@@ -127,7 +127,7 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
   const detail = laneSummary(item.lanes, 'detail')?.state ?? 'UNKNOWN';
   const lines = statusLines(item);
   return (
-    <li className={styles.item} data-selected={selected} data-platform={item.platform.toLowerCase()} data-work-ref={item.ref} onClick={() => onSelect(item)}>
+    <li className={styles.item} data-selected={selected} data-checked={canCheck && checked} data-selection-active={canCheck} data-platform={item.platform.toLowerCase()} data-work-ref={item.ref} onClick={() => onSelect(item)}>
       <div className={styles.card}>
         <Visual item={item} title={title} index={String(ordinal).padStart(3, '0')} />
         <div className={styles.plate}>
@@ -156,7 +156,7 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
             {lines.join('；')}
           </span>
         </div>
-        {canCheck ? <CheckBox item={item} checked={checked} onCheck={onCheck} /> : null}
+        {canCheck ? <div className={styles.pickCorner}><CheckBox item={item} checked={checked} onCheck={onCheck} /></div> : null}
       </div>
     </li>
   );

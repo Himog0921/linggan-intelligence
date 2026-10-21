@@ -57,6 +57,7 @@ interface ResultsAreaProps {
   selectedRef: string | null;
   layout: LayoutKey;
   checked: ReadonlySet<string>;
+  selectionMode: boolean;
   listRef: Ref<HTMLDivElement>;
   onSelect: (item: WorkItem, source: 'user' | 'auto') => void;
   onCheck: (ref: string, checked: boolean) => void;
@@ -69,7 +70,7 @@ interface ResultsAreaProps {
  * 显示成空列表；追加失败时已读到的作品保留，在列表下方给内联说明，同一个按钮即重试。
  */
 export function ResultsArea(props: ResultsAreaProps) {
-  const { shell, domainSelected, problem, list, items, selectedRef, layout, checked, listRef, onSelect, onCheck, onRetryShell, onClearScope } = props;
+  const { shell, domainSelected, problem, list, items, selectedRef, layout, checked, selectionMode, listRef, onSelect, onCheck, onRetryShell, onClearScope } = props;
   const status = describeStatus({ shell, domainSelected, scopeProblem: problem, list: { pending: list.pending, error: list.error, count: items.length } });
   return (
     <div className={styles.results}>
@@ -84,7 +85,7 @@ export function ResultsArea(props: ResultsAreaProps) {
         />
       ) : null}
       {items.length > 0 ? (
-        <WorkList ref={listRef} items={items} layout={layout} selectedRef={selectedRef} checked={checked} canCheck={domainSelected} onSelect={onSelect} onCheck={onCheck} />
+        <WorkList ref={listRef} items={items} layout={layout} selectedRef={selectedRef} checked={checked} canCheck={domainSelected && selectionMode} onSelect={onSelect} onCheck={onCheck} />
       ) : null}
       {items.length > 0 && list.hasNext ? (
         <div className={styles.footer}>

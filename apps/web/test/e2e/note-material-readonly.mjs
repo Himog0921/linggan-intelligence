@@ -27,6 +27,7 @@ try {
   page.on('pageerror', error => report.pageErrors.push(error.message));
   page.on('request', request => { if (new URL(request.url()).pathname.endsWith('/note-material')) report.reads++; });
   await page.goto(`${origin}/corpus/evidence?domain=${domain}&work=${work}&tab=dossier`);
+  await page.getByText('材料完整度及旧任务输入', { exact: true }).click();
   await page.getByRole('heading', { name: '每篇解读材料', exact: true }).waitFor();
   assert.equal(report.reads, 0, 'folded section does not read material');
   const section = page.locator('section').filter({ has: page.getByRole('heading', { name: '每篇解读材料', exact: true }) });

@@ -1,44 +1,31 @@
 import { ActionButton } from '../../../shared/ActionButton';
 import styles from './Controls.module.css';
 
-/** 单次批量动作的作品上限（评论深采、整理图片文字都按它判断）。 */
+/** 单次批量动作上限：保留与现有采集任务交接的 200 篇合同。 */
 export const SELECTION_LIMIT = 200;
-
 interface SelectionBarProps {
   count: number;
+  visibleCount: number;
+  visibleSelected: number;
   hasDomain: boolean;
-  /** 刷新前留下了未完成的批量整理：显示「继续上次整理」。 */
   hasPendingBatch: boolean;
-  onSelectPage: () => void;
+  onClear: () => void;
   onDeepCollect: () => void;
   onOpenBatch: () => void;
   onResumeBatch: () => void;
 }
-
-/**
- * 勾选与批量动作。勾选集合独立于检查器的选中；「评论深采」把集合交给采集页（真实动作与回执由采集页负责），
- * 「整理图片文字」在页内弹窗里逐篇重新分层。两者都要有领域，且勾选 1–200 篇；超过 200 篇就地说明，而不是只禁用。
- */
-export function SelectionBar({ count, hasDomain, hasPendingBatch, onSelectPage, onDeepCollect, onOpenBatch, onResumeBatch }: SelectionBarProps) {
+/** 只有明确进入选择模式时出现；选择列表与详情阅读互不干扰。 */
+export function SelectionBar({ count, visibleCount, visibleSelected, hasDomain, hasPendingBatch, onClear, onDeepCollect, onOpenBatch, onResumeBatch }: SelectionBarProps) {
   const usable = hasDomain && count > 0 && count <= SELECTION_LIMIT;
-  return (
-    <div className={styles.selection} role="group" aria-label="批量操作">
-      <ActionButton variant="quiet" disabled={!hasDomain} onClick={onSelectPage}>
-        勾选本页
-      </ActionButton>
-      <span role="status" aria-live="polite">{`已勾选 ${count} 篇作品`}</span>
-      {count > SELECTION_LIMIT ? <span className={styles.limit}>{`最多 ${SELECTION_LIMIT} 篇，请减少勾选`}</span> : null}
-      <ActionButton variant="quiet" disabled={!usable} onClick={onDeepCollect}>
-        评论深采
-      </ActionButton>
-      <ActionButton variant="quiet" disabled={!usable} onClick={onOpenBatch}>
-        整理图片文字
-      </ActionButton>
-      {hasPendingBatch ? (
-        <ActionButton variant="quiet" className={styles.resume} onClick={onResumeBatch}>
-          继续上次整理
-        </ActionButton>
-      ) : null}
-    </div>
-  );
+  return <div className={styles.selection} role="group" aria-label="批量操作">
+    <span className={styles.selectedCount} role="status" aria-live="polite">
+      已选 <b>{count}</b> 篇 <small>· 当前筛选 {visibleSelected}/{visibleCount}</small>
+    </span>
+    <span aria-hidden="true" className={styles.selectionDivider} />
+    <ActionButton variant="quiet" disabled={count === 0} onClick={onClear}>清空已选</ActionButton>
+    <ActionButton variant="quiet" disabled={!usable} onClick={onDeepCollect}>评论深采</ActionButton>
+    <ActionButton variant="quiet" disabled={!usable} onClick={onOpenBatch}>整理图片文字</ActionButton>
+    {hasPendingBatch ? <ActionButton variant="quiet" className={styles.resume} onClick={onResumeBatch}>继续上次整理</ActionButton> : null}
+    {count > SELECTION_LIMIT ? <span className={styles.limit}>{`最多 ${SELECTION_LIMIT} 篇，请减少勾选`}</span> : null}
+  </div>;
 }

@@ -436,3 +436,16 @@
 }
 
 .photoImage { width: 100%; height: 100%; background: var(--lgi-canvas); }
+
+/* V2.2: browsing and selecting are separate visual states, with no saturated full-card fill. */
+.item[data-selected='true'] .front,
+.item[data-selected='true'] .back,
+.item[data-selected='true'] .plate { background:var(--lgi-canvas-low); }
+.item[data-selected='true'] .visual { outline:2px solid var(--lgi-signal-mark);outline-offset:-2px; }
+.item[data-selected='true'] .face::after { opacity:.55; }
+.item[data-checked='true'] .visual { outline:2px solid var(--lgi-signal);outline-offset:-2px; }
+.item[data-checked='true'] .plate { background:var(--lgi-signal-faint);border-bottom:2px solid var(--lgi-signal); }
+.pickCorner { position:absolute;z-index:6;right:var(--lgi-space-2);top:var(--lgi-space-2);
+  background:var(--lgi-canvas-overlay);border:1px solid var(--lgi-hairline); }
+.item[data-selection-active='true'] .visual:hover .flip { transform:none; }
+.item[data-selection-active='true'] .visual[data-flipped='true']:hover .flip { transform:rotateY(180deg); }

@@ -17,6 +17,17 @@ describe('勾选集合（与采集页的交接，C12／F06）', () => {
     expect(JSON.parse(sessionStorage.getItem(`collection-selected:${DOMAIN}`) ?? 'null')).toEqual([workRef(1), workRef(3)]);
   });
 
+  it('本页全选再次点击会取消本页；其他检索结果的已选保持不变', () => {
+    const { result } = renderHook(() => useCollectionSelection(DOMAIN));
+    act(() => result.current.toggle(workRef(9), true));
+    act(() => result.current.togglePage([workRef(1),workRef(2)]));
+    expect([...result.current.selection]).toEqual([workRef(9),workRef(1),workRef(2)]);
+    act(() => result.current.togglePage([workRef(1),workRef(2)]));
+    expect([...result.current.selection]).toEqual([workRef(9)]);
+    act(() => result.current.clear());
+    expect(result.current.selection.size).toBe(0);
+  });
+
   it('刷新后读回；存储里不是数组或含非字符串时忽略坏项，不崩', () => {
     sessionStorage.setItem(`collection-selected:${DOMAIN}`, JSON.stringify([workRef(1), 5, null, workRef(2)]));
     const { result } = renderHook(() => useCollectionSelection(DOMAIN));

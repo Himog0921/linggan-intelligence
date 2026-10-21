@@ -168,3 +168,11 @@
 .metrics {
   margin: var(--lgi-space-2) 0;
 }
+
+/* V2.2: evidence content first; technical and legacy material previews collapsed. */
+.dossierCounts { font:600 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui);
+  color:var(--lgi-ink);margin:var(--lgi-space-2) 0; }
+.advanced { margin-top:var(--lgi-space-5);border-top:1px solid var(--lgi-hairline);
+  padding-top:var(--lgi-space-3); }
+.advanced > summary { cursor:pointer;color:var(--lgi-muted);
+  font:600 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui); }
