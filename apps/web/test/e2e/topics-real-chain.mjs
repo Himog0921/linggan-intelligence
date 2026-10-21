@@ -410,7 +410,7 @@ try {
       await go();
       await action("research");
       const dialog=page.getByRole("dialog",{name:"AI 状态与历史研究"});await dialog.waitFor();
-      assert.equal(await dialog.getByRole("link",{name:"去 AI 设置"}).getAttribute("href"),"/settings/models?section=automation&task=legacy_topic_map");
+      assert.equal(await dialog.getByRole("link",{name:"去 AI 设置"}).getAttribute("href"),"/settings/models?view=advanced&area=work&task=legacy_topic_map");
       assert.equal(await dialog.locator('form[data-form="research-config"]').count(),0);
       const refreshed=page.waitForResponse(r=>r.request().method()==="GET"&&r.url().includes("/topic-map/research?"));
       await dialog.getByRole("button",{name:"刷新历史记录"}).click();assert.equal((await refreshed).status(),200);

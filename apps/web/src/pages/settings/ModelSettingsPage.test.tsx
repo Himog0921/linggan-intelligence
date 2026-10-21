@@ -21,7 +21,7 @@ beforeEach(() => {
   }));
 });
 afterEach(() => vi.unstubAllGlobals());
-function renderPage(entry = '/settings/models') {
+function renderPage(entry = '/settings/models?section=models') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<MemoryRouter initialEntries={[entry]}><QueryClientProvider client={client}><ModelSettingsPage /></QueryClientProvider></MemoryRouter>);
 }

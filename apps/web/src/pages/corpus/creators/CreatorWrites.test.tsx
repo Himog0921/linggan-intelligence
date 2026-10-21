@@ -268,7 +268,7 @@ describe('发现设置', () => {
     kit.route('PUT', '/api/local/creator-discovery-policy', ok({ revision: 4, saved: true }));
     const { user, dialog } = await openPolicy();
     expect(within(dialog).queryByRole('combobox')).toBeNull();
-    expect(within(dialog).getByRole('link', { name: '去 AI 设置' })).toHaveAttribute('href', '/settings/models?section=automation&task=legacy_creator_discovery');
+    expect(within(dialog).getByRole('link', { name: '去 AI 设置' })).toHaveAttribute('href', '/settings/models?view=advanced&area=work&task=legacy_creator_discovery');
     await user.type(within(dialog).getByRole('spinbutton', { name: /最低点赞/ }), '100');
     await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

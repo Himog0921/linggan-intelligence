@@ -94,12 +94,12 @@ function TrialPanel({ data, task, action }: { data: AiSettings; task: Task; acti
     </section>
   </div>;
 }
-export function AiSkillSection({ data, action }: { data: AiSettings; action: AiAction }) {
+export function AiSkillSection({ data, action, linkBase = '?section=skills&task=' }: { data: AiSettings; action: AiAction; linkBase?: string }) {
   const [query] = useSearchParams(); const versionRef = query.get('version');
   const task = data.tasks.find(t => t.taskKey === query.get('task') && t.skillAllowed) ?? data.tasks.find(t => t.taskKey === 'writing_legacy');
   return <section className={styles.section} aria-labelledby="skills-title"><h2 id="skills-title">做法</h2><SkillImport data={data} action={action} />
-    <div className={styles.group}><h3>已导入版本</h3>{data.skills.length ? <nav className={styles.selector} aria-label="做法版本">{data.skills.flatMap(skill => skill.versions.map(version => <Link key={version.versionRef} to={`?section=skills&version=${version.versionRef}${task ? `&task=${task.taskKey}` : ''}`} aria-current={version.versionRef === versionRef ? 'page' : undefined}>{skill.name} · v{version.versionNo}<small><Moment value={version.createdAt} /></small></Link>))}</nav> : <p>尚未导入做法。导入完成后再保存候选配置。</p>}{versionRef ? <VersionRead reference={versionRef} /> : null}</div>
-    <nav className={styles.selector} aria-label="做法绑定的工作">{data.tasks.filter(t => t.skillAllowed).map(t => <Link key={t.taskKey} to={`?section=skills&task=${t.taskKey}`} aria-current={task?.taskKey === t.taskKey ? 'page' : undefined}>{t.label}</Link>)}</nav>
+    <div className={styles.group}><h3>已导入版本</h3>{data.skills.length ? <nav className={styles.selector} aria-label="做法版本">{data.skills.flatMap(skill => skill.versions.map(version => <Link key={version.versionRef} to={linkBase.startsWith('?view=') ? '?view=advanced&area=skills&version=' + encodeURIComponent(version.versionRef) + (task ? '&task=' + encodeURIComponent(task.taskKey) : '') : `?section=skills&version=${version.versionRef}${task ? `&task=${task.taskKey}` : ''}`} aria-current={version.versionRef === versionRef ? 'page' : undefined}>{skill.name} · v{version.versionNo}<small><Moment value={version.createdAt} /></small></Link>))}</nav> : <p>尚未导入做法。导入完成后再保存候选配置。</p>}{versionRef ? <VersionRead reference={versionRef} /> : null}</div>
+    <nav className={styles.selector} aria-label="做法绑定的工作">{data.tasks.filter(t => t.skillAllowed).map(t => <Link key={t.taskKey} to={linkBase + encodeURIComponent(t.taskKey)} aria-current={task?.taskKey === t.taskKey ? 'page' : undefined}>{t.label}</Link>)}</nav>
     {task ? <TrialPanel key={`${task.taskKey}:${task.revision}`} data={data} task={task} action={action} /> : null}
   </section>;
 }

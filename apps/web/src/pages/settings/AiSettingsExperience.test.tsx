@@ -1,0 +1,136 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ModelSettingsPage } from './ModelSettingsPage';
+import { businessSettingsFixture, settingsFixture } from './aiSettingsFixture.test-support';
+
+type Reply = { status: number; body: unknown };
+type Call = { path: string; method: string; body: Record<string, unknown> };
+let calls: Call[];
+let respond: (call: Call) => Reply;
+const ok = (body: unknown): Reply => ({ status: 200, body });
+function mount(url = '/settings/models') {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<MemoryRouter initialEntries={[url]}><QueryClientProvider client={client}><ModelSettingsPage/></QueryClientProvider></MemoryRouter>);
+}
+beforeEach(() => {
+  calls = [];
+  respond = call => call.method === 'GET' && call.path === '/api/local/ai-settings'
+    ? ok(businessSettingsFixture()) : { status: 503, body: { error: 'unavailable' } };
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    const call = { path, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? JSON.parse(init.body) : {} };
+    calls.push(call);
+    const response = respond(call);
+    return new Response(JSON.stringify(response.body), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+  }));
+});
+afterEach(() => vi.unstubAllGlobals());
+
+describe('AI 设置正式四视图', () => {
+  it('默认展示工作能力，并沿用共享 Context Bar 的面包屑和导航，不读即写', async () => {
+    const user = userEvent.setup();
+    mount();
+    expect(await screen.findByRole('heading', { name: '工作能力' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'AI 设置', level: 1 })).toBeInTheDocument();
+    expect(document.querySelectorAll('.v7-global-header')).toHaveLength(1);
+    expect(screen.getByRole('navigation', { name: 'AI 设置视图' })).toHaveTextContent('运行与用量');
+    expect(screen.getByRole('link', { name: /AI 能力/ })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('button', { name: /评论研究/ }));
+    expect(await screen.findByRole('dialog', { name: '评论研究' })).toBeInTheDocument();
+    expect(screen.getByText(/目前不能执行新工作/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '关闭详情' }));
+    expect(screen.queryByRole('dialog', { name: '评论研究' })).not.toBeInTheDocument();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+  });
+
+  it('关键词、状态和视图切换不改变实际开关或配置', async () => {
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole('heading', { name: '工作能力' });
+    const search = screen.getByRole('searchbox', { name: '搜索 AI 工作' });
+    await user.type(search, '评论');
+    expect(screen.getByRole('button', { name: /评论研究/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /旧创作者分析/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '列表视图' }));
+    expect(screen.getByRole('button', { name: /评论研究/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '已接入' }));
+    expect(screen.getByText(/没有符合条件的工作/)).toBeInTheDocument();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+  });
+
+  it('模型连接从真实连接与登记模型读取，内置 WeMM 为只读专用运行时', async () => {
+    const data = settingsFixture();
+    data.connections.push({ ...data.connections[0]!, connectionRef: 'local-conn', name: '本机 WeMM Runtime',
+      api: 'local-wemm-runtime', baseUrl: 'local://wemm-embedding-2b', localEndpoint: true, endpointRef: 'local-endpoint' });
+    data.models.push({ ...data.models[0]!, identityRef: 'local-model', connectionRef: 'local-conn',
+      endpointRef: 'local-endpoint', modelId: 'Tencent/WeMM-Embedding-2B' });
+    respond = call => call.method === 'GET' && call.path === '/api/local/ai-settings' ? ok(data) : { status: 503, body: {} };
+    const user = userEvent.setup();
+    mount('/settings/models?view=models');
+    await screen.findByRole('heading', { name: '模型连接', level: 2 });
+    expect(screen.getByText('隔离合成连接', { selector: 'b' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /本机 WeMM Runtime/ }));
+    expect(screen.getByText(/本机 WeMM 不使用通用 API 密钥/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '技术配置' }));
+    expect(screen.getByText(/不允许通过普通 HTTP 模型表单修改/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '保存连接' })).not.toBeInTheDocument();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+  });
+
+  it('连接向导有明确保存边界，保存不触发探测、许可或派发', async () => {
+    const user = userEvent.setup();
+    respond = call => {
+      if (call.method === 'GET') return ok(settingsFixture());
+      if (call.path === '/api/local/model-settings/connections') {
+        return ok({ connectionRef: call.body.connectionRef, versionRef: call.body.versionRef, revision: 1 });
+      }
+      return { status: 503, body: { error: 'unexpected_post' } };
+    };
+    mount('/settings/models?view=models');
+    await screen.findByRole('heading', { name: '模型连接', level: 2 });
+    await user.click(screen.getByRole('button', { name: '接入模型' }));
+    expect(screen.getByRole('dialog', { name: '接入模型' })).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /外部语言模型服务/ }));
+    await user.type(screen.getByRole('textbox', { name: '连接名称' }), '我的模型服务');
+    await user.type(screen.getByRole('textbox', { name: '服务地址' }), 'https://example.com/v1');
+    await user.type(screen.getByLabelText('API 密钥'), 'synthetic-test-key');
+    await user.click(screen.getByRole('button', { name: '保存连接并继续' }));
+    expect((await screen.findAllByText(/连接已保存，尚未测试/)).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getByLabelText('模型 ID')).toBeInTheDocument());
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(1);
+    expect(calls.find(call => call.method === 'POST')).toMatchObject({
+      path: '/api/local/model-settings/connections',
+      body: { expectedRevision: 0, name: '我的模型服务', baseUrl: 'https://example.com/v1' },
+    });
+  });
+
+  it('运行页只显示真实响应；未知 token、未报价和失败详情均可回链', async () => {
+    const data = settingsFixture();
+    const usage = { taskKey: 'model_probe', budgetDay: '2026-10-20', calls: '1', runningCalls: '0', failedCalls: '1',
+      measuredCalls: '1', unknownCalls: '0', notDispatchedCalls: '0', measuredTokens: '16', quotaHeldTokens: '20',
+      unknownHeldTokens: '0', knownQuotePicoUsd: null, unpricedMeasuredCalls: '1', cacheReadUnknownCalls: '0', reasoningUnknownCalls: '0' };
+    const enriched = { ...data, execution: { ...data.execution, dailyUsage: [usage] } };
+    const invocation = { invocationRef: 'invocation-1', taskKey: 'model_probe', taskConfigRef: 'config-1',
+      modelConfigRef: null, batchRef: null, roundNo: null, operation: 'probe', state: 'failed',
+      connectionVersionRef: 'version-1', modelId: 'synthetic-model', connectionName: '隔离合成连接', usageState: 'measured',
+      dispatchState: 'sent', budgetDay: '2026-10-20', inputTokens: '11', outputTokens: '5',
+      measuredTokens: '16', cachedInputTokens: null, cacheWriteTokens: null, reasoningTokens: null,
+      quotaHeldTokens: '20', legacyChargedTokens: null, quotePicoUsd: null, failureCode: 'model_call_failed',
+      createdAt: '2026-10-20T03:00:00Z', finishedAt: '2026-10-20T03:00:01Z' };
+    respond = call => call.path === '/api/local/ai-settings' ? ok(enriched)
+      : call.path.startsWith('/api/local/ai-settings/invocations') ? ok({
+        contract: 'ai-invocation-history.v1', pageSize: 50, hasMore: false, nextCursor: null, items: [invocation],
+      }) : { status: 503, body: {} };
+    const user = userEvent.setup();
+    mount('/settings/models?view=runs');
+    expect(await screen.findByRole('heading', { name: '运行与用量', level: 2 })).toBeInTheDocument();
+    expect(await screen.findByText('synthetic-model')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '查看' }));
+    expect(screen.getByRole('dialog', { name: '调用与版本详情' })).toBeInTheDocument();
+    expect(screen.getByText('model_call_failed')).toBeInTheDocument();
+    expect(screen.getByText('未知（未定价）')).toBeInTheDocument();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+  });
+});
