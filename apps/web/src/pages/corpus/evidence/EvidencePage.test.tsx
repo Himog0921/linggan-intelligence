@@ -24,18 +24,21 @@ const addressAfterFirstSelection = (extra = '') => `/corpus/evidence?domain=${DO
 async function opened(search?: string) {
   const view = renderEvidencePage(pageUrl(search));
   await screen.findByRole('button', { name: '合成作品 1' });
+  await view.user.click(rowButton(1));
   return view;
 }
 
 describe('打开页面', () => {
-  it('读外壳与列表，自动选中第一项并替换地址（不新增历史），再读它的详情；全程只有读取请求', async () => {
+  it('默认只显示作品列表，不选中第一项；用户点击后再读取详情', async () => {
     pageRoutes(kit);
-    const view = await opened();
+    const view = renderEvidencePage();
+    await screen.findByRole('button', { name: '合成作品 1' });
+    expect(view.location()).toBe(pageUrl(`domain=${DOMAIN}`));
+    expect(kit.of('GET', detailPathOf(1))).toHaveLength(0);
+    expect(document.querySelector('[data-inspector]')).toHaveAttribute('data-inspector', 'closed');
+    await view.user.click(rowButton(1));
     await waitFor(() => expect(view.location()).toBe(addressAfterFirstSelection()));
-    expect(view.router.state.historyAction).toBe('REPLACE');
-    await waitFor(() => expect(within(aside()).getByRole('heading', { level: 2, hidden: true, name: '合成作品 1' })).toBeInTheDocument());
-    expect(kit.of('GET', detailPathOf(1))).toHaveLength(1);
-    expect(kit.of('GET', detailPathOf(1))[0]?.search.get('domain')).toBe(DOMAIN);
+    await waitFor(() => expect(kit.of('GET', detailPathOf(1))).toHaveLength(1));
     expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
     expect(document.title).toBe('证据库 · 语料');
   });
@@ -51,7 +54,7 @@ describe('打开页面', () => {
   it('页头读数是读取时间；侧栏徽标是本次读取的作品数，悬停说明里是三个读数', async () => {
     pageRoutes(kit, { list: ok(listJson(items(3), { asOf: '2026-10-16 13:28:09.89457+08' })) });
     await opened();
-    expect(screen.getByText('读取于 2026-10-16 13:28')).toBeInTheDocument();
+    expect(screen.queryByText('读取于 2026-10-16 13:28')).toBeNull();
     const badge = document.getElementById('ev-rail-count')!;
     expect(badge).toHaveTextContent('3');
     expect(badge).not.toHaveAttribute('hidden');
@@ -79,7 +82,7 @@ describe('打开页面', () => {
     });
     renderEvidencePage();
     expect(await screen.findByText('正在读取本机材料投影')).toBeInTheDocument();
-    expect(screen.getByText('读取中…')).toBeInTheDocument();
+    expect(screen.queryByText('读取中…')).toBeNull();
     release();
     expect(await screen.findByRole('button', { name: '合成作品 2' })).toBeInTheDocument();
     expect(screen.queryByText('正在读取本机材料投影')).not.toBeInTheDocument();
@@ -99,7 +102,7 @@ describe('没有领域', () => {
     expect(search).toHaveAttribute('title', '请先选择研究领域，再读取统一作品材料。');
     expect(screen.getByRole('button', { name: /筛选/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: '读取材料' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '部分取得' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '选择' })).toBeDisabled();
   });
 
   it('关闭对话框只回到「请选择研究领域」空态，不代选、不读材料', async () => {
@@ -258,6 +261,8 @@ describe('地址直达一件不在页内的作品', () => {
     pageRoutes(kit, { count: 1 });
     kit.route('GET', detailPathOf(1), fail(503, 'material_detail_unavailable'));
     const { user } = renderEvidencePage();
+    await screen.findByRole('button', { name: '合成作品 1' });
+    await user.click(rowButton(1));
     expect(await screen.findByText('当前作品详情读取失败')).toBeInTheDocument();
     expect(screen.getAllByText('material_detail_unavailable').length).toBeGreaterThanOrEqual(1);
     expect(rowButton(1)).toBeEnabled();

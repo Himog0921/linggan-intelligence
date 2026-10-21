@@ -28,30 +28,37 @@ const bench = () => document.querySelector<HTMLElement>('[data-inspector]')!;
 async function opened(url?: string) {
   const view = renderEvidencePage(url);
   await screen.findByRole('button', { name: '合成作品 1' });
+  await view.user.click(rowButton(1));
   await waitFor(() => expect(view.location()).toContain('work='));
   return view;
 }
 
 describe('勾选与批量动作', () => {
-  it('「勾选本页」勾选已读到的全部作品，只存稳定引用；重新打开页面仍在（F06）', async () => {
+  it('只有选择态才显示勾选框；勾选本页再次点击取消，存储仍用稳定引用', async () => {
     pageRoutes(kit);
     const view = await opened();
+    expect(screen.queryAllByRole('checkbox', { name: /^勾选作品：/ })).toHaveLength(0);
+    await view.user.click(screen.getByRole('button', { name: '选择' }));
     await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
-    expect(screen.getByText('已勾选 3 篇作品')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 3 篇');
     expect(JSON.parse(sessionStorage.getItem(selectionKey) ?? 'null')).toEqual([workRef(1), workRef(2), workRef(3)]);
-    expect(screen.getAllByRole('checkbox', { name: '勾选作品用于批量操作' }).every(box => (box as HTMLInputElement).checked)).toBe(true);
+    expect(screen.getAllByRole('checkbox', { name: /^勾选作品：/ }).every(box => (box as HTMLInputElement).checked)).toBe(true);
+    await view.user.click(screen.getByRole('button', { name: '取消本页' }));
+    expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 0 篇');
+    await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
 
     view.unmount();
     pageRoutes(kit);
     renderEvidencePage();
     await screen.findByRole('button', { name: '合成作品 1' });
-    expect(screen.getByText('已勾选 3 篇作品')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 3 篇');
   });
 
   it('取消勾选同步到存储；不同领域是另一份集合', async () => {
     pageRoutes(kit);
     const view = await opened();
-    const boxes = screen.getAllByRole('checkbox', { name: '勾选作品用于批量操作' });
+    await view.user.click(screen.getByRole('button', { name: '选择' }));
+    const boxes = screen.getAllByRole('checkbox', { name: /^勾选作品：/ });
     await view.user.click(boxes[0]!);
     await view.user.click(boxes[1]!);
     await view.user.click(boxes[0]!);
@@ -61,7 +68,8 @@ describe('勾选与批量动作', () => {
     pageRoutes(kit, { shell: ok(shellJson({ selectedDomain: OTHER_DOMAIN })) });
     renderEvidencePage(pageUrl(`domain=${OTHER_DOMAIN}`));
     await screen.findByRole('button', { name: '合成作品 1' });
-    expect(screen.getByText('已勾选 0 篇作品')).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: '批量操作' })).toBeNull();
+    // A new browsing visit does not automatically re-enter the bulk-selection mode.
   });
 
   it('「评论深采」把集合交给采集页：键名、数组格式与跳转形状保持（DR-6）', async () => {
@@ -80,7 +88,7 @@ describe('勾选与批量动作', () => {
     sessionStorage.setItem(selectionKey, JSON.stringify(Array.from({ length: 201 }, (_, index) => workRef(1000 + index))));
     pageRoutes(kit);
     await opened();
-    expect(screen.getByText('已勾选 201 篇作品')).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 201 篇');
     expect(screen.getByText('最多 200 篇，请减少勾选')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '评论深采' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '整理图片文字' })).toBeDisabled();
@@ -119,29 +127,29 @@ describe('检查器外壳', () => {
   it('五个标签，默认「概览」；点「证据」替换历史并写入地址', async () => {
     pageRoutes(kit);
     const view = await opened();
-    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['概览', '证据', '研究底稿', '材料', '来源轨迹']);
-    expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('aria-selected', 'true');
-    await view.user.click(screen.getByRole('tab', { name: '证据' }));
-    expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}&tab=evidence`);
+    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['作品', '研究底稿', '采集记录']);
+    expect(screen.getByRole('tab', { name: '作品' })).toHaveAttribute('aria-selected', 'true');
+    await view.user.click(screen.getByRole('tab', { name: '研究底稿' }));
+    expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}&tab=dossier`);
     expect(view.router.state.historyAction).toBe('REPLACE');
-    expect(screen.getByRole('tab', { name: '证据' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('tab', { name: '概览' })).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: '作品' })).toHaveAttribute('tabindex', '-1');
   });
 
   it('← → Home End 在标签间移动并聚焦', async () => {
     pageRoutes(kit);
     const view = await opened();
-    screen.getByRole('tab', { name: '概览' }).focus();
+    screen.getByRole('tab', { name: '作品' }).focus();
     await view.user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { name: '证据' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveFocus();
     await view.user.keyboard('{End}');
-    expect(screen.getByRole('tab', { name: '来源轨迹' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: '采集记录' })).toHaveFocus();
     await view.user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { name: '概览' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: '作品' })).toHaveFocus();
     await view.user.keyboard('{ArrowLeft}');
-    expect(screen.getByRole('tab', { name: '来源轨迹' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: '采集记录' })).toHaveFocus();
     await view.user.keyboard('{Home}');
-    expect(screen.getByRole('tab', { name: '概览' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: '作品' })).toHaveFocus();
     expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}`);
   });
 
@@ -225,7 +233,8 @@ describe('抽屉模式（≤1180px）', () => {
 
   it('列表加载后自动选中不展开抽屉；点选才展开；宽度控件与「×」不存在', async () => {
     pageRoutes(kit);
-    const view = await opened();
+    const view = renderEvidencePage();
+    await screen.findByRole('button', { name: '合成作品 1' });
     expect(aside()).toHaveAttribute('inert');
     expect(screen.queryByRole('button', { name: '关闭检查器' })).not.toBeInTheDocument();
     expect(screen.queryByRole('group', { name: '检查器宽度' })).not.toBeInTheDocument();
@@ -334,9 +343,9 @@ describe('敏感面', () => {
   it('引用与执行血缘只在「来源轨迹」这一技术层里', async () => {
     pageRoutes(kit);
     const view = await opened();
-    await view.user.click(screen.getByRole('tab', { name: '来源轨迹' }));
-    expect(ordinaryText(activePanel())).toMatch(UUID);
-    expect(screen.getByRole('tab', { name: '来源轨迹' })).toHaveAttribute('aria-selected', 'true');
+    await view.user.click(screen.getByRole('tab', { name: '采集记录' }));
+    expect(activePanel().textContent).toMatch(UUID);
+    expect(screen.getByRole('tab', { name: '采集记录' })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('只写三类存储键，且值里没有作品内容', async () => {
@@ -356,7 +365,7 @@ describe('敏感面', () => {
   it('页面打开时的请求只有外壳、列表与选中作品的详情', async () => {
     pageRoutes(kit);
     await opened();
-    await screen.findByRole('tab', { name: '概览' });
+    await screen.findByRole('tab', { name: '作品' });
     const paths = [...new Set(kit.calls.map(call => call.path))].sort();
     expect(paths).toEqual(['/api/local/corpus/shell', LIST_PATH, detailPathOf(1)].sort());
   });
