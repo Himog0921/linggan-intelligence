@@ -198,9 +198,9 @@ export function toApiParams(domain: string, query: EvidenceQuery, cursor: string
   return params;
 }
 
-/** 筛选浮层上的徽标数：四个下拉里与默认不同的个数（系统视图与排序不计）。 */
+/** One indicator for all effective filter choices, including the former quick-view tabs. */
 export function activeFilterCount(query: EvidenceQuery): number {
-  return [query.lane, query.laneState, query.mediaKind].filter(value => value !== '').length;
+  return [query.lane, query.laneState, query.mediaKind].filter(value => value !== '').length + (query.view === 'all' ? 0 : 1);
 }
 
 /** 是否带着创作者作品集合（`creatorKey` 或 `creatorFilter` 存在即成立）。 */

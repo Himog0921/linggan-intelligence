@@ -274,3 +274,6 @@
 
 .resultMeta { display: flex; justify-content: space-between; align-items: center; flex: none; gap: var(--lgi-space-3); padding: var(--lgi-space-3) var(--lgi-space-5); border-bottom: 1px solid var(--lgi-hairline); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); color: var(--lgi-muted); }
 @media (max-width: 640px) { .resultMeta { flex-wrap: wrap; padding-inline: var(--lgi-space-4); } }
+
+/* V2.2 removes the permanent list readout rail; the sidebar's domain count stays intact. */
+.bench { transition:grid-template-columns var(--lgi-duration-panel) var(--lgi-ease-ui); }

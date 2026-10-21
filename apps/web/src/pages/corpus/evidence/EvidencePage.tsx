@@ -1,8 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { CorpusFrame } from '../../../corpus/CorpusFrame';
 import { useCorpusShell } from '../../../corpus/useCorpusShell';
-import { humanMoment } from '../../../shared/formatting';
 import { DomainChoiceDialog } from './DomainChoiceDialog';
 import { EvidenceControls } from './EvidenceControls';
 import { Inspector } from './Inspector';
@@ -41,16 +40,10 @@ export function EvidencePage() {
   // ── 列表与详情 ────────────────────────────────────────────────────────────────
   const problem = domain === null ? null : scopeProblem(query);
   const { list, items, last, apiKey } = useWorkList(domain, query, problem !== null);
-  // 列表读到之后才有「选中」：地址里的作品在页内就选它，不在就直读，都没有才自动选第一项。
-  const selected = domain !== null && list.data !== undefined ? (query.work ?? items[0]?.ref ?? null) : null;
+  // V2: 浏览态不自动打开首篇；显式作品地址仍可直接读取，不要求作品出现在当前批次。
+  const selected = domain !== null ? query.work : null;
   const listItem = items.find(item => item.ref === selected) ?? null;
   const { detail, refetch: refetchDetail } = useWorkDetail({ domain, selected, listItem, collectionRunRef: query.collectionRunRef });
-
-  const firstRef = items[0]?.ref ?? null;
-  useEffect(() => {
-    // 地址里没有作品时，自动选中第一项并写回地址（替换历史）。
-    if (domain !== null && query.work === null && firstRef !== null) go(current => ({ ...current, work: firstRef }), true);
-  }, [domain, query.work, firstRef, go]);
 
   // ── 检查器：桌面是一栏（可关、三档宽度），≤1180px 是盖在列表上的抽屉 ───────────────────
   const drawer = useMediaQuery(DRAWER_QUERY);
@@ -58,7 +51,7 @@ export function EvidencePage() {
   const drawerOpen = drawerWork !== null && drawerWork === selected;
   const [preferred, rememberWidth] = usePanelWidthPreference();
   const width: PanelWidth = query.panel !== null && query.panel !== 'closed' ? query.panel : preferred;
-  const closed = query.panel === 'closed';
+  const closed = query.panel === 'closed' || selected === null;
   const widthBeforeClose = useRef<PanelWidth | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -93,8 +86,13 @@ export function EvidencePage() {
   }
 
   // ── 勾选与批量动作 ──────────────────────────────────────────────────────────────
-  const { selection, toggle, addAll } = useCollectionSelection(domain);
+  const { selection, toggle, togglePage, clear } = useCollectionSelection(domain);
+  const [selecting, setSelecting] = useState(false);
   const batch = useRelayerBatch();
+  const loadedRefs = items.map(item => item.ref);
+  const visibleSelected = loadedRefs.filter(ref => selection.has(ref)).length;
+  const allPageSelected = loadedRefs.length > 0 && visibleSelected === loadedRefs.length;
+  function cancelSelection() { clear(); setSelecting(false); }
 
   function deepCollect() {
     if (domain === null) return;
@@ -111,9 +109,6 @@ export function EvidencePage() {
   const facts = readoutFacts(items);
   const hasDomain = domain !== null;
   const shownQuery: EvidenceQuery = hasDomain ? query : { ...DEFAULT_QUERY, layout: query.layout };
-  const loading = hasDomain && problem === null && list.isPending;
-  const readout = loading ? '读取中…' : last ? (last.asOf ? `读取于 ${humanMoment(last.asOf)}` : '读取时间未知') : '';
-
   return (
     <CorpusFrame
       page="evidence"
@@ -131,25 +126,28 @@ export function EvidencePage() {
             hasDomain={hasDomain}
             scope={domain}
             busy={list.isFetching && !list.isFetchingNextPage}
+            selecting={selecting}
+            onToggleSelecting={() => selecting ? cancelSelection() : setSelecting(true)}
+            onSelectPage={() => togglePage(loadedRefs)}
+            allPageSelected={allPageSelected}
+            pageHasItems={items.length > 0}
             onChange={go}
             onSubmit={text => reread({ ...query, q: text, view: 'all', work: null })}
             onClearFilters={() => reread({ ...query, lane: '', laneState: '', mediaKind: '', view: 'all', work: null })}
             banners={<ReturnBanners query={query} domainParam={domainParam} />}
           >
-            <SelectionBar
+            {selecting ? <SelectionBar
               count={selection.size}
+              visibleCount={items.length}
+              visibleSelected={visibleSelected}
               hasDomain={hasDomain}
               hasPendingBatch={batch.pending}
-              onSelectPage={() => addAll(items.map(item => item.ref))}
+              onClear={cancelSelection}
               onDeepCollect={deepCollect}
               onOpenBatch={() => domain !== null && batch.open([...selection], domain)}
               onResumeBatch={batch.resume}
-            />
+            /> : null}
           </EvidenceControls>
-        </div>
-        <div className={styles.resultMeta} aria-live="polite">
-          <span>{hasDomain ? `已载入 ${items.length.toLocaleString('zh-CN')} 篇作品` : '选择领域后读取材料'}</span>
-          <span className={styles.readout}>{readout}</span>
         </div>
         <ReadReceipt last={last} failure={list.error} count={items.length} />
         <div className={styles.bench} data-inspector={closed ? 'closed' : width}>
@@ -170,6 +168,7 @@ export function EvidencePage() {
             selectedRef={selected}
             layout={query.layout}
             checked={selection}
+            selectionMode={selecting}
             listRef={listRef}
             onSelect={select}
             onCheck={toggle}
