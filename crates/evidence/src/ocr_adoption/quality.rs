@@ -220,6 +220,12 @@ fn content_quality(b: &Block, r: &mut RegionAssessment) {
         }
         r.role = Role::Background;
         r.reasons.push(Reason::ImageRegionText);
+    } else if mathematical_expression(&b.text) {
+        if r.quality != Quality::Rejected {
+            r.quality = Quality::NeedsReview;
+        }
+        r.role = Role::StructuredText;
+        r.reasons.push(Reason::MathematicalLayoutUnverified);
     } else if b.label == "table" || b.text.contains("<table") {
         if r.quality != Quality::Rejected {
             r.quality = Quality::NeedsReview;
@@ -254,6 +260,11 @@ fn qualify_fragments(input: &ImageInput, b: &Block, lines: &[&Line], r: &mut Reg
     r.adoption_state = AdoptionState::Pending;
     if !r.fallback_candidates.is_empty() {
         r.reasons.push(Reason::FallbackNotConfirmed);
+    }
+    // Agreement on flattened characters cannot prove superscripts or equation structure.
+    // Keep both observations without treating a matching crop as a mathematical proof.
+    if r.reasons.contains(&Reason::MathematicalLayoutUnverified) {
+        return;
     }
     let anchors = normalized(
         &lines
@@ -337,6 +348,10 @@ fn classify_ui_context(input: &ImageInput, b: &Block, r: &mut RegionAssessment) 
         i.bbox[2] <= b.bbox[0] + w * 0.02
             && b.bbox[0] - i.bbox[2] < w * 0.06
             && i.bbox[3].min(b.bbox[3]) > i.bbox[1].max(b.bbox[1])
+            // An avatar often extends below its name into the first comment row.
+            // Only the upper, name-aligned row is metadata on this geometric evidence.
+            && b.bbox[1] < (i.bbox[1] + i.bbox[3]) * 0.5
+            && b.bbox[3] <= i.bbox[3]
     });
     let dated = b.text.chars().filter(char::is_ascii_digit).count() >= 4
         && (b.text.contains(':') || b.text.contains('-') || b.text.contains('年'));
@@ -349,8 +364,48 @@ fn classify_ui_context(input: &ImageInput, b: &Block, r: &mut RegionAssessment) 
         r.reasons.push(Reason::ScreenshotUiContext);
         return;
     }
-    if neighbor || dated || b.text.starts_with("展开") && b.text.contains("回复") {
+    let control = b.text.starts_with("展开") && b.text.contains("回复")
+        || b.text.starts_with("译自") && b.text.contains("显示原文");
+    if neighbor || dated || control {
         r.role = Role::LayoutMetadata;
         r.reasons.push(Reason::ScreenshotUiContext);
     }
+}
+
+fn mathematical_expression(text: &str) -> bool {
+    let text: String = text.nfkc().filter(|c| !c.is_whitespace()).collect();
+    text.chars().any(|c| c.is_ascii_digit())
+        && text
+            .chars()
+            .any(|c| matches!(c, '=' | '≈' | '≠' | '≤' | '≥'))
+        && text.chars().all(|c| {
+            c.is_ascii_alphanumeric()
+                || matches!(
+                    c,
+                    '=' | '≈'
+                        | '≠'
+                        | '≤'
+                        | '≥'
+                        | '+'
+                        | '-'
+                        | '−'
+                        | '*'
+                        | '/'
+                        | '×'
+                        | '÷'
+                        | '^'
+                        | '_'
+                        | '.'
+                        | ','
+                        | '('
+                        | ')'
+                        | '['
+                        | ']'
+                        | '{'
+                        | '}'
+                        | '\\'
+                        | '$'
+                        | '%'
+                )
+        })
 }

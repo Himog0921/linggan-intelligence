@@ -165,6 +165,7 @@ pub enum Reason {
     DecorationLike,
     ImageRegionText,
     StructuredLayoutUnverified,
+    MathematicalLayoutUnverified,
     NoLineSupport,
     AnchorDisagreement,
     MatchingLineText,

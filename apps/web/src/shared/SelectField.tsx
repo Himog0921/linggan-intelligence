@@ -44,7 +44,14 @@ export function SelectField<T extends string>({ label, value, options, onChange,
     const outside = (event: PointerEvent) => {
       if (event.target instanceof Node && !trigger.current?.contains(event.target) && !popup?.contains(event.target)) setOpen(false);
     };
-    const dismiss = (event: Event) => { if (event.target instanceof Node && popup?.contains(event.target)) return; setOpen(false); };
+    const dismiss = (event: Event) => {
+      if (event.type === 'scroll' && event.target instanceof Node) {
+        // Only scrolling an ancestor can displace this trigger. A preview carousel
+        // elsewhere in the page must not dismiss a selection in progress.
+        if (popup?.contains(event.target) || !event.target.contains(trigger.current)) return;
+      }
+      setOpen(false);
+    };
     document.addEventListener('pointerdown', outside, true);
     window.addEventListener('resize', dismiss);
     document.addEventListener('scroll', dismiss, true);

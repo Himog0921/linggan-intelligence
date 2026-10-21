@@ -58,7 +58,16 @@ pub(super) fn select(input: &ImageInput, regions: &mut [RegionAssessment]) -> Co
     {
         Some(Reason::CompetingTitleGroups)
     } else if !first.supported {
-        Some(Reason::UnsupportedCandidate)
+        Some(
+            if regions.iter().any(|r| {
+                first.block_refs.contains(&r.block_ref)
+                    && r.reasons.contains(&Reason::MathematicalLayoutUnverified)
+            }) {
+                Reason::MathematicalLayoutUnverified
+            } else {
+                Reason::UnsupportedCandidate
+            },
+        )
     } else {
         None
     };

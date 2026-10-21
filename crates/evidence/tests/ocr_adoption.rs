@@ -682,3 +682,78 @@ fn screenshot_counter_is_pending_even_when_both_recognizers_agree() {
         "ordinary numeric material without screenshot context is retained"
     );
 }
+
+#[test]
+fn avatar_overlap_does_not_exclude_the_comment_below_the_name() {
+    let mut i = input();
+    i.image_role = ImageRole::Interior;
+    i.sequence_ordinal = Some(2);
+    for n in 0..3 {
+        let y = 100. + n as f64 * 200.;
+        add(&mut i, "image", "icon", [10., y, 60., y + 50.]);
+        add(
+            &mut i,
+            "paragraph_title",
+            "合成昵称",
+            [65., y + 5., 190., y + 25.],
+        );
+        add(
+            &mut i,
+            "text",
+            "这段材料可以逐字回到原图。",
+            [65., y + 35., 650., y + 65.],
+        );
+    }
+    add(&mut i, "text", "译自法语 显示原文", [65., 750., 400., 780.]);
+    add(&mut i, "text", "展开8条回复", [65., 800., 400., 830.]);
+    add(&mut i, "text", "2026-09-08 回复", [65., 850., 400., 880.]);
+    let a = assess(&i).unwrap();
+    for n in 0..3 {
+        assert_eq!(a.regions[n * 3 + 1].role, Role::LayoutMetadata);
+        assert_eq!(
+            a.regions[n * 3 + 2].adoption_state,
+            AdoptionState::AdoptedBlock
+        );
+    }
+    let work = project_work(&[a]).unwrap();
+    assert_eq!(
+        work.image_text
+            .matches("这段材料可以逐字回到原图。")
+            .count(),
+        3
+    );
+    assert!(!work.image_text.contains("合成昵称"));
+    assert!(!work.image_text.contains("显示原文"));
+    assert!(!work.image_text.contains("回复"));
+}
+
+#[test]
+fn equations_are_not_promoted_to_a_cover_title_or_flattened_prose() {
+    let mut i = input();
+    let equation = "1.05365=12.3\n1.04365=9.8";
+    add(&mut i, "text", equation, [100., 180., 900., 400.]);
+    let a = assess(&i).unwrap();
+    assert_eq!(a.cover_title.state, TitleState::Uncertain);
+    assert_eq!(a.cover_title.text, None);
+    assert_eq!(a.cover_title.candidates[0].text, equation);
+    assert_eq!(a.regions[0].adoption_state, AdoptionState::Pending);
+    assert!(a.regions[0].usable_fragments.is_empty());
+    assert!(project_work(&[a]).unwrap().image_text.is_empty());
+    i.rechecks
+        .push(crop(&i, 0, RecheckKind::LineCrop, equation));
+    assert!(assess(&i).unwrap().regions[0].usable_fragments.is_empty());
+}
+
+#[test]
+fn numeric_and_mixed_prose_titles_remain_eligible() {
+    for text in [
+        "2027年学习计划",
+        "每天1%进步=一年后的改变",
+        "What does E=mc² mean?",
+        "42",
+    ] {
+        let mut i = input();
+        add(&mut i, "doc_title", text, [100., 180., 900., 300.]);
+        assert_eq!(title(&i).text.as_deref(), Some(text));
+    }
+}
