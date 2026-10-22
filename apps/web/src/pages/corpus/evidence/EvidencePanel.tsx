@@ -58,7 +58,7 @@ function DerivedTexts({ inspector }: { inspector: Inspector }) {
                   {cover ? <span className={styles.inlineNote}>封面图 · 不宜直接引用</span> : null}
                   {derivative.slotKey ? <Tech>{derivative.slotKey}</Tech> : null}
                 </div>
-                <q className={styles.derivativeText}>{derivative.displayText}</q>
+                <div className={styles.derivativeText}>{derivative.displayText}</div>
                 <StateLine state={derivative.state} />
                 <Layering derivative={derivative} />
                 {cover ? <SourceNote>封面是设计排版，机器识别结果常为噪声；列表引用的原声不采用它。</SourceNote> : null}

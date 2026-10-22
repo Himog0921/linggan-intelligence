@@ -1,5 +1,5 @@
 {
-  "fingerprint": "c17afa3b19b0e0085742b72b90bcc1324b1f294a982f09376da28aa148b5c072",
+  "fingerprint": "1f4f456a3bfd427e8c09cb898b75b5979e020888125ec7b109dd0b4fdfcc9b25",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -327,7 +327,7 @@
     },
     {
       "path": "apps/web/src/shared/SelectField.tsx",
-      "sha256": "cfbbff78e55d4e04c77f2ba178dd8b64d752f3fb7426aa2f06a1fd7f4ac9b8fa"
+      "sha256": "b34c09b755db3dc1d1cae2270bf1e2a714b4137d0b2c3f52812b57a06ca2393a"
     },
     {
       "path": "apps/web/src/shared/inputMethod.ts",

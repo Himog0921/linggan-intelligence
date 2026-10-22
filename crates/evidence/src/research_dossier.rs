@@ -25,6 +25,7 @@ pub struct ResearchDossier {
     pub coverage: Value,
     pub metadata: Value,
     pub sections: Vec<Value>,
+    pub image_text_projection: Value,
 }
 
 /// One result per canonical slot/purpose/position. Pending reprocessing does not erase an
@@ -64,6 +65,7 @@ pub(crate) fn select_media(media: Vec<Value>) -> Vec<Value> {
                 .max_by_key(|v| {
                     let layer = &v["ocrLayering"];
                     (
+                        v["ocrAdoption"].is_object(),
                         layer["imageWidth"].as_i64().unwrap_or(0)
                             * layer["imageHeight"].as_i64().unwrap_or(0),
                         v["researchText"].as_str().map_or(0, |s| s.chars().count()),
@@ -261,7 +263,9 @@ pub(crate) fn assemble(
         "comments":"separate_authorized_research_channel","sampling":"collected_material_only"});
     let revision = hash(&json!([VERSION, &fragments, &media, &metadata, &coverage]).to_string());
     let sections = sections(&fragments, &coverage);
+    let image_text_projection = crate::ocr_adoption_persistence::project_dossier_images(&media);
     ResearchDossier {
+        image_text_projection,
         contract: VERSION,
         work_ref: work.public_ref,
         revision,

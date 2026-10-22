@@ -1,0 +1,156 @@
+use super::*;
+use std::collections::HashSet;
+
+pub(super) fn validate(input: &ImageInput) -> Result<(), InputError> {
+    let image = &input.image;
+    if input.schema_version != 1
+        || image.width == 0
+        || image.height == 0
+        || image.width > 100_000
+        || image.height > 100_000
+        || input.layout.blocks.len() > 512
+        || input.anchors.lines.len() > 4096
+        || input.layout.terminations.len() > 512
+        || input.rechecks.len() > 1024
+        || input
+            .layout
+            .blocks
+            .iter()
+            .map(|b| b.text.len())
+            .sum::<usize>()
+            > 2_000_000
+        || input
+            .anchors
+            .lines
+            .iter()
+            .map(|l| l.text.len())
+            .sum::<usize>()
+            > 2_000_000
+    {
+        return Err(InputError::Bounds);
+    }
+    if image != &input.layout.image
+        || image != &input.anchors.image
+        || image.work_ref.is_nil()
+        || !reference(&image.image_ref)
+        || input.sequence_ordinal == Some(0)
+        || (input.image_role == ImageRole::FirstImage && input.sequence_ordinal != Some(1))
+        || (input.image_role == ImageRole::Interior
+            && input.sequence_ordinal.is_some_and(|p| p < 2))
+    {
+        return Err(InputError::Identity);
+    }
+    if !hash(&image.blob_sha256)
+        || [&input.layout.pipeline, &input.anchors.pipeline]
+            .iter()
+            .any(|p| !hash(&p.raw_sha256) || !reference(&p.version))
+    {
+        return Err(InputError::Source);
+    }
+    let mut refs = HashSet::new();
+    let mut orders = HashSet::new();
+    for block in &input.layout.blocks {
+        if !reference(&block.block_ref)
+            || !reference(&block.label)
+            || !refs.insert(block.block_ref.as_str())
+            || !orders.insert(block.reading_order)
+        {
+            return Err(InputError::Reference);
+        }
+        if !bbox(block.bbox, image) {
+            return Err(InputError::Geometry);
+        }
+    }
+    let mut line_refs = HashSet::new();
+    orders.clear();
+    for line in &input.anchors.lines {
+        if !reference(&line.line_ref)
+            || !line_refs.insert(line.line_ref.as_str())
+            || !orders.insert(line.reading_order)
+            || line.text.trim().is_empty()
+        {
+            return Err(InputError::Reference);
+        }
+        if !bbox(line.bbox, image)
+            || !line.confidence.is_finite()
+            || !(0.0..=1.0).contains(&line.confidence)
+        {
+            return Err(InputError::Geometry);
+        }
+    }
+    let mut receipts = HashSet::new();
+    for receipt in &input.layout.terminations {
+        let block = input
+            .layout
+            .blocks
+            .iter()
+            .find(|b| b.block_ref == receipt.block_ref);
+        if receipt.raw_text.as_ref().is_some_and(|text| {
+            text.len() > 100_000
+                || receipt.raw_output_sha256.as_deref()
+                    != Some(content_hash(text.as_bytes()).as_str())
+        }) {
+            return Err(InputError::Receipt);
+        }
+        if !receipts.insert(&receipt.block_ref)
+            || block.is_none_or(|b| content_hash(b.text.as_bytes()) != receipt.output_sha256)
+            || receipt
+                .finish_reason
+                .as_ref()
+                .is_some_and(|s| !reference(s))
+        {
+            return Err(InputError::Receipt);
+        }
+    }
+    validate_rechecks(input)
+}
+
+fn bbox(b: [f64; 4], image: &ImageIdentity) -> bool {
+    b.iter().all(|v| v.is_finite() && *v >= 0.0)
+        && b[0] < b[2]
+        && b[1] < b[3]
+        && b[2] <= f64::from(image.width)
+        && b[3] <= f64::from(image.height)
+}
+fn reference(s: &str) -> bool {
+    !s.trim().is_empty() && s.len() <= 512 && !s.chars().any(char::is_control)
+}
+fn hash(s: &str) -> bool {
+    s.len() == 64
+        && s.bytes()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase())
+}
+
+fn validate_rechecks(input: &ImageInput) -> Result<(), InputError> {
+    let mut ids = HashSet::new();
+    for c in &input.rechecks {
+        let Some(b) = input
+            .layout
+            .blocks
+            .iter()
+            .find(|b| b.block_ref == c.block_ref)
+        else {
+            return Err(InputError::Receipt);
+        };
+        // A crop may cover the whole block or a bounded part of it. Partial crops
+        // can only support partial source ranges, never certify the entire block.
+        let contains =
+            |a: [f64; 4], b: [f64; 4]| a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3];
+        let overlap = (c.crop_bbox[2].min(b.bbox[2]) - c.crop_bbox[0].max(b.bbox[0])).max(0.0)
+            * (c.crop_bbox[3].min(b.bbox[3]) - c.crop_bbox[1].max(b.bbox[1])).max(0.0);
+        let area = (c.crop_bbox[2] - c.crop_bbox[0]) * (c.crop_bbox[3] - c.crop_bbox[1]);
+        if !ids.insert((&c.block_ref, c.kind as u8, c.crop_bbox.map(f64::to_bits)))
+            || c.image_blob_sha256 != input.image.blob_sha256
+            || !bbox(c.crop_bbox, &input.image)
+            || !(contains(c.crop_bbox, b.bbox) || overlap / area >= 0.60)
+            || !hash(&c.crop_sha256)
+            || !hash(&c.raw_sha256)
+            || !reference(&c.pipeline_version)
+            || c.text.len() > 100_000
+            || c.finish_reason.as_ref().is_some_and(|s| !reference(s))
+        {
+            return Err(InputError::Receipt);
+        }
+    }
+    Ok(())
+}

@@ -266,6 +266,9 @@ async fn execute_image_ocr(
     worker_instance_ref: Uuid,
     claim: &MediaProcessingClaim,
 ) -> Result<(), String> {
+    if claim.processor_version == linggan_evidence::ocr_adoption_persistence::PROCESSOR_VERSION {
+        return media_worker_support::ocr_vl::execute(database, worker_instance_ref, claim).await;
+    }
     if !claim.mime_type.starts_with("image/") {
         return Err("image_ocr_mime_mismatch".to_owned());
     }

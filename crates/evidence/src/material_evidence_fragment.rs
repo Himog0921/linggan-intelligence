@@ -253,6 +253,7 @@ async fn read_text_candidates(
            AND ($3::text IS NULL OR lower(layer.image_substantive_text) LIKE '%' || lower($3) || '%') \
            AND ($3::text IS NOT NULL OR job.slot_key NOT LIKE '%:cover:%') \
            AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref) \
+           AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition d WHERE d.state='WITHDRAWN_OR_RESTRICTED' AND (d.derivative_ref=derivative.derivative_ref OR d.blob_sha256=job.blob_sha256 OR d.slot_key=job.slot_key)) \
          ORDER BY layout.content_public_ref,layer.created_at DESC".to_owned()
     } else {
         format!(
@@ -262,6 +263,7 @@ async fn read_text_candidates(
          WHERE derived.content_public_ref=ANY($1) AND derived.created_at <= $2::timestamptz \
            AND ($3::text IS NULL OR lower(derived.display_text) LIKE '%' || lower($3) || '%') \
            AND ($3::text IS NOT NULL OR job.slot_key NOT LIKE '%:cover:%'){retirement_filter} \
+           AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition d WHERE d.state='WITHDRAWN_OR_RESTRICTED' AND (d.derivative_ref=derivative.derivative_ref OR d.blob_sha256=job.blob_sha256 OR d.slot_key=job.slot_key)) \
          ORDER BY derived.content_public_ref,job.slot_key,derived.created_at DESC"
         )
     };

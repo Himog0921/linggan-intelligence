@@ -24,9 +24,17 @@ it('长菜单定位只滚动菜单自身，末项点击仍提交，外部滚动�
   expect(ancestorScroll).not.toHaveBeenCalled();
   fireEvent.scroll(popup);
   expect(screen.getByRole('listbox')).toBe(popup);
+  const preview = document.createElement('div');
+  document.body.append(preview);
+  fireEvent.scroll(preview);
+  expect(screen.getByRole('listbox')).toBe(popup);
+  preview.remove();
   await user.click(last);
   expect(change).toHaveBeenCalledExactlyOnceWith('12');
   expect(trigger).toHaveFocus();
+  await user.click(trigger);
+  fireEvent.scroll(trigger.parentElement!);
+  expect(screen.queryByRole('listbox')).toBeNull();
   await user.click(trigger);
   fireEvent.scroll(document);
   expect(screen.queryByRole('listbox')).toBeNull();

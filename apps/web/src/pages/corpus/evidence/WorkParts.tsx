@@ -24,10 +24,11 @@ export function QuoteBlock({ fragment, wrap = false }: { fragment: QuoteFragment
     );
   }
   const parts = quoteParts(fragment);
+  const Text = ['ocr_text', 'image_substantive_text', 'cover_headline'].includes(fragment.sourceKind) ? 'div' : 'q';
   return (
     <div className={styles.quote} data-wrap={wrap}>
       <span className={styles.quoteSource}>{fragmentSourceLabel(fragment.sourceKind)}</span>
-      <q>
+      <Text>
         {parts === null ? (
           fragment.text
         ) : (
@@ -37,7 +38,7 @@ export function QuoteBlock({ fragment, wrap = false }: { fragment: QuoteFragment
             {parts.after}
           </Fragment>
         )}
-      </q>
+      </Text>
     </div>
   );
 }

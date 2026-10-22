@@ -724,10 +724,13 @@ pub(crate) async fn read_derivatives_batch(
             .or_default()
             .push(row);
     }
-    Ok(grouped
-        .into_iter()
-        .map(|(work, rows)| (work, project_derivative_rows(rows)))
-        .collect())
+    let mut result = HashMap::new();
+    for (work, rows) in grouped {
+        let mut projected = project_derivative_rows(rows);
+        crate::ocr_adoption_persistence::attach_media(tx, &mut projected.0, as_of).await?;
+        result.insert(work, projected);
+    }
+    Ok(result)
 }
 
 /// Research exhausts the already acquired derivatives in bounded pages, sharing the
@@ -789,6 +792,9 @@ pub(crate) async fn read_topic_derivatives_batch(
             );
         }
         after += DETAIL_DERIVATIVE_LIMIT as i64;
+    }
+    for items in derivatives.values_mut() {
+        crate::ocr_adoption_persistence::attach_media(tx, items, as_of).await?;
     }
     Ok(derivatives)
 }

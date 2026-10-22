@@ -1,3 +1,5 @@
+pub(crate) mod ocr_vl;
+
 use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
