@@ -150,7 +150,17 @@ async fn fill_slots(
         *audit_due = Instant::now() + Duration::from_secs(60);
     }
     while tasks.len() < concurrency as usize && !drain.is_requested() {
-        let Some(item) = queue::claim_next(db, fence).await? else {
+        let claimed = match queue::claim_next(db, fence).await {
+            Err(ExecutorError::FenceLost) if drain.is_requested() => {
+                // The session can enter draining after the loop guard but before
+                // claim admission. Still require the same live owner; a genuine
+                // replacement or lost session must continue to fail closed.
+                fence.begin(db, false).await?.commit().await?;
+                break;
+            }
+            result => result?,
+        };
+        let Some(item) = claimed else {
             break;
         };
         if drain.is_requested() {
