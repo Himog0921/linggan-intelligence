@@ -445,7 +445,16 @@
 .item[data-selected='true'] .face::after { opacity:.55; }
 .item[data-checked='true'] .visual { outline:2px solid var(--lgi-signal);outline-offset:-2px; }
 .item[data-checked='true'] .plate { background:var(--lgi-signal-faint);border-bottom:2px solid var(--lgi-signal); }
-.pickCorner { position:absolute;z-index:6;right:var(--lgi-space-2);top:var(--lgi-space-2);
-  background:var(--lgi-canvas-overlay);border:1px solid var(--lgi-hairline); }
+.pickCorner {
+  position:absolute;z-index:6;top:var(--lgi-space-3);right:var(--lgi-space-3);
+  display:grid;place-items:center;box-sizing:border-box;
+  width:calc(var(--lgi-space-8) + var(--lgi-focus-inset));
+  height:calc(var(--lgi-space-8) + var(--lgi-focus-inset));
+  background:var(--lgi-canvas-overlay);border:1px solid var(--lgi-hairline);
+}
+/* Reserve a separate slot for the ordinal; the picker must never cover the number. */
+.item[data-selection-active='true'] .faceHead {
+  padding-right:calc(var(--lgi-space-12) + var(--lgi-space-2));
+}
 .item[data-selection-active='true'] .visual:hover .flip { transform:none; }
 .item[data-selection-active='true'] .visual[data-flipped='true']:hover .flip { transform:rotateY(180deg); }

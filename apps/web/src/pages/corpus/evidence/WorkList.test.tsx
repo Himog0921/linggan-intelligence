@@ -105,6 +105,16 @@ describe('研读排版', () => {
     expect(onSelect).not.toHaveBeenCalled();
   });
 
+  it.each(['research', 'table', 'cover'] as const)('三视图选择框不触发详情打开（%s）', async layout => {
+    const { user, onSelect, onCheck } = renderList({ layout, canCheck: true, checked: new Set([workRef(1)]) });
+    const boxes = screen.getAllByRole('checkbox', { name: /^勾选作品：/ });
+    expect(boxes).toHaveLength(3);
+    expect(boxes[0]).toBeChecked();
+    await user.click(boxes[1]!);
+    expect(onCheck).toHaveBeenLastCalledWith(workRef(2), true);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
   it('浏览态没有勾选框', () => {
     renderList({ canCheck: false });
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
