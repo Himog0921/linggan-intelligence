@@ -34,18 +34,7 @@ pub async fn relayer_work(
         return Err(crate::ProducerRuntimeError::MaterialIdentityConflict);
     }
     let plan = super::relayer_plan(&dossier);
-    let layouts: Vec<_> = dossier
-        .media
-        .iter()
-        .filter(|m| m["state"] == "ACQUIRED" && m["contextOnly"] != true)
-        .filter_map(|m| {
-            m["ocrLayering"]["layoutRef"]
-                .as_str()
-                .and_then(|s| s.parse::<Uuid>().ok())
-        })
-        .collect::<std::collections::BTreeSet<_>>()
-        .into_iter()
-        .collect();
+    let layouts = super::relayerable_layouts(&dossier);
     if layouts.len() > 100 {
         return Err(crate::ProducerRuntimeError::MaterialIdentityConflict);
     }
