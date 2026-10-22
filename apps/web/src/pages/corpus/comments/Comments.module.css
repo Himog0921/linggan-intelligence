@@ -474,7 +474,7 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
   display:grid;grid-template-columns:minmax(calc(var(--lgi-space-24) * 2.8),calc(var(--lgi-space-24) * 3.05)) minmax(0,1fr);
   gap:var(--lgi-space-10);align-items:start;min-width:0
 }
-.study-overview[data-compact-wordcloud="v23"] .study-overview-metrics {min-width:0}
+.study-overview[data-compact-wordcloud="v23"] .study-overview-metrics {min-width:0;display:flex;flex-direction:column;min-height:calc(var(--lgi-space-1)*123.25)}
 .study-overview[data-compact-wordcloud="v23"] .study-metrics-asof {min-height:var(--lgi-space-5)}
 .study-overview[data-compact-wordcloud="v23"] .study-metric-hero {padding-top:var(--lgi-space-4)}
 .study-overview[data-compact-wordcloud="v23"] .study-metric-hero .study-metric-value strong {font-size:var(--lgi-text-page-title)}
@@ -485,7 +485,7 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
 .study-overview[data-compact-wordcloud="v23"] .study-metric-pair {margin-top:0}
 .study-overview[data-compact-wordcloud="v23"] .study-metric-small {min-height:calc(var(--lgi-space-16) + var(--lgi-space-2))}
 .study-overview[data-compact-wordcloud="v23"] .study-metric-small .study-metric-delta {padding-top:var(--lgi-space-2)}
-.study-overview[data-compact-wordcloud="v23"] .study-metric-pending {margin-top:var(--lgi-space-2);min-height:var(--lgi-space-8);padding-top:var(--lgi-space-2)}
+.study-overview[data-compact-wordcloud="v23"] .study-metric-pending {margin-top:auto;min-height:var(--lgi-space-8);padding-top:var(--lgi-space-2)}
 .study-overview-right {display:flex;flex-direction:column;min-width:0}
 .study-overview[data-compact-wordcloud="v23"] .study-observation-toolbar {
   display:flex;flex-direction:row;align-items:center;justify-content:space-between;
@@ -502,7 +502,7 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
 .study-overview[data-compact-wordcloud="v23"] .study-observation-controls {gap:var(--lgi-space-3);margin-left:auto}
 .study-overview[data-compact-wordcloud="v23"] .study-series-svg-wrap,
 .study-overview[data-compact-wordcloud="v23"] .study-series-table-wrap {
-  height:calc(var(--lgi-space-24) * 2.04);max-height:calc(var(--lgi-space-24) * 2.04);
+  height:calc(var(--lgi-space-1) * 40.5);max-height:calc(var(--lgi-space-1) * 40.5);
   min-height:0;overflow:hidden;border:0
 }
 .study-overview[data-compact-wordcloud="v23"] .study-series-svg-wrap svg {height:100%;width:100%}
@@ -539,12 +539,12 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
 }
 .study-word-tabs button[aria-pressed="true"] {color:var(--lgi-ink);border-color:var(--lgi-signal);font-weight:var(--lgi-weight-bold)}
 .study-word-layout {display:grid;grid-template-columns:minmax(0,1.7fr) minmax(calc(var(--lgi-space-24)*2.3),.72fr);
-  gap:var(--lgi-space-5);margin-top:var(--lgi-space-2);min-width:0}
+  gap:var(--lgi-space-4);margin-top:var(--lgi-space-1);min-width:0}
 .study-word-main {min-width:0}
 .study-word-stage {
   position:relative;display:flex;align-content:center;align-items:center;justify-content:space-around;
   flex-wrap:wrap;column-gap:var(--lgi-space-3);row-gap:var(--lgi-space-2);
-  box-sizing:border-box;min-height:calc(var(--lgi-space-24)*2.08);height:calc(var(--lgi-space-24)*2.08);
+  box-sizing:border-box;min-height:calc(var(--lgi-space-1)*45.25);height:calc(var(--lgi-space-1)*45.25);
   overflow-y:auto;overscroll-behavior:contain;padding:var(--lgi-space-2) var(--lgi-space-1)
 }
 .study-word-stage::before {
@@ -567,7 +567,7 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
 .study-word-item[data-highlight="true"] {color:var(--lgi-signal-ink);border-bottom-color:var(--lgi-signal)}
 .study-word-item:hover {color:var(--lgi-signal-ink)}
 .study-word-selected {
-  display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0;min-height:var(--lgi-space-9);
+  display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0;min-height:var(--lgi-space-8);
   border-top:1px solid var(--lgi-hairline);
   color:var(--lgi-muted);font-size:var(--lgi-text-label)
 }
@@ -580,7 +580,7 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
 .study-word-tophead b {font-size:var(--lgi-text-label)}
 .study-word-tophead span {font-size:var(--lgi-text-label);color:var(--lgi-muted)}
 .study-word-rank {display:grid;grid-template-columns:var(--lgi-space-5) minmax(0,1fr) var(--lgi-space-12);
-  gap:var(--lgi-space-1);align-items:center;width:100%;height:calc(var(--lgi-space-4) + var(--lgi-space-1));
+  gap:var(--lgi-space-1);align-items:center;width:100%;height:calc(var(--lgi-space-4) + var(--lgi-space-1) * .75);
   border:0;padding:0;background:transparent;text-align:left}
 .study-word-rank:hover {background:var(--lgi-canvas-low)}
 .study-word-rank span {color:var(--lgi-muted);font:var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}
