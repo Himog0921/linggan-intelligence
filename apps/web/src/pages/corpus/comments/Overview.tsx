@@ -26,7 +26,9 @@ export function Overview({ domain, nav, preferences, onPreferences }: {
           days={preferences.seriesDays} view={preferences.seriesView}
           onDays={seriesDays => onPreferences(old => ({ ...old, seriesDays }))}
           onView={seriesView => onPreferences(old => ({ ...old, seriesView }))}/>
-        <DomainWordCloud domain={domain} days={preferences.seriesDays} nav={nav}/>
+        <DomainWordCloud domain={domain} days={preferences.seriesDays} nav={nav}
+          category={preferences.wordCategory}
+          onCategory={wordCategory => onPreferences(old => ({ ...old, wordCategory }))}/>
       </div>
     </section>
   </div>;
