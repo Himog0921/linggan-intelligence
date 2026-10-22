@@ -1,6 +1,7 @@
 # 文档总索引
 
 - [OCR 封面标题选择与异常内容拦截](plans/active/ocr-title-quality-454.md)：#454/#464 的区块采用、局部复核与自有库链路验证；生产默认、共享运行与业务签收仍另列。
+- [OCR 手动图片文字识别：实施与验收](plans/active/ocr-manual-recognition-454.md)：#454 当前候选；图组手动 OCR、真实持久化百分比、检查器结果与 OCR 模型设置，未合并、未部署。
 
 采集完整交付入口：[COLLECTION-JTBD-001 单次采集](plans/active/collection-single-run-398.md)（Issue #398 / Draft PR #406；替代 #400 的限制，含 UI 与验收矩阵）。[运行与数据合同](data-contracts/collection-single-run-001.md)、[正式 UI 核对](design/changes/collection-single-run-398.md)、[单独 UI 审美审查](design/changes/collection-single-run-398-visual-audit.md)。旧[两页导航](plans/active/collection-jtbd-001.md)保留历史范围。
 

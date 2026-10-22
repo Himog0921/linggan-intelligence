@@ -1,6 +1,12 @@
 //! Owned loopback SSE endpoint. It never forwards traffic or reads credentials/files.
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
+    },
+};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
@@ -17,6 +23,23 @@ pub struct Endpoint {
 }
 impl Endpoint {
     pub async fn start(gated: bool) -> Self {
+        Self::start_inner(gated, None, None).await
+    }
+    /// Blocks precisely the second image response until the owned browser proof writes its
+    /// release token.  It never opens a network path beyond the loopback mock.
+    pub async fn start_browser_second_gate(release_path: PathBuf) -> Self {
+        Self::start_inner(false, Some(release_path), None).await
+    }
+    /// A valid transport with an invalid visual contract simulates a terminal second-image
+    /// failure while retaining the exact raw receipt for inspection.
+    pub async fn start_second_image_schema_failure() -> Self {
+        Self::start_inner(false, None, Some(2)).await
+    }
+    async fn start_inner(
+        gated: bool,
+        second_gate_path: Option<PathBuf>,
+        schema_failure_at: Option<usize>,
+    ) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(vec![]));
@@ -25,20 +48,37 @@ impl Endpoint {
         let (seen_tx, seen) = oneshot::channel();
         let (release, release_rx) = oneshot::channel();
         let gate = Arc::new(Mutex::new(gated.then_some((seen_tx, release_rx))));
+        let visual_requests = Arc::new(AtomicUsize::new(0));
         let task = tokio::spawn(async move {
             let mut tasks = JoinSet::new();
             loop {
                 tokio::select! {
                     _=stopping.changed()=>break,
                     socket=listener.accept()=>{
-                        let(mut socket,_)=socket.unwrap();let recorded=recorded.clone();let gate=gate.clone();
+                        let(mut socket,_)=socket.unwrap();let recorded=recorded.clone();let gate=gate.clone();let visual_requests=visual_requests.clone();let second_gate_path=second_gate_path.clone();
                         tasks.spawn(async move {
                             let request=read(&mut socket).await;let prompt=text(&request,"user");
                             let probe=prompt.contains("ai-probe.synthetic.v1");
                             recorded.lock().unwrap().push(request);
                             let waiting=if probe {None} else {gate.lock().unwrap().take()};
                             if let Some((seen,release))=waiting {seen.send(()).unwrap();release.await.unwrap();}
-                            let output=if probe {json!({"lingganProbe":"ok"})}else{json!({"titlePresence":"absent","titleText":null,"regions":[{"regionRef":"r1","text":"42","role":"body","legibility":"clear","bbox":null},{ "regionRef":"r2","text":"SYNTHETIC BRAND","role":"brand","legibility":"clear","bbox":null},{"regionRef":"r3","text":"SYNTHETIC ACTION","role":"call_to_action","legibility":"clear","bbox":null}],"unreadable":false})};
+                            let image_number=(!probe).then(||visual_requests.fetch_add(1,Ordering::SeqCst)+1);
+                            if image_number==Some(2) {
+                                if let Some(path)=second_gate_path {
+                                    while !path.exists() { tokio::time::sleep(std::time::Duration::from_millis(20)).await; }
+                                }
+                            }
+                            let output=if schema_failure_at.is_some() && image_number==schema_failure_at {json!({"malformed":"synthetic second-image schema failure"})}else if probe {json!({"lingganProbe":"ok"})}else if prompt.contains("\"imageRole\":\"explicit_cover\"") {
+                                json!({"titlePresence":"present","titleText":"合成封面标题","regions":[
+                                    {"regionRef":"cover-title","text":"合成封面标题","role":"main_title","legibility":"clear","bbox":[0.1,0.1,0.9,0.25]},
+                                    {"regionRef":"cover-body","text":"封面正文","role":"body","legibility":"clear","bbox":[0.1,0.3,0.9,0.5]},
+                                    {"regionRef":"cover-brand","text":"SYNTHETIC BRAND","role":"brand","legibility":"clear","bbox":null}],"unreadable":false})
+                            } else if prompt.contains("\"imageRole\":\"interior\"") {
+                                json!({"titlePresence":"absent","titleText":null,"regions":[
+                                    {"regionRef":"interior-heading","text":"内页章节标题","role":"chapter_heading","legibility":"clear","bbox":[0.1,0.1,0.9,0.25]},
+                                    {"regionRef":"interior-body","text":"内页正文","role":"body","legibility":"clear","bbox":[0.1,0.3,0.9,0.5]},
+                                    {"regionRef":"interior-partial","text":"模糊字","role":"body","legibility":"partial","bbox":null}],"unreadable":false})
+                            } else {json!({"titlePresence":"absent","titleText":null,"regions":[{"regionRef":"r1","text":"42","role":"body","legibility":"clear","bbox":null},{ "regionRef":"r2","text":"SYNTHETIC BRAND","role":"brand","legibility":"clear","bbox":null},{"regionRef":"r3","text":"SYNTHETIC ACTION","role":"call_to_action","legibility":"clear","bbox":null}],"unreadable":false})};
                             respond(&mut socket,&output.to_string()).await;
                         });
                     }

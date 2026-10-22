@@ -43,7 +43,7 @@ export function ModelSettingsPage() {
     {settings.isPending ? <p role="status" className={styles.loading}>正在读取 AI 设置…</p> : null}
   </>;
   const legacySurface = data ? legacy === 'models' ? <AiModelSection data={data} action={action}/> : legacy === 'automation' ? <AiTaskSection data={data} action={action}/> : legacy === 'skills' ? <AiSkillSection data={data} action={action}/> : <AiHealthSection data={data} action={action}/> : null;
-  const viewSurface = data ? view === 'capabilities' ? <AiCapabilities data={data}/> : view === 'models' ? <AiConnections data={data} action={action}/> : view === 'runs' ? <AiRuns data={data}/> : <AiAdvanced data={data} action={action}/> : null;
+  const viewSurface = data ? view === 'capabilities' ? <AiCapabilities data={data} action={action}/> : view === 'models' ? <AiConnections data={data} action={action}/> : view === 'runs' ? <AiRuns data={data}/> : <AiAdvanced data={data} action={action}/> : null;
 
   return <AppShell active={null} boundaryLabel={data?.synthetic ? '合成隔离环境' : '本机设置'} crumb={crumb} meta={meta}>
     {legacy ? <main className={[legacyStyles.page, styles.root].join(' ')} data-ai-settings-page aria-labelledby="ai-settings-page-title">

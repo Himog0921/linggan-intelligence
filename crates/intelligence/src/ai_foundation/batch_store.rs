@@ -53,6 +53,9 @@ pub enum InputRef {
     OcrAuditSample {
         sample_ref: Uuid,
     },
+    OcrRecognitionItem {
+        item_ref: Uuid,
+    },
     WritingRequest {
         request_ref: Uuid,
     },
@@ -86,6 +89,7 @@ impl InputRef {
                     && (profile.is_none() || *operation == ProbeOperation::Probe)
             }
             Self::OcrAuditSample { .. } => task == TaskKey::OcrQualityAudit,
+            Self::OcrRecognitionItem { .. } => task == TaskKey::OcrRecognition,
             Self::WritingRequest { .. } => task == TaskKey::WritingLegacy && !trial,
             Self::WritingPreview { .. } => task == TaskKey::WritingLegacy && trial,
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
@@ -130,7 +134,7 @@ impl BatchKind {
             | TaskKey::WritingAssistant
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => matches!(self, Self::Interactive | Self::Trial),
-            TaskKey::NoteInterpretation | TaskKey::AuthorOrgIdentity | TaskKey::OcrQualityAudit => {
+            TaskKey::NoteInterpretation | TaskKey::AuthorOrgIdentity | TaskKey::OcrQualityAudit | TaskKey::OcrRecognition => {
                 self != Self::Probe
             }
             _ => false,

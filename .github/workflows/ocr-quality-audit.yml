@@ -1,7 +1,7 @@
 name: OCR quality audit isolated proof
 on:
   pull_request:
-    branches: [main, codex/ocr-title-quality-454]
+    branches: [main, codex/ocr-title-quality-454, codex/ocr-quality-audit-454]
     paths:
       - '.github/workflows/ocr-quality-audit.yml'
       - 'crates/intelligence/src/ocr_quality_audit*'
@@ -9,6 +9,14 @@ on:
       - 'crates/intelligence/src/ai_foundation/**'
       - 'crates/intelligence/src/pi_*'
       - 'crates/evidence/src/ocr_adoption_persistence/**'
+      - 'crates/evidence/src/cloud_ocr_adoption*'
+      - 'crates/evidence/src/research_dossier.rs'
+      - 'crates/evidence/tests/cloud_ocr*'
+      - 'apps/worker/tests/ocr_recognition_postgres.rs'
+      - 'apps/worker/tests/ocr_vl_postgres.rs'
+      - 'database/migrations/0144_ocr_manual_recognition.sql'
+      - 'apps/api/src/local_web/ocr_recognition*'
+      - 'apps/web/**'
       - 'apps/api/src/local_web/ocr_audit.rs'
       - 'apps/web/src/pages/settings/OcrAudit*'
       - 'apps/web/src/pages/settings/ocrAuditApi.ts'
@@ -54,6 +62,7 @@ jobs:
           cargo test -p linggan-intelligence --lib --locked
           cargo test -p linggan-intelligence --test ocr_quality_audit --locked
           cargo test -p linggan-evidence --test ocr_adoption --locked
+          cargo test -p linggan-evidence --lib --locked
           npm --prefix apps/pi-adapter test
           npm --prefix apps/web run lint
           npm --prefix apps/web run test
@@ -63,5 +72,5 @@ jobs:
         run: |
           bash scripts/check-project-governance.sh origin/main
           bash scripts/verify-ui-design-handbook.sh
-          rustfmt --check --edition 2024 --config skip_children=true crates/intelligence/src/ocr_quality_audit.rs crates/intelligence/src/ocr_quality_audit/*.rs crates/intelligence/src/ai_foundation/executor/ocr_audit.rs crates/evidence/src/ocr_adoption_persistence/review.rs crates/intelligence/tests/ocr_quality_audit.rs apps/worker/tests/ocr_quality_audit_postgres.rs apps/worker/tests/support/ocr_audit_endpoint.rs apps/api/src/local_web/ocr_audit.rs
+          rustfmt --check --edition 2024 --config skip_children=true crates/intelligence/src/ocr_quality_audit.rs crates/intelligence/src/ocr_quality_audit/*.rs crates/intelligence/src/ai_foundation/executor/ocr_audit.rs crates/evidence/src/ocr_adoption_persistence/review.rs crates/intelligence/tests/ocr_quality_audit.rs apps/worker/tests/ocr_quality_audit_postgres.rs apps/worker/tests/support/ocr_audit_endpoint.rs apps/api/src/local_web/ocr_audit.rs crates/evidence/src/cloud_ocr_adoption.rs crates/evidence/src/ocr_adoption_persistence/read.rs crates/evidence/tests/cloud_ocr_saved.rs crates/intelligence/src/ai_foundation/ocr_recognition.rs crates/intelligence/src/ai_foundation/executor/ocr_recognition.rs apps/worker/tests/ocr_recognition_postgres.rs apps/api/src/local_web/ocr_recognition.rs apps/api/src/local_web/ocr_recognition_browser_tests.rs
           git diff --check

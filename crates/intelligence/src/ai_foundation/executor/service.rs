@@ -1,5 +1,5 @@
 //! The dedicated AI process. Its session heartbeat runs while claims and child calls await.
-use super::{ExecutorError, ExecutorSession, probe, queue, schema, writing};
+use super::{ExecutorError, ExecutorSession, ocr_recognition, probe, queue, schema, writing};
 use crate::{
     ai_foundation::TaskKey, model_secrets::ModelSecretStore, model_worker_drain::ModelWorkerDrain,
     pi_adapter::PiAdapter,
@@ -165,6 +165,9 @@ async fn fill_slots(
                 }
                 TaskKey::OcrQualityAudit => {
                     super::ocr_audit::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                TaskKey::OcrRecognition => {
+                    ocr_recognition::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 TaskKey::WritingLegacy => {
                     writing::execute_writing(&db, &item, secrets.as_ref(), &adapter).await

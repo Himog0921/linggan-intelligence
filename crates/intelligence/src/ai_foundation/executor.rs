@@ -7,6 +7,7 @@ use uuid::Uuid;
 mod budget;
 mod dispatch;
 pub mod ocr_audit;
+pub mod ocr_recognition;
 mod preparation;
 pub mod probe;
 pub mod queue;

@@ -107,6 +107,9 @@
   padding-bottom: calc(var(--lgi-space-1) * 1.75);
   font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui);
 }
+.sectionHeader { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--lgi-space-3); margin-bottom: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2); border-bottom: 1px solid var(--lgi-ink); padding-bottom: calc(var(--lgi-space-1) * 1.75); }
+.sectionHeader h3 { margin: 0; font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
+.sectionActions { display: inline-flex; margin-left: auto; }
 
 /* ── 行内状态：失败、警示、访问边界三者分色，不共用一个视觉 ── */
 .inline {

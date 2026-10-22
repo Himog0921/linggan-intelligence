@@ -6,6 +6,7 @@ pub(crate) async fn attach_media(
     items: &mut [Value],
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
+    crate::cloud_ocr_adoption::attach_media(tx, items, as_of).await?;
     let jobs: Vec<Uuid> = items
         .iter()
         .filter(|v| v["state"] == "ACQUIRED" && v["processorVersion"] == PROCESSOR_VERSION)
@@ -73,13 +74,47 @@ pub(crate) fn project_dossier_images(media: &[Value]) -> Value {
         .filter(|m| m["state"] == "ACQUIRED" && m["contextOnly"] != true)
         .filter_map(|m| serde_json::from_value(m["ocrAdoption"]["assessment"].clone()).ok())
         .collect();
-    if images.is_empty() {
+    let cloud: Vec<_> = media
+        .iter()
+        .filter(|m| {
+            m["state"] == "ACQUIRED"
+                && m["contextOnly"] != true
+                && m["ocrAdoption"]["assessment"]["producer"] == "cloud_vision"
+        })
+        .collect();
+    if images.is_empty() && cloud.is_empty() {
         return Value::Null;
     }
-    match rule::project_work(&images) {
-        Ok(p) => {
-            json!({"state":"OBSERVED_IMAGES_ONLY","projection":super::review::project(media,json!(p))})
+    let mut projection = if images.is_empty() {
+        json!({"workRef":cloud[0]["ocrAdoption"]["assessment"]["image"]["workRef"],"sourceRelation":"image_transcription_not_author_claim",
+            "coverTitle":null,"imageText":"","images":[],"fragments":[],"orderIncomplete":false})
+    } else {
+        match rule::project_work(&images) {
+            Ok(p) => json!(p),
+            Err(_) => return json!({"state":"ORDER_OR_IDENTITY_UNRESOLVED","projection":null}),
         }
-        Err(_) => json!({"state":"ORDER_OR_IDENTITY_UNRESOLVED","projection":null}),
+    };
+    let mut ordered = projection["images"].as_array().cloned().unwrap_or_default();
+    for item in &cloud {
+        let a = &item["ocrAdoption"]["assessment"];
+        ordered.push(json!({"imageRef":a["image"]["imageRef"],"ordinal":a["ordinal"],"text":a["imageText"],
+            "pendingBlocks":item["ocrAdoption"]["pendingBlocks"],"segments":[],"humanVerified":false}));
     }
+    ordered.sort_by_key(|image| {
+        (
+            image["ordinal"].as_u64().unwrap_or(u64::MAX),
+            image["imageRef"].to_string(),
+        )
+    });
+    projection["images"] = json!(ordered);
+    projection["orderIncomplete"] = json!(
+        ordered.iter().any(|i| i["ordinal"].is_null())
+            || ordered
+                .windows(2)
+                .any(|p| p[0]["ordinal"].is_number() && p[0]["ordinal"] == p[1]["ordinal"])
+    );
+    // Cloud text is a readable preview, not qualified source fragments. The overlay
+    // rebuilds local fragment offsets without inventing cloud line/character anchors.
+    json!({"state":if cloud.is_empty(){"OBSERVED_IMAGES_ONLY"}else{"MACHINE_PREVIEW_UNVERIFIED"},
+        "projection":super::review::project(media,projection)})
 }

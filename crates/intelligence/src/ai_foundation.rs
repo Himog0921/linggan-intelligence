@@ -51,6 +51,7 @@ pub enum TaskKey {
     WritingLegacy,
     ModelProbe,
     OcrQualityAudit,
+    OcrRecognition,
     CommentStudy,
     CommentEmbedding,
     LegacyCreatorDiscovery,
@@ -68,6 +69,7 @@ impl TaskKey {
             Self::WritingLegacy => "writing_legacy",
             Self::ModelProbe => "model_probe",
             Self::OcrQualityAudit => "ocr_quality_audit",
+            Self::OcrRecognition => "ocr_recognition",
             Self::CommentStudy => "comment_study",
             Self::CommentEmbedding => "comment_embedding",
             Self::LegacyCreatorDiscovery => "legacy_creator_discovery",
@@ -87,3 +89,4 @@ impl TaskKey {
 }
 
 pub mod invocation_read;
+pub mod ocr_recognition;

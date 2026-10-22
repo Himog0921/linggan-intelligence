@@ -144,4 +144,33 @@ describe('AI 设置正式四视图', () => {
     expect(screen.getByText('未知（未定价）')).toBeInTheDocument();
     expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
   });
+  it('OCR 模型复用现有连接，保存不启用运行、不发图', async () => {
+    const base = settingsFixture();
+    const capability = { capabilityRef: 'cap-vision', source: 'manual', sourceVersion: 'synthetic-only', probeInvocationRef: null, contextTokens: 8192, maxOutputTokens: 2048, maxTimeoutSeconds: 60, thinkingLevels: ['off'], compat: {}, thinkingLevelMap: { off: null }, outputMode: 'json_object', strictSchema: false };
+    const model = { ...base.models[0]!, capability };
+    const config = { ...base.tasks[0]!.configuration, taskKey: 'ocr_recognition', executionContract: 'ocr-recognition.v1',
+      model: { modelConfigRef: 'model-config', modelRef: 'old-model-ref', identityRef: 'identity-1', modelId: 'synthetic-model',
+        connectionRef: 'connection-1', connectionVersionRef: 'version-1', capabilityRef: 'cap-vision',
+        limits: { inputTokens: 2048, outputTokens: 512, timeoutSeconds: 30, attempts: 1, thinkingLevel: 'off' } } };
+    const data = { ...base, models: [model, { ...model, identityRef: 'identity-2', selectionModelRef: 'second-model', modelId: 'synthetic-other-vision' }],
+      tasks: [{ ...base.tasks[0]!, taskKey: 'ocr_recognition', label: '图片文字识别', handlerContract: 'ocr-recognition.v1', configuration: config }],
+      controls: base.controls.map(control => control.taskKey ? { ...control, scope: 'task:ocr_recognition', taskKey: 'ocr_recognition', label: '图片文字识别' } : control) };
+    respond = call => call.method === 'GET' ? ok(data) : call.path === '/api/local/ai-settings/task-configs'
+      ? ok({ taskKey: 'ocr_recognition', taskConfigRef: 'next-config', modelConfigRef: 'next-model', revision: 1, applied: true })
+      : { status: 503, body: {} };
+    const user = userEvent.setup(); mount();
+    await user.click(await screen.findByRole('button', { name: /图片文字识别/ }));
+    expect(screen.getByRole('heading', { name: 'OCR 模型' })).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole('combobox', { name: '选择 OCR 模型' }), 'identity-2');
+    for (const [label, value] of [['输入 token 上限', '2048'], ['输出 token 上限', '512'], ['单次等待秒数', '30']]) {
+      await user.clear(screen.getByRole('spinbutton', { name: label })); await user.type(screen.getByRole('spinbutton', { name: label }), value!);
+    }
+    await user.selectOptions(screen.getByRole('combobox', { name: '思考等级' }), 'off');
+    await user.selectOptions(screen.getByRole('combobox', { name: '每日额度' }), 'unlimited');
+    expect(screen.getByRole('spinbutton', { name: '最多尝试次数' })).toHaveValue(1);
+    await user.click(screen.getByRole('button', { name: '保存配置' }));
+    await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toHaveLength(1));
+    expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'ocr_recognition', budget: { mode: 'unlimited' }, model: { modelRef: 'second-model', limits: { attempts: 1 } } } });
+  });
+
 });

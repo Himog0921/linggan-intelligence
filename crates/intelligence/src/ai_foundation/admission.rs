@@ -167,6 +167,22 @@ pub(crate) async fn check_queue_input_scope(
                     "ocr_quality_image"
                 }
             }
+            TaskKey::OcrRecognition => {
+                let InputRef::OcrRecognitionItem { item_ref } = input else {
+                    return Err(FoundationError::Invalid);
+                };
+                let available: bool = sqlx::query_scalar(
+                    "SELECT NOT EXISTS(SELECT 1 FROM linggan_ocr_recognition_item i
+                     WHERE i.item_ref=$1 AND EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d
+                       WHERE d.slot_key=i.slot_key OR d.blob_sha256=i.blob_sha256 OR d.materialization_ref=i.materialization_ref))",
+                ).bind(item_ref).fetch_one(&mut **tx).await?;
+                if !available {
+                    return Err(FoundationError::AdmissionDenied(vec![
+                        "ocr_source_unavailable".into(),
+                    ]));
+                }
+                "manual_ocr_image"
+            }
             TaskKey::NoteInterpretation
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => "note_material",

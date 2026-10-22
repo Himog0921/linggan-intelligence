@@ -80,12 +80,18 @@ pub async fn declare(db: &Database, url: &str) -> Configured {
         attempts: 1,
         thinking_level: "off".into(),
     };
+    let current_writing_revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='writing_legacy'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
     let task = save_task_config(
         db,
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
             task_key: TaskKey::WritingLegacy,
-            expected_revision: 0,
+            expected_revision: current_writing_revision,
             model: Some(ModelSelection {
                 model_ref: model,
                 capability_ref: cap.revision_ref,
@@ -243,12 +249,18 @@ pub async fn prepare_with_actual_probe(
         MaterialClass::SyntheticProbe,
     )
     .await;
+    let current_probe_revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='model_probe'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
     let config = save_task_config(
         db,
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
             task_key: TaskKey::ModelProbe,
-            expected_revision: 0,
+            expected_revision: current_probe_revision,
             model: None,
             skill_version_ref: None,
             material_columns: Default::default(),
