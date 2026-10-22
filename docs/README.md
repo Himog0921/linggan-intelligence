@@ -1,12 +1,5 @@
 # 文档总索引
 
-## 2026-10-22 · COMMENT-WORD-CLOUD-V23（候选）
-
-- [紧凑概览 + 领域词云执行计划](plans/active/comment-wordcloud-v23-20261022.md)：用户批准 V2.3，保留研究与来源边界。
-- [V2.3 UI 与词云 API 变更](design/changes/comment-wordcloud-v23-20261022-ui-change-manifest.md)：单轴上方的黑柱/橙红渐变曲线，真实评论按身份去重词频，来源回查。
-- [V2.3 验收矩阵](design/acceptance/comment-wordcloud-v23-20261022-acceptance.md)：静态/组件、隔离 PG、真实浏览器与未证边界。
-
-
 - [OCR 封面标题选择与异常内容拦截](plans/active/ocr-title-quality-454.md)：#454/#464 的区块采用、局部复核与自有库链路验证；生产默认、共享运行与业务签收仍另列。
 - [OCR 手动图片文字识别：实施与验收](plans/active/ocr-manual-recognition-454.md)：#454 当前候选；图组手动 OCR、真实持久化百分比、检查器结果与 OCR 模型设置，未合并、未部署。
 
@@ -17,6 +10,14 @@
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
+
+## 2026-10-22 · COMMENT-WORD-CLOUD-V23（候选）
+
+- [紧凑概览 + 领域词云执行计划](plans/active/comment-wordcloud-v23-20261022.md)：用户批准 V2.3，保留研究与来源边界。
+- [V2.3 UI 与词云 API 变更](design/changes/comment-wordcloud-v23-20261022-ui-change-manifest.md)：单轴上方的黑柱/橙红渐变曲线，真实评论按身份去重词频，来源回查。
+- [V2.3 验收矩阵](design/acceptance/comment-wordcloud-v23-20261022-acceptance.md)：静态/组件、隔离 PG、真实浏览器与未证边界。
+
+
 
 本页是项目的“总书目”。Agent 不应先通读所有材料，而应从这里逐层进入与当前事项直接相关的文件。
 
