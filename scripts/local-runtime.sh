@@ -377,6 +377,9 @@ migrate() {
   apply_migration_once "0139_ai_gen1_executor" "$project_root/database/migrations/0139_ai_gen1_executor.sql"
   apply_migration_once "0140_ai_gen1_writing" "$project_root/database/migrations/0140_ai_gen1_writing.sql"
   apply_migration_once "0141_ai_gen1_legacy_settings" "$project_root/database/migrations/0141_ai_gen1_legacy_settings.sql"
+  apply_migration_once "0142_ocr_adoption" "$project_root/database/migrations/0142_ocr_adoption.sql"
+  apply_migration_once "0143_ocr_quality_audit" "$project_root/database/migrations/0143_ocr_quality_audit.sql"
+  apply_migration_once "0144_ocr_manual_recognition" "$project_root/database/migrations/0144_ocr_manual_recognition.sql"
 }
 
 case "$command_name" in

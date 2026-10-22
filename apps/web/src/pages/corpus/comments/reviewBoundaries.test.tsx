@@ -1,7 +1,7 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { calls, comment, DOMAIN, installFetch, json, OTHER, policy, renderPage, WORK } from './testKit';
+import { calls, comment, DOMAIN, installFetch, json, OTHER, renderPage, WORK } from './testKit';
 const RUN = '00000000-0000-4000-8000-000000000011', RUN2 = '00000000-0000-4000-8000-000000000012', PROBLEM = '00000000-0000-4000-8000-000000000013';
 const run = (ref = RUN, name = 'SYNTHETIC 方法一') => ({ runRef: ref, state: 'stopped', methodName: name, createdAt: '2026-10-18T01:00:00Z' });
 const detail = (ref = RUN, name = 'SYNTHETIC 方法一') => ({ run: { ...run(ref, name), method: { name }, scope: {}, semanticSummary: null, costSummary: null } });
@@ -22,7 +22,7 @@ describe('D3 review regression boundaries', () => {
   expect(document.querySelector('.v7-side a[href^="/corpus/evidence"]')).toHaveAttribute('href', '/corpus/evidence');
   expect(document.querySelector('.v7-side a[href^="/corpus/creators"]')).toHaveAttribute('href', '/corpus/creators');
   expect(calls.filter(c => c.url.pathname !== '/api/local/ai-settings').map(c => c.url.pathname)).toEqual(['/api/local/corpus/shell']);
-  expect(calls.find(c => c.url.pathname === '/api/local/ai-settings')?.url.searchParams.has('domain')).toBe(false);
+  expect(calls.some(c => c.url.pathname === '/api/local/ai-settings')).toBe(false);
  });
  it('uses the server-resolved domain for corpus navigation', async () => {
   installFetch(url => url.pathname === '/api/local/corpus/shell' ? json({ domains: [{ domainRef: OTHER, name: '合成领域二', status: 'active', targetCount: 0, sampleCount: null }], selectedDomain: OTHER, collectionState: '观察中' }) : undefined);
@@ -39,10 +39,10 @@ describe('D3 review regression boundaries', () => {
   expect(drawer).toHaveAttribute('open');
   expect(calls.filter(c => c.url.pathname.endsWith('/comments/detail')).every(c => c.method === 'GET' && c.url.searchParams.get('workRef') === WORK && c.url.searchParams.get('commentExternalId') === 'c1')).toBe(true);
  });
- it('initial overview reads only shell, overview and the shared AI state, never setup or methods', async () => {
+ it('initial overview reads only shell and overview, never AI settings or historical methods', async () => {
   installFetch(); renderPage(); await screen.findByLabelText('研究累计读数与昨日活动');
   expect(screen.getByRole('link', { name: /采集/ })).toHaveTextContent('观察中');
-  expect([...new Set(calls.map(c => c.url.pathname))].sort()).toEqual(['/api/local/ai-settings', '/api/local/corpus/shell', '/api/local/comment-study/overview'].sort()); expect(calls.every(c => c.method === 'GET')).toBe(true);
+  expect([...new Set(calls.map(c => c.url.pathname))].sort()).toEqual(['/api/local/corpus/shell', '/api/local/comment-study/overview'].sort()); expect(calls.every(c => c.method === 'GET')).toBe(true);
  });
  it('reports shell failure distinctly and offers a working retry', async () => {
   let reads = 0; installFetch(url => url.pathname === '/api/local/corpus/shell' && ++reads === 1 ? json({ error: 'unavailable' }, 503) : undefined); renderPage();
@@ -51,16 +51,16 @@ describe('D3 review regression boundaries', () => {
  });
  it('retains cross-page comment selection and history cursor without a retired execution action', async () => {
   installFetch(url => url.pathname.endsWith('/comments') ? json({ domainRef: DOMAIN, items: [comment(url.searchParams.has('cursor') ? 'c2' : 'c1', true)], summary: { displayableCommentCount: 2, eligibleCommentCount: 2 }, indexCoverage: { indexedCount: 2, pendingCount: 0 }, page: { nextCursor: url.searchParams.has('cursor') ? null : 'page2' } }) : url.pathname.endsWith('/selection-preview') ? json({ targetCount: 2, requestedWorkCount: 1, coveredWorkCount: 1, scopeCommentCount: 2, exclusionCounts: {} }) : undefined);
-  const { router } = renderPage(`domain=${DOMAIN}&view=comments`); await userEvent.click(await screen.findByRole('checkbox', { name: '选择这条评论' })); await userEvent.click(screen.getByRole('button', { name: '下一页' }));
+  const { router } = renderPage(`domain=${DOMAIN}&view=comments`); await userEvent.click(await screen.findByRole('button', { name: '选择评论' })); await userEvent.click(screen.getByRole('checkbox', { name: '选择这条评论' })); await userEvent.click(screen.getByRole('button', { name: '下一页' }));
   await waitFor(() => expect(document.querySelector('input[data-comment-id="c2"]')).not.toBeNull()); await userEvent.click(screen.getByRole('checkbox', { name: '选择这条评论' })); expect(router.state.location.search).toContain('cursor=page2');
   await userEvent.click(screen.getByRole('button', { name: '上一页' })); await waitFor(() => expect(document.querySelector('input[data-comment-id="c1"]')).not.toBeNull()); expect(screen.getByRole('checkbox', { name: '选择这条评论' })).toBeChecked();
   await act(() => router.navigate(-1)); await waitFor(() => expect(document.querySelector('input[data-comment-id="c2"]')).not.toBeNull()); expect(screen.getByRole('checkbox', { name: '选择这条评论' })).toBeChecked();
   expect(screen.queryByRole('button', { name: '研究所选评论' })).not.toBeInTheDocument();
   expect(calls.every(c => c.method === 'GET')).toBe(true);
  });
- it('the overview unfiled-expression link opens all unmerged clues', async () => {
+ it('the overview new-expression metric opens matching unfiled clues', async () => {
   installFetch(url => url.pathname.endsWith('/problem-candidates') ? json({ expressions: [], page: { nextCursor: null } }) : undefined); const { router } = renderPage(); await screen.findByLabelText('研究累计读数与昨日活动');
-  await userEvent.click(screen.getByRole('button', { name: '查看未建档表达' })); await waitFor(() => expect(calls.some(c => c.url.pathname.endsWith('/problem-candidates'))).toBe(true)); expect(router.state.location.search).toContain('state=clues'); expect(screen.getByRole('button', { name: '未归并线索' })).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.click(screen.getByRole('button', { name: /新表达待建档/ })); await waitFor(() => expect(calls.some(c => c.url.pathname.endsWith('/problem-candidates'))).toBe(true)); expect(router.state.location.search).toContain('state=clues'); expect(screen.getByRole('button', { name: '未归并线索' })).toHaveAttribute('aria-pressed', 'true');
  });
  it('a newly restricted detail also hides its stale list title, definition and quote', async () => {
   installFetch(url => url.pathname.endsWith('/problem-cards') ? json({ contract: 'comment-study.problem-cards.v1', domainRef: DOMAIN, problems: [problem()], totalCount: 1, page: { nextCursor: null } }) : url.pathname.endsWith('/problems/' + PROBLEM) ? json({ problem: problem(false), revisionHistory: [], sourceDistribution: null }) : url.pathname.endsWith('/evidence') ? json({ problemRef: PROBLEM, evidence: [], page: { nextCursor: null } }) : undefined);
@@ -100,47 +100,42 @@ describe('D3 review regression boundaries', () => {
   const finish=new Map<string,(value:Response)=>void>();installFetch(url=>url.pathname.endsWith('/works')?new Promise<Response>(resolve=>{finish.set(url.searchParams.get('q')||'',resolve);}):undefined);renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
   await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));
   const input=screen.getByRole('searchbox',{name:'所属作品'});await userEvent.type(input,'older');await userEvent.click(screen.getByRole('button',{name:'查找作品'}));await userEvent.clear(input);await userEvent.type(input,'newer');await userEvent.click(screen.getByRole('button',{name:'查找作品'}));
-  await act(async()=>{finish.get('older')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 旧搜索'}],page:{nextCursor:null}}));await Promise.resolve();});expect(screen.queryByRole('option',{name:'SYNTHETIC 旧搜索'})).not.toBeInTheDocument();
-  await act(async()=>{finish.get('newer')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 新搜索'}],page:{nextCursor:null}}));});expect(await screen.findByRole('option',{name:'SYNTHETIC 新搜索'})).toBeInTheDocument();
+  await act(async()=>{finish.get('older')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 旧搜索'}],page:{nextCursor:null}}));await Promise.resolve();});
+  await act(async()=>{finish.get('newer')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 新搜索'}],page:{nextCursor:null}}));});
+  await userEvent.click(screen.getByRole('combobox',{name:'已匹配作品'}));
+  expect(await screen.findByRole('option',{name:'SYNTHETIC 新搜索'})).toBeInTheDocument();
+  expect(screen.queryByRole('option',{name:'SYNTHETIC 旧搜索'})).not.toBeInTheDocument();
  });
  it('a work lookup cannot restore an old filter after the comment route changes',async()=>{
   let finish:(value:Response)=>void=()=>{};installFetch(url=>url.pathname.endsWith('/works')?new Promise<Response>(resolve=>{finish=resolve;}):undefined);const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.click(screen.getByRole('button',{name:'查找作品'}));await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'new-filter');await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));await waitFor(()=>expect(router.state.location.search).toContain('q=new-filter'));
   await act(async()=>{finish(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 过期搜索'}],page:{nextCursor:null}}));await Promise.resolve();});expect(router.state.location.search).toContain('q=new-filter');expect(screen.queryByRole('option',{name:'SYNTHETIC 过期搜索'})).not.toBeInTheDocument();
  });
 
- it('loads all historical method pages and compares fixed snapshots without activating or editing them', async () => {
-  const older = '00000000-0000-4000-8000-000000000014';
-  installFetch(url => url.pathname.endsWith('/policies')
-   ? json({ domainRef: DOMAIN, items: url.searchParams.has('cursor') ? [{ ...policy(older), methodName: '合成旧方法', isActive: false }] : [policy()], page: { hasMore: !url.searchParams.has('cursor'), nextCursor: url.searchParams.has('cursor') ? null : 'older-page' } })
-   : url.pathname.endsWith('/policies/' + older) ? json({ domainRef: DOMAIN, policy: { ...policy(older), methodName: '合成旧方法' } }) : undefined);
-  renderPage(); await screen.findByLabelText('研究累计读数与昨日活动');
+ it('keeps frozen method history in the run detail instead of global page chrome', async () => {
+  installFetch(runReply); renderPage(); await screen.findByLabelText('研究累计读数与昨日活动');
+  expect(screen.queryByText('查看历史方法版本')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '研究批次' }));
+  await userEvent.click(await screen.findByRole('tab', { name: '本次方法' }));
+  expect(await screen.findByText(/不会用当前默认方法补写这次运行/)).toBeInTheDocument();
   expect(calls.some(c => c.url.pathname.endsWith('/policies'))).toBe(false);
-  await userEvent.click(screen.getByText('查看历史方法版本'));
-  const current = await screen.findByRole('combobox', { name: '历史方法版本' });
-  expect(within(current).getAllByRole('option')).toHaveLength(2);
-  expect(calls.filter(c => c.url.pathname.endsWith('/policies')).map(c => c.url.searchParams.get('cursor'))).toEqual([null, 'older-page']);
-  await userEvent.selectOptions(screen.getByRole('combobox', { name: '并排对比其他历史版本' }), older);
-  expect(await screen.findByRole('heading', { name: '合成旧方法' })).toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: /默认方法|保存方法|编辑/ })).not.toBeInTheDocument();
   expect(calls.every(c => c.method === 'GET')).toBe(true);
  });
  it('a failed background shell refresh preserves the current comment filter and selection without a write', async () => {
   let shellReads = 0;
   installFetch(url => url.pathname === '/api/local/corpus/shell' && ++shellReads > 1 ? json({ error: 'unavailable' }, 503) : undefined);
   const { queryClient } = renderPage(`domain=${DOMAIN}&view=comments&q=kept`);
-  await screen.findByRole('table'); await userEvent.click(screen.getAllByRole('checkbox', { name: '选择这条评论' })[0]!);
+  await screen.findByRole('table'); await userEvent.click(screen.getByRole('button', { name: '选择评论' })); await userEvent.click(screen.getAllByRole('checkbox', { name: '选择这条评论' })[0]!);
   await act(async () => { await queryClient.refetchQueries({ queryKey: ['corpus-shell', DOMAIN] }); });
   await screen.findByText(/领域信息刷新失败/);
   expect(screen.getByRole('searchbox', { name: '字面搜索' })).toHaveValue('kept');
   expect(screen.getAllByRole('checkbox', { name: '选择这条评论' })[0]).toBeChecked();
   expect(calls.every(c => c.method === 'GET')).toBe(true);
  });
- it('historical method defaults remain unknown when missing instead of becoming zero or NaN', async () => {
-  installFetch(url => url.pathname.includes('/policies/') ? json({ domainRef: DOMAIN, policy: { ...policy(), defaults: null } }) : undefined);
-  renderPage(); await screen.findByLabelText('研究累计读数与昨日活动');
-  await userEvent.click(screen.getByText('查看历史方法版本'));
-  expect(await screen.findByText(/默认评论上限 — 条；语境上限 — 字符/)).toBeInTheDocument();
-  expect(screen.queryByText(/NaN|默认评论上限 0/)).not.toBeInTheDocument();
+ it('never invents missing frozen limits in run details', async () => {
+  installFetch(runReply); renderPage(`domain=${DOMAIN}&view=runs`);
+  await userEvent.click(await screen.findByRole('tab', { name: '本次方法' }));
+  expect(await screen.findByText(/本次冻结上限：评论 未记录 条/)).toBeInTheDocument();
+  expect(screen.queryByText(/默认评论上限 0/)).not.toBeInTheDocument();
  });
 
 });

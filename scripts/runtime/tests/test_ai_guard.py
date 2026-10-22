@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import subprocess
 import sys
 import unittest
@@ -15,6 +16,20 @@ import ai_guard as guard
 
 SOURCE = "a" * 40
 TARGET = "b" * 40
+
+
+class MigrationRegistry(unittest.TestCase):
+    def test_every_migration_has_one_matching_runtime_registration(self):
+        root = Path(__file__).resolve().parents[3]
+        source = (root / "scripts/local-runtime.sh").read_text()
+        registrations = re.findall(
+            r'apply_migration_once "([^"]+)" "\$project_root/database/migrations/([^"]+)"',
+            source,
+        )
+        expected = {path.name for path in (root / "database/migrations").glob("*.sql")}
+        self.assertEqual(expected, {name for _, name in registrations})
+        self.assertEqual(len(expected), len(registrations))
+        self.assertTrue(all(key == Path(name).stem for key, name in registrations))
 
 
 def example():

@@ -149,12 +149,9 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
       </td>
       <td>
         <div className={styles.cell}>
-          <button type="button" className={`${styles.link} ${styles.ellipsis}`} title={valueLabel(focus.value)} onClick={() => onOpen(item.creatorKey)}>
+          <button type="button" className={`${styles.link} ${styles.ellipsis}`} title={`${valueLabel(focus.value)} · ${state.text}`} onClick={() => onOpen(item.creatorKey)}>
             {valueLabel(focus.value)}
           </button>
-          <span className={`${styles.secondary} ${styles.analysis}`} data-kind={state.kind} title={state.text}>
-            {state.text}
-          </span>
         </div>
       </td>
       <td>
@@ -187,15 +184,12 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
             <a className={styles.secondary} href={scopeWorkLink(link, item.creatorKey, 'unknown')} data-return-key={item.creatorKey}>
               待判断 {formatCount(item.unknownRelevanceWorkCount)}
             </a>
-          ) : (
-            <span className={styles.secondary}>篇相关作品</span>
-          )}
+          ) : null}
         </div>
       </td>
       <td className={styles.number}>
         <div className={styles.cell}>
-          <Metric value={likes} className={styles.metric} />
-          <span className={styles.secondary}>{high ? '当前命中作品' : '已判相关作品'}</span>
+          <span title={high ? '当前命中作品的点赞表现' : '已判相关作品的点赞表现'}><Metric value={likes} className={styles.metric} /></span>
         </div>
       </td>
       <td>

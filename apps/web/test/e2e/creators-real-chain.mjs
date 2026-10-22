@@ -285,7 +285,7 @@ try {
   });
 
   await step('真实写入：发现设置（点赞标准，带设置版本号）→ 爆款作者数变化', async () => {
-    await page.getByRole('button', { name: '发现设置' }).click();
+    await page.getByRole('button', { name: '判定标准' }).click();
     const dialog = page.getByRole('dialog', { name: '发现设置' });
     await dialog.waitFor();
     await dialog.getByRole('link', { name: '去 AI 设置' }).waitFor();
@@ -300,7 +300,7 @@ try {
     // 合成作者 03 的相关作品有 300 个赞 ≥ 100，且尚未加入观察。
     await page.getByRole('button', { name: '未观察的爆款作者 1' }).waitFor();
     // 第二次打开带着新的设置版本号。
-    await page.getByRole('button', { name: '发现设置' }).click();
+    await page.getByRole('button', { name: '判定标准' }).click();
     const again = page.getByRole('dialog', { name: '发现设置' });
     await again.waitFor();
     assert.equal(await again.getByRole('spinbutton', { name: /最低点赞/ }).inputValue(), '100');

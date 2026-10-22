@@ -59,12 +59,12 @@ describe('创作者页 · 列表', () => {
     expect(cells[0]).toHaveTextContent('粉丝 2,001');
     expect(cells[1]).toHaveTextContent('任务启动 · 晚间练习');
     expect(cells[2]).toHaveTextContent('本领域持续创作');
-    expect(cells[2]).toHaveTextContent('已有分析结果');
+    expect(within(cells[2]!).getByRole('button')).toHaveAttribute('title', expect.stringContaining('已有分析结果'));
     expect(cells[3]).toHaveTextContent('亲历自述');
     expect(cells[4]).toHaveTextContent('3');
     expect(cells[4]).toHaveTextContent('待判断 2');
     expect(cells[5]).toHaveTextContent('1,500');
-    expect(cells[5]).toHaveTextContent('已判相关作品');
+    expect(cells[5]).not.toHaveTextContent('已判相关作品');
     expect(cells[6]).toHaveTextContent('合成作品 11');
     expect(cells[6]).toHaveTextContent('已判相关 · 赞 1,211');
     expect(cells[7]).toHaveTextContent('未加入观察');
@@ -105,17 +105,18 @@ describe('创作者页 · 列表', () => {
       ),
     );
     await loaded();
-    expect(rowFor('合成作者 1')).toHaveTextContent('历史排队记录 · 已停用，不再执行');
-    expect(rowFor('合成作者 2')).toHaveTextContent('历史分析失败 · 本日额度已用尽');
-    expect(rowFor('合成作者 3')).toHaveTextContent('已分析，依据不足');
-    expect(rowFor('合成作者 4')).toHaveTextContent('尚无分析结果 · 旧自动分析已停用');
+    expect(within(rowFor('合成作者 1')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('历史排队记录 · 已停用，不再执行'));
+    expect(within(rowFor('合成作者 2')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('历史分析失败 · 本日额度已用尽'));
+    expect(within(rowFor('合成作者 3')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('已分析，依据不足'));
+    expect(within(rowFor('合成作者 4')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('尚无分析结果 · 旧自动分析已停用'));
   });
 
   it.each([true, false])('历史开关 %s 不改变退役展示，摘要、材料范围和筛选提示一致', async analysisEnabled => {
     defaultRoutes(kit, ok(listJson({ analysisEnabled, items: [itemJson(1, { authorState: null, authorResult: false, focusValue: 'unknown' })] })));
     const { user } = await loaded(`/corpus/creators?domain=${DOMAIN}&focus=unknown`);
-    expect(rowFor('合成作者 1')).toHaveTextContent('尚无分析结果 · 旧自动分析已停用');
-    expect(screen.getByRole('button', { name: '发现设置' })).toHaveTextContent('旧自动分析已停用');
+    expect(within(rowFor('合成作者 1')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('尚无分析结果 · 旧自动分析已停用'));
+    expect(screen.getByRole('button', { name: '判定标准' })).toBeInTheDocument();
+    expect(screen.queryByText('旧自动分析已停用')).not.toBeInTheDocument();
     expect(screen.getByText('仅检索已有判断；旧自动分析已停用。')).toBeInTheDocument();
     expect(screen.queryByText(/自动分析已开启|自动分析未开启/)).toBeNull();
     await user.click(screen.getByRole('button', { name: '材料范围' }));
@@ -560,7 +561,7 @@ describe('创作者页 · 搜索、排序、分页', () => {
     expect(screen.getByRole('button', { name: '命中相关' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '命中最高赞' })).toBeInTheDocument();
     expect(rowFor('合成作者 1')).toHaveTextContent('范围内 3');
-    expect(rowFor('合成作者 1')).toHaveTextContent('当前命中作品');
+    expect(rowFor('合成作者 1').querySelector('[title="当前命中作品的点赞表现"]')).not.toBeNull();
   });
 
   it('分页：翻页写进地址，请求的页码从 0 起；改每页数量回到第一页', async () => {

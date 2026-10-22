@@ -1,12 +1,20 @@
 # PAGE-CORPUS-CREATORS-V1-001 · 创作者（语料）
 
 > 状态: 权威当前
-> 最后核对: 2026-10-20
+> 最后核对: 2026-10-22
 > 适用范围: `/corpus/creators`：在当前领域内浏览作者、查看判断依据、调整单项判断、加入观察名单；以及语料三页共用的 React 外壳（左侧二级导航、面包屑领域选择器、一级导航「采集」状态词）
 > 事实来源: 真实代码（`apps/web/src/pages/corpus/creators/`、`apps/web/src/corpus/`、`apps/api/src/local_web/creators.rs`、`apps/api/src/local_web/corpus_shell_api.rs`、`crates/evidence/src/creator_discovery.rs`）；[CREATOR-DISCOVERY-001](../../plans/active/creator-discovery-001.md) 的产品范围；[WEB-REACT-001 阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §3.1 能力清单（逐项记录旧页能力与 React 落点）；PR #384（未合并）的只读调查结论
 > 冲突时以谁为准: Mog 最新确认、真实运行/代码/数据合同、DEC-0010；能力清单与本规格冲突时以代码和能力清单为准，并回改本文
 > 页面层级与模式: L1；`LIDS-PAT-001` 的 Corpus Explorer（读数条、筛选、连续表格、分页），依据抽屉为右侧受限的 Split Evidence Inspector；不新造页面骨架
 > 当前实现证据: D1历史实现见[原验收](../acceptance/web-react-001-d1-acceptance.md)；当前LIDS-UI-001/B续修为本地真实React候选，见[本轮验收](../acceptance/lids-ui-implementation-001-acceptance.md)，未合并部署，Mog待验收
+
+## 2026-10-22 · 创作者列表信息密度与统一控件收口（最新确认）
+
+替代 2026-10-21“列表始终常驻旧 AI 退役状态”的展示做法：创作者的高频工作区不再展示退役提示与“AI 设置”说明；用户仍可在材料范围、已有分析详情和统一设置中查看旧链路不可用的真实含义，绝不将历史排队显示成正在执行。低频的“判定标准”入口并入紧凑结果条，仍打开现有政策/阈值对话框，不暗示启动自动分析。
+
+FIND、排序、筛选和刷新在宽屏同带，已有快捷观察视图单带，结果与材料范围小字紧凑披露；沿用共享 ActionButton/CreatorSelect（SelectField 薄适配）。八列表格继续保持 80px 行容量、固定头/首列/观察操作、局部横向滚动和右侧依据抽屉。删除行内重复的分析状态小字与“已判相关作品”等冗余说明，详细状态保存为可访问的 title/抽屉依据；原业务判断、门槛、时间、数值与可执行动作不变。文字统一截断，数据列按 Manrope 数字对齐，单元格垂直居中。
+
+本次没有重写列表 API、修改作者资格、改数据库、迁移工位或开放 AI 开关；支持“加入观察”确认、人工调整、筛选和返回位置的既有回执。PR、CI、部署与视觉签收各自独立记录。
 
 ## 2026-10-21 · 旧 AI 退役状态展示修正
 
