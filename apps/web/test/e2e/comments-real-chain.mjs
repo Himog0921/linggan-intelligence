@@ -56,11 +56,14 @@ try {
    await page.locator('[data-post-usage="unmark"]').first().click();await page.locator('[data-post-usage="unmark"]').waitFor({state:'hidden'});
   });
   await step('Cross-view comment selection and all four historical views never create old research',async()=>{
+   await button('选择评论').click();
+   await page.locator('[data-select-comment][data-eligible="true"]').first().waitFor();
    await page.locator('[data-select-comment][data-eligible="true"]').first().check();
    for(const name of ['概览','研究批次','用户问题','用户评论']){await button(name).click();assert.equal(await button('发起研究').count(),0);}
    await page.locator('[data-select-comment][data-eligible="true"]').first().waitFor();
    assert.equal(await page.locator('[data-select-comment][data-eligible="true"]').first().isChecked(),true);
    assert.ok(report.writes.every(write=>write.path.endsWith('/comments/post-usage')));
+   await button('完成选择').click();
   });
  }else{
   const run=v['e2e-run-ref'],problem=v['e2e-problem-ref'];
