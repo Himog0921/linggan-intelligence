@@ -212,12 +212,6 @@
   font-size: var(--lgi-text-body);
 }
 
-.workCell .check {
-  position: static;
-  display: inline-flex;
-  margin-top: var(--lgi-space-1);
-}
-
 .cell {
   color: var(--lgi-muted);
   font: var(--lgi-text-data) / var(--lgi-lh-body) var(--lgi-font-sans);
