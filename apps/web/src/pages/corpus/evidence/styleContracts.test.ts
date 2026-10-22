@@ -68,6 +68,28 @@ describe('样式契约', () => {
     expect(list).toMatch(/@media \(max-width: 420px\)\s*\{\s*\.list\[data-layout='cover'\] \.items\s*\{\s*grid-template-columns:\s*1fr/);
   });
 
+  it('V2.3 标题按钮高度不再继承 44px 通用按钮高度，文字以 16px 单行排布', () => {
+    const list = styles.get('WorkList.module.css') ?? '';
+    const title = list.match(/\.list\[data-layout='research'\] \.titleButton\s*\{([^}]+)\}/)?.[1] ?? '';
+    expect(title).toMatch(/min-height:\s*0/);
+    expect(title).toMatch(/height:\s*calc\(var\(--lgi-space-5\) \+ var\(--lgi-focus-inset\)\)/);
+    expect(list).toMatch(/\.list\[data-layout='research'\] \.title\s*\{[^}]*--lgi-type-reading-size/);
+  });
+
+  it('V2.3 选择框定位统一且不会与原表格序号选择器冲突', () => {
+    const list = styles.get('WorkList.module.css') ?? '';
+    const check = list.match(/\.check\s*\{([^}]+)\}/)?.[1] ?? '';
+    expect(check).toMatch(/top:\s*auto/);
+    expect(check).toMatch(/right:\s*auto/);
+    expect(list).toMatch(/\.list\[data-layout='research'\] \.article > \[data-evidence-check\]\s*\{[^}]*top:\s*50%/);
+    expect(list).toMatch(/\.list\[data-layout='table'\] \.tableRow td\.checkCell\s*\{[^}]*vertical-align:\s*middle/);
+    expect(list).not.toMatch(/\.tableRow td:nth-child\(4\)/);
+    expect(list).not.toMatch(/\.table th:nth-child\(/);
+    expect(list).toMatch(/\.list\[data-layout='table'\] \.materialCell\s*\{[^}]*display:\s*flex/);
+    const cover = styles.get('CoverCard.module.css') ?? '';
+    expect(cover).toMatch(/\.pickCorner\s*\{[^}]*place-items:\s*center/);
+  });
+
   it('关闭检查器是让这一栏塌缩，不是隐藏元素：栏宽是一个变量，三档加关闭', () => {
     const page = styles.get('EvidencePage.module.css') ?? '';
     expect(page).toMatch(/--ev-inspector-w/);
