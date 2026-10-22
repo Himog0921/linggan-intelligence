@@ -8,9 +8,11 @@
 
 本清单应放在 Issue 正文、实施计划或 PR 描述中；不要为每次变更在 docs/design/ 下创建新的零散 Markdown。它是实施前的最小“依据与影响回执”。
 
+本表用于复杂 UI 工作包。局部展示/文案修正可用简短摘要引用既有规格，省略不适用栏目；执行分级与审阅以[协作协议](../../governance/agent-collaboration.md)为准。
+
 ## 1. 事项
 
-- Issue / SCOPE：
+- 工作包 / SCOPE（Issue 如适用）：
 - Agent 与 worktree：
 - 目标：
 - 用户可见结果：
@@ -20,7 +22,7 @@
 
 | 来源 | 状态 | 本次解决的问题 | 已核对 |
 |---|---|---|---|
-| AGENTS.md / current-state | 待填写 | 待填写 | 待填写 |
+| AGENTS.md；current-state 仅运行/发布/跨包核对适用 | 待填写 | 待填写 | 待填写 |
 | UI execution contract | 待填写 | 待填写 | 待填写 |
 | 产品页面文档 | 待填写 | 待填写 | 待填写 |
 | 设计规则/页面/组件规格 | 待填写 | 待填写 | 待填写 |

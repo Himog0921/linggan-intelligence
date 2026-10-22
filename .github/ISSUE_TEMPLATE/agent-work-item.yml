@@ -1,5 +1,5 @@
 name: Agent work item
-description: Create a centrally assigned, evidence-bounded work item for one execution Agent.
+description: Track a protected or multi-stage work package; ordinary fast-lane changes can use the PR summary.
 title: "[WORK] "
 labels:
   - needs-triage
@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        This form creates a work request, not a Claim, completion report, or implementation authority. At request time, provide authority, goal/scope, dependencies, proposed file boundaries, acceptance, validation plan, stop/escalation, and completion requirements. A coordinator must manually verify every required field before assignment and `ready-for-agent`; GitHub `required` metadata is only a form hint in this private repository and is not the enforcement gate.
+        Use docs/governance/agent-collaboration.md to choose the delivery lane. This optional tracking form records an existing authorization; it does not replace it or grant external permissions. Fast-lane work may use only the PR summary. The package coordinator checks scope, dependencies and evidence before marking ready-for-agent. Required fields are form hints, not a CI or authorization gate.
 
   - type: textarea
     id: scope_authority
@@ -43,7 +43,7 @@ body:
     id: file_ownership
     attributes:
       label: Proposed exclusive, shared, and forbidden files
-      description: Give explicit paths or bounded globs. The coordinator confirms ownership before assignment; the later Claim records the assigned Agent, exact base/branch/worktree, start time, and final ownership. Everything outside the allowed set remains forbidden.
+      description: Give bounded paths and ownership. The coordinator records necessary direct dependencies before editing, resolves package-internal integration, and escalates cross-package conflicts or new product/permission scope under the collaboration protocol.
       placeholder: |
         Proposed exclusive files:
         Proposed shared files:
@@ -76,7 +76,7 @@ body:
     id: stop_and_escalation
     attributes:
       label: Stop and escalation conditions
-      description: State when the Agent must stop instead of guessing, expanding scope, resolving conflicts, or performing destructive/external actions.
+      description: State unresolved product choices, cross-package authority conflicts, and unapproved data/permission/external effects. Routine package-internal implementation and conflict repair follow the collaboration protocol.
       placeholder: "Stop when ...; escalate to ..."
     validations:
       required: true

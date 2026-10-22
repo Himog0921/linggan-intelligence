@@ -1,35 +1,8 @@
 name: OCR adoption (local contracts and persistence)
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - '.github/workflows/ocr-adoption.yml'
-      - 'crates/evidence/src/ocr_adoption.rs'
-      - 'crates/evidence/src/ocr_adoption/**'
-      - 'crates/evidence/src/ocr_adoption_persistence.rs'
-      - 'crates/evidence/src/ocr_adoption_persistence/**'
-      - 'crates/evidence/src/material_processing.rs'
-      - 'crates/evidence/src/material_media_read.rs'
-      - 'crates/evidence/src/material_evidence_fragment.rs'
-      - 'crates/evidence/src/research_dossier.rs'
-      - 'apps/worker/src/bin/media_worker.rs'
-      - 'apps/worker/src/bin/media_worker_support/**'
-      - 'apps/worker/tests/ocr_vl_postgres.rs'
-      - 'database/migrations/0142_ocr_adoption.sql'
-      - 'scripts/test-ocr-adoption-postgres.sh'
-      - 'crates/evidence/src/ocr_layering.rs'
-      - 'crates/evidence/src/lib.rs'
-      - 'crates/evidence/examples/ocr_adoption_replay.rs'
-      - 'crates/evidence/tests/ocr_adoption.rs'
-      - 'crates/evidence/tests/ocr_adoption/**'
-      - 'crates/evidence/Cargo.toml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
+  workflow_call:
 permissions:
   contents: read
-concurrency:
-  group: ocr-adoption-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
 jobs:
   synthetic-ocr-contracts:
     runs-on: ubuntu-24.04
@@ -68,8 +41,6 @@ jobs:
           test "$result" -eq 2
           test ! -s /tmp/ocr-out
           test "$(cat /tmp/ocr-err)" = ocr_adoption_replay_failed
-      - name: Formatting, governance and diff
+      - name: OCR source formatting
         run: |
           rustfmt --check --edition 2024 --config skip_children=true crates/evidence/src/ocr_adoption.rs crates/evidence/src/ocr_adoption/*.rs crates/evidence/tests/ocr_adoption.rs crates/evidence/tests/ocr_adoption/*.rs crates/evidence/examples/ocr_adoption_replay.rs crates/evidence/src/ocr_adoption_persistence.rs crates/evidence/src/ocr_adoption_persistence/*.rs apps/worker/src/bin/media_worker_support/ocr_vl.rs apps/worker/tests/ocr_vl_postgres.rs
-          bash scripts/check-project-governance.sh origin/main
-          git diff --check

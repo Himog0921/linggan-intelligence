@@ -34,16 +34,11 @@ docs/decisions/
 当前任务直接相关的计划、架构、合同、代码与测试
 ```
 
-## 开始探索前的固定读取顺序
+## 按任务读取
 
-任何工程技能开始处理 Linggan Intelligence 前，至少读取：
+先读 `AGENTS.md`，再按任务选择：涉及领域概念/命名读 `docs/context/domain-language.md`；涉及业务行为/数据/权限读[安全与领域约束](safety-invariants.md)；涉及领域边界或 Claim 资格读 `docs/product/domain-invariants.md`。只加载相关决定、合同与计划。
 
-1. `AGENTS.md`；
-2. `docs/README.md`；
-3. `docs/current-state.md`；
-4. `docs/context/domain-language.md`；
-5. 当前任务直接相关的 `docs/decisions/`、计划、架构或产品文档；
-6. 如果任务涉及领域边界或 Claim 资格，再读取 `docs/product/domain-invariants.md`。
+`docs/README.md` 是查找入口；`docs/current-state.md` 仅在核对运行、发布或跨包依赖时读取。上方文档布局表示职责，不是每次必须串行通读的清单。
 
 不要无差别加载全部文档。只有任务需要校验历史来源、旧系统、producer 或插件事实时，才进入 `references/`，并先读取 `references/README.md` 和对应来源说明。
 
@@ -86,12 +81,12 @@ Agent 在 Issue、SCOPE、实施计划、Rust 类型/函数/模块、数据库�
 
 ## 更新责任
 
-领域文档发生变化时，必须同步：
+领域文档发生变化时，按[协作协议](../governance/agent-collaboration.md)同步发生变化的事实：
 
 1. 权威领域或决策文件；
 2. 直接受影响的产品、架构、合同或 SCOPE；
-3. `docs/README.md` 中的状态或索引；
-4. `docs/progress/YYYY-MM.md`；
+3. 新增、移动或状态变化时更新 `docs/README.md` 对应条目；
+4. 重要领域决定记入月度 progress，普通修正留在 PR 回执；
 5. 必要时更新 `docs/current-state.md`；
 6. 运行 `./scripts/check-project-governance.sh`。
 

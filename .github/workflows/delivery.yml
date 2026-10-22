@@ -1,0 +1,93 @@
+name: Delivery
+
+# One PR entrypoint. Drafts retain the same selected proofs in this first rollout;
+# no successful preflight is advertised as a substitute for final verification.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+
+concurrency:
+  # Body/title edits must neither cancel in-flight proof nor replace its gate.
+  # A base retarget is an edited event too, and DOES require fresh verification.
+  group: ${{ github.event.action == 'edited' && !github.event.changes.base && format('delivery-metadata-{0}', github.run_id) || format('delivery-{0}', github.event.pull_request.number) }}
+  cancel-in-progress: true
+
+jobs:
+  preflight:
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'Metadata edit (no preflight)' || 'Preflight' }}
+    if: github.event.action != 'edited' || github.event.changes.base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      ai: ${{ steps.route.outputs.ai }}
+      ocr_adoption: ${{ steps.route.outputs.ocr_adoption }}
+      ocr_audit: ${{ steps.route.outputs.ocr_audit }}
+      web: ${{ steps.route.outputs.web }}
+      topic: ${{ steps.route.outputs.topic }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+      - name: Governance, whitespace and lightweight checks
+        env:
+          DELIVERY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: bash scripts/ci-preflight.sh "$DELIVERY_BASE_SHA"
+      - name: Select affected proofs
+        id: route
+        env:
+          DELIVERY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/ci-select.mjs "$DELIVERY_BASE_SHA"
+
+  ai:
+    needs: preflight
+    if: needs.preflight.outputs.ai == 'true'
+    uses: ./.github/workflows/ai-gen1-foundation.yml
+  ocr-adoption:
+    needs: preflight
+    if: needs.preflight.outputs.ocr_adoption == 'true'
+    uses: ./.github/workflows/ocr-adoption.yml
+  ocr-audit:
+    needs: preflight
+    if: needs.preflight.outputs.ocr_audit == 'true'
+    uses: ./.github/workflows/ocr-quality-audit.yml
+  web:
+    needs: preflight
+    if: needs.preflight.outputs.web == 'true'
+    uses: ./.github/workflows/web-app.yml
+  topic:
+    needs: preflight
+    if: needs.preflight.outputs.topic == 'true'
+    uses: ./.github/workflows/topic-map-compact-ui.yml
+
+  gate:
+    # A skipped check is considered passing by GitHub; give metadata-only runs a
+    # different name so they cannot overwrite the required Delivery gate result.
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'Metadata edit (no validation)' || 'Delivery gate' }}
+    needs: [preflight, ai, ocr-adoption, ocr-audit, web, topic]
+    if: always() && (github.event.action != 'edited' || github.event.changes.base)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every selected proof to succeed
+        env:
+          DELIVERY_NEEDS: ${{ toJSON(needs) }}
+        run: |
+          node --input-type=module <<'JS'
+          const needs = JSON.parse(process.env.DELIVERY_NEEDS);
+          if (needs.preflight.result !== 'success') throw new Error('Preflight did not succeed');
+          for (const [job, output] of Object.entries({ ai: 'ai', 'ocr-adoption': 'ocr_adoption', 'ocr-audit': 'ocr_audit', web: 'web', topic: 'topic' })) {
+            const selected = needs.preflight.outputs[output];
+            if (!['true', 'false'].includes(selected)) throw new Error(`Missing route for ${job}`);
+            const expected = selected === 'true' ? 'success' : 'skipped';
+            if (needs[job].result !== expected) throw new Error(`${job}: expected ${expected}, received ${needs[job].result}`);
+          }
+          console.log('Preflight and all selected synthetic proofs succeeded. This does not attest deployment or business acceptance.');
+          JS

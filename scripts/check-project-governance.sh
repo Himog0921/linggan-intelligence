@@ -36,44 +36,9 @@ while IFS= read -r path; do
   esac
 done < <(find . -maxdepth 1 -type f -name '*.md' -print | sort)
 
-allowed_status='权威当前|代码事实优先|活跃计划|已完成计划|一次性报告|历史归档|草案'
-
-while IFS= read -r path; do
-  relative="${path#docs/}"
-
-  if [[ "$path" != "docs/README.md" ]] && ! grep -Fq "]($relative)" docs/README.md; then
-    report_error "document is not indexed in docs/README.md: $path"
-  fi
-
-  header="$(sed -n '1,12p' "$path")"
-  for field in '状态:' '最后核对:' '适用范围:' '事实来源:' '冲突时以谁为准:'; do
-    if ! grep -Fq "> $field" <<<"$header"; then
-      report_error "missing status header field '$field' in $path"
-    fi
-  done
-
-  if ! grep -Eq "^> 状态: ($allowed_status)(  )?$" <<<"$header"; then
-    report_error "invalid document status in $path"
-  fi
-
-  case "$path" in
-    docs/plans/active/*.md)
-      if ! grep -Eq '^> 状态: 活跃计划(  )?$' <<<"$header"; then
-        report_error "active plan must use status 活跃计划: $path"
-      fi
-      ;;
-    docs/plans/completed/*.md)
-      if ! grep -Eq '^> 状态: 已完成计划(  )?$' <<<"$header"; then
-        report_error "completed plan must use status 已完成计划: $path"
-      fi
-      ;;
-  esac
-
-  base_name="$(basename "$path")"
-  if [[ "$base_name" =~ (最新版|最终版|final-final|copy|temp|draft[0-9]+) ]]; then
-    report_error "unstable lifecycle name: $path"
-  fi
-done < <(find docs -type f -name '*.md' -print | sort)
+if ! node scripts/check-document-governance.mjs; then
+  report_error "document governance failed"
+fi
 
 while IFS= read -r path; do
   report_error "tracked generated/private artifact is forbidden: $path"
@@ -82,28 +47,6 @@ done < <(
     grep -Ev '^references/' |
     grep -E '(^|/)(\.DS_Store|target/|dist/|build/|coverage/|tmp/|temp/|artifacts/private/|database/backups/|database/restores/)' || true
 )
-
-link_files=(README.md AGENTS.md CLAUDE.md codx.md)
-while IFS= read -r path; do link_files+=("$path"); done < <(find docs database -type f -name '*.md' -print | sort)
-link_files+=(references/README.md)
-
-for path in "${link_files[@]}"; do
-  [[ -f "$path" ]] || continue
-  while IFS= read -r raw_link; do
-    link="$(sed -E 's/^\]\(([^)]+)\)$/\1/' <<<"$raw_link")"
-    link="${link%%#*}"
-    case "$link" in
-      ''|http://*|https://*|mailto:*|\#*) continue ;;
-    esac
-    if [[ "$link" == /* ]]; then
-      continue
-    fi
-    candidate="$(dirname "$path")/$link"
-    if [[ ! -e "$candidate" ]]; then
-      report_error "broken local link in $path: $link"
-    fi
-  done < <(grep -Eo '\]\([^)]+\)' "$path" || true)
-done
 
 if [[ "$#" -gt 0 ]]; then
   base_ref="$1"
@@ -134,21 +77,12 @@ while IFS= read -r worktree_path; do
   report_error "worktree outside the sanctioned path (see AGENTS.md): $worktree_path"
 done < <(git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}')
 
-if ! git rev-parse --verify "$base_ref" >/dev/null 2>&1; then
+if ! git rev-parse --verify --end-of-options "${base_ref}^{commit}" >/dev/null 2>&1; then
   report_error "unknown comparison ref: $base_ref"
-else
-  changed_files="$({
-    git diff --name-only "$base_ref" --
-    git ls-files --others --exclude-standard
-  } | sort -u)"
-
-  material_changes="$(grep -Ev '^(docs/progress/|$)' <<<"$changed_files" || true)"
-  progress_change="$(grep -E '^docs/progress/[0-9]{4}-[0-9]{2}\.md$' <<<"$changed_files" || true)"
-
-  if [[ -n "$material_changes" && -z "$progress_change" ]]; then
-    report_error "material changes require a monthly docs/progress/YYYY-MM.md entry"
-  fi
 fi
+
+# Ordinary changes use their PR receipt. Monthly progress records only package
+# milestones/decisions/releases, as defined by agent-collaboration.md.
 
 # 人可读时间只有一种写法：YYYY-MM-DD HH:MM，由数据库函数 linggan_human_moment 统一给出。
 #

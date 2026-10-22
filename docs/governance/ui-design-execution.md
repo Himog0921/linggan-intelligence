@@ -15,7 +15,7 @@
 
 ## L0 · 每次 UI 任务先读
 
-1. 确认用户结果、当前授权及 checkout/HEAD；核对 AGENTS.md、docs/README.md、docs/current-state.md 与[既有 UI 执行合同](../agents/ui-execution-contract.md)。
+1. 确认用户结果、当前授权及 checkout/HEAD；按 AGENTS.md 与[UI 执行合同](../agents/ui-execution-contract.md)路由；docs/README 只作索引，current-state 仅在核对运行/发布/跨包依赖时读取。
 2. 读本协议与 LIDS 入口；声明受影响的页面/模式、核心对象、区域及共享依赖。
 3. 按下一表只展开本任务命中的模块。历史图、HTML 和审阅页用于举证，不能覆盖规则正文或直接授予业务实现。
 
@@ -45,7 +45,7 @@
 
 ## L3 · 证据与交付
 
-先给出一份有界声明：用户结果；页面/模式及区域组合；采用的正式规则与替代项；复用组件及业务适配；状态/交互矩阵；待决 ID；文件范围；验证与未验证边界。沿用 [UI Change Manifest](../design/templates/ui-change-manifest-form.md)，不另造模板。
+先给出一份有界声明：用户结果；页面/模式及区域组合；采用的正式规则与替代项；复用组件及业务适配；状态/交互矩阵；待决 ID；文件范围；验证与未验证边界。可直接记在工作包/PR 中；复杂改版沿用 [UI Change Manifest](../design/templates/ui-change-manifest-form.md)，不为同一信息再建一份文件。协作与文档同步按[协作协议](agent-collaboration.md)。
 
 按风险核对常态、空、加载、错误、部分、受限、未确认；长文本、键盘、窄屏、缩放和返回上下文。数据只读、写命令、真实回执和用户视觉验收分别记证据。没有产品依据的数字与动作不补造。
 
