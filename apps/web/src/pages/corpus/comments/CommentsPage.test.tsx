@@ -40,6 +40,15 @@ describe('D3 actual four-view React boundary', () => {
   await waitFor(()=>expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('q')).toBe('两字'));
   const call=calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)!;expect(call.url.searchParams.get('signalKind')).toBe('need');expect(call.url.searchParams.get('minLikes')).toBe('100');expect(router.state.location.search).toContain('signalKind=need');expect(call.url.searchParams.get('domain')).toBe(DOMAIN);
  });
+ it('keeps a matched work in the filter draft until it is explicitly applied',async()=>{
+  installFetch();const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
+  const commentReads=()=>calls.filter(call=>call.url.pathname.endsWith('/comments')).length;
+  await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.type(screen.getByRole('searchbox',{name:'所属作品'}),'合成');await userEvent.click(screen.getByRole('button',{name:'查找作品'}));
+  await userEvent.click(await screen.findByRole('combobox',{name:'已匹配作品'}));await userEvent.click(await screen.findByRole('option',{name:'合成作品'}));
+  const readsBeforeApply=commentReads();expect(router.state.location.search).not.toContain('workRef=');
+  await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));await waitFor(()=>expect(router.state.location.search).toContain(`workRef=${WORK}`));
+  expect(commentReads()).toBeGreaterThan(readsBeforeApply);expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('workRef')).toBe(WORK);
+ });
  it('moves tertiary navigation and verified counts into the shared context row, keeping the table flat', async()=> {
   installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
   const nav=screen.getByRole('navigation',{name:'评论研究视图'});

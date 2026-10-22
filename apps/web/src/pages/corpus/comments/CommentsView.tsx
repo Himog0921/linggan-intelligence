@@ -62,7 +62,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
   const saved = async (message: string) => { setFeedback(message); if (filter.cursor) route({ cursor: null, history: [] }, true); else { const result = await query.refetch(); if (result.error) throw result.error; } };
   const detail = detailWork && detailId ? <CommentDetail key={commentIdentity({ workRef: detailWork, commentExternalId: detailId })} domain={domain} commentKey={{ workRef: detailWork, commentExternalId: detailId }} nav={nav} close={closeDetail} filterWork={(workRef, workLabel) => route({ workRef, workLabel, workChoices: [{ workRef, displayTitle: workLabel }], cursor: null, history: [] }, false, true)} /> : null;
 
-  const extraCount = Number(draft.voiceRole !== 'reader_and_unknown') + Number(!!draft.minLikes) + Number(draft.postUsage !== 'all') + Number(!!filter.workRef);
+  const extraCount = Number(draft.voiceRole !== 'reader_and_unknown') + Number(!!draft.minLikes) + Number(draft.postUsage !== 'all') + Number(!!draft.workRef);
   const loadedEligible = rows.filter(item => item.studyEligibility.eligible && ['primary','reference'].includes(item.observationRole));
   const allPageSelected = loadedEligible.length > 0 && loadedEligible.every(item => selectedIds.has(commentIdentity(item.commentKey)));
   function togglePage() {
@@ -89,6 +89,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
         const form = new FormData(event.currentTarget);
         route({ q: String(form.get('q') || '').trim(), studyState: draft.studyState, signalKind: draft.signalKind,
           voiceRole: draft.voiceRole, sort: draft.sort, minLikes: draft.minLikes, postUsage: draft.postUsage,
+          workRef: draft.workRef, workLabel: draft.workLabel, workChoices: draft.workChoices,
           cursor: null, history: [] });
       }}>
         <div className={c('study-worktable-filter-bar')}>
@@ -122,10 +123,10 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
         <form key={filter.workLabel} id="comment-work-search-form" onSubmit={event => { event.preventDefault(); void searchWorks(event.currentTarget); }}>
           <label>所属作品<input id="comment-work-search" name="workQuery" type="search" defaultValue={filter.workLabel} placeholder="搜索作品标题" /></label><button type="submit">查找作品</button>
         </form>
-        <div className={c('study-filter-control')}><span>已匹配作品</span><SelectField label="已匹配作品" value={filter.workRef || ''} onChange={value => {
+        <div className={c('study-filter-control')}><span>已匹配作品</span><SelectField label="已匹配作品" value={draft.workRef || ''} onChange={value => {
           const ref = value || null;
-          route({ workRef: ref, workLabel: filter.workChoices.find(row => row.workRef === ref)?.displayTitle || '', cursor: null, history: [] });
-        }} options={workError ? [{value:'',label:workError,disabled:true}] : [{value:'',label:'全部作品'},...filter.workChoices.map(work => ({value:work.workRef,label:work.displayTitle || '未命名作品'}))]} /></div>
+          setDraft(old => ({ ...old, workRef: ref, workLabel: old.workChoices.find(row => row.workRef === ref)?.displayTitle || '' }));
+        }} options={workError ? [{value:'',label:workError,disabled:true}] : [{value:'',label:'全部作品'},...draft.workChoices.map(work => ({value:work.workRef,label:work.displayTitle || '未命名作品'}))]} /></div>
       </div>
       <div className={c('study-comment-result-bar')}>
         <span>{stats?.displayableCommentCount == null ? '评论范围待读取' : `当前筛选 ${stats.displayableCommentCount.toLocaleString('zh-CN')} 条评论`}</span>

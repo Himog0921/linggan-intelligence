@@ -381,7 +381,7 @@
 .study-filter-title {font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-sans);color:var(--lgi-muted)}
 .study-filter-search-shell {display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0;min-height:var(--lgi-action-height);box-sizing:border-box;border:var(--lgi-action-border-width) solid var(--lgi-ink);padding:0 var(--lgi-space-3)}
 .study-filter-search-shell:focus-within {background:var(--lgi-focus-warm)}
-.study-filter-search-shell b {flex:none;color:var(--lgi-signal-ink);font:var(--lgi-weight-bold) var(--lgi-text-label)/1 var(--lgi-font-brand)}
+.study-filter-search-shell b {flex:none;color:var(--lgi-signal-ink);font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-brand)}
 .study-worktable-filter-fields .study-filter-search-shell input {flex:1;width:100%;height:100%;border:0;outline:0;box-shadow:none;padding:0;background:transparent;font:var(--lgi-type-input-weight) var(--lgi-type-input-size)/var(--lgi-type-input-leading) var(--lgi-font-sans)}
 .study-worktable-filter-fields .study-filter-search-shell input:focus-visible {outline:0;box-shadow:none}
 .study-filter-advanced .study-filter-control {min-width:calc(var(--lgi-space-24)*1.5)}
@@ -400,7 +400,7 @@
 .study-col-usage {width:7%}
 .study-comments-table .study-comment-check-cell {padding:0;overflow:visible;text-align:center;vertical-align:middle}
 .study-comment-check {display:grid;place-items:center;box-sizing:border-box;width:var(--lgi-space-8);height:var(--lgi-space-8);margin:0 auto;cursor:pointer}
-.study-comments-table .study-comment-check input {appearance:none;-webkit-appearance:none;position:relative;box-sizing:border-box;width:var(--lgi-shell-icon);height:var(--lgi-shell-icon);margin:0;border:1.5px solid var(--lgi-ink);border-radius:0;background:var(--lgi-canvas);cursor:pointer;clip-path:polygon(0 0,calc(100% - var(--lgi-space-1)) 0,100% var(--lgi-space-1),100% 100%,0 100%)}
+.study-comments-table .study-comment-check input {appearance:none;-webkit-appearance:none;position:relative;box-sizing:border-box;width:var(--lgi-shell-icon);height:var(--lgi-shell-icon);margin:0;border:var(--lgi-action-border-width) solid var(--lgi-ink);border-radius:0;background:var(--lgi-canvas);cursor:pointer;clip-path:polygon(0 0,calc(100% - var(--lgi-space-1)) 0,100% var(--lgi-space-1),100% 100%,0 100%)}
 .study-comment-check input:hover:not(:disabled) {background:var(--lgi-canvas-sunken)}
 .study-comment-check input:checked {background:var(--lgi-signal);border-color:var(--lgi-ink)}
 .study-comment-check input:checked::after {content:'';position:absolute;left:var(--lgi-space-1);top:var(--lgi-space-1);width:var(--lgi-space-2);height:var(--lgi-space-1);border-left:var(--lgi-focus-inset) solid var(--lgi-canvas);border-bottom:var(--lgi-focus-inset) solid var(--lgi-canvas);transform:rotate(-45deg)}
