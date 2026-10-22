@@ -25,7 +25,10 @@ export function ObservationChart({ points }: { points: ObservationPoint[] }) {
     return () => observer.disconnect();
   }, []);
   if (!points.length) return <p className={c('study-observation-empty')}>当前没有可读取的评论观察序列。</p>;
-  const l = 51, rr = 10, top = 24, topH = 190, signalBase = 329, signalH = 70, covY = signalBase + 8, covH = 6, dateY = covY + covH + 20, h = dateY + 16;
+  // The vertical anchors deliberately follow the left overview metrics: comment at the
+  // hero metric title, signal at the current-signal title. Keep data geometry separate
+  // from this reading alignment so scales and values retain their original meaning.
+  const l = 51, rr = 10, top = 48, topH = 300, signalBase = 477, signalH = 116, covY = signalBase + 8, covH = 8, dateY = covY + covH + 24, h = dateY + 20;
   const band = (w - l - rr) / points.length, bw = points.length <= 7 ? Math.min(42, band * .34) : Math.max(4, Math.min(19, band * .54)), cx = (i: number) => l + band * (i + .5);
   const obs = points.map(p => Math.max(0, Number(p.newObservedCommentCount) || 0)), sig = points.map(p => Math.max(0, Number(p.acceptedSignalCount) || 0));
   const oc = scale(Math.max(...obs), 3), sc = scale(Math.max(...sig), 2), oy = (v: number) => top + topH - v / oc.max * topH, sy = (v: number) => signalBase - v / sc.max * signalH;
@@ -37,7 +40,7 @@ export function ObservationChart({ points }: { points: ObservationPoint[] }) {
   return <div className={c('study-series-chart')}><div ref={wrapper} className={c('study-series-svg-wrap')}><svg viewBox={`0 0 ${w} ${h}`} role="img" aria-label="上下双轨每日柱状图及紧贴信号轴的采集覆盖">
     <title>首次观察评论与研究信号写入，底部短刻度表示采集覆盖</title>
     {grid.map(value => <Fragment key={value}><line className={c('study-series-grid-line')} x1={l} x2={w - rr} y1={oy(value)} y2={oy(value)} /><text x={l - 8} y={oy(value) + 4} textAnchor="end">{num(Math.round(value))}</text></Fragment>)}
-    <text className={c('study-series-axis-caption')} x="0" y="14">评论</text><text className={c('study-series-axis-caption')} x="0" y={signalBase - signalH - 10}>信号</text><line className={c('study-series-zero-line')} x1={l} x2={w - rr} y1={signalBase} y2={signalBase} /><text x={l - 8} y={signalBase + 4} textAnchor="end">0</text>
+    <text className={c('study-series-axis-caption')} x="0" y="17">评论</text><text className={c('study-series-axis-caption')} x="0" y={signalBase - signalH - 14}>信号</text><line className={c('study-series-zero-line')} x1={l} x2={w - rr} y1={signalBase} y2={signalBase} /><text x={l - 8} y={signalBase + 4} textAnchor="end">0</text>
     {points.map((point, i) => {
       const x = cx(i), left = x - bw / 2, a = obs[i]!, b = sig[i]!;
       const state = ['recorded', 'partial', 'none'].includes(point.observationCoverage ?? '') ? point.observationCoverage : 'none';

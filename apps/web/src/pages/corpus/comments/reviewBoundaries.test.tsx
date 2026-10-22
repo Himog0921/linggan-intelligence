@@ -69,7 +69,7 @@ describe('D3 review regression boundaries', () => {
  });
  it('a late work lookup cannot navigate back after leaving comments', async () => {
   let finish: (value: Response) => void = () => {}; installFetch(url => url.pathname.endsWith('/works') ? new Promise<Response>(resolve => { finish = resolve; }) : undefined);
-  const { router } = renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table'); await userEvent.click(screen.getByRole('button', { name: /更多筛选/ })); await userEvent.click(screen.getByRole('button', { name: '查找作品' })); await userEvent.click(screen.getByRole('button', { name: '研究批次' }));
+  const { router } = renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table'); await userEvent.click(screen.getByRole('combobox',{name:'搜索范围'})); await userEvent.click(screen.getByRole('option',{name:'作品标题'})); await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'延迟'); await userEvent.click(screen.getByRole('button',{name:'筛选'})); await userEvent.click(screen.getByRole('button',{name:'完成'})); await userEvent.click(screen.getByRole('button', { name: '研究批次' }));
   await act(async () => { finish(json({ items: [], page: { nextCursor: null } })); await Promise.resolve(); }); expect(new URLSearchParams(router.state.location.search).get('view')).toBe('runs');
  });
  it('historical missing selection counts stay unknown and history open moves focus to the new detail', async () => {
@@ -98,16 +98,15 @@ describe('D3 review regression boundaries', () => {
 
  it('an older work search cannot overtake a newer pending search within the same route',async()=>{
   const finish=new Map<string,(value:Response)=>void>();installFetch(url=>url.pathname.endsWith('/works')?new Promise<Response>(resolve=>{finish.set(url.searchParams.get('q')||'',resolve);}):undefined);renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));
-  const input=screen.getByRole('searchbox',{name:'所属作品'});await userEvent.type(input,'older');await userEvent.click(screen.getByRole('button',{name:'查找作品'}));await userEvent.clear(input);await userEvent.type(input,'newer');await userEvent.click(screen.getByRole('button',{name:'查找作品'}));
+  await userEvent.click(screen.getByRole('combobox',{name:'搜索范围'}));await userEvent.click(screen.getByRole('option',{name:'作品标题'}));
+  const input=screen.getByRole('searchbox',{name:'字面搜索'});await userEvent.type(input,'older');await userEvent.click(screen.getByRole('button',{name:'筛选'}));await userEvent.click(screen.getByRole('button',{name:'完成'}));await userEvent.clear(input);await userEvent.type(input,'newer');await userEvent.keyboard('{Enter}');
   await act(async()=>{finish.get('older')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 旧搜索'}],page:{nextCursor:null}}));await Promise.resolve();});
   await act(async()=>{finish.get('newer')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 新搜索'}],page:{nextCursor:null}}));});
-  await userEvent.click(screen.getByRole('combobox',{name:'已匹配作品'}));
   expect(await screen.findByRole('option',{name:'SYNTHETIC 新搜索'})).toBeInTheDocument();
   expect(screen.queryByRole('option',{name:'SYNTHETIC 旧搜索'})).not.toBeInTheDocument();
  });
  it('a work lookup cannot restore an old filter after the comment route changes',async()=>{
-  let finish:(value:Response)=>void=()=>{};installFetch(url=>url.pathname.endsWith('/works')?new Promise<Response>(resolve=>{finish=resolve;}):undefined);const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.click(screen.getByRole('button',{name:'查找作品'}));await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'new-filter');await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));await waitFor(()=>expect(router.state.location.search).toContain('q=new-filter'));
+  let finish:(value:Response)=>void=()=>{};installFetch(url=>url.pathname.endsWith('/works')?new Promise<Response>(resolve=>{finish=resolve;}):undefined);const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');await userEvent.click(screen.getByRole('combobox',{name:'搜索范围'}));await userEvent.click(screen.getByRole('option',{name:'作品标题'}));await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'过期');await userEvent.click(screen.getByRole('button',{name:'筛选'}));await userEvent.click(screen.getByRole('button',{name:'完成'}));await userEvent.click(screen.getByRole('combobox',{name:'搜索范围'}));await userEvent.click(screen.getByRole('option',{name:'评论文本'}));await userEvent.clear(screen.getByRole('searchbox',{name:'字面搜索'}));await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'new-filter');await userEvent.keyboard('{Enter}');await waitFor(()=>expect(router.state.location.search).toContain('q=new-filter'));
   await act(async()=>{finish(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 过期搜索'}],page:{nextCursor:null}}));await Promise.resolve();});expect(router.state.location.search).toContain('q=new-filter');expect(screen.queryByRole('option',{name:'SYNTHETIC 过期搜索'})).not.toBeInTheDocument();
  });
 
