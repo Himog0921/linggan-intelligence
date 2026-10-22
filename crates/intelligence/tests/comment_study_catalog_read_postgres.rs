@@ -7,7 +7,8 @@ mod research_fixture;
 use fixture::{proof_database, submit_package_at};
 use linggan_intelligence::comment_study_catalog::{
     CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
-    StudyCatalogError, read_catalog_summary, read_comment_catalog, refresh_clean_cache,
+    StudyCatalogError, WordCloudQuery, read_catalog_summary, read_comment_catalog,
+    read_word_cloud, refresh_clean_cache,
 };
 use linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF;
 use linggan_storage_postgres::Database;
@@ -381,4 +382,39 @@ async fn cursor_rejects_changed_filters_and_summary_does_not_count_only_the_firs
             .len(),
         1
     );
+}
+
+#[tokio::test]
+#[ignore = "isolated disposable PostgreSQL only; validates real source gate and stable comment identity"]
+async fn domain_phrase_frequency_counts_distinct_eligible_comments_and_retains_source_keys() {
+    let db = database("word_cloud_eligible_gate").await;
+    let observed: String =
+        sqlx::query_scalar("SELECT (scope_001_now() - interval '2 days')::text")
+            .fetch_one(db.pool()).await.unwrap();
+    detail_with_author(&db, "word-a", "SYNTHETIC 第一篇", Some("creator")).await;
+    detail_with_author(&db, "word-b", "SYNTHETIC 第二篇", Some("creator")).await;
+    for index in 0..5 {
+        let note = if index < 3 { "word-a" } else { "word-b" };
+        comment_with_author(&db, note, &format!("c-{index}"),
+            "作业拖拉，作业拖拉；每天还是作业拖拉", Some("reader"), &observed).await;
+    }
+    // The creator's own comment must never contribute to reader-language frequency.
+    comment_with_author(&db, "word-a", "creator-voice", "作业拖拉",
+        Some("creator"), &observed).await;
+    cache(&db).await;
+    let domain = query().domain;
+    let read = read_word_cloud(&db, &WordCloudQuery { domain, days: Some(7) })
+        .await.unwrap();
+    assert_eq!(read["eligibleCommentCount"], 5);
+    assert_eq!(read["processedCommentCount"], 5);
+    assert_eq!(read["truncated"], false);
+    let words = read["items"].as_array().unwrap();
+    let phrase = words.iter().find(|item| item["text"] == "作业拖拉").unwrap();
+    assert_eq!(phrase["count"], 5);
+    assert_eq!(phrase["workCount"], 2);
+    assert_eq!(phrase["category"], "scenario");
+    assert_eq!(phrase["examples"].as_array().unwrap().len(), 3);
+    assert!(phrase["examples"][0].get("commentText").is_none());
+    assert!(read_word_cloud(&db, &WordCloudQuery { domain, days: Some(30) })
+        .await.is_err());
 }

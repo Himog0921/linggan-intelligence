@@ -39,10 +39,10 @@ describe('D3 review regression boundaries', () => {
   expect(drawer).toHaveAttribute('open');
   expect(calls.filter(c => c.url.pathname.endsWith('/comments/detail')).every(c => c.method === 'GET' && c.url.searchParams.get('workRef') === WORK && c.url.searchParams.get('commentExternalId') === 'c1')).toBe(true);
  });
- it('initial overview reads only shell and overview, never AI settings or historical methods', async () => {
+ it('initial overview reads shell, overview and words, never AI settings or historical methods', async () => {
   installFetch(); renderPage(); await screen.findByLabelText('研究累计读数与昨日活动');
   expect(screen.getByRole('link', { name: /采集/ })).toHaveTextContent('观察中');
-  expect([...new Set(calls.map(c => c.url.pathname))].sort()).toEqual(['/api/local/corpus/shell', '/api/local/comment-study/overview'].sort()); expect(calls.every(c => c.method === 'GET')).toBe(true);
+  expect([...new Set(calls.map(c => c.url.pathname))].sort()).toEqual(['/api/local/corpus/shell', '/api/local/comment-study/overview', '/api/local/comment-study/word-cloud'].sort()); expect(calls.every(c => c.method === 'GET')).toBe(true);
  });
  it('reports shell failure distinctly and offers a working retry', async () => {
   let reads = 0; installFetch(url => url.pathname === '/api/local/corpus/shell' && ++reads === 1 ? json({ error: 'unavailable' }, 503) : undefined); renderPage();

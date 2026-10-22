@@ -11,6 +11,14 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-10-22 · COMMENT-WORD-CLOUD-V23（候选）
+
+- [紧凑概览 + 领域词云执行计划](plans/active/comment-wordcloud-v23-20261022.md)：用户批准 V2.3，保留研究与来源边界。
+- [V2.3 UI 与词云 API 变更](design/changes/comment-wordcloud-v23-20261022-ui-change-manifest.md)：单轴上方的黑柱/橙红渐变曲线，真实评论按身份去重词频，来源回查。
+- [V2.3 验收矩阵](design/acceptance/comment-wordcloud-v23-20261022-acceptance.md)：静态/组件、隔离 PG、真实浏览器与未证边界。
+
+
+
 本页是项目的“总书目”。Agent 不应先通读所有材料，而应从这里逐层进入与当前事项直接相关的文件。
 
 

@@ -9,7 +9,8 @@ describe('D3 actual four-view React boundary', () => {
   installFetch(); renderPage();
   const region = await screen.findByLabelText('研究累计读数与昨日活动');
   expect(region).toHaveTextContent('可研究评论100条');expect(region).toHaveTextContent('当前研究信号70个');expect(region).toHaveTextContent('长期用户问题0个');
-  await userEvent.click(screen.getByRole('tab',{name:'使用经历'}));
+  await screen.findByRole('button',{name:'办法与经历'});
+  await userEvent.click(screen.getByRole('button',{name:'办法与经历'}));
   expect(region).toHaveTextContent('当前研究信号70个');
   expect(calls.filter(call=>call.url.pathname.endsWith('/overview'))).toHaveLength(1);
   expect(screen.getByRole('button',{name:'近 56 天'})).toHaveAttribute('aria-pressed','true');
@@ -139,12 +140,12 @@ describe('D3 actual four-view React boundary', () => {
   installFetch();renderPage();await screen.findByLabelText('研究累计读数与昨日活动');
   await userEvent.click(screen.getByRole('button',{name:'近 7 天'}));
   await userEvent.click(screen.getByRole('button',{name:'表格'}));
-  await userEvent.click(screen.getByRole('tab',{name:'使用经历'}));
+  await userEvent.click(screen.getByRole('button',{name:'办法与经历'}));
   await userEvent.click(screen.getByRole('button',{name:'用户评论'}));await screen.findByRole('table');
   await userEvent.click(screen.getByRole('button',{name:'概览'}));await screen.findByLabelText('研究累计读数与昨日活动');
   expect(screen.getByRole('button',{name:'近 7 天'})).toHaveAttribute('aria-pressed','true');
   expect(screen.getByRole('button',{name:'表格'})).toHaveAttribute('aria-pressed','true');
-  expect(screen.getByRole('tab',{name:'使用经历'})).toHaveAttribute('aria-selected','true');
+  expect(screen.getByRole('button',{name:'办法与经历'})).toHaveAttribute('aria-pressed','true');
   expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(8);
  });
 
