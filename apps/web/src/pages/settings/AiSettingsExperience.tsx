@@ -10,14 +10,15 @@ import { AiCapabilityForm } from './AiCapabilityForm';
 import { NoticeLine } from './AiSettingsFields';
 import { ConnectionForm, EgressForm, ProbeForm } from './AiModelSection';
 import { OcrAuditSettings } from './OcrAuditSettings';
-import { AiTaskSection, ControlAction } from './AiTaskSection';
+import { AiTaskSection, AiTaskForm, ControlAction } from './AiTaskSection';
 import { AiSkillSection } from './AiSkillSection';
 import { BATCH_STATE, MATERIAL, TASK_STATE, budgetText, count, type AiSettings, type Task } from './aiSettingsModel';
 import type { AiAction } from './useAiAction';
 import styles from './AiSettingsExperience.module.css';
 
-const ORDER = ['ocr_quality_audit', 'writing_legacy', 'note_interpretation', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'legacy_creator_discovery', 'legacy_topic_map'];
+const ORDER = ['ocr_recognition', 'ocr_quality_audit', 'writing_legacy', 'note_interpretation', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'legacy_creator_discovery', 'legacy_topic_map'];
 const COPY: Record<string, { group: string; description: string }> = {
+  ocr_recognition: { group: '图片文字', description: '手动识别当前作品的已有本地原图；保存模型配置不会发图，默认关闭。' },
   ocr_quality_audit: { group: '语料质量', description: '可选盲读抽检，人工确认后追加修正，默认关闭。' },
   writing_legacy: { group: '内容工作台', description: '基于选中的作品材料，提供可审阅的写作建议与修改方案。' },
   note_interpretation: { group: '内容理解', description: '提炼笔记观点、表达方式与值得验证的关键信息。' },
@@ -38,6 +39,7 @@ const STATES: Record<string, { name: string; tone: string; note: string }> = {
   legacy: { name: '保留历史', tone: 'history', note: '仅保留历史' },
 };
 const MATERIAL_BY_TASK: Record<string, string> = {
+  ocr_recognition: 'manual_ocr_image', ocr_quality_audit: 'ocr_quality_image',
   note_interpretation: 'note_material', direction_list_draft: 'note_material', direction_proposal: 'note_material',
   author_org_identity: 'public_author_bio', writing_assistant: 'selected_writing_material',
   writing_legacy: 'selected_writing_material', model_probe: 'synthetic_probe',
@@ -113,18 +115,19 @@ function checksFor(data: AiSettings, task: Task): Check[] {
     { title: '当前地址的材料许可', okay: material ? (model ? license?.allowed === true : null) : null, detail: material ? (license?.allowed ? (MATERIAL[material] ?? material) + '已批准' : '需核对端点、工作与材料许可') : '当前业务的许可类别需要服务端确认' },
   ];
 }
-function CapabilityDrawer({ data, task, onClose }: { data: AiSettings; task: Task; onClose: () => void }) {
+function CapabilityDrawer({ data, task, action, onClose }: { data: AiSettings; task: Task; action: AiAction; onClose: () => void }) {
   const checks = checksFor(data, task);
   const failed = checks.filter(c => c.okay !== true).length;
   return <Drawer title={task.label} onClose={onClose}>
     <div className={styles.drawerIntro}><Status stage={task.lifecycle}/><p>{COPY[task.taskKey]?.description ?? '当前业务工作，具体能力以实际接入合同为准。'}</p></div>
     <div className={styles.drawerSummary}><b>{task.lifecycle !== 'active' ? '目前不能执行新工作' : failed ? '尚未满足全部已知运行条件' : '已知配置通过，执行仍需服务端复核'}</b><small>{failed} 项尚未确认或通过 · 前端诊断不代替最终运行准入</small></div>
+    {task.taskKey === 'ocr_recognition' ? <AiTaskForm key={task.revision} data={data} task={task} action={action}/> : null}
     <h3 className={styles.blockTitle}>运行条件</h3><div className={styles.checkList}>{checks.map(check => <div className={styles.checkRow} key={check.title}><span className={styles.checkMark} data-ok={String(check.okay)}>{check.okay === true ? '✓' : check.okay === false ? '!' : '?'}</span><div><b>{check.title}</b><small>{check.detail}</small></div></div>)}</div>
     <h3 className={styles.blockTitle}>现有配置</h3><dl className={styles.definition}><dt>模型</dt><dd>{task.configuration.model?.modelId ?? '未配置'}</dd><dt>做法版本</dt><dd>{task.configuration.skillVersionRef ? '已选择固定版本' : '未绑定'}</dd><dt>每日额度</dt><dd>{budgetText(task.configuration.budget)}</dd><dt>工作开关</dt><dd>{data.controls.find(c => c.taskKey === task.taskKey) ? data.controls.find(c => c.taskKey === task.taskKey)?.enabled ? '已启用' : '未启用' : '未知'}</dd></dl>
     <div className={styles.drawerFooter}><Link className={styles.actionLink} to={'?view=advanced&area=work&task=' + encodeURIComponent(task.taskKey)} onClick={onClose}>查看工作配置 <Glyph name="arrow"/></Link><Link className={styles.subtleLink} to={'?view=runs&task=' + encodeURIComponent(task.taskKey)} onClick={onClose}>查看调用记录</Link></div>
   </Drawer>;
 }
-export function AiCapabilities({ data }: { data: AiSettings }) {
+export function AiCapabilities({ data, action }: { data: AiSettings; action: AiAction }) {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [layout, setLayout] = useState<'grid' | 'list'>('grid');
@@ -155,7 +158,7 @@ export function AiCapabilities({ data }: { data: AiSettings }) {
     <div className={styles.capGrid} data-layout={layout}>{visible.map((task, index) => <button type="button" key={task.taskKey} className={styles.capCard} data-stage={task.lifecycle} onClick={() => setDetail(task.taskKey)}><span className={styles.capTop}><small>CAPABILITY / {String(index + 1).padStart(2, '0')}</small><Status stage={task.lifecycle}/></span><span className={styles.capMiddle}><b>{task.label}</b><small>{COPY[task.taskKey]?.description ?? '查看当前业务能力与运行配置。'}</small></span><span className={styles.capBottom}><small>{COPY[task.taskKey]?.group ?? '其他工作'} · {STATES[task.lifecycle]?.note ?? '当前状态待核对'}</small><b>查看详情 <Glyph name="arrow"/></b></span></button>)}
       {!visible.length ? <div className={styles.empty}>没有符合条件的工作，试着调整搜索或筛选。</div> : null}</div>
     <p className={styles.footnote}>业务工作与基础模型测试分开管理，连接状态和运行状态均来自当前数据库回执。</p>
-    {selected ? <CapabilityDrawer task={selected} data={data} onClose={() => setDetail(null)}/> : null}
+    {selected ? <CapabilityDrawer task={selected} data={data} action={action} onClose={() => setDetail(null)}/> : null}
     {diagnostics ? <Drawer title="系统运行诊断" onClose={() => setDiagnostics(false)}><div className={styles.checkList}>{[
       ['独立执行器', online, observed === 'not_started' ? '数据库暂无执行器实例回执' : '当前状态：' + observed],
       ['全局 AI 开关', control?.enabled ?? null, control ? '当前开关回执：' + (control.enabled ? '已启用' : '已关闭') : '开关回执缺失'],

@@ -454,3 +454,11 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## 创作者退役状态一致性续修
 
 本轮日志、测试报告、独立复核与浏览器截图固定 artifacts/private/creator-ai-status-copy-001（本专属树；合并移除前复制至主仓库同名 private 目录保留），忽略、不入 Git，无秘密和原始材料导出。来源为实际本轮命令，root 负责，保留至 Mog 验收；只清理自有进程/目录。Web 依赖和 dist 使用既有登记，人工维护的 TS/TSX/CSS 与现有文档为源文件。
+
+
+## AI-GEN1-OCR-MANUAL-454 隔离证明
+
+- 生成源：`scripts/test-ocr-quality-audit-postgres.sh --browser`、`apps/worker/tests/ocr_recognition_postgres.rs`、`apps/web/test/e2e/ocr-recognition-real-chain.mjs`；延用该脚本独占、随机命名的 Docker container/volume、临时 assets/media 和 `OCR_AUDIT_PROOF_OUTPUT`。只用程序化合成图、loopback Pi mock 与自有库；EXIT 核对清理，不连接共享库或运行目录。
+- 原始 OCR：运行测试的 media 根下 `ocr/manual/<item UUID>.json`，来自 mock 返回原字节；实际 derivative/layout/adoption 指向该文件，随 owned assets 清理。真实生产结果不在本轮创建。
+- 私有证据：任务临时目录 `linggan-ocr-manual-implementation-2026-10-22` 保存 before/after 截图、浏览器回执、日志、自包含对照和保存响应回归。真实原图与保存响应只在该本机私有范围读取，不入 Git/CI，也不新增模型调用；`cloud_ocr_saved` 的 ignored test 仅由显式私有 manifest 驱动。
+- Git 只保存合成 fixture/runner/测试源、长期合同与结果摘要，不保存二进制、DSN、密钥、真实图片/正文或截图。保留本机证据供 Mog 验收；owned 数据资源由脚本主动清理，任务外数据不处理。

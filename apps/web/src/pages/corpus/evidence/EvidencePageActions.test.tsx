@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BATCH_KEY } from './batchStore';
 import { DOMAIN, OTHER_DOMAIN, dossierJson, shellJson, workRef } from './evidenceFixtures';
 import { assignLocation } from './navigation';
-import { LIST_PATH, detailPathOf, pageRoutes, pageUrl, renderEvidencePage, stubViewport } from './pageKit';
+import { LIST_PATH, detailPathOf, ocrPathOf, pageRoutes, pageUrl, renderEvidencePage, stubViewport } from './pageKit';
 import { createFetchMock, ok, type FetchKit } from './testKit';
 
 vi.mock('./navigation', () => ({ assignLocation: vi.fn() }));
@@ -370,11 +370,12 @@ describe('敏感面', () => {
     }
   });
 
-  it('页面打开时的请求只有外壳、列表与选中作品的详情', async () => {
+  it('页面打开时只读取外壳、列表、选中作品详情及其 OCR 状态，不发起识别', async () => {
     pageRoutes(kit);
     await opened();
     await screen.findByRole('tab', { name: '作品' });
     const paths = [...new Set(kit.calls.map(call => call.path))].sort();
-    expect(paths).toEqual(['/api/local/corpus/shell', LIST_PATH, detailPathOf(1)].sort());
+    expect(paths).toEqual(['/api/local/corpus/shell', LIST_PATH, detailPathOf(1), ocrPathOf(1)].sort());
+    expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
   });
 });

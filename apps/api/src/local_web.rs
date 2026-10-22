@@ -64,6 +64,9 @@ mod material_projection_tests;
 mod material_replica_fallback_tests;
 mod model_settings;
 mod ocr_audit;
+mod ocr_recognition;
+#[cfg(test)]
+mod ocr_recognition_browser_tests;
 mod offline_preview;
 #[cfg(test)]
 mod offline_preview_tests;
@@ -392,6 +395,7 @@ fn router(state: LocalWebState) -> Router {
 
 fn material_api_routes() -> Router<LocalWebState> {
     Router::new()
+        .merge(ocr_recognition::routes())
         .route(
             "/api/local/work-resources/{public_ref}/research-dossier",
             get(research_dossier::read).layer(axum::middleware::from_fn(

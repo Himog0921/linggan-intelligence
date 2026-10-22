@@ -19,6 +19,7 @@ pub enum MaterialClass {
     ModelCatalog,
     SyntheticImageProbe,
     OcrQualityImage,
+    ManualOcrImage,
     NoteMaterial,
     PublicAuthorBio,
     SelectedWritingMaterial,
@@ -30,6 +31,7 @@ impl MaterialClass {
             Self::ModelCatalog => "model_catalog",
             Self::SyntheticImageProbe => "synthetic_image_probe",
             Self::OcrQualityImage => "ocr_quality_image",
+            Self::ManualOcrImage => "manual_ocr_image",
             Self::NoteMaterial => "note_material",
             Self::PublicAuthorBio => "public_author_bio",
             Self::SelectedWritingMaterial => "selected_writing_material",
@@ -39,6 +41,7 @@ impl MaterialClass {
         match self {
             Self::SyntheticProbe | Self::ModelCatalog => task == TaskKey::ModelProbe,
             Self::SyntheticImageProbe | Self::OcrQualityImage => task == TaskKey::OcrQualityAudit,
+            Self::ManualOcrImage => task == TaskKey::OcrRecognition,
             Self::NoteMaterial => matches!(
                 task,
                 TaskKey::NoteInterpretation

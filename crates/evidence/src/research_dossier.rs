@@ -65,6 +65,7 @@ pub(crate) fn select_media(media: Vec<Value>) -> Vec<Value> {
                 .max_by_key(|v| {
                     let layer = &v["ocrLayering"];
                     (
+                        v["ocrHumanAdoption"].is_object(),
                         v["ocrAdoption"].is_object(),
                         layer["imageWidth"].as_i64().unwrap_or(0)
                             * layer["imageHeight"].as_i64().unwrap_or(0),

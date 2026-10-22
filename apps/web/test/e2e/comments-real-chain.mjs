@@ -63,13 +63,23 @@ try {
    await page.locator('[data-select-comment][data-eligible="true"]').first().waitFor();
    assert.equal(await page.locator('[data-select-comment][data-eligible="true"]').first().isChecked(),true);
    assert.ok(report.writes.every(write=>write.path.endsWith('/comments/post-usage')));
-   await button('完成选择').click();
+   await button('取消选择').click();
+   assert.equal(await page.locator('[data-select-comment]').count(),0);
   });
  }else{
   const run=v['e2e-run-ref'],problem=v['e2e-problem-ref'];
   await step('Overview, runs and problems do not expose proactive research',async()=>{for(const view of ['overview','runs','problems']){await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view})}`);await page.getByRole('button',{name:'发起研究',exact:true}).waitFor({state:'hidden'});}await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments'})}`);assert.equal(await button('发起研究').count(),0);});
   const response=await page.request.get(`${origin}/api/local/comment-study/targets?${new URLSearchParams({domain,runRef:run,limit:'100'})}`);assert.equal(response.status(),200);const targets=await response.json(),target=targets.targets.find(row=>row.commentKey?.commentExternalId&&row.signalCount>0);assert.ok(target);const key=target.commentKey;
-  await step('Comment deep link shows distinct raw, parent, cleaning and history',async()=>{await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments',commentWorkRef:key.workRef,commentExternalId:key.commentExternalId})}`);await page.getByRole('heading',{name:'父评论语境',exact:true}).waitFor();assert.ok(await page.locator('#comment-detail-body [data-history-run="'+run+'"]').count()>=3);});
+  await step('Comment deep link shows actual parent context and history without empty sections',async()=>{
+   const detailResponse=await page.request.get(`${origin}/api/local/comment-study/comments/detail?${new URLSearchParams({domain,...key})}`);
+   assert.equal(detailResponse.status(),200);const detail=await detailResponse.json();
+   await page.goto(`${origin}/corpus/comments?${new URLSearchParams({domain,view:'comments',commentWorkRef:key.workRef,commentExternalId:key.commentExternalId})}`);
+   await page.getByRole('heading',{name:'所属作品',exact:true}).waitFor();
+   const parentHeading=page.getByRole('heading',{name:'父评论语境',exact:true});
+   if(detail.parentContext?.commentText){await parentHeading.waitFor();await page.locator('#comment-detail-body').getByText(detail.parentContext.commentText,{exact:true}).waitFor();}
+   else assert.equal(await parentHeading.count(),0);
+   assert.ok(await page.locator('#comment-detail-body [data-history-run="'+run+'"]').count()>=3);
+  });
   await step('History to immutable run method and real request snapshot',async()=>{await page.locator('#comment-detail-body [data-history-panel="method"]').first().click();await page.getByRole('heading',{name:'本次方法',exact:true}).waitFor();await page.getByRole('tab',{name:'调用记录',exact:true}).click();await page.locator('[data-request-detail]').first().click();await page.getByRole('heading',{name:'本次冻结请求快照',exact:true}).waitFor();assert.ok((await page.locator('[data-comment-study-content]').innerText()).includes('SYNTHETIC / NOT EVIDENCE'));});
   await step('Signal links actual long-lived problem definition and evidence',async()=>{await page.getByRole('tab',{name:'研究信号',exact:true}).click();await page.locator('[data-signal-problem="'+problem+'"]').first().click();await page.locator('#sr3-drawer-title').waitFor();assert.equal(new URL(page.url()).searchParams.get('problemRef'),problem);await page.locator('[data-sr3="context"]').first().click();await page.getByText('父评论只用于理解这条表达，不计为它的独立支持依据。',{exact:true}).first().waitFor();await page.locator('[data-sr3="close"]').click();assert.equal(new URL(page.url()).searchParams.has('problemRef'),false);});
   await step('Problem cards reopen and browser history restores scope',async()=>{await page.locator('[data-sr3="open"]').first().click();await page.locator('#sr3-drawer-title').waitFor();await page.goBack();await page.locator('#sr3-drawer-title').waitFor({state:'hidden'});await page.goForward();await page.locator('#sr3-drawer-title').waitFor();await page.locator('[data-sr3="close"]').click();});

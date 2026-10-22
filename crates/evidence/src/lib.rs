@@ -51,6 +51,7 @@ mod material_social_read;
 mod material_storage_key;
 mod media_acquisition;
 mod monitor_rule_read;
+pub mod cloud_ocr_adoption;
 pub mod ocr_adoption;
 pub mod ocr_adoption_persistence;
 pub mod ocr_layering;

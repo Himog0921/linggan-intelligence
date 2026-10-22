@@ -16,6 +16,7 @@ export const LIST_PATH = '/api/local/work-resources';
 export const SHELL_PATH = '/api/local/corpus/shell';
 export const pageUrl = (search = `domain=${DOMAIN}`) => `/corpus/evidence${search ? `?${search}` : ''}`;
 export const detailPathOf = (n: number) => `${LIST_PATH}/${workRef(n)}`;
+export const ocrPathOf = (n: number) => `${detailPathOf(n)}/ocr-recognition`;
 
 export function renderEvidencePage(url = pageUrl()) {
   const client = newClient();
@@ -60,5 +61,8 @@ export function pageRoutes(kit: FetchKit, routes: Routes = {}) {
   const count = routes.count ?? 3;
   kit.route('GET', SHELL_PATH, routes.shell ?? ok(shellJson()));
   kit.route('GET', LIST_PATH, routes.list ?? ok(listJson(items(count))));
-  for (let n = 1; n <= count; n += 1) kit.route('GET', detailPathOf(n), ok(detailJson(n, routes.detail?.(n) ?? {})));
+  for (let n = 1; n <= count; n += 1) {
+    kit.route('GET', detailPathOf(n), ok(detailJson(n, routes.detail?.(n) ?? {})));
+    kit.route('GET', ocrPathOf(n), ok({ runRef: null, workRef: workRef(n), state: 'unavailable', completedImages: 0, totalImages: 0, currentStage: '尚未配置 OCR 模型。', modelLabel: null, unavailableReason: '尚未配置 OCR 模型。', coverTitle: null, coverTitleStatus: null, images: [], pendingCount: 0, failureCode: null }));
+  }
 }

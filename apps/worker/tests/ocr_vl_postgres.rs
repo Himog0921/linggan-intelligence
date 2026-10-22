@@ -29,6 +29,16 @@ pub(crate) async fn admit(
     bytes: &[u8],
     mime: &str,
 ) -> Uuid {
+    admit_with_slot_role(db, work, ordinal, bytes, mime, "image").await
+}
+pub(crate) async fn admit_with_slot_role(
+    db: &Database,
+    work: &str,
+    ordinal: u32,
+    bytes: &[u8],
+    mime: &str,
+    slot_role: &str,
+) -> Uuid {
     let present: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_material_content WHERE content_external_id=$1)",
     )
@@ -40,9 +50,32 @@ pub(crate) async fn admit(
         fixture::submit_package(db,"content_detail",json!({"contentExternalId":work}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":work},"payload":{"title":"Synthetic replay metadata","bodyText":"Native body must remain independent."}})).await;
     }
     let observation = Uuid::new_v4();
-    let slot = format!("xhs:{work}:image:{ordinal}");
+    let (slot, source_type, source_external_id, context) = match slot_role {
+        "avatar" => (
+            format!("xhs:author:synthetic-author:avatar:{ordinal}"),
+            "author",
+            "synthetic-author".to_owned(),
+            Some(work),
+        ),
+        "comment_image" => (
+            format!("xhs:comment:synthetic-comment-{ordinal}:comment_image:{ordinal}"),
+            "comment",
+            format!("synthetic-comment-{ordinal}"),
+            Some(work),
+        ),
+        _ => (
+            format!("xhs:{work}:image:{ordinal}"),
+            "content",
+            work.to_owned(),
+            None,
+        ),
+    };
     let uri = format!("https://media.example/{work}/{ordinal}.jpg");
-    fixture::submit_package(db,"media_slots",json!({"contentExternalId":work}),json!({"kind":"media_slot","slotKey":slot,"observationRef":observation,"slot":{"role":"image","ordinal":ordinal},"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-21T00:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":work}})).await;
+    let mut record = json!({"kind":"media_slot","slotKey":slot,"observationRef":observation,"slot":{"role":slot_role,"ordinal":ordinal},"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-21T00:00:00Z"},"sourceObject":{"platform":"xhs","type":source_type,"externalId":source_external_id}});
+    if let Some(context) = context {
+        record["contextContentExternalId"] = json!(context);
+    }
+    fixture::submit_package(db, "media_slots", json!({"contentExternalId":work}), record).await;
     let hash = support::sha256_hex(bytes);
     let key = format!("blobs/{hash}");
     let path = support::prepare_output(&key).unwrap();
