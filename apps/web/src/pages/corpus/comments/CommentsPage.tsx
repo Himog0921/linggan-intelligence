@@ -10,8 +10,6 @@ import { Overview } from './Overview';
 import { initialOverviewPreferences } from './overviewState';
 import { ProblemsView } from './ProblemsView';
 import { RunPicker, RunsView } from './RunsView';
-import { AiBusinessStatus } from '../../settings/AiBusinessStatus';
-import { PolicyHistory } from './PolicyHistory';
 import type { SelectedComment } from './studyApi';
 import type { StudyNavigation } from './studyApi';
 import { c } from './styles';
@@ -82,8 +80,6 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
     <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>只读呈现新评论研究链路<br />自动排程保持关闭</>} />
     {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> :
     <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1>
-    <AiBusinessStatus taskKey="comment_study" />
-    {domain ? <PolicyHistory domain={domain} /> : null}
     {shellError ? <p className={c('study-table-status')} role="status">领域信息刷新失败；当前显示上次读取结果。{shellError} <button type="button" onClick={retryShell}>重新读取领域信息</button></p> : null}
     {domain && view === 'runs' ? <RunPicker domain={domain} selected={params.get('runRef')} nav={nav} /> : <div id="study-run-picker" className={c('study-run-picker')} hidden />}
     <section id="study-tab-result" className={view === 'comments' ? c('study-tab-comments') : undefined} aria-live="polite" data-comment-study-content aria-busy={loading}>
