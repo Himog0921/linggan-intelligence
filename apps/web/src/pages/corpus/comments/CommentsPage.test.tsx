@@ -140,12 +140,12 @@ describe('D3 actual four-view React boundary', () => {
   installFetch();renderPage();await screen.findByLabelText('研究累计读数与昨日活动');
   await userEvent.click(screen.getByRole('button',{name:'近 7 天'}));
   await userEvent.click(screen.getByRole('button',{name:'表格'}));
-  await userEvent.click(screen.getByRole('tab',{name:'使用经历'}));
+  await userEvent.click(screen.getByRole('button',{name:'办法与经历'}));
   await userEvent.click(screen.getByRole('button',{name:'用户评论'}));await screen.findByRole('table');
   await userEvent.click(screen.getByRole('button',{name:'概览'}));await screen.findByLabelText('研究累计读数与昨日活动');
   expect(screen.getByRole('button',{name:'近 7 天'})).toHaveAttribute('aria-pressed','true');
   expect(screen.getByRole('button',{name:'表格'})).toHaveAttribute('aria-pressed','true');
-  expect(screen.getByRole('tab',{name:'使用经历'})).toHaveAttribute('aria-selected','true');
+  expect(screen.getByRole('button',{name:'办法与经历'})).toHaveAttribute('aria-pressed','true');
   expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(8);
  });
 
