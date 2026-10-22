@@ -527,7 +527,7 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
   font:var(--lgi-weight-bold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)
 }
 .study-wordcloud {min-width:0;margin-top:var(--lgi-space-3);padding-top:var(--lgi-space-3);border-top:1px solid var(--lgi-hairline)}
-.study-word-head {display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-3);min-height:var(--lgi-space-7)}
+.study-word-head {display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-3);min-height:var(--lgi-space-8)}
 .study-word-title {display:flex;align-items:baseline;gap:var(--lgi-space-2);min-width:0}
 .study-word-title h2 {white-space:nowrap;font:var(--lgi-weight-semibold) var(--lgi-text-body)/var(--lgi-lh-body) var(--lgi-font-sans)}
 .study-word-title small {color:var(--lgi-muted);font-size:var(--lgi-text-label);white-space:nowrap}
@@ -602,7 +602,7 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
 .study-word-source-list {display:grid;gap:var(--lgi-space-2)}
 .study-word-source-list button {display:flex;justify-content:space-between}
 @media(max-width:1450px) {
-  .study-overview[data-compact-wordcloud="v23"] .study-overview-hero {gap:var(--lgi-space-7)}
+  .study-overview[data-compact-wordcloud="v23"] .study-overview-hero {gap:var(--lgi-space-8)}
   .study-word-layout {grid-template-columns:minmax(0,1.3fr) minmax(calc(var(--lgi-space-24)*2),.8fr);gap:var(--lgi-space-3)}
   .study-word-top10 {padding-left:var(--lgi-space-3)}
   .study-word-stage {column-gap:var(--lgi-space-2)}
