@@ -46,6 +46,7 @@ export interface DossierLayering {
 }
 
 export interface DossierOcrAdoption {
+  adoptionRef?: string | null;
   rawBlocks: { blockRef: string; text: string }[];
   pendingBlocks: string[];
   projectionVersion: string | null;
@@ -61,6 +62,7 @@ export interface DossierMedia {
   displayText: string | null;
   researchText: string | null;
   ocrAdoption?: DossierOcrAdoption | null;
+  humanReviewRef?: string | null;
   /** 原图的受控本地句柄（已过 `/api/local/media/` 校验）；没有是 null。 */
   originalUrl: string | null;
   originalMaterializationRef: string | null;

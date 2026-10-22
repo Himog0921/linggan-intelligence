@@ -473,3 +473,7 @@ AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundat
 
 - [组件同步合同](design/lids/component-sync.md)、[生成组件目录](design/lids/component-library.generated.md)：C09/C16规则、实现、展示同源。
 - [运营页规格](design/pages/ops-page.md)、[创作页规格](design/pages/content-workbench-page.md)：数据/创作二级及Z02三级导航，发布证据沿LIDS-UI-001计划与验收。
+
+- [OCR质量抽检与人工修正](plans/active/ocr-quality-audit-454.md)：#454 后续隔离实施，默认关闭；状态/证据在计划与PR。
+
+- [OCR可选质量抽检数据合同](data-contracts/ocr-quality-audit.md)：冻结样本、盲读、人工版本、来源撤回、质量分母与未验证边界。

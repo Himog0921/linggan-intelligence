@@ -48,7 +48,7 @@ function DerivedTexts({ inspector }: { inspector: Inspector }) {
         <SourceNote>当前详情没有已识别的图片文字或转录文本；不把缺少记录写成处理成功或失败。</SourceNote>
       ) : (
         <>
-          <SourceNote>以下为机器识别结果，与原图可能有出入。</SourceNote>
+          <SourceNote>以下为所选图片文字与转录版本，机器识别可能有出入；人工修正来源在分层详情保留。</SourceNote>
           {texts.map(derivative => {
             const cover = derivative.slotKey !== null && coverSlots.has(derivative.slotKey);
             return (

@@ -22,7 +22,13 @@ async fn database(schema: &str) -> Database {
     .unwrap();
     db
 }
-async fn admit(db: &Database, work: &str, ordinal: u32, bytes: &[u8], mime: &str) -> Uuid {
+pub(crate) async fn admit(
+    db: &Database,
+    work: &str,
+    ordinal: u32,
+    bytes: &[u8],
+    mime: &str,
+) -> Uuid {
     let present: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_material_content WHERE content_external_id=$1)",
     )
@@ -55,7 +61,7 @@ async fn admit(db: &Database, work: &str, ordinal: u32, bytes: &[u8], mime: &str
     .await
     .unwrap()
 }
-async fn execute_one(db: &Database) -> MediaProcessingClaim {
+pub(crate) async fn execute_one(db: &Database) -> MediaProcessingClaim {
     let worker = Uuid::new_v4();
     let MediaProcessingClaimOutcome::Claimed(claim) = claim_media_processing_work_for_version(
         db,
@@ -320,7 +326,7 @@ fn private_saved_bridge_receipts_are_bound() {
     }
 }
 
-const SYNTHETIC_BRIDGE: &str = r#"
+pub(crate) const SYNTHETIC_BRIDGE: &str = r#"
 import sys,json,hashlib
 def encoded(x):return json.dumps(x,sort_keys=True,ensure_ascii=False,separators=(',',':'))
 def sha(x):return hashlib.sha256(x.encode()).hexdigest()

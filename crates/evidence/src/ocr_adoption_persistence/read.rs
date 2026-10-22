@@ -53,12 +53,13 @@ pub(crate) async fn attach_media(
         item["derivativeRef"] = json!(row.get::<Uuid, _>("derivative_ref"));
         item["displayText"] = json!(text.chars().take(600).collect::<String>());
         item["researchText"] = json!(text);
-        item["ocrAdoption"] = json!({"assessment":a,"lineRefMap":row.get::<Value,_>("line_ref_map"),"sourceRelation":"image_transcription_not_author_claim","rawBlocks":input.layout.blocks,"segments":image.segments,"pendingBlocks":image.pending_blocks,"projectionVersion":"ocr-source-gaps-v1"});
+        item["ocrAdoption"] = json!({"adoptionRef":row.get::<Uuid,_>("adoption_ref"),"assessment":a,"lineRefMap":row.get::<Value,_>("line_ref_map"),"sourceRelation":"image_transcription_not_author_claim","rawBlocks":input.layout.blocks,"segments":image.segments,"pendingBlocks":image.pending_blocks,"projectionVersion":"ocr-source-gaps-v1"});
         item["ocrLayering"] = json!({"layoutRef":row.get::<Uuid,_>("layout_ref"),"layeringRef":row.get::<Uuid,_>("adoption_ref"),
             "layerVersion":a.rule_version,"state":row.get::<String,_>("state"),"decisionSource":"local_ocr_adoption",
             "imageWidth":a.image.width,"imageHeight":a.image.height,"engineVersion":input.layout.pipeline.version,
             "coverHeadline":title,"imageSubstantiveText":text,"cleanCorpusEligible":!projection.fragments.is_empty(),
             "retainedLines":[],"excludedLines":[],"sourceFragments":a.regions.iter().flat_map(|r|&r.usable_fragments).collect::<Vec<_>>()});
+        super::review::attach_in(tx, item, row.get("adoption_ref"), as_of).await?;
     }
     Ok(())
 }
@@ -76,7 +77,9 @@ pub(crate) fn project_dossier_images(media: &[Value]) -> Value {
         return Value::Null;
     }
     match rule::project_work(&images) {
-        Ok(p) => json!({"state":"OBSERVED_IMAGES_ONLY","projection":p}),
+        Ok(p) => {
+            json!({"state":"OBSERVED_IMAGES_ONLY","projection":super::review::project(media,json!(p))})
+        }
         Err(_) => json!({"state":"ORDER_OR_IDENTITY_UNRESOLVED","projection":null}),
     }
 }

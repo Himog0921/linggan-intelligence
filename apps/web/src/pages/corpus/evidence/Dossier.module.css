@@ -176,3 +176,12 @@
   padding-top:var(--lgi-space-3); }
 .advanced > summary { cursor:pointer;color:var(--lgi-muted);
   font:600 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui); }
+
+/* OCR audit extends the existing evidence inspector; controls keep the shared tokens. */
+.audit { display: grid; gap: var(--lgi-space-3); min-width: 0; margin-top: var(--lgi-space-4); }
+.reviewForm, .reviewForm fieldset { display: grid; gap: var(--lgi-space-3); min-width: 0; }
+.reviewForm fieldset { padding: var(--lgi-space-4); border: 1px solid var(--lgi-border); }
+.reviewForm label { display: grid; gap: var(--lgi-space-2); }
+.reviewForm :is(input,select,textarea) { box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; border: 1px solid var(--lgi-border); background: var(--lgi-canvas); color: var(--lgi-body); padding: var(--lgi-space-2) var(--lgi-space-3); font: inherit; }
+.reviewForm textarea { min-height: var(--lgi-space-24); resize: vertical; }
+.reviewForm :focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: 2px; }

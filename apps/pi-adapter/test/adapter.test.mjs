@@ -75,10 +75,12 @@ test('recorded limit kind distinguishes wire bytes from final text bytes',async(
     const wireBody=frame.repeat(Math.ceil((sseByteLimit(maxOutputTokens)+1)/Buffer.byteLength(frame)));
     assert.ok(Buffer.byteLength(wireBody)>sseByteLimit(maxOutputTokens));
     const wire=await server((req,res)=>{res.writeHead(200,{'Content-Type':'text/event-stream'});res.end(wireBody);});
-    try{const result=await execute(request(wire.url,{maxOutputTokens}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_token_budget',retryClass:'never'});}finally{await wire.close();}
+    try{const result=await execute(request(wire.url,{maxOutputTokens,timeoutMs:15000}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'sse_stream_token_budget',retryClass:'never'});}finally{await wire.close();}
   }
   const final=await server((req,res)=>success(res,'x'.repeat(LIMITS.maxTextBytes+1),false));
-  try{const result=await execute(request(final.url,{maxOutputTokens:8192}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'final_text_bytes'});}finally{await final.close();}
+  // This checks the byte boundary, not CPU speed parsing a megabyte on a shared CI runner.
+  // Keep production deadlines and the dedicated timeout test unchanged.
+  try{const result=await execute(request(final.url,{maxOutputTokens:8192,timeoutMs:15000}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'final_text_bytes'});}finally{await final.close();}
 });
 test('2,000-token fragmented output succeeds above the historical SSE byte cap',async()=>{
   let calls=0;

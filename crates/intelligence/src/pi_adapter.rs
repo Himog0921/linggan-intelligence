@@ -11,6 +11,12 @@ use tokio::{
 
 pub const PI_PROTOCOL: &str = "linggan.pi.v1/0.85.1";
 pub const WEMM_PROTOCOL: &str = "linggan.wemm.v1";
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PiImage {
+    pub mime_type: String,
+    pub data: String,
+}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PiRequest {
@@ -25,6 +31,8 @@ pub struct PiRequest {
     pub max_output_tokens: i32,
     pub system: String,
     pub prompt: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<PiImage>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub execution: Option<crate::ai_foundation::transport::PiExecution>,
 }
@@ -620,6 +628,7 @@ mod diagnostic_tests {
             PathBuf::from("/unused"),
         );
         let mut request = PiRequest {
+            images: vec![],
             version: PI_PROTOCOL,
             operation: "analyze".into(),
             api: "openai-responses".into(),

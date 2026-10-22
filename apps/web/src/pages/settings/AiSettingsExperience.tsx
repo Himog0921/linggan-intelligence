@@ -9,14 +9,16 @@ import { fetchHistory } from './aiSettingsApi';
 import { AiCapabilityForm } from './AiCapabilityForm';
 import { NoticeLine } from './AiSettingsFields';
 import { ConnectionForm, EgressForm, ProbeForm } from './AiModelSection';
+import { OcrAuditSettings } from './OcrAuditSettings';
 import { AiTaskSection, ControlAction } from './AiTaskSection';
 import { AiSkillSection } from './AiSkillSection';
 import { BATCH_STATE, MATERIAL, TASK_STATE, budgetText, count, type AiSettings, type Task } from './aiSettingsModel';
 import type { AiAction } from './useAiAction';
 import styles from './AiSettingsExperience.module.css';
 
-const ORDER = ['writing_legacy', 'note_interpretation', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'legacy_creator_discovery', 'legacy_topic_map'];
+const ORDER = ['ocr_quality_audit', 'writing_legacy', 'note_interpretation', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'legacy_creator_discovery', 'legacy_topic_map'];
 const COPY: Record<string, { group: string; description: string }> = {
+  ocr_quality_audit: { group: '语料质量', description: '可选盲读抽检，人工确认后追加修正，默认关闭。' },
   writing_legacy: { group: '内容工作台', description: '基于选中的作品材料，提供可审阅的写作建议与修改方案。' },
   note_interpretation: { group: '内容理解', description: '提炼笔记观点、表达方式与值得验证的关键信息。' },
   author_org_identity: { group: '创作者研究', description: '辅助判断公开作者简介与账号定位，结论需要保留来源证据。' },
@@ -282,7 +284,7 @@ export function AiRuns({ data }: { data: AiSettings }) {
   const bars = Array.from(byDay.entries()).sort(([a], [b]) => a.localeCompare(b)).slice(-7);
   const max = bars.reduce((value, [, entry]) => entry.known > value ? entry.known : value, 1n);
   const items = (history.data?.items ?? []).filter(item => filter === 'all' || (filter === 'succeeded' ? item.state === 'succeeded' : item.state === 'failed'));
-  return <div className={styles.experience}><div className={styles.sectionHeading}><div><h2>运行与用量</h2><small>真实数据库回执 · 最近七日用量与分页调用记录分开统计</small></div><label className={styles.runFilter}>按工作筛选<select value={taskKey} onChange={event => setQuery({ view: 'runs', ...(event.target.value ? { task: event.target.value } : {}) })}><option value="">全部工作</option>{data.tasks.map(t => <option key={t.taskKey} value={t.taskKey}>{t.label}</option>)}</select></label></div>
+  return <div className={styles.experience}><OcrAuditSettings/><div className={styles.sectionHeading}><div><h2>运行与用量</h2><small>真实数据库回执 · 最近七日用量与分页调用记录分开统计</small></div><label className={styles.runFilter}>按工作筛选<select value={taskKey} onChange={event => setQuery({ view: 'runs', ...(event.target.value ? { task: event.target.value } : {}) })}><option value="">全部工作</option>{data.tasks.map(t => <option key={t.taskKey} value={t.taskKey}>{t.label}</option>)}</select></label></div>
     <div className={styles.runStats}>{[
       ['调用数', calls === null ? '—' : count(calls.toString()), '最近七日'],
       ['失败数', failures === null ? '—' : count(failures.toString()), '按运行账记录'],

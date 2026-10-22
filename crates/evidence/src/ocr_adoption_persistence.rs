@@ -11,6 +11,7 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 mod read;
+mod review;
 mod validation;
 pub(crate) use read::attach_media;
 pub(crate) use read::project_dossier_images;
