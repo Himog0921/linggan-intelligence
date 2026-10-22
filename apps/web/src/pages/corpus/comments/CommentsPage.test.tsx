@@ -12,6 +12,7 @@ describe('D3 actual four-view React boundary', () => {
   await userEvent.click(screen.getByRole('tab',{name:'使用经历'}));
   expect(region).toHaveTextContent('当前研究信号70个');
   expect(calls.filter(call=>call.url.pathname.endsWith('/overview'))).toHaveLength(1);
+  expect(screen.getByRole('button',{name:'近 56 天'})).toHaveAttribute('aria-pressed','true');
   await userEvent.click(screen.getByRole('button',{name:'近 7 天'}));
   await userEvent.click(screen.getByRole('button',{name:'表格'}));
   expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(8);
@@ -27,13 +28,15 @@ describe('D3 actual four-view React boundary', () => {
   expect(screen.getAllByRole('button',{name:'SYNTHETIC 原声 <script>不执行</script>'})).toHaveLength(2);
   expect(document.querySelector('script')).toBeNull();
   expect(screen.getByTitle('点赞数未知：采集时没有取得这条评论的点赞')).toHaveTextContent('—');
+  expect(screen.queryByRole('checkbox',{name:'选择这条评论'})).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button',{name:'选择评论'}));
   const boxes=screen.getAllByRole('checkbox',{name:'选择这条评论'});expect(boxes[0]).toBeEnabled();expect(boxes[1]).toBeDisabled();
   await userEvent.click(boxes[0]!);expect(screen.getByText('已选 1 条 · 来自 1 篇作品')).toBeInTheDocument();expect(screen.queryByRole('button',{name:'研究所选评论'})).not.toBeInTheDocument();
   expect(calls.every(call=>call.method==='GET')).toBe(true);
  });
  it('sends the complete submitted filter to the server and records it in the deep link',async()=>{
   installFetch();const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.selectOptions(screen.getByRole('combobox',{name:'研究标签'}),'need');await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.selectOptions(screen.getByRole('combobox',{name:'点赞'}),'100');await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));
+  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.click(screen.getByRole('combobox',{name:'研究标签'}));await userEvent.click(screen.getByRole('option',{name:'需求'}));await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.click(screen.getByRole('combobox',{name:'点赞'}));await userEvent.click(screen.getByRole('option',{name:'100 以上'}));await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));
   await waitFor(()=>expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('q')).toBe('两字'));
   const call=calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)!;expect(call.url.searchParams.get('signalKind')).toBe('need');expect(call.url.searchParams.get('minLikes')).toBe('100');expect(router.state.location.search).toContain('signalKind=need');expect(call.url.searchParams.get('domain')).toBe(DOMAIN);
  });
@@ -44,11 +47,11 @@ describe('D3 actual four-view React boundary', () => {
   expect(document.querySelector('.v7-context-section-nav')).toContainElement(nav);
   expect(screen.queryByText('评论证据库')).not.toBeInTheDocument();
   await waitFor(()=>expect(document.querySelector('.v7-context-count summary b')).toHaveTextContent('100'));
-  expect(within(screen.getByRole('table')).getAllByRole('columnheader').map(cell=>cell.textContent)).toEqual(['选择','原声','点赞','所属作品','研究状态','研究标签','作者','点赞采集日','观测时间','改帖']);
+  expect(within(screen.getByRole('table')).getAllByRole('columnheader').map(cell=>cell.textContent)).toEqual(['原声','点赞','所属作品','研究状态','研究标签','作者','点赞采集日','观测时间','改帖']);
   expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(3);
   expect(screen.queryByText(/已选 0/)).not.toBeInTheDocument();
  });
- it('keeps all four views read-only for retired research and links to centralized AI settings', async()=> {
+ it('keeps retired research read-only without unrelated AI settings on the page', async()=> {
   installFetch();renderPage();await screen.findByLabelText('研究累计读数与昨日活动');
   expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button',{name:'研究批次'}));
@@ -59,11 +62,12 @@ describe('D3 actual four-view React boundary', () => {
   expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button',{name:'用户评论'}));await screen.findByRole('table');
   expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
-  expect(screen.getByRole('link',{name:'去 AI 设置'})).toHaveAttribute('href','/settings/models?view=advanced&area=work&task=comment_study');
+  expect(screen.queryByRole('link',{name:'去 AI 设置'})).not.toBeInTheDocument();
   expect(calls.every(call=>call.method==='GET')).toBe(true);
  });
  it('retains comment selection across tertiary pages and exposes the compact batch bar only when selected',async()=>{
   installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
+  await userEvent.click(screen.getByRole('button',{name:'选择评论'}));
   await userEvent.click(screen.getAllByRole('checkbox',{name:'选择这条评论'})[0]!);
   expect(screen.getByText('已选 1 条 · 来自 1 篇作品')).toBeInTheDocument();
   await userEvent.click(screen.getByRole('button',{name:'概览'}));await screen.findByLabelText('研究累计读数与昨日活动');
@@ -73,13 +77,13 @@ describe('D3 actual four-view React boundary', () => {
   await userEvent.click(screen.getByRole('button',{name:'清空选择'}));
   expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();
  });
- it('keeps centralized AI status independent of comment-directory failures',async()=>{
+ it('keeps comment-directory failures local',async()=>{
   installFetch(url=>url.pathname.endsWith('/comments')?json({error:'unavailable'},503):undefined);
   renderPage(`domain=${DOMAIN}&view=comments`);
   await screen.findByText(/评论目录读取失败/);
   expect(document.querySelector('.v7-context-count summary b')).toHaveTextContent('—');
   expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
-  expect(screen.getByRole('link',{name:'去 AI 设置'})).toBeInTheDocument();
+  expect(screen.queryByRole('link',{name:'去 AI 设置'})).not.toBeInTheDocument();
   expect(calls.every(call=>call.method==='GET')).toBe(true);
  });
 
