@@ -28,6 +28,30 @@ pub struct ResearchDossier {
     pub image_text_projection: Value,
 }
 
+/// Cloud-manual OCR deliberately has no local line anchors.  It can be inspected
+/// and later human-adopted, but the local re-layer operation cannot process it.
+pub(crate) fn media_can_relayer(media: &Value) -> bool {
+    matches!(
+        media["processorKind"].as_str(),
+        Some("image_ocr" | "video_frame_ocr")
+    ) && !media["processorVersion"]
+        .as_str()
+        .is_some_and(crate::cloud_ocr_adoption::is_processor_version)
+}
+
+pub(crate) fn relayerable_layouts(dossier: &ResearchDossier) -> Vec<Uuid> {
+    dossier
+        .media
+        .iter()
+        .filter(|media| {
+            media_can_relayer(media) && media["state"] == "ACQUIRED" && media["contextOnly"] != true
+        })
+        .filter_map(|media| media["ocrLayering"]["layoutRef"].as_str()?.parse().ok())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
 /// One result per canonical slot/purpose/position. Pending reprocessing does not erase an
 /// already readable source. Selection favors admitted image dimensions and available text;
 /// it never splices lines from multiple layouts or ranks by average confidence alone.
@@ -531,13 +555,16 @@ pub fn relayer_plan(dossier: &ResearchDossier) -> Value {
             ) && m["contextOnly"] != true
         })
         .collect();
-    let layouts: Vec<_> = images
-        .iter()
-        .filter(|m| m["state"] == "ACQUIRED" && m["ocrLayering"]["layoutRef"].is_string())
-        .collect();
+    let layouts = relayerable_layouts(dossier);
     let current = layouts
         .iter()
-        .filter(|m| m["ocrLayering"]["layerVersion"] == crate::ocr_layering::VERSION)
+        .filter(|layout| {
+            images.iter().any(|media| {
+                media_can_relayer(media)
+                    && media["ocrLayering"]["layoutRef"] == json!(layout)
+                    && media["ocrLayering"]["layerVersion"] == crate::ocr_layering::VERSION
+            })
+        })
         .count();
     let slots: Vec<_> = dossier.coverage["mediaSlots"]
         .as_array()
@@ -626,5 +653,45 @@ mod tests {
             selected[0]["ocrLayering"]["imageSubstantiveText"],
             "有完整正文"
         );
+    }
+
+    #[test]
+    fn relayer_plan_excludes_cloud_manual_preview_without_hiding_a_local_layout() {
+        let local = Uuid::new_v4();
+        let cloud = Uuid::new_v4();
+        let dossier = ResearchDossier {
+            contract: VERSION,
+            work_ref: Uuid::nil(),
+            revision: "revision".into(),
+            material_revision: "material".into(),
+            as_of: "2026-10-22T00:00:00Z".into(),
+            fragments: vec![],
+            media: vec![
+                json!({
+                    "slotKey":"xhs:synthetic:image:1","processorKind":"image_ocr",
+                    "processorVersion":"local-v3","state":"ACQUIRED","contextOnly":false,
+                    "ocrLayering":{"layoutRef":local,"layerVersion":"rules-v1"}
+                }),
+                json!({
+                    "slotKey":"xhs:synthetic:image:2","processorKind":"image_ocr",
+                    "processorVersion":"cloud-manual-v1:00000000-0000-4000-8000-000000000001",
+                    "state":"ACQUIRED","contextOnly":false,
+                    "ocrLayering":{"layoutRef":cloud,"layerVersion":"cloud-ocr-adoption.v1","decisionSource":"cloud_vision_unverified"}
+                }),
+            ],
+            coverage: json!({"mediaSlots":[
+                {"slotKey":"xhs:synthetic:image:1","purpose":"body_image"},
+                {"slotKey":"xhs:synthetic:image:2","purpose":"body_image"}
+            ]}),
+            metadata: Value::Null,
+            sections: vec![],
+            image_text_projection: Value::Null,
+        };
+        assert_eq!(relayerable_layouts(&dossier), vec![local]);
+        let plan = relayer_plan(&dossier);
+        assert_eq!(plan["imageJobs"], 2);
+        assert_eq!(plan["layoutCount"], 1);
+        assert_eq!(plan["pendingLayouts"], 1);
+        assert_eq!(plan["needsOcr"], 0);
     }
 }
