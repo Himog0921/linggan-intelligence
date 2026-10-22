@@ -27,26 +27,12 @@ const button=name=>page.getByRole('button',{name,exact:true});
 try {
  const proof=await page.request.get(origin+'/__comment-study-browser-proof');assert.equal(proof.status(),200);assert.equal(await proof.text(),v['proof-token']);
  if(mode==='commands'){
-  await step('Comment directory preserves filtering and shows frozen AI with the unified settings link',async()=>{
+  await step('Comment directory preserves filtering without retired AI controls',async()=>{
    await page.goto(`${origin}/corpus/comments?domain=${domain}&view=comments`);
    await page.locator('#comment-filter-form').waitFor();
-   await page.getByRole('region',{name:'评论研究 AI状态'}).waitFor();
    assert.equal(await button('发起研究').count(),0);
-   assert.equal(await page.getByRole('link',{name:'去 AI 设置'}).getAttribute('href'),'/settings/models?view=advanced&area=work&task=comment_study');
-  });
-  await step('Historical methods remain immutable, readable and comparable',async()=>{
-   await page.getByText('查看历史方法版本',{exact:true}).click();
-   const select=page.getByRole('combobox',{name:'历史方法版本'});await select.waitFor();
-   await select.selectOption(v['existing-policy-ref']);
-   await page.getByRole('heading',{name:'SYNTHETIC A',exact:true}).waitFor();
-   const compare=page.getByRole('combobox',{name:'并排对比其他历史版本'});
-   const older=await compare.locator('option').evaluateAll(options=>options.find(option=>option.textContent.includes('SYNTHETIC B'))?.value);
-   assert.ok(older);await compare.selectOption(older);
-   await page.locator('article').filter({hasText:'默认评论上限'}).nth(1).waitFor();
-   assert.equal(await button('设为默认方法').count(),0);
-   assert.equal(await button('保存新方法版本').count(),0);
-   await select.selectOption(v['initial-active-policy-ref']);
-   await page.getByText('这个历史方法的完整内容未记录。',{exact:true}).waitFor();
+   assert.equal(await page.getByRole('link',{name:'去 AI 设置'}).count(),0);
+   assert.equal(await page.getByText('查看历史方法版本',{exact:true}).count(),0);
   });
   await step('Old start, resume, recovery and method writes are actually rejected without a model',async()=>{
    for(const pathname of ['/api/local/comment-study/runs','/api/local/comment-study/policies',
