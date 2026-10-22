@@ -65,11 +65,11 @@ fn is_han(c: char) -> bool {
 // synonyms, while the short seed phrases must be exact matches in source text.
 fn candidates(text: &str) -> HashSet<String> {
     let mut found: HashSet<String> = SEEDS.iter()
-        .filter(|(term, _)| text.contains(term))
+        .filter(|(term, _)| text.contains(*term))
         .map(|(term, _)| (*term).to_owned())
         .collect();
     let mut span = Vec::<char>::new();
-    let mut scan = |chars: &mut Vec<char>, found: &mut HashSet<String>| {
+    let scan = |chars: &mut Vec<char>, found: &mut HashSet<String>| {
         if chars.len() >= 4 {
             for start in 0..chars.len() {
                 for length in 4..=6 {
@@ -158,7 +158,7 @@ const WORD_CLOUD_SQL: &str = r#"
     SELECT qualified.content_public_ref, qualified.comment_external_id,
            left(qualified.research_text, 800) AS text,
            first_seen.observed_at,
-           count(*) OVER ()::bigint AS scope_count
+           (count(*) OVER ())::bigint AS scope_count
     FROM qualified
     JOIN first_seen USING (content_public_ref, comment_external_id)
     WHERE qualified.exclusion_reason IS NULL
