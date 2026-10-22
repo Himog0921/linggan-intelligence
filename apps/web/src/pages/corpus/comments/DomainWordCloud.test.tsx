@@ -11,7 +11,7 @@ describe('V2.3 scoped language observation', () => {
     installFetch();
     const { router } = renderPage();
     const region = await screen.findByRole('region', { name: '领域高频表达' });
-    expect(within(region).getByRole('button', { name: '作业拖拉' })).toHaveAttribute('title', expect.stringContaining('3 条不同合格评论'));
+    expect(await within(region).findByRole('button', { name: '作业拖拉' })).toHaveAttribute('title', expect.stringContaining('3 条不同合格评论'));
     expect(within(region).getByRole('complementary', { name: '高频短语 Top10' })).toHaveTextContent('作业拖拉');
     await userEvent.click(within(region).getByRole('button', { name: '作业拖拉' }));
     await userEvent.click(within(region).getByRole('button', { name: '查看原声 ↗' }));
