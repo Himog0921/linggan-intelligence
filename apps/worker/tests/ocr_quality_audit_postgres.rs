@@ -245,22 +245,6 @@ print(json.dumps(b,ensure_ascii=False))
         source_before["sequenceOrdinal"]
     );
     drop(requests);
-    // An explicit diagnostic remains independent, after the business image already succeeded.
-    let probe = StartRun {
-        command_ref: Uuid::new_v4(),
-        run_key: "probe:synthetic-vision".into(),
-        seed: "synthetic-probe".into(),
-        visual_probe: true,
-    };
-    let receipt = audit::store::start_run(&db, &probe).await.unwrap();
-    assert_eq!(receipt["selected"], 1);
-    execute(&db, &owner, &adapter).await;
-    let qualified: bool =
-        sqlx::query_scalar("SELECT o.vision_qualified FROM linggan_ocr_audit_observation o JOIN linggan_ocr_audit_sample s USING(sample_ref) WHERE s.pool='probe'")
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
-    assert!(qualified);
     let report = audit::report::report(&db, run_ref).await.unwrap();
     assert_eq!(report["pools"][0]["selected"], 1);
     assert_eq!(report["samples"][0]["workRef"], json!(work));
@@ -382,7 +366,7 @@ print(json.dumps(b,ensure_ascii=False))
         1
     );
     let bodies = wire.requests.lock().unwrap();
-    assert_eq!(bodies.len(), 3);
+    assert_eq!(bodies.len(), 2);
     for b in bodies.iter().skip(1) {
         let content = &b["messages"]
             .as_array()
@@ -495,7 +479,7 @@ print(json.dumps(b,ensure_ascii=False))
     let limit_run: Uuid = serde_json::from_value(limited["runRef"].clone()).unwrap();
     let skipped:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) WHERE b.command_ref=$1 AND c.state='skipped' AND c.attempt_count=0 AND c.failure_code='audit_run_budget_exhausted'").bind(limit_run).fetch_one(db.pool()).await.unwrap();
     assert_eq!(skipped, 1);
-    assert_eq!(wire.requests.lock().unwrap().len(), 3);
+    assert_eq!(wire.requests.lock().unwrap().len(), 2);
     // Local eligibility alone never authorizes egress; revoke a frozen sample before dispatch.
     let privacy_run = audit::store::start_run(
         &db,
@@ -546,9 +530,17 @@ print(json.dumps(b,ensure_ascii=False))
     .unwrap();
     assert_eq!(uncleared["selected"], 0);
     assert_eq!(uncleared["inventory"]["skippedPrivacyUnreviewed"], 1);
-    assert_eq!(wire.requests.lock().unwrap().len(), 3);
-    owner.request_drain().await.unwrap();
-    owner.complete_drain().await.unwrap();
+    assert_eq!(wire.requests.lock().unwrap().len(), 2);
+    let recent = audit::report::recent(&db).await.unwrap();
+    assert!(
+        recent["runs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["runRef"] == json!(run_ref)),
+        "the UI fixture's business run must remain in the four recent manual slots"
+    );
+    owner.heartbeat().await.unwrap();
     if let Some(binary) = std::env::var_os("OCR_AUDIT_BROWSER_PROOF_BINARY") {
         let status = tokio::task::spawn_blocking(move || {
             std::process::Command::new(binary)
@@ -564,6 +556,27 @@ print(json.dumps(b,ensure_ascii=False))
         .unwrap();
         assert!(status.success());
     }
+    // The optional diagnostic cannot evict the business fixture from the recent-run UI.
+    owner.heartbeat().await.unwrap();
+    // An explicit diagnostic remains independent, after the business image already succeeded.
+    let probe = StartRun {
+        command_ref: Uuid::new_v4(),
+        run_key: "probe:synthetic-vision".into(),
+        seed: "synthetic-probe".into(),
+        visual_probe: true,
+    };
+    let receipt = audit::store::start_run(&db, &probe).await.unwrap();
+    assert_eq!(receipt["selected"], 1);
+    execute(&db, &owner, &adapter).await;
+    let qualified: bool =
+        sqlx::query_scalar("SELECT o.vision_qualified FROM linggan_ocr_audit_observation o JOIN linggan_ocr_audit_sample s USING(sample_ref) WHERE s.pool='probe'")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert!(qualified);
+    assert_eq!(wire.requests.lock().unwrap().len(), 3);
+    owner.request_drain().await.unwrap();
+    owner.complete_drain().await.unwrap();
     let source = audit::source::load_in(&mut db.pool().acquire().await.unwrap(), adoption)
         .await
         .unwrap()
