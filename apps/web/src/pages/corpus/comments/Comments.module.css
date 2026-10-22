@@ -309,7 +309,7 @@
 /* Single-line comment research worktable: preserve existing evidence and server-owned actions. */
 .study-worktable-filters{display:grid;gap:var(--lgi-space-3);padding:0 0 var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
 .study-worktable-filter-bar{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:var(--lgi-space-3)}
-.study-worktable-filter-fields{display:grid;grid-template-columns:minmax(calc(var(--lgi-space-24) * 2),2fr) repeat(3,minmax(calc(var(--lgi-space-24) + var(--lgi-space-4)),.85fr));gap:var(--lgi-space-2);min-width:0}
+.study-worktable-filter-fields{display:grid;grid-template-columns:minmax(calc(var(--lgi-space-24) * 2),1fr) repeat(3,minmax(calc(var(--lgi-space-24) * 1.35),calc(var(--lgi-space-24) * 1.75)));gap:var(--lgi-space-2);min-width:0}
 .study-worktable-filter-fields label,.study-filter-advanced label{display:grid;min-width:0;gap:var(--lgi-space-1);font:var(--lgi-text-label)/var(--lgi-lh-body) var(--lgi-font-sans);color:var(--lgi-muted)}
 .study-worktable-filter-fields input,.study-worktable-filter-fields select,.study-filter-advanced select{width:100%;min-width:0;height:var(--lgi-space-10);padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border-strong);background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-text-data)/var(--lgi-lh-body) var(--lgi-font-sans)}
 .study-worktable-filter-actions{display:flex;align-items:end;gap:var(--lgi-space-2)}
@@ -394,6 +394,12 @@
 .study-filter-search-shell kbd {padding-right:var(--lgi-space-3);color:var(--lgi-ghost);font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/1 var(--lgi-font-mono)}
 .study-filter-search-clear {align-self:stretch;display:grid;place-items:center;flex:none;width:var(--lgi-action-height);border:0;border-left:1px solid var(--lgi-hairline);padding:0;background:transparent;color:var(--lgi-muted);font:var(--lgi-text-section)/1 var(--lgi-font-sans);cursor:pointer}
 .study-filter-search-clear:hover {background:var(--lgi-canvas-low);color:var(--lgi-ink)}
+.study-filter-search-shell>span:has([role="combobox"]) {flex:none;border-right:1px solid var(--lgi-border)}
+.study-filter-search-shell {position:relative}
+.study-work-search-results {position:absolute;top:calc(100% + var(--lgi-space-1));right:0;left:0;z-index:var(--lgi-z-popover);display:grid;max-height:calc(var(--lgi-space-24) * 5);overflow:auto;border:var(--lgi-action-border-width) solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal)}
+.study-work-search-results button {min-height:var(--lgi-action-height);border:0;border-bottom:1px solid var(--lgi-hairline);padding:0 var(--lgi-space-3);background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-type-input-weight) var(--lgi-type-input-size)/var(--lgi-type-input-leading) var(--lgi-font-sans);text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.study-work-search-results button:last-child {border-bottom:0}
+.study-work-search-results button[aria-selected="true"],.study-work-search-results button:hover {background:var(--lgi-canvas-low);box-shadow:inset var(--lgi-action-border-width) 0 var(--lgi-signal)}
 .study-filter-advanced .study-filter-control {min-width:calc(var(--lgi-space-24)*1.5)}
 .study-comment-result-bar {display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-3);min-height:var(--lgi-space-12);font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-sans);color:var(--lgi-muted)}
 .study-comment-select-mode {display:inline-flex;align-items:center;justify-content:center;gap:var(--lgi-space-2);height:var(--lgi-space-10);min-height:var(--lgi-space-10);border:var(--lgi-action-border-width) solid var(--lgi-ink);padding:0 var(--lgi-space-4);background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);white-space:nowrap;cursor:pointer}
@@ -429,6 +435,7 @@
 
 /* Results.module.css also styles run tables.  Reassert the comment directory's stricter
  * 48px reading contract here, otherwise its generic 16px cell padding re-expands rows. */
+.study-results-comments .study-comments-table {table-layout:fixed}
 .study-results-comments .study-comments-table tbody td {height:var(--lgi-space-12);padding:0 var(--lgi-space-2);vertical-align:middle;line-height:var(--lgi-lh-data)}
 .study-results-comments .study-comments-table .study-comment-open {display:flex;align-items:center;height:var(--lgi-space-12);overflow:hidden;white-space:nowrap}
 .study-results-comments .study-comments-table .study-comment-voice {display:block;overflow:hidden;-webkit-line-clamp:unset;overflow-wrap:normal;text-overflow:ellipsis;white-space:nowrap;line-height:var(--lgi-lh-data)}
@@ -436,6 +443,7 @@
 .study-results-comments .study-comments-table .study-comment-kinds {align-items:center;flex-wrap:nowrap;overflow:hidden;white-space:nowrap}
 .study-results-comments .study-comments-table .study-comment-like-cell {text-align:right}
 .study-results-comments .study-comments-table .study-comment-like-cell .study-like-count {display:inline-flex;align-items:center;min-height:var(--lgi-space-12);line-height:var(--lgi-lh-data)}
+.study-results-comments .study-comments-table .study-comment-like-heading {text-align:right}
 
 /* The generic Results drawer predates Context Bar measurement.  The comment inspector
  * starts at the measured shared-shell edge instead of covering the breadcrumb/navigation. */
@@ -443,3 +451,19 @@ body:has(.study-results-comments) :global(#comment-detail-dialog).study-detail-d
 body:has(.study-results-comments) :global(#comment-detail-body).study-detail-body {padding:0 var(--lgi-space-6) var(--lgi-space-6)}
 body:has(.study-results-comments) :global(#comment-detail-body).study-detail-body>blockquote {margin:var(--lgi-space-5) 0 0;padding:var(--lgi-space-4);border-left:var(--lgi-action-rail-width) solid var(--lgi-signal);background:var(--lgi-canvas-low);font:var(--lgi-text-longform)/var(--lgi-lh-longform) var(--lgi-font-evidence)}
 @media(max-width:900px){body:has(.study-results-comments) :global(#comment-detail-dialog).study-detail-dialog {inset:var(--v7-header-height) 0 0;width:100%;height:calc(100dvh - var(--v7-header-height));max-height:calc(100dvh - var(--v7-header-height))}body:has(.study-results-comments) :global(#comment-detail-body).study-detail-body {padding:0 var(--lgi-space-4) var(--lgi-space-4)}}
+
+/* The directory keeps its action plane compact: advanced choices float from the filter trigger,
+ * while selection owns one left-edge page action instead of growing a second toolbar. */
+.study-worktable-filter-actions {position:relative;align-items:end}
+.study-worktable-filter-actions .study-comment-select-mode {flex:none}
+.study-filter-advanced {position:absolute;top:calc(100% + var(--lgi-space-2));right:0;z-index:var(--lgi-z-popover);display:grid;grid-template-columns:repeat(3,minmax(calc(var(--lgi-space-24) * 1.35),1fr));gap:var(--lgi-space-3);width:min(calc(var(--lgi-space-24) * 7.5),calc(100vw - var(--lgi-space-6)));box-sizing:border-box;border:var(--lgi-action-border-width) solid var(--lgi-ink);padding:var(--lgi-space-4);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal)}
+.study-filter-advanced footer {grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-3);border-top:1px solid var(--lgi-hairline);padding-top:var(--lgi-space-3)}
+.study-filter-advanced footer .study-link {color:var(--lgi-ink);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui)}
+.study-filter-work-error {margin:var(--lgi-space-2) 0 0;color:var(--lgi-danger);font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-sans)}
+.study-comment-page-select {height:var(--lgi-space-10);min-height:var(--lgi-space-10);border:var(--lgi-action-border-width) solid var(--lgi-ink);padding:0 var(--lgi-space-4);background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);cursor:pointer}
+.study-comment-page-select:hover:not(:disabled) {background:var(--lgi-canvas-low)}
+.study-comment-page-select:disabled {color:var(--lgi-muted);cursor:not-allowed}
+.study-comment-toast {position:fixed;right:var(--lgi-space-6);bottom:var(--lgi-space-6);z-index:var(--lgi-z-toast);max-width:min(calc(var(--lgi-space-24) * 4),calc(100vw - var(--lgi-space-12)));margin:0;border:var(--lgi-action-border-width) solid var(--lgi-ink);padding:var(--lgi-space-3) var(--lgi-space-4);background:var(--lgi-ink);color:var(--lgi-on-dark);box-shadow:var(--lgi-shadow-brutal);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);animation:study-comment-toast-in var(--lgi-duration-overlay) var(--lgi-ease-enter)}
+.study-comment-toast[data-error="true"] {background:var(--lgi-danger);color:var(--lgi-on-dark)}
+@keyframes study-comment-toast-in {from {opacity:0;transform:translateY(var(--lgi-space-3))} to {opacity:1;transform:none}}
+@media(max-width:900px) {.study-filter-advanced {grid-template-columns:1fr}.study-filter-advanced footer {grid-column:auto}}

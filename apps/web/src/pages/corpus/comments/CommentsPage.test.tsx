@@ -27,17 +27,18 @@ describe('D3 actual four-view React boundary', () => {
   await screen.findByRole('table');
   expect(screen.getAllByRole('button',{name:'SYNTHETIC 原声 <script>不执行</script>'})).toHaveLength(2);
   expect(document.querySelector('script')).toBeNull();
+  expect(document.querySelector('select[aria-label="搜索范围"]')).toBeNull();
   expect(screen.getByTitle('点赞数未知：采集时没有取得这条评论的点赞')).toHaveTextContent('—');
   expect(screen.queryByRole('checkbox',{name:'选择这条评论'})).not.toBeInTheDocument();
   expect(screen.getByRole('button',{name:'选择评论'})).toHaveAttribute('title','进入批量选择模式');
-  await userEvent.click(screen.getByRole('button',{name:'选择评论'}));
+  const selectMode = screen.getByRole('button',{name:'选择评论'});await userEvent.click(selectMode);
   const boxes=screen.getAllByRole('checkbox',{name:'选择这条评论'});expect(boxes[0]).toBeEnabled();expect(boxes[1]).toBeDisabled();
-  await userEvent.click(boxes[0]!);expect(screen.getByText('已选 1 条 · 来自 1 篇作品')).toBeInTheDocument();expect(screen.queryByRole('button',{name:'研究所选评论'})).not.toBeInTheDocument();
+  const pageSelect=screen.getByRole('button',{name:/勾选本页/});expect(pageSelect.compareDocumentPosition(screen.getByRole('button',{name:'取消选择'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();await userEvent.click(boxes[0]!);expect(screen.getByRole('button',{name:/勾选本页/})).toBeInTheDocument();expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'研究所选评论'})).not.toBeInTheDocument();
   expect(calls.every(call=>call.method==='GET')).toBe(true);
  });
  it('sends the complete submitted filter to the server and records it in the deep link',async()=>{
   installFetch();const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.click(screen.getByRole('combobox',{name:'研究标签'}));await userEvent.click(screen.getByRole('option',{name:'需求'}));await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.click(screen.getByRole('combobox',{name:'点赞'}));await userEvent.click(screen.getByRole('option',{name:'100 以上'}));await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));
+  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.click(screen.getByRole('combobox',{name:'研究标签'}));await userEvent.click(screen.getByRole('option',{name:'需求'}));await userEvent.click(screen.getByRole('button',{name:'筛选'}));await userEvent.click(screen.getByRole('combobox',{name:'点赞'}));await userEvent.click(screen.getByRole('option',{name:'100 以上'}));await userEvent.click(screen.getByRole('button',{name:'完成'}));
   await waitFor(()=>expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('q')).toBe('两字'));
   const call=calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)!;expect(call.url.searchParams.get('signalKind')).toBe('need');expect(call.url.searchParams.get('minLikes')).toBe('100');expect(router.state.location.search).toContain('signalKind=need');expect(call.url.searchParams.get('domain')).toBe(DOMAIN);
  });
@@ -49,14 +50,25 @@ describe('D3 actual four-view React boundary', () => {
   expect(reads()).toBe(1);
   expect(screen.getByRole('searchbox',{name:'字面搜索'})).toHaveValue('');
  });
- it('keeps a matched work in the filter draft until it is explicitly applied',async()=>{
+ it('uses the one FIND field to choose a work title before it explicitly applies the work filter',async()=>{
   installFetch();const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
   const commentReads=()=>calls.filter(call=>call.url.pathname.endsWith('/comments')).length;
-  await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.type(screen.getByRole('searchbox',{name:'所属作品'}),'合成');await userEvent.click(screen.getByRole('button',{name:'查找作品'}));
-  await userEvent.click(await screen.findByRole('combobox',{name:'已匹配作品'}));await userEvent.click(await screen.findByRole('option',{name:'合成作品'}));
+  await userEvent.click(screen.getByRole('combobox',{name:'搜索范围'}));await userEvent.click(screen.getByRole('option',{name:'作品标题'}));await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'合成');await userEvent.click(screen.getByRole('button',{name:'筛选'}));await userEvent.click(screen.getByRole('button',{name:'完成'}));
+  await userEvent.click(await screen.findByRole('option',{name:'合成作品'}));
   const readsBeforeApply=commentReads();expect(router.state.location.search).not.toContain('workRef=');
-  await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));await waitFor(()=>expect(router.state.location.search).toContain(`workRef=${WORK}`));
+  await userEvent.click(screen.getByRole('button',{name:'筛选'}));await userEvent.click(screen.getByRole('button',{name:'完成'}));await waitFor(()=>expect(router.state.location.search).toContain(`workRef=${WORK}`));
   expect(commentReads()).toBeGreaterThan(readsBeforeApply);expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('workRef')).toBe(WORK);
+ });
+ it('returns from comment detail to a visible work-title FIND filter',async()=>{
+  installFetch(url=>url.pathname.endsWith('/comments/detail') ? json({commentKey:{workRef:WORK,commentExternalId:'c1'},source:{sourceState:'known',displayState:'known'},comment:comment(),work:{displayTitle:'合成作品',displayTitleSource:'platform_title'},parentContext:null,studyHistory:{items:[],totalCount:0,page:{nextCursor:null}}}) : url.pathname.endsWith('/comments/related') ? json({commentKey:{workRef:WORK,commentExternalId:'c1'},sourceState:'known',signals:[],page:{nextCursor:null}}) : undefined);
+  const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
+  await userEvent.click(screen.getAllByRole('button',{name:'SYNTHETIC 原声 <script>不执行</script>'})[0]!);
+  await userEvent.click(await screen.findByRole('button',{name:'查看该作品的评论'}));
+  await waitFor(()=>{ const params=new URLSearchParams(router.state.location.search);expect(params.get('searchScope')).toBe('work');expect(params.get('q')).toBe('合成作品');expect(params.get('workRef')).toBe(WORK); });
+  expect(screen.getByRole('combobox',{name:'搜索范围'})).toHaveTextContent('作品标题');
+  expect(screen.getByRole('searchbox',{name:'字面搜索'})).toHaveValue('合成作品');
+  const listRead=calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)!;
+  expect(listRead.url.searchParams.get('workRef')).toBe(WORK);expect(listRead.url.searchParams.get('q')).toBe('');
  });
  it('moves tertiary navigation and verified counts into the shared context row, keeping the table flat', async()=> {
   installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
@@ -83,17 +95,17 @@ describe('D3 actual four-view React boundary', () => {
   expect(screen.queryByRole('link',{name:'去 AI 设置'})).not.toBeInTheDocument();
   expect(calls.every(call=>call.method==='GET')).toBe(true);
  });
- it('retains comment selection across tertiary pages and exposes the compact batch bar only when selected',async()=>{
+ it('retains comment selection across tertiary pages without adding a batch-summary toolbar',async()=>{
   installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
   await userEvent.click(screen.getByRole('button',{name:'选择评论'}));
   await userEvent.click(screen.getAllByRole('checkbox',{name:'选择这条评论'})[0]!);
-  expect(screen.getByText('已选 1 条 · 来自 1 篇作品')).toBeInTheDocument();
+  expect(screen.getByRole('button',{name:/勾选本页/})).toBeInTheDocument();expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button',{name:'概览'}));await screen.findByLabelText('研究累计读数与昨日活动');
   expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();
   await userEvent.click(screen.getByRole('button',{name:'用户评论'}));await screen.findByRole('table');
   expect(screen.getAllByRole('checkbox',{name:'选择这条评论'})[0]).toBeChecked();
-  await userEvent.click(screen.getByRole('button',{name:'清空选择'}));
-  expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button',{name:'取消选择'}));
+  expect(screen.queryByRole('checkbox',{name:'选择这条评论'})).not.toBeInTheDocument();
  });
  it('keeps comment-directory failures local',async()=>{
   installFetch(url=>url.pathname.endsWith('/comments')?json({error:'unavailable'},503):undefined);
@@ -111,7 +123,7 @@ describe('D3 actual four-view React boundary', () => {
    if(url.pathname.endsWith('/comments')&&attempts>1)return json({domainRef:DOMAIN,items:[{...comment(),postUsage:{state:'used',markedAt:null}}],summary:{displayableCommentCount:1,eligibleCommentCount:1},indexCoverage:{indexedCount:1,pendingCount:0},page:{nextCursor:null}});
    return undefined;
   });renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);const receiptStatus=await screen.findByText(/保存未获确认/);expect(receiptStatus.tagName).toBe('P');expect(screen.queryByText('已改成帖子',{exact:true})).not.toBeInTheDocument();await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);await screen.findByRole('button',{name:'撤销标记'});
+  await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);const receiptStatus=await screen.findByText(/保存未获确认/);expect(receiptStatus.tagName).toBe('P');expect(receiptStatus).toHaveAttribute('data-comment-toast');expect(receiptStatus).toHaveAttribute('data-error','true');expect(screen.queryByText('已改成帖子',{exact:true})).not.toBeInTheDocument();await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);await screen.findByRole('button',{name:'撤销标记'});expect(screen.getByText('已确认原请求回执，没有重复记录。')).toHaveAttribute('data-comment-toast');
   const writes=calls.filter(call=>call.method==='POST');expect(writes).toHaveLength(2);expect(writes[0]!.body?.requestRef).toBe(writes[1]!.body?.requestRef);expect(writes[0]!.body?.workRef).toBe(WORK);
  });
  it('aborts the old domain read and excludes its late result from the new domain',async()=>{
