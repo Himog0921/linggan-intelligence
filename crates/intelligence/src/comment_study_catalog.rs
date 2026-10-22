@@ -19,6 +19,8 @@ mod post_usage;
 mod read;
 #[path = "comment_study_catalog/works.rs"]
 mod works;
+#[path = "comment_study_catalog/word_cloud.rs"]
+mod word_cloud;
 
 pub use read::{
     CatalogPostUsage, CatalogSort, CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole,
@@ -33,6 +35,7 @@ pub use post_usage::{
     PostUsageAction, PostUsageCommand, PostUsageError, record_comment_post_usage,
 };
 pub use works::{WorkCatalogQuery, read_work_catalog};
+pub use word_cloud::{WordCloudQuery, read_word_cloud};
 
 pub(super) fn facts_sql() -> String {
     include_str!("comment_study_catalog/facts.sql").replace(
