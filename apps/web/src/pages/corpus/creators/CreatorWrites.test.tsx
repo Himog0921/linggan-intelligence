@@ -259,7 +259,7 @@ describe('迟到的回执不改写之后打开的对话框（#384 发现 5）', 
 describe('发现设置', () => {
   async function openPolicy(list = listJson({ revision: 3, items: [itemJson(1)] })) {
     const view = await page(list);
-    await view.user.click(screen.getByRole('button', { name: '发现设置' }));
+    await view.user.click(screen.getByRole('button', { name: '判定标准' }));
     const dialog = await screen.findByRole('dialog', { name: '发现设置' });
     return { ...view, dialog };
   }
@@ -305,7 +305,7 @@ describe('发现设置', () => {
     kit.route('GET', '/api/local/ai-settings', () => error(503, 'ai_database_unavailable'));
     const { user } = renderCreatorsPage();
     await screen.findByRole('table');
-    await user.click(screen.getByRole('button', { name: '发现设置' }));
+    await user.click(screen.getByRole('button', { name: '判定标准' }));
     const dialog = await screen.findByRole('dialog', { name: '发现设置' });
     expect(await within(dialog).findByText('开关读取失败，当前值待核对。')).toBeInTheDocument();
     await user.type(within(dialog).getByRole('spinbutton', { name: /最低点赞/ }), '50');
@@ -343,7 +343,7 @@ describe('发现设置', () => {
     cancel();
     await user.click(await screen.findByRole('button', { name: '收起并继续跟踪' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await user.click(screen.getByRole('button', { name: '发现设置' }));
+    await user.click(screen.getByRole('button', { name: '判定标准' }));
     const reopened = await screen.findByRole('dialog', { name: '发现设置' });
     await user.type(within(reopened).getByRole('spinbutton', { name: /最低点赞/ }), '500');
     gate.resolve({ status: 200, body: { revision: 4, saved: true } });
