@@ -16,7 +16,7 @@ describe('D3 observation counts and coverage', () => {
     render(<ObservationChart points={points(1)} />);
     const svg = screen.getByRole('img', { name: '评论柱状与研究信号渐变曲线，共同横轴及采集覆盖' });
     const axis = [...svg.querySelectorAll('text[text-anchor="end"]')].filter(e => Number(e.getAttribute('x')) === 40 && Number(e.getAttribute('y')) < 400).map(e => e.textContent);
-    expect(axis).toEqual(['0', '1']);
+    expect(axis).toEqual(['1', '0']);
     expect(screen.getByRole('img', { name: /2026-10-01：首次观察 1 条/ })).toBeInTheDocument();
   });
   it('shows unobserved days as unknown without hiding independent signal counts', () => {
