@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { LikeCount, PostUsageControl } from './CommentCells';
 import { ActionButton } from '../../../shared/ActionButton';
@@ -18,12 +18,12 @@ interface Props { domain: string; nav: StudyNavigation; selected: SelectedCommen
 export function CommentsView({ domain, nav, selected, onSelected, onCounts, requestRefs, closeDetail }: Props) {
   const location = useLocation(), navigate = useNavigate(), params = new URLSearchParams(location.search);
   const state = location.state as { commentFilter?: CommentFilters; commentDomain?: string } | null;
-  const filter = commentFilters(params, state?.commentDomain === domain ? state.commentFilter : null);
+  const filter = useMemo(() => commentFilters(new URLSearchParams(location.search), state?.commentDomain === domain ? state.commentFilter : null), [domain, location.search, state]);
   const [feedback, setFeedback] = useState(''), [postUsageFeedback, setPostUsageFeedback] = useState(''), [workError, setWorkError] = useState('');
   const [advanced, setAdvanced] = useState(() => !!(filter.voiceRole !== 'reader_and_unknown' || filter.minLikes || filter.postUsage !== 'all' || filter.workRef));
   const [draft, setDraft] = useState(filter);
   const [selecting, setSelecting] = useState(selected.length > 0);
-  useEffect(() => { setDraft(filter); }, [domain, location.search]);
+  useEffect(() => { setDraft(filter); }, [filter]);
   const alive = useRef(true), searchSerial = useRef(0), currentLocation = useRef(location.key);
   useLayoutEffect(() => { currentLocation.current = location.key; }, [location.key]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; searchSerial.current += 1; }; }, []);
@@ -67,7 +67,8 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
     for (const item of loadedEligible) {
       const key = commentIdentity(item.commentKey);
       if (ids.has(key)) continue;
-      if (next.length >= 3000 || (!works.has(item.commentKey.workRef) && works.size >= 100)) break;
+      if (next.length >= 3000) break;
+      if (!works.has(item.commentKey.workRef) && works.size >= 100) continue;
       next.push({ commentKey: item.commentKey, observationRole: item.observationRole });
       ids.add(key); works.add(item.commentKey.workRef);
     }
@@ -92,7 +93,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
               {value:'all',label:'全部'}, {value:'never_studied',label:'从未研究'}, {value:'in_progress',label:'处理中'},
               {value:'studied',label:'已有成功结果'}, {value:'needs_context',label:'等待语境'}, {value:'failed',label:'最近失败'},
             ]} /></div>
-            <div className={c('study-filter-control')}><span>研究标签</span><SelectField label="研究标签" value={draft.signalKind || ''} onChange={signalKind => setDraft(old => ({ ...old, signalKind: signalKind || null }))} options={[{value:'',label:'全部标签'},...Object.entries(signalKindLabel).map(([value,label])=>({value,label}))]} /></div>
+            <div className={c('study-filter-control')}><span>研究标签</span><SelectField label="研究标签" value={draft.signalKind || ''} onChange={signalKind => setDraft(old => ({ ...old, signalKind: signalKind || null }))} options={[{value:'',label:'全部标签'},...Object.entries(signalKindLabel).map(([value,label])=>({value,label:label || value}))]} /></div>
             <div className={c('study-filter-control')}><span>排序</span><SelectField label="排序" value={draft.sort} onChange={sort => setDraft(old => ({ ...old, sort }))} options={[{value:'like_desc',label:'点赞最多'},{value:'received_desc',label:'最新收到'}]} /></div>
           </div>
           <div className={c('study-worktable-filter-actions')}>
