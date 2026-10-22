@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { errorText, num } from './format';
 import { useStudyRead, type StudyNavigation } from './studyApi';
-import { parseWordCloud, type WordCategory } from './wordCloudDtos';
+import { parseWordCloud } from './wordCloudDtos';
+import type { WordCloudCategory } from './overviewState';
 import { c } from './styles';
 
-type Category = 'all' | Exclude<WordCategory, 'unclassified'>;
+type Category = WordCloudCategory;
 const TABS: readonly { key: Category; label: string }[] = [
   { key: 'all', label: '全部表达' },
   { key: 'scenario', label: '困难场景' },
@@ -18,9 +19,10 @@ function weight(value: number, maximum: number): number {
 }
 
 /** Compact V2.3 voice map: phrases are exact source-text matches, not AI-created labels. */
-export function DomainWordCloud({ domain, days, nav }: { domain: string; days: number; nav: StudyNavigation }) {
+export function DomainWordCloud({ domain, days, nav, category, onCategory }: {
+  domain: string; days: number; nav: StudyNavigation; category: Category; onCategory: (category: Category) => void;
+}) {
   const query = useStudyRead(domain, `word-cloud?days=${days}`, parseWordCloud);
-  const [category, setCategory] = useState<Category>('all');
   const [chosen, setChosen] = useState<string | null>(null);
   const [showSources, setShowSources] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
@@ -47,7 +49,7 @@ export function DomainWordCloud({ domain, days, nav }: { domain: string; days: n
       <div className={c('study-word-title')}><h2>领域高频表达</h2><small>评论原声中的短语 · 非用户问题判定</small></div>
       <div className={c('study-word-tabs')} role="group" aria-label="表达分类">
         {TABS.map(tab => <button key={tab.key} type="button" aria-pressed={category === tab.key}
-          onClick={() => { setCategory(tab.key); setChosen(null); }}>{tab.label}</button>)}
+          onClick={() => { onCategory(tab.key); setChosen(null); }}>{tab.label}</button>)}
       </div>
     </div>
     {query.isPending ? <div className={c('study-word-state')} role="status">正在统计近 {days} 天合格评论的词语…</div>
