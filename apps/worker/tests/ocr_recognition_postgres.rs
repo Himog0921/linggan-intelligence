@@ -118,6 +118,17 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     let work = ocr::admit(&db, work_key, 1, &image(1), "image/png").await;
     ocr::admit(&db, work_key, 2, &image(2), "image/png").await;
     ocr::admit(&db, work_key, 3, &image(3), "image/png").await;
+    let unconfigured = read_run(&db, work).await.unwrap();
+    assert_eq!(unconfigured["state"], "unavailable");
+    assert_eq!(
+        unconfigured["unavailableReason"], "图片文字识别尚未配置可用模型或端点。",
+        "an empty model selection is configuration state, not a database read failure"
+    );
+    let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(calls, 0, "reading unconfigured OCR never calls a model");
     let wire = endpoint::Endpoint::start(false).await;
     let adapter = adapter();
     let mut owner = ExecutorSession::acquire(&db, "synthetic-manual-ocr", 4)
