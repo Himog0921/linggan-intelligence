@@ -708,3 +708,35 @@
 
 .pagination .pageButton { height:var(--lgi-space-8); padding-inline:var(--lgi-space-2); }
 .pageSize [role=combobox] { min-height:var(--lgi-space-8); padding-inline:var(--lgi-space-2); }
+
+/* CORPUS-UX-20261022: compact corpus explorer, single controls and disciplined rows. */
+.workTools {display:flex;flex-direction:column;align-items:stretch;gap:var(--lgi-space-2)}
+.toolbar {flex-direction:row;align-items:center;flex-wrap:nowrap;gap:var(--lgi-space-3)}
+.toolbar .search {flex:1 1 auto;min-width:0}
+.queryActions {flex:0 0 auto;gap:var(--lgi-space-2)}
+.queryActions > :last-child {margin-left:0}
+.queryActions > span {min-width:calc(var(--lgi-space-24) + var(--lgi-space-12))}
+.viewBar {display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:var(--lgi-space-3)}
+.quick {gap:var(--lgi-space-5)}
+.resultBar {min-height:var(--lgi-space-10);padding-block:var(--lgi-space-1)}
+.scopeTools {gap:var(--lgi-space-1)}
+.table tbody tr {height:var(--creator-row)}
+.table tbody td {height:var(--creator-row);vertical-align:middle}
+.table .cell {min-height:0;max-height:calc(var(--lgi-space-16) - var(--lgi-space-1));align-content:center}
+.table .cellCopy {align-self:center}
+.table .number .cell {text-align:right}
+.table .ellipsis {white-space:nowrap;text-overflow:ellipsis}
+.table .clamp {max-height:var(--lgi-space-10);-webkit-line-clamp:2}
+@container (max-width:1000px) {
+  .toolbar {flex-wrap:wrap}
+  .toolbar .search {flex:1 1 calc(var(--lgi-space-24)*3);min-width:0}
+  .queryActions {flex:1 0 auto}
+  .viewBar .quick {overflow:auto}
+}
+@container (max-width:600px) {
+  .toolbar {flex-direction:column;align-items:stretch}
+  .toolbar .search {flex:0 0 auto;width:100%}
+  .queryActions {width:100%;flex:1}
+  .viewBar {min-width:0}
+  .resultBar {flex-wrap:wrap}
+}
