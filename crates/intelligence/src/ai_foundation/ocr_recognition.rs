@@ -106,12 +106,13 @@ async fn scope_in(
     work: Uuid,
     config: Uuid,
 ) -> Result<(Value, Vec<Source>), FoundationError> {
-    let cfg: Uuid = sqlx::query_scalar(
+    let cfg: Option<Uuid> = sqlx::query_scalar(
         "SELECT model_config_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
     )
     .bind(config)
     .fetch_one(&mut *conn)
     .await?;
+    let cfg = cfg.ok_or(FoundationError::ConfigurationIncomplete)?;
     let model = transport_store::load_frozen_in(conn, cfg).await?;
     let sources = sources_in(conn, work).await?;
     if sources.is_empty() {
