@@ -22,8 +22,13 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
   const [feedback, setFeedback] = useState(''), [postUsageFeedback, setPostUsageFeedback] = useState(''), [workError, setWorkError] = useState('');
   const [advanced, setAdvanced] = useState(() => !!(filter.voiceRole !== 'reader_and_unknown' || filter.minLikes || filter.postUsage !== 'all' || filter.workRef));
   const [draft, setDraft] = useState(filter);
+  const [previousFilter, setPreviousFilter] = useState(filter);
   const [selecting, setSelecting] = useState(selected.length > 0);
-  useEffect(() => { setDraft(filter); }, [filter]);
+  // A router change replaces the submitted draft; local SelectField edits never auto-query.
+  if (previousFilter !== filter) {
+    setPreviousFilter(filter);
+    setDraft(filter);
+  }
   const alive = useRef(true), searchSerial = useRef(0), currentLocation = useRef(location.key);
   useLayoutEffect(() => { currentLocation.current = location.key; }, [location.key]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; searchSerial.current += 1; }; }, []);
