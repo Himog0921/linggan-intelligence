@@ -9,7 +9,8 @@ describe('D3 actual four-view React boundary', () => {
   installFetch(); renderPage();
   const region = await screen.findByLabelText('研究累计读数与昨日活动');
   expect(region).toHaveTextContent('可研究评论100条');expect(region).toHaveTextContent('当前研究信号70个');expect(region).toHaveTextContent('长期用户问题0个');
-  await userEvent.click(screen.getByRole('tab',{name:'使用经历'}));
+  await screen.findByRole('button',{name:'办法与经历'});
+  await userEvent.click(screen.getByRole('button',{name:'办法与经历'}));
   expect(region).toHaveTextContent('当前研究信号70个');
   expect(calls.filter(call=>call.url.pathname.endsWith('/overview'))).toHaveLength(1);
   expect(screen.getByRole('button',{name:'近 56 天'})).toHaveAttribute('aria-pressed','true');
