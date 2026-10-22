@@ -22,12 +22,14 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
   const [feedback, setFeedback] = useState(''), [postUsageFeedback, setPostUsageFeedback] = useState(''), [workError, setWorkError] = useState('');
   const [advanced, setAdvanced] = useState(() => !!(filter.voiceRole !== 'reader_and_unknown' || filter.minLikes || filter.postUsage !== 'all' || filter.workRef));
   const [draft, setDraft] = useState(filter);
+  const [queryDraft, setQueryDraft] = useState(filter.q);
   const [previousFilter, setPreviousFilter] = useState(filter);
   const [selecting, setSelecting] = useState(selected.length > 0);
   // A router change replaces the submitted draft; local SelectField edits never auto-query.
   if (previousFilter !== filter) {
     setPreviousFilter(filter);
     setDraft(filter);
+    setQueryDraft(filter.q);
   }
   const alive = useRef(true), searchSerial = useRef(0), currentLocation = useRef(location.key);
   useLayoutEffect(() => { currentLocation.current = location.key; }, [location.key]);
@@ -86,15 +88,14 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
       {postUsageFeedback ? <p className={c('study-table-status')} role="status">{postUsageFeedback}</p> : null}
       <form key={queryParams.toString()} id="comment-filter-form" className={c('study-worktable-filters')} onSubmit={event => {
         event.preventDefault();
-        const form = new FormData(event.currentTarget);
-        route({ q: String(form.get('q') || '').trim(), studyState: draft.studyState, signalKind: draft.signalKind,
+        route({ q: queryDraft.trim(), studyState: draft.studyState, signalKind: draft.signalKind,
           voiceRole: draft.voiceRole, sort: draft.sort, minLikes: draft.minLikes, postUsage: draft.postUsage,
           workRef: draft.workRef, workLabel: draft.workLabel, workChoices: draft.workChoices,
           cursor: null, history: [] });
       }}>
         <div className={c('study-worktable-filter-bar')}>
           <div className={c('study-worktable-filter-fields')}>
-            <label className={c('study-filter-query')}><span className={c('study-filter-title')}>字面搜索</span><span className={c('study-filter-search-shell')}><b aria-hidden="true">FIND</b><input id="comment-query" name="q" type="search" aria-label="字面搜索" defaultValue={filter.q} placeholder="搜索评论文本" autoComplete="off" /></span></label>
+            <label className={c('study-filter-query')}><span className={c('study-filter-title')}>字面搜索</span><span className={c('study-filter-search-shell')}><b aria-hidden="true">FIND</b><input id="comment-query" name="q" type="search" aria-label="字面搜索" value={queryDraft} onChange={event => setQueryDraft(event.currentTarget.value)} placeholder="搜索评论文本" autoComplete="off" />{queryDraft ? <button type="button" className={c('study-filter-search-clear')} aria-label="清空字面搜索" onClick={() => setQueryDraft('')}>×</button> : <kbd aria-hidden="true">/</kbd>}</span></label>
             <div className={c('study-filter-control')}><span>研究状态</span><SelectField label="研究状态" value={draft.studyState} onChange={studyState => setDraft(old => ({ ...old, studyState }))} options={[
               {value:'all',label:'全部'}, {value:'never_studied',label:'从未研究'}, {value:'in_progress',label:'处理中'},
               {value:'studied',label:'已有成功结果'}, {value:'needs_context',label:'等待语境'}, {value:'failed',label:'最近失败'},
@@ -130,10 +131,10 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
       </div>
       <div className={c('study-comment-result-bar')}>
         <span>{stats?.displayableCommentCount == null ? '评论范围待读取' : `当前筛选 ${stats.displayableCommentCount.toLocaleString('zh-CN')} 条评论`}</span>
-        <ActionButton variant="outline" type="button" aria-pressed={selecting} onClick={() => {
+        <button className={c('study-comment-select-mode')} type="button" aria-pressed={selecting} title={selecting ? '退出并清空本次选择' : '进入批量选择模式'} onClick={() => {
           if (selecting) onSelected([]);
           setSelecting(old => !old);
-        }}>{selecting ? '完成选择' : '选择评论'}</ActionButton>
+        }}><span aria-hidden="true" className={c('study-comment-select-glyph')}><i/><i/><i/><i/></span>{selecting ? '完成选择' : '选择评论'}</button>
       </div>
       {selecting ? <div className={c('study-comment-selection')} aria-label="当前所选评论">
         <span id="comment-selection-count" role="status">已选 {selected.length} 条 · 来自 {selectedWorks.size} 篇作品</span>
@@ -157,7 +158,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
             <td><button type="button" className={c('study-comment-open')} aria-label={item.commentText || '评论原声不可用'} title={item.commentText || '评论原声不可用'} data-comment-work={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} onClick={() => nav.comment(item.commentKey)}>
               <span className={c('study-comment-voice')}>{item.commentText || '评论原声不可用'}</span>{!eligible ? <span className={c('study-row-limitation')} title={eligibilityText}>不可研</span> : null}
             </button></td>
-            <td><LikeCount item={item} compact /></td>
+            <td className={c('study-comment-like-cell')}><LikeCount item={item} compact /></td>
             <td><span className={c('study-work-title')} title={item.workTitle ? (item.workTitleSource === 'platform_title' ? item.workTitle : item.workTitle + ' · ' + (workTitleSourceLabel[item.workTitleSource || ''] || '标题来源未记录')) : '未命名作品'}>{item.workTitle || '未命名作品'}</span></td>
             <td><span className={c('study-row-status')} title={statusText}>{statusText}</span></td>
             <td><div className={c('study-comment-kinds')} title={fullKinds || '无当前有效标签'}>{kinds.length ? kinds.map(kind => <span className={c('study-badge')} key={kind}>{signalKindLabel[kind]}</span>) : <span className={c('study-detail-muted')} aria-label="无当前有效标签">—</span>}</div></td>

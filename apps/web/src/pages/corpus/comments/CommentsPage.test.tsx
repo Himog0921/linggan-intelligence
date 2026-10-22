@@ -29,6 +29,7 @@ describe('D3 actual four-view React boundary', () => {
   expect(document.querySelector('script')).toBeNull();
   expect(screen.getByTitle('点赞数未知：采集时没有取得这条评论的点赞')).toHaveTextContent('—');
   expect(screen.queryByRole('checkbox',{name:'选择这条评论'})).not.toBeInTheDocument();
+  expect(screen.getByRole('button',{name:'选择评论'})).toHaveAttribute('title','进入批量选择模式');
   await userEvent.click(screen.getByRole('button',{name:'选择评论'}));
   const boxes=screen.getAllByRole('checkbox',{name:'选择这条评论'});expect(boxes[0]).toBeEnabled();expect(boxes[1]).toBeDisabled();
   await userEvent.click(boxes[0]!);expect(screen.getByText('已选 1 条 · 来自 1 篇作品')).toBeInTheDocument();expect(screen.queryByRole('button',{name:'研究所选评论'})).not.toBeInTheDocument();
@@ -39,6 +40,14 @@ describe('D3 actual four-view React boundary', () => {
   await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.click(screen.getByRole('combobox',{name:'研究标签'}));await userEvent.click(screen.getByRole('option',{name:'需求'}));await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.click(screen.getByRole('combobox',{name:'点赞'}));await userEvent.click(screen.getByRole('option',{name:'100 以上'}));await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));
   await waitFor(()=>expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('q')).toBe('两字'));
   const call=calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)!;expect(call.url.searchParams.get('signalKind')).toBe('need');expect(call.url.searchParams.get('minLikes')).toBe('100');expect(router.state.location.search).toContain('signalKind=need');expect(call.url.searchParams.get('domain')).toBe(DOMAIN);
+ });
+ it('keeps FIND clearing local until the user explicitly applies the comment filter',async()=>{
+  installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
+  const reads=()=>calls.filter(call=>call.url.pathname.endsWith('/comments')).length;
+  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'待清空');
+  await userEvent.click(screen.getByRole('button',{name:'清空字面搜索'}));
+  expect(reads()).toBe(1);
+  expect(screen.getByRole('searchbox',{name:'字面搜索'})).toHaveValue('');
  });
  it('keeps a matched work in the filter draft until it is explicitly applied',async()=>{
   installFetch();const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
