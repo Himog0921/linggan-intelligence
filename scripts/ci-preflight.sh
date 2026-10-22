@@ -12,6 +12,9 @@ comparison="$(git merge-base "$base_commit" HEAD)"
 git diff --check "$comparison" --
 bash scripts/check-project-governance.sh "$comparison"
 bash scripts/verify-ui-design-handbook.sh
+# Source fingerprints include the agent entrypoints. This check needs no npm
+# install and must fail here, not after the full frontend test suite.
+node scripts/lids.mjs check
 node --test scripts/check-document-governance.test.mjs scripts/ci-select.test.mjs
 
 # Include staged, unstaged and untracked files for local use. CI uses the same
