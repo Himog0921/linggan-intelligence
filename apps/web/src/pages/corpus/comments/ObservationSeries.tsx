@@ -116,11 +116,11 @@ export function ObservationSeries({ series, days, view, onDays, onView }: {
       </div>
       <div className={c('study-observation-controls')}>
         <div className={c('study-text-switcher')} role="group" aria-label="观察时间范围">
-          {[7,28,56].map(n => <button type="button" key={n} aria-pressed={days===n} onClick={() => onDays(n)}>近 {n} 天</button>)}
+          {[7,28,56].map(n => <button type="button" key={n} data-series-days={n} aria-pressed={days===n} onClick={() => onDays(n)}>近 {n} 天</button>)}
         </div>
         <div className={c('study-text-switcher')} role="group" aria-label="观察数据视图">
-          <button type="button" aria-pressed={view==='chart'} onClick={() => onView('chart')}>图表</button>
-          <button type="button" aria-pressed={view==='table'} onClick={() => onView('table')}>表格</button>
+          <button type="button" data-series-view="chart" aria-pressed={view==='chart'} onClick={() => onView('chart')}>图表</button>
+          <button type="button" data-series-view="table" aria-pressed={view==='table'} onClick={() => onView('table')}>表格</button>
         </div>
       </div>
     </div>
