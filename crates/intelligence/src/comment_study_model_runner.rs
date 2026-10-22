@@ -5,6 +5,7 @@
 //! create memberships.  Those mutations remain in their dedicated transactional acceptors.
 
 use crate::{
+    comment_study_batch::outbound_model_payload,
     comment_study_batch_acceptance::reject_study_batch_dispatch,
     comment_study_model_dispatch::{
         ReservedStudyModelCall, StudyModelDispatchError, mark_study_batch_model_dispatch_started,
@@ -97,25 +98,21 @@ pub async fn call_study_batch_model(
         .unwrap_or_else(semantic_system_instruction);
     provider.prompt = match reservation.prompt.clone() {
         Some(prompt) => prompt,
-        None => match serde_json::to_string(&json!({
-            "contract":"comment-study.note-batch.v1",
-            "batchRef":reservation.batch_ref,
-            "runRef":reservation.run_ref,
-            "input":manifest,
-            "outputSchema":batch_output_schema()
-        })) {
-            Ok(prompt) => prompt,
-            Err(_) => {
-                settle_pre_provider_failure(
-                    database,
-                    &reservation,
-                    lease_token,
-                    "invalid_model_command",
-                )
-                .await?;
-                return Err(StudyModelRunnerError::Model(ModelError::Invalid));
+        None => {
+            match default_provider_prompt(reservation.batch_ref, reservation.run_ref, &manifest) {
+                Ok(prompt) => prompt,
+                Err(_) => {
+                    settle_pre_provider_failure(
+                        database,
+                        &reservation,
+                        lease_token,
+                        "invalid_model_command",
+                    )
+                    .await?;
+                    return Err(StudyModelRunnerError::Model(ModelError::Invalid));
+                }
             }
-        },
+        }
     };
 
     if reservation.system_instruction.is_some() {
@@ -179,6 +176,22 @@ pub async fn call_study_batch_model(
             Err(StudyModelRunnerError::Model(error))
         }
     }
+}
+
+/// The database's frozen batch input remains untouched so local evidence mappings and retry
+/// identity are stable. The provider receives this separate, redacted copy every time, including
+/// when a pre-existing batch is retried after this boundary was introduced.
+fn default_provider_prompt(
+    batch_ref: Uuid,
+    run_ref: Uuid,
+    manifest: &Value,
+) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&outbound_model_payload(
+        batch_ref,
+        run_ref,
+        manifest,
+        &batch_output_schema(),
+    ))
 }
 
 /// Reservation precedes provider request construction so the budget and exact batch are durable.
@@ -380,7 +393,55 @@ fn batch_output_schema() -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::{batch_output_schema, parse_provider_json, semantic_system_instruction};
+    use super::{
+        batch_output_schema, default_provider_prompt, parse_provider_json,
+        semantic_system_instruction,
+    };
+    use crate::comment_study_batch::OUTBOUND_REDACTION_VERSION;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    #[test]
+    fn default_provider_prompt_redacts_every_free_text_context_without_mutating_the_freeze() {
+        let batch_ref = Uuid::new_v4();
+        let run_ref = Uuid::new_v4();
+        let frozen = json!({
+            "workContext": {
+                "displayTitle":"添加微信 vxexample",
+                "contextManifest":{"sources":[{"text":"作品正文 https://example.test/private"}]}
+            },
+            "targets":[{
+                "targetRef":Uuid::new_v4(),
+                "researchText":"请拨打 138 1234 5678 或发 person@example.test",
+                "parentContext":{"researchText":"家长联系微信 parent_123"}
+            }]
+        });
+        let prompt = default_provider_prompt(batch_ref, run_ref, &frozen).unwrap();
+        let sent: serde_json::Value = serde_json::from_str(&prompt).unwrap();
+
+        assert_eq!(sent["inputRedactionVersion"], OUTBOUND_REDACTION_VERSION);
+        for secret in [
+            "vxexample",
+            "https://example.test/private",
+            "138 1234 5678",
+            "person@example.test",
+            "parent_123",
+        ] {
+            assert!(
+                !prompt.contains(secret),
+                "outbound prompt retained {secret}"
+            );
+        }
+        assert!(sent["input"].to_string().contains('█'));
+        assert_eq!(
+            frozen["targets"][0]["researchText"],
+            "请拨打 138 1234 5678 或发 person@example.test"
+        );
+        assert_eq!(
+            frozen["workContext"]["contextManifest"]["sources"][0]["text"],
+            "作品正文 https://example.test/private"
+        );
+    }
 
     #[test]
     fn accepts_direct_or_complete_fenced_json_only() {
