@@ -40,7 +40,7 @@ export function ObservationChart({ points }: { points: ObservationPoint[] }) {
   }, []);
   if (!points.length) return <p className={c('study-observation-empty')}>当前没有可读取的评论观察序列。</p>;
 
-  const h = 196, left = 48, right = 46, top = 22, base = 148, coverageY = 157, coverageH = 6, dateY = 190;
+  const h = 162, left = 48, right = 46, top = 20, base = 122, coverageY = 132, coverageH = 6, dateY = 157;
   const plotWidth = Math.max(1, width - left - right), band = plotWidth / points.length;
   const bw = Math.min(10, Math.max(2.4, band * .34));
   const x = (i: number) => left + band * (i + .5);
