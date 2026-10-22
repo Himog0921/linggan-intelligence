@@ -9,4 +9,4 @@ pub mod source;
 pub mod store;
 pub use contract::*;
 pub const CONTRACT: &str = "ocr-visual-audit.v1";
-pub const PROMPT_VERSION: &str = "ocr-blind-read.v1";
+pub const PROMPT_VERSION: &str = "ocr-blind-read.v2";

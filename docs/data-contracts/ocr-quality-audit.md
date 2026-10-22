@@ -22,6 +22,8 @@
 
 图片使用独占的analyze_image操作；旧adapter不认识该操作会在外发前拒绝，不能静默退回仅文本。Pi保留固定SDK0.85.1，通过其ImageContent发送一个受限的原图data URI；无工具、无附件上传服务或URL回退。模型提示不含本地OCR答案；图中指令一律是数据。严格JSON区分present/absent/uncertain、正文/章节/字幕/背景/UI/未知、可读性与原图归一化bbox；坐标未知为null。空字符串、坏schema和非stop为失败，不能记为无文字。模型意见和差异始终是suggested，不参与真实错误率分母。
 
+坐标约定（提示词`ocr-blind-read.v2`）：非null的bbox只能为原图归一化`[x_min,y_min,x_max,y_max]`，各值均在闭区间0～1；左上角为[0,0]、右下角为[1,1]，并满足x_min<x_max、y_min<y_max。定位未知时保留null；不猜像素/千分制、不事后换算、裁剪或放宽校验。提示词明确该约定，schema的number元素声明minimum=0/maximum=1与四元素约束，Rust解析器继续拒绝越界/倒序/零面积等非法框。合法框和null原样保留。此前v1冻结记录与原始响应不重写；结果结构合同仍为`ocr-visual-audit.v1`。
+
 ## 审阅与采用版本
 
 `linggan_media_ocr_review` 追加adopt/reject/pending，绑定sample/issue、adoption、版本、审核人、原因、前后文本与原图来源。采用正文是本图完整新版本，封面标题是显式首图/封面的候选；平台标题和原始OCR永久不改。唯一原区块文字范围可重建时为ocr_block，否则为manual_transcription，后者不伪造OCR框/范围。reject/pending不替换已采用文本，也不恢复旧机器结果。

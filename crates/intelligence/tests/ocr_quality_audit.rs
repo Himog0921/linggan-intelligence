@@ -100,6 +100,56 @@ fn blind_prompt_contains_no_local_answer_or_dynamic_instruction() {
     assert!(prompt.contains("jsonExample"));
 }
 #[test]
+fn prompt_and_schema_specify_normalized_original_image_coordinates() {
+    let (system, prompt) = audit::prompt();
+    assert!(system.contains("[0,1]"));
+    assert!(system.contains("[x_min,y_min,x_max,y_max]"));
+    assert!(system.contains("bbox:null"));
+    assert!(system.contains("do not guess coordinate units"));
+    let prompt: serde_json::Value = serde_json::from_str(&prompt).unwrap();
+    assert_eq!(prompt["promptVersion"], audit::PROMPT_VERSION);
+    assert_eq!(prompt["coordinateContract"]["range"], json!([0, 1]));
+    assert!(prompt["coordinateContract"]["unknown"].is_null());
+    let schema = audit::response_schema().schema;
+    let bbox = &schema["properties"]["regions"]["items"]["properties"]["bbox"];
+    assert_eq!(bbox["type"], json!(["array", "null"]));
+    assert_eq!(bbox["minItems"], 4);
+    assert_eq!(bbox["maxItems"], 4);
+    assert_eq!(bbox["items"]["minimum"], 0.0);
+    assert_eq!(bbox["items"]["maximum"], 1.0);
+}
+#[test]
+fn coordinates_preserve_null_and_valid_values_but_never_repair_invalid_units() {
+    for bbox in [
+        json!(null),
+        json!([0, 0, 1, 1]),
+        json!([0.08, 0.11, 0.43, 0.42]),
+    ] {
+        let mut v = output();
+        v["regions"][0]["bbox"] = bbox.clone();
+        let parsed = parse_visual(&v.to_string(), Some("stop")).unwrap();
+        let expected: Option<[f64; 4]> = serde_json::from_value(bbox).unwrap();
+        assert_eq!(parsed.regions[0].bbox, expected);
+    }
+    for bbox in [
+        json!([80, 110, 430, 420]),
+        json!([0, 0, 144, 96]),
+        json!([-0.01, 0, 1, 1]),
+        json!([0, 0, 1.01, 1]),
+        json!([0.8, 0, 0.2, 1]),
+        json!([0, 0.8, 1, 0.2]),
+        json!([0, 0, 0, 1]),
+        json!([0, 0, 1, 0]),
+        json!([0, 0, 1]),
+        json!([0, 0, 1, 1, 1]),
+        json!(["0", 0, 1, 1]),
+    ] {
+        let mut v = output();
+        v["regions"][0]["bbox"] = bbox;
+        assert!(parse_visual(&v.to_string(), Some("stop")).is_err());
+    }
+}
+#[test]
 fn synthetic_visual_probe_is_a_real_bounded_image() {
     let bytes = audit::source::probe_image_bytes();
     let image = image::load_from_memory(&bytes).unwrap();
