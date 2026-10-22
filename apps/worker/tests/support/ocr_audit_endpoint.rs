@@ -38,7 +38,7 @@ impl Endpoint {
                             recorded.lock().unwrap().push(request);
                             let waiting=if probe {None} else {gate.lock().unwrap().take()};
                             if let Some((seen,release))=waiting {seen.send(()).unwrap();release.await.unwrap();}
-                            let output=if probe {json!({"lingganProbe":"ok"})}else{json!({"titlePresence":"absent","titleText":null,"regions":[{"regionRef":"r1","text":"42","role":"body","legibility":"clear","bbox":null}],"unreadable":false})};
+                            let output=if probe {json!({"lingganProbe":"ok"})}else{json!({"titlePresence":"absent","titleText":null,"regions":[{"regionRef":"r1","text":"42","role":"body","legibility":"clear","bbox":null},{ "regionRef":"r2","text":"SYNTHETIC BRAND","role":"brand","legibility":"clear","bbox":null},{"regionRef":"r3","text":"SYNTHETIC ACTION","role":"call_to_action","legibility":"clear","bbox":null}],"unreadable":false})};
                             respond(&mut socket,&output.to_string()).await;
                         });
                     }

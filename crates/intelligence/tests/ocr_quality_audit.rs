@@ -64,6 +64,23 @@ fn absent_and_unreadable_are_distinct_valid_observations() {
     assert!(parse_visual(&unreadable.to_string(), Some("stop")).is_ok());
 }
 #[test]
+fn visible_brand_and_call_to_action_are_preserved_with_closed_roles() {
+    let (_, prompt) = audit::prompt_for_image(None);
+    let prompt: serde_json::Value = serde_json::from_str(&prompt).unwrap();
+    let schema = audit::response_schema().schema;
+    let roles = &schema["properties"]["regions"]["items"]["properties"]["role"]["enum"];
+    assert_eq!(prompt["roleVocabulary"], *roles);
+    for role in roles.as_array().unwrap() {
+        let mut v = output();
+        v["regions"][0]["role"] = role.clone();
+        let parsed = parse_visual(&v.to_string(), Some("stop")).unwrap();
+        assert_eq!(serde_json::to_value(parsed).unwrap(), v);
+    }
+    let mut v = output();
+    v["regions"][0]["role"] = json!("unsupported_generated_role");
+    assert!(parse_visual(&v.to_string(), Some("stop")).is_err());
+}
+#[test]
 fn sampling_is_work_first_deterministic_disjoint_and_does_not_fill_missing_pools() {
     let candidates: Vec<_> = (1..=12)
         .map(|n| Candidate {

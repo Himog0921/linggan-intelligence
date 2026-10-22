@@ -22,7 +22,7 @@
 
 图片使用独占的analyze_image操作；旧adapter不认识该操作会在外发前拒绝，不能静默退回仅文本。Pi保留固定SDK0.85.1，通过其ImageContent发送一个受限的原图data URI；无工具、无附件上传服务或URL回退。模型提示不含本地OCR答案；图中指令一律是数据。严格JSON区分present/absent/uncertain、正文/章节/字幕/背景/UI/未知、可读性与原图归一化bbox；坐标未知为null。空字符串、坏schema和非stop为失败，不能记为无文字。模型意见和差异始终是suggested，不参与真实错误率分母。
 
-当前提示词`ocr-blind-read.v3`由冻结来源的imageRole/sequenceOrdinal提供首图/封面、内页或未知位置，不把本地OCR答案送给模型。首图请求真实可见封面标题及全部可见文字，内页保留正文/章节/列表；regions按阅读顺序承载全文，品牌/UI等仍标角色保留。部分可读/不可读及未知归属保留为partial/unreadable/uncertain区块，不静默删除或补写。标题可由按原顺序的多个main_title区块支持，比较时只忽略换行等空白，不补字、改字或重排；原始区块和titleText不改写。原图身份/hash/引用由本地冻结来源绑定，不依赖模型生成ID。
+当前提示词`ocr-blind-read.v4`保留v3的来源上下文：由冻结来源的imageRole/sequenceOrdinal提供首图/封面、内页或未知位置，不把本地OCR答案送给模型。首图请求真实可见封面标题及全部可见文字，内页保留正文/章节/列表；regions按阅读顺序承载全文，品牌/UI等仍标角色保留。提示词和schema共享封闭roleVocabulary，明确brand/call_to_action，解析器保留这两类文字及角色，不把它们改成正文；其它未知角色仍拒绝。部分可读/不可读及未知归属保留为partial/unreadable/uncertain区块，不静默删除或补写。标题可由按原顺序的多个main_title区块支持，比较时只忽略换行等空白，不补字、改字或重排；原始区块和titleText不改写。原图身份/hash/引用由本地冻结来源绑定，不依赖模型生成ID。真实v3首次失败账本不因v4离线解析通过而重写，保存响应复核不算新模型实跑。
 
 坐标约定（v2明确、v3继续保持）：非null的bbox只能为原图归一化`[x_min,y_min,x_max,y_max]`，各值均在闭区间0～1；左上角为[0,0]、右下角为[1,1]，并满足x_min<x_max、y_min<y_max。定位未知时保留null；不猜像素/千分制、不事后换算、裁剪或放宽校验。提示词明确该约定，schema的number元素声明minimum=0/maximum=1与四元素约束，Rust解析器继续拒绝越界/倒序/零面积等非法框。合法框和null原样保留。此前v1/v2冻结记录与原始响应不重写；结果结构合同仍为`ocr-visual-audit.v1`。
 

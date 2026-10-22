@@ -278,6 +278,11 @@ print(json.dumps(b,ensure_ascii=False))
             .unwrap();
     let detail = audit::report::detail(&db, sample).await.unwrap();
     assert!(detail["issues"].as_array().unwrap().len() > 0);
+    assert_eq!(detail["modelOpinion"]["regions"][1]["role"], "brand");
+    assert_eq!(
+        detail["modelOpinion"]["regions"][2]["role"],
+        "call_to_action"
+    );
     let issue: Uuid = serde_json::from_value(detail["issues"][0]["issue_ref"].clone()).unwrap();
     let freeze: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(db.pool())
