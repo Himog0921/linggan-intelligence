@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { num } from './format';
-import { errorText } from './format';
+import { errorText, num } from './format';
 import { useStudyRead, type StudyNavigation } from './studyApi';
 import { parseWordCloud, type WordCategory } from './wordCloudDtos';
 import { c } from './styles';
@@ -33,8 +32,14 @@ export function DomainWordCloud({ domain, days, nav }: { domain: string; days: n
   useEffect(() => {
     const element = dialog.current;
     if (!element) return;
-    if (showSources && !element.open) element.showModal();
-    if (!showSources && element.open) element.close();
+    if (showSources && !element.open) {
+      if (typeof element.showModal === 'function') element.showModal();
+      else element.setAttribute('open', ''); // jsdom has no native dialog methods
+    }
+    if (!showSources && element.open) {
+      if (typeof element.close === 'function') element.close();
+      else element.removeAttribute('open');
+    }
   }, [showSources]);
 
   return <section className={c('study-wordcloud')} aria-label="领域高频表达">
