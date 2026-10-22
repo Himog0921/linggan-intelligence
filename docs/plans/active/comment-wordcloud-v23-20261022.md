@@ -1,6 +1,6 @@
 # COMMENT-WORD-CLOUD-V23 · 评论研究概览紧凑版与领域词云
 
-> 状态: 实施候选 / 未合并、未部署
+> 状态: 活跃计划
 > 最后核对: 2026-10-22
 > 适用范围: /corpus/comments?view=overview 与同源只读短语统计
 > 事实来源: 用户确认的 V2.3 HTML、main@97981b96、当前 React/Rust/PostgreSQL 业务合同
