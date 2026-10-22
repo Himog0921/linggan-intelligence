@@ -561,7 +561,7 @@ describe('创作者页 · 搜索、排序、分页', () => {
     expect(screen.getByRole('button', { name: '命中相关' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '命中最高赞' })).toBeInTheDocument();
     expect(rowFor('合成作者 1')).toHaveTextContent('范围内 3');
-    expect(rowFor('合成作者 1')).toHaveTextContent('当前命中作品');
+    expect(rowFor('合成作者 1').querySelector('[title="当前命中作品的点赞表现"]')).not.toBeNull();
   });
 
   it('分页：翻页写进地址，请求的页码从 0 起；改每页数量回到第一页', async () => {
