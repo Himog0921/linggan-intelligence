@@ -20,6 +20,8 @@ describe('每篇材料读取合同', () => {
       expect(parse(value).columns[0]!.state).toBe(state);
     }
     expect(materialReason('2:source:media_work_state_unavailable')).toBe('当前媒体作业证据不足（位置 2:source）');
+    expect(materialReason('ocr_machine_preview_unverified')).toBe('图片文字仅有机器预览，尚未人工采用');
+    expect(materialReason('machine_preview_unverified')).toBe('机器预览尚未人工采用，不会进入本次输入');
   });
   it('新状态、原因、字段、处理范围和合同均使整份响应不可显示', () => {
     const changes = [
