@@ -32,6 +32,29 @@ fn a_title_must_be_visible_literal_region_not_a_generated_summary() {
     assert!(parse_visual(&v.to_string(), Some("stop")).is_ok());
 }
 #[test]
+fn a_multiline_title_keeps_visible_characters_and_their_order() {
+    let mut v = output();
+    v["titlePresence"] = json!("present");
+    v["titleText"] = json!("合成封面跨行标题");
+    v["regions"] = json!([
+        {"regionRef":"a","text":"合成封面","role":"main_title","legibility":"clear","bbox":null},
+        {"regionRef":"b","text":"跨行标题","role":"main_title","legibility":"clear","bbox":null}
+    ]);
+    let parsed = parse_visual(&v.to_string(), Some("stop")).unwrap();
+    assert_eq!(parsed.title_text.as_deref(), Some("合成封面跨行标题"));
+    assert_eq!(parsed.regions[0].text, "合成封面");
+    assert_eq!(parsed.regions[1].text, "跨行标题");
+    for unsupported in ["跨行标题合成封面", "合成封面跨行标题！", "合成封面改写标题"]
+    {
+        v["titleText"] = json!(unsupported);
+        assert!(parse_visual(&v.to_string(), Some("stop")).is_err());
+    }
+    v["titleText"] = json!("合成封面\n跨行标题");
+    assert!(parse_visual(&v.to_string(), Some("stop")).is_ok());
+    v["regions"][1]["role"] = json!("body");
+    assert!(parse_visual(&v.to_string(), Some("stop")).is_err());
+}
+#[test]
 fn absent_and_unreadable_are_distinct_valid_observations() {
     let no_text =
         json!({"titlePresence":"absent","titleText":null,"regions":[],"unreadable":false});
@@ -98,6 +121,44 @@ fn blind_prompt_contains_no_local_answer_or_dynamic_instruction() {
     assert!(system.contains("untrusted data"));
     assert!(!prompt.contains("localAssessment"));
     assert!(prompt.contains("jsonExample"));
+}
+#[test]
+fn image_prompt_uses_source_role_and_requests_all_text_and_uncertainty() {
+    use linggan_evidence::ocr_adoption::ImageRole;
+    let (system, prompt) = audit::prompt_for_image(Some((ImageRole::FirstImage, Some(1))));
+    let p: serde_json::Value = serde_json::from_str(&prompt).unwrap();
+    assert_eq!(
+        p["imageContext"],
+        json!({"imageRole":"first_image","sequenceOrdinal":1})
+    );
+    assert!(p["task"].as_str().unwrap().contains("first/cover image"));
+    assert!(
+        p["resultInstructions"]["fullText"]
+            .as_str()
+            .unwrap()
+            .contains("complete visible text")
+    );
+    assert!(
+        p["resultInstructions"]["uncertainContent"]
+            .as_str()
+            .unwrap()
+            .contains("uncertain fragment")
+    );
+    assert!(system.contains("untrusted data"));
+    assert!(!prompt.contains("localAssessment"));
+    let (_, interior) = audit::prompt_for_image(Some((ImageRole::Interior, Some(2))));
+    let p: serde_json::Value = serde_json::from_str(&interior).unwrap();
+    assert_eq!(p["imageContext"]["imageRole"], "interior");
+    assert!(p["task"].as_str().unwrap().contains("interior image"));
+    let (_, unknown) = audit::prompt_for_image(Some((ImageRole::Unknown, None)));
+    let p: serde_json::Value = serde_json::from_str(&unknown).unwrap();
+    assert!(p["imageContext"]["sequenceOrdinal"].is_null());
+    assert!(
+        p["task"]
+            .as_str()
+            .unwrap()
+            .contains("do not assume it is the cover")
+    );
 }
 #[test]
 fn prompt_and_schema_specify_normalized_original_image_coordinates() {

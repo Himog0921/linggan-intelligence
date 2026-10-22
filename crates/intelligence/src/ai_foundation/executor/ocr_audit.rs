@@ -72,16 +72,9 @@ async fn prepare(
         return Err(FoundationError::AdmissionDenied(vec!["audit_model_changed".into()]).into());
     }
     let probe = sample.get::<String, _>("pool") == "probe";
-    let image = if probe {
-        source::probe_image()
+    let (image, image_context) = if probe {
+        (source::probe_image(), None)
     } else {
-        let qualified:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ocr_audit_observation o JOIN linggan_ocr_audit_sample s USING(sample_ref) JOIN linggan_model_invocation i ON i.invocation_ref=o.invocation_ref WHERE s.pool='probe' AND o.vision_qualified AND i.state='succeeded' AND i.connection_version_ref=$1 AND i.model_ref=$2)").bind(model.connection_version_ref).bind(model.current_model_ref).fetch_one(&mut *tx).await?;
-        if !qualified {
-            return Err(FoundationError::AdmissionDenied(vec![
-                "current_visual_probe_required".into(),
-            ])
-            .into());
-        }
         let source = source::load_in(&mut tx, sample.get::<Uuid, _>("adoption_ref"))
             .await?
             .ok_or_else(|| {
@@ -90,9 +83,13 @@ async fn prepare(
         if source.input.image.blob_sha256 != sample.get::<String, _>("blob_sha256") {
             return Err(ExecutorError::Invalid);
         }
-        source::read_image(&source).map_err(|_| {
+        let image = source::read_image(&source).map_err(|_| {
             FoundationError::AdmissionDenied(vec!["audit_source_unavailable".into()])
-        })?
+        })?;
+        (
+            image,
+            Some((source.input.image_role, source.input.sequence_ordinal)),
+        )
     };
     let workspace: Uuid =
         sqlx::query_scalar("SELECT workspace_ref FROM linggan_model_workspace WHERE singleton")
@@ -105,7 +102,7 @@ async fn prepare(
             FoundationError::AdmissionDenied(vec!["synthetic_endpoint_required".into()]).into(),
         );
     }
-    let (system, prompt) = audit::prompt();
+    let (system, prompt) = audit::prompt_for_image(image_context);
     let mut request = model.request(
         secrets.get(workspace, model.secret_ref)?,
         system.into(),

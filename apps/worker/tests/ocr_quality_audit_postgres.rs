@@ -205,6 +205,47 @@ print(json.dumps(b,ensure_ascii=False))
         MaterialClass::OcrQualityImage,
     )
     .await;
+    let prior_visual_probes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_ocr_audit_observation WHERE vision_qualified",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        prior_visual_probes, 0,
+        "real-image admission must not require a 42 receipt"
+    );
+    let run = audit::store::start_run(&db, &start).await.unwrap();
+    let run_ref: Uuid = serde_json::from_value(run["runRef"].clone()).unwrap();
+    assert_eq!(
+        audit::store::start_run(&db, &start).await.unwrap(),
+        run,
+        "duplicate command is a receipt replay"
+    );
+    execute(&db, &owner, &adapter).await;
+    let observed: bool = sqlx::query_scalar("SELECT o.result IS NOT NULL AND i.state='succeeded' FROM linggan_ocr_audit_observation o JOIN linggan_ocr_audit_sample s USING(sample_ref) JOIN linggan_model_invocation i ON i.invocation_ref=o.invocation_ref WHERE s.run_ref=$1")
+        .bind(run_ref).fetch_one(db.pool()).await.unwrap();
+    assert!(
+        observed,
+        "direct image succeeds without any synthetic visual qualification"
+    );
+    let requests = wire.requests.lock().unwrap();
+    assert_eq!(
+        requests.len(),
+        2,
+        "one historical text fixture plus one direct image; no visual preflight"
+    );
+    let sent: Value = serde_json::from_str(&endpoint::text(&requests[1], "user")).unwrap();
+    assert_eq!(
+        sent["imageContext"]["imageRole"],
+        source_before["imageRole"]
+    );
+    assert_eq!(
+        sent["imageContext"]["sequenceOrdinal"],
+        source_before["sequenceOrdinal"]
+    );
+    drop(requests);
+    // An explicit diagnostic remains independent, after the business image already succeeded.
     let probe = StartRun {
         command_ref: Uuid::new_v4(),
         run_key: "probe:synthetic-vision".into(),
@@ -215,19 +256,11 @@ print(json.dumps(b,ensure_ascii=False))
     assert_eq!(receipt["selected"], 1);
     execute(&db, &owner, &adapter).await;
     let qualified: bool =
-        sqlx::query_scalar("SELECT vision_qualified FROM linggan_ocr_audit_observation")
+        sqlx::query_scalar("SELECT o.vision_qualified FROM linggan_ocr_audit_observation o JOIN linggan_ocr_audit_sample s USING(sample_ref) WHERE s.pool='probe'")
             .fetch_one(db.pool())
             .await
             .unwrap();
     assert!(qualified);
-    let run = audit::store::start_run(&db, &start).await.unwrap();
-    let run_ref: Uuid = serde_json::from_value(run["runRef"].clone()).unwrap();
-    assert_eq!(
-        audit::store::start_run(&db, &start).await.unwrap(),
-        run,
-        "duplicate command is a receipt replay"
-    );
-    execute(&db, &owner, &adapter).await;
     let report = audit::report::report(&db, run_ref).await.unwrap();
     assert_eq!(report["pools"][0]["selected"], 1);
     assert_eq!(report["samples"][0]["workRef"], json!(work));
