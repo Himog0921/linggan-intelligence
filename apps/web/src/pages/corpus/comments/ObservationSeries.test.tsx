@@ -15,7 +15,7 @@ describe('D3 observation counts and coverage', () => {
   it('uses unique integer axis labels for a single observed comment', () => {
     render(<ObservationChart points={points(1)} />);
     const svg = screen.getByRole('img', { name: '上下双轨每日柱状图及紧贴信号轴的采集覆盖' });
-    const axis = [...svg.querySelectorAll('text[text-anchor="end"]')].filter(e => Number(e.getAttribute('x')) === 43 && Number(e.getAttribute('y')) < 250).map(e => e.textContent);
+    const axis = [...svg.querySelectorAll('text[text-anchor="end"]')].filter(e => Number(e.getAttribute('x')) === 43 && Number(e.getAttribute('y')) < 400).map(e => e.textContent);
     expect(axis).toEqual(['0', '1']);
     expect(screen.getByRole('img', { name: /2026-10-01：首次观察 1 条/ })).toBeInTheDocument();
   });

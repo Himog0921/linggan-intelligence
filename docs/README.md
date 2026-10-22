@@ -30,6 +30,8 @@
 
 - [变更清单](design/changes/corpus-study-creator-ux-20261022-ui-change-manifest.md)：PR #470 的页面、状态、依赖和非目标边界。
 - [发布前验收](design/acceptance/corpus-study-creator-ux-20261022-acceptance.md)：自动检查结果与真实链路、部署、业务验收的待验证边界。
+- [评论目录密度与检查器续修清单](design/changes/comment-study-density-inspector-471-ui-change-manifest.md)：表格、统一控件、检查器和概览对齐的增量边界。
+- [评论目录密度与检查器验收](design/acceptance/comment-study-density-inspector-471-acceptance.md)：本次浏览器与工程门禁的独立回执。
 
 ## 2026-10-19 · WEB-REACT-001 完整收尾包（当前）
 
