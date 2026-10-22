@@ -1,0 +1,27 @@
+name: Repository maintenance gate
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: maintenance-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Whitespace and repository governance
+        run: |
+          git diff --check origin/${{ github.base_ref }}...HEAD
+          bash scripts/check-project-governance.sh origin/${{ github.base_ref }}

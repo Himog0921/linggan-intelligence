@@ -228,9 +228,15 @@ pub async fn reserve_study_batch_model_call(
     } else {
         None
     };
-    let input_size = conservative_token_estimate_json(&input_manifest);
-    if input_size > i64::from(input_limit) {
-        return Err(StudyModelDispatchError::InputLimit);
+    // A v2 request has already checked the exact, redacted provider payload above (including
+    // its frozen system instruction and schema). Rechecking raw local evidence here would make
+    // fitting and reservation disagree about the same egress request. Legacy dispatch has no
+    // frozen request envelope, so it retains the original manifest ceiling.
+    if v2_request.is_none() {
+        let input_size = conservative_token_estimate_json(&input_manifest);
+        if input_size > i64::from(input_limit) {
+            return Err(StudyModelDispatchError::InputLimit);
+        }
     }
     let request_hash = v2_request
         .as_ref()

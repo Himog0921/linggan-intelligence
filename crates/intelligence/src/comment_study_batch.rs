@@ -4,6 +4,7 @@
 //! source: every output carries its target reference and is later admitted against that target's
 //! own immutable comment text.
 
+use crate::comment_cleaning::redact_outbound_text;
 use crate::comment_study_policy::{
     CompiledStudyMethod, StudyMethodManifest, StudyModelIdentity, StudyModelSnapshot,
     verify_study_method,
@@ -20,6 +21,7 @@ use thiserror::Error;
 use uuid::Uuid;
 
 pub const BATCH_CONTRACT: &str = "comment-study.note-batch.v1";
+pub const OUTBOUND_REDACTION_VERSION: &str = "comment-study-outbound-redaction.v1";
 pub const MAX_TARGETS_PER_BATCH: i64 = 12;
 
 #[derive(Debug, Clone)]
@@ -384,13 +386,7 @@ pub(crate) fn semantic_model_request_manifest(
     system_instruction: &str,
     output_schema: &Value,
 ) -> Result<(String, Value), serde_json::Error> {
-    let payload = json!({
-        "contract":BATCH_CONTRACT,
-        "batchRef":batch_ref,
-        "runRef":run_ref,
-        "input":input_manifest,
-        "outputSchema":output_schema,
-    });
+    let payload = outbound_model_payload(batch_ref, run_ref, input_manifest, output_schema);
     let prompt = serde_json::to_string(&payload)?;
     let request_manifest = json!({
         "stage":"semantic",
@@ -399,6 +395,55 @@ pub(crate) fn semantic_model_request_manifest(
         "outputSchema":output_schema,
     });
     Ok((prompt, request_manifest))
+}
+
+/// Builds the exact batch payload that may cross the provider boundary. The retained batch input
+/// is not changed: this always creates a transport-only copy, so both v2 frozen-method dispatch
+/// and legacy dispatch redact the same text fields.
+pub(crate) fn outbound_model_payload(
+    batch_ref: Uuid,
+    run_ref: Uuid,
+    input_manifest: &Value,
+    output_schema: &Value,
+) -> Value {
+    json!({
+        "contract":BATCH_CONTRACT,
+        "batchRef":batch_ref,
+        "runRef":run_ref,
+        "inputRedactionVersion":OUTBOUND_REDACTION_VERSION,
+        "input":redact_outbound_batch_input(input_manifest),
+        "outputSchema":output_schema,
+    })
+}
+
+/// Only the frozen batch contract's free-text keys are masked. References, contracts, states,
+/// hashes, source kinds and schema fields remain exact, so the response stays addressable and
+/// audit metadata stays comparable.
+pub(crate) fn redact_outbound_batch_input(input_manifest: &Value) -> Value {
+    fn redact(value: &mut Value) {
+        match value {
+            Value::Array(values) => values.iter_mut().for_each(redact),
+            Value::Object(fields) => {
+                for (name, value) in fields.iter_mut() {
+                    if matches!(
+                        name.as_str(),
+                        "researchText" | "commentText" | "displayTitle" | "text"
+                    ) {
+                        if let Some(text) = value.as_str() {
+                            *value = Value::String(redact_outbound_text(text));
+                        }
+                    } else {
+                        redact(value);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut outbound = input_manifest.clone();
+    redact(&mut outbound);
+    outbound
 }
 
 /// A provider-independent conservative estimator: every non-ASCII scalar costs two tokens,
@@ -727,6 +772,63 @@ mod tests {
                 "context":{"value":"家庭作业","basis":"写作业"}
             }
         })
+    }
+
+    #[test]
+    fn frozen_method_request_redacts_free_text_without_mutating_the_batch_input() {
+        let batch_ref = Uuid::new_v4();
+        let run_ref = Uuid::new_v4();
+        let frozen = json!({
+            "workContext": {
+                "displayTitle":"添加微信 vxexample",
+                "contextManifest":{"sources":[{"text":"作品正文 https://example.test/private"}]}
+            },
+            "targets":[{
+                "targetRef":Uuid::new_v4(),
+                "researchText":"请拨打 138 1234 5678 或发 person@example.test",
+                "parentContext":{"researchText":"家长联系微信 parent_123"}
+            }]
+        });
+        let (prompt, request_manifest) = semantic_model_request_manifest(
+            batch_ref,
+            run_ref,
+            &frozen,
+            "synthetic instruction",
+            &json!({"type":"object"}),
+        )
+        .unwrap();
+
+        assert_eq!(
+            serde_json::from_str::<Value>(&prompt).unwrap()["inputRedactionVersion"],
+            OUTBOUND_REDACTION_VERSION
+        );
+        for secret in [
+            "vxexample",
+            "https://example.test/private",
+            "138 1234 5678",
+            "person@example.test",
+            "parent_123",
+        ] {
+            assert!(
+                !prompt.contains(secret),
+                "outbound prompt retained {secret}"
+            );
+            assert!(
+                !request_manifest["prompt"]
+                    .as_str()
+                    .unwrap()
+                    .contains(secret),
+                "frozen request manifest retained {secret}"
+            );
+        }
+        assert_eq!(
+            frozen["targets"][0]["researchText"],
+            "请拨打 138 1234 5678 或发 person@example.test"
+        );
+        assert_eq!(
+            frozen["workContext"]["contextManifest"]["sources"][0]["text"],
+            "作品正文 https://example.test/private"
+        );
     }
 
     #[test]

@@ -186,6 +186,14 @@ fn classify_cleaned(raw: &str, out: &mut CleanComment) {
 /// Outbound only. Conservative contact-token masking never changes the local source.
 pub fn outbound(mut value: CleanComment) -> CleanComment {
     let mut cs: Vec<char> = value.text.chars().collect();
+    // Some inputs at the egress boundary are frozen work context rather than a cleaned comment.
+    // Normalize full-width ASCII here as well, so a phone number cannot evade masking merely
+    // because this caller deliberately preserves the local frozen source unchanged.
+    for character in &mut cs {
+        if ('\u{ff01}'..='\u{ff5e}').contains(character) {
+            *character = char::from_u32(*character as u32 - 0xfee0).unwrap_or(*character);
+        }
+    }
     let mut url_start = 0;
     while url_start < cs.len() {
         let tail: String = cs[url_start..].iter().take(8).collect();
@@ -252,6 +260,21 @@ pub fn outbound(mut value: CleanComment) -> CleanComment {
     value
 }
 
+/// Returns a transport-only representation suitable for an external model prompt.
+///
+/// Unlike [`clean`], this does not remove noise or create evidence offsets: the caller retains
+/// the immutable local text and only receives the conservative contact masking applied by
+/// [`outbound`].
+pub fn redact_outbound_text(text: &str) -> String {
+    outbound(CleanComment {
+        text: text.into(),
+        offsets: Vec::new(),
+        state: "outbound".into(),
+        reasons: Vec::new(),
+    })
+    .text
+}
+
 fn url_boundary(characters: &[char], index: usize) -> bool {
     let current = characters[index];
     current.is_whitespace()
@@ -300,6 +323,20 @@ mod tests {
                 .text
                 .contains("1234")
         );
+    }
+
+    #[test]
+    fn outbound_text_redacts_without_changing_the_local_input() {
+        let local = "请联系邮箱 person@example.test，电话１３８ １２３４ ５６７８，网址 https://example.test/a";
+        let sent = redact_outbound_text(local);
+        assert_eq!(
+            local,
+            "请联系邮箱 person@example.test，电话１３８ １２３４ ５６７８，网址 https://example.test/a"
+        );
+        assert!(!sent.contains("person@example.test"));
+        assert!(!sent.contains("138 1234 5678"));
+        assert!(!sent.contains("https://example.test/a"));
+        assert!(sent.contains('█'));
     }
 }
 
