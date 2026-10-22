@@ -22,7 +22,7 @@ describe('D3 review regression boundaries', () => {
   expect(document.querySelector('.v7-side a[href^="/corpus/evidence"]')).toHaveAttribute('href', '/corpus/evidence');
   expect(document.querySelector('.v7-side a[href^="/corpus/creators"]')).toHaveAttribute('href', '/corpus/creators');
   expect(calls.filter(c => c.url.pathname !== '/api/local/ai-settings').map(c => c.url.pathname)).toEqual(['/api/local/corpus/shell']);
-  expect(calls.find(c => c.url.pathname === '/api/local/ai-settings')?.url.searchParams.has('domain')).toBe(false);
+  expect(calls.some(c => c.url.pathname === '/api/local/ai-settings')).toBe(false);
  });
  it('uses the server-resolved domain for corpus navigation', async () => {
   installFetch(url => url.pathname === '/api/local/corpus/shell' ? json({ domains: [{ domainRef: OTHER, name: '合成领域二', status: 'active', targetCount: 0, sampleCount: null }], selectedDomain: OTHER, collectionState: '观察中' }) : undefined);
@@ -58,9 +58,9 @@ describe('D3 review regression boundaries', () => {
   expect(screen.queryByRole('button', { name: '研究所选评论' })).not.toBeInTheDocument();
   expect(calls.every(c => c.method === 'GET')).toBe(true);
  });
- it('the overview unfiled-expression link opens all unmerged clues', async () => {
+ it('the overview new-expression metric opens matching unfiled clues', async () => {
   installFetch(url => url.pathname.endsWith('/problem-candidates') ? json({ expressions: [], page: { nextCursor: null } }) : undefined); const { router } = renderPage(); await screen.findByLabelText('研究累计读数与昨日活动');
-  await userEvent.click(screen.getByRole('button', { name: '查看未建档表达' })); await waitFor(() => expect(calls.some(c => c.url.pathname.endsWith('/problem-candidates'))).toBe(true)); expect(router.state.location.search).toContain('state=clues'); expect(screen.getByRole('button', { name: '未归并线索' })).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.click(screen.getByRole('button', { name: /新表达待建档/ })); await waitFor(() => expect(calls.some(c => c.url.pathname.endsWith('/problem-candidates'))).toBe(true)); expect(router.state.location.search).toContain('state=clues'); expect(screen.getByRole('button', { name: '未归并线索' })).toHaveAttribute('aria-pressed', 'true');
  });
  it('a newly restricted detail also hides its stale list title, definition and quote', async () => {
   installFetch(url => url.pathname.endsWith('/problem-cards') ? json({ contract: 'comment-study.problem-cards.v1', domainRef: DOMAIN, problems: [problem()], totalCount: 1, page: { nextCursor: null } }) : url.pathname.endsWith('/problems/' + PROBLEM) ? json({ problem: problem(false), revisionHistory: [], sourceDistribution: null }) : url.pathname.endsWith('/evidence') ? json({ problemRef: PROBLEM, evidence: [], page: { nextCursor: null } }) : undefined);
@@ -100,8 +100,11 @@ describe('D3 review regression boundaries', () => {
   const finish=new Map<string,(value:Response)=>void>();installFetch(url=>url.pathname.endsWith('/works')?new Promise<Response>(resolve=>{finish.set(url.searchParams.get('q')||'',resolve);}):undefined);renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
   await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));
   const input=screen.getByRole('searchbox',{name:'所属作品'});await userEvent.type(input,'older');await userEvent.click(screen.getByRole('button',{name:'查找作品'}));await userEvent.clear(input);await userEvent.type(input,'newer');await userEvent.click(screen.getByRole('button',{name:'查找作品'}));
-  await act(async()=>{finish.get('older')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 旧搜索'}],page:{nextCursor:null}}));await Promise.resolve();});expect(screen.queryByRole('option',{name:'SYNTHETIC 旧搜索'})).not.toBeInTheDocument();
-  await act(async()=>{finish.get('newer')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 新搜索'}],page:{nextCursor:null}}));});expect(await screen.findByRole('option',{name:'SYNTHETIC 新搜索'})).toBeInTheDocument();
+  await act(async()=>{finish.get('older')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 旧搜索'}],page:{nextCursor:null}}));await Promise.resolve();});
+  await act(async()=>{finish.get('newer')!(json({items:[{workRef:WORK,displayTitle:'SYNTHETIC 新搜索'}],page:{nextCursor:null}}));});
+  await userEvent.click(screen.getByRole('combobox',{name:'已匹配作品'}));
+  expect(await screen.findByRole('option',{name:'SYNTHETIC 新搜索'})).toBeInTheDocument();
+  expect(screen.queryByRole('option',{name:'SYNTHETIC 旧搜索'})).not.toBeInTheDocument();
  });
  it('a work lookup cannot restore an old filter after the comment route changes',async()=>{
   let finish:(value:Response)=>void=()=>{};installFetch(url=>url.pathname.endsWith('/works')?new Promise<Response>(resolve=>{finish=resolve;}):undefined);const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');await userEvent.click(screen.getByRole('button',{name:/更多筛选/}));await userEvent.click(screen.getByRole('button',{name:'查找作品'}));await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'new-filter');await userEvent.click(screen.getByRole('button',{name:'应用筛选'}));await waitFor(()=>expect(router.state.location.search).toContain('q=new-filter'));
