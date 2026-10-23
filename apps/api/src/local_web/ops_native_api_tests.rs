@@ -12,6 +12,13 @@ use linggan_intelligence::ops_ledger::{
         read_ops_publications, read_ops_summary,
     },
 };
+use linggan_contracts::{parse_producer_attempt, parse_producer_submission};
+use linggan_evidence::{
+    AccountEligibilityObservation, DispatchDecision, activate_installation_credential,
+    bind_observation_account, decide_dispatch, report_account_eligibility,
+    rotate_installation_credential, set_station_accepting, start_producer_attempt,
+    submit_producer_package,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
@@ -1061,6 +1068,145 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     .await;
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(conflict["code"], "ops_sync_request_conflict");
+
+    // This stays entirely inside the isolated proof database, but exercises the actual shared
+    // queue → live claim → Attempt → Package → Receipt path rather than inserting a package.
+    let installation_ref = Uuid::new_v4();
+    let station_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO execution_station(station_ref,display_name,daily_work_quota) \
+         VALUES($1,'运营同步隔离工位',10000)",
+    )
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO plugin_installation \
+         (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) \
+         VALUES($1,$2,$3,'person',scope_001_now(),'0.8.61', \
+                '[\"content_detail\",\"xhs.pageAccess\"]'::jsonb)",
+    )
+    .bind(installation_ref)
+    .bind(installation_ref.to_string())
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    set_station_accepting(&database, station_ref, true, "person")
+        .await
+        .unwrap();
+    let grant = rotate_installation_credential(&database, installation_ref)
+        .await
+        .unwrap();
+    let credential = grant.raw_credential.expose_once().to_owned();
+    activate_installation_credential(
+        &database,
+        installation_ref,
+        grant.credential_ref,
+        &credential,
+    )
+    .await
+    .unwrap();
+    let observed_account = report_account_eligibility(
+        &database,
+        installation_ref,
+        &credential,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "0123456789abcdef01234567",
+        },
+        Some(b"ops-publication-sync-isolated-proof"),
+    )
+    .await
+    .unwrap();
+    bind_observation_account(
+        &database,
+        observed_account.account_ref.expect("authenticated account"),
+        installation_ref,
+        "person",
+    )
+    .await
+    .unwrap();
+    let dispatch = decide_dispatch(&database, &installation_ref.to_string(), &credential)
+        .await
+        .unwrap();
+    let DispatchDecision::Dispatch { task_id, task_spec, .. } = dispatch else {
+        panic!("the exact Ops work must dispatch through the shared live-claim path: {dispatch:?}");
+    };
+    assert_eq!(task_spec["source"], "scheduled");
+    assert_eq!(task_spec["capabilitiesRequested"][0], "content_detail");
+    assert_eq!(task_spec["target"]["contentExternalId"], note);
+    let attempt_id = Uuid::new_v4();
+    let attempt = parse_producer_attempt(
+        &json!({
+            "contractVersion":"linggan.producer.attempt.v1", "taskId":task_id,
+            "attemptId":attempt_id, "producerInstanceId":installation_ref
+        })
+        .to_string(),
+    )
+    .unwrap();
+    start_producer_attempt(&database, &attempt).await.unwrap();
+    let package_ref = Uuid::new_v4();
+    let submission = parse_producer_submission(
+        &json!({
+            "contractVersion":"linggan.producer.capture-package.v1", "taskId":task_id,
+            "attemptId":attempt_id, "producerInstanceId":installation_ref,
+            "submissionId":Uuid::new_v4(),
+            "capturePackage":{
+                "contractVersion":"linggan.producer.capture-package.v1", "packageRef":package_ref,
+                "packageKind":"content_detail", "platform":"xhs",
+                "observedAt":"2026-10-23T08:00:00Z", "capturedAt":"2026-10-23T08:00:01Z",
+                "coverage":{"target":{"basis":"known_set","contentExternalId":note},"layers":[{
+                    "capability":"content_detail","observed":1,"attempted":1,"acquired":1,
+                    "verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"fixture_complete"
+                }]},
+                "records":[{"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":note},"payload":{
+                    "title":"隔离运营回填标题", "bodyText":"隔离运营回填正文", "authorId":"0123456789abcdef01234567"
+                }}]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let outcome = submit_producer_package(&database, &submission).await.unwrap();
+    let linggan_evidence::RuntimeSubmissionOutcome::Acknowledged { receipt_ref, execution_effect, .. } = outcome else {
+        panic!("a first valid package must receive an acknowledgement");
+    };
+    assert_eq!(execution_effect, "COMPLETED_LIVE_STEP");
+    let projection: (Uuid, Uuid, Uuid, Uuid, i64, String) = sqlx::query_as(
+        "SELECT publication_ref,content_public_ref,package_ref,receipt_ref,publication_version,observed_at \
+           FROM linggan_ops_publication_material_projection WHERE receipt_ref=$1",
+    )
+    .bind(receipt_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(projection.0, publication_ref);
+    assert_eq!(projection.2, package_ref);
+    assert_eq!(projection.3, receipt_ref);
+    assert_eq!(projection.4, 1);
+    assert_eq!(projection.5, "2026-10-23T08:00:00Z");
+    let untouched: (Option<i64>, Option<f64>, Option<String>, Uuid, Uuid) = sqlx::query_as(
+        "SELECT like_count,cover_click_rate,publisher_name,account_ref, \
+                native_publisher_member_ref \
+           FROM linggan_ops_publication WHERE publication_ref=$1",
+    )
+    .bind(publication_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(untouched, (None, None, None, account_ref, owner));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_material_domain_usage WHERE content_public_ref=$1",
+        )
+        .bind(projection.1)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        0,
+        "Ops projection adds an explicit own-use link without rewriting domain usage"
+    );
 }
 
 fn publication_body(request_id: Uuid, account_ref: Uuid) -> Value {

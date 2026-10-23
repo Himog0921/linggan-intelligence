@@ -52,12 +52,16 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 `0157_ops_publication_execution_input_eligibility` 将精确运营发布纳入既有执行输入资格台账。若其绑定 locator 此后被判为不可用，系统按 publication 身份记录一次 `input_blocked`，收束同一发布待执行的 lane，并在重新发租时跳过它；不会释放整单并无止境地重新排队。它不把 publication 伪装成 material，也不把 URL 变化自动当作扩大采集范围的授权。
 
+`0158_ops_publication_material_projection` 只保存合格回包与运营发布之间的追加式关联：`publication/version → request/work order → task/attempt → package/receipt → record ordinal → Material`。运行时先写入 Receipt，再在同一事务中检查所有这些边界。只有 scheduled 精确 scope 的 `content_detail`、`COMPLETED_LIVE_STEP`、`ACCEPTED` receipt、未超出该单一详情配额的 `accepted_for_library_content` record、匹配的平台作品 ID 与作者 ID 才能创建该关联；回包缺字段、身份不符、record 被隔离或 `LOST_AUTHORITY` 时均不会投影。详情包没有任何合格 record 时也不会仅凭 package 创建 `linggan_material_content`。
+
+该投影从不更新 `linggan_ops_publication`，所以手工阅读量/CTR、日报、历史发布人、当前负责人、业务归属和原发布字段不在此写入范围。它也不写 `linggan_material_domain_usage`：领域 primary/reference 不是“我方内容”含义，不能为了把运营同步展示在某个领域而重写既有领域用途。投影本身是不可变且以 Receipt 为幂等键；后续读取、字段采用、媒体状态与受控重放必须消费这条真实链，不得重新访问平台或伪造回执。
+
 对于 `accepted` / `existing`，数据库约束要求同时具备发布/账号/业务/平台/作品/作者/版本/locator 指纹以及 existing-chain 的 Request/WorkOrder 引用。其他决定禁止携带这两个执行引用。因此无法发生“工单已建但运营关联未保存”的表面成功，也不能把 internal `publication_ref` 塞进平台内容 ID。
 
 ## 4. 已接入与未完成边界
 
 同步 API 现会在同一数据库事务内，对具备 XHS 冻结身份与 locator 的条目调用精确发布准入：它创建或复用仅作控制身份的 creator Target（不等于发现、归档或 Material），冻结发布所属 active Domain 的 primary/reference 关系，写入 `Acquisition Request → Admission → WorkOrder → collection_work_order_ops_publication_target`，再写回同步条目的两个 existing-chain 引用。唯一可接受的授权必须明确包含 `ops_publication_sync` 模板、`batch` lane、至少一篇作品和一个工作单元；旧授权不会被自动扩大。精确 scope 固定一篇、零评论/回复/媒体/OCR/ASR，WorkOrder 的 `max_works=1`，且 lease 发放会再次检查这份精确授权仍有效。
 
-这仍然只到“已排入既有共享队列”：没有在 API 中访问平台、选择工位、发 Lease、生成 Task、创建 Attempt/Package/Receipt、接纳 Material 或回填运营投影。`0155–0157` 及租约/派发/详情会话/缺输入停止读取面已让该 WorkOrder 在被合格安装领取后只展开既有 `content_detail` task，并且只解析同一 scope 的 locator，绝不回退到同名 Material 的 discovery 链接。抖音仍没有受控 locator、身份、能力与回填闭环。本切片不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
+`0155–0158` 及租约/派发/详情会话/缺输入停止读取面现在可在隔离 PostgreSQL 中走通一条合成的 XHS 控制链：精确 scope 被合格安装领取，真实调度代码生成 scheduled task，合格 `content_detail` 的 Attempt/Package/Receipt 创建或复用 Material，并追加发布—Material 投影。此证明不访问平台，也不能证明真实 XHS 内容、浏览器插件、生产迁移、部署或业务验收。抖音仍没有受控 locator、身份、能力与回填闭环。
 
-后续工作是回包绑定、Receipt 合格判定、只在合格 receipt 后创建/复用 Material 与可重放的运营投影，以及两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。
+后续工作是把该不可变结果接到运营读取状态、字段采用/冲突处理、媒体状态和受控“只重放投影”动作，并完成两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。

@@ -493,9 +493,9 @@ async fn insert_material_domain_usage(
     content_public_ref: Uuid,
     record_ordinal: i32,
 ) -> Result<(), ProducerRuntimeError> {
-    // This typed projection runs before submit_producer_package writes its receipt, inside the
-    // same transaction. The receipt is inserted after all typed rows succeed, so joining it here
-    // would silently suppress every Domain usage while still accepting the discovery itself.
+    // `submit_producer_package` has already inserted the Receipt in this transaction. The
+    // receipt is still invisible outside the transaction until every typed projection succeeds,
+    // so a failed typed projection cannot leave it behind as a false admission success.
     let rows: Vec<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(
         "SELECT usage.work_order_ref,usage.request_ref,usage.domain_ref,usage.role \
          FROM linggan_runtime_capture_package package \
@@ -544,7 +544,9 @@ async fn insert_content_records(
     let Some(expected_content_id) = target_string(package, "contentExternalId") else {
         return Ok(());
     };
-    let content_public_ref = ensure_content(tx, package, expected_content_id).await?;
+    // A detail Package can be acknowledged while all of its records are retained or mismatched.
+    // Do not create the global Material identity until one record actually qualifies.
+    let mut content_public_ref = None;
     let mut retained = 0;
     for (ordinal, record) in package.records().iter().enumerate() {
         if !accepted_ordinals.contains(&i32::try_from(ordinal).expect("record count is bounded")) {
@@ -556,6 +558,15 @@ async fn insert_content_records(
         if detail.content_id != expected_content_id {
             continue;
         }
+        let content_public_ref = match content_public_ref {
+            Some(content_public_ref) => content_public_ref,
+            None => {
+                let material_content_ref =
+                    ensure_content(tx, package, expected_content_id).await?;
+                content_public_ref = Some(material_content_ref);
+                material_content_ref
+            }
+        };
         insert_content_detail(tx, package, ordinal, detail, content_public_ref).await?;
         retained += 1;
     }
@@ -563,11 +574,108 @@ async fn insert_content_records(
         tx,
         package,
         "detail",
-        Some(content_public_ref),
+        content_public_ref,
         None,
         retained,
     )
     .await
+}
+
+/// Persist the narrow Ops-publication to Material link after a Receipt exists.
+///
+/// It is an add-only read model: the Operations publication itself is never updated here, so
+/// manual reads/CTR, daily facts, historical publisher, current responsibility and business stay
+/// under their own write contracts. Absence of the new table is tolerated during rolling upgrade;
+/// generic producer admission must not be made unavailable by this optional consumer.
+pub(crate) async fn project_exact_ops_publication_after_receipt(
+    tx: &mut Transaction<'_, Postgres>,
+    package: &ProducerCapturePackage,
+    receipt_ref: Uuid,
+) -> Result<(), ProducerRuntimeError> {
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_ops_publication_material_projection') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if !schema_ready || package.package_kind() != "content_detail" {
+        return Ok(());
+    }
+    let rows: Vec<(Uuid, i64, Uuid, Uuid, Uuid, Uuid, i32, Uuid, String)> = sqlx::query_as(
+        "SELECT scope.publication_ref,scope.publication_version,request.request_ref, \
+                lease.work_order_ref,package.task_id,package.attempt_id,disposition.record_ordinal, \
+                content.public_ref,detail.observed_at \
+           FROM linggan_runtime_submission_receipt receipt \
+           JOIN linggan_runtime_capture_package package ON package.package_ref=receipt.package_ref \
+           JOIN linggan_runtime_task task ON task.task_id=package.task_id \
+           JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+           JOIN collection_work_order_lease lease ON lease.lease_ref=lease_task.lease_ref \
+           JOIN collection_work_order work_order ON work_order.work_order_ref=lease.work_order_ref \
+           JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
+           JOIN collection_acquisition_request request ON request.request_ref=decision.request_ref \
+           JOIN collection_work_order_ops_publication_target scope \
+             ON scope.work_order_ref=work_order.work_order_ref \
+           JOIN linggan_ops_publication publication ON publication.publication_ref=scope.publication_ref \
+           JOIN linggan_runtime_record_disposition disposition \
+             ON disposition.package_ref=package.package_ref \
+            AND disposition.disposition='accepted_for_library_content' \
+            AND disposition.reason NOT LIKE '%__beyond_task_maximum_quota' \
+           JOIN linggan_material_content content \
+             ON content.platform=package.platform AND content.content_external_id=scope.content_external_id \
+           JOIN linggan_material_content_detail detail \
+             ON detail.content_public_ref=content.public_ref \
+            AND detail.package_ref=package.package_ref \
+            AND detail.record_ordinal=disposition.record_ordinal \
+          WHERE receipt.receipt_ref=$1 \
+            AND receipt.material_admission='ACCEPTED' \
+            AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+            AND package.package_kind='content_detail' \
+            AND task.source='scheduled' \
+            AND task.platform=publication.platform \
+            AND task.task_spec->'target'->>'contentExternalId'=scope.content_external_id \
+            AND package.coverage->'target'->>'contentExternalId'=scope.content_external_id \
+            AND detail.author_external_id=scope.author_external_id",
+    )
+    .bind(receipt_ref)
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    for (
+        publication_ref,
+        publication_version,
+        request_ref,
+        work_order_ref,
+        task_id,
+        attempt_id,
+        record_ordinal,
+        content_public_ref,
+        observed_at,
+    ) in rows
+    {
+        sqlx::query(
+            "INSERT INTO linggan_ops_publication_material_projection \
+             (projection_ref,publication_ref,publication_version,request_ref,work_order_ref, \
+              task_id,attempt_id,package_ref,receipt_ref,record_ordinal,content_public_ref,observed_at) \
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) \
+             ON CONFLICT (receipt_ref) DO NOTHING",
+        )
+        .bind(Uuid::new_v4())
+        .bind(publication_ref)
+        .bind(publication_version)
+        .bind(request_ref)
+        .bind(work_order_ref)
+        .bind(task_id)
+        .bind(attempt_id)
+        .bind(package.package_ref())
+        .bind(receipt_ref)
+        .bind(record_ordinal)
+        .bind(content_public_ref)
+        .bind(observed_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    }
+    Ok(())
 }
 
 async fn insert_comment_records(

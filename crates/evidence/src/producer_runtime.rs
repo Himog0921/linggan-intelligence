@@ -1004,9 +1004,6 @@ pub async fn submit_producer_package(
         crate::material_contract_validation::task_package_binding_valid(&task_spec, package)
             && incremental_comment_budget_valid_in(&mut tx, &task_spec, package).await?;
     insert_record_dispositions(&mut tx, package, maximum_quota, task_binding_valid).await?;
-    if task_binding_valid {
-        crate::material_admission::insert_typed_materials(&mut tx, package).await?;
-    }
     let receipt_ref = Uuid::new_v4();
     let execution_effect = match (task_source.as_str(), live_scheduled_claim) {
         ("scheduled", true) => "COMPLETED_LIVE_STEP",
@@ -1017,6 +1014,19 @@ pub async fn submit_producer_package(
         .bind(submission.submission_id()).bind(submission.task_id()).bind(submission.attempt_id()).bind(submission.producer_instance_id())
         .bind(&package_hash).bind(package.package_ref()).bind(receipt_ref).bind(execution_effect)
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
+    // A typed Material may only be created after its immutable Receipt has been persisted. The
+    // transaction remains atomic, so a typed-projection failure rolls the Receipt back too.
+    if task_binding_valid {
+        crate::material_admission::insert_typed_materials(&mut tx, package).await?;
+    }
+    // The Receipt is persisted before an Ops projection is even considered. Both writes remain
+    // atomic, so a later projection failure cannot leave behind a receipt that claims success.
+    crate::material_admission::project_exact_ops_publication_after_receipt(
+        &mut tx,
+        package,
+        receipt_ref,
+    )
+    .await?;
     if live_scheduled_claim {
         let completed = crate::work_order_lease::complete_lease_for_task_in_transaction(
             &mut tx,
