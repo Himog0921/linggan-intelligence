@@ -7,6 +7,34 @@ use uuid::Uuid;
 use super::requests::{RequestOwner, ensure_request_owner_in, lock, receipt, replay};
 use super::source_usage::{prepare, raw_present, redact, redact_title_in, target_mut};
 
+fn stored_document(value: serde_json::Value) -> Result<WorkDocument, WorkbenchError> {
+    match serde_json::from_value(value.clone()) {
+        Ok(document) => Ok(document),
+        // Pre-dossier workbench revisions did not persist the immutable block and
+        // as-of identity required by the current citation contract.  They cannot
+        // be safely requalified as current source material, so keep the original
+        // record intact and distinguish it from a transient database failure.
+        Err(_)
+            if value
+                .get("excerpts")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|excerpts| {
+                    excerpts.iter().any(|excerpt| {
+                        excerpt
+                            .get("citation")
+                            .and_then(serde_json::Value::as_object)
+                            .is_some_and(|citation| {
+                                !citation.contains_key("blockRef") || !citation.contains_key("asOf")
+                            })
+                    })
+                }) =>
+        {
+            Err(WorkbenchError::LegacyReferenceUnavailable)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 pub async fn read_revision_in(
     tx: &mut Transaction<'_, Postgres>,
     work: Uuid,
@@ -19,7 +47,7 @@ pub async fn read_revision_in(
             id: row.try_get("revision_ref")?,
             number: row.try_get("revision_number")?,
             saved_at: row.try_get("saved_at")?,
-            document: serde_json::from_value(row.try_get("document")?)?,
+            document: stored_document(row.try_get("document")?)?,
         },
     ))
 }
@@ -28,19 +56,27 @@ pub async fn list_works(
     domain: Option<Uuid>,
 ) -> Result<Vec<WorkSummary>, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
-    let rows = sqlx::query("SELECT w.work_ref,w.domain_ref FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref WHERE ($1::uuid IS NULL OR w.domain_ref=$1) ORDER BY r.saved_at DESC,w.work_ref LIMIT 200")
+    let rows = sqlx::query("SELECT w.work_ref,w.domain_ref,r.revision_ref,r.saved_at::text,r.document FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref WHERE ($1::uuid IS NULL OR w.domain_ref=$1) ORDER BY r.saved_at DESC,w.work_ref LIMIT 200")
         .bind(domain).fetch_all(&mut *tx).await?;
     let mut summaries = Vec::new();
     for row in rows {
         let work_id = row.try_get("work_ref")?;
-        let (domain_ref, revision) = read_revision_in(&mut tx, work_id, None).await?;
-        let title = redact_title_in(&mut tx, domain_ref, &revision.document).await?;
+        let domain_ref = row.try_get("domain_ref")?;
+        let revision_id = row.try_get("revision_ref")?;
+        let saved_at = row.try_get("saved_at")?;
+        let title = match stored_document(row.try_get("document")?) {
+            Ok(document) => redact_title_in(&mut tx, domain_ref, &document).await?,
+            Err(WorkbenchError::LegacyReferenceUnavailable) => {
+                "[历史作品：引用版本无法安全读取]".into()
+            }
+            Err(error) => return Err(error),
+        };
         summaries.push(WorkSummary {
             work_id,
             domain_ref,
             title,
-            revision_id: revision.id,
-            saved_at: revision.saved_at,
+            revision_id,
+            saved_at,
         });
     }
     summaries.sort_by(|a, b| {
@@ -164,6 +200,43 @@ pub async fn save(
     redact(&mut tx, domain, &mut out.revision.document).await?;
     tx.commit().await?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod stored_document_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_citation_without_immutable_source_identity_is_distinguished() {
+        let mut value = serde_json::to_value(WorkDocument::default()).unwrap();
+        value["excerpts"] = json!([{
+            "id": Uuid::new_v4(),
+            "citation": {
+                "sourceKind": "note",
+                "sourceRef": Uuid::new_v4(),
+                "workRef": Uuid::new_v4(),
+                "field": "body",
+                "sourceVersion": "legacy",
+                "start": 0,
+                "end": 1,
+                "textHash": "hash",
+                "location": null
+            },
+            "selectedText": "x",
+            "textHash": "hash"
+        }]);
+
+        assert!(matches!(
+            stored_document(value),
+            Err(WorkbenchError::LegacyReferenceUnavailable)
+        ));
+    }
+
+    #[test]
+    fn current_document_still_decodes_strictly() {
+        assert!(stored_document(serde_json::to_value(WorkDocument::default()).unwrap()).is_ok());
+    }
 }
 async fn save_in(
     tx: &mut Transaction<'_, Postgres>,
