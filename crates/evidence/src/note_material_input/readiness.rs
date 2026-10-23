@@ -131,10 +131,17 @@ pub(super) fn columns(
                 .any(|m| m["processorKind"] == kind && m["state"] == "WITHDRAWN_OR_RESTRICTED");
         let relayer = kind == "image_ocr"
             && media.iter().any(|m| {
-                m["processorKind"] == kind
+                crate::research_dossier::media_can_relayer(m)
                     && m["contextOnly"] != true
                     && m["state"] == "ACQUIRED"
                     && m["ocrLayering"]["layerVersion"] != crate::ocr_layering::VERSION
+            });
+        let machine_preview_unverified = kind == "image_ocr"
+            && media.iter().any(|m| {
+                m["processorKind"] == kind
+                    && m["contextOnly"] != true
+                    && m["state"] == "ACQUIRED"
+                    && m["ocrLayering"]["decisionSource"] == "cloud_vision_unverified"
             });
         let waiting = items.iter().any(|s| {
             s.state == "waiting"
@@ -153,6 +160,8 @@ pub(super) fn columns(
             ColumnState::Restricted
         } else if available {
             ColumnState::Available
+        } else if machine_preview_unverified {
+            ColumnState::NotAdopted
         } else if items.iter().any(|s| s.state == "terminal_failure") {
             ColumnState::TerminalFailure
         } else if !items.is_empty() && items.iter().all(|s| s.state == "known_empty") {
@@ -171,6 +180,9 @@ pub(super) fn columns(
             .collect();
         if relayer {
             reasons.push("current_layer_required".into());
+        }
+        if machine_preview_unverified && !available {
+            reasons.push("machine_preview_unverified".into());
         }
         if restricted {
             reasons.push("source_restricted".into());
@@ -223,5 +235,35 @@ mod tests {
             columns(&[pending], &media, false, false)[0].state,
             ColumnState::Waiting
         );
+    }
+    #[test]
+    fn cloud_preview_without_human_adoption_is_not_a_relayer_target_or_input() {
+        let cloud = serde_json::json!({
+            "processorKind":"image_ocr",
+            "processorVersion":"cloud-manual-v1:00000000-0000-4000-8000-000000000001",
+            "contextOnly":false,
+            "state":"ACQUIRED",
+            "ocrLayering":{"decisionSource":"cloud_vision_unverified","layerVersion":"cloud-ocr-adoption.v1"}
+        });
+        let column = &columns(&[], &[cloud], false, false)[0];
+        assert_eq!(column.state, ColumnState::NotAdopted);
+        assert_eq!(column.reasons, vec!["machine_preview_unverified"]);
+    }
+    #[test]
+    fn local_relayer_remains_the_blocker_when_a_cloud_preview_also_exists() {
+        let local = serde_json::json!({
+            "processorKind":"image_ocr","processorVersion":"local-v3",
+            "contextOnly":false,"state":"ACQUIRED",
+            "ocrLayering":{"layerVersion":"rules-v1"}
+        });
+        let cloud = serde_json::json!({
+            "processorKind":"image_ocr",
+            "processorVersion":"cloud-manual-v1:00000000-0000-4000-8000-000000000001",
+            "contextOnly":false,"state":"ACQUIRED",
+            "ocrLayering":{"decisionSource":"cloud_vision_unverified","layerVersion":"cloud-ocr-adoption.v1"}
+        });
+        let column = &columns(&[], &[local, cloud], false, false)[0];
+        assert_eq!(column.state, ColumnState::NeedsRelayer);
+        assert!(column.reasons.contains(&"current_layer_required".into()));
     }
 }

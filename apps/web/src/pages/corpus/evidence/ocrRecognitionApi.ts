@@ -19,3 +19,8 @@ export async function stopOcrRecognition(batchRef: string, expectedRevision: num
   const receipt = await requestJson('/api/local/ai-settings/batches/cancel', { method: 'POST', body: { batchRef, expectedRevision, commandRef, reason: '用户在当前作品停止图片文字识别' } });
   if (!isRecord(receipt) || receipt.batchRef !== batchRef || receipt.cancelRequested !== true) throw new ApiError({ kind: 'invalid_response', status: 200 });
 }
+export async function adoptManualOcr(workRef: string, payload: { commandRef: string; adoptionRef: string; expectedRevision: number; decision: 'adopt' | 'reject' | 'pending'; field: 'adopted_body'; text: string | null; actor: string; reason: string }) {
+  const receipt = await requestJson(root(workRef) + '/adoptions', { method: 'POST', body: payload });
+  if (!isRecord(receipt) || typeof receipt.reviewRef !== 'string' || typeof receipt.revision !== 'number') throw new ApiError({ kind: 'invalid_response', status: 200 });
+  return receipt;
+}

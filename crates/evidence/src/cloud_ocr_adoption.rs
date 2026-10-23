@@ -495,6 +495,8 @@ pub(crate) async fn attach_media(
         item["derivativeRef"] = json!(row.get::<Uuid, _>("derivative_ref"));
         item["ocrAdoption"] = json!({"adoptionRef":row.get::<Uuid,_>("adoption_ref"),"assessment":assessment,"rawBlocks":raw_blocks,"lineRefMap":[],"pendingBlocks":pending,"projectionVersion":RULE_VERSION,"sourceRelation":"image_transcription_not_author_claim"});
         item["ocrLayering"] = json!({"layoutRef":row.get::<Uuid,_>("layout_ref"),"layeringRef":row.get::<Uuid,_>("adoption_ref"),"layerVersion":RULE_VERSION,"state":"NEEDS_REVIEW","decisionSource":"cloud_vision_unverified","imageWidth":row.get::<i32,_>("image_width"),"imageHeight":row.get::<i32,_>("image_height"),"engineVersion":PROCESSOR_VERSION,"coverHeadline":assessment["coverTitle"],"imageSubstantiveText":Value::Null,"cleanCorpusEligible":false,"retainedLines":[],"excludedLines":[],"sourceFragments":[]});
+        crate::ocr_adoption_persistence::attach_in(tx, item, row.get("adoption_ref"), as_of)
+            .await?;
     }
     Ok(())
 }

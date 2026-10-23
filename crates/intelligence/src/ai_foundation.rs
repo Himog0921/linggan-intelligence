@@ -89,4 +89,5 @@ impl TaskKey {
 }
 
 pub mod invocation_read;
+pub mod ocr_manual_adoption;
 pub mod ocr_recognition;

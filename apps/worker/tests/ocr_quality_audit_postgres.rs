@@ -58,6 +58,7 @@ async fn synthetic_audit_blind_read_review_report_and_withdrawal() {
         include_str!("../../../database/migrations/0142_ocr_adoption.sql"),
         include_str!("../../../database/migrations/0143_ocr_quality_audit.sql"),
         include_str!("../../../database/migrations/0144_ocr_manual_recognition.sql"),
+        include_str!("../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
     ] {
         sqlx::raw_sql(source).execute(db.pool()).await.unwrap();
     }

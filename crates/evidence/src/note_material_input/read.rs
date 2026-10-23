@@ -165,6 +165,14 @@ ORDER BY d.material_ref,h.ordinal
                     }
                 ));
             }
+            if column.state == ColumnState::NotAdopted
+                && column
+                    .reasons
+                    .iter()
+                    .any(|reason| reason == "machine_preview_unverified")
+            {
+                reasons.push(format!("{}_machine_preview_unverified", column.field));
+            }
         }
         let (tag_state, tag_reason) = match current.detail_material_ref {
             None => (ColumnState::NotAcquired, Some("detail_not_acquired")),

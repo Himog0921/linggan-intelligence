@@ -6,9 +6,13 @@ cd "$project_root"
 audit_tmp_root="${TMPDIR:-/tmp}"
 audit_tmp_root="${audit_tmp_root%/}"
 export AI_FOUNDATION_PROOF_NODE="$(command -v node)"
+manual_adoption_only=0
+browser_proof=0
 case "${1:-}" in
  '') ;;
+ --manual-adoption) manual_adoption_only=1 ;;
  --browser)
+  browser_proof=1
   npm --prefix apps/web run build
   export LINGGAN_WEB_DIST="$project_root/apps/web/dist"
   export LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE
@@ -25,7 +29,7 @@ PYCODE
   export OCR_AUDIT_BROWSER_PROOF_BINARY
   [[ -x "$OCR_AUDIT_BROWSER_PROOF_BINARY" ]] || exit 2
   ;;
- *) echo 'usage: test-ocr-quality-audit-postgres.sh [--browser]' >&2;exit 2;;
+ *) echo 'usage: test-ocr-quality-audit-postgres.sh [--browser|--manual-adoption]' >&2;exit 2;;
 esac
 export LINGGAN_COLLECTION_UPGRADE_PHASE=governance RUST_TEST_THREADS=1
 suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
@@ -66,8 +70,15 @@ export LINGGAN_LOCAL_MEDIA_ROOT="$proof_assets/media"
 export LINGGAN_PADDLE_OCR_PYTHON="$(command -v python3)"
 export LINGGAN_PADDLE_VL_SCRIPT="$proof_assets/synthetic-bridge.py"
 export OCR_AUDIT_PROOF_OUTPUT="$proof_assets/receipts"
+if [[ "$manual_adoption_only" == 1 ]]; then
+ cargo test -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
+ exit 0
+fi
 cargo test -p linggan-worker --test ocr_quality_audit_postgres synthetic_audit_blind_read_review_report_and_withdrawal --locked -- --ignored --nocapture
-cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable --locked -- --ignored --nocapture
+if [[ "$browser_proof" == 1 ]]; then
+ cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable --locked -- --ignored --nocapture
+fi
+cargo test -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
 cargo test -p linggan-worker --test ocr_recognition_postgres second_image_schema_failure_stops_without_sending_the_third_image --locked -- --ignored --nocapture
 cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend --locked -- --ignored --nocapture
 cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_freezes_only_current_work_images_not_context_or_history --locked -- --ignored --nocapture
