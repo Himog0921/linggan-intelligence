@@ -37,6 +37,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             axum::routing::post(record_view_report),
         )
         .route(
+            "/api/local/ops/native/view-reports/batch",
+            axum::routing::post(record_view_reports_batch),
+        )
+        .route(
             "/api/local/ops/native/publications/{publication_ref}/execution-locators",
             axum::routing::post(record_execution_locator),
         )
@@ -113,6 +117,20 @@ struct RecordViewBody {
     report_kind: String,
     view_count: Option<i64>,
     as_of: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BatchViewReportItem {
+    publication_ref: Uuid,
+    #[serde(flatten)]
+    report: RecordViewBody,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BatchViewReportsBody {
+    reports: Vec<BatchViewReportItem>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -261,6 +279,37 @@ async fn record_view_report(
         Ok((status, receipt)) => receipt_response(status, receipt),
         Err(error) => write_error(error),
     }
+}
+
+async fn record_view_reports_batch(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Json(body): Json<BatchViewReportsBody>,
+) -> Response {
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let Some(database) = state.database.database() else { return super::ops_api::not_connected(); };
+    if body.reports.is_empty() || body.reports.len() > 100 {
+        return write_error(WriteError::Invalid("ops_native_batch_size_invalid"));
+    }
+    let mut items = Vec::with_capacity(body.reports.len());
+    for (index, item) in body.reports.into_iter().enumerate() {
+        let request_ref = item.report.request_id;
+        let (status, receipt) = match write_view_report(database, member.clone(), item.publication_ref, item.report).await {
+            Ok(result) => result,
+            Err(WriteError::Invalid(code)) => (
+                if code.ends_with("_conflict") { StatusCode::CONFLICT } else { StatusCode::UNPROCESSABLE_ENTITY },
+                CommandReceipt { request_ref, outcome: "rejected".to_owned(), code: code.to_owned(), record_ref: None, resulting_version: None, replayed: false },
+            ),
+            Err(WriteError::Unavailable) => return write_error(WriteError::Unavailable),
+        };
+        items.push(BatchPublicationReceipt { ordinal: index + 1, status: status.as_u16(), receipt });
+    }
+    let mut response = Json(BatchPublicationsReceipt { items }).into_response();
+    super::ops_auth::secure_headers(&mut response);
+    response
 }
 
 async fn record_execution_locator(
