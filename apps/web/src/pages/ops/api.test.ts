@@ -81,6 +81,18 @@ it("accepts only the durable native receipt for its own request identity", () =>
   expect(() => api.nativeReceipt(receipt, "other")).toThrow();
   expect(() => api.nativeReceipt({ receipt: { ...receipt.receipt, outcome: "success" } }, "r")).toThrow();
 });
+it("keeps batch receipts positionally bound to their submitted request identities", () => {
+  const result = {
+    items: [
+      { ordinal: 1, status: 201, receipt: { requestRef: "one", outcome: "accepted", code: "accepted", replayed: false } },
+      { ordinal: 2, status: 422, receipt: { requestRef: "two", outcome: "rejected", code: "ops_native_view_count_invalid", replayed: false } },
+    ],
+  };
+  expect(api.nativeBatchReceipts(result, ["one", "two"]).items[1]).toMatchObject({ status: 422, outcome: "rejected" });
+  expect(() => api.nativeBatchReceipts({ ...result, items: [{ ...result.items[0], ordinal: 2 }, result.items[1]] }, ["one", "two"])).toThrow();
+  expect(() => api.nativeBatchReceipts({ ...result, items: [result.items[1], result.items[0]] }, ["one", "two"])).toThrow();
+  expect(() => api.nativeBatchReceipts({ ...result, items: [result.items[0]] }, ["one", "two"])).toThrow();
+});
 it("keeps native daily provenance, version, and null metrics distinct", () => {
   const page = api.daily({
     asOf: null, scope: "all_businesses", limit: 200, operators: ["甲"], items: [{

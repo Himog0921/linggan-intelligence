@@ -373,18 +373,35 @@ export type NativePublicationCommand = {
 export async function createNativePublication(command: NativePublicationCommand & { requestId: string }) {
   return nativeCommand("/api/local/ops/native/publications", { ...command, publishedAt: null }, command.requestId);
 }
+/**
+ * Batch writes still carry a receipt for every caller-owned request identity.
+ * The transport response is not evidence of success unless every returned
+ * position and receipt maps back to the request submitted at that position.
+ */
+export function nativeBatchReceipts(value: unknown, requestIds: readonly string[]) {
+  return d.decode(value, r => {
+    const items = d.list(r, "items", item => {
+      const receipt = d.obj(item, "receipt");
+      return {
+        ordinal: n(item, "ordinal"), status: n(item, "status"),
+        requestRef: s(receipt, "requestRef"),
+        outcome: enumeration(receipt, "outcome", ["accepted", "unchanged", "rejected", "stale"]),
+        code: s(receipt, "code"), replayed: b(receipt, "replayed"),
+      };
+    });
+    if (items.length !== requestIds.length) throw new d.ShapeError("items");
+    for (const [index, item] of items.entries()) {
+      if (!Number.isSafeInteger(item.ordinal) || item.ordinal !== index + 1) throw new d.ShapeError("items.ordinal");
+      if (!Number.isSafeInteger(item.status) || item.status < 100 || item.status > 599) throw new d.ShapeError("items.status");
+      if (item.requestRef !== requestIds[index]) throw new d.ShapeError("items.receipt.requestRef");
+    }
+    return { items };
+  });
+}
 export async function createNativePublicationBatch(commands: readonly (NativePublicationCommand & { requestId: string })[]) {
-  return d.decode(await requestJson("/api/local/ops/native/publications/batch", {
+  return nativeBatchReceipts(await requestJson("/api/local/ops/native/publications/batch", {
     method: "POST", body: { publications: commands.map(command => ({ ...command, publishedAt: null })) },
-  }), r => ({ items: d.list(r, "items", item => {
-    const receipt = d.obj(item, "receipt");
-    return {
-      ordinal: n(item, "ordinal"), status: n(item, "status"),
-      requestRef: s(receipt, "requestRef"),
-      outcome: enumeration(receipt, "outcome", ["accepted", "unchanged", "rejected", "stale"]),
-      code: s(receipt, "code"), replayed: b(receipt, "replayed"),
-    };
-  }) }));
+  }), commands.map(command => command.requestId));
 }
 
 export type NativeDailyCommand = {
@@ -400,6 +417,13 @@ export type NativeViewCommand = {
 };
 export async function recordNativeView(publicationRef: string, command: NativeViewCommand & { requestId: string }) {
   return nativeCommand(`/api/local/ops/native/publications/${encodeURIComponent(publicationRef)}/view-reports`, command, command.requestId);
+}
+export type NativeViewBatchReport = NativeViewCommand & { requestId: string; publicationRef: string };
+/** The server isolates each report; this decoder preserves that per-row result boundary. */
+export async function recordNativeViewBatch(reports: readonly NativeViewBatchReport[]) {
+  return nativeBatchReceipts(await requestJson("/api/local/ops/native/view-reports/batch", {
+    method: "POST", body: { reports },
+  }), reports.map(report => report.requestId));
 }
 const figures = (r: R) => ({
   published: nn(r, "published"),
