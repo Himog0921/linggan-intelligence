@@ -66,11 +66,19 @@ export function ContentComparisonPanel(){
   const [unknown,setUnknown]=useState(false);
   const [error,setError]=useState<string|null>(null);
   const command=useRef<string|null>(params.get('inspect_comparison_command'));
+  // A transport-unknown submission must replay the *same payload* and command,
+  // even when a newer preview becomes available while the first request is in flight.
+  const pendingPayload=useRef<{
+    commandRef:string;targetRef:string;domainRef:string|null;workRefs:string[];
+    knowledgeCutoff:string;expectedMaterialRevisions:string[];
+    taskConfigRef:string;expectedTaskRevision:number;
+  }|null>(null);
   const previousSelection=useRef(works.join(','));
   // A comparison belongs to the exact selected works, not a different later selection.
   if(previousSelection.current!==works.join(',')){
     previousSelection.current=works.join(',');
     command.current=null;
+    pendingPayload.current=null;
     if(requestRef!==null)setRequestRef(null);
     if(error!==null)setError(null);
     if(unknown)setUnknown(false);
@@ -83,33 +91,40 @@ export function ContentComparisonPanel(){
   const read=useInspectionRead(readPath,decodeResult);
   const matched=read.data?.materials.map(material=>material.workRef).join(',')===works.join(',');
   const begin=async()=>{
-    if(!preview.data?.canStart||pending)return;
+    if(pending)return;
     const input=preview.data;
-    if(input.workRefs.join(',')!==works.join(',')){setError('选择已改变，请重新读取研究准备信息。');return;}
-    if(!input.taskConfigRef||input.taskRevision===null)return;
+    if(!pendingPayload.current){
+      if(!input?.canStart||!input.taskConfigRef||input.taskRevision===null)return;
+      if(input.workRefs.join(',')!==works.join(',')){setError('选择已改变，请重新读取研究准备信息。');return;}
+    }
     const commandRef=command.current??crypto.randomUUID();
     command.current=commandRef;
+    if(!pendingPayload.current&&input?.taskConfigRef&&input.taskRevision!==null){
+      pendingPayload.current={
+        commandRef,targetRef:input.targetRef,domainRef:context.scope.domain==='all'?null:context.scope.domain,
+        workRefs:input.workRefs,knowledgeCutoff:input.knowledgeCutoff,
+        expectedMaterialRevisions:input.materialRevisions,taskConfigRef:input.taskConfigRef,
+        expectedTaskRevision:input.taskRevision,
+      };
+    }
+    const payload=pendingPayload.current;
+    if(!payload)return;
     setPending(true);setError(null);
     try{
       const output=await requestJson(
-        inspectionUrl(context.scope,'content-comparison/requests',{as_of:input.knowledgeCutoff}),
-        {method:'POST',body:{
-          commandRef,targetRef:input.targetRef,domainRef:context.scope.domain==='all'?null:context.scope.domain,
-          workRefs:input.workRefs,knowledgeCutoff:input.knowledgeCutoff,
-          expectedMaterialRevisions:input.materialRevisions,taskConfigRef:input.taskConfigRef,
-          expectedTaskRevision:input.taskRevision,
-        }}
+        inspectionUrl(context.scope,'content-comparison/requests',{as_of:payload.knowledgeCutoff}),
+        {method:'POST',body:payload}
       );
       if(!isRecord(output)||typeof output.requestRef!=='string'
         ||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(output.requestRef))throw new Error('服务器结果不可确认');
       const id=output.requestRef;
-      setRequestRef(id);setUnknown(false);command.current=null;
+      setRequestRef(id);setUnknown(false);command.current=null;pendingPayload.current=null;
       context.patch({inspect_comparison_request:id,inspect_comparison_command:null});
     }catch(caught){
       if(caught instanceof ApiError&&caught.answered){
         const payload=isRecord(caught.responseBody)?caught.responseBody:null;
         const reasons=payload&&Array.isArray(payload.reasons)?payload.reasons.filter(v=>typeof v==='string') as string[]:[];
-        setUnknown(false);command.current=null;
+        setUnknown(false);command.current=null;pendingPayload.current=null;
         setError(reasons.length?reasons.map(explanation).join('；'):'本次内容对照未被接纳，当前作品指标与原文仍可继续查看。');
       }else {
         // With an unknown response, keep the same command ID for an explicit retry.
@@ -122,7 +137,7 @@ export function ContentComparisonPanel(){
   return <section className={styles.contentResearch} aria-label="内容新增与重复表达对照">
     <div className={styles.contentResearchHead}>
       <div><h3>内容新增与重复表达</h3><p className={styles.meta}>仅比较所选作品的已取得内容；与点赞、收藏等表现对照独立。</p></div>
-      {!requestRef&&<ActionButton variant="outline" disabled={!preview.data?.canStart||pending||works.length<2} onClick={()=>{void begin();}}>
+      {!requestRef&&<ActionButton variant="outline" disabled={(!preview.data?.canStart&&!unknown)||pending||works.length<2} onClick={()=>{void begin();}}>
         {pending?'正在提交…':unknown?'按原请求核对':'比较内容'}</ActionButton>}
       {requestRef&&<ActionButton variant="quiet" onClick={read.reload}>读取研究结果</ActionButton>}
     </div>
