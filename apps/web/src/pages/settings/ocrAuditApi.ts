@@ -31,8 +31,8 @@ export async function fetchAuditDetail(readingRef: string, signal?: AbortSignal)
     if (!isRecord(raw) || !['confirmed','dismissed','pending'].includes(String(raw.decision)) || typeof raw.revision !== 'number' || typeof raw.actor !== 'string' || typeof raw.reason !== 'string') throw new ApiError({ kind: 'invalid_response', status: 200 });
     return { revision: raw.revision, decision: raw.decision as 'confirmed' | 'dismissed' | 'pending', actor: raw.actor, reason: raw.reason, materialReviewCommandRef: typeof raw.material_review_command_ref === 'string' ? raw.material_review_command_ref : null };
   });
-  const reviewed = value.reviews.filter(isRecord).filter(r => r.decision !== 'pending').at(-1);
-  const counts = isRecord(reviewed?.metrics) ? reviewed.metrics : {};
+  const reviewed = value.reviews.filter(isRecord).at(-1);
+  const counts = reviewed?.decision !== 'pending' && isRecord(reviewed?.metrics) ? reviewed.metrics : {};
   const humanCounts = Object.fromEntries(metricCounts.map(key => {
     const pair = counts[key]; return [key, isRecord(pair) && typeof pair.numerator === 'number' && typeof pair.denominator === 'number' ? { numerator: pair.numerator, denominator: pair.denominator } : { numerator: 0, denominator: 0 }];
   }));

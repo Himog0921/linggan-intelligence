@@ -482,11 +482,23 @@ print(json.dumps(b,ensure_ascii=False))
     owner.heartbeat().await.unwrap();
     if let Some(binary) = std::env::var_os("OCR_AUDIT_BROWSER_PROOF_BINARY") {
         let status = tokio::task::spawn_blocking(move || {
+            let proof =
+                "local_web::ocr_audit::tests::owned_audit_ui_reads_and_appends_a_human_opinion";
+            let listed = std::process::Command::new(&binary)
+                .args([proof, "--ignored", "--exact", "--list"])
+                .output()
+                .expect("list owned audit browser proof");
+            assert!(
+                listed.status.success()
+                    && String::from_utf8_lossy(&listed.stdout)
+                        .lines()
+                        .any(|line| line == format!("{proof}: test")),
+                "the API binary must contain the exact owned audit browser proof"
+            );
             std::process::Command::new(binary)
-                .arg(
-                    "local_web::ocr_audit::tests::owned_audit_ui_reads_and_appends_a_human_version",
-                )
+                .arg(proof)
                 .arg("--ignored")
+                .arg("--exact")
                 .arg("--nocapture")
                 .status()
                 .unwrap()
@@ -520,6 +532,39 @@ print(json.dumps(b,ensure_ascii=False))
         .await
         .unwrap()
         .unwrap();
+    let current_revision: i64 = sqlx::query_scalar(
+        "SELECT max(revision) FROM linggan_ocr_audit_review WHERE sample_ref=$1",
+    )
+    .bind(sample)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    audit::review::review(
+        &db,
+        &audit::review::Review {
+            command_ref: Uuid::new_v4(),
+            expected_revision: current_revision,
+            decision: "pending".into(),
+            issue_ref: None,
+            metrics: Default::default(),
+            ..review.clone()
+        },
+    )
+    .await
+    .unwrap();
+    let reopened = audit::report::report(&db, run_ref).await.unwrap();
+    assert_eq!(
+        reopened["pools"][0]["humanReviewedSamples"], 0,
+        "a pending latest opinion cannot fall back to an older reviewed version"
+    );
+    assert_eq!(
+        reopened["pools"][0]["metrics"]["bodyMissing"]["denominator"],
+        0
+    );
+    assert_eq!(
+        reopened["pools"][0]["pendingDifferences"], reopened["pools"][0]["modelDifferences"],
+        "a whole-image pending opinion reopens every difference"
+    );
     sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-ocr-audit-proof','synthetic restriction',clock_timestamp())").bind(Uuid::new_v4()).bind(source.slot_key).execute(db.pool()).await.unwrap();
     assert!(
         audit::review::review(&db, &review).await.unwrap() == opinion,

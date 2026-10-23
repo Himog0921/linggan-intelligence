@@ -46,8 +46,24 @@ pub(super) async fn apply(
     read::lock_work(&mut tx, work).await?;
     let as_of = cutoff(&mut tx, Some(as_of)).await?;
     read::scope(&mut tx, domain, &[work], &as_of).await?;
-    read::check_revision(&mut tx, work, expected).await?;
     let rows = inventory(&mut tx, work, &as_of).await?;
+    let now = cutoff(&mut tx, None).await?;
+    let current_sources = inventory(&mut tx, work, &now).await?;
+    if rows.iter().map(|(source, _, _)| source).collect::<Vec<_>>()
+        != current_sources
+            .iter()
+            .map(|(source, _, _)| source)
+            .collect::<Vec<_>>()
+    {
+        return Err(Error::Conflict);
+    }
+    let read_only_replay = rows.iter().all(|(_, _, projected)| *projected);
+    // Publishing tags changes the dossier revision. A replay may acknowledge
+    // exactly those immutable projections without writing them again; pending
+    // writes still require the original complete dossier revision.
+    if !read_only_replay {
+        read::check_revision(&mut tx, work, expected).await?;
+    }
     let (mut inserted, mut current, mut absent, mut invalid, mut nonempty) = (0, 0, 0, 0, 0);
     for (material, payload, _) in &rows {
         let payload = payload
@@ -71,6 +87,6 @@ pub(super) async fn apply(
     }
     tx.commit().await?;
     Ok(
-        json!({"detailCount":rows.len(),"projected":inserted,"alreadyCurrent":current,"notProvided":absent,"invalid":invalid,"nonempty":nonempty}),
+        json!({"detailCount":rows.len(),"projected":inserted,"alreadyCurrent":current,"notProvided":absent,"invalid":invalid,"nonempty":nonempty,"readOnlyReplay":read_only_replay}),
     )
 }

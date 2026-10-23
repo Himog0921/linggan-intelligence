@@ -37,7 +37,7 @@ impl Projection {
             let owner = fragment_owner(part, fragment);
             if owner == Some(work) {
                 self.author |=
-                    ["title", "body", "cover_headline", "ocr", "transcript"].contains(&fragment.field.as_str());
+                    crate::topic_map_research_analysis::fragment_role(fragment) == "author";
                 self.comments |=
                     ["studied_comment", "unresearched_comment"].contains(&fragment.field.as_str());
             }

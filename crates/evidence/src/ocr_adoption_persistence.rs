@@ -195,9 +195,9 @@ async fn insert_adoption(
         .zip(line_refs)
         .map(|(l, id)| json!({"sourceLineRef":l.line_ref,"lineRef":id}))
         .collect();
-    sqlx::query("INSERT INTO linggan_media_ocr_adoption(adoption_ref,derivative_ref,layout_ref,rule_version,input_fingerprint,observation,assessment,line_ref_map,image_text,cover_title,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+    sqlx::query("INSERT INTO linggan_media_ocr_adoption(adoption_ref,derivative_ref,layout_ref,rule_version,input_fingerprint,observation,assessment,line_ref_map) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
         .bind(adoption).bind(derivative).bind(layout).bind(rule::RULE_VERSION).bind(&p.assessment.input_fingerprint)
-        .bind(json!(p.observation)).bind(json!(p.assessment)).bind(json!(map)).bind("").bind(Option::<String>::None).bind("NEEDS_REVIEW")
+        .bind(json!(p.observation)).bind(json!(p.assessment)).bind(json!(map))
         .execute(&mut **tx).await.map_err(Error::Internal)?;
     Ok(())
 }

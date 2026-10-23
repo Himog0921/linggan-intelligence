@@ -90,7 +90,6 @@ async fn probe_image() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::path::PathBuf;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "owned preseeded synthetic PostgreSQL and built UI only"]

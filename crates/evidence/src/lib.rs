@@ -185,7 +185,7 @@ pub use local_producer::{
 pub use material_asset_read::{
     LocalMaterialAsset, read_local_derivative, read_local_materialization,
 };
-pub use material_creation_comments::read_creation_comments_in;
+pub use material_creation_comments::{read_creation_comments_in, read_creation_comments_at_in};
 pub use material_disposition::{
     MaterialMediaDisposition, record_blob_disposition, record_derivative_disposition,
     record_materialization_disposition, record_slot_disposition,

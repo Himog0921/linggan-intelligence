@@ -22,7 +22,6 @@ fn provider_materials(fragments: &[Fragment]) -> Vec<Value> {
         "sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,
         "unitRef":f.unit_ref,"speaker":f.speaker,"content":f.model_content(),"issues":f.issues
     })).collect()
-
 }
 
 /// Audit metadata only. This map is kept locally and is not part of the model prompt.
@@ -93,7 +92,7 @@ mod tests {
             start: 0,
             end: 2,
             text: "材料".into(),
-        ..Fragment::default()
+            ..Fragment::default()
         };
         let output = |id: &str| json!({"relevance":{"value":"related","reason":"材料支持","evidenceFragmentIds":[id]}});
         let fragments = vec![f];
@@ -111,12 +110,20 @@ mod tests {
     #[test]
     fn provider_receives_complete_canonical_content_once_with_source_metadata() {
         let text = format!("{}尾部限制不能省略", "原始正文😀\n".repeat(2000));
-        let fragment = Fragment { fragment_id: "work.reading.1".into(), source_ref: uuid::Uuid::from_u128(1),
-            source_version: "exact-source-version".into(), reading_ref: Some(uuid::Uuid::from_u128(2)),
-            unit_ref: Some(uuid::Uuid::from_u128(3)), speaker: "other".into(),
-            field: "ocr".into(), end: text.chars().count(), text: text.clone(),
-            structure: json!({"kind":"quote","text":text}), issues: vec![json!({"code":"unclear"})],
-            ..Fragment::default() };
+        let fragment = Fragment {
+            fragment_id: "work.reading.1".into(),
+            source_ref: uuid::Uuid::from_u128(1),
+            source_version: "exact-source-version".into(),
+            reading_ref: Some(uuid::Uuid::from_u128(2)),
+            unit_ref: Some(uuid::Uuid::from_u128(3)),
+            speaker: "other".into(),
+            field: "ocr".into(),
+            end: text.chars().count(),
+            text: text.clone(),
+            structure: json!({"kind":"quote","text":text}),
+            issues: vec![json!({"code":"unclear"})],
+            ..Fragment::default()
+        };
         let value = &provider_materials(std::slice::from_ref(&fragment))[0];
         assert_eq!(value["content"]["text"], text);
         assert_eq!(value["sourceRef"], json!(fragment.source_ref));
@@ -126,5 +133,4 @@ mod tests {
         assert_eq!(value["issues"], json!(fragment.issues));
         assert!(value.get("text").is_none());
     }
-
 }

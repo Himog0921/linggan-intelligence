@@ -136,7 +136,6 @@ pub struct StudyRunLimits {
 impl StudyRunLimits {
     pub fn validate(&self) -> Result<(), StudySelectionError> {
         if !(1..=3000).contains(&self.comment_budget)
-
             || !(1024..=10000000).contains(&self.token_limit)
         {
             return Err(StudySelectionError::InvalidLimit);

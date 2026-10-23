@@ -30,6 +30,14 @@ fn adapter() -> PiAdapter {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../pi-adapter/src/adapter.mjs"),
     )
 }
+fn selected_slots(ready: &serde_json::Value) -> Vec<String> {
+    ready["scope"]["images"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|image| image["slotKey"].as_str().unwrap().to_owned())
+        .collect()
+}
 fn image(seed: u8) -> Vec<u8> {
     let mut out = Vec::new();
     let mut encoder = png::Encoder::new(&mut out, 2, 2);
@@ -146,8 +154,24 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     let ready = read_run(&db, work).await.unwrap();
     assert_eq!(ready["state"], "ready");
     let scope = ready["scope"]["sha256"].as_str().unwrap().to_owned();
+    assert!(
+        matches!(
+            start_run(
+                &db,
+                work,
+                &StartRun {
+                    command_ref: Uuid::new_v4(),
+                    expected_scope_sha256: scope.clone(),
+                    slot_keys: vec![],
+                }
+            )
+            .await,
+            Err(linggan_intelligence::ai_foundation::store::FoundationError::Invalid)
+        ),
+        "an empty selection cannot silently widen to all images"
+    );
     let request = StartRun {
-        slot_keys: vec![],
+        slot_keys: selected_slots(&ready),
         command_ref: Uuid::new_v4(),
         expected_scope_sha256: scope,
     };
@@ -223,6 +247,14 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     assert_eq!(
         current_count, 0,
         "cloud reread is an explicit candidate only"
+    );
+    linggan_evidence::ensure_media_processing_work(&db)
+        .await
+        .unwrap();
+    let rescheduled:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_media_processing_work work JOIN linggan_media_processing_job job USING(job_ref) WHERE job.processor_version LIKE 'cloud-manual-v2:%'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        rescheduled, 0,
+        "completed manual vision jobs never become automatic local OCR jobs"
     );
     assert_eq!(
         run["scope"]["images"].as_array().unwrap().len(),
@@ -356,9 +388,23 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
                 .unwrap();
             }
         });
+        let proof = "local_web::ocr_recognition_browser_tests::owned_manual_ocr_real_ui";
+        let listed = tokio::process::Command::new(&binary)
+            .args([proof, "--ignored", "--exact", "--list"])
+            .output()
+            .await
+            .expect("list owned manual OCR browser proof");
+        assert!(
+            listed.status.success()
+                && String::from_utf8_lossy(&listed.stdout)
+                    .lines()
+                    .any(|line| line == format!("{proof}: test")),
+            "the API binary must contain the exact owned manual OCR browser proof"
+        );
         let mut browser = tokio::process::Command::new(binary)
-            .arg("local_web::ocr_recognition_browser_tests::owned_manual_ocr_real_ui")
+            .arg(proof)
             .arg("--ignored")
+            .arg("--exact")
             .arg("--nocapture")
             .kill_on_drop(true)
             .spawn()
@@ -445,15 +491,13 @@ async fn second_image_schema_failure_stops_without_sending_the_third_image() {
         .await
         .unwrap();
     configure_recognition(&db, &wire.url, &owner, &adapter).await;
-    let scope = read_run(&db, work).await.unwrap()["scope"]["sha256"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let ready = read_run(&db, work).await.unwrap();
+    let scope = ready["scope"]["sha256"].as_str().unwrap().to_owned();
     let receipt = start_run(
         &db,
         work,
         &StartRun {
-            slot_keys: vec![],
+            slot_keys: selected_slots(&ready),
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },
@@ -527,15 +571,13 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
     ocr::admit(&db, "ocr-recognition-cancelled", 3, &image(43), "image/png").await;
     let cancellation_wire = endpoint::Endpoint::start(false).await;
     configure_recognition(&db, &cancellation_wire.url, &owner, &adapter).await;
-    let scope = read_run(&db, cancelled_work).await.unwrap()["scope"]["sha256"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let ready = read_run(&db, cancelled_work).await.unwrap();
+    let scope = ready["scope"]["sha256"].as_str().unwrap().to_owned();
     let receipt = start_run(
         &db,
         cancelled_work,
         &StartRun {
-            slot_keys: vec![],
+            slot_keys: selected_slots(&ready),
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },
@@ -576,7 +618,7 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
         &db,
         cancelled_work,
         &StartRun {
-            slot_keys: vec![],
+            slot_keys: selected_slots(&read_cancelled),
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: read_cancelled["scope"]["sha256"]
                 .as_str()
@@ -614,7 +656,8 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
     ocr::admit(&db, "ocr-recognition-recovery", 3, &image(53), "image/png").await;
     let mut recovery_wire = endpoint::Endpoint::start(true).await;
     configure_recognition(&db, &recovery_wire.url, &owner, &adapter).await;
-    let recovery_scope = read_run(&db, recovery_work).await.unwrap()["scope"]["sha256"]
+    let recovery_ready = read_run(&db, recovery_work).await.unwrap();
+    let recovery_scope = recovery_ready["scope"]["sha256"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -622,7 +665,7 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
         &db,
         recovery_work,
         &StartRun {
-            slot_keys: vec![],
+            slot_keys: selected_slots(&recovery_ready),
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: recovery_scope,
         },
@@ -703,7 +746,7 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
 
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
-async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
+async fn manual_ocr_freezes_only_explicit_current_work_images_not_context_or_history() {
     let db = fixture::db("ocr_recognition_source_scope_owned").await;
     let work_key = "ocr-recognition-source-scope";
     let work = ocr::admit(&db, work_key, 1, &image(61), "image/png").await;
@@ -727,7 +770,7 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
         &db,
         work,
         &StartRun {
-            slot_keys: vec![],
+            slot_keys: vec![format!("xhs:{work_key}:image:1")],
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },
@@ -744,7 +787,8 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
     .fetch_all(db.pool())
     .await
     .unwrap();
-    assert_eq!(frozen.len(), 2);
+    assert_eq!(frozen.len(), 1);
+    assert_eq!(frozen[0].0, format!("xhs:{work_key}:image:1"));
     assert!(
         frozen
             .iter()
@@ -756,7 +800,7 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
             .all(|(_, blob)| blob != &linggan_evidence::ocr_adoption::content_hash(&image(61))),
         "a historical replica for the same slot is outside the frozen dispatch source set"
     );
-    for expected in 0..2 {
+    for expected in 0..1 {
         let item = queue::claim_next(&db, owner.fence())
             .await
             .unwrap()
@@ -774,8 +818,8 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
     );
     assert_eq!(
         wire.requests.lock().unwrap().len(),
-        3,
-        "one probe plus exactly two current eligible images; avatar, comment image, and old replica stay local"
+        2,
+        "one probe plus exactly one explicitly selected current image; unselected image, avatar, comment image, and old replica stay local"
     );
     wire.finish().await;
 }

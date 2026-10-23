@@ -60,7 +60,9 @@ pub(super) async fn preview(db: &Database, r: &PreviewRequest) -> Result<Value, 
     let system = execution::system_in(&mut tx, config).await?;
     let prompt = payload.to_string();
     let estimated = crate::ai_foundation::transport::estimate_input_tokens(&system, &prompt);
-    if estimated > model.limits.input_tokens { return Err(AiError::InputLimit); }
+    if estimated > model.limits.input_tokens {
+        return Err(AiError::InputLimit);
+    }
     model
         .execution
         .validate(

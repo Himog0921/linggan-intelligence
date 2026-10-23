@@ -21,7 +21,11 @@ it('无抽检记录也能采用明确选中的候选，生成/采用/核验分�
   const material = unit(); vi.mocked(api.fetchCandidates).mockResolvedValue([candidate(material), candidate(material, 'candidate-2')]);
   vi.mocked(api.reviewReading).mockImplementation(async (_work, _domain, _unit, command) => receipt(material, command));
   const view = mount(material); const user = userEvent.setup(); await user.click(screen.getByRole('button', { name: '核对与修正' }));
-  await user.selectOptions(await screen.findByLabelText('核对版本'), 'candidate-2');
+  const versions = await screen.findByRole('combobox', { name: '核对版本' });
+  expect(versions).toHaveAccessibleName('核对版本');
+  expect(versions).toBe(screen.getByLabelText('核对版本', { exact: true }));
+  await user.selectOptions(versions, 'candidate-2');
+  expect(versions).toHaveAccessibleName('核对版本');
   expect(screen.getByText('全文 candidate-2')).toBeVisible(); expect(api.reviewReading).not.toHaveBeenCalled();
   await user.click(screen.getByRole('button', { name: '采用此候选' })); await screen.findByText('候选读本已采用。');
   const command = vi.mocked(api.reviewReading).mock.calls[0]![3];
@@ -53,6 +57,7 @@ it.each([new TypeError('lost receipt'), new ApiError({ kind: 'http', status: 503
   vi.mocked(api.reviewReading).mockRejectedValueOnce(failure).mockImplementationOnce(async (_w, _d, _u, command) => receipt(material, command));
   const view = mount(material); const user = userEvent.setup(); await user.click(screen.getByRole('button', { name: '核对与修正' })); await screen.findByText(/当前没有其他候选版本/);
   await user.click(screen.getByRole('button', { name: '逐块修正' }));
+  for (const label of ['第 1 项', '第 1 行，第 2 列', '第 1 轮发言', '标题文字']) expect(screen.getByLabelText(label, { exact: true })).toHaveAccessibleName(label);
   const full = '不是每天。'.repeat(20000); fireEvent.change(screen.getByLabelText('第 1 行，第 2 列'), { target: { value: full } });
   await user.click(screen.getByRole('checkbox', { name: /已对照来源解决：这里有一个字/ }));
   await user.click(screen.getByRole('checkbox', { name: /已对照来源解决：标题的一字待核对/ }));

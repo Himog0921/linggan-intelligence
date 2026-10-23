@@ -464,21 +464,21 @@ async fn read_slots_batch(
     .fetch_all(&mut **tx)
     .await?;
     let mut acquired_components = std::collections::HashSet::new();
-        for row in sqlx::query(
-            "SELECT work.observation_ref,work.component_kind \
+    for row in sqlx::query(
+        "SELECT work.observation_ref,work.component_kind \
              FROM linggan_media_acquisition_work work \
              JOIN linggan_material_media_origin origin USING(observation_ref) \
              WHERE origin.content_public_ref=ANY($1) AND work.state='completed'",
-        )
-        .bind(content_refs)
-        .fetch_all(&mut **tx)
-        .await?
-        {
-            acquired_components.insert((
-                row.get::<Uuid, _>("observation_ref"),
-                row.get::<String, _>("component_kind"),
-            ));
-        }
+    )
+    .bind(content_refs)
+    .fetch_all(&mut **tx)
+    .await?
+    {
+        acquired_components.insert((
+            row.get::<Uuid, _>("observation_ref"),
+            row.get::<String, _>("component_kind"),
+        ));
+    }
     let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
     for row in rows {
         grouped
@@ -733,7 +733,8 @@ async fn read_derivative_rows(
     if content_refs.is_empty() {
         return Ok(Vec::new());
     }
-    let retirement_join = "LEFT JOIN linggan_media_ocr_retirement retired ON retired.retired_job_ref=job.job_ref";
+    let retirement_join =
+        "LEFT JOIN linggan_media_ocr_retirement retired ON retired.retired_job_ref=job.job_ref";
     let layering_join = "LEFT JOIN LATERAL (SELECT layout.image_width,layout.image_height,layout.engine_version,layer.layout_ref,layer.layering_ref,layer.layer_version,layer.state,layer.decision_source,layer.cover_headline,layer.image_substantive_text,layer.retained_line_refs,layer.excluded_lines FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=derivative.derivative_ref AND layout.created_at<=$2::timestamptz AND layer.created_at<=$2::timestamptz ORDER BY layer.created_at DESC,layer.layering_ref DESC LIMIT 1) layering ON true";
     let derivative_rows = sqlx::query(AssertSqlSafe(format!(
         "WITH restricted_disposition AS MATERIALIZED ( \

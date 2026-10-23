@@ -103,8 +103,8 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
                 reserved += s.get::<Option<i64>, _>("reserved_tokens").unwrap_or(0);
             }
             let mut work_ref = None;
-            if let Some(adoption) = s.get::<Option<Uuid>, _>("reading_ref") {
-                match source::load_in(&mut tx, adoption).await? {
+            if let Some(reading) = s.get::<Option<Uuid>, _>("reading_ref") {
+                match source::load_in(&mut tx, reading).await? {
                     Some(source) => work_ref = Some(source.work_ref),
                     None => {
                         withheld += 1;
@@ -119,7 +119,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
             .fetch_one(&mut *tx)
             .await?;
             differences += issues;
-            let reviews:Vec<Value>=sqlx::query_scalar("SELECT metrics FROM linggan_ocr_audit_review WHERE sample_ref=$1 AND decision<>'pending' ORDER BY revision DESC LIMIT 1").bind(id).fetch_all(&mut *tx).await?;
+            let reviews:Vec<Value>=sqlx::query_scalar("SELECT metrics FROM (SELECT decision,metrics FROM linggan_ocr_audit_review WHERE sample_ref=$1 ORDER BY revision DESC LIMIT 1) current_review WHERE decision<>'pending'").bind(id).fetch_all(&mut *tx).await?;
             if !reviews.is_empty() {
                 checked += 1;
                 if issues == 0 {
@@ -128,7 +128,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
                     reviewed_disagreements += 1
                 }
             }
-            let pending_issues:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_ocr_audit_issue issue WHERE issue.sample_ref=$1 AND COALESCE((SELECT decision FROM linggan_ocr_audit_review WHERE issue_ref=issue.issue_ref ORDER BY revision DESC LIMIT 1),'pending')='pending'").bind(id).fetch_one(&mut *tx).await?;
+            let pending_issues:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_ocr_audit_issue issue WHERE issue.sample_ref=$1 AND COALESCE((SELECT decision FROM linggan_ocr_audit_review review WHERE review.sample_ref=issue.sample_ref AND (review.issue_ref=issue.issue_ref OR review.issue_ref IS NULL) ORDER BY revision DESC LIMIT 1),'pending')='pending'").bind(id).fetch_one(&mut *tx).await?;
             pending += pending_issues;
             for value in reviews {
                 let m: HumanMetrics =

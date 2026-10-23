@@ -12,7 +12,7 @@ pub(crate) async fn check_queue_configuration(
     config: Uuid,
     trial: bool,
 ) -> Result<(), FoundationError> {
-    let row=sqlx::query("SELECT t.lifecycle,t.requires_skill,t.handler_contract,c.execution_contract,c.model_config_ref,c.skill_version_ref,c.budget_mode,
+    let row=sqlx::query("SELECT t.lifecycle,t.requires_skill,t.handler_contract,c.execution_contract,c.material_columns,c.model_config_ref,c.skill_version_ref,c.budget_mode,
         m.capability_ref,p.endpoint_ref,cap.endpoint_ref AS frozen_endpoint,b.current_version_ref,
         connection.enabled AS connection_enabled,probe.state AS probe_state,probe.result AS probe_result
         FROM linggan_ai_task_config c JOIN linggan_ai_task t USING(task_key)
@@ -30,6 +30,13 @@ pub(crate) async fn check_queue_configuration(
         WHERE c.task_config_ref=$1 AND c.task_key=$2")
         .bind(config).bind(task.as_str()).fetch_optional(&mut **tx).await?.ok_or(FoundationError::NotFound)?;
     let mut denied = Vec::new();
+    if serde_json::from_value::<std::collections::BTreeSet<super::task_config::MaterialColumn>>(
+        row.get("material_columns"),
+    )
+    .is_err()
+    {
+        denied.push("material_columns_not_supported".into());
+    }
     if row.get::<String, _>("lifecycle") != "active" {
         denied.push("task_not_connected".into());
     }
@@ -151,13 +158,13 @@ pub(crate) async fn check_queue_input_scope(
                 if pool == "probe" {
                     "synthetic_image_probe"
                 } else {
-                    let adoption: Uuid = sqlx::query_scalar(
-                        "SELECT adoption_ref FROM linggan_ocr_audit_sample WHERE sample_ref=$1",
+                    let reading: Uuid = sqlx::query_scalar(
+                        "SELECT reading_ref FROM linggan_ocr_audit_sample WHERE sample_ref=$1",
                     )
                     .bind(sample_ref)
                     .fetch_one(&mut **tx)
                     .await?;
-                    if !crate::ocr_quality_audit::source::external_clearance_in(&mut **tx, adoption)
+                    if !crate::ocr_quality_audit::source::external_clearance_in(&mut **tx, reading)
                         .await?
                     {
                         return Err(FoundationError::AdmissionDenied(vec![

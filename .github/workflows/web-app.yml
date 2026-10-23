@@ -39,6 +39,7 @@ on:
       - 'database/migrations/0130_note_material_snapshot.sql'
       - 'database/migrations/0145_research_dossier_v2.sql'
       - 'database/migrations/0146_comment_study_full_context.sql'
+      - 'database/migrations/0147_dossier_consumer_contracts.sql'
       - 'crates/intelligence/src/ops_ledger/read/creation_read.rs'
       - 'Cargo.lock'
       - 'crates/intelligence/Cargo.toml'

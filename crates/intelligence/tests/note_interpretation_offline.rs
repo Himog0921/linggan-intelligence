@@ -42,8 +42,10 @@ fn input() -> Input {
                 text_hash: "synthetic-hash".into(),
                 text: "今天🙂先写作业".into(),
                 speaker: "author".into(),
-                structure: serde_json::json!({"kind":"paragraph","text":"今天🙂先写作业","speaker":"author"}),
-                issues: vec![], reading_ref: Some(Uuid::from_u128(30)), unit_ref: Some(Uuid::from_u128(31)),
+                structure: serde_json::json!({"ref":"native","kind":"paragraph","text":"今天🙂先写作业","speaker":"author"}),
+                issues: vec![],
+                reading_ref: Some(Uuid::from_u128(30)),
+                unit_ref: Some(Uuid::from_u128(31)),
             }],
             layer_version: "synthetic.v3".into(),
             processing_scope: ProcessingScope {
@@ -155,12 +157,7 @@ fn missing_ambiguous_restricted_and_ineligible_citations_are_rejected() {
         end: 9,
     }];
     validate_output(&input, &output).unwrap();
-    for field in [
-        "asr",
-        "image_body",
-        "author_name",
-        "comment",
-    ] {
+    for field in ["asr", "image_body", "author_name", "comment"] {
         input.material.fragments[0].field = field.into();
         assert!(validate_output(&input, &output).is_err());
     }
@@ -207,21 +204,37 @@ fn preview_preserves_all_canonical_fields_order_roles_structure_and_missing_stat
         let mut fragment = input.material.fragments[0].clone();
         fragment.field = field.into();
         fragment.citation_id = format!("media-{i}");
+        fragment.logical_position = format!("media-block-{i}");
         fragment.text = format!("{}末尾仍保留🙂", "完整图片音频帧文字".repeat(3000));
         fragment.end = fragment.start + fragment.text.chars().count();
         fragment.speaker = "unconfirmed".into();
-        fragment.structure = serde_json::json!({"kind":"paragraph","text":fragment.text,"speaker":"unconfirmed"});
+        fragment.structure = serde_json::json!({"ref":fragment.logical_position,"kind":"paragraph","text":fragment.text,"speaker":"unconfirmed"});
         input.material.fragments.push(fragment);
-        input.material.columns.iter_mut().find(|c|c.field==field).unwrap().state = ColumnState::Available;
+        input
+            .material
+            .columns
+            .iter_mut()
+            .find(|c| c.field == field)
+            .unwrap()
+            .state = ColumnState::Available;
     }
-    input.material.columns.iter_mut().find(|c|c.field=="tags").unwrap().state = ColumnState::NotProvided;
+    input
+        .material
+        .columns
+        .iter_mut()
+        .find(|c| c.field == "tags")
+        .unwrap()
+        .state = ColumnState::NotProvided;
     let preview = prepare_input(&input).unwrap();
     assert_eq!(preview.columns, input.material.columns);
     assert_eq!(preview.fragments, input.material.fragments);
     assert_eq!(preview.fragments[1].speaker, "unconfirmed");
     assert!(preview.fragments[3].text.ends_with("末尾仍保留🙂"));
     let encoded = serde_json::to_string(&preview).unwrap();
-    assert_eq!(encoded, serde_json::to_string(&prepare_input(&input).unwrap()).unwrap());
+    assert_eq!(
+        encoded,
+        serde_json::to_string(&prepare_input(&input).unwrap()).unwrap()
+    );
 }
 
 #[test]
@@ -633,4 +646,22 @@ fn fixed_fixture_is_reproducible_and_version_comparison_has_no_omitted_old_direc
     let mut duplicate = b.comparison.clone();
     duplicate.push(duplicate[0].clone());
     assert!(validate_comparison(&a.catalogue, &b.catalogue, &duplicate).is_err());
+}
+
+#[test]
+fn preview_rejects_content_role_and_reference_repairs() {
+    for change in ["text", "speaker", "ref", "shape"] {
+        let mut input = input();
+        let structure = &mut input.material.fragments[0].structure;
+        match change {
+            "text" => structure["text"] = "different content".into(),
+            "speaker" => structure["speaker"] = "other".into(),
+            "ref" => structure["ref"] = "another block".into(),
+            _ => structure["items"] = serde_json::json!(["second content shape"]),
+        }
+        assert!(matches!(
+            prepare_input(&input),
+            Err(Invalid("offline_input_structure_invalid"))
+        ));
+    }
 }

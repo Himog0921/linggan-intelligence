@@ -745,7 +745,10 @@ async fn insert_content_detail(
     content_public_ref: Uuid,
 ) -> Result<(), ProducerRuntimeError> {
     sqlx::query("SELECT pg_advisory_xact_lock(420,hashtext($1::uuid::text))")
-        .bind(content_public_ref).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+        .bind(content_public_ref)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     let material_ref = Uuid::new_v4();
     let title = detail.payload.get("title").and_then(Value::as_str);
     let body = detail.payload.get("bodyText").and_then(Value::as_str);
@@ -782,9 +785,11 @@ async fn insert_content_detail(
         .bind(published.reference_observed_at).bind(published.parser_version)
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     crate::material_hashtag::project(tx, material_ref, detail.payload)
-        .await.map_err(ProducerRuntimeError::Internal)?;
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     crate::research_dossier::native::publish_current_body_in(&mut **tx, content_public_ref)
-        .await.map_err(ProducerRuntimeError::Internal)?;
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
 

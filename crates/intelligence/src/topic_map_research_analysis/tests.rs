@@ -7,14 +7,20 @@ use concept_quality::new_proposal;
 fn fragment(id: &str, field: &str, start: usize, value: &str) -> Fragment {
     Fragment {
         fragment_id: id.into(),
+        structure: json!({"ref":id,"kind":"paragraph","text":value,"speaker":if field.contains("comment") {"other"} else {"author"}}),
         source_ref: Uuid::new_v4(),
         field: field.into(),
         source_version: "synthetic-v1".into(),
         start,
         end: start + value.chars().count(),
         text: value.into(),
-        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
-    ..Fragment::default()
+        speaker: if field.contains("comment") {
+            "other"
+        } else {
+            "author"
+        }
+        .into(),
+        ..Fragment::default()
     }
 }
 fn citation(f: &Fragment) -> Citation {

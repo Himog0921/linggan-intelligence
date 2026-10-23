@@ -244,6 +244,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0144_ocr_manual_recognition.sql"),
     include_str!("../../../../database/migrations/0145_research_dossier_v2.sql"),
     include_str!("../../../../database/migrations/0146_comment_study_full_context.sql"),
+    include_str!("../../../../database/migrations/0147_dossier_consumer_contracts.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -328,6 +329,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0128_content_workbench_ai', '52c0cb171926e8c46a077d2a52d3ba93ecf337c9022779b0caaa4c9fb110eafd'), ('0129_note_material_hashtags', '7d1cdc0786e217ef500b3a2b7b31e47971fd48da110b41c64c617f99117baa05'), ('0130_note_material_snapshot', 'eeed1797b3f748dfe2dd5e58fd3eba354ae957891ba37f8815f4301953418350'), ('0131_ai_gen1_provider', '235332ca3ee7ad73ba9d0079d0943b387e6e64acfd20b809643aed2b3b73c259'), ('0132_ai_gen1_control', '55eea68854ef7052c691a22c3285d51e3e0beb12f7934b60c685fc2169d730b2'), ('0133_ai_gen1_skill', '0642f95501a9ac56a5d62f969503b24ea658c47ad8041e96f8b4cdd651bc3408'), ('0134_ai_gen1_task_config', '77a9ac05b37d2cf310859301c30d47d2dc1374400c67ea7d5d735a946a17a31c'), ('0135_ai_gen1_batch', '2c558c20d84167b2dc7a649a6be180afe2a37be27b889ac126cf3a5d3402cff8'), ('0136_ai_gen1_skill_binding', 'ee0c19ddb4df3e08fe3dab3b3b114fdfd74d815d5c017667d9c9a57a8d5e1411'), ('0137_ai_gen1_round', '7262239689e3369bd64c18e4103d7e430aa51c805f4625916767c64a013285ae'), ('0138_ai_gen1_invocation', 'b7568a12dc7b1c41bbfabaa423a469aff2783a01b25c3673880a264e5185ec43'), ('0139_ai_gen1_executor', 'd541b2003337d9d50b4591f69760cfae0c78cec2cb3d4e7b56a3f9c2e8b09d6f'), ('0140_ai_gen1_writing', 'd0b3dcf47816e38aa7b8c6187106a2ce4649dfdd6d1b3a6e4b8f311fa1f57af3'), ('0141_ai_gen1_legacy_settings', 'ffbd53baf7aab446f1dd6fefe5df9c7d8405b47a44e182d014d68c2b7376d01d');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0142_ocr_adoption','baad716a89398d3e923838028358db7e6189f66c79408c4502287f8b75498057'),('0143_ocr_quality_audit','11d316460ceb7d49b27751efe4b2382b88a1a068f86784f427771bbdf30bdb6c');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0144_ocr_manual_recognition','de82e4ddabe0e9045165a01e3e32ab2ae24625853def47934907c66d0fc12990');\n",
-    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0145_research_dossier_v2','8c4468b4db741dbb805c2fb48da6a36c3045b5f28d63829e4cee16c1a0199ff1');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0145_research_dossier_v2','ed284ff1a73465a8d9b2745bc8dbadb299c0045ad8e56026c57d15d107840889');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0146_comment_study_full_context','be742f93edfa4b46e5a2fe5485fc17f1531dc14bd9265fc1fe52204d045857f9');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0147_dossier_consumer_contracts','5da3a82504c2a64bf66bb313550390023aa4b771a21df6577d1ef06e8edc7195');\n",
 );

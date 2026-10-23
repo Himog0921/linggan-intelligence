@@ -44,7 +44,14 @@ fn reference(value: &Value) -> Result<Uuid, StudySelectionError> {
 }
 
 fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySelectionError> {
-    if ["characterBudget","truncated","omitted","omittedFragmentCount"].iter().any(|key| manifest.get(key).is_some())
+    if [
+        "characterBudget",
+        "truncated",
+        "omitted",
+        "omittedFragmentCount",
+    ]
+    .iter()
+    .any(|key| manifest.get(key).is_some())
         || manifest["contract"] != "comment-study.context.v2"
         || manifest["cleanerVersion"] != CLEANER_VERSION
         || reference(&manifest["workRef"])? != key.work_ref
@@ -60,27 +67,48 @@ fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySe
         let kind = text(&source["kind"])?;
         if !matches!(
             kind,
-            "native_title" | "body" | "tags" | "image_substantive_text" | "asr_text" | "frame_ocr_text"
+            "native_title"
+                | "body"
+                | "tags"
+                | "image_substantive_text"
+                | "asr_text"
+                | "frame_ocr_text"
         ) {
             return Err(StudySelectionError::InvalidSnapshot);
         }
         reference(&source["sourceRef"])?;
-        if text(&source["sourceVersion"])?.is_empty() || text(&source["blockRef"])?.is_empty()
+        if text(&source["sourceVersion"])?.is_empty()
+            || text(&source["blockRef"])?.is_empty()
             || text(&source["asOf"])?.is_empty()
-            || !matches!(text(&source["speaker"])?, "author" | "other" | "unconfirmed")
-            || !source["structure"].is_object() || !source["issues"].is_array()
-        { return Err(StudySelectionError::InvalidSnapshot); }
+            || !matches!(
+                text(&source["speaker"])?,
+                "author" | "other" | "unconfirmed"
+            )
+            || !source["structure"].is_object()
+            || !source["issues"].is_array()
+        {
+            return Err(StudySelectionError::InvalidSnapshot);
+        }
         for key in ["readingRef", "unitRef"] {
-            if !source[key].is_null() { reference(&source[key])?; }
+            if !source[key].is_null() {
+                reference(&source[key])?;
+            }
         }
         let content = text(&source["text"])?;
-        linggan_evidence::research_dossier::content::validate_blocks(std::slice::from_ref(&source["structure"]))
-            .map_err(|_| StudySelectionError::InvalidSnapshot)?;
+        linggan_evidence::research_dossier::content::validate_blocks(std::slice::from_ref(
+            &source["structure"],
+        ))
+        .map_err(|_| StudySelectionError::InvalidSnapshot)?;
         linggan_evidence::research_dossier::content::validate_issues(&source["issues"])
             .map_err(|_| StudySelectionError::InvalidSnapshot)?;
         if linggan_evidence::research_dossier::content::block_text(&source["structure"]) != content
-            || source["structure"]["speaker"].as_str().unwrap_or("unconfirmed") != source["speaker"].as_str().unwrap_or("")
-        { return Err(StudySelectionError::InvalidSnapshot); }
+            || source["structure"]["speaker"]
+                .as_str()
+                .unwrap_or("unconfirmed")
+                != source["speaker"].as_str().unwrap_or("")
+        {
+            return Err(StudySelectionError::InvalidSnapshot);
+        }
         let length = content.chars().count() as u64;
         if source["characterCount"].as_u64() != Some(length) {
             return Err(StudySelectionError::InvalidSnapshot);

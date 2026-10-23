@@ -84,7 +84,20 @@ async fn read(
             "read_model_not_connected",
         );
     };
-    respond(sources::read_source(db, q.domain_ref, &kind, reference, q.work_ref, &q.field, &q.block_ref, &q.source_version, &q.as_of).await)
+    respond(
+        sources::read_source(
+            db,
+            q.domain_ref,
+            &kind,
+            reference,
+            q.work_ref,
+            &q.field,
+            &q.block_ref,
+            &q.source_version,
+            &q.as_of,
+        )
+        .await,
+    )
 }
 
 async fn prepare(

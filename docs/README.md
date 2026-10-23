@@ -60,9 +60,9 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 
 Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 首版已随 PR #432 合并；Mog 对其 V3 还原不予验收，当前在独立候选重新落地并补齐本篇材料准备，验收前不合并部署。基础验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。
 
-## 研究底稿与图片分层第一阶段
+## 研究底稿第一阶段历史
 
-- [实施计划](plans/active/research-dossier-001.md)：Issue #420，完整模块实施中。
+- [第一阶段历史计划](plans/active/research-dossier-001.md)：Issue #420 历史实施；当前实现与验收统一转入 [v2](plans/active/research-dossier-v2.md)。
 - [底稿与任务材料合同](data-contracts/research-dossier.md)：本期数据、分层和输入范围。
 - [UI 变更清单](design/changes/research-dossier-001-ui-change-manifest.md)：详情、对照和预览。
 
@@ -457,7 +457,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 |---|---|---|
 | [统一实施计划](plans/active/ai-gen1-001.md) | 活跃计划 | #454；PR-1A → PR-1B → PR-1C；各阶段权限与验收 |
 | [第一代 AI 决定](decisions/0011-ai-generation-one.md) | 已确认决定 | 设置集中、skill 范围、顺序与旧决定替代关系 |
-| [每篇解读材料输入](data-contracts/note-material-input.md) | 代码事实优先 | 新适配、标签、指纹/来源、就绪、快照及窄批处理 |
+| [每篇解读材料输入历史](data-contracts/note-material-input.md) | 已被 v2 取代 | 不再是对外合同；当前读取见 research-dossier.v2 |
 | [PR-1A 验收回执](audits/ai-gen1-pr1a-acceptance.md) | 一次性报告 | 合成隔离证明、收尾审查、Draft 与未证层 |
 
 ## LIDS-UI-001 · 正式前端采用
@@ -481,7 +481,7 @@ AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundat
 
 - [AI-GEN1 C0离线计划](plans/active/ai-gen1-pr1c0-offline.md)：离线合同/合成流程，C1真实启用另计；[离线合同](data-contracts/note-interpretation-offline.md)。
 
-- [每篇解读材料只读预览](plans/active/ai-gen1-note-material-preview.md)：#454/#420，Mog已确认G1；最小UI增量，运行/G4另列。
+- [每篇解读材料只读预览历史](plans/active/ai-gen1-note-material-preview.md)：#454/#420 历史范围；当前底稿界面与验证归入 RESEARCH-DOSSIER-V2。
 
 ## 运营 LIDS 发布与标准件同步（2026-10-20）
 

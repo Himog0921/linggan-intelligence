@@ -82,10 +82,15 @@ fn input(field: &str) -> ResearchInput {
         start: 10_001,
         end: 10_001 + text.chars().count(),
         text: text.into(),
-        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
-    ..Fragment::default()
+        speaker: if field.contains("comment") {
+            "other"
+        } else {
+            "author"
+        }
+        .into(),
+        ..Fragment::default()
     };
-    let author = ["title", "body", "ocr", "transcript"].contains(&field);
+    let author = crate::topic_map_research_analysis::fragment_role(&fragment) == "author";
     ResearchInput {
         work: DiscoveryWork {
             work_ref,
@@ -197,5 +202,30 @@ fn window(
         task: Uuid::from_u128(result.unwrap_or(99)),
         method: crate::topic_map_research_analysis::METHOD_VERSION.into(),
         time: time.into(),
+    }
+}
+
+#[test]
+fn author_journey_uses_canonical_speaker_for_every_note_material_kind() {
+    for field in ["title", "body", "tags", "ocr", "transcript", "frame_text"] {
+        for speaker in ["author", "other", "unconfirmed"] {
+            let mut source = input(field);
+            source.fragments[0].speaker = speaker.into();
+            let output = serde_json::to_value(draft(&source)).unwrap();
+            let part = window(source, output, json!({}), Some(1), "2026-10-23T00:00:00Z");
+            assert_eq!(
+                work_summary::author_journey(&part).is_some(),
+                speaker == "author",
+                "field={field}, speaker={speaker}"
+            );
+            let mut projected = work(1, false);
+            projection::project_work(&mut projected, vec![part], &mut [], &HashSet::new());
+            let expected = if speaker == "author" {
+                "available"
+            } else {
+                "source_unavailable"
+            };
+            assert_eq!(projected.research.unwrap()["authorSourceState"], expected);
+        }
     }
 }

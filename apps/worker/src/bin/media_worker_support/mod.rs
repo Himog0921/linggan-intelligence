@@ -212,15 +212,6 @@ pub(crate) fn ensure_local_input(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub(crate) fn normalize_text(value: &str) -> String {
-    value
-        .lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 pub(crate) fn sha256_hex(value: &[u8]) -> String {
     Sha256::digest(value)
         .iter()

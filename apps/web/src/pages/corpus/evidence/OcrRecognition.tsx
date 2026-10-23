@@ -12,6 +12,7 @@ function ocrPercent(run: OcrRecognitionRun): number {
   return run.totalImages <= 0 ? 0 : Math.min(99, Math.floor(run.completedImages / run.totalImages * 100));
 }
 const isLive = (run: OcrRecognitionRun | null) => Boolean(run && ['queued', 'running', 'finalizing', 'unknown'].includes(run.state));
+interface StopRequest { commandRef: string; batchRef: string; expectedRevision: number }
 function actionCopy(run: OcrRecognitionRun | null) {
   if (!run || run.state === 'ready' || run.state === 'unavailable') return 'OCR 识别';
   if (run.cancelRequested && isLive(run)) return '正在停止';
@@ -42,8 +43,9 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
   const [confirm, setConfirm] = useState<OcrRecognitionScope | null>(null);
   const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
   const [refresh, setRefresh] = useState(0);
+  const [stopRequest, setStopRequest] = useState<StopRequest | null>(null);
   const write = useRef<{ commandRef: string; scope: OcrRecognitionScope; slotKeys: string[] } | null>(null);
-  const stopCommand = useRef<string | null>(null); const mounted = useRef(true);
+  const stopInFlight = useRef(false); const mounted = useRef(true);
   const result = useRef<HTMLDivElement>(null);
   useEffect(() => {
     mounted.current = true; const controller = new AbortController(); let timer: number | undefined;
@@ -62,11 +64,11 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
     return () => { mounted.current = false; controller.abort(); window.clearTimeout(timer); };
   }, [workRef, refresh]);
   const value = run ? ocrPercent(run) : 0; const live = isLive(run);
-  const canStart = !loading && !readFailed && !sending && !unconfirmed && !live && run !== null && ['ready', 'succeeded', 'stopped'].includes(run.state) && run.scope !== null;
+  const canStart = !loading && !readFailed && !sending && !unconfirmed && stopRequest === null && !live && run !== null && ['ready', 'succeeded', 'stopped'].includes(run.state) && run.scope !== null;
   function chooseScope() { if (canStart && run?.scope) { setSelectedSlots(run.scope.images.map(image => image.slotKey)); setConfirm(run.scope); } }
   async function submit(scope: OcrRecognitionScope) {
     if (!write.current && selectedSlots.length === 0) return;
-    if (sending) return;
+    if (sending || stopRequest !== null || stopInFlight.current) return;
     const pending = write.current ?? { commandRef: crypto.randomUUID(), scope, slotKeys: [...selectedSlots] }; write.current = pending;
     setSending(true); setMessage('');
     try {
@@ -80,13 +82,25 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
     } finally { if (mounted.current) setSending(false); }
   }
   async function stop() {
-    if (!run?.batchRef || run.batchRevision === null || sending) return;
-    setSending(true); const commandRef = stopCommand.current ?? crypto.randomUUID(); stopCommand.current = commandRef;
+    if (sending || stopInFlight.current) return;
+    let request = stopRequest;
+    if (!request) {
+      if (loading || readFailed || !live || !run?.batchRef || run.batchRevision === null || run.cancelRequested) return;
+      request = { commandRef: crypto.randomUUID(), batchRef: run.batchRef, expectedRevision: run.batchRevision };
+      setStopRequest(request);
+    }
+    stopInFlight.current = true; setSending(true); setMessage('');
     try {
-      await stopOcrRecognition(run.batchRef, run.batchRevision, commandRef);
-      if (mounted.current) { stopCommand.current = null; setMessage('已提交停止请求，正在核对结果。'); setRefresh(value => value + 1); }
-    } catch { if (mounted.current) setMessage('停止回执未确认；再次停止仍核对原命令。'); }
-    finally { if (mounted.current) setSending(false); }
+      await stopOcrRecognition(request.batchRef, request.expectedRevision, request.commandRef);
+      if (mounted.current) { setStopRequest(null); setLoading(true); setMessage('已提交停止请求，正在核对结果。'); setRefresh(value => value + 1); }
+    } catch (error) {
+      if (!mounted.current) return;
+      if (error instanceof ApiError && error.failure.kind === 'http' && [400, 401, 403, 404, 409, 410, 413, 415, 422].includes(error.failure.status)) {
+        setStopRequest(null); setLoading(true);
+        setMessage(error.failure.status === 409 ? '停止请求未被接纳，任务版本已变化；正在读取最新状态，之后可重新选择停止。' : '停止请求未被接纳；正在重新核对任务状态与操作资格。');
+        setRefresh(value => value + 1);
+      } else setMessage('停止回执尚未确认；“核对本次停止请求”使用原批次、原修订与原命令，核清前不能开始新识读。');
+    } finally { stopInFlight.current = false; if (mounted.current) setSending(false); }
   }
   function act() {
     if (live || run?.state === 'succeeded' || run?.state === 'stopped') {
@@ -107,7 +121,7 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
       <div className={styles.feedbackRow}><p className={styles.status} role="status" aria-live="polite">{run ? stageCopy(run) : loading ? '正在读取图片文字识别状态…' : '尚未取得识别资格。'}</p>
         <a href="/settings/models?view=advanced&area=work&task=ocr_recognition">OCR 模型设置</a>
         {run && ['succeeded', 'stopped'].includes(run.state) ? <button type="button" className={styles.source} disabled={!canStart} onClick={chooseScope}>选择图片重新识读</button> : null}
-        {live && run?.batchRef ? <button type="button" className={styles.source} disabled={sending || run.cancelRequested} onClick={() => void stop()}>停止本次识别</button> : null}</div>
+        {stopRequest ? <button type="button" className={styles.source} disabled={sending} onClick={() => void stop()}>核对本次停止请求</button> : live && run?.batchRef ? <button type="button" className={styles.source} disabled={loading || readFailed || sending || run.cancelRequested} onClick={() => void stop()}>停止本次识别</button> : null}</div>
       {run && ['succeeded', 'stopped'].includes(run.state) && run.scope === null && run.unavailableReason ? <p className={styles.status}>当前无法发起新识读：{run.unavailableReason}</p> : null}
       {message ? <p className={styles.status} role="status">{message}</p> : null}
       {readFailed ? <button className={styles.source} type="button" onClick={() => setRefresh(value => value + 1)}>重新读取状态</button> : null}

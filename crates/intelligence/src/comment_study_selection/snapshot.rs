@@ -95,9 +95,7 @@ async fn scan(
         .map(|(work, dossier)| {
             (
                 work,
-                crate::comment_study_source::context::dossier_manifest(
-                    &dossier,
-                ),
+                crate::comment_study_source::context::dossier_manifest(&dossier),
             )
         })
         .collect();

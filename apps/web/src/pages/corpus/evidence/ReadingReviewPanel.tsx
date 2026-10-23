@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ApiError } from '../../../shared/api';
@@ -20,6 +20,7 @@ export function ReadingReviewPanel(props: Props) {
   </section>;
 }
 function ReviewContent({ unit, work, domain, onApplied }: Props) {
+  const versionLabel = useId();
   const query = useQuery({ queryKey: ['dossier-candidates', domain, work], queryFn: ({ signal }) => fetchCandidates(work, domain, signal), retry: false, gcTime: 0 });
   const [expected, setExpected] = useState(unit.currentRevisionRef);
   const [candidate, setCandidate] = useState<ReadingCandidate | null>(null);
@@ -64,7 +65,7 @@ function ReviewContent({ unit, work, domain, onApplied }: Props) {
   return <div className={styles.reviewContent} aria-busy={busy}>
     {query.isPending ? <p role="status">正在读取候选版本…</p> : null}
     {query.isError ? <p role="status">候选版本暂时不可读；当前读本仍可核对。<button type="button" onClick={() => void query.refetch()}>重读候选</button></p> : null}
-    {candidates.length > 0 ? <label>核对版本<select disabled={busy || pending !== null || changed} value={candidate?.candidateRevisionRef ?? ''} onChange={event => select(event.target.value)}>
+    {candidates.length > 0 ? <label><span id={versionLabel}>核对版本</span><select aria-labelledby={versionLabel} disabled={busy || pending !== null || changed} value={candidate?.candidateRevisionRef ?? ''} onChange={event => select(event.target.value)}>
       <option value="">当前采用读本</option>{candidates.map((value, index) => <option key={value.candidateRevisionRef} value={value.candidateRevisionRef}>{`${PRODUCER[value.generatedBy]} · 候选 ${index + 1} · ${value.createdAt}`}</option>)}
     </select></label> : <p className={styles.note}>当前没有其他候选版本，可直接对照来源修正。</p>}
     {changed && pending === null ? <p role="status">底稿已有新版本，未提交的修改仍保留。<button type="button" onClick={reset}>使用最新读本</button></p> : null}

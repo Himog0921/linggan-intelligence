@@ -26,7 +26,7 @@ Markdown 通过 `format=markdown` 单独生成，与同一次读取的区块顺�
 
 ## 材料与结构化区块
 
-材料字段：`ref`、`kind`、`slotKey`、`page`、`sourceState`、`sourceRef`、`sourceVersion`、`currentRevisionRef`、`originalUrl`、`reading`、`blocks`、`issues`。材料种类为 body、tags、image、audio、video_frame。未知页码为 null；不按数据库遍历序号猜平台页码。
+材料字段：`ref`、`kind`、`slotKey`、`page`、`sourceState`、`sourceRef`、`sourceVersion`、`currentRevisionRef`、`originalUrl`、`reading`、`blocks`、`issues`；仅在字节证明建立页序关系时增加 `pageSource`。材料种类为 body、tags、image、audio、video_frame。未知页码为 null；不按数据库遍历序号猜平台页码。
 
 `reading` 分开表达生成者 `generatedBy`、采用状态 `adoption`、核对状态 `verification`、规范化规则 `ruleVersion`。机器生成、被采用、人工核对是三件事。生成者取 platform、ordinary_ocr、local_vision、cloud_vision、asr、frame_ocr、human_edit。
 
@@ -42,7 +42,7 @@ Markdown 通过 `format=markdown` 单独生成，与同一次读取的区块顺�
 | quote | text | 引用角色明确或标未知 |
 | gap | text | 只标局部缺口，不补造原文 |
 
-所有区块默认角色不明为 `unconfirmed`，确定角色为 `author` 或 `other`。角色未知不等于删去文字；必须随上下文进入研究任务。坐标仅在真实来源支持时输出，格式 `[x,y,width,height]`，范围 0..1；音视频位置为真实毫秒区间 `time:{startMs,endMs}`。没有真实坐标或时间时省略，不编造。
+所有区块默认角色不明为 `unconfirmed`，确定角色为 `author` 或 `other`。角色未知不等于删去文字；必须随上下文进入研究任务。坐标仅在真实来源支持时输出，格式 `[x,y,width,height]`，范围 0..1；音视频位置为真实毫秒区间 `time:{startMs,endMs}`。帧只证明一个采样时点时，起止相等，不虚构持续时间。没有真实坐标或时间时省略，不编造。
 
 OCR 低置信度局部成为 gap；可信的周围文字保留。原始识别行留作诊断，不通过白名单、UI 词表或“作者正文资格”把整张截图的可读内容过滤掉。无法可靠恢复列顺序、表格或角色时，明确记录结构问题；不能把估计说成原图事实。
 
@@ -57,6 +57,10 @@ OCR 低置信度局部成为 gap；可信的周围文字保留。原始识别行
 
 媒体 sourceVersion 指向精确 materialization；正文 sourceVersion 指向不可变原生 material。媒体必须对应该槽位当时的最新来源 generation，不能从较旧 generation 借字节填缺。所有当前与历史读取仍检查当前受限、撤回与退役资格。
 
+Live Photo 的静态图片与动态视频按实际已验证媒体类型分别选择来源；图像 OCR、音频与帧不能因另一组件后完成而失效或串用来源。已清理字节但未撤回文字的来源保留不可变文字，原图入口明确不可用。
+
+平台标签沿用不可变 `content-hashtags.v1` 来源投影，保留原序与重复条目，不从正文猜标签。其 `currentRevisionRef` 为 null，sourceVersion 绑定 material 与投影规则，区块引用绑定 material；这属于同一底稿的原生材料，不另建可编辑标签读本或另一份正文。
+
 普通 OCR、平台正文、ASR、帧 OCR 可自动发布，但须以捕获的 expected current 作 CAS，并保护同来源的人工作品。显式重新识别只形成 candidate，不按模型名、图片尺寸、文字长度或完成时间自动更换当前。
 
 正文在来源接纳时规范化并持久化。GET 不生成、不升级、不重新解释正文。旧开发数据缺少 canonical reading 时显示 not_processed，并可由显式命令重建；读取不能退回原生 bodyText 来假装已处理。
@@ -69,6 +73,8 @@ OCR 低置信度局部成为 gap；可信的周围文字保留。原始识别行
 
 服务器核对作品归属、候选来源、当前版本与请求幂等；冲突返回 409，不能覆盖他人的新决定。请求成功但回执丢失时，界面用原 commandRef 和原请求重试；未知状态不显示成功、不自动生成新命令。页面切换或候选变化后的迟到响应不得改写新页面。
 
+网络断开、5xx 或无法解码的成功回执都属于结果未知，必须保留原命令。只有服务器明确拒绝且确认未写入的错误才释放该命令身份。
+
 结构化编辑保留区块种类、表格单元格、对话角色与已知来源位置。问题带稳定 key 和解决责任：`reading_edit` 可通过编辑并明确勾选解决；`source_refresh`（缺页、来源变化、时间未知等）必须补来源，文字编辑或“已核对”不能消除。未明确解决的问题继续存在。
 
 OCR 抽检仅记录质量判断 confirmed/dismissed/pending，可关联材料命令；它不再拥有第二套文字采用表、当前选择或修订接口。
@@ -78,6 +84,10 @@ OCR 抽检仅记录质量判断 confirmed/dismissed/pending，可关联材料命
 完整图片序列只从平台显式 imageList 获得。保留原始位置、缺失位置、相同 URL/字节在后页的真实重复；DOM 扫描只能给 observed_set，不声明平台图片总数。
 
 封面与第一页只有在字节一致、位置关系明确时才合并为同一内容来源；第 3 页再次使用相同图仍保留。没有证明的“封面就是第 1 页”不可用于补页码。
+
+合并优先保留实际可用读本与明确人工决定。若保留的读本来自封面，保留其真实 unit、reading、source 与区块引用，并以 `pageSource:{basis:"same_verified_bytes",sourceRef,sourceVersion,slotKey}` 标明页序证据；不能把文字改挂到另一条来源。不同已采用版本无法等价时同时保留并标明 `duplicate_image_readings`，直到来源核对完成。
+
+最新完整平台图片清单使已移除的旧槽位失去当前资格；后续局部观察只增加自身取得的槽位，不能复活被移除的旧页。读取、候选、任务领取、采用、重建与检索共享同一成员判定。当前观察未提供完整清单时，平台总数继续标为未知。
 
 coverage.imageInventory 分别给出 basis、expectedPages（未知为 null）、acquiredPages、processedPages、missingPages、unknownOrder。已知总页数时统计只覆盖对应真实页，不能把额外封面算成第 N+1 页；处理数 ≤ 取得数 ≤ 已知总数。
 
@@ -91,7 +101,7 @@ coverage.imageInventory 分别给出 basis、expectedPages（未知为 null）�
 
 独立入口包括 candidates、readings/{readingRef}、materials/{unitRef}/review、metadata；评论沿用授权分页。批量读取固定一个共同 asOf，为每篇返回独立结果，某篇缺失不伪装整批成功或抹去其他有效材料。
 
-引用必须绑定作品、unit、reading、blockRef、sourceRef、sourceVersion 与 asOf；blockRef 采用 `workUUID.readingUUID.ordinal`。相同文本不是相同来源。冻结引用精确匹配，不按字段名或相似文本找新内容顶替；旧引用缺少必要字段则明确不可解析。
+识读引用必须绑定作品、unit、reading、blockRef、sourceRef、sourceVersion 与 asOf；blockRef 采用 `workUUID.readingUUID.ordinal`。不可变原生标签使用 `workUUID.materialUUID.ordinal` 并绑定投影规则。相同文本不是相同来源。冻结引用精确匹配，不按字段名或相似文本找新内容顶替；旧引用缺少必要字段则明确不可解析。
 
 内部任务 adapter 可以生成短引用编号和来源映射，但正文只发送一次，结构、角色、问题与真实位置必须保留。评论研究携带选定评论、必要父回复和完整作品语境；作者研究携带所选作品及独立作者材料；主题研究窗口不得截取一篇的前 N 字冒充整篇。
 

@@ -128,6 +128,7 @@ latest_detail AS (
   JOIN requested_work scope ON scope.public_ref=lane.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE lane.content_public_ref IS NOT NULL AND package.accepted_at <= $2::timestamptz
+    AND lane.created_at <= $2::timestamptz
   GROUP BY lane.content_public_ref
 ), work_resource_current AS (
   SELECT content.platform,content.content_external_id,content.public_ref,

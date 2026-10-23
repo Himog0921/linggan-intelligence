@@ -7,9 +7,16 @@ pub(super) async fn note_document_in(
 ) -> Result<MaterialDocument, SourceError> {
     let source = d.work_ref;
     let title = d.note["displayTitle"].as_str().unwrap_or("").to_owned();
-    let author = d.metadata["author"]["displayName"].as_str().unwrap_or("作者未知").to_owned();
-    let fields: Vec<_> = d.fragments.iter().filter(|f| fragment_kind(&f.field).is_some())
-        .map(|f| dossier_item(&d,f)).collect::<Result<_,_>>()?;
+    let author = d.metadata["author"]["displayName"]
+        .as_str()
+        .unwrap_or("作者未知")
+        .to_owned();
+    let fields: Vec<_> = d
+        .fragments
+        .iter()
+        .filter(|f| fragment_kind(&f.field).is_some())
+        .map(|f| dossier_item(&d, f))
+        .collect::<Result<_, _>>()?;
     if fields.is_empty() {
         return Err(SourceError::Unavailable);
     }
@@ -54,8 +61,19 @@ pub(super) async fn read_document_in(
             SourceKind::OpsPublication => SourceField::Body,
             _ => return Err(SourceError::Invalid),
         };
-        let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut **tx).await?;
-        let (i, c) = read_source_in(tx, kind, source, work, &field, &source_block_ref(source, &field), &as_of).await?;
+        let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+            .fetch_one(&mut **tx)
+            .await?;
+        let (i, c) = read_source_in(
+            tx,
+            kind,
+            source,
+            work,
+            &field,
+            &source_block_ref(source, &field),
+            &as_of,
+        )
+        .await?;
         let version = if *kind == SourceKind::Comment {
             comment_document_version(&i.source_version, &c)
         } else {
@@ -64,7 +82,17 @@ pub(super) async fn read_document_in(
         let parent = i.work_ref;
         let mut fields = vec![i];
         if *kind == SourceKind::OpsPublication {
-            match read_source_in(tx, kind, source, None, &SourceField::Title, &source_block_ref(source, &SourceField::Title), &as_of).await {
+            match read_source_in(
+                tx,
+                kind,
+                source,
+                None,
+                &SourceField::Title,
+                &source_block_ref(source, &SourceField::Title),
+                &as_of,
+            )
+            .await
+            {
                 Ok((i, _)) => fields.insert(0, i),
                 Err(SourceError::Unavailable) => {}
                 Err(e) => return Err(e),
@@ -102,7 +130,10 @@ pub(super) async fn read_comment_documents_in(
     domain: Uuid,
     refs: &[Uuid],
 ) -> Result<std::collections::BTreeMap<Uuid, Result<MaterialDocument, SourceError>>, SourceError> {
-    let contexts = linggan_evidence::read_creation_comments_in(tx, refs).await?;
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **tx)
+        .await?;
+    let contexts = linggan_evidence::read_creation_comments_at_in(tx, refs, &as_of).await?;
     let mut output = std::collections::BTreeMap::new();
     for (source, context) in contexts {
         let result = async {
@@ -115,7 +146,7 @@ pub(super) async fn read_comment_documents_in(
                 return Err(SourceError::Unavailable);
             }
             let mut item = comment_item(source, None, &SourceField::CommentBody, &context)?;
-            item.as_of = sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut **tx).await?;
+            item.as_of = as_of.clone();
             Ok(MaterialDocument {
                 document_id: document_id(&SourceKind::Comment, source),
                 source_kind: SourceKind::Comment,

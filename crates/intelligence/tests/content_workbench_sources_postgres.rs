@@ -130,7 +130,10 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
         .await
         .unwrap()
         .unwrap();
-    let image = canonical.fragments.iter().find(|f| f.field == "ocr" && f.text.starts_with("第0行"))
+    let image = canonical
+        .fragments
+        .iter()
+        .find(|f| f.field == "ocr" && f.text.starts_with("第0行"))
         .expect("ordinary OCR publishes canonical blocks before consumers read");
     let mut tx = db.pool().begin().await.unwrap();
     let (source, context) = sources::read_source_in(
@@ -155,7 +158,8 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|m| m["currentRevisionRef"] == json!(image.reading_ref) && m["originalUrl"].is_string())
+            .any(|m| m["currentRevisionRef"] == json!(image.reading_ref)
+                && m["originalUrl"].is_string())
     );
     tx.commit().await.unwrap();
     for (kind, id, parent) in [
@@ -174,7 +178,10 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
     let reply:Uuid=sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment_current WHERE comment_external_id='reply'").fetch_one(db.pool()).await.unwrap();
     let unknown:Uuid=sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment_current WHERE comment_external_id='unknown-reply'").fetch_one(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *tx).await.unwrap();
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
     let (_, context) = sources::read_source_in(
         &mut tx,
         &SourceKind::Comment,
@@ -189,7 +196,10 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
     assert_eq!(context["parentComment"]["state"], "known");
     assert_eq!(context["parentWork"]["state"], "known");
     assert!(!context.to_string().contains("authorId"));
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *tx).await.unwrap();
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
     let (_, context) = sources::read_source_in(
         &mut tx,
         &SourceKind::Comment,
@@ -210,7 +220,11 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
             source_kind: SourceKind::Comment,
             source_ref: reply,
             work_ref: Some(work),
-            as_of: None, block_ref: None, source_version: None, citation_source_ref: None, field: None,
+            as_of: None,
+            block_ref: None,
+            source_version: None,
+            citation_source_ref: None,
+            field: None,
         },
     )
     .await
@@ -221,7 +235,10 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
     })).unwrap();
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'parent','synthetic restriction')").bind(work).execute(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *tx).await.unwrap();
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
     let (_, context) = sources::read_source_in(
         &mut tx,
         &SourceKind::Comment,
@@ -274,8 +291,14 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
     tx.commit().await.unwrap();
     dossier::fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成新版本","bodyText":"新版本正文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
     let mut tx = db.pool().begin().await.unwrap();
-    assert_eq!(sources::validate_citation_in_domain(&mut tx, &c, DOMAIN).await.unwrap().selected_text,
-        doc.excerpts[0].selected_text.clone().unwrap(), "a refresh does not rewrite frozen citations");
+    assert_eq!(
+        sources::validate_citation_in_domain(&mut tx, &c, DOMAIN)
+            .await
+            .unwrap()
+            .selected_text,
+        doc.excerpts[0].selected_text.clone().unwrap(),
+        "a refresh does not rewrite frozen citations"
+    );
     for mutation in ["sourceRef", "sourceVersion", "blockRef", "asOf"] {
         let mut changed = c.clone();
         match mutation {
@@ -284,17 +307,38 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
             "blockRef" => changed.block_ref = format!("{}.forged", changed.block_ref),
             _ => changed.as_of = "2000-01-01T00:00:00Z".into(),
         }
-        assert!(sources::validate_citation_in_domain(&mut tx, &changed, DOMAIN).await.is_err(), "must bind {mutation}");
+        assert!(
+            sources::validate_citation_in_domain(&mut tx, &changed, DOMAIN)
+                .await
+                .is_err(),
+            "must bind {mutation}"
+        );
     }
     tx.commit().await.unwrap();
-    let frozen_document = sources::materials::read_document(&db, &sources::materials::DocumentQuery {
-        domain_ref: DOMAIN, source_kind: SourceKind::Note, source_ref: work, work_ref: Some(work),
-        as_of: Some(c.as_of.clone()), block_ref: Some(c.block_ref.clone()), source_version: Some(c.source_version.clone()),
-        citation_source_ref: Some(c.source_ref), field: Some(c.field.clone()),
-    }).await.unwrap();
+    let frozen_document = sources::materials::read_document(
+        &db,
+        &sources::materials::DocumentQuery {
+            domain_ref: DOMAIN,
+            source_kind: SourceKind::Note,
+            source_ref: work,
+            work_ref: Some(work),
+            as_of: Some(c.as_of.clone()),
+            block_ref: Some(c.block_ref.clone()),
+            source_version: Some(c.source_version.clone()),
+            citation_source_ref: Some(c.source_ref),
+            field: Some(c.field.clone()),
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(frozen_document["title"], "合成底稿验收");
-    assert!(frozen_document["fragments"].as_array().unwrap().iter()
-        .any(|f| f["blockRef"] == c.block_ref && f["sourceVersion"] == c.source_version));
+    assert!(
+        frozen_document["fragments"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f["blockRef"] == c.block_ref && f["sourceVersion"] == c.source_version)
+    );
     assert!(!frozen_document.to_string().contains("新版本正文"));
     let (_, publication) = fixture::ops_seed(&db).await;
     let query = sources::SourceQuery {
@@ -306,7 +350,10 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
     assert_eq!(page["totalBasis"], "source_directory");
     assert!(page["returnedFragmentCount"].as_u64().unwrap() > 0);
     let mut tx = db.pool().begin().await.unwrap();
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *tx).await.unwrap();
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
     assert!(
         sources::read_source_in(
             &mut tx,
@@ -323,7 +370,10 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
     tx.commit().await.unwrap();
     sqlx::query("UPDATE linggan_ops_publication SET missing_since_batch_ref=first_batch_ref WHERE publication_ref=$1").bind(publication).execute(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *tx).await.unwrap();
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
     assert!(
         sources::read_source_in(
             &mut tx,
@@ -938,11 +988,15 @@ async fn assert_comment_batch_matches_singles(
         .execute(&mut *tx)
         .await
         .unwrap();
-    let batch = linggan_evidence::read_creation_comments_in(&mut tx, refs)
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
+    let batch = linggan_evidence::read_creation_comments_at_in(&mut tx, refs, &as_of)
         .await
         .unwrap();
     for reference in refs {
-        let single = linggan_evidence::read_creation_comment_in(&mut tx, *reference)
+        let single = linggan_evidence::read_creation_comment_at_in(&mut tx, *reference, &as_of)
             .await
             .unwrap();
         assert_eq!(

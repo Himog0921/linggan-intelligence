@@ -207,14 +207,14 @@ async fn insert_slot_and_origin(
             .map(|uri| ("single", *uri))
             .collect()
     };
-        let mut previous_component = "";
-        for (index, (component_kind, uri)) in component_candidates.iter().enumerate() {
-            let producer_primary = previous_component != *component_kind;
-            previous_component = component_kind;
-            sqlx::query("INSERT INTO linggan_material_media_candidate (candidate_ref,observation_ref,candidate_ordinal,external_uri,producer_primary,source_field,source_field_state,expires_at,expires_at_state,component_kind) VALUES ($1,$2,$3,$4,$5,NULL,'UNKNOWN',NULL,'UNKNOWN',$6)")
+    let mut previous_component = "";
+    for (index, (component_kind, uri)) in component_candidates.iter().enumerate() {
+        let producer_primary = previous_component != *component_kind;
+        previous_component = component_kind;
+        sqlx::query("INSERT INTO linggan_material_media_candidate (candidate_ref,observation_ref,candidate_ordinal,external_uri,producer_primary,source_field,source_field_state,expires_at,expires_at_state,component_kind) VALUES ($1,$2,$3,$4,$5,NULL,'UNKNOWN',NULL,'UNKNOWN',$6)")
                 .bind(Uuid::new_v4()).bind(media.observation_ref).bind(i32::try_from(index + 1).expect("candidate list is bounded"))
                 .bind(uri).bind(producer_primary).bind(component_kind).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-        }
+    }
     let components = component_candidates
         .iter()
         .map(|(component, _)| *component)
@@ -287,19 +287,19 @@ async fn enqueue_media_acquisition(
     observation_ref: Uuid,
     components: &HashSet<&str>,
 ) -> Result<(), ProducerRuntimeError> {
-        for component in components {
-            sqlx::query(
-                "INSERT INTO linggan_media_acquisition_work \
+    for component in components {
+        sqlx::query(
+            "INSERT INTO linggan_media_acquisition_work \
                  (work_ref,observation_ref,component_kind) VALUES ($1,$2,$3) \
                  ON CONFLICT (observation_ref,component_kind) DO NOTHING",
-            )
-            .bind(Uuid::new_v4())
-            .bind(observation_ref)
-            .bind(component)
-            .execute(&mut **tx)
-            .await
-            .map_err(ProducerRuntimeError::Internal)?;
-        }
+        )
+        .bind(Uuid::new_v4())
+        .bind(observation_ref)
+        .bind(component)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    }
     Ok(())
 }
 
@@ -456,15 +456,33 @@ fn media_record<'a>(
     })
 }
 
-fn explicit_page(package: &ProducerCapturePackage, record: &Value, role: &str, ordinal: i32) -> Option<Option<i32>> {
-    let Some(page) = record.pointer("/slot/displayOrdinal") else { return Some(None); };
-    let page = page.as_i64().and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 0)?;
+fn explicit_page(
+    package: &ProducerCapturePackage,
+    record: &Value,
+    role: &str,
+    ordinal: i32,
+) -> Option<Option<i32>> {
+    let Some(page) = record.pointer("/slot/displayOrdinal") else {
+        return Some(None);
+    };
+    let page = page
+        .as_i64()
+        .and_then(|p| i32::try_from(p).ok())
+        .filter(|p| *p > 0)?;
     let inventory = package.coverage().pointer("/target/imageInventory")?;
     let total = inventory["expectedPages"].as_u64()?;
-    if !matches!(role, "image" | "live_photo") || page != ordinal
-        || record.pointer("/slot/displayOrderBasis").and_then(Value::as_str) != Some("platform_explicit")
-        || inventory["state"] != "complete" || inventory["source"] != "platform_image_list"
-        || page as u64 > total { return None; }
+    if !matches!(role, "image" | "live_photo")
+        || page != ordinal
+        || record
+            .pointer("/slot/displayOrderBasis")
+            .and_then(Value::as_str)
+            != Some("platform_explicit")
+        || inventory["state"] != "complete"
+        || inventory["source"] != "platform_image_list"
+        || page as u64 > total
+    {
+        return None;
+    }
     Some(Some(page))
 }
 

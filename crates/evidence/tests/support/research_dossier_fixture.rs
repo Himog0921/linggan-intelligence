@@ -64,16 +64,9 @@ pub async fn ordinary_ocr_with_bytes(
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
     }
-    admit_media_blob(
-        db,
-        observation,
-        &sha,
-        mime_type,
-        size,
-        storage_key,
-    )
-    .await
-    .unwrap();
+    admit_media_blob(db, observation, &sha, mime_type, size, storage_key)
+        .await
+        .unwrap();
     ensure_media_processing_work(db).await.unwrap();
     let worker = Uuid::new_v4();
     let MediaProcessingClaimOutcome::Claimed(claim) =

@@ -267,7 +267,7 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 ## AI-GEN1 / PR-1A 隔离证据
 
 - 固定证据目录：本工作树 `artifacts/private/ai-gen1-pr1a/`；从实际 Cargo/治理/隔离 runner 输出保存日志与最终收尾审查。忽略、不提交、不伪造；只含合成资料与无凭据元数据。系统临时目录中本次 `ai-gen1-pr1a-*.log` 是同一过程的临时输出，可核对后删除；最终保留到本包审阅结束，移除工作树前按需移交同名私有证据目录。
-- 重放入口：`scripts/test-research-dossier-postgres.sh --note-material` 与原完整兼容 runner。随机 Docker PG/卷/数据库只由该脚本创建并由其 trap 清理；不借用共享 DSN、不清理其他容器或 schema。CLI 的 plan/receipt 是操作者显式生成的本机 JSON，不自动写进 Git；无正文。真实范围的 plan/apply 尚未获派。
+- 重放入口：`scripts/test-research-dossier-postgres.sh --dossier-input` 与原完整兼容 runner。随机 Docker PG/卷/数据库只由该脚本创建并由其 trap 清理；不借用共享 DSN、不清理其他容器或 schema。CLI 的 plan/receipt 是操作者显式生成的本机 JSON，不自动写进 Git；无正文。真实范围的 plan/apply 尚未获派。
 - `Cargo.lock` 按既有登记由 Cargo 管理；本包加入已解析的 Unicode normalization 依赖，不手改生成锁。没有新前端生成物或发布包。
 
 ## 前期规范包生成登记（保留历史生命周期）
@@ -437,9 +437,9 @@ AI-GEN1正式设置页候选：人工维护的apps/web/src/pages/settings分区/
 
 AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测试/计划允许入Git；验证输出固定本独立树`artifacts/private/ai-gen1-pr1c0/`，忽略不提交，无真实材料或共享DB。CI同一浏览器证据放自有`$RUNNER_TEMP/web-app-proof/c0-offline/`，随既有Web artifact归档；截图/report/临时fixture.json不入Git。研发阶段B自有target曾移交C0；合并收尾已清理该工作树/target，日志保留到仓库根同名`artifacts/private/ai-gen1-pr1c0/`。Mog另行授权的实际发布只读元数据与合成页面回执沿该private目录保留，不含真实原文/秘密，不能与无DB研发证明混称。
 
-## AI-GEN1 · 材料只读预览隔离证明
+## RESEARCH-DOSSIER-V2 · 完整底稿与独立审阅隔离证明
 
-`artifacts/private/ai-gen1-note-material-preview/`：本任务自有合成浏览器报告、截图、日志、审查哈希和CI回执，不入Git；由正式测试runner生成，交付/集成后按任务证据保留，不包含真实原文/秘密。CI写入`$RUNNER_TEMP/web-app-proof/note-material/`，沿既有artifact上传/到期清理。
+`artifacts/private/research-dossier-v2/`：本任务自有合成浏览器报告、截图、日志、审查哈希和CI回执，不入Git；由 `scripts/test-research-dossier-postgres.sh --dossier-ui` 的合成 React → Axum → PostgreSQL runner 生成，交付/集成后按任务证据保留，不包含真实原文/秘密。CI写入`$RUNNER_TEMP/web-app-proof/dossier-v2/`，沿既有artifact上传/到期清理。
 
 ## LIDS-UI-001 · 运营发布与同源构建
 

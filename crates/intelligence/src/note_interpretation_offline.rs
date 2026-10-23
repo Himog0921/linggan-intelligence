@@ -116,18 +116,45 @@ pub fn prepare_input(input: &Input) -> Result<InputPreview, Invalid> {
     let columns = input.material.columns.clone();
     let fragments = input.material.fragments.clone();
     let mut column_fields = BTreeSet::new();
-    if columns.iter().any(|column| !canonical_field(&column.field)
-        || !column_fields.insert(column.field.as_str())) {
+    if columns.iter().any(|column| {
+        !canonical_field(&column.field) || !column_fields.insert(column.field.as_str())
+    }) {
         return Err(Invalid("offline_input_column_invalid"));
     }
     let mut citations = BTreeSet::new();
+    let mut blocks = BTreeSet::new();
     for fragment in &fragments {
         if fragment.citation_id.is_empty()
             || !citations.insert(fragment.citation_id.clone())
             || fragment.end.checked_sub(fragment.start) != Some(fragment.text.chars().count())
-            || !matches!(fragment.speaker.as_str(), "author" | "other" | "unconfirmed")
-        { return Err(Invalid("offline_input_fragment_invalid")); }
-        if !columns.iter().any(|c| c.field == fragment.field && c.state == ColumnState::Available) {
+            || !matches!(
+                fragment.speaker.as_str(),
+                "author" | "other" | "unconfirmed"
+            )
+        {
+            return Err(Invalid("offline_input_fragment_invalid"));
+        }
+        let content = &fragment.structure;
+        if content["ref"].as_str() != Some(fragment.logical_position.as_str())
+            || fragment.logical_position.is_empty()
+            || !blocks.insert(fragment.logical_position.as_str())
+            || linggan_evidence::research_dossier::content::validate_blocks(std::slice::from_ref(
+                content,
+            ))
+            .is_err()
+            || linggan_evidence::research_dossier::content::validate_issues(&serde_json::json!(
+                fragment.issues
+            ))
+            .is_err()
+            || linggan_evidence::research_dossier::content::block_text(content) != fragment.text
+            || content["speaker"].as_str().unwrap_or("unconfirmed") != fragment.speaker
+        {
+            return Err(Invalid("offline_input_structure_invalid"));
+        }
+        if !columns
+            .iter()
+            .any(|c| c.field == fragment.field && c.state == ColumnState::Available)
+        {
             return Err(Invalid("offline_input_column_conflict"));
         }
     }
@@ -142,7 +169,10 @@ pub fn prepare_input(input: &Input) -> Result<InputPreview, Invalid> {
 }
 
 fn canonical_field(field: &str) -> bool {
-    matches!(field, "title" | "body" | "tags" | "ocr" | "transcript" | "frame_text")
+    matches!(
+        field,
+        "title" | "body" | "tags" | "ocr" | "transcript" | "frame_text"
+    )
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

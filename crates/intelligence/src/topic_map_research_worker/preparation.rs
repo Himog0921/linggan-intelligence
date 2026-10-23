@@ -405,14 +405,20 @@ mod tests {
     fn fragment(id: &str, field: &str, start: usize, text: &str) -> Fragment {
         Fragment {
             fragment_id: id.into(),
+            structure: json!({"ref":id,"kind":"paragraph","text":text,"speaker":if field.contains("comment") {"other"} else {"author"}}),
             source_ref: Uuid::from_u128(1),
             field: field.into(),
             source_version: "synthetic.v1".into(),
             start,
             end: start + text.chars().count(),
             text: text.into(),
-            speaker: if field.contains("comment") { "other" } else { "author" }.into(),
-    ..Fragment::default()
+            speaker: if field.contains("comment") {
+                "other"
+            } else {
+                "author"
+            }
+            .into(),
+            ..Fragment::default()
         }
     }
 

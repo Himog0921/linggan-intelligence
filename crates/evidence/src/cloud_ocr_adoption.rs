@@ -142,7 +142,7 @@ pub async fn persist_in(
     let fingerprint = crate::ocr_adoption::content_hash(observation.to_string().as_bytes());
     // Original producer diagnostics stay immutable and never serve as a second
     // material projection. The common reading table owns all user/agent content.
-    sqlx::query("INSERT INTO linggan_media_ocr_adoption(adoption_ref,derivative_ref,layout_ref,rule_version,input_fingerprint,observation,assessment,line_ref_map,image_text,cover_title,state) VALUES($1,$2,$3,$4,$5,$6,$7,'[]','',NULL,'NEEDS_REVIEW')")
+    sqlx::query("INSERT INTO linggan_media_ocr_adoption(adoption_ref,derivative_ref,layout_ref,rule_version,input_fingerprint,observation,assessment,line_ref_map) VALUES($1,$2,$3,$4,$5,$6,$7,'[]')")
         .bind(Uuid::new_v4()).bind(derivative).bind(layout).bind(RULE_VERSION).bind(fingerprint).bind(observation)
         .bind(json!({"producer":"cloud_vision","sourceRelation":"image_transcription","ruleVersion":RULE_VERSION})).execute(&mut **tx).await?;
     Ok(blocks)

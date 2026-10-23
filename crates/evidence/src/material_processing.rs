@@ -108,7 +108,10 @@ pub async fn ensure_media_processing_work(database: &Database) -> Result<u64, sq
         "INSERT INTO linggan_media_processing_work(work_ref,job_ref) \
          SELECT gen_random_uuid(),job.job_ref FROM linggan_media_processing_job job \
          LEFT JOIN linggan_media_processing_work work USING(job_ref) \
-         WHERE work.job_ref IS NULL{retired_job_filter} ON CONFLICT(job_ref) DO NOTHING"
+         WHERE work.job_ref IS NULL{retired_job_filter} \
+           AND NOT EXISTS(SELECT 1 FROM linggan_media_derivative result WHERE result.job_ref=job.job_ref) \
+           AND NOT EXISTS(SELECT 1 FROM linggan_media_processing_job_event event WHERE event.job_ref=job.job_ref AND event.state IN ('succeeded','invalidated')) \
+         ON CONFLICT(job_ref) DO NOTHING"
     )))
     .execute(database.pool())
     .await?
@@ -268,7 +271,10 @@ pub async fn claim_media_processing_work_for_version(
     // 当成一种**正常结局**，并且**只退它一条**（下一个 tick 再退下一条），而不是替整个队列下结论。
     let input = sqlx::query(
         "SELECT job.processor_version,job.blob_sha256,blob.mime_type,blob.storage_key, \
-                content.public_ref AS content_public_ref,current_media.materialization_ref \
+                content.public_ref AS content_public_ref,current_media.materialization_ref, \
+                NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                    WHERE disposition.slot_key=job.slot_key OR disposition.blob_sha256=job.blob_sha256 \
+                       OR disposition.materialization_ref=current_media.materialization_ref) AS source_available \
          FROM linggan_media_processing_job job \
          JOIN linggan_media_blob blob ON blob.sha256=job.blob_sha256 \
          JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
@@ -281,7 +287,12 @@ pub async fn claim_media_processing_work_for_version(
     .bind(job_ref)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some(input) = input else {
+    let unavailable_reason = match input.as_ref() {
+        None => Some(SOURCE_MATERIAL_MISSING),
+        Some(row) if !row.get::<bool, _>("source_available") => Some("source_media_unavailable"),
+        Some(_) => None,
+    };
+    if let Some(reason) = unavailable_reason {
         // 就地退休。状态是 `not_applicable` 而不是 `terminal`：`terminal` 被表约束钉死为
         // 「试满 3 次」（`CHECK (state<>'terminal' OR attempt_count=3)`），而这条作业**一次都没试过**，
         // 把 `attempt_count` 写成 3 是伪造尝试史。`not_applicable` 也要求 `completed_at`，
@@ -294,7 +305,7 @@ pub async fn claim_media_processing_work_for_version(
              completed_at=scope_001_now(),updated_at=scope_001_now() WHERE work_ref=$1",
         )
         .bind(work_ref)
-        .bind(SOURCE_MATERIAL_MISSING)
+        .bind(reason)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
@@ -303,16 +314,17 @@ pub async fn claim_media_processing_work_for_version(
         )
         .bind(Uuid::new_v4())
         .bind(job_ref)
-        .bind(SOURCE_MATERIAL_MISSING)
+        .bind(reason)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
         return Ok(MediaProcessingClaimOutcome::Retired {
             job_ref,
             processor_kind,
-            reason: SOURCE_MATERIAL_MISSING,
+            reason,
         });
-    };
+    }
+    let input = input.ok_or(sqlx::Error::RowNotFound)?;
     let lease_interval = if processor_kind == "asr" {
         "6 hours"
     } else {

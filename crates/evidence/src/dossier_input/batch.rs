@@ -91,7 +91,11 @@ pub async fn plan(
             work_ref: input.work_ref,
             expected_revision: input.dossier_revision,
             material_fingerprint: input.material_fingerprint,
-            body_source_version: dossiers[&input.work_ref].materials.iter().find(|m|m["kind"]=="body").and_then(|m|m["sourceVersion"].as_str().map(str::to_owned)),
+            body_source_version: dossiers[&input.work_ref]
+                .materials
+                .iter()
+                .find(|m| m["kind"] == "body")
+                .and_then(|m| m["sourceVersion"].as_str().map(str::to_owned)),
             relayer_source_hash: relayer_source_hash(&dossiers[&input.work_ref]),
             detail_refs: details.iter().map(|(r, _, _)| *r).collect(),
             pending_tag_details: details.iter().filter(|(_, _, done)| !*done).count(),
@@ -216,7 +220,7 @@ async fn apply_work(
     entry: &PlanEntry,
 ) -> Result<Value, Error> {
     match plan.operation {
-        BatchOperation::NativeBody => native_body(database,plan,entry).await,
+        BatchOperation::NativeBody => native_body(database, plan, entry).await,
         BatchOperation::Hashtags => {
             backfill::apply(
                 database,
@@ -274,29 +278,62 @@ async fn apply_work(
     }
 }
 
-async fn native_body(database:&Database,plan:&BatchPlan,entry:&PlanEntry)->Result<Value,Error>{
-    let mut tx=database.pool().begin().await?;
-    read::lock_work(&mut tx,entry.work_ref).await?;
-    read::scope(&mut tx,plan.domain_ref,&[entry.work_ref],&plan.as_of).await?;
-    let now=cutoff(&mut tx,None).await?;
-    let current=crate::research_dossier::read_in(&mut tx,&[entry.work_ref],&now).await?.remove(&entry.work_ref).ok_or(Error::NotFound)?;
-    let body=current.materials.iter().find(|m|m["kind"]=="body").ok_or(Error::NotFound)?;
-    if body["sourceVersion"].as_str()!=entry.body_source_version.as_deref(){return Err(Error::Conflict);}
-    if current.revision!=entry.expected_revision {
-        if body["reading"]["ruleVersion"]==crate::research_dossier::content::RULE_VERSION&&body["currentRevisionRef"].is_string(){
-            tx.commit().await?;return Ok(json!({"state":"already_current","readOnlyReplay":true}));
+async fn native_body(
+    database: &Database,
+    plan: &BatchPlan,
+    entry: &PlanEntry,
+) -> Result<Value, Error> {
+    let mut tx = database.pool().begin().await?;
+    read::lock_work(&mut tx, entry.work_ref).await?;
+    read::scope(&mut tx, plan.domain_ref, &[entry.work_ref], &plan.as_of).await?;
+    let now = cutoff(&mut tx, None).await?;
+    let current = crate::research_dossier::read_in(&mut tx, &[entry.work_ref], &now)
+        .await?
+        .remove(&entry.work_ref)
+        .ok_or(Error::NotFound)?;
+    let body = current
+        .materials
+        .iter()
+        .find(|m| m["kind"] == "body")
+        .ok_or(Error::NotFound)?;
+    if body["sourceVersion"].as_str() != entry.body_source_version.as_deref() {
+        return Err(Error::Conflict);
+    }
+    if current.revision != entry.expected_revision {
+        if body["reading"]["ruleVersion"] == crate::research_dossier::content::RULE_VERSION
+            && body["currentRevisionRef"].is_string()
+        {
+            tx.commit().await?;
+            return Ok(json!({"state":"already_current","readOnlyReplay":true}));
         }
         return Err(Error::Conflict);
     }
-    let result=crate::research_dossier::native::publish_current_body_in(&mut tx,entry.work_ref).await?;
-    tx.commit().await?;Ok(result)
+    let result =
+        crate::research_dossier::native::publish_current_body_in(&mut tx, entry.work_ref).await?;
+    tx.commit().await?;
+    Ok(result)
 }
 
 // Outputs change during normalization; source membership and restrictions may not.
-fn relayer_source_hash(dossier:&crate::research_dossier::ResearchDossier)->String{
-    let media:Vec<_>=dossier.media.iter().map(|m|json!([m["slotKey"],m["sourceVersion"],m["layoutRef"],m["humanProtected"]])).collect();
-    let native:Vec<_>=dossier.fragments.iter().filter(|f|matches!(f.field.as_str(),"title"|"body"|"tags")).collect();
-    hash(&json!([native,dossier.media_inventory,media]).to_string())
+fn relayer_source_hash(dossier: &crate::research_dossier::ResearchDossier) -> String {
+    let media: Vec<_> = dossier
+        .media
+        .iter()
+        .map(|m| {
+            json!([
+                m["slotKey"],
+                m["sourceVersion"],
+                m["layoutRef"],
+                m["humanProtected"]
+            ])
+        })
+        .collect();
+    let native: Vec<_> = dossier
+        .fragments
+        .iter()
+        .filter(|f| matches!(f.field.as_str(), "title" | "body" | "tags"))
+        .collect();
+    hash(&json!([native, dossier.media_inventory, media]).to_string())
 }
 
 #[cfg(test)]

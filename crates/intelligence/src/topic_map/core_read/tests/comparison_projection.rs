@@ -173,7 +173,10 @@ fn all_participants_share_frozen_findings_without_single_work_claims() {
                 .enumerate()
             {
                 assert_eq!(item["researchResultRef"], json!(Uuid::from_u128(50)));
-                assert_eq!(item["researchMethodVersion"], crate::topic_map_research_analysis::METHOD_VERSION);
+                assert_eq!(
+                    item["researchMethodVersion"],
+                    crate::topic_map_research_analysis::METHOD_VERSION
+                );
                 assert_eq!(item[index_field], json!(index));
                 assert_eq!(item["evidenceWorkRefs"], json!([a, b]));
             }
@@ -225,10 +228,16 @@ fn multiple_results_keep_each_result_index_and_evidence_scope() {
     );
     let angles = research["output"]["angles"].as_array().unwrap();
     assert_eq!(angles.len(), 3);
-    assert_eq!(angles[0]["researchMethodVersion"], crate::topic_map_research_analysis::METHOD_VERSION);
+    assert_eq!(
+        angles[0]["researchMethodVersion"],
+        crate::topic_map_research_analysis::METHOD_VERSION
+    );
     assert_eq!(angles[1]["researchAngleIndex"], 1);
     assert_eq!(angles[2]["researchResultRef"], json!(Uuid::from_u128(40)));
-    assert_eq!(angles[2]["researchMethodVersion"], crate::topic_map_research_analysis::METHOD_VERSION);
+    assert_eq!(
+        angles[2]["researchMethodVersion"],
+        crate::topic_map_research_analysis::METHOD_VERSION
+    );
     assert_eq!(angles[2]["researchAngleIndex"], 0);
     assert_eq!(angles[2]["evidenceWorkRefs"], json!([Uuid::from_u128(1)]));
     assert!(angles[2].get("comparisonScope").is_none());

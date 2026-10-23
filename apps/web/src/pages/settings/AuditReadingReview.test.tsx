@@ -1,6 +1,7 @@
 import { act, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { AuditReadingReview } from './AuditReadingReview';
+import { fetchAuditDetail } from './ocrAuditApi';
 import { createFetchMock, deferred, fail, ok, renderWithProviders, type FetchKit, type Reply } from '../corpus/evidence/testKit';
 
 const reading = '80000000-0000-4000-8000-000000000001';
@@ -11,6 +12,17 @@ function detail() { return { sampleRef: sample, originalAssetUrl: null, modelId:
 function receipt(body: unknown) { const command = body as { decision: string; materialReviewCommandRef: string | null }; return { reviewRef: '83000000-0000-4000-8000-000000000001', readingRef: reading, revision: 1, decision: command.decision, materialReviewCommandRef: command.materialReviewCommandRef }; }
 beforeEach(() => { kit = createFetchMock(); kit.install(); kit.route('GET', `${base}/readings/${reading}`, ok(detail())); });
 afterEach(() => vi.unstubAllGlobals());
+
+it('最新意见恢复待核验时，不沿用旧确认版本的核验点数', async () => {
+  kit.route('GET', `${base}/readings/${reading}`, ok({ ...detail(), reviews: [
+    { revision: 1, decision: 'confirmed', actor: '合成审核人', reason: '早先确认', metrics: { bodyMissing: { numerator: 2, denominator: 5 } } },
+    { revision: 2, decision: 'pending', actor: '合成审核人', reason: '新证据需要重新核对', metrics: { bodyMissing: { numerator: 2, denominator: 5 } } },
+  ] }));
+  const result = await fetchAuditDetail(reading);
+  expect(result.revision).toBe(2);
+  expect(result.humanCounts.bodyMissing).toEqual({ numerator: 0, denominator: 0 });
+  expect(result.reviews.map(review => review.decision)).toEqual(['confirmed', 'pending']);
+});
 
 it.each(['confirmed', 'dismissed', 'pending'])('仅记录 %s 抽检意见；不产生读本替换或文本写入', async decision => {
   kit.route('POST', `${base}/reviews`, call => ({ status: 200, body: receipt(call.body) }));

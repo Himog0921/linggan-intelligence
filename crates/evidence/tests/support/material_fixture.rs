@@ -313,7 +313,7 @@ pub const MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0142_ocr_adoption','baad716a89398d3e923838028358db7e6189f66c79408c4502287f8b75498057');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0143_ocr_quality_audit','11d316460ceb7d49b27751efe4b2382b88a1a068f86784f427771bbdf30bdb6c');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0144_ocr_manual_recognition','de82e4ddabe0e9045165a01e3e32ab2ae24625853def47934907c66d0fc12990');\n",
-    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0145_research_dossier_v2','8c4468b4db741dbb805c2fb48da6a36c3045b5f28d63829e4cee16c1a0199ff1');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0145_research_dossier_v2','ed284ff1a73465a8d9b2745bc8dbadb299c0045ad8e56026c57d15d107840889');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

@@ -39,20 +39,32 @@ pub struct Fragment {
     #[serde(default)]
     pub unit_ref: Option<Uuid>,
 }
-fn unconfirmed_speaker() -> String { "unconfirmed".into() }
+fn unconfirmed_speaker() -> String {
+    "unconfirmed".into()
+}
 impl Default for Fragment {
     fn default() -> Self {
-        Self { fragment_id: String::new(), source_ref: Uuid::nil(), field: String::new(),
-            source_version: String::new(), start: 0, end: 0, text: String::new(),
-            speaker: unconfirmed_speaker(), structure: Value::Null, issues: Vec::new(),
-            reading_ref: None, unit_ref: None }
+        Self {
+            fragment_id: String::new(),
+            source_ref: Uuid::nil(),
+            field: String::new(),
+            source_version: String::new(),
+            start: 0,
+            end: 0,
+            text: String::new(),
+            speaker: unconfirmed_speaker(),
+            structure: Value::Null,
+            issues: Vec::new(),
+            reading_ref: None,
+            unit_ref: None,
+        }
     }
 }
 impl Fragment {
-    /// Canonical blocks already own their content. Non-dossier sources (comments and
-    /// biographies) provide plain text without a second normalized representation.
+    /// Every source constructs its own content block before reaching a consumer.
+    /// Missing structure never causes a note's raw text to be silently substituted.
     pub fn model_content(&self) -> Value {
-        if self.structure.is_object() { self.structure.clone() } else { json!({"kind":"paragraph","text":self.text}) }
+        self.structure.clone()
     }
 }
 #[derive(Clone, Debug, Serialize)]
@@ -120,11 +132,20 @@ pub fn fragment(
 ) -> Option<Fragment> {
     let text = text.filter(|value| !value.trim().is_empty())?;
     let source = source?;
-    let source_version = version.map(str::to_owned).unwrap_or_else(|| source.to_string());
+    let source_version = version
+        .map(str::to_owned)
+        .unwrap_or_else(|| source.to_string());
+    let fragment_id = format!("{work}.{source}.{field}");
     Some(Fragment {
-        fragment_id: format!("{work}.{source}.{field}"),
-        source_ref: source, field: field.into(), source_version,
-        start: 0, end: text.chars().count(), text: text.into(),
+        structure: json!({"ref":fragment_id,"kind":"paragraph","text":text,"speaker":"author"}),
+        speaker: "author".into(),
+        fragment_id,
+        source_ref: source,
+        field: field.into(),
+        source_version,
+        start: 0,
+        end: text.chars().count(),
+        text: text.into(),
         ..Fragment::default()
     })
 }
@@ -290,9 +311,7 @@ async fn load_topic_material_scope(
         .await?;
     // Qualification reconstructs finite source windows, not an analytical scan.
     // Keep planner settings local so returning a pooled connection changes no caller.
-    sqlx::query("SET LOCAL jit=off")
-        .execute(&mut *tx)
-        .await?;
+    sqlx::query("SET LOCAL jit=off").execute(&mut *tx).await?;
     sqlx::query("SET LOCAL plan_cache_mode=force_custom_plan")
         .execute(&mut *tx)
         .await?;
@@ -316,7 +335,8 @@ async fn load_topic_material_scope(
         if let Some(data) = data.as_mut() {
             data.works.append(&mut part.works);
             data.work_name_sources.extend(part.work_name_sources);
-            data.profile_name_candidates.extend(part.profile_name_candidates);
+            data.profile_name_candidates
+                .extend(part.profile_name_candidates);
             data.observation_lookup_available &= part.observation_lookup_available;
         } else {
             data = Some(part);
@@ -329,11 +349,18 @@ async fn load_topic_material_scope(
 }
 
 /// Read one creator work with the same complete projection as the worker, without scheduling.
-pub async fn load_creator_material_for_work(database:&Database,scope:&CreatorScope,work:Uuid)->Result<DiscoveryData,DiscoveryError>{
-    let mut tx=database.pool().begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").execute(&mut *tx).await?;
-    let result=load_materials_in(&mut tx,scope,Some(&[work])).await?;
-    tx.commit().await?;Ok(result)
+pub async fn load_creator_material_for_work(
+    database: &Database,
+    scope: &CreatorScope,
+    work: Uuid,
+) -> Result<DiscoveryData, DiscoveryError> {
+    let mut tx = database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let result = load_materials_in(&mut tx, scope, Some(&[work])).await?;
+    tx.commit().await?;
+    Ok(result)
 }
 
 pub(crate) async fn load_in(
@@ -412,7 +439,10 @@ async fn load_materials_in(
     let profile_names=sqlx::query("SELECT DISTINCT ON(author.author_external_id) author.author_external_id,author.display_name,author.material_ref FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package package USING(package_ref) WHERE author.platform=$1 AND package.accepted_at<=$2::timestamptz AND NULLIF(btrim(author.display_name),'') IS NOT NULL AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3) ORDER BY author.author_external_id,author.observed_at::timestamptz DESC,author.created_at DESC,author.material_ref DESC").bind(&q.platform).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
     for row in profile_names {
         let author: String = row.get("author_external_id");
-        profile_name_candidates.insert(creator_key(&q.platform, &author), (row.get("display_name"), row.get("material_ref")));
+        profile_name_candidates.insert(
+            creator_key(&q.platform, &author),
+            (row.get("display_name"), row.get("material_ref")),
+        );
     }
     sqlx::query("SAVEPOINT creator_observation_lookup")
         .execute(&mut **tx)
@@ -483,8 +513,15 @@ async fn load_materials_in(
         let work_refs: Vec<_> = batch.iter().map(|current| current.public_ref).collect();
         let mut dossiers = crate::research_dossier::read_in(tx, &work_refs, &as_of).await?;
         for c in batch {
-            let dossier = dossiers.remove(&c.public_ref).ok_or(DiscoveryError::Invalid("dossier_unavailable"))?;
-            let search_text = dossier.fragments.iter().map(|f| f.text.as_str()).collect::<Vec<_>>().join("\n");
+            let dossier = dossiers
+                .remove(&c.public_ref)
+                .ok_or(DiscoveryError::Invalid("dossier_unavailable"))?;
+            let search_text = dossier
+                .fragments
+                .iter()
+                .map(|f| f.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             let fragments = dossier.fragments;
             let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments,"rule":RULE_VERSION,"config":policy["configRef"]}).to_string());
             let mut result = json!({});
@@ -549,12 +586,20 @@ async fn load_materials_in(
                 .and_then(|a| profiles.get(a))
                 .cloned()
                 .unwrap_or(Value::Null);
-            let current_name = c.creator_display_name.as_deref().filter(|name| !name.trim().is_empty());
-            let profile_name = profile["displayName"].as_str().filter(|name| !name.trim().is_empty());
+            let current_name = c
+                .creator_display_name
+                .as_deref()
+                .filter(|name| !name.trim().is_empty());
+            let profile_name = profile["displayName"]
+                .as_str()
+                .filter(|name| !name.trim().is_empty());
             if current_name.is_some() {
                 work_name_sources.insert(c.public_ref, json!({"kind":"accepted_work","workRef":c.public_ref,"sourceRef":c.creator_source.material_ref}));
             } else if profile_name.is_some() {
-                work_name_sources.insert(c.public_ref, json!({"kind":"accepted_author_profile","sourceRef":profile["sourceRef"]}));
+                work_name_sources.insert(
+                    c.public_ref,
+                    json!({"kind":"accepted_author_profile","sourceRef":profile["sourceRef"]}),
+                );
             }
             let observation = if observation_lookup_available {
                 c.author_external_id.as_ref().and_then(|a|targets.get(a)).cloned().unwrap_or(json!({"inCurrentDomain":false,"monitoringState":"not_enabled","existsInOtherDomains":false,"hasOtherPrimaryDomain":false,"targetRef":null,"usageRole":null,"lookupState":"available"}))
@@ -761,15 +806,35 @@ fn author_display(
 ) -> (Option<String>, Value) {
     if let Some(named) = works
         .iter()
-        .filter(|work| work.display_name.as_deref().is_some_and(|name| !name.trim().is_empty()))
+        .filter(|work| {
+            work.display_name
+                .as_deref()
+                .is_some_and(|name| !name.trim().is_empty())
+        })
         .max_by_key(|work| (&work.first_added, work.work_ref))
     {
-        return (named.display_name.clone(), data.work_name_sources.get(&named.work_ref).cloned().unwrap_or(Value::Null));
+        return (
+            named.display_name.clone(),
+            data.work_name_sources
+                .get(&named.work_ref)
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
     }
-    if let Some(candidate) = latest.creator_key.as_ref().and_then(|key| data.profile_name_candidates.get(key)) {
-        return (Some(candidate.0.clone()), json!({"kind":"accepted_author_profile","sourceRef":candidate.1}));
+    if let Some(candidate) = latest
+        .creator_key
+        .as_ref()
+        .and_then(|key| data.profile_name_candidates.get(key))
+    {
+        return (
+            Some(candidate.0.clone()),
+            json!({"kind":"accepted_author_profile","sourceRef":candidate.1}),
+        );
     }
-    let name = latest.observation["displayName"].as_str().filter(|name| !name.trim().is_empty()).map(str::to_owned);
+    let name = latest.observation["displayName"]
+        .as_str()
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_owned);
     let source = if name.is_some() {
         json!({"kind":"observation_target","targetRef":latest.observation["targetRef"]})
     } else {
@@ -777,7 +842,12 @@ fn author_display(
     };
     (name, source)
 }
-fn author_matches(data: &DiscoveryData, latest: &DiscoveryWork, works: &[&DiscoveryWork], q: &CreatorScope) -> bool {
+fn author_matches(
+    data: &DiscoveryData,
+    latest: &DiscoveryWork,
+    works: &[&DiscoveryWork],
+    q: &CreatorScope,
+) -> bool {
     let outside = latest.observation["inCurrentDomain"] == false;
     if q.observation.as_deref().is_some_and(|s| match s {
         "outside" => !outside,
@@ -1038,7 +1108,14 @@ mod topic_material_tests {
         assert_eq!(full.text, text);
         assert_eq!(full.end, text.chars().count());
         assert_eq!(full.source_version, "v1");
-        let later = fragment(work, "body", Some(&text), Some(Uuid::from_u128(3)), Some("v2")).unwrap();
+        let later = fragment(
+            work,
+            "body",
+            Some(&text),
+            Some(Uuid::from_u128(3)),
+            Some("v2"),
+        )
+        .unwrap();
         assert_ne!(full.fragment_id, later.fragment_id);
         assert_ne!(full.source_ref, later.source_ref);
     }

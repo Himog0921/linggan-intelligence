@@ -17,7 +17,6 @@ use uuid::Uuid;
 pub struct StartRun {
     pub command_ref: Uuid,
     pub expected_scope_sha256: String,
-    #[serde(default)]
     pub slot_keys: Vec<String>,
 }
 #[derive(Clone)]
@@ -60,7 +59,7 @@ async fn sources_in(
                 WHERE d.slot_key=o.slot_key OR d.blob_sha256=m.blob_sha256 OR d.materialization_ref=m.materialization_ref)
         ) SELECT c.*,ARRAY[c.slot_key] || COALESCE((SELECT array_agg(cover.slot_key) FROM candidates cover
                 WHERE c.purpose<>'cover' AND c.ordinal=1 AND cover.purpose='cover' AND cover.blob_sha256=c.blob_sha256),'{}') aliases,
-            (c.purpose='cover' OR c.ordinal=1) cover
+            (c.purpose='cover' OR COALESCE(c.ordinal=1,false)) cover
             FROM candidates c
             WHERE c.purpose<>'cover' OR NOT EXISTS(SELECT 1 FROM candidates first_page WHERE first_page.purpose<>'cover' AND first_page.ordinal=1 AND first_page.blob_sha256=c.blob_sha256)
             ORDER BY ordinal NULLS LAST,slot_key",
@@ -158,7 +157,8 @@ pub async fn start_run(
         return Err(FoundationError::Conflict);
     }
     let selected: std::collections::BTreeSet<_> = request.slot_keys.iter().collect();
-    if selected.len() != request.slot_keys.len()
+    if selected.is_empty()
+        || selected.len() != request.slot_keys.len()
         || selected
             .iter()
             .any(|key| !sources.iter().any(|s| s.slot_key.as_str() == key.as_str()))
@@ -167,7 +167,7 @@ pub async fn start_run(
     }
     let sources: Vec<_> = sources
         .into_iter()
-        .filter(|s| selected.is_empty() || selected.contains(&s.slot_key))
+        .filter(|s| selected.contains(&s.slot_key))
         .collect();
     // Batch cancellation is authoritative. Persist the matching run before looking for
     // active work so a later explicit confirmation creates a new immutable generation.

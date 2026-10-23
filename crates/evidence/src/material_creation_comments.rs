@@ -9,6 +9,17 @@ pub async fn read_creation_comments_in(
     tx: &mut Transaction<'_, Postgres>,
     sources: &[Uuid],
 ) -> Result<BTreeMap<Uuid, Value>, sqlx::Error> {
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **tx)
+        .await?;
+    read_creation_comments_at_in(tx, sources, &as_of).await
+}
+
+pub async fn read_creation_comments_at_in(
+    tx: &mut Transaction<'_, Postgres>,
+    sources: &[Uuid],
+    as_of: &str,
+) -> Result<BTreeMap<Uuid, Value>, sqlx::Error> {
     if sources.is_empty() {
         return Ok(BTreeMap::new());
     }
@@ -17,11 +28,13 @@ pub async fn read_creation_comments_in(
          EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted, \
          parent.material_ref AS parent_ref,parent.body_text AS parent_body,parent.body_state AS parent_body_state, \
          EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=parent.content_public_ref AND r.comment_external_id=parent.comment_external_id) AS parent_restricted \
-         FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) \
-         LEFT JOIN linggan_material_comment_current parent ON c.is_reply AND parent.content_public_ref=c.content_public_ref AND parent.comment_external_id=c.parent_comment_external_id \
-           AND EXISTS(SELECT 1 FROM linggan_runtime_capture_package p WHERE p.package_ref=parent.package_ref AND p.accepted_at<=scope_001_now()) \
-         WHERE c.material_ref=ANY($1) AND package.accepted_at<=scope_001_now()"
-    ).bind(sources).fetch_all(&mut **tx).await?;
+         FROM linggan_material_comment c JOIN linggan_runtime_capture_package package USING(package_ref) \
+         LEFT JOIN LATERAL (SELECT p.* FROM linggan_material_comment p JOIN linggan_runtime_capture_package pp USING(package_ref) \
+           WHERE c.is_reply AND p.content_public_ref=c.content_public_ref AND p.comment_external_id=c.parent_comment_external_id \
+             AND p.created_at<=$2::timestamptz AND pp.accepted_at<=$2::timestamptz \
+           ORDER BY p.observed_at::timestamptz DESC,p.created_at DESC,p.material_ref DESC LIMIT 1) parent ON true \
+         WHERE c.material_ref=ANY($1) AND c.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz"
+    ).bind(sources).bind(as_of).fetch_all(&mut **tx).await?;
     let works: Vec<Uuid> = rows
         .iter()
         .filter(|row| !row.get::<bool, _>("restricted"))
@@ -29,10 +42,7 @@ pub async fn read_creation_comments_in(
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut **tx)
-        .await?;
-    let dossiers = crate::research_dossier::read_in(tx, &works, &as_of).await?;
+    let dossiers = crate::research_dossier::read_in(tx, &works, as_of).await?;
     let mut output = BTreeMap::new();
     for row in rows {
         let source: Uuid = row.get("material_ref");

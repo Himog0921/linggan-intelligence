@@ -23,7 +23,10 @@ pub(super) fn finish(material: &mut Material) {
                 f.source_version,
                 f.start,
                 f.end,
-                f.text_hash, f.logical_position, f.reading_ref, f.unit_ref
+                f.text_hash,
+                f.logical_position,
+                f.reading_ref,
+                f.unit_ref
             ])
         })
         .collect();
@@ -46,7 +49,16 @@ pub(super) fn finish(material: &mut Material) {
 fn content_fingerprint(columns: &[Column], fragments: &[Fragment]) -> String {
     let text: Vec<_> = fragments
         .iter()
-        .map(|f| json!([f.field, f.logical_position, hash(&f.text), f.speaker, hash(&f.structure.to_string()), f.issues]))
+        .map(|f| {
+            json!([
+                f.field,
+                f.logical_position,
+                hash(&f.text),
+                f.speaker,
+                hash(&f.structure.to_string()),
+                f.issues
+            ])
+        })
         .collect();
     hash(&json!([FINGERPRINT_VERSION, columns, text]).to_string())
 }
@@ -69,8 +81,11 @@ pub(super) fn fragment(
         end: start + text.chars().count(),
         text_hash: hash(&text),
         text,
-        speaker: "unconfirmed".into(), structure: serde_json::Value::Null, issues: vec![],
-        reading_ref: None, unit_ref: None,
+        speaker: "unconfirmed".into(),
+        structure: serde_json::Value::Null,
+        issues: vec![],
+        reading_ref: None,
+        unit_ref: None,
     }
 }
 
@@ -115,12 +130,25 @@ mod tests {
             content_fingerprint(&cols, &[a]),
             content_fingerprint(&cols, &[changed])
         );
-        let base = fragment("ocr", "page-1.block-1".into(), Uuid::new_v4(), "v1".into(), 0, "相同字面文字".into());
-        let mut role = base.clone(); role.speaker = "author".into();
-        let mut structure = base.clone(); structure.structure = json!({"kind":"quote","text":base.text});
-        let mut issue = base.clone(); issue.issues = vec![json!({"code":"unclear","message":"归属未确认"})];
+        let base = fragment(
+            "ocr",
+            "page-1.block-1".into(),
+            Uuid::new_v4(),
+            "v1".into(),
+            0,
+            "相同字面文字".into(),
+        );
+        let mut role = base.clone();
+        role.speaker = "author".into();
+        let mut structure = base.clone();
+        structure.structure = json!({"kind":"quote","text":base.text});
+        let mut issue = base.clone();
+        issue.issues = vec![json!({"code":"unclear","message":"归属未确认"})];
         for changed in [role, structure, issue] {
-            assert_ne!(content_fingerprint(&cols, std::slice::from_ref(&base)), content_fingerprint(&cols, &[changed]));
+            assert_ne!(
+                content_fingerprint(&cols, std::slice::from_ref(&base)),
+                content_fingerprint(&cols, &[changed])
+            );
         }
         let missing = vec![Column {
             field: "body".into(),

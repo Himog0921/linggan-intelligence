@@ -116,10 +116,9 @@ async fn run() -> Result<bool, String> {
             )
         }
         Command::Apply(_) => {
-            let report =
-                dossier_input::apply_plan(&database, &saved.expect("parsed apply plan"))
-                    .await
-                    .map_err(|e| e.to_string())?;
+            let report = dossier_input::apply_plan(&database, &saved.expect("parsed apply plan"))
+                .await
+                .map_err(|e| e.to_string())?;
             let complete = report.complete();
             (
                 serde_json::to_value(report).map_err(|_| "serialization_failed")?,

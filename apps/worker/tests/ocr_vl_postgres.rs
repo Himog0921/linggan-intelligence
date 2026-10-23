@@ -196,7 +196,7 @@ async fn synthetic_worker_keeps_visual_candidates_separate_until_explicit_review
     );
     tx.rollback().await.unwrap();
     assert!(
-        sqlx::query("UPDATE linggan_media_ocr_adoption SET image_text='overwrite'")
+        sqlx::query("UPDATE linggan_media_ocr_adoption SET observation='{}'")
             .execute(db.pool())
             .await
             .is_err()
@@ -292,11 +292,12 @@ async fn private_unseen_images_use_actual_worker_and_database() {
             continue;
         }
         works.insert(work);
-        let row=sqlx::query("SELECT a.observation,a.assessment,a.image_text,a.cover_title,a.adoption_ref,a.derivative_ref,a.layout_ref,d.storage_key FROM linggan_media_ocr_adoption a JOIN linggan_media_derivative d USING(derivative_ref) WHERE d.job_ref=$1").bind(claim.job_ref).fetch_one(db.pool()).await.unwrap();
+        let row=sqlx::query("SELECT a.observation,a.assessment,a.adoption_ref,a.derivative_ref,a.layout_ref,d.storage_key FROM linggan_media_ocr_adoption a JOIN linggan_media_derivative d USING(derivative_ref) WHERE d.job_ref=$1").bind(claim.job_ref).fetch_one(db.pool()).await.unwrap();
         let raw_path = support::local_media_root().join(row.get::<String, _>("storage_key"));
         let saved = std::fs::read(raw_path).unwrap();
         let p = store::prepare(&saved).unwrap();
-        assert_eq!(row.get::<String, _>("image_text"), "");
+        assert_eq!(row.get::<Value, _>("observation"), json!(p.observation));
+        assert_eq!(row.get::<Value, _>("assessment"), json!(p.assessment));
         let candidate = linggan_evidence::material_reading::read_candidates(&db, work)
             .await
             .unwrap();

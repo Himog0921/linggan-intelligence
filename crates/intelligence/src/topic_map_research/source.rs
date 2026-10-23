@@ -237,11 +237,13 @@ fn comment_inputs(
             .get(&(work, identity.external_id.clone()))
             .cloned()
             .unwrap_or_default();
+        let fragment_id = format!(
+            "{work}.comment.{}",
+            creator_discovery::hash(&identity.external_id)
+        );
         let fragment = Fragment {
-            fragment_id: format!(
-                "{work}.comment.{}",
-                creator_discovery::hash(&identity.external_id)
-            ),
+            structure: json!({"ref":fragment_id,"kind":"paragraph","text":source.research_text,"speaker":"other"}),
+            fragment_id,
             source_ref: source.source_ref,
             field: if signals.is_empty() {
                 "unresearched_comment"
@@ -254,7 +256,7 @@ fn comment_inputs(
             end: source.research_text.chars().count(),
             text: source.research_text,
             speaker: "other".into(),
-        ..Fragment::default()
+            ..Fragment::default()
         };
         let mut parent_id = None;
         let mut parent_author = None;
@@ -274,6 +276,7 @@ fn comment_inputs(
             );
             parent_author = identity.author.clone();
             parents.entry(id.clone()).or_insert(Fragment {
+                structure: json!({"ref":id,"kind":"paragraph","text":text,"speaker":"other"}),
                 fragment_id: id.clone(),
                 source_ref: reference,
                 field: PARENT_CONTEXT_FIELD.into(),
@@ -282,7 +285,7 @@ fn comment_inputs(
                 end: text.chars().count(),
                 text,
                 speaker: "other".into(),
-            ..Fragment::default()
+                ..Fragment::default()
             });
             parent_id = Some(id);
         }

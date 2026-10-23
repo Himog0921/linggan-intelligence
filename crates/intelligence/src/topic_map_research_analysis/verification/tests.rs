@@ -20,7 +20,8 @@ fn source(text: &str) -> Fragment {
         end: 7 + text.chars().count(),
         text: text.into(),
         speaker: "author".into(),
-    ..Fragment::default()
+        structure: json!({"ref":"synthetic.body","kind":"paragraph","text":text,"speaker":"author"}),
+        ..Fragment::default()
     }
 }
 

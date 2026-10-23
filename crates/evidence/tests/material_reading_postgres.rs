@@ -564,6 +564,33 @@ async fn live_photo_components_are_independent_in_both_completion_orders_and_byt
         assert_eq!(material["sourceState"], "present");
         assert!(!material["blocks"].as_array().unwrap().is_empty());
         assert!(material.get("originalUrl").is_none());
+        let blob: String = sqlx::query_scalar(
+            "SELECT blob_sha256 FROM linggan_media_materialization WHERE materialization_ref=$1",
+        )
+        .bind(still.unwrap())
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr',$4,'full_blob')")
+            .bind(Uuid::new_v4()).bind(blob).bind(&slot).bind(ocr_adoption_persistence::PROCESSOR_VERSION).execute(db.pool()).await.unwrap();
+        ensure_media_processing_work(&db).await.unwrap();
+        assert!(
+            matches!(
+                claim_media_processing_work_for_version(
+                    &db,
+                    Uuid::new_v4(),
+                    &["image_ocr".into()],
+                    Some(ocr_adoption_persistence::PROCESSOR_VERSION)
+                )
+                .await
+                .unwrap(),
+                MediaProcessingClaimOutcome::Retired {
+                    reason: "source_media_unavailable",
+                    ..
+                }
+            ),
+            "byte cleanup preserves text but prevents a new image-processing lease"
+        );
     }
 }
 

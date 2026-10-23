@@ -12,7 +12,8 @@ fn command() -> StartStudyRunCommand {
     serde_json::from_value(json!({"requestRef":Uuid::from_u128(100),
         "domainRef":crate::comment_study_source::ADHD_DOMAIN_REF,"policyRef":Uuid::from_u128(11),
         "scope":{"kind":"works","workRefs":[Uuid::from_u128(10)]},"mode":"new_only",
-        "limits":{"commentBudget":100,"tokenLimit":100000},"reason":null})).unwrap()
+        "limits":{"commentBudget":100,"tokenLimit":100000},"reason":null}))
+    .unwrap()
 }
 fn candidate(work: u128, rank: u64) -> SelectionCandidate {
     SelectionCandidate {
@@ -119,12 +120,7 @@ fn both_scope_variants_reject_crossed_fields_and_missing_members() {
 }
 #[test]
 fn selection_and_model_limits_and_scope_sizes_are_enforced() {
-    for (comments, tokens) in [
-        (0, 100000),
-        (3001, 100000),
-        (100, 1023),
-        (100, 10000001),
-    ] {
+    for (comments, tokens) in [(0, 100000), (3001, 100000), (100, 1023), (100, 10000001)] {
         let mut c = command();
         c.limits = StudyRunLimits {
             comment_budget: comments,
@@ -616,12 +612,27 @@ fn raw_punctuation_and_whitespace_changes_are_not_lost_by_cleaning() {
 #[test]
 fn changed_speaker_or_uncertainty_changes_context_equivalence() {
     let first = prepared("孩子做作业总是拖延");
-    for (field,value) in [("speaker",json!("other")),("issues",json!([{"key":"uncertain","code":"negation_uncertain","message":"否定待确认","resolution":"reading_edit"}]))] {
+    for (field, value) in [
+        ("speaker", json!("other")),
+        (
+            "issues",
+            json!([{"key":"uncertain","code":"negation_uncertain","message":"否定待确认","resolution":"reading_edit"}]),
+        ),
+    ] {
         let mut ctx = context();
         ctx["sources"][0][field] = value.clone();
-        if field == "speaker" { ctx["sources"][0]["structure"][field] = value; }
-        let changed = prepare_study_input(&key(10,"评论-A"),Uuid::from_u128(21),"孩子做作业总是拖延",&ctx,None).unwrap();
-        assert_ne!(first.input_fingerprint,changed.input_fingerprint);
+        if field == "speaker" {
+            ctx["sources"][0]["structure"][field] = value;
+        }
+        let changed = prepare_study_input(
+            &key(10, "评论-A"),
+            Uuid::from_u128(21),
+            "孩子做作业总是拖延",
+            &ctx,
+            None,
+        )
+        .unwrap();
+        assert_ne!(first.input_fingerprint, changed.input_fingerprint);
     }
 }
 #[test]

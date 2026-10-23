@@ -12,7 +12,9 @@ pub(super) struct Inventory {
 }
 
 pub(super) async fn read_in(
-    tx: &mut Transaction<'_, Postgres>, works: &[Uuid], as_of: &str,
+    tx: &mut Transaction<'_, Postgres>,
+    works: &[Uuid],
+    as_of: &str,
 ) -> Result<BTreeMap<Uuid, Inventory>, sqlx::Error> {
     let mut result = BTreeMap::<Uuid, Inventory>::new();
     let rows = sqlx::query(r#"
@@ -44,13 +46,17 @@ FROM origins o CROSS JOIN LATERAL (
 ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.slot_key,component.kind
 "#).bind(works).bind(as_of).fetch_all(&mut **tx).await?;
     for row in rows {
-        let work:Uuid=row.get("content_public_ref");
-        let source:Option<Uuid>=row.get("materialization_ref");
-        let sha:Option<String>=row.get("blob_sha256");
-        let restricted:bool=row.get("restricted");
-        let unavailable:bool=row.get("bytes_unavailable");
-        let original = if restricted || unavailable { None } else {
-            source.zip(sha.as_deref()).map(|(reference,hash)|format!("/api/local/media/{reference}/{hash}"))
+        let work: Uuid = row.get("content_public_ref");
+        let source: Option<Uuid> = row.get("materialization_ref");
+        let sha: Option<String> = row.get("blob_sha256");
+        let restricted: bool = row.get("restricted");
+        let unavailable: bool = row.get("bytes_unavailable");
+        let original = if restricted || unavailable {
+            None
+        } else {
+            source
+                .zip(sha.as_deref())
+                .map(|(reference, hash)| format!("/api/local/media/{reference}/{hash}"))
         };
         result.entry(work).or_default().slots.push(json!({
             "slotKey":row.get::<String,_>("slot_key"),"purpose":row.get::<String,_>("purpose"),
@@ -63,14 +69,17 @@ ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.slot_key,component.
             "sourceState":if restricted {"restricted"} else if source.is_some() {"present"} else {"not_acquired"}
         }));
     }
-    read_manifests(tx,works,as_of,&mut result).await?;
-    read_tags(tx,works,as_of,&mut result).await?;
+    read_manifests(tx, works, as_of, &mut result).await?;
+    read_tags(tx, works, as_of, &mut result).await?;
     Ok(result)
 }
 
 async fn read_manifests(
-    tx:&mut Transaction<'_,Postgres>,works:&[Uuid],as_of:&str,result:&mut BTreeMap<Uuid,Inventory>,
-)->Result<(),sqlx::Error>{
+    tx: &mut Transaction<'_, Postgres>,
+    works: &[Uuid],
+    as_of: &str,
+    result: &mut BTreeMap<Uuid, Inventory>,
+) -> Result<(), sqlx::Error> {
     let rows=sqlx::query(r#"
 SELECT DISTINCT ON (lane.content_public_ref) lane.content_public_ref,package.package_ref,
  package.payload #> '{coverage,target,imageInventory}' AS manifest
@@ -80,19 +89,22 @@ WHERE lane.content_public_ref=ANY($1) AND lane.lane='media_slots'
 ORDER BY lane.content_public_ref,package.accepted_at DESC,lane.created_at DESC,package.package_ref DESC
 "#).bind(works).bind(as_of).fetch_all(&mut **tx).await?;
     for row in rows {
-        let work:Uuid=row.get("content_public_ref");
-        let manifest:Option<Value>=row.get("manifest");
-        if let Some(mut manifest)=manifest.filter(|m|m.is_object()) {
-            manifest["packageRef"]=json!(row.get::<Uuid,_>("package_ref"));
-            result.entry(work).or_default().manifest=Some(manifest);
+        let work: Uuid = row.get("content_public_ref");
+        let manifest: Option<Value> = row.get("manifest");
+        if let Some(mut manifest) = manifest.filter(|m| m.is_object()) {
+            manifest["packageRef"] = json!(row.get::<Uuid, _>("package_ref"));
+            result.entry(work).or_default().manifest = Some(manifest);
         }
     }
     Ok(())
 }
 
 async fn read_tags(
-    tx:&mut Transaction<'_,Postgres>,works:&[Uuid],as_of:&str,result:&mut BTreeMap<Uuid,Inventory>,
-)->Result<(),sqlx::Error>{
+    tx: &mut Transaction<'_, Postgres>,
+    works: &[Uuid],
+    as_of: &str,
+    result: &mut BTreeMap<Uuid, Inventory>,
+) -> Result<(), sqlx::Error> {
     let rows=sqlx::query(r#"
 SELECT d.content_public_ref,d.material_ref,p.state,p.projection_contract,
  COALESCE(jsonb_agg(h.tag_text ORDER BY h.ordinal) FILTER (WHERE h.ordinal IS NOT NULL),'[]'::jsonb) AS tags
@@ -105,8 +117,8 @@ WHERE d.content_public_ref=ANY($1) AND p.created_at<=$2::timestamptz
 GROUP BY d.content_public_ref,d.material_ref,p.state,p.projection_contract
 "#).bind(works).bind(as_of).bind(crate::material_hashtag::VERSION).fetch_all(&mut **tx).await?;
     for row in rows {
-        let work:Uuid=row.get("content_public_ref");
-        let source:Uuid=row.get("material_ref");
+        let work: Uuid = row.get("content_public_ref");
+        let source: Uuid = row.get("material_ref");
         result.entry(work).or_default().tags.insert(source,json!({"state":row.get::<String,_>("state"),
             "ruleVersion":row.get::<String,_>("projection_contract"),"values":row.get::<Value,_>("tags")}));
     }

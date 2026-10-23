@@ -217,6 +217,12 @@ CREATE TRIGGER dossier_fragment_immutable BEFORE UPDATE OR DELETE ON linggan_dos
 
 DROP VIEW IF EXISTS linggan_ocr_audit_eligible_source;
 DROP TABLE IF EXISTS linggan_media_ocr_review;
+ALTER TABLE linggan_media_ocr_adoption
+    DROP COLUMN image_text,
+    DROP COLUMN cover_title,
+    DROP COLUMN state;
+COMMENT ON TABLE linggan_media_ocr_adoption IS
+    'Immutable original OCR observations and diagnostic assessments. Canonical content and human selection belong exclusively to linggan_material_reading.';
 DO $$ BEGIN
     -- The reusable material-only fixture intentionally omits the AI task schema.
     IF to_regclass('linggan_ocr_recognition_item') IS NOT NULL THEN
