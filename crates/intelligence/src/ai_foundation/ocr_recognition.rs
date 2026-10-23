@@ -258,7 +258,16 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
               FROM linggan_ocr_recognition_slot_alias a WHERE a.item_ref=i.item_ref),'[]') aliases,
             ctl.state AS control_state,ctl.failure_code AS control_failure_code,
             adopted.cover_title,adopted.assessment->>'coverTitleStatus' AS cover_title_status,
-            COALESCE(adopted.assessment->'regions','[]'::jsonb) regions
+            COALESCE(adopted.assessment->'regions','[]'::jsonb) regions,
+            adopted.image_text AS machine_text,
+            COALESCE((SELECT max(review.revision) FROM linggan_media_ocr_review review
+              WHERE review.adoption_ref=adopted.adoption_ref),0) AS review_revision,
+            (SELECT jsonb_build_object('reviewRef',review.review_ref,'revision',review.revision,
+              'text',review.after_text,'actor',review.actor,'reason',review.reason,
+              'reviewedAt',review.created_at::text)
+             FROM linggan_media_ocr_review review WHERE review.adoption_ref=adopted.adoption_ref
+               AND review.field='adopted_body' AND review.decision='adopt'
+             ORDER BY review.revision DESC LIMIT 1) AS human_body
          FROM linggan_ocr_recognition_item i
          LEFT JOIN linggan_model_invocation inv ON inv.invocation_ref=i.invocation_ref
          LEFT JOIN linggan_ocr_recognition_run owning_run ON owning_run.run_ref=i.run_ref
@@ -350,7 +359,11 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
                 "finishReason":if visible{json!(i.get::<Option<String>,_>("finish_reason"))}else{Value::Null},
                 "usage":if visible && has_invocation {json!({"inputTokens":i.get::<Option<i64>,_>("input_tokens"),"outputTokens":i.get::<Option<i64>,_>("output_tokens"),"measuredTokens":i.get::<Option<i64>,_>("measured_tokens")})}else{Value::Null},
                 "estimatedCostUsd":if visible { pico_usd(i.get::<Option<String>,_>("cost_pico_usd")) } else { Value::Null },
-                "regions":if visible{i.get::<Value,_>("regions")}else{json!([])}
+                "regions":if visible{i.get::<Value,_>("regions")}else{json!([])},
+                "adoptionRef":if visible{json!(i.get::<Option<Uuid>,_>("adoption_ref"))}else{Value::Null},
+                "reviewRevision":if visible{json!(i.get::<i64,_>("review_revision"))}else{json!(0)},
+                "machineText":if visible{json!(i.get::<Option<String>,_>("machine_text"))}else{Value::Null},
+                "humanBody":if visible{json!(i.get::<Option<Value>,_>("human_body"))}else{Value::Null}
             })
         })
         .collect::<Vec<_>>();

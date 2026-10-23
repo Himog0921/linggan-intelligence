@@ -110,7 +110,7 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
       {confirm ? <div className={styles.confirm} role="group" aria-label="确认本篇图片识别范围"><b>识别本篇 {confirm.imageCount} 张原图</b><p>将按既有源顺序发送到 {confirm.modelLabel}。每张一次，首个失败后停止；可能产生模型费用。</p><small>{confirm.endpointUrl}</small>
         <div className={styles.confirmActions}><ActionButton variant="primary" disabled={sending} onClick={() => void submit(confirm)}>确认并开始识别</ActionButton><ActionButton disabled={sending} onClick={() => setConfirm(null)}>取消</ActionButton></div></div> : null}
       {children}
-      {run?.images.length ? <div ref={result}><OcrRecognitionResults key={run.runRef} run={run} onOpen={onOpenSource}/></div> : null}
+      {run?.images.length ? <div ref={result}><OcrRecognitionResults key={run.runRef} run={run} onOpen={onOpenSource} onSaved={() => setRefresh(value => value + 1)}/></div> : null}
     </div>
   </Section>;
 }

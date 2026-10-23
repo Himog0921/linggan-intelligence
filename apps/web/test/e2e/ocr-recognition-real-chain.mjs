@@ -15,6 +15,8 @@ const errors=[];const writes=[];page.on('pageerror',error=>errors.push(error.mes
 page.on('request',request=>{if(request.method()==='POST')writes.push(new URL(request.url()).pathname);});
 const statePath='/api/local/work-resources/'+encodeURIComponent(workRef)+'/ocr-recognition';
 const read=async()=>{const response=await page.request.get(origin+statePath);assert.equal(response.status(),200,await response.text());return response.json();};
+const materialPath='/api/local/work-resources/'+encodeURIComponent(workRef)+'/research-dossier/note-material?domain='+encodeURIComponent(domain);
+const readMaterial=async()=>{const response=await page.request.get(origin+materialPath);assert.equal(response.status(),200,await response.text());return response.json();};
 try{
  await page.goto(origin+'/settings/models?view=advanced&area=work&task=ocr_recognition');
  await page.getByRole('heading',{name:'OCR 模型',exact:true}).waitFor();
@@ -43,6 +45,9 @@ try{
  await page.getByRole('button',{name:'查看识别结果',exact:true}).waitFor();
  const final=await read();assert.equal(final.state,'succeeded');assert.equal(final.completedImages,final.totalImages);
  assert.equal(final.totalImages,3);assert.ok(final.coverTitle,'first image yields a real literal candidate');
+ const beforeAdoption=await readMaterial();const beforeOcr=beforeAdoption.columns.find(column=>column.field==='ocr');
+ assert.notEqual(beforeOcr?.state,'available','saved cloud preview is not an input before human adoption');
+ assert.ok(!beforeAdoption.fragments.some(fragment=>fragment.field==='ocr'),'unadopted cloud preview contributes no material fragment');
  const result=page.getByRole('region',{name:'图片文字识别结果',exact:true});await result.waitFor();
  await result.getByText(final.coverTitle,{exact:true}).waitFor();
  assert.ok(final.images.every(image=>image.originalUrl&&image.rawJson&&image.usage?.measuredTokens!==null));
@@ -60,12 +65,23 @@ try{
  await page.screenshot({path:path.join(directory,'recognition-raw-json.png'),fullPage:true});
  await result.getByRole('button',{name:'核对原图',exact:true}).first().click();await page.getByRole('dialog').waitFor();
  await page.getByRole('button',{name:'关闭查看器',exact:true}).click();
+ await result.getByRole('button',{name:'人工核对并采用',exact:true}).first().click();
+ const manualBody=page.getByRole('textbox',{name:'对照原图后的完整正文',exact:true});await manualBody.fill('浏览器人工采用的合成正文');
+ await page.getByRole('textbox',{name:'审核人',exact:true}).fill('synthetic-browser-reviewer');
+ await page.getByRole('textbox',{name:'对照依据与原因',exact:true}).fill('synthetic-owned-original');
+ const adoptionReceipt=page.waitForResponse(r=>new URL(r.url()).pathname===statePath+'/adoptions'&&r.request().method()==='POST');
+ await page.getByRole('button',{name:'保存人工采用',exact:true}).click();assert.equal((await adoptionReceipt).status(),200);
+ await page.getByText('已人工采用 · 第 1 版',{exact:true}).waitFor();
+ const afterAdoption=await readMaterial();const afterOcr=afterAdoption.columns.find(column=>column.field==='ocr');
+ assert.notEqual(afterOcr?.state,'not_provided','the post-receipt read retains the OCR column even while other images remain separate');
+ assert.ok(afterAdoption.fragments.some(fragment=>fragment.field==='ocr'&&fragment.text==='浏览器人工采用的合成正文'),'dossier material read returns the reviewed literal and not the machine preview');
+ const afterRun=await read();assert.equal(afterRun.images.some(image=>image.humanBody?.text==='浏览器人工采用的合成正文'),true);
  await page.reload();await page.getByRole('button',{name:'查看识别结果',exact:true}).waitFor();
  assert.equal((await read()).runRef,final.runRef,'refresh only reads the existing run');
  await page.setViewportSize({width:980,height:1100});await page.screenshot({path:path.join(directory,'recognition-narrow.png'),fullPage:true});
  assert.deepEqual(errors,[]);
  assert.equal(writes.filter(p=>p===statePath).length,1,'one explicit browser start command');
- await writeFile(path.join(directory,'recognition-browser-result.json'),JSON.stringify({result:'PASS',scope:'actual React/API/owned PG; supplier mock; no real calls',writes,errors,runRef:final.runRef,observedPercentage:33,finalPercentage:100,steps:['model configuration saved without dispatch or switch changes','current-work scope confirmation','committed percentage in button','title/body/raw JSON and original viewer','refresh retains persisted result']},null,2));
- console.log('Manual OCR browser: model → scope → persisted 33% → saved results/raw/source → refresh PASS');
+ await writeFile(path.join(directory,'recognition-browser-result.json'),JSON.stringify({result:'PASS',scope:'actual React/API/owned PG; supplier mock; no real calls',writes,errors,runRef:final.runRef,observedPercentage:33,finalPercentage:100,steps:['model configuration saved without dispatch or switch changes','current-work scope confirmation','committed percentage in button','unadopted cloud preview excluded from note material','original review plus adopted_body receipt','reviewed body reread through note material and run','title/body/raw JSON and original viewer','refresh retains persisted result']},null,2));
+ console.log('Manual OCR browser: model → scope → saved cloud preview excluded → reviewed adoption → dossier reread → refresh PASS');
 }catch(error){await writeFile(path.join(directory,'recognition-browser-failure.html'),await page.content());await page.screenshot({path:path.join(directory,'recognition-browser-failure.png'),fullPage:true});throw error;}
 finally{await browser.close();}
