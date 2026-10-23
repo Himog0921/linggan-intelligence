@@ -208,7 +208,11 @@ async fn create_publications_batch(
             Ok(result) => result,
             Err(error) => match error {
                 WriteError::Invalid(code) => (
-                    StatusCode::UNPROCESSABLE_ENTITY,
+                    if code.ends_with("_conflict") {
+                        StatusCode::CONFLICT
+                    } else {
+                        StatusCode::UNPROCESSABLE_ENTITY
+                    },
                     CommandReceipt { request_ref, outcome: "rejected".to_owned(), code: code.to_owned(), record_ref: None, resulting_version: None, replayed: false },
                 ),
                 WriteError::Unavailable => return write_error(WriteError::Unavailable),
