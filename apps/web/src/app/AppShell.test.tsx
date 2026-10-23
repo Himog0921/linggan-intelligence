@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
 
@@ -75,6 +75,14 @@ describe('全站唯一React导航', () => {
     expect(within(navigation).getByRole('button',{name:/雷达/})).toBeDisabled();
     expect(within(navigation).getByRole('button',{name:/洞察/})).toBeDisabled();
     expect(screen.getByRole('link',{name:'设置'})).toHaveAttribute('href','/settings');
+  });
+  it('只在服务器确认退出后才离开当前工作区；未确认时保留可重试提示', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('offline')));
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>页面</AppShell>);
+    fireEvent.click(screen.getByText('个人菜单'));
+    fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('退出未完成'));
+    expect(fetch).toHaveBeenCalledWith('/api/local/auth/logout', expect.objectContaining({ method: 'POST', credentials: 'same-origin' }));
   });
 });
 
