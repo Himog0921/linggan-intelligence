@@ -33,6 +33,7 @@ pub use material_admission::{
     ReplyRequalification, TargetMaterialReprojection, reproject_accepted_target_materials,
     requalify_reply_contract_records,
 };
+pub mod cloud_ocr_adoption;
 mod material_asset_read;
 mod material_contract_validation;
 mod material_creation_comments;
@@ -51,7 +52,6 @@ mod material_social_read;
 mod material_storage_key;
 mod media_acquisition;
 mod monitor_rule_read;
-pub mod cloud_ocr_adoption;
 pub mod ocr_adoption;
 pub mod ocr_adoption_persistence;
 pub mod ocr_layering;
@@ -84,8 +84,8 @@ mod station_read;
 mod step_report;
 mod target_catalog;
 mod target_enrichment;
-mod target_inspector;
 pub mod target_inspection;
+mod target_inspector;
 mod work_order;
 mod work_order_lease;
 mod work_resource_current;
@@ -113,7 +113,7 @@ pub use collection_control::{
     AccountEligibilityObservation, AccountEligibilityReceipt, AccountEligibilityState,
     CONTROL_FRESHNESS_MINUTES, CapacitySelection, CollectionControlError,
     ComparableObservationRound, DEFAULT_MONITOR_INTERVAL_SECONDS, DynamicCadence,
-    ExplicitAccountEligibilitySignal, IssuedInstallationCredential, InstallationCredentialSecret,
+    ExplicitAccountEligibilitySignal, InstallationCredentialSecret, IssuedInstallationCredential,
     MAXIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_PLUGIN_VERSION,
     MonitorCommandActor, MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand,
     MonitorRuleCommandError, MonitorRuleCommandReceipt, MonitorRuleDraft, MonitorRuleMode,

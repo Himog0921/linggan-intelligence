@@ -82,6 +82,11 @@ docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 docker exec "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d "$proof_database" -c "CREATE EXTENSION pg_stat_statements" >/dev/null
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
+if [[ "${1:-}" == "--target-inspection" ]]; then
+  AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test target_inspection_postgres --locked -- --ignored --nocapture --test-threads=1
+  echo "TARGET-INSPECTOR-V4 isolated PostgreSQL proof passed"
+  exit 0
+fi
 if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-writing" || "${1:-}" == "--ai-service" || "${1:-}" == "--ai-install" || "${1:-}" == "--ai-readonly" || "${1:-}" == "--ai-compatibility" ]]; then
   ledger_asset_root="$(mktemp -d "$project_root/artifacts/private/ai-gen1-pr1b/ledger-assets.XXXXXX")"
   export LINGGAN_CREATION_ASSET_ROOT="$ledger_asset_root"
@@ -109,6 +114,7 @@ if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == 
     exit 0
   fi
   if [[ "${1:-}" != "--ai-writing" && "${1:-}" != "--ai-compatibility" ]]; then
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test target_inspection_postgres --locked -- --ignored --nocapture --test-threads=1
     cargo test -p linggan-intelligence --test ai_pool_cancellation_postgres --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_foundation_postgres --locked -- --ignored --nocapture
     cargo test -p linggan-api --bin linggan-api ai_settings_http_ --locked -- --ignored --nocapture

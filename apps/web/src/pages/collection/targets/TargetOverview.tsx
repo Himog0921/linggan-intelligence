@@ -85,7 +85,7 @@ export function Overview({data,params,commands}:{data:Drawer;params:URLSearchPar
             <input type="checkbox" checked={selection.includes(item.publicRef)}
               onChange={event=>setRetire(event.target.checked?[...selection,item.publicRef]:selection.filter(v=>v!==item.publicRef))}/>
             {item.title??'标题尚未取得'}</label></li>)}</ul>
-          <button className="c-btn-secondary" disabled={!selection.length||commands.busy}>确认所选作品已失效</button>
+          <button className="c-btn-secondary" disabled={!selection.length||commands.busy}>确认这些作品已失效</button>
         </form>
       </details>}
     {creator&&i.archive!=='complete'&&i.missing===0&&<p className={styles.meta}>建档：{archiveLabels[i.archive]??i.archive}。建档完整性与持续巡查分别判断。</p>}

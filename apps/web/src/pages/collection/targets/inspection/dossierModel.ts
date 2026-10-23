@@ -1,0 +1,4 @@
+import { array,flag,num,record,ref,str } from './inspectionApi';
+export interface SourceFragment{citationId:string;sourceRef:string;sourceVersion:string;field:string;start:number;end:number;text:string}
+export interface DossierView{workRef:string;knowledgeCutoff:string;materialRevision:string;dossierRevision:string;ownerContract:string;fragments:SourceFragment[];partial:boolean;limitations:string[]}
+export function decodeDossier(value:unknown):DossierView{const r=record(value);return {workRef:ref(r.workRef),knowledgeCutoff:str(r.knowledgeCutoff),materialRevision:str(r.materialRevision),dossierRevision:str(r.dossierRevision),ownerContract:str(r.ownerContract),fragments:array(r.fragments,value=>{const f=record(value);return {citationId:str(f.citationId),sourceRef:ref(f.sourceRef),sourceVersion:str(f.sourceVersion),field:str(f.field),start:num(f.start),end:num(f.end),text:str(f.text)};}),partial:flag(r.partial),limitations:array(r.limitations,str)};}

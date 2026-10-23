@@ -381,6 +381,7 @@ migrate() {
   apply_migration_once "0143_ocr_quality_audit" "$project_root/database/migrations/0143_ocr_quality_audit.sql"
   apply_migration_once "0144_ocr_manual_recognition" "$project_root/database/migrations/0144_ocr_manual_recognition.sql"
   apply_migration_once "0145_ocr_manual_human_adoption" "$project_root/database/migrations/0145_ocr_manual_human_adoption.sql"
+  apply_migration_once "0149_target_inspector_comparison" "$project_root/database/migrations/0149_target_inspector_comparison.sql"
 }
 
 case "$command_name" in

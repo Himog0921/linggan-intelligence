@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Link } from 'react-router';
 import type { Drawer } from './api';
 import { TargetSelect } from './TargetSelect';
-import { WorkResearchActions,useOptionalTargetResearch } from './inspection/TargetResearchContext';
+import { WorkResearchActions } from './inspection/TargetResearchContext';
+import { useOptionalTargetResearch } from './inspection/researchContext';
 import { ExactDetailGaps } from './inspection/ExactDetailGaps';
 import type { Commands } from './useWorkspace';
 import styles from './inspection/TargetResearch.module.css';
@@ -20,7 +21,7 @@ export function Works({data,params,commands}:{data:Drawer;params:URLSearchParams
   const completed=works.filter(work=>work.complete).length;
   const patrol=works.filter(work=>work.source==='patrol').length;
   return <section className="c-dw-section c-dw-works" id="target-works" aria-label={creator?'作品目录':'关键词全部作品'}>
-    <div className={styles.inlineSummary}><span>目录 <b>{works.length}</b></span><span>详情已取 <b>{completed}</b></span><span>待取详情 <b>{data.inspector?.missing??'—'}</b></span><span>历次巡查带入 <b>{patrol}</b></span></div>
+    <div className={`c-dw-catalog-summary ${styles.inlineSummary}`}><span>目录 <b>{works.length}</b></span><span>详情已取 <b>{completed}</b></span><span>待取详情 <b>{data.inspector?.missing??'—'}</b></span><span>历次巡查带入 <b>{patrol}</b></span></div>
     <form className="c-dw-catalog-filter" action="/collection/targets" method="get">
       {[...params].filter(([key])=>!['catalog_query','catalog_filter'].includes(key)).map(([key,value])=><input key={key} type="hidden" name={key} value={value}/>)}
       <input type="search" name="catalog_query" value={query} onChange={event=>setQuery(event.target.value)} placeholder="搜索作品标题或作品 ID" aria-label="搜索作品标题或作品 ID"/>
@@ -43,7 +44,7 @@ export function Works({data,params,commands}:{data:Drawer;params:URLSearchParams
         <td><Link className="c-btn-secondary c-dw-work-open" to={`/corpus/evidence?${params.get('domain')&&params.get('domain')!=='all'?`domain=${encodeURIComponent(params.get('domain')??'')}&`:''}work=${work.publicRef}`} target="_blank" rel="noopener noreferrer">查看</Link></td>
       </tr>)}</tbody>
     </table></div>
-    {matching.length===0&&<p className={styles.empty}>当前筛选没有匹配作品。</p>}
+    {matching.length===0&&<p className={styles.empty}>当前筛选没有匹配的作品。</p>}
     {creator&&selected==='pending'&&<ExactDetailGaps data={data} params={params} commands={commands}/>}
   </section>;
 }

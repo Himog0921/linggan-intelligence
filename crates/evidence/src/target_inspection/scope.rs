@@ -3,37 +3,49 @@ use linggan_storage_postgres::Database;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-pub(crate) async fn begin<'a>(database: &'a Database, scope: &Scope)
-    -> Result<(Transaction<'a, Postgres>, String), Error>
-{
+pub(crate) async fn begin<'a>(
+    database: &'a Database,
+    scope: &Scope,
+) -> Result<(Transaction<'a, Postgres>, String), Error> {
     let mut tx = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        .execute(&mut *tx).await?;
+        .execute(&mut *tx)
+        .await?;
     validate_target(&mut tx, scope).await?;
     let valid: bool = sqlx::query_scalar(
         "SELECT CASE WHEN $1::text IS NULL THEN true \
          WHEN $1 ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' \
          THEN isfinite($1::timestamptz) AND $1::timestamptz<=scope_001_now() ELSE false END",
     ).bind(scope.knowledge_cutoff.as_deref()).fetch_one(&mut *tx).await.map_err(time_error)?;
-    if !valid { return Err(Error::Invalid("invalid_knowledge_cutoff")); }
+    if !valid {
+        return Err(Error::Invalid("invalid_knowledge_cutoff"));
+    }
     // Machine timestamp. A single cutoff freezes every read in this inspection response.
     let cutoff: String = sqlx::query_scalar(
-        "SELECT to_char(COALESCE($1::timestamptz,scope_001_now()) AT TIME ZONE 'UTC', \
-         'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
-    ).bind(scope.knowledge_cutoff.as_deref()).fetch_one(&mut *tx).await?;
+        "SELECT to_char(COALESCE($1::timestamptz,scope_001_now()) AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .bind(scope.knowledge_cutoff.as_deref())
+    .fetch_one(&mut *tx)
+    .await?;
     Ok((tx, cutoff))
 }
 
 fn time_error(error: sqlx::Error) -> Error {
     if let sqlx::Error::Database(database) = &error {
-        if matches!(database.code().as_deref(),Some("22007"|"22008"|"22P02")) {
+        if matches!(
+            database.code().as_deref(),
+            Some("22007" | "22008" | "22P02")
+        ) {
             return Error::Invalid("invalid_knowledge_cutoff");
         }
     }
     Error::Database(error)
 }
 
-pub(crate) async fn validate_target(tx: &mut Transaction<'_, Postgres>, scope: &Scope) -> Result<(), Error> {
+pub(crate) async fn validate_target(
+    tx: &mut Transaction<'_, Postgres>,
+    scope: &Scope,
+) -> Result<(), Error> {
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM collection_observation_target target \
          WHERE target.target_ref=$1 AND ($2::uuid IS NULL OR EXISTS( \
@@ -43,13 +55,22 @@ pub(crate) async fn validate_target(tx: &mut Transaction<'_, Postgres>, scope: &
            OR EXISTS(SELECT 1 FROM collection_work_order work_order \
              JOIN collection_work_order_domain_usage usage USING(work_order_ref) \
              WHERE work_order.target_ref=target.target_ref AND usage.domain_ref=$2)))",
-    ).bind(scope.target_ref).bind(scope.domain_ref).fetch_one(&mut **tx).await?;
-    if !exists { return Err(Error::NotFound); }
+    )
+    .bind(scope.target_ref)
+    .bind(scope.domain_ref)
+    .fetch_one(&mut **tx)
+    .await?;
+    if !exists {
+        return Err(Error::NotFound);
+    }
     Ok(())
 }
 
 pub(crate) async fn require_work(
-    tx: &mut Transaction<'_, Postgres>, scope: &Scope, work: Uuid, cutoff: &str,
+    tx: &mut Transaction<'_, Postgres>,
+    scope: &Scope,
+    work: Uuid,
+    cutoff: &str,
 ) -> Result<(), Error> {
     let belongs: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM collection_observation_target target \
@@ -81,11 +102,15 @@ pub(crate) async fn require_work(
                  WHERE work_usage.work_order_ref=work_order.work_order_ref \
                    AND ($2::uuid IS NULL OR work_usage.domain_ref=$2))))))",
     ).bind(scope.target_ref).bind(scope.domain_ref).bind(work).bind(cutoff).fetch_one(&mut **tx).await?;
-    if !belongs { return Err(Error::NotFound); }
+    if !belongs {
+        return Err(Error::NotFound);
+    }
     Ok(())
 }
 
 pub(crate) fn check_offset(offset: usize) -> Result<i64, Error> {
-    if offset > 100_000 { return Err(Error::Invalid("inspection_offset_out_of_range")); }
+    if offset > 100_000 {
+        return Err(Error::Invalid("inspection_offset_out_of_range"));
+    }
     i64::try_from(offset).map_err(|_| Error::Invalid("inspection_offset_out_of_range"))
 }

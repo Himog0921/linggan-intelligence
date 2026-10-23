@@ -1,14 +1,12 @@
 import { useState } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
-import { array,flag,inspectionUrl,num,record,ref,str } from './inspectionApi';
+import { inspectionUrl } from './inspectionApi';
 import { EvidenceLink,ReadFeedback } from './ResearchParts';
-import { useTargetResearch } from './TargetResearchContext';
+import { useTargetResearch } from './researchContext';
 import { useInspectionRead } from './useInspectionRead';
 import styles from './TargetResearch.module.css';
 
-export interface SourceFragment{citationId:string;sourceRef:string;sourceVersion:string;field:string;start:number;end:number;text:string}
-export interface DossierView{workRef:string;knowledgeCutoff:string;materialRevision:string;dossierRevision:string;ownerContract:string;fragments:SourceFragment[];partial:boolean;limitations:string[]}
-export function decodeDossier(value:unknown):DossierView{const r=record(value);return {workRef:ref(r.workRef),knowledgeCutoff:str(r.knowledgeCutoff),materialRevision:str(r.materialRevision),dossierRevision:str(r.dossierRevision),ownerContract:str(r.ownerContract),fragments:array(r.fragments,value=>{const f=record(value);return {citationId:str(f.citationId),sourceRef:ref(f.sourceRef),sourceVersion:str(f.sourceVersion),field:str(f.field),start:num(f.start),end:num(f.end),text:str(f.text)};}),partial:flag(r.partial),limitations:array(r.limitations,str)};}
+import { decodeDossier } from './dossierModel';
 const fieldLabels:Record<string,string>={title:'平台标题',cover_headline:'封面文字',body:'正文',tags:'话题标签',ocr:'图片文字',transcript:'视频转写'};
 export function DossierReadout({work}:{work:string}){
   const context=useTargetResearch();const [open,setOpen]=useState(false);

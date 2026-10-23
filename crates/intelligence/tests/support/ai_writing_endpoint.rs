@@ -40,7 +40,9 @@ impl Endpoint {
                             recorded.lock().unwrap().push(request);
                             let waiting=if probe {None} else {gate.lock().unwrap().take()};
                             if let Some((seen,release))=waiting {seen.send(()).unwrap();release.await.unwrap();}
-                            let output=if probe {json!({"lingganProbe":"ok"})} else if instruction=="invalid-output" {json!({"outcome":"no_signal"})} else {
+                            let output=if probe {json!({"lingganProbe":"ok"})} else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["documents"].is_array()) {
+                                json!({"relation":"mostly_repeated","claims":[{"kind":"shared_point","statement":"两侧合成材料均有步骤说明。","targetCitations":["W1-S1"],"referenceCitations":["W2-S1"]}],"limitations":["synthetic loopback fixture only"]})
+                            } else if instruction=="invalid-output" {json!({"outcome":"no_signal"})} else {
                                 json!({"title":null,"paragraphs":[{"paragraphId":null,"text":if system.contains("candidate-v2") {"合成候选建议"} else if system.contains("baseline-v1") {"合成基线建议"} else {"合成写作建议"}}],"pages":[]})
                             };
                             respond(&mut socket,&output.to_string()).await;

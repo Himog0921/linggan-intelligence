@@ -7,7 +7,7 @@ import { age,metricLabels,metricValue,moment,number,reason } from './inspectionP
 import { Cutoff,EvidenceLink,MetricPicker,ReadFeedback,ResearchPanel } from './ResearchParts';
 import { DossierReadout } from './DossierReadout';
 import { ContentComparisonPanel } from './ContentComparisonPanel';
-import { useTargetResearch } from './TargetResearchContext';
+import { useTargetResearch } from './researchContext';
 import { useInspectionRead } from './useInspectionRead';
 import styles from './TargetResearch.module.css';
 

@@ -3,7 +3,7 @@ import { ActionButton } from '../../../../shared/ActionButton';
 import { decodeObservationComparison,decodeTrace,inspectionUrl,METRICS,type MetricKey } from './inspectionApi';
 import { metricLabels,metricValue,moment,ruleLabels,sourceName } from './inspectionPresent';
 import { Cutoff,Delta,EvidenceLink,MetricPicker,ReadFeedback,ResearchPanel } from './ResearchParts';
-import { useTargetResearch } from './TargetResearchContext';
+import { useTargetResearch } from './researchContext';
 import { useInspectionRead } from './useInspectionRead';
 import styles from './TargetResearch.module.css';
 

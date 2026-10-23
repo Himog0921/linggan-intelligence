@@ -1,20 +1,11 @@
-import { createContext,useContext,useRef,useState,type ReactNode } from 'react';
+import { useRef,useState,type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { ActionButton } from '../../../../shared/ActionButton';
 import type { Drawer } from '../api';
 import { listHref } from '../useWorkspace';
-import type { ReadScope } from './inspectionApi';
 import styles from './TargetResearch.module.css';
 
-export type Panel='compare'|'trace'|'similar';
-interface ResearchContext {
-  data:Drawer;params:URLSearchParams;scope:ReadScope;selected:string[];
-  panel:string|null;focusedWork:string|null;message:string|null;
-  patch:(values:Record<string,string|null>,replace?:boolean)=>void;
-  toggle:(work:string)=>void;open:(panel:Panel,work?:string)=>void;back:()=>void;
-  clear:()=>void;pinCutoff:(cutoff:string)=>void;
-}
-const Context=createContext<ResearchContext|null>(null);
+import { Context,useTargetResearch,useOptionalTargetResearch,type ResearchContext,type Panel } from './researchContext';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function TargetResearchProvider({data,params,children}:{data:Drawer;params:URLSearchParams;children:ReactNode}){
   const navigate=useNavigate();
@@ -51,8 +42,6 @@ export function TargetResearchProvider({data,params,children}:{data:Drawer;param
     pinCutoff:(next)=>{if(!params.has('inspect_as_of'))patch({inspect_as_of:next},true);}};
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
-export function useTargetResearch():ResearchContext {const value=useContext(Context);if(!value)throw new Error('目标研究必须位于当前检查器内');return value;}
-export function useOptionalTargetResearch(){return useContext(Context);}
 export function WorkResearchActions({work,similar=true}:{work:string;similar?:boolean}){
   const context=useOptionalTargetResearch();if(!context)return null;
   return <span className={styles.rowActions}>

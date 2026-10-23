@@ -1,3 +1,6 @@
+import { EgressForm } from './AiModelSection';
+import { parseAiSettings } from './aiSettingsModel';
+import { useAiAction } from './useAiAction';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -173,4 +176,24 @@ describe('AI 设置正式四视图', () => {
     expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'ocr_recognition', budget: { mode: 'unlimited' }, model: { modelRef: 'second-model', limits: { attempts: 1 } } } });
   });
 
+});
+
+
+it('作品内容对照的正式材料许可可由设置表单提交，保存不派发任务',async()=>{
+  const raw=settingsFixture();
+  const configuration={...raw.configurations[0]!,taskKey:'work_comparison',taskConfigRef:'comparison-config',executionContract:'work-content-comparison.v1'};
+  raw.tasks.push({...raw.tasks[0]!,taskKey:'work_comparison',label:'作品内容对照',configuration});
+  raw.configurations.push(configuration);
+  const data=parseAiSettings(raw),connection=data.connections[0]!;
+  function Form(){return <EgressForm data={data} connection={connection} action={useAiAction()}/>;}
+  respond=call=>call.method==='POST'?ok({eventRef:'00000000-0000-4000-8000-000000000009',allowed:true}):ok(raw);
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  render(<QueryClientProvider client={client}><Form/></QueryClientProvider>);
+  const user=userEvent.setup();
+  await user.selectOptions(screen.getByLabelText('工作与材料'),'work_comparison:note_material');
+  await user.type(screen.getByLabelText('外发许可原因'),'合成材料授权证明');
+  await user.click(screen.getByRole('button',{name:'批准这项材料外发'}));
+  await waitFor(()=>expect(calls.filter(c=>c.method==='POST')).toHaveLength(1));
+  expect(calls.find(c=>c.method==='POST')?.body).toMatchObject({taskKey:'work_comparison',materialClass:'note_material',allowed:true});
+  expect(calls.some(c=>/batches|content-comparison/.test(c.path))).toBe(false);
 });

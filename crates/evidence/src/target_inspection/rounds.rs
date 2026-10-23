@@ -57,45 +57,87 @@ const ROUNDS_SQL: &str = concat!(
 );
 
 pub async fn read_rounds(
-    database: &Database, request: &Scope, rule: Option<Uuid>, offset: usize,
+    database: &Database,
+    request: &Scope,
+    rule: Option<Uuid>,
+    offset: usize,
 ) -> Result<RoundPage, Error> {
     let (mut tx, cutoff) = scope::begin(database, request).await?;
-    if let Some(rule) = rule { require_rule(&mut tx, request.target_ref, rule).await?; }
+    if let Some(rule) = rule {
+        require_rule(&mut tx, request.target_ref, rule).await?;
+    }
     let mut rounds = read_in(&mut tx, request, &cutoff, rule, None, PAGE_SIZE + 1, offset).await?;
     let next_offset = (rounds.len() > PAGE_SIZE).then_some(offset + PAGE_SIZE);
     rounds.truncate(PAGE_SIZE);
     tx.commit().await?;
-    Ok(RoundPage { target_ref: request.target_ref, domain_ref: request.domain_ref,
-        knowledge_cutoff: cutoff, method_version: METHOD_VERSION, rounds, next_offset })
+    Ok(RoundPage {
+        target_ref: request.target_ref,
+        domain_ref: request.domain_ref,
+        knowledge_cutoff: cutoff,
+        method_version: METHOD_VERSION,
+        rounds,
+        next_offset,
+    })
 }
 
 pub(crate) async fn require_rule(
-    tx: &mut Transaction<'_, Postgres>, target: Uuid, rule: Uuid,
+    tx: &mut Transaction<'_, Postgres>,
+    target: Uuid,
+    rule: Uuid,
 ) -> Result<(), Error> {
     let exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM collection_monitor_rule WHERE target_ref=$1 AND rule_ref=$2)",
-    ).bind(target).bind(rule).fetch_one(&mut **tx).await?;
-    if !exists { return Err(Error::NotFound); }
+    )
+    .bind(target)
+    .bind(rule)
+    .fetch_one(&mut **tx)
+    .await?;
+    if !exists {
+        return Err(Error::NotFound);
+    }
     Ok(())
 }
 
 pub(crate) async fn read_in(
-    tx: &mut Transaction<'_, Postgres>, request: &Scope, cutoff: &str,
-    rule: Option<Uuid>, only: Option<&[Uuid]>, limit: usize, offset: usize,
+    tx: &mut Transaction<'_, Postgres>,
+    request: &Scope,
+    cutoff: &str,
+    rule: Option<Uuid>,
+    only: Option<&[Uuid]>,
+    limit: usize,
+    offset: usize,
 ) -> Result<Vec<Round>, Error> {
     let offset = scope::check_offset(offset)?;
-    if limit > PAGE_SIZE + 1 { return Err(Error::Invalid("round_limit_out_of_range")); }
-    let rows = sqlx::query(ROUNDS_SQL).bind(request.target_ref).bind(request.domain_ref)
-        .bind(cutoff).bind(rule).bind(only).bind(i64::try_from(limit).unwrap_or(51))
-        .bind(offset).fetch_all(&mut **tx).await?;
-    rows.into_iter().map(|row| {
-        let account: Option<String> = row.try_get("account_ref")?;
-        Ok(Round { round_ref: row.try_get("round_ref")?, package_ref: row.try_get("package_ref")?,
-            rule_ref: row.try_get("rule_ref")?, rule_revision_ref: row.try_get("rule_revision_ref")?,
-            slot: row.try_get("slot_key")?, observed_at: row.try_get("observed_at")?,
-            observed_epoch_ms: row.try_get("observed_epoch_ms")?, accepted_at: row.try_get("accepted_at")?,
-            coverage: row.try_get("coverage")?, hits: row.try_get("hits")?,
-            conditions: row.try_get("conditions")?,
-            account_ref: account.as_deref().and_then(|v| Uuid::parse_str(v).ok()) })
-    }).collect()
+    if limit > PAGE_SIZE + 1 {
+        return Err(Error::Invalid("round_limit_out_of_range"));
+    }
+    let rows = sqlx::query(ROUNDS_SQL)
+        .bind(request.target_ref)
+        .bind(request.domain_ref)
+        .bind(cutoff)
+        .bind(rule)
+        .bind(only)
+        .bind(i64::try_from(limit).unwrap_or(51))
+        .bind(offset)
+        .fetch_all(&mut **tx)
+        .await?;
+    rows.into_iter()
+        .map(|row| {
+            let account: Option<String> = row.try_get("account_ref")?;
+            Ok(Round {
+                round_ref: row.try_get("round_ref")?,
+                package_ref: row.try_get("package_ref")?,
+                rule_ref: row.try_get("rule_ref")?,
+                rule_revision_ref: row.try_get("rule_revision_ref")?,
+                slot: row.try_get("slot_key")?,
+                observed_at: row.try_get("observed_at")?,
+                observed_epoch_ms: row.try_get("observed_epoch_ms")?,
+                accepted_at: row.try_get("accepted_at")?,
+                coverage: row.try_get("coverage")?,
+                hits: row.try_get("hits")?,
+                conditions: row.try_get("conditions")?,
+                account_ref: account.as_deref().and_then(|v| Uuid::parse_str(v).ok()),
+            })
+        })
+        .collect()
 }

@@ -3,7 +3,7 @@ import { ActionButton } from '../../../../shared/ActionButton';
 import { array,flag,inspectionUrl,nullable,num,record,ref,str } from './inspectionApi';
 import { DossierReadout } from './DossierReadout';
 import { Cutoff,EvidenceLink,ReadFeedback,ResearchPanel } from './ResearchParts';
-import { useTargetResearch } from './TargetResearchContext';
+import { useTargetResearch } from './researchContext';
 import { useInspectionRead } from './useInspectionRead';
 import { moment } from './inspectionPresent';
 import styles from './TargetResearch.module.css';

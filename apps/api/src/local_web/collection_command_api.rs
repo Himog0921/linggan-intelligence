@@ -328,33 +328,41 @@ async fn run(state: &LocalWebState, action: &str, id: Uuid, fields: Value) -> (S
                 content_public_ref: Vec<Uuid>,
             }
             let Ok(form) = serde_json::from_value::<ExactGapFields>(fields.clone()) else {
-                return reject(id,action,"command_fields_invalid");
+                return reject(id, action, "command_fields_invalid");
             };
-            let Some(db)=state.database.database() else {
-                return reject(id,action,"read_model_not_connected");
+            let Some(db) = state.database.database() else {
+                return reject(id, action, "read_model_not_connected");
             };
-            let scope=linggan_evidence::target_inspection::Scope{
-                target_ref:form.row_target_ref,
-                domain_ref:form.domain_ref,
-                knowledge_cutoff:None,
+            let scope = linggan_evidence::target_inspection::Scope {
+                target_ref: form.row_target_ref,
+                domain_ref: form.domain_ref,
+                knowledge_cutoff: None,
             };
             return match linggan_evidence::target_inspection::request_detail_gaps(
-                db,&scope,&form.content_public_ref,
-            ).await {
+                db,
+                &scope,
+                &form.content_public_ref,
+            )
+            .await
+            {
                 Ok(receipt) if receipt.work_order_ref.is_some() => (
-                    StatusCode::OK,answer(id,action,"applied",Some("detail_gaps_queued"),None),
+                    StatusCode::OK,
+                    answer(id, action, "applied", Some("detail_gaps_queued"), None),
                 ),
                 Ok(receipt) => {
-                    let code=format!("detail_gaps_{}",receipt.admission);
-                    reject(id,action,&code)
+                    let code = format!("detail_gaps_{}", receipt.admission);
+                    reject(id, action, &code)
                 }
-                Err(linggan_evidence::target_inspection::Error::Invalid(_)) => 
-                    reject(id,action,"detail_gap_selection_stale"),
-                Err(linggan_evidence::target_inspection::Error::Scope) =>
-                    reject(id,action,"target_domain_unassigned"),
-                Err(linggan_evidence::target_inspection::Error::NotFound) =>
-                    reject(id,action,"detail_gaps_target_missing"),
-                Err(_) => reject(id,action,"detail_gaps_unavailable"),
+                Err(linggan_evidence::target_inspection::Error::Invalid(_)) => {
+                    reject(id, action, "detail_gap_selection_stale")
+                }
+                Err(linggan_evidence::target_inspection::Error::Scope) => {
+                    reject(id, action, "target_domain_unassigned")
+                }
+                Err(linggan_evidence::target_inspection::Error::NotFound) => {
+                    reject(id, action, "detail_gaps_target_missing")
+                }
+                Err(_) => reject(id, action, "detail_gaps_unavailable"),
             };
         }
         "patrol-toggle" => {

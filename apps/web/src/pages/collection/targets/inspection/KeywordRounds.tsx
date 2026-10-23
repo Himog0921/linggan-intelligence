@@ -4,13 +4,13 @@ import { TargetSelect } from '../TargetSelect';
 import { decodeRoundComparison,decodeRoundResult,decodeRounds,inspectionUrl,METRICS,type MetricKey,type Round,type RoundWork } from './inspectionApi';
 import { discoveryLabels,metricLabels,metricValue,moment,number,reason,ruleLabels } from './inspectionPresent';
 import { Cutoff,Delta,MetricPicker,ReadFeedback } from './ResearchParts';
-import { useTargetResearch } from './TargetResearchContext';
+import { useTargetResearch } from './researchContext';
 import { useInspectionRead } from './useInspectionRead';
 import styles from './TargetResearch.module.css';
 
 export function KeywordRounds(){
   const context=useTargetResearch();const rules=context.data.rules??[];
-  const rule=context.params.get('inspect_rule')??rules.find(item=>item.enabled)?.ruleRef??rules[0]?.ruleRef??null;
+  const rule=context.params.get('inspect_rule')||null;
   const comparing=context.params.get('inspect_round_view')==='compare';
   const offset=Math.max(0,Number(context.params.get('inspect_round_offset')??'0')||0);
   const page=useInspectionRead(inspectionUrl(context.scope,'rounds',{rule,offset}),decodeRounds);
@@ -35,7 +35,7 @@ export function KeywordRounds(){
   const refresh=()=>context.patch({inspect_as_of:null,inspect_left_round:null,inspect_right_round:null,inspect_round_offset:null});
   return <section className={styles.root} aria-label="关键词轮次观察">
     <div className={styles.toolbar}>
-      {rules.length>0&&<TargetSelect name="inspection-rule" label="观察规则" value={rule??''} onChange={value=>context.patch({inspect_rule:value,inspect_left_round:null,inspect_right_round:null,inspect_round_offset:null})} options={rules.map(item=>({value:item.ruleRef,label:ruleLabels[item.slot]??'历史规则'}))}/>}
+      {rules.length>0&&<TargetSelect name="inspection-rule" label="观察规则" value={rule??''} onChange={value=>context.patch({inspect_rule:value,inspect_left_round:null,inspect_right_round:null,inspect_round_offset:null})} options={[{value:'',label:'全部已取得轮次（含规则未记录）'},...rules.map(item=>({value:item.ruleRef,label:ruleLabels[item.slot]??'历史规则'}))]}/>}
       <ActionButton variant="quiet" aria-pressed={!comparing} onClick={()=>context.patch({inspect_round_view:'latest'})}>本轮结果</ActionButton>
       <ActionButton variant="quiet" aria-pressed={comparing} onClick={()=>context.patch({inspect_round_view:'compare'})}>与上轮对照</ActionButton>
       <ActionButton variant="quiet" onClick={refresh}>读取最新轮次</ActionButton>

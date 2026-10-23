@@ -5,7 +5,7 @@ import { TargetSelect } from '../TargetSelect';
 import type { InspectionRead } from './useInspectionRead';
 import { METRICS,type MetricKey,type Difference } from './inspectionApi';
 import { duration,metricLabels,moment,number,reason } from './inspectionPresent';
-import { useTargetResearch } from './TargetResearchContext';
+import { useTargetResearch } from './researchContext';
 import styles from './TargetResearch.module.css';
 
 export function ResearchPanel({title,actions,children}:{title:string;actions?:ReactNode;children:ReactNode}){
