@@ -85,6 +85,7 @@ mod step_report;
 mod target_catalog;
 mod target_enrichment;
 mod target_inspector;
+pub mod target_inspection;
 mod work_order;
 mod work_order_lease;
 mod work_resource_current;
@@ -112,7 +113,7 @@ pub use collection_control::{
     AccountEligibilityObservation, AccountEligibilityReceipt, AccountEligibilityState,
     CONTROL_FRESHNESS_MINUTES, CapacitySelection, CollectionControlError,
     ComparableObservationRound, DEFAULT_MONITOR_INTERVAL_SECONDS, DynamicCadence,
-    ExplicitAccountEligibilitySignal, InstallationCredentialSecret, IssuedInstallationCredential,
+    ExplicitAccountEligibilitySignal, IssuedInstallationCredential, InstallationCredentialSecret,
     MAXIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_PLUGIN_VERSION,
     MonitorCommandActor, MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand,
     MonitorRuleCommandError, MonitorRuleCommandReceipt, MonitorRuleDraft, MonitorRuleMode,
