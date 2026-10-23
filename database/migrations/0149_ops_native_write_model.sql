@@ -45,6 +45,7 @@ ALTER TABLE linggan_ops_account
         OR (
             source_system = 'linggan_native'
             AND source_record_id = account_ref::text
+            AND native_record_state IS NOT NULL
             AND ledger_state = CASE native_record_state
                 WHEN 'active' THEN 'native_active'
                 WHEN 'archived' THEN 'native_archived'
@@ -232,6 +233,32 @@ CREATE TRIGGER linggan_ops_native_write_request_is_append_only
     BEFORE UPDATE OR DELETE ON linggan_ops_native_write_request
     FOR EACH ROW EXECUTE FUNCTION linggan_ops_forbid_mutation();
 
+ALTER TABLE linggan_ops_view_report
+    ADD CONSTRAINT linggan_ops_view_report_native_request_fk
+    FOREIGN KEY (request_ref) REFERENCES linggan_ops_native_write_request(request_ref)
+    DEFERRABLE INITIALLY DEFERRED;
+
+CREATE FUNCTION linggan_ops_native_view_report_matches_request() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$ BEGIN
+        IF NEW.source_kind = 'linggan_ops_manual' AND NOT EXISTS (
+            SELECT 1 FROM linggan_ops_native_write_request
+            WHERE request_ref = NEW.request_ref
+              AND command_kind = 'view_report_record'
+              AND outcome = 'accepted'
+              AND record_ref = NEW.publication_ref
+              AND actor_member_ref = NEW.reported_by_member_ref
+        ) THEN
+            RAISE EXCEPTION 'native view report must reference its accepted actor command receipt';
+        END IF;
+        RETURN NEW;
+    END $$;
+
+CREATE CONSTRAINT TRIGGER linggan_ops_native_view_report_matches_request
+    AFTER INSERT ON linggan_ops_view_report
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION linggan_ops_native_view_report_matches_request();
+
 -- Native daily data is a current record plus append-only accepted revisions.  Nullable values
 -- mean not filled; zero is a real value.  The base row never conceals who actually saved it.
 CREATE TABLE linggan_ops_daily_report_revision (
@@ -245,8 +272,11 @@ CREATE TABLE linggan_ops_daily_report_revision (
     request_ref uuid NOT NULL UNIQUE REFERENCES linggan_ops_native_write_request(request_ref),
     recorded_at timestamptz NOT NULL DEFAULT scope_001_now(),
     CONSTRAINT linggan_ops_daily_report_revision_version_check CHECK (
-        previous_version IS NULL OR resulting_version = previous_version + 1
-    )
+        (previous_version IS NULL AND resulting_version = 1)
+        OR (previous_version IS NOT NULL AND resulting_version = previous_version + 1)
+    ),
+    CONSTRAINT linggan_ops_daily_report_revision_daily_version_key
+        UNIQUE (daily_ref, resulting_version)
 );
 
 CREATE INDEX linggan_ops_daily_report_revision_daily_idx
@@ -255,6 +285,30 @@ CREATE INDEX linggan_ops_daily_report_revision_daily_idx
 CREATE TRIGGER linggan_ops_daily_report_revision_is_append_only
     BEFORE UPDATE OR DELETE ON linggan_ops_daily_report_revision
     FOR EACH ROW EXECUTE FUNCTION linggan_ops_forbid_mutation();
+
+CREATE FUNCTION linggan_ops_native_daily_revision_matches_current() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$ BEGIN
+        IF NOT EXISTS (
+            SELECT 1
+            FROM linggan_ops_daily_report AS daily
+            JOIN linggan_ops_native_write_request AS request ON request.request_ref = NEW.request_ref
+            WHERE daily.daily_ref = NEW.daily_ref
+              AND daily.source_system = 'linggan_native'
+              AND daily.native_version = NEW.resulting_version
+              AND request.command_kind = 'daily_report_record'
+              AND request.outcome = 'accepted'
+              AND request.record_ref = NEW.daily_ref
+              AND request.actor_member_ref = NEW.changed_by_member_ref
+        ) THEN
+            RAISE EXCEPTION 'native daily revision must reference its current row and accepted actor receipt';
+        END IF;
+        RETURN NEW;
+    END $$;
+
+CREATE TRIGGER linggan_ops_native_daily_revision_matches_current
+    BEFORE INSERT ON linggan_ops_daily_report_revision
+    FOR EACH ROW EXECUTE FUNCTION linggan_ops_native_daily_revision_matches_current();
 
 COMMENT ON TABLE linggan_ops_native_write_request IS
     'Append-only command receipt for native Operations writes; payload hash supports retry-versus-conflict decisions.';

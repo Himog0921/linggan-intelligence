@@ -340,5 +340,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0146_ops_team_auth','9d53a01d644a411732ebebfcdfaa1e368065aca15693150d93800561205ba054');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0147_ops_team_responsibility','1c6dd919d67963923c111ae6e6eac70fc5b0803512e9f819ba2d7da12d44a6fc');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0148_ops_first_admin_bootstrap','8e8362c4054807dfae8111fa39ff57c78e8baab11bc6a31788bb6c554ffb310d');\n",
-    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0149_ops_native_write_model','f015884be21bdc4e849773212a5930060b26cfd7b83c746e1e4f7b888404fdbf');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0149_ops_native_write_model','ad1a3bc04ffe8989b8efa942ae3f6f211ed92b8e1ff25539e00f6fda643ade6d');\n",
 );

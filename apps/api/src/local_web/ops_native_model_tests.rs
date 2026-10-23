@@ -75,6 +75,23 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
         malformed.is_err(),
         "native rows cannot impersonate a source record"
     );
+    let missing_lifecycle = sqlx::query(
+        "INSERT INTO linggan_ops_account \
+         (account_ref,source_system,source_record_id,domain_ref,ledger_state,platform,account_name,\
+          status,is_retained,profile_link_state,review_status,native_version,\
+          native_created_by_member_ref,native_updated_by_member_ref) \
+         VALUES($1,'linggan_native',$1::text,$2,'native_active','xhs','无状态账号',\
+          'active',true,'missing','confirmed',1,$3,$3)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(domain)
+    .bind(member)
+    .execute(pool)
+    .await;
+    assert!(
+        missing_lifecycle.is_err(),
+        "native accounts fail closed without a lifecycle state"
+    );
 
     let publication = Uuid::new_v4();
     sqlx::query(
@@ -152,6 +169,21 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
         (0, None),
         "manual zero is a valid reported value, not an import"
     );
+    let orphan_view = sqlx::query(
+        "INSERT INTO linggan_ops_view_report \
+         (report_ref,publication_ref,report_kind,view_count,source_kind,as_of,reported_by_member_ref,request_ref) \
+         VALUES($1,$2,'value',1,'linggan_ops_manual',scope_001_now(),$3,$4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(publication)
+    .bind(member)
+    .bind(Uuid::new_v4())
+    .execute(pool)
+    .await;
+    assert!(
+        orphan_view.is_err(),
+        "manual view reports require an accepted command receipt"
+    );
 
     let daily = Uuid::new_v4();
     let daily_request = Uuid::new_v4();
@@ -219,6 +251,55 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
     assert!(
         duplicate_daily.is_err(),
         "one stable member has at most one native daily row per day"
+    );
+    let stale_daily_request = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_native_write_request \
+         (request_ref,command_kind,actor_member_ref,payload_sha256,outcome,record_ref,resulting_version,outcome_code) \
+         VALUES($1,'daily_report_record',$2,decode(repeat('ef',32),'hex'),'accepted',$3,2,'accepted')",
+    )
+    .bind(stale_daily_request)
+    .bind(member)
+    .bind(daily)
+    .execute(pool)
+    .await
+    .unwrap();
+    let stale_revision = sqlx::query(
+        "INSERT INTO linggan_ops_daily_report_revision \
+         (revision_ref,daily_ref,previous_version,resulting_version,links_opened_count,followers_gained,\
+          changed_by_member_ref,request_ref) \
+         VALUES($1,$2,1,2,0,0,$3,$4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(daily)
+    .bind(member)
+    .bind(stale_daily_request)
+    .execute(pool)
+    .await;
+    assert!(
+        stale_revision.is_err(),
+        "a revision cannot outrun its native daily current version"
+    );
+    sqlx::query("UPDATE linggan_ops_daily_report SET native_version=2 WHERE daily_ref=$1")
+        .bind(daily)
+        .execute(pool)
+        .await
+        .unwrap();
+    let skipped_first_revision = sqlx::query(
+        "INSERT INTO linggan_ops_daily_report_revision \
+         (revision_ref,daily_ref,previous_version,resulting_version,links_opened_count,followers_gained,\
+          changed_by_member_ref,request_ref) \
+         VALUES($1,$2,NULL,2,0,0,$3,$4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(daily)
+    .bind(member)
+    .bind(stale_daily_request)
+    .execute(pool)
+    .await;
+    assert!(
+        skipped_first_revision.is_err(),
+        "a native daily revision chain cannot start after version one"
     );
 
     let mutate_receipt = sqlx::query(
