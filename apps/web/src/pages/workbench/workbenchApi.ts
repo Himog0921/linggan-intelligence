@@ -339,6 +339,7 @@ export function errorText(error: unknown): string {
       source_unavailable: '来源暂不可读。',
       creation_not_connected: '创作暂时无法读取，当前输入仍保留。请稍后重试。',
       creation_storage_not_configured: '图片存储尚未配置，仍可继续写正文。',
+      creation_legacy_reference_unavailable: '这份历史作品缺少当前所需的来源定位，原稿已保留，但暂不能安全打开。',
       creation_ai_model_unavailable: '创作模型尚不可用，仍可手写。',
       creation_ai_admission_denied: '当前运行条件尚未满足，请到AI设置核对开关、模型、额度和外发许可。当前输入仍保留。',
       creation_ai_stale: '底稿已改变，请重新预览。',

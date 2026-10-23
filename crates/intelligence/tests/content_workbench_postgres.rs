@@ -84,6 +84,62 @@ async fn save_replay_stale_and_restore_keep_linear_history() {
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn legacy_citation_revisions_keep_a_safe_library_entry_without_becoming_readable() {
+    let db = db("creation_legacy_citation").await;
+    let current = create(&db, doc()).await;
+    let work = Uuid::new_v4();
+    let revision = Uuid::new_v4();
+    let mut legacy = serde_json::to_value(doc()).unwrap();
+    legacy["excerpts"] = serde_json::json!([{
+        "id": Uuid::new_v4(),
+        "citation": {
+            "sourceKind": "note",
+            "sourceRef": Uuid::new_v4(),
+            "workRef": Uuid::new_v4(),
+            "field": "body",
+            "sourceVersion": "legacy",
+            "start": 0,
+            "end": 1,
+            "textHash": "legacy",
+            "location": null
+        },
+        "selectedText": "x",
+        "textHash": "legacy"
+    }]);
+    sqlx::query("INSERT INTO linggan_creation_work(work_ref,domain_ref,saved_by) VALUES($1,$2,'local_machine')")
+        .bind(work)
+        .bind(fixture::dossier::DOMAIN)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,previous_revision_ref,document,document_sha256) VALUES($1,$2,1,NULL,$3,$4)")
+        .bind(revision)
+        .bind(work)
+        .bind(legacy)
+        .bind("0".repeat(64))
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE linggan_creation_work SET current_revision_ref=$2 WHERE work_ref=$1")
+        .bind(work)
+        .bind(revision)
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+    let library = list_works(&db, Some(fixture::dossier::DOMAIN)).await.unwrap();
+    assert!(library.iter().any(|item| item.work_id == current.work_id && item.title == "合成🙂\n创作"));
+    assert!(library.iter().any(|item| {
+        item.work_id == work && item.title == "[历史作品：引用版本无法安全读取]"
+    }));
+    assert!(matches!(
+        read_work(&db, work).await,
+        Err(WorkbenchError::LegacyReferenceUnavailable)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn same_revision_two_tabs_allow_exactly_one_writer() {
     let db = db("creation_tabs").await;
     let first = create(&db, doc()).await;

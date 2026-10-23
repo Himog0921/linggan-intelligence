@@ -208,6 +208,10 @@ pub(super) fn error(e: WorkbenchError) -> Response {
             StatusCode::SERVICE_UNAVAILABLE,
             "creation_storage_not_configured",
         ),
+        WorkbenchError::LegacyReferenceUnavailable => (
+            StatusCode::CONFLICT,
+            "creation_legacy_reference_unavailable",
+        ),
         _ => (StatusCode::SERVICE_UNAVAILABLE, "creation_unavailable"),
     };
     local_read_json_error(status, code)
