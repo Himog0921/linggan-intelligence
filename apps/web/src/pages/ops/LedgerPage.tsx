@@ -19,6 +19,7 @@ import {
   TextCell,
 } from "./ui";
 import { c, peopleTabs, readonly } from "./styles";
+import { NativeAccountDialog } from "./NativeAccountDialog";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
   publications: [
@@ -144,6 +145,7 @@ export function LedgerPage({
   const [cover, setCover] = useState<string | null>(null);
   const [coverFailed, setCoverFailed] = useState(false);
   const [detail, setDetail] = useState<api.Publication | null>(null);
+  const [newAccount, setNewAccount] = useState(false);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
@@ -298,7 +300,7 @@ export function LedgerPage({
               </ActionButton>
             </>
           ) : kind === "accounts" ? (
-            <ActionButton type="button" disabled title={readonly}>
+            <ActionButton type="button" disabled={business === "all"} title={business === "all" ? "请先选择一个业务" : undefined} onClick={() => setNewAccount(true)}>
               新增账号
             </ActionButton>
           ) : null}
@@ -489,6 +491,7 @@ export function LedgerPage({
           {detail.cover.available ? <ActionButton onClick={() => openCover(`/ops/covers/${encodeURIComponent(detail.ref)}`)}>查看封面大图</ActionButton> : <p>封面未迁入</p>}
         </div>
       </Dialog> : null}
+      {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
       {cover ? (
         <Dialog
           label="封面大图" outsideClose
