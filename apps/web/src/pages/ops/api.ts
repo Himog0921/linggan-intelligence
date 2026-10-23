@@ -242,6 +242,16 @@ export async function createNativeAccount(command: NativeAccountCommand & { requ
     method: "POST", body: command,
   }), command.requestId);
 }
+
+export type NativePublicationCommand = {
+  accountRef: string; publicationUrl: string; canonicalUrl: string | null;
+  publishedOn: string | null; title: string | null; body: string | null;
+};
+export async function createNativePublication(command: NativePublicationCommand & { requestId: string }) {
+  return nativeReceipt(await requestJson("/api/local/ops/native/publications", {
+    method: "POST", body: { ...command, publishedAt: null },
+  }), command.requestId);
+}
 const figures = (r: R) => ({
   published: nn(r, "published"),
   linksOpened: nn(r, "linksOpened"),

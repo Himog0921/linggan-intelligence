@@ -20,6 +20,7 @@ import {
 } from "./ui";
 import { c, peopleTabs, readonly } from "./styles";
 import { NativeAccountDialog } from "./NativeAccountDialog";
+import { NativePublicationDialog } from "./NativePublicationDialog";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
   publications: [
@@ -146,6 +147,7 @@ export function LedgerPage({
   const [coverFailed, setCoverFailed] = useState(false);
   const [detail, setDetail] = useState<api.Publication | null>(null);
   const [newAccount, setNewAccount] = useState(false);
+  const [newPublication, setNewPublication] = useState(false);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
@@ -167,7 +169,7 @@ export function LedgerPage({
         api.accounts,
         signal,
       ),
-    enabled: kind === "accounts",
+    enabled: kind === "accounts" || kind === "publications",
   });
   const daily = useQuery({
     queryKey: ["ops", "daily", business, operator],
@@ -292,7 +294,7 @@ export function LedgerPage({
           <small className={c("ops-note")}>切换前只读</small>
           {kind === "publications" ? (
             <>
-              <ActionButton type="button" disabled title={readonly}>
+              <ActionButton type="button" disabled={!accounts.data?.items.length} title={!accounts.data?.items.length ? "当前业务没有可用账号" : undefined} onClick={() => setNewPublication(true)}>
                 新增发布
               </ActionButton>
               <ActionButton type="button" disabled title="自动发现我方帖子上线后可用">
@@ -492,6 +494,7 @@ export function LedgerPage({
         </div>
       </Dialog> : null}
       {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
+      {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items} close={() => setNewPublication(false)} /> : null}
       {cover ? (
         <Dialog
           label="封面大图" outsideClose
