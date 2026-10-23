@@ -1,0 +1,74 @@
+import { createContext,useContext,useRef,useState,type ReactNode } from 'react';
+import { useNavigate } from 'react-router';
+import { ActionButton } from '../../../../shared/ActionButton';
+import type { Drawer } from '../api';
+import { listHref } from '../useWorkspace';
+import type { ReadScope } from './inspectionApi';
+import styles from './TargetResearch.module.css';
+
+export type Panel='compare'|'trace'|'similar';
+interface ResearchContext {
+  data:Drawer;params:URLSearchParams;scope:ReadScope;selected:string[];
+  panel:string|null;focusedWork:string|null;message:string|null;
+  patch:(values:Record<string,string|null>,replace?:boolean)=>void;
+  toggle:(work:string)=>void;open:(panel:Panel,work?:string)=>void;back:()=>void;
+  clear:()=>void;pinCutoff:(cutoff:string)=>void;
+}
+const Context=createContext<ResearchContext|null>(null);
+const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function TargetResearchProvider({data,params,children}:{data:Drawer;params:URLSearchParams;children:ReactNode}){
+  const navigate=useNavigate();
+  const [message,setMessage]=useState<string|null>(null);
+  const returns=useRef<{url:string;scroll:number;focus:string|null}[]>([]);
+  const selected=(params.get('inspect_works')??'').split(',').filter(Boolean);
+  const valid=selected.length<=3&&new Set(selected).size===selected.length&&selected.every(id=>uuid.test(id));
+  const focus=params.get('inspect_work');
+  const patch=(values:Record<string,string|null>,replace=false)=>navigate(listHref(params,values),{replace});
+  const toggle=(work:string)=>{
+    if(!uuid.test(work))return;
+    if(!valid){setMessage('对照选择无效，请清除后重新选择。');return;}
+    if(selected.includes(work)){patch({inspect_works:selected.filter(v=>v!==work).join(',')||null});setMessage(null);return;}
+    if(selected.length===3){setMessage('最多同时对照 3 篇，请先移除或替换一篇。');return;}
+    patch({inspect_works:[...selected,work].join(',')});setMessage(null);
+  };
+  const open=(panel:Panel,work?:string)=>{
+    if(panel==='compare'&&(!valid||selected.length<2)){setMessage('请先选择 2—3 篇作品。');return;}
+    if(work&&!uuid.test(work))return;
+    const active=document.activeElement;
+    returns.current.push({url:listHref(params),scroll:document.querySelector('.c-dw-body')?.scrollTop??0,focus:active instanceof HTMLElement?active.id:null});
+    patch({inspect_panel:panel,inspect_work:work??null});
+    requestAnimationFrame(()=>{document.querySelector('.c-dw-body')?.scrollTo({top:0});});
+  };
+  const back=()=>{
+    const previous=returns.current.pop();
+    if(previous){navigate(previous.url);requestAnimationFrame(()=>{const body=document.querySelector('.c-dw-body');if(body)body.scrollTop=previous.scroll;if(previous.focus)document.getElementById(previous.focus)?.focus();});}
+    else patch({inspect_panel:null,inspect_work:null,inspect_left_observation:null,inspect_right_observation:null});
+  };
+  const cutoff=params.get('inspect_as_of');
+  const value:ResearchContext={data,params,scope:{targetRef:data.target.targetRef,domain:params.get('domain')??'all',cutoff},selected:valid?selected:[],panel:params.get('inspect_panel'),focusedWork:focus&&uuid.test(focus)?focus:null,
+    message:message??(valid?null:'对照选择无效，请清除后重新选择。'),patch,toggle,open,back,
+    clear:()=>{setMessage(null);patch({inspect_works:null});},
+    pinCutoff:(next)=>{if(!params.has('inspect_as_of'))patch({inspect_as_of:next},true);}};
+  return <Context.Provider value={value}>{children}</Context.Provider>;
+}
+export function useTargetResearch():ResearchContext {const value=useContext(Context);if(!value)throw new Error('目标研究必须位于当前检查器内');return value;}
+export function useOptionalTargetResearch(){return useContext(Context);}
+export function WorkResearchActions({work,similar=true}:{work:string;similar?:boolean}){
+  const context=useOptionalTargetResearch();if(!context)return null;
+  return <span className={styles.rowActions}>
+    <ActionButton variant="quiet" aria-pressed={context.selected.includes(work)} onClick={()=>context.toggle(work)}>{context.selected.includes(work)?'移出对照':'加入对照'}</ActionButton>
+    {similar&&context.data.target.kind==='creator'&&<ActionButton id={`work-${work}-similar`} variant="quiet" onClick={()=>context.open('similar',work)}>相近旧作</ActionButton>}
+    <ActionButton id={`work-${work}-trace`} variant="quiet" onClick={()=>context.open('trace',work)}>观察轨迹</ActionButton>
+  </span>;
+}
+export function ResearchSelectionBar(){
+  const context=useTargetResearch();
+  if(context.selected.length===0&&context.message===null)return null;
+  return <div className={styles.selection} aria-label="作品对照选择">
+    <span>已选 {context.selected.length} / 3 篇</span>
+    <div className={styles.selectedNames}>{context.selected.map((id,index)=><span key={id}>{context.data.catalog?.find(w=>w.publicRef===id)?.title??`作品 ${index+1}`}</span>)}</div>
+    {context.message&&<span role="status">{context.message}</span>}
+    <ActionButton variant="outline" disabled={context.selected.length<2} onClick={()=>context.open('compare')}>并排对照</ActionButton>
+    <ActionButton variant="quiet" onClick={context.clear}>清除选择</ActionButton>
+  </div>;
+}
