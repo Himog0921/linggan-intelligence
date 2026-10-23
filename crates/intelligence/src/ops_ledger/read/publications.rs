@@ -150,7 +150,9 @@ pub struct OpsPublicationPage {
 const FILTERED: &str = "kept AS ( \
     SELECT p.*, a.account_name, a.ledger_state, publisher.display_name AS native_publisher_name, \
            lv.view_count, lv.views_as_of, sync.request_ref AS sync_request_ref, \
-           sync.decision AS sync_decision, sync.sync_state \
+           sync.decision AS sync_decision, sync.sync_state, adoption.title AS adopted_title, \
+           adoption.body AS adopted_body, adoption.like_count AS adopted_like_count, \
+           adoption.collect_count AS adopted_collect_count, adoption.comment_count AS adopted_comment_count \
       FROM linggan_ops_publication p \
       LEFT JOIN linggan_ops_account a ON a.account_ref = p.account_ref \
       LEFT JOIN linggan_ops_member publisher ON publisher.member_ref = p.native_publisher_member_ref \
@@ -191,6 +193,34 @@ const FILTERED: &str = "kept AS ( \
             WHERE item.requested_publication_ref=p.publication_ref \
             ORDER BY item.created_at DESC,item.ordinal DESC LIMIT 1 \
       ) sync ON true \
+      LEFT JOIN LATERAL ( \
+           SELECT \
+             (SELECT CASE WHEN field.disposition='adopted' THEN field.value_text END \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='title' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1) AS title, \
+             (SELECT CASE WHEN field.disposition='adopted' THEN field.value_text END \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='body' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1) AS body, \
+             (SELECT CASE WHEN field.disposition='adopted' THEN field.value_count END \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='like_count' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1) AS like_count, \
+             (SELECT CASE WHEN field.disposition='adopted' THEN field.value_count END \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='collect_count' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1) AS collect_count, \
+             (SELECT CASE WHEN field.disposition='adopted' THEN field.value_count END \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='comment_count' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1) AS comment_count \
+      ) adoption ON true \
      WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
        AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
        AND ($1::uuid IS NULL OR a.domain_ref = $1) \
@@ -260,12 +290,15 @@ async fn read_page(
                 coalesce(kept.published_business_date,kept.native_published_on)::text AS business_date, \
                 coalesce(to_char(kept.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'), \
                          kept.native_published_on::text) AS published, \
-                kept.published_date_state, kept.platform, kept.title, kept.body, kept.publication_url, \
+                kept.published_date_state, kept.platform, kept.adopted_title AS title, \
+                kept.adopted_body AS body, kept.publication_url, \
                 kept.account_name, kept.ledger_state, \
                 coalesce(kept.publisher_name,kept.native_publisher_name) AS publisher_name, \
                 kept.view_count, kept.views_as_of, \
                 ((now() AT TIME ZONE 'Asia/Shanghai')::date - coalesce(kept.published_business_date,kept.native_published_on)) >= 7 AS aged, \
-                kept.like_count, kept.collect_count, kept.comment_count, kept.cover_click_rate, \
+                kept.adopted_like_count AS like_count, \
+                kept.adopted_collect_count AS collect_count, \
+                kept.adopted_comment_count AS comment_count, kept.cover_click_rate, \
                 kept.sync_request_ref, kept.sync_decision, coalesce(kept.sync_state,'not_requested') AS sync_state, \
                 cover.publication_ref IS NOT NULL AS has_cover \
            FROM kept LEFT JOIN linggan_ops_publication_cover cover ON cover.publication_ref = kept.publication_ref \

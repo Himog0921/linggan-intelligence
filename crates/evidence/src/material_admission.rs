@@ -601,6 +601,12 @@ pub(crate) async fn project_exact_ops_publication_after_receipt(
     if !schema_ready || package.package_kind() != "content_detail" {
         return Ok(());
     }
+    let field_adoption_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_ops_publication_field_adoption') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
     let rows: Vec<(Uuid, i64, Uuid, Uuid, Uuid, Uuid, i32, Uuid, String)> = sqlx::query_as(
         "SELECT scope.publication_ref,scope.publication_version,request.request_ref, \
                 lease.work_order_ref,package.task_id,package.attempt_id,disposition.record_ordinal, \
@@ -632,6 +638,7 @@ pub(crate) async fn project_exact_ops_publication_after_receipt(
             AND package.package_kind='content_detail' \
             AND task.source='scheduled' \
             AND task.platform=publication.platform \
+            AND publication.native_version=scope.publication_version \
             AND task.task_spec->'target'->>'contentExternalId'=scope.content_external_id \
             AND package.coverage->'target'->>'contentExternalId'=scope.content_external_id \
             AND detail.author_external_id=scope.author_external_id",
@@ -674,7 +681,68 @@ pub(crate) async fn project_exact_ops_publication_after_receipt(
         .execute(&mut **tx)
         .await
         .map_err(ProducerRuntimeError::Internal)?;
+        if field_adoption_ready {
+            project_exact_ops_publication_fields_after_receipt(
+                tx,
+                receipt_ref,
+                package.package_ref(),
+            )
+            .await?;
+        }
     }
+    Ok(())
+}
+
+/// Keep automatic detail values separate from the human registration.  The current read model
+/// can therefore choose them by observation time and identity version, while a future human
+/// correction can create a newer version/conflict without erasing either source.
+async fn project_exact_ops_publication_fields_after_receipt(
+    tx: &mut Transaction<'_, Postgres>,
+    receipt_ref: Uuid,
+    package_ref: Uuid,
+) -> Result<(), ProducerRuntimeError> {
+    sqlx::query(
+        "INSERT INTO linggan_ops_publication_field_adoption \
+         (adoption_ref,projection_ref,publication_ref,publication_version,field_name,disposition,source_kind, \
+          value_text,value_count,value_instant,observed_at,source_package_ref,source_record_ordinal) \
+         SELECT gen_random_uuid(),projection.projection_ref,projection.publication_ref, \
+                projection.publication_version,candidate.field_name,candidate.disposition,'receipt_detail', \
+                candidate.value_text,candidate.value_count,candidate.value_instant,detail.observed_at, \
+                detail.package_ref,detail.record_ordinal \
+           FROM linggan_ops_publication_material_projection projection \
+           JOIN linggan_ops_publication publication \
+             ON publication.publication_ref=projection.publication_ref \
+           JOIN linggan_material_content_detail detail \
+             ON detail.package_ref=projection.package_ref \
+            AND detail.record_ordinal=projection.record_ordinal \
+           CROSS JOIN LATERAL (VALUES \
+             ('title'::text, CASE WHEN detail.title_state='KNOWN' THEN 'adopted' ELSE 'not_provided' END, \
+                detail.title, NULL::bigint, NULL::timestamptz), \
+             ('body'::text, CASE WHEN detail.body_state='KNOWN' THEN 'adopted' ELSE 'not_provided' END, \
+                detail.body_text, NULL::bigint, NULL::timestamptz), \
+             ('like_count'::text, CASE WHEN detail.like_count_state='KNOWN' THEN 'adopted' ELSE 'not_provided' END, \
+                NULL::text, detail.like_count, NULL::timestamptz), \
+             ('collect_count'::text, CASE WHEN detail.collect_count_state='KNOWN' THEN 'adopted' ELSE 'not_provided' END, \
+                NULL::text, detail.collect_count, NULL::timestamptz), \
+             ('comment_count'::text, CASE WHEN detail.comment_count_state='KNOWN' THEN 'adopted' ELSE 'not_provided' END, \
+                NULL::text, detail.comment_count, NULL::timestamptz), \
+             ('published_at'::text, CASE \
+                WHEN detail.published_at IS NULL THEN 'not_provided' \
+                WHEN publication.native_published_on IS NOT NULL \
+                 AND publication.native_published_on<>(detail.published_at AT TIME ZONE 'Asia/Shanghai')::date THEN 'conflict' \
+                ELSE 'adopted' END, \
+                NULL::text, NULL::bigint, detail.published_at) \
+           ) AS candidate(field_name,disposition,value_text,value_count,value_instant) \
+          WHERE projection.receipt_ref=$1 \
+            AND projection.package_ref=$2 \
+            AND publication.native_version=projection.publication_version \
+         ON CONFLICT (projection_ref,field_name) DO NOTHING",
+    )
+    .bind(receipt_ref)
+    .bind(package_ref)
+    .execute(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
 

@@ -469,6 +469,15 @@ migrate() {
   apply_migration_once "0148_ops_first_admin_bootstrap" "$project_root/database/migrations/0148_ops_first_admin_bootstrap.sql"
   apply_migration_once "0149_ops_native_write_model" "$project_root/database/migrations/0149_ops_native_write_model.sql"
   apply_migration_once "0150_ops_native_publication_date_precision" "$project_root/database/migrations/0150_ops_native_publication_date_precision.sql"
+  apply_migration_once "0151_ops_publication_sync_request" "$project_root/database/migrations/0151_ops_publication_sync_request.sql"
+  apply_migration_once "0152_ops_publication_execution_locator" "$project_root/database/migrations/0152_ops_publication_execution_locator.sql"
+  apply_migration_once "0153_ops_account_responsibility_command" "$project_root/database/migrations/0153_ops_account_responsibility_command.sql"
+  apply_migration_once "0154_ops_member_deactivation" "$project_root/database/migrations/0154_ops_member_deactivation.sql"
+  apply_migration_once "0155_ops_exact_publication_work_scope" "$project_root/database/migrations/0155_ops_exact_publication_work_scope.sql"
+  apply_migration_once "0156_ops_exact_publication_detail_session" "$project_root/database/migrations/0156_ops_exact_publication_detail_session.sql"
+  apply_migration_once "0157_ops_publication_execution_input_eligibility" "$project_root/database/migrations/0157_ops_publication_execution_input_eligibility.sql"
+  apply_migration_once "0158_ops_publication_material_projection" "$project_root/database/migrations/0158_ops_publication_material_projection.sql"
+  apply_migration_once "0159_ops_publication_field_adoption" "$project_root/database/migrations/0159_ops_publication_field_adoption.sql"
 }
 
 case "$command_name" in

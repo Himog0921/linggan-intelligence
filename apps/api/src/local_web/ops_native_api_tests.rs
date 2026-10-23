@@ -185,6 +185,17 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     )
     .await
     .unwrap();
+    assert!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_ops_publication_field_adoption \
+             WHERE source_kind='workbench_import'",
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap()
+            > 0,
+        "an import writes its current fields into the same adoption stream rather than relying on the registration projection",
+    );
     let unassigned_publication: Uuid = sqlx::query_scalar(
         "SELECT publication_ref FROM linggan_ops_publication \
          WHERE source_system='content_workbench' AND account_ref IS NULL",
@@ -360,6 +371,25 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     .await
     .unwrap();
     assert_eq!(date_precision, (None, "day".to_owned()));
+    let native_title_adoption: (String, String, Option<String>, Uuid) = sqlx::query_as(
+        "SELECT source_kind,disposition,value_text,source_request_ref \
+           FROM linggan_ops_publication_field_adoption \
+          WHERE publication_ref=$1 AND field_name='title'",
+    )
+    .bind(publication_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        native_title_adoption,
+        (
+            "native_registration".to_owned(),
+            "adopted".to_owned(),
+            Some("只知道日期的发布".to_owned()),
+            publication_request,
+        ),
+        "an explicitly entered native title is a source-bound current field, not a list fallback",
+    );
 
     let mut invalid_publication = publication_body(Uuid::new_v4(), account_ref);
     invalid_publication["publishedOn"] = Value::String("2026-02-30".to_owned());
@@ -520,11 +550,31 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     )
     .await
     .unwrap();
+    let imported_item = publications
+        .items
+        .iter()
+        .find(|item| item.source == "imported")
+        .expect("the first page retains an imported publication");
+    let imported_current: (String, Option<String>) = sqlx::query_as(
+        "SELECT disposition,value_text FROM linggan_ops_publication_field_adoption \
+         WHERE publication_ref=$1 AND field_name='title' \
+         ORDER BY observed_at::timestamptz DESC,created_at DESC,adoption_ref DESC LIMIT 1",
+    )
+    .bind(imported_item.r#ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        imported_item.title.as_deref()
+            == (imported_current.0 == "adopted").then_some(imported_current.1.as_deref()).flatten(),
+        "the list reads the imported baseline from field adoption, without falling back to the registration row",
+    );
     assert!(publications.items.iter().any(|item| {
         item.r#ref == publication_ref
             && item.business_date == "2026-10-20"
             && item.source == "native"
             && item.publisher.as_deref() == Some("本人运营")
+            && item.title.as_deref() == Some("只知道日期的发布")
     }));
     let overview = read_ops_overview(
         &database,
@@ -1162,7 +1212,8 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
                     "verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"fixture_complete"
                 }]},
                 "records":[{"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":note},"payload":{
-                    "title":"隔离运营回填标题", "bodyText":"隔离运营回填正文", "authorId":"0123456789abcdef01234567"
+                    "title":"隔离运营回填标题", "bodyText":"隔离运营回填正文", "authorId":"0123456789abcdef01234567",
+                    "likeCount":71, "collectCount":9, "commentCount":6
                 }}]
             }
         })
@@ -1187,8 +1238,30 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     assert_eq!(projection.3, receipt_ref);
     assert_eq!(projection.4, 1);
     assert_eq!(projection.5, "2026-10-23T08:00:00Z");
-    let untouched: (Option<i64>, Option<f64>, Option<String>, Uuid, Uuid) = sqlx::query_as(
-        "SELECT like_count,cover_click_rate,publisher_name,account_ref, \
+    let adopted: Vec<(String, String, Option<String>, Option<i64>)> = sqlx::query_as(
+        "SELECT field_name,disposition,value_text,value_count \
+           FROM linggan_ops_publication_field_adoption \
+          WHERE projection_ref=(SELECT projection_ref FROM linggan_ops_publication_material_projection WHERE receipt_ref=$1) \
+          ORDER BY field_name",
+    )
+    .bind(receipt_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        adopted,
+        vec![
+            ("body".into(), "adopted".into(), Some("隔离运营回填正文".into()), None),
+            ("collect_count".into(), "adopted".into(), None, Some(9)),
+            ("comment_count".into(), "adopted".into(), None, Some(6)),
+            ("like_count".into(), "adopted".into(), None, Some(71)),
+            ("published_at".into(), "not_provided".into(), None, None),
+            ("title".into(), "adopted".into(), Some("隔离运营回填标题".into()), None),
+        ],
+        "the Receipt leaves a field-level provenance trail; missing evidence is not a zero",
+    );
+    let untouched: (Option<String>, Option<String>, Option<i64>, Option<i64>, Option<i64>, Option<f64>, Option<String>, Uuid, Uuid) = sqlx::query_as(
+        "SELECT title,body,like_count,collect_count,comment_count,cover_click_rate,publisher_name,account_ref, \
                 native_publisher_member_ref \
            FROM linggan_ops_publication WHERE publication_ref=$1",
     )
@@ -1196,7 +1269,7 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(untouched, (None, None, None, account_ref, owner));
+    assert_eq!(untouched, (None, None, None, None, None, None, None, account_ref, owner));
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM linggan_material_domain_usage WHERE content_public_ref=$1",
@@ -1239,6 +1312,9 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     assert_eq!(row.sync.request_ref, Some(accepted_request_ref));
     assert_eq!(row.sync.decision.as_deref(), Some("accepted"));
     assert_eq!(row.sync.state, "material_projected");
+    assert_eq!(row.title.as_deref(), Some("隔离运营回填标题"));
+    assert_eq!(row.body.as_deref(), Some("隔离运营回填正文"));
+    assert_eq!((row.likes, row.collects, row.comments), (Some(71), Some(9), Some(6)));
 }
 
 fn publication_body(request_id: Uuid, account_ref: Uuid) -> Value {

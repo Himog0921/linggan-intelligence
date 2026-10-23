@@ -56,7 +56,9 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 `0158_ops_publication_material_projection` 只保存合格回包与运营发布之间的追加式关联：`publication/version → request/work order → task/attempt → package/receipt → record ordinal → Material`。运行时先写入 Receipt，再在同一事务中检查所有这些边界。只有 scheduled 精确 scope 的 `content_detail`、`COMPLETED_LIVE_STEP`、`ACCEPTED` receipt、未超出该单一详情配额的 `accepted_for_library_content` record、匹配的平台作品 ID 与作者 ID 才能创建该关联；回包缺字段、身份不符、record 被隔离或 `LOST_AUTHORITY` 时均不会投影。详情包没有任何合格 record 时也不会仅凭 package 创建 `linggan_material_content`。
 
-该投影从不更新 `linggan_ops_publication`，所以手工阅读量/CTR、日报、历史发布人、当前负责人、业务归属和原发布字段不在此写入范围。它也不写 `linggan_material_domain_usage`：领域 primary/reference 不是“我方内容”含义，不能为了把运营同步展示在某个领域而重写既有领域用途。投影本身是不可变且以 Receipt 为幂等键；后续读取、字段采用、媒体状态与受控重放必须消费这条真实链，不得重新访问平台或伪造回执。
+该投影从不更新 `linggan_ops_publication`，所以手工阅读量/CTR、日报、历史发布人、当前负责人、业务归属和原发布字段不在此写入范围。它也不写 `linggan_material_domain_usage`：领域 primary/reference 不是“我方内容”含义，不能为了把运营同步展示在某个领域而重写既有领域用途。投影本身是不可变且以 Receipt 为幂等键；字段采用、媒体状态与受控重放必须消费这条真实链，不得重新访问平台或伪造回执。
+
+`0159_ops_publication_field_adoption` 使登记导入、原生登记和合格 Receipt 都以追加式逐字段决定形成一个统一读取模型，而非修改注册行或在页面回退主表。导入基线有 import batch，原生明确填写的标题/正文有原生命令回执，Receipt 值有 package/record、对应 publication identity version 和观测时刻；每项均保存 `adopted`、`not_provided` 或 `conflict` disposition。当前列表按观测时刻读取身份版本仍匹配的最新决定；未知字段绝不补零，也不会回退旧主表字段。`published_at` 若为空记为 `not_provided`，若与原生登记的北京业务日冲突则保留 `conflict`，不会静默改变运营报表日期。该阶段不采用阅读量、CTR、日报、历史/当前责任人或业务字段，也不提供人工字段修订命令、冲突裁决或投影-only 重放。
 
 对于 `accepted` / `existing`，数据库约束要求同时具备发布/账号/业务/平台/作品/作者/版本/locator 指纹以及 existing-chain 的 Request/WorkOrder 引用。其他决定禁止携带这两个执行引用。因此无法发生“工单已建但运营关联未保存”的表面成功，也不能把 internal `publication_ref` 塞进平台内容 ID。
 
@@ -64,8 +66,8 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 同步 API 现会在同一数据库事务内，对具备 XHS 冻结身份与 locator 的条目调用精确发布准入：它创建或复用仅作控制身份的 creator Target（不等于发现、归档或 Material），冻结发布所属 active Domain 的 primary/reference 关系，写入 `Acquisition Request → Admission → WorkOrder → collection_work_order_ops_publication_target`，再写回同步条目的两个 existing-chain 引用。唯一可接受的授权必须明确包含 `ops_publication_sync` 模板、`batch` lane、至少一篇作品和一个工作单元；旧授权不会被自动扩大。精确 scope 固定一篇、零评论/回复/媒体/OCR/ASR，WorkOrder 的 `max_works=1`，且 lease 发放会再次检查这份精确授权仍有效。
 
-`0155–0158` 及租约/派发/详情会话/缺输入停止读取面现在可在隔离 PostgreSQL 中走通一条合成的 XHS 控制链：精确 scope 被合格安装领取，真实调度代码生成 scheduled task，合格 `content_detail` 的 Attempt/Package/Receipt 创建或复用 Material，并追加发布—Material 投影。此证明不访问平台，也不能证明真实 XHS 内容、浏览器插件、生产迁移、部署或业务验收。抖音仍没有受控 locator、身份、能力与回填闭环。
+`0155–0159` 及租约/派发/详情会话/缺输入停止读取面现在可在隔离 PostgreSQL 中走通一条合成的 XHS 控制链：精确 scope 被合格安装领取，真实调度代码生成 scheduled task，合格 `content_detail` 的 Attempt/Package/Receipt 创建或复用 Material、追加发布—Material 投影，并以同一 Receipt 追加字段采用决定和当前列表读投影。此证明不访问平台，也不能证明真实 XHS 内容、浏览器插件、生产迁移、部署或业务验收。抖音仍没有受控 locator、身份、能力与回填闭环。
 
-运营“发布记录”页面现在可从“同步数据”打开一个仅列出当前页记录的显式选择框：未选择时不能提交，提交后逐条显示原始决定与当前 `execution`，并可按原 `requestRef` 刷新读取。列表读取还会为每条发布返回其**最近一次**持久化同步条目的 `requestRef`、原始 `decision` 和共享链实时状态；关闭对话框、刷新页面或重新进入后仍可从该 `requestRef` 重开同一回执，绝不把浏览器瞬态提示当作任务状态。最近一次命令的状态不替代 Material 当前字段、媒体或人工采用状态；它不自动发现、不提交未选记录，也不把 `material_projected` 写成“同步完成”。界面明确标注字段和媒体尚未采用。页面交互已由前端测试覆盖，但并非真实平台、插件、生产迁移、部署或业务验收。
+运营“发布记录”页面现在可从“同步数据”打开一个仅列出当前页记录的显式选择框：未选择时不能提交，提交后逐条显示原始决定与当前 `execution`，并可按原 `requestRef` 刷新读取。列表读取还会为每条发布返回其**最近一次**持久化同步条目的 `requestRef`、原始 `decision` 和共享链实时状态；关闭对话框、刷新页面或重新进入后仍可从该 `requestRef` 重开同一回执，绝不把浏览器瞬态提示当作任务状态。最近一次命令的状态不替代 Material 当前字段、媒体或人工采用状态；它不自动发现、不提交未选记录，也不把 `material_projected` 写成“同步完成”。详情字段的 receipt-qualified 当前采用值已进入列表读取，但页面尚未提供人工采用/冲突处理，也没有媒体采用状态。页面交互已由前端测试覆盖，但并非真实平台、插件、生产迁移、部署或业务验收。
 
-后续工作仍是字段采用/冲突处理、媒体状态和受控“只重放投影”动作，并完成两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。
+后续工作仍是人工字段采用与冲突处理、媒体状态和受控“只重放投影”动作，并完成两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。

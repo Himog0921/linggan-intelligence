@@ -502,11 +502,50 @@ async fn write_publication(
         1,
     );
     insert_receipt(&mut transaction, &receipt).await?;
+    insert_native_publication_field_adoptions(
+        &mut transaction,
+        publication_ref,
+        publication.request_id,
+        &publication.title,
+        &publication.body,
+    )
+    .await?;
     transaction
         .commit()
         .await
         .map_err(|_| WriteError::Unavailable)?;
     Ok((StatusCode::CREATED, receipt.receipt))
+}
+
+/// A native registration's explicitly supplied text enters the same current-field model as an
+/// imported baseline or a later receipt. Empty inputs deliberately create no manual override, so
+/// a qualified detail observation may supply that still-unknown field.
+async fn insert_native_publication_field_adoptions(
+    transaction: &mut Transaction<'_, Postgres>,
+    publication_ref: Uuid,
+    request_ref: Uuid,
+    title: &Option<String>,
+    body: &Option<String>,
+) -> Result<(), WriteError> {
+    sqlx::query(
+        "INSERT INTO linggan_ops_publication_field_adoption \
+         (adoption_ref,publication_ref,publication_version,field_name,disposition,source_kind, \
+          source_request_ref,value_text,observed_at) \
+         SELECT gen_random_uuid(),$1,1,candidate.field_name,'adopted','native_registration',$2, \
+                candidate.value_text,scope_001_now()::text \
+           FROM (VALUES ('title'::text,$3::text),('body'::text,$4::text)) \
+                AS candidate(field_name,value_text) \
+          WHERE candidate.value_text IS NOT NULL \
+         ON CONFLICT (source_request_ref,publication_ref,field_name) DO NOTHING",
+    )
+    .bind(publication_ref)
+    .bind(request_ref)
+    .bind(title)
+    .bind(body)
+    .execute(&mut **transaction)
+    .await
+    .map_err(|_| WriteError::Unavailable)?;
+    Ok(())
 }
 
 /// Transfer the current operational owner without touching imported attribution or historical

@@ -484,6 +484,7 @@ pub async fn proof_database_with_ops_ledger(schema: &str) -> Database {
         include_str!(
             "../../../../database/migrations/0158_ops_publication_material_projection.sql"
         ),
+        include_str!("../../../../database/migrations/0159_ops_publication_field_adoption.sql"),
     ]
     .concat();
     isolated_proof_schema(&url, schema, &migrations)
