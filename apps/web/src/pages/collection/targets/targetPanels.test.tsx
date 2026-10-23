@@ -205,3 +205,13 @@ describe('检查器紧凑披露保留数据含义',()=>{
     expect(screen.getByText(/只按当前可分析作品计算/)).toBeVisible();
   });
 });
+
+it('紧凑图表只疏显示日期刻度，保留全部20个作品时间桶且末端标签不相邻堆叠',()=>{
+  const points=Array.from({length:20},(_,index)=>{const date=new Date(Date.UTC(2025,2+index,1)).toISOString().slice(0,10);return {publicRef:`00000000-0000-4000-8000-${String(index+10).padStart(12,'0')}`,title:'合成作品',published:date,date,epochMs:Date.parse(date),value:index,discussionRate:null,association:'AUTHOR_CONFIRMED',new:false};});
+  const p={...coverageFixture,linked:20,lowerBound:20,confirmed:20,eligible:20,points};
+  const {container}=render(<MemoryRouter><Chart p={p} params={new URLSearchParams()} distribution={false} week={false} buckets={bucketPoints(points,false)}/></MemoryRouter>);
+  const dates=Array.from(container.querySelectorAll('text[y="446"]'));
+  expect(dates.length).toBeLessThanOrEqual(7);expect(dates[0]).toHaveTextContent('2025/03');expect(dates.at(-1)).toHaveTextContent('2026/10');
+  expect(Number(dates.at(-1)?.getAttribute('x'))-Number(dates.at(-2)?.getAttribute('x'))).toBeGreaterThanOrEqual(100);
+  expect(container.querySelectorAll('.life-trend-bucket-hit')).toHaveLength(20);
+});
