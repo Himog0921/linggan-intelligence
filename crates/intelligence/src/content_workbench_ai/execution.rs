@@ -12,8 +12,8 @@ pub(crate) async fn system_in(
     tx: &mut Transaction<'_, Postgres>,
     config: Uuid,
 ) -> Result<String, AiError> {
-    let invocation:Option<String>=sqlx::query_scalar("SELECT v.invocation FROM linggan_ai_task_config c LEFT JOIN linggan_skill_version v ON v.version_ref=c.skill_version_ref WHERE c.task_config_ref=$1 AND c.task_key='writing_legacy'")
-        .bind(config).fetch_one(&mut **tx).await?;
+    let invocation:Option<String>=sqlx::query_scalar("SELECT v.invocation FROM linggan_ai_task_config c LEFT JOIN linggan_skill_version v ON v.version_ref=c.skill_version_ref WHERE c.task_config_ref=$1 AND c.task_key='writing_legacy' AND c.execution_contract=$2")
+        .bind(config).bind(METHOD).fetch_one(&mut **tx).await?;
     Ok(match invocation {
         Some(invocation) => format!("{SYSTEM}\n\n{invocation}"),
         None => SYSTEM.into(),
@@ -26,8 +26,8 @@ pub(crate) async fn model_in(
     tx: &mut Transaction<'_, Postgres>,
     config: Uuid,
 ) -> Result<FrozenModel, AiError> {
-    let reference:Option<Uuid>=sqlx::query_scalar("SELECT model_config_ref FROM linggan_ai_task_config WHERE task_config_ref=$1 AND task_key='writing_legacy'")
-        .bind(config).fetch_optional(&mut **tx).await?.flatten();
+    let reference:Option<Uuid>=sqlx::query_scalar("SELECT model_config_ref FROM linggan_ai_task_config WHERE task_config_ref=$1 AND task_key='writing_legacy' AND execution_contract=$2")
+        .bind(config).bind(METHOD).fetch_optional(&mut **tx).await?.flatten();
     load_frozen_in(&mut **tx, reference.ok_or(AiError::Model)?)
         .await
         .map_err(AiError::from)
@@ -42,12 +42,12 @@ pub(crate) async fn load_in(
     tx: &mut Transaction<'_, Postgres>,
     preview: Uuid,
 ) -> Result<Input, AiError> {
-    let row=sqlx::query("SELECT input_manifest,request_hash,task_config_ref FROM linggan_creation_ai_preview WHERE preview_ref=$1")
-        .bind(preview).fetch_optional(&mut **tx).await?.ok_or(AiError::NotFound)?;
+    let row=sqlx::query("SELECT input_manifest,request_hash,task_config_ref FROM linggan_creation_ai_preview WHERE preview_ref=$1 AND method_version=$2")
+        .bind(preview).bind(METHOD).fetch_optional(&mut **tx).await?.ok_or(AiError::Stale)?;
     let manifest: PreviewRequest =
         serde_json::from_value(row.get("input_manifest")).map_err(|_| AiError::Invalid)?;
     let config: Option<Uuid> = row.get("task_config_ref");
-    let config = config.ok_or(AiError::Model)?; // Legacy previews remain readable, not silently executable.
+    let config = config.ok_or(AiError::Model)?;
     let (_, payload, body_hash) = inputs_in(tx, &manifest).await?;
     let system = system_in(tx, config).await?;
     let hash: String = row.get("request_hash");

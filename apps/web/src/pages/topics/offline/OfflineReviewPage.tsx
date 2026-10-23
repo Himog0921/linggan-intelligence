@@ -5,10 +5,11 @@ import { AppShell } from '../../../app/AppShell';
 import { ActionButton } from '../../../shared/ActionButton';
 import { DecisionForm } from './DecisionForm';
 import { CatalogueView, StatisticsView } from './CatalogueView';
+import { DossierBlocks } from '../../corpus/evidence/DossierBlocks';
 import { fetchPreview, recompute, relevanceLabels, perspectiveLabels, stateLabels, type Preview, type Judgment, type Scenario } from './api';
 import styles from './OfflineReview.module.css';
 
-const fields = { title: '标题', cover_headline: '封面大字', body: '正文', tags: '话题标签', ocr: '图片文字' };
+const fields = { title: '标题', body: '正文', tags: '话题标签', ocr: '图片文字', transcript: '音频转录', frame_text: '视频画面文字' };
 export function OfflineReviewPage() {
   const query = useQuery({ queryKey: ['ai-offline-preview'], queryFn: ({ signal }) => fetchPreview(signal), retry: false, refetchOnWindowFocus: false });
   return <AppShell active="topic" activeState="离线预演" boundaryLabel="合成数据 · 非实时" crumb={<>主题图谱 / 离线预演</>} meta="">
@@ -45,7 +46,7 @@ function LoadedReview({ initial }: { initial: Preview }) {
     {view === 'catalogue' ? <CatalogueView data={data} select={select} /> : <div className={styles.workspace}>
       <nav className={styles.index} aria-label="合成笔记">{data.notes.map(item => <button key={item.input.identity.workRef} aria-current={item === note ? 'page' : undefined} type="button" disabled={busy} onClick={() => select(item.input.identity.workRef)}><strong>{item.title}</strong><small>合成点赞：{item.likes === null ? '未知' : item.likes.toLocaleString('zh-CN')}<br />发布周：{item.publishedWeek ?? '未知'}</small>{item.result.needsReview ? <span>待你重看</span> : null}</button>)}</nav>
       {note ? <>
-        <section className={styles.reader}><h2>合成输入</h2><p>默认五列；缺失与终态状态保留。</p>{note.input.columns.map(column => <section key={column.field}><h3>{fields[column.field]} <small>{stateLabels[column.state]}</small></h3>{note.input.fragments.filter(f => f.field === column.field).map(fragment => <div key={fragment.citationId}><p className={styles.literal}>{fragment.text}</p><details><summary>片段引用与字符位置</summary><code>{fragment.citationId} · [{fragment.start}, {fragment.end})</code></details></div>)}</section>)}</section>
+        <section className={styles.reader}><h2>合成输入</h2><p>完整底稿内容；缺失与终态状态保留。</p>{note.input.columns.map(column => <section key={column.field}><h3>{fields[column.field]} <small>{stateLabels[column.state]}</small></h3>{note.input.fragments.filter(f => f.field === column.field).map(fragment => <div key={fragment.citationId}><DossierBlocks blocks={[fragment.structure]} issues={fragment.issues} /><details><summary>片段引用与字符位置</summary><code>{fragment.citationId} · [{fragment.start}, {fragment.end})</code><p>来源 {fragment.sourceRef} · 来源版本 {fragment.sourceVersion} · 冻结时间 {note.input.asOf}</p></details></div>)}</section>)}</section>
         <aside className={styles.result}><h2>固定示例结果</h2><p>离线预演，没有模型分析。</p>
           {note.result.needsReview ? <p role="status" className={styles.notice}><strong>待你重看</strong>：原裁定方向已合并或移除，当前显示机器示例新结果；原裁定仍保留。</p> : note.result.manualApplied ? <p>当前显示本次会话裁定。</p> : <p>当前显示固定机器示例。</p>}
           <dl><dt>相关性</dt><dd>{relevanceLabels[note.result.effective.relevance]}</dd><dt>主方向</dt><dd>{note.result.effective.relevance === 'related' ? directionName(note.result.effective.primaryDirection) : '不归方向'}</dd><dt>也相关（不进统计）</dt><dd>{note.result.effective.alsoRelated ? directionName(note.result.effective.alsoRelated) : '不设置'}</dd><dt>把握 / 谁在讲</dt><dd>{note.result.effective.confidence === 'certain' ? '确定' : '可能'} / {perspectiveLabels[note.result.effective.perspective]}</dd><dt>理由</dt><dd>{note.result.effective.reason ?? '已清除'}</dd></dl>

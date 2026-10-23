@@ -106,7 +106,7 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
   return (
     <>
       <Panel id="overview" active={tab === 'overview'}>
-        <ReadingPanel context={context} domain={domain} />
+        <ReadingPanel context={context} domain={domain} active={tab === 'overview'} />
       </Panel>
       <Panel id="dossier" active={tab === 'dossier'}>
         {fragment ? <Section title="当前列表引用的原声"><QuoteBlock fragment={fragment} wrap /></Section> : null}
@@ -114,7 +114,6 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
           work={item.ref}
           domain={domain}
           active={tab === 'dossier'}
-          platformComments={item.display.engagement.comment}
           onOpenImage={media => setViewer({ objects: [singleViewerObject(media)], index: 0 })}
           onApplied={onApplied}
         />

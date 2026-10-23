@@ -21,7 +21,7 @@ const paths = {
   ],
   ocr_adoption: [
     'crates/evidence/src/ocr_adoption.rs', 'crates/evidence/src/ocr_adoption/**',
-    'crates/evidence/src/ocr_adoption_persistence.rs', 'crates/evidence/src/ocr_adoption_persistence/**',
+    'crates/evidence/src/ocr_adoption_persistence.rs', 'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**',
     'crates/evidence/src/material_processing.rs', 'crates/evidence/src/material_media_read.rs',
     'crates/evidence/src/material_evidence_fragment.rs', 'crates/evidence/src/research_dossier.rs',
     'apps/worker/src/bin/media_worker.rs', 'apps/worker/src/bin/media_worker_support/**',
@@ -34,7 +34,7 @@ const paths = {
   ocr_audit: [
     'crates/intelligence/src/ocr_quality_audit*', 'crates/intelligence/src/ocr_quality_audit/**',
     'crates/intelligence/src/ai_foundation/**', 'crates/intelligence/src/pi_*',
-    'crates/evidence/src/ocr_adoption_persistence/**', 'crates/evidence/src/cloud_ocr_adoption*',
+    'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**', 'crates/evidence/src/ocr_adoption_persistence.rs', 'crates/evidence/src/cloud_ocr_adoption*',
     'crates/evidence/src/research_dossier.rs', 'crates/evidence/tests/cloud_ocr*',
     'apps/worker/tests/ocr_recognition_postgres.rs', 'apps/worker/tests/ocr_vl_postgres.rs',
     'database/migrations/0144_ocr_manual_recognition.sql',
@@ -55,9 +55,9 @@ const paths = {
     'crates/evidence/src/material_social_read.rs', 'crates/evidence/src/research_dossier.rs',
     'crates/evidence/src/research_dossier/**', 'crates/evidence/src/work_resource_*.rs',
     'crates/evidence/src/material_*.rs', 'crates/evidence/src/content_reobservation.rs',
-    'scripts/test-research-dossier-postgres.sh', 'crates/evidence/src/note_material_input.rs',
-    'crates/evidence/src/note_material_input/**', 'crates/evidence/tests/note_material_postgres.rs',
-    'apps/worker/src/bin/note_material.rs', 'database/migrations/0129_note_material_hashtags.sql',
+    'scripts/test-research-dossier-postgres.sh', 'crates/evidence/src/dossier_input.rs',
+    'crates/evidence/src/dossier_input/**', 'crates/evidence/tests/dossier_input_postgres.rs',
+    'apps/worker/src/bin/research_dossier.rs', 'database/migrations/0129_note_material_hashtags.sql',
     'database/migrations/0130_note_material_snapshot.sql',
     'crates/intelligence/src/ops_ledger/read/creation_read.rs',
     'crates/intelligence/Cargo.toml', 'crates/intelligence/src/note_interpretation_offline.rs',
@@ -89,6 +89,13 @@ export function selectSuites(changedPaths) {
   const selected = Object.fromEntries(suites.map(suite => [suite, false]));
   let full = changedPaths.length === 0;
   for (const path of changedPaths) {
+    // Dossier/readings are shared by OCR, AI input and the three reading surfaces.
+    // Their schema or public source contract must run every existing consumer proof.
+    if (/^crates\/evidence\/src\/(?:research_dossier|material_reading|dossier_input)(?:\.rs$|\/)/.test(path)
+      || /^database\/migrations\/\d+_(research_dossier_v2|comment_study_full_context|dossier_consumer_contracts)\.sql$/.test(path)) {
+      full = true;
+      continue;
+    }
     if (/^(?:\.github\/|AGENTS\.md$|CLAUDE\.md$|codx\.md$|Cargo\.(?:toml|lock)$|\.nvmrc$|rust-toolchain(?:\.toml)?$|docs\/(?:governance|agents)\/|scripts\/(?:ci-|check-project-governance|verify-ui-design-handbook|verify-lids-alignment))/.test(path)) {
       full = true;
       continue;

@@ -5,6 +5,7 @@ import { TopicLibrary } from "./TopicLibrary";
 import { TopicDetail } from "./TopicDetail";
 import * as api from "./workbenchApi";
 import { newDocument } from "./workbenchModel";
+import { ApiError } from "../../shared/api";
 vi.mock("./workbenchApi");
 const id = "00000000-0000-4000-8000-000000000001";
 const works = [
@@ -27,7 +28,10 @@ function library() {
     </QueryClientProvider>,
   );
 }
-beforeEach(() => vi.clearAllMocks());
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(api.isLegacyReferenceUnavailable).mockReturnValue(false);
+});
 describe("unknown values remain unknown on topic surfaces", () => {
   it("does not turn an unread draft into zero words or an unwritten match", async () => {
     vi.mocked(api.readWork).mockImplementation(
@@ -50,6 +54,19 @@ describe("unknown values remain unknown on topic surfaces", () => {
     expect(screen.queryByText(/0 字/)).not.toBeInTheDocument();
     fireEvent.click(retry);
     await waitFor(() => expect(api.readWork).toHaveBeenCalledTimes(2));
+  });
+  it("preserves an unparseable historical draft without offering a retry that cannot succeed", async () => {
+    vi.mocked(api.isLegacyReferenceUnavailable).mockReturnValue(true);
+    vi.mocked(api.readWork).mockRejectedValue(new ApiError({
+      kind: "http",
+      status: 409,
+      code: "creation_legacy_reference_unavailable",
+    }));
+    library();
+    expect(await screen.findByText(/历史引用缺少当前所需的来源定位/)).toBeInTheDocument();
+    expect(screen.getAllByText(/原稿已保留/).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "重试读取方案" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/读取失败，进度未知/)).not.toBeInTheDocument();
   });
   it("only reports no accounts after a successful empty read and labels known platforms in Chinese", () => {
     const props = {

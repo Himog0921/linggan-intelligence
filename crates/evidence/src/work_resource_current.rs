@@ -80,13 +80,8 @@ pub(crate) async fn read_work_resource_current_page(
     tx: &mut Transaction<'_, Postgres>,
     query: WorkResourceCurrentPageQuery<'_>,
 ) -> Result<Vec<WorkResourceCurrent>, sqlx::Error> {
-    let ocr_retirement_schema_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
-            .fetch_one(&mut **tx)
-            .await?;
     let identity_page = query.text.is_none() && query.lane.is_none() && query.media_kind.is_none();
-    let sql =
-        crate::material_query_sql::material_page_sql(ocr_retirement_schema_ready, identity_page);
+    let sql = crate::material_query_sql::material_page_sql(identity_page);
     // Both query strings are assembled only from private compile-time literals in
     // `material_query_sql`; no caller input is interpolated. Runtime values stay bound.
     // Domain, explicit refs and cursor radically change selectivity. A cached generic
@@ -114,6 +109,14 @@ pub(crate) async fn read_work_resource_currents(
     public_refs: &[Uuid],
     as_of: &str,
 ) -> Result<Vec<WorkResourceCurrent>, sqlx::Error> {
+    read_work_resource_currents_in(&mut **tx, public_refs, as_of).await
+}
+
+pub(crate) async fn read_work_resource_currents_in(
+    conn: &mut sqlx::PgConnection,
+    public_refs: &[Uuid],
+    as_of: &str,
+) -> Result<Vec<WorkResourceCurrent>, sqlx::Error> {
     if public_refs.is_empty() {
         return Ok(Vec::new());
     }
@@ -125,7 +128,7 @@ pub(crate) async fn read_work_resource_currents(
         .persistent(false)
         .bind(public_refs)
         .bind(as_of)
-        .fetch_all(&mut **tx)
+        .fetch_all(&mut *conn)
         .await
         .map(|rows| rows.into_iter().map(map_current).collect())
 }

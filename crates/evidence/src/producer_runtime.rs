@@ -171,17 +171,7 @@ pub async fn admit_media_blob(
             .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
     }
     let materialization_ref = Uuid::new_v4();
-    let qualified_read_schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('linggan_material_media_disposition_event') IS NOT NULL",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    let local_asset_path = if qualified_read_schema_ready {
-        format!("/api/local/media/{materialization_ref}/{sha256}")
-    } else {
-        format!("/api/local/media/{sha256}")
-    };
+    let local_asset_path = format!("/api/local/media/{materialization_ref}/{sha256}");
     sqlx::query("INSERT INTO linggan_media_materialization (materialization_ref,blob_sha256,download_attempt_ref,local_asset_path) VALUES ($1,$2,$3,$4)")
         .bind(materialization_ref).bind(sha256).bind(download_attempt_ref).bind(&local_asset_path)
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
@@ -199,15 +189,8 @@ pub async fn admit_media_blob(
     .fetch_optional(&mut *tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
-    let policy_schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('collection_work_order_material_target') IS NOT NULL",
-    )
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    let processing_policy = if policy_schema_ready {
-        sqlx::query(
-            "SELECT target.allow_ocr,target.allow_asr \
+    let processing_policy = sqlx::query(
+        "SELECT target.allow_ocr,target.allow_asr \
              FROM linggan_material_media_origin origin \
              JOIN linggan_runtime_capture_package package USING(package_ref) \
              JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
@@ -216,14 +199,11 @@ pub async fn admit_media_blob(
                ON target.work_order_ref=lease.work_order_ref \
               AND target.content_public_ref=origin.content_public_ref \
              WHERE origin.observation_ref=$1 ORDER BY target.created_at DESC LIMIT 1",
-        )
-        .bind(media_observation_ref)
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(ProducerRuntimeError::Internal)?
-    } else {
-        None
-    };
+    )
+    .bind(media_observation_ref)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
     let allow_ocr = processing_policy
         .as_ref()
         .is_none_or(|row| row.get::<bool, _>("allow_ocr"));

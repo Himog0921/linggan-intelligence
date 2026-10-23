@@ -37,7 +37,7 @@ WITH requested_roles AS MATERIALIZED (
     ORDER BY rank, content_public_ref
     LIMIT $8
 )
-SELECT page.*, left(raw.body_text, 16001) AS body_text,
+SELECT page.*, raw.body_text AS body_text,
        author.author_external_id AS work_author_external_id,
        EXISTS (
            SELECT 1 FROM linggan_material_comment_restriction restriction

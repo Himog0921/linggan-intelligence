@@ -116,18 +116,3 @@ fn encoding_damage_is_not_reported_as_valid_empty_analysis() {
     assert_eq!(CLEANER_VERSION, "comment-clean.v2");
     assert_eq!(unicode_properties::UNICODE_VERSION, (17, 0, 0));
 }
-
-#[test]
-fn outbound_urls_are_redacted_without_changing_source_offsets() {
-    let raw = "有效方法 https://example.test/a?q=1 更多信息";
-    let local = clean(raw);
-    assert!(local.text.contains("example.test"));
-    let sent = outbound(local.clone());
-    assert!(!sent.text.contains("example.test"));
-    assert_eq!(sent.offsets, local.offsets);
-    assert!(sent.resolve("有效方法", raw).is_ok());
-    assert!(sent.reasons.iter().any(|r| r == "url_masked"));
-    let adjacent = outbound(clean("参考https://example.test/a?q=1，依旧不知道怎么办"));
-    assert!(adjacent.text.ends_with(",依旧不知道怎么办"));
-    assert!(!adjacent.text.contains("example.test"));
-}

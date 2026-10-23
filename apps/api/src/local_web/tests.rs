@@ -213,7 +213,8 @@ async fn retired_policy_endpoint_cannot_write_even_for_a_paused_domain() {
     assert_eq!(response.status(), StatusCode::GONE);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(payload["error"]["code"], "policy_endpoint_retired");
+    assert_eq!(payload["error"], "ai_legacy_execution_retired");
+    assert_eq!(payload["taskKey"], "comment_study");
     let policy_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_comment_study_policy \
          WHERE domain_ref=$1 AND model_config_ref=$2",

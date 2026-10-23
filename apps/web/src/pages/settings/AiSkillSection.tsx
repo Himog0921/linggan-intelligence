@@ -9,7 +9,7 @@ import { Field, Moment, Reference } from './AiSettingsFields';
 import { readSkillFolder } from './aiSkillUpload';
 import type { AiAction } from './useAiAction';
 import styles from './AiSettings.module.css';
-const SOURCE_QUALIFICATION: Record<string, string> = { readable: '当前可读', unavailable: '当前来源不可读取或已换版；历史产出已隐藏', not_connected: '这类输入尚未接入读取' };
+const SOURCE_QUALIFICATION: Record<string, string> = { readable: '当前可读', unavailable: '当前来源不可读取；历史产出已隐藏', not_connected: '这类输入尚未接入读取' };
 
 function SkillImport({ data, action }: { data: AiSettings; action: AiAction }) {
   const [files, setFiles] = useState<File[]>([]);

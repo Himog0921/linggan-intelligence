@@ -25,6 +25,7 @@ use linggan_intelligence::{
     },
     content_workbench::*,
     content_workbench_ai as ai,
+    content_workbench_sources::{read_source_in, text_hash},
     model_secrets::SyntheticModelSecrets,
     pi_adapter::PiAdapter,
 };
@@ -39,6 +40,111 @@ fn adapter() -> PiAdapter {
         ),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/pi-adapter/src/adapter.mjs"),
     )
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL contract proof; no provider or child process"]
+async fn dossier_contract_cutover_keeps_history_inert_and_accepts_v2_preview() {
+    let db = fixture::db("dossier_consumer_contracts").await;
+    let columns: Value = sqlx::query_scalar("SELECT c.material_columns FROM linggan_ai_task_setting s JOIN linggan_ai_task_config c ON c.task_config_ref=s.current_config_ref WHERE s.task_key='note_interpretation'")
+        .fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        columns,
+        json!(["title", "body", "tags", "ocr", "transcript", "frame_text"])
+    );
+    let supported: (bool, bool) = sqlx::query_as("SELECT linggan_ai_columns_valid('[\"frame_text\"]'),linggan_ai_columns_valid('[\"cover_headline\"]')")
+        .fetch_one(db.pool()).await.unwrap();
+    assert_eq!(supported, (true, false));
+    let archived: Uuid = sqlx::query_scalar("SELECT task_config_ref FROM linggan_ai_task_config WHERE task_key='note_interpretation' AND material_columns ? 'cover_headline' ORDER BY config_sequence LIMIT 1")
+        .fetch_one(db.pool()).await.unwrap();
+    assert!(sqlx::query("UPDATE linggan_ai_task_setting SET current_config_ref=$1,revision=revision+1 WHERE task_key='note_interpretation'")
+        .bind(archived).execute(db.pool()).await.unwrap_err().to_string().contains("ai_dossier_configuration_required"));
+    let active_contracts: (String, String) = sqlx::query_as("SELECT t.handler_contract,c.execution_contract FROM linggan_ai_task t JOIN linggan_ai_task_setting s USING(task_key) JOIN linggan_ai_task_config c ON c.task_config_ref=s.current_config_ref WHERE t.task_key='writing_legacy'")
+        .fetch_one(db.pool()).await.unwrap();
+    assert_eq!(active_contracts, (ai::METHOD.into(), ai::METHOD.into()));
+
+    let config = setup::declare(&db, "http://127.0.0.1:1").await;
+    let work = fixture::create(&db, fixture::doc()).await;
+    let request = preview(&work, config.task.model_config_ref.unwrap(), "");
+    let result = ai::preview(&db, &request).await.unwrap();
+    assert_eq!(result["methodVersion"], ai::METHOD);
+    let persisted: String = sqlx::query_scalar(
+        "SELECT method_version FROM linggan_creation_ai_preview WHERE preview_ref=$1",
+    )
+    .bind(request.preview_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(persisted, ai::METHOD);
+    let stale = sqlx::query("INSERT INTO linggan_creation_ai_preview(preview_ref,work_ref,input_revision,config_ref,request_hash,method_version,action,input_manifest,reserved_tokens,task_config_ref) SELECT $2,work_ref,input_revision,config_ref,request_hash,'content-workbench-writing.v1',action,input_manifest,reserved_tokens,task_config_ref FROM linggan_creation_ai_preview WHERE preview_ref=$1")
+        .bind(request.preview_ref).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap_err();
+    assert!(
+        stale
+            .to_string()
+            .contains("ai_dossier_writing_contract_required")
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        0
+    );
+
+    let invocation = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,input_tokens,output_tokens,result,finished_at) VALUES($1,$2,$3,'probe',repeat('0',64),'succeeded',0,0,0,0,'{\"syntheticContractFixture\":true}',scope_001_now())")
+        .bind(invocation).bind(config.version).bind(config.model).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_creation_writing_qualification(model_ref,connection_version_ref,method_version,invocation_ref,qualified) VALUES($1,$2,$3,$4,false)")
+        .bind(config.model).bind(config.version).bind(ai::METHOD).bind(invocation).execute(db.pool()).await.unwrap();
+    let stale_qualification = sqlx::query("INSERT INTO linggan_creation_writing_qualification(model_ref,connection_version_ref,method_version,invocation_ref,qualified) VALUES($1,$2,'content-workbench-writing.v1',$3,false)")
+        .bind(config.model).bind(config.version).bind(invocation).execute(db.pool()).await.unwrap_err();
+    assert!(
+        stale_qualification
+            .to_string()
+            .contains("ai_dossier_writing_contract_required")
+    );
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL deferred-constraint migration proof; no provider"]
+async fn dossier_contract_cutover_validates_pending_seed_constraints_before_ddl() {
+    let db = fixture::dossier::fixture::proof_database("dossier_deferred_seed").await;
+    let mut tx = db.pool().begin().await.unwrap();
+    for migration in [
+        include_str!("../../../database/migrations/0127_content_workbench.sql"),
+        include_str!("../../../database/migrations/0128_content_workbench_ai.sql"),
+        include_str!("../../../database/migrations/0140_ai_gen1_writing.sql"),
+        include_str!("../../../database/migrations/0141_ai_gen1_legacy_settings.sql"),
+    ] {
+        sqlx::raw_sql(migration).execute(&mut *tx).await.unwrap();
+    }
+    // Match a fresh install: a seed is inserted before the same transaction
+    // reaches the cutover DDL, leaving its deferred command FK check queued.
+    sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,material_columns,budget_mode,origin) VALUES($1,'note_interpretation','[\"title\",\"cover_headline\",\"body\",\"tags\",\"ocr\",\"transcript\"]','unconfigured','seed')")
+        .bind(Uuid::new_v4()).execute(&mut *tx).await.unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0148_dossier_consumer_contracts.sql"
+    ))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let canonical: bool = sqlx::query_scalar("SELECT bool_and(linggan_ai_columns_valid(c.material_columns) AND (s.task_key<>'writing_legacy' OR c.execution_contract='content-workbench-writing.v2')) FROM linggan_ai_task_setting s JOIN linggan_ai_task_config c ON c.task_config_ref=s.current_config_ref")
+        .fetch_one(&mut *tx).await.unwrap();
+    assert!(canonical);
+    tx.commit().await.unwrap();
+
+    let mut invalid = db.pool().begin().await.unwrap();
+    sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,material_columns,budget_mode,origin,command_ref) VALUES($1,'note_interpretation','[\"body\"]','unconfigured','seed',$2)")
+        .bind(Uuid::new_v4()).bind(Uuid::new_v4()).execute(&mut *invalid).await.unwrap();
+    let error = sqlx::raw_sql("SET CONSTRAINTS linggan_ai_task_config_command_ref_fkey IMMEDIATE")
+        .execute(&mut *invalid)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.as_database_error().unwrap().code().as_deref(),
+        Some("23503")
+    );
+    invalid.rollback().await.unwrap();
 }
 
 #[tokio::test]
@@ -310,17 +416,32 @@ async fn pause_and_unavailable_sources_never_allocate_a_writing_invocation_or_st
         "cancelled"
     );
     setup::enable(&db, ControlScope::Global).await;
-    let cited = fixture::cited_doc(&db).await;
+    let cited = body_and_comment_doc(&db).await;
+    let body = cited.excerpts[0].citation.clone();
+    let comment_work = cited.excerpts[1].citation.work_ref.unwrap();
+    let frozen_body = frozen_source(&db, &body).await;
     let work = fixture::create(&db, cited).await;
     let queued = enqueue(
         &db,
         &preview(&work, config.task.model_config_ref.unwrap(), ""),
     )
     .await;
-    withdraw(&db).await;
-    run(&db, &owner).await;
+    observe_new_body(&db, &body).await;
+    assert_eq!(frozen_source(&db, &body).await, frozen_body);
+    ai::preview(
+        &db,
+        &preview(&work, config.task.model_config_ref.unwrap(), ""),
+    )
+    .await
+    .unwrap();
+    fixture::restrict_comment(&db, comment_work).await;
+    let item = claim_next(&db, owner.fence()).await.unwrap().unwrap();
+    execute_writing(&db, &item, &SyntheticModelSecrets, &unavailable)
+        .await
+        .unwrap();
     let result = ai::status(&db, queued.request_id).await.unwrap();
     assert_eq!(result["state"], "failed");
+    assert_eq!(result["failureCode"], "ai_source_unavailable");
     assert!(result["invocationRef"].is_null());
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_model_invocation WHERE task_key='writing_legacy'",
@@ -332,8 +453,62 @@ async fn pause_and_unavailable_sources_never_allocate_a_writing_invocation_or_st
     assert_eq!(endpoint.requests.lock().unwrap().len(), 1);
     endpoint.finish().await;
 }
-async fn withdraw(db: &Database) {
+async fn body_and_comment_doc(db: &Database) -> WorkDocument {
+    let mut body = fixture::cited_doc(db).await;
+    let comment =
+        fixture::comment_doc_for_work(db, body.excerpts[0].citation.work_ref.unwrap()).await;
+    body.excerpts.extend(comment.excerpts);
+    body.canvas.extend(comment.canvas);
+    body
+}
+async fn frozen_source(db: &Database, citation: &Citation) -> Value {
+    let mut tx = db.pool().begin().await.unwrap();
+    let (source, _) = read_source_in(
+        &mut tx,
+        &citation.source_kind,
+        citation.source_ref,
+        citation.work_ref,
+        &citation.field,
+        &citation.block_ref,
+        &citation.as_of,
+    )
+    .await
+    .unwrap();
+    assert_eq!(source.source_ref, citation.source_ref);
+    assert_eq!(source.work_ref, citation.work_ref);
+    assert_eq!(source.source_kind, citation.source_kind);
+    assert_eq!(source.field, citation.field);
+    assert_eq!(source.block_ref, citation.block_ref);
+    assert_eq!(source.as_of, citation.as_of);
+    assert_eq!(source.source_version, citation.source_version);
+    let selected: String = source
+        .text
+        .chars()
+        .skip(citation.start)
+        .take(citation.end - citation.start)
+        .collect();
+    assert_eq!(text_hash(&selected), citation.text_hash);
+    assert_eq!(
+        source.text,
+        format!("{}结尾不能丢失🙂", "完整正文。".repeat(900))
+    );
+    tx.commit().await.unwrap();
+    serde_json::to_value(source).unwrap()
+}
+async fn observe_new_body(db: &Database, frozen: &Citation) {
     fixture::dossier::fixture::submit_package_at(db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成替代版本","bodyText":"新版原文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
+    let current = linggan_evidence::research_dossier::read(db, frozen.work_ref.unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let body = current
+        .fragments
+        .iter()
+        .find(|f| f.field == "body")
+        .unwrap();
+    assert_eq!(body.text, "新版原文");
+    assert_ne!(body.fragment_id, frozen.block_ref);
+    assert_ne!(body.source_version, frozen.source_version);
 }
 async fn inflight(name: &str, cancel: bool) {
     let db = fixture::db(name).await;
@@ -503,7 +678,11 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
     )
     .await
     .unwrap();
-    let work = fixture::create(&db, fixture::cited_doc(&db).await).await;
+    let document = body_and_comment_doc(&db).await;
+    let body = document.excerpts[0].citation.clone();
+    let comment_work = document.excerpts[1].citation.work_ref.unwrap();
+    let frozen_body = frozen_source(&db, &body).await;
+    let work = fixture::create(&db, document).await;
     let input = preview(&work, config.task.model_config_ref.unwrap(), "");
     ai::preview(&db, &input).await.unwrap();
     let second = import_skill(
@@ -580,10 +759,23 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
     activate_skill(&db, &approve).await.unwrap();
     assert!(claim_next(&db, owner.fence()).await.unwrap().is_none());
     assert_eq!(endpoint.requests.lock().unwrap().len(), 3);
-    withdraw(&db).await;
+    observe_new_body(&db, &body).await;
+    assert_eq!(frozen_source(&db, &body).await, frozen_body);
+    let after_observation = read_comparison(&db, trial.comparison_ref, 0).await.unwrap();
+    assert_eq!(after_observation["sourceQualification"], "readable");
+    assert_eq!(
+        after_observation["baseline"]["output"],
+        compared["baseline"]["output"]
+    );
+    assert_eq!(
+        after_observation["candidate"]["output"],
+        compared["candidate"]["output"]
+    );
+    fixture::restrict_comment(&db, comment_work).await;
     let redacted = read_comparison(&db, trial.comparison_ref, 0).await.unwrap();
     assert_eq!(redacted["sourceQualification"], "unavailable");
     assert!(redacted["baseline"]["output"].is_null());
     assert!(redacted["candidate"]["output"].is_null());
+    assert_eq!(endpoint.requests.lock().unwrap().len(), 3);
     endpoint.finish().await;
 }

@@ -44,16 +44,20 @@ fn reference(value: &Value) -> Result<Uuid, StudySelectionError> {
 }
 
 fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySelectionError> {
-    if manifest["contract"] != "comment-study.context.v1"
+    if [
+        "characterBudget",
+        "truncated",
+        "omitted",
+        "omittedFragmentCount",
+    ]
+    .iter()
+    .any(|key| manifest.get(key).is_some())
+        || manifest["contract"] != "comment-study.context.v2"
         || manifest["cleanerVersion"] != CLEANER_VERSION
         || reference(&manifest["workRef"])? != key.work_ref
     {
         return Err(StudySelectionError::InvalidSnapshot);
     }
-    let budget = manifest["characterBudget"]
-        .as_u64()
-        .filter(|v| (1..=20000).contains(v))
-        .ok_or(StudySelectionError::InvalidSnapshot)?;
     let sources = manifest["sources"]
         .as_array()
         .ok_or(StudySelectionError::InvalidSnapshot)?;
@@ -63,12 +67,48 @@ fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySe
         let kind = text(&source["kind"])?;
         if !matches!(
             kind,
-            "native_title" | "cover_headline" | "body" | "image_substantive_text" | "asr_text" | "frame_ocr_text"
+            "native_title"
+                | "body"
+                | "tags"
+                | "image_substantive_text"
+                | "asr_text"
+                | "frame_ocr_text"
         ) {
             return Err(StudySelectionError::InvalidSnapshot);
         }
         reference(&source["sourceRef"])?;
+        if text(&source["sourceVersion"])?.is_empty()
+            || text(&source["blockRef"])?.is_empty()
+            || text(&source["asOf"])?.is_empty()
+            || !matches!(
+                text(&source["speaker"])?,
+                "author" | "other" | "unconfirmed"
+            )
+            || !source["structure"].is_object()
+            || !source["issues"].is_array()
+        {
+            return Err(StudySelectionError::InvalidSnapshot);
+        }
+        for key in ["readingRef", "unitRef"] {
+            if !source[key].is_null() {
+                reference(&source[key])?;
+            }
+        }
         let content = text(&source["text"])?;
+        linggan_evidence::research_dossier::content::validate_blocks(std::slice::from_ref(
+            &source["structure"],
+        ))
+        .map_err(|_| StudySelectionError::InvalidSnapshot)?;
+        linggan_evidence::research_dossier::content::validate_issues(&source["issues"])
+            .map_err(|_| StudySelectionError::InvalidSnapshot)?;
+        if linggan_evidence::research_dossier::content::block_text(&source["structure"]) != content
+            || source["structure"]["speaker"]
+                .as_str()
+                .unwrap_or("unconfirmed")
+                != source["speaker"].as_str().unwrap_or("")
+        {
+            return Err(StudySelectionError::InvalidSnapshot);
+        }
         let length = content.chars().count() as u64;
         if source["characterCount"].as_u64() != Some(length) {
             return Err(StudySelectionError::InvalidSnapshot);
@@ -76,9 +116,6 @@ fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySe
         used = used
             .checked_add(length)
             .ok_or(StudySelectionError::InvalidSnapshot)?;
-        if used > budget {
-            return Err(StudySelectionError::InvalidSnapshot);
-        }
         let ordinal = match &source["slotOrdinal"] {
             Value::Null => None,
             value => Some(
@@ -88,7 +125,7 @@ fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySe
                     .ok_or(StudySelectionError::InvalidSnapshot)?,
             ),
         };
-        retained.push(json!({"kind":kind,"order":order,"slotOrdinal":ordinal,"text":content}));
+        retained.push(json!({"kind":kind,"order":order,"slotOrdinal":ordinal,"text":content, "speaker":source["speaker"],"structure":source["structure"],"issues":source["issues"]}));
     }
     if manifest["includedCharacterCount"].as_u64() != Some(used) {
         return Err(StudySelectionError::InvalidSnapshot);
@@ -153,7 +190,7 @@ fn parent_context(
 
 /// source_ref/raw/parent/context must originate in one authorized freeze snapshot. This function
 /// verifies shape/content, not DB ownership or current restrictions. The caller must not reread
-/// different work/parent versions after selection. Already bounded context is never truncated here.
+/// different work/parent versions after selection. Full note context is never truncated here.
 pub fn prepare_study_input(
     key: &CommentKey,
     source_ref: Uuid,
@@ -177,7 +214,7 @@ pub fn prepare_study_input(
         parent_context(key, parent)?;
     let raw_sha256 = hash_text(raw);
     let research_sha256 = hash_text(&cleaned.text);
-    let input_fingerprint = hash(&json!({"contract":"comment-study.input-fingerprint.v1",
+    let input_fingerprint = hash(&json!({"contract":"comment-study.input-fingerprint.v2",
         "commentKey":key,"rawSha256":raw_sha256,"researchSha256":research_sha256,
         "cleanerVersion":CLEANER_VERSION,"dependencyState":dependency_state,
         "workContext":context,"parentContext":parent_identity}))?;

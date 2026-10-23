@@ -38,6 +38,11 @@ impl SourceError {
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceItem {
+    pub as_of: String,
+    pub block_ref: String,
+    pub speaker: String,
+    pub structure: Value,
+    pub issues: Vec<Value>,
     pub fragment_id: String,
     pub source_kind: SourceKind,
     pub source_ref: Uuid,
@@ -63,6 +68,8 @@ pub struct SourceQuery {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AnchorRequest {
+    pub as_of: String,
+    pub block_ref: String,
     pub domain_ref: Uuid,
     pub source_kind: SourceKind,
     pub source_ref: Uuid,
@@ -75,6 +82,9 @@ pub struct AnchorRequest {
 pub struct ValidatedCitation {
     pub selected_text: String,
     pub text_hash: String,
+    pub speaker: String,
+    pub content: Value,
+    pub issues: Vec<Value>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -96,13 +106,12 @@ fn item(
     text: String,
 ) -> SourceItem {
     SourceItem {
-        fragment_id: format!(
-            "{source}.{}",
-            serde_json::to_value(&field)
-                .unwrap_or(Value::Null)
-                .as_str()
-                .unwrap_or("unknown")
-        ),
+        as_of: String::new(),
+        fragment_id: source_block_ref(source, &field),
+        block_ref: source_block_ref(source, &field),
+        speaker: "unconfirmed".into(),
+        structure: Value::Null,
+        issues: Vec::new(),
         source_kind: kind,
         source_ref: source,
         work_ref: work,
@@ -147,14 +156,11 @@ fn comment_item(
         text,
     );
     i.author_label = "匿名评论来源".into();
-    i.title = c["parentWork"]["fragments"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .find(|f| f["field"] == "title")
-        .and_then(|f| f["text"].as_str())
-        .map(|s| s.to_owned())
-        .unwrap_or_else(|| "匿名原声 · 父笔记未知".into());
+    i.speaker = "other".into();
+    i.title = c["parentWork"]["dossier"]["note"]["displayTitle"]
+        .as_str()
+        .unwrap_or("匿名原声 · 父笔记未知")
+        .to_owned();
     Ok(i)
 }
 
@@ -164,20 +170,36 @@ pub async fn read_source_in(
     source: Uuid,
     work: Option<Uuid>,
     field: &SourceField,
+    block_ref: &str,
+    as_of: &str,
 ) -> Result<(SourceItem, Value), SourceError> {
+    let valid: bool = sqlx::query_scalar("SELECT CASE WHEN pg_input_is_valid($1,'timestamp with time zone') THEN $1::timestamptz<=scope_001_now() ELSE false END")
+        .bind(as_of).fetch_one(&mut **tx).await?;
+    if !valid {
+        return Err(SourceError::Invalid);
+    }
     if *kind == SourceKind::Comment {
         if *field != SourceField::CommentBody {
             return Err(SourceError::Invalid);
         }
-        let c = linggan_evidence::read_creation_comment_in(tx, source)
+        let c = linggan_evidence::read_creation_comment_at_in(tx, source, as_of)
             .await?
             .ok_or(SourceError::Unavailable)?;
-        let i = comment_item(source, work, field, &c)?;
+        let mut i = comment_item(source, work, field, &c)?;
+        i.as_of = as_of.into();
+        if i.block_ref != block_ref {
+            return Err(SourceError::Unavailable);
+        }
         return Ok((i, c));
     }
     if *kind == SourceKind::OpsPublication {
         if !matches!(field, SourceField::Title | SourceField::Body) {
             return Err(SourceError::Invalid);
+        }
+        let visible: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ops_publication p JOIN linggan_ops_import_batch b ON b.batch_ref=p.last_changed_batch_ref WHERE p.publication_ref=$1 AND b.applied_at<=$2::timestamptz)")
+            .bind(source).bind(as_of).fetch_one(&mut **tx).await?;
+        if !visible {
+            return Err(SourceError::Unavailable);
         }
         let p = read_creation_publications(tx, None, None, Some(source))
             .await?
@@ -203,13 +225,14 @@ pub async fn read_source_in(
             .account_name
             .clone()
             .unwrap_or_else(|| "我方历史内容".into());
+        i.as_of = as_of.into();
+        if i.block_ref != block_ref {
+            return Err(SourceError::Unavailable);
+        }
         return Ok((i, json!({"publication":p})));
     }
     let work_id = work.ok_or(SourceError::Invalid)?;
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut **tx)
-        .await?;
-    let mut d = research_dossier::read_in(tx, &[work_id], &as_of)
+    let d = research_dossier::read_in(tx, &[work_id], as_of)
         .await?
         .remove(&work_id)
         .ok_or(SourceError::Unavailable)?;
@@ -217,7 +240,11 @@ pub async fn read_source_in(
     let f = d
         .fragments
         .iter()
-        .find(|f| f.source_ref == source && name.as_str() == Some(f.field.as_str()))
+        .find(|f| {
+            f.fragment_id == block_ref
+                && f.source_ref == source
+                && name.as_str() == Some(f.field.as_str())
+        })
         .cloned()
         .ok_or_else(|| {
             if *kind == SourceKind::Note
@@ -230,122 +257,79 @@ pub async fn read_source_in(
                 SourceError::Unavailable
             }
         })?;
-    if (*kind == SourceKind::Note && !matches!(field, SourceField::Title | SourceField::Body))
-        || (*kind == SourceKind::Ocr
-            && !matches!(field, SourceField::Ocr | SourceField::CoverHeadline))
-    {
+    let expected = fragment_kind(&f.field).ok_or(SourceError::Invalid)?;
+    if expected.0 != *kind || expected.1 != *field {
         return Err(SourceError::Invalid);
     }
-    let title = d
-        .fragments
-        .iter()
-        .find(|f| f.field == "title")
-        .map(|f| f.text.clone())
-        .unwrap_or_default();
-    let mut i = item(
-        kind.clone(),
-        source,
-        Some(work_id),
-        field.clone(),
-        f.source_version,
-        title,
-        f.text,
-    );
-    i.author_label = d.metadata["authorDisplayName"]
-        .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| {
-            if i.title.is_empty() {
-                "作者未知 · 来源编号分组".into()
-            } else {
-                "作者未知 · 原篇标题分组".into()
-            }
-        });
-    if *kind == SourceKind::Ocr {
-        let m = d
-            .media
-            .iter_mut()
-            .find(|m| m["derivativeRef"] == json!(source))
-            .ok_or(SourceError::Unavailable)?;
-        research_dossier::enrich_layout(tx, m).await?;
-        i.location = Some(ocr_location(m, &i.text)?);
-    }
+    let i = dossier_item(&d, &f)?;
     Ok((i, json!({"dossier":d})))
 }
-fn ocr_location(media: &Value, text: &str) -> Result<OcrLocation, SourceError> {
-    let layer = &media["ocrLayering"];
-    let parse =
-        |v: &Value| serde_json::from_value::<Uuid>(v.clone()).map_err(|_| SourceError::Unavailable);
-    let retained = layer["retainedLines"]
-        .as_array()
-        .ok_or(SourceError::Unavailable)?;
-    let mut spans = Vec::new();
-    let mut offset = 0;
-    // The semantic layer joins retained lines verbatim; if a processor changed text, no
-    // approximate contains match is promoted into an exact image location.
-    for line in layer["lines"].as_array().ok_or(SourceError::Unavailable)? {
-        let line_ref = parse(&line["lineRef"])?;
-        if !retained.iter().any(|r| r["lineRef"] == json!(line_ref)) {
-            continue;
-        }
-        let s = line["text"]
+fn source_block_ref(source: Uuid, field: &SourceField) -> String {
+    format!(
+        "{source}.{}",
+        serde_json::to_value(field)
+            .expect("field is serializable")
             .as_str()
-            .ok_or(SourceError::Unavailable)?
-            .trim();
-        let remaining: String = text.chars().skip(offset).collect();
-        let leading = remaining.chars().take_while(|c| c.is_whitespace()).count();
-        let tail: String = remaining.chars().skip(leading).collect();
-        if !tail.starts_with(s) {
-            continue;
-        }
-        let start = offset + leading;
-        let end = start + s.chars().count();
-        offset = end;
-        let b = line["bbox"].as_array().ok_or(SourceError::Unavailable)?;
-        if b.len() != 4 {
-            return Err(SourceError::Unavailable);
-        }
-        let coords: Vec<f64> = b
-            .iter()
-            .map(|v| v.as_f64().ok_or(SourceError::Unavailable))
-            .collect::<Result<_, _>>()?;
-        let bbox = [
-            coords[0],
-            coords[1],
-            coords[2] - coords[0],
-            coords[3] - coords[1],
-        ];
-        if bbox.iter().any(|v| !v.is_finite() || *v < 0.0)
-            || bbox[0] + bbox[2] > 1.0
-            || bbox[1] + bbox[3] > 1.0
-        {
-            return Err(SourceError::Unavailable);
-        }
-        spans.push(OcrLineSpan {
-            line_ref,
-            start,
-            end,
-            bbox,
-        });
-    }
-    if spans.is_empty() {
-        return Err(SourceError::Unavailable);
-    }
-    Ok(OcrLocation {
-        derivative_ref: parse(&media["derivativeRef"])?,
-        layout_ref: parse(&layer["layoutRef"])?,
-        layering_ref: parse(&layer["layeringRef"])?,
-        blob_sha256: media["semanticMediaSource"]["blobSha256"]
-            .as_str()
-            .ok_or(SourceError::Unavailable)?
-            .into(),
-        slot_key: media["slotKey"]
-            .as_str()
-            .ok_or(SourceError::Unavailable)?
-            .into(),
-        line_spans: spans,
+            .expect("field is a string")
+    )
+}
+
+fn fragment_kind(field: &str) -> Option<(SourceKind, SourceField)> {
+    Some(match field {
+        "title" => (SourceKind::Note, SourceField::Title),
+        "body" => (SourceKind::Note, SourceField::Body),
+        "tags" => (SourceKind::Note, SourceField::Tags),
+        "ocr" => (SourceKind::Ocr, SourceField::Ocr),
+        "transcript" => (SourceKind::Transcript, SourceField::Transcript),
+        "frame_text" => (SourceKind::FrameText, SourceField::FrameText),
+        _ => return None,
     })
 }
+
+fn dossier_item(
+    d: &research_dossier::ResearchDossier,
+    f: &linggan_evidence::creator_discovery::Fragment,
+) -> Result<SourceItem, SourceError> {
+    let (kind, field) = fragment_kind(&f.field).ok_or(SourceError::Invalid)?;
+    let mut item = item(
+        kind,
+        f.source_ref,
+        Some(d.work_ref),
+        field,
+        f.source_version.clone(),
+        d.note["displayTitle"].as_str().unwrap_or("").to_owned(),
+        f.text.clone(),
+    );
+    item.as_of = d.as_of.clone();
+    item.fragment_id = f.fragment_id.clone();
+    item.block_ref = f.fragment_id.clone();
+    item.speaker = f.speaker.clone();
+    item.structure = f.structure.clone();
+    item.issues = f.issues.clone();
+    item.author_label = d.metadata["author"]["displayName"]
+        .as_str()
+        .unwrap_or("作者未知")
+        .to_owned();
+    item.location = block_location(d, f);
+    Ok(item)
+}
+
+fn block_location(
+    d: &research_dossier::ResearchDossier,
+    f: &linggan_evidence::creator_discovery::Fragment,
+) -> Option<OcrLocation> {
+    let bbox: [f64; 4] = serde_json::from_value(f.structure.get("bbox")?.clone()).ok()?;
+    let unit = f.unit_ref?;
+    let material = d.materials.iter().find(|m| m["ref"] == json!(unit))?;
+    Some(OcrLocation {
+        unit_ref: f.unit_ref?,
+        reading_ref: f.reading_ref?,
+        block_ref: f.fragment_id.clone(),
+        slot_key: material["slotKey"].as_str()?.into(),
+        bbox,
+    })
+}
+
 fn exact_slice(text: &str, start: usize, end: usize) -> Result<String, SourceError> {
     if start >= end || end > text.chars().count() {
         return Err(SourceError::Invalid);
@@ -354,19 +338,25 @@ fn exact_slice(text: &str, start: usize, end: usize) -> Result<String, SourceErr
 }
 fn selection_location(
     location: Option<OcrLocation>,
-    start: usize,
-    end: usize,
+    _start: usize,
+    _end: usize,
 ) -> Option<OcrLocation> {
-    location.map(|mut l| {
-        l.line_spans.retain(|s| s.start < end && s.end > start);
-        l
-    })
+    location
 }
 pub async fn validate_citation(
     tx: &mut Transaction<'_, Postgres>,
     c: &Citation,
 ) -> Result<ValidatedCitation, SourceError> {
-    let (i, _) = read_source_in(tx, &c.source_kind, c.source_ref, c.work_ref, &c.field).await?;
+    let (i, _) = read_source_in(
+        tx,
+        &c.source_kind,
+        c.source_ref,
+        c.work_ref,
+        &c.field,
+        &c.block_ref,
+        &c.as_of,
+    )
+    .await?;
     if i.source_version != c.source_version {
         return Err(SourceError::Changed);
     }
@@ -378,6 +368,13 @@ pub async fn validate_citation(
     Ok(ValidatedCitation {
         selected_text: text,
         text_hash: hash,
+        speaker: i.speaker,
+        content: if i.structure.is_object() {
+            i.structure
+        } else {
+            json!({"kind":"paragraph","text":i.text})
+        },
+        issues: i.issues,
     })
 }
 pub async fn qualify_citations(
@@ -487,14 +484,24 @@ pub async fn validate_anchor(db: &Database, a: &AnchorRequest) -> Result<Value, 
         a.domain_ref,
     )
     .await?;
-    let (i, _) =
-        read_source_in(&mut tx, &a.source_kind, a.source_ref, a.work_ref, &a.field).await?;
+    let (i, _) = read_source_in(
+        &mut tx,
+        &a.source_kind,
+        a.source_ref,
+        a.work_ref,
+        &a.field,
+        &a.block_ref,
+        &a.as_of,
+    )
+    .await?;
     if i.source_version != a.source_version {
         return Err(SourceError::Changed);
     }
     let text = exact_slice(&i.text, a.start, a.end)?;
     let hash = text_hash(&text);
     let citation = Citation {
+        block_ref: a.block_ref.clone(),
+        as_of: a.as_of.clone(),
         source_kind: a.source_kind.clone(),
         source_ref: a.source_ref,
         work_ref: a.work_ref,
@@ -515,13 +522,19 @@ pub async fn read_source(
     source: Uuid,
     work: Option<Uuid>,
     field: &SourceField,
+    block_ref: &str,
+    source_version: &str,
+    as_of: &str,
 ) -> Result<Value, SourceError> {
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
     ensure_source_domain_in(&mut tx, kind, source, work, domain).await?;
-    let (i, context) = read_source_in(&mut tx, kind, source, work, field).await?;
+    let (i, context) = read_source_in(&mut tx, kind, source, work, field, block_ref, as_of).await?;
+    if i.source_version != source_version {
+        return Err(SourceError::Changed);
+    }
     tx.commit().await?;
     Ok(json!({"item":i,"context":context}))
 }
@@ -586,7 +599,17 @@ pub async fn list_sources(db: &Database, q: &SourceQuery) -> Result<Value, Sourc
                 } else {
                     SourceField::Body
                 };
-                match read_source_in(&mut tx, &kind, reference, None, &field).await {
+                match read_source_in(
+                    &mut tx,
+                    &kind,
+                    reference,
+                    None,
+                    &field,
+                    &source_block_ref(reference, &field),
+                    &as_of,
+                )
+                .await
+                {
                     Ok((i, _)) => items.push(i),
                     Err(SourceError::Unavailable | SourceError::Restricted) => {}
                     Err(e) => return Err(e),
@@ -596,45 +619,11 @@ pub async fn list_sources(db: &Database, q: &SourceQuery) -> Result<Value, Sourc
         _ => {
             let dossiers = research_dossier::read_in(&mut tx, &refs, &as_of).await?;
             for d in dossiers.into_values() {
-                let title = d
-                    .fragments
-                    .iter()
-                    .find(|f| f.field == "title")
-                    .map(|f| f.text.clone())
-                    .unwrap_or_default();
-                for f in d.fragments {
-                    let field = match (kind.clone(), f.field.as_str()) {
-                        (SourceKind::Note, "title") => SourceField::Title,
-                        (SourceKind::Note, "body") => SourceField::Body,
-                        (SourceKind::Ocr, "ocr") => SourceField::Ocr,
-                        (SourceKind::Ocr, "cover_headline") => SourceField::CoverHeadline,
-                        _ => continue,
-                    };
-                    let mut entry = item(
-                        kind.clone(),
-                        f.source_ref,
-                        Some(d.work_ref),
-                        field,
-                        f.source_version,
-                        title.clone(),
-                        f.text,
-                    );
-                    entry.author_label = d.metadata["authorDisplayName"]
-                        .as_str()
-                        .map(str::to_owned)
-                        .unwrap_or_else(|| "作者未知 · 原篇标题分组".into());
-                    items.push(entry);
+                for f in &d.fragments {
+                    if fragment_kind(&f.field).is_some_and(|(source_kind, _)| source_kind == kind) {
+                        items.push(dossier_item(&d, f)?);
+                    }
                 }
-            }
-        }
-    }
-    for i in &mut items {
-        if i.source_kind == SourceKind::Ocr {
-            match read_source_in(&mut tx, &i.source_kind, i.source_ref, i.work_ref, &i.field).await
-            {
-                Ok((full, _)) => *i = full,
-                Err(SourceError::Unavailable) => i.qualification = "location_unavailable".into(),
-                Err(e) => return Err(e),
             }
         }
     }
@@ -654,21 +643,18 @@ mod tests {
         assert!(exact_slice("😀", 0, 2).is_err());
     }
     #[test]
-    fn nonorigin_ocr_box_and_unicode_line_mapping() {
-        let line = Uuid::new_v4();
-        let next = Uuid::new_v4();
-        let layout = Uuid::new_v4();
-        let derivative = Uuid::new_v4();
-        let media = json!({"derivativeRef":derivative,"slotKey":"xhs:synthetic:image:2","semanticMediaSource":{"blobSha256":"a".repeat(64)},"ocrLayering":{"layoutRef":layout,"layeringRef":Uuid::new_v4(),"retainedLines":[{"lineRef":line},{"lineRef":next}],"lines":[{"lineRef":line,"text":" 甲😀 ","bbox":[0.12,0.28,0.88,0.305]},{"lineRef":next,"text":"乙","bbox":[0.2,0.4,0.9,0.5]}]}});
-        let location = ocr_location(&media, "甲😀\n乙").unwrap();
-        assert_eq!(location.layout_ref, layout);
-        assert_eq!(location.line_spans[0].start, 0);
-        assert_eq!(location.line_spans[0].end, 2);
-        assert_eq!(location.line_spans[1].start, 3);
-        assert!((location.line_spans[0].bbox[2] - 0.76).abs() < 1e-10);
-        assert!((location.line_spans[0].bbox[3] - 0.025).abs() < 1e-10);
-        let selected = selection_location(Some(location), 1, 4).unwrap();
-        assert_eq!(selected.line_spans.len(), 2);
-        assert!(ocr_location(&media, "模型改写过的文字").is_err());
+    fn selections_keep_the_real_block_box_without_fabricating_character_geometry() {
+        let location = OcrLocation {
+            unit_ref: Uuid::new_v4(),
+            reading_ref: Uuid::new_v4(),
+            block_ref: "canonical-block".into(),
+            slot_key: "image:1".into(),
+            bbox: [0.12, 0.28, 0.76, 0.025],
+        };
+        assert_eq!(
+            selection_location(Some(location.clone()), 1, 4),
+            Some(location)
+        );
+        assert!(selection_location(None, 1, 4).is_none());
     }
 }

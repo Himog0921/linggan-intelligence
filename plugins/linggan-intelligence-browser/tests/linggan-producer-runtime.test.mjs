@@ -818,3 +818,39 @@ test('detail NUL text is losslessly encoded before freeze without mutating sourc
   assert.equal(clean.records[0].payload.content, '不变\n正文');
   assert.equal(clean.records[0].payload.sourceTextEncoding, undefined);
 });
+
+
+test('platform image slots retain explicit missing positions and repeated image URLs', () => {
+  const manifest = { state: 'complete', source: 'platform_image_list', expectedPages: 3 };
+  const packageValue = packageMediaSlots({ platform: 'xhs', note: {
+    noteId: 'note-positions', imageInventory: manifest,
+    imagePositions: [
+      { page: 1, candidateUris: ['https://cdn.example/repeated.jpg'] },
+      { page: 2, candidateUris: [] },
+      { page: 3, candidateUris: ['https://cdn.example/repeated.jpg'] },
+    ],
+  } });
+  assert.deepEqual(packageValue.coverage.target.imageInventory, manifest);
+  assert.deepEqual(packageValue.records.map((record) => record.slotKey), [
+    'xhs:note-positions:image:1', 'xhs:note-positions:image:3',
+  ]);
+  assert.deepEqual(packageValue.records.map((record) => record.slot.displayOrdinal), [1, 3]);
+  assert.ok(packageValue.records.every((record) => record.slot.displayOrderBasis === 'platform_explicit'));
+  assert.equal(packageValue.records[0].observation.externalUri, packageValue.records[1].observation.externalUri);
+});
+
+test('DOM image observations have relationship identities without asserting page order', () => {
+  const packageValue = packageMediaSlots({ platform: 'xhs', note: {
+    noteId: 'note-dom', imageInventory: { state: 'observed_set', source: 'dom_observed_set', expectedPages: null },
+    imagePositions: [{ page: null, candidateUris: ['https://cdn.example/a.jpg'] }],
+  } });
+  assert.equal(packageValue.records[0].slot.ordinal, 1);
+  assert.equal(Object.hasOwn(packageValue.records[0].slot, 'displayOrdinal'), false);
+  assert.equal(Object.hasOwn(packageValue.records[0].slot, 'displayOrderBasis'), false);
+});
+
+test('capture package capacity fails explicitly instead of dropping tail records', () => {
+  assert.throws(() => createCapturePackage({ packageKind: 'media_slots', platform: 'xhs',
+    records: Array.from({ length: 2049 }, (_, index) => ({ index })),
+  }), /capture_package_record_limit_exceeded/);
+});

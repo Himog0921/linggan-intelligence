@@ -282,23 +282,34 @@ function extractHashtags(text = '') {
   return matches.map(tag => tag.replace(/^#/, '').trim()).filter(Boolean);
 }
 
-/**
- * 移除话题标签
- */
-function removeHashtags(text = '') {
-  return String(text || '').replace(/#\s*[^\s#，。！？,.!?:：;；、]+/g, '').replace(/\s+/g, ' ').trim();
+/** Native text is evidence: preserve whitespace, markdown and hashtags verbatim. */
+export function readXhsNativeText(note = {}) {
+  return {
+    title: typeof note.title === 'string' ? note.title : undefined,
+    content: typeof note.desc === 'string' ? note.desc : undefined,
+    bodyText: typeof note.desc === 'string' ? note.desc : undefined,
+    hashtags: [...new Set([...extractHashtags(note.title), ...extractHashtags(note.desc)])],
+  };
 }
 
-function stripLooseHashes(text = '') {
-  return String(text || '')
-    .replace(/^\s*#{1,6}\s*/gm, '')
-    .replace(/(^|\s)(?:#\s*){2,}(?=\s|$)/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function cleanNoteBodyText(text = '') {
-  return stripLooseHashes(removeHashtags(text));
+/** Only a platform imageList asserts page order and a complete expected page count. */
+export function readXhsImageInventory(note = {}) {
+  const imageList = Array.isArray(note.imageList) ? note.imageList : [];
+  const explicit = Array.isArray(note.imageList)
+    && note._captureSource !== 'xhs.detail_dom'
+    && note._imageInventorySource !== 'dom_observed_set';
+  const imagePositions = imageList.map((img, index) => {
+    const candidateUris = getHighQualityImageCandidates(getXhsImageUrl(img));
+    return { page: explicit ? index + 1 : null, candidateUris };
+  });
+  return {
+    images: imagePositions.map(({ candidateUris }) => candidateUris[0]).filter(Boolean),
+    imageCandidates: imagePositions.map(({ candidateUris }) => candidateUris).filter((values) => values.length),
+    imagePositions,
+    imageInventory: explicit
+      ? { state: 'complete', source: 'platform_image_list', expectedPages: imageList.length }
+      : { state: 'observed_set', source: 'dom_observed_set', expectedPages: null },
+  };
 }
 
 function toNormalizedTimestamp(raw) {
@@ -473,9 +484,12 @@ export function readXhsPublishedAtEvidence(note = {}, { now = Date.now() } = {})
   };
 }
 
-function readDetailText(root, selectors = []) {
+function readDetailText(root, selectors = [], preserve = false) {
   for (const selector of selectors) {
-    const value = String(root?.querySelector?.(selector)?.textContent || '').trim();
+    const raw = root?.querySelector?.(selector)?.textContent;
+    if (typeof raw !== 'string') continue;
+    if (preserve) return raw;
+    const value = raw.trim();
     if (value) return value;
   }
   return '';
@@ -508,8 +522,8 @@ export function readXhsNoteDetailFromDom(wd = window, { expectedNoteId = '' } = 
     .map((element) => pickImageUrlFromElement(element))
     .filter(Boolean);
   const imageList = [...new Set(imageUrls)].map((urlDefault) => ({ urlDefault }));
-  const title = readDetailText(root, ['.note-title', '[class*="note-title"]']);
-  const desc = readDetailText(root, ['.note-content .desc', '[class*="note-content"] [class*="desc"]']);
+  const title = readDetailText(root, ['.note-title', '[class*="note-title"]'], true);
+  const desc = readDetailText(root, ['.note-content .desc', '[class*="note-content"] [class*="desc"]'], true);
   const authorName = readDetailText(root, ['.author-wrapper .name', '[class*="author"] [class*="name"]']);
   const authorAvatar = pickImageUrlFromElement(root.querySelector?.(
     '.author-container img, .author-wrapper > a img, .author-wrapper img.avatar-item',
@@ -540,11 +554,7 @@ export function readXhsNoteDetailFromDom(wd = window, { expectedNoteId = '' } = 
 export function enrichXhsNoteDetailFromDom(note = {}, domNote = null) {
   if (!domNote) return note;
 
-  const structuredImages = Array.isArray(note.imageList) ? note.imageList : [];
-  const structuredHasMedia = structuredImages.some((image) => {
-    const value = getXhsImageUrl(image);
-    return typeof value === 'string' && value.trim().length > 0;
-  });
+  const hasPlatformImageList = Array.isArray(note.imageList);
   const domImages = Array.isArray(domNote.imageList) ? domNote.imageList : [];
   const user = note.user && typeof note.user === 'object' ? note.user : {};
   const domUser = domNote.user && typeof domNote.user === 'object' ? domNote.user : {};
@@ -556,7 +566,8 @@ export function enrichXhsNoteDetailFromDom(note = {}, domNote = null) {
 
   return {
     ...note,
-    ...(!structuredHasMedia && domImages.length ? { imageList: domImages } : {}),
+    ...(!hasPlatformImageList && domImages.length
+      ? { imageList: domImages, _imageInventorySource: 'dom_observed_set' } : {}),
     user: {
       ...user,
       ...(!String(user.userId || '').trim() && domUser.userId ? { userId: domUser.userId } : {}),
@@ -655,12 +666,7 @@ export async function collectNote(wd = window, options = {}) {
   }
 
   // 3. 映射字段
-  const imageUrls = (note.imageList || [])
-    .map((img) => toHighQualityImageUrl(getXhsImageUrl(img)))
-    .filter(Boolean);
-  const imageCandidates = (note.imageList || [])
-    .map((img) => getHighQualityImageCandidates(getXhsImageUrl(img)))
-    .filter((arr) => arr.length > 0);
+  const imageInventory = readXhsImageInventory(note);
   const livePhotoStreams = extractXhsLivePhotoStreams(note.imageList || []);
   const videoSelection = pickBestVideoStream(note.video?.media?.stream || {});
   const existing = await noteStore.getById(note.noteId || note.id || noteKey);
@@ -679,14 +685,10 @@ export async function collectNote(wd = window, options = {}) {
     platform: 'xhs',
     url: safeUrl(wd.location?.href || window.location.href),
     canonicalUrl: safeUrl(wd.location?.href || window.location.href),
-    title: cleanNoteBodyText(note.title || ''),
-    content: cleanNoteBodyText(note.desc || ''),
-    bodyText: cleanNoteBodyText(note.desc || ''),
-    hashtags: [...new Set([...extractHashtags(note.title || ''), ...extractHashtags(note.desc || '')])],
+    ...readXhsNativeText(note),
     type: note.type === 'video' ? 'video' : 'normal',
     cover: toHighQualityImageUrl(getXhsImageUrl(note.imageList?.[0] || {})),
-    images: imageUrls,
-    imageCandidates,
+    ...imageInventory,
     livePhotoStreams,
     video: videoSelection.url,
     videoStreams: videoSelection.streams || [],

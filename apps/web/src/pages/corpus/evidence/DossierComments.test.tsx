@@ -10,7 +10,7 @@ function setup(...responders: Parameters<FetchKit['route']>[2][]) {
   const kit = createFetchMock();
   kit.install();
   kit.route('GET', PATH, ...responders);
-  const view = renderWithProviders(<DossierComments work={workRef(1)} domain={DOMAIN} />);
+  const view = renderWithProviders(<DossierComments work={workRef(1)} domain={DOMAIN} active />);
   return { kit, ...view };
 }
 
@@ -55,6 +55,26 @@ describe('评论与回复：直接展示（Mog 2026-10-23）', () => {
     expect(kit.of('GET', PATH)[1]?.search.get('cursor')).toBe('next-1');
     expect(screen.getAllByText('合成评论 29')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: '加载更多评论' })).toBeNull();
+  });
+
+  it('「作品」标签没激活时不读评论；激活后才读', async () => {
+    const kit = createFetchMock();
+    kit.install();
+    kit.route('GET', PATH, ok(dossierCommentsJson(1)));
+    const view = renderWithProviders(<DossierComments work={workRef(1)} domain={DOMAIN} active={false} />);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(kit.of('GET', PATH)).toHaveLength(0);
+    view.unmount();
+    renderWithProviders(<DossierComments work={workRef(1)} domain={DOMAIN} active />);
+    expect(await screen.findByText('合成评论 0')).toBeInTheDocument();
+  });
+
+  it('读取被明确拒绝（来源撤回或无权限）时，已显示的评论一并收起', async () => {
+    const { user } = setup(ok(dossierCommentsJson(30, { cursor: 'next-1', total: 40 })), fail(404, 'material_not_found'));
+    await screen.findByText('合成评论 0');
+    await user.click(screen.getByRole('button', { name: '加载更多评论' }));
+    expect(await screen.findByText(/评论暂时读不出来/)).toBeInTheDocument();
+    expect(screen.queryByText('合成评论 0')).toBeNull();
   });
 
   it('一条都没采到时如实说；读失败只在这里提示，可以重读', async () => {

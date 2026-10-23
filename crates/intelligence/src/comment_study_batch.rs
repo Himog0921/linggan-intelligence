@@ -588,6 +588,21 @@ async fn lock_work_targets(
     Ok(targets)
 }
 
+// Canonical structure contains the block content. Rendered text remains in the frozen
+// source manifest for exact citation matching, but is not repeated in the provider packet.
+fn provider_work_context(context: &Value) -> Value {
+    let mut value = context.clone();
+    for source in value["sources"].as_array_mut().into_iter().flatten() {
+        if source["structure"].is_object() {
+            if let Some(object) = source.as_object_mut() {
+                object.remove("text");
+                object.remove("characterCount");
+            }
+        }
+    }
+    value
+}
+
 fn batch_manifest(
     batch_ref: Uuid,
     run_ref: Uuid,
@@ -599,7 +614,7 @@ fn batch_manifest(
         "batchRef":batch_ref,
         "runRef":run_ref,
         "workRef":work.content_public_ref,
-        "workContext":work.context_manifest,
+        "workContext":provider_work_context(&work.context_manifest),
         "targets":targets.iter().map(|target| json!({
             "targetRef":target.target_ref,
             "sourceRef":target.source_ref,
@@ -869,5 +884,26 @@ mod tests {
         assert_eq!(parsed.unattributable_result_count, 1);
         assert!(parsed.rejected_targets.is_empty());
         assert_eq!(parsed.missing_target_refs, vec![target]);
+    }
+    #[test]
+    fn provider_context_keeps_full_structured_block_and_provenance_without_duplicate_text() {
+        let text = format!("{}最后的限定条件", "规范正文😀\n".repeat(2000));
+        let source = Uuid::new_v4();
+        let reading = Uuid::new_v4();
+        let frozen = json!({"contract":"comment-study.context.v2","sources":[{
+            "blockRef":"work.reading.1","sourceRef":source,"sourceVersion":"exact-version","readingRef":reading,
+            "speaker":"other","text":text,"characterCount":text.chars().count(),
+            "structure":{"kind":"quote","text":text},"issues":[{"code":"unconfirmed_attribution"}]}]});
+        let payload = provider_work_context(&frozen);
+        assert_eq!(payload["sources"][0]["structure"]["text"], text);
+        assert_eq!(payload["sources"][0]["sourceRef"], json!(source));
+        assert_eq!(payload["sources"][0]["readingRef"], json!(reading));
+        assert_eq!(payload["sources"][0]["speaker"], "other");
+        assert_eq!(
+            payload["sources"][0]["issues"],
+            frozen["sources"][0]["issues"]
+        );
+        assert!(payload["sources"][0].get("text").is_none());
+        assert_eq!(frozen["sources"][0]["text"], text);
     }
 }

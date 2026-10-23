@@ -167,7 +167,6 @@ pub async fn read_overview(
                 "SELECT jsonb_build_object( \
                  'policyRef',policy.policy_ref,'domainRef',policy.domain_ref, \
                  'contract',policy.contract,'commentBudget',policy.comment_budget, \
-                 'contextCharacterBudget',policy.context_character_budget, \
                  'modelConfigured',policy.model_config_ref IS NOT NULL \
              ) \
              FROM linggan_comment_study_active_policy active \
@@ -848,7 +847,7 @@ pub async fn read_runs(
             "pendingResolutionCount":extra.map(|item| item.1),
             "pendingPairCount":extra.map(|item| item.2),
             "limits":{"commentBudget":row.get::<Option<i32>,_>("comment_budget"),
-                "contextCharacterBudget":row.get::<Option<i32>,_>("context_character_budget"),
+
                 "tokenLimit":row.get::<Option<i64>,_>("token_limit")},
             "state":row.get::<String,_>("state"),"createdAt":row.get::<String,_>("created_at"),
             "finishedAt":row.get::<Option<String>,_>("finished_at"),
@@ -887,7 +886,7 @@ pub async fn read_run_detail(
            'runRef',run.run_ref,'domainRef',policy.domain_ref,'policyRef',run.policy_ref, \
            'asOf',run.as_of,'state',run.state,'createdAt',run.created_at,'finishedAt',run.finished_at, \
            'limits',jsonb_build_object('commentBudget',run.comment_budget, \
-             'contextCharacterBudget',run.context_character_budget,'tokenLimit',run.token_limit), \
+             'tokenLimit',run.token_limit), \
            'selectionContract',run.selection_manifest->>'contract', \
            'scope',run.selection_manifest, \
            'requestedWorkCount',CASE WHEN jsonb_typeof(run.selection_manifest->'requestedWorkRefs')='array' \

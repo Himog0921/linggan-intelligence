@@ -238,7 +238,7 @@ mod tests {
 
     fn frozen_source_stamp() -> Value {
         json!({
-            "inputContract":"topic-map.source-windows.v2", "inputHash":"frozen-input",
+            "inputContract":"topic-map.source-windows.v3", "inputHash":"frozen-input",
             "workRef":"work-1", "contextWorkRefs":["context-1"], "scopeWorkRefs":["work-1","context-1"],
             "methodVersion":"topic-map.research.v4", "configRef":"config-1", "domain":"domain-1",
             "domainDefinitionHash":"domain-hash", "roleIdentity":{"workRole":"author_work"},

@@ -75,15 +75,15 @@ jobs:
         run: |
           export WEB_APP_PROOF_NODE="$(command -v node)"
           bash scripts/test-web-app-postgres.sh
-      - name: Note material readonly React main path (owned synthetic PostgreSQL)
+      - name: Research dossier v2 React main path (owned synthetic PostgreSQL)
         env:
-          WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof/note-material
-        run: bash scripts/test-research-dossier-postgres.sh --note-material-ui
+          WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof/dossier-v2
+        run: bash scripts/test-research-dossier-postgres.sh --dossier-ui
       - name: AI-GEN1 material input contracts (synthetic PostgreSQL only)
         run: |
           cargo test -p linggan-evidence --lib material_ --locked
-          cargo test -p linggan-worker --bin linggan-note-material --locked
-          bash scripts/test-research-dossier-postgres.sh --note-material
+          cargo test -p linggan-worker --bin linggan-research-dossier --locked
+          bash scripts/test-research-dossier-postgres.sh --dossier-input
       - name: Web source formatting
         run: |
           # 只查本模块自己的 Rust 文件：local_web.rs 在主线上已有与本模块无关的格式偏差。

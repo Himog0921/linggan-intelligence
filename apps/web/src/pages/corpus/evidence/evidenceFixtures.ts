@@ -366,114 +366,38 @@ export function commentsJson(count: number, options: { cursor?: string | null; t
 export const REVISION = 'r'.repeat(64);
 
 export function planJson(overrides: Partial<Record<string, unknown>> = {}) {
-  return { alreadyCurrent: 0, expectedRevision: REVISION, imageJobs: 4, imageSlots: 4, layoutCount: 1, maximumLayoutsPerWork: 100, needsOcr: 3, pendingLayouts: 1, workCount: 1, ...overrides };
+  return { alreadyCurrent: 0, expectedRevision: REVISION, imageJobs: 4, imageSlots: 4, layoutCount: 1, needsOcr: 3, pendingReviewCount: 0, pendingLayouts: 1, workCount: 1, ...overrides };
 }
-
-export function dossierMediaJson(n: number, options: { layered?: boolean; contextOnly?: boolean; handle?: string | null; other?: string } = {}) {
-  const lines = [
-    { bbox: [0.12, 0.28, 0.88, 0.305], confidence: 0.98, lineRef: mediaRef(700 + n), ordinal: 0, text: '第0行连续的图片正文，完整可用。' },
-    { bbox: [0.1, 0.1, 0.85, 0.17], confidence: 0.98, lineRef: mediaRef(710 + n), ordinal: 1, text: '封面大字独立保留' },
-    { bbox: [0, 0.9, 0.2, 0.92], confidence: 0.6, lineRef: mediaRef(720 + n), ordinal: 2, text: '平台水印' },
-  ];
+export function dossierMaterialJson(n: number, overrides: Record<string, unknown> = {}) {
+  const reading = mediaRef(800 + n);
   return {
-    contextOnly: options.contextOnly ?? false,
-    derivativeRef: mediaRef(800 + n),
-    displayText: '第0行连续的图片正文，完整可用。',
-    kind: 'ocr_text',
-    ocrLayering:
-      options.layered === false
-        ? null
-        : {
-            cleanCorpusEligible: false,
-            coverHeadline: null,
-            decisionSource: 'rules',
-            engineVersion: 'synthetic-paddle',
-            excludedLines: [{ classification: 'platform_watermark', lineRef: mediaRef(720 + n) }],
-            imageHeight: 320,
-            imageSubstantiveText: null,
-            imageWidth: 240,
-            layerVersion: 'rules-v1',
-            layeringRef: mediaRef(730 + n),
-            layoutRef: mediaRef(740 + n),
-            lines,
-            retainedLines: [
-              { classification: 'substantive_text', lineRef: mediaRef(700 + n) },
-              { classification: 'primary_copy', lineRef: mediaRef(710 + n) },
-            ],
-            state: 'PARTIAL',
-          },
-    originalAssetUrl: options.handle === undefined ? mediaHandle(n) : options.handle,
-    originalMaterializationRef: mediaRef(n),
-    otherProcessing: options.other ? { state: options.other } : undefined,
-    processorKind: 'image_ocr',
-    researchText: '第0行连续的图片正文，完整可用。',
-    selectionBasis: 'readable_source,image_dimensions',
-    slotKey: `xhs:ext:image:${n}`,
-    slotOrdinal: n,
-    state: 'ACQUIRED',
+    ref: mediaRef(700 + n), kind: 'image', slotKey: `xhs:ext:image:${n}`, page: n,
+    sourceState: 'present', sourceRef: mediaRef(500 + n), sourceVersion: `source-${n}`, currentRevisionRef: reading,
+    originalUrl: mediaHandle(n), reading: { generatedBy: 'ordinary_ocr', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2', review: null },
+    blocks: [
+      { ref: `${workRef(1)}.${reading}.0`, kind: 'heading', text: '封面大字独立保留', speaker: 'author', bbox: [0.1, 0.1, 0.75, 0.07] },
+      { ref: `${workRef(1)}.${reading}.1`, kind: 'paragraph', text: '第0行连续的图片正文，完整可用。', speaker: 'unconfirmed', bbox: [0.12, 0.28, 0.76, 0.025] },
+    ], issues: [], ...overrides,
   };
 }
-
-export function taskInputJson(kind: 'creator' | 'comments' | 'topics') {
-  const fragment = { field: 'title', characterCount: 6, end: 6, fragmentId: `f-${kind}`, sourceRef: mediaRef(500), sourceVersion: 'v', start: 0, text: '合成作品标题' };
-  return kind === 'comments'
-    ? { characterBudget: 20000, includedCharacterCount: 6, omitted: [], sources: [{ characterCount: 6, kind: 'native_title', text: '合成作品标题' }], truncated: false }
-    : { characterBudget: 4000, fragments: [fragment], includedCharacterCount: 6, markdown: `## 平台标题\n\n[S1]\n合成作品标题\n`, truncated: kind === 'creator' ? false : true };
-}
-
-export interface DossierOptions {
-  fragments?: { field: string; text: string; id?: string }[];
-  media?: unknown[];
-  plan?: Record<string, unknown>;
-  coverage?: Record<string, unknown>;
-  metadata?: Record<string, unknown>;
-}
-
+export interface DossierOptions { bodyText?: string; materials?: unknown[]; plan?: Record<string, unknown>; coverage?: Record<string, unknown>; note?: Record<string, unknown> }
 export function dossierJson(n: number, options: DossierOptions = {}) {
-  const ref = workRef(n);
-  const fragments = (options.fragments ?? [{ field: 'title', text: '合成作品标题' }, { field: 'body', text: '合成正文。'.repeat(120) }]).map(({ field, text, id }, index) => ({
-    end: Array.from(text).length,
-    field,
-    fragmentId: id ?? `${ref}.${field}`,
-    sourceRef: mediaRef(500 + index),
-    sourceVersion: `version-${index}`,
-    start: 0,
-    text,
-  }));
+  const ref = workRef(n); const base = `/api/local/work-resources/${ref}/research-dossier`;
   return {
     dossier: {
-      asOf: '2026-10-16 13:28:10.18622+08',
-      contract: 'research-dossier.v1',
-      coverage: { body: 'KNOWN', comments: 'separate_authorized_research_channel', mediaAvailable: 1, mediaCount: 8, sampling: 'collected_material_only', title: 'KNOWN', titleQualification: 'source_value', uncertainImages: 1, ...(options.coverage ?? {}) },
-      fragments,
-      materialRevision: 'm'.repeat(64),
-      media: options.media ?? [dossierMediaJson(1)],
-      metadata: {
-        authorDisplayName: '合成作者',
-        authorExternalId: 'synthetic-author-id',
-        collects: { observedAt: '2026-10-10T09:00:00Z', state: 'KNOWN', value: 30 },
-        comments: { observedAt: '2026-10-10T09:00:00Z', state: 'KNOWN', value: 321 },
-        externalId: `ext-${n}`,
-        likes: { observedAt: '2026-10-10T09:00:00Z', state: 'KNOWN', value: 1200 },
-        observedAt: '2026-10-10 17:00',
-        platform: 'xhs',
-        publishedAt: '2026-10-13 13:28',
-        publishedPrecision: 'second',
-        shares: { observedAt: '2026-10-10T09:00:00Z', state: 'KNOWN', value: 2 },
-        ...(options.metadata ?? {}),
-      },
-      revision: REVISION,
-      sections: [
-        { fragmentIds: fragments.filter(f => f.field === 'title').map(f => f.fragmentId), kind: 'title', label: '平台标题', sourceState: 'KNOWN', state: 'available' },
-        { fragmentIds: [], kind: 'cover_headline', label: '封面与图片大字', sourceState: null, state: 'unknown' },
-        { fragmentIds: fragments.filter(f => f.field === 'body').map(f => f.fragmentId), kind: 'body', label: '正文', sourceState: 'KNOWN', state: 'available' },
-        { fragmentIds: [], kind: 'comments', label: '评论', sourceState: null, state: 'separate' },
+      contract: 'research-dossier.v2', workRef: ref, revision: REVISION, materialRevision: 'm'.repeat(64), asOf: '2026-10-23T08:00:00Z',
+      note: { platform: 'xhs', externalId: `synthetic-ext-${n}`, sourceUrl: null, platformTitle: '合成作品标题', titleSource: { sourceRef: mediaRef(500), sourceVersion: 'native-1' }, displayTitle: '合成作品标题', displayTitleBasis: 'platform', ...options.note },
+      materials: options.materials ?? [
+        { ref: mediaRef(900), kind: 'body', slotKey: null, page: null, sourceState: 'present', sourceRef: mediaRef(501), sourceVersion: 'native-1', currentRevisionRef: mediaRef(901), originalUrl: null,
+          reading: { generatedBy: 'platform', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2', review: null },
+          blocks: [{ ref: `${ref}.${mediaRef(901)}.0`, kind: 'paragraph', speaker: 'author', text: options.bodyText ?? '合成正文。'.repeat(120) }], issues: [] },
+        dossierMaterialJson(1),
       ],
-      workRef: ref,
-    },
-    inputs: { comments: taskInputJson('comments'), creator: taskInputJson('creator'), topics: taskInputJson('topics') },
-    markdown: '# 合成底稿\n\n合成作品标题\n',
-    relayerPlan: planJson(options.plan),
+      coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 2, acquiredPages: 1, processedPages: 1, missingPages: [2], unknownOrder: false },
+        sources: { body: { state: 'available', units: 1, readings: 1 }, images: { state: 'partial', units: 2, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } }, issues: [], ...options.coverage },
+      attachments: { comments: { href: `${base}/comments` }, author: { href: `${base}/metadata?sections=author` }, interaction: { href: `${base}/metadata?sections=interaction` }, versions: { href: `${base}/candidates` } },
+      selection: { mode: 'full', kinds: [], unitRefs: [], blockRefs: [], imagePages: [], omittedUnits: 0, completeRevision: REVISION },
+    }, relayerPlan: planJson(options.plan),
   };
 }
 
@@ -502,10 +426,6 @@ export function dossierCommentsJson(count: number, options: { cursor?: string | 
 
 export function relayerReceiptJson(overrides: Partial<Record<string, unknown>> = {}) {
   return { alreadyCurrent: 0, layerVersion: 'rules-v2', needsOcr: 0, results: [], scopeCount: 1, skipped: 0, updated: 1, workRef: workRef(1), ...overrides };
-}
-
-export function creatorPreviewJson(overrides: Partial<Record<string, unknown>> = {}) {
-  return { available: true, estimatedInputTokensUpperBound: 6195, inputTokenLimit: 8192, input: { materials: '## 平台标题\n\n合成作品标题' }, stage: 'prepared_request', system: '合成系统提示词（诊断用）', ...overrides };
 }
 
 // ───────────────────────── 复观测 ─────────────────────────
@@ -541,19 +461,5 @@ export function shellJson(overrides: Record<string, unknown> = {}) {
     selectedDomain: DOMAIN,
     collectionState: '观察中',
     ...overrides,
-  };
-}
-
-/** note-material-input.v1 合成响应；真实形状另由 owned Axum/PG 主路径核对。 */
-export function noteMaterialJson(work = workRef(1), domain = DOMAIN) {
-  const fields = ['title', 'cover_headline', 'body', 'tags', 'ocr', 'transcript'];
-  return {
-    contract: 'note-material-input.v1', fingerprintContract: 'note-material-fingerprint.v1',
-    workRef: work, domainRef: domain, asOf: '2026-10-20T00:00:00Z', dossierRevision: 'synthetic-dossier-v1',
-    materialFingerprint: SHA, provenanceHash: 'b'.repeat(64), snapshotIdentity: 'c'.repeat(64),
-    ready: false, notReadyReasons: ['transcript_processing_pending'], layerVersion: 'rules-v3',
-    processingScope: { included: ['image_ocr', 'asr'], contextOnly: ['comment_image', 'author_avatar', 'thumbnail', 'audio_extract'], notConnected: ['video_frame_ocr'] },
-    columns: fields.map(field => ({ field, state: field === 'body' ? 'available' : field === 'transcript' ? 'waiting' : 'not_acquired', reasons: [] as string[] })),
-    fragments: [{ citationId: 'S1', field: 'body', logicalPosition: 'native', sourceRef: workRef(99), sourceVersion: 'synthetic-v1', start: 4, end: 8, textHash: SHA, text: '合成🙂文' }],
   };
 }

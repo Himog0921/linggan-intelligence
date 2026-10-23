@@ -1,10 +1,13 @@
 # OCR-MANUAL-HUMAN-ADOPTION-454 · Evidence Library UI 变更清单
 
-> 状态: 草案
+> 状态: 历史归档
 > 最后核对: 2026-10-23
 > 适用范围: Evidence Library 当前作品的已保存手动 OCR 结果
 > 事实来源: PAGE-EVIDENCE-001、OCR-CONTENT-LAYERING-001、手动云端 OCR 人工采用合同、LIDS v7.0
 > 冲突时以谁为准: Mog 最新确认、AGENTS.md、受控 API 回执与数据合同
+
+
+本文保留 #479 的实现与发布设计历史。当前实现由 [research-dossier.v2](../../data-contracts/research-dossier.md) 取代：人工采用统一使用 material_reading 命令，旧 overlay、独立 API 和表单已退役。下文旧迁移/端点步骤不能用于当前候选发布；0145 历史迁移保持原样，并在 canonical 0146 之前执行。
 
 ## 1. 事项
 

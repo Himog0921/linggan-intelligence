@@ -1,4 +1,4 @@
-import type { DossierMedia } from './dossierTypes';
+import type { DossierMaterial } from './dossierTypes';
 import { purposeLabel } from './evidencePresent';
 import type { Fragment, Inspector, MediaSlot } from './evidenceTypes';
 
@@ -161,15 +161,15 @@ export function positionText(index: number, total: number): string {
 }
 
 /** 底稿里「放大查看原图」用的单图对象：同一个查看器，单图模式，不能前后翻。 */
-export function singleViewerObject(media: DossierMedia): ViewerObject {
+export function singleViewerObject(media: DossierMaterial): ViewerObject {
   return {
     index: 0,
     purpose: 'body_image',
     label: purposeLabel('body_image'),
-    ordinal: media.slotOrdinal ?? 1,
-    objectRef: media.originalMaterializationRef,
+    ordinal: media.page ?? 1,
+    objectRef: media.sourceRef,
     bytesState: 'ACQUIRED',
-    derivedState: media.state,
+    derivedState: media.sourceState,
     assetUrl: media.originalUrl,
   };
 }

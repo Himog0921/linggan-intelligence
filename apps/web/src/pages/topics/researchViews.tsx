@@ -639,9 +639,7 @@ export function currentResearchSummary(
               {[
                 "自动研究每批最多 ",
                 number(limits.automaticBatchWindows),
-                " 个窗口 · 单窗最多 ",
-                number(limits.windowChars),
-                " 字符 · 每窗最多 ",
+                " 个窗口 · 完整单篇笔记 · 每窗最多 ",
                 number(limits.primaryCommentsPerWindow),
                 " 条主要评论",
               ].join("")}

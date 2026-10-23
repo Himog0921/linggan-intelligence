@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { RouterProvider, createMemoryRouter } from 'react-router';
 import { vi } from 'vitest';
 import { EvidencePage } from './EvidencePage';
-import { DOMAIN, detailJson, dossierCommentsJson, listItemJson, listJson, shellJson, workRef, type DetailOptions, type ItemOptions } from './evidenceFixtures';
+import { DOMAIN, detailJson, dossierCommentsJson, dossierJson, listItemJson, listJson, shellJson, workRef, type DetailOptions, type ItemOptions } from './evidenceFixtures';
 import { DRAWER_QUERY, NO_HOVER_QUERY } from './useMediaQuery';
 import { newClient, ok, type FetchKit, type Responder } from './testKit';
 
@@ -66,7 +66,8 @@ export function pageRoutes(kit: FetchKit, routes: Routes = {}) {
   kit.route('GET', LIST_PATH, routes.list ?? ok(listJson(items(count))));
   for (let n = 1; n <= count; n += 1) {
     kit.route('GET', detailPathOf(n), ok(detailJson(n, routes.detail?.(n) ?? {})));
+    kit.route('GET', `${detailPathOf(n)}/research-dossier`, ok(dossierJson(n)));
     kit.route('GET', commentsPathOf(n), routes.comments?.(n) ?? ok(dossierCommentsJson(2, { offset: n * 100 })));
-    kit.route('GET', ocrPathOf(n), ok({ runRef: null, workRef: workRef(n), state: 'unavailable', completedImages: 0, totalImages: 0, currentStage: '尚未配置 OCR 模型。', modelLabel: null, unavailableReason: '尚未配置 OCR 模型。', coverTitle: null, coverTitleStatus: null, images: [], pendingCount: 0, failureCode: null }));
+    kit.route('GET', ocrPathOf(n), ok({ runRef: null, workRef: workRef(n), state: 'unavailable', completedImages: 0, totalImages: 0, currentStage: '尚未配置 OCR 模型。', modelLabel: null, unavailableReason: '尚未配置 OCR 模型。', batchRef: null, batchRevision: null, cancelRequested: false, scope: null, images: [], pendingCount: 0, failureCode: null }));
   }
 }

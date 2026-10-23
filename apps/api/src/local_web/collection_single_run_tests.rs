@@ -233,6 +233,37 @@ async fn collection_single_run_browser_with_persisted_data() {
     assert_eq!(legacy_read["legacy"], true);
     assert_eq!(legacy_read["available_details"], 1);
     assert_eq!(legacy_read["ended"], true);
+    let inspection_domain = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain(domain_ref,name,status) VALUES($1,'V4合成独立领域','active')")
+        .bind(inspection_domain).execute(db.pool()).await.unwrap();
+    let inspection_package = legacy_fixture::submit_package_for_domain(
+        &db,
+        &inspection_domain.to_string(),
+        "V4合成持续观察",
+        "deep_archive",
+        json!({"query":"V4合成持续观察"}),
+        2,
+        "discovery_search",
+        legacy_fixture::search_coverage("V4合成持续观察", 2),
+        json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        vec![
+            legacy_fixture::discovery_card(
+                "v4-work-a",
+                "V4合成作品甲",
+                "10",
+                "https://www.xiaohongshu.com/explore/v4-work-a?xsec_token=SYNTHETIC",
+            ),
+            legacy_fixture::discovery_card(
+                "v4-work-b",
+                "V4合成作品乙",
+                "0",
+                "https://www.xiaohongshu.com/explore/v4-work-b?xsec_token=SYNTHETIC",
+            ),
+        ],
+    )
+    .await;
+    let inspection_target:uuid::Uuid=sqlx::query_scalar("SELECT w.target_ref FROM linggan_runtime_capture_package p JOIN collection_work_order_lease_task t USING(task_id) JOIN collection_work_order_lease l USING(lease_ref) JOIN collection_work_order w USING(work_order_ref) WHERE p.package_ref=$1")
+        .bind(inspection_package).fetch_one(db.pool()).await.unwrap();
     // Count is frozen after all fixture domains have been inserted.
     let domain_count: i64 = sqlx::query_scalar("SELECT count(*) FROM observation_domain")
         .fetch_one(db.pool())
@@ -250,7 +281,7 @@ async fn collection_single_run_browser_with_persisted_data() {
     let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
     let directory = std::env::var("COLLECTION_PROOF_DIR").unwrap();
     std::fs::create_dir_all(&directory).unwrap();
-    std::fs::write(std::path::Path::new(&directory).join("fixture.json"),json!({"origin":origin,"domainRef":domain,"otherDomainRef":other,"runRef":first,"selectionRunRef":selection_ref,"domainCount":domain_count,"activeStationRef":active_station,"changedAccountRef":changed.account_ref,"unclaimedRef":unclaimed,"existingRequestKey":existing_request_key,"legacyDomainRef":legacy_domain,"legacyRunRef":legacy_run,"legacyTargetRef":legacy_target}).to_string()).unwrap();
+    std::fs::write(std::path::Path::new(&directory).join("fixture.json"),json!({"origin":origin,"domainRef":domain,"otherDomainRef":other,"runRef":first,"selectionRunRef":selection_ref,"domainCount":domain_count,"activeStationRef":active_station,"changedAccountRef":changed.account_ref,"unclaimedRef":unclaimed,"existingRequestKey":existing_request_key,"inspectionTargetRef":inspection_target,"inspectionDomainRef":inspection_domain,"legacyDomainRef":legacy_domain,"legacyRunRef":legacy_run,"legacyTargetRef":legacy_target}).to_string()).unwrap();
     let node = std::env::var("COLLECTION_PROOF_NODE").unwrap();
     for name in [
         "test-collection-single-run-ui.cjs",

@@ -35,6 +35,8 @@ pub enum WorkbenchError {
     ExportConflict,
     #[error("creation_storage_not_configured")]
     StorageNotConfigured,
+    #[error("creation_legacy_reference_unavailable")]
+    LegacyReferenceUnavailable,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
     #[error(transparent)]

@@ -108,31 +108,26 @@ pub(crate) async fn start_run_kind(
     }
     let run = r.command_ref;
     let mut selections = vec![];
-    let mut inventory = json!({"eligible":0,"selected":1,"skippedRestrictedOrRetired":0,"skippedPrivacyUnreviewed":0,"seed":r.seed,"filterVersion":"admitted-ocr-v1"});
+    let mut inventory = json!({"eligible":0,"selected":1,"skippedRestrictedOrRetired":0,"skippedPrivacyUnreviewed":0,"seed":r.seed,"filterVersion":"canonical-reading-v2"});
     if !r.visual_probe {
-        let rows=sqlx::query("SELECT adoption_ref,content_public_ref,blob_sha256,state FROM linggan_ocr_audit_eligible_source a WHERE EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=a.content_public_ref AND u.domain_ref=$1) ORDER BY adoption_ref LIMIT 10001").bind(s.domain_ref).fetch_all(&mut *c.tx).await?;
-        if rows.len() > 10000 {
-            return Err(FoundationError::AdmissionDenied(vec![
-                "audit_inventory_limit".into(),
-            ]));
-        }
+        let rows=sqlx::query("SELECT reading_ref,content_public_ref,blob_sha256,(jsonb_array_length(issues)>0 OR EXISTS(SELECT 1 FROM jsonb_array_elements(blocks) b WHERE jsonb_array_length(COALESCE(b->'issues','[]'))>0)) AS risk FROM linggan_ocr_audit_eligible_source a WHERE EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=a.content_public_ref AND u.domain_ref=$1) ORDER BY reading_ref").bind(s.domain_ref).fetch_all(&mut *c.tx).await?;
         let candidates: Vec<_> = rows
             .into_iter()
             .map(|row| Candidate {
-                adoption_ref: row.get("adoption_ref"),
+                reading_ref: row.get("reading_ref"),
                 work_ref: row.get("content_public_ref"),
                 blob_sha256: row.get("blob_sha256"),
-                risk: row.get::<String, _>("state") != "ACCEPTED",
+                risk: row.get("risk"),
             })
             .collect();
         let admitted_count = candidates.len();
         let candidates: Vec<_> = candidates
             .into_iter()
-            .filter(|c| s.privacy_cleared_refs.contains(&c.adoption_ref))
+            .filter(|c| s.privacy_cleared_refs.contains(&c.reading_ref))
             .collect();
         selections = sampling::select(&r.seed, &candidates, &s);
-        let total:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_media_ocr_adoption a JOIN linggan_media_ocr_layout l USING(layout_ref) WHERE EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=l.content_public_ref AND u.domain_ref=$1)").bind(s.domain_ref).fetch_one(&mut *c.tx).await?;
-        inventory = json!({"eligible":candidates.len(),"selected":selections.len(),"skippedRestrictedOrRetired":total-admitted_count as i64,"skippedPrivacyUnreviewed":admitted_count-candidates.len(),"candidates":candidates,"seed":r.seed,"filterVersion":"admitted-ocr-v1","randomPopulation":"eligible_except_fixed_regression","requested":{"random":s.random_count,"risk":s.risk_count,"regression":s.regression_count}});
+        let total:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_material_unit material WHERE material.kind='image' AND material.current_reading_ref IS NOT NULL AND EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=material.content_public_ref AND u.domain_ref=$1)").bind(s.domain_ref).fetch_one(&mut *c.tx).await?;
+        inventory = json!({"eligible":candidates.len(),"selected":selections.len(),"skippedRestrictedOrRetired":total-admitted_count as i64,"skippedPrivacyUnreviewed":admitted_count-candidates.len(),"candidates":candidates,"seed":r.seed,"filterVersion":"canonical-reading-v2","randomPopulation":"eligible_except_fixed_regression","requested":{"random":s.random_count,"risk":s.risk_count,"regression":s.regression_count}});
     }
     sqlx::query("INSERT INTO linggan_ocr_audit_run(run_ref,run_key,seed,kind,settings,task_config_ref,endpoint_ref,model_id,connection_version_ref,price_ref,prompt_version,inventory) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)")
  .bind(run).bind(&r.run_key).bind(&r.seed).bind(kind).bind(value).bind(cfg.get::<Uuid,_>("current_config_ref")).bind(model.endpoint_ref).bind(&model.model_id).bind(model.connection_version_ref).bind(price).bind(super::PROMPT_VERSION).bind(&inventory).execute(&mut *c.tx).await?;
@@ -151,13 +146,13 @@ pub(crate) async fn start_run_kind(
         });
     } else {
         for selected in &selections {
-            let source = source::load_in(&mut c.tx, selected.candidate.adoption_ref)
+            let source = source::load_in(&mut c.tx, selected.candidate.reading_ref)
                 .await?
                 .ok_or(FoundationError::Conflict)?;
             let sample = Uuid::new_v4();
-            let human:Value=sqlx::query_scalar("SELECT COALESCE(jsonb_object_agg(field,to_jsonb(v)),'{}') FROM(SELECT DISTINCT ON(field) review_ref,revision,field,after_text,source_kind,block_ref,source_start,source_end FROM linggan_media_ocr_review WHERE adoption_ref=$1 AND decision='adopt' ORDER BY field,revision DESC)v").bind(source.adoption_ref).fetch_one(&mut *c.tx).await?;
-            let local_snapshot = json!({"humanAdoptions":human,"inputFingerprint":source.assessment.input_fingerprint,"ruleVersion":source.assessment.rule_version});
-            sqlx::query("INSERT INTO linggan_ocr_audit_sample(sample_ref,run_ref,adoption_ref,pool,blob_sha256,local_rule_version,local_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7)").bind(sample).bind(run).bind(source.adoption_ref).bind(&selected.pool).bind(&source.input.image.blob_sha256).bind(&source.assessment.rule_version).bind(local_snapshot).execute(&mut *c.tx).await?;
+            let local_snapshot = source.frozen_snapshot();
+            sqlx::query("INSERT INTO linggan_ocr_audit_sample(sample_ref,run_ref,reading_ref,pool,blob_sha256,local_rule_version,local_snapshot) VALUES($1,$2,$3,$4,$5,$6,$7)")
+                .bind(sample).bind(run).bind(source.reading_ref).bind(&selected.pool).bind(&source.image.blob_sha256).bind(&source.rule_version).bind(local_snapshot).execute(&mut *c.tx).await?;
             items.push(BatchInput {
                 item_key: sample.to_string(),
                 input: InputRef::OcrAuditSample { sample_ref: sample },

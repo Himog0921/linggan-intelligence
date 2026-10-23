@@ -30,7 +30,7 @@ WITH latest AS MATERIALIZED (
     ORDER BY source.created_at, source.material_ref
     LIMIT $2
 )
-SELECT pending.material_ref, left(raw.body_text, 16001) AS raw_prefix,
+SELECT pending.material_ref, raw.body_text AS raw_prefix,
        encode(sha256(convert_to(raw.body_text, 'UTF8')), 'hex') AS raw_sha256
 FROM pending
 JOIN linggan_material_comment raw ON raw.material_ref = pending.material_ref

@@ -203,14 +203,7 @@ async fn execute(
     if w.fragments.is_empty() {
         return Ok(Some((validate_work(&json!({}), &[]), None)));
     }
-    let input_budget: i32 = sqlx::query_scalar(
-        "SELECT input_token_limit FROM linggan_model_config WHERE config_ref=$1",
-    )
-    .bind(config)
-    .fetch_one(db.pool())
-    .await?;
-    let (input, fragments) =
-        crate::creator_discovery_input::prepare(&data.domain, w, input_budget as usize)?;
+    let (input, fragments) = crate::creator_discovery_input::prepare(&data.domain, w, &data.as_of);
     let (raw, invocation) = call(
         db,
         secrets,
@@ -223,7 +216,7 @@ async fn execute(
         work.to_string(),
         lease,
         fingerprint,
-        &crate::creator_discovery_input::citation_map(&fragments),
+        &crate::creator_discovery_input::citation_map(&fragments, &data.as_of),
     )
     .await?;
     let output = crate::creator_discovery_input::validate_response(&raw, &fragments);
@@ -366,42 +359,22 @@ async fn run_focus(
     sqlx::query("UPDATE linggan_creator_discovery_author_analysis SET job_state='running',attempt_count=attempt_count+1,lease_token=$3,lease_expires_at=scope_001_now()+interval '5 minutes' WHERE domain_ref=$1 AND platform='xhs' AND author_external_id=$2").bind(domain).bind(&author).bind(lease).execute(&mut *tx).await?;
     tx.commit().await?;
     let result=async{
-  let mut q=scope(domain);let mut data=discovery::load(db,&q).await.map_err(read_error)?;q.usage_role="reference".into();data.works.extend(discovery::load(db,&q).await.map_err(read_error)?.works);data.works.sort_by_key(|w|w.work_ref);data.works.dedup_by_key(|w|w.work_ref);
+  let data=discovery::load_topic_materials(db,domain).await.map_err(read_error)?;
   let mut works:Vec<_>=data.works.iter().filter(|w|w.author_external_id.as_deref()==Some(&author)).collect();works.sort_by(|a,b|a.published_date.cmp(&b.published_date).then_with(||a.work_ref.cmp(&b.work_ref)));
   if works.is_empty() || discovery::focus_fingerprint(&works[0].profile,&works,&json!(config))!=fingerprint {return Err(ModelError::Source);}
-  let input_budget:i32=sqlx::query_scalar("SELECT input_token_limit FROM linggan_model_config WHERE config_ref=$1").bind(config).fetch_one(db.pool()).await?;
-  let mut fragments:Vec<Fragment>=Vec::new();let mut summaries=Vec::new();let step=works.len().div_ceil(20).max(1);
-  let biography=works.first().and_then(|w|discovery::fragment(w.work_ref,"biography",w.profile["biography"].as_str(),w.profile["sourceRef"].as_str().and_then(|s|Uuid::parse_str(s).ok()),None));
-  if let Some(mut bio)=biography {
-    bio.text=bio.text.chars().take(600).collect();bio.end=bio.text.chars().count();
-    loop {
-      let trial=json!({"domain":data.domain,"works":[],"fragments":[bio],"sampleBasis":"limited_domain_sample"});
-      if trial.to_string().len()+FOCUS_SYSTEM.len()+INPUT_ENVELOPE_BYTES<=input_budget as usize {fragments.push(bio);break;}
-      let len=bio.text.chars().count();if len<=1 {break;}
-      bio.text=bio.text.chars().take(len/2).collect();bio.end=bio.start+bio.text.chars().count();
-    }
+  let mut fragments:Vec<Fragment>=Vec::new(); let mut summaries=Vec::new();
+  if let Some(biography)=works.first().and_then(|w|discovery::fragment(w.work_ref,"biography",w.profile["biography"].as_str(),w.profile["sourceRef"].as_str().and_then(|s|Uuid::parse_str(s).ok()),None)) {
+    fragments.push(biography);
   }
-  let mut related=std::collections::HashMap::new();let mut broad=std::collections::HashSet::new();
-  for w in works.iter().step_by(step).take(20){
-    let mut chosen:Vec<_>=w.fragments.iter().take(2).cloned().collect();
-    for f in &mut chosen {f.text=f.text.chars().take(240).collect();f.end=f.text.chars().count();}
-    let summary=loop {
-      if chosen.is_empty() {break None;}
-      let summary=json!({"workRef":w.work_ref,"relevance":w.relevance,"topicHints":w.topic_hints,"sourceKind":w.acquisition_kind,"fragmentIds":chosen.iter().map(|f|&f.fragment_id).collect::<Vec<_>>()});
-      let mut trial_fragments=fragments.clone();trial_fragments.extend(chosen.clone());let mut trial_summaries=summaries.clone();trial_summaries.push(summary.clone());
-      let trial=json!({"domain":data.domain,"works":trial_summaries,"fragments":trial_fragments,"sampleBasis":"profile_discovery_sample"});
-      if trial.to_string().len()+FOCUS_SYSTEM.len()+INPUT_ENVELOPE_BYTES<=input_budget as usize {break Some(summary);}
-      let Some(longest)=chosen.iter_mut().max_by_key(|f|f.text.chars().count()) else {break None};
-      let len=longest.text.chars().count();
-      if len<=1 {chosen.pop();continue;}
-      longest.text=longest.text.chars().take(len/2).collect();longest.end=longest.start+longest.text.chars().count();
-    };
-    let Some(summary)=summary else {continue;};
+  let mut related=std::collections::HashMap::new(); let mut broad=std::collections::HashSet::new();
+  for w in &works {
+    let chosen=w.fragments.clone();
     if w.relevance=="related" {for f in &chosen{related.insert(f.fragment_id.clone(),w.work_ref);}}
     if w.acquisition_kind=="profile_discovery" {broad.insert(w.work_ref);}
-    fragments.extend(chosen);summaries.push(summary);
+    summaries.push(json!({"workRef":w.work_ref,"relevance":w.relevance,"topicHints":w.topic_hints,"sourceKind":w.acquisition_kind,"fragmentIds":chosen.iter().map(|f|&f.fragment_id).collect::<Vec<_>>()}));
+    fragments.extend(chosen);
   }
-  let input=json!({"domain":data.domain,"works":summaries,"fragments":fragments,"sampleBasis":if broad.len()>=2{"profile_discovery_sample"}else{"limited_domain_sample"}});
+  let input=json!({"domain":data.domain,"asOf":data.as_of,"works":summaries,"fragments":fragments.iter().map(|f|json!({"fragmentId":f.fragment_id,"blockRef":f.fragment_id,"field":f.field,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,"unitRef":f.unit_ref,"speaker":f.speaker,"content":f.model_content(),"issues":f.issues})).collect::<Vec<_>>(),"sampleBasis":if broad.len()>=2{"profile_discovery_sample"}else{"limited_domain_sample"}});
   if fragments.is_empty() {return Ok::<_,ModelError>((validate_focus(&json!({}),&fragments,&related,&broad),None));}
   let (raw,invocation)=call(db,secrets,adapter,domain,config,FOCUS_SYSTEM,&input,"focus",author.clone(),lease,&fingerprint,&Value::Null).await?;
   Ok::<_,ModelError>((validate_focus(&raw,&fragments,&related,&broad),Some(invocation)))

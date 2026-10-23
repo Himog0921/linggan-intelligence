@@ -1,6 +1,6 @@
 //! Handwritten synthetic examples, never loaded from the corpus, environment or provider.
 use super::*;
-use linggan_evidence::note_material_input::ProcessingScope;
+use linggan_evidence::dossier_input::ProcessingScope;
 
 const AS_OF: &str = "2026-10-20T00:00:00Z";
 const NAMES: [&str; 23] = [
@@ -131,18 +131,21 @@ fn material(i: usize) -> Material {
         .map(|(n, (field, text))| Fragment {
             citation_id: format!("synthetic-{i}-{n}"),
             field: field.into(),
-            logical_position: "native".into(),
+            logical_position: format!("synthetic-{i}-{n}"),
             source_ref: Uuid::from_u128(200 + i as u128),
             source_version: "synthetic.v1".into(),
             start: 0,
             end: text.chars().count(),
             text_hash: format!("synthetic-text-{i}-{n}"),
             text: text.into(),
+            speaker: "author".into(), structure: serde_json::json!({"ref":format!("synthetic-{i}-{n}"),
+                "kind":if field == "title" { "heading" } else { "paragraph" },"text":text,"speaker":"author"}),
+            issues: vec![], reading_ref: Some(Uuid::from_u128(500 + i as u128)), unit_ref: Some(Uuid::from_u128(600 + i as u128)),
         })
         .collect();
     Material {
-        contract: note_material_input::VERSION.into(),
-        fingerprint_contract: note_material_input::FINGERPRINT_VERSION.into(),
+        contract: dossier_input::VERSION.into(),
+        fingerprint_contract: dossier_input::FINGERPRINT_VERSION.into(),
         domain_ref: Uuid::from_u128(1),
         work_ref: work(i),
         as_of: AS_OF.into(),
@@ -152,7 +155,7 @@ fn material(i: usize) -> Material {
         snapshot_identity: format!("synthetic-snapshot-{i}"),
         ready: true,
         not_ready_reasons: vec![],
-        columns: INPUT_FIELDS
+        columns: ["title", "body", "tags", "ocr", "transcript", "frame_text"]
             .into_iter()
             .map(|field| Column {
                 field: field.into(),
