@@ -25,6 +25,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/auth/login", post(login))
         .route("/api/local/auth/session", get(session))
         .route("/api/local/auth/logout", post(logout))
+        .route("/api/local/auth/password/change", post(change_password))
         .route("/api/local/auth/invitations", post(create_invitation))
         .route(
             "/api/local/auth/invitations/accept",
@@ -55,6 +56,14 @@ struct AcceptInvitationRequest {
     password: String,
 }
 
+#[derive(Deserialize)]
+struct ChangePasswordRequest {
+    #[serde(rename = "currentPassword")]
+    current_password: String,
+    #[serde(rename = "newPassword")]
+    new_password: String,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct AuthenticatedMember {
     pub(super) member_ref: Uuid,
@@ -71,23 +80,37 @@ async fn login(
         return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable");
     };
     let email = normalize_email(&request.email);
-    let member = match find_login_member(database, &email).await {
-        Ok(Some(member)) => member,
-        Ok(None) => return invalid_credentials(),
-        Err(_) => return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"),
-    };
-    if !password_matches(&member.3, &request.password) {
-        return invalid_credentials();
-    }
     let token = new_session_token();
-    if issue_session(database, member.0, &token).await.is_err() {
-        return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable");
+    let result: Result<Option<AuthenticatedMember>, sqlx::Error> = async {
+        let mut transaction = database.pool().begin().await?;
+        let member = sqlx::query_as::<_, (Uuid, String, String, String)>(
+            "SELECT member_ref, display_name, role, password_hash \
+             FROM linggan_ops_member \
+             WHERE email_normalized=$1 AND state='active' FOR SHARE",
+        )
+        .bind(&email)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some(member) = member else {
+            return Ok(None);
+        };
+        if !password_matches(&member.3, &request.password) {
+            return Ok(None);
+        }
+        issue_session_transaction(&mut transaction, member.0, &token).await?;
+        transaction.commit().await?;
+        Ok(Some(member_identity(member)))
     }
-    with_session_cookie(
-        Json(member_json(&member_identity(member))).into_response(),
-        &token,
-        secure_cookie_required(&headers),
-    )
+    .await;
+    match result {
+        Ok(Some(member)) => with_session_cookie(
+            Json(member_json(&member)).into_response(),
+            &token,
+            secure_cookie_required(&headers),
+        ),
+        Ok(None) => invalid_credentials(),
+        Err(_) => auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"),
+    }
 }
 
 async fn session(State(state): State<LocalWebState>, headers: HeaderMap) -> Response {
@@ -119,6 +142,75 @@ async fn logout(State(state): State<LocalWebState>, headers: HeaderMap) -> Respo
         axum::http::StatusCode::NO_CONTENT.into_response(),
         secure_cookie_required(&headers),
     )
+}
+
+async fn change_password(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Json(request): Json<ChangePasswordRequest>,
+) -> Response {
+    let member = match current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    if !valid_password(&request.current_password) || !valid_password(&request.new_password) {
+        return request_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ops_password_change_invalid",
+        );
+    }
+    let Some(database) = state.database.database() else {
+        return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable");
+    };
+    let token = new_session_token();
+    let result: Result<PasswordChange, ()> = async {
+        let mut transaction = database.pool().begin().await.map_err(|_| ())?;
+        let stored = sqlx::query_as::<_, (String, String)>(
+            "SELECT password_hash, state FROM linggan_ops_member WHERE member_ref=$1 FOR UPDATE",
+        )
+        .bind(member.member_ref)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| ())?;
+        let Some((current_hash, state)) = stored else {
+            return Ok(PasswordChange::InvalidCredentials);
+        };
+        if state != "active" || !password_matches(&current_hash, &request.current_password) {
+            return Ok(PasswordChange::InvalidCredentials);
+        }
+        let password_hash = hash_password(&request.new_password).map_err(|_| ())?;
+        sqlx::query(
+            "UPDATE linggan_ops_member SET password_hash=$2, version=version+1 WHERE member_ref=$1 AND state='active'",
+        )
+        .bind(member.member_ref)
+        .bind(password_hash)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ())?;
+        sqlx::query(
+            "UPDATE linggan_ops_session SET revoked_at=scope_001_now(), revoked_reason='credential_reset' \
+             WHERE member_ref=$1 AND revoked_at IS NULL",
+        )
+        .bind(member.member_ref)
+        .execute(&mut *transaction)
+        .await
+        .map_err(|_| ())?;
+        issue_session_transaction(&mut transaction, member.member_ref, &token)
+            .await
+            .map_err(|_| ())?;
+        transaction.commit().await.map_err(|_| ())?;
+        Ok(PasswordChange::Changed)
+    }
+    .await;
+    match result {
+        Ok(PasswordChange::Changed) => with_session_cookie(
+            Json(member_json(&member)).into_response(),
+            &token,
+            secure_cookie_required(&headers),
+        ),
+        Ok(PasswordChange::InvalidCredentials) => invalid_credentials(),
+        Err(()) => auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"),
+    }
 }
 
 async fn create_invitation(
@@ -310,6 +402,11 @@ enum InvitationAcceptance {
     Gone,
 }
 
+enum PasswordChange {
+    Changed,
+    InvalidCredentials,
+}
+
 pub(super) async fn current_member(
     state: &LocalWebState,
     headers: &HeaderMap,
@@ -353,19 +450,6 @@ pub(super) async fn current_member(
     })
 }
 
-async fn find_login_member(
-    database: &Database,
-    email: &str,
-) -> Result<Option<(Uuid, String, String, String)>, sqlx::Error> {
-    sqlx::query_as(
-        "SELECT member_ref, display_name, role, password_hash \
-         FROM linggan_ops_member WHERE email_normalized=$1 AND state='active'",
-    )
-    .bind(email)
-    .fetch_optional(database.pool())
-    .await
-}
-
 fn normalize_email(value: &str) -> String {
     value.trim().to_ascii_lowercase()
 }
@@ -397,32 +481,16 @@ fn valid_email(value: &str) -> bool {
             .is_some_and(|(local, domain)| !local.is_empty() && !domain.is_empty())
 }
 
+fn valid_password(value: &str) -> bool {
+    !value.is_empty() && value.len() <= 4096
+}
+
 fn new_session_token() -> String {
     format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
 }
 
 fn token_digest(token: &str) -> [u8; 32] {
     Sha256::digest(token.as_bytes()).into()
-}
-
-async fn issue_session(
-    database: &Database,
-    member_ref: Uuid,
-    token: &str,
-) -> Result<(), sqlx::Error> {
-    let digest = token_digest(token);
-    sqlx::query(
-        "INSERT INTO linggan_ops_session \
-         (session_ref, member_ref, token_sha256, expires_at) \
-         VALUES($1,$2,$3,scope_001_now() + make_interval(secs => $4))",
-    )
-    .bind(Uuid::new_v4())
-    .bind(member_ref)
-    .bind(digest.as_slice())
-    .bind(SESSION_TTL_SECONDS as f64)
-    .execute(database.pool())
-    .await
-    .map(|_| ())
 }
 
 async fn issue_session_transaction(

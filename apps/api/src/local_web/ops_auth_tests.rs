@@ -400,6 +400,127 @@ async fn admin_invites_once_reinvite_revokes_old_link_and_acceptance_activates_m
     assert_ne!(admin_ref, operator_ref);
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn password_change_requires_current_secret_revokes_old_sessions_and_issues_one_fresh_session()
+{
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_auth_pw_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    active_member(database.pool(), "member@example.test", "operator").await;
+    let app = app_with_database(database.clone());
+    let first_cookie = login_cookie(app.clone(), "member@example.test").await;
+    let second_cookie = login_cookie(app.clone(), "member@example.test").await;
+
+    let malformed = authenticated_json_request(
+        "/api/local/auth/password/change",
+        r#"{"currentPassword":"","newPassword":"new-synthetic-password"}"#,
+        &first_cookie,
+    );
+    assert_eq!(
+        app.clone().oneshot(malformed).await.unwrap().status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let wrong_current = authenticated_json_request(
+        "/api/local/auth/password/change",
+        r#"{"currentPassword":"wrong","newPassword":"new-synthetic-password"}"#,
+        &first_cookie,
+    );
+    assert_eq!(
+        app.clone().oneshot(wrong_current).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        app.clone()
+            .oneshot(session_request(
+                "/api/local/auth/session",
+                &first_cookie,
+                "GET"
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK,
+        "a rejected current secret must not revoke the existing session"
+    );
+
+    let change = authenticated_json_request(
+        "/api/local/auth/password/change",
+        r#"{"currentPassword":"synthetic-password-only","newPassword":"new-synthetic-password"}"#,
+        &first_cookie,
+    );
+    let change = app.clone().oneshot(change).await.unwrap();
+    assert_eq!(change.status(), StatusCode::OK);
+    let fresh_cookie = change.headers()["set-cookie"].to_str().unwrap().to_owned();
+    assert!(fresh_cookie.contains("HttpOnly; SameSite=Strict; Path=/"));
+    assert!(!fresh_cookie.contains("new-synthetic-password"));
+    for stale_cookie in [&first_cookie, &second_cookie] {
+        assert_eq!(
+            app.clone()
+                .oneshot(session_request(
+                    "/api/local/auth/session",
+                    stale_cookie,
+                    "GET"
+                ))
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::UNAUTHORIZED,
+            "password change must revoke every pre-change session"
+        );
+    }
+    assert_eq!(
+        app.clone()
+            .oneshot(session_request(
+                "/api/local/auth/session",
+                &fresh_cookie,
+                "GET"
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let old_login = json_request(
+        "/api/local/auth/login",
+        r#"{"email":"member@example.test","password":"synthetic-password-only"}"#,
+    );
+    assert_eq!(
+        app.clone().oneshot(old_login).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let new_login = json_request(
+        "/api/local/auth/login",
+        r#"{"email":"member@example.test","password":"new-synthetic-password"}"#,
+    );
+    assert_eq!(
+        app.clone().oneshot(new_login).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let password_hash = sqlx::query_scalar::<_, String>(
+        "SELECT password_hash FROM linggan_ops_member WHERE email_normalized='member@example.test'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_ne!(password_hash, "new-synthetic-password");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_ops_session WHERE revoked_reason='credential_reset'",
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        2
+    );
+}
+
 fn json_request(path: &str, body: impl Into<Body>) -> Request<Body> {
     Request::builder()
         .method("POST")
