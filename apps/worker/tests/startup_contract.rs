@@ -621,7 +621,6 @@ async fn seed_synthetic_study(database: &Database) -> Uuid {
             model_config_ref: config,
             defaults: StudyPolicyDefaults {
                 comment_budget: 1,
-                context_character_budget: 6000,
             },
             stage_instructions: StudyStageInstructions {
                 semantic: "synthetic test only".into(),
