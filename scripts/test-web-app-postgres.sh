@@ -28,7 +28,9 @@ proof_scope="${WEB_APP_PROOF_SCOPE:-all}"
 if [[ "$proof_scope" == "ops-native" ]]; then
   export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 fi
-if [[ "$proof_scope" != "ops-native" ]]; then
+# These focused scopes exercise Axum + isolated PostgreSQL only.  Do not make
+# their security/model proofs fail on unrelated generated frontend drift.
+if [[ "$proof_scope" != "ops-native" && "$proof_scope" != "ops-auth" ]]; then
   if [[ ! -d apps/web/node_modules ]]; then
     "$npm_bin" ci --prefix apps/web --ignore-scripts --no-audit --no-fund
   fi
