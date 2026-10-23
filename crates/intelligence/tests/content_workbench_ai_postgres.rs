@@ -53,7 +53,7 @@ if a=='draft': out['paragraphs']=[{{'paragraphId':None,'text':'合成起草😀'
 if a=='rewrite_selection': out['paragraphs']=[{{'paragraphId':p['paragraphs'][0]['id'],'text':'合成改写😀'}}]
 if a=='page_copy': out['pages']=[{{'pageId':p['pages'][0]['pageId'],'heading':'合成图页','body':'合成图页正文'}}]
 if 'QUOTE' in p['authorInstruction']:
-    raw=p['materials'][0]['text']
+    raw=p['materials'][0]['content']['text']
     if a=='draft':
         out['title']='作者标题'+raw+'标题收束'
         out['paragraphs']=[{{'paragraphId':None,'text':'作者前言😀'+raw+'作者中段'+raw+'作者结语'}}]
