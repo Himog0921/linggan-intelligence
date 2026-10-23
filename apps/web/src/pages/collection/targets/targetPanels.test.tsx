@@ -6,6 +6,10 @@ import { RuleErrors, RuleReceipt } from './RuleFeedback';
 import { Chart } from './LifecycleChart';
 import { LifecyclePanel } from './TargetLifecycle';
 import { Review } from './LifecycleReview';
+import { WorkIntroduction } from './inspection/WorkComparisonPanel';
+import type { Metric,Snapshot } from './inspection/inspectionApi';
+import { parseWorkItem } from '../../corpus/evidence/evidenceDecode';
+import { listItemJson } from '../../corpus/evidence/evidenceFixtures';
 import { bucketPoints } from './chartMath';
 import type { Lifecycle } from './api';
 import { Toolbar } from './TargetToolbar';
@@ -214,4 +218,12 @@ it('紧凑图表只疏显示日期刻度，保留全部20个作品时间桶且�
   expect(dates.length).toBeLessThanOrEqual(7);expect(dates[0]).toHaveTextContent('2025/03');expect(dates.at(-1)).toHaveTextContent('2026/10');
   expect(Number(dates.at(-1)?.getAttribute('x'))-Number(dates.at(-2)?.getAttribute('x'))).toBeGreaterThanOrEqual(100);
   expect(container.querySelectorAll('.life-trend-bucket-hit')).toHaveLength(20);
+});
+
+it.each([['OTHER_LANES_NOT_EVALUATED',null],['SOURCE_INCOMPLETE','来源信息不完整'],['SYNTHETIC_UNREPORTED_LIMIT','来源未完整表达']])('作品头部不把默认技术限制码当作内容判断：%s', (code,copy)=>{
+  const resource={...parseWorkItem(listItemJson(1)),primaryLimitation:code};
+  const unknown:Metric={value:null,state:'unknown',observationRef:null,observedAt:null,observedEpochMs:null,sourceKind:null,precision:'unknown'};
+  const item:Snapshot={workRef:resource.ref,status:'available',resource,metrics:{likes:unknown,comments:unknown,collects:unknown,shares:unknown},publishedEpochMs:null,reasons:[]};
+  render(<WorkIntroduction item={item}/>);expect(screen.queryByText(code)).not.toBeInTheDocument();
+  if(copy)expect(screen.getByText(copy)).toBeVisible();else expect(screen.queryByText('其他材料通道尚未评估')).not.toBeInTheDocument();
 });
