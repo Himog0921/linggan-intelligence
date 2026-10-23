@@ -211,6 +211,37 @@ export function receipt(value: unknown) {
     };
   });
 }
+
+/** A native-write receipt is the durable result of one request identity, not a toast outcome. */
+export function nativeReceipt(value: unknown, requestId: string) {
+  return d.decode(value, (r) => {
+    const receipt = d.obj(r, "receipt");
+    const requestRef = s(receipt, "requestRef");
+    if (requestRef !== requestId) throw new d.ShapeError("receipt.requestRef");
+    return {
+      requestRef,
+      outcome: enumeration(receipt, "outcome", ["accepted", "unchanged", "rejected", "stale"]),
+      code: s(receipt, "code"),
+      recordRef: sn(receipt, "recordRef"),
+      resultingVersion: nn(receipt, "resultingVersion"),
+      replayed: b(receipt, "replayed"),
+    };
+  });
+}
+
+export type NativeAccountCommand = {
+  domainRef: string; platform: "xhs" | "douyin"; accountName: string;
+  profileUrl: string | null; platformUserId: string | null; handle: string | null;
+  status: string | null; isRetained: boolean | null; followerCount: number | null;
+  deviceCode: string | null; ipLocation: string | null; notes: string | null;
+};
+
+/** The caller owns the UUID so an unanswered request can be retried without duplicating facts. */
+export async function createNativeAccount(command: NativeAccountCommand & { requestId: string }) {
+  return nativeReceipt(await requestJson("/api/local/ops/native/accounts", {
+    method: "POST", body: command,
+  }), command.requestId);
+}
 const figures = (r: R) => ({
   published: nn(r, "published"),
   linksOpened: nn(r, "linksOpened"),

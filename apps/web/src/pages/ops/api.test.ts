@@ -55,6 +55,17 @@ it("requires explicit native-data provenance on a summary", () => {
   expect(api.summary(summary).nativeDataPresent).toBe(true);
   expect(() => api.summary(without(summary, "nativeDataPresent"))).toThrow();
 });
+it("accepts only the durable native receipt for its own request identity", () => {
+  const receipt = {
+    receipt: {
+      requestRef: "r", outcome: "accepted", code: "accepted", recordRef: "account",
+      resultingVersion: 1, replayed: false,
+    },
+  };
+  expect(api.nativeReceipt(receipt, "r").recordRef).toBe("account");
+  expect(() => api.nativeReceipt(receipt, "other")).toThrow();
+  expect(() => api.nativeReceipt({ receipt: { ...receipt.receipt, outcome: "success" } }, "r")).toThrow();
+});
 it("rejects invalid state enums rather than inferring a platform or execution status", () => {
   expect(() =>
     api.daily({
