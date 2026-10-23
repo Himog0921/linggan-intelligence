@@ -32,7 +32,8 @@ function count(value: number | null): string {
 
 function historyCopy(row: CommentCollectionRow): string {
   const shown = row.shown === null ? '' : `，当时页面显示 ${formatNumber(row.shown)} 条`;
-  const complete = row.complete === true ? ' · 已采全' : row.complete === false ? ' · 没有采全' : '';
+  // 「尽量采全」走到了评论区尽头就算采全，页面上的总数可能含已删除或看不到的评论，所以不说「已采全 N 条」。
+  const complete = row.complete === true ? ' · 能看到的都采了' : row.complete === false ? ' · 没有采全' : '';
   return `${momentText(row.at)} · ${row.scope} · 采到 ${count(row.collected)} 条${shown}${complete}`;
 }
 

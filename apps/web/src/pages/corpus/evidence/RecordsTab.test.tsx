@@ -147,6 +147,17 @@ describe('评论深采（Mog 2026-10-23）', () => {
     expect(screen.getByRole('button', { name: '采全部评论' })).toBeEnabled();
   });
 
+  it('「尽量采全」走到尽头说「能看到的都采了」（页面总数可能含看不到的），没走到尽头说「没有采全」', () => {
+    setup({
+      commentsHistory: [
+        { ...history[0], observedAt: '2026-10-14T10:01:00Z', collectionScope: 'all_public_comments', collectionState: 'complete', uniqueCollectedCount: 2, pageCommentCount: 3 },
+        { ...history[0], observedAt: '2026-10-13T10:01:00Z', collectionScope: 'all_public_comments', collectionState: 'partial', uniqueCollectedCount: 1, pageCommentCount: 3 },
+      ],
+    });
+    expect(screen.getByText('2026-10-14 18:01 · 尽量采全 · 采到 2 条，当时页面显示 3 条 · 能看到的都采了')).toBeInTheDocument();
+    expect(screen.getByText('2026-10-13 18:01 · 尽量采全 · 采到 1 条，当时页面显示 3 条 · 没有采全')).toBeInTheDocument();
+  });
+
   it('不是小红书：只说暂不支持，不给按钮；没采过评论如实说', () => {
     setup({ platform: 'douyin', commentsHistory: [] });
     expect(screen.getByText('评论深采目前只支持小红书笔记。')).toBeInTheDocument();
