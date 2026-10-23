@@ -110,7 +110,7 @@ pub enum DetailPageSessionGrantError {
     InvalidCredential,
     #[error("the installation no longer holds that live detail task claim")]
     ClaimNotHeld,
-    #[error("the task is not a material detail-page task")]
+    #[error("the task is not a supported exact detail-page scope")]
     DetailScopeUnavailable,
     #[error("the task no longer has an accepted signed execution locator")]
     ExecutionSourceUnavailable,
@@ -436,7 +436,11 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() \
                               AND table_name='collection_work_order_lease_task_dispatch_failure' \
-                              AND column_name='failure_disposition')",
+                              AND column_name='failure_disposition') \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_schema=current_schema() \
+                              AND table_name='collection_detail_page_session' \
+                              AND column_name='ops_publication_ref')",
     )
     .fetch_one(database.pool())
     .await
@@ -535,26 +539,33 @@ async fn grant_detail_page_session_inner(
         return Err(DetailPageSessionGrantError::InvalidCredential);
     }
 
-    type RawClaimedDetail = (Uuid, Uuid, Uuid, Value);
+    type RawClaimedDetail = (Uuid, Uuid, Option<Uuid>, Option<Uuid>, Value);
     let claimed: Option<RawClaimedDetail> = sqlx::query_as::<_, RawClaimedDetail>(
-        "SELECT lease.lease_ref,lease.work_order_ref,target.content_public_ref,runtime.task_spec \
+        "SELECT lease.lease_ref,lease.work_order_ref,scope.content_public_ref,scope.ops_publication_ref,runtime.task_spec \
          FROM collection_work_order_lease_task task \
          JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
          JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
-         JOIN collection_work_order_material_target target ON target.work_order_ref=lease.work_order_ref \
-         JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
+         JOIN LATERAL ( \
+             SELECT target.content_public_ref,NULL::uuid AS ops_publication_ref,content.content_external_id \
+             FROM collection_work_order_material_target target \
+             JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
+             WHERE target.work_order_ref=lease.work_order_ref \
+             UNION ALL \
+             SELECT NULL::uuid,target.publication_ref,target.content_external_id \
+             FROM collection_work_order_ops_publication_target target \
+             WHERE target.work_order_ref=lease.work_order_ref \
+         ) scope ON scope.content_external_id=runtime.task_spec #>> '{target,contentExternalId}' \
          WHERE task.task_id=$1 AND task.execution_state='in_progress' \
            AND task.claimed_by_installation_ref=$2 \
            AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
            AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
-           AND content.content_external_id=runtime.task_spec #>> '{target,contentExternalId}' \
          FOR UPDATE OF task,lease",
     )
     .bind(task_id)
     .bind(installation_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((lease_ref, work_order_ref, content_public_ref, task_spec)) = claimed else {
+    let Some((lease_ref, work_order_ref, content_public_ref, ops_publication_ref, task_spec)) = claimed else {
         return Err(DetailPageSessionGrantError::ClaimNotHeld);
     };
     let Some(plan) = page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?
@@ -600,11 +611,13 @@ async fn grant_detail_page_session_inner(
          FROM collection_detail_page_session session \
          JOIN plugin_installation owner ON owner.installation_ref=session.owner_installation_ref \
          WHERE work_order_ref=$1 \
-           AND session.content_public_ref=$2 \
+           AND session.content_public_ref IS NOT DISTINCT FROM $2 \
+           AND session.ops_publication_ref IS NOT DISTINCT FROM $3 \
          FOR UPDATE OF session,owner",
     )
     .bind(work_order_ref)
     .bind(content_public_ref)
+    .bind(ops_publication_ref)
     .fetch_optional(&mut *transaction)
     .await?;
     // 通道身份要绑定到**这次实际发出的那份计划**：新授权用刚冻结的这份，重放用会话里
@@ -615,13 +628,14 @@ async fn grant_detail_page_session_inner(
             let session_ref = Uuid::new_v4();
             sqlx::query(
                 "INSERT INTO collection_detail_page_session \
-                     (session_ref,work_order_ref,content_public_ref,owner_installation_ref, \
+                     (session_ref,work_order_ref,content_public_ref,ops_publication_ref,owner_installation_ref, \
                       grant_request_id,initial_lease_ref,plan_snapshot,plan_hash,execution_source_url_sha256,state) \
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'authorized')",
+                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'authorized')",
             )
             .bind(session_ref)
             .bind(work_order_ref)
             .bind(content_public_ref)
+            .bind(ops_publication_ref)
             .bind(installation_ref)
             .bind(grant_request_id)
             .bind(lease_ref)
