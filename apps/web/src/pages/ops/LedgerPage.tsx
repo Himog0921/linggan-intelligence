@@ -22,6 +22,7 @@ import { NativeAccountDialog } from "./NativeAccountDialog";
 import { NativePublicationDialog } from "./NativePublicationDialog";
 import { NativeDailyDialog } from "./NativeDailyDialog";
 import { NativeViewDialog } from "./NativeViewDialog";
+import { NativeViewBatchDialog } from "./NativeViewBatchDialog";
 import { AccountResponsibilityDialog } from "./AccountResponsibilityDialog";
 import { PublicationSyncDialog } from "./PublicationSyncDialog";
 import type { LedgerKind } from "./OpsPage";
@@ -156,6 +157,7 @@ export function LedgerPage({
   const [newDaily, setNewDaily] = useState(false);
   const [editDaily, setEditDaily] = useState<api.Daily | null>(null);
   const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
+  const [batchViews, setBatchViews] = useState(false);
   const [responsibilityAccount, setResponsibilityAccount] = useState<api.Account | null>(null);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
@@ -313,6 +315,9 @@ export function LedgerPage({
               </ActionButton>
               <ActionButton type="button" disabled={!pubs.data?.items.length} title={!pubs.data?.items.length ? "当前筛选下没有可选择的发布记录" : undefined} onClick={() => setSyncPublications(true)}>
                 同步数据
+              </ActionButton>
+              <ActionButton type="button" disabled={!pubs.data?.items.length} title={!pubs.data?.items.length ? "当前筛选下没有可选择的发布记录" : undefined} onClick={() => setBatchViews(true)}>
+                批量补阅读量
               </ActionButton>
             </>
           ) : kind === "accounts" ? (
@@ -523,6 +528,7 @@ export function LedgerPage({
       {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
       {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
       {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
+      {batchViews && pubs.data ? <NativeViewBatchDialog publications={pubs.data.items} close={() => setBatchViews(false)} /> : null}
       {responsibilityAccount && members.data ? <AccountResponsibilityDialog account={responsibilityAccount} members={members.data} close={() => setResponsibilityAccount(null)} /> : null}
       {cover ? (
         <Dialog
