@@ -373,6 +373,19 @@ export type NativePublicationCommand = {
 export async function createNativePublication(command: NativePublicationCommand & { requestId: string }) {
   return nativeCommand("/api/local/ops/native/publications", { ...command, publishedAt: null }, command.requestId);
 }
+export async function createNativePublicationBatch(commands: readonly (NativePublicationCommand & { requestId: string })[]) {
+  return d.decode(await requestJson("/api/local/ops/native/publications/batch", {
+    method: "POST", body: { publications: commands.map(command => ({ ...command, publishedAt: null })) },
+  }), r => ({ items: d.list(r, "items", item => {
+    const receipt = d.obj(item, "receipt");
+    return {
+      ordinal: n(item, "ordinal"), status: n(item, "status"),
+      requestRef: s(receipt, "requestRef"),
+      outcome: enumeration(receipt, "outcome", ["accepted", "unchanged", "rejected", "stale"]),
+      code: s(receipt, "code"), replayed: b(receipt, "replayed"),
+    };
+  }) }));
+}
 
 export type NativeDailyCommand = {
   businessDate: string; linksOpenedCount: number | null; followersGained: number | null;
