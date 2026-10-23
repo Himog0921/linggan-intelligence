@@ -1060,7 +1060,7 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     assert_eq!(status, StatusCode::OK);
     assert_eq!(replay["replayed"], true);
     let (status, conflict) = post(
-        app,
+        app.clone(),
         "/api/local/ops/publication-syncs",
         Some(&other_cookie),
         json!({ "idempotencyKey": request_ref, "publicationRefs": [publication_ref] }),
@@ -1207,6 +1207,19 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
         0,
         "Ops projection adds an explicit own-use link without rewriting domain usage"
     );
+    let (status, receipt) = get(
+        app,
+        &format!("/api/local/ops/publication-syncs/{request_ref}"),
+        Some(&owner_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(receipt["items"][0]["execution"]["state"], "material_projected");
+    assert_eq!(receipt["items"][0]["execution"]["taskId"], task_id.to_string());
+    assert_eq!(receipt["items"][0]["execution"]["attemptId"], attempt_id.to_string());
+    assert_eq!(receipt["items"][0]["execution"]["packageRef"], package_ref.to_string());
+    assert_eq!(receipt["items"][0]["execution"]["receiptRef"], receipt_ref.to_string());
+    assert_eq!(receipt["items"][0]["execution"]["materialRef"], projection.1.to_string());
 }
 
 fn publication_body(request_id: Uuid, account_ref: Uuid) -> Value {

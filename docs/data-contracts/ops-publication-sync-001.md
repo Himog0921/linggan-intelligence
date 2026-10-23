@@ -15,6 +15,8 @@
 - 每条发布由服务端在同一事务中冻结当时的发布、账号、业务、平台、作品身份、账号作者身份、原生版本和 locator 指纹（可知时）。
 - `accepted` / `existing` 只有同时关联真实 `collection_acquisition_request` 与 `collection_work_order` 才可能写入；运营表没有独立的排队、租约、尝试或重试状态。
 
+`GET /api/local/ops/publication-syncs/{requestRef}` 保留原始逐条 `decision`，并另行读取共享链的当前执行事实 `execution`。`queued`、`waiting_execution`、`collecting`、`receipt_lost_authority`、`no_qualified_result` 与 `material_projected` 不会改写原始决定；尤其 `material_projected` 只表示不可变的 Receipt→Material 关联已写入，不能表示运营字段已经采用、媒体已经可用或整条同步已完成。
+
 XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicationRef}/execution-locators` 追加一条受控的短期执行来源。该命令只接受包含 24 位小写作品 ID 和非空 `xsec_token` 的完整 XHS 地址，并在同一事务冻结账号的当前作者 ID、发布版本、作品 ID、地址摘要和实际提交人。签名地址只保存在受保护的来源表，绝不出现在命令或同步回执中；短链、裸详情地址、抖音地址、无作者身份或无写权限均不被接受。它不是 discovery、CapturePackage、material、授权或任务。
 
 当前路由受现有 Ops active-session 与同源守卫保护；团队成员可读取已持久化回执，写权限仍逐条按管理员、当前责任人或同组组长判定。

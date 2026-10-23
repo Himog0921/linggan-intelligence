@@ -46,6 +46,22 @@ struct SyncItem {
     code: String,
     acquisition_request_ref: Option<Uuid>,
     work_order_ref: Option<Uuid>,
+    execution: SyncExecutionStatus,
+}
+
+/// Read-only execution facts for one immutable sync item. This never substitutes a current
+/// status for the item's original admission decision, and `material_projected` is deliberately
+/// not named "synced": field adoption and media are separate later consumers.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SyncExecutionStatus {
+    state: &'static str,
+    task_id: Option<Uuid>,
+    attempt_id: Option<Uuid>,
+    package_ref: Option<Uuid>,
+    receipt_ref: Option<Uuid>,
+    receipt_effect: Option<String>,
+    material_ref: Option<Uuid>,
 }
 
 enum SyncError {
@@ -515,9 +531,43 @@ async fn read_receipt_in(
     let Some(selected_count) = selected_count else {
         return Ok(None);
     };
-    let rows: Vec<(Uuid, String, String, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
-        "SELECT requested_publication_ref,decision,decision_code,acquisition_request_ref,work_order_ref \
-         FROM linggan_ops_publication_sync_item WHERE request_ref=$1 ORDER BY ordinal",
+    let rows: Vec<(
+        Uuid,
+        String,
+        String,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<String>,
+        Option<Uuid>,
+        Option<String>,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<String>,
+        Option<Uuid>,
+    )> = sqlx::query_as(
+        "SELECT item.requested_publication_ref,item.decision,item.decision_code, \
+                item.acquisition_request_ref,item.work_order_ref,work.queue_state, \
+                task.task_id,task.execution_state,attempt.attempt_id,package.package_ref, \
+                receipt.receipt_ref,receipt.execution_effect,projection.content_public_ref \
+           FROM linggan_ops_publication_sync_item item \
+           LEFT JOIN collection_work_order work ON work.work_order_ref=item.work_order_ref \
+           LEFT JOIN LATERAL ( \
+                SELECT lease_task.task_id,lease_task.execution_state \
+                  FROM collection_work_order_lease lease \
+                  JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+                 WHERE lease.work_order_ref=item.work_order_ref \
+                 ORDER BY lease.issued_at DESC,lease_task.sequence_no ASC LIMIT 1 \
+           ) task ON true \
+           LEFT JOIN LATERAL ( \
+                SELECT attempt_id FROM linggan_runtime_attempt \
+                 WHERE task_id=task.task_id ORDER BY started_at DESC,attempt_id DESC LIMIT 1 \
+           ) attempt ON true \
+           LEFT JOIN linggan_runtime_capture_package package ON package.attempt_id=attempt.attempt_id \
+           LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+           LEFT JOIN linggan_ops_publication_material_projection projection \
+             ON projection.receipt_ref=receipt.receipt_ref \
+          WHERE item.request_ref=$1 ORDER BY item.ordinal",
     )
     .bind(request_ref)
     .fetch_all(&mut **transaction)
@@ -530,18 +580,103 @@ async fn read_receipt_in(
         items: rows
             .into_iter()
             .map(
-                |(publication_ref, decision, code, acquisition_request_ref, work_order_ref)| {
-                    SyncItem {
-                        publication_ref,
+                |(
+                    requested_publication_ref,
+                    decision,
+                    decision_code,
+                    acquisition_request_ref,
+                    work_order_ref,
+                    queue_state,
+                    task_id,
+                    execution_state,
+                    attempt_id,
+                    package_ref,
+                    receipt_ref,
+                    execution_effect,
+                    content_public_ref,
+                )| {
+                    SyncItemRow {
+                        requested_publication_ref,
                         decision,
-                        code,
+                        decision_code,
                         acquisition_request_ref,
                         work_order_ref,
+                        queue_state,
+                        task_id,
+                        execution_state,
+                        attempt_id,
+                        package_ref,
+                        receipt_ref,
+                        execution_effect,
+                        content_public_ref,
                     }
+                    .into_item()
                 },
             )
             .collect(),
     }))
+}
+
+struct SyncItemRow {
+    requested_publication_ref: Uuid,
+    decision: String,
+    decision_code: String,
+    acquisition_request_ref: Option<Uuid>,
+    work_order_ref: Option<Uuid>,
+    queue_state: Option<String>,
+    task_id: Option<Uuid>,
+    execution_state: Option<String>,
+    attempt_id: Option<Uuid>,
+    package_ref: Option<Uuid>,
+    receipt_ref: Option<Uuid>,
+    execution_effect: Option<String>,
+    content_public_ref: Option<Uuid>,
+}
+
+impl SyncItemRow {
+    fn into_item(self) -> SyncItem {
+        let state = if !matches!(self.decision.as_str(), "accepted" | "existing") {
+            "not_submitted"
+        } else if self.content_public_ref.is_some() {
+            "material_projected"
+        } else if self.receipt_ref.is_some() {
+            match self.execution_effect.as_deref() {
+                Some("COMPLETED_LIVE_STEP") => "receipt_accepted_projection_pending",
+                Some("LOST_AUTHORITY") => "receipt_lost_authority",
+                _ => "receipt_accepted",
+            }
+        } else if self.package_ref.is_some() {
+            "package_pending_receipt"
+        } else if self.attempt_id.is_some() {
+            "collecting"
+        } else if self.execution_state.as_deref() == Some("in_progress") {
+            "awaiting_collection"
+        } else {
+            match self.queue_state.as_deref() {
+                Some("queued") => "queued",
+                Some("leased") => "waiting_execution",
+                Some("completed") => "no_qualified_result",
+                Some("cancelled") => "stopped",
+                _ => "chain_unavailable",
+            }
+        };
+        SyncItem {
+            publication_ref: self.requested_publication_ref,
+            decision: self.decision,
+            code: self.decision_code,
+            acquisition_request_ref: self.acquisition_request_ref,
+            work_order_ref: self.work_order_ref,
+            execution: SyncExecutionStatus {
+                state,
+                task_id: self.task_id,
+                attempt_id: self.attempt_id,
+                package_ref: self.package_ref,
+                receipt_ref: self.receipt_ref,
+                receipt_effect: self.execution_effect,
+                material_ref: self.content_public_ref,
+            },
+        }
+    }
 }
 
 fn secure(mut response: Response) -> Response {
