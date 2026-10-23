@@ -41,6 +41,8 @@ pub struct ResearchDossier {
     #[serde(skip_serializing)]
     pub media_inventory: Vec<Value>,
     #[serde(skip_serializing)]
+    pub candidate_statuses: Vec<Value>,
+    #[serde(skip_serializing)]
     pub metadata: Value,
 }
 
@@ -58,15 +60,20 @@ pub async fn read_in(
             crate::material_reading::read_current_in(&mut **tx, batch, as_of).await?;
         let mut inventories = inventory::read_in(tx, batch, as_of).await?;
         let mut layouts = relayer::source_layouts_in(&mut **tx, batch, as_of).await?;
+        let mut candidates =
+            crate::material_reading::candidate_statuses_in(&mut **tx, batch, as_of).await?;
         for work in currents {
             let reference = work.public_ref;
-            let dossier = projection::assemble(
+            let mut dossier = projection::assemble(
                 &work,
                 readings.remove(&reference).unwrap_or_default(),
                 inventories.remove(&reference).unwrap_or_default(),
                 layouts.remove(&reference).unwrap_or_default(),
                 as_of,
             );
+            dossier.candidate_statuses = candidates.remove(&reference).unwrap_or_default();
+            refresh_revision(&mut dossier);
+            dossier.selection["completeRevision"] = json!(dossier.revision);
             output.insert(reference, dossier);
         }
     }
@@ -111,22 +118,45 @@ pub async fn cutoff_in(
         .bind(value).fetch_one(&mut **tx).await
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReadingVersion {
+    pub work_ref: Uuid,
+    pub material: Value,
+    /// The unit's real current pointer in the same snapshot, independent of page deduplication.
+    pub current_revision_ref: Option<Uuid>,
+}
+
 pub async fn read_version(
     database: &linggan_storage_postgres::Database,
     work: Uuid,
     reading: Uuid,
-) -> Result<Option<Value>, sqlx::Error> {
+) -> Result<Option<ReadingVersion>, sqlx::Error> {
     let mut tx = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
     let cutoff = cutoff_in(&mut tx, None).await?;
-    let result = crate::material_reading::read_versions_in(&mut *tx, &[work], &cutoff, &[reading])
-        .await?
-        .remove(&work)
-        .and_then(|v| v.into_iter().next());
+    let material =
+        crate::material_reading::read_versions_in(&mut *tx, &[work], &cutoff, &[reading])
+            .await?
+            .remove(&work)
+            .and_then(|v| v.into_iter().next());
+    let result = if let Some(material) = material {
+        let unit: Uuid = serde_json::from_value(material["ref"].clone())
+            .map_err(|_| sqlx::Error::Protocol("reading_unit_invalid".into()))?;
+        let current_revision_ref =
+            crate::material_reading::current_reference_in(&mut tx, work, unit, &cutoff).await?;
+        Some(ReadingVersion {
+            work_ref: work,
+            material: projection::public_material(material),
+            current_revision_ref,
+        })
+    } else {
+        None
+    };
     tx.commit().await?;
-    Ok(result.map(projection::public_material))
+    Ok(result)
 }
 
 pub async fn plan(
@@ -159,6 +189,15 @@ pub fn relayer_plan(dossier: &ResearchDossier) -> Value {
         .iter()
         .filter(|v| v["component"] == "image")
         .collect();
+    let pending_review = image_slots
+        .iter()
+        .filter(|s| {
+            dossier
+                .candidate_statuses
+                .iter()
+                .any(|c| c["kind"] == "image" && same_image_source(s, c))
+        })
+        .count();
     let needs_ocr = image_slots
         .iter()
         .filter(|s| {
@@ -166,13 +205,28 @@ pub fn relayer_plan(dossier: &ResearchDossier) -> Value {
                 && !dossier
                     .materials
                     .iter()
-                    .any(|m| m["slotKey"] == s["slotKey"] && m["currentRevisionRef"].is_string())
-                && !layouts.iter().any(|m| m["slotKey"] == s["slotKey"])
+                    .any(|m| same_image_source(s, m) && m["currentRevisionRef"].is_string())
+                && !layouts.iter().any(|m| same_image_source(s, m))
+                && !dossier
+                    .candidate_statuses
+                    .iter()
+                    .any(|c| c["kind"] == "image" && same_image_source(s, c))
         })
         .count();
     json!({"workCount":1,"imageSlots":image_slots.len(),"imageJobs":layouts.len(),"layoutCount":layouts.len(),
-        "pendingLayouts":pending,"alreadyCurrent":current,"humanProtected":protected,"needsOcr":needs_ocr,
+        "pendingLayouts":pending,"pendingReviewCount":pending_review,"alreadyCurrent":current,"humanProtected":protected,"needsOcr":needs_ocr,
         "expectedRevision":dossier.revision})
+}
+
+fn same_image_source(slot: &Value, reading: &Value) -> bool {
+    let matches = |source: &Value| {
+        source["slotKey"] == reading["slotKey"]
+            && source["sourceVersion"] == reading["sourceVersion"]
+    };
+    matches(slot)
+        || slot["sameBytesSources"]
+            .as_array()
+            .is_some_and(|sources| sources.iter().any(matches))
 }
 
 pub(super) fn refresh_revision(dossier: &mut ResearchDossier) {
@@ -182,7 +236,8 @@ pub(super) fn refresh_revision(dossier: &mut ResearchDossier) {
         &json!([
             dossier.material_revision,
             dossier.coverage,
-            dossier.metadata
+            dossier.metadata,
+            dossier.candidate_statuses
         ])
         .to_string(),
     );

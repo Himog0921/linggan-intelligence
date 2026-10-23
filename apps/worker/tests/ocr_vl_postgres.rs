@@ -170,10 +170,10 @@ async fn synthetic_worker_keeps_visual_candidates_separate_until_explicit_review
             edited_blocks: None,
             verified: false,
             resolved_issue_keys: vec![],
+            actor: "synthetic-reviewer".into(),
+            reason: "Compare the complete synthetic source image".into(),
         };
-        review_reading(&db, unit, &review, Some("synthetic-worker-proof"))
-            .await
-            .unwrap();
+        review_reading(&db, unit, &review).await.unwrap();
     }
     let d = research_dossier::read(&db, work).await.unwrap().unwrap();
     assert!(

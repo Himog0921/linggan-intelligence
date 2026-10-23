@@ -26,16 +26,20 @@ export function MaterialsSection({ payload, work, domain, onOpenImage, onApplied
   return <div className={styles.materials}>
     {dossier.note.platformTitle !== null ? <Section title="平台标题"><p className={styles.text}>{dossier.note.platformTitle}</p></Section> : null}
     {dossier.materials.length === 0 ? <p>当前尚无可读材料；这不等于原作品没有内容。</p> : null}
-    {dossier.materials.map(unit => <section key={unit.ref} className={styles.material} data-unit-ref={unit.ref}>
+    {dossier.materials.map(unit => <MaterialSection key={unit.ref} unit={unit} work={work} domain={domain} onOpenImage={onOpenImage} onApplied={onApplied} />)}
+  </div>;
+}
+function MaterialSection({ unit, work, domain, onOpenImage, onApplied }: { unit: DossierMaterial; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void }) {
+  const [originalReadable, setOriginalReadable] = useState(true);
+  return <section className={styles.material} data-unit-ref={unit.ref}>
       <header className={styles.materialHead}><h3>{materialLabel(unit)}</h3><span>{readingLabel(unit)}</span></header>
       {unit.pageSource ? <p className={styles.note}>页序由已验证的同图来源确认。</p> : null}
       {unit.blocks.length === 0 ? <p className={styles.note}>{emptyMaterialNote(unit)}</p> : null}
       <DossierBlocks blocks={unit.blocks} issues={unit.issues} />
-      {unit.kind === 'image' || unit.kind === 'video_frame' ? <ImageCompare material={unit} onOpenImage={onOpenImage} /> : null}
-      {unit.kind !== 'tags' && unit.sourceState === 'present' && (unit.currentRevisionRef !== null || unit.kind === 'image') ? <ReadingReviewPanel unit={unit} work={work} domain={domain} onApplied={onApplied} /> : null}
+      {unit.kind === 'image' || unit.kind === 'video_frame' ? <ImageCompare key={unit.originalUrl} material={unit} onOpenImage={onOpenImage} onReadable={setOriginalReadable} /> : null}
+      {unit.kind !== 'tags' && unit.sourceState === 'present' && (unit.currentRevisionRef !== null || unit.kind === 'image') ? <ReadingReviewPanel unit={unit} work={work} domain={domain} onApplied={onApplied} originalReadable={originalReadable} /> : null}
       <details className={styles.disclosure}><summary>来源与读本版本</summary><pre className={styles.pre}>{JSON.stringify({ unitRef: unit.ref, sourceRef: unit.sourceRef, sourceVersion: unit.sourceVersion, currentRevisionRef: unit.currentRevisionRef, pageSource: unit.pageSource, reading: unit.reading }, null, 2)}</pre></details>
-    </section>)}
-  </div>;
+    </section>;
 }
 async function readMetadata(work: string, domain: string, asOf: string, signal: AbortSignal) {
   const value = await requestJson(`${API_ROOT}/${encodeURIComponent(work)}/research-dossier/metadata?domain=${encodeURIComponent(domain)}&asOf=${encodeURIComponent(asOf)}&sections=author,interaction`, { signal });

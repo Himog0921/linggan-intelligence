@@ -359,14 +359,14 @@ export function commentsJson(count: number, options: { cursor?: string | null; t
 export const REVISION = 'r'.repeat(64);
 
 export function planJson(overrides: Partial<Record<string, unknown>> = {}) {
-  return { alreadyCurrent: 0, expectedRevision: REVISION, imageJobs: 4, imageSlots: 4, layoutCount: 1, needsOcr: 3, pendingLayouts: 1, workCount: 1, ...overrides };
+  return { alreadyCurrent: 0, expectedRevision: REVISION, imageJobs: 4, imageSlots: 4, layoutCount: 1, needsOcr: 3, pendingReviewCount: 0, pendingLayouts: 1, workCount: 1, ...overrides };
 }
 export function dossierMaterialJson(n: number, overrides: Record<string, unknown> = {}) {
   const reading = mediaRef(800 + n);
   return {
     ref: mediaRef(700 + n), kind: 'image', slotKey: `xhs:ext:image:${n}`, page: n,
     sourceState: 'present', sourceRef: mediaRef(500 + n), sourceVersion: `source-${n}`, currentRevisionRef: reading,
-    originalUrl: mediaHandle(n), reading: { generatedBy: 'ordinary_ocr', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2' },
+    originalUrl: mediaHandle(n), reading: { generatedBy: 'ordinary_ocr', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2', review: null },
     blocks: [
       { ref: `${workRef(1)}.${reading}.0`, kind: 'heading', text: '封面大字独立保留', speaker: 'author', bbox: [0.1, 0.1, 0.75, 0.07] },
       { ref: `${workRef(1)}.${reading}.1`, kind: 'paragraph', text: '第0行连续的图片正文，完整可用。', speaker: 'unconfirmed', bbox: [0.12, 0.28, 0.76, 0.025] },
@@ -382,7 +382,7 @@ export function dossierJson(n: number, options: DossierOptions = {}) {
       note: { platform: 'xhs', externalId: `synthetic-ext-${n}`, sourceUrl: null, platformTitle: '合成作品标题', titleSource: { sourceRef: mediaRef(500), sourceVersion: 'native-1' }, displayTitle: '合成作品标题', displayTitleBasis: 'platform', ...options.note },
       materials: options.materials ?? [
         { ref: mediaRef(900), kind: 'body', slotKey: null, page: null, sourceState: 'present', sourceRef: mediaRef(501), sourceVersion: 'native-1', currentRevisionRef: mediaRef(901), originalUrl: null,
-          reading: { generatedBy: 'platform', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2' },
+          reading: { generatedBy: 'platform', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2', review: null },
           blocks: [{ ref: `${ref}.${mediaRef(901)}.0`, kind: 'paragraph', speaker: 'author', text: options.bodyText ?? '合成正文。'.repeat(120) }], issues: [] },
         dossierMaterialJson(1),
       ],

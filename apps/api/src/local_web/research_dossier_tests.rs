@@ -185,18 +185,20 @@ async fn dossier_http_candidates_review_replay_conflict_and_restricted_history()
     let base = format!("/api/local/work-resources/{work}/research-dossier");
     let (_, choices) = call(app.clone(), &format!("{base}/candidates"), None).await;
     assert_eq!(choices["candidates"].as_array().unwrap().len(), 2);
-    assert_eq!(
-        dossier::read(&db, work).await.unwrap().unwrap().revision,
-        before.revision
+    let with_candidates = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(with_candidates.material_revision, before.material_revision);
+    assert_ne!(
+        with_candidates.revision, before.revision,
+        "candidate identities affect the review plan, not the current text"
     );
     let endpoint = format!("{base}/materials/{}/review", image["ref"].as_str().unwrap());
-    let command = json!({"commandRef":Uuid::new_v4(),"expectedCurrentRevisionRef":image["currentRevisionRef"],"candidateRevisionRef":second,"action":"adopt","verified":false,"resolvedIssueKeys":[]});
+    let command = json!({"commandRef":Uuid::new_v4(),"expectedCurrentRevisionRef":image["currentRevisionRef"],"candidateRevisionRef":second,"action":"adopt","actor":"synthetic-http-reviewer","reason":"Compare saved image with candidate","verified":false,"resolvedIssueKeys":[]});
     let (status, receipt) = call(app.clone(), &endpoint, Some(command.clone())).await;
     assert_eq!(status, StatusCode::OK, "{receipt}");
     assert_eq!(receipt["currentRevisionRef"], second.to_string());
     let replay = call(app.clone(), &endpoint, Some(command.clone())).await;
     assert_eq!(replay, (StatusCode::OK, receipt));
-    let stale = json!({"commandRef":Uuid::new_v4(),"expectedCurrentRevisionRef":image["currentRevisionRef"],"candidateRevisionRef":first,"action":"adopt","verified":false,"resolvedIssueKeys":[]});
+    let stale = json!({"commandRef":Uuid::new_v4(),"expectedCurrentRevisionRef":image["currentRevisionRef"],"candidateRevisionRef":first,"action":"adopt","actor":"synthetic-http-reviewer","reason":"Compare saved image with candidate","verified":false,"resolvedIssueKeys":[]});
     assert_eq!(
         call(app.clone(), &endpoint, Some(stale)).await.0,
         StatusCode::CONFLICT
@@ -208,6 +210,29 @@ async fn dossier_http_candidates_review_replay_conflict_and_restricted_history()
     assert_eq!(
         commands, 1,
         "a replay and a stale command cannot append another decision"
+    );
+    let (_, adopted_version) = call(app.clone(), &format!("{base}/readings/{second}"), None).await;
+    assert_eq!(adopted_version["currentRevisionRef"], second.to_string());
+    assert_eq!(
+        adopted_version["material"]["currentRevisionRef"],
+        second.to_string()
+    );
+    let replacement = json!({"commandRef":Uuid::new_v4(),"expectedCurrentRevisionRef":second,
+        "candidateRevisionRef":first,"action":"adopt","actor":"another-http-reviewer",
+        "reason":"A later explicit review of the full saved image","verified":true,"resolvedIssueKeys":[]});
+    assert_eq!(
+        call(app.clone(), &endpoint, Some(replacement)).await.0,
+        StatusCode::OK
+    );
+    let (_, old_version) = call(app.clone(), &format!("{base}/readings/{second}"), None).await;
+    assert_eq!(
+        old_version["material"], adopted_version["material"],
+        "exact immutable content never follows the new current pointer"
+    );
+    assert_eq!(
+        old_version["currentRevisionRef"],
+        first.to_string(),
+        "old receipts cannot replace the current unit pointer, including deduplicated units"
     );
     let source = image["sourceRef"].as_str().unwrap().parse().unwrap();
     linggan_evidence::record_materialization_disposition(

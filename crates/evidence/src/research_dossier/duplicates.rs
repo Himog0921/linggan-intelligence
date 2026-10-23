@@ -56,17 +56,24 @@ pub(super) fn collapse(mut slots: Vec<Value>, readings: &[Value]) -> Vec<Value> 
         .find(|(s, _)| s["slotKey"] == first["slotKey"])
         .or_else(|| choices.first())
         .map_or(first.clone(), |(s, _)| (*s).clone());
+    let same_bytes_sources: Vec<_> = group
+        .iter()
+        .filter(|s| s["slotKey"] != chosen["slotKey"])
+        .map(|s| json!({"slotKey":s["slotKey"],"sourceVersion":s["sourceVersion"]}))
+        .collect();
     let keys: Vec<_> = group.iter().map(|s| s["slotKey"].clone()).collect();
     slots.retain(|s| {
         s["component"] != "image"
             || !keys.contains(&s["slotKey"])
             || s["slotKey"] == chosen["slotKey"]
     });
-    if chosen["slotKey"] != first["slotKey"] {
-        if let Some(slot) = slots
-            .iter_mut()
-            .find(|s| s["slotKey"] == chosen["slotKey"] && s["component"] == "image")
-        {
+    if let Some(slot) = slots
+        .iter_mut()
+        .find(|s| s["slotKey"] == chosen["slotKey"] && s["component"] == "image")
+    {
+        // Only metadata crosses the proven cover/first-page equivalence; reading identities stay put.
+        slot["sameBytesSources"] = json!(same_bytes_sources);
+        if chosen["slotKey"] != first["slotKey"] {
             slot["page"] = json!(1);
             slot["displayOrderState"] = json!("KNOWN");
             slot["pageSource"] = json!({"basis":"same_verified_bytes","sourceRef":first["sourceRef"],"sourceVersion":first["sourceVersion"],"slotKey":first["slotKey"]});

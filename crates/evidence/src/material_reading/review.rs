@@ -5,31 +5,26 @@ pub async fn review_reading(
     db: &Database,
     unit_ref: Uuid,
     request: &ReviewReadingRequest,
-    actor: Option<&str>,
 ) -> Result<Value, ReadingError> {
     validate(request)?;
-    if actor.is_some_and(|a| a.trim().is_empty()) {
-        return Err(ReadingError::Invalid);
-    }
     let request_hash =
-        crate::ocr_adoption::content_hash(json!([unit_ref, request, actor]).to_string().as_bytes());
+        crate::ocr_adoption::content_hash(json!([unit_ref, request]).to_string().as_bytes());
     let mut tx = db.pool().begin().await?;
     sqlx::query("SELECT pg_advisory_xact_lock(421,hashtext($1::text))")
         .bind(request.command_ref.to_string())
         .execute(&mut *tx)
         .await?;
-    if let Some(row) = sqlx::query(
+    let replay = sqlx::query(
         "SELECT request_hash,response FROM linggan_material_reading_command WHERE command_ref=$1",
     )
     .bind(request.command_ref)
     .fetch_optional(&mut *tx)
-    .await?
+    .await?;
+    if replay
+        .as_ref()
+        .is_some_and(|r| r.get::<String, _>("request_hash") != request_hash)
     {
-        return if row.get::<String, _>("request_hash") == request_hash {
-            Ok(row.get("response"))
-        } else {
-            Err(ReadingError::Conflict)
-        };
+        return Err(ReadingError::Conflict);
     }
     let work: Uuid = sqlx::query_scalar(
         "SELECT content_public_ref FROM linggan_material_unit WHERE unit_ref=$1",
@@ -44,9 +39,6 @@ pub async fn review_reading(
         .fetch_one(&mut *tx)
         .await?;
     let mut unit = Unit::from_row(&row);
-    if unit.current != request.expected_current_revision_ref {
-        return Err(ReadingError::Conflict);
-    }
     let candidate =
         sqlx::query("SELECT * FROM linggan_material_reading WHERE reading_ref=$1 AND unit_ref=$2")
             .bind(request.candidate_revision_ref)
@@ -54,42 +46,94 @@ pub async fn review_reading(
             .fetch_optional(&mut *tx)
             .await?
             .ok_or(ReadingError::NotFound)?;
-    let candidate_blocks: Vec<Value> =
-        serde_json::from_value(candidate.get("blocks")).map_err(|_| ReadingError::Invalid)?;
-    let candidate_issues: Vec<Value> =
-        serde_json::from_value(candidate.get("issues")).map_err(|_| ReadingError::Invalid)?;
-    validate_content(&candidate_blocks, &candidate_issues).map_err(|_| ReadingError::Invalid)?;
-    let source_version: String = candidate.get("source_version");
+    // Current source eligibility also gates retries; a receipt cannot bypass withdrawal.
+    require_current_source(&mut tx, &unit, &candidate).await?;
+    if let Some(replay) = replay {
+        return Ok(replay.get("response"));
+    }
     let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut *tx)
         .await?;
-    if source_version != unit.source
+    let effective_current = read::current_reference_in(&mut tx, work, unit.id, &now).await?;
+    if effective_current != request.expected_current_revision_ref {
+        return Err(ReadingError::Conflict);
+    }
+    if !source::bytes_available(&mut tx, &unit).await? {
+        return Err(ReadingError::OriginalUnavailable);
+    }
+    if request.action == "keep" {
+        require_current_reading(&mut tx, &unit).await?;
+    }
+    apply(&mut tx, &mut unit, request, &candidate).await?;
+    // Opinions preserve the stored selection, including an ineligible historical pointer.
+    let resulting = if matches!(request.action.as_str(), "pending" | "reject") {
+        effective_current
+    } else {
+        unit.current
+    };
+    let receipt = json!({"commandRef":request.command_ref,"unitRef":unit.id,
+        "candidateRevisionRef":request.candidate_revision_ref,"action":request.action,
+        "currentRevisionRef":resulting,
+        "adoption":resulting.map(|_| &unit.adoption),
+        "verification":resulting.map(|_| &unit.verification)});
+    sqlx::query("INSERT INTO linggan_material_reading_command(command_ref,request_hash,unit_ref,candidate_reading_ref,expected_reading_ref,resulting_reading_ref,action,actor,reason,verified,response) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
+        .bind(request.command_ref).bind(request_hash).bind(unit.id).bind(request.candidate_revision_ref)
+        .bind(request.expected_current_revision_ref).bind(resulting).bind(&request.action)
+        .bind(&request.actor).bind(&request.reason).bind(request.verified).bind(&receipt)
+        .execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(receipt)
+}
+
+async fn require_current_source(
+    conn: &mut PgConnection,
+    unit: &Unit,
+    reading: &sqlx::postgres::PgRow,
+) -> Result<(), ReadingError> {
+    let blocks: Vec<Value> =
+        serde_json::from_value(reading.get("blocks")).map_err(|_| ReadingError::Invalid)?;
+    let issues: Vec<Value> =
+        serde_json::from_value(reading.get("issues")).map_err(|_| ReadingError::Invalid)?;
+    validate_content(&blocks, &issues).map_err(|_| ReadingError::Invalid)?;
+    let version: String = reading.get("source_version");
+    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *conn)
+        .await?;
+    if version != unit.source
         || !source::current(
-            &mut tx,
+            conn,
             unit.work,
             &unit.kind,
             unit.slot.as_deref(),
-            &source_version,
-            candidate.get("derivative_ref"),
+            &version,
+            reading.get("derivative_ref"),
             &now,
         )
         .await?
     {
         return Err(ReadingError::SourceChanged);
     }
-    apply(&mut tx, &mut unit, request, &candidate).await?;
-    let receipt = json!({"commandRef":request.command_ref,"unitRef":unit.id,"candidateRevisionRef":request.candidate_revision_ref,
-        "action":request.action,"currentRevisionRef":unit.current,"adoption":unit.adoption,"verification":unit.verification});
-    sqlx::query("INSERT INTO linggan_material_reading_command(command_ref,request_hash,unit_ref,candidate_reading_ref,expected_reading_ref,resulting_reading_ref,action,actor,verified,response) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
-        .bind(request.command_ref).bind(request_hash).bind(unit.id).bind(request.candidate_revision_ref)
-        .bind(request.expected_current_revision_ref).bind(unit.current).bind(&request.action).bind(actor)
-        .bind(request.verified).bind(&receipt).execute(&mut *tx).await?;
-    tx.commit().await?;
-    Ok(receipt)
+    Ok(())
+}
+
+async fn require_current_reading(conn: &mut PgConnection, unit: &Unit) -> Result<(), ReadingError> {
+    let current = unit.current.ok_or(ReadingError::Invalid)?;
+    let reading =
+        sqlx::query("SELECT * FROM linggan_material_reading WHERE reading_ref=$1 AND unit_ref=$2")
+            .bind(current)
+            .bind(unit.id)
+            .fetch_one(&mut *conn)
+            .await?;
+    require_current_source(conn, unit, &reading).await
 }
 
 fn validate(r: &ReviewReadingRequest) -> Result<(), ReadingError> {
-    if !["adopt", "edit", "keep"].contains(&r.action.as_str())
+    if !["adopt", "edit", "keep", "pending", "reject"].contains(&r.action.as_str())
+        || r.actor.trim().is_empty()
+        || r.actor.chars().count() > 120
+        || r.reason.trim().is_empty()
+        || r.reason.chars().count() > 300
+        || (["pending", "reject"].contains(&r.action.as_str()) && r.verified)
         || (r.action == "edit") != r.edited_blocks.is_some()
         || (r.action != "edit" && !r.resolved_issue_keys.is_empty())
         || r.resolved_issue_keys.iter().any(|k| k.is_empty())
@@ -132,6 +176,7 @@ async fn apply(
                 unit.adoption = "human_adopted".into();
             }
         }
+        "pending" | "reject" => return Ok(()),
         _ => return Err(ReadingError::Invalid),
     }
     unit.verification = if r.verified { "verified" } else { "unchecked" }.into();
@@ -241,8 +286,13 @@ fn protect_observed_metadata(
             {
                 return Err(ReadingError::Invalid);
             }
-            if let Some(value) = original.and_then(|b| b.get(field)) {
-                block[field] = value.clone();
+            if let Some(source) = original.filter(|source| same_content(source, block)) {
+                if let Some(value) = source.get(field) {
+                    block[field] = value.clone();
+                }
+            } else if let Some(object) = block.as_object_mut() {
+                // A reused block ID alone does not establish a new transcription's location.
+                object.remove(field);
             }
         }
         if let Some(provided) = block.get("issues").and_then(Value::as_array) {
@@ -263,6 +313,14 @@ fn protect_observed_metadata(
     Ok(())
 }
 
+fn same_content(before: &Value, after: &Value) -> bool {
+    [
+        "kind", "text", "items", "ordered", "start", "columns", "rows", "turns", "level",
+    ]
+    .iter()
+    .all(|field| before.get(*field) == after.get(*field))
+}
+
 fn issue_key(issue: &Value) -> Option<&str> {
     issue["key"].as_str()
 }
@@ -270,6 +328,23 @@ fn issue_key(issue: &Value) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn editing_keeps_observed_anchors_only_when_source_content_still_matches() {
+        let before = vec![
+            json!({"ref":"b","kind":"paragraph","text":"不是 30 mg🙂","speaker":"unconfirmed",
+            "bbox":[0.1,0.2,0.3,0.2],"time":{"startMs":42,"endMs":42}}),
+        ];
+        let mut unchanged = before.clone();
+        unchanged[0]["speaker"] = json!("other");
+        unchanged[0].as_object_mut().unwrap().remove("bbox");
+        protect_observed_metadata(&before, &mut unchanged, &[]).unwrap();
+        assert_eq!(unchanged[0]["bbox"], before[0]["bbox"]);
+        assert_eq!(unchanged[0]["time"], before[0]["time"]);
+        let mut changed = before.clone();
+        changed[0]["text"] = json!("一段不同的人工转写");
+        protect_observed_metadata(&before, &mut changed, &[]).unwrap();
+        assert!(changed[0].get("bbox").is_none() && changed[0].get("time").is_none());
+    }
     #[test]
     fn editing_cannot_clear_source_gaps_or_silently_remove_issues() {
         let before = vec![

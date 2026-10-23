@@ -35,7 +35,7 @@ function stageCopy(run: OcrRecognitionRun) {
   return run.unavailableReason ?? '保存模型不会自动发图。';
 }
 /** Parent keys this work-scoped session, so late A responses cannot appear in B. */
-export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: string; onOpenSource?: OcrSourceOpener; children?: ReactNode }) {
+export function OcrRecognition({ workRef, domain, onOpenSource, children }: { workRef: string; domain: string; onOpenSource?: OcrSourceOpener; children?: ReactNode }) {
   const [run, setRun] = useState<OcrRecognitionRun | null>(null);
   const [loading, setLoading] = useState(true); const [readFailed, setReadFailed] = useState(false);
   const [sending, setSending] = useState(false); const [message, setMessage] = useState('');
@@ -129,7 +129,7 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
       {confirm ? <div className={styles.confirm} role="group" aria-label="确认本篇图片识别范围"><b>重新识读 {selectedSlots.length} 张原图</b><p>将按既有源顺序发送到 {confirm.modelLabel}。每张一次，首个失败后停止；可能产生模型费用。</p><small>{confirm.endpointUrl}</small><fieldset disabled={sending}><legend>选择重新识读的图片</legend>{confirm.images.map(image => <label key={image.slotKey}><input type="checkbox" checked={selectedSlots.includes(image.slotKey)} onChange={event => setSelectedSlots(current => event.target.checked ? [...current, image.slotKey] : current.filter(key => key !== image.slotKey))} />{image.ordinal === null ? image.role === 'cover' ? '封面 · 页码未知' : '页码未知的图片' : `第 ${image.ordinal} 页`}</label>)}</fieldset>
         <div className={styles.confirmActions}><ActionButton variant="primary" disabled={sending || selectedSlots.length === 0} onClick={() => void submit(confirm)}>确认并开始识别</ActionButton><ActionButton disabled={sending} onClick={() => setConfirm(null)}>取消</ActionButton></div></div> : null}
       {children}
-      {run?.images.length ? <div ref={result}><OcrRecognitionResults key={run.runRef} run={run} onOpen={onOpenSource}/></div> : null}
+      {run?.images.length ? <div ref={result}><OcrRecognitionResults key={run.runRef} run={run} domain={domain} onOpen={onOpenSource} onSaved={() => setRefresh(value => value + 1)}/></div> : null}
     </div>
   </Section>;
 }

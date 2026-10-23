@@ -255,7 +255,8 @@ pub const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0142_ocr_adoption.sql"),
     include_str!("../../../../database/migrations/0143_ocr_quality_audit.sql"),
     include_str!("../../../../database/migrations/0144_ocr_manual_recognition.sql"),
-    include_str!("../../../../database/migrations/0145_research_dossier_v2.sql"),
+    include_str!("../../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
+    include_str!("../../../../database/migrations/0146_research_dossier_v2.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -313,7 +314,8 @@ pub const MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0142_ocr_adoption','baad716a89398d3e923838028358db7e6189f66c79408c4502287f8b75498057');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0143_ocr_quality_audit','11d316460ceb7d49b27751efe4b2382b88a1a068f86784f427771bbdf30bdb6c');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0144_ocr_manual_recognition','de82e4ddabe0e9045165a01e3e32ab2ae24625853def47934907c66d0fc12990');\n",
-    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0145_research_dossier_v2','ed284ff1a73465a8d9b2745bc8dbadb299c0045ad8e56026c57d15d107840889');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0145_ocr_manual_human_adoption','49ba4e27a8923ea2e12fefee6e209797aa5d0e7e09b7c299e6ae11e236dbbfbc');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0146_research_dossier_v2','0f3e2ce3720363d8510c448df66a06fb907a955e83817ba9d011d36b4c063881');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

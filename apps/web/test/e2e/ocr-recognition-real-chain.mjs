@@ -12,9 +12,11 @@ const endpoint = new URL(origin);
 assert.equal(endpoint.hostname, '127.0.0.1'); assert.notEqual(endpoint.port, '3000'); assert.match(endpoint.port, /^\d+$/);
 for (const ref of [workRef, domain]) assert.match(ref, /^[0-9a-f-]{36}$/i);
 const statePath = `/api/local/work-resources/${workRef}/ocr-recognition`;
-const candidatesPath = `/api/local/work-resources/${workRef}/research-dossier/candidates?domain=${domain}`;
+const dossierPath = `/api/local/work-resources/${workRef}/research-dossier`;
+const candidatesPath = `${dossierPath}/candidates?domain=${domain}`;
 const configPath = '/api/local/ai-settings/task-configs';
-const report = { result: 'FAIL', scope: 'actual React/API/owned PG; loopback supplier mock; no real provider calls', writes: [], startCommands: [], blockedRequests: [], errors: [], steps: [] };
+const reviewPaths = new Set();
+const report = { result: 'FAIL', scope: 'actual React/API/owned PG; loopback supplier mock; no real provider calls', writes: [], startCommands: [], reviewCommands: [], blockedRequests: [], errors: [], steps: [] };
 const browser = await chromium.launch({ headless: true, ...(process.env.DOSSIER_BROWSER_EXECUTABLE ? { executablePath: process.env.DOSSIER_BROWSER_EXECUTABLE } : {}) });
 let page;
 async function readJson(requestPath) {
@@ -36,12 +38,14 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'zh-CN' });
   await context.route('**/*', route => {
     const request = route.request(); const url = new URL(request.url());
-    const allowedWrite = request.method() === 'POST' && [configPath, statePath].includes(url.pathname);
+    const allowedReview = request.method() === 'POST' && reviewPaths.has(url.pathname) && url.searchParams.get('domain') === domain;
+    const allowedWrite = request.method() === 'POST' && ([configPath, statePath].includes(url.pathname) || allowedReview);
     if (url.origin !== origin || (request.method() !== 'GET' && !allowedWrite)) {
       report.blockedRequests.push(`${request.method()} ${request.url()}`); return route.abort();
     }
     if (allowedWrite) report.writes.push(url.pathname);
     if (allowedWrite && url.pathname === statePath) report.startCommands.push(request.postDataJSON());
+    if (allowedReview) report.reviewCommands.push({ path: url.pathname, command: request.postDataJSON() });
     return route.continue();
   });
   page = await context.newPage(); page.setDefaultTimeout(30000);
@@ -146,18 +150,83 @@ try {
   assert.ok(candidates.every(candidate => candidate.currentRevisionRef === null), 'manual OCR does not automatically adopt any candidate');
   report.steps.push('All three canonical candidate readings, literal heading/body/brand, original image comparison and exact raw diagnostics are readable; adoption remains separate.');
 
+  const firstCandidate = candidates.find(candidate => candidate.candidateRevisionRef === final.images[0].candidateRevisionRef);
+  const secondCandidate = candidates.find(candidate => candidate.candidateRevisionRef === final.images[1].candidateRevisionRef);
+  assert.ok(firstCandidate && secondCandidate);
+  const firstReviewPath = `${dossierPath}/materials/${firstCandidate.unitRef}/review`;
+  const secondReviewPath = `${dossierPath}/materials/${secondCandidate.unitRef}/review`;
+  reviewPaths.add(firstReviewPath); reviewPaths.add(secondReviewPath);
+  await firstPage.getByRole('button', { name: '人工核对与采用', exact: true }).click();
+  const firstReview = firstPage.getByRole('region', { name: '人工核对图片读本', exact: true });
+  await firstReview.getByLabel('核对版本', { exact: true }).waitFor();
+  assert.equal(await firstReview.getByLabel('核对版本', { exact: true }).inputValue(), firstCandidate.candidateRevisionRef);
+  await firstReview.getByRole('region', { name: '当前采用读本', exact: true }).getByText('尚未采用读本。', { exact: true }).waitFor();
+  await firstReview.locator('summary').filter({ hasText: /^对照原图/ }).click();
+  await loadedImage(firstReview.getByRole('img', { name: '第 1 页原图', exact: true }));
+  await firstReview.getByRole('button', { name: '逐块修正', exact: true }).click();
+  const manualText = '合成浏览器人工核对正文：逐字对照原图，完整保留标点、数字 42 与来源信息。';
+  await firstReview.getByLabel('段落文字', { exact: true }).first().fill(manualText);
+  await firstReview.getByLabel('审核人', { exact: true }).fill('合成浏览器审核人');
+  await firstReview.getByLabel('核对依据', { exact: true }).fill('对照本页受控原图完成逐块修正。');
+  await firstReview.getByRole('checkbox', { name: '已对照来源核验所选候选读本', exact: true }).check();
+  const humanSaved = page.waitForResponse(response => new URL(response.url()).pathname === firstReviewPath && response.request().method() === 'POST');
+  const sameRunRefresh = page.waitForResponse(response => new URL(response.url()).pathname === statePath && response.request().method() === 'GET');
+  await firstReview.getByRole('button', { name: '保存完整修正版', exact: true }).click();
+  const humanResponse = await humanSaved; assert.equal(humanResponse.status(), 200, await humanResponse.text()); const humanReceipt = await humanResponse.json();
+  const refreshedRun = await (await sameRunRefresh).json(); assert.equal(refreshedRun.runRef, final.runRef); assert.deepEqual(refreshedRun.images, final.images, 'human review does not rewrite machine previews or raw JSON');
+  const humanCommand = report.reviewCommands[0].command;
+  assert.equal(humanCommand.action, 'edit'); assert.equal(humanCommand.expectedCurrentRevisionRef, null); assert.equal(humanCommand.candidateRevisionRef, firstCandidate.candidateRevisionRef);
+  assert.equal(humanCommand.actor, '合成浏览器审核人'); assert.equal(humanCommand.reason, '对照本页受控原图完成逐块修正。'); assert.equal(humanCommand.verified, true);
+  assert.equal(humanCommand.editedBlocks.length, firstCandidate.blocks.length);
+  assert.ok(humanCommand.editedBlocks.some(block => block.text === manualText));
+  assert.equal(humanReceipt.adoption, 'human_edited'); assert.equal(humanReceipt.verification, 'verified');
+  await firstReview.getByRole('region', { name: '当前采用读本', exact: true }).getByText(manualText, { exact: true }).waitFor();
+  const adoptedDossier = await readJson(`${dossierPath}?domain=${domain}`);
+  const adoptedUnit = adoptedDossier.dossier.materials.find(unit => unit.ref === firstCandidate.unitRef);
+  assert.equal(adoptedUnit.currentRevisionRef, humanReceipt.currentRevisionRef);
+  assert.ok(adoptedUnit.blocks.some(block => block.text === manualText));
+  assert.equal(adoptedUnit.reading.review.actor, humanCommand.actor); assert.equal(adoptedUnit.reading.review.reason, humanCommand.reason);
+  await page.screenshot({ path: path.join(directory, 'recognition-human-review.png'), fullPage: true });
+  report.steps.push('The saved image entry opens the exact canonical candidate, compares its original, submits actor/reason and full block edit, then refreshes the same run and canonical current reading.');
+
+  const secondPage = result.locator(`[data-ocr-image="${final.images[1].imageRef}"]`);
+  await secondPage.getByRole('button', { name: '人工核对与采用', exact: true }).click();
+  const secondReview = secondPage.getByRole('region', { name: '人工核对图片读本', exact: true });
+  await secondReview.getByLabel('核对版本', { exact: true }).waitFor();
+  await secondReview.getByLabel('审核人', { exact: true }).fill('合成浏览器审核人');
+  await secondReview.getByLabel('核对依据', { exact: true }).fill('只记录核对意见，保留当前正文。');
+  for (const [decision, button] of [['pending', '保持待核验'], ['reject', '拒绝此候选']]) {
+    const reviewed = page.waitForResponse(response => new URL(response.url()).pathname === secondReviewPath && response.request().method() === 'POST');
+    await secondReview.getByRole('button', { name: button, exact: true }).click();
+    const reviewedResponse = await reviewed; assert.equal(reviewedResponse.status(), 200, await reviewedResponse.text()); const receipt = await reviewedResponse.json();
+    assert.equal(receipt.action, decision); assert.equal(receipt.currentRevisionRef, null); assert.equal(receipt.adoption, null); assert.equal(receipt.verification, null);
+    const queue = (await readJson(candidatesPath)).candidates;
+    assert.equal(queue.some(candidate => candidate.candidateRevisionRef === secondCandidate.candidateRevisionRef), decision === 'pending');
+    if (decision === 'pending') {
+      const opinion = secondReview.getByText(/此候选最近意见：待核验 · 合成浏览器审核人/);
+      await opinion.waitFor(); assert.match(await opinion.innerText(), /只记录核对意见，保留当前正文。/);
+    }
+    const afterOpinion = await readJson(`${dossierPath}?domain=${domain}`);
+    assert.equal(afterOpinion.dossier.materialRevision, adoptedDossier.dossier.materialRevision, 'opinion-only decisions preserve the effective reading');
+  }
+  report.steps.push('Pending keeps an unadopted candidate in the review queue; reject removes it. Neither changes current text, adoption, verification or material revision.');
+
   await page.reload(); await page.getByRole('button', { name: '查看识别结果', exact: true }).waitFor();
   const reloaded = await readJson(statePath);
   assert.equal(reloaded.runRef, final.runRef, 'refresh only reads the existing run');
   assert.deepEqual(reloaded.images.map(image => image.candidateRevisionRef), candidateRefs);
+  await firstPage.getByRole('button', { name: '人工核对与采用', exact: true }).click();
+  await firstPage.getByRole('region', { name: '当前采用读本', exact: true }).getByText(manualText, { exact: true }).waitFor();
   await page.setViewportSize({ width: 980, height: 1100 });
   await page.screenshot({ path: path.join(directory, 'recognition-narrow.png'), fullPage: true });
   assert.deepEqual(report.errors, []); assert.deepEqual(report.blockedRequests, []);
   assert.equal(report.writes.filter(value => value === statePath).length, 1, 'one explicit browser start command');
   assert.equal(report.writes.filter(value => value === configPath).length, 1, 'one explicit model configuration command');
+  assert.deepEqual(report.reviewCommands.map(value => value.command.action), ['edit', 'pending', 'reject']);
+  for (const { command } of report.reviewCommands.slice(1)) { assert.equal(command.verified, false); assert.deepEqual(command.resolvedIssueKeys, []); assert.ok(!('editedBlocks' in command)); }
   report.steps.push('Reload preserves the persisted run and candidate identities without another dispatch.');
   Object.assign(report, { result: 'PASS', runRef: final.runRef, candidateRefs, observedPercentage: 33, finalPercentage: 100 });
-  console.log('Manual OCR browser: model → explicit selected slots → persisted 33% → canonical candidates/raw/source → refresh PASS');
+  console.log('Manual OCR browser: model → explicit selected slots → persisted 33% → canonical candidates/raw/source → common human review → refresh PASS');
 } catch (error) {
   report.error = String(error?.stack ?? error);
   if (page) { await writeFile(path.join(directory, 'recognition-browser-failure.html'), await page.content()); await page.screenshot({ path: path.join(directory, 'recognition-browser-failure.png'), fullPage: true }); }

@@ -12,6 +12,7 @@ mod read;
 mod review;
 mod source;
 mod write;
+pub(crate) use read::{candidate_statuses_in, current_reference_in};
 pub use read::{read_candidates, read_current_in, read_versions_in};
 pub use review::review_reading;
 pub use write::publish_in;
@@ -56,6 +57,8 @@ pub struct ReviewReadingRequest {
     pub expected_current_revision_ref: Option<Uuid>,
     pub candidate_revision_ref: Uuid,
     pub action: String,
+    pub actor: String,
+    pub reason: String,
     pub edited_blocks: Option<Vec<Value>>,
     pub verified: bool,
     #[serde(default)]
@@ -72,6 +75,8 @@ pub enum ReadingError {
     Conflict,
     #[error("reading_source_changed")]
     SourceChanged,
+    #[error("reading_original_unavailable")]
+    OriginalUnavailable,
     #[error("reading_storage_unavailable")]
     Storage(#[from] sqlx::Error),
 }

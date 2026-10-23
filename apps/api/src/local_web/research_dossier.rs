@@ -160,7 +160,7 @@ pub(super) async fn review(
         Ok(false) => return local_read_json_error(StatusCode::NOT_FOUND, "reading_not_found"),
         Err(_) => return unavailable(),
     }
-    match material_reading::review_reading(db, unit, &input, None).await {
+    match material_reading::review_reading(db, unit, &input).await {
         Ok(receipt) => Json(receipt).into_response(),
         Err(error) => reading_error(error),
     }
@@ -172,6 +172,7 @@ fn reading_error(error: material_reading::ReadingError) -> Response {
         E::NotFound => (StatusCode::NOT_FOUND, "reading_not_found"),
         E::Conflict => (StatusCode::CONFLICT, "reading_revision_conflict"),
         E::SourceChanged => (StatusCode::CONFLICT, "reading_source_changed"),
+        E::OriginalUnavailable => (StatusCode::CONFLICT, "reading_original_unavailable"),
         E::Storage(_) => (
             StatusCode::SERVICE_UNAVAILABLE,
             "reading_storage_unavailable",
@@ -192,7 +193,7 @@ pub(super) async fn version(
         return response;
     }
     match dossier::read_version(db, work, reading).await {
-        Ok(Some(value)) => Json(json!({"workRef":work,"material":value})).into_response(),
+        Ok(Some(value)) => Json(value).into_response(),
         Ok(None) => local_read_json_error(StatusCode::NOT_FOUND, "reading_not_found"),
         Err(error) => read_error(error),
     }

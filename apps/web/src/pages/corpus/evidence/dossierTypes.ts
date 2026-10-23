@@ -5,6 +5,10 @@ export type Speaker = 'author' | 'other' | 'unconfirmed';
 export type ReadingProducer = 'platform' | 'ordinary_ocr' | 'local_vision' | 'cloud_vision' | 'asr' | 'frame_ocr' | 'human_edit';
 export type Adoption = 'automatic' | 'human_adopted' | 'human_edited';
 export type Verification = 'unchecked' | 'verified';
+export type ReadingReviewAction = 'adopt' | 'edit' | 'keep' | 'pending' | 'reject';
+export interface ReadingReviewSummary {
+  commandRef: string; actor: string; reason: string; action: ReadingReviewAction; reviewedAt: string;
+}
 export interface DossierIssue {
   key: string; code: string; message: string; resolution: 'reading_edit' | 'source_refresh'; blockRef?: string | null;
 }
@@ -28,7 +32,7 @@ export interface DossierMaterial {
   pageSource?: { basis: 'same_verified_bytes'; sourceRef: string; sourceVersion: string; slotKey: string };
   sourceState: SourceState; sourceRef: string | null; sourceVersion: string | null;
   currentRevisionRef: string | null; originalUrl: string | null;
-  reading: { generatedBy: ReadingProducer; adoption: Adoption; verification: Verification; ruleVersion: string } | null;
+  reading: { generatedBy: ReadingProducer; adoption: Adoption; verification: Verification; ruleVersion: string; review: ReadingReviewSummary | null } | null;
   blocks: DossierBlock[]; issues: DossierIssue[];
 }
 export interface DossierNote {
@@ -53,20 +57,21 @@ export interface Dossier {
 }
 export interface RelayerPlan {
   workCount: number | null; imageSlots: number | null; imageJobs: number | null;
-  layoutCount: number; pendingLayouts: number; alreadyCurrent: number; needsOcr: number; expectedRevision: string;
+  layoutCount: number; pendingLayouts: number; alreadyCurrent: number; needsOcr: number; pendingReviewCount: number; expectedRevision: string;
 }
 export interface DossierPayload { dossier: Dossier; relayerPlan: RelayerPlan }
 export interface ReadingCandidate {
   unitRef: string; slotKey: string | null; candidateRevisionRef: string; currentRevisionRef: string | null;
-  blocks: DossierBlock[]; issues: DossierIssue[]; generatedBy: ReadingProducer; verification: Verification; createdAt: string;
+  blocks: DossierBlock[]; issues: DossierIssue[]; generatedBy: ReadingProducer; verification: Verification; createdAt: string; review: ReadingReviewSummary | null;
 }
 export interface ReadingReviewRequest {
   commandRef: string; expectedCurrentRevisionRef: string | null; candidateRevisionRef: string;
-  action: 'adopt' | 'edit' | 'keep'; editedBlocks?: DossierBlock[]; verified: boolean; resolvedIssueKeys: string[];
+  action: ReadingReviewAction; editedBlocks?: DossierBlock[]; verified: boolean; resolvedIssueKeys: string[];
+  actor: string; reason: string;
 }
 export interface ReadingReviewReceipt {
-  commandRef: string; unitRef: string; candidateRevisionRef: string; action: 'adopt' | 'edit' | 'keep';
-  currentRevisionRef: string | null; adoption: Adoption; verification: Verification; reviewRef: string | null;
+  commandRef: string; unitRef: string; candidateRevisionRef: string; action: ReadingReviewAction;
+  currentRevisionRef: string | null; adoption: Adoption | null; verification: Verification | null; reviewRef: string | null;
 }
 export interface DossierComment { sourceRef: string; parentSourceRef: string | null; relation: 'ROOT' | 'REPLY'; body: string | null; likeCount: number | null }
 export interface DossierCommentPage { items: DossierComment[]; total: number | null; nextCursor: string | null }

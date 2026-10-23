@@ -2,7 +2,6 @@
 
 - [OCR 封面标题选择与异常内容拦截](plans/active/ocr-title-quality-454.md)：#454/#464 的区块采用、局部复核与自有库链路验证；生产默认、共享运行与业务签收仍另列。
 - [OCR 手动图片文字识别：实施与验收](plans/active/ocr-manual-recognition-454.md)：#454 当前候选；图组手动 OCR、真实持久化百分比、检查器结果与 OCR 模型设置，未合并、未部署。
-
 采集完整交付入口：[COLLECTION-JTBD-001 单次采集](plans/active/collection-single-run-398.md)（Issue #398 / Draft PR #406；替代 #400 的限制，含 UI 与验收矩阵）。[运行与数据合同](data-contracts/collection-single-run-001.md)、[正式 UI 核对](design/changes/collection-single-run-398.md)、[单独 UI 审美审查](design/changes/collection-single-run-398-visual-audit.md)。旧[两页导航](plans/active/collection-jtbd-001.md)保留历史范围。
 
 > 状态: 权威当前
@@ -27,6 +26,11 @@
 本页是项目的“总书目”。Agent 不应先通读所有材料，而应从这里逐层进入与当前事项直接相关的文件。
 
 协作与风险分级统一读[工作包协作协议](governance/agent-collaboration.md)。业务行为、数据、权限和外部调用先读[安全与领域约束](agents/safety-invariants.md)；该文件保留原根 AGENTS 的不变量。运行状态仅在运行/发布/跨包依赖任务中读取，不作为所有实现的预读门。
+
+- [手动云端 OCR 的人工采用合同](data-contracts/ocr-manual-human-adoption.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
+- [手动云端 OCR 人工采用实施计划](archive/plans/ocr-manual-human-adoption-454.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
+- [手动云端 OCR 人工采用发布运行手册](runbooks/ocr-manual-human-adoption-release-454.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
+- [UI 变更清单](design/changes/ocr-manual-human-adoption-454-ui-change-manifest.md) / [验收记录](design/acceptance/ocr-manual-human-adoption-454-acceptance.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
 
 
 - [主题图谱紧凑工作区变更](design/changes/topic-map-compact-382.md)：#382 当前 UI 后续，取代旧工作区布局，不改研究与来源合同。

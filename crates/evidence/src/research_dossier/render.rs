@@ -47,7 +47,8 @@ fn field_label(field: &str) -> &str {
 }
 
 pub fn markdown(dossier: &ResearchDossier) -> String {
-    let title = dossier.note["displayTitle"].as_str().unwrap_or("研究底稿");
+    // Image-derived display titles remain complete evidence blocks at their source position.
+    let title = dossier.note["platformTitle"].as_str().unwrap_or("研究底稿");
     let mut out = format!(
         "# {title}\n\n作品：{}\n截点：{}\n合同：{}\n\n",
         dossier.work_ref, dossier.as_of, dossier.contract
@@ -55,7 +56,6 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
     if dossier.selection["mode"] == "explicit" {
         out.push_str("> 当前导出为显式选择的材料。\n\n");
     }
-    let mut display_heading_emitted = dossier.note["displayTitleBasis"] == "image_heading";
     for unit in &dossier.materials {
         let label = match unit["kind"].as_str() {
             Some("image") => unit["page"]
@@ -72,13 +72,6 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
             out.push_str(&format!("{}\n\n", empty_label(unit)));
         }
         for block in blocks {
-            if display_heading_emitted
-                && block["kind"] == "heading"
-                && block["text"].as_str() == Some(title)
-            {
-                display_heading_emitted = false;
-                continue;
-            }
             render_block(&mut out, block);
         }
         for issue in unit["issues"].as_array().into_iter().flatten() {
@@ -153,5 +146,142 @@ fn render_block(out: &mut String, block: &Value) {
 fn render_issue(out: &mut String, issue: &Value) {
     if let Some(message) = issue["message"].as_str() {
         out.push_str(&format!("> 待确认：{message}\n\n"));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::research_dossier::{Selection, VERSION, select};
+    use uuid::Uuid;
+
+    fn fixture(platform_title: Option<&str>, body_heading: Option<&str>) -> ResearchDossier {
+        let mut materials = vec![];
+        if let Some(text) = body_heading {
+            materials.push(json!({"ref":"body-unit","kind":"body","sourceState":"present","issues":[],"blocks":[
+                {"ref":"body-heading","kind":"heading","text":text,"speaker":"other","time":{"startMs":10,"endMs":20},
+                    "issues":[{"key":"body-title","code":"unclear","message":"正文标题待确认","resolution":"reading_edit"}]},
+                {"ref":"body-next","kind":"paragraph","text":"正文后续","speaker":"author"}
+            ]}));
+        }
+        materials.push(json!({"ref":"image-unit","kind":"image","page":1,"sourceState":"present","issues":[],"blocks":[
+            {"ref":"image-heading","kind":"heading","text":"同名标题","speaker":"unconfirmed","time":{"startMs":40,"endMs":40},
+                "issues":[{"key":"image-title","code":"unclear","message":"图片标题待确认","resolution":"reading_edit"}]},
+            {"ref":"image-next","kind":"paragraph","text":"图片后续","speaker":"author"}
+        ]}));
+        ResearchDossier {
+            contract: VERSION,
+            work_ref: Uuid::from_u128(1),
+            revision: "full-revision".into(),
+            material_revision: "material-revision".into(),
+            as_of: "2026-10-23T00:00:00Z".into(),
+            note: json!({"platformTitle":platform_title,"displayTitle":platform_title.unwrap_or("同名标题"),
+                "displayTitleBasis":if platform_title.is_some(){"platform"}else{"image_heading"}}),
+            materials,
+            coverage: json!({"imageInventory":{"expectedPages":1,"acquiredPages":1,"processedPages":1}}),
+            attachments: json!({}),
+            selection: json!({"mode":"full"}),
+            fragments: vec![],
+            media: vec![],
+            media_inventory: vec![],
+            candidate_statuses: vec![],
+            metadata: json!({}),
+        }
+    }
+
+    fn section<'a>(markdown: &'a str, label: &str) -> &'a str {
+        let remaining = markdown.split_once(&format!("## {label}\n\n")).unwrap().1;
+        remaining
+            .split_once("\n## ")
+            .map_or(remaining, |(section, _)| section)
+            .trim_end()
+    }
+
+    fn assert_body(markdown: &str, heading: &str) {
+        assert_eq!(
+            section(markdown, "正文"),
+            format!(
+                "*他人*\n\n### {heading}\n\n*来源时间：10–20 ms*\n\n> 待确认：正文标题待确认\n\n正文后续"
+            )
+        );
+    }
+
+    fn assert_image(markdown: &str) {
+        assert_eq!(
+            section(markdown, "图片 1"),
+            "*角色未确认*\n\n### 同名标题\n\n*来源时间：40 ms*\n\n> 待确认：图片标题待确认\n\n图片后续"
+        );
+    }
+
+    #[test]
+    fn markdown_image_title_preserves_local_role_time_and_issues_once() {
+        let output = markdown(&fixture(None, None));
+        assert!(output.starts_with("# 研究底稿\n\n"));
+        assert_image(&output);
+        for text in [
+            "同名标题",
+            "角色未确认",
+            "来源时间：40 ms",
+            "图片标题待确认",
+            "图片后续",
+        ] {
+            assert_eq!(output.matches(text).count(), 1, "{text}");
+        }
+    }
+
+    #[test]
+    fn markdown_same_text_headings_keep_both_source_positions() {
+        let output = markdown(&fixture(None, Some("同名标题")));
+        assert!(output.starts_with("# 研究底稿\n\n"));
+        assert_eq!(output.matches("### 同名标题\n").count(), 2);
+        assert_body(&output, "同名标题");
+        assert_image(&output);
+        assert!(output.find("## 正文\n").unwrap() < output.find("## 图片 1\n").unwrap());
+    }
+
+    #[test]
+    fn markdown_explicit_body_selection_does_not_emit_unselected_image_title() {
+        for heading in ["同名标题", "仅正文标题"] {
+            let mut dossier = fixture(None, Some(heading));
+            let note = dossier.note.clone();
+            select(
+                &mut dossier,
+                &Selection {
+                    kinds: vec!["body".into()],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(
+                dossier.note, note,
+                "selection retains the full note display metadata"
+            );
+            assert_eq!(dossier.materials.len(), 1);
+            let output = markdown(&dossier);
+            assert!(output.starts_with("# 研究底稿\n\n"));
+            assert!(output.contains("> 当前导出为显式选择的材料。"));
+            assert_body(&output, heading);
+            assert_eq!(output.matches(&format!("### {heading}\n")).count(), 1);
+            for omitted in ["## 图片 1", "图片标题待确认", "来源时间：40 ms", "图片后续"]
+            {
+                assert!(!output.contains(omitted), "{omitted}");
+            }
+            if heading != "同名标题" {
+                assert!(!output.contains("同名标题"));
+            }
+        }
+    }
+
+    #[test]
+    fn markdown_platform_title_does_not_replace_same_text_material_headings() {
+        let output = markdown(&fixture(Some("同名标题"), Some("同名标题")));
+        assert!(output.starts_with("# 同名标题\n\n"));
+        assert_eq!(
+            output.lines().filter(|line| *line == "# 同名标题").count(),
+            1
+        );
+        assert_eq!(output.matches("### 同名标题\n").count(), 2);
+        assert_body(&output, "同名标题");
+        assert_image(&output);
     }
 }

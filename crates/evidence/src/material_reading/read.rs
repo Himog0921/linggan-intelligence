@@ -18,6 +18,36 @@ pub async fn read_versions_in(
     read_rows(conn, works, as_of, Some(readings)).await
 }
 
+/// A current pointer requires the same source eligibility as the canonical current reader.
+pub(crate) async fn current_reference_in(
+    conn: &mut PgConnection,
+    work: Uuid,
+    unit_ref: Uuid,
+    as_of: &str,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let row = sqlx::query("SELECT u.*,r.derivative_ref FROM linggan_material_unit u LEFT JOIN linggan_material_reading r ON r.reading_ref=u.current_reading_ref AND r.unit_ref=u.unit_ref WHERE u.content_public_ref=$1 AND u.unit_ref=$2")
+        .bind(work).bind(unit_ref).fetch_one(&mut *conn).await?;
+    let unit = Unit::from_row(&row);
+    let derivative = row.get("derivative_ref");
+    if unit.current.is_some()
+        && source::unrestricted(conn, &unit, derivative, &unit.source).await?
+        && source::current(
+            conn,
+            work,
+            &unit.kind,
+            unit.slot.as_deref(),
+            &unit.source,
+            derivative,
+            as_of,
+        )
+        .await?
+    {
+        Ok(unit.current)
+    } else {
+        Ok(None)
+    }
+}
+
 async fn read_rows(
     conn: &mut PgConnection,
     works: &[Uuid],
@@ -29,15 +59,17 @@ async fn read_rows(
     }
     let sql = if readings.is_some() {
         "SELECT u.unit_ref,u.content_public_ref,u.kind,u.slot_key,r.page_ordinal,r.source_version,r.source_state,r.reading_ref AS current_reading_ref,COALESCE(s.revision,0) AS revision,COALESCE(s.adoption,'automatic') AS adoption,COALESCE(s.verification,'unchecked') AS verification, \
-        r.reading_ref,r.source_version AS reading_source_version,r.derivative_ref,r.producer_ref,r.producer_kind,r.rule_version,r.blocks,r.issues,r.source_location,r.created_at::text AS reading_created_at \
+        r.reading_ref,r.source_version AS reading_source_version,r.derivative_ref,r.producer_ref,r.producer_kind,r.rule_version,r.blocks,r.issues,r.source_location,r.created_at::text AS reading_created_at,CASE WHEN rc.command_ref IS NOT NULL THEN jsonb_build_object('commandRef',rc.command_ref,'actor',rc.actor,'reason',rc.reason,'action',rc.action,'reviewedAt',rc.created_at::text) END AS review \
         FROM linggan_material_unit u JOIN linggan_material_reading r ON r.unit_ref=u.unit_ref AND r.created_at<=$2::text::timestamptz AND r.reading_ref=ANY($3::uuid[]) \
         LEFT JOIN LATERAL(SELECT * FROM linggan_material_reading_selection s WHERE s.unit_ref=u.unit_ref AND s.reading_ref=r.reading_ref AND s.created_at<=$2::text::timestamptz ORDER BY s.revision DESC LIMIT 1) s ON true \
+        LEFT JOIN linggan_material_reading_command rc ON rc.command_ref=s.command_ref \
         WHERE u.content_public_ref=ANY($1) ORDER BY u.content_public_ref,r.page_ordinal NULLS LAST,u.unit_key,r.created_at"
     } else {
         "SELECT u.unit_ref,u.content_public_ref,u.kind,u.slot_key,s.page_ordinal,s.source_version,s.source_state,s.reading_ref AS current_reading_ref,s.revision,s.adoption,s.verification, \
-        r.reading_ref,r.source_version AS reading_source_version,r.derivative_ref,r.producer_ref,r.producer_kind,r.rule_version,r.blocks,r.issues,r.source_location,r.created_at::text AS reading_created_at \
+        r.reading_ref,r.source_version AS reading_source_version,r.derivative_ref,r.producer_ref,r.producer_kind,r.rule_version,r.blocks,r.issues,r.source_location,r.created_at::text AS reading_created_at,CASE WHEN rc.command_ref IS NOT NULL THEN jsonb_build_object('commandRef',rc.command_ref,'actor',rc.actor,'reason',rc.reason,'action',rc.action,'reviewedAt',rc.created_at::text) END AS review \
         FROM linggan_material_unit u JOIN LATERAL(SELECT * FROM linggan_material_reading_selection s WHERE s.unit_ref=u.unit_ref AND s.created_at<=$2::text::timestamptz ORDER BY s.revision DESC LIMIT 1) s ON true \
         LEFT JOIN linggan_material_reading r ON r.reading_ref=s.reading_ref AND r.unit_ref=u.unit_ref AND r.created_at<=$2::text::timestamptz \
+        LEFT JOIN linggan_material_reading_command rc ON rc.command_ref=s.command_ref \
         WHERE u.content_public_ref=ANY($1) AND $3::uuid[] IS NULL ORDER BY u.content_public_ref,s.page_ordinal NULLS LAST,u.unit_key"
     };
     let rows = sqlx::query(sql)
@@ -124,7 +156,7 @@ fn project(unit: &Unit, row: &sqlx::postgres::PgRow, readable: bool) -> Result<V
         "derivativeRef":if readable {row.get::<Option<Uuid>,_>("derivative_ref")}else{None},
         "jobRef":if readable {row.get::<Option<Uuid>,_>("producer_ref")}else{None},"sourceLocation":location,
         "createdAt":row.get::<Option<String>,_>("reading_created_at"),
-        "reading":if readable {json!({"generatedBy":row.get::<Option<String>,_>("producer_kind"),"adoption":unit.adoption,"verification":unit.verification,"ruleVersion":row.get::<Option<String>,_>("rule_version")})}else{Value::Null},
+        "reading":if readable {json!({"generatedBy":row.get::<Option<String>,_>("producer_kind"),"adoption":unit.adoption,"verification":unit.verification,"ruleVersion":row.get::<Option<String>,_>("rule_version"),"review":row.get::<Option<Value>,_>("review")})}else{Value::Null},
         "blocks":blocks,"issues":issues
     });
     if let Some(url) = location.as_ref().and_then(|v| v["originalUrl"].as_str()) {
@@ -150,9 +182,9 @@ pub async fn read_candidates(db: &Database, work: Uuid) -> Result<Vec<Value>, Re
     let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut *tx)
         .await?;
-    let rows = sqlx::query("SELECT u.*,r.reading_ref,r.source_version AS candidate_source,r.derivative_ref,r.blocks,r.issues,r.producer_kind,r.created_at::text AS reading_created_at FROM linggan_material_unit u JOIN linggan_material_reading r USING(unit_ref) WHERE u.content_public_ref=$1 AND r.reading_ref IS DISTINCT FROM u.current_reading_ref AND NOT EXISTS(SELECT 1 FROM linggan_material_reading_selection s WHERE s.reading_ref=r.reading_ref) AND NOT EXISTS(SELECT 1 FROM linggan_material_reading_command c WHERE c.candidate_reading_ref=r.reading_ref) ORDER BY r.created_at DESC,r.reading_ref")
-        .bind(work).fetch_all(&mut *tx).await?;
+    let rows = candidate_rows_in(&mut tx, &[work], &now, true).await?;
     let mut candidates = vec![];
+    let mut current_refs = BTreeMap::new();
     for row in rows {
         let unit = Unit::from_row(&row);
         if !source::current(
@@ -169,9 +201,83 @@ pub async fn read_candidates(db: &Database, work: Uuid) -> Result<Vec<Value>, Re
             continue;
         }
         let (blocks, issues) = stored_content(&row)?;
-        let value = json!({"unitRef":unit.id,"slotKey":unit.slot,"candidateRevisionRef":row.get::<Uuid,_>("reading_ref"),"currentRevisionRef":unit.current,"blocks":blocks,"issues":issues,"generatedBy":row.get::<String,_>("producer_kind"),"verification":"unchecked","createdAt":row.get::<String,_>("reading_created_at")});
+        let current = if let Some(reference) = current_refs.get(&unit.id) {
+            *reference
+        } else {
+            let reference = current_reference_in(&mut tx, work, unit.id, &now).await?;
+            current_refs.insert(unit.id, reference);
+            reference
+        };
+        let value = json!({"unitRef":unit.id,"slotKey":unit.slot,"candidateRevisionRef":row.get::<Uuid,_>("reading_ref"),"currentRevisionRef":current,"blocks":blocks,"issues":issues,"generatedBy":row.get::<String,_>("producer_kind"),"verification":"unchecked","createdAt":row.get::<String,_>("reading_created_at"),"review":row.get::<Option<Value>,_>("review")});
         candidates.push(value);
     }
     tx.commit().await?;
     Ok(candidates)
+}
+
+/// Candidate existence is metadata; default dossier reads never load the candidate text again.
+pub(crate) async fn candidate_statuses_in(
+    conn: &mut PgConnection,
+    works: &[Uuid],
+    as_of: &str,
+) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
+    let rows = candidate_rows_in(conn, works, as_of, false).await?;
+    let mut result = BTreeMap::<Uuid, Vec<Value>>::new();
+    for row in rows {
+        let unit = Unit::from_row(&row);
+        if source::current(
+            conn,
+            unit.work,
+            &unit.kind,
+            unit.slot.as_deref(),
+            &row.get::<String, _>("candidate_source"),
+            row.get("derivative_ref"),
+            as_of,
+        )
+        .await?
+        {
+            result.entry(unit.work).or_default().push(json!({
+                "unitRef":unit.id,"kind":unit.kind,"slotKey":unit.slot,
+                "sourceVersion":row.get::<String,_>("candidate_source"),
+                "candidateRevisionRef":row.get::<Uuid,_>("reading_ref")}));
+        }
+    }
+    Ok(result)
+}
+
+async fn candidate_rows_in(
+    conn: &mut PgConnection,
+    works: &[Uuid],
+    as_of: &str,
+    content: bool,
+) -> Result<Vec<sqlx::postgres::PgRow>, sqlx::Error> {
+    sqlx::query(
+        r#"
+SELECT u.unit_ref,u.content_public_ref,u.kind,u.slot_key,s.page_ordinal,s.source_version,
+ s.source_state,s.reading_ref AS current_reading_ref,s.revision,s.adoption,s.verification,
+ r.reading_ref,r.source_version AS candidate_source,r.derivative_ref,
+ CASE WHEN $3 THEN r.blocks END AS blocks,CASE WHEN $3 THEN r.issues END AS issues,
+ r.producer_kind,r.created_at::text AS reading_created_at,
+ CASE WHEN c.command_ref IS NOT NULL THEN jsonb_build_object('commandRef',c.command_ref,
+ 'actor',c.actor,'reason',c.reason,'action',c.action,'reviewedAt',c.created_at::text) END AS review
+FROM linggan_material_unit u JOIN linggan_material_reading r USING(unit_ref)
+JOIN LATERAL(SELECT * FROM linggan_material_reading_selection s
+ WHERE s.unit_ref=u.unit_ref AND s.created_at<=$2::text::timestamptz
+ ORDER BY s.revision DESC LIMIT 1) s ON true
+LEFT JOIN LATERAL(SELECT * FROM linggan_material_reading_command c
+ WHERE c.candidate_reading_ref=r.reading_ref AND c.created_at<=$2::text::timestamptz
+ ORDER BY c.command_sequence DESC LIMIT 1) c ON true
+WHERE u.content_public_ref=ANY($1) AND r.created_at<=$2::text::timestamptz
+ AND r.reading_ref IS DISTINCT FROM s.reading_ref
+ AND (c.action IS NULL OR c.action='pending')
+ AND NOT EXISTS(SELECT 1 FROM linggan_material_reading_selection prior
+ WHERE prior.reading_ref=r.reading_ref AND prior.created_at<=$2::text::timestamptz)
+ORDER BY r.created_at DESC,r.reading_ref
+"#,
+    )
+    .bind(works)
+    .bind(as_of)
+    .bind(content)
+    .fetch_all(conn)
+    .await
 }

@@ -33,7 +33,7 @@ pub async fn db(name: &str) -> Database {
     .await
     .unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../../database/migrations/0147_dossier_consumer_contracts.sql"
+        "../../../../database/migrations/0148_dossier_consumer_contracts.sql"
     ))
     .execute(db.pool())
     .await
@@ -42,8 +42,8 @@ pub async fn db(name: &str) -> Database {
     // executor's startup check; the minimal material fixture intentionally omits them.
     for (id, source) in [
         (
-            "0147_dossier_consumer_contracts",
-            include_str!("../../../../database/migrations/0147_dossier_consumer_contracts.sql"),
+            "0148_dossier_consumer_contracts",
+            include_str!("../../../../database/migrations/0148_dossier_consumer_contracts.sql"),
         ),
         (
             "0141_ai_gen1_legacy_settings",

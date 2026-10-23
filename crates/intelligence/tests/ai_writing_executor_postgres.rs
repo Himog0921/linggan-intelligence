@@ -122,7 +122,7 @@ async fn dossier_contract_cutover_validates_pending_seed_constraints_before_ddl(
     sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,material_columns,budget_mode,origin) VALUES($1,'note_interpretation','[\"title\",\"cover_headline\",\"body\",\"tags\",\"ocr\",\"transcript\"]','unconfigured','seed')")
         .bind(Uuid::new_v4()).execute(&mut *tx).await.unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0147_dossier_consumer_contracts.sql"
+        "../../../database/migrations/0148_dossier_consumer_contracts.sql"
     ))
     .execute(&mut *tx)
     .await

@@ -92,7 +92,7 @@ export function selectSuites(changedPaths) {
     // Dossier/readings are shared by OCR, AI input and the three reading surfaces.
     // Their schema or public source contract must run every existing consumer proof.
     if (/^crates\/evidence\/src\/(?:research_dossier|material_reading|dossier_input)(?:\.rs$|\/)/.test(path)
-      || /^database\/migrations\/014[567]_/.test(path)) {
+      || /^database\/migrations\/\d+_(research_dossier_v2|comment_study_full_context|dossier_consumer_contracts)\.sql$/.test(path)) {
       full = true;
       continue;
     }

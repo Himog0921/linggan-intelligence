@@ -119,6 +119,8 @@ try {
   const issues = issueList(candidate); assert.ok(issues.some(issue => issue.resolution === 'reading_edit')); assert.ok(issues.some(issue => issue.resolution === 'source_refresh'));
   await image.getByLabel('核对版本', { exact: true }).selectOption(candidateRefs[1]);
   assert.equal(commands.length, 0, 'reading candidates or source images does not adopt or invoke a model');
+  await image.getByLabel('审核人', { exact: true }).fill('合成底稿审核人');
+  await image.getByLabel('核对依据', { exact: true }).fill('逐块对照受控原图，保存完整结构与来源缺口。');
   await snapshot('research-dossier-v2-candidate-1440.png');
   const adopted = await applyReview('adopt', image.getByRole('button', { name: '采用此候选', exact: true }));
   assert.equal(adopted.command.expectedCurrentRevisionRef, before.currentRevisionRef); assert.equal(adopted.command.candidateRevisionRef, candidateRefs[1]);
@@ -133,7 +135,7 @@ try {
   await image.getByLabel('第 1 行，第 1 列', { exact: true }).first().fill(editedCell);
   await image.getByLabel('第 1 项', { exact: true }).first().fill(editedList);
   await image.getByLabel('第 1 轮发言', { exact: true }).first().fill(editedTurn);
-  for (const field of await image.locator('textarea').all()) assert.equal(await field.getAttribute('maxlength'), null);
+  for (const field of await image.getByRole('group', { name: '逐块修正完整读本', exact: true }).locator('textarea').all()) assert.equal(await field.getAttribute('maxlength'), null);
   for (const issue of issues) {
     const checkbox = image.getByRole('checkbox', { name: `已对照来源解决：${issue.message}`, exact: true });
     if (issue.resolution === 'reading_edit') await checkbox.check();

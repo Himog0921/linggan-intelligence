@@ -67,9 +67,9 @@ test('the canonical dossier and reading schema exercise every current consumer',
     'crates/evidence/src/material_reading/read.rs',
     'crates/evidence/src/dossier_input.rs',
     'crates/evidence/src/dossier_input/backfill.rs',
-    'database/migrations/0145_research_dossier_v2.sql',
-    'database/migrations/0146_comment_study_full_context.sql',
-    'database/migrations/0147_dossier_consumer_contracts.sql',
+    'database/migrations/0146_research_dossier_v2.sql',
+    'database/migrations/0147_comment_study_full_context.sql',
+    'database/migrations/0148_dossier_consumer_contracts.sql',
   ]) assert.deepEqual(selected([path]), suites, path);
   assert.deepEqual(selected(['apps/worker/src/bin/research_dossier.rs']), ['ai', 'web']);
   assert.deepEqual(selected(['crates/evidence/tests/dossier_input_postgres.rs']), ['web']);

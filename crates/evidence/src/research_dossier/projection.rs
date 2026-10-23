@@ -68,6 +68,7 @@ pub(super) fn assemble(
         fragments,
         media: layouts,
         media_inventory: slots,
+        candidate_statuses: vec![],
         metadata: metadata(work),
     };
     super::refresh_revision(&mut dossier);
@@ -148,7 +149,7 @@ fn tags(work: &WorkResourceCurrent, inventory: &Inventory) -> Option<Value> {
         source,
         tags["ruleVersion"].as_str().unwrap_or("")
     ));
-    unit["reading"] = json!({"generatedBy":"platform","adoption":"automatic","verification":"unchecked","ruleVersion":tags["ruleVersion"]});
+    unit["reading"] = json!({"generatedBy":"platform","adoption":"automatic","verification":"unchecked","ruleVersion":tags["ruleVersion"],"review":null});
     if !values.is_empty() {
         unit["blocks"] = json!([{"ref":format!("{}.{}.0",work.public_ref,source),"kind":"list","ordered":false,"items":values,"speaker":"author"}]);
     }

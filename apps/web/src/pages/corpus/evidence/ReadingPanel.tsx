@@ -34,7 +34,7 @@ export function ReadingPanel({ context, domain, active }: { context: PanelContex
       {reading.isPending ? <p role="status">正在读取正文…</p> : reading.isError && !body ? <p role="status">正文读本暂不可读。<button type="button" onClick={() => void reading.refetch()}>重试读取</button></p> : body ? <>{body.blocks.length ? <DossierBlocks blocks={body.blocks} issues={body.issues} /> : <SourceNote>{emptyMaterialNote(body)}</SourceNote>}</> : <SourceNote>正文来源尚未取得。</SourceNote>}
       {reading.isError && body ? <p role="status">刷新未完成，保留上次读到的正文版本。</p> : null}
     </Section>
-    <OcrRecognition key={item.ref} workRef={item.ref} onOpenSource={(image, opener) => {
+    <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} domain={domain} onOpenSource={(image, opener) => {
       const index = objects.findIndex(object => object.slotKey !== null && (object.slotKey === image.slotKey || image.aliases.includes(object.slotKey)));
       if (index >= 0) onOpenViewer(index, opener);
       else if (image.originalUrl) window.open(image.originalUrl, '_blank', 'noopener,noreferrer');

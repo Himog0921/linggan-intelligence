@@ -77,20 +77,24 @@ CREATE TABLE linggan_material_reading_selection (
 CREATE INDEX material_reading_selection_time ON linggan_material_reading_selection(unit_ref,created_at,revision);
 CREATE TABLE linggan_material_reading_command (
     command_ref uuid PRIMARY KEY,
+    command_sequence bigint GENERATED ALWAYS AS IDENTITY UNIQUE,
     request_hash text NOT NULL CHECK (request_hash~'^[0-9a-f]{64}$'),
     unit_ref uuid NOT NULL REFERENCES linggan_material_unit(unit_ref),
     candidate_reading_ref uuid NOT NULL REFERENCES linggan_material_reading(reading_ref),
     expected_reading_ref uuid REFERENCES linggan_material_reading(reading_ref),
     resulting_reading_ref uuid REFERENCES linggan_material_reading(reading_ref),
-    action text NOT NULL CHECK (action IN ('adopt','edit','keep')),
-    actor text CHECK (actor IS NULL OR length(btrim(actor))>0),
+    action text NOT NULL CHECK (action IN ('adopt','edit','keep','pending','reject')),
+    actor text NOT NULL CHECK (length(btrim(actor)) BETWEEN 1 AND 120),
+    reason text NOT NULL CHECK (length(btrim(reason)) BETWEEN 1 AND 300),
     verified boolean NOT NULL,
     response jsonb NOT NULL CHECK (jsonb_typeof(response)='object'),
     created_at timestamptz NOT NULL DEFAULT scope_001_now(),
     FOREIGN KEY (unit_ref,candidate_reading_ref) REFERENCES linggan_material_reading(unit_ref,reading_ref),
     FOREIGN KEY (unit_ref,expected_reading_ref) REFERENCES linggan_material_reading(unit_ref,reading_ref),
-    FOREIGN KEY (unit_ref,resulting_reading_ref) REFERENCES linggan_material_reading(unit_ref,reading_ref)
+    FOREIGN KEY (unit_ref,resulting_reading_ref) REFERENCES linggan_material_reading(unit_ref,reading_ref),
+    CHECK (action NOT IN ('pending','reject') OR (NOT verified AND resulting_reading_ref IS NOT DISTINCT FROM expected_reading_ref))
 );
+CREATE INDEX material_reading_command_candidate_time ON linggan_material_reading_command(candidate_reading_ref,command_sequence);
 ALTER TABLE linggan_material_reading_selection ADD CONSTRAINT material_selection_command
     FOREIGN KEY (command_ref) REFERENCES linggan_material_reading_command(command_ref) DEFERRABLE INITIALLY DEFERRED;
 

@@ -108,15 +108,12 @@ print(json.dumps(b,ensure_ascii=False))
         edited_blocks: None,
         verified: false,
         resolved_issue_keys: vec![],
+        actor: "synthetic-reviewer".into(),
+        reason: "Compare the complete synthetic source image".into(),
     };
-    linggan_evidence::material_reading::review_reading(
-        &db,
-        unit,
-        &adopt,
-        Some("synthetic-operator"),
-    )
-    .await
-    .unwrap();
+    linggan_evidence::material_reading::review_reading(&db, unit, &adopt)
+        .await
+        .unwrap();
     let source_before: Value = sqlx::query_scalar("SELECT observation FROM linggan_media_ocr_adoption WHERE derivative_ref=(SELECT derivative_ref FROM linggan_material_reading WHERE reading_ref=$1)")
         .bind(reading).fetch_one(db.pool()).await.unwrap();
     let wire = endpoint::Endpoint::start(false).await;
@@ -313,15 +310,12 @@ print(json.dumps(b,ensure_ascii=False))
         edited_blocks: None,
         verified: false,
         resolved_issue_keys: vec![],
+        actor: "synthetic-reviewer".into(),
+        reason: "Compare the complete synthetic source image".into(),
     };
-    linggan_evidence::material_reading::review_reading(
-        &db,
-        unit,
-        &keep,
-        Some("synthetic-operator"),
-    )
-    .await
-    .unwrap();
+    linggan_evidence::material_reading::review_reading(&db, unit, &keep)
+        .await
+        .unwrap();
     let dismiss = audit::review::Review {
         command_ref: Uuid::new_v4(),
         expected_revision: 1,

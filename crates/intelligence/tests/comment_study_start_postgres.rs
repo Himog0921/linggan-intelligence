@@ -141,7 +141,7 @@ async fn setup_with_model_limits(
     .await
     .unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0146_comment_study_full_context.sql"
+        "../../../database/migrations/0147_comment_study_full_context.sql"
     ))
     .execute(db.pool())
     .await

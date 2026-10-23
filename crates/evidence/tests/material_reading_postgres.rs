@@ -1,4 +1,6 @@
 //! Real PostgreSQL proofs for the canonical producer/selection/review boundary.
+#[path = "material_reading/review_opinions.rs"]
+mod review_opinions;
 #[path = "support/research_dossier_fixture.rs"]
 mod support;
 use linggan_evidence::{material_reading::*, *};
@@ -79,6 +81,8 @@ fn request(
         edited_blocks: None,
         verified: false,
         resolved_issue_keys: vec![],
+        actor: "synthetic-reviewer".into(),
+        reason: "Compare the complete synthetic source image".into(),
     }
 }
 fn paragraph(text: &str) -> Vec<Value> {
@@ -134,26 +138,27 @@ async fn ordinary_ocr_is_current_and_manual_candidates_require_explicit_cas_revi
     assert_eq!(read_candidates(&db, work).await.unwrap().len(), 1);
     let mut adopt = request(candidate, Some(original_ref), "adopt");
     adopt.verified = true;
-    let accepted = review_reading(&db, candidate.unit_ref, &adopt, Some("synthetic-operator"))
+    let accepted = review_reading(&db, candidate.unit_ref, &adopt)
         .await
         .unwrap();
     assert_eq!(accepted["currentRevisionRef"], json!(candidate.reading_ref));
     assert_eq!(
-        review_reading(&db, candidate.unit_ref, &adopt, Some("synthetic-operator"))
+        review_reading(&db, candidate.unit_ref, &adopt)
             .await
             .unwrap(),
         accepted
     );
+    let mut changed_actor = adopt.clone();
+    changed_actor.actor = "another-actor".into();
     assert!(matches!(
-        review_reading(&db, candidate.unit_ref, &adopt, Some("another-actor")).await,
+        review_reading(&db, candidate.unit_ref, &changed_actor).await,
         Err(ReadingError::Conflict)
     ));
     assert!(matches!(
         review_reading(
             &db,
             candidate.unit_ref,
-            &request(candidate, Some(original_ref), "adopt"),
-            None
+            &request(candidate, Some(original_ref), "adopt")
         )
         .await,
         Err(ReadingError::Conflict)
@@ -238,26 +243,26 @@ async fn edits_preserve_observed_locations_and_source_issues_with_new_immutable_
     edit.edited_blocks = Some(base.clone());
     edit.edited_blocks.as_mut().unwrap()[0]["bbox"] = json!([0.5, 0.2, 0.4, 0.1]);
     assert!(matches!(
-        review_reading(&db, candidate.unit_ref, &edit, None).await,
+        review_reading(&db, candidate.unit_ref, &edit).await,
         Err(ReadingError::Invalid)
     ));
     edit.edited_blocks = Some(base.clone());
     edit.edited_blocks.as_mut().unwrap()[0]["issues"][0]["resolution"] = json!("source_refresh");
     assert!(matches!(
-        review_reading(&db, candidate.unit_ref, &edit, None).await,
+        review_reading(&db, candidate.unit_ref, &edit).await,
         Err(ReadingError::Invalid)
     ));
     edit.edited_blocks = Some(base.clone());
     edit.resolved_issue_keys = vec!["missing_source".into()];
     assert!(matches!(
-        review_reading(&db, candidate.unit_ref, &edit, None).await,
+        review_reading(&db, candidate.unit_ref, &edit).await,
         Err(ReadingError::Invalid)
     ));
     edit.resolved_issue_keys = vec!["unclear".into()];
     edit.edited_blocks.as_mut().unwrap()[0]["text"] = json!("核对原图：不是 30 mg。");
     edit.edited_blocks.as_mut().unwrap().push(json!({"kind":"table","columns":["项目","数值"],"rows":[["剂量","30 mg"]],"speaker":"unconfirmed"}));
     edit.verified = true;
-    let receipt = review_reading(&db, candidate.unit_ref, &edit, Some("synthetic-editor"))
+    let receipt = review_reading(&db, candidate.unit_ref, &edit)
         .await
         .unwrap();
     let selected = current(&db, work).await;
@@ -267,7 +272,10 @@ async fn edits_preserve_observed_locations_and_source_issues_with_new_immutable_
     );
     assert_ne!(selected["currentRevisionRef"], json!(candidate.reading_ref));
     assert_eq!(selected["reading"]["generatedBy"], "human_edit");
-    assert_eq!(selected["blocks"][0]["bbox"], base[0]["bbox"]);
+    assert!(
+        selected["blocks"][0].get("bbox").is_none(),
+        "changed text cannot inherit an unproven location"
+    );
     assert_eq!(selected["blocks"][1]["kind"], "table");
     assert_eq!(selected["issues"][0]["resolution"], "source_refresh");
     assert!(
@@ -306,7 +314,7 @@ async fn keep_is_a_human_decision_and_current_restrictions_apply_to_exact_histor
     )
     .await;
     let keep = request(candidate, Some(old), "keep");
-    let receipt = review_reading(&db, candidate.unit_ref, &keep, None)
+    let receipt = review_reading(&db, candidate.unit_ref, &keep)
         .await
         .unwrap();
     assert_eq!(receipt["currentRevisionRef"], json!(old));
@@ -342,8 +350,7 @@ async fn keep_is_a_human_decision_and_current_restrictions_apply_to_exact_histor
         review_reading(
             &db,
             candidate.unit_ref,
-            &request(candidate, Some(old), "adopt"),
-            None
+            &request(candidate, Some(old), "adopt")
         )
         .await,
         Err(ReadingError::SourceChanged)
@@ -373,13 +380,21 @@ async fn new_source_generation_blocks_stale_adoption_without_substituting_histor
         review_reading(
             &db,
             candidate.unit_ref,
-            &request(candidate, Some(old), "adopt"),
-            None
+            &request(candidate, Some(old), "adopt")
         )
         .await,
         Err(ReadingError::SourceChanged)
     ));
     assert!(read_candidates(&db, work).await.unwrap().is_empty());
+    let historical_version = research_dossier::read_version(&db, work, old)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        historical_version.current_revision_ref.is_none(),
+        "a stored pointer from an older generation is not current"
+    );
+    assert_eq!(historical_version.material["blocks"], original["blocks"]);
     let mut conn = db.pool().acquire().await.unwrap();
     let exact = read_versions_in(&mut conn, &[work], &frozen, &[old])
         .await
@@ -620,12 +635,19 @@ async fn complete_manifest_removes_old_candidates_and_later_partial_observation_
         review_reading(
             &db,
             candidate.unit_ref,
-            &request(candidate, Some(old), "adopt"),
-            None
+            &request(candidate, Some(old), "adopt")
         )
         .await,
         Err(ReadingError::SourceChanged)
     ));
+    let removed_version = research_dossier::read_version(&db, work, old)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        removed_version.current_revision_ref.is_none(),
+        "a removed slot cannot expose its historical reading as current"
+    );
     let current_active: bool = sqlx::query_scalar(
         "SELECT linggan_dossier_slot_active($1,'xhs:dossier-note:image:1',scope_001_now())",
     )

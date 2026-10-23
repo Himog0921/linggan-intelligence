@@ -174,7 +174,8 @@ async fn native_text_has_no_size_ceiling_and_history_keeps_original_structure() 
     let exact = dossier::read_version(&db, work, reading)
         .await
         .unwrap()
-        .unwrap();
+        .unwrap()
+        .material;
     assert_eq!(exact["blocks"], material(&first, "body")["blocks"]);
     assert!(
         dossier::read_at(&db, work, Some("2999-01-01T00:00:00Z"))
@@ -363,6 +364,7 @@ async fn publish_image(
     slot: &str,
     source: Uuid,
     text: &str,
+    publication: material_reading::Publication,
 ) -> material_reading::PublishedReading {
     let mut tx = db.pool().begin().await.unwrap();
     let result = material_reading::publish_in(
@@ -384,14 +386,15 @@ async fn publish_image(
             ],
             issues: vec![],
             source_location: json!({}),
-            publication: material_reading::Publication::Automatic {
-                expected_current: None,
-            },
+            publication,
         },
     )
     .await
     .unwrap();
-    assert!(result.current);
+    assert_eq!(
+        result.current,
+        matches!(publication, material_reading::Publication::Automatic { .. })
+    );
     tx.commit().await.unwrap();
     result
 }
@@ -419,6 +422,9 @@ async fn cover_dedup_keeps_available_and_human_readings_with_real_page_provenanc
         "xhs:cover-reading:cover:1",
         sources[0],
         "封面已完成全部文字",
+        material_reading::Publication::Automatic {
+            expected_current: None,
+        },
     )
     .await;
     let first = dossier::read(&db, work).await.unwrap().unwrap();
@@ -444,8 +450,9 @@ async fn cover_dedup_keeps_available_and_human_readings_with_real_page_provenanc
             edited_blocks: Some(vec![edited]),
             verified: true,
             resolved_issue_keys: vec![],
+            actor: "synthetic-reviewer".into(),
+            reason: "Compare the complete synthetic source image".into(),
         },
-        Some("SYNTHETIC-ONLY"),
     )
     .await
     .unwrap();
@@ -455,6 +462,9 @@ async fn cover_dedup_keeps_available_and_human_readings_with_real_page_provenanc
         "xhs:cover-reading:image:1",
         sources[1],
         "机器尚未校正的第一页文字",
+        material_reading::Publication::Automatic {
+            expected_current: None,
+        },
     )
     .await;
     let current = dossier::read(&db, work).await.unwrap().unwrap();
@@ -479,4 +489,71 @@ async fn cover_dedup_keeps_available_and_human_readings_with_real_page_provenanc
         .unwrap()
         .unwrap();
     assert_eq!(frozen.materials, first.materials);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn cover_candidate_counts_after_dedup_without_reassigning_reading_or_later_page() {
+    let db = fixture::proof_database("dossier_v2_cover_candidate").await;
+    let work = detail(
+        &db,
+        "cover-candidate",
+        json!({"bodyText":"候选保留真实来源"}),
+    )
+    .await;
+    let sources = images(
+        &db,
+        "cover-candidate",
+        2,
+        &[("cover", 1, 'd'), ("image", 1, 'd'), ("image", 2, 'd')],
+    )
+    .await;
+    let candidate = publish_image(
+        &db,
+        work,
+        "xhs:cover-candidate:cover:1",
+        sources[0],
+        "只有封面来源拥有完整候选",
+        material_reading::Publication::Candidate,
+    )
+    .await;
+    let read = dossier::read(&db, work).await.unwrap().unwrap();
+    let plan = dossier::relayer_plan(&read);
+    assert_eq!(plan["imageSlots"], 2);
+    assert_eq!(plan["pendingReviewCount"], 1);
+    assert_eq!(
+        plan["needsOcr"], 1,
+        "the repeated real second page still needs its own reading"
+    );
+    assert_eq!(plan["layoutCount"], 0);
+    let pages: Vec<_> = read
+        .materials
+        .iter()
+        .filter(|m| m["kind"] == "image")
+        .collect();
+    assert_eq!(pages.len(), 2);
+    assert_eq!(pages[0]["slotKey"], "xhs:cover-candidate:image:1");
+    assert_eq!(pages[1]["slotKey"], "xhs:cover-candidate:image:2");
+    assert!(pages.iter().all(|m| m["currentRevisionRef"].is_null()));
+    assert!(
+        !serde_json::to_string(&read)
+            .unwrap()
+            .contains("只有封面来源拥有完整候选")
+    );
+    let candidates = material_reading::read_candidates(&db, work).await.unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0]["unitRef"], candidate.unit_ref.to_string());
+    assert_eq!(candidates[0]["slotKey"], "xhs:cover-candidate:cover:1");
+    let exact = dossier::read_version(&db, work, candidate.reading_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(exact.current_revision_ref, None);
+    assert_eq!(exact.material["ref"], candidate.unit_ref.to_string());
+    assert_eq!(exact.material["sourceVersion"], sources[0].to_string());
+    assert_eq!(
+        exact.material["blocks"][0]["text"],
+        "只有封面来源拥有完整候选"
+    );
+    assert_ne!(exact.material["ref"], pages[0]["ref"]);
 }

@@ -139,17 +139,21 @@ async fn ai_binary_rejects_out_of_contract_concurrency_before_connecting() {
 #[ignore = "owned PostgreSQL only"]
 async fn ai_binary_missing_migration_has_no_instance_or_success_ack() {
     let db = fixture::db("ai_binary_missing_migration").await;
-    sqlx::query(
-        "DELETE FROM linggan_local_schema_migration WHERE migration_id='0140_ai_gen1_writing'",
-    )
-    .execute(db.pool())
-    .await
-    .unwrap();
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let scoped = format!("{url}?options=-csearch_path%3Dai_binary_missing_migration");
-    let mut process = Process::start(Some(&scoped), "4");
-    assert_eq!(process.wait().await.code(), Some(1));
-    assert_eq!(process.ack()["reason"], "ai_executor_schema_not_ready");
+    for migration in [
+        "0140_ai_gen1_writing",
+        "0146_research_dossier_v2",
+        "0148_dossier_consumer_contracts",
+    ] {
+        let expected: String = sqlx::query_scalar("DELETE FROM linggan_local_schema_migration WHERE migration_id=$1 RETURNING migration_sha256")
+            .bind(migration).fetch_one(db.pool()).await.unwrap();
+        let mut process = Process::start(Some(&scoped), "4");
+        assert_eq!(process.wait().await.code(), Some(1));
+        assert_eq!(process.ack()["reason"], "ai_executor_schema_not_ready");
+        sqlx::query("INSERT INTO linggan_local_schema_migration(migration_id,migration_sha256) VALUES($1,$2)")
+            .bind(migration).bind(expected).execute(db.pool()).await.unwrap();
+    }
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ai_executor_instance")
         .fetch_one(db.pool())
         .await

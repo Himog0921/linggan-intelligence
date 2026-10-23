@@ -26,8 +26,9 @@ function Head({ payload, domain, relayer, busy, onRefresh }: { payload: DossierP
       <ActionButton variant="outline" onClick={() => downloadDossier(payload)}>导出 JSON</ActionButton>
       <ActionButton variant="quiet" disabled={busy} onClick={onRefresh}>刷新底稿</ActionButton>
     </div>{message ? <p role="status">{message}</p> : null}
+    {plan.pendingReviewCount > 0 ? <p className={styles.note}>有 {plan.pendingReviewCount} 张图片的重新识读候选待人工核对，尚未自动替换当前读本。</p> : null}
     <details className={styles.disclosure}><summary>整理已有识别版面</summary>
-      <p className={styles.note}>{`可整理 ${plan.layoutCount} · 待整理 ${plan.pendingLayouts} · 已是当前规则 ${plan.alreadyCurrent} · 待识字 ${plan.needsOcr}`}</p>
+      <p className={styles.note}>{`可整理 ${plan.layoutCount} · 待整理 ${plan.pendingLayouts} · 已是当前规则 ${plan.alreadyCurrent} · 待识字 ${plan.needsOcr} · 待人工核对 ${plan.pendingReviewCount} 张图片`}</p>
       <ActionButton disabled={plan.layoutCount === 0 || relayer.sending} onClick={relayer.run}>重新整理</ActionButton>
     </details><FeedbackLine feedback={relayer.feedback} />
     {relayer.sending ? <p role="status">正在整理已有识别结果…</p> : null}

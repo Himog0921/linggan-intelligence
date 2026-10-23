@@ -4,6 +4,8 @@
 mod endpoint;
 #[path = "../../../crates/intelligence/tests/support/content_workbench_fixture.rs"]
 mod fixture;
+#[path = "ocr_recognition_postgres/human_review.rs"]
+mod human_review;
 #[path = "ocr_vl_postgres.rs"]
 mod ocr;
 #[path = "../../../crates/intelligence/tests/support/ai_writing_fixture.rs"]

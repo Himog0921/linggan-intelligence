@@ -1,5 +1,5 @@
-import { requestJson, requestText } from '../../../shared/api';
-import { parseCandidates, parseDossierComments, parseDossierPayload, parseReadingReceipt, parseRelayerPlanResponse, parseRelayerReceipt } from './dossierDecode';
+import { ApiError, requestJson, requestText } from '../../../shared/api';
+import { parseCandidates, parseDossierComments, parseDossierPayload, parseReadingReceipt, parseReadingVersion, parseRelayerPlanResponse, parseRelayerReceipt } from './dossierDecode';
 import type { DossierCommentPage, DossierPayload, ReadingReviewRequest, RelayerPlan, RelayerReceipt } from './dossierTypes';
 import { API_ROOT } from './evidencePaths';
 
@@ -16,6 +16,11 @@ export async function fetchRelayerPlan(work: string, domain: string, signal?: Ab
 }
 export async function fetchCandidates(work: string, domain: string, signal?: AbortSignal) {
   return parseCandidates(await requestJson(`${base(work)}/candidates?${scope(domain)}`, { signal }));
+}
+export async function fetchReadingVersion(work: string, domain: string, reading: string, signal?: AbortSignal) {
+  const value = parseReadingVersion(await requestJson(`${base(work)}/readings/${encodeURIComponent(reading)}?${scope(domain)}`, { signal }));
+  if (value.workRef !== work || value.material.currentRevisionRef !== reading) throw new ApiError({ kind: 'invalid_response', status: 200 });
+  return value;
 }
 export async function reviewReading(work: string, domain: string, unit: string, command: ReadingReviewRequest) {
   return parseReadingReceipt(await requestJson(`${base(work)}/materials/${encodeURIComponent(unit)}/review?${scope(domain)}`, { method: 'POST', body: command }));

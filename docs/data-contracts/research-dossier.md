@@ -20,15 +20,17 @@
 
 Markdown 通过 `format=markdown` 单独生成，与同一次读取的区块顺序和内容一致。评论、作者与互动元数据分别按需读取；评论页数不冒充平台评论总量。原图和识别诊断通过来源引用读取，不把原始布局/任务账本塞入每次 Agent 输入。
 
-顶层字段：`contract`、`workRef`、`revision`、`materialRevision`、`asOf`、`note`、`materials`、`coverage`、`attachments`、`selection`。`materialRevision` 绑定材料、来源和结构；`revision` 还绑定覆盖与辅助元数据。时间戳本身不令未变材料失效。
+Markdown 顶层标题只使用原生平台标题，缺失时使用“研究底稿”。图片派生展示标题仍在其真实图片 heading 区块中输出一次，角色、来源时间和局部问题随块保留；不同来源出现同文标题仍各自保留。显式选择未包含的图片块不会仅因它曾作为展示标题而被带入导出。
 
-`note` 保留平台、作品身份、平台标题及来源、展示标题及采用依据。平台标题与图片标题是不同事实。仅显式封面或已证明的第一页标题可补展示标题，不能伪造平台标题。相同图片标题在 Markdown 标题区与正文只呈现一次；来源仍保留。
+顶层字段：`contract`、`workRef`、`revision`、`materialRevision`、`asOf`、`note`、`materials`、`coverage`、`attachments`、`selection`。`materialRevision` 绑定材料、来源和结构；`revision` 还绑定覆盖、辅助元数据与同截点可审候选的身份；候选全文不进入默认读取。时间戳本身不令未变材料失效。
+
+`note` 保留平台、作品身份、平台标题及来源、展示标题及采用依据。平台标题与图片标题是不同事实。仅显式封面或已证明的第一页标题可补展示标题，不能伪造平台标题。图片派生展示标题不另复制到 Markdown H1；不同来源的同文区块仍各自保留。
 
 ## 材料与结构化区块
 
 材料字段：`ref`、`kind`、`slotKey`、`page`、`sourceState`、`sourceRef`、`sourceVersion`、`currentRevisionRef`、`originalUrl`、`reading`、`blocks`、`issues`；仅在字节证明建立页序关系时增加 `pageSource`。材料种类为 body、tags、image、audio、video_frame。未知页码为 null；不按数据库遍历序号猜平台页码。
 
-`reading` 分开表达生成者 `generatedBy`、采用状态 `adoption`、核对状态 `verification`、规范化规则 `ruleVersion`。机器生成、被采用、人工核对是三件事。生成者取 platform、ordinary_ocr、local_vision、cloud_vision、asr、frame_ocr、human_edit。
+`reading` 分开表达生成者 `generatedBy`、采用状态 `adoption`、核对状态 `verification`、规范化规则 `ruleVersion`，以及可空的 `review:{commandRef,actor,reason,action,reviewedAt}`。review 只来自该次 selection 的命令，后来的暂缓/拒绝不能改写已采用版本的审核人和依据；自动读本及原生标签为 null。机器生成、被采用、人工核对是三件事。生成者取 platform、ordinary_ocr、local_vision、cloud_vision、asr、frame_ocr、human_edit。
 
 区块拥有稳定 `ref` 与一种内容形态：
 
@@ -53,11 +55,11 @@ OCR 低置信度局部成为 gap；可信的周围文字保留。原始识别行
 1. `linggan_material_unit` 是作品内材料位置，持有 sourceVersion、显式 currentReadingRef、单调 revision、采用与核对状态。
 2. `linggan_material_reading` 保存不可变的完整区块、局部问题、生成者、规则、来源版本、依赖版本及 publication 类型。
 3. `linggan_material_reading_selection` 追加每一次当前选择、来源变化与核对决定；历史读取按事件截点恢复，不读取今天的可变指针冒充昨天。
-4. `linggan_material_reading_command` 以 commandRef 保存请求指纹和回执。相同 ID、相同请求重试返回原回执；相同 ID 不同请求冲突。
+4. `linggan_material_reading_command` 以 commandRef 保存审核人、依据、决定、请求指纹和回执；command_sequence 给同候选意见建立确定顺序。相同 ID、相同请求重试返回原回执；相同 ID 不同请求冲突。
 
 媒体 sourceVersion 指向精确 materialization；正文 sourceVersion 指向不可变原生 material。媒体必须对应该槽位当时的最新来源 generation，不能从较旧 generation 借字节填缺。所有当前与历史读取仍检查当前受限、撤回与退役资格。
 
-Live Photo 的静态图片与动态视频按实际已验证媒体类型分别选择来源；图像 OCR、音频与帧不能因另一组件后完成而失效或串用来源。已清理字节但未撤回文字的来源保留不可变文字，原图入口明确不可用。
+Live Photo 的静态图片与动态视频按实际已验证媒体类型分别选择来源；图像 OCR、音频与帧不能因另一组件后完成而失效或串用来源。已清理字节但未撤回文字的来源保留不可变文字，原图入口明确不可用，并拒绝新的人工决定；已完成命令可返回原回执，但仍检查当前来源与撤回资格。
 
 平台标签沿用不可变 `content-hashtags.v1` 来源投影，保留原序与重复条目，不从正文猜标签。其 `currentRevisionRef` 为 null，sourceVersion 绑定 material 与投影规则，区块引用绑定 material；这属于同一底稿的原生材料，不另建可编辑标签读本或另一份正文。
 
@@ -69,13 +71,27 @@ Live Photo 的静态图片与动态视频按实际已验证媒体类型分别选
 
 ## 独立校正、采用与核对
 
-每页可查看候选、采用候选、结构化编辑后采用，或保留当前。动作不依赖先加入抽检样本。请求包含 commandRef、expectedCurrentRevisionRef、candidateRevisionRef、action、可选 editedBlocks、verified、resolvedIssueKeys。
+每页可查看候选、采用候选、结构化编辑后采用、保留当前，或记录暂缓与拒绝意见。已保存 OCR 的每张图片直接打开同一个底稿审阅面板；只含标题或空区块的候选也有入口。若封面/第一页去重隐藏了原 unit，按精确 reading 引用读取原 unit 与真实 current，不能把候选内容伪装成已采用内容。动作不依赖先加入抽检样本。
+
+唯一请求包含 commandRef、expectedCurrentRevisionRef、candidateRevisionRef、action、actor、reason、可选 editedBlocks、verified、resolvedIssueKeys。actor 与 reason 为必填非空审核元数据，分别上限 120、300 个字符；这些限制不适用于正文或区块内容。请求指纹与未知回执重试冻结全部字段。
+
+| action | 当前选择与核验状态 | 候选列表 |
+|---|---|---|
+| adopt | 选择完整候选，记录人工采用与显式 verification | 已采用读本退出 |
+| edit | 新增不可变人工读本，绑定原 candidate，选择新读本 | 原候选退出 |
+| keep | 保留确实存在且可读的 current，记录人工选择与显式 verification | 被保留决定处理的候选退出 |
+| pending | 只追加审阅意见，不写 selection、不改 adoption/verification | 保持可审 |
+| reject | 只追加审阅意见，不写 selection、不改 adoption/verification | 退出待审 |
+
+pending/reject 允许 current=null，此时回执的 adoption 与 verification 也为 null；这两种意见不得携带 editedBlocks、已解决问题或 verified=true。未被采用过的候选按截至读取时间的最新命令判断：无意见或 pending 可审，reject/keep/adopt/edit 不可审。reject 后显式 pending 可以重新待审；已进入过 selection 的读本不会重新成为新候选。
 
 服务器核对作品归属、候选来源、当前版本与请求幂等；冲突返回 409，不能覆盖他人的新决定。请求成功但回执丢失时，界面用原 commandRef 和原请求重试；未知状态不显示成功、不自动生成新命令。页面切换或候选变化后的迟到响应不得改写新页面。
 
+对外 current 指针与锁内 CAS 共用来源资格：如果只撤回旧读本的衍生物，而同一原图的另一候选仍有效，current 为 null，新候选可以在 expected=null 下审阅。pending/reject 的回执与命令 resulting 同样为 null，既有 unit 指针和选择历史不因这类意见被清空；采用或编辑成功才追加新的选择。候选列表与精确版本入口遵循这一口径，历史计划继续按原 asOf 取选择和意见。
+
 网络断开、5xx 或无法解码的成功回执都属于结果未知，必须保留原命令。只有服务器明确拒绝且确认未写入的错误才释放该命令身份。
 
-结构化编辑保留区块种类、表格单元格、对话角色与已知来源位置。问题带稳定 key 和解决责任：`reading_edit` 可通过编辑并明确勾选解决；`source_refresh`（缺页、来源变化、时间未知等）必须补来源，文字编辑或“已核对”不能消除。未明确解决的问题继续存在。
+结构化编辑保留区块种类、表格单元格与对话角色；来源位置仅在对应内容仍一致时保留。仅沿用 blockRef 不足以证明一段新转写位于旧 bbox/time；文字或结构改变且无法准确对应时移除位置，原读本与原始观察不变。问题带稳定 key 和解决责任：`reading_edit` 可通过编辑并明确勾选解决；`source_refresh`（缺页、来源变化、时间未知等）必须补来源，文字编辑或“已核对”不能消除。未明确解决的问题继续存在。
 
 OCR 抽检仅记录质量判断 confirmed/dismissed/pending，可关联材料命令；它不再拥有第二套文字采用表、当前选择或修订接口。
 
@@ -93,11 +109,17 @@ coverage.imageInventory 分别给出 basis、expectedPages（未知为 null）�
 
 音频采用实际转写 segment 的时间。帧 OCR 保留所有实际采样帧及真实 PTS，不设固定 12 帧读入上限、不跨时间全局去重。采样视频明确标 incomplete；未采样位置未知。只有已证明无音轨才是 not_applicable；识别器无输出不证明源内容为空。
 
+重建计划只枚举同源、同截点的普通本地 OCR layout。`pendingReviewCount` 统计有可审候选的图片槽位，仅云端候选存在时 `layoutCount=0`、`pendingLayouts=0`、`needsOcr=0` 并显示待核对；本地与云端并存时仍处理本地 target，保护人工 current。
+
+封面与显式第一页经相同已验证字节证明去重时，计划保留内部来源别名，仅用于正确统计候选和已处理状态；候选仍绑定其原 unit、slot 和 sourceVersion，不搬到另一页，也不把后续相同图片的真实页面一并合并。
+
 来源状态：present、known_empty、not_acquired、not_applicable、restricted。取得来源但尚无 canonical reading 为 not_processed。部分内容可用仍可阅读，不用一个 completed 压平缺页、失败、待核对与处理进度。
 
 ## 读取、选择、引用与任务接入
 
 现有 `/api/local/work-resources/{workRef}/research-dossier` 成为唯一笔记读取入口。支持 asOf 与 format。默认 full；kinds、unitRefs、blockRefs、imagePages 是显式选择，采用并集；空值、未知 ID 或非法枚举返回错误。selection 报实际选择、省略材料数与完整材料 revision，禁止把局部表示标成完整。
+
+readings/{readingRef} 在同一只读快照返回 workRef、所请求版本 material，以及顶层 currentRevisionRef（当前仍有来源资格的 unit 指针，可为 null）。material.currentRevisionRef 保持请求的版本身份；旧成功回执不能替代最新 current，去重隐藏的 unit 也按该指针精确读取，不重复运输当前全文。
 
 独立入口包括 candidates、readings/{readingRef}、materials/{unitRef}/review、metadata；评论沿用授权分页。批量读取固定一个共同 asOf，为每篇返回独立结果，某篇缺失不伪装整批成功或抹去其他有效材料。
 
