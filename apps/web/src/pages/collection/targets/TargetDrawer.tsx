@@ -70,7 +70,7 @@ function DrawerContent({data,params,commands,tab,worksView}:{data:Drawer;params:
   return <>
     <nav className="c-dw-view-tabs" aria-label="作品视图">{(creator?[['list','列表'],['performance','表现']]:[['rounds','本轮观察'],['catalog','全部作品']]).map(([key,label])=><Link key={key} className="c-dw-view-tab" aria-current={(creator?worksView===key:keywordRounds?key==='rounds':key==='catalog')?'page':undefined}
       to={listHref(params,creator?{wview:key??'list'}:{inspect_keyword_view:key??'rounds',catalog_filter:key==='rounds'?null:params.get('catalog_filter')})}>{label}</Link>)}</nav>
-    {creator?(worksView==='performance'?<LifecyclePanel lifecycle={data.lifecycle} params={params}/>:<Works data={data} params={params}/>):keywordRounds?<KeywordRounds/>:<Works data={data} params={params}/>}
+    {creator?(worksView==='performance'?<LifecyclePanel lifecycle={data.lifecycle} params={params}/>:<Works data={data} params={params} commands={commands}/>):keywordRounds?<KeywordRounds/>:<Works data={data} params={params}/>}
     <ResearchSelectionBar/>
   </>;
 }

@@ -121,7 +121,7 @@ pub async fn request(
     }).collect::<Vec<_>>();
     let outcome=acquisition_chain::request_and_admit_in_transaction_scoped(
         &mut tx,request.target_ref,"deep_archive",
-        "从观察目标页按精确缺详情作品补采","person",Some(domain),&materials,
+        "从观察目标页发起深度建档","person",Some(domain),&materials,
         None,None,false,
     ).await?;
     let receipt=DetailGapReceipt{

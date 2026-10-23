@@ -1360,7 +1360,7 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
 
 /// 与上面同一件事，接受规范材料作用域。
 #[allow(clippy::too_many_arguments)]
-pub(crate) async fn request_and_admit_in_transaction_scoped(
+pub(crate) pub(crate) async fn request_and_admit_in_transaction_scoped(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
     lane: &str,

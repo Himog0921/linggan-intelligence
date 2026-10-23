@@ -3,9 +3,11 @@ import { Link } from 'react-router';
 import type { Drawer } from './api';
 import { TargetSelect } from './TargetSelect';
 import { WorkResearchActions,useOptionalTargetResearch } from './inspection/TargetResearchContext';
+import { ExactDetailGaps } from './inspection/ExactDetailGaps';
+import type { Commands } from './useWorkspace';
 import styles from './inspection/TargetResearch.module.css';
 
-export function Works({data,params}:{data:Drawer;params:URLSearchParams}){
+export function Works({data,params,commands}:{data:Drawer;params:URLSearchParams;commands:Commands}){
   const creator=data.target.kind==='creator';
   const [query,setQuery]=useState(params.get('catalog_query')??'');
   const [filter,setFilter]=useState(params.get('catalog_filter')??'all');
@@ -42,5 +44,6 @@ export function Works({data,params}:{data:Drawer;params:URLSearchParams}){
       </tr>)}</tbody>
     </table></div>
     {matching.length===0&&<p className={styles.empty}>当前筛选没有匹配作品。</p>}
+    {creator&&selected==='pending'&&<ExactDetailGaps data={data} params={params} commands={commands}/>}
   </section>;
 }
