@@ -398,20 +398,7 @@ pub async fn complete_media_processing_text(
         .begin()
         .await
         .map_err(ProducerRuntimeError::Internal)?;
-    let live: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM linggan_media_processing_work \
-         WHERE work_ref=$1 AND job_ref=$2 AND state='leased' \
-           AND worker_instance_ref=$3 AND claim_generation=$4 \
-           AND lease_expires_at>scope_001_now())",
-    )
-    .bind(claim.work_ref)
-    .bind(claim.job_ref)
-    .bind(worker_instance_ref)
-    .bind(claim.claim_generation)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    if !live {
+    if !claim_is_live(&mut tx, claim, worker_instance_ref).await? {
         return Err(ProducerRuntimeError::MaterialIdentityConflict);
     }
     let existing: Option<Uuid> = sqlx::query_scalar(

@@ -375,7 +375,13 @@ fn explicit_sample_freeze_is_order_independent_and_binds_input_and_provenance() 
         let mut a = first.clone();
         let mut b = second.clone();
         match field {
-            "literal" => a.material.fragments[0].text = "今天🙂先做家务".into(),
+            "literal" => {
+                let fragment = &mut a.material.fragments[0];
+                fragment.text = "今天🙂先做家务".into();
+                fragment.end = fragment.start + fragment.text.chars().count();
+                fragment.text_hash = linggan_evidence::creator_discovery::hash(&fragment.text);
+                fragment.structure["text"] = serde_json::json!(fragment.text);
+            }
             "provenance" => a.material.provenance_hash = "different-source".into(),
             "snapshot" => a.material.snapshot_identity = "different-snapshot".into(),
             "direction_members" => {

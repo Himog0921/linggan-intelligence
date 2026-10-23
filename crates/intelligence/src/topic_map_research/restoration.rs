@@ -2,7 +2,8 @@
 use super::identity::{domain_identity, input_identity_for, role_identity};
 use super::windows::{is_research_evidence, selected_comment_study, with_comparison_context};
 use super::{
-    INPUT_CONTRACT, ResearchError, ResearchInput, load_inputs_for_works, manifest_source_work_refs,
+    INPUT_CONTRACT, ResearchError, ResearchInput, load_inputs_for_works_at, manifest_as_of,
+    manifest_source_work_refs,
 };
 use linggan_evidence::creator_discovery::{self, Fragment};
 use linggan_storage_postgres::Database;
@@ -11,11 +12,12 @@ use sqlx::Row;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-/// Restore only the frozen window, resolving every range through today's qualified
-/// canonical source. No raw text is stored in the durable request manifest.
+/// Restore the frozen window from its exact canonical source versions, qualified
+/// under current restrictions. Durable request manifests contain references only.
 pub(crate) fn restore_window(input: &ResearchInput, manifest: &Value) -> Option<ResearchInput> {
+    manifest_as_of(manifest)?;
     current_identity(input, manifest)?;
-    let (fragments, origins, current_sources) = restore_fragments(input, manifest)?;
+    let (fragments, origins) = restore_fragments(input, manifest)?;
     let mut restored = input.clone();
     restored.work.fragments = fragments
         .iter()
@@ -35,7 +37,6 @@ pub(crate) fn restore_window(input: &ResearchInput, manifest: &Value) -> Option<
         .cloned()
         .map(Value::Object)?;
     restored.coverage["fragmentOrigins"] = origins;
-    restored.coverage["currentSources"] = current_sources;
     restored.context_work_refs = manifest["contextWorkRefs"]
         .as_array()?
         .iter()
@@ -68,9 +69,11 @@ pub(crate) fn restore_window(input: &ResearchInput, manifest: &Value) -> Option<
 fn current_identity(input: &ResearchInput, manifest: &Value) -> Option<()> {
     let contract = manifest["inputContract"].as_str()?;
     let method = manifest["methodVersion"].as_str()?;
-    if contract != INPUT_CONTRACT || method != crate::topic_map_research_analysis::METHOD_VERSION
+    if contract != INPUT_CONTRACT
+        || method != crate::topic_map_research_analysis::METHOD_VERSION
         || manifest["workRef"] != json!(input.work.work_ref)
         || manifest["configRef"] != input.coverage["configRef"]
+        || manifest["coverage"]["asOf"] != input.coverage["asOf"]
         || manifest["domainDefinitionHash"].as_str()?
             != creator_discovery::hash(&domain_identity(&input.domain).to_string())
         || manifest["roleIdentity"] != role_identity(input)
@@ -145,17 +148,13 @@ fn qualified_author_context(input: &ResearchInput, source: &Fragment) -> bool {
                 .is_some_and(|owner| input.context_work_refs.contains(&owner)))
 }
 
-fn restore_fragments(
-    input: &ResearchInput,
-    manifest: &Value,
-) -> Option<(Vec<Fragment>, Value, Value)> {
+fn restore_fragments(input: &ResearchInput, manifest: &Value) -> Option<(Vec<Fragment>, Value)> {
     let refs = manifest["fragments"].as_array()?;
     if refs.is_empty() {
         return None;
     }
     let mut fragments = Vec::new();
     let mut origins = serde_json::Map::new();
-    let mut current_sources = serde_json::Map::new();
     let mut ids = BTreeSet::new();
     for reference in refs {
         let id = reference["fragmentId"].as_str()?;
@@ -187,26 +186,35 @@ fn restore_fragments(
             return None;
         }
         let work_context = reference["field"].as_str()?.starts_with("work_context:");
-        let expected = if work_context { format!("{origin}.context") } else { origin.to_owned() };
-        if id != expected || reference["blockRef"] != origin
-            || reference["asOf"].as_str().is_none_or(str::is_empty)
-            || source.source_ref != frozen_source || source.source_version != frozen_version
+        let expected = if work_context {
+            format!("{origin}.context")
+        } else {
+            origin.to_owned()
+        };
+        if id != expected
+            || reference["blockRef"] != origin
+            || reference["asOf"] != manifest["coverage"]["asOf"]
+            || source.source_ref != frozen_source
+            || source.source_version != frozen_version
             || reference["readingRef"] != json!(source.reading_ref)
             || reference["unitRef"] != json!(source.unit_ref)
             || reference["speaker"] != source.speaker
             || reference["structureHash"] != creator_discovery::hash(&source.structure.to_string())
             || reference["issues"] != json!(source.issues)
-        { return None; }
+        {
+            return None;
+        }
         let text = source.text.clone();
         if text.chars().count() != end - start
             || reference["textHash"].as_str()? != creator_discovery::hash(&text)
-            || reference["contextOnly"].as_bool()? != (work_context || !is_research_evidence(source))
-        { return None; }
+            || reference["contextOnly"].as_bool()?
+                != (work_context || !is_research_evidence(source))
+        {
+            return None;
+        }
         origins.insert(id.to_owned(), json!(origin));
-        current_sources.insert(id.to_owned(),json!({"sourceFragmentId":origin,"sourceRef":source.source_ref,
-            "sourceVersion":source.source_version,"sourceTextHash":creator_discovery::hash(&source.text)}));
-        // The current qualified source proves the text; frozen physical references
-        // remain the audit identity of the already dispatched request and its units.
+        // The exact frozen physical source remains the request's audit identity;
+        // the canonical reader has already applied current withdrawal restrictions.
         fragments.push(Fragment {
             fragment_id: id.to_owned(),
             source_ref: frozen_source,
@@ -215,18 +223,17 @@ fn restore_fragments(
             start,
             end,
             text,
-            speaker: source.speaker.clone(), structure: source.structure.clone(),
-            issues: source.issues.clone(), reading_ref: source.reading_ref, unit_ref: source.unit_ref,
+            speaker: source.speaker.clone(),
+            structure: source.structure.clone(),
+            issues: source.issues.clone(),
+            reading_ref: source.reading_ref,
+            unit_ref: source.unit_ref,
         });
     }
     if !fragments.iter().any(is_research_evidence) {
         return None;
     }
-    Some((
-        fragments,
-        Value::Object(origins),
-        Value::Object(current_sources),
-    ))
+    Some((fragments, Value::Object(origins)))
 }
 
 /// Comparison manifests freeze several qualified works; ordinary extraction
@@ -286,7 +293,10 @@ pub(crate) async fn research_result_sources_current(
     if contract.as_deref() != Some(crate::topic_map_research_analysis::EXTRACT_CONTRACT) {
         return Ok(false);
     }
+    let Some(as_of) = manifest_as_of(&manifest) else {
+        return Ok(false);
+    };
     let scope = manifest_source_work_refs(work, &manifest);
-    let all = load_inputs_for_works(db, domain, config, &scope).await?;
+    let all = load_inputs_for_works_at(db, domain, config, &scope, as_of).await?;
     Ok(restore_scoped_window(&all, work, &manifest).is_some())
 }

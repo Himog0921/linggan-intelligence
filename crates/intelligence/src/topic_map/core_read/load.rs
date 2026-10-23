@@ -54,15 +54,23 @@ pub(super) async fn load_windows(
     rows.retain(|row| {
         !projection_targets(row.get("work_public_ref"), &row.get("input_refs"), &visible).is_empty()
     });
-    let mut scopes = HashMap::<(Uuid, Uuid), BTreeSet<Uuid>>::new();
+    let mut scopes = HashMap::<(Uuid, Uuid, String), BTreeSet<Uuid>>::new();
     for row in &rows {
+        let manifest: Value = row.get("input_refs");
+        let Some(as_of) = topic_map_research::manifest_as_of(&manifest) else {
+            continue;
+        };
         // Visibility limits projection, never the frozen participants used for qualification.
         scopes
-            .entry((row.get("domain_ref"), row.get("config_ref")))
+            .entry((
+                row.get("domain_ref"),
+                row.get("config_ref"),
+                as_of.to_owned(),
+            ))
             .or_default()
             .extend(topic_map_research::manifest_source_work_refs(
                 row.get("work_public_ref"),
-                &row.get("input_refs"),
+                &manifest,
             ));
     }
     let (unavailable, inputs) =
@@ -80,9 +88,20 @@ pub(super) async fn load_windows(
         }
         let domain: Uuid = row.get("domain_ref");
         let config: Uuid = row.get("config_ref");
+        let manifest: Value = row.get("input_refs");
+        let Some(as_of) = topic_map_research::manifest_as_of(&manifest) else {
+            continue;
+        };
+        let Some(frozen) = inputs.frozen.get(&(domain, config, as_of.to_owned())) else {
+            continue;
+        };
+        let Some(current) = inputs.current.get(&(domain, config)) else {
+            continue;
+        };
         if let Some(window) = restore_row(
             &row,
-            &inputs[&(domain, config)],
+            frozen,
+            current,
             &allowed,
             &unavailable,
             &mut window_counts,
@@ -119,12 +138,13 @@ pub(super) fn projection_targets(
 fn restore_row(
     row: &PgRow,
     all: &[ResearchInput],
+    current_inventory: &[ResearchInput],
     allowed: &[Uuid],
     unavailable: &HashSet<Uuid>,
     window_counts: &mut HashMap<(Uuid, Uuid, Uuid, usize), usize>,
 ) -> Option<Window> {
     let work: Uuid = row.get("work_public_ref");
-    let source = all.iter().find(|i| i.work.work_ref == work)?;
+    let source = current_inventory.iter().find(|i| i.work.work_ref == work);
     let wrapper: Value = row.get("input_refs");
     let manifest = wrapper.get("source").unwrap_or(&wrapper).clone();
     if !comparison_definitions_current(&manifest, unavailable) {
@@ -132,18 +152,19 @@ fn restore_row(
     }
     let output: Value = row.get("output_json");
     let mut current = topic_map_research::restore_scoped_window(all, work, &manifest)?;
+    let current_coverage_eligible =
+        source.is_some_and(|source| sources_match_current(&current, source));
     if manifest["coverage"]["kind"] != "comparison" {
         // Current qualified inventory is the denominator, including newly added sources.
-        current.coverage["sourceChars"] = source.coverage["sourceChars"].clone();
+        current.coverage["sourceChars"] = source
+            .map(|source| source.coverage["sourceChars"].clone())
+            .unwrap_or(json!(0));
         current.coverage["windowCount"] = json!(
             *window_counts
-                .entry((
-                    row.get("domain_ref"),
-                    row.get("config_ref"),
-                    work,
-                    0
-                ))
-                .or_insert_with(|| topic_map_research::research_window_count(source))
+                .entry((row.get("domain_ref"), row.get("config_ref"), work, 0))
+                .or_insert_with(|| source
+                    .map(topic_map_research::research_window_count)
+                    .unwrap_or(0))
         );
     }
     let typed: ResearchOutput = serde_json::from_value(output.clone()).ok()?;
@@ -169,6 +190,26 @@ fn restore_row(
         manifest,
         output,
         core,
+        current_coverage_eligible,
+    })
+}
+
+fn sources_match_current(frozen: &ResearchInput, current: &ResearchInput) -> bool {
+    frozen.fragments.iter().all(|source| {
+        let origin = frozen.coverage["fragmentOrigins"][&source.fragment_id].as_str();
+        current.fragments.iter().any(|now| {
+            origin == Some(now.fragment_id.as_str())
+                && source.source_ref == now.source_ref
+                && source.source_version == now.source_version
+                && source.reading_ref == now.reading_ref
+                && source.unit_ref == now.unit_ref
+                && source.start == now.start
+                && source.end == now.end
+                && source.text == now.text
+                && source.speaker == now.speaker
+                && source.structure == now.structure
+                && source.issues == now.issues
+        })
     })
 }
 

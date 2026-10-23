@@ -1,77 +1,25 @@
-> Keep this pull request in **Draft** until the execution Agent has completed its declared checks and an independent reviewer has been assigned.
+## 用户结果与工作包
 
-## Related Issue and authority
+<!-- 一两句话描述问题与最终行为。使用已有工作包时直接链接，避免复制规格。 -->
+- 授权来源 / 工作包（有 Issue 则 Refs #；快车道可无 Issue）：
+- 风险通道与理由：快车道 / 保护车道
+- 影响模块、关键状态、共享依赖及不涉及的边界：
 
-- Refs #
-- Active SCOPE / accepted decision / explicit authority:
-- Base commit:
-- Execution Agent / task-id:
+## 验证与风险
 
-## Changed scope
+<!-- 写实际结果和证明边界；未执行的关键检查注明原因。 -->
+- 预检与相关模块验证：
+- 数据、权限、外部调用、迁移或部署影响（无则写无）：
+- 未验证事项：
 
--
+## 审阅与交付
 
-## Explicitly out of scope
+- 协调者 / task-id；保护车道 Claim（base、branch/worktree、文件所有权，已有记录可链接）：
+- 独立审阅：被审提交、结论与已处理发现；纯文档勘误可写自查：
+- 审阅后的增量及最终提交复核：
+- 最终 CI：
+- main / 运行部署 / Mog 验收状态（按实际说明，不由测试通过推断）：
 
--
-
-## Validation and evidence
-
-| Check | Result | What it proves | What it does not prove |
-|---|---|---|---|
-|  |  |  |  |
-
-## Database and external side effects
-
-- Database writes/migrations:
-- External APIs, GitHub, producer, plugin, account, or filesystem effects:
-- Production or sensitive-data access:
-- Cleanup or rollback performed:
-
-## Proved / not proved
-
-**Proved**
-
--
-
-**Not proved**
-
--
-
-## Shared files and integration
-
-- Exclusive files changed:
-- Shared files changed:
-- Integration owner task-id and required merge order:
-- Known parallel branches or conflicts:
-
-## Completion layers
-
-| Layer | Status | Evidence |
-|---|---|---|
-| Design |  |  |
-| Code |  |  |
-| Automated checks |  |  |
-| Real-chain proof |  |  |
-| Deploy |  |  |
-| Mog acceptance |  |  |
-
-## Independent reviewer verdict
-
-> To be completed by a reviewer who did not implement this Issue.
-
-- Reviewer:
-- Commit reviewed:
-- Verdict: `PENDING / PASS / FAIL`
-- Findings and unresolved risks:
-- Re-review required after changes: `yes / no`
-
-## Merge gate
-
-- [ ] PR is linked to exactly one primary Issue and the declared authority.
-- [ ] Diff contains no files outside the Issue Claim.
-- [ ] Required checks and side effects are reported with proof boundaries.
-- [ ] Independent review is complete for the current head commit.
-- [ ] Integration owner has confirmed shared-file order and conflicts.
-- [ ] Deploy and business acceptance have not been inferred from merge readiness.
-- [ ] PR uses `Refs #`; after merge, main/docs will be re-verified, completion layers recorded, and the Issue closed manually.
+<!-- Ready 表示实现和声明验证已准备好，无需等待 reviewer 先认领。
+     合并授权按 docs/governance/agent-collaboration.md；保护车道针对最终 head。
+     本模板是工作包摘要/回执，不要求为同一内容另建计划和月报。 -->

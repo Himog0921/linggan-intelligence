@@ -33,7 +33,6 @@ pub enum StudyStage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudyPolicyDefaults {
     pub comment_budget: i32,
-
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,7 +133,6 @@ impl CreateStudyPolicyCommand {
             || self.parent_policy_ref.is_some_and(|id| id.is_nil())
             || !bounded_text(self.method_name.trim(), 1, 100)
             || !(1..=3000).contains(&self.defaults.comment_budget)
-
         {
             return Err(StudyPolicyContractError::InvalidRequest);
         }

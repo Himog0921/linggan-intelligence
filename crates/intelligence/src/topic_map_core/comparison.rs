@@ -81,7 +81,6 @@ fn scope(value: &Value) -> Option<Vec<Uuid>> {
     (refs.iter().copied().collect::<BTreeSet<_>>().len() == refs.len()).then_some(refs)
 }
 
-
 fn build_comparison(
     inputs: &[ResearchInput],
     tasks: &[TaskEvidence],
@@ -120,11 +119,22 @@ fn build_comparison(
         .collect();
     let full = research::with_comparison_context(primary.clone(), inputs, &available);
     let mut spans = selected_spans(&selected);
-    for source in inputs.iter().filter(|i| selected_works.contains(&i.work.work_ref)) {
+    for source in inputs
+        .iter()
+        .filter(|i| selected_works.contains(&i.work.work_ref))
+    {
         for fragment in &source.work.fragments {
-            if !spans.iter().any(|s| s.work == source.work.work_ref && s.origin == fragment.fragment_id) {
-                spans.push(Span { work: source.work.work_ref, origin: fragment.fragment_id.clone(),
-                    context_field: Some(format!("work_context:{}", fragment.field)), start: fragment.start, end: fragment.end });
+            if !spans
+                .iter()
+                .any(|s| s.work == source.work.work_ref && s.origin == fragment.fragment_id)
+            {
+                spans.push(Span {
+                    work: source.work.work_ref,
+                    origin: fragment.fragment_id.clone(),
+                    context_field: Some(format!("work_context:{}", fragment.field)),
+                    start: fragment.start,
+                    end: fragment.end,
+                });
             }
         }
     }
@@ -207,11 +217,22 @@ fn comparison_fragments(
         }
         // A block selected as author evidence can also supply a reply's context.
         // Its content is sent once; discussion citations preserve each use.
-        let primary = spans.iter().any(|other| other.work == span.work
-            && other.origin == span.origin && other.context_field.is_none());
-        let field = if primary { source.field.as_str() } else { span.context_field.as_deref().unwrap_or(&source.field) };
-        let id = if field.starts_with("work_context:") { format!("{}.context", span.origin) } else { span.origin.clone() };
-        if fragments.iter().any(|f: &Fragment| f.fragment_id == id) { continue; }
+        let primary = spans.iter().any(|other| {
+            other.work == span.work && other.origin == span.origin && other.context_field.is_none()
+        });
+        let field = if primary {
+            source.field.as_str()
+        } else {
+            span.context_field.as_deref().unwrap_or(&source.field)
+        };
+        let id = if field.starts_with("work_context:") {
+            format!("{}.context", span.origin)
+        } else {
+            span.origin.clone()
+        };
+        if fragments.iter().any(|f: &Fragment| f.fragment_id == id) {
+            continue;
+        }
         origins.insert(id.clone(), json!(span.origin));
         owners.insert(id.clone(), json!(span.work));
         let mut fragment = source.clone();
@@ -243,8 +264,11 @@ fn selected_discussions(
                         sources.origins[&f.fragment_id] == span.origin
                             && sources.owners[&f.fragment_id] == json!(span.work)
                             && match &span.context_field {
-                                Some(field) => f.field == *field
-                                    || field.strip_prefix("work_context:") == Some(f.field.as_str()),
+                                Some(field) => {
+                                    f.field == *field
+                                        || field.strip_prefix("work_context:")
+                                            == Some(f.field.as_str())
+                                }
                                 None => research::is_research_evidence(f),
                             }
                             && f.start <= span.start

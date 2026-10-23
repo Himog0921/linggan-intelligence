@@ -42,9 +42,16 @@ pub fn validate_work(output: &Value, fragments: &[Fragment]) -> Value {
         "professional_output",
         "explicit_promotion",
     ] {
-        let author_sources: HashSet<_> = fragments.iter().filter(|f| f.speaker == "author")
-            .map(|f| f.fragment_id.as_str()).collect();
-        let sources = if key == "personal_experience" { &author_sources } else { &allowed };
+        let author_sources: HashSet<_> = fragments
+            .iter()
+            .filter(|f| f.speaker == "author")
+            .map(|f| f.fragment_id.as_str())
+            .collect();
+        let sources = if key == "personal_experience" {
+            &author_sources
+        } else {
+            &allowed
+        };
         traits[key] = supported(&output["traits"][key], sources, &["yes", "no", "unknown"])
             .unwrap_or_else(|| unknown.clone());
     }
@@ -141,7 +148,7 @@ mod tests {
             start: 0,
             end: 2,
             text: "实践".into(),
-        ..Fragment::default()
+            ..Fragment::default()
         };
         let r = validate_work(
             &json!({"relevance":{"value":"related","reason":"讨论领域","evidenceFragmentIds":["w.body"]},"traits":{"personal_experience":{"value":"yes","reason":"伪造","evidenceFragmentIds":["other"]}},"topicHints":[{"text":"启动","evidenceFragmentIds":["w.body"]}]}),
@@ -174,7 +181,7 @@ mod tests {
             start: 0,
             end: 2,
             text: "样本".into(),
-        ..Fragment::default()
+            ..Fragment::default()
         };
         let fragments = vec![make(one, "body"), make(two, "body"), make(one, "biography")];
         let a = fragments[0].fragment_id.clone();
@@ -216,9 +223,17 @@ mod tests {
     fn quoted_and_unconfirmed_material_cannot_certify_author_personal_experience() {
         let output = json!({"traits":{"personal_experience":{"value":"yes","reason":"原声","evidenceFragmentIds":["block"]}}});
         for speaker in ["other", "unconfirmed"] {
-            let f = Fragment { fragment_id:"block".into(), field:"ocr".into(), text:"我家孩子的经历".into(), speaker:speaker.into(), ..Fragment::default() };
-            assert_eq!(validate_work(&output, &[f])["traits"]["personal_experience"]["value"], "unknown");
+            let f = Fragment {
+                fragment_id: "block".into(),
+                field: "ocr".into(),
+                text: "我家孩子的经历".into(),
+                speaker: speaker.into(),
+                ..Fragment::default()
+            };
+            assert_eq!(
+                validate_work(&output, &[f])["traits"]["personal_experience"]["value"],
+                "unknown"
+            );
         }
     }
-
 }

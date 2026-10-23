@@ -216,7 +216,12 @@ fn author_evidence_and_reply_context_share_one_complete_canonical_block() {
         .iter()
         .find(|f| f.field == "body")
         .unwrap();
-    assert!(!comparison.fragments.iter().any(|f| f.field == "work_context:body"));
+    assert!(
+        !comparison
+            .fragments
+            .iter()
+            .any(|f| f.field == "work_context:body")
+    );
     assert_eq!(primary.text, "A中😀e\u{301}B作者语境");
     let rows = comparison.coverage["selectedDiscussions"]
         .as_array()

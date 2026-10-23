@@ -140,8 +140,12 @@ async fn setup_with_model_limits(
     .execute(db.pool())
     .await
     .unwrap();
-    sqlx::raw_sql(include_str!("../../../database/migrations/0146_comment_study_full_context.sql"))
-        .execute(db.pool()).await.unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0146_comment_study_full_context.sql"
+    ))
+    .execute(db.pool())
+    .await
+    .unwrap();
     let (connection, version, model, config) = (
         Uuid::new_v4(),
         Uuid::new_v4(),
@@ -278,10 +282,7 @@ async fn policy_with_semantic_instruction(
             method_name: "INPUT_LIMIT_FIXTURE".to_owned(),
             parent_policy_ref: Some(command.policy_ref),
             model_config_ref,
-            defaults: StudyPolicyDefaults {
-                comment_budget: 2,
-
-            },
+            defaults: StudyPolicyDefaults { comment_budget: 2 },
             stage_instructions: StudyStageInstructions {
                 semantic: semantic_instruction,
                 resolution: String::new(),
@@ -2664,7 +2665,12 @@ async fn dossier_partial_image_body_reaches_v2_frozen_context() {
         .await
         .unwrap()
         .unwrap();
-    assert!(dossier.fragments.iter().any(|f| f.field == "ocr" && f.text.contains("第3行连续")));
+    assert!(
+        dossier
+            .fragments
+            .iter()
+            .any(|f| f.field == "ocr" && f.text.contains("第3行连续"))
+    );
     command.scope = StudyScope::Works {
         work_refs: vec![work],
     };
@@ -2690,7 +2696,11 @@ async fn dossier_partial_image_body_reaches_v2_frozen_context() {
     for source in context["sources"].as_array().unwrap() {
         assert!(source["blockRef"].is_string() && source["asOf"].is_string());
         assert!(source["sourceRef"].is_string() && source["sourceVersion"].is_string());
-        assert!(source["speaker"].is_string() && source["structure"].is_object() && source["issues"].is_array());
+        assert!(
+            source["speaker"].is_string()
+                && source["structure"].is_object()
+                && source["issues"].is_array()
+        );
     }
     // No model invocation was made: the existing batch's frozen work context is
     // the same context exposed to the real model request builder.

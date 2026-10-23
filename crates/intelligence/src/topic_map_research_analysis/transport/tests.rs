@@ -11,8 +11,13 @@ fn fragment(id: &str, field: &str, start: usize, text: &str) -> Fragment {
         start,
         end: start + text.chars().count(),
         text: text.into(),
-        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
-    ..Fragment::default()
+        speaker: if field.contains("comment") {
+            "other"
+        } else {
+            "author"
+        }
+        .into(),
+        ..Fragment::default()
     }
 }
 

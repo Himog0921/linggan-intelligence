@@ -20,15 +20,16 @@ mod restoration;
 mod source;
 #[path = "topic_map_research/windows.rs"]
 mod windows;
-pub(crate) use queue::{
-    overlaps_unknown_dispatch, queue_automatic_run, queue_research_run,
-};
+pub(crate) use queue::{overlaps_unknown_dispatch, queue_automatic_run, queue_research_run};
 #[cfg(test)]
 use restoration::sources_current;
 pub(crate) use restoration::{
     research_result_sources_current, restore_scoped_window, restore_window,
 };
-pub(crate) use source::{load_inputs, load_inputs_for_works, manifest_source_work_refs};
+pub(crate) use source::{
+    load_inputs, load_inputs_for_works, load_inputs_for_works_at, manifest_as_of,
+    manifest_source_work_refs,
+};
 pub(crate) use windows::{
     input_identity, is_research_evidence, reference_manifest, research_window_count,
     research_windows, selected_comment_study, with_comparison_context,
@@ -36,6 +37,10 @@ pub(crate) use windows::{
 #[cfg(test)]
 #[path = "topic_map_research/tests.rs"]
 mod input_tests;
+
+#[cfg(test)]
+#[path = "topic_map_research/tests/saved_source_postgres.rs"]
+mod saved_source_postgres;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ResearchError {

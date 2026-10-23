@@ -1,0 +1,129 @@
+#!/usr/bin/env node
+// Routes the existing proof suites. A path outside the known map fails open to
+// MORE verification, never to an empty green run. Keep this map conservative
+// until cross-module dependencies have executable coverage.
+import { execFileSync } from 'node:child_process';
+import { appendFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+
+export const suites = ['ai', 'ocr_adoption', 'ocr_audit', 'web', 'topic'];
+
+// These patterns preserve the former pull_request.paths coverage of the five
+// reusable workflows. Unknown paths and changes to the delivery mechanism run
+// all five. Do not remove a pattern without evidence about its consumers.
+const paths = {
+  ai: [
+    'crates/contracts/src/ai_*', 'crates/intelligence/**',
+    'crates/storage-postgres/**', 'apps/api/src/local_web/**',
+    'apps/worker/**', 'apps/pi-adapter/**', 'database/migrations/**',
+    'scripts/runtime/**', 'scripts/local-runtime.sh',
+    'scripts/test-research-dossier-postgres.sh',
+  ],
+  ocr_adoption: [
+    'crates/evidence/src/ocr_adoption.rs', 'crates/evidence/src/ocr_adoption/**',
+    'crates/evidence/src/ocr_adoption_persistence.rs', 'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**',
+    'crates/evidence/src/material_processing.rs', 'crates/evidence/src/material_media_read.rs',
+    'crates/evidence/src/material_evidence_fragment.rs', 'crates/evidence/src/research_dossier.rs',
+    'apps/worker/src/bin/media_worker.rs', 'apps/worker/src/bin/media_worker_support/**',
+    'apps/worker/tests/ocr_vl_postgres.rs', 'database/migrations/0142_ocr_adoption.sql',
+    'scripts/test-ocr-adoption-postgres.sh', 'crates/evidence/src/ocr_layering.rs',
+    'crates/evidence/src/lib.rs', 'crates/evidence/examples/ocr_adoption_replay.rs',
+    'crates/evidence/tests/ocr_adoption.rs', 'crates/evidence/tests/ocr_adoption/**',
+    'crates/evidence/Cargo.toml',
+  ],
+  ocr_audit: [
+    'crates/intelligence/src/ocr_quality_audit*', 'crates/intelligence/src/ocr_quality_audit/**',
+    'crates/intelligence/src/ai_foundation/**', 'crates/intelligence/src/pi_*',
+    'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**', 'crates/evidence/src/ocr_adoption_persistence.rs', 'crates/evidence/src/cloud_ocr_adoption*',
+    'crates/evidence/src/research_dossier.rs', 'crates/evidence/tests/cloud_ocr*',
+    'apps/worker/tests/ocr_recognition_postgres.rs', 'apps/worker/tests/ocr_vl_postgres.rs',
+    'database/migrations/0144_ocr_manual_recognition.sql',
+    'apps/api/src/local_web/ocr_recognition*', 'apps/api/src/local_web/ocr_audit.rs',
+    'apps/web/**', 'apps/pi-adapter/**',
+    'apps/worker/tests/ocr_quality_audit_postgres.rs', 'apps/worker/tests/support/ocr_audit_endpoint.rs',
+    'database/migrations/0143_ocr_quality_audit.sql',
+    'scripts/test-ocr-quality-audit-postgres.sh', 'scripts/local-runtime.sh',
+    'scripts/runtime/tests/test_ai_guard.py',
+  ],
+  web: [
+    'apps/web/**', 'docs/design/lids/**', 'docs/design/changes/lids-component-change.json',
+    'scripts/lids*', 'scripts/sync-lids*', 'apps/api/src/**',
+    'scripts/check-web-react-*', 'scripts/login-anatomy/**', 'apps/api/Cargo.toml',
+    'scripts/runtime/prepare-web.sh', 'scripts/test-web-app-postgres.sh',
+    'scripts/test-content-workbench-postgres.sh', 'scripts/test-collection-*.cjs',
+    'scripts/test-collection-single-run-postgres.sh',
+    'crates/evidence/src/material_social_read.rs', 'crates/evidence/src/research_dossier.rs',
+    'crates/evidence/src/research_dossier/**', 'crates/evidence/src/work_resource_*.rs',
+    'crates/evidence/src/material_*.rs', 'crates/evidence/src/content_reobservation.rs',
+    'scripts/test-research-dossier-postgres.sh', 'crates/evidence/src/dossier_input.rs',
+    'crates/evidence/src/dossier_input/**', 'crates/evidence/tests/dossier_input_postgres.rs',
+    'apps/worker/src/bin/research_dossier.rs', 'database/migrations/0129_note_material_hashtags.sql',
+    'database/migrations/0130_note_material_snapshot.sql',
+    'crates/intelligence/src/ops_ledger/read/creation_read.rs',
+    'crates/intelligence/Cargo.toml', 'crates/intelligence/src/note_interpretation_offline.rs',
+    'crates/intelligence/src/note_interpretation_offline/**',
+    'crates/intelligence/tests/note_interpretation_offline.rs',
+    'crates/intelligence/src/comment_study_run/**',
+    'crates/intelligence/tests/comment_study_start_postgres.rs',
+    'scripts/test-comment-study-productization-postgres.sh',
+    'crates/intelligence/src/content_workbench*', 'crates/intelligence/src/content_workbench/**',
+    'crates/intelligence/src/content_workbench_sources/**', 'crates/evidence/src/lib.rs',
+    'crates/intelligence/tests/content_workbench*',
+    'crates/intelligence/tests/support/content_workbench_fixture.rs',
+    'database/migrations/0127_content_workbench.sql', 'database/migrations/0128_content_workbench_ai.sql',
+  ],
+  topic: [
+    'apps/web/src/styles/**', 'apps/web/src/pages/topics/**', 'apps/web/test/e2e/topic*',
+    'apps/web/package-lock.json', 'apps/api/src/local_web/topic_workspace*',
+    'apps/api/src/local_web/web_app*',
+  ],
+};
+
+function globRegex(pattern) {
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped.replace(/\*\*|\*/g, star => star === '**' ? '.*' : '[^/]*')}$`);
+}
+const matchers = Object.fromEntries(suites.map(suite => [suite, paths[suite].map(globRegex)]));
+
+export function selectSuites(changedPaths) {
+  const selected = Object.fromEntries(suites.map(suite => [suite, false]));
+  let full = changedPaths.length === 0;
+  for (const path of changedPaths) {
+    // Dossier/readings are shared by OCR, AI input and the three reading surfaces.
+    // Their schema or public source contract must run every existing consumer proof.
+    if (/^crates\/evidence\/src\/(?:research_dossier|material_reading|dossier_input)(?:\.rs$|\/)/.test(path)
+      || /^database\/migrations\/014[567]_/.test(path)) {
+      full = true;
+      continue;
+    }
+    if (/^(?:\.github\/|AGENTS\.md$|CLAUDE\.md$|codx\.md$|Cargo\.(?:toml|lock)$|\.nvmrc$|rust-toolchain(?:\.toml)?$|docs\/(?:governance|agents)\/|scripts\/(?:ci-|check-project-governance|verify-ui-design-handbook|verify-lids-alignment))/.test(path)) {
+      full = true;
+      continue;
+    }
+    const matched = suites.filter(suite => matchers[suite].some(pattern => pattern.test(path)));
+    if (matched.length) {
+      for (const suite of matched) selected[suite] = true;
+    } else if (!/^docs\/.*\.md$/.test(path) && path !== 'README.md') {
+      full = true;
+    }
+  }
+  if (full) for (const suite of suites) selected[suite] = true;
+  return { ...selected, full };
+}
+
+export function changedPaths(base, cwd = process.cwd()) {
+  // Resolve to a commit ID before constructing a rev range. argv is never a shell.
+  const options = { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+  const commit = execFileSync('git', ['rev-parse', '--verify', '--end-of-options', `${base}^{commit}`], options).trim();
+  return execFileSync('git', ['diff', '--no-renames', '--name-only', '-z', `${commit}...HEAD`], options).split('\0').filter(Boolean);
+}
+
+function main() {
+  const [base, ...rest] = process.argv.slice(2);
+  if (!base || rest.length) throw new Error('Usage: node scripts/ci-select.mjs <base-ref>');
+  const result = selectSuites(changedPaths(base));
+  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, Object.entries(result).map(([name, value]) => `${name}=${value}\n`).join(''));
+  console.log(JSON.stringify(result, null, 2));
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

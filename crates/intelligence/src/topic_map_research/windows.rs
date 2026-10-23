@@ -94,13 +94,28 @@ pub(crate) fn selected_comment_study(
 /// A whole note is the minimum author context. Comments are grouped by explicit
 /// voice count, retaining every selected comment and its complete parents.
 pub(crate) fn research_windows(input: &ResearchInput) -> Vec<ResearchInput> {
-    let author: Vec<_> = input.fragments.iter()
-        .filter(|f| is_research_evidence(f) && !is_comment(f)).cloned().collect();
+    let author: Vec<_> = input
+        .fragments
+        .iter()
+        .filter(|f| is_research_evidence(f) && !is_comment(f))
+        .cloned()
+        .collect();
     let mut windows = Vec::new();
-    if !author.is_empty() { windows.push(source_window(input, author, Vec::new())); }
-    let comments: Vec<_> = input.fragments.iter().filter(|f| is_comment(f)).cloned().collect();
+    if !author.is_empty() {
+        windows.push(source_window(input, author, Vec::new()));
+    }
+    let comments: Vec<_> = input
+        .fragments
+        .iter()
+        .filter(|f| is_comment(f))
+        .cloned()
+        .collect();
     for group in comments.chunks(3) {
-        windows.push(source_window(input, group.to_vec(), comment_context(input, group)));
+        windows.push(source_window(
+            input,
+            group.to_vec(),
+            comment_context(input, group),
+        ));
     }
     let count = windows.len();
     for (index, window) in windows.iter_mut().enumerate() {
@@ -111,8 +126,17 @@ pub(crate) fn research_windows(input: &ResearchInput) -> Vec<ResearchInput> {
 }
 
 pub(crate) fn research_window_count(input: &ResearchInput) -> usize {
-    usize::from(input.fragments.iter().any(|f| is_research_evidence(f) && !is_comment(f)))
-        + input.fragments.iter().filter(|f| is_comment(f)).count().div_ceil(3)
+    usize::from(
+        input
+            .fragments
+            .iter()
+            .any(|f| is_research_evidence(f) && !is_comment(f)),
+    ) + input
+        .fragments
+        .iter()
+        .filter(|f| is_comment(f))
+        .count()
+        .div_ceil(3)
 }
 
 fn chars(fragments: &[Fragment]) -> usize {
@@ -120,7 +144,10 @@ fn chars(fragments: &[Fragment]) -> usize {
 }
 
 fn is_comment(fragment: &Fragment) -> bool {
-    matches!(fragment.field.as_str(), "studied_comment" | "unresearched_comment")
+    matches!(
+        fragment.field.as_str(),
+        "studied_comment" | "unresearched_comment"
+    )
 }
 
 fn range_origin(input: &ResearchInput, fragment: &Fragment) -> String {
@@ -137,10 +164,7 @@ fn range_origin(input: &ResearchInput, fragment: &Fragment) -> String {
         .to_owned()
 }
 
-fn comment_context(
-    input: &ResearchInput,
-    evidence: &[Fragment],
-) -> Vec<Fragment> {
+fn comment_context(input: &ResearchInput, evidence: &[Fragment]) -> Vec<Fragment> {
     let mut context = Vec::new();
     let mut parent_ids = BTreeSet::new();
     let origins: BTreeSet<_> = evidence.iter().map(|f| range_origin(input, f)).collect();
@@ -161,7 +185,13 @@ fn comment_context(
         piece.field = format!("work_context:{}", source.field);
         context.push(piece);
     }
-    context.extend(input.fragments.iter().filter(|source| parent_ids.contains(source.fragment_id.as_str())).cloned());
+    context.extend(
+        input
+            .fragments
+            .iter()
+            .filter(|source| parent_ids.contains(source.fragment_id.as_str()))
+            .cloned(),
+    );
     context
 }
 

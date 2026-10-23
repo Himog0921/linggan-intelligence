@@ -71,14 +71,12 @@ pub(crate) async fn read_work_contexts(
 pub(crate) fn dossier_manifest(
     dossier: &linggan_evidence::research_dossier::ResearchDossier,
 ) -> Value {
-    crate::comment_study_run::full_context_manifest(
-        &json!({
-            "contract":"comment-study.context.v2","workRef":dossier.work_ref,
-            "dossierRevision":dossier.material_revision,"dossierContract":dossier.contract,
-            "cleanerVersion":CLEANER_VERSION,
-            "sources":linggan_evidence::research_dossier::context_sources(dossier)
-        }),
-    )
+    crate::comment_study_run::full_context_manifest(&json!({
+        "contract":"comment-study.context.v2","workRef":dossier.work_ref,
+        "dossierRevision":dossier.material_revision,"dossierContract":dossier.contract,
+        "cleanerVersion":CLEANER_VERSION,
+        "sources":linggan_evidence::research_dossier::context_sources(dossier)
+    }))
 }
 
 pub(crate) async fn read_parents(

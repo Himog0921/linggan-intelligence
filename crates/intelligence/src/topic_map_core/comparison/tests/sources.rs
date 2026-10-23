@@ -77,9 +77,22 @@ fn comparison_uses_real_work_metadata_and_absolute_unicode_citations_without_raw
     assert_eq!(comparison.work.fragments.len(), 1);
     assert_eq!(comparison.work.fragments[0].start, 0);
     assert_eq!(comparison.work.fragments[0].text, a_source.text);
-    assert_eq!(comparison.coverage["coveredChars"], inputs.iter().flat_map(|i| &i.fragments).map(|f| f.text.chars().count()).sum::<usize>());
-    assert_eq!(comparison.coverage["selectedDiscussions"][0]["evidence"][0]["start"], 2500);
-    assert_eq!(comparison.coverage["selectedDiscussions"][0]["evidence"][0]["end"], 2508);
+    assert_eq!(
+        comparison.coverage["coveredChars"],
+        inputs
+            .iter()
+            .flat_map(|i| &i.fragments)
+            .map(|f| f.text.chars().count())
+            .sum::<usize>()
+    );
+    assert_eq!(
+        comparison.coverage["selectedDiscussions"][0]["evidence"][0]["start"],
+        2500
+    );
+    assert_eq!(
+        comparison.coverage["selectedDiscussions"][0]["evidence"][0]["end"],
+        2508
+    );
     assert_eq!(comparison.coverage["state"], "partial");
     assert_eq!(comparison.coverage["selectedDiscussionCount"], 2);
     assert_eq!(comparison.coverage["countsArePeople"], false);
@@ -159,7 +172,10 @@ fn equal_text_reobservation_cannot_substitute_a_frozen_comparison_source_tuple()
     reassigned[0].task = Uuid::from_u128(9999);
     let same_discussions = build_comparison(&inputs, &reassigned, &requested, &topics()).unwrap();
     assert_eq!(same_discussions.hash, comparison.hash);
-    assert_eq!(same_discussions.coverage["selectedDiscussions"][0]["taskRef"], json!(Uuid::from_u128(9999)));
+    assert_eq!(
+        same_discussions.coverage["selectedDiscussions"][0]["taskRef"],
+        json!(Uuid::from_u128(9999))
+    );
 }
 
 #[test]

@@ -19,8 +19,13 @@ fn source(work: u128, id: u128, field: &str, text: &str) -> Fragment {
         start: 0,
         end: text.chars().count(),
         text: text.into(),
-        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
-    ..Fragment::default()
+        speaker: if field.contains("comment") {
+            "other"
+        } else {
+            "author"
+        }
+        .into(),
+        ..Fragment::default()
     }
 }
 

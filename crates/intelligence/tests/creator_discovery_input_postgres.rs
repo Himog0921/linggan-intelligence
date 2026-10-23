@@ -66,10 +66,15 @@ async fn canonical_creator_input_keeps_full_content_and_exact_provenance_without
         assert_eq!(local["asOf"], data.as_of);
         assert!(local.get("text").is_none());
     }
+    let node: std::path::PathBuf = std::env::var_os("CREATOR_PROOF_NODE")
+        .expect("owned proof Node required")
+        .into();
+    assert!(
+        node.is_file(),
+        "CREATOR_PROOF_NODE must name the owned Node executable"
+    );
     let adapter = PiAdapter::configured_with_test_command(
-        std::env::var_os("CREATOR_PROOF_NODE")
-            .expect("owned proof Node required")
-            .into(),
+        node,
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/support/creator_discovery_adapter.mjs"),
     );

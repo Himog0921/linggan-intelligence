@@ -4,6 +4,7 @@ export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
+source scripts/cargo-proof.sh
 
 
 # Statement counters are database-wide. Keep all proof suites serial; a caller
@@ -93,38 +94,41 @@ if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == 
   export LINGGAN_LOCAL_MEDIA_ROOT="$ledger_asset_root/source-media"
   export LINGGAN_PI_NODE="$(command -v node)"
   if [[ "${1:-}" == "--ai-readonly" ]]; then
-    cargo test -p linggan-intelligence --test topic_map_postgres --locked -- --ignored --nocapture
-    echo "AI-GEN1 historical Topic Map source/read qualification proof passed"
+    export CREATOR_PROOF_NODE="$(command -v node)"
+    cargo_proof -p linggan-intelligence --test topic_map_postgres --locked -- --ignored --nocapture
+    cargo_proof -p linggan-intelligence --test creator_discovery_input_postgres --locked -- --ignored --nocapture
+    cargo_proof -p linggan-intelligence --lib topic_map_research::saved_source_postgres:: --locked -- --ignored --nocapture
+    echo "Canonical creator input and frozen Topic Map source/read qualification proofs passed"
     exit 0
   fi
   if [[ "${1:-}" == "--ai-install" ]]; then
     python3 -B scripts/runtime/tests/test_ai_guard.py
     python3 -B scripts/runtime/tests/test_install_flow.py
     python3 -B scripts/runtime/tests/test_local_children.py
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-worker --test ai_worker_contract --locked -- --include-ignored --nocapture
-    cargo test -p linggan-worker --test startup_contract --locked -- --include-ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-worker --test ai_worker_contract --locked -- --include-ignored --nocapture
+    cargo_proof -p linggan-worker --test startup_contract --locked -- --include-ignored --nocapture
     echo "AI-GEN1 release handshake and patrol ownership proof passed"
     exit 0
   fi
   if [[ "${1:-}" == "--ai-service" ]]; then
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_foundation_postgres executor_probe:: --locked -- --ignored --nocapture
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_executor_service_postgres --locked -- --ignored --nocapture
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-worker --test ai_worker_contract --locked -- --include-ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_foundation_postgres executor_probe:: --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_executor_service_postgres --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-worker --test ai_worker_contract --locked -- --include-ignored --nocapture
     echo "AI-GEN1 dedicated executor service proof passed"
     exit 0
   fi
   if [[ "${1:-}" != "--ai-writing" && "${1:-}" != "--ai-compatibility" ]]; then
-    cargo test -p linggan-intelligence --test ai_pool_cancellation_postgres --locked -- --ignored --nocapture
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_foundation_postgres --locked -- --ignored --nocapture
-    cargo test -p linggan-api --bin linggan-api ai_settings_http_ --locked -- --ignored --nocapture
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_adapter_transport --locked -- --ignored --nocapture
+    cargo_proof -p linggan-intelligence --test ai_pool_cancellation_postgres --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_foundation_postgres --locked -- --ignored --nocapture
+    cargo_proof -p linggan-api --bin linggan-api ai_settings_http_ --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_adapter_transport --locked -- --ignored --nocapture
   fi
   if [[ "${1:-}" != "--ai-compatibility" ]]; then
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo test -p linggan-intelligence --test ai_writing_executor_postgres --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_writing_executor_postgres --locked -- --ignored --nocapture
   fi
   export LINGGAN_PI_NODE="$ledger_asset_root/no-model-process"
   if [[ "${1:-}" == "--ai-writing" ]]; then
-    cargo test -p linggan-intelligence --test content_workbench_ai_postgres --locked -- --ignored --nocapture
+    cargo_proof -p linggan-intelligence --test content_workbench_ai_postgres --locked -- --ignored --nocapture
   fi
   if [[ "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-compatibility" ]]; then
     export CREATOR_PROOF_NODE="$(command -v node)"
@@ -140,7 +144,7 @@ if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == 
     fi
     ledger_failures=0
     for ledger_consumer in "${ledger_consumers[@]}"; do
-      if ! cargo test -p linggan-intelligence --test "$ledger_consumer" --locked -- --ignored --nocapture; then
+      if ! cargo_proof -p linggan-intelligence --test "$ledger_consumer" --locked -- --ignored --nocapture; then
         ledger_failures=$((ledger_failures + 1))
       fi
     done
@@ -163,31 +167,32 @@ if [[ "${1:-}" == "--dossier-ui" ]]; then
   export DOSSIER_UI_PROOF=1
   export LINGGAN_LOCAL_MEDIA_ROOT="$WEB_APP_PROOF_DIR/media"
   export LINGGAN_PI_NODE="$project_root/artifacts/private/research-dossier-v2/no-model-process"
-  cargo test -p linggan-api --bin linggan-api dossier_v2_browser_proof --locked -- --ignored --nocapture
+  cargo_proof -p linggan-api --bin linggan-api dossier_v2_browser_proof --locked -- --ignored --nocapture
   exit 0
 fi
 if [[ "${1:-}" == "--dossier-input" ]]; then
-  cargo test -p linggan-evidence --test local_producer_postgres every_declared_capability_admits_one_typed_package --locked -- --ignored --nocapture
-  cargo test -p linggan-evidence --test dossier_input_postgres --locked -- --ignored --nocapture
-  cargo test -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
-  cargo test -p linggan-evidence --test material_reading_postgres --locked -- --ignored --nocapture
-  cargo test -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture
+  cargo_proof -p linggan-evidence --test local_producer_postgres full_runtime_accepts_each_capability_without_collapsing_partial_media_or_replay --locked -- --ignored --exact --nocapture
+  cargo_proof -p linggan-evidence --test local_producer_postgres every_declared_capability_admits_one_typed_package --locked -- --ignored --nocapture
+  cargo_proof -p linggan-evidence --test dossier_input_postgres --locked -- --ignored --nocapture
+  cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
+  cargo_proof -p linggan-evidence --test material_reading_postgres --locked -- --ignored --nocapture
+  cargo_proof -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture
   echo "RESEARCH-DOSSIER-V2 canonical inputs, immutable readings and HTTP proof passed"
   exit 0
 fi
 if [[ "${1:-}" == "--http" ]]; then
-  cargo test -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture
+  cargo_proof -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture
   exit 0
 fi
-cargo test -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
-cargo test -p linggan-evidence --test creator_discovery_postgres --locked -- --ignored --nocapture
+cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
+cargo_proof -p linggan-evidence --test creator_discovery_postgres --locked -- --ignored --nocapture
 for test in source_context_admits_only_the_latest a_reobserved_media_slot source_gate_excludes_withdrawn_ocr; do
-  cargo test -p linggan-intelligence --test comment_study_rebuild_postgres "$test" --locked -- --ignored --nocapture
+  cargo_proof -p linggan-intelligence --test comment_study_rebuild_postgres "$test" --locked -- --ignored --nocapture
 done
 for test in dossier_partial_image_body_reaches_v2_frozen_context concurrent_ preview_and_two_runs_cover_different_comments_from_688 new_run_is_frozen_and_method_bound_dispatch missing_parent_reaches_model; do
-  cargo test -p linggan-intelligence --test comment_study_start_postgres "$test" --locked -- --ignored --nocapture
+  cargo_proof -p linggan-intelligence --test comment_study_start_postgres "$test" --locked -- --ignored --nocapture
 done
 export CREATOR_PROOF_NODE="$(command -v node)"
-cargo test -p linggan-intelligence --test creator_discovery_input_postgres --locked -- --ignored --nocapture
-cargo test -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture
+cargo_proof -p linggan-intelligence --test creator_discovery_input_postgres --locked -- --ignored --nocapture
+cargo_proof -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture
 echo "RESEARCH-DOSSIER-V2 PostgreSQL proof passed"

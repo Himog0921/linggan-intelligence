@@ -2,8 +2,7 @@
 use super::admission::pending_sources;
 use super::windows::{is_research_evidence, origin_id};
 use super::{
-    INPUT_CONTRACT, ResearchError, ResearchInput, load_inputs,
-    reference_manifest, research_windows,
+    INPUT_CONTRACT, ResearchError, ResearchInput, load_inputs, reference_manifest, research_windows,
 };
 use crate::topic_map_research_analysis::METHOD_VERSION;
 use linggan_evidence::creator_discovery;

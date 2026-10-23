@@ -27,6 +27,7 @@ struct Window {
     manifest: Value,
     output: Value,
     core: Value,
+    current_coverage_eligible: bool,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]

@@ -21,6 +21,9 @@ impl Coverage {
         self.total_windows = self
             .total_windows
             .max(part.input.coverage["windowCount"].as_u64().unwrap_or(0) as usize);
+        if !part.current_coverage_eligible {
+            return;
+        }
         // Model/config identities audit a run; they cannot multiply source
         // coverage. Include parent ranges so repeated child text does not hide
         // unprocessed pages of its surrounding conversation.

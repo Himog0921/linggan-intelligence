@@ -76,7 +76,6 @@ struct ActivePolicy {
     policy_ref: Uuid,
     domain_ref: Uuid,
     comment_budget: i32,
-
 }
 
 /// Revalidates a user selection and freezes only its currently eligible source comments.
@@ -208,7 +207,6 @@ async fn read_active_policy(
         policy_ref: row.get("policy_ref"),
         domain_ref: row.get("domain_ref"),
         comment_budget: row.get("comment_budget"),
-
     })
 }
 
@@ -438,20 +436,25 @@ fn context_state(manifest: &Value) -> &'static str {
     let has_sources = manifest["sources"]
         .as_array()
         .is_some_and(|sources| !sources.is_empty());
-    if has_sources {
-        "ready"
-    } else {
-        "missing"
-    }
+    if has_sources { "ready" } else { "missing" }
 }
 
-pub fn context_cleaner_version() -> &'static str { crate::comment_cleaning::CLEANER_VERSION }
+pub fn context_cleaner_version() -> &'static str {
+    crate::comment_cleaning::CLEANER_VERSION
+}
 
 /// Keep the dossier's canonical order and every selected block. Provider capacity
 /// is checked at dispatch; it must never change which source text is being studied.
 pub fn full_context_manifest(manifest: &Value) -> Value {
     let sources = manifest["sources"].as_array().cloned().unwrap_or_default();
-    let count: usize = sources.iter().map(|source| source["text"].as_str().map_or(0, |text| text.chars().count())).sum();
+    let count: usize = sources
+        .iter()
+        .map(|source| {
+            source["text"]
+                .as_str()
+                .map_or(0, |text| text.chars().count())
+        })
+        .sum();
     json!({"contract":"comment-study.context.v2","workRef":manifest["workRef"],
         "cleanerVersion":manifest["cleanerVersion"],"dossierRevision":manifest["dossierRevision"],
         "dossierContract":manifest["dossierContract"],"includedCharacterCount":count,
@@ -498,9 +501,11 @@ mod tests {
             {"blockRef":"second","sourceRef":Uuid::from_u128(11),"text":long,"speaker":"other","structure":{"type":"quote"},"issues":[{"code":"speaker_unconfirmed"}]},
             {"blockRef":"first","sourceRef":Uuid::from_u128(12),"text":"反例"}]});
         let full = full_context_manifest(&manifest);
-        assert_eq!(full["sources"],manifest["sources"]);
-        assert_eq!(full["includedCharacterCount"],long.chars().count()+2);
-        for key in ["characterBudget","truncated","omitted"] { assert!(full.get(key).is_none()); }
-        assert_eq!(context_state(&full),"ready");
+        assert_eq!(full["sources"], manifest["sources"]);
+        assert_eq!(full["includedCharacterCount"], long.chars().count() + 2);
+        for key in ["characterBudget", "truncated", "omitted"] {
+            assert!(full.get(key).is_none());
+        }
+        assert_eq!(context_state(&full), "ready");
     }
 }

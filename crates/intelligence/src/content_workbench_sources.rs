@@ -109,7 +109,9 @@ fn item(
         as_of: String::new(),
         fragment_id: source_block_ref(source, &field),
         block_ref: source_block_ref(source, &field),
-        speaker: "unconfirmed".into(), structure: Value::Null, issues: Vec::new(),
+        speaker: "unconfirmed".into(),
+        structure: Value::Null,
+        issues: Vec::new(),
         source_kind: kind,
         source_ref: source,
         work_ref: work,
@@ -155,8 +157,10 @@ fn comment_item(
     );
     i.author_label = "匿名评论来源".into();
     i.speaker = "other".into();
-    i.title = c["parentWork"]["dossier"]["note"]["displayTitle"].as_str()
-        .unwrap_or("匿名原声 · 父笔记未知").to_owned();
+    i.title = c["parentWork"]["dossier"]["note"]["displayTitle"]
+        .as_str()
+        .unwrap_or("匿名原声 · 父笔记未知")
+        .to_owned();
     Ok(i)
 }
 
@@ -171,7 +175,9 @@ pub async fn read_source_in(
 ) -> Result<(SourceItem, Value), SourceError> {
     let valid: bool = sqlx::query_scalar("SELECT CASE WHEN pg_input_is_valid($1,'timestamp with time zone') THEN $1::timestamptz<=scope_001_now() ELSE false END")
         .bind(as_of).fetch_one(&mut **tx).await?;
-    if !valid { return Err(SourceError::Invalid); }
+    if !valid {
+        return Err(SourceError::Invalid);
+    }
     if *kind == SourceKind::Comment {
         if *field != SourceField::CommentBody {
             return Err(SourceError::Invalid);
@@ -181,7 +187,9 @@ pub async fn read_source_in(
             .ok_or(SourceError::Unavailable)?;
         let mut i = comment_item(source, work, field, &c)?;
         i.as_of = as_of.into();
-        if i.block_ref != block_ref { return Err(SourceError::Unavailable); }
+        if i.block_ref != block_ref {
+            return Err(SourceError::Unavailable);
+        }
         return Ok((i, c));
     }
     if *kind == SourceKind::OpsPublication {
@@ -190,7 +198,9 @@ pub async fn read_source_in(
         }
         let visible: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ops_publication p JOIN linggan_ops_import_batch b ON b.batch_ref=p.last_changed_batch_ref WHERE p.publication_ref=$1 AND b.applied_at<=$2::timestamptz)")
             .bind(source).bind(as_of).fetch_one(&mut **tx).await?;
-        if !visible { return Err(SourceError::Unavailable); }
+        if !visible {
+            return Err(SourceError::Unavailable);
+        }
         let p = read_creation_publications(tx, None, None, Some(source))
             .await?
             .into_iter()
@@ -216,7 +226,9 @@ pub async fn read_source_in(
             .clone()
             .unwrap_or_else(|| "我方历史内容".into());
         i.as_of = as_of.into();
-        if i.block_ref != block_ref { return Err(SourceError::Unavailable); }
+        if i.block_ref != block_ref {
+            return Err(SourceError::Unavailable);
+        }
         return Ok((i, json!({"publication":p})));
     }
     let work_id = work.ok_or(SourceError::Invalid)?;
@@ -228,7 +240,11 @@ pub async fn read_source_in(
     let f = d
         .fragments
         .iter()
-        .find(|f| f.fragment_id == block_ref && f.source_ref == source && name.as_str() == Some(f.field.as_str()))
+        .find(|f| {
+            f.fragment_id == block_ref
+                && f.source_ref == source
+                && name.as_str() == Some(f.field.as_str())
+        })
         .cloned()
         .ok_or_else(|| {
             if *kind == SourceKind::Note
@@ -242,12 +258,20 @@ pub async fn read_source_in(
             }
         })?;
     let expected = fragment_kind(&f.field).ok_or(SourceError::Invalid)?;
-    if expected.0 != *kind || expected.1 != *field { return Err(SourceError::Invalid); }
+    if expected.0 != *kind || expected.1 != *field {
+        return Err(SourceError::Invalid);
+    }
     let i = dossier_item(&d, &f)?;
     Ok((i, json!({"dossier":d})))
 }
 fn source_block_ref(source: Uuid, field: &SourceField) -> String {
-    format!("{source}.{}", serde_json::to_value(field).expect("field is serializable").as_str().expect("field is a string"))
+    format!(
+        "{source}.{}",
+        serde_json::to_value(field)
+            .expect("field is serializable")
+            .as_str()
+            .expect("field is a string")
+    )
 }
 
 fn fragment_kind(field: &str) -> Option<(SourceKind, SourceField)> {
@@ -262,27 +286,48 @@ fn fragment_kind(field: &str) -> Option<(SourceKind, SourceField)> {
     })
 }
 
-fn dossier_item(d: &research_dossier::ResearchDossier, f: &linggan_evidence::creator_discovery::Fragment) -> Result<SourceItem, SourceError> {
+fn dossier_item(
+    d: &research_dossier::ResearchDossier,
+    f: &linggan_evidence::creator_discovery::Fragment,
+) -> Result<SourceItem, SourceError> {
     let (kind, field) = fragment_kind(&f.field).ok_or(SourceError::Invalid)?;
-    let mut item = item(kind, f.source_ref, Some(d.work_ref), field, f.source_version.clone(),
-        d.note["displayTitle"].as_str().unwrap_or("").to_owned(), f.text.clone());
+    let mut item = item(
+        kind,
+        f.source_ref,
+        Some(d.work_ref),
+        field,
+        f.source_version.clone(),
+        d.note["displayTitle"].as_str().unwrap_or("").to_owned(),
+        f.text.clone(),
+    );
     item.as_of = d.as_of.clone();
     item.fragment_id = f.fragment_id.clone();
     item.block_ref = f.fragment_id.clone();
     item.speaker = f.speaker.clone();
     item.structure = f.structure.clone();
     item.issues = f.issues.clone();
-    item.author_label = d.metadata["author"]["displayName"].as_str().unwrap_or("作者未知").to_owned();
+    item.author_label = d.metadata["author"]["displayName"]
+        .as_str()
+        .unwrap_or("作者未知")
+        .to_owned();
     item.location = block_location(d, f);
     Ok(item)
 }
 
-fn block_location(d: &research_dossier::ResearchDossier, f: &linggan_evidence::creator_discovery::Fragment) -> Option<OcrLocation> {
-    let bbox: [f64;4] = serde_json::from_value(f.structure.get("bbox")?.clone()).ok()?;
+fn block_location(
+    d: &research_dossier::ResearchDossier,
+    f: &linggan_evidence::creator_discovery::Fragment,
+) -> Option<OcrLocation> {
+    let bbox: [f64; 4] = serde_json::from_value(f.structure.get("bbox")?.clone()).ok()?;
     let unit = f.unit_ref?;
     let material = d.materials.iter().find(|m| m["ref"] == json!(unit))?;
-    Some(OcrLocation { unit_ref:f.unit_ref?, reading_ref:f.reading_ref?,
-        block_ref:f.fragment_id.clone(), slot_key:material["slotKey"].as_str()?.into(), bbox })
+    Some(OcrLocation {
+        unit_ref: f.unit_ref?,
+        reading_ref: f.reading_ref?,
+        block_ref: f.fragment_id.clone(),
+        slot_key: material["slotKey"].as_str()?.into(),
+        bbox,
+    })
 }
 
 fn exact_slice(text: &str, start: usize, end: usize) -> Result<String, SourceError> {
@@ -291,12 +336,27 @@ fn exact_slice(text: &str, start: usize, end: usize) -> Result<String, SourceErr
     }
     Ok(text.chars().skip(start).take(end - start).collect())
 }
-fn selection_location(location: Option<OcrLocation>, _start: usize, _end: usize) -> Option<OcrLocation> { location }
+fn selection_location(
+    location: Option<OcrLocation>,
+    _start: usize,
+    _end: usize,
+) -> Option<OcrLocation> {
+    location
+}
 pub async fn validate_citation(
     tx: &mut Transaction<'_, Postgres>,
     c: &Citation,
 ) -> Result<ValidatedCitation, SourceError> {
-    let (i, _) = read_source_in(tx, &c.source_kind, c.source_ref, c.work_ref, &c.field, &c.block_ref, &c.as_of).await?;
+    let (i, _) = read_source_in(
+        tx,
+        &c.source_kind,
+        c.source_ref,
+        c.work_ref,
+        &c.field,
+        &c.block_ref,
+        &c.as_of,
+    )
+    .await?;
     if i.source_version != c.source_version {
         return Err(SourceError::Changed);
     }
@@ -309,7 +369,11 @@ pub async fn validate_citation(
         selected_text: text,
         text_hash: hash,
         speaker: i.speaker,
-        content: if i.structure.is_object() { i.structure } else { json!({"kind":"paragraph","text":i.text}) },
+        content: if i.structure.is_object() {
+            i.structure
+        } else {
+            json!({"kind":"paragraph","text":i.text})
+        },
         issues: i.issues,
     })
 }
@@ -420,8 +484,16 @@ pub async fn validate_anchor(db: &Database, a: &AnchorRequest) -> Result<Value, 
         a.domain_ref,
     )
     .await?;
-    let (i, _) =
-        read_source_in(&mut tx, &a.source_kind, a.source_ref, a.work_ref, &a.field, &a.block_ref, &a.as_of).await?;
+    let (i, _) = read_source_in(
+        &mut tx,
+        &a.source_kind,
+        a.source_ref,
+        a.work_ref,
+        &a.field,
+        &a.block_ref,
+        &a.as_of,
+    )
+    .await?;
     if i.source_version != a.source_version {
         return Err(SourceError::Changed);
     }
@@ -460,7 +532,9 @@ pub async fn read_source(
         .await?;
     ensure_source_domain_in(&mut tx, kind, source, work, domain).await?;
     let (i, context) = read_source_in(&mut tx, kind, source, work, field, block_ref, as_of).await?;
-    if i.source_version != source_version { return Err(SourceError::Changed); }
+    if i.source_version != source_version {
+        return Err(SourceError::Changed);
+    }
     tx.commit().await?;
     Ok(json!({"item":i,"context":context}))
 }
@@ -525,7 +599,17 @@ pub async fn list_sources(db: &Database, q: &SourceQuery) -> Result<Value, Sourc
                 } else {
                     SourceField::Body
                 };
-                match read_source_in(&mut tx, &kind, reference, None, &field, &source_block_ref(reference, &field), &as_of).await {
+                match read_source_in(
+                    &mut tx,
+                    &kind,
+                    reference,
+                    None,
+                    &field,
+                    &source_block_ref(reference, &field),
+                    &as_of,
+                )
+                .await
+                {
                     Ok((i, _)) => items.push(i),
                     Err(SourceError::Unavailable | SourceError::Restricted) => {}
                     Err(e) => return Err(e),
@@ -536,7 +620,7 @@ pub async fn list_sources(db: &Database, q: &SourceQuery) -> Result<Value, Sourc
             let dossiers = research_dossier::read_in(&mut tx, &refs, &as_of).await?;
             for d in dossiers.into_values() {
                 for f in &d.fragments {
-                    if fragment_kind(&f.field).is_some_and(|(source_kind,_)| source_kind == kind) {
+                    if fragment_kind(&f.field).is_some_and(|(source_kind, _)| source_kind == kind) {
                         items.push(dossier_item(&d, f)?);
                     }
                 }
@@ -560,9 +644,17 @@ mod tests {
     }
     #[test]
     fn selections_keep_the_real_block_box_without_fabricating_character_geometry() {
-        let location = OcrLocation {unit_ref:Uuid::new_v4(),reading_ref:Uuid::new_v4(),
-            block_ref:"canonical-block".into(),slot_key:"image:1".into(),bbox:[0.12,0.28,0.76,0.025]};
-        assert_eq!(selection_location(Some(location.clone()),1,4),Some(location));
-        assert!(selection_location(None,1,4).is_none());
+        let location = OcrLocation {
+            unit_ref: Uuid::new_v4(),
+            reading_ref: Uuid::new_v4(),
+            block_ref: "canonical-block".into(),
+            slot_key: "image:1".into(),
+            bbox: [0.12, 0.28, 0.76, 0.025],
+        };
+        assert_eq!(
+            selection_location(Some(location.clone()), 1, 4),
+            Some(location)
+        );
+        assert!(selection_location(None, 1, 4).is_none());
     }
 }

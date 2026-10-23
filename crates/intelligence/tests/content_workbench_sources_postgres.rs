@@ -1057,9 +1057,13 @@ async fn batched_comments_preserve_complete_single_reads_and_refresh_restriction
         json!(other_work)
     );
     assert_eq!(initial[&reply]["parentWork"]["workRef"], json!(work));
-    let other_fragments = initial[&other_comment]["parentWork"]["fragments"]
+    let other_materials = initial[&other_comment]["parentWork"]["dossier"]["materials"]
         .as_array()
         .unwrap();
+    let other_fragments: Vec<_> = other_materials
+        .iter()
+        .flat_map(|material| material["blocks"].as_array().unwrap())
+        .collect();
     assert!(
         other_fragments
             .iter()

@@ -194,6 +194,7 @@ fn window(
     time: &str,
 ) -> Window {
     Window {
+        current_coverage_eligible: true,
         manifest: json!({"coverage":input.coverage}),
         input,
         output,

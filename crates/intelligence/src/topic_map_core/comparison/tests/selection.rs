@@ -75,9 +75,20 @@ fn parent_context_is_complete_and_never_counts_as_a_second_discussion_source() {
     assert_eq!(comparison.coverage["availableDiscussionCount"], 3);
     assert_eq!(comparison.coverage["selectedDiscussionCount"], 3);
     assert_eq!(comparison.coverage["evidenceChars"], 21);
-    assert_eq!(comparison.coverage["contextChars"], parent.text.chars().count());
-    assert_eq!(comparison.coverage["inputChars"], 21 + parent.text.chars().count());
-    assert!(comparison.fragments.iter().any(|f| f.field == "parent_comment_context" && f.text == parent.text));
+    assert_eq!(
+        comparison.coverage["contextChars"],
+        parent.text.chars().count()
+    );
+    assert_eq!(
+        comparison.coverage["inputChars"],
+        21 + parent.text.chars().count()
+    );
+    assert!(
+        comparison
+            .fragments
+            .iter()
+            .any(|f| f.field == "parent_comment_context" && f.text == parent.text)
+    );
     assert_eq!(
         comparison.comment_study[0]["parentFragmentIds"]
             .as_array()

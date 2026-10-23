@@ -32,7 +32,6 @@ pub(super) fn selected_spans(selected: &[Candidate]) -> Vec<Span> {
     merge_spans(selected.iter().flat_map(|c| c.spans.iter().cloned()))
 }
 
-
 pub(super) fn shared_topics(candidates: &[Candidate]) -> BTreeSet<String> {
     let mut members = BTreeMap::<String, BTreeSet<Uuid>>::new();
     for candidate in candidates {

@@ -888,7 +888,8 @@ mod tests {
     #[test]
     fn provider_context_keeps_full_structured_block_and_provenance_without_duplicate_text() {
         let text = format!("{}最后的限定条件", "规范正文😀\n".repeat(2000));
-        let source = Uuid::new_v4(); let reading = Uuid::new_v4();
+        let source = Uuid::new_v4();
+        let reading = Uuid::new_v4();
         let frozen = json!({"contract":"comment-study.context.v2","sources":[{
             "blockRef":"work.reading.1","sourceRef":source,"sourceVersion":"exact-version","readingRef":reading,
             "speaker":"other","text":text,"characterCount":text.chars().count(),
@@ -898,9 +899,11 @@ mod tests {
         assert_eq!(payload["sources"][0]["sourceRef"], json!(source));
         assert_eq!(payload["sources"][0]["readingRef"], json!(reading));
         assert_eq!(payload["sources"][0]["speaker"], "other");
-        assert_eq!(payload["sources"][0]["issues"], frozen["sources"][0]["issues"]);
+        assert_eq!(
+            payload["sources"][0]["issues"],
+            frozen["sources"][0]["issues"]
+        );
         assert!(payload["sources"][0].get("text").is_none());
         assert_eq!(frozen["sources"][0]["text"], text);
     }
-
 }

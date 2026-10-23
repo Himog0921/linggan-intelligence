@@ -56,7 +56,12 @@ pub(super) fn origin_id(input: &ResearchInput, fragment: &Fragment) -> String {
 pub(crate) fn semantic_source_identity(input: &ResearchInput, fragment: &Fragment) -> String {
     let origin = origin_id(input, fragment);
     if let Some(unit) = fragment.unit_ref {
-        return format!("{}.{}.{}", input.work.work_ref, unit, origin.rsplit('.').next().unwrap_or(""));
+        return format!(
+            "{}.{}.{}",
+            input.work.work_ref,
+            unit,
+            origin.rsplit('.').next().unwrap_or("")
+        );
     }
     match fragment.field.as_str() {
         "title" | "body" => format!(

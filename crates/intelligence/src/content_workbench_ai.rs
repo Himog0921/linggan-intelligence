@@ -258,18 +258,36 @@ async fn inputs_in(
 }
 
 fn append_canonical_material(
-    materials: &mut Vec<Value>, indexes: &mut std::collections::BTreeMap<String,usize>,
-    citation: &Citation, source: sources::ValidatedCitation,
+    materials: &mut Vec<Value>,
+    indexes: &mut std::collections::BTreeMap<String, usize>,
+    citation: &Citation,
+    source: sources::ValidatedCitation,
 ) -> Result<(), AiError> {
-    let identity = json!([citation.source_kind,citation.source_ref,citation.work_ref,
-        citation.field,citation.source_version,citation.block_ref,citation.as_of]).to_string();
+    let identity = json!([
+        citation.source_kind,
+        citation.source_ref,
+        citation.work_ref,
+        citation.field,
+        citation.source_version,
+        citation.block_ref,
+        citation.as_of
+    ])
+    .to_string();
     if let Some(index) = indexes.get(&identity) {
         let material = &mut materials[*index];
-        if material["content"] != source.content || material["speaker"] != source.speaker
-            || material["issues"] != json!(source.issues) { return Err(AiError::Source); }
-        let citations = material["citations"].as_array_mut().expect("canonical citations");
+        if material["content"] != source.content
+            || material["speaker"] != source.speaker
+            || material["issues"] != json!(source.issues)
+        {
+            return Err(AiError::Source);
+        }
+        let citations = material["citations"]
+            .as_array_mut()
+            .expect("canonical citations");
         let value = json!(citation);
-        if !citations.contains(&value) { citations.push(value); }
+        if !citations.contains(&value) {
+            citations.push(value);
+        }
     } else {
         indexes.insert(identity, materials.len());
         materials.push(json!({"citations":[citation],"content":source.content,
@@ -397,24 +415,46 @@ mod tests {
         let text = format!("{}最后才出现的否定🙂", "完整正文。".repeat(4000));
         let content = json!({"kind":"quote","text":text,"speaker":"other"});
         let issue = json!({"key":"unclear","code":"unclear","message":"归属待确认","resolution":"reading_edit"});
-        let source = || sources::ValidatedCitation { selected_text:"完整正文。".into(), text_hash:"selected".into(),
-            speaker:"other".into(), content:content.clone(), issues:vec![issue.clone()] };
-        let mut first = Citation { block_ref:"work.reading.0".into(),as_of:"2026-10-23T00:00:00Z".into(),
-            source_kind:SourceKind::Ocr,source_ref:Uuid::from_u128(1),work_ref:Some(Uuid::from_u128(2)),
-            field:SourceField::Ocr,source_version:Uuid::from_u128(3).to_string(),start:0,end:5,
-            text_hash:"quote-1".into(),location:None };
+        let source = || sources::ValidatedCitation {
+            selected_text: "完整正文。".into(),
+            text_hash: "selected".into(),
+            speaker: "other".into(),
+            content: content.clone(),
+            issues: vec![issue.clone()],
+        };
+        let mut first = Citation {
+            block_ref: "work.reading.0".into(),
+            as_of: "2026-10-23T00:00:00Z".into(),
+            source_kind: SourceKind::Ocr,
+            source_ref: Uuid::from_u128(1),
+            work_ref: Some(Uuid::from_u128(2)),
+            field: SourceField::Ocr,
+            source_version: Uuid::from_u128(3).to_string(),
+            start: 0,
+            end: 5,
+            text_hash: "quote-1".into(),
+            location: None,
+        };
         let mut materials = vec![];
         let mut indexes = std::collections::BTreeMap::new();
-        append_canonical_material(&mut materials,&mut indexes,&first,source()).unwrap();
-        first.start=10; first.end=15; first.text_hash="quote-2".into();
-        append_canonical_material(&mut materials,&mut indexes,&first,source()).unwrap();
-        append_canonical_material(&mut materials,&mut indexes,&first,source()).unwrap();
-        assert_eq!(materials.len(),1);
-        assert_eq!(materials[0]["citations"].as_array().unwrap().len(),2);
-        assert_eq!(materials[0]["content"],content);
-        assert_eq!(materials[0]["speaker"],"other");
-        assert_eq!(materials[0]["issues"][0],issue);
-        assert_eq!(serde_json::to_string(&materials).unwrap().matches("最后才出现的否定🙂").count(),1);
+        append_canonical_material(&mut materials, &mut indexes, &first, source()).unwrap();
+        first.start = 10;
+        first.end = 15;
+        first.text_hash = "quote-2".into();
+        append_canonical_material(&mut materials, &mut indexes, &first, source()).unwrap();
+        append_canonical_material(&mut materials, &mut indexes, &first, source()).unwrap();
+        assert_eq!(materials.len(), 1);
+        assert_eq!(materials[0]["citations"].as_array().unwrap().len(), 2);
+        assert_eq!(materials[0]["content"], content);
+        assert_eq!(materials[0]["speaker"], "other");
+        assert_eq!(materials[0]["issues"][0], issue);
+        assert_eq!(
+            serde_json::to_string(&materials)
+                .unwrap()
+                .matches("最后才出现的否定🙂")
+                .count(),
+            1
+        );
     }
     #[test]
     fn writing_contract_never_accepts_research_json() {

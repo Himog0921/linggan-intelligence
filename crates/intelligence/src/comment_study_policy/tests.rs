@@ -382,7 +382,10 @@ fn canonical_json_has_explicit_utf8_order_and_preserves_unicode_text() {
 #[test]
 fn canonical_json_preserves_coordinates_integer_extremes_and_rejects_excessive_nesting() {
     for v in [json!(1.0), json!({"nested":[1.5]}), json!(-0.0)] {
-        assert_eq!(serde_json::from_slice::<Value>(&canonical_json_v2(&v).unwrap()).unwrap(), v);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&canonical_json_v2(&v).unwrap()).unwrap(),
+            v
+        );
     }
     for v in [json!(i64::MIN), json!(u64::MAX)] {
         assert!(canonical_json_v2(&v).is_ok());

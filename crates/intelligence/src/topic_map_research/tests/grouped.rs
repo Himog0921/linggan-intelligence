@@ -55,7 +55,15 @@ fn one_hundred_short_comments_pack_independent_voices_and_restore_precise_source
         assert!(window.comment_study.as_array().unwrap().len() <= 3);
         assert!(window.coverage["inputChars"].as_u64().unwrap() > 900);
         assert_eq!(window.coverage["workContextPartial"], false);
-        assert_eq!(window.fragments.iter().find(|f| f.field == "work_context:body").unwrap().text, body.text);
+        assert_eq!(
+            window
+                .fragments
+                .iter()
+                .find(|f| f.field == "work_context:body")
+                .unwrap()
+                .text,
+            body.text
+        );
         assert!(window.work.fragments.is_empty());
         let manifest = reference_manifest(window);
         let context: Vec<_> = manifest["fragments"]

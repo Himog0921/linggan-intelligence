@@ -145,21 +145,20 @@ async fn read_page(
     // Keep the setting transaction-local so pooled connections retain their normal defaults.
     sqlx::query("SET LOCAL jit = off").execute(&mut *tx).await?;
     let as_of = resolve_as_of(&mut tx, previous.as_ref()).await?;
-    let projection: Value =
-        sqlx::query_scalar(AssertSqlSafe(statement(scope.pattern.is_some())?))
-            .persistent(false)
-            .bind(query.domain)
-            .bind(&as_of)
-            .bind(CLEANER_VERSION)
-            .bind(Option::<Uuid>::None)
-            .bind(Option::<&str>::None)
-            .bind(&scope.pattern)
-            .bind(&scope.study)
-            .bind(previous.as_ref().map(|cursor| cursor.last.reference))
-            .bind(scope.limit + 1)
-            .bind(scope.observation_role.as_str())
-            .fetch_one(&mut *tx)
-            .await?;
+    let projection: Value = sqlx::query_scalar(AssertSqlSafe(statement(scope.pattern.is_some())?))
+        .persistent(false)
+        .bind(query.domain)
+        .bind(&as_of)
+        .bind(CLEANER_VERSION)
+        .bind(Option::<Uuid>::None)
+        .bind(Option::<&str>::None)
+        .bind(&scope.pattern)
+        .bind(&scope.study)
+        .bind(previous.as_ref().map(|cursor| cursor.last.reference))
+        .bind(scope.limit + 1)
+        .bind(scope.observation_role.as_str())
+        .fetch_one(&mut *tx)
+        .await?;
     tx.commit().await?;
     response(query.domain, &scope, &as_of, projection)
 }

@@ -131,17 +131,28 @@ mod title_tests {
 
     #[test]
     fn cover_heading_requires_exact_source_and_reading_and_real_first_page() {
-        for required in ["origin.content_public_ref = $1", "origin.display_ordinal=1",
-            "selected.reading_ref", "materialization.materialization_ref::text=reading.source_version",
-            "WITHDRAWN_OR_RESTRICTED", "BYTES_CLEANED", "package.accepted_at <= $2",
-            "retired.retired_job_ref", "block->>'kind'='heading'"] {
-            assert!(COVER_HEADLINE_SQL.contains(required),"missing {required}");
+        for required in [
+            "origin.content_public_ref = $1",
+            "origin.display_ordinal=1",
+            "selected.reading_ref",
+            "materialization.materialization_ref::text=reading.source_version",
+            "WITHDRAWN_OR_RESTRICTED",
+            "BYTES_CLEANED",
+            "package.accepted_at <= $2",
+            "retired.retired_job_ref",
+            "block->>'kind'='heading'",
+        ] {
+            assert!(COVER_HEADLINE_SQL.contains(required), "missing {required}");
         }
-        for obsolete in ["linggan_media_ocr_layering_result", "BETWEEN 1 AND 3", "layer_version", "text_content"] {
+        for obsolete in [
+            "linggan_media_ocr_layering_result",
+            "BETWEEN 1 AND 3",
+            "layer_version",
+            "text_content",
+        ] {
             assert!(!COVER_HEADLINE_SQL.contains(obsolete));
         }
     }
-
 }
 
 /// The complete identity of one frozen block. A matching source UUID alone does
@@ -160,8 +171,12 @@ pub async fn read_frozen_work_text_in_transaction(
     work_ref: Uuid,
     source: &FrozenWorkSource,
 ) -> Result<Vec<String>, WorkResourceReadError> {
-    Ok(read_frozen_work_texts_in_transaction(tx, work_ref, std::slice::from_ref(source))
-        .await?.remove(source).unwrap_or_default())
+    Ok(
+        read_frozen_work_texts_in_transaction(tx, work_ref, std::slice::from_ref(source))
+            .await?
+            .remove(source)
+            .unwrap_or_default(),
+    )
 }
 
 /// Historical selection is read through the same dossier owner as current reads.
@@ -173,15 +188,25 @@ pub async fn read_frozen_work_texts_in_transaction(
 ) -> Result<std::collections::HashMap<FrozenWorkSource, Vec<String>>, WorkResourceReadError> {
     use std::collections::{BTreeSet, HashMap};
     let mut texts = HashMap::new();
-    for cutoff in sources.iter().map(|s| s.as_of.as_str()).collect::<BTreeSet<_>>() {
+    for cutoff in sources
+        .iter()
+        .map(|s| s.as_of.as_str())
+        .collect::<BTreeSet<_>>()
+    {
         let canonical_cutoff = crate::research_dossier::cutoff_in(tx, Some(cutoff)).await?;
-        let Some(dossier) = crate::research_dossier::read_in(tx, &[work_ref], &canonical_cutoff).await?.remove(&work_ref) else {
+        let Some(dossier) = crate::research_dossier::read_in(tx, &[work_ref], &canonical_cutoff)
+            .await?
+            .remove(&work_ref)
+        else {
             continue;
         };
         for requested in sources.iter().filter(|source| source.as_of == cutoff) {
-            if let Some(fragment) = dossier.fragments.iter().find(|fragment|
-                fragment.fragment_id == requested.block_ref && fragment.source_ref == requested.source_ref
-                && fragment.field == requested.field && fragment.source_version == requested.source_version) {
+            if let Some(fragment) = dossier.fragments.iter().find(|fragment| {
+                fragment.fragment_id == requested.block_ref
+                    && fragment.source_ref == requested.source_ref
+                    && fragment.field == requested.field
+                    && fragment.source_version == requested.source_version
+            }) {
                 texts.insert(requested.clone(), vec![fragment.text.clone()]);
             }
         }
@@ -196,8 +221,12 @@ pub async fn frozen_work_fragment_manifest_in_transaction(
 ) -> Result<Vec<serde_json::Value>, WorkResourceReadError> {
     use serde_json::json;
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut **tx).await?;
-    let Some(dossier) = crate::research_dossier::read_in(tx, &[work], &as_of).await?.remove(&work) else {
+        .fetch_one(&mut **tx)
+        .await?;
+    let Some(dossier) = crate::research_dossier::read_in(tx, &[work], &as_of)
+        .await?
+        .remove(&work)
+    else {
         return Ok(Vec::new());
     };
     Ok(dossier.fragments.iter().map(|fragment| json!({

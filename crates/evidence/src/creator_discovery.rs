@@ -264,7 +264,7 @@ pub async fn load(database: &Database, q: &CreatorScope) -> Result<DiscoveryData
     Ok(data)
 }
 
-/// Bounded creator-style fragments for referenced works; current gates remain unchanged.
+/// Complete canonical fragments for referenced works under current eligibility.
 pub async fn load_for_works(
     database: &Database,
     q: &CreatorScope,
@@ -275,7 +275,7 @@ pub async fn load_for_works(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let data = load_materials_in(&mut tx, q, Some(work_refs)).await?;
+    let data = load_materials_in(&mut tx, q, Some(work_refs), None).await?;
     tx.commit().await?;
     Ok(data)
 }
@@ -287,7 +287,7 @@ pub async fn load_topic_materials(
     database: &Database,
     domain: Uuid,
 ) -> Result<DiscoveryData, DiscoveryError> {
-    load_topic_material_scope(database, domain, None).await
+    load_topic_material_scope(database, domain, None, None).await
 }
 
 /// Read only the requested works through the same current domain/material gates.
@@ -297,13 +297,24 @@ pub async fn load_topic_materials_for_works(
     domain: Uuid,
     work_refs: &[Uuid],
 ) -> Result<DiscoveryData, DiscoveryError> {
-    load_topic_material_scope(database, domain, Some(work_refs)).await
+    load_topic_material_scope(database, domain, Some(work_refs), None).await
+}
+
+/// Reconstruct the exact observation cutoff while applying current source restrictions.
+pub async fn load_topic_materials_for_works_at(
+    database: &Database,
+    domain: Uuid,
+    work_refs: &[Uuid],
+    as_of: &str,
+) -> Result<DiscoveryData, DiscoveryError> {
+    load_topic_material_scope(database, domain, Some(work_refs), Some(as_of)).await
 }
 
 async fn load_topic_material_scope(
     database: &Database,
     domain: Uuid,
     work_refs: Option<&[Uuid]>,
+    as_of: Option<&str>,
 ) -> Result<DiscoveryData, DiscoveryError> {
     let mut tx = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
@@ -315,6 +326,7 @@ async fn load_topic_material_scope(
     sqlx::query("SET LOCAL plan_cache_mode=force_custom_plan")
         .execute(&mut *tx)
         .await?;
+    let as_of = crate::research_dossier::cutoff_in(&mut tx, as_of).await?;
     let mut platforms: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 AND ($2::uuid[] IS NULL OR usage.content_public_ref=ANY($2)) ORDER BY content.platform",
     )
@@ -331,7 +343,7 @@ async fn load_topic_material_scope(
         let scope: CreatorScope =
             serde_json::from_value(json!({"domain":domain,"platform":platform}))
                 .map_err(|_| DiscoveryError::Invalid("invalid_topic_material_scope"))?;
-        let mut part = load_materials_in(&mut tx, &scope, work_refs).await?;
+        let mut part = load_materials_in(&mut tx, &scope, work_refs, Some(&as_of)).await?;
         if let Some(data) = data.as_mut() {
             data.works.append(&mut part.works);
             data.work_name_sources.extend(part.work_name_sources);
@@ -358,7 +370,7 @@ pub async fn load_creator_material_for_work(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let result = load_materials_in(&mut tx, scope, Some(&[work])).await?;
+    let result = load_materials_in(&mut tx, scope, Some(&[work]), None).await?;
     tx.commit().await?;
     Ok(result)
 }
@@ -367,16 +379,17 @@ pub(crate) async fn load_in(
     tx: &mut Transaction<'_, Postgres>,
     q: &CreatorScope,
 ) -> Result<DiscoveryData, DiscoveryError> {
-    load_materials_in(tx, q, None).await
+    load_materials_in(tx, q, None, None).await
 }
 
 async fn load_materials_in(
     tx: &mut Transaction<'_, Postgres>,
     q: &CreatorScope,
     work_refs: Option<&[Uuid]>,
+    as_of: Option<&str>,
 ) -> Result<DiscoveryData, DiscoveryError> {
-    let clock=sqlx::query("SELECT scope_001_now()::text AS now,linggan_human_moment(scope_001_now()) AS display_now,(extract(epoch FROM scope_001_now())*1000)::bigint AS epoch").fetch_one(&mut **tx).await?;
-    let as_of: String = clock.get("now");
+    let as_of = crate::research_dossier::cutoff_in(tx, as_of).await?;
+    let clock=sqlx::query("SELECT linggan_human_moment($1::timestamptz) AS display_now,(extract(epoch FROM $1::timestamptz)*1000)::bigint AS epoch").bind(&as_of).fetch_one(&mut **tx).await?;
     let display_as_of: String = clock.get("display_now");
     let now_epoch: i64 = clock.get("epoch");
     for date in [&q.published_from, &q.published_to].into_iter().flatten() {

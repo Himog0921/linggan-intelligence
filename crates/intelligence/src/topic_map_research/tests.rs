@@ -18,8 +18,13 @@ fn source(field: &str, text: &str, id: u128) -> Fragment {
         start: 0,
         end: text.chars().count(),
         text: text.into(),
-        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
-    ..Fragment::default()
+        speaker: if field.contains("comment") {
+            "other"
+        } else {
+            "author"
+        }
+        .into(),
+        ..Fragment::default()
     }
 }
 
@@ -85,12 +90,16 @@ fn comment_metadata(comment: &Fragment, parent: Option<&Fragment>, signals: Valu
 
 #[test]
 fn source_windows_keep_one_complete_note_with_all_canonical_structure_and_provenance() {
-    let text = format!("{}最后才出现的限制：这一办法对我没有效果。", "开始一个任务。👩‍👧\n保留完整段落。\n".repeat(430));
+    let text = format!(
+        "{}最后才出现的限制：这一办法对我没有效果。",
+        "开始一个任务。👩‍👧\n保留完整段落。\n".repeat(430)
+    );
     let mut body = source("body", &text, 10);
     body.speaker = "other".into();
     body.structure = json!({"kind":"quote","text":text,"attribution":"转述"});
     body.issues = vec![json!({"code":"speaker_uncertain"})];
-    body.reading_ref = Some(Uuid::from_u128(40)); body.unit_ref = Some(Uuid::from_u128(41));
+    body.reading_ref = Some(Uuid::from_u128(40));
+    body.unit_ref = Some(Uuid::from_u128(41));
     let input = input(vec![body.clone()]);
     let windows = research_windows(&input);
     assert_eq!(windows.len(), 1);
@@ -101,8 +110,14 @@ fn source_windows_keep_one_complete_note_with_all_canonical_structure_and_proven
     assert_eq!(window.coverage["materialSelection"], "whole_note");
     assert_eq!(window.coverage["inputChars"], text.chars().count());
     let manifest = reference_manifest(window);
-    assert_eq!(manifest["fragments"][0]["sourceRef"], json!(body.source_ref));
-    assert_eq!(manifest["fragments"][0]["readingRef"], json!(body.reading_ref));
+    assert_eq!(
+        manifest["fragments"][0]["sourceRef"],
+        json!(body.source_ref)
+    );
+    assert_eq!(
+        manifest["fragments"][0]["readingRef"],
+        json!(body.reading_ref)
+    );
     assert_eq!(manifest["fragments"][0]["blockRef"], body.fragment_id);
     assert_eq!(manifest["fragments"][0]["speaker"], "other");
     assert!(manifest["fragments"][0].get("text").is_none());
@@ -148,17 +163,35 @@ fn frozen_window_rejects_source_version_role_structure_issue_and_range_substitut
             0 => changed.fragments[0].source_ref = Uuid::from_u128(900),
             1 => changed.fragments[0].source_version = "different-source-version".into(),
             2 => changed.fragments[0].speaker = "other".into(),
-            3 => changed.fragments[0].structure = json!({"kind":"quote","text":changed.fragments[0].text}),
+            3 => {
+                changed.fragments[0].structure =
+                    json!({"kind":"quote","text":changed.fragments[0].text})
+            }
             4 => changed.fragments[0].issues.push(json!({"code":"unclear"})),
-            5 => { changed.fragments[0].text.push_str("追加尾段"); changed.fragments[0].end = changed.fragments[0].text.chars().count(); }
+            5 => {
+                changed.fragments[0].text.push_str("追加尾段");
+                changed.fragments[0].end = changed.fragments[0].text.chars().count();
+            }
             _ => changed.fragments.clear(),
         }
-        assert!(restore_window(&changed, &manifest).is_none(), "change={change}");
+        assert!(
+            restore_window(&changed, &manifest).is_none(),
+            "change={change}"
+        );
     }
-    for key in ["blockRef","asOf","sourceVersion"] {
-        let mut corrupt = manifest.clone(); corrupt["fragments"][0][key] = Value::Null;
-        assert!(restore_window(&original, &corrupt).is_none(), "missing={key}");
+    for key in ["blockRef", "asOf", "sourceVersion"] {
+        let mut corrupt = manifest.clone();
+        corrupt["fragments"][0][key] = Value::Null;
+        assert!(
+            restore_window(&original, &corrupt).is_none(),
+            "missing={key}"
+        );
     }
+    let mut changed_cutoff = manifest.clone();
+    changed_cutoff["fragments"][0]["asOf"] = json!("2026-10-23T00:00:01Z");
+    assert!(restore_window(&original, &changed_cutoff).is_none());
+    changed_cutoff["coverage"]["asOf"] = changed_cutoff["fragments"][0]["asOf"].clone();
+    assert!(restore_window(&original, &changed_cutoff).is_none());
 }
 
 #[test]
@@ -235,9 +268,11 @@ fn comment_reobservation_cannot_substitute_frozen_source_or_parent() {
     original.comment_study = json!([comment_metadata(&comment, Some(&parent), json!([]))]);
     let manifest = reference_manifest(&research_windows(&original).remove(0));
     assert!(restore_window(&original, &manifest).is_some());
-    let mut current = original.clone(); current.fragments[0].source_ref = Uuid::from_u128(500);
+    let mut current = original.clone();
+    current.fragments[0].source_ref = Uuid::from_u128(500);
     assert!(restore_window(&current, &manifest).is_none());
-    let mut current = original; current.fragments[1].source_ref = Uuid::from_u128(501);
+    let mut current = original;
+    current.fragments[1].source_ref = Uuid::from_u128(501);
     assert!(restore_window(&current, &manifest).is_none());
 }
 
@@ -296,7 +331,6 @@ fn unknown_dispatch_cannot_be_replayed_through_another_window_hash() {
         &changed_text,
         &refs
     ));
-
 }
 
 fn two_works() -> Vec<ResearchInput> {
@@ -443,10 +477,7 @@ fn overview_window_denominator_matches_lossless_partition_with_parent_context() 
     tiny.comment_study = json!([comment_metadata(&child, Some(&parent), json!([]))]);
     update_source_coverage(&mut tiny);
     {
-        assert_eq!(
-            research_window_count(&tiny),
-            research_windows(&tiny).len()
-        );
+        assert_eq!(research_window_count(&tiny), research_windows(&tiny).len());
     }
     assert_eq!(research_window_count(&input(vec![])), 0);
 }

@@ -100,7 +100,12 @@ async fn setup(name: &str, guards: bool) -> (Database, Uuid, Uuid, Uuid) {
     if guards {
         sqlx::raw_sql(GUARDS).execute(&mut *tx).await.unwrap();
     }
-    sqlx::raw_sql(include_str!("../../../database/migrations/0146_comment_study_full_context.sql")).execute(&mut *tx).await.unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0146_comment_study_full_context.sql"
+    ))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     (db, config, connection, legacy)
 }

@@ -159,16 +159,23 @@ fn citation(c: &Citation) -> Result<(), WorkbenchError> {
     if c.start >= c.end
         || c.end - c.start > 100_000
         || !sha(&c.text_hash)
-        || c.source_version.trim().is_empty() || c.source_version.len() > 500
-        || c.block_ref.trim().is_empty() || c.block_ref.len() > 500
-        || c.as_of.trim().is_empty() || c.as_of.len() > 100
+        || c.source_version.trim().is_empty()
+        || c.source_version.len() > 500
+        || c.block_ref.trim().is_empty()
+        || c.block_ref.len() > 500
+        || c.as_of.trim().is_empty()
+        || c.as_of.len() > 100
         || c.source_ref.is_nil()
     {
         return Err(WorkbenchError::Invalid("citation"));
     }
     if let Some(l) = &c.location {
-        if l.unit_ref.is_nil() || l.reading_ref.is_nil() || l.block_ref != c.block_ref
-            || l.slot_key.is_empty() || l.slot_key.len() > 500 || !rect(l.bbox)
+        if l.unit_ref.is_nil()
+            || l.reading_ref.is_nil()
+            || l.block_ref != c.block_ref
+            || l.slot_key.is_empty()
+            || l.slot_key.len() > 500
+            || !rect(l.bbox)
         {
             return Err(WorkbenchError::Invalid("ocr_location"));
         }

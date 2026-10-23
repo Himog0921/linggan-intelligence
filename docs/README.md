@@ -26,6 +26,8 @@
 
 本页是项目的“总书目”。Agent 不应先通读所有材料，而应从这里逐层进入与当前事项直接相关的文件。
 
+协作与风险分级统一读[工作包协作协议](governance/agent-collaboration.md)。业务行为、数据、权限和外部调用先读[安全与领域约束](agents/safety-invariants.md)；该文件保留原根 AGENTS 的不变量。运行状态仅在运行/发布/跨包依赖任务中读取，不作为所有实现的预读门。
+
 
 - [主题图谱紧凑工作区变更](design/changes/topic-map-compact-382.md)：#382 当前 UI 后续，取代旧工作区布局，不改研究与来源合同。
 
@@ -64,7 +66,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 
 - [第一阶段历史计划](plans/active/research-dossier-001.md)：Issue #420 历史实施；当前实现与验收统一转入 [v2](plans/active/research-dossier-v2.md)。
 - [底稿与任务材料合同](data-contracts/research-dossier.md)：本期数据、分层和输入范围。
-- [UI 变更清单](design/changes/research-dossier-001-ui-change-manifest.md)：详情、对照和预览。
+- [第一阶段 UI 变更历史](design/changes/research-dossier-001-ui-change-manifest.md)：旧详情、对照和预览记录；当前表面与验收统一见 [v2 实施计划](plans/active/research-dossier-v2.md)。
 
 ## 评论研究产品化 · 当前交付入口
 
