@@ -41,5 +41,13 @@
 .receiptFacts dt { color: var(--lgi-muted); }
 .receiptFacts dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .receipts pre { white-space: pre-wrap; word-break: break-word; max-height: calc(var(--lgi-space-24) * 4); overflow: auto; padding: var(--lgi-space-3); background: var(--lgi-canvas-low); font-family: var(--lgi-font-code); font-size: var(--lgi-text-data); }
+.manual { display: grid; gap: var(--lgi-space-2); padding: var(--lgi-space-3); background: var(--lgi-canvas-low); border-left: var(--lgi-action-rail-width) solid var(--lgi-warning); }
+.manualHeading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--lgi-space-2); flex-wrap: wrap; }
+.manualHeading small { color: var(--lgi-muted); }
+.manual pre { margin: 0; white-space: pre-wrap; font-family: var(--lgi-font-evidence); }
+.manualForm { display: grid; gap: var(--lgi-space-2); }
+.manualForm label { display: grid; gap: var(--lgi-space-1); font-size: var(--lgi-text-data); }
+.manualForm input,.manualForm select,.manualForm textarea { font: inherit; min-width: 0; border: 1px solid var(--lgi-ink); background: var(--lgi-canvas); padding: var(--lgi-space-2); }
+.manualForm textarea { min-height: calc(var(--lgi-space-24) * 2); resize: vertical; }
 @keyframes ocrActivity { to { background-position: var(--lgi-secondary-pitch) 0; } }
 @media (prefers-reduced-motion:reduce) { .action .fill { transition: none; } .action .fill::after { animation: none; } }
