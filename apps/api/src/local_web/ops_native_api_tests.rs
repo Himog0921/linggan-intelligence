@@ -81,6 +81,51 @@ async fn native_only_summary_is_available_without_forging_an_import_batch() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn member_deactivation_revokes_sessions_and_leaves_current_accounts_pending() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_member_stop_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url, &schema, full_schema_fixture::FULL_MIGRATIONS,
+    ).await.unwrap();
+    let admin = member(database.pool(), "stop-admin@example.test", "停用管理员", "admin").await;
+    let departing = member(database.pool(), "stop-member@example.test", "离职运营", "operator").await;
+    let domain = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES($1,'停用合成业务')")
+        .bind(domain).execute(database.pool()).await.unwrap();
+    let app = app_with_database(database.clone());
+    let admin_cookie = session(database.pool(), admin).await;
+    let departing_cookie = session(database.pool(), departing).await;
+    let (status, account) = post(app.clone(), "/api/local/ops/native/accounts", Some(&departing_cookie), json!({
+        "requestId":Uuid::new_v4(),"domainRef":domain,"platform":"xhs","accountName":"待接管账号",
+        "profileUrl":"https://example.test/xhs/stop","platformUserId":"0123456789abcdef01234567","deviceCode":null,"followerCount":null,"ipLocation":null,"notes":null
+    })).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let account_ref: Uuid = account["receipt"]["recordRef"].as_str().unwrap().parse().unwrap();
+    let request_id = Uuid::new_v4();
+    let body = json!({"requestId":request_id,"expectedVersion":1,"reason":"合成离职停用"});
+    let (status, stopped) = post(app.clone(), &format!("/api/local/auth/members/{departing}/deactivate"), Some(&admin_cookie), body.clone()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(stopped["outcome"], "accepted");
+    assert_eq!(stopped["unassignedAccountCount"], 1);
+    let state: (String, Option<Uuid>, i64, i64) = sqlx::query_as(
+        "SELECT member.state,account.current_responsible_member_ref,account.responsibility_version, \
+                (SELECT count(*) FROM linggan_ops_session WHERE member_ref=$1 AND revoked_at IS NOT NULL) \
+         FROM linggan_ops_member member CROSS JOIN linggan_ops_account account \
+         WHERE member.member_ref=$1 AND account.account_ref=$2",
+    ).bind(departing).bind(account_ref).fetch_one(database.pool()).await.unwrap();
+    assert_eq!(state, ("disabled".to_owned(), None, 2, 1));
+    let changes: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ops_account_responsibility_change WHERE account_ref=$1 AND previous_member_ref=$2 AND next_member_ref IS NULL")
+        .bind(account_ref).bind(departing).fetch_one(database.pool()).await.unwrap();
+    assert_eq!(changes, 1);
+    let (status, _) = get(app.clone(), "/api/local/ops/members", Some(&departing_cookie)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, replay) = post(app, &format!("/api/local/auth/members/{departing}/deactivate"), Some(&admin_cookie), body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["replayed"], true);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
 async fn native_commands_are_session_bound_idempotent_and_versioned() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("ops_native_http_{}", Uuid::new_v4().simple());

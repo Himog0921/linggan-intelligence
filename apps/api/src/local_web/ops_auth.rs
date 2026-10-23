@@ -4,7 +4,7 @@ use super::*;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
     response::{IntoResponse, Response},
@@ -26,6 +26,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/auth/session", get(session))
         .route("/api/local/auth/logout", post(logout))
         .route("/api/local/auth/password/change", post(change_password))
+        .route(
+            "/api/local/auth/members/{member_ref}/deactivate",
+            post(deactivate_member),
+        )
         .route("/api/local/auth/invitations", post(create_invitation))
         .route(
             "/api/local/auth/invitations/accept",
@@ -62,6 +66,14 @@ struct ChangePasswordRequest {
     current_password: String,
     #[serde(rename = "newPassword")]
     new_password: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DeactivateMemberRequest {
+    request_id: Uuid,
+    expected_version: i64,
+    reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -211,6 +223,89 @@ async fn change_password(
         Ok(PasswordChange::InvalidCredentials) => invalid_credentials(),
         Err(()) => auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"),
     }
+}
+
+/// Stop browser access first, then leave currently owned accounts explicitly unassigned.  This is
+/// intentionally not a handover shortcut: a later administrator assigns each account under the
+/// ordinary responsibility command, while historical publishers and imported operators remain
+/// untouched.
+async fn deactivate_member(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Path(target_member_ref): Path<Uuid>,
+    Json(request): Json<DeactivateMemberRequest>,
+) -> Response {
+    let actor = match current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let reason = request.reason.trim();
+    if request.expected_version <= 0 || reason.is_empty() || reason.len() > 1000 || target_member_ref == actor.member_ref {
+        return request_error(StatusCode::UNPROCESSABLE_ENTITY, "ops_member_deactivation_invalid");
+    }
+    let Some(database) = state.database.database() else {
+        return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable");
+    };
+    let payload: [u8; 32] = Sha256::digest(
+        serde_json::to_vec(&json!({"targetMemberRef":target_member_ref,"expectedVersion":request.expected_version,"reason":reason}))
+            .expect("deactivation payload serializes"),
+    )
+    .into();
+    let result: Result<(StatusCode, Value), Response> = async {
+        let mut transaction = database.pool().begin().await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,0))")
+            .bind(request.request_id.to_string()).execute(&mut *transaction).await
+            .map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))?;
+        if let Some((stored_actor, stored_payload, outcome, code, count, version)) = sqlx::query_as::<_, (Uuid, Vec<u8>, String, String, i32, Option<i64>)>(
+            "SELECT actor_member_ref,payload_sha256,outcome,result_code,unassigned_account_count,resulting_version \
+             FROM linggan_ops_member_deactivation_request WHERE request_ref=$1",
+        ).bind(request.request_id).fetch_optional(&mut *transaction).await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))? {
+            if stored_actor != actor.member_ref || stored_payload != payload { return Err(request_error(StatusCode::CONFLICT, "ops_member_deactivation_conflict")); }
+            transaction.commit().await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))?;
+            let status = if outcome == "accepted" || outcome == "unchanged" { StatusCode::OK } else { StatusCode::CONFLICT };
+            return Ok((status, json!({"requestId":request.request_id,"outcome":outcome,"code":code,"unassignedAccountCount":count,"resultingVersion":version,"replayed":true})));
+        }
+        let actor_is_admin: bool = sqlx::query_scalar("SELECT role='admin' AND state='active' FROM linggan_ops_member WHERE member_ref=$1 FOR SHARE")
+            .bind(actor.member_ref).fetch_optional(&mut *transaction).await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))?.unwrap_or(false);
+        if !actor_is_admin { return Err(request_error(StatusCode::FORBIDDEN, "ops_auth_forbidden")); }
+        let target: Option<(String, String, i64)> = sqlx::query_as("SELECT role,state,version FROM linggan_ops_member WHERE member_ref=$1 FOR UPDATE")
+            .bind(target_member_ref).fetch_optional(&mut *transaction).await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))?;
+        let Some((role, member_state, version)) = target else { return Err(request_error(StatusCode::NOT_FOUND, "ops_member_not_found")); };
+        let (outcome, code, result_version, count) = if version != request.expected_version {
+            ("stale", "ops_member_version_stale", None, 0)
+        } else if member_state == "disabled" {
+            ("unchanged", "ops_member_already_disabled", Some(version), 0)
+        } else if role == "admin" {
+            let active_admins: Vec<Uuid> = sqlx::query_scalar("SELECT member_ref FROM linggan_ops_member WHERE role='admin' AND state='active' FOR UPDATE")
+                .fetch_all(&mut *transaction).await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))?;
+            if active_admins.len() <= 1 { ("rejected", "ops_member_last_admin_protected", None, 0) } else { deactivate_in(&mut transaction, target_member_ref, actor.member_ref, reason).await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))? }
+        } else { deactivate_in(&mut transaction, target_member_ref, actor.member_ref, reason).await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))? };
+        sqlx::query("INSERT INTO linggan_ops_member_deactivation_request (request_ref,actor_member_ref,target_member_ref,expected_version,payload_sha256,reason,outcome,result_code,unassigned_account_count,resulting_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+            .bind(request.request_id).bind(actor.member_ref).bind(target_member_ref).bind(request.expected_version).bind(payload.as_slice()).bind(reason).bind(outcome).bind(code).bind(count).bind(result_version)
+            .execute(&mut *transaction).await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))?;
+        transaction.commit().await.map_err(|_| auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"))?;
+        let status = if outcome == "accepted" || outcome == "unchanged" { StatusCode::OK } else { StatusCode::CONFLICT };
+        Ok((status, json!({"requestId":request.request_id,"outcome":outcome,"code":code,"unassignedAccountCount":count,"resultingVersion":result_version,"replayed":false})))
+    }.await;
+    match result { Ok((status, body)) => { let mut response = (status, Json(body)).into_response(); secure_headers(&mut response); response }, Err(response) => response }
+}
+
+async fn deactivate_in(transaction: &mut Transaction<'_, Postgres>, target: Uuid, actor: Uuid, reason: &str) -> Result<(&'static str, &'static str, Option<i64>, i32), sqlx::Error> {
+    let version: i64 = sqlx::query_scalar("UPDATE linggan_ops_member SET state='disabled',disabled_at=scope_001_now(),version=version+1 WHERE member_ref=$1 RETURNING version")
+        .bind(target).fetch_one(&mut **transaction).await?;
+    sqlx::query("UPDATE linggan_ops_session SET revoked_at=scope_001_now(),revoked_reason='member_disabled' WHERE member_ref=$1 AND revoked_at IS NULL")
+        .bind(target).execute(&mut **transaction).await?;
+    sqlx::query("UPDATE linggan_ops_invite SET revoked_at=scope_001_now(),revoked_reason='member_disabled' WHERE member_ref=$1 AND accepted_at IS NULL AND revoked_at IS NULL")
+        .bind(target).execute(&mut **transaction).await?;
+    sqlx::query("UPDATE linggan_ops_password_reset SET revoked_at=scope_001_now(),revoked_reason='member_disabled' WHERE member_ref=$1 AND consumed_at IS NULL AND revoked_at IS NULL")
+        .bind(target).execute(&mut **transaction).await?;
+    let accounts: Vec<(Uuid, i64)> = sqlx::query_as("UPDATE linggan_ops_account SET current_responsible_member_ref=NULL,responsibility_version=responsibility_version+1 WHERE current_responsible_member_ref=$1 RETURNING account_ref,responsibility_version")
+        .bind(target).fetch_all(&mut **transaction).await?;
+    for (account_ref, resulting_version) in &accounts {
+        sqlx::query("INSERT INTO linggan_ops_account_responsibility_change (change_ref,account_ref,previous_member_ref,next_member_ref,changed_by_member_ref,reason,request_ref,resulting_version) VALUES($1,$2,$3,NULL,$4,$5,$6,$7)")
+            .bind(Uuid::new_v4()).bind(account_ref).bind(target).bind(actor).bind(format!("成员停用：{reason}")).bind(Uuid::new_v4()).bind(resulting_version).execute(&mut **transaction).await?;
+    }
+    Ok(("accepted", "ops_member_deactivated", Some(version), i32::try_from(accounts.len()).unwrap_or(i32::MAX)))
 }
 
 async fn create_invitation(

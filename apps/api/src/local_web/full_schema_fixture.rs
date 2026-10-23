@@ -261,6 +261,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0153_ops_account_responsibility_command.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0154_ops_member_deactivation.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -353,4 +355,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0151_ops_publication_sync_request','0df347c29292746f66b3790adb550f216f8ff9eda74542d43d862aae23dbb3ed');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0152_ops_publication_execution_locator','c246316f9d17eb6a36826a335b14f07f9aa3f0422f3a3ea871799eb037a8e5cd');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0153_ops_account_responsibility_command','8b9c082a82a2135edc72fd36d7a37260c105a1614db29517607ddd66b732b46d');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0154_ops_member_deactivation','3c525adbd09e4613c4f3c55ad3c2b4476d3db85525af647eddb15852d643c5c3');\n",
 );
