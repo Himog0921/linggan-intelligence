@@ -6,6 +6,7 @@ import { decodeWorkComparison,inspectionUrl,METRICS,type MetricKey,type Snapshot
 import { age,metricLabels,metricValue,moment,number,reason } from './inspectionPresent';
 import { Cutoff,EvidenceLink,MetricPicker,ReadFeedback,ResearchPanel } from './ResearchParts';
 import { DossierReadout } from './DossierReadout';
+import { ContentComparisonPanel } from './ContentComparisonPanel';
 import { useTargetResearch } from './TargetResearchContext';
 import { useInspectionRead } from './useInspectionRead';
 import styles from './TargetResearch.module.css';
@@ -56,6 +57,7 @@ export function WorkComparisonPanel(){
         </div>
       </div>
       {references&&<div className={styles.inlineSummary}><span>所选参照的{metricLabels[metric]}中位数 <b>{number(references.median)}</b></span><span>可用参照 <b>{references.count}</b> 篇</span><span>不含第一列；仅说明所选作品，不代表作者整体规律。</span></div>}
+      <ContentComparisonPanel/>
       <div className={styles.footer}><ActionButton variant="quiet" onClick={context.back}>返回原列表或图表</ActionButton><ActionButton variant="quiet" onClick={read.reload}>重读固定截点</ActionButton></div>
     </>}
   </ResearchPanel>;

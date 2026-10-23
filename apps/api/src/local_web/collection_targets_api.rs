@@ -5,6 +5,7 @@ use axum::Router;
 mod workspace;
 mod inspection;
 mod materials;
+mod analysis;
 pub(super) fn routes()->Router<LocalWebState>{
-    workspace::routes().merge(inspection::routes()).merge(materials::routes())
+    workspace::routes().merge(inspection::routes()).merge(materials::routes()).merge(analysis::routes())
 }

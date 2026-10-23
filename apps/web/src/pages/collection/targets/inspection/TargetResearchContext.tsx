@@ -27,9 +27,9 @@ export function TargetResearchProvider({data,params,children}:{data:Drawer;param
   const toggle=(work:string)=>{
     if(!uuid.test(work))return;
     if(!valid){setMessage('对照选择无效，请清除后重新选择。');return;}
-    if(selected.includes(work)){patch({inspect_works:selected.filter(v=>v!==work).join(',')||null});setMessage(null);return;}
+    if(selected.includes(work)){patch({inspect_works:selected.filter(v=>v!==work).join(',')||null,inspect_comparison_request:null});setMessage(null);return;}
     if(selected.length===3){setMessage('最多同时对照 3 篇，请先移除或替换一篇。');return;}
-    patch({inspect_works:[...selected,work].join(',')});setMessage(null);
+    patch({inspect_works:[...selected,work].join(','),inspect_comparison_request:null});setMessage(null);
   };
   const open=(panel:Panel,work?:string)=>{
     if(panel==='compare'&&(!valid||selected.length<2)){setMessage('请先选择 2—3 篇作品。');return;}
@@ -47,7 +47,7 @@ export function TargetResearchProvider({data,params,children}:{data:Drawer;param
   const cutoff=params.get('inspect_as_of');
   const value:ResearchContext={data,params,scope:{targetRef:data.target.targetRef,domain:params.get('domain')??'all',cutoff},selected:valid?selected:[],panel:params.get('inspect_panel'),focusedWork:focus&&uuid.test(focus)?focus:null,
     message:message??(valid?null:'对照选择无效，请清除后重新选择。'),patch,toggle,open,back,
-    clear:()=>{setMessage(null);patch({inspect_works:null});},
+    clear:()=>{setMessage(null);patch({inspect_works:null,inspect_comparison_request:null});},
     pinCutoff:(next)=>{if(!params.has('inspect_as_of'))patch({inspect_as_of:next},true);}};
   return <Context.Provider value={value}>{children}</Context.Provider>;
 }
