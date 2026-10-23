@@ -103,6 +103,9 @@ pub struct OpsPublicationItem {
     /// The newest explicit Operations sync command for this publication.  It is a read of the
     /// shared collection chain, not a mutation of the ledger or a claim that fields were adopted.
     pub sync: OpsPublicationSync,
+    /// Media is separately qualified through the shared observation → byte-acquisition → local
+    /// materialization chain.  A remote candidate URI is deliberately never an available asset.
+    pub media: OpsPublicationMedia,
     pub duplicates: Vec<OpsDuplicate>,
     pub cover: OpsCoverState,
 }
@@ -113,6 +116,19 @@ pub struct OpsPublicationSync {
     pub request_ref: Option<Uuid>,
     pub decision: Option<String>,
     pub state: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpsPublicationMedia {
+    /// `not_requested` means this publication has no current-version exact media scope; it does
+    /// not make any historical cover disappear. `waiting_for_slots`, `processing`, `partial`,
+    /// `available`, `failed`, and `unavailable` are derived from immutable shared media facts.
+    pub state: &'static str,
+    pub observed: i64,
+    pub available: i64,
+    pub failed: i64,
+    pub unavailable: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -300,8 +316,79 @@ async fn read_page(
                 kept.adopted_collect_count AS collect_count, \
                 kept.adopted_comment_count AS comment_count, kept.cover_click_rate, \
                 kept.sync_request_ref, kept.sync_decision, coalesce(kept.sync_state,'not_requested') AS sync_state, \
-                cover.publication_ref IS NOT NULL AS has_cover \
+                cover.publication_ref IS NOT NULL AS has_cover, \
+                media.media_state,media.observed_media,media.available_media,media.failed_media,media.unavailable_media \
            FROM kept LEFT JOIN linggan_ops_publication_cover cover ON cover.publication_ref = kept.publication_ref \
+           LEFT JOIN LATERAL ( \
+             SELECT CASE \
+                 WHEN NOT EXISTS (SELECT 1 FROM collection_work_order_ops_publication_target scope \
+                                  WHERE scope.publication_ref=kept.publication_ref \
+                                    AND scope.publication_version=kept.native_version AND scope.acquire_media) \
+                    THEN 'not_requested' \
+                 WHEN counted.observed_media=0 \
+                      AND EXISTS (SELECT 1 FROM collection_work_order_ops_publication_target scope \
+                                  JOIN collection_work_order_lease lease USING(work_order_ref) \
+                                  JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+                                  JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+                                  WHERE scope.publication_ref=kept.publication_ref \
+                                    AND scope.publication_version=kept.native_version AND scope.acquire_media \
+                                    AND task.task_spec->'capabilitiesRequested'->>0='media_slots' \
+                                    AND lease_task.execution_state IN ('unavailable','blocked','input_blocked')) \
+                    THEN 'failed' \
+                 WHEN counted.observed_media=0 THEN 'waiting_for_slots' \
+                 WHEN counted.available_media=counted.observed_media THEN 'available' \
+                 WHEN counted.available_media>0 THEN 'partial' \
+                 WHEN counted.unavailable_media=counted.observed_media THEN 'unavailable' \
+                 WHEN counted.failed_media=counted.observed_media THEN 'failed' \
+                 ELSE 'processing' END AS media_state, \
+                    counted.observed_media,counted.available_media,counted.failed_media,counted.unavailable_media \
+               FROM ( \
+                 SELECT count(*)::bigint AS observed_media, \
+                    count(*) FILTER (WHERE EXISTS ( \
+                        SELECT 1 FROM linggan_media_download_attempt attempt \
+                        JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+                        WHERE attempt.media_observation_ref=projection.observation_ref \
+                          AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                                          WHERE disposition.slot_key=projection.slot_key \
+                                             OR disposition.materialization_ref=materialization.materialization_ref \
+                                             OR disposition.blob_sha256=materialization.blob_sha256) \
+                    ))::bigint AS available_media, \
+                    count(*) FILTER (WHERE NOT EXISTS ( \
+                        SELECT 1 FROM linggan_media_download_attempt attempt \
+                        JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+                        WHERE attempt.media_observation_ref=projection.observation_ref \
+                          AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                                          WHERE disposition.slot_key=projection.slot_key \
+                                             OR disposition.materialization_ref=materialization.materialization_ref \
+                                             OR disposition.blob_sha256=materialization.blob_sha256) \
+                    ) AND EXISTS ( \
+                        SELECT 1 FROM linggan_media_download_attempt attempt \
+                        WHERE attempt.media_observation_ref=projection.observation_ref \
+                          AND attempt.terminal_reason IS NOT NULL AND attempt.terminal_reason<>'acquired' \
+                    ))::bigint AS failed_media, \
+                    count(*) FILTER (WHERE NOT EXISTS ( \
+                        SELECT 1 FROM linggan_media_download_attempt attempt \
+                        JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+                        WHERE attempt.media_observation_ref=projection.observation_ref \
+                          AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                                          WHERE disposition.slot_key=projection.slot_key \
+                                             OR disposition.materialization_ref=materialization.materialization_ref \
+                                             OR disposition.blob_sha256=materialization.blob_sha256) \
+                    ) AND EXISTS ( \
+                        SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                        WHERE disposition.slot_key=projection.slot_key \
+                           OR disposition.materialization_ref IN ( \
+                              SELECT materialization.materialization_ref \
+                              FROM linggan_media_download_attempt attempt \
+                              JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+                              WHERE attempt.media_observation_ref=projection.observation_ref \
+                           ) \
+                    ))::bigint AS unavailable_media \
+                   FROM linggan_ops_publication_media_projection projection \
+                  WHERE projection.publication_ref=kept.publication_ref \
+                    AND projection.publication_version=kept.native_version \
+               ) counted \
+           ) media ON true \
           ORDER BY CASE WHEN $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END ASC, \
                    CASE WHEN NOT $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END DESC, \
                    kept.source_created_at DESC NULLS LAST, kept.publication_ref DESC \
@@ -373,11 +460,31 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
             decision: row.try_get("sync_decision")?,
             state: sync_state(&row.try_get::<String, _>("sync_state")?)?,
         },
+        media: OpsPublicationMedia {
+            state: media_state(&row.try_get::<String, _>("media_state")?)?,
+            observed: row.try_get("observed_media")?,
+            available: row.try_get("available_media")?,
+            failed: row.try_get("failed_media")?,
+            unavailable: row.try_get("unavailable_media")?,
+        },
         duplicates: Vec::new(),
         cover: OpsCoverState {
             available: row.try_get("has_cover")?,
         },
     })
+}
+
+fn media_state(value: &str) -> Result<&'static str, OpsReadError> {
+    match value {
+        "not_requested" => Ok("not_requested"),
+        "waiting_for_slots" => Ok("waiting_for_slots"),
+        "processing" => Ok("processing"),
+        "partial" => Ok("partial"),
+        "available" => Ok("available"),
+        "failed" => Ok("failed"),
+        "unavailable" => Ok("unavailable"),
+        _ => Err(OpsReadError::InvalidParameter("publication_media_state")),
+    }
 }
 
 fn sync_state(value: &str) -> Result<&'static str, OpsReadError> {

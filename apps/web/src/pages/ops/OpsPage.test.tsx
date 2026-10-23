@@ -9,7 +9,7 @@ const publication = {
   ref: 'pub', source: 'imported', businessDate: '2026-10-18', dateState: 'as_recorded', platform: 'xhs', title: '测试发布标题', body: '完整正文\n保留第二段',
   url: 'https://example.com/post', account: { name: '合成账号', ledgerState: 'in_ledger' }, publisher: '甲',
   views: { state: 'pending', value: null, overdue: false, hit: false }, likes: null, collects: 0, comments: null,
-  coverClickRate: null, systemCheck: 'not_checked', sync: { requestRef: null, decision: null, state: 'not_requested' }, duplicates: [], cover: { available: true },
+  coverClickRate: null, systemCheck: 'not_checked', sync: { requestRef: null, decision: null, state: 'not_requested' }, media: { state: 'not_requested', observed: 0, available: 0, failed: 0, unavailable: 0 }, duplicates: [], cover: { available: true },
 };
 let failPublications = false;
 let noAccounts = false;

@@ -508,6 +508,9 @@ export function LedgerPage({
             <div><dt>阅读量</dt><dd>{detail.views.state === 'value' ? f.count(detail.views.value).text : detail.views.state === 'pending' ? '待补' : '选填，未知'}</dd></div>
             <div><dt>点赞</dt><dd>{f.count(detail.likes).text}</dd></div><div><dt>收藏</dt><dd>{f.count(detail.collects).text}</dd></div><div><dt>评论</dt><dd>{f.count(detail.comments).text}</dd></div>
           </dl>
+          <p className={c('ops-note')}>
+            采集媒体：{mediaLabels[detail.media.state]}{detail.media.observed ? `（已观察 ${detail.media.observed}，本地可用 ${detail.media.available}，失败 ${detail.media.failed}，当前不可用 ${detail.media.unavailable}）` : ''}
+          </p>
           <h3>发布正文</h3><p className={c('ops-full-text')}>{detail.body || '未迁入正文'}</p>
           {detail.duplicates.length ? <p>合并的重复登记日期：{detail.duplicates.map(row => row.businessDate).join('、')}</p> : null}
           {detail.cover.available ? <ActionButton onClick={() => openCover(`/ops/covers/${encodeURIComponent(detail.ref)}`)}>查看封面大图</ActionButton> : <p>封面未迁入</p>}
@@ -576,6 +579,7 @@ function PublicationRow({
       <td>
         <div className={c("ops-stack")}>
           <SyncTag item={item} openSync={openSync} />
+          <MediaTag media={item.media} />
           <span className={c("ops-secondary")}>
             {item.views.state === "value"
               ? "阅读量已填"
@@ -706,11 +710,28 @@ const syncLabels: Record<api.Publication["sync"]["state"], string> = {
   stopped: "执行已停止",
   chain_unavailable: "状态暂不可读",
 };
+const mediaLabels: Record<api.Publication["media"]["state"], string> = {
+  not_requested: "未请求采集媒体",
+  waiting_for_slots: "等待读取图片/视频",
+  processing: "图片/视频处理中",
+  partial: "媒体部分可用",
+  available: "媒体已本地验证",
+  failed: "媒体处理失败",
+  unavailable: "媒体当前不可用",
+};
+function MediaTag({ media }: { media: api.Publication["media"] }) {
+  const tone = media.state === "available" ? "success" : media.state === "failed" || media.state === "partial" || media.state === "unavailable" ? "warning" : undefined;
+  const title = media.observed
+    ? `已观察 ${media.observed} 项；本地验证 ${media.available} 项；失败 ${media.failed} 项；当前不可用 ${media.unavailable} 项。远程地址不等于可用媒体。`
+    : "媒体状态独立于文字回填；远程地址不等于本地可用资源。";
+  return <Tag tone={tone} title={title}>{mediaLabels[media.state]}</Tag>;
+}
 function SyncTag({ item, openSync }: { item: api.Publication; openSync: (requestRef: string) => void }) {
   const { sync } = item;
+  const requestRef = sync.requestRef;
   const tone = sync.state === "material_projected" ? "success" : ["receipt_lost_authority", "no_qualified_result", "stopped"].includes(sync.state) ? "warning" : undefined;
-  if (!sync.requestRef) return <Tag title="尚未为这条发布提交同步命令">{syncLabels[sync.state]}</Tag>;
-  return <button type="button" className={c("ops-sync-status")} onClick={() => openSync(sync.requestRef)} title="打开这次同步的真实执行状态">
+  if (!requestRef) return <Tag title="尚未为这条发布提交同步命令">{syncLabels[sync.state]}</Tag>;
+  return <button type="button" className={c("ops-sync-status")} onClick={() => openSync(requestRef)} title="打开这次同步的真实执行状态">
     <Tag tone={tone}>{syncLabels[sync.state]}</Tag>
   </button>;
 }

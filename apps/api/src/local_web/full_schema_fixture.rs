@@ -267,11 +267,15 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0156_ops_exact_publication_detail_session.sql"),
     "\n",
-    include_str!("../../../../database/migrations/0157_ops_publication_execution_input_eligibility.sql"),
+    include_str!(
+        "../../../../database/migrations/0157_ops_publication_execution_input_eligibility.sql"
+    ),
     "\n",
     include_str!("../../../../database/migrations/0158_ops_publication_material_projection.sql"),
     "\n",
     include_str!("../../../../database/migrations/0159_ops_publication_field_adoption.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0160_ops_publication_media_projection.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -371,4 +375,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0157_ops_publication_execution_input_eligibility','d8507a2380c2fd0664f097384a963f0da8a9b479ea9c7b6eecbd38a0346823fe');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0158_ops_publication_material_projection','a9c653b1b8299a5444508bff312b428b070bc19f4ad126e6db33582013f5a53e');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0159_ops_publication_field_adoption','7a129d08af79844dfa7e7ac81ff84f6c39af8c7e1d5c088d7798452dd295ed24');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0160_ops_publication_media_projection','7096a4392d468fb8e848db0b3954b318a2ca04a3876c26eb9c18cb87a6c02c61');\n",
 );

@@ -565,7 +565,9 @@ async fn grant_detail_page_session_inner(
     .bind(installation_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((lease_ref, work_order_ref, content_public_ref, ops_publication_ref, task_spec)) = claimed else {
+    let Some((lease_ref, work_order_ref, content_public_ref, ops_publication_ref, task_spec)) =
+        claimed
+    else {
         return Err(DetailPageSessionGrantError::ClaimNotHeld);
     };
     let Some(plan) = page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?
@@ -2495,9 +2497,12 @@ const CANDIDATE_SQL: &str = concat!(
                     EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
                             WHERE scope.work_order_ref=work_order.work_order_ref \
                               AND scope.reply_expand_limit>0), \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref \
-                              AND scope.acquire_media), \
+                    (EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                             WHERE scope.work_order_ref=work_order.work_order_ref \
+                               AND scope.acquire_media) \
+                     OR EXISTS (SELECT 1 FROM collection_work_order_ops_publication_target scope \
+                                WHERE scope.work_order_ref=work_order.work_order_ref \
+                                  AND scope.acquire_media)), \
                     work_order.estimated_work_units, \
                     COALESCE(work_order.dispatch_group_key, \
                              concat('work:',work_order.work_order_ref::text)) \

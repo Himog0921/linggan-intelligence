@@ -4,6 +4,13 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
 };
+use linggan_contracts::{parse_producer_attempt, parse_producer_submission};
+use linggan_evidence::{
+    AccountEligibilityObservation, DispatchDecision, activate_installation_credential,
+    admit_media_blob, bind_observation_account, decide_dispatch, report_account_eligibility,
+    rotate_installation_credential, set_station_accepting, start_producer_attempt,
+    submit_producer_package,
+};
 use linggan_intelligence::ops_ledger::{
     apply_ops_import, preview_ops_import,
     read::{
@@ -11,13 +18,6 @@ use linggan_intelligence::ops_ledger::{
         read_ops_businesses, read_ops_daily, read_ops_overview, read_ops_overview_trend,
         read_ops_publications, read_ops_summary,
     },
-};
-use linggan_contracts::{parse_producer_attempt, parse_producer_submission};
-use linggan_evidence::{
-    AccountEligibilityObservation, DispatchDecision, activate_installation_credential,
-    bind_observation_account, decide_dispatch, report_account_eligibility,
-    rotate_installation_credential, set_station_accepting, start_producer_attempt,
-    submit_producer_package,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -92,13 +92,32 @@ async fn member_deactivation_revokes_sessions_and_leaves_current_accounts_pendin
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("ops_member_stop_{}", Uuid::new_v4().simple());
     let database = linggan_storage_postgres::testing::isolated_proof_schema(
-        &url, &schema, full_schema_fixture::FULL_MIGRATIONS,
-    ).await.unwrap();
-    let admin = member(database.pool(), "stop-admin@example.test", "停用管理员", "admin").await;
-    let departing = member(database.pool(), "stop-member@example.test", "离职运营", "operator").await;
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let admin = member(
+        database.pool(),
+        "stop-admin@example.test",
+        "停用管理员",
+        "admin",
+    )
+    .await;
+    let departing = member(
+        database.pool(),
+        "stop-member@example.test",
+        "离职运营",
+        "operator",
+    )
+    .await;
     let domain = Uuid::new_v4();
     sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES($1,'停用合成业务')")
-        .bind(domain).execute(database.pool()).await.unwrap();
+        .bind(domain)
+        .execute(database.pool())
+        .await
+        .unwrap();
     let app = app_with_database(database.clone());
     let admin_cookie = session(database.pool(), admin).await;
     let departing_cookie = session(database.pool(), departing).await;
@@ -107,10 +126,20 @@ async fn member_deactivation_revokes_sessions_and_leaves_current_accounts_pendin
         "profileUrl":"https://example.test/xhs/stop","platformUserId":"0123456789abcdef01234567","deviceCode":null,"followerCount":null,"ipLocation":null,"notes":null
     })).await;
     assert_eq!(status, StatusCode::CREATED);
-    let account_ref: Uuid = account["receipt"]["recordRef"].as_str().unwrap().parse().unwrap();
+    let account_ref: Uuid = account["receipt"]["recordRef"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
     let request_id = Uuid::new_v4();
     let body = json!({"requestId":request_id,"expectedVersion":1,"reason":"合成离职停用"});
-    let (status, stopped) = post(app.clone(), &format!("/api/local/auth/members/{departing}/deactivate"), Some(&admin_cookie), body.clone()).await;
+    let (status, stopped) = post(
+        app.clone(),
+        &format!("/api/local/auth/members/{departing}/deactivate"),
+        Some(&admin_cookie),
+        body.clone(),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(stopped["outcome"], "accepted");
     assert_eq!(stopped["unassignedAccountCount"], 1);
@@ -124,9 +153,20 @@ async fn member_deactivation_revokes_sessions_and_leaves_current_accounts_pendin
     let changes: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ops_account_responsibility_change WHERE account_ref=$1 AND previous_member_ref=$2 AND next_member_ref IS NULL")
         .bind(account_ref).bind(departing).fetch_one(database.pool()).await.unwrap();
     assert_eq!(changes, 1);
-    let (status, _) = get(app.clone(), "/api/local/ops/members", Some(&departing_cookie)).await;
+    let (status, _) = get(
+        app.clone(),
+        "/api/local/ops/members",
+        Some(&departing_cookie),
+    )
+    .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, replay) = post(app, &format!("/api/local/auth/members/{departing}/deactivate"), Some(&admin_cookie), body).await;
+    let (status, replay) = post(
+        app,
+        &format!("/api/local/auth/members/{departing}/deactivate"),
+        Some(&admin_cookie),
+        body,
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(replay["replayed"], true);
 }
@@ -566,7 +606,9 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     .unwrap();
     assert!(
         imported_item.title.as_deref()
-            == (imported_current.0 == "adopted").then_some(imported_current.1.as_deref()).flatten(),
+            == (imported_current.0 == "adopted")
+                .then_some(imported_current.1.as_deref())
+                .flatten(),
         "the list reads the imported baseline from field adoption, without falling back to the registration row",
     );
     assert!(publications.items.iter().any(|item| {
@@ -1069,7 +1111,7 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM collection_work_order_ops_publication_target \
              WHERE work_order_ref=$1 AND publication_ref=$2 AND publication_version=1 \
-               AND content_external_id=$3 AND author_external_id=$4"
+               AND content_external_id=$3 AND author_external_id=$4 AND acquire_media"
         )
         .bind(work_order_ref)
         .bind(publication_ref)
@@ -1136,7 +1178,7 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
         "INSERT INTO plugin_installation \
          (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) \
          VALUES($1,$2,$3,'person',scope_001_now(),'0.8.61', \
-                '[\"content_detail\",\"xhs.pageAccess\"]'::jsonb)",
+                '[\"content_detail\",\"media_slots\",\"xhs.pageAccess\"]'::jsonb)",
     )
     .bind(installation_ref)
     .bind(installation_ref.to_string())
@@ -1181,7 +1223,10 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     let dispatch = decide_dispatch(&database, &installation_ref.to_string(), &credential)
         .await
         .unwrap();
-    let DispatchDecision::Dispatch { task_id, task_spec, .. } = dispatch else {
+    let DispatchDecision::Dispatch {
+        task_id, task_spec, ..
+    } = dispatch
+    else {
         panic!("the exact Ops work must dispatch through the shared live-claim path: {dispatch:?}");
     };
     assert_eq!(task_spec["source"], "scheduled");
@@ -1220,8 +1265,15 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
         .to_string(),
     )
     .unwrap();
-    let outcome = submit_producer_package(&database, &submission).await.unwrap();
-    let linggan_evidence::RuntimeSubmissionOutcome::Acknowledged { receipt_ref, execution_effect, .. } = outcome else {
+    let outcome = submit_producer_package(&database, &submission)
+        .await
+        .unwrap();
+    let linggan_evidence::RuntimeSubmissionOutcome::Acknowledged {
+        receipt_ref,
+        execution_effect,
+        ..
+    } = outcome
+    else {
         panic!("a first valid package must receive an acknowledgement");
     };
     assert_eq!(execution_effect, "COMPLETED_LIVE_STEP");
@@ -1251,12 +1303,22 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     assert_eq!(
         adopted,
         vec![
-            ("body".into(), "adopted".into(), Some("隔离运营回填正文".into()), None),
+            (
+                "body".into(),
+                "adopted".into(),
+                Some("隔离运营回填正文".into()),
+                None
+            ),
             ("collect_count".into(), "adopted".into(), None, Some(9)),
             ("comment_count".into(), "adopted".into(), None, Some(6)),
             ("like_count".into(), "adopted".into(), None, Some(71)),
             ("published_at".into(), "not_provided".into(), None, None),
-            ("title".into(), "adopted".into(), Some("隔离运营回填标题".into()), None),
+            (
+                "title".into(),
+                "adopted".into(),
+                Some("隔离运营回填标题".into()),
+                None
+            ),
         ],
         "the Receipt leaves a field-level provenance trail; missing evidence is not a zero",
     );
@@ -1269,7 +1331,10 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(untouched, (None, None, None, None, None, None, None, account_ref, owner));
+    assert_eq!(
+        untouched,
+        (None, None, None, None, None, None, None, account_ref, owner)
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM linggan_material_domain_usage WHERE content_public_ref=$1",
@@ -1281,6 +1346,110 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
         0,
         "Ops projection adds an explicit own-use link without rewriting domain usage"
     );
+    let media_dispatch = decide_dispatch(&database, &installation_ref.to_string(), &credential)
+        .await
+        .unwrap();
+    let DispatchDecision::Dispatch {
+        task_id: media_task_id,
+        task_spec: media_task_spec,
+        ..
+    } = media_dispatch
+    else {
+        panic!(
+            "the exact Ops work must continue through its approved media slot task: {media_dispatch:?}"
+        );
+    };
+    assert_eq!(media_task_spec["capabilitiesRequested"][0], "media_slots");
+    assert_eq!(media_task_spec["target"]["contentExternalId"], note);
+    let media_attempt_id = Uuid::new_v4();
+    let media_attempt = parse_producer_attempt(
+        &json!({
+            "contractVersion":"linggan.producer.attempt.v1", "taskId":media_task_id,
+            "attemptId":media_attempt_id, "producerInstanceId":installation_ref
+        })
+        .to_string(),
+    )
+    .unwrap();
+    start_producer_attempt(&database, &media_attempt)
+        .await
+        .unwrap();
+    let media_package_ref = Uuid::new_v4();
+    let observation_ref = Uuid::new_v4();
+    let media_submission = parse_producer_submission(
+        &json!({
+            "contractVersion":"linggan.producer.capture-package.v1", "taskId":media_task_id,
+            "attemptId":media_attempt_id, "producerInstanceId":installation_ref,
+            "submissionId":Uuid::new_v4(),
+            "capturePackage":{
+                "contractVersion":"linggan.producer.capture-package.v1", "packageRef":media_package_ref,
+                "packageKind":"media_slots", "platform":"xhs",
+                "observedAt":"2026-10-23T08:01:00Z", "capturedAt":"2026-10-23T08:01:01Z",
+                "coverage":{"target":{"basis":"known_set","contentExternalId":note},"layers":[{
+                    "capability":"media_slots","observed":1,"attempted":1,"acquired":0,
+                    "verified":0,"failed":0,"notAttempted":0,"unknown":0,
+                    "stoppedReason":"media_acquisition_not_started"
+                }]},
+                "records":[{"kind":"media_slot","slotKey":format!("xhs:{note}:cover:1"),
+                    "observationRef":observation_ref,"slot":{"role":"cover","ordinal":1},
+                    "observation":{"externalUri":"https://media.example/ops-sync-cover.jpg",
+                        "candidateUris":["https://media.example/ops-sync-cover.jpg"],"observedAt":"2026-10-23T08:01:00Z"},
+                    "sourceObject":{"platform":"xhs","type":"content","externalId":note}}]
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let media_outcome = submit_producer_package(&database, &media_submission)
+        .await
+        .unwrap();
+    let linggan_evidence::RuntimeSubmissionOutcome::Acknowledged {
+        receipt_ref: media_receipt_ref,
+        execution_effect: media_effect,
+        ..
+    } = media_outcome
+    else {
+        panic!("a valid media-slot package must receive an acknowledgement");
+    };
+    assert_eq!(media_effect, "COMPLETED_LIVE_STEP");
+    let media_projection: (Uuid, Uuid, Uuid, String) = sqlx::query_as(
+        "SELECT publication_ref,package_ref,observation_ref,slot_key \
+           FROM linggan_ops_publication_media_projection \
+          WHERE receipt_ref=$1 AND record_ordinal=0",
+    )
+    .bind(media_receipt_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        media_projection,
+        (
+            publication_ref,
+            media_package_ref,
+            observation_ref,
+            format!("xhs:{note}:cover:1")
+        )
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_media_acquisition_work WHERE observation_ref=$1"
+        )
+        .bind(observation_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1,
+        "an observed Ops slot is handed to the shared byte-acquisition lifecycle, not a parallel downloader"
+    );
+    admit_media_blob(
+        &database,
+        observation_ref,
+        &"a".repeat(64),
+        "image/jpeg",
+        12,
+        "blobs/ops-sync-cover.jpg",
+    )
+    .await
+    .unwrap();
     let (status, receipt) = get(
         app,
         &format!("/api/local/ops/publication-syncs/{accepted_request_ref}"),
@@ -1288,12 +1457,30 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(receipt["items"][0]["execution"]["state"], "material_projected");
-    assert_eq!(receipt["items"][0]["execution"]["taskId"], task_id.to_string());
-    assert_eq!(receipt["items"][0]["execution"]["attemptId"], attempt_id.to_string());
-    assert_eq!(receipt["items"][0]["execution"]["packageRef"], package_ref.to_string());
-    assert_eq!(receipt["items"][0]["execution"]["receiptRef"], receipt_ref.to_string());
-    assert_eq!(receipt["items"][0]["execution"]["materialRef"], projection.1.to_string());
+    assert_eq!(
+        receipt["items"][0]["execution"]["state"],
+        "material_projected"
+    );
+    assert_eq!(
+        receipt["items"][0]["execution"]["taskId"],
+        task_id.to_string()
+    );
+    assert_eq!(
+        receipt["items"][0]["execution"]["attemptId"],
+        attempt_id.to_string()
+    );
+    assert_eq!(
+        receipt["items"][0]["execution"]["packageRef"],
+        package_ref.to_string()
+    );
+    assert_eq!(
+        receipt["items"][0]["execution"]["receiptRef"],
+        receipt_ref.to_string()
+    );
+    assert_eq!(
+        receipt["items"][0]["execution"]["materialRef"],
+        projection.1.to_string()
+    );
     let persisted = read_ops_publications(
         &database,
         OpsBusiness::Domain(domain),
@@ -1314,7 +1501,15 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     assert_eq!(row.sync.state, "material_projected");
     assert_eq!(row.title.as_deref(), Some("隔离运营回填标题"));
     assert_eq!(row.body.as_deref(), Some("隔离运营回填正文"));
-    assert_eq!((row.likes, row.collects, row.comments), (Some(71), Some(9), Some(6)));
+    assert_eq!(
+        (row.likes, row.collects, row.comments),
+        (Some(71), Some(9), Some(6))
+    );
+    assert_eq!(row.media.state, "available");
+    assert_eq!(
+        (row.media.observed, row.media.available, row.media.failed),
+        (1, 1, 0)
+    );
 }
 
 fn publication_body(request_id: Uuid, account_ref: Uuid) -> Value {

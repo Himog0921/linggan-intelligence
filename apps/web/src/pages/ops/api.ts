@@ -105,6 +105,16 @@ function publication(r: R) {
       })(),
       state: syncState(sync, "state"),
     },
+    media: (() => {
+      const media = d.obj(r, "media");
+      return {
+        state: enumeration(media, "state", ["not_requested", "waiting_for_slots", "processing", "partial", "available", "failed", "unavailable"] as const),
+        observed: n(media, "observed"),
+        available: n(media, "available"),
+        failed: n(media, "failed"),
+        unavailable: n(media, "unavailable"),
+      };
+    })(),
     duplicates: d.list(r, "duplicates", (item) => ({
       businessDate: s(item, "businessDate"),
     })),

@@ -13,6 +13,7 @@ const decisionLabel: Record<api.PublicationSyncReceipt["items"][number]["decisio
   conflict: "当前记录冲突",
 };
 const executionLabel: Record<api.PublicationSyncReceipt["items"][number]["execution"]["state"], string> = {
+  not_requested: "尚未提交同步",
   not_submitted: "未进入采集链",
   queued: "等待分派",
   waiting_execution: "等待执行工位",

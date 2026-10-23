@@ -48,7 +48,7 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 `0152_ops_publication_execution_locator` 追加 `linggan_ops_publication_execution_locator`：每行都绑定发布、账号、XHS 作品/作者身份、原生发布版本、原始签名地址及其 SHA-256、提交人和验证状态，且数据库禁止更新或删除。同一发布与同一地址摘要不会产生第二条来源；新 token 是另一条输入事实，后续 resolver 必须按当前发布版本选择，不能回退到已经失效或属于另一作品的地址。
 
-`0155_ops_exact_publication_work_scope` 已新增 `collection_work_order_ops_publication_target`。它是一个 Work Order 的不可变、逐条精确发布范围：只绑定发布、发布版本、平台作品/作者身份与受保护 locator 的引用；它明确只允许详情页读取，评论、回复、媒体、OCR 与 ASR 均为零/false。表不能容纳 material、discovery finding、package 或原始签名 URL，也不为既有 Authorization 默认追加 `ops_publication_sync` 模板——没有这份显式授权的同步仍必须阻断。
+`0155_ops_exact_publication_work_scope` 已新增 `collection_work_order_ops_publication_target`。它是一个 Work Order 的不可变、逐条精确发布范围：只绑定发布、发布版本、平台作品/作者身份与受保护 locator 的引用；它不能容纳 material、discovery finding、package 或原始签名 URL，也不为既有 Authorization 默认追加 `ops_publication_sync` 模板——没有这份显式授权的同步仍必须阻断。0155 时代已形成的 scope 保持详情-only（评论、回复、媒体、OCR、ASR 均为零/false）；`0160_ops_publication_media_projection` 只让**新建**的精确 scope 追加同页 `media_slots`，仍保持评论、回复、OCR 与 ASR 为零。历史 scope 不会因升级被放宽。
 
 `0156_ops_exact_publication_detail_session` 使既有详情页会话在“material / 跨行业样本 / 精确运营发布”三种互斥来源中准确绑定一种。精确发布会话只在租约中的同一发布范围和同一 locator 仍可解析时授权；它不能借 material 的会话唯一键、也不能用相同作品 ID 匹配到别的 Work Order。
 
@@ -60,14 +60,16 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 `0159_ops_publication_field_adoption` 使登记导入、原生登记和合格 Receipt 都以追加式逐字段决定形成一个统一读取模型，而非修改注册行或在页面回退主表。导入基线有 import batch，原生明确填写的标题/正文有原生命令回执，Receipt 值有 package/record、对应 publication identity version 和观测时刻；每项均保存 `adopted`、`not_provided` 或 `conflict` disposition。当前列表按观测时刻读取身份版本仍匹配的最新决定；未知字段绝不补零，也不会回退旧主表字段。`published_at` 若为空记为 `not_provided`，若与原生登记的北京业务日冲突则保留 `conflict`，不会静默改变运营报表日期。该阶段不采用阅读量、CTR、日报、历史/当前责任人或业务字段，也不提供人工字段修订命令、冲突裁决或投影-only 重放。
 
+`0160_ops_publication_media_projection` 使已批准同页的 `media_slots` 仍沿既有 Task/Attempt/Package/Receipt 和统一媒体获取链运行：只有 scheduled 精确 scope、`COMPLETED_LIVE_STEP`、`ACCEPTED` Receipt、当前 publication identity version、正确平台/作品 Task target，以及 `accepted_for_media_identity` record 才会追加 `publication/version → request/work order → task/attempt → package/receipt/record → observation/slot` 关联。它既不保存远程 URL，也不另建下载器。列表状态只从该关联再读取统一媒体链：`waiting_for_slots`、`processing`、`partial`、`available`、`failed`、`unavailable` 与 `not_requested` 分开表达；`available` 只在未被处置的本地 materialization 已验证时成立，已处置资源显示为 `unavailable` 而非伪装成处理中。下载失败或处置不会删除历史 observation，也不会清除已经可读的字段或历史封面。
+
 对于 `accepted` / `existing`，数据库约束要求同时具备发布/账号/业务/平台/作品/作者/版本/locator 指纹以及 existing-chain 的 Request/WorkOrder 引用。其他决定禁止携带这两个执行引用。因此无法发生“工单已建但运营关联未保存”的表面成功，也不能把 internal `publication_ref` 塞进平台内容 ID。
 
 ## 4. 已接入与未完成边界
 
-同步 API 现会在同一数据库事务内，对具备 XHS 冻结身份与 locator 的条目调用精确发布准入：它创建或复用仅作控制身份的 creator Target（不等于发现、归档或 Material），冻结发布所属 active Domain 的 primary/reference 关系，写入 `Acquisition Request → Admission → WorkOrder → collection_work_order_ops_publication_target`，再写回同步条目的两个 existing-chain 引用。唯一可接受的授权必须明确包含 `ops_publication_sync` 模板、`batch` lane、至少一篇作品和一个工作单元；旧授权不会被自动扩大。精确 scope 固定一篇、零评论/回复/媒体/OCR/ASR，WorkOrder 的 `max_works=1`，且 lease 发放会再次检查这份精确授权仍有效。
+同步 API 现会在同一数据库事务内，对具备 XHS 冻结身份与 locator 的条目调用精确发布准入：它创建或复用仅作控制身份的 creator Target（不等于发现、归档或 Material），冻结发布所属 active Domain 的 primary/reference 关系，写入 `Acquisition Request → Admission → WorkOrder → collection_work_order_ops_publication_target`，再写回同步条目的两个 existing-chain 引用。唯一可接受的授权必须明确包含 `ops_publication_sync` 模板、`batch` lane、至少一篇作品和一个工作单元；旧授权不会被自动扩大。新 scope 固定一篇详情与同页 `media_slots`，但评论/回复/OCR/ASR 均为零；WorkOrder 的 `max_works=1`，且 lease 发放会再次检查这份精确授权仍有效。
 
-`0155–0159` 及租约/派发/详情会话/缺输入停止读取面现在可在隔离 PostgreSQL 中走通一条合成的 XHS 控制链：精确 scope 被合格安装领取，真实调度代码生成 scheduled task，合格 `content_detail` 的 Attempt/Package/Receipt 创建或复用 Material、追加发布—Material 投影，并以同一 Receipt 追加字段采用决定和当前列表读投影。此证明不访问平台，也不能证明真实 XHS 内容、浏览器插件、生产迁移、部署或业务验收。抖音仍没有受控 locator、身份、能力与回填闭环。
+`0155–0160` 及租约/派发/详情会话/缺输入停止读取面现在可在隔离 PostgreSQL 中走通一条合成的 XHS 控制链：精确 scope 被合格安装领取，真实调度代码依序生成 scheduled `content_detail` 与 `media_slots` task；合格详情 Receipt 创建或复用 Material、追加发布—Material 投影和字段采用决定，合格媒体 Receipt 追加发布—observation/slot 投影，随后只有统一媒体链的本地物化才能将列表状态升为 `available`。此证明不访问平台，也不能证明真实 XHS 内容、浏览器插件、生产迁移、部署或业务验收。抖音仍没有受控 locator、身份、能力与回填闭环。
 
-运营“发布记录”页面现在可从“同步数据”打开一个仅列出当前页记录的显式选择框：未选择时不能提交，提交后逐条显示原始决定与当前 `execution`，并可按原 `requestRef` 刷新读取。列表读取还会为每条发布返回其**最近一次**持久化同步条目的 `requestRef`、原始 `decision` 和共享链实时状态；关闭对话框、刷新页面或重新进入后仍可从该 `requestRef` 重开同一回执，绝不把浏览器瞬态提示当作任务状态。最近一次命令的状态不替代 Material 当前字段、媒体或人工采用状态；它不自动发现、不提交未选记录，也不把 `material_projected` 写成“同步完成”。详情字段的 receipt-qualified 当前采用值已进入列表读取，但页面尚未提供人工采用/冲突处理，也没有媒体采用状态。页面交互已由前端测试覆盖，但并非真实平台、插件、生产迁移、部署或业务验收。
+运营“发布记录”页面现在可从“同步数据”打开一个仅列出当前页记录的显式选择框：未选择时不能提交，提交后逐条显示原始决定与当前 `execution`，并可按原 `requestRef` 刷新读取。列表读取还会为每条发布返回其**最近一次**持久化同步条目的 `requestRef`、原始 `decision` 和共享链实时状态；关闭对话框、刷新页面或重新进入后仍可从该 `requestRef` 重开同一回执，绝不把浏览器瞬态提示当作任务状态。列表与详情另行显示媒体状态及已观察/本地可用/失败数量，且不把历史导入封面、远程 URI 或 `material_projected` 当作“媒体已可用”。当前未提供媒体重试命令、人工字段采用/冲突处理或投影-only 重放；页面交互已由前端测试覆盖，但并非真实平台、插件、生产迁移、部署或业务验收。
 
-后续工作仍是人工字段采用与冲突处理、媒体状态和受控“只重放投影”动作，并完成两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。
+后续工作仍是媒体失败后的受控重试入口、人工字段采用与冲突处理、受控“只重放投影”动作，并完成两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。

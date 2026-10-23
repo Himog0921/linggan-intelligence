@@ -485,7 +485,11 @@ pub async fn request_and_admit_exact_ops_publication_in_transaction(
         )
         .bind(domain_ref)
         .bind(target_ref)
-        .bind(if has_other_primary { "reference" } else { "primary" })
+        .bind(if has_other_primary {
+            "reference"
+        } else {
+            "primary"
+        })
         .execute(&mut **transaction)
         .await?;
     }
@@ -674,8 +678,8 @@ pub async fn request_and_admit_exact_ops_publication_in_transaction(
             .await?;
             sqlx::query(
                 "INSERT INTO collection_work_order_ops_publication_target \
-                     (work_order_ref,publication_ref,publication_version,locator_ref,content_external_id,author_external_id,ordinal) \
-                 VALUES($1,$2,$3,$4,$5,$6,1)",
+                     (work_order_ref,publication_ref,publication_version,locator_ref,content_external_id,author_external_id,ordinal,acquire_media) \
+                 VALUES($1,$2,$3,$4,$5,$6,1,true)",
             )
             .bind(work_order_ref)
             .bind(target.publication_ref)
@@ -689,7 +693,9 @@ pub async fn request_and_admit_exact_ops_publication_in_transaction(
         }
         AdmissionOutcome::Merge { .. } => {
             let work_order_ref = merge_work_order_ref.ok_or_else(|| {
-                sqlx::Error::Protocol("merge outcome has no exact Ops publication Work Order".to_owned())
+                sqlx::Error::Protocol(
+                    "merge outcome has no exact Ops publication Work Order".to_owned(),
+                )
             })?;
             sqlx::query(
                 "INSERT INTO collection_work_order_domain_usage \

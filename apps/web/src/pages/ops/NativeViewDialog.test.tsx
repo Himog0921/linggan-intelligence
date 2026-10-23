@@ -10,7 +10,7 @@ const publication = {
   ref: "publication", source: "native" as const, businessDate: "2026-10-20", dateState: "as_recorded" as const,
   platform: "xhs" as const, title: "测试发布", body: null, url: "https://example.test/post", account: null, publisher: null,
   views: { state: "pending" as const, value: null, overdue: false, hit: false }, likes: null, collects: null, comments: null,
-  coverClickRate: null, systemCheck: "not_checked" as const, sync: { requestRef: null, decision: null, state: "not_requested" as const }, duplicates: [], cover: { available: false },
+  coverClickRate: null, systemCheck: "not_checked" as const, sync: { requestRef: null, decision: null, state: "not_requested" as const }, media: { state: "not_requested" as const, observed: 0, available: 0, failed: 0, unavailable: 0 }, duplicates: [], cover: { available: false },
 };
 
 it("records an explicit zero as a value rather than clearing the reading", async () => {

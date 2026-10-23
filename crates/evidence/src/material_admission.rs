@@ -561,8 +561,7 @@ async fn insert_content_records(
         let content_public_ref = match content_public_ref {
             Some(content_public_ref) => content_public_ref,
             None => {
-                let material_content_ref =
-                    ensure_content(tx, package, expected_content_id).await?;
+                let material_content_ref = ensure_content(tx, package, expected_content_id).await?;
                 content_public_ref = Some(material_content_ref);
                 material_content_ref
             }
@@ -570,15 +569,7 @@ async fn insert_content_records(
         insert_content_detail(tx, package, ordinal, detail, content_public_ref).await?;
         retained += 1;
     }
-    insert_lane_observation(
-        tx,
-        package,
-        "detail",
-        content_public_ref,
-        None,
-        retained,
-    )
-    .await
+    insert_lane_observation(tx, package, "detail", content_public_ref, None, retained).await
 }
 
 /// Persist the narrow Ops-publication to Material link after a Receipt exists.
@@ -592,6 +583,9 @@ pub(crate) async fn project_exact_ops_publication_after_receipt(
     package: &ProducerCapturePackage,
     receipt_ref: Uuid,
 ) -> Result<(), ProducerRuntimeError> {
+    if package.package_kind() == "media_slots" {
+        return project_exact_ops_publication_media_after_receipt(tx, package, receipt_ref).await;
+    }
     let schema_ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('linggan_ops_publication_material_projection') IS NOT NULL",
     )
@@ -689,6 +683,107 @@ pub(crate) async fn project_exact_ops_publication_after_receipt(
             )
             .await?;
         }
+    }
+    Ok(())
+}
+
+/// Bind only qualified exact-scope media observations to an Operations publication.
+///
+/// A slot observation merely establishes that the page exposed a candidate.  Byte acquisition,
+/// verification, withdrawal and local delivery remain facts in the shared media lifecycle; the
+/// Operations reader derives its availability state from those facts instead of treating an
+/// external URI as a usable asset.
+async fn project_exact_ops_publication_media_after_receipt(
+    tx: &mut Transaction<'_, Postgres>,
+    package: &ProducerCapturePackage,
+    receipt_ref: Uuid,
+) -> Result<(), ProducerRuntimeError> {
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_ops_publication_media_projection') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if !schema_ready {
+        return Ok(());
+    }
+    let rows: Vec<(Uuid, i64, Uuid, Uuid, Uuid, Uuid, i32, Uuid, String, String)> =
+        sqlx::query_as(
+            "SELECT scope.publication_ref,scope.publication_version,request.request_ref, \
+                    lease.work_order_ref,package.task_id,package.attempt_id,disposition.record_ordinal, \
+                    origin.observation_ref,origin.slot_key,package.observed_at \
+               FROM linggan_runtime_submission_receipt receipt \
+               JOIN linggan_runtime_capture_package package ON package.package_ref=receipt.package_ref \
+               JOIN linggan_runtime_task task ON task.task_id=package.task_id \
+               JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+               JOIN collection_work_order_lease lease ON lease.lease_ref=lease_task.lease_ref \
+               JOIN collection_work_order work_order ON work_order.work_order_ref=lease.work_order_ref \
+               JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
+               JOIN collection_acquisition_request request ON request.request_ref=decision.request_ref \
+               JOIN collection_work_order_ops_publication_target scope \
+                 ON scope.work_order_ref=work_order.work_order_ref AND scope.acquire_media \
+               JOIN linggan_ops_publication publication ON publication.publication_ref=scope.publication_ref \
+               JOIN linggan_runtime_record_disposition disposition \
+                 ON disposition.package_ref=package.package_ref \
+                AND disposition.disposition='accepted_for_media_identity' \
+                AND disposition.reason NOT LIKE '%__beyond_task_maximum_quota' \
+               JOIN linggan_material_media_origin origin \
+                 ON origin.package_ref=package.package_ref \
+                AND origin.record_ordinal=disposition.record_ordinal \
+               JOIN linggan_material_content content ON content.public_ref=origin.content_public_ref \
+              WHERE receipt.receipt_ref=$1 \
+                AND receipt.material_admission='ACCEPTED' \
+                AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+                AND package.package_kind='media_slots' \
+                AND task.source='scheduled' \
+                AND task.platform=publication.platform \
+                AND publication.native_version=scope.publication_version \
+                AND task.task_spec->'capabilitiesRequested'->>0='media_slots' \
+                AND task.task_spec->'target'->>'contentExternalId'=scope.content_external_id \
+                AND package.coverage->'target'->>'contentExternalId'=scope.content_external_id \
+                AND content.platform=package.platform \
+                AND content.content_external_id=scope.content_external_id",
+        )
+        .bind(receipt_ref)
+        .fetch_all(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    for (
+        publication_ref,
+        publication_version,
+        request_ref,
+        work_order_ref,
+        task_id,
+        attempt_id,
+        record_ordinal,
+        observation_ref,
+        slot_key,
+        observed_at,
+    ) in rows
+    {
+        sqlx::query(
+            "INSERT INTO linggan_ops_publication_media_projection \
+             (media_projection_ref,publication_ref,publication_version,request_ref,work_order_ref, \
+              task_id,attempt_id,package_ref,receipt_ref,record_ordinal,observation_ref,slot_key,observed_at) \
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
+             ON CONFLICT (package_ref,record_ordinal) DO NOTHING",
+        )
+        .bind(Uuid::new_v4())
+        .bind(publication_ref)
+        .bind(publication_version)
+        .bind(request_ref)
+        .bind(work_order_ref)
+        .bind(task_id)
+        .bind(attempt_id)
+        .bind(package.package_ref())
+        .bind(receipt_ref)
+        .bind(record_ordinal)
+        .bind(observation_ref)
+        .bind(slot_key)
+        .bind(observed_at)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     }
     Ok(())
 }
@@ -967,7 +1062,8 @@ async fn insert_content_detail(
         .bind(published.reference_observed_at).bind(published.parser_version)
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     crate::material_hashtag::project(tx, material_ref, detail.payload)
-        .await.map_err(ProducerRuntimeError::Internal)?;
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
 

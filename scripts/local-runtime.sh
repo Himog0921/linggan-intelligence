@@ -478,6 +478,7 @@ migrate() {
   apply_migration_once "0157_ops_publication_execution_input_eligibility" "$project_root/database/migrations/0157_ops_publication_execution_input_eligibility.sql"
   apply_migration_once "0158_ops_publication_material_projection" "$project_root/database/migrations/0158_ops_publication_material_projection.sql"
   apply_migration_once "0159_ops_publication_field_adoption" "$project_root/database/migrations/0159_ops_publication_field_adoption.sql"
+  apply_migration_once "0160_ops_publication_media_projection" "$project_root/database/migrations/0160_ops_publication_media_projection.sql"
 }
 
 case "$command_name" in
