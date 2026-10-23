@@ -25,6 +25,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/auth/login", post(login))
         .route("/api/local/auth/session", get(session))
         .route("/api/local/auth/logout", post(logout))
+        .route("/api/local/auth/members", get(list_members))
         .route("/api/local/auth/password/change", post(change_password))
         .route(
             "/api/local/auth/members/{member_ref}/deactivate",
@@ -74,6 +75,18 @@ struct DeactivateMemberRequest {
     request_id: Uuid,
     expected_version: i64,
     reason: String,
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TeamMemberView {
+    member_ref: Uuid,
+    email: String,
+    display_name: String,
+    role: String,
+    state: String,
+    version: i64,
+    current_account_count: i64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -129,6 +142,42 @@ async fn session(State(state): State<LocalWebState>, headers: HeaderMap) -> Resp
     match current_member(&state, &headers).await {
         Ok(member) => Json(member_json(&member)).into_response(),
         Err(response) => response,
+    }
+}
+
+/// A management roster is deliberately separate from the active-member selector used by account
+/// handover. It includes disabled/invited identities and versions, but never credential material.
+async fn list_members(State(state): State<LocalWebState>, headers: HeaderMap) -> Response {
+    let actor = match current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    if actor.role != "admin" {
+        return request_error(StatusCode::FORBIDDEN, "ops_auth_forbidden");
+    }
+    let Some(database) = state.database.database() else {
+        return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable");
+    };
+    let members: Result<Vec<(Uuid, String, String, String, String, i64, i64)>, sqlx::Error> = sqlx::query_as(
+        "SELECT member.member_ref,member.email_normalized AS email,member.display_name,member.role,member.state,member.version, \
+                count(account.account_ref)::bigint AS current_account_count \
+         FROM linggan_ops_member AS member \
+         LEFT JOIN linggan_ops_account AS account ON account.current_responsible_member_ref=member.member_ref \
+         GROUP BY member.member_ref,member.email_normalized,member.display_name,member.role,member.state,member.version \
+         ORDER BY CASE member.state WHEN 'active' THEN 0 WHEN 'invited' THEN 1 ELSE 2 END,member.display_name,member.member_ref",
+    )
+    .fetch_all(database.pool())
+    .await;
+    match members {
+        Ok(members) => {
+            let members = members.into_iter().map(|(member_ref, email, display_name, role, state, version, current_account_count)| TeamMemberView {
+                member_ref, email, display_name, role, state, version, current_account_count,
+            }).collect::<Vec<_>>();
+            let mut response = Json(json!({"members":members})).into_response();
+            secure_headers(&mut response);
+            response
+        }
+        Err(_) => auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable"),
     }
 }
 

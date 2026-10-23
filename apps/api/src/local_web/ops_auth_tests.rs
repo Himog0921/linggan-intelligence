@@ -126,6 +126,55 @@ async fn login_session_logout_and_disabled_member_do_not_leak_credentials() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn administrator_roster_exposes_lifecycle_and_current_responsibility_without_credentials() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_auth_roster_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let admin = active_member(database.pool(), "admin@example.test", "admin").await;
+    let operator = active_member(database.pool(), "operator@example.test", "operator").await;
+    let app = app_with_database(database.clone());
+    let operator_cookie = stored_session(
+        database.pool(), operator, "roster_operator_session", "0 seconds", "1 hour",
+    ).await;
+    assert_eq!(
+        app.clone()
+            .oneshot(session_request("/api/local/auth/members", &operator_cookie, "GET"))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN,
+        "the active roster selector is not a management roster"
+    );
+    let admin_cookie = stored_session(
+        database.pool(), admin, "roster_admin_session", "0 seconds", "1 hour",
+    ).await;
+    let (status, roster) = json_response(
+        app.oneshot(session_request("/api/local/auth/members", &admin_cookie, "GET"))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let members = roster["members"].as_array().unwrap();
+    assert_eq!(members.len(), 2);
+    let operator = members
+        .iter()
+        .find(|member| member["email"] == "operator@example.test")
+        .unwrap();
+    assert_eq!(operator["state"], "active");
+    assert_eq!(operator["version"], 1);
+    assert_eq!(operator["currentAccountCount"], 0);
+    assert!(operator.get("passwordHash").is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
 async fn ops_ledger_routes_require_an_active_team_session_without_claiming_the_creation_workspace()
 {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
