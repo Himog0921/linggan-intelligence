@@ -57,7 +57,18 @@ pub fn fingerprint(materials:&[DossierView])->String {
         d.fragments.iter().map(|f|json!([f.citation_id,f.source_ref,f.source_version,f.start,f.end])).collect::<Vec<_>>()])).collect::<Vec<_>>()).to_string())
 }
 
+/// Content-level comparisons belong to one stable creator identity. A keyword result
+/// may contain many authors; the caller cannot elevate it to a same-author judgment.
+async fn require_creator(db:&Database,target:Uuid)->Result<(),FoundationError>{
+    let ok:bool=sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM collection_observation_target \
+         WHERE target_ref=$1 AND target_kind='creator')",
+    ).bind(target).fetch_one(db.pool()).await?;
+    if ok{Ok(())}else{Err(FoundationError::Invalid)}
+}
+
 pub async fn preview(db:&Database,scope:&Scope,works:&[Uuid])->Result<Preview,FoundationError>{
+    require_creator(db,scope.target_ref).await?;
     let materials=inspection::comparison_materials(db,scope,works).await.map_err(map_source_error)?;
     let cutoff=materials.first().ok_or(FoundationError::Invalid)?.knowledge_cutoff.clone();
     let mut tx=db.pool().begin().await?;
@@ -80,6 +91,7 @@ pub async fn preview(db:&Database,scope:&Scope,works:&[Uuid])->Result<Preview,Fo
 }
 
 pub async fn start(db:&Database,request:&StartComparison)->Result<ComparisonReceipt,FoundationError>{
+    require_creator(db,request.target_ref).await?;
     let scope=Scope{target_ref:request.target_ref,domain_ref:request.domain_ref,knowledge_cutoff:Some(request.knowledge_cutoff.clone())};
     // The read owner validates the timestamp and object scope before any command write.
     inspection::comparison_materials(db,&scope,&request.work_refs).await.map_err(map_source_error)?;
