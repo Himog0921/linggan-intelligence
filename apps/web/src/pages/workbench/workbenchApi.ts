@@ -291,6 +291,13 @@ export function conflictReceipt(error: unknown) {
 }
 export class WorkbenchActionError extends Error {}
 
+export function isLegacyReferenceUnavailable(error: unknown): boolean {
+  return error instanceof ApiError &&
+    error.failure.kind === 'http' &&
+    error.failure.status === 409 &&
+    error.failure.code === 'creation_legacy_reference_unavailable';
+}
+
 /** Human feedback is separate from the preserved invocation diagnostics. */
 export function aiFailureText(code: string | null): string {
   const messages: Record<string, string> = {
