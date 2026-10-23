@@ -1450,6 +1450,18 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     )
     .await
     .unwrap();
+    let dry_run = linggan_evidence::replay_exact_ops_publication_projections(
+        &database,
+        accepted_request_ref,
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (dry_run.eligible_receipts, dry_run.replayed_receipts),
+        (2, 0),
+        "a projection replay dry-run never writes"
+    );
     let replay = linggan_evidence::replay_exact_ops_publication_projections(
         &database,
         accepted_request_ref,
