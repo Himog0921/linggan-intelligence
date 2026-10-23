@@ -431,6 +431,25 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
         "an explicitly entered native title is a source-bound current field, not a list fallback",
     );
 
+    let batch_good = publication_body(Uuid::new_v4(), account_ref);
+    let mut batch_bad = publication_body(Uuid::new_v4(), account_ref);
+    batch_bad["publishedOn"] = Value::String("2026-02-30".to_owned());
+    let (batch_status, batch) = post(
+        app.clone(),
+        "/api/local/ops/native/publications/batch",
+        Some(&owner_cookie),
+        json!({"publications": [batch_good, batch_bad]}),
+    )
+    .await;
+    assert_eq!(batch_status, StatusCode::OK);
+    assert_eq!(batch["items"][0]["status"], StatusCode::CREATED.as_u16());
+    assert_eq!(batch["items"][0]["receipt"]["outcome"], "accepted");
+    assert_eq!(batch["items"][1]["status"], StatusCode::UNPROCESSABLE_ENTITY.as_u16());
+    assert_eq!(
+        batch["items"][1]["receipt"]["code"],
+        "ops_native_publication_date_invalid"
+    );
+
     let mut invalid_publication = publication_body(Uuid::new_v4(), account_ref);
     invalid_publication["publishedOn"] = Value::String("2026-02-30".to_owned());
     let invalid_publication = post(
@@ -641,7 +660,7 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
             overview.native_facts.followers_gained,
             overview.native_facts.hits,
         ),
-        (true, Some("2026-10-20"), 1, Some(0), Some(0), 0),
+        (true, Some("2026-10-20"), 2, Some(0), Some(0), 0),
         "native current facts must stay visible without claiming historical coverage",
     );
     let trend =

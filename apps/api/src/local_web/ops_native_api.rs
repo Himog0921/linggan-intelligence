@@ -25,6 +25,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             axum::routing::post(create_publication),
         )
         .route(
+            "/api/local/ops/native/publications/batch",
+            axum::routing::post(create_publications_batch),
+        )
+        .route(
             "/api/local/ops/native/accounts/{account_ref}/responsibility",
             axum::routing::post(transfer_account_responsibility),
         )
@@ -71,6 +75,26 @@ struct CreatePublicationBody {
     published_on: Option<String>,
     title: Option<String>,
     body: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreatePublicationsBatchBody {
+    publications: Vec<CreatePublicationBody>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchPublicationReceipt {
+    ordinal: usize,
+    status: u16,
+    receipt: CommandReceipt,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchPublicationsReceipt {
+    items: Vec<BatchPublicationReceipt>,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -158,6 +182,43 @@ async fn create_publication(
         Ok((status, receipt)) => receipt_response(status, receipt),
         Err(error) => write_error(error),
     }
+}
+
+/// Each row keeps its own command identity and transaction, so a malformed or unauthorized
+/// row cannot roll back accepted siblings or make retrying the failed input duplicate them.
+async fn create_publications_batch(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Json(body): Json<CreatePublicationsBatchBody>,
+) -> Response {
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let Some(database) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
+    if body.publications.is_empty() || body.publications.len() > 100 {
+        return write_error(WriteError::Invalid("ops_native_batch_size_invalid"));
+    }
+    let mut items = Vec::with_capacity(body.publications.len());
+    for (index, publication) in body.publications.into_iter().enumerate() {
+        let request_ref = publication.request_id;
+        let (status, receipt) = match write_publication(database, member.clone(), publication).await {
+            Ok(result) => result,
+            Err(error) => match error {
+                WriteError::Invalid(code) => (
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                    CommandReceipt { request_ref, outcome: "rejected".to_owned(), code: code.to_owned(), record_ref: None, resulting_version: None, replayed: false },
+                ),
+                WriteError::Unavailable => return write_error(WriteError::Unavailable),
+            },
+        };
+        items.push(BatchPublicationReceipt { ordinal: index + 1, status: status.as_u16(), receipt });
+    }
+    let mut response = Json(BatchPublicationsReceipt { items }).into_response();
+    super::ops_auth::secure_headers(&mut response);
+    response
 }
 
 async fn transfer_account_responsibility(
