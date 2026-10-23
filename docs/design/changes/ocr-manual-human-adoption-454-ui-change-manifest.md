@@ -48,10 +48,10 @@
 
 | 层级 | 验收方法 | 实际结果 | 未证明边界 |
 |---|---|---|---|
-| 任务可用 | 合成 React/API/PG 单图采用与刷新读回 | 待执行 | 真实人工判断 |
-| 状态诚实 | 测试未采用、未知、冲突、受限和确认回执 | 待执行 | 生产数据 |
-| 视觉一致 | 既有 Section/Form/ActionButton 的组件测试及浏览器走查 | 待执行 | Mog 视觉验收 |
-| 真实后果 | owned PostgreSQL 检查 immutable command/review 和投影 | 待执行 | 共享库、部署、G4 |
+| 任务可用 | 合成 React/API/PG 单图采用与刷新读回 | VERIFIED（owned PostgreSQL + browser） | 真实人工判断 |
+| 状态诚实 | 测试未采用、未知、冲突、受限和确认回执 | VERIFIED（组件 + owned data chain） | 生产数据 |
+| 视觉一致 | 既有 Section/Form/ActionButton 的组件测试及浏览器走查 | VERIFIED（合成浏览器）；Mog 验收仍 NOT VERIFIED | Mog 视觉验收 |
+| 真实后果 | owned PostgreSQL 检查 immutable command/review 和投影 | VERIFIED（owned PostgreSQL）；共享库、部署、G4 仍 NOT VERIFIED | 共享库、部署、G4 |
 
 ## 6. 交接
 

@@ -24,6 +24,7 @@
 
 - [手动云端 OCR 的人工采用合同](data-contracts/ocr-manual-human-adoption.md)：#454 叠加候选；云端机器预览与人工采用的追加版本边界，不混入 OCR 抽检样本。
 - [手动云端 OCR 人工采用实施计划](plans/active/ocr-manual-human-adoption-454.md)：叠加 Draft PR #477 的受控写入口和合成验证范围；不写共享库、不部署。
+- [手动云端 OCR 人工采用发布运行手册](runbooks/ocr-manual-human-adoption-release-454.md)：#477→#479 合并后才可按精确 main 授权使用的备份、0145、3000 回读与回退条件；本身不授权发布。
 - [UI 变更清单](design/changes/ocr-manual-human-adoption-454-ui-change-manifest.md) / [验收记录](design/acceptance/ocr-manual-human-adoption-454-acceptance.md)：当前作品图组的人工核对表单、真实回执和未证明边界。
 
 
