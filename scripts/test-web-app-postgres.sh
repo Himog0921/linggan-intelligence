@@ -112,6 +112,10 @@ if [[ "${WEB_APP_PROOF_SCOPE:-all}" == ops-auth ]]; then
   run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::ops_auth_tests -- --ignored --nocapture --test-threads=1
   exit 0
 fi
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == ops-native ]]; then
+  run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::ops_native_model_tests -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == workbench ]]; then
   mkdir -p "$support_dir/creation-assets"
   run_proof "$proof_dir" env -u CW_BROWSER_REAL_SAMPLES -u CW_BROWSER_MANUAL_REVIEW LINGGAN_CREATION_ASSET_ROOT="$support_dir/creation-assets" CW_BROWSER_PROOF=1 CW_BROWSER_PROOF_DIR="$proof_dir" CW_BROWSER_PROOF_NODE="$node_bin" cargo test -p linggan-api --bins --locked content_workbench_real_chain_browser_proof -- --ignored --nocapture --test-threads=1

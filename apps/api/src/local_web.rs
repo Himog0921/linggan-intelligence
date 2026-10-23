@@ -76,6 +76,8 @@ mod ops_auth;
 #[cfg(test)]
 mod ops_auth_tests;
 #[cfg(test)]
+mod ops_native_model_tests;
+#[cfg(test)]
 mod ops_browser_tests;
 mod ops_export;
 mod ops_overview_api;

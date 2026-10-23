@@ -137,6 +137,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [design/pages/ops-page.md](design/pages/ops-page.md) | 权威当前；Issue #405，Mog 2026-10-13 确认，随 PR #407 上线（`main@9e45e01c`） | PAGE-OPS-001：一级页面「运营」的壳层与左侧二级页面，发布记录、账号管理、每日数据、导入导出的只读呈现、状态词典、与工作台的预期差异和验收矩阵 |
 | [design/pages/ops-overview-page.md](design/pages/ops-overview-page.md) | 权威当前；Issue #409，Mog 2026-10-13 确认，随 PR #415 已上线，业务验收待 Mog；Issue #417 三处小修随 #418 已上线，读屏跟进为候选 | PAGE-OPS-002：运营「总览」五块驾驶舱、周与月加微目标的设定与修改记录、每日数据执行状态的新口径、与工作台的差异和验收矩阵 |
 | [data-contracts/ops-ledger-001.md](data-contracts/ops-ledger-001.md) | 权威当前；随 PR #403 上线（`main@3029efff`） | 运营台账五张表的含义、内容工作台导出的导入规则 `ops-import.v1`（校验、重复登记合并、阅读量填报、消失记录标记、预览指纹）、新旧对账口径与 D2/D3 读取约定 |
+| [data-contracts/ops-native-write-001.md](data-contracts/ops-native-write-001.md) | 权威当前；OPS-LAUNCH-001 阶段 2 原生写入数据边界 | 原生账号、发布、手工阅读量和日报如何与历史迁入在同一账本共存；请求幂等、版本、空值和审计语义 |
 | [data-contracts/ops-http-001.md](data-contracts/ops-http-001.md) | 权威当前；D2/D3 随 PR #407/#415 上线；Issue #417 三处修复随 #418 已上线，读屏跟进为候选 | 运营读取与本机目标设定接口：业务选择、记录/账号/每日数据/导出/封面、总览覆盖与趋势未知、目标周期及回执 |
 | [design/acceptance/ops-page-001-visual-acceptance.md](design/acceptance/ops-page-001-visual-acceptance.md) | 一次性报告；已上线，Mog 业务验收待做 | ACC-OPS-PAGE-001：运营页面在共享库副本上的走查、四类数据边界、失败与快速切换、共享页头放下第 6 项及 13 处修正 |
 | [design/acceptance/ops-page-002-visual-acceptance.md](design/acceptance/ops-page-002-visual-acceptance.md) | 一次性报告；D3 已上线，业务验收待 Mog | ACC-OPS-PAGE-002：运营总览隔离走查、D3 上线回执与分层证明、Issue #417 合并后修复验证 |
