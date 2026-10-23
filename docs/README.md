@@ -11,6 +11,11 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-10-23 · 研究底稿 v2
+
+- [唯一底稿合同](data-contracts/research-dossier.md)：完整区块、显式当前、独立校正、精确引用与按需表示。
+- [实施与验收](plans/active/research-dossier-v2.md)：当前授权、表面/状态/依赖、测试矩阵与实际交付状态；取代 v1 并行输入的实施边界。
+
 ## 2026-10-22 · COMMENT-WORD-CLOUD-V23（候选）
 
 - [紧凑概览 + 领域词云执行计划](plans/active/comment-wordcloud-v23-20261022.md)：用户批准 V2.3，保留研究与来源边界。

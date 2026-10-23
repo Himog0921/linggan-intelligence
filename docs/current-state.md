@@ -8,6 +8,10 @@
 
 OCR 的动态交付事实以统一 Issue #454 及关联 PR/CI 为准。原本地规则与开发回归见[既有 OCR 计划](plans/active/ocr-title-quality-454.md)；当前获准的本篇手动云 OCR、动效百分比、检查器结果与模型选择见[手动识别计划](plans/active/ocr-manual-recognition-454.md)。两者保留来源和采用边界，候选实现、隔离证明不代表主线/部署或 Mog 生产业务验收；本包不新增真实模型调用、不操作共享数据库或现有服务。
 
+## 2026-10-23 · 研究底稿 v2 实施中
+
+Mog 已确认完整底稿标准并授权代码落地；`codex/research-dossier-v2` 基于 e2afc30a 重建。上一轮未提交工作树丢失，旧测试记录不算当前交付证明。新合同取消默认内容截断、旧读取兼容与第二任务输入，采用不可变 reading、显式当前选择与独立校正。仓库和远端分支已恢复，代码/验证进行中，尚未 PR、合并或部署。详见[实施与验收](plans/active/research-dossier-v2.md)。
+
 ## AI 设置左栏导航候选（2026-10-21）
 
 `/settings/models?view=capabilities|models|runs|advanced` 的四个正常 AI 设置视图已在候选工作树迁入共享左栏，主区不再显示重复 Hero、说明或刷新按钮。聚焦测试、类型/lint/LIDS/生产构建与隔离浏览器的八个视图场景通过；390px 使用共享横向轨道的四个直接入口。完整 settings 实链的做法导入 `400` 并等待回执超时，可由未修改 `5997b189` 基线复现，未在本包掩盖。候选未提交、未合并、未部署或刷新本机 `:3000`；无迁移、共享库写入、真实模型/供应商或研究调用。详见 [变更清单](design/changes/ai-settings-left-nav-001-ui-change-manifest.md) 和 [验收记录](design/acceptance/ai-settings-left-nav-001-acceptance.md)。
