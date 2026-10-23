@@ -46,10 +46,12 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 `0152_ops_publication_execution_locator` 追加 `linggan_ops_publication_execution_locator`：每行都绑定发布、账号、XHS 作品/作者身份、原生发布版本、原始签名地址及其 SHA-256、提交人和验证状态，且数据库禁止更新或删除。同一发布与同一地址摘要不会产生第二条来源；新 token 是另一条输入事实，后续 resolver 必须按当前发布版本选择，不能回退到已经失效或属于另一作品的地址。
 
+`0155_ops_exact_publication_work_scope` 已新增 `collection_work_order_ops_publication_target`。它是一个 Work Order 的不可变、逐条精确发布范围：只绑定发布、发布版本、平台作品/作者身份与受保护 locator 的引用；它明确只允许详情页读取，评论、回复、媒体、OCR 与 ASR 均为零/false。表不能容纳 material、discovery finding、package 或原始签名 URL，也不为既有 Authorization 默认追加 `ops_publication_sync` 模板——没有这份显式授权的同步仍必须阻断。
+
 对于 `accepted` / `existing`，数据库约束要求同时具备发布/账号/业务/平台/作品/作者/版本/locator 指纹以及 existing-chain 的 Request/WorkOrder 引用。其他决定禁止携带这两个执行引用。因此无法发生“工单已建但运营关联未保存”的表面成功，也不能把 internal `publication_ref` 塞进平台内容 ID。
 
 ## 4. 未完成边界
 
-本切片没有创建 `Acquisition Request`、`Admission`、`Work Order`、`Lease`、`Task`、`Attempt`、`Package` 或 `Receipt`；没有平台访问、媒体处理、回填投影或 React 同步按钮。XHS locator 已能作为不可变输入被同步命令冻结，但还没有接入 Collection 的统一 resolver/派发；抖音仍没有受控 locator、身份、能力与回填闭环。它不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
+本切片仍没有由同步 API 创建 `Acquisition Request`、`Admission`、`Work Order`、`Lease`、`Task`、`Attempt`、`Package` 或 `Receipt`；没有平台访问、媒体处理、回填投影或 React 同步按钮。`0155` 只先建立了未来桥接不可绕过的精确范围物理约束，尚未接入 Collection 的准入、租约展开、统一 resolver/派发、详情页会话、资格停止或回执投影；因此 XHS 命令的当前结果仍是 `ops_sync_execution_bridge_not_ready`。抖音仍没有受控 locator、身份、能力与回填闭环。它不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
 
 后续桥接必须为运营精确发布引入受控 locator/身份输入，并在同一采集链中实现回包绑定、receipt 合格判定、投影重放和两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。
