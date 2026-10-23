@@ -1,6 +1,7 @@
 import { useEffect,useState,type CSSProperties } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
 import { MediaImage } from '../../../corpus/evidence/Media';
+import { limitationCopy } from '../../../corpus/evidence/evidencePresent';
 import { TargetSelect } from '../TargetSelect';
 import { decodeWorkComparison,inspectionUrl,METRICS,type MetricKey,type Snapshot } from './inspectionApi';
 import { age,metricLabels,metricValue,moment,number,reason } from './inspectionPresent';
@@ -64,12 +65,13 @@ export function WorkComparisonPanel(){
 
 export function WorkIntroduction({item}:{item:Snapshot}){
   const resource=item.resource;const title=resource?.display.title??'标题未取得';
+  const limitation=resource?.primaryLimitation;
   return <div className={styles.intro}>
     <MediaImage className={styles.cover} url={resource?.media.coverUrl??null} showStatus fallback="封面未取得"
       names={{loaded:`${title}的封面`,loading:'封面读取中',failed:'封面读取失败',absent:'封面未取得'}}/>
     <div><h3>{title}</h3><p className={styles.meta}>{resource?.display.creatorName??'作者待核对'}</p><time className={`${styles.meta} ${styles.moment}`}>{moment(resource?.display.publishedAt??null)}</time>
       {!resource&&<p className={styles.meta}>当前范围内不可读取，其他作品仍可对照。</p>}
-      {resource?.primaryLimitation&&<p className={styles.meta}>{resource.primaryLimitation}</p>}
+      {limitation&&limitation!=='NONE'&&limitation!=='OTHER_LANES_NOT_EVALUATED'&&<p className={styles.meta}>{limitationCopy(limitation)}</p>}
     </div>
   </div>;
 }

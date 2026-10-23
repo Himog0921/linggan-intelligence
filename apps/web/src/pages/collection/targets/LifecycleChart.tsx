@@ -103,9 +103,7 @@ export function Chart({
       <>
         <div className="life-trend-head">
           <div>
-            <div className="life-trend-eyebrow">作品复核</div>
             <h2>作品表现分布</h2>
-            <p>每个点是一篇当前可分析作品；横轴为发布时间，纵轴保持当前{metric}原始数值。</p>
           </div>
           <ChartSwitch params={params} distribution week={week} />
         </div>
@@ -198,6 +196,7 @@ export function Chart({
     ),
     max = Math.max(1, ...medians) * 1.18,
     maxPosts = Math.max(1, ...buckets.map((b) => b.points.length)),
+    labelStep = Math.max(1,Math.ceil((buckets.length-1)/6)),
     step = buckets.length > 1 ? 890 / (buckets.length - 1) : 445,
     x = (i: number) => (buckets.length === 1 ? 507 : 62 + step * i),
     y = (v: number) => 416 - (v / max) * 388,
@@ -213,9 +212,7 @@ export function Chart({
     <>
       <div className="life-trend-head">
         <div>
-          <div className="life-trend-eyebrow">作品复核</div>
           <h2>作品表现趋势</h2>
-          <p>柱形表示发布密度，主线使用同一时间桶的{metric}中位数；橙红只标记最近巡查新增。</p>
         </div>
         <ChartSwitch params={params} distribution={false} week={week} />
       </div>
@@ -301,7 +298,7 @@ export function Chart({
             </a>
           ))}
           {buckets.map((b, i) =>
-            buckets.length <= 7 || i === 0 || i + 1 === buckets.length || i % 2 === 0 ? (
+            i===0||i+1===buckets.length||(i%labelStep===0&&buckets.length-1-i>=labelStep) ? (
               <text
                 key={b.label}
                 className="life-trend-axis"

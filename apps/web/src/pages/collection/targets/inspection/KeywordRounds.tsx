@@ -42,12 +42,12 @@ export function KeywordRounds(){
     </div>
     <ReadFeedback read={page}/>
     {options.length>0&&<div className={styles.toolbar}>
-      {comparing&&<TargetSelect name="inspection-left-round" label="上轮" value={left??''} onChange={value=>context.patch({inspect_left_round:value||null})} options={[{value:'',label:'选择较早观察'},...options]}/>}
-      <TargetSelect name="inspection-right-round" label="本轮" value={right??''} onChange={value=>context.patch({inspect_right_round:value||null})} options={[{value:'',label:'选择本轮'},...options]}/>
+      {comparing&&<TargetSelect name="inspection-left-round" label="上轮" value={left??''} onChange={value=>context.patch({inspect_left_round:value||null})} options={[{value:'',label:'选择较早观察'},...options.map(option=>({...option,disabled:option.value===right||(known.get(option.value)?.observedEpochMs??Infinity)>(known.get(right??'')?.observedEpochMs??-Infinity)}))]}/>}
+      <TargetSelect name="inspection-right-round" label="本轮" value={right??''} onChange={value=>context.patch({inspect_right_round:value||null,inspect_left_round:null})} options={[{value:'',label:'选择本轮'},...options]}/>
       <MetricPicker value={metric} onChange={value=>context.patch({inspect_metric:value})}/>
     </div>}
     {page.data?.rounds.length===0&&<p className={styles.empty}>当前规则尚无可还原的观察轮次；可切换“全部作品”查看已有目录。</p>}
-    {comparing&&!left&&right&&<p className={styles.notice}>当前只有一轮可选，尚不能形成两轮差异。选择“本轮结果”可查看已取得作品。</p>}
+    {comparing&&!left&&right&&<p className={styles.notice}>当前可选轮次中，未找到本轮之前的同规则观察。可更换本轮或查看“本轮结果”。</p>}
     {comparing?<><ReadFeedback read={compared}/>{compared.data&&<>
       <div className={styles.inlineSummary}><span>共同命中 <b>{number(compared.data.commonCount)}</b></span><span>本轮新出现 <b>{number(compared.data.enteredCount)}</b></span><span>本轮未命中 <b>{number(compared.data.absentCount)}</b></span><Cutoff value={compared.data.knowledgeCutoff}/></div>
       {compared.data.reasons.length>0&&<div className={styles.notice}><p>{compared.data.reasons.map(reason).join('；')}。仍保留两侧原值，不外推整个入口的涨跌。</p></div>}
@@ -56,7 +56,7 @@ export function KeywordRounds(){
         <colgroup><col style={{width:'36%'}}/><col style={{width:'22%'}}/><col style={{width:'13%'}}/><col style={{width:'13%'}}/><col style={{width:'16%'}}/></colgroup>
         <thead><tr><th>作品</th><th>本轮情况</th><th>上轮{metricLabels[metric]}</th><th>本轮{metricLabels[metric]}</th><th>变化</th></tr></thead>
         <tbody>{compared.data.rows.map(row=><tr key={row.workRef}>
-          <td><button type="button" className={styles.titleButton} onClick={()=>context.open('trace',row.workRef)}>{row.right?.title??row.left?.title??'标题未取得'}</button><div className={styles.subline}>{row.right?.creator??row.left?.creator??'作者待取得'}<ActionButton variant="quiet" onClick={()=>context.toggle(row.workRef)}>{context.selected.includes(row.workRef)?'移出对照':'加入对照'}</ActionButton></div></td>
+          <td><button id={`round-work-${row.workRef}-trace`} type="button" className={styles.titleButton} onClick={()=>context.open('trace',row.workRef)}>{row.right?.title??row.left?.title??'标题未取得'}</button><div className={styles.subline}>{row.right?.creator??row.left?.creator??'这两轮未记录作者'}<ActionButton variant="quiet" onClick={()=>context.toggle(row.workRef)}>{context.selected.includes(row.workRef)?'移出对照':'加入对照'}</ActionButton></div></td>
           <td><span className={styles.tag} data-new={row.discoveryLabel==='new_in_library'}>{discoveryLabels[row.discoveryLabel]??'范围待核对'}</span><div className={styles.meta}>采样位置 {row.left?.position??'—'} → {row.right?.position??'—'}</div></td>
           <td className={styles.value}>{row.left?metricValue(row.left.metrics[metric]):'未命中'}</td><td className={styles.value}>{row.right?metricValue(row.right.metrics[metric]):'未命中'}</td><td><Delta value={row.metrics[metric]}/></td>
         </tr>)}</tbody>
@@ -77,7 +77,7 @@ export function KeywordRounds(){
 function SingleRound({rows,metric}:{rows:RoundWork[];metric:MetricKey}){
   const context=useTargetResearch();
   return <div className={styles.tableScroll} tabIndex={0} aria-label="本轮命中作品，可横向滚动"><table className={styles.table}><thead><tr><th style={{width:'44%'}}>作品</th><th>采样位置</th><th>{metricLabels[metric]}</th><th style={{width:'25%'}}>来源情况</th></tr></thead><tbody>{rows.map(row=><tr key={row.workRef}>
-    <td><button type="button" className={styles.titleButton} onClick={()=>context.open('trace',row.workRef)}>{row.title??'标题未取得'}</button><div className={styles.subline}>{row.creator??'作者待取得'}<ActionButton variant="quiet" onClick={()=>context.toggle(row.workRef)}>{context.selected.includes(row.workRef)?'移出对照':'加入对照'}</ActionButton></div></td>
+    <td><button id={`round-work-${row.workRef}-trace`} type="button" className={styles.titleButton} onClick={()=>context.open('trace',row.workRef)}>{row.title??'标题未取得'}</button><div className={styles.subline}>{row.creator??'本轮未记录作者'}<ActionButton variant="quiet" onClick={()=>context.toggle(row.workRef)}>{context.selected.includes(row.workRef)?'移出对照':'加入对照'}</ActionButton></div></td>
     <td>{row.position??'—'}</td><td className={styles.value}>{metricValue(row.metrics[metric])}</td><td><span className={styles.tag}>{row.libraryPresence==='new'?'新入库':row.firstSeenInScope===true&&row.libraryPresence==='existing'?'库内已有 · 本规则首次发现':row.firstSeenInScope===false?'再次命中':'首次范围未能确认'}</span></td>
   </tr>)}</tbody></table>{rows.length===0&&<p className={styles.empty}>本轮没有取得合格作品；覆盖情况以上方实际回执为准。</p>}</div>;
 }

@@ -83,8 +83,12 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     const populated={target:inspectionTarget,base,round,works:result.body.works};
     assert(populated, 'V4 browser proof requires a real accepted round with at least two works');
     await goto({ domain: inspectionDomain, drawer: populated.target.targetRef, dtab: 'works', inspect_right_round: populated.round.roundRef });
-    await page.getByRole('button', { name: '加入对照', exact: true }).first().click();
-    await page.getByRole('button', { name: '加入对照', exact: true }).first().click();
+    for(const work of populated.works.slice(0,2)){
+      const row=page.getByRole('row').filter({has:page.getByRole('button',{name:work.title,exact:true})});
+      await row.getByRole('button',{name:'加入对照',exact:true}).click();
+      await row.getByRole('button',{name:'移出对照',exact:true}).waitFor();
+    }
+    assert.equal(await page.getByRole('button',{name:'移出对照',exact:true}).count(),2,'two distinct persisted works must be selected');
     await page.getByRole('button', { name: '并排对照', exact: true }).click();
     await page.getByRole('heading', { name: '作品并排对照', exact: true }).waitFor();
     await page.getByRole('button', { name: '当前累计', exact: true }).waitFor();
@@ -95,6 +99,16 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     const canonicalUrl = new URL(canonical.url()); assert.equal(canonicalUrl.searchParams.get('asOf'), new URL(page.url()).searchParams.get('inspect_as_of'));
     await page.getByText('以下按当前研究截点读取正式底稿。', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(directory, 'targets-v4-canonical-dossier.png') });
+    for(const width of [1440,1024,390]){
+      await page.setViewportSize({width,height:900});
+      const geometry=await page.locator('#c-drawer').evaluate(el=>({width:el.getBoundingClientRect().width,
+        overflow:el.scrollWidth-el.clientWidth,headOverflow:el.querySelector('.c-dw-head').scrollWidth-el.querySelector('.c-dw-head').clientWidth,
+        bodyOverflow:el.querySelector('.c-dw-body').scrollWidth-el.querySelector('.c-dw-body').clientWidth}));
+      assert(Math.abs(geometry.width-(width<=760?width:Math.min(960,width-96)))<=1,JSON.stringify(geometry));
+      assert(geometry.overflow<=1&&geometry.headOverflow<=1&&geometry.bodyOverflow<=1,'drawer stays bounded; comparison scrolls locally: '+JSON.stringify(geometry));
+      await page.screenshot({path:path.join(directory,`targets-v4-compact-${width}.png`)});
+    }
+    await page.setViewportSize({width:1440,height:1000});
     await page.getByRole('button', { name: '发布后 24 小时', exact: true }).click();
     const v4Selected = populated.works.slice(0, 2).map(work => work.workRef).join(',');
     const age = await get(`${populated.base}/work-comparison?domain=${inspectionDomain}&works=${v4Selected}&mode=age_24h`);
