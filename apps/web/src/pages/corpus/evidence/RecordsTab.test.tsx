@@ -158,6 +158,39 @@ describe('评论深采（Mog 2026-10-23）', () => {
     expect(screen.getByText('2026-10-13 18:01 · 尽量采全 · 采到 1 条，当时页面显示 3 条 · 没有采全')).toBeInTheDocument();
   });
 
+  it('采指定条数：默认 100，可改；确认框写清采到多少条就停；请求带 up_to 与条数', async () => {
+    kit.route('POST', RUNS, ok({ runRef: RUN, domainRef: DOMAIN, replayed: false }));
+    kit.route('GET', `${RUNS}/${RUN}`, ok(runJson({ comment_mode: 'up_to', comment_target: 40 })));
+    const view = setup();
+    await view.user.click(screen.getByRole('radio', { name: /采指定条数/ }));
+    const input = screen.getByRole('spinbutton', { name: '条数' });
+    expect(input).toHaveValue(100);
+    await view.user.clear(input);
+    await view.user.type(input, '40');
+    await view.user.click(screen.getByRole('button', { name: '采 40 条评论' }));
+    const dialog = screen.getByRole('dialog', { name: '确认评论深采' });
+    expect(within(dialog).getByText(/把评论和回复采到 40 条就停（评论区先到底也会停）/)).toBeInTheDocument();
+    await view.user.click(within(dialog).getByRole('button', { name: '确认提交' }));
+    expect(await screen.findByText('已提交')).toBeInTheDocument();
+    expect(kit.of('POST', RUNS)[0]?.body).toMatchObject({ source: { kind: 'selected_works', workRefs: [workRef(1)] }, workLimit: 1, commentMode: 'up_to', commentTarget: 40 });
+    expect(screen.getByRole('radio', { name: /采全部评论/ })).toBeDisabled();
+  });
+
+  it('条数不是 1–1000 的整数：按钮不可用并就地说明，不发请求', async () => {
+    const view = setup();
+    await view.user.click(screen.getByRole('radio', { name: /采指定条数/ }));
+    const input = screen.getByRole('spinbutton', { name: '条数' });
+    for (const bad of ['0', '1001', '2.5']) {
+      await view.user.clear(input);
+      await view.user.type(input, bad);
+      expect(screen.getByText('请填 1–1000 之间的整数')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '采 指定 条评论' })).toBeDisabled();
+    }
+    await view.user.clear(input);
+    expect(screen.getByRole('button', { name: '采 指定 条评论' })).toBeDisabled();
+    expect(kit.calls).toHaveLength(0);
+  });
+
   it('不是小红书：只说暂不支持，不给按钮；没采过评论如实说', () => {
     setup({ platform: 'douyin', commentsHistory: [] });
     expect(screen.getByText('评论深采目前只支持小红书笔记。')).toBeInTheDocument();
