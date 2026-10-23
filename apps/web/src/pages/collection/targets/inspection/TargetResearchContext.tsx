@@ -76,7 +76,7 @@ export function ResearchSelectionBar(){
   if(context.selected.length===0&&context.message===null)return null;
   return <div className={styles.selection} aria-label="作品对照选择">
     <span>已选 {context.selected.length} / 3 篇</span>
-    <div className={styles.selectedNames}>{context.selected.map((id,index)=><span key={id}>{context.data.catalog?.find(w=>w.publicRef===id)?.title??`作品 ${index+1}`}</span>)}</div>
+    <div className={styles.selectedNames}>{context.selected.map((id,index)=><span key={id} title={context.data.catalog?.find(w=>w.publicRef===id)?.title??`作品 ${index+1}`}>{context.data.catalog?.find(w=>w.publicRef===id)?.title??`作品 ${index+1}`}</span>)}</div>
     {context.message&&<span role="status">{context.message}</span>}
     <ActionButton id="work-comparison-open" variant="outline" disabled={context.selected.length<2} onClick={()=>context.open('compare')}>并排对照</ActionButton>
     <ActionButton variant="quiet" onClick={context.clear}>清除选择</ActionButton>

@@ -4,6 +4,9 @@ import { MemoryRouter } from 'react-router';
 import { AssignDomain } from './TargetAssignment';
 import { RuleErrors, RuleReceipt } from './RuleFeedback';
 import { Chart } from './LifecycleChart';
+import { LifecyclePanel } from './TargetLifecycle';
+import { Review } from './LifecycleReview';
+import { bucketPoints } from './chartMath';
 import type { Lifecycle } from './api';
 import { Toolbar } from './TargetToolbar';
 import { Modal } from './TargetModals';
@@ -174,5 +177,31 @@ describe('原目标弹窗的几何与初始选择', () => {
     Object.defineProperty(cancel, 'offsetParent', { configurable: true, value: document.body });
     fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Tab' });
     expect(cancel).toHaveFocus();
+  });
+});
+
+const coverageFixture:Lifecycle={status:'AVAILABLE',asOf:'2026-01-03T00:00:00Z',window:'all',metric:'likes',linked:220,lowerBound:220,confirmed:220,eligible:220,
+  exclusions:{authorNotVerified:0,authorMismatch:0,publishedAtNotQualified:0,outsideWindow:0,metricUnknown:0,scanTruncated:false},
+  receipt:{scanLimit:2000,probedCount:220,scannedCount:220,returnedCount:220,truncated:false},points:[]};
+describe('检查器紧凑披露保留数据含义',()=>{
+  it('已知相等的220只披露一次，作者与分析资格分别保留',()=>{
+    render(<MemoryRouter><LifecyclePanel lifecycle={{state:'ready',projection:coverageFixture}} params={new URLSearchParams()}/></MemoryRouter>);
+    const coverage=screen.getByLabelText('作品覆盖摘要');expect(coverage.textContent?.match(/220/g)).toHaveLength(1);
+    expect(coverage).toHaveTextContent('作者均已确认');expect(coverage).toHaveTextContent('当前均可分析');
+  });
+  it.each([{linked:220,lowerBound:220,confirmed:200,eligible:180},{linked:null,lowerBound:220,confirmed:220,eligible:220},{linked:0,lowerBound:0,confirmed:0,eligible:0}])('差异、目录下限和已知零不被合并成全部：%j',counts=>{
+    render(<MemoryRouter><LifecyclePanel lifecycle={{state:'ready',projection:{...coverageFixture,...counts}}} params={new URLSearchParams()}/></MemoryRouter>);
+    const coverage=screen.getByLabelText('作品覆盖摘要');expect(coverage).toHaveTextContent(`作者已确认 ${counts.confirmed} 篇`);
+    expect(coverage).toHaveTextContent(`当前可分析 ${counts.eligible} 篇`);expect(coverage).not.toHaveTextContent('均');
+    if(counts.linked===null)expect(coverage).toHaveTextContent('作品目录下限 ≥220');
+  });
+  it('复核读数仍直接可见，解释可按需展开，密度不重复作品总数',()=>{
+    const point={publicRef:targetRef,title:'合成作品',published:'2026-01-01',date:'2026-01-01',epochMs:Date.parse('2026-01-01T00:00:00Z'),value:0,discussionRate:null,association:'AUTHOR_CONFIRMED',new:true};
+    const p={...coverageFixture,eligible:1,points:[point]};const {container}=render(<Review p={p} week={false} distribution={false} buckets={bucketPoints(p.points,false)}/>);
+    expect(screen.getByText('1.0 / 活跃月')).toBeVisible();expect(screen.getByText('1 篇')).toBeVisible();
+    const details=container.querySelector('.life-review-item details');expect(details).not.toHaveAttribute('open');
+    expect(screen.getByText(/只按当前可分析作品计算/)).not.toBeVisible();
+    fireEvent.click(container.querySelector('.life-review-item summary')!);
+    expect(screen.getByText(/只按当前可分析作品计算/)).toBeVisible();
   });
 });

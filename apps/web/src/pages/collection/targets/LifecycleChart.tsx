@@ -103,9 +103,7 @@ export function Chart({
       <>
         <div className="life-trend-head">
           <div>
-            <div className="life-trend-eyebrow">作品复核</div>
             <h2>作品表现分布</h2>
-            <p>每个点是一篇当前可分析作品；横轴为发布时间，纵轴保持当前{metric}原始数值。</p>
           </div>
           <ChartSwitch params={params} distribution week={week} />
         </div>
@@ -213,9 +211,7 @@ export function Chart({
     <>
       <div className="life-trend-head">
         <div>
-          <div className="life-trend-eyebrow">作品复核</div>
           <h2>作品表现趋势</h2>
-          <p>柱形表示发布密度，主线使用同一时间桶的{metric}中位数；橙红只标记最近巡查新增。</p>
         </div>
         <ChartSwitch params={params} distribution={false} week={week} />
       </div>
