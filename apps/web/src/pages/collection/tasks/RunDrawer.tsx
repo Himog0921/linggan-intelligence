@@ -4,7 +4,7 @@ import { RunDialog } from './RunDialog';
 import { ActionButton } from '../../../shared/ActionButton';
 import styles from './RunDrawer.module.css';
 import { controlRun, definiteRejection, type ControlIntent, type RunAction, type RunRequest } from './runRequests';
-import { errorText, readRun, readWorks, uuid, type Run } from './tasksApi';
+import { commentModeLabel, errorText, readRun, readWorks, uuid, type Run } from './tasksApi';
 
 function status(r: Run) { return r.control_intent === 'stopped' ? '已停止，成果保留' : r.control_intent === 'paused' ? '已暂停' : r.ended ? r.needs_attention ? '本轮结束，有缺口' : '本轮已结束' : r.phase === 'blocked' ? '需要处理' : r.domain_status === 'paused' ? '领域已暂停' : r.live_leases !== null && r.live_leases > 0 ? '执行中' : '等待派发'; }
 const count = (value: number | null) => value === null ? '—' : value.toLocaleString('zh-CN');
@@ -25,7 +25,7 @@ function Progress({ r, control, locked, feedback }: { r: Run; control: (action: 
     </dl>
     <dl className={styles.facts}>
       <div><dt>观察领域</dt><dd>{r.domain_name}</dd></div>
-      <div><dt>采集方式</dt><dd>{r.legacy ? '历史采集' : r.comment_mode === 'all_public' ? '尽量采全，含回复' : '每篇最多30条评论样本'}</dd></div>
+      <div><dt>采集方式</dt><dd>{r.legacy ? '历史采集' : commentModeLabel(r, '每篇最多30条评论样本')}</dd></div>
       <div><dt>作品上限</dt><dd>{count(r.work_limit)} 篇</dd></div>
       <div><dt>复用详情</dt><dd>{count(r.reused_details)} 篇</dd></div>
       <div><dt>本轮采回评论</dt><dd>{count(r.received_comments)} 条</dd></div>

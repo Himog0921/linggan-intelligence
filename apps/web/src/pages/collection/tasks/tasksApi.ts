@@ -29,7 +29,7 @@ export function parseRun(value: unknown) {
   if (!legacy && (v.control_intent == null || v.comment_mode == null || v.revision == null)) throw new ApiError({kind:'invalid_response', status:200});
   return {
     run_ref: uuid(v.run_ref), domain_ref: uuid(v.domain_ref), name: text(v.name), domain_name: text(v.domain_name), source_kind: text(v.source_kind),
-    legacy, ended: bool(v.ended), control_intent: optional(v.control_intent, text), phase: text(v.phase), comment_mode: optional(v.comment_mode, text),
+    legacy, ended: bool(v.ended), control_intent: optional(v.control_intent, text), phase: text(v.phase), comment_mode: optional(v.comment_mode, text), comment_target: optional(v.comment_target, number),
     created_at: text(v.created_at), updated_at: text(v.updated_at), revision: optional(v.revision, number), work_limit: number(v.work_limit),
     scope_frozen_at: optional(v.scope_frozen_at, text), discovery_reason: optional(v.discovery_reason, text), latest_delivery_at: optional(v.latest_delivery_at, text),
     available_details: optional(v.available_details, number), delivered_comments: optional(v.delivered_comments, number), new_comments: optional(v.new_comments, number), reused_details: optional(v.reused_details, number), selected_works: optional(v.selected_works, number),
@@ -66,13 +66,19 @@ export function runStatus(r: Run): string {
   if (r.domain_status === 'paused') return '领域暂停';
   return r.live_leases !== null && r.live_leases > 0 ? '执行中' : '等待派发';
 }
+/** 评论范围的写法；`sample` 是两处列表原有的不同短语（台账写「总样本」、抽屉写「评论样本」）。 */
+export function commentModeLabel(r: Pick<Run, 'comment_mode' | 'comment_target'>, sample: string): string {
+  if (r.comment_mode === 'all_public') return '尽量采全，含回复';
+  if (r.comment_mode === 'up_to') return r.comment_target === null ? '每篇采到指定条数，含回复' : `每篇采到 ${r.comment_target} 条就停，含回复`;
+  return sample;
+}
 export function sourceLabel(kind: string): string { return ({ temporary_keyword: '临时关键词', observation_target: '观察目标', selected_works: '语料已选作品', archive: '建档', patrol: '本轮巡查', supplement: '显式补采' } as Record<string, string>)[kind] ?? '既有采集'; }
 export function discoveryLabel(reason: string | null): string { return reason === null ? '等待发现结果' : ({ surface_ended: '本轮可见作品已发现完毕', maximum_quota: '已达到本次作品上限', accepted_discovery_scope: '已固定本次发现结果', person_selected_exact_set: '沿用勾选的作品集合', discovery_execution_stopped: '发现未完成，需要处理' } as Record<string, string>)[reason] ?? '发现原因见执行诊断'; }
 export function errorText(error: unknown): string {
   if (error instanceof ApiError) {
     if (!error.answered) return '服务器尚未给出可核对的结果';
     const code = error.failure.kind === 'http' ? error.failure.code : null;
-    return ({ domain_not_active: '本次领域尚未运行，请先恢复领域', target_outside_domain_or_stopped: '观察目标已停用或不属于本次领域，请重新选择', works_outside_domain: '所选作品不属于本次领域，请回到语料重新选择', invalid_work_limit: '作品上限须为 1–200 篇', invalid_keyword: '请填写 1–80 字的临时关键词', invalid_work_set: '所选作品集合无效，请回到语料重新选择', unsupported_ranking: '当前排序不可用，请重新选择', ranking_not_applicable: '该来源不使用搜索排序', collection_run_conflict: '任务状态或请求内容已改变，请重新读取后操作', collection_run_not_found: '当前领域下找不到这次采集', run_ended: '本轮已结束，成果保留', run_stopped: '本次采集已停止，成果保留' } as Record<string, string>)[code ?? ''] ?? '请求未被接受，请重新核对当前范围';
+    return ({ domain_not_active: '本次领域尚未运行，请先恢复领域', target_outside_domain_or_stopped: '观察目标已停用或不属于本次领域，请重新选择', works_outside_domain: '所选作品不属于本次领域，请回到语料重新选择', invalid_work_limit: '作品上限须为 1–200 篇', invalid_keyword: '请填写 1–80 字的临时关键词', invalid_work_set: '所选作品集合无效，请回到语料重新选择', unsupported_ranking: '当前排序不可用，请重新选择', ranking_not_applicable: '该来源不使用搜索排序', collection_run_conflict: '任务状态或请求内容已改变，请重新读取后操作', collection_run_not_found: '当前领域下找不到这次采集', run_ended: '本轮已结束，成果保留', run_stopped: '本次采集已停止，成果保留', invalid_comment_target: '条数须为 1–1000 的整数', comment_target_not_applicable: '只有「指定条数」才填条数' } as Record<string, string>)[code ?? ''] ?? '请求未被接受，请重新核对当前范围';
   }
   return '读取或提交没有完成，请保留当前输入后重试';
 }

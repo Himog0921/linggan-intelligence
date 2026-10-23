@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../shared/api';
 import { RunCreationDialog } from './RunCreationDialog';
 import { controlRun, createRun } from './runRequests';
-import { parseRun, parseWorks, readRun } from './tasksApi';
+import { commentModeLabel, parseRun, parseWorks, readRun } from './tasksApi';
 
 const domain = 'a0000000-0000-4000-8000-000000000001';
 const run = 'a0000000-0000-4000-8000-000000000002';
@@ -32,6 +32,14 @@ describe('采集任务数据与失联恢复', () => {
     await act(async()=>{finish(json({runRef:run,domainRef:domain}));await pending;});
     expect(created).not.toHaveBeenCalled();
     expect(sessionStorage.getItem(`collection-run-draft:${domain}`)).toBe(saved);
+  });
+  it('评论范围的写法：尽量采全、指定条数（Mog 2026-10-23）、30 条样本；条数缺失不编造', () => {
+    const current = { ...legacy, legacy: false, control_intent: 'running', revision: 1 };
+    expect(commentModeLabel(parseRun({ ...current, comment_mode: 'all_public' }), '样本')).toBe('尽量采全，含回复');
+    expect(commentModeLabel(parseRun({ ...current, comment_mode: 'up_to', comment_target: 40 }), '样本')).toBe('每篇采到 40 条就停，含回复');
+    expect(commentModeLabel(parseRun({ ...current, comment_mode: 'up_to' }), '样本')).toBe('每篇采到指定条数，含回复');
+    expect(commentModeLabel(parseRun({ ...current, comment_mode: 'sample_30' }), '每篇最多30条总样本')).toBe('每篇最多30条总样本');
+    expect(() => parseRun({ ...current, comment_mode: 'up_to', comment_target: -1 })).toThrow(ApiError);
   });
   it('历史记录允许不存在的控制版本，保留未知与真实零；新版记录缺版本拒绝展示', () => {
     const r = parseRun(legacy); expect(r.revision).toBeNull(); expect(r.new_comments).toBeNull(); expect(r.available_details).toBe(0);
