@@ -75,6 +75,9 @@ mod ops_api;
 mod ops_auth;
 #[cfg(test)]
 mod ops_auth_tests;
+mod ops_native_api;
+#[cfg(test)]
+mod ops_native_api_tests;
 #[cfg(test)]
 mod ops_native_model_tests;
 #[cfg(test)]

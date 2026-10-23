@@ -468,6 +468,7 @@ migrate() {
   apply_migration_once "0147_ops_team_responsibility" "$project_root/database/migrations/0147_ops_team_responsibility.sql"
   apply_migration_once "0148_ops_first_admin_bootstrap" "$project_root/database/migrations/0148_ops_first_admin_bootstrap.sql"
   apply_migration_once "0149_ops_native_write_model" "$project_root/database/migrations/0149_ops_native_write_model.sql"
+  apply_migration_once "0150_ops_native_publication_date_precision" "$project_root/database/migrations/0150_ops_native_publication_date_precision.sql"
 }
 
 case "$command_name" in

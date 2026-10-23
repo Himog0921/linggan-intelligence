@@ -113,7 +113,7 @@ if [[ "${WEB_APP_PROOF_SCOPE:-all}" == ops-auth ]]; then
   exit 0
 fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == ops-native ]]; then
-  run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::ops_native_model_tests -- --ignored --nocapture --test-threads=1
+  run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::ops_native_ -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == workbench ]]; then

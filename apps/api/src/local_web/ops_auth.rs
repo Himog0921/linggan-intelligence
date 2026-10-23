@@ -599,7 +599,7 @@ fn secure_cookie_required(headers: &HeaderMap) -> bool {
             .is_some_and(|value| value.eq_ignore_ascii_case("https"))
 }
 
-fn secure_headers(response: &mut Response) {
+pub(super) fn secure_headers(response: &mut Response) {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));

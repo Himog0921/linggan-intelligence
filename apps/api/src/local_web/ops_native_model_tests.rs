@@ -99,10 +99,10 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
          (publication_ref,source_system,source_record_id,account_ref,platform,publication_url,canonical_url,\
           content_id_state,published_at,published_date_state,entry_source,review_status,\
           native_record_state,native_version,native_publisher_member_ref,native_registered_by_member_ref,\
-          native_business_domain_ref) \
+          native_business_domain_ref,native_published_on,native_published_precision) \
          VALUES($1,'linggan_native',$1::text,$2,'xhs','https://example.test/post/1',\
-          'https://example.test/post/1','pending_match',scope_001_now(),'as_recorded',\
-          'linggan_ops_manual','confirmed','active',1,$3,$3,$4)",
+          'https://example.test/post/1','pending_match','2026-10-23T00:00:00+08:00','as_recorded',\
+          'linggan_ops_manual','confirmed','active',1,$3,$3,$4,'2026-10-23','instant')",
     )
     .bind(publication)
     .bind(account)
@@ -117,10 +117,10 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
          (publication_ref,source_system,source_record_id,account_ref,platform,publication_url,canonical_url,\
           content_id_state,published_at,published_date_state,entry_source,review_status,\
           native_record_state,native_version,native_publisher_member_ref,native_registered_by_member_ref,\
-          native_business_domain_ref) \
+          native_business_domain_ref,native_published_on,native_published_precision) \
          VALUES($1,'linggan_native',$1::text,$2,'douyin','https://example.test/video/1',\
-          'https://example.test/video/1','pending_match',scope_001_now(),'as_recorded',\
-          'linggan_ops_manual','confirmed','active',1,$3,$3,$4)",
+          'https://example.test/video/1','pending_match','2026-10-23T00:00:00+08:00','as_recorded',\
+          'linggan_ops_manual','confirmed','active',1,$3,$3,$4,'2026-10-23','instant')",
     )
     .bind(wrong_platform)
     .bind(account)
@@ -132,6 +132,34 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
         wrong_platform.is_err(),
         "a native publication cannot bind a cross-platform account"
     );
+
+    let date_only_publication = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_publication \
+         (publication_ref,source_system,source_record_id,account_ref,platform,publication_url,canonical_url,\
+          content_id_state,published_date_state,entry_source,review_status,native_record_state,native_version,\
+          native_publisher_member_ref,native_registered_by_member_ref,native_business_domain_ref,\
+          native_published_on,native_published_precision) \
+         VALUES($1,'linggan_native',$1::text,$2,'xhs','https://example.test/post/date-only',\
+          'https://example.test/post/date-only','pending_match','as_recorded','linggan_ops_manual',\
+          'confirmed','active',1,$3,$3,$4,'2026-10-20','day')",
+    )
+    .bind(date_only_publication)
+    .bind(account)
+    .bind(member)
+    .bind(domain)
+    .execute(pool)
+    .await
+    .unwrap();
+    let date_precision: (Option<String>, String) = sqlx::query_as(
+        "SELECT published_at::text, native_published_precision \
+         FROM linggan_ops_publication WHERE publication_ref=$1",
+    )
+    .bind(date_only_publication)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(date_precision, (None, "day".to_owned()));
 
     let view_request = Uuid::new_v4();
     sqlx::query(
@@ -309,4 +337,87 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
     .execute(pool)
     .await;
     assert!(mutate_receipt.is_err(), "write receipts stay append-only");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn native_publication_precision_migration_upgrades_0149_rows() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("opsnat_upgrade_{}", Uuid::new_v4().simple());
+    let precision_migration = include_str!(
+        "../../../../database/migrations/0150_ops_native_publication_date_precision.sql"
+    );
+    let migrations_before_0150 =
+        full_schema_fixture::FULL_MIGRATIONS.replacen(precision_migration, "", 1);
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        &migrations_before_0150,
+    )
+    .await
+    .unwrap();
+    let pool = database.pool();
+    let member = Uuid::new_v4();
+    let domain = Uuid::new_v4();
+    let account = Uuid::new_v4();
+    let publication = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_member \
+         (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) \
+         VALUES($1,'upgrade@example.test','升级运营','operator','active','synthetic-hash',scope_001_now())",
+    )
+    .bind(member)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES ($1,'升级合成业务')")
+        .bind(domain)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_ops_account \
+         (account_ref,source_system,source_record_id,domain_ref,ledger_state,platform,account_name, \
+          status,is_retained,profile_link_state,review_status,native_record_state,native_version, \
+          native_created_by_member_ref,native_updated_by_member_ref) \
+         VALUES($1,'linggan_native',$1::text,$2,'native_active','xhs','升级账号', \
+          'active',true,'missing','confirmed','active',1,$3,$3)",
+    )
+    .bind(account)
+    .bind(domain)
+    .bind(member)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_ops_publication \
+         (publication_ref,source_system,source_record_id,account_ref,platform,publication_url,canonical_url, \
+          content_id_state,published_at,published_date_state,entry_source,review_status, \
+          native_record_state,native_version,native_publisher_member_ref,native_registered_by_member_ref, \
+          native_business_domain_ref) \
+         VALUES($1,'linggan_native',$1::text,$2,'xhs','https://example.test/upgrade', \
+          'https://example.test/upgrade','pending_match','2026-10-22T18:30:00Z','as_recorded', \
+          'linggan_ops_manual','confirmed','active',1,$3,$3,$4)",
+    )
+    .bind(publication)
+    .bind(account)
+    .bind(member)
+    .bind(domain)
+    .execute(pool)
+    .await
+    .unwrap();
+
+    sqlx::raw_sql(precision_migration)
+        .execute(pool)
+        .await
+        .unwrap();
+    let precision: (String, String) = sqlx::query_as(
+        "SELECT native_published_on::text,native_published_precision \
+         FROM linggan_ops_publication WHERE publication_ref=$1",
+    )
+    .bind(publication)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(precision, ("2026-10-23".to_owned(), "instant".to_owned()));
 }
