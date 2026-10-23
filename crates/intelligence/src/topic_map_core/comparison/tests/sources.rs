@@ -31,7 +31,7 @@ fn comparison_uses_real_work_metadata_and_absolute_unicode_citations_without_raw
         &format!("{}甲🐈正文片段尾声未选入秘密", "占".repeat(2500)),
     );
     let a = input(1, vec![a_source.clone()]);
-    let a_window = research::research_windows(&a, 3000)
+    let a_window = research::research_windows(&a)
         .into_iter()
         .find(|w| w.fragments.iter().any(|f| f.start <= 2500 && f.end >= 2508))
         .unwrap();
@@ -75,9 +75,24 @@ fn comparison_uses_real_work_metadata_and_absolute_unicode_citations_without_raw
     assert_eq!(comparison.work.work_ref, requested[0]);
     assert_eq!(comparison.context_work_refs, vec![requested[1]]);
     assert_eq!(comparison.work.fragments.len(), 1);
-    assert_eq!(comparison.work.fragments[0].start, 2500);
-    assert_eq!(comparison.work.fragments[0].text, "甲🐈正文片段尾声");
-    assert_eq!(comparison.coverage["coveredChars"], 15);
+    assert_eq!(comparison.work.fragments[0].start, 0);
+    assert_eq!(comparison.work.fragments[0].text, a_source.text);
+    assert_eq!(
+        comparison.coverage["coveredChars"],
+        inputs
+            .iter()
+            .flat_map(|i| &i.fragments)
+            .map(|f| f.text.chars().count())
+            .sum::<usize>()
+    );
+    assert_eq!(
+        comparison.coverage["selectedDiscussions"][0]["evidence"][0]["start"],
+        2500
+    );
+    assert_eq!(
+        comparison.coverage["selectedDiscussions"][0]["evidence"][0]["end"],
+        2508
+    );
     assert_eq!(comparison.coverage["state"], "partial");
     assert_eq!(comparison.coverage["selectedDiscussionCount"], 2);
     assert_eq!(comparison.coverage["countsArePeople"], false);
@@ -143,7 +158,7 @@ fn withdrawal_changed_text_role_or_used_definition_invalidates_the_whole_compari
 }
 
 #[test]
-fn equal_text_reobservation_keeps_semantic_comparison_and_frozen_audit_origin() {
+fn equal_text_reobservation_cannot_substitute_a_frozen_comparison_source_tuple() {
     let (inputs, tasks, requested) = pair();
     let comparison = build_comparison(&inputs, &tasks, &requested, &topics()).unwrap();
     let manifest = research::reference_manifest(&comparison);
@@ -151,28 +166,11 @@ fn equal_text_reobservation_keeps_semantic_comparison_and_frozen_audit_origin() 
     reobserved[1].fragments[0].source_ref = Uuid::from_u128(999);
     reobserved[1].fragments[0].source_version = "new-physical-observation".into();
     reobserved[1].comment_study[0]["sourceRef"] = json!(Uuid::from_u128(999));
-    let current = research::restore_scoped_window(&reobserved, requested[0], &manifest).unwrap();
-    assert_eq!(current.hash, comparison.hash);
-    let fragment = current
-        .fragments
-        .iter()
-        .find(|f| f.field == "unresearched_comment")
-        .unwrap();
-    assert_eq!(fragment.source_ref, inputs[1].fragments[0].source_ref);
-    assert_eq!(
-        current.coverage["currentSources"][&fragment.fragment_id]["sourceRef"],
-        json!(Uuid::from_u128(999))
-    );
-    assert_eq!(
-        build_comparison(&reobserved, &tasks, &requested, &topics())
-            .unwrap()
-            .hash,
-        comparison.hash
-    );
+    assert!(research::restore_scoped_window(&reobserved, requested[0], &manifest).is_none());
+    assert!(build_comparison(&reobserved, &tasks, &requested, &topics()).is_err());
     let mut reassigned = tasks.clone();
     reassigned[0].task = Uuid::from_u128(9999);
-    let same_discussions =
-        build_comparison(&reobserved, &reassigned, &requested, &topics()).unwrap();
+    let same_discussions = build_comparison(&inputs, &reassigned, &requested, &topics()).unwrap();
     assert_eq!(same_discussions.hash, comparison.hash);
     assert_eq!(
         same_discussions.coverage["selectedDiscussions"][0]["taskRef"],

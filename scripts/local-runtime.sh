@@ -381,7 +381,11 @@ migrate() {
   apply_migration_once "0143_ocr_quality_audit" "$project_root/database/migrations/0143_ocr_quality_audit.sql"
   apply_migration_once "0144_ocr_manual_recognition" "$project_root/database/migrations/0144_ocr_manual_recognition.sql"
   apply_migration_once "0145_ocr_manual_human_adoption" "$project_root/database/migrations/0145_ocr_manual_human_adoption.sql"
-  apply_migration_once "0146_collection_run_comment_target" "$project_root/database/migrations/0146_collection_run_comment_target.sql"
+  apply_migration_once "0146_research_dossier_v2" "$project_root/database/migrations/0146_research_dossier_v2.sql"
+  apply_migration_once "0147_comment_study_full_context" "$project_root/database/migrations/0147_comment_study_full_context.sql"
+  apply_migration_once "0148_dossier_consumer_contracts" "$project_root/database/migrations/0148_dossier_consumer_contracts.sql"
+  apply_migration_once "0149_target_inspector_comparison" "$project_root/database/migrations/0149_target_inspector_comparison.sql"
+  apply_migration_once "0150_collection_run_comment_target" "$project_root/database/migrations/0150_collection_run_comment_target.sql"
 }
 
 case "$command_name" in

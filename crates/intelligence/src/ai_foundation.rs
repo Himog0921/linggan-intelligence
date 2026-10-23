@@ -1,7 +1,6 @@
 //! AI-GEN1 execution boundaries: pure decisions and explicit persisted control.
 //! A configured task is not permission to send material, nor proof its handler is connected.
 use serde::{Deserialize, Serialize};
-
 pub(crate) mod admission;
 pub mod batch_control;
 pub mod batch_store;
@@ -23,6 +22,7 @@ pub mod task_config;
 pub mod transport;
 pub mod transport_store;
 pub mod usage;
+pub mod work_comparison;
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum RuleError {
@@ -39,7 +39,6 @@ pub enum RuleError {
     #[error("ai_invalid_round")]
     Round,
 }
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskKey {
@@ -52,6 +51,7 @@ pub enum TaskKey {
     ModelProbe,
     OcrQualityAudit,
     OcrRecognition,
+    WorkComparison,
     CommentStudy,
     CommentEmbedding,
     LegacyCreatorDiscovery,
@@ -70,6 +70,7 @@ impl TaskKey {
             Self::ModelProbe => "model_probe",
             Self::OcrQualityAudit => "ocr_quality_audit",
             Self::OcrRecognition => "ocr_recognition",
+            Self::WorkComparison => "work_comparison",
             Self::CommentStudy => "comment_study",
             Self::CommentEmbedding => "comment_embedding",
             Self::LegacyCreatorDiscovery => "legacy_creator_discovery",
@@ -87,7 +88,5 @@ impl TaskKey {
         )
     }
 }
-
 pub mod invocation_read;
-pub mod ocr_manual_adoption;
 pub mod ocr_recognition;

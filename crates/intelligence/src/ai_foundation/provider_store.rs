@@ -45,6 +45,7 @@ impl MaterialClass {
             Self::NoteMaterial => matches!(
                 task,
                 TaskKey::NoteInterpretation
+                    | TaskKey::WorkComparison
                     | TaskKey::DirectionListDraft
                     | TaskKey::DirectionProposal
             ),

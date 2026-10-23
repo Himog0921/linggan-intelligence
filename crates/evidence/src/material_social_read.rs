@@ -501,46 +501,22 @@ pub async fn read_creation_comment_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     source: Uuid,
 ) -> Result<Option<Value>, sqlx::Error> {
-    let row=sqlx::query("SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.parent_comment_external_id,c.is_reply,c.body_text,c.body_state,c.observed_at,c.package_ref, EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE c.material_ref=$1 AND package.accepted_at<=scope_001_now()")
-        .bind(source).fetch_optional(&mut **tx).await?;
-    let Some(row) = row else { return Ok(None) };
-    if row.get::<bool, _>("restricted") {
-        return Ok(Some(
-            serde_json::json!({"sourceRef":source,"qualification":"restricted"}),
-        ));
-    }
-    let work: Uuid = row.get("content_public_ref");
-    let parent_id: Option<String> = row.get("parent_comment_external_id");
-    let reply: bool = row.get("is_reply");
-    let parent = if !reply {
-        serde_json::json!({"state":"not_applicable"})
-    } else if let Some(parent_id) = parent_id {
-        let parent=sqlx::query("SELECT c.material_ref,c.body_text,c.body_state,EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE c.content_public_ref=$1 AND c.comment_external_id=$2 AND package.accepted_at<=scope_001_now()")
-            .bind(work).bind(parent_id).fetch_optional(&mut **tx).await?;
-        match parent {
-            Some(p) if p.get::<bool, _>("restricted") => serde_json::json!({"state":"restricted"}),
-            Some(p) => {
-                serde_json::json!({"state":"known","sourceRef":p.get::<Uuid,_>("material_ref"),"body":p.get::<Option<String>,_>("body_text"),"bodyState":p.get::<String,_>("body_state")})
-            }
-            None => serde_json::json!({"state":"unknown"}),
-        }
-    } else {
-        serde_json::json!({"state":"unknown"})
-    };
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut **tx)
         .await?;
-    let parent_dossier = crate::research_dossier::read_in(tx, &[work], &as_of)
-        .await?
-        .remove(&work);
-    let parent_work = if let Some(dossier) = parent_dossier {
-        serde_json::json!({"state":"known","workRef":work,"materialRevision":dossier.material_revision,"fragments":dossier.fragments,"coverage":dossier.coverage})
-    } else {
-        serde_json::json!({"state":"unavailable","workRef":work})
-    };
-    Ok(Some(
-        serde_json::json!({"sourceRef":source,"workRef":work,"body":row.get::<Option<String>,_>("body_text"),"bodyState":row.get::<String,_>("body_state"),"observedAt":row.get::<String,_>("observed_at"),"packageRef":row.get::<Uuid,_>("package_ref"),"qualification":"readable","parentWork":parent_work,"parentComment":parent,"anonymousAuthorContext":{"identity":"WITHHELD","platformUserIdReturned":false}}),
-    ))
+    read_creation_comment_at_in(tx, source, &as_of).await
+}
+
+pub async fn read_creation_comment_at_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    source: Uuid,
+    as_of: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    Ok(
+        crate::material_creation_comments::read_creation_comments_at_in(tx, &[source], as_of)
+            .await?
+            .remove(&source),
+    )
 }
 
 pub async fn creation_comment_directory_in(
@@ -566,21 +542,40 @@ pub async fn creation_comment_directory_in(
     Ok((refs, total))
 }
 
-pub async fn read_dossier_comments(database:&Database, content_ref:Uuid, after:Option<Uuid>) -> Result<Value,sqlx::Error> {
-    let mut page=read_comment_page(database,content_ref,after,None,30,None).await?;
-    let refs:Vec<Uuid>=page["items"].as_array().into_iter().flatten().filter_map(|i|i["sourceRef"].as_str()?.parse().ok()).collect();
+pub async fn read_dossier_comments(
+    database: &Database,
+    content_ref: Uuid,
+    after: Option<Uuid>,
+) -> Result<Value, sqlx::Error> {
+    let mut page = read_comment_page(database, content_ref, after, None, 30, None).await?;
+    let refs: Vec<Uuid> = page["items"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|i| i["sourceRef"].as_str()?.parse().ok())
+        .collect();
     let rows=sqlx::query("SELECT comment.material_ref,engagement.like_count,engagement.like_count_state,parent.material_ref AS parent_ref FROM linggan_material_comment comment LEFT JOIN linggan_material_comment_engagement engagement USING(material_ref) LEFT JOIN linggan_material_comment_current parent ON parent.content_public_ref=comment.content_public_ref AND parent.comment_external_id=comment.parent_comment_external_id AND NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction restricted WHERE restricted.content_public_ref=parent.content_public_ref AND restricted.comment_external_id=parent.comment_external_id) WHERE comment.material_ref=ANY($1)").bind(&refs).fetch_all(database.pool()).await?;
-    for item in page["items"].as_array_mut().into_iter().flatten(){
-        if let Some(row)=rows.iter().find(|r|item["sourceRef"]==serde_json::json!(r.get::<Uuid,_>("material_ref"))){
-            item["likeCount"]=serde_json::json!(row.get::<Option<i64>,_>("like_count"));
-            item["likeState"]=serde_json::json!(row.get::<Option<String>,_>("like_count_state"));
-            item["parentSourceRef"]=serde_json::json!(row.get::<Option<Uuid>,_>("parent_ref"));
+    for item in page["items"].as_array_mut().into_iter().flatten() {
+        if let Some(row) = rows
+            .iter()
+            .find(|r| item["sourceRef"] == serde_json::json!(r.get::<Uuid, _>("material_ref")))
+        {
+            item["likeCount"] = serde_json::json!(row.get::<Option<i64>, _>("like_count"));
+            item["likeState"] = serde_json::json!(row.get::<Option<String>, _>("like_count_state"));
+            item["parentSourceRef"] = serde_json::json!(row.get::<Option<Uuid>, _>("parent_ref"));
         }
     }
     Ok(page)
 }
 
-async fn read_comment_page(database:&Database,content_ref:Uuid,after:Option<Uuid>,text:Option<&str>,limit:usize,body_limit:Option<i32>)->Result<Value,sqlx::Error>{
+async fn read_comment_page(
+    database: &Database,
+    content_ref: Uuid,
+    after: Option<Uuid>,
+    text: Option<&str>,
+    limit: usize,
+    body_limit: Option<i32>,
+) -> Result<Value, sqlx::Error> {
     let mut rows = sqlx::query(
         "SELECT comment.material_ref,comment.is_reply,left(comment.body_text,COALESCE($5,char_length(comment.body_text))) AS body_text, \
              COALESCE(char_length(comment.body_text)>$5,false) AS body_truncated,comment.body_state,comment.observed_at, \

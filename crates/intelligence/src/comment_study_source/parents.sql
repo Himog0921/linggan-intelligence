@@ -5,7 +5,7 @@ SELECT k.work_ref,k.external_id,latest.material_ref AS source_ref,
             WHEN latest.body_state='KNOWN' AND latest.body_text IS NOT NULL THEN 'known'
             ELSE 'unknown' END AS source_state,
        CASE WHEN r.content_public_ref IS NULL AND latest.body_state='KNOWN'
-            THEN left(latest.body_text,16001) ELSE NULL END AS raw_prefix
+            THEN latest.body_text ELSE NULL END AS raw_prefix
 FROM requested k
 LEFT JOIN LATERAL (
     SELECT c.material_ref,c.body_state,c.body_text FROM linggan_material_comment c

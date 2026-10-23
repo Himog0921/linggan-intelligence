@@ -69,6 +69,46 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     assert.equal(missing.status, 404);
     reports.push('persisted list, null/zero contract, independent missing-target 404');
 
+    // V4 uses actual accepted packages, not a frontend response mock.
+    const inspectionDomain=fixture.inspectionDomainRef;
+    const inspectionList=await targets(inspectionDomain);
+    const inspectionTarget=inspectionList.rows.find(row=>row.targetRef===fixture.inspectionTargetRef);
+    assert(inspectionTarget,'the persistent V4 fixture must appear in the correct domain');
+    const base=`/api/collection/workspace/target/${inspectionTarget.targetRef}/inspection`;
+    const rounds=await get(`${base}/rounds?domain=${inspectionDomain}`);
+    assert.equal(rounds.status,200);assert(rounds.body.rounds[0]);
+    const round=rounds.body.rounds[0];
+    const result=await get(`${base}/rounds/${round.roundRef}?domain=${inspectionDomain}`);
+    assert.equal(result.status,200);assert.equal(result.body.works.length,2);
+    const populated={target:inspectionTarget,base,round,works:result.body.works};
+    assert(populated, 'V4 browser proof requires a real accepted round with at least two works');
+    await goto({ domain: inspectionDomain, drawer: populated.target.targetRef, dtab: 'works', inspect_right_round: populated.round.roundRef });
+    await page.getByRole('button', { name: '加入对照', exact: true }).first().click();
+    await page.getByRole('button', { name: '加入对照', exact: true }).first().click();
+    await page.getByRole('button', { name: '并排对照', exact: true }).click();
+    await page.getByRole('heading', { name: '作品并排对照', exact: true }).waitFor();
+    await page.getByRole('button', { name: '当前累计', exact: true }).waitFor();
+    const canonicalResponse = page.waitForResponse(response => response.url().includes('/api/local/work-resources/') && response.url().includes('/research-dossier?'));
+    await page.getByRole('button', { name: '展开已取得的底稿', exact: true }).first().click();
+    const canonical = await canonicalResponse; assert.equal(canonical.status(), 200);
+    const canonicalPayload = await canonical.json(); assert.equal(canonicalPayload.dossier.contract, 'research-dossier.v2');
+    const canonicalUrl = new URL(canonical.url()); assert.equal(canonicalUrl.searchParams.get('asOf'), new URL(page.url()).searchParams.get('inspect_as_of'));
+    await page.getByText('以下按当前研究截点读取正式底稿。', { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(directory, 'targets-v4-canonical-dossier.png') });
+    await page.getByRole('button', { name: '发布后 24 小时', exact: true }).click();
+    const v4Selected = populated.works.slice(0, 2).map(work => work.workRef).join(',');
+    const age = await get(`${populated.base}/work-comparison?domain=${inspectionDomain}&works=${v4Selected}&mode=age_24h`);
+    assert.equal(age.status, 200); assert.equal(age.body.mode, 'age_24h'); assert.equal(age.body.items.length, 2);
+    assert(age.body.items.every(item => item.metrics.likes.value === null), 'fixture has no qualified 24-hour observation; latest values must not fill history');
+    await page.getByRole('button', { name: '返回原列表或图表', exact: true }).click();
+    await page.getByRole('button', { name: populated.works[0].title, exact: true }).click();
+    await page.getByRole('heading', { name: '观察轨迹', exact: true }).waitFor();
+    const trace = await get(`${populated.base}/works/${populated.works[0].workRef}/observations?domain=${inspectionDomain}`);
+    assert.equal(trace.status, 200); assert(trace.body.observations.length > 0);
+    assert.equal(writes.length, 0, 'rounds, comparison and trace do not collect or invoke');
+    await page.screenshot({ path: path.join(directory, 'targets-v4-observation-trace.png') });
+    reports.push('V4 React to Axum/PostgreSQL: real round, two works, canonical V2 at the same cutoff, age-24h unknown, trace and return without writes');
+
     const creatorId = 'ad0000000000000000000101';
     const creator = await create('creator', creatorId, fixture.domainRef);
     const keyword = await create('keyword', 'React迁移合成关键词G001', fixture.domainRef);

@@ -13,7 +13,7 @@ pub struct SampleEntry {
     pub dossier_revision: String,
     pub material_fingerprint: String,
     pub provenance_hash: String,
-    /// SHA-256 of the five-column InputPreview JSON, including states and literal fragments.
+    /// SHA-256 of the canonical InputPreview JSON, including states and literal fragments.
     pub input_sha256: String,
 }
 

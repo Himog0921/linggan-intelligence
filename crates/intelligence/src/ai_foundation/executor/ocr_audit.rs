@@ -75,21 +75,22 @@ async fn prepare(
     let (image, image_context) = if probe {
         (source::probe_image(), None)
     } else {
-        let source = source::load_in(&mut tx, sample.get::<Uuid, _>("adoption_ref"))
+        let source = source::load_in(&mut tx, sample.get::<Uuid, _>("reading_ref"))
             .await?
             .ok_or_else(|| {
                 FoundationError::AdmissionDenied(vec!["audit_source_unavailable".into()])
             })?;
-        if source.input.image.blob_sha256 != sample.get::<String, _>("blob_sha256") {
+        if source.image.blob_sha256 != sample.get::<String, _>("blob_sha256") {
+            return Err(ExecutorError::Invalid);
+        }
+        source.validate_snapshot(&sample.get::<serde_json::Value, _>("local_snapshot"))?;
+        if source.rule_version != sample.get::<String, _>("local_rule_version") {
             return Err(ExecutorError::Invalid);
         }
         let image = source::read_image(&source).map_err(|_| {
             FoundationError::AdmissionDenied(vec!["audit_source_unavailable".into()])
         })?;
-        (
-            image,
-            Some((source.input.image_role, source.input.sequence_ordinal)),
-        )
+        (image, Some((source.image_role, source.sequence_ordinal)))
     };
     let workspace: Uuid =
         sqlx::query_scalar("SELECT workspace_ref FROM linggan_model_workspace WHERE singleton")
@@ -133,24 +134,6 @@ async fn prepare(
         + u128::from(model.limits.output_tokens) * output)
         .div_ceil(1_000_000);
     let held=sqlx::query("SELECT count(*)::bigint AS calls,COALESCE(sum(d.reserved_tokens),0)::text AS tokens,COALESCE(sum(d.reserved_cost_micro_usd),0)::text AS cost,count(*) FILTER(WHERE i.state='running')::bigint AS running FROM linggan_ocr_audit_dispatch d JOIN linggan_ocr_audit_sample s USING(sample_ref) JOIN linggan_model_invocation i USING(invocation_ref) WHERE s.run_ref=$1").bind(sample.get::<Uuid,_>("run_ref")).fetch_one(&mut *tx).await?;
-    let tokens: u64 = held
-        .get::<String, _>("tokens")
-        .parse()
-        .map_err(|_| ExecutorError::Invalid)?;
-    let held_cost: u128 = held
-        .get::<String, _>("cost")
-        .parse()
-        .map_err(|_| ExecutorError::Invalid)?;
-    if held.get::<i64, _>("calls") >= i64::from(settings.max_requests)
-        || tokens
-            .checked_add(reservation)
-            .is_none_or(|v| v > settings.max_tokens)
-        || held_cost + cost > u128::from(settings.max_cost_micro_usd)
-    {
-        return Err(
-            FoundationError::AdmissionDenied(vec!["audit_run_budget_exhausted".into()]).into(),
-        );
-    }
     if held.get::<i64, _>("running") >= i64::from(settings.concurrency) {
         return Err(FoundationError::AdmissionDenied(vec!["audit_concurrency_full".into()]).into());
     }
@@ -242,7 +225,7 @@ async fn settle(
         None
     } else {
         let id: Uuid = sqlx::query_scalar(
-            "SELECT adoption_ref FROM linggan_ocr_audit_sample WHERE sample_ref=$1",
+            "SELECT reading_ref FROM linggan_ocr_audit_sample WHERE sample_ref=$1",
         )
         .bind(p.sample)
         .fetch_one(&mut *tx)
@@ -291,7 +274,7 @@ async fn settle(
         .bind(p.sample)
         .fetch_one(&mut *tx)
         .await?;
-        for (n, d) in audit::difference::compare(&source.assessment, v, &snapshot)
+        for (n, d) in audit::difference::compare(&source, v, &snapshot)?
             .iter()
             .enumerate()
         {

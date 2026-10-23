@@ -3,6 +3,7 @@
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
+source "$project_root/scripts/cargo-proof.sh"
 audit_tmp_root="${TMPDIR:-/tmp}"
 audit_tmp_root="${audit_tmp_root%/}"
 export AI_FOUNDATION_PROOF_NODE="$(command -v node)"
@@ -71,17 +72,17 @@ export LINGGAN_PADDLE_OCR_PYTHON="$(command -v python3)"
 export LINGGAN_PADDLE_VL_SCRIPT="$proof_assets/synthetic-bridge.py"
 export OCR_AUDIT_PROOF_OUTPUT="$proof_assets/receipts"
 if [[ "$manual_adoption_only" == 1 ]]; then
- cargo test -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
+ cargo_proof -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
  exit 0
 fi
-cargo test -p linggan-worker --test ocr_quality_audit_postgres synthetic_audit_blind_read_review_report_and_withdrawal --locked -- --ignored --nocapture
+cargo_proof -p linggan-worker --test ocr_quality_audit_postgres synthetic_audit_blind_read_review_report_and_withdrawal --locked -- --ignored --nocapture
 if [[ "$browser_proof" == 1 ]]; then
- cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable --locked -- --ignored --nocapture
+ cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable --locked -- --ignored --nocapture
 fi
-cargo test -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
-cargo test -p linggan-worker --test ocr_recognition_postgres second_image_schema_failure_stops_without_sending_the_third_image --locked -- --ignored --nocapture
-cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend --locked -- --ignored --nocapture
-cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_freezes_only_current_work_images_not_context_or_history --locked -- --ignored --nocapture
+cargo_proof -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
+cargo_proof -p linggan-worker --test ocr_recognition_postgres second_image_schema_failure_stops_without_sending_the_third_image --locked -- --ignored --nocapture
+cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend --locked -- --ignored --nocapture
+cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_freezes_only_explicit_current_work_images_not_context_or_history --locked -- --ignored --nocapture
 if [[ -n "${OCR_AUDIT_SAVE_DIR:-}" ]];then
  [[ "$OCR_AUDIT_SAVE_DIR" == "${audit_tmp_root}/linggan-ocr-audit-"* ]] || exit 2
  mkdir -p "$OCR_AUDIT_SAVE_DIR"

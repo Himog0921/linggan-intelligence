@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { fetchDossierComments } from './dossierApi';
-import { nestComments } from './dossierPresent';
+import { hideCachedReading, nestComments } from './dossierPresent';
 import type { DossierComment } from './dossierTypes';
 import { formatNumber } from './evidencePresent';
 import { dossierCommentsKey } from './evidenceKeys';
@@ -34,20 +34,23 @@ function uniqueItems(pages: readonly { items: readonly DossierComment[] }[]): Do
 }
 
 /**
- * 「评论与回复」里的评论原文：打开作品就读第一页（每页 30 条），主评论下嵌回复，直接显示全文；
- * 还有更多时给「加载更多评论」。读不出来只在这里提示，正文与图组照常。
+ * 「评论与回复」里的评论原文：「作品」标签一打开就读第一页（每页 30 条），主评论下嵌回复，直接显示全文；
+ * 还有更多时给「加载更多评论」。与正文同一规则：标签没激活就不读。读不出来只在这里提示，正文与图组照常。
  */
-export function DossierComments({ work, domain }: { work: string; domain: string }) {
+export function DossierComments({ work, domain, active }: { work: string; domain: string; active: boolean }) {
   const query = useInfiniteQuery({
     queryKey: dossierCommentsKey(domain, work),
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => fetchDossierComments(work, domain, pageParam, signal),
     getNextPageParam: page => page.nextCursor ?? undefined,
+    enabled: active,
     retry: false,
     gcTime: 0,
     refetchOnWindowFocus: false,
   });
-  const items = query.data ? uniqueItems(query.data.pages) : [];
+  // 读取被明确拒绝（无权限、来源撤回或不存在）时，已经显示的评论一并收起，不继续展示旧读数。
+  const denied = query.isError && hideCachedReading(query.error);
+  const items = query.data && !denied ? uniqueItems(query.data.pages) : [];
   const nodes = nestComments(items);
   const failed = query.isError && !query.isFetching;
   return (

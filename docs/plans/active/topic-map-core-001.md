@@ -55,7 +55,9 @@ Design / Code / Automated checks 随真实结果更新；Real-chain proof（真�
 
 本机的 PGlite WASM 仅补充证明完整 DDL 与单会话恢复/资格拒绝。其多个 SQLx 客户端共享 prepared statement 命名空间，不能替代原生事务/并发 gate；不修改生产连接池来绕过这一限制。
 
-最后一轮复审增补 `topic_map_saved_sources_postgres.rs` 与 `topic_map_core_lifecycle_postgres.rs`：前者负责保存原文/定义依赖撤回和跨配置同文身份，后者负责有限重评授权、维护队列完成竞争及发送等待期间的来源撤回。Worker 完成逻辑与主题接纳分别拆入 `lifecycle.rs`、`acceptance.rs`，所有新增测试为手写合成源码，纳入同一隔离 PostgreSQL gate。
+该历史复审最初增补 `topic_map_saved_sources_postgres.rs` 与 `topic_map_core_lifecycle_postgres.rs`：前者负责保存原文/定义依赖撤回和跨配置同文身份，后者负责有限重评授权、维护队列完成竞争及发送等待期间的来源撤回。Worker 完成逻辑与主题接纳分别拆入 `lifecycle.rs`、`acceptance.rs`，所有新增测试为手写合成源码，纳入同一隔离 PostgreSQL gate。
+
+2026-10-23 RESEARCH-DOSSIER-V2 接缝：保存来源证明现迁入 `crates/intelligence/src/topic_map_research/tests/saved_source_postgres.rs`（`cfg(test)`），由真实 canonical preparation 和显式合成接受记录驱动当前保存/读取/资格链，不重新启用已退役的旧 Configure/Start/worker。当前入口为 `cargo test -p linggan-intelligence --lib topic_map_research::saved_source_postgres:: -- --ignored --test-threads=1`，由原 PostgreSQL runner 统一执行；验收事实见 [v2 实施计划](research-dossier-v2.md)。
 
 补充 `topic_map_core_unknown_postgres.rs` 与 `topic_map_core_legacy_postgres.rs`：前者以合成传输未知响应验证跨配置等待、暂停及来源改变均不允许盲目重发；后者保留真实旧 schema 的 machine_proposed 来源缺口，验证不可复核的机器定义不继续进入展示、prompt 或保存，人工裁定定义仍可用。不回填猜测的历史血缘。比较任务还在实际 policy/run 锁后重核候选快照，防止等待期间新讨论/定义被旧授权包接纳。
 

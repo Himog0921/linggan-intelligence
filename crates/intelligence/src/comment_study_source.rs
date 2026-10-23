@@ -153,21 +153,6 @@ async fn load_sources(
     Ok(result)
 }
 
-pub(crate) async fn eligible_sources_in_transaction(
-    tx: &mut Transaction<'_, Postgres>,
-    domain: Uuid,
-    as_of: &str,
-    works: &[Uuid],
-    limit: i64,
-) -> Result<Vec<StudySource>, StudySourceError> {
-    let selections = works
-        .iter()
-        .copied()
-        .map(|work_ref| (work_ref, StudySourceRole::Primary))
-        .collect::<Vec<_>>();
-    eligible_sources_in_transaction_for_selections(tx, domain, as_of, &selections, limit).await
-}
-
 pub(crate) async fn eligible_sources_in_transaction_for_selections(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,

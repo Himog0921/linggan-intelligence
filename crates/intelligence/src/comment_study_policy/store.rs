@@ -115,7 +115,7 @@ fn model_info(model: &StudyModelSnapshot, enabled: bool) -> Value {
 }
 
 pub(super) const SUMMARY_COLUMNS: &str = "p.policy_ref,p.domain_ref,p.method_name,p.parent_policy_ref, \
-    p.model_config_ref,p.method_hash,p.comment_budget,p.context_character_budget, \
+    p.model_config_ref,p.method_hash,p.comment_budget, \
     to_char(p.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at, \
     EXISTS(SELECT 1 FROM linggan_comment_study_active_policy a \
            WHERE a.domain_ref=p.domain_ref AND a.policy_ref=p.policy_ref) AS is_active";
@@ -129,8 +129,7 @@ pub(super) fn summary(row: &sqlx::postgres::PgRow) -> Result<Value, sqlx::Error>
         "createdAt": row.try_get::<String,_>("created_at")?,
         "recordingState": if hash.is_some() { "recorded" } else { "legacy_unrecorded" },
         "methodHash": hash,
-        "defaults": {"commentBudget": row.try_get::<i32,_>("comment_budget")?,
-            "contextCharacterBudget": row.try_get::<i32,_>("context_character_budget")?},
+        "defaults": {"commentBudget": row.try_get::<i32,_>("comment_budget")?},
         "isActive": row.try_get::<bool,_>("is_active")?,
     }))
 }
@@ -222,15 +221,14 @@ pub async fn create_study_policy(
     let reference = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO linggan_comment_study_policy \
-        (policy_ref,domain_ref,model_config_ref,contract,comment_budget,context_character_budget, \
+        (policy_ref,domain_ref,model_config_ref,contract,comment_budget, \
          method_name,parent_policy_ref,method_manifest,method_hash) \
-        VALUES($1,$2,$3,'comment-study.v1',$4,$5,$6,$7,$8,$9)",
+        VALUES($1,$2,$3,'comment-study.v1',$4,$5,$6,$7,$8)",
     )
     .bind(reference)
     .bind(command.domain_ref)
     .bind(command.model_config_ref)
     .bind(command.defaults.comment_budget)
-    .bind(command.defaults.context_character_budget)
     .bind(command.method_name.trim())
     .bind(command.parent_policy_ref)
     .bind(manifest)

@@ -160,14 +160,15 @@ describe('检查器外壳', () => {
     expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}`);
   });
 
-  it('研究底稿标签激活时才读取底稿（G10）', async () => {
+  it('作品正文与研究底稿共享同一 canonical 读取，附加元数据按需读取', async () => {
     pageRoutes(kit);
     kit.route('GET', `${detailPathOf(1)}/research-dossier`, ok(dossierJson(1)));
     const view = await opened();
-    expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(0);
+    await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
     await view.user.click(screen.getByRole('tab', { name: '研究底稿' }));
     await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
     expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)[0]?.search.get('domain')).toBe(DOMAIN);
+    expect(kit.of('GET', `${detailPathOf(1)}/research-dossier/metadata`)).toHaveLength(0);
   });
 
   it('`tab=dossier` 的深链直接读取底稿', async () => {
@@ -371,13 +372,13 @@ describe('敏感面', () => {
   });
 
   // Mog 2026-10-23：评论直接展示——打开作品即读评论第一页（只读、只读这一篇，仍不写任何存储）。
-  it('页面打开时只读取外壳、列表、选中作品详情、OCR 状态与评论第一页，不发起识别', async () => {
+  it('页面打开时读取选中作品的 canonical 正文、识别状态与评论第一页，不发起识别或读取附件', async () => {
     pageRoutes(kit);
     await opened();
     await screen.findByRole('tab', { name: '作品' });
     await waitFor(() => expect(kit.of('GET', commentsPathOf(1))).toHaveLength(1));
     const paths = [...new Set(kit.calls.map(call => call.path))].sort();
-    expect(paths).toEqual(['/api/local/corpus/shell', LIST_PATH, detailPathOf(1), ocrPathOf(1), commentsPathOf(1)].sort());
+    expect(paths).toEqual(['/api/local/corpus/shell', LIST_PATH, detailPathOf(1), ocrPathOf(1), `${detailPathOf(1)}/research-dossier`, commentsPathOf(1)].sort());
     expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
   });
 });

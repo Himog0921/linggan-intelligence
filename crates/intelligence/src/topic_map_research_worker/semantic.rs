@@ -145,6 +145,7 @@ pub(super) async fn prepare_review(
     }
     .map_err(|_| ModelError::InvalidOutput)?;
     packet["domain"] = input.domain.clone();
+    packet["asOf"] = input.coverage["asOf"].clone();
     prepared.review_packet = packet.clone();
     prepared.system = verification::VERIFY_SYSTEM.into();
     let mut prompt = json!({"contract":verification::VERIFY_CONTRACT,

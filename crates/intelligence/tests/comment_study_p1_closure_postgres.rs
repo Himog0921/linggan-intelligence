@@ -50,6 +50,18 @@ async fn work(db: &Database, source: Uuid) -> Uuid {
     .unwrap()
 }
 
+/// Two independent read receipts necessarily carry their own observation instant.
+/// The P1 contract here is that the selected work context has the same frozen
+/// canonical revision and ordered sources, not that these two receipt timestamps
+/// stringify identically across PostgreSQL sessions.
+fn context_without_source_as_of(manifest: &Value) -> Value {
+    let mut manifest = manifest.clone();
+    for source in manifest["sources"].as_array_mut().unwrap() {
+        source.as_object_mut().unwrap().remove("asOf");
+    }
+    manifest
+}
+
 #[tokio::test]
 #[ignore = "isolated synthetic PostgreSQL"]
 async fn p1_directory_and_frozen_source_share_parent_and_work_context() {
@@ -99,8 +111,8 @@ async fn p1_directory_and_frozen_source_share_parent_and_work_context() {
         selected[0].parent_research_text.as_deref()
     );
     assert_eq!(
-        detail["work"]["contextManifest"],
-        selected[0].context_manifest
+        context_without_source_as_of(&detail["work"]["contextManifest"]),
+        context_without_source_as_of(&selected[0].context_manifest)
     );
     assert!(
         detail["work"]["contextManifest"]["sources"]

@@ -1,24 +1,21 @@
+import { parseBlock, parseIssue } from '../corpus/evidence/dossierBlockDecode';
+import type { DossierBlock, DossierIssue, Speaker } from '../corpus/evidence/dossierTypes';
 /** Closed HTTP projection of CONTENT-WORKBENCH-001. Unicode ranges are scalar offsets. */
-export type SourceKind = 'note' | 'comment' | 'ocr' | 'ops_publication';
-export type SourceField = 'title' | 'body' | 'ocr' | 'cover_headline' | 'comment_body';
+export type SourceKind = 'note' | 'comment' | 'ocr' | 'transcript' | 'frame_text' | 'ops_publication';
+export type SourceField = 'title' | 'body' | 'tags' | 'ocr' | 'transcript' | 'frame_text' | 'comment_body';
 export type CanvasGroup = 'inbox' | 'opening' | 'argument' | 'example' | 'ending';
 export type PageKind = 'cover' | 'opinion' | 'voice' | 'steps';
 export type Palette = 'cream' | 'sage' | 'ink';
-export interface OcrLineSpan {
-  lineRef: string;
-  start: number;
-  end: number;
+export interface OcrLocation {
+  unitRef: string;
+  readingRef: string;
+  blockRef: string;
+  slotKey: string;
   bbox: [number, number, number, number];
 }
-export interface OcrLocation {
-  derivativeRef: string;
-  layoutRef: string;
-  layeringRef: string;
-  blobSha256: string;
-  slotKey: string;
-  lineSpans: OcrLineSpan[];
-}
 export interface Citation {
+  asOf: string;
+  blockRef: string;
   sourceKind: SourceKind;
   sourceRef: string;
   workRef: string | null;
@@ -224,7 +221,12 @@ export interface AssetRecord {
   height: number;
 }
 export interface SourceItem {
+  asOf: string;
   fragmentId: string;
+  blockRef: string;
+  speaker: Speaker;
+  structure: DossierBlock | null;
+  issues: DossierIssue[];
   sourceKind: SourceKind;
   sourceRef: string;
   workRef: string | null;
@@ -383,27 +385,18 @@ function shape<T>(fields: { [K in keyof T]: Parser<T[K]> }): Parser<T> {
     return result as T;
   };
 }
-const sourceKind = choice('note', 'comment', 'ocr', 'ops_publication');
-const field = choice('title', 'body', 'ocr', 'cover_headline', 'comment_body');
+const sourceKind = choice('note', 'comment', 'ocr', 'transcript', 'frame_text', 'ops_publication');
+const field = choice('title', 'body', 'tags', 'ocr', 'transcript', 'frame_text', 'comment_body');
 const bbox: Parser<[number, number, number, number]> = v => {
   if (!Array.isArray(v) || v.length !== 4) return bad();
-  return [num(v[0]), num(v[1]), num(v[2]), num(v[3])];
+  const result: [number, number, number, number] = [num(v[0]), num(v[1]), num(v[2]), num(v[3])];
+  if (result.some(value => value < 0 || value > 1) || result[2] <= 0 || result[3] <= 0 || result[0] + result[2] > 1.00000001 || result[1] + result[3] > 1.00000001) return bad();
+  return result;
 };
-const lineSpan = shape<OcrLineSpan>({
-  lineRef: uuid,
-  start: integer,
-  end: integer,
-  bbox
-});
-const location = shape<OcrLocation>({
-  derivativeRef: uuid,
-  layoutRef: uuid,
-  layeringRef: uuid,
-  blobSha256: str,
-  slotKey: str,
-  lineSpans: array(lineSpan)
-});
+const location = shape<OcrLocation>({ unitRef: uuid, readingRef: uuid, blockRef: str, slotKey: str, bbox });
 export const parseCitation = shape<Citation>({
+  asOf: str,
+  blockRef: str,
   sourceKind,
   sourceRef: uuid,
   workRef: nullable(uuid),
@@ -623,8 +616,13 @@ export const parseAsset = shape<AssetRecord>({
   width: integer,
   height: integer
 });
-export const parseSourceItem = shape<SourceItem>({
+const sourceItem = shape<SourceItem>({
+  asOf: str,
   fragmentId: str,
+  blockRef: str,
+  speaker: choice('author', 'other', 'unconfirmed'),
+  structure: nullable(v => parseBlock(object(v))),
+  issues: array(v => parseIssue(object(v))),
   sourceKind,
   sourceRef: uuid,
   workRef: nullable(uuid),
@@ -637,6 +635,11 @@ export const parseSourceItem = shape<SourceItem>({
   qualification: str,
   location: nullable(location)
 });
+export function parseSourceItem(value: unknown): SourceItem {
+  const row = sourceItem(value);
+  if (!row.blockRef || !row.asOf || row.fragmentId !== row.blockRef || (row.structure !== null && row.structure.ref !== row.blockRef)) return bad();
+  return row;
+}
 export const parseMaterialDocument = shape<MaterialDocument>({
   documentId: str, sourceKind: materialKind, sourceRef: uuid, workRef: nullable(uuid),
   sourceVersion: str, title: str, authorLabel: str,
@@ -812,6 +815,8 @@ export const SOURCE_LABELS: Record<SourceKind, string> = {
   note: '原笔记',
   comment: '匿名原声',
   ocr: '图片文字',
+  transcript: '音轨转写',
+  frame_text: '视频画面文字',
   ops_publication: '我方作品'
 };
 

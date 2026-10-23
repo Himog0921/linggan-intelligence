@@ -402,18 +402,16 @@ fn material_api_routes() -> Router<LocalWebState> {
                 comment_study::local_comment_study_guard,
             )),
         )
-        .route(
-            "/api/local/work-resources/{public_ref}/research-dossier/note-material",
-            get(research_dossier::note_material).layer(axum::middleware::from_fn(
-                comment_study::local_comment_study_guard,
-            )),
-        )
-        .route(
-            "/api/local/work-resources/{public_ref}/research-dossier/creator-preview",
-            get(research_dossier::creator_preview).layer(axum::middleware::from_fn(
-                comment_study::local_comment_study_guard,
-            )),
-        )
+        .route("/api/local/work-resources/{public_ref}/research-dossier/candidates",
+            get(research_dossier::candidates).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/work-resources/{public_ref}/research-dossier/materials/{unit_ref}/review",
+            post(research_dossier::review).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/work-resources/{public_ref}/research-dossier/readings/{reading_ref}",
+            get(research_dossier::version).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/work-resources/{public_ref}/research-dossier/metadata",
+            get(research_dossier::metadata).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route("/api/local/research-dossiers/read",
+            post(research_dossier::batch).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
         .route(
             "/api/local/work-resources/{public_ref}/research-dossier/comments",
             get(research_dossier::comments).layer(axum::middleware::from_fn(

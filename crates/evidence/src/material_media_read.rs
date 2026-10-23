@@ -463,30 +463,21 @@ async fn read_slots_batch(
     .bind(i64::try_from(DETAIL_MEDIA_SLOT_LIMIT + 1).expect("detail slot limit is bounded"))
     .fetch_all(&mut **tx)
     .await?;
-    let component_work_ready: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM pg_attribute \
-         WHERE attrelid=to_regclass('linggan_media_acquisition_work') \
-           AND attname='component_kind' AND NOT attisdropped)",
-    )
-    .fetch_one(&mut **tx)
-    .await?;
     let mut acquired_components = std::collections::HashSet::new();
-    if component_work_ready {
-        for row in sqlx::query(
-            "SELECT work.observation_ref,work.component_kind \
+    for row in sqlx::query(
+        "SELECT work.observation_ref,work.component_kind \
              FROM linggan_media_acquisition_work work \
              JOIN linggan_material_media_origin origin USING(observation_ref) \
              WHERE origin.content_public_ref=ANY($1) AND work.state='completed'",
-        )
-        .bind(content_refs)
-        .fetch_all(&mut **tx)
-        .await?
-        {
-            acquired_components.insert((
-                row.get::<Uuid, _>("observation_ref"),
-                row.get::<String, _>("component_kind"),
-            ));
-        }
+    )
+    .bind(content_refs)
+    .fetch_all(&mut **tx)
+    .await?
+    {
+        acquired_components.insert((
+            row.get::<Uuid, _>("observation_ref"),
+            row.get::<String, _>("component_kind"),
+        ));
     }
     let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
     for row in rows {
@@ -726,77 +717,10 @@ pub(crate) async fn read_derivatives_batch(
     }
     let mut result = HashMap::new();
     for (work, rows) in grouped {
-        let mut projected = project_derivative_rows(rows);
-        crate::ocr_adoption_persistence::attach_media(tx, &mut projected.0, as_of).await?;
+        let projected = project_derivative_rows(rows);
         result.insert(work, projected);
     }
     Ok(result)
-}
-
-/// Research exhausts the already acquired derivatives in bounded pages, sharing the
-/// disposition/retirement/OCR projection with the existing preview reader.
-pub(crate) async fn read_topic_derivatives_batch(
-    tx: &mut Transaction<'_, Postgres>,
-    content_refs: &[Uuid],
-    as_of: &str,
-) -> Result<HashMap<Uuid, Vec<Value>>, sqlx::Error> {
-    let mut pending = content_refs.to_vec();
-    let mut after = 0_i64;
-    let mut derivatives = HashMap::<Uuid, Vec<Value>>::new();
-    while !pending.is_empty() {
-        let rows = read_derivative_rows(tx, &pending, as_of, after, DETAIL_DERIVATIVE_LIMIT as i64)
-            .await?;
-        let mut grouped: HashMap<Uuid, Vec<PgRow>> = HashMap::new();
-        for row in rows {
-            grouped
-                .entry(row.get("content_public_ref"))
-                .or_default()
-                .push(row);
-        }
-        pending.clear();
-        for (work, rows) in grouped {
-            if rows.len() == DETAIL_DERIVATIVE_LIMIT {
-                pending.push(work);
-            }
-            let research: Vec<_> = rows
-                .iter()
-                .map(|row| {
-                    (
-                        row.get::<Option<Uuid>, _>("derivative_ref"),
-                        row.get::<Option<String>, _>("research_text"),
-                        crate::creator_discovery::topic_media_source_identity(
-                            &row.get::<String, _>("input_blob_sha256"),
-                            &row.get::<String, _>("slot_key"),
-                            &row.get::<String, _>("input_scope"),
-                            row.get::<Option<Value>, _>("derived_source_location")
-                                .unwrap_or(serde_json::json!({})),
-                        ),
-                    )
-                })
-                .collect();
-            derivatives.entry(work).or_default().extend(
-                project_derivative_rows(rows)
-                    .0
-                    .into_iter()
-                    .zip(research)
-                    .map(|(mut derivative, (reference, text, semantic))| {
-                        derivative["derivativeRef"] = serde_json::json!(reference);
-                        derivative["semanticMediaSource"] = semantic;
-                        if derivative["state"] == "ACQUIRED"
-                            && matches!(derivative["kind"].as_str(), Some("asr_text" | "ocr_text"))
-                        {
-                            derivative["researchText"] = serde_json::json!(text);
-                        }
-                        derivative
-                    }),
-            );
-        }
-        after += DETAIL_DERIVATIVE_LIMIT as i64;
-    }
-    for items in derivatives.values_mut() {
-        crate::ocr_adoption_persistence::attach_media(tx, items, as_of).await?;
-    }
-    Ok(derivatives)
 }
 
 async fn read_derivative_rows(
@@ -809,21 +733,9 @@ async fn read_derivative_rows(
     if content_refs.is_empty() {
         return Ok(Vec::new());
     }
-    let ocr_retirement_schema_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
-            .fetch_one(&mut **tx)
-            .await?;
-    // This is a schema-compatibility branch, not user SQL: see the matching page-query guard.
-    let retirement_join = if ocr_retirement_schema_ready {
-        "LEFT JOIN linggan_media_ocr_retirement retired ON retired.retired_job_ref=job.job_ref"
-    } else {
-        "LEFT JOIN LATERAL (SELECT NULL::uuid AS retired_job_ref) retired ON true"
-    };
-    let layering_join = if ocr_retirement_schema_ready {
-        "LEFT JOIN LATERAL (SELECT layout.image_width,layout.image_height,layout.engine_version,layer.layout_ref,layer.layering_ref,layer.layer_version,layer.state,layer.decision_source,layer.cover_headline,layer.image_substantive_text,layer.retained_line_refs,layer.excluded_lines FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=derivative.derivative_ref AND layout.created_at<=$2::timestamptz AND layer.created_at<=$2::timestamptz AND layer.layer_version IN ('rules-v1','rules-v2','rules-v3') ORDER BY CASE layer.layer_version WHEN 'rules-v3' THEN 0 WHEN 'rules-v2' THEN 1 ELSE 2 END,layer.created_at DESC,layer.layering_ref DESC LIMIT 1) layering ON true"
-    } else {
-        "LEFT JOIN LATERAL (SELECT NULL::integer AS image_width,NULL::integer AS image_height,NULL::text AS engine_version,NULL::uuid AS layout_ref,NULL::uuid AS layering_ref,NULL::text AS layer_version,NULL::jsonb AS retained_line_refs,NULL::jsonb AS excluded_lines,NULL::text AS state,NULL::text AS decision_source,NULL::text AS cover_headline,NULL::text AS image_substantive_text) layering ON true"
-    };
+    let retirement_join =
+        "LEFT JOIN linggan_media_ocr_retirement retired ON retired.retired_job_ref=job.job_ref";
+    let layering_join = "LEFT JOIN LATERAL (SELECT layout.image_width,layout.image_height,layout.engine_version,layer.layout_ref,layer.layering_ref,layer.layer_version,layer.state,layer.decision_source,layer.cover_headline,layer.image_substantive_text,layer.retained_line_refs,layer.excluded_lines FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=derivative.derivative_ref AND layout.created_at<=$2::timestamptz AND layer.created_at<=$2::timestamptz ORDER BY layer.created_at DESC,layer.layering_ref DESC LIMIT 1) layering ON true";
     let derivative_rows = sqlx::query(AssertSqlSafe(format!(
         "WITH restricted_disposition AS MATERIALIZED ( \
              SELECT slot_key,blob_sha256,derivative_ref \

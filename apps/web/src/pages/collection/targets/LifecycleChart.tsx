@@ -241,7 +241,7 @@ export function Chart({
         <svg
           className="life-trend-chart"
           viewBox="0 0 980 470"
-          role="img"
+          role="group"
           aria-labelledby="life-trend-chart-title life-trend-chart-desc"
         >
           <title id="life-trend-chart-title">创作者作品表现趋势</title>
@@ -284,7 +284,10 @@ export function Chart({
           </text>
           <path className="life-trend-line" d={line} />
           {buckets.map((b, i) => (
-            <g key={b.label}>
+            <a key={b.label} href={listHref(params,{life_bucket:b.label,life_work:null},'creator-lifecycle')}
+              aria-label={`${b.label}，${b.points.length} 篇当前可分析作品，${metric}中位数 ${medians[i] ?? 0}。选择后查看本桶作品并加入对照。`}
+              aria-current={params.get('life_bucket')===b.label?'true':undefined}
+              className={params.get('life_bucket')===b.label?'life-trend-bucket-selected':undefined}>
               {b.points.some((v) => v.new) && (
                 <circle className="life-trend-new-ring" cx={coordinate(x(i))} cy={coordinate(y(medians[i] ?? 0))} r={9.5} />
               )}
@@ -294,7 +297,8 @@ export function Chart({
                 cy={coordinate(y(medians[i] ?? 0))}
                 r={4.4}
               />
-            </g>
+              <circle className="life-trend-bucket-hit" cx={coordinate(x(i))} cy={coordinate(y(medians[i] ?? 0))} r={14} fill="transparent" />
+            </a>
           ))}
           {buckets.map((b, i) =>
             buckets.length <= 7 || i === 0 || i + 1 === buckets.length || i % 2 === 0 ? (

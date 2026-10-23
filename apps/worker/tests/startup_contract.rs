@@ -619,10 +619,7 @@ async fn seed_synthetic_study(database: &Database) -> Uuid {
             method_name: "WORKER_SIGTERM_DRAIN_SYNTHETIC".into(),
             parent_policy_ref: None,
             model_config_ref: config,
-            defaults: StudyPolicyDefaults {
-                comment_budget: 1,
-                context_character_budget: 6000,
-            },
+            defaults: StudyPolicyDefaults { comment_budget: 1 },
             stage_instructions: StudyStageInstructions {
                 semantic: "synthetic test only".into(),
                 resolution: String::new(),
@@ -640,7 +637,7 @@ async fn seed_synthetic_study(database: &Database) -> Uuid {
         "policyRef": policy_ref,
         "scope": {"kind":"works","workRefs":[work_ref]},
         "mode":"new_only",
-        "limits":{"commentBudget":1,"contextCharacterBudget":6000,"tokenLimit":100000},
+        "limits":{"commentBudget":1,"tokenLimit":100000},
         "reason":null
     }))
     .unwrap();

@@ -1,3 +1,6 @@
+import { parseDossier } from '../corpus/evidence/dossierDecode';
+import { DossierBlocks } from '../corpus/evidence/DossierBlocks';
+import { mediaPath } from '../corpus/evidence/evidencePaths';
 import { MaterialDistribution } from "./MaterialDistribution";
 import { ActionButton } from "../../shared/ActionButton";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -42,107 +45,21 @@ function SourceContextView({ value }: { value: unknown }) {
   if (!isRecord(value)) return null;
   const parent = isRecord(value.parentWork) ? value.parentWork : null;
   const comment = isRecord(value.parentComment) ? value.parentComment : null;
-  const dossier = isRecord(value.dossier) ? value.dossier : null;
-  const fragments = parent?.fragments;
-  const coverage = dossier?.coverage ?? parent?.coverage;
-  return (
-    <div className={styles.context}>
-      {comment && comment.state !== "not_applicable" ? (
-        <section>
-          <h3>回复语境</h3>
-          {comment.state === "known" && typeof comment.body === "string" ? (
-            <blockquote>{comment.body}</blockquote>
-          ) : (
-            <p>
-              {comment.state === "restricted"
-                ? "父评论已受限"
-                : comment.state === "known"
-                  ? "父评论正文未知"
-                  : "父评论未知"}
-            </p>
-          )}
-        </section>
-      ) : null}
-      {parent ? (
-        <section>
-          <h3>所在笔记</h3>
-          {Array.isArray(fragments) ? (
-            fragments.map((f, i) =>
-              isRecord(f) && typeof f.text === "string" ? (
-                <p className={styles.evidence} key={i}>
-                  {f.text}
-                </p>
-              ) : null,
-            )
-          ) : (
-            <p>
-              {parent.state === "unavailable"
-                ? "所在笔记暂不可读"
-                : "所在笔记内容未知"}
-            </p>
-          )}
-        </section>
-      ) : null}
-      {coverage !== undefined ? (
-        <details>
-          <summary>取得范围</summary>
-          <pre>{JSON.stringify(coverage, null, 2)}</pre>
-        </details>
-      ) : null}
-    </div>
-  );
+  let dossier: ReturnType<typeof parseDossier> | null = null;
+  try { if (parent?.dossier !== undefined) dossier = parseDossier(parent.dossier); } catch { /* An invalid source is visible as unavailable, never replaced with a legacy body. */ }
+  return <div className={styles.context}>
+    {comment && comment.state !== 'not_applicable' ? <section><h3>回复语境</h3>{comment.state === 'known' && typeof comment.body === 'string' ? <blockquote>{comment.body}</blockquote> : <p>{comment.state === 'restricted' ? '父评论已受限' : '父评论正文尚未确认'}</p>}</section> : null}
+    {parent ? <section><h3>所在笔记</h3>{dossier ? <>{dossier.note.platformTitle ? <p className={styles.evidence}>{dossier.note.platformTitle}</p> : null}{dossier.materials.map(unit => <DossierBlocks key={unit.ref} blocks={unit.blocks} issues={unit.issues} />)}</> : <p>{parent.state === 'restricted' ? '所在笔记已受限' : '所在笔记暂不可读'}</p>}</section> : null}
+  </div>;
 }
-
-function OcrEvidence({
-  piece,
-  context,
-  start,
-  end,
-}: {
-  piece: ReadingPiece;
-  context: unknown;
-  start: number;
-  end: number;
-}) {
+function OcrEvidence({ piece, context }: { piece: ReadingPiece; context: unknown; start: number; end: number }) {
   const location = piece.source.location;
   if (!location) return null;
-  const dossier =
-    isRecord(context) && isRecord(context.dossier) ? context.dossier : null;
-  const media = dossier && Array.isArray(dossier.media) ? dossier.media : [];
-  const original = media.find(
-    (item) => isRecord(item) && item.derivativeRef === location.derivativeRef,
-  );
-  const url =
-    isRecord(original) &&
-    typeof original.originalAssetUrl === "string" &&
-    original.originalAssetUrl.startsWith("/api/local/media/")
-      ? original.originalAssetUrl
-      : null;
-  return (
-    <section>
-      <h3>图片文字位置</h3>
-      {url ? (
-        <div className={styles.ocrImage}>
-          <img src={url} alt="OCR 来源原图" />
-          {location.lineSpans
-            .filter((line) => line.end > start && line.start < end)
-            .map((line) => (
-              <span
-                key={line.lineRef}
-                style={{
-                  left: `${line.bbox[0] * 100}%`,
-                  top: `${line.bbox[1] * 100}%`,
-                  width: `${line.bbox[2] * 100}%`,
-                  height: `${line.bbox[3] * 100}%`,
-                }}
-              />
-            ))}
-        </div>
-      ) : (
-        <p>原图尚未取得；文字位置仍保留。</p>
-      )}
-    </section>
-  );
+  let dossier: ReturnType<typeof parseDossier> | null = null;
+  try { if (isRecord(context)) dossier = parseDossier(context.dossier); } catch { /* The reading is unavailable; do not locate against a different revision. */ }
+  const material = dossier?.materials.find(unit => unit.ref === location.unitRef && unit.currentRevisionRef === location.readingRef && unit.blocks.some(block => block.ref === location.blockRef));
+  const url = mediaPath(material?.originalUrl);
+  return <section><h3>原文区块位置</h3>{url ? <div className={styles.ocrImage}><img src={url} alt="文字来源原图" /><span style={{ left: `${location.bbox[0] * 100}%`, top: `${location.bbox[1] * 100}%`, width: `${location.bbox[2] * 100}%`, height: `${location.bbox[3] * 100}%` }} /></div> : <p>该版本的原图当前不可读；保留原区块引用。</p>}</section>;
 }
 function BookPassage({
   piece,
@@ -439,7 +356,7 @@ export function MaterialBrowser({
     (piece) =>
       (kind === "all" ||
         piece.source.sourceKind === kind ||
-        (kind === "note" && piece.source.sourceKind === "ocr")) &&
+        (kind === "note" && ["ocr", "transcript", "frame_text"].includes(piece.source.sourceKind))) &&
       (type === "全部" || piece.type === type) &&
       `${piece.text} ${piece.source.authorLabel}`.includes(filter),
   );
@@ -449,6 +366,8 @@ export function MaterialBrowser({
           (piece) =>
             piece.source.sourceRef === focusCitation.sourceRef &&
             piece.source.field === focusCitation.field &&
+            piece.source.blockRef === focusCitation.blockRef &&
+            piece.source.asOf === focusCitation.asOf &&
             piece.source.sourceVersion === focusCitation.sourceVersion &&
             piece.start <= focusCitation.start &&
             piece.end > focusCitation.start,
@@ -461,6 +380,8 @@ export function MaterialBrowser({
       (piece) =>
         piece.source.sourceRef === focusCitation.sourceRef &&
         piece.source.field === focusCitation.field &&
+            piece.source.blockRef === focusCitation.blockRef &&
+            piece.source.asOf === focusCitation.asOf &&
         piece.source.sourceVersion !== focusCitation.sourceVersion,
     );
   const requestedSelection =
@@ -577,6 +498,8 @@ export function MaterialBrowser({
         excerpt.citation.sourceRef === piece.source.sourceRef &&
         excerpt.citation.sourceVersion === piece.source.sourceVersion &&
         excerpt.citation.field === piece.source.field &&
+        excerpt.citation.blockRef === piece.source.blockRef &&
+        excerpt.citation.asOf === piece.source.asOf &&
         excerpt.citation.start < piece.end &&
         excerpt.citation.end > piece.start,
     );
@@ -603,6 +526,8 @@ export function MaterialBrowser({
         workRef: source.workRef,
         field: source.field,
         sourceVersion: source.sourceVersion,
+        blockRef: source.blockRef,
+        asOf: source.asOf,
         start: selected.start,
         end: selected.end,
       });

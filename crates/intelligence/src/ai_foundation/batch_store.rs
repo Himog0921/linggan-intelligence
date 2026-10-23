@@ -56,6 +56,9 @@ pub enum InputRef {
     OcrRecognitionItem {
         item_ref: Uuid,
     },
+    WorkComparison {
+        request_ref: Uuid,
+    },
     WritingRequest {
         request_ref: Uuid,
     },
@@ -90,6 +93,7 @@ impl InputRef {
             }
             Self::OcrAuditSample { .. } => task == TaskKey::OcrQualityAudit,
             Self::OcrRecognitionItem { .. } => task == TaskKey::OcrRecognition,
+            Self::WorkComparison { .. } => task == TaskKey::WorkComparison && !trial,
             Self::WritingRequest { .. } => task == TaskKey::WritingLegacy && !trial,
             Self::WritingPreview { .. } => task == TaskKey::WritingLegacy && trial,
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
@@ -130,13 +134,15 @@ impl BatchKind {
     fn permits(self, task: TaskKey) -> bool {
         match task {
             TaskKey::ModelProbe => self == Self::Probe,
+            TaskKey::WorkComparison => self == Self::Interactive,
             TaskKey::WritingLegacy
             | TaskKey::WritingAssistant
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => matches!(self, Self::Interactive | Self::Trial),
-            TaskKey::NoteInterpretation | TaskKey::AuthorOrgIdentity | TaskKey::OcrQualityAudit | TaskKey::OcrRecognition => {
-                self != Self::Probe
-            }
+            TaskKey::NoteInterpretation
+            | TaskKey::AuthorOrgIdentity
+            | TaskKey::OcrQualityAudit
+            | TaskKey::OcrRecognition => self != Self::Probe,
             _ => false,
         }
     }
@@ -178,6 +184,7 @@ pub struct TrialReceipt {
     pub inputs_sha256: String,
     pub accepted: bool,
 }
+
 pub(crate) fn input_hash(
     task: TaskKey,
     items: &[BatchInput],
@@ -243,23 +250,9 @@ pub(crate) async fn insert_batch(
     let batch = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_ai_batch(batch_ref,task_key,task_config_ref,kind,inputs_sha256,item_count,command_ref) VALUES($1,$2,$3,$4,$5,$6,$7)")
         .bind(batch).bind(task.as_str()).bind(config).bind(kind.as_str()).bind(hash).bind(items.len() as i32).bind(command).execute(&mut **tx).await?;
-    let records = items
-        .iter()
-        .enumerate()
-        .map(|(position, item)| {
-            json!({"item_ref":Uuid::new_v4(),"position":position,
-        "item_key":item.item_key,"input_ref":item.input})
-        })
-        .collect::<Vec<_>>();
-    sqlx::query(
-        "INSERT INTO linggan_ai_batch_item(item_ref,batch_ref,position,item_key,input_ref)
-        SELECT item_ref,$1,position,item_key,input_ref FROM jsonb_to_recordset($2::jsonb)
-        AS items(item_ref uuid,position integer,item_key text,input_ref jsonb)",
-    )
-    .bind(batch)
-    .bind(json!(records))
-    .execute(&mut **tx)
-    .await?;
+    let records=items.iter().enumerate().map(|(position,item)|json!({"item_ref":Uuid::new_v4(),"position":position,"item_key":item.item_key,"input_ref":item.input})).collect::<Vec<_>>();
+    sqlx::query("INSERT INTO linggan_ai_batch_item(item_ref,batch_ref,position,item_key,input_ref) SELECT item_ref,$1,position,item_key,input_ref FROM jsonb_to_recordset($2::jsonb) AS items(item_ref uuid,position integer,item_key text,input_ref jsonb)")
+        .bind(batch).bind(json!(records)).execute(&mut **tx).await?;
     Ok(batch)
 }
 pub async fn create_batch(
@@ -272,9 +265,12 @@ pub async fn create_batch(
     {
         return Err(FoundationError::Invalid);
     }
+    // Work comparison must freeze its exact material scope through its owning command.
+    if request.task_key == TaskKey::WorkComparison {
+        return Err(FoundationError::Invalid);
+    }
     let hash = input_hash(request.task_key, &request.items, false)?;
-    let payload = json!({"task":request.task_key,"expectedTaskRevision":request.expected_task_revision,
-        "config":request.task_config_ref,"kind":request.kind,"inputsHash":hash});
+    let payload = json!({"task":request.task_key,"expectedTaskRevision":request.expected_task_revision,"config":request.task_config_ref,"kind":request.kind,"inputsHash":hash});
     let mut command = Command::begin(db, request.command_ref, "batch", &payload).await?;
     if let Some(receipt) = command.replay()? {
         return Ok(receipt);
@@ -308,7 +304,6 @@ pub async fn create_batch(
         .await
 }
 /// Caller locks this batch before any request row, matching execution's publication boundary.
-/// In-flight items retain their lease and settle usage; only untouched pending items are cancelled.
 pub(crate) async fn cancel_in(
     tx: &mut Transaction<'_, Postgres>,
     batch: Uuid,
@@ -325,12 +320,9 @@ pub(crate) async fn cancel_in(
         return Ok(());
     }
     if !row.get::<bool, _>("cancel_requested") {
-        sqlx::query("UPDATE linggan_ai_batch_control SET cancel_requested=true,revision=revision+1,stop_reason='human_cancelled' WHERE batch_ref=$1")
-            .bind(batch).execute(&mut **tx).await?;
+        sqlx::query("UPDATE linggan_ai_batch_control SET cancel_requested=true,revision=revision+1,stop_reason='human_cancelled' WHERE batch_ref=$1").bind(batch).execute(&mut **tx).await?;
     }
-    sqlx::query("UPDATE linggan_ai_batch_item_control c SET state='cancelled',usable=false,finished_at=scope_001_now()
-        FROM linggan_ai_batch_item item WHERE item.item_ref=c.item_ref AND item.batch_ref=$1 AND c.state='pending'")
-        .bind(batch).execute(&mut **tx).await?;
+    sqlx::query("UPDATE linggan_ai_batch_item_control c SET state='cancelled',usable=false,finished_at=scope_001_now() FROM linggan_ai_batch_item item WHERE item.item_ref=c.item_ref AND item.batch_ref=$1 AND c.state='pending'").bind(batch).execute(&mut **tx).await?;
     super::rounds::evaluate_in(tx, batch).await?;
     Ok(())
 }
@@ -345,8 +337,7 @@ pub async fn create_trial(
         return Err(FoundationError::Invalid);
     }
     let hash = input_hash(request.task_key, &request.items, true)?;
-    let payload = json!({"task":request.task_key,"expectedTaskRevision":request.expected_task_revision,
-        "baseline":request.baseline_config_ref,"candidate":request.candidate_config_ref,"inputsHash":hash});
+    let payload = json!({"task":request.task_key,"expectedTaskRevision":request.expected_task_revision,"baseline":request.baseline_config_ref,"candidate":request.candidate_config_ref,"inputsHash":hash});
     let mut command = Command::begin(db, request.command_ref, "trial_comparison", &payload).await?;
     if let Some(receipt) = command.replay()? {
         return Ok(receipt);
@@ -358,8 +349,7 @@ pub async fn create_trial(
     )
     .await?;
     let baseline = if let Some(config) = request.baseline_config_ref {
-        let approved:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ai_task_config c JOIN linggan_skill_binding b USING(task_key) WHERE c.task_config_ref=$1 AND c.task_key=$2 AND c.skill_version_ref IS NOT DISTINCT FROM b.current_version_ref)")
-            .bind(config).bind(request.task_key.as_str()).fetch_one(&mut *command.tx).await?;
+        let approved:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ai_task_config c JOIN linggan_skill_binding b USING(task_key) WHERE c.task_config_ref=$1 AND c.task_key=$2 AND c.skill_version_ref IS NOT DISTINCT FROM b.current_version_ref)").bind(config).bind(request.task_key.as_str()).fetch_one(&mut *command.tx).await?;
         if !approved {
             return Err(FoundationError::SkillTrialRequired);
         }
@@ -388,8 +378,7 @@ pub async fn create_trial(
         &hash,
     )
     .await?;
-    sqlx::query("INSERT INTO linggan_ai_trial_comparison(comparison_ref,task_key,baseline_batch_ref,candidate_batch_ref) VALUES($1,$2,$3,$4)")
-        .bind(request.command_ref).bind(request.task_key.as_str()).bind(baseline).bind(candidate).execute(&mut *command.tx).await?;
+    sqlx::query("INSERT INTO linggan_ai_trial_comparison(comparison_ref,task_key,baseline_batch_ref,candidate_batch_ref) VALUES($1,$2,$3,$4)").bind(request.command_ref).bind(request.task_key.as_str()).bind(baseline).bind(candidate).execute(&mut *command.tx).await?;
     command
         .finish(TrialReceipt {
             comparison_ref: request.command_ref,
@@ -400,7 +389,6 @@ pub async fn create_trial(
         })
         .await
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;

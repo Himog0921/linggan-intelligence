@@ -33,9 +33,6 @@ pub struct Settings {
     #[serde(default)]
     pub privacy_clearance_reason: String,
     pub regression_count: u32,
-    pub max_requests: u32,
-    pub max_tokens: u64,
-    pub max_cost_micro_usd: u64,
     pub concurrency: u32,
     pub timeout_seconds: u32,
 }
@@ -51,9 +48,6 @@ impl Default for Settings {
             privacy_clearance_actor: String::new(),
             privacy_clearance_reason: String::new(),
             regression_count: 10,
-            max_requests: 60,
-            max_tokens: 600_000,
-            max_cost_micro_usd: 2_000_000,
             concurrency: 1,
             timeout_seconds: 60,
         }
@@ -66,13 +60,8 @@ impl Settings {
             .checked_add(self.risk_count)
             .and_then(|n| n.checked_add(self.regression_count));
         if count.is_none_or(|n| n == 0 || n > 200)
-            || !(1..=200).contains(&self.max_requests)
             || !(1..=4).contains(&self.concurrency)
             || !(1..=300).contains(&self.timeout_seconds)
-            || self.max_tokens == 0
-            || self.max_tokens > 100_000_000
-            || self.max_cost_micro_usd == 0
-            || self.max_cost_micro_usd > 100_000_000
             || self.privacy_cleared_refs.len() > 1000
             || self
                 .privacy_cleared_refs
