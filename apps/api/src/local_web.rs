@@ -485,8 +485,13 @@ async fn corpus_entry() -> Redirect {
 }
 
 pub async fn serve() -> Result<(), std::io::Error> {
+    let database = configured_database_state().await;
+    // 单次采集（含评论深采）由本服务自己推进，不依赖巡查 worker（Mog 2026-10-23）。
+    if let Some(connected) = database.database() {
+        collection_run_api::spawn_run_advancer(connected.clone());
+    }
     let application = router(LocalWebState {
-        database: configured_database_state().await,
+        database,
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
         account_digest_key: configured_account_digest_key(),
     });
