@@ -6,10 +6,12 @@ mod scope;
 mod trace;
 mod works;
 mod materials;
+mod gaps;
 pub use comparison::{compare_rounds,read_round_result};
 pub use rounds::read_rounds;
 pub use trace::{compare_observations,read_trace};
 pub use works::{ComparisonMode,WorkComparison,WorkSnapshot,compare_works};
+pub use gaps::{DetailGapPreview,DetailGapReceipt,preview as preview_detail_gaps,request as request_detail_gaps};
 pub use materials::{DossierView,SourceFragment,RelatedWorks,read_dossier,related_works,comparison_materials,comparison_materials_in};
 use serde::{Deserialize,Serialize};
 use uuid::Uuid;
@@ -23,6 +25,7 @@ pub enum Error{
     #[error("target_inspection_scope_unavailable")] Scope,
     #[error(transparent)] Database(#[from]sqlx::Error),
     #[error("target_inspection_material_unavailable")] Material,
+    #[error(transparent)] Acquisition(#[from] crate::AcquisitionChainError),
 }
 #[derive(Clone,Debug)]
 pub struct Scope{pub target_ref:Uuid,pub domain_ref:Option<Uuid>,pub knowledge_cutoff:Option<String>}

@@ -96,6 +96,7 @@ fn known_action(action: &str) -> bool {
             | "archive"
             | "retire-materials"
             | "patrol-toggle"
+            | "detail-gaps-exact"
             | "monitor-rules-retire"
             | "delete"
             | "domain"
@@ -318,6 +319,43 @@ async fn run(state: &LocalWebState, action: &str, id: Uuid, fields: Value) -> (S
             collection_retire_materials(State(state.clone()), pairs_body(&fields))
                 .await
                 .into_response()
+        }
+        "detail-gaps-exact" => {
+            #[derive(serde::Deserialize)]
+            struct ExactGapFields {
+                row_target_ref: Uuid,
+                domain_ref: Option<Uuid>,
+                content_public_ref: Vec<Uuid>,
+            }
+            let Ok(form) = serde_json::from_value::<ExactGapFields>(fields.clone()) else {
+                return reject(id,action,"command_fields_invalid");
+            };
+            let Some(db)=state.database.database() else {
+                return reject(id,action,"read_model_not_connected");
+            };
+            let scope=linggan_evidence::target_inspection::Scope{
+                target_ref:form.row_target_ref,
+                domain_ref:form.domain_ref,
+                knowledge_cutoff:None,
+            };
+            return match linggan_evidence::target_inspection::request_detail_gaps(
+                db,&scope,&form.content_public_ref,
+            ).await {
+                Ok(receipt) if receipt.work_order_ref.is_some() => (
+                    StatusCode::OK,answer(id,action,"applied",Some("detail_gaps_queued"),None),
+                ),
+                Ok(receipt) => {
+                    let code=format!("detail_gaps_{}",receipt.admission);
+                    reject(id,action,&code)
+                }
+                Err(linggan_evidence::target_inspection::Error::Invalid(_)) => 
+                    reject(id,action,"detail_gap_selection_stale"),
+                Err(linggan_evidence::target_inspection::Error::Scope) =>
+                    reject(id,action,"target_domain_unassigned"),
+                Err(linggan_evidence::target_inspection::Error::NotFound) =>
+                    reject(id,action,"detail_gaps_target_missing"),
+                Err(_) => reject(id,action,"detail_gaps_unavailable"),
+            };
         }
         "patrol-toggle" => {
             collection_target_patrol_toggle(State(state.clone()), pairs_body(&fields))

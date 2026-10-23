@@ -56,7 +56,7 @@ fn respond<T: Serialize>(result: Result<T, Error>) -> Response {
         Err(Error::Invalid(code)) => local_read_json_error(StatusCode::BAD_REQUEST,code),
         Err(Error::NotFound) => local_read_json_error(StatusCode::NOT_FOUND,"target_inspection_not_found"),
         Err(Error::Scope) => local_read_json_error(StatusCode::FORBIDDEN,"target_inspection_scope_unavailable"),
-        Err(Error::Database(_) | Error::Material) => unavailable(),
+        Err(Error::Database(_) | Error::Material | Error::Acquisition(_)) => unavailable(),
     }
 }
 fn unavailable() -> Response {
