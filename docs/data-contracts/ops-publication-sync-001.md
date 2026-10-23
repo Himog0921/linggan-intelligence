@@ -52,6 +52,6 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 ## 4. 未完成边界
 
-本切片仍没有由同步 API 创建 `Acquisition Request`、`Admission`、`Work Order`、`Lease`、`Task`、`Attempt`、`Package` 或 `Receipt`；没有平台访问、媒体处理、回填投影或 React 同步按钮。`0155` 只先建立了未来桥接不可绕过的精确范围物理约束，尚未接入 Collection 的准入、租约展开、统一 resolver/派发、详情页会话、资格停止或回执投影；因此 XHS 命令的当前结果仍是 `ops_sync_execution_bridge_not_ready`。抖音仍没有受控 locator、身份、能力与回填闭环。它不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
+本切片仍没有由同步 API 创建 `Acquisition Request`、`Admission`、`Work Order`、`Lease`、`Task`、`Attempt`、`Package` 或 `Receipt`；没有平台访问、媒体处理、回填投影或 React 同步按钮。`0155` 及租约/派发读取面已经让未来 Work Order 可把精确范围展开为既有 `content_detail` task，并且只解析该工单绑定的 locator，绝不回退到同名材料的 discovery 链接；它尚未接入 Collection 准入、详情页会话、资格停止或回执投影，且同步 API 还不写此范围。因此 XHS 命令的当前结果仍是 `ops_sync_execution_bridge_not_ready`。抖音仍没有受控 locator、身份、能力与回填闭环。它不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
 
 后续桥接必须为运营精确发布引入受控 locator/身份输入，并在同一采集链中实现回包绑定、receipt 合格判定、投影重放和两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。

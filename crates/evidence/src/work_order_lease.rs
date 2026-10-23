@@ -60,6 +60,7 @@ pub async fn lease_schema_is_ready(database: &Database) -> Result<bool, sqlx::Er
         "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
                 AND to_regclass('collection_work_order_lease_task') IS NOT NULL \
                 AND to_regclass('collection_work_order_domain_usage') IS NOT NULL \
+                AND to_regclass('collection_work_order_ops_publication_target') IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_name='collection_work_order' \
                               AND column_name='retry_not_before_at')",
@@ -1375,12 +1376,20 @@ async fn load_material_targets(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
 ) -> Result<Vec<MaterialTarget>, LeaseError> {
+    // Both relations are immutable, exact scopes.  The Operations relation deliberately has no
+    // Material row behind it, but its detail-only policy has the same task-expansion shape.
     let rows: Vec<(String, i32, i32, bool)> = sqlx::query_as(
-        "SELECT content.content_external_id,target.comment_limit,target.reply_expand_limit, \
-                target.acquire_media \
-         FROM collection_work_order_material_target target \
-         JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
-         WHERE target.work_order_ref=$1 ORDER BY target.ordinal",
+        "SELECT scope.content_external_id,scope.comment_limit,scope.reply_expand_limit,scope.acquire_media \
+         FROM ( \
+             SELECT content.content_external_id,target.comment_limit,target.reply_expand_limit,target.acquire_media,target.ordinal \
+             FROM collection_work_order_material_target target \
+             JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
+             WHERE target.work_order_ref=$1 \
+             UNION ALL \
+             SELECT target.content_external_id,target.comment_limit,target.reply_expand_limit,target.acquire_media,target.ordinal \
+             FROM collection_work_order_ops_publication_target target \
+             WHERE target.work_order_ref=$1 \
+         ) scope ORDER BY scope.ordinal",
     )
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)

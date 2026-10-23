@@ -420,6 +420,7 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass(format('%I.%I',current_schema(),'collection_work_order_lease')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_work_order_lease_task')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_work_order_ops_publication_target')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_work_order_lease_task_dispatch_failure')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_dispatch_lane_fairness')) IS NOT NULL \
                 AND to_regclass(format('%I.%I',current_schema(),'collection_platform_dispatch_policy')) IS NOT NULL \
@@ -565,7 +566,7 @@ async fn grant_detail_page_session_inner(
     // signed URL: a different discovery result must be claimed afresh rather
     // than silently swapping a page beneath an already-consumed grant.
     let Some(current_execution_source_url) =
-        execution_source_url_for_task(&mut transaction, &task_spec).await?
+        execution_source_url_for_task(&mut transaction, task_id, &task_spec).await?
     else {
         return Err(DetailPageSessionGrantError::ExecutionSourceUnavailable);
     };
@@ -1748,7 +1749,7 @@ pub async fn decide_dispatch(
             return Ok(DispatchDecision::ControlBlocked { reason_code });
         }
         let execution_source_url =
-            execution_source_url_for_task(&mut transaction, &task_spec).await?;
+            execution_source_url_for_task(&mut transaction, task_id, &task_spec).await?;
         if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
             // Do not release an in-progress task: an earlier response may
             // have been lost after the browser actually began its Attempt.
@@ -1830,7 +1831,7 @@ pub async fn decide_dispatch(
         }
 
         let execution_source_url =
-            execution_source_url_for_task(&mut transaction, &task_spec).await?;
+            execution_source_url_for_task(&mut transaction, task_id, &task_spec).await?;
         if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
             // 这个任务还是 pending：浏览器一次都没开始过。停它自己——停的方式是收束它那
             // 一篇的全部通道并记进执行资格台账，**不释放整张租约**。释放整张租约正是那条
@@ -2099,7 +2100,7 @@ async fn claim_next_queued_work_order(
                     .fetch_one(&mut **transaction)
                     .await?;
             let execution_source_url =
-                execution_source_url_for_task(transaction, &task_spec).await?;
+                execution_source_url_for_task(transaction, task_id, &task_spec).await?;
             if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
                 // 这里只停**这一个成员**，不释放租约。释放租约等于把同批地址完好的作品一起
                 // 放回队列：它们下一轮仍要排在这个缺地址的成员后面，于是每一轮都从头再来，
@@ -2369,14 +2370,20 @@ async fn page_session_plan_for_task(
     };
 
     let scope: Option<(i32, i32, bool, i64)> = sqlx::query_as(
-        "SELECT target.comment_limit,target.reply_expand_limit,target.acquire_media, \
+        "SELECT scope.comment_limit,scope.reply_expand_limit,scope.acquire_media, \
                 GREATEST(1,FLOOR(EXTRACT(EPOCH FROM (lease.expires_at-scope_001_now()))))::bigint \
          FROM collection_work_order_lease lease \
-         JOIN collection_work_order_material_target target \
-           ON target.work_order_ref=lease.work_order_ref \
-         JOIN linggan_material_content content \
-           ON content.public_ref=target.content_public_ref \
-         WHERE lease.lease_ref=$1 AND content.content_external_id=$2 LIMIT 1",
+         JOIN LATERAL ( \
+             SELECT target.comment_limit,target.reply_expand_limit,target.acquire_media,content.content_external_id \
+             FROM collection_work_order_material_target target \
+             JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
+             WHERE target.work_order_ref=lease.work_order_ref \
+             UNION ALL \
+             SELECT target.comment_limit,target.reply_expand_limit,target.acquire_media,target.content_external_id \
+             FROM collection_work_order_ops_publication_target target \
+             WHERE target.work_order_ref=lease.work_order_ref \
+         ) scope ON scope.content_external_id=$2 \
+         WHERE lease.lease_ref=$1 LIMIT 1",
     )
     .bind(lease_ref)
     .bind(content_external_id)
@@ -2461,11 +2468,13 @@ macro_rules! dispatch_order_sql {
 
 pub(crate) use {dispatch_order_sql, dispatch_ready_predicate_sql};
 
-/// 候选工单的选取。冻结的材料作用域决定工位需要哪些能力。
+/// 候选工单的选取。冻结的材料或精确运营发布作用域决定工位需要哪些能力。
 const CANDIDATE_SQL: &str = concat!(
     "SELECT work_order.work_order_ref,target.platform,target.target_kind,work_order.lane, \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref), \
+                    (EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                             WHERE scope.work_order_ref=work_order.work_order_ref) \
+                     OR EXISTS (SELECT 1 FROM collection_work_order_ops_publication_target scope \
+                                WHERE scope.work_order_ref=work_order.work_order_ref)), \
                     EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
                             WHERE scope.work_order_ref=work_order.work_order_ref \
                               AND scope.comment_limit>0), \
@@ -2511,6 +2520,7 @@ async fn execution_source_url_is_rejected(
 
 async fn execution_source_url_for_task(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_id: Uuid,
     task_spec: &Value,
 ) -> Result<Option<String>, sqlx::Error> {
     if !requires_signed_execution_source(task_spec) {
@@ -2519,6 +2529,35 @@ async fn execution_source_url_for_task(
     let Some(content_external_id) = task_content_external_id(task_spec) else {
         return Ok(None);
     };
+    // An Ops scope has already frozen one approved signed locator for this exact Work Order.
+    // It must win over discovery evidence: falling back to a similarly named material's URL
+    // would silently swap the page that the Operations command authorized.
+    let exact_locator: Option<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT locator.locator_url \
+         FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
+         JOIN collection_work_order_ops_publication_target scope \
+           ON scope.work_order_ref=lease.work_order_ref \
+         JOIN linggan_ops_publication_execution_locator locator \
+           ON locator.locator_ref=scope.locator_ref \
+          AND locator.publication_ref=scope.publication_ref \
+          AND locator.publication_version=scope.publication_version \
+         WHERE task.task_id=$1 AND scope.content_external_id=$2 \
+           AND {} \
+         LIMIT 1",
+        signed_locator_predicate("locator.locator_url")
+    )))
+    .bind(task_id)
+    .bind(content_external_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(url) = exact_locator {
+        return if execution_source_url_is_rejected(transaction, &url).await? {
+            Ok(None)
+        } else {
+            Ok(Some(url))
+        };
+    }
     // 「哪条地址算执行入口」这一条判据住在 `execution_input_eligibility`：候选筛选、准入冻结
     // 与这里问的是同一件事。三处各写一份 URL 形状的判据，正是「候选说能跑、派发说没地址」
     // 这类缺陷的由来。
