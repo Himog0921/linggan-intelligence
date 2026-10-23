@@ -1048,10 +1048,19 @@ async fn remaining_steps_for_work_order(
             work_order_ref,
         )
         .await?;
-    let mut blocked_contents =
-        content_external_ids_for_object_refs_in_transaction(transaction, &blocked).await?;
+    let mut blocked_contents = content_external_ids_for_object_refs_in_transaction(
+        transaction,
+        work_order_ref,
+        &blocked,
+    )
+    .await?;
     blocked_contents.extend(
-        content_external_ids_for_object_refs_in_transaction(transaction, &budget_exhausted).await?,
+        content_external_ids_for_object_refs_in_transaction(
+            transaction,
+            work_order_ref,
+            &budget_exhausted,
+        )
+        .await?,
     );
 
     let mut stopped_members = 0_usize;
@@ -1093,6 +1102,7 @@ async fn remaining_steps_for_work_order(
 /// 引用时才去查它。
 async fn content_external_ids_for_object_refs_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
     objects: &crate::execution_input_eligibility::BlockedObjects,
 ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
     let mut contents: Vec<String> = Vec::new();
@@ -1102,6 +1112,18 @@ async fn content_external_ids_for_object_refs_in_transaction(
                 "SELECT content_external_id FROM linggan_material_content WHERE public_ref=ANY($1)",
             )
             .bind(&objects.material)
+            .fetch_all(&mut **transaction)
+            .await?,
+        );
+    }
+    if !objects.ops_publication.is_empty() {
+        contents.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT content_external_id FROM collection_work_order_ops_publication_target \
+                 WHERE work_order_ref=$1 AND publication_ref=ANY($2)",
+            )
+            .bind(work_order_ref)
+            .bind(&objects.ops_publication)
             .fetch_all(&mut **transaction)
             .await?,
         );
