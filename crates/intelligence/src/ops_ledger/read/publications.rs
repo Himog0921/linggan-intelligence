@@ -106,6 +106,9 @@ pub struct OpsPublicationItem {
     /// Media is separately qualified through the shared observation → byte-acquisition → local
     /// materialization chain.  A remote candidate URI is deliberately never an available asset.
     pub media: OpsPublicationMedia,
+    /// Each displayed detail value has an explicit current adoption decision.  A `conflict`
+    /// stays visible instead of being collapsed into an indistinguishable empty cell.
+    pub field_adoption: OpsPublicationFieldAdoption,
     pub duplicates: Vec<OpsDuplicate>,
     pub cover: OpsCoverState,
 }
@@ -129,6 +132,17 @@ pub struct OpsPublicationMedia {
     pub available: i64,
     pub failed: i64,
     pub unavailable: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpsPublicationFieldAdoption {
+    pub title: &'static str,
+    pub body: &'static str,
+    pub likes: &'static str,
+    pub collects: &'static str,
+    pub comments: &'static str,
+    pub published_at: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -168,7 +182,9 @@ const FILTERED: &str = "kept AS ( \
            lv.view_count, lv.views_as_of, sync.request_ref AS sync_request_ref, \
            sync.decision AS sync_decision, sync.sync_state, adoption.title AS adopted_title, \
            adoption.body AS adopted_body, adoption.like_count AS adopted_like_count, \
-           adoption.collect_count AS adopted_collect_count, adoption.comment_count AS adopted_comment_count \
+           adoption.collect_count AS adopted_collect_count, adoption.comment_count AS adopted_comment_count, \
+           adoption.title_state,adoption.body_state,adoption.like_count_state,adoption.collect_count_state, \
+           adoption.comment_count_state,adoption.published_at_state \
       FROM linggan_ops_publication p \
       LEFT JOIN linggan_ops_account a ON a.account_ref = p.account_ref \
       LEFT JOIN linggan_ops_member publisher ON publisher.member_ref = p.native_publisher_member_ref \
@@ -235,7 +251,37 @@ const FILTERED: &str = "kept AS ( \
                 FROM linggan_ops_publication_field_adoption field \
                WHERE field.publication_ref=p.publication_ref AND field.field_name='comment_count' \
                  AND field.publication_version IS NOT DISTINCT FROM p.native_version \
-               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1) AS comment_count \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1) AS comment_count, \
+             coalesce((SELECT field.disposition \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='title' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1), 'not_provided') AS title_state, \
+             coalesce((SELECT field.disposition \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='body' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1), 'not_provided') AS body_state, \
+             coalesce((SELECT field.disposition \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='like_count' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1), 'not_provided') AS like_count_state, \
+             coalesce((SELECT field.disposition \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='collect_count' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1), 'not_provided') AS collect_count_state, \
+             coalesce((SELECT field.disposition \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='comment_count' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1), 'not_provided') AS comment_count_state, \
+             coalesce((SELECT field.disposition \
+                FROM linggan_ops_publication_field_adoption field \
+               WHERE field.publication_ref=p.publication_ref AND field.field_name='published_at' \
+                 AND field.publication_version IS NOT DISTINCT FROM p.native_version \
+               ORDER BY field.observed_at::timestamptz DESC,field.created_at DESC,field.adoption_ref DESC LIMIT 1), 'not_provided') AS published_at_state \
       ) adoption ON true \
      WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
        AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
@@ -315,6 +361,8 @@ async fn read_page(
                 kept.adopted_like_count AS like_count, \
                 kept.adopted_collect_count AS collect_count, \
                 kept.adopted_comment_count AS comment_count, kept.cover_click_rate, \
+                kept.title_state,kept.body_state,kept.like_count_state,kept.collect_count_state, \
+                kept.comment_count_state,kept.published_at_state, \
                 kept.sync_request_ref, kept.sync_decision, coalesce(kept.sync_state,'not_requested') AS sync_state, \
                 cover.publication_ref IS NOT NULL AS has_cover, \
                 media.media_state,media.observed_media,media.available_media,media.failed_media,media.unavailable_media \
@@ -467,11 +515,30 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
             failed: row.try_get("failed_media")?,
             unavailable: row.try_get("unavailable_media")?,
         },
+        field_adoption: OpsPublicationFieldAdoption {
+            title: field_adoption_state(&row.try_get::<String, _>("title_state")?)?,
+            body: field_adoption_state(&row.try_get::<String, _>("body_state")?)?,
+            likes: field_adoption_state(&row.try_get::<String, _>("like_count_state")?)?,
+            collects: field_adoption_state(&row.try_get::<String, _>("collect_count_state")?)?,
+            comments: field_adoption_state(&row.try_get::<String, _>("comment_count_state")?)?,
+            published_at: field_adoption_state(&row.try_get::<String, _>("published_at_state")?)?,
+        },
         duplicates: Vec::new(),
         cover: OpsCoverState {
             available: row.try_get("has_cover")?,
         },
     })
+}
+
+fn field_adoption_state(value: &str) -> Result<&'static str, OpsReadError> {
+    match value {
+        "adopted" => Ok("adopted"),
+        "not_provided" => Ok("not_provided"),
+        "conflict" => Ok("conflict"),
+        _ => Err(OpsReadError::InvalidParameter(
+            "publication_field_adoption_state",
+        )),
+    }
 }
 
 fn media_state(value: &str) -> Result<&'static str, OpsReadError> {

@@ -58,7 +58,7 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 该投影从不更新 `linggan_ops_publication`，所以手工阅读量/CTR、日报、历史发布人、当前负责人、业务归属和原发布字段不在此写入范围。它也不写 `linggan_material_domain_usage`：领域 primary/reference 不是“我方内容”含义，不能为了把运营同步展示在某个领域而重写既有领域用途。投影本身是不可变且以 Receipt 为幂等键；字段采用、媒体状态与受控重放必须消费这条真实链，不得重新访问平台或伪造回执。
 
-`0159_ops_publication_field_adoption` 使登记导入、原生登记和合格 Receipt 都以追加式逐字段决定形成一个统一读取模型，而非修改注册行或在页面回退主表。导入基线有 import batch，原生明确填写的标题/正文有原生命令回执，Receipt 值有 package/record、对应 publication identity version 和观测时刻；每项均保存 `adopted`、`not_provided` 或 `conflict` disposition。当前列表按观测时刻读取身份版本仍匹配的最新决定；未知字段绝不补零，也不会回退旧主表字段。`published_at` 若为空记为 `not_provided`，若与原生登记的北京业务日冲突则保留 `conflict`，不会静默改变运营报表日期。该阶段不采用阅读量、CTR、日报、历史/当前责任人或业务字段，也不提供人工字段修订命令、冲突裁决或投影-only 重放。
+`0159_ops_publication_field_adoption` 使登记导入、原生登记和合格 Receipt 都以追加式逐字段决定形成一个统一读取模型，而非修改注册行或在页面回退主表。导入基线有 import batch，原生明确填写的标题/正文有原生命令回执，Receipt 值有 package/record、对应 publication identity version 和观测时刻；每项均保存 `adopted`、`not_provided` 或 `conflict` disposition。当前列表按观测时刻读取身份版本仍匹配的最新决定；未知字段绝不补零，也不会回退旧主表字段。字段值只在 `adopted` 时显示；每个字段的 disposition 同时输出，故页面会把 `conflict` 明确标为“待核实”，不会和 `not_provided` 混为一个空单元格。`published_at` 若为空记为 `not_provided`，若与原生登记的北京业务日冲突则保留 `conflict`，不会静默改变运营报表日期。该阶段不采用阅读量、CTR、日报、历史/当前责任人或业务字段，也不提供人工字段修订命令、冲突裁决或投影-only 重放。
 
 `0160_ops_publication_media_projection` 使已批准同页的 `media_slots` 仍沿既有 Task/Attempt/Package/Receipt 和统一媒体获取链运行：只有 scheduled 精确 scope、`COMPLETED_LIVE_STEP`、`ACCEPTED` Receipt、当前 publication identity version、正确平台/作品 Task target，以及 `accepted_for_media_identity` record 才会追加 `publication/version → request/work order → task/attempt → package/receipt/record → observation/slot` 关联。它既不保存远程 URL，也不另建下载器。列表状态只从该关联再读取统一媒体链：`waiting_for_slots`、`processing`、`partial`、`available`、`failed`、`unavailable` 与 `not_requested` 分开表达；`available` 只在未被处置的本地 materialization 已验证时成立，已处置资源显示为 `unavailable` 而非伪装成处理中。下载失败或处置不会删除历史 observation，也不会清除已经可读的字段或历史封面。
 
@@ -70,6 +70,6 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 `0155–0160` 及租约/派发/详情会话/缺输入停止读取面现在可在隔离 PostgreSQL 中走通一条合成的 XHS 控制链：精确 scope 被合格安装领取，真实调度代码依序生成 scheduled `content_detail` 与 `media_slots` task；合格详情 Receipt 创建或复用 Material、追加发布—Material 投影和字段采用决定，合格媒体 Receipt 追加发布—observation/slot 投影，随后只有统一媒体链的本地物化才能将列表状态升为 `available`。此证明不访问平台，也不能证明真实 XHS 内容、浏览器插件、生产迁移、部署或业务验收。抖音仍没有受控 locator、身份、能力与回填闭环。
 
-运营“发布记录”页面现在可从“同步数据”打开一个仅列出当前页记录的显式选择框：未选择时不能提交，提交后逐条显示原始决定与当前 `execution`，并可按原 `requestRef` 刷新读取。列表读取还会为每条发布返回其**最近一次**持久化同步条目的 `requestRef`、原始 `decision` 和共享链实时状态；关闭对话框、刷新页面或重新进入后仍可从该 `requestRef` 重开同一回执，绝不把浏览器瞬态提示当作任务状态。列表与详情另行显示媒体状态及已观察/本地可用/失败数量，且不把历史导入封面、远程 URI 或 `material_projected` 当作“媒体已可用”。当前未提供媒体重试命令、人工字段采用/冲突处理或投影-only 重放；页面交互已由前端测试覆盖，但并非真实平台、插件、生产迁移、部署或业务验收。
+运营“发布记录”页面现在可从“同步数据”打开一个仅列出当前页记录的显式选择框：未选择时不能提交，提交后逐条显示原始决定与当前 `execution`，并可按原 `requestRef` 刷新读取。列表读取还会为每条发布返回其**最近一次**持久化同步条目的 `requestRef`、原始 `decision` 和共享链实时状态；关闭对话框、刷新页面或重新进入后仍可从该 `requestRef` 重开同一回执，绝不把浏览器瞬态提示当作任务状态。列表与详情另行显示媒体状态及已观察/本地可用/失败数量，且不把历史导入封面、远程 URI 或 `material_projected` 当作“媒体已可用”。当前未提供媒体重试命令、人工字段采用/冲突处理或投影-only 重放；字段冲突虽可见，但页面不能静默裁决或覆盖。页面交互已由前端测试覆盖，但并非真实平台、插件、生产迁移、部署或业务验收。
 
 后续工作仍是媒体失败后的受控重试入口、人工字段采用与冲突处理、受控“只重放投影”动作，并完成两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。

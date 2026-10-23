@@ -511,6 +511,7 @@ export function LedgerPage({
           <p className={c('ops-note')}>
             采集媒体：{mediaLabels[detail.media.state]}{detail.media.observed ? `（已观察 ${detail.media.observed}，本地可用 ${detail.media.available}，失败 ${detail.media.failed}，当前不可用 ${detail.media.unavailable}）` : ''}
           </p>
+          <FieldAdoptionNotice adoption={detail.fieldAdoption} />
           <h3>发布正文</h3><p className={c('ops-full-text')}>{detail.body || '未迁入正文'}</p>
           {detail.duplicates.length ? <p>合并的重复登记日期：{detail.duplicates.map(row => row.businessDate).join('、')}</p> : null}
           {detail.cover.available ? <ActionButton onClick={() => openCover(`/ops/covers/${encodeURIComponent(detail.ref)}`)}>查看封面大图</ActionButton> : <p>封面未迁入</p>}
@@ -580,6 +581,7 @@ function PublicationRow({
         <div className={c("ops-stack")}>
           <SyncTag item={item} openSync={openSync} />
           <MediaTag media={item.media} />
+          <FieldAdoptionTag adoption={item.fieldAdoption} />
           <span className={c("ops-secondary")}>
             {item.views.state === "value"
               ? "阅读量已填"
@@ -725,6 +727,32 @@ function MediaTag({ media }: { media: api.Publication["media"] }) {
     ? `已观察 ${media.observed} 项；本地验证 ${media.available} 项；失败 ${media.failed} 项；当前不可用 ${media.unavailable} 项。远程地址不等于可用媒体。`
     : "媒体状态独立于文字回填；远程地址不等于本地可用资源。";
   return <Tag tone={tone} title={title}>{mediaLabels[media.state]}</Tag>;
+}
+const adoptionLabels: Record<api.Publication["fieldAdoption"]["title"], string> = {
+  adopted: "已采用",
+  not_provided: "未提供",
+  conflict: "待核实",
+};
+const adoptionNames: Record<keyof api.Publication["fieldAdoption"], string> = {
+  title: "标题", body: "正文", likes: "点赞", collects: "收藏", comments: "评论", publishedAt: "发布时间",
+};
+function conflictingFields(adoption: api.Publication["fieldAdoption"]) {
+  return (Object.entries(adoption) as [keyof typeof adoption, typeof adoption.title][])
+    .filter(([, state]) => state === "conflict")
+    .map(([field]) => adoptionNames[field]);
+}
+function FieldAdoptionTag({ adoption }: { adoption: api.Publication["fieldAdoption"] }) {
+  const conflicts = conflictingFields(adoption);
+  if (!conflicts.length) return null;
+  return <Tag tone="warning" title={`采集观察与原生登记不一致：${conflicts.join("、")}。当前保留冲突，尚未自动覆盖。`}>字段待核实</Tag>;
+}
+function FieldAdoptionNotice({ adoption }: { adoption: api.Publication["fieldAdoption"] }) {
+  const conflicts = conflictingFields(adoption);
+  if (conflicts.length) return <p className={c("ops-note")}>字段采用：{conflicts.join("、")}待核实；当前保留原登记，尚未自动覆盖。</p>;
+  const missing = (Object.entries(adoption) as [keyof typeof adoption, typeof adoption.title][])
+    .filter(([, state]) => state === "not_provided")
+    .map(([field]) => adoptionNames[field]);
+  return missing.length ? <p className={c("ops-note")}>字段采用：{missing.join("、")}未由当前来源提供。</p> : <p className={c("ops-note")}>字段采用：{adoptionLabels.adopted}的观察已按当前身份版本显示。</p>;
 }
 function SyncTag({ item, openSync }: { item: api.Publication; openSync: (requestRef: string) => void }) {
   const { sync } = item;

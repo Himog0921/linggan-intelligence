@@ -1505,6 +1505,17 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
         (row.likes, row.collects, row.comments),
         (Some(71), Some(9), Some(6))
     );
+    assert_eq!(
+        (
+            row.field_adoption.title,
+            row.field_adoption.body,
+            row.field_adoption.likes,
+            row.field_adoption.collects,
+            row.field_adoption.comments,
+        ),
+        ("adopted", "adopted", "adopted", "adopted", "adopted"),
+        "a qualified Receipt exposes its field-adoption decisions independently from the values"
+    );
     assert_eq!(row.media.state, "available");
     assert_eq!(
         (row.media.observed, row.media.available, row.media.failed),

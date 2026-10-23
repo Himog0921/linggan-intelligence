@@ -115,6 +115,14 @@ function publication(r: R) {
         unavailable: n(media, "unavailable"),
       };
     })(),
+    fieldAdoption: (() => {
+      const adoption = d.obj(r, "fieldAdoption");
+      const state = (key: string) => enumeration(adoption, key, ["adopted", "not_provided", "conflict"] as const);
+      return {
+        title: state("title"), body: state("body"), likes: state("likes"),
+        collects: state("collects"), comments: state("comments"), publishedAt: state("publishedAt"),
+      };
+    })(),
     duplicates: d.list(r, "duplicates", (item) => ({
       businessDate: s(item, "businessDate"),
     })),

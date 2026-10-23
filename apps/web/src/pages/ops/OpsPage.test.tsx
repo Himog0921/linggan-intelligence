@@ -9,16 +9,17 @@ const publication = {
   ref: 'pub', source: 'imported', businessDate: '2026-10-18', dateState: 'as_recorded', platform: 'xhs', title: '测试发布标题', body: '完整正文\n保留第二段',
   url: 'https://example.com/post', account: { name: '合成账号', ledgerState: 'in_ledger' }, publisher: '甲',
   views: { state: 'pending', value: null, overdue: false, hit: false }, likes: null, collects: 0, comments: null,
-  coverClickRate: null, systemCheck: 'not_checked', sync: { requestRef: null, decision: null, state: 'not_requested' }, media: { state: 'not_requested', observed: 0, available: 0, failed: 0, unavailable: 0 }, duplicates: [], cover: { available: true },
+  coverClickRate: null, systemCheck: 'not_checked', sync: { requestRef: null, decision: null, state: 'not_requested' }, media: { state: 'not_requested', observed: 0, available: 0, failed: 0, unavailable: 0 }, fieldAdoption: { title: 'adopted', body: 'adopted', likes: 'not_provided', collects: 'adopted', comments: 'not_provided', publishedAt: 'adopted' }, duplicates: [], cover: { available: true },
 };
 let failPublications = false;
 let noAccounts = false;
 let nativeOnly = false;
 let persistedSync = false;
+let fieldConflict = false;
 const requests: URL[] = [];
 const requestBodies: unknown[] = [];
 beforeEach(() => {
-  requests.length = 0; requestBodies.length = 0; failPublications = false; noAccounts = false; nativeOnly = false; persistedSync = false;
+  requests.length = 0; requestBodies.length = 0; failPublications = false; noAccounts = false; nativeOnly = false; persistedSync = false; fieldConflict = false;
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const url = new URL(path, 'http://localhost'); requests.push(url);
     if (options?.body) requestBodies.push(JSON.parse(String(options.body)));
@@ -39,7 +40,10 @@ beforeEach(() => {
       asOf: nativeOnly ? null : asOf, nativeDataPresent: nativeOnly, month: '2026-10', activeAccounts: 1, ledgerAccounts: 1, monthPublished: 1,
       effectivePublication: { state: 'not_connected' }, monthFollowersGained: { value: null, scope: 'all_businesses' }, monthHits: null,
     } : endpoint === 'accounts' ? { asOf: noAccounts ? null : asOf, total: 0, active: 0, operators: [], items: [] }
-    : { asOf, page: Number(url.searchParams.get('page') || 1), pageSize: 50, total: 100, totalPages: 2, operators: ['甲'], items: [persistedSync ? { ...publication, sync: { requestRef: 'sync-request', decision: 'accepted', state: 'queued' } } : publication] };
+    : { asOf, page: Number(url.searchParams.get('page') || 1), pageSize: 50, total: 100, totalPages: 2, operators: ['甲'], items: [
+      fieldConflict ? { ...publication, fieldAdoption: { ...publication.fieldAdoption, publishedAt: 'conflict' } }
+      : persistedSync ? { ...publication, sync: { requestRef: 'sync-request', decision: 'accepted', state: 'queued' } } : publication,
+    ] };
     return new Response(JSON.stringify(failPublications && endpoint === 'publications' ? { error: 'unavailable' } : result), {
       status: failPublications && endpoint === 'publications' ? 503 : 200, headers: { 'Content-Type': 'application/json' },
     });
@@ -99,6 +103,13 @@ it('opens full publication content, preserves unknown vs zero, and restores focu
   fireEvent.click(within(media).getByRole('button', { name: '关闭' }));
   expect(screen.getByRole('dialog', { name: '发布记录详情' })).toBeInTheDocument();
   fireEvent.click(within(detail).getByRole('button', { name: '关闭详情' })); expect(opener).toHaveFocus();
+});
+it('keeps a receipt field conflict visible instead of treating it as an absent value', async () => {
+  fieldConflict = true; show();
+  const opener = await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
+  expect(screen.getByText('字段待核实')).toBeInTheDocument();
+  fireEvent.click(opener);
+  expect(within(screen.getByRole('dialog', { name: '发布记录详情' })).getByText(/发布时间待核实；当前保留原登记/)).toBeInTheDocument();
 });
 it('keeps scope picker in the breadcrumb and clears filters when switching business', async () => {
   show('/ops/publications?domain=d1&platform=xhs&page=2');
