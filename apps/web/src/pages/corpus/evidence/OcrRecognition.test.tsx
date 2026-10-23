@@ -88,6 +88,15 @@ describe('work-scoped OCR state and receipts', () => {
     expect(screen.queryByRole('link', { name: '核对原图' })).not.toBeInTheDocument();
     expect(screen.getAllByText('原图当前不可用').length).toBeGreaterThan(0);
   });
+  it('offers manual adoption for a saved readable cover even when it has only a title or no regions', () => {
+    const result = run({ state: 'succeeded', completedImages: 1, totalImages: 1, images: [{
+      imageRef: 'cover-a', ordinal: 1, role: 'cover', state: 'succeeded', slotKey: 'cover-slot', aliases: [], originalUrl: '/api/local/cover',
+      rawResultRef: 'raw-cover', rawResultSha256: 'b'.repeat(64), rawJson: '{}', invocationRef: 'invocation-cover', finishReason: 'stop', usage: null, estimatedCostUsd: null,
+      adoptionRef: 'adoption-cover', reviewRevision: 0, machineText: '封面机器预览', humanBody: null, regions: [],
+    }] });
+    render(<OcrRecognitionResults run={result} onSaved={vi.fn()}/>);
+    expect(screen.getByRole('button', { name: '人工核对并采用' })).toBeInTheDocument();
+  });
   it('rejects guessed coordinates and mismatched persisted counts at the transport boundary', () => {
     expect(() => parseOcrRecognition(run({ completedImages: 4 }))).toThrow();
     const payload = run({ images: [{
