@@ -182,11 +182,23 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
             &["image"]
         };
         for kind in kinds {
-            let reading = readings.iter().find(|r| {
-                r["slotKey"] == slot["slotKey"]
-                    && r["kind"] == *kind
-                    && r["sourceVersion"] == slot["sourceVersion"]
-            });
+            let reading = readings
+                .iter()
+                .find(|r| {
+                    r["slotKey"] == slot["slotKey"]
+                        && r["kind"] == *kind
+                        && r["sourceVersion"] == slot["sourceVersion"]
+                })
+                .or_else(|| {
+                    readings.iter().find(|r| {
+                        // A re-observation may create a fresh materialization for bytes that already
+                        // have a current reading. Keep that immutable reading available only when its
+                        // exact verified blob is still the current source of this same slot.
+                        r["slotKey"] == slot["slotKey"]
+                            && r["kind"] == *kind
+                            && r["sourceLocation"]["blobSha256"] == slot["blobSha256"]
+                    })
+                });
             let mut material = if let Some(r) = reading {
                 public_material(r.clone())
             } else {
