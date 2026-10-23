@@ -92,7 +92,7 @@ export function ContentComparisonPanel(){
     setPending(true);setError(null);
     try{
       const output=await requestJson(
-        inspectionUrl(context.scope,'content-comparison/requests'),
+        inspectionUrl(context.scope,'content-comparison/requests',{as_of:input.knowledgeCutoff}),
         {method:'POST',body:{
           commandRef,targetRef:input.targetRef,domainRef:context.scope.domain==='all'?null:context.scope.domain,
           workRefs:input.workRefs,knowledgeCutoff:input.knowledgeCutoff,
@@ -101,7 +101,7 @@ export function ContentComparisonPanel(){
         }}
       );
       if(!isRecord(output)||typeof output.requestRef!=='string'
-        ||!/^[0-9a-f]{8}-[0-9a-f-]{27,}$/i.test(output.requestRef))throw new Error('服务器结果不可确认');
+        ||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(output.requestRef))throw new Error('服务器结果不可确认');
       const id=output.requestRef;
       setRequestRef(id);setUnknown(false);command.current=null;
       context.patch({inspect_comparison_request:id,inspect_comparison_command:null});

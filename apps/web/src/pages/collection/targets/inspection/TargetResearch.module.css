@@ -100,3 +100,7 @@
 .claimExcerpt{padding-block:var(--lgi-space-3);border-bottom:var(--lgi-action-border-width) solid var(--lgi-hairline)}
 .claimExcerpt blockquote{margin:0 0 var(--lgi-space-2);white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:760px){.claimSources{grid-template-columns:1fr}}
+
+.drawer :global(.life-trend-bucket-hit){pointer-events:all;cursor:pointer}
+.drawer :global(.life-trend-bucket-selected .life-trend-dot){stroke:var(--lgi-signal);stroke-width:3}
+.drawer :global(.life-trend-bucket-selected .life-trend-bucket-hit:focus-visible){stroke:var(--lgi-focus);stroke-width:2}

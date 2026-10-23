@@ -21,7 +21,7 @@ export function WorkComparisonPanel(){
   useEffect(()=>{if(data)context.pinCutoff(data.knowledgeCutoff);},[data,context]);
   const replace=(index:number,value:string)=>{
     if(context.selected.some((id,at)=>id===value&&at!==index)){setMessage('这篇已经在对照中，请选择其他作品。');return;}
-    const next=[...context.selected];next[index]=value;setMessage(null);context.patch({inspect_works:next.join(',')});
+    const next=[...context.selected];next[index]=value;setMessage(null);context.patch({inspect_works:next.join(','),inspect_comparison_request:null});
   };
   const references=data?.referenceStatistics[metric];
   return <ResearchPanel title="作品并排对照" actions={<div className={styles.modes}>
