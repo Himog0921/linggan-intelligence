@@ -7,10 +7,12 @@ audit_tmp_root="${TMPDIR:-/tmp}"
 audit_tmp_root="${audit_tmp_root%/}"
 export AI_FOUNDATION_PROOF_NODE="$(command -v node)"
 manual_adoption_only=0
+browser_proof=0
 case "${1:-}" in
  '') ;;
  --manual-adoption) manual_adoption_only=1 ;;
  --browser)
+  browser_proof=1
   npm --prefix apps/web run build
   export LINGGAN_WEB_DIST="$project_root/apps/web/dist"
   export LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE
@@ -73,6 +75,9 @@ if [[ "$manual_adoption_only" == 1 ]]; then
  exit 0
 fi
 cargo test -p linggan-worker --test ocr_quality_audit_postgres synthetic_audit_blind_read_review_report_and_withdrawal --locked -- --ignored --nocapture
+if [[ "$browser_proof" == 1 ]]; then
+ cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable --locked -- --ignored --nocapture
+fi
 cargo test -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
 cargo test -p linggan-worker --test ocr_recognition_postgres second_image_schema_failure_stops_without_sending_the_third_image --locked -- --ignored --nocapture
 cargo test -p linggan-worker --test ocr_recognition_postgres manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend --locked -- --ignored --nocapture
