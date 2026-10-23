@@ -249,6 +249,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0147_ops_team_responsibility.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0148_ops_first_admin_bootstrap.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -335,4 +337,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0145_ocr_manual_human_adoption','49ba4e27a8923ea2e12fefee6e209797aa5d0e7e09b7c299e6ae11e236dbbfbc');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0146_ops_team_auth','9d53a01d644a411732ebebfcdfaa1e368065aca15693150d93800561205ba054');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0147_ops_team_responsibility','1c6dd919d67963923c111ae6e6eac70fc5b0803512e9f819ba2d7da12d44a6fc');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0148_ops_first_admin_bootstrap','8e8362c4054807dfae8111fa39ff57c78e8baab11bc6a31788bb6c554ffb310d');\n",
 );

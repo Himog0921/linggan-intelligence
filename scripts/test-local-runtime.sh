@@ -232,6 +232,37 @@ fi
 
 "$project_root/scripts/local-runtime.sh" --database "$proof_database" migrate
 
+# The first Ops administrator is a controlled console bootstrap, never a browser registration.
+# Use only a synthetic token and address inside this disposable database, then prove it cannot
+# be repeated or create a second identity.
+bootstrap_token="$(openssl rand -hex 32)"
+printf '%s\n%s\n%s\n' "$bootstrap_token" 'first-admin@example.test' 'Synthetic First Admin' | \
+  LINGGAN_OPS_BOOTSTRAP_CONFIRM=CREATE_FIRST_OPS_ADMIN \
+  "$project_root/scripts/local-runtime.sh" --database "$proof_database" bootstrap-ops-admin \
+  >"$proof_directory/bootstrap-ops-admin.log"
+bootstrap_state="$(docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -At \
+  -U "$POSTGRES_USER" -d "$proof_database" -c "
+    SELECT concat(count(*), ':', min(member.role), ':', min(member.state), ':', count(DISTINCT bootstrap.invite_ref))
+    FROM linggan_ops_first_admin_bootstrap AS bootstrap
+    JOIN linggan_ops_member AS member ON member.member_ref=bootstrap.member_ref;")"
+if [[ "$bootstrap_state" != "1:admin:invited:1" ]]; then
+  echo "runtime proof did not create exactly one invited synthetic first administrator" >&2
+  exit 1
+fi
+if printf '%s\n%s\n%s\n' "$(openssl rand -hex 32)" 'second-admin@example.test' 'Synthetic Second Admin' | \
+  LINGGAN_OPS_BOOTSTRAP_CONFIRM=CREATE_FIRST_OPS_ADMIN \
+  "$project_root/scripts/local-runtime.sh" --database "$proof_database" bootstrap-ops-admin \
+  >"$proof_directory/bootstrap-ops-admin-repeat.log" 2>&1; then
+  echo "runtime proof allowed first Ops administrator bootstrap twice" >&2
+  exit 1
+fi
+if ! grep -q 'first Ops administrator bootstrap is no longer available' \
+  "$proof_directory/bootstrap-ops-admin-repeat.log"; then
+  cat "$proof_directory/bootstrap-ops-admin-repeat.log" >&2
+  echo "runtime proof second first-admin bootstrap failed for an unexpected reason" >&2
+  exit 1
+fi
+
 observed_at="$(docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -At -U "$POSTGRES_USER" -d "$proof_database" \
   -c "SELECT to_char(scope_001_now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"');")"
 payload_path="$proof_directory/discovery.json"

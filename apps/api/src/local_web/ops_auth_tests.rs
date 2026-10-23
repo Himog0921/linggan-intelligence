@@ -452,6 +452,96 @@ async fn team_group_and_responsibility_foundation_preserves_history() {
             .is_err(),
         "responsibility receipt must not be erasable"
     );
+    let bootstrap_invite = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_invite \
+         (invite_ref,member_ref,token_sha256,invited_by_member_ref,expires_at) \
+         VALUES($1,$2,decode(repeat('e',64),'hex'),$2,scope_001_now()+interval '7 days')",
+    )
+    .bind(bootstrap_invite)
+    .bind(admin)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        sqlx::query(
+            "INSERT INTO linggan_ops_first_admin_bootstrap \
+             (bootstrap_ref,member_ref,invite_ref,request_ref,control_channel) \
+             VALUES($1,$2,$3,$4,'local_runtime_console')"
+        )
+        .bind(Uuid::new_v4())
+        .bind(admin)
+        .bind(bootstrap_invite)
+        .bind(Uuid::new_v4())
+        .execute(database.pool())
+        .await
+        .is_err(),
+        "the schema must reject bootstrap after any team member already exists"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn first_admin_bootstrap_receipt_requires_an_empty_invited_admin_team() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_bootstrap_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let admin = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state) \
+         VALUES($1,'first-admin@example.test','合成首位管理员','admin','invited')",
+    )
+    .bind(admin)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let invite = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_invite \
+         (invite_ref,member_ref,token_sha256,invited_by_member_ref,expires_at) \
+         VALUES($1,$2,decode(repeat('a',64),'hex'),$2,scope_001_now()+interval '7 days')",
+    )
+    .bind(invite)
+    .bind(admin)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let receipt = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_first_admin_bootstrap \
+         (bootstrap_ref,member_ref,invite_ref,request_ref,control_channel) \
+         VALUES($1,$2,$3,$4,'local_runtime_console')",
+    )
+    .bind(receipt)
+    .bind(admin)
+    .bind(invite)
+    .bind(Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        sqlx::query(
+            "UPDATE linggan_ops_first_admin_bootstrap SET request_ref=$2 WHERE bootstrap_ref=$1"
+        )
+        .bind(receipt)
+        .bind(Uuid::new_v4())
+        .execute(database.pool())
+        .await
+        .is_err()
+    );
+    assert!(
+        sqlx::query("DELETE FROM linggan_ops_first_admin_bootstrap WHERE bootstrap_ref=$1")
+            .bind(receipt)
+            .execute(database.pool())
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
