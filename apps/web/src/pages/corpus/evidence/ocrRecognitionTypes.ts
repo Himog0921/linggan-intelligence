@@ -19,6 +19,8 @@ export interface OcrRecognitionImage {
   invocationRef: string | null; finishReason: string | null;
   usage: { inputTokens: number | null; outputTokens: number | null; measuredTokens: number | null } | null;
   estimatedCostUsd: string | null; regions: readonly OcrRecognitionRegion[];
+  adoptionRef?: string | null; reviewRevision?: number; machineText?: string | null;
+  humanBody?: { reviewRef: string; revision: number; text: string; actor: string; reason: string; reviewedAt: string } | null;
 }
 export interface OcrRecognitionScope {
   sha256: string; imageCount: number; modelLabel: string; endpointUrl: string;
@@ -62,7 +64,9 @@ function image(value: unknown): OcrRecognitionImage {
     state: choice(row.state, ['pending', 'running', 'succeeded', 'failed', 'unattempted', 'unknown']), slotKey: optionalString(row.slotKey), aliases: row.aliases === undefined ? [] : array(row.aliases, string),
     originalUrl: localAsset(row.originalUrl), rawResultRef: optionalString(row.rawResultRef), rawResultSha256: optionalString(row.rawResultSha256), rawJson: optionalString(row.rawJson),
     invocationRef: optionalString(row.invocationRef), usage: usage ? { inputTokens: optionalInteger(usage.inputTokens), outputTokens: optionalInteger(usage.outputTokens), measuredTokens: optionalInteger(usage.measuredTokens) } : null,
-    estimatedCostUsd: optionalString(row.estimatedCostUsd), finishReason: optionalString(row.finishReason), regions: array(row.regions, region) };
+    estimatedCostUsd: optionalString(row.estimatedCostUsd), finishReason: optionalString(row.finishReason), regions: array(row.regions, region),
+    adoptionRef: optionalString(row.adoptionRef), reviewRevision: row.reviewRevision === undefined ? 0 : integer(row.reviewRevision), machineText: optionalString(row.machineText),
+    humanBody: row.humanBody === undefined || row.humanBody === null ? null : (() => { const review = record(row.humanBody); return { reviewRef: string(review.reviewRef), revision: integer(review.revision), text: string(review.text), actor: string(review.actor), reason: string(review.reason), reviewedAt: string(review.reviewedAt) }; })() };
 }
 export function parseOcrRecognition(value: unknown): OcrRecognitionRun | null {
   if (value === null) return null;

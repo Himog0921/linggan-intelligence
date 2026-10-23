@@ -8,14 +8,50 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use linggan_intelligence::ai_foundation::ocr_recognition::{self, StartRun};
+use linggan_intelligence::ai_foundation::{
+    ocr_manual_adoption::{self, Adopt},
+    ocr_recognition::{self, StartRun},
+};
 use uuid::Uuid;
 
 pub(super) fn routes() -> Router<LocalWebState> {
-    Router::new().route(
-        "/api/local/work-resources/{public_ref}/ocr-recognition",
-        get(read).post(start),
-    )
+    Router::new()
+        .route(
+            "/api/local/work-resources/{public_ref}/ocr-recognition",
+            get(read).post(start),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/ocr-recognition/adoptions",
+            axum::routing::post(adopt),
+        )
+}
+async fn adopt(
+    State(state): State<LocalWebState>,
+    Path(work): Path<String>,
+    body: Bytes,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
+    };
+    let Ok(work) = Uuid::parse_str(&work) else {
+        return local_read_json_error(StatusCode::BAD_REQUEST, "invalid_material_ref");
+    };
+    let Ok(request) = serde_json::from_slice::<Adopt>(&body) else {
+        return local_read_json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_manual_ocr_adoption_command",
+        );
+    };
+    match ocr_manual_adoption::adopt(db, work, &request).await {
+        Ok(receipt) => Json(receipt).into_response(),
+        Err(linggan_intelligence::ai_foundation::store::FoundationError::NotFound) => {
+            local_read_json_error(StatusCode::NOT_FOUND, "manual_ocr_adoption_unavailable")
+        }
+        Err(linggan_intelligence::ai_foundation::store::FoundationError::Conflict) => {
+            local_read_json_error(StatusCode::CONFLICT, "manual_ocr_adoption_conflict")
+        }
+        Err(_) => local_read_json_error(StatusCode::BAD_REQUEST, "manual_ocr_adoption_refused"),
+    }
 }
 async fn read(State(state): State<LocalWebState>, Path(work): Path<String>) -> Response {
     let Some(db) = state.database.database() else {
