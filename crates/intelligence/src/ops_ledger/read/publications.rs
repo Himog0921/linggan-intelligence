@@ -82,6 +82,9 @@ pub struct OpsPublicationItem {
     pub r#ref: Uuid,
     /// The workbench's own record number, kept as the provenance anchor (exports carry it).
     pub source_id: String,
+    /// `imported` records came from the historical workbench export; `native` records were
+    /// created in Operations.
+    pub source: &'static str,
     pub business_date: String,
     pub published_at: String,
     pub date_state: String,
@@ -134,17 +137,20 @@ pub struct OpsPublicationPage {
 /// Rows of the current business that the filters keep. `$1` business domain, `$2` operator,
 /// `$3` platform, `$4` account pattern, `$5`/`$6` date range, `$7` pending views only.
 const FILTERED: &str = "kept AS ( \
-    SELECT p.*, a.account_name, a.ledger_state, lv.view_count, lv.views_as_of \
+    SELECT p.*, a.account_name, a.ledger_state, publisher.display_name AS native_publisher_name, \
+           lv.view_count, lv.views_as_of \
       FROM linggan_ops_publication p \
       LEFT JOIN linggan_ops_account a ON a.account_ref = p.account_ref \
+      LEFT JOIN linggan_ops_member publisher ON publisher.member_ref = p.native_publisher_member_ref \
       LEFT JOIN latest_views lv ON lv.publication_ref = p.publication_ref \
      WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
+       AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
        AND ($1::uuid IS NULL OR a.domain_ref = $1) \
-       AND ($2::text IS NULL OR p.publisher_name = $2) \
+       AND ($2::text IS NULL OR coalesce(p.publisher_name,publisher.display_name) = $2) \
        AND ($3::text IS NULL OR p.platform = $3) \
        AND ($4::text IS NULL OR a.account_name ILIKE $4 ESCAPE '\\') \
-       AND ($5::date IS NULL OR p.published_business_date >= $5::date) \
-       AND ($6::date IS NULL OR p.published_business_date <= $6::date) \
+       AND ($5::date IS NULL OR coalesce(p.published_business_date,p.native_published_on) >= $5::date) \
+       AND ($6::date IS NULL OR coalesce(p.published_business_date,p.native_published_on) <= $6::date) \
        AND (NOT $7 OR (p.platform = 'xhs' AND lv.view_count IS NULL)))";
 
 pub async fn read_ops_publications(
@@ -168,10 +174,14 @@ pub async fn read_ops_publications(
     let items = read_page(database, business, &filter, Some(OPS_PAGE_SIZE)).await?;
     let operators = names(
         sqlx::query(
-            "SELECT DISTINCT p.publisher_name FROM linggan_ops_publication p \
+            "SELECT DISTINCT coalesce(p.publisher_name,publisher.display_name) AS publisher_name \
+               FROM linggan_ops_publication p \
                LEFT JOIN linggan_ops_account a ON a.account_ref = p.account_ref \
+               LEFT JOIN linggan_ops_member publisher ON publisher.member_ref = p.native_publisher_member_ref \
               WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
-                AND p.publisher_name IS NOT NULL AND ($1::uuid IS NULL OR a.domain_ref = $1) \
+                AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
+                AND coalesce(p.publisher_name,publisher.display_name) IS NOT NULL \
+                AND ($1::uuid IS NULL OR a.domain_ref = $1) \
               ORDER BY 1",
         )
         .bind(business.domain_ref())
@@ -198,17 +208,21 @@ async fn read_page(
 ) -> Result<Vec<OpsPublicationItem>, OpsReadError> {
     let sql = format!(
         "WITH {LATEST_VIEWS_CTE}, {FILTERED} \
-         SELECT kept.publication_ref, kept.source_record_id, kept.published_business_date::text AS business_date, \
-                to_char(kept.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS published, \
+         SELECT kept.publication_ref, kept.source_record_id, kept.source_system, \
+                coalesce(kept.published_business_date,kept.native_published_on)::text AS business_date, \
+                coalesce(to_char(kept.published_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"'), \
+                         kept.native_published_on::text) AS published, \
                 kept.published_date_state, kept.platform, kept.title, kept.body, kept.publication_url, \
-                kept.account_name, kept.ledger_state, kept.publisher_name, kept.view_count, kept.views_as_of, \
-                ((now() AT TIME ZONE 'Asia/Shanghai')::date - kept.published_business_date) >= 7 AS aged, \
+                kept.account_name, kept.ledger_state, \
+                coalesce(kept.publisher_name,kept.native_publisher_name) AS publisher_name, \
+                kept.view_count, kept.views_as_of, \
+                ((now() AT TIME ZONE 'Asia/Shanghai')::date - coalesce(kept.published_business_date,kept.native_published_on)) >= 7 AS aged, \
                 kept.like_count, kept.collect_count, kept.comment_count, kept.cover_click_rate, \
                 cover.publication_ref IS NOT NULL AS has_cover \
            FROM kept LEFT JOIN linggan_ops_publication_cover cover ON cover.publication_ref = kept.publication_ref \
-          ORDER BY CASE WHEN $7 THEN kept.published_at END ASC, \
-                   CASE WHEN NOT $7 THEN kept.published_at END DESC, \
-                   kept.source_created_at DESC, kept.publication_ref DESC \
+          ORDER BY CASE WHEN $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END ASC, \
+                   CASE WHEN NOT $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END DESC, \
+                   kept.source_created_at DESC NULLS LAST, kept.publication_ref DESC \
           LIMIT $9 OFFSET $8"
     );
     let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
@@ -254,6 +268,7 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
     Ok(OpsPublicationItem {
         r#ref: row.try_get("publication_ref")?,
         source_id: row.try_get("source_record_id")?,
+        source: source(row.try_get("source_system")?)?,
         business_date: row.try_get("business_date")?,
         published_at: row.try_get("published")?,
         date_state: row.try_get("published_date_state")?,
@@ -276,6 +291,14 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
             available: row.try_get("has_cover")?,
         },
     })
+}
+
+fn source(source_system: String) -> Result<&'static str, OpsReadError> {
+    match source_system.as_str() {
+        "content_workbench" => Ok("imported"),
+        "linggan_native" => Ok("native"),
+        _ => Err(OpsReadError::InvalidParameter("publication_source")),
+    }
 }
 
 /// DEC-0009 rules: only Xiaohongshu views are required and judged; unknown is never 0.
@@ -313,7 +336,7 @@ async fn attach_duplicates(
     }
     let refs: Vec<Uuid> = items.iter().map(|item| item.r#ref).collect();
     let rows = sqlx::query(
-        "SELECT merged_into_ref, published_business_date::text AS business_date \
+        "SELECT merged_into_ref, coalesce(published_business_date,native_published_on)::text AS business_date \
            FROM linggan_ops_publication WHERE merged_into_ref = ANY($1) \
           ORDER BY published_at, publication_ref",
     )

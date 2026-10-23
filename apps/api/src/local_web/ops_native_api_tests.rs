@@ -4,7 +4,13 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
 };
-use linggan_intelligence::ops_ledger::{apply_ops_import, preview_ops_import};
+use linggan_intelligence::ops_ledger::{
+    apply_ops_import, preview_ops_import,
+    read::{
+        OpsBusiness, OpsPublicationFilter, read_ops_accounts, read_ops_businesses, read_ops_daily,
+        read_ops_publications,
+    },
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
@@ -304,7 +310,7 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     let daily_request = Uuid::new_v4();
     let daily_body = json!({
         "requestId": daily_request,
-        "businessDate": "2026-10-23",
+        "businessDate": "2026-10-20",
         "linksOpenedCount": null,
         "followersGained": null,
         "expectedVersion": null
@@ -327,11 +333,21 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     .await;
     assert_eq!(replay_status, StatusCode::OK);
     assert_eq!(replay["receipt"]["replayed"], true);
+    let daily = read_ops_daily(&database, OpsBusiness::All, Some("本人运营"), None)
+        .await
+        .unwrap();
+    assert!(daily.items.iter().any(|item| {
+        item.r#ref == daily_ref
+            && item.links_opened.is_none()
+            && item.followers_gained.is_none()
+            && item.month_followers_gained.is_none()
+            && item.execution == "not_filled"
+    }));
     let (status, updated) = post(
         app.clone(),
         "/api/local/ops/native/daily-reports",
         Some(&owner_cookie),
-        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-23", "linksOpenedCount": 0, "followersGained": 0, "expectedVersion": 1 }),
+        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-20", "linksOpenedCount": 0, "followersGained": 0, "expectedVersion": 1 }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -340,7 +356,7 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
         app,
         "/api/local/ops/native/daily-reports",
         Some(&owner_cookie),
-        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-23", "linksOpenedCount": 1, "followersGained": 1, "expectedVersion": 1 }),
+        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-20", "linksOpenedCount": 1, "followersGained": 1, "expectedVersion": 1 }),
     )
     .await;
     assert_eq!(stale.0, StatusCode::CONFLICT);
@@ -364,6 +380,38 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
         2,
         "the stale write only adds its immutable receipt, not a revision"
     );
+    let accounts = read_ops_accounts(&database, OpsBusiness::All, None)
+        .await
+        .unwrap();
+    assert!(
+        accounts
+            .items
+            .iter()
+            .any(|item| item.r#ref == account_ref && item.source == "native")
+    );
+    assert!(
+        read_ops_businesses(&database)
+            .await
+            .unwrap()
+            .iter()
+            .any(|business| business.domain_ref == domain && business.account_count == 1)
+    );
+    let publications = read_ops_publications(
+        &database,
+        OpsBusiness::All,
+        OpsPublicationFilter {
+            page: 1,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(publications.items.iter().any(|item| {
+        item.r#ref == publication_ref
+            && item.business_date == "2026-10-20"
+            && item.source == "native"
+            && item.publisher.as_deref() == Some("本人运营")
+    }));
 }
 
 fn publication_body(request_id: Uuid, account_ref: Uuid) -> Value {

@@ -22,13 +22,17 @@ pub struct OpsDailyItem {
     pub weekday: &'static str,
     pub operator: String,
     pub published: i64,
-    pub links_opened: i64,
-    pub followers_gained: i64,
+    /// Null means the operator did not report this metric; it is distinct from a reported zero.
+    pub links_opened: Option<i64>,
+    /// Null means the operator did not report this metric; it is distinct from a reported zero.
+    pub followers_gained: Option<i64>,
     pub add_rate: Option<f64>,
     pub hits: i64,
-    pub month_followers_gained: i64,
+    /// Null means there are no reported follower values for this operator-month yet.
+    pub month_followers_gained: Option<i64>,
     pub month_published: i64,
-    /// 执行状态 (PAGE-OPS-002 §4): `not_published`, `praise`, `pending_views` or `done`.
+    /// 执行状态 (PAGE-OPS-002 §4): `not_published`, `not_filled`, `praise`,
+    /// `pending_views` or `done`.
     pub execution: &'static str,
 }
 
@@ -45,13 +49,18 @@ pub struct OpsDailyPage {
 /// Published and hit counts are recounted from kept registrations by publisher name and day;
 /// running month totals are per operator. `$1` operator, `$2` hit threshold, `$3` row limit.
 const DAILY_SQL: &str = "per_day AS ( \
-    SELECT p.publisher_name, p.published_business_date AS business_date, count(*) AS published, \
+    SELECT coalesce(p.publisher_name,publisher.display_name) AS publisher_name, \
+           coalesce(p.published_business_date,p.native_published_on) AS business_date, count(*) AS published, \
            count(*) FILTER (WHERE p.platform = 'xhs' AND lv.view_count >= $2) AS hits, \
            count(*) FILTER (WHERE p.platform = 'xhs' AND lv.view_count IS NULL \
-                              AND (now() AT TIME ZONE 'Asia/Shanghai')::date - p.published_business_date >= 7) AS pending_overdue \
+                              AND (now() AT TIME ZONE 'Asia/Shanghai')::date \
+                                  - coalesce(p.published_business_date,p.native_published_on) >= 7) AS pending_overdue \
       FROM linggan_ops_publication p \
+      LEFT JOIN linggan_ops_member publisher ON publisher.member_ref = p.native_publisher_member_ref \
       LEFT JOIN latest_views lv ON lv.publication_ref = p.publication_ref \
-     WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL AND p.publisher_name IS NOT NULL \
+     WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
+       AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
+       AND coalesce(p.publisher_name,publisher.display_name) IS NOT NULL \
      GROUP BY 1, 2), \
   days AS ( \
     SELECT d.daily_ref, d.source_record_id, d.business_date, d.operator_name, d.links_opened_count, d.followers_gained, \
@@ -106,8 +115,10 @@ pub async fn read_ops_daily(
 }
 
 fn item(row: &sqlx::postgres::PgRow) -> Result<OpsDailyItem, OpsReadError> {
-    let links: i32 = row.try_get("links_opened_count")?;
-    let followers: i32 = row.try_get("followers_gained")?;
+    let links: Option<i32> = row.try_get("links_opened_count")?;
+    let followers: Option<i32> = row.try_get("followers_gained")?;
+    let links = links.map(i64::from);
+    let followers = followers.map(i64::from);
     Ok(OpsDailyItem {
         r#ref: row.try_get("daily_ref")?,
         source_id: row.try_get("source_record_id")?,
@@ -115,16 +126,16 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsDailyItem, OpsReadError> {
         weekday: weekday(row.try_get("isodow")?),
         operator: row.try_get("operator_name")?,
         published: row.try_get("published")?,
-        links_opened: i64::from(links),
-        followers_gained: i64::from(followers),
-        add_rate: add_rate(i64::from(followers), i64::from(links)),
+        links_opened: links,
+        followers_gained: followers,
+        add_rate: add_rate(followers, links),
         hits: row.try_get("hits")?,
         month_followers_gained: row.try_get("month_followers")?,
         month_published: row.try_get("month_published")?,
         execution: execution(
             row.try_get("published")?,
             row.try_get("hits")?,
-            i64::from(followers),
+            followers,
             row.try_get("pending_overdue")?,
         ),
     })
@@ -135,12 +146,14 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsDailyItem, OpsReadError> {
 pub(crate) fn execution(
     published: i64,
     hits: i64,
-    followers: i64,
+    followers: Option<i64>,
     pending_overdue: i64,
 ) -> &'static str {
     if published == 0 {
         "not_published"
-    } else if hits > 0 || followers > 0 {
+    } else if followers.is_none() {
+        "not_filled"
+    } else if hits > 0 || followers.is_some_and(|count| count > 0) {
         "praise"
     } else if pending_overdue > 0 {
         "pending_views"
@@ -150,8 +163,11 @@ pub(crate) fn execution(
 }
 
 /// 添加率 = 加微 ÷ 打开; with no opened links the rate is undefined, not 0.
-pub(crate) fn add_rate(followers: i64, links: i64) -> Option<f64> {
-    (links > 0).then(|| followers as f64 / links as f64)
+pub(crate) fn add_rate(followers: Option<i64>, links: Option<i64>) -> Option<f64> {
+    match (followers, links) {
+        (Some(followers), Some(links)) if links > 0 => Some(followers as f64 / links as f64),
+        _ => None,
+    }
 }
 
 fn weekday(isodow: i32) -> &'static str {
@@ -173,19 +189,19 @@ mod tests {
     #[test]
     fn execution_status_follows_the_new_rules_in_order() {
         assert_eq!(
-            execution(0, 0, 3, 0),
+            execution(0, 0, Some(3), 0),
             "not_published",
             "no registration that day"
         );
         assert_eq!(
-            execution(2, 1, 0, 1),
+            execution(2, 1, Some(0), 1),
             "praise",
             "a hit outranks a missing view"
         );
-        assert_eq!(execution(2, 0, 4, 0), "praise");
-        assert_eq!(execution(3, 0, 0, 1), "pending_views");
+        assert_eq!(execution(2, 0, Some(4), 0), "praise");
+        assert_eq!(execution(3, 0, Some(0), 1), "pending_views");
         assert_eq!(
-            execution(3, 0, 0, 0),
+            execution(3, 0, Some(0), 0),
             "done",
             "0 followers is not 需复盘 any more"
         );
@@ -193,8 +209,9 @@ mod tests {
 
     #[test]
     fn add_rate_is_unknown_without_opened_links() {
-        assert_eq!(add_rate(3, 0), None);
-        assert_eq!(add_rate(0, 4), Some(0.0));
-        assert_eq!(add_rate(1, 4), Some(0.25));
+        assert_eq!(add_rate(Some(3), Some(0)), None);
+        assert_eq!(add_rate(Some(0), Some(4)), Some(0.0));
+        assert_eq!(add_rate(Some(1), Some(4)), Some(0.25));
+        assert_eq!(add_rate(None, Some(4)), None);
     }
 }

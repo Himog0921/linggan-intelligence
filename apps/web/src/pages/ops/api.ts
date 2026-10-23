@@ -73,6 +73,7 @@ function publication(r: R) {
     throw new d.ShapeError("views.value");
   return {
     ref: s(r, "ref"),
+    source: enumeration(r, "source", ["imported", "native"]),
     businessDate: s(r, "businessDate"),
     dateState: enumeration(r, "dateState", ["as_recorded", "suspect_year"]),
     platform: platform(r),
@@ -84,6 +85,7 @@ function publication(r: R) {
       ledgerState: enumeration(a, "ledgerState", [
         "in_ledger",
         "absent_from_export",
+        "native_active",
       ]),
     })),
     publisher: sn(r, "publisher"),
@@ -113,6 +115,7 @@ export function publications(value: unknown) {
 function account(r: R) {
   return {
     ref: s(r, "ref"),
+    source: enumeration(r, "source", ["imported", "native"]),
     platform: platform(r),
     name: s(r, "name"),
     profileUrl: sn(r, "profileUrl"),
@@ -142,14 +145,15 @@ function dailyItem(r: R) {
     weekday: s(r, "weekday"),
     operator: s(r, "operator"),
     published: n(r, "published"),
-    linksOpened: n(r, "linksOpened"),
-    followersGained: n(r, "followersGained"),
+    linksOpened: nn(r, "linksOpened"),
+    followersGained: nn(r, "followersGained"),
     addRate: nn(r, "addRate"),
     hits: n(r, "hits"),
-    monthFollowersGained: n(r, "monthFollowersGained"),
+    monthFollowersGained: nn(r, "monthFollowersGained"),
     monthPublished: n(r, "monthPublished"),
     execution: enumeration(r, "execution", [
       "not_published",
+      "not_filled",
       "praise",
       "pending_views",
       "done",

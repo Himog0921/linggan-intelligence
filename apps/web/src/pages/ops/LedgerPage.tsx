@@ -475,7 +475,10 @@ export function LedgerPage({
         <header className={c('ops-detail-head')}><h2>{detail.title || '无标题发布记录'}</h2><ActionButton onClick={() => setDetail(null)}>关闭详情</ActionButton></header>
         <div className={c('ops-dialog-body')}>
           <p>{detail.businessDate} · {f.platformLabel[detail.platform]} · {detail.account?.name || '账号未知'}</p>
-          <p className={c('ops-note')}>迁入记录 · 系统尚未核对平台发布状态</p>
+          <p className={c('ops-note')}>
+            {detail.source === "native" ? "运营台账原生登记" : "工作台历史迁入"}
+            {' · '}系统尚未核对平台发布状态
+          </p>
           <External href={detail.url} title="原发布链接">查看原发布链接 ↗</External>
           <dl className={c('ops-detail-facts')}>
             <div><dt>阅读量</dt><dd>{detail.views.state === 'value' ? f.count(detail.views.value).text : detail.views.state === 'pending' ? '待补' : '选填，未知'}</dd></div>
@@ -598,7 +601,7 @@ function PublicationRow({
             <span className={c("ops-ellipsis")} title={item.account.name}>
               {item.account.name}
             </span>
-            {item.account.ledgerState !== "in_ledger" ? (
+            {item.account.ledgerState === "absent_from_export" ? (
               <Tag title="这个账号已在工作台删除，旧状态未知">已停用</Tag>
             ) : null}
           </div>
@@ -668,6 +671,7 @@ function AccountRow({ item, index }: { item: api.Account; index: number }) {
             {item.name}
           </span>
         )}
+        {item.source === "native" ? <Tag title="由运营台账原生创建">原生</Tag> : null}
       </td>
       <TextCell value={item.deviceCode} />
       <NumberCell value={item.followerCount} />
@@ -697,6 +701,7 @@ function AccountRow({ item, index }: { item: api.Account; index: number }) {
 }
 const execution = {
   not_published: ["未完成", "warning", "当天没有这个运营人的发布登记"],
+  not_filled: ["待补数据", "warning", "当天已有发布登记，但加微尚未填写"],
   praise: ["可表扬", "success", "当天有爆款或有加微"],
   pending_views: [
     "待补阅读量",
@@ -722,7 +727,7 @@ function DailyRow({ item }: { item: api.Daily }) {
       <NumberCell value={item.followersGained} />
       <td className={c("ops-number")}>
         {item.addRate === null ? (
-          <Missing title="打开为 0 时没有添加率" />
+          <Missing title="打开为 0 或打开/加微尚未填写时，没有添加率" />
         ) : (
           <span>{f.percent(item.addRate * 100)}</span>
         )}

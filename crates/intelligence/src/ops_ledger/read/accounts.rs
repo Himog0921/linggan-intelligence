@@ -18,6 +18,9 @@ pub struct OpsHealth {
 pub struct OpsAccountItem {
     pub r#ref: Uuid,
     pub source_id: String,
+    /// `imported` records came from the historical workbench export; `native` records were
+    /// created in Operations.  Keep provenance visible instead of making them look identical.
+    pub source: &'static str,
     pub platform: String,
     pub name: String,
     pub profile_url: Option<String>,
@@ -50,16 +53,20 @@ pub async fn read_ops_accounts(
     let operator = operator.map(str::trim).filter(|text| !text.is_empty());
     let scope = sqlx::query(
         "SELECT count(*) AS total, count(*) FILTER (WHERE status IN ('active', 'warming')) AS active \
-           FROM linggan_ops_account WHERE ledger_state = 'in_ledger' AND ($1::uuid IS NULL OR domain_ref = $1)",
+           FROM linggan_ops_account WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
+             OR (source_system='linggan_native' AND native_record_state='active')) \
+             AND ($1::uuid IS NULL OR domain_ref = $1)",
     )
     .bind(business.domain_ref())
     .fetch_one(database.pool())
     .await?;
     let rows = sqlx::query(
-        "SELECT account_ref, source_record_id, platform, account_name, profile_url, device_code, follower_count, \
+        "SELECT account_ref, source_record_id, source_system, platform, account_name, profile_url, device_code, follower_count, \
                 ip_location, operator_name, status, is_retained, notes \
            FROM linggan_ops_account \
-          WHERE ledger_state = 'in_ledger' AND ($1::uuid IS NULL OR domain_ref = $1) \
+          WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
+             OR (source_system='linggan_native' AND native_record_state='active')) \
+            AND ($1::uuid IS NULL OR domain_ref = $1) \
             AND ($2::text IS NULL OR operator_name = $2) \
           ORDER BY operator_name NULLS LAST, platform, account_name, account_ref",
     )
@@ -73,6 +80,7 @@ pub async fn read_ops_accounts(
             Ok(OpsAccountItem {
                 r#ref: row.try_get("account_ref")?,
                 source_id: row.try_get("source_record_id")?,
+                source: source(row.try_get("source_system")?)?,
                 platform: row.try_get("platform")?,
                 name: row.try_get("account_name")?,
                 profile_url: row.try_get("profile_url")?,
@@ -92,7 +100,9 @@ pub async fn read_ops_accounts(
     let operators = names(
         sqlx::query(
             "SELECT DISTINCT operator_name FROM linggan_ops_account \
-              WHERE ledger_state = 'in_ledger' AND operator_name IS NOT NULL \
+              WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
+                 OR (source_system='linggan_native' AND native_record_state='active')) \
+                AND operator_name IS NOT NULL \
                 AND ($1::uuid IS NULL OR domain_ref = $1) ORDER BY 1",
         )
         .bind(business.domain_ref())
@@ -106,4 +116,12 @@ pub async fn read_ops_accounts(
         operators,
         items,
     })
+}
+
+fn source(source_system: String) -> Result<&'static str, OpsReadError> {
+    match source_system.as_str() {
+        "content_workbench" => Ok("imported"),
+        "linggan_native" => Ok("native"),
+        _ => Err(OpsReadError::InvalidParameter("account_source")),
+    }
 }

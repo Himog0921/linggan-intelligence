@@ -1,5 +1,5 @@
 {
-  "fingerprint": "dc9f7d28e6d50c8de1d24178722db2737ba819bb7e28ebbbc4a8dbe0d34b0f41",
+  "fingerprint": "2412c27a13939ed879f8557d230223fc216c16db0a7dba4b5661e58f00e7ca80",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -239,7 +239,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/LedgerPage.tsx",
-      "sha256": "d3446978cb8ae01f226790f97a405bbfbe448302a897cc40c2502f0ddd1f5532"
+      "sha256": "2f5b2b0e8691db0fa95dc99d566f3a19a34a4ab2a05786a7e23d4aa4df631640"
     },
     {
       "path": "apps/web/src/pages/ops/Ops.module.css",
