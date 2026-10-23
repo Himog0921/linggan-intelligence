@@ -1,15 +1,15 @@
 //! Object-scoped inspection over existing immutable material records.
-//! No new Work identity, scheduler, capture or model dispatch is created by these reads.
-mod scope;
-mod rounds;
+//! These reads never create a second Work identity, scheduler, capture or model dispatch.
 mod comparison;
-mod works;
+mod rounds;
+mod scope;
 mod trace;
+mod works;
 
-pub use comparison::compare_rounds;
+pub use comparison::{compare_rounds, read_round_result};
 pub use rounds::read_rounds;
-pub use trace::read_trace;
-pub use works::compare_works;
+pub use trace::{compare_observations, read_trace};
+pub use works::{ComparisonMode, WorkComparison, WorkSnapshot, compare_works};
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -97,7 +97,7 @@ pub struct MetricDifferences {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Round {
-    /// Runtime admits one terminal package per Attempt. A retry is another Attempt.
+    /// The existing runtime admits one terminal package per Attempt. Retries stay separate.
     pub round_ref: Uuid,
     pub package_ref: Uuid,
     pub rule_ref: Option<Uuid>,
@@ -132,9 +132,20 @@ pub struct RoundWork {
     pub creator: Option<String>,
     pub position: Option<i64>,
     pub metrics: Metrics,
-    pub first_seen_in_scope: bool,
+    pub first_seen_in_scope: Option<bool>,
     pub library_presence: String,
     pub seen_before_left: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoundResult {
+    pub target_ref: Uuid,
+    pub knowledge_cutoff: String,
+    pub method_version: &'static str,
+    pub round: Round,
+    pub works: Vec<RoundWork>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -159,13 +170,13 @@ pub struct RoundComparison {
     pub comparison_state: &'static str,
     pub reasons: Vec<&'static str>,
     pub rows: Vec<ComparedRow>,
-    pub common_count: usize,
-    pub entered_count: usize,
-    pub absent_count: usize,
+    pub common_count: Option<usize>,
+    pub entered_count: Option<usize>,
+    pub absent_count: Option<usize>,
     pub truncated: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TraceEntry {
     pub observation_ref: String,
@@ -191,4 +202,15 @@ pub struct TracePage {
     pub observations: Vec<TraceEntry>,
     pub next_offset: Option<usize>,
     pub method_version: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObservationComparison {
+    pub work_ref: Uuid,
+    pub knowledge_cutoff: String,
+    pub method_version: &'static str,
+    pub left: TraceEntry,
+    pub right: TraceEntry,
+    pub metrics: MetricDifferences,
 }

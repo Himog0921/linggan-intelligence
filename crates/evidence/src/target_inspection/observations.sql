@@ -19,8 +19,7 @@ WITH observations AS (
     JOIN linggan_runtime_capture_package package USING(package_ref)
     JOIN linggan_runtime_submission_receipt receipt USING(package_ref)
     JOIN linggan_runtime_record_disposition disposition
-      ON disposition.package_ref=observation.package_ref
-     AND disposition.record_ordinal=observation.record_ordinal
+      ON disposition.package_ref=observation.package_ref AND disposition.record_ordinal=observation.record_ordinal
     LEFT JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id
     LEFT JOIN collection_work_order_lease lease USING(lease_ref)
     LEFT JOIN collection_work_order work_order USING(work_order_ref)
@@ -30,8 +29,7 @@ WITH observations AS (
     LEFT JOIN collection_monitor_rule rule ON rule.rule_ref=revision.rule_ref
     WHERE receipt.material_admission='ACCEPTED'
       AND disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content')
-      AND package.accepted_at <= $4::timestamptz
-      AND observation.observed_at <= $4::timestamptz
+      AND package.accepted_at <= $4::timestamptz AND observation.observed_at <= $4::timestamptz
       AND EXISTS(SELECT 1 FROM collection_work_order_domain_usage usage
           WHERE usage.work_order_ref=work_order.work_order_ref
             AND ($2::uuid IS NULL OR usage.domain_ref=$2))
@@ -44,5 +42,6 @@ SELECT qualified.*,
        EXISTS(SELECT 1 FROM qualified newer WHERE newer.observed_at>qualified.observed_at
                AND newer.accepted_at<qualified.accepted_at) AS late_arrival
 FROM qualified
+WHERE $7::uuid[] IS NULL OR material_ref=ANY($7)
 ORDER BY observed_at DESC,material_ref DESC
 LIMIT $5 OFFSET $6

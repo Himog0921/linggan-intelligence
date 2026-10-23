@@ -9,8 +9,7 @@ WITH history AS (
            collect_count,collect_count_state,share_count,share_count_state
     FROM linggan_material_discovery_finding WHERE content_public_ref=$1
 )
-SELECT DISTINCT ON(metric.name) metric.name,metric.value,history.material_ref,
-       history.source_kind,
+SELECT DISTINCT ON(metric.name) metric.name,metric.value,history.material_ref,history.source_kind,
        to_char(history.observed_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS observed_at,
        (extract(epoch FROM history.observed_at)*1000)::bigint AS observed_epoch_ms,
        package.payload #> ARRAY['records',history.record_ordinal::text,'payload'] AS raw
@@ -30,11 +29,9 @@ CROSS JOIN LATERAL (VALUES
 WHERE receipt.material_admission='ACCEPTED'
   AND disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content')
   AND metric.state='KNOWN' AND metric.value>=0
-  AND package.accepted_at <= $2::timestamptz
-  AND history.observed_at <= $2::timestamptz
-  AND abs(extract(epoch FROM history.observed_at)-$3::double precision/1000.0-86400)<=3600
+  AND package.accepted_at <= $2::timestamptz AND history.observed_at <= $2::timestamptz
+  AND abs(extract(epoch FROM history.observed_at)-$3::bigint/1000.0-86400)<=3600
   AND EXISTS(SELECT 1 FROM collection_work_order_domain_usage usage
       WHERE usage.work_order_ref=work_order.work_order_ref AND ($4::uuid IS NULL OR usage.domain_ref=$4))
-ORDER BY metric.name,
-         abs(extract(epoch FROM history.observed_at)-$3::double precision/1000.0-86400),
+ORDER BY metric.name,abs(extract(epoch FROM history.observed_at)-$3::bigint/1000.0-86400),
          history.observed_at DESC,(history.source_kind='content_detail') DESC,history.material_ref
