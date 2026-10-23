@@ -444,11 +444,28 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     assert_eq!(batch_status, StatusCode::OK);
     assert_eq!(batch["items"][0]["status"], StatusCode::CREATED.as_u16());
     assert_eq!(batch["items"][0]["receipt"]["outcome"], "accepted");
+    let batch_publication_ref = uuid(&batch["items"][0]["receipt"]["recordRef"]);
     assert_eq!(batch["items"][1]["status"], StatusCode::UNPROCESSABLE_ENTITY.as_u16());
     assert_eq!(
         batch["items"][1]["receipt"]["code"],
         "ops_native_publication_date_invalid"
     );
+
+    let (batch_view_status, batch_view) = post(
+        app.clone(),
+        "/api/local/ops/native/view-reports/batch",
+        Some(&owner_cookie),
+        json!({"reports": [
+            {"publicationRef": batch_publication_ref, "requestId": Uuid::new_v4(), "reportKind": "value", "viewCount": 0, "asOf": "2026-10-23T08:00:00+08:00"},
+            {"publicationRef": Uuid::new_v4(), "requestId": Uuid::new_v4(), "reportKind": "value", "viewCount": 1, "asOf": "2026-10-23T08:00:00+08:00"}
+        ]}),
+    )
+    .await;
+    assert_eq!(batch_view_status, StatusCode::OK);
+    assert_eq!(batch_view["items"][0]["status"], StatusCode::CREATED.as_u16());
+    assert_eq!(batch_view["items"][0]["receipt"]["outcome"], "accepted");
+    assert_eq!(batch_view["items"][1]["status"], StatusCode::NOT_FOUND.as_u16());
+    assert_eq!(batch_view["items"][1]["receipt"]["code"], "ops_native_publication_not_found");
 
     let mut invalid_publication = publication_body(Uuid::new_v4(), account_ref);
     invalid_publication["publishedOn"] = Value::String("2026-02-30".to_owned());
