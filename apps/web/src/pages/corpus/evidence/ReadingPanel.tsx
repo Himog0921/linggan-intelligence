@@ -59,7 +59,7 @@ export function ReadingPanel({ context, domain }: { context: PanelContext; domai
         <span>本地评论 <strong>{inspector.commentsCoverage?.retained ?? '未知'}</strong> 条</span>
         <span>已采回复 <strong>{inspector.repliesCoverage?.retained ?? '未知'}</strong> 条</span>
       </div>
-      <DossierComments work={item.ref} domain={domain} platformComments={item.display.engagement.comment} />
+      <DossierComments work={item.ref} domain={domain} />
     </Section>
   </div>;
 }

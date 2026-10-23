@@ -154,15 +154,42 @@
   }
 }
 
-/* ── 已采评论 ─────────────────────────────── */
-.commentRow {
-  margin: var(--lgi-space-2) 0;
+/* ── 评论与回复：打开作品即显示全文，回复缩进在主评论下 ───────── */
+.comments {
+  display: grid;
+  gap: var(--lgi-space-3);
+  margin-top: var(--lgi-space-3);
+  min-width: 0;
+}
+
+.comment {
+  min-width: 0;
+}
+
+.commentMeta {
+  margin: 0;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.commentText {
+  margin: var(--lgi-space-1) 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence);
 }
 
 .replies {
-  margin-left: var(--lgi-space-4);
+  display: grid;
+  gap: var(--lgi-space-2);
+  margin: var(--lgi-space-2) 0 0 var(--lgi-space-4);
   border-left: 2px solid var(--lgi-border);
   padding-left: var(--lgi-space-3);
+}
+
+.inlineAction {
+  margin-left: var(--lgi-space-2);
 }
 
 .metrics {

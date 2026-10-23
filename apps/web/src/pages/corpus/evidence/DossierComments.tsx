@@ -1,75 +1,75 @@
-import { useEffect, useRef, useState } from 'react';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { fetchDossierComments } from './dossierApi';
 import { nestComments } from './dossierPresent';
 import type { DossierComment } from './dossierTypes';
-import { Section } from './Primitives';
-import { metricReading } from './evidencePresent';
-import type { Metric } from './evidenceTypes';
+import { formatNumber } from './evidencePresent';
+import { dossierCommentsKey } from './evidenceKeys';
 import styles from './Dossier.module.css';
 
-function Row({ item, replies, orphan }: { item: DossierComment; replies: DossierComment[]; orphan: boolean }) {
-  const summary = `${item.relation === 'REPLY' ? '回复' : '主评论'} · 赞 ${item.likeCount ?? '未知'} · ${item.body?.slice(0, 80) || '原文未知'}${replies.length > 0 ? ` · ${replies.length} 条已采回复` : ''}`;
+function likes(item: DossierComment): string {
+  return item.likeCount === null ? '赞 —' : `赞 ${formatNumber(item.likeCount)}`;
+}
+
+function CommentItem({ item, replies, orphan }: { item: DossierComment; replies: DossierComment[]; orphan: boolean }) {
   return (
-    <details className={styles.commentRow}>
-      <summary>{summary}</summary>
-      <p className={styles.text}>{item.body || '尚未取得评论文字'}</p>
-      {orphan ? <p className={styles.note}>父评论尚未读到，暂不拼接其内容。</p> : null}
+    <article className={styles.comment} data-relation={item.relation}>
+      <p className={styles.commentMeta}>{item.relation === 'REPLY' ? `回复 · ${likes(item)}` : likes(item)}</p>
+      <p className={styles.commentText}>{item.body || '这条评论没有取得文字'}</p>
+      {orphan ? <p className={styles.note}>它回复的那条评论还没读到。</p> : null}
       {replies.length > 0 ? (
         <div className={styles.replies}>
           {replies.map(reply => (
-            <Row key={reply.sourceRef} item={reply} replies={[]} orphan={false} />
+            <CommentItem key={reply.sourceRef} item={reply} replies={[]} orphan={false} />
           ))}
         </div>
       ) : null}
-    </details>
+    </article>
   );
 }
 
-type State = { phase: 'idle' | 'loading' | 'error'; items: readonly DossierComment[]; cursor: string | null; total: number | null; loadedOnce: boolean };
+/** 跨页去重：同一条评论只出现一次（续读不会重复）。 */
+function uniqueItems(pages: readonly { items: readonly DossierComment[] }[]): DossierComment[] {
+  const seen = new Set<string>();
+  return pages.flatMap(page => page.items).filter(item => (seen.has(item.sourceRef) ? false : (seen.add(item.sourceRef), true)));
+}
 
 /**
- * 底稿里的「已采评论」：经授权评论通道按页读取（每页 30 条），主评论下嵌回复；
- * 数量相同不代表已采全——平台曾显示的条数另行写明，不推算、不合并。
+ * 「评论与回复」里的评论原文：打开作品就读第一页（每页 30 条），主评论下嵌回复，直接显示全文；
+ * 还有更多时给「加载更多评论」。读不出来只在这里提示，正文与图组照常。
  */
-export function DossierComments({ work, domain, platformComments }: { work: string; domain: string; platformComments: Metric }) {
-  const [state, setState] = useState<State>({ phase: 'idle', items: [], cursor: null, total: null, loadedOnce: false });
-  const controller = useRef<AbortController | null>(null);
-  useEffect(() => () => controller.current?.abort(), []);
-
-  function load() {
-    controller.current?.abort();
-    const abort = new AbortController();
-    controller.current = abort;
-    setState(previous => ({ ...previous, phase: 'loading' }));
-    fetchDossierComments(work, domain, state.cursor, abort.signal).then(
-      page => {
-        if (abort.signal.aborted) return;
-        setState(previous => ({ phase: 'idle', items: [...previous.items, ...page.items.filter(item => !previous.items.some(known => known.sourceRef === item.sourceRef))], cursor: page.nextCursor, total: page.total, loadedOnce: true }));
-      },
-      () => {
-        if (!abort.signal.aborted) setState(previous => ({ ...previous, phase: 'error' }));
-      },
-    );
-  }
-
-  const nodes = nestComments(state.items);
-  const status = state.loadedOnce
-    ? `已展示 ${state.items.length} / ${state.total ?? '未知'} 条可读取评论；平台曾显示 ${metricReading(platformComments)} 条。数量相同不代表已采全。`
-    : '按已取得的来源稳定顺序读取，不代表平台展示顺序。';
+export function DossierComments({ work, domain }: { work: string; domain: string }) {
+  const query = useInfiniteQuery({
+    queryKey: dossierCommentsKey(domain, work),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam, signal }) => fetchDossierComments(work, domain, pageParam, signal),
+    getNextPageParam: page => page.nextCursor ?? undefined,
+    retry: false,
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+  const items = query.data ? uniqueItems(query.data.pages) : [];
+  const nodes = nestComments(items);
+  const failed = query.isError && !query.isFetching;
   return (
-    <Section title="已采评论">
-      <p className={styles.note}>{status}</p>
-      <div className={styles.panel}>
-        {nodes.map(node => (
-          <Row key={node.item.sourceRef} item={node.item} replies={node.replies} orphan={node.orphan} />
-        ))}
-      </div>
-      {state.phase === 'error' ? <p className={styles.note}>评论读取暂不可用，底稿其他部分仍可使用。</p> : null}
-      {state.loadedOnce && state.cursor === null ? null : (
-        <button type="button" disabled={state.phase === 'loading'} onClick={load}>
-          {state.loadedOnce ? '继续读取 30 条' : '读取前 30 条'}
+    <div className={styles.comments} aria-busy={query.isFetching}>
+      {nodes.map(node => (
+        <CommentItem key={node.item.sourceRef} item={node.item} replies={node.replies} orphan={node.orphan} />
+      ))}
+      {query.isPending && !failed ? <p className={styles.note} role="status">正在读取评论…</p> : null}
+      {query.isSuccess && items.length === 0 ? <p className={styles.note}>还没有采到评论。</p> : null}
+      {failed ? (
+        <p className={styles.note} role="status">
+          评论暂时读不出来，正文和图片不受影响。
+          <button type="button" className={styles.inlineAction} onClick={() => void (query.isFetchNextPageError ? query.fetchNextPage() : query.refetch())}>
+            重新读取
+          </button>
+        </p>
+      ) : null}
+      {query.hasNextPage && !failed ? (
+        <button type="button" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
+          {query.isFetchingNextPage ? '正在读取…' : '加载更多评论'}
         </button>
-      )}
-    </Section>
+      ) : null}
+    </div>
   );
 }

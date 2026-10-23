@@ -8,7 +8,7 @@ import userEvent from '@testing-library/user-event';
 import { RouterProvider, createMemoryRouter } from 'react-router';
 import { vi } from 'vitest';
 import { EvidencePage } from './EvidencePage';
-import { DOMAIN, detailJson, listItemJson, listJson, shellJson, workRef, type DetailOptions, type ItemOptions } from './evidenceFixtures';
+import { DOMAIN, detailJson, dossierCommentsJson, listItemJson, listJson, shellJson, workRef, type DetailOptions, type ItemOptions } from './evidenceFixtures';
 import { DRAWER_QUERY, NO_HOVER_QUERY } from './useMediaQuery';
 import { newClient, ok, type FetchKit, type Responder } from './testKit';
 
@@ -17,6 +17,7 @@ export const SHELL_PATH = '/api/local/corpus/shell';
 export const pageUrl = (search = `domain=${DOMAIN}`) => `/corpus/evidence${search ? `?${search}` : ''}`;
 export const detailPathOf = (n: number) => `${LIST_PATH}/${workRef(n)}`;
 export const ocrPathOf = (n: number) => `${detailPathOf(n)}/ocr-recognition`;
+export const commentsPathOf = (n: number) => `${detailPathOf(n)}/research-dossier/comments`;
 
 export function renderEvidencePage(url = pageUrl()) {
   const client = newClient();
@@ -54,15 +55,18 @@ interface Routes {
   /** 每件作品详情的选项。 */
   detail?: (n: number) => DetailOptions;
   shell?: Responder;
+  /** 「评论与回复」第一页（打开作品即读）；缺省每件 2 条合成评论。 */
+  comments?: (n: number) => Responder;
 }
 
-/** 外壳、列表与前 count 件作品的详情。写接口一律不登记：页面打开时不该发任何写请求。 */
+/** 外壳、列表与前 count 件作品的详情（含评论第一页）。写接口一律不登记：页面打开时不该发任何写请求。 */
 export function pageRoutes(kit: FetchKit, routes: Routes = {}) {
   const count = routes.count ?? 3;
   kit.route('GET', SHELL_PATH, routes.shell ?? ok(shellJson()));
   kit.route('GET', LIST_PATH, routes.list ?? ok(listJson(items(count))));
   for (let n = 1; n <= count; n += 1) {
     kit.route('GET', detailPathOf(n), ok(detailJson(n, routes.detail?.(n) ?? {})));
+    kit.route('GET', commentsPathOf(n), routes.comments?.(n) ?? ok(dossierCommentsJson(2, { offset: n * 100 })));
     kit.route('GET', ocrPathOf(n), ok({ runRef: null, workRef: workRef(n), state: 'unavailable', completedImages: 0, totalImages: 0, currentStage: '尚未配置 OCR 模型。', modelLabel: null, unavailableReason: '尚未配置 OCR 模型。', coverTitle: null, coverTitleStatus: null, images: [], pendingCount: 0, failureCode: null }));
   }
 }
