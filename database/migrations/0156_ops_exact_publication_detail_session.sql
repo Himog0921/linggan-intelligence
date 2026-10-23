@@ -25,9 +25,28 @@ BEGIN
     END LOOP;
 END $$;
 
+-- `0104` removes the cross-industry table and its session column in the unified final
+-- schema.  Keep this bridge valid for both a database upgraded from the earlier shape and a
+-- fresh final-schema install; otherwise the final fixture cannot even establish the table.
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+         WHERE table_schema=current_schema()
+           AND table_name='collection_detail_page_session'
+           AND column_name='cross_industry_sample_ref'
+    ) THEN
+        EXECUTE 'ALTER TABLE collection_detail_page_session
+                 ADD CONSTRAINT collection_detail_page_session_one_source_object
+                 CHECK (num_nonnulls(content_public_ref,cross_industry_sample_ref,ops_publication_ref)=1)';
+    ELSE
+        EXECUTE 'ALTER TABLE collection_detail_page_session
+                 ADD CONSTRAINT collection_detail_page_session_one_source_object
+                 CHECK (num_nonnulls(content_public_ref,ops_publication_ref)=1)';
+    END IF;
+END $$;
+
 ALTER TABLE collection_detail_page_session
-    ADD CONSTRAINT collection_detail_page_session_one_source_object
-    CHECK (num_nonnulls(content_public_ref,cross_industry_sample_ref,ops_publication_ref)=1),
     ADD CONSTRAINT collection_detail_page_session_ops_publication_unique
     UNIQUE (work_order_ref,ops_publication_ref);
 

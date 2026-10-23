@@ -692,6 +692,7 @@ pub(crate) fn acquisition_failure_code(
         Failure::TargetNotRequestable { .. } => "target_not_requestable",
         Failure::KeywordArchiveIncomplete => "baseline_not_ready",
         Failure::InvalidMaterialTargets => "invalid_material_targets",
+        Failure::InvalidOpsPublicationScope => "invalid_ops_publication_scope",
         Failure::ProgressiveArchiveAuthorizationTooSmall { .. } => "authorization_bound_too_small",
         Failure::ProgressiveArchiveAuthorizationMissing => "authorization_missing",
         Failure::ProgressiveArchivePurposeMismatch => "progressive_purpose_mismatch",

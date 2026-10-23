@@ -23,20 +23,20 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 | 决定 | 当前含义 | 是否生成采集工作 |
 | --- | --- | --- |
-| `blocked` | 条目合法，但没有进入现有采集链所必需的身份、执行能力或桥接 | 否 |
+| `blocked` | 条目合法但未满足身份、受控 locator、有效精确授权或其他既有链前提；会保留拒绝决定 | 否 |
 | `forbidden` | 当前成员没有该账号的同步操作权 | 否 |
 | `invalid` | 发布不存在、未分配账号或已失效 | 否 |
 | `conflict` | 命令身份或冻结版本不兼容；本切片尚未产生该条目形态 | 否 |
-| `accepted` | 保留给已写入既有 Request/Admission/WorkOrder 关联的条目 | 仅未来桥接实现后 |
-| `existing` | 保留给同用途、同身份、同授权范围的真实在途链复用 | 仅未来桥接实现后 |
+| `accepted` | 同一事务已写入真实 Request、Admission、WorkOrder 与精确发布 scope | 是，写入既有共享队列，尚未执行 |
+| `existing` | 同一发布版本和 locator 的兼容 WorkOrder 仍在未认领队列，本次 Request 合并进去 | 是，复用既有共享队列项，尚未执行 |
 
 当前已明确返回的阻断码包括：
 
 - `ops_sync_content_identity_unresolved`：登记发布仍为 `pending_match`，不能把 URL 字符串当作平台作品身份；
 - `ops_sync_author_identity_unresolved`：账号没有可核验的平台作者身份；
 - `ops_sync_douyin_execution_not_ready`：抖音尚无受控身份、locator、能力与回填闭环；
-- `ops_sync_execution_bridge_not_ready`：XHS 身份均已冻结，但“运营精确发布”尚未接入同一 Work Order/locator/dispatch 合同。
 - `ops_sync_execution_locator_unavailable`：作品/作者身份可知，但还没有与当前发布版本匹配的受控 XHS 执行来源。
+- `authorization_missing` / `authorization_scope_mismatch` / `authorization_work_unit_limit_reached`：来源已冻结，但不存在覆盖 `ops_publication_sync`、`batch`、一篇详情读的有效 Collection Authorization；不会写 WorkOrder。
 
 阻断、无权和非法都保留命令条目；它们绝不表示“已提交”“等待工位”或“同步完成”。
 
@@ -54,8 +54,10 @@ XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicati
 
 对于 `accepted` / `existing`，数据库约束要求同时具备发布/账号/业务/平台/作品/作者/版本/locator 指纹以及 existing-chain 的 Request/WorkOrder 引用。其他决定禁止携带这两个执行引用。因此无法发生“工单已建但运营关联未保存”的表面成功，也不能把 internal `publication_ref` 塞进平台内容 ID。
 
-## 4. 未完成边界
+## 4. 已接入与未完成边界
 
-本切片仍没有由同步 API 创建 `Acquisition Request`、`Admission`、`Work Order`、`Lease`、`Task`、`Attempt`、`Package` 或 `Receipt`；没有平台访问、媒体处理、回填投影或 React 同步按钮。`0155–0157` 及租约/派发/详情会话/缺输入停止读取面已经让未来 Work Order 可把精确范围展开为既有 `content_detail` task，并且只解析该工单绑定的 locator，绝不回退到同名材料的 discovery 链接；它尚未接入 Collection 准入或回执投影，且同步 API 还不写此范围。因此 XHS 命令的当前结果仍是 `ops_sync_execution_bridge_not_ready`。抖音仍没有受控 locator、身份、能力与回填闭环。它不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
+同步 API 现会在同一数据库事务内，对具备 XHS 冻结身份与 locator 的条目调用精确发布准入：它创建或复用仅作控制身份的 creator Target（不等于发现、归档或 Material），冻结发布所属 active Domain 的 primary/reference 关系，写入 `Acquisition Request → Admission → WorkOrder → collection_work_order_ops_publication_target`，再写回同步条目的两个 existing-chain 引用。唯一可接受的授权必须明确包含 `ops_publication_sync` 模板、`batch` lane、至少一篇作品和一个工作单元；旧授权不会被自动扩大。精确 scope 固定一篇、零评论/回复/媒体/OCR/ASR，WorkOrder 的 `max_works=1`，且 lease 发放会再次检查这份精确授权仍有效。
 
-后续桥接必须为运营精确发布引入受控 locator/身份输入，并在同一采集链中实现回包绑定、receipt 合格判定、投影重放和两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。
+这仍然只到“已排入既有共享队列”：没有在 API 中访问平台、选择工位、发 Lease、生成 Task、创建 Attempt/Package/Receipt、接纳 Material 或回填运营投影。`0155–0157` 及租约/派发/详情会话/缺输入停止读取面已让该 WorkOrder 在被合格安装领取后只展开既有 `content_detail` task，并且只解析同一 scope 的 locator，绝不回退到同名 Material 的 discovery 链接。抖音仍没有受控 locator、身份、能力与回填闭环。本切片不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
+
+后续工作是回包绑定、Receipt 合格判定、只在合格 receipt 后创建/复用 Material 与可重放的运营投影，以及两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。

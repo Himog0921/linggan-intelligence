@@ -825,7 +825,7 @@ async fn native_account_responsibility_is_versioned_idempotent_and_group_bounded
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
-async fn publication_sync_command_is_durable_but_never_invents_collection_work() {
+async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection_work() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("ops_sync_http_{}", Uuid::new_v4().simple());
     let database = linggan_storage_postgres::testing::isolated_proof_schema(
@@ -963,8 +963,85 @@ async fn publication_sync_command_is_durable_but_never_invents_collection_work()
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(sourced_sync["items"][0]["decision"], "blocked");
     assert_eq!(
-        sourced_sync["items"][0]["code"], "ops_sync_execution_bridge_not_ready",
-        "the identity is now frozen, but a locator source does not invent a Collection work order"
+        sourced_sync["items"][0]["code"], "authorization_missing",
+        "a frozen locator alone does not authorize platform work"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM collection_acquisition_request")
+            .fetch_one(database.pool())
+            .await
+            .unwrap(),
+        1,
+        "a refused authorization decision remains auditable"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM collection_work_order")
+            .fetch_one(database.pool())
+            .await
+            .unwrap(),
+        0,
+        "no authorization means no queue instruction"
+    );
+    let authorization_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+         (authorization_ref,platform,target_kind,lane,purpose,max_works_per_target, \
+          allowed_task_templates,allowed_dispatch_lanes,max_work_units,granted_by,expires_at) \
+         VALUES($1,'xhs','creator','deep_archive','ops publication sync',1, \
+                ARRAY['ops_publication_sync'],ARRAY['batch'],1,'person', \
+                scope_001_now()+interval '1 day')",
+    )
+    .bind(authorization_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let (status, accepted_sync) = post(
+        app.clone(),
+        "/api/local/ops/publication-syncs",
+        Some(&owner_cookie),
+        json!({ "idempotencyKey": Uuid::new_v4(), "publicationRefs": [publication_ref] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(accepted_sync["items"][0]["decision"], "accepted");
+    assert_eq!(accepted_sync["items"][0]["code"], "within_authorization");
+    let collection_request_ref = uuid(&accepted_sync["items"][0]["acquisitionRequestRef"]);
+    let work_order_ref = uuid(&accepted_sync["items"][0]["workOrderRef"]);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM collection_work_order_ops_publication_target \
+             WHERE work_order_ref=$1 AND publication_ref=$2 AND publication_version=1 \
+               AND content_external_id=$3 AND author_external_id=$4"
+        )
+        .bind(work_order_ref)
+        .bind(publication_ref)
+        .bind(note)
+        .bind("0123456789abcdef01234567")
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM collection_work_order_material_target WHERE work_order_ref=$1"
+        )
+        .bind(work_order_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        0,
+        "the admitted post is not fabricated as Material"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM collection_acquisition_request WHERE request_ref=$1 AND purpose='ops_publication_sync'"
+        )
+        .bind(collection_request_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1
     );
     let (status, replay) = post(
         app.clone(),

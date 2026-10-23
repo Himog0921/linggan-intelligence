@@ -200,7 +200,7 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
         });
     }
     reject_if_already_leased(transaction, work_order_ref).await?;
-    reject_if_authorization_lapsed(transaction, &subject).await?;
+    reject_if_authorization_lapsed(transaction, work_order_ref, &subject).await?;
     reject_if_rule_changed(&subject)?;
 
     // One installation may hold only one active Lease. Serialize on its installation first so an
@@ -971,6 +971,7 @@ async fn reject_if_already_leased(
 
 async fn reject_if_authorization_lapsed(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
     subject: &LeaseSubject,
 ) -> Result<(), LeaseError> {
     let Some(authorization_ref) = subject.authorization_ref else {
@@ -979,9 +980,17 @@ async fn reject_if_authorization_lapsed(
     let valid: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM collection_acquisition_authorization \
                         WHERE authorization_ref = $1 AND revoked_at IS NULL \
-                          AND expires_at > scope_001_now())",
+                          AND expires_at > scope_001_now() \
+                          AND (NOT EXISTS (SELECT 1 \
+                                          FROM collection_work_order_ops_publication_target scope \
+                                          WHERE scope.work_order_ref=$2) \
+                               OR ('ops_publication_sync'=ANY(allowed_task_templates) \
+                                   AND 'batch'=ANY(allowed_dispatch_lanes) \
+                                   AND (max_works_per_target IS NULL OR max_works_per_target>=1) \
+                                   AND max_work_units>=1)))",
     )
     .bind(authorization_ref)
+    .bind(work_order_ref)
     .fetch_one(&mut **transaction)
     .await?;
     if !valid {

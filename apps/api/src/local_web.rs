@@ -1197,6 +1197,7 @@ async fn collection_material_deepening(
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
+                AcquisitionChainError::InvalidOpsPublicationScope => "ops_publication_scope_invalid",
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
                     "progressive_archive_authorization_too_small"
                 }
@@ -1290,6 +1291,7 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
+                AcquisitionChainError::InvalidOpsPublicationScope => "ops_publication_scope_invalid",
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
                     "progressive_archive_authorization_too_small"
                 }
@@ -3573,6 +3575,7 @@ fn creator_archive_error_receipt(error: &RequestLeaseError) -> &'static str {
             | AcquisitionChainError::KeywordArchiveIncomplete
             | AcquisitionChainError::ProgressiveArchiveNotReady { .. }
             | AcquisitionChainError::InvalidMaterialTargets
+            | AcquisitionChainError::InvalidOpsPublicationScope
             | AcquisitionChainError::Database(_),
         ) => "archive_request_failed",
     }

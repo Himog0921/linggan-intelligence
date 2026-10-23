@@ -1,9 +1,8 @@
-//! OPS-LAUNCH-001 S01 foundation: durable, session-bound Operations sync commands.
+//! OPS-LAUNCH-001: durable, session-bound Operations sync commands.
 //!
-//! This module deliberately does not manufacture a Collection request or Work Order.  An item
-//! can be `accepted` only after the later exact-publication bridge has actually written those
-//! existing-chain references.  Until then, a well-formed XHS registration is truthfully
-//! `blocked`, rather than being reported as queued or synchronized.
+//! An XHS item becomes `accepted` only when the exact-publication admission bridge writes its
+//! Request → Admission → Work Order references in this same transaction.  It never invents a
+//! Material, discovery finding, Package, or a second queue.
 use super::*;
 use axum::{
     Json, Router,
@@ -148,8 +147,9 @@ async fn create_in_database(
         sqlx::query(
             "INSERT INTO linggan_ops_publication_sync_item \
              (sync_item_ref,request_ref,ordinal,requested_publication_ref,publication_ref,account_ref,domain_ref, \
-              platform,expected_content_id,expected_author_id,publication_version,locator_sha256,decision,decision_code) \
-             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+              platform,expected_content_id,expected_author_id,publication_version,locator_sha256,decision,decision_code, \
+              acquisition_request_ref,work_order_ref) \
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)",
         )
         .bind(Uuid::new_v4())
         .bind(body.idempotency_key)
@@ -165,6 +165,8 @@ async fn create_in_database(
         .bind(decision.locator_sha256)
         .bind(decision.decision)
         .bind(decision.code)
+        .bind(decision.acquisition_request_ref)
+        .bind(decision.work_order_ref)
         .execute(&mut *transaction)
         .await
         .map_err(|_| SyncError::Unavailable)?;
@@ -216,6 +218,7 @@ struct FrozenPublication {
     content_id_state: String,
     author_id: Option<String>,
     publication_version: Option<i64>,
+    locator_ref: Option<Uuid>,
     locator_sha256: Option<Vec<u8>>,
     execution_locator_ready: bool,
     active: bool,
@@ -234,6 +237,7 @@ async fn publication_snapshot(
         String,
         Option<String>,
         Option<i64>,
+        Option<Uuid>,
         Option<Vec<u8>>,
         bool,
         bool,
@@ -243,7 +247,7 @@ async fn publication_snapshot(
                 publication.platform,COALESCE(locator.expected_content_id,publication.platform_content_id) AS content_id, \
                 CASE WHEN locator.locator_ref IS NULL THEN publication.content_id_state ELSE 'operator_execution_locator' END AS content_id_state, \
                 COALESCE(locator.expected_author_id,account.platform_user_id) AS author_id,publication.native_version AS publication_version, \
-                locator.locator_sha256,locator.locator_ref IS NOT NULL AS execution_locator_ready, \
+                locator.locator_ref,locator.locator_sha256,locator.locator_ref IS NOT NULL AS execution_locator_ready, \
                 CASE WHEN publication.source_system='linggan_native' \
                      THEN publication.native_record_state='active' \
                      ELSE publication.legacy_effective_publication END AS active \
@@ -272,6 +276,7 @@ async fn publication_snapshot(
             content_id_state,
             author_id,
             publication_version,
+            locator_ref,
             locator_sha256,
             execution_locator_ready,
             active,
@@ -284,6 +289,7 @@ async fn publication_snapshot(
             content_id_state,
             author_id,
             publication_version,
+            locator_ref,
             locator_sha256,
             execution_locator_ready,
             active,
@@ -302,6 +308,8 @@ struct Decision {
     locator_sha256: Option<Vec<u8>>,
     decision: &'static str,
     code: &'static str,
+    acquisition_request_ref: Option<Uuid>,
+    work_order_ref: Option<Uuid>,
 }
 
 async fn decide(
@@ -323,6 +331,8 @@ async fn decide(
         locator_sha256: frozen.locator_sha256.clone(),
         decision: "blocked",
         code: "ops_sync_execution_bridge_not_ready",
+        acquisition_request_ref: None,
+        work_order_ref: None,
     };
     let Some(account_ref) = frozen.account_ref else {
         return Ok(Decision {
@@ -384,7 +394,39 @@ async fn decide(
             ..base
         });
     }
-    Ok(base)
+    let (Some(domain_ref), Some(content_external_id), Some(author_external_id),
+         Some(publication_version), Some(locator_ref)) = (
+        frozen.domain_ref,
+        frozen.content_id.as_deref(),
+        frozen.author_id.as_deref(),
+        frozen.publication_version,
+        frozen.locator_ref,
+    ) else {
+        return Ok(base);
+    };
+    let outcome = linggan_evidence::request_and_admit_exact_ops_publication_in_transaction(
+        transaction,
+        domain_ref,
+        "ops_publication_sync",
+        &linggan_evidence::OpsPublicationExactTarget {
+            publication_ref: frozen.publication_ref,
+            publication_version,
+            locator_ref,
+            content_external_id: content_external_id.to_owned(),
+            author_external_id: author_external_id.to_owned(),
+        },
+    )
+    .await
+    .map_err(|_| SyncError::Unavailable)?;
+    let accepted = matches!(outcome.outcome, linggan_contracts::AdmissionOutcome::Admitted { .. });
+    let existing = matches!(outcome.outcome, linggan_contracts::AdmissionOutcome::Merge { .. });
+    Ok(Decision {
+        decision: if accepted { "accepted" } else if existing { "existing" } else { "blocked" },
+        code: outcome.reason_code,
+        acquisition_request_ref: (accepted || existing).then_some(outcome.request_ref),
+        work_order_ref: outcome.work_order_ref,
+        ..base
+    })
 }
 
 impl Decision {
@@ -400,6 +442,8 @@ impl Decision {
             locator_sha256: None,
             decision: "invalid",
             code,
+            acquisition_request_ref: None,
+            work_order_ref: None,
         }
     }
 }

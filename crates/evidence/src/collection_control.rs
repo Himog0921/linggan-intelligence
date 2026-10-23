@@ -2241,6 +2241,7 @@ fn manual_observe_error_reason(error: &AcquisitionChainError) -> &'static str {
         AcquisitionChainError::SchemaUnavailable => "schema_unavailable",
         AcquisitionChainError::UnknownTarget => "unknown_target",
         AcquisitionChainError::InvalidMaterialTargets => "invalid_material_targets",
+        AcquisitionChainError::InvalidOpsPublicationScope => "invalid_ops_publication_scope",
         AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
             "progressive_archive_authorization_too_small"
         }
