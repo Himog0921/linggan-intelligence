@@ -99,7 +99,7 @@ DeepSeek `deepseek-v4-flash`，接收方 `https://api.deepseek.com/v1`，共82�
 
 工作包：[OCR-DOSSIER-SYSTEM-50](../plans/active/ocr-dossier-system-50.md)。私有生成物依[登记册](../governance/generated-artifacts-registry.md)保存在本worktree `artifacts/private/ocr-dossier-system-50/`，回收前需搬到主仓同名位置。核心证据：manifest.json、N01–N50-result.json、test-summary.json、failure-analysis.json、visual-review.md/json、native-body回执、retired-ocr-cleanup-receipt.json、postgres-tests.log。私有原文/响应/原图不随Git提交。
 
-已通过：ci-preflight；前端typecheck/lint及44项相关组件测试；OCR合同14项；cloud候选转换3项；隔离PostgreSQL28项（正文准备5、读本7、并发5、版本重排11）。隔离测试容器已移除；最终复核全部执行控制及本次外发许可为false，退役文本剩余0条，append-only触发器启用。独立审阅和最终提交/CI状态按PR回执记录。真实50篇只证明基线首次结果；隔离PG、合成测试与前端预览均不能替代修正版真实OCR、主线合并、3000部署或Mog业务验收。
+已通过：ci-preflight；前端typecheck/lint及44项相关组件测试；OCR合同14项；cloud候选转换3项；隔离PostgreSQL28项（正文准备5、读本7、并发5、版本重排11）。另通过5项隔离真实worker+本地合成服务链路：抽检/人工采用、云候选人工采用、第二图失败停止、取消及租约恢复不重发、精确图片范围冻结。前端生产构建通过。隔离测试容器已移除；最终复核全部执行控制及本次外发许可为false，退役文本剩余0条，append-only触发器启用。独立审阅和最终提交/CI状态按PR回执记录。真实50篇只证明基线首次结果；隔离PG、合成测试与前端预览均不能替代修正版真实OCR、主线合并、3000部署或Mog业务验收。
 
 
 ### 候选审阅与离线重放回执
@@ -107,3 +107,5 @@ DeepSeek `deepseek-v4-flash`，接收方 `https://api.deepseek.com/v1`，共82�
 独立只读审阅检查base `93f03a579b954b0850d405a33f1f83a6a5704d26` 和完整候选diff，发现1项P2、无P1：角色专属提示遮蔽非clear的字符可读性警告。已修复并覆盖4种角色×2种可读性，增量审阅确认关闭，无新增阻断。审阅后实现diff SHA256为 `f10ed1525941e6c350a490e9e1820d82dd169e06777eedc4890099b74ad26fd6`；该身份不含未跟踪报告/工作包，之后仅补文档回执，最终关联实际提交。
 
 已保存raw离线重放（0次模型调用）：65张仍通过严格解析并完成候选转换，另16份raw继续拒绝，1次失败没有raw可重放。683个非空region均能匹配规范化区块全文（忽略空白，将等价无序列表标记统一比较）；这核对的是模型已返回字符在转换时的保留，不是原图识别的完整性。3个非空unreadable region已保留原字符。离线重放证明解析与转换行为，不证明模型识别准确。
+
+现有worker测试将“禁止云候选进入普通队列”的查询由硬编码v2改为覆盖cloud-manual各版本，避免v3升级后的空查假通过；该一行测试增量已独立复核。完整三图浏览器场景仍由最终CI执行。
