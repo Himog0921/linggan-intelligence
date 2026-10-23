@@ -169,22 +169,35 @@ async fn evidence_page_real_chain_browser_proof() {
     );
     assert!(writes.iter().all(|write| write.status == 200));
     // 脚本里的写动作是固定的：复观测两次（先建工单，再合并）；重新分层五次（底稿里两次、批量弹窗里三篇）；
-    // 评论深采一次。
-    assert_eq!((reobserve, relayer, runs), (2, 5, 1));
-    // 评论深采与采集页同一条合同：一次只含富作品、尽量采全的单次采集。建立时只冻结范围，
-    // 采集请求、工单与租约要等调度推进才形成，所以下面的计数不受它影响。
-    let run: (String, String, i32, i64) = sqlx::query_as(
-        "SELECT r.source_kind,r.comment_mode,r.work_limit, \
-                (SELECT count(*) FROM collection_run_work w WHERE w.run_ref=r.run_ref AND w.content_public_ref=$1) \
-         FROM collection_run r",
+    // 评论深采两次（富作品尽量采全、视频作品指定 40 条）。
+    assert_eq!((reobserve, relayer, runs), (2, 5, 2));
+    // 评论深采与采集页同一条合同：每次一个只含该作品的单次采集（富作品尽量采全；视频作品采到 40 条就停）。
+    // 建立时只冻结范围，采集请求、工单与租约要等调度推进才形成，所以下面的计数不受它影响。
+    let runs: Vec<(Uuid, String, Option<i32>, String, i32)> = sqlx::query_as(
+        "SELECT w.content_public_ref,r.comment_mode,r.comment_target,r.source_kind,r.work_limit \
+         FROM collection_run r JOIN collection_run_work w USING(run_ref) ORDER BY r.comment_mode",
     )
-    .bind(data.rich)
-    .fetch_one(db.pool())
+    .fetch_all(db.pool())
     .await
-    .expect("exactly one comment deep collection run");
+    .unwrap();
     assert_eq!(
-        run,
-        ("selected_works".to_owned(), "all_public".to_owned(), 1, 1)
+        runs,
+        vec![
+            (
+                data.rich,
+                "all_public".to_owned(),
+                None,
+                "selected_works".to_owned(),
+                1
+            ),
+            (
+                data.video,
+                "up_to".to_owned(),
+                Some(40),
+                "selected_works".to_owned(),
+                1
+            ),
+        ]
     );
     let after = effects(&db).await;
     let reobserved = reobserve as i64;
