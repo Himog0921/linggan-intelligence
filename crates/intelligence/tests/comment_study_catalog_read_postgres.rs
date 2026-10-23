@@ -388,9 +388,12 @@ async fn cursor_rejects_changed_filters_and_summary_does_not_count_only_the_firs
 #[ignore = "isolated disposable PostgreSQL only; validates real source gate and stable comment identity"]
 async fn domain_phrase_frequency_counts_distinct_eligible_comments_and_retains_source_keys() {
     let db = database("word_cloud_eligible_gate").await;
-    let observed: String =
-        sqlx::query_scalar("SELECT (scope_001_now() - interval '2 days')::text")
-            .fetch_one(db.pool()).await.unwrap();
+    // Producer packages require an explicit UTC timestamp, not PostgreSQL's display format.
+    let observed: String = sqlx::query_scalar(
+        r#"SELECT to_char((scope_001_now() - interval '2 days') AT TIME ZONE 'UTC',
+                         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')"#,
+    )
+    .fetch_one(db.pool()).await.unwrap();
     detail_with_author(&db, "word-a", "SYNTHETIC 第一篇", Some("creator")).await;
     detail_with_author(&db, "word-b", "SYNTHETIC 第二篇", Some("creator")).await;
     for index in 0..5 {

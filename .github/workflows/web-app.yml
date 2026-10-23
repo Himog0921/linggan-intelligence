@@ -1,65 +1,9 @@
 name: Web app (WEB-REACT-001)
-# 网页前端（DEC-0010）：任何改动 React 应用、其服务器接缝或共享外壳样式的 PR 都要通过。
-# 不按分支名放行，避免「换了分支名，检查就整套跳过」。
+# Called by delivery.yml after its single preflight and conservative change routing.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'apps/web/**'
-      - 'docs/design/lids/**'
-      - 'AGENTS.md'
-      - 'CLAUDE.md'
-      - 'codx.md'
-      - 'docs/governance/ui-design-execution.md'
-      - 'docs/design/changes/lids-component-change.json'
-      - 'scripts/lids*'
-      - 'scripts/sync-lids*'
-      - 'apps/api/src/**'
-      - 'scripts/check-web-react-*'
-      - 'scripts/login-anatomy/**'
-      - 'apps/api/Cargo.toml'
-      - 'scripts/runtime/prepare-web.sh'
-      - 'scripts/test-web-app-postgres.sh'
-      - 'scripts/test-content-workbench-postgres.sh'
-      - 'scripts/test-collection-*.cjs'
-      - 'scripts/test-collection-single-run-postgres.sh'
-      - 'crates/evidence/src/material_social_read.rs'
-      - 'crates/evidence/src/research_dossier.rs'
-      - 'crates/evidence/src/research_dossier/**'
-      - 'crates/evidence/src/work_resource_*.rs'
-      - 'crates/evidence/src/material_*.rs'
-      - 'crates/evidence/src/content_reobservation.rs'
-      - 'scripts/test-research-dossier-postgres.sh'
-      - 'crates/evidence/src/note_material_input.rs'
-      - 'crates/evidence/src/note_material_input/**'
-      - 'crates/evidence/tests/note_material_postgres.rs'
-      - 'apps/worker/src/bin/note_material.rs'
-      - 'database/migrations/0129_note_material_hashtags.sql'
-      - 'database/migrations/0130_note_material_snapshot.sql'
-      - 'crates/intelligence/src/ops_ledger/read/creation_read.rs'
-      - 'Cargo.lock'
-      - 'crates/intelligence/Cargo.toml'
-      - 'crates/intelligence/src/note_interpretation_offline.rs'
-      - 'crates/intelligence/src/note_interpretation_offline/**'
-      - 'crates/intelligence/tests/note_interpretation_offline.rs'
-      - 'crates/intelligence/src/comment_study_run/**'
-      - 'crates/intelligence/tests/comment_study_start_postgres.rs'
-      - 'scripts/test-comment-study-productization-postgres.sh'
-      - 'crates/intelligence/src/content_workbench*'
-      - 'crates/intelligence/src/content_workbench/**'
-      - 'crates/intelligence/src/content_workbench_sources/**'
-      - 'crates/evidence/src/lib.rs'
-      - 'crates/intelligence/tests/content_workbench*'
-      - 'crates/intelligence/tests/support/content_workbench_fixture.rs'
-      - 'database/migrations/0127_content_workbench.sql'
-      - 'database/migrations/0128_content_workbench_ai.sql'
-      - '.nvmrc'
-      - '.github/workflows/web-app.yml'
+  workflow_call:
 permissions:
   contents: read
-concurrency:
-  group: web-app-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
 jobs:
   web-checks:
     runs-on: ubuntu-24.04
@@ -140,11 +84,8 @@ jobs:
           cargo test -p linggan-evidence --lib material_ --locked
           cargo test -p linggan-worker --bin linggan-note-material --locked
           bash scripts/test-research-dossier-postgres.sh --note-material
-      - name: Governance and format
+      - name: Web source formatting
         run: |
-          bash scripts/check-project-governance.sh origin/main
-          bash scripts/verify-ui-design-handbook.sh
-          git diff --check
           # 只查本模块自己的 Rust 文件：local_web.rs 在主线上已有与本模块无关的格式偏差。
           rustfmt --edition 2024 --config skip_children=true --check \
             apps/api/src/local_web/web_app.rs apps/api/src/local_web/web_app_tests.rs apps/api/src/local_web/model_settings.rs \

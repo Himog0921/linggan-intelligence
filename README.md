@@ -16,9 +16,9 @@ Linggan Intelligence 是一个面向垂直领域的持续情报研究系统。�
 
 1. 先阅读 [`AGENTS.md`](AGENTS.md)，确认最高约束。
 2. 通过 [`docs/README.md`](docs/README.md) 进入文档地图。
-3. 查看 [`docs/current-state.md`](docs/current-state.md)，只处理当前已确认事项。
+3. 实施按[协作协议](docs/governance/agent-collaboration.md)建立工作包；仅在核对运行、发布或跨包依赖时查看 [`docs/current-state.md`](docs/current-state.md)。
 4. 根据任务按需阅读产品、架构、运行手册或历史证据，不一次性加载整个 `references/`。
-5. 提交变更前运行 `./scripts/check-project-governance.sh`。
+5. 提交前运行 `bash scripts/ci-preflight.sh origin/main` 和受影响模块验证。
 
 ## 开发环境
 

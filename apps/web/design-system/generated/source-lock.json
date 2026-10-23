@@ -1,13 +1,13 @@
 {
-  "fingerprint": "1f4f456a3bfd427e8c09cb898b75b5979e020888125ec7b109dd0b4fdfcc9b25",
+  "fingerprint": "dc9f7d28e6d50c8de1d24178722db2737ba819bb7e28ebbbc4a8dbe0d34b0f41",
   "inputs": [
     {
       "path": "AGENTS.md",
-      "sha256": "6f05586d5bddbfcb733d5702b863d7f5d259b64ae2c06aa40e14c330b265885a"
+      "sha256": "4269c2c401175c914048d34a06c40cd52cac3021917383d32e281f10efa80848"
     },
     {
       "path": "CLAUDE.md",
-      "sha256": "820ee0dce4cd8999dd1589b2b4998f380bcf8f35cf213799113318e1b621a6cc"
+      "sha256": "f3bbfe55495be1c19c1cb761827815bff3b6134f31df5754c5db91da3312ed85"
     },
     {
       "path": "apps/web/design-system/compositionReview/CompositionReview.jsx",
@@ -343,7 +343,7 @@
     },
     {
       "path": "codx.md",
-      "sha256": "4a7bf563d7a9a314e4753c7dad26be21a1ee5e96d6e53079e3d13940324bc793"
+      "sha256": "c9c7aa9853686f6a316503e2f9a330df01dad7ada8afe653167bf2e7e7ff1b57"
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
@@ -403,7 +403,7 @@
     },
     {
       "path": "docs/governance/ui-design-execution.md",
-      "sha256": "0ccbe06d6aceb777dfeb4e30fb79488dc9374400e8914fc86008b412213bae01"
+      "sha256": "eb15c61719e496811095740bd8386d1350061ac04879b10da95ac1d4482716c8"
     },
     {
       "path": "scripts/lids.mjs",

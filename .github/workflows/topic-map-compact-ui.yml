@@ -1,14 +1,6 @@
 name: Topic Map compact UI
 on:
-  pull_request:
-    paths:
-      - 'apps/web/src/styles/**'
-      - 'apps/web/src/pages/topics/**'
-      - 'apps/web/test/e2e/topic*'
-      - 'apps/web/package-lock.json'
-      - 'apps/api/src/local_web/topic_workspace*'
-      - 'apps/api/src/local_web/web_app*'
-      - '.github/workflows/topic-map-compact-ui.yml'
+  workflow_call:
 permissions:
   contents: read
 jobs:
