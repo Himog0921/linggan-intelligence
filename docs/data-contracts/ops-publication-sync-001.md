@@ -15,6 +15,8 @@
 - 每条发布由服务端在同一事务中冻结当时的发布、账号、业务、平台、作品身份、账号作者身份、原生版本和 locator 指纹（可知时）。
 - `accepted` / `existing` 只有同时关联真实 `collection_acquisition_request` 与 `collection_work_order` 才可能写入；运营表没有独立的排队、租约、尝试或重试状态。
 
+XHS 原生发布可先通过 `POST /api/local/ops/native/publications/{publicationRef}/execution-locators` 追加一条受控的短期执行来源。该命令只接受包含 24 位小写作品 ID 和非空 `xsec_token` 的完整 XHS 地址，并在同一事务冻结账号的当前作者 ID、发布版本、作品 ID、地址摘要和实际提交人。签名地址只保存在受保护的来源表，绝不出现在命令或同步回执中；短链、裸详情地址、抖音地址、无作者身份或无写权限均不被接受。它不是 discovery、CapturePackage、material、授权或任务。
+
 当前路由受现有 Ops active-session 与同源守卫保护；团队成员可读取已持久化回执，写权限仍逐条按管理员、当前责任人或同组组长判定。
 
 ## 2. 当前决定词典
@@ -34,6 +36,7 @@
 - `ops_sync_author_identity_unresolved`：账号没有可核验的平台作者身份；
 - `ops_sync_douyin_execution_not_ready`：抖音尚无受控身份、locator、能力与回填闭环；
 - `ops_sync_execution_bridge_not_ready`：XHS 身份均已冻结，但“运营精确发布”尚未接入同一 Work Order/locator/dispatch 合同。
+- `ops_sync_execution_locator_unavailable`：作品/作者身份可知，但还没有与当前发布版本匹配的受控 XHS 执行来源。
 
 阻断、无权和非法都保留命令条目；它们绝不表示“已提交”“等待工位”或“同步完成”。
 
@@ -41,10 +44,12 @@
 
 `linggan_ops_publication_sync_request` 保存命令身份、actor、载荷摘要、选中数量、固定用途和提交时间；`linggan_ops_publication_sync_item` 保存逐条冻结快照和决定。两表均有数据库级 append-only trigger。
 
+`0152_ops_publication_execution_locator` 追加 `linggan_ops_publication_execution_locator`：每行都绑定发布、账号、XHS 作品/作者身份、原生发布版本、原始签名地址及其 SHA-256、提交人和验证状态，且数据库禁止更新或删除。同一发布与同一地址摘要不会产生第二条来源；新 token 是另一条输入事实，后续 resolver 必须按当前发布版本选择，不能回退到已经失效或属于另一作品的地址。
+
 对于 `accepted` / `existing`，数据库约束要求同时具备发布/账号/业务/平台/作品/作者/版本/locator 指纹以及 existing-chain 的 Request/WorkOrder 引用。其他决定禁止携带这两个执行引用。因此无法发生“工单已建但运营关联未保存”的表面成功，也不能把 internal `publication_ref` 塞进平台内容 ID。
 
 ## 4. 未完成边界
 
-本切片没有创建 `Acquisition Request`、`Admission`、`Work Order`、`Lease`、`Task`、`Attempt`、`Package` 或 `Receipt`；没有平台访问、媒体处理、回填投影或 React 同步按钮。它不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
+本切片没有创建 `Acquisition Request`、`Admission`、`Work Order`、`Lease`、`Task`、`Attempt`、`Package` 或 `Receipt`；没有平台访问、媒体处理、回填投影或 React 同步按钮。XHS locator 已能作为不可变输入被同步命令冻结，但还没有接入 Collection 的统一 resolver/派发；抖音仍没有受控 locator、身份、能力与回填闭环。它不证明 XHS 或抖音真实同步，也不授权生产迁移、部署、真实插件、真实账号或平台操作。
 
 后续桥接必须为运营精确发布引入受控 locator/身份输入，并在同一采集链中实现回包绑定、receipt 合格判定、投影重放和两平台端到端证明；不得复用假 discovery、假材料或第二个调度队列。

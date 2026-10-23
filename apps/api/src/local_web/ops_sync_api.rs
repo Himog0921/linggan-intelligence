@@ -217,6 +217,7 @@ struct FrozenPublication {
     author_id: Option<String>,
     publication_version: Option<i64>,
     locator_sha256: Option<Vec<u8>>,
+    execution_locator_ready: bool,
     active: bool,
 }
 
@@ -235,18 +236,26 @@ async fn publication_snapshot(
         Option<i64>,
         Option<Vec<u8>>,
         bool,
+        bool,
     )> = sqlx::query_as(
         "SELECT publication.publication_ref,publication.account_ref, \
                 COALESCE(publication.native_business_domain_ref,account.domain_ref) AS domain_ref, \
-                publication.platform,publication.platform_content_id AS content_id,publication.content_id_state, \
-                account.platform_user_id AS author_id,publication.native_version AS publication_version, \
-                CASE WHEN publication.canonical_url IS NULL THEN NULL \
-                     ELSE sha256(convert_to(publication.canonical_url,'UTF8')) END AS locator_sha256, \
+                publication.platform,COALESCE(locator.expected_content_id,publication.platform_content_id) AS content_id, \
+                CASE WHEN locator.locator_ref IS NULL THEN publication.content_id_state ELSE 'operator_execution_locator' END AS content_id_state, \
+                COALESCE(locator.expected_author_id,account.platform_user_id) AS author_id,publication.native_version AS publication_version, \
+                locator.locator_sha256,locator.locator_ref IS NOT NULL AS execution_locator_ready, \
                 CASE WHEN publication.source_system='linggan_native' \
                      THEN publication.native_record_state='active' \
                      ELSE publication.legacy_effective_publication END AS active \
          FROM linggan_ops_publication publication \
          LEFT JOIN linggan_ops_account account ON account.account_ref=publication.account_ref \
+         LEFT JOIN LATERAL ( \
+             SELECT source.locator_ref,source.expected_content_id,source.expected_author_id,source.locator_sha256 \
+               FROM linggan_ops_publication_execution_locator source \
+              WHERE source.publication_ref=publication.publication_ref \
+                AND source.publication_version=publication.native_version \
+              ORDER BY source.provided_at DESC,source.locator_ref DESC LIMIT 1 \
+         ) locator ON publication.source_system='linggan_native' \
          WHERE publication.publication_ref=$1 FOR SHARE OF publication",
     )
     .bind(publication_ref)
@@ -264,6 +273,7 @@ async fn publication_snapshot(
             author_id,
             publication_version,
             locator_sha256,
+            execution_locator_ready,
             active,
         )| FrozenPublication {
             publication_ref,
@@ -275,6 +285,7 @@ async fn publication_snapshot(
             author_id,
             publication_version,
             locator_sha256,
+            execution_locator_ready,
             active,
         },
     ))
@@ -348,6 +359,7 @@ async fn decide(
     }
     if frozen.content_id_state != "parsed_publication_url"
         && frozen.content_id_state != "parsed_canonical_url"
+        && frozen.content_id_state != "operator_execution_locator"
     {
         return Ok(Decision {
             code: "ops_sync_content_identity_unresolved",
@@ -357,6 +369,12 @@ async fn decide(
     if frozen.author_id.is_none() {
         return Ok(Decision {
             code: "ops_sync_author_identity_unresolved",
+            ..base
+        });
+    }
+    if !frozen.execution_locator_ready {
+        return Ok(Decision {
+            code: "ops_sync_execution_locator_unavailable",
             ..base
         });
     }

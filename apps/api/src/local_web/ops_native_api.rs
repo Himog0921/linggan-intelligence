@@ -7,6 +7,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
 };
+use linggan_intelligence::ops_ledger::xhs_note_id;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -26,6 +27,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route(
             "/api/local/ops/native/publications/{publication_ref}/view-reports",
             axum::routing::post(record_view_report),
+        )
+        .route(
+            "/api/local/ops/native/publications/{publication_ref}/execution-locators",
+            axum::routing::post(record_execution_locator),
         )
         .route(
             "/api/local/ops/native/daily-reports",
@@ -71,6 +76,13 @@ struct RecordViewBody {
     report_kind: String,
     view_count: Option<i64>,
     as_of: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RecordExecutionLocatorBody {
+    request_id: Uuid,
+    signed_locator: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -149,6 +161,25 @@ async fn record_view_report(
         return super::ops_api::not_connected();
     };
     match write_view_report(database, member, publication_ref, body).await {
+        Ok((status, receipt)) => receipt_response(status, receipt),
+        Err(error) => write_error(error),
+    }
+}
+
+async fn record_execution_locator(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Path(publication_ref): Path<Uuid>,
+    Json(body): Json<RecordExecutionLocatorBody>,
+) -> Response {
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let Some(database) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
+    match write_execution_locator(database, member, publication_ref, body).await {
         Ok((status, receipt)) => receipt_response(status, receipt),
         Err(error) => write_error(error),
     }
@@ -437,6 +468,202 @@ async fn write_publication(
         &payload,
         publication_ref,
         1,
+    );
+    insert_receipt(&mut transaction, &receipt).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+    Ok((StatusCode::CREATED, receipt.receipt))
+}
+
+async fn write_execution_locator(
+    database: &linggan_storage_postgres::Database,
+    member: super::ops_auth::AuthenticatedMember,
+    publication_ref: Uuid,
+    body: RecordExecutionLocatorBody,
+) -> Result<(StatusCode, CommandReceipt), WriteError> {
+    let raw_payload = raw_payload(&body)?;
+    let request_id = body.request_id;
+    let locator = match required_url(&body.signed_locator).and_then(|value| {
+        (xhs_note_id(&value).is_some() && has_xhs_signature(&value))
+            .then_some(value)
+            .ok_or(WriteError::Invalid("ops_native_execution_locator_invalid"))
+    }) {
+        Ok(locator) => locator,
+        Err(WriteError::Invalid(code)) => {
+            return reject_invalid_input(
+                database,
+                &member,
+                request_id,
+                "publication_locator_record",
+                &raw_payload,
+                code,
+            )
+            .await;
+        }
+        Err(error) => return Err(error),
+    };
+    let content_id =
+        xhs_note_id(&locator).expect("validated signed locator has XHS content identity");
+    let payload = digest(json!({ "publicationRef": publication_ref, "signedLocator": locator }));
+    let mut transaction = database
+        .pool()
+        .begin()
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+    if let Some(receipt) = replay(
+        &mut transaction,
+        request_id,
+        "publication_locator_record",
+        &member,
+        &payload,
+    )
+    .await?
+    {
+        transaction
+            .commit()
+            .await
+            .map_err(|_| WriteError::Unavailable)?;
+        return Ok((status_for(&receipt), receipt));
+    }
+    let publication: Option<(Uuid, String, Option<i64>, bool, Option<String>)> = sqlx::query_as(
+        "SELECT publication.account_ref,publication.platform,publication.native_version, \
+                publication.source_system='linggan_native' AND publication.native_record_state='active' AS active, \
+                account.platform_user_id \
+           FROM linggan_ops_publication publication \
+           JOIN linggan_ops_account account ON account.account_ref=publication.account_ref \
+          WHERE publication.publication_ref=$1 FOR SHARE OF publication",
+    )
+    .bind(publication_ref)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| WriteError::Unavailable)?;
+    let Some((account_ref, platform, version, active, author_id)) = publication else {
+        return rejected(
+            transaction,
+            request_id,
+            "publication_locator_record",
+            &member,
+            &payload,
+            Some(publication_ref),
+            None,
+            "ops_native_publication_not_found",
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+    };
+    if !active {
+        return rejected(
+            transaction,
+            request_id,
+            "publication_locator_record",
+            &member,
+            &payload,
+            Some(publication_ref),
+            version,
+            "ops_native_publication_inactive",
+            StatusCode::CONFLICT,
+        )
+        .await;
+    }
+    if platform != "xhs" {
+        return rejected(
+            transaction,
+            request_id,
+            "publication_locator_record",
+            &member,
+            &payload,
+            Some(publication_ref),
+            version,
+            "ops_native_execution_locator_platform_unsupported",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+        .await;
+    }
+    if !can_write_account(&mut transaction, &member, account_ref).await? {
+        return rejected(
+            transaction,
+            request_id,
+            "publication_locator_record",
+            &member,
+            &payload,
+            Some(publication_ref),
+            version,
+            "ops_native_forbidden",
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    }
+    let Some(author_id) = author_id.filter(|value| !value.trim().is_empty()) else {
+        return rejected(
+            transaction,
+            request_id,
+            "publication_locator_record",
+            &member,
+            &payload,
+            Some(publication_ref),
+            version,
+            "ops_native_execution_locator_author_unresolved",
+            StatusCode::UNPROCESSABLE_ENTITY,
+        )
+        .await;
+    };
+    let Some(version) = version else {
+        return Err(WriteError::Unavailable);
+    };
+    let locator_sha256 = Sha256::digest(locator.as_bytes()).to_vec();
+    if let Some(existing) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT locator_ref FROM linggan_ops_publication_execution_locator \
+          WHERE publication_ref=$1 AND locator_sha256=$2 FOR SHARE",
+    )
+    .bind(publication_ref)
+    .bind(&locator_sha256)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| WriteError::Unavailable)?
+    {
+        let receipt = accepted(
+            request_id,
+            "publication_locator_record",
+            &member,
+            &payload,
+            existing,
+            version,
+        );
+        insert_receipt(&mut transaction, &receipt).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| WriteError::Unavailable)?;
+        return Ok((StatusCode::OK, receipt.receipt));
+    }
+    let locator_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_publication_execution_locator \
+         (locator_ref,publication_ref,account_ref,platform,expected_content_id,expected_author_id,publication_version, \
+          locator_url,locator_sha256,provided_by_member_ref,validation_state) \
+         VALUES($1,$2,$3,'xhs',$4,$5,$6,$7,$8,$9,'accepted_xhs_signed_locator')",
+    )
+    .bind(locator_ref)
+    .bind(publication_ref)
+    .bind(account_ref)
+    .bind(&content_id)
+    .bind(&author_id)
+    .bind(version)
+    .bind(&locator)
+    .bind(&locator_sha256)
+    .bind(member.member_ref)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| WriteError::Unavailable)?;
+    let receipt = accepted(
+        request_id,
+        "publication_locator_record",
+        &member,
+        &payload,
+        locator_ref,
+        version,
     );
     insert_receipt(&mut transaction, &receipt).await?;
     transaction
@@ -1334,6 +1561,22 @@ fn required_url(value: &str) -> Result<String, WriteError> {
         return Err(WriteError::Invalid("ops_native_url_invalid"));
     }
     Ok(value)
+}
+
+/// A note ID names the work; this signed locator is only its short-lived execution input.
+/// Keep the token out of all API receipts and require a non-empty value rather than accepting a
+/// bare detail URL that the Producer cannot actually open.
+fn has_xhs_signature(value: &str) -> bool {
+    value
+        .split_once('?')
+        .map(|(_, query)| {
+            query.split('&').any(|entry| {
+                entry
+                    .split_once('=')
+                    .is_some_and(|(key, token)| key == "xsec_token" && !token.is_empty())
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn optional_url(value: Option<String>) -> Result<Option<String>, WriteError> {

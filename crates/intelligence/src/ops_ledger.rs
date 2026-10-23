@@ -30,6 +30,7 @@ use uuid::Uuid;
 pub use export_rows::ExportFile;
 pub use import_diff::ChangeCounts;
 pub use ledger_totals::{ConsistencyCheck, LedgerTotals, compare_with_ledger, read_ledger_totals};
+pub use links::xhs_note_id;
 pub use reconciliation::Reconciliation;
 
 pub const OPS_IMPORT_RULE_VERSION: &str = "ops-import.v1";

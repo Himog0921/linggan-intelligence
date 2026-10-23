@@ -623,6 +623,47 @@ async fn publication_sync_command_is_durable_but_never_invents_collection_work()
             .unwrap(),
         0
     );
+    let signed_locator = format!(
+        "https://www.xiaohongshu.com/explore/{note}?xsec_token=SYNTHETIC_SIGNED_INPUT&xsec_source=pc_user"
+    );
+    let (status, locator) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/publications/{publication_ref}/execution-locators"),
+        Some(&owner_cookie),
+        json!({ "requestId": Uuid::new_v4(), "signedLocator": signed_locator }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(locator["receipt"]["outcome"], "accepted");
+    assert!(
+        locator["receipt"].get("signedLocator").is_none(),
+        "a signed execution input is never echoed in a command receipt"
+    );
+    let frozen_source: (String, String, i64) = sqlx::query_as(
+        "SELECT expected_content_id,expected_author_id,publication_version \
+           FROM linggan_ops_publication_execution_locator WHERE publication_ref=$1",
+    )
+    .bind(publication_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        frozen_source,
+        (note.to_owned(), "0123456789abcdef01234567".to_owned(), 1)
+    );
+    let (status, sourced_sync) = post(
+        app.clone(),
+        "/api/local/ops/publication-syncs",
+        Some(&owner_cookie),
+        json!({ "idempotencyKey": Uuid::new_v4(), "publicationRefs": [publication_ref] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(sourced_sync["items"][0]["decision"], "blocked");
+    assert_eq!(
+        sourced_sync["items"][0]["code"], "ops_sync_execution_bridge_not_ready",
+        "the identity is now frozen, but a locator source does not invent a Collection work order"
+    );
     let (status, replay) = post(
         app.clone(),
         "/api/local/ops/publication-syncs",
