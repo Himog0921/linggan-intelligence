@@ -31,29 +31,30 @@ function setup(props: Parameters<typeof Harness>[0] = {}) {
 }
 
 describe('可用性（M01）', () => {
-  it('没有关联授权：写原因并附原因码，不提供按钮', () => {
+  // Mog 2026-10-23：普通层只说人话，原因码不在这里出现（留在「技术信息」的技术事实里）。
+  it('没有关联授权：用人话写原因，不显示原因码，不提供按钮', () => {
     setup({ channel: { ...eligible, eligible: false, url: null, reason: 'TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION_REQUIRED' } });
-    expect(screen.getByText(/尚未具备监控目标关联的有效深度归档授权/)).toBeInTheDocument();
-    expect(screen.getByText('TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION_REQUIRED')).toBeInTheDocument();
+    expect(screen.getByText(/这篇笔记现在不能复观测：它不在任何仍有效的观察授权里/)).toBeInTheDocument();
+    expect(screen.queryByText('TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION_REQUIRED')).toBeNull();
     expect(screen.queryByRole('button', { name: /复观测/ })).toBeNull();
   });
 
   it('平台不支持、入口没通过同源校验、非小红书：各写各的原因', () => {
     const { unmount } = setup({ channel: { ...eligible, supported: false, eligible: false, url: null } });
-    expect(screen.getByText(/平台当前不支持复观测/)).toBeInTheDocument();
+    expect(screen.getByText('这个平台的作品暂时不能复观测。')).toBeInTheDocument();
     unmount();
     const second = setup({ channel: { ...eligible, url: 'https://evil.example/reobserve' } });
-    expect(screen.getByText(/复观测入口未通过同源路径校验/)).toBeInTheDocument();
+    expect(screen.getByText('复观测入口地址不对，页面没有提供按钮。')).toBeInTheDocument();
     second.unmount();
     setup({ platform: 'douyin' });
     expect(screen.queryByRole('button', { name: '立即复观测' })).toBeNull();
   });
 
-  it('可用：范围说明常驻（不放 tooltip），按钮与媒体策略', () => {
+  it('可用：范围用人话常驻（不放 tooltip），按钮可点；不再单列媒体策略码', () => {
     setup();
-    expect(screen.getByText('范围：详情、评论（最多 30 条）与回复；不下载媒体、不跑 OCR / 转录。')).toBeInTheDocument();
+    expect(screen.getByText('重新打开这篇笔记，更新点赞、评论、收藏、分享，顺带采最多 30 条评论和回复；不重新下载图片视频，也不重新识字。')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '立即复观测' })).toBeEnabled();
-    expect(screen.getByText('媒体：复用既有副本，不新取')).toBeInTheDocument();
+    expect(screen.queryByText(/EXISTING_ASSETS_REUSED|媒体策略/)).toBeNull();
   });
 });
 

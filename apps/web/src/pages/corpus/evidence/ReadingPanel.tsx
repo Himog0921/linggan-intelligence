@@ -35,7 +35,7 @@ export function ReadingPanel({ context, domain, active }: { context: PanelContex
       {reading.isError && body ? <p role="status">刷新未完成，保留上次读到的正文版本。</p> : null}
     </Section>
     <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} domain={domain} onOpenSource={(image, opener) => {
-      const index = objects.findIndex(object => object.slotKey !== null && (object.slotKey === image.slotKey || image.aliases.includes(object.slotKey)));
+      const index = objects.findIndex(object => object.slotKeys.some(key => key === image.slotKey || image.aliases.includes(key)));
       if (index >= 0) onOpenViewer(index, opener);
       else if (image.originalUrl) window.open(image.originalUrl, '_blank', 'noopener,noreferrer');
     }}>
@@ -52,7 +52,7 @@ export function ReadingPanel({ context, domain, active }: { context: PanelContex
         <span>本地评论 <strong>{inspector.commentsCoverage?.retained ?? '未知'}</strong> 条</span>
         <span>已采回复 <strong>{inspector.repliesCoverage?.retained ?? '未知'}</strong> 条</span>
       </div>
-      <DossierComments work={item.ref} domain={domain} platformComments={item.display.engagement.comment} />
+      <DossierComments work={item.ref} domain={domain} active={active} />
     </Section>
   </div>;
 }

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type PointerEvent } from 'react';
-import { stateMeta, purposeLabel } from './evidencePresent';
+import { stateMeta } from './evidencePresent';
 import { positionText, type MediaObject } from './mediaObjects';
 import { matches } from './useMediaQuery';
 import styles from './MediaRail.module.css';
@@ -23,7 +23,7 @@ function scrollRail(viewport: HTMLElement, left: number) {
 function Card({ object, total, onOpen }: { object: MediaObject; total: number; onOpen: MediaRailProps['onOpen'] }) {
   const [phase, setPhase] = useState<'loading' | 'loaded' | 'failed'>('loading');
   const failed = phase === 'failed';
-  const label = `${purposeLabel(object.purpose)} 第 ${object.ordinal} 个本地媒体对象`;
+  const label = `${object.label} 第 ${object.ordinal} 个本地媒体对象`;
   return (
     <button
       type="button"
@@ -48,7 +48,7 @@ function Card({ object, total, onOpen }: { object: MediaObject; total: number; o
         <span className={styles.index}>{positionText(object.index, total)}</span>
       </span>
       <span className={styles.meta}>
-        <b>{purposeLabel(object.purpose)}</b>
+        <b>{object.label}</b>
         <span>{object.derivedState ? `文字 ${stateMeta(object.derivedState)[0]}` : '文字未处理'}</span>
       </span>
     </button>

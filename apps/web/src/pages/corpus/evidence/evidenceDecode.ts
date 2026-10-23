@@ -281,6 +281,11 @@ function parseDerivative(record: Json): Derivative {
   };
 }
 
+/** 只认 64 位十六进制的内容指纹；其余一律当作不知道，不拿它去合并对象。 */
+function sha256Of(value: string | null): string | null {
+  return value !== null && /^[0-9a-f]{64}$/i.test(value) ? value.toLowerCase() : null;
+}
+
 function parseMediaSlot(record: Json): MediaSlot {
   const blob = optObj(record, 'blob') ?? {};
   const replica = optObj(record, 'replica') ?? {};
@@ -295,6 +300,7 @@ function parseMediaSlot(record: Json): MediaSlot {
     hasHandle: handle !== null && handle !== '',
     deliveryState: optStr(blob, 'deliveryState'),
     mime: optStr(blob, 'deliveryMimeType') || optStr(blob, 'declaredMimeType') || '',
+    blobSha256: sha256Of(optStr(blob, 'sha256')),
     materializationRef: optStr(replica, 'materializationRef'),
     replicaState: optStr(record, 'replicaState'),
     displayOrderState: optStr(record, 'displayOrderState'),

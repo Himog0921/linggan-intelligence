@@ -80,7 +80,7 @@ describe('选中与历史', () => {
   it('从地址整体还原：排版、标签、宽度、作品都来自地址', async () => {
     pageRoutes(kit);
     const view = renderEvidencePage(pageUrl(`domain=${DOMAIN}&layout=table&tab=trace&panel=wide&work=${workRef(2)}`));
-    await screen.findByRole('table');
+    await screen.findByRole('table', { name: '作品材料集合' });
     expect(screen.getByRole('button', { name: '表格' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('tab', { name: '采集记录' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('button', { name: '加宽' })).toHaveAttribute('aria-pressed', 'true');
@@ -214,7 +214,7 @@ describe('检索与筛选', () => {
     const view = await opened();
     const before = listCalls().length;
     await view.user.click(screen.getByRole('button', { name: '表格' }));
-    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(await screen.findByRole('table', { name: '作品材料集合' })).toBeInTheDocument();
     await waitFor(() => expect(view.location()).toBe(withWork(1, `domain=${DOMAIN}&layout=table`)));
     expect(listCalls()).toHaveLength(before);
     expect(screen.getByRole('button', { name: '合成作品 1' })).toHaveAttribute('aria-current', 'true');
@@ -223,7 +223,7 @@ describe('检索与筛选', () => {
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     // 新增历史：后退一步回到表格，再一步回到研读。
     await act(() => view.router.navigate(-1));
-    expect(await screen.findByRole('table')).toBeInTheDocument();
+    expect(await screen.findByRole('table', { name: '作品材料集合' })).toBeInTheDocument();
     await act(() => view.router.navigate(-1));
     expect(screen.queryByRole('table')).not.toBeInTheDocument();
     expect(view.location()).toBe(withWork(1));

@@ -344,13 +344,19 @@ try {
     // Research Dossier v2 的正文是连续完整读本，不能由展示层折叠而隐藏尾段。
     assert.equal(await reading.getByRole('button', { name: '展开全文' }).count(), 0);
     await reading.getByText('合成长文结尾标记。').waitFor();
-    // 技术事实归入「采集记录」：默认折叠；展开后才有稳定引用与技术码。
+    // 采集记录（Mog 2026-10-23）：先给观察记录、复观测、评论深采；技术事实等收进最下方默认折叠的「技术信息」，
+    // 展开后技术事实仍各自折叠，再展开才有稳定引用与技术码。
     await page.getByRole('tab', { name: '采集记录' }).click();
     const trace = panel('采集记录');
-    const facts = trace.locator('details').filter({ has: page.locator('summary', { hasText: '技术事实' }) });
-    assert.equal(await facts.evaluate(node => node.open), false);
+    for (const heading of ['观察记录', '复观测', '评论深采']) await trace.getByRole('heading', { name: heading }).waitFor();
+    assert.match(await trace.innerText(), /这篇笔记被观察过 \d+ 次，最近一次 \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+    const technical = trace.locator('xpath=.//details[summary[normalize-space()="技术信息（排查用）"]]');
+    assert.equal(await technical.evaluate(node => node.open), false);
     assert.doesNotMatch(await trace.innerText(), UUID);
-    await facts.locator('summary').click();
+    await technical.locator('xpath=./summary').click();
+    const facts = trace.locator('xpath=.//details[summary[normalize-space()="技术事实"]]');
+    assert.equal(await facts.evaluate(node => node.open), false);
+    await facts.locator('xpath=./summary').click();
     assert.ok((await facts.innerText()).includes(rich));
     await shot('evidence-1440-rich-overview');
     // 旧深链映射到最接近的三个标签，不显示已拆除的旧标签名。
@@ -360,7 +366,7 @@ try {
     await page.getByRole('heading', { name: '研究底稿' }).waitFor();
     await open(`&work=${rich}&tab=materials`);
     assert.equal(await page.getByRole('tab', { name: '采集记录' }).getAttribute('aria-selected'), 'true');
-    await page.getByRole('heading', { name: '材料完整度' }).waitFor();
+    await page.getByRole('heading', { name: '观察记录' }).waitFor();
     await open(`&work=${rich}&tab=trace`);
     assert.equal(await page.getByRole('tab', { name: '采集记录' }).getAttribute('aria-selected'), 'true');
     // 每个标签点击都写入规范地址，并替换历史（不让标签切换堆满后退栈）。
@@ -408,26 +414,40 @@ try {
     assert.equal(await videoCard.locator('img').count(), 0, '视频不当图片渲染');
     assert.match(await videoCard.innerText(), /已取得/);
     assert.equal(await panel('作品').locator('img[alt$="本地媒体对象"]').count(), 1, '同一作品的封面仍是受控图片');
+    // 封面与正文第 1 张是同一份文件（两个槽位、同一字节指纹）：图组只显示一张，并写全它的两个角色。
+    const videoCards = panel('作品').locator('button[data-index]');
+    assert.equal(await videoCards.count(), 2, '三个槽位、两份文件 → 两张卡');
+    assert.deepEqual(await videoCards.locator('b').allTextContents(), ['封面 · 正文第 1 张', '视频']);
+    assert.match(await panel('作品').innerText(), /02 个本地媒体对象/);
   });
 
   // ⑦ 评论
-  await step('评论：点击前没有评论请求；点击后按 30 条分页读取，续读；不出现平台用户标识', async () => {
-    const before = requestsTo('GET', /\/comments$/).length;
+  await step('评论：打开作品即按 30 条读第一页并直接显示全文；「加载更多评论」续读；没有数量解释语；不出现平台用户标识', async () => {
+    const reads = () => requestsTo('GET', /\/research-dossier\/comments$/).length;
+    const before = reads();
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
-    assert.equal(requestsTo('GET', /\/comments$/).length, before, '没有点击就不读取评论原文');
     const work = panel('作品');
-    await work.getByRole('button', { name: '读取前 30 条' }).click();
-    await work.getByText(/已展示 30 \/ 48 条可读取评论/).waitFor();
-    await work.getByRole('button', { name: '继续读取 30 条' }).click();
-    await work.getByText(/已展示 48 \/ 48 条可读取评论/).waitFor();
+    // Mog 2026-10-23：评论直接展示，不用再点「读取」；48 条要两页，第一页之后才出现「加载更多评论」。
+    const more = work.getByRole('button', { name: '加载更多评论' });
+    await more.waitFor();
+    assert.equal(reads(), before + 1, '打开作品只读第一页');
+    assert.equal(await work.locator('article[data-relation]').count(), 30, '第一页 30 条直接显示');
+    assert.equal(await work.getByText(/可读取评论|数量相同不代表已采全|读取前 30 条/).count(), 0, '数量解释语已删去');
+    await more.click();
+    // 点下去之后按钮先变成「正在读取…」：等第二页真的渲染出来（共 48 条），而不是只等按钮名字变掉。
+    await page.waitForFunction(() => document.querySelectorAll('[role="tabpanel"]:not([hidden]) article[data-relation]').length === 48);
+    assert.equal(await work.getByRole('button', { name: /加载更多评论|正在读取/ }).count(), 0, '读完没有更多');
+    assert.equal(reads(), before + 2);
     const text = await work.innerText();
     assert.doesNotMatch(text, /reader-\d|replier-\d/);
-    // 评论与回复按稳定来源编号排序（orderBasis: stable_source_ref_not_platform_order），编号每次播种都不同，
-    // 48 条含嵌套回复；折叠态只展示 45 条主评论摘要。两类数量分别断言，避免把折叠策略误当成数据缺失。
+    // 评论与回复按稳定来源编号排序（orderBasis: stable_source_ref_not_platform_order），编号每次播种都不同；
+    // 48 条（45 条主评论＋3 条回复）全文都显示，回复缩进在主评论下。
+    assert.equal(await work.locator('article[data-relation="ROOT"]').count(), 45);
+    assert.equal(await work.locator('article[data-relation="REPLY"]').count(), 3);
     const shown = [...text.matchAll(/合成(评论|回复) (\d+)：/g)].map(match => `${match[1]}${match[2]}`);
-    assert.equal(shown.length, 45, '折叠态展示 45 条主评论摘要');
-    assert.equal(new Set(shown).size, 45, '续读没有重复的主评论');
+    assert.equal(shown.length, 48, '48 条全文直接显示');
+    assert.equal(new Set(shown).size, 48, '续读没有重复');
     await shot('evidence-1440-comments');
   });
 
@@ -532,8 +552,36 @@ try {
     await open(`&work=${plain}`);
     await waitInspector(TITLE.plain);
     await page.getByRole('tab', { name: '采集记录' }).click();
-    await panel('采集记录').getByText(/尚未具备监控目标关联的有效深度归档授权/).first().waitFor();
+    await panel('采集记录').getByText(/这篇笔记现在不能复观测：它不在任何仍有效的观察授权里/).first().waitFor();
     assert.equal(await panel('采集记录').getByRole('button', { name: '立即复观测' }).count(), 0);
+  });
+
+  // ⑨b 评论深采（Mog 2026-10-23）
+  await step('评论深采：确认步骤、取消不发请求；确认后恰好一个单次采集请求（只含这一篇、尽量采全），回执已提交，进度读同一次采集', async () => {
+    await open(`&work=${rich}`);
+    await waitInspector(TITLE.rich);
+    await page.getByRole('tab', { name: '采集记录' }).click();
+    const section = panel('采集记录');
+    const writes = report.writes.length;
+    await section.getByRole('button', { name: '采全部评论' }).click();
+    const dialog = page.getByRole('dialog', { name: '确认评论深采' });
+    await dialog.waitFor();
+    assert.match(await dialog.innerText(), /让合格的工位真实访问平台/);
+    assert.equal(await page.evaluate(() => document.activeElement?.textContent), '取消', '焦点默认在「取消」');
+    await shot('evidence-1440-deep-comments-confirm');
+    await dialog.getByRole('button', { name: '取消' }).click();
+    assert.equal(report.writes.length, writes, '取消不发请求');
+    await section.getByRole('button', { name: '采全部评论' }).click();
+    await dialog.getByRole('button', { name: '确认提交' }).click();
+    await section.getByText('已提交', { exact: true }).waitFor();
+    await section.getByText(/^等待派发 · 这次新采到/).waitFor();
+    await writesTotal(writes + 1);
+    assert.equal(report.writes.at(-1).path, '/api/collection/runs');
+    assert.equal(report.writes.at(-1).status, 200);
+    assert.equal(await section.getByRole('button', { name: '评论深采已提交' }).isDisabled(), true);
+    assert.match(await section.getByRole('link', { name: '在采集任务里查看' }).getAttribute('href'), /^\/collection\/tasks\?domain=[0-9a-f-]{36}&run=[0-9a-f-]{36}$/);
+    assert.doesNotMatch(await section.innerText(), UUID);
+    await shot('evidence-1440-deep-comments-submitted');
   });
 
   // ⑩ 入站
@@ -670,8 +718,8 @@ try {
     assert.deepEqual(report.pageErrors, []);
     assert.deepEqual(report.consoleErrors.filter(text => !text.includes('Failed to load resource')), []);
     assert.deepEqual(report.failedRequests.filter(entry => !entry.includes('net::ERR_ABORTED')), []);
-    // 写请求只有两类：重新分层（来自底稿与批量弹窗）与立即复观测。
-    for (const write of report.writes) assert.match(write.path, /\/(relayer|reobserve)$/, `${write.method} ${write.path}`);
+    // 写请求只有三类：重新分层（来自底稿与批量弹窗）、立即复观测与评论深采（单次采集）。
+    for (const write of report.writes) assert.match(write.path, /\/(relayer|reobserve)$|^\/api\/collection\/runs$/, `${write.method} ${write.path}`);
     assert.ok(report.writes.every(write => write.status === 200));
   });
 

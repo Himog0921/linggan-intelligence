@@ -300,17 +300,16 @@ async fn seed_video(db: &Database, domain: Uuid) -> Uuid {
     work.author_id = "ev-video-author";
     work.author_name = "合成作者 视频";
     let reference = seed_work(db, domain, &work).await;
-    let observations = slot_package(db, "ev-video", &[("cover", 1), ("video", 1)]).await;
+    // 封面与正文第 1 张是同一份文件（小红书的封面就是第一张图）：两个槽位、同一字节指纹，图组只显示一张。
+    let observations =
+        slot_package(db, "ev-video", &[("cover", 1), ("image", 1), ("video", 1)]).await;
+    let cover = png_bytes(240, 320, [100, 100, 160]);
+    for observation in &observations[..2] {
+        admit_bytes(db, *observation, &cover, "image/png").await;
+    }
     admit_bytes(
         db,
-        observations[0],
-        &png_bytes(240, 320, [100, 100, 160]),
-        "image/png",
-    )
-    .await;
-    admit_bytes(
-        db,
-        observations[1],
+        observations[2],
         b"synthetic-video-bytes-not-playable",
         "video/mp4",
     )

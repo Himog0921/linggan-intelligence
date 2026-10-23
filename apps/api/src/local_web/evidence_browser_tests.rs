@@ -56,7 +56,8 @@ fn writes(report: &Value) -> Vec<Write> {
 }
 
 /// 浏览器真实链路：打开与外壳 → 未选领域 → 三种排版与续读 → 检索与筛选 → 阅读主序 → 媒体与查看器 → 评论 →
-/// 研究底稿（预览、导出、重新分层、批量弹窗）→ 立即复观测 → 入站链接 → 评论深采交接 → 存储 → 四个视口 → 负例。
+/// 研究底稿（预览、导出、重新分层、批量弹窗）→ 立即复观测 → 评论深采 → 入站链接 → 评论深采交接 → 存储 →
+/// 四个视口 → 负例。
 // 多线程：浏览器子进程运行期间，服务器任务必须能在其他线程上继续响应。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL + built apps/web/dist + Node/Chromium; run by scripts/test-web-app-postgres.sh"]
@@ -157,14 +158,34 @@ async fn evidence_page_real_chain_browser_proof() {
         .iter()
         .filter(|write| write.path.ends_with("/relayer"))
         .count();
+    let runs = writes
+        .iter()
+        .filter(|write| write.path == "/api/collection/runs")
+        .count();
     assert_eq!(
-        reobserve + relayer,
+        reobserve + relayer + runs,
         writes.len(),
-        "页面只有两类写请求：立即复观测与重新分层"
+        "页面只有三类写请求：立即复观测、重新分层与评论深采"
     );
     assert!(writes.iter().all(|write| write.status == 200));
-    // 脚本里的写动作是固定的：复观测两次（先建工单，再合并）；重新分层五次（底稿里两次、批量弹窗里三篇）。
-    assert_eq!((reobserve, relayer), (2, 5));
+    // 脚本里的写动作是固定的：复观测两次（先建工单，再合并）；重新分层五次（底稿里两次、批量弹窗里三篇）；
+    // 评论深采一次。
+    assert_eq!((reobserve, relayer, runs), (2, 5, 1));
+    // 评论深采与采集页同一条合同：一次只含富作品、尽量采全的单次采集。建立时只冻结范围，
+    // 采集请求、工单与租约要等调度推进才形成，所以下面的计数不受它影响。
+    let run: (String, String, i32, i64) = sqlx::query_as(
+        "SELECT r.source_kind,r.comment_mode,r.work_limit, \
+                (SELECT count(*) FROM collection_run_work w WHERE w.run_ref=r.run_ref AND w.content_public_ref=$1) \
+         FROM collection_run r",
+    )
+    .bind(data.rich)
+    .fetch_one(db.pool())
+    .await
+    .expect("exactly one comment deep collection run");
+    assert_eq!(
+        run,
+        ("selected_works".to_owned(), "all_public".to_owned(), 1, 1)
+    );
     let after = effects(&db).await;
     let reobserved = reobserve as i64;
     assert_eq!(
