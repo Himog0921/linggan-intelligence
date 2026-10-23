@@ -444,7 +444,9 @@ try {
     assert.equal(await work.locator('article[data-relation]').count(), 30, '第一页 30 条直接显示');
     assert.equal(await work.getByText(/可读取评论|数量相同不代表已采全|读取前 30 条/).count(), 0, '数量解释语已删去');
     await more.click();
-    await more.waitFor({ state: 'detached' });
+    // 点下去之后按钮先变成「正在读取…」：等第二页真的渲染出来（共 48 条），而不是只等按钮名字变掉。
+    await page.waitForFunction(() => document.querySelectorAll('[role="tabpanel"]:not([hidden]) article[data-relation]').length === 48);
+    assert.equal(await work.getByRole('button', { name: /加载更多评论|正在读取/ }).count(), 0, '读完没有更多');
     assert.equal(reads(), before + 2);
     const text = await work.innerText();
     assert.doesNotMatch(text, /reader-\d|replier-\d/);
