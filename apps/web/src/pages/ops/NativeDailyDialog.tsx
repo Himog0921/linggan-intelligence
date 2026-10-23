@@ -20,12 +20,13 @@ function optionalCount(value: string): number | null | undefined {
  * A blank metric intentionally becomes null.  It is never coerced to zero:
  * zero is an explicit operational fact with different reporting semantics.
  */
-export function NativeDailyDialog({ close }: { close: () => void }) {
+export function NativeDailyDialog({ close, item }: { close: () => void; item?: api.Daily }) {
   const client = useQueryClient();
   const requestId = useRef<string | null>(null);
-  const [businessDate, setBusinessDate] = useState("");
-  const [linksOpened, setLinksOpened] = useState("");
-  const [followersGained, setFollowersGained] = useState("");
+  const editing = item !== undefined;
+  const [businessDate, setBusinessDate] = useState(item?.businessDate || "");
+  const [linksOpened, setLinksOpened] = useState(item?.linksOpened?.toString() || "");
+  const [followersGained, setFollowersGained] = useState(item?.followersGained?.toString() || "");
   const [submitting, setSubmitting] = useState(false);
   const [retrySameRequest, setRetrySameRequest] = useState(false);
   const [message, setMessage] = useState("");
@@ -58,7 +59,7 @@ export function NativeDailyDialog({ close }: { close: () => void }) {
         businessDate,
         linksOpenedCount,
         followersGained: followersGainedCount,
-        expectedVersion: null,
+        expectedVersion: item?.nativeVersion || null,
       });
       requestId.current = null;
       setRetrySameRequest(false);
@@ -72,7 +73,8 @@ export function NativeDailyDialog({ close }: { close: () => void }) {
         return;
       }
       if (result.outcome === "stale") {
-        setMessage("该日期已有你的日报，未覆盖原记录。刷新后核对；带版本的编辑流程尚未开放。");
+        await client.invalidateQueries({ queryKey: ["ops", "daily"] });
+        setMessage(editing ? "这条日报已被更新，未覆盖原记录。列表已刷新，请核对后再编辑。" : "该日期已有你的日报，未覆盖原记录。刷新后可进入编辑。");
         return;
       }
       setMessage(`服务器拒绝：${result.code}`);
@@ -90,13 +92,13 @@ export function NativeDailyDialog({ close }: { close: () => void }) {
     }
   }
 
-  return <Dialog label="填写原生日报" onClose={requestClose}><form className={c("ops-dialog-body")} onSubmit={submit}>
-    <h2>填写日报</h2>
-    <p className={c("ops-note")}>留空是“未填写”，填 0 才是“当天为零”。日报归属当前会话的运营人，服务端会拒绝覆盖已有版本。</p>
-    <label>日期<input type="date" required value={businessDate} onChange={event => setBusinessDate(event.target.value)} disabled={locked} /></label>
+  return <Dialog label={editing ? "修正原生日报" : "填写原生日报"} onClose={requestClose}><form className={c("ops-dialog-body")} onSubmit={submit}>
+    <h2>{editing ? "修正日报" : "填写日报"}</h2>
+    <p className={c("ops-note")}>留空是“未填写”，填 0 才是“当天为零”。{editing ? "本次按读到的版本保存；若他人已更新，服务端会拒绝覆盖。" : "日报归属当前会话的运营人，服务端会拒绝覆盖已有版本。"}</p>
+    <label>日期<input type="date" required value={businessDate} onChange={event => setBusinessDate(event.target.value)} disabled={locked || editing} /></label>
     <label>打开（可选）<input type="number" min="0" max={MAX_I32} step="1" inputMode="numeric" value={linksOpened} onChange={event => setLinksOpened(event.target.value)} disabled={locked} /></label>
     <label>加微（可选）<input type="number" min="0" max={MAX_I32} step="1" inputMode="numeric" value={followersGained} onChange={event => setFollowersGained(event.target.value)} disabled={locked} /></label>
     {message ? <p role="status">{message}</p> : null}
-    <footer><ActionButton type="button" onClick={requestClose} disabled={submitting}>取消</ActionButton><ActionButton type="submit" disabled={submitting}>{submitting ? "正在提交…" : retrySameRequest ? "重试同一请求" : "登记日报"}</ActionButton></footer>
+    <footer><ActionButton type="button" onClick={requestClose} disabled={submitting}>取消</ActionButton><ActionButton type="submit" disabled={submitting}>{submitting ? "正在提交…" : retrySameRequest ? "重试同一请求" : editing ? "保存修正" : "登记日报"}</ActionButton></footer>
   </form></Dialog>;
 }

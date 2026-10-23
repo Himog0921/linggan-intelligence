@@ -151,6 +151,7 @@ export function LedgerPage({
   const [newAccount, setNewAccount] = useState(false);
   const [newPublication, setNewPublication] = useState(false);
   const [newDaily, setNewDaily] = useState(false);
+  const [editDaily, setEditDaily] = useState<api.Daily | null>(null);
   const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
@@ -394,7 +395,7 @@ export function LedgerPage({
               ))
             ) : kind === "daily" && daily.data?.items.length ? (
               daily.data.items.map((item) => (
-                <DailyRow key={item.ref} item={item} />
+                <DailyRow key={item.ref} item={item} edit={setEditDaily} />
               ))
             ) : data && !result.isFetching ? (
               <Empty
@@ -505,6 +506,7 @@ export function LedgerPage({
       {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
       {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items} close={() => setNewPublication(false)} /> : null}
       {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
+      {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
       {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
       {cover ? (
         <Dialog
@@ -729,7 +731,7 @@ const execution = {
   ],
   done: ["已完成", "", "当天有发布登记，没有待处理项"],
 };
-function DailyRow({ item }: { item: api.Daily }) {
+function DailyRow({ item, edit }: { item: api.Daily; edit: (item: api.Daily) => void }) {
   const [label, tone, title] = execution[item.execution];
   return (
     <tr>
@@ -755,9 +757,13 @@ function DailyRow({ item }: { item: api.Daily }) {
       <NumberCell value={item.monthFollowersGained} />
       <NumberCell value={item.monthPublished} />
       <td>
-        <ActionButton type="button" disabled title={readonly}>
-          编辑
-        </ActionButton>
+        {item.source === "native" && item.nativeVersion !== null ? (
+          <ActionButton type="button" onClick={() => edit(item)} title="仅当前会话具备权限时可保存修正；并发更新不会被覆盖">
+            编辑
+          </ActionButton>
+        ) : <ActionButton type="button" disabled title="历史迁入日报保持来源只读">
+          历史只读
+        </ActionButton>}
       </td>
     </tr>
   );
