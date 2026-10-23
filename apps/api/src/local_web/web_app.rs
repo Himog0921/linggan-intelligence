@@ -23,6 +23,7 @@ const REACT_PAGES: &[&str] = &[
     "/login",
     "/invite/accept",
     "/settings/models",
+    "/settings/account",
     "/settings/team",
     "/ops/creation",
     "/corpus/creators",
@@ -46,6 +47,7 @@ const REACT_PAGES: &[&str] = &[
 /// returned.  This is distinct from the local-origin guard: a same-origin browser without an
 /// active team session must not receive the management surface and rely on client-side hiding.
 const AUTHENTICATED_REACT_PAGES: &[&str] = &[
+    "/settings/account",
     "/settings/team",
     "/ops/overview",
     "/ops/publications",

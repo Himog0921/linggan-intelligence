@@ -498,6 +498,7 @@ async fn health_reports_the_frontend_build() {
             "/login",
             "/invite/accept",
             "/settings/models",
+            "/settings/account",
             "/settings/team",
             "/ops/creation",
             "/corpus/creators",
