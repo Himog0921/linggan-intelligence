@@ -175,7 +175,7 @@ pub async fn claim_media_processing_work(
         .await
 }
 
-/// An explicit version restriction for controlled local execution; normal claim behavior is unchanged.
+/// Explicit versions are reserved for controlled execution. Normal workers only claim supported versions.
 pub async fn claim_media_processing_work_for_version(
     database: &Database,
     worker_instance_ref: Uuid,
@@ -185,6 +185,17 @@ pub async fn claim_media_processing_work_for_version(
     if enabled_processors.is_empty() {
         return Ok(MediaProcessingClaimOutcome::Idle);
     }
+    let mut supported_versions: Vec<String> = enabled_processors
+        .iter()
+        .filter_map(|kind| {
+            processor_version_for_kind(kind).map(|version| format!("{kind}:{version}"))
+        })
+        .collect();
+    // Local visual recognition has a separate, still supported image processor.
+    supported_versions.push(format!(
+        "image_ocr:{}",
+        crate::ocr_adoption_persistence::PROCESSOR_VERSION
+    ));
     let retired_job_filter = " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)";
     let mut tx = database.pool().begin().await?;
     // **认领闸。** 先取锁，再数在途，最后才认领——三步必须在同一把锁下，否则这道闸拦不住任何东西。
@@ -234,7 +245,7 @@ pub async fn claim_media_processing_work_for_version(
            ON concurrency.processor_kind = job.processor_kind \
          WHERE work.state IN ('pending','retry_wait') AND work.attempt_count < $1 \
            AND job.processor_kind = ANY($2) \
-           AND ($3::text IS NULL OR job.processor_version=$3) \
+           AND (($3::text IS NULL AND (job.processor_kind || ':' || job.processor_version)=ANY($4)) OR job.processor_version=$3) \
            {retired_job_filter} \
            AND work.next_attempt_at <= scope_001_now() \
            AND (SELECT count(*) \
@@ -253,6 +264,7 @@ pub async fn claim_media_processing_work_for_version(
     .bind(MAX_PROCESSING_ATTEMPTS)
     .bind(enabled_processors)
     .bind(processor_version)
+    .bind(&supported_versions)
     .fetch_optional(&mut *tx)
     .await?;
     let Some(candidate) = candidate else {

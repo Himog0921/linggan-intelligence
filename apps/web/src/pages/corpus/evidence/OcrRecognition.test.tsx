@@ -184,3 +184,15 @@ describe('work-scoped OCR state and receipts', () => {
     await waitFor(() => expect(commands).toHaveLength(1)); expect(commands[0]).toMatchObject({ expectedScopeSha256: 'b'.repeat(64), slotKeys: ['new-slot-2'] });
   });
 });
+
+it.each([
+  ['ocr_visual_coordinates_invalid', '文字位置无效'],
+  ['ocr_visual_title_mismatch', '标题与识别原文不一致'],
+  ['ocr_output_truncated', '识别输出不完整'],
+])('停止原因可读且不触发重发：%s', async (failureCode, message) => {
+  const fetch = vi.fn(async () => reply(run({ state: 'stopped', failureCode })));
+  vi.stubGlobal('fetch', fetch);
+  render(<OcrRecognition domain="domain-a" workRef="work-a"/>);
+  expect(await screen.findByText(`${message}，本次已停止。已保存结果可查看，后续图片未发送。`)).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(1);
+});

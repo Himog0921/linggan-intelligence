@@ -163,9 +163,11 @@
 .reviewForm :focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: 2px; }
 
 /* Full reading keeps one flowing column; only diagnostics and source comparison disclose. */
+.coverage { margin-block: var(--lgi-space-4); color: var(--lgi-muted); font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui); }
+.coverage p { margin: var(--lgi-space-2) 0; }
 .materials, .blocks, .reviewContent { display: grid; gap: var(--lgi-space-3); min-width: 0; }
-.material { min-width: 0; padding-block: var(--lgi-space-4); }
-.materialHead { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--lgi-space-3); }
+.material { min-width: 0; padding-block: var(--lgi-space-4); border-top: 1px solid var(--lgi-hairline); }
+.materialHead { margin-bottom: var(--lgi-space-3); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--lgi-space-3); }
 .materialHead h3, .blockHeading { margin: 0; font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
 .materialHead span, .attribution { margin: 0; color: var(--lgi-muted); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); }
 .block, .blockList, .blockTable, .dialogue { min-width: 0; font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence); overflow-wrap: anywhere; }
@@ -180,7 +182,7 @@
 .gap, .issues { color: var(--lgi-muted); font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui); }
 .issues { margin: var(--lgi-space-2) 0; padding-left: var(--lgi-space-4); }
 .review { margin-block: var(--lgi-space-3); }
-.reviewContent { padding-top: var(--lgi-space-3); }
+.reviewContent { padding-block: var(--lgi-space-3); }
 .reviewContent label { display: grid; gap: var(--lgi-space-2); }
 .reviewContent :is(textarea, select, input:not([type=checkbox])) { min-width: 0; width: 100%; max-width: 100%; box-sizing: border-box; padding: var(--lgi-space-2); border: 1px solid var(--lgi-border); background: var(--lgi-canvas); color: var(--lgi-body); font: inherit; }
 .reviewContent textarea { min-height: var(--lgi-space-16); resize: vertical; }
