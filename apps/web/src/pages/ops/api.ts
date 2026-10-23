@@ -388,6 +388,14 @@ export function overview(value: unknown) {
       ...base(r),
       businessSelected: b(r, "businessSelected"),
       window: windowDTO(d.obj(r, "window")),
+      nativeFacts: {
+        observed: b(d.obj(r, "nativeFacts"), "observed"),
+        latestBusinessDate: sn(d.obj(r, "nativeFacts"), "latestBusinessDate"),
+        published: n(d.obj(r, "nativeFacts"), "published"),
+        linksOpened: nn(d.obj(r, "nativeFacts"), "linksOpened"),
+        followersGained: nn(d.obj(r, "nativeFacts"), "followersGained"),
+        hits: n(d.obj(r, "nativeFacts"), "hits"),
+      },
       kpi: {
         current: figures(d.obj(k, "current")),
         previous: figures(d.obj(k, "previous")),
@@ -465,7 +473,9 @@ export function trend(value: unknown) {
       hits: nn(p, "hits"),
       coverage: enumeration(p, "coverage", ["full", "partial", "not_migrated"]),
       coveredTo: sn(p, "coveredTo"),
+      nativeFacts: b(p, "nativeFacts"),
     })),
+    nativeLatestBusinessDate: sn(r, "nativeLatestBusinessDate"),
   }));
 }
 export type Summary = ReturnType<typeof summary>;

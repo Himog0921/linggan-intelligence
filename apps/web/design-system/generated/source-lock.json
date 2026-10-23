@@ -1,5 +1,5 @@
 {
-  "fingerprint": "2d6b44b548ee73f45f29a9307733994a36545ecca753c6ec8ff905308cec6c2f",
+  "fingerprint": "4e406cc2bc889fec1f24059b9da7a39fbb6e5922ddca3b18514993845e8dbb65",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -235,7 +235,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/Charts.tsx",
-      "sha256": "5e5e573998c25433ddaa6265ea0d1f9f4da293b416ec980adcf09dae466337bc"
+      "sha256": "30dbf9c066dc4daddd4a58cdcd269feb2441c80bca72696dbc0680c260458b0b"
     },
     {
       "path": "apps/web/src/pages/ops/LedgerPage.tsx",
@@ -263,7 +263,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OverviewPage.tsx",
-      "sha256": "4ac72a786115bc769b7799cb447ca2f65fd5a05ee0062068a84af603e152c6f4"
+      "sha256": "8efc00b2e8e92c9c8e247a22fe8f74359b7165025e2720936b708cd80658fd56"
     },
     {
       "path": "apps/web/src/pages/ops/TargetDialog.tsx",

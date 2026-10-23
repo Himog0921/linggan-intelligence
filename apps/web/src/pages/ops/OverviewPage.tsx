@@ -111,13 +111,15 @@ export function OverviewPage({ business }: { business: string }) {
         </div>
       </div>
       <Status
-        error={result.isError || Boolean(data && !data.asOf)}
+        error={result.isError || Boolean(data && !data.asOf && !data.nativeFacts.observed)}
         retry={result.isError ? () => void result.refetch() : undefined}
       >
         {result.isError
           ? `总览读取失败（${api.reason(result.error)}），可以重试。`
-          : data && !data.asOf
-            ? "还没有迁入数据。"
+          : data && !data.asOf && !data.nativeFacts.observed
+            ? "还没有历史迁入或原生登记数据。"
+            : data && !data.asOf
+              ? "历史尚未迁入；下方原生事实是稀疏登记，不代表连续覆盖。"
             : note}
       </Status>
       <div
@@ -128,6 +130,11 @@ export function OverviewPage({ business }: { business: string }) {
       >
         {data ? (
           <>
+            {data.nativeFacts.observed ? (
+              <p className={c("ops-scope-note")}>
+                原生当前事实（非连续覆盖）· 最晚登记日 {data.nativeFacts.latestBusinessDate || "未知"}：发布 {f.number(data.nativeFacts.published)} · 打开 {f.number(data.nativeFacts.linksOpened)} · 加微 {f.number(data.nativeFacts.followersGained)} · 小红书爆款 {f.number(data.nativeFacts.hits)}。
+              </p>
+            ) : null}
             <section className={c("ops-hero-v2")} aria-label="经营结果与加微目标">
               <div className={c("ops-results-v2")}>
                 <div className={c("ops-lead-readout-v2")}>
@@ -272,6 +279,7 @@ export function OverviewPage({ business }: { business: string }) {
                   <span className={c("ops-analysis-hint-v2")}>
                     近 90 日 / 12 周 / 6 月 · 与顶部周期独立
                   </span>
+                  {trend.data?.nativeLatestBusinessDate ? <span className={c("ops-analysis-hint-v2")}>原生事实最晚登记至 {trend.data.nativeLatestBusinessDate}；不代表连续迁入</span> : null}
                 </div>
                 {trend.isError ? (
                   <div className={c("ops-chart")}>

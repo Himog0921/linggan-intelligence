@@ -7,7 +7,8 @@ use axum::{
 use linggan_intelligence::ops_ledger::{
     apply_ops_import, preview_ops_import,
     read::{
-        OpsBusiness, OpsPublicationFilter, read_ops_accounts, read_ops_businesses, read_ops_daily,
+        OpsBusiness, OpsOverviewQuery, OpsPublicationFilter, OverviewSlice, read_ops_accounts,
+        read_ops_businesses, read_ops_daily, read_ops_overview, read_ops_overview_trend,
         read_ops_publications, read_ops_summary,
     },
 };
@@ -473,6 +474,51 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
             && item.source == "native"
             && item.publisher.as_deref() == Some("本人运营")
     }));
+    let overview = read_ops_overview(
+        &database,
+        OpsBusiness::All,
+        &OpsOverviewQuery {
+            slice: OverviewSlice::Week,
+            today: Some("2026-10-23".to_owned()),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        overview.window.complete_through.as_deref(),
+        Some("2026-10-11")
+    );
+    assert_eq!(
+        (
+            overview.native_facts.observed,
+            overview.native_facts.latest_business_date.as_deref(),
+            overview.native_facts.published,
+            overview.native_facts.links_opened,
+            overview.native_facts.followers_gained,
+            overview.native_facts.hits,
+        ),
+        (true, Some("2026-10-20"), 1, Some(0), Some(0), 0),
+        "native current facts must stay visible without claiming historical coverage",
+    );
+    let trend =
+        read_ops_overview_trend(&database, OpsBusiness::All, Some("day"), Some("2026-10-23"))
+            .await
+            .unwrap();
+    let native_day = trend
+        .points
+        .iter()
+        .find(|point| point.start == "2026-10-20")
+        .unwrap();
+    assert_eq!(
+        trend.native_latest_business_date.as_deref(),
+        Some("2026-10-20")
+    );
+    assert_eq!(native_day.coverage, "not_migrated");
+    assert!(native_day.native_facts);
+    assert_eq!(
+        (native_day.followers_gained, native_day.hits),
+        (Some(0), Some(0))
+    );
 }
 
 fn publication_body(request_id: Uuid, account_ref: Uuid) -> Value {

@@ -155,11 +155,12 @@ export function windowLine(w: Window, asOf: AsOf) {
 export const blockEmptyText = (w: Window, text: string) =>
   w.covered === null ? "这段时间还没有迁入的数据" : text;
 export function trendPointNote(p: TrendPoint) {
-  return p.coverage === "not_migrated"
+  const historical = p.coverage === "not_migrated"
     ? "还没迁入"
     : p.coverage === "partial"
       ? `按 ${p.coveredTo} 及以前计算`
       : "";
+  return [historical, p.nativeFacts ? "含原生稀疏事实" : ""].filter(Boolean).join("；");
 }
 export function trendAccessibleLabel(
   points: TrendPoint[],
@@ -168,7 +169,7 @@ export function trendAccessibleLabel(
   return [
     `加微与爆款长趋势，${points.length} 个${{ day: "日", week: "周", month: "月" }[granularity]}`,
     ...points
-      .filter((p) => p.coverage === "partial")
+      .filter((p) => p.coverage === "partial" || p.nativeFacts)
       .map((p) => `${p.label} · ${trendPointNote(p)}`),
   ].join("；");
 }

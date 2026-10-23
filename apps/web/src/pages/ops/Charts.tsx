@@ -141,6 +141,7 @@ export function TrendChart({
                     height={coverageHeight}
                     className={c("ops-trend-coverage-v2")}
                     data-coverage={p.coverage}
+                    data-native-facts={p.nativeFacts ? "true" : undefined}
                   />
                   {(i === 0 || i === points.length - 1 || i % showEvery === 0) ? (
                     <Axis center={x(i)} y={labelY} value={p.label} width={width} />
