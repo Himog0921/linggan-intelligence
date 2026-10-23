@@ -279,6 +279,13 @@ export type NativeDailyCommand = {
 export async function recordNativeDaily(command: NativeDailyCommand & { requestId: string }) {
   return nativeCommand("/api/local/ops/native/daily-reports", command, command.requestId);
 }
+
+export type NativeViewCommand = {
+  reportKind: "value" | "cleared"; viewCount: number | null; asOf: string;
+};
+export async function recordNativeView(publicationRef: string, command: NativeViewCommand & { requestId: string }) {
+  return nativeCommand(`/api/local/ops/native/publications/${encodeURIComponent(publicationRef)}/view-reports`, command, command.requestId);
+}
 const figures = (r: R) => ({
   published: nn(r, "published"),
   linksOpened: nn(r, "linksOpened"),

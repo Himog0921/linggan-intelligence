@@ -22,6 +22,7 @@ import { c, peopleTabs, readonly } from "./styles";
 import { NativeAccountDialog } from "./NativeAccountDialog";
 import { NativePublicationDialog } from "./NativePublicationDialog";
 import { NativeDailyDialog } from "./NativeDailyDialog";
+import { NativeViewDialog } from "./NativeViewDialog";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
   publications: [
@@ -150,6 +151,7 @@ export function LedgerPage({
   const [newAccount, setNewAccount] = useState(false);
   const [newPublication, setNewPublication] = useState(false);
   const [newDaily, setNewDaily] = useState(false);
+  const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
@@ -383,6 +385,7 @@ export function LedgerPage({
                   item={item}
                   openCover={openCover}
                   openDetail={setDetail}
+                  recordView={setViewPublication}
                 />
               ))
             ) : kind === "accounts" && accounts.data?.items.length ? (
@@ -502,6 +505,7 @@ export function LedgerPage({
       {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
       {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items} close={() => setNewPublication(false)} /> : null}
       {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
+      {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
       {cover ? (
         <Dialog
           label="封面大图" outsideClose
@@ -526,10 +530,12 @@ export function LedgerPage({
 function PublicationRow({
   item,
   openCover, openDetail,
+  recordView,
 }: {
   item: api.Publication;
   openCover: (src: string) => void;
   openDetail: (item: api.Publication) => void;
+  recordView: (item: api.Publication) => void;
 }) {
   return (
     <tr>
@@ -623,7 +629,7 @@ function PublicationRow({
         )}
       </td>
       <TextCell value={item.publisher} />
-      <DisabledActions />
+      <td><ActionButton type="button" onClick={() => recordView(item)}>补阅读量</ActionButton></td>
       <td className={c("ops-number")}>
         <div className={c("ops-stack")} style={{ alignItems: "flex-end" }}>
           {item.views.state === "value" ? (
