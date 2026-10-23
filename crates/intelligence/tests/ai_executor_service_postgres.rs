@@ -190,33 +190,41 @@ async fn cancel_batch_during_service_calls_retains_actual_usage_and_discards_out
 #[ignore = "owned PostgreSQL only"]
 async fn service_refuses_missing_or_different_migration_before_acquiring_an_instance() {
     let db = fixture::db("ai_service_schema").await;
-    sqlx::query(
-        "DELETE FROM linggan_local_schema_migration WHERE migration_id='0140_ai_gen1_writing'",
-    )
-    .execute(db.pool())
-    .await
-    .unwrap();
-    let result = service::run(
-        db.clone(),
-        "synthetic-schema",
-        4,
-        Arc::new(SyntheticModelSecrets),
-        adapter(),
-        ModelWorkerDrain::new(),
-    )
-    .await;
-    assert!(matches!(result, Err(ExecutorError::SchemaNotReady)));
-    sqlx::query("INSERT INTO linggan_local_schema_migration(migration_id,migration_sha256) VALUES('0140_ai_gen1_writing',repeat('0',64))").execute(db.pool()).await.unwrap();
-    let result = service::run(
-        db.clone(),
-        "synthetic-schema",
-        4,
-        Arc::new(SyntheticModelSecrets),
-        adapter(),
-        ModelWorkerDrain::new(),
-    )
-    .await;
-    assert!(matches!(result, Err(ExecutorError::SchemaNotReady)));
+    for migration in [
+        "0140_ai_gen1_writing",
+        "0146_research_dossier_v2",
+        "0148_dossier_consumer_contracts",
+    ] {
+        let expected: String = sqlx::query_scalar("DELETE FROM linggan_local_schema_migration WHERE migration_id=$1 RETURNING migration_sha256")
+            .bind(migration).fetch_one(db.pool()).await.unwrap();
+        for corrupt in [false, true] {
+            if corrupt {
+                sqlx::query("INSERT INTO linggan_local_schema_migration(migration_id,migration_sha256) VALUES($1,repeat('0',64))")
+                    .bind(migration).execute(db.pool()).await.unwrap();
+            }
+            let result = service::run(
+                db.clone(),
+                "synthetic-schema",
+                4,
+                Arc::new(SyntheticModelSecrets),
+                adapter(),
+                ModelWorkerDrain::new(),
+            )
+            .await;
+            assert!(
+                matches!(result, Err(ExecutorError::SchemaNotReady)),
+                "{migration}, corrupt={corrupt}"
+            );
+        }
+        sqlx::query(
+            "UPDATE linggan_local_schema_migration SET migration_sha256=$2 WHERE migration_id=$1",
+        )
+        .bind(migration)
+        .bind(expected)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    }
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ai_executor_instance")
         .fetch_one(db.pool())
         .await

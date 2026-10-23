@@ -1,5 +1,6 @@
 import * as d from '../../../shared/decode';
 import { requestJson } from '../../../shared/api';
+import { parseBlock, parseIssue } from '../../corpus/evidence/dossierBlockDecode';
 
 export const relevanceLabels = { related: '相关', not_related: '不相关', unknown: '未知' };
 export const perspectiveLabels = { parent_lived_experience: '家长亲历', adult_self_report: '成人自述', professional_education: '专业科普', organization_promotion: '机构推广', other: '其他', unknown: '看不出' };
@@ -48,10 +49,14 @@ export function parsePreview(value: unknown) {
       catalogue: catalogue(d.obj(root, 'catalogue')), baselineCatalogue: catalogue(d.obj(root, 'baselineCatalogue')), candidateCatalogue: catalogue(d.obj(root, 'candidateCatalogue')),
       comparison: d.list(root, 'comparison', item => ({ kind: choice(item, 'kind', ['keep', 'merge', 'delete', 'new']), oldRefs: d.strList(item, 'oldRefs'), newRefs: d.strList(item, 'newRefs') })),
       notes: d.list(root, 'notes', note => {
-        const input = d.obj(note, 'input'); fixed(input, 'origin', 'offline_mock'); fixed(input, 'contract', 'note-interpretation-offline-input.v1');
+        const input = d.obj(note, 'input'); fixed(input, 'origin', 'offline_mock'); fixed(input, 'contract', 'note-interpretation-offline-input.v2');
         const result = d.obj(note, 'result'); const manual = d.optObj(result, 'judgment');
         return { title: d.str(note, 'title'), likes: d.optNum(note, 'likes'), publishedWeek: d.optStr(note, 'publishedWeek'),
-          input: { identity: identity(d.obj(input, 'identity')), columns: d.list(input, 'columns', col => ({ field: choice(col, 'field', ['title', 'cover_headline', 'body', 'tags', 'ocr']), state: choice(col, 'state', Object.keys(stateLabels) as (keyof typeof stateLabels)[]) })), fragments: d.list(input, 'fragments', f => ({ field: d.str(f, 'field'), text: d.str(f, 'text'), citationId: d.str(f, 'citationId'), start: d.num(f, 'start'), end: d.num(f, 'end') })) },
+          input: { identity: identity(d.obj(input, 'identity')), asOf: d.str(input, 'asOf'), columns: d.list(input, 'columns', col => ({ field: choice(col, 'field', ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text']), state: choice(col, 'state', Object.keys(stateLabels) as (keyof typeof stateLabels)[]) })), fragments: d.list(input, 'fragments', f => {
+            const structure = parseBlock(d.obj(f, 'structure')); const citationId = d.str(f, 'citationId');
+            if (structure.ref !== citationId) throw new d.ShapeError('fragment.citationId');
+            return { field: choice(f, 'field', ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text']), text: d.str(f, 'text'), citationId, start: d.num(f, 'start'), end: d.num(f, 'end'), sourceRef: d.str(f, 'sourceRef'), sourceVersion: d.str(f, 'sourceVersion'), speaker: choice(f, 'speaker', ['author', 'other', 'unconfirmed']), structure, issues: d.list(f, 'issues', parseIssue), readingRef: d.optStr(f, 'readingRef'), unitRef: d.optStr(f, 'unitRef') };
+          }) },
           baseline: output(d.obj(note, 'baseline')), result: { machine: output(d.obj(result, 'machine')), effective: output(d.obj(result, 'effective')), judgment: manual ? judgment(manual) : null, manualApplied: d.bool(result, 'manualApplied'), needsReview: d.bool(result, 'needsReview') } };
       }),
       summary: { total: d.num(summary, 'total'), unknown: d.num(summary, 'unknown'), notRelated: d.num(summary, 'notRelated'), noSuitableDirection: d.num(summary, 'noSuitableDirection'), unknownLikes: d.num(summary, 'unknownLikes'), unknownWeek: d.num(summary, 'unknownWeek'), directions: d.list(summary, 'directions', dir => ({ directionRef: d.str(dir, 'directionRef'), count: d.num(dir, 'count'), possible: d.num(dir, 'possible'), over1000: d.num(dir, 'over1000'), over5000: d.num(dir, 'over5000'), unknownLikes: d.num(dir, 'unknownLikes'), unknownWeek: d.num(dir, 'unknownWeek'), weeks: counts(d.obj(dir, 'weeks')), perspectives: counts(d.obj(dir, 'perspectives')), keywords: d.list(dir, 'keywords', k => ({ text: d.str(k, 'text'), count: d.num(k, 'count') })) })) },

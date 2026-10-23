@@ -6,8 +6,6 @@ use linggan_storage_postgres::Database;
 use serde_json::json;
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-#[path = "core_read/legacy.rs"]
-mod legacy;
 #[path = "core_read/load.rs"]
 mod load;
 #[path = "core_read/partial.rs"]
@@ -29,6 +27,7 @@ struct Window {
     manifest: Value,
     output: Value,
     core: Value,
+    current_coverage_eligible: bool,
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]

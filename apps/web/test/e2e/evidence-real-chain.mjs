@@ -334,25 +334,16 @@ try {
     await waitInspector(TITLE.rich);
     const reading = panel('作品');
     // 标题来自列表，作者、互动与正文来自随后的详情读取：等正文到了再读（只等标题会读到空白的分区）。
-    await reading.locator('p[data-collapsed]').waitFor();
+    await reading.getByText('第1段。', { exact: false }).waitFor();
     const text = await reading.innerText();
     // 作者、发布时间、互动属于共享 Inspector 头部，正文标签只承载可阅读材料。
     const summary = await inspector().innerText();
     assert.match(summary, /合成作者 林/);
     for (const figure of ['12,345', '321', '4,567', '89']) assert.ok(summary.includes(figure), figure);
     assert.ok(text.includes('第1段。'));
-    // 长文折叠与展开：折叠只是不占满整屏，正文仍完整在页面里（裁切不删字）。
-    const toggle = reading.getByRole('button', { name: '展开全文' });
-    assert.equal(await toggle.getAttribute('aria-expanded'), 'false');
-    const body = reading.locator('p[data-collapsed]');
-    assert.equal(await body.getAttribute('data-collapsed'), 'true');
-    const folded = await body.evaluate(node => ({ shown: node.clientHeight, full: node.scrollHeight }));
-    assert.ok(folded.full > folded.shown, '折叠时正文被裁切');
-    await toggle.click();
-    assert.equal(await body.getAttribute('data-collapsed'), 'false');
-    const unfolded = await body.evaluate(node => ({ shown: node.clientHeight, full: node.scrollHeight }));
-    assert.ok(unfolded.shown > folded.shown && unfolded.shown >= unfolded.full - 1, '展开后完整显示');
-    await page.getByText('合成长文结尾标记。').waitFor();
+    // Research Dossier v2 的正文是连续完整读本，不能由展示层折叠而隐藏尾段。
+    assert.equal(await reading.getByRole('button', { name: '展开全文' }).count(), 0);
+    await reading.getByText('合成长文结尾标记。').waitFor();
     // 技术事实归入「采集记录」：默认折叠；展开后才有稳定引用与技术码。
     await page.getByRole('tab', { name: '采集记录' }).click();
     const trace = panel('采集记录');
@@ -441,25 +432,23 @@ try {
   });
 
   // ⑧ 研究底稿
-  await step('研究底稿：读取、预览旧任务输入（不调用模型）、导出内容、重新分层（已完成／已是当前版本）', async () => {
+  await step('研究底稿：共享读取、导出内容、对照原图、重新整理（已完成／已是当前版本）', async () => {
     const before = requestsTo('GET', /research-dossier$/).length;
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
-    assert.equal(requestsTo('GET', /research-dossier$/).length, before, '底稿标签没有激活前不读取底稿');
+    const reading = panel('作品');
+    await reading.getByText('第1段。', { exact: false }).waitFor();
+    // 「作品」的完整正文与「研究底稿」共享同一 canonical snapshot：打开作品先读一次，切换标签不得重读。
+    assert.equal(requestsTo('GET', /research-dossier$/).length, before + 1, '作品正文读取 canonical 读本一次');
     await page.getByRole('tab', { name: '研究底稿' }).click();
     const dossier = panel('研究底稿');
     await dossier.getByRole('heading', { name: '研究底稿' }).waitFor();
-    assert.equal(requestsTo('GET', /research-dossier$/).length, before + 1);
-    await dossier.locator('details > summary').filter({ hasText: '材料重新分层与高级核对' }).click();
-    assert.match(await dossier.innerText(), /可用布局 1 · 待分层 1 · 当前版本 0/);
+    assert.equal(requestsTo('GET', /research-dossier$/).length, before + 1, '切入研究底稿复用 canonical 读本');
+    await dossier.locator('details > summary').filter({ hasText: '整理已有识别版面' }).click();
+    assert.match(await dossier.innerText(), /可整理 1 · 待整理 1 · 已是当前规则 0/);
     await shot('evidence-1440-dossier');
-    // 对照原图：展开第一张图的识别结果，点一行在原图上标出位置（框坐标须都在 0–1）。
-    await dossier.locator('details > summary').filter({ hasText: /图片|识别/ }).first().click();
-    // 预览旧任务输入：只读，不调用模型。
-    await dossier.locator('details > summary').filter({ hasText: '材料完整度及旧任务输入' }).click();
-    await dossier.getByRole('button', { name: '按旧配置预览完整请求' }).waitFor();
-    await dossier.getByRole('button', { name: '按旧配置预览完整请求' }).click();
-    await page.waitForFunction(() => /预览|估算|上限/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
+    // 对照原图仅打开本机受控来源，不触发模型或采集。
+    await dossier.locator('summary').filter({ hasText: /^对照原图/ }).first().click();
     // 导出：Markdown 与 JSON 都是用户显式触发的下载，内容来自服务器给的底稿。
     const [markdown] = await Promise.all([page.waitForEvent('download'), dossier.getByRole('button', { name: '导出 Markdown' }).click()]);
     assert.match(markdown.suggestedFilename(), /\.md$/);
@@ -467,13 +456,13 @@ try {
     const [json] = await Promise.all([page.waitForEvent('download'), dossier.getByRole('button', { name: '导出 JSON' }).click()]);
     assert.match(json.suggestedFilename(), /\.json$/);
     assert.ok(JSON.parse(await readFile(await json.path(), 'utf8')).revision);
-    // 重新分层：第一次更新 1 个版面；之后已是当前版本。
+    // 重新整理：第一次更新 1 个版面；之后已是当前版本。
     const writes = report.writes.length;
-    await dossier.getByRole('button', { name: /^重新分层/ }).click();
+    await dossier.getByRole('button', { name: '重新整理' }).click();
     await page.waitForFunction(() => /本次 1 个版面：更新 1 个/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
     await writesTotal(writes + 1);
-    await page.waitForFunction(() => /待分层 0 · 当前版本 1/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
-    await dossier.getByRole('button', { name: /^重新分层/ }).click();
+    await page.waitForFunction(() => /待整理 0 · 已是当前规则 1/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
+    await dossier.getByRole('button', { name: '重新整理' }).click();
     await page.waitForFunction(() => /已是当前版本，无需更新/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
     await writesTotal(writes + 2);
   });

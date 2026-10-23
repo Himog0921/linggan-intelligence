@@ -46,8 +46,8 @@ path = "src/bin/ops_history_import.rs"
 workspace = true
 
 [[bin]]
-name = "linggan-note-material"
-path = "src/bin/note_material.rs"
+name = "linggan-research-dossier"
+path = "src/bin/research_dossier.rs"
 
 [[bin]]
 name = "linggan-ai-worker"

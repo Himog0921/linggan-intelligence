@@ -1,10 +1,13 @@
 # OCR-MANUAL-HUMAN-ADOPTION-454 · 合并后发布运行手册
 
-> 状态: 草案
+> 状态: 历史归档
 > 最后核对: 2026-10-23
 > 适用范围: #477 先合并、#479 rebase 后独立合并后的 `0145_ocr_manual_human_adoption.sql` 与本机 3000 更新
 > 事实来源: 现行 migration、`scripts/runtime/install.sh`、`docs/runbooks/local-runtime-deployment.md` 与本包隔离证明
 > 冲突时以谁为准: Mog 对精确 main head 的发布授权、实际运行身份、备份/恢复回执与 migration ledger
+
+
+本文保留 #479 的实现与发布设计历史。当前实现由 [research-dossier.v2](../data-contracts/research-dossier.md) 取代：人工采用统一使用 material_reading 命令，旧 overlay、独立 API 和表单已退役。下文旧迁移/端点步骤不能用于当前候选发布；0145 历史迁移保持原样，并在 canonical 0146 之前执行。
 
 ## 前提与禁止事项
 

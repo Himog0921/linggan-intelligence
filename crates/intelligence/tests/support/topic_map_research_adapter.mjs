@@ -58,9 +58,28 @@ if (envelope.contract === 'topic-map.verify.v1') {
 }
 const quotes = envelope.contract === 'topic-map.extract.quotes.v1';
 const compact = quotes || envelope.contract === 'topic-map.extract.compact.v1';
-const fragments = (input.fragments ?? []).map((f) => compact ? {
-  ...f, fragmentId: `${f.workRef ?? input.workRef}.synthetic.${f.fragmentIndex}`,
-} : f);
+function canonicalText(block) {
+  if (!block || typeof block !== 'object') throw new Error('canonical content required');
+  switch (block.kind) {
+    case 'paragraph': case 'heading': case 'quote': case 'gap':
+      if (typeof block.text !== 'string') throw new Error('canonical text required');
+      return block.text;
+    case 'list':
+      return block.items.map((item, index) => `${block.ordered ? `${(block.start ?? 1) + index}.` : '-'} ${item}`).join('\n');
+    case 'table': {
+      const row = (cells) => `| ${cells.map(cell => cell.replaceAll('\\', '\\\\').replaceAll('|', '\\|').replaceAll('\n', '<br>')).join(' | ')} |`;
+      return [row(block.columns), `| ${block.columns.map(() => '---').join(' | ')} |`, ...block.rows.map(row)].join('\n');
+    }
+    case 'dialogue':
+      return block.turns.map(turn => `${({author: '作者', other: '他人', unconfirmed: '角色未确认'})[turn.speaker]}：${turn.text}`).join('\n');
+    default: throw new Error(`unknown canonical kind ${block.kind}`);
+  }
+}
+const fragments = (input.fragments ?? []).map((f) => {
+  if (Object.hasOwn(f, 'text')) throw new Error('duplicated legacy input text');
+  return {...f, text: canonicalText(f.content),
+    ...(compact ? {fragmentId: `${f.workRef ?? input.workRef}.synthetic.${f.fragmentIndex}`} : {})};
+});
 if (compact) input.commentStudy = (input.commentStudy ?? []).map((c) => ({
   ...c, fragmentId: fragments[c.fragmentIndex]?.fragmentId,
   parentFragmentIds: (c.parentFragmentIndexes ?? []).map(index => fragments[index]?.fragmentId),
@@ -81,12 +100,12 @@ const attack = sourceText.includes('SYNTHETIC ATTACK');
 const compare = sourceText.includes('SYNTHETIC COMPARE');
 const noSignal = sourceText.includes('SYNTHETIC NO_SIGNAL');
 const insufficient = sourceText.includes('SYNTHETIC INSUFFICIENT');
-const authorFields = ['title', 'body', 'ocr', 'transcript'];
+const authorFields = ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text'];
 const commentFields = ['studied_comment', 'unresearched_comment'];
 const cite = (f) => ({
   fragmentId: attack ? 'foreign.fragment' : f.fragmentId,
-  start: f.start,
-  end: Math.min(f.end, f.start + 1000),
+  start: request.modelId === 'synthetic-topic-map-cite-tail' ? Math.max(f.start, f.end - 1000) : f.start,
+  end: request.modelId === 'synthetic-topic-map-cite-tail' ? f.end : Math.min(f.end, f.start + 1000),
 });
 const boundary = {
   label: '合成实践启动',
@@ -101,13 +120,17 @@ const sustainedBoundary = {
   exclusionCriteria: ['尚未开始练习时的启动困难'],
 };
 function discussion(f, text = f.text, chosenBoundary = boundary) {
+  if (request.modelId === 'synthetic-topic-map-cite-tail' && text === f.text) {
+    text = Array.from(text).slice(-1000).join('');
+  }
   const relative = f.text.indexOf(text);
   const start = f.start + Array.from(f.text.slice(0, Math.max(0, relative))).length;
   return {
     ...chosenBoundary,
     label: text.includes('ALIAS_START') ? '拆解第一步' : chosenBoundary.label,
     statement: Array.from(text).slice(0, 1000).join(''),
-    speakerRole: authorFields.includes(f.field) ? 'author' : commentFields.includes(f.field) ? 'commenter' : 'unknown',
+    speakerRole: commentFields.includes(f.field) ? 'commenter' : authorFields.includes(f.field)
+      ? ({author:'author',other:'quoted',unconfirmed:'unknown'})[f.speaker] : 'unknown',
     evidenceRole: text.includes('CHALLENGE') ? 'challenge' : 'support',
     rationale: '合成 fixture 只复述所引用原始材料；不表示真实研究判断', topicRef: null,
     evidence: [{fragmentId: attack ? 'foreign.fragment' : f.fragmentId, start, end: Math.min(f.end, start + Array.from(text).slice(0,1000).length)}],
@@ -117,7 +140,7 @@ function extract() {
   // Only the explicit saved-source fixture model selects the last absolute slice.
   const tailAuthor = request.modelId === 'synthetic-topic-map-cite-tail'
     ? fragments.filter((f) => authorFields.includes(f.field))
-      .reduce((last, f) => !last || f.start > last.start ? f : last, null)
+      .at(-1)
     : null;
   const author = tailAuthor ?? fragments.find((f) => f.field === 'body' && f.fragmentId.startsWith(input.workRef))
     ?? fragments.find((f) => authorFields.includes(f.field));

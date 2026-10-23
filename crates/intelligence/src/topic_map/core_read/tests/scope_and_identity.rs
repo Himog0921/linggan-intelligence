@@ -85,29 +85,15 @@ fn withdrawn_compared_definition_clears_decision_but_preserves_source_discussion
 }
 
 #[test]
-fn old_definition_does_not_inherit_current_version_even_with_the_same_label() {
-    let input = input("body");
-    let mut draft = draft(&input);
-    draft.discussions[0].topic_ref = Some(Uuid::from_u128(100));
-    let manifest =
-        json!({"topics":[{"topicRef":Uuid::from_u128(100),"definitionRef":Uuid::from_u128(101)}]});
-    let legacy = legacy::legacy_units(Uuid::from_u128(6), &draft, &manifest);
+fn frozen_definition_does_not_inherit_current_version_even_with_the_same_label() {
+    let frozen = json!({"unitId":"frozen-unit","status":"matched","assignments":[{
+        "topicRef":Uuid::from_u128(100),"definitionRef":Uuid::from_u128(101),"label":"同名主题"}],
+        "evidence":[],"relations":[]});
     let mut topics = vec![topic(100)];
     topics[0].definition_ref = Uuid::from_u128(102);
-    let unit = units::current_unit(
-        &legacy["units"][0],
-        Some(Uuid::from_u128(6)),
-        &topics,
-        &HashSet::new(),
-    );
-    assert_eq!(
-        legacy["units"][0]["assignments"][0]["definitionRef"],
-        json!(Uuid::from_u128(101))
-    );
-    assert_eq!(unit["status"], "uncertain");
-    assert_eq!(unit["assignments"], json!([]));
-    let missing = legacy::legacy_units(Uuid::from_u128(6), &draft, &json!({}));
-    assert!(missing["units"][0]["assignments"][0]["definitionRef"].is_null());
+    let current = units::current_unit(&frozen, Some(Uuid::from_u128(6)), &topics, &HashSet::new());
+    assert_eq!(current["status"], "uncertain");
+    assert_eq!(current["assignments"], json!([]));
 }
 
 #[test]

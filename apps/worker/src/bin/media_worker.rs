@@ -5,11 +5,11 @@
 
 use linggan_evidence::{
     ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput,
-    OcrLayeringInput, OcrLineInput, READINESS_RETRY_START,
-    claim_media_processing_work, complete_media_processing_derivative,
-    complete_media_processing_ocr, complete_media_processing_text,
-    complete_media_processing_without_output, ensure_media_processing_work,
-    fail_media_processing_work, next_readiness_retry, read_claim_gate_readiness,
+    OcrLayeringInput, OcrLineInput, READINESS_RETRY_START, claim_media_processing_work,
+    complete_media_processing_derivative, complete_media_processing_ocr,
+    complete_media_processing_text, complete_media_processing_without_output,
+    ensure_media_processing_work, fail_media_processing_work, next_readiness_retry,
+    read_claim_gate_readiness,
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -21,8 +21,8 @@ mod media_worker_support;
 
 use media_worker_support::{
     apply_ffmpeg_path, command_available, emit_startup_event, ensure_local_input, ffmpeg_command,
-    first_text_file, local_media_root, normalize_text, paddle_ocr_python, paddle_ocr_script,
-    prepare_output, require_success, run_command, sha256_hex, whisper_command, whisper_model,
+    first_json_file, local_media_root, paddle_ocr_python, paddle_ocr_script, prepare_output,
+    require_success, run_command, sha256_hex, whisper_command, whisper_model,
 };
 
 const TICK_INTERVAL: Duration = Duration::from_secs(5);
@@ -445,9 +445,16 @@ fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> {
 }
 
 fn layer_paddle_lines(lines: &[PaddleOcrLine]) -> OcrLayeringInput {
-    linggan_evidence::ocr_layering::layer_lines(&lines.iter().map(|line| OcrLineInput {
-        text: line.text.clone(), confidence: line.confidence, bbox_norm: line.bbox_norm,
-    }).collect::<Vec<_>>())
+    linggan_evidence::ocr_layering::layer_lines(
+        &lines
+            .iter()
+            .map(|line| OcrLineInput {
+                text: line.text.clone(),
+                confidence: line.confidence,
+                bbox_norm: line.bbox_norm,
+            })
+            .collect::<Vec<_>>(),
+    )
 }
 
 async fn execute_thumbnail(
@@ -517,10 +524,19 @@ async fn execute_asr(
     }
     let input = local_media_root().join(&claim.storage_key);
     ensure_local_input(&input)?;
+    if !has_audio_stream(&input)? {
+        complete_media_processing_without_output(
+            database,
+            claim,
+            worker_instance_ref,
+            "no_audio_stream_observed",
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        return Ok(());
+    }
     let output_dir = local_media_root().join(format!("derivatives/asr/{}", claim.job_ref));
-    // 先清空再建。`first_text_file` 取的是目录里**第一个** txt，所以上一次被超时杀掉留下的
-    // 半截转写，会被这一次当成完整结果读走。此前从没撞上，是因为 whisper 一次都没跑成过；
-    // 换成 medium 之后单条耗时涨到十几分钟、逼近超时，这条路径才真正可达。
+    // The job's previous timed-out attempt must not supply this attempt's transcript.
     let _ = std::fs::remove_dir_all(&output_dir);
     std::fs::create_dir_all(&output_dir)
         .map_err(|error| format!("asr_output_directory_failed:{error}"))?;
@@ -532,18 +548,22 @@ async fn execute_asr(
             "--model",
             &whisper_model(),
             "--output_format",
-            "txt",
+            "json",
             "--output_dir",
         ])
         .arg(&output_dir)
         .args(["--fp16", "False"])
         .args(["--initial_prompt", ASR_INITIAL_PROMPT]);
     require_success(run_command(&mut command, ASR_PROCESS_TIMEOUT)?, "asr")?;
-    let transcript = first_text_file(&output_dir)?;
-    let text = normalize_text(
-        &std::fs::read_to_string(&transcript)
-            .map_err(|error| format!("asr_output_read_failed:{error}"))?,
-    );
+    let transcript = first_json_file(&output_dir)?;
+    let raw = std::fs::read_to_string(&transcript)
+        .map_err(|error| format!("asr_output_read_failed:{error}"))?;
+    let blocks = media_worker_support::timed_text::asr_blocks(&raw)?;
+    let text = blocks
+        .iter()
+        .map(linggan_evidence::research_dossier::content::block_text)
+        .collect::<Vec<_>>()
+        .join("\n\n");
     if text.is_empty() {
         complete_media_processing_without_output(
             database,
@@ -563,6 +583,8 @@ async fn execute_asr(
         "asr",
         &text,
         Some("zh-Hans"),
+        linggan_evidence::material_reading::producers::ReadingContent { blocks,issues:vec![],source_state:"present".into(),
+            source_location:serde_json::json!({"rawTranscriptSha256":sha256_hex(raw.as_bytes()),"timing":"whisper_segments"}) },
     )
     .await
 }
@@ -579,62 +601,97 @@ async fn execute_video_frame_ocr(
     ensure_local_input(&input)?;
     let frame_dir =
         local_media_root().join(format!("derivatives/frame-ocr/{}/frames", claim.job_ref));
-    std::fs::create_dir_all(&frame_dir)
-        .map_err(|error| format!("frame_output_directory_failed:{error}"))?;
-    let pattern = frame_dir.join("frame-%03d.jpg");
+    if frame_dir.exists() {
+        std::fs::remove_dir_all(&frame_dir).map_err(|e| format!("frame_cleanup_failed:{e}"))?;
+    }
+    std::fs::create_dir_all(&frame_dir).map_err(|e| format!("frame_directory_failed:{e}"))?;
+    let pattern = frame_dir.join("frame-%09d.jpg");
     let mut ffmpeg = Command::new(ffmpeg_command());
-    ffmpeg
-        .args(["-y", "-i"])
-        .arg(&input)
-        .args(["-vf", "fps=1/10,scale='min(1280,iw)':-2", "-frames:v", "12"])
+    ffmpeg.args(["-y","-i"]).arg(&input)
+        .args(["-vf","select='isnan(prev_selected_t)+gte(t-prev_selected_t,10)',showinfo,scale='min(1280,iw)':-2","-vsync","vfr"])
         .arg(&pattern);
-    require_success(
-        run_command(&mut ffmpeg, PROCESS_TIMEOUT)?,
-        "video_frame_extract",
-    )?;
-    let mut texts = Vec::new();
+    let extracted = run_command(&mut ffmpeg, PROCESS_TIMEOUT)?;
+    let timestamps = media_worker_support::timed_text::sampled_pts(&extracted.stderr)?;
+    require_success(extracted, "video_frame_extract")?;
     let mut frames = std::fs::read_dir(&frame_dir)
-        .map_err(|error| format!("frame_directory_read_failed:{error}"))?
+        .map_err(|e| format!("frame_read_failed:{e}"))?
         .filter_map(Result::ok)
-        .map(|entry| entry.path())
+        .map(|f| f.path())
+        .filter(|f| f.extension().is_some_and(|e| e == "jpg"))
         .collect::<Vec<_>>();
     frames.sort();
-    for frame in frames {
-        let output = run_paddle_ocr(&frame, "image/jpeg")?;
-        let text = output
-            .lines
-            .unwrap_or_default()
-            .iter()
-            .map(|line| line.text.trim())
-            .filter(|line| !line.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
-        if !text.is_empty() && !texts.contains(&text) {
-            texts.push(text);
+    if frames.len() != timestamps.len() {
+        return Err("frame_timestamp_count_mismatch".into());
+    }
+    let mut blocks = vec![];
+    for (frame_index, (frame, pts)) in frames.iter().zip(&timestamps).enumerate() {
+        let output = run_paddle_ocr(frame, "image/jpeg")?;
+        let lines:Vec<_>=output.lines.unwrap_or_default().iter().map(|l|serde_json::json!({"text":l.text,"confidence":l.confidence,
+            "bbox":[l.bbox_norm[0],l.bbox_norm[1],l.bbox_norm[2]-l.bbox_norm[0],l.bbox_norm[3]-l.bbox_norm[1]]})).collect();
+        let mut frame_blocks = linggan_evidence::research_dossier::content::ocr_blocks(&lines);
+        if frame_blocks.is_empty() {
+            frame_blocks.push(serde_json::json!({"kind":"gap","speaker":"unconfirmed","text":"〔此抽样帧未返回文字〕","issues":[{"key":"recognition_empty","code":"recognition_empty","message":"未返回文字不证明此帧没有文字","resolution":"reading_edit"}]}));
         }
+        for block in &mut frame_blocks {
+            block["time"] = serde_json::json!({"startMs":pts,"endMs":pts});
+            if let Some(issues) = block
+                .get_mut("issues")
+                .and_then(serde_json::Value::as_array_mut)
+            {
+                for issue in issues {
+                    issue["key"] = serde_json::json!(format!(
+                        "frame_{frame_index}:{}",
+                        issue["key"].as_str().expect("OCR issue key")
+                    ));
+                }
+            }
+        }
+        blocks.extend(frame_blocks);
     }
-    let text = texts.join("\n");
-    if text.is_empty() {
-        complete_media_processing_without_output(
-            database,
-            claim,
-            worker_instance_ref,
-            "no_frame_text_observed",
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-        return Ok(());
+    if blocks.is_empty() {
+        return Err("video_frames_not_acquired".into());
     }
-    complete_text_derivative(
-        database,
-        worker_instance_ref,
-        claim,
-        "frame_ocr_text",
-        "frame-ocr",
-        &text,
-        Some("zh-Hans"),
-    )
-    .await
+    let text = blocks
+        .iter()
+        .map(linggan_evidence::research_dossier::content::block_text)
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    complete_text_derivative(database,worker_instance_ref,claim,"frame_ocr_text","frame-ocr",&text,Some("zh-Hans"),
+        linggan_evidence::material_reading::producers::ReadingContent {blocks,issues:vec![serde_json::json!({"key":"sampled_frames","code":"sampling_incomplete","message":"仅覆盖实际抽样帧，未逐帧检查完整视频","resolution":"source_refresh"})],source_state:"present".into(),
+            source_location:serde_json::json!({"sampledPtsMs":timestamps,"frameCount":frames.len(),"sampling":"at_least_10_seconds_between_selected_source_frames"})}).await
+}
+
+fn has_audio_stream(input: &Path) -> Result<bool, String> {
+    let command = std::env::var("LINGGAN_FFPROBE_COMMAND").unwrap_or_else(|_| {
+        std::path::PathBuf::from(ffmpeg_command())
+            .with_file_name("ffprobe")
+            .to_string_lossy()
+            .into_owned()
+    });
+    let output = run_command(
+        Command::new(command)
+            .args([
+                "-v",
+                "error",
+                "-select_streams",
+                "a",
+                "-show_entries",
+                "stream=index",
+                "-of",
+                "json",
+            ])
+            .arg(input),
+        PROCESS_TIMEOUT,
+    )?;
+    if !output.status.success() {
+        return Err("audio_stream_probe_failed".into());
+    }
+    let value: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|_| "audio_stream_probe_invalid")?;
+    Ok(!value["streams"]
+        .as_array()
+        .ok_or("audio_stream_probe_invalid")?
+        .is_empty())
 }
 
 async fn complete_binary_derivative(
@@ -672,6 +729,7 @@ async fn complete_text_derivative(
     directory: &str,
     text: &str,
     language_tag: Option<&str>,
+    reading: linggan_evidence::material_reading::producers::ReadingContent,
 ) -> Result<(), String> {
     let bytes = text.as_bytes();
     let content_hash = sha256_hex(bytes);
@@ -694,6 +752,7 @@ async fn complete_text_derivative(
         text,
         &display_text,
         language_tag,
+        reading,
     )
     .await
     .map_err(|error| error.to_string())?;

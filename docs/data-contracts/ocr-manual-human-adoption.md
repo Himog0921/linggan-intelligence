@@ -1,10 +1,13 @@
 # 手动云端 OCR 的人工采用合同
 
-> 状态: 草案
+> 状态: 历史归档
 > 最后核对: 2026-10-23
 > 适用范围: #454 已保存 `cloud_manual` OCR 结果的人工核对、追加版本与受控读取
 > 事实来源: `OCR-CONTENT-LAYERING-001`、`note-material-input.v1`、现有 `linggan_media_ocr_review` 投影和 Mog 继续收口授权
 > 冲突时以谁为准: Mog 最新明确确认、原图/原始结果/当前权限、现行迁移与运行时校验
+
+
+本文保留 #479 的实现与发布设计历史。当前实现由 [research-dossier.v2](research-dossier.md) 取代：人工采用统一使用 material_reading 命令，旧 overlay、独立 API 和表单已退役。下文旧迁移/端点步骤不能用于当前候选发布；0145 历史迁移保持原样，并在 canonical 0146 之前执行。
 
 ## 目的与非目标
 

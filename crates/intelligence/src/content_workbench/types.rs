@@ -8,6 +8,8 @@ pub enum SourceKind {
     Note,
     Comment,
     Ocr,
+    Transcript,
+    FrameText,
     OpsPublication,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -16,12 +18,16 @@ pub enum SourceField {
     Title,
     Body,
     Ocr,
-    CoverHeadline,
+    Tags,
+    Transcript,
+    FrameText,
     CommentBody,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Citation {
+    pub block_ref: String,
+    pub as_of: String,
     pub source_kind: SourceKind,
     pub source_ref: Uuid,
     pub work_ref: Option<Uuid>,
@@ -35,19 +41,10 @@ pub struct Citation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OcrLocation {
-    pub derivative_ref: Uuid,
-    pub layout_ref: Uuid,
-    pub layering_ref: Uuid,
-    pub blob_sha256: String,
+    pub unit_ref: Uuid,
+    pub reading_ref: Uuid,
+    pub block_ref: String,
     pub slot_key: String,
-    pub line_spans: Vec<OcrLineSpan>,
-}
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct OcrLineSpan {
-    pub line_ref: Uuid,
-    pub start: usize,
-    pub end: usize,
     pub bbox: [f64; 4],
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

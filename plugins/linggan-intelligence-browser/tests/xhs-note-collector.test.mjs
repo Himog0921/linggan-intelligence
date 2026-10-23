@@ -10,6 +10,8 @@ import {
   parseXhsInteractCount,
   parseXhsPublishedAt,
   readXhsPublishedAtEvidence,
+  readXhsNativeText,
+  readXhsImageInventory,
   readXhsNoteDetailFromDom,
   resolveExpectedNoteFromMap,
   selectNoteKey,
@@ -365,7 +367,7 @@ test('readXhsNoteDetailFromDom rejects a non-platform author href', () => {
   assert.equal(result.user.profileUrl, undefined);
 });
 
-test('enrichXhsNoteDetailFromDom fills only missing media and author identity fields', () => {
+test('enrichXhsNoteDetailFromDom preserves an explicit empty image list and enriches author identity', () => {
   const result = enrichXhsNoteDetailFromDom({
     noteId: 'note_1',
     title: '结构化标题',
@@ -388,7 +390,7 @@ test('enrichXhsNoteDetailFromDom fills only missing media and author identity fi
   assert.equal(result.user.userId, 'author_1');
   assert.equal(result.user.profileUrl, 'https://www.xiaohongshu.com/user/profile/author_1?xsec_source=pc_user');
   assert.equal(result.user.avatar, 'https://img.example.com/avatar.jpg');
-  assert.deepEqual(result.imageList, [{ urlDefault: 'https://img.example.com/detail.jpg' }]);
+  assert.deepEqual(result.imageList, []);
 });
 
 test('enrichXhsNoteDetailFromDom does not attach another author profile to the structured author', () => {
@@ -399,7 +401,7 @@ test('enrichXhsNoteDetailFromDom does not attach another author profile to the s
   assert.equal(result.user.profileUrl, undefined);
 });
 
-test('enrichXhsNoteDetailFromDom replaces hydrated placeholder objects with observed URLs', () => {
+test('enrichXhsNoteDetailFromDom preserves missing platform image positions while enriching avatar', () => {
   const result = enrichXhsNoteDetailFromDom({
     noteId: 'note_1',
     imageList: [{ urlDefault: { traceId: 'placeholder' } }],
@@ -410,6 +412,40 @@ test('enrichXhsNoteDetailFromDom replaces hydrated placeholder objects with obse
     user: { avatar: 'https://img.example.com/avatar.jpg' },
   });
 
-  assert.deepEqual(result.imageList, [{ urlDefault: 'https://img.example.com/detail.jpg' }]);
+  assert.deepEqual(result.imageList, [{ urlDefault: { traceId: 'placeholder' } }]);
   assert.equal(result.user.avatar, 'https://img.example.com/avatar.jpg');
+});
+
+
+test('native text keeps exact whitespace, hashtags, empty and unknown source states', () => {
+  const title = '  ## 标题\n#真实话题  ';
+  const desc = '第一段😀  \n\n  第二段\t#话题 结尾\n';
+  const value = readXhsNativeText({ title, desc });
+  assert.equal(value.title, title);
+  assert.equal(value.content, desc);
+  assert.equal(value.bodyText, desc);
+  assert.ok(value.hashtags.includes('真实话题'));
+  assert.equal(readXhsNativeText({ title: '', desc: '' }).bodyText, '');
+  assert.equal(readXhsNativeText({}).bodyText, undefined);
+});
+
+test('platform image inventory preserves missing pages and repeated URLs', () => {
+  const value = readXhsImageInventory({ imageList: [
+    { urlDefault: 'https://img.example.com/a.jpg' }, {},
+    { urlDefault: 'https://img.example.com/a.jpg' },
+  ] });
+  assert.deepEqual(value.imageInventory, { state: 'complete', source: 'platform_image_list', expectedPages: 3 });
+  assert.deepEqual(value.imagePositions.map((image) => image.page), [1, 2, 3]);
+  assert.deepEqual(value.imagePositions[1].candidateUris, []);
+  assert.deepEqual(value.imagePositions[0].candidateUris, value.imagePositions[2].candidateUris);
+});
+
+test('DOM enrichment leaves image order unknown without claiming platform pages', () => {
+  const note = enrichXhsNoteDetailFromDom({}, { imageList: [
+    { urlDefault: 'https://img.example.com/a.jpg' },
+  ] });
+  const value = readXhsImageInventory(note);
+  assert.equal(value.imageInventory.state, 'observed_set');
+  assert.equal(value.imageInventory.expectedPages, null);
+  assert.equal(value.imagePositions[0].page, null);
 });

@@ -81,8 +81,8 @@ impl WorkCatalogQuery {
     }
 }
 
-fn statement(ocr_schema_ready: bool, title_search: bool) -> Result<String, StudyCatalogError> {
-    let titles = linggan_evidence::work_display_title_ctes(ocr_schema_ready)
+fn statement(title_search: bool) -> Result<String, StudyCatalogError> {
+    let titles = linggan_evidence::work_display_title_ctes()
         .map_err(|_| StudyCatalogError::ProjectionInvalid)?;
     // All fragments are owned compile-time constants. Caller values are only bind parameters.
     if title_search {
@@ -145,28 +145,20 @@ async fn read_page(
     // Keep the setting transaction-local so pooled connections retain their normal defaults.
     sqlx::query("SET LOCAL jit = off").execute(&mut *tx).await?;
     let as_of = resolve_as_of(&mut tx, previous.as_ref()).await?;
-    let ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('linggan_media_ocr_layout') IS NOT NULL \
-          AND to_regclass('linggan_media_ocr_layering_result') IS NOT NULL \
-          AND to_regclass('linggan_media_ocr_retirement') IS NOT NULL",
-    )
-    .fetch_one(&mut *tx)
-    .await?;
-    let projection: Value =
-        sqlx::query_scalar(AssertSqlSafe(statement(ready, scope.pattern.is_some())?))
-            .persistent(false)
-            .bind(query.domain)
-            .bind(&as_of)
-            .bind(CLEANER_VERSION)
-            .bind(Option::<Uuid>::None)
-            .bind(Option::<&str>::None)
-            .bind(&scope.pattern)
-            .bind(&scope.study)
-            .bind(previous.as_ref().map(|cursor| cursor.last.reference))
-            .bind(scope.limit + 1)
-            .bind(scope.observation_role.as_str())
-            .fetch_one(&mut *tx)
-            .await?;
+    let projection: Value = sqlx::query_scalar(AssertSqlSafe(statement(scope.pattern.is_some())?))
+        .persistent(false)
+        .bind(query.domain)
+        .bind(&as_of)
+        .bind(CLEANER_VERSION)
+        .bind(Option::<Uuid>::None)
+        .bind(Option::<&str>::None)
+        .bind(&scope.pattern)
+        .bind(&scope.study)
+        .bind(previous.as_ref().map(|cursor| cursor.last.reference))
+        .bind(scope.limit + 1)
+        .bind(scope.observation_role.as_str())
+        .fetch_one(&mut *tx)
+        .await?;
     tx.commit().await?;
     response(query.domain, &scope, &as_of, projection)
 }
@@ -262,7 +254,7 @@ mod tests {
 
     #[test]
     fn title_search_precedes_pagination_and_has_no_full_work_read_loop() {
-        let sql = statement(true, true).unwrap();
+        let sql = statement(true).unwrap();
         assert!(sql.contains(&super::super::facts_sql()));
         assert!(sql.contains("display_title ILIKE $6"));
         assert!(
@@ -276,7 +268,7 @@ mod tests {
 
     #[test]
     fn unfiltered_work_pages_resolve_canonical_titles_after_pagination() {
-        let sql = statement(true, false).unwrap();
+        let sql = statement(false).unwrap();
         let page = sql.find("work_page AS").unwrap();
         let titles = sql.find("cs_display_titles AS").unwrap();
         let totals = sql.find("work_totals AS").unwrap();

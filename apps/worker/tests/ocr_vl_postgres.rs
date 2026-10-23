@@ -13,14 +13,7 @@ use std::path::PathBuf;
 use uuid::Uuid;
 
 async fn database(schema: &str) -> Database {
-    let db = fixture::proof_database(schema).await;
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0142_ocr_adoption.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    db
+    fixture::proof_database(schema).await
 }
 pub(crate) async fn admit(
     db: &Database,
@@ -64,7 +57,7 @@ pub(crate) async fn admit_with_slot_role(
             Some(work),
         ),
         _ => (
-            format!("xhs:{work}:image:{ordinal}"),
+            format!("xhs:{work}:{slot_role}:{ordinal}"),
             "content",
             work.to_owned(),
             None,
@@ -75,7 +68,24 @@ pub(crate) async fn admit_with_slot_role(
     if let Some(context) = context {
         record["contextContentExternalId"] = json!(context);
     }
-    fixture::submit_package(db, "media_slots", json!({"contentExternalId":work}), record).await;
+    let mut target = json!({"contentExternalId":work});
+    if slot_role == "image" && ordinal == 1 {
+        target["imageInventory"] =
+            json!({"state":"complete","source":"platform_image_list","expectedPages":ordinal});
+        record["slot"]["displayOrdinal"] = json!(ordinal);
+        record["slot"]["displayOrderBasis"] = json!("platform_explicit");
+    }
+    fixture::submit_custom_package(
+        db,
+        "xhs",
+        &["media_slots"],
+        json!({"contentExternalId":work}),
+        "media_slots",
+        "xhs",
+        json!({"target":target,"layers":[fixture::coverage_layer("media_slots",1)]}),
+        vec![record],
+    )
+    .await;
     let hash = support::sha256_hex(bytes);
     let key = format!("blobs/{hash}");
     let path = support::prepare_output(&key).unwrap();
@@ -114,7 +124,10 @@ pub(crate) async fn execute_one(db: &Database) -> MediaProcessingClaim {
 
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL runner only"]
-async fn synthetic_worker_persists_only_adopted_text_with_exact_sources() {
+async fn synthetic_worker_keeps_visual_candidates_separate_until_explicit_review() {
+    use linggan_evidence::material_reading::{
+        ReviewReadingRequest, read_candidates, review_reading,
+    };
     assert!(std::env::var_os("OCR_CHAIN_MANIFEST").is_none());
     let script = PathBuf::from(std::env::var_os("LINGGAN_PADDLE_VL_SCRIPT").unwrap());
     std::fs::write(&script, SYNTHETIC_BRIDGE).unwrap();
@@ -125,70 +138,69 @@ async fn synthetic_worker_persists_only_adopted_text_with_exact_sources() {
         .await
         .unwrap();
     execute_one(&db).await;
-    let mut frozen_tx = db.pool().begin().await.unwrap();
-    let old = research_dossier::read_in(&mut frozen_tx, &[work], &before)
-        .await
-        .unwrap()
-        .remove(&work)
-        .unwrap();
-    assert!(
-        old.media.iter().all(|m| m["ocrAdoption"].is_null()),
-        "a later OCR result cannot enter a frozen cutoff"
-    );
-    frozen_tx.rollback().await.unwrap();
     admit(&db, "ocr-synthetic", 2, b"synthetic-interior", "image/png").await;
     execute_one(&db).await;
+    let candidates = read_candidates(&db, work).await.unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert!(candidates.iter().all(|c| c["currentRevisionRef"].is_null()));
+    assert!(
+        candidates
+            .iter()
+            .all(|c| c["blocks"].to_string().contains("CANARY-UNCONFIRMED")),
+        "machine uncertainty stays local and does not erase recognized text"
+    );
     let d = research_dossier::read(&db, work).await.unwrap().unwrap();
     assert!(
-        d.fragments
+        d.materials
             .iter()
-            .any(|f| f.field == "body" && f.text == "Native body must remain independent.")
+            .filter(|m| m["kind"] == "image")
+            .all(|m| m["blocks"] == json!([])),
+        "generation cannot select itself"
     );
+    for candidate in &candidates {
+        let unit = serde_json::from_value(candidate["unitRef"].clone()).unwrap();
+        let review = ReviewReadingRequest {
+            command_ref: Uuid::new_v4(),
+            expected_current_revision_ref: None,
+            candidate_revision_ref: serde_json::from_value(
+                candidate["candidateRevisionRef"].clone(),
+            )
+            .unwrap(),
+            action: "adopt".into(),
+            edited_blocks: None,
+            verified: false,
+            resolved_issue_keys: vec![],
+            actor: "synthetic-reviewer".into(),
+            reason: "Compare the complete synthetic source image".into(),
+        };
+        review_reading(&db, unit, &review).await.unwrap();
+    }
+    let d = research_dossier::read(&db, work).await.unwrap().unwrap();
     assert!(
-        d.fragments
+        d.materials
             .iter()
-            .filter(|f| f.field == "ocr")
-            .all(|f| !f.text.contains("CANARY-UNCONFIRMED"))
+            .filter(|m| m["kind"] == "image")
+            .all(|m| m["reading"]["adoption"] == "human_adopted")
     );
-    assert_eq!(
-        d.media
-            .iter()
-            .filter(|m| m["ocrAdoption"].is_object())
-            .count(),
-        2
-    );
-    let p = &d.image_text_projection["projection"];
-    assert!(p["imageText"].as_str().unwrap().contains("Synthetic body"));
-    assert_eq!(p["images"].as_array().unwrap().len(), 2);
-    assert!(p["coverTitle"].is_string());
-    assert_eq!(
-        d.media
-            .iter()
-            .find(|m| m["slotOrdinal"] == 2 && m["ocrAdoption"].is_object())
-            .unwrap()["ocrAdoption"]["assessment"]["coverTitle"]["state"],
-        "not_cover"
-    );
-    let counts:Vec<i64>=sqlx::query_scalar("SELECT count(*) FROM linggan_media_ocr_adoption UNION ALL SELECT count(*) FROM linggan_material_derived_text").fetch_all(db.pool()).await.unwrap();
-    assert_eq!(counts, vec![2, 2]);
-    let raw: Vec<Value> = sqlx::query_scalar("SELECT observation FROM linggan_media_ocr_adoption")
-        .fetch_all(db.pool())
+    assert!(json!(d.materials).to_string().contains("Synthetic body"));
+    let mut tx = db.pool().begin().await.unwrap();
+    let frozen = research_dossier::read_in(&mut tx, &[work], &before)
         .await
         .unwrap();
     assert!(
-        raw.iter()
-            .all(|v| v["layout"]["blocks"][2]["text"] == "CANARY-UNCONFIRMED")
+        frozen[&work]
+            .materials
+            .iter()
+            .filter(|m| m["kind"] == "image")
+            .all(|m| m["blocks"] == json!([]))
     );
+    tx.rollback().await.unwrap();
     assert!(
-        raw.iter()
-            .all(|v| v["layout"]["terminations"][2]["finishReason"] == "length")
-    );
-    assert!(
-        sqlx::query("UPDATE linggan_media_ocr_adoption SET image_text='overwrite'")
+        sqlx::query("UPDATE linggan_media_ocr_adoption SET observation='{}'")
             .execute(db.pool())
             .await
             .is_err()
     );
-    // No claim may write a second result after the lease has finished.
     let idle = claim_media_processing_work_for_version(
         &db,
         Uuid::new_v4(),
@@ -198,36 +210,21 @@ async fn synthetic_worker_persists_only_adopted_text_with_exact_sources() {
     .await
     .unwrap();
     assert!(matches!(idle, MediaProcessingClaimOutcome::Idle));
-    let query:linggan_contracts::EvidenceQuery=serde_json::from_value(json!({"scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery","text":"Synthetic body"})).unwrap();
-    let page = read_work_resources(&db, &query).await.unwrap();
+    record_slot_disposition(
+        &db,
+        "xhs:ocr-synthetic:image:2",
+        MaterialMediaDisposition::WithdrawnOrRestricted,
+        "synthetic-policy",
+        "synthetic restriction",
+    )
+    .await
+    .unwrap();
+    let d = research_dossier::read(&db, work).await.unwrap().unwrap();
     assert!(
-        page.items.iter().any(|i| i
-            .evidence_fragment
-            .as_ref()
-            .is_some_and(|f| f.text.contains("Synthetic body"))),
-        "the public Corpus reader reaches the adopted image text"
-    );
-    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at) VALUES($1,'xhs:ocr-synthetic:image:2','WITHDRAWN_OR_RESTRICTED','synthetic-ocr-proof','synthetic restriction',clock_timestamp())").bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
-    let restricted = research_dossier::read(&db, work).await.unwrap().unwrap();
-    assert!(
-        restricted
-            .media
+        d.materials
             .iter()
-            .filter(|m| m["slotOrdinal"] == 2)
-            .all(|m| m["ocrAdoption"].is_null() && m["researchText"].is_null()),
-        "restricted observations cannot enter the adopted-text projection"
-    );
-    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at) VALUES($1,'xhs:ocr-synthetic:image:1','WITHDRAWN_OR_RESTRICTED','synthetic-ocr-proof','synthetic restriction',clock_timestamp())").bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
-    let page = read_work_resources(&db, &query).await.unwrap();
-    assert!(
-        page.items.iter().all(|i| i
-            .evidence_fragment
-            .as_ref()
-            .is_none_or(|f| !f.text.contains("Synthetic body"))),
-        "the public Corpus reader must not recover restricted OCR via derived_text"
-    );
-    println!(
-        "synthetic worker → lease → raw/layout/adoption → dossier/Corpus, cutoff and restriction proof passed"
+            .filter(|m| m["slotKey"] == "xhs:ocr-synthetic:image:2")
+            .all(|m| m["blocks"] == json!([]))
     );
 }
 
@@ -295,16 +292,20 @@ async fn private_unseen_images_use_actual_worker_and_database() {
             continue;
         }
         works.insert(work);
-        let row=sqlx::query("SELECT a.observation,a.assessment,a.image_text,a.cover_title,a.adoption_ref,a.derivative_ref,a.layout_ref,d.storage_key FROM linggan_media_ocr_adoption a JOIN linggan_media_derivative d USING(derivative_ref) WHERE d.job_ref=$1").bind(claim.job_ref).fetch_one(db.pool()).await.unwrap();
+        let row=sqlx::query("SELECT a.observation,a.assessment,a.adoption_ref,a.derivative_ref,a.layout_ref,d.storage_key FROM linggan_media_ocr_adoption a JOIN linggan_media_derivative d USING(derivative_ref) WHERE d.job_ref=$1").bind(claim.job_ref).fetch_one(db.pool()).await.unwrap();
         let raw_path = support::local_media_root().join(row.get::<String, _>("storage_key"));
         let saved = std::fs::read(raw_path).unwrap();
         let p = store::prepare(&saved).unwrap();
-        assert_eq!(p.image_text, row.get::<String, _>("image_text"));
+        assert_eq!(row.get::<Value, _>("observation"), json!(p.observation));
+        assert_eq!(row.get::<Value, _>("assessment"), json!(p.assessment));
+        let candidate = linggan_evidence::material_reading::read_candidates(&db, work)
+            .await
+            .unwrap();
         assert_eq!(
             p.assessment.image.blob_sha256,
             image["sha256"].as_str().unwrap()
         );
-        let receipt = json!({"id":image["id"],"workRef":work,"seconds":elapsed.elapsed().as_secs_f64(),"adoptionRef":row.get::<Uuid,_>("adoption_ref"),"derivativeRef":row.get::<Uuid,_>("derivative_ref"),"layoutRef":row.get::<Uuid,_>("layout_ref"),"observation":row.get::<Value,_>("observation"),"assessment":row.get::<Value,_>("assessment"),"imageText":p.image_text,"coverTitle":p.cover_title});
+        let receipt = json!({"id":image["id"],"workRef":work,"seconds":elapsed.elapsed().as_secs_f64(),"adoptionRef":row.get::<Uuid,_>("adoption_ref"),"derivativeRef":row.get::<Uuid,_>("derivative_ref"),"layoutRef":row.get::<Uuid,_>("layout_ref"),"observation":row.get::<Value,_>("observation"),"assessment":row.get::<Value,_>("assessment"),"candidates":candidate});
         std::fs::write(
             out.join(format!("{}.raw.json", image["id"].as_str().unwrap())),
             saved,
@@ -320,7 +321,12 @@ async fn private_unseen_images_use_actual_worker_and_database() {
     }
     for work in &works {
         let dossier = research_dossier::read(&db, *work).await.unwrap().unwrap();
-        assert!(dossier.media.iter().any(|m| m["ocrAdoption"].is_object()));
+        assert!(
+            !linggan_evidence::material_reading::read_candidates(&db, *work)
+                .await
+                .unwrap()
+                .is_empty()
+        );
         std::fs::write(
             out.join(format!("work-{work}.json")),
             serde_json::to_vec_pretty(&dossier).unwrap(),

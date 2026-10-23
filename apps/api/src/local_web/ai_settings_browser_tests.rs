@@ -101,7 +101,12 @@ async fn ai_settings_skill_trial_real_chain_browser_proof() {
     )
     .await
     .unwrap();
-    let work = fixture::create(&db, fixture::cited_doc(&db).await).await;
+    let mut document = fixture::cited_doc(&db).await;
+    let restricted_work = document.excerpts[0].citation.work_ref.unwrap();
+    let comment = fixture::comment_doc_for_work(&db, restricted_work).await;
+    document.excerpts.extend(comment.excerpts);
+    document.canvas.extend(comment.canvas);
+    let work = fixture::create(&db, document).await;
     let preview = writing::PreviewRequest {
         selection: None,
         preview_ref: Uuid::new_v4(),
@@ -141,9 +146,18 @@ async fn ai_settings_skill_trial_real_chain_browser_proof() {
     fs::write(package.join("SKILL.md"),"---\nname: writing-method\ndescription: Synthetic fixed writing method\n---\ncandidate-v2\n").unwrap();
     fs::write(directory.join("fixture.json"),json!({"origin":origin,"package":package,"previewRef":preview.preview_ref,"baselineConfigRef":enabled.task_config_ref,"firstVersionRef":first.version_ref}).to_string()).unwrap();
     let first_phase = browser(&node, &directory, "trial").await;
-    let second_phase = if first_phase.success() {
+    let refreshed_phase = if first_phase.success() {
         fixture::dossier::fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成替代版本","bodyText":"新版原文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
-        Some(browser(&node, &directory, "changed-source").await)
+        Some(browser(&node, &directory, "refreshed-source").await)
+    } else {
+        None
+    };
+    let restricted_phase = if refreshed_phase
+        .as_ref()
+        .is_some_and(|phase| phase.success())
+    {
+        fixture::restrict_comment(&db, restricted_work).await;
+        Some(browser(&node, &directory, "restricted-source").await)
     } else {
         None
     };
@@ -159,8 +173,12 @@ async fn ai_settings_skill_trial_real_chain_browser_proof() {
     );
     assert!(first_phase.success(), "inspect the trial browser report");
     assert!(
-        second_phase.unwrap().success(),
-        "inspect the changed-source browser report"
+        refreshed_phase.is_some_and(|phase| phase.success()),
+        "inspect the refreshed-source browser report"
+    );
+    assert!(
+        restricted_phase.is_some_and(|phase| phase.success()),
+        "inspect the restricted-source browser report"
     );
     assert_eq!(
         actual_calls, 3,

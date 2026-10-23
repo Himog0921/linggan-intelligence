@@ -342,7 +342,7 @@ try {
     await reading.getByRole('navigation',{name:'材料分布索引'}).getByTitle('合成选题：给家庭留出缓冲',{exact:true}).click();
     await until(async()=>await reading.locator('[data-work-ref]').first().getAttribute('data-work-ref')===fixture.noteRefs[1],'manual document selection survives prior citation focus');
     await stage('画布');await page.locator('article').filter({has:page.getByRole('button',{name:'回到出处 ↗',exact:true})}).first().getByRole('button',{name:'回到出处 ↗',exact:true}).click();
-    await reading.getByText('合成长文😀',{exact:true}).waitFor();
+    await reading.locator('[aria-label="可选择原文"]').filter({hasText:'合成长文😀'}).first().waitFor();
     assert.equal(await reading.locator('[data-work-ref]').first().getAttribute('data-work-ref'),fixture.noteRefs[0]);
     report.citationNavigation={initialLeaf:initial,nextLeaf:initial+2,switchedWorkRef:fixture.noteRefs[1],reopenedWorkRef:fixture.noteRefs[0]};await screenshot('workbench-source-backlink-navigation');
   });

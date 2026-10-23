@@ -24,7 +24,7 @@ const PARTIALS: &str = r#"
     FROM linggan_topic_map_research_task t
     JOIN linggan_topic_map_research_run run USING(run_ref)
     WHERE ($1::uuid IS NULL OR t.domain_ref=$1) AND t.phase='resolve'
-        AND run.method_version IN ('topic-map.research.v2','topic-map.research.v3','topic-map.research.v4','topic-map.research.v5','topic-map.research.v6')
+        AND run.method_version='topic-map.research.v6'
         AND jsonb_typeof(t.resolutions_json)='array' AND jsonb_array_length(t.resolutions_json)>0
         AND COALESCE(t.input_refs#>>'{source,coverage,kind}',t.input_refs#>>'{coverage,kind}','source')<>'comparison'
         AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_request request
@@ -54,15 +54,23 @@ pub(super) async fn load_windows(
     rows.retain(|row| {
         !projection_targets(row.get("work_public_ref"), &row.get("input_refs"), &visible).is_empty()
     });
-    let mut scopes = HashMap::<(Uuid, Uuid), BTreeSet<Uuid>>::new();
+    let mut scopes = HashMap::<(Uuid, Uuid, String), BTreeSet<Uuid>>::new();
     for row in &rows {
+        let manifest: Value = row.get("input_refs");
+        let Some(as_of) = topic_map_research::manifest_as_of(&manifest) else {
+            continue;
+        };
         // Visibility limits projection, never the frozen participants used for qualification.
         scopes
-            .entry((row.get("domain_ref"), row.get("config_ref")))
+            .entry((
+                row.get("domain_ref"),
+                row.get("config_ref"),
+                as_of.to_owned(),
+            ))
             .or_default()
             .extend(topic_map_research::manifest_source_work_refs(
                 row.get("work_public_ref"),
-                &row.get("input_refs"),
+                &manifest,
             ));
     }
     let (unavailable, inputs) =
@@ -80,9 +88,20 @@ pub(super) async fn load_windows(
         }
         let domain: Uuid = row.get("domain_ref");
         let config: Uuid = row.get("config_ref");
+        let manifest: Value = row.get("input_refs");
+        let Some(as_of) = topic_map_research::manifest_as_of(&manifest) else {
+            continue;
+        };
+        let Some(frozen) = inputs.frozen.get(&(domain, config, as_of.to_owned())) else {
+            continue;
+        };
+        let Some(current) = inputs.current.get(&(domain, config)) else {
+            continue;
+        };
         if let Some(window) = restore_row(
             &row,
-            &inputs[&(domain, config)],
+            frozen,
+            current,
             &allowed,
             &unavailable,
             &mut window_counts,
@@ -119,55 +138,40 @@ pub(super) fn projection_targets(
 fn restore_row(
     row: &PgRow,
     all: &[ResearchInput],
+    current_inventory: &[ResearchInput],
     allowed: &[Uuid],
     unavailable: &HashSet<Uuid>,
     window_counts: &mut HashMap<(Uuid, Uuid, Uuid, usize), usize>,
 ) -> Option<Window> {
     let work: Uuid = row.get("work_public_ref");
-    let source = all.iter().find(|i| i.work.work_ref == work)?;
+    let source = current_inventory.iter().find(|i| i.work.work_ref == work);
     let wrapper: Value = row.get("input_refs");
     let manifest = wrapper.get("source").unwrap_or(&wrapper).clone();
     if !comparison_definitions_current(&manifest, unavailable) {
         return None;
     }
     let output: Value = row.get("output_json");
-    let legacy = output["contract"] == "topic-map.research.v1";
-    if legacy && !legacy::definitions_current(&wrapper, unavailable) {
-        return None;
-    }
-    let mut current = if legacy {
-        topic_map_research::restore_legacy_scoped(all, source, &manifest)?
-    } else {
-        topic_map_research::restore_scoped_window(all, work, &manifest)?
-    };
+    let mut current = topic_map_research::restore_scoped_window(all, work, &manifest)?;
+    let current_coverage_eligible =
+        source.is_some_and(|source| sources_match_current(&current, source));
     if manifest["coverage"]["kind"] != "comparison" {
         // Current qualified inventory is the denominator, including newly added sources.
-        current.coverage["sourceChars"] = source.coverage["sourceChars"].clone();
-        // Reuse this qualified window's frozen partition, including historical sizes.
-        // The absence of maxChars belongs to the legacy 3000-character contract.
-        let max_chars = manifest["coverage"]["maxChars"]
-            .as_u64()
-            .and_then(|size| usize::try_from(size).ok())
-            .filter(|size| *size > 0)
-            .unwrap_or(3000);
+        current.coverage["sourceChars"] = source
+            .map(|source| source.coverage["sourceChars"].clone())
+            .unwrap_or(json!(0));
         current.coverage["windowCount"] = json!(
             *window_counts
-                .entry((
-                    row.get("domain_ref"),
-                    row.get("config_ref"),
-                    work,
-                    max_chars
-                ))
-                .or_insert_with(|| topic_map_research::research_window_count(source, max_chars))
+                .entry((row.get("domain_ref"), row.get("config_ref"), work, 0))
+                .or_insert_with(|| source
+                    .map(topic_map_research::research_window_count)
+                    .unwrap_or(0))
         );
     }
     let typed: ResearchOutput = serde_json::from_value(output.clone()).ok()?;
     analysis::validate_output(&typed, &current.fragments, allowed).ok()?;
     let result: Option<Uuid> = row.get("result_ref");
     let core: Value = row.get("core_json");
-    let (output, core) = if legacy {
-        (output, legacy::legacy_units(result?, &typed, &manifest))
-    } else if result.is_none() {
+    let (output, core) = if result.is_none() {
         partial::payload(&typed, &current, &core["units"])?
     } else {
         // Reject malformed stored unit identities without discarding valid source analysis.
@@ -186,6 +190,26 @@ fn restore_row(
         manifest,
         output,
         core,
+        current_coverage_eligible,
+    })
+}
+
+fn sources_match_current(frozen: &ResearchInput, current: &ResearchInput) -> bool {
+    frozen.fragments.iter().all(|source| {
+        let origin = frozen.coverage["fragmentOrigins"][&source.fragment_id].as_str();
+        current.fragments.iter().any(|now| {
+            origin == Some(now.fragment_id.as_str())
+                && source.source_ref == now.source_ref
+                && source.source_version == now.source_version
+                && source.reading_ref == now.reading_ref
+                && source.unit_ref == now.unit_ref
+                && source.start == now.start
+                && source.end == now.end
+                && source.text == now.text
+                && source.speaker == now.speaker
+                && source.structure == now.structure
+                && source.issues == now.issues
+        })
     })
 }
 

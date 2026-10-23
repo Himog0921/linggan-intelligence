@@ -1,6 +1,6 @@
 //! C0 pure contracts over the shared dossier. No provider, queue, database or serving writes.
 //! Mock output has a distinct wire shape; it is never a model or business acceptance receipt.
-use linggan_evidence::note_material_input::{self, Column, ColumnState, Fragment, Material};
+use linggan_evidence::dossier_input::{self, Column, ColumnState, Fragment, Material};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -18,7 +18,6 @@ pub use sample::{FrozenSample, SampleEntry, freeze_sample};
 pub use statistics::{NoteStatistics, Summary, summarize};
 
 pub const CONTRACT: &str = "note-interpretation-offline.v1";
-const INPUT_FIELDS: [&str; 5] = ["title", "cover_headline", "body", "tags", "ocr"];
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 #[error("{0}")]
@@ -76,8 +75,8 @@ impl Input {
     }
 
     pub fn validate(&self) -> Result<(), Invalid> {
-        if self.material.contract != note_material_input::VERSION
-            || self.material.fingerprint_contract != note_material_input::FINGERPRINT_VERSION
+        if self.material.contract != dossier_input::VERSION
+            || self.material.fingerprint_contract != dossier_input::FINGERPRINT_VERSION
         {
             return Err(Invalid("offline_material_contract_mismatch"));
         }
@@ -114,45 +113,66 @@ pub struct InputPreview {
 
 pub fn prepare_input(input: &Input) -> Result<InputPreview, Invalid> {
     input.validate()?;
-    let mut columns = vec![];
-    let mut fragments = vec![];
+    let columns = input.material.columns.clone();
+    let fragments = input.material.fragments.clone();
+    let mut column_fields = BTreeSet::new();
+    if columns.iter().any(|column| {
+        !canonical_field(&column.field) || !column_fields.insert(column.field.as_str())
+    }) {
+        return Err(Invalid("offline_input_column_invalid"));
+    }
     let mut citations = BTreeSet::new();
-    for field in INPUT_FIELDS {
-        let mut matching = input.material.columns.iter().filter(|c| c.field == field);
-        let column = matching
-            .next()
-            .ok_or(Invalid("offline_input_column_missing"))?;
-        if matching.next().is_some() {
-            return Err(Invalid("offline_input_column_ambiguous"));
+    let mut blocks = BTreeSet::new();
+    for fragment in &fragments {
+        if fragment.citation_id.is_empty()
+            || !citations.insert(fragment.citation_id.clone())
+            || fragment.end.checked_sub(fragment.start) != Some(fragment.text.chars().count())
+            || !matches!(
+                fragment.speaker.as_str(),
+                "author" | "other" | "unconfirmed"
+            )
+        {
+            return Err(Invalid("offline_input_fragment_invalid"));
         }
-        let selected: Vec<_> = input
-            .material
-            .fragments
+        let content = &fragment.structure;
+        if content["ref"].as_str() != Some(fragment.logical_position.as_str())
+            || fragment.logical_position.is_empty()
+            || !blocks.insert(fragment.logical_position.as_str())
+            || linggan_evidence::research_dossier::content::validate_blocks(std::slice::from_ref(
+                content,
+            ))
+            .is_err()
+            || linggan_evidence::research_dossier::content::validate_issues(&serde_json::json!(
+                fragment.issues
+            ))
+            .is_err()
+            || linggan_evidence::research_dossier::content::block_text(content) != fragment.text
+            || content["speaker"].as_str().unwrap_or("unconfirmed") != fragment.speaker
+        {
+            return Err(Invalid("offline_input_structure_invalid"));
+        }
+        if !columns
             .iter()
-            .filter(|f| f.field == field)
-            .collect();
-        if (column.state == ColumnState::Available) != !selected.is_empty() {
+            .any(|c| c.field == fragment.field && c.state == ColumnState::Available)
+        {
             return Err(Invalid("offline_input_column_conflict"));
         }
-        for fragment in selected {
-            if fragment.citation_id.is_empty()
-                || !citations.insert(fragment.citation_id.clone())
-                || fragment.end.checked_sub(fragment.start) != Some(fragment.text.chars().count())
-            {
-                return Err(Invalid("offline_input_fragment_invalid"));
-            }
-            fragments.push(fragment.clone());
-        }
-        columns.push(column.clone());
     }
     Ok(InputPreview {
-        contract: "note-interpretation-offline-input.v1".into(),
+        contract: "note-interpretation-offline-input.v2".into(),
         origin: Origin::OfflineMock,
         identity: input.identity(),
         as_of: input.material.as_of.clone(),
         columns,
         fragments,
     })
+}
+
+fn canonical_field(field: &str) -> bool {
+    matches!(
+        field,
+        "title" | "body" | "tags" | "ocr" | "transcript" | "frame_text"
+    )
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -255,12 +275,9 @@ pub fn validate_output(input: &Input, output: &Output) -> Result<(), Invalid> {
             .next()
             .ok_or(Invalid("offline_keyword_citation_missing"))?;
         if fragments.next().is_some()
-            || !matches!(
-                fragment.field.as_str(),
-                "title" | "cover_headline" | "body" | "tags"
-            )
+            || !canonical_field(&fragment.field)
             || !input.material.columns.iter().any(|c| {
-                c.field == fragment.field && c.state == note_material_input::ColumnState::Available
+                c.field == fragment.field && c.state == dossier_input::ColumnState::Available
             })
             || fragment.end.checked_sub(fragment.start) != Some(fragment.text.chars().count())
             || keyword.start < fragment.start

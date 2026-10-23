@@ -197,7 +197,7 @@ export function topicProgress(): ResearchProgress {
     usage: { chargedTokens: 0, reservedTokens: 0, timezone: "Asia/Shanghai" },
     processingLimits: {
       automaticBatchWindows: 20,
-      windowChars: 900,
+      materialSelection: 'whole_note',
       primaryCommentsPerWindow: 3,
     },
     targets: [],

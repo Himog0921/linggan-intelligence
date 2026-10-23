@@ -3,6 +3,7 @@ use super::{TopicMapError, TopicMapSavedFragment, TopicMapSavedRange};
 use crate::comment_study_source::{
     StudySourceRole, eligible_sources_for_topic_research_in_transaction,
 };
+use linggan_evidence::FrozenWorkSource;
 use serde_json::Value;
 use sqlx::{Postgres, Row, Transaction};
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -53,22 +54,22 @@ pub(super) async fn restore_saved_fragments(
     research: &Value,
 ) -> Result<Option<Vec<TopicMapSavedFragment>>, TopicMapError> {
     let comments = qualified_comment_texts(tx, domain, manifests).await?;
-    let mut native = HashMap::<Uuid, Vec<(Uuid, String)>>::new();
+    let mut native = HashMap::<Uuid, Vec<FrozenWorkSource>>::new();
     for manifest in manifests {
         let Some(work) = reference(manifest, "workRef") else {
             return Ok(None);
         };
-        let Some(source) = reference(manifest, "sourceRef") else {
+        let Some(_source) = reference(manifest, "sourceRef") else {
             return Ok(None);
         };
         let Some(field) = manifest["field"].as_str() else {
             return Ok(None);
         };
         if !is_comment_field(field) {
-            native.entry(work).or_default().push((
-                source,
-                field.strip_prefix("work_context:").unwrap_or(field).into(),
-            ));
+            let Some(frozen) = frozen_source(manifest) else {
+                return Ok(None);
+            };
+            native.entry(work).or_default().push(frozen);
         }
     }
     let mut texts = HashMap::new();
@@ -76,8 +77,8 @@ pub(super) async fn restore_saved_fragments(
         let restored = linggan_evidence::read_frozen_work_texts_in_transaction(tx, work, &sources)
             .await
             .map_err(|e| TopicMapError::Source(e.to_string()))?;
-        for ((source, field), values) in restored {
-            texts.insert((work, source, field), values);
+        for (source, values) in restored {
+            texts.insert((work, source), values);
         }
     }
     let mut fragments = Vec::new();
@@ -93,16 +94,18 @@ pub(super) async fn restore_saved_fragments(
         };
         let context_only = field == "parent_comment_context" || field.starts_with("work_context:");
         let text = if is_comment_field(field) {
+            let Some(cutoff) = manifest["asOf"].as_str() else {
+                return Ok(None);
+            };
             comments
-                .get(&(work, source, context_only))
+                .get(&(work, source, context_only, cutoff.to_owned()))
                 .and_then(|text| frozen_slice(text, manifest))
         } else {
+            let Some(frozen) = frozen_source(manifest) else {
+                return Ok(None);
+            };
             texts
-                .get(&(
-                    work,
-                    source,
-                    field.strip_prefix("work_context:").unwrap_or(field).into(),
-                ))
+                .get(&(work, frozen))
                 .into_iter()
                 .flatten()
                 .find_map(|text| frozen_slice(text, manifest))
@@ -117,7 +120,7 @@ pub(super) async fn restore_saved_fragments(
             field: field.into(),
             source_version: manifest["sourceVersion"]
                 .as_str()
-                .unwrap_or("immutable-material")
+                .expect("source tuple was qualified")
                 .into(),
             start,
             end,
@@ -127,6 +130,20 @@ pub(super) async fn restore_saved_fragments(
         });
     }
     Ok(Some(fragments))
+}
+
+fn frozen_source(manifest: &Value) -> Option<FrozenWorkSource> {
+    let field = manifest["field"].as_str()?;
+    Some(FrozenWorkSource {
+        source_ref: reference(manifest, "sourceRef")?,
+        block_ref: manifest["blockRef"].as_str()?.to_owned(),
+        field: field
+            .strip_prefix("work_context:")
+            .unwrap_or(field)
+            .to_owned(),
+        source_version: manifest["sourceVersion"].as_str()?.to_owned(),
+        as_of: manifest["asOf"].as_str()?.to_owned(),
+    })
 }
 
 fn reference(manifest: &Value, key: &str) -> Option<Uuid> {
@@ -139,6 +156,10 @@ struct CommentRecord {
     parent: Option<String>,
     text: Option<String>,
 }
+
+type CommentScope = (Uuid, Uuid, String);
+type QualifiedComments = HashMap<CommentScope, Option<Uuid>>;
+type CommentTexts = HashMap<(Uuid, Uuid, bool, String), String>;
 
 async fn comment_records(
     tx: &mut Transaction<'_, Postgres>,
@@ -172,7 +193,7 @@ async fn qualified_comment_texts(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
     manifests: &[Value],
-) -> Result<HashMap<(Uuid, Uuid, bool), String>, TopicMapError> {
+) -> Result<CommentTexts, TopicMapError> {
     let comment_refs: Vec<_> = manifests
         .iter()
         .filter(|m| m["field"].as_str().is_some_and(is_comment_field))
@@ -201,97 +222,233 @@ async fn qualified_comment_texts(
             )
         })
         .collect();
-    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut **tx)
-        .await?;
-    let qualified =
-        eligible_sources_for_topic_research_in_transaction(tx, domain, &now, &selections)
-            .await
-            .map_err(|e| TopicMapError::Source(e.to_string()))?;
-    let refs: Vec<_> = qualified
+    let refs: Vec<_> = comment_refs
         .iter()
-        .flat_map(|s| [Some(s.source_ref), s.parent_source_ref])
-        .flatten()
-        .chain(
-            comment_refs
-                .iter()
-                .filter_map(|m| reference(m, "sourceRef")),
-        )
+        .filter_map(|manifest| reference(manifest, "sourceRef"))
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
     let records = comment_records(tx, &refs).await?;
-    let mut eligible = HashSet::new();
-    let mut links = HashSet::new();
-    for source in qualified {
-        if let Some(child) = records.get(&source.source_ref) {
-            eligible.insert((child.work, child.id.clone()));
-            if source.parent_research_text.is_some()
-                && let Some(parent) = source.parent_source_ref.and_then(|r| records.get(&r))
-            {
-                links.insert((child.work, child.id.clone(), parent.id.clone()));
-            }
+    let mut qualified = QualifiedComments::new();
+    for cutoff in comment_refs
+        .iter()
+        .filter_map(|m| m["asOf"].as_str())
+        .collect::<BTreeSet<_>>()
+    {
+        let cutoff_value = linggan_evidence::research_dossier::cutoff_in(tx, Some(cutoff)).await?;
+        // The same gate retains current domain/restriction checks, while both
+        // child and parent observations come from this manifest's cutoff.
+        let sources = eligible_sources_for_topic_research_in_transaction(
+            tx,
+            domain,
+            &cutoff_value,
+            &selections,
+        )
+        .await
+        .map_err(|e| TopicMapError::Source(e.to_string()))?;
+        for source in sources {
+            qualified.insert(
+                (
+                    source.content_public_ref,
+                    source.source_ref,
+                    cutoff.to_owned(),
+                ),
+                source
+                    .parent_source_ref
+                    .filter(|_| source.parent_research_text.is_some()),
+            );
         }
     }
-    Ok(select_comment_texts(
-        &comment_refs,
-        &records,
-        &eligible,
-        &links,
-    ))
+    Ok(select_comment_texts(&comment_refs, &records, &qualified))
 }
 
 fn select_comment_texts(
     manifests: &[&Value],
     records: &HashMap<Uuid, CommentRecord>,
-    eligible: &HashSet<(Uuid, String)>,
-    links: &HashSet<(Uuid, String, String)>,
-) -> HashMap<(Uuid, Uuid, bool), String> {
+    qualified: &QualifiedComments,
+) -> CommentTexts {
     let mut texts = HashMap::new();
     let mut parents = HashSet::new();
     for manifest in manifests
         .iter()
         .filter(|m| m["field"] != "parent_comment_context")
     {
-        let Some(source) = reference(manifest, "sourceRef") else {
+        let Some(scope) = comment_scope(manifest) else {
+            continue;
+        };
+        let Some(parent) = qualified.get(&scope) else {
             continue;
         };
         let Some(record) = records
-            .get(&source)
-            .filter(|r| Some(r.work) == reference(manifest, "workRef"))
+            .get(&scope.1)
+            .filter(|r| comment_tuple_matches(manifest, scope.1, r))
         else {
             continue;
         };
-        if !eligible.contains(&(record.work, record.id.clone())) {
-            continue;
-        }
         if let Some(text) = &record.text {
-            texts.insert((record.work, source, false), text.clone());
+            texts.insert((scope.0, scope.1, false, scope.2.clone()), text.clone());
         }
-        if let Some(parent) = &record.parent
-            && links.contains(&(record.work, record.id.clone(), parent.clone()))
+        if let Some(parent) = parent
+            && records
+                .get(parent)
+                .is_some_and(|r| r.work == record.work && record.parent.as_ref() == Some(&r.id))
         {
-            parents.insert((record.work, parent.clone()));
+            parents.insert((scope.0, *parent, scope.2));
         }
     }
     for manifest in manifests
         .iter()
         .filter(|m| m["field"] == "parent_comment_context")
     {
-        let Some(source) = reference(manifest, "sourceRef") else {
+        let Some(scope) = comment_scope(manifest) else {
             continue;
         };
         let Some(record) = records
-            .get(&source)
-            .filter(|r| Some(r.work) == reference(manifest, "workRef"))
+            .get(&scope.1)
+            .filter(|r| comment_tuple_matches(manifest, scope.1, r))
         else {
             continue;
         };
-        if parents.contains(&(record.work, record.id.clone()))
+        if parents.contains(&scope)
             && let Some(text) = &record.text
         {
-            texts.insert((record.work, source, true), text.clone());
+            texts.insert((scope.0, scope.1, true, scope.2), text.clone());
         }
     }
     texts
+}
+
+fn comment_scope(manifest: &Value) -> Option<CommentScope> {
+    Some((
+        reference(manifest, "workRef")?,
+        reference(manifest, "sourceRef")?,
+        manifest["asOf"].as_str()?.to_owned(),
+    ))
+}
+
+fn comment_tuple_matches(manifest: &Value, source: Uuid, record: &CommentRecord) -> bool {
+    let Some(text) = &record.text else {
+        return false;
+    };
+    let kind = if manifest["field"] == "parent_comment_context" {
+        "comment-context"
+    } else {
+        "comment"
+    };
+    let block = format!(
+        "{}.{}.{}",
+        record.work,
+        kind,
+        linggan_evidence::creator_discovery::hash(&record.id)
+    );
+    Some(record.work) == reference(manifest, "workRef")
+        && reference(manifest, "sourceRef") == Some(source)
+        && manifest["blockRef"] == block
+        && manifest["sourceVersion"] == linggan_evidence::creator_discovery::hash(text)
+}
+
+#[cfg(test)]
+mod tuple_tests {
+    use super::*;
+    #[test]
+    fn historical_comment_requires_exact_source_version_block_and_qualified_cutoff() {
+        let work = Uuid::from_u128(1);
+        let source = Uuid::from_u128(2);
+        let text = "完整评论原声🙂";
+        let record = CommentRecord {
+            work,
+            id: "reply".into(),
+            parent: None,
+            text: Some(text.into()),
+        };
+        let cutoff = "2026-10-15T00:00:00Z";
+        let records = HashMap::from([(source, record)]);
+        let qualified = HashMap::from([((work, source, cutoff.to_owned()), None)]);
+        let manifest = serde_json::json!({"workRef":work,"sourceRef":source,"field":"unresearched_comment",
+            "blockRef":format!("{work}.comment.{}",linggan_evidence::creator_discovery::hash("reply")),
+            "sourceVersion":linggan_evidence::creator_discovery::hash(text),"asOf":cutoff});
+        assert_eq!(
+            select_comment_texts(&[&manifest], &records, &qualified)
+                .get(&(work, source, false, cutoff.to_owned()))
+                .map(String::as_str),
+            Some(text)
+        );
+        for key in ["workRef", "sourceRef", "sourceVersion", "blockRef", "asOf"] {
+            let mut forged = manifest.clone();
+            forged[key] = Value::String("unqualified".into());
+            assert!(
+                select_comment_texts(&[&forged], &records, &qualified).is_empty(),
+                "must bind {key}"
+            );
+        }
+        assert!(select_comment_texts(&[&manifest], &records, &HashMap::new()).is_empty());
+    }
+
+    #[test]
+    fn child_qualification_cannot_authorize_other_parent_version_or_cutoff() {
+        let (work, child, parent, later_parent) = (
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            Uuid::from_u128(3),
+            Uuid::from_u128(4),
+        );
+        let cutoff = "2026-10-15T00:00:00Z";
+        let later = "2026-10-16T00:00:00Z";
+        let child_text = "这一步该怎样开始练习？";
+        let parent_text = "从一次很短的练习开始。";
+        let records = HashMap::from([
+            (
+                child,
+                CommentRecord {
+                    work,
+                    id: "reply".into(),
+                    parent: Some("parent".into()),
+                    text: Some(child_text.into()),
+                },
+            ),
+            (
+                parent,
+                CommentRecord {
+                    work,
+                    id: "parent".into(),
+                    parent: None,
+                    text: Some(parent_text.into()),
+                },
+            ),
+            (
+                later_parent,
+                CommentRecord {
+                    work,
+                    id: "parent".into(),
+                    parent: None,
+                    text: Some(parent_text.into()),
+                },
+            ),
+        ]);
+        let qualified = HashMap::from([((work, child, cutoff.to_owned()), Some(parent))]);
+        let child_manifest = serde_json::json!({"workRef":work,"sourceRef":child,"field":"unresearched_comment",
+            "blockRef":format!("{work}.comment.{}",linggan_evidence::creator_discovery::hash("reply")),
+            "sourceVersion":linggan_evidence::creator_discovery::hash(child_text),"asOf":cutoff});
+        let parent_manifest = serde_json::json!({"workRef":work,"sourceRef":parent,"field":"parent_comment_context",
+            "blockRef":format!("{work}.comment-context.{}",linggan_evidence::creator_discovery::hash("parent")),
+            "sourceVersion":linggan_evidence::creator_discovery::hash(parent_text),"asOf":cutoff});
+        let original =
+            select_comment_texts(&[&child_manifest, &parent_manifest], &records, &qualified);
+        assert_eq!(original.len(), 2);
+        for (key, value) in [
+            ("sourceRef", serde_json::json!(later_parent)),
+            ("asOf", serde_json::json!(later)),
+        ] {
+            let mut forged = parent_manifest.clone();
+            forged[key] = value;
+            let selected = select_comment_texts(&[&child_manifest, &forged], &records, &qualified);
+            assert_eq!(selected.len(), 1, "parent authority must bind {key}");
+            assert!(selected.contains_key(&(work, child, false, cutoff.to_owned())));
+        }
+        let only_later = HashMap::from([((work, child, later.to_owned()), Some(parent))]);
+        assert!(
+            select_comment_texts(&[&child_manifest, &parent_manifest], &records, &only_later)
+                .is_empty()
+        );
+    }
 }

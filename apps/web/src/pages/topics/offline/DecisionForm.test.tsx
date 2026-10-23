@@ -6,7 +6,7 @@ import type { Note, Preview } from './api';
 // Small component props, deliberately distinct from the backend's authoritative sample fixture.
 const identity = { domainRef: 'unit-domain', workRef: 'unit-work', snapshotIdentity: 'unit-snapshot', directionVersionRef: 'unit-directions', skillVersionRef: 'unit-skill' };
 const machine: Note['baseline'] = { identity, relevance: 'related', primaryDirection: 'one', alsoRelated: null, reason: '初始合成理由', confidence: 'possible', perspective: 'unknown', keywords: [] };
-const note: Note = { title: '组件单元示例', likes: null, publishedWeek: null, input: { identity, columns: [], fragments: [] }, baseline: machine, result: { machine, effective: machine, judgment: null, manualApplied: false, needsReview: false } };
+const note: Note = { title: '组件单元示例', likes: null, publishedWeek: null, input: { identity, asOf: '2026-10-23T08:00:00Z', columns: [], fragments: [] }, baseline: machine, result: { machine, effective: machine, judgment: null, manualApplied: false, needsReview: false } };
 const catalogue: Preview['catalogue'] = { versionRef: 'unit-directions', groups: [], directions: [{ directionRef: 'one', groupRef: 'group', name: '组件示例方向', definition: '组件单元测试', exampleWorkRefs: [] }] };
 afterEach(cleanup);
 

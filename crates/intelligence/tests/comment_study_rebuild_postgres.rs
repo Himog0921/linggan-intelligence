@@ -78,6 +78,26 @@ fn domain_read_query(run_ref: Option<Uuid>) -> CommentStudyReadQuery {
     }
 }
 
+/// Dossier v2 exposes image text only after the user-visible, explicit relayer
+/// has published a canonical reading. Comment Study must consume that reading,
+/// never an OCR table row directly.
+async fn relayer_note(database: &linggan_storage_postgres::Database, comment_id: &str) {
+    let work: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE comment_external_id=$1",
+    )
+    .bind(comment_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let dossier = linggan_evidence::research_dossier::read(database, work)
+        .await
+        .unwrap()
+        .unwrap();
+    linggan_evidence::research_dossier::relayer_work(database, work, &dossier.revision)
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
 async fn source_gate_selects_only_adhd_current_readable_and_unrestricted_comments() {
@@ -114,7 +134,7 @@ async fn source_gate_selects_only_adhd_current_readable_and_unrestricted_comment
     assert!(selected[0].research_text.contains("每天写作业"));
     assert_eq!(
         selected[0].context_manifest["contract"],
-        "comment-study.context.v1"
+        "comment-study.context.v2"
     );
     assert!(
         selected[0].context_manifest["sources"]
@@ -426,6 +446,7 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
     )
     .await
     .unwrap();
+    relayer_note(&database, "study-ocr-comment").await;
     let domain_ref = PROOF_DOMAIN_REF;
     let as_of = "2099-01-01T00:00:00Z";
     let before_withdrawal = eligible_sources(&database, domain_ref, as_of, 10)
@@ -463,7 +484,7 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn source_context_admits_only_the_latest_accepted_nonretired_ocr_semantic_text() {
+async fn source_context_keeps_each_current_nonretired_image_reading_distinct() {
     let database = proof_database("comment_study_ocr_context_qualification").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
         .execute(database.pool())
@@ -493,6 +514,7 @@ async fn source_context_admits_only_the_latest_accepted_nonretired_ocr_semantic_
         "可以进入研究语境的图片实质文本",
     )
     .await;
+    relayer_note(&database, "study-ocr-qualification-comment").await;
     let (superseded_derivative, _) = complete_study_context_ocr(
         &database,
         "study-ocr-qualification-note",
@@ -547,12 +569,18 @@ async fn source_context_admits_only_the_latest_accepted_nonretired_ocr_semantic_
         .iter()
         .filter(|fragment| fragment["kind"] == "image_substantive_text")
         .collect();
-    assert_eq!(ocr_fragments.len(), 1, "{ocr_fragments:?}");
-    assert_eq!(
-        ocr_fragments[0]["sourceRef"],
-        serde_json::json!(accepted_derivative)
+    assert_eq!(ocr_fragments.len(), 2, "{ocr_fragments:?}");
+    assert!(
+        ocr_fragments
+            .iter()
+            .any(|fragment| fragment["text"] == "可以进入研究语境的图片实质文本")
     );
-    assert_eq!(ocr_fragments[0]["text"], "可以进入研究语境的图片实质文本");
+    assert!(
+        ocr_fragments.iter().any(|fragment| {
+            fragment["text"] == "旧的 accepted 文本不能越过最新 partial"
+        }),
+        "separate current image slots remain separate dossier materials"
+    );
     assert!(
         sources[0].context_manifest["sources"]
             .as_array()
@@ -568,7 +596,7 @@ async fn source_context_admits_only_the_latest_accepted_nonretired_ocr_semantic_
     );
     assert!(
         !manifest.contains("最新 partial 不能进入研究语境"),
-        "the latest PARTIAL layer must suppress its older accepted layer: {manifest}"
+        "a non-canonical PARTIAL layer must not rewrite the canonical reading: {manifest}"
     );
     assert!(
         !manifest.contains("已退役 OCR 不能进入研究语境"),
@@ -758,9 +786,13 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
     )
     .await
     .unwrap();
+    relayer_note(&database, "study-reobserved-comment").await;
 
     // The same slot is captured a second time, which is ordinary re-observation rather than new
-    // material: the OCR text behind it is still one derived document.
+    // material: the OCR text behind it is still one derived document. Re-admit
+    // the unchanged verified bytes; Dossier v2 may preserve its canonical reading
+    // across materializations only when this byte identity remains exact.
+    let second_observation_ref = Uuid::new_v4();
     submit_package(
         &database,
         "media_slots",
@@ -768,7 +800,7 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
         serde_json::json!({
             "kind":"media_slot",
             "slotKey":slot_key,
-            "observationRef":Uuid::new_v4(),
+            "observationRef":second_observation_ref,
             "slot":{"role":"image","ordinal":1},
             "observation":{
                 "externalUri":"https://media.example/study-reobserved-note.jpg",
@@ -779,6 +811,16 @@ async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_te
         }),
     )
     .await;
+    admit_media_blob(
+        &database,
+        second_observation_ref,
+        "6a45d0f1e3c7b2984f5a0d6c8e1b3a7952d4c6e8f0a2b4c6d8e0f2a4b6c8d0e2",
+        "image/jpeg",
+        12,
+        "blobs/6a/study-reobserved-note.jpg",
+    )
+    .await
+    .unwrap();
     let generations: i64 =
         sqlx::query_scalar("SELECT count(*) FROM linggan_material_media_origin WHERE slot_key=$1")
             .bind(slot_key)

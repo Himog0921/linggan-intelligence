@@ -1,5 +1,4 @@
 //! Exact creator request preparation shared by preview and dispatch. No I/O or model calls.
-use crate::{creator_discovery_analysis::SYSTEM, model_settings::ModelError};
 use linggan_evidence::{
     creator_discovery::{DiscoveryWork, Fragment},
     research_dossier,
@@ -8,41 +7,28 @@ use serde_json::{Value, json};
 
 pub(crate) const ENVELOPE_BYTES: usize = 128;
 
-pub fn prepare(
-    domain: &Value,
-    work: &DiscoveryWork,
-    input_budget: usize,
-) -> Result<(Value, Vec<Fragment>), ModelError> {
-    let mut fragments = work.fragments.clone();
-    loop {
-        let manifest: Vec<_> = fragments
-            .iter()
-            .enumerate()
-            .map(|(i, f)| json!({"fragmentId":format!("S{}",i+1),"field":f.field}))
-            .collect();
-        let input = json!({"domain":domain,"workRef":work.work_ref,"sourceFingerprint":work.fingerprint,
-            "materialContract":research_dossier::VERSION,"materials":research_dossier::render_materials(&fragments),
-            "fragments":manifest,"acquisitionContext":{"kind":work.acquisition_kind,"selectionBiased":true}});
-        if input.to_string().len() + SYSTEM.len() + ENVELOPE_BYTES <= input_budget {
-            return Ok((input, fragments));
-        }
-        let Some(longest) = fragments.iter_mut().max_by_key(|f| f.text.chars().count()) else {
-            return Err(ModelError::InputLimit);
-        };
-        let length = longest.text.chars().count();
-        if length <= 1 {
-            return Err(ModelError::InputLimit);
-        }
-        longest.text = longest.text.chars().take(length / 2).collect();
-        longest.end = longest.start + longest.text.chars().count();
-    }
+pub fn prepare(domain: &Value, work: &DiscoveryWork, as_of: &str) -> (Value, Vec<Fragment>) {
+    let fragments = work.fragments.clone();
+    let materials = provider_materials(&fragments);
+    let input = json!({"domain":domain,"workRef":work.work_ref,"asOf":as_of,"sourceFingerprint":work.fingerprint,
+        "materialContract":research_dossier::VERSION,"materials":materials,
+        "acquisitionContext":{"kind":work.acquisition_kind,"selectionBiased":true}});
+    (input, fragments)
+}
+
+fn provider_materials(fragments: &[Fragment]) -> Vec<Value> {
+    fragments.iter().enumerate().map(|(index, f)| json!({
+        "citation":format!("S{}",index+1),"blockRef":f.fragment_id,"field":f.field,
+        "sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,
+        "unitRef":f.unit_ref,"speaker":f.speaker,"content":f.model_content(),"issues":f.issues
+    })).collect()
 }
 
 /// Audit metadata only. This map is kept locally and is not part of the model prompt.
-pub fn citation_map(fragments: &[Fragment]) -> Value {
+pub fn citation_map(fragments: &[Fragment], as_of: &str) -> Value {
     json!(fragments.iter().enumerate().map(|(i,f)| json!({
-        "citation":format!("S{}",i+1),"fragmentId":f.fragment_id,"sourceRef":f.source_ref,
-        "sourceVersion":f.source_version,"start":f.start,"end":f.end
+        "citation":format!("S{}",i+1),"fragmentId":f.fragment_id,"sourceRef":f.source_ref,"asOf":as_of,
+        "sourceVersion":f.source_version,"blockRef":f.fragment_id,"readingRef":f.reading_ref,"unitRef":f.unit_ref,"start":f.start,"end":f.end
     })).collect::<Vec<_>>())
 }
 
@@ -106,6 +92,7 @@ mod tests {
             start: 0,
             end: 2,
             text: "材料".into(),
+            ..Fragment::default()
         };
         let output = |id: &str| json!({"relevance":{"value":"related","reason":"材料支持","evidenceFragmentIds":[id]}});
         let fragments = vec![f];
@@ -119,5 +106,31 @@ mod tests {
                 "unknown"
             );
         }
+    }
+    #[test]
+    fn provider_receives_complete_canonical_content_once_with_source_metadata() {
+        let text = format!("{}尾部限制不能省略", "原始正文😀\n".repeat(2000));
+        let fragment = Fragment {
+            fragment_id: "work.reading.1".into(),
+            source_ref: uuid::Uuid::from_u128(1),
+            source_version: "exact-source-version".into(),
+            reading_ref: Some(uuid::Uuid::from_u128(2)),
+            unit_ref: Some(uuid::Uuid::from_u128(3)),
+            speaker: "other".into(),
+            field: "ocr".into(),
+            end: text.chars().count(),
+            text: text.clone(),
+            structure: json!({"kind":"quote","text":text}),
+            issues: vec![json!({"code":"unclear"})],
+            ..Fragment::default()
+        };
+        let value = &provider_materials(std::slice::from_ref(&fragment))[0];
+        assert_eq!(value["content"]["text"], text);
+        assert_eq!(value["sourceRef"], json!(fragment.source_ref));
+        assert_eq!(value["readingRef"], json!(fragment.reading_ref));
+        assert_eq!(value["blockRef"], fragment.fragment_id);
+        assert_eq!(value["speaker"], "other");
+        assert_eq!(value["issues"], json!(fragment.issues));
+        assert!(value.get("text").is_none());
     }
 }

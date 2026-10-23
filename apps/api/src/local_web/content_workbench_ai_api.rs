@@ -32,7 +32,7 @@ fn respond(result: Result<serde_json::Value, ai::AiError>) -> Response {
             .into_response(),
         Err(e) => super::local_read_json_error(
             match e {
-                ai::AiError::Invalid => StatusCode::BAD_REQUEST,
+                ai::AiError::Invalid | ai::AiError::InputLimit => StatusCode::BAD_REQUEST,
                 ai::AiError::Stale | ai::AiError::Conflict => StatusCode::CONFLICT,
                 ai::AiError::NotFound => StatusCode::NOT_FOUND,
                 ai::AiError::Source => StatusCode::FORBIDDEN,

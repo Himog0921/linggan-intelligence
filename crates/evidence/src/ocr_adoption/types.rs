@@ -290,19 +290,6 @@ pub struct Assessment {
     pub regions: Vec<RegionAssessment>,
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DisplaySource {
-    PlatformTitle,
-    CoverOcr,
-    Unknown,
-}
-#[derive(Debug, Serialize)]
-pub struct DisplayTitle<'a> {
-    pub source: DisplaySource,
-    pub text: Option<&'a str>,
-}
-
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum InputError {
     #[error("schema_or_bounds_invalid")]

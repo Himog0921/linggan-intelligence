@@ -4,6 +4,7 @@ set -Eeuo pipefail
 trap 'echo "Topic Map proof failed at script line ${LINENO}" >&2' ERR
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
+source scripts/cargo-proof.sh
 docker info >/dev/null 2>&1 || { echo "Docker is unavailable" >&2; exit 1; }
 suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
 proof_database="linggan_topic_map_proof_${suffix}"
@@ -46,7 +47,8 @@ export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 # Attempt every selected target, preserving failure so later proofs are not hidden.
 proof_exit=0
-cargo test -p linggan-intelligence --test topic_map_postgres --test topic_map_research_postgres --test topic_map_core_postgres --test topic_map_core_lifecycle_postgres --test topic_map_core_unknown_postgres --test topic_map_core_legacy_postgres --test topic_map_semantic_review_postgres --test topic_map_rule_feedback_postgres --test topic_map_core_recovery_postgres --test topic_map_core_quality_postgres --test topic_map_core_grouped_postgres --test topic_map_saved_sources_postgres --test topic_map_search_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
+cargo test -p linggan-intelligence --test topic_map_postgres --test topic_map_research_postgres --test topic_map_core_postgres --test topic_map_core_lifecycle_postgres --test topic_map_core_unknown_postgres --test topic_map_core_legacy_postgres --test topic_map_semantic_review_postgres --test topic_map_rule_feedback_postgres --test topic_map_core_recovery_postgres --test topic_map_core_quality_postgres --test topic_map_core_grouped_postgres --test topic_map_search_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
+cargo_proof -p linggan-intelligence --lib topic_map_research::saved_source_postgres:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo test -p linggan-evidence --test topic_map_comment_budget_postgres --test material_projection_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
 cargo test -p linggan-evidence --test creator_lifecycle_postgres --locked lifecycle_and_work_resource_share_one_field_wise_current_owner -- --ignored --test-threads=1 || proof_exit=$?
 cargo test -p linggan-api --locked --no-fail-fast topic_map -- --ignored --test-threads=1 || proof_exit=$?

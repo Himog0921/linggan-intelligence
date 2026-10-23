@@ -394,17 +394,6 @@ pub(crate) async fn insert_typed_materials(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
 ) -> Result<(), ProducerRuntimeError> {
-    let schema_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_material_lane_observation') IS NOT NULL")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(ProducerRuntimeError::Internal)?;
-    if !schema_ready {
-        if package.package_kind() == "media_slots" {
-            crate::material_media::insert_legacy_only(tx, package).await?;
-        }
-        return Ok(());
-    }
     let accepted_ordinals = sqlx::query_scalar::<_, i32>(
         "SELECT record_ordinal FROM linggan_runtime_record_disposition \
          WHERE package_ref=$1 AND disposition <> 'quarantined'",
@@ -755,9 +744,14 @@ async fn insert_content_detail(
     detail: ContentDetailRecord<'_>,
     content_public_ref: Uuid,
 ) -> Result<(), ProducerRuntimeError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(420,hashtext($1::uuid::text))")
+        .bind(content_public_ref)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     let material_ref = Uuid::new_v4();
-    let title = exact_string(detail.payload, "title");
-    let body = exact_string(detail.payload, "bodyText");
+    let title = detail.payload.get("title").and_then(Value::as_str);
+    let body = detail.payload.get("bodyText").and_then(Value::as_str);
     let creator = exact_string(detail.payload, "authorName");
     let author_external_id = exact_string(detail.payload, "authorId");
     let published = published_at_evidence(detail.payload);
@@ -791,7 +785,11 @@ async fn insert_content_detail(
         .bind(published.reference_observed_at).bind(published.parser_version)
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     crate::material_hashtag::project(tx, material_ref, detail.payload)
-        .await.map_err(ProducerRuntimeError::Internal)?;
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    crate::research_dossier::native::publish_current_body_in(&mut **tx, content_public_ref)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
 

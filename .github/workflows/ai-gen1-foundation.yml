@@ -44,5 +44,5 @@ jobs:
         run: bash scripts/test-research-dossier-postgres.sh --ai-service 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-service.log
       - name: Copied installer guard and patrol ownership
         run: bash scripts/test-research-dossier-postgres.sh --ai-install 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-install.log
-      - name: Historical material read qualification
+      - name: Canonical creator input and frozen Topic Map source qualification
         run: bash scripts/test-research-dossier-postgres.sh --ai-readonly 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-readonly.log

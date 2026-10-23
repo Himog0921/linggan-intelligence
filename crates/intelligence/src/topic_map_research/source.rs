@@ -13,7 +13,7 @@ pub(crate) async fn load_inputs(
     domain: Uuid,
     config: Uuid,
 ) -> Result<Vec<ResearchInput>, ResearchError> {
-    load_scoped_inputs(db, domain, config, None).await
+    load_scoped_inputs(db, domain, config, None, None).await
 }
 
 pub(crate) async fn load_inputs_for_works(
@@ -22,7 +22,33 @@ pub(crate) async fn load_inputs_for_works(
     config: Uuid,
     works: &[Uuid],
 ) -> Result<Vec<ResearchInput>, ResearchError> {
-    load_scoped_inputs(db, domain, config, Some(works)).await
+    load_scoped_inputs(db, domain, config, Some(works), None).await
+}
+
+pub(crate) async fn load_inputs_for_works_at(
+    db: &Database,
+    domain: Uuid,
+    config: Uuid,
+    works: &[Uuid],
+    as_of: &str,
+) -> Result<Vec<ResearchInput>, ResearchError> {
+    load_scoped_inputs(db, domain, config, Some(works), Some(as_of)).await
+}
+
+/// Every frozen block must bind the same explicit observation cutoff.
+pub(crate) fn manifest_as_of(manifest: &Value) -> Option<&str> {
+    let manifest = manifest.get("source").unwrap_or(manifest);
+    if manifest["inputContract"] != INPUT_CONTRACT {
+        return None;
+    }
+    let as_of = manifest["coverage"]["asOf"]
+        .as_str()
+        .filter(|s| !s.is_empty())?;
+    let fragments = manifest["fragments"].as_array()?;
+    if fragments.is_empty() || fragments.iter().any(|f| f["asOf"].as_str() != Some(as_of)) {
+        return None;
+    }
+    Some(as_of)
 }
 
 /// Match the exact reconstruction scope: ordinary windows have one source;
@@ -55,23 +81,12 @@ async fn load_scoped_inputs(
     domain: Uuid,
     config: Uuid,
     work_refs: Option<&[Uuid]>,
+    as_of: Option<&str>,
 ) -> Result<Vec<ResearchInput>, ResearchError> {
-    let data = match work_refs {
-        Some(works) => creator_discovery::load_topic_materials_for_works(db, domain, works).await,
-        None => creator_discovery::load_topic_materials(db, domain).await,
-    }
-    .map_err(|e| match e {
-        creator_discovery::DiscoveryError::Database(e) => ResearchError::Database(e),
-        _ => ResearchError::Invalid("source_unavailable"),
-    })?;
+    let data = load_material_scope(db, domain, work_refs, as_of).await?;
     let rows=sqlx::query("SELECT t.topic_ref,d.definition_ref,d.version,d.display_name,d.definition_text FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_map_binding WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true WHERE b.domain_ref=$1 ORDER BY t.topic_ref").bind(domain).fetch_all(db.pool()).await?;
     let topics=Value::Array(rows.iter().map(|r|json!({"topicRef":r.get::<Uuid,_>("topic_ref"),"definitionRef":r.get::<Uuid,_>("definition_ref"),"version":r.get::<i32,_>("version"),"label":r.get::<String,_>("display_name"),"definition":r.get::<String,_>("definition_text")})).collect());
-    let study_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('linggan_comment_study_effective_signal')IS NOT NULL",
-    )
-    .fetch_one(db.pool())
-    .await?;
-    let own_rows=sqlx::query("SELECT platform,author_external_id FROM(SELECT DISTINCT ON(platform,author_external_id)*FROM linggan_topic_map_own_creator WHERE domain_ref=$1 ORDER BY platform,author_external_id,created_at DESC)current WHERE active").bind(domain).fetch_all(db.pool()).await?;
+    let own_rows=sqlx::query("SELECT platform,author_external_id FROM(SELECT DISTINCT ON(platform,author_external_id)*FROM linggan_topic_map_own_creator WHERE domain_ref=$1 AND created_at<=$2::timestamptz ORDER BY platform,author_external_id,created_at DESC,membership_ref DESC)current WHERE active").bind(domain).bind(&data.as_of).fetch_all(db.pool()).await?;
     let own: BTreeSet<(String, String)> = own_rows
         .iter()
         .map(|r| (r.get("platform"), r.get("author_external_id")))
@@ -101,7 +116,7 @@ async fn load_scoped_inputs(
         crate::comment_study_source::StudySourceError::Database(e) => ResearchError::Database(e),
         _ => ResearchError::Invalid("comment_source_unavailable"),
     })?;
-    let (comment_ids, signals) = comment_lineage(db, domain, &sources, study_ready).await?;
+    let (comment_ids, signals) = comment_lineage(db, domain, &sources, &data.as_of).await?;
     let mut comments_by_work =
         BTreeMap::<Uuid, Vec<crate::comment_study_source::StudySource>>::new();
     for source in sources {
@@ -110,8 +125,8 @@ async fn load_scoped_inputs(
             .or_default()
             .push(source);
     }
-    let breakouts: BTreeMap<Uuid, bool> = sqlx::query("SELECT DISTINCT ON(work_public_ref) work_public_ref,marked FROM linggan_topic_map_breakout WHERE domain_ref=$1 ORDER BY work_public_ref,created_at DESC")
-        .bind(domain).fetch_all(db.pool()).await?.into_iter()
+    let breakouts: BTreeMap<Uuid, bool> = sqlx::query("SELECT DISTINCT ON(work_public_ref) work_public_ref,marked FROM linggan_topic_map_breakout WHERE domain_ref=$1 AND created_at<=$2::timestamptz ORDER BY work_public_ref,created_at DESC,marking_ref DESC")
+        .bind(domain).bind(&data.as_of).fetch_all(db.pool()).await?.into_iter()
         .map(|r| (r.get("work_public_ref"), r.get("marked"))).collect();
     let mut inputs = Vec::new();
     for mut work in data.works {
@@ -145,13 +160,35 @@ async fn load_scoped_inputs(
             context_work_refs: Vec::new(),
             comment_study: json!(comments),
             role_metadata,
-            coverage: json!({"inputContract":INPUT_CONTRACT,"configRef":config}),
+            coverage: json!({"inputContract":INPUT_CONTRACT,"configRef":config,"asOf":data.as_of}),
         };
         update_source_coverage(&mut input);
         input.hash = input_identity(&input);
         inputs.push(input);
     }
     Ok(inputs)
+}
+
+async fn load_material_scope(
+    db: &Database,
+    domain: Uuid,
+    work_refs: Option<&[Uuid]>,
+    as_of: Option<&str>,
+) -> Result<creator_discovery::DiscoveryData, ResearchError> {
+    match (work_refs, as_of) {
+        (Some(works), Some(as_of)) => {
+            creator_discovery::load_topic_materials_for_works_at(db, domain, works, as_of).await
+        }
+        (Some(works), None) => {
+            creator_discovery::load_topic_materials_for_works(db, domain, works).await
+        }
+        (None, None) => creator_discovery::load_topic_materials(db, domain).await,
+        (None, Some(_)) => return Err(ResearchError::Invalid("frozen_scope_required")),
+    }
+    .map_err(|error| match error {
+        creator_discovery::DiscoveryError::Database(error) => ResearchError::Database(error),
+        _ => ResearchError::Invalid("source_unavailable"),
+    })
 }
 
 #[derive(Clone)]
@@ -167,7 +204,7 @@ async fn comment_lineage(
     db: &Database,
     domain: Uuid,
     sources: &[crate::comment_study_source::StudySource],
-    study_ready: bool,
+    as_of: &str,
 ) -> Result<(CommentIds, StudySignals), ResearchError> {
     let refs: Vec<_> = sources
         .iter()
@@ -192,23 +229,18 @@ async fn comment_lineage(
         }
     }
     let mut signals = StudySignals::new();
-    if study_ready {
-        let works: Vec<_> = sources
-            .iter()
-            .map(|source| source.content_public_ref)
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        for works in works.chunks(500) {
-            // The effective head already checks current comment/parent text and
-            // eligibility. A new physical observation must not detach its Signal.
-            let rows = sqlx::query("SELECT content_public_ref,comment_external_id,signal_ref,kind,proposition FROM linggan_comment_study_effective_signal WHERE domain_ref=$1 AND content_public_ref=ANY($2) ORDER BY content_public_ref,comment_external_id,signal_ref")
-                .bind(domain).bind(works).fetch_all(db.pool()).await?;
-            for row in rows {
-                signals.entry((row.get("content_public_ref"),row.get("comment_external_id"))).or_default()
-                    .push(json!({"signalRef":row.get::<Uuid,_>("signal_ref"),"kind":row.get::<String,_>("kind"),
-                        "proposition":row.get::<String,_>("proposition")}));
-            }
+    let sources: Vec<_> = sources.iter().map(|source| source.source_ref).collect();
+    for sources in sources.chunks(500) {
+        let rows = sqlx::query(include_str!("comment_signals.sql"))
+            .bind(domain)
+            .bind(sources)
+            .bind(as_of)
+            .fetch_all(db.pool())
+            .await?;
+        for row in rows {
+            signals.entry((row.get("content_public_ref"),row.get("comment_external_id"))).or_default()
+                .push(json!({"signalRef":row.get::<Uuid,_>("signal_ref"),"kind":row.get::<String,_>("kind"),
+                    "proposition":row.get::<String,_>("proposition")}));
         }
     }
     Ok((ids, signals))
@@ -237,11 +269,13 @@ fn comment_inputs(
             .get(&(work, identity.external_id.clone()))
             .cloned()
             .unwrap_or_default();
+        let fragment_id = format!(
+            "{work}.comment.{}",
+            creator_discovery::hash(&identity.external_id)
+        );
         let fragment = Fragment {
-            fragment_id: format!(
-                "{work}.comment.{}",
-                creator_discovery::hash(&identity.external_id)
-            ),
+            structure: json!({"ref":fragment_id,"kind":"paragraph","text":source.research_text,"speaker":"other"}),
+            fragment_id,
             source_ref: source.source_ref,
             field: if signals.is_empty() {
                 "unresearched_comment"
@@ -253,6 +287,8 @@ fn comment_inputs(
             start: 0,
             end: source.research_text.chars().count(),
             text: source.research_text,
+            speaker: "other".into(),
+            ..Fragment::default()
         };
         let mut parent_id = None;
         let mut parent_author = None;
@@ -272,6 +308,7 @@ fn comment_inputs(
             );
             parent_author = identity.author.clone();
             parents.entry(id.clone()).or_insert(Fragment {
+                structure: json!({"ref":id,"kind":"paragraph","text":text,"speaker":"other"}),
                 fragment_id: id.clone(),
                 source_ref: reference,
                 field: PARENT_CONTEXT_FIELD.into(),
@@ -279,6 +316,8 @@ fn comment_inputs(
                 start: 0,
                 end: text.chars().count(),
                 text,
+                speaker: "other".into(),
+                ..Fragment::default()
             });
             parent_id = Some(id);
         }

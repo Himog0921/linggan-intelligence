@@ -1,5 +1,5 @@
 use super::*;
-use crate::comment_study_run::bounded_context_manifest;
+use crate::comment_study_run::full_context_manifest;
 use serde_json::Value;
 
 fn key(work: u128, id: &str) -> CommentKey {
@@ -12,7 +12,8 @@ fn command() -> StartStudyRunCommand {
     serde_json::from_value(json!({"requestRef":Uuid::from_u128(100),
         "domainRef":crate::comment_study_source::ADHD_DOMAIN_REF,"policyRef":Uuid::from_u128(11),
         "scope":{"kind":"works","workRefs":[Uuid::from_u128(10)]},"mode":"new_only",
-        "limits":{"commentBudget":100,"contextCharacterBudget":6000,"tokenLimit":100000},"reason":null})).unwrap()
+        "limits":{"commentBudget":100,"tokenLimit":100000},"reason":null}))
+    .unwrap()
 }
 fn candidate(work: u128, rank: u64) -> SelectionCandidate {
     SelectionCandidate {
@@ -33,11 +34,12 @@ fn history(state: StudyTargetState) -> SelectionHistory {
     }
 }
 fn context() -> Value {
-    bounded_context_manifest(
-        &json!({"contract":"comment-study.context.v1","workRef":Uuid::from_u128(10),
+    full_context_manifest(
+        &json!({"contract":"comment-study.context.v2","workRef":Uuid::from_u128(10),
         "cleanerVersion":"comment-clean.v2","sources":[{"sourceRef":Uuid::from_u128(20),
-        "kind":"native_title","slotOrdinal":null,"text":"合成作品","characterCount":4}]}),
-        6000,
+        "kind":"native_title","slotOrdinal":null,"text":"合成作品","characterCount":4,
+        "sourceVersion":"source-v1","blockRef":"work.source.title","asOf":"2026-10-23T00:00:00Z",
+        "speaker":"author","structure":{"kind":"heading","text":"合成作品","speaker":"author"},"issues":[]}]}),
     )
 }
 fn parent(state: &str) -> Value {
@@ -117,19 +119,12 @@ fn both_scope_variants_reject_crossed_fields_and_missing_members() {
     }
 }
 #[test]
-fn all_three_limits_and_scope_sizes_are_enforced() {
-    for (comments, context, tokens) in [
-        (0, 6000, 100000),
-        (3001, 6000, 100000),
-        (100, 0, 100000),
-        (100, 20001, 100000),
-        (100, 6000, 1023),
-        (100, 6000, 10000001),
-    ] {
+fn selection_and_model_limits_and_scope_sizes_are_enforced() {
+    for (comments, tokens) in [(0, 100000), (3001, 100000), (100, 1023), (100, 10000001)] {
         let mut c = command();
         c.limits = StudyRunLimits {
             comment_budget: comments,
-            context_character_budget: context,
+
             token_limit: tokens,
         };
         assert_eq!(
@@ -256,15 +251,14 @@ fn set_normalization_keeps_start_and_preview_identical() {
 fn manual_intent_hash_binds_policy_scope_and_every_budget_not_the_receipt_key() {
     let c = command();
     let original = c.manual_request_hash().unwrap();
-    for mut changed in [c.clone(), c.clone(), c.clone(), c.clone(), c.clone()]
+    for mut changed in [c.clone(), c.clone(), c.clone(), c.clone()]
         .into_iter()
         .enumerate()
     {
         match changed.0 {
             0 => changed.1.limits.comment_budget += 1,
-            1 => changed.1.limits.context_character_budget += 1,
-            2 => changed.1.limits.token_limit += 1,
-            3 => changed.1.policy_ref = Uuid::new_v4(),
+            1 => changed.1.limits.token_limit += 1,
+            2 => changed.1.policy_ref = Uuid::new_v4(),
             _ => {
                 changed.1.scope = StudyScope::Works {
                     work_refs: vec![Uuid::from_u128(13)],
@@ -580,7 +574,7 @@ fn scope_and_snapshot_corruption_do_not_silently_become_empty_success() {
 fn content_fingerprint_matches_independent_python_golden() {
     assert_eq!(
         prepared("孩子做作业总是拖延").input_fingerprint,
-        "c61512a54fa4aba0a9c5b1d9f898656d8c22432425e3ae61b2bed8a71165d652"
+        "4dc74e9d9210d57997efb7137892b1fc9b0164cf0e4c596077fac3e73d50f497"
     );
 }
 #[test]
@@ -616,38 +610,38 @@ fn raw_punctuation_and_whitespace_changes_are_not_lost_by_cleaning() {
     );
 }
 #[test]
-fn unused_context_omissions_do_not_trigger_research_but_retained_text_does() {
+fn changed_speaker_or_uncertainty_changes_context_equivalence() {
     let first = prepared("孩子做作业总是拖延");
-    let mut ctx = context();
-    ctx["omitted"] = json!([{"sourceRef":Uuid::new_v4(),"kind":"image_substantive_text","characterCount":12000}]);
-    ctx["omittedFragmentCount"] = json!(1);
-    ctx["truncated"] = json!(true);
-    let again = prepare_study_input(
-        &key(10, "评论-A"),
-        Uuid::from_u128(21),
-        "孩子做作业总是拖延",
-        &ctx,
-        None,
-    )
-    .unwrap();
-    assert_eq!(first.input_fingerprint, again.input_fingerprint);
-    assert_ne!(first.input_hash, again.input_hash);
-    ctx["sources"][0]["text"] = json!("另一作品");
-    let changed = prepare_study_input(
-        &key(10, "评论-A"),
-        Uuid::from_u128(21),
-        "孩子做作业总是拖延",
-        &ctx,
-        None,
-    )
-    .unwrap();
-    assert_ne!(first.input_fingerprint, changed.input_fingerprint);
+    for (field, value) in [
+        ("speaker", json!("other")),
+        (
+            "issues",
+            json!([{"key":"uncertain","code":"negation_uncertain","message":"否定待确认","resolution":"reading_edit"}]),
+        ),
+    ] {
+        let mut ctx = context();
+        ctx["sources"][0][field] = value.clone();
+        if field == "speaker" {
+            ctx["sources"][0]["structure"][field] = value;
+        }
+        let changed = prepare_study_input(
+            &key(10, "评论-A"),
+            Uuid::from_u128(21),
+            "孩子做作业总是拖延",
+            &ctx,
+            None,
+        )
+        .unwrap();
+        assert_ne!(first.input_fingerprint, changed.input_fingerprint);
+    }
 }
 #[test]
 fn retained_fragment_order_is_part_of_content_equivalence() {
     let mut ctx = context();
     let second = json!({"kind":"body","text":"合成正文","characterCount":4,
-        "sourceRef":Uuid::from_u128(22),"slotOrdinal":null});
+        "sourceRef":Uuid::from_u128(22),"slotOrdinal":null,"sourceVersion":"source-v2","blockRef":"work.source.body",
+        "asOf":"2026-10-23T00:00:00Z","speaker":"author","issues":[],
+        "structure":{"kind":"paragraph","text":"合成正文","speaker":"author","bbox":[0.12,0.28,0.76,0.025]}});
     ctx["sources"].as_array_mut().unwrap().push(second);
     ctx["includedCharacterCount"] = json!(8);
     let first = prepare_study_input(
