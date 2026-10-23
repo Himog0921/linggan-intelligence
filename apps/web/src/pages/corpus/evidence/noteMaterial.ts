@@ -15,10 +15,12 @@ export type ColumnState = keyof typeof COLUMN_LABELS;
 const REASONS: Readonly<Record<string, string>> = {
   waiting_detail_within_24h: '详情仍在取得宽限内', ocr_processing_pending: '图片文字处理未结束',
   transcript_processing_pending: '转写处理未结束', ocr_needs_relayer: '图片文字需要当前分层',
+  ocr_machine_preview_unverified: '图片文字仅有机器预览，尚未人工采用',
   tags_projection_pending: '话题标签投影待补', qualified_text_unavailable: '尚无符合条件的文字',
   media_processing_pending: '媒体处理未结束', media_work_state_unavailable: '当前媒体作业证据不足',
   media_processing_terminal: '本次媒体处理已终止', media_processing_not_applicable: '本次媒体处理不适用',
   processor_reported_empty: '本次处理明确未发现文字或语音', source_restricted: '来源已受限',
+  machine_preview_unverified: '机器预览尚未人工采用，不会进入本次输入',
   current_layer_required: '需要当前分层版本', detail_not_acquired: '尚未取得详情',
   source_field_absent: '来源未提供此字段', source_field_invalid: '来源字段异常',
   source_provided_empty_array: '本次来源明确提供空列表',
