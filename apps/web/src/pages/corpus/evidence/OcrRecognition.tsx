@@ -24,7 +24,7 @@ function actionCopy(run: OcrRecognitionRun | null) {
 }
 function stageCopy(run: OcrRecognitionRun) {
   if (run.state === 'unavailable') return run.unavailableReason ?? '识别资格尚未确认，请核对 OCR 设置。';
-  if (run.state === 'succeeded') return '识别完成 · ' + run.pendingCount + ' 处待核验。任务完成不等于内容全部核验。';
+  if (run.state === 'succeeded') return '候选读本已生成 · ' + run.pendingCount + ' 处待核验。请在研究底稿中确认采用。';
   if (run.state === 'unknown') return '结果暂未确认；只核对原任务，不重复发送图片。';
   if (run.state === 'stopped') return '本次已停止，已保存结果仍可查看；未尝试图片没有发送。';
   if (run.cancelRequested) return '正在核对停止回执；在途请求只尽力中断，已得结果保留。';
@@ -40,8 +40,9 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
   const [sending, setSending] = useState(false); const [message, setMessage] = useState('');
   const [unconfirmed, setUnconfirmed] = useState(false);
   const [confirm, setConfirm] = useState<OcrRecognitionScope | null>(null);
+  const [selectedSlots, setSelectedSlots] = useState<string[]>([]);
   const [refresh, setRefresh] = useState(0);
-  const write = useRef<{ commandRef: string; scope: OcrRecognitionScope } | null>(null);
+  const write = useRef<{ commandRef: string; scope: OcrRecognitionScope; slotKeys: string[] } | null>(null);
   const stopCommand = useRef<string | null>(null); const mounted = useRef(true);
   const result = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -61,18 +62,20 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
     return () => { mounted.current = false; controller.abort(); window.clearTimeout(timer); };
   }, [workRef, refresh]);
   const value = run ? ocrPercent(run) : 0; const live = isLive(run);
-  const canStart = !loading && !readFailed && !sending && !unconfirmed && !live && run?.state === 'ready' && run.scope !== null;
+  const canStart = !loading && !readFailed && !sending && !unconfirmed && !live && run !== null && ['ready', 'succeeded', 'stopped'].includes(run.state) && run.scope !== null;
+  function chooseScope() { if (canStart && run?.scope) { setSelectedSlots(run.scope.images.map(image => image.slotKey)); setConfirm(run.scope); } }
   async function submit(scope: OcrRecognitionScope) {
+    if (!write.current && selectedSlots.length === 0) return;
     if (sending) return;
-    const pending = write.current ?? { commandRef: crypto.randomUUID(), scope }; write.current = pending;
+    const pending = write.current ?? { commandRef: crypto.randomUUID(), scope, slotKeys: [...selectedSlots] }; write.current = pending;
     setSending(true); setMessage('');
     try {
-      const next = await startOcrRecognition(workRef, pending.commandRef, pending.scope.sha256);
+      const next = await startOcrRecognition(workRef, pending.commandRef, pending.scope.sha256, pending.slotKeys);
       if (!mounted.current) return;
       write.current = null; setUnconfirmed(false); setRun(next); setConfirm(null); setRefresh(value => value + 1);
     } catch (error) {
       if (!mounted.current) return;
-      if (error instanceof ApiError && error.answered) { write.current = null; setUnconfirmed(false); setConfirm(null); setMessage('本篇范围或运行条件已变化，请核对最新状态。'); setRefresh(value => value + 1); }
+      if (error instanceof ApiError && error.failure.kind === 'http' && [400, 401, 403, 404, 409, 410, 413, 415, 422].includes(error.failure.status)) { write.current = null; setUnconfirmed(false); setConfirm(null); setMessage('本篇范围或运行条件已变化，请核对最新状态。'); setRefresh(value => value + 1); }
       else { setUnconfirmed(true); setConfirm(null); setMessage('发起回执暂未确认；“核对本次请求”使用原命令，不会另建任务。'); }
     } finally { if (mounted.current) setSending(false); }
   }
@@ -93,7 +96,7 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
       else target?.scrollIntoView({ block: 'start', behavior: 'auto' });
       return;
     }
-    if (canStart && run?.scope) setConfirm(run.scope);
+    chooseScope();
   }
   const action = <><ActionButton className={styles.action} data-ocr-action data-state={run?.state ?? 'loading'} style={{ '--ocr-progress': value + '%' } as CSSProperties}
     disabled={loading || sending || (!live && run?.state !== 'succeeded' && run?.state !== 'stopped' && !canStart)} aria-busy={live || sending} onClick={act}>
@@ -103,12 +106,14 @@ export function OcrRecognition({ workRef, onOpenSource, children }: { workRef: s
     <div className={styles.module} data-ocr-recognition data-state={run?.state ?? 'loading'}>
       <div className={styles.feedbackRow}><p className={styles.status} role="status" aria-live="polite">{run ? stageCopy(run) : loading ? '正在读取图片文字识别状态…' : '尚未取得识别资格。'}</p>
         <a href="/settings/models?view=advanced&area=work&task=ocr_recognition">OCR 模型设置</a>
+        {run && ['succeeded', 'stopped'].includes(run.state) ? <button type="button" className={styles.source} disabled={!canStart} onClick={chooseScope}>选择图片重新识读</button> : null}
         {live && run?.batchRef ? <button type="button" className={styles.source} disabled={sending || run.cancelRequested} onClick={() => void stop()}>停止本次识别</button> : null}</div>
+      {run && ['succeeded', 'stopped'].includes(run.state) && run.scope === null && run.unavailableReason ? <p className={styles.status}>当前无法发起新识读：{run.unavailableReason}</p> : null}
       {message ? <p className={styles.status} role="status">{message}</p> : null}
       {readFailed ? <button className={styles.source} type="button" onClick={() => setRefresh(value => value + 1)}>重新读取状态</button> : null}
       {unconfirmed && !sending ? <button className={styles.source} type="button" onClick={() => { if (write.current) void submit(write.current.scope); }}>核对本次请求</button> : null}
-      {confirm ? <div className={styles.confirm} role="group" aria-label="确认本篇图片识别范围"><b>识别本篇 {confirm.imageCount} 张原图</b><p>将按既有源顺序发送到 {confirm.modelLabel}。每张一次，首个失败后停止；可能产生模型费用。</p><small>{confirm.endpointUrl}</small>
-        <div className={styles.confirmActions}><ActionButton variant="primary" disabled={sending} onClick={() => void submit(confirm)}>确认并开始识别</ActionButton><ActionButton disabled={sending} onClick={() => setConfirm(null)}>取消</ActionButton></div></div> : null}
+      {confirm ? <div className={styles.confirm} role="group" aria-label="确认本篇图片识别范围"><b>重新识读 {selectedSlots.length} 张原图</b><p>将按既有源顺序发送到 {confirm.modelLabel}。每张一次，首个失败后停止；可能产生模型费用。</p><small>{confirm.endpointUrl}</small><fieldset disabled={sending}><legend>选择重新识读的图片</legend>{confirm.images.map(image => <label key={image.slotKey}><input type="checkbox" checked={selectedSlots.includes(image.slotKey)} onChange={event => setSelectedSlots(current => event.target.checked ? [...current, image.slotKey] : current.filter(key => key !== image.slotKey))} />{image.ordinal === null ? image.role === 'cover' ? '封面 · 页码未知' : '页码未知的图片' : `第 ${image.ordinal} 页`}</label>)}</fieldset>
+        <div className={styles.confirmActions}><ActionButton variant="primary" disabled={sending || selectedSlots.length === 0} onClick={() => void submit(confirm)}>确认并开始识别</ActionButton><ActionButton disabled={sending} onClick={() => setConfirm(null)}>取消</ActionButton></div></div> : null}
       {children}
       {run?.images.length ? <div ref={result}><OcrRecognitionResults key={run.runRef} run={run} onOpen={onOpenSource}/></div> : null}
     </div>

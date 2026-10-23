@@ -4,6 +4,7 @@ use crate::comment_study_source::{
     StudySourceRole, eligible_sources_for_topic_research_in_transaction,
 };
 use serde_json::Value;
+use linggan_evidence::FrozenWorkSource;
 use sqlx::{Postgres, Row, Transaction};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use uuid::Uuid;
@@ -53,22 +54,20 @@ pub(super) async fn restore_saved_fragments(
     research: &Value,
 ) -> Result<Option<Vec<TopicMapSavedFragment>>, TopicMapError> {
     let comments = qualified_comment_texts(tx, domain, manifests).await?;
-    let mut native = HashMap::<Uuid, Vec<(Uuid, String)>>::new();
+    let mut native = HashMap::<Uuid, Vec<FrozenWorkSource>>::new();
     for manifest in manifests {
         let Some(work) = reference(manifest, "workRef") else {
             return Ok(None);
         };
-        let Some(source) = reference(manifest, "sourceRef") else {
+        let Some(_source) = reference(manifest, "sourceRef") else {
             return Ok(None);
         };
         let Some(field) = manifest["field"].as_str() else {
             return Ok(None);
         };
         if !is_comment_field(field) {
-            native.entry(work).or_default().push((
-                source,
-                field.strip_prefix("work_context:").unwrap_or(field).into(),
-            ));
+            let Some(frozen) = frozen_source(manifest) else { return Ok(None); };
+            native.entry(work).or_default().push(frozen);
         }
     }
     let mut texts = HashMap::new();
@@ -76,8 +75,8 @@ pub(super) async fn restore_saved_fragments(
         let restored = linggan_evidence::read_frozen_work_texts_in_transaction(tx, work, &sources)
             .await
             .map_err(|e| TopicMapError::Source(e.to_string()))?;
-        for ((source, field), values) in restored {
-            texts.insert((work, source, field), values);
+        for (source, values) in restored {
+            texts.insert((work, source), values);
         }
     }
     let mut fragments = Vec::new();
@@ -97,12 +96,8 @@ pub(super) async fn restore_saved_fragments(
                 .get(&(work, source, context_only))
                 .and_then(|text| frozen_slice(text, manifest))
         } else {
-            texts
-                .get(&(
-                    work,
-                    source,
-                    field.strip_prefix("work_context:").unwrap_or(field).into(),
-                ))
+            let Some(frozen) = frozen_source(manifest) else { return Ok(None); };
+            texts.get(&(work, frozen))
                 .into_iter()
                 .flatten()
                 .find_map(|text| frozen_slice(text, manifest))
@@ -117,7 +112,7 @@ pub(super) async fn restore_saved_fragments(
             field: field.into(),
             source_version: manifest["sourceVersion"]
                 .as_str()
-                .unwrap_or("immutable-material")
+                .expect("source tuple was qualified")
                 .into(),
             start,
             end,
@@ -127,6 +122,17 @@ pub(super) async fn restore_saved_fragments(
         });
     }
     Ok(Some(fragments))
+}
+
+fn frozen_source(manifest: &Value) -> Option<FrozenWorkSource> {
+    let field = manifest["field"].as_str()?;
+    Some(FrozenWorkSource {
+        source_ref: reference(manifest, "sourceRef")?,
+        block_ref: manifest["blockRef"].as_str()?.to_owned(),
+        field: field.strip_prefix("work_context:").unwrap_or(field).to_owned(),
+        source_version: manifest["sourceVersion"].as_str()?.to_owned(),
+        as_of: manifest["asOf"].as_str()?.to_owned(),
+    })
 }
 
 fn reference(manifest: &Value, key: &str) -> Option<Uuid> {
@@ -221,6 +227,13 @@ async fn qualified_comment_texts(
         .into_iter()
         .collect();
     let records = comment_records(tx, &refs).await?;
+    let mut visible = HashSet::new();
+    for cutoff in comment_refs.iter().filter_map(|m| m["asOf"].as_str()).collect::<BTreeSet<_>>() {
+        let cutoff_value = linggan_evidence::research_dossier::cutoff_in(tx, Some(cutoff)).await?;
+        let at_cutoff: Vec<Uuid> = sqlx::query_scalar("SELECT comment.material_ref FROM linggan_material_comment comment JOIN linggan_runtime_capture_package package USING(package_ref) WHERE comment.material_ref=ANY($1) AND comment.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz")
+            .bind(&refs).bind(cutoff_value).fetch_all(&mut **tx).await?;
+        visible.extend(at_cutoff.into_iter().map(|source| (source, cutoff.to_owned())));
+    }
     let mut eligible = HashSet::new();
     let mut links = HashSet::new();
     for source in qualified {
@@ -238,6 +251,7 @@ async fn qualified_comment_texts(
         &records,
         &eligible,
         &links,
+        &visible,
     ))
 }
 
@@ -246,6 +260,7 @@ fn select_comment_texts(
     records: &HashMap<Uuid, CommentRecord>,
     eligible: &HashSet<(Uuid, String)>,
     links: &HashSet<(Uuid, String, String)>,
+    visible: &HashSet<(Uuid, String)>,
 ) -> HashMap<(Uuid, Uuid, bool), String> {
     let mut texts = HashMap::new();
     let mut parents = HashSet::new();
@@ -258,7 +273,7 @@ fn select_comment_texts(
         };
         let Some(record) = records
             .get(&source)
-            .filter(|r| Some(r.work) == reference(manifest, "workRef"))
+            .filter(|r| comment_tuple_matches(manifest, source, r, visible))
         else {
             continue;
         };
@@ -283,7 +298,7 @@ fn select_comment_texts(
         };
         let Some(record) = records
             .get(&source)
-            .filter(|r| Some(r.work) == reference(manifest, "workRef"))
+            .filter(|r| comment_tuple_matches(manifest, source, r, visible))
         else {
             continue;
         };
@@ -294,4 +309,41 @@ fn select_comment_texts(
         }
     }
     texts
+}
+
+fn comment_tuple_matches(
+    manifest: &Value, source: Uuid, record: &CommentRecord, visible: &HashSet<(Uuid,String)>,
+) -> bool {
+    let Some(text) = &record.text else { return false; };
+    let Some(cutoff) = manifest["asOf"].as_str() else { return false; };
+    let kind = if manifest["field"] == "parent_comment_context" { "comment-context" } else { "comment" };
+    let block = format!("{}.{}.{}", record.work, kind, linggan_evidence::creator_discovery::hash(&record.id));
+    Some(record.work) == reference(manifest, "workRef")
+        && reference(manifest, "sourceRef") == Some(source)
+        && manifest["blockRef"] == block
+        && manifest["sourceVersion"] == linggan_evidence::creator_discovery::hash(text)
+        && visible.contains(&(source, cutoff.to_owned()))
+}
+
+#[cfg(test)]
+mod tuple_tests {
+    use super::*;
+    #[test]
+    fn historical_comment_requires_exact_source_version_block_and_visible_cutoff() {
+        let work = Uuid::from_u128(1);
+        let source = Uuid::from_u128(2);
+        let text = "完整评论原声🙂";
+        let record = CommentRecord { work, id: "reply".into(), parent: None, text: Some(text.into()) };
+        let cutoff = "2026-10-15T00:00:00Z";
+        let visible = HashSet::from([(source, cutoff.to_owned())]);
+        let manifest = serde_json::json!({"workRef":work,"sourceRef":source,"field":"unresearched_comment",
+            "blockRef":format!("{work}.comment.{}",linggan_evidence::creator_discovery::hash("reply")),
+            "sourceVersion":linggan_evidence::creator_discovery::hash(text),"asOf":cutoff});
+        assert!(comment_tuple_matches(&manifest, source, &record, &visible));
+        for key in ["workRef","sourceRef","sourceVersion","blockRef","asOf"] {
+            let mut forged = manifest.clone(); forged[key] = Value::String("unqualified".into());
+            assert!(!comment_tuple_matches(&forged, source, &record, &visible), "must bind {key}");
+        }
+        assert!(!comment_tuple_matches(&manifest, source, &record, &HashSet::new()));
+    }
 }

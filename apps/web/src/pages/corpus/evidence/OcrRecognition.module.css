@@ -17,23 +17,13 @@
 .results h4,.results h5,.results p { margin: 0; }
 .resultHeading h4 { font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
 .resultHeading p,.resultHeading > span,.results small { color: var(--lgi-muted); font-size: var(--lgi-text-data); }
-.resultBlock,.page { display: grid; gap: var(--lgi-space-2); }
-.coverTitle { font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-evidence); }
+.page { display: grid; gap: var(--lgi-space-2); }
 .page + .page { margin-top: var(--lgi-space-3); }
 .page h5 { font-size: var(--lgi-text-data); font-weight: var(--lgi-type-control-weight); }
-.region { white-space: pre-wrap; line-height: var(--lgi-lh-longform); font-family: var(--lgi-font-evidence); }
-.region mark { background: var(--lgi-warning-soft); color: var(--lgi-ink); box-decoration-break: clone; }
-.region mark small { color: var(--lgi-warning); }
-.omitted { color: var(--lgi-muted); }
 .readModes { display: flex; gap: var(--lgi-space-4); border-bottom: 1px solid var(--lgi-hairline); }
 .readModes button { padding: var(--lgi-space-2) 0; border: 0; border-bottom: var(--lgi-action-rail-width) solid transparent; background: none; color: var(--lgi-muted); font: inherit; cursor: pointer; }
 .readModes button[aria-pressed='true'] { border-bottom-color: var(--lgi-signal); color: var(--lgi-ink); }
 .original { max-width: 100%; max-height: calc(var(--lgi-space-24) * 4); width: auto; object-fit: contain; object-position: left; }
-.rawRegion { display: grid; gap: var(--lgi-space-1); margin-top: var(--lgi-space-3); }
-.rawRegion p { white-space: pre-wrap; }
-.pending { background: var(--lgi-warning-soft); padding: var(--lgi-space-3); }
-.pending > div { margin-top: var(--lgi-space-3); }
-.pending .source { margin-left: var(--lgi-space-2); }
 .results summary { cursor: pointer; font-size: var(--lgi-text-data); }
 .receipts { display: grid; gap: var(--lgi-space-2); }
 .receipts > details { margin-top: var(--lgi-space-3); }
@@ -43,3 +33,6 @@
 .receipts pre { white-space: pre-wrap; word-break: break-word; max-height: calc(var(--lgi-space-24) * 4); overflow: auto; padding: var(--lgi-space-3); background: var(--lgi-canvas-low); font-family: var(--lgi-font-code); font-size: var(--lgi-text-data); }
 @keyframes ocrActivity { to { background-position: var(--lgi-secondary-pitch) 0; } }
 @media (prefers-reduced-motion:reduce) { .action .fill { transition: none; } .action .fill::after { animation: none; } }
+
+.confirm fieldset { min-width: 0; border: 0; margin: 0; padding: 0; display: grid; gap: var(--lgi-space-2); }
+.confirm fieldset label { display: flex; align-items: baseline; gap: var(--lgi-space-2); }

@@ -24,7 +24,7 @@ fn reference(value: &Value) -> Uuid {
 fn command(config: Uuid, parent: Option<Uuid>) -> CreateStudyPolicyCommand {
     serde_json::from_value(
         json!({"domainRef":domain(),"methodName":" 合成方法 ","modelConfigRef":config,
-        "parentPolicyRef":parent,"defaults":{"commentBudget":100,"contextCharacterBudget":6000},
+        "parentPolicyRef":parent,"defaults":{"commentBudget":100},
         "stageInstructions":{"semantic":"  合成说明\n","resolution":"","pair":""}}),
     )
     .unwrap()
@@ -100,6 +100,7 @@ async fn setup(name: &str, guards: bool) -> (Database, Uuid, Uuid, Uuid) {
     if guards {
         sqlx::raw_sql(GUARDS).execute(&mut *tx).await.unwrap();
     }
+    sqlx::raw_sql(include_str!("../../../database/migrations/0146_comment_study_full_context.sql")).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
     (db, config, connection, legacy)
 }
@@ -238,8 +239,8 @@ async fn policy_guards_block_mutation_incomplete_insert_and_untracked_reapplicat
     assert!(
         sqlx::query(
             "INSERT INTO linggan_comment_study_policy \
-        (policy_ref,domain_ref,contract,comment_budget,context_character_budget) \
-        VALUES($1,$2,'comment-study.v1',1,1)"
+        (policy_ref,domain_ref,contract,comment_budget) \
+        VALUES($1,$2,'comment-study.v1',1)"
         )
         .bind(Uuid::new_v4())
         .bind(domain())
@@ -281,8 +282,8 @@ async fn partial_schema_refuses_new_save_and_corrupted_hash_is_never_regenerated
     // Direct hostile INSERT simulates imported corruption, without weakening the immutable trigger.
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_comment_study_policy \
-        (policy_ref,domain_ref,model_config_ref,contract,comment_budget,context_character_budget,method_name,method_manifest,method_hash) \
-        VALUES($1,$2,$3,'comment-study.v1',100,6000,'SYNTHETIC corrupt',$4,repeat('0',64))")
+        (policy_ref,domain_ref,model_config_ref,contract,comment_budget,method_name,method_manifest,method_hash) \
+        VALUES($1,$2,$3,'comment-study.v1',100,'SYNTHETIC corrupt',$4,repeat('0',64))")
         .bind(id).bind(domain()).bind(config).bind(saved["policy"]["methodManifest"].clone())
         .execute(db.pool()).await.unwrap();
     assert!(matches!(
@@ -304,10 +305,10 @@ async fn policy_directory_pages_all_versions_with_ties_without_prompt_payloads()
         .unwrap();
     // 103 valid versions share one timestamp; UUID is the required tie-breaker.
     sqlx::query("INSERT INTO linggan_comment_study_policy \
-        (policy_ref,domain_ref,model_config_ref,contract,comment_budget,context_character_budget, \
+        (policy_ref,domain_ref,model_config_ref,contract,comment_budget, \
          method_name,parent_policy_ref,method_manifest,method_hash,created_at) \
         SELECT gen_random_uuid(),p.domain_ref,p.model_config_ref,p.contract,p.comment_budget, \
-        p.context_character_budget,p.method_name,p.policy_ref,p.method_manifest,p.method_hash, \
+        p.method_name,p.policy_ref,p.method_manifest,p.method_hash, \
         '2026-01-01T00:00:00Z'::timestamptz \
         FROM linggan_comment_study_policy p CROSS JOIN generate_series(1,103) n WHERE p.policy_ref=$1")
         .bind(reference(&first)).execute(db.pool()).await.unwrap();

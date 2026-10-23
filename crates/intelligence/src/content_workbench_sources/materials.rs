@@ -52,6 +52,8 @@ fn kind_name(kind: &SourceKind) -> &'static str {
         SourceKind::Comment => "comment",
         SourceKind::OpsPublication => "ops_publication",
         SourceKind::Ocr => "ocr",
+        SourceKind::Transcript => "transcript",
+        SourceKind::FrameText => "frame_text",
     }
 }
 pub fn document_id(kind: &SourceKind, source: Uuid) -> String {
@@ -211,17 +213,45 @@ pub struct DocumentQuery {
     pub source_kind: SourceKind,
     pub source_ref: Uuid,
     pub work_ref: Option<Uuid>,
+    pub as_of: Option<String>,
+    pub block_ref: Option<String>,
+    pub source_version: Option<String>,
+    pub citation_source_ref: Option<Uuid>,
+    pub field: Option<SourceField>,
 }
 pub async fn read_document(db: &Database, q: &DocumentQuery) -> Result<Value, SourceError> {
     let mut tx = begin(db).await?;
-    let document = read_document_in(
-        &mut tx,
-        q.domain_ref,
-        &q.source_kind,
-        q.source_ref,
-        q.work_ref,
-    )
-    .await?;
+    let document = match (&q.as_of, &q.block_ref, &q.source_version, q.citation_source_ref, &q.field) {
+        (None, None, None, None, None) => read_document_in(
+            &mut tx, q.domain_ref, &q.source_kind, q.source_ref, q.work_ref,
+        ).await?,
+        (Some(as_of), Some(block_ref), Some(version), Some(source), Some(field)) => {
+            let kind = if q.source_kind == SourceKind::Note {
+                if q.work_ref != Some(q.source_ref) { return Err(SourceError::Invalid); }
+                let field_name = serde_json::to_value(field).map_err(|_| SourceError::Invalid)?;
+                fragment_kind(field_name.as_str().ok_or(SourceError::Invalid)?)
+                    .ok_or(SourceError::Invalid)?.0
+            } else {
+                if source != q.source_ref { return Err(SourceError::Invalid); }
+                q.source_kind.clone()
+            };
+            ensure_source_domain_in(&mut tx, &kind, source, q.work_ref, q.domain_ref).await?;
+            let (item, context) = read_source_in(&mut tx, &kind, source, q.work_ref, field, block_ref, as_of).await?;
+            if &item.source_version != version { return Err(SourceError::Changed); }
+            if q.source_kind == SourceKind::Note {
+                let dossier = research_dossier::read_in(&mut tx, &[q.source_ref], as_of).await?
+                    .remove(&q.source_ref).ok_or(SourceError::Unavailable)?;
+                documents::note_document_in(&mut tx, dossier).await?
+            } else {
+                MaterialDocument { document_id: document_id(&q.source_kind, q.source_ref),
+                    source_kind: q.source_kind.clone(), source_ref: q.source_ref, work_ref: item.work_ref,
+                    source_version: item.source_version.clone(), title: item.title.clone(),
+                    author_label: item.author_label.clone(), qualification: "readable".into(),
+                    fragments: vec![item], context, match_reasons: vec![] }
+            }
+        }
+        _ => return Err(SourceError::Invalid),
+    };
     tx.commit().await?;
     Ok(json!(document))
 }

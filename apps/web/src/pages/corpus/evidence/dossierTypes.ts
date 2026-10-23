@@ -1,164 +1,73 @@
-/**
- * 研究底稿（RESEARCH-DOSSIER-001）的接口响应形状。
- *
- * `raw` 字段只服务两件事：用户显式触发的导出（JSON 导出就是服务器给的底稿原样序列化，旧页如此，DR-9），
- * 以及折叠的技术诊断。普通层只渲染白名单字段，不渲染 `raw`。
- */
-import type { Metric } from './evidenceTypes';
-
-export interface DossierFragment {
-  fragmentId: string;
-  field: string;
-  text: string;
-  /** 片段在底稿里的字符数（旧页用 `end` 当长度，起点恒为 0）。 */
-  end: number;
-  sourceRef: string | null;
-  sourceVersion: string | null;
+/** The only research reading contract. Raw is held in memory for explicit JSON export. */
+export type MaterialKind = 'body' | 'tags' | 'image' | 'audio' | 'video_frame';
+export type SourceState = 'present' | 'known_empty' | 'not_acquired' | 'not_applicable' | 'restricted';
+export type Speaker = 'author' | 'other' | 'unconfirmed';
+export type ReadingProducer = 'platform' | 'ordinary_ocr' | 'local_vision' | 'cloud_vision' | 'asr' | 'frame_ocr' | 'human_edit';
+export type Adoption = 'automatic' | 'human_adopted' | 'human_edited';
+export type Verification = 'unchecked' | 'verified';
+export interface DossierIssue {
+  key: string; code: string; message: string; resolution: 'reading_edit' | 'source_refresh'; blockRef?: string | null;
 }
-
-export interface DossierSection {
-  label: string;
-  kind: string;
-  fragmentIds: string[];
+export interface BlockLocation {
+  /** Normalized x, y, width, height. Never synthesized from reading order. */
+  bbox?: readonly [number, number, number, number] | null;
+  time?: { startMs: number; endMs: number } | null;
 }
-
-export interface DossierLine {
-  lineRef: string;
-  text: string;
-  /** 归一化坐标 [左, 上, 右, 下]，须都在 0–1；否则为 null，不画框。 */
-  bbox: readonly [number, number, number, number] | null;
+interface BlockBase extends BlockLocation {
+  ref: string; speaker?: Speaker; issues?: DossierIssue[];
 }
-
-export interface DossierLayering {
-  layerVersion: string | null;
-  state: string;
-  decisionSource: string | null;
-  engineVersion: string | null;
-  imageWidth: number | null;
-  imageHeight: number | null;
-  layoutRef: string | null;
-  layeringRef: string | null;
-  lines: DossierLine[];
-  /** 保留行：行引用 → 分类。 */
-  retained: Readonly<Record<string, string>>;
-  /** 已排除行（水印、界面、不清文字）：行引用 → 分类。 */
-  excluded: Readonly<Record<string, string>>;
+export type DossierBlock = BlockBase & (
+  | { kind: 'heading'; text: string; level?: number }
+  | { kind: 'paragraph' | 'quote' | 'gap'; text: string }
+  | { kind: 'list'; items: string[]; ordered: boolean; start?: number }
+  | { kind: 'table'; columns: string[]; rows: string[][] }
+  | { kind: 'dialogue'; turns: { speaker: Speaker; text: string }[] }
+);
+export interface DossierMaterial {
+  ref: string; kind: MaterialKind; slotKey: string | null; page: number | null;
+  pageSource?: { basis: 'same_verified_bytes'; sourceRef: string; sourceVersion: string; slotKey: string };
+  sourceState: SourceState; sourceRef: string | null; sourceVersion: string | null;
+  currentRevisionRef: string | null; originalUrl: string | null;
+  reading: { generatedBy: ReadingProducer; adoption: Adoption; verification: Verification; ruleVersion: string } | null;
+  blocks: DossierBlock[]; issues: DossierIssue[];
 }
-
-export interface DossierOcrAdoption {
-  adoptionRef?: string | null;
-  rawBlocks: { blockRef: string; text: string }[];
-  pendingBlocks: string[];
-  projectionVersion: string | null;
+export interface DossierNote {
+  platform: string; sourceUrl: string | null; platformTitle: string | null;
+  titleSource: { sourceRef: string | null; sourceVersion: string | null } | null;
+  displayTitle: string | null; displayTitleBasis: 'platform' | 'image_heading' | 'missing';
 }
-
-export interface DossierMedia {
-  derivativeRef: string | null;
-  slotKey: string | null;
-  slotOrdinal: number | null;
-  state: string;
-  processorKind: string | null;
-  contextOnly: boolean;
-  displayText: string | null;
-  researchText: string | null;
-  ocrAdoption?: DossierOcrAdoption | null;
-  humanReviewRef?: string | null;
-  /** 原图的受控本地句柄（已过 `/api/local/media/` 校验）；没有是 null。 */
-  originalUrl: string | null;
-  originalMaterializationRef: string | null;
-  selectionBasis: string | null;
-  layering: DossierLayering | null;
-  /** 同一张图另有处理结果时的提示（当前展示所选可读版本）。 */
-  otherProcessing: { state: string } | null;
-}
-
 export interface DossierCoverage {
-  title: string;
-  body: string;
-  titleQualification: string | null;
-  mediaAvailable: number;
-  mediaCount: number;
-  uncertainImages: number;
+  imageInventory: { basis: 'platform_image_list' | 'observed_set'; expectedPages: number | null; acquiredPages: number; processedPages: number; missingPages: number[]; unknownOrder: boolean };
+  sources: Record<'body' | 'images' | 'audio' | 'videoFrames', { state: 'available' | 'known_empty' | 'not_acquired' | 'not_applicable' | 'restricted' | 'partial' | 'not_processed'; units: number; readings: number }>;
+  issues: DossierIssue[];
 }
-
-export interface DossierMetadata {
-  platform: string;
-  authorDisplayName: string | null;
-  publishedAt: string | null;
-  likes: Metric;
-  comments: Metric;
-  collects: Metric;
+export interface DossierSelection {
+  mode: 'full' | 'explicit'; kinds: MaterialKind[]; unitRefs: string[]; blockRefs: string[]; imagePages: number[];
+  omittedUnits: number; completeRevision: string;
 }
-
-export interface RelayerPlan {
-  workCount: number | null;
-  imageSlots: number | null;
-  imageJobs: number | null;
-  layoutCount: number;
-  pendingLayouts: number;
-  alreadyCurrent: number;
-  needsOcr: number;
-  maximumLayoutsPerWork: number | null;
-  expectedRevision: string;
-}
-
-export interface TaskInput {
-  includedCharacterCount: number;
-  truncated: boolean;
-  fragments: { field: string; characterCount: number; text: string }[];
-  markdown: string | null;
-  raw: unknown;
-}
-
-export type TaskKey = 'creator' | 'comments' | 'topics';
-
 export interface Dossier {
-  revision: string;
-  asOf: string | null;
-  fragments: DossierFragment[];
-  sections: DossierSection[];
-  media: DossierMedia[];
-  coverage: DossierCoverage;
-  metadata: DossierMetadata;
-  /** 服务器给的底稿原样（含 `metadata.authorExternalId`）：只用于显式导出与折叠诊断。 */
-  raw: unknown;
+  contract: 'research-dossier.v2'; workRef: string; revision: string; materialRevision: string; asOf: string;
+  note: DossierNote; materials: DossierMaterial[]; coverage: DossierCoverage;
+  attachments: Record<'comments' | 'author' | 'interaction' | 'versions', { href: string }>;
+  selection: DossierSelection; raw: unknown;
 }
-
-export interface DossierPayload {
-  dossier: Dossier;
-  relayerPlan: RelayerPlan;
-  markdown: string;
-  inputs: Record<TaskKey, TaskInput>;
+export interface RelayerPlan {
+  workCount: number | null; imageSlots: number | null; imageJobs: number | null;
+  layoutCount: number; pendingLayouts: number; alreadyCurrent: number; needsOcr: number; expectedRevision: string;
 }
-
-export interface CreatorPreview {
-  available: boolean;
-  reason: string | null;
-  inputTokenLimit: number | null;
-  estimatedInputTokensUpperBound: number | null;
-  materials: string | null;
-  /** 完整请求与来源映射（含系统提示词）：只作折叠诊断，不写存储、不写日志。 */
-  raw: unknown;
+export interface DossierPayload { dossier: Dossier; relayerPlan: RelayerPlan }
+export interface ReadingCandidate {
+  unitRef: string; slotKey: string | null; candidateRevisionRef: string; currentRevisionRef: string | null;
+  blocks: DossierBlock[]; issues: DossierIssue[]; generatedBy: ReadingProducer; verification: Verification; createdAt: string;
 }
-
-export interface DossierComment {
-  sourceRef: string;
-  parentSourceRef: string | null;
-  relation: 'ROOT' | 'REPLY';
-  body: string | null;
-  likeCount: number | null;
+export interface ReadingReviewRequest {
+  commandRef: string; expectedCurrentRevisionRef: string | null; candidateRevisionRef: string;
+  action: 'adopt' | 'edit' | 'keep'; editedBlocks?: DossierBlock[]; verified: boolean; resolvedIssueKeys: string[];
 }
-
-export interface DossierCommentPage {
-  items: DossierComment[];
-  total: number | null;
-  nextCursor: string | null;
+export interface ReadingReviewReceipt {
+  commandRef: string; unitRef: string; candidateRevisionRef: string; action: 'adopt' | 'edit' | 'keep';
+  currentRevisionRef: string | null; adoption: Adoption; verification: Verification; reviewRef: string | null;
 }
-
-export interface RelayerReceipt {
-  scopeCount: number;
-  updated: number;
-  alreadyCurrent: number;
-  skipped: number;
-  needsOcr: number;
-}
+export interface DossierComment { sourceRef: string; parentSourceRef: string | null; relation: 'ROOT' | 'REPLY'; body: string | null; likeCount: number | null }
+export interface DossierCommentPage { items: DossierComment[]; total: number | null; nextCursor: string | null }
+export interface RelayerReceipt { scopeCount: number; updated: number; alreadyCurrent: number; skipped: number; needsOcr: number }

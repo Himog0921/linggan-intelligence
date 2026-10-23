@@ -19,7 +19,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/ocr-audit/runs", post(start).get(recent))
         .route("/api/local/ocr-audit/runs/{id}", get(run))
         .route("/api/local/ocr-audit/samples/{id}", get(sample))
-        .route("/api/local/ocr-audit/adoptions/{id}", get(adoption))
+        .route("/api/local/ocr-audit/readings/{id}", get(reading))
         .route("/api/local/ocr-audit/reviews", post(review))
         .route("/api/local/ocr-audit/probe-image", get(probe_image))
 }
@@ -47,11 +47,11 @@ async fn sample(State(s): State<LocalWebState>, Path(id): Path<Uuid>) -> Respons
     };
     respond(report::detail(db, id).await)
 }
-async fn adoption(State(s): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
+async fn reading(State(s): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
     let Some(db) = s.database.database() else {
         return unavailable();
     };
-    respond(report::latest_for_adoption(db, id).await)
+    respond(report::latest_for_reading(db, id).await)
 }
 async fn save(State(s): State<LocalWebState>, body: Bytes) -> Response {
     let Some(db) = s.database.database() else {
@@ -94,7 +94,7 @@ mod tests {
     use std::path::PathBuf;
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     #[ignore = "owned preseeded synthetic PostgreSQL and built UI only"]
-    async fn owned_audit_ui_reads_and_appends_a_human_version() {
+    async fn owned_audit_ui_reads_and_appends_a_human_opinion() {
         let uri = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
         assert!(uri.contains("@127.0.0.1:") && uri.contains("/linggan_intelligence_ocr_"));
         let directory = PathBuf::from(std::env::var_os("OCR_AUDIT_PROOF_OUTPUT").unwrap());
@@ -128,7 +128,7 @@ mod tests {
         let _ = server.await;
         assert!(status.success());
         let rows: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM linggan_media_ocr_review WHERE actor='SYNTHETIC-BROWSER-NOT-MOG'",
+            "SELECT count(*) FROM linggan_ocr_audit_review WHERE actor='SYNTHETIC-BROWSER-NOT-MOG'",
         )
         .fetch_one(db.pool())
         .await

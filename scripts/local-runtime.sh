@@ -380,6 +380,8 @@ migrate() {
   apply_migration_once "0142_ocr_adoption" "$project_root/database/migrations/0142_ocr_adoption.sql"
   apply_migration_once "0143_ocr_quality_audit" "$project_root/database/migrations/0143_ocr_quality_audit.sql"
   apply_migration_once "0144_ocr_manual_recognition" "$project_root/database/migrations/0144_ocr_manual_recognition.sql"
+  apply_migration_once "0145_research_dossier_v2" "$project_root/database/migrations/0145_research_dossier_v2.sql"
+  apply_migration_once "0146_comment_study_full_context" "$project_root/database/migrations/0146_comment_study_full_context.sql"
 }
 
 case "$command_name" in

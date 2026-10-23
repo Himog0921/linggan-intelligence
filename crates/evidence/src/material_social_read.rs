@@ -501,8 +501,18 @@ pub async fn read_creation_comment_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     source: Uuid,
 ) -> Result<Option<Value>, sqlx::Error> {
-    let row=sqlx::query("SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.parent_comment_external_id,c.is_reply,c.body_text,c.body_state,c.observed_at,c.package_ref, EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE c.material_ref=$1 AND package.accepted_at<=scope_001_now()")
-        .bind(source).fetch_optional(&mut **tx).await?;
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **tx).await?;
+    read_creation_comment_at_in(tx, source, &as_of).await
+}
+
+pub async fn read_creation_comment_at_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    source: Uuid,
+    as_of: &str,
+) -> Result<Option<Value>, sqlx::Error> {
+    let row=sqlx::query("SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.parent_comment_external_id,c.is_reply,c.body_text,c.body_state,c.observed_at,c.package_ref, EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted FROM linggan_material_comment c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE c.material_ref=$1 AND package.accepted_at<=$2::timestamptz AND c.created_at<=$2::timestamptz")
+        .bind(source).bind(as_of).fetch_optional(&mut **tx).await?;
     let Some(row) = row else { return Ok(None) };
     if row.get::<bool, _>("restricted") {
         return Ok(Some(
@@ -515,8 +525,8 @@ pub async fn read_creation_comment_in(
     let parent = if !reply {
         serde_json::json!({"state":"not_applicable"})
     } else if let Some(parent_id) = parent_id {
-        let parent=sqlx::query("SELECT c.material_ref,c.body_text,c.body_state,EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE c.content_public_ref=$1 AND c.comment_external_id=$2 AND package.accepted_at<=scope_001_now()")
-            .bind(work).bind(parent_id).fetch_optional(&mut **tx).await?;
+        let parent=sqlx::query("SELECT c.material_ref,c.body_text,c.body_state,EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS restricted FROM linggan_material_comment c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE c.content_public_ref=$1 AND c.comment_external_id=$2 AND package.accepted_at<=$3::timestamptz AND c.created_at<=$3::timestamptz ORDER BY c.observed_at::timestamptz DESC,c.created_at DESC,c.material_ref DESC LIMIT 1")
+            .bind(work).bind(parent_id).bind(as_of).fetch_optional(&mut **tx).await?;
         match parent {
             Some(p) if p.get::<bool, _>("restricted") => serde_json::json!({"state":"restricted"}),
             Some(p) => {
@@ -527,14 +537,11 @@ pub async fn read_creation_comment_in(
     } else {
         serde_json::json!({"state":"unknown"})
     };
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut **tx)
-        .await?;
     let parent_dossier = crate::research_dossier::read_in(tx, &[work], &as_of)
         .await?
         .remove(&work);
     let parent_work = if let Some(dossier) = parent_dossier {
-        serde_json::json!({"state":"known","workRef":work,"materialRevision":dossier.material_revision,"fragments":dossier.fragments,"coverage":dossier.coverage})
+        serde_json::json!({"state":"known","workRef":work,"dossier":dossier})
     } else {
         serde_json::json!({"state":"unavailable","workRef":work})
     };

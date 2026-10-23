@@ -32,9 +32,6 @@ pub(super) fn selected_spans(selected: &[Candidate]) -> Vec<Span> {
     merge_spans(selected.iter().flat_map(|c| c.spans.iter().cloned()))
 }
 
-pub(super) fn cost(spans: &[Span]) -> usize {
-    spans.iter().map(|s| s.end - s.start).sum()
-}
 
 pub(super) fn shared_topics(candidates: &[Candidate]) -> BTreeSet<String> {
     let mut members = BTreeMap::<String, BTreeSet<Uuid>>::new();
@@ -96,31 +93,13 @@ pub(super) fn choose(candidates: &[Candidate], requested: &[Uuid]) -> Vec<Candid
         rows.sort_by(|a, b| {
             rank(b, &common)
                 .cmp(&rank(a, &common))
-                .then(cost(&a.spans).cmp(&cost(&b.spans)))
                 .then(a.unit["unitId"].as_str().cmp(&b.unit["unitId"].as_str()))
         });
     }
     let mut selected: Vec<Candidate> = Vec::new();
-    // One fair share first; large whole citations can use spare capacity in the next pass.
-    let fair_share = MAX_CHARS / requested.len().max(1);
-    for limit in [fair_share, MAX_CHARS] {
-        for work in requested {
-            if selected.iter().any(|c| c.work == *work) {
-                continue;
-            }
-            let Some(rows) = by_work.get(work) else {
-                continue;
-            };
-            if let Some(candidate) = rows.iter().find(|c| {
-                cost(&c.spans) <= limit
-                    && cost(&merge_spans(
-                        selected_spans(&selected)
-                            .into_iter()
-                            .chain(c.spans.iter().cloned()),
-                    )) <= MAX_CHARS
-            }) {
-                selected.push(candidate.clone());
-            }
+    for work in requested {
+        if let Some(candidate) = by_work.get(work).and_then(|rows| rows.first()) {
+            selected.push(candidate.clone());
         }
     }
     for work in requested {
@@ -149,13 +128,7 @@ pub(super) fn choose(candidates: &[Candidate], requested: &[Uuid]) -> Vec<Candid
                     && e.unit["evidenceRole"] == c.unit["evidenceRole"]
             })
         });
-        if let Some(candidate) = remaining.into_iter().find(|c| {
-            cost(&merge_spans(
-                selected_spans(&selected)
-                    .into_iter()
-                    .chain(c.spans.iter().cloned()),
-            )) <= MAX_CHARS
-        }) {
+        if let Some(candidate) = remaining.into_iter().next() {
             selected.push(candidate.clone());
         }
     }
@@ -174,7 +147,6 @@ fn choose_author_response(candidates: &[Candidate], work: Uuid) -> Vec<Candidate
         rows.sort_by(|a, b| {
             rank(b, &common)
                 .cmp(&rank(a, &common))
-                .then(cost(&a.spans).cmp(&cost(&b.spans)))
                 .then(a.unit["unitId"].as_str().cmp(&b.unit["unitId"].as_str()))
         });
     }
@@ -206,16 +178,7 @@ fn choose_author_response(candidates: &[Candidate], work: Uuid) -> Vec<Candidate
                 if require_shared && !shared {
                     continue;
                 }
-                if cost(&merge_spans(
-                    author
-                        .spans
-                        .iter()
-                        .cloned()
-                        .chain(commenter.spans.iter().cloned()),
-                )) <= MAX_CHARS
-                {
-                    return vec![(*author).clone(), (*commenter).clone()];
-                }
+                return vec![(*author).clone(), (*commenter).clone()];
             }
         }
     }

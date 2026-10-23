@@ -33,7 +33,7 @@ pub enum StudyStage {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudyPolicyDefaults {
     pub comment_budget: i32,
-    pub context_character_budget: i32,
+
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,7 +134,7 @@ impl CreateStudyPolicyCommand {
             || self.parent_policy_ref.is_some_and(|id| id.is_nil())
             || !bounded_text(self.method_name.trim(), 1, 100)
             || !(1..=3000).contains(&self.defaults.comment_budget)
-            || !(1..=20000).contains(&self.defaults.context_character_budget)
+
         {
             return Err(StudyPolicyContractError::InvalidRequest);
         }
@@ -182,7 +182,7 @@ pub(super) fn base_instruction(stage: StudyStage) -> &'static str {
 /// Compiled Rust schema, checked against the approved contract fixtures in tests.
 pub fn study_output_schema(stage: StudyStage) -> Result<Value, StudyPolicyContractError> {
     let schema = templates::output_schema(stage);
-    if canonical_json_v1(&schema)?.len() > MAX_SCHEMA_BYTES {
+    if canonical_json_v2(&schema)?.len() > MAX_SCHEMA_BYTES {
         return Err(StudyPolicyContractError::OutputSchema);
     }
     Ok(schema)
@@ -307,9 +307,10 @@ fn stage_hash(
     }))
 }
 
-/// Object keys sorted by UTF-8 bytes; arrays and strings stay exact. Only integer numbers.
+/// Object keys sorted by UTF-8 bytes; arrays and strings stay exact. Finite JSON numbers
+/// retain their typed representation, including OCR coordinates without rounding.
 /// This implementation does not depend on serde_json's optional preserve_order feature.
-pub fn canonical_json_v1(value: &Value) -> Result<Vec<u8>, StudyPolicyContractError> {
+pub fn canonical_json_v2(value: &Value) -> Result<Vec<u8>, StudyPolicyContractError> {
     fn write(
         value: &Value,
         out: &mut Vec<u8>,
@@ -344,7 +345,7 @@ pub fn canonical_json_v1(value: &Value) -> Result<Vec<u8>, StudyPolicyContractEr
                 }
                 out.push(b']');
             }
-            Value::Number(n) if !n.is_i64() && !n.is_u64() => {
+            Value::Number(n) if n.as_f64().is_none_or(|v| !v.is_finite()) => {
                 return Err(StudyPolicyContractError::CanonicalJson);
             }
             _ => serde_json::to_writer(out, value)
@@ -358,7 +359,7 @@ pub fn canonical_json_v1(value: &Value) -> Result<Vec<u8>, StudyPolicyContractEr
 }
 
 pub fn json_hash(value: &Value) -> Result<String, StudyPolicyContractError> {
-    Ok(Sha256::digest(canonical_json_v1(value)?)
+    Ok(Sha256::digest(canonical_json_v2(value)?)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())

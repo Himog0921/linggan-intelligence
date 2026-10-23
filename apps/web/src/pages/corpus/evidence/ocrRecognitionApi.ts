@@ -8,8 +8,8 @@ export async function readOcrRecognition(workRef: string, signal?: AbortSignal) 
   return result;
 }
 /** Only internal references cross the browser boundary. The server freezes/rechecks the image list. */
-export async function startOcrRecognition(workRef: string, commandRef: string, expectedScopeSha256: string) {
-  const receipt = await requestJson(root(workRef), { method: 'POST', body: { commandRef, expectedScopeSha256 } });
+export async function startOcrRecognition(workRef: string, commandRef: string, expectedScopeSha256: string, slotKeys: readonly string[]) {
+  const receipt = await requestJson(root(workRef), { method: 'POST', body: { commandRef, expectedScopeSha256, slotKeys } });
   if (!isRecord(receipt) || typeof receipt.runRef !== 'string') throw new ApiError({ kind: 'invalid_response', status: 200 });
   const result = await readOcrRecognition(workRef);
   if (!result || result.runRef !== receipt.runRef) throw new ApiError({ kind: 'invalid_response', status: 200 });

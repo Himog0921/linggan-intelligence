@@ -18,6 +18,8 @@ fn source(field: &str, text: &str, id: u128) -> Fragment {
         start: 0,
         end: text.chars().count(),
         text: text.into(),
+        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
+    ..Fragment::default()
     }
 }
 
@@ -66,7 +68,7 @@ fn input(fragments: Vec<Fragment>) -> ResearchInput {
         context_work_refs: Vec::new(),
         comment_study: json!([]),
         role_metadata: json!({"workRef":work_ref,"authorExternalId":"synthetic-author","own":false,"ownScopeConfigured":false}),
-        coverage: json!({"inputContract":INPUT_CONTRACT,"configRef":Uuid::from_u128(4)}),
+        coverage: json!({"inputContract":INPUT_CONTRACT,"configRef":Uuid::from_u128(4),"asOf":"2026-10-23T00:00:00Z"}),
     };
     update_source_coverage(&mut input);
     input.hash = input_identity(&input);
@@ -82,65 +84,40 @@ fn comment_metadata(comment: &Fragment, parent: Option<&Fragment>, signals: Valu
 }
 
 #[test]
-fn source_windows_cover_long_unicode_text_without_prefix_loss() {
-    let text = format!(
-        "{}最后才出现的限制：这一办法对我没有效果。",
-        "开始一个任务。👩‍👧\n保留完整段落。\n".repeat(430)
-    );
-    let body = source("body", &text, 10);
+fn source_windows_keep_one_complete_note_with_all_canonical_structure_and_provenance() {
+    let text = format!("{}最后才出现的限制：这一办法对我没有效果。", "开始一个任务。👩‍👧\n保留完整段落。\n".repeat(430));
+    let mut body = source("body", &text, 10);
+    body.speaker = "other".into();
+    body.structure = json!({"kind":"quote","text":text,"attribution":"转述"});
+    body.issues = vec![json!({"code":"speaker_uncertain"})];
+    body.reading_ref = Some(Uuid::from_u128(40)); body.unit_ref = Some(Uuid::from_u128(41));
     let input = input(vec![body.clone()]);
-    let windows = research_windows(&input, 3000);
-    assert!(windows.len() > 2);
-    assert_eq!(
-        windows
-            .iter()
-            .map(|w| w.coverage["windowChars"].as_u64().unwrap())
-            .sum::<u64>(),
-        text.chars().count() as u64
-    );
-    let rebuilt: String = windows
-        .iter()
-        .flat_map(|w| w.fragments.iter())
-        .map(|f| f.text.as_str())
-        .collect();
-    assert_eq!(rebuilt, text);
-    for (index, window) in windows.iter().enumerate() {
-        assert!(
-            window
-                .fragments
-                .iter()
-                .all(|f| f.text.chars().count() <= 1200)
-        );
-        assert!(
-            window
-                .fragments
-                .iter()
-                .map(|f| f.text.chars().count())
-                .sum::<usize>()
-                <= 3000
-        );
-        assert_eq!(window.coverage["windowIndex"], json!(index));
-        assert_eq!(window.coverage["windowCount"], json!(windows.len()));
-        for f in &window.fragments {
-            assert_eq!(
-                f.text,
-                body.text
-                    .chars()
-                    .skip(f.start)
-                    .take(f.end - f.start)
-                    .collect::<String>()
-            );
-        }
-        let restored = restore_window(&input, &reference_manifest(window)).unwrap();
-        assert_eq!(restored.hash, window.hash);
-    }
+    let windows = research_windows(&input);
+    assert_eq!(windows.len(), 1);
+    let window = &windows[0];
+    assert_eq!(window.fragments[0].text, text);
+    assert_eq!(window.fragments[0].structure, body.structure);
+    assert_eq!(window.fragments[0].issues, body.issues);
+    assert_eq!(window.coverage["materialSelection"], "whole_note");
+    assert_eq!(window.coverage["inputChars"], text.chars().count());
+    let manifest = reference_manifest(window);
+    assert_eq!(manifest["fragments"][0]["sourceRef"], json!(body.source_ref));
+    assert_eq!(manifest["fragments"][0]["readingRef"], json!(body.reading_ref));
+    assert_eq!(manifest["fragments"][0]["blockRef"], body.fragment_id);
+    assert_eq!(manifest["fragments"][0]["speaker"], "other");
+    assert!(manifest["fragments"][0].get("text").is_none());
+    let restored = restore_window(&input, &manifest).unwrap();
+    assert_eq!(restored.hash, window.hash);
+    assert_eq!(restored.fragments[0].text, text);
+    assert_eq!(restored.fragments[0].structure, body.structure);
+    assert_eq!(restored.fragments[0].issues, body.issues);
 }
 
 #[test]
 fn unrelated_topic_and_new_source_do_not_change_a_frozen_window() {
     let body = source("body", "同一场景中先弄清楚下一步做什么。", 10);
     let original = input(vec![body]);
-    let window = research_windows(&original, 3000).remove(0);
+    let window = research_windows(&original).remove(0);
     let manifest = reference_manifest(&window);
     let mut expanded = original.clone();
     expanded.topics = json!([{"topicRef":Uuid::from_u128(80),"definition":"完全不同的新主题"}]);
@@ -148,7 +125,7 @@ fn unrelated_topic_and_new_source_do_not_change_a_frozen_window() {
         .fragments
         .push(source("unresearched_comment", "后补采的一条独立评论。", 20));
     update_source_coverage(&mut expanded);
-    assert_eq!(research_windows(&expanded, 3000)[0].hash, window.hash);
+    assert_eq!(research_windows(&expanded)[0].hash, window.hash);
     assert!(sources_current(&expanded, &manifest));
     assert_eq!(
         restore_window(&expanded, &manifest)
@@ -160,47 +137,28 @@ fn unrelated_topic_and_new_source_do_not_change_a_frozen_window() {
 }
 
 #[test]
-fn physical_refresh_preserves_semantics_and_audit_but_text_owner_and_range_changes_do_not() {
+fn frozen_window_rejects_source_version_role_structure_issue_and_range_substitution() {
     let original = input(vec![source("body", "你好🙂这里有明确的文本证据。", 10)]);
-    let window = research_windows(&original, 7).remove(0);
+    let window = research_windows(&original).remove(0);
     let manifest = reference_manifest(&window);
-    let mut changed = original.clone();
-    changed.fragments[0].source_ref = Uuid::from_u128(900);
-    changed.fragments[0].source_version = "a-different-source-version".into();
-    changed.work.likes = Some(900);
-    changed.role_metadata["likes"] = json!(900);
-    let restored = restore_window(&changed, &manifest).unwrap();
-    assert_eq!(research_windows(&changed, 7)[0].hash, window.hash);
-    assert_eq!(
-        restored.fragments[0].source_ref,
-        original.fragments[0].source_ref
-    );
-    assert_eq!(
-        restored.coverage["currentSources"][&restored.fragments[0].fragment_id]["sourceRef"],
-        json!(Uuid::from_u128(900))
-    );
-    changed.fragments[0]
-        .text
-        .push_str("追加与已选窗口无关的尾段");
-    changed.fragments[0].end = changed.fragments[0].text.chars().count();
-    assert!(sources_current(&changed, &manifest));
-    changed.fragments[0].text = changed.fragments[0].text.replacen("你好", "再见", 1);
-    assert!(!sources_current(&changed, &manifest));
-    changed = original.clone();
-    changed.fragments.clear();
-    assert!(restore_window(&changed, &manifest).is_none());
-    changed = original.clone();
-    changed.role_metadata["own"] = json!(true);
-    assert!(restore_window(&changed, &manifest).is_none());
-    changed = original.clone();
-    changed.work.author_external_id = Some("different-author".into());
-    assert!(!sources_current(&changed, &manifest));
-    let mut corrupt = manifest.clone();
-    corrupt["fragments"][0]["end"] = json!(999);
-    assert!(restore_window(&original, &corrupt).is_none());
-    corrupt = manifest.clone();
-    corrupt["fragments"][0]["textHash"] = json!("0".repeat(64));
-    assert!(restore_window(&original, &corrupt).is_none());
+    assert!(restore_window(&original, &manifest).is_some());
+    for change in 0..7 {
+        let mut changed = original.clone();
+        match change {
+            0 => changed.fragments[0].source_ref = Uuid::from_u128(900),
+            1 => changed.fragments[0].source_version = "different-source-version".into(),
+            2 => changed.fragments[0].speaker = "other".into(),
+            3 => changed.fragments[0].structure = json!({"kind":"quote","text":changed.fragments[0].text}),
+            4 => changed.fragments[0].issues.push(json!({"code":"unclear"})),
+            5 => { changed.fragments[0].text.push_str("追加尾段"); changed.fragments[0].end = changed.fragments[0].text.chars().count(); }
+            _ => changed.fragments.clear(),
+        }
+        assert!(restore_window(&changed, &manifest).is_none(), "change={change}");
+    }
+    for key in ["blockRef","asOf","sourceVersion"] {
+        let mut corrupt = manifest.clone(); corrupt["fragments"][0][key] = Value::Null;
+        assert!(restore_window(&original, &corrupt).is_none(), "missing={key}");
+    }
 }
 
 #[test]
@@ -215,8 +173,8 @@ fn long_parent_is_context_only_and_does_not_duplicate_comment_coverage() {
     let mut original = input(vec![child.clone(), parent.clone()]);
     original.comment_study = json!([comment_metadata(&child, Some(&parent), json!([]))]);
     update_source_coverage(&mut original);
-    let windows = research_windows(&original, 3000);
-    assert!(windows.len() > 1);
+    let windows = research_windows(&original);
+    assert_eq!(windows.len(), 1);
     assert_eq!(
         windows
             .iter()
@@ -244,14 +202,6 @@ fn long_parent_is_context_only_and_does_not_duplicate_comment_coverage() {
                 .unwrap()
                 .is_empty()
         );
-        assert!(
-            window
-                .fragments
-                .iter()
-                .map(|f| f.text.chars().count())
-                .sum::<usize>()
-                <= 3000
-        );
         assert!(sources_current(&original, &reference_manifest(window)));
     }
     original.fragments.retain(is_research_evidence);
@@ -267,7 +217,7 @@ fn signal_dependency_is_limited_to_comments_in_this_group() {
     original.comment_study = json!(comments.iter().enumerate().map(|(index,c)|
         comment_metadata(c,None,json!([{ "signalRef":Uuid::from_u128(40+index as u128),"kind":"need","proposition":"需要明确第一步"}]))
     ).collect::<Vec<_>>());
-    let window = research_windows(&original, 3000).remove(0);
+    let window = research_windows(&original).remove(0);
     assert_eq!(window.comment_study.as_array().unwrap().len(), 3);
     let manifest = reference_manifest(&window);
     let mut changed = original.clone();
@@ -278,31 +228,17 @@ fn signal_dependency_is_limited_to_comments_in_this_group() {
 }
 
 #[test]
-fn comment_reobservation_retains_effective_signal_and_frozen_provenance() {
+fn comment_reobservation_cannot_substitute_frozen_source_or_parent() {
     let comment = source("studied_comment", "我试过这一步还是不知怎样继续。", 20);
     let parent = source(PARENT_CONTEXT_FIELD, "先从一个很小的任务开始试。", 21);
     let mut original = input(vec![comment.clone(), parent.clone()]);
-    original.comment_study = json!([comment_metadata(
-        &comment,
-        Some(&parent),
-        json!([
-        {"signalRef":Uuid::from_u128(50),"kind":"need","proposition":"下一步行动不明确"}])
-    )]);
-    let window = research_windows(&original, 3000).remove(0);
-    let mut current = original.clone();
-    current.fragments[0].source_ref = Uuid::from_u128(500);
-    current.fragments[1].source_ref = Uuid::from_u128(501);
-    current.comment_study[0]["sourceRef"] = json!(Uuid::from_u128(500));
-    current.comment_study[0]["parentSourceRef"] = json!(Uuid::from_u128(501));
-    assert_eq!(research_windows(&current, 3000)[0].hash, window.hash);
-    let restored = restore_window(&current, &reference_manifest(&window)).unwrap();
-    assert_eq!(
-        restored.comment_study[0]["sourceRef"],
-        json!(comment.source_ref)
-    );
-    assert_eq!(restored.fragments[0].source_ref, comment.source_ref);
-    current.comment_study[0]["signals"][0]["signalRef"] = json!(Uuid::from_u128(502));
-    assert!(!sources_current(&current, &reference_manifest(&window)));
+    original.comment_study = json!([comment_metadata(&comment, Some(&parent), json!([]))]);
+    let manifest = reference_manifest(&research_windows(&original).remove(0));
+    assert!(restore_window(&original, &manifest).is_some());
+    let mut current = original.clone(); current.fragments[0].source_ref = Uuid::from_u128(500);
+    assert!(restore_window(&current, &manifest).is_none());
+    let mut current = original; current.fragments[1].source_ref = Uuid::from_u128(501);
+    assert!(restore_window(&current, &manifest).is_none());
 }
 
 #[test]
@@ -334,7 +270,7 @@ fn unknown_dispatch_cannot_be_replayed_through_another_window_hash() {
         "前十个字保持原样。后面是尚未发送的更多内容。",
         10,
     )]);
-    let unknown = research_windows(&original, 10).remove(0);
+    let unknown = research_windows(&original).remove(0);
     let refs = reference_manifest(&unknown)["fragments"]
         .as_array()
         .unwrap()
@@ -343,15 +279,10 @@ fn unknown_dispatch_cannot_be_replayed_through_another_window_hash() {
     changed_config.fragments[0].source_ref = Uuid::from_u128(901);
     changed_config.fragments[0].source_version = "later physical observation".into();
     changed_config.coverage["configRef"] = json!(Uuid::from_u128(999));
-    let new_windows = research_windows(&changed_config, 4);
+    let new_windows = research_windows(&changed_config);
     assert_ne!(new_windows[0].hash, unknown.hash);
     assert!(overlaps_unknown_dispatch(
         &new_windows[0],
-        &changed_config,
-        &refs
-    ));
-    assert!(!overlaps_unknown_dispatch(
-        &new_windows[3],
         &changed_config,
         &refs
     ));
@@ -361,19 +292,11 @@ fn unknown_dispatch_cannot_be_replayed_through_another_window_hash() {
         10,
     )]);
     assert!(!overlaps_unknown_dispatch(
-        &research_windows(&changed_text, 4)[0],
+        &research_windows(&changed_text)[0],
         &changed_text,
         &refs
     ));
-    let mut legacy = refs;
-    legacy[0]["sourceFragmentId"] = Value::Null;
-    legacy[0]["fragmentId"] = json!("old-prefix-format");
-    legacy[0]["sourceVersion"] = json!("old-preview-version");
-    assert!(overlaps_unknown_dispatch(
-        &new_windows[0],
-        &changed_config,
-        &legacy
-    ));
+
 }
 
 fn two_works() -> Vec<ResearchInput> {
@@ -419,7 +342,7 @@ fn comparison_restores_each_work_and_checks_other_works_roles_and_restrictions()
     changed[1].role_metadata["own"] = json!(true);
     assert!(restore_scoped_window(&changed, all[0].work.work_ref, &manifest).is_none());
     assert!(restore_scoped_window(&all[..1], all[0].work.work_ref, &manifest).is_none());
-    let mut source = research_windows(&all[0], 3000).remove(0);
+    let mut source = research_windows(&all[0]).remove(0);
     source.context_work_refs.push(all[1].work.work_ref);
     assert!(
         restore_scoped_window(
@@ -499,10 +422,10 @@ fn overview_window_denominator_matches_lossless_partition_with_parent_context() 
                 .collect::<Vec<_>>()
         );
         update_source_coverage(&mut original);
-        for size in [899, 900, 1200, 3000] {
-            let windows = research_windows(&original, size);
-            let count = research_window_count(&original, size);
-            assert_eq!(count, windows.len(), "author={author_present} size={size}");
+        {
+            let windows = research_windows(&original);
+            let count = research_window_count(&original);
+            assert_eq!(count, windows.len(), "author={author_present}");
             assert!(
                 windows
                     .iter()
@@ -519,11 +442,11 @@ fn overview_window_denominator_matches_lossless_partition_with_parent_context() 
     ]);
     tiny.comment_study = json!([comment_metadata(&child, Some(&parent), json!([]))]);
     update_source_coverage(&mut tiny);
-    for size in [0, 1, 2, 7] {
+    {
         assert_eq!(
-            research_window_count(&tiny, size),
-            research_windows(&tiny, size).len()
+            research_window_count(&tiny),
+            research_windows(&tiny).len()
         );
     }
-    assert_eq!(research_window_count(&input(vec![]), 3000), 0);
+    assert_eq!(research_window_count(&input(vec![])), 0);
 }

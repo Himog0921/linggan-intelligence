@@ -7,14 +7,13 @@ mod backfill;
 mod batch;
 mod identity;
 mod read;
-mod readiness;
 mod snapshot;
 pub use batch::{BatchOperation, BatchPlan, BatchReceipt, apply_plan, plan};
 pub use read::{read, read_at};
 pub use snapshot::{SnapshotReceipt, save_snapshot};
 
-pub const VERSION: &str = "note-material-input.v1";
-pub const FINGERPRINT_VERSION: &str = "note-material-fingerprint.v1";
+pub const VERSION: &str = "research-dossier.v2";
+pub const FINGERPRINT_VERSION: &str = "research-dossier-fingerprint.v2";
 pub const MAX_WORKS: usize = 200;
 
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +66,11 @@ pub struct Fragment {
     pub end: usize,
     pub text_hash: String,
     pub text: String,
+    pub speaker: String,
+    pub structure: serde_json::Value,
+    pub issues: Vec<serde_json::Value>,
+    pub reading_ref: Option<Uuid>,
+    pub unit_ref: Option<Uuid>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

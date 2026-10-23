@@ -1,29 +1,7 @@
 use super::{Column, FINGERPRINT_VERSION, Fragment, Material, VERSION};
 use crate::creator_discovery::hash;
 use serde_json::json;
-use unicode_normalization::UnicodeNormalization;
-
-fn normalized(value: &str) -> String {
-    value
-        .replace("\r\n", "\n")
-        .replace('\r', "\n")
-        .nfc()
-        .collect()
-}
-
 pub(super) fn finish(material: &mut Material) {
-    material.fragments.sort_by_key(|f| {
-        (
-            field_order(&f.field),
-            f.logical_position.clone(),
-            hash(&normalized(&f.text)),
-        )
-    });
-    material.fragments.dedup_by(|a, b| {
-        a.field == b.field
-            && a.logical_position == b.logical_position
-            && normalized(&a.text) == normalized(&b.text)
-    });
     for (i, f) in material.fragments.iter_mut().enumerate() {
         f.citation_id = format!("S{}", i + 1);
     }
@@ -31,7 +9,6 @@ pub(super) fn finish(material: &mut Material) {
         c.reasons.sort();
         c.reasons.dedup();
     }
-    material.columns.sort_by_key(|c| field_order(&c.field));
     material.not_ready_reasons.sort();
     material.not_ready_reasons.dedup();
     material.ready = material.not_ready_reasons.is_empty();
@@ -46,7 +23,7 @@ pub(super) fn finish(material: &mut Material) {
                 f.source_version,
                 f.start,
                 f.end,
-                f.text_hash
+                f.text_hash, f.logical_position, f.reading_ref, f.unit_ref
             ])
         })
         .collect();
@@ -69,7 +46,7 @@ pub(super) fn finish(material: &mut Material) {
 fn content_fingerprint(columns: &[Column], fragments: &[Fragment]) -> String {
     let text: Vec<_> = fragments
         .iter()
-        .map(|f| json!([f.field, f.logical_position, hash(&normalized(&f.text))]))
+        .map(|f| json!([f.field, f.logical_position, hash(&f.text), f.speaker, hash(&f.structure.to_string()), f.issues]))
         .collect();
     hash(&json!([FINGERPRINT_VERSION, columns, text]).to_string())
 }
@@ -92,28 +69,18 @@ pub(super) fn fragment(
         end: start + text.chars().count(),
         text_hash: hash(&text),
         text,
-    }
-}
-
-fn field_order(field: &str) -> usize {
-    match field {
-        "title" => 0,
-        "cover_headline" => 1,
-        "body" => 2,
-        "tags" => 3,
-        "ocr" => 4,
-        "transcript" => 5,
-        _ => 6,
+        speaker: "unconfirmed".into(), structure: serde_json::Value::Null, issues: vec![],
+        reading_ref: None, unit_ref: None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::note_material_input::ColumnState;
+    use crate::dossier_input::ColumnState;
     use uuid::Uuid;
     #[test]
-    fn normalization_and_sources_have_separate_identities_and_unicode_offsets() {
+    fn exact_text_structure_and_roles_have_distinct_identities_with_unicode_offsets() {
         let cols = vec![Column {
             field: "body".into(),
             state: ColumnState::Available,
@@ -135,7 +102,7 @@ mod tests {
             0,
             "é\n中🙂".into(),
         );
-        assert_eq!(
+        assert_ne!(
             content_fingerprint(&cols, std::slice::from_ref(&a)),
             content_fingerprint(&cols, std::slice::from_ref(&b))
         );
@@ -148,6 +115,13 @@ mod tests {
             content_fingerprint(&cols, &[a]),
             content_fingerprint(&cols, &[changed])
         );
+        let base = fragment("ocr", "page-1.block-1".into(), Uuid::new_v4(), "v1".into(), 0, "相同字面文字".into());
+        let mut role = base.clone(); role.speaker = "author".into();
+        let mut structure = base.clone(); structure.structure = json!({"kind":"quote","text":base.text});
+        let mut issue = base.clone(); issue.issues = vec![json!({"code":"unclear","message":"归属未确认"})];
+        for changed in [role, structure, issue] {
+            assert_ne!(content_fingerprint(&cols, std::slice::from_ref(&base)), content_fingerprint(&cols, &[changed]));
+        }
         let missing = vec![Column {
             field: "body".into(),
             state: ColumnState::NotAcquired,

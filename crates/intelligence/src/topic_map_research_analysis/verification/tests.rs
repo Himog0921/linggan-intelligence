@@ -19,6 +19,8 @@ fn source(text: &str) -> Fragment {
         start: 7,
         end: 7 + text.chars().count(),
         text: text.into(),
+        speaker: "author".into(),
+    ..Fragment::default()
     }
 }
 
@@ -172,7 +174,7 @@ fn empty_no_signal_still_requires_review_of_the_actual_source() {
     output.discussions.clear();
     let packet = extraction_review(&output, std::slice::from_ref(&f)).unwrap();
     assert_eq!(packet["checks"][0]["checkId"], "o0");
-    assert_eq!(packet["outcomeContext"][0]["text"], f.text);
+    assert_eq!(packet["outcomeContext"][0]["content"]["text"], f.text);
     assert_eq!(packet["outcomeContext"][0]["contextOnly"], true);
     let failed = reject(&packet, "semantic_outcome_unsupported", "fail");
     assert_eq!(

@@ -24,7 +24,7 @@ const PARTIALS: &str = r#"
     FROM linggan_topic_map_research_task t
     JOIN linggan_topic_map_research_run run USING(run_ref)
     WHERE ($1::uuid IS NULL OR t.domain_ref=$1) AND t.phase='resolve'
-        AND run.method_version IN ('topic-map.research.v2','topic-map.research.v3','topic-map.research.v4','topic-map.research.v5','topic-map.research.v6')
+        AND run.method_version='topic-map.research.v6'
         AND jsonb_typeof(t.resolutions_json)='array' AND jsonb_array_length(t.resolutions_json)>0
         AND COALESCE(t.input_refs#>>'{source,coverage,kind}',t.input_refs#>>'{coverage,kind}','source')<>'comparison'
         AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_request request
@@ -131,43 +131,26 @@ fn restore_row(
         return None;
     }
     let output: Value = row.get("output_json");
-    let legacy = output["contract"] == "topic-map.research.v1";
-    if legacy && !legacy::definitions_current(&wrapper, unavailable) {
-        return None;
-    }
-    let mut current = if legacy {
-        topic_map_research::restore_legacy_scoped(all, source, &manifest)?
-    } else {
-        topic_map_research::restore_scoped_window(all, work, &manifest)?
-    };
+    let mut current = topic_map_research::restore_scoped_window(all, work, &manifest)?;
     if manifest["coverage"]["kind"] != "comparison" {
         // Current qualified inventory is the denominator, including newly added sources.
         current.coverage["sourceChars"] = source.coverage["sourceChars"].clone();
-        // Reuse this qualified window's frozen partition, including historical sizes.
-        // The absence of maxChars belongs to the legacy 3000-character contract.
-        let max_chars = manifest["coverage"]["maxChars"]
-            .as_u64()
-            .and_then(|size| usize::try_from(size).ok())
-            .filter(|size| *size > 0)
-            .unwrap_or(3000);
         current.coverage["windowCount"] = json!(
             *window_counts
                 .entry((
                     row.get("domain_ref"),
                     row.get("config_ref"),
                     work,
-                    max_chars
+                    0
                 ))
-                .or_insert_with(|| topic_map_research::research_window_count(source, max_chars))
+                .or_insert_with(|| topic_map_research::research_window_count(source))
         );
     }
     let typed: ResearchOutput = serde_json::from_value(output.clone()).ok()?;
     analysis::validate_output(&typed, &current.fragments, allowed).ok()?;
     let result: Option<Uuid> = row.get("result_ref");
     let core: Value = row.get("core_json");
-    let (output, core) = if legacy {
-        (output, legacy::legacy_units(result?, &typed, &manifest))
-    } else if result.is_none() {
+    let (output, core) = if result.is_none() {
         partial::payload(&typed, &current, &core["units"])?
     } else {
         // Reject malformed stored unit identities without discarding valid source analysis.

@@ -1,249 +1,148 @@
-//! Material preview and explicit local re-layering; neither path launches research.
+//! A single full-note read contract; explicit commands are separate from read-only views.
 use super::*;
-use axum::http::StatusCode;
-use linggan_evidence::research_dossier as dossier;
+use axum::http::{StatusCode,header};
+use linggan_evidence::{research_dossier as dossier,material_reading};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value,json};
+use uuid::Uuid;
+
+#[derive(Default,Deserialize)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub(super) struct Params{
+    domain:Option<Uuid>,cursor:Option<Uuid>,as_of:Option<String>,format:Option<String>,
+    kinds:Option<String>,unit_refs:Option<String>,block_refs:Option<String>,image_pages:Option<String>,sections:Option<String>,
+}
+
+async fn ensure_scope(db:&linggan_storage_postgres::Database,work:Uuid,domain:Option<Uuid>)->Result<(),Response>{
+    let exists:Result<bool,_>=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_content c WHERE c.public_ref=$1 AND ($2::uuid IS NULL OR EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=c.public_ref AND u.domain_ref=$2)))")
+        .bind(work).bind(domain).fetch_one(db.pool()).await;
+    match exists{Ok(true)=>Ok(()),Ok(false)=>Err(local_read_json_error(StatusCode::NOT_FOUND,"material_not_found")),Err(_)=>Err(unavailable())}
+}
+fn unavailable()->Response{local_read_json_error(StatusCode::SERVICE_UNAVAILABLE,"dossier_read_unavailable")}
+fn read_error(error:sqlx::Error)->Response{
+    match error{
+        sqlx::Error::Protocol(reason) if reason=="future_cutoff"=>local_read_json_error(StatusCode::BAD_REQUEST,"future_cutoff"),
+        sqlx::Error::Database(error) if matches!(error.code().as_deref(),Some("22007"|"22008"))=>local_read_json_error(StatusCode::BAD_REQUEST,"invalid_cutoff"),
+        _=>unavailable(),
+    }
+}
+fn parts(value:Option<&str>)->Result<Vec<String>,Response>{
+    let Some(value)=value else{return Ok(vec![]);};
+    let parts:Vec<_>=value.split(',').map(str::trim).collect();
+    if parts.iter().any(|v|v.is_empty()){return Err(local_read_json_error(StatusCode::BAD_REQUEST,"empty_selection_value"));}
+    Ok(parts.into_iter().map(str::to_owned).collect())
+}
+fn selection(params:&Params)->Result<dossier::Selection,Response>{
+    Ok(dossier::Selection{kinds:parts(params.kinds.as_deref())?,unit_refs:parts(params.unit_refs.as_deref())?,block_refs:parts(params.block_refs.as_deref())?,
+        image_pages:parts(params.image_pages.as_deref())?.iter().map(|p|p.parse::<u64>().map_err(|_|local_read_json_error(StatusCode::BAD_REQUEST,"invalid_image_page"))).collect::<Result<_,_>>()?})
+}
+
+pub(super) async fn read(State(state):State<LocalWebState>,Path(work):Path<Uuid>,Query(params):Query<Params>)->Response{
+    let Some(db)=state.database.database()else{return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE,"read_model_not_connected");};
+    if let Err(response)=ensure_scope(db,work,params.domain).await{return response;}
+    if !matches!(params.format.as_deref(),None|Some("json"|"markdown")){return local_read_json_error(StatusCode::BAD_REQUEST,"invalid_format");}
+    let selection=match selection(&params){Ok(value)=>value,Err(response)=>return response};
+    match dossier::read_at(db,work,params.as_of.as_deref()).await{
+        Ok(Some(mut value))=>{
+            let plan=dossier::relayer_plan(&value);
+            if let Err(reason)=dossier::select(&mut value,&selection){return (StatusCode::BAD_REQUEST,Json(json!({"operation":"local_read","outcome":"unavailable","code":reason}))).into_response();}
+            if params.format.as_deref()==Some("markdown"){
+                ([(header::CONTENT_TYPE,"text/markdown; charset=utf-8")],dossier::markdown(&value)).into_response()
+            }else{Json(json!({"dossier":value,"relayerPlan":plan})).into_response()}
+        }
+        Ok(None)=>local_read_json_error(StatusCode::NOT_FOUND,"material_not_found"),Err(error)=>read_error(error),
+    }
+}
+
+pub(super) async fn candidates(State(state):State<LocalWebState>,Path(work):Path<Uuid>,Query(params):Query<Params>)->Response{
+    let Some(db)=state.database.database()else{return unavailable();};
+    if let Err(response)=ensure_scope(db,work,params.domain).await{return response;}
+    match material_reading::read_candidates(db,work).await{
+        Ok(candidates)=>Json(json!({"candidates":candidates})).into_response(),Err(error)=>reading_error(error),
+    }
+}
+
+pub(super) async fn review(State(state):State<LocalWebState>,Path((work,unit)):Path<(Uuid,Uuid)>,Query(params):Query<Params>,Json(input):Json<material_reading::ReviewReadingRequest>)->Response{
+    let Some(db)=state.database.database()else{return unavailable();};
+    if let Err(response)=ensure_scope(db,work,params.domain).await{return response;}
+    let belongs:Result<bool,_>=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_unit WHERE unit_ref=$1 AND content_public_ref=$2)")
+        .bind(unit).bind(work).fetch_one(db.pool()).await;
+    match belongs{Ok(true)=>{},Ok(false)=>return local_read_json_error(StatusCode::NOT_FOUND,"reading_not_found"),Err(_)=>return unavailable()}
+    match material_reading::review_reading(db,unit,&input,None).await{Ok(receipt)=>Json(receipt).into_response(),Err(error)=>reading_error(error)}
+}
+fn reading_error(error:material_reading::ReadingError)->Response{
+    use material_reading::ReadingError as E;
+    let (status,reason)=match error{E::Invalid=>(StatusCode::BAD_REQUEST,"invalid_reading_command"),E::NotFound=>(StatusCode::NOT_FOUND,"reading_not_found"),
+        E::Conflict=>(StatusCode::CONFLICT,"reading_revision_conflict"),E::SourceChanged=>(StatusCode::CONFLICT,"reading_source_changed"),E::Storage(_)=>(StatusCode::SERVICE_UNAVAILABLE,"reading_storage_unavailable")};
+    local_read_json_error(status,reason)
+}
+
+pub(super) async fn version(State(state):State<LocalWebState>,Path((work,reading)):Path<(Uuid,Uuid)>,Query(params):Query<Params>)->Response{
+    let Some(db)=state.database.database()else{return unavailable();};
+    if let Err(response)=ensure_scope(db,work,params.domain).await{return response;}
+    match dossier::read_version(db,work,reading).await{Ok(Some(value))=>Json(json!({"workRef":work,"material":value})).into_response(),Ok(None)=>local_read_json_error(StatusCode::NOT_FOUND,"reading_not_found"),Err(error)=>read_error(error)}
+}
+
+pub(super) async fn metadata(State(state):State<LocalWebState>,Path(work):Path<Uuid>,Query(params):Query<Params>)->Response{
+    let Some(db)=state.database.database()else{return unavailable();};
+    if let Err(response)=ensure_scope(db,work,params.domain).await{return response;}
+    let sections=match parts(params.sections.as_deref()){Ok(v)if !v.is_empty()&&v.iter().all(|s|matches!(s.as_str(),"author"|"interaction"))=>v,_=>return local_read_json_error(StatusCode::BAD_REQUEST,"metadata_sections_required")};
+    match dossier::read_at(db,work,params.as_of.as_deref()).await{
+        Ok(Some(value))=>{let mut selected=serde_json::Map::new();for section in sections{selected.insert(section.clone(),value.metadata[&section].clone());}
+            Json(json!({"workRef":work,"asOf":value.as_of,"metadata":selected})).into_response()},
+        Ok(None)=>local_read_json_error(StatusCode::NOT_FOUND,"material_not_found"),Err(error)=>read_error(error),
+    }
+}
+
+pub(super) async fn comments(State(state):State<LocalWebState>,Path(work):Path<Uuid>,Query(params):Query<Params>)->Response{
+    let Some(db)=state.database.database()else{return unavailable();};
+    let Some(domain)=params.domain else{return local_read_json_error(StatusCode::BAD_REQUEST,"domain_required");};
+    if let Err(response)=ensure_scope(db,work,Some(domain)).await{return response;}
+    match linggan_evidence::read_dossier_comments(db,work,params.cursor).await{Ok(value)=>Json(value).into_response(),Err(_)=>unavailable()}
+}
+
+pub(super) async fn plan(State(state):State<LocalWebState>,Path(work):Path<Uuid>,Query(params):Query<Params>)->Response{
+    let Some(db)=state.database.database()else{return unavailable();};
+    if let Err(response)=ensure_scope(db,work,params.domain).await{return response;}
+    match dossier::plan(db,work).await{Ok(Some(value))=>Json(json!({"relayerPlan":value})).into_response(),Ok(None)=>local_read_json_error(StatusCode::NOT_FOUND,"material_not_found"),Err(error)=>read_error(error)}
+}
 
 #[derive(Deserialize)]
-pub(super) struct Params {
-    domain: Option<uuid::Uuid>,
-    cursor: Option<uuid::Uuid>,
-}
-
-async fn scoped(
-    database: &linggan_storage_postgres::Database,
-    work: uuid::Uuid,
-    domain: Option<uuid::Uuid>,
-) -> Result<bool, sqlx::Error> {
-    match domain {
-        Some(domain)=>sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_domain_usage WHERE content_public_ref=$1 AND domain_ref=$2)").bind(work).bind(domain).fetch_one(database.pool()).await,
-        None=>Ok(true),
-    }
-}
-
-pub(super) async fn read(
-    State(state): State<LocalWebState>,
-    Path(work): Path<uuid::Uuid>,
-    Query(params): Query<Params>,
-) -> Response {
-    let Some(database) = state.database.database() else {
-        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
-    };
-    match scoped(database, work, params.domain).await {
-        Ok(true) => {}
-        Ok(false) => return local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
-        Err(_) => {
-            return local_read_json_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "dossier_read_unavailable",
-            );
-        }
-    }
-    match dossier::read(database, work).await {
-        Ok(Some(value)) => {
-            let creator = dossier::bounded_fragments(&value.fragments, 4000);
-            let comment = linggan_intelligence::comment_study_run::bounded_context_manifest(
-                &json!({
-                    "workRef":work,"dossierContract":value.contract,"dossierRevision":value.material_revision,
-                    "cleanerVersion":linggan_intelligence::comment_study_run::context_cleaner_version(),
-                    "sources":dossier::context_sources(&value)
-                }),
-                20000,
-            );
-            let total: usize = value.fragments.iter().map(|f| f.end).sum();
-            let included: usize = creator.iter().map(|f| f.end).sum();
-            Json(json!({"dossier":value,"relayerPlan":dossier::relayer_plan(&value),"markdown":dossier::markdown(&value),"inputs":{
-                "creator":{"markdown":dossier::render_materials(&creator),"stage":"work_materials","characterBudget":4000,"includedCharacterCount":included,"omittedCharacterCount":total-included,"truncated":included<total,"fragments":creator},
-                "comments":comment,
-                "topics":{"markdown":dossier::render_materials(&value.fragments),"stage":"before_research_windowing","includedCharacterCount":total,"truncated":false,"fragments":value.fragments}
-            }})).into_response()
-        }
-        Ok(None) => local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
-        Err(_) => {
-            local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "dossier_read_unavailable")
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct Relayer {
-    expected_revision: String,
-    domain: Option<uuid::Uuid>,
-}
-
-pub(super) async fn relayer(
-    State(state): State<LocalWebState>,
-    Path(work): Path<uuid::Uuid>,
-    Json(input): Json<Relayer>,
-) -> Response {
-    let Some(database) = state.database.database() else {
-        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
-    };
-    match scoped(database, work, input.domain).await {
-        Ok(true) => {}
-        Ok(false) => return local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
-        Err(_) => {
-            return local_read_json_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "dossier_read_unavailable",
-            );
-        }
-    }
-    match dossier::relayer_work(database, work, &input.expected_revision).await {
-        Ok(result) => Json(result).into_response(),
-        Err(linggan_evidence::ProducerRuntimeError::MaterialIdentityConflict) => {
-            local_read_json_error(StatusCode::CONFLICT, "dossier_changed_or_scope_unavailable")
-        }
-        Err(_) => local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "dossier_relayer_failed"),
-    }
-}
-
-pub(super) async fn comments(
-    State(state): State<LocalWebState>,
-    Path(work): Path<uuid::Uuid>,
-    Query(params): Query<Params>,
-) -> Response {
-    let Some(database) = state.database.database() else {
-        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
-    };
-    let Some(domain) = params.domain else {
-        return local_read_json_error(StatusCode::BAD_REQUEST, "domain_required");
-    };
-    match scoped(database, work, Some(domain)).await {
-        Ok(true) => {}
-        Ok(false) => return local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
-        Err(_) => {
-            return local_read_json_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "dossier_read_unavailable",
-            );
-        }
-    }
-    match linggan_evidence::read_dossier_comments(database, work, params.cursor).await {
-        Ok(page) => Json(page).into_response(),
-        Err(_) => local_read_json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "material_comment_channel_unavailable",
-        ),
-    }
-}
-
-/// Same final input fitter as creator dispatch. Reading does not reserve tokens or enqueue work.
-pub(super) async fn creator_preview(
-    State(state): State<LocalWebState>,
-    Path(work): Path<uuid::Uuid>,
-    Query(params): Query<Params>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
-    };
-    let Some(domain) = params.domain else {
-        return local_read_json_error(StatusCode::BAD_REQUEST, "domain_required");
-    };
-    match prepare_creator_preview(db, domain, work).await {
-        Ok(value) => Json(value).into_response(),
-        Err(_) => local_read_json_error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "creator_preview_unavailable",
-        ),
-    }
-}
-
-async fn prepare_creator_preview(
-    db: &linggan_storage_postgres::Database,
-    domain: uuid::Uuid,
-    work: uuid::Uuid,
-) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
-    use sqlx::Row;
-    let platform:Option<String>=sqlx::query_scalar("SELECT content.platform FROM linggan_material_content content WHERE public_ref=$1 AND EXISTS(SELECT 1 FROM linggan_material_domain_usage usage WHERE usage.content_public_ref=$1 AND usage.domain_ref=$2)").bind(work).bind(domain).fetch_optional(db.pool()).await?;
-    let Some(platform) = platform else {
-        return Ok(json!({"available":false,"reason":"material_not_found"}));
-    };
-    let scope = serde_json::from_value(json!({"domain":domain,"platform":platform}))?;
-    let data =
-        linggan_evidence::creator_discovery::load_creator_material_for_work(db, &scope, work)
-            .await?;
-    let Some(work) = data.works.first() else {
-        return Ok(json!({"available":false,"reason":"material_not_found"}));
-    };
-    let config=sqlx::query("SELECT config.config_ref,config.input_token_limit FROM linggan_creator_discovery_policy policy JOIN linggan_model_config config ON config.config_ref=policy.config_ref WHERE policy.domain_ref=$1 AND policy.platform=$2").bind(domain).bind(&platform).fetch_optional(db.pool()).await?;
-    let Some(config) = config else {
-        return Ok(
-            json!({"available":false,"reason":"model_not_configured","markdown":dossier::render_materials(&work.fragments)}),
-        );
-    };
-    let limit = config.get::<i32, _>("input_token_limit") as usize;
-    match linggan_intelligence::creator_discovery_input::prepare(&data.domain, work, limit) {
-        Ok((input, fragments)) => Ok(
-            json!({"available":true,"stage":"prepared_request","configRef":config.get::<uuid::Uuid,_>("config_ref"),"inputTokenLimit":limit,
-            "system":linggan_intelligence::creator_discovery_analysis::SYSTEM,"input":input,"fragments":fragments,
-            "citationMap":linggan_intelligence::creator_discovery_input::citation_map(&fragments),
-            "estimatedInputTokensUpperBound":input.to_string().len()+linggan_intelligence::creator_discovery_analysis::SYSTEM.len()+128,
-            "asOf":data.as_of,"sourceFingerprint":work.fingerprint}),
-        ),
-        Err(_) => Ok(json!({"available":false,"reason":"configured_input_limit_too_small"})),
-    }
-}
-
-pub(super) async fn plan(
-    State(state): State<LocalWebState>,
-    Path(work): Path<uuid::Uuid>,
-    Query(params): Query<Params>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
-    };
-    match scoped(db, work, params.domain).await {
-        Ok(true) => {}
-        Ok(false) => return local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
-        Err(_) => {
-            return local_read_json_error(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "dossier_read_unavailable",
-            );
-        }
-    }
-    match dossier::plan(db, work).await {
-        Ok(Some(value)) => Json(json!({"relayerPlan":value})).into_response(),
-        Ok(None) => local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
-        Err(_) => {
-            local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "dossier_read_unavailable")
-        }
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub(super) struct Relayer{expected_revision:String,domain:Option<Uuid>}
+pub(super) async fn relayer(State(state):State<LocalWebState>,Path(work):Path<Uuid>,Json(input):Json<Relayer>)->Response{
+    let Some(db)=state.database.database()else{return unavailable();};
+    if let Err(response)=ensure_scope(db,work,input.domain).await{return response;}
+    match dossier::relayer_work(db,work,&input.expected_revision).await{
+        Ok(value)=>Json(value).into_response(),Err(linggan_evidence::ProducerRuntimeError::MaterialIdentityConflict)=>local_read_json_error(StatusCode::CONFLICT,"dossier_changed_or_scope_unavailable"),
+        Err(_)=>local_read_json_error(StatusCode::SERVICE_UNAVAILABLE,"dossier_relayer_failed"),
     }
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub(super) struct NoteMaterialParams {
-    domain: uuid::Uuid,
-    as_of: Option<String>,
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub(super) struct Batch{domain:Uuid,work_refs:Vec<Uuid>,as_of:Option<String>,#[serde(default)]selection:dossier::Selection}
+pub(super) async fn batch(State(state):State<LocalWebState>,Json(input):Json<Batch>)->Response{
+    let Some(db)=state.database.database()else{return unavailable();};
+    let unique:std::collections::BTreeSet<_>=input.work_refs.iter().collect();
+    if unique.is_empty()||unique.len()!=input.work_refs.len(){return local_read_json_error(StatusCode::BAD_REQUEST,"unique_nonempty_work_refs_required");}
+    match batch_read(db,&input).await{Ok(value)=>Json(value).into_response(),Err(error)=>read_error(error)}
 }
-
-pub(super) async fn note_material(
-    State(state): State<LocalWebState>,
-    Path(work): Path<uuid::Uuid>,
-    Query(params): Query<NoteMaterialParams>,
-) -> Response {
-    use linggan_evidence::note_material_input::{self, Error};
-    let Some(database) = state.database.database() else {
-        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
-    };
-    match note_material_input::read_at(database, params.domain, &[work], params.as_of.as_deref())
-        .await
-    {
-        Ok(mut materials) => Json(materials.remove(0)).into_response(),
-        Err(Error::NotFound) => local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
-        Err(Error::Invalid(reason)) => local_read_json_error(StatusCode::BAD_REQUEST, reason),
-        Err(Error::Storage(sqlx::Error::Database(error)))
-            if error.code().as_deref() == Some("22007")
-                || error.code().as_deref() == Some("22008") =>
-        {
-            local_read_json_error(StatusCode::BAD_REQUEST, "invalid_cutoff")
+async fn batch_read(db:&linggan_storage_postgres::Database,input:&Batch)->Result<Value,sqlx::Error>{
+    let mut tx=db.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY").execute(&mut *tx).await?;
+    let cutoff=dossier::cutoff_in(&mut tx,input.as_of.as_deref()).await?;
+    let mut results=vec![];
+    for work in &input.work_refs{
+        if !dossier::creation_work_in_domain(&mut tx,*work,input.domain).await?{results.push(json!({"workRef":work,"state":"not_found"}));continue;}
+        // A failed work query cannot leave the surrounding batch transaction aborted.
+        sqlx::query("SAVEPOINT dossier_work").execute(&mut *tx).await?;
+        match dossier::read_in(&mut tx,&[*work],&cutoff).await{
+            Ok(mut values)=>match values.remove(work){Some(mut value)=>match dossier::select(&mut value,&input.selection){Ok(())=>results.push(json!({"workRef":work,"state":"available","dossier":value})),Err(reason)=>results.push(json!({"workRef":work,"state":"invalid_selection","reason":reason}))},None=>results.push(json!({"workRef":work,"state":"not_found"}))},
+            Err(_)=>{sqlx::query("ROLLBACK TO SAVEPOINT dossier_work").execute(&mut *tx).await?;results.push(json!({"workRef":work,"state":"unavailable"}));}
         }
-        Err(_) => {
-            local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "note_material_unavailable")
-        }
+        sqlx::query("RELEASE SAVEPOINT dossier_work").execute(&mut *tx).await?;
     }
+    tx.commit().await?;
+    Ok(json!({"contract":dossier::VERSION,"asOf":cutoff,"results":results}))
 }

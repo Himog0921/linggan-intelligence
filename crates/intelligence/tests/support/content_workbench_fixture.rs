@@ -129,6 +129,8 @@ pub async fn cited_doc(db: &Database) -> WorkDocument {
         f.source_ref,
         Some(work),
         &SourceField::Body,
+        &f.fragment_id,
+        &as_of,
     )
     .await
     .unwrap();
@@ -141,6 +143,8 @@ pub async fn cited_doc(db: &Database) -> WorkDocument {
     doc.excerpts.push(Excerpt {
         id,
         citation: Citation {
+            block_ref: source.block_ref.clone(),
+            as_of: source.as_of.clone(),
             source_kind: SourceKind::Note,
             source_ref: f.source_ref,
             work_ref: Some(work),
@@ -170,12 +174,15 @@ pub async fn comment_doc(db: &Database) -> WorkDocument {
     dossier::fixture::submit_package(db,"comments",serde_json::json!({"contentExternalId":"dossier-note"}),serde_json::json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"commentId":"creation-quote","noteId":"dossier-note","text":"这是一条可精确定位的合成匿名原声🙂\n需要继续核验来源资格。"}})).await;
     let source_ref:Uuid=sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment_current WHERE comment_external_id='creation-quote'").fetch_one(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *tx).await.unwrap();
     let (source, _) = read_source_in(
         &mut tx,
         &SourceKind::Comment,
         source_ref,
         Some(work),
         &SourceField::CommentBody,
+        &format!("{source_ref}.comment_body"),
+        &as_of,
     )
     .await
     .unwrap();
@@ -186,6 +193,8 @@ pub async fn comment_doc(db: &Database) -> WorkDocument {
     doc.excerpts.push(Excerpt {
         id,
         citation: Citation {
+            block_ref: source.block_ref.clone(),
+            as_of: source.as_of.clone(),
             source_kind: SourceKind::Comment,
             source_ref,
             work_ref: Some(work),

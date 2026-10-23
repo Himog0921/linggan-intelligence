@@ -21,12 +21,12 @@ mod source;
 #[path = "topic_map_research/windows.rs"]
 mod windows;
 pub(crate) use queue::{
-    attach_legacy_media_aliases, overlaps_unknown_dispatch, queue_automatic_run, queue_research_run,
+    overlaps_unknown_dispatch, queue_automatic_run, queue_research_run,
 };
 #[cfg(test)]
 use restoration::sources_current;
 pub(crate) use restoration::{
-    research_result_sources_current, restore_legacy_scoped, restore_scoped_window, restore_window,
+    research_result_sources_current, restore_scoped_window, restore_window,
 };
 pub(crate) use source::{load_inputs, load_inputs_for_works, manifest_source_work_refs};
 pub(crate) use windows::{
@@ -143,9 +143,8 @@ pub(crate) struct ResearchInput {
     pub coverage: Value,
 }
 
-const INPUT_CONTRACT: &str = "topic-map.source-windows.v2";
+pub(crate) const INPUT_CONTRACT: &str = "topic-map.source-windows.v3";
 const PARENT_CONTEXT_FIELD: &str = "parent_comment_context";
-const RESEARCH_WINDOW_CHARS: usize = 900;
 pub async fn apply_research_command(
     db: &Database,
     command: &ResearchCommand,
@@ -306,7 +305,7 @@ pub async fn read_research_progress(db: &Database, domain: Uuid) -> Result<Value
     let targets=sqlx::query("SELECT t.target_ref,t.target_kind,t.display_name,t.identity_key FROM collection_observation_target t JOIN observation_domain_target membership USING(target_ref)WHERE membership.domain_ref=$1 AND t.lifecycle_state<>'dismissed'ORDER BY t.display_name,t.target_ref LIMIT 100").bind(domain).fetch_all(db.pool()).await?;
     let rounds=sqlx::query("SELECT r.*,r.created_at::text AS created,(SELECT count(*)FROM linggan_topic_map_collection_slot s WHERE s.round_ref=r.round_ref)AS reserved_count FROM linggan_topic_map_collection_round r WHERE r.domain_ref=$1 ORDER BY created_at DESC LIMIT 20").bind(domain).fetch_all(db.pool()).await?;
     Ok(
-        json!({"domainRef":domain,"methodVersion":METHOD_VERSION,"policy":policy,"targets":targets.iter().map(|r|json!({"targetRef":r.get::<Uuid,_>("target_ref"),"kind":r.get::<String,_>("target_kind"),"displayName":r.get::<Option<String>,_>("display_name").unwrap_or(r.get::<String,_>("identity_key")),"domainRef":domain})).collect::<Vec<_>>(),"collectionRounds":rounds.iter().map(|r|json!({"roundRef":r.get::<Uuid,_>("round_ref"),"kind":r.get::<String,_>("kind"),"state":r.get::<String,_>("state"),"reason":r.get::<Option<String>,_>("last_reason"),"detailSlotsReserved":r.get::<i64,_>("reserved_count"),"detailLimit":r.get::<i32,_>("detail_limit"),"createdAt":r.get::<String,_>("created")})).collect::<Vec<_>>(),"usage":{"chargedTokens":usage.get::<i64,_>("charged"),"reservedTokens":usage.get::<i64,_>("reserved"),"timezone":"Asia/Shanghai"},"summary":summary,"currentMethodSummary":current_method_summary,"processingLimits":{"automaticBatchWindows":20,"windowChars":RESEARCH_WINDOW_CHARS,"primaryCommentsPerWindow":3},"runListLimit":30,"runs":rows.iter().map(research_run_progress).collect::<Vec<_>>(),"models":models.iter().map(|r|json!({"configRef":r.get::<Uuid,_>("config_ref"),"modelId":r.get::<String,_>("model_id"),"inputTokenLimit":r.get::<i32,_>("input_token_limit"),"outputTokenLimit":r.get::<i32,_>("output_token_limit"),"maxAttempts":r.get::<i32,_>("max_attempts"),"timeoutSeconds":r.get::<i32,_>("timeout_seconds")})).collect::<Vec<_>>() }),
+        json!({"domainRef":domain,"methodVersion":METHOD_VERSION,"policy":policy,"targets":targets.iter().map(|r|json!({"targetRef":r.get::<Uuid,_>("target_ref"),"kind":r.get::<String,_>("target_kind"),"displayName":r.get::<Option<String>,_>("display_name").unwrap_or(r.get::<String,_>("identity_key")),"domainRef":domain})).collect::<Vec<_>>(),"collectionRounds":rounds.iter().map(|r|json!({"roundRef":r.get::<Uuid,_>("round_ref"),"kind":r.get::<String,_>("kind"),"state":r.get::<String,_>("state"),"reason":r.get::<Option<String>,_>("last_reason"),"detailSlotsReserved":r.get::<i64,_>("reserved_count"),"detailLimit":r.get::<i32,_>("detail_limit"),"createdAt":r.get::<String,_>("created")})).collect::<Vec<_>>(),"usage":{"chargedTokens":usage.get::<i64,_>("charged"),"reservedTokens":usage.get::<i64,_>("reserved"),"timezone":"Asia/Shanghai"},"summary":summary,"currentMethodSummary":current_method_summary,"processingLimits":{"automaticBatchWindows":20,"materialSelection":"whole_note","primaryCommentsPerWindow":3},"runListLimit":30,"runs":rows.iter().map(research_run_progress).collect::<Vec<_>>(),"models":models.iter().map(|r|json!({"configRef":r.get::<Uuid,_>("config_ref"),"modelId":r.get::<String,_>("model_id"),"inputTokenLimit":r.get::<i32,_>("input_token_limit"),"outputTokenLimit":r.get::<i32,_>("output_token_limit"),"maxAttempts":r.get::<i32,_>("max_attempts"),"timeoutSeconds":r.get::<i32,_>("timeout_seconds")})).collect::<Vec<_>>() }),
     )
 }
 

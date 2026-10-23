@@ -39,7 +39,7 @@ fn domain() -> Uuid {
 async fn policy(db: &Database, config: Uuid, name: &str) -> Uuid {
     let command: CreateStudyPolicyCommand = serde_json::from_value(json!({
         "domainRef":domain(),"methodName":name,"parentPolicyRef":null,"modelConfigRef":config,
-        "defaults":{"commentBudget":1,"contextCharacterBudget":1},
+        "defaults":{"commentBudget":1},
         "stageInstructions":{"semantic":"","resolution":"","pair":""}}))
     .unwrap();
     let saved = create_study_policy(db, command).await.unwrap();
@@ -84,6 +84,7 @@ async fn setup(name: &str, count: usize) -> Proof {
         include_str!("../../../../database/migrations/0111_comment_study_pair_failure_state.sql"),
         include_str!("../../../../database/migrations/0112_comment_study_membership_revision.sql"),
         include_str!("../../../../database/migrations/0114_comment_study_effective_head.sql"),
+        include_str!("../../../../database/migrations/0146_comment_study_full_context.sql"),
     ] {
         sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
     }
@@ -142,7 +143,7 @@ async fn setup(name: &str, count: usize) -> Proof {
     }
     let command = json!({"requestRef":Uuid::new_v4(),"domainRef":domain(),"policyRef":method,
         "scope":{"kind":"works","workRefs":[work]},"mode":"new_only",
-        "limits":{"commentBudget":100,"contextCharacterBudget":6000,"tokenLimit":100000},"reason":null});
+        "limits":{"commentBudget":100,"tokenLimit":100000},"reason":null});
     Proof {
         application: app(LocalDatabaseState::Ready(db.clone())),
         db,

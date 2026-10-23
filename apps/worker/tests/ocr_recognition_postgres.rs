@@ -83,37 +83,10 @@ async fn configure_recognition(
     .await;
     model
 }
-async fn apply_manual_ocr_migrations(db: &linggan_storage_postgres::Database) {
-    for migration in [
-        include_str!("../../../database/migrations/0142_ocr_adoption.sql"),
-        include_str!("../../../database/migrations/0143_ocr_quality_audit.sql"),
-        include_str!("../../../database/migrations/0144_ocr_manual_recognition.sql"),
-    ] {
-        sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
-    }
-}
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
 async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() {
     let db = fixture::db("ocr_recognition_owned").await;
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0142_ocr_adoption.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0143_ocr_quality_audit.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0144_ocr_manual_recognition.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
     let work_key = "ocr-recognition-three-synthetic";
     let work = ocr::admit(&db, work_key, 1, &image(1), "image/png").await;
     ocr::admit(&db, work_key, 2, &image(2), "image/png").await;
@@ -174,6 +147,7 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     assert_eq!(ready["state"], "ready");
     let scope = ready["scope"]["sha256"].as_str().unwrap().to_owned();
     let request = StartRun {
+        slot_keys: vec![],
         command_ref: Uuid::new_v4(),
         expected_scope_sha256: scope,
     };
@@ -218,25 +192,42 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     assert_eq!(run["completedImages"], 3);
     assert_eq!(run["totalImages"], 3);
     assert_eq!(run["images"].as_array().unwrap().len(), 3);
-    assert_eq!(run["coverTitle"], "合成封面标题");
-    assert_eq!(run["coverTitleStatus"], "adopted");
+    assert!(run.get("coverTitle").is_none());
     let images = run["images"].as_array().unwrap();
     assert!(
-        images[1]["regions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|region| region["role"] == "chapter_heading" && region["text"] == "内页章节标题"),
-        "an interior heading remains an image region and is never promoted to coverTitle"
+        images[1]["ordinal"].is_null(),
+        "a partial observation does not invent a page number"
     );
     assert!(
-        images[1]["regions"]
+        images[1]["blocks"]
             .as_array()
             .unwrap()
             .iter()
-            .flat_map(|region| region["spans"].as_array().unwrap())
-            .any(|span| span["status"] == "pending"),
-        "partial image text is a pending Unicode range rather than fabricated certainty"
+            .any(|b| b["text"] == "42")
+    );
+    assert!(
+        images[1]["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["issues"].as_array().is_some_and(|i| !i.is_empty()))
+    );
+    assert_eq!(
+        linggan_evidence::material_reading::read_candidates(&db, work)
+            .await
+            .unwrap()
+            .len(),
+        3
+    );
+    let current_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_material_unit WHERE content_public_ref=$1 AND kind='image' AND current_reading_ref IS NOT NULL").bind(work).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        current_count, 0,
+        "cloud reread is an explicit candidate only"
+    );
+    assert_eq!(
+        run["scope"]["images"].as_array().unwrap().len(),
+        3,
+        "terminal results expose a fresh scope for an explicit new run"
     );
     assert!(
         run["images"]
@@ -436,7 +427,7 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     assert_eq!(withdrawn["images"][0]["state"], "unknown");
     assert!(withdrawn["images"][0]["originalUrl"].is_null());
     assert!(withdrawn["images"][0]["rawJson"].is_null());
-    assert_eq!(withdrawn["images"][0]["regions"], serde_json::json!([]));
+    assert_eq!(withdrawn["images"][0]["blocks"], serde_json::json!([]));
     wire.finish().await;
 }
 
@@ -444,7 +435,6 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
 async fn second_image_schema_failure_stops_without_sending_the_third_image() {
     let db = fixture::db("ocr_recognition_second_failure_owned").await;
-    apply_manual_ocr_migrations(&db).await;
     let work_key = "ocr-recognition-second-failure";
     let work = ocr::admit(&db, work_key, 1, &image(31), "image/png").await;
     ocr::admit(&db, work_key, 2, &image(32), "image/png").await;
@@ -463,6 +453,7 @@ async fn second_image_schema_failure_stops_without_sending_the_third_image() {
         &db,
         work,
         &StartRun {
+            slot_keys: vec![],
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },
@@ -523,7 +514,6 @@ async fn second_image_schema_failure_stops_without_sending_the_third_image() {
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
 async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend() {
     let db = fixture::db("ocr_recognition_control_projection_owned").await;
-    apply_manual_ocr_migrations(&db).await;
     let adapter = adapter();
     let owner = ExecutorSession::acquire(&db, "synthetic-manual-ocr-control", 4)
         .await
@@ -545,6 +535,7 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
         &db,
         cancelled_work,
         &StartRun {
+            slot_keys: vec![],
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },
@@ -585,6 +576,7 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
         &db,
         cancelled_work,
         &StartRun {
+            slot_keys: vec![],
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: read_cancelled["scope"]["sha256"]
                 .as_str()
@@ -630,6 +622,7 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
         &db,
         recovery_work,
         &StartRun {
+            slot_keys: vec![],
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: recovery_scope,
         },
@@ -712,7 +705,6 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
 async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
     let db = fixture::db("ocr_recognition_source_scope_owned").await;
-    apply_manual_ocr_migrations(&db).await;
     let work_key = "ocr-recognition-source-scope";
     let work = ocr::admit(&db, work_key, 1, &image(61), "image/png").await;
     // The same slot receives a newer verified replica. The prior blob must never enter a
@@ -735,6 +727,7 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
         &db,
         work,
         &StartRun {
+            slot_keys: vec![],
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },

@@ -1,4 +1,4 @@
-//! Bounded, source-qualified author responses and cross-work comparisons.
+//! Source-qualified author responses with whole canonical blocks and note context.
 use crate::topic_map_research::{self as research, ResearchInput};
 use linggan_evidence::creator_discovery::Fragment;
 use serde_json::{Value, json};
@@ -26,9 +26,7 @@ pub(crate) use unknown::blocks_comparison as blocks_unknown_dispatch;
 #[path = "comparison/tests.rs"]
 mod tests;
 
-const MAX_CHARS: usize = 3000;
 const MAX_UNITS_PER_WORK: usize = 2;
-const PARENT_CHARS: usize = 160;
 const TERMINAL: [&str; 7] = [
     "succeeded",
     "no_signal",
@@ -83,9 +81,6 @@ fn scope(value: &Value) -> Option<Vec<Uuid>> {
     (refs.iter().copied().collect::<BTreeSet<_>>().len() == refs.len()).then_some(refs)
 }
 
-fn brief(value: &Value, max: usize) -> String {
-    value.as_str().unwrap_or("").chars().take(max).collect()
-}
 
 fn build_comparison(
     inputs: &[ResearchInput],
@@ -124,7 +119,15 @@ fn build_comparison(
         .copied()
         .collect();
     let full = research::with_comparison_context(primary.clone(), inputs, &available);
-    let spans = selected_spans(&selected);
+    let mut spans = selected_spans(&selected);
+    for source in inputs.iter().filter(|i| selected_works.contains(&i.work.work_ref)) {
+        for fragment in &source.work.fragments {
+            if !spans.iter().any(|s| s.work == source.work.work_ref && s.origin == fragment.fragment_id) {
+                spans.push(Span { work: source.work.work_ref, origin: fragment.fragment_id.clone(),
+                    context_field: Some(format!("work_context:{}", fragment.field)), start: fragment.start, end: fragment.end });
+            }
+        }
+    }
     let sources = comparison_fragments(inputs, &spans)?;
     let discussions = selected_discussions(&selected, &sources)?;
     let ComparisonFragments {
@@ -150,10 +153,10 @@ fn build_comparison(
         .map(|f| f.text.chars().count())
         .sum();
     let mut input = full.clone();
-    input.coverage = json!({"inputContract":full.coverage["inputContract"],"configRef":full.coverage["configRef"],
+    input.coverage = json!({"inputContract":full.coverage["inputContract"],"configRef":full.coverage["configRef"],"asOf":full.coverage["asOf"],
         "kind":"comparison","scopeWorkRefs":requested,"availableWorkRefs":available,"selectedWorkRefs":selected_works,
         "sourceChars":source_chars,"coveredChars":evidence_chars,"evidenceChars":evidence_chars,"contextChars":context_chars,
-        "inputChars":evidence_chars+context_chars,"maxChars":MAX_CHARS,"state":"partial",
+        "inputChars":evidence_chars+context_chars,"materialSelection":"selected_discussions_with_whole_note_context","state":"partial",
         "availableDiscussionCount":candidates.len(),"selectedDiscussionCount":selected.len(),
         "selectionPolicy":"current_units_shared_topic_counterexample_first_v1","selectedDiscussions":discussions,
         "fragmentOrigins":origins,"fragmentWorkRefs":owners,
@@ -199,33 +202,22 @@ fn comparison_fragments(
             .find(|i| i.work.work_ref == span.work)
             .and_then(|i| i.fragments.iter().find(|f| f.fragment_id == span.origin))
             .ok_or("comparison_source_unavailable")?;
-        let text: String = source
-            .text
-            .chars()
-            .skip(span.start - source.start)
-            .take(span.end - span.start)
-            .collect();
-        if text.chars().count() != span.end - span.start {
+        if span.start < source.start || span.end > source.end || span.start >= span.end {
             return Err("comparison_source_range_invalid");
         }
-        let field = span.context_field.as_deref().unwrap_or(&source.field);
-        let marker = if field.starts_with("work_context:") {
-            "context.chars"
-        } else {
-            "chars"
-        };
-        let id = format!("{}.{marker}.{}.{}", span.origin, span.start, span.end);
+        // A block selected as author evidence can also supply a reply's context.
+        // Its content is sent once; discussion citations preserve each use.
+        let primary = spans.iter().any(|other| other.work == span.work
+            && other.origin == span.origin && other.context_field.is_none());
+        let field = if primary { source.field.as_str() } else { span.context_field.as_deref().unwrap_or(&source.field) };
+        let id = if field.starts_with("work_context:") { format!("{}.context", span.origin) } else { span.origin.clone() };
+        if fragments.iter().any(|f: &Fragment| f.fragment_id == id) { continue; }
         origins.insert(id.clone(), json!(span.origin));
         owners.insert(id.clone(), json!(span.work));
-        fragments.push(Fragment {
-            fragment_id: id,
-            source_ref: source.source_ref,
-            source_version: source.source_version.clone(),
-            field: field.into(),
-            start: span.start,
-            end: span.end,
-            text,
-        });
+        let mut fragment = source.clone();
+        fragment.fragment_id = id;
+        fragment.field = field.into();
+        fragments.push(fragment);
     }
     Ok(ComparisonFragments {
         fragments,
@@ -251,7 +243,8 @@ fn selected_discussions(
                         sources.origins[&f.fragment_id] == span.origin
                             && sources.owners[&f.fragment_id] == json!(span.work)
                             && match &span.context_field {
-                                Some(field) => f.field == *field,
+                                Some(field) => f.field == *field
+                                    || field.strip_prefix("work_context:") == Some(f.field.as_str()),
                                 None => research::is_research_evidence(f),
                             }
                             && f.start <= span.start
@@ -262,14 +255,13 @@ fn selected_discussions(
             })
             .collect::<Result<_, &'static str>>()?;
         discussions.push(json!({"unitId":candidate.unit["unitId"],"workRef":candidate.work,"taskRef":candidate.task,
-            "label":brief(&candidate.unit["label"],120),"statement":brief(&candidate.unit["statement"],300),
-            "statementTruncated":candidate.unit["statement"].as_str().is_some_and(|s|s.chars().count()>300),
+            "label":candidate.unit["label"],"statement":candidate.unit["statement"],
             "speakerRole":candidate.unit["speakerRole"],"evidenceRole":candidate.unit["evidenceRole"],
             "comparedDefinitionRefs":candidate.unit["comparedDefinitionRefs"],
             "hierarchy":candidate.unit["hierarchy"].as_object().map(|h|json!({"parentTopicRef":h["parentTopicRef"],"parentDefinitionRef":h["parentDefinitionRef"]})),
-            "reason":brief(&candidate.unit["reason"],160),
+            "reason":candidate.unit["reason"],
             "status":candidate.unit["status"],"assignments":candidate.unit["assignments"].as_array().into_iter().flatten().map(|a|
-                json!({"topicRef":a["topicRef"],"definitionRef":a["definitionRef"],"label":brief(&a["label"],120),"reason":brief(&a["reason"],160)})).collect::<Vec<_>>(),
+                json!({"topicRef":a["topicRef"],"definitionRef":a["definitionRef"],"label":a["label"],"reason":a["reason"]})).collect::<Vec<_>>(),
             "evidence":evidence}));
     }
     Ok(discussions)

@@ -4,7 +4,7 @@ fn command() -> CreateStudyPolicyCommand {
     serde_json::from_value(json!({
         "domainRef":crate::comment_study_source::ADHD_DOMAIN_REF,"methodName":"合成研究方法",
         "parentPolicyRef":null,"modelConfigRef":Uuid::from_u128(10),
-        "defaults":{"commentBudget":100,"contextCharacterBudget":6000},
+        "defaults":{"commentBudget":100},
         "stageInstructions":{"semantic":"保留用户原意","resolution":"","pair":""}
     }))
     .unwrap()
@@ -25,7 +25,7 @@ fn model() -> StudyModelSnapshot {
 fn request_value() -> Value {
     json!({"domainRef":crate::comment_study_source::ADHD_DOMAIN_REF,"methodName":"合成",
         "modelConfigRef":Uuid::from_u128(10),"parentPolicyRef":null,
-        "defaults":{"commentBudget":100,"contextCharacterBudget":6000},
+        "defaults":{"commentBudget":100},
         "stageInstructions":{"semantic":"","resolution":"","pair":""}})
 }
 
@@ -62,7 +62,6 @@ fn all_three_stage_instructions_and_both_defaults_are_required() {
         ("stageInstructions", "resolution"),
         ("stageInstructions", "pair"),
         ("defaults", "commentBudget"),
-        ("defaults", "contextCharacterBudget"),
     ] {
         let mut value = request_value();
         value[section].as_object_mut().unwrap().remove(key);
@@ -108,11 +107,6 @@ fn create_request_enforces_existing_domain_id_and_budget_boundaries() {
     for value in [0, 3001] {
         let mut c = command();
         c.defaults.comment_budget = value;
-        assert!(c.validate().is_err());
-    }
-    for value in [0, 20001] {
-        let mut c = command();
-        c.defaults.context_character_budget = value;
         assert!(c.validate().is_err());
     }
     let mut c = command();
@@ -269,7 +263,6 @@ fn display_name_parent_and_default_budgets_do_not_change_method_hash() {
     c.method_name = "另一个名称".into();
     c.parent_policy_ref = Some(Uuid::from_u128(123));
     c.defaults.comment_budget = 300;
-    c.defaults.context_character_budget = 20000;
     let b = compile_study_method(&c, &model()).unwrap();
     assert_eq!(a, b);
 }
@@ -366,7 +359,7 @@ fn unsupported_and_unrecorded_methods_do_not_acquire_current_defaults() {
 #[test]
 fn canonical_json_has_explicit_utf8_order_and_preserves_unicode_text() {
     let v = json!({"z":[2,1],"a":{"é":"  原声😀\n","a":null},"\u{e000}":1,"\u{10000}":2});
-    let bytes = canonical_json_v1(&v).unwrap();
+    let bytes = canonical_json_v2(&v).unwrap();
     assert_eq!(
         String::from_utf8(bytes).unwrap(),
         "{\"a\":{\"a\":null,\"é\":\"  原声😀\\n\"},\"z\":[2,1],\"\u{e000}\":1,\"\u{10000}\":2}"
@@ -387,26 +380,26 @@ fn canonical_json_has_explicit_utf8_order_and_preserves_unicode_text() {
 }
 
 #[test]
-fn canonical_json_rejects_floats_and_excessive_nesting_but_accepts_all_integer_extremes() {
+fn canonical_json_preserves_coordinates_integer_extremes_and_rejects_excessive_nesting() {
     for v in [json!(1.0), json!({"nested":[1.5]}), json!(-0.0)] {
-        assert!(canonical_json_v1(&v).is_err());
+        assert_eq!(serde_json::from_slice::<Value>(&canonical_json_v2(&v).unwrap()).unwrap(), v);
     }
     for v in [json!(i64::MIN), json!(u64::MAX)] {
-        assert!(canonical_json_v1(&v).is_ok());
+        assert!(canonical_json_v2(&v).is_ok());
     }
     let mut v = json!(0);
     for _ in 0..66 {
         v = json!([v]);
     }
-    assert!(canonical_json_v1(&v).is_err());
+    assert!(canonical_json_v2(&v).is_err());
 }
 
 #[test]
-fn existing_worker_system_text_is_byte_preserved() {
+fn canonical_dossier_worker_instructions_match_frozen_rule_bytes() {
     for (s, digest) in [
         (
             StudyStage::Semantic,
-            "638878036ea105570bda2f40f4489cee58d41c433e10f191123cc78c667d7e81",
+            "b9096aee9ee22deec5737f00228f1286b5eb236cfc1a7444ab101190f3d83f97",
         ),
         (
             StudyStage::Resolution,

@@ -57,7 +57,7 @@ async fn insert(
 ) -> Result<SnapshotReceipt, Error> {
     let candidate = Uuid::new_v4();
     let inserted:Option<Uuid>=sqlx::query_scalar(r#"
-INSERT INTO linggan_note_material_snapshot(snapshot_ref,domain_ref,content_public_ref,snapshot_identity,
+INSERT INTO linggan_dossier_snapshot(snapshot_ref,domain_ref,content_public_ref,snapshot_identity,
 material_fingerprint,provenance_hash,input_contract,fingerprint_contract,dossier_contract,layer_version,as_of,ready,not_ready_reasons,columns,fragment_count)
 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::timestamptz,$12,$13,$14,$15)
 ON CONFLICT(domain_ref,content_public_ref,snapshot_identity) DO NOTHING RETURNING snapshot_ref
@@ -69,7 +69,7 @@ ON CONFLICT(domain_ref,content_public_ref,snapshot_identity) DO NOTHING RETURNIN
     let reference=match inserted {
         Some(reference)=>{
             for (ordinal,f) in input.fragments.iter().enumerate(){
-                sqlx::query("INSERT INTO linggan_note_material_fragment(snapshot_ref,ordinal,citation_id,field,source_ref,source_version,logical_position,text_hash,char_start,char_end) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+                sqlx::query("INSERT INTO linggan_dossier_fragment(snapshot_ref,ordinal,citation_id,field,source_ref,source_version,logical_position,text_hash,char_start,char_end) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
                 .bind(reference).bind(ordinal as i32).bind(&f.citation_id).bind(&f.field).bind(f.source_ref)
                 .bind(&f.source_version).bind(&f.logical_position).bind(&f.text_hash)
                 .bind(i32::try_from(f.start).map_err(|_|Error::Invalid("invalid_character_range"))?)
@@ -77,7 +77,7 @@ ON CONFLICT(domain_ref,content_public_ref,snapshot_identity) DO NOTHING RETURNIN
             }
             reference
         },
-        None=>sqlx::query_scalar("SELECT snapshot_ref FROM linggan_note_material_snapshot WHERE domain_ref=$1 AND content_public_ref=$2 AND snapshot_identity=$3")
+        None=>sqlx::query_scalar("SELECT snapshot_ref FROM linggan_dossier_snapshot WHERE domain_ref=$1 AND content_public_ref=$2 AND snapshot_identity=$3")
             .bind(input.domain_ref).bind(input.work_ref).bind(&input.snapshot_identity).fetch_one(&mut **tx).await?,
     };
     Ok(SnapshotReceipt {

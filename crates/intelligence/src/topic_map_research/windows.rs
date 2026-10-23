@@ -50,67 +50,6 @@ pub(super) fn update_source_coverage(input: &mut ResearchInput) {
     );
 }
 
-/// Unicode scalar offsets stay relative to the full qualified source. Newlines are
-/// retained; a paragraph boundary is preferred only when it makes forward progress.
-fn split_fragment(source: &Fragment, max_chars: usize) -> Vec<Fragment> {
-    let max_chars = max_chars.max(1);
-    let chars: Vec<char> = source.text.chars().collect();
-    let mut pieces = Vec::new();
-    let mut start = 0;
-    while start < chars.len() {
-        let hard_end = (start + max_chars).min(chars.len());
-        let end = if hard_end < chars.len() {
-            chars[start..hard_end]
-                .iter()
-                .rposition(|c| *c == '\n')
-                .map(|position| start + position + 1)
-                .filter(|end| *end > start)
-                .unwrap_or(hard_end)
-        } else {
-            hard_end
-        };
-        let absolute_start = source.start + start;
-        let absolute_end = source.start + end;
-        pieces.push(Fragment {
-            fragment_id: format!(
-                "{}.chars.{absolute_start}.{absolute_end}",
-                source
-                    .fragment_id
-                    .split(".chars.")
-                    .next()
-                    .unwrap_or(&source.fragment_id)
-            ),
-            source_ref: source.source_ref,
-            field: source.field.clone(),
-            source_version: source.source_version.clone(),
-            start: absolute_start,
-            end: absolute_end,
-            text: chars[start..end].iter().collect(),
-        });
-        start = end;
-    }
-    pieces
-}
-
-fn pack_fragments(fragments: Vec<Fragment>, max_chars: usize) -> Vec<Vec<Fragment>> {
-    let mut groups = Vec::new();
-    let mut group = Vec::new();
-    let mut chars = 0;
-    for fragment in fragments {
-        let size = fragment.text.chars().count();
-        if !group.is_empty() && chars + size > max_chars {
-            groups.push(std::mem::take(&mut group));
-            chars = 0;
-        }
-        chars += size;
-        group.push(fragment);
-    }
-    if !group.is_empty() {
-        groups.push(group);
-    }
-    groups
-}
-
 pub(crate) fn selected_comment_study(
     input: &ResearchInput,
     fragments: &[Fragment],
@@ -152,15 +91,17 @@ pub(crate) fn selected_comment_study(
     json!(selected)
 }
 
-/// Source groups retain every fragment's owner and offsets. Admission subtracts
-/// frozen current ranges before packing, so a newly acquired comment does not
-/// replay prior groups. Author context is a bounded prefix, not extra evidence;
-/// complete author text has its own lossless windows. Long parent context is paged.
-pub(crate) fn research_windows(input: &ResearchInput, max_chars: usize) -> Vec<ResearchInput> {
+/// A whole note is the minimum author context. Comments are grouped by explicit
+/// voice count, retaining every selected comment and its complete parents.
+pub(crate) fn research_windows(input: &ResearchInput) -> Vec<ResearchInput> {
+    let author: Vec<_> = input.fragments.iter()
+        .filter(|f| is_research_evidence(f) && !is_comment(f)).cloned().collect();
     let mut windows = Vec::new();
-    visit_source_windows(input, max_chars, |evidence, context, index, size| {
-        windows.push(source_window(input, evidence, context, index, size));
-    });
+    if !author.is_empty() { windows.push(source_window(input, author, Vec::new())); }
+    let comments: Vec<_> = input.fragments.iter().filter(|f| is_comment(f)).cloned().collect();
+    for group in comments.chunks(3) {
+        windows.push(source_window(input, group.to_vec(), comment_context(input, group)));
+    }
     let count = windows.len();
     for (index, window) in windows.iter_mut().enumerate() {
         window.coverage["windowIndex"] = json!(index);
@@ -169,57 +110,9 @@ pub(crate) fn research_windows(input: &ResearchInput, max_chars: usize) -> Vec<R
     windows
 }
 
-/// Count the exact canonical partition without cloning inputs or hashing prompts.
-pub(crate) fn research_window_count(input: &ResearchInput, max_chars: usize) -> usize {
-    let mut count = 0;
-    visit_source_windows(input, max_chars, |_, _, _, _| count += 1);
-    count
-}
-
-fn visit_source_windows(
-    input: &ResearchInput,
-    max_chars: usize,
-    mut visit: impl FnMut(Vec<Fragment>, Vec<Fragment>, usize, usize),
-) {
-    let max_chars = max_chars.max(1);
-    let author: Vec<_> = input
-        .fragments
-        .iter()
-        .filter(|f| is_research_evidence(f))
-        .filter(|f| !is_comment(f))
-        .flat_map(|f| split_fragment(f, max_chars.min(1200)))
-        .collect();
-    for evidence in pack_fragments(author, max_chars) {
-        visit(evidence, Vec::new(), 0, max_chars);
-    }
-    let evidence_limit = if max_chars > 1 {
-        max_chars.div_ceil(2)
-    } else {
-        1
-    };
-    let comments = input
-        .fragments
-        .iter()
-        .filter(|f| is_comment(f))
-        .flat_map(|f| split_fragment(f, evidence_limit.min(1200)))
-        .collect();
-    for evidence in comment_groups(comments, evidence_limit) {
-        let evidence_chars = chars(&evidence);
-        let context_limit = max_chars.saturating_sub(evidence_chars);
-        let context = comment_context(input, &evidence, context_limit);
-        let groups = if context_limit > 0 {
-            pack_fragments(context, context_limit)
-        } else {
-            Vec::new()
-        };
-        if groups.is_empty() {
-            visit(evidence, Vec::new(), 0, max_chars);
-        } else {
-            for (index, context) in groups.into_iter().enumerate() {
-                visit(evidence.clone(), context, index, max_chars);
-            }
-        }
-    }
+pub(crate) fn research_window_count(input: &ResearchInput) -> usize {
+    usize::from(input.fragments.iter().any(|f| is_research_evidence(f) && !is_comment(f)))
+        + input.fragments.iter().filter(|f| is_comment(f)).count().div_ceil(3)
 }
 
 fn chars(fragments: &[Fragment]) -> usize {
@@ -227,31 +120,7 @@ fn chars(fragments: &[Fragment]) -> usize {
 }
 
 fn is_comment(fragment: &Fragment) -> bool {
-    matches!(
-        fragment.field.as_str(),
-        "studied_comment" | "unresearched_comment"
-    )
-}
-
-fn comment_groups(fragments: Vec<Fragment>, max_chars: usize) -> Vec<Vec<Fragment>> {
-    let mut groups = Vec::new();
-    let mut group = Vec::new();
-    let mut size = 0;
-    for fragment in fragments {
-        let next = fragment.text.chars().count();
-        // Three independent voices bound structured output without discarding sources;
-        // source count is a request bound, never a minimum admission threshold.
-        if !group.is_empty() && (size + next > max_chars || group.len() == 3) {
-            groups.push(std::mem::take(&mut group));
-            size = 0;
-        }
-        size += next;
-        group.push(fragment);
-    }
-    if !group.is_empty() {
-        groups.push(group);
-    }
-    groups
+    matches!(fragment.field.as_str(), "studied_comment" | "unresearched_comment")
 }
 
 fn range_origin(input: &ResearchInput, fragment: &Fragment) -> String {
@@ -271,11 +140,7 @@ fn range_origin(input: &ResearchInput, fragment: &Fragment) -> String {
 fn comment_context(
     input: &ResearchInput,
     evidence: &[Fragment],
-    max_chars: usize,
 ) -> Vec<Fragment> {
-    if max_chars == 0 {
-        return Vec::new();
-    }
     let mut context = Vec::new();
     let mut parent_ids = BTreeSet::new();
     let origins: BTreeSet<_> = evidence.iter().map(|f| range_origin(input, f)).collect();
@@ -290,35 +155,13 @@ fn comment_context(
             parent_ids.insert(parent);
         }
     }
-    // Repeat at most 600 characters of qualified author context. The full work's
-    // tail remains evidence in author windows, and omission is explicit below.
-    let mut remaining = max_chars.min(600);
     for source in &input.work.fragments {
-        if remaining == 0 {
-            break;
-        }
         let mut piece = source.clone();
-        let count = source.text.chars().count().min(remaining).min(1200);
-        if count == 0 {
-            continue;
-        }
-        piece.end = piece.start + count;
-        piece.text = source.text.chars().take(count).collect();
-        piece.fragment_id = format!(
-            "{}.context.chars.{}.{}",
-            source.fragment_id, piece.start, piece.end
-        );
+        piece.fragment_id = format!("{}.context", source.fragment_id);
         piece.field = format!("work_context:{}", source.field);
         context.push(piece);
-        remaining -= count;
     }
-    for source in input
-        .fragments
-        .iter()
-        .filter(|f| parent_ids.contains(f.fragment_id.as_str()))
-    {
-        context.extend(split_fragment(source, max_chars.min(1200)));
-    }
+    context.extend(input.fragments.iter().filter(|source| parent_ids.contains(source.fragment_id.as_str())).cloned());
     context
 }
 
@@ -326,8 +169,6 @@ fn source_window(
     input: &ResearchInput,
     evidence: Vec<Fragment>,
     context: Vec<Fragment>,
-    context_index: usize,
-    max_chars: usize,
 ) -> ResearchInput {
     let evidence_chars = chars(&evidence);
     let context_chars = chars(&context);
@@ -336,7 +177,7 @@ fn source_window(
         let origin = f
             .fragment_id
             .split(if f.field.starts_with("work_context:") {
-                ".context.chars."
+                ".context"
             } else {
                 ".chars."
             })
@@ -363,27 +204,13 @@ fn source_window(
     window.fragments.extend(context);
     window.comment_study = selected_comment_study(input, &window.fragments, &origins);
     window.coverage["fragmentOrigins"] = origins;
-    window.coverage["windowChars"] = json!(if context_index == 0 {
-        evidence_chars
-    } else {
-        0
-    });
+    window.coverage["windowChars"] = json!(evidence_chars);
     window.coverage["evidenceChars"] = json!(evidence_chars);
     window.coverage["contextChars"] = json!(context_chars);
     window.coverage["inputChars"] = json!(evidence_chars + context_chars);
-    window.coverage["contextUnavailableForBudget"] =
-        json!(max_chars == evidence_chars && window.work.fragments.is_empty());
-    window.coverage["workContextPartial"] = json!(
-        window.work.fragments.is_empty()
-            && chars(&input.work.fragments)
-                > window
-                    .fragments
-                    .iter()
-                    .filter(|f| f.field.starts_with("work_context:"))
-                    .map(|f| f.text.chars().count())
-                    .sum()
-    );
-    window.coverage["repeatedEvidence"] = json!(context_index > 0);
+    window.coverage["workContextPartial"] = json!(false);
+    window.coverage["repeatedEvidence"] = json!(false);
+    window.coverage["materialSelection"] = json!("whole_note");
     window.coverage["sourceFragmentIds"] = json!(
         window
             .fragments
@@ -400,7 +227,6 @@ fn source_window(
     } else {
         Value::Null
     };
-    window.coverage["maxChars"] = json!(max_chars);
     identify_window(&mut window);
     window
 }

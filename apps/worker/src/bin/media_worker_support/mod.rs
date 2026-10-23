@@ -1,4 +1,5 @@
 pub(crate) mod ocr_vl;
+pub(crate) mod timed_text;
 
 use sha2::{Digest, Sha256};
 use std::io::Read;
@@ -87,12 +88,12 @@ pub(crate) fn prepare_output(storage_key: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-pub(crate) fn first_text_file(directory: &Path) -> Result<PathBuf, String> {
+pub(crate) fn first_json_file(directory: &Path) -> Result<PathBuf, String> {
     std::fs::read_dir(directory)
         .map_err(|error| format!("output_directory_read_failed:{error}"))?
         .filter_map(Result::ok)
         .map(|entry| entry.path())
-        .find(|path| path.extension().and_then(|value| value.to_str()) == Some("txt"))
+        .find(|path| path.extension().and_then(|value| value.to_str()) == Some("json"))
         .ok_or_else(|| "asr_output_missing".to_owned())
 }
 

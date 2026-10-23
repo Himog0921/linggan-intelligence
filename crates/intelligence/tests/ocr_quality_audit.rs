@@ -84,7 +84,7 @@ fn visible_brand_and_call_to_action_are_preserved_with_closed_roles() {
 fn sampling_is_work_first_deterministic_disjoint_and_does_not_fill_missing_pools() {
     let candidates: Vec<_> = (1..=12)
         .map(|n| Candidate {
-            adoption_ref: Uuid::from_u128(n),
+            reading_ref: Uuid::from_u128(n),
             work_ref: Uuid::from_u128(if n < 10 { 1 } else { n }),
             blob_sha256: format!("{n:064x}"),
             risk: true,
@@ -107,7 +107,7 @@ fn sampling_is_work_first_deterministic_disjoint_and_does_not_fill_missing_pools
     assert_eq!(a.len(), 6);
     assert_eq!(
         a.iter()
-            .map(|s| s.candidate.adoption_ref)
+            .map(|s| s.candidate.reading_ref)
             .collect::<std::collections::HashSet<_>>()
             .len(),
         6

@@ -76,6 +76,7 @@ export function createCapturePackage({
   if (!['xhs', 'douyin'].includes(platform)) {
     throw new Error('unsupported_linggan_producer_platform');
   }
+  if (asArray(records).length > 2048) throw new Error('capture_package_record_limit_exceeded');
   return {
     contractVersion: PACKAGE_VERSION,
     packageRef,
@@ -87,7 +88,7 @@ export function createCapturePackage({
       target: target && typeof target === 'object' && !Array.isArray(target) ? target : { basis: 'unknown' },
       layers: [boundedCoverageLayer(packageKind, { ...coverage, targetBasis: target?.basis })],
     },
-    records: asArray(records).slice(0, 2048),
+    records: asArray(records),
     ...(checkpoint === undefined ? {} : { checkpoint }),
   };
 }
@@ -321,7 +322,10 @@ export function packageMediaSlots({ platform, note, commentRecords = [], observe
     platform,
     observedAt,
     capturedAt,
-    target: { basis: 'known_set', contentExternalId: String(note?.noteId || note?.id || '') },
+    target: {
+      basis: 'known_set', contentExternalId: String(note?.noteId || note?.id || ''),
+      ...(note?.imageInventory ? { imageInventory: note.imageInventory } : {}),
+    },
     coverage: { observed: sources.length, attempted: 0, acquired: 0, verified: 0, notAttempted: sources.length, unknown: 0, stoppedReason: 'media_acquisition_not_started' },
     records: sources.map((candidate) => {
       // Ordinal belongs to the relationship purpose, not the mixed collector output. Seven body
@@ -329,7 +333,7 @@ export function packageMediaSlots({ platform, note, commentRecords = [], observe
       const ordinalScope = candidate.subject
         ? `${candidate.subject.type}:${candidate.subject.externalId}:${candidate.role}`
         : `content:${contentExternalId}:${candidate.role}`;
-      const slotOrdinal = (roleOrdinals.get(ordinalScope) || 0) + 1;
+      const slotOrdinal = candidate.page ?? ((roleOrdinals.get(ordinalScope) || 0) + 1);
       roleOrdinals.set(ordinalScope, slotOrdinal);
       // Slot identity says "this content's nth image/video". A URL is intentionally only an
       // observation; it can change without replacing the slot or a previously acquired blob.
@@ -343,7 +347,10 @@ export function packageMediaSlots({ platform, note, commentRecords = [], observe
         kind: 'media_slot',
         slotKey,
         observationRef: crypto.randomUUID(),
-        slot: { role: candidate.role, ordinal: slotOrdinal },
+        slot: {
+          role: candidate.role, ordinal: slotOrdinal,
+          ...(candidate.page ? { displayOrdinal: candidate.page, displayOrderBasis: 'platform_explicit' } : {}),
+        },
         observation: {
           externalUri: candidate.url,
           candidateUris: candidate.candidateUris,
@@ -426,7 +433,7 @@ function mediaCandidateUris(value) {
     ? [value]
     : [
       value?.url, value?.urlDefault, value?.originUrl, value?.downloadUrl,
-      value?.urlList, value?.url_list, value?.candidates, value?.uri,
+      value?.urlList, value?.url_list, value?.candidates, value?.candidateUris, value?.uri,
     ];
   return [...new Set(values
     .flatMap((candidate) => Array.isArray(candidate) ? candidate : [candidate])
@@ -479,17 +486,17 @@ function collectMediaCandidates(note = {}, commentRecords = []) {
     ? [value]
     : [
       value?.url, value?.urlDefault, value?.originUrl, value?.downloadUrl,
-      value?.urlList, value?.url_list, value?.candidates, value?.uri,
+      value?.urlList, value?.url_list, value?.candidates, value?.candidateUris, value?.uri,
     ]);
   const normalizeUris = (values) => [...new Set(values
     .flatMap((candidate) => Array.isArray(candidate) ? candidate : [candidate])
     .map((candidate) => String(candidate || '').trim())
     .filter(Boolean))];
-  const push = (role, value, subject = null) => {
+  const push = (role, value, subject = null, page = null) => {
     const candidateUris = normalizeUris(candidateValues(value));
     if (!candidateUris.length) return;
     if (role !== 'live_photo') {
-      output.push({ role, url: candidateUris[0], candidateUris, ...(subject ? { subject } : {}) });
+      output.push({ role, url: candidateUris[0], candidateUris, ...(subject ? { subject } : {}), ...(page ? { page } : {}) });
       return;
     }
     const stillCandidates = normalizeUris(candidateValues(value?.coverUrl || value?.still));
@@ -504,7 +511,16 @@ function collectMediaCandidates(note = {}, commentRecords = []) {
       },
     });
   };
-  asArray(note.images).forEach((value) => push('image', value));
+  if (Array.isArray(note.imagePositions)) {
+    const explicit = note.imageInventory?.state === 'complete'
+      && note.imageInventory?.source === 'platform_image_list';
+    note.imagePositions.forEach((value) => {
+      const page = explicit && Number.isInteger(value?.page) && value.page > 0 ? value.page : null;
+      push('image', value, null, page);
+    });
+  } else {
+    asArray(note.images).forEach((value) => push('image', value));
+  }
   if (note.cover || note.coverUrl) push('cover', note.cover || note.coverUrl);
   if (note.video) push('video', note.video);
   asArray(note.livePhotoStreams).forEach((value) => push('live_photo', value));

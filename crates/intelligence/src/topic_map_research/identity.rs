@@ -55,6 +55,9 @@ pub(super) fn origin_id(input: &ResearchInput, fragment: &Fragment) -> String {
 /// Physical request references remain available separately for audit.
 pub(crate) fn semantic_source_identity(input: &ResearchInput, fragment: &Fragment) -> String {
     let origin = origin_id(input, fragment);
+    if let Some(unit) = fragment.unit_ref {
+        return format!("{}.{}.{}", input.work.work_ref, unit, origin.rsplit('.').next().unwrap_or(""));
+    }
     match fragment.field.as_str() {
         "title" | "body" => format!(
             "{}.{}",
@@ -71,16 +74,16 @@ pub(crate) fn semantic_source_identity(input: &ResearchInput, fragment: &Fragmen
 pub(super) fn fragment_reference(input: &ResearchInput, fragment: &Fragment) -> Value {
     let origin = origin_id(input, fragment);
     json!({"fragmentId":fragment.fragment_id,"sourceFragmentId":origin,
-        "sourceRef":fragment.source_ref,"sourceVersion":fragment.source_version,"field":fragment.field,
+        "sourceRef":fragment.source_ref,"sourceVersion":fragment.source_version,"field":fragment.field,"blockRef":origin,"asOf":input.coverage["asOf"],"readingRef":fragment.reading_ref,"unitRef":fragment.unit_ref,
         "start":fragment.start,"end":fragment.end,"textHash":creator_discovery::hash(&fragment.text),
         "sourceTextHash":input.coverage["sourceHashes"][&origin],
-        "workRef":fragment.fragment_id.split('.').next(),"contextOnly":!is_research_evidence(fragment)})
+        "workRef":fragment.fragment_id.split('.').next(),"contextOnly":!is_research_evidence(fragment),"speaker":fragment.speaker,"structureHash":creator_discovery::hash(&fragment.structure.to_string()),"issues":fragment.issues})
 }
 
 fn semantic_fragment(input: &ResearchInput, fragment: &Fragment) -> Value {
     json!({"sourceFragmentId":semantic_source_identity(input,fragment),"field":fragment.field,
         "start":fragment.start,"end":fragment.end,"textHash":creator_discovery::hash(&fragment.text),
-        "contextOnly":!is_research_evidence(fragment)})
+        "contextOnly":!is_research_evidence(fragment),"speaker":fragment.speaker,"structure":fragment.structure,"issues":fragment.issues})
 }
 
 fn semantic_comment_study(input: &ResearchInput) -> Value {

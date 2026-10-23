@@ -7,29 +7,33 @@ use sqlx::Row;
 use uuid::Uuid;
 pub async fn detail(db: &Database, sample: Uuid) -> Result<Value, FoundationError> {
     let mut tx = db.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
     let row=sqlx::query("SELECT s.*,o.result,o.failure_code,o.vision_qualified,r.model_id,r.prompt_version,r.connection_version_ref FROM linggan_ocr_audit_sample s JOIN linggan_ocr_audit_run r USING(run_ref) LEFT JOIN linggan_ocr_audit_observation o USING(sample_ref) WHERE s.sample_ref=$1").bind(sample).fetch_optional(&mut *tx).await?.ok_or(FoundationError::NotFound)?;
     let mut result = json!({"sampleRef":sample,"runRef":row.get::<Uuid,_>("run_ref"),"pool":row.get::<String,_>("pool"),"modelId":row.get::<String,_>("model_id"),"promptVersion":row.get::<String,_>("prompt_version"),"visionQualified":row.get::<Option<bool>,_>("vision_qualified"),"failureCode":row.get::<Option<String>,_>("failure_code"),"modelOpinion":row.get::<Option<Value>,_>("result"),"localSnapshot":row.get::<Value,_>("local_snapshot")});
-    if let Some(adoption) = row.get::<Option<Uuid>, _>("adoption_ref") {
-        let s = source::load_in(&mut tx, adoption)
+    if let Some(reading) = row.get::<Option<Uuid>, _>("reading_ref") {
+        let s = source::load_in(&mut tx, reading)
             .await?
             .ok_or(FoundationError::NotFound)?;
-        result["adoptionRef"] = json!(adoption);
+        s.validate_snapshot(&row.get::<Value, _>("local_snapshot"))?;
+        result["readingRef"] = json!(reading);
         result["workRef"] = json!(s.work_ref);
         result["imageRef"] = json!(s.slot_key);
-        result["blobSha256"] = json!(s.input.image.blob_sha256);
-        result["localAssessment"] = json!(s.assessment);
-        result["rawBlocks"] = json!(s.input.layout.blocks);
-        let url:Option<String>=sqlx::query_scalar("SELECT mat.local_asset_path FROM linggan_media_materialization mat JOIN linggan_media_download_attempt attempt USING(download_attempt_ref) JOIN linggan_media_observation observation ON observation.observation_ref=attempt.media_observation_ref WHERE mat.blob_sha256=$1 AND observation.slot_key=$2 ORDER BY mat.verified_at DESC LIMIT 1").bind(&s.input.image.blob_sha256).bind(&s.slot_key).fetch_optional(&mut *tx).await?;
-        result["originalAssetUrl"] = json!(url);
-        let reviews:Value=sqlx::query_scalar("SELECT COALESCE(jsonb_agg(to_jsonb(v) ORDER BY revision),'[]') FROM linggan_media_ocr_review v WHERE adoption_ref=$1").bind(adoption).fetch_one(&mut *tx).await?;
+        result["blobSha256"] = json!(s.image.blob_sha256);
+        result["unitRef"] = json!(s.unit_ref);
+        result["blocks"] = json!(s.blocks);
+        result["readingIssues"] = json!(s.issues);
+        result["originalAssetUrl"] = json!(s.original_url);
+        let reviews:Value=sqlx::query_scalar("SELECT COALESCE(jsonb_agg(to_jsonb(v) ORDER BY revision),'[]') FROM linggan_ocr_audit_review v WHERE sample_ref=$1").bind(sample).fetch_one(&mut *tx).await?;
         result["reviews"] = reviews;
     }
     let issues:Value=sqlx::query_scalar("SELECT COALESCE(jsonb_agg(to_jsonb(v) ORDER BY position),'[]') FROM linggan_ocr_audit_issue v WHERE sample_ref=$1").bind(sample).fetch_one(&mut *tx).await?;
     result["issues"] = issues;
     Ok(result)
 }
-pub async fn latest_for_adoption(db: &Database, id: Uuid) -> Result<Value, FoundationError> {
-    let sample:Option<Uuid>=sqlx::query_scalar("SELECT sample_ref FROM linggan_ocr_audit_sample s WHERE adoption_ref=$1 ORDER BY EXISTS(SELECT 1 FROM linggan_ocr_audit_observation o WHERE o.sample_ref=s.sample_ref AND o.result IS NOT NULL) DESC,created_at DESC LIMIT 1").bind(id).fetch_optional(db.pool()).await?;
+pub async fn latest_for_reading(db: &Database, id: Uuid) -> Result<Value, FoundationError> {
+    let sample:Option<Uuid>=sqlx::query_scalar("SELECT sample_ref FROM linggan_ocr_audit_sample s WHERE reading_ref=$1 ORDER BY EXISTS(SELECT 1 FROM linggan_ocr_audit_observation o WHERE o.sample_ref=s.sample_ref AND o.result IS NOT NULL) DESC,created_at DESC LIMIT 1").bind(id).fetch_optional(db.pool()).await?;
     match sample {
         Some(s) => detail(db, s).await,
         None => Ok(json!({"sampleRef":null,"state":"not_sampled"})),
@@ -99,7 +103,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
                 reserved += s.get::<Option<i64>, _>("reserved_tokens").unwrap_or(0);
             }
             let mut work_ref = None;
-            if let Some(adoption) = s.get::<Option<Uuid>, _>("adoption_ref") {
+            if let Some(adoption) = s.get::<Option<Uuid>, _>("reading_ref") {
                 match source::load_in(&mut tx, adoption).await? {
                     Some(source) => work_ref = Some(source.work_ref),
                     None => {
@@ -115,7 +119,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
             .fetch_one(&mut *tx)
             .await?;
             differences += issues;
-            let reviews:Vec<Value>=sqlx::query_scalar("SELECT metrics FROM linggan_media_ocr_review WHERE sample_ref=$1 AND decision<>'pending' ORDER BY revision DESC LIMIT 1").bind(id).fetch_all(&mut *tx).await?;
+            let reviews:Vec<Value>=sqlx::query_scalar("SELECT metrics FROM linggan_ocr_audit_review WHERE sample_ref=$1 AND decision<>'pending' ORDER BY revision DESC LIMIT 1").bind(id).fetch_all(&mut *tx).await?;
             if !reviews.is_empty() {
                 checked += 1;
                 if issues == 0 {
@@ -124,7 +128,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
                     reviewed_disagreements += 1
                 }
             }
-            let pending_issues:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_ocr_audit_issue issue WHERE issue.sample_ref=$1 AND COALESCE((SELECT decision FROM linggan_media_ocr_review WHERE issue_ref=issue.issue_ref ORDER BY revision DESC LIMIT 1),'pending')='pending'").bind(id).fetch_one(&mut *tx).await?;
+            let pending_issues:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_ocr_audit_issue issue WHERE issue.sample_ref=$1 AND COALESCE((SELECT decision FROM linggan_ocr_audit_review WHERE issue_ref=issue.issue_ref ORDER BY revision DESC LIMIT 1),'pending')='pending'").bind(id).fetch_one(&mut *tx).await?;
             pending += pending_issues;
             for value in reviews {
                 let m: HumanMetrics =
@@ -140,7 +144,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
             if s.get::<Option<String>, _>("failure_code").is_some() {
                 failures += 1;
             }
-            visible.push(json!({"sampleRef":id,"workRef":work_ref,"pool":pool,"adoptionRef":s.get::<Option<Uuid>,_>("adoption_ref"),"observed":s.get::<bool,_>("observed"),"visionQualified":s.get::<Option<bool>,_>("vision_qualified"),"differenceCount":issues,"failureCode":s.get::<Option<String>,_>("failure_code")}));
+            visible.push(json!({"sampleRef":id,"workRef":work_ref,"pool":pool,"readingRef":s.get::<Option<Uuid>,_>("reading_ref"),"observed":s.get::<bool,_>("observed"),"visionQualified":s.get::<Option<bool>,_>("vision_qualified"),"differenceCount":issues,"failureCode":s.get::<Option<String>,_>("failure_code")}));
         }
         for v in metrics.values_mut() {
             let d = v["denominator"].as_u64().unwrap();
@@ -154,7 +158,7 @@ pub async fn report(db: &Database, run: Uuid) -> Result<Value, FoundationError> 
     }
     let trend:Value=sqlx::query_scalar("SELECT COALESCE(jsonb_agg(jsonb_build_object('runRef',run_ref,'createdAt',created_at,'kind',kind) ORDER BY created_at DESC),'[]') FROM(SELECT run_ref,created_at,kind FROM linggan_ocr_audit_run WHERE kind='weekly' AND created_at>$1::text::timestamptz-interval '28 days' AND created_at<=$1::text::timestamptz ORDER BY created_at DESC LIMIT 4)v").bind(r.get::<String,_>("created_text")).fetch_one(&mut *tx).await?;
     Ok(
-        json!({"runRef":run,"kind":r.get::<String,_>("kind"),"runKey":r.get::<String,_>("run_key"),"createdAt":r.get::<String,_>("created_text"),"inventory":r.get::<Value,_>("inventory"),"domainRef":r.get::<Value,_>("settings")["domainRef"],"modelId":r.get::<String,_>("model_id"),"promptVersion":r.get::<String,_>("prompt_version"),"settings":r.get::<Value,_>("settings"),"reviewVersions":sqlx::query_scalar::<_,Value>("SELECT COALESCE(jsonb_agg(jsonb_build_object('reviewRef',review_ref,'revision',revision) ORDER BY created_at),'[]') FROM linggan_media_ocr_review WHERE sample_ref IN(SELECT sample_ref FROM linggan_ocr_audit_sample WHERE run_ref=$1)").bind(run).fetch_one(&mut *tx).await?,"pools":pools,"samples":visible,"fourWeekRuns":trend,"truthBasis":"human_confirmed_points_only","costBasis":"frozen_price_estimate_not_provider_bill"}),
+        json!({"runRef":run,"kind":r.get::<String,_>("kind"),"runKey":r.get::<String,_>("run_key"),"createdAt":r.get::<String,_>("created_text"),"inventory":r.get::<Value,_>("inventory"),"domainRef":r.get::<Value,_>("settings")["domainRef"],"modelId":r.get::<String,_>("model_id"),"promptVersion":r.get::<String,_>("prompt_version"),"settings":r.get::<Value,_>("settings"),"reviewVersions":sqlx::query_scalar::<_,Value>("SELECT COALESCE(jsonb_agg(jsonb_build_object('reviewRef',review_ref,'revision',revision) ORDER BY created_at),'[]') FROM linggan_ocr_audit_review WHERE sample_ref IN(SELECT sample_ref FROM linggan_ocr_audit_sample WHERE run_ref=$1)").bind(run).fetch_one(&mut *tx).await?,"pools":pools,"samples":visible,"fourWeekRuns":trend,"truthBasis":"human_confirmed_points_only","costBasis":"frozen_price_estimate_not_provider_bill"}),
     )
 }
 pub async fn recent(db: &Database) -> Result<Value, FoundationError> {

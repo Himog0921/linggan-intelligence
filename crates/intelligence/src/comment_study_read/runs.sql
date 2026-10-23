@@ -3,8 +3,7 @@
 WITH selected_runs AS MATERIALIZED (
     SELECT run.run_ref, run.policy_ref,
            (to_jsonb(run)->>'comment_budget')::integer AS comment_budget,
-           (to_jsonb(run)->>'context_character_budget')::integer AS context_character_budget,
-           (to_jsonb(run)->>'token_limit')::bigint AS token_limit,
+                      (to_jsonb(run)->>'token_limit')::bigint AS token_limit,
            run.as_of, run.state, run.created_at, run.finished_at,
            to_char(run.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_created_at,
            to_jsonb(run)->'selection_manifest'->>'contract' AS selection_contract,
@@ -27,7 +26,6 @@ WITH selected_runs AS MATERIALIZED (
 SELECT run.run_ref,
        run.policy_ref,
        run.comment_budget,
-       run.context_character_budget,
        run.token_limit,
        run.as_of::text AS as_of,
        run.state,

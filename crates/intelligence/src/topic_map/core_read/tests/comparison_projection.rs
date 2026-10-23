@@ -173,7 +173,7 @@ fn all_participants_share_frozen_findings_without_single_work_claims() {
                 .enumerate()
             {
                 assert_eq!(item["researchResultRef"], json!(Uuid::from_u128(50)));
-                assert_eq!(item["researchMethodVersion"], "topic-map.research.v2");
+                assert_eq!(item["researchMethodVersion"], crate::topic_map_research_analysis::METHOD_VERSION);
                 assert_eq!(item[index_field], json!(index));
                 assert_eq!(item["evidenceWorkRefs"], json!([a, b]));
             }
@@ -193,13 +193,13 @@ fn all_participants_share_frozen_findings_without_single_work_claims() {
 }
 
 #[test]
-fn mixed_versions_keep_each_result_method_index_and_evidence_scope() {
+fn multiple_results_keep_each_result_index_and_evidence_scope() {
     let source = input("body");
     let mut output = draft(&source);
-    output.contract = "topic-map.research.v1".into();
-    let core = legacy::legacy_units(Uuid::from_u128(40), &output, &json!({}));
+    output.contract = crate::topic_map_research_analysis::EXTRACT_CONTRACT.into();
+    let core = json!({"units":[]});
     let mut single = window(source, json!(output), core, Some(40), "2026-10-09");
-    single.method = "topic-map.research.v1".into();
+    single.method = crate::topic_map_research_analysis::METHOD_VERSION.into();
     let mut baseline = work(1, false);
     let baseline_candidates = projection::project_work(
         &mut baseline,
@@ -225,10 +225,10 @@ fn mixed_versions_keep_each_result_method_index_and_evidence_scope() {
     );
     let angles = research["output"]["angles"].as_array().unwrap();
     assert_eq!(angles.len(), 3);
-    assert_eq!(angles[0]["researchMethodVersion"], "topic-map.research.v2");
+    assert_eq!(angles[0]["researchMethodVersion"], crate::topic_map_research_analysis::METHOD_VERSION);
     assert_eq!(angles[1]["researchAngleIndex"], 1);
     assert_eq!(angles[2]["researchResultRef"], json!(Uuid::from_u128(40)));
-    assert_eq!(angles[2]["researchMethodVersion"], "topic-map.research.v1");
+    assert_eq!(angles[2]["researchMethodVersion"], crate::topic_map_research_analysis::METHOD_VERSION);
     assert_eq!(angles[2]["researchAngleIndex"], 0);
     assert_eq!(angles[2]["evidenceWorkRefs"], json!([Uuid::from_u128(1)]));
     assert!(angles[2].get("comparisonScope").is_none());

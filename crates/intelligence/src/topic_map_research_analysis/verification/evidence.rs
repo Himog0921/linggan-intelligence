@@ -45,8 +45,8 @@ impl<'a> EvidenceTable<'a> {
         let text: String = chars[start..end].iter().collect();
         let id = format!("e{}", self.entries.len());
         self.entries
-            .push(json!({"evidenceId":id,"fragmentId":f.fragment_id,
-            "field":f.field,"start":citation.start,"end":citation.end,"text":text,
+            .push(json!({"evidenceId":id,"fragmentId":f.fragment_id,"blockRef":f.fragment_id.strip_suffix(".context").unwrap_or(&f.fragment_id),
+            "field":f.field,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,"unitRef":f.unit_ref,"speaker":f.speaker,"issues":f.issues,"start":citation.start,"end":citation.end,"text":text,
             "contextOnly":f.field=="parent_comment_context" || f.field.starts_with("work_context:")}));
         self.ids.insert(key, id.clone());
         Ok(id)
@@ -59,8 +59,8 @@ pub(super) fn outcome_context(fragments: &[Fragment]) -> Value {
     json!(
         fragments
             .iter()
-            .map(|f| json!({"fragmentId":f.fragment_id,
-        "field":f.field,"text":f.text,"contextOnly":true}))
+            .map(|f| json!({"fragmentId":f.fragment_id,"blockRef":f.fragment_id.strip_suffix(".context").unwrap_or(&f.fragment_id),
+        "field":f.field,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,"unitRef":f.unit_ref,"content":f.model_content(),"speaker":f.speaker,"issues":f.issues,"contextOnly":true}))
             .collect::<Vec<_>>()
     )
 }

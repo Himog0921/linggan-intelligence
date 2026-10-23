@@ -3,6 +3,8 @@
 mod comments;
 #[path = "support/topic_map_core_fixture.rs"]
 mod core_fixture;
+#[path = "../../evidence/tests/support/research_dossier_fixture.rs"]
+mod dossier_fixture;
 use core_fixture::*;
 use linggan_intelligence::{
     model_secrets::SyntheticModelSecrets,
@@ -27,7 +29,7 @@ async fn synthetic_citation_config(db: &Database, original: Uuid, selector: &str
     // and its callable receipt; keep the original model and every limit intact.
     sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) SELECT $1,m.connection_version_ref,$3,'manual' FROM linggan_model_entry m JOIN linggan_model_config c USING(model_ref) WHERE c.config_ref=$2")
         .bind(model).bind(original).bind(selector).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) SELECT $1,$2,input_token_limit,output_token_limit,timeout_seconds,max_attempts FROM linggan_model_config WHERE config_ref=$3")
+    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) SELECT $1,$2,65536,output_token_limit,timeout_seconds,max_attempts FROM linggan_model_config WHERE config_ref=$3")
         .bind(config).bind(model).bind(original).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) SELECT $1,connection_version_ref,model_ref,'probe','synthetic-cite-tail','succeeded',0,0,$3 FROM linggan_model_entry WHERE model_ref=$2")
         .bind(Uuid::new_v4()).bind(model).bind(json!({"ok":true,"modelCallable":true,"semanticQualified":true})).execute(db.pool()).await.unwrap();
@@ -137,7 +139,7 @@ async fn assert_tail_angle_citation(
     let citations = output["angles"][0]["evidence"].as_array().unwrap();
     assert_eq!(citations.len(), 1, "fixture must explicitly cite its tail");
     assert_eq!(citations[0]["fragmentId"], tail["fragmentId"]);
-    let window_start = tail["start"].as_u64().unwrap() as usize;
+    let window_start = end.saturating_sub(1000).max(tail["start"].as_u64().unwrap() as usize);
     assert_eq!(citations[0]["start"], json!(window_start));
     assert_eq!(citations[0]["end"], json!(end));
     let emoji_byte = source.find(emoji).expect("fixture tail contains its emoji");
@@ -356,283 +358,78 @@ async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_toget
     );
 }
 
-async fn media_slot(db: &Database, id: &str) -> (String, String) {
-    let slot = format!("xhs:{id}:cover:1");
-    let observation = Uuid::new_v4();
-    fixture::submit_package(db,"media_slots",json!({"contentExternalId":id}),json!({
-        "kind":"media_slot","slotKey":slot,"observationRef":observation,"slot":{"role":"cover","ordinal":1},
-        "observation":{"externalUri":"https://media.example/synthetic.jpg","candidateUris":["https://media.example/synthetic.jpg"],"observedAt":"2026-09-20T10:00:00Z"},
-        "sourceObject":{"platform":"xhs","type":"content","externalId":id}
-    })).await;
-    let blob = "f".repeat(64);
-    linggan_evidence::admit_media_blob(
-        db,
-        observation,
-        &blob,
-        "image/jpeg",
-        4096,
-        "blobs/synthetic/saved-tail",
-    )
-    .await
-    .unwrap();
-    // Every pending row consumes one preview position; complete topic pagination
-    // must still reach the acquired sources added after this first full page.
-    sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) SELECT gen_random_uuid(),$1,$2,'asr','saved-preview-padding-'||n::text,'full' FROM generate_series(1,260)n")
-        .bind(&blob).bind(&slot).execute(db.pool()).await.unwrap();
-    (slot, blob)
-}
-
-async fn media_job(db: &Database, slot: &str, blob: &str, kind: &str, version: &str) -> Uuid {
-    let job = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,$4,$5,'saved-tail')")
-        .bind(job).bind(blob).bind(slot).bind(kind).bind(version).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,occurred_at) VALUES($1,$2,'succeeded',clock_timestamp())")
-        .bind(Uuid::new_v4()).bind(job).execute(db.pool()).await.unwrap();
-    job
-}
-
-async fn media_text(
-    db: &Database,
-    work: Uuid,
-    job: Uuid,
-    field: &str,
-    text: &str,
-    position: i32,
-) -> Uuid {
-    let derivative = Uuid::new_v4();
-    let kind = if field == "ocr" {
-        "ocr_text"
-    } else {
-        "asr_text"
-    };
-    sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(derivative).bind(job).bind(kind).bind(linggan_evidence::creator_discovery::hash(text))
-        .bind(text.len() as i64).bind(format!("derivatives/saved/{derivative}.txt")).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_material_derived_text(derivative_ref,content_public_ref,kind,text_content,display_text,source_location) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(derivative).bind(work).bind(kind).bind(text).bind(text.chars().take(80).collect::<String>())
-        .bind(json!({"segment":position,"processorVersion":"synthetic-media-v1"})).execute(db.pool()).await.unwrap();
-    derivative
-}
-
-async fn media_layout(
-    db: &Database,
-    work: Uuid,
-    derivative: Uuid,
-    blob: &str,
-    text: &str,
-    version: &str,
-    retained: Value,
-) -> Uuid {
-    let layout = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) VALUES($1,$2,$3,$4,'paddleocr','synthetic-saved',1080,1440,$5,20,$6)")
-        .bind(layout).bind(derivative).bind(work).bind(blob).bind(linggan_evidence::creator_discovery::hash(text))
-        .bind(format!("derivatives/saved/{layout}.json")).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_media_ocr_layering_result(layering_ref,layout_ref,layer_version,state,decision_source,image_substantive_text,cover_headline,retained_line_refs,excluded_lines) VALUES($1,$2,$3,'ACCEPTED','rules',$4,'合成封面标题',$5,'[]')")
-        .bind(Uuid::new_v4()).bind(layout).bind(version).bind(text).bind(retained).execute(db.pool()).await.unwrap();
-    layout
-}
-
-async fn accepted_layout(
-    db: &Database,
-    work: Uuid,
-    derivative: Uuid,
-    blob: &str,
-    text: &str,
-) -> Uuid {
-    media_layout(
-        db,
-        work,
-        derivative,
-        blob,
-        text,
-        "rules-v3",
-        json!([{"lineRef":"synthetic-line-1","classification":"substantive_text"}]),
-    )
-    .await
-}
-
 #[tokio::test]
 #[ignore = "isolated native PostgreSQL; synthetic adapter only"]
-async fn later_media_pages_and_full_asr_ocr_reopen_without_authorizing_restricted_siblings() {
-    let (db, config, adapter) = setup("topic_saved_media_tail").await;
-    let config = tail_fixture_config(&db, config).await;
-    let work = work(&db, "saved-media-tail", "").await;
-    let (slot, blob) = media_slot(&db, "saved-media-tail").await;
-    let asr = media_job(&db, &slot, &blob, "asr", "synthetic-full-asr").await;
-    let transcript = format!(
-        "{}尾段🙂开始练习还需要明确下一步。",
-        "转录正文。".repeat(2400)
-    );
-    let asr_derivative = media_text(&db, work, asr, "transcript", &transcript, 1).await;
-    let ocr = media_job(&db, &slot, &blob, "image_ocr", "synthetic-full-ocr").await;
-    let allowed = media_text(&db, work, ocr, "ocr", "同一个job中另一张图的原始预览。", 1).await;
-    accepted_layout(&db, work, allowed, &blob, "另一个合格位置的独立正文。").await;
-    let restricted = media_text(
-        &db,
-        work,
-        ocr,
-        "ocr",
-        "待验证的原始OCR预览，不可替代正文。",
-        2,
-    )
-    .await;
-    let ocr_text = format!(
-        "{}合格OCR尾部👩‍👧仍然属于这一张图的开始练习证据。",
-        "分层正文。".repeat(2400)
-    );
-    let layout = accepted_layout(&db, work, restricted, &blob, &ocr_text).await;
-    // A selected current layer must not authorize historical or unsupported text.
-    let stale_text = "旧分层不能冒充当前实质正文。";
-    sqlx::query("INSERT INTO linggan_media_ocr_layering_result(layering_ref,layout_ref,layer_version,state,decision_source,image_substantive_text,retained_line_refs,excluded_lines) VALUES($1,$2,'rules-v1','ACCEPTED','rules',$3,'[]','[]')")
-        .bind(Uuid::new_v4()).bind(layout).bind(stale_text).execute(db.pool()).await.unwrap();
-    let unsupported = media_text(&db, work, ocr, "ocr", "不支持的分层版本。", 3).await;
-    media_layout(
-        &db,
-        work,
-        unsupported,
-        &blob,
-        "不可接纳的未知版本正文。",
-        "synthetic-v1",
-        json!([]),
-    )
-    .await;
-    let no_substantive_lines = media_text(&db, work, ocr, "ocr", "未保留实质行。", 4).await;
-    media_layout(
-        &db,
-        work,
-        no_substantive_lines,
-        &blob,
-        "未保留实质行的正文不可用。",
-        "rules-v3",
-        json!([]),
-    )
-    .await;
-    let preview = linggan_evidence::read_work_resource(&db, work)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(preview.inspector["derivativesReceipt"]["truncated"], true);
-    assert!(!preview.inspector["derivatives"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|d| d["jobRef"] == json!(asr)));
-    let full = linggan_evidence::creator_discovery::load_topic_materials(&db, D)
-        .await
-        .unwrap();
-    let material = full.works.iter().find(|w| w.work_ref == work).unwrap();
-    assert!(material
-        .fragments
-        .iter()
-        .any(|f| f.field == "transcript" && f.text == transcript));
-    assert!(material
-        .fragments
-        .iter()
-        .any(|f| f.field == "ocr" && f.text == ocr_text));
-    assert!(!material
-        .fragments
-        .iter()
-        .any(|f| f.field == "ocr" && [unsupported, no_substantive_lines].contains(&f.source_ref)));
+async fn canonical_full_image_reading_reopens_exact_frozen_tuple_and_obeys_restrictions() {
+    use linggan_evidence::{FrozenWorkSource, material_reading::{NewReading, Publication, publish_in}};
+    let (db, original_config, adapter) = setup("topic_saved_canonical_media").await;
+    let config = tail_fixture_config(&db, original_config).await;
+    let work = dossier_fixture::work(&db).await;
+    let derivative = dossier_fixture::ordinary_ocr(&db).await;
+    let initial = linggan_evidence::research_dossier::read(&db, work).await.unwrap().unwrap();
+    let image = initial.fragments.iter().find(|f| f.field == "ocr").unwrap();
+    let slot: String = sqlx::query_scalar("SELECT slot_key FROM linggan_material_unit WHERE unit_ref=$1")
+        .bind(image.unit_ref).fetch_one(db.pool()).await.unwrap();
+    let text = format!("{}合格图片尾部👩‍👧仍然属于这一张图的开始练习证据。", "完整正文。".repeat(2400));
+    let publish = |text: String, current| NewReading {
+        content_public_ref: work, unit_key: format!("image:{slot}"), kind: "image".into(),
+        slot_key: Some(slot.clone()), page: Some(1), source_version: image.source_version.clone(),
+        source_state: "present".into(), derivative_ref: Some(derivative), producer_ref: Some(Uuid::new_v4()),
+        generated_by: "ordinary_ocr".into(), rule_version: "synthetic-canonical-proof.v2".into(),
+        blocks: vec![json!({"kind":"paragraph","text":text,"speaker":"author","bbox":[0.1,0.1,0.8,0.8]})],
+        issues: vec![], source_location: json!({"synthetic":true}),
+        publication: Publication::Automatic { expected_current: current },
+    };
     let mut tx = db.pool().begin().await.unwrap();
-    for source in [asr, asr_derivative] {
-        let texts = linggan_evidence::read_frozen_work_text_in_transaction(
-            &mut tx,
-            work,
-            source,
-            "transcript",
-        )
-        .await
-        .unwrap();
-        assert_eq!(texts, vec![transcript.clone()]);
-    }
-    for source in [ocr, restricted] {
-        let texts =
-            linggan_evidence::read_frozen_work_text_in_transaction(&mut tx, work, source, "ocr")
-                .await
-                .unwrap();
-        assert!(texts.contains(&ocr_text));
-        assert!(!texts.iter().any(|t| [
-            stale_text,
-            "不可接纳的未知版本正文。",
-            "未保留实质行的正文不可用。"
-        ]
-        .contains(&t.as_str())));
-        let headlines = linggan_evidence::read_frozen_work_text_in_transaction(
-            &mut tx,
-            work,
-            source,
-            "cover_headline",
-        )
-        .await
-        .unwrap();
-        assert!(headlines.iter().any(|t| t == "合成封面标题"));
-    }
-    for source in [unsupported, no_substantive_lines] {
-        assert!(linggan_evidence::read_frozen_work_text_in_transaction(
-            &mut tx, work, source, "ocr"
-        )
-        .await
-        .unwrap()
-        .is_empty());
-    }
+    let published = publish_in(&mut tx, publish(text.clone(), image.reading_ref)).await.unwrap();
+    assert!(published.current);
     tx.commit().await.unwrap();
-    apply_research_command(&db, &configure(config, 100000, false))
-        .await
-        .unwrap();
-    apply_research_command(&db, &start(vec![work]))
-        .await
-        .unwrap();
-    let asr_task = source_task(&db, work, config, "transcript", Some(asr_derivative), 12000).await;
-    finish_source_task(&db, &adapter, asr_task).await;
-    assert_tail_angle_citation(&db, asr_task, "transcript", &transcript, "🙂").await;
-    let asr_saved = save_task_angle(&db, asr_task, work, "saved-full-asr-tail").await;
-    let reopened = topic_map::read_saved_alternative(&db, D, asr_saved)
-        .await
-        .unwrap();
+    let canonical = linggan_evidence::research_dossier::read(&db, work).await.unwrap().unwrap();
+    let image = canonical.fragments.iter().find(|f| f.reading_ref == Some(published.reading_ref)).unwrap();
+    assert_eq!(image.text, text);
+    let frozen = FrozenWorkSource { source_ref:image.source_ref, block_ref:image.fragment_id.clone(),
+        field:image.field.clone(), source_version:image.source_version.clone(), as_of:canonical.as_of.clone() };
+    let materials = linggan_evidence::creator_discovery::load_topic_materials(&db, D).await.unwrap();
+    let full = &materials.works.iter().find(|w| w.work_ref == work).unwrap().fragments;
+    assert!(full.iter().any(|f| f.fragment_id == image.fragment_id && f.text == text && f.speaker == "author"));
+    apply_research_command(&db, &configure(config, 1000000, false)).await.unwrap();
+    apply_research_command(&db, &start(vec![work])).await.unwrap();
+    let task = source_task(&db, work, config, "ocr", Some(image.source_ref), 12000).await;
+    finish_source_task(&db, &adapter, task).await;
+    assert_tail_angle_citation(&db, task, "ocr", &text, "👩‍👧").await;
+    let saved = save_task_angle(&db, task, work, "saved-canonical-image-tail").await;
+    let reopened = topic_map::read_saved_alternative(&db, D, saved).await.unwrap();
     assert_ne!(reopened.source_state, "source_unavailable");
-    assert!(reopened.fragments.iter().any(|f| f.field == "transcript"
-        && f.text.contains("尾段🙂")
-        && !f.cited_ranges.is_empty()));
-    let ocr_task = source_task(&db, work, config, "ocr", Some(restricted), 12000).await;
-    finish_source_task(&db, &adapter, ocr_task).await;
-    assert_tail_angle_citation(&db, ocr_task, "ocr", &ocr_text, "👩‍👧").await;
-    let ocr_saved = save_task_angle(&db, ocr_task, work, "saved-full-ocr-tail").await;
-    let reopened = topic_map::read_saved_alternative(&db, D, ocr_saved)
-        .await
-        .unwrap();
-    assert!(reopened
-        .fragments
-        .iter()
-        .any(|f| f.field == "ocr" && f.text.contains("合格OCR尾部")));
-    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,derivative_ref,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-proof','restricted sibling',clock_timestamp())")
-        .bind(Uuid::new_v4()).bind(restricted).execute(db.pool()).await.unwrap();
+    assert!(reopened.fragments.iter().any(|f| f.field == "ocr" && f.text == text && !f.cited_ranges.is_empty()));
     let mut tx = db.pool().begin().await.unwrap();
-    let texts = linggan_evidence::read_frozen_work_text_in_transaction(&mut tx, work, ocr, "ocr")
-        .await
-        .unwrap();
-    for field in ["ocr", "cover_headline"] {
-        assert!(linggan_evidence::read_frozen_work_text_in_transaction(
-            &mut tx, work, restricted, field
-        )
-        .await
-        .unwrap()
-        .is_empty());
+    assert_eq!(linggan_evidence::read_frozen_work_text_in_transaction(&mut tx, work, &frozen).await.unwrap(), vec![text.clone()]);
+    for field in ["sourceRef", "sourceVersion", "blockRef", "asOf"] {
+        let mut wrong = frozen.clone();
+        match field {
+            "sourceRef" => wrong.source_ref = derivative, // a derivative/job alias never authorizes a block
+            "sourceVersion" => wrong.source_version = Uuid::new_v4().to_string(),
+            "blockRef" => wrong.block_ref.push_str(".foreign"),
+            _ => wrong.as_of = "2000-01-01T00:00:00Z".into(),
+        }
+        assert!(linggan_evidence::read_frozen_work_text_in_transaction(&mut tx, work, &wrong).await.unwrap().is_empty(), "must bind {field}");
     }
+    let next = publish_in(&mut tx, publish("明确更新后的识读".into(), Some(published.reading_ref))).await.unwrap();
+    assert!(next.current);
     tx.commit().await.unwrap();
-    assert!(texts.iter().any(|t| t == "另一个合格位置的独立正文。"));
-    assert!(
-        !texts.contains(&ocr_text),
-        "an allowed sibling cannot authorize the restricted derivative's historical layer"
-    );
-    let hidden = topic_map::read_saved_alternative(&db, D, ocr_saved)
-        .await
-        .unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    assert_eq!(linggan_evidence::read_frozen_work_text_in_transaction(&mut tx, work, &frozen).await.unwrap(), vec![text.clone()],
+        "new reading cannot replace the old cutoff selection");
+    tx.commit().await.unwrap();
+    let reopened = topic_map::read_saved_alternative(&db, D, saved).await.unwrap();
+    assert!(reopened.fragments.iter().any(|f| f.text == text));
+    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,derivative_ref,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-proof','restricted canonical source',scope_001_now())")
+        .bind(Uuid::new_v4()).bind(derivative).execute(db.pool()).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    assert!(linggan_evidence::read_frozen_work_text_in_transaction(&mut tx, work, &frozen).await.unwrap().is_empty());
+    tx.commit().await.unwrap();
+    let hidden = topic_map::read_saved_alternative(&db, D, saved).await.unwrap();
     assert_eq!(hidden.source_state, "source_unavailable");
-    assert!(
-        hidden.fragments.is_empty()
-            && hidden.title.is_none()
-            && hidden.original_definition.is_none()
-    );
+    assert!(hidden.fragments.is_empty() && hidden.title.is_none() && hidden.original_definition.is_none());
 }
 
 async fn assert_definition_withdrawal_hides_saved(indirect: bool) {

@@ -65,10 +65,10 @@ export async function history(id: string) {
   return parseHistory(await requestJson(`${base}/works/${uuid(id)}/revisions`)).items;
 }
 export async function materialFromCitation(domainRef: string, citation: Citation, signal?: AbortSignal) {
-  const sourceKind = citation.sourceKind === 'ocr' ? 'note' : citation.sourceKind;
+  const sourceKind = ['ocr', 'transcript', 'frame_text'].includes(citation.sourceKind) ? 'note' : citation.sourceKind;
   const sourceRef = sourceKind === 'note' ? citation.workRef : citation.sourceRef;
   if (!sourceRef) throw new WorkbenchContractError();
-  const params = new URLSearchParams({domainRef, sourceKind, sourceRef});
+  const params = new URLSearchParams({domainRef, sourceKind, sourceRef, asOf: citation.asOf, blockRef: citation.blockRef, sourceVersion: citation.sourceVersion, citationSourceRef: citation.sourceRef, field: citation.field});
   if (citation.workRef) params.set('workRef', citation.workRef);
   const document = parseMaterialDocument(await requestJson(`${base}/sources/document?${params}`, {signal}));
   if (document.sourceRef !== sourceRef || document.sourceKind !== sourceKind) throw new WorkbenchContractError();
@@ -105,6 +105,9 @@ export async function sources(query: {
   }));
 }
 export async function source(domain: string, item: {
+  asOf: string;
+  sourceVersion: string;
+  blockRef: string;
   sourceKind: string;
   sourceRef: string;
   workRef: string | null;
@@ -112,14 +115,19 @@ export async function source(domain: string, item: {
 }, signal?: AbortSignal) {
   const q = new URLSearchParams({
     domainRef: domain,
-    field: item.field
+    field: item.field,
+    blockRef: item.blockRef,
+    sourceVersion: item.sourceVersion,
+    asOf: item.asOf
   });
   if (item.workRef) q.set('workRef', item.workRef);
-  return parseContext(await requestJson(`${base}/sources/${item.sourceKind}/${uuid(item.sourceRef)}?${q}`, {
-    signal
-  }));
+  const result = parseContext(await requestJson(`${base}/sources/${item.sourceKind}/${uuid(item.sourceRef)}?${q}`, { signal }));
+  if (result.item.blockRef !== item.blockRef || result.item.asOf !== item.asOf || result.item.sourceVersion !== item.sourceVersion || result.item.sourceRef !== item.sourceRef || result.item.field !== item.field || result.item.workRef !== item.workRef) throw new WorkbenchContractError();
+  return result;
 }
 export async function anchor(body: {
+  asOf: string;
+  blockRef: string;
   domainRef: string;
   sourceKind: string;
   sourceRef: string;
@@ -129,7 +137,9 @@ export async function anchor(body: {
   start: number;
   end: number;
 }) {
-  return parseAnchor(await post(`${base}/sources/validate`, body));
+  const result = parseAnchor(await post(`${base}/sources/validate`, body));
+  if (result.citation.blockRef !== body.blockRef || result.citation.asOf !== body.asOf || result.citation.sourceVersion !== body.sourceVersion || result.citation.sourceRef !== body.sourceRef || result.citation.field !== body.field || result.citation.start !== body.start || result.citation.end !== body.end) throw new WorkbenchContractError();
+  return result;
 }
 export async function uploadAsset(id: string, file: File, requestId: string) {
   const record = parseAsset(await requestBinaryJson(`${base}/works/${uuid(id)}/assets`, file, {

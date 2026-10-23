@@ -1,4 +1,4 @@
-//! Human commands append a new adoption version; raw OCR and platform titles never change.
+//! Audit opinions do not modify material. Corrections use the common reading command.
 use super::source;
 use crate::ai_foundation::store::{Command, FoundationError, valid_reason};
 use linggan_storage_postgres::Database;
@@ -46,119 +46,59 @@ pub struct Review {
     pub issue_ref: Option<Uuid>,
     pub expected_revision: i64,
     pub decision: String,
-    pub field: String,
-    pub text: Option<String>,
+    pub material_review_command_ref: Option<Uuid>,
     pub actor: String,
     pub reason: String,
     pub metrics: HumanMetrics,
 }
 pub async fn review(db: &Database, r: &Review) -> Result<Value, FoundationError> {
-    if !matches!(r.decision.as_str(), "adopt" | "reject" | "pending")
-        || !matches!(r.field.as_str(), "adopted_body" | "cover_headline")
+    if !matches!(r.decision.as_str(), "confirmed" | "dismissed" | "pending")
         || !valid_reason(&r.actor, 120)
         || !valid_reason(&r.reason, 300)
         || !r.metrics.validate(r.decision == "pending")
-        || (r.decision == "adopt") != r.text.is_some()
-        || r.text.as_ref().is_some_and(|s| s.chars().count() > 16_000)
     {
         return Err(FoundationError::Invalid);
     }
     let mut c = Command::begin(db, r.command_ref, "ocr_audit_review", r).await?;
-    if let Some(v) = c.replay::<Value>()? {
-        let id: Uuid = serde_json::from_value(v["adoptionRef"].clone())
-            .map_err(|_| FoundationError::Invalid)?;
-        if source::load_in(&mut c.tx, id).await?.is_none() {
-            return Err(FoundationError::NotFound);
-        }
-        return Ok(v);
+    if let Some(value) = c.replay::<Value>()? {
+        return Ok(value);
     }
-    let id: Option<Uuid> =
-        sqlx::query_scalar("SELECT adoption_ref FROM linggan_ocr_audit_sample WHERE sample_ref=$1")
-            .bind(r.sample_ref)
-            .fetch_optional(&mut *c.tx)
-            .await?
-            .flatten();
-    let id = id.ok_or(FoundationError::NotFound)?;
-    sqlx::query(
-        "SELECT adoption_ref FROM linggan_media_ocr_adoption WHERE adoption_ref=$1 FOR UPDATE",
+    let reading: Option<Uuid> = sqlx::query_scalar(
+        "SELECT reading_ref FROM linggan_ocr_audit_sample WHERE sample_ref=$1 FOR UPDATE",
     )
-    .bind(id)
-    .fetch_one(&mut *c.tx)
-    .await?;
+    .bind(r.sample_ref)
+    .fetch_optional(&mut *c.tx)
+    .await?
+    .flatten();
+    let reading = reading.ok_or(FoundationError::NotFound)?;
+    let source = source::load_in(&mut c.tx, reading)
+        .await?
+        .ok_or(FoundationError::NotFound)?;
     if let Some(issue) = r.issue_ref {
-        let matches:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ocr_audit_issue WHERE issue_ref=$1 AND sample_ref=$2)").bind(issue).bind(r.sample_ref).fetch_one(&mut *c.tx).await?;
-        if !matches {
+        let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ocr_audit_issue WHERE issue_ref=$1 AND sample_ref=$2)")
+            .bind(issue).bind(r.sample_ref).fetch_one(&mut *c.tx).await?;
+        if !valid {
             return Err(FoundationError::Invalid);
         }
     }
-    let source = source::load_in(&mut c.tx, id)
-        .await?
-        .ok_or(FoundationError::NotFound)?;
+    if let Some(command) = r.material_review_command_ref {
+        let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_reading_command WHERE command_ref=$1 AND unit_ref=$2 AND (candidate_reading_ref=$3 OR expected_reading_ref=$3))")
+            .bind(command).bind(source.unit_ref).bind(reading).fetch_one(&mut *c.tx).await?;
+        if !valid {
+            return Err(FoundationError::Invalid);
+        }
+    }
     let revision: i64 = sqlx::query_scalar(
-        "SELECT COALESCE(max(revision),0) FROM linggan_media_ocr_review WHERE adoption_ref=$1",
+        "SELECT COALESCE(max(revision),0) FROM linggan_ocr_audit_review WHERE sample_ref=$1",
     )
-    .bind(id)
+    .bind(r.sample_ref)
     .fetch_one(&mut *c.tx)
     .await?;
     if revision != r.expected_revision {
         return Err(FoundationError::Conflict);
     }
-    if r.field == "cover_headline"
-        && !matches!(
-            source.assessment.image_role,
-            linggan_evidence::ocr_adoption::ImageRole::FirstImage
-                | linggan_evidence::ocr_adoption::ImageRole::ExplicitCover
-        )
-    {
-        return Err(FoundationError::Invalid);
-    }
-    let previous:Option<String>=sqlx::query_scalar("SELECT after_text FROM linggan_media_ocr_review WHERE adoption_ref=$1 AND field=$2 AND decision='adopt' ORDER BY revision DESC LIMIT 1").bind(id).bind(&r.field).fetch_optional(&mut *c.tx).await?;
-    let before = previous.unwrap_or_else(|| {
-        if r.field == "cover_headline" {
-            source
-                .assessment
-                .cover_title
-                .text
-                .clone()
-                .unwrap_or_default()
-        } else {
-            linggan_evidence::ocr_adoption::project_work(std::slice::from_ref(&source.assessment))
-                .ok()
-                .and_then(|p| p.images.into_iter().next())
-                .map(|i| i.text)
-                .unwrap_or_default()
-        }
-    });
-    let literal = r.text.as_ref().filter(|s| !s.is_empty()).and_then(|text| {
-        let matches: Vec<_> = source
-            .input
-            .layout
-            .blocks
-            .iter()
-            .flat_map(|b| b.text.match_indices(text).map(move |(n, _)| (b, n)))
-            .collect();
-        if matches.len() != 1 {
-            return None;
-        }
-        let (b, n) = matches[0];
-        let start = b.text[..n].chars().count();
-        Some((
-            b.block_ref.clone(),
-            start as i32,
-            (start + text.chars().count()) as i32,
-        ))
-    });
-    let kind = if r.decision == "adopt" {
-        Some(if literal.is_some() {
-            "ocr_block"
-        } else {
-            "manual_transcription"
-        })
-    } else {
-        None
-    };
-    let record = json!({"reviewRef":r.command_ref,"adoptionRef":id,"revision":revision+1,"decision":r.decision,"field":r.field,"beforeText":before,"afterText":r.text,"sourceKind":kind,"blockRef":literal.as_ref().map(|l|&l.0),"sourceStart":literal.as_ref().map(|l|l.1),"sourceEnd":literal.as_ref().map(|l|l.2),"imageRef":source.slot_key,"blobSha256":source.input.image.blob_sha256});
-    sqlx::query("INSERT INTO linggan_media_ocr_review(review_ref,sample_ref,issue_ref,adoption_ref,revision,decision,field,before_text,after_text,source_kind,block_ref,source_start,source_end,actor,reason,metrics) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)")
- .bind(r.command_ref).bind(r.sample_ref).bind(r.issue_ref).bind(id).bind(revision+1).bind(&r.decision).bind(&r.field).bind(before).bind(&r.text).bind(kind).bind(literal.as_ref().map(|l|&l.0)).bind(literal.as_ref().map(|l|l.1)).bind(literal.as_ref().map(|l|l.2)).bind(&r.actor).bind(&r.reason).bind(json!(r.metrics)).execute(&mut *c.tx).await?;
-    c.finish(record).await
+    sqlx::query("INSERT INTO linggan_ocr_audit_review(review_ref,sample_ref,issue_ref,reading_ref,revision,decision,material_review_command_ref,actor,reason,metrics) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
+        .bind(r.command_ref).bind(r.sample_ref).bind(r.issue_ref).bind(reading).bind(revision+1).bind(&r.decision)
+        .bind(r.material_review_command_ref).bind(&r.actor).bind(&r.reason).bind(json!(r.metrics)).execute(&mut *c.tx).await?;
+    c.finish(json!({"reviewRef":r.command_ref,"sampleRef":r.sample_ref,"readingRef":reading,"revision":revision+1,"decision":r.decision,"materialReviewCommandRef":r.material_review_command_ref})).await
 }

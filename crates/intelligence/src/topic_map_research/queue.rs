@@ -2,7 +2,7 @@
 use super::admission::pending_sources;
 use super::windows::{is_research_evidence, origin_id};
 use super::{
-    INPUT_CONTRACT, RESEARCH_WINDOW_CHARS, ResearchError, ResearchInput, load_inputs,
+    INPUT_CONTRACT, ResearchError, ResearchInput, load_inputs,
     reference_manifest, research_windows,
 };
 use crate::topic_map_research_analysis::METHOD_VERSION;
@@ -71,11 +71,6 @@ pub(crate) fn overlaps_unknown_dispatch(
                     || !(reference["sourceRef"] == json!(source.source_ref)
                         || reference["sourceFragmentId"].as_str() == Some(origin.as_str())
                         || reference["fragmentId"].as_str() == Some(origin.as_str())
-                        || reference["semanticSourceAliases"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .any(|id| id == &origin)
                         || (matches!(field, "body" | "title")
                             && reference["workRef"].as_str() == origin.split('.').next()))
                 {
@@ -110,58 +105,6 @@ pub(crate) fn overlaps_unknown_dispatch(
                 reference["textHash"].as_str() == Some(creator_discovery::hash(&text).as_str())
             })
         })
-}
-
-pub(crate) async fn attach_legacy_media_aliases(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    refs: &mut [Value],
-) -> Result<(), sqlx::Error> {
-    let jobs: Vec<Uuid> = refs
-        .iter()
-        .filter(|r| matches!(r["field"].as_str(), Some("ocr" | "transcript")))
-        .filter_map(|r| r["sourceRef"].as_str()?.parse().ok())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect();
-    for jobs in jobs.chunks(500) {
-        let rows = sqlx::query("SELECT job.job_ref,job.blob_sha256,job.slot_key,job.input_scope,job.processor_kind,origin.content_public_ref,derived.source_location FROM linggan_media_processing_job job JOIN linggan_material_media_origin origin USING(slot_key) JOIN linggan_media_derivative derivative USING(job_ref) JOIN linggan_material_derived_text derived USING(derivative_ref) WHERE job.job_ref=ANY($1)")
-            .bind(jobs).fetch_all(&mut **tx).await?;
-        for reference in refs.iter_mut() {
-            let owner = reference["workRef"]
-                .as_str()
-                .or_else(|| reference["fragmentId"].as_str()?.split('.').next());
-            let Some(owner) = owner.and_then(|owner| owner.parse::<Uuid>().ok()) else {
-                continue;
-            };
-            let aliases: Vec<_> = rows
-                .iter()
-                .filter(|row| {
-                    reference["sourceRef"] == json!(row.get::<Uuid, _>("job_ref"))
-                        && owner == row.get::<Uuid, _>("content_public_ref")
-                        && (reference["field"] == "transcript")
-                            == (row.get::<String, _>("processor_kind") == "asr")
-                })
-                .map(|row| {
-                    let semantic = creator_discovery::topic_media_source_identity(
-                        &row.get::<String, _>("blob_sha256"),
-                        &row.get::<String, _>("slot_key"),
-                        &row.get::<String, _>("input_scope"),
-                        row.get::<Option<Value>, _>("source_location")
-                            .unwrap_or(json!({})),
-                    );
-                    format!(
-                        "{owner}.{}.{}",
-                        reference["field"].as_str().unwrap_or(""),
-                        creator_discovery::hash(&semantic.to_string())
-                    )
-                })
-                .collect();
-            if !aliases.is_empty() {
-                reference["semanticSourceAliases"] = json!(aliases);
-            }
-        }
-    }
-    Ok(())
 }
 
 pub(crate) async fn queue_research_run(
@@ -274,7 +217,7 @@ async fn queue_run(
             .into_iter()
             .collect()
     };
-    let input_scope = json!({"workRefs":frozen_works,"inputContract":INPUT_CONTRACT,"maxWindowChars":RESEARCH_WINDOW_CHARS});
+    let input_scope = json!({"workRefs":frozen_works,"inputContract":INPUT_CONTRACT,"materialSelection":"whole_note"});
     sqlx::query("INSERT INTO linggan_topic_map_research_run(run_ref,domain_ref,request_ref,trigger,topic_ref,config_ref,method_version,token_limit,state,last_reason,input_scope) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'queued',$9,$10)")
         .bind(run).bind(domain).bind(request).bind(trigger).bind(topic).bind(config).bind(METHOD_VERSION)
         .bind(p.get::<i64,_>("run_token_limit")).bind(if remaining{Some("additional_source_windows_pending")}else{None}).bind(input_scope)
@@ -347,7 +290,7 @@ fn prepare_windows(input: &[ResearchInput], scope: &[Uuid], trigger: &str) -> Ve
                 .copied()
                 .collect();
         }
-        windows.extend(research_windows(&input, RESEARCH_WINDOW_CHARS));
+        windows.extend(research_windows(&input));
     }
     windows
 }
@@ -376,7 +319,7 @@ async fn select_windows(
     let scope_strings: Vec<_> = scope.iter().map(Uuid::to_string).collect();
     let unknown = sqlx::query("SELECT input_refs FROM linggan_topic_map_research_task WHERE domain_ref=$1 AND state='unknown_dispatch' AND (work_public_ref=ANY($2) OR (COALESCE(input_refs->'source',input_refs)->'contextWorkRefs') ?| $3 OR (COALESCE(input_refs->'source',input_refs)->'coverage'->'scopeWorkRefs') ?| $3)")
         .bind(domain).bind(&scope).bind(&scope_strings).fetch_all(&mut **tx).await?;
-    let mut unknown_refs: Vec<Value> = unknown
+    let unknown_refs: Vec<Value> = unknown
         .into_iter()
         .flat_map(|row| {
             let manifest: Value = row.get("input_refs");
@@ -386,7 +329,6 @@ async fn select_windows(
                 .unwrap_or_default()
         })
         .collect();
-    attach_legacy_media_aliases(tx, &mut unknown_refs).await?;
     let mut selected = Vec::new();
     let mut remaining = false;
     for window in windows {

@@ -2,7 +2,7 @@ use super::*;
 use crate::topic_map_research_analysis::{ResearchOutput, validate_output};
 
 fn comment_window(source: &ResearchInput) -> ResearchInput {
-    research::research_windows(source, 3000)
+    research::research_windows(source)
         .into_iter()
         .find(|window| window.work.fragments.is_empty())
         .unwrap()
@@ -80,14 +80,14 @@ fn comment_only_comparison_keeps_work_context_without_manufacturing_author_evide
     let comparison = build_comparison(&inputs, &tasks, &requested, &topics()).unwrap();
     assert_eq!(comparison.coverage["availableDiscussionCount"], 2);
     assert_eq!(comparison.coverage["selectedDiscussionCount"], 2);
-    assert_eq!(comparison.coverage["evidenceChars"], 8);
-    assert_eq!(comparison.coverage["coveredChars"], 8);
-    assert_eq!(comparison.coverage["contextChars"], 8);
-    assert_eq!(comparison.coverage["inputChars"], 16);
+    assert_eq!(comparison.coverage["evidenceChars"], 18);
+    assert_eq!(comparison.coverage["coveredChars"], 18);
+    assert_eq!(comparison.coverage["contextChars"], 20);
+    assert_eq!(comparison.coverage["inputChars"], 38);
     assert!(comparison.work.fragments.is_empty());
     assert_eq!(comparison.fragments.len(), 4);
     for work in comparison.coverage["perWork"].as_array().unwrap() {
-        assert_eq!(work["selectedChars"], 4);
+        assert_eq!(work["selectedChars"], 9);
         assert_eq!(work["parentContextChars"], 0);
     }
     for context in comparison
@@ -95,9 +95,9 @@ fn comment_only_comparison_keeps_work_context_without_manufacturing_author_evide
         .iter()
         .filter(|f| f.field == "work_context:body")
     {
-        assert!(context.fragment_id.ends_with(".context.chars.2.6"));
-        assert_eq!(context.text, "😀e\u{301}B");
-        assert_eq!((context.start, context.end), (2, 6));
+        assert!(context.fragment_id.ends_with(".context"));
+        assert_eq!(context.text, "A中😀e\u{301}B作者语境");
+        assert_eq!((context.start, context.end), (0, 10));
     }
     let manifest = research::reference_manifest(&comparison);
     let restored = research::restore_scoped_window(&inputs, requested[0], &manifest).unwrap();
@@ -173,7 +173,7 @@ fn comment_only_comparison_keeps_work_context_without_manufacturing_author_evide
 }
 
 #[test]
-fn overlapping_author_evidence_and_work_context_retain_distinct_roles_ids_and_citations() {
+fn author_evidence_and_reply_context_share_one_complete_canonical_block() {
     let source = input(
         1,
         vec![
@@ -181,7 +181,7 @@ fn overlapping_author_evidence_and_work_context_retain_distinct_roles_ids_and_ci
             source(1, 12, "unresearched_comment", "评论表达自己的困惑"),
         ],
     );
-    let author_window = research::research_windows(&source, 3000)
+    let author_window = research::research_windows(&source)
         .into_iter()
         .find(|window| !window.work.fragments.is_empty())
         .unwrap();
@@ -206,31 +206,25 @@ fn overlapping_author_evidence_and_work_context_retain_distinct_roles_ids_and_ci
         &topics(),
     )
     .unwrap();
-    assert_eq!(comparison.fragments.len(), 3);
+    assert_eq!(comparison.fragments.len(), 2);
     assert_eq!(comparison.work.fragments.len(), 1);
-    assert_eq!(comparison.coverage["evidenceChars"], 8);
-    assert_eq!(comparison.coverage["contextChars"], 4);
-    assert_eq!(comparison.coverage["inputChars"], 12);
+    assert_eq!(comparison.coverage["evidenceChars"], 19);
+    assert_eq!(comparison.coverage["contextChars"], 0);
+    assert_eq!(comparison.coverage["inputChars"], 19);
     let primary = comparison
         .fragments
         .iter()
         .find(|f| f.field == "body")
         .unwrap();
-    let context = comparison
-        .fragments
-        .iter()
-        .find(|f| f.field == "work_context:body")
-        .unwrap();
-    assert_eq!(primary.text, context.text);
-    assert_eq!((primary.start, primary.end), (context.start, context.end));
-    assert_ne!(primary.fragment_id, context.fragment_id);
+    assert!(!comparison.fragments.iter().any(|f| f.field == "work_context:body"));
+    assert_eq!(primary.text, "A中😀e\u{301}B作者语境");
     let rows = comparison.coverage["selectedDiscussions"]
         .as_array()
         .unwrap();
     let author = rows.iter().find(|u| u["unitId"] == "author").unwrap();
     let comment = rows.iter().find(|u| u["unitId"] == "comment").unwrap();
     assert_eq!(author["evidence"][0]["fragmentId"], primary.fragment_id);
-    assert_eq!(comment["evidence"][1]["fragmentId"], context.fragment_id);
+    assert_eq!(comment["evidence"][1]["fragmentId"], primary.fragment_id);
     assert!(
         validate_output(
             &response_output(&comparison, "direct"),

@@ -93,17 +93,17 @@ pub(super) async fn insert_run(
     let mut manifest = json!({"contract":"comment-study.run-selection.v2","requestedWorkRefs":snapshot.requested_works,
         "requestedWorkRoles":command.work_roles,
         "coveredWorkRefs":covered,"targetSourceRefs":sources,"selectionMode":command.mode,
-        "commentBudget":limits.comment_budget,"contextCharacterBudget":limits.context_character_budget,
+        "commentBudget":limits.comment_budget,
         "tokenLimit":limits.token_limit,"indexCoverage":snapshot.index_coverage,"exclusionCounts":snapshot.selection.exclusion_counts});
     if let Some(source_run_ref) = source_run_ref {
         manifest["recoverySourceRunRef"] = json!(source_run_ref);
     }
     sqlx::query("INSERT INTO linggan_comment_study_run \
-        (run_ref,policy_ref,as_of,state,selection_manifest,selection_hash,comment_budget,context_character_budget, \
+        (run_ref,policy_ref,as_of,state,selection_manifest,selection_hash,comment_budget, \
          token_limit,execution_manifest,dispatch_state,dispatch_reason) \
-        VALUES($1,$2,$3::text::timestamptz,'queued',$4,$5,$6,$7,$8,$9,'enabled',NULL)")
+        VALUES($1,$2,$3::text::timestamptz,'queued',$4,$5,$6,$7,$8,'enabled',NULL)")
         .bind(run).bind(command.policy_ref).bind(&snapshot.as_of).bind(&manifest).bind(hash(&manifest)?)
-        .bind(limits.comment_budget).bind(limits.context_character_budget).bind(limits.token_limit)
+        .bind(limits.comment_budget).bind(limits.token_limit)
         .bind(execution(policy)?).execute(&mut **tx).await?;
     let mut works = Vec::new();
     for work in covered {

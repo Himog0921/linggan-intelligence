@@ -93,13 +93,13 @@ WITH requested_roles AS MATERIALIZED (
           'indexed',q.cached_source_ref IS NOT NULL,'inProgress',q.in_progress,
           'latest',CASE WHEN q.last_state IS NULL THEN NULL ELSE jsonb_build_object('state',q.last_state,
               'inputFingerprint',q.last_fingerprint,'legacyStoppedWithoutLiveInvocation',q.safely_stopped_legacy) END,
-          'rawText',CASE WHEN q.exclusion_reason IS NULL AND NOT q.in_progress THEN left(raw.body_text,16001) ELSE NULL END,
+          'rawText',CASE WHEN q.exclusion_reason IS NULL AND NOT q.in_progress THEN raw.body_text ELSE NULL END,
           'rawSha256',q.raw_sha256,'researchText',CASE WHEN q.exclusion_reason IS NULL AND NOT q.in_progress THEN q.research_text ELSE NULL END,
           'parent',CASE WHEN q.parent_comment_external_id IS NULL OR q.exclusion_reason IS NOT NULL OR q.in_progress THEN NULL
               ELSE jsonb_build_object('commentKey',jsonb_build_object('workRef',q.content_public_ref,'commentExternalId',q.parent_comment_external_id),
                   'sourceRef',parent.material_ref,'sourceState',CASE WHEN restricted.content_public_ref IS NOT NULL THEN 'restricted'
                     WHEN parent.body_state='KNOWN' AND parent.body_text IS NOT NULL THEN 'known' ELSE 'unknown' END,
-                  'commentText',CASE WHEN restricted.content_public_ref IS NULL AND parent.body_state='KNOWN' THEN left(parent.body_text,16001) ELSE NULL END) END)
+                  'commentText',CASE WHEN restricted.content_public_ref IS NULL AND parent.body_state='KNOWN' THEN parent.body_text ELSE NULL END) END)
     FROM qualified q JOIN linggan_material_comment raw ON raw.material_ref=q.material_ref
     LEFT JOIN LATERAL (
         SELECT c.material_ref,c.body_state,c.body_text FROM linggan_material_comment c

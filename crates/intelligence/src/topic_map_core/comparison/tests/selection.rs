@@ -35,14 +35,14 @@ fn shared_topic_counterexample_and_another_speaker_are_selected_before_extra_lab
 }
 
 #[test]
-fn parent_context_is_bounded_and_never_counts_as_a_second_discussion_source() {
+fn parent_context_is_complete_and_never_counts_as_a_second_discussion_source() {
     let (mut inputs, mut tasks, requested) = pair();
     let parent = source(2, 23, "parent_comment_context", &"父语境".repeat(100));
     inputs[1].comment_study[0]["parentFragmentId"] = json!(parent.fragment_id);
     inputs[1].comment_study[0]["parentSourceRef"] = json!(parent.source_ref);
     inputs[1].fragments.push(parent.clone());
     inputs[1].hash = research::input_identity(&inputs[1]);
-    let windows = research::research_windows(&inputs[1], 3000);
+    let windows = research::research_windows(&inputs[1]);
     let window = &windows[0];
     let child = window
         .fragments
@@ -74,9 +74,10 @@ fn parent_context_is_bounded_and_never_counts_as_a_second_discussion_source() {
     let comparison = build_comparison(&inputs, &tasks, &requested, &topics()).unwrap();
     assert_eq!(comparison.coverage["availableDiscussionCount"], 3);
     assert_eq!(comparison.coverage["selectedDiscussionCount"], 3);
-    assert_eq!(comparison.coverage["evidenceChars"], 11);
-    assert_eq!(comparison.coverage["contextChars"], 160);
-    assert_eq!(comparison.coverage["inputChars"], 171);
+    assert_eq!(comparison.coverage["evidenceChars"], 21);
+    assert_eq!(comparison.coverage["contextChars"], parent.text.chars().count());
+    assert_eq!(comparison.coverage["inputChars"], 21 + parent.text.chars().count());
+    assert!(comparison.fragments.iter().any(|f| f.field == "parent_comment_context" && f.text == parent.text));
     assert_eq!(
         comparison.comment_study[0]["parentFragmentIds"]
             .as_array()
@@ -107,7 +108,7 @@ fn parent_context_is_bounded_and_never_counts_as_a_second_discussion_source() {
 }
 
 #[test]
-fn coverage_reports_selected_subset_and_whole_scope_metadata_under_source_budget() {
+fn comparison_keeps_every_requested_work_without_a_character_budget() {
     let mut inputs = Vec::new();
     let mut tasks = Vec::new();
     for work in 1..=10 {
@@ -151,12 +152,12 @@ fn coverage_reports_selected_subset_and_whole_scope_metadata_under_source_budget
             .as_array()
             .unwrap()
             .len(),
-        3
+        10
     );
     assert_eq!(comparison.coverage["sourceChars"], 9000);
-    assert_eq!(comparison.coverage["coveredChars"], 2700);
-    assert_eq!(comparison.coverage["inputChars"], 2700);
-    assert_eq!(comparison.coverage["selectedDiscussionCount"], 3);
+    assert_eq!(comparison.coverage["coveredChars"], 9000);
+    assert_eq!(comparison.coverage["inputChars"], 9000);
+    assert_eq!(comparison.coverage["selectedDiscussionCount"], 10);
     assert_eq!(
         comparison.role_metadata["works"].as_array().unwrap().len(),
         10
@@ -185,7 +186,7 @@ fn duplicate_units_and_overlapping_citations_do_not_inflate_input_or_discussion_
     let comparison = build_comparison(&inputs, &tasks, &requested, &topics()).unwrap();
     assert_eq!(comparison.coverage["availableDiscussionCount"], 2);
     assert_eq!(comparison.coverage["selectedDiscussionCount"], 2);
-    assert_eq!(comparison.coverage["coveredChars"], 13);
+    assert_eq!(comparison.coverage["coveredChars"], 21);
     assert_eq!(comparison.fragments.len(), 2);
     let unit = &comparison.coverage["selectedDiscussions"][0];
     assert_eq!(

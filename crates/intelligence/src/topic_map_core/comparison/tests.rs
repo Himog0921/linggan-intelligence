@@ -19,6 +19,8 @@ fn source(work: u128, id: u128, field: &str, text: &str) -> Fragment {
         start: 0,
         end: text.chars().count(),
         text: text.into(),
+        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
+    ..Fragment::default()
     }
 }
 
@@ -75,7 +77,7 @@ fn input(work: u128, fragments: Vec<Fragment>) -> ResearchInput {
         role_metadata: json!({"workRef":work_ref,"platform":if work==1{"xhs"}else{"douyin"},"usageRoles":["primary"],
             "own":work==1,"ownScopeConfigured":true,"manualOwnBreakout":false,"likes":work*10,
             "likesObservedAt":"2026-01-01T00:00:00Z","followerCount":null,"publishedAt":null}),
-        coverage: json!({"inputContract":"topic-map.source-windows.v1","configRef":Uuid::from_u128(40)}),
+        coverage: json!({"inputContract":research::INPUT_CONTRACT,"configRef":Uuid::from_u128(40),"asOf":"2026-10-23T00:00:00Z"}),
     };
     input.comment_study = research::selected_comment_study(&input, &input.fragments, &json!({}));
     input.hash = research::input_identity(&input);

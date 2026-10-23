@@ -145,7 +145,7 @@ async fn load_scoped_inputs(
             context_work_refs: Vec::new(),
             comment_study: json!(comments),
             role_metadata,
-            coverage: json!({"inputContract":INPUT_CONTRACT,"configRef":config}),
+            coverage: json!({"inputContract":INPUT_CONTRACT,"configRef":config,"asOf":data.as_of}),
         };
         update_source_coverage(&mut input);
         input.hash = input_identity(&input);
@@ -253,6 +253,8 @@ fn comment_inputs(
             start: 0,
             end: source.research_text.chars().count(),
             text: source.research_text,
+            speaker: "other".into(),
+        ..Fragment::default()
         };
         let mut parent_id = None;
         let mut parent_author = None;
@@ -279,6 +281,8 @@ fn comment_inputs(
                 start: 0,
                 end: text.chars().count(),
                 text,
+                speaker: "other".into(),
+            ..Fragment::default()
             });
             parent_id = Some(id);
         }

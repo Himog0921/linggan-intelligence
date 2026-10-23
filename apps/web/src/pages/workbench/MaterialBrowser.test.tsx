@@ -20,12 +20,14 @@ import {
 } from "./workbenchModel";
 import {
   FRAGMENT_TYPES,
+  fragmentType,
   materialPieces,
   readingLeaves,
 } from "./materialReading";
 vi.mock("./workbenchApi");
 const id = "00000000-0000-4000-8000-000000000001";
 const item: SourceItem = {
+  asOf: "2026-10-23T08:00:00Z", blockRef: `${id}.body`, speaker: "unconfirmed", structure: null, issues: [],
   fragmentId: `${id}.body`,
   sourceKind: "note",
   sourceRef: id,
@@ -111,6 +113,11 @@ beforeEach(() => {
   vi.mocked(api.errorText).mockReturnValue("来源已受限");
 });
 describe("V3 full documents and exact fragment linking", () => {
+  it('keeps canonical image heading blocks distinct from keyword-classified body without a second cover field', () => {
+    const heading: SourceItem = { ...item, sourceKind: 'ocr', field: 'ocr', structure: { ref: item.blockRef, kind: 'heading', text: '第一步并非最终结论' } };
+    expect(fragmentType(heading, heading.structure!.kind === 'heading' ? heading.structure!.text : '')).toBe('待分类');
+    expect(fragmentType({ ...heading, structure: { ref: item.blockRef, kind: 'paragraph', text: '第一步并非最终结论' } }, '第一步并非最终结论')).toBe('边界');
+  });
   it("keeps a long Unicode sentence intact instead of cutting a voice at scalar 88", () => {
     const sentence = "孩子😀不愿开始写作业的时候先看见他的困难".repeat(8) + "。";
     const doc = {...material, fragments:[{...item, sourceKind:'comment' as const, text:sentence + "下一句。"}]};
@@ -389,6 +396,7 @@ it("does not project historical citation offsets onto a newer source version", a
         onChange={vi.fn()}
         onCollect={vi.fn()}
         focusCitation={{
+          asOf: item.asOf, blockRef: item.blockRef,
           sourceKind: "note",
           sourceRef: id,
           workRef: id,
@@ -424,7 +432,7 @@ it.each([
     { ...item, sourceKind: "ops_publication", text },
   ];
   for (const source of sources) {
-    const pieces = materialPieces({ ...material, sourceKind: source.sourceKind === "ocr" ? "note" : source.sourceKind, fragments: [source] });
+    const pieces = materialPieces({ ...material, sourceKind: source.sourceKind === "comment" ? "comment" : source.sourceKind === "ops_publication" ? "ops_publication" : "note", fragments: [source] });
     expect(pieces.length).toBeGreaterThan(0);
     expect(pieces.every((piece) => piece.type === type && piece.typeBasis === "unverified_keyword")).toBe(true);
     expect(pieces.map((piece) => piece.text).join("")).toBe(text);
@@ -642,6 +650,7 @@ it("consumes a backlink positioning intent when the author flips a long document
     },
   };
   const citation = {
+    asOf: item.asOf, blockRef: item.blockRef,
     sourceKind: "note" as const,
     sourceRef: id,
     workRef: id,
@@ -721,6 +730,7 @@ it("lets matrix document navigation release the backlink and a new citation posi
     },
   };
   const citation = {
+    asOf: item.asOf, blockRef: item.blockRef,
     sourceKind: "note" as const,
     sourceRef: id,
     workRef: id,

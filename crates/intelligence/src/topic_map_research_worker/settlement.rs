@@ -367,7 +367,7 @@ async fn append_result(
         && output.journey.evidence.iter().all(|citation| {
             c.input.fragments.iter().any(|f| {
                 f.fragment_id == citation.fragment_id
-                    && ["title", "body", "cover_headline", "ocr", "transcript"].contains(&f.field.as_str())
+                    && analysis::fragment_role(f) == "author"
             })
         })
     {

@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-const PLAN_VERSION: &str = "note-material-plan.v1";
+const PLAN_VERSION: &str = "research-dossier-plan.v2";
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchOperation {
+    NativeBody,
     Hashtags,
     Relayer,
     Snapshot,
@@ -20,6 +21,7 @@ pub struct PlanEntry {
     pub work_ref: Uuid,
     pub expected_revision: String,
     pub material_fingerprint: String,
+    pub body_source_version: Option<String>,
     pub relayer_source_hash: String,
     pub detail_refs: Vec<Uuid>,
     pub pending_tag_details: usize,
@@ -89,6 +91,7 @@ pub async fn plan(
             work_ref: input.work_ref,
             expected_revision: input.dossier_revision,
             material_fingerprint: input.material_fingerprint,
+            body_source_version: dossiers[&input.work_ref].materials.iter().find(|m|m["kind"]=="body").and_then(|m|m["sourceVersion"].as_str().map(str::to_owned)),
             relayer_source_hash: relayer_source_hash(&dossiers[&input.work_ref]),
             detail_refs: details.iter().map(|(r, _, _)| *r).collect(),
             pending_tag_details: details.iter().filter(|(_, _, done)| !*done).count(),
@@ -148,7 +151,7 @@ impl BatchReceipt {
 pub async fn apply_plan(database: &Database, plan: &BatchPlan) -> Result<BatchReceipt, Error> {
     plan.validate()?;
     let mut report = BatchReceipt {
-        contract: "note-material-receipt.v1",
+        contract: "research-dossier-receipt.v2",
         plan_hash: plan.plan_hash.clone(),
         operation: plan.operation,
         work_count: plan.entries.len(),
@@ -177,6 +180,7 @@ pub async fn apply_plan(database: &Database, plan: &BatchPlan) -> Result<BatchRe
                 report.layout_skipped += result["skipped"].as_u64().unwrap_or(0);
                 report.needs_ocr += result["needsOcr"].as_u64().unwrap_or(0);
                 let changed = match plan.operation {
+                    BatchOperation::NativeBody => result["state"] == "updated",
                     BatchOperation::Hashtags => result["projected"].as_u64().unwrap_or(0) > 0,
                     BatchOperation::Relayer => result["updated"].as_u64().unwrap_or(0) > 0,
                     BatchOperation::Snapshot => result["inserted"] == true,
@@ -212,6 +216,7 @@ async fn apply_work(
     entry: &PlanEntry,
 ) -> Result<Value, Error> {
     match plan.operation {
+        BatchOperation::NativeBody => native_body(database,plan,entry).await,
         BatchOperation::Hashtags => {
             backfill::apply(
                 database,
@@ -234,7 +239,7 @@ async fn apply_work(
             .await?
         )),
         BatchOperation::Relayer => {
-            // Reuse the canonical single-work transaction and its 100-layout limit.
+            // Reuse the canonical full-source transaction; all eligible layouts are retained.
             // On replay, a fully current work needs no mutation; a changed work that
             // still has pending layouts must retain the original revision guard.
             let mut tx = database.pool().begin().await?;
@@ -251,7 +256,6 @@ async fn apply_work(
                 // revision drift, rather than pretending the frozen source stayed unchanged.
                 if relayer_source_hash(&current) == entry.relayer_source_hash
                     && status["pendingLayouts"] == 0
-                    && status["layoutCount"].as_u64().unwrap_or(0) <= 100
                 {
                     return Ok(
                         json!({"updated":0,"alreadyCurrent":status["alreadyCurrent"],"skipped":0,"needsOcr":status["needsOcr"],"layerOutputChanged":true,"readOnlyReplay":true}),
@@ -270,45 +274,29 @@ async fn apply_work(
     }
 }
 
-// Bind immutable source identities and all native/observation metadata, excluding
-// only layering outputs that this operation itself appends. A replay may skip a
-// finished layer; it must still reject a changed body, job, layout or restriction.
-fn relayer_source_hash(dossier: &crate::research_dossier::ResearchDossier) -> String {
-    let native: Vec<_> = dossier
-        .fragments
-        .iter()
-        .filter(|f| matches!(f.field.as_str(), "title" | "body"))
-        .collect();
-    let media: Vec<_> = dossier
-        .media
-        .iter()
-        .map(|m| {
-            json!([
-                m["slotKey"],
-                m["slotOrdinal"],
-                m["jobRef"],
-                m["derivativeRef"],
-                m["processorKind"],
-                m["processorVersion"],
-                m["sourceScope"],
-                m["semanticMediaSource"],
-                m["state"],
-                m["dispositionState"],
-                m["contextOnly"],
-                m["otherProcessing"],
-                m["ocrLayering"]["layoutRef"]
-            ])
-        })
-        .collect();
-    hash(
-        &json!([
-            native,
-            dossier.metadata,
-            dossier.coverage["mediaSlots"],
-            media
-        ])
-        .to_string(),
-    )
+async fn native_body(database:&Database,plan:&BatchPlan,entry:&PlanEntry)->Result<Value,Error>{
+    let mut tx=database.pool().begin().await?;
+    read::lock_work(&mut tx,entry.work_ref).await?;
+    read::scope(&mut tx,plan.domain_ref,&[entry.work_ref],&plan.as_of).await?;
+    let now=cutoff(&mut tx,None).await?;
+    let current=crate::research_dossier::read_in(&mut tx,&[entry.work_ref],&now).await?.remove(&entry.work_ref).ok_or(Error::NotFound)?;
+    let body=current.materials.iter().find(|m|m["kind"]=="body").ok_or(Error::NotFound)?;
+    if body["sourceVersion"].as_str()!=entry.body_source_version.as_deref(){return Err(Error::Conflict);}
+    if current.revision!=entry.expected_revision {
+        if body["reading"]["ruleVersion"]==crate::research_dossier::content::RULE_VERSION&&body["currentRevisionRef"].is_string(){
+            tx.commit().await?;return Ok(json!({"state":"already_current","readOnlyReplay":true}));
+        }
+        return Err(Error::Conflict);
+    }
+    let result=crate::research_dossier::native::publish_current_body_in(&mut tx,entry.work_ref).await?;
+    tx.commit().await?;Ok(result)
+}
+
+// Outputs change during normalization; source membership and restrictions may not.
+fn relayer_source_hash(dossier:&crate::research_dossier::ResearchDossier)->String{
+    let media:Vec<_>=dossier.media.iter().map(|m|json!([m["slotKey"],m["sourceVersion"],m["layoutRef"],m["humanProtected"]])).collect();
+    let native:Vec<_>=dossier.fragments.iter().filter(|f|matches!(f.field.as_str(),"title"|"body"|"tags")).collect();
+    hash(&json!([native,dossier.media_inventory,media]).to_string())
 }
 
 #[cfg(test)]

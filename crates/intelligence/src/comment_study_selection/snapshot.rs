@@ -97,7 +97,6 @@ async fn scan(
                 work,
                 crate::comment_study_source::context::dossier_manifest(
                     &dossier,
-                    command.limits.context_character_budget as usize,
                 ),
             )
         })

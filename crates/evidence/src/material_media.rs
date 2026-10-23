@@ -138,24 +138,6 @@ pub(crate) async fn identity_conflict_reason(
     Ok(observation_exists.then_some("media_observation_identity_conflict"))
 }
 
-pub(crate) async fn insert_legacy_only(
-    tx: &mut Transaction<'_, Postgres>,
-    package: &ProducerCapturePackage,
-) -> Result<(), ProducerRuntimeError> {
-    for record in package.records() {
-        let Some(media) = legacy_media_record(record) else {
-            continue;
-        };
-        sqlx::query("INSERT INTO linggan_media_slot (slot_key,platform,content_external_id,role,ordinal,first_package_ref) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (slot_key) DO NOTHING")
-            .bind(media.slot_key).bind(package.platform()).bind(media.subject_external_id).bind(media.role).bind(media.producer_ordinal).bind(package.package_ref())
-            .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-        sqlx::query("INSERT INTO linggan_media_observation (observation_ref,slot_key,package_ref,observed_external_uri,observed_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (observation_ref) DO NOTHING")
-            .bind(media.observation_ref).bind(media.slot_key).bind(package.package_ref()).bind(media.primary_uri).bind(package.observed_at())
-            .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-    }
-    Ok(())
-}
-
 async fn insert_slot_and_origin(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
@@ -198,9 +180,11 @@ async fn insert_slot_and_origin(
     let live = media.purpose == "live_photo";
     let has_still = !media.still_candidates.is_empty();
     let has_motion = !media.motion_candidates.is_empty();
-    sqlx::query("INSERT INTO linggan_material_media_origin (observation_ref,content_public_ref,slot_key,package_ref,record_ordinal,source_generation,purpose,producer_ordinal,display_ordinal,display_order_state,display_order_basis,candidate_set_state,composite_state,live_photo_still_state,live_photo_motion_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,'UNKNOWN','producer_global_sequence_unverified','OBSERVED_SET',$9,$10,$11)")
+    sqlx::query("INSERT INTO linggan_material_media_origin (observation_ref,content_public_ref,slot_key,package_ref,record_ordinal,source_generation,purpose,producer_ordinal,display_ordinal,display_order_state,display_order_basis,candidate_set_state,composite_state,live_photo_still_state,live_photo_motion_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'OBSERVED_SET',$12,$13,$14)")
         .bind(media.observation_ref).bind(content_public_ref).bind(media.slot_key).bind(package.package_ref())
         .bind(i32::try_from(record_ordinal).expect("package record count is bounded")).bind(generation).bind(media.purpose).bind(media.producer_ordinal)
+        .bind(media.display_ordinal).bind(if media.display_ordinal.is_some() {"KNOWN"} else {"UNKNOWN"})
+        .bind(if media.display_ordinal.is_some() {"platform_explicit"} else {"unknown"})
         // A slot package has observed candidate references; it has not acquired either byte
         // component yet. Even when both still and motion candidates are present, the immutable
         // origin therefore remains PARTIAL until the separate acquisition lane materializes them.
@@ -223,15 +207,6 @@ async fn insert_slot_and_origin(
             .map(|uri| ("single", *uri))
             .collect()
     };
-    let component_column_ready: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM pg_attribute \
-         WHERE attrelid='linggan_material_media_candidate'::regclass \
-           AND attname='component_kind' AND NOT attisdropped)",
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    if component_column_ready {
         let mut previous_component = "";
         for (index, (component_kind, uri)) in component_candidates.iter().enumerate() {
             let producer_primary = previous_component != *component_kind;
@@ -240,13 +215,6 @@ async fn insert_slot_and_origin(
                 .bind(Uuid::new_v4()).bind(media.observation_ref).bind(i32::try_from(index + 1).expect("candidate list is bounded"))
                 .bind(uri).bind(producer_primary).bind(component_kind).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
         }
-    } else {
-        for (index, uri) in media.candidates.iter().enumerate() {
-            sqlx::query("INSERT INTO linggan_material_media_candidate (candidate_ref,observation_ref,candidate_ordinal,external_uri,producer_primary,source_field,source_field_state,expires_at,expires_at_state) VALUES ($1,$2,$3,$4,$5,NULL,'UNKNOWN',NULL,'UNKNOWN')")
-                .bind(Uuid::new_v4()).bind(media.observation_ref).bind(i32::try_from(index + 1).expect("candidate list is bounded"))
-                .bind(uri).bind(index == 0).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-        }
-    }
     let components = component_candidates
         .iter()
         .map(|(component, _)| *component)
@@ -261,14 +229,6 @@ async fn insert_resource_relation(
     content_public_ref: Option<Uuid>,
     media: &MediaRecord<'_>,
 ) -> Result<(), ProducerRuntimeError> {
-    let table_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_media_resource_relation') IS NOT NULL")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(ProducerRuntimeError::Internal)?;
-    if !table_ready {
-        return Ok(());
-    }
     let relationship_kind = match media.purpose {
         "author_avatar" => "author.avatar",
         "comment_image" => "comment.image",
@@ -327,23 +287,6 @@ async fn enqueue_media_acquisition(
     observation_ref: Uuid,
     components: &HashSet<&str>,
 ) -> Result<(), ProducerRuntimeError> {
-    let schema_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_media_acquisition_work') IS NOT NULL")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(ProducerRuntimeError::Internal)?;
-    if !schema_ready {
-        return Ok(());
-    }
-    let component_column_ready: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM pg_attribute \
-         WHERE attrelid='linggan_media_acquisition_work'::regclass \
-           AND attname='component_kind' AND NOT attisdropped)",
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    if component_column_ready {
         for component in components {
             sqlx::query(
                 "INSERT INTO linggan_media_acquisition_work \
@@ -357,17 +300,6 @@ async fn enqueue_media_acquisition(
             .await
             .map_err(ProducerRuntimeError::Internal)?;
         }
-    } else {
-        sqlx::query(
-            "INSERT INTO linggan_media_acquisition_work (work_ref,observation_ref) \
-             VALUES ($1,$2) ON CONFLICT (observation_ref) DO NOTHING",
-        )
-        .bind(Uuid::new_v4())
-        .bind(observation_ref)
-        .execute(&mut **tx)
-        .await
-        .map_err(ProducerRuntimeError::Internal)?;
-    }
     Ok(())
 }
 
@@ -383,42 +315,7 @@ struct MediaRecord<'a> {
     role: &'a str,
     purpose: &'static str,
     producer_ordinal: i32,
-}
-
-fn legacy_media_record(record: &Value) -> Option<MediaRecord<'_>> {
-    let slot_key = record.get("slotKey")?.as_str()?.trim();
-    let observation_ref = Uuid::parse_str(record.get("observationRef")?.as_str()?).ok()?;
-    let primary_uri = record.pointer("/observation/externalUri")?.as_str()?.trim();
-    let content_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
-    let role = record.pointer("/slot/role")?.as_str()?.trim();
-    let purpose = match role {
-        "image" => "body_image",
-        "cover" => "cover",
-        "video" => "video",
-        "live_photo" => "live_photo",
-        _ => return None,
-    };
-    let producer_ordinal = record
-        .pointer("/slot/ordinal")?
-        .as_i64()
-        .filter(|value| *value > 0)
-        .and_then(|value| i32::try_from(value).ok())?;
-    if slot_key.is_empty() || primary_uri.is_empty() || content_id.is_empty() {
-        return None;
-    }
-    Some(MediaRecord {
-        slot_key,
-        observation_ref,
-        primary_uri,
-        candidates: vec![primary_uri],
-        still_candidates: Vec::new(),
-        motion_candidates: Vec::new(),
-        subject_kind: "content",
-        subject_external_id: content_id,
-        role,
-        purpose,
-        producer_ordinal,
-    })
+    display_ordinal: Option<i32>,
 }
 
 fn media_record<'a>(
@@ -542,6 +439,7 @@ fn media_record<'a>(
     {
         return None;
     }
+    let display_ordinal = explicit_page(package, record, role, producer_ordinal)?;
     Some(MediaRecord {
         slot_key,
         observation_ref,
@@ -554,7 +452,20 @@ fn media_record<'a>(
         role,
         purpose,
         producer_ordinal,
+        display_ordinal,
     })
+}
+
+fn explicit_page(package: &ProducerCapturePackage, record: &Value, role: &str, ordinal: i32) -> Option<Option<i32>> {
+    let Some(page) = record.pointer("/slot/displayOrdinal") else { return Some(None); };
+    let page = page.as_i64().and_then(|p| i32::try_from(p).ok()).filter(|p| *p > 0)?;
+    let inventory = package.coverage().pointer("/target/imageInventory")?;
+    let total = inventory["expectedPages"].as_u64()?;
+    if !matches!(role, "image" | "live_photo") || page != ordinal
+        || record.pointer("/slot/displayOrderBasis").and_then(Value::as_str) != Some("platform_explicit")
+        || inventory["state"] != "complete" || inventory["source"] != "platform_image_list"
+        || page as u64 > total { return None; }
+    Some(Some(page))
 }
 
 fn target_content_id(package: &ProducerCapturePackage) -> Option<&str> {

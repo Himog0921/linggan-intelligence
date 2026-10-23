@@ -56,7 +56,7 @@ pub async fn read_creation_comments_in(
             json!({"state":"unknown"})
         };
         let parent_work = if let Some(dossier) = dossiers.get(&work) {
-            json!({"state":"known","workRef":work,"materialRevision":dossier.material_revision,"fragments":dossier.fragments,"coverage":dossier.coverage})
+            json!({"state":"known","workRef":work,"dossier":dossier})
         } else {
             json!({"state":"unavailable","workRef":work})
         };

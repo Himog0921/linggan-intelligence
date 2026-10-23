@@ -79,7 +79,7 @@ pub async fn work_resource_schema_is_ready(database: &Database) -> Result<bool, 
 /// No caller text enters this SQL. Native selection still belongs to Work Resource Current;
 /// OCR uses the exact selector used by the existing Evidence display fallback.
 /// This is not a permission boundary: the caller must first qualify its domain/work scope.
-pub fn work_display_title_ctes(ocr_schema_ready: bool) -> Result<String, WorkResourceReadError> {
+pub fn work_display_title_ctes() -> Result<String, WorkResourceReadError> {
     let native = crate::material_query_sql::work_resource_currents_sql();
     let binding = "$1::uuid[]";
     if native.matches(binding).count() != 1 || COVER_HEADLINE_SQL.matches(" = $1").count() != 1 {
@@ -87,11 +87,7 @@ pub fn work_display_title_ctes(ocr_schema_ready: bool) -> Result<String, WorkRes
     }
     // Adapt only a fixed placeholder to a fixed relation, never a caller-supplied SQL fragment.
     let native = native.replacen(binding, "ARRAY(SELECT work_ref FROM cs_title_scope)", 1);
-    let cover = if ocr_schema_ready {
-        COVER_HEADLINE_SQL.replacen(" = $1", " = current.public_ref", 1)
-    } else {
-        "SELECT NULL::text AS cover_headline WHERE false".to_owned()
-    };
+    let cover = COVER_HEADLINE_SQL.replacen(" = $1", " = current.public_ref", 1);
     // Same Unicode White_Space set as str::trim; a non-ASCII blank is not a real title.
     let sql = format!(
         r#"cs_title_currents AS ({native}),
@@ -118,7 +114,7 @@ mod title_tests {
 
     #[test]
     fn catalog_titles_reuse_current_and_the_single_cover_selector() {
-        let sql = work_display_title_ctes(true).unwrap();
+        let sql = work_display_title_ctes().unwrap();
         let native = crate::material_query_sql::work_resource_currents_sql().replacen(
             "$1::uuid[]",
             "ARRAY(SELECT work_ref FROM cs_title_scope)",
@@ -134,240 +130,82 @@ mod title_tests {
     }
 
     #[test]
-    fn absent_ocr_schema_does_not_reference_uninstalled_relations() {
-        let sql = work_display_title_ctes(false).unwrap();
-        assert!(!sql.contains("linggan_media_ocr_layering_result"));
-        assert!(!sql.contains("linggan_media_ocr_retirement"));
-        assert!(sql.contains("NULL::text AS cover_headline WHERE false"));
-    }
-
-    #[test]
-    fn cover_headline_requires_live_owned_qualified_media_not_raw_ocr() {
-        for required in [
-            "origin.content_public_ref = $1",
-            "display_ordinal BETWEEN 1 AND 3",
-            "retired.retired_job_ref",
-            "WITHDRAWN_OR_RESTRICTED",
-            "= 'succeeded'",
-            "package.accepted_at <= $2",
-            "result.layering_ref DESC",
-        ] {
-            assert!(COVER_HEADLINE_SQL.contains(required), "missing {required}");
+    fn cover_heading_requires_exact_source_and_reading_and_real_first_page() {
+        for required in ["origin.content_public_ref = $1", "origin.display_ordinal=1",
+            "selected.reading_ref", "materialization.materialization_ref::text=reading.source_version",
+            "WITHDRAWN_OR_RESTRICTED", "BYTES_CLEANED", "package.accepted_at <= $2",
+            "retired.retired_job_ref", "block->>'kind'='heading'"] {
+            assert!(COVER_HEADLINE_SQL.contains(required),"missing {required}");
         }
-        assert!(!COVER_HEADLINE_SQL.contains("text_content"));
-        assert!(!COVER_HEADLINE_SQL.contains("image_substantive_text"));
+        for obsolete in ["linggan_media_ocr_layering_result", "BETWEEN 1 AND 3", "layer_version", "text_content"] {
+            assert!(!COVER_HEADLINE_SQL.contains(obsolete));
+        }
     }
 
-    #[test]
-    fn cover_headline_lookup_starts_from_the_selected_works_media_origins() {
-        assert!(COVER_HEADLINE_SQL.contains("WITH current_origin AS MATERIALIZED"));
-        assert!(COVER_HEADLINE_SQL.contains("FROM current_origin origin"));
-        assert!(
-            COVER_HEADLINE_SQL.contains(
-                "JOIN linggan_media_processing_job job ON job.slot_key = origin.slot_key"
-            )
-        );
-        // Version selection is bounded to an already scoped layout, never all jobs.
-        assert!(COVER_HEADLINE_SQL.contains("layer.layout_ref=layout.layout_ref"));
-    }
 }
 
-/// Resolve an immutable source version only after the caller qualifies the work's current use.
-/// Derivative text still passes the shared disposition/retirement reader before it is returned.
+/// The complete identity of one frozen block. A matching source UUID alone does
+/// not authorize a different reading, block, field, version or observation time.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FrozenWorkSource {
+    pub source_ref: Uuid,
+    pub block_ref: String,
+    pub field: String,
+    pub source_version: String,
+    pub as_of: String,
+}
+
 pub async fn read_frozen_work_text_in_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_ref: Uuid,
-    source_ref: Uuid,
-    field: &str,
+    source: &FrozenWorkSource,
 ) -> Result<Vec<String>, WorkResourceReadError> {
-    Ok(
-        read_frozen_work_texts_in_transaction(tx, work_ref, &[(source_ref, field.into())])
-            .await?
-            .remove(&(source_ref, field.into()))
-            .unwrap_or_default(),
-    )
+    Ok(read_frozen_work_texts_in_transaction(tx, work_ref, std::slice::from_ref(source))
+        .await?.remove(source).unwrap_or_default())
 }
 
-/// Resolve a finite saved decision's requested sources with one complete media
-/// pagination per work. Source text remains in canonical immutable records.
+/// Historical selection is read through the same dossier owner as current reads.
+/// Current restrictions still apply; absent historical identities stay unavailable.
 pub async fn read_frozen_work_texts_in_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_ref: Uuid,
-    sources: &[(Uuid, String)],
-) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>, WorkResourceReadError> {
-    use std::collections::{HashMap, HashSet};
-    let requested: HashSet<_> = sources.iter().cloned().collect();
+    sources: &[FrozenWorkSource],
+) -> Result<std::collections::HashMap<FrozenWorkSource, Vec<String>>, WorkResourceReadError> {
+    use std::collections::{BTreeSet, HashMap};
     let mut texts = HashMap::new();
-    for (source, field) in requested
-        .iter()
-        .filter(|(_, field)| matches!(field.as_str(), "title" | "body"))
-    {
-        texts.insert(
-            (*source, field.clone()),
-            read_frozen_native_text(tx, work_ref, *source, field).await?,
-        );
-    }
-    if requested
-        .iter()
-        .any(|(_, field)| matches!(field.as_str(), "ocr" | "transcript" | "cover_headline"))
-    {
-        texts.extend(read_frozen_media_texts(tx, work_ref, &requested).await?);
-    }
-    Ok(texts)
-}
-
-async fn read_frozen_native_text(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    work: Uuid,
-    source: Uuid,
-    field: &str,
-) -> Result<Vec<String>, WorkResourceReadError> {
-    let row: Option<(Option<String>,Option<String>)> = sqlx::query_as("SELECT detail.title,detail.body_text FROM linggan_material_content_detail detail JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=detail.package_ref AND disposition.record_ordinal=detail.record_ordinal WHERE detail.material_ref=$1 AND detail.content_public_ref=$2 AND disposition.disposition<>'quarantined'").bind(source).bind(work).fetch_optional(&mut **tx).await?;
-    if let Some((title, body)) = row {
-        return Ok(if field == "title" { title } else { body }
-            .into_iter()
-            .collect());
-    }
-    if field == "title" {
-        return Ok(sqlx::query_scalar("SELECT finding.title FROM linggan_material_discovery_finding finding JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=finding.package_ref AND disposition.record_ordinal=finding.record_ordinal WHERE finding.material_ref=$1 AND finding.content_public_ref=$2 AND disposition.disposition<>'quarantined' AND finding.title IS NOT NULL").bind(source).bind(work).fetch_all(&mut **tx).await?);
-    }
-    Ok(Vec::new())
-}
-
-async fn read_frozen_media_texts(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    work: Uuid,
-    requested: &std::collections::HashSet<(Uuid, String)>,
-) -> Result<std::collections::HashMap<(Uuid, String), Vec<String>>, WorkResourceReadError> {
-    use std::collections::HashMap;
-    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut **tx)
-        .await?;
-    let items = crate::material_media_read::read_topic_derivatives_batch(tx, &[work], &as_of)
-        .await?
-        .remove(&work)
-        .unwrap_or_default();
-    let mut texts = HashMap::<(Uuid, String), Vec<String>>::new();
-    for derivative in items {
-        if derivative["state"] != "ACQUIRED"
-            || matches!(
-                derivative["dispositionState"].as_str(),
-                Some("WITHDRAWN_OR_RESTRICTED" | "OCR_RETIRED")
-            )
-        {
+    for cutoff in sources.iter().map(|s| s.as_of.as_str()).collect::<BTreeSet<_>>() {
+        let canonical_cutoff = crate::research_dossier::cutoff_in(tx, Some(cutoff)).await?;
+        let Some(dossier) = crate::research_dossier::read_in(tx, &[work_ref], &canonical_cutoff).await?.remove(&work_ref) else {
             continue;
-        }
-        // Current dossiers freeze derivative IDs; older saved decisions freeze job IDs.
-        // Both resolve only this qualified derivative, never a sibling or another layer.
-        let sources: std::collections::HashSet<Uuid> = ["derivativeRef", "jobRef"]
-            .into_iter()
-            .filter_map(|key| derivative[key].as_str()?.parse().ok())
-            .collect();
-        let layer = &derivative["ocrLayering"];
-        for (field, text) in [
-            (
-                "transcript",
-                derivative["researchText"]
-                    .as_str()
-                    .filter(|_| derivative["kind"] == "asr_text"),
-            ),
-            (
-                "ocr",
-                layer["imageSubstantiveText"]
-                    .as_str()
-                    .filter(|_| layer["cleanCorpusEligible"] == true),
-            ),
-            (
-                "cover_headline",
-                layer["coverHeadline"]
-                    .as_str()
-                    .filter(|_| matches!(layer["state"].as_str(), Some("ACCEPTED" | "PARTIAL"))),
-            ),
-        ] {
-            if let Some(text) = text {
-                for source in &sources {
-                    let key = (*source, field.to_owned());
-                    if requested.contains(&key) {
-                        texts.entry(key).or_default().push(text.to_owned());
-                    }
-                }
+        };
+        for requested in sources.iter().filter(|source| source.as_of == cutoff) {
+            if let Some(fragment) = dossier.fragments.iter().find(|fragment|
+                fragment.fragment_id == requested.block_ref && fragment.source_ref == requested.source_ref
+                && fragment.field == requested.field && fragment.source_version == requested.source_version) {
+                texts.insert(requested.clone(), vec![fragment.text.clone()]);
             }
         }
     }
     Ok(texts)
 }
 
-/// Freeze exact canonical source identities and text hashes without persisting source text.
+/// Freeze canonical block identities and hashes, without another copy of source text.
 pub async fn frozen_work_fragment_manifest_in_transaction(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work: Uuid,
 ) -> Result<Vec<serde_json::Value>, WorkResourceReadError> {
+    use serde_json::json;
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut **tx)
-        .await?;
-    let Some(c) = crate::work_resource_current::read_work_resource_currents(tx, &[work], &as_of)
-        .await?
-        .pop()
-    else {
+        .fetch_one(&mut **tx).await?;
+    let Some(dossier) = crate::research_dossier::read_in(tx, &[work], &as_of).await?.remove(&work) else {
         return Ok(Vec::new());
     };
-    let mut fragments = Vec::new();
-    let mut add = |field: &str, text: &str, source: Uuid, version: &str| {
-        let text: String = text.chars().take(4000).collect();
-        let hash = crate::creator_discovery::hash(&text);
-        fragments.push(serde_json::json!({"workRef":work,"fragmentId":format!("{work}.{field}.{}",&hash[..12]),"sourceRef":source,"field":field,"sourceVersion":version,"textHash":hash,"start":0,"end":text.chars().count()}));
-    };
-    for (field, text, source) in [
-        ("title", c.title.as_deref(), &c.title_source),
-        ("body", c.body_text.as_deref(), &c.body_source),
-    ] {
-        if let (Some(text), Some(reference)) =
-            (text.filter(|s| !s.trim().is_empty()), source.material_ref)
-        {
-            add(
-                field,
-                text,
-                reference,
-                source
-                    .recorded_at
-                    .as_deref()
-                    .unwrap_or("immutable-material"),
-            );
-        }
-    }
-    let mut derivatives =
-        crate::material_media_read::read_derivatives_batch(tx, &[work], &as_of).await?;
-    if let Some((items, _, _, _, _)) = derivatives.remove(&work) {
-        for d in items {
-            if matches!(
-                d["dispositionState"].as_str(),
-                Some("WITHDRAWN_OR_RESTRICTED" | "OCR_RETIRED")
-            ) {
-                continue;
-            }
-            let clean = d
-                .pointer("/ocrLayering/imageSubstantiveText")
-                .and_then(serde_json::Value::as_str);
-            let text = clean.or_else(|| {
-                if d["kind"] == "asr_text" {
-                    d["displayText"].as_str()
-                } else {
-                    None
-                }
-            });
-            if let (Some(text), Some(source)) =
-                (text, d["jobRef"].as_str().and_then(|s| s.parse().ok()))
-            {
-                add(
-                    if clean.is_some() { "ocr" } else { "transcript" },
-                    text,
-                    source,
-                    d["processorVersion"].as_str().unwrap_or(""),
-                );
-            }
-        }
-    }
-    Ok(fragments)
+    Ok(dossier.fragments.iter().map(|fragment| json!({
+        "workRef":work,"fragmentId":fragment.fragment_id,"blockRef":fragment.fragment_id,
+        "sourceRef":fragment.source_ref,"field":fragment.field,"sourceVersion":fragment.source_version,
+        "readingRef":fragment.reading_ref,"unitRef":fragment.unit_ref,"asOf":as_of,
+        "textHash":crate::creator_discovery::hash(&fragment.text),"start":fragment.start,"end":fragment.end
+    })).collect())
 }
 
 /// Overview projection for a finite domain-qualified work set. Statistics callers must

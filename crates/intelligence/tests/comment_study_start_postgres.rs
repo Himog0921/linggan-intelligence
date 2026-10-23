@@ -140,6 +140,8 @@ async fn setup_with_model_limits(
     .execute(db.pool())
     .await
     .unwrap();
+    sqlx::raw_sql(include_str!("../../../database/migrations/0146_comment_study_full_context.sql"))
+        .execute(db.pool()).await.unwrap();
     let (connection, version, model, config) = (
         Uuid::new_v4(),
         Uuid::new_v4(),
@@ -162,7 +164,7 @@ async fn setup_with_model_limits(
         VALUES($1,$2,$3,$4,$5,2)").bind(config).bind(model).bind(model_input_limit).bind(model_output_limit).bind(timeout_seconds).execute(db.pool()).await.unwrap();
     let policy: CreateStudyPolicyCommand = serde_json::from_value(
         json!({"domainRef":domain(),"methodName":"SYNTHETIC", "parentPolicyRef":null,
-        "modelConfigRef":config,"defaults":{"commentBudget":1,"contextCharacterBudget":1},
+        "modelConfigRef":config,"defaults":{"commentBudget":1},
         "stageInstructions":{"semantic":"","resolution":"","pair":""}}),
     )
     .unwrap();
@@ -183,7 +185,7 @@ async fn setup_with_model_limits(
     }
     let command=serde_json::from_value(json!({"requestRef":Uuid::new_v4(),"domainRef":domain(),"policyRef":policy["policy"]["policyRef"],
         "scope":{"kind":"works","workRefs":[work]},"mode":"new_only",
-        "limits":{"commentBudget":100,"contextCharacterBudget":6000,"tokenLimit":100000},"reason":null})).unwrap();
+        "limits":{"commentBudget":100,"tokenLimit":100000},"reason":null})).unwrap();
     (db, command, connection)
 }
 
@@ -278,7 +280,7 @@ async fn policy_with_semantic_instruction(
             model_config_ref,
             defaults: StudyPolicyDefaults {
                 comment_budget: 2,
-                context_character_budget: 6000,
+
             },
             stage_instructions: StudyStageInstructions {
                 semantic: semantic_instruction,
@@ -617,11 +619,11 @@ async fn preview_and_two_runs_cover_different_comments_from_688() {
         .bind(first.run_ref).bind(second.run_ref).fetch_one(db.pool()).await.unwrap();
     assert_eq!(overlap, 0);
     assert_eq!(effects(&db).await, json!([2, 200, 2, 0]));
-    let limits:Value=sqlx::query_scalar("SELECT jsonb_build_array(comment_budget,context_character_budget,token_limit) FROM linggan_comment_study_run WHERE run_ref=$1")
+    let limits:Value=sqlx::query_scalar("SELECT jsonb_build_array(comment_budget,token_limit) FROM linggan_comment_study_run WHERE run_ref=$1")
         .bind(first.run_ref).fetch_one(db.pool()).await.unwrap();
     assert_eq!(
         limits,
-        json!([100, 6000, 100000]),
+        json!([100, 100000]),
         "no active/default budget substitution"
     );
 }
@@ -2647,7 +2649,7 @@ async fn partial_problem_stage_usage_above_reservation_blocks_followup_request()
 async fn dossier_partial_image_body_reaches_v2_frozen_context() {
     let (db, mut command, _) = setup("dossier_comment_start", 0).await;
     let work = dossier_fixture::work(&db).await;
-    dossier_fixture::legacy_ocr(&db).await;
+    dossier_fixture::ordinary_ocr(&db).await;
     comment_with_author(
         &db,
         "dossier-note",
@@ -2662,14 +2664,11 @@ async fn dossier_partial_image_body_reaches_v2_frozen_context() {
         .await
         .unwrap()
         .unwrap();
-    linggan_evidence::research_dossier::relayer_work(&db, work, &dossier.revision)
-        .await
-        .unwrap();
+    assert!(dossier.fragments.iter().any(|f| f.field == "ocr" && f.text.contains("第3行连续")));
     command.scope = StudyScope::Works {
         work_refs: vec![work],
     };
     command.work_roles.clear();
-    command.limits.context_character_budget = 20000;
     let preview = preview_study_selection(&db, command.preview())
         .await
         .unwrap();
@@ -2684,10 +2683,15 @@ async fn dossier_partial_image_body_reaches_v2_frozen_context() {
     .fetch_one(db.pool())
     .await
     .unwrap();
-    assert_eq!(context["dossierContract"], "research-dossier.v1");
+    assert_eq!(context["dossierContract"], "research-dossier.v2");
     assert!(context.to_string().contains("第3行连续"));
     assert!(context.to_string().contains("封面大字独立保留"));
-    assert!(!context.to_string().contains("用途不清"));
+    assert!(context.to_string().contains("用途不清"));
+    for source in context["sources"].as_array().unwrap() {
+        assert!(source["blockRef"].is_string() && source["asOf"].is_string());
+        assert!(source["sourceRef"].is_string() && source["sourceVersion"].is_string());
+        assert!(source["speaker"].is_string() && source["structure"].is_object() && source["issues"].is_array());
+    }
     // No model invocation was made: the existing batch's frozen work context is
     // the same context exposed to the real model request builder.
     assert_eq!(effects(&db).await[3], 0);

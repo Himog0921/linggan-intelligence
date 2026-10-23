@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchDossierComments } from './dossierApi';
-import { nestComments } from './dossierPresent';
+import { hideCachedReading, nestComments } from './dossierPresent';
 import type { DossierComment } from './dossierTypes';
 import { Section } from './Primitives';
 import { metricReading } from './evidencePresent';
@@ -46,8 +46,8 @@ export function DossierComments({ work, domain, platformComments }: { work: stri
         if (abort.signal.aborted) return;
         setState(previous => ({ phase: 'idle', items: [...previous.items, ...page.items.filter(item => !previous.items.some(known => known.sourceRef === item.sourceRef))], cursor: page.nextCursor, total: page.total, loadedOnce: true }));
       },
-      () => {
-        if (!abort.signal.aborted) setState(previous => ({ ...previous, phase: 'error' }));
+      error => {
+        if (!abort.signal.aborted) setState(previous => hideCachedReading(error) ? { phase: 'error', items: [], cursor: null, total: null, loadedOnce: false } : { ...previous, phase: 'error' });
       },
     );
   }

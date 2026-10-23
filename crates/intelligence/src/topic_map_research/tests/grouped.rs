@@ -27,14 +27,7 @@ fn one_hundred_short_comments_pack_independent_voices_and_restore_precise_source
             .collect::<Vec<_>>()
     );
     update_source_coverage(&mut original);
-    let windows = research_windows(&original, super::super::RESEARCH_WINDOW_CHARS);
-    assert!(windows.iter().all(|w| {
-        w.fragments
-            .iter()
-            .map(|f| f.text.chars().count())
-            .sum::<usize>()
-            <= 900
-    }));
+    let windows = research_windows(&original);
     let author_body: String = windows
         .iter()
         .flat_map(|w| &w.fragments)
@@ -47,7 +40,7 @@ fn one_hundred_short_comments_pack_independent_voices_and_restore_precise_source
         .filter(|w| w.role_metadata["commentOnly"] == true)
         .collect();
     assert_eq!(groups.len(), 34);
-    assert_eq!(windows.len(), 37); // title, two body windows, all 100 primary voices
+    assert_eq!(windows.len(), 35); // one complete note and all 100 primary voices
     assert_eq!(
         windows[0]
             .work
@@ -55,13 +48,14 @@ fn one_hundred_short_comments_pack_independent_voices_and_restore_precise_source
             .iter()
             .map(|f| f.field.as_str())
             .collect::<Vec<_>>(),
-        vec!["title"]
+        vec!["title", "body"]
     );
     let mut seen = std::collections::BTreeSet::new();
     for window in groups {
         assert!(window.comment_study.as_array().unwrap().len() <= 3);
-        assert!(window.coverage["inputChars"].as_u64().unwrap() <= 900);
-        assert!(window.coverage["workContextPartial"].as_bool().unwrap());
+        assert!(window.coverage["inputChars"].as_u64().unwrap() > 900);
+        assert_eq!(window.coverage["workContextPartial"], false);
+        assert_eq!(window.fragments.iter().find(|f| f.field == "work_context:body").unwrap().text, body.text);
         assert!(window.work.fragments.is_empty());
         let manifest = reference_manifest(window);
         let context: Vec<_> = manifest["fragments"]
@@ -106,7 +100,7 @@ fn author_context_is_source_qualified_and_never_turns_into_independent_evidence(
     let body = source("body", "先把任务拆成小步骤，降低第一步的难度。", 11);
     let mut original = input(vec![title, body, comment.clone()]);
     original.comment_study = json!([comment_metadata(&comment, None, json!([]))]);
-    let all_windows = research_windows(&original, 3000);
+    let all_windows = research_windows(&original);
     let author_ids: std::collections::BTreeSet<_> = all_windows[0]
         .fragments
         .iter()
@@ -184,7 +178,7 @@ fn grouped_children_share_parent_context_and_keep_the_parent_tail() {
             .collect::<Vec<_>>()
     );
     update_source_coverage(&mut original);
-    let windows = research_windows(&original, 3000);
+    let windows = research_windows(&original);
     assert!(windows.len() > 1);
     let text: String = windows
         .iter()
@@ -236,23 +230,11 @@ fn grouped_children_share_parent_context_and_keep_the_parent_tail() {
 }
 
 #[test]
-fn historical_v2_frozen_window_keeps_read_qualification_without_new_dispatch_identity() {
+fn historical_window_contract_is_not_admitted_as_a_current_dossier_window() {
     let original = input(vec![source("body", "历史窗口的合格原声。", 10)]);
-    let mut window = research_windows(&original, 3000).remove(0);
-    window.hash = super::super::identity::input_identity_for(
-        &window,
-        "topic-map.source-windows.v1",
-        "topic-map.research.v2",
-    );
-    let mut manifest = reference_manifest(&window);
+    let mut manifest = reference_manifest(&research_windows(&original).remove(0));
     manifest["inputContract"] = json!("topic-map.source-windows.v1");
     manifest["methodVersion"] = json!("topic-map.research.v2");
-    assert_eq!(
-        restore_window(&original, &manifest).unwrap().hash,
-        window.hash
-    );
-    assert_ne!(research_windows(&original, 3000)[0].hash, window.hash);
-    manifest["methodVersion"] = json!("unrecognized-method");
     assert!(restore_window(&original, &manifest).is_none());
 }
 
@@ -266,7 +248,7 @@ fn missing_parent_pages_never_reopen_unknown_child_when_short_voices_are_packed(
     );
     let mut old = input(vec![child.clone(), parent.clone()]);
     old.comment_study = json!([comment_metadata(&child, Some(&parent), json!([]))]);
-    let unknown = research_windows(&old, 3000).remove(0);
+    let unknown = research_windows(&old).remove(0);
     let refs = reference_manifest(&unknown)["fragments"]
         .as_array()
         .unwrap()
@@ -295,7 +277,7 @@ fn missing_parent_pages_never_reopen_unknown_child_when_short_voices_are_packed(
             .iter()
             .any(|f| f.fragment_id == child.fragment_id)
     );
-    let windows = research_windows(&pending, 3000);
+    let windows = research_windows(&pending);
     assert_eq!(windows.len(), 2);
     assert_eq!(
         windows
@@ -311,15 +293,9 @@ fn missing_parent_pages_never_reopen_unknown_child_when_short_voices_are_packed(
 }
 
 #[test]
-fn historical_v3_frozen_window_keeps_source_qualification_after_compact_upgrade() {
-    let original = input(vec![source("body", "历史方法保存的完整合格原声。", 10)]);
-    let mut old = research_windows(&original, 3000).remove(0);
-    old.hash = super::super::identity::input_identity_for(&old, super::super::INPUT_CONTRACT, "topic-map.research.v3");
-    let mut manifest = reference_manifest(&old);
+fn obsolete_method_cannot_bypass_canonical_input_qualification() {
+    let original = input(vec![source("body", "完整合格原声。", 10)]);
+    let mut manifest = reference_manifest(&research_windows(&original).remove(0));
     manifest["methodVersion"] = json!("topic-map.research.v3");
-    assert_eq!(restore_window(&original, &manifest).unwrap().hash, old.hash);
-    assert_ne!(research_windows(&original, 900)[0].hash, old.hash);
-    let mut withdrawn = original.clone();
-    withdrawn.fragments.clear();
-    assert!(restore_window(&withdrawn, &manifest).is_none());
+    assert!(restore_window(&original, &manifest).is_none());
 }

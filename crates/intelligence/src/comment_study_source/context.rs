@@ -1,4 +1,4 @@
-//! Bounded, shared parent/work context reads. No caller substitutes a newer context for a Run.
+//! Complete, shared parent/work context reads. No caller substitutes a newer context for a Run.
 use super::StudySourceError;
 use crate::comment_cleaning::{CLEANER_VERSION, clean};
 use serde_json::{Value, json};
@@ -14,9 +14,7 @@ pub(crate) async fn read_titles(
     if works.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let ready: bool = sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_layout') IS NOT NULL AND to_regclass('linggan_media_ocr_layering_result') IS NOT NULL AND to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
-        .fetch_one(&mut **tx).await?;
-    let ctes = linggan_evidence::work_display_title_ctes(ready)
+    let ctes = linggan_evidence::work_display_title_ctes()
         .map_err(|_| sqlx::Error::Protocol("shared work title projection unavailable".into()))?;
     let sql = format!(
         "WITH cs_title_scope AS (SELECT unnest($1::uuid[]) AS work_ref), {ctes} SELECT * FROM cs_display_titles"
@@ -63,25 +61,23 @@ pub(crate) async fn read_work_contexts(
     let titles = read_titles(tx, works, as_of).await?;
     let dossiers = linggan_evidence::research_dossier::read_in(tx, works, as_of).await?;
     Ok(dossiers.into_iter().map(|(work,dossier)| {
-        let bounded=dossier_manifest(&dossier,20000);
+        let full=dossier_manifest(&dossier);
         (work,json!({"workRef":work,"displayTitle":titles.get(&work).and_then(|t|t.get("displayTitle")),
             "displayTitleSource":titles.get(&work).and_then(|t|t.get("displayTitleSource")),
-            "contextManifest":bounded}))
+            "contextManifest":full}))
     }).collect())
 }
 
 pub(crate) fn dossier_manifest(
     dossier: &linggan_evidence::research_dossier::ResearchDossier,
-    budget: usize,
 ) -> Value {
-    crate::comment_study_run::bounded_context_manifest(
+    crate::comment_study_run::full_context_manifest(
         &json!({
-            "contract":"comment-study.context.v1","workRef":dossier.work_ref,
+            "contract":"comment-study.context.v2","workRef":dossier.work_ref,
             "dossierRevision":dossier.material_revision,"dossierContract":dossier.contract,
             "cleanerVersion":CLEANER_VERSION,
             "sources":linggan_evidence::research_dossier::context_sources(dossier)
         }),
-        budget,
     )
 }
 

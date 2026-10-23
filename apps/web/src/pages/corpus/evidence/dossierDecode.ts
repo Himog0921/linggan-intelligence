@@ -1,231 +1,81 @@
-import { isRecord } from '../../../shared/api';
-import { decode, list, num, obj, optBool, optNum, optObj, optStr, str, type Json } from '../../../shared/decode';
-import type { Metric } from './evidenceTypes';
-import { mediaPath } from './evidencePaths';
-import type {
-  CreatorPreview,
-  Dossier,
-  DossierComment,
-  DossierCommentPage,
-  DossierCoverage,
-  DossierFragment,
-  DossierLayering,
-  DossierLine,
-  DossierMedia,
-  DossierMetadata,
-  DossierPayload,
-  DossierSection,
-  RelayerPlan,
-  RelayerReceipt,
-  TaskInput,
-  TaskKey,
-} from './dossierTypes';
+import { bool, decode, list, num, obj, optNum, optObj, optStr, ShapeError, str, type Json } from '../../../shared/decode';
+import { apiPath, mediaPath } from './evidencePaths';
+import { choice, count, parseBlocks, parseIssue, strings } from './dossierBlockDecode';
+import type { Dossier, DossierCommentPage, DossierCoverage, DossierMaterial, DossierPayload, DossierSelection, ReadingCandidate, ReadingReviewReceipt, RelayerPlan, RelayerReceipt } from './dossierTypes';
 
-function metric(record: Json | null): Metric {
-  return record === null ? { value: null, state: 'UNKNOWN' } : { value: optNum(record, 'value'), state: optStr(record, 'state') ?? 'UNKNOWN' };
+const KINDS = ['body', 'tags', 'image', 'audio', 'video_frame'] as const;
+const PRODUCERS = ['platform', 'ordinary_ocr', 'local_vision', 'cloud_vision', 'asr', 'frame_ocr', 'human_edit'] as const;
+const ADOPTIONS = ['automatic', 'human_adopted', 'human_edited'] as const;
+const VERIFICATIONS = ['unchecked', 'verified'] as const;
+const COVERAGE = ['available', 'known_empty', 'not_acquired', 'not_applicable', 'restricted', 'partial', 'not_processed'] as const;
+function optionalCount(row: Json, name: string, minimum = 0): number | null {
+  const value = optNum(row, name); return value === null ? null : count(value, name, minimum);
 }
-
-function parseFragment(record: Json): DossierFragment {
+function parseMaterial(row: Json): DossierMaterial {
+  const reading = optObj(row, 'reading');
+  const pageSource = optObj(row, 'pageSource');
+  if (pageSource && ['sourceRef', 'sourceVersion', 'slotKey'].some(key => str(pageSource, key) === '')) throw new ShapeError('pageSource');
   return {
-    fragmentId: str(record, 'fragmentId'),
-    field: optStr(record, 'field') ?? 'unknown',
-    text: optStr(record, 'text') ?? '',
-    end: optNum(record, 'end') ?? Array.from(optStr(record, 'text') ?? '').length,
-    sourceRef: optStr(record, 'sourceRef'),
-    sourceVersion: optStr(record, 'sourceVersion'),
+    ref: str(row, 'ref'), kind: choice(row.kind, KINDS, 'kind'), slotKey: optStr(row, 'slotKey'), page: optionalCount(row, 'page', 1),
+    ...(pageSource === null ? {} : { pageSource: { basis: choice(pageSource.basis, ['same_verified_bytes'], 'pageSource.basis'), sourceRef: str(pageSource, 'sourceRef'), sourceVersion: str(pageSource, 'sourceVersion'), slotKey: str(pageSource, 'slotKey') } }),
+    sourceState: choice(row.sourceState, ['present', 'known_empty', 'not_acquired', 'not_applicable', 'restricted'], 'sourceState'),
+    sourceRef: optStr(row, 'sourceRef'), sourceVersion: optStr(row, 'sourceVersion'), currentRevisionRef: optStr(row, 'currentRevisionRef'),
+    originalUrl: mediaPath(row.originalUrl), blocks: parseBlocks(row), issues: list(row, 'issues', parseIssue),
+    reading: reading === null ? null : { generatedBy: choice(reading.generatedBy, PRODUCERS, 'generatedBy'), adoption: choice(reading.adoption, ADOPTIONS, 'adoption'), verification: choice(reading.verification, VERIFICATIONS, 'verification'), ruleVersion: str(reading, 'ruleVersion') },
   };
 }
-
-function parseSection(record: Json): DossierSection {
-  const ids = Array.isArray(record.fragmentIds) ? record.fragmentIds.filter((id): id is string => typeof id === 'string') : [];
-  return { label: str(record, 'label'), kind: optStr(record, 'kind') ?? '', fragmentIds: ids };
+function parseCoverage(row: Json): DossierCoverage {
+  const images = obj(row, 'imageInventory'); const source = obj(row, 'sources');
+  const expectedPages = optionalCount(images, 'expectedPages');
+  const acquiredPages = count(images.acquiredPages, 'acquiredPages'); const processedPages = count(images.processedPages, 'processedPages');
+  if (processedPages > acquiredPages || (expectedPages !== null && acquiredPages > expectedPages)) throw new ShapeError('imageInventory');
+  if (!Array.isArray(images.missingPages)) throw new ShapeError('missingPages');
+  const missingPages = images.missingPages.map(value => count(value, 'missingPages', 1));
+  if (new Set(missingPages).size !== missingPages.length || missingPages.some(page => expectedPages === null || page > expectedPages)) throw new ShapeError('missingPages');
+  const readSource = (key: string) => {
+    const value = obj(source, key); const units = count(value.units, 'units'); const readings = count(value.readings, 'readings');
+    if (readings > units) throw new ShapeError('readings');
+    return { state: choice(value.state, COVERAGE, 'state'), units, readings };
+  };
+  return { imageInventory: { basis: choice(images.basis, ['platform_image_list', 'observed_set'], 'basis'), expectedPages, acquiredPages, processedPages, missingPages, unknownOrder: bool(images, 'unknownOrder') },
+    sources: { body: readSource('body'), images: readSource('images'), audio: readSource('audio'), videoFrames: readSource('videoFrames') }, issues: list(row, 'issues', parseIssue) };
 }
-
-/** 归一化坐标须都在 0–1，否则不画框（宁可不标，也不标错位置）。 */
-function parseBox(value: unknown): DossierLine['bbox'] {
-  if (!Array.isArray(value) || value.length !== 4) return null;
-  const [left, top, right, bottom] = value as unknown[];
-  const box = [left, top, right, bottom];
-  return box.every(side => typeof side === 'number' && Number.isFinite(side) && side >= 0 && side <= 1)
-    ? ([left, top, right, bottom] as unknown as [number, number, number, number])
-    : null;
+function parseSelection(row: Json): DossierSelection {
+  const kinds = strings(row.kinds, 'kinds').map(value => choice(value, KINDS, 'kinds'));
+  if (!Array.isArray(row.imagePages)) throw new ShapeError('imagePages');
+  return { mode: choice(row.mode, ['full', 'explicit'], 'mode'), kinds, unitRefs: strings(row.unitRefs, 'unitRefs'), blockRefs: strings(row.blockRefs, 'blockRefs'), imagePages: row.imagePages.map(value => count(value, 'imagePages', 1)), omittedUnits: count(row.omittedUnits, 'omittedUnits'), completeRevision: str(row, 'completeRevision') };
 }
-
-function classifications(value: unknown): Record<string, string> {
-  const result: Record<string, string> = {};
-  if (Array.isArray(value)) {
-    for (const entry of value) {
-      if (isRecord(entry) && typeof entry.lineRef === 'string') result[entry.lineRef] = typeof entry.classification === 'string' ? entry.classification : 'uncertain';
-    }
-  }
-  return result;
-}
-
-function parseLayering(record: Json | null): DossierLayering | null {
-  if (record === null) return null;
-  const lines = Array.isArray(record.lines) ? record.lines.filter(isRecord) : [];
+function parseDossierRow(row: Json): Dossier {
+  if (row.contract !== 'research-dossier.v2' || 'fragments' in row || 'media' in row || 'markdown' in row) throw new ShapeError('contract');
+  const note = obj(row, 'note'); const titleSource = optObj(note, 'titleSource'); const attachments = obj(row, 'attachments');
+  const attachment = (name: string) => { const href = apiPath(str(obj(attachments, name), 'href')); if (href === null) throw new ShapeError(`attachments.${name}`); return { href }; };
+  const materials = list(row, 'materials', parseMaterial); const blocks = materials.flatMap(unit => unit.blocks);
+  if (new Set(materials.map(unit => unit.ref)).size !== materials.length || new Set(blocks.map(block => block.ref)).size !== blocks.length) throw new ShapeError('materials.ref');
   return {
-    layerVersion: optStr(record, 'layerVersion'),
-    state: optStr(record, 'state') ?? 'UNKNOWN',
-    decisionSource: optStr(record, 'decisionSource'),
-    engineVersion: optStr(record, 'engineVersion'),
-    imageWidth: optNum(record, 'imageWidth'),
-    imageHeight: optNum(record, 'imageHeight'),
-    layoutRef: optStr(record, 'layoutRef'),
-    layeringRef: optStr(record, 'layeringRef'),
-    lines: lines.map(line => ({ lineRef: str(line, 'lineRef'), text: optStr(line, 'text') ?? '', bbox: parseBox(line.bbox) })),
-    retained: classifications(record.retainedLines),
-    excluded: classifications(record.excludedLines),
+    contract: 'research-dossier.v2', workRef: str(row, 'workRef'), revision: str(row, 'revision'), materialRevision: str(row, 'materialRevision'), asOf: str(row, 'asOf'),
+    note: { platform: str(note, 'platform'), sourceUrl: optStr(note, 'sourceUrl'), platformTitle: optStr(note, 'platformTitle'),
+      titleSource: titleSource === null ? null : { sourceRef: optStr(titleSource, 'sourceRef'), sourceVersion: optStr(titleSource, 'sourceVersion') },
+      displayTitle: optStr(note, 'displayTitle'), displayTitleBasis: choice(note.displayTitleBasis, ['platform', 'image_heading', 'missing'], 'displayTitleBasis') },
+    materials, coverage: parseCoverage(obj(row, 'coverage')), attachments: { comments: attachment('comments'), author: attachment('author'), interaction: attachment('interaction'), versions: attachment('versions') }, selection: parseSelection(obj(row, 'selection')), raw: row,
   };
 }
-
-function parseMedia(record: Json): DossierMedia {
-  const other = optObj(record, 'otherProcessing');
-  const adoption = optObj(record, 'ocrAdoption');
-  const human = optObj(record, 'ocrHumanAdoption');
-  return {
-    derivativeRef: optStr(record, 'derivativeRef'),
-    slotKey: optStr(record, 'slotKey'),
-    slotOrdinal: optNum(record, 'slotOrdinal'),
-    state: optStr(record, 'state') ?? 'UNKNOWN',
-    processorKind: optStr(record, 'processorKind'),
-    contextOnly: optBool(record, 'contextOnly') === true,
-    displayText: optStr(record, 'displayText'),
-    researchText: optStr(record, 'researchText'),
-    humanReviewRef: human === null ? null : optStr(optObj(human, 'adopted_body') ?? {}, 'reviewRef'),
-    ocrAdoption: adoption === null ? null : {
-      adoptionRef: optStr(adoption, 'adoptionRef'),
-      rawBlocks: Array.isArray(adoption.rawBlocks) ? adoption.rawBlocks.filter(isRecord).map(block => ({ blockRef: str(block, 'blockRef'), text: str(block, 'text') })) : [],
-      pendingBlocks: Array.isArray(adoption.pendingBlocks) ? adoption.pendingBlocks.filter((id): id is string => typeof id === 'string') : [],
-      projectionVersion: optStr(adoption, 'projectionVersion'),
-    },
-    originalUrl: mediaPath(record.originalAssetUrl),
-    originalMaterializationRef: optStr(record, 'originalMaterializationRef'),
-    selectionBasis: optStr(record, 'selectionBasis'),
-    layering: parseLayering(optObj(record, 'ocrLayering')),
-    otherProcessing: other === null ? null : { state: optStr(other, 'state') ?? 'UNKNOWN' },
-  };
-}
-
-function parseCoverage(record: Json): DossierCoverage {
-  return {
-    title: optStr(record, 'title') ?? 'UNKNOWN',
-    body: optStr(record, 'body') ?? 'UNKNOWN',
-    titleQualification: optStr(record, 'titleQualification'),
-    mediaAvailable: optNum(record, 'mediaAvailable') ?? 0,
-    mediaCount: optNum(record, 'mediaCount') ?? 0,
-    uncertainImages: optNum(record, 'uncertainImages') ?? 0,
-  };
-}
-
-function parseMetadata(record: Json): DossierMetadata {
-  return {
-    platform: optStr(record, 'platform') ?? '平台未知',
-    authorDisplayName: optStr(record, 'authorDisplayName'),
-    publishedAt: optStr(record, 'publishedAt'),
-    likes: metric(optObj(record, 'likes')),
-    comments: metric(optObj(record, 'comments')),
-    collects: metric(optObj(record, 'collects')),
-  };
-}
-
-export function parseRelayerPlan(record: Json): RelayerPlan {
-  return {
-    workCount: optNum(record, 'workCount'),
-    imageSlots: optNum(record, 'imageSlots'),
-    imageJobs: optNum(record, 'imageJobs'),
-    layoutCount: num(record, 'layoutCount'),
-    pendingLayouts: num(record, 'pendingLayouts'),
-    alreadyCurrent: num(record, 'alreadyCurrent'),
-    needsOcr: num(record, 'needsOcr'),
-    maximumLayoutsPerWork: optNum(record, 'maximumLayoutsPerWork'),
-    expectedRevision: str(record, 'expectedRevision'),
-  };
-}
-
-function parseTaskInput(record: Json): TaskInput {
-  const source = Array.isArray(record.fragments) ? record.fragments : Array.isArray(record.sources) ? record.sources : [];
-  return {
-    includedCharacterCount: optNum(record, 'includedCharacterCount') ?? 0,
-    truncated: optBool(record, 'truncated') === true,
-    fragments: source.filter(isRecord).map(fragment => {
-      const text = optStr(fragment, 'text') ?? '';
-      return {
-        field: optStr(fragment, 'field') ?? optStr(fragment, 'kind') ?? 'unknown',
-        characterCount: optNum(fragment, 'characterCount') ?? Array.from(text).length,
-        text,
-      };
-    }),
-    markdown: optStr(record, 'markdown'),
-    raw: record,
-  };
-}
-
+export function parseDossier(value: unknown): Dossier { return decode(value, parseDossierRow); }
 export function parseDossierPayload(value: unknown): DossierPayload {
-  return decode(value, root => {
-    const dossier = obj(root, 'dossier');
-    const inputs = obj(root, 'inputs');
-    const task = (key: TaskKey) => parseTaskInput(obj(inputs, key));
-    return {
-      dossier: {
-        revision: str(dossier, 'revision'),
-        asOf: optStr(dossier, 'asOf'),
-        fragments: list(dossier, 'fragments', parseFragment),
-        sections: list(dossier, 'sections', parseSection),
-        media: list(dossier, 'media', parseMedia),
-        coverage: parseCoverage(obj(dossier, 'coverage')),
-        metadata: parseMetadata(obj(dossier, 'metadata')),
-        raw: dossier,
-      } satisfies Dossier,
-      relayerPlan: parseRelayerPlan(obj(root, 'relayerPlan')),
-      markdown: str(root, 'markdown'),
-      inputs: { creator: task('creator'), comments: task('comments'), topics: task('topics') },
-    };
-  });
+  return decode(value, root => ({ dossier: parseDossierRow(obj(root, 'dossier')), relayerPlan: parseRelayerPlan(obj(root, 'relayerPlan')) }));
 }
-
-export function parseRelayerPlanResponse(value: unknown): RelayerPlan {
-  return decode(value, root => parseRelayerPlan(obj(root, 'relayerPlan')));
+export function parseRelayerPlan(row: Json): RelayerPlan {
+  return { workCount: optionalCount(row, 'workCount'), imageSlots: optionalCount(row, 'imageSlots'), imageJobs: optionalCount(row, 'imageJobs'), layoutCount: count(row.layoutCount, 'layoutCount'), pendingLayouts: count(row.pendingLayouts, 'pendingLayouts'), alreadyCurrent: count(row.alreadyCurrent, 'alreadyCurrent'), needsOcr: count(row.needsOcr, 'needsOcr'), expectedRevision: str(row, 'expectedRevision') };
 }
-
-export function parseCreatorPreview(value: unknown): CreatorPreview {
-  return decode(value, root => {
-    const input = optObj(root, 'input');
-    return {
-      available: optBool(root, 'available') === true,
-      reason: optStr(root, 'reason'),
-      inputTokenLimit: optNum(root, 'inputTokenLimit'),
-      estimatedInputTokensUpperBound: optNum(root, 'estimatedInputTokensUpperBound'),
-      materials: input === null ? null : optStr(input, 'materials'),
-      raw: root,
-    };
-  });
+export function parseRelayerPlanResponse(value: unknown): RelayerPlan { return decode(value, root => parseRelayerPlan(obj(root, 'relayerPlan'))); }
+export function parseCandidates(value: unknown): ReadingCandidate[] {
+  return decode(value, root => list(root, 'candidates', row => ({ unitRef: str(row, 'unitRef'), slotKey: optStr(row, 'slotKey'), candidateRevisionRef: str(row, 'candidateRevisionRef'), currentRevisionRef: optStr(row, 'currentRevisionRef'), blocks: parseBlocks(row), issues: list(row, 'issues', parseIssue), generatedBy: choice(row.generatedBy, PRODUCERS, 'generatedBy'), verification: choice(row.verification, VERIFICATIONS, 'verification'), createdAt: str(row, 'createdAt') })));
 }
-
-function parseDossierComment(record: Json): DossierComment {
-  return {
-    sourceRef: str(record, 'sourceRef'),
-    parentSourceRef: optStr(record, 'parentSourceRef'),
-    relation: optStr(record, 'relation') === 'REPLY' ? 'REPLY' : 'ROOT',
-    body: optStr(record, 'body'),
-    likeCount: optNum(record, 'likeCount'),
-  };
+export function parseReadingReceipt(value: unknown): ReadingReviewReceipt {
+  return decode(value, row => ({ commandRef: str(row, 'commandRef'), unitRef: str(row, 'unitRef'), candidateRevisionRef: str(row, 'candidateRevisionRef'), action: choice(row.action, ['adopt', 'edit', 'keep'], 'action'), currentRevisionRef: optStr(row, 'currentRevisionRef'), adoption: choice(row.adoption, ADOPTIONS, 'adoption'), verification: choice(row.verification, VERIFICATIONS, 'verification'), reviewRef: optStr(row, 'reviewRef') }));
 }
-
 export function parseDossierComments(value: unknown): DossierCommentPage {
-  return decode(value, root => ({
-    items: list(root, 'items', parseDossierComment),
-    total: optNum(root, 'total'),
-    nextCursor: optStr(root, 'nextCursor'),
-  }));
+  return decode(value, root => ({ items: list(root, 'items', row => ({ sourceRef: str(row, 'sourceRef'), parentSourceRef: optStr(row, 'parentSourceRef'), relation: choice(row.relation, ['ROOT', 'REPLY'], 'relation'), body: optStr(row, 'body'), likeCount: optionalCount(row, 'likeCount') })), total: optionalCount(root, 'total'), nextCursor: optStr(root, 'nextCursor') }));
 }
-
 export function parseRelayerReceipt(value: unknown): RelayerReceipt {
-  return decode(value, root => ({
-    scopeCount: num(root, 'scopeCount'),
-    updated: num(root, 'updated'),
-    alreadyCurrent: num(root, 'alreadyCurrent'),
-    skipped: num(root, 'skipped'),
-    needsOcr: optNum(root, 'needsOcr') ?? 0,
-  }));
+  return decode(value, root => ({ scopeCount: num(root, 'scopeCount'), updated: num(root, 'updated'), alreadyCurrent: num(root, 'alreadyCurrent'), skipped: num(root, 'skipped'), needsOcr: num(root, 'needsOcr') }));
 }

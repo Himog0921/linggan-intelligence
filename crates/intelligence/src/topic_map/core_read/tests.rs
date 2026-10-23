@@ -82,6 +82,8 @@ fn input(field: &str) -> ResearchInput {
         start: 10_001,
         end: 10_001 + text.chars().count(),
         text: text.into(),
+        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
+    ..Fragment::default()
     };
     let author = ["title", "body", "ocr", "transcript"].contains(&field);
     ResearchInput {
@@ -127,7 +129,7 @@ fn input(field: &str) -> ResearchInput {
         context_work_refs: vec![],
         comment_study: json!([]),
         role_metadata: json!({"workRef":work_ref,"own":false}),
-        coverage: json!({"sourceChars":text.chars().count(),"windowCount":1,"windowKey":"synthetic-window"}),
+        coverage: json!({"asOf":"2026-10-23T00:00:00Z","sourceChars":text.chars().count(),"windowCount":1,"windowKey":"synthetic-window"}),
     }
 }
 
@@ -158,7 +160,7 @@ fn draft(input: &ResearchInput) -> ResearchOutput {
             rationale: "原文直接陈述该困难。".into(),
         })
         .collect();
-    serde_json::from_value(json!({"contract":"topic-map.research.v2","outcome":"analyzed","discussions":discussions,
+    serde_json::from_value(json!({"contract":crate::topic_map_research_analysis::EXTRACT_CONTRACT,"outcome":"analyzed","discussions":discussions,
         "journey":{"mainStage":"begin_practice","involvedStages":["begin_practice"],"overlays":[],"path":"adult",
             "rationale":"原文描述尝试开展任务。","evidence":evidence},
         "scenes":[{"label":"执行任务","evidence":evidence}],"responseMatches":[],
@@ -193,7 +195,7 @@ fn window(
         core,
         result: result.map(Uuid::from_u128),
         task: Uuid::from_u128(result.unwrap_or(99)),
-        method: "topic-map.research.v2".into(),
+        method: crate::topic_map_research_analysis::METHOD_VERSION.into(),
         time: time.into(),
     }
 }

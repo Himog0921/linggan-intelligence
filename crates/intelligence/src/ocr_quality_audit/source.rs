@@ -1,58 +1,100 @@
 //! One admission predicate is reused at sample freeze, dispatch, publication and readback.
 use crate::ai_foundation::store::FoundationError;
-use linggan_evidence::ocr_adoption::{Assessment, ImageInput};
+use linggan_evidence::ocr_adoption::{ImageIdentity, ImageRole};
 use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 pub struct Source {
-    pub adoption_ref: Uuid,
+    pub reading_ref: Uuid,
+    pub unit_ref: Uuid,
     pub work_ref: Uuid,
     pub derivative_ref: Uuid,
     pub slot_key: String,
     pub storage_key: String,
     pub mime_type: String,
     pub byte_size: i64,
-    pub input: ImageInput,
-    pub assessment: Assessment,
+    pub image: ImageIdentity,
+    pub image_role: ImageRole,
+    pub sequence_ordinal: Option<u32>,
+    pub blocks: Vec<Value>,
+    pub issues: Vec<Value>,
+    pub rule_version: String,
+    pub original_url: String,
 }
+impl Source {
+    pub fn frozen_snapshot(&self) -> Value {
+        serde_json::json!({"readingRef":self.reading_ref,"unitRef":self.unit_ref,"ruleVersion":self.rule_version})
+    }
+
+    pub fn validate_snapshot(&self, snapshot: &Value) -> Result<(), FoundationError> {
+        if snapshot != &self.frozen_snapshot() {
+            return Err(FoundationError::Invalid);
+        }
+        Ok(())
+    }
+}
+/// Frozen samples retain their exact reading even after another reading is selected.
+/// Current withdrawal, bytes disposition and job retirement still revoke access.
 pub async fn load_in(
     conn: &mut sqlx::PgConnection,
     id: Uuid,
 ) -> Result<Option<Source>, FoundationError> {
-    let Some(r) =
-        sqlx::query("SELECT * FROM linggan_ocr_audit_eligible_source WHERE adoption_ref=$1")
-            .bind(id)
-            .fetch_optional(conn)
-            .await?
-    else {
-        return Ok(None);
-    };
-    let input: ImageInput = serde_json::from_value(r.get::<Value, _>("observation"))
-        .map_err(|_| FoundationError::Invalid)?;
-    let assessment: Assessment = serde_json::from_value(r.get::<Value, _>("assessment"))
-        .map_err(|_| FoundationError::Invalid)?;
+    let Some(r)=sqlx::query("SELECT r.*,u.slot_key,o.purpose,o.display_ordinal,o.display_order_state,m.blob_sha256,m.local_asset_path,b.storage_key,b.mime_type,b.byte_size,l.image_width,l.image_height FROM linggan_material_reading r JOIN linggan_material_unit u USING(unit_ref) JOIN linggan_media_materialization m ON m.materialization_ref::text=r.source_version JOIN linggan_media_download_attempt a USING(download_attempt_ref) JOIN linggan_material_media_origin o ON o.observation_ref=a.media_observation_ref AND o.slot_key=u.slot_key JOIN linggan_media_blob b ON b.sha256=m.blob_sha256 JOIN linggan_media_ocr_layout l ON l.ocr_derivative_ref=r.derivative_ref WHERE r.reading_ref=$1 AND u.kind='image' AND NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition dis WHERE dis.slot_key=u.slot_key OR dis.blob_sha256=m.blob_sha256 OR dis.materialization_ref=m.materialization_ref OR dis.derivative_ref=r.derivative_ref) AND NOT EXISTS(SELECT 1 FROM linggan_media_derivative d JOIN linggan_media_ocr_retirement retired ON retired.retired_job_ref=d.job_ref WHERE d.derivative_ref=r.derivative_ref)")
+        .bind(id).fetch_optional(conn).await? else {return Ok(None)};
     let work_ref: Uuid = r.get("content_public_ref");
     let slot_key: String = r.get("slot_key");
-    if input.image != assessment.image
-        || input.image.work_ref != work_ref
-        || input.image.image_ref != slot_key
-    {
-        return Err(FoundationError::Invalid);
-    }
+    let ordinal: Option<i32> = if r.get::<String, _>("display_order_state") == "KNOWN" {
+        r.get("display_ordinal")
+    } else {
+        None
+    };
+    let image_role = if r.get::<String, _>("purpose") == "cover" {
+        ImageRole::ExplicitCover
+    } else if ordinal == Some(1) {
+        ImageRole::FirstImage
+    } else if ordinal.is_some() {
+        ImageRole::Interior
+    } else {
+        ImageRole::Unknown
+    };
+    let blocks: Vec<Value> =
+        serde_json::from_value(r.get("blocks")).map_err(|_| FoundationError::Invalid)?;
+    let issues: Vec<Value> =
+        serde_json::from_value(r.get("issues")).map_err(|_| FoundationError::Invalid)?;
+    linggan_evidence::research_dossier::content::validate_blocks(&blocks)
+        .map_err(|_| FoundationError::Invalid)?;
+    linggan_evidence::research_dossier::content::validate_issues(&serde_json::json!(issues))
+        .map_err(|_| FoundationError::Invalid)?;
     Ok(Some(Source {
-        adoption_ref: id,
+        reading_ref: id,
+        unit_ref: r.get("unit_ref"),
         work_ref,
         derivative_ref: r.get("derivative_ref"),
-        slot_key,
+        slot_key: slot_key.clone(),
         storage_key: r.get("storage_key"),
         mime_type: r.get("mime_type"),
         byte_size: r.get("byte_size"),
-        input,
-        assessment,
+        image: ImageIdentity {
+            work_ref,
+            image_ref: slot_key,
+            blob_sha256: r.get("blob_sha256"),
+            width: r.get::<i32, _>("image_width") as u32,
+            height: r.get::<i32, _>("image_height") as u32,
+        },
+        image_role,
+        sequence_ordinal: ordinal.map(|n| n as u32),
+        blocks,
+        issues,
+        rule_version: r.get("rule_version"),
+        original_url: format!(
+            "/api/local/media/{}/{}",
+            r.get::<String, _>("source_version"),
+            r.get::<String, _>("blob_sha256")
+        ),
     }))
 }
 /// Local use eligibility does not grant permission to send an image externally.
-/// An operator must explicitly clear the exact immutable adoption, with an audit reason.
+/// An operator must explicitly clear the exact immutable reading, with an audit reason.
 pub async fn external_clearance_in(
     conn: &mut sqlx::PgConnection,
     id: Uuid,
@@ -88,7 +130,7 @@ pub fn read_image(s: &Source) -> Result<crate::pi_adapter::PiImage, FoundationEr
     }
     let bytes = std::fs::read(file).map_err(|_| FoundationError::NotFound)?;
     if bytes.len() as i64 != s.byte_size
-        || linggan_evidence::ocr_adoption::content_hash(&bytes) != s.input.image.blob_sha256
+        || linggan_evidence::ocr_adoption::content_hash(&bytes) != s.image.blob_sha256
     {
         return Err(FoundationError::Conflict);
     }
@@ -106,8 +148,7 @@ pub fn read_image(s: &Source) -> Result<crate::pi_adapter::PiImage, FoundationEr
     let (w, h) = decoder
         .into_dimensions()
         .map_err(|_| FoundationError::Invalid)?;
-    if w != s.input.image.width || h != s.input.image.height || (w as u64) * (h as u64) > 40_000_000
-    {
+    if w != s.image.width || h != s.image.height || (w as u64) * (h as u64) > 40_000_000 {
         return Err(FoundationError::Invalid);
     }
     Ok(crate::pi_adapter::PiImage {

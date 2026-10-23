@@ -13,6 +13,8 @@ fn fragment(id: &str, field: &str, start: usize, value: &str) -> Fragment {
         start,
         end: start + value.chars().count(),
         text: value.into(),
+        speaker: if field.contains("comment") { "other" } else { "author" }.into(),
+    ..Fragment::default()
     }
 }
 fn citation(f: &Fragment) -> Citation {

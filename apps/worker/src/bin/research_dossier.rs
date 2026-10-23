@@ -1,5 +1,5 @@
 //! No background loop: print a bounded read-only plan, or explicitly apply one saved plan.
-use linggan_evidence::note_material_input::{self, BatchOperation, BatchPlan};
+use linggan_evidence::dossier_input::{self, BatchOperation, BatchPlan};
 use std::process::ExitCode;
 use uuid::Uuid;
 
@@ -47,7 +47,7 @@ fn parse(args: &[String]) -> Result<Command, &'static str> {
         .map(|v| v.parse().map_err(|_| "invalid_work"))
         .collect::<Result<Vec<Uuid>, _>>()?;
     if works.is_empty()
-        || works.len() > note_material_input::MAX_WORKS
+        || works.len() > dossier_input::MAX_WORKS
         || works
             .iter()
             .collect::<std::collections::BTreeSet<_>>()
@@ -57,6 +57,7 @@ fn parse(args: &[String]) -> Result<Command, &'static str> {
         return Err("invalid_scope");
     }
     let operation = match flags.get("--operation").copied() {
+        Some("native_body") => BatchOperation::NativeBody,
         Some("hashtags") => BatchOperation::Hashtags,
         Some("relayer") => BatchOperation::Relayer,
         Some("snapshot") => BatchOperation::Snapshot,
@@ -75,11 +76,11 @@ async fn main() -> ExitCode {
     match run().await {
         Ok(true) => ExitCode::SUCCESS,
         Ok(false) => {
-            eprintln!("note-material: partial_or_failed; see receipt");
+            eprintln!("research-dossier: partial_or_failed; see receipt");
             ExitCode::FAILURE
         }
         Err(error) => {
-            eprintln!("note-material: {error}");
+            eprintln!("research-dossier: {error}");
             ExitCode::FAILURE
         }
     }
@@ -106,7 +107,7 @@ async fn run() -> Result<bool, String> {
             operation,
         } => {
             let result =
-                note_material_input::plan(&database, domain, &works, as_of.as_deref(), operation)
+                dossier_input::plan(&database, domain, &works, as_of.as_deref(), operation)
                     .await
                     .map_err(|e| e.to_string())?;
             (
@@ -116,7 +117,7 @@ async fn run() -> Result<bool, String> {
         }
         Command::Apply(_) => {
             let report =
-                note_material_input::apply_plan(&database, &saved.expect("parsed apply plan"))
+                dossier_input::apply_plan(&database, &saved.expect("parsed apply plan"))
                     .await
                     .map_err(|e| e.to_string())?;
             let complete = report.complete();
@@ -172,7 +173,7 @@ mod tests {
         use std::io::Read;
         let details: Vec<_> = (1..=500).map(Uuid::from_u128).collect();
         let entries:Vec<_>=(1000..1200).map(|n|json!({"workRef":Uuid::from_u128(n),"expectedRevision":"a".repeat(64),"materialFingerprint":"b".repeat(64),"relayerSourceHash":"c".repeat(64),"detailRefs":details,"pendingTagDetails":500,"sourceNotProvided":0,"sourceInvalid":0,"sourceNonempty":500,"relayer":{}})).collect();
-        let value = json!({"contract":"note-material-plan.v1","domainRef":Uuid::nil(),"asOf":"2026-10-19T00:00:00Z","layerVersion":"rules-v3","maximumWorks":200,"operation":"hashtags","entries":entries,"planHash":"d".repeat(64)});
+        let value = json!({"contract":"research-dossier-plan.v2","domainRef":Uuid::nil(),"asOf":"2026-10-19T00:00:00Z","layerVersion":"rules-v3","maximumWorks":200,"operation":"hashtags","entries":entries,"planHash":"d".repeat(64)});
         let bytes = serde_json::to_vec_pretty(&value).unwrap();
         assert!(bytes.len() > 1024 * 1024);
         assert_eq!(decode_plan(bytes.as_slice()).unwrap().entries.len(), 200);

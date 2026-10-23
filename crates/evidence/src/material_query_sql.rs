@@ -13,7 +13,7 @@ latest_detail AS (
   FROM linggan_material_content_detail detail
   JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz
+  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_title AS (
@@ -23,7 +23,7 @@ latest_detail AS (
   FROM linggan_material_content_detail detail
   JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.title_state='KNOWN'
+  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz AND detail.title_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_body AS (
@@ -33,7 +33,7 @@ latest_detail AS (
   FROM linggan_material_content_detail detail
   JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.body_state='KNOWN'
+  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz AND detail.body_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_creator AS (
@@ -43,7 +43,7 @@ latest_detail AS (
   FROM linggan_material_content_detail detail
   JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.creator_display_name_state='KNOWN'
+  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz AND detail.creator_display_name_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_published_at AS (
@@ -57,7 +57,7 @@ latest_detail AS (
   FROM linggan_material_content_detail detail
   JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.published_at IS NOT NULL
+  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz AND detail.published_at IS NOT NULL
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_published_text AS (
@@ -70,7 +70,7 @@ latest_detail AS (
   FROM linggan_material_content_detail detail
   JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz
+  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz
     AND detail.published_at_source_text_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
@@ -79,7 +79,7 @@ latest_detail AS (
   FROM linggan_material_discovery_finding finding
   JOIN requested_work scope ON scope.public_ref=finding.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz
+  WHERE package.accepted_at <= $2::timestamptz AND finding.created_at <= $2::timestamptz
   ORDER BY finding.content_public_ref,finding.observed_at::timestamptz DESC,
            finding.created_at DESC,finding.package_ref DESC,finding.material_ref DESC
 ), latest_like AS (
@@ -89,7 +89,7 @@ latest_detail AS (
   FROM linggan_material_engagement_observation observation
   JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND observation.like_count_state='KNOWN'
+  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND observation.like_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_comment_count AS (
@@ -99,7 +99,7 @@ latest_detail AS (
   FROM linggan_material_engagement_observation observation
   JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND observation.comment_count_state='KNOWN'
+  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND observation.comment_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_collect AS (
@@ -109,7 +109,7 @@ latest_detail AS (
   FROM linggan_material_engagement_observation observation
   JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND observation.collect_count_state='KNOWN'
+  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND observation.collect_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_share AS (
@@ -119,7 +119,7 @@ latest_detail AS (
   FROM linggan_material_engagement_observation observation
   JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND observation.share_count_state='KNOWN'
+  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND observation.share_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_lane AS (
@@ -260,17 +260,17 @@ scoped_work AS MATERIALIZED (
  SELECT detail.content_public_ref,max(detail.observed_at::timestamptz) AS observed_at
  FROM linggan_material_content_detail detail JOIN scoped_work scope ON scope.public_ref=detail.content_public_ref
  JOIN linggan_runtime_capture_package package USING(package_ref)
- WHERE package.accepted_at <= $2::timestamptz GROUP BY detail.content_public_ref
+ WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz GROUP BY detail.content_public_ref
 ), recent_discovery_time AS (
  SELECT finding.content_public_ref,max(finding.observed_at::timestamptz) AS observed_at
  FROM linggan_material_discovery_finding finding JOIN scoped_work scope ON scope.public_ref=finding.content_public_ref
  JOIN linggan_runtime_capture_package package USING(package_ref)
- WHERE package.accepted_at <= $2::timestamptz GROUP BY finding.content_public_ref
+ WHERE package.accepted_at <= $2::timestamptz AND finding.created_at <= $2::timestamptz GROUP BY finding.content_public_ref
 ), recent_lane_time AS (
  SELECT lane.content_public_ref,max(lane.observed_at::timestamptz) AS observed_at
  FROM linggan_material_lane_observation lane JOIN scoped_work scope ON scope.public_ref=lane.content_public_ref
  JOIN linggan_runtime_capture_package package USING(package_ref)
- WHERE package.accepted_at <= $2::timestamptz GROUP BY lane.content_public_ref
+ WHERE package.accepted_at <= $2::timestamptz AND lane.created_at <= $2::timestamptz GROUP BY lane.content_public_ref
 ), requested_work AS MATERIALIZED (
  SELECT content.* FROM scoped_work content
  LEFT JOIN recent_detail_time detail ON detail.content_public_ref=content.public_ref
@@ -285,31 +285,11 @@ scoped_work AS MATERIALIZED (
 )
 "#;
 
-pub(crate) fn material_page_sql(
-    ocr_content_layering_schema_ready: bool,
-    identity_page: bool,
-) -> String {
+pub(crate) fn material_page_sql(identity_page: bool) -> String {
     let scope = if identity_page {
         IDENTITY_PAGE_SCOPE
     } else {
         FILTERED_PAGE_SCOPE
-    };
-    // PostgreSQL resolves relation names before it evaluates a WHERE condition.  This must be a
-    // separate compile-time fragment rather than `to_regclass(...) AND NOT EXISTS (...)`, so a
-    // reader on an older migration ledger can still load the work projection while 0091 has not
-    // been applied yet.
-    let retired_ocr_filter = if ocr_content_layering_schema_ready {
-        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=derived_job.job_ref)"
-    } else {
-        ""
-    };
-    // Only ACCEPTED semantic text is eligible to be a corpus/search hit.  PARTIAL is useful
-    // evidence but deliberately stays out of the clean corpus until a future visual selector
-    // resolves the remaining ambiguity.
-    let substantive_ocr_search = if ocr_content_layering_schema_ready {
-        " OR EXISTS (SELECT 1 FROM linggan_media_ocr_layering_result layer JOIN linggan_media_ocr_layout layout USING(layout_ref) JOIN linggan_media_derivative layer_derivative ON layer_derivative.derivative_ref=layout.ocr_derivative_ref JOIN linggan_media_processing_job layer_job ON layer_job.job_ref=layer_derivative.job_ref WHERE layout.content_public_ref=current.public_ref AND layer.state='ACCEPTED' AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL AND lower(layer.image_substantive_text) LIKE '%' || lower($1) || '%' AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=layer_job.job_ref))"
-    } else {
-        ""
     };
     format!(
         r#"WITH {scope}, {WORK_RESOURCE_CURRENT_CTES}, current_comment AS (
@@ -317,19 +297,37 @@ pub(crate) fn material_page_sql(
   FROM linggan_material_comment comment
   JOIN requested_work scope ON scope.public_ref=comment.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz
+  WHERE package.accepted_at <= $2::timestamptz AND comment.created_at <= $2::timestamptz
   ORDER BY comment.content_public_ref,comment.comment_external_id,
            comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC
 )
 SELECT current.* FROM work_resource_current current
 WHERE ($1::text IS NULL
   OR lower(COALESCE(current.title,'')) LIKE '%' || lower($1) || '%'
-  OR lower(COALESCE(current.body_text,'')) LIKE '%' || lower($1) || '%'
   OR lower(COALESCE(current.creator_display_name,'')) LIKE '%' || lower($1) || '%'
   OR EXISTS (SELECT 1 FROM current_comment comment WHERE comment.content_public_ref=current.public_ref AND lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($1) || '%')
-  OR EXISTS (SELECT 1 FROM linggan_material_derived_text derived JOIN linggan_media_derivative derivative USING(derivative_ref) JOIN linggan_media_processing_job derived_job USING(job_ref) WHERE derived.content_public_ref=current.public_ref AND lower(derived.text_content) LIKE '%' || lower($1) || '%'{retired_ocr_filter})
-  {substantive_ocr_search}
-  OR EXISTS (SELECT 1 FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package author_package USING(package_ref) WHERE author.platform=current.platform AND author.author_external_id=current.author_external_id AND author_package.accepted_at <= $2::timestamptz AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%')))
+  OR EXISTS (
+    SELECT 1 FROM linggan_material_unit u
+    JOIN LATERAL(SELECT * FROM linggan_material_reading_selection s WHERE s.unit_ref=u.unit_ref AND s.created_at<=$2::timestamptz ORDER BY revision DESC LIMIT 1) selected ON true
+    JOIN linggan_material_reading reading ON reading.reading_ref=selected.reading_ref
+    WHERE u.content_public_ref=current.public_ref
+      AND lower((jsonb_path_query_array(reading.blocks,'$[*].text') || jsonb_path_query_array(reading.blocks,'$[*].items[*]') || jsonb_path_query_array(reading.blocks,'$[*].columns[*]') || jsonb_path_query_array(reading.blocks,'$[*].rows[*][*]') || jsonb_path_query_array(reading.blocks,'$[*].turns[*].text'))::text) LIKE '%' || lower($1) || '%'
+      AND ((u.kind='body' AND reading.source_version=current.body_source_material_ref::text) OR (u.kind<>'body' AND EXISTS(
+        SELECT 1 FROM linggan_material_media_origin origin
+        JOIN linggan_runtime_capture_package source_package ON source_package.package_ref=origin.package_ref
+        JOIN linggan_runtime_record_disposition source_disposition ON source_disposition.package_ref=origin.package_ref AND source_disposition.record_ordinal=origin.record_ordinal
+        JOIN linggan_media_download_attempt attempt ON attempt.media_observation_ref=origin.observation_ref
+        JOIN linggan_media_materialization media USING(download_attempt_ref)
+        WHERE origin.content_public_ref=u.content_public_ref AND origin.slot_key=u.slot_key AND linggan_dossier_slot_active(u.content_public_ref,u.slot_key,$2::timestamptz)
+          AND origin.created_at<=$2::timestamptz AND source_package.accepted_at<=$2::timestamptz AND source_disposition.disposition='accepted_for_media_identity'
+          AND origin.source_generation=(SELECT max(o.source_generation) FROM linggan_material_media_origin o JOIN linggan_runtime_capture_package p USING(package_ref) JOIN linggan_runtime_record_disposition d ON d.package_ref=o.package_ref AND d.record_ordinal=o.record_ordinal WHERE o.slot_key=u.slot_key AND o.created_at<=$2::timestamptz AND p.accepted_at<=$2::timestamptz AND d.disposition='accepted_for_media_identity')
+          AND media.materialization_ref::text=reading.source_version AND media.verified_at<=$2::timestamptz
+          AND media.materialization_ref=(SELECT m2.materialization_ref FROM linggan_media_materialization m2 JOIN linggan_media_download_attempt a2 USING(download_attempt_ref) JOIN linggan_media_blob b2 ON b2.sha256=m2.blob_sha256 WHERE ((u.kind='image' AND b2.mime_type LIKE 'image/%') OR (u.kind='video_frame' AND b2.mime_type LIKE 'video/%') OR (u.kind='audio' AND (b2.mime_type LIKE 'video/%' OR (origin.purpose<>'live_photo' AND b2.mime_type LIKE 'audio/%')))) AND a2.media_observation_ref=origin.observation_ref AND m2.verified_at<=$2::timestamptz ORDER BY m2.verified_at DESC,m2.materialization_ref DESC LIMIT 1)
+          AND NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition dis WHERE dis.state='WITHDRAWN_OR_RESTRICTED' AND (dis.slot_key=u.slot_key OR dis.blob_sha256=media.blob_sha256 OR dis.materialization_ref=media.materialization_ref OR dis.derivative_ref=reading.derivative_ref))
+          AND NOT EXISTS(SELECT 1 FROM linggan_media_derivative d JOIN linggan_media_ocr_retirement retired ON retired.retired_job_ref=d.job_ref WHERE d.derivative_ref=reading.derivative_ref)
+      )))
+  )
+  OR EXISTS (SELECT 1 FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package author_package USING(package_ref) WHERE author.platform=current.platform AND author.author_external_id=current.author_external_id AND author_package.accepted_at <= $2::timestamptz AND author.created_at <= $2::timestamptz AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%')))
 AND ($8::uuid IS NULL OR current.public_ref=$8)
 AND ($9::uuid IS NULL OR EXISTS (
   SELECT 1 FROM linggan_material_domain_usage domain_usage
@@ -340,13 +338,13 @@ AND current.observed_at IS NOT NULL
 AND ($6::text IS NULL
   OR ($6='detail' AND current.detail_material_ref IS NOT NULL)
   OR ($6='discovery' AND current.material_ref IS NOT NULL)
-  OR ($6 IN ('comments','replies') AND EXISTS (SELECT 1 FROM linggan_material_lane_observation filtered_lane JOIN linggan_runtime_capture_package filtered_package USING(package_ref) WHERE filtered_lane.content_public_ref=current.public_ref AND filtered_lane.lane=$6 AND filtered_package.accepted_at <= $2::timestamptz))
-  OR ($6='author' AND EXISTS (SELECT 1 FROM linggan_material_author_profile filtered_author JOIN linggan_runtime_capture_package filtered_author_package USING(package_ref) WHERE filtered_author.platform=current.platform AND filtered_author.author_external_id=current.author_external_id AND filtered_author_package.accepted_at <= $2::timestamptz))
-  OR ($6='media_slots' AND EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_origin JOIN linggan_runtime_capture_package filtered_origin_package USING(package_ref) WHERE filtered_origin.content_public_ref=current.public_ref AND filtered_origin_package.accepted_at <= $2::timestamptz))
-  OR ($6='media_bytes' AND EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_origin JOIN linggan_runtime_capture_package filtered_origin_package USING(package_ref) JOIN linggan_media_download_attempt filtered_attempt ON filtered_attempt.media_observation_ref=filtered_origin.observation_ref JOIN linggan_media_materialization filtered_materialization USING(download_attempt_ref) WHERE filtered_origin.content_public_ref=current.public_ref AND filtered_origin_package.accepted_at <= $2::timestamptz AND filtered_materialization.verified_at <= $2::timestamptz))
+  OR ($6 IN ('comments','replies') AND EXISTS (SELECT 1 FROM linggan_material_lane_observation filtered_lane JOIN linggan_runtime_capture_package filtered_package USING(package_ref) WHERE filtered_lane.content_public_ref=current.public_ref AND filtered_lane.lane=$6 AND filtered_package.accepted_at <= $2::timestamptz AND filtered_lane.created_at <= $2::timestamptz))
+  OR ($6='author' AND EXISTS (SELECT 1 FROM linggan_material_author_profile filtered_author JOIN linggan_runtime_capture_package filtered_author_package USING(package_ref) WHERE filtered_author.platform=current.platform AND filtered_author.author_external_id=current.author_external_id AND filtered_author_package.accepted_at <= $2::timestamptz AND filtered_author.created_at <= $2::timestamptz))
+  OR ($6='media_slots' AND EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_origin JOIN linggan_runtime_capture_package filtered_origin_package USING(package_ref) WHERE filtered_origin.content_public_ref=current.public_ref AND filtered_origin_package.accepted_at <= $2::timestamptz AND filtered_origin.created_at <= $2::timestamptz))
+  OR ($6='media_bytes' AND EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_origin JOIN linggan_runtime_capture_package filtered_origin_package USING(package_ref) JOIN linggan_media_download_attempt filtered_attempt ON filtered_attempt.media_observation_ref=filtered_origin.observation_ref JOIN linggan_media_materialization filtered_materialization USING(download_attempt_ref) WHERE filtered_origin.content_public_ref=current.public_ref AND filtered_origin_package.accepted_at <= $2::timestamptz AND filtered_origin.created_at <= $2::timestamptz AND filtered_materialization.verified_at <= $2::timestamptz))
   OR ($6='ocr' AND EXISTS (SELECT 1 FROM linggan_media_processing_job filtered_job JOIN linggan_media_slot filtered_slot USING(slot_key) WHERE filtered_slot.platform=current.platform AND filtered_slot.content_external_id=current.content_external_id AND filtered_job.processor_kind IN ('image_ocr','video_frame_ocr') AND filtered_job.created_at <= $2::timestamptz))
   OR ($6='asr' AND EXISTS (SELECT 1 FROM linggan_media_processing_job filtered_job JOIN linggan_media_slot filtered_slot USING(slot_key) WHERE filtered_slot.platform=current.platform AND filtered_slot.content_external_id=current.content_external_id AND filtered_job.processor_kind='asr' AND filtered_job.created_at <= $2::timestamptz)))
-AND ($7::text IS NULL OR EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_kind JOIN linggan_runtime_capture_package filtered_kind_package USING(package_ref) WHERE filtered_kind.content_public_ref=current.public_ref AND filtered_kind.purpose=$7 AND filtered_kind_package.accepted_at <= $2::timestamptz))
+AND ($7::text IS NULL OR EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_kind JOIN linggan_runtime_capture_package filtered_kind_package USING(package_ref) WHERE filtered_kind.content_public_ref=current.public_ref AND filtered_kind.purpose=$7 AND filtered_kind_package.accepted_at <= $2::timestamptz AND filtered_kind.created_at <= $2::timestamptz))
 AND ($3::text IS NULL OR current.observed_at::timestamptz < $3::timestamptz
   OR (current.observed_at::timestamptz=$3::timestamptz
     AND (current.platform > $4 OR (current.platform=$4 AND current.content_external_id > $5))))
@@ -370,10 +368,8 @@ mod tests {
     #[test]
     fn shared_work_resource_reads_do_not_expand_target_scoped_retirement_to_all_corpus_uses() {
         for sql in [
-            material_page_sql(false, false),
-            material_page_sql(false, true),
-            material_page_sql(true, false),
-            material_page_sql(true, true),
+            material_page_sql(false),
+            material_page_sql(true),
             work_resource_currents_sql(),
         ] {
             assert!(

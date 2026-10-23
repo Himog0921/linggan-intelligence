@@ -17,12 +17,25 @@ pub async fn work(db: &linggan_storage_postgres::Database) -> Uuid {
     work
 }
 
-pub async fn legacy_ocr(db: &linggan_storage_postgres::Database) -> Uuid {
-    let observation = Uuid::new_v4();
-    fixture::submit_package(db,"media_slots",json!({"contentExternalId":"dossier-note"}),json!({"kind":"media_slot","slotKey":"xhs:dossier-note:image:1","observationRef":observation,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/dossier.jpg","candidateUris":["https://media.example/dossier.jpg"],"observedAt":"2026-10-14T00:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"}})).await;
+pub async fn ordinary_ocr(db: &linggan_storage_postgres::Database) -> Uuid {
     let preview_bytes = std::env::var("DOSSIER_PROOF_IMAGE")
         .ok()
         .map(|path| std::fs::read(path).unwrap());
+    ordinary_ocr_with_bytes(db, preview_bytes).await
+}
+
+pub async fn ordinary_ocr_with_bytes(
+    db: &linggan_storage_postgres::Database,
+    preview_bytes: Option<Vec<u8>>,
+) -> Uuid {
+    let observation = Uuid::new_v4();
+    let target = json!({"contentExternalId":"dossier-note","imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":1}});
+    fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":"dossier-note"}),"media_slots","xhs",
+        json!({"target":target,"layers":[fixture::coverage_layer("media_slots",1)]}),
+        vec![json!({"kind":"media_slot","slotKey":"xhs:dossier-note:image:1","observationRef":observation,
+            "slot":{"role":"image","ordinal":1,"displayOrdinal":1,"displayOrderBasis":"platform_explicit"},
+            "observation":{"externalUri":"https://media.example/dossier.jpg","candidateUris":["https://media.example/dossier.jpg"],"observedAt":"2026-10-14T00:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"}})]).await;
     let (sha, size) = preview_bytes.as_ref().map_or_else(
         || ("a".repeat(64), 12),
         |bytes| {
@@ -36,13 +49,28 @@ pub async fn legacy_ocr(db: &linggan_storage_postgres::Database) -> Uuid {
             )
         },
     );
+    let (mime_type, storage_key) = if preview_bytes
+        .as_ref()
+        .is_some_and(|bytes| bytes.starts_with(b"\x89PNG\r\n\x1a\n"))
+    {
+        ("image/png", "blobs/dossier.png")
+    } else {
+        ("image/jpeg", "blobs/dossier.jpg")
+    };
+    if let Some(bytes) = preview_bytes {
+        let root = std::env::var_os("LINGGAN_LOCAL_MEDIA_ROOT")
+            .expect("synthetic browser image requires an owned local media root");
+        let path = std::path::PathBuf::from(root).join(storage_key);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, bytes).unwrap();
+    }
     admit_media_blob(
         db,
         observation,
         &sha,
-        "image/jpeg",
+        mime_type,
         size,
-        "blobs/dossier.jpg",
+        storage_key,
     )
     .await
     .unwrap();

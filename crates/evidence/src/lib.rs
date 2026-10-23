@@ -28,7 +28,7 @@ mod local_discovery;
 mod local_producer;
 mod material_admission;
 mod material_hashtag;
-pub mod note_material_input;
+pub mod dossier_input;
 pub use material_admission::{
     ReplyRequalification, TargetMaterialReprojection, reproject_accepted_target_materials,
     requalify_reply_contract_records,
@@ -54,6 +54,7 @@ mod monitor_rule_read;
 pub mod cloud_ocr_adoption;
 pub mod ocr_adoption;
 pub mod ocr_adoption_persistence;
+pub mod material_reading;
 pub mod ocr_layering;
 pub mod research_dossier;
 pub use keyword_archive_detail::{
@@ -200,7 +201,7 @@ pub use material_processing::{
     record_media_derivative_completion, requeue_outdated_processor_jobs,
 };
 pub use material_social_read::{
-    creation_comment_directory_in, read_authorized_research_comments, read_creation_comment_in,
+    creation_comment_directory_in, read_authorized_research_comments, read_creation_comment_in, read_creation_comment_at_in,
     read_dossier_comments,
 };
 pub use media_acquisition::{
@@ -286,7 +287,7 @@ pub use work_resource_read::{
 pub mod collection_repair;
 pub use work_resource_read::work_display_title_ctes;
 pub use work_resource_read::{
-    frozen_work_fragment_manifest_in_transaction, read_frozen_work_text_in_transaction,
+    FrozenWorkSource, frozen_work_fragment_manifest_in_transaction, read_frozen_work_text_in_transaction,
     read_frozen_work_texts_in_transaction,
 };
 
