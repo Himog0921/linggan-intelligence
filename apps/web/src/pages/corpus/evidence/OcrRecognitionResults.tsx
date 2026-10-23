@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useState } from 'react';
 import type { OcrRecognitionImage, OcrRecognitionRegion, OcrRecognitionRun } from './ocrRecognitionTypes';
+import { ManualOcrAdoption } from './ManualOcrAdoption';
 import styles from './OcrRecognition.module.css';
 
 export type OcrSourceOpener = (image: OcrRecognitionImage, opener: HTMLElement) => void;
@@ -25,7 +26,7 @@ function RegionText({ region }: { region: OcrRecognitionRegion }) {
   fragments.push(points.slice(cursor).join(''));
   return <>{fragments}</>;
 }
-function PageText({ image, onOpen, compare, coverOther = false }: { image: OcrRecognitionImage; onOpen?: OcrSourceOpener; compare: boolean; coverOther?: boolean }) {
+function PageText({ image, onOpen, compare, coverOther = false, workRef, onSaved }: { image: OcrRecognitionImage; onOpen?: OcrSourceOpener; compare: boolean; coverOther?: boolean; workRef?: string; onSaved?: () => void }) {
   const regions = image.regions.filter(region => region.status !== 'excluded' && (!coverOther || region.role !== 'main_title'));
   return <article className={styles.page} data-ocr-image={image.imageRef}>
     <div className={styles.pageHeading}><h5>{coverOther ? '封面其他文字' : pageLabel(image)}</h5><Source image={image} onOpen={onOpen}/></div>
@@ -38,9 +39,10 @@ function PageText({ image, onOpen, compare, coverOther = false }: { image: OcrRe
       <small>{region.role} · {region.status === 'adopted' ? '当前采用，未人工核验' : region.status === 'pending' ? '待核验' : '未采用'} · {region.bbox === null ? '坐标未知，可回整图' : '归一化原图坐标 ' + region.bbox.join(', ')}</small>
       <p>{region.text || '〔原区块无可读文字〕'}</p>{region.reason ? <small>{region.reason}</small> : null}
     </div>)}</details> : null}
+    {workRef && onSaved ? <ManualOcrAdoption workRef={workRef} image={image} onSaved={onSaved}/> : null}
   </article>;
 }
-export function OcrRecognitionResults({ run, onOpen }: { run: OcrRecognitionRun; onOpen?: OcrSourceOpener }) {
+export function OcrRecognitionResults({ run, onOpen, onSaved }: { run: OcrRecognitionRun; onOpen?: OcrSourceOpener; onSaved?: () => void }) {
   const [compare, setCompare] = useState(false);
   const cover = run.images.find(image => image.role === 'cover');
   const pages = run.images.filter(image => image.role === 'page');
@@ -55,9 +57,9 @@ export function OcrRecognitionResults({ run, onOpen }: { run: OcrRecognitionRun;
     <div className={styles.resultBlock}><b>封面标题</b><p className={styles.coverTitle}>{run.coverTitle ?? (run.coverTitleStatus === 'absent' ? '首图未选出主标题' : '尚无确认的封面标题')}</p>
       <div className={styles.pageHeading}><small>{run.coverTitleStatus === 'pending' ? '标题候选待核验' : '仅从首图选择；不改写平台标题'}</small>{cover ? <Source image={cover} onOpen={onOpen}/> : null}</div></div>
     <div className={styles.readModes} aria-label="图片文字阅读方式"><button type="button" aria-pressed={!compare} onClick={() => setCompare(false)}>合并阅读</button><button type="button" aria-pressed={compare} onClick={() => setCompare(true)}>逐图对照</button></div>
-    {cover && cover.regions.some(region => region.role !== 'main_title') ? <PageText image={cover} onOpen={onOpen} compare={compare} coverOther/> : null}
-    <div className={styles.resultBlock}><b>图片正文</b>{pages.length ? pages.map(image => <PageText key={image.imageRef} image={image} onOpen={onOpen} compare={compare}/>) : <p className={styles.status}>尚无可读的内页正文。</p>}</div>
-    {unknown.length ? <div className={styles.resultBlock}><b>顺序未知 · 单图保留</b><small>未将这些图片推定为首图或拼入有序正文。</small>{unknown.map(image => <PageText key={image.imageRef} image={image} onOpen={onOpen} compare={compare}/>)}</div> : null}
+    {cover && cover.regions.some(region => region.role !== 'main_title') ? <PageText image={cover} onOpen={onOpen} compare={compare} coverOther workRef={run.workRef} onSaved={onSaved}/> : null}
+    <div className={styles.resultBlock}><b>图片正文</b>{pages.length ? pages.map(image => <PageText key={image.imageRef} image={image} onOpen={onOpen} compare={compare} workRef={run.workRef} onSaved={onSaved}/>) : <p className={styles.status}>尚无可读的内页正文。</p>}</div>
+    {unknown.length ? <div className={styles.resultBlock}><b>顺序未知 · 单图保留</b><small>未将这些图片推定为首图或拼入有序正文。</small>{unknown.map(image => <PageText key={image.imageRef} image={image} onOpen={onOpen} compare={compare} workRef={run.workRef} onSaved={onSaved}/>)}</div> : null}
     {pending.length ? <details className={styles.pending}><summary>待核验内容 · {pending.length} 处</summary>{pending.map((entry, index) => <div key={index}><p>{entry.text || '不可读区域'}</p>{entry.comparisonText ? <p>已有同图对照原文：{entry.comparisonText}</p> : null}<small>{entry.reason ?? '需对照原图核验'} · {pageLabel(entry.image)}</small><Source image={entry.image} onOpen={onOpen}/></div>)}</details> : null}
     <details className={styles.receipts}><summary>原始识别与运行回执</summary><p className={styles.status}>原文按原样保留。估算费用依据调用账本；实际扣款未提供时不记为零。</p>
       {run.images.map(image => <details key={image.imageRef}><summary>{pageLabel(image)} · {image.rawJson === null ? '尚无原始返回' : '原始 JSON 与用量'}</summary>

@@ -1,6 +1,6 @@
 //! Optional human adoption overlay. Raw observations and local machine decisions remain intact.
 use super::*;
-pub(super) async fn attach_in(
+pub(crate) async fn attach_in(
     tx: &mut Transaction<'_, Postgres>,
     item: &mut Value,
     id: Uuid,

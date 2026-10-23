@@ -15,6 +15,7 @@ mod review;
 mod validation;
 pub(crate) use read::attach_media;
 pub(crate) use read::project_dossier_images;
+pub(crate) use review::attach_in;
 
 pub const PROCESSOR_VERSION: &str = "local-vl-v1";
 
