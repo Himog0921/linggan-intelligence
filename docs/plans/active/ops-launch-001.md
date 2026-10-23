@@ -41,7 +41,7 @@
 
 同步只把冻结的、明确选中的发布连接到既有 `Acquisition Request → Admission → WorkOrder → Lease → Task/Attempt → Package/Receipt` 链；不会建第二套队列或由前端直调插件。`accepted`、`existing`、`blocked`、`forbidden`、`conflict`/`invalid` 是逐条决定；“已提交、执行结束、已接纳、已回填、媒体可用”永不互相替代。
 
-尚无 material 的合法运营发布使用受约束的运营精确来源，不能插入假 discovery、假 package 或把内部 publication ID 当平台内容 ID。只有合格 record 和 receipt 可触发运营投影；投影失败重放合格回执而不重采。链接、账号、身份版本、作者 ID 和当前采用权限不一致时阻断投影。XHS 签名 URL 仅作短期执行输入；抖音须补全身份、导航、能力、可知性与回填闭环，不能仅改枚举。
+尚无 material 的合法运营发布使用受约束的运营精确来源，不能插入假 discovery、假 package 或把内部 publication ID 当平台内容 ID。只有合格 record 和 receipt 可触发运营投影；投影失败重放合格回执而不重采。链接、账号、身份版本、作者 ID 和当前采用权限不一致时阻断投影。XHS 签名 URL 仅作短期执行输入；抖音须补全身份、导航、能力、可知性与回填闭环，不能仅改枚举。`0151_ops_publication_sync_request` 与同源会话 API 已先建立不可变请求/条目、服务端冻结和逐条 `blocked`/`forbidden`/`invalid` 回执，并以约束预留真实 collection Request/WorkOrder 引用；它目前不创建任何采集工作。现有原生发布的内容身份仍是 `pending_match`，因此会明确阻断为 `ops_sync_content_identity_unresolved`，不能因 URL 看似可解析而跳过身份版本。
 
 ## 4. 表面、状态和依赖
 

@@ -80,6 +80,7 @@ mod ops_native_api;
 mod ops_native_api_tests;
 #[cfg(test)]
 mod ops_native_model_tests;
+mod ops_sync_api;
 #[cfg(test)]
 mod ops_browser_tests;
 mod ops_export;

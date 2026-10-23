@@ -521,6 +521,128 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn publication_sync_command_is_durable_but_never_invents_collection_work() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_sync_http_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let owner = member(
+        database.pool(),
+        "sync-owner@example.test",
+        "同步本人",
+        "operator",
+    )
+    .await;
+    let other = member(
+        database.pool(),
+        "sync-other@example.test",
+        "同步他人",
+        "operator",
+    )
+    .await;
+    let domain = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES($1,'同步合成领域')")
+        .bind(domain)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let app = app_with_database(database.clone());
+    let owner_cookie = session(database.pool(), owner).await;
+    let other_cookie = session(database.pool(), other).await;
+    let (status, account) = post(
+        app.clone(),
+        "/api/local/ops/native/accounts",
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "domainRef": domain, "platform": "xhs",
+            "accountName": "同步小红书账号", "profileUrl": "https://example.test/xhs/sync",
+            "platformUserId": "0123456789abcdef01234567"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let account_ref = uuid(&account["receipt"]["recordRef"]);
+    let note = "6650a1b2c3d4e5f60718293a";
+    let (status, publication) = post(
+        app.clone(),
+        "/api/local/ops/native/publications",
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "accountRef": account_ref,
+            "publicationUrl": format!("https://www.xiaohongshu.com/explore/{note}"),
+            "publishedOn": "2026-10-20"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let publication_ref = uuid(&publication["receipt"]["recordRef"]);
+    let request_ref = Uuid::new_v4();
+    let body = json!({ "idempotencyKey": request_ref, "publicationRefs": [publication_ref] });
+    assert_eq!(
+        hostile_post(
+            app.clone(),
+            "/api/local/ops/publication-syncs",
+            body.clone()
+        )
+        .await,
+        StatusCode::FORBIDDEN
+    );
+    let (status, first) = post(
+        app.clone(),
+        "/api/local/ops/publication-syncs",
+        Some(&owner_cookie),
+        body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(first["replayed"], false);
+    assert_eq!(first["items"][0]["decision"], "blocked");
+    assert_eq!(
+        first["items"][0]["code"],
+        "ops_sync_content_identity_unresolved"
+    );
+    assert!(first["items"][0]["acquisitionRequestRef"].is_null());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM collection_acquisition_request")
+            .fetch_one(database.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM collection_work_order")
+            .fetch_one(database.pool())
+            .await
+            .unwrap(),
+        0
+    );
+    let (status, replay) = post(
+        app.clone(),
+        "/api/local/ops/publication-syncs",
+        Some(&owner_cookie),
+        body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["replayed"], true);
+    let (status, conflict) = post(
+        app,
+        "/api/local/ops/publication-syncs",
+        Some(&other_cookie),
+        json!({ "idempotencyKey": request_ref, "publicationRefs": [publication_ref] }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(conflict["code"], "ops_sync_request_conflict");
+}
+
 fn publication_body(request_id: Uuid, account_ref: Uuid) -> Value {
     json!({
         "requestId": request_id,

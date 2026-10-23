@@ -190,13 +190,13 @@ async fn native_facts(
     let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "WITH {LATEST_VIEWS_CTE}, \
          native_publications AS ( \
-           SELECT p.published_business_date AS business_date,p.platform,lv.view_count \
+           SELECT coalesce(p.published_business_date,p.native_published_on) AS business_date,p.platform,lv.view_count \
              FROM linggan_ops_publication p \
              LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref \
              LEFT JOIN latest_views lv ON lv.publication_ref=p.publication_ref \
             WHERE p.source_system='linggan_native' AND p.merged_into_ref IS NULL \
               AND p.missing_since_batch_ref IS NULL \
-              AND p.published_business_date BETWEEN $3::date AND $4::date \
+              AND coalesce(p.published_business_date,p.native_published_on) BETWEEN $3::date AND $4::date \
               AND ($2::uuid IS NULL OR a.domain_ref=$2)), \
          native_daily AS ( \
            SELECT business_date,links_opened_count,followers_gained \

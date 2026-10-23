@@ -65,7 +65,7 @@ pub async fn read_ops_overview_trend(
                          SELECT d.business_date FROM linggan_ops_daily_report d \
                           WHERE d.source_system='linggan_native' AND d.missing_since_batch_ref IS NULL \
                          UNION ALL \
-                         SELECT p.published_business_date FROM linggan_ops_publication p \
+                         SELECT coalesce(p.published_business_date,p.native_published_on) FROM linggan_ops_publication p \
                           LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref \
                           WHERE p.source_system='linggan_native' AND p.merged_into_ref IS NULL \
                             AND p.missing_since_batch_ref IS NULL AND ($4::uuid IS NULL OR a.domain_ref=$4) \
@@ -88,23 +88,23 @@ pub async fn read_ops_overview_trend(
                   AND d.business_date BETWEEN (SELECT min(start) FROM b) AND t.today \
                   AND (d.source_system='linggan_native' OR (t.complete_through IS NOT NULL AND d.business_date <= t.complete_through)) \
                 GROUP BY 1), \
-         h AS (SELECT date_trunc($2, p.published_business_date::timestamp)::date AS start, count(*) AS hits \
+         h AS (SELECT date_trunc($2, coalesce(p.published_business_date,p.native_published_on)::timestamp)::date AS start, count(*) AS hits \
                  FROM linggan_ops_publication p \
                  LEFT JOIN linggan_ops_account a ON a.account_ref = p.account_ref \
                  JOIN latest_views lv ON lv.publication_ref = p.publication_ref, t \
                 WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
                   AND p.platform = 'xhs' AND lv.view_count >= $3 \
-                  AND p.published_business_date BETWEEN (SELECT min(start) FROM b) AND t.today \
-                  AND (p.source_system='linggan_native' OR (t.complete_through IS NOT NULL AND p.published_business_date <= t.complete_through)) \
+                  AND coalesce(p.published_business_date,p.native_published_on) BETWEEN (SELECT min(start) FROM b) AND t.today \
+                  AND (p.source_system='linggan_native' OR (t.complete_through IS NOT NULL AND coalesce(p.published_business_date,p.native_published_on) <= t.complete_through)) \
                   AND ($4::uuid IS NULL OR a.domain_ref = $4) \
                 GROUP BY 1), \
          native_daily AS (SELECT date_trunc($2,d.business_date::timestamp)::date AS start FROM linggan_ops_daily_report d, t \
                            WHERE d.source_system='linggan_native' AND d.missing_since_batch_ref IS NULL \
                              AND d.business_date BETWEEN (SELECT min(start) FROM b) AND t.today GROUP BY 1), \
-         native_publication AS (SELECT date_trunc($2,p.published_business_date::timestamp)::date AS start \
+         native_publication AS (SELECT date_trunc($2,coalesce(p.published_business_date,p.native_published_on)::timestamp)::date AS start \
                                   FROM linggan_ops_publication p LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref, t \
                                  WHERE p.source_system='linggan_native' AND p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
-                                   AND p.published_business_date BETWEEN (SELECT min(start) FROM b) AND t.today \
+                                   AND coalesce(p.published_business_date,p.native_published_on) BETWEEN (SELECT min(start) FROM b) AND t.today \
                                    AND ($4::uuid IS NULL OR a.domain_ref=$4) GROUP BY 1), \
          native_bucket AS (SELECT start FROM native_daily UNION SELECT start FROM native_publication) \
          SELECT b.start::text AS start, \

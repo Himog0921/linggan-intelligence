@@ -10,6 +10,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .merge(super::ops_api::routes())
         .merge(super::ops_overview_api::routes())
         .merge(super::ops_native_api::routes())
+        .merge(super::ops_sync_api::routes())
         .layer(axum::middleware::from_fn(
             super::comment_study::local_comment_study_guard,
         ))
