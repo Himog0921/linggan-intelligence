@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { ApiError } from "../../shared/api";
 import * as api from "./api";
 import { NativeViewBatchDialog } from "./NativeViewBatchDialog";
 
@@ -30,4 +31,23 @@ it("retains only answered failed view reports for a corrected targeted retry", a
   expect(screen.getByLabelText("选择：第一条")).not.toBeChecked();
   expect(screen.getByLabelText("选择：第二条")).toBeChecked();
   expect(screen.getByLabelText("批量阅读量结果")).toHaveTextContent("ops_native_view_count_invalid");
+});
+
+it("locks an unconfirmed batch and retries each original request identity", async () => {
+  const close = vi.fn();
+  vi.mocked(api.recordNativeViewBatch)
+    .mockRejectedValueOnce(new ApiError({ kind: "network" }))
+    .mockResolvedValueOnce({ items: [{ ordinal: 1, status: 201, requestRef: "ignored", outcome: "accepted" as const, code: "accepted", replayed: true }] });
+  render(<QueryClientProvider client={new QueryClient()}><NativeViewBatchDialog publications={[publication("one", "第一条")]} close={close} /></QueryClientProvider>);
+  fireEvent.click(screen.getByLabelText("选择：第一条"));
+  fireEvent.change(screen.getByLabelText("阅读量：第一条"), { target: { value: "0" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存批量阅读量" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("提交结果未确认"));
+  expect(screen.getByLabelText("阅读量：第一条")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "重试同一批请求" }));
+  await waitFor(() => expect(api.recordNativeViewBatch).toHaveBeenCalledTimes(2));
+  const first = vi.mocked(api.recordNativeViewBatch).mock.calls[0]![0][0]!;
+  const second = vi.mocked(api.recordNativeViewBatch).mock.calls[1]![0][0]!;
+  expect(second.requestId).toBe(first.requestId);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
 });
