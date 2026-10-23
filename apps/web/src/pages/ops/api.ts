@@ -113,6 +113,55 @@ export function publications(value: unknown) {
     items: d.list(r, "items", publication),
   }));
 }
+const syncState = (r: R, key: string) => enumeration(r, key, [
+  "not_submitted",
+  "queued",
+  "waiting_execution",
+  "awaiting_collection",
+  "collecting",
+  "package_pending_receipt",
+  "receipt_accepted_projection_pending",
+  "receipt_lost_authority",
+  "receipt_accepted",
+  "material_projected",
+  "no_qualified_result",
+  "stopped",
+  "chain_unavailable",
+] as const);
+function syncReceipt(value: unknown) {
+  return d.decode(value, (r) => ({
+    requestRef: s(r, "requestRef"),
+    selectedCount: n(r, "selectedCount"),
+    replayed: b(r, "replayed"),
+    items: d.list(r, "items", (item) => {
+      const execution = d.obj(item, "execution");
+      return {
+        publicationRef: s(item, "publicationRef"),
+        decision: enumeration(item, "decision", ["blocked", "forbidden", "invalid", "conflict", "accepted", "existing"] as const),
+        code: s(item, "code"),
+        acquisitionRequestRef: sn(item, "acquisitionRequestRef"),
+        workOrderRef: sn(item, "workOrderRef"),
+        execution: {
+          state: syncState(execution, "state"),
+          taskId: sn(execution, "taskId"),
+          attemptId: sn(execution, "attemptId"),
+          packageRef: sn(execution, "packageRef"),
+          receiptRef: sn(execution, "receiptRef"),
+          receiptEffect: sn(execution, "receiptEffect"),
+          materialRef: sn(execution, "materialRef"),
+        },
+      };
+    }),
+  }));
+}
+export async function createPublicationSync(publicationRefs: readonly string[], idempotencyKey = crypto.randomUUID()) {
+  return syncReceipt(await requestJson("/api/local/ops/publication-syncs", {
+    method: "POST", body: { idempotencyKey, publicationRefs },
+  }));
+}
+export async function publicationSync(requestRef: string, signal?: AbortSignal) {
+  return syncReceipt(await requestJson(`/api/local/ops/publication-syncs/${encodeURIComponent(requestRef)}`, { signal }));
+}
 function account(r: R) {
   return {
     ref: s(r, "ref"),
@@ -513,6 +562,7 @@ export function trend(value: unknown) {
 export type Summary = ReturnType<typeof summary>;
 export type AsOf = Summary["asOf"];
 export type Publication = ReturnType<typeof publications>["items"][number];
+export type PublicationSyncReceipt = ReturnType<typeof syncReceipt>;
 export type Account = ReturnType<typeof accounts>["items"][number];
 export type ActiveMember = ReturnType<typeof members>[number];
 export type Daily = ReturnType<typeof daily>["items"][number];

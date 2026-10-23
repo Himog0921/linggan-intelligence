@@ -15,11 +15,25 @@ let failPublications = false;
 let noAccounts = false;
 let nativeOnly = false;
 const requests: URL[] = [];
+const requestBodies: unknown[] = [];
 beforeEach(() => {
-  requests.length = 0; failPublications = false; noAccounts = false; nativeOnly = false;
-  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+  requests.length = 0; requestBodies.length = 0; failPublications = false; noAccounts = false; nativeOnly = false;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const url = new URL(path, 'http://localhost'); requests.push(url);
+    if (options?.body) requestBodies.push(JSON.parse(String(options.body)));
     const endpoint = url.pathname.split('/').at(-1);
+    if (endpoint === 'publication-syncs') return new Response(JSON.stringify({
+      requestRef: 'sync-request', selectedCount: 1, replayed: false, items: [{
+        publicationRef: 'pub', decision: 'accepted', code: 'accepted', acquisitionRequestRef: 'request', workOrderRef: 'work-order',
+        execution: { state: 'queued', taskId: null, attemptId: null, packageRef: null, receiptRef: null, receiptEffect: null, materialRef: null },
+      }],
+    }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    if (url.pathname.includes('/publication-syncs/')) return new Response(JSON.stringify({
+      requestRef: 'sync-request', selectedCount: 1, replayed: false, items: [{
+        publicationRef: 'pub', decision: 'accepted', code: 'accepted', acquisitionRequestRef: 'request', workOrderRef: 'work-order',
+        execution: { state: 'material_projected', taskId: 'task', attemptId: 'attempt', packageRef: 'package', receiptRef: 'receipt', receiptEffect: 'COMPLETED_LIVE_STEP', materialRef: 'material' },
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     const result = endpoint === 'businesses' ? [{ domainRef: 'd1', name: '合成业务', accountCount: 1 }] : endpoint === 'summary' ? {
       asOf: nativeOnly ? null : asOf, nativeDataPresent: nativeOnly, month: '2026-10', activeAccounts: 1, ledgerAccounts: 1, monthPublished: 1,
       effectivePublication: { state: 'not_connected' }, monthFollowersGained: { value: null, scope: 'all_businesses' }, monthHits: null,
@@ -110,6 +124,22 @@ it('does not label native-only Operations facts as an absent import', async () =
   nativeOnly = true; show();
   await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
   expect(screen.getByText('原生台账数据（历史尚未迁入）')).toBeInTheDocument();
+});
+
+it('submits only explicitly selected publications and refreshes shared execution facts', async () => {
+  show();
+  await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
+  fireEvent.click(screen.getByRole('button', { name: '同步数据' }));
+  const dialog = screen.getByRole('dialog', { name: '同步已登记发布' });
+  expect(within(dialog).getByText('只为选中的精确发布申请采集；不会自动发现、不会改写台账字段。')).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: '提交' })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole('checkbox'));
+  fireEvent.click(within(dialog).getByRole('button', { name: '提交 1 条' }));
+  await within(dialog).findByText('等待分派');
+  expect(requestBodies).toContainEqual(expect.objectContaining({ publicationRefs: ['pub'] }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '刷新执行状态' }));
+  await within(dialog).findByText('已关联材料（字段尚未采用）');
+  expect(requests.some(url => url.pathname === '/api/local/ops/publication-syncs/sync-request')).toBe(true);
 });
 
 it('protects unapplied dates and restores the draft after cancelling a close', async () => {

@@ -530,6 +530,52 @@
   border-top: 1px solid var(--lgi-border);
   background: var(--lgi-canvas-low);
 }
+.ops-sync-dialog {
+  width: min(calc(var(--lgi-space-24) * 5), calc(100vw - var(--lgi-space-12)));
+}
+.ops-sync-intro {
+  white-space: normal;
+  margin: 0;
+}
+.ops-sync-list {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  max-height: min(calc(var(--lgi-space-24) * 5), 48dvh);
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--lgi-border);
+}
+.ops-sync-list legend {
+  padding: 0 var(--lgi-space-2);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-label);
+}
+.ops-dialog .ops-sync-choice {
+  display: grid;
+  grid-template-columns: var(--lgi-space-5) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--lgi-space-2);
+  min-height: var(--ops-control);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  border-bottom: 1px solid var(--lgi-hairline);
+  cursor: pointer;
+}
+.ops-dialog .ops-sync-choice:last-child { border-bottom: 0; }
+.ops-dialog .ops-sync-choice input { min-width: auto; height: auto; }
+.ops-sync-choice span { min-width: 0; display: grid; gap: var(--lgi-space-1); }
+.ops-sync-choice strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--lgi-text-data); }
+.ops-sync-choice small, .ops-sync-result small { color: var(--lgi-muted); font-size: var(--lgi-text-label); overflow-wrap: anywhere; }
+.ops-sync-error { margin: 0; color: var(--lgi-danger); font-size: var(--lgi-text-data); }
+.ops-sync-result { display: grid; gap: var(--lgi-space-3); }
+.ops-sync-result p { margin: 0; }
+.ops-sync-receipt { font-variant-numeric: tabular-nums; font-size: var(--lgi-text-data); font-weight: var(--lgi-weight-semibold); }
+.ops-sync-result ul { list-style: none; display: grid; gap: 0; margin: 0; padding: 0; border-top: 1px solid var(--lgi-border); }
+.ops-sync-result li { display: grid; gap: var(--lgi-space-2); padding: var(--lgi-space-3) 0; border-bottom: 1px solid var(--lgi-hairline); }
+.ops-sync-result li > div { display: flex; align-items: center; gap: var(--lgi-space-2); flex-wrap: wrap; }
+.ops-sync-result strong { font-size: var(--lgi-text-data); font-weight: var(--lgi-weight-medium); }
 .ops-cover-dialog {
   width: fit-content;
   max-width: calc(100vw - var(--lgi-space-12));

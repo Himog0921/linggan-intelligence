@@ -23,6 +23,7 @@ import { NativePublicationDialog } from "./NativePublicationDialog";
 import { NativeDailyDialog } from "./NativeDailyDialog";
 import { NativeViewDialog } from "./NativeViewDialog";
 import { AccountResponsibilityDialog } from "./AccountResponsibilityDialog";
+import { PublicationSyncDialog } from "./PublicationSyncDialog";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
   publications: [
@@ -150,6 +151,7 @@ export function LedgerPage({
   const [detail, setDetail] = useState<api.Publication | null>(null);
   const [newAccount, setNewAccount] = useState(false);
   const [newPublication, setNewPublication] = useState(false);
+  const [syncPublications, setSyncPublications] = useState(false);
   const [newDaily, setNewDaily] = useState(false);
   const [editDaily, setEditDaily] = useState<api.Daily | null>(null);
   const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
@@ -308,7 +310,7 @@ export function LedgerPage({
               <ActionButton type="button" disabled={!accounts.data?.items.length} title={!accounts.data?.items.length ? "当前业务没有可用账号" : undefined} onClick={() => setNewPublication(true)}>
                 新增发布
               </ActionButton>
-              <ActionButton type="button" disabled title="自动发现我方帖子上线后可用">
+              <ActionButton type="button" disabled={!pubs.data?.items.length} title={!pubs.data?.items.length ? "当前筛选下没有可选择的发布记录" : undefined} onClick={() => setSyncPublications(true)}>
                 同步数据
               </ActionButton>
             </>
@@ -511,6 +513,7 @@ export function LedgerPage({
       </Dialog> : null}
       {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
       {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items} close={() => setNewPublication(false)} /> : null}
+      {syncPublications && pubs.data ? <PublicationSyncDialog publications={pubs.data.items} close={() => setSyncPublications(false)} /> : null}
       {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
       {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
       {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
