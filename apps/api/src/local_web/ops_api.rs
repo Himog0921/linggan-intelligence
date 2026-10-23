@@ -7,7 +7,8 @@ use linggan_intelligence::ops_ledger::read::{
     read_ops_businesses, read_ops_daily, read_ops_publication_export, read_ops_publications,
     read_ops_summary,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
@@ -15,6 +16,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/ops/summary", get(summary))
         .route("/api/local/ops/publications", get(publications))
         .route("/api/local/ops/accounts", get(accounts))
+        .route("/api/local/ops/members", get(members))
         .route("/api/local/ops/daily", get(daily))
         .route("/api/local/ops/export", get(export))
         .route("/ops/covers/{publication_ref}", get(cover))
@@ -37,6 +39,14 @@ struct ExportQuery {
     domain: Option<String>,
     kind: Option<String>,
     format: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ActiveOpsMember {
+    member_ref: Uuid,
+    display_name: String,
+    role: String,
 }
 
 pub(super) fn read_error(error: OpsReadError) -> Response {
@@ -149,6 +159,38 @@ async fn accounts(
             json(read_ops_accounts(database, business, query.operator.as_deref()).await)
         }
         Err(error) => read_error(error),
+    }
+}
+
+/// The whole Operations team can read the active internal roster.  This endpoint is only a
+/// selector source; every transfer still rechecks the actor, target state and group boundary in
+/// the command transaction.
+async fn members(State(state): State<LocalWebState>, headers: HeaderMap) -> Response {
+    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+        return response;
+    }
+    let Some(database) = state.database.database() else {
+        return not_connected();
+    };
+    let members: Result<Vec<(Uuid, String, String)>, sqlx::Error> = sqlx::query_as(
+        "SELECT member_ref,display_name,role FROM linggan_ops_member \
+         WHERE state='active' ORDER BY display_name,member_ref",
+    )
+    .fetch_all(database.pool())
+    .await;
+    match members {
+        Ok(members) => Json(
+            members
+                .into_iter()
+                .map(|(member_ref, display_name, role)| ActiveOpsMember {
+                    member_ref,
+                    display_name,
+                    role,
+                })
+                .collect::<Vec<_>>(),
+        )
+        .into_response(),
+        Err(error) => read_error(OpsReadError::Database(error)),
     }
 }
 

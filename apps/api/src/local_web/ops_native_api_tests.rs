@@ -669,6 +669,32 @@ async fn native_account_responsibility_is_versioned_idempotent_and_group_bounded
         current,
         (Some(successor), 2, "linggan_native".to_owned(), 1)
     );
+    let (status, account_page) = get(
+        app.clone(),
+        &format!("/api/local/ops/accounts?domain={domain}"),
+        Some(&lead_cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let rendered_account = account_page["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["ref"] == account_ref.to_string())
+        .unwrap();
+    assert_eq!(
+        rendered_account["currentResponsibleMemberRef"],
+        successor.to_string()
+    );
+    assert_eq!(rendered_account["currentResponsibleName"], "接任运营");
+    assert_eq!(rendered_account["responsibilityVersion"], 2);
+    let (status, roster) = get(app.clone(), "/api/local/ops/members", Some(&lead_cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(roster.as_array().unwrap().iter().any(|item| {
+        item["memberRef"] == successor.to_string()
+            && item["displayName"] == "接任运营"
+            && item["role"] == "operator"
+    }));
     let change_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_ops_account_responsibility_change WHERE account_ref=$1",
     )
@@ -965,6 +991,27 @@ async fn post(app: Router, path: &str, cookie: Option<&str>, body: Value) -> (St
         .header(header::HOST, "127.0.0.1:3000")
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(body.to_string()))
+        .unwrap();
+    if let Some(cookie) = cookie {
+        request
+            .headers_mut()
+            .insert(header::COOKIE, cookie.parse().unwrap());
+    }
+    let response = app.oneshot(request).await.unwrap();
+    let status = response.status();
+    let bytes = to_bytes(response.into_body(), 65_536).await.unwrap();
+    (
+        status,
+        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+    )
+}
+
+async fn get(app: Router, path: &str, cookie: Option<&str>) -> (StatusCode, Value) {
+    let mut request = Request::builder()
+        .method("GET")
+        .uri(path)
+        .header(header::HOST, "127.0.0.1:3000")
+        .body(Body::empty())
         .unwrap();
     if let Some(cookie) = cookie {
         request

@@ -27,6 +27,11 @@ pub struct OpsAccountItem {
     pub device_code: Option<String>,
     pub follower_count: Option<i64>,
     pub ip_location: Option<String>,
+    /// The Linggan member responsible now. This is deliberately separate from the historical
+    /// workbench operator name below, which stays immutable provenance on imported rows.
+    pub current_responsible_member_ref: Option<Uuid>,
+    pub current_responsible_name: Option<String>,
+    pub responsibility_version: i64,
     pub operator: Option<String>,
     pub status: Option<String>,
     pub health: OpsHealth,
@@ -61,14 +66,18 @@ pub async fn read_ops_accounts(
     .fetch_one(database.pool())
     .await?;
     let rows = sqlx::query(
-        "SELECT account_ref, source_record_id, source_system, platform, account_name, profile_url, device_code, follower_count, \
-                ip_location, operator_name, status, is_retained, notes \
-           FROM linggan_ops_account \
-          WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
-             OR (source_system='linggan_native' AND native_record_state='active')) \
-            AND ($1::uuid IS NULL OR domain_ref = $1) \
-            AND ($2::text IS NULL OR operator_name = $2) \
-          ORDER BY operator_name NULLS LAST, platform, account_name, account_ref",
+        "SELECT account.account_ref, account.source_record_id, account.source_system, account.platform, account.account_name, \
+                account.profile_url, account.device_code, account.follower_count, account.ip_location, \
+                account.current_responsible_member_ref, responsible.display_name AS current_responsible_name, \
+                account.responsibility_version, account.operator_name, account.status, account.is_retained, account.notes \
+           FROM linggan_ops_account account \
+           LEFT JOIN linggan_ops_member responsible \
+             ON responsible.member_ref=account.current_responsible_member_ref \
+          WHERE ((account.source_system='content_workbench' AND account.ledger_state='in_ledger') \
+             OR (account.source_system='linggan_native' AND account.native_record_state='active')) \
+            AND ($1::uuid IS NULL OR account.domain_ref = $1) \
+            AND ($2::text IS NULL OR account.operator_name = $2) \
+          ORDER BY account.operator_name NULLS LAST, account.platform, account.account_name, account.account_ref",
     )
     .bind(business.domain_ref())
     .bind(operator)
@@ -87,6 +96,9 @@ pub async fn read_ops_accounts(
                 device_code: row.try_get("device_code")?,
                 follower_count: row.try_get("follower_count")?,
                 ip_location: row.try_get("ip_location")?,
+                current_responsible_member_ref: row.try_get("current_responsible_member_ref")?,
+                current_responsible_name: row.try_get("current_responsible_name")?,
+                responsibility_version: row.try_get("responsibility_version")?,
                 operator: row.try_get("operator_name")?,
                 status: row.try_get("status")?,
                 health: OpsHealth {

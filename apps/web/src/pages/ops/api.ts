@@ -123,6 +123,9 @@ function account(r: R) {
     deviceCode: sn(r, "deviceCode"),
     followerCount: nn(r, "followerCount"),
     ipLocation: sn(r, "ipLocation"),
+    currentResponsibleMemberRef: sn(r, "currentResponsibleMemberRef"),
+    currentResponsibleName: sn(r, "currentResponsibleName"),
+    responsibilityVersion: n(r, "responsibilityVersion"),
     operator: sn(r, "operator"),
     status: sn(r, "status"),
     health: enumeration(d.obj(r, "health"), "state", ["not_filled"]),
@@ -138,6 +141,14 @@ export function accounts(value: unknown) {
     operators: names(r, "operators"),
     items: d.list(r, "items", account),
   }));
+}
+export function members(value: unknown) {
+  if (!Array.isArray(value)) throw new ApiError({ kind: "invalid_response", status: 200 });
+  return value.map((item) => d.decode(item, (r) => ({
+    memberRef: s(r, "memberRef"),
+    displayName: s(r, "displayName"),
+    role: enumeration(r, "role", ["admin", "lead", "operator"]),
+  })));
 }
 function dailyItem(r: R) {
   return {
@@ -262,6 +273,20 @@ export type NativeAccountCommand = {
 /** The caller owns the UUID so an unanswered request can be retried without duplicating facts. */
 export async function createNativeAccount(command: NativeAccountCommand & { requestId: string }) {
   return nativeCommand("/api/local/ops/native/accounts", command, command.requestId);
+}
+
+export type NativeAccountResponsibilityCommand = {
+  nextMemberRef: string | null; expectedVersion: number; reason: string;
+};
+export async function transferNativeAccountResponsibility(
+  accountRef: string,
+  command: NativeAccountResponsibilityCommand & { requestId: string },
+) {
+  return nativeCommand(
+    `/api/local/ops/native/accounts/${encodeURIComponent(accountRef)}/responsibility`,
+    command,
+    command.requestId,
+  );
 }
 
 export type NativePublicationCommand = {
@@ -489,6 +514,7 @@ export type Summary = ReturnType<typeof summary>;
 export type AsOf = Summary["asOf"];
 export type Publication = ReturnType<typeof publications>["items"][number];
 export type Account = ReturnType<typeof accounts>["items"][number];
+export type ActiveMember = ReturnType<typeof members>[number];
 export type Daily = ReturnType<typeof daily>["items"][number];
 export type Overview = ReturnType<typeof overview>;
 export type Window = Overview["window"];

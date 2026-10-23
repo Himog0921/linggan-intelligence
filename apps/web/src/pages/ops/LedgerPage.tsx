@@ -8,7 +8,6 @@ import * as api from "./api";
 import * as f from "./format";
 import {
   Dialog,
-  DisabledActions,
   Empty,
   External,
   Missing,
@@ -18,11 +17,12 @@ import {
   Tabs,
   TextCell,
 } from "./ui";
-import { c, peopleTabs, readonly } from "./styles";
+import { c, peopleTabs } from "./styles";
 import { NativeAccountDialog } from "./NativeAccountDialog";
 import { NativePublicationDialog } from "./NativePublicationDialog";
 import { NativeDailyDialog } from "./NativeDailyDialog";
 import { NativeViewDialog } from "./NativeViewDialog";
+import { AccountResponsibilityDialog } from "./AccountResponsibilityDialog";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
   publications: [
@@ -50,7 +50,7 @@ const columns = {
     "设备编号",
     "粉丝",
     "IP所在地",
-    "运营人",
+    "当前负责人 / 历史运营人",
     "账号状态",
     "账号健康",
     "保留",
@@ -153,6 +153,7 @@ export function LedgerPage({
   const [newDaily, setNewDaily] = useState(false);
   const [editDaily, setEditDaily] = useState<api.Daily | null>(null);
   const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
+  const [responsibilityAccount, setResponsibilityAccount] = useState<api.Account | null>(null);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
@@ -185,6 +186,11 @@ export function LedgerPage({
         signal,
       ),
     enabled: kind === "daily",
+  });
+  const members = useQuery({
+    queryKey: ["ops", "members"],
+    queryFn: ({ signal }) => api.get("/api/local/ops/members", api.members, signal),
+    enabled: kind === "accounts",
   });
   const result =
     kind === "publications" ? pubs : kind === "accounts" ? accounts : daily;
@@ -296,7 +302,7 @@ export function LedgerPage({
               迁入自内容工作台 · 发布数按发布记录自动统计
             </span>
           )}
-          <small className={c("ops-note")}>切换前只读</small>
+          <small className={c("ops-note")}>原生录入和责任交接会保留来源与回执；历史迁入事实仍只读</small>
           {kind === "publications" ? (
             <>
               <ActionButton type="button" disabled={!accounts.data?.items.length} title={!accounts.data?.items.length ? "当前业务没有可用账号" : undefined} onClick={() => setNewPublication(true)}>
@@ -391,7 +397,7 @@ export function LedgerPage({
               ))
             ) : kind === "accounts" && accounts.data?.items.length ? (
               accounts.data.items.map((item, i) => (
-                <AccountRow key={item.ref} item={item} index={i} />
+                <AccountRow key={item.ref} item={item} index={i} transfer={setResponsibilityAccount} ready={members.isSuccess} />
               ))
             ) : kind === "daily" && daily.data?.items.length ? (
               daily.data.items.map((item) => (
@@ -508,6 +514,7 @@ export function LedgerPage({
       {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
       {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
       {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
+      {responsibilityAccount && members.data ? <AccountResponsibilityDialog account={responsibilityAccount} members={members.data} close={() => setResponsibilityAccount(null)} /> : null}
       {cover ? (
         <Dialog
           label="封面大图" outsideClose
@@ -677,7 +684,7 @@ function PublicationRow({
     </tr>
   );
 }
-function AccountRow({ item, index }: { item: api.Account; index: number }) {
+function AccountRow({ item, index, transfer, ready }: { item: api.Account; index: number; transfer: (item: api.Account) => void; ready: boolean }) {
   return (
     <tr>
       <td className={c("ops-number")}>{index + 1}</td>
@@ -697,7 +704,12 @@ function AccountRow({ item, index }: { item: api.Account; index: number }) {
       <TextCell value={item.deviceCode} />
       <NumberCell value={item.followerCount} />
       <TextCell value={item.ipLocation} />
-      <TextCell value={item.operator} />
+      <td>
+        <div className={c("ops-stack")}>
+          {item.currentResponsibleName ? <span>{item.currentResponsibleName}</span> : <Missing title="尚未分配 Linggan 当前负责人">待接管</Missing>}
+          {item.operator ? <small className={c("ops-secondary")}>历史：{item.operator}</small> : null}
+        </div>
+      </td>
       <td>
         {item.status ? (
           <span>{f.accountStatus[item.status] || item.status}</span>
@@ -716,7 +728,7 @@ function AccountRow({ item, index }: { item: api.Account; index: number }) {
         )}
       </td>
       <TextCell value={item.notes} />
-      <DisabledActions />
+      <td><ActionButton type="button" disabled={!ready} title={ready ? "按当前权限与同组关系校验" : "正在读取可选成员"} onClick={() => transfer(item)}>交接</ActionButton></td>
     </tr>
   );
 }
