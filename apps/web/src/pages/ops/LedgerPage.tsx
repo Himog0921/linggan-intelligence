@@ -21,6 +21,7 @@ import {
 import { c, peopleTabs, readonly } from "./styles";
 import { NativeAccountDialog } from "./NativeAccountDialog";
 import { NativePublicationDialog } from "./NativePublicationDialog";
+import { NativeDailyDialog } from "./NativeDailyDialog";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
   publications: [
@@ -148,6 +149,7 @@ export function LedgerPage({
   const [detail, setDetail] = useState<api.Publication | null>(null);
   const [newAccount, setNewAccount] = useState(false);
   const [newPublication, setNewPublication] = useState(false);
+  const [newDaily, setNewDaily] = useState(false);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
@@ -304,6 +306,10 @@ export function LedgerPage({
           ) : kind === "accounts" ? (
             <ActionButton type="button" disabled={business === "all"} title={business === "all" ? "请先选择一个业务" : undefined} onClick={() => setNewAccount(true)}>
               新增账号
+            </ActionButton>
+          ) : kind === "daily" ? (
+            <ActionButton type="button" onClick={() => setNewDaily(true)}>
+              填写日报
             </ActionButton>
           ) : null}
         </div>
@@ -495,6 +501,7 @@ export function LedgerPage({
       </Dialog> : null}
       {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
       {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items} close={() => setNewPublication(false)} /> : null}
+      {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
       {cover ? (
         <Dialog
           label="封面大图" outsideClose

@@ -18,6 +18,9 @@ pub const OPS_DAILY_LIMIT: i64 = 200;
 pub struct OpsDailyItem {
     pub r#ref: Uuid,
     pub source_id: String,
+    pub source: &'static str,
+    /// Present only for a native row; callers must send it back to replace that row.
+    pub native_version: Option<i64>,
     pub business_date: String,
     pub weekday: &'static str,
     pub operator: String,
@@ -63,13 +66,13 @@ const DAILY_SQL: &str = "per_day AS ( \
        AND coalesce(p.publisher_name,publisher.display_name) IS NOT NULL \
      GROUP BY 1, 2), \
   days AS ( \
-    SELECT d.daily_ref, d.source_record_id, d.business_date, d.operator_name, d.links_opened_count, d.followers_gained, \
+    SELECT d.daily_ref, d.source_record_id, d.source_system, d.native_version, d.business_date, d.operator_name, d.links_opened_count, d.followers_gained, \
            coalesce(pd.published, 0) AS published, coalesce(pd.hits, 0) AS hits, \
            coalesce(pd.pending_overdue, 0) AS pending_overdue \
       FROM linggan_ops_daily_report d \
       LEFT JOIN per_day pd ON pd.publisher_name = d.operator_name AND pd.business_date = d.business_date \
      WHERE d.missing_since_batch_ref IS NULL AND ($1::text IS NULL OR d.operator_name = $1)) \
-  SELECT daily_ref, source_record_id, business_date::text AS business_date, extract(isodow FROM business_date)::int AS isodow, \
+  SELECT daily_ref, source_record_id, source_system, native_version, business_date::text AS business_date, extract(isodow FROM business_date)::int AS isodow, \
          operator_name, links_opened_count, followers_gained, published, hits, pending_overdue, \
          (sum(followers_gained) OVER month_window)::bigint AS month_followers, \
          (sum(published) OVER month_window)::bigint AS month_published \
@@ -122,6 +125,12 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsDailyItem, OpsReadError> {
     Ok(OpsDailyItem {
         r#ref: row.try_get("daily_ref")?,
         source_id: row.try_get("source_record_id")?,
+        source: match row.try_get::<String, _>("source_system")?.as_str() {
+            "content_workbench" => "imported",
+            "linggan_native" => "native",
+            _ => return Err(OpsReadError::InvalidParameter("daily_source")),
+        },
+        native_version: row.try_get("native_version")?,
         business_date: row.try_get("business_date")?,
         weekday: weekday(row.try_get("isodow")?),
         operator: row.try_get("operator_name")?,

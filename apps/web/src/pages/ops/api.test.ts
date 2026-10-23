@@ -66,6 +66,17 @@ it("accepts only the durable native receipt for its own request identity", () =>
   expect(() => api.nativeReceipt(receipt, "other")).toThrow();
   expect(() => api.nativeReceipt({ receipt: { ...receipt.receipt, outcome: "success" } }, "r")).toThrow();
 });
+it("keeps native daily provenance, version, and null metrics distinct", () => {
+  const page = api.daily({
+    asOf: null, scope: "all_businesses", limit: 200, operators: ["甲"], items: [{
+      ref: "daily", source: "native", nativeVersion: 1, businessDate: "2026-10-23", weekday: "五", operator: "甲",
+      published: 0, linksOpened: null, followersGained: 0, addRate: null, hits: 0,
+      monthFollowersGained: 0, monthPublished: 0, execution: "not_published",
+    }],
+  });
+  expect(page.items[0]).toMatchObject({ source: "native", nativeVersion: 1, linksOpened: null, followersGained: 0 });
+  expect(() => api.daily({ ...page, items: [{ ...page.items[0], nativeVersion: null, source: "unknown" }] })).toThrow();
+});
 it("rejects invalid state enums rather than inferring a platform or execution status", () => {
   expect(() =>
     api.daily({

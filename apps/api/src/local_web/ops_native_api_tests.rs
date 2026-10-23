@@ -397,6 +397,8 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
         .unwrap();
     assert!(daily.items.iter().any(|item| {
         item.r#ref == daily_ref
+            && item.source == "native"
+            && item.native_version == Some(1)
             && item.links_opened.is_none()
             && item.followers_gained.is_none()
             && item.month_followers_gained.is_none()

@@ -142,6 +142,8 @@ export function accounts(value: unknown) {
 function dailyItem(r: R) {
   return {
     ref: s(r, "ref"),
+    source: enumeration(r, "source", ["imported", "native"]),
+    nativeVersion: nn(r, "nativeVersion"),
     businessDate: s(r, "businessDate"),
     weekday: s(r, "weekday"),
     operator: s(r, "operator"),
@@ -229,6 +231,27 @@ export function nativeReceipt(value: unknown, requestId: string) {
   });
 }
 
+/**
+ * Native commands may deliberately return a durable `stale` or `rejected`
+ * receipt with a non-2xx status.  Decode that receipt when it is present;
+ * authentication and transport failures remain failures, never a synthetic
+ * command result.
+ */
+async function nativeCommand(path: string, body: unknown, requestId: string) {
+  try {
+    return nativeReceipt(await requestJson(path, { method: "POST", body }), requestId);
+  } catch (error) {
+    if (error instanceof ApiError && error.answered) {
+      try {
+        return nativeReceipt(error.responseBody, requestId);
+      } catch {
+        // This was an answered HTTP failure, but not a command receipt.
+      }
+    }
+    throw error;
+  }
+}
+
 export type NativeAccountCommand = {
   domainRef: string; platform: "xhs" | "douyin"; accountName: string;
   profileUrl: string | null; platformUserId: string | null; handle: string | null;
@@ -238,9 +261,7 @@ export type NativeAccountCommand = {
 
 /** The caller owns the UUID so an unanswered request can be retried without duplicating facts. */
 export async function createNativeAccount(command: NativeAccountCommand & { requestId: string }) {
-  return nativeReceipt(await requestJson("/api/local/ops/native/accounts", {
-    method: "POST", body: command,
-  }), command.requestId);
+  return nativeCommand("/api/local/ops/native/accounts", command, command.requestId);
 }
 
 export type NativePublicationCommand = {
@@ -248,9 +269,15 @@ export type NativePublicationCommand = {
   publishedOn: string | null; title: string | null; body: string | null;
 };
 export async function createNativePublication(command: NativePublicationCommand & { requestId: string }) {
-  return nativeReceipt(await requestJson("/api/local/ops/native/publications", {
-    method: "POST", body: { ...command, publishedAt: null },
-  }), command.requestId);
+  return nativeCommand("/api/local/ops/native/publications", { ...command, publishedAt: null }, command.requestId);
+}
+
+export type NativeDailyCommand = {
+  businessDate: string; linksOpenedCount: number | null; followersGained: number | null;
+  expectedVersion: number | null;
+};
+export async function recordNativeDaily(command: NativeDailyCommand & { requestId: string }) {
+  return nativeCommand("/api/local/ops/native/daily-reports", command, command.requestId);
 }
 const figures = (r: R) => ({
   published: nn(r, "published"),
