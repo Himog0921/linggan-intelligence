@@ -523,6 +523,237 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn native_account_responsibility_is_versioned_idempotent_and_group_bounded() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_resp_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let admin = member(
+        database.pool(),
+        "responsibility-admin@example.test",
+        "管理员",
+        "admin",
+    )
+    .await;
+    let lead = member(
+        database.pool(),
+        "responsibility-lead@example.test",
+        "组长",
+        "lead",
+    )
+    .await;
+    let owner = member(
+        database.pool(),
+        "responsibility-owner@example.test",
+        "原负责人",
+        "operator",
+    )
+    .await;
+    let successor = member(
+        database.pool(),
+        "responsibility-successor@example.test",
+        "接任运营",
+        "operator",
+    )
+    .await;
+    let other_group_member = member(
+        database.pool(),
+        "responsibility-other@example.test",
+        "异组运营",
+        "operator",
+    )
+    .await;
+    let disabled = member(
+        database.pool(),
+        "responsibility-disabled@example.test",
+        "停用运营",
+        "operator",
+    )
+    .await;
+    let domain = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES($1,'责任交接合成领域')")
+        .bind(domain)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let primary_group = Uuid::new_v4();
+    let other_group = Uuid::new_v4();
+    for (group_ref, display_name) in [(primary_group, "交接主组"), (other_group, "交接异组")]
+    {
+        sqlx::query(
+            "INSERT INTO linggan_ops_group (group_ref,display_name,state,created_by_member_ref) \
+             VALUES($1,$2,'active',$3)",
+        )
+        .bind(group_ref)
+        .bind(display_name)
+        .bind(admin)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    }
+    for (member_ref, group_ref) in [
+        (lead, primary_group),
+        (owner, primary_group),
+        (successor, primary_group),
+        (other_group_member, other_group),
+    ] {
+        sqlx::query(
+            "INSERT INTO linggan_ops_group_membership_event \
+             (event_ref,group_ref,member_ref,action,acted_by_member_ref,reason,request_ref) \
+             VALUES($1,$2,$3,'joined',$4,'合成交接分组',$5)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(group_ref)
+        .bind(member_ref)
+        .bind(admin)
+        .bind(Uuid::new_v4())
+        .execute(database.pool())
+        .await
+        .unwrap();
+    }
+    let app = app_with_database(database.clone());
+    let admin_cookie = session(database.pool(), admin).await;
+    let lead_cookie = session(database.pool(), lead).await;
+    let owner_cookie = session(database.pool(), owner).await;
+    let (status, created) = post(
+        app.clone(),
+        "/api/local/ops/native/accounts",
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "domainRef": domain, "platform": "xhs",
+            "accountName": "待交接原生账号", "profileUrl": "https://example.test/xhs/responsibility",
+            "platformUserId": "0123456789abcdef01234567"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let account_ref = uuid(&created["receipt"]["recordRef"]);
+    let transfer_request = Uuid::new_v4();
+    let transfer_body = json!({
+        "requestId": transfer_request, "nextMemberRef": successor, "expectedVersion": 1,
+        "reason": "本周排班交接"
+    });
+    let (status, transferred) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}/responsibility"),
+        Some(&lead_cookie),
+        transfer_body.clone(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(transferred["receipt"]["outcome"], "accepted");
+    assert_eq!(transferred["receipt"]["resultingVersion"], 2);
+    let (status, replay) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}/responsibility"),
+        Some(&lead_cookie),
+        transfer_body,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["receipt"]["replayed"], true);
+    let current: (Option<Uuid>, i64, String, i64) = sqlx::query_as(
+        "SELECT current_responsible_member_ref,responsibility_version,source_system,native_version \
+         FROM linggan_ops_account WHERE account_ref=$1",
+    )
+    .bind(account_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        current,
+        (Some(successor), 2, "linggan_native".to_owned(), 1)
+    );
+    let change_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_ops_account_responsibility_change WHERE account_ref=$1",
+    )
+    .bind(account_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        change_count, 1,
+        "an identical request cannot write a second handover"
+    );
+    let (status, cross_group) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}/responsibility"),
+        Some(&lead_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "nextMemberRef": other_group_member, "expectedVersion": 2,
+            "reason": "错误跨组交接"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(cross_group["receipt"]["code"], "ops_native_forbidden");
+    let (status, unassigned) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}/responsibility"),
+        Some(&admin_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "nextMemberRef": null, "expectedVersion": 2,
+            "reason": "离职后待管理员接管"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(unassigned["receipt"]["resultingVersion"], 3);
+    sqlx::query("UPDATE linggan_ops_member SET state='disabled',disabled_at=scope_001_now() WHERE member_ref=$1")
+        .bind(disabled)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let (status, inactive_target) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}/responsibility"),
+        Some(&admin_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "nextMemberRef": disabled, "expectedVersion": 3,
+            "reason": "不能把账号交给已停用成员"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        inactive_target["receipt"]["code"],
+        "ops_native_responsibility_target_inactive"
+    );
+    let (status, stale) = post(
+        app,
+        &format!("/api/local/ops/native/accounts/{account_ref}/responsibility"),
+        Some(&admin_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "nextMemberRef": successor, "expectedVersion": 2,
+            "reason": "过期页面不能覆盖新责任"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        stale["receipt"]["code"],
+        "ops_native_responsibility_version_stale"
+    );
+    let change_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_ops_account_responsibility_change WHERE account_ref=$1",
+    )
+    .bind(account_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        change_count, 2,
+        "rejected and stale commands never become handover history"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
 async fn publication_sync_command_is_durable_but_never_invents_collection_work() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("ops_sync_http_{}", Uuid::new_v4().simple());

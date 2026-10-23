@@ -25,6 +25,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             axum::routing::post(create_publication),
         )
         .route(
+            "/api/local/ops/native/accounts/{account_ref}/responsibility",
+            axum::routing::post(transfer_account_responsibility),
+        )
+        .route(
             "/api/local/ops/native/publications/{publication_ref}/view-reports",
             axum::routing::post(record_view_report),
         )
@@ -67,6 +71,15 @@ struct CreatePublicationBody {
     published_on: Option<String>,
     title: Option<String>,
     body: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TransferAccountResponsibilityBody {
+    request_id: Uuid,
+    next_member_ref: Option<Uuid>,
+    expected_version: i64,
+    reason: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -142,6 +155,25 @@ async fn create_publication(
         return super::ops_api::not_connected();
     };
     match write_publication(database, member, body).await {
+        Ok((status, receipt)) => receipt_response(status, receipt),
+        Err(error) => write_error(error),
+    }
+}
+
+async fn transfer_account_responsibility(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Path(account_ref): Path<Uuid>,
+    Json(body): Json<TransferAccountResponsibilityBody>,
+) -> Response {
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let Some(database) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
+    match write_account_responsibility(database, member, account_ref, body).await {
         Ok((status, receipt)) => receipt_response(status, receipt),
         Err(error) => write_error(error),
     }
@@ -475,6 +507,221 @@ async fn write_publication(
         .await
         .map_err(|_| WriteError::Unavailable)?;
     Ok((StatusCode::CREATED, receipt.receipt))
+}
+
+/// Transfer the current operational owner without touching imported attribution or historical
+/// publication ownership.  A lead may move an account only within the group they currently
+/// manage; only an administrator may leave it explicitly unassigned for later takeover.
+async fn write_account_responsibility(
+    database: &linggan_storage_postgres::Database,
+    member: super::ops_auth::AuthenticatedMember,
+    account_ref: Uuid,
+    body: TransferAccountResponsibilityBody,
+) -> Result<(StatusCode, CommandReceipt), WriteError> {
+    let raw_payload = raw_payload(&json!({ "accountRef": account_ref, "body": body }))?;
+    let request_id = body.request_id;
+    let reason = body.reason.trim().to_owned();
+    if body.expected_version < 1 || reason.is_empty() || reason.len() > 1000 {
+        return reject_invalid_input(
+            database,
+            &member,
+            request_id,
+            "account_responsibility_transfer",
+            &raw_payload,
+            "ops_native_responsibility_invalid",
+        )
+        .await;
+    }
+    let payload = digest(json!({
+        "accountRef": account_ref,
+        "nextMemberRef": body.next_member_ref,
+        "expectedVersion": body.expected_version,
+        "reason": reason,
+    }));
+    let mut transaction = database
+        .pool()
+        .begin()
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+    if let Some(receipt) = replay(
+        &mut transaction,
+        request_id,
+        "account_responsibility_transfer",
+        &member,
+        &payload,
+    )
+    .await?
+    {
+        transaction
+            .commit()
+            .await
+            .map_err(|_| WriteError::Unavailable)?;
+        return Ok((status_for(&receipt), receipt));
+    }
+    let account: Option<(Option<Uuid>, i64)> = sqlx::query_as(
+        "SELECT current_responsible_member_ref,responsibility_version \
+         FROM linggan_ops_account \
+         WHERE account_ref=$1 AND ((source_system='linggan_native' AND native_record_state='active') \
+              OR (source_system='content_workbench' AND ledger_state='in_ledger')) \
+         FOR UPDATE",
+    )
+    .bind(account_ref)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| WriteError::Unavailable)?;
+    let Some((previous_member_ref, current_version)) = account else {
+        return rejected(
+            transaction,
+            request_id,
+            "account_responsibility_transfer",
+            &member,
+            &payload,
+            Some(account_ref),
+            None,
+            "ops_native_account_not_found",
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+    };
+    if body.expected_version != current_version {
+        return stale_for(
+            transaction,
+            request_id,
+            "account_responsibility_transfer",
+            &member,
+            &payload,
+            account_ref,
+            current_version,
+            "ops_native_responsibility_version_stale",
+        )
+        .await;
+    }
+    if let Some(next_member_ref) = body.next_member_ref {
+        let target_state: Option<String> = sqlx::query_scalar(
+            "SELECT state FROM linggan_ops_member WHERE member_ref=$1 FOR SHARE",
+        )
+        .bind(next_member_ref)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+        match target_state.as_deref() {
+            Some("active") => {}
+            Some(_) => {
+                return rejected(
+                    transaction,
+                    request_id,
+                    "account_responsibility_transfer",
+                    &member,
+                    &payload,
+                    Some(account_ref),
+                    Some(current_version),
+                    "ops_native_responsibility_target_inactive",
+                    StatusCode::UNPROCESSABLE_ENTITY,
+                )
+                .await;
+            }
+            None => {
+                return rejected(
+                    transaction,
+                    request_id,
+                    "account_responsibility_transfer",
+                    &member,
+                    &payload,
+                    Some(account_ref),
+                    Some(current_version),
+                    "ops_native_responsibility_target_not_found",
+                    StatusCode::NOT_FOUND,
+                )
+                .await;
+            }
+        }
+    }
+    let allowed = if member.role == "admin" {
+        true
+    } else if member.role == "lead" {
+        match (previous_member_ref, body.next_member_ref) {
+            (Some(previous_member_ref), Some(next_member_ref)) => {
+                same_active_group(&mut transaction, member.member_ref, previous_member_ref).await?
+                    && same_active_group(&mut transaction, member.member_ref, next_member_ref)
+                        .await?
+            }
+            _ => false,
+        }
+    } else {
+        false
+    };
+    if !allowed {
+        return rejected(
+            transaction,
+            request_id,
+            "account_responsibility_transfer",
+            &member,
+            &payload,
+            Some(account_ref),
+            Some(current_version),
+            "ops_native_forbidden",
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    }
+    if previous_member_ref == body.next_member_ref {
+        let receipt = unchanged(
+            request_id,
+            "account_responsibility_transfer",
+            &member,
+            &payload,
+            account_ref,
+            current_version,
+            "ops_native_responsibility_unchanged",
+        );
+        insert_receipt(&mut transaction, &receipt).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| WriteError::Unavailable)?;
+        return Ok((StatusCode::OK, receipt.receipt));
+    }
+    let resulting_version = current_version + 1;
+    sqlx::query(
+        "UPDATE linggan_ops_account \
+         SET current_responsible_member_ref=$2,responsibility_version=$3 WHERE account_ref=$1",
+    )
+    .bind(account_ref)
+    .bind(body.next_member_ref)
+    .bind(resulting_version)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| WriteError::Unavailable)?;
+    sqlx::query(
+        "INSERT INTO linggan_ops_account_responsibility_change \
+         (change_ref,account_ref,previous_member_ref,next_member_ref,changed_by_member_ref,reason,request_ref,resulting_version) \
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(account_ref)
+    .bind(previous_member_ref)
+    .bind(body.next_member_ref)
+    .bind(member.member_ref)
+    .bind(&reason)
+    .bind(request_id)
+    .bind(resulting_version)
+    .execute(&mut *transaction)
+    .await
+    .map_err(|_| WriteError::Unavailable)?;
+    let receipt = accepted(
+        request_id,
+        "account_responsibility_transfer",
+        &member,
+        &payload,
+        account_ref,
+        resulting_version,
+    );
+    insert_receipt(&mut transaction, &receipt).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+    Ok((StatusCode::OK, receipt.receipt))
 }
 
 async fn write_execution_locator(
@@ -1080,6 +1327,30 @@ fn accepted(
     }
 }
 
+fn unchanged(
+    request_ref: Uuid,
+    command_kind: &'static str,
+    member: &super::ops_auth::AuthenticatedMember,
+    payload: &[u8; 32],
+    record_ref: Uuid,
+    resulting_version: i64,
+    code: &'static str,
+) -> PendingReceipt {
+    PendingReceipt {
+        receipt: CommandReceipt {
+            request_ref,
+            outcome: "unchanged".to_owned(),
+            code: code.to_owned(),
+            record_ref: Some(record_ref),
+            resulting_version: Some(resulting_version),
+            replayed: false,
+        },
+        command_kind,
+        actor_member_ref: member.member_ref,
+        payload: *payload,
+    }
+}
+
 struct PendingReceipt {
     receipt: CommandReceipt,
     command_kind: &'static str,
@@ -1179,23 +1450,47 @@ async fn reject_invalid_input(
 }
 
 async fn stale(
-    mut transaction: Transaction<'_, Postgres>,
+    transaction: Transaction<'_, Postgres>,
     request_ref: Uuid,
     member: &super::ops_auth::AuthenticatedMember,
     payload: &[u8; 32],
     daily_ref: Uuid,
     current: i64,
 ) -> Result<(StatusCode, CommandReceipt), WriteError> {
+    stale_for(
+        transaction,
+        request_ref,
+        "daily_report_record",
+        member,
+        payload,
+        daily_ref,
+        current,
+        "ops_native_version_stale",
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn stale_for(
+    mut transaction: Transaction<'_, Postgres>,
+    request_ref: Uuid,
+    command_kind: &'static str,
+    member: &super::ops_auth::AuthenticatedMember,
+    payload: &[u8; 32],
+    record_ref: Uuid,
+    current: i64,
+    code: &'static str,
+) -> Result<(StatusCode, CommandReceipt), WriteError> {
     let pending = PendingReceipt {
         receipt: CommandReceipt {
             request_ref,
             outcome: "stale".to_owned(),
-            code: "ops_native_version_stale".to_owned(),
-            record_ref: Some(daily_ref),
+            code: code.to_owned(),
+            record_ref: Some(record_ref),
             resulting_version: Some(current),
             replayed: false,
         },
-        command_kind: "daily_report_record",
+        command_kind,
         actor_member_ref: member.member_ref,
         payload: *payload,
     };
