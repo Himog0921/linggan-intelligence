@@ -85,6 +85,7 @@ mod station_read;
 mod step_report;
 mod target_catalog;
 mod target_enrichment;
+pub mod target_inspection;
 mod target_inspector;
 mod work_order;
 mod work_order_lease;

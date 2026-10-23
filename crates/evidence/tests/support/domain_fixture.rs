@@ -164,6 +164,36 @@ pub async fn submit_package_for_target(
     checkpoint: serde_json::Value,
     records: Vec<serde_json::Value>,
 ) -> Uuid {
+    submit_package_for_target_at(
+        database,
+        target_ref,
+        identity_key,
+        lane,
+        task_target,
+        quota,
+        package_kind,
+        coverage,
+        checkpoint,
+        records,
+        "2026-09-11T02:00:00Z",
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn submit_package_for_target_at(
+    database: &Database,
+    target_ref: Uuid,
+    identity_key: &str,
+    lane: &str,
+    task_target: serde_json::Value,
+    quota: i32,
+    package_kind: &str,
+    coverage: serde_json::Value,
+    checkpoint: serde_json::Value,
+    records: Vec<serde_json::Value>,
+    observed_at: &str,
+) -> Uuid {
     let request_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_acquisition_request \
@@ -240,10 +270,13 @@ pub async fn submit_package_for_target(
     .expect("the fixture WorkOrder has a frozen Domain purpose");
 
     // 工位名在同一个证明库里必须唯一：一条用例会连着提交两轮（列表面 + 详情面）。
-    let station_ref =
-        register_station(database, &format!("Domain采样证明工位 {identity_key}"), 200)
-            .await
-            .expect("station fixture is stored");
+    let station_ref = register_station(
+        database,
+        &format!("Domain采样证明工位 {identity_key} {}", Uuid::new_v4()),
+        200,
+    )
+    .await
+    .expect("station fixture is stored");
     let lease_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_work_order_lease (lease_ref,work_order_ref,station_ref,capture_identity,expires_at) \
@@ -338,7 +371,7 @@ pub async fn submit_package_for_target(
         "capturePackage":{
             "contractVersion":"linggan.producer.capture-package.v1","packageRef":package_ref,
             "packageKind":package_kind,"platform":"xhs",
-            "observedAt":"2026-09-11T02:00:00Z","capturedAt":"2026-09-11T02:00:00Z",
+            "observedAt":observed_at,"capturedAt":observed_at,
             "coverage":coverage,"checkpoint":checkpoint,"records":records
         }
     });

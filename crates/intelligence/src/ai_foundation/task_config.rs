@@ -138,6 +138,8 @@ pub async fn save_task_config(
         || request.expected_revision == i64::MAX
         || matches!(request.budget,BudgetPolicy::Capped(v) if v>i64::MAX as u64)
         || (request.task_key == TaskKey::ModelProbe && request.model.is_some())
+        || (request.task_key == TaskKey::WorkComparison
+            && request.model.as_ref().is_some_and(|m| m.limits.attempts != 1))
         || (matches!(
             request.task_key,
             TaskKey::NoteInterpretation | TaskKey::DirectionListDraft | TaskKey::DirectionProposal

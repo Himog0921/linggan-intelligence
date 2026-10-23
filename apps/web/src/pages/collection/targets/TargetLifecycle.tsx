@@ -1,4 +1,6 @@
 import { Chart } from './LifecycleChart';
+import { WorkResearchActions } from './inspection/TargetResearchContext';
+import styles from './inspection/TargetResearch.module.css';
 import { Review } from './LifecycleReview';
 import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
@@ -70,7 +72,8 @@ export function LifecyclePanel({
   const distribution = params.get('life_chart') === 'distribution',
     week = params.get('life_grain') === 'week',
     buckets = bucketPoints(p.points, week),
-    selected = p.points.find((v) => v.publicRef === params.get('life_work'));
+    selected = p.points.find((v) => v.publicRef === params.get('life_work')),
+    selectedBucket = !distribution ? buckets.find(b=>b.label===params.get('life_bucket')) : undefined;
   const viewParams = new URLSearchParams(params);
   viewParams.set('life_chart', distribution ? 'distribution' : 'trend');
   viewParams.set('life_grain', week ? 'week' : 'month');
@@ -164,8 +167,27 @@ export function LifecyclePanel({
             />
           )}
         </article>
-        {p.points.length > 0 && <Review p={p} week={week} distribution={distribution} buckets={buckets} />}
+        {p.points.length > 0 && (distribution && selected ? (
+          <aside className="life-review" aria-label="选中作品与对照操作">
+            <div className="life-review-head"><b>选中作品</b><Link to={listHref(viewParams,{life_work:null},'creator-lifecycle')}>返回复核摘要</Link></div>
+            <h3>{selected.title??'标题未取得'}</h3>
+            <p className={styles.meta}>{selected.date} · {metricLabel(p.metric)} {selected.value}</p>
+            <p className={styles.meta}>单篇数值来自当前有资格的作品样本，尚不能当作发布后同期表现。</p>
+            <WorkResearchActions work={selected.publicRef}/>
+          </aside>
+        ) : <Review p={p} week={week} distribution={distribution} buckets={buckets} />)}
       </div>
+      {selectedBucket && <section className="life-evidence" aria-label="所选时间桶的作品">
+        <div className="life-evidence-head"><h2>{selectedBucket.label} · 本桶可分析作品</h2>
+          <Link to={listHref(viewParams,{life_bucket:null},'creator-lifecycle')}>清除时间桶</Link></div>
+        <div className="life-evidence-table-wrap"><table className="life-evidence-table">
+          <thead><tr><th>作品</th><th>发布时间</th><th>{metricLabel(p.metric)}</th><th>对照与证据</th></tr></thead>
+          <tbody>{selectedBucket.points.map(work=><tr key={work.publicRef}>
+            <td><Link to={listHref(viewParams,{life_work:work.publicRef},'creator-lifecycle')}>{work.title??'标题未取得'}</Link></td>
+            <td>{work.date}</td><td>{work.value}</td><td><WorkResearchActions work={work.publicRef}/></td>
+          </tr>)}</tbody>
+        </table></div>
+      </section>}
       <section className="life-evidence">
         <div className="life-evidence-head">
           <h2>近期作品证据</h2>
@@ -222,7 +244,7 @@ export function LifecyclePanel({
           {p.receipt.truncated && <li>当前作品范围仍有后续内容</li>}
         </ul>
       )}
-      {selected && (
+      {selected && !distribution && (
         <section className="life-selected" aria-label="选中作品摘要">
           <h3>{selected.title ?? '标题未知'}</h3>
           <dl>
@@ -235,6 +257,7 @@ export function LifecyclePanel({
               <dd>{selected.value}</dd>
             </div>
           </dl>
+          <WorkResearchActions work={selected.publicRef}/>
           <Link className="life-corpus-link" to={`/corpus/evidence?work=${selected.publicRef}`}>
             到语料页查看这篇作品
           </Link>

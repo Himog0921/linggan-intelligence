@@ -16,12 +16,13 @@ import { BATCH_STATE, MATERIAL, TASK_STATE, budgetText, count, type AiSettings, 
 import type { AiAction } from './useAiAction';
 import styles from './AiSettingsExperience.module.css';
 
-const ORDER = ['ocr_recognition', 'ocr_quality_audit', 'writing_legacy', 'note_interpretation', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'legacy_creator_discovery', 'legacy_topic_map'];
+const ORDER = ['ocr_recognition', 'ocr_quality_audit', 'writing_legacy', 'note_interpretation', 'work_comparison', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'legacy_creator_discovery', 'legacy_topic_map'];
 const COPY: Record<string, { group: string; description: string }> = {
   ocr_recognition: { group: '图片文字', description: '手动识别当前作品的已有本地原图；保存模型配置不会发图，默认关闭。' },
   ocr_quality_audit: { group: '语料质量', description: '可选盲读抽检，独立记录质量意见；材料修正需逐项审阅，默认关闭。' },
   writing_legacy: { group: '内容工作台', description: '基于选中的作品材料，提供可审阅的写作建议与修改方案。' },
   note_interpretation: { group: '内容理解', description: '提炼笔记观点、表达方式与值得验证的关键信息。' },
+  work_comparison: { group: '作品研究', description: '显式比较同一作者所选作品的已取得材料，保留双侧来源与覆盖限制。' },
   author_org_identity: { group: '创作者研究', description: '辅助判断公开作者简介与账号定位，结论需要保留来源证据。' },
   direction_list_draft: { group: '主题研究', description: '从已有证据中整理候选研究方向，供人工审查。' },
   direction_proposal: { group: '市场洞察', description: '辅助提出值得验证的新切入点，而非自动立项。' },
@@ -40,7 +41,7 @@ const STATES: Record<string, { name: string; tone: string; note: string }> = {
 };
 const MATERIAL_BY_TASK: Record<string, string> = {
   ocr_recognition: 'manual_ocr_image', ocr_quality_audit: 'ocr_quality_image',
-  note_interpretation: 'note_material', direction_list_draft: 'note_material', direction_proposal: 'note_material',
+  note_interpretation: 'note_material', work_comparison: 'note_material', direction_list_draft: 'note_material', direction_proposal: 'note_material',
   author_org_identity: 'public_author_bio', writing_assistant: 'selected_writing_material',
   writing_legacy: 'selected_writing_material', model_probe: 'synthetic_probe',
 };
