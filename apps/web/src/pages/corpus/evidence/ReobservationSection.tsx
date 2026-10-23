@@ -1,7 +1,7 @@
 import { ActionButton } from '../../../shared/ActionButton';
 import { useState } from 'react';
 import { OperationBlock } from './ReobservationOperation';
-import { FeedbackLine, InlineState, Section, SourceNote, Tech } from './Primitives';
+import { FeedbackLine, InlineState, Section, SourceNote } from './Primitives';
 import { ReobserveConfirmDialog } from './ReobserveConfirmDialog';
 import { errorCode } from './evidenceFeedback';
 import { reobservationAccess } from './reobservationAccess';
@@ -19,32 +19,29 @@ interface ReobservationSectionProps {
   onRecheck: () => void;
 }
 
-const MEDIA_POLICY: Readonly<Record<string, string>> = { EXISTING_ASSETS_REUSED: '媒体：复用既有副本，不新取' };
-
 /**
- * 「立即复观测」。范围说明常驻（不放 tooltip）。点击先弹确认，确认之后才发请求；回执分四种结局显示。
- * 未确认之后不自动重发，只提供「重新核对」和「查看采集任务」；确需再提交时会再次确认，并写明后果。
+ * 「复观测」：要不要现在再看一次这篇笔记。范围用人话常驻（不放 tooltip）。点击先弹确认，确认之后才发请求；
+ * 回执分四种结局显示。未确认之后不自动重发，只提供「重新核对」和「查看采集任务」；确需再提交时会再次确认，并写明后果。
+ * 不可用时只说原因；原因码只留在技术信息里（Mog 2026-10-23：普通层不放机器语言）。
  */
 export function ReobservationSection({ item, channel, domain, state, onRecheck }: ReobservationSectionProps) {
   const [confirming, setConfirming] = useState(false);
   const access = reobservationAccess(item, channel);
   if (access.actionPath === null) {
     return (
-      <Section title="立即复观测">
+      <Section title="复观测">
         <SourceNote>{access.reason}</SourceNote>
-        <Tech>{channel.reason}</Tech>
       </Section>
     );
   }
   const unknown = state.feedback?.tone === 'unknown';
   return (
-    <Section title="立即复观测">
-      <p className={styles.scope}>范围：详情、评论（最多 30 条）与回复；不下载媒体、不跑 OCR / 转录。</p>
+    <Section title="复观测">
+      <p className={styles.scope}>重新打开这篇笔记，更新点赞、评论、收藏、分享，顺带采最多 30 条评论和回复；不重新下载图片视频，也不重新识字。</p>
       <div className={styles.actions}>
         <ActionButton variant="primary" disabled={state.queued || state.sending} onClick={() => setConfirming(true)}>
           {state.queued ? '复观测已入队' : state.sending ? '提交中…' : '立即复观测'}
         </ActionButton>
-        <span className={styles.policy}>{(channel.mediaPolicy ? MEDIA_POLICY[channel.mediaPolicy] : undefined) ?? (channel.mediaPolicy ? <Tech>{channel.mediaPolicy}</Tech> : '媒体策略未知')}</span>
       </div>
       <FeedbackLine feedback={state.feedback}>
         {unknown ? (
