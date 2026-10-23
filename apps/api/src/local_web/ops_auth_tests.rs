@@ -280,6 +280,182 @@ async fn ops_ledger_routes_require_an_active_team_session_without_claiming_the_c
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn team_group_and_responsibility_foundation_preserves_history() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_team_model_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let admin = active_member(database.pool(), "admin@example.test", "admin").await;
+    let member = active_member(database.pool(), "member@example.test", "operator").await;
+    let group = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_group (group_ref,display_name,state,created_by_member_ref) \
+         VALUES($1,'合成运营组','active',$2)",
+    )
+    .bind(group)
+    .bind(admin)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let disabled_group = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_group \
+         (group_ref,display_name,state,created_by_member_ref,disabled_at) \
+         VALUES($1,'合成已停用运营组','disabled',$2,scope_001_now())",
+    )
+    .bind(disabled_group)
+    .bind(admin)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        sqlx::query("DELETE FROM linggan_ops_group WHERE group_ref=$1")
+            .bind(disabled_group)
+            .execute(database.pool())
+            .await
+            .is_err(),
+        "a disabled group must remain historical authorization context"
+    );
+    let event = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_group_membership_event \
+         (event_ref,group_ref,member_ref,action,acted_by_member_ref,reason,request_ref) \
+         VALUES($1,$2,$3,'joined',$4,'合成测试加入',$5)",
+    )
+    .bind(event)
+    .bind(group)
+    .bind(member)
+    .bind(admin)
+    .bind(Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        sqlx::query(
+            "UPDATE linggan_ops_group_membership_event SET reason='篡改' WHERE event_ref=$1"
+        )
+        .bind(event)
+        .execute(database.pool())
+        .await
+        .is_err(),
+        "membership history must be append-only"
+    );
+    assert!(
+        sqlx::query("DELETE FROM linggan_ops_group_membership_event WHERE event_ref=$1")
+            .bind(event)
+            .execute(database.pool())
+            .await
+            .is_err(),
+        "membership history must not be erasable"
+    );
+    let native_columns: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM information_schema.columns \
+         WHERE table_schema=current_schema() AND table_name='linggan_ops_account' \
+           AND column_name IN ('current_responsible_member_ref','responsibility_version')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(native_columns, 2);
+    let domain = linggan_evidence::observation_domain::create_observation_domain_with_details(
+        &database,
+        "合成团队责任领域",
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .domain_ref;
+    let account = Uuid::new_v4();
+    let historical_batch = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_import_batch \
+         (batch_ref,preview_hash,rule_version,source_system,source_workspace_id,exported_at,domain_ref, \
+          accounts_sha256,publications_sha256,daily_sha256,account_rows,publication_rows,daily_rows, \
+          accounts_inserted,accounts_updated,accounts_unchanged,publications_inserted,publications_updated, \
+          publications_unchanged,publications_marked_missing,daily_inserted,daily_updated,daily_unchanged, \
+          daily_marked_missing,view_reports_appended) \
+         VALUES($1,repeat('a',64),'ops-import.v1','content_workbench','synthetic-team-proof', \
+                scope_001_now(),$2,repeat('b',64),repeat('c',64),repeat('d',64), \
+                0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)",
+    )
+    .bind(historical_batch)
+    .bind(domain)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_ops_account \
+         (account_ref,source_system,source_record_id,domain_ref,ledger_state,platform,account_name, \
+          responsible_user_source_id,profile_link_state,first_batch_ref,last_changed_batch_ref) \
+         VALUES($1,'content_workbench','synthetic-responsibility-account',$2, \
+                'absent_from_export','xhs','合成责任账号','legacy-owner','missing',$3,$3)",
+    )
+    .bind(account)
+    .bind(domain)
+    .bind(historical_batch)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_ops_account \
+         SET current_responsible_member_ref=$2,responsibility_version=2 WHERE account_ref=$1",
+    )
+    .bind(account)
+    .bind(member)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let change = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_account_responsibility_change \
+         (change_ref,account_ref,next_member_ref,changed_by_member_ref,reason,request_ref,resulting_version) \
+         VALUES($1,$2,$3,$4,'合成首次分配',$5,2)",
+    )
+    .bind(change)
+    .bind(account)
+    .bind(member)
+    .bind(admin)
+    .bind(Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let historical_owner: String = sqlx::query_scalar(
+        "SELECT responsible_user_source_id FROM linggan_ops_account WHERE account_ref=$1",
+    )
+    .bind(account)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(historical_owner, "legacy-owner");
+    assert!(
+        sqlx::query(
+            "UPDATE linggan_ops_account_responsibility_change \
+             SET reason='篡改' WHERE change_ref=$1"
+        )
+        .bind(change)
+        .execute(database.pool())
+        .await
+        .is_err(),
+        "responsibility receipt must be append-only"
+    );
+    assert!(
+        sqlx::query("DELETE FROM linggan_ops_account_responsibility_change WHERE change_ref=$1")
+            .bind(change)
+            .execute(database.pool())
+            .await
+            .is_err(),
+        "responsibility receipt must not be erasable"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
 async fn auth_rejects_invalid_cookie_cross_site_and_storage_failures() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("ops_auth_reject_{}", Uuid::new_v4().simple());

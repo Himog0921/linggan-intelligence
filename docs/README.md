@@ -129,6 +129,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [decisions/0009-stage-one-job-topic-pool.md](decisions/0009-stage-one-job-topic-pool.md) | 权威当前 | 第一阶段主 Job：小红书选题池经营（复用与试新、爆款标准、成功指标、升级条件）、运营模块整体迁入与先后顺序；所取代的旧条款与待裁定事项 |
 | [plans/active/ops-launch-001.md](plans/active/ops-launch-001.md) | 活跃计划；Issue #483；受保护工作树实施中 | 内部团队邀请制登录、原生运营写入、已登记发布的精确同步、交接停用及 React 页面收口；尚未推送、合并或部署 |
 | [data-contracts/ops-auth-001.md](data-contracts/ops-auth-001.md) | 权威当前；认证切片实现中 | 内部邀请成员、Argon2id 密码哈希、会话 cookie、同源写入边界与机器身份分离 |
+| [data-contracts/ops-team-responsibility-001.md](data-contracts/ops-team-responsibility-001.md) | 权威当前；原生写权限结构基础 | 团队组、追加式成员归属、账号当前负责人和责任变更回执；不替代后续服务端授权 |
 
 > **运营文档状态提示（2026-10-23）：** 下列 OPS-MIGRATION、PAGE-OPS、OPS-LEDGER 与 OPS-HTTP 条目保留 D1–D3 的历史迁入、读取和上线证据；其中声称“权威当前”或规定 D4–D6 后续路线的部分，均受 OPS-LAUNCH-001 的优先规则限制。新认证、原生写入、同步及交接合同会以独立的当前文档加入本索引，不能由旧条目的本机守卫或只读约束推导。
 | [plans/active/ops-module-migration-001.md](plans/active/ops-module-migration-001.md) | 历史迁入计划；D1–D3 的事实仍保留，D4–D6 已由 OPS-LAUNCH-001 取代 | 内容工作台运营管理迁入的历史边界、导入与只读证据；不再规定原生可写运营的未来路线 |

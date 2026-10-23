@@ -382,6 +382,7 @@ migrate() {
   apply_migration_once "0144_ocr_manual_recognition" "$project_root/database/migrations/0144_ocr_manual_recognition.sql"
   apply_migration_once "0145_ocr_manual_human_adoption" "$project_root/database/migrations/0145_ocr_manual_human_adoption.sql"
   apply_migration_once "0146_ops_team_auth" "$project_root/database/migrations/0146_ops_team_auth.sql"
+  apply_migration_once "0147_ops_team_responsibility" "$project_root/database/migrations/0147_ops_team_responsibility.sql"
 }
 
 case "$command_name" in
