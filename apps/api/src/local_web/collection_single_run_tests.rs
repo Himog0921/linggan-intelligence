@@ -35,6 +35,7 @@ async fn collection_single_run_browser_with_persisted_data() {
             ranking: Some("comprehensive".into()),
             work_limit: 5,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -71,6 +72,7 @@ async fn collection_single_run_browser_with_persisted_data() {
             ranking: Some("comprehensive".into()),
             work_limit: 51,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -122,6 +124,7 @@ async fn collection_single_run_browser_with_persisted_data() {
                 } else {
                     CommentMode::Sample30
                 },
+                comment_target: None,
             },
         )
         .await

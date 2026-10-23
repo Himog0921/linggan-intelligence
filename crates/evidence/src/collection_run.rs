@@ -28,15 +28,21 @@ pub enum CommentMode {
     #[serde(rename = "sample_30")]
     Sample30,
     AllPublic,
+    /// 每篇采到 `comment_target` 条不重复评论（含回复）就停；评论区先走到尽头也结束（Mog 2026-10-23）。
+    UpTo,
 }
 impl CommentMode {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sample30 => "sample_30",
             Self::AllPublic => "all_public",
+            Self::UpTo => "up_to",
         }
     }
 }
+
+/// 「指定条数」的上限：每段最多 30 条，1000 条约 34 段。
+pub const MAX_COMMENT_TARGET: i32 = 1000;
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(
     tag = "kind",
@@ -58,6 +64,10 @@ pub struct CreateRun {
     pub ranking: Option<String>,
     pub work_limit: i32,
     pub comment_mode: CommentMode,
+    /// 只在 `up_to` 时给：每篇要采到的不重复评论数（含回复），1–1000。其余范围不带这个字段；
+    /// 空值不序列化，既有请求的指纹因此不变。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment_target: Option<i32>,
 }
 fn hash<T: Serialize>(v: &T) -> Result<String, RunError> {
     let bytes = serde_json::to_vec(v).map_err(|_| RunError::Invalid("invalid_request"))?;
@@ -70,6 +80,12 @@ impl CreateRun {
     fn validate(&self) -> Result<(), RunError> {
         if !(1..=200).contains(&self.work_limit) {
             return Err(RunError::Invalid("invalid_work_limit"));
+        }
+        match (self.comment_mode, self.comment_target) {
+            (CommentMode::UpTo, Some(target)) if (1..=MAX_COMMENT_TARGET).contains(&target) => {}
+            (CommentMode::UpTo, _) => return Err(RunError::Invalid("invalid_comment_target")),
+            (_, Some(_)) => return Err(RunError::Invalid("comment_target_not_applicable")),
+            _ => {}
         }
         if self.ranking.as_deref().is_some_and(|r| {
             !matches!(
@@ -176,7 +192,7 @@ pub async fn create_run(db: &Database, input: &CreateRun) -> Result<Value, RunEr
     let run = Uuid::new_v4();
     let target = Uuid::new_v4();
     let auth = Uuid::new_v4();
-    sqlx::query("INSERT INTO collection_run(run_ref,idempotency_key,request_hash,domain_ref,source_kind,source_target_ref,name,search_query,ranking,work_limit,comment_mode) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)").bind(run).bind(input.idempotency_key).bind(fingerprint).bind(input.domain_ref).bind(kind).bind(source_target).bind(&name).bind(&query).bind(&input.ranking).bind(input.work_limit).bind(input.comment_mode.as_str()).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO collection_run(run_ref,idempotency_key,request_hash,domain_ref,source_kind,source_target_ref,name,search_query,ranking,work_limit,comment_mode,comment_target) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)").bind(run).bind(input.idempotency_key).bind(fingerprint).bind(input.domain_ref).bind(kind).bind(source_target).bind(&name).bind(&query).bind(&input.ranking).bind(input.work_limit).bind(input.comment_mode.as_str()).bind(input.comment_target).execute(&mut *tx).await?;
     // An execution-only identity never mutates or joins the person's long-term target.
     // The true source query/creator id is frozen separately and supplied to TaskSpec.
     sqlx::query("INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,display_name,source,purpose_kind,purpose_run_ref) VALUES($1,'xhs',$2,$3,$4,'manual','single_run',$5)").bind(target).bind(&target_kind).bind(format!("single-run:{run}")).bind(&name).bind(run).execute(&mut *tx).await?;
@@ -242,11 +258,16 @@ pub(crate) async fn admit_stage(
     } else {
         Vec::new()
     };
-    let sample = r.get::<String, _>("comment_mode") == "sample_30";
+    let mode: String = r.get("comment_mode");
+    let sample = mode == "sample_30";
+    // 指定条数：每段只要还差的那些（最多 30），采够就不再排新段。
+    let comment_target: Option<i32> = r.get("comment_target");
     let comment_limit = if stage == "detail" {
         0
     } else if sample {
         30 - known.len().min(30) as i32
+    } else if let Some(target) = comment_target {
+        (i64::from(target) - known.len() as i64).clamp(0, 30) as i32
     } else {
         30
     };
@@ -282,7 +303,14 @@ pub(crate) async fn admit_stage(
     )
     .await?;
     if let Some(order) = result.work_order_ref {
-        let mut directive = json!({"runRef":run,"stage":stage,"commentMode":r.get::<String,_>("comment_mode"),"searchQuery":r.get::<Option<String>,_>("search_query"),"ranking":r.get::<Option<String>,_>("ranking").unwrap_or_else(||"comprehensive".into()),"workLimit":r.get::<i32,_>("work_limit"),"segment":segment});
+        // 插件只认 sample_30／all_public：指定条数按「尽量采全」的遍历方式执行，条数由每段的
+        // newUniqueLimit 收住；原始意图另记 commentTarget，便于执行诊断核对。
+        let plugin_mode = if mode == "up_to" {
+            "all_public"
+        } else {
+            mode.as_str()
+        };
+        let mut directive = json!({"runRef":run,"stage":stage,"commentMode":plugin_mode,"commentTarget":comment_target,"searchQuery":r.get::<Option<String>,_>("search_query"),"ranking":r.get::<Option<String>,_>("ranking").unwrap_or_else(||"comprehensive".into()),"workLimit":r.get::<i32,_>("work_limit"),"segment":segment});
         if stage == "comments" && (!sample || !known.is_empty()) {
             directive["commentBudget"] = json!({"knownCommentIds":known,"newUniqueLimit":comment_limit,"maxScrollRounds":50,"maxDurationSeconds":180});
             if sample {
@@ -481,6 +509,7 @@ mod tests {
             ranking: None,
             work_limit: 1,
             comment_mode: CommentMode::AllPublic,
+            comment_target: None,
         };
         assert!(input.validate().is_ok());
         input.work_limit = 0;
@@ -488,6 +517,74 @@ mod tests {
         assert_eq!(
             serde_json::to_value(CommentMode::AllPublic).unwrap(),
             "all_public"
+        );
+    }
+
+    fn selected(mode: CommentMode, target: Option<i32>) -> CreateRun {
+        CreateRun {
+            idempotency_key: Uuid::nil(),
+            domain_ref: Uuid::nil(),
+            source: RunSource::SelectedWorks {
+                work_refs: vec![Uuid::nil()],
+            },
+            ranking: None,
+            work_limit: 1,
+            comment_mode: mode,
+            comment_target: target,
+        }
+    }
+
+    /// 指定条数只认 1–1000 的整数；其余范围带了条数就是错的请求，不悄悄忽略。
+    #[test]
+    fn a_targeted_count_is_bounded_and_only_belongs_to_up_to() {
+        for target in [1, 30, 31, MAX_COMMENT_TARGET] {
+            assert!(selected(CommentMode::UpTo, Some(target)).validate().is_ok());
+        }
+        for (mode, target, code) in [
+            (CommentMode::UpTo, None, "invalid_comment_target"),
+            (CommentMode::UpTo, Some(0), "invalid_comment_target"),
+            (
+                CommentMode::UpTo,
+                Some(MAX_COMMENT_TARGET + 1),
+                "invalid_comment_target",
+            ),
+            (
+                CommentMode::AllPublic,
+                Some(100),
+                "comment_target_not_applicable",
+            ),
+            (
+                CommentMode::Sample30,
+                Some(30),
+                "comment_target_not_applicable",
+            ),
+        ] {
+            assert!(
+                matches!(selected(mode, target).validate(), Err(RunError::Invalid(found)) if found == code),
+                "{mode:?} {target:?}"
+            );
+        }
+        assert_eq!(serde_json::to_value(CommentMode::UpTo).unwrap(), "up_to");
+    }
+
+    /// 新字段不进旧请求的指纹：上线前「未确认」的请求上线后用同一身份重放，仍得到同一份回执而不是冲突。
+    /// 指纹是结构体按字段顺序序列化后的字节，这里钉住改动前的字节排布。
+    #[test]
+    fn existing_request_fingerprints_do_not_change() {
+        let nil = Uuid::nil();
+        let before = format!(
+            r#"{{"idempotencyKey":"{nil}","domainRef":"{nil}","source":{{"kind":"selected_works","workRefs":["{nil}"]}},"ranking":null,"workLimit":1,"commentMode":"all_public"}}"#
+        );
+        let parsed: CreateRun = serde_json::from_str(&before).unwrap();
+        assert_eq!(serde_json::to_string(&parsed).unwrap(), before);
+        let targeted = serde_json::to_string(&selected(CommentMode::UpTo, Some(100))).unwrap();
+        assert!(
+            targeted.ends_with(r#""commentMode":"up_to","commentTarget":100}"#),
+            "{targeted}"
+        );
+        assert_ne!(
+            hash(&parsed).unwrap(),
+            hash(&selected(CommentMode::UpTo, Some(100))).unwrap()
         );
     }
 }

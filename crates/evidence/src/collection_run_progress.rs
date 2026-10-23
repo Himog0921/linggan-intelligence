@@ -26,7 +26,7 @@ pub async fn advance_runs(db: &Database) -> Result<usize, RunError> {
         if !locked {
             continue;
         }
-        let r=sqlx::query("SELECT phase,comment_mode,control_intent,(SELECT status FROM observation_domain d WHERE d.domain_ref=collection_run.domain_ref) AS domain_status FROM collection_run WHERE run_ref=$1 FOR UPDATE").bind(run).fetch_one(&mut *tx).await?;
+        let r=sqlx::query("SELECT phase,comment_mode,comment_target,control_intent,(SELECT status FROM observation_domain d WHERE d.domain_ref=collection_run.domain_ref) AS domain_status FROM collection_run WHERE run_ref=$1 FOR UPDATE").bind(run).fetch_one(&mut *tx).await?;
         if r.get::<String, _>("phase") == "discovery" {
             freeze_discovery(&mut tx, run).await?;
         }
@@ -39,7 +39,13 @@ pub async fn advance_runs(db: &Database) -> Result<usize, RunError> {
             && r.get::<String, _>("domain_status") == "active"
         {
             queue_materials(&mut tx, run, &r.get::<String, _>("comment_mode")).await?;
-            reconcile_materials(&mut tx, run, &r.get::<String, _>("comment_mode")).await?;
+            reconcile_materials(
+                &mut tx,
+                run,
+                &r.get::<String, _>("comment_mode"),
+                r.get::<Option<i32>, _>("comment_target"),
+            )
+            .await?;
         }
         tx.commit().await?;
         advanced += 1;
@@ -123,6 +129,7 @@ async fn reconcile_materials(
     tx: &mut Transaction<'_, Postgres>,
     run: Uuid,
     mode: &str,
+    target: Option<i32>,
 ) -> Result<(), RunError> {
     let latest=sqlx::query("SELECT * FROM (SELECT DISTINCT ON(o.content_public_ref) o.content_public_ref,o.stage,o.segment,o.work_order_ref,w.queue_state,member.checkpoint FROM collection_run_order o JOIN collection_run_work member ON member.run_ref=o.run_ref AND member.content_public_ref=o.content_public_ref LEFT JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=$1 AND o.content_public_ref IS NOT NULL AND member.gap_reason IS NULL AND NOT COALESCE((member.checkpoint->>'commentsComplete')::boolean,false) ORDER BY o.content_public_ref,CASE WHEN o.stage='comments' THEN 2 ELSE 1 END DESC,o.segment DESC,o.created_at DESC,o.request_ref DESC) latest WHERE queue_state IN('completed','cancelled') LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
     for row in latest {
@@ -178,7 +185,12 @@ async fn reconcile_materials(
                         && receipt["traversal"]["repliesExhausted"] == true
                         && receipt["traversal"]["identityReliable"] == true))
         });
-        if complete || (mode == "sample_30" && captured >= 30 && discussion.is_some() && replies) {
+        // 指定条数：这篇已采到的不重复评论（含回复）够数即完成；不够数时仍按「尽量采全」的遍历判据收尾。
+        let reached = target.is_some_and(|target| captured >= i64::from(target));
+        if complete
+            || (mode == "sample_30" && captured >= 30 && discussion.is_some() && replies)
+            || (reached && discussion.is_some() && replies)
+        {
             sqlx::query("UPDATE collection_run_work SET checkpoint=checkpoint||jsonb_build_object('commentsComplete',true,'lastOrder',$3::uuid,'lastSegment',$4::integer) WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).bind(order).bind(segment).execute(&mut **tx).await?;
             continue;
         }
