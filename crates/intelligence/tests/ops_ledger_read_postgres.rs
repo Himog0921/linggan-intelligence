@@ -6,7 +6,7 @@ mod fixture;
 #[path = "support/ops_export_fixture.rs"]
 mod ops;
 
-use fixture::proof_database;
+use fixture::proof_database_with_ops_ledger;
 use linggan_intelligence::ops_ledger::covers::{
     CoverImportRequest, apply_cover_import, preview_cover_import,
 };
@@ -24,7 +24,7 @@ use uuid::Uuid;
 const EXPORTED_AT: &str = "2026-10-12T22:43:00+08:00";
 
 async fn imported(name: &str) -> Database {
-    let db = proof_database(name).await;
+    let db = proof_database_with_ops_ledger(name).await;
     import(&db, &first_export()).await;
     db
 }
@@ -244,7 +244,7 @@ async fn business_selection_only_offers_domains_with_accounts() {
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn summary_counts_this_beijing_month_and_is_unknown_before_any_import() {
-    let db = proof_database("ops_read_summary").await;
+    let db = proof_database_with_ops_ledger("ops_read_summary").await;
     let before = read_ops_summary(&db, OpsBusiness::All).await.unwrap();
     assert_eq!(
         (
@@ -351,7 +351,7 @@ async fn accounts_and_daily_rows_follow_the_workbench_and_recount_from_registrat
             day_two.add_rate,
             day_two.month_followers_gained
         ),
-        ("星期三", None, 4)
+        ("星期三", None, Some(4))
     );
     assert_eq!(daily.items[2].add_rate, Some(0.4));
     assert_eq!(daily.scope, "all_businesses");

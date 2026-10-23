@@ -1,6 +1,6 @@
 //! Target saves: one receipt per request, a linear revision history per period, no lost update.
 
-use super::fixture::proof_database;
+use super::fixture::proof_database_with_ops_ledger as proof_database;
 use linggan_intelligence::ops_ledger::targets::{
     OpsTargetError, SetTargetRequest, TargetPeriod, read_ops_target_history, set_ops_target,
 };

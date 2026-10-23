@@ -18,11 +18,22 @@ npm_bin="$(dirname "$node_bin")/npm"
 [[ -x "$npm_bin" ]] || npm_bin="$(command -v npm)"
 export PATH="$(dirname "$node_bin"):$PATH"
 
-# 前端：锁定依赖、重新构建，证明用的就是当前源码。
-if [[ ! -d apps/web/node_modules ]]; then
-  "$npm_bin" ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+# Native Ops proofs exercise only Axum and PostgreSQL.  Do not make that focused backend proof
+# depend on a generated browser build (or its unrelated design-system drift); every browser scope
+# still builds the current frontend before starting its isolated database.
+proof_scope="${WEB_APP_PROOF_SCOPE:-all}"
+# This focused proof intentionally exercises a synthetic exact publication through a new shared
+# lease.  It must declare the same governance phase as the dedicated Operations proof runner;
+# missing phase remains fail-closed for every other invocation.
+if [[ "$proof_scope" == "ops-native" ]]; then
+  export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 fi
-"$npm_bin" --prefix apps/web run build
+if [[ "$proof_scope" != "ops-native" ]]; then
+  if [[ ! -d apps/web/node_modules ]]; then
+    "$npm_bin" ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+  fi
+  "$npm_bin" --prefix apps/web run build
+fi
 
 suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
 proof_database="linggan_web_app_proof_${suffix}"

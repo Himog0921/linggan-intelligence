@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ActionButton } from "../../shared/ActionButton";
 import * as api from "./api";
 import { c } from "./styles";
@@ -34,12 +34,25 @@ function tone(item: api.PublicationSyncReceipt["items"][number]) {
 }
 function ref(value: string | null) { return value ? value.slice(0, 8) : null; }
 
-export function PublicationSyncDialog({ publications, close }: { publications: readonly api.Publication[]; close: () => void }) {
+export function PublicationSyncDialog({ publications, requestRef, close }: { publications: readonly api.Publication[]; requestRef?: string; close: () => void }) {
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [receipt, setReceipt] = useState<api.PublicationSyncReceipt | null>(null);
   const [message, setMessage] = useState("");
+  useEffect(() => {
+    if (!requestRef) return;
+    let live = true;
+    setRefreshing(true); setMessage("");
+    void api.publicationSync(requestRef).then(value => {
+      if (live) setReceipt(value);
+    }).catch(error => {
+      if (live) setMessage(`状态暂时无法读取：${api.reason(error)}`);
+    }).finally(() => {
+      if (live) setRefreshing(false);
+    });
+    return () => { live = false; };
+  }, [requestRef]);
   function toggle(publicationRef: string) {
     setSelected(current => current.includes(publicationRef) ? current.filter(ref => ref !== publicationRef) : [...current, publicationRef]);
   }
@@ -67,7 +80,7 @@ export function PublicationSyncDialog({ publications, close }: { publications: r
         <small>只为选中的精确发布申请采集；不会自动发现、不会改写台账字段。</small>
       </header>
       <div className={c("ops-dialog-body")}>
-        {!receipt ? <>
+        {!receipt && !requestRef ? <>
           <p className={c("ops-note", "ops-sync-intro")}>先选择本页记录。提交只会写入受控命令；是否能够排入既有采集链，由服务端逐条给出决定。</p>
           <fieldset className={c("ops-sync-list")} disabled={submitting}>
             <legend>本页发布记录（最多选择 200 条）</legend>
@@ -77,12 +90,12 @@ export function PublicationSyncDialog({ publications, close }: { publications: r
             </label>)}
           </fieldset>
           {message ? <p role="status" className={c("ops-sync-error")}>{message}</p> : null}
-        </> : <SyncResult receipt={receipt} refresh={refresh} refreshing={refreshing} />}
+        </> : receipt ? <SyncResult receipt={receipt} refresh={refresh} refreshing={refreshing} /> : <p role="status" className={c("ops-note")}>{refreshing ? "正在读取同步状态…" : "同步状态暂时无法读取。"}</p>}
         {receipt && message ? <p role="status" className={c("ops-sync-error")}>{message}</p> : null}
       </div>
       <footer>
         <ActionButton type="button" onClick={close} disabled={submitting}>{receipt ? "关闭" : "取消"}</ActionButton>
-        {!receipt ? <ActionButton type="submit" disabled={!selected.length} busy={submitting}>{selected.length ? `提交 ${selected.length} 条` : "提交"}</ActionButton> : <ActionButton type="button" onClick={refresh} busy={refreshing}>刷新执行状态</ActionButton>}
+        {!receipt && !requestRef ? <ActionButton type="submit" disabled={!selected.length} busy={submitting}>{selected.length ? `提交 ${selected.length} 条` : "提交"}</ActionButton> : <ActionButton type="button" onClick={refresh} disabled={!receipt} busy={refreshing}>刷新执行状态</ActionButton>}
       </footer>
     </form>
   </Dialog>;

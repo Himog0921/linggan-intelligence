@@ -440,6 +440,57 @@ pub async fn proof_database(schema: &str) -> Database {
         .expect("migrations apply")
 }
 
+/// The Operations read model is deliberately tested against the newest Operations schema rather
+/// than the older material-fixture baseline.  Keeping this tail separate avoids silently making
+/// unrelated material proofs depend on team/session and native-ledger tables, while ensuring an
+/// Ops reader cannot accidentally be exercised against a pre-native schema.
+pub async fn proof_database_with_ops_ledger(schema: &str) -> Database {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
+    let first_post_workbench_migration =
+        include_str!("../../../../database/migrations/0129_note_material_hashtags.sql");
+    let (before_content_workbench, after_content_workbench) = MIGRATIONS
+        .split_once(first_post_workbench_migration)
+        .expect("material fixture retains the 0129 migration boundary");
+    let migrations = [
+        before_content_workbench,
+        include_str!("../../../../database/migrations/0127_content_workbench.sql"),
+        include_str!("../../../../database/migrations/0128_content_workbench_ai.sql"),
+        first_post_workbench_migration,
+        after_content_workbench,
+        include_str!("../../../../database/migrations/0140_ai_gen1_writing.sql"),
+        include_str!("../../../../database/migrations/0141_ai_gen1_legacy_settings.sql"),
+        include_str!("../../../../database/migrations/0142_ocr_adoption.sql"),
+        include_str!("../../../../database/migrations/0143_ocr_quality_audit.sql"),
+        include_str!("../../../../database/migrations/0144_ocr_manual_recognition.sql"),
+        include_str!("../../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
+        include_str!("../../../../database/migrations/0146_ops_team_auth.sql"),
+        include_str!("../../../../database/migrations/0147_ops_team_responsibility.sql"),
+        include_str!("../../../../database/migrations/0148_ops_first_admin_bootstrap.sql"),
+        include_str!("../../../../database/migrations/0149_ops_native_write_model.sql"),
+        include_str!(
+            "../../../../database/migrations/0150_ops_native_publication_date_precision.sql"
+        ),
+        include_str!("../../../../database/migrations/0151_ops_publication_sync_request.sql"),
+        include_str!("../../../../database/migrations/0152_ops_publication_execution_locator.sql"),
+        include_str!("../../../../database/migrations/0153_ops_account_responsibility_command.sql"),
+        include_str!("../../../../database/migrations/0154_ops_member_deactivation.sql"),
+        include_str!("../../../../database/migrations/0155_ops_exact_publication_work_scope.sql"),
+        include_str!(
+            "../../../../database/migrations/0156_ops_exact_publication_detail_session.sql"
+        ),
+        include_str!(
+            "../../../../database/migrations/0157_ops_publication_execution_input_eligibility.sql"
+        ),
+        include_str!(
+            "../../../../database/migrations/0158_ops_publication_material_projection.sql"
+        ),
+    ]
+    .concat();
+    isolated_proof_schema(&url, schema, &migrations)
+        .await
+        .expect("latest Operations migrations apply")
+}
+
 #[allow(dead_code)]
 pub async fn proof_database_before_domain_cleanup(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");

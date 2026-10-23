@@ -368,6 +368,19 @@
   color: var(--lgi-ink);
   box-shadow: inset calc(var(--lgi-space-1) / 2) 0 var(--lgi-warning-dot);
 }
+.ops-main .ops-sync-status:not([data-action-button]) {
+  height: auto;
+  min-height: var(--lgi-space-6);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+@media (hover: hover) {
+  .ops-main .ops-sync-status:not([data-action-button]):hover .ops-tag {
+    text-decoration: underline;
+  }
+}
 .ops-main .ops-row-actions {
   display: flex;
   gap: var(--lgi-space-1);

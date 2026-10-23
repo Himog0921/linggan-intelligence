@@ -152,6 +152,7 @@ export function LedgerPage({
   const [newAccount, setNewAccount] = useState(false);
   const [newPublication, setNewPublication] = useState(false);
   const [syncPublications, setSyncPublications] = useState(false);
+  const [syncRequestRef, setSyncRequestRef] = useState<string | null>(null);
   const [newDaily, setNewDaily] = useState(false);
   const [editDaily, setEditDaily] = useState<api.Daily | null>(null);
   const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
@@ -395,6 +396,7 @@ export function LedgerPage({
                   openCover={openCover}
                   openDetail={setDetail}
                   recordView={setViewPublication}
+                  openSync={requestRef => { setSyncRequestRef(requestRef); setSyncPublications(true); }}
                 />
               ))
             ) : kind === "accounts" && accounts.data?.items.length ? (
@@ -513,7 +515,7 @@ export function LedgerPage({
       </Dialog> : null}
       {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
       {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items} close={() => setNewPublication(false)} /> : null}
-      {syncPublications && pubs.data ? <PublicationSyncDialog publications={pubs.data.items} close={() => setSyncPublications(false)} /> : null}
+      {syncPublications && pubs.data ? <PublicationSyncDialog publications={pubs.data.items} requestRef={syncRequestRef || undefined} close={() => { setSyncPublications(false); setSyncRequestRef(null); }} /> : null}
       {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
       {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
       {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
@@ -543,11 +545,13 @@ function PublicationRow({
   item,
   openCover, openDetail,
   recordView,
+  openSync,
 }: {
   item: api.Publication;
   openCover: (src: string) => void;
   openDetail: (item: api.Publication) => void;
   recordView: (item: api.Publication) => void;
+  openSync: (requestRef: string) => void;
 }) {
   return (
     <tr>
@@ -571,9 +575,7 @@ function PublicationRow({
       </td>
       <td>
         <div className={c("ops-stack")}>
-          <Tag title="系统还没去主页核对过这篇帖子；自动发现上线后接入">
-            未检查
-          </Tag>
+          <SyncTag item={item} openSync={openSync} />
           <span className={c("ops-secondary")}>
             {item.views.state === "value"
               ? "阅读量已填"
@@ -686,6 +688,31 @@ function PublicationRow({
       </td>
     </tr>
   );
+}
+
+const syncLabels: Record<api.Publication["sync"]["state"], string> = {
+  not_requested: "未提交同步",
+  not_submitted: "未进入采集链",
+  queued: "等待分派",
+  waiting_execution: "等待执行工位",
+  awaiting_collection: "已分派，等待采集",
+  collecting: "正在采集",
+  package_pending_receipt: "回包等待核验",
+  receipt_accepted_projection_pending: "回执合格，等待材料关联",
+  receipt_lost_authority: "回执失去授权",
+  receipt_accepted: "回执已接受",
+  material_projected: "已关联材料",
+  no_qualified_result: "未得到合格结果",
+  stopped: "执行已停止",
+  chain_unavailable: "状态暂不可读",
+};
+function SyncTag({ item, openSync }: { item: api.Publication; openSync: (requestRef: string) => void }) {
+  const { sync } = item;
+  const tone = sync.state === "material_projected" ? "success" : ["receipt_lost_authority", "no_qualified_result", "stopped"].includes(sync.state) ? "warning" : undefined;
+  if (!sync.requestRef) return <Tag title="尚未为这条发布提交同步命令">{syncLabels[sync.state]}</Tag>;
+  return <button type="button" className={c("ops-sync-status")} onClick={() => openSync(sync.requestRef)} title="打开这次同步的真实执行状态">
+    <Tag tone={tone}>{syncLabels[sync.state]}</Tag>
+  </button>;
 }
 function AccountRow({ item, index, transfer, ready }: { item: api.Account; index: number; transfer: (item: api.Account) => void; ready: boolean }) {
   return (

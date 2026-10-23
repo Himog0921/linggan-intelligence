@@ -100,8 +100,19 @@ pub struct OpsPublicationItem {
     pub comments: Option<i64>,
     pub cover_click_rate: Option<f64>,
     pub system_check: &'static str,
+    /// The newest explicit Operations sync command for this publication.  It is a read of the
+    /// shared collection chain, not a mutation of the ledger or a claim that fields were adopted.
+    pub sync: OpsPublicationSync,
     pub duplicates: Vec<OpsDuplicate>,
     pub cover: OpsCoverState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpsPublicationSync {
+    pub request_ref: Option<Uuid>,
+    pub decision: Option<String>,
+    pub state: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -138,11 +149,48 @@ pub struct OpsPublicationPage {
 /// `$3` platform, `$4` account pattern, `$5`/`$6` date range, `$7` pending views only.
 const FILTERED: &str = "kept AS ( \
     SELECT p.*, a.account_name, a.ledger_state, publisher.display_name AS native_publisher_name, \
-           lv.view_count, lv.views_as_of \
+           lv.view_count, lv.views_as_of, sync.request_ref AS sync_request_ref, \
+           sync.decision AS sync_decision, sync.sync_state \
       FROM linggan_ops_publication p \
       LEFT JOIN linggan_ops_account a ON a.account_ref = p.account_ref \
       LEFT JOIN linggan_ops_member publisher ON publisher.member_ref = p.native_publisher_member_ref \
       LEFT JOIN latest_views lv ON lv.publication_ref = p.publication_ref \
+      LEFT JOIN LATERAL ( \
+           SELECT item.request_ref,item.decision, \
+                  CASE \
+                    WHEN item.decision NOT IN ('accepted','existing') THEN 'not_submitted' \
+                    WHEN projection.content_public_ref IS NOT NULL THEN 'material_projected' \
+                    WHEN receipt.receipt_ref IS NOT NULL AND receipt.execution_effect='COMPLETED_LIVE_STEP' THEN 'receipt_accepted_projection_pending' \
+                    WHEN receipt.receipt_ref IS NOT NULL AND receipt.execution_effect='LOST_AUTHORITY' THEN 'receipt_lost_authority' \
+                    WHEN receipt.receipt_ref IS NOT NULL THEN 'receipt_accepted' \
+                    WHEN package.package_ref IS NOT NULL THEN 'package_pending_receipt' \
+                    WHEN attempt.attempt_id IS NOT NULL THEN 'collecting' \
+                    WHEN task.execution_state='in_progress' THEN 'awaiting_collection' \
+                    WHEN work.queue_state='queued' THEN 'queued' \
+                    WHEN work.queue_state='leased' THEN 'waiting_execution' \
+                    WHEN work.queue_state='completed' THEN 'no_qualified_result' \
+                    WHEN work.queue_state='cancelled' THEN 'stopped' \
+                    ELSE 'chain_unavailable' \
+                  END AS sync_state \
+             FROM linggan_ops_publication_sync_item item \
+             LEFT JOIN collection_work_order work ON work.work_order_ref=item.work_order_ref \
+             LEFT JOIN LATERAL ( \
+                  SELECT lease_task.task_id,lease_task.execution_state \
+                    FROM collection_work_order_lease lease \
+                    JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+                   WHERE lease.work_order_ref=item.work_order_ref \
+                   ORDER BY lease.issued_at DESC,lease_task.sequence_no ASC LIMIT 1 \
+             ) task ON true \
+             LEFT JOIN LATERAL ( \
+                  SELECT attempt_id FROM linggan_runtime_attempt \
+                   WHERE task_id=task.task_id ORDER BY started_at DESC,attempt_id DESC LIMIT 1 \
+             ) attempt ON true \
+             LEFT JOIN linggan_runtime_capture_package package ON package.attempt_id=attempt.attempt_id \
+             LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+             LEFT JOIN linggan_ops_publication_material_projection projection ON projection.receipt_ref=receipt.receipt_ref \
+            WHERE item.requested_publication_ref=p.publication_ref \
+            ORDER BY item.created_at DESC,item.ordinal DESC LIMIT 1 \
+      ) sync ON true \
      WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
        AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
        AND ($1::uuid IS NULL OR a.domain_ref = $1) \
@@ -218,6 +266,7 @@ async fn read_page(
                 kept.view_count, kept.views_as_of, \
                 ((now() AT TIME ZONE 'Asia/Shanghai')::date - coalesce(kept.published_business_date,kept.native_published_on)) >= 7 AS aged, \
                 kept.like_count, kept.collect_count, kept.comment_count, kept.cover_click_rate, \
+                kept.sync_request_ref, kept.sync_decision, coalesce(kept.sync_state,'not_requested') AS sync_state, \
                 cover.publication_ref IS NOT NULL AS has_cover \
            FROM kept LEFT JOIN linggan_ops_publication_cover cover ON cover.publication_ref = kept.publication_ref \
           ORDER BY CASE WHEN $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END ASC, \
@@ -286,11 +335,36 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
         comments: row.try_get("comment_count")?,
         cover_click_rate: row.try_get("cover_click_rate")?,
         system_check: "not_checked",
+        sync: OpsPublicationSync {
+            request_ref: row.try_get("sync_request_ref")?,
+            decision: row.try_get("sync_decision")?,
+            state: sync_state(&row.try_get::<String, _>("sync_state")?)?,
+        },
         duplicates: Vec::new(),
         cover: OpsCoverState {
             available: row.try_get("has_cover")?,
         },
     })
+}
+
+fn sync_state(value: &str) -> Result<&'static str, OpsReadError> {
+    match value {
+        "not_requested" => Ok("not_requested"),
+        "not_submitted" => Ok("not_submitted"),
+        "queued" => Ok("queued"),
+        "waiting_execution" => Ok("waiting_execution"),
+        "awaiting_collection" => Ok("awaiting_collection"),
+        "collecting" => Ok("collecting"),
+        "package_pending_receipt" => Ok("package_pending_receipt"),
+        "receipt_accepted_projection_pending" => Ok("receipt_accepted_projection_pending"),
+        "receipt_lost_authority" => Ok("receipt_lost_authority"),
+        "receipt_accepted" => Ok("receipt_accepted"),
+        "material_projected" => Ok("material_projected"),
+        "no_qualified_result" => Ok("no_qualified_result"),
+        "stopped" => Ok("stopped"),
+        "chain_unavailable" => Ok("chain_unavailable"),
+        _ => Err(OpsReadError::InvalidParameter("publication_sync_state")),
+    }
 }
 
 fn source(source_system: String) -> Result<&'static str, OpsReadError> {

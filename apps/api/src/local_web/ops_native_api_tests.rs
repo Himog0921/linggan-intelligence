@@ -1012,6 +1012,7 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(accepted_sync["items"][0]["decision"], "accepted");
     assert_eq!(accepted_sync["items"][0]["code"], "within_authorization");
+    let accepted_request_ref = uuid(&accepted_sync["requestRef"]);
     let collection_request_ref = uuid(&accepted_sync["items"][0]["acquisitionRequestRef"]);
     let work_order_ref = uuid(&accepted_sync["items"][0]["workOrderRef"]);
     assert_eq!(
@@ -1209,7 +1210,7 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     );
     let (status, receipt) = get(
         app,
-        &format!("/api/local/ops/publication-syncs/{request_ref}"),
+        &format!("/api/local/ops/publication-syncs/{accepted_request_ref}"),
         Some(&owner_cookie),
     )
     .await;
@@ -1220,6 +1221,24 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     assert_eq!(receipt["items"][0]["execution"]["packageRef"], package_ref.to_string());
     assert_eq!(receipt["items"][0]["execution"]["receiptRef"], receipt_ref.to_string());
     assert_eq!(receipt["items"][0]["execution"]["materialRef"], projection.1.to_string());
+    let persisted = read_ops_publications(
+        &database,
+        OpsBusiness::Domain(domain),
+        OpsPublicationFilter {
+            page: 1,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let row = persisted
+        .items
+        .iter()
+        .find(|item| item.r#ref == publication_ref)
+        .expect("the Operations list keeps the registered publication");
+    assert_eq!(row.sync.request_ref, Some(accepted_request_ref));
+    assert_eq!(row.sync.decision.as_deref(), Some("accepted"));
+    assert_eq!(row.sync.state, "material_projected");
 }
 
 fn publication_body(request_id: Uuid, account_ref: Uuid) -> Value {

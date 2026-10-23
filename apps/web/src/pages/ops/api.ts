@@ -70,6 +70,7 @@ function publication(r: R) {
   const views = d.obj(r, "views");
   const state = enumeration(views, "state", ["value", "pending", "optional"]);
   const value = nn(views, "value");
+  const sync = d.obj(r, "sync");
   if ((state === "value") !== (value !== null))
     throw new d.ShapeError("views.value");
   return {
@@ -96,6 +97,14 @@ function publication(r: R) {
     comments: nn(r, "comments"),
     coverClickRate: nn(r, "coverClickRate"),
     systemCheck: enumeration(r, "systemCheck", ["not_checked"]),
+    sync: {
+      requestRef: sn(sync, "requestRef"),
+      decision: (() => {
+        const value = d.field(sync, "decision");
+        return value === null ? null : enumeration(sync, "decision", ["blocked", "forbidden", "invalid", "conflict", "accepted", "existing"] as const);
+      })(),
+      state: syncState(sync, "state"),
+    },
     duplicates: d.list(r, "duplicates", (item) => ({
       businessDate: s(item, "businessDate"),
     })),
@@ -114,6 +123,7 @@ export function publications(value: unknown) {
   }));
 }
 const syncState = (r: R, key: string) => enumeration(r, key, [
+  "not_requested",
   "not_submitted",
   "queued",
   "waiting_execution",

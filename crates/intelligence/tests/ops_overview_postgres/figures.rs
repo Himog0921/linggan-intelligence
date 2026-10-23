@@ -12,7 +12,7 @@ use super::ops::ADHD_DOMAIN;
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn uncovered_blocks_are_unknown_and_covered_empty_blocks_are_zero() {
-    let empty = super::fixture::proof_database("ops_overview_never_imported").await;
+    let empty = super::fixture::proof_database_with_ops_ledger("ops_overview_never_imported").await;
     let db = imported("ops_overview_uncovered_blocks").await;
     for database in [&empty, &db] {
         let page = overview(
