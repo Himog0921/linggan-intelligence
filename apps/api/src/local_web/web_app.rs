@@ -21,6 +21,7 @@ use std::{path::PathBuf, sync::Arc};
 /// 由 React 应用提供的正式页面。必须与 `apps/web/src/app/pages.ts` 逐项相同（前端测试对照）。
 const REACT_PAGES: &[&str] = &[
     "/login",
+    "/invite/accept",
     "/settings/models",
     "/ops/creation",
     "/corpus/creators",
@@ -128,7 +129,7 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
         get(|| async { Redirect::temporary("/settings/models") }),
     );
     for page in REACT_PAGES {
-        if *page == "/login" || OPS_REACT_PAGES.contains(page) {
+        if *page == "/login" || *page == "/invite/accept" || OPS_REACT_PAGES.contains(page) {
             continue;
         }
         pages = if *page == "/topics/{canonical_key}" {
@@ -139,7 +140,8 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
     }
     pages
         .layer(middleware::from_fn(local_comment_study_guard))
-        .route("/login", get(login_entry))
+        .route("/login", get(public_auth_entry))
+        .route("/invite/accept", get(public_auth_entry))
         .route("/ui-assets/{*file}", get(asset))
         .with_state(config)
 }
@@ -205,7 +207,7 @@ async fn ops_entry(State(state): State<super::LocalWebState>, headers: HeaderMap
 }
 
 /// Login remains a local development entry: no credential submission or session.
-async fn login_entry(State(config): State<WebAppConfig>) -> Response {
+async fn public_auth_entry(State(config): State<WebAppConfig>) -> Response {
     let mut response = entry(State(config)).await;
     response
         .headers_mut()

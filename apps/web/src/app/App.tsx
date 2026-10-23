@@ -3,8 +3,9 @@ import { lazy, Suspense } from 'react';
 import { createBrowserRouter } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { ModelSettingsPage } from '../pages/settings/ModelSettingsPage';
+import { AcceptInvitationPage } from '../pages/login/AcceptInvitationPage';
 import { NotFoundPage } from './NotFoundPage';
-import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH, TOPICS_PATH, OFFLINE_REVIEW_PATH } from './pages';
+import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, INVITATION_ACCEPT_PATH, MODEL_SETTINGS_PATH, WORKBENCH_PATH, TOPICS_PATH, OFFLINE_REVIEW_PATH } from './pages';
 
 const LoginPage = lazy(() => import('../pages/login/LoginPage').then(module => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import('../pages/workbench/WorkbenchPage').then(module => ({ default: module.WorkbenchPage })));
@@ -31,6 +32,7 @@ const queryClient = new QueryClient({
 
 const router = createBrowserRouter([
   { path: '/login', element: <Suspense fallback={<p role="status">正在打开工作台入口…</p>}><LoginPage /></Suspense> },
+  { path: INVITATION_ACCEPT_PATH, element: <AcceptInvitationPage /> },
   { path: MODEL_SETTINGS_PATH, element: <ModelSettingsPage /> },
   { path: WORKBENCH_PATH, element: <Suspense fallback={<p role="status">正在打开工作台…</p>}><WorkbenchPage /></Suspense> },
   { path: CREATORS_PATH, element: <Suspense fallback={<p role="status">正在打开创作者…</p>}><CreatorsPage /></Suspense> },

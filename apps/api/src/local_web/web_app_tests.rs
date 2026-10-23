@@ -496,6 +496,7 @@ async fn health_reports_the_frontend_build() {
         health["webApp"]["pages"],
         json!([
             "/login",
+            "/invite/accept",
             "/settings/models",
             "/ops/creation",
             "/corpus/creators",
@@ -730,17 +731,19 @@ async fn comments_entry_preserves_json_routes_and_retires_legacy_assets() {
 }
 
 #[tokio::test]
-async fn login_is_the_same_react_entry_without_a_session_or_credential_post() {
+async fn public_auth_pages_are_uncached_react_entries_without_a_session_or_credential_post() {
     let router = web(synthetic_dist(Some("284cd3a9"), true), "284cd3a9");
-    let (status, headers, body) = send(router.clone(), "/login", "127.0.0.1:3000").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, ENTRY);
-    assert!(!headers.contains_key(header::SET_COOKIE));
-    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
-    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
-    let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
-    assert!(csp.contains("form-action 'none'"));
-    assert!(csp.contains("script-src 'self'"));
+    for path in ["/login", "/invite/accept"] {
+        let (status, headers, body) = send(router.clone(), path, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert_eq!(body, ENTRY, "{path}");
+        assert!(!headers.contains_key(header::SET_COOKIE), "{path}");
+        assert_eq!(headers[header::CACHE_CONTROL], "no-store", "{path}");
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{path}");
+        let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+        assert!(csp.contains("form-action 'none'"), "{path}");
+        assert!(csp.contains("script-src 'self'"), "{path}");
+    }
     let response = router
         .oneshot(
             Request::builder()
