@@ -17,7 +17,7 @@
 
 `linggan_ops_member` 保存稳定 `member_ref`、规范化电子邮箱、显示名、角色、状态、密码哈希、创建/停用时间和乐观版本。密码只保存 Argon2id 哈希；日志、JSON 响应、审计字段和 Git 禁止出现明文密码。
 
-`linggan_ops_session` 保存稳定会话引用、仅令牌 SHA-256 摘要、成员引用、签发/最近使用/过期/撤销时间。原始令牌只在成功登录的响应 `Set-Cookie` 出现；不能从数据库、响应正文或日志读回。邀请和重设令牌沿同一“摘要、单次、限时、可撤销”规则，在后续成员管理切片加入。
+`linggan_ops_session` 保存稳定会话引用、仅令牌 SHA-256 摘要、成员引用、签发/最近使用/过期/撤销时间。原始会话令牌只在成功登录的响应 `Set-Cookie` 出现；不能从数据库、响应正文或日志读回。邀请和重设令牌沿同一“摘要、单次、限时、可撤销”规则。邀请原始令牌仅会返回给当前已认证管理员以便复制到受控投递通道；响应禁止缓存，数据库、日志和后续读取接口均不可读回该原文。
 
 会话默认有效期为 7 天，cookie 名为 `linggan_ops_session`，`HttpOnly; SameSite=Strict; Path=/`；HTTPS 运行必须额外 `Secure`。服务以受信反向代理的 `X-Forwarded-Proto: https` 或 `LINGGAN_OPS_COOKIE_SECURE=1` 选择该属性；本机 `http://localhost`/`127.0.0.1` 开发链允许省略 `Secure`，但这不是生产豁免。所有会话响应是 `Cache-Control: no-store` 并设 `X-Content-Type-Options: nosniff`。
 
@@ -28,8 +28,10 @@
 | `POST /api/local/auth/login` | 以 email + password 建立会话 | `200`，只返回成员公开身份；cookie 写入 | `401 ops_auth_invalid_credentials`，不存在、停用、密码错误使用同一结果 |
 | `GET /api/local/auth/session` | 读取当前浏览器成员 | `200`，公开身份与角色 | `401 ops_auth_session_required`；过期/撤销/停用不区分给浏览器 |
 | `POST /api/local/auth/logout` | 撤销当前会话并清 cookie | `204`，重放亦安全 | 无有效 cookie 同样 `204` |
+| `POST /api/local/auth/invitations` | 管理员创建或重邀待加入成员 | `201`，只向该管理员一次性返回可复制令牌；7 天有效 | `401` 未登录、`403` 非管理员、`409` 已启用/已停用成员、`422` 无效输入 |
+| `POST /api/local/auth/invitations/accept` | 以有效邀请首次设密、激活成员并建立会话 | `200` 与 HttpOnly 会话 cookie | `410` 伪造/过期/撤销链接，`409` 已消费链接，`422` 格式错误 |
 
-写接口必须是同源请求：服务端验证本机受信 Host、`Sec-Fetch-Site` 和（存在时）`Origin`；不接受跨站来源。登录、退出或会话失败不会说明账户是否存在。密码重设、邀请签收、成员/组管理和资源责任判定将在其实现切片增加明确接口，不能借用登录接口的输入或响应字段。
+写接口必须是同源请求：服务端验证本机受信 Host、`Sec-Fetch-Site` 和（存在时）`Origin`；不接受跨站来源。登录、退出或会话失败不会说明账户是否存在。邀请只绑定服务器上创建的邮箱、显示名和角色，签收请求不能自行提交或提升角色；重邀在同一事务中撤销旧未消费令牌且不创建第二个成员身份。当前仅实现受控复制令牌，真实邮件投递与邮箱持有验证仍须在测试接收器/获授权的正式邮件环境独立证明。密码重设、成员/组管理和资源责任判定将在其实现切片增加明确接口，不能借用登录接口的输入或响应字段。
 
 ## 4. 授权接入顺序
 
@@ -40,6 +42,7 @@
 ## 5. 最小可证伪验收
 
 - 用隔离 PostgreSQL 写入已启用成员的 Argon2id 哈希：正确凭据得到仅 HttpOnly cookie；错误凭据、停用成员和损坏 hash 不泄露存在性。
+- 管理员创建邀请、重邀、受邀成员签收与首次设密处于同一隔离 PostgreSQL + Axum 场景：非管理员不可发邀，旧链接失效，同一邮箱只保留一个成员引用，令牌仅存摘要，签收后才有会话。
 - 以该 cookie 读取 session 成功；撤销、过期或停用后均被拒绝；退出后 cookie 失效且同一会话不能复用。
 - 不带 cookie、伪造 cookie、跨站 `Origin` 均不能获得成员身份；producer 路由在同一测试中不因浏览器 cookie 逻辑而改变。
 

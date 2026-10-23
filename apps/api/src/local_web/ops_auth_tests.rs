@@ -2,7 +2,7 @@
 use super::*;
 use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
 use axum::{
-    body::Body,
+    body::{Body, to_bytes},
     http::{HeaderValue, Request, StatusCode, header},
 };
 use sha2::{Digest, Sha256};
@@ -235,14 +235,232 @@ async fn auth_rejects_invalid_cookie_cross_site_and_storage_failures() {
     );
 }
 
-fn json_request(path: &str, body: &'static str) -> Request<Body> {
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn admin_invites_once_reinvite_revokes_old_link_and_acceptance_activates_member() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_auth_invite_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let admin_ref = active_member(database.pool(), "admin@example.test", "admin").await;
+    let operator_ref = active_member(database.pool(), "operator@example.test", "operator").await;
+    let app = app_with_database(database.clone());
+
+    let admin_cookie = login_cookie(app.clone(), "admin@example.test").await;
+    let operator_cookie = login_cookie(app.clone(), "operator@example.test").await;
+    let denied = authenticated_json_request(
+        "/api/local/auth/invitations",
+        r#"{"email":"new@example.test","displayName":"新成员","role":"operator"}"#,
+        &operator_cookie,
+    );
+    assert_eq!(
+        app.clone().oneshot(denied).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    let invalid_email = authenticated_json_request(
+        "/api/local/auth/invitations",
+        r#"{"email":"not-an-email","displayName":"新成员","role":"operator"}"#,
+        &admin_cookie,
+    );
+    assert_eq!(
+        app.clone().oneshot(invalid_email).await.unwrap().status(),
+        StatusCode::UNPROCESSABLE_ENTITY
+    );
+    let first = authenticated_json_request(
+        "/api/local/auth/invitations",
+        r#"{"email":"new@example.test","displayName":"新成员","role":"operator"}"#,
+        &admin_cookie,
+    );
+    let first = app.clone().oneshot(first).await.unwrap();
+    assert_eq!(first.headers()["cache-control"], "no-store");
+    let (status, first) = json_response(first).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let first_token = first["invitation"]["token"].as_str().unwrap().to_owned();
+    assert_eq!(first["invitation"]["expiresInSeconds"], 604_800);
+    let first_digest: [u8; 32] = Sha256::digest(first_token.as_bytes()).into();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_ops_invite WHERE token_sha256=$1"
+        )
+        .bind(first_digest.as_slice())
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1,
+        "the raw invitation token never becomes a stored credential"
+    );
+    let second = authenticated_json_request(
+        "/api/local/auth/invitations",
+        r#"{"email":"new@example.test","displayName":"新成员（更新）","role":"lead"}"#,
+        &admin_cookie,
+    );
+    let (status, second) = json_response(app.clone().oneshot(second).await.unwrap()).await;
+    assert_eq!(status, StatusCode::CREATED);
+    let second_token = second["invitation"]["token"].as_str().unwrap().to_owned();
+    assert_ne!(first_token, second_token);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_ops_member WHERE email_normalized='new@example.test'"
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1,
+        "reinvitation must not make another member identity"
+    );
+    let forged = json_request(
+        "/api/local/auth/invitations/accept",
+        r#"{"token":"0000000000000000000000000000000000000000000000000000000000000000","password":"synthetic-invite-password"}"#,
+    );
+    assert_eq!(
+        app.clone().oneshot(forged).await.unwrap().status(),
+        StatusCode::GONE
+    );
+    let expired_member_ref = Uuid::new_v4();
+    let expired_token = "e".repeat(64);
+    let expired_digest: [u8; 32] = Sha256::digest(expired_token.as_bytes()).into();
+    sqlx::query(
+        "INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state) VALUES($1,'expired@example.test','过期邀请','operator','invited')",
+    )
+    .bind(expired_member_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_ops_invite (invite_ref,member_ref,token_sha256,invited_by_member_ref,issued_at,expires_at) VALUES($1,$2,$3,$4,scope_001_now()-interval '2 hours',scope_001_now()-interval '1 hour')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(expired_member_ref)
+    .bind(expired_digest.as_slice())
+    .bind(admin_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let expired = json_request(
+        "/api/local/auth/invitations/accept",
+        format!(r#"{{"token":"{expired_token}","password":"synthetic-invite-password"}}"#),
+    );
+    assert_eq!(
+        app.clone().oneshot(expired).await.unwrap().status(),
+        StatusCode::GONE
+    );
+    let old_link = json_request(
+        "/api/local/auth/invitations/accept",
+        format!(r#"{{"token":"{first_token}","password":"synthetic-invite-password"}}"#),
+    );
+    assert_eq!(
+        app.clone().oneshot(old_link).await.unwrap().status(),
+        StatusCode::GONE
+    );
+    let acceptance = json_request(
+        "/api/local/auth/invitations/accept",
+        format!(r#"{{"token":"{second_token}","password":"synthetic-invite-password"}}"#),
+    );
+    let acceptance = app.clone().oneshot(acceptance).await.unwrap();
+    assert_eq!(acceptance.status(), StatusCode::OK);
+    let accepted_cookie = acceptance.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let (state, role, password_hash) = sqlx::query_as::<_, (String, String, Option<String>)>(
+        "SELECT state, role, password_hash FROM linggan_ops_member WHERE email_normalized='new@example.test'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(state, "active");
+    assert_eq!(role, "lead");
+    assert!(password_hash.is_some());
+    assert_eq!(
+        app.clone()
+            .oneshot(session_request(
+                "/api/local/auth/session",
+                &accepted_cookie,
+                "GET"
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let replay = json_request(
+        "/api/local/auth/invitations/accept",
+        format!(r#"{{"token":"{second_token}","password":"synthetic-invite-password"}}"#),
+    );
+    assert_eq!(
+        app.oneshot(replay).await.unwrap().status(),
+        StatusCode::CONFLICT,
+        "single-use acceptance remains explicit under replay"
+    );
+    assert_ne!(admin_ref, operator_ref);
+}
+
+fn json_request(path: &str, body: impl Into<Body>) -> Request<Body> {
     Request::builder()
         .method("POST")
         .uri(path)
         .header("host", "127.0.0.1:3000")
         .header("content-type", "application/json")
-        .body(Body::from(body))
+        .body(body.into())
         .unwrap()
+}
+
+fn authenticated_json_request(path: &str, body: impl Into<Body>, cookie: &str) -> Request<Body> {
+    let value = cookie.split(';').next().unwrap();
+    Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("host", "127.0.0.1:3000")
+        .header("content-type", "application/json")
+        .header("cookie", value)
+        .body(body.into())
+        .unwrap()
+}
+
+async fn json_response(response: Response) -> (StatusCode, Value) {
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&body).unwrap())
+}
+
+async fn login_cookie(app: Router, email: &str) -> String {
+    let request = json_request(
+        "/api/local/auth/login",
+        format!(r#"{{"email":"{email}","password":"synthetic-password-only"}}"#),
+    );
+    let response = app.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    response.headers()["set-cookie"]
+        .to_str()
+        .unwrap()
+        .to_owned()
+}
+
+async fn active_member(pool: &sqlx::PgPool, email: &str, role: &str) -> Uuid {
+    let password_hash = Argon2::default()
+        .hash_password(
+            b"synthetic-password-only",
+            &SaltString::encode_b64(b"isolated-proof-salt").unwrap(),
+        )
+        .unwrap()
+        .to_string();
+    let member_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) VALUES($1,$2,'合成管理员',$3,'active',$4,scope_001_now())",
+    )
+    .bind(member_ref)
+    .bind(email)
+    .bind(role)
+    .bind(password_hash)
+    .execute(pool)
+    .await
+    .unwrap();
+    member_ref
 }
 
 fn session_request(path: &str, cookie: &str, method: &str) -> Request<Body> {
