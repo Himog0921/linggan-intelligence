@@ -25,6 +25,7 @@ use linggan_intelligence::{
     },
     content_workbench::*,
     content_workbench_ai as ai,
+    content_workbench_sources::{read_source_in, text_hash},
     model_secrets::SyntheticModelSecrets,
     pi_adapter::PiAdapter,
 };
@@ -415,17 +416,32 @@ async fn pause_and_unavailable_sources_never_allocate_a_writing_invocation_or_st
         "cancelled"
     );
     setup::enable(&db, ControlScope::Global).await;
-    let cited = fixture::cited_doc(&db).await;
+    let cited = body_and_comment_doc(&db).await;
+    let body = cited.excerpts[0].citation.clone();
+    let comment_work = cited.excerpts[1].citation.work_ref.unwrap();
+    let frozen_body = frozen_source(&db, &body).await;
     let work = fixture::create(&db, cited).await;
     let queued = enqueue(
         &db,
         &preview(&work, config.task.model_config_ref.unwrap(), ""),
     )
     .await;
-    withdraw(&db).await;
-    run(&db, &owner).await;
+    observe_new_body(&db, &body).await;
+    assert_eq!(frozen_source(&db, &body).await, frozen_body);
+    ai::preview(
+        &db,
+        &preview(&work, config.task.model_config_ref.unwrap(), ""),
+    )
+    .await
+    .unwrap();
+    fixture::restrict_comment(&db, comment_work).await;
+    let item = claim_next(&db, owner.fence()).await.unwrap().unwrap();
+    execute_writing(&db, &item, &SyntheticModelSecrets, &unavailable)
+        .await
+        .unwrap();
     let result = ai::status(&db, queued.request_id).await.unwrap();
     assert_eq!(result["state"], "failed");
+    assert_eq!(result["failureCode"], "ai_source_unavailable");
     assert!(result["invocationRef"].is_null());
     let count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_model_invocation WHERE task_key='writing_legacy'",
@@ -437,8 +453,62 @@ async fn pause_and_unavailable_sources_never_allocate_a_writing_invocation_or_st
     assert_eq!(endpoint.requests.lock().unwrap().len(), 1);
     endpoint.finish().await;
 }
-async fn withdraw(db: &Database) {
+async fn body_and_comment_doc(db: &Database) -> WorkDocument {
+    let mut body = fixture::cited_doc(db).await;
+    let comment =
+        fixture::comment_doc_for_work(db, body.excerpts[0].citation.work_ref.unwrap()).await;
+    body.excerpts.extend(comment.excerpts);
+    body.canvas.extend(comment.canvas);
+    body
+}
+async fn frozen_source(db: &Database, citation: &Citation) -> Value {
+    let mut tx = db.pool().begin().await.unwrap();
+    let (source, _) = read_source_in(
+        &mut tx,
+        &citation.source_kind,
+        citation.source_ref,
+        citation.work_ref,
+        &citation.field,
+        &citation.block_ref,
+        &citation.as_of,
+    )
+    .await
+    .unwrap();
+    assert_eq!(source.source_ref, citation.source_ref);
+    assert_eq!(source.work_ref, citation.work_ref);
+    assert_eq!(source.source_kind, citation.source_kind);
+    assert_eq!(source.field, citation.field);
+    assert_eq!(source.block_ref, citation.block_ref);
+    assert_eq!(source.as_of, citation.as_of);
+    assert_eq!(source.source_version, citation.source_version);
+    let selected: String = source
+        .text
+        .chars()
+        .skip(citation.start)
+        .take(citation.end - citation.start)
+        .collect();
+    assert_eq!(text_hash(&selected), citation.text_hash);
+    assert_eq!(
+        source.text,
+        format!("{}结尾不能丢失🙂", "完整正文。".repeat(900))
+    );
+    tx.commit().await.unwrap();
+    serde_json::to_value(source).unwrap()
+}
+async fn observe_new_body(db: &Database, frozen: &Citation) {
     fixture::dossier::fixture::submit_package_at(db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成替代版本","bodyText":"新版原文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
+    let current = linggan_evidence::research_dossier::read(db, frozen.work_ref.unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    let body = current
+        .fragments
+        .iter()
+        .find(|f| f.field == "body")
+        .unwrap();
+    assert_eq!(body.text, "新版原文");
+    assert_ne!(body.fragment_id, frozen.block_ref);
+    assert_ne!(body.source_version, frozen.source_version);
 }
 async fn inflight(name: &str, cancel: bool) {
     let db = fixture::db(name).await;
@@ -608,7 +678,11 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
     )
     .await
     .unwrap();
-    let work = fixture::create(&db, fixture::cited_doc(&db).await).await;
+    let document = body_and_comment_doc(&db).await;
+    let body = document.excerpts[0].citation.clone();
+    let comment_work = document.excerpts[1].citation.work_ref.unwrap();
+    let frozen_body = frozen_source(&db, &body).await;
+    let work = fixture::create(&db, document).await;
     let input = preview(&work, config.task.model_config_ref.unwrap(), "");
     ai::preview(&db, &input).await.unwrap();
     let second = import_skill(
@@ -685,10 +759,23 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
     activate_skill(&db, &approve).await.unwrap();
     assert!(claim_next(&db, owner.fence()).await.unwrap().is_none());
     assert_eq!(endpoint.requests.lock().unwrap().len(), 3);
-    withdraw(&db).await;
+    observe_new_body(&db, &body).await;
+    assert_eq!(frozen_source(&db, &body).await, frozen_body);
+    let after_observation = read_comparison(&db, trial.comparison_ref, 0).await.unwrap();
+    assert_eq!(after_observation["sourceQualification"], "readable");
+    assert_eq!(
+        after_observation["baseline"]["output"],
+        compared["baseline"]["output"]
+    );
+    assert_eq!(
+        after_observation["candidate"]["output"],
+        compared["candidate"]["output"]
+    );
+    fixture::restrict_comment(&db, comment_work).await;
     let redacted = read_comparison(&db, trial.comparison_ref, 0).await.unwrap();
     assert_eq!(redacted["sourceQualification"], "unavailable");
     assert!(redacted["baseline"]["output"].is_null());
     assert!(redacted["candidate"]["output"].is_null());
+    assert_eq!(endpoint.requests.lock().unwrap().len(), 3);
     endpoint.finish().await;
 }

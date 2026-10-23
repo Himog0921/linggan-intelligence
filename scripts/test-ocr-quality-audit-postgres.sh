@@ -82,7 +82,7 @@ fi
 cargo_proof -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
 cargo_proof -p linggan-worker --test ocr_recognition_postgres second_image_schema_failure_stops_without_sending_the_third_image --locked -- --ignored --nocapture
 cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend --locked -- --ignored --nocapture
-cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_freezes_only_current_work_images_not_context_or_history --locked -- --ignored --nocapture
+cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_freezes_only_explicit_current_work_images_not_context_or_history --locked -- --ignored --nocapture
 if [[ -n "${OCR_AUDIT_SAVE_DIR:-}" ]];then
  [[ "$OCR_AUDIT_SAVE_DIR" == "${audit_tmp_root}/linggan-ocr-audit-"* ]] || exit 2
  mkdir -p "$OCR_AUDIT_SAVE_DIR"

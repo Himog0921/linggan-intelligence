@@ -8,9 +8,11 @@
 
 OCR 的动态交付事实以统一 Issue #454 及关联 PR/CI 为准。原本地规则与开发回归见[既有 OCR 计划](plans/active/ocr-title-quality-454.md)；当前获准的本篇手动云 OCR、动效百分比、检查器结果与模型选择见[手动识别计划](plans/active/ocr-manual-recognition-454.md)。两者保留来源和采用边界，候选实现、隔离证明不代表主线/部署或 Mog 生产业务验收；本包不新增真实模型调用、不操作共享数据库或现有服务。
 
-## 2026-10-23 · 研究底稿 v2 主线集成与本地验收完成
+## 2026-10-23 · 研究底稿 v2 集成与 CI 接缝本地复验完成
 
-Mog 已确认完整底稿标准并授权实现；唯一交付为 [PR #481](https://github.com/Himog0921/linggan-intelligence/pull/481)。已集成 main `b471d9f1`（#477/#479）：新增人工采用行为接入唯一 v2 命令/面板，旧 overlay/API 退役，保留主线 0145、本包迁移顺延为 0146–0148。当前合并候选已通过受影响的实际 PostgreSQL、HTTP、两条 React → Axum → PostgreSQL 浏览器链、前端严格检查与生产构建；旧结果撤回后的候选采用、同截点有效当前版本、意见不改变选择和 Markdown 同文标题完整性均有回归。独立审阅覆盖最终 56 个非文档变动路径，无剩余实质阻断。此前 `8427b468` 的完整证明与本轮增量分开记录；最终远端提交及 CI 以 PR 实际 head 回执为准。尚未合并、共享迁移、部署或进行真实模型/G4 验收。详见 [实施包](plans/active/research-dossier-v2.md)。
+Mog 已确认完整底稿标准并授权实现；唯一交付为 [PR #481](https://github.com/Himog0921/linggan-intelligence/pull/481)。已集成 main `b471d9f1`（#477/#479）：新增人工采用行为接入唯一 v2 命令/面板，旧 overlay/API 退役，保留主线 0145、本包迁移顺延为 0146–0148。集成提交 `4955f4b0` 的必要本地 PostgreSQL、HTTP、实际浏览器与独立审阅通过；实际 CI 完整 Web 1180/1180、主题/底稿 UI、OCR adoption 和 preflight 通过，但最终 gate 因 OCR 筛选名、AI/浏览器旧来源假设失败。
+
+同包修正保留冻结引用语义：新观察后仍读原完整材料，实际当前 restriction 才阻断调用与隐藏产出。Writing 完整 9/9、模块整理后的工作台受影响场景 1/1、三阶段真实浏览器、补回的 OCR scope 与 selector 回归已通过；本轮九个源码路径独立审阅无剩余实质阻断。最后预检、提交与远端 CI 以 PR 的实际新 head 为准。旧失败和复验分开记录，不以本地结果代替 CI。尚未合并、共享迁移、部署或进行真实模型/G4 验收。详见 [实施包](plans/active/research-dossier-v2.md)。
 
 ## AI 设置左栏导航候选（2026-10-21）
 

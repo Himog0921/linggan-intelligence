@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -246,4 +246,25 @@ test('Delivery executes current creator, saved-source and OCR proof targets with
   assert.match(ocr, /source scripts\/cargo-proof\.sh/);
   assert.match(ocr, /cargo_proof .*"\$test_name" --locked -- --ignored --exact --nocapture/);
   assert.doesNotMatch(readFileSync(join(root, '.github/workflows/ocr-adoption.yml'), 'utf8'), /--lib ocr_adoption_persistence::/);
+});
+
+test('OCR audit runner filters name actual Rust tests, including split modules', () => {
+  const runner = readFileSync(join(root, 'scripts/test-ocr-quality-audit-postgres.sh'), 'utf8');
+  const calls = [...runner.matchAll(/cargo_proof -p linggan-worker --test (\w+) (\w+) --locked/g)];
+  assert.ok(calls.length > 0, 'inspect the actual audit proof calls');
+  assert.equal(calls.length, [...runner.matchAll(/^\s*cargo_proof\b/gm)].length, 'every audit proof call must be checked');
+  const rustSources = directory => readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return rustSources(path);
+    return entry.isFile() && entry.name.endsWith('.rs') ? [readFileSync(path, 'utf8')] : [];
+  });
+  for (const [, target, filter] of calls) {
+    const entrypoint = join(root, 'apps/worker/tests', `${target}.rs`);
+    const modules = join(root, 'apps/worker/tests', target);
+    const sources = [readFileSync(entrypoint, 'utf8'), ...(existsSync(modules) ? rustSources(modules) : [])];
+    const names = sources.flatMap(source => [...source.matchAll(
+      /#\[(?:tokio::)?test(?:\([^]*?\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:async\s+)?fn\s+(\w+)\s*\(/g,
+    )].map(match => match[1]));
+    assert.ok(names.includes(filter), `${target}: ${filter} must select a declared Rust test`);
+  }
 });
