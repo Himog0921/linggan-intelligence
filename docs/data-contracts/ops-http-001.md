@@ -1,7 +1,7 @@
 # 运营页面接口合同（OPS-HTTP-001）
 
 > 状态: 权威当前
-> 最后核对: 2026-10-14
+> 最后核对: 2026-10-23
 > 适用范围: OPS-MIGRATION-001 第 D2 步（Issue #405）：一级页面「运营」四个二级页面读取的 JSON 接口、导出、历史封面图，以及业务选择的作用范围；第 D3 步（Issue #409）：总览读取与周、月加微目标的设定（本合同唯一的写接口）
 > 事实来源: [PAGE-OPS-001](../design/pages/ops-page.md)、[PAGE-OPS-002](../design/pages/ops-overview-page.md)、[OPS-LEDGER-001](ops-ledger-001.md)、Mog 2026-10-13 的确认
 > 冲突时以谁为准: [OPS-LAUNCH-001](../plans/active/ops-launch-001.md)、Mog 最新确认、AGENTS.md、OPS-LEDGER-001、真实 API/schema/代码
@@ -29,7 +29,7 @@
 - 只看在最新导出中的记录（`missing_since_batch_ref` 为空）；被合并的重复登记只出现在主记录的 `duplicates` 里。
 - 日期一律是北京时间的业务日，格式 `YYYY-MM-DD`；「本月」是今天所在的北京时间月份。
 - 未知或没有值返回 `null`，不返回 0；0 只表示已确认为零。
-- 每个响应带 `asOf`：最近一次导入批次的导出时间与批次号，`{ "exportedAt"（UTC 时刻）, "exportedAtBeijing"（北京时间 `YYYY-MM-DD HH:MM`）, "batchRef" }`。从未导入时为 `null`。
+- 每个响应带 `asOf`：最近一次**历史导入**批次的导出时间与批次号，`{ "exportedAt"（UTC 时刻）, "exportedAtBeijing"（北京时间 `YYYY-MM-DD HH:MM`）, "batchRef" }`。从未导入时为 `null`；原生事实绝不伪造此值。
 - 失败统一返回 `{ "operation": "local_read", "outcome": "unavailable", "code": "<代码>" }`：参数不合法 400 `ops_parameter_invalid`，业务不存在 404 `ops_business_not_found`，读取不可用 503 `ops_read_unavailable`，本机服务没有连数据库 503 `read_model_not_connected`。页面把代码翻成中文原因显示，不直接显示代码。
 
 ## 3. 接口
@@ -50,6 +50,7 @@
 | `effectivePublication` | 固定 `{ "state": "not_connected" }`，自动发现（D5）上线前不给数值 |
 | `monthFollowersGained` | `{ "value", "scope": "all_businesses" }`，本月每日数据加微之和 |
 | `monthHits` | 本月发布的小红书主记录中，最新阅读量 ≥ 5000 的条数 |
+| `nativeDataPresent` | 是否存在有效原生运营事实。它只说明可读事实存在，不表示历史导入覆盖完整；在 `asOf=null` 时区分「尚无历史迁入但已有原生台账」与「完全没有数据」。 |
 
 ### `GET /api/local/ops/publications`
 
@@ -63,6 +64,7 @@
 | 字段 | 含义 |
 |---|---|
 | `ref` | 发布登记编号 |
+| `source` | `imported`（历史工作台迁入）或 `native`（运营台账原生登记）；来源不可由页面猜测。 |
 | `businessDate`、`publishedAt`、`dateState` | 业务日、原始发布时间、`as_recorded` / `suspect_year` |
 | `platform`、`title`、`body`、`url` | 原值；`url` 是发布链接 |
 | `account` | `{ "name", "ledgerState" }`；没有账号为 `null` |
@@ -77,7 +79,7 @@
 
 只列在台账的账号，按负责运营、平台、账号名升序。返回 `total`、`active`、`operators`、`items`。
 
-每条 `item`：`ref`、`platform`、`name`、`profileUrl`、`deviceCode`、`followerCount`、`ipLocation`、`operator`、`status`、`isRetained`、`notes`，以及固定为 `{ "state": "not_filled" }` 的 `health`。账号健康改为运营手动填写，D4b 前没有值。
+每条 `item`：`ref`、`source`（`imported` / `native`）、`platform`、`name`、`profileUrl`、`deviceCode`、`followerCount`、`ipLocation`、`operator`、`status`、`isRetained`、`notes`，以及固定为 `{ "state": "not_filled" }` 的 `health`。账号健康改为运营手动填写，D4b 前没有值。
 
 ### `GET /api/local/ops/daily?domain=&operator=`
 
@@ -89,8 +91,8 @@
 |---|---|
 | `ref`、`businessDate`、`weekday`、`operator` | 原值；星期按业务日计算 |
 | `published` | 该运营人当天的主记录条数（按发布人名） |
-| `linksOpened`、`followersGained` | 原值 |
-| `addRate` | `followersGained ÷ linksOpened`；打开为 0 时为 `null` |
+| `linksOpened`、`followersGained` | 原值；原生行的 `null` 为未填，`0` 才是确认零；历史迁入的 `0` 保留其旧时无法区分的语义。 |
+| `addRate` | `followersGained ÷ linksOpened`；打开为 0、或任一指标未填时为 `null` |
 | `hits` | 该运营人当天发布的小红书主记录中，最新阅读量 ≥ 5000 的条数 |
 | `monthFollowersGained`、`monthPublished` | 该运营人当月截至当天的累计 |
 

@@ -6,21 +6,22 @@ import { OpsPage } from './OpsPage';
 vi.mock('./OverviewPage', () => ({ OverviewPage: () => <p>概览内容</p> }));
 const asOf = { exportedAt: '2026-10-19T02:00:00Z', exportedAtBeijing: '2026-10-19 10:00', batchRef: 'batch' };
 const publication = {
-  ref: 'pub', businessDate: '2026-10-18', dateState: 'as_recorded', platform: 'xhs', title: '测试发布标题', body: '完整正文\n保留第二段',
+  ref: 'pub', source: 'imported', businessDate: '2026-10-18', dateState: 'as_recorded', platform: 'xhs', title: '测试发布标题', body: '完整正文\n保留第二段',
   url: 'https://example.com/post', account: { name: '合成账号', ledgerState: 'in_ledger' }, publisher: '甲',
   views: { state: 'pending', value: null, overdue: false, hit: false }, likes: null, collects: 0, comments: null,
   coverClickRate: null, systemCheck: 'not_checked', duplicates: [], cover: { available: true },
 };
 let failPublications = false;
 let noAccounts = false;
+let nativeOnly = false;
 const requests: URL[] = [];
 beforeEach(() => {
-  requests.length = 0; failPublications = false; noAccounts = false;
+  requests.length = 0; failPublications = false; noAccounts = false; nativeOnly = false;
   vi.stubGlobal('fetch', vi.fn(async (path: string) => {
     const url = new URL(path, 'http://localhost'); requests.push(url);
     const endpoint = url.pathname.split('/').at(-1);
     const result = endpoint === 'businesses' ? [{ domainRef: 'd1', name: '合成业务', accountCount: 1 }] : endpoint === 'summary' ? {
-      asOf, month: '2026-10', activeAccounts: 1, ledgerAccounts: 1, monthPublished: 1,
+      asOf: nativeOnly ? null : asOf, nativeDataPresent: nativeOnly, month: '2026-10', activeAccounts: 1, ledgerAccounts: 1, monthPublished: 1,
       effectivePublication: { state: 'not_connected' }, monthFollowersGained: { value: null, scope: 'all_businesses' }, monthHits: null,
     } : endpoint === 'accounts' ? { asOf: noAccounts ? null : asOf, total: 0, active: 0, operators: [], items: [] }
     : { asOf, page: Number(url.searchParams.get('page') || 1), pageSize: 50, total: 100, totalPages: 2, operators: ['甲'], items: [publication] };
@@ -104,6 +105,11 @@ it('retains no-import as a distinct state from an empty imported account list', 
   noAccounts = true; show('/ops/accounts?domain=d1');
   await screen.findByText('还没有迁入数据。');
   expect(screen.queryByText('当前筛选下没有账号。')).not.toBeInTheDocument();
+});
+it('does not label native-only Operations facts as an absent import', async () => {
+  nativeOnly = true; show();
+  await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
+  expect(screen.getByText('原生台账数据（历史尚未迁入）')).toBeInTheDocument();
 });
 
 it('protects unapplied dates and restores the draft after cancelling a close', async () => {

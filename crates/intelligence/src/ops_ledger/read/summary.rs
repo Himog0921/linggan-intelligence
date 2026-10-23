@@ -22,11 +22,13 @@ pub struct OpsUnscoped {
     pub scope: &'static str,
 }
 
-/// Every count is `None` until the first import: an empty mirror proves nothing about the month.
+/// `as_of` remains historical-import provenance only. `native_data_present` tells the caller that
+/// it may safely render recorded Operations facts even when no historical import has happened.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpsSummary {
     pub as_of: Option<OpsAsOf>,
+    pub native_data_present: bool,
     pub month: String,
     pub active_accounts: Option<i64>,
     pub ledger_accounts: Option<i64>,
@@ -49,9 +51,20 @@ pub async fn read_ops_summary(
     let not_connected = OpsNotConnected {
         state: "not_connected",
     };
-    if as_of.is_none() {
+    let native_data_present: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_ops_account \
+                         WHERE source_system='linggan_native' AND native_record_state='active') \
+             OR EXISTS (SELECT 1 FROM linggan_ops_publication \
+                         WHERE source_system='linggan_native' AND native_record_state='active') \
+             OR EXISTS (SELECT 1 FROM linggan_ops_daily_report \
+                         WHERE source_system='linggan_native' AND missing_since_batch_ref IS NULL)",
+    )
+    .fetch_one(database.pool())
+    .await?;
+    if as_of.is_none() && !native_data_present {
         return Ok(OpsSummary {
             as_of,
+            native_data_present,
             month,
             active_accounts: None,
             ledger_accounts: None,
@@ -67,7 +80,9 @@ pub async fn read_ops_summary(
     let accounts = sqlx::query(
         "SELECT count(*) FILTER (WHERE status IN ('active', 'warming')) AS active, count(*) AS total \
            FROM linggan_ops_account \
-          WHERE ledger_state = 'in_ledger' AND ($1::uuid IS NULL OR domain_ref = $1)",
+          WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
+             OR (source_system='linggan_native' AND native_record_state='active')) \
+            AND ($1::uuid IS NULL OR domain_ref = $1)",
     )
     .bind(business.domain_ref())
     .fetch_one(database.pool())
@@ -80,8 +95,9 @@ pub async fn read_ops_summary(
            LEFT JOIN linggan_ops_account a ON a.account_ref = p.account_ref \
            LEFT JOIN latest_views lv ON lv.publication_ref = p.publication_ref \
           WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
+            AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
             AND ($1::uuid IS NULL OR a.domain_ref = $1) \
-            AND to_char(p.published_business_date, 'YYYY-MM') = $3"
+            AND to_char(coalesce(p.published_business_date,p.native_published_on), 'YYYY-MM') = $3"
     )))
     .bind(business.domain_ref())
     .bind(XHS_HIT_VIEW_THRESHOLD)
@@ -99,6 +115,7 @@ pub async fn read_ops_summary(
     .await?;
     Ok(OpsSummary {
         as_of,
+        native_data_present,
         month,
         active_accounts: Some(accounts.try_get("active")?),
         ledger_accounts: Some(accounts.try_get("total")?),

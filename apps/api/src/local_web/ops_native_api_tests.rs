@@ -8,7 +8,7 @@ use linggan_intelligence::ops_ledger::{
     apply_ops_import, preview_ops_import,
     read::{
         OpsBusiness, OpsPublicationFilter, read_ops_accounts, read_ops_businesses, read_ops_daily,
-        read_ops_publications,
+        read_ops_publications, read_ops_summary,
     },
 };
 use serde_json::{Value, json};
@@ -18,6 +18,65 @@ use uuid::Uuid;
 
 #[path = "../../../../crates/intelligence/tests/support/ops_export_fixture.rs"]
 mod ops_export;
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn native_only_summary_is_available_without_forging_an_import_batch() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_nsum_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let owner = member(
+        database.pool(),
+        "native-summary@example.test",
+        "原生汇总",
+        "operator",
+    )
+    .await;
+    let domain = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES($1,'原生汇总领域')")
+        .bind(domain)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let app = app_with_database(database.clone());
+    let cookie = session(database.pool(), owner).await;
+    let (status, _) = post(
+        app,
+        "/api/local/ops/native/accounts",
+        Some(&cookie),
+        json!({
+            "requestId": Uuid::new_v4(),
+            "domainRef": domain,
+            "platform": "xhs",
+            "accountName": "仅原生账号",
+            "profileUrl": "https://example.test/xhs/native-summary",
+            "platformUserId": "0123456789abcdef01234567"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let summary = read_ops_summary(&database, OpsBusiness::All).await.unwrap();
+    assert_eq!(
+        summary.as_of, None,
+        "native writes never manufacture import provenance"
+    );
+    assert!(summary.native_data_present);
+    assert_eq!(
+        (summary.active_accounts, summary.ledger_accounts),
+        (Some(1), Some(1))
+    );
+    assert_eq!(
+        (summary.month_published, summary.month_hits),
+        (Some(0), Some(0))
+    );
+    assert_eq!(summary.month_followers_gained.value, None);
+}
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]

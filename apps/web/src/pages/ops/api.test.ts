@@ -40,6 +40,21 @@ it("does not allow missing data to manufacture a success receipt", () => {
     }).outcome,
   ).toBe("stale");
 });
+it("requires explicit native-data provenance on a summary", () => {
+  const summary = {
+    asOf: null,
+    nativeDataPresent: true,
+    month: "2026-10",
+    activeAccounts: 1,
+    ledgerAccounts: 1,
+    monthPublished: 0,
+    effectivePublication: { state: "not_connected" },
+    monthFollowersGained: { value: null, scope: "all_businesses" },
+    monthHits: 0,
+  };
+  expect(api.summary(summary).nativeDataPresent).toBe(true);
+  expect(() => api.summary(without(summary, "nativeDataPresent"))).toThrow();
+});
 it("rejects invalid state enums rather than inferring a platform or execution status", () => {
   expect(() =>
     api.daily({
@@ -114,6 +129,7 @@ it("requires explicit null for an absent current target", () => {
 it("requires nullable account fields without replacing missing values with unknown", () => {
   const account = {
     ref: "r",
+    source: "imported",
     platform: "xhs",
     name: "合成账号",
     profileUrl: null,

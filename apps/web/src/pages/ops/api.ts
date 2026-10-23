@@ -47,6 +47,7 @@ export function businesses(value: unknown) {
 export function summary(value: unknown) {
   return d.decode(value, (r) => ({
     ...base(r),
+    nativeDataPresent: b(r, "nativeDataPresent"),
     month: s(r, "month"),
     activeAccounts: nn(r, "activeAccounts"),
     ledgerAccounts: nn(r, "ledgerAccounts"),
