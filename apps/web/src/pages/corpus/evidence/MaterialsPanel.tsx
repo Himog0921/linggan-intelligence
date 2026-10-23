@@ -2,7 +2,7 @@ import { FactGrid, InlineState, Section, Tech } from './Primitives';
 import { MediaRail } from './MediaRail';
 import type { PanelContext } from './ReadingPanel';
 import { purposeLabel, receiptRows, stateMeta } from './evidencePresent';
-import { mediaObjects, positionText } from './mediaObjects';
+import { mediaObjects, mediaSlotLedger, positionText } from './mediaObjects';
 import styles from './Inspector.module.css';
 
 /**
@@ -13,7 +13,7 @@ export function MaterialsPanel({ context }: { context: PanelContext }) {
   const { item, inspector, channels, listItem, onOpenViewer } = context;
   const fragment = (listItem ?? item).fragment;
   const objects = mediaObjects(inspector, fragment);
-  const ledger = mediaObjects(inspector, fragment, true);
+  const ledger = mediaSlotLedger(inspector, fragment);
   const receipt = channels.mediaReceipt ?? inspector.mediaSlotsReceipt;
   return (
     <div>

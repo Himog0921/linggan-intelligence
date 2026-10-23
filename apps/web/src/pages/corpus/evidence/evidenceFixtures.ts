@@ -28,6 +28,13 @@ export interface SlotOptions {
   mime?: string;
   slotKey?: string;
   displayOrderState?: string;
+  /** 字节指纹；默认每个槽位各不相同。两个槽位给同一个值，就是同一份文件的两个槽位（封面＝正文第 1 张）。 */
+  sha256?: string;
+}
+
+/** 合成的字节指纹：每个序号一个、互不相同。 */
+export function contentSha(n: number): string {
+  return n.toString(16).padStart(64, 'e');
 }
 
 /** 媒体槽位（列表层 `media.images[]`／`coverCandidates[]`，详情层 `inspector.mediaSlots[]` 同形）。 */
@@ -43,7 +50,7 @@ export function slotJson(n: number, ref: string, options: SlotOptions = {}) {
       detectedMimeType: null,
       durationMs: null,
       intrinsicDimensions: { height: null, state: 'UNKNOWN', width: null },
-      sha256: SHA,
+      sha256: options.sha256 ?? contentSha(n),
     },
     bytesState: options.bytesState ?? 'ACQUIRED',
     components: null,

@@ -42,7 +42,7 @@ export function ReadingPanel({ context, domain }: { context: PanelContext; domai
         : <><SourceNote>正文通道尚未取得</SourceNote><StateLine state={laneSummary(item.lanes, 'detail')?.state} /></>}
     </Section>
     <OcrRecognition key={item.ref} workRef={item.ref} onOpenSource={(image, opener) => {
-      const index = objects.findIndex(object => object.slotKey !== null && (object.slotKey === image.slotKey || image.aliases.includes(object.slotKey)));
+      const index = objects.findIndex(object => object.slotKeys.some(key => key === image.slotKey || image.aliases.includes(key)));
       if (index >= 0) onOpenViewer(index, opener);
       else if (image.originalUrl) window.open(image.originalUrl, '_blank', 'noopener,noreferrer');
     }}>
