@@ -1450,6 +1450,40 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     )
     .await
     .unwrap();
+    let replay = linggan_evidence::replay_exact_ops_publication_projections(
+        &database,
+        accepted_request_ref,
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (replay.eligible_receipts, replay.replayed_receipts),
+        (2, 2),
+        "projection-only replay consumes the prior detail and media Receipts without another task"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_ops_publication_material_projection WHERE receipt_ref=$1"
+        )
+        .bind(receipt_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1,
+        "replay remains idempotent for the detail projection"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_ops_publication_media_projection WHERE receipt_ref=$1"
+        )
+        .bind(media_receipt_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap(),
+        1,
+        "replay remains idempotent for the media projection"
+    );
     let (status, receipt) = get(
         app,
         &format!("/api/local/ops/publication-syncs/{accepted_request_ref}"),

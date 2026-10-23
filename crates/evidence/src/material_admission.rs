@@ -687,6 +687,76 @@ pub(crate) async fn project_exact_ops_publication_after_receipt(
     Ok(())
 }
 
+/// Replay only the Operations projection of Receipts already accepted for one immutable sync
+/// command.  It never creates a task, lease, attempt, Package, Receipt, typed Material, or
+/// media download: it merely re-runs the same narrow Receipt-qualified projection inserts.
+///
+/// The caller owns authorization and durable command auditing. `apply=false` is a dry read of
+/// the eligible immutable evidence; `apply=true` keeps every replay in one transaction.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpsPublicationProjectionReplay {
+    pub sync_request_ref: Uuid,
+    pub eligible_receipts: usize,
+    pub replayed_receipts: usize,
+}
+
+pub async fn replay_exact_ops_publication_projections(
+    database: &Database,
+    sync_request_ref: Uuid,
+    apply: bool,
+) -> Result<OpsPublicationProjectionReplay, ProducerRuntimeError> {
+    let mut tx = database
+        .pool()
+        .begin()
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    let rows = sqlx::query(
+        "SELECT DISTINCT receipt.receipt_ref,package.package_ref,package.payload \
+           FROM linggan_ops_publication_sync_item item \
+           JOIN collection_work_order work ON work.work_order_ref=item.work_order_ref \
+           JOIN collection_work_order_lease lease ON lease.work_order_ref=work.work_order_ref \
+           JOIN collection_work_order_lease_task lease_task ON lease_task.lease_ref=lease.lease_ref \
+           JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
+           JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+          WHERE item.request_ref=$1 AND item.decision IN ('accepted','existing') \
+            AND receipt.material_admission='ACCEPTED' \
+            AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+            AND package.package_kind IN ('content_detail','media_slots') \
+          ORDER BY receipt.receipt_ref",
+    )
+    .bind(sync_request_ref)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let mut report = OpsPublicationProjectionReplay {
+        sync_request_ref,
+        eligible_receipts: rows.len(),
+        replayed_receipts: 0,
+    };
+    for row in rows {
+        let receipt_ref: Uuid = row.get("receipt_ref");
+        let package_ref: Uuid = row.get("package_ref");
+        let payload: Value = row.get("payload");
+        let package = parse_producer_capture_package(&payload.to_string())?;
+        if package.package_ref() != package_ref {
+            return Err(ProducerRuntimeError::MaterialIdentityConflict);
+        }
+        if apply {
+            project_exact_ops_publication_after_receipt(&mut tx, &package, receipt_ref).await?;
+            report.replayed_receipts += 1;
+        }
+    }
+    if apply {
+        tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
+    } else {
+        tx.rollback()
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+    }
+    Ok(report)
+}
+
 /// Bind only qualified exact-scope media observations to an Operations publication.
 ///
 /// A slot observation merely establishes that the page exposed a candidate.  Byte acquisition,

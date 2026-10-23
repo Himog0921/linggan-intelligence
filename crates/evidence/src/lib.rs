@@ -30,7 +30,8 @@ mod material_admission;
 mod material_hashtag;
 pub mod note_material_input;
 pub use material_admission::{
-    ReplyRequalification, TargetMaterialReprojection, reproject_accepted_target_materials,
+    OpsPublicationProjectionReplay, ReplyRequalification, TargetMaterialReprojection,
+    replay_exact_ops_publication_projections, reproject_accepted_target_materials,
     requalify_reply_contract_records,
 };
 mod material_asset_read;
