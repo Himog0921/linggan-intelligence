@@ -76,7 +76,6 @@ struct ActivePolicy {
     policy_ref: Uuid,
     domain_ref: Uuid,
     comment_budget: i32,
-    context_character_budget: i32,
 }
 
 /// Revalidates a user selection and freezes only its currently eligible source comments.
@@ -195,7 +194,7 @@ async fn read_active_policy(
     domain_ref: Uuid,
 ) -> Result<ActivePolicy, PrepareStudyRunError> {
     let row = sqlx::query(
-        "SELECT policy.policy_ref,policy.domain_ref,policy.comment_budget,policy.context_character_budget \
+        "SELECT policy.policy_ref,policy.domain_ref,policy.comment_budget \
          FROM linggan_comment_study_active_policy active \
          JOIN linggan_comment_study_policy policy USING(policy_ref) \
          WHERE active.domain_ref=$1 FOR SHARE OF active",
@@ -208,7 +207,6 @@ async fn read_active_policy(
         policy_ref: row.get("policy_ref"),
         domain_ref: row.get("domain_ref"),
         comment_budget: row.get("comment_budget"),
-        context_character_budget: row.get("context_character_budget"),
     })
 }
 
@@ -266,10 +264,7 @@ async fn insert_work_and_targets(
 ) -> Result<usize, sqlx::Error> {
     let mut needs_context_count = 0;
     for ((work_ref, observation_role), sources) in grouped {
-        let context_manifest = bounded_context_manifest(
-            &sources[0].context_manifest,
-            usize::try_from(policy.context_character_budget).expect("policy budget is positive"),
-        );
+        let context_manifest = full_context_manifest(&sources[0].context_manifest);
         let context_state = context_state(&context_manifest);
         insert_work(
             transaction,
@@ -441,84 +436,29 @@ fn context_state(manifest: &Value) -> &'static str {
     let has_sources = manifest["sources"]
         .as_array()
         .is_some_and(|sources| !sources.is_empty());
-    if manifest["truncated"].as_bool().unwrap_or(false) {
-        "partial"
-    } else if has_sources {
-        "ready"
-    } else {
-        "missing"
-    }
+    if has_sources { "ready" } else { "missing" }
 }
 
-/// Makes the configured context-character cap part of the frozen work contract.  Fragments are
-/// retained whole (never mid-quote) in a stable relevance order, while omitted material is
-/// explicitly recorded so a model cannot mistake partial context for a complete work record.
-pub fn context_cleaner_version() -> &'static str { crate::comment_cleaning::CLEANER_VERSION }
-
-pub fn bounded_context_manifest(manifest: &Value, budget: usize) -> Value {
-    let mut fragments: Vec<Value> = manifest["sources"].as_array().cloned().unwrap_or_default();
-    fragments.sort_by_key(sort_key);
-    let mut used = 0_usize;
-    let mut retained = Vec::new();
-    // A caller may apply a smaller budget to an already bounded source projection.
-    // Earlier omissions remain auditable; re-bounding must never declare that input complete.
-    let mut omitted = manifest["omitted"].as_array().cloned().unwrap_or_default();
-    for fragment in fragments {
-        let length = fragment["characterCount"]
-            .as_u64()
-            .map(|n| n as usize)
-            .unwrap_or_else(|| {
-                fragment["text"]
-                    .as_str()
-                    .map_or(0, |text| text.chars().count())
-            });
-        if fragment["text"].is_string() && used.saturating_add(length) <= budget {
-            used += length;
-            retained.push(fragment);
-        } else {
-            // What was cut has to be nameable. A bare count cannot tell a caller whether the
-            // budget dropped a stray caption or the whole second half of a work.
-            omitted.push(json!({
-                "kind":fragment["kind"],
-                "sourceRef":fragment["sourceRef"],
-                "slotOrdinal":fragment["slotOrdinal"],
-                "characterCount":length
-            }));
-        }
-    }
-    json!({
-        "contract":"comment-study.context.v1",
-        "workRef":manifest["workRef"],
-        "cleanerVersion":manifest["cleanerVersion"],
-        "dossierRevision":manifest["dossierRevision"],
-        "dossierContract":manifest["dossierContract"],
-        "characterBudget":budget,
-        "includedCharacterCount":used,
-        "orderBasis":ORDER_BASIS,
-        "omittedFragmentCount":omitted.len(),
-        "omitted":omitted,
-        "truncated":!omitted.is_empty(),
-        "sources":retained
-    })
+pub fn context_cleaner_version() -> &'static str {
+    crate::comment_cleaning::CLEANER_VERSION
 }
 
-/// Media fragments carry `slotOrdinal`, which is the work's own display order for its images and
-/// video. Nothing in `source_location` records a position *inside* a slot — it holds only a blob
-/// digest and a processor version — so two texts from one slot have no knowable reading order and
-/// are merely kept deterministic by their source reference. The basis travels with the manifest so
-/// a reader never mistakes that tiebreak for the order the work is actually read in.
-const ORDER_BASIS: &str = "native_title,body,slot_ordinal,stable_source_ref";
-
-fn sort_key(fragment: &Value) -> (u8, i64, String) {
-    let priority = match fragment["kind"].as_str().unwrap_or("") {
-        "native_title" => 0,
-        "body" => 1,
-        _ => 2,
-    };
-    // A slot whose ordinal the producer never established sorts after every known one rather than
-    // ahead of slot 1, which is where a missing value would otherwise land.
-    let slot_ordinal = fragment["slotOrdinal"].as_i64().unwrap_or(i64::MAX);
-    (priority, slot_ordinal, fragment["sourceRef"].to_string())
+/// Keep the dossier's canonical order and every selected block. Provider capacity
+/// is checked at dispatch; it must never change which source text is being studied.
+pub fn full_context_manifest(manifest: &Value) -> Value {
+    let sources = manifest["sources"].as_array().cloned().unwrap_or_default();
+    let count: usize = sources
+        .iter()
+        .map(|source| {
+            source["text"]
+                .as_str()
+                .map_or(0, |text| text.chars().count())
+        })
+        .sum();
+    json!({"contract":"comment-study.context.v2","workRef":manifest["workRef"],
+        "cleanerVersion":manifest["cleanerVersion"],"dossierRevision":manifest["dossierRevision"],
+        "dossierContract":manifest["dossierContract"],"includedCharacterCount":count,
+        "orderBasis":"dossier_canonical_block_order","sources":sources})
 }
 
 fn hash_text(value: &str) -> String {
@@ -553,102 +493,19 @@ async fn count_targets(database: &Database, run_ref: Uuid) -> Result<usize, sqlx
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
-    fn context_cap_keeps_whole_high_priority_fragments_and_marks_the_omission() {
-        let manifest = json!({
-            "contract":"comment-study.context.v1",
-            "workRef":"00000000-0000-4000-8000-000000000010",
-            "cleanerVersion":"test",
-            "sources":[
-                {"kind":"transcript","sourceRef":"t1","text":"123456"},
-                {"kind":"body","sourceRef":"b1","text":"1234"},
-                {"kind":"native_title","sourceRef":"n1","text":"12"}
-            ]
-        });
-        let bounded = bounded_context_manifest(&manifest, 6);
-        assert_eq!(bounded["includedCharacterCount"], 6);
-        assert_eq!(bounded["omittedFragmentCount"], 1);
-        assert_eq!(bounded["truncated"], true);
-        assert_eq!(bounded["sources"][0]["kind"], "native_title");
-        assert_eq!(bounded["sources"][1]["kind"], "body");
-        assert_eq!(context_state(&bounded), "partial");
-    }
-
-    #[test]
-    fn rebounding_preserves_prior_omission_metadata() {
-        let manifest = json!({"sources":[{"kind":"body","sourceRef":"body","text":null,"characterCount":21000},
-            {"kind":"native_title","sourceRef":"title","text":"ABC","characterCount":3}]});
-        let first = bounded_context_manifest(&manifest, 20000);
-        let second = bounded_context_manifest(&first, 2);
-        assert_eq!(second["omittedFragmentCount"], 2);
-        assert_eq!(second["truncated"], true);
-        assert_eq!(second["includedCharacterCount"], 0);
-    }
-
-    #[test]
-    fn media_fragments_follow_the_works_slot_order_not_their_reference_order() {
-        // The references sort in the exact reverse of the slot order, so ordering by reference —
-        // as the manifest used to — hands the model the work's images backwards. References that
-        // happened to sort the same way as the slots would let this assertion pass either way.
-        let manifest = json!({
-            "contract":"comment-study.context.v1",
-            "workRef":"00000000-0000-4000-8000-000000000010",
-            "cleanerVersion":"test",
-            "sources":[
-                {"kind":"ocr_text","sourceRef":"a-gamma","text":"三","slotOrdinal":3},
-                {"kind":"ocr_text","sourceRef":"z-alpha","text":"一","slotOrdinal":1},
-                {"kind":"ocr_text","sourceRef":"m-beta","text":"二","slotOrdinal":2}
-            ]
-        });
-        let bounded = bounded_context_manifest(&manifest, 100);
-        let order: Vec<&str> = bounded["sources"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|fragment| fragment["text"].as_str().unwrap())
-            .collect();
-        assert_eq!(order, vec!["一", "二", "三"]);
-        assert_eq!(bounded["orderBasis"], ORDER_BASIS);
-    }
-
-    #[test]
-    fn a_slot_without_a_known_ordinal_sorts_after_the_known_ones() {
-        let manifest = json!({
-            "contract":"comment-study.context.v1",
-            "workRef":"00000000-0000-4000-8000-000000000010",
-            "cleanerVersion":"test",
-            "sources":[
-                {"kind":"ocr_text","sourceRef":"a-unknown","text":"未知"},
-                {"kind":"ocr_text","sourceRef":"z-second","text":"二","slotOrdinal":2}
-            ]
-        });
-        let bounded = bounded_context_manifest(&manifest, 100);
-        let order: Vec<&str> = bounded["sources"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|fragment| fragment["text"].as_str().unwrap())
-            .collect();
-        assert_eq!(order, vec!["二", "未知"]);
-    }
-
-    #[test]
-    fn an_omitted_fragment_is_named_rather_than_only_counted() {
-        let manifest = json!({
-            "contract":"comment-study.context.v1",
-            "workRef":"00000000-0000-4000-8000-000000000010",
-            "cleanerVersion":"test",
-            "sources":[
-                {"kind":"native_title","sourceRef":"n1","text":"12"},
-                {"kind":"ocr_text","sourceRef":"late","text":"3456","slotOrdinal":9}
-            ]
-        });
-        let bounded = bounded_context_manifest(&manifest, 2);
-        assert_eq!(bounded["omittedFragmentCount"], 1);
-        assert_eq!(
-            bounded["omitted"],
-            json!([{"kind":"ocr_text","sourceRef":"late","slotOrdinal":9,"characterCount":4}])
-        );
+    fn context_retains_all_blocks_in_canonical_order_without_a_budget() {
+        let long = format!("{}不得据此归纳成普遍结论。", "完整材料🙂\n".repeat(12000));
+        let manifest = json!({"contract":"comment-study.context.v2","workRef":Uuid::from_u128(10),
+            "cleanerVersion":context_cleaner_version(),"sources":[
+            {"blockRef":"second","sourceRef":Uuid::from_u128(11),"text":long,"speaker":"other","structure":{"type":"quote"},"issues":[{"code":"speaker_unconfirmed"}]},
+            {"blockRef":"first","sourceRef":Uuid::from_u128(12),"text":"反例"}]});
+        let full = full_context_manifest(&manifest);
+        assert_eq!(full["sources"], manifest["sources"]);
+        assert_eq!(full["includedCharacterCount"], long.chars().count() + 2);
+        for key in ["characterBudget", "truncated", "omitted"] {
+            assert!(full.get(key).is_none());
+        }
+        assert_eq!(context_state(&full), "ready");
     }
 }

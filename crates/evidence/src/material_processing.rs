@@ -103,27 +103,15 @@ pub enum MediaProcessingClaimOutcome {
 }
 
 pub async fn ensure_media_processing_work(database: &Database) -> Result<u64, sqlx::Error> {
-    let ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_media_processing_work') IS NOT NULL")
-            .fetch_one(database.pool())
-            .await?;
-    if !ready {
-        return Ok(0);
-    }
-    let retirement_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
-            .fetch_one(database.pool())
-            .await?;
-    let retired_job_filter = if retirement_ready {
-        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
-    } else {
-        ""
-    };
+    let retired_job_filter = " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)";
     Ok(sqlx::query(AssertSqlSafe(format!(
         "INSERT INTO linggan_media_processing_work(work_ref,job_ref) \
          SELECT gen_random_uuid(),job.job_ref FROM linggan_media_processing_job job \
          LEFT JOIN linggan_media_processing_work work USING(job_ref) \
-         WHERE work.job_ref IS NULL{retired_job_filter} ON CONFLICT(job_ref) DO NOTHING"
+         WHERE work.job_ref IS NULL{retired_job_filter} \
+           AND NOT EXISTS(SELECT 1 FROM linggan_media_derivative result WHERE result.job_ref=job.job_ref) \
+           AND NOT EXISTS(SELECT 1 FROM linggan_media_processing_job_event event WHERE event.job_ref=job.job_ref AND event.state IN ('succeeded','invalidated')) \
+         ON CONFLICT(job_ref) DO NOTHING"
     )))
     .execute(database.pool())
     .await?
@@ -194,24 +182,10 @@ pub async fn claim_media_processing_work_for_version(
     enabled_processors: &[String],
     processor_version: Option<&str>,
 ) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
-    let ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('linggan_media_processing_work') IS NOT NULL \
-            AND to_regclass('linggan_media_processing_concurrency') IS NOT NULL",
-    )
-    .fetch_one(database.pool())
-    .await?;
-    if !ready || enabled_processors.is_empty() {
+    if enabled_processors.is_empty() {
         return Ok(MediaProcessingClaimOutcome::Idle);
     }
-    let retirement_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
-            .fetch_one(database.pool())
-            .await?;
-    let retired_job_filter = if retirement_ready {
-        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
-    } else {
-        ""
-    };
+    let retired_job_filter = " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)";
     let mut tx = database.pool().begin().await?;
     // **认领闸。** 先取锁，再数在途，最后才认领——三步必须在同一把锁下，否则这道闸拦不住任何东西。
     //
@@ -297,18 +271,28 @@ pub async fn claim_media_processing_work_for_version(
     // 当成一种**正常结局**，并且**只退它一条**（下一个 tick 再退下一条），而不是替整个队列下结论。
     let input = sqlx::query(
         "SELECT job.processor_version,job.blob_sha256,blob.mime_type,blob.storage_key, \
-                content.public_ref AS content_public_ref \
+                content.public_ref AS content_public_ref,current_media.materialization_ref, \
+                NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                    WHERE disposition.slot_key=job.slot_key OR disposition.blob_sha256=job.blob_sha256 \
+                       OR disposition.materialization_ref=current_media.materialization_ref) AS source_available \
          FROM linggan_media_processing_job job \
          JOIN linggan_media_blob blob ON blob.sha256=job.blob_sha256 \
          JOIN linggan_media_slot slot ON slot.slot_key=job.slot_key \
          JOIN linggan_material_content content \
            ON content.platform=slot.platform AND content.content_external_id=slot.content_external_id \
-         WHERE job.job_ref=$1",
+         JOIN LATERAL(SELECT o.observation_ref FROM linggan_material_media_origin o JOIN linggan_runtime_capture_package p USING(package_ref) JOIN linggan_runtime_record_disposition d ON d.package_ref=o.package_ref AND d.record_ordinal=o.record_ordinal WHERE o.slot_key=job.slot_key AND o.content_public_ref=content.public_ref AND p.accepted_at<=scope_001_now() AND o.created_at<=scope_001_now() AND d.disposition='accepted_for_media_identity' ORDER BY source_generation DESC LIMIT 1) current_origin ON true \
+         JOIN LATERAL(SELECT m.materialization_ref,m.blob_sha256 FROM linggan_media_materialization m JOIN linggan_media_download_attempt a USING(download_attempt_ref) JOIN linggan_media_blob b ON b.sha256=m.blob_sha256 WHERE a.media_observation_ref=current_origin.observation_ref AND b.mime_type LIKE split_part(blob.mime_type,'/',1)||'/%' AND m.verified_at<=scope_001_now() ORDER BY m.verified_at DESC,m.materialization_ref DESC LIMIT 1) current_media ON current_media.blob_sha256=job.blob_sha256 \
+         WHERE job.job_ref=$1 AND linggan_dossier_slot_active(content.public_ref,job.slot_key,scope_001_now())",
     )
     .bind(job_ref)
     .fetch_optional(&mut *tx)
     .await?;
-    let Some(input) = input else {
+    let unavailable_reason = match input.as_ref() {
+        None => Some(SOURCE_MATERIAL_MISSING),
+        Some(row) if !row.get::<bool, _>("source_available") => Some("source_media_unavailable"),
+        Some(_) => None,
+    };
+    if let Some(reason) = unavailable_reason {
         // 就地退休。状态是 `not_applicable` 而不是 `terminal`：`terminal` 被表约束钉死为
         // 「试满 3 次」（`CHECK (state<>'terminal' OR attempt_count=3)`），而这条作业**一次都没试过**，
         // 把 `attempt_count` 写成 3 是伪造尝试史。`not_applicable` 也要求 `completed_at`，
@@ -321,7 +305,7 @@ pub async fn claim_media_processing_work_for_version(
              completed_at=scope_001_now(),updated_at=scope_001_now() WHERE work_ref=$1",
         )
         .bind(work_ref)
-        .bind(SOURCE_MATERIAL_MISSING)
+        .bind(reason)
         .execute(&mut *tx)
         .await?;
         sqlx::query(
@@ -330,16 +314,17 @@ pub async fn claim_media_processing_work_for_version(
         )
         .bind(Uuid::new_v4())
         .bind(job_ref)
-        .bind(SOURCE_MATERIAL_MISSING)
+        .bind(reason)
         .execute(&mut *tx)
         .await?;
         tx.commit().await?;
         return Ok(MediaProcessingClaimOutcome::Retired {
             job_ref,
             processor_kind,
-            reason: SOURCE_MATERIAL_MISSING,
+            reason,
         });
-    };
+    }
+    let input = input.ok_or(sqlx::Error::RowNotFound)?;
     let lease_interval = if processor_kind == "asr" {
         "6 hours"
     } else {
@@ -348,13 +333,17 @@ pub async fn claim_media_processing_work_for_version(
     let row = sqlx::query(
         "UPDATE linggan_media_processing_work SET state='leased', \
            attempt_count=attempt_count+1,claim_generation=claim_generation+1, \
-           worker_instance_ref=$2,lease_expires_at=scope_001_now()+$3::interval, \
+           worker_instance_ref=$2,lease_expires_at=scope_001_now()+$3::interval,reading_source_version=$4, \
+           reading_base_ref=(SELECT u.current_reading_ref FROM linggan_material_unit u JOIN linggan_media_processing_job j ON j.slot_key=u.slot_key WHERE j.job_ref=$5 AND u.content_public_ref=$6 AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' WHEN 'video_frame_ocr' THEN 'video_frame' ELSE '' END), \
            updated_at=scope_001_now() WHERE work_ref=$1 \
          RETURNING claim_generation,lease_expires_at::text AS lease_expires_at",
     )
     .bind(work_ref)
     .bind(worker_instance_ref)
     .bind(lease_interval)
+    .bind(input.get::<Uuid,_>("materialization_ref").to_string())
+    .bind(job_ref)
+    .bind(input.get::<Uuid,_>("content_public_ref"))
     .fetch_one(&mut *tx)
     .await?;
     sqlx::query(
@@ -393,6 +382,7 @@ pub async fn complete_media_processing_text(
     text_content: &str,
     display_text: &str,
     language_tag: Option<&str>,
+    reading: crate::material_reading::producers::ReadingContent,
 ) -> Result<Uuid, ProducerRuntimeError> {
     if !derivative_matches_processor(&claim.processor_kind, derivative_kind)
         || !is_sha256(content_hash)
@@ -408,20 +398,7 @@ pub async fn complete_media_processing_text(
         .begin()
         .await
         .map_err(ProducerRuntimeError::Internal)?;
-    let live: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM linggan_media_processing_work \
-         WHERE work_ref=$1 AND job_ref=$2 AND state='leased' \
-           AND worker_instance_ref=$3 AND claim_generation=$4 \
-           AND lease_expires_at>scope_001_now())",
-    )
-    .bind(claim.work_ref)
-    .bind(claim.job_ref)
-    .bind(worker_instance_ref)
-    .bind(claim.claim_generation)
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    if !live {
+    if !claim_is_live(&mut tx, claim, worker_instance_ref).await? {
         return Err(ProducerRuntimeError::MaterialIdentityConflict);
     }
     let existing: Option<Uuid> = sqlx::query_scalar(
@@ -482,6 +459,14 @@ pub async fn complete_media_processing_text(
     )
     .bind(claim.work_ref)
     .execute(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    crate::material_reading::producers::publish_job_in(
+        &mut tx,
+        claim,
+        Some(derivative_ref),
+        reading,
+    )
     .await
     .map_err(ProducerRuntimeError::Internal)?;
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
@@ -572,6 +557,15 @@ pub async fn complete_media_processing_ocr(
     .execute(&mut *tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
+    let lines: Vec<_> = input.lines.iter().enumerate().map(|(index,line)| json!({
+        "ref":line_refs[index],"text":line.text,"confidence":line.confidence,
+        "bbox":[line.bbox_norm[0],line.bbox_norm[1],line.bbox_norm[2]-line.bbox_norm[0],line.bbox_norm[3]-line.bbox_norm[1]],
+        "kind":if input.layering.headline_ordinals.contains(&index){"heading"}else{"paragraph"},"speaker":"unconfirmed"
+    })).collect();
+    crate::material_reading::producers::publish_job_in(&mut tx, claim, Some(derivative_ref), crate::material_reading::producers::ReadingContent {
+        blocks:crate::research_dossier::content::ocr_blocks(&lines),issues:vec![],source_state:"present".into(),
+        source_location:json!({"layoutRef":layout_ref,"imageWidth":input.image_width,"imageHeight":input.image_height,"layerVersion":input.layering.layer_version})
+    }).await.map_err(ProducerRuntimeError::Internal)?;
     finish_processing_claim(&mut tx, claim, worker_instance_ref).await?;
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(derivative_ref)
@@ -589,7 +583,6 @@ fn valid_ocr_completion_input(claim: &MediaProcessingClaim, input: &OcrCompletio
         && input.layout_byte_size <= crate::material_storage_key::maximum_local_asset_bytes()
         && crate::material_storage_key::is_safe_storage_key(&input.raw_storage_key)
         && crate::material_storage_key::is_safe_storage_key(&input.layout_storage_key)
-        && input.lines.len() <= 5_000
         && matches!(
             input.layering.state.as_str(),
             "ACCEPTED" | "PARTIAL" | "NEEDS_REVIEW" | "FAILED"
@@ -604,7 +597,6 @@ fn valid_ocr_completion_input(claim: &MediaProcessingClaim, input: &OcrCompletio
 
 fn valid_ocr_line(line: &OcrLineInput) -> bool {
     !line.text.trim().is_empty()
-        && line.text.len() <= 10_000
         && (0.0..=1.0).contains(&line.confidence)
         && line
             .bbox_norm
@@ -661,14 +653,6 @@ fn valid_ocr_layering_input(input: &OcrLayeringInput, line_count: usize) -> bool
         && valid_exclusion
         && (input.state != "ACCEPTED" || non_empty_result)
         && (input.cover_headline.is_some() == !input.headline_ordinals.is_empty())
-        && input
-            .cover_headline
-            .as_ref()
-            .is_none_or(|value| value.len() <= 500)
-        && input
-            .image_substantive_text
-            .as_ref()
-            .is_none_or(|value| value.len() <= 20_000)
 }
 
 pub(crate) async fn claim_is_live(
@@ -900,6 +884,37 @@ pub async fn complete_media_processing_without_output(
     .execute(&mut *tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
+    if matches!(
+        claim.processor_kind.as_str(),
+        "image_ocr" | "asr" | "video_frame_ocr"
+    ) {
+        let no_audio = reason == "no_audio_stream_observed" && claim.processor_kind == "asr";
+        let blocks = if no_audio {
+            vec![]
+        } else {
+            vec![
+                json!({"kind":"gap","speaker":"unconfirmed","text":"〔识别未返回文字，尚未确认原始材料无文字〕","issues":[{"key":"recognition_empty","code":"recognition_empty","message":"需核对原始材料","resolution":"reading_edit"}]}),
+            ]
+        };
+        crate::material_reading::producers::publish_job_in(
+            &mut tx,
+            claim,
+            None,
+            crate::material_reading::producers::ReadingContent {
+                blocks,
+                issues: vec![],
+                source_state: if no_audio {
+                    "not_applicable"
+                } else {
+                    "present"
+                }
+                .into(),
+                source_location: json!({"recognitionOutcome":reason}),
+            },
+        )
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    }
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
@@ -1075,9 +1090,9 @@ pub fn processor_version_for_kind(processor_kind: &str) -> Option<&'static str> 
         // OCR 从 Tesseract 改为 PaddleOCR v4，同时保存逐行框与本地分层结果；旧 OCR 输出必须按
         // 新作业重跑，不能让同一唯一键悄悄复用。视频抽帧也必须同批切换，避免系统仍有一个隐蔽
         // 的 Tesseract OCR 入口。
-        "image_ocr" | "video_frame_ocr" => Some("local-v3"),
+        "image_ocr" | "video_frame_ocr" => Some("local-v4"),
         // 2026-09-17：whisper 换 medium 并加简体提示、修掉交给 whisper 子进程的 PATH（缺 ffmpeg）。
-        "asr" => Some("local-v2"),
+        "asr" => Some("local-v3"),
         // 行为没变的两类留在 `local-v1`：它们没有需要重做的存量，存量重排也不该碰它们。
         "thumbnail" | "audio_extract" => Some("local-v1"),
         _ => None,

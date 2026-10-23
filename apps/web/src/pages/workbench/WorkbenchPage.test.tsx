@@ -678,7 +678,7 @@ it('retains the second edited paragraph after adopting the first and returning t
 });
 
 it('creates an inner page in the placement dialog and flushes its stable identity before one body-and-page placement',async()=>{
- const initial=envelope();const excerpt=crypto.randomUUID();initial.revision.document.excerpts=[{id:excerpt,citation:{sourceKind:'note',sourceRef:domain,workRef:domain,field:'body',sourceVersion:'source1',start:0,end:4,textHash:'hash',location:null},selectedText:'可用原文',textHash:'hash'}];initial.revision.document.canvas=[{id:paragraph,excerptId:excerpt,expression:'自己的表达',expressionRevision:1,group:'opening',note:''}];
+ const initial=envelope();const excerpt=crypto.randomUUID();initial.revision.document.excerpts=[{id:excerpt,citation:{asOf:'2026-10-23T08:00:00Z',blockRef:'block',sourceKind:'note',sourceRef:domain,workRef:domain,field:'body',sourceVersion:'source1',start:0,end:4,textHash:'hash',location:null},selectedText:'可用原文',textHash:'hash'}];initial.revision.document.canvas=[{id:paragraph,excerptId:excerpt,expression:'自己的表达',expressionRevision:1,group:'opening',note:''}];
  vi.mocked(api.readWork).mockResolvedValue(initial);const order:string[]=[];let stored=initial.revision.document;const savedId=crypto.randomUUID();
  vi.mocked(api.save).mockImplementation(async(_id,request)=>{order.push('save');stored=request.document;return {requestId:request.requestId,workId:work,outcome:'accepted',replayed:false,revision:{id:savedId,number:2,savedAt:'now',document:stored}};});
  vi.mocked(api.place).mockImplementation(async(_id,request)=>{order.push('place');return {requestId:request.requestId,workId:work,outcome:'accepted',replayed:false,revision:{id:crypto.randomUUID(),number:3,savedAt:'now',document:stored}};});
@@ -785,19 +785,29 @@ describe('retained recovery copies preserve manuscript tags', () => {
     vi.mocked(api.history).mockResolvedValue([historical]);
     vi.mocked(api.restore).mockImplementation(async (_id, request) => ({ requestId: request.requestId, workId: work, outcome: 'accepted', replayed: false, revision: restored }));
     vi.mocked(api.save).mockImplementation(async (_id, request) => ({ requestId: request.requestId, workId: work, outcome: 'accepted', replayed: false, revision: { ...restored, id: crypto.randomUUID(), number: 3, document: request.document } }));
-    show();
+    const view = show();
     await screen.findByLabelText('确认发布标签');
-    if (unsaved) fireEvent.change(screen.getByLabelText('确认发布标签'), { target: { value: '未保存标签 共同标签 未保存标签' } });
-    fireEvent.click(screen.getByRole('button', { name: '历史' }));
-    fireEvent.click(await screen.findByRole('button', { name: '恢复为新版本' }));
-    await waitFor(() => expect(screen.getByLabelText('确认发布标签')).toHaveValue('历史标签'));
-    fireEvent.click(screen.getByRole('button', { name: '历史' }));
-    fireEvent.click(await screen.findByRole('button', { name: '恢复到编辑区' }));
-    const expected = unsaved ? ['未保存标签', '共同标签'] : ['本页标签'];
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
-    await waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(api.save).mock.calls[0]?.[1].document.tags).toEqual(expected);
-    expect(screen.getByLabelText('确认发布标签')).toHaveValue(expected.join(' '));
+    // Keep this recovery sequence before the 900ms autosave deadline, regardless of CPU load.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      if (unsaved) fireEvent.change(screen.getByLabelText('确认发布标签'), { target: { value: '未保存标签 共同标签 未保存标签' } });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '历史' })); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '恢复为新版本' })); });
+      expect(screen.getByLabelText('确认发布标签')).toHaveValue('历史标签');
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '历史' })); });
+      fireEvent.click(screen.getByRole('button', { name: '恢复到编辑区' }));
+      const expected = unsaved ? ['未保存标签', '共同标签'] : ['本页标签'];
+      expect(api.save).not.toHaveBeenCalled();
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '保存' })); });
+      expect(api.save).toHaveBeenCalledTimes(1);
+      expect(vi.mocked(api.save).mock.calls[0]?.[1].document.tags).toEqual(expected);
+      expect(screen.getByLabelText('确认发布标签')).toHaveValue(expected.join(' '));
+      await act(async () => { await vi.advanceTimersByTimeAsync(900); });
+      expect(api.save).toHaveBeenCalledTimes(1);
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
   });
 });
 

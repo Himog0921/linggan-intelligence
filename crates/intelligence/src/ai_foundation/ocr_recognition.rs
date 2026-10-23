@@ -17,6 +17,7 @@ use uuid::Uuid;
 pub struct StartRun {
     pub command_ref: Uuid,
     pub expected_scope_sha256: String,
+    pub slot_keys: Vec<String>,
 }
 #[derive(Clone)]
 struct Source {
@@ -36,51 +37,32 @@ async fn sources_in(
     conn: &mut sqlx::PgConnection,
     work: Uuid,
 ) -> Result<Vec<Source>, FoundationError> {
-    // A blob may be reachable through several slots.  Keep one frozen route for dispatch,
-    // while deriving its cover role from every surviving alias; `DISTINCT ON` alone would
-    // accidentally turn a cover into an interior image when the first alias is not a cover.
     let rows = sqlx::query(
         "WITH current_origin AS MATERIALIZED (
-            SELECT DISTINCT ON (o.slot_key) o.slot_key,o.purpose
-            FROM linggan_material_media_origin o
+            SELECT DISTINCT ON (o.slot_key) o.* FROM linggan_material_media_origin o
             JOIN linggan_runtime_capture_package p USING(package_ref)
-            WHERE o.content_public_ref=$1
+            JOIN linggan_runtime_record_disposition d ON d.package_ref=o.package_ref AND d.record_ordinal=o.record_ordinal
+            WHERE d.disposition='accepted_for_media_identity' AND o.content_public_ref=$1 AND linggan_dossier_slot_active($1,o.slot_key,scope_001_now()) AND p.accepted_at<=scope_001_now() AND o.created_at<=scope_001_now()
               AND o.purpose IN ('cover','body_image','live_photo')
             ORDER BY o.slot_key,o.source_generation DESC
-        ), historical_materialization AS MATERIALIZED (
-            SELECT historical.slot_key,m.*
-            FROM linggan_material_media_origin historical
-            JOIN linggan_media_observation ob USING(slot_key)
-            JOIN linggan_media_download_attempt a ON a.media_observation_ref=ob.observation_ref
-            JOIN linggan_media_materialization m USING(download_attempt_ref)
-            WHERE historical.slot_key IN (SELECT slot_key FROM current_origin)
-        ), latest_replica AS MATERIALIZED (
-            SELECT DISTINCT ON (m.slot_key) m.*
-            FROM historical_materialization m
-            ORDER BY m.slot_key,m.verified_at DESC,m.materialization_ref DESC
-        ), available_replica AS MATERIALIZED (
-            SELECT m.*
-            FROM latest_replica m
-            JOIN linggan_media_blob b ON b.sha256=m.blob_sha256
-            WHERE NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d
-              WHERE d.slot_key=m.slot_key OR d.blob_sha256=m.blob_sha256 OR d.materialization_ref=m.materialization_ref)
         ), candidates AS MATERIALIZED (
-            SELECT o.slot_key,o.purpose,m.materialization_ref,m.blob_sha256,s.ordinal,
+            SELECT o.slot_key,o.purpose,m.materialization_ref,m.blob_sha256,
+                   CASE WHEN o.display_order_state='KNOWN' THEN o.display_ordinal END ordinal,
                    m.local_asset_path,b.storage_key,b.mime_type,b.byte_size,m.verified_at
             FROM current_origin o
-            JOIN linggan_media_slot s USING(slot_key)
-            JOIN available_replica m USING(slot_key)
+            JOIN LATERAL(SELECT m.* FROM linggan_media_materialization m JOIN linggan_media_download_attempt a USING(download_attempt_ref) JOIN linggan_media_blob image_blob ON image_blob.sha256=m.blob_sha256
+                WHERE image_blob.mime_type LIKE 'image/%' AND a.media_observation_ref=o.observation_ref AND m.verified_at<=scope_001_now()
+                ORDER BY m.verified_at DESC,m.materialization_ref DESC LIMIT 1) m ON true
             JOIN linggan_media_blob b ON b.sha256=m.blob_sha256
             WHERE b.mime_type LIKE 'image/%'
-        ), aliases AS MATERIALIZED (
-            SELECT blob_sha256,array_agg(slot_key ORDER BY slot_key) AS aliases,
-                   bool_or(purpose='cover') AS cover
-            FROM candidates GROUP BY blob_sha256
-        ), frozen AS (
-            SELECT DISTINCT ON(c.blob_sha256) c.*,a.aliases,a.cover
-            FROM candidates c JOIN aliases a USING(blob_sha256)
-            ORDER BY c.blob_sha256,a.cover DESC,c.ordinal NULLS LAST,c.verified_at DESC,c.slot_key
-        ) SELECT * FROM frozen ORDER BY cover DESC,ordinal NULLS LAST,slot_key",
+              AND NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d
+                WHERE d.slot_key=o.slot_key OR d.blob_sha256=m.blob_sha256 OR d.materialization_ref=m.materialization_ref)
+        ) SELECT c.*,ARRAY[c.slot_key] || COALESCE((SELECT array_agg(cover.slot_key) FROM candidates cover
+                WHERE c.purpose<>'cover' AND c.ordinal=1 AND cover.purpose='cover' AND cover.blob_sha256=c.blob_sha256),'{}') aliases,
+            (c.purpose='cover' OR COALESCE(c.ordinal=1,false)) cover
+            FROM candidates c
+            WHERE c.purpose<>'cover' OR NOT EXISTS(SELECT 1 FROM candidates first_page WHERE first_page.purpose<>'cover' AND first_page.ordinal=1 AND first_page.blob_sha256=c.blob_sha256)
+            ORDER BY ordinal NULLS LAST,slot_key",
     )
     .bind(work)
     .fetch_all(conn)
@@ -94,7 +76,11 @@ async fn sources_in(
             aliases: r.get("aliases"),
             ordinal: r.get("ordinal"),
             cover: r.get("cover"),
-            original_url: r.get("local_asset_path"),
+            original_url: format!(
+                "/api/local/media/{}/{}",
+                r.get::<Uuid, _>("materialization_ref"),
+                r.get::<String, _>("blob_sha256")
+            ),
             storage_key: r.get("storage_key"),
             mime_type: r.get("mime_type"),
             byte_size: r.get("byte_size"),
@@ -121,7 +107,7 @@ async fn scope_in(
     let images:Vec<Value>=sources.iter().map(|s|json!({"blobSha256":s.blob_sha256,"materializationRef":s.materialization_ref,"slotKey":s.slot_key,"aliases":s.aliases,"ordinal":s.ordinal,"cover":s.cover})).collect();
     let sha=crate::research_text::content_hash(&json!({"workRef":work,"taskConfigRef":config,"connectionVersionRef":model.connection_version_ref,"modelId":model.model_id,"endpointUrl":model.base_url,"images":images}).to_string());
     Ok((
-        json!({"sha256":sha,"imageCount":sources.len(),"modelLabel":model.model_id,"endpointUrl":model.base_url}),
+        json!({"sha256":sha,"imageCount":sources.len(),"modelLabel":model.model_id,"endpointUrl":model.base_url,"images":sources.iter().map(|s|json!({"slotKey":s.slot_key,"ordinal":s.ordinal,"role":if s.cover{"cover"}else if s.ordinal.is_some(){"page"}else{"unknown"},"originalUrl":s.original_url})).collect::<Vec<_>>()}),
         sources,
     ))
 }
@@ -159,7 +145,7 @@ pub async fn start_run(
         db,
         request.command_ref,
         "ocr_recognition_start",
-        &json!({"workRef":work,"expectedScopeSha256":request.expected_scope_sha256}),
+        &json!({"workRef":work,"expectedScopeSha256":request.expected_scope_sha256,"slotKeys":request.slot_keys}),
     )
     .await?;
     if let Some(r) = c.replay()? {
@@ -170,6 +156,19 @@ pub async fn start_run(
     if scope["sha256"].as_str() != Some(request.expected_scope_sha256.as_str()) {
         return Err(FoundationError::Conflict);
     }
+    let selected: std::collections::BTreeSet<_> = request.slot_keys.iter().collect();
+    if selected.is_empty()
+        || selected.len() != request.slot_keys.len()
+        || selected
+            .iter()
+            .any(|key| !sources.iter().any(|s| s.slot_key.as_str() == key.as_str()))
+    {
+        return Err(FoundationError::Invalid);
+    }
+    let sources: Vec<_> = sources
+        .into_iter()
+        .filter(|s| selected.contains(&s.slot_key))
+        .collect();
     // Batch cancellation is authoritative. Persist the matching run before looking for
     // active work so a later explicit confirmation creates a new immutable generation.
     sqlx::query(
@@ -257,23 +256,13 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
             COALESCE((SELECT jsonb_agg(item_slot_key ORDER BY item_slot_key)
               FROM linggan_ocr_recognition_slot_alias a WHERE a.item_ref=i.item_ref),'[]') aliases,
             ctl.state AS control_state,ctl.failure_code AS control_failure_code,
-            adopted.cover_title,adopted.assessment->>'coverTitleStatus' AS cover_title_status,
-            COALESCE(adopted.assessment->'regions','[]'::jsonb) regions,
-            adopted.image_text AS machine_text,
-            COALESCE((SELECT max(review.revision) FROM linggan_media_ocr_review review
-              WHERE review.adoption_ref=adopted.adoption_ref),0) AS review_revision,
-            (SELECT jsonb_build_object('reviewRef',review.review_ref,'revision',review.revision,
-              'text',review.after_text,'actor',review.actor,'reason',review.reason,
-              'reviewedAt',review.created_at::text)
-             FROM linggan_media_ocr_review review WHERE review.adoption_ref=adopted.adoption_ref
-               AND review.field='adopted_body' AND review.decision='adopt'
-             ORDER BY review.revision DESC LIMIT 1) AS human_body
+            COALESCE(reading.blocks,'[]'::jsonb) blocks,COALESCE(reading.issues,'[]'::jsonb) issues
          FROM linggan_ocr_recognition_item i
          LEFT JOIN linggan_model_invocation inv ON inv.invocation_ref=i.invocation_ref
          LEFT JOIN linggan_ocr_recognition_run owning_run ON owning_run.run_ref=i.run_ref
          LEFT JOIN linggan_ai_batch_item bi ON bi.batch_ref=owning_run.batch_ref AND bi.item_key=i.item_ref::text
          LEFT JOIN linggan_ai_batch_item_control ctl ON ctl.item_ref=bi.item_ref
-         LEFT JOIN linggan_media_ocr_adoption adopted ON adopted.adoption_ref=i.adoption_ref
+         LEFT JOIN linggan_material_reading reading ON reading.reading_ref=i.candidate_reading_ref
          WHERE i.run_ref=$1 ORDER BY i.position",
     )
     .bind(run_ref)
@@ -300,33 +289,43 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
     } else {
         run.get::<Option<String>, _>("failure_code")
     };
+    let (ready_scope, unavailable) = if matches!(read_state.as_str(), "succeeded" | "stopped") {
+        let mut tx = db.pool().begin().await?;
+        let config: Uuid = sqlx::query_scalar("SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key='ocr_recognition'").fetch_one(&mut *tx).await?;
+        let result = ready_scope_in(&mut tx, work, config).await;
+        tx.commit().await?;
+        match result {
+            Ok(scope) => (Some(scope), None),
+            Err(error) => (None, Some(unavailable_reason(&error))),
+        }
+    } else {
+        (None, None)
+    };
+    for item in &items {
+        let blocks: Vec<Value> =
+            serde_json::from_value(item.get("blocks")).map_err(|_| FoundationError::Invalid)?;
+        linggan_evidence::research_dossier::content::validate_blocks(&blocks)
+            .map_err(|_| FoundationError::Invalid)?;
+        linggan_evidence::research_dossier::content::validate_issues(
+            &item.get::<Value, _>("issues"),
+        )
+        .map_err(|_| FoundationError::Invalid)?;
+    }
     let pending: usize = items
         .iter()
         .filter(|i| i.get::<bool, _>("visible"))
         .map(|i| {
-            i.get::<Value, _>("regions")
-                .as_array()
-                .map(|regions| {
-                    regions
-                        .iter()
-                        .filter(|region| {
-                            region["spans"].as_array().is_some_and(|spans| {
-                                spans.iter().any(|span| span["status"] == "pending")
-                            })
-                        })
-                        .count()
-                })
-                .unwrap_or(0)
+            let blocks: Value = i.get("blocks");
+            let issues: Value = i.get("issues");
+            issues.as_array().map_or(0, Vec::len)
+                + blocks
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .map(|b| b["issues"].as_array().map_or(0, Vec::len))
+                    .sum::<usize>()
         })
         .sum();
-    let cover = items.iter().find_map(|i| {
-        (i.get::<bool, _>("visible") && i.get::<String, _>("role") == "cover").then(|| {
-            (
-                i.get::<Option<String>, _>("cover_title"),
-                i.get::<Option<String>, _>("cover_title_status"),
-            )
-        })
-    });
     let image_json = items
         .iter()
         .map(|i| {
@@ -359,16 +358,14 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
                 "finishReason":if visible{json!(i.get::<Option<String>,_>("finish_reason"))}else{Value::Null},
                 "usage":if visible && has_invocation {json!({"inputTokens":i.get::<Option<i64>,_>("input_tokens"),"outputTokens":i.get::<Option<i64>,_>("output_tokens"),"measuredTokens":i.get::<Option<i64>,_>("measured_tokens")})}else{Value::Null},
                 "estimatedCostUsd":if visible { pico_usd(i.get::<Option<String>,_>("cost_pico_usd")) } else { Value::Null },
-                "regions":if visible{i.get::<Value,_>("regions")}else{json!([])},
-                "adoptionRef":if visible{json!(i.get::<Option<Uuid>,_>("adoption_ref"))}else{Value::Null},
-                "reviewRevision":if visible{json!(i.get::<i64,_>("review_revision"))}else{json!(0)},
-                "machineText":if visible{json!(i.get::<Option<String>,_>("machine_text"))}else{Value::Null},
-                "humanBody":if visible{json!(i.get::<Option<Value>,_>("human_body"))}else{Value::Null}
+                "blocks":if visible{i.get::<Value,_>("blocks")}else{json!([])},
+                "issues":if visible{i.get::<Value,_>("issues")}else{json!([])},
+                "candidateRevisionRef":if visible{json!(i.get::<Option<Uuid>,_>("candidate_reading_ref"))}else{Value::Null},"generatedBy":"cloud_vision"
             })
         })
         .collect::<Vec<_>>();
     Ok(
-        json!({"runRef":run_ref,"workRef":work,"state":read_state,"completedImages":run.get::<i32,_>("completed_images"),"totalImages":run.get::<i32,_>("total_images"),"currentStage":"按冻结顺序处理当前图组。","modelLabel":run.get::<Option<String>,_>("model_label"),"unavailableReason":Value::Null,"coverTitle":cover.as_ref().and_then(|(title,_)|title.clone()),"coverTitleStatus":cover.and_then(|(_,status)|status),"images":image_json,"pendingCount":pending,"failureCode":read_failure,"batchRef":run.get::<Option<Uuid>,_>("batch_ref"),"batchRevision":run.get::<Option<i64>,_>("revision"),"cancelRequested":run.get::<Option<bool>,_>("cancel_requested").unwrap_or(false),"scope":{"sha256":run.get::<String,_>("scope_sha256"),"imageCount":run.get::<i32,_>("total_images"),"modelLabel":run.get::<String,_>("model_label"),"endpointUrl":run.get::<String,_>("endpoint_url")}}),
+        json!({"runRef":run_ref,"workRef":work,"state":read_state,"completedImages":run.get::<i32,_>("completed_images"),"totalImages":run.get::<i32,_>("total_images"),"currentStage":"按冻结顺序处理当前图组。","modelLabel":run.get::<Option<String>,_>("model_label"),"unavailableReason":unavailable,"images":image_json,"pendingCount":pending,"failureCode":read_failure,"batchRef":run.get::<Option<Uuid>,_>("batch_ref"),"batchRevision":run.get::<Option<i64>,_>("revision"),"cancelRequested":run.get::<Option<bool>,_>("cancel_requested").unwrap_or(false),"scope":ready_scope}),
     )
 }
 fn pico_usd(value: Option<String>) -> Value {
@@ -410,5 +407,5 @@ fn unavailable_reason(error: &FoundationError) -> &'static str {
     }
 }
 fn empty(work: Uuid, state: &str, scope: Option<Value>, unavailable_reason: Option<&str>) -> Value {
-    json!({"runRef":Value::Null,"workRef":work,"state":state,"completedImages":0,"totalImages":0,"currentStage":if state=="ready"{"确认当前图组后可开始。"}else{"当前图片或模型配置不可用。"},"modelLabel":scope.as_ref().and_then(|s|s["modelLabel"].as_str()),"unavailableReason":unavailable_reason,"coverTitle":Value::Null,"coverTitleStatus":Value::Null,"images":[],"pendingCount":0,"failureCode":Value::Null,"batchRef":Value::Null,"batchRevision":Value::Null,"cancelRequested":false,"scope":scope})
+    json!({"runRef":Value::Null,"workRef":work,"state":state,"completedImages":0,"totalImages":0,"currentStage":if state=="ready"{"确认当前图组后可开始。"}else{"当前图片或模型配置不可用。"},"modelLabel":scope.as_ref().and_then(|s|s["modelLabel"].as_str()),"unavailableReason":unavailable_reason,"images":[],"pendingCount":0,"failureCode":Value::Null,"batchRef":Value::Null,"batchRevision":Value::Null,"cancelRequested":false,"scope":scope})
 }

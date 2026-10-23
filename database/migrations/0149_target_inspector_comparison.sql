@@ -6,7 +6,7 @@ INSERT INTO linggan_ai_control(scope_key,task_key) VALUES('task:work_comparison'
 WITH config AS (
  INSERT INTO linggan_ai_task_config(task_config_ref,task_key,execution_contract,material_columns,budget_mode,origin)
  VALUES(gen_random_uuid(),'work_comparison','work-content-comparison.v1',
-        '["title","cover_headline","body","tags","ocr","transcript"]','unconfigured','seed')
+        '["title","body","tags","ocr","transcript","frame_text"]','unconfigured','seed')
  RETURNING task_config_ref
 ) INSERT INTO linggan_ai_task_setting(task_key,current_config_ref)
  SELECT 'work_comparison',task_config_ref FROM config;

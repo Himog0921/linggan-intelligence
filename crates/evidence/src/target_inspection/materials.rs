@@ -7,7 +7,7 @@ use sqlx::{Postgres, Transaction};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SourceFragment {
     pub citation_id: String,
@@ -16,7 +16,15 @@ pub struct SourceFragment {
     pub field: String,
     pub start: usize,
     pub end: usize,
+    #[serde(skip_serializing, default)]
     pub text: String,
+    pub speaker: String,
+    pub structure: serde_json::Value,
+    pub issues: Vec<serde_json::Value>,
+    pub reading_ref: Option<Uuid>,
+    pub unit_ref: Option<Uuid>,
+    pub knowledge_cutoff: String,
+    pub source_location: serde_json::Value,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -111,7 +119,7 @@ async fn read_in(
     Ok(dossiers
         .into_iter()
         .map(|(work, dossier)| {
-            let mut limitations = coverage_limitations(&dossier.coverage, &dossier.media);
+            let mut limitations = coverage_limitations(&dossier.coverage, &dossier.materials);
             let partial = !limitations.is_empty();
             limitations.push("collected_material_only".into());
             (
@@ -128,13 +136,20 @@ async fn read_in(
                         .fragments
                         .into_iter()
                         .map(|f| SourceFragment {
-                            citation_id: f.fragment_id,
+                            citation_id: f.fragment_id.clone(),
                             source_ref: f.source_ref,
                             source_version: f.source_version,
                             field: f.field,
                             start: f.start,
                             end: f.end,
                             text: f.text,
+                            speaker: f.speaker,
+                            structure: f.structure,
+                            issues: f.issues,
+                            reading_ref: f.reading_ref,
+                            unit_ref: f.unit_ref,
+                            knowledge_cutoff: cutoff.into(),
+                            source_location: dossier.materials.iter().find(|unit| unit["blocks"].as_array().is_some_and(|blocks| blocks.iter().any(|block| block["ref"] == f.fragment_id))).map(|unit| serde_json::json!({"slotKey":unit["slotKey"],"page":unit["page"]})).unwrap_or(serde_json::Value::Null),
                         })
                         .collect(),
                 },
@@ -143,71 +158,68 @@ async fn read_in(
         .collect())
 }
 
-// The processing-job count is not the image inventory. A known source slot
-// without readable processing remains missing even when no job has been made.
-fn coverage_limitations(coverage: &serde_json::Value, media: &[serde_json::Value]) -> Vec<String> {
-    let mut reasons = Vec::new();
-    if coverage["body"] != "KNOWN" {
-        reasons.push("native_body_not_known".into());
+// Canonical V2 source states and reading blocks determine coverage; layouts are diagnostics.
+fn coverage_limitations(
+    coverage: &serde_json::Value,
+    materials: &[serde_json::Value],
+) -> Vec<String> {
+    let mut reasons = BTreeSet::new();
+    let inventory = &coverage["imageInventory"];
+    if inventory["expectedPages"].as_u64().is_none() {
+        reasons.insert("image_total_unknown".into());
     }
-    if coverage["uncertainImages"].as_u64().is_some_and(|n| n > 0) {
-        reasons.push("image_reading_uncertain".into());
+    if inventory["unknownOrder"] == true {
+        reasons.insert("image_order_unknown".into());
     }
-    if media.iter().any(|item| {
-        matches!(
-            item["processorKind"].as_str(),
-            Some("image_ocr" | "video_frame_ocr" | "asr")
-        ) && item["contextOnly"] != true
-            && item["state"] != "ACQUIRED"
-            && item["state"] != "KNOWN_EMPTY"
-    }) {
-        reasons.push("some_media_not_available".into());
+    if inventory["missingPages"]
+        .as_array()
+        .is_some_and(|pages| !pages.is_empty())
+    {
+        reasons.insert("some_media_not_readable".into());
     }
-    let Some(slots) = coverage["mediaSlots"].as_array() else {
-        reasons.push("media_coverage_unknown".into());
-        return reasons;
-    };
-    let incomplete = slots.iter().any(|slot| {
-        let Some(key) = slot["slotKey"].as_str() else {
-            return true;
-        };
-        let Some(purpose) = slot["purpose"].as_str() else {
-            return true;
-        };
-        media.iter().all(|item| {
-            if item["slotKey"] != key || item["contextOnly"] == true {
-                return true;
-            }
-            let processor = item["processorKind"].as_str();
-            let matching = match purpose {
-                "cover" | "body_image" => processor == Some("image_ocr"),
-                "video" => processor == Some("asr"),
-                _ => return true,
-            };
-            if !matching
-                || matches!(
-                    item["dispositionState"].as_str(),
-                    Some("OCR_RETIRED" | "WITHDRAWN_OR_RESTRICTED")
-                )
-            {
-                return true;
-            }
-            !(item["state"] == "KNOWN_EMPTY"
-                || (item["state"] == "ACQUIRED"
-                    && if purpose == "video" {
-                        item["researchText"]
-                            .as_str()
-                            .is_some_and(|s| !s.trim().is_empty())
+    for unit in materials {
+        let kind = unit["kind"].as_str().unwrap_or("");
+        let state = unit["sourceState"].as_str().unwrap_or("");
+        if !matches!(state, "known_empty" | "not_applicable") {
+            if state != "present" {
+                reasons.insert(
+                    if kind == "body" {
+                        "native_body_not_known"
                     } else {
-                        item["ocrLayering"]["state"] == "ACCEPTED"
-                            && item["ocrLayering"]["cleanCorpusEligible"] == true
-                    }))
-        })
-    });
-    if incomplete {
-        reasons.push("some_media_not_readable".into());
+                        "some_media_not_available"
+                    }
+                    .into(),
+                );
+            } else if kind != "tags" && !unit["currentRevisionRef"].is_string() {
+                reasons.insert(
+                    if kind == "body" {
+                        "native_body_not_processed"
+                    } else {
+                        "some_media_not_readable"
+                    }
+                    .into(),
+                );
+            }
+        }
+        if unit["issues"]
+            .as_array()
+            .is_some_and(|issues| !issues.is_empty())
+            || unit["blocks"].as_array().is_some_and(|blocks| {
+                blocks.iter().any(|block| {
+                    block["kind"] == "gap"
+                        || block["issues"]
+                            .as_array()
+                            .is_some_and(|issues| !issues.is_empty())
+                })
+            })
+        {
+            reasons.insert("material_reading_uncertain".into());
+        }
+        if kind == "video_frame" && state != "not_applicable" {
+            reasons.insert("video_sampling_incomplete".into());
+        }
     }
-    reasons
+    reasons.into_iter().collect()
 }
 
 pub async fn related_works(
@@ -246,6 +258,7 @@ pub async fn related_works(
     let truncated = ids.len() > 2000;
     let scanned_count = ids.len().min(2000);
     let candidates = read_work_resource_currents(&mut tx, &ids[..scanned_count], &cutoff).await?;
+    let candidate_materials = read_in(&mut tx, &ids[..scanned_count], &cutoff).await?;
     let current_text = read_in(&mut tx, &[work], &cutoff)
         .await?
         .remove(&work)
@@ -274,11 +287,15 @@ pub async fn related_works(
                 (Some(_), Some(_)) => return None,
                 _ => "unconfirmed",
             };
-            let candidate_terms = terms(&format!(
-                "{}\n{}",
-                candidate.title.as_deref().unwrap_or(""),
-                candidate.body_text.as_deref().unwrap_or("")
-            ));
+            let canonical = candidate_materials.get(&candidate.public_ref)?;
+            let candidate_terms = terms(
+                &canonical
+                    .fragments
+                    .iter()
+                    .map(|fragment| fragment.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            );
             let matched = tokens.intersection(&candidate_terms).count();
             if matched == 0 {
                 return None;
@@ -293,7 +310,7 @@ pub async fn related_works(
                     temporal_relation: temporal,
                     selection_basis: "lexical_unverified",
                     matched_terms: matched,
-                    material_available: candidate.detail_material_ref.is_some(),
+                    material_available: !canonical.fragments.is_empty(),
                 },
             ))
         })
@@ -312,7 +329,7 @@ pub async fn related_works(
         candidates,
         scanned_count,
         truncated,
-        retrieval_basis: "native_text_lexical_candidates",
+        retrieval_basis: "canonical_dossier_lexical_candidates",
         method_version: "target-related-lexical.v1",
     })
 }
@@ -336,38 +353,52 @@ fn terms(text: &str) -> BTreeSet<String> {
 mod tests {
     use super::coverage_limitations;
     use serde_json::json;
-
-    #[test]
-    fn known_unprocessed_images_and_unknown_inventory_are_partial() {
-        let coverage = json!({"body":"KNOWN","mediaCount":0,"mediaAvailable":0,
-            "uncertainImages":0,"mediaSlots":[{"slotKey":"image-1","purpose":"body_image"}]});
-        assert_eq!(
-            coverage_limitations(&coverage, &[]),
-            vec!["some_media_not_readable"]
-        );
-        assert_eq!(
-            coverage_limitations(&json!({"body":"KNOWN"}), &[]),
-            vec!["media_coverage_unknown"]
-        );
-        assert!(coverage_limitations(&json!({"body":"KNOWN","mediaSlots":[]}), &[]).is_empty());
+    fn coverage() -> serde_json::Value {
+        json!({"imageInventory":{"expectedPages":1,"missingPages":[],"unknownOrder":false}})
     }
-
     #[test]
-    fn every_known_image_requires_qualified_reading_or_known_empty() {
-        let coverage = json!({"body":"KNOWN","mediaSlots":[
-            {"slotKey":"cover","purpose":"cover"},{"slotKey":"page-2","purpose":"body_image"}]});
-        let cover = json!({"slotKey":"cover","processorKind":"image_ocr","state":"ACQUIRED",
-            "ocrLayering":{"state":"ACCEPTED","cleanCorpusEligible":true}});
-        let empty = json!({"slotKey":"page-2","processorKind":"image_ocr","state":"KNOWN_EMPTY"});
-        assert!(coverage_limitations(&coverage, &[cover.clone(), empty.clone()]).is_empty());
-        assert!(!coverage_limitations(&coverage, &[cover.clone()]).is_empty());
-        for state in ["QUEUED", "WITHDRAWN_OR_RESTRICTED", "RETIRED"] {
-            let mut unread = empty.clone();
-            unread["state"] = json!(state);
-            assert!(!coverage_limitations(&coverage, &[cover.clone(), unread]).is_empty());
+    fn v2_readings_and_known_empty_are_qualified_without_processing_job_counts() {
+        let body = json!({"kind":"body","sourceState":"present","currentRevisionRef":"reading","blocks":[],"issues":[]});
+        let empty = json!({"kind":"image","sourceState":"known_empty","currentRevisionRef":null,"blocks":[],"issues":[]});
+        assert!(coverage_limitations(&coverage(), &[body.clone(), empty.clone()]).is_empty());
+        let mut old = body;
+        old["currentRevisionRef"] = json!(null);
+        assert!(
+            coverage_limitations(&coverage(), &[old]).contains(&"native_body_not_processed".into())
+        );
+        let mut unread = empty.clone();
+        unread["sourceState"] = json!("present");
+        assert!(
+            coverage_limitations(&coverage(), &[unread])
+                .contains(&"some_media_not_readable".into())
+        );
+        let mut restricted = empty;
+        restricted["sourceState"] = json!("restricted");
+        assert!(
+            coverage_limitations(&coverage(), &[restricted])
+                .contains(&"some_media_not_available".into())
+        );
+    }
+    #[test]
+    fn v2_missing_pages_unknown_order_and_local_issues_remain_partial() {
+        let mut c = coverage();
+        c["imageInventory"]["expectedPages"] = json!(null);
+        c["imageInventory"]["unknownOrder"] = json!(true);
+        c["imageInventory"]["missingPages"] = json!([2]);
+        let reasons = coverage_limitations(
+            &c,
+            &[
+                json!({"kind":"video_frame","sourceState":"present","currentRevisionRef":"reading","blocks":[{"kind":"gap"}],"issues":[]}),
+            ],
+        );
+        for reason in [
+            "image_total_unknown",
+            "image_order_unknown",
+            "some_media_not_readable",
+            "material_reading_uncertain",
+            "video_sampling_incomplete",
+        ] {
+            assert!(reasons.contains(&reason.into()), "{reason}");
         }
-        let mut uncertain = cover.clone();
-        uncertain["ocrLayering"]["state"] = json!("PARTIAL");
-        assert!(!coverage_limitations(&coverage, &[uncertain, empty]).is_empty());
     }
 }

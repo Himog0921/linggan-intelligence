@@ -75,7 +75,7 @@ fn title(input: &ImageInput) -> CoverTitle {
 }
 
 #[test]
-fn title_uses_text_blocks_and_keeps_platform_title_separate() {
+fn title_quality_uses_the_complete_supported_text_blocks() {
     let mut i = input();
     add(&mut i, "text", "安静的家庭", [100., 180., 850., 270.]);
     add(
@@ -91,14 +91,6 @@ fn title_uses_text_blocks_and_keeps_platform_title_separate() {
         Some("安静的家庭\n如何一起度过周末？")
     );
     assert_eq!(result.cover_title.fragments.len(), 2);
-    assert_eq!(
-        display_title(Some("平台的原始标题"), &result).text,
-        Some("平台的原始标题")
-    );
-    assert_eq!(
-        display_title(None, &result).text,
-        result.cover_title.text.as_deref()
-    );
 }
 
 #[test]
@@ -575,45 +567,6 @@ fn required_termination_cannot_be_invented_from_whole_image_success() {
 }
 
 #[test]
-fn inner_pages_form_ordered_body_with_headings_repetitions_and_exact_image_links() {
-    let mut first = input();
-    first.image_role = ImageRole::Interior;
-    first.sequence_ordinal = Some(2);
-    add(
-        &mut first,
-        "paragraph_title",
-        "第一段内页标题",
-        [100., 200., 900., 300.],
-    );
-    add(
-        &mut first,
-        "text",
-        "这段正文保留具体表达",
-        [100., 400., 900., 430.],
-    );
-    let a = assess(&first).unwrap();
-    let mut second = first.clone();
-    second.image.image_ref = "synthetic:image:3".into();
-    second.layout.image = second.image.clone();
-    second.anchors.image = second.image.clone();
-    second.sequence_ordinal = Some(3);
-    let b = assess(&second).unwrap();
-    let body = project_work(&[b, a]).unwrap();
-    assert_eq!(body.image_text.matches("第一段内页标题").count(), 2);
-    assert_eq!(body.images[0].ordinal, Some(2));
-    assert!(body.cover_title.is_none());
-    for f in &body.fragments {
-        let text: String = body
-            .image_text
-            .chars()
-            .skip(f.start)
-            .take(f.end - f.start)
-            .collect();
-        assert_eq!(text, f.source.text);
-    }
-}
-
-#[test]
 fn colored_same_row_words_use_geometry_without_modifying_raw_ordinals() {
     let mut i = input();
     add(&mut i, "text", "怎样安静度过周末", [100., 200., 900., 300.]);
@@ -719,16 +672,14 @@ fn avatar_overlap_does_not_exclude_the_comment_below_the_name() {
             AdoptionState::AdoptedBlock
         );
     }
-    let work = project_work(&[a]).unwrap();
     assert_eq!(
-        work.image_text
-            .matches("这段材料可以逐字回到原图。")
+        a.regions
+            .iter()
+            .flat_map(|r| &r.usable_fragments)
+            .filter(|f| f.text == "这段材料可以逐字回到原图。")
             .count(),
         3
     );
-    assert!(!work.image_text.contains("合成昵称"));
-    assert!(!work.image_text.contains("显示原文"));
-    assert!(!work.image_text.contains("回复"));
 }
 
 #[test]
@@ -742,7 +693,6 @@ fn equations_are_not_promoted_to_a_cover_title_or_flattened_prose() {
     assert_eq!(a.cover_title.candidates[0].text, equation);
     assert_eq!(a.regions[0].adoption_state, AdoptionState::Pending);
     assert!(a.regions[0].usable_fragments.is_empty());
-    assert!(project_work(&[a]).unwrap().image_text.is_empty());
     i.rechecks
         .push(crop(&i, 0, RecheckKind::LineCrop, equation));
     assert!(assess(&i).unwrap().regions[0].usable_fragments.is_empty());

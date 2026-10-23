@@ -13,10 +13,6 @@ use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route(
-            "/api/collection/workspace/target/{target}/inspection/works/{work}/dossier",
-            get(dossier),
-        )
-        .route(
             "/api/collection/workspace/target/{target}/inspection/works/{work}/related",
             get(related),
         )
@@ -69,20 +65,6 @@ fn unavailable() -> Response {
         StatusCode::SERVICE_UNAVAILABLE,
         "target_inspection_unavailable",
     )
-}
-async fn dossier(
-    State(state): State<LocalWebState>,
-    Path((target, work)): Path<(Uuid, Uuid)>,
-    Query(params): Query<Params>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    let scope = match params.scope(target) {
-        Ok(v) => v,
-        Err(e) => return respond::<()>(Err(e)),
-    };
-    respond(inspection::read_dossier(db, &scope, work).await)
 }
 async fn related(
     State(state): State<LocalWebState>,

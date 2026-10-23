@@ -78,6 +78,7 @@ pub fn material_revisions(materials: &[DossierView]) -> Vec<String> {
         .map(|d| d.material_revision.clone())
         .collect()
 }
+// The immutable request binds the knowledge cutoff. Time alone is not a new material version.
 pub fn fingerprint(materials: &[DossierView]) -> String {
     content_hash(
         &json!(
@@ -96,7 +97,13 @@ pub fn fingerprint(materials: &[DossierView]) -> String {
                             f.source_ref,
                             f.source_version,
                             f.start,
-                            f.end
+                            f.end,
+                            f.speaker,
+                            f.structure,
+                            f.issues,
+                            f.reading_ref,
+                            f.unit_ref,
+                            f.source_location
                         ]))
                         .collect::<Vec<_>>()
                 ]))
@@ -320,7 +327,7 @@ pub async fn read(
         .await?;
     let row=sqlx::query("SELECT r.*,to_char(r.knowledge_cutoff AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS cutoff,c.state,c.wait_reason,c.failure_code,result.result FROM linggan_work_comparison_request r JOIN linggan_ai_batch_item item USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) LEFT JOIN linggan_work_comparison_result result USING(request_ref) WHERE r.request_ref=$1 AND r.target_ref=$2 AND r.domain_ref IS NOT DISTINCT FROM $3")
         .bind(request_ref).bind(scope.target_ref).bind(scope.domain_ref).fetch_optional(&mut *tx).await?.ok_or(FoundationError::NotFound)?;
-    let materials = frozen_in(&mut tx, request_ref).await?;
+    let mut materials = frozen_in(&mut tx, request_ref).await?;
     let result: Option<Value> = row.get("result");
     let result = result
         .map(serde_json::from_value::<Analysis>)
@@ -336,6 +343,24 @@ pub async fn read(
         .await
         .map_err(map_source_error)?;
     let outdated = fingerprint(&current) != row.get::<String, _>("input_fingerprint");
+    // Full frozen/current inputs have been validated above. Public evidence is an explicit
+    // selection of published claim blocks; full-note reading stays with canonical V2.
+    let selected: std::collections::BTreeSet<_> = result
+        .iter()
+        .flat_map(|analysis| &analysis.claims)
+        .flat_map(|claim| {
+            claim
+                .target_citations
+                .iter()
+                .chain(&claim.reference_citations)
+        })
+        .map(|citation| (citation.work_ref, citation.citation_id.clone()))
+        .collect();
+    for material in &mut materials {
+        material
+            .fragments
+            .retain(|source| selected.contains(&(material.work_ref, source.citation_id.clone())));
+    }
     let response = ComparisonRead {
         request_ref,
         batch_ref: row.get("batch_ref"),

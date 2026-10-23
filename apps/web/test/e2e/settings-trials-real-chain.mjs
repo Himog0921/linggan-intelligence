@@ -9,9 +9,9 @@ const fixture=JSON.parse(await readFile(path.join(directory,'fixture.json'),'utf
 const {origin}=fixture;
 const base=new URL(origin);
 assert.equal(base.hostname,'127.0.0.1');assert.equal(base.protocol,'http:');assert.notEqual(base.port,'3000');
-const phase=process.argv[2];assert.ok(['trial','changed-source'].includes(phase));
+const phase=process.argv[2];assert.ok(['trial','refreshed-source','restricted-source'].includes(phase));
 const report={phase,scope:'owned synthetic probe and two SDK trial calls only',steps:[],errors:[],blocked:[],screenshots:[]};
-const browser=await chromium.launch({headless:true});
+const browser=await chromium.launch({headless:true,...(process.env.DOSSIER_BROWSER_EXECUTABLE?{executablePath:process.env.DOSSIER_BROWSER_EXECUTABLE}:{})});
 const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
 await context.route('**/*',route=>{
  if(new URL(route.request().url()).origin!==origin){report.blocked.push(route.request().url());return route.abort();}
@@ -31,7 +31,7 @@ async function step(name,action){
  try{await action();const screenshot=`${phase}-${report.steps.length+1}.png`;await page.screenshot({path:path.join(directory,screenshot),fullPage:true});report.screenshots.push(screenshot);report.steps.push({name,result:'PASS'});console.log('AI trial UI PASS: '+name);}
  catch(error){report.steps.push({name,result:'FAIL',error:String(error.stack??error)});throw error;}
 }
-let candidate,comparison;
+let candidate,comparison,frozenComparison;
 try{
  if(phase==='trial'){
   let version;
@@ -71,6 +71,7 @@ try{
    await page.getByRole('button',{name:'刷新比较回执',exact:true}).click();
    await page.getByText('合成基线建议',{exact:true}).waitFor();await page.getByText('合成候选建议',{exact:true}).waitFor();
    assert.equal(receipt.baseline.skillVersionRef,fixture.firstVersionRef);assert.equal(receipt.candidate.skillVersionRef,version.versionRef);
+   frozenComparison=receipt;
   });
   await step('activation changes the current binding only, leaving three measured synthetic calls',async()=>{
    await page.getByLabel('启用理由',{exact:true}).fill('合成UI两版比较后启用');
@@ -79,20 +80,29 @@ try{
    const data=await root(),task=data.tasks.find(task=>task.taskKey==='writing_legacy');
    assert.equal(task.activeSkillVersionRef,version.versionRef);assert.equal(task.configuration.taskConfigRef,activated.taskConfigRef);
    assert.equal(data.execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),3);
-   await writeFile(path.join(directory,'trial-receipt.json'),JSON.stringify({candidateConfigRef:candidate.taskConfigRef,comparisonRef:comparison.comparisonRef}));
+   await writeFile(path.join(directory,'trial-receipt.json'),JSON.stringify({candidateConfigRef:candidate.taskConfigRef,comparisonRef:comparison.comparisonRef,inputRef:frozenComparison.inputRef,baselineOutput:frozenComparison.baseline.output,candidateOutput:frozenComparison.candidate.output}));
   });
  }else{
   const saved=JSON.parse(await readFile(path.join(directory,'trial-receipt.json'),'utf8'));
-  await step('a source replacement hides both historical trial outputs on a fresh read',async()=>{
+  const restricted=phase==='restricted-source';
+  await step(restricted?'a current source restriction hides both historical trial outputs without another call':'a new observation preserves the frozen input and both historical trial outputs',async()=>{
    await goto('skills');
    await page.getByLabel('候选配置',{exact:true}).selectOption(saved.candidateConfigRef);
    await page.getByLabel('查看试跑比较',{exact:true}).selectOption(saved.comparisonRef);
    const response=await page.request.get(`${origin}/api/local/ai-settings/trials/${saved.comparisonRef}?position=0`);assert.equal(response.status(),200);
-   const historical=await response.json();assert.equal(historical.qualifiesForActivation,true);assert.equal(historical.sourceQualification,'unavailable');
-   assert.equal(historical.baseline.output,null);assert.equal(historical.candidate.output,null);
-   await page.getByText('当前来源不可读取或已换版；历史产出已隐藏',{exact:false}).waitFor();
-   await page.getByText('尚无可展示产出，或来源资格已经变化。',{exact:true}).first().waitFor();
-   assert.equal(await page.getByText('合成基线建议',{exact:true}).count(),0);assert.equal(await page.getByText('合成候选建议',{exact:true}).count(),0);
+   const historical=await response.json();assert.equal(historical.qualifiesForActivation,true);
+   assert.deepEqual(historical.inputRef,saved.inputRef);
+   if(restricted){
+    assert.equal(historical.sourceQualification,'unavailable');
+    assert.equal(historical.baseline.output,null);assert.equal(historical.candidate.output,null);
+    await page.getByText('当前来源不可读取；历史产出已隐藏',{exact:false}).waitFor();
+    await page.getByText('尚无可展示产出，或来源资格已经变化。',{exact:true}).first().waitFor();
+    assert.equal(await page.getByText('合成基线建议',{exact:true}).count(),0);assert.equal(await page.getByText('合成候选建议',{exact:true}).count(),0);
+   }else{
+    assert.equal(historical.sourceQualification,'readable');
+    assert.deepEqual(historical.baseline.output,saved.baselineOutput);assert.deepEqual(historical.candidate.output,saved.candidateOutput);
+    await page.getByText('合成基线建议',{exact:true}).waitFor();await page.getByText('合成候选建议',{exact:true}).waitFor();
+   }
    const data=await root();assert.equal(data.execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),3);
   });
  }

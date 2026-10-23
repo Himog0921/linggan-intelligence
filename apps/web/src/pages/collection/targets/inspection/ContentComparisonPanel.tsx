@@ -3,6 +3,7 @@ import { comparisonIntent,setComparisonIntent,useComparisonIntent,type Compariso
 import { ApiError, requestJson, isRecord } from '../../../../shared/api';
 import { ActionButton } from '../../../../shared/ActionButton';
 import { DossierReadout } from './DossierReadout';
+import { DossierBlocks } from '../../../corpus/evidence/DossierBlocks';
 import { type DossierView,decodeDossier } from './dossierModel';
 import { inspectionUrl, array, flag, nullable, num, record, ref, str } from './inspectionApi';
 import { EvidenceLink, ReadFeedback } from './ResearchParts';
@@ -80,7 +81,7 @@ function Comparison(){
   const preview=useInspectionRead(previewPath,decodePreview);
   const readPath=requestRef
     ?inspectionUrl(context.scope,'content-comparison/requests/'+requestRef):null;
-  const read=useInspectionRead(readPath,decodeResult);
+  const read=useInspectionRead(readPath,decodeResult,true);
   const matched=read.data?.materials.map(material=>material.workRef).join(',')===works.join(',');
   const begin=async()=>{
     const previous=comparisonIntent(key);
@@ -154,7 +155,7 @@ function Comparison(){
             </article>)}
           {result.limitations.map((limitation,index)=><p key={index} className={styles.meta}>{limitation}</p>)}
         </>}
-        {read.data.materials.map(material=><DossierReadout key={material.workRef} work={material.workRef}/>)}
+        {read.data.materials.map(material=><DossierReadout key={material.workRef} work={material.workRef} cutoff={read.data!.knowledgeCutoff}/>)}
       </>}
       {read.data&&!matched&&<p className={styles.notice}>本次研究所属作品已发生变化；旧请求结果不用于当前选择。</p>}
     </>}
@@ -162,6 +163,6 @@ function Comparison(){
 }
 function CitationExcerpt({citation,materials}:{citation:Citation;materials:DossierView[]}){
   const source=materials.find(m=>m.workRef===citation.workRef)?.fragments.find(f=>f.citationId===citation.citationId);
-  if(!source)return null;
-  return <div className={styles.claimExcerpt}><blockquote>{source.text}</blockquote><EvidenceLink work={citation.workRef}>核对来源</EvidenceLink></div>;
+  if(!source)return <p className={styles.notice}>此来源引用当前不可解析，请重新核对材料资格。</p>;
+  return <div className={styles.claimExcerpt}><DossierBlocks blocks={[source.structure]} issues={source.issues}/><details><summary>来源版本与截点</summary><p className={styles.meta}>{source.sourceRef} · {source.sourceVersion} · {source.unitRef??'原生材料'} · {source.readingRef??'原生版本'} · {source.sourceLocation?.page!==null&&source.sourceLocation?.page!==undefined?`第 ${source.sourceLocation.page} 页 · `:''}{source.knowledgeCutoff}</p></details><EvidenceLink work={citation.workRef}>核对来源</EvidenceLink></div>;
 }

@@ -85,7 +85,7 @@ pub fn prompt(materials: &[DossierView]) -> (String, String) {
             json!({
                 "work":format!("W{}",i+1),"partial":d.partial,"coverageLimitations":d.limitations,
                 "fragments":d.fragments.iter().enumerate().map(|(n,f)|json!({
-                    "id":format!("W{}-S{}",i+1,n+1),"field":f.field,"text":f.text
+                    "id":format!("W{}-S{}",i+1,n+1),"field":f.field,"content":f.structure,"speaker":f.speaker,"issues":f.issues,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,"unitRef":f.unit_ref,"asOf":f.knowledge_cutoff,"sourceLocation":f.source_location
                 })).collect::<Vec<_>>()
             })
         })
@@ -191,7 +191,7 @@ mod tests {
                 knowledge_cutoff: "2026-10-23T00:00:00Z".into(),
                 material_revision: format!("revision-{i}"),
                 dossier_revision: format!("dossier-{i}"),
-                owner_contract: "research-dossier.v1".into(),
+                owner_contract: "research-dossier.v2".into(),
                 fragments: vec![SourceFragment {
                     citation_id: format!("citation-{i}"),
                     source_ref: Uuid::from_u128(i + 2),
@@ -200,6 +200,9 @@ mod tests {
                     start: 0,
                     end: 4,
                     text: "合成正文".into(),
+                    structure: json!({"ref":format!("citation-{i}"),"kind":"paragraph","text":"合成正文","speaker":"author"}),
+                    speaker: "author".into(),
+                    ..Default::default()
                 }],
                 partial,
                 limitations: vec![],
@@ -245,5 +248,35 @@ mod tests {
             assert!(result.partial);
             assert_eq!(result.relation, "undetermined");
         }
+    }
+    #[test]
+    fn v2_prompt_preserves_structure_roles_positions_and_full_text_once() {
+        let mut input = materials(false);
+        let source = &mut input[0].fragments[0];
+        source.structure = json!({"ref":source.citation_id,"kind":"table","speaker":"other","columns":["condition","action"],"rows":[["5mg","do not increase TABLE-ONCE"]],"bbox":[0.1,0.2,0.4,0.3],"time":{"startMs":100,"endMs":200}});
+        source.text = "5mg do not increase TABLE-ONCE".into();
+        source.speaker = "other".into();
+        source.reading_ref = Some(Uuid::from_u128(30));
+        source.unit_ref = Some(Uuid::from_u128(31));
+        source.knowledge_cutoff = "2026-10-23T00:00:00Z".into();
+        let (_, body) = prompt(&input);
+        let packet: Value = serde_json::from_str(&body).unwrap();
+        let block = &packet["documents"][0]["fragments"][0];
+        assert_eq!(body.matches("TABLE-ONCE").count(), 1);
+        assert!(block.get("text").is_none());
+        assert_eq!(block["content"]["time"], json!({"startMs":100,"endMs":200}));
+        assert_eq!(block["content"]["bbox"], json!([0.1, 0.2, 0.4, 0.3]));
+        assert_eq!(block["speaker"], "other");
+        assert_eq!(block["readingRef"], Uuid::from_u128(30).to_string());
+        let original = super::super::fingerprint(&input);
+        input[0].knowledge_cutoff = "2026-10-23T01:00:00Z".into();
+        input[0].fragments[0].knowledge_cutoff = input[0].knowledge_cutoff.clone();
+        assert_eq!(
+            super::super::fingerprint(&input),
+            original,
+            "unchanged material stays reusable across cutoffs; the immutable request binds its cutoff"
+        );
+        input[0].fragments[0].speaker = "author".into();
+        assert_ne!(super::super::fingerprint(&input), original);
     }
 }

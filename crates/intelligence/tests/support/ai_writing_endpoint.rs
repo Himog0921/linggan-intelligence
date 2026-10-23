@@ -41,7 +41,9 @@ impl Endpoint {
                             let waiting=if probe {None} else {gate.lock().unwrap().take()};
                             if let Some((seen,release))=waiting {seen.send(()).unwrap();release.await.unwrap();}
                             let output=if probe {json!({"lingganProbe":"ok"})} else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["documents"].is_array()) {
-                                json!({"relation":"mostly_repeated","claims":[{"kind":"shared_point","statement":"两侧合成材料均有步骤说明。","targetCitations":["W1-S1"],"referenceCitations":["W2-S1"]}],"limitations":["synthetic loopback fixture only"]})
+                                let packet:Value=serde_json::from_str(&prompt).unwrap();
+                                let citation=|index:usize| {let entries=packet["documents"][index]["fragments"].as_array().unwrap();entries.iter().find(|f|f["content"]["kind"]=="table").unwrap_or(&entries[0])["id"].clone()};
+                                json!({"relation":"mostly_repeated","claims":[{"kind":"shared_point","statement":"两侧合成材料均有步骤说明。","targetCitations":[citation(0)],"referenceCitations":[citation(1)]}],"limitations":["synthetic loopback fixture only"]})
                             } else if instruction=="invalid-output" {json!({"outcome":"no_signal"})} else {
                                 json!({"title":null,"paragraphs":[{"paragraphId":null,"text":if system.contains("candidate-v2") {"合成候选建议"} else if system.contains("baseline-v1") {"合成基线建议"} else {"合成写作建议"}}],"pages":[]})
                             };

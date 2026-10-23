@@ -31,7 +31,7 @@ export function LimitsFields({ limits, max, levels, singleAttempt = false }: { l
     <p><small>输入与输出之和必须在已声明的上下文容量内；保存时由服务端核对。</small></p>
   </div>;
 }
-const COLUMNS: Record<string, string> = { title: '标题', cover_headline: '封面文字', body: '正文', tags: '标签', ocr: '图片文字', transcript: '转录文字' };
+const COLUMNS: Record<string, string> = { title: '标题', body: '正文', tags: '标签', ocr: '图片文字', transcript: '音频转录', frame_text: '视频画面文字' };
 export function AiTaskForm({ data, task, action }: { data: AiSettings; task: Task; action: AiAction }) {
   const current = task.configuration;
   const [identity, setIdentity] = useState(current.model?.identityRef ?? '');
@@ -52,7 +52,7 @@ export function AiTaskForm({ data, task, action }: { data: AiSettings; task: Tas
   }
   return <form className={styles.form} onSubmit={event => void save(event)}>
     <h3>{isOcr ? 'OCR 模型' : task.label + '配置'}</h3><p>{TASK_STATE[task.lifecycle] ?? '接入状态未知'} · {budgetText(current.budget)}</p>
-    {isOcr ? <p>手动识别当前作品：首图选择封面标题，内页按源顺序保留正文。保存模型不发图、不启用开关；图片效果由有界业务实跑核对，无需数字探针前置。</p> : null}
+    {isOcr ? <p>手动选择需要识读的图片，按来源顺序保留完整内容和结构。生成的候选可逐张对照原图审阅；保存模型配置不会开始识读。</p> : null}
     {modelRequired ? <><Field label={isOcr ? '选择 OCR 模型' : '选择模型'} hint={isOcr ? '复用已有连接和能力；可更换统一运输层支持的模型。文本测试成功不代表图片效果已验证。' : undefined}><select value={identity} onChange={event => setIdentity(event.target.value)} required><option value="">请选择</option>{data.models.map(model => <option key={model.identityRef} value={model.identityRef} disabled={isOcr && (!model.capability || !model.selectionModelRef)}>{data.connections.find(c => c.connectionRef === model.connectionRef)?.name} · {model.modelId}{model.capability ? '' : '（能力待配置）'}</option>)}</select></Field>
       {selected?.capability ? <LimitsFields key={identity} singleAttempt={isOcr || task.taskKey === 'work_comparison'} limits={current.model?.identityRef === identity ? current.model.limits : null} max={{ ...selected.capability, maxAttempts: data.resources.maxAttempts }} levels={selected.capability.thinkingLevels} /> : <p>当前地址没有已声明能力，请先到模型区补齐。</p>}</> : <p>模型测试在模型区逐次选择连接与模型；此处仅配置测试任务的额度。</p>}
     {task.skillAllowed ? <Field label="固定做法版本" hint="选择新版本会保存候选，试跑并启用后才替换当前版本。"><select name="skillVersionRef" defaultValue={current.skillVersionRef ?? ''} required={task.requiresSkill}><option value="">暂不绑定</option>{data.skills.flatMap(skill => skill.versions.map(version => <option key={version.versionRef} value={version.versionRef}>{skill.name} · v{version.versionNo}{version.disableModelInvocation ? '（不供模型自动发现，可人工绑定）' : ''}</option>))}</select></Field> : null}

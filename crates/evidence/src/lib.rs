@@ -21,6 +21,7 @@ mod directory_boundary;
 mod dispatch;
 mod execution_input_eligibility;
 pub use runtime_readiness::{collection_governance_enabled, collection_upgrade_phase};
+pub mod dossier_input;
 mod execution_station;
 mod ingress;
 mod keyword_archive_detail;
@@ -28,7 +29,6 @@ mod local_discovery;
 mod local_producer;
 mod material_admission;
 mod material_hashtag;
-pub mod note_material_input;
 pub use material_admission::{
     ReplyRequalification, TargetMaterialReprojection, reproject_accepted_target_materials,
     requalify_reply_contract_records,
@@ -48,6 +48,7 @@ mod material_processing_validation;
 mod material_projection;
 mod material_projection_types;
 mod material_query_sql;
+pub mod material_reading;
 mod material_social_read;
 mod material_storage_key;
 mod media_acquisition;
@@ -185,7 +186,7 @@ pub use local_producer::{
 pub use material_asset_read::{
     LocalMaterialAsset, read_local_derivative, read_local_materialization,
 };
-pub use material_creation_comments::read_creation_comments_in;
+pub use material_creation_comments::{read_creation_comments_at_in, read_creation_comments_in};
 pub use material_disposition::{
     MaterialMediaDisposition, record_blob_disposition, record_derivative_disposition,
     record_materialization_disposition, record_slot_disposition,
@@ -201,8 +202,8 @@ pub use material_processing::{
     record_media_derivative_completion, requeue_outdated_processor_jobs,
 };
 pub use material_social_read::{
-    creation_comment_directory_in, read_authorized_research_comments, read_creation_comment_in,
-    read_dossier_comments,
+    creation_comment_directory_in, read_authorized_research_comments, read_creation_comment_at_in,
+    read_creation_comment_in, read_dossier_comments,
 };
 pub use media_acquisition::{
     MediaAcquisitionDecision, MediaAcquisitionError, MediaAcquisitionFailureOutcome,
@@ -287,8 +288,8 @@ pub use work_resource_read::{
 pub mod collection_repair;
 pub use work_resource_read::work_display_title_ctes;
 pub use work_resource_read::{
-    frozen_work_fragment_manifest_in_transaction, read_frozen_work_text_in_transaction,
-    read_frozen_work_texts_in_transaction,
+    FrozenWorkSource, frozen_work_fragment_manifest_in_transaction,
+    read_frozen_work_text_in_transaction, read_frozen_work_texts_in_transaction,
 };
 
 pub use collection_run_material_read::scope_items_in as scope_run_material_items;

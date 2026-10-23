@@ -24,7 +24,7 @@ pub(super) fn app(database: LocalDatabaseState) -> Router {
 pub(super) fn command() -> Value {
     json!({"requestRef":Uuid::new_v4(),"domainRef":ADHD_DOMAIN_REF,"policyRef":Uuid::new_v4(),
         "scope":{"kind":"works","workRefs":[Uuid::new_v4()]},"mode":"new_only",
-        "limits":{"commentBudget":100,"contextCharacterBudget":6000,"tokenLimit":100000},"reason":null})
+        "limits":{"commentBudget":100,"tokenLimit":100000},"reason":null})
 }
 
 pub(super) async fn send(application: Router, path: &str, value: Value) -> (StatusCode, Value) {
@@ -241,7 +241,7 @@ async fn retired_start_cannot_be_reenabled_by_domain_limits_or_scheduled_query()
         ("domainRef", json!(Uuid::nil()), "unsupported_domain"),
         (
             "limits",
-            json!({"commentBudget":0,"contextCharacterBudget":6000,"tokenLimit":100}),
+            json!({"commentBudget":0,"tokenLimit":100}),
             "invalid_limit",
         ),
     ] {

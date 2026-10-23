@@ -657,7 +657,7 @@ pub async fn recover_study_run(
         .await?;
     ensure_start_schema(&mut tx).await?;
     let source = sqlx::query(
-        "SELECT run.policy_ref,run.comment_budget,run.context_character_budget,run.token_limit \
+        "SELECT run.policy_ref,run.comment_budget,run.token_limit \
          FROM linggan_comment_study_run run JOIN linggan_comment_study_policy policy USING(policy_ref) \
          WHERE run.run_ref=$1 AND policy.domain_ref=$2 AND run.finished_at IS NOT NULL \
            AND run.selection_manifest->>'contract'='comment-study.run-selection.v2'",
@@ -716,7 +716,7 @@ pub async fn recover_study_run(
         mode: StudySelectionMode::ContinueReady,
         limits: StudyRunLimits {
             comment_budget: source.get("comment_budget"),
-            context_character_budget: source.get("context_character_budget"),
+
             token_limit: source.get("token_limit"),
         },
         reason: None,

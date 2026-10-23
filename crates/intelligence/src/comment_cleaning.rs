@@ -183,85 +183,6 @@ fn classify_cleaned(raw: &str, out: &mut CleanComment) {
         out.reasons.push("context_dependent".into());
     }
 }
-/// Outbound only. Conservative contact-token masking never changes the local source.
-pub fn outbound(mut value: CleanComment) -> CleanComment {
-    let mut cs: Vec<char> = value.text.chars().collect();
-    let mut url_start = 0;
-    while url_start < cs.len() {
-        let tail: String = cs[url_start..].iter().take(8).collect();
-        if tail.starts_with("https://") || tail.starts_with("http://") || tail.starts_with("www.") {
-            let mut end = url_start;
-            while end < cs.len() && !url_boundary(&cs, end) {
-                end += 1;
-            }
-            cs[url_start..end].fill('█');
-            value.reasons.push("url_masked".into());
-            url_start = end;
-        } else {
-            url_start += 1;
-        }
-    }
-    let mut start = 0;
-    while start < cs.len() {
-        if cs[start].is_ascii_alphanumeric() || matches!(cs[start], '@' | '+' | '_' | '-' | '.') {
-            let mut end = start + 1;
-            while end < cs.len()
-                && (cs[end].is_ascii_alphanumeric()
-                    || matches!(cs[end], '@' | '+' | '_' | '-' | '.'))
-            {
-                end += 1;
-            }
-            let token: String = cs[start..end].iter().collect();
-            let prefix: String = cs[..start].iter().rev().take(12).rev().collect();
-            if token.chars().filter(char::is_ascii_digit).count() >= 7
-                || (token.contains('@') && token.contains('.'))
-                || ["微信", "微信号", "加我", "vx", "VX", "电话", "联系"]
-                    .iter()
-                    .any(|s| prefix.contains(s))
-            {
-                cs[start..end].fill('█');
-                value.reasons.push("contact_masked".into());
-            }
-            start = end;
-        } else {
-            start += 1;
-        }
-    }
-    let mut i = 0;
-    while i < cs.len() {
-        if !cs[i].is_ascii_digit() {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        let mut digits = 0;
-        while i < cs.len()
-            && (cs[i].is_ascii_digit() || matches!(cs[i], ' ' | '-' | '+' | '(' | ')'))
-        {
-            if cs[i].is_ascii_digit() {
-                digits += 1;
-            }
-            i += 1;
-        }
-        if digits >= 7 {
-            cs[start..i].fill('█');
-            value.reasons.push("contact_masked".into());
-        }
-    }
-    value.text = cs.into_iter().collect();
-    value
-}
-
-fn url_boundary(characters: &[char], index: usize) -> bool {
-    let current = characters[index];
-    current.is_whitespace()
-        || "，。；！？、<>\"".contains(current)
-        || (matches!(current, ',' | ';' | '!')
-            && characters
-                .get(index + 1)
-                .is_some_and(|next| next.is_alphabetic() && !next.is_ascii()))
-}
-
 #[cfg(test)]
 fn clean_optional(raw: Option<&str>) -> CleanComment {
     raw.map(clean).unwrap_or_else(|| CleanComment {
@@ -286,20 +207,6 @@ mod tests {
         assert_eq!(clean("😭😭😭").state, "dropped");
         assert_eq!(clean("我也是！！").state, "context");
         assert_eq!(clean("没有效果，一催就吵").state, "direct");
-    }
-    #[test]
-    fn contact_masking_does_not_create_fake_evidence() {
-        let raw = "没有效果 联系微信 abc123，电话13812345678";
-        let c = outbound(clean(raw));
-        assert!(!c.text.contains("abc123"));
-        assert!(!c.text.contains("13812345678"));
-        assert!(c.resolve("██", raw).is_err());
-        assert!(c.resolve("没有效果", raw).is_ok());
-        assert!(
-            !outbound(clean("电话１３８ １２３４ ５６７８"))
-                .text
-                .contains("1234")
-        );
     }
 }
 

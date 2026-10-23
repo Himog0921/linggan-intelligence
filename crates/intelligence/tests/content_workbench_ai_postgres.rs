@@ -11,6 +11,9 @@ mod fixture;
 mod foundation_fixture;
 use foundation_fixture::run_request;
 
+#[path = "content_workbench_ai_postgres/dispatch.rs"]
+mod dispatch;
+
 struct OwnedFakeRoot(std::path::PathBuf);
 impl AsRef<std::path::Path> for OwnedFakeRoot {
     fn as_ref(&self) -> &std::path::Path {
@@ -37,14 +40,20 @@ r=json.load(sys.stdin)
 p=json.loads(r['prompt'])
 counter=Path({})
 with counter.open('a') as f: f.write('called\n')
-if 'DELAY' in p['authorInstruction']: time.sleep(0.3)
+if 'DELAY' in p['authorInstruction']:
+    release=counter.with_suffix('.release')
+    deadline=time.monotonic()+10
+    while not release.exists():
+        if time.monotonic()>deadline: raise TimeoutError('owned test did not release adapter')
+        time.sleep(0.01)
+    release.unlink()
 a=p['action']
 out={{'title':None,'paragraphs':[],'pages':[]}}
 if a=='draft': out['paragraphs']=[{{'paragraphId':None,'text':'合成起草😀'}}]
 if a=='rewrite_selection': out['paragraphs']=[{{'paragraphId':p['paragraphs'][0]['id'],'text':'合成改写😀'}}]
 if a=='page_copy': out['pages']=[{{'pageId':p['pages'][0]['pageId'],'heading':'合成图页','body':'合成图页正文'}}]
 if 'QUOTE' in p['authorInstruction']:
-    raw=p['materials'][0]['text']
+    raw=p['materials'][0]['content']['text']
     if a=='draft':
         out['title']='作者标题'+raw+'标题收束'
         out['paragraphs']=[{{'paragraphId':None,'text':'作者前言😀'+raw+'作者中段'+raw+'作者结语'}}]
@@ -101,248 +110,6 @@ fn call_count(path: &std::path::Path) -> usize {
         .lines()
         .count()
 }
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof with local fake transport"]
-async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
-    let db = fixture::db("creation_ai").await;
-    let config = foundation_fixture::configure_fake_prerequisites(&db).await;
-    let work = fixture::create(&db, fixture::doc()).await;
-    let (adapter, count, root) = adapter();
-    let ready = ai::readiness(&db).await.unwrap();
-    assert_eq!(ready["configured"], true);
-    assert!(ready["writingQualified"].is_null());
-    let r = request(&work, config, ai::WritingAction::Draft, "");
-    let exec = prepare(&db, &r).await;
-    assert_eq!(call_count(&count), 0);
-    ai::execute(&db, &exec).await.unwrap();
-    ai::execute(&db, &exec).await.unwrap();
-    let mut changed = exec.clone();
-    changed.budget_tokens += 1;
-    assert!(matches!(
-        ai::execute(&db, &changed).await,
-        Err(ai::AiError::Conflict)
-    ));
-    let second_preview = request(&work, config, ai::WritingAction::Draft, "different preview");
-    let mut cross_preview = prepare(&db, &second_preview).await;
-    cross_preview.request_id = exec.request_id;
-    assert!(matches!(
-        ai::execute(&db, &cross_preview).await,
-        Err(ai::AiError::Conflict)
-    ));
-    let mut work_collision = prepare(&db, &second_preview).await;
-    work_collision.request_id = work.request_id;
-    assert!(matches!(
-        ai::execute(&db, &work_collision).await,
-        Err(ai::AiError::Conflict)
-    ));
-    assert!(matches!(
-        save(
-            &db,
-            work.work_id,
-            &SaveRequest {
-                request_id: exec.request_id,
-                expected_revision: work.revision.id,
-                document: work.revision.document.clone()
-            }
-        )
-        .await,
-        Err(WorkbenchError::RequestConflict)
-    ));
-    let (a, b) = tokio::join!(
-        run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter),
-        run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-    );
-    a.unwrap();
-    b.unwrap();
-    assert_eq!(call_count(&count), 1);
-    let status = ai::status(&db, exec.request_id).await.unwrap();
-    assert_eq!(status["state"], "succeeded");
-    assert_eq!(status["usage"]["chargedTokens"], 20);
-    assert_eq!(status["suggestion"]["paragraphs"][0]["text"], "合成起草😀");
-    assert_eq!(ai::readiness(&db).await.unwrap()["writingQualified"], true);
-    let mut doc = work.revision.document.clone();
-    doc.paragraphs[0].text = "作者新编辑".into();
-    let newer = save(
-        &db,
-        work.work_id,
-        &SaveRequest {
-            request_id: Uuid::new_v4(),
-            expected_revision: work.revision.id,
-            document: doc,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        ai::status(&db, exec.request_id).await.unwrap()["staleBase"],
-        true
-    );
-    assert!(matches!(
-        ai::adopt(
-            &db,
-            exec.request_id,
-            &ai::AdoptRequest {
-                request_id: Uuid::new_v4(),
-                expected_revision: work.revision.id,
-                paragraph_indices: None,
-                page_indices: None,
-                adopt_title: false
-            }
-        )
-        .await,
-        Err(ai::AiError::Stale)
-    ));
-    let r = request(&newer, config, ai::WritingAction::RewriteSelection, "");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
-    let adoption = ai::AdoptRequest {
-        request_id: Uuid::new_v4(),
-        expected_revision: newer.revision.id,
-        paragraph_indices: Some(vec![0]),
-        page_indices: Some(vec![]),
-        adopt_title: false,
-    };
-    let adopted = ai::adopt(&db, exec.request_id, &adoption).await.unwrap();
-    let replay = ai::adopt(&db, exec.request_id, &adoption).await.unwrap();
-    assert_eq!(replay["replayed"], true);
-    assert_eq!(replay["revision"]["id"], adopted["revision"]["id"]);
-    assert_eq!(
-        adopted["revision"]["document"]["paragraphs"][0]["id"],
-        json!(newer.revision.document.paragraphs[0].id)
-    );
-    assert_eq!(
-        adopted["revision"]["document"]["paragraphs"][0]["text"],
-        "合成改写😀"
-    );
-    let current = read_work(&db, work.work_id).await.unwrap();
-    let latest = SaveReceipt {
-        request_id: Uuid::new_v4(),
-        work_id: work.work_id,
-        outcome: "accepted".into(),
-        replayed: false,
-        revision: current.revision,
-    };
-    let r = request(&latest, config, ai::WritingAction::Draft, "DELAY");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    let future = run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter);
-    let cancel = async {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        ai::cancel(&db, exec.request_id).await.unwrap();
-    };
-    let (result, _) = tokio::join!(future, cancel);
-    result.unwrap();
-    let status = ai::status(&db, exec.request_id).await.unwrap();
-    assert_eq!(status["state"], "cancelled");
-    assert!(status["suggestion"].is_null());
-    assert_eq!(status["usage"]["chargedTokens"], 20);
-    let r = request(&latest, config, ai::WritingAction::Draft, "INVALID");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
-    let status = ai::status(&db, exec.request_id).await.unwrap();
-    assert_eq!(status["state"], "failed");
-    assert_eq!(status["usage"]["chargedTokens"], 20);
-    assert_eq!(ai::readiness(&db).await.unwrap()["writingQualified"], false);
-    let r = request(&latest, config, ai::WritingAction::PageCopy, "BADPAGE");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
-    assert_eq!(
-        ai::status(&db, exec.request_id).await.unwrap()["state"],
-        "failed"
-    );
-    let r = request(&latest, config, ai::WritingAction::PageCopy, "");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
-    assert_eq!(
-        ai::status(&db, exec.request_id).await.unwrap()["state"],
-        "succeeded"
-    );
-    let r = request(&latest, config, ai::WritingAction::Draft, "DELAY");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    let future = run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter);
-    let disable = async {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        sqlx::query("UPDATE linggan_model_connection SET enabled=false")
-            .execute(db.pool())
-            .await
-            .unwrap();
-    };
-    let (result, _) = tokio::join!(future, disable);
-    result.unwrap();
-    let status = ai::status(&db, exec.request_id).await.unwrap();
-    assert_eq!(status["state"], "succeeded");
-    assert_eq!(status["usage"]["chargedTokens"], 20);
-    sqlx::query("UPDATE linggan_model_connection SET enabled=true")
-        .execute(db.pool())
-        .await
-        .unwrap();
-    let r = request(&latest, config, ai::WritingAction::Draft, "");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    ai::cancel(&db, exec.request_id).await.unwrap();
-    let before = call_count(&count);
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
-    assert_eq!(call_count(&count), before);
-    let cancelled = ai::status(&db, exec.request_id).await.unwrap();
-    assert!(cancelled["invocationRef"].is_null());
-    assert!(cancelled["usage"]["chargedTokens"].is_null());
-    assert_eq!(cancelled["usage"]["state"], "not_reserved");
-    // Not selecting a material checkbox cannot authorize sending a paragraph that still
-    // carries its exact source-use link after the source has changed.
-    let document = fixture::cited_doc(&db).await;
-    let canvas = document.canvas[0].id;
-    let paragraph = document.paragraphs[0].id;
-    let source_work = fixture::create(&db, document).await;
-    let placed = place(
-        &db,
-        source_work.work_id,
-        &PlaceRequest {
-            request_id: Uuid::new_v4(),
-            expected_revision: source_work.revision.id,
-            canvas_id: canvas,
-            targets: vec![UseTarget::Paragraph {
-                paragraph_id: paragraph,
-            }],
-        },
-    )
-    .await
-    .unwrap();
-    let r = request(&placed, config, ai::WritingAction::RewriteSelection, "");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    let before = call_count(&count);
-    fixture::dossier::fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成替代版本","bodyText":"新版原文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
-    assert_eq!(call_count(&count), before);
-    let status = ai::status(&db, exec.request_id).await.unwrap();
-    assert_eq!(status["state"], "failed");
-    assert!(status["invocationRef"].is_null());
-    assert!(status["usage"]["chargedTokens"].is_null());
-    assert_eq!(status["usage"]["state"], "not_reserved");
-    assert!(status["suggestion"].is_null());
-    let research_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation i WHERE i.operation='analyze' AND (NOT EXISTS(SELECT 1 FROM linggan_creation_ai_request r WHERE r.invocation_ref=i.invocation_ref) OR i.result->>'purpose' IS DISTINCT FROM 'content_workbench')").fetch_one(db.pool()).await.unwrap();
-    assert_eq!(research_count, 0);
-    std::fs::remove_dir_all(root).unwrap();
-}
-
 #[tokio::test]
 #[ignore = "isolated PostgreSQL source adoption proof with local fake transport"]
 async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_public_projection()

@@ -29,6 +29,7 @@ struct Prepared {
     blob: String,
     content: Uuid,
     slot_key: String,
+    materialization_ref: Uuid,
     role: String,
     ordinal: Option<i32>,
     width: u32,
@@ -214,6 +215,7 @@ async fn prepare(
         blob: r.get("blob_sha256"),
         content: r.get("content_public_ref"),
         slot_key: r.get("slot_key"),
+        materialization_ref: r.get("materialization_ref"),
         role,
         ordinal,
         width: w,
@@ -251,7 +253,7 @@ async fn settle(
     let (mut tx, cancelled) = receipt::lock_in(db, item, p.invocation, response).await?;
     let raw = response.and_then(|r| r.text.as_deref());
     // Preserve exactly what arrived, including a response that fails the versioned visual
-    // schema.  Such a receipt remains inspectable but never becomes adopted OCR.
+    // schema.  Such a receipt remains inspectable but never becomes a candidate reading.
     let raw_asset = raw.map(|body| write_raw(p.item, body)).transpose()?;
     let parsed = response.filter(|r| r.ok).and_then(|r| {
         visual::parse_visual(
@@ -263,6 +265,8 @@ async fn settle(
     let success = parsed.is_some() && !cancelled;
     let failure = if success {
         None
+    } else if cancelled {
+        Some("cancel_requested")
     } else if response.is_some_and(|r| r.ok) {
         Some("ocr_visual_schema_invalid")
     } else {
@@ -278,11 +282,15 @@ async fn settle(
         .bind(response.and_then(|r| r.diagnostic.as_ref()).and_then(|d| d.finish_reason.as_deref()))
         .execute(&mut *tx)
         .await?;
-    if let Some(v) = parsed {
+    if let Some(v) = parsed.filter(|_| !cancelled) {
         let (raw_storage_key, raw_size) = raw_asset.ok_or(ExecutorError::Invalid)?;
         // A run is an immutable producer generation.  Replaying this receipt selects the same
         // version, while starting another confirmed run cannot overwrite this derivative.
-        let processor_version = format!("cloud-manual-v1:{}", p.run);
+        let processor_version = format!(
+            "{}:{}",
+            linggan_evidence::cloud_ocr_adoption::PROCESSOR_VERSION,
+            p.run
+        );
         let job = Uuid::new_v4();
         sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr',$4,'full') ON CONFLICT(blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
             .bind(job).bind(&p.blob).bind(&p.slot_key).bind(&processor_version).execute(&mut *tx).await?;
@@ -314,7 +322,7 @@ async fn settle(
             sequence_ordinal: p.ordinal.map(|n| n as u32),
         };
         let visual_json = serde_json::to_value(&v).map_err(|_| ExecutorError::Invalid)?;
-        let assessment = linggan_evidence::cloud_ocr_adoption::persist_in(
+        let blocks = linggan_evidence::cloud_ocr_adoption::persist_in(
             &mut tx,
             &source,
             derivative,
@@ -323,15 +331,22 @@ async fn settle(
             &visual_json,
         )
         .await?;
-        // The adoption row is the sole projected result.  Retaining its exact reference avoids
-        // a later run of the same blob changing this run's title, regions, or disagreement spans.
-        let adoption: Uuid = serde_json::from_value(assessment["adoptionRef"].clone())
-            .map_err(|_| ExecutorError::Invalid)?;
-        sqlx::query("UPDATE linggan_ocr_recognition_item SET adoption_ref=$2 WHERE item_ref=$1")
-            .bind(p.item)
-            .bind(adoption)
-            .execute(&mut *tx)
-            .await?;
+        let reading = linggan_evidence::material_reading::producers::publish_cloud_in(
+            &mut tx,
+            p.content,
+            job,
+            p.materialization_ref,
+            derivative,
+            blocks,
+        )
+        .await?;
+        sqlx::query(
+            "UPDATE linggan_ocr_recognition_item SET candidate_reading_ref=$2 WHERE item_ref=$1",
+        )
+        .bind(p.item)
+        .bind(reading.reading_ref)
+        .execute(&mut *tx)
+        .await?;
     }
     let mut result = response
         .map(safe_result)

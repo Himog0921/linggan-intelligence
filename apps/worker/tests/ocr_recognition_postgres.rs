@@ -4,11 +4,12 @@
 mod endpoint;
 #[path = "../../../crates/intelligence/tests/support/content_workbench_fixture.rs"]
 mod fixture;
+#[path = "ocr_recognition_postgres/human_review.rs"]
+mod human_review;
 #[path = "ocr_vl_postgres.rs"]
 mod ocr;
 #[path = "../../../crates/intelligence/tests/support/ai_writing_fixture.rs"]
 mod setup;
-use linggan_evidence::research_dossier;
 use linggan_intelligence::{
     ai_foundation::{
         TaskKey,
@@ -16,7 +17,6 @@ use linggan_intelligence::{
         control::BudgetPolicy,
         control_store::ControlScope,
         executor::{ExecutorSession, ocr_recognition, queue},
-        ocr_manual_adoption::{Adopt, adopt},
         ocr_recognition::{StartRun, read_run, start_run},
         provider_store::MaterialClass,
         task_config::{ModelSelection, SaveTaskConfig, save_task_config},
@@ -24,7 +24,6 @@ use linggan_intelligence::{
     model_secrets::SyntheticModelSecrets,
     pi_adapter::PiAdapter,
 };
-use sqlx::Row;
 use std::path::PathBuf;
 use uuid::Uuid;
 fn adapter() -> PiAdapter {
@@ -32,6 +31,14 @@ fn adapter() -> PiAdapter {
         PathBuf::from(std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap()),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../pi-adapter/src/adapter.mjs"),
     )
+}
+fn selected_slots(ready: &serde_json::Value) -> Vec<String> {
+    ready["scope"]["images"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|image| image["slotKey"].as_str().unwrap().to_owned())
+        .collect()
 }
 fn image(seed: u8) -> Vec<u8> {
     let mut out = Vec::new();
@@ -86,44 +93,10 @@ async fn configure_recognition(
     .await;
     model
 }
-async fn apply_manual_ocr_migrations(db: &linggan_storage_postgres::Database) {
-    for migration in [
-        include_str!("../../../database/migrations/0142_ocr_adoption.sql"),
-        include_str!("../../../database/migrations/0143_ocr_quality_audit.sql"),
-        include_str!("../../../database/migrations/0144_ocr_manual_recognition.sql"),
-        include_str!("../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
-    ] {
-        sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
-    }
-}
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
 async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() {
     let db = fixture::db("ocr_recognition_owned").await;
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0142_ocr_adoption.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0143_ocr_quality_audit.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0144_ocr_manual_recognition.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0145_ocr_manual_human_adoption.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
     let work_key = "ocr-recognition-three-synthetic";
     let work = ocr::admit(&db, work_key, 1, &image(1), "image/png").await;
     ocr::admit(&db, work_key, 2, &image(2), "image/png").await;
@@ -183,7 +156,24 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     let ready = read_run(&db, work).await.unwrap();
     assert_eq!(ready["state"], "ready");
     let scope = ready["scope"]["sha256"].as_str().unwrap().to_owned();
+    assert!(
+        matches!(
+            start_run(
+                &db,
+                work,
+                &StartRun {
+                    command_ref: Uuid::new_v4(),
+                    expected_scope_sha256: scope.clone(),
+                    slot_keys: vec![],
+                }
+            )
+            .await,
+            Err(linggan_intelligence::ai_foundation::store::FoundationError::Invalid)
+        ),
+        "an empty selection cannot silently widen to all images"
+    );
     let request = StartRun {
+        slot_keys: selected_slots(&ready),
         command_ref: Uuid::new_v4(),
         expected_scope_sha256: scope,
     };
@@ -228,84 +218,50 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     assert_eq!(run["completedImages"], 3);
     assert_eq!(run["totalImages"], 3);
     assert_eq!(run["images"].as_array().unwrap().len(), 3);
-    assert_eq!(run["coverTitle"], "合成封面标题");
-    assert_eq!(run["coverTitleStatus"], "adopted");
+    assert!(run.get("coverTitle").is_none());
     let images = run["images"].as_array().unwrap();
-    let adoption: Uuid = serde_json::from_value(images[1]["adoptionRef"].clone()).unwrap();
-    let raw_before: serde_json::Value = sqlx::query_scalar(
-        "SELECT observation FROM linggan_media_ocr_adoption WHERE adoption_ref=$1",
-    )
-    .bind(adoption)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    let manual = Adopt {
-        command_ref: Uuid::new_v4(),
-        adoption_ref: adoption,
-        expected_revision: 0,
-        decision: "adopt".into(),
-        field: "adopted_body".into(),
-        text: Some("内页章节标题".into()),
-        actor: "SYNTHETIC-HUMAN-NOT-MOG".into(),
-        reason: "合成原图逐字核对".into(),
-    };
-    let manual_receipt = adopt(&db, work, &manual).await.unwrap();
-    assert_eq!(manual_receipt["auditSampleRef"], serde_json::Value::Null);
-    assert_eq!(adopt(&db, work, &manual).await.unwrap(), manual_receipt);
-    assert!(matches!(
-        adopt(
-            &db,
-            work,
-            &Adopt {
-                expected_revision: 0,
-                command_ref: Uuid::new_v4(),
-                ..manual.clone()
-            }
-        )
-        .await,
-        Err(linggan_intelligence::ai_foundation::store::FoundationError::Conflict)
-    ));
-    let review: (Option<Uuid>, Option<Uuid>, String, String) = sqlx::query_as(
-        "SELECT sample_ref,issue_ref,source_kind,after_text FROM linggan_media_ocr_review WHERE review_ref=$1",
-    )
-    .bind(manual.command_ref)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    assert_eq!(review.0, None);
-    assert_eq!(review.1, None);
-    assert_eq!(review.2, "ocr_block");
-    assert_eq!(review.3, "内页章节标题");
-    let updated = read_run(&db, work).await.unwrap();
-    assert_eq!(updated["images"][1]["reviewRevision"], 1);
-    assert_eq!(updated["images"][1]["humanBody"]["text"], "内页章节标题");
-    let raw_after: serde_json::Value = sqlx::query_scalar(
-        "SELECT observation FROM linggan_media_ocr_adoption WHERE adoption_ref=$1",
-    )
-    .bind(adoption)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    assert!(
+        images[1]["ordinal"].is_null(),
+        "a partial observation does not invent a page number"
+    );
+    assert!(
+        images[1]["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["text"] == "42")
+    );
+    assert!(
+        images[1]["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|b| b["issues"].as_array().is_some_and(|i| !i.is_empty()))
+    );
     assert_eq!(
-        raw_after, raw_before,
-        "human adoption never mutates the machine observation"
-    );
-    assert!(
-        images[1]["regions"]
-            .as_array()
+        linggan_evidence::material_reading::read_candidates(&db, work)
+            .await
             .unwrap()
-            .iter()
-            .any(|region| region["role"] == "chapter_heading" && region["text"] == "内页章节标题"),
-        "an interior heading remains an image region and is never promoted to coverTitle"
+            .len(),
+        3
     );
-    assert!(
-        images[1]["regions"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .flat_map(|region| region["spans"].as_array().unwrap())
-            .any(|span| span["status"] == "pending"),
-        "partial image text is a pending Unicode range rather than fabricated certainty"
+    let current_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_material_unit WHERE content_public_ref=$1 AND kind='image' AND current_reading_ref IS NOT NULL").bind(work).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        current_count, 0,
+        "cloud reread is an explicit candidate only"
+    );
+    linggan_evidence::ensure_media_processing_work(&db)
+        .await
+        .unwrap();
+    let rescheduled:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_media_processing_work work JOIN linggan_media_processing_job job USING(job_ref) WHERE job.processor_version LIKE 'cloud-manual-v2:%'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        rescheduled, 0,
+        "completed manual vision jobs never become automatic local OCR jobs"
+    );
+    assert_eq!(
+        run["scope"]["images"].as_array().unwrap().len(),
+        3,
+        "terminal results expose a fresh scope for an explicit new run"
     );
     assert!(
         run["images"]
@@ -434,9 +390,23 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
                 .unwrap();
             }
         });
+        let proof = "local_web::ocr_recognition_browser_tests::owned_manual_ocr_real_ui";
+        let listed = tokio::process::Command::new(&binary)
+            .args([proof, "--ignored", "--exact", "--list"])
+            .output()
+            .await
+            .expect("list owned manual OCR browser proof");
+        assert!(
+            listed.status.success()
+                && String::from_utf8_lossy(&listed.stdout)
+                    .lines()
+                    .any(|line| line == format!("{proof}: test")),
+            "the API binary must contain the exact owned manual OCR browser proof"
+        );
         let mut browser = tokio::process::Command::new(binary)
-            .arg("local_web::ocr_recognition_browser_tests::owned_manual_ocr_real_ui")
+            .arg(proof)
             .arg("--ignored")
+            .arg("--exact")
             .arg("--nocapture")
             .kill_on_drop(true)
             .spawn()
@@ -505,307 +475,14 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     assert_eq!(withdrawn["images"][0]["state"], "unknown");
     assert!(withdrawn["images"][0]["originalUrl"].is_null());
     assert!(withdrawn["images"][0]["rawJson"].is_null());
-    assert_eq!(withdrawn["images"][0]["regions"], serde_json::json!([]));
+    assert_eq!(withdrawn["images"][0]["blocks"], serde_json::json!([]));
     wire.finish().await;
-}
-
-#[tokio::test]
-#[ignore = "owned disposable PostgreSQL only; no model or image egress"]
-async fn cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample() {
-    let db = fixture::db("ocr_manual_adoption_owned").await;
-    apply_manual_ocr_migrations(&db).await;
-    let work = ocr::admit(
-        &db,
-        "ocr-manual-adoption-synthetic",
-        1,
-        &image(19),
-        "image/png",
-    )
-    .await;
-    let row = sqlx::query(
-        "SELECT o.slot_key,m.blob_sha256,m.materialization_ref,m.local_asset_path,
-                b.storage_key,b.mime_type,b.byte_size
-           FROM linggan_media_observation o
-           JOIN linggan_media_download_attempt attempt
-             ON attempt.media_observation_ref=o.observation_ref
-           JOIN linggan_media_materialization m USING(download_attempt_ref)
-           JOIN linggan_media_blob b ON b.sha256=m.blob_sha256
-          WHERE o.slot_key=$1",
-    )
-    .bind("xhs:ocr-manual-adoption-synthetic:image:1")
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    let job = Uuid::new_v4();
-    let derivative = Uuid::new_v4();
-    let layout = Uuid::new_v4();
-    let adoption = Uuid::new_v4();
-    let processor_version = format!("cloud-manual-v1:{job}");
-    let blob: String = row.get("blob_sha256");
-    let slot: String = row.get("slot_key");
-    sqlx::query(
-        "INSERT INTO linggan_media_processing_job
-          (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope)
-         VALUES($1,$2,$3,'image_ocr',$4,'full')",
-    )
-    .bind(job)
-    .bind(&blob)
-    .bind(&slot)
-    .bind(&processor_version)
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason)
-         VALUES($1,$2,'succeeded','synthetic saved cloud result')",
-    )
-    .bind(Uuid::new_v4())
-    .bind(job)
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_media_derivative
-          (derivative_ref,job_ref,derivative_kind,content_hash,storage_key)
-         VALUES($1,$2,'ocr_text',$3,$4)",
-    )
-    .bind(derivative)
-    .bind(job)
-    .bind("a".repeat(64))
-    .bind("ocr/manual/synthetic.json")
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_media_ocr_layout
-          (layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,
-           image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key)
-         VALUES($1,$2,$3,$4,'cloud_manual','cloud-manual-v1:synthetic',2,2,$5,1,$6)",
-    )
-    .bind(layout)
-    .bind(derivative)
-    .bind(work)
-    .bind(&blob)
-    .bind("b".repeat(64))
-    .bind("ocr/manual/synthetic-layout.json")
-    .execute(db.pool())
-    .await
-    .unwrap();
-    let source = serde_json::json!({
-        "image":{"workRef":work,"imageRef":slot,"blobSha256":blob,"width":2,"height":2},
-        "imageRole":"first_image","sequenceOrdinal":1
-    });
-    let observation = serde_json::json!({
-        "producer":"cloud_vision","source":source,"rawSha256":"e".repeat(64),"result":{}
-    });
-    let fingerprint =
-        linggan_evidence::ocr_adoption::content_hash(observation.to_string().as_bytes());
-    let assessment = serde_json::json!({
-        "producer":"cloud_vision","ruleVersion":"cloud-ocr-adoption.v1",
-        "image":source["image"],"imageRole":"first_image","ordinal":1,
-        "coverTitle":null,"coverTitleStatus":"pending","inputFingerprint":fingerprint,
-        "imageText":"合成人工采用正文","humanVerified":false,
-        "regions":[{"regionRef":"body-1","text":"合成人工采用正文","bbox":[0.1,0.1,0.9,0.9],
-          "spans":[{"start":0,"end":8,"status":"adopted","reason":null}]}]
-    });
-    sqlx::query(
-        "INSERT INTO linggan_media_ocr_adoption
-          (adoption_ref,derivative_ref,layout_ref,rule_version,input_fingerprint,observation,
-           assessment,line_ref_map,image_text,cover_title,state)
-         VALUES($1,$2,$3,'cloud-ocr-adoption.v1',$4,$5,$6,'[]'::jsonb,$7,NULL,'NEEDS_REVIEW')",
-    )
-    .bind(adoption)
-    .bind(derivative)
-    .bind(layout)
-    .bind(&fingerprint)
-    .bind(&observation)
-    .bind(&assessment)
-    .bind("合成人工采用正文")
-    .execute(db.pool())
-    .await
-    .unwrap();
-    let config: Uuid = sqlx::query_scalar(
-        "SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key='ocr_recognition'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    let run = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO linggan_ocr_recognition_run
-          (run_ref,command_ref,content_public_ref,task_config_ref,state,model_label,endpoint_url,
-           scope_sha256,total_images,completed_images)
-         VALUES($1,$2,$3,$4,'succeeded','synthetic-cloud-model','https://loopback.invalid/ocr',$5,1,1)",
-    )
-    .bind(run)
-    .bind(Uuid::new_v4())
-    .bind(work)
-    .bind(config)
-    .bind("d".repeat(64))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_ocr_recognition_item
-          (item_ref,run_ref,position,slot_key,blob_sha256,materialization_ref,ordinal,role,state,
-           original_url,storage_key,mime_type,byte_size,adoption_ref)
-         VALUES($1,$2,0,$3,$4,$5,1,'cover','succeeded',$6,$7,$8,$9,$10)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(run)
-    .bind(&slot)
-    .bind(&blob)
-    .bind(row.get::<Uuid, _>("materialization_ref"))
-    .bind(row.get::<String, _>("local_asset_path"))
-    .bind(row.get::<String, _>("storage_key"))
-    .bind(row.get::<String, _>("mime_type"))
-    .bind(row.get::<i64, _>("byte_size"))
-    .bind(adoption)
-    .execute(db.pool())
-    .await
-    .unwrap();
-
-    let unadopted = research_dossier::read(&db, work).await.unwrap().unwrap();
-    let machine_preview = unadopted
-        .media
-        .iter()
-        .find(|media| media["ocrLayering"]["decisionSource"] == "cloud_vision_unverified")
-        .unwrap();
-    assert!(machine_preview["researchText"].is_null());
-    assert!(machine_preview["ocrLayering"]["imageSubstantiveText"].is_null());
-    assert!(machine_preview["ocrLayering"]["cleanCorpusEligible"] == false);
-
-    // This row shape is permitted by the old recognition-item foreign key but is corrupt:
-    // it points another work's run at this cloud adoption. The command must reject it.
-    let other_work = ocr::admit(
-        &db,
-        "ocr-manual-adoption-other-work",
-        1,
-        &image(20),
-        "image/png",
-    )
-    .await;
-    let other_run = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO linggan_ocr_recognition_run
-          (run_ref,command_ref,content_public_ref,task_config_ref,state,model_label,endpoint_url,
-           scope_sha256,total_images,completed_images)
-         VALUES($1,$2,$3,$4,'succeeded','synthetic-cloud-model','https://loopback.invalid/ocr',$5,1,1)",
-    )
-    .bind(other_run)
-    .bind(Uuid::new_v4())
-    .bind(other_work)
-    .bind(config)
-    .bind("f".repeat(64))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_ocr_recognition_item
-          (item_ref,run_ref,position,slot_key,blob_sha256,materialization_ref,ordinal,role,state,
-           original_url,storage_key,mime_type,byte_size,adoption_ref)
-         SELECT $1,$2,0,slot_key,blob_sha256,materialization_ref,ordinal,role,state,
-                original_url,storage_key,mime_type,byte_size,adoption_ref
-           FROM linggan_ocr_recognition_item WHERE run_ref=$3",
-    )
-    .bind(Uuid::new_v4())
-    .bind(other_run)
-    .bind(run)
-    .execute(db.pool())
-    .await
-    .unwrap();
-    assert!(matches!(
-        adopt(
-            &db,
-            other_work,
-            &Adopt {
-                command_ref: Uuid::new_v4(),
-                adoption_ref: adoption,
-                expected_revision: 0,
-                decision: "adopt".into(),
-                field: "adopted_body".into(),
-                text: Some("不得跨作品采用".into()),
-                actor: "synthetic-reviewer".into(),
-                reason: "owned proof: reject corrupt cross-work recognition item".into(),
-            }
-        )
-        .await,
-        Err(linggan_intelligence::ai_foundation::store::FoundationError::NotFound)
-    ));
-
-    let request = Adopt {
-        command_ref: Uuid::new_v4(),
-        adoption_ref: adoption,
-        expected_revision: 0,
-        decision: "adopt".into(),
-        field: "adopted_body".into(),
-        text: Some("合成人工采用正文".into()),
-        actor: "synthetic-reviewer".into(),
-        reason: "owned proof: compare saved cloud result with synthetic image".into(),
-    };
-    let receipt = adopt(&db, work, &request).await.unwrap();
-    assert!(receipt["auditSampleRef"].is_null());
-    assert_eq!(adopt(&db, work, &request).await.unwrap(), receipt);
-    let conflict = Adopt {
-        command_ref: Uuid::new_v4(),
-        ..request.clone()
-    };
-    assert!(matches!(
-        adopt(&db, work, &conflict).await,
-        Err(linggan_intelligence::ai_foundation::store::FoundationError::Conflict)
-    ));
-    let review = sqlx::query(
-        "SELECT sample_ref,issue_ref,source_kind,after_text
-           FROM linggan_media_ocr_review WHERE adoption_ref=$1",
-    )
-    .bind(adoption)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    assert!(review.get::<Option<Uuid>, _>("sample_ref").is_none());
-    assert!(review.get::<Option<Uuid>, _>("issue_ref").is_none());
-    assert_eq!(review.get::<String, _>("source_kind"), "ocr_block");
-    assert_eq!(
-        review.get::<Option<String>, _>("after_text").unwrap(),
-        "合成人工采用正文"
-    );
-    let stored_observation: serde_json::Value = sqlx::query_scalar(
-        "SELECT observation FROM linggan_media_ocr_adoption WHERE adoption_ref=$1",
-    )
-    .bind(adoption)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    assert_eq!(stored_observation, observation);
-    let visible = read_run(&db, work).await.unwrap();
-    assert_eq!(visible["images"][0]["reviewRevision"], 1);
-    assert_eq!(
-        visible["images"][0]["humanBody"]["text"],
-        "合成人工采用正文"
-    );
-    let dossier = research_dossier::read(&db, work).await.unwrap().unwrap();
-    let media = dossier
-        .media
-        .iter()
-        .find(|media| media["ocrHumanAdoption"]["adopted_body"].is_object())
-        .unwrap();
-    assert_eq!(media["researchText"], "合成人工采用正文");
-    assert_eq!(media["ocrLayering"]["decisionSource"], "human_ocr_review");
-    assert_eq!(
-        dossier.image_text_projection["projection"]["imageText"],
-        "合成人工采用正文"
-    );
-    assert_eq!(
-        dossier.image_text_projection["projection"]["fragments"][0]["source"]["sourceKind"],
-        "block"
-    );
 }
 
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
 async fn second_image_schema_failure_stops_without_sending_the_third_image() {
     let db = fixture::db("ocr_recognition_second_failure_owned").await;
-    apply_manual_ocr_migrations(&db).await;
     let work_key = "ocr-recognition-second-failure";
     let work = ocr::admit(&db, work_key, 1, &image(31), "image/png").await;
     ocr::admit(&db, work_key, 2, &image(32), "image/png").await;
@@ -816,14 +493,13 @@ async fn second_image_schema_failure_stops_without_sending_the_third_image() {
         .await
         .unwrap();
     configure_recognition(&db, &wire.url, &owner, &adapter).await;
-    let scope = read_run(&db, work).await.unwrap()["scope"]["sha256"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let ready = read_run(&db, work).await.unwrap();
+    let scope = ready["scope"]["sha256"].as_str().unwrap().to_owned();
     let receipt = start_run(
         &db,
         work,
         &StartRun {
+            slot_keys: selected_slots(&ready),
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },
@@ -884,7 +560,6 @@ async fn second_image_schema_failure_stops_without_sending_the_third_image() {
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
 async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend() {
     let db = fixture::db("ocr_recognition_control_projection_owned").await;
-    apply_manual_ocr_migrations(&db).await;
     let adapter = adapter();
     let owner = ExecutorSession::acquire(&db, "synthetic-manual-ocr-control", 4)
         .await
@@ -898,14 +573,13 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
     ocr::admit(&db, "ocr-recognition-cancelled", 3, &image(43), "image/png").await;
     let cancellation_wire = endpoint::Endpoint::start(false).await;
     configure_recognition(&db, &cancellation_wire.url, &owner, &adapter).await;
-    let scope = read_run(&db, cancelled_work).await.unwrap()["scope"]["sha256"]
-        .as_str()
-        .unwrap()
-        .to_owned();
+    let ready = read_run(&db, cancelled_work).await.unwrap();
+    let scope = ready["scope"]["sha256"].as_str().unwrap().to_owned();
     let receipt = start_run(
         &db,
         cancelled_work,
         &StartRun {
+            slot_keys: selected_slots(&ready),
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },
@@ -946,6 +620,7 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
         &db,
         cancelled_work,
         &StartRun {
+            slot_keys: selected_slots(&read_cancelled),
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: read_cancelled["scope"]["sha256"]
                 .as_str()
@@ -983,7 +658,8 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
     ocr::admit(&db, "ocr-recognition-recovery", 3, &image(53), "image/png").await;
     let mut recovery_wire = endpoint::Endpoint::start(true).await;
     configure_recognition(&db, &recovery_wire.url, &owner, &adapter).await;
-    let recovery_scope = read_run(&db, recovery_work).await.unwrap()["scope"]["sha256"]
+    let recovery_ready = read_run(&db, recovery_work).await.unwrap();
+    let recovery_scope = recovery_ready["scope"]["sha256"]
         .as_str()
         .unwrap()
         .to_owned();
@@ -991,6 +667,7 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
         &db,
         recovery_work,
         &StartRun {
+            slot_keys: selected_slots(&recovery_ready),
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: recovery_scope,
         },
@@ -1071,9 +748,8 @@ async fn manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend(
 
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
-async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
+async fn manual_ocr_freezes_only_explicit_current_work_images_not_context_or_history() {
     let db = fixture::db("ocr_recognition_source_scope_owned").await;
-    apply_manual_ocr_migrations(&db).await;
     let work_key = "ocr-recognition-source-scope";
     let work = ocr::admit(&db, work_key, 1, &image(61), "image/png").await;
     // The same slot receives a newer verified replica. The prior blob must never enter a
@@ -1096,6 +772,7 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
         &db,
         work,
         &StartRun {
+            slot_keys: vec![format!("xhs:{work_key}:image:1")],
             command_ref: Uuid::new_v4(),
             expected_scope_sha256: scope,
         },
@@ -1112,7 +789,8 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
     .fetch_all(db.pool())
     .await
     .unwrap();
-    assert_eq!(frozen.len(), 2);
+    assert_eq!(frozen.len(), 1);
+    assert_eq!(frozen[0].0, format!("xhs:{work_key}:image:1"));
     assert!(
         frozen
             .iter()
@@ -1124,7 +802,7 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
             .all(|(_, blob)| blob != &linggan_evidence::ocr_adoption::content_hash(&image(61))),
         "a historical replica for the same slot is outside the frozen dispatch source set"
     );
-    for expected in 0..2 {
+    for expected in 0..1 {
         let item = queue::claim_next(&db, owner.fence())
             .await
             .unwrap()
@@ -1142,8 +820,8 @@ async fn manual_ocr_freezes_only_current_work_images_not_context_or_history() {
     );
     assert_eq!(
         wire.requests.lock().unwrap().len(),
-        3,
-        "one probe plus exactly two current eligible images; avatar, comment image, and old replica stay local"
+        2,
+        "one probe plus exactly one explicitly selected current image; unselected image, avatar, comment image, and old replica stay local"
     );
     wire.finish().await;
 }

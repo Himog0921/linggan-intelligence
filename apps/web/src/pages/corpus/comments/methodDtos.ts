@@ -15,7 +15,7 @@ export interface MethodManifest extends Json { stages: Partial<Record<'semantic'
 export interface StudyPolicy {
   policyRef: string; methodName: string | null; parentPolicyRef: string | null; methodHash: string | null; createdAt: string | null;
   recordingState: string | null; isActive: boolean | null;
-  defaults: { commentBudget: number | null; contextCharacterBudget: number | null } | null;
+  defaults: { commentBudget: number | null } | null;
   methodManifest: MethodManifest | null; model: unknown;
 }
 export interface StudyWork {
@@ -41,7 +41,7 @@ export function parsePolicy(row: Json): StudyPolicy {
     }
     const ref = optStr(manifest, 'modelConfigRef'); if (ref) methodManifest.modelConfigRef = ref;
   }
-  return { policyRef: str(row, 'policyRef'), methodName: optStr(row, 'methodName'), parentPolicyRef: optStr(row, 'parentPolicyRef'), methodHash: optStr(row, 'methodHash'), createdAt: optStr(row, 'createdAt'), recordingState: optStr(row, 'recordingState'), isActive: optBool(row, 'isActive'), defaults: defaults ? { commentBudget: optNum(defaults, 'commentBudget'), contextCharacterBudget: optNum(defaults, 'contextCharacterBudget') } : null, methodManifest, model: row.model ?? null };
+  return { policyRef: str(row, 'policyRef'), methodName: optStr(row, 'methodName'), parentPolicyRef: optStr(row, 'parentPolicyRef'), methodHash: optStr(row, 'methodHash'), createdAt: optStr(row, 'createdAt'), recordingState: optStr(row, 'recordingState'), isActive: optBool(row, 'isActive'), defaults: defaults ? { commentBudget: optNum(defaults, 'commentBudget') } : null, methodManifest, model: row.model ?? null };
 }
 export const parsePolicyDetail = (row: Json) => decode(row, r => parsePolicy(obj(r, 'policy')));
 export function parsePolicyPage(row: Json) {

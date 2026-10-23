@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -43,9 +43,9 @@ test('existing domain proof coverage is retained and unions across files', () =>
     ['crates/intelligence/src/content_workbench/source_usage.rs', ['ai', 'web']],
     ['crates/intelligence/src/comment_study_run/submit.rs', ['ai', 'web']],
     ['crates/evidence/src/ocr_adoption/selection.rs', ['ocr_adoption']],
-    ['crates/evidence/src/ocr_adoption_persistence/read.rs', ['ocr_adoption', 'ocr_audit']],
+    ['crates/evidence/src/ocr_adoption_persistence.rs', ['ocr_adoption', 'ocr_audit']],
     ['crates/evidence/src/material_media_read.rs', ['ocr_adoption', 'web']],
-    ['crates/evidence/src/research_dossier.rs', ['ocr_adoption', 'ocr_audit', 'web']],
+    ['crates/evidence/src/research_dossier.rs', suites],
     ['apps/worker/tests/ocr_vl_postgres.rs', ['ai', 'ocr_adoption', 'ocr_audit']],
     ['database/migrations/0142_ocr_adoption.sql', ['ai', 'ocr_adoption']],
     ['database/migrations/0143_ocr_quality_audit.sql', ['ai', 'ocr_audit']],
@@ -57,6 +57,22 @@ test('existing domain proof coverage is retained and unions across files', () =>
   ];
   for (const [path, expected] of cases) assert.deepEqual(selected([path]), expected, path);
   assert.deepEqual(selected(['docs/README.md', 'apps/web/src/pages/topics/TopicsPage.tsx', 'crates/evidence/src/ocr_adoption.rs']), ['ocr_adoption', 'ocr_audit', 'web', 'topic']);
+});
+
+test('the canonical dossier and reading schema exercise every current consumer', () => {
+  for (const path of [
+    'crates/evidence/src/research_dossier.rs',
+    'crates/evidence/src/research_dossier/content/ocr.rs',
+    'crates/evidence/src/material_reading.rs',
+    'crates/evidence/src/material_reading/read.rs',
+    'crates/evidence/src/dossier_input.rs',
+    'crates/evidence/src/dossier_input/backfill.rs',
+    'database/migrations/0146_research_dossier_v2.sql',
+    'database/migrations/0147_comment_study_full_context.sql',
+    'database/migrations/0148_dossier_consumer_contracts.sql',
+  ]) assert.deepEqual(selected([path]), suites, path);
+  assert.deepEqual(selected(['apps/worker/src/bin/research_dossier.rs']), ['ai', 'web']);
+  assert.deepEqual(selected(['crates/evidence/tests/dossier_input_postgres.rs']), ['web']);
 });
 
 test('Git diff uses merge-base, includes deleted and renamed paths, and preserves unusual filenames', () => {
@@ -178,4 +194,77 @@ test('preflight and every reusable proof check out the same PR event head', () =
     assert.equal(checkouts.length, headRefs.length, `${workflow} checks out the event head SHA`);
   }
   assert.equal((delivery.match(/DELIVERY_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/g) ?? []).length, 2);
+});
+
+test('isolated Rust proofs reject empty selections and preserve listing or execution failures', () => {
+  const shell = String.raw`
+    source "$1"
+    cargo() {
+      if [[ "$*" == *' --list' ]]; then
+        case "$PROOF_FIXTURE" in
+          empty) printf '0 tests, 0 benchmarks\n' ;;
+          list_failure) return 43 ;;
+          *) printf 'source_frozen: test\n\n1 test, 0 benchmarks\n' ;;
+        esac
+      else
+        printf '%s\n' "$@"
+        [[ "$PROOF_FIXTURE" != execution_failure ]] || return 37
+      fi
+    }
+    cargo_proof -p synthetic --test canonical source_frozen --locked -- --ignored --exact --nocapture
+  `;
+  const invoke = mode => spawnSync('bash', ['-c', shell, 'proof-fixture', join(root, 'scripts/cargo-proof.sh')], {
+    encoding: 'utf8', env: { ...process.env, PROOF_FIXTURE: mode },
+  });
+  const empty = invoke('empty');
+  assert.equal(empty.status, 1); assert.equal(empty.stdout, '');
+  assert.match(empty.stderr, /selected no tests/);
+  assert.equal(invoke('list_failure').status, 43);
+  assert.equal(invoke('execution_failure').status, 37);
+  const successful = invoke('selected');
+  assert.equal(successful.status, 0);
+  assert.deepEqual(successful.stdout.trim().split('\n'), [
+    'test', '-p', 'synthetic', '--test', 'canonical', 'source_frozen', '--locked', '--', '--ignored', '--exact', '--nocapture',
+  ]);
+});
+
+test('Delivery executes current creator, saved-source and OCR proof targets without empty-test filters', () => {
+  const runner = readFileSync(join(root, 'scripts/test-research-dossier-postgres.sh'), 'utf8');
+  const readonly = runner.split('if [[ "${1:-}" == "--ai-readonly" ]]; then')[1]?.split('\n  fi')[0];
+  assert.ok(readonly, 'inspect the actual Delivery mode');
+  assert.match(readonly, /cargo_proof -p linggan-intelligence --test creator_discovery_input_postgres /);
+  assert.match(readonly, /cargo_proof -p linggan-intelligence --lib topic_map_research::saved_source_postgres:: /);
+  assert.match(readonly, /export CREATOR_PROOF_NODE=/);
+  assert.match(runner, /source scripts\/cargo-proof\.sh/);
+  assert.doesNotMatch(runner, /\bcargo test\b/, 'all filtered dossier proof calls guard against zero selected tests');
+  const workflow = readFileSync(join(root, '.github/workflows/ai-gen1-foundation.yml'), 'utf8');
+  assert.match(workflow, /test-research-dossier-postgres\.sh --ai-readonly/);
+  const ocr = readFileSync(join(root, 'scripts/test-ocr-adoption-postgres.sh'), 'utf8');
+  const name = ocr.match(/test_name=(synthetic_[a-z_]+)/)?.[1];
+  assert.ok(name);
+  assert.ok(readFileSync(join(root, 'apps/worker/tests/ocr_vl_postgres.rs'), 'utf8').includes(`async fn ${name}()`));
+  assert.match(ocr, /source scripts\/cargo-proof\.sh/);
+  assert.match(ocr, /cargo_proof .*"\$test_name" --locked -- --ignored --exact --nocapture/);
+  assert.doesNotMatch(readFileSync(join(root, '.github/workflows/ocr-adoption.yml'), 'utf8'), /--lib ocr_adoption_persistence::/);
+});
+
+test('OCR audit runner filters name actual Rust tests, including split modules', () => {
+  const runner = readFileSync(join(root, 'scripts/test-ocr-quality-audit-postgres.sh'), 'utf8');
+  const calls = [...runner.matchAll(/cargo_proof -p linggan-worker --test (\w+) (\w+) --locked/g)];
+  assert.ok(calls.length > 0, 'inspect the actual audit proof calls');
+  assert.equal(calls.length, [...runner.matchAll(/^\s*cargo_proof\b/gm)].length, 'every audit proof call must be checked');
+  const rustSources = directory => readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return rustSources(path);
+    return entry.isFile() && entry.name.endsWith('.rs') ? [readFileSync(path, 'utf8')] : [];
+  });
+  for (const [, target, filter] of calls) {
+    const entrypoint = join(root, 'apps/worker/tests', `${target}.rs`);
+    const modules = join(root, 'apps/worker/tests', target);
+    const sources = [readFileSync(entrypoint, 'utf8'), ...(existsSync(modules) ? rustSources(modules) : [])];
+    const names = sources.flatMap(source => [...source.matchAll(
+      /#\[(?:tokio::)?test(?:\([^]*?\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:async\s+)?fn\s+(\w+)\s*\(/g,
+    )].map(match => match[1]));
+    assert.ok(names.includes(filter), `${target}: ${filter} must select a declared Rust test`);
+  }
 });

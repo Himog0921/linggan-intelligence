@@ -88,6 +88,13 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     await page.getByRole('button', { name: '并排对照', exact: true }).click();
     await page.getByRole('heading', { name: '作品并排对照', exact: true }).waitFor();
     await page.getByRole('button', { name: '当前累计', exact: true }).waitFor();
+    const canonicalResponse = page.waitForResponse(response => response.url().includes('/api/local/work-resources/') && response.url().includes('/research-dossier?'));
+    await page.getByRole('button', { name: '展开已取得的底稿', exact: true }).first().click();
+    const canonical = await canonicalResponse; assert.equal(canonical.status(), 200);
+    const canonicalPayload = await canonical.json(); assert.equal(canonicalPayload.dossier.contract, 'research-dossier.v2');
+    const canonicalUrl = new URL(canonical.url()); assert.equal(canonicalUrl.searchParams.get('asOf'), new URL(page.url()).searchParams.get('inspect_as_of'));
+    await page.getByText('以下按当前研究截点读取正式底稿。', { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(directory, 'targets-v4-canonical-dossier.png') });
     await page.getByRole('button', { name: '发布后 24 小时', exact: true }).click();
     const v4Selected = populated.works.slice(0, 2).map(work => work.workRef).join(',');
     const age = await get(`${populated.base}/work-comparison?domain=${inspectionDomain}&works=${v4Selected}&mode=age_24h`);
@@ -100,7 +107,7 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     assert.equal(trace.status, 200); assert(trace.body.observations.length > 0);
     assert.equal(writes.length, 0, 'rounds, comparison and trace do not collect or invoke');
     await page.screenshot({ path: path.join(directory, 'targets-v4-observation-trace.png') });
-    reports.push('V4 React to Axum/PostgreSQL: real round, two works, age-24h unknown, trace and return without writes');
+    reports.push('V4 React to Axum/PostgreSQL: real round, two works, canonical V2 at the same cutoff, age-24h unknown, trace and return without writes');
 
     const creatorId = 'ad0000000000000000000101';
     const creator = await create('creator', creatorId, fixture.domainRef);

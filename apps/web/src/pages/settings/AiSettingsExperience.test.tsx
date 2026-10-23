@@ -176,6 +176,32 @@ describe('AI 设置正式四视图', () => {
     expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'ocr_recognition', budget: { mode: 'unlimited' }, model: { modelRef: 'second-model', limits: { attempts: 1 } } } });
   });
 
+  it('材料范围沿用底稿六类字段，视频画面可显式选入后保存', async () => {
+    const base = settingsFixture();
+    const capability = { capabilityRef: 'cap-text', source: 'manual', sourceVersion: 'synthetic-only', probeInvocationRef: null, contextTokens: 8192, maxOutputTokens: 2048, maxTimeoutSeconds: 60, thinkingLevels: ['off'], compat: {}, thinkingLevelMap: { off: null }, outputMode: 'json_object', strictSchema: false };
+    const config = { ...base.tasks[0]!.configuration, taskKey: 'note_interpretation', materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript'],
+      model: { modelConfigRef: 'model-config', modelRef: 'old-model-ref', identityRef: 'identity-1', modelId: 'synthetic-model',
+        connectionRef: 'connection-1', connectionVersionRef: 'version-1', capabilityRef: 'cap-text',
+        limits: { inputTokens: 2048, outputTokens: 512, timeoutSeconds: 30, attempts: 1, thinkingLevel: 'off' } } };
+    const data = { ...base, models: [{ ...base.models[0]!, capability }],
+      tasks: [{ ...base.tasks[0]!, taskKey: 'note_interpretation', label: '笔记解读', configuration: config }] };
+    respond = call => call.method === 'GET' ? ok(data) : call.path === '/api/local/ai-settings/task-configs'
+      ? ok({ taskKey: 'note_interpretation', taskConfigRef: 'next-config', modelConfigRef: 'model-config', revision: 1, applied: true })
+      : { status: 503, body: {} };
+    const user = userEvent.setup(); mount();
+    await user.click(await screen.findByRole('button', { name: /笔记解读/ }));
+    await user.click(screen.getByRole('link', { name: '查看工作配置' }));
+    expect(screen.queryByRole('checkbox', { name: '封面文字' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '视频画面文字' })).not.toBeChecked();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+    await user.click(screen.getByRole('checkbox', { name: '视频画面文字' }));
+    await user.click(screen.getByRole('button', { name: '保存配置' }));
+    await screen.findByText(/配置已保存，用于后续批次/);
+    const writes = calls.filter(call => call.method === 'POST');
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'note_interpretation', expectedRevision: 0, materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text'] } });
+  });
+
 });
 
 

@@ -19,7 +19,7 @@ import styles from './AiSettingsExperience.module.css';
 const ORDER = ['ocr_recognition', 'ocr_quality_audit', 'writing_legacy', 'note_interpretation', 'work_comparison', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'legacy_creator_discovery', 'legacy_topic_map'];
 const COPY: Record<string, { group: string; description: string }> = {
   ocr_recognition: { group: '图片文字', description: '手动识别当前作品的已有本地原图；保存模型配置不会发图，默认关闭。' },
-  ocr_quality_audit: { group: '语料质量', description: '可选盲读抽检，人工确认后追加修正，默认关闭。' },
+  ocr_quality_audit: { group: '语料质量', description: '可选盲读抽检，独立记录质量意见；材料修正需逐项审阅，默认关闭。' },
   writing_legacy: { group: '内容工作台', description: '基于选中的作品材料，提供可审阅的写作建议与修改方案。' },
   note_interpretation: { group: '内容理解', description: '提炼笔记观点、表达方式与值得验证的关键信息。' },
   work_comparison: { group: '作品研究', description: '显式比较同一作者所选作品的已取得材料，保留双侧来源与覆盖限制。' },

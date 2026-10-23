@@ -5,7 +5,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Candidate {
-    pub adoption_ref: Uuid,
+    pub reading_ref: Uuid,
     pub work_ref: Uuid,
     pub blob_sha256: String,
     pub risk: bool,
@@ -22,8 +22,8 @@ pub fn select(seed: &str, candidates: &[Candidate], s: &Settings) -> Vec<Selecti
     let mut out = vec![];
     // Fixed regression is reserved before random; its excluded denominator is frozen explicitly.
     for id in s.regression_refs.iter().take(s.regression_count as usize) {
-        if let Some(c) = candidates.iter().find(|c| &c.adoption_ref == id) {
-            if used.insert(c.adoption_ref) {
+        if let Some(c) = candidates.iter().find(|c| &c.reading_ref == id) {
+            if used.insert(c.reading_ref) {
                 out.push(Selection {
                     candidate: c.clone(),
                     pool: "regression".into(),
@@ -34,12 +34,12 @@ pub fn select(seed: &str, candidates: &[Candidate], s: &Settings) -> Vec<Selecti
     let mut works = std::collections::BTreeMap::<Uuid, Vec<&Candidate>>::new();
     for c in candidates
         .iter()
-        .filter(|c| !s.regression_refs.contains(&c.adoption_ref))
+        .filter(|c| !s.regression_refs.contains(&c.reading_ref))
     {
         works.entry(c.work_ref).or_default().push(c);
     }
     for group in works.values_mut() {
-        group.sort_by_key(|c| hash(c.adoption_ref.to_string()));
+        group.sort_by_key(|c| hash(c.reading_ref.to_string()));
     }
     let mut works: Vec<_> = works.into_iter().collect();
     works.sort_by_key(|(w, _)| hash(w.to_string()));
@@ -52,7 +52,7 @@ pub fn select(seed: &str, candidates: &[Candidate], s: &Settings) -> Vec<Selecti
             }
             if let Some(c) = group.get(round) {
                 found = true;
-                if used.insert(c.adoption_ref) {
+                if used.insert(c.reading_ref) {
                     out.push(Selection {
                         candidate: (*c).clone(),
                         pool: "random".into(),
@@ -68,12 +68,10 @@ pub fn select(seed: &str, candidates: &[Candidate], s: &Settings) -> Vec<Selecti
     let mut risk: Vec<_> = candidates
         .iter()
         .filter(|c| {
-            c.risk
-                && !used.contains(&c.adoption_ref)
-                && !s.regression_refs.contains(&c.adoption_ref)
+            c.risk && !used.contains(&c.reading_ref) && !s.regression_refs.contains(&c.reading_ref)
         })
         .collect();
-    risk.sort_by_key(|c| hash(c.adoption_ref.to_string()));
+    risk.sort_by_key(|c| hash(c.reading_ref.to_string()));
     out.extend(
         risk.into_iter()
             .take(s.risk_count as usize)
@@ -82,6 +80,5 @@ pub fn select(seed: &str, candidates: &[Candidate], s: &Settings) -> Vec<Selecti
                 pool: "risk".into(),
             }),
     );
-    out.truncate(s.max_requests as usize);
     out
 }

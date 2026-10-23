@@ -54,14 +54,6 @@ async fn execute(
 #[ignore = "owned disposable runner only"]
 async fn synthetic_audit_blind_read_review_report_and_withdrawal() {
     let db = fixture::db("ocr_quality_audit_owned").await;
-    for source in [
-        include_str!("../../../database/migrations/0142_ocr_adoption.sql"),
-        include_str!("../../../database/migrations/0143_ocr_quality_audit.sql"),
-        include_str!("../../../database/migrations/0144_ocr_manual_recognition.sql"),
-        include_str!("../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
-    ] {
-        sqlx::raw_sql(source).execute(db.pool()).await.unwrap();
-    }
     let initial = audit::store::read_settings(&db).await.unwrap();
     assert_eq!(initial["settings"]["automatic"], false);
     assert!(audit::schedule::tick(&db).await.unwrap().is_none());
@@ -102,17 +94,28 @@ print(json.dumps(b,ensure_ascii=False))
     ocr::execute_one(&db).await;
     let package:Uuid=sqlx::query_scalar("SELECT package_ref FROM linggan_material_content_detail WHERE content_public_ref=$1 LIMIT 1").bind(work).fetch_one(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(work).bind(fixture::dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
-    let adoption: Uuid = sqlx::query_scalar("SELECT adoption_ref FROM linggan_media_ocr_adoption")
-        .fetch_one(db.pool())
+    let candidate = linggan_evidence::material_reading::read_candidates(&db, work)
+        .await
+        .unwrap()
+        .remove(0);
+    let reading: Uuid = serde_json::from_value(candidate["candidateRevisionRef"].clone()).unwrap();
+    let unit: Uuid = serde_json::from_value(candidate["unitRef"].clone()).unwrap();
+    let adopt = linggan_evidence::material_reading::ReviewReadingRequest {
+        command_ref: Uuid::new_v4(),
+        expected_current_revision_ref: None,
+        candidate_revision_ref: reading,
+        action: "adopt".into(),
+        edited_blocks: None,
+        verified: false,
+        resolved_issue_keys: vec![],
+        actor: "synthetic-reviewer".into(),
+        reason: "Compare the complete synthetic source image".into(),
+    };
+    linggan_evidence::material_reading::review_reading(&db, unit, &adopt)
         .await
         .unwrap();
-    let source_before: Value = sqlx::query_scalar(
-        "SELECT observation FROM linggan_media_ocr_adoption WHERE adoption_ref=$1",
-    )
-    .bind(adoption)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let source_before: Value = sqlx::query_scalar("SELECT observation FROM linggan_media_ocr_adoption WHERE derivative_ref=(SELECT derivative_ref FROM linggan_material_reading WHERE reading_ref=$1)")
+        .bind(reading).fetch_one(db.pool()).await.unwrap();
     let wire = endpoint::Endpoint::start(false).await;
     let adapter = adapter();
     let mut owner = ExecutorSession::acquire(&db, "synthetic-ocr-audit", 4)
@@ -165,7 +168,7 @@ print(json.dumps(b,ensure_ascii=False))
     .unwrap();
     let settings = audit::Settings {
         domain_ref: Some(fixture::dossier::DOMAIN),
-        privacy_cleared_refs: vec![adoption],
+        privacy_cleared_refs: vec![reading],
         privacy_clearance_actor: "SYNTHETIC-PROOF-NOT-MOG".into(),
         privacy_clearance_reason: "Procedurally generated pixels only; no real personal material"
             .into(),
@@ -274,16 +277,16 @@ print(json.dumps(b,ensure_ascii=False))
         .fetch_one(db.pool())
         .await
         .unwrap();
+    let before_review = research_dossier::read(&db, work).await.unwrap().unwrap();
     let review = audit::review::Review {
         command_ref: Uuid::new_v4(),
         sample_ref: sample,
         issue_ref: Some(issue),
         expected_revision: 0,
-        decision: "adopt".into(),
-        field: "adopted_body".into(),
-        text: Some("42".into()),
+        decision: "confirmed".into(),
+        material_review_command_ref: None,
         actor: "SYNTHETIC-PROOF-NOT-MOG".into(),
-        reason: "Synthetic fixture pixels compared with a frozen procedural original".into(),
+        reason: "Synthetic pixels checked independently of material selection".into(),
         metrics: audit::review::HumanMetrics {
             body_missing: audit::review::Count {
                 numerator: 1,
@@ -292,75 +295,42 @@ print(json.dumps(b,ensure_ascii=False))
             ..Default::default()
         },
     };
-    let adopted = audit::review::review(&db, &review).await.unwrap();
-    let literal = source_before["layout"]["blocks"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|b| b["text"].as_str().is_some_and(|t| t.contains("42")));
-    assert_eq!(
-        adopted["sourceKind"],
-        if literal {
-            "ocr_block"
-        } else {
-            "manual_transcription"
-        }
-    );
-    assert_eq!(audit::review::review(&db, &review).await.unwrap(), adopted);
+    let opinion = audit::review::review(&db, &review).await.unwrap();
+    assert_eq!(audit::review::review(&db, &review).await.unwrap(), opinion);
     let d = research_dossier::read(&db, work).await.unwrap().unwrap();
-    let media = d
-        .media
-        .iter()
-        .find(|m| m["ocrHumanAdoption"].is_object())
-        .unwrap();
-    assert_eq!(media["researchText"], "42");
-    assert_eq!(d.image_text_projection["projection"]["imageText"], "42");
     assert_eq!(
-        d.image_text_projection["projection"]["fragments"][0]["source"]["sourceKind"],
-        if literal {
-            "block"
-        } else {
-            "manual_transcription"
-        }
+        d.materials, before_review.materials,
+        "audit opinion cannot mutate the material reading"
     );
-    let mut tx = db.pool().begin().await.unwrap();
-    let old = research_dossier::read_in(&mut tx, &[work], &freeze)
+    let keep = linggan_evidence::material_reading::ReviewReadingRequest {
+        command_ref: Uuid::new_v4(),
+        expected_current_revision_ref: Some(reading),
+        candidate_revision_ref: reading,
+        action: "keep".into(),
+        edited_blocks: None,
+        verified: false,
+        resolved_issue_keys: vec![],
+        actor: "synthetic-reviewer".into(),
+        reason: "Compare the complete synthetic source image".into(),
+    };
+    linggan_evidence::material_reading::review_reading(&db, unit, &keep)
         .await
         .unwrap();
-    assert!(
-        old[&work]
-            .media
-            .iter()
-            .all(|m| m["ocrHumanAdoption"].is_null())
-    );
-    tx.rollback().await.unwrap();
-    let reject = audit::review::Review {
+    let dismiss = audit::review::Review {
         command_ref: Uuid::new_v4(),
         expected_revision: 1,
-        decision: "reject".into(),
-        text: None,
+        decision: "dismissed".into(),
+        material_review_command_ref: Some(keep.command_ref),
         ..review.clone()
     };
-    audit::review::review(&db, &reject).await.unwrap();
-    assert_eq!(
-        research_dossier::read(&db, work)
-            .await
-            .unwrap()
-            .unwrap()
-            .media
-            .iter()
-            .find(|m| m["ocrHumanAdoption"].is_object())
-            .unwrap()["researchText"],
-        "42",
-        "rejecting another suggestion never resurrects machine output"
-    );
-    let after: Value = sqlx::query_scalar(
-        "SELECT observation FROM linggan_media_ocr_adoption WHERE adoption_ref=$1",
-    )
-    .bind(adoption)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    audit::review::review(&db, &dismiss).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    let frozen = research_dossier::read_in(&mut tx, &[work], &freeze)
+        .await
+        .unwrap();
+    assert_eq!(frozen[&work].materials, before_review.materials);
+    tx.rollback().await.unwrap();
+    let after:Value=sqlx::query_scalar("SELECT observation FROM linggan_media_ocr_adoption WHERE derivative_ref=(SELECT derivative_ref FROM linggan_material_reading WHERE reading_ref=$1)").bind(reading).fetch_one(db.pool()).await.unwrap();
     assert_eq!(source_before, after);
     let report = audit::report::report(&db, run_ref).await.unwrap();
     assert_eq!(
@@ -391,13 +361,13 @@ print(json.dumps(b,ensure_ascii=False))
     // Preserve synthetic UI fixtures before testing current-source withdrawal.
     if let Some(out) = std::env::var_os("OCR_AUDIT_PROOF_OUTPUT") {
         std::fs::create_dir_all(&out).unwrap();
-        std::fs::write(PathBuf::from(&out).join("fixture.json"),serde_json::to_vec_pretty(&json!({"schema":"ocr_quality_audit_owned","domain":fixture::dossier::DOMAIN,"workRef":work,"adoptionRef":adoption,"sampleRef":sample,"runRef":run_ref,"report":report,"detail":audit::report::detail(&db,sample).await.unwrap(),"dossier":d})).unwrap()).unwrap();
+        std::fs::write(PathBuf::from(&out).join("fixture.json"),serde_json::to_vec_pretty(&json!({"schema":"ocr_quality_audit_owned","domain":fixture::dossier::DOMAIN,"workRef":work,"readingRef":reading,"sampleRef":sample,"runRef":run_ref,"report":report,"detail":audit::report::detail(&db,sample).await.unwrap(),"dossier":d})).unwrap()).unwrap();
     }
     // Weekly schedule: exactly Monday 09:00 Asia/Shanghai, one frozen run per week.
     let automatic = audit::Settings {
         automatic: true,
         domain_ref: Some(fixture::dossier::DOMAIN),
-        privacy_cleared_refs: vec![adoption],
+        privacy_cleared_refs: vec![reading],
         privacy_clearance_actor: "SYNTHETIC-PROOF-NOT-MOG".into(),
         privacy_clearance_reason: "Procedurally generated pixels only; no real personal material"
             .into(),
@@ -443,45 +413,6 @@ print(json.dumps(b,ensure_ascii=False))
     .await
     .unwrap();
     sqlx::raw_sql("CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT clock_timestamp() $$").execute(db.pool()).await.unwrap();
-    // The per-run token budget skips before dispatch and never spends a provider attempt.
-    let tiny = audit::Settings {
-        max_tokens: 1,
-        domain_ref: Some(fixture::dossier::DOMAIN),
-        privacy_cleared_refs: vec![adoption],
-        privacy_clearance_actor: "SYNTHETIC-PROOF-NOT-MOG".into(),
-        privacy_clearance_reason: "Procedurally generated pixels only; no real personal material"
-            .into(),
-        random_count: 1,
-        risk_count: 0,
-        regression_count: 0,
-        ..Default::default()
-    };
-    audit::store::save_settings(
-        &db,
-        &SaveSettings {
-            command_ref: Uuid::new_v4(),
-            expected_revision: 2,
-            settings: tiny,
-        },
-    )
-    .await
-    .unwrap();
-    let limited = audit::store::start_run(
-        &db,
-        &StartRun {
-            command_ref: Uuid::new_v4(),
-            run_key: "manual:budget-proof".into(),
-            seed: "budget-proof".into(),
-            visual_probe: false,
-        },
-    )
-    .await
-    .unwrap();
-    execute(&db, &owner, &adapter).await;
-    let limit_run: Uuid = serde_json::from_value(limited["runRef"].clone()).unwrap();
-    let skipped:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) WHERE b.command_ref=$1 AND c.state='skipped' AND c.attempt_count=0 AND c.failure_code='audit_run_budget_exhausted'").bind(limit_run).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(skipped, 1);
-    assert_eq!(wire.requests.lock().unwrap().len(), 2);
     // Local eligibility alone never authorizes egress; revoke a frozen sample before dispatch.
     let privacy_run = audit::store::start_run(
         &db,
@@ -505,7 +436,7 @@ print(json.dumps(b,ensure_ascii=False))
         &db,
         &SaveSettings {
             command_ref: Uuid::new_v4(),
-            expected_revision: 3,
+            expected_revision: 2,
             settings: private_settings,
         },
     )
@@ -545,11 +476,23 @@ print(json.dumps(b,ensure_ascii=False))
     owner.heartbeat().await.unwrap();
     if let Some(binary) = std::env::var_os("OCR_AUDIT_BROWSER_PROOF_BINARY") {
         let status = tokio::task::spawn_blocking(move || {
+            let proof =
+                "local_web::ocr_audit::tests::owned_audit_ui_reads_and_appends_a_human_opinion";
+            let listed = std::process::Command::new(&binary)
+                .args([proof, "--ignored", "--exact", "--list"])
+                .output()
+                .expect("list owned audit browser proof");
+            assert!(
+                listed.status.success()
+                    && String::from_utf8_lossy(&listed.stdout)
+                        .lines()
+                        .any(|line| line == format!("{proof}: test")),
+                "the API binary must contain the exact owned audit browser proof"
+            );
             std::process::Command::new(binary)
-                .arg(
-                    "local_web::ocr_audit::tests::owned_audit_ui_reads_and_appends_a_human_version",
-                )
+                .arg(proof)
                 .arg("--ignored")
+                .arg("--exact")
                 .arg("--nocapture")
                 .status()
                 .unwrap()
@@ -579,14 +522,47 @@ print(json.dumps(b,ensure_ascii=False))
     assert_eq!(wire.requests.lock().unwrap().len(), 3);
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();
-    let source = audit::source::load_in(&mut db.pool().acquire().await.unwrap(), adoption)
+    let source = audit::source::load_in(&mut db.pool().acquire().await.unwrap(), reading)
         .await
         .unwrap()
         .unwrap();
+    let current_revision: i64 = sqlx::query_scalar(
+        "SELECT max(revision) FROM linggan_ocr_audit_review WHERE sample_ref=$1",
+    )
+    .bind(sample)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    audit::review::review(
+        &db,
+        &audit::review::Review {
+            command_ref: Uuid::new_v4(),
+            expected_revision: current_revision,
+            decision: "pending".into(),
+            issue_ref: None,
+            metrics: Default::default(),
+            ..review.clone()
+        },
+    )
+    .await
+    .unwrap();
+    let reopened = audit::report::report(&db, run_ref).await.unwrap();
+    assert_eq!(
+        reopened["pools"][0]["humanReviewedSamples"], 0,
+        "a pending latest opinion cannot fall back to an older reviewed version"
+    );
+    assert_eq!(
+        reopened["pools"][0]["metrics"]["bodyMissing"]["denominator"],
+        0
+    );
+    assert_eq!(
+        reopened["pools"][0]["pendingDifferences"], reopened["pools"][0]["modelDifferences"],
+        "a whole-image pending opinion reopens every difference"
+    );
     sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-ocr-audit-proof','synthetic restriction',clock_timestamp())").bind(Uuid::new_v4()).bind(source.slot_key).execute(db.pool()).await.unwrap();
     assert!(
-        audit::review::review(&db, &review).await.is_err(),
-        "a repeated command cannot reveal withdrawn adoption text"
+        audit::review::review(&db, &review).await.unwrap() == opinion,
+        "a receipt replay exposes references only, never withdrawn material text"
     );
     assert!(audit::report::detail(&db, sample).await.is_err());
     assert_eq!(
@@ -595,6 +571,6 @@ print(json.dumps(b,ensure_ascii=False))
     );
     wire.finish().await;
     println!(
-        "owned OCR worker → AI visual blind read → append-only human version → dossier/report → withdrawal passed; synthetic only"
+        "owned OCR worker → AI visual blind read → independent audit opinion → canonical reading/report → withdrawal passed; synthetic only"
     );
 }

@@ -51,8 +51,7 @@ export function WorkComparisonPanel(){
           <div className={styles.compareRow}>{data.items.map(item=><div className={styles.compareCell} key={item.workRef}>{METRICS.filter(key=>key!==metric).map(key=><div className={styles.footer} key={key}><span className={styles.meta}>{metricLabels[key]}</span><span className={styles.value} title={moment(item.metrics[key].observedAt)}>{metricValue(item.metrics[key])}</span></div>)}</div>)}</div>
           <div className={styles.compareLabel}>已取得内容与来源</div>
           <div className={styles.compareRow}>{data.items.map(item=><div className={styles.compareCell} key={item.workRef}>
-            {item.resource?.fragment?<><blockquote className={styles.quote}>{item.resource.fragment.text}</blockquote><p className={styles.meta}>{item.resource.fragment.truncated?'当前为来源节选；展开底稿查看已取得内容。':'原文片段，不代表全部内容。'}</p></>:<p className={styles.meta}>当前没有可显示的来源节选。</p>}
-            {item.resource&&<DossierReadout work={item.workRef}/>}<p><EvidenceLink work={item.workRef}/></p>
+            {item.resource&&<DossierReadout work={item.workRef} cutoff={data.knowledgeCutoff}/>}<p><EvidenceLink work={item.workRef}/></p>
           </div>)}</div>
         </div>
       </div>

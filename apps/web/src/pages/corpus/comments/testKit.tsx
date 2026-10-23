@@ -22,7 +22,7 @@ export function wordCloud(domain = DOMAIN, days = 56) {
    { text: '三分钟关卡', count: 2, workCount: 1, category: 'approach', examples: [] },
   ] };
 }
-export function policy(ref = POLICY) { return { policyRef: ref, methodName: '合成方法', recordingState: 'recorded', isActive: true, defaults: { commentBudget: 100, contextCharacterBudget: 6000 }, methodManifest: { stages: Object.fromEntries(['semantic', 'resolution', 'pair'].map(k => [k, { systemInstruction: '<stage-instructions>\n\n</stage-instructions>', outputSchema: {} }])) } }; }
+export function policy(ref = POLICY) { return { policyRef: ref, methodName: '合成方法', recordingState: 'recorded', isActive: true, defaults: { commentBudget: 100 }, methodManifest: { stages: Object.fromEntries(['semantic', 'resolution', 'pair'].map(k => [k, { systemInstruction: '<stage-instructions>\n\n</stage-instructions>', outputSchema: {} }])) } }; }
 export const calls: { url: URL; method: string; body: Record<string, unknown> | null; signal: AbortSignal | null }[] = [];
 export function defaultReply(url: URL) {
  if (url.pathname === '/api/local/ai-settings') return businessSettingsFixture();

@@ -41,6 +41,17 @@ async fn work(
 ) -> Uuid {
     work_with_text(database, index, platform, likes, days, true).await
 }
+
+/// Match ordinary content admission: Dossier v2 owns a canonical body reading,
+/// so Topic Map evidence must not read a raw detail row as its source text.
+async fn publish_current_body(database: &Database, work: Uuid) {
+    let mut transaction = database.pool().begin().await.unwrap();
+    linggan_evidence::research_dossier::native::publish_current_body_in(&mut transaction, work)
+        .await
+        .unwrap();
+    transaction.commit().await.unwrap();
+}
+
 async fn work_with_text(
     database: &Database,
     index: usize,
@@ -70,6 +81,7 @@ async fn work_with_text(
         "合成样本·成人环境转换",
     ];
     sqlx::query("INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,like_count,like_count_state,published_at,published_at_source_kind,published_at_source_field,published_at_precision,published_at_parser_version)VALUES($1,$2,$3,0,scope_001_now()::text,$4,'KNOWN',$5,'KNOWN',$6,'KNOWN','合成明确发布记录','KNOWN',$5,$7,$8,$9,scope_001_now()-($10*interval '1 day'),'platform_epoch','publishedAt','second','synthetic-proof.v1')").bind(Uuid::new_v4()).bind(reference).bind(package).bind(if has_text{titles[index%titles.len()]}else{""}).bind(if has_text{format!("SYNTHETIC ONLY 合成边界测试，第{index}篇：记录明确行动、尝试与限制，不表示真实研究。")}else{String::new()}).bind(if index==0{"合成我方账号"}else{"合成外部作者"}).bind(if index==0{"synthetic-own"}else{"synthetic-peer"}).bind(likes).bind(if likes.is_some(){"KNOWN"}else{"UNKNOWN"}).bind(days).execute(database.pool()).await.unwrap();
+    publish_current_body(database, reference).await;
     sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(reference).bind(domain()).bind(package).execute(database.pool()).await.unwrap();
     reference
 }
@@ -563,6 +575,7 @@ async fn saved_alternative_freezes_source_version_and_concurrent_saves_do_not_st
     .unwrap();
     sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason)VALUES($1,1,'accepted_for_library_content','SYNTHETIC_NEW_SOURCE_VERSION')").bind(package).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,searchable_text,creator_display_name,creator_display_name_state,published_at_source_text_state) VALUES($1,$2,$3,1,scope_001_now()::text,'合成新来源版本','KNOWN','SYNTHETIC CHANGED BODY','KNOWN','SYNTHETIC CHANGED BODY','合成我方账号','KNOWN','UNKNOWN')").bind(Uuid::new_v4()).bind(refs[0]).bind(package).execute(database.pool()).await.unwrap();
+    publish_current_body(&database, refs[0]).await;
     let changed = read_topic_map(&database, &query).await.unwrap();
     let alternative: Uuid = changed.alternatives[0]["alternativeRef"]
         .as_str()

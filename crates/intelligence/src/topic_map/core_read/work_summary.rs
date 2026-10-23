@@ -21,6 +21,9 @@ impl Coverage {
         self.total_windows = self
             .total_windows
             .max(part.input.coverage["windowCount"].as_u64().unwrap_or(0) as usize);
+        if !part.current_coverage_eligible {
+            return;
+        }
         // Model/config identities audit a run; they cannot multiply source
         // coverage. Include parent ranges so repeated child text does not hide
         // unprocessed pages of its surrounding conversation.
@@ -41,7 +44,7 @@ impl Coverage {
             .iter()
             .filter(|f| crate::topic_map_research::is_research_evidence(f))
         {
-            // The same source span has one identity even when v1/v2 window IDs differ.
+            // Repeated windows share the canonical source span identity.
             let origin = crate::topic_map_research::semantic_source_identity(&part.input, f);
             let ranges = self.spans.entry(origin).or_default();
             if part.is_partial() {
@@ -102,7 +105,7 @@ pub(super) fn author_journey(part: &Window) -> Option<&Value> {
             && refs.iter().all(|c| {
                 part.input.fragments.iter().any(|f| {
                     c["fragmentId"].as_str() == Some(&f.fragment_id)
-                        && ["title", "body", "cover_headline", "ocr", "transcript"].contains(&f.field.as_str())
+                        && crate::topic_map_research_analysis::fragment_role(f) == "author"
                 })
             })
     });

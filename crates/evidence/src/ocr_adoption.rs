@@ -1,17 +1,15 @@
-//! Deterministic adoption of saved OCR observations. No I/O, inference, or persistence.
+//! Deterministic quality assessment of saved OCR observations. No I/O or inference.
 //!
 //! Layout labels describe the model's guess, not the author's cover title. An accepted
-//! projection remains a machine decision; it never certifies truth or author attribution.
+//! assessment remains a machine opinion; canonical reading content is published separately.
 mod partial;
 mod quality;
 mod title;
 mod types;
 mod ui;
 mod validation;
-mod work;
 
 pub use types::*;
-pub use work::{WorkFragment, WorkImageText, WorkProjection, WorkSegment, project_work};
 
 pub const RULE_VERSION: &str = "ocr-adoption-v6.1";
 
@@ -46,29 +44,6 @@ pub fn content_hash(bytes: &[u8]) -> String {
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect()
-}
-
-/// A display projection only. This function never writes to a platform-title field.
-pub fn display_title<'a>(
-    platform: Option<&'a str>,
-    assessment: &'a Assessment,
-) -> DisplayTitle<'a> {
-    if let Some(text) = platform.filter(|s| !s.trim().is_empty()) {
-        DisplayTitle {
-            source: DisplaySource::PlatformTitle,
-            text: Some(text),
-        }
-    } else if assessment.cover_title.state == TitleState::Usable {
-        DisplayTitle {
-            source: DisplaySource::CoverOcr,
-            text: assessment.cover_title.text.as_deref(),
-        }
-    } else {
-        DisplayTitle {
-            source: DisplaySource::Unknown,
-            text: None,
-        }
-    }
 }
 
 /// Derives visual order for a single crop without changing its raw line ordinals.

@@ -10,6 +10,11 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-10-23 · 研究底稿 v2
+
+- [唯一底稿合同](data-contracts/research-dossier.md)：完整区块、显式当前、独立校正、精确引用与按需表示。
+- [实施与验收](plans/active/research-dossier-v2.md)：当前授权、表面/状态/依赖、测试矩阵与实际交付状态；取代 v1 并行输入的实施边界。
+
 ## 2026-10-22 · COMMENT-WORD-CLOUD-V23（候选）
 
 - [紧凑概览 + 领域词云执行计划](plans/active/comment-wordcloud-v23-20261022.md)：用户批准 V2.3，保留研究与来源边界。
@@ -22,10 +27,10 @@
 
 协作与风险分级统一读[工作包协作协议](governance/agent-collaboration.md)。业务行为、数据、权限和外部调用先读[安全与领域约束](agents/safety-invariants.md)；该文件保留原根 AGENTS 的不变量。运行状态仅在运行/发布/跨包依赖任务中读取，不作为所有实现的预读门。
 
-- [手动云端 OCR 的人工采用合同](data-contracts/ocr-manual-human-adoption.md)：#454 叠加候选；云端机器预览与人工采用的追加版本边界，不混入 OCR 抽检样本。
-- [手动云端 OCR 人工采用实施计划](plans/active/ocr-manual-human-adoption-454.md)：叠加 Draft PR #477 的受控写入口和合成验证范围；不写共享库、不部署。
-- [手动云端 OCR 人工采用发布运行手册](runbooks/ocr-manual-human-adoption-release-454.md)：#477→#479 合并后才可按精确 main 授权使用的备份、0145、3000 回读与回退条件；本身不授权发布。
-- [UI 变更清单](design/changes/ocr-manual-human-adoption-454-ui-change-manifest.md) / [验收记录](design/acceptance/ocr-manual-human-adoption-454-acceptance.md)：当前作品图组的人工核对表单、真实回执和未证明边界。
+- [手动云端 OCR 的人工采用合同](data-contracts/ocr-manual-human-adoption.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
+- [手动云端 OCR 人工采用实施计划](archive/plans/ocr-manual-human-adoption-454.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
+- [手动云端 OCR 人工采用发布运行手册](runbooks/ocr-manual-human-adoption-release-454.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
+- [UI 变更清单](design/changes/ocr-manual-human-adoption-454-ui-change-manifest.md) / [验收记录](design/acceptance/ocr-manual-human-adoption-454-acceptance.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
 
 
 - [主题图谱紧凑工作区变更](design/changes/topic-map-compact-382.md)：#382 当前 UI 后续，取代旧工作区布局，不改研究与来源合同。
@@ -61,11 +66,11 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 
 Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用，不留新旧双轨（[DEC-0010](decisions/0010-web-frontend-react.md)）。唯一推进入口是 [WEB-REACT-001 计划](plans/active/web-react-001.md)（Issue #430），它合并了 UI 改版专项 UIUX-CONTENT-WORKBENCH-001（Issue #425，原生前端停止、后端继续，React 归阶段 C）。迁移期间旧页面冻结，只修阻断使用的缺陷；新页面一律用 React。阶段 A+B 已随 PR #431 合并至 main@0a90fd4a，3000 同版本部署和线上只读链路经 #430 核验；阶段 C 首版已随 PR #432 合并；Mog 对其 V3 还原不予验收，当前在独立候选重新落地并补齐本篇材料准备，验收前不合并部署。基础验收记录见 [ACC-WEB-REACT-001-B](design/acceptance/web-react-001-b-acceptance.md)。
 
-## 研究底稿与图片分层第一阶段
+## 研究底稿第一阶段历史
 
-- [实施计划](plans/active/research-dossier-001.md)：Issue #420，完整模块实施中。
+- [第一阶段历史计划](plans/active/research-dossier-001.md)：Issue #420 历史实施；当前实现与验收统一转入 [v2](plans/active/research-dossier-v2.md)。
 - [底稿与任务材料合同](data-contracts/research-dossier.md)：本期数据、分层和输入范围。
-- [UI 变更清单](design/changes/research-dossier-001-ui-change-manifest.md)：详情、对照和预览。
+- [第一阶段 UI 变更历史](design/changes/research-dossier-001-ui-change-manifest.md)：旧详情、对照和预览记录；当前表面与验收统一见 [v2 实施计划](plans/active/research-dossier-v2.md)。
 
 ## 评论研究产品化 · 当前交付入口
 
@@ -459,7 +464,7 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 |---|---|---|
 | [统一实施计划](plans/active/ai-gen1-001.md) | 活跃计划 | #454；PR-1A → PR-1B → PR-1C；各阶段权限与验收 |
 | [第一代 AI 决定](decisions/0011-ai-generation-one.md) | 已确认决定 | 设置集中、skill 范围、顺序与旧决定替代关系 |
-| [每篇解读材料输入](data-contracts/note-material-input.md) | 代码事实优先 | 新适配、标签、指纹/来源、就绪、快照及窄批处理 |
+| [每篇解读材料输入历史](data-contracts/note-material-input.md) | 已被 v2 取代 | 不再是对外合同；当前读取见 research-dossier.v2 |
 | [PR-1A 验收回执](audits/ai-gen1-pr1a-acceptance.md) | 一次性报告 | 合成隔离证明、收尾审查、Draft 与未证层 |
 
 ## LIDS-UI-001 · 正式前端采用
@@ -483,7 +488,7 @@ AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundat
 
 - [AI-GEN1 C0离线计划](plans/active/ai-gen1-pr1c0-offline.md)：离线合同/合成流程，C1真实启用另计；[离线合同](data-contracts/note-interpretation-offline.md)。
 
-- [每篇解读材料只读预览](plans/active/ai-gen1-note-material-preview.md)：#454/#420，Mog已确认G1；最小UI增量，运行/G4另列。
+- [每篇解读材料只读预览历史](plans/active/ai-gen1-note-material-preview.md)：#454/#420 历史范围；当前底稿界面与验证归入 RESEARCH-DOSSIER-V2。
 
 ## 运营 LIDS 发布与标准件同步（2026-10-20）
 

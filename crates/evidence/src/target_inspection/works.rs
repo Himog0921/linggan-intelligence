@@ -125,6 +125,8 @@ async fn snapshot(
     crate::material_projection::enrich_media_material(tx, &mut resource, cutoff)
         .await
         .map_err(|_| Error::Material)?;
+    // Research text is read through canonical V2 at this same cutoff, never the list excerpt.
+    resource.evidence_fragment = None;
     let mut reasons = Vec::new();
     let metrics = match mode {
         ComparisonMode::Current => current_metrics(tx, &current).await?,

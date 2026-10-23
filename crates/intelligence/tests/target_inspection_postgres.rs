@@ -17,11 +17,12 @@ use linggan_intelligence::ai_foundation::{
     control::BudgetPolicy,
     control_store::{Actor, ControlScope},
     provider_store::{ChangeEgress, MaterialClass, change_egress},
-    task_config::{ModelSelection, SaveTaskConfig, save_task_config},
+    task_config::{MaterialColumn, ModelSelection, SaveTaskConfig, save_task_config},
     work_comparison as comparison,
 };
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
+use sqlx::Row;
 use uuid::Uuid;
 
 async fn db(name: &str) -> Database {
@@ -44,10 +45,36 @@ async fn db(name: &str) -> Database {
             include_str!("../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
         ),
         (
+            "0146_research_dossier_v2",
+            include_str!("../../../database/migrations/0146_research_dossier_v2.sql"),
+        ),
+        (
+            "0147_comment_study_full_context",
+            include_str!("../../../database/migrations/0147_comment_study_full_context.sql"),
+        ),
+        (
+            "0148_dossier_consumer_contracts",
+            include_str!("../../../database/migrations/0148_dossier_consumer_contracts.sql"),
+        ),
+        (
             "0149_target_inspector_comparison",
             include_str!("../../../database/migrations/0149_target_inspector_comparison.sql"),
         ),
     ] {
+        if let Some(recorded) = sqlx::query_scalar::<_, String>(
+            "SELECT migration_sha256 FROM linggan_local_schema_migration WHERE migration_id=$1",
+        )
+        .bind(id)
+        .fetch_optional(db.pool())
+        .await
+        .unwrap()
+        {
+            assert_eq!(
+                recorded,
+                linggan_intelligence::research_text::content_hash(source)
+            );
+            continue;
+        }
         sqlx::raw_sql(source).execute(db.pool()).await.unwrap();
         sqlx::query("INSERT INTO linggan_local_schema_migration(migration_id,migration_sha256) VALUES($1,$2)")
             .bind(id).bind(linggan_intelligence::research_text::content_hash(source)).execute(db.pool()).await.unwrap();
@@ -85,6 +112,8 @@ async fn work(db: &Database, id: &str, likes: i64) -> Uuid {
     .unwrap();
     sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
         .bind(Uuid::new_v4()).bind(work).bind(fixture::dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+    fixture::dossier::fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":id}),"media_slots","xhs",
+        json!({"target":{"contentExternalId":id,"imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":0}},"layers":[fixture::dossier::fixture::coverage_layer("media_slots",0)]}),vec![]).await;
     work
 }
 async fn counts(db: &Database) -> Value {
@@ -129,10 +158,11 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
     };
     assert!(inspection::read_dossier(&db, &other, a).await.is_err());
     let observation = Uuid::new_v4();
-    fixture::dossier::fixture::submit_package(&db,"media_slots",json!({"contentExternalId":"inspector-a"}),
-        json!({"kind":"media_slot","slotKey":"xhs:inspector-a:image:1","observationRef":observation,
-        "slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/image.jpg","candidateUris":["https://media.example/image.jpg"],"observedAt":"2026-09-11T02:00:00Z"},
-        "sourceObject":{"platform":"xhs","type":"content","externalId":"inspector-a"}})).await;
+    fixture::dossier::fixture::submit_custom_package(&db,"xhs",&["media_slots"],json!({"contentExternalId":"inspector-a"}),"media_slots","xhs",
+        json!({"target":{"contentExternalId":"inspector-a","imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":1}},"layers":[fixture::dossier::fixture::coverage_layer("media_slots",1)]}),vec![json!({"kind":"media_slot","slotKey":"xhs:inspector-a:image:1","observationRef":observation,
+        "slot":{"role":"image","ordinal":1,"displayOrdinal":1,"displayOrderBasis":"platform_explicit"},
+        "observation":{"externalUri":"https://media.example/image.jpg","candidateUris":["https://media.example/image.jpg"],"observedAt":"2026-09-11T02:00:00Z"},
+        "sourceObject":{"platform":"xhs","type":"content","externalId":"inspector-a"}})]).await;
     let dossier = inspection::read_dossier(&db, &scope, a).await.unwrap();
     assert!(
         dossier.partial,
@@ -174,10 +204,46 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
     )
     .await
     .unwrap();
+    let raw_empty = inspection::read_dossier(&db, &scope, a).await.unwrap();
+    assert!(
+        raw_empty.partial,
+        "V2 empty recognition is a gap until human confirmation"
+    );
+    let canonical = linggan_evidence::research_dossier::read(&db, a)
+        .await
+        .unwrap()
+        .unwrap();
+    let image = canonical
+        .materials
+        .iter()
+        .find(|unit| unit["kind"] == "image")
+        .unwrap();
+    let reading: Uuid = image["currentRevisionRef"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    linggan_evidence::material_reading::review_reading(
+        &db,
+        image["ref"].as_str().unwrap().parse().unwrap(),
+        &linggan_evidence::material_reading::ReviewReadingRequest {
+            command_ref: Uuid::new_v4(),
+            expected_current_revision_ref: Some(reading),
+            candidate_revision_ref: reading,
+            action: "edit".into(),
+            actor: "synthetic-human-proof".into(),
+            reason: "synthetic explicit image has no text".into(),
+            edited_blocks: Some(vec![]),
+            verified: true,
+            resolved_issue_keys: vec!["recognition_empty".into()],
+        },
+    )
+    .await
+    .unwrap();
     let complete = inspection::read_dossier(&db, &scope, a).await.unwrap();
     assert!(
         !complete.partial,
-        "known empty is an observed result, not missing processing: {:?}",
+        "human-confirmed empty reading is qualified: {:?}",
         complete.limitations
     );
     let frozen = Scope {
@@ -196,8 +262,19 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
     let restricted = inspection::read_dossier(&db, &frozen, a).await.unwrap();
     assert!(restricted.partial);
     assert_eq!(
-        restricted.material_revision, complete.material_revision,
-        "no text changed in this withdrawal case"
+        restricted
+            .fragments
+            .iter()
+            .find(|f| f.field == "body")
+            .unwrap()
+            .reading_ref,
+        complete
+            .fragments
+            .iter()
+            .find(|f| f.field == "body")
+            .unwrap()
+            .reading_ref,
+        "the native text reading did not change"
     );
     assert_ne!(
         comparison::fingerprint(&[complete]),
@@ -212,9 +289,23 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
     let db = db("inspector_v4_commands").await;
     let scope = creator(&db).await;
     let works = vec![
-        work(&db, "comparison-a", 0).await,
+        work(&db, "dossier-note", 0).await,
         work(&db, "comparison-b", 8).await,
     ];
+    fixture::dossier::ordinary_ocr(&db).await;
+    let image_row=sqlx::query("SELECT u.*,r.source_location,r.derivative_ref FROM linggan_material_unit u JOIN linggan_material_reading r ON r.reading_ref=u.current_reading_ref WHERE u.content_public_ref=$1 AND u.kind='image'").bind(works[0]).fetch_one(db.pool()).await.unwrap();
+    let image_reading: Uuid = image_row.get("current_reading_ref");
+    let mut tx = db.pool().begin().await.unwrap();
+    let rich=linggan_evidence::material_reading::publish_in(&mut tx,linggan_evidence::material_reading::NewReading {
+        content_public_ref:works[0],unit_key:image_row.get("unit_key"),kind:"image".into(),slot_key:image_row.get("slot_key"),page:image_row.get("page_ordinal"),source_version:image_row.get("source_version"),source_state:"present".into(),
+        derivative_ref:image_row.get("derivative_ref"),producer_ref:None,generated_by:"ordinary_ocr".into(),rule_version:"dossier-content.v2:synthetic-structure-proof".into(),
+        blocks:vec![json!({"kind":"table","speaker":"other","columns":["条件","行动"],"rows":[["5mg TABLE-CANARY","不要加量"]],"bbox":[0.1,0.28,0.75,0.025]}),
+            json!({"kind":"dialogue","turns":[{"speaker":"other","text":"没有改善 DIALOGUE-CANARY"},{"speaker":"author","text":"先复核"}]}),
+            json!({"kind":"paragraph","speaker":"unconfirmed","text":"局部待核对","issues":[{"key":"synthetic-local","code":"unclear","message":"合成局部问题","resolution":"reading_edit"}]})],
+        issues:vec![],source_location:image_row.get("source_location"),publication:linggan_evidence::material_reading::Publication::Automatic{expected_current:Some(image_reading)},
+    }).await.unwrap();
+    tx.commit().await.unwrap();
+    assert!(rich.current);
     let endpoint = wire::Endpoint::start(false).await;
     let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
         std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap().into(),
@@ -244,7 +335,15 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
                 limits: configured.limits.clone(),
             }),
             skill_version_ref: None,
-            material_columns: Default::default(),
+            material_columns: [
+                MaterialColumn::Title,
+                MaterialColumn::Body,
+                MaterialColumn::Tags,
+                MaterialColumn::Ocr,
+                MaterialColumn::Transcript,
+                MaterialColumn::FrameText,
+            ]
+            .into(),
             budget: BudgetPolicy::Unlimited,
         },
     )
@@ -387,6 +486,47 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
     })
     .await
     .expect("actual shared executor settles content comparison");
+    assert!(
+        !result.outdated,
+        "time alone cannot invalidate unchanged material"
+    );
+    let quoted = &result.materials[0].fragments;
+    assert_eq!(
+        quoted.len(),
+        1,
+        "only the published claim's exact block is transported"
+    );
+    assert_eq!(quoted[0].reading_ref, Some(rich.reading_ref));
+    assert_eq!(quoted[0].unit_ref, Some(rich.unit_ref));
+    assert_eq!(quoted[0].structure["kind"], "table");
+    assert_eq!(quoted[0].speaker, "other");
+    assert_eq!(quoted[0].structure["bbox"], json!([0.1, 0.28, 0.75, 0.025]));
+    assert_eq!(quoted[0].source_location["page"], 1);
+    let public = serde_json::to_value(&result.materials).unwrap();
+    assert!(public[0]["fragments"][0].get("text").is_none());
+    let requests = endpoint.requests.lock().unwrap();
+    let prompt = wire::text(requests.last().unwrap(), "user");
+    assert_eq!(prompt.matches("TABLE-CANARY").count(), 1);
+    assert_eq!(prompt.matches("DIALOGUE-CANARY").count(), 1);
+    let packet: Value = serde_json::from_str(&prompt).unwrap();
+    let fragments = packet["documents"][0]["fragments"].as_array().unwrap();
+    let table = fragments
+        .iter()
+        .find(|f| f["content"]["kind"] == "table")
+        .unwrap();
+    assert_eq!(table["speaker"], "other");
+    assert_eq!(table["readingRef"], rich.reading_ref.to_string());
+    assert_eq!(table["unitRef"], rich.unit_ref.to_string());
+    assert!(
+        fragments.iter().any(|f| f["content"]["kind"] == "dialogue"
+            && f["content"]["turns"][0]["speaker"] == "other")
+    );
+    assert!(fragments.iter().any(|f| {
+        f["issues"]
+            .as_array()
+            .is_some_and(|issues| !issues.is_empty())
+    }));
+    drop(requests);
     let analysis = result.result.unwrap();
     assert_eq!(analysis.claims.len(), 1);
     assert_eq!(analysis.claims[0].target_citations[0].work_ref, works[0]);

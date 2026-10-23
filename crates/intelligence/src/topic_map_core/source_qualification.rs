@@ -20,14 +20,20 @@ pub(crate) async fn unavailable_definitions(
         .map(|(unavailable, _)| unavailable)
 }
 
-pub(crate) type QualifiedInputs = HashMap<(Uuid, Uuid), Vec<ResearchInput>>;
+pub(crate) type FrozenScope = (Uuid, Uuid, String);
+pub(crate) type FrozenScopes = HashMap<FrozenScope, BTreeSet<Uuid>>;
+
+pub(crate) struct QualifiedInputs {
+    pub current: HashMap<(Uuid, Uuid), Vec<ResearchInput>>,
+    pub frozen: HashMap<FrozenScope, Vec<ResearchInput>>,
+}
 
 /// Merge definition creation sources and projected result sources before qualification.
 /// Only request-local inputs are reused; every request rechecks current authority.
 pub(crate) async fn qualify_definitions_and_inputs(
     db: &Database,
     domain: Option<Uuid>,
-    additional_scopes: &HashMap<(Uuid, Uuid), BTreeSet<Uuid>>,
+    additional_scopes: &FrozenScopes,
 ) -> Result<(HashSet<Uuid>, QualifiedInputs), ModelError> {
     let rows = sqlx::query("SELECT rule.definition_ref,rule.domain_ref,task.work_public_ref,run.config_ref,request.request_manifest FROM linggan_topic_map_concept_rule rule LEFT JOIN linggan_topic_map_research_request request ON request.invocation_ref=rule.invocation_ref LEFT JOIN linggan_topic_map_research_task task USING(task_ref) LEFT JOIN linggan_topic_map_research_run run ON run.run_ref=task.run_ref WHERE ($1::uuid IS NULL OR rule.domain_ref=$1)")
         .bind(domain).fetch_all(db.pool()).await?;
@@ -40,23 +46,41 @@ pub(crate) async fn qualify_definitions_and_inputs(
         ) else {
             continue;
         };
+        let Some(as_of) = topic_map_research::manifest_as_of(&manifest) else {
+            continue;
+        };
         scopes
-            .entry((row.get("domain_ref"), config))
+            .entry((row.get("domain_ref"), config, as_of.to_owned()))
             .or_default()
             .extend(topic_map_research::manifest_source_work_refs(
                 work, &manifest,
             ));
     }
-    let mut inputs = HashMap::<(Uuid, Uuid), Vec<ResearchInput>>::new();
-    for ((domain, config), scope) in scopes {
+    let mut frozen = HashMap::<FrozenScope, Vec<ResearchInput>>::new();
+    for ((domain, config, as_of), scope) in scopes {
+        let scope: Vec<_> = scope.into_iter().collect();
+        let loaded =
+            topic_map_research::load_inputs_for_works_at(db, domain, config, &scope, &as_of)
+                .await
+                .map_err(source_error)?;
+        frozen.insert((domain, config, as_of), loaded);
+    }
+    // Current inventory supplies coverage denominators only. Frozen request
+    // restoration always selects the exact cutoff above, without a latest-source retry.
+    let mut current_scopes = HashMap::<(Uuid, Uuid), BTreeSet<Uuid>>::new();
+    for ((domain, config, _), scope) in additional_scopes {
+        current_scopes
+            .entry((*domain, *config))
+            .or_default()
+            .extend(scope);
+    }
+    let mut current = HashMap::new();
+    for ((domain, config), scope) in current_scopes {
         let scope: Vec<_> = scope.into_iter().collect();
         let loaded = topic_map_research::load_inputs_for_works(db, domain, config, &scope)
             .await
-            .map_err(|e| match e {
-                topic_map_research::ResearchError::Database(e) => ModelError::Database(e),
-                _ => ModelError::Source,
-            })?;
-        inputs.insert((domain, config), loaded);
+            .map_err(source_error)?;
+        current.insert((domain, config), loaded);
     }
     let mut unavailable = legacy_unverifiable_definitions(db, domain).await?;
     let mut dependencies = HashMap::new();
@@ -74,14 +98,22 @@ pub(crate) async fn qualify_definitions_and_inputs(
             row.get::<Uuid, _>("definition_ref"),
             definition_dependencies(&manifest),
         );
-        if topic_map_research::restore_scoped_window(&inputs[&(domain, config)], work, &manifest)
-            .is_none()
-        {
+        let qualified = topic_map_research::manifest_as_of(&manifest)
+            .and_then(|as_of| frozen.get(&(domain, config, as_of.to_owned())))
+            .and_then(|inputs| topic_map_research::restore_scoped_window(inputs, work, &manifest));
+        if qualified.is_none() {
             unavailable.insert(row.get("definition_ref"));
         }
     }
     propagate_unavailable(&mut unavailable, &dependencies);
-    Ok((unavailable, inputs))
+    Ok((unavailable, QualifiedInputs { current, frozen }))
+}
+
+fn source_error(error: topic_map_research::ResearchError) -> ModelError {
+    match error {
+        topic_map_research::ResearchError::Database(error) => ModelError::Database(error),
+        _ => ModelError::Source,
+    }
 }
 
 async fn legacy_unverifiable_definitions(

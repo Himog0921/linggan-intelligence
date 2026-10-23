@@ -1,4 +1,8 @@
-import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { fetchDossier } from './dossierApi';
+import { dossierKey } from './evidenceKeys';
+import { DossierBlocks } from './DossierBlocks';
+import { emptyMaterialNote, hideCachedReading } from './dossierPresent';
 import { DossierComments } from './DossierComments';
 import { InlineState, Section, SourceNote, StateLine } from './Primitives';
 import { MediaRail } from './MediaRail';
@@ -17,31 +21,20 @@ export interface PanelContext {
   comments: CommentChannel;
   onOpenViewer: (index: number, opener: HTMLElement) => void;
 }
-const COLLAPSE_CHARACTERS = 360;
-const COLLAPSE_LINES = 8;
-function Body({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const long = Array.from(text).length > COLLAPSE_CHARACTERS || text.split('\n').length > COLLAPSE_LINES;
-  return <div>
-    <p className={styles.bodyBlock} data-collapsed={long && !expanded}>{text}</p>
-    {long ? <button type="button" className={styles.moreText} aria-expanded={expanded}
-      onClick={() => setExpanded(value => !value)}>{expanded ? '收起正文' : '展开全文'}</button> : null}
-  </div>;
-}
 /** Work page reads source content only. The shared inspector header owns metadata. */
-export function ReadingPanel({ context, domain }: { context: PanelContext; domain: string }) {
+export function ReadingPanel({ context, domain, active }: { context: PanelContext; domain: string; active: boolean }) {
   const { item, inspector, listItem, onOpenViewer } = context;
   const objects = mediaObjects(inspector, (listItem ?? item).fragment);
-  const body = inspector.detail.body;
+  const reading = useQuery({ queryKey: dossierKey(domain, item.ref), queryFn: ({ signal }) => fetchDossier(item.ref, domain, signal), enabled: active, staleTime: 30_000, gcTime: 0 });
+  const body = hideCachedReading(reading.error) ? undefined : reading.data?.dossier.materials.find(unit => unit.kind === 'body');
   const ocr = laneSummary(item.lanes, 'ocr')?.state;
   const asr = laneSummary(item.lanes, 'asr')?.state;
   return <div className={styles.readingBody}>
     <Section title="正文">
-      {body?.state === 'KNOWN' && body.value
-        ? <Body text={body.value} />
-        : <><SourceNote>正文通道尚未取得</SourceNote><StateLine state={laneSummary(item.lanes, 'detail')?.state} /></>}
+      {reading.isPending ? <p role="status">正在读取正文…</p> : reading.isError && !body ? <p role="status">正文读本暂不可读。<button type="button" onClick={() => void reading.refetch()}>重试读取</button></p> : body ? <>{body.blocks.length ? <DossierBlocks blocks={body.blocks} issues={body.issues} /> : <SourceNote>{emptyMaterialNote(body)}</SourceNote>}</> : <SourceNote>正文来源尚未取得。</SourceNote>}
+      {reading.isError && body ? <p role="status">刷新未完成，保留上次读到的正文版本。</p> : null}
     </Section>
-    <OcrRecognition key={item.ref} workRef={item.ref} onOpenSource={(image, opener) => {
+    <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} domain={domain} onOpenSource={(image, opener) => {
       const index = objects.findIndex(object => object.slotKey !== null && (object.slotKey === image.slotKey || image.aliases.includes(object.slotKey)));
       if (index >= 0) onOpenViewer(index, opener);
       else if (image.originalUrl) window.open(image.originalUrl, '_blank', 'noopener,noreferrer');

@@ -514,7 +514,7 @@ export interface ResearchProgress {
   usage: { chargedTokens: number; reservedTokens: number; timezone: string };
   processingLimits: {
     automaticBatchWindows: number;
-    windowChars: number;
+    materialSelection: 'whole_note';
     primaryCommentsPerWindow: number;
   };
   targets: { targetRef: string; displayName: string; kind: string }[];
