@@ -520,16 +520,10 @@ async fn health_reports_the_frontend_build() {
 #[tokio::test]
 async fn workbench_entry_is_registered_and_ops_preserves_explicit_domain() {
     let domain = "00000000-0000-4000-8000-000000000001";
-    let (status, headers, _) =
-        send(app(), &format!("/ops?domain={domain}"), "127.0.0.1:3000").await;
-    assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(
-        headers[header::LOCATION],
-        format!("/ops/creation?domain={domain}")
-    );
-    let (status, headers, _) = send(app(), "/ops", "127.0.0.1:3000").await;
-    assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(headers[header::LOCATION], "/ops/creation");
+    let (status, _, _) = send(app(), &format!("/ops?domain={domain}"), "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let (status, _, _) = send(app(), "/ops", "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     let (status, _, _) = send(app(), "/ops/creation", "127.0.0.1:3000").await;
     assert!(matches!(
         status,
@@ -633,10 +627,7 @@ async fn settings_page_real_chain_browser_proof() {
 async fn operations_five_pages_are_react_and_native_assets_are_retired() {
     for page in ["overview", "publications", "accounts", "daily", "io"] {
         let (status, _, body) = send(app(), &format!("/ops/{page}"), "127.0.0.1:3000").await;
-        assert!(matches!(
-            status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert!(!body.contains("data-ops-page"));
     }
     for asset in ["ops.css", "ops.js", "ops-overview.js"] {

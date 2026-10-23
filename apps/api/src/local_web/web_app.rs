@@ -10,7 +10,7 @@ use super::comment_study::local_comment_study_guard;
 use axum::{
     Router,
     extract::{Path, State},
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
     response::{Html, IntoResponse, Redirect, Response},
     routing::get,
@@ -38,6 +38,14 @@ const REACT_PAGES: &[&str] = &[
     "/topics",
     "/topics/offline-review",
     "/topics/{canonical_key}",
+];
+
+const OPS_REACT_PAGES: &[&str] = &[
+    "/ops/overview",
+    "/ops/publications",
+    "/ops/accounts",
+    "/ops/daily",
+    "/ops/io",
 ];
 
 /// 静态资源只允许这些类型：Vite 产物的脚本、样式、图片和字体。入口 HTML 与构建信息不经这里。
@@ -105,6 +113,14 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
     routes_for(WebAppConfig::from_environment())
 }
 
+pub(super) fn ops_routes() -> Router<super::LocalWebState> {
+    let mut pages = Router::new();
+    for page in OPS_REACT_PAGES {
+        pages = pages.route(page, get(ops_entry));
+    }
+    pages.layer(middleware::from_fn(local_comment_study_guard))
+}
+
 pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig) -> Router<S> {
     // 一级入口的默认子页由服务器决定，不放进前端路由：书签与旧链接不依赖脚本也能到达。
     let mut pages = Router::new().route(
@@ -112,7 +128,7 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
         get(|| async { Redirect::temporary("/settings/models") }),
     );
     for page in REACT_PAGES {
-        if *page == "/login" {
+        if *page == "/login" || OPS_REACT_PAGES.contains(page) {
             continue;
         }
         pages = if *page == "/topics/{canonical_key}" {
@@ -176,6 +192,16 @@ async fn entry(State(config): State<WebAppConfig>) -> Response {
             "新版网页的前端文件与后台服务不是同一个版本，已停止提供页面。请重新运行本机同步构建。",
         ),
     }
+}
+
+/// Operations ledger pages are served only after the same request has passed the local-origin
+/// guard and an active team session check.  The creation workspace intentionally keeps its
+/// existing boundary until its own team migration is implemented.
+async fn ops_entry(State(state): State<super::LocalWebState>, headers: HeaderMap) -> Response {
+    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+        return response;
+    }
+    entry(State(WebAppConfig::from_environment())).await
 }
 
 /// Login remains a local development entry: no credential submission or session.

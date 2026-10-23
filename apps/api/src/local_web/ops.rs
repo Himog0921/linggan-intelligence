@@ -1,5 +1,6 @@
 //! WEB-REACT-001 E: existing operations APIs and default entry. No page HTML or legacy assets.
 use super::*;
+use axum::http::HeaderMap;
 use linggan_intelligence::ops_ledger::read::OpsBusiness;
 use serde::Deserialize;
 
@@ -19,7 +20,14 @@ pub(super) struct BusinessQuery {
 }
 
 /// WEB-REACT-001 C: 运营默认进入正式创作工作区；台账五页由同一 React 应用提供。
-async fn entry(Query(query): Query<BusinessQuery>) -> Response {
+async fn entry(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Query(query): Query<BusinessQuery>,
+) -> Response {
+    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+        return response;
+    }
     match OpsBusiness::parse(query.domain.as_deref()) {
         Ok(OpsBusiness::All) => Redirect::to("/ops/creation").into_response(),
         Ok(OpsBusiness::Domain(domain)) => {

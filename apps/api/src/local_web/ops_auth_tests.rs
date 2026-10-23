@@ -126,6 +126,160 @@ async fn login_session_logout_and_disabled_member_do_not_leak_credentials() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn ops_ledger_routes_require_an_active_team_session_without_claiming_the_creation_workspace()
+{
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_auth_bound_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    active_member(database.pool(), "ops@example.test", "operator").await;
+    let app = app_with_database(database);
+
+    let protected = [
+        ("GET", "/ops"),
+        ("GET", "/ops/overview"),
+        ("GET", "/ops/publications"),
+        ("GET", "/ops/accounts"),
+        ("GET", "/ops/daily"),
+        ("GET", "/ops/io"),
+        ("GET", "/api/local/ops/businesses"),
+        ("GET", "/api/local/ops/summary"),
+        ("GET", "/api/local/ops/publications"),
+        ("GET", "/api/local/ops/accounts"),
+        ("GET", "/api/local/ops/daily"),
+        ("GET", "/api/local/ops/export"),
+        ("GET", "/api/local/ops/overview"),
+        ("GET", "/api/local/ops/overview/trend"),
+        ("GET", "/api/local/ops/targets"),
+        ("POST", "/api/local/ops/targets"),
+        ("GET", "/ops/covers/00000000-0000-4000-8000-000000000001"),
+    ];
+    for (method, path) in protected {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(header::HOST, "127.0.0.1:3000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "{method} {path}"
+        );
+        assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+        assert_eq!(
+            response.headers()[header::X_CONTENT_TYPE_OPTIONS],
+            "nosniff"
+        );
+        let foreign = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(method)
+                    .uri(path)
+                    .header(header::HOST, "attacker.example:3000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(foreign.status(), StatusCode::FORBIDDEN, "{method} {path}");
+    }
+
+    let creation = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/ops/creation")
+                .header(header::HOST, "127.0.0.1:3000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        creation.status(),
+        StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+    ));
+    let creation_api = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/ops/api/creation/works")
+                .header(header::HOST, "127.0.0.1:3000")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(
+        creation_api.status(),
+        StatusCode::UNAUTHORIZED,
+        "the creation API must retain its existing boundary"
+    );
+    let producer = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/producer/manual-tasks")
+                .header(header::HOST, "127.0.0.1:3000")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{}"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_ne!(
+        producer.status(),
+        StatusCode::UNAUTHORIZED,
+        "the machine producer contract must not inherit browser-session auth"
+    );
+
+    let cookie = login_cookie(app.clone(), "ops@example.test").await;
+    let redirect = app
+        .clone()
+        .oneshot(session_request("/ops", &cookie, "GET"))
+        .await
+        .unwrap();
+    assert_eq!(redirect.status(), StatusCode::SEE_OTHER);
+    assert_eq!(redirect.headers()[header::LOCATION], "/ops/creation");
+    let page = app
+        .clone()
+        .oneshot(session_request("/ops/overview", &cookie, "GET"))
+        .await
+        .unwrap();
+    assert!(matches!(
+        page.status(),
+        StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
+    ));
+    for (method, path) in protected {
+        let response = app
+            .clone()
+            .oneshot(session_request(path, &cookie, method))
+            .await
+            .unwrap();
+        assert_ne!(
+            response.status(),
+            StatusCode::UNAUTHORIZED,
+            "{method} {path} must reach its endpoint after session validation"
+        );
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
 async fn auth_rejects_invalid_cookie_cross_site_and_storage_failures() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("ops_auth_reject_{}", Uuid::new_v4().simple());
