@@ -78,7 +78,7 @@ DeepSeek `deepseek-v4-flash`，接收方 `https://api.deepseek.com/v1`，共82�
 - cloud v3保留unreadable区块中仍存在的字符并标疑点，只有真正空文本才显示缺口；保留旧v2读本资格。角色提示区分界面、背景、字幕、品牌。
 - 普通worker只领取当前注册版本与仍支持的local-vl；显式指定版本的受控入口保留。没有自动重排或执行旧队列。
 - 原文未取得时批次结果为partial，避免声称已经准备。
-- UI删除检查器与底稿重复摘录/标题，压缩材料摘要和间距；问题按key就近去重，未知页码使用独立图片编号，连续相同表达者标签只显示一次，缺口括号不叠加。
+- UI删除证据库侧栏实现说明页脚，以及检查器与底稿重复摘录/标题，压缩材料摘要和间距；问题按key就近去重，未知页码使用独立图片编号，连续相同表达者标签只显示一次，缺口括号不叠加。
 - 无当前读本/候选时不显示不能提交的审核表单，来源和技术版本默认折叠；保留实际风险、采用状态和动作后果，删除重复解释性文案。
 
 ## UI实看与仍需修正的地方
@@ -99,7 +99,7 @@ DeepSeek `deepseek-v4-flash`，接收方 `https://api.deepseek.com/v1`，共82�
 
 工作包：[OCR-DOSSIER-SYSTEM-50](../plans/active/ocr-dossier-system-50.md)。私有生成物依[登记册](../governance/generated-artifacts-registry.md)保存在本worktree `artifacts/private/ocr-dossier-system-50/`，回收前需搬到主仓同名位置。核心证据：manifest.json、N01–N50-result.json、test-summary.json、failure-analysis.json、visual-review.md/json、native-body回执、retired-ocr-cleanup-receipt.json、postgres-tests.log。私有原文/响应/原图不随Git提交。
 
-已通过：ci-preflight；前端typecheck/lint及44项相关组件测试；OCR合同14项；cloud候选转换3项；隔离PostgreSQL28项（正文准备5、读本7、并发5、版本重排11）。另通过5项隔离真实worker+本地合成服务链路：抽检/人工采用、云候选人工采用、第二图失败停止、取消及租约恢复不重发、精确图片范围冻结。前端生产构建通过。隔离测试容器已移除；最终复核全部执行控制及本次外发许可为false，退役文本剩余0条，append-only触发器启用。独立审阅和最终提交/CI状态按PR回执记录。真实50篇只证明基线首次结果；隔离PG、合成测试与前端预览均不能替代修正版真实OCR、主线合并、3000部署或Mog业务验收。
+已通过：ci-preflight；前端typecheck/lint及69项相关组件测试；OCR合同14项；cloud候选转换3项；隔离PostgreSQL28项（正文准备5、读本7、并发5、版本重排11）。另通过5项隔离真实worker+本地合成服务链路：抽检/人工采用、云候选人工采用、第二图失败停止、取消及租约恢复不重发、精确图片范围冻结。前端生产构建通过。隔离测试容器已移除；最终复核全部执行控制及本次外发许可为false，退役文本剩余0条，append-only触发器启用。独立审阅和最终提交/CI状态按PR回执记录。真实50篇只证明基线首次结果；隔离PG、合成测试与前端预览均不能替代修正版真实OCR、主线合并、3000部署或Mog业务验收。
 
 
 ### 候选审阅与离线重放回执
@@ -109,3 +109,5 @@ DeepSeek `deepseek-v4-flash`，接收方 `https://api.deepseek.com/v1`，共82�
 已保存raw离线重放（0次模型调用）：65张仍通过严格解析并完成候选转换，另16份raw继续拒绝，1次失败没有raw可重放。683个非空region均能匹配规范化区块全文（忽略空白，将等价无序列表标记统一比较）；这核对的是模型已返回字符在转换时的保留，不是原图识别的完整性。3个非空unreadable region已保留原字符。离线重放证明解析与转换行为，不证明模型识别准确。
 
 现有worker测试将“禁止云候选进入普通队列”的查询由硬编码v2改为覆盖cloud-manual各版本，避免v3升级后的空查假通过；该一行测试增量已独立复核。完整三图浏览器场景仍由最终CI执行。
+
+最终截图复核追加删除证据库侧栏的实现说明，使用foot=null保持共享组件合同；typecheck与EvidencePage额外25项通过。该增量初次漏传必填属性的问题已修复并独立复核关闭，最终不留未解决P1/P2。
