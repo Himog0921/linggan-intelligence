@@ -1,12 +1,18 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-10-20
+> 最后核对: 2026-10-23
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 用户要求、2026-10-20 AI-GEN1候选源码/owned隔离证明与GitHub只读核对；其他模块及本机运行事实按各节原核对日保留
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 OCR 的动态交付事实以统一 Issue #454 及关联 PR/CI 为准。原本地规则与开发回归见[既有 OCR 计划](plans/active/ocr-title-quality-454.md)；当前获准的本篇手动云 OCR、动效百分比、检查器结果与模型选择见[手动识别计划](plans/active/ocr-manual-recognition-454.md)。两者保留来源和采用边界，候选实现、隔离证明不代表主线/部署或 Mog 生产业务验收；本包不新增真实模型调用、不操作共享数据库或现有服务。
+
+## OPS-LAUNCH-001 · 内部团队运营数据可写上线（2026-10-23）
+
+Mog 交付 `Intelligence_Ops_Launch_2026-10-23` 并要求按其落地；当前实施车道是 [Issue #483](https://github.com/Himog0921/linggan-intelligence/issues/483)、`codex/ops-launch-001` 和隔离工作树 `.worktrees/ops-launch-001`，基线为 `origin/main@b471d9f1a7e8bedce3f518dff4711136f0299e1b`。本轮先完成计划及历史迁入期文档的权威边界整理：D1–D3 的历史导入、读取和未知语义保留；D4–D6 的未来路线由 [OPS-LAUNCH-001](plans/active/ops-launch-001.md) 替代。
+
+截至本记录，认证的第一纵向切片已实现：`0146_ops_team_auth`、Argon2id 校验及登录/会话/退出 API 已在一次性隔离 PostgreSQL + Axum 中通过。该证明覆盖正确和错误凭据、停用/伪造/过期会话、跨站来源、存储不可用、HTTPS `Secure` cookie 对称清除，以及既有 producer 路由不被浏览器认证截获；临时容器、卷和支持目录已清理。它尚未把业务页面/旧 OPS 读取 API 接入会话守卫，尚未实现邀请签收、重设、成员管理、原生写 API、同步、React 界面或浏览器全链路。也未推送、开 PR、合并、部署、写共享数据库、调用真实邮件/平台或进行团队试用；上述真实环境动作仍需对应授权与实际回执，不能由本计划或 Issue 替代。
 
 ## AI 设置左栏导航候选（2026-10-21）
 

@@ -4,7 +4,9 @@
 > 最后核对: 2026-10-14
 > 适用范围: OPS-MIGRATION-001 第 D2 步（Issue #405）：一级页面「运营」四个二级页面读取的 JSON 接口、导出、历史封面图，以及业务选择的作用范围；第 D3 步（Issue #409）：总览读取与周、月加微目标的设定（本合同唯一的写接口）
 > 事实来源: [PAGE-OPS-001](../design/pages/ops-page.md)、[PAGE-OPS-002](../design/pages/ops-overview-page.md)、[OPS-LEDGER-001](ops-ledger-001.md)、Mog 2026-10-13 的确认
-> 冲突时以谁为准: Mog 最新确认、AGENTS.md、OPS-LEDGER-001、真实 API/schema/代码
+> 冲突时以谁为准: [OPS-LAUNCH-001](../plans/active/ops-launch-001.md)、Mog 最新确认、AGENTS.md、OPS-LEDGER-001、真实 API/schema/代码
+
+> **2026-10-23 边界：** 本文的历史读接口、目标修订和 `null`/未知语义仍有效；“所有运营接口只接受本机读取守卫、除目标外均只读”的结论仅描述迁入阶段。邀请会话、原生写命令、逐条批量回执和发布同步必须由 OPS-LAUNCH-001 的正式认证/HTTP 合同替代，不能把 localhost、前端隐藏按钮或成功 toast 当授权。
 > 当前实现状态: D2、D3 已随 PR #407 / #415 上线；D3 三处修复随 PR #418 上线为 14ee80b1；Issue #417 的读屏说明跟进为候选，未合并部署
 
 除 §4 设定目标外，接口只读（GET），沿用本机读取守卫：只接受本机访问，响应 `no-store`、`nosniff`。D2 不新增写接口；发布记录、账号与每日数据写入随 D4b。

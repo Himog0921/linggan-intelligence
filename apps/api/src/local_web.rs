@@ -72,6 +72,9 @@ mod offline_preview;
 mod offline_preview_tests;
 mod ops;
 mod ops_api;
+mod ops_auth;
+#[cfg(test)]
+mod ops_auth_tests;
 #[cfg(test)]
 mod ops_browser_tests;
 mod ops_export;
@@ -383,6 +386,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(model_settings::routes())
         .merge(ai_settings::routes())
         .merge(offline_preview::routes())
+        .merge(ops_auth::routes())
         .merge(web_app::routes())
         .merge(ops::routes())
         .merge(content_workbench_api::routes())

@@ -127,7 +127,11 @@ Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 
 | [decisions/0007-ocr-content-layering.md](decisions/0007-ocr-content-layering.md) | 权威当前 | OCR 原始事实、内容分层、视觉选择边界和展示标题来源的长期决定 |
 | [decisions/0008-peer-domains-and-unified-material-pipeline.md](decisions/0008-peer-domains-and-unified-material-pipeline.md) | 权威当前 | 平级 Domain、共享真实 Target、primary/reference 用途、统一材料链与 Domain pause 的长期决定 |
 | [decisions/0009-stage-one-job-topic-pool.md](decisions/0009-stage-one-job-topic-pool.md) | 权威当前 | 第一阶段主 Job：小红书选题池经营（复用与试新、爆款标准、成功指标、升级条件）、运营模块整体迁入与先后顺序；所取代的旧条款与待裁定事项 |
-| [plans/active/ops-module-migration-001.md](plans/active/ops-module-migration-001.md) | 活跃计划；D1–D3 已上线，D2/D3 业务验收待 Mog；Issue #417 三处小修随 #418 已上线，读屏跟进为候选；D4、D4b、D5、D6 未派定 | 内容工作台运营管理迁入：已确认范围、交付顺序、各步回执与签收、每天 9 点检查新导出且逐次授权导入 |
+| [plans/active/ops-launch-001.md](plans/active/ops-launch-001.md) | 活跃计划；Issue #483；受保护工作树实施中 | 内部团队邀请制登录、原生运营写入、已登记发布的精确同步、交接停用及 React 页面收口；尚未推送、合并或部署 |
+| [data-contracts/ops-auth-001.md](data-contracts/ops-auth-001.md) | 权威当前；认证切片实现中 | 内部邀请成员、Argon2id 密码哈希、会话 cookie、同源写入边界与机器身份分离 |
+
+> **运营文档状态提示（2026-10-23）：** 下列 OPS-MIGRATION、PAGE-OPS、OPS-LEDGER 与 OPS-HTTP 条目保留 D1–D3 的历史迁入、读取和上线证据；其中声称“权威当前”或规定 D4–D6 后续路线的部分，均受 OPS-LAUNCH-001 的优先规则限制。新认证、原生写入、同步及交接合同会以独立的当前文档加入本索引，不能由旧条目的本机守卫或只读约束推导。
+| [plans/active/ops-module-migration-001.md](plans/active/ops-module-migration-001.md) | 历史迁入计划；D1–D3 的事实仍保留，D4–D6 已由 OPS-LAUNCH-001 取代 | 内容工作台运营管理迁入的历史边界、导入与只读证据；不再规定原生可写运营的未来路线 |
 | [design/pages/ops-page.md](design/pages/ops-page.md) | 权威当前；Issue #405，Mog 2026-10-13 确认，随 PR #407 上线（`main@9e45e01c`） | PAGE-OPS-001：一级页面「运营」的壳层与左侧二级页面，发布记录、账号管理、每日数据、导入导出的只读呈现、状态词典、与工作台的预期差异和验收矩阵 |
 | [design/pages/ops-overview-page.md](design/pages/ops-overview-page.md) | 权威当前；Issue #409，Mog 2026-10-13 确认，随 PR #415 已上线，业务验收待 Mog；Issue #417 三处小修随 #418 已上线，读屏跟进为候选 | PAGE-OPS-002：运营「总览」五块驾驶舱、周与月加微目标的设定与修改记录、每日数据执行状态的新口径、与工作台的差异和验收矩阵 |
 | [data-contracts/ops-ledger-001.md](data-contracts/ops-ledger-001.md) | 权威当前；随 PR #403 上线（`main@3029efff`） | 运营台账五张表的含义、内容工作台导出的导入规则 `ops-import.v1`（校验、重复登记合并、阅读量填报、消失记录标记、预览指纹）、新旧对账口径与 D2/D3 读取约定 |
