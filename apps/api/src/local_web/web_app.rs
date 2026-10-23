@@ -23,6 +23,7 @@ const REACT_PAGES: &[&str] = &[
     "/login",
     "/invite/accept",
     "/settings/models",
+    "/settings/team",
     "/ops/creation",
     "/corpus/creators",
     "/corpus/evidence",
@@ -41,7 +42,11 @@ const REACT_PAGES: &[&str] = &[
     "/topics/{canonical_key}",
 ];
 
-const OPS_REACT_PAGES: &[&str] = &[
+/// Pages that contain organisation data must be checked by the server before the React entry is
+/// returned.  This is distinct from the local-origin guard: a same-origin browser without an
+/// active team session must not receive the management surface and rely on client-side hiding.
+const AUTHENTICATED_REACT_PAGES: &[&str] = &[
+    "/settings/team",
     "/ops/overview",
     "/ops/publications",
     "/ops/accounts",
@@ -114,10 +119,10 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
     routes_for(WebAppConfig::from_environment())
 }
 
-pub(super) fn ops_routes() -> Router<super::LocalWebState> {
+pub(super) fn authenticated_routes() -> Router<super::LocalWebState> {
     let mut pages = Router::new();
-    for page in OPS_REACT_PAGES {
-        pages = pages.route(page, get(ops_entry));
+    for page in AUTHENTICATED_REACT_PAGES {
+        pages = pages.route(page, get(authenticated_entry));
     }
     pages.layer(middleware::from_fn(local_comment_study_guard))
 }
@@ -129,7 +134,7 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
         get(|| async { Redirect::temporary("/settings/models") }),
     );
     for page in REACT_PAGES {
-        if *page == "/login" || *page == "/invite/accept" || OPS_REACT_PAGES.contains(page) {
+        if *page == "/login" || *page == "/invite/accept" || AUTHENTICATED_REACT_PAGES.contains(page) {
             continue;
         }
         pages = if *page == "/topics/{canonical_key}" {
@@ -196,10 +201,10 @@ async fn entry(State(config): State<WebAppConfig>) -> Response {
     }
 }
 
-/// Operations ledger pages are served only after the same request has passed the local-origin
-/// guard and an active team session check.  The creation workspace intentionally keeps its
+/// Team and operations pages are served only after the same request has passed the local-origin
+/// guard and an active team session check. The creation workspace intentionally keeps its
 /// existing boundary until its own team migration is implemented.
-async fn ops_entry(State(state): State<super::LocalWebState>, headers: HeaderMap) -> Response {
+async fn authenticated_entry(State(state): State<super::LocalWebState>, headers: HeaderMap) -> Response {
     if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
         return response;
     }

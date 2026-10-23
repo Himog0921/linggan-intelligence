@@ -394,7 +394,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(offline_preview::routes())
         .merge(ops_auth::routes())
         .merge(web_app::routes())
-        .merge(web_app::ops_routes())
+        .merge(web_app::authenticated_routes())
         .merge(ops::routes())
         .merge(content_workbench_api::routes())
         .merge(content_workbench_sources_api::routes())

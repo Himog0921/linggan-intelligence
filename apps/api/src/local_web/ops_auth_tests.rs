@@ -191,6 +191,7 @@ async fn ops_ledger_routes_require_an_active_team_session_without_claiming_the_c
 
     let protected = [
         ("GET", "/ops"),
+        ("GET", "/settings/team"),
         ("GET", "/ops/overview"),
         ("GET", "/ops/publications"),
         ("GET", "/ops/accounts"),
