@@ -80,11 +80,12 @@ function ReviewContent({ unit, work, domain, onApplied, initialCandidate, origin
     {unit.reading?.review ? <p className={styles.note}>当前读本审核：{unit.reading.review.actor} · {unit.reading.review.reviewedAt}<br />核对依据：{unit.reading.review.reason}</p> : null}
     {candidateReview ? <p className={styles.note}>此候选最近意见：{ACTION_LABEL[candidateReview.action]} · {candidateReview.actor} · {candidateReview.reviewedAt}<br />核对依据：{candidateReview.reason}</p> : null}
     {query.isPending ? <p role="status">正在读取候选版本…</p> : null}
-    {query.isError ? <p role="status">候选版本暂时不可读；当前读本仍可核对。<button type="button" onClick={() => void query.refetch()}>重读候选</button></p> : null}
+    {query.isError ? <p role="status">{expected === null ? '候选版本暂时不可读。' : '候选版本暂时不可读；当前读本仍可核对。'}<button type="button" onClick={() => void query.refetch()}>重读候选</button></p> : null}
     {options.length > 0 ? <label><span id={versionLabel}>核对版本</span><select aria-labelledby={versionLabel} disabled={busy || pending !== null || changed} value={candidate?.candidateRevisionRef ?? ''} onChange={event => select(event.target.value)}>
       <option value="">{expected === null ? '尚未采用读本' : '当前采用读本'}</option>{options.map((value, index) => <option key={value.candidateRevisionRef} value={value.candidateRevisionRef}>{`${PRODUCER[value.generatedBy]} · 候选 ${index + 1} · ${value.createdAt}`}</option>)}
-    </select></label> : <p className={styles.note}>当前没有其他候选版本，可直接对照来源修正。</p>}
+    </select></label> : !query.isPending && !query.isError ? <p className={styles.note}>{expected === null ? '尚无可核对的读本，请先完成图片识别。' : '当前没有其他候选版本。'}</p> : null}
     {changed && pending === null ? <p role="status">底稿已有新版本，未提交的修改仍保留。<button type="button" onClick={reset}>使用最新读本</button></p> : null}
+    {selectedRef !== null || pending !== null ? <>
     {originalUnavailable ? <p role="status">原始媒体当前不可读，已有文字仍可阅读。恢复原始媒体后才能提交新的人工决定。</p> : null}
     {editing ? <DossierBlockEditor blocks={blocks} onChange={setBlocks} disabled={disabled} /> : candidate ? <DossierBlocks blocks={candidate.blocks} issues={candidate.issues} /> : null}
     {editing ? <><DossierIssues issues={issues.filter(issue => issue.resolution === 'source_refresh')} />
@@ -93,7 +94,7 @@ function ReviewContent({ unit, work, domain, onApplied, initialCandidate, origin
     <label className={styles.checkLabel}><input type="checkbox" disabled={disabled} checked={verified} onChange={event => setVerified(event.target.checked)} />{selectedRef !== expected ? '已对照来源核验所选候选读本' : '已对照来源核验当前读本'}</label>
     <label>审核人<input value={actor} maxLength={120} disabled={busy || pending !== null} autoComplete="off" onChange={event => setActor(event.target.value)} /></label>
     <label>核对依据<textarea value={reason} maxLength={300} disabled={busy || pending !== null} onChange={event => setReason(event.target.value)} /></label>
-    <p className={styles.note}>提交前填写审核人和核对依据。待核验与拒绝候选仅记录意见，不替换当前读本。</p>
+    {candidate ? <p className={styles.note}>采用后替换当前读本；待核验与拒绝仅记录意见。</p> : null}
     <div className={styles.toolbar}>
       {pending ? <ActionButton busy={busy} onClick={() => void submit(pending.action)}>核对同一保存请求</ActionButton> : <>
         {editing ? <><ActionButton variant="primary" disabled={disabled || !metadataValid} onClick={() => void submit('edit')}>保存完整修正版</ActionButton><ActionButton disabled={busy} onClick={() => { setEditing(false); setBlocks(copyBlocks(candidate?.blocks ?? unit.blocks)); setResolved([]); }}>取消修正</ActionButton></> : <>
@@ -103,6 +104,7 @@ function ReviewContent({ unit, work, domain, onApplied, initialCandidate, origin
           {candidate ? <><ActionButton disabled={disabled || !metadataValid} onClick={() => void submit('pending')}>保持待核验</ActionButton><ActionButton disabled={disabled || !metadataValid} onClick={() => void submit('reject')}>拒绝此候选</ActionButton></> : null}
         </>}
       </>}
-    </div>{message ? <p role="status">{message}</p> : null}
+    </div></> : options.length > 0 ? <p className={styles.note}>选择候选后可核对与修正，选中不会自动采用。</p> : null}
+    {message ? <p role="status">{message}</p> : null}
   </div>;
 }

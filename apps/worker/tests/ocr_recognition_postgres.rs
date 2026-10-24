@@ -253,7 +253,7 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
     linggan_evidence::ensure_media_processing_work(&db)
         .await
         .unwrap();
-    let rescheduled:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_media_processing_work work JOIN linggan_media_processing_job job USING(job_ref) WHERE job.processor_version LIKE 'cloud-manual-v2:%'").fetch_one(db.pool()).await.unwrap();
+    let rescheduled:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_media_processing_work work JOIN linggan_media_processing_job job USING(job_ref) WHERE job.processor_version LIKE 'cloud-manual-%'").fetch_one(db.pool()).await.unwrap();
     assert_eq!(
         rescheduled, 0,
         "completed manual vision jobs never become automatic local OCR jobs"

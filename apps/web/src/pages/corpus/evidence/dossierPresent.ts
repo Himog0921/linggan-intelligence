@@ -2,12 +2,12 @@ import { ApiError } from '../../../shared/api';
 import type { DossierBlock, DossierMaterial, SourceState } from './dossierTypes';
 const SOURCE_STATES: Record<SourceState, string> = { present: '已取得', known_empty: '来源明确为空', not_acquired: '尚未取得', not_applicable: '不适用', restricted: '材料受限' };
 export function sourceStateLabel(state: SourceState): string { return SOURCE_STATES[state]; }
-export function materialLabel(unit: DossierMaterial): string {
+export function materialLabel(unit: DossierMaterial, imageNumber?: number): string {
   if (unit.kind === 'body') return '正文';
   if (unit.kind === 'tags') return '独立标签';
   if (unit.kind === 'audio') return '音轨转写';
   if (unit.kind === 'video_frame') return '视频画面文字';
-  return unit.page === null ? '图片 · 页码未知' : `第 ${unit.page} 页`;
+  return unit.page === null ? `图片${imageNumber === undefined ? '' : ` ${imageNumber}`} · 页码未知` : `第 ${unit.page} 页`;
 }
 export function readingLabel(unit: DossierMaterial): string {
   if (unit.sourceState !== 'present') return sourceStateLabel(unit.sourceState);

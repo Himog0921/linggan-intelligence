@@ -10,7 +10,7 @@ import { DOSSIER_KEY, dossierKey } from './evidenceKeys';
 import { downloadDossier, downloadDossierMarkdown } from './exportDossier';
 import { useRelayer } from './useRelayer';
 import styles from './Dossier.module.css';
-interface Props { work: string; domain: string; active: boolean; onOpenImage: (material: DossierMaterial) => void; onApplied: () => void }
+interface Props { work: string; domain: string; active: boolean; displayedTitle?: string; onOpenImage: (material: DossierMaterial) => void; onApplied: () => void }
 function Head({ payload, domain, relayer, busy, onRefresh }: { payload: DossierPayload; domain: string; relayer: ReturnType<typeof useRelayer>; busy: boolean; onRefresh: () => void }) {
   const [exporting, setExporting] = useState(false); const [message, setMessage] = useState('');
   const mounted = useRef(true); useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -26,7 +26,7 @@ function Head({ payload, domain, relayer, busy, onRefresh }: { payload: DossierP
       <ActionButton variant="outline" onClick={() => downloadDossier(payload)}>导出 JSON</ActionButton>
       <ActionButton variant="quiet" disabled={busy} onClick={onRefresh}>刷新底稿</ActionButton>
     </div>{message ? <p role="status">{message}</p> : null}
-    {plan.pendingReviewCount > 0 ? <p className={styles.note}>有 {plan.pendingReviewCount} 张图片的重新识读候选待人工核对，尚未自动替换当前读本。</p> : null}
+    {plan.pendingReviewCount > 0 ? <p className={styles.note}>{plan.pendingReviewCount} 张图片有待核对候选，尚未采用。</p> : null}
     <details className={styles.disclosure}><summary>整理已有识别版面</summary>
       <p className={styles.note}>{`可整理 ${plan.layoutCount} · 待整理 ${plan.pendingLayouts} · 已是当前规则 ${plan.alreadyCurrent} · 待识字 ${plan.needsOcr} · 待人工核对 ${plan.pendingReviewCount} 张图片`}</p>
       <ActionButton disabled={plan.layoutCount === 0 || relayer.sending} onClick={relayer.run}>重新整理</ActionButton>
@@ -35,7 +35,7 @@ function Head({ payload, domain, relayer, busy, onRefresh }: { payload: DossierP
   </Section>;
 }
 /** The human reading and on-demand exports share the same canonical snapshot. */
-export function DossierPanel({ work, domain, active, onOpenImage, onApplied }: Props) {
+export function DossierPanel({ work, domain, active, displayedTitle, onOpenImage, onApplied }: Props) {
   const [activated, setActivated] = useState(active); if (active && !activated) setActivated(true);
   const client = useQueryClient();
   const query = useQuery({ queryKey: dossierKey(domain, work), queryFn: ({ signal }) => fetchDossier(work, domain, signal), enabled: activated, staleTime: 30_000, gcTime: 0 });
@@ -47,7 +47,7 @@ export function DossierPanel({ work, domain, active, onOpenImage, onApplied }: P
     <Head key={`${domain}:${work}`} payload={payload} domain={domain} relayer={relayer} busy={query.isFetching} onRefresh={() => void query.refetch()} />
     {query.isError ? <p role="status">刷新未完成，当前保留上一次读到的版本。<button type="button" onClick={() => void query.refetch()}>重试刷新</button></p> : null}
     <CoverageSection payload={payload} />
-    <MaterialsSection payload={payload} work={work} domain={domain} onOpenImage={onOpenImage} onApplied={applied} />
+    <MaterialsSection displayedTitle={displayedTitle} payload={payload} work={work} domain={domain} onOpenImage={onOpenImage} onApplied={applied} />
     <MetaSection payload={payload} domain={domain} />
   </div>;
 }

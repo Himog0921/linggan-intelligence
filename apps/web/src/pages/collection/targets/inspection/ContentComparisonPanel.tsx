@@ -51,6 +51,11 @@ const relationNames:Record<string,string>={
   different_problem:'问题并不相同',undetermined:'目前无法确定',
 };
 const help:Record<string,string>={
+  daily_budget_unconfigured:'每日额度尚未配置',
+  model_configuration_unqualified:'模型配置尚不可用',
+  executor_off:'AI 执行器未开启',
+  global_off:'全局 AI 开关未开启',
+  task_work_comparison_off:'内容对照任务未开启',
   task_not_connected:'尚未配置内容对照任务；仍可手动并排。',
   egress_not_approved:'当前未获准发送该范围材料；可继续查看现有底稿。',
   comparison_source_unavailable:'选中作品缺少足够可读材料；请先查看各篇底稿覆盖。',
@@ -114,7 +119,7 @@ function Comparison(){
         const response=isRecord(caught.responseBody)?caught.responseBody:null;
         const reasons=response&&Array.isArray(response.reasons)?response.reasons.filter(v=>typeof v==='string') as string[]:[];
         setComparisonIntent(key,null);
-        if(mounted.current)setError(reasons.length?reasons.map(explanation).join('；'):'本次内容对照未被接纳，当前作品指标与原文仍可继续查看。');
+        if(mounted.current)setError(reasons.length?[...new Set(reasons.map(explanation))].join('；'):'本次内容对照未被接纳，当前作品指标与原文仍可继续查看。');
       }else {
         // With an unknown response, keep the same command ID for an explicit retry.
         setComparisonIntent(key,{payload,state:'unknown'});
@@ -134,7 +139,7 @@ function Comparison(){
     {!requestRef&&<ReadFeedback read={preview}/>}
     {preview.data?.partial&&<p className={styles.meta}>部分作品材料仍不完整；分析只可引用已取得内容。</p>}
     {!requestRef&&preview.data&&!preview.data.canStart&&<p className={styles.meta}>
-      {preview.data.reasons.map(explanation).join('；')||'当前没有可用的模型研究设置。'} 手动并排对照不受影响。
+      {[...new Set(preview.data.reasons.map(explanation))].join('；')||'当前没有可用的模型研究设置。'} 手动并排对照不受影响。
     </p>}
     {error&&<p className={styles.notice} role={unknown?'status':'alert'}>{error}</p>}
     {requestRef&&<><ReadFeedback read={read}/>

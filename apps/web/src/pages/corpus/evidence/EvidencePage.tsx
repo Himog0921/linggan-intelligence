@@ -116,7 +116,7 @@ export function EvidencePage() {
       action="/corpus/evidence"
       shell={shell}
       meta={null}
-      foot="只读本机材料投影／列表与详情不触发采集"
+      foot={null}
       evidenceCount={hasDomain ? { count: facts.works, title: readoutTitle(facts) } : null}
     >
       <div className={styles.page}>

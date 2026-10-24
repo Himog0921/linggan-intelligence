@@ -462,3 +462,7 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 - 原始 OCR：运行测试的 media 根下 `ocr/manual/<item UUID>.json`，来自 mock 返回原字节；实际 derivative/layout/adoption 指向该文件，随 owned assets 清理。真实生产结果不在本轮创建。
 - 私有证据：任务临时目录 `linggan-ocr-manual-implementation-2026-10-22` 保存 before/after 截图、浏览器回执、日志、自包含对照和保存响应回归。真实原图与保存响应只在该本机私有范围读取，不入 Git/CI，也不新增模型调用；`cloud_ocr_saved` 的 ignored test 仅由显式私有 manifest 驱动。
 - Git 只保存合成 fixture/runner/测试源、长期合同与结果摘要，不保存二进制、DSN、密钥、真实图片/正文或截图。保留本机证据供 Mog 验收；owned 数据资源由脚本主动清理，任务外数据不处理。
+
+## OCR-DOSSIER-SYSTEM-50
+
+私有产物位于本包worktree的 `artifacts/private/ocr-dossier-system-50/`；最终移交到主仓库同名忽略目录。含只读盘点、固定50篇引用/图片manifest、原始模型响应、截图、逐项质量报告与测试日志，不入Git，真实内容不写普通日志。生成来源为正式API/数据库只读盘点、已授权有界OCR执行和原图对照；禁止改写原始响应与像素。清理备份使用同目录加密归档，密钥独立用户私有目录0600保存；只按本包精确清单清理。保留至Mog验收，合并清理worktree前核对私有资料已移交。
