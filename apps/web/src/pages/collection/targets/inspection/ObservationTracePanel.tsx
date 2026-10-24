@@ -1,4 +1,4 @@
-import { useEffect,useState } from 'react';
+import { useEffect,useRef,useState } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
 import { decodeObservationComparison,decodeTrace,inspectionUrl,METRICS,type MetricKey } from './inspectionApi';
 import { metricLabels,metricValue,moment,ruleLabels,sourceName } from './inspectionPresent';
@@ -16,12 +16,20 @@ export function ObservationTracePanel({work}:{work:string}){
   const compared=useInspectionRead(left&&right?inspectionUrl(context.scope,`works/${work}/observation-comparison`,{left,right}):null,decodeObservationComparison);
   useEffect(()=>{if(read.data)context.pinCutoff(read.data.knowledgeCutoff);},[read.data,context]);
   const selected=[left,right].filter((id):id is string=>id!==null);
+  // Only the two selected identities/times survive pagination, never source bodies.
+  const selectedTimes=useRef(new Map<string,number>());
   const toggle=(id:string)=>{
     if(selected.includes(id)){const next=selected.filter(value=>value!==id);context.patch({inspect_left_observation:next[0]??null,inspect_right_observation:next[1]??null});setMessage(null);return;}
     if(selected.length===2){setMessage('请选择两次观察；更换时先取消其中一次。');return;}
-    const next=[...selected,id];context.patch({inspect_left_observation:next[0]??null,inspect_right_observation:next[1]??null});setMessage(null);
+    const times=new Map(selectedTimes.current);
+    for(const observation of read.data?.observations??[])times.set(observation.observationRef,observation.observedEpochMs);
+    if(selected.some(ref=>!times.has(ref))){setMessage('已选观察不在当前页，刷新后无法确认其时间。请返回该页重新勾选，或清除观察选择后重选。');return;}
+    const next=[...selected,id].sort((a,b)=>{const x=times.get(a),y=times.get(b);return x!==undefined&&y!==undefined?x-y:0;});
+    selectedTimes.current=new Map(next.flatMap(ref=>{const epoch=times.get(ref);return epoch===undefined?[]:[[ref,epoch]];}));
+    context.patch({inspect_left_observation:next[0]??null,inspect_right_observation:next[1]??null});setMessage(null);
   };
   return <ResearchPanel title="观察轨迹" actions={<EvidenceLink work={work}>查看作品</EvidenceLink>}>
+    <h3>{context.data.catalog?.find(item=>item.publicRef===work)?.title??'作品标题未取得'}</h3>
     <div className={styles.toolbar}><MetricPicker value={metric} onChange={value=>context.patch({inspect_metric:value})}/>{read.data&&<Cutoff value={read.data.knowledgeCutoff}/>}</div>
     <p className={styles.meta}>同一作品在不同时间、不同入口的真实观察。勾选两次，核对当时实际取得的值。</p>
     <ReadFeedback read={read}/>{message&&<p role="status" className={styles.notice}>{message}</p>}
@@ -38,6 +46,7 @@ export function ObservationTracePanel({work}:{work:string}){
       </tr>)}</tbody>
     </table>{read.data.observations.length===0&&<p className={styles.empty}>当前范围没有可读取的观察记录；不据此将指标写成零。</p>}</div>}
     <div className={styles.footer}><span className={styles.meta}>已选 {selected.length} / 2 次</span><div className={styles.rowActions}>
+      <ActionButton variant="quiet" disabled={selected.length===0} onClick={()=>{selectedTimes.current.clear();context.patch({inspect_left_observation:null,inspect_right_observation:null});setMessage(null);}}>清除观察选择</ActionButton>
       <ActionButton variant="quiet" disabled={offset===0} onClick={()=>context.patch({inspect_trace_offset:String(Math.max(0,offset-50))})}>上一页</ActionButton>
       <ActionButton variant="quiet" disabled={read.data?.nextOffset==null} onClick={()=>{if(read.data?.nextOffset!=null)context.patch({inspect_trace_offset:String(read.data.nextOffset)});}}>下一页</ActionButton>
     </div></div>

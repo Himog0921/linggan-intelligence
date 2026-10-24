@@ -23,6 +23,8 @@ export function TargetDrawer({targetRef,params,commands,revision}:{targetRef:str
   const tab=rawTab===null?(legacyLife?'works':'overview'):['works','baseline','archive'].includes(rawTab)?'works':rawTab==='patrol'?'patrol':'overview';
   const worksView=params.get('wview')==='performance'||(params.get('wview')===null&&legacyLife)?'performance':'list';
   const query=new URLSearchParams(params);
+  // Research reads own their scope; UI navigation must not unload the base target.
+  for(const key of [...query.keys()])if(key.startsWith('inspect_'))query.delete(key);
   if(tab==='works'&&worksView==='performance'){
     if(!query.has('life_window'))query.set('life_window','all');
     if(!query.has('life_metric'))query.set('life_metric','likes');

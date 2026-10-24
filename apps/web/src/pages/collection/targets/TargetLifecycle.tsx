@@ -2,7 +2,6 @@ import { Chart } from './LifecycleChart';
 import { WorkResearchActions } from './inspection/TargetResearchContext';
 import styles from './inspection/TargetResearch.module.css';
 import { Review } from './LifecycleReview';
-import type { CSSProperties } from 'react';
 import { Link } from 'react-router';
 import type { Drawer } from './api';
 import { listHref } from './useWorkspace';
@@ -14,35 +13,6 @@ import { bucketPoints, metricLabel } from './chartMath';
 function State({ title, body }: { title: string; body: string }) {
   return (
     <section className="c-dw-section life-panel"><div className="life-heading"><h2>作品表现</h2></div><div className="life-state"><b>{title}</b><p>{body}</p></div></section>
-  );
-}
-function SummaryStat({
-  value,
-  label,
-  progress,
-  signal = false,
-}: {
-  value: number | string;
-  label: string;
-  progress: number | null;
-  signal?: boolean;
-}) {
-  return (
-    <div className="life-performance-stat">
-      <div>
-        <b>{value}</b>
-        <span>{label}</span>
-      </div>
-      {progress !== null && (
-        <span className={`life-stat-progress${signal ? ' life-stat-progress-signal' : ''}`}>
-          <i
-            style={
-              { '--life-progress': `${Math.max(0, Math.min(100, progress)).toFixed(2)}%` } as CSSProperties
-            }
-          />
-        </span>
-      )}
-    </div>
   );
 }
 export function LifecyclePanel({
@@ -138,23 +108,10 @@ export function LifecyclePanel({
           数据截至 <time>{p.asOf}</time>
         </p>
       </div>
-      <div className="life-performance-summary" aria-label="作品覆盖摘要">
-        <SummaryStat
-          value={p.linked ?? `≥${p.lowerBound}`}
-          label={p.linked === null ? '作品目录下限' : '作品目录'}
-          progress={p.linked === null ? null : 100}
-        />
-        <SummaryStat
-          value={p.confirmed}
-          label="作者已确认"
-          progress={p.linked !== null && p.linked > 0 ? (p.confirmed / p.linked) * 100 : null}
-        />
-        <SummaryStat
-          value={p.eligible}
-          label="当前可分析"
-          progress={p.confirmed > 0 ? (p.eligible / p.confirmed) * 100 : null}
-          signal
-        />
+      <div className={styles.coverage} aria-label="作品覆盖摘要">
+        <span>{p.linked===null?'作品目录下限':'作品目录'} <b>{p.linked===null?`≥${p.lowerBound}`:p.linked}</b> 篇</span>
+        <span>{p.linked!==null&&p.linked>0&&p.confirmed===p.linked?'作者均已确认':<>作者已确认 <b>{p.confirmed}</b> 篇</>}</span>
+        <span>{p.linked!==null&&p.linked>0&&p.eligible===p.linked?'当前均可分析':<>当前可分析 <b>{p.eligible}</b> 篇</>}</span>
       </div>
       <div className={`life-performance-grid${p.points.length ? '' : ' life-performance-grid-empty'}`}>
         <article className="life-trend-panel">
@@ -168,7 +125,7 @@ export function LifecyclePanel({
           )}
         </article>
         {p.points.length > 0 && (distribution && selected ? (
-          <aside className="life-review" aria-label="选中作品与对照操作">
+          <aside className="life-review life-selected-review" aria-label="选中作品与对照操作">
             <div className="life-review-head"><b>选中作品</b><Link to={listHref(viewParams,{life_work:null},'creator-lifecycle')}>返回复核摘要</Link></div>
             <h3>{selected.title??'标题未取得'}</h3>
             <p className={styles.meta}>{selected.date} · {metricLabel(p.metric)} {selected.value}</p>
@@ -263,9 +220,7 @@ export function LifecyclePanel({
           </Link>
         </section>
       )}
-      <p className="life-boundary">
-        这里比较的是该创作者自己的作品表现，不是“监控价值”评分。尚未建立内容分类，因此不按主题生成表现结论。
-      </p>
+      <details className={styles.conditions}><summary>覆盖与图表口径</summary><p>作品目录、作者已确认和当前可分析分别表示目录范围、作者归属和当前时间窗及指标资格；数量相同不代表完成了内容分析。图表只比较该创作者自己的作品表现，尚未按内容主题分类。</p></details>
     </section>
   );
 }

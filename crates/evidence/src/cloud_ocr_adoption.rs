@@ -6,13 +6,16 @@ use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-pub const PROCESSOR_VERSION: &str = "cloud-manual-v2";
-pub const RULE_VERSION: &str = "cloud-ocr-observation.v2";
+pub const PROCESSOR_VERSION: &str = "cloud-manual-v3";
+pub const RULE_VERSION: &str = "cloud-ocr-observation.v3";
 pub fn is_processor_version(version: &str) -> bool {
-    version == PROCESSOR_VERSION
-        || version
-            .strip_prefix("cloud-manual-v2:")
-            .is_some_and(|run| Uuid::parse_str(run).is_ok())
+    ["cloud-manual-v2", PROCESSOR_VERSION].iter().any(|prefix| {
+        version == *prefix
+            || version
+                .strip_prefix(prefix)
+                .and_then(|v| v.strip_prefix(':'))
+                .is_some_and(|run| Uuid::parse_str(run).is_ok())
+    })
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,9 +90,9 @@ pub fn blocks_from_visual(visual: &Value) -> Result<Vec<Value>, sqlx::Error> {
             return Err(invalid("cloud_region_invalid"));
         }
         let coordinates = bbox(&region["bbox"])?;
-        let mut blocks = if legibility == "unreadable" || original.trim().is_empty() {
+        let mut blocks = if original.trim().is_empty() {
             vec![
-                json!({"ref":reference,"kind":"gap","speaker":"unconfirmed","text":"〔此处文字无法辨认〕"}),
+                json!({"ref":reference,"kind":"gap","speaker":"unconfirmed","text":"此处文字无法辨认"}),
             ]
         } else {
             crate::research_dossier::content::blocks_from_text(original, "unconfirmed")
@@ -114,13 +117,25 @@ pub fn blocks_from_visual(visual: &Value) -> Result<Vec<Value>, sqlx::Error> {
                 ]
                 .contains(&role)
             {
-                block["issues"] = json!([{"key":format!("{reference}.{index}:reading"),"code":"uncertain_reading","message":"原文可读性或表达归属需要核验","resolution":"reading_edit","blockRef":block["ref"]}]);
+                let role_message = match role {
+                    "ui" => "界面文字，归属待核验",
+                    "background" => "背景文字，归属待核验",
+                    "subtitle" => "字幕，归属待核验",
+                    "brand" => "品牌文字，归属待核验",
+                    _ => "原文可读性或表达归属需要核验",
+                };
+                let message = match legibility {
+                    "partial" => format!("{role_message}；部分字符无法确认"),
+                    "unreadable" => format!("{role_message}；字符无法可靠辨认"),
+                    _ => role_message.to_owned(),
+                };
+                block["issues"] = json!([{"key":format!("{reference}.{index}:reading"),"code":"uncertain_reading","message":message,"resolution":"reading_edit","blockRef":block["ref"]}]);
             }
         }
         output.extend(blocks);
     }
     if output.is_empty() {
-        output.push(json!({"ref":"empty","kind":"gap","speaker":"unconfirmed","text":"〔识别未返回文字，尚未确认图片无文字〕","issues":[{"key":"recognition_empty","code":"recognition_empty","message":"未返回文字不证明原图没有文字","resolution":"reading_edit","blockRef":"empty"}]}));
+        output.push(json!({"ref":"empty","kind":"gap","speaker":"unconfirmed","text":"识别未返回文字，尚未确认图片无文字","issues":[{"key":"recognition_empty","code":"recognition_empty","message":"未返回文字不证明原图没有文字","resolution":"reading_edit","blockRef":"empty"}]}));
     }
     crate::research_dossier::content::validate_blocks(&output).map_err(|e| invalid(&e))?;
     Ok(output)
@@ -151,6 +166,35 @@ pub async fn persist_in(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unreadable_region_retains_returned_characters_as_unverified_text() {
+        let v = json!({"regions":[{"regionRef":"r","text":"禁止 … 10 mg","role":"body","legibility":"unreadable","bbox":null}]});
+        let blocks = blocks_from_visual(&v).unwrap();
+        assert_eq!(blocks[0]["text"], "禁止 … 10 mg");
+        assert_eq!(blocks[0]["kind"], "paragraph");
+        assert_eq!(blocks[0]["issues"][0]["resolution"], "reading_edit");
+        assert!(is_processor_version("cloud-manual-v2"));
+        assert!(is_processor_version(&format!(
+            "{PROCESSOR_VERSION}:{}",
+            Uuid::nil()
+        )));
+        assert!(!is_processor_version("cloud-manual-v1"));
+    }
+    #[test]
+    fn role_messages_always_preserve_nonclear_legibility() {
+        for role in ["ui", "background", "subtitle", "brand"] {
+            for (legibility, warning) in [
+                ("partial", "部分字符无法确认"),
+                ("unreadable", "字符无法可靠辨认"),
+            ] {
+                let blocks = blocks_from_visual(&json!({"regions":[{"regionRef":"r","text":"禁止 … 10 mg","role":role,"legibility":legibility,"bbox":null}]})).unwrap();
+                assert_eq!(blocks[0]["text"], "禁止 … 10 mg");
+                let message = blocks[0]["issues"][0]["message"].as_str().unwrap();
+                assert!(message.contains("归属待核验"));
+                assert!(message.contains(warning), "{role}/{legibility}: {message}");
+            }
+        }
+    }
     #[test]
     fn preserves_readable_unknown_role_and_converts_only_observed_box() {
         let v = json!({"regions":[{"regionRef":"r","text":"不可以超过 10 mg\n\n第二段","role":"background","legibility":"clear","bbox":[0.1,0.2,0.9,0.8]}]});

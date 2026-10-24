@@ -4,7 +4,7 @@ import styles from './Dossier.module.css';
 const SPEAKERS: Record<Speaker, string> = { author: '作品作者', other: '他人表述', unconfirmed: '表达者未确认' };
 export function DossierIssues({ issues }: { issues: readonly DossierIssue[] }) {
   if (issues.length === 0) return null;
-  return <ul className={styles.issues}>{issues.map(issue => <li key={issue.key}>{issue.message}</li>)}</ul>;
+  return <ul className={styles.issues}>{[...new Map(issues.map(issue => [issue.key, issue])).values()].map(issue => <li key={issue.key}>{issue.message}</li>)}</ul>;
 }
 function Content({ block }: { block: DossierBlock }) {
   switch (block.kind) {
@@ -13,7 +13,7 @@ function Content({ block }: { block: DossierBlock }) {
       return <Heading className={styles.blockHeading} data-source-level={block.level}>{block.text}</Heading>;
     }
     case 'quote': return <blockquote className={styles.text}>{block.text}</blockquote>;
-    case 'gap': return <p className={styles.gap}>〔{block.text}〕</p>;
+    case 'gap': return <p className={styles.gap}>{block.text.startsWith('〔') && block.text.endsWith('〕') ? block.text : `〔${block.text}〕`}</p>;
     case 'list': return block.ordered
       ? <ol className={styles.blockList} start={block.start}>{block.items.map((text, index) => <li key={index}>{text}</li>)}</ol>
       : <ul className={styles.blockList}>{block.items.map((text, index) => <li key={index}>{text}</li>)}</ul>;
@@ -25,8 +25,8 @@ function Content({ block }: { block: DossierBlock }) {
 /** Continuous full reading. Structure and attribution stay with the source words. */
 export function DossierBlocks({ blocks, issues = [] }: { blocks: readonly DossierBlock[]; issues?: readonly DossierIssue[] }) {
   const localKeys = new Set(blocks.flatMap(block => (block.issues ?? []).map(issue => issue.key)));
-  return <div className={styles.blocks}>{blocks.map(block => <div key={block.ref} className={styles.block} data-block-ref={block.ref}>
-    {block.speaker && block.speaker !== 'author' && block.kind !== 'dialogue' ? <p className={styles.attribution}>{SPEAKERS[block.speaker]}</p> : null}
+  return <div className={styles.blocks}>{blocks.map((block, index) => <div key={block.ref} className={styles.block} data-block-ref={block.ref}>
+    {block.speaker && block.speaker !== 'author' && block.kind !== 'dialogue' && (index === 0 || blocks[index - 1]?.speaker !== block.speaker || blocks[index - 1]?.kind === 'dialogue') ? <p className={styles.attribution}>{SPEAKERS[block.speaker]}</p> : null}
     {block.time ? <p className={styles.attribution}>{block.time.startMs === block.time.endMs ? `${(block.time.startMs / 1000).toFixed(3)} 秒` : `${(block.time.startMs / 1000).toFixed(3)}–${(block.time.endMs / 1000).toFixed(3)} 秒`}</p> : null}
     <Content block={block} />
     <DossierIssues issues={[...(block.issues ?? []), ...issues.filter(issue => issue.blockRef === block.ref && !localKeys.has(issue.key))]} />

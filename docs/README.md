@@ -498,3 +498,7 @@ AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundat
 - [OCR质量抽检与人工修正](plans/active/ocr-quality-audit-454.md)：#454 后续隔离实施，默认关闭；状态/证据在计划与PR。
 
 - [OCR可选质量抽检数据合同](data-contracts/ocr-quality-audit.md)：冻结样本、盲读、人工版本、来源撤回、质量分母与未验证边界。
+
+- [OCR-DOSSIER-SYSTEM-50：识别管线整改与五十篇验证](plans/active/ocr-dossier-system-50.md) · 活跃计划；真实清理/识别授权与候选修复分层记录。
+
+- [研究底稿与 OCR 五十篇审查报告](audits/ocr-dossier-system-50-2026-10-24.md) · 一次性报告；含真实识别、内容对照、清理和候选修正边界。

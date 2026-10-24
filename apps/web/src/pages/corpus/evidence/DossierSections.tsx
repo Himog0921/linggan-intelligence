@@ -13,32 +13,33 @@ import styles from './Dossier.module.css';
 
 export function CoverageSection({ payload }: { payload: DossierPayload }) {
   const { imageInventory: images, issues } = payload.dossier.coverage;
-  return <Section title="取得范围与缺口">
-    <p>{images.expectedPages === null ? `已取得 ${images.acquiredPages} 张图片，原作总页数未知。` : `原作 ${images.expectedPages} 页，已取得 ${images.acquiredPages} 页，已有读本 ${images.processedPages} 页。`}</p>
+  const materialIssues = payload.dossier.materials.flatMap(unit => [...unit.issues, ...unit.blocks.flatMap(block => block.issues ?? [])]);
+  const summaryIssues = issues.filter(issue => !(issue.code === 'image_total_unknown' && images.expectedPages === null) && !materialIssues.some(local => local.key === issue.key));
+  return <section className={styles.coverage} aria-label="材料覆盖">
+    <p>{images.expectedPages === null ? `已取得 ${images.acquiredPages} 张图片，已有读本 ${images.processedPages} 页，原作总页数未知。` : `原作 ${images.expectedPages} 页，已取得 ${images.acquiredPages} 页，已有读本 ${images.processedPages} 页。`}</p>
     {images.missingPages.length > 0 ? <p>尚未取得第 {images.missingPages.join('、')} 页。</p> : null}
     {images.unknownOrder ? <p className={styles.note}>部分图片的原作顺序尚未确认。</p> : null}
     {payload.dossier.selection.mode === 'explicit' ? <p className={styles.note}>当前是显式选择的材料范围，另有 {payload.dossier.selection.omittedUnits} 项未选入。</p> : null}
-    <DossierIssues issues={issues} />
-  </Section>;
+    <DossierIssues issues={summaryIssues} />
+  </section>;
 }
-export function MaterialsSection({ payload, work, domain, onOpenImage, onApplied }: { payload: DossierPayload; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void }) {
+export function MaterialsSection({ payload, work, domain, displayedTitle, onOpenImage, onApplied }: { payload: DossierPayload; displayedTitle?: string; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void }) {
   const { dossier } = payload;
   return <div className={styles.materials}>
-    {dossier.note.platformTitle !== null ? <Section title="平台标题"><p className={styles.text}>{dossier.note.platformTitle}</p></Section> : null}
+    {dossier.note.platformTitle !== null && dossier.note.platformTitle !== displayedTitle ? <Section title="平台标题"><p className={styles.text}>{dossier.note.platformTitle}</p></Section> : null}
     {dossier.materials.length === 0 ? <p>当前尚无可读材料；这不等于原作品没有内容。</p> : null}
-    {dossier.materials.map(unit => <MaterialSection key={unit.ref} unit={unit} work={work} domain={domain} onOpenImage={onOpenImage} onApplied={onApplied} />)}
+    {dossier.materials.map((unit, index) => <MaterialSection key={unit.ref} unit={unit} imageNumber={dossier.materials.slice(0, index + 1).filter(material => material.kind === 'image').length} work={work} domain={domain} onOpenImage={onOpenImage} onApplied={onApplied} />)}
   </div>;
 }
-function MaterialSection({ unit, work, domain, onOpenImage, onApplied }: { unit: DossierMaterial; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void }) {
+function MaterialSection({ unit, work, domain, imageNumber, onOpenImage, onApplied }: { unit: DossierMaterial; imageNumber: number; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void }) {
   const [originalReadable, setOriginalReadable] = useState(true);
   return <section className={styles.material} data-unit-ref={unit.ref}>
-      <header className={styles.materialHead}><h3>{materialLabel(unit)}</h3><span>{readingLabel(unit)}</span></header>
-      {unit.pageSource ? <p className={styles.note}>页序由已验证的同图来源确认。</p> : null}
-      {unit.blocks.length === 0 ? <p className={styles.note}>{emptyMaterialNote(unit)}</p> : null}
-      <DossierBlocks blocks={unit.blocks} issues={unit.issues} />
+      <header className={styles.materialHead}><h3>{materialLabel(unit, imageNumber)}</h3>{unit.reading !== null || unit.blocks.length > 0 ? <span>{readingLabel(unit)}</span> : null}</header>
+      {unit.blocks.length === 0 && !unit.issues.some(issue => issue.code === 'not_processed') ? <p className={styles.note}>{emptyMaterialNote(unit)}</p> : null}
+      <DossierBlocks blocks={unit.blocks} issues={unit.issues.filter(issue => !(issue.code === 'page_order_unknown' && unit.page === null))} />
       {unit.kind === 'image' || unit.kind === 'video_frame' ? <ImageCompare key={unit.originalUrl} material={unit} onOpenImage={onOpenImage} onReadable={setOriginalReadable} /> : null}
       {unit.kind !== 'tags' && unit.sourceState === 'present' && (unit.currentRevisionRef !== null || unit.kind === 'image') ? <ReadingReviewPanel unit={unit} work={work} domain={domain} onApplied={onApplied} originalReadable={originalReadable} /> : null}
-      <details className={styles.disclosure}><summary>来源与读本版本</summary><pre className={styles.pre}>{JSON.stringify({ unitRef: unit.ref, sourceRef: unit.sourceRef, sourceVersion: unit.sourceVersion, currentRevisionRef: unit.currentRevisionRef, pageSource: unit.pageSource, reading: unit.reading }, null, 2)}</pre></details>
+      <details className={styles.disclosure}><summary>来源与读本版本</summary>{unit.pageSource ? <p className={styles.note}>页序由已验证的同图来源确认。</p> : null}<pre className={styles.pre}>{JSON.stringify({ unitRef: unit.ref, sourceRef: unit.sourceRef, sourceVersion: unit.sourceVersion, currentRevisionRef: unit.currentRevisionRef, pageSource: unit.pageSource, reading: unit.reading }, null, 2)}</pre></details>
     </section>;
 }
 async function readMetadata(work: string, domain: string, asOf: string, signal: AbortSignal) {

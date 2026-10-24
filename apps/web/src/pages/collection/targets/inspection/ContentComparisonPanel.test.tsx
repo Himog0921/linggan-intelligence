@@ -122,3 +122,17 @@ it.each([403,409,503])('来源重读被拒绝 %s 后隐藏缓存中的比较结�
   rejected=true;await client.invalidateQueries({queryKey:['target-inspection']});await screen.findByRole('alert');
   expect(screen.queryByText('已撤回的比较结论')).not.toBeInTheDocument();expect(screen.queryByText('已撤回引用正文')).not.toBeInTheDocument();
 });
+
+
+it('真实准入关闭原因分别说明，预览不会提交模型研究',async()=>{
+  const works=['00000000-0000-4000-8000-000000000006','00000000-0000-4000-8000-000000000007'];
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  const fetch=vi.spyOn(globalThis,'fetch').mockResolvedValue(answer({...preview(works),canStart:false,
+    reasons:['daily_budget_unconfigured','model_configuration_unqualified','executor_off','global_off','task_work_comparison_off']}));
+  render(harness(client,works,vi.fn()));
+  const reasons=await screen.findByText(/每日额度尚未配置/);
+  for(const text of ['模型配置尚不可用','AI 执行器未开启','全局 AI 开关未开启','内容对照任务未开启'])expect(reasons).toHaveTextContent(text);
+  expect(screen.getByRole('button',{name:'比较内容'})).toBeDisabled();
+  expect(screen.queryByText(/当前研究暂不能执行/)).not.toBeInTheDocument();
+  expect(fetch.mock.calls.every(([,init])=>init?.method==='GET')).toBe(true);
+});

@@ -27,7 +27,17 @@ function stageCopy(run: OcrRecognitionRun) {
   if (run.state === 'unavailable') return run.unavailableReason ?? '识别资格尚未确认，请核对 OCR 设置。';
   if (run.state === 'succeeded') return '候选读本已生成 · ' + run.pendingCount + ' 处待核验。请在研究底稿中确认采用。';
   if (run.state === 'unknown') return '结果暂未确认；只核对原任务，不重复发送图片。';
-  if (run.state === 'stopped') return '本次已停止，已保存结果仍可查看；未尝试图片没有发送。';
+  if (run.state === 'stopped') {
+    const reasons: Record<string, string> = {
+      ocr_visual_coordinates_invalid: '文字位置无效',
+      ocr_visual_title_mismatch: '标题与识别原文不一致',
+      ocr_visual_schema_invalid: '识别结果格式不完整',
+      ocr_output_truncated: '识别输出不完整',
+      ocr_provider_failed: '识别服务未返回有效结果',
+    };
+    const reason = run.failureCode ? reasons[run.failureCode] : undefined;
+    return `${reason ? `${reason}，本次已停止` : '本次已停止'}。已保存结果可查看，后续图片未发送。`;
+  }
   if (run.cancelRequested) return '正在核对停止回执；在途请求只尽力中断，已得结果保留。';
   if (run.state === 'queued') return '已排队，等待已启用的执行器处理。';
   if (run.state === 'finalizing') return '正在提交可读结果，尚未宣布全部完成。';

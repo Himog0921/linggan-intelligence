@@ -166,3 +166,41 @@ it('离开旧材料后迟到的保存回执不会修改新材料界面', async (
   expect(within(document.body).getByRole('button', { name: '核对与修正' })).toBeInTheDocument();
   await waitFor(() => expect(api.reviewReading).toHaveBeenCalledTimes(1));
 });
+
+it('无当前读本和候选时不显示审核表单或无法执行的提交动作', async () => {
+  const material = unit({ currentRevisionRef: null, reading: null, blocks: [] });
+  vi.mocked(api.fetchCandidates).mockResolvedValue([]);
+  mount(material); const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '核对与修正' }));
+  expect(await screen.findByText('尚无可核对的读本，请先完成图片识别。')).toBeVisible();
+  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('核对依据')).not.toBeInTheDocument();
+  expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '逐块修正' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '保留当前读本' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/可直接对照来源修正/)).not.toBeInTheDocument();
+  expect(api.reviewReading).not.toHaveBeenCalled();
+});
+it('无当前读本时须明确选中候选才出现审核表单，选择本身不采用', async () => {
+  const material = unit({ currentRevisionRef: null, reading: null, blocks: [] });
+  const next = candidate(material); vi.mocked(api.fetchCandidates).mockResolvedValue([next]);
+  mount(material); const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '核对与修正' }));
+  const select = await screen.findByLabelText('核对版本');
+  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
+  await user.selectOptions(select, next.candidateRevisionRef);
+  expect(screen.getByLabelText('审核人')).toBeVisible();
+  expect(screen.getByText('全文 candidate-1')).toBeVisible();
+  expect(api.reviewReading).not.toHaveBeenCalled();
+  await user.selectOptions(select, '');
+  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
+});
+it('无当前读本且候选读取失败时不给出可修正承诺', async () => {
+  vi.mocked(api.fetchCandidates).mockRejectedValue(new ApiError({ kind: 'http', status: 503, code: null }));
+  mount(unit({ currentRevisionRef: null, reading: null, blocks: [] })); const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '核对与修正' }));
+  expect(await screen.findByText('候选版本暂时不可读。')).toBeVisible();
+  expect(screen.queryByText(/当前读本仍可核对|可直接对照来源修正/)).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '重读候选' })).toBeEnabled();
+});

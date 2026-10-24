@@ -126,12 +126,46 @@ describe('评论深采（Mog 2026-10-23）', () => {
     await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
     expect(await screen.findByText(/可能已经建立/)).toBeInTheDocument();
     const identity = (kit.of('POST', RUNS)[0]?.body as { idempotencyKey: string }).idempotencyKey;
-    kit.route('GET', `${RUNS}/requests/${identity}`, ok({ runRef: RUN, domainRef: DOMAIN, replayed: true }));
+    expect(screen.queryByRole('button', { name: '仍要重新提交' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '采全部评论' })).toBeNull();
+    kit.route('GET', `${RUNS}/requests/${identity}`, fail(500, 'unavailable'), ok({ runRef: RUN, domainRef: DOMAIN, replayed: true }));
     kit.route('GET', `${RUNS}/${RUN}`, ok(runJson()));
+    await view.user.click(screen.getByRole('button', { name: '核对原请求' }));
+    expect(await screen.findByText(/可能已经建立/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '仍要重新提交' })).toBeNull();
     await view.user.click(screen.getByRole('button', { name: '核对原请求' }));
     expect(await screen.findByText('已提交')).toBeInTheDocument();
     expect(kit.of('POST', RUNS)).toHaveLength(1);
-    expect(kit.of('GET', `${RUNS}/requests/${identity}`)).toHaveLength(1);
+    expect(kit.of('GET', `${RUNS}/requests/${identity}`)).toHaveLength(2);
+  });
+
+  it('会话存储不可写时阻止提交，避免刷新后无法核对身份', async () => {
+    const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('storage unavailable'); });
+    try {
+      const view = setup();
+      await view.user.click(screen.getByRole('button', { name: '采全部评论' }));
+      await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
+      expect(await screen.findByText(/无法保存请求身份，尚未提交/)).toBeInTheDocument();
+      expect(kit.of('POST', RUNS)).toHaveLength(0);
+    } finally { storage.mockRestore(); }
+  });
+
+  it('刷新后从持久身份恢复，核对成功前不会再 POST', async () => {
+    kit.route('POST', RUNS, () => 'network');
+    const first = setup();
+    await first.user.click(screen.getByRole('button', { name: '采全部评论' }));
+    await first.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
+    await screen.findByText(/可能已经建立/);
+    const identity = (kit.of('POST', RUNS)[0]?.body as { idempotencyKey: string }).idempotencyKey;
+    expect(Object.values(sessionStorage).some(value => value.includes(identity))).toBe(true);
+    first.unmount();
+    kit.route('GET', `${RUNS}/requests/${identity}`, ok({ runRef: RUN, domainRef: DOMAIN, replayed: true }));
+    kit.route('GET', `${RUNS}/${RUN}`, ok(runJson()));
+    const restored = setup();
+    expect(screen.queryByRole('button', { name: '采全部评论' })).toBeNull();
+    await restored.user.click(screen.getByRole('button', { name: '核对原请求' }));
+    expect(await screen.findByText('已提交')).toBeInTheDocument();
+    expect(kit.of('POST', RUNS)).toHaveLength(1);
   });
 
   it('核对时服务器说原请求没有记录：说没有建立，可以重新提交', async () => {
