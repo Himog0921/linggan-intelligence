@@ -14,7 +14,7 @@ pub async fn advance_runs(db: &Database) -> Result<usize, RunError> {
     if !ready {
         return Ok(0);
     }
-    let runs:Vec<Uuid>=sqlx::query_scalar("SELECT run_ref FROM collection_run r JOIN observation_domain d USING(domain_ref) WHERE ((r.control_intent='running' AND r.phase IN('discovery','materials') AND d.status='active') OR (r.phase='discovery' AND EXISTS(SELECT 1 FROM collection_run_order o JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=r.run_ref AND o.stage='discovery' AND w.queue_state='completed')))  ORDER BY r.updated_at,r.run_ref LIMIT 20").fetch_all(db.pool()).await?;
+    let runs:Vec<Uuid>=sqlx::query_scalar("SELECT run_ref FROM collection_run r JOIN observation_domain d USING(domain_ref) WHERE ((r.control_intent='running' AND r.phase IN('discovery','materials') AND d.status='active') OR (r.phase='discovery' AND EXISTS(SELECT 1 FROM collection_run_order o JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=r.run_ref AND o.stage='discovery' AND w.queue_state='completed')))  ORDER BY r.last_advanced_at NULLS FIRST,r.updated_at,r.run_ref LIMIT 20").fetch_all(db.pool()).await?;
     let mut advanced = 0;
     for run in runs {
         let mut tx = db.pool().begin().await?;
@@ -47,6 +47,13 @@ pub async fn advance_runs(db: &Database) -> Result<usize, RunError> {
             )
             .await?;
         }
+        // 独立记录检查时间，避免旧的等待任务长期占满有界窗口。
+        sqlx::query(
+            "UPDATE collection_run SET last_advanced_at=clock_timestamp() WHERE run_ref=$1",
+        )
+        .bind(run)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         advanced += 1;
     }

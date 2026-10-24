@@ -2,6 +2,8 @@
 -- 新评论范围 up_to：每篇作品采到 comment_target 条不重复评论（含回复）就停；评论区先走到尽头也结束。
 -- 只加列、扩约束，并把新列纳入冻结的采集意图与汇总视图；既有采集行的 comment_target 为 NULL，意图与历史不变。
 ALTER TABLE collection_run ADD COLUMN comment_target integer;
+-- 推进调度的轮转位置独立于业务更新时间；等待工位不阻塞后来的任务，也不刷新一分钟准入重试时钟。
+ALTER TABLE collection_run ADD COLUMN last_advanced_at timestamptz;
 ALTER TABLE collection_run DROP CONSTRAINT collection_run_comment_mode_check;
 ALTER TABLE collection_run ADD CONSTRAINT collection_run_comment_mode_check
  CHECK(comment_mode IN('sample_30','all_public','up_to'));

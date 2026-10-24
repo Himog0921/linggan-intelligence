@@ -1665,3 +1665,66 @@ async fn a_targeted_count_also_ends_when_the_comment_area_runs_out_first() {
     assert_eq!(result["completed_discussions"], 1);
     assert_eq!(result["gap_works"], 0);
 }
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL harness"]
+async fn waiting_runs_rotate_without_resetting_admission_retry_time() {
+    let db = fixture::proof_database("single_run_rotation").await;
+    let d = domain(&db).await;
+    for n in 0..21 {
+        create_run(
+            &db,
+            &CreateRun {
+                idempotency_key: Uuid::new_v4(),
+                domain_ref: d,
+                source: RunSource::TemporaryKeyword {
+                    query: format!("合成等待任务{n}"),
+                },
+                ranking: Some("comprehensive".into()),
+                work_limit: 1,
+                comment_mode: CommentMode::Sample30,
+                comment_target: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    // 没有工位/交付；旧代码每次只取同一批20个。检查时钟不能改变业务更新时间。
+    let before: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT run_ref,updated_at::text FROM collection_run ORDER BY run_ref")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    linggan_evidence::collection_run_progress::advance_runs(&db)
+        .await
+        .unwrap();
+    let first: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_run WHERE last_advanced_at IS NOT NULL",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(first, 20);
+    linggan_evidence::collection_run_progress::advance_runs(&db)
+        .await
+        .unwrap();
+    let second: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_run WHERE last_advanced_at IS NOT NULL",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        second, 21,
+        "the newest run must get a turn despite twenty waiting runs"
+    );
+    let after: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT run_ref,updated_at::text FROM collection_run ORDER BY run_ref")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        before, after,
+        "round-robin checks must not reset admission backoff"
+    );
+}
