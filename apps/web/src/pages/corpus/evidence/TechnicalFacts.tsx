@@ -14,10 +14,10 @@ import {
   timelineRuns,
   type FactRowData,
 } from './evidencePresent';
-import type { AuthorContext, Inspector, WorkItem } from './evidenceTypes';
+import type { AuthorContext, Inspector, Reobservation, WorkItem } from './evidenceTypes';
 import styles from './Inspector.module.css';
 
-function IdentityFacts({ item }: { item: WorkItem }) {
+function IdentityFacts({ item, reobservation }: { item: WorkItem; reobservation: Reobservation }) {
   const display = item.display;
   const limitation = item.primaryLimitation;
   const rows: FactRowData[] = [
@@ -30,6 +30,8 @@ function IdentityFacts({ item }: { item: WorkItem }) {
     ['最近观察', momentText(item.lastObservedAt)],
     // 读模型把「当前主要限制」写死成同一个默认值，不等价于「只跑过发现通道」：只在这里列出，不作标题结论（DR-8）。
     ['当前主要限制', limitation && limitation !== 'NONE' ? limitationCopy(limitation) : '本次读取没有记录额外限制', limitation],
+    // 复观测不可用的原因码：普通层只说人话，原码留在这里核对。
+    ['复观测资格', reobservation.eligible ? '可以复观测' : '不可复观测', reobservation.reason],
   ];
   return <FactGrid rows={rows} />;
 }
@@ -93,7 +95,7 @@ function Timeline({ inspector }: { inspector: Inspector }) {
  * 平台计数与本地留存、材料通道状态、互动观察时间线、作者上下文。字段码与 UUID 只出现在这里；
  * 折叠是排布，不是改写——每一行的原文案与状态码与旧页一致。
  */
-export function TechnicalFacts({ item, inspector }: { item: WorkItem; inspector: Inspector }) {
+export function TechnicalFacts({ item, inspector, reobservation }: { item: WorkItem; inspector: Inspector; reobservation: Reobservation }) {
   const detail = inspector.detail;
   const metrics = inspector.engagement;
   const author = inspector.authorContext ?? inspector.sharedAuthorContext;
@@ -101,7 +103,7 @@ export function TechnicalFacts({ item, inspector }: { item: WorkItem; inspector:
     <details className={styles.technical}>
       <summary>技术事实</summary>
       <Section title="作品字段与来源">
-        <IdentityFacts item={item} />
+        <IdentityFacts item={item} reobservation={reobservation} />
       </Section>
       <Section title="来源与溯源">
         <FactGrid rows={[['来源监控', monitoringOriginCopy(item)]]} />

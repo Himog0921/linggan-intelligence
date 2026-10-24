@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseWorkDetail } from './evidenceDecode';
-import { detailJson, mediaHandle, slotJson, workRef } from './evidenceFixtures';
-import { mediaObjects, positionText } from './mediaObjects';
+import { contentSha, detailJson, mediaHandle, slotJson, workRef } from './evidenceFixtures';
+import { mediaObjects, mediaSlotLedger, positionText } from './mediaObjects';
 import { clampPan, clampZoom, zoomAbout, ZOOM_MAX } from './zoomMath';
 
 const ref = workRef(1);
@@ -18,7 +18,7 @@ describe('本机媒体对象（J01）', () => {
       slotJson(2, ref, { ordinal: 2 }),
     ]);
     expect(mediaObjects(inspector, null).map(object => object.ordinal)).toEqual([1, 2, 3]);
-    expect(mediaObjects(inspector, null, true)).toHaveLength(4);
+    expect(mediaSlotLedger(inspector, null)).toHaveLength(4);
     expect(positionText(0, 12)).toBe('01 / 12');
   });
 
@@ -52,6 +52,46 @@ describe('本机媒体对象（J01）', () => {
     );
     expect(objects[0]).toMatchObject({ derivedState: 'ACQUIRED', derivedText: '第一张图上的字', isMatch: true });
     expect(objects[1]).toMatchObject({ derivedState: null, derivedText: null, isMatch: false });
+  });
+});
+
+describe('同一份文件只算一张（2026-10-23：封面＝正文第 1 张）', () => {
+  const same = contentSha(77);
+  const cover = slotJson(1, ref, { purpose: 'cover', ordinal: 1, sha256: same });
+  const firstBody = slotJson(2, ref, { ordinal: 1, sha256: same });
+  const secondBody = slotJson(3, ref, { ordinal: 2 });
+
+  it('封面与正文第 1 张指纹相同：轨道只出一张，角色写全，代表槽位是封面', () => {
+    const objects = mediaObjects(inspectorWith([secondBody, firstBody, cover]), null);
+    expect(objects).toHaveLength(2);
+    expect(objects[0]).toMatchObject({ index: 0, purpose: 'cover', label: '封面 · 正文第 1 张', slotKey: `xhs:${ref}:cover:1`, assetUrl: mediaHandle(1) });
+    expect(objects[0]!.slotKeys).toEqual([`xhs:${ref}:cover:1`, `xhs:${ref}:image:1`]);
+    expect(objects[1]).toMatchObject({ index: 1, label: '正文图片', slotKey: `xhs:${ref}:image:2` });
+  });
+
+  it('台账仍逐槽位一行：合并只是展示，两个槽位都在', () => {
+    const ledger = mediaSlotLedger(inspectorWith([cover, firstBody, secondBody]), null);
+    expect(ledger.map(object => object.slotKey)).toEqual([`xhs:${ref}:cover:1`, `xhs:${ref}:image:1`, `xhs:${ref}:image:2`]);
+  });
+
+  it('文字状态与命中取自任一别名：识字记在正文槽位上，合并后的那张也显示已取得', () => {
+    const objects = mediaObjects(
+      inspectorWith([cover, firstBody], [{ kind: 'ocr_text', state: 'ACQUIRED', displayText: '封面大字', slotKey: `xhs:${ref}:image:1` }]),
+      { slotKey: `xhs:${ref}:image:1` },
+    );
+    expect(objects).toHaveLength(1);
+    expect(objects[0]).toMatchObject({ derivedState: 'ACQUIRED', derivedText: '封面大字', isMatch: true });
+  });
+
+  it('没有指纹（还没取得字节）的槽位不合并，也不拿别的槽位顶替', () => {
+    const objects = mediaObjects(
+      inspectorWith([
+        slotJson(1, ref, { purpose: 'cover', ordinal: 1, handle: null, bytesState: 'NOT_OBSERVED', sha256: 'not-a-hash' }),
+        slotJson(2, ref, { ordinal: 1, handle: null, bytesState: 'NOT_OBSERVED', sha256: 'not-a-hash' }),
+      ]),
+      null,
+    );
+    expect(objects.map(object => object.label)).toEqual(['封面', '正文图片']);
   });
 });
 

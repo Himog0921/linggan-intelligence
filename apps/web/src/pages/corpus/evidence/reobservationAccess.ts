@@ -8,9 +8,9 @@ export function reobservationAccess(item: Pick<WorkItem, 'platform'>, channel: C
   return {
     actionPath: null,
     reason: !channel.supported
-      ? '该作品的平台当前不支持复观测；页面没有创建可调用入口。'
+      ? '这个平台的作品暂时不能复观测。'
       : channel.eligible
-        ? '复观测入口未通过同源路径校验；页面不会猜测后端路由。'
-        : '该作品当前尚未具备监控目标关联的有效深度归档授权；页面不会提供不可执行的操作。',
+        ? '复观测入口地址不对，页面没有提供按钮。'
+        : '这篇笔记现在不能复观测：它不在任何仍有效的观察授权里（比如来源的观察目标已停用，或授权已过期）。',
   };
 }

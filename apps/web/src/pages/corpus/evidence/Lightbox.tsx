@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { ModalDialog } from '../../../corpus/ModalDialog';
-import { purposeLabel, stateMeta } from './evidencePresent';
+import { stateMeta } from './evidencePresent';
 import { positionText, type ViewerObject } from './mediaObjects';
 import { useZoomPan } from './useZoomPan';
 import styles from './Lightbox.module.css';
@@ -52,7 +52,7 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
     <div className={styles.viewer} onKeyDown={onKeyDown}>
       <header className={styles.head}>
         <div>
-          <strong id={titleId}>{`${purposeLabel(object.purpose)} · 第 ${positionText(object.index, total).replace(' / ', ' / ')} 个`}</strong>
+          <strong id={titleId}>{`${object.label} · 第 ${positionText(object.index, total).replace(' / ', ' / ')} 个`}</strong>
           <span className={styles.subtitle}>{subtitle}</span>
         </div>
         <div className={styles.tools}>
@@ -92,7 +92,7 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
             onPointerCancel={zoom.onPointerEnd}
           >
             {object.assetUrl && phase !== 'failed' ? (
-              <img key={object.index} ref={image} src={object.assetUrl} alt={`${purposeLabel(object.purpose)} 原尺寸本地副本`} onLoad={() => setImageState({ key: mediaKey, phase: 'loaded' })} onError={() => setImageState({ key: mediaKey, phase: 'failed' })} style={{ transform: `translate(${zoom.pan.x}px, ${zoom.pan.y}px) scale(${zoom.zoom})` }} />
+              <img key={object.index} ref={image} src={object.assetUrl} alt={`${object.label} 原尺寸本地副本`} onLoad={() => setImageState({ key: mediaKey, phase: 'loaded' })} onError={() => setImageState({ key: mediaKey, phase: 'failed' })} style={{ transform: `translate(${zoom.pan.x}px, ${zoom.pan.y}px) scale(${zoom.zoom})` }} />
             ) : null}
             {!object.assetUrl || phase !== 'loaded' ? <span className={styles.mediaState} role="status">{!object.assetUrl ? `未取得可内联副本 · ${stateMeta(object.bytesState)[0]}` : phase === 'failed' ? '本地副本读取失败；可切换其他对象或关闭查看器。' : '正在读取本地副本…'}</span> : null}
           </div>
