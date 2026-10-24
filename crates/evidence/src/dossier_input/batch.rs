@@ -173,7 +173,8 @@ pub async fn apply_plan(database: &Database, plan: &BatchPlan) -> Result<BatchRe
         let result = apply_work(database, plan, entry).await;
         let (outcome, result) = match result {
             Ok(result) => {
-                let partial = result["invalid"].as_u64().unwrap_or(0) > 0
+                let partial = result["state"] == "not_acquired"
+                    || result["invalid"].as_u64().unwrap_or(0) > 0
                     || result["skipped"].as_u64().unwrap_or(0) > 0
                     || result["needsOcr"].as_u64().unwrap_or(0) > 0;
                 report.layout_updated += result["updated"].as_u64().unwrap_or(0);

@@ -61,11 +61,11 @@ describe('打开页面', () => {
     expect(badge.title).toMatch(/^本次读取 3 个作品 · 已留存评论 .* · 本地材料 \d+ · 部分或缺口 \d+$/);
   });
 
-  it('页面标题、侧栏页脚与语料导航保持', async () => {
+  it('保留页面标题和语料导航，不展示实现说明页脚', async () => {
     pageRoutes(kit);
     await opened();
     expect(screen.getByRole('heading', { level: 1, name: '证据库' })).toBeInTheDocument();
-    expect(screen.getByText('只读本机材料投影／列表与详情不触发采集')).toBeInTheDocument();
+    expect(screen.queryByText('只读本机材料投影／列表与详情不触发采集')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /证据库/ })).toHaveAttribute('href', `/corpus/evidence?domain=${DOMAIN}`);
   });
 

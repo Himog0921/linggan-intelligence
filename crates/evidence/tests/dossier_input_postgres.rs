@@ -216,3 +216,33 @@ async fn explicit_hashtag_projection_preserves_source_order_without_narrative_fa
     assert_eq!(changed.already_current, 0);
     assert_eq!(changed.results[0].result["reason"], "material_changed");
 }
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL only"]
+async fn missing_body_is_partial_not_already_prepared() {
+    let db = fixture::proof_database("dossier_body_missing").await;
+    let package = fixture::submit_package(&db, "content_detail", json!({"contentExternalId":"no-body"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"no-body"},"payload":{"title":"合成标题"}})).await;
+    let work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='no-body'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+        .bind(Uuid::new_v4()).bind(work).bind(DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+    let plan = input::plan(
+        &db,
+        DOMAIN,
+        &[work],
+        None,
+        input::BatchOperation::NativeBody,
+    )
+    .await
+    .unwrap();
+    let report = input::apply_plan(&db, &plan).await.unwrap();
+    assert_eq!(report.partial, 1);
+    assert_eq!(report.already_current, 0);
+    assert_eq!(report.updated, 0);
+    assert!(!report.complete());
+}
