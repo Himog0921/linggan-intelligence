@@ -26,6 +26,7 @@ const report = {
   sources: {},
 };
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+const UUID_EXACT = new RegExp(`^${UUID.source}$`, 'i');
 const base = `${origin}/corpus/evidence?domain=${domainOne}`;
 const LIST = '/api/local/work-resources';
 const step = async (name, run) => {
@@ -582,6 +583,12 @@ try {
     assert.match(await section.getByRole('link', { name: '在采集任务里查看' }).getAttribute('href'), /^\/collection\/tasks\?domain=[0-9a-f-]{36}&run=[0-9a-f-]{36}$/);
     assert.doesNotMatch(await section.innerText(), UUID);
     await shot('evidence-1440-deep-comments-submitted');
+    await page.reload();
+    await waitInspector(TITLE.rich);
+    await page.getByRole('tab', { name: '采集记录' }).click();
+    await panel('采集记录').getByRole('button', { name: '评论深采已提交' }).waitFor();
+    assert.equal(await panel('采集记录').getByRole('button', { name: '评论深采已提交' }).isDisabled(), true);
+    assert.equal(report.writes.length, writes + 1, '刷新恢复原回执，不重新 POST');
     // 采指定条数：另一篇作品选 40 条，请求带 up_to 与条数（库内另核）。
     await open(`&work=${video}`);
     await waitInspector(TITLE.video);
@@ -663,7 +670,7 @@ try {
   });
 
   // ⑫ 存储
-  await step('存储只有三类键且无作品内容', async () => {
+  await step('存储只有四类键且无作品内容，深采只保存冻结请求与回执', async () => {
     await open();
     await page.getByRole('button', { name: '选择', exact: true }).click();
     await rowOf(TITLE.rich).getByRole('checkbox', { name: `勾选作品：${TITLE.rich}` }).check();
@@ -675,7 +682,29 @@ try {
       session: Object.fromEntries(Object.keys(sessionStorage).map(key => [key, sessionStorage.getItem(key)])),
     }));
     assert.deepEqual(Object.keys(report.storage.local), ['linggan.evidence.inspectorWidth']);
-    for (const key of Object.keys(report.storage.session)) assert.match(key, /^(collection-selected:[0-9a-f-]{36}|linggan-research-dossier-batch-v1)$/);
+    for (const [key, value] of Object.entries(report.storage.session)) {
+      const deep = /^linggan\.evidence\.comment-deep\.v1:([0-9a-f-]{36}):([0-9a-f-]{36})$/.exec(key);
+      if (!deep) {
+        assert.match(key, /^(collection-selected:[0-9a-f-]{36}|linggan-research-dossier-batch-v1)$/);
+        continue;
+      }
+      const entry = JSON.parse(value);
+      assert.deepEqual(Object.keys(entry).sort(), ['request', 'runRef']);
+      assert.deepEqual(Object.keys(entry.request).sort(), ['fingerprint', 'identity', 'sent']);
+      assert.match(entry.request.identity, UUID_EXACT);
+      assert.match(deep[1], UUID_EXACT);
+      assert.match(deep[2], UUID_EXACT);
+      assert.equal(entry.request.sent, true);
+      if (entry.runRef !== null) assert.match(entry.runRef, UUID_EXACT);
+      const intent = JSON.parse(entry.request.fingerprint);
+      assert.deepEqual(Object.keys(intent).sort(), ['commentMode', ...(intent.commentMode === 'up_to' ? ['commentTarget'] : []), 'domainRef', 'ranking', 'source', 'workLimit'].sort());
+      assert.equal(intent.domainRef, deep[1]);
+      assert.deepEqual(intent.source, { kind: 'selected_works', workRefs: [deep[2]] });
+      assert.equal(intent.ranking, null);
+      assert.equal(intent.workLimit, 1);
+      assert.ok(['all_public', 'up_to'].includes(intent.commentMode));
+      if (intent.commentMode === 'up_to') assert.ok(Number.isInteger(intent.commentTarget) && intent.commentTarget >= 1 && intent.commentTarget <= 1000);
+    }
     for (const value of [...Object.values(report.storage.local), ...Object.values(report.storage.session)]) assert.doesNotMatch(value, /合成|先做两分钟/);
     await page.evaluate(() => {
       localStorage.clear();
