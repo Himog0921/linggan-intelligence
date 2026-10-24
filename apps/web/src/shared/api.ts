@@ -115,3 +115,23 @@ async function sendJsonRequest(
   }
   return parsed;
 }
+
+/** On-demand Markdown uses the same same-origin and uncertain-response boundary as JSON. */
+export async function requestText(path: string, options: { signal?: AbortSignal } = {}): Promise<string> {
+  if (!path.startsWith('/') || path.startsWith('//') || /[\\\r\n\t]/.test(path)) throw new Error('只允许同源相对路径');
+  let response: Response; let text: string;
+  try {
+    response = await fetch(path, { method: 'GET', cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'text/markdown' }, signal: options.signal ?? null });
+    text = await response.text();
+  } catch (error) {
+    if (options.signal?.aborted) throw error;
+    throw new ApiError({ kind: 'network' });
+  }
+  if (!response.ok) {
+    let value: unknown; try { value = JSON.parse(text); } catch { value = null; }
+    throw new ApiError({ kind: 'http', status: response.status, code: isRecord(value) && typeof value.error === 'string' ? value.error : null }, value);
+  }
+  const type = response.headers.get('Content-Type')?.split(';')[0]?.trim().toLowerCase();
+  if (type !== 'text/markdown') throw new ApiError({ kind: 'invalid_response', status: response.status });
+  return text;
+}

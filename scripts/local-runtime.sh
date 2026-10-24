@@ -197,11 +197,11 @@ repair_password() {
 
 require_ops_first_admin_bootstrap_schema() {
   local expected_hash recorded_hash relation
-  expected_hash="$(shasum -a 256 "$project_root/database/migrations/0148_ops_first_admin_bootstrap.sql" | awk '{print $1}')"
-  recorded_hash="$(psql_in_container -At -c "SELECT migration_sha256 FROM linggan_local_schema_migration WHERE migration_id='0148_ops_first_admin_bootstrap'")"
+  expected_hash="$(shasum -a 256 "$project_root/database/migrations/0152_ops_first_admin_bootstrap.sql" | awk '{print $1}')"
+  recorded_hash="$(psql_in_container -At -c "SELECT migration_sha256 FROM linggan_local_schema_migration WHERE migration_id='0152_ops_first_admin_bootstrap'")"
   relation="$(psql_in_container -At -c "SELECT to_regclass('linggan_ops_first_admin_bootstrap')")"
   if [[ "$recorded_hash" != "$expected_hash" || "$relation" != "linggan_ops_first_admin_bootstrap" ]]; then
-    echo "0148_ops_first_admin_bootstrap is not the verified current schema; run the explicit migrate workflow first" >&2
+    echo "0152_ops_first_admin_bootstrap is not the verified current schema; run the explicit migrate workflow first" >&2
     exit 1
   fi
 }
@@ -464,21 +464,25 @@ migrate() {
   apply_migration_once "0143_ocr_quality_audit" "$project_root/database/migrations/0143_ocr_quality_audit.sql"
   apply_migration_once "0144_ocr_manual_recognition" "$project_root/database/migrations/0144_ocr_manual_recognition.sql"
   apply_migration_once "0145_ocr_manual_human_adoption" "$project_root/database/migrations/0145_ocr_manual_human_adoption.sql"
-  apply_migration_once "0146_ops_team_auth" "$project_root/database/migrations/0146_ops_team_auth.sql"
-  apply_migration_once "0147_ops_team_responsibility" "$project_root/database/migrations/0147_ops_team_responsibility.sql"
-  apply_migration_once "0148_ops_first_admin_bootstrap" "$project_root/database/migrations/0148_ops_first_admin_bootstrap.sql"
-  apply_migration_once "0149_ops_native_write_model" "$project_root/database/migrations/0149_ops_native_write_model.sql"
-  apply_migration_once "0150_ops_native_publication_date_precision" "$project_root/database/migrations/0150_ops_native_publication_date_precision.sql"
-  apply_migration_once "0151_ops_publication_sync_request" "$project_root/database/migrations/0151_ops_publication_sync_request.sql"
-  apply_migration_once "0152_ops_publication_execution_locator" "$project_root/database/migrations/0152_ops_publication_execution_locator.sql"
-  apply_migration_once "0153_ops_account_responsibility_command" "$project_root/database/migrations/0153_ops_account_responsibility_command.sql"
-  apply_migration_once "0154_ops_member_deactivation" "$project_root/database/migrations/0154_ops_member_deactivation.sql"
-  apply_migration_once "0155_ops_exact_publication_work_scope" "$project_root/database/migrations/0155_ops_exact_publication_work_scope.sql"
-  apply_migration_once "0156_ops_exact_publication_detail_session" "$project_root/database/migrations/0156_ops_exact_publication_detail_session.sql"
-  apply_migration_once "0157_ops_publication_execution_input_eligibility" "$project_root/database/migrations/0157_ops_publication_execution_input_eligibility.sql"
-  apply_migration_once "0158_ops_publication_material_projection" "$project_root/database/migrations/0158_ops_publication_material_projection.sql"
-  apply_migration_once "0159_ops_publication_field_adoption" "$project_root/database/migrations/0159_ops_publication_field_adoption.sql"
-  apply_migration_once "0160_ops_publication_media_projection" "$project_root/database/migrations/0160_ops_publication_media_projection.sql"
+  apply_migration_once "0146_research_dossier_v2" "$project_root/database/migrations/0146_research_dossier_v2.sql"
+  apply_migration_once "0147_comment_study_full_context" "$project_root/database/migrations/0147_comment_study_full_context.sql"
+  apply_migration_once "0148_dossier_consumer_contracts" "$project_root/database/migrations/0148_dossier_consumer_contracts.sql"
+  apply_migration_once "0149_target_inspector_comparison" "$project_root/database/migrations/0149_target_inspector_comparison.sql"
+  apply_migration_once "0150_ops_team_auth" "$project_root/database/migrations/0150_ops_team_auth.sql"
+  apply_migration_once "0151_ops_team_responsibility" "$project_root/database/migrations/0151_ops_team_responsibility.sql"
+  apply_migration_once "0152_ops_first_admin_bootstrap" "$project_root/database/migrations/0152_ops_first_admin_bootstrap.sql"
+  apply_migration_once "0153_ops_native_write_model" "$project_root/database/migrations/0153_ops_native_write_model.sql"
+  apply_migration_once "0154_ops_native_publication_date_precision" "$project_root/database/migrations/0154_ops_native_publication_date_precision.sql"
+  apply_migration_once "0155_ops_publication_sync_request" "$project_root/database/migrations/0155_ops_publication_sync_request.sql"
+  apply_migration_once "0156_ops_publication_execution_locator" "$project_root/database/migrations/0156_ops_publication_execution_locator.sql"
+  apply_migration_once "0157_ops_account_responsibility_command" "$project_root/database/migrations/0157_ops_account_responsibility_command.sql"
+  apply_migration_once "0158_ops_member_deactivation" "$project_root/database/migrations/0158_ops_member_deactivation.sql"
+  apply_migration_once "0159_ops_exact_publication_work_scope" "$project_root/database/migrations/0159_ops_exact_publication_work_scope.sql"
+  apply_migration_once "0160_ops_exact_publication_detail_session" "$project_root/database/migrations/0160_ops_exact_publication_detail_session.sql"
+  apply_migration_once "0161_ops_publication_execution_input_eligibility" "$project_root/database/migrations/0161_ops_publication_execution_input_eligibility.sql"
+  apply_migration_once "0162_ops_publication_material_projection" "$project_root/database/migrations/0162_ops_publication_material_projection.sql"
+  apply_migration_once "0163_ops_publication_field_adoption" "$project_root/database/migrations/0163_ops_publication_field_adoption.sql"
+  apply_migration_once "0164_ops_publication_media_projection" "$project_root/database/migrations/0164_ops_publication_media_projection.sql"
 }
 
 case "$command_name" in

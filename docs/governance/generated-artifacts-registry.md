@@ -62,7 +62,7 @@
 ## CREATOR-DISCOVERY-001 隔离验证产物
 
 - 位置：系统临时目录中的 `creator-discovery-*.log`、`creator-discovery-http-check.py`、GitHub body Markdown、隔离 API ledger SQL 与 worker 屏障临时目录（用例自行清理）、本任务 `linggan-creator-discovery-proof-*` 一次性 Docker container（无宿主业务 volume），以及 Cargo 既有忽略目录。
-- 来源：`creator_discovery_postgres`、`creator_discovery_worker_postgres` 与专用本地 API 进程；输入均为合成数据。测试源码是维护的测试输入，不是生成产物。
+- 来源：`creator_discovery_postgres`、`creator_discovery_input_postgres` 与专用本地 API 进程；输入均为合成数据。v2 将退役 worker 的失效调度证明替换为当前 canonical 输入准备、合成适配器合同与退役入口无副作用证明，不重新启用旧调度器。测试源码是维护的测试输入，不是生成产物。
 - Git：不提交日志、数据库、截图或构建产物；可复现命令与结果转写至 `docs/audits/creator-discovery-001-acceptance.md`。
 - 清理：确认测试和本任务 API 进程结束后停止本任务容器，`--rm` 删除其临时数据；不得清理其他容器、业务库、工作树或共享 runtime。
 
@@ -267,7 +267,7 @@ Mog 授权三篇指定作品在本机核对与重新分层。私有材料快照�
 ## AI-GEN1 / PR-1A 隔离证据
 
 - 固定证据目录：本工作树 `artifacts/private/ai-gen1-pr1a/`；从实际 Cargo/治理/隔离 runner 输出保存日志与最终收尾审查。忽略、不提交、不伪造；只含合成资料与无凭据元数据。系统临时目录中本次 `ai-gen1-pr1a-*.log` 是同一过程的临时输出，可核对后删除；最终保留到本包审阅结束，移除工作树前按需移交同名私有证据目录。
-- 重放入口：`scripts/test-research-dossier-postgres.sh --note-material` 与原完整兼容 runner。随机 Docker PG/卷/数据库只由该脚本创建并由其 trap 清理；不借用共享 DSN、不清理其他容器或 schema。CLI 的 plan/receipt 是操作者显式生成的本机 JSON，不自动写进 Git；无正文。真实范围的 plan/apply 尚未获派。
+- 重放入口：`scripts/test-research-dossier-postgres.sh --dossier-input` 与原完整兼容 runner。随机 Docker PG/卷/数据库只由该脚本创建并由其 trap 清理；不借用共享 DSN、不清理其他容器或 schema。CLI 的 plan/receipt 是操作者显式生成的本机 JSON，不自动写进 Git；无正文。真实范围的 plan/apply 尚未获派。
 - `Cargo.lock` 按既有登记由 Cargo 管理；本包加入已解析的 Unicode normalization 依赖，不手改生成锁。没有新前端生成物或发布包。
 
 ## 前期规范包生成登记（保留历史生命周期）
@@ -437,9 +437,9 @@ AI-GEN1正式设置页候选：人工维护的apps/web/src/pages/settings分区/
 
 AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测试/计划允许入Git；验证输出固定本独立树`artifacts/private/ai-gen1-pr1c0/`，忽略不提交，无真实材料或共享DB。CI同一浏览器证据放自有`$RUNNER_TEMP/web-app-proof/c0-offline/`，随既有Web artifact归档；截图/report/临时fixture.json不入Git。研发阶段B自有target曾移交C0；合并收尾已清理该工作树/target，日志保留到仓库根同名`artifacts/private/ai-gen1-pr1c0/`。Mog另行授权的实际发布只读元数据与合成页面回执沿该private目录保留，不含真实原文/秘密，不能与无DB研发证明混称。
 
-## AI-GEN1 · 材料只读预览隔离证明
+## RESEARCH-DOSSIER-V2 · 完整底稿与独立审阅隔离证明
 
-`artifacts/private/ai-gen1-note-material-preview/`：本任务自有合成浏览器报告、截图、日志、审查哈希和CI回执，不入Git；由正式测试runner生成，交付/集成后按任务证据保留，不包含真实原文/秘密。CI写入`$RUNNER_TEMP/web-app-proof/note-material/`，沿既有artifact上传/到期清理。
+`artifacts/private/research-dossier-v2/`：本任务自有合成浏览器报告、截图、日志、审查哈希和CI回执，不入Git；由 `scripts/test-research-dossier-postgres.sh --dossier-ui` 的合成 React → Axum → PostgreSQL runner 生成，交付/集成后按任务证据保留，不包含真实原文/秘密。CI写入`$RUNNER_TEMP/web-app-proof/dossier-v2/`，沿既有artifact上传/到期清理。
 
 ## LIDS-UI-001 · 运营发布与同源构建
 
@@ -462,3 +462,7 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 - 原始 OCR：运行测试的 media 根下 `ocr/manual/<item UUID>.json`，来自 mock 返回原字节；实际 derivative/layout/adoption 指向该文件，随 owned assets 清理。真实生产结果不在本轮创建。
 - 私有证据：任务临时目录 `linggan-ocr-manual-implementation-2026-10-22` 保存 before/after 截图、浏览器回执、日志、自包含对照和保存响应回归。真实原图与保存响应只在该本机私有范围读取，不入 Git/CI，也不新增模型调用；`cloud_ocr_saved` 的 ignored test 仅由显式私有 manifest 驱动。
 - Git 只保存合成 fixture/runner/测试源、长期合同与结果摘要，不保存二进制、DSN、密钥、真实图片/正文或截图。保留本机证据供 Mog 验收；owned 数据资源由脚本主动清理，任务外数据不处理。
+
+## OCR-DOSSIER-SYSTEM-50
+
+私有产物位于本包worktree的 `artifacts/private/ocr-dossier-system-50/`；最终移交到主仓库同名忽略目录。含只读盘点、固定50篇引用/图片manifest、原始模型响应、截图、逐项质量报告与测试日志，不入Git，真实内容不写普通日志。生成来源为正式API/数据库只读盘点、已授权有界OCR执行和原图对照；禁止改写原始响应与像素。清理备份使用同目录加密归档，密钥独立用户私有目录0600保存；只按本包精确清单清理。保留至Mog验收，合并清理worktree前核对私有资料已移交。

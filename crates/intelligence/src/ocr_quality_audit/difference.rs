@@ -1,7 +1,9 @@
-//! Deterministic suggestions only. Cloud disagreement is not an observed error.
-use super::{Legibility, TitlePresence, VisualResult, VisualRole};
-use linggan_evidence::ocr_adoption::{Assessment, Role};
+//! Deterministic suggestions against the frozen canonical reading. A cloud
+//! disagreement is a question for review, never a correction or a truth claim.
+use super::{Legibility, TitlePresence, VisualResult, VisualRole, source::Source};
+use linggan_evidence::research_dossier::content::block_text;
 use serde::Serialize;
+use serde_json::Value;
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Difference {
@@ -12,174 +14,149 @@ pub struct Difference {
     pub suggested_text: Option<String>,
     pub bbox: Option<[f64; 4]>,
 }
+
 pub fn compare(
-    local: &Assessment,
+    local: &Source,
     v: &VisualResult,
-    snapshot: &serde_json::Value,
-) -> Vec<Difference> {
+    snapshot: &Value,
+) -> Result<Vec<Difference>, crate::ai_foundation::store::FoundationError> {
+    local.validate_snapshot(snapshot)?;
     let mut out = vec![];
-    let human = &snapshot["humanAdoptions"];
-    let title = if human["cover_headline"].is_object() {
-        human["cover_headline"]["after_text"]
-            .as_str()
-            .filter(|s| !s.is_empty())
-    } else {
-        local.cover_title.text.as_deref()
-    };
-    let mut add = |kind, block_ref, region_ref, local_text, suggested_text, bbox| {
-        out.push(Difference {
-            kind,
-            block_ref,
-            region_ref,
-            local_text,
-            suggested_text,
-            bbox,
-        })
-    };
-    if v.title_presence == TitlePresence::Absent && title.is_some() {
-        add(
-            "title_false_adoption",
-            None,
-            None,
-            title.map(str::to_owned),
-            None,
-            None,
-        );
-    }
-    if let Some(vision) = v.title_text.as_ref().filter(|t| Some(t.as_str()) != title) {
-        add(
-            if title.is_some() {
-                "wrong_character"
-            } else {
-                "title_missing"
-            },
-            None,
-            None,
-            title.map(str::to_owned),
-            Some(vision.clone()),
-            None,
-        );
-    }
-    if v.unreadable || v.title_presence == TitlePresence::Uncertain {
-        add("uncertain", None, None, None, None, None);
-    }
-    let machine_text = local
-        .regions
+    let title = local
+        .blocks
         .iter()
-        .flat_map(|r| &r.usable_fragments)
-        .map(|f| f.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    let local_text = human["adopted_body"]["after_text"]
-        .as_str()
-        .unwrap_or(&machine_text);
-    for r in &v.regions {
-        if r.legibility != Legibility::Clear {
-            add(
-                "uncertain",
-                None,
-                Some(r.region_ref.clone()),
-                None,
-                Some(r.text.clone()),
-                r.bbox,
-            );
-            continue;
-        }
-        if matches!(r.role, VisualRole::Body | VisualRole::ChapterHeading)
-            && !r.text.trim().is_empty()
-            && !local_text.contains(&r.text)
-        {
-            let same_region = r.bbox.and_then(|b| {
-                local.regions.iter().find(|l| {
-                    let a = [
-                        l.bbox[0] / f64::from(local.image.width),
-                        l.bbox[1] / f64::from(local.image.height),
-                        l.bbox[2] / f64::from(local.image.width),
-                        l.bbox[3] / f64::from(local.image.height),
-                    ];
-                    let overlap = (a[2].min(b[2]) - a[0].max(b[0])).max(0.)
-                        * (a[3].min(b[3]) - a[1].max(b[1])).max(0.);
-                    !l.usable_fragments.is_empty()
-                        && overlap / ((b[2] - b[0]) * (b[3] - b[1])) >= 0.6
-                })
+        .find(|b| b["kind"] == "heading")
+        .map(block_text);
+    if matches!(
+        local.image_role,
+        linggan_evidence::ocr_adoption::ImageRole::FirstImage
+            | linggan_evidence::ocr_adoption::ImageRole::ExplicitCover
+    ) {
+        if v.title_presence == TitlePresence::Absent && title.is_some() {
+            out.push(Difference {
+                kind: "title_false_adoption",
+                block_ref: None,
+                region_ref: None,
+                local_text: title.clone(),
+                suggested_text: None,
+                bbox: None,
             });
-            add(
-                if same_region.is_some() {
+        }
+        if let Some(vision) = v
+            .title_text
+            .as_ref()
+            .filter(|t| Some(t.as_str()) != title.as_deref())
+        {
+            out.push(Difference {
+                kind: if title.is_some() {
+                    "wrong_character"
+                } else {
+                    "title_missing"
+                },
+                block_ref: None,
+                region_ref: None,
+                local_text: title,
+                suggested_text: Some(vision.clone()),
+                bbox: None,
+            });
+        }
+    }
+    let rendered = local
+        .blocks
+        .iter()
+        .map(block_text)
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    for region in &v.regions {
+        if region.legibility != Legibility::Clear {
+            out.push(Difference {
+                kind: "uncertain",
+                block_ref: None,
+                region_ref: Some(region.region_ref.clone()),
+                local_text: None,
+                suggested_text: Some(region.text.clone()),
+                bbox: region.bbox,
+            });
+        } else if !region.text.is_empty()
+            && !rendered.contains(&region.text)
+            && matches!(
+                region.role,
+                VisualRole::Body | VisualRole::ChapterHeading | VisualRole::MainTitle
+            )
+        {
+            let same = region
+                .bbox
+                .and_then(|b| local.blocks.iter().find(|l| overlaps(&l["bbox"], b)));
+            out.push(Difference {
+                kind: if same.is_some() {
                     "wrong_character"
                 } else {
                     "body_missing"
                 },
-                same_region.map(|l| l.block_ref.clone()),
-                Some(r.region_ref.clone()),
-                same_region.map(|l| {
-                    l.usable_fragments
-                        .iter()
-                        .map(|f| f.text.as_str())
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                }),
-                Some(r.text.clone()),
-                r.bbox,
-            );
-        }
-        if matches!(
-            r.role,
-            VisualRole::Ui | VisualRole::Background | VisualRole::Subtitle
-        ) && r.text.chars().count() >= 2
-            && local_text.contains(&r.text)
-        {
-            add(
-                "source_role_mismatch",
-                None,
-                Some(r.region_ref.clone()),
-                Some(r.text.clone()),
-                None,
-                r.bbox,
-            );
+                block_ref: same.and_then(|b| b["ref"].as_str()).map(str::to_owned),
+                region_ref: Some(region.region_ref.clone()),
+                local_text: same.map(block_text),
+                suggested_text: Some(region.text.clone()),
+                bbox: region.bbox,
+            });
         }
     }
-    for r in local
-        .regions
-        .iter()
-        .filter(|_| !human["adopted_body"].is_object())
-    {
-        if !matches!(
-            r.role,
-            Role::TextCandidate | Role::ImageHeading | Role::OtherTitleGroup | Role::CoverTitle
-        ) {
-            continue;
-        }
-        for f in &r.usable_fragments {
-            if f.text.chars().count() >= 4 && !v.regions.iter().any(|v| v.text.contains(&f.text)) {
-                // Lack of matching cloud text alone cannot certify hallucination.
-                add(
-                    "uncertain",
-                    Some(r.block_ref.clone()),
-                    None,
-                    Some(f.text.clone()),
-                    None,
-                    None,
-                );
-            }
+    for block in &local.blocks {
+        let text = block_text(block);
+        if block["kind"] != "gap"
+            && text.chars().count() >= 4
+            && !v.regions.iter().any(|r| r.text.contains(&text))
+        {
+            out.push(Difference {
+                kind: "uncertain",
+                block_ref: block["ref"].as_str().map(str::to_owned),
+                region_ref: None,
+                local_text: Some(text),
+                suggested_text: None,
+                bbox: None,
+            });
         }
     }
     let positions: Vec<_> = local
-        .regions
+        .blocks
         .iter()
-        .flat_map(|r| &r.usable_fragments)
-        .filter_map(|f| {
+        .filter_map(|b| {
+            let text = block_text(b);
             let matches: Vec<_> = v
                 .regions
                 .iter()
                 .enumerate()
-                .filter(|(_, r)| r.text == f.text)
+                .filter(|(_, r)| r.text == text)
+                .map(|(i, _)| i)
                 .collect();
-            (matches.len() == 1).then(|| matches[0].0)
+            (matches.len() == 1).then(|| matches[0])
         })
         .collect();
     if positions.windows(2).any(|p| p[0] > p[1]) {
-        add("reading_order", None, None, None, None, None);
+        out.push(Difference {
+            kind: "reading_order",
+            block_ref: None,
+            region_ref: None,
+            local_text: None,
+            suggested_text: None,
+            bbox: None,
+        });
     }
-    out.truncate(200);
-    out
+    Ok(out)
+}
+
+fn overlaps(value: &Value, b: [f64; 4]) -> bool {
+    let Some(a) = value.as_array().filter(|a| a.len() == 4) else {
+        return false;
+    };
+    let values: Option<Vec<f64>> = a.iter().map(Value::as_f64).collect();
+    let Some(a) = values else { return false };
+    let area = (b[2] - b[0]) * (b[3] - b[1]);
+    if area <= 0. {
+        return false;
+    }
+    ((a[0] + a[2]).min(b[2]) - a[0].max(b[0])).max(0.)
+        * ((a[1] + a[3]).min(b[3]) - a[1].max(b[1])).max(0.)
+        / area
+        >= 0.6
 }

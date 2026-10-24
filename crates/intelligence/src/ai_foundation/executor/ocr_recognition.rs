@@ -29,6 +29,7 @@ struct Prepared {
     blob: String,
     content: Uuid,
     slot_key: String,
+    materialization_ref: Uuid,
     role: String,
     ordinal: Option<i32>,
     width: u32,
@@ -191,6 +192,7 @@ async fn prepare(
     let req_hash = content_hash(
         &json!([
             "ocr-recognition.v1",
+            visual::PROMPT_VERSION,
             item.item_ref,
             item.task_config_ref,
             model.connection_version_ref,
@@ -198,7 +200,7 @@ async fn prepare(
         ])
         .to_string(),
     );
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,task_config_ref,batch_ref,round_no,quota_bucket,classification_source,dispatch_admitted_at,deadline_at,egress_event_ref,result,created_at,price_ref) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,'ocr_recognition',$7,$8,$9,'task_day','producer_v1',$10::text::timestamptz,$10::text::timestamptz+make_interval(secs=>$11),$12,$13,$10::text::timestamptz,$14)").bind(invocation).bind(model.connection_version_ref).bind(model.current_model_ref).bind(cfg).bind(req_hash).bind(reserved as i64).bind(item.task_config_ref).bind(item.batch_ref).bind((item.position/linggan_contracts::ai_limits::AI_LIMITS.round_size+1)as i32).bind(admitted).bind(request.timeout_ms as f64/1000.0+10.0).bind(egress).bind(json!({"producer":"ai-gen1-executor.v1","purpose":"ocr_recognition"})).bind(price).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,task_config_ref,batch_ref,round_no,quota_bucket,classification_source,dispatch_admitted_at,deadline_at,egress_event_ref,result,created_at,price_ref) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,'ocr_recognition',$7,$8,$9,'task_day','producer_v1',$10::text::timestamptz,$10::text::timestamptz+make_interval(secs=>$11),$12,$13,$10::text::timestamptz,$14)").bind(invocation).bind(model.connection_version_ref).bind(model.current_model_ref).bind(cfg).bind(req_hash).bind(reserved as i64).bind(item.task_config_ref).bind(item.batch_ref).bind((item.position/linggan_contracts::ai_limits::AI_LIMITS.round_size+1)as i32).bind(admitted).bind(request.timeout_ms as f64/1000.0+10.0).bind(egress).bind(json!({"producer":"ai-gen1-executor.v1","purpose":"ocr_recognition","promptVersion":visual::PROMPT_VERSION})).bind(price).execute(&mut *tx).await?;
     let changed=sqlx::query("UPDATE linggan_ai_batch_item_control SET invocation_ref=$2,attempt_count=attempt_count+1,executed_config_ref=$3,execution_contract='ocr-recognition.v1' WHERE item_ref=$1 AND attempt_count=0").bind(item.item_ref).bind(invocation).bind(item.task_config_ref).execute(&mut *tx).await?;
     if changed.rows_affected() != 1 {
         return Err(ExecutorError::FenceLost);
@@ -214,6 +216,7 @@ async fn prepare(
         blob: r.get("blob_sha256"),
         content: r.get("content_public_ref"),
         slot_key: r.get("slot_key"),
+        materialization_ref: r.get("materialization_ref"),
         role,
         ordinal,
         width: w,
@@ -251,23 +254,33 @@ async fn settle(
     let (mut tx, cancelled) = receipt::lock_in(db, item, p.invocation, response).await?;
     let raw = response.and_then(|r| r.text.as_deref());
     // Preserve exactly what arrived, including a response that fails the versioned visual
-    // schema.  Such a receipt remains inspectable but never becomes adopted OCR.
+    // schema.  Such a receipt remains inspectable but never becomes a candidate reading.
     let raw_asset = raw.map(|body| write_raw(p.item, body)).transpose()?;
-    let parsed = response.filter(|r| r.ok).and_then(|r| {
-        visual::parse_visual(
-            r.text.as_deref()?,
-            r.diagnostic.as_ref()?.finish_reason.as_deref(),
+    let parsed = response.filter(|r| r.ok).map(|r| {
+        visual::parse_visual_diagnostic(
+            r.text.as_deref().unwrap_or_default(),
+            r.diagnostic
+                .as_ref()
+                .and_then(|d| d.finish_reason.as_deref()),
         )
-        .ok()
     });
-    let success = parsed.is_some() && !cancelled;
+    let success = matches!(parsed, Some(Ok(_))) && !cancelled;
     let failure = if success {
         None
-    } else if response.is_some_and(|r| r.ok) {
-        Some("ocr_visual_schema_invalid")
+    } else if cancelled {
+        Some("cancel_requested")
+    } else if response
+        .and_then(|r| r.diagnostic.as_ref())
+        .and_then(|d| d.finish_reason.as_deref())
+        == Some("length")
+    {
+        Some("ocr_output_truncated")
+    } else if let Some(Err(code)) = &parsed {
+        Some(*code)
     } else {
         Some("ocr_provider_failed")
     };
+    let parsed = parsed.and_then(Result::ok);
     let raw_hash = raw.map(content_hash);
     sqlx::query("UPDATE linggan_ocr_recognition_item SET state=$2,raw_result_ref=$3,raw_result_sha256=$4,raw_json=$5,finish_reason=$6 WHERE item_ref=$1")
         .bind(p.item)
@@ -278,11 +291,15 @@ async fn settle(
         .bind(response.and_then(|r| r.diagnostic.as_ref()).and_then(|d| d.finish_reason.as_deref()))
         .execute(&mut *tx)
         .await?;
-    if let Some(v) = parsed {
+    if let Some(v) = parsed.filter(|_| !cancelled) {
         let (raw_storage_key, raw_size) = raw_asset.ok_or(ExecutorError::Invalid)?;
         // A run is an immutable producer generation.  Replaying this receipt selects the same
         // version, while starting another confirmed run cannot overwrite this derivative.
-        let processor_version = format!("cloud-manual-v1:{}", p.run);
+        let processor_version = format!(
+            "{}:{}",
+            linggan_evidence::cloud_ocr_adoption::PROCESSOR_VERSION,
+            p.run
+        );
         let job = Uuid::new_v4();
         sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr',$4,'full') ON CONFLICT(blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
             .bind(job).bind(&p.blob).bind(&p.slot_key).bind(&processor_version).execute(&mut *tx).await?;
@@ -314,7 +331,7 @@ async fn settle(
             sequence_ordinal: p.ordinal.map(|n| n as u32),
         };
         let visual_json = serde_json::to_value(&v).map_err(|_| ExecutorError::Invalid)?;
-        let assessment = linggan_evidence::cloud_ocr_adoption::persist_in(
+        let blocks = linggan_evidence::cloud_ocr_adoption::persist_in(
             &mut tx,
             &source,
             derivative,
@@ -323,19 +340,27 @@ async fn settle(
             &visual_json,
         )
         .await?;
-        // The adoption row is the sole projected result.  Retaining its exact reference avoids
-        // a later run of the same blob changing this run's title, regions, or disagreement spans.
-        let adoption: Uuid = serde_json::from_value(assessment["adoptionRef"].clone())
-            .map_err(|_| ExecutorError::Invalid)?;
-        sqlx::query("UPDATE linggan_ocr_recognition_item SET adoption_ref=$2 WHERE item_ref=$1")
-            .bind(p.item)
-            .bind(adoption)
-            .execute(&mut *tx)
-            .await?;
+        let reading = linggan_evidence::material_reading::producers::publish_cloud_in(
+            &mut tx,
+            p.content,
+            job,
+            p.materialization_ref,
+            derivative,
+            blocks,
+        )
+        .await?;
+        sqlx::query(
+            "UPDATE linggan_ocr_recognition_item SET candidate_reading_ref=$2 WHERE item_ref=$1",
+        )
+        .bind(p.item)
+        .bind(reading.reading_ref)
+        .execute(&mut *tx)
+        .await?;
     }
     let mut result = response
         .map(safe_result)
         .unwrap_or_else(|| json!({"ok":false}));
+    result["promptVersion"] = json!(visual::PROMPT_VERSION);
     result["executorReceipt"] = json!(item.lease_token);
     finish_invocation_in(&mut tx, p.invocation, response, success, failure, &result).await?;
     if success {

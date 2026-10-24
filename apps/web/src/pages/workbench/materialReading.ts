@@ -22,7 +22,7 @@ export interface ReadingPiece {
 }
 export function fragmentType(source: SourceItem, text: string): FragmentType {
   if (source.sourceKind === "comment") return "原声";
-  if (source.field === "title" || source.field === "cover_headline")
+  if (source.field === "title" || source.structure?.kind === "heading")
     return "待分类";
   if (/并非|不代表|不一定|不能|但是|不过|需要注意|边界|例外|未必/u.test(text))
     return "边界";

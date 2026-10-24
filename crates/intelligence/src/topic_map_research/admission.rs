@@ -1,6 +1,6 @@
 //! Qualified incremental source admission before bounded window packing.
 use super::ResearchInput;
-use super::queue::{attach_legacy_media_aliases, overlaps_unknown_dispatch};
+use super::queue::overlaps_unknown_dispatch;
 use super::windows::{is_research_evidence, origin_id};
 use crate::topic_map_research_analysis::METHOD_VERSION;
 use serde_json::Value;
@@ -42,7 +42,6 @@ pub(super) async fn pending_sources(
                 .push(row.get("input_refs"));
         }
     }
-    attach_legacy_media_aliases(tx, &mut unknown_refs).await?;
     Ok(inputs
         .iter()
         .filter(|i| scope.contains(&i.work.work_ref))

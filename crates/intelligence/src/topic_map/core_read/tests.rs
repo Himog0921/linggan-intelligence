@@ -82,8 +82,15 @@ fn input(field: &str) -> ResearchInput {
         start: 10_001,
         end: 10_001 + text.chars().count(),
         text: text.into(),
+        speaker: if field.contains("comment") {
+            "other"
+        } else {
+            "author"
+        }
+        .into(),
+        ..Fragment::default()
     };
-    let author = ["title", "body", "ocr", "transcript"].contains(&field);
+    let author = crate::topic_map_research_analysis::fragment_role(&fragment) == "author";
     ResearchInput {
         work: DiscoveryWork {
             work_ref,
@@ -127,7 +134,7 @@ fn input(field: &str) -> ResearchInput {
         context_work_refs: vec![],
         comment_study: json!([]),
         role_metadata: json!({"workRef":work_ref,"own":false}),
-        coverage: json!({"sourceChars":text.chars().count(),"windowCount":1,"windowKey":"synthetic-window"}),
+        coverage: json!({"asOf":"2026-10-23T00:00:00Z","sourceChars":text.chars().count(),"windowCount":1,"windowKey":"synthetic-window"}),
     }
 }
 
@@ -158,7 +165,7 @@ fn draft(input: &ResearchInput) -> ResearchOutput {
             rationale: "原文直接陈述该困难。".into(),
         })
         .collect();
-    serde_json::from_value(json!({"contract":"topic-map.research.v2","outcome":"analyzed","discussions":discussions,
+    serde_json::from_value(json!({"contract":crate::topic_map_research_analysis::EXTRACT_CONTRACT,"outcome":"analyzed","discussions":discussions,
         "journey":{"mainStage":"begin_practice","involvedStages":["begin_practice"],"overlays":[],"path":"adult",
             "rationale":"原文描述尝试开展任务。","evidence":evidence},
         "scenes":[{"label":"执行任务","evidence":evidence}],"responseMatches":[],
@@ -187,13 +194,39 @@ fn window(
     time: &str,
 ) -> Window {
     Window {
+        current_coverage_eligible: true,
         manifest: json!({"coverage":input.coverage}),
         input,
         output,
         core,
         result: result.map(Uuid::from_u128),
         task: Uuid::from_u128(result.unwrap_or(99)),
-        method: "topic-map.research.v2".into(),
+        method: crate::topic_map_research_analysis::METHOD_VERSION.into(),
         time: time.into(),
+    }
+}
+
+#[test]
+fn author_journey_uses_canonical_speaker_for_every_note_material_kind() {
+    for field in ["title", "body", "tags", "ocr", "transcript", "frame_text"] {
+        for speaker in ["author", "other", "unconfirmed"] {
+            let mut source = input(field);
+            source.fragments[0].speaker = speaker.into();
+            let output = serde_json::to_value(draft(&source)).unwrap();
+            let part = window(source, output, json!({}), Some(1), "2026-10-23T00:00:00Z");
+            assert_eq!(
+                work_summary::author_journey(&part).is_some(),
+                speaker == "author",
+                "field={field}, speaker={speaker}"
+            );
+            let mut projected = work(1, false);
+            projection::project_work(&mut projected, vec![part], &mut [], &HashSet::new());
+            let expected = if speaker == "author" {
+                "available"
+            } else {
+                "source_unavailable"
+            };
+            assert_eq!(projected.research.unwrap()["authorSourceState"], expected);
+        }
     }
 }

@@ -1,6 +1,17 @@
 //! Synthetic geometry and words; private source text is never a CI fixture.
 use super::*;
 
+// Diagnostic supported spans remain useful for explaining recognition uncertainty.
+// They are not the dossier text: the canonical publisher preserves full observed blocks.
+fn supported_text(a: &Assessment) -> String {
+    a.regions
+        .iter()
+        .flat_map(|r| &r.usable_fragments)
+        .map(|f| f.text.as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn avatars(i: &mut ImageInput) {
     for n in 0..3 {
         let y = 100. + n as f64 * 200.;
@@ -30,8 +41,7 @@ fn checklist_icons_are_not_enough_to_exclude_supported_prose() {
         );
     }
     let a = assess(&i).unwrap();
-    let p = project_work(&[a]).unwrap();
-    assert_eq!(p.image_text.matches("清晰的合成要点").count(), 3);
+    assert_eq!(supported_text(&a).matches("清晰的合成要点").count(), 3);
 }
 
 #[test]
@@ -81,12 +91,7 @@ fn screenshot_controls_and_inline_ui_are_removed_by_source_ranges() {
         f.text
     );
     assert_eq!(f.bbox, [65., 750., 850., 810.]);
-    let p = project_work(&[a]).unwrap();
-    assert_eq!(
-        p.image_text,
-        "〔部分内容未采用〕\n这段原文保持原样。\n〔部分内容未采用〕"
-    );
-    assert!(p.images[0].pending_blocks.contains(&mixed));
+    assert!(r.adoption_state.has_unresolved_text());
     assert_eq!(i.layout.blocks[6].text, original);
 }
 
@@ -113,10 +118,16 @@ fn unsupported_emoji_is_not_certified_by_alphanumeric_normalization() {
             .iter()
             .all(|f| !f.text.contains('🥦'))
     );
-    let p = project_work(&[a]).unwrap();
-    assert!(p.image_text.contains("原文甲"));
-    assert!(p.image_text.contains("原文乙"));
-    assert!(!p.images[0].pending_blocks.is_empty());
+    let supported = supported_text(&a);
+    assert!(supported.contains("原文甲"));
+    assert!(supported.contains("原文乙"));
+    assert!(
+        a.regions
+            .last()
+            .unwrap()
+            .adoption_state
+            .has_unresolved_text()
+    );
 }
 
 #[test]
@@ -150,9 +161,13 @@ fn adjacent_smaller_title_tail_joins_but_distant_body_does_not() {
         Some("周末安排\n先迈一步\n可以慢慢来")
     );
     assert_eq!(a.cover_title.fragments.len(), 2);
-    assert_eq!(
-        project_work(&[a]).unwrap().image_text,
-        "以下是具体的行动建议"
+    assert!(
+        a.regions
+            .last()
+            .unwrap()
+            .usable_fragments
+            .iter()
+            .any(|f| f.text == "以下是具体的行动建议")
     );
 }
 
@@ -197,16 +212,15 @@ fn one_disputed_word_does_not_erase_other_literal_clauses() {
         );
         assert_eq!(f.bbox, i.layout.blocks[0].bbox);
     }
-    let p = project_work(&[a]).unwrap();
-    assert!(p.image_text.contains("第一组合成要点"));
-    assert!(p.image_text.contains("第二组合成要点"));
-    assert!(p.image_text.contains("其余完整说明应该保留"));
-    assert!(!p.image_text.contains("争议"));
-    assert_eq!(p.images[0].pending_blocks.len(), 1);
+    let supported = supported_text(&a);
+    assert!(supported.contains("第一组合成要点"));
+    assert!(supported.contains("第二组合成要点"));
+    assert!(supported.contains("其余完整说明应该保留"));
+    assert!(!supported.contains("争议"));
 }
 
 #[test]
-fn unsupported_formula_and_orphan_variation_selector_do_not_survive_projection() {
+fn unsupported_formula_and_orphan_variation_selector_are_not_certified() {
     let mut i = input();
     i.image_role = ImageRole::Interior;
     i.sequence_ordinal = Some(2);
@@ -216,11 +230,11 @@ fn unsupported_formula_and_orphan_variation_selector_do_not_survive_projection()
     i.rechecks.push(crop(&i, 0, RecheckKind::VlCrop, raw));
     let a = assess(&i).unwrap();
     assert!(a.regions[0].reasons.contains(&Reason::UnverifiedSymbol));
-    let p = project_work(&[a]).unwrap();
-    assert!(p.image_text.contains("合成文字前半句"));
-    assert!(p.image_text.contains("后半句仍然完整保留"));
+    let supported = supported_text(&a);
+    assert!(supported.contains("合成文字前半句"));
+    assert!(supported.contains("后半句仍然完整保留"));
     assert!(
-        !p.image_text
+        !supported
             .chars()
             .any(|c| matches!(c, '$' | '^' | 'R' | '\u{fe0f}' | '🏔'))
     );
@@ -283,11 +297,11 @@ fn partial_source_ranges_do_not_leave_orphan_latex_or_remove_supported_prose() {
     i.rechecks.push(crop(&i, 0, RecheckKind::LineCrop, line));
     i.rechecks.push(crop(&i, 0, RecheckKind::VlCrop, line));
     let a = assess(&i).unwrap();
-    let p = project_work(&[a]).unwrap();
-    assert!(p.image_text.contains("这段合成正文应该保留"));
-    assert!(p.image_text.contains("结尾合成要点"));
+    let supported = supported_text(&a);
+    assert!(supported.contains("这段合成正文应该保留"));
+    assert!(supported.contains("结尾合成要点"));
     assert!(
-        !p.image_text
+        !supported
             .chars()
             .any(|c| matches!(c, '$' | '\\' | '{' | '}'))
     );
@@ -319,13 +333,9 @@ fn aggregate_comments_keep_scoped_bodies_and_exclude_dates_and_counters() {
         a.regions[0].adoption_state,
         AdoptionState::AdoptedPartialBlock
     );
-    let p = project_work(&[a]).unwrap();
-    assert_eq!(
-        p.image_text,
-        "〔部分内容未采用〕\n这是第一条合成评论正文\n〔部分内容未采用〕\n这是第二条合成评论正文\n〔部分内容未采用〕"
-    );
-    assert_eq!(p.source_relation, "image_transcription_not_author_claim");
-    assert_eq!(p.fragments.len(), 2);
+    let supported = supported_text(&a);
+    assert_eq!(supported, "这是第一条合成评论正文\n这是第二条合成评论正文");
+    assert_eq!(a.regions[0].usable_fragments.len(), 2);
     assert_eq!(i.layout.blocks[0].text, raw);
 }
 
@@ -341,9 +351,9 @@ fn date_in_a_card_is_not_enough_to_establish_a_screenshot() {
         "2028年共同学习计划",
         [65., 750., 600., 780.],
     );
-    let p = project_work(&[assess(&i).unwrap()]).unwrap();
-    assert!(p.image_text.contains("2028年共同学习计划"));
-    assert!(p.image_text.contains("合成昵称"));
+    let supported = supported_text(&assess(&i).unwrap());
+    assert!(supported.contains("2028年共同学习计划"));
+    assert!(supported.contains("合成昵称"));
 }
 
 #[test]
@@ -363,72 +373,9 @@ fn navigation_clock_header_is_not_narrative_even_when_model_box_is_oversized() {
     let a = assess(&i).unwrap();
     assert_eq!(a.regions[0].role, Role::LayoutMetadata);
     assert!(a.regions[0].usable_fragments.is_empty());
-    assert!(project_work(&[a]).unwrap().image_text.is_empty());
     assert_eq!(i.layout.blocks[0].text, "<昨天09:18杂字");
     // A calendar on a poster without navigation is not screenshot metadata.
     i.layout.blocks[0].text = "昨天09:18".into();
     let a = assess(&i).unwrap();
     assert_ne!(a.regions[0].role, Role::LayoutMetadata);
-}
-
-#[test]
-fn source_gaps_are_typed_and_never_part_of_cited_source_fragments() {
-    let mut i = input();
-    i.image_role = ImageRole::Interior;
-    i.sequence_ordinal = Some(2);
-    add(
-        &mut i,
-        "text",
-        "甲段原文争议乙段原文尾部",
-        [100., 200., 900., 500.],
-    );
-    let mut a = assess(&i).unwrap();
-    let r = &mut a.regions[0];
-    r.adoption_state = AdoptionState::AdoptedPartialBlock;
-    r.usable_fragments = [(0, 4, "甲段原文"), (6, 10, "乙段原文")]
-        .into_iter()
-        .map(|(start, end, text)| Fragment {
-            source_kind: SourceKind::Block,
-            source_ref: r.block_ref.clone(),
-            start,
-            end,
-            text: text.into(),
-            bbox: r.bbox,
-        })
-        .collect();
-    let p = project_work(&[a.clone()]).unwrap();
-    assert_eq!(
-        p.image_text,
-        "甲段原文\n〔部分内容未采用〕\n乙段原文\n〔部分内容未采用〕"
-    );
-    assert_eq!(
-        p.images[0]
-            .segments
-            .iter()
-            .filter(|s| matches!(s, WorkSegment::Gap { .. }))
-            .count(),
-        2
-    );
-    for f in &p.fragments {
-        assert_eq!(
-            p.image_text
-                .chars()
-                .skip(f.start)
-                .take(f.end - f.start)
-                .collect::<String>(),
-            f.source.text
-        );
-        assert!(!f.source.text.contains("〔"));
-    }
-    // Existing decisions stay readable without inventing an old raw-text length.
-    a.rule_version = "ocr-adoption-v6".into();
-    a.regions[0].source_char_count = None;
-    let p = project_work(&[a]).unwrap();
-    assert!(matches!(
-        p.images[0].segments.last(),
-        Some(WorkSegment::Gap {
-            source_end: None,
-            ..
-        })
-    ));
 }

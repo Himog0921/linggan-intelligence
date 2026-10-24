@@ -15,11 +15,28 @@ use uuid::Uuid;
 #[serde(rename_all = "snake_case")]
 pub enum MaterialColumn {
     Title,
-    CoverHeadline,
     Body,
     Tags,
     Ocr,
     Transcript,
+    FrameText,
+}
+
+#[cfg(test)]
+mod column_tests {
+    use super::MaterialColumn;
+
+    #[test]
+    fn task_selectors_use_only_canonical_dossier_fields() {
+        for field in ["title", "body", "tags", "ocr", "transcript", "frame_text"] {
+            let column: MaterialColumn = serde_json::from_value(serde_json::json!(field)).unwrap();
+            assert_eq!(serde_json::to_value(column).unwrap(), field);
+        }
+        assert!(
+            serde_json::from_value::<MaterialColumn>(serde_json::json!("cover_headline")).is_err()
+        );
+        assert!(serde_json::from_value::<MaterialColumn>(serde_json::json!("raw_body")).is_err());
+    }
 }
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -121,6 +138,8 @@ pub async fn save_task_config(
         || request.expected_revision == i64::MAX
         || matches!(request.budget,BudgetPolicy::Capped(v) if v>i64::MAX as u64)
         || (request.task_key == TaskKey::ModelProbe && request.model.is_some())
+        || (request.task_key == TaskKey::WorkComparison
+            && request.model.as_ref().is_some_and(|m| m.limits.attempts != 1))
         || (matches!(
             request.task_key,
             TaskKey::NoteInterpretation | TaskKey::DirectionListDraft | TaskKey::DirectionProposal

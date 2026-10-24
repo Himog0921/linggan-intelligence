@@ -1,5 +1,5 @@
 {
-  "fingerprint": "3549b55e73b9bd8b8ea094ca41cef7ffd1d8dfdbf70bd5174351cf38fa71372f",
+  "fingerprint": "e8a6d5cb61fd58e420644833e7d72f1a8aacb707e2738133cf36ba6720b98a35",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -239,11 +239,11 @@
     },
     {
       "path": "apps/web/src/pages/ops/LedgerPage.tsx",
-      "sha256": "8f9461283f0e1e314597ae5454daff5a92b624762f7a87e41e70aaf8aa3be422"
+      "sha256": "e5bce8fb0d34eea860f8d1c77cb896281f722e96dcdc934b99f9cc1d8b97a21f"
     },
     {
       "path": "apps/web/src/pages/ops/Ops.module.css",
-      "sha256": "2d3013da5bcfba5f071a2638ad0fb00d8997037b9f344aa300541f7c3d2fb8fd"
+      "sha256": "8b165a05d9f3d88c56bad40631f0552c90b5fea5c00b65646c0083e9442361cf"
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
@@ -287,7 +287,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/TopicLibrary.tsx",
-      "sha256": "bc1f7d4ef6f2082867f33e39bb03e41092723ae28d0b97c1fe5a8bcaf696026e"
+      "sha256": "67168d28eb3bfff1cd3e48fe40b2c97ad5ffc8387059df0980c79043604afb48"
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.module.css",
@@ -335,7 +335,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "4d61745bb05b549c053fa45ff0640e190863f87798a03e372f33f24ca62d15bd"
+      "sha256": "659fde2209c8d9f64e32cbefbc7ac861b27ad82b7f389fd05c9884b13c8c085b"
     },
     {
       "path": "apps/web/src/styles/typography.css",

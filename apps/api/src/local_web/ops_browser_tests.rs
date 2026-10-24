@@ -1,5 +1,6 @@
 //! Stage E: real Router, PostgreSQL, React, target receipts and unmodified export bytes.
 use super::*;
+use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
 use linggan_intelligence::ops_ledger::read::{
     OpsBusiness, read_ops_accounts, read_ops_as_of, read_ops_daily, read_ops_publication_export,
 };
@@ -65,6 +66,40 @@ async fn operations_five_pages_real_chain_browser_proof() {
     apply_ops_import(&db, &request, &preview.preview_hash)
         .await
         .unwrap();
+    // These React routes are protected by the actual server-side team-session boundary.
+    // Seed one active, synthetic operator and one opaque session only in this proof schema;
+    // the browser receives the raw token while PostgreSQL stores its digest.
+    let browser_member = Uuid::new_v4();
+    let password_hash = Argon2::default()
+        .hash_password(
+            b"synthetic-browser-proof-password",
+            &SaltString::encode_b64(b"ops-browser-proof-salt").unwrap(),
+        )
+        .unwrap()
+        .to_string();
+    sqlx::query(
+        "INSERT INTO linggan_ops_member \
+         (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) \
+         VALUES($1,'ops-browser@example.test','合成浏览器运营','operator','active',$2,scope_001_now())",
+    )
+    .bind(browser_member)
+    .bind(password_hash)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let browser_session_token = format!("ops-browser-{}", Uuid::new_v4().simple());
+    let browser_session_digest: [u8; 32] = Sha256::digest(browser_session_token.as_bytes()).into();
+    sqlx::query(
+        "INSERT INTO linggan_ops_session \
+         (session_ref,member_ref,token_sha256,expires_at) \
+         VALUES($1,$2,$3,scope_001_now() + interval '1 hour')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(browser_member)
+    .bind(browser_session_digest.as_slice())
+    .execute(db.pool())
+    .await
+    .unwrap();
     sqlx::query("UPDATE linggan_ops_account SET domain_ref=$1 WHERE source_record_id='acc-3'")
         .bind(second)
         .execute(db.pool())
@@ -144,6 +179,7 @@ async fn operations_five_pages_real_chain_browser_proof() {
     let result = std::process::Command::new(std::env::var("WEB_APP_PROOF_NODE").unwrap())
         .arg(ProofPath::new(env!("CARGO_MANIFEST_DIR")).join("../web/test/e2e/ops-real-chain.mjs"))
         .env("WEB_APP_PROOF_DIR", &directory)
+        .env("WEB_APP_PROOF_SESSION_TOKEN", &browser_session_token)
         .status();
     server.abort();
     let _ = server.await;

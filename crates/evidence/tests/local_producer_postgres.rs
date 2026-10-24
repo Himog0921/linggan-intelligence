@@ -11,7 +11,7 @@ use linggan_evidence::{
     record_media_upload_chunk, start_local_attempt, start_producer_attempt, submit_local_package,
     submit_producer_package,
 };
-use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
+use linggan_storage_postgres::Database;
 use sqlx::Row;
 
 #[path = "support/material_fixture.rs"]
@@ -19,63 +19,6 @@ mod domain_fixture;
 
 const PROOF_DOMAIN_REF: uuid::Uuid =
     uuid::Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0001);
-
-const MIGRATIONS: &str = concat!(
-    include_str!("../../../database/migrations/0001_scope_001_capture_evidence.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0002_local_001_discovery.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0003_local_trusted_producer.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0005_collection_observation_target.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0006_collection_acquisition_chain.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0007_execution_station.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0008_collection_risk_pause.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0009_work_order_station.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0010_work_order_lease.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0011_execution_gate.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0012_target_monitor_schedule.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0013_drop_execution_gate.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0014_target_group.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0015_material_projection.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0016_material_social_lanes.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0017_material_media_projection.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0018_material_discovery_lane.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0019_work_order_lease_task_sequence.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0020_observation_runtime_automation.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0021_discovery_cover_media_acquisition.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0022_material_deepening_scope.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0023_material_engagement_and_media_components.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0024_media_processing_runtime.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0025_comment_current_projection.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0026_work_resource_read.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0027_unified_media_resource.sql"),
-    include_str!("../../../database/migrations/0129_note_material_hashtags.sql"),
-);
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
@@ -778,10 +721,7 @@ async fn local_manual_submission_freezes_one_terminal_package_per_attempt() {
 }
 
 async fn proof_database(schema: &str) -> Database {
-    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
-    isolated_proof_schema(&url, schema, MIGRATIONS)
-        .await
-        .expect("migrations apply")
+    domain_fixture::proof_database(schema).await
 }
 
 async fn assert_count(database: &Database, table: &str, expected: i64) {

@@ -32,6 +32,7 @@ export function TopicLibrary({
     envelope: detail[index]?.data,
     loading: detail[index]?.isPending,
     failed: detail[index]?.isError,
+    legacy: api.isLegacyReferenceUnavailable(detail[index]?.error),
     retry: () => detail[index]?.refetch(),
   }));
   const unresolved = entries.filter((entry) => !entry.envelope);
@@ -77,20 +78,24 @@ export function TopicLibrary({
             .filter((entry) => entry.failed)
             .map((entry) => (
               <p key={entry.work.workId}>
-                {entry.work.title}：详情读取失败{" "}
-                <ActionButton
-                  variant="outline"
-                  onClick={() => void entry.retry()}
-                >
-                  重试读取方案
-                </ActionButton>
+                {entry.work.title}：{entry.legacy
+                  ? "历史引用缺少当前所需的来源定位，原稿已保留，暂不能安全打开。"
+                  : <>
+                    详情读取失败{" "}
+                    <ActionButton
+                      variant="outline"
+                      onClick={() => void entry.retry()}
+                    >
+                      重试读取方案
+                    </ActionButton>
+                  </>}
               </p>
             ))}
         </div>
       ) : null}
       {section === "today" ? (
         <div className={styles.topicWall}>
-          {rows.map(({ work, envelope, loading, failed }, index) => {
+          {rows.map(({ work, envelope, loading, failed, legacy }, index) => {
             const d = envelope?.revision.document;
             return (
               <button
@@ -108,7 +113,7 @@ export function TopicLibrary({
                   </h2>
                   <p>
                     {d?.outline.filter(Boolean).slice(0, 2).join(" / ") ||
-                      (failed ? "方案读取失败，打开后重试" : "提纲待整理")}
+                      (legacy ? "历史引用无法安全读取，原稿已保留" : failed ? "方案读取失败，打开后重试" : "提纲待整理")}
                   </p>
                   <footer>
                     <span>
@@ -125,7 +130,7 @@ export function TopicLibrary({
         </div>
       ) : (
         <div className={styles.draftList}>
-          {rows.map(({ work, envelope, loading, failed }) => {
+          {rows.map(({ work, envelope, loading, failed, legacy }) => {
             const d = envelope?.revision.document;
             const words = d
               ? Array.from(d.paragraphs.map((p) => p.text).join("")).length
@@ -138,7 +143,9 @@ export function TopicLibrary({
                     {d
                       ? d.paragraphs.find((p) => p.text.trim())?.text ||
                         "尚未开始正文"
-                      : failed
+                      : legacy
+                        ? "历史引用无法安全读取，原稿已保留"
+                        : failed
                         ? "稿件详情读取失败"
                         : "正在读取稿件详情…"}
                   </p>
@@ -147,7 +154,9 @@ export function TopicLibrary({
                   {d
                     ? `${words} 字 · ${d.pages.filter((p) => p.kind !== "cover").length} 张内页`
                     : failed
-                      ? "读取失败，进度未知"
+                      ? legacy
+                        ? "历史引用缺少来源定位"
+                        : "读取失败，进度未知"
                       : loading
                         ? "正在读取进度…"
                         : "进度未知"}

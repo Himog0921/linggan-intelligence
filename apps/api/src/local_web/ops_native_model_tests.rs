@@ -341,11 +341,11 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
-async fn native_publication_precision_migration_upgrades_0149_rows() {
+async fn native_publication_precision_migration_upgrades_0153_rows() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("opsnat_upgrade_{}", Uuid::new_v4().simple());
     let precision_migration = include_str!(
-        "../../../../database/migrations/0150_ops_native_publication_date_precision.sql"
+        "../../../../database/migrations/0154_ops_native_publication_date_precision.sql"
     );
     let migrations_before_0150 =
         full_schema_fixture::FULL_MIGRATIONS.replacen(precision_migration, "", 1);

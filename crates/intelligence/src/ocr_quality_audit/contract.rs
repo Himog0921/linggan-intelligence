@@ -33,9 +33,6 @@ pub struct Settings {
     #[serde(default)]
     pub privacy_clearance_reason: String,
     pub regression_count: u32,
-    pub max_requests: u32,
-    pub max_tokens: u64,
-    pub max_cost_micro_usd: u64,
     pub concurrency: u32,
     pub timeout_seconds: u32,
 }
@@ -51,9 +48,6 @@ impl Default for Settings {
             privacy_clearance_actor: String::new(),
             privacy_clearance_reason: String::new(),
             regression_count: 10,
-            max_requests: 60,
-            max_tokens: 600_000,
-            max_cost_micro_usd: 2_000_000,
             concurrency: 1,
             timeout_seconds: 60,
         }
@@ -66,13 +60,8 @@ impl Settings {
             .checked_add(self.risk_count)
             .and_then(|n| n.checked_add(self.regression_count));
         if count.is_none_or(|n| n == 0 || n > 200)
-            || !(1..=200).contains(&self.max_requests)
             || !(1..=4).contains(&self.concurrency)
             || !(1..=300).contains(&self.timeout_seconds)
-            || self.max_tokens == 0
-            || self.max_tokens > 100_000_000
-            || self.max_cost_micro_usd == 0
-            || self.max_cost_micro_usd > 100_000_000
             || self.privacy_cleared_refs.len() > 1000
             || self
                 .privacy_cleared_refs
@@ -151,11 +140,15 @@ pub fn qualifies_probe(v: &VisualResult) -> bool {
             .iter()
             .any(|r| r.legibility == Legibility::Clear && r.text.trim() == "42")
 }
-pub fn parse_visual(text: &str, finish: Option<&str>) -> Result<VisualResult, FoundationError> {
+/// Stable local diagnostics; rejected text is never normalized into a successful reading.
+pub fn parse_visual_diagnostic(
+    text: &str,
+    finish: Option<&str>,
+) -> Result<VisualResult, &'static str> {
     if finish != Some("stop") || text.len() > 131072 || text.trim().is_empty() {
-        return Err(FoundationError::Invalid);
+        return Err("ocr_visual_schema_invalid");
     }
-    let v: VisualResult = serde_json::from_str(text).map_err(|_| FoundationError::Invalid)?;
+    let v: VisualResult = serde_json::from_str(text).map_err(|_| "ocr_visual_schema_invalid")?;
     let mut refs = std::collections::HashSet::new();
     if v.regions.len() > 200
         || v.title_text
@@ -170,15 +163,19 @@ pub fn parse_visual(text: &str, finish: Option<&str>) -> Result<VisualResult, Fo
                 || r.region_ref.len() > 80
                 || !refs.insert(&r.region_ref)
                 || r.text.chars().count() > 20_000
-                || r.bbox.is_some_and(|b| {
-                    b.iter()
-                        .any(|n| !n.is_finite() || !(BBOX_MIN..=BBOX_MAX).contains(n))
-                        || b[0] >= b[2]
-                        || b[1] >= b[3]
-                })
         })
     {
-        return Err(FoundationError::Invalid);
+        return Err("ocr_visual_schema_invalid");
+    }
+    if v.regions.iter().any(|r| {
+        r.bbox.is_some_and(|b| {
+            b.iter()
+                .any(|n| !n.is_finite() || !(BBOX_MIN..=BBOX_MAX).contains(n))
+                || b[0] >= b[2]
+                || b[1] >= b[3]
+        })
+    }) {
+        return Err("ocr_visual_coordinates_invalid");
     }
     // Compare visible title characters in reading order; never rewrite the returned text.
     if let Some(title) = &v.title_text {
@@ -203,11 +200,15 @@ pub fn parse_visual(text: &str, finish: Option<&str>) -> Result<VisualResult, Fo
             .any(|r| r.role == VisualRole::MainTitle && compact(&r.text) == candidate)
             && (candidate.is_empty() || compact(&ordered_text) != candidate)
         {
-            return Err(FoundationError::Invalid);
+            return Err("ocr_visual_title_mismatch");
         }
     }
     Ok(v)
 }
+pub fn parse_visual(text: &str, finish: Option<&str>) -> Result<VisualResult, FoundationError> {
+    parse_visual_diagnostic(text, finish).map_err(|_| FoundationError::Invalid)
+}
+
 pub fn prompt() -> (&'static str, String) {
     prompt_for_image(None)
 }
@@ -227,8 +228,11 @@ pub fn prompt_for_image(context: Option<(ImageRole, Option<u32>)>) -> (&'static 
     serde_json::json!({"contract":super::CONTRACT,"promptVersion":super::PROMPT_VERSION,
         "imageContext":context.map(|(role,ordinal)|serde_json::json!({"imageRole":role,"sequenceOrdinal":ordinal})),
         "roleVocabulary":VISUAL_ROLES,
+        "legibilityVocabulary":["clear","partial","unreadable"],
+        "requiredFields":{"root":["titlePresence","titleText","regions","unreadable"],"region":["regionRef","text","role","legibility","bbox"]},
         "task":task,
         "resultInstructions":{"title":"titleText must use only visible main_title region characters, allowing line-wrap whitespace only; mark titlePresence uncertain when ambiguous, absent when no true title exists.","fullText":"regions must retain the complete visible text in reading order, including title and non-title text; do not return only selected key points or a summary.","uncertainContent":"Retain each uncertain fragment as a region with partial/unreadable legibility or uncertain role. Preserve readable characters and do not invent the rest. Empty text is valid for unreadable regions or visibly absent text."},
+        "selfCheck":["Include all four root fields and all six fields on every region. regionRef must be unique.","Use only listed enum values. Use partial, never unclear, for partially readable text.","Check each bbox: 0 <= x_min < x_max <= 1 and 0 <= y_min < y_max <= 1. For invisible or unlocatable fragments return null, never zero-area boxes.","When titleText is not null it must exactly match one main_title region or all main_title regions concatenated in reading order, ignoring whitespace only. If no main_title region exists, titleText must be null.","Group continuous paragraphs into regions; retain line breaks, list order, dialogue speakers and table rows/cells. Do not split every word into a separate region. Do not omit any visible content to shorten the answer."],
         "coordinateContract":{"space":"normalized original image","order":["x_min","y_min","x_max","y_max"],"range":[0,1],"topLeft":[0,0],"bottomRight":[1,1],"unknown":null,"example":[0.1,0.2,0.9,0.8]},
         "jsonExample":{"titlePresence":"absent","titleText":null,"regions":[{"regionRef":"r1","text":"visible text","role":"body","legibility":"clear","bbox":null}],"unreadable":false}}).to_string())
 }

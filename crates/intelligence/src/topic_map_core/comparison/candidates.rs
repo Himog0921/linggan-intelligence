@@ -159,9 +159,7 @@ fn with_parent_context(
                 origin: parent.into(),
                 context_field: Some(fragment.field.clone()),
                 start: fragment.start,
-                end: fragment
-                    .end
-                    .min(fragment.start.saturating_add(PARENT_CHARS)),
+                end: fragment.end,
             });
         }
     }

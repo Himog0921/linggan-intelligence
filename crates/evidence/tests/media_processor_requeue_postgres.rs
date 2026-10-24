@@ -21,11 +21,10 @@ use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
 
-/// 与生产代码逐字相同的版本号。`local-v3` 是 Paddle OCR 分层版；ASR 不在这次 OCR
-/// 替换范围，仍保持上一代 `local-v2`。
+/// 与生产版本注册表独立核对：当前 OCR local-v4，ASR local-v3。
 const BASELINE: &str = "local-v1";
-const CURRENT: &str = "local-v3";
-const ASR_CURRENT: &str = "local-v2";
+const CURRENT: &str = "local-v4";
+const ASR_CURRENT: &str = "local-v3";
 /// 重排出来的作业在事件流里的理由，与摄取路径的 `queued_for_local_processor` 分开。
 const REQUEUE_REASON: &str = "requeued_after_processor_version_upgrade";
 
@@ -796,5 +795,57 @@ async fn requeue_refuses_a_kind_that_has_no_registered_version() {
     assert!(
         error.to_string().contains("image_ocr_ocr"),
         "报错要点出是哪个名字：{error}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn normal_claim_skips_stale_versions_but_keeps_current_and_local_visual() {
+    let database = proof_database("ocr_supported_versions").await;
+    let (sha, slot) = seed_media_without_jobs(&database, 82, "image").await;
+    let stale = insert_outdated_job(&database, &sha, &slot, "image_ocr", "local-v3").await;
+    ensure_media_processing_work(&database).await.unwrap();
+    assert!(matches!(
+        claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+            .await
+            .unwrap(),
+        MediaProcessingClaimOutcome::Idle
+    ));
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM linggan_media_processing_work WHERE job_ref=$1")
+            .bind(stale)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        state, "pending",
+        "skipping must not invent an attempt or retirement"
+    );
+    for version in [
+        CURRENT,
+        linggan_evidence::ocr_adoption_persistence::PROCESSOR_VERSION,
+    ] {
+        let job = insert_outdated_job(&database, &sha, &slot, "image_ocr", version).await;
+        ensure_media_processing_work(&database).await.unwrap();
+        let claimed =
+            claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+                .await
+                .unwrap();
+        assert!(
+            matches!(claimed, MediaProcessingClaimOutcome::Claimed(ref claim) if claim.job_ref == job && claim.processor_version == version),
+            "{claimed:?}"
+        );
+        sqlx::query("UPDATE linggan_media_processing_work SET state='not_applicable',worker_instance_ref=NULL,lease_expires_at=NULL,completed_at=scope_001_now() WHERE job_ref=$1").bind(job).execute(database.pool()).await.unwrap();
+    }
+    let explicit = linggan_evidence::claim_media_processing_work_for_version(
+        &database,
+        Uuid::new_v4(),
+        &kinds(&["image_ocr"]),
+        Some("local-v3"),
+    )
+    .await
+    .unwrap();
+    assert!(
+        matches!(explicit, MediaProcessingClaimOutcome::Claimed(ref claim) if claim.job_ref == stale)
     );
 }

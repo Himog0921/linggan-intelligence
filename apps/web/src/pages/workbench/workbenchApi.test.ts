@@ -110,6 +110,14 @@ describe('human failure copy preserves diagnostics', () => {
     });
     expect(errorText(new Error('opaque_backend_error'))).not.toContain('opaque_backend_error');
   });
+  it('explains why an old work is preserved but cannot be opened under the current citation contract', async () => {
+    const { errorText } = await import('./workbenchApi');
+    expect(errorText(new ApiError({
+      kind: 'http',
+      status: 409,
+      code: 'creation_legacy_reference_unavailable'
+    }))).toContain('原稿已保留');
+  });
   it('explains known AI failures and unknown states in Chinese with a next step', async () => {
     const {
       aiFailureText,

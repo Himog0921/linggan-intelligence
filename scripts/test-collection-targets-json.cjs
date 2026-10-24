@@ -69,6 +69,60 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     assert.equal(missing.status, 404);
     reports.push('persisted list, null/zero contract, independent missing-target 404');
 
+    // V4 uses actual accepted packages, not a frontend response mock.
+    const inspectionDomain=fixture.inspectionDomainRef;
+    const inspectionList=await targets(inspectionDomain);
+    const inspectionTarget=inspectionList.rows.find(row=>row.targetRef===fixture.inspectionTargetRef);
+    assert(inspectionTarget,'the persistent V4 fixture must appear in the correct domain');
+    const base=`/api/collection/workspace/target/${inspectionTarget.targetRef}/inspection`;
+    const rounds=await get(`${base}/rounds?domain=${inspectionDomain}`);
+    assert.equal(rounds.status,200);assert(rounds.body.rounds[0]);
+    const round=rounds.body.rounds[0];
+    const result=await get(`${base}/rounds/${round.roundRef}?domain=${inspectionDomain}`);
+    assert.equal(result.status,200);assert.equal(result.body.works.length,2);
+    const populated={target:inspectionTarget,base,round,works:result.body.works};
+    assert(populated, 'V4 browser proof requires a real accepted round with at least two works');
+    await goto({ domain: inspectionDomain, drawer: populated.target.targetRef, dtab: 'works', inspect_right_round: populated.round.roundRef });
+    for(const work of populated.works.slice(0,2)){
+      const row=page.getByRole('row').filter({has:page.getByRole('button',{name:work.title,exact:true})});
+      await row.getByRole('button',{name:'加入对照',exact:true}).click();
+      await row.getByRole('button',{name:'移出对照',exact:true}).waitFor();
+    }
+    assert.equal(await page.getByRole('button',{name:'移出对照',exact:true}).count(),2,'two distinct persisted works must be selected');
+    await page.getByRole('button', { name: '并排对照', exact: true }).click();
+    await page.getByRole('heading', { name: '作品并排对照', exact: true }).waitFor();
+    await page.getByRole('button', { name: '当前累计', exact: true }).waitFor();
+    const canonicalResponse = page.waitForResponse(response => response.url().includes('/api/local/work-resources/') && response.url().includes('/research-dossier?'));
+    await page.getByRole('button', { name: '展开已取得的底稿', exact: true }).first().click();
+    const canonical = await canonicalResponse; assert.equal(canonical.status(), 200);
+    const canonicalPayload = await canonical.json(); assert.equal(canonicalPayload.dossier.contract, 'research-dossier.v2');
+    const canonicalUrl = new URL(canonical.url()); assert.equal(canonicalUrl.searchParams.get('asOf'), new URL(page.url()).searchParams.get('inspect_as_of'));
+    await page.getByText('以下按当前研究截点读取正式底稿。', { exact: true }).waitFor();
+    await page.screenshot({ path: path.join(directory, 'targets-v4-canonical-dossier.png') });
+    for(const width of [1440,1024,390]){
+      await page.setViewportSize({width,height:900});
+      const geometry=await page.locator('#c-drawer').evaluate(el=>({width:el.getBoundingClientRect().width,
+        overflow:el.scrollWidth-el.clientWidth,headOverflow:el.querySelector('.c-dw-head').scrollWidth-el.querySelector('.c-dw-head').clientWidth,
+        bodyOverflow:el.querySelector('.c-dw-body').scrollWidth-el.querySelector('.c-dw-body').clientWidth}));
+      assert(Math.abs(geometry.width-(width<=760?width:Math.min(960,width-96)))<=1,JSON.stringify(geometry));
+      assert(geometry.overflow<=1&&geometry.headOverflow<=1&&geometry.bodyOverflow<=1,'drawer stays bounded; comparison scrolls locally: '+JSON.stringify(geometry));
+      await page.screenshot({path:path.join(directory,`targets-v4-compact-${width}.png`)});
+    }
+    await page.setViewportSize({width:1440,height:1000});
+    await page.getByRole('button', { name: '发布后 24 小时', exact: true }).click();
+    const v4Selected = populated.works.slice(0, 2).map(work => work.workRef).join(',');
+    const age = await get(`${populated.base}/work-comparison?domain=${inspectionDomain}&works=${v4Selected}&mode=age_24h`);
+    assert.equal(age.status, 200); assert.equal(age.body.mode, 'age_24h'); assert.equal(age.body.items.length, 2);
+    assert(age.body.items.every(item => item.metrics.likes.value === null), 'fixture has no qualified 24-hour observation; latest values must not fill history');
+    await page.getByRole('button', { name: '返回原列表或图表', exact: true }).click();
+    await page.getByRole('button', { name: populated.works[0].title, exact: true }).click();
+    await page.getByRole('heading', { name: '观察轨迹', exact: true }).waitFor();
+    const trace = await get(`${populated.base}/works/${populated.works[0].workRef}/observations?domain=${inspectionDomain}`);
+    assert.equal(trace.status, 200); assert(trace.body.observations.length > 0);
+    assert.equal(writes.length, 0, 'rounds, comparison and trace do not collect or invoke');
+    await page.screenshot({ path: path.join(directory, 'targets-v4-observation-trace.png') });
+    reports.push('V4 React to Axum/PostgreSQL: real round, two works, canonical V2 at the same cutoff, age-24h unknown, trace and return without writes');
+
     const creatorId = 'ad0000000000000000000101';
     const creator = await create('creator', creatorId, fixture.domainRef);
     const keyword = await create('keyword', 'React迁移合成关键词G001', fixture.domainRef);

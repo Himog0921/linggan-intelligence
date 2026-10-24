@@ -13,7 +13,7 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use uuid::Uuid;
-
+mod work_comparison;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DrainReceipt {
@@ -22,8 +22,7 @@ pub struct DrainReceipt {
     pub process_id: u32,
     pub source_revision: String,
 }
-
-/// Saving configuration or starting this process does not turn on any execution control.
+/// Saving configuration or starting this process never enables execution controls.
 pub async fn run(
     db: Database,
     source_revision: &str,
@@ -35,8 +34,6 @@ pub async fn run(
     schema::require_ready(&db).await?;
     let mut session = ExecutorSession::acquire(&db, source_revision, concurrency).await?;
     let fence = session.fence();
-    // Polling a DB heartbeat must not suspend the transaction which owns a shared
-    // instance lock. JoinSet also aborts the work loop and its children on failure.
     let (work_db, work_drain) = (db.clone(), drain.clone());
     let mut work = JoinSet::new();
     work.spawn(async move {
@@ -47,7 +44,6 @@ pub async fn run(
     heartbeat.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut deadline = None;
     loop {
-        // Reading the current value also handles a stop requested before subscription.
         if drain.is_requested() && deadline.is_none() {
             deadline = Some(Instant::now() + Duration::from_secs(AI_LIMITS.drain_grace_seconds()));
             tokio::time::timeout(Duration::from_secs(5), session.request_drain())
@@ -56,24 +52,12 @@ pub async fn run(
         }
         tokio::select! {
             biased;
-            _=stopping.changed(), if deadline.is_none()=>{},
-            _=tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now)), if deadline.is_some()=>{
-                return Err(ExecutorError::DrainTimedOut);
-            },
-            _=heartbeat.tick()=>{
-                tokio::time::timeout(Duration::from_secs(5),session.heartbeat()).await
-                    .map_err(|_|ExecutorError::HeartbeatTimedOut)??;
-            },
-            result=work.join_next()=>{
-                result.ok_or(ExecutorError::TaskFailed)?
-                    .map_err(|_|ExecutorError::TaskFailed)??;
-                break;
-            }
+            _=stopping.changed(),if deadline.is_none()=>{},
+            _=tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now)),if deadline.is_some()=>{return Err(ExecutorError::DrainTimedOut);},
+            _=heartbeat.tick()=>{tokio::time::timeout(Duration::from_secs(5),session.heartbeat()).await.map_err(|_|ExecutorError::HeartbeatTimedOut)??;},
+            result=work.join_next()=>{result.ok_or(ExecutorError::TaskFailed)?.map_err(|_|ExecutorError::TaskFailed)??;break;}
         }
     }
-    // An idle work loop can observe the stop and finish during the same select
-    // poll, before the outer loop handles the watch notification. Persist that
-    // transition before completing the drain; an empty queue is not a DB receipt.
     if deadline.is_none() {
         tokio::time::timeout(Duration::from_secs(5), session.request_drain())
             .await
@@ -87,7 +71,6 @@ pub async fn run(
         source_revision: source_revision.into(),
     })
 }
-
 async fn work_loop(
     db: &Database,
     fence: super::ExecutorFence,
@@ -107,26 +90,19 @@ async fn work_loop(
             return failure.map_or(Ok(()), Err);
         }
         tokio::select! {
-            result=tasks.join_next(), if !tasks.is_empty()=>{
-                let result=result.expect("a nonempty JoinSet yields a task")
-                    .map_err(|_|ExecutorError::TaskFailed).and_then(|r|r);
-                if let Err(error)=result {
-                    failure.get_or_insert(error);
-                    drain.request();
-                }
+            result=tasks.join_next(),if !tasks.is_empty()=>{
+                let result=result.expect("a nonempty JoinSet yields a task").map_err(|_|ExecutorError::TaskFailed).and_then(|r|r);
+                if let Err(error)=result{failure.get_or_insert(error);drain.request();}
             },
             _=poll.tick()=>{
-                if drain.is_requested() {continue;}
-                let result=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery,&mut audit_due).await;
-                if let Err(error)=result {
-                    failure.get_or_insert(error);
-                    drain.request();
+                if drain.is_requested(){continue;}
+                if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery,&mut audit_due).await{
+                    failure.get_or_insert(error);drain.request();
                 }
             }
         }
     }
 }
-
 async fn fill_slots(
     db: &Database,
     fence: super::ExecutorFence,
@@ -143,7 +119,6 @@ async fn fill_slots(
         *recovery = Instant::now() + Duration::from_secs(5);
     }
     if Instant::now() >= *audit_due {
-        // Optional sampling cannot take down unrelated AI handlers. Admission is rechecked by enqueue.
         if crate::ocr_quality_audit::schedule::tick(db).await.is_err() {
             eprintln!("ocr_audit_schedule_deferred");
         }
@@ -152,17 +127,12 @@ async fn fill_slots(
     while tasks.len() < concurrency as usize && !drain.is_requested() {
         let claimed = match queue::claim_next(db, fence).await {
             Err(ExecutorError::FenceLost) if drain.is_requested() => {
-                // The session can enter draining after the loop guard but before
-                // claim admission. Still require the same live owner; a genuine
-                // replacement or lost session must continue to fail closed.
                 fence.begin(db, false).await?.commit().await?;
                 break;
             }
             result => result?,
         };
-        let Some(item) = claimed else {
-            break;
-        };
+        let Some(item) = claimed else { break };
         if drain.is_requested() {
             item.defer(db, "executor_draining").await?;
             break;
@@ -181,6 +151,9 @@ async fn fill_slots(
                 }
                 TaskKey::WritingLegacy => {
                     writing::execute_writing(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                TaskKey::WorkComparison => {
+                    work_comparison::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 _ => Err(ExecutorError::Invalid),
             }

@@ -1,3 +1,6 @@
+import { EgressForm } from './AiModelSection';
+import { parseAiSettings } from './aiSettingsModel';
+import { useAiAction } from './useAiAction';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -173,4 +176,50 @@ describe('AI 设置正式四视图', () => {
     expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'ocr_recognition', budget: { mode: 'unlimited' }, model: { modelRef: 'second-model', limits: { attempts: 1 } } } });
   });
 
+  it('材料范围沿用底稿六类字段，视频画面可显式选入后保存', async () => {
+    const base = settingsFixture();
+    const capability = { capabilityRef: 'cap-text', source: 'manual', sourceVersion: 'synthetic-only', probeInvocationRef: null, contextTokens: 8192, maxOutputTokens: 2048, maxTimeoutSeconds: 60, thinkingLevels: ['off'], compat: {}, thinkingLevelMap: { off: null }, outputMode: 'json_object', strictSchema: false };
+    const config = { ...base.tasks[0]!.configuration, taskKey: 'note_interpretation', materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript'],
+      model: { modelConfigRef: 'model-config', modelRef: 'old-model-ref', identityRef: 'identity-1', modelId: 'synthetic-model',
+        connectionRef: 'connection-1', connectionVersionRef: 'version-1', capabilityRef: 'cap-text',
+        limits: { inputTokens: 2048, outputTokens: 512, timeoutSeconds: 30, attempts: 1, thinkingLevel: 'off' } } };
+    const data = { ...base, models: [{ ...base.models[0]!, capability }],
+      tasks: [{ ...base.tasks[0]!, taskKey: 'note_interpretation', label: '笔记解读', configuration: config }] };
+    respond = call => call.method === 'GET' ? ok(data) : call.path === '/api/local/ai-settings/task-configs'
+      ? ok({ taskKey: 'note_interpretation', taskConfigRef: 'next-config', modelConfigRef: 'model-config', revision: 1, applied: true })
+      : { status: 503, body: {} };
+    const user = userEvent.setup(); mount();
+    await user.click(await screen.findByRole('button', { name: /笔记解读/ }));
+    await user.click(screen.getByRole('link', { name: '查看工作配置' }));
+    expect(screen.queryByRole('checkbox', { name: '封面文字' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '视频画面文字' })).not.toBeChecked();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+    await user.click(screen.getByRole('checkbox', { name: '视频画面文字' }));
+    await user.click(screen.getByRole('button', { name: '保存配置' }));
+    await screen.findByText(/配置已保存，用于后续批次/);
+    const writes = calls.filter(call => call.method === 'POST');
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'note_interpretation', expectedRevision: 0, materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text'] } });
+  });
+
+});
+
+
+it('作品内容对照的正式材料许可可由设置表单提交，保存不派发任务',async()=>{
+  const raw=settingsFixture();
+  const configuration={...raw.configurations[0]!,taskKey:'work_comparison',taskConfigRef:'comparison-config',executionContract:'work-content-comparison.v1'};
+  raw.tasks.push({...raw.tasks[0]!,taskKey:'work_comparison',label:'作品内容对照',configuration});
+  raw.configurations.push(configuration);
+  const data=parseAiSettings(raw),connection=data.connections[0]!;
+  function Form(){return <EgressForm data={data} connection={connection} action={useAiAction()}/>;}
+  respond=call=>call.method==='POST'?ok({eventRef:'00000000-0000-4000-8000-000000000009',allowed:true}):ok(raw);
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  render(<QueryClientProvider client={client}><Form/></QueryClientProvider>);
+  const user=userEvent.setup();
+  await user.selectOptions(screen.getByLabelText('工作与材料'),'work_comparison:note_material');
+  await user.type(screen.getByLabelText('外发许可原因'),'合成材料授权证明');
+  await user.click(screen.getByRole('button',{name:'批准这项材料外发'}));
+  await waitFor(()=>expect(calls.filter(c=>c.method==='POST')).toHaveLength(1));
+  expect(calls.find(c=>c.method==='POST')?.body).toMatchObject({taskKey:'work_comparison',materialClass:'note_material',allowed:true});
+  expect(calls.some(c=>/batches|content-comparison/.test(c.path))).toBe(false);
 });

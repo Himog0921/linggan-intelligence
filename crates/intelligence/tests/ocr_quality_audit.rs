@@ -84,7 +84,7 @@ fn visible_brand_and_call_to_action_are_preserved_with_closed_roles() {
 fn sampling_is_work_first_deterministic_disjoint_and_does_not_fill_missing_pools() {
     let candidates: Vec<_> = (1..=12)
         .map(|n| Candidate {
-            adoption_ref: Uuid::from_u128(n),
+            reading_ref: Uuid::from_u128(n),
             work_ref: Uuid::from_u128(if n < 10 { 1 } else { n }),
             blob_sha256: format!("{n:064x}"),
             risk: true,
@@ -107,7 +107,7 @@ fn sampling_is_work_first_deterministic_disjoint_and_does_not_fill_missing_pools
     assert_eq!(a.len(), 6);
     assert_eq!(
         a.iter()
-            .map(|s| s.candidate.adoption_ref)
+            .map(|s| s.candidate.reading_ref)
             .collect::<std::collections::HashSet<_>>()
             .len(),
         6
@@ -254,4 +254,46 @@ fn external_clearance_is_explicit_scoped_and_auditable() {
     assert!(s.validate().is_ok());
     s.privacy_cleared_refs.push(Uuid::from_u128(1));
     assert!(s.validate().is_err());
+}
+
+#[test]
+fn diagnostics_distinguish_geometry_and_title_without_repairing_received_text() {
+    use audit::parse_visual_diagnostic;
+    for bbox in [json!([0.2, 0.5, 0.8, 0.5]), json!([0.2, 0.5, 0.8, 1.1])] {
+        let mut v = output();
+        v["regions"][0]["bbox"] = bbox;
+        assert_eq!(
+            parse_visual_diagnostic(&v.to_string(), Some("stop")).unwrap_err(),
+            "ocr_visual_coordinates_invalid"
+        );
+    }
+    let mut v = output();
+    v["titlePresence"] = json!("present");
+    v["titleText"] = json!("新增的标题");
+    assert_eq!(
+        parse_visual_diagnostic(&v.to_string(), Some("stop")).unwrap_err(),
+        "ocr_visual_title_mismatch"
+    );
+    v = output();
+    v["regions"][0]["legibility"] = json!("unclear");
+    assert_eq!(
+        parse_visual_diagnostic(&v.to_string(), Some("stop")).unwrap_err(),
+        "ocr_visual_schema_invalid"
+    );
+    assert_eq!(
+        parse_visual_diagnostic(&json!({"regions":[]}).to_string(), Some("stop")).unwrap_err(),
+        "ocr_visual_schema_invalid"
+    );
+    let (_, prompt) = audit::prompt();
+    let p: serde_json::Value = serde_json::from_str(&prompt).unwrap();
+    let schema = audit::response_schema().schema;
+    assert_eq!(p["requiredFields"]["root"], schema["required"]);
+    assert_eq!(
+        p["requiredFields"]["region"],
+        schema["properties"]["regions"]["items"]["required"]
+    );
+    assert_eq!(
+        p["legibilityVocabulary"],
+        schema["properties"]["regions"]["items"]["properties"]["legibility"]["enum"]
+    );
 }

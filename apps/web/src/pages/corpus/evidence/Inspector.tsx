@@ -4,7 +4,7 @@ import { EvidencePanel } from './EvidencePanel';
 import { Lightbox } from './Lightbox';
 import { TechnicalFacts } from './TechnicalFacts';
 import { ReobservationSection } from './ReobservationSection';
-import { AuthorFact, Engagement, MaterialLegend, MaterialRail, QuoteBlock } from './WorkParts';
+import { AuthorFact, Engagement, MaterialLegend, MaterialRail } from './WorkParts';
 import { Section } from './Primitives';
 import { materialSummary, publishedCopy } from './evidencePresent';
 import { MaterialsPanel } from './MaterialsPanel';
@@ -104,15 +104,14 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
   return (
     <>
       <Panel id="overview" active={tab === 'overview'}>
-        <ReadingPanel context={context} domain={domain} />
+        <ReadingPanel context={context} domain={domain} active={tab === 'overview'} />
       </Panel>
       <Panel id="dossier" active={tab === 'dossier'}>
-        {fragment ? <Section title="当前列表引用的原声"><QuoteBlock fragment={fragment} wrap /></Section> : null}
         <DossierPanel
           work={item.ref}
+          displayedTitle={workTitle(item)}
           domain={domain}
           active={tab === 'dossier'}
-          platformComments={item.display.engagement.comment}
           onOpenImage={media => setViewer({ objects: [singleViewerObject(media)], index: 0 })}
           onApplied={onApplied}
         />

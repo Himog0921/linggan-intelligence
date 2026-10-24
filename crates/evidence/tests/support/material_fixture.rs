@@ -252,6 +252,11 @@ pub const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0137_ai_gen1_round.sql"),
     include_str!("../../../../database/migrations/0138_ai_gen1_invocation.sql"),
     include_str!("../../../../database/migrations/0139_ai_gen1_executor.sql"),
+    include_str!("../../../../database/migrations/0142_ocr_adoption.sql"),
+    include_str!("../../../../database/migrations/0143_ocr_quality_audit.sql"),
+    include_str!("../../../../database/migrations/0144_ocr_manual_recognition.sql"),
+    include_str!("../../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
+    include_str!("../../../../database/migrations/0146_research_dossier_v2.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -306,6 +311,11 @@ pub const MIGRATIONS: &str = concat!(
     "('0124_ops_publication_cover', 'd879223368b2a1f2023384c40b6cc6c94ca4a959ee3ec9a09712c2c96fac5b3c'),\n",
     "('0125_collection_single_run', '0413aa2357eadb2ba382509f16f37220adb01b4a2e358eb794b14c85466a73b5'),\n",
     "('0126_ops_target', '92ce85c849d586be51bcc07781e0dc384f9c2df8ae91fc6ed85c589e874fdaaa'), ('0129_note_material_hashtags', '7d1cdc0786e217ef500b3a2b7b31e47971fd48da110b41c64c617f99117baa05'), ('0130_note_material_snapshot', 'eeed1797b3f748dfe2dd5e58fd3eba354ae957891ba37f8815f4301953418350'), ('0131_ai_gen1_provider', '235332ca3ee7ad73ba9d0079d0943b387e6e64acfd20b809643aed2b3b73c259'), ('0132_ai_gen1_control', '55eea68854ef7052c691a22c3285d51e3e0beb12f7934b60c685fc2169d730b2'), ('0133_ai_gen1_skill', '0642f95501a9ac56a5d62f969503b24ea658c47ad8041e96f8b4cdd651bc3408'), ('0134_ai_gen1_task_config', '77a9ac05b37d2cf310859301c30d47d2dc1374400c67ea7d5d735a946a17a31c'), ('0135_ai_gen1_batch', '2c558c20d84167b2dc7a649a6be180afe2a37be27b889ac126cf3a5d3402cff8'), ('0136_ai_gen1_skill_binding', 'ee0c19ddb4df3e08fe3dab3b3b114fdfd74d815d5c017667d9c9a57a8d5e1411'), ('0137_ai_gen1_round', '7262239689e3369bd64c18e4103d7e430aa51c805f4625916767c64a013285ae'), ('0138_ai_gen1_invocation', 'b7568a12dc7b1c41bbfabaa423a469aff2783a01b25c3673880a264e5185ec43'), ('0139_ai_gen1_executor', 'd541b2003337d9d50b4591f69760cfae0c78cec2cb3d4e7b56a3f9c2e8b09d6f');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0142_ocr_adoption','baad716a89398d3e923838028358db7e6189f66c79408c4502287f8b75498057');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0143_ocr_quality_audit','11d316460ceb7d49b27751efe4b2382b88a1a068f86784f427771bbdf30bdb6c');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0144_ocr_manual_recognition','de82e4ddabe0e9045165a01e3e32ab2ae24625853def47934907c66d0fc12990');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0145_ocr_manual_human_adoption','49ba4e27a8923ea2e12fefee6e209797aa5d0e7e09b7c299e6ae11e236dbbfbc');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0146_research_dossier_v2','0f3e2ce3720363d8510c448df66a06fb907a955e83817ba9d011d36b4c063881');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {
@@ -463,29 +473,29 @@ pub async fn proof_database_with_ops_ledger(schema: &str) -> Database {
         include_str!("../../../../database/migrations/0143_ocr_quality_audit.sql"),
         include_str!("../../../../database/migrations/0144_ocr_manual_recognition.sql"),
         include_str!("../../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
-        include_str!("../../../../database/migrations/0146_ops_team_auth.sql"),
-        include_str!("../../../../database/migrations/0147_ops_team_responsibility.sql"),
-        include_str!("../../../../database/migrations/0148_ops_first_admin_bootstrap.sql"),
-        include_str!("../../../../database/migrations/0149_ops_native_write_model.sql"),
+        include_str!("../../../../database/migrations/0150_ops_team_auth.sql"),
+        include_str!("../../../../database/migrations/0151_ops_team_responsibility.sql"),
+        include_str!("../../../../database/migrations/0152_ops_first_admin_bootstrap.sql"),
+        include_str!("../../../../database/migrations/0153_ops_native_write_model.sql"),
         include_str!(
-            "../../../../database/migrations/0150_ops_native_publication_date_precision.sql"
+            "../../../../database/migrations/0154_ops_native_publication_date_precision.sql"
         ),
-        include_str!("../../../../database/migrations/0151_ops_publication_sync_request.sql"),
-        include_str!("../../../../database/migrations/0152_ops_publication_execution_locator.sql"),
-        include_str!("../../../../database/migrations/0153_ops_account_responsibility_command.sql"),
-        include_str!("../../../../database/migrations/0154_ops_member_deactivation.sql"),
-        include_str!("../../../../database/migrations/0155_ops_exact_publication_work_scope.sql"),
+        include_str!("../../../../database/migrations/0155_ops_publication_sync_request.sql"),
+        include_str!("../../../../database/migrations/0156_ops_publication_execution_locator.sql"),
+        include_str!("../../../../database/migrations/0157_ops_account_responsibility_command.sql"),
+        include_str!("../../../../database/migrations/0158_ops_member_deactivation.sql"),
+        include_str!("../../../../database/migrations/0159_ops_exact_publication_work_scope.sql"),
         include_str!(
-            "../../../../database/migrations/0156_ops_exact_publication_detail_session.sql"
-        ),
-        include_str!(
-            "../../../../database/migrations/0157_ops_publication_execution_input_eligibility.sql"
+            "../../../../database/migrations/0160_ops_exact_publication_detail_session.sql"
         ),
         include_str!(
-            "../../../../database/migrations/0158_ops_publication_material_projection.sql"
+            "../../../../database/migrations/0161_ops_publication_execution_input_eligibility.sql"
         ),
-        include_str!("../../../../database/migrations/0159_ops_publication_field_adoption.sql"),
-        include_str!("../../../../database/migrations/0160_ops_publication_media_projection.sql"),
+        include_str!(
+            "../../../../database/migrations/0162_ops_publication_material_projection.sql"
+        ),
+        include_str!("../../../../database/migrations/0163_ops_publication_field_adoption.sql"),
+        include_str!("../../../../database/migrations/0164_ops_publication_media_projection.sql"),
     ]
     .concat();
     isolated_proof_schema(&url, schema, &migrations)

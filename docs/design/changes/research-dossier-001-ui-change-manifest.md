@@ -1,10 +1,13 @@
 # RESEARCH-DOSSIER-001 · 证据库底稿与图片对照
 
-> 状态: 活跃计划
-> 最后核对: 2026-10-14
+> 状态: 历史归档
+> 替代关系: 已被 RESEARCH-DOSSIER-V2 取代
+> 最后核对: 2026-10-23（仅核对取代关系；以下实现事实保留原日期）
 > 适用范围: Issue #420；证据库 Inspector 的新底稿页签和相关动作
 > 事实来源: Mog 确认的修订方案第一阶段、PAGE-EVIDENCE-001、LIDS
 > 冲突时以谁为准: 用户最新确认、真实后端回执、研究底稿合同、现有 LIDS
+
+本清单记录第一阶段界面，已停止作为现行设计标准。完整连续阅读、独立候选采纳与结构编辑、单一 JSON/Markdown 合同的当前表面、状态、依赖与验收统一见 [RESEARCH-DOSSIER-V2](../../plans/active/research-dossier-v2.md) 和[当前底稿合同](../../data-contracts/research-dossier.md)。以下旧预览/折叠/自动选择表述仅保留历史，不提供兼容运行要求。
 
 读取回执：AGENTS、UI execution contract、design/README、LIDS README/tokens/data-boundaries/language-policy、PAGE-EVIDENCE-001、OCR 合同。变更为交互+状态+有界本地动作；不改变导航和站点视觉风格。
 

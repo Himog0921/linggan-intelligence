@@ -23,6 +23,8 @@ const MIGRATIONS: &[(&str, &str)] = &[
     migration!("0139_ai_gen1_executor"),
     migration!("0140_ai_gen1_writing"),
     migration!("0141_ai_gen1_legacy_settings"),
+    migration!("0146_research_dossier_v2"),
+    migration!("0148_dossier_consumer_contracts"),
 ];
 
 pub(super) async fn require_ready(db: &Database) -> Result<(), ExecutorError> {

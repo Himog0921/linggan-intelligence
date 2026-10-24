@@ -17,7 +17,7 @@ const document: MaterialDocument = {
   context: null,
   fragments: [
     {
-      fragmentId: "one.body",
+      fragmentId: "one.body", asOf: "2026-10-23T08:00:00Z", blockRef: "one.body", speaker: "author", structure: null, issues: [],
       sourceKind: "note",
       sourceRef: "one",
       workRef: "one",

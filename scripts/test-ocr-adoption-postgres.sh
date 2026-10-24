@@ -3,10 +3,11 @@
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
+source scripts/cargo-proof.sh
 case "${1:-}" in
   '')
     [[ -z "${OCR_CHAIN_MANIFEST:-}" ]] || { echo "private manifest requires explicit --private-local" >&2; exit 2; }
-    test_name=synthetic_worker_persists_only_adopted_text_with_exact_sources
+    test_name=synthetic_worker_keeps_visual_candidates_separate_until_explicit_review
     ;;
   --private-local)
     [[ -z "${GITHUB_ACTIONS:-}" && -f "${OCR_CHAIN_MANIFEST:-}" && -n "${OCR_CHAIN_OUTPUT:-}" && -f "${LINGGAN_PADDLE_VL_SCRIPT:-}" ]] || { echo "private local prerequisites missing or forbidden in CI" >&2; exit 2; }
@@ -49,4 +50,4 @@ if [[ "${1:-}" != --private-local ]];then
   export LINGGAN_PADDLE_OCR_PYTHON="$(command -v python3)"
   export LINGGAN_PADDLE_VL_SCRIPT="$proof_assets/synthetic-bridge.py"
 fi
-cargo test -p linggan-worker --test ocr_vl_postgres "$test_name" --locked -- --ignored --nocapture
+cargo_proof -p linggan-worker --test ocr_vl_postgres "$test_name" --locked -- --ignored --exact --nocapture

@@ -1,5 +1,5 @@
 //! Synthetic only: no database, network, environment configuration or model process.
-use linggan_evidence::note_material_input::{
+use linggan_evidence::dossier_input::{
     self, Column, ColumnState, Fragment, Material, ProcessingScope,
 };
 use linggan_intelligence::note_interpretation_offline::*;
@@ -8,8 +8,8 @@ use uuid::Uuid;
 fn input() -> Input {
     Input {
         material: Material {
-            contract: note_material_input::VERSION.into(),
-            fingerprint_contract: note_material_input::FINGERPRINT_VERSION.into(),
+            contract: dossier_input::VERSION.into(),
+            fingerprint_contract: dossier_input::FINGERPRINT_VERSION.into(),
             domain_ref: Uuid::from_u128(1),
             work_ref: Uuid::from_u128(2),
             as_of: "2026-10-20T00:00:00Z".into(),
@@ -19,7 +19,7 @@ fn input() -> Input {
             snapshot_identity: "synthetic-snapshot".into(),
             ready: true,
             not_ready_reasons: vec![],
-            columns: ["body", "title", "cover_headline", "tags", "ocr"]
+            columns: ["body", "title", "tags", "ocr", "transcript", "frame_text"]
                 .into_iter()
                 .map(|field| Column {
                     field: field.into(),
@@ -41,6 +41,11 @@ fn input() -> Input {
                 end: 14,
                 text_hash: "synthetic-hash".into(),
                 text: "今天🙂先写作业".into(),
+                speaker: "author".into(),
+                structure: serde_json::json!({"ref":"native","kind":"paragraph","text":"今天🙂先写作业","speaker":"author"}),
+                issues: vec![],
+                reading_ref: Some(Uuid::from_u128(30)),
+                unit_ref: Some(Uuid::from_u128(31)),
             }],
             layer_version: "synthetic.v3".into(),
             processing_scope: ProcessingScope {
@@ -152,14 +157,7 @@ fn missing_ambiguous_restricted_and_ineligible_citations_are_rejected() {
         end: 9,
     }];
     validate_output(&input, &output).unwrap();
-    for field in [
-        "ocr",
-        "transcript",
-        "asr",
-        "image_body",
-        "author_name",
-        "comment",
-    ] {
+    for field in ["asr", "image_body", "author_name", "comment"] {
         input.material.fragments[0].field = field.into();
         assert!(validate_output(&input, &output).is_err());
     }
@@ -200,35 +198,39 @@ fn output_cannot_claim_provider_origin_or_hide_unknown_fields() {
 }
 
 #[test]
-fn preview_selects_the_five_default_fields_and_preserves_missing_states() {
+fn preview_preserves_all_canonical_fields_order_roles_structure_and_missing_states() {
     let mut input = input();
-    for (i, field) in ["transcript", "author_name", "comment"]
-        .into_iter()
-        .enumerate()
-    {
+    for (i, field) in ["ocr", "transcript", "frame_text"].into_iter().enumerate() {
         let mut fragment = input.material.fragments[0].clone();
         fragment.field = field.into();
-        fragment.citation_id = format!("excluded-{i}");
-        fragment.text = "不应进入输入包的合成文字".into();
+        fragment.citation_id = format!("media-{i}");
+        fragment.logical_position = format!("media-block-{i}");
+        fragment.text = format!("{}末尾仍保留🙂", "完整图片音频帧文字".repeat(3000));
         fragment.end = fragment.start + fragment.text.chars().count();
+        fragment.speaker = "unconfirmed".into();
+        fragment.structure = serde_json::json!({"ref":fragment.logical_position,"kind":"paragraph","text":fragment.text,"speaker":"unconfirmed"});
         input.material.fragments.push(fragment);
-        input.material.columns.push(Column {
-            field: field.into(),
-            state: ColumnState::Available,
-            reasons: vec![],
-        });
+        input
+            .material
+            .columns
+            .iter_mut()
+            .find(|c| c.field == field)
+            .unwrap()
+            .state = ColumnState::Available;
     }
-    input.material.columns[4].state = ColumnState::TerminalFailure;
-    input.material.columns[4].reasons = vec!["synthetic_terminal".into()];
+    input
+        .material
+        .columns
+        .iter_mut()
+        .find(|c| c.field == "tags")
+        .unwrap()
+        .state = ColumnState::NotProvided;
     let preview = prepare_input(&input).unwrap();
-    assert_eq!(preview.columns.len(), 5);
-    assert_eq!(preview.fragments.len(), 1);
-    assert_eq!(preview.fragments[0], input.material.fragments[0]);
-    let ocr = preview.columns.iter().find(|c| c.field == "ocr").unwrap();
-    assert_eq!(ocr.state, ColumnState::TerminalFailure);
-    assert_eq!(ocr.reasons, ["synthetic_terminal"]);
+    assert_eq!(preview.columns, input.material.columns);
+    assert_eq!(preview.fragments, input.material.fragments);
+    assert_eq!(preview.fragments[1].speaker, "unconfirmed");
+    assert!(preview.fragments[3].text.ends_with("末尾仍保留🙂"));
     let encoded = serde_json::to_string(&preview).unwrap();
-    assert!(!encoded.contains("不应进入输入包的合成文字"));
     assert_eq!(
         encoded,
         serde_json::to_string(&prepare_input(&input).unwrap()).unwrap()
@@ -247,7 +249,7 @@ fn preview_rejects_missing_duplicate_and_contradictory_columns() {
         .push(input.material.columns[0].clone());
     assert!(prepare_input(&input).is_err());
     input.material.columns.pop();
-    input.material.columns.pop();
+    input.material.columns.retain(|c| c.field != "body");
     assert!(prepare_input(&input).is_err());
 }
 
@@ -373,7 +375,13 @@ fn explicit_sample_freeze_is_order_independent_and_binds_input_and_provenance() 
         let mut a = first.clone();
         let mut b = second.clone();
         match field {
-            "literal" => a.material.fragments[0].text = "今天🙂先做家务".into(),
+            "literal" => {
+                let fragment = &mut a.material.fragments[0];
+                fragment.text = "今天🙂先做家务".into();
+                fragment.end = fragment.start + fragment.text.chars().count();
+                fragment.text_hash = linggan_evidence::creator_discovery::hash(&fragment.text);
+                fragment.structure["text"] = serde_json::json!(fragment.text);
+            }
             "provenance" => a.material.provenance_hash = "different-source".into(),
             "snapshot" => a.material.snapshot_identity = "different-snapshot".into(),
             "direction_members" => {
@@ -644,4 +652,22 @@ fn fixed_fixture_is_reproducible_and_version_comparison_has_no_omitted_old_direc
     let mut duplicate = b.comparison.clone();
     duplicate.push(duplicate[0].clone());
     assert!(validate_comparison(&a.catalogue, &b.catalogue, &duplicate).is_err());
+}
+
+#[test]
+fn preview_rejects_content_role_and_reference_repairs() {
+    for change in ["text", "speaker", "ref", "shape"] {
+        let mut input = input();
+        let structure = &mut input.material.fragments[0].structure;
+        match change {
+            "text" => structure["text"] = "different content".into(),
+            "speaker" => structure["speaker"] = "other".into(),
+            "ref" => structure["ref"] = "another block".into(),
+            _ => structure["items"] = serde_json::json!(["second content shape"]),
+        }
+        assert!(matches!(
+            prepare_input(&input),
+            Err(Invalid("offline_input_structure_invalid"))
+        ));
+    }
 }

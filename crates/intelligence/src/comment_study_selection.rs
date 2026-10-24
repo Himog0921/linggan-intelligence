@@ -129,14 +129,13 @@ pub enum StudySelectionMode {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StudyRunLimits {
     pub comment_budget: i32,
-    pub context_character_budget: i32,
+
     pub token_limit: i64,
 }
 
 impl StudyRunLimits {
     pub fn validate(&self) -> Result<(), StudySelectionError> {
         if !(1..=3000).contains(&self.comment_budget)
-            || !(1..=20000).contains(&self.context_character_budget)
             || !(1024..=10000000).contains(&self.token_limit)
         {
             return Err(StudySelectionError::InvalidLimit);

@@ -480,7 +480,7 @@ export const decodeProgress = (value: unknown): T.ResearchProgress =>
     }))(d.obj(r, "usage")),
     processingLimits: ((r) => ({
       automaticBatchWindows: d.num(r, "automaticBatchWindows"),
-      windowChars: d.num(r, "windowChars"),
+      materialSelection: (() => { const value = d.str(r, "materialSelection"); if (value !== 'whole_note') throw new d.ShapeError('materialSelection'); return 'whole_note' as const; })(),
       primaryCommentsPerWindow: d.num(r, "primaryCommentsPerWindow"),
     }))(d.obj(r, "processingLimits")),
     targets: d.list(r, "targets", (r) => ({

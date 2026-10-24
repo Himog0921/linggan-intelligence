@@ -65,10 +65,10 @@ export async function history(id: string) {
   return parseHistory(await requestJson(`${base}/works/${uuid(id)}/revisions`)).items;
 }
 export async function materialFromCitation(domainRef: string, citation: Citation, signal?: AbortSignal) {
-  const sourceKind = citation.sourceKind === 'ocr' ? 'note' : citation.sourceKind;
+  const sourceKind = ['ocr', 'transcript', 'frame_text'].includes(citation.sourceKind) ? 'note' : citation.sourceKind;
   const sourceRef = sourceKind === 'note' ? citation.workRef : citation.sourceRef;
   if (!sourceRef) throw new WorkbenchContractError();
-  const params = new URLSearchParams({domainRef, sourceKind, sourceRef});
+  const params = new URLSearchParams({domainRef, sourceKind, sourceRef, asOf: citation.asOf, blockRef: citation.blockRef, sourceVersion: citation.sourceVersion, citationSourceRef: citation.sourceRef, field: citation.field});
   if (citation.workRef) params.set('workRef', citation.workRef);
   const document = parseMaterialDocument(await requestJson(`${base}/sources/document?${params}`, {signal}));
   if (document.sourceRef !== sourceRef || document.sourceKind !== sourceKind) throw new WorkbenchContractError();
@@ -105,6 +105,9 @@ export async function sources(query: {
   }));
 }
 export async function source(domain: string, item: {
+  asOf: string;
+  sourceVersion: string;
+  blockRef: string;
   sourceKind: string;
   sourceRef: string;
   workRef: string | null;
@@ -112,14 +115,19 @@ export async function source(domain: string, item: {
 }, signal?: AbortSignal) {
   const q = new URLSearchParams({
     domainRef: domain,
-    field: item.field
+    field: item.field,
+    blockRef: item.blockRef,
+    sourceVersion: item.sourceVersion,
+    asOf: item.asOf
   });
   if (item.workRef) q.set('workRef', item.workRef);
-  return parseContext(await requestJson(`${base}/sources/${item.sourceKind}/${uuid(item.sourceRef)}?${q}`, {
-    signal
-  }));
+  const result = parseContext(await requestJson(`${base}/sources/${item.sourceKind}/${uuid(item.sourceRef)}?${q}`, { signal }));
+  if (result.item.blockRef !== item.blockRef || result.item.asOf !== item.asOf || result.item.sourceVersion !== item.sourceVersion || result.item.sourceRef !== item.sourceRef || result.item.field !== item.field || result.item.workRef !== item.workRef) throw new WorkbenchContractError();
+  return result;
 }
 export async function anchor(body: {
+  asOf: string;
+  blockRef: string;
   domainRef: string;
   sourceKind: string;
   sourceRef: string;
@@ -129,7 +137,9 @@ export async function anchor(body: {
   start: number;
   end: number;
 }) {
-  return parseAnchor(await post(`${base}/sources/validate`, body));
+  const result = parseAnchor(await post(`${base}/sources/validate`, body));
+  if (result.citation.blockRef !== body.blockRef || result.citation.asOf !== body.asOf || result.citation.sourceVersion !== body.sourceVersion || result.citation.sourceRef !== body.sourceRef || result.citation.field !== body.field || result.citation.start !== body.start || result.citation.end !== body.end) throw new WorkbenchContractError();
+  return result;
 }
 export async function uploadAsset(id: string, file: File, requestId: string) {
   const record = parseAsset(await requestBinaryJson(`${base}/works/${uuid(id)}/assets`, file, {
@@ -281,6 +291,13 @@ export function conflictReceipt(error: unknown) {
 }
 export class WorkbenchActionError extends Error {}
 
+export function isLegacyReferenceUnavailable(error: unknown): boolean {
+  return error instanceof ApiError &&
+    error.failure.kind === 'http' &&
+    error.failure.status === 409 &&
+    error.failure.code === 'creation_legacy_reference_unavailable';
+}
+
 /** Human feedback is separate from the preserved invocation diagnostics. */
 export function aiFailureText(code: string | null): string {
   const messages: Record<string, string> = {
@@ -329,6 +346,7 @@ export function errorText(error: unknown): string {
       source_unavailable: '来源暂不可读。',
       creation_not_connected: '创作暂时无法读取，当前输入仍保留。请稍后重试。',
       creation_storage_not_configured: '图片存储尚未配置，仍可继续写正文。',
+      creation_legacy_reference_unavailable: '这份历史作品缺少当前所需的来源定位，原稿已保留，但暂不能安全打开。',
       creation_ai_model_unavailable: '创作模型尚不可用，仍可手写。',
       creation_ai_admission_denied: '当前运行条件尚未满足，请到AI设置核对开关、模型、额度和外发许可。当前输入仍保留。',
       creation_ai_stale: '底稿已改变，请重新预览。',
