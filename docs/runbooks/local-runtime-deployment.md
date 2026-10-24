@@ -156,6 +156,8 @@ cd /Users/moglenny/proma/linggan-intelligence
 
 三者由同一个 `scripts/runtime/launch.sh <binary>` 启动、共用同一份 `sync.sh`。更新后仍须分别核对三个 PID 和构建 revision；共用脚本不证明当前存活进程已经同步。
 
+**单次采集由 API 自己推进**（EVIDENCE-INSPECTOR-RECORDS-001，Mog 2026-10-23；候选，合并部署前不生效）：`linggan-api` 启动后每 15 秒调用一次 `collection_run_progress::advance_runs`，只推进采集页「单次采集」与证据库「评论深采」建立的 `collection_run`——按已接纳交付冻结范围、准入下一段，不访问平台、不调模型，也不运行巡检、建档补采等其它调度。所以巡检 worker 停用时，用户发起的单次采集仍会排出下一段并等工位认领；巡检 worker 若恢复，两边同时推进也安全（每次采集一把咨询锁，抢不到就跳过）。它和 worker 一样受 `LINGGAN_COLLECTION_UPGRADE_PHASE=governance` 门控，日志落在 `api.err.log`（`collection run advancement failed`）。
+
 日志在 `runtime-logs/{api,worker,media-worker}.{out,err}.log`。
 
 ## 6. 处置

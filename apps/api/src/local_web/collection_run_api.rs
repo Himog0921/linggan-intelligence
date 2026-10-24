@@ -76,6 +76,26 @@ fn result(r: Result<serde_json::Value, RunError>) -> Response {
         }
     }
 }
+/// 单次采集的推进间隔：一段评论交卷后，最多等这么久就排下一段。
+const RUN_ADVANCE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// 本服务自己推进单次采集（Mog 2026-10-23）。巡查 worker 停用时，页面上建的单次采集（含证据库的评论深采）
+/// 由这里定时推进：只调用 `advance_runs`——按已接纳的交付冻结范围、准入下一段，不访问平台、不调模型，
+/// 也不碰巡查、建档补采等其它自动任务。它和 worker 同时运行也安全：每次采集一把咨询锁，抢不到就留给对方。
+pub(super) fn spawn_run_advancer(database: linggan_storage_postgres::Database) {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(RUN_ADVANCE_INTERVAL);
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tick.tick().await;
+            if let Err(error) =
+                linggan_evidence::collection_run_progress::advance_runs(&database).await
+            {
+                eprintln!("linggan local runtime: collection run advancement failed: {error}");
+            }
+        }
+    });
+}
 fn disconnected() -> Response {
     local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected")
 }

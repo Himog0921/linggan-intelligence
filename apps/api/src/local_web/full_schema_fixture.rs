@@ -248,6 +248,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0148_dossier_consumer_contracts.sql"),
     include_str!("../../../../database/migrations/0149_target_inspector_comparison.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0150_collection_run_comment_target.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -336,4 +338,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0147_comment_study_full_context','be742f93edfa4b46e5a2fe5485fc17f1531dc14bd9265fc1fe52204d045857f9');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0148_dossier_consumer_contracts','5da3a82504c2a64bf66bb313550390023aa4b771a21df6577d1ef06e8edc7195');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0149_target_inspector_comparison','176f85ab2b82e92d6387e26ce3b7de0eb46f3a99be79b14cf266d83b187a27a4');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0150_collection_run_comment_target','c1d380d7085bd2f1a0cafe15a42cbe969e7e2ad1060f444d1c41ce92071c6425');\n",
 );

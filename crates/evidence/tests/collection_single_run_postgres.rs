@@ -80,6 +80,7 @@ async fn actual_search_dispatch_receipt_freezes_37_in_rank_order_and_never_refil
             ranking: Some("comprehensive".into()),
             work_limit: 50,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -269,6 +270,7 @@ async fn standard_30_deep_500_standard_30_keep_versions_and_scope_results() {
             ranking: Some("comprehensive".into()),
             work_limit: 1,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -304,6 +306,7 @@ async fn standard_30_deep_500_standard_30_keep_versions_and_scope_results() {
             ranking: None,
             work_limit: 1,
             comment_mode: CommentMode::AllPublic,
+            comment_target: None,
         },
     )
     .await
@@ -334,6 +337,7 @@ async fn standard_30_deep_500_standard_30_keep_versions_and_scope_results() {
             ranking: None,
             work_limit: 1,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -416,6 +420,7 @@ async fn fifty_fixed_works_deepen_in_shared_queue_without_thirty_or_two_reply_tr
             ranking: Some("comprehensive".into()),
             work_limit: 50,
             comment_mode: CommentMode::AllPublic,
+            comment_target: None,
         },
     )
     .await
@@ -530,6 +535,7 @@ async fn temporary_run_is_transactional_idempotent_and_not_a_long_term_target() 
         ranking: Some("comprehensive".into()),
         work_limit: 50,
         comment_mode: CommentMode::AllPublic,
+        comment_target: None,
     };
     let first = create_run(&db, &input).await.unwrap();
     let replay = create_run(&db, &input).await.unwrap();
@@ -600,6 +606,7 @@ async fn stop_is_durable_versioned_and_cannot_be_reversed_by_replay() {
             ranking: None,
             work_limit: 5,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -705,6 +712,7 @@ async fn existing_keyword_uses_selected_domain_without_mutating_identity_or_rule
         ranking: Some("latest".into()),
         work_limit: 5,
         comment_mode: CommentMode::Sample30,
+        comment_target: None,
     };
     let run = create_run(&db, &request).await.unwrap();
     let run: Uuid = serde_json::from_value(run["runRef"].clone()).unwrap();
@@ -765,6 +773,7 @@ async fn pause_resume_stop_late_and_duplicate_delivery_do_not_restart_or_refill(
             ranking: None,
             work_limit: 50,
             comment_mode: CommentMode::AllPublic,
+            comment_target: None,
         },
     )
     .await
@@ -882,6 +891,7 @@ async fn old_plugin_waits_instead_of_silently_sampling_all_public() {
             ranking: None,
             work_limit: 5,
             comment_mode: CommentMode::AllPublic,
+            comment_target: None,
         },
     )
     .await
@@ -920,6 +930,7 @@ async fn stop_and_real_dispatch_compete_without_post_stop_execution() {
             ranking: None,
             work_limit: 50,
             comment_mode: CommentMode::AllPublic,
+            comment_target: None,
         },
     )
     .await
@@ -991,6 +1002,7 @@ async fn unfinished_replies_and_one_risk_gap_do_not_complete_or_block_other_work
             ranking: None,
             work_limit: 2,
             comment_mode: CommentMode::AllPublic,
+            comment_target: None,
         },
     )
     .await
@@ -1131,6 +1143,7 @@ async fn configured_periodic_rule_remains_byte_equal_after_one_off() {
             ranking: None,
             work_limit: 50,
             comment_mode: CommentMode::AllPublic,
+            comment_target: None,
         },
     )
     .await
@@ -1156,6 +1169,7 @@ async fn partial_sample_pause_resume_preserves_30_total_and_prior_reply_caps() {
             ranking: Some("comprehensive".into()),
             work_limit: 1,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -1278,6 +1292,7 @@ async fn existing_work_occupies_its_rank_and_resume_cannot_replace_with_51() {
             ranking: Some("comprehensive".into()),
             work_limit: 1,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -1318,6 +1333,7 @@ async fn existing_work_occupies_its_rank_and_resume_cannot_replace_with_51() {
             ranking: Some("most_liked".into()),
             work_limit: 50,
             comment_mode: CommentMode::Sample30,
+            comment_target: None,
         },
     )
     .await
@@ -1511,5 +1527,204 @@ async fn legacy_grouping_keeps_archive_rounds_supplements_and_unknown_history_se
             .unwrap(),
         0,
         "reading or migration never dispatches a historical task"
+    );
+}
+
+/// 指定条数（Mog 2026-10-23）：一篇作品、只要 `target` 条。返回每个评论段向插件要的条数与结束时的汇总。
+async fn targeted_run(name: &str, target: i32, available: usize) -> (Vec<u64>, serde_json::Value) {
+    let db = fixture::proof_database(name).await;
+    let d = domain(&db).await;
+    let (install, credential) = station(&db).await;
+    let created = create_run(
+        &db,
+        &CreateRun {
+            idempotency_key: Uuid::new_v4(),
+            domain_ref: d,
+            source: RunSource::TemporaryKeyword {
+                query: "合成指定条数".into(),
+            },
+            ranking: Some("comprehensive".into()),
+            work_limit: 1,
+            comment_mode: CommentMode::UpTo,
+            comment_target: Some(target),
+        },
+    )
+    .await
+    .unwrap();
+    let run: Uuid = serde_json::from_value(created["runRef"].clone()).unwrap();
+    let search = next(&db, install, &credential).await;
+    deliver(&db, install, &search, "discovery_search", vec![json!({"kind":"discovery_card","resultPosition":1,"sourceObject":{"platform":"xhs","type":"content","externalId":"targetfixture"},"payload":{"noteId":"targetfixture","url":"https://www.xiaohongshu.com/explore/targetfixture?xsec_token=SYNTHETIC_FIXTURE&xsec_source=pc_user","title":"合成指定条数作品"}})], json!({"basis":"maximum_quota","maximumQuota":1,"query":"合成指定条数"})).await;
+    let mut limits = Vec::new();
+    for _ in 0..200 {
+        linggan_evidence::collection_run_progress::advance_runs(&db)
+            .await
+            .unwrap();
+        if read_run(&db, run, d).await.unwrap()["ended"] == true {
+            break;
+        }
+        let spec = next(&db, install, &credential).await;
+        let kind = spec["capabilitiesRequested"][0].as_str().unwrap();
+        let note = spec["target"]["contentExternalId"].as_str().unwrap();
+        match kind {
+            "content_detail" => {
+                deliver(&db,install,&spec,kind,vec![json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":note},"payload":{"noteId":note,"title":"合成指定条数详情","bodyText":"合成正文，评论按条数分段。"}})],json!({"basis":"known_set","contentExternalId":note})).await;
+            }
+            "media_slots" => {
+                deliver(
+                    &db,
+                    install,
+                    &spec,
+                    kind,
+                    vec![],
+                    json!({"basis":"known_set","contentExternalId":note}),
+                )
+                .await;
+            }
+            "comments" | "replies" => {
+                // 插件只认两种模式：指定条数按「尽量采全」的遍历执行，条数由每段的 newUniqueLimit 收住。
+                assert_eq!(spec["commentMode"], "all_public");
+                let budget = &spec["incrementalCommentBudget"];
+                let limit = budget["newUniqueLimit"].as_u64().unwrap();
+                assert_eq!(spec["commentLimit"].as_u64(), Some(limit));
+                let start = budget["knownCommentIds"].as_array().unwrap().len();
+                let end = (start + limit as usize).min(available);
+                let records = (start..end)
+                    .filter(|n| {
+                        if kind == "comments" {
+                            *n < 28
+                        } else {
+                            *n >= 28
+                        }
+                    })
+                    .map(|n| discussion_record(n, note))
+                    .collect();
+                let mut target_json = json!({"basis":"known_set","contentExternalId":note});
+                if kind == "comments" {
+                    limits.push(limit);
+                    let done = end == available;
+                    target_json["commentCollection"] = json!({"version":1,"noteId":note,"scope":"all_public_comments","pageCommentCount":available,"expectedCount":available,"uniqueCollectedCount":end-start,"state":if done{"complete"}else{"partial"},"analysisUsability":"usable","targetIdentity":"matched","stopReason":if done{"comment_area_end"}else{"comment_cap_reached"},"traversal":{"mainExhausted":done,"repliesExhausted":done,"identityReliable":true}});
+                } else {
+                    assert!(
+                        spec.get("replyExpandLimit").is_none(),
+                        "targeted replies inherit no per-root cap"
+                    );
+                }
+                deliver(&db, install, &spec, kind, records, target_json).await;
+            }
+            other => panic!("unexpected targeted scope capability {other}"),
+        }
+    }
+    let result = read_run(&db, run, d).await.unwrap();
+    let frozen: (String, Option<i32>) =
+        sqlx::query_as("SELECT comment_mode,comment_target FROM collection_run WHERE run_ref=$1")
+            .bind(run)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(frozen, ("up_to".to_owned(), Some(target)));
+    // 意图冻结：已建的采集不能改条数。
+    let changed =
+        sqlx::query("UPDATE collection_run SET comment_target=comment_target+1 WHERE run_ref=$1")
+            .bind(run)
+            .execute(db.pool())
+            .await;
+    assert!(
+        changed.is_err(),
+        "the targeted count is part of the frozen intent"
+    );
+    (limits, result)
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL harness"]
+async fn a_targeted_count_asks_only_for_the_remainder_and_stops_once_reached() {
+    let (limits, result) = targeted_run("single_run_up_to_40", 40, 500).await;
+    assert_eq!(
+        limits,
+        vec![30, 10],
+        "第二段只要还差的 10 条，够数后不再排第三段"
+    );
+    assert_eq!(result["ended"], true);
+    assert_eq!(result["comment_mode"], "up_to");
+    assert_eq!(result["comment_target"], 40);
+    assert_eq!(result["delivered_comments"], 40);
+    assert_eq!(result["completed_discussions"], 1);
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL harness"]
+async fn a_targeted_count_also_ends_when_the_comment_area_runs_out_first() {
+    let (limits, result) = targeted_run("single_run_up_to_short", 100, 31).await;
+    assert_eq!(
+        limits,
+        vec![30, 30],
+        "还差 70 条时仍按每段 30 去要，评论区先到底就结束"
+    );
+    assert_eq!(result["ended"], true);
+    assert_eq!(result["delivered_comments"], 31);
+    assert_eq!(result["completed_discussions"], 1);
+    assert_eq!(result["gap_works"], 0);
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL harness"]
+async fn waiting_runs_rotate_without_resetting_admission_retry_time() {
+    let db = fixture::proof_database("single_run_rotation").await;
+    let d = domain(&db).await;
+    for n in 0..21 {
+        create_run(
+            &db,
+            &CreateRun {
+                idempotency_key: Uuid::new_v4(),
+                domain_ref: d,
+                source: RunSource::TemporaryKeyword {
+                    query: format!("合成等待任务{n}"),
+                },
+                ranking: Some("comprehensive".into()),
+                work_limit: 1,
+                comment_mode: CommentMode::Sample30,
+                comment_target: None,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    // 没有工位/交付；旧代码每次只取同一批20个。检查时钟不能改变业务更新时间。
+    let before: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT run_ref,updated_at::text FROM collection_run ORDER BY run_ref")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    linggan_evidence::collection_run_progress::advance_runs(&db)
+        .await
+        .unwrap();
+    let first: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_run WHERE last_advanced_at IS NOT NULL",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(first, 20);
+    linggan_evidence::collection_run_progress::advance_runs(&db)
+        .await
+        .unwrap();
+    let second: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_run WHERE last_advanced_at IS NOT NULL",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        second, 21,
+        "the newest run must get a turn despite twenty waiting runs"
+    );
+    let after: Vec<(Uuid, String)> =
+        sqlx::query_as("SELECT run_ref,updated_at::text FROM collection_run ORDER BY run_ref")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        before, after,
+        "round-robin checks must not reset admission backoff"
     );
 }

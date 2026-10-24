@@ -558,7 +558,7 @@ try {
   });
 
   // ⑨b 评论深采（Mog 2026-10-23）
-  await step('评论深采：确认步骤、取消不发请求；确认后恰好一个单次采集请求（只含这一篇、尽量采全），回执已提交，进度读同一次采集', async () => {
+  await step('评论深采：确认步骤、取消不发请求；确认后恰好一个单次采集请求（只含这一篇、尽量采全），回执已提交，进度读同一次采集；另一篇按指定条数', async () => {
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
     await page.getByRole('tab', { name: '采集记录' }).click();
@@ -589,6 +589,22 @@ try {
     await panel('采集记录').getByRole('button', { name: '评论深采已提交' }).waitFor();
     assert.equal(await panel('采集记录').getByRole('button', { name: '评论深采已提交' }).isDisabled(), true);
     assert.equal(report.writes.length, writes + 1, '刷新恢复原回执，不重新 POST');
+    // 采指定条数：另一篇作品选 40 条，请求带 up_to 与条数（库内另核）。
+    await open(`&work=${video}`);
+    await waitInspector(TITLE.video);
+    await page.getByRole('tab', { name: '采集记录' }).click();
+    await section.getByRole('radio', { name: /采指定条数/ }).check();
+    const count = section.getByRole('spinbutton', { name: '条数' });
+    await count.fill('40');
+    await section.getByRole('button', { name: '采 40 条评论' }).click();
+    await dialog.waitFor();
+    assert.match(await dialog.innerText(), /把评论和回复采到 40 条就停/);
+    await dialog.getByRole('button', { name: '确认提交' }).click();
+    await section.getByText('已提交', { exact: true }).waitFor();
+    await writesTotal(writes + 2);
+    assert.equal(report.writes.at(-1).path, '/api/collection/runs');
+    assert.equal(report.writes.at(-1).status, 200);
+    await shot('evidence-1440-deep-comments-count');
   });
 
   // ⑩ 入站

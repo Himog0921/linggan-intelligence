@@ -41,7 +41,8 @@ pub(crate) async fn guard_order(
         }
         // Until the complete bounded deep collector is negotiated, never silently sample a
         // person's all-public request. Its durable scope stays waiting in the same queue.
-        else if mode == "all_public" {
+        // A targeted count runs on the same traversal, so it needs the same negotiated collector.
+        else if matches!(mode.as_str(), "all_public" | "up_to") {
             let deep:bool=sqlx::query_scalar("SELECT capabilities @> '[\"collection.all_public.v1\"]'::jsonb FROM plugin_installation WHERE installation_ref=$1").bind(installation).fetch_one(&mut **tx).await?;
             (!deep).then(|| "collection_all_public_protocol_unavailable".into())
         } else {

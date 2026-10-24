@@ -121,3 +121,68 @@
   align-items: center;
   gap: var(--lgi-space-3);
 }
+
+/* 评论深采范围：两个单选与条数输入。控件沿用页面原生表单的字体与焦点。 */
+.modes {
+  display: grid;
+  gap: var(--lgi-space-2);
+  margin: 0 0 var(--lgi-space-3);
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.mode {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--lgi-space-2);
+  align-items: baseline;
+  cursor: pointer;
+  font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui);
+}
+
+.mode small {
+  grid-column: 2;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+}
+
+.modes:disabled .mode {
+  cursor: not-allowed;
+  color: var(--lgi-ghost);
+}
+
+.target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  margin-left: var(--lgi-space-6);
+  font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui);
+}
+
+.target input {
+  box-sizing: border-box;
+  width: calc(var(--lgi-space-16) + var(--lgi-space-8));
+  border: 1px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-1) var(--lgi-space-2);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: inherit;
+  font-family: var(--lgi-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.target input:focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: 2px;
+}
+
+.target input[aria-invalid='true'] {
+  border-color: var(--lgi-danger);
+}
+
+.target small {
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+}
