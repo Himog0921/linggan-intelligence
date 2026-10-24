@@ -93,7 +93,12 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
     const retry = stored && stored.runRef === null ? stored : null;
     const intent = retry?.intent ?? commentDeepIntent(domain, item.ref, target);
     const request: RunRequest = retry?.request ?? { identity: crypto.randomUUID(), fingerprint: JSON.stringify(intent), sent: false };
-    requests.set(key, { request, intent, runRef: null });
+    try {
+      requests.set(key, { request, intent, runRef: null });
+    } catch {
+      setResult(feedback('error', '无法保存请求身份，尚未提交。请允许浏览器会话存储后重试。'));
+      return;
+    }
     const wasSent = request.sent;
     setSending(true);
     setResult(null);
@@ -182,11 +187,6 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
                 {running ? '评论深采已提交' : mode === 'count' ? `采 ${target ?? '指定'} 条评论` : '采全部评论'}
               </ActionButton>
             )}
-            {uncertain ? (
-              <button type="button" className={page.textButton} disabled={sending} onClick={() => setConfirming(true)}>
-                仍要重新提交
-              </button>
-            ) : null}
           </div>
           <FeedbackLine feedback={result} />
           {runRef !== null ? (
@@ -206,16 +206,11 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
       )}
       {confirming ? (
         <CommentDeepConfirmDialog
-          afterUnknown={uncertain}
           target={target}
           onCancel={() => setConfirming(false)}
           onConfirm={() => {
             setConfirming(false);
-            if (uncertain) {
-              // 用户看过「可能已经建立」的提示仍要再提交：放弃原请求身份，按现在的选择新建。
-              requests.delete(key);
-              setUncertain(false);
-            } else if (runRef !== null) {
+            if (runRef !== null) {
               // 上一次已经结束，再采一次是新请求。
               requests.delete(key);
             }

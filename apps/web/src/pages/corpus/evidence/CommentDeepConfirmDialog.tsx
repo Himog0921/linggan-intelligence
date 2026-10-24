@@ -4,8 +4,6 @@ import { ModalDialog } from '../../../corpus/ModalDialog';
 import styles from './Dialogs.module.css';
 
 interface CommentDeepConfirmDialogProps {
-  /** 上一次请求没有得到确认：再提交前先说清可能已经建立过一次。 */
-  afterUnknown: boolean;
   /** 「采指定条数」的条数；尽量采全时是 null。 */
   target: number | null;
   onConfirm: () => void;
@@ -17,7 +15,7 @@ interface CommentDeepConfirmDialogProps {
  * 不会做什么，确认之后才发请求；「取消」排在「确认提交」之前，是第一个可聚焦的控件。
  * 真实动作走采集页同一条单次采集合同（只含这一篇；尽量采全或采到指定条数就停），不另造一套。
  */
-export function CommentDeepConfirmDialog({ afterUnknown, target, onConfirm, onCancel }: CommentDeepConfirmDialogProps) {
+export function CommentDeepConfirmDialog({ target, onConfirm, onCancel }: CommentDeepConfirmDialogProps) {
   const titleId = useId();
   return (
     <ModalDialog labelledBy={titleId} className={styles.dialog} onClose={onCancel}>
@@ -35,9 +33,6 @@ export function CommentDeepConfirmDialog({ afterUnknown, target, onConfirm, onCa
               : `这会让合格的工位真实访问平台，打开这篇笔记，把评论和回复采到 ${target} 条就停（评论区先到底也会停）。`}
             提交后可以在采集任务里暂停或停止，已经采到的不会删除。
           </p>
-          {afterUnknown ? (
-            <p className={styles.notice}>上一次提交没有得到确认，可能已经建立过一次。建议先点“核对原请求”。</p>
-          ) : null}
           <p>这一步会：</p>
           <ul className={styles.list}>
             <li>新建一次只包含这篇笔记的单次采集</li>
@@ -56,7 +51,7 @@ export function CommentDeepConfirmDialog({ afterUnknown, target, onConfirm, onCa
             取消
           </button>
           <ActionButton variant="primary" onClick={onConfirm}>
-            {afterUnknown ? '仍然提交' : '确认提交'}
+            确认提交
           </ActionButton>
         </footer>
       </div>
