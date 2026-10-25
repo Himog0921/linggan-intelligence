@@ -521,3 +521,66 @@ test('reply exhaustion needs per-root evidence and missing identities prevent a 
  assert.equal(apiReplyTraversalExhausted({pages:[{comments:[{sub_comment_has_more:false}]}]}),false);
  assert.equal(apiReplyTraversalExhausted({pages:[{comments:[{id:'r',sub_comment_has_more:true}]}],subPages:[{rootCommentId:'r',hasMore:false}]}),true);
 });
+
+
+test('repeated API pages leave budget for actual DOM pagination of missing roots', async (t) => {
+  const saved = { window: globalThis.window, document: globalThis.document, chrome: globalThis.chrome };
+  const listeners = new Set();
+  let fetches = 0;
+  let domScans = 0;
+  let loaded = false;
+  const root = { id: 'known-root', content: '合成已知评论', sub_comment_has_more: false, sub_comment_count: 0 };
+  const parents = ['known-root', 'missing-root'].map(id => ({
+    id: `parent-${id}`, querySelector: () => ({ id, innerText: `合成评论 ${id}`,
+      querySelector: () => null, querySelectorAll: () => [], getAttribute: () => null }),
+    querySelectorAll: () => [],
+  }));
+  const scrollParent = { scrollTop: 0, clientHeight: 300, scrollHeight: 600, parentElement: null,
+    scrollBy({ top }) { this.scrollTop += top; loaded = true; },
+  };
+  const container = {
+    parentElement: scrollParent,
+    get innerText() { return `共 2 条评论${loaded ? ' - THE END -' : ''}`; },
+    getBoundingClientRect: () => ({ width: 300, height: 300 }),
+    querySelector: () => parents[0],
+    querySelectorAll(selector) {
+      if (selector === '.parent-comment') { domScans++; return parents.slice(0, loaded ? 2 : 1); }
+      return selector === '.parent-comment, .comment-item' ? parents.slice(0, loaded ? 2 : 1) : [];
+    },
+  };
+  globalThis.window = {
+    location: { href: 'https://www.xiaohongshu.com/explore/repeated-api', pathname: '/explore/repeated-api' },
+    innerHeight: 800, setTimeout, clearTimeout,
+    addEventListener(type, listener) { if (type === 'message') listeners.add(listener); },
+    removeEventListener(type, listener) { listeners.delete(listener); },
+    getComputedStyle: element => ({ display: 'block', visibility: 'visible', opacity: '1',
+      overflow: 'visible', overflowY: element === scrollParent ? 'scroll' : 'visible' }),
+    postMessage(message) {
+      const type = { __lgboom_xhs_comment_api_reset_request__: '__lgboom_xhs_comment_api_reset_response__',
+        __lgboom_xhs_page_fetch_request__: '__lgboom_xhs_page_fetch_response__',
+        __lgboom_xhs_comment_api_request__: '__lgboom_xhs_comment_api_response__' }[message.type];
+      if (!type) return;
+      if (message.type === '__lgboom_xhs_page_fetch_request__') fetches++;
+      queueMicrotask(() => listeners.forEach(listener => listener({ source: window, data: {
+        source: 'lgboom-xhs-api-capture', type, payload: { requestId: message.payload.requestId,
+          ok: true, reset: true, noteId: 'repeated-api',
+          pages: [{ noteId: 'repeated-api', comments: [root], hasMore: true, cursor: 'same-cursor' }], subPages: [],
+          json: { data: { comments: [root], has_more: true, cursor: 'same-cursor' } },
+        },
+      } })));
+    },
+  };
+  globalThis.document = { readyState: 'complete', body: { innerText: '' }, documentElement: container,
+    querySelector: () => null, querySelectorAll: selector => selector === '.comments-container' ? [container] : [] };
+  globalThis.chrome = { runtime: { getURL: () => '' } };
+  t.after(() => Object.assign(globalThis, saved));
+  const result = await collectComments({ noteId: 'repeated-api', observedNoteId: 'repeated-api',
+    persist: false, emitReceipt: false, executionPolicy: { minimumCooldownMs: 0 },
+    taskSpec: { commentMode: 'all_public', incrementalCommentBudget: { knownCommentIds: ['known-root'],
+      newUniqueLimit: 11, maxScrollRounds: 8, maxDurationSeconds: 180 } },
+  });
+  assert.deepEqual(result.comments.map(c => c.commentId), ['missing-root']);
+  assert.ok(domScans > 0);
+  assert.ok(fetches < 8, 'repeated API pages must hand over before the shared budget is exhausted');
+  assert.equal(result.collectionReceipt.state, 'complete');
+});

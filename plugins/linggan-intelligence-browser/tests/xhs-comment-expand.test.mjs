@@ -83,8 +83,10 @@ test('expandAllReplies recursively clicks newly revealed show-more buttons', asy
 test('expandNextReply performs only one click and checks pause boundaries around it', async () => {
   const events = [];
   let buttons = [];
+  let replies = [];
   const first = createExpandButton('展开 2 条回复', () => {
     events.push('click:first');
+    replies = [{ id: 'new-reply' }];
     buttons = buttons.filter((button) => button !== first);
   });
   buttons = [
@@ -94,7 +96,7 @@ test('expandNextReply performs only one click and checks pause boundaries around
   const parentCommentEl = {
     querySelectorAll(selector) {
       if (selector === 'div.show-more') return buttons;
-      if (selector === '.comment-item.comment-item-sub') return [];
+      if (selector === '.comment-item.comment-item-sub') return replies;
       return [];
     },
   };
@@ -277,4 +279,50 @@ test('expandAllReplies stops after one stubborn control instead of looping to it
   });
 
   assert.equal(clicks, 1);
+});
+
+
+test('replacing an equivalent expand control without replies is no progress', async () => {
+  let control;
+  const replacement = () => createExpandButton('展开更多回复', () => { control = replacement(); });
+  control = replacement();
+  const parent = { querySelectorAll: (selector) => selector === 'div.show-more' ? [control] : [] };
+  const result = await expandNextReply(parent, {
+    control, waitBeforeAction: async () => {}, waitAfterAction: async () => {},
+  });
+  assert.equal(result.acted, false);
+  assert.equal(result.reason, 'reply_expand_no_progress');
+});
+
+test('revealing an immovable offscreen control is no progress', async (t) => {
+  const saved = { window: globalThis.window, document: globalThis.document };
+  globalThis.window = { getComputedStyle: () => ({ overflow: 'visible', overflowY: 'visible' }) };
+  globalThis.document = { documentElement: { getBoundingClientRect: () => ({ top: 0, bottom: 100 }) } };
+  t.after(() => Object.assign(globalThis, saved));
+  let clicks = 0;
+  const control = { textContent: '展开更多回复', getBoundingClientRect: () => ({ top: 200, bottom: 220 }),
+    scrollIntoView() {}, click() { clicks++; } };
+  const parent = { querySelectorAll: (selector) => selector === 'div.show-more' ? [control] : [] };
+  const result = await expandNextReply(parent, {
+    control, waitBeforeAction: async () => {}, waitAfterAction: async () => {},
+  });
+  assert.equal(result.acted, false);
+  assert.equal(result.reason, 'reply_expand_no_progress');
+  assert.equal(clicks, 0);
+});
+
+
+test('stalled roots remain skipped after node replacement until their reply IDs change', () => {
+  let replies = [];
+  const parent = () => ({
+    querySelector: () => ({ id: 'stable-root' }),
+    querySelectorAll: selector => selector === 'div.show-more' ? [createExpandButton('展开更多回复')]
+      : selector === '.comment-item.comment-item-sub' ? replies : [],
+  });
+  const container = { querySelectorAll: () => [parent()] };
+  const first = findNextExpandableReplyTarget(container);
+  const stalledReplySurfaces = new Set([first.surfaceKey]);
+  assert.equal(findNextExpandableReplyTarget(container, { stalledReplySurfaces }), null);
+  replies = [{ id: 'late-reply' }];
+  assert.ok(findNextExpandableReplyTarget(container, { stalledReplySurfaces }));
 });
