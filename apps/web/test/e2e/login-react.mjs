@@ -19,7 +19,9 @@ try {
    const context = await browser.newContext({viewport:{width,height},reducedMotion:'reduce'});
    const page = await context.newPage(); page.on('pageerror',e=>report.errors.push(String(e)));
    await page.route('**/*',route=>{
-    const request=route.request();if(new URL(request.url()).origin!==origin || !['GET','HEAD'].includes(request.method())) {report.blocked.push({url:request.url(),method:request.method()});return route.abort();}return route.continue();
+    const request=route.request(), url=new URL(request.url());
+    const loginPost=request.method()==='POST' && url.origin===origin && url.pathname==='/api/local/auth/login';
+    if(url.origin!==origin || (!['GET','HEAD'].includes(request.method()) && !loginPost)) {report.blocked.push({url:request.url(),method:request.method()});return route.abort();}return route.continue();
    });
    await page.goto(origin+'/login'); await page.getByRole('heading',{name:'登录工作台',exact:true}).waitFor();
    await page.waitForFunction(()=>['still','mobile','fallback'].includes(document.getElementById('station-scene')?.dataset.status));
