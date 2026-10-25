@@ -28,7 +28,7 @@ cleanup() {
   task_exit=$?
   trap - EXIT
   cleanup_failed=0
-  [[ "${proof_database_created:-0}" -eq 0 ]] || docker exec "$proof_container" dropdb --if-exists -U "$proof_user" "$proof_database" || cleanup_failed=1
+  [[ "${proof_database_created:-0}" -eq 0 ]] || docker exec "$proof_container" dropdb --if-exists -h 127.0.0.1 -U "$proof_user" "$proof_database" || cleanup_failed=1
   [[ "${proof_container_created:-0}" -eq 0 ]] || docker rm -f "$proof_container" >/dev/null || cleanup_failed=1
   [[ "${proof_volume_created:-0}" -eq 0 ]] || docker volume rm "$proof_volume" >/dev/null || cleanup_failed=1
   [[ "$cleanup_failed" -eq 0 ]] || { echo "focused collection single run proof cleanup failed" >&2; exit 1; }
@@ -41,11 +41,13 @@ docker volume create "$proof_volume" >/dev/null
 proof_volume_created=1
 docker run -d --name "$proof_container" --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" --env POSTGRES_DB=postgres --env POSTGRES_USER="$proof_user" --env POSTGRES_PASSWORD="$proof_password" --publish 127.0.0.1::5432 "$postgres_image" >/dev/null
 proof_container_created=1
-for _ in {1..30}; do docker exec "$proof_container" pg_isready -U "$proof_user" -d postgres >/dev/null 2>&1 && break; sleep 1; done
-docker exec "$proof_container" pg_isready -U "$proof_user" -d postgres >/dev/null
+# The entrypoint's temporary initialization server accepts only Unix sockets and
+# then shuts down. Wait for the final TCP listener used by the proof connection.
+for _ in {1..30}; do docker exec "$proof_container" pg_isready -h 127.0.0.1 -U "$proof_user" -d postgres >/dev/null 2>&1 && break; sleep 1; done
+docker exec "$proof_container" pg_isready -h 127.0.0.1 -U "$proof_user" -d postgres >/dev/null
 proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:\([0-9][0-9]*\)$/\1/p')"
 [[ "$proof_port" =~ ^[0-9]+$ ]] || { echo "isolated proof PostgreSQL did not expose a safe local port" >&2; exit 1; }
-docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
+docker exec "$proof_container" createdb -h 127.0.0.1 -U "$proof_user" "$proof_database"
 proof_database_created=1
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 export COLLECTION_CONTROL_PROOF_DATABASE_URL="$LOCAL_001_PROOF_DATABASE_URL"
