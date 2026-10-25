@@ -1,14 +1,14 @@
 # COLLECTION-SINGLE-RUN-001 · 一次采集的持久范围与读取合同
 
 > 状态: 代码事实优先
-> 最后核对: 2026-10-13
+> 最后核对: 2026-10-23（up_to 增量）
 > 适用范围: Issue #398 / Draft PR #406 的单次采集候选；0125 migration、Rust、正式插件 0.8.61
 > 事实来源: Mog 完整交接授权；本分支 collection_run、原 Request/Admission/WorkOrder/Lease/Package/Receipt 与共享材料代码
 > 冲突时以谁为准: 用户最新授权、可执行合同和真实运行结果；本合同不代表合并、业务库迁移或发布
 
 ## 写入和所有权
 
-`POST /api/collection/runs` 接受 camelCase JSON：`idempotencyKey`、`domainRef`、`source`、`ranking`、`workLimit`、`commentMode`。source 为 temporary_keyword/query、observation_target/targetRef、selected_works/workRefs。只接受本次明确选择的 active 领域、XHS 的有效长期目标或该领域的精确材料 ID；作品上限 1–200，临时词 1–80 字符；创作者与精确作品无搜索排名，关键词排名使用现有五种枚举。
+`POST /api/collection/runs` 接受 camelCase JSON：`idempotencyKey`、`domainRef`、`source`、`ranking`、`workLimit`、`commentMode`，以及仅 `up_to` 必带的 `commentTarget`。source 为 temporary_keyword/query、observation_target/targetRef、selected_works/workRefs。只接受本次明确选择的 active 领域、XHS 的有效长期目标或该领域的精确材料 ID；作品上限 1–200，临时词 1–80 字符；创作者与精确作品无搜索排名，关键词排名使用现有五种枚举。
 
 相同幂等键和同一规范请求返回原 run；相同键不同意图返回 409。客户端未知写结果先读 `/api/collection/runs/requests/{idempotencyKey}`，再使用原身份重试，不自动创建第二次采集。当前 API 属于现有本地工作台的访问边界，未新增外部超级用户接口。
 
@@ -24,16 +24,17 @@
 
 每次 worker 推进只处理有界数量的 run/作品；原队列、工位并发、账号限制、授权、节奏和资源准入继续有效。暂未准入保留真实请求/决定，最多每分钟重试缺少工单的相同阶段；已准入阶段不重复创建。
 
-## 两种评论模式
+## 评论模式
 
 | 模式 | 用户范围 | 分段/恢复 |
 | --- | --- | --- |
 | sample_30 | 每篇最多 30 条唯一总记录，含回复；每主评论最多 2 回复 | 首段为原标准窗口；部分交付后扣除本轮原始稳定 ID，续段只派剩余额度，并带 knownReplyCounts 保留跨段每主评论回复额度 |
 | all_public | 尽量遍历本轮可访问主评论及回复，保留开始/结束与缺口 | newUniqueLimit=30 为一次执行的有界新增额度，maxScrollRounds/maxDurationSeconds 是执行预算；不是采全目标上限，没有每主评论 2 回复或总 30 上限 |
+| up_to（2026-10-23 新增，`commentTarget` 1–1000） | 每篇采到 `commentTarget` 条不重复记录（含回复）就停；评论区先走到尽头也结束 | 与 all_public 同一遍历（TaskSpec 对插件仍写 `all_public`，原意图另记 `commentTarget`），每段 `newUniqueLimit=min(30, 目标−本轮已接纳稳定 ID)`；本轮已接纳稳定 ID 达到目标即完成，否则按 all_public 的遍历判据收尾。只有它带 `commentTarget`，其余范围带了即 422；请求未带该字段时指纹与旧请求逐字节一致 |
 
 `collectionRunRef`、`commentMode` 和可选 `incrementalCommentBudget` 贯穿工单、TaskSpec、页面计划、采集器和回执。detail-only 0 表示不要求评论；all_public 由明确模式表示，绝不用 0 或超大整数替代目标。knownCommentIds 来自本轮原始接纳包，包含清洗掉的记录，避免为凑 30 条有效文本另采。knownReplyCounts 只允许单次标准模式，根 ID 有界、数值 0–2。
 
-插件宣告 `collection.single_run.v1`；深采另需 `collection.all_public.v1`。未支持的旧插件保持等待，不认领新合同、不悄悄降为采样。旧任务不带新字段时继续原 v1/v2 校验、outbox 和回执路径。
+插件宣告 `collection.single_run.v1`；深采（all_public 与 up_to）另需 `collection.all_public.v1`。未支持的旧插件保持等待，不认领新合同、不悄悄降为采样。旧任务不带新字段时继续原 v1/v2 校验、outbox 和回执路径。
 
 新的 all_public 完成回执必须具有 mainExhausted、repliesExhausted、identityReliable 的真实遍历依据。显示计数达到、no_progress 或主评论到底不能单独证明整篇采全。回复关系/稳定身份不足保留未知或部分；连续三段无新稳定 ID 后保留可说明的缺口，不无限自动重试。风控/访问受限停止受影响执行，不切换账号规避；一篇失败不连坐其他合格材料。
 
@@ -67,3 +68,7 @@
 0125 已接在 main 0124 后，登记 local-runtime 与两个完整 schema fixture/hash。包含新增表/视图、用途约束/触发器、首接纳索引和历史 identity 回填；没有业务库执行授权。生产应用前需估计历史评论回填和索引/DDL 锁时间，保留旧版本 outbox，做备份与恢复预案。
 
 发布顺序：独立复审与合并授权 → 经另行授权应用数据库增量 → 发布同版本 API/worker → 按工位单独授权加载 0.8.61 候选并验证能力/账号 → 若另获授权才做平台小样本。旧插件可继续旧任务，新单次保持等待；候选 ZIP 可复现只证明包一致，不证明已安装或真实平台覆盖。
+
+### 推进窗口公平性（PR #486 审查修正）
+
+API 每 15 秒的推进每次至多检查 20 次单次采集，按独立的 `last_advanced_at` 轮转，尚未检查的优先；等待工位的旧任务不长期占满窗口。该调度时间使用真实时钟，独立于业务 `updated_at` 与准入重试时钟，不改变冻结意图或平台观察时间。

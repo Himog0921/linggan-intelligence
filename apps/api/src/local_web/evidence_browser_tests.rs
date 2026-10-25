@@ -56,7 +56,8 @@ fn writes(report: &Value) -> Vec<Write> {
 }
 
 /// 浏览器真实链路：打开与外壳 → 未选领域 → 三种排版与续读 → 检索与筛选 → 阅读主序 → 媒体与查看器 → 评论 →
-/// 研究底稿（预览、导出、重新分层、批量弹窗）→ 立即复观测 → 入站链接 → 评论深采交接 → 存储 → 四个视口 → 负例。
+/// 研究底稿（预览、导出、重新分层、批量弹窗）→ 立即复观测 → 评论深采 → 入站链接 → 评论深采交接 → 存储 →
+/// 四个视口 → 负例。
 // 多线程：浏览器子进程运行期间，服务器任务必须能在其他线程上继续响应。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL + built apps/web/dist + Node/Chromium; run by scripts/test-web-app-postgres.sh"]
@@ -157,14 +158,47 @@ async fn evidence_page_real_chain_browser_proof() {
         .iter()
         .filter(|write| write.path.ends_with("/relayer"))
         .count();
+    let runs = writes
+        .iter()
+        .filter(|write| write.path == "/api/collection/runs")
+        .count();
     assert_eq!(
-        reobserve + relayer,
+        reobserve + relayer + runs,
         writes.len(),
-        "页面只有两类写请求：立即复观测与重新分层"
+        "页面只有三类写请求：立即复观测、重新分层与评论深采"
     );
     assert!(writes.iter().all(|write| write.status == 200));
-    // 脚本里的写动作是固定的：复观测两次（先建工单，再合并）；重新分层五次（底稿里两次、批量弹窗里三篇）。
-    assert_eq!((reobserve, relayer), (2, 5));
+    // 脚本里的写动作是固定的：复观测两次（先建工单，再合并）；重新分层五次（底稿里两次、批量弹窗里三篇）；
+    // 评论深采两次（富作品尽量采全、视频作品指定 40 条）。
+    assert_eq!((reobserve, relayer, runs), (2, 5, 2));
+    // 评论深采与采集页同一条合同：每次一个只含该作品的单次采集（富作品尽量采全；视频作品采到 40 条就停）。
+    // 建立时只冻结范围，采集请求、工单与租约要等调度推进才形成，所以下面的计数不受它影响。
+    let runs: Vec<(Uuid, String, Option<i32>, String, i32)> = sqlx::query_as(
+        "SELECT w.content_public_ref,r.comment_mode,r.comment_target,r.source_kind,r.work_limit \
+         FROM collection_run r JOIN collection_run_work w USING(run_ref) ORDER BY r.comment_mode",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        runs,
+        vec![
+            (
+                data.rich,
+                "all_public".to_owned(),
+                None,
+                "selected_works".to_owned(),
+                1
+            ),
+            (
+                data.video,
+                "up_to".to_owned(),
+                Some(40),
+                "selected_works".to_owned(),
+                1
+            ),
+        ]
+    );
     let after = effects(&db).await;
     let reobserved = reobserve as i64;
     assert_eq!(

@@ -49,12 +49,16 @@ describe('页面源码的敏感面', () => {
     expect(offenders(/api\/local\/evidence-library\/legacy|api\/local\/cross-industry|crossIndustry|ACK 完整/)).toEqual([]);
   });
 
-  it('只写三类本机存储键：检查器宽度偏好、评论深采交接、批量整理断点；评论与作品内容不进存储', () => {
+  it('只写四类本机存储键：检查器宽度偏好、评论深采交接与请求身份、批量整理断点；评论与作品内容不进存储', () => {
     const keys = sources.flatMap(({ file, code }) => [...code.matchAll(/(?:localStorage|sessionStorage)\.(?:setItem|getItem|removeItem)\(\s*([^,)]+)/g)].map(match => `${file}:${match[1]?.trim()}`));
     expect(keys.sort()).toEqual(
       [
         'batchStore.ts:BATCH_KEY',
         'batchStore.ts:BATCH_KEY',
+        'commentDeepRequests.ts:PREFIX + key',
+        'commentDeepRequests.ts:PREFIX + key',
+        'commentDeepRequests.ts:PREFIX + key',
+        'commentDeepRequests.ts:key',
         'usePanelWidthPreference.ts:STORAGE_KEY',
         'usePanelWidthPreference.ts:STORAGE_KEY',
         'useCollectionSelection.ts:selectionKey(domain',

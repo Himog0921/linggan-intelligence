@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { CommentDeepCollect } from './CommentDeepCollect';
 import { DossierPanel } from './DossierPanel';
 import { EvidencePanel } from './EvidencePanel';
 import { Lightbox } from './Lightbox';
@@ -8,6 +9,7 @@ import { AuthorFact, Engagement, MaterialLegend, MaterialRail } from './WorkPart
 import { Section } from './Primitives';
 import { materialSummary, publishedCopy } from './evidencePresent';
 import { MaterialsPanel } from './MaterialsPanel';
+import { ObservationHistory } from './ObservationHistory';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
 import { TracePanel } from './TracePanel';
@@ -120,15 +122,22 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
           <EvidencePanel context={context} />
         </details>
       </Panel>
+      {/* 采集记录（Mog 2026-10-23）：先答「看过几次、数字怎么变、要不要再看、评论要不要采全」；
+          材料完整度、媒体台账、来源编号与技术事实一项不删，统一收进默认折叠的「技术信息」。 */}
       <Panel id="trace" active={tab === 'trace'}>
-        <Section title="材料完整度">
-          <MaterialRail summary={materialSummary(item)} />
-          <MaterialLegend summary={materialSummary(item)} />
-        </Section>
+        <ObservationHistory item={item} inspector={inspector} />
         <ReobservationSection item={item} channel={channels.reobservation} domain={domain} state={reobservation} onRecheck={recheck} />
-        <MaterialsPanel context={context} />
-        <TracePanel context={context} />
-        <TechnicalFacts item={item} inspector={inspector} />
+        <CommentDeepCollect item={item} inspector={inspector} domain={domain} />
+        <details className={styles.technical}>
+          <summary>技术信息（排查用）</summary>
+          <Section title="材料完整度">
+            <MaterialRail summary={materialSummary(item)} />
+            <MaterialLegend summary={materialSummary(item)} />
+          </Section>
+          <MaterialsPanel context={context} />
+          <TracePanel context={context} />
+          <TechnicalFacts item={item} inspector={inspector} reobservation={channels.reobservation} />
+        </details>
       </Panel>
       {viewer ? <Lightbox objects={viewer.objects} index={viewer.index} onIndex={index => setViewer({ ...viewer, index })} onClose={() => setViewer(null)} /> : null}
     </>

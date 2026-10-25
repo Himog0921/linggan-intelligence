@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
-import { discoveryLabel, moment, runStatus, sourceLabel, type Run } from './tasksApi';
+import { commentModeLabel, discoveryLabel, moment, runStatus, sourceLabel, type Run } from './tasksApi';
 import styles from './RunLedger.module.css';
 
 const fields = [
@@ -24,7 +24,7 @@ function value(run: Run, field: Field): string {
     case 'domain': return run.domain_name;
     case 'source': return sourceLabel(run.source_kind);
     case 'scope': return `${run.scope_frozen_at || run.legacy ? count(run.selected_works) : '—'} / ≤${run.work_limit}`;
-    case 'mode': return run.legacy ? '按原工单范围' : run.comment_mode === 'all_public' ? '尽量采全，含回复' : '每篇最多30条总样本';
+    case 'mode': return run.legacy ? '按原工单范围' : commentModeLabel(run, '每篇最多30条总样本');
     case 'rank': return '—'; // The current read contract does not project a ranking.
     case 'details': return count(run.available_details);
     case 'comments': return count(run.delivered_comments);

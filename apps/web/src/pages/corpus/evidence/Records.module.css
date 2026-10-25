@@ -1,0 +1,188 @@
+/* 「采集记录」标签（Mog 2026-10-23）：观察记录表、复观测、评论深采。只消费 LIDS --lgi-* Token。 */
+
+.lead {
+  margin: 0 0 var(--lgi-space-3);
+  color: var(--lgi-ink);
+  font: var(--lgi-type-body-weight) var(--lgi-type-body-size) / var(--lgi-type-body-leading) var(--lgi-font-ui);
+}
+
+/* ── 观察记录表：时间与来源一列，四个数字各一列；数字右对齐、等宽。窄宽度只让表格自己横向滚动。 ── */
+.tableWrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.observations {
+  width: 100%;
+  border-collapse: collapse;
+  border-top: 1px solid var(--lgi-ink);
+  font: var(--lgi-type-data-weight) var(--lgi-type-data-size) / var(--lgi-type-data-leading) var(--lgi-font-ui);
+}
+
+.observations th,
+.observations td {
+  border-bottom: 1px solid var(--lgi-hairline);
+  padding: var(--lgi-space-2);
+  vertical-align: top;
+}
+
+.observations thead th {
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.observations thead th:first-child,
+.observations tbody th {
+  padding-left: 0;
+  text-align: left;
+}
+
+.observations tbody th {
+  font-weight: var(--lgi-weight-regular);
+}
+
+.observations td {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.when,
+.value {
+  display: block;
+  color: var(--lgi-ink);
+  font-family: var(--lgi-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.how {
+  display: block;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+}
+
+.delta {
+  display: block;
+  color: var(--lgi-ink);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.delta[data-trend='flat'] {
+  color: var(--lgi-ghost);
+}
+
+/* ── 评论深采 ─────────────────────────────── */
+.history {
+  display: grid;
+  gap: var(--lgi-space-1);
+  margin: 0 0 var(--lgi-space-3);
+  padding: 0;
+  list-style: none;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-data-weight) var(--lgi-type-data-size) / var(--lgi-type-data-leading) var(--lgi-font-ui);
+}
+
+.more {
+  color: var(--lgi-ghost);
+}
+
+.scope {
+  margin: 0 0 var(--lgi-space-2);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-data);
+  line-height: var(--lgi-lh-longform);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-3);
+}
+
+.runProgress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-2) var(--lgi-space-3);
+  margin-top: var(--lgi-space-3);
+  border: 1px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  background: var(--lgi-canvas-low);
+  font-size: var(--lgi-text-data);
+}
+
+.runActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-3);
+}
+
+/* 评论深采范围：两个单选与条数输入。控件沿用页面原生表单的字体与焦点。 */
+.modes {
+  display: grid;
+  gap: var(--lgi-space-2);
+  margin: 0 0 var(--lgi-space-3);
+  border: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.mode {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: var(--lgi-space-2);
+  align-items: baseline;
+  cursor: pointer;
+  font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui);
+}
+
+.mode small {
+  grid-column: 2;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+}
+
+.modes:disabled .mode {
+  cursor: not-allowed;
+  color: var(--lgi-ghost);
+}
+
+.target {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  margin-left: var(--lgi-space-6);
+  font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui);
+}
+
+.target input {
+  box-sizing: border-box;
+  width: calc(var(--lgi-space-16) + var(--lgi-space-8));
+  border: 1px solid var(--lgi-border-strong);
+  padding: var(--lgi-space-1) var(--lgi-space-2);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: inherit;
+  font-family: var(--lgi-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.target input:focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: 2px;
+}
+
+.target input[aria-invalid='true'] {
+  border-color: var(--lgi-danger);
+}
+
+.target small {
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+}

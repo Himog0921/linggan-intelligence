@@ -468,6 +468,7 @@ migrate() {
   apply_migration_once "0147_comment_study_full_context" "$project_root/database/migrations/0147_comment_study_full_context.sql"
   apply_migration_once "0148_dossier_consumer_contracts" "$project_root/database/migrations/0148_dossier_consumer_contracts.sql"
   apply_migration_once "0149_target_inspector_comparison" "$project_root/database/migrations/0149_target_inspector_comparison.sql"
+  apply_migration_once "0150_collection_run_comment_target" "$project_root/database/migrations/0150_collection_run_comment_target.sql"
   apply_migration_once "0151_ops_team_auth" "$project_root/database/migrations/0151_ops_team_auth.sql"
   apply_migration_once "0152_ops_team_responsibility" "$project_root/database/migrations/0152_ops_team_responsibility.sql"
   apply_migration_once "0153_ops_first_admin_bootstrap" "$project_root/database/migrations/0153_ops_first_admin_bootstrap.sql"

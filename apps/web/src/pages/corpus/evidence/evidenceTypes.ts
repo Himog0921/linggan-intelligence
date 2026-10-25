@@ -201,6 +201,8 @@ export interface MediaSlot {
   hasHandle: boolean;
   deliveryState: string | null;
   mime: string;
+  /** 本地字节的内容指纹（64 位十六进制）；没有取得字节或形状不对是 null。同一指纹就是同一份文件。 */
+  blobSha256: string | null;
   materializationRef: string | null;
   replicaState: string | null;
   displayOrderState: string | null;

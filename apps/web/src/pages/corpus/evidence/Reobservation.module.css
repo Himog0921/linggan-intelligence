@@ -1,4 +1,4 @@
-/* 立即复观测：范围说明、动作、回执与执行状态。只消费 LIDS --lgi-* Token。 */
+/* 复观测：范围说明、动作、回执与执行状态。只消费 LIDS --lgi-* Token。 */
 
 .scope {
   margin: 0 0 var(--lgi-space-2);
@@ -12,11 +12,6 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--lgi-space-3);
-}
-
-.policy {
-  color: var(--lgi-ghost);
-  font-size: var(--lgi-text-label);
 }
 
 .operation {
