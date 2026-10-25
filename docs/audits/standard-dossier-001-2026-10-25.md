@@ -1,7 +1,7 @@
 # STANDARD-DOSSIER-001 实施、系统测试与问题报告
 
 > 状态: 一次性报告
-> 候选阶段: 自测通过，独立审查待开始
+> 候选阶段: 实施与独立增量复核通过；主线集成验证通过，远端 CI 见同分支 PR 实际回执
 > 最后核对: 2026-10-25（Asia/Shanghai）
 > 适用范围: 统一研究底稿实施包；候选不等于主线或3000部署
 > 事实来源: Mog 当前指令、实施手册、实际源码与本包隔离运行回执
@@ -11,7 +11,7 @@
 
 base / origin/main / 3000 起始均为 `df6dde9e87a6b72c4eeba5b84bd29043ae61d405`。API PID64924，cwd/executable 位于 canonical runtime-main，health ready；patrol/media/ai-executor disabled。共享checkout停留旧分支且210项既有修改，未改动。本包工作树 `.worktrees/standard-dossier-001`，分支 `codex/standard-dossier-001`。Claim及包内所有权见当月progress。
 
-实施授权包含包内测试、一次独立审查及问题修复；新的模型外发单独确认。没有针对本包最终head的合并/部署授权，候选完成后一次提交确认。生产不回填、不迁移、不启用worker；所有PG写入在自有一次性容器/数据库。媒体验证用合成视频和保存结果回放，未将合成文字冒称真实识别输出。
+实施授权包含包内测试、一次独立审查及问题修复；新的模型外发单独确认。没有针对本包最终head的合并/部署授权，候选完成后一次提交确认。本包没有执行生产回填、迁移或启用worker；所有PG写入在自有一次性容器/数据库。媒体验证用合成视频和保存结果回放，未将合成文字冒称真实识别输出。
 
 ## 实施结果
 
@@ -35,13 +35,15 @@ base / origin/main / 3000 起始均为 `df6dde9e87a6b72c4eeba5b84bd29043ae61d405
 | T09 | 日常机器发布、显式云预览、人工优先、CAS/请求幂等 | 既有PG通过，local daily worker新增已通过 |
 | T10 | native原文与本地layout准备两次，第二次不复制、不新识别 | 隔离PG通过 |
 | T11 | 研究期间更新后精确历史不变、两图/区块选择不夹未选材料 | 组装/PG通过 |
-| T12 | 同一真实HTTP入口按37块遍历463块，新正文未混入旧asOf | 5个HTTP测试通过 |
+| T12 | 同一真实HTTP入口按38块遍历463块（456正文+1标签+6图片），覆盖正文与补充的交界，新正文未混入旧asOf | 5个HTTP测试通过 |
 | T13 | 真实共享输入和末端适配检查；作者/主题fragments、评论context_sources、工作台、离线输入 | 已通过 |
 | T14 | React→Axum→一次性PG；刷新/切换/原件/采用/结构化编辑/保留当前/导出；1440、1280、390 | 实际浏览器及视觉增量通过 |
 
-最终原生100%浏览器证据目录为 `browser-frontend-focused/`。22次宽度/指标几何检查、三次真实修正命令通过，pageErrors/consoleErrors/blockedRequests均为空；新增聚焦图显示视频补充画面、失败材料及实际加载原图，内容避开sticky页头。
+原生100%浏览器第一轮 `browser-frontend-focused/` 的22次几何检查、三次真实修正命令通过。审查修复后 `browser-reviewed/` 通过26次宽度/指标几何检查与三次修正命令，pageErrors/consoleErrors/blockedRequests均为空；视频为1主文块+3补充块。聚焦图展示视频补充、失败材料与实际加载原图，内容避开sticky页头。随后主线集成候选的最终截图目录为 `browser-integrated/`，26次几何检查和3次修正通过、三类浏览器错误均为空；运行版本与URL/dataSource由该目录fixture及evidence-receipt记录。
 
-原生100%浏览器截图五组：`standard-dossier-1-*`无正文多图，2有正文与图片补充，3视频，4部分失败，5无文字原件。每组1440与1280；fixture.json/report.json记录随机候选URL、作品/域和数据来源。合成回放不证明真实OCR/ASR质量；本机ffmpeg实际生成MP4并提取WAV和首帧，ffprobe证据为local-media-proof.json。当前PATH无whisper命令，未运行真实ASR；不使用mock声称通过。
+原生100%浏览器截图五组：`standard-dossier-1-*`无正文多图，2有正文与图片补充，3视频，4部分失败，5无文字原件。每组1440与1280；fixture.json/report.json记录随机候选URL、作品/域和数据来源。额外两组优先重用本机保存材料：6为N25无正文四图（46主文块），7为N20有正文三图（1主文+31补充块）。原图字节通过3000已有本地原件GET读取，sha256核对；OCR块来自本地已保存的显式预览结果，复制到一次性数据库作为离线回放，**没有采用到生产当前读本**。真实材料和合成场景都连接实际React→Axum→隔离PG，无响应mock。私有manifest/原图/输出不进Git；带私有manifest的GitHub Actions执行被拒绝。
+
+这些回放不证明新识别质量；本机ffmpeg实际生成MP4并提取WAV和首帧，ffprobe证据为local-media-proof.json。当前PATH无whisper命令，未运行真实ASR；不使用mock声称通过。
 
 ## 问题与修复
 
@@ -50,6 +52,9 @@ base / origin/main / 3000 起始均为 `df6dde9e87a6b72c4eeba5b84bd29043ae61d405
 | 无平台标题的列表/检查器 | 列表请求panic，底稿无法从实际页面打开 | 原末端强制取layout_ref，canonical阅读来源不一定有layout | 取可空layout来源并保留unit/reading引用 | 首次browser-pg.log失败，browser-pg-fixed.log整链通过 | 已修复 |
 | ASR无输出 | 诊断占位语进入“正文” | complete_without_output写gap假文字 | 空blocks+实际状态，无语音与无音轨分开 | 真实PG边界通过 | 已修复 |
 | 部分可读 | 离线入口按整篇ready/列状态拒绝已有块 | 完整性与可读性混用 | 保留coverage，使用已有合格fragment | 纯函数与真实共享输入通过 | 已修复 |
+| 全gap识别结果（独立审查P2） | 诊断占位被算作可用原文 | 非空字符串代替来源文字资格 | 共享has_source_text、全gap内部fragments为空，公开诊断/原件保留，混合文字保留 | 离线22测试、共享消费者PG的gap-only用例及前端24测试 | 已修复 |
+| 视频主文（独立审查P2） | 封面和口播同时进入主文 | 无正文时无条件提升图片 | 有可读口播/画面时封面归补充，正文图片独立保留，封面单独可用时可作主文 | 12组装、9底稿PG、视频浏览器1+3引用 | 已修复 |
+| 连续分段（独立审查P2） | 续段只有标签+图片时改变原顺序 | segment调用selection后重新提升补充 | 过滤冻结分区及有序引用，显式selection仍重建 | 实际HTTP 463块连续遍历，size38跨正文/补充边界 | 已修复 |
 | 1280列表/普通机器阅读 | 未知指标折行截断；未知角色标语反复打断正文 | flex-shrink及共用块默认角色标签 | 前端定向修正 | 第一轮截图已保留 | 已修复 |
 
 初始测试中旧“缺持久读本则正文不可读”断言按已确认目标更新；离线列聚合限制不再连坐合格块。默认系统runner的旧评论筛选名已改为实际测试名，零测试guard保留；全新工作树AI证明缺证据父目录已补mkdir。初次OCR audit缺少固定SDK依赖导致probe未发送，按lock安装后实际loopback验证通过，不改真实供应商合同。
@@ -62,4 +67,8 @@ base / origin/main / 3000 起始均为 `df6dde9e87a6b72c4eeba5b84bd29043ae61d405
 
 自测通过：Evidence纯函数133通过/2忽略；Intelligence lib357通过/5忽略与离线输入21通过；完整Web116文件/1270测试（随后无音轨/无语音增量20测试）及类型/lint/生产构建通过；canonical-inputs、all-shared-consumers、daily-worker、ocr-audit-retest、saved-topic-inputs-retest全部通过，具体命令及逐项结果见私有日志。预检通过。完整Web之后的UI状态增量由定向测试和最终浏览器构建验证。
 
-自测完成后交一个独立只读代理审查具体提交，修成立问题，仅复核受影响增量。最终提交、PR、实际CI结果将补在本节。主线与3000未由本包改动，Mog前端业务验收待定。
+独立只读审查初始实现提交 `ff1cbf2ae50e255ac2d0d2aaca5dbbee5b9a7fec`，发现上述3项P2；修复提交 `38b636d245d482c98337ca4de2a36222b5f36a31`。原审阅者只复核受影响增量，结论PASS，3项均关闭、无新增阻断。复核日志的实际成功数：组装12、离线22、canonical-inputs28、shared-consumers30（前次口头31已按逐条日志求和校正），隔离资源清理验证通过；前端gap修复2文件24测试及类型/lint通过。
+
+收尾时主线及3000已由另一工作包推进到 `34e7084019485aa563d8e41353689445ef3cb8b4`（PR #494累计评论数），不是本包发布。本包合入该主线形成 `d6abf272a0e1e73b225743393889d23f29a4c4be`；仅页面规格末尾追加发生冲突，保留双方原意，没有覆盖累计数代码。主线集成后typecheck与3文件43测试通过；浏览器重新构建验证。后续仅报告/状态记录改变时不重复全仓审查，最终head与远端CI以PR实际回执为准。
+
+本报告不把候选截图标成3000。主线与3000尚不包含本包；无本包最终head的发布授权，Mog前端业务验收与合并部署待定。生产历史整理范围也仍待确认：既有平台原文/合格本地layout，排除显式云预览，无新识别。没有新模型外发、更换引擎或追加审核体系。
