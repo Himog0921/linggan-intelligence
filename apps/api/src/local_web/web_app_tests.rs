@@ -2,6 +2,7 @@
 //! 以及一条在隔离 PostgreSQL 上用真实浏览器走完设置页的证明（默认忽略）。
 use super::web_app::{WebAppConfig, routes_for, test_support};
 use super::*;
+use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
 use axum::{
     body::{Body, to_bytes},
     http::{HeaderMap, Request, StatusCode, header},
@@ -565,6 +566,24 @@ async fn settings_page_real_chain_browser_proof() {
     )
     .await
     .expect("migrations apply");
+    let login_password = "synthetic-settings-browser-password";
+    let password_hash = Argon2::default()
+        .hash_password(
+            login_password.as_bytes(),
+            &SaltString::encode_b64(b"settings-browser-proof-salt").unwrap(),
+        )
+        .unwrap()
+        .to_string();
+    sqlx::query(
+        "INSERT INTO linggan_ops_member \\
+         (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) \\
+         VALUES($1,'settings-browser@example.test','设置页合成运营','operator','active',$2,scope_001_now())",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(password_hash)
+    .execute(database.pool())
+    .await
+    .unwrap();
     let application = router(LocalWebState {
         database: LocalDatabaseState::Ready(Arc::new(database.clone())),
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
@@ -595,6 +614,8 @@ async fn settings_page_real_chain_browser_proof() {
                 .arg(login)
                 .env("WEB_LOGIN_CANDIDATE", &origin)
                 .env("WEB_LOGIN_PROOF_DIR", FsPath::new(&directory).join("login"))
+                .env("WEB_LOGIN_EMAIL", "settings-browser@example.test")
+                .env("WEB_LOGIN_PASSWORD", login_password)
                 .env_remove("WEB_LOGIN_BASELINE")
                 .status()
                 .unwrap(),
