@@ -199,6 +199,20 @@ pub async fn deliver_work_segment(
         .unwrap()
         .to_owned();
     deliver(db,install,&detail,"content_detail",vec![json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":note},"payload":{"noteId":note,"title":"合成详情","bodyText":if start>0{"后来深采详情词"}else{"合成详情先交付，与慢评论独立。"},"authorId":"syntheticauthor","authorName":"合成作者"}})],json!({"basis":"known_set","contentExternalId":note})).await;
+    // The detail lane can complete before the in-page comment traversal finishes.
+    // Its held lease remains a valid control binding until all lanes are terminal.
+    let detail_task = serde_json::from_value(detail["taskId"].clone()).unwrap();
+    assert_eq!(
+        linggan_evidence::probe_collection_run_control(
+            db,
+            &install.to_string(),
+            credential,
+            detail_task,
+        )
+        .await
+        .unwrap()["mayAct"],
+        true
+    );
     let comments = next_discussion(db, install, credential).await;
     assert_eq!(comments["capabilitiesRequested"][0], "comments");
     if deep {
@@ -1727,4 +1741,97 @@ async fn waiting_runs_rotate_without_resetting_admission_retry_time() {
         before, after,
         "round-robin checks must not reset admission backoff"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL harness"]
+async fn control_probe_waits_for_serialization_and_rechecks_authority_after_waiting() {
+    use linggan_evidence::{CollectionControlError, probe_collection_run_control};
+    use std::time::Duration;
+
+    for scenario in ["running", "paused", "expired", "revoked"] {
+        let db = fixture::proof_database(&format!("run_control_wait_{scenario}")).await;
+        let domain_ref = domain(&db).await;
+        let (install, credential) = station(&db).await;
+        let created = create_run(
+            &db,
+            &CreateRun {
+                idempotency_key: Uuid::new_v4(),
+                domain_ref,
+                source: RunSource::TemporaryKeyword {
+                    query: "合成探针并发".into(),
+                },
+                ranking: None,
+                work_limit: 1,
+                comment_mode: CommentMode::AllPublic,
+                comment_target: None,
+            },
+        )
+        .await
+        .unwrap();
+        let run: Uuid = serde_json::from_value(created["runRef"].clone()).unwrap();
+        let spec = next(&db, install, &credential).await;
+        let task: Uuid = serde_json::from_value(spec["taskId"].clone()).unwrap();
+        let mut holder = db.pool().begin().await.unwrap();
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,400))")
+            .bind(run.to_string())
+            .execute(&mut *holder)
+            .await
+            .unwrap();
+        let install_key = install.to_string();
+        let probe = probe_collection_run_control(&db, &install_key, &credential, task);
+        tokio::pin!(probe);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut probe)
+                .await
+                .is_err(),
+            "normal serialization contention must wait, not manufacture a stop: {scenario}"
+        );
+
+        // Commit a concurrent authority change while the probe waits for the run lock.
+        // It must use the post-wait authority, never the initially held lease or credential.
+        match scenario {
+            "paused" => {
+                sqlx::query("UPDATE collection_run SET control_intent='paused',revision=revision+1 WHERE run_ref=$1")
+                    .bind(run).execute(&mut *holder).await.unwrap();
+            }
+            "expired" => {
+                sqlx::query("UPDATE collection_work_order_lease SET expires_at=issued_at+interval '1 microsecond' WHERE lease_ref=(SELECT lease_ref FROM collection_work_order_lease_task WHERE task_id=$1)")
+                    .bind(task).execute(&mut *holder).await.unwrap();
+            }
+            "revoked" => {
+                sqlx::query("UPDATE installation_credential SET revoked_at=scope_001_now(),revoke_reason_code='person_revoked' WHERE installation_ref=$1 AND revoked_at IS NULL")
+                    .bind(install).execute(&mut *holder).await.unwrap();
+            }
+            _ => {}
+        }
+        holder.commit().await.unwrap();
+        let outcome = tokio::time::timeout(Duration::from_secs(3), &mut probe)
+            .await
+            .unwrap();
+        match scenario {
+            "running" => {
+                let result = outcome.unwrap();
+                assert_eq!(result["mayAct"], true);
+                assert!(result["reasonCode"].is_null());
+                let row = read_run(&db, run, domain_ref).await.unwrap();
+                assert_eq!(row["control_intent"], "running");
+                assert_eq!(row["revision"], 1);
+            }
+            "paused" => {
+                let result = outcome.unwrap();
+                assert_eq!(result["mayAct"], false);
+                assert_eq!(result["reasonCode"], "collection_run_paused");
+            }
+            "expired" => assert!(matches!(
+                outcome,
+                Err(CollectionControlError::ClaimedTaskNotHeld)
+            )),
+            "revoked" => assert!(matches!(
+                outcome,
+                Err(CollectionControlError::InvalidCredential)
+            )),
+            _ => unreachable!(),
+        }
+    }
 }
