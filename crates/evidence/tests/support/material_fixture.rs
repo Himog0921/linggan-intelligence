@@ -463,18 +463,20 @@ pub async fn proof_database_with_ops_ledger(schema: &str) -> Database {
     let (before_content_workbench, after_content_workbench) = MIGRATIONS
         .split_once(first_post_workbench_migration)
         .expect("material fixture retains the 0129 migration boundary");
+    let first_ocr_adoption = include_str!("../../../../database/migrations/0142_ocr_adoption.sql");
+    let (before_ocr_adoption, from_ocr_adoption) = after_content_workbench
+        .split_once(first_ocr_adoption)
+        .expect("material fixture retains the 0142 migration boundary");
     let migrations = [
         before_content_workbench,
         include_str!("../../../../database/migrations/0127_content_workbench.sql"),
         include_str!("../../../../database/migrations/0128_content_workbench_ai.sql"),
         first_post_workbench_migration,
-        after_content_workbench,
+        before_ocr_adoption,
         include_str!("../../../../database/migrations/0140_ai_gen1_writing.sql"),
         include_str!("../../../../database/migrations/0141_ai_gen1_legacy_settings.sql"),
-        include_str!("../../../../database/migrations/0142_ocr_adoption.sql"),
-        include_str!("../../../../database/migrations/0143_ocr_quality_audit.sql"),
-        include_str!("../../../../database/migrations/0144_ocr_manual_recognition.sql"),
-        include_str!("../../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
+        first_ocr_adoption,
+        from_ocr_adoption,
         include_str!("../../../../database/migrations/0151_ops_team_auth.sql"),
         include_str!("../../../../database/migrations/0152_ops_team_responsibility.sql"),
         include_str!("../../../../database/migrations/0153_ops_first_admin_bootstrap.sql"),

@@ -558,7 +558,14 @@ async fn insert_content_records(
         insert_content_detail(tx, package, ordinal, detail, content_public_ref).await?;
         retained += 1;
     }
-    insert_lane_observation(tx, package, "detail", content_public_ref, None, retained).await
+    // A valid detail receipt can have no record that qualifies for the library.  It must retain
+    // the receipt without fabricating a content identity or a `detail` lane row, whose invariant
+    // requires a concrete content reference.
+    if let Some(content_public_ref) = content_public_ref {
+        insert_lane_observation(tx, package, "detail", Some(content_public_ref), None, retained)
+            .await?;
+    }
+    Ok(())
 }
 
 /// Persist the narrow Ops-publication to Material link after a Receipt exists.
