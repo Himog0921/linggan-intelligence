@@ -84,7 +84,7 @@ impl Input {
             .material
             .fragments
             .iter()
-            .any(|f| !f.text.trim().is_empty())
+            .any(|f| linggan_evidence::research_dossier::content::has_source_text(&f.structure))
         {
             return Err(Invalid("offline_material_no_readable_text"));
         }

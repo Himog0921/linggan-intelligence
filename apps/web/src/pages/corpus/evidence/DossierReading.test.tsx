@@ -95,3 +95,23 @@ it('只有附件时未取得正文收进来源详情，原件入口仍默认可�
     expect(screen.getByText('来源尚未取得，不能判断原作是否没有内容。')).toBeVisible();
   } finally { vi.unstubAllGlobals(); }
 });
+
+it.each([
+  [null, false, true],
+  ['   ', false, true],
+  [null, true, false],
+  ['可读平台标题', false, false],
+] as const)('仅识别缺口不冒充原文：标题 %s，已有原文 %s', (title, hasText, empty) => {
+  const gap = { ref: 'gap-only', kind: 'gap', text: '〔此页识别失败〕' };
+  const issue = { key: 'gap-diagnostic', code: 'recognition_failed', message: '来源需重新处理', resolution: 'source_refresh' };
+  const dossier = parseDossierPayload(dossierJson(1, { note: { platformTitle: title, displayTitle: title, displayTitleBasis: title?.trim() ? 'platform' : 'missing' }, materials: [dossierMaterialJson(1, {
+    blocks: hasText ? [gap, { ref: 'actual-text', kind: 'paragraph', text: '已经识别的真实文字' }] : [gap], issues: [issue],
+  })] })).dossier;
+  render(<DossierReading dossier={dossier} titleRendered onSource={vi.fn()} />);
+  if (empty) expect(screen.getByText('暂无可读文字。')).toBeVisible();
+  else expect(screen.queryByText('暂无可读文字。')).not.toBeInTheDocument();
+  expect(screen.getByText('〔此页识别失败〕')).toBeVisible();
+  expect(screen.getByText('来源需重新处理')).toBeVisible();
+  expect(screen.getByRole('button', { name: '查看来源' })).toBeVisible();
+  if (hasText) expect(screen.getByText('已经识别的真实文字')).toBeVisible();
+});

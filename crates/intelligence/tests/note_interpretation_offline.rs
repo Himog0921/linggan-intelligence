@@ -686,3 +686,23 @@ fn preview_rejects_content_role_and_reference_repairs() {
         ));
     }
 }
+
+#[test]
+fn gaps_are_diagnostics_and_mixed_source_words_remain_available() {
+    let mut input = input();
+    let mut gap = input.material.fragments[0].clone();
+    gap.citation_id = "S2".into();
+    gap.logical_position = "gap".into();
+    gap.text = "〔未识别，需核对原件〕".into();
+    gap.start = 0;
+    gap.end = gap.text.chars().count();
+    gap.structure =
+        serde_json::json!({"ref":"gap","kind":"gap","speaker":"author","text":gap.text});
+    input.material.fragments.push(gap.clone());
+    assert!(prepare_input(&input).is_ok());
+    input.material.fragments = vec![gap];
+    assert_eq!(
+        prepare_input(&input).unwrap_err(),
+        Invalid("offline_material_no_readable_text")
+    );
+}

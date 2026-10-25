@@ -356,7 +356,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
         &db,
         "segment-note",
         Some(
-            &((0..457)
+            &((0..456)
                 .map(|i| format!("第{i}段完整原文🙂"))
                 .collect::<Vec<_>>()
                 .join("\n\n")),
@@ -367,6 +367,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
         false,
     )
     .await;
+    dossier_fixture::fixture::submit_package(&db,"content_detail",json!({"contentExternalId":"segment-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"segment-note"},"payload":{"hashtags":["#冻结顺序"]}})).await;
     let app = app_with_database(db.clone());
     let base = format!(
         "/api/local/work-resources/{work}/research-dossier?domain={}",
@@ -392,7 +393,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
             .unwrap_or_default();
         let (status, page) = call(
             app.clone(),
-            &format!("{base}&segmentSize=37&segmentOffset={offset}{suffix}"),
+            &format!("{base}&segmentSize=38&segmentOffset={offset}{suffix}"),
             None,
         )
         .await;
@@ -423,7 +424,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
         } else {
             break;
         }
-        if offset == 37 {
+        if offset == 38 {
             dossier_fixture::fixture::submit_package(&db,"content_detail",json!({"contentExternalId":"segment-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"segment-note"},"payload":{"bodyText":"研究期间新正文，不得混入旧研究"}})).await;
         }
     }
@@ -433,7 +434,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
     let (status, empty) = call(
         app.clone(),
         &format!(
-            "{base}&segmentSize=37&asOf={as_of}&expectedRevision={revision}&segmentOffset=463"
+            "{base}&segmentSize=38&asOf={as_of}&expectedRevision={revision}&segmentOffset=463"
         ),
         None,
     )
@@ -450,7 +451,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
     );
     let (status, _) = call(
         app.clone(),
-        &format!("{base}&segmentSize=37&segmentOffset=37"),
+        &format!("{base}&segmentSize=38&segmentOffset=38"),
         None,
     )
     .await;
@@ -458,7 +459,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
     let (as_of, revision) = pinned.unwrap();
     let (status, _) = call(
         app.clone(),
-        &format!("{base}&segmentSize=37&asOf={as_of}&expectedRevision=wrong"),
+        &format!("{base}&segmentSize=38&asOf={as_of}&expectedRevision=wrong"),
         None,
     )
     .await;
@@ -466,7 +467,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
     let (status, _) = call(
         app,
         &format!(
-            "{base}&segmentSize=37&asOf={as_of}&expectedRevision={revision}&segmentOffset=9999"
+            "{base}&segmentSize=38&asOf={as_of}&expectedRevision={revision}&segmentOffset=9999"
         ),
         None,
     )

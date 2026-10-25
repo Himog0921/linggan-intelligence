@@ -9,6 +9,10 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
         .materials
         .iter()
         .any(|m| m["kind"] == "body" && readable(m));
+    let video_text = dossier
+        .materials
+        .iter()
+        .any(|m| matches!(m["kind"].as_str(), Some("audio" | "video_frame")) && readable(m));
     let mut main = vec![];
     let mut supplement = vec![];
     for material in &dossier.materials {
@@ -16,7 +20,8 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
             material["kind"] == "body"
         } else {
             match material["kind"].as_str() {
-                Some("image" | "audio") => true,
+                Some("image") => material["purpose"] != "cover" || !video_text,
+                Some("audio") => true,
                 Some("video_frame") => !dossier.materials.iter().any(|other| {
                     other["kind"] == "audio"
                         && other["slotKey"] == material["slotKey"]
@@ -37,12 +42,24 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
         }
     }
     dossier.reading_view = json!({"mainBlockRefs":main,"supplementBlockRefs":supplement});
-    // Internal representations share exactly the same ordering as public renderers.
-    let order: BTreeMap<_, _> = main
+    // Public materials retain diagnostics. Text consumers need at least one
+    // actual source block, including after an explicit selection of only gaps.
+    if !dossier
+        .fragments
         .iter()
-        .chain(&supplement)
+        .any(|f| content::has_source_text(&f.structure))
+    {
+        dossier.fragments.clear();
+    }
+    order_fragments(dossier);
+}
+
+pub(super) fn order_fragments(dossier: &mut ResearchDossier) {
+    let references = ordered_refs(dossier);
+    let order: BTreeMap<_, _> = references
+        .iter()
         .enumerate()
-        .map(|(i, r)| (r.as_str(), i))
+        .map(|(i, r)| (r.to_string(), i))
         .collect();
     dossier
         .fragments
@@ -66,7 +83,7 @@ fn readable(material: &Value) -> bool {
             .as_array()
             .into_iter()
             .flatten()
-            .any(|b| !content::block_text(b).trim().is_empty())
+            .any(content::has_source_text)
 }
 
 fn title(note: &mut Value, materials: &[Value]) {
@@ -215,7 +232,7 @@ mod tests {
                     if body.is_some() {
                         assert_eq!(*main, json!(["b"]));
                     } else if video {
-                        assert_eq!(*main, json!(["h1", "p1", "a"]));
+                        assert_eq!(*main, json!(["a"]));
                     } else {
                         assert_eq!(*main, json!(["h1", "p1"]));
                     }
@@ -243,6 +260,10 @@ mod tests {
         d.materials[0]["blocks"][0]["kind"] = json!("paragraph");
         rebuild(&mut d);
         assert_eq!(d.note["displayTitleBasis"], "missing");
+        assert_eq!(d.reading_view["mainBlockRefs"], json!(["v"]));
+        d.materials[2]["blocks"] = json!([]);
+        rebuild(&mut d);
+        assert_eq!(d.reading_view["mainBlockRefs"], json!(["h1", "p1"]));
     }
 
     #[test]

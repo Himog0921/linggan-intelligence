@@ -46,8 +46,19 @@ async fn dossier_v2_browser_proof() {
         let work = standard_fixture::scenario(&db, name, body, images, video, partial, empty).await;
         scenarios.push(json!({"name":name,"work":work,"domain":standard_fixture::DOMAIN,"dataSource":"synthetic saved-result replay; no recognition/model"}));
     }
+    if let Some(path) = std::env::var_os("STANDARD_DOSSIER_SAVED_MANIFEST") {
+        assert!(
+            std::env::var_os("GITHUB_ACTIONS").is_none(),
+            "private replay is local only"
+        );
+        let entries: Vec<Value> = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        for entry in entries {
+            let work = standard_fixture::replay_saved(&db, &entry).await;
+            scenarios.push(json!({"name":entry["name"],"work":work,"domain":standard_fixture::DOMAIN,"dataSource":entry["dataSource"],"sourceWorkRef":entry["sourceWorkRef"]}));
+        }
+    }
     // Saved-result replay includes a completed lifecycle; no recognizer is invoked.
-    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) SELECT gen_random_uuid(),j.job_ref,'succeeded','synthetic_saved_result_replay' FROM linggan_media_processing_job j JOIN linggan_material_unit u ON u.slot_key=j.slot_key AND u.current_reading_ref IS NOT NULL AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' WHEN 'video_frame_ocr' THEN 'video_frame' ELSE '' END").execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) SELECT gen_random_uuid(),j.job_ref,'succeeded','offline_saved_result_replay' FROM linggan_media_processing_job j JOIN linggan_material_unit u ON u.slot_key=j.slot_key AND u.current_reading_ref IS NOT NULL AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' WHEN 'video_frame_ocr' THEN 'video_frame' ELSE '' END").execute(db.pool()).await.unwrap();
     let before:Value=sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_model_invocation),(SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_runtime_capture_package))").fetch_one(db.pool()).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fixture = json!({"origin":format!("http://{}",listener.local_addr().unwrap()),"domain":dossier_fixture::DOMAIN,"work":work,

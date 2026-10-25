@@ -1,4 +1,5 @@
-//! Synthetic media/result replay shared by PG and actual React browser proofs.
+//! Saved-result replay shared by isolated PG and actual React browser proofs.
+//! Default scenarios are synthetic; optional private inputs remain local to the owned proof.
 #[path = "material_fixture.rs"]
 pub mod fixture;
 use linggan_evidence::{material_reading as reading, *};
@@ -27,7 +28,7 @@ pub async fn scenario(
     sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(work).bind(DOMAIN).bind(package).execute(db.pool()).await.unwrap();
     let mut slots = vec![];
     for page in 1..=images {
-        slots.push(("image", page));
+        slots.push((if video && page == 1 { "cover" } else { "image" }, page));
     }
     if video {
         slots.push(("video", 1));
@@ -39,7 +40,7 @@ pub async fn scenario(
         let uri=format!("https://media.example/{name}/{role}/{page}");
         json!({"kind":"media_slot","slotKey":format!("xhs:{name}:{role}:{page}"),"observationRef":observation,"slot":slot,"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":name}})
     }).collect();
-    fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":name}),"media_slots","xhs",json!({"target":{"contentExternalId":name,"imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":images}},"layers":[fixture::coverage_layer("media_slots",slots.len() as i64)]}),records).await;
+    fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":name}),"media_slots","xhs",json!({"target":if video{json!({"contentExternalId":name})}else{json!({"contentExternalId":name,"imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":images}})},"layers":[fixture::coverage_layer("media_slots",slots.len() as i64)]}),records).await;
     for ((role, page), observation) in slots.iter().zip(observations) {
         if partial && *page == images {
             continue;
@@ -146,6 +147,75 @@ pub async fn scenario(
             .unwrap();
             tx.commit().await.unwrap();
         }
+    }
+    work
+}
+
+/// Private replay only: saved recognizer output is not adopted into the source database.
+/// The fresh source/reading identities below belong exclusively to the disposable proof DB.
+pub async fn replay_saved(db: &Database, entry: &serde_json::Value) -> Uuid {
+    let name = entry["name"].as_str().unwrap();
+    let body = entry["body"]["blocks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(linggan_evidence::research_dossier::content::block_text)
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    let images = entry["images"].as_array().unwrap();
+    let work = scenario(
+        db,
+        name,
+        (!body.is_empty()).then_some(body.as_str()),
+        images.len().try_into().unwrap(),
+        false,
+        false,
+        true,
+    )
+    .await;
+    if let Some(title) = entry["note"]["platformTitle"].as_str() {
+        fixture::submit_package(db,"content_detail",json!({"contentExternalId":name}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":name},"payload":{"title":title,"bodyText":body}})).await;
+    }
+    for (index, image) in images.iter().enumerate() {
+        let slot = format!("xhs:{name}:image:{}", index + 1);
+        let observation:Uuid=sqlx::query_scalar("SELECT observation_ref FROM linggan_material_media_origin WHERE slot_key=$1 ORDER BY source_generation DESC LIMIT 1").bind(&slot).fetch_one(db.pool()).await.unwrap();
+        let bytes = std::fs::read(image["path"].as_str().unwrap()).unwrap();
+        use sha2::{Digest, Sha256};
+        let sha = Sha256::digest(&bytes)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert_eq!(image["sha256"], sha);
+        let key = format!("saved-replay/{name}/{}.bin", index + 1);
+        let path = std::path::PathBuf::from(std::env::var_os("LINGGAN_LOCAL_MEDIA_ROOT").unwrap())
+            .join(&key);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, &bytes).unwrap();
+        let source = admit_media_blob(
+            db,
+            observation,
+            &sha,
+            image["mimeType"].as_str().unwrap(),
+            bytes.len() as i64,
+            &key,
+        )
+        .await
+        .unwrap()
+        .materialization_ref;
+        let mut tx = db.pool().begin().await.unwrap();
+        reading::publish_in(&mut tx,reading::NewReading{content_public_ref:work,unit_key:format!("image:{slot}"),kind:"image".into(),slot_key:Some(slot),page:Some((index+1).try_into().unwrap()),source_version:source.to_string(),source_state:"present".into(),derivative_ref:None,producer_ref:Some(Uuid::new_v4()),generated_by:image["generatedBy"].as_str().unwrap().into(),rule_version:"private-saved-result-replay.v1".into(),blocks:serde_json::from_value(image["blocks"].clone()).unwrap(),issues:serde_json::from_value(image["issues"].clone()).unwrap(),source_location:json!({"proofPurpose":"offline_replay_only","originalWorkRef":entry["sourceWorkRef"],"originalReadingRef":image["sourceReadingRef"]}),publication:reading::Publication::Automatic{expected_current:None}}).await.unwrap();
+        tx.commit().await.unwrap();
+    }
+    // Copy exact block structure from the existing platform reading when available.
+    if !body.is_empty() {
+        let d = linggan_evidence::research_dossier::read(db, work)
+            .await
+            .unwrap()
+            .unwrap();
+        let unit = d.materials.iter().find(|m| m["kind"] == "body").unwrap();
+        let mut tx = db.pool().begin().await.unwrap();
+        reading::publish_in(&mut tx,reading::NewReading{content_public_ref:work,unit_key:"body".into(),kind:"body".into(),slot_key:None,page:None,source_version:unit["sourceVersion"].as_str().unwrap().into(),source_state:"present".into(),derivative_ref:None,producer_ref:Some(Uuid::new_v4()),generated_by:"platform".into(),rule_version:"private-saved-result-replay.v1".into(),blocks:serde_json::from_value(entry["body"]["blocks"].clone()).unwrap(),issues:vec![],source_location:json!({"proofPurpose":"offline_replay_only","originalWorkRef":entry["sourceWorkRef"]}),publication:reading::Publication::Automatic{expected_current:serde_json::from_value::<Option<Uuid>>(unit["currentRevisionRef"].clone()).unwrap_or(None)}}).await.unwrap();
+        tx.commit().await.unwrap();
     }
     work
 }

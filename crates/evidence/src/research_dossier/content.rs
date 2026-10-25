@@ -7,6 +7,11 @@ mod text;
 pub use ocr::ocr_blocks;
 pub use text::{block_text, blocks_from_text, speaker_label};
 
+/// Gap labels describe missing recognition, not words supplied by the source.
+pub fn has_source_text(block: &Value) -> bool {
+    block["kind"] != "gap" && !block_text(block).trim().is_empty()
+}
+
 pub const RULE_VERSION: &str = "dossier-content.v2";
 
 pub fn validate_blocks(blocks: &[Value]) -> Result<(), String> {

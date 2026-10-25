@@ -592,14 +592,14 @@ async fn standard_partial_results_and_video_keep_the_shared_complete_input() {
     let read = dossier::read(&db, video).await.unwrap().unwrap();
     assert_eq!(
         read.reading_view["mainBlockRefs"].as_array().unwrap().len(),
-        3
+        1
     );
     assert_eq!(
         read.reading_view["supplementBlockRefs"]
             .as_array()
             .unwrap()
             .len(),
-        1
+        3
     );
     assert!(
         read.fragments

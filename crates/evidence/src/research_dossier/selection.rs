@@ -117,6 +117,7 @@ pub fn segment(
     }
     let end = offset.saturating_add(size).min(total);
     let selected: Vec<_> = refs[offset..end].iter().map(|r| (*r).to_owned()).collect();
+    let frozen_order = dossier.reading_view.clone();
     let complete = dossier.revision.clone();
     let scope = if dossier.selection["mode"] == "explicit" {
         "selected"
@@ -134,10 +135,25 @@ pub fn segment(
         select(
             dossier,
             &Selection {
-                block_refs: selected,
+                block_refs: selected.clone(),
                 ..Default::default()
             },
         )?;
+        // A transport segment is a slice of one frozen reading order. Unlike an
+        // explicit user selection, it cannot promote supplements after filtering.
+        for key in ["mainBlockRefs", "supplementBlockRefs"] {
+            dossier.reading_view[key] = json!(
+                frozen_order[key]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|r| r.as_str().is_some_and(|r| selected.iter().any(|s| s == r)))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            );
+        }
+        super::reading::order_fragments(dossier);
+        super::refresh_revision(dossier);
     }
     Ok(
         json!({"completeRevision":complete,"asOf":dossier.as_of,"offset":offset,"end":end,"totalBlocks":total,
