@@ -1,7 +1,7 @@
 # COLLECTION-SINGLE-RUN-001 · 一次采集的持久范围与读取合同
 
 > 状态: 代码事实优先
-> 最后核对: 2026-10-23（up_to 增量）
+> 最后核对: 2026-10-25（up_to 增量、控制探针锁争用修复候选）
 > 适用范围: Issue #398 / Draft PR #406 的单次采集候选；0125 migration、Rust、正式插件 0.8.61
 > 事实来源: Mog 完整交接授权；本分支 collection_run、原 Request/Admission/WorkOrder/Lease/Package/Receipt 与共享材料代码
 > 冲突时以谁为准: 用户最新授权、可执行合同和真实运行结果；本合同不代表合并、业务库迁移或发布
@@ -42,7 +42,7 @@
 
 `POST /api/collection/runs/{runRef}/commands` 接受 commandRef、domainRef、expectedRevision、action（pause/continue/stop）。命令身份重放原回执；冲突版本返回 409。run 控制、worker 推进与派发共用 advisory 400；命令身份另用 399。暂停禁止新动作和后续段，继续保留集合/参数，停止不可逆地取消尚未认领订单并保留材料和待交付。停止或结束的 run 不因心跳/迟到回执恢复派发。
 
-插件每次页面动作前调用原本地凭据校验后的 `/api/local/collection/run-control`，失败关闭。已经采回的数据走 durable outbox，优先交付/对账，不重新采。逐页快照以冻结的 CaptureIdentity 和 Package 身份保存；尚在采集的暂存包可单调增加稳定 ID，已封存或已接纳包不可修改。后台退出后先恢复待交付，不能把网络超时当“没有接纳”。
+插件每次页面动作前调用原本地凭据校验后的 `/api/local/collection/run-control`，失败关闭。执行中探针与推进/控制共用 run 咨询锁，正常锁争用等待至多 5 秒，不把调度器的临时 try-lock 让位解释为人工停止；取得锁后重新核对当前安装凭据和仍有效的领取租约，再判断运行、领域与能力资格。超时或资格变化仍失败关闭；队列派发继续使用原 try-lock，避免阻塞公平领取。已经采回的数据走 durable outbox，优先交付/对账，不重新采。逐页快照以冻结的 CaptureIdentity 和 Package 身份保存；尚在采集的暂存包可单调增加稳定 ID，已封存或已接纳包不可修改。后台退出后先恢复待交付，不能把网络超时当“没有接纳”。
 
 同 run、同作品、同已确认账号、未过期的自有详情页与游标优先复用；仍取得新段的正式 grant 和 Task 身份。页面/账号/会话变化或过期时不盲移游标，重新进入并用本轮稳定 ID 去重。会话保留最多 10 分钟；其内存缓存不成为服务端范围或材料权威。
 
