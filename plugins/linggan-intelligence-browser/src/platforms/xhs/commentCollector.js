@@ -108,7 +108,7 @@ function readCommentSignalsSafe(container) {
 
 function getCommentSurfaceFingerprint(container) {
   const items = [...(container?.querySelectorAll?.('.parent-comment, .comment-item') || [])];
-  const ids = items.slice(0, 80).map((item, index) => String(item?.dataset?.commentId || item?.dataset?.id || item?.id || index)).join('|');
+  const ids = items.map((item, index) => String(item?.dataset?.commentId || item?.dataset?.id || item?.id || index)).join('|');
   const signals = readCommentSignalsSafe(container);
   return `${items.length}:${ids}:${signals.hasEndMarker ? 'end' : 'open'}`;
 }
@@ -140,6 +140,32 @@ async function loadMoreCommentSurface(container, distance = DEFAULT_COMMENT_SCRO
   await actionGate.after({ kind: 'dom_scroll', changed });
   await waitIfPaused();
   return changed;
+}
+
+// Aggregate diagnostics only: no URLs, credentials, IDs or comment text. These identify
+// which phase consumed a controlled Attempt without adding another result/upload path.
+function createCommentDiagnostics(budgetState, enabled) {
+  let lastAt = 0;
+  let lastPhase = '';
+  return (phase, values = {}, force = false) => {
+    if (!enabled) return;
+    const now = Date.now();
+    if (!force && phase === lastPhase && now - lastAt < 15000) return;
+    lastAt = now;
+    lastPhase = phase;
+    const container = getActiveCommentsContext().container;
+    const scrollParent = container && findScrollParent(container);
+    console.debug('[Linggan comments]', JSON.stringify({ phase,
+      roots: container?.querySelectorAll?.('.parent-comment')?.length || 0,
+      replies: container?.querySelectorAll?.('.comment-item.comment-item-sub')?.length || 0,
+      scrollTop: Number(scrollParent?.scrollTop || 0),
+      scrollHeight: Number(scrollParent?.scrollHeight || 0),
+      viewport: Number(scrollParent?.clientHeight || 0),
+      remainingRounds: budgetState?.remainingRounds ?? null,
+      remainingMs: budgetState ? Math.max(0, budgetState.deadline - now) : null,
+      ...values,
+    }));
+  };
 }
 
 export function shouldNudgeCommentSurfaceFromBottom({
@@ -310,6 +336,7 @@ export async function collectComments({
   }
   const budgetState = incrementalBudget ? { remainingRounds: incrementalBudget.maxScrollRounds, deadline: Date.now() + incrementalBudget.maxDurationSeconds * 1000, exhausted: false } : null;
   if (incrementalBudget) maxTotal = incrementalBudget.newUniqueLimit;
+  const diagnose = createCommentDiagnostics(budgetState, Boolean(taskSpec?.collectionRunRef));
   const budgetShouldStop = () => shouldStop() || Boolean(budgetState && Date.now() >= budgetState.deadline);
   const actionGate = createCommentActionGate({
     minimumCooldownMs: executionPolicy.minimumCooldownMs ?? DEFAULT_COMMENT_ACTION_COOLDOWN_MS,
@@ -324,6 +351,7 @@ export async function collectComments({
     maxTotal,
     incrementalBudget,
     budgetState,
+    diagnose,
     maxSubComments,
     onProgress,
     onSnapshot,
@@ -364,6 +392,7 @@ export async function collectComments({
     incrementalBudget,
     commentMode,
     budgetState,
+    diagnose,
     maxSubComments,
     onProgress,
     onSnapshot,
@@ -518,6 +547,7 @@ export function resolveCommentContinuationHint(pageCommentCount = 0, publicComme
 async function collectCommentsViaApi({
   commentSessionKey = '', resumeCommentSessionKey = '',
   incrementalBudget = null, budgetState = null,
+  diagnose = () => {},
   noteId = '',
   noteUrl = '',
   maxTotal = 0,
@@ -547,12 +577,16 @@ async function collectCommentsViaApi({
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : 4;
   const shouldExpandReplies = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
   const stalledReplyControls = new WeakSet();
+  const stalledReplySurfaces = new Set();
   let apiObserved = false;
   let hydrationDegradedEver = false;
   let unreliableIdentitySeen = false;
   let consecutiveHydrationFailures = 0;
   let riskStopped = false;
   let retainedSnapshot = null;
+  let lastApiProgressKey = null;
+  let repeatedApiPages = 0;
+  let apiNeedsDomFallback = false;
   let freshAttemptStarted = false;
   let freshAttemptReady = false;
   const savedSession=reusableApiSessions.get(noteId);
@@ -602,6 +636,7 @@ async function collectCommentsViaApi({
       break;
     }
 
+    diagnose('api', { captured: allComments.length, repeatedApiPages });
     let foundNew = false;
     let hydrationActionsPerformed = 0;
     let hydrationActionAttempted = false;
@@ -681,6 +716,18 @@ async function collectCommentsViaApi({
           : {},
       });
 
+      // A successful request is not pagination progress. Repeated cursors and stable IDs
+      // must yield to DOM while this Attempt still has time and rounds to scan it.
+      const apiProgressKey = JSON.stringify([
+        apiComments.map(comment => comment.commentId).sort(),
+        [retainedSnapshot.pages, retainedSnapshot.subPages].map(pages =>
+          pages.map(page => [page.rootCommentId || '', page.cursor || '', page.hasMore]).sort()),
+      ]);
+      repeatedApiPages = apiProgressKey === lastApiProgressKey ? repeatedApiPages + 1 : 0;
+      lastApiProgressKey = apiProgressKey;
+      if (repeatedApiPages >= 2 && (hydrationActionsPerformed > 0 || hydrationActionAttempted)) {
+        apiNeedsDomFallback = true;
+      }
       unreliableIdentitySeen ||= apiComments.some(c=>c.qualityReason==='synthetic_comment_id');
       for (const comment of apiComments) {
         await waitIfPaused();
@@ -737,6 +784,14 @@ async function collectCommentsViaApi({
       break;
     }
 
+    if (apiNeedsDomFallback) {
+      diagnose('api_fallback', { captured: allComments.length, repeatedApiPages }, true);
+      publishCountedProgress({ status: 'collecting', current: allComments.length,
+        message: '页面 API 连续返回相同分页，切换到页面评论树采集',
+      });
+      break;
+    }
+
     // The API hydrator is deliberately stepwise: after one network page this loop yields,
     // re-reads state and chooses the next single action instead of racing DOM scrolling.
     if (hydrationActionsPerformed > 0 || hydrationActionAttempted) {
@@ -745,7 +800,7 @@ async function collectCommentsViaApi({
     }
 
     if (shouldExpandReplies && hydrationDegradedEver && container) {
-      const expandableTarget = findNextExpandableReplyTarget(container, { stalledReplyControls });
+      const expandableTarget = findNextExpandableReplyTarget(container, { stalledReplyControls, stalledReplySurfaces });
       if (expandableTarget) {
         const expanded = await expandNextReply(expandableTarget.parentEl, {
           control: expandableTarget.control,
@@ -765,7 +820,8 @@ async function collectCommentsViaApi({
         if (expanded.acted) continue;
         if (expanded.reason === 'reply_expand_no_progress') {
           stalledReplyControls.add(expandableTarget.control);
-          if (findNextExpandableReplyTarget(container, { stalledReplyControls })) continue;
+          if (expandableTarget.surfaceKey) stalledReplySurfaces.add(expandableTarget.surfaceKey);
+          if (findNextExpandableReplyTarget(container, { stalledReplyControls, stalledReplySurfaces })) continue;
         }
       }
     }
@@ -832,7 +888,7 @@ async function collectCommentsViaApi({
       repliesExhausted: retainedSnapshot?.hydrationMeta?.pending === false && apiReplyTraversalExhausted(retainedSnapshot) && !finalSignals.hasExpandableReplies,
       identityReliable: !unreliableIdentitySeen && allComments.every(c => c.qualityReason !== 'synthetic_comment_id'),
     },
-    needsDomContinuation: shouldContinueDomAfterApi({
+    needsDomContinuation: (apiNeedsDomFallback && hasDomComments) || shouldContinueDomAfterApi({
       depthMode,
       hydrationDegraded: hydrationDegradedEver,
       hasExpandableReplies: finalSignals.hasExpandableReplies,
@@ -856,6 +912,7 @@ async function collectCommentsViaApi({
 
 async function collectCommentsFromDom({
   incrementalBudget = null, budgetState = null,
+  diagnose = () => {},
   noteId = '',
   noteUrl = '',
   maxTotal = 0,
@@ -894,9 +951,11 @@ async function collectCommentsFromDom({
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : DEFAULT_DOM_TOP_UP_MAX_NO_NEW;
   const shouldExpandReplies = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
   const stalledReplyControls = new WeakSet();
+  const stalledReplySurfaces = new Set();
   let unreliableIdentitySeen = !initialIdentityReliable;
   let bottomNudgeCount = 0;
   let riskStopped = false;
+  let lastScannedSurface = null;
 
   while (!shouldStop()) {
     if (budgetState && (budgetState.remainingRounds-- <= 0 || Date.now() >= budgetState.deadline)) { budgetState.exhausted = true; break; }
@@ -925,6 +984,8 @@ async function collectCommentsFromDom({
       break;
     }
 
+    diagnose('dom', { captured: allComments.length });
+    const scannedSurface = getCommentSurfaceFingerprint(container);
     const parentComments = container.querySelectorAll('.parent-comment');
     let foundNew = false;
 
@@ -1011,6 +1072,7 @@ async function collectCommentsFromDom({
       }
     }
 
+    lastScannedSurface = scannedSurface;
     if (foundNew) {
       bottomNudgeCount = 0;
       const context = getActiveCommentsContext();
@@ -1027,7 +1089,7 @@ async function collectCommentsFromDom({
     }
 
     if (shouldExpandReplies) {
-      const expandableTarget = findNextExpandableReplyTarget(container, { stalledReplyControls });
+      const expandableTarget = findNextExpandableReplyTarget(container, { stalledReplyControls, stalledReplySurfaces });
       if (expandableTarget) {
         onProgress?.(withPageCommentCount({
           status: 'collecting',
@@ -1048,20 +1110,30 @@ async function collectCommentsFromDom({
             await actionGate.after({ kind: 'dom_expand_reply' });
           },
         });
+        diagnose('dom_reply', { captured: allComments.length, action: expanded.reason });
         if (expanded.acted) {
           noNewCount = foundNew ? 0 : noNewCount;
           continue;
         }
         if (expanded.reason === 'reply_expand_no_progress') {
           stalledReplyControls.add(expandableTarget.control);
+          if (expandableTarget.surfaceKey) stalledReplySurfaces.add(expandableTarget.surfaceKey);
           onProgress?.(withPageCommentCount({
             status: 'collecting',
             current: allComments.length,
             message: `当前回复入口未产生新数据，继续检查其他楼层（已取得 ${allComments.length} 条）`,
           }, container));
-          if (findNextExpandableReplyTarget(container, { stalledReplyControls })) continue;
+          if (findNextExpandableReplyTarget(container, { stalledReplyControls, stalledReplySurfaces })) continue;
         }
       }
+    }
+
+    // querySelectorAll returns a static NodeList. A scroll/reply request can append the
+    // final page while the awaited scan is still reading the previous list. Consume that
+    // changed surface before THE END or the no-progress limit can terminate this Attempt.
+    if (getCommentSurfaceFingerprint(resolveContainer() || container) !== scannedSurface) {
+      noNewCount = 0;
+      continue;
     }
 
     if (!foundNew) {
@@ -1131,13 +1203,17 @@ async function collectCommentsFromDom({
     await commentStore.bulkUpsert(allComments);
   }
 
-  const finalSignals = readCommentSignalsSafe(resolveContainer() || container);
+  const finalContainer = resolveContainer() || container;
+  const finalSignals = readCommentSignalsSafe(finalContainer);
+  diagnose('dom_end', { captured: allComments.length, endMarker: finalSignals.hasEndMarker }, true);
+  const finalSurfaceScanned = lastScannedSurface === getCommentSurfaceFingerprint(finalContainer)
+    && !shouldStop() && !(maxTotal > 0 && allComments.length >= maxTotal);
   return {
     total: allComments.length,
     comments: allComments,
     traversal: {
-      mainExhausted: finalSignals.hasEndMarker && !(maxTotal > 0 && allComments.length >= maxTotal),
-      repliesExhausted: finalSignals.hasEndMarker && !finalSignals.hasExpandableReplies,
+      mainExhausted: finalSurfaceScanned && finalSignals.hasEndMarker,
+      repliesExhausted: finalSurfaceScanned && finalSignals.hasEndMarker && !finalSignals.hasExpandableReplies,
       identityReliable: !unreliableIdentitySeen && allComments.every(c => c.qualityReason !== 'synthetic_comment_id'),
     },
     stopReason: riskStopped
@@ -1146,7 +1222,7 @@ async function collectCommentsFromDom({
         ? 'manual_stop'
         : (maxTotal > 0 && allComments.length >= maxTotal
         ? 'comment_cap_reached'
-        : (finalSignals.hasEndMarker ? 'comment_area_end' : 'no_progress'))),
+        : (finalSurfaceScanned && finalSignals.hasEndMarker ? 'comment_area_end' : 'no_progress'))),
   };
 }
 
@@ -1607,14 +1683,27 @@ export function isExpandMoreReplyTrigger(text = '') {
   return /展开/.test(String(text || '').trim());
 }
 
+function replyExpansionSurfaceKey(parentEl) {
+  const main = parentEl?.querySelector?.(':scope > .comment-item:not(.comment-item-sub)')
+    || parentEl?.querySelector?.('.comment-item:not(.comment-item-sub)');
+  const rootId = String(main?.dataset?.commentId || main?.dataset?.id || main?.id || parentEl?.id || '');
+  if (!rootId) return '';
+  const replyIds = [...parentEl.querySelectorAll('.comment-item.comment-item-sub')]
+    .map((item, index) => String(item?.dataset?.commentId || item?.dataset?.id || item?.id || index));
+  return JSON.stringify([rootId, replyIds]);
+}
+
 export function findNextExpandableReplyTarget(container, {
   stalledReplyControls = new WeakSet(),
+  stalledReplySurfaces = new Set(),
 } = {}) {
   if (!container?.querySelectorAll) return null;
   for (const parentEl of container.querySelectorAll('.parent-comment')) {
+    const surfaceKey = replyExpansionSurfaceKey(parentEl);
+    if (surfaceKey && stalledReplySurfaces.has(surfaceKey)) continue;
     const control = [...parentEl.querySelectorAll('div.show-more')]
       .find((el) => isExpandMoreReplyTrigger(el?.textContent) && !stalledReplyControls.has(el));
-    if (control) return { parentEl, control };
+    if (control) return { parentEl, control, surfaceKey };
   }
   return null;
 }
@@ -1657,7 +1746,9 @@ export async function expandNextReply(parentCommentEl, {
       await waitForPageSettle(420);
     }
     await waitIfPaused();
-    return { acted: true, reason: 'reply_control_revealed' };
+    return replyControlIsVisible(button)
+      ? { acted: true, reason: 'reply_control_revealed' }
+      : { acted: false, reason: 'reply_expand_no_progress', control: button };
   }
   button.click();
   if (typeof waitAfterAction === 'function') {
@@ -1672,9 +1763,9 @@ export async function expandNextReply(parentCommentEl, {
   }
   await waitIfPaused();
   const afterCount = parentCommentEl.querySelectorAll('.comment-item.comment-item-sub').length;
-  const sameControlStillExpandable = [...parentCommentEl.querySelectorAll('div.show-more')]
-    .some((el) => el === button && isExpandMoreReplyTrigger(el?.textContent));
-  if (afterCount <= beforeCount && sameControlStillExpandable) {
+  const stillExpandable = [...parentCommentEl.querySelectorAll('div.show-more')]
+    .some((el) => isExpandMoreReplyTrigger(el?.textContent));
+  if (afterCount <= beforeCount && stillExpandable) {
     return {
       acted: false,
       reason: 'reply_expand_no_progress',

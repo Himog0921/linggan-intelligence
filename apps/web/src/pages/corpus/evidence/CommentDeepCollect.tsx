@@ -31,10 +31,6 @@ function notFound(error: unknown): boolean {
   return error instanceof ApiError && error.failure.kind === 'http' && error.failure.status === 404;
 }
 
-function sum(left: number | null, right: number | null): number | null {
-  return left === null || right === null ? null : left + right;
-}
-
 function count(value: number | null): string {
   return value === null ? '未知' : formatNumber(value);
 }
@@ -122,12 +118,13 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
     }
   }
 
-  const status = run.data ? `${runStatus(run.data)} · 这次新采到 ${count(run.data.new_comments)} 条` : run.isError ? '进度暂时读不出来' : '正在读取进度…';
+  const status = run.data
+    ? `${runStatus(run.data)} · 本轮采回 ${count(run.data.received_comments)} 条 · 首次新增 ${count(run.data.new_comments)} 条`
+    : run.isError ? '进度暂时读不出来' : '正在读取进度…';
   return (
     <Section title="评论深采">
       <p className={styles.lead}>
-        {`平台显示 ${metricReading(item.display.engagement.comment)} 条评论 · 已采到 ${count(sum(roots, replies))} 条`}
-        {roots !== null && replies !== null ? `（评论 ${formatNumber(roots)}、回复 ${formatNumber(replies)}）` : ''}
+        {`平台显示 ${metricReading(item.display.engagement.comment)} 条评论 · 最近记录：评论 ${count(roots)} 条、回复 ${count(replies)} 条`}
       </p>
       {history.length === 0 ? (
         <SourceNote>还没有采过这篇的评论。</SourceNote>

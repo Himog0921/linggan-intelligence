@@ -575,7 +575,7 @@ try {
     await section.getByRole('button', { name: '采全部评论' }).click();
     await dialog.getByRole('button', { name: '确认提交' }).click();
     await section.getByText('已提交', { exact: true }).waitFor();
-    await section.getByText(/^等待派发 · 这次新采到/).waitFor();
+    await section.getByText('等待派发 · 本轮采回 0 条 · 首次新增 0 条', { exact: true }).waitFor();
     await writesTotal(writes + 1);
     assert.equal(report.writes.at(-1).path, '/api/collection/runs');
     assert.equal(report.writes.at(-1).status, 200);
