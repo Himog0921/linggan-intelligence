@@ -79,7 +79,7 @@ describe('评论深采（Mog 2026-10-23）', () => {
 
   it('先说现在采到多少、以前怎么采的；点「采全部评论」先确认，取消不发请求', async () => {
     const view = setup();
-    expect(screen.getByText(/平台显示 37 条评论 · 最近一段采到 21 条（评论 18、回复 3）/)).toBeInTheDocument();
+    expect(screen.getByText('平台显示 37 条评论 · 最近记录：评论 18 条、回复 3 条')).toBeInTheDocument();
     expect(screen.getByText('2026-10-15 05:59 · 随详情顺带采（最多 30 条） · 采到 21 条，当时页面显示 37 条')).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: '采全部评论' }));
     const dialog = screen.getByRole('dialog', { name: '确认评论深采' });
@@ -105,16 +105,21 @@ describe('评论深采（Mog 2026-10-23）', () => {
     expect(screen.getByRole('button', { name: '评论深采已提交' })).toBeDisabled();
   });
 
-  it.each([37, null])('最近一段7条与本轮采回%s条、首次新增0条分别展示；未知不写成0', async received => {
+  it.each([37, null])('各自最近记录与本轮采回%s条、首次新增0条分别展示，不拼接不同采集段', async received => {
     kit.route('POST', RUNS, ok({ runRef: RUN, domainRef: DOMAIN, replayed: false }));
     kit.route('GET', `${RUNS}/${RUN}`, ok(runJson({ ended: true, received_comments: received, new_comments: 0 })));
     const view = setup({ commentsCoverage: { count: 4, countState: 'KNOWN', retained: 4 } });
-    expect(screen.getByText('平台显示 37 条评论 · 最近一段采到 7 条（评论 4、回复 3）')).toBeInTheDocument();
+    expect(screen.getByText('平台显示 37 条评论 · 最近记录：评论 4 条、回复 3 条')).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: '采全部评论' }));
     await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
     expect(await screen.findByText(`本轮已结束 · 本轮采回 ${received === null ? '未知' : received} 条 · 首次新增 0 条`)).toBeInTheDocument();
     expect(kit.of('POST', RUNS)).toHaveLength(1);
     expect(kit.of('GET', `${RUNS}/${RUN}`)).toHaveLength(1);
+  });
+
+  it('最近评论数未知不抹掉已知回复数，也不把未知写成0', () => {
+    setup({ commentsCoverage: null });
+    expect(screen.getByText('平台显示 37 条评论 · 最近记录：评论 未知 条、回复 3 条')).toBeInTheDocument();
   });
 
   it('服务器明确拒绝：说「没有建立」和原因，按钮恢复，下一次是新请求', async () => {
