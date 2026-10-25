@@ -122,11 +122,13 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
     }
   }
 
-  const status = run.data ? `${runStatus(run.data)} · 这次新采到 ${count(run.data.new_comments)} 条` : run.isError ? '进度暂时读不出来' : '正在读取进度…';
+  const status = run.data
+    ? `${runStatus(run.data)} · 本轮采回 ${count(run.data.received_comments)} 条 · 首次新增 ${count(run.data.new_comments)} 条`
+    : run.isError ? '进度暂时读不出来' : '正在读取进度…';
   return (
     <Section title="评论深采">
       <p className={styles.lead}>
-        {`平台显示 ${metricReading(item.display.engagement.comment)} 条评论 · 已采到 ${count(sum(roots, replies))} 条`}
+        {`平台显示 ${metricReading(item.display.engagement.comment)} 条评论 · 最近一段采到 ${count(sum(roots, replies))} 条`}
         {roots !== null && replies !== null ? `（评论 ${formatNumber(roots)}、回复 ${formatNumber(replies)}）` : ''}
       </p>
       {history.length === 0 ? (

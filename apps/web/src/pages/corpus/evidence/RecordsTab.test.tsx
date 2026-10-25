@@ -28,7 +28,7 @@ function runJson(overrides: Record<string, unknown> = {}) {
   return {
     run_ref: RUN, domain_ref: DOMAIN, name: '已选 1 篇作品', domain_name: 'ADHD', source_kind: 'selected_works', legacy: false, ended: false,
     control_intent: 'running', phase: 'materials', comment_mode: 'all_public', created_at: '2026-10-23T10:00:00Z', updated_at: '2026-10-23T10:00:00Z',
-    revision: 1, work_limit: 1, live_leases: 0, new_comments: 0, ...overrides,
+    revision: 1, work_limit: 1, live_leases: 0, received_comments: 0, new_comments: 0, ...overrides,
   };
 }
 
@@ -79,7 +79,7 @@ describe('评论深采（Mog 2026-10-23）', () => {
 
   it('先说现在采到多少、以前怎么采的；点「采全部评论」先确认，取消不发请求', async () => {
     const view = setup();
-    expect(screen.getByText(/平台显示 37 条评论 · 已采到 21 条（评论 18、回复 3）/)).toBeInTheDocument();
+    expect(screen.getByText(/平台显示 37 条评论 · 最近一段采到 21 条（评论 18、回复 3）/)).toBeInTheDocument();
     expect(screen.getByText('2026-10-15 05:59 · 随详情顺带采（最多 30 条） · 采到 21 条，当时页面显示 37 条')).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: '采全部评论' }));
     const dialog = screen.getByRole('dialog', { name: '确认评论深采' });
@@ -99,10 +99,22 @@ describe('评论深采（Mog 2026-10-23）', () => {
     const [post] = kit.of('POST', RUNS);
     expect(post?.body).toMatchObject({ domainRef: DOMAIN, source: { kind: 'selected_works', workRefs: [workRef(1)] }, ranking: null, workLimit: 1, commentMode: 'all_public' });
     expect(typeof (post?.body as { idempotencyKey?: unknown }).idempotencyKey).toBe('string');
-    expect(await screen.findByText('等待派发 · 这次新采到 0 条')).toBeInTheDocument();
+    expect(await screen.findByText('等待派发 · 本轮采回 0 条 · 首次新增 0 条')).toBeInTheDocument();
     expect(kit.of('GET', `${RUNS}/${RUN}`)[0]?.search.get('domainRef')).toBe(DOMAIN);
     expect(screen.getByRole('link', { name: '在采集任务里查看' })).toHaveAttribute('href', `/collection/tasks?domain=${encodeURIComponent(DOMAIN)}&run=${RUN}`);
     expect(screen.getByRole('button', { name: '评论深采已提交' })).toBeDisabled();
+  });
+
+  it.each([37, null])('最近一段7条与本轮采回%s条、首次新增0条分别展示；未知不写成0', async received => {
+    kit.route('POST', RUNS, ok({ runRef: RUN, domainRef: DOMAIN, replayed: false }));
+    kit.route('GET', `${RUNS}/${RUN}`, ok(runJson({ ended: true, received_comments: received, new_comments: 0 })));
+    const view = setup({ commentsCoverage: { count: 4, countState: 'KNOWN', retained: 4 } });
+    expect(screen.getByText('平台显示 37 条评论 · 最近一段采到 7 条（评论 4、回复 3）')).toBeInTheDocument();
+    await view.user.click(screen.getByRole('button', { name: '采全部评论' }));
+    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
+    expect(await screen.findByText(`本轮已结束 · 本轮采回 ${received === null ? '未知' : received} 条 · 首次新增 0 条`)).toBeInTheDocument();
+    expect(kit.of('POST', RUNS)).toHaveLength(1);
+    expect(kit.of('GET', `${RUNS}/${RUN}`)).toHaveLength(1);
   });
 
   it('服务器明确拒绝：说「没有建立」和原因，按钮恢复，下一次是新请求', async () => {
