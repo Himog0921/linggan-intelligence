@@ -574,11 +574,7 @@ async fn settings_page_real_chain_browser_proof() {
         )
         .unwrap()
         .to_string();
-    sqlx::query(
-        "INSERT INTO linggan_ops_member \\
-         (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) \\
-         VALUES($1,'settings-browser@example.test','设置页合成运营','operator','active',$2,scope_001_now())",
-    )
+    sqlx::query("INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) VALUES($1,'settings-browser@example.test','设置页合成运营','operator','active',$2,scope_001_now())")
     .bind(uuid::Uuid::new_v4())
     .bind(password_hash)
     .execute(database.pool())
