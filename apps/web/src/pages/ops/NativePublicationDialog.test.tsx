@@ -13,6 +13,7 @@ const account = {
   ref: "account", source: "native" as const, platform: "xhs" as const, name: "合成账号",
   profileUrl: null, deviceCode: null, followerCount: null, ipLocation: null,
   currentResponsibleMemberRef: null, currentResponsibleName: null, responsibilityVersion: 1,
+  nativeVersion: 1, nativeState: "active" as const, handle: null,
   operator: null, status: null, health: "not_filled" as const, isRetained: null, notes: null,
 };
 

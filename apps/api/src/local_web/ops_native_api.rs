@@ -21,6 +21,18 @@ pub(super) fn routes() -> Router<LocalWebState> {
             axum::routing::post(create_account),
         )
         .route(
+            "/api/local/ops/native/accounts/{account_ref}",
+            axum::routing::post(update_account),
+        )
+        .route(
+            "/api/local/ops/native/accounts/{account_ref}/archive",
+            axum::routing::post(archive_account),
+        )
+        .route(
+            "/api/local/ops/native/accounts/{account_ref}/restore",
+            axum::routing::post(restore_account),
+        )
+        .route(
             "/api/local/ops/native/publications",
             axum::routing::post(create_publication),
         )
@@ -66,6 +78,33 @@ struct CreateAccountBody {
     device_code: Option<String>,
     ip_location: Option<String>,
     notes: Option<String>,
+}
+
+/// Ordinary account maintenance deliberately cannot change platform or platform identity.
+/// Those fields bind a stable external account and need their own administrator-only correction
+/// workflow rather than becoming an accidental side effect of editing a display name.
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UpdateAccountBody {
+    request_id: Uuid,
+    expected_version: i64,
+    account_name: String,
+    profile_url: Option<String>,
+    handle: Option<String>,
+    status: String,
+    is_retained: bool,
+    follower_count: Option<i64>,
+    device_code: Option<String>,
+    ip_location: Option<String>,
+    notes: Option<String>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountLifecycleBody {
+    request_id: Uuid,
+    expected_version: i64,
+    reason: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -184,6 +223,63 @@ async fn create_account(
     }
 }
 
+async fn update_account(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Path(account_ref): Path<Uuid>,
+    Json(body): Json<UpdateAccountBody>,
+) -> Response {
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let Some(database) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
+    match write_account_update(database, member, account_ref, body).await {
+        Ok((status, receipt)) => receipt_response(status, receipt),
+        Err(error) => write_error(error),
+    }
+}
+
+async fn archive_account(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Path(account_ref): Path<Uuid>,
+    Json(body): Json<AccountLifecycleBody>,
+) -> Response {
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let Some(database) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
+    match write_account_lifecycle(database, member, account_ref, body, true).await {
+        Ok((status, receipt)) => receipt_response(status, receipt),
+        Err(error) => write_error(error),
+    }
+}
+
+async fn restore_account(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Path(account_ref): Path<Uuid>,
+    Json(body): Json<AccountLifecycleBody>,
+) -> Response {
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let Some(database) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
+    match write_account_lifecycle(database, member, account_ref, body, false).await {
+        Ok((status, receipt)) => receipt_response(status, receipt),
+        Err(error) => write_error(error),
+    }
+}
+
 async fn create_publication(
     State(state): State<LocalWebState>,
     headers: HeaderMap,
@@ -222,7 +318,8 @@ async fn create_publications_batch(
     let mut items = Vec::with_capacity(body.publications.len());
     for (index, publication) in body.publications.into_iter().enumerate() {
         let request_ref = publication.request_id;
-        let (status, receipt) = match write_publication(database, member.clone(), publication).await {
+        let (status, receipt) = match write_publication(database, member.clone(), publication).await
+        {
             Ok(result) => result,
             Err(error) => match error {
                 WriteError::Invalid(code) => (
@@ -231,12 +328,23 @@ async fn create_publications_batch(
                     } else {
                         StatusCode::UNPROCESSABLE_ENTITY
                     },
-                    CommandReceipt { request_ref, outcome: "rejected".to_owned(), code: code.to_owned(), record_ref: None, resulting_version: None, replayed: false },
+                    CommandReceipt {
+                        request_ref,
+                        outcome: "rejected".to_owned(),
+                        code: code.to_owned(),
+                        record_ref: None,
+                        resulting_version: None,
+                        replayed: false,
+                    },
                 ),
                 WriteError::Unavailable => return write_error(WriteError::Unavailable),
             },
         };
-        items.push(BatchPublicationReceipt { ordinal: index + 1, status: status.as_u16(), receipt });
+        items.push(BatchPublicationReceipt {
+            ordinal: index + 1,
+            status: status.as_u16(),
+            receipt,
+        });
     }
     let mut response = Json(BatchPublicationsReceipt { items }).into_response();
     super::ops_auth::secure_headers(&mut response);
@@ -290,22 +398,42 @@ async fn record_view_reports_batch(
         Ok(member) => member,
         Err(response) => return response,
     };
-    let Some(database) = state.database.database() else { return super::ops_api::not_connected(); };
+    let Some(database) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
     if body.reports.is_empty() || body.reports.len() > 100 {
         return write_error(WriteError::Invalid("ops_native_batch_size_invalid"));
     }
     let mut items = Vec::with_capacity(body.reports.len());
     for (index, item) in body.reports.into_iter().enumerate() {
         let request_ref = item.report.request_id;
-        let (status, receipt) = match write_view_report(database, member.clone(), item.publication_ref, item.report).await {
-            Ok(result) => result,
-            Err(WriteError::Invalid(code)) => (
-                if code.ends_with("_conflict") { StatusCode::CONFLICT } else { StatusCode::UNPROCESSABLE_ENTITY },
-                CommandReceipt { request_ref, outcome: "rejected".to_owned(), code: code.to_owned(), record_ref: None, resulting_version: None, replayed: false },
-            ),
-            Err(WriteError::Unavailable) => return write_error(WriteError::Unavailable),
-        };
-        items.push(BatchPublicationReceipt { ordinal: index + 1, status: status.as_u16(), receipt });
+        let (status, receipt) =
+            match write_view_report(database, member.clone(), item.publication_ref, item.report)
+                .await
+            {
+                Ok(result) => result,
+                Err(WriteError::Invalid(code)) => (
+                    if code.ends_with("_conflict") {
+                        StatusCode::CONFLICT
+                    } else {
+                        StatusCode::UNPROCESSABLE_ENTITY
+                    },
+                    CommandReceipt {
+                        request_ref,
+                        outcome: "rejected".to_owned(),
+                        code: code.to_owned(),
+                        record_ref: None,
+                        resulting_version: None,
+                        replayed: false,
+                    },
+                ),
+                Err(WriteError::Unavailable) => return write_error(WriteError::Unavailable),
+            };
+        items.push(BatchPublicationReceipt {
+            ordinal: index + 1,
+            status: status.as_u16(),
+            receipt,
+        });
     }
     let mut response = Json(BatchPublicationsReceipt { items }).into_response();
     super::ops_auth::secure_headers(&mut response);
@@ -492,6 +620,367 @@ async fn write_account(
         .await
         .map_err(|_| WriteError::Unavailable)?;
     Ok((StatusCode::CREATED, receipt.receipt))
+}
+
+async fn write_account_update(
+    database: &linggan_storage_postgres::Database,
+    member: super::ops_auth::AuthenticatedMember,
+    account_ref: Uuid,
+    body: UpdateAccountBody,
+) -> Result<(StatusCode, CommandReceipt), WriteError> {
+    let raw_payload = raw_payload(&json!({ "accountRef": account_ref, "body": body }))?;
+    let request_id = body.request_id;
+    let account = match PreparedAccountUpdate::parse(body) {
+        Ok(account) => account,
+        Err(WriteError::Invalid(code)) => {
+            return reject_invalid_input(
+                database,
+                &member,
+                request_id,
+                "account_update",
+                &raw_payload,
+                code,
+            )
+            .await;
+        }
+        Err(error) => return Err(error),
+    };
+    let payload = digest(
+        json!({ "accountRef": account_ref, "expectedVersion": account.expected_version,
+        "accountName": account.account_name, "profileUrl": account.profile_url, "handle": account.handle,
+        "status": account.status, "isRetained": account.is_retained, "followerCount": account.follower_count,
+        "deviceCode": account.device_code, "ipLocation": account.ip_location, "notes": account.notes }),
+    );
+    let mut transaction = database
+        .pool()
+        .begin()
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+    if let Some(receipt) = replay(
+        &mut transaction,
+        account.request_id,
+        "account_update",
+        &member,
+        &payload,
+    )
+    .await?
+    {
+        transaction
+            .commit()
+            .await
+            .map_err(|_| WriteError::Unavailable)?;
+        return Ok((status_for(&receipt), receipt));
+    }
+    let current: Option<(String, Option<i64>, Option<String>, String, Option<String>, Option<String>, String, bool, Option<i64>, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT source_system,native_version,native_record_state,account_name,profile_url,handle,status,is_retained,follower_count,device_code,ip_location,notes \
+         FROM linggan_ops_account WHERE account_ref=$1 FOR UPDATE",
+    )
+    .bind(account_ref)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(|_| WriteError::Unavailable)?;
+    let Some((
+        source_system,
+        native_version,
+        native_state,
+        account_name,
+        profile_url,
+        handle,
+        status,
+        is_retained,
+        follower_count,
+        device_code,
+        ip_location,
+        notes,
+    )) = current
+    else {
+        return rejected(
+            transaction,
+            account.request_id,
+            "account_update",
+            &member,
+            &payload,
+            Some(account_ref),
+            None,
+            "ops_native_account_not_found",
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+    };
+    let Some(current_version) = native_version.filter(|_| source_system == "linggan_native") else {
+        return rejected(
+            transaction,
+            account.request_id,
+            "account_update",
+            &member,
+            &payload,
+            Some(account_ref),
+            None,
+            "ops_native_account_not_editable",
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    };
+    if native_state.as_deref() != Some("active") {
+        return rejected(
+            transaction,
+            account.request_id,
+            "account_update",
+            &member,
+            &payload,
+            Some(account_ref),
+            Some(current_version),
+            "ops_native_account_inactive",
+            StatusCode::CONFLICT,
+        )
+        .await;
+    }
+    if !can_write_account(&mut transaction, &member, account_ref).await? {
+        return rejected(
+            transaction,
+            account.request_id,
+            "account_update",
+            &member,
+            &payload,
+            Some(account_ref),
+            Some(current_version),
+            "ops_native_forbidden",
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    }
+    if account.expected_version != current_version {
+        return stale_for(
+            transaction,
+            account.request_id,
+            "account_update",
+            &member,
+            &payload,
+            account_ref,
+            current_version,
+            "ops_native_version_stale",
+        )
+        .await;
+    }
+    if (
+        account_name,
+        profile_url,
+        handle,
+        status,
+        is_retained,
+        follower_count,
+        device_code,
+        ip_location,
+        notes,
+    ) == (
+        account.account_name.clone(),
+        account.profile_url.clone(),
+        account.handle.clone(),
+        account.status.clone(),
+        account.is_retained,
+        account.follower_count,
+        account.device_code.clone(),
+        account.ip_location.clone(),
+        account.notes.clone(),
+    ) {
+        let receipt = unchanged(
+            account.request_id,
+            "account_update",
+            &member,
+            &payload,
+            account_ref,
+            current_version,
+            "ops_native_unchanged",
+        );
+        insert_receipt(&mut transaction, &receipt).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| WriteError::Unavailable)?;
+        return Ok((StatusCode::OK, receipt.receipt));
+    }
+    let next_version = current_version + 1;
+    sqlx::query(
+        "UPDATE linggan_ops_account SET account_name=$2,profile_url=$3,handle=$4,status=$5,is_retained=$6, \
+         follower_count=$7,device_code=$8,ip_location=$9,notes=$10, \
+         profile_link_state=CASE WHEN platform_user_id IS NOT NULL THEN 'parsed' \
+              WHEN $3 IS NOT NULL THEN 'pending_match' ELSE 'missing' END, \
+         native_version=$11,native_updated_by_member_ref=$12 \
+         WHERE account_ref=$1",
+    )
+    .bind(account_ref).bind(&account.account_name).bind(&account.profile_url).bind(&account.handle).bind(&account.status)
+    .bind(account.is_retained).bind(account.follower_count).bind(&account.device_code).bind(&account.ip_location)
+    .bind(&account.notes).bind(next_version).bind(member.member_ref)
+    .execute(&mut *transaction).await.map_err(|_| WriteError::Unavailable)?;
+    let receipt = accepted(
+        account.request_id,
+        "account_update",
+        &member,
+        &payload,
+        account_ref,
+        next_version,
+    );
+    insert_receipt(&mut transaction, &receipt).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+    Ok((StatusCode::OK, receipt.receipt))
+}
+
+async fn write_account_lifecycle(
+    database: &linggan_storage_postgres::Database,
+    member: super::ops_auth::AuthenticatedMember,
+    account_ref: Uuid,
+    body: AccountLifecycleBody,
+    archive: bool,
+) -> Result<(StatusCode, CommandReceipt), WriteError> {
+    let command_kind = if archive {
+        "account_archive"
+    } else {
+        "account_restore"
+    };
+    let raw_payload = raw_payload(&json!({ "accountRef": account_ref, "body": body }))?;
+    let request_id = body.request_id;
+    let reason = body.reason.trim().to_owned();
+    if body.expected_version < 1 || reason.is_empty() || reason.chars().count() > 1_000 {
+        return reject_invalid_input(
+            database,
+            &member,
+            request_id,
+            command_kind,
+            &raw_payload,
+            "ops_native_account_lifecycle_invalid",
+        )
+        .await;
+    }
+    let payload = digest(
+        json!({ "accountRef": account_ref, "expectedVersion": body.expected_version, "reason": reason }),
+    );
+    let mut transaction = database
+        .pool()
+        .begin()
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+    if let Some(receipt) = replay(
+        &mut transaction,
+        request_id,
+        command_kind,
+        &member,
+        &payload,
+    )
+    .await?
+    {
+        transaction
+            .commit()
+            .await
+            .map_err(|_| WriteError::Unavailable)?;
+        return Ok((status_for(&receipt), receipt));
+    }
+    let current: Option<(String, Option<i64>, Option<String>)> = sqlx::query_as(
+        "SELECT source_system,native_version,native_record_state FROM linggan_ops_account WHERE account_ref=$1 FOR UPDATE",
+    ).bind(account_ref).fetch_optional(&mut *transaction).await.map_err(|_| WriteError::Unavailable)?;
+    let Some((source_system, native_version, state)) = current else {
+        return rejected(
+            transaction,
+            request_id,
+            command_kind,
+            &member,
+            &payload,
+            Some(account_ref),
+            None,
+            "ops_native_account_not_found",
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+    };
+    let Some(current_version) = native_version.filter(|_| source_system == "linggan_native") else {
+        return rejected(
+            transaction,
+            request_id,
+            command_kind,
+            &member,
+            &payload,
+            Some(account_ref),
+            None,
+            "ops_native_account_not_editable",
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    };
+    if !can_write_account(&mut transaction, &member, account_ref).await? {
+        return rejected(
+            transaction,
+            request_id,
+            command_kind,
+            &member,
+            &payload,
+            Some(account_ref),
+            Some(current_version),
+            "ops_native_forbidden",
+            StatusCode::FORBIDDEN,
+        )
+        .await;
+    }
+    if body.expected_version != current_version {
+        return stale_for(
+            transaction,
+            request_id,
+            command_kind,
+            &member,
+            &payload,
+            account_ref,
+            current_version,
+            "ops_native_version_stale",
+        )
+        .await;
+    }
+    let wanted = if archive { "archived" } else { "active" };
+    if state.as_deref() == Some(wanted) {
+        let receipt = unchanged(
+            request_id,
+            command_kind,
+            &member,
+            &payload,
+            account_ref,
+            current_version,
+            "ops_native_unchanged",
+        );
+        insert_receipt(&mut transaction, &receipt).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(|_| WriteError::Unavailable)?;
+        return Ok((StatusCode::OK, receipt.receipt));
+    }
+    let next_version = current_version + 1;
+    if archive {
+        sqlx::query("UPDATE linggan_ops_account SET native_record_state='archived',ledger_state='native_archived', \
+                     native_archived_at=scope_001_now(),native_archive_reason=$2,native_version=$3,native_updated_by_member_ref=$4 \
+                     WHERE account_ref=$1")
+            .bind(account_ref).bind(&reason).bind(next_version).bind(member.member_ref).execute(&mut *transaction).await
+            .map_err(|_| WriteError::Unavailable)?;
+    } else {
+        sqlx::query("UPDATE linggan_ops_account SET native_record_state='active',ledger_state='native_active', \
+                     native_archived_at=NULL,native_archive_reason=NULL,native_version=$2,native_updated_by_member_ref=$3 \
+                     WHERE account_ref=$1")
+            .bind(account_ref).bind(next_version).bind(member.member_ref).execute(&mut *transaction).await
+            .map_err(|_| WriteError::Unavailable)?;
+    }
+    let receipt = accepted(
+        request_id,
+        command_kind,
+        &member,
+        &payload,
+        account_ref,
+        next_version,
+    );
+    insert_receipt(&mut transaction, &receipt).await?;
+    transaction
+        .commit()
+        .await
+        .map_err(|_| WriteError::Unavailable)?;
+    Ok((StatusCode::OK, receipt.receipt))
 }
 
 async fn write_publication(
@@ -1530,7 +2019,14 @@ async fn insert_receipt(
     .bind(&pending.receipt.code)
     .execute(&mut **transaction)
     .await
-    .map_err(|_| WriteError::Unavailable)?;
+    .map_err(|error| {
+        eprintln!(
+            "ops native receipt unavailable: command_kind={} database_kind={:?}",
+            pending.command_kind,
+            error.as_database_error().and_then(|value| value.code())
+        );
+        WriteError::Unavailable
+    })?;
     Ok(())
 }
 
@@ -1884,6 +2380,41 @@ impl PreparedAccount {
         } else {
             "missing"
         }
+    }
+}
+
+struct PreparedAccountUpdate {
+    request_id: Uuid,
+    expected_version: i64,
+    account_name: String,
+    profile_url: Option<String>,
+    handle: Option<String>,
+    status: String,
+    is_retained: bool,
+    follower_count: Option<i64>,
+    device_code: Option<String>,
+    ip_location: Option<String>,
+    notes: Option<String>,
+}
+
+impl PreparedAccountUpdate {
+    fn parse(body: UpdateAccountBody) -> Result<Self, WriteError> {
+        if body.expected_version < 1 || body.follower_count.is_some_and(|value| value < 0) {
+            return Err(WriteError::Invalid("ops_native_account_update_invalid"));
+        }
+        Ok(Self {
+            request_id: body.request_id,
+            expected_version: body.expected_version,
+            account_name: required(&body.account_name, 512)?,
+            profile_url: optional_url(body.profile_url)?,
+            handle: optional(body.handle, 512)?,
+            status: choice(&body.status, &["active", "warming", "paused"])?,
+            is_retained: body.is_retained,
+            follower_count: body.follower_count,
+            device_code: optional(body.device_code, 512)?,
+            ip_location: optional(body.ip_location, 512)?,
+            notes: optional(body.notes, 4_000)?,
+        })
     }
 }
 

@@ -188,6 +188,9 @@ it("requires nullable account fields without replacing missing values with unkno
     currentResponsibleMemberRef: null,
     currentResponsibleName: null,
     responsibilityVersion: 1,
+    nativeVersion: null,
+    nativeState: null,
+    handle: null,
     operator: null,
     status: null,
     health: { state: "not_filled" },
@@ -197,9 +200,10 @@ it("requires nullable account fields without replacing missing values with unkno
   expect(
     api.accounts({ ...page, items: [account] }).items[0]?.followerCount,
   ).toBeNull();
-  for (const key of ["profileUrl", "followerCount", "currentResponsibleName", "responsibilityVersion", "isRetained"]) {
+  for (const key of ["profileUrl", "followerCount", "currentResponsibleName", "responsibilityVersion", "nativeVersion", "nativeState", "handle", "isRetained"]) {
     expect(() =>
       api.accounts({ ...page, items: [without(account, key)] }),
     ).toThrow();
   }
+  expect(() => api.accounts({ ...page, items: [{ ...account, nativeState: "retired" }] })).toThrow();
 });

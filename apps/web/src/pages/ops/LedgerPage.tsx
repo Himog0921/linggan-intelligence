@@ -24,6 +24,7 @@ import { NativeDailyDialog } from "./NativeDailyDialog";
 import { NativeViewDialog } from "./NativeViewDialog";
 import { NativeViewBatchDialog } from "./NativeViewBatchDialog";
 import { AccountResponsibilityDialog } from "./AccountResponsibilityDialog";
+import { NativeAccountArchiveDialog, NativeAccountEditDialog } from "./NativeAccountLifecycleDialog";
 import { PublicationSyncDialog } from "./PublicationSyncDialog";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
@@ -159,6 +160,8 @@ export function LedgerPage({
   const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
   const [batchViews, setBatchViews] = useState(false);
   const [responsibilityAccount, setResponsibilityAccount] = useState<api.Account | null>(null);
+  const [editingAccount, setEditingAccount] = useState<api.Account | null>(null);
+  const [lifecycleAccount, setLifecycleAccount] = useState<{ account: api.Account; restore: boolean } | null>(null);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
@@ -406,7 +409,7 @@ export function LedgerPage({
               ))
             ) : kind === "accounts" && accounts.data?.items.length ? (
               accounts.data.items.map((item, i) => (
-                <AccountRow key={item.ref} item={item} index={i} transfer={setResponsibilityAccount} ready={members.isSuccess} />
+                <AccountRow key={item.ref} item={item} index={i} transfer={setResponsibilityAccount} edit={setEditingAccount} lifecycle={(account, restore) => setLifecycleAccount({ account, restore })} ready={members.isSuccess} />
               ))
             ) : kind === "daily" && daily.data?.items.length ? (
               daily.data.items.map((item) => (
@@ -523,13 +526,15 @@ export function LedgerPage({
         </div>
       </Dialog> : null}
       {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
-      {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items} close={() => setNewPublication(false)} /> : null}
+      {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items.filter(account => account.nativeState !== "archived")} close={() => setNewPublication(false)} /> : null}
       {syncPublications && pubs.data ? <PublicationSyncDialog publications={pubs.data.items} requestRef={syncRequestRef || undefined} close={() => { setSyncPublications(false); setSyncRequestRef(null); }} /> : null}
       {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
       {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
       {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
       {batchViews && pubs.data ? <NativeViewBatchDialog publications={pubs.data.items} close={() => setBatchViews(false)} /> : null}
       {responsibilityAccount && members.data ? <AccountResponsibilityDialog account={responsibilityAccount} members={members.data} close={() => setResponsibilityAccount(null)} /> : null}
+      {editingAccount ? <NativeAccountEditDialog account={editingAccount} close={() => setEditingAccount(null)} /> : null}
+      {lifecycleAccount ? <NativeAccountArchiveDialog account={lifecycleAccount.account} restore={lifecycleAccount.restore} close={() => setLifecycleAccount(null)} /> : null}
       {cover ? (
         <Dialog
           label="封面大图" outsideClose
@@ -769,7 +774,7 @@ function SyncTag({ item, openSync }: { item: api.Publication; openSync: (request
     <Tag tone={tone}>{syncLabels[sync.state]}</Tag>
   </button>;
 }
-function AccountRow({ item, index, transfer, ready }: { item: api.Account; index: number; transfer: (item: api.Account) => void; ready: boolean }) {
+function AccountRow({ item, index, transfer, edit, lifecycle, ready }: { item: api.Account; index: number; transfer: (item: api.Account) => void; edit: (item: api.Account) => void; lifecycle: (item: api.Account, restore: boolean) => void; ready: boolean }) {
   return (
     <tr>
       <td className={c("ops-number")}>{index + 1}</td>
@@ -785,6 +790,7 @@ function AccountRow({ item, index, transfer, ready }: { item: api.Account; index
           </span>
         )}
         {item.source === "native" ? <Tag title="由运营台账原生创建">原生</Tag> : null}
+        {item.nativeState === "archived" ? <Tag tone="warning" title="归档账号保留以便恢复，不可继续登记发布">已归档</Tag> : null}
       </td>
       <TextCell value={item.deviceCode} />
       <NumberCell value={item.followerCount} />
@@ -813,7 +819,11 @@ function AccountRow({ item, index, transfer, ready }: { item: api.Account; index
         )}
       </td>
       <TextCell value={item.notes} />
-      <td><ActionButton type="button" disabled={!ready} title={ready ? "按当前权限与同组关系校验" : "正在读取可选成员"} onClick={() => transfer(item)}>交接</ActionButton></td>
+      <td><div className={c("ops-stack")}>
+        {item.source === "native" && item.nativeVersion !== null && item.nativeState !== "archived" ? <><ActionButton type="button" onClick={() => edit(item)}>编辑</ActionButton><ActionButton type="button" onClick={() => lifecycle(item, false)}>归档</ActionButton></> : null}
+        {item.source === "native" && item.nativeVersion !== null && item.nativeState === "archived" ? <ActionButton type="button" onClick={() => lifecycle(item, true)}>恢复</ActionButton> : null}
+        {item.nativeState !== "archived" ? <ActionButton type="button" disabled={!ready} title={ready ? "按当前权限与同组关系校验" : "正在读取可选成员"} onClick={() => transfer(item)}>交接</ActionButton> : null}
+      </div></td>
     </tr>
   );
 }

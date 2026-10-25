@@ -445,7 +445,10 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     assert_eq!(batch["items"][0]["status"], StatusCode::CREATED.as_u16());
     assert_eq!(batch["items"][0]["receipt"]["outcome"], "accepted");
     let batch_publication_ref = uuid(&batch["items"][0]["receipt"]["recordRef"]);
-    assert_eq!(batch["items"][1]["status"], StatusCode::UNPROCESSABLE_ENTITY.as_u16());
+    assert_eq!(
+        batch["items"][1]["status"],
+        StatusCode::UNPROCESSABLE_ENTITY.as_u16()
+    );
     assert_eq!(
         batch["items"][1]["receipt"]["code"],
         "ops_native_publication_date_invalid"
@@ -462,10 +465,19 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     )
     .await;
     assert_eq!(batch_view_status, StatusCode::OK);
-    assert_eq!(batch_view["items"][0]["status"], StatusCode::CREATED.as_u16());
+    assert_eq!(
+        batch_view["items"][0]["status"],
+        StatusCode::CREATED.as_u16()
+    );
     assert_eq!(batch_view["items"][0]["receipt"]["outcome"], "accepted");
-    assert_eq!(batch_view["items"][1]["status"], StatusCode::NOT_FOUND.as_u16());
-    assert_eq!(batch_view["items"][1]["receipt"]["code"], "ops_native_publication_not_found");
+    assert_eq!(
+        batch_view["items"][1]["status"],
+        StatusCode::NOT_FOUND.as_u16()
+    );
+    assert_eq!(
+        batch_view["items"][1]["receipt"]["code"],
+        "ops_native_publication_not_found"
+    );
 
     let mut invalid_publication = publication_body(Uuid::new_v4(), account_ref);
     invalid_publication["publishedOn"] = Value::String("2026-02-30".to_owned());
@@ -698,6 +710,280 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
     assert_eq!(
         (native_day.followers_gained, native_day.hits),
         (Some(0), Some(0))
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn native_account_lifecycle_is_versioned_idempotent_and_never_edits_imported_rows() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_al_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let owner = member(
+        database.pool(),
+        "account-lifecycle-owner@example.test",
+        "账号负责人",
+        "operator",
+    )
+    .await;
+    let other = member(
+        database.pool(),
+        "account-lifecycle-other@example.test",
+        "无关运营",
+        "operator",
+    )
+    .await;
+    let domain = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO observation_domain (domain_ref,name) VALUES($1,'账号生命周期合成领域')",
+    )
+    .bind(domain)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let owner_cookie = session(database.pool(), owner).await;
+    let other_cookie = session(database.pool(), other).await;
+    let app = app_with_database(database.clone());
+
+    let (created_status, created) = post(
+        app.clone(),
+        "/api/local/ops/native/accounts",
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(),
+            "domainRef": domain,
+            "platform": "xhs",
+            "accountName": "生命周期账号",
+            "profileUrl": "https://example.test/xhs/lifecycle",
+            "platformUserId": "0123456789abcdef01234567"
+        }),
+    )
+    .await;
+    assert_eq!(created_status, StatusCode::CREATED);
+    let account_ref = uuid(&created["receipt"]["recordRef"]);
+
+    let update_body = json!({
+        "requestId": Uuid::new_v4(),
+        "expectedVersion": 1,
+        "accountName": "生命周期账号（已维护）",
+        "profileUrl": "https://example.test/xhs/lifecycle",
+        "handle": "lifecycle",
+        "status": "warming",
+        "isRetained": true,
+        "followerCount": 0,
+        "deviceCode": "dev-lifecycle",
+        "ipLocation": "上海",
+        "notes": "隔离生命周期测试"
+    });
+    let (update_status, updated) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}"),
+        Some(&owner_cookie),
+        update_body.clone(),
+    )
+    .await;
+    assert_eq!(update_status, StatusCode::OK);
+    assert_eq!(updated["receipt"]["outcome"], "accepted");
+    assert_eq!(updated["receipt"]["resultingVersion"], 2);
+    let (replay_status, replay) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}"),
+        Some(&owner_cookie),
+        update_body,
+    )
+    .await;
+    assert_eq!(replay_status, StatusCode::OK);
+    assert_eq!(replay["receipt"]["replayed"], true);
+    let row: (
+        String,
+        String,
+        Option<String>,
+        String,
+        bool,
+        Option<i64>,
+        i64,
+    ) = sqlx::query_as(
+        "SELECT account_name,status,handle,notes,is_retained,follower_count,native_version \
+         FROM linggan_ops_account WHERE account_ref=$1",
+    )
+    .bind(account_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        row,
+        (
+            "生命周期账号（已维护）".to_owned(),
+            "warming".to_owned(),
+            Some("lifecycle".to_owned()),
+            "隔离生命周期测试".to_owned(),
+            true,
+            Some(0),
+            2,
+        )
+    );
+    let (unchanged_status, unchanged) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}"),
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "expectedVersion": 2,
+            "accountName": "生命周期账号（已维护）", "profileUrl": "https://example.test/xhs/lifecycle",
+            "handle": "lifecycle", "status": "warming", "isRetained": true, "followerCount": 0,
+            "deviceCode": "dev-lifecycle", "ipLocation": "上海", "notes": "隔离生命周期测试"
+        }),
+    )
+    .await;
+    assert_eq!(unchanged_status, StatusCode::OK);
+    assert_eq!(unchanged["receipt"]["outcome"], "unchanged");
+    assert_eq!(unchanged["receipt"]["resultingVersion"], 2);
+    let (stale_status, stale) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}"),
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "expectedVersion": 1,
+            "accountName": "过期写入", "profileUrl": null, "handle": null, "status": "active",
+            "isRetained": true, "followerCount": null, "deviceCode": null, "ipLocation": null, "notes": null
+        }),
+    )
+    .await;
+    assert_eq!(stale_status, StatusCode::CONFLICT);
+    assert_eq!(stale["receipt"]["outcome"], "stale");
+    let (denied_status, denied) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}"),
+        Some(&other_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "expectedVersion": 2,
+            "accountName": "越权写入", "profileUrl": null, "handle": null, "status": "active",
+            "isRetained": true, "followerCount": null, "deviceCode": null, "ipLocation": null, "notes": null
+        }),
+    )
+    .await;
+    assert_eq!(denied_status, StatusCode::FORBIDDEN);
+    assert_eq!(denied["receipt"]["code"], "ops_native_forbidden");
+
+    let archive_body = json!({
+        "requestId": Uuid::new_v4(), "expectedVersion": 2, "reason": "账号暂停运营"
+    });
+    let (archive_status, archived) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}/archive"),
+        Some(&owner_cookie),
+        archive_body.clone(),
+    )
+    .await;
+    assert_eq!(archive_status, StatusCode::OK);
+    assert_eq!(archived["receipt"]["resultingVersion"], 3);
+    let (_, archive_replay) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}/archive"),
+        Some(&owner_cookie),
+        archive_body,
+    )
+    .await;
+    assert_eq!(archive_replay["receipt"]["replayed"], true);
+    let archived_row: (String, String, Option<String>, i64) = sqlx::query_as(
+        "SELECT native_record_state,ledger_state,native_archive_reason,native_version \
+         FROM linggan_ops_account WHERE account_ref=$1",
+    )
+    .bind(account_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        archived_row,
+        (
+            "archived".to_owned(),
+            "native_archived".to_owned(),
+            Some("账号暂停运营".to_owned()),
+            3,
+        )
+    );
+    let (inactive_status, inactive) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}"),
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "expectedVersion": 3,
+            "accountName": "不应写入", "profileUrl": null, "handle": null, "status": "active",
+            "isRetained": true, "followerCount": null, "deviceCode": null, "ipLocation": null, "notes": null
+        }),
+    )
+    .await;
+    assert_eq!(inactive_status, StatusCode::CONFLICT);
+    assert_eq!(inactive["receipt"]["code"], "ops_native_account_inactive");
+    let (restore_status, restored) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/accounts/{account_ref}/restore"),
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "expectedVersion": 3, "reason": "恢复排期"
+        }),
+    )
+    .await;
+    assert_eq!(restore_status, StatusCode::OK);
+    assert_eq!(restored["receipt"]["resultingVersion"], 4);
+    let restored_row: (String, String, Option<String>, bool, i64) = sqlx::query_as(
+        "SELECT native_record_state,ledger_state,native_archive_reason,native_archived_at IS NULL,native_version \
+         FROM linggan_ops_account WHERE account_ref=$1",
+    )
+    .bind(account_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(restored_row.0, "active");
+    assert_eq!(restored_row.1, "native_active");
+    assert!(restored_row.2.is_none() && restored_row.3);
+    assert_eq!(restored_row.4, 4);
+
+    sqlx::query(
+        "INSERT INTO observation_domain (domain_ref,name) VALUES($1,'历史迁入合成业务') \
+         ON CONFLICT (domain_ref) DO NOTHING",
+    )
+    .bind(ops_export::ADHD_DOMAIN)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let historical_request = ops_export::first_export().request("2026-10-12T22:43:00+08:00");
+    let historical_preview = preview_ops_import(&database, &historical_request)
+        .await
+        .unwrap();
+    apply_ops_import(
+        &database,
+        &historical_request,
+        &historical_preview.preview_hash,
+    )
+    .await
+    .unwrap();
+    let imported_ref: Uuid = sqlx::query_scalar(
+        "SELECT account_ref FROM linggan_ops_account WHERE source_system='content_workbench' LIMIT 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let (imported_status, imported) = post(
+        app,
+        &format!("/api/local/ops/native/accounts/{imported_ref}"),
+        Some(&owner_cookie),
+        json!({
+            "requestId": Uuid::new_v4(), "expectedVersion": 1,
+            "accountName": "不能覆盖历史", "profileUrl": null, "handle": null, "status": "active",
+            "isRetained": true, "followerCount": null, "deviceCode": null, "ipLocation": null, "notes": null
+        }),
+    )
+    .await;
+    assert_eq!(imported_status, StatusCode::FORBIDDEN);
+    assert_eq!(
+        imported["receipt"]["code"],
+        "ops_native_account_not_editable"
     );
 }
 

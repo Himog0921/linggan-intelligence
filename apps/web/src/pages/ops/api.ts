@@ -203,6 +203,12 @@ function account(r: R) {
     currentResponsibleMemberRef: sn(r, "currentResponsibleMemberRef"),
     currentResponsibleName: sn(r, "currentResponsibleName"),
     responsibilityVersion: n(r, "responsibilityVersion"),
+    nativeVersion: nn(r, "nativeVersion"),
+    nativeState: (() => {
+      const value = d.field(r, "nativeState");
+      return value === null ? null : enumeration(r, "nativeState", ["active", "archived"] as const);
+    })(),
+    handle: sn(r, "handle"),
     operator: sn(r, "operator"),
     status: sn(r, "status"),
     health: enumeration(d.obj(r, "health"), "state", ["not_filled"]),
@@ -350,6 +356,22 @@ export type NativeAccountCommand = {
 /** The caller owns the UUID so an unanswered request can be retried without duplicating facts. */
 export async function createNativeAccount(command: NativeAccountCommand & { requestId: string }) {
   return nativeCommand("/api/local/ops/native/accounts", command, command.requestId);
+}
+
+export type NativeAccountUpdateCommand = {
+  expectedVersion: number; accountName: string; profileUrl: string | null; handle: string | null;
+  status: "active" | "warming" | "paused"; isRetained: boolean; followerCount: number | null;
+  deviceCode: string | null; ipLocation: string | null; notes: string | null;
+};
+export async function updateNativeAccount(accountRef: string, command: NativeAccountUpdateCommand & { requestId: string }) {
+  return nativeCommand(`/api/local/ops/native/accounts/${encodeURIComponent(accountRef)}`, command, command.requestId);
+}
+export type NativeAccountLifecycleCommand = { expectedVersion: number; reason: string };
+export async function archiveNativeAccount(accountRef: string, command: NativeAccountLifecycleCommand & { requestId: string }) {
+  return nativeCommand(`/api/local/ops/native/accounts/${encodeURIComponent(accountRef)}/archive`, command, command.requestId);
+}
+export async function restoreNativeAccount(accountRef: string, command: NativeAccountLifecycleCommand & { requestId: string }) {
+  return nativeCommand(`/api/local/ops/native/accounts/${encodeURIComponent(accountRef)}/restore`, command, command.requestId);
 }
 
 export type NativeAccountResponsibilityCommand = {
