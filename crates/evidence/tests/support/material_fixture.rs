@@ -473,29 +473,29 @@ pub async fn proof_database_with_ops_ledger(schema: &str) -> Database {
         include_str!("../../../../database/migrations/0143_ocr_quality_audit.sql"),
         include_str!("../../../../database/migrations/0144_ocr_manual_recognition.sql"),
         include_str!("../../../../database/migrations/0145_ocr_manual_human_adoption.sql"),
-        include_str!("../../../../database/migrations/0150_ops_team_auth.sql"),
-        include_str!("../../../../database/migrations/0151_ops_team_responsibility.sql"),
-        include_str!("../../../../database/migrations/0152_ops_first_admin_bootstrap.sql"),
-        include_str!("../../../../database/migrations/0153_ops_native_write_model.sql"),
+        include_str!("../../../../database/migrations/0151_ops_team_auth.sql"),
+        include_str!("../../../../database/migrations/0152_ops_team_responsibility.sql"),
+        include_str!("../../../../database/migrations/0153_ops_first_admin_bootstrap.sql"),
+        include_str!("../../../../database/migrations/0154_ops_native_write_model.sql"),
         include_str!(
-            "../../../../database/migrations/0154_ops_native_publication_date_precision.sql"
+            "../../../../database/migrations/0155_ops_native_publication_date_precision.sql"
         ),
-        include_str!("../../../../database/migrations/0155_ops_publication_sync_request.sql"),
-        include_str!("../../../../database/migrations/0156_ops_publication_execution_locator.sql"),
-        include_str!("../../../../database/migrations/0157_ops_account_responsibility_command.sql"),
-        include_str!("../../../../database/migrations/0158_ops_member_deactivation.sql"),
-        include_str!("../../../../database/migrations/0159_ops_exact_publication_work_scope.sql"),
+        include_str!("../../../../database/migrations/0156_ops_publication_sync_request.sql"),
+        include_str!("../../../../database/migrations/0157_ops_publication_execution_locator.sql"),
+        include_str!("../../../../database/migrations/0158_ops_account_responsibility_command.sql"),
+        include_str!("../../../../database/migrations/0159_ops_member_deactivation.sql"),
+        include_str!("../../../../database/migrations/0160_ops_exact_publication_work_scope.sql"),
         include_str!(
-            "../../../../database/migrations/0160_ops_exact_publication_detail_session.sql"
-        ),
-        include_str!(
-            "../../../../database/migrations/0161_ops_publication_execution_input_eligibility.sql"
+            "../../../../database/migrations/0161_ops_exact_publication_detail_session.sql"
         ),
         include_str!(
-            "../../../../database/migrations/0162_ops_publication_material_projection.sql"
+            "../../../../database/migrations/0162_ops_publication_execution_input_eligibility.sql"
         ),
-        include_str!("../../../../database/migrations/0163_ops_publication_field_adoption.sql"),
-        include_str!("../../../../database/migrations/0164_ops_publication_media_projection.sql"),
+        include_str!(
+            "../../../../database/migrations/0163_ops_publication_material_projection.sql"
+        ),
+        include_str!("../../../../database/migrations/0164_ops_publication_field_adoption.sql"),
+        include_str!("../../../../database/migrations/0165_ops_publication_media_projection.sql"),
     ]
     .concat();
     isolated_proof_schema(&url, schema, &migrations)

@@ -2,13 +2,13 @@
 
 > 状态: 权威当前
 > 最后核对: 2026-10-23
-> 适用范围: 已迁移 `0152_ops_first_admin_bootstrap` 的本地 Linggan 运行库中，建立唯一首位 Ops 管理员的控制台动作。
-> 事实来源: `0152_ops_first_admin_bootstrap.sql`、`scripts/local-runtime.sh`、OPS-AUTH-001、OPS-LAUNCH-001 与隔离 runtime proof。
+> 适用范围: 已迁移 `0153_ops_first_admin_bootstrap` 的本地 Linggan 运行库中，建立唯一首位 Ops 管理员的控制台动作。
+> 事实来源: `0153_ops_first_admin_bootstrap.sql`、`scripts/local-runtime.sh`、OPS-AUTH-001、OPS-LAUNCH-001 与隔离 runtime proof。
 > 冲突时以谁为准: Mog 对精确环境和名单的授权、实际 migration ledger、OPS-AUTH-001 与运行时命令的 fail-closed 行为。
 
 ## 1. 何时可以执行
 
-这不是公共注册、HTTP 接口或部署后自动步骤。只有在已获该环境的首位管理员名单授权、服务已按受控迁移流程停止、`0152` 已由显式迁移写入同一数据库 ledger 时，才可由本地运行库操作者执行一次。
+这不是公共注册、HTTP 接口或部署后自动步骤。只有在已获该环境的首位管理员名单授权、服务已按受控迁移流程停止、`0153` 已由显式迁移写入同一数据库 ledger 时，才可由本地运行库操作者执行一次。
 
 真实邮箱、显示名和令牌不写入 Git、工单、日志或运行回执。没有名单/环境授权时，保留未初始化状态；不得用合成姓名替代真实成员，也不得通过 SQL 手工插行绕开此命令。
 
@@ -30,6 +30,6 @@ unset bootstrap_token bootstrap_email bootstrap_display_name
 
 ## 3. 拒绝条件与核对
 
-命令在下列任一情况失败且不写入：确认值/输入格式不正确、服务仍运行、数据库凭据或本机端口不可信、`0152` relation 或 ledger checksum 不匹配、任意 Ops 成员已存在，或 bootstrap 回执已存在。事务以 advisory lock 串行化并同时检查“无成员、无 bootstrap 回执”；第二次调用不能创建第二身份。
+命令在下列任一情况失败且不写入：确认值/输入格式不正确、服务仍运行、数据库凭据或本机端口不可信、`0153` relation 或 ledger checksum 不匹配、任意 Ops 成员已存在，或 bootstrap 回执已存在。事务以 advisory lock 串行化并同时检查“无成员、无 bootstrap 回执”；第二次调用不能创建第二身份。
 
 执行后仅核对受控数据库中的 bootstrap 回执、关联成员为 `admin/invited` 和邀请摘要存在。不要查询或记录原始令牌。接受邀请、真实邮件送达、HTTPS、实际团队使用、推送、合并和部署均是独立阶段，不能由此命令或隔离 proof 推断。
