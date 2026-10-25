@@ -74,8 +74,7 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
     refetchOnWindowFocus: false,
   });
   const history = commentCollectionRows(inspector.commentsHistory);
-  const roots = inspector.commentsCoverage?.retained ?? null;
-  const replies = inspector.repliesCoverage?.retained ?? null;
+  const cumulative = inspector.commentsReceipt?.total ?? null;
   const target = mode === 'count' ? parseCommentTarget(targetText) : null;
   const invalidTarget = mode === 'count' && target === null;
   // 这一次已经建好且还没结束：不再重复建；结束了可以再采一次（新请求、新身份）。
@@ -124,7 +123,7 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
   return (
     <Section title="评论深采">
       <p className={styles.lead}>
-        {`平台显示 ${metricReading(item.display.engagement.comment)} 条评论 · 最近记录：评论 ${count(roots)} 条、回复 ${count(replies)} 条`}
+        {`平台显示 ${metricReading(item.display.engagement.comment)} 条评论 · 累计已采到 ${count(cumulative)} 条`}
       </p>
       {history.length === 0 ? (
         <SourceNote>还没有采过这篇的评论。</SourceNote>
