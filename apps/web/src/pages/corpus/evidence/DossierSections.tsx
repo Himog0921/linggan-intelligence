@@ -48,7 +48,7 @@ function MaterialSource({ unit, work, domain, imageNumber, onOpenImage, onApplie
   </details>;
   return <section className={styles.material} data-source-unit-ref={unit.ref} tabIndex={-1}>
     <header className={styles.materialHead}><h4>{materialLabel(unit, imageNumber)} · 原件</h4></header>
-    {unit.kind === 'image' || unit.kind === 'video_frame' ? <ImageCompare key={unit.originalUrl} material={unit} onOpenImage={onOpenImage} onReadable={setOriginalReadable} /> : unit.originalUrl ? <a href={unit.originalUrl} target="_blank" rel="noreferrer">查看音视频原件</a> : null}
+    {unit.kind === 'image' ? <ImageCompare key={unit.originalUrl} material={unit} onOpenImage={onOpenImage} onReadable={setOriginalReadable} /> : unit.originalUrl ? <a href={unit.originalUrl} target="_blank" rel="noreferrer">查看音视频原件</a> : null}
     {unit.kind !== 'tags' && unit.sourceState === 'present' && (unit.currentRevisionRef !== null || unit.kind === 'image') ? <ReadingReviewPanel unit={unit} work={work} domain={domain} onApplied={onApplied} originalReadable={originalReadable} /> : null}
     <details className={styles.disclosure}><summary>来源与读本版本</summary>{unit.reading !== null ? <p className={styles.note}>{readingLabel(unit)}</p> : null}{unit.pageSource ? <p className={styles.note}>页序由已验证的同图来源确认。</p> : null}<pre className={styles.pre}>{JSON.stringify({ unitRef: unit.ref, sourceRef: unit.sourceRef, sourceVersion: unit.sourceVersion, currentRevisionRef: unit.currentRevisionRef, processing: unit.processing, issues: unit.issues, pageSource: unit.pageSource, reading: unit.reading }, null, 2)}</pre></details>
   </section>;

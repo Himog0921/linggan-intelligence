@@ -39,7 +39,7 @@ base / origin/main / 3000 起始均为 `df6dde9e87a6b72c4eeba5b84bd29043ae61d405
 | T13 | 真实共享输入和末端适配检查；作者/主题fragments、评论context_sources、工作台、离线输入 | 已通过 |
 | T14 | React→Axum→一次性PG；刷新/切换/原件/采用/结构化编辑/保留当前/导出；1440、1280、390 | 实际浏览器及视觉增量通过 |
 
-原生100%浏览器第一轮 `browser-frontend-focused/` 的22次几何检查、三次真实修正命令通过。审查修复后 `browser-reviewed/` 通过26次宽度/指标几何检查与三次修正命令，pageErrors/consoleErrors/blockedRequests均为空；视频为1主文块+3补充块。聚焦图展示视频补充、失败材料与实际加载原图，内容避开sticky页头。随后主线集成候选的最终截图目录为 `browser-integrated/`，26次几何检查和3次修正通过、三类浏览器错误均为空；运行版本与URL/dataSource由该目录fixture及evidence-receipt记录。
+原生100%浏览器第一轮 `browser-frontend-focused/` 的22次几何检查、三次真实修正命令通过。审查修复后 `browser-reviewed/` 通过26次宽度/指标几何检查与三次修正命令，pageErrors/consoleErrors/blockedRequests均为空；视频为1主文块+3补充块。聚焦图展示视频补充、失败材料与实际加载原图，内容避开sticky页头。随后主线集成候选的截图目录为 `browser-integrated/`，最终原视频入口修复后的截图为 `browser-final/`，两轮均26次几何检查和3次修正通过、三类浏览器错误均为空；最终浏览器还对audio/video_frame两种材料的原视频链接执行实际同源GET，均200/video/mp4、有字节且未交给图片解码；运行版本与URL/dataSource由该目录fixture及evidence-receipt记录。
 
 原生100%浏览器截图五组：`standard-dossier-1-*`无正文多图，2有正文与图片补充，3视频，4部分失败，5无文字原件。每组1440与1280；fixture.json/report.json记录随机候选URL、作品/域和数据来源。额外两组优先重用本机保存材料：6为N25无正文四图（46主文块），7为N20有正文三图（1主文+31补充块）。原图字节通过3000已有本地原件GET读取，sha256核对；OCR块来自本地已保存的显式预览结果，复制到一次性数据库作为离线回放，**没有采用到生产当前读本**。真实材料和合成场景都连接实际React→Axum→隔离PG，无响应mock。私有manifest/原图/输出不进Git；带私有manifest的GitHub Actions执行被拒绝。
 
@@ -52,6 +52,7 @@ base / origin/main / 3000 起始均为 `df6dde9e87a6b72c4eeba5b84bd29043ae61d405
 | 无平台标题的列表/检查器 | 列表请求panic，底稿无法从实际页面打开 | 原末端强制取layout_ref，canonical阅读来源不一定有layout | 取可空layout来源并保留unit/reading引用 | 首次browser-pg.log失败，browser-pg-fixed.log整链通过 | 已修复 |
 | ASR无输出 | 诊断占位语进入“正文” | complete_without_output写gap假文字 | 空blocks+实际状态，无语音与无音轨分开 | 真实PG边界通过 | 已修复 |
 | 部分可读 | 离线入口按整篇ready/列状态拒绝已有块 | 完整性与可读性混用 | 保留coverage，使用已有合格fragment | 纯函数与真实共享输入通过 | 已修复 |
+| 视频原件入口（收尾补查） | 视频帧原件指向MP4，展开图片对照将坏图 | 新原件链接接入后旧组件仍将video_frame视作图片 | 只有image进ImageCompare；audio/video_frame走已有音视频原件链接 | 组件2种回归、最终3文件45测试；真实浏览器两次MP4 GET | 已修复 |
 | 全gap识别结果（独立审查P2） | 诊断占位被算作可用原文 | 非空字符串代替来源文字资格 | 共享has_source_text、全gap内部fragments为空，公开诊断/原件保留，混合文字保留 | 离线22测试、共享消费者PG的gap-only用例及前端24测试 | 已修复 |
 | 视频主文（独立审查P2） | 封面和口播同时进入主文 | 无正文时无条件提升图片 | 有可读口播/画面时封面归补充，正文图片独立保留，封面单独可用时可作主文 | 12组装、9底稿PG、视频浏览器1+3引用 | 已修复 |
 | 连续分段（独立审查P2） | 续段只有标签+图片时改变原顺序 | segment调用selection后重新提升补充 | 过滤冻结分区及有序引用，显式selection仍重建 | 实际HTTP 463块连续遍历，size38跨正文/补充边界 | 已修复 |
@@ -69,6 +70,6 @@ base / origin/main / 3000 起始均为 `df6dde9e87a6b72c4eeba5b84bd29043ae61d405
 
 独立只读审查初始实现提交 `ff1cbf2ae50e255ac2d0d2aaca5dbbee5b9a7fec`，发现上述3项P2；修复提交 `38b636d245d482c98337ca4de2a36222b5f36a31`。原审阅者只复核受影响增量，结论PASS，3项均关闭、无新增阻断。复核日志的实际成功数：组装12、离线22、canonical-inputs28、shared-consumers30（前次口头31已按逐条日志求和校正），隔离资源清理验证通过；前端gap修复2文件24测试及类型/lint通过。
 
-收尾时主线及3000已由另一工作包推进到 `34e7084019485aa563d8e41353689445ef3cb8b4`（PR #494累计评论数），不是本包发布。本包合入该主线形成 `d6abf272a0e1e73b225743393889d23f29a4c4be`；仅页面规格末尾追加发生冲突，保留双方原意，没有覆盖累计数代码。主线集成后typecheck与3文件43测试通过；浏览器重新构建验证。后续仅报告/状态记录改变时不重复全仓审查，最终head与远端CI以PR实际回执为准。
+收尾时主线及3000已由另一工作包推进到 `34e7084019485aa563d8e41353689445ef3cb8b4`（PR #494累计评论数），不是本包发布。本包合入该主线形成 `d6abf272a0e1e73b225743393889d23f29a4c4be`；仅页面规格末尾追加发生冲突，保留双方原意，没有覆盖累计数代码。主线集成后typecheck与3文件43测试通过；浏览器重新构建验证。收尾补查的原视频入口只修一处渲染条件并补两类组件/真实GET测试，原审阅者只复核该增量，关联提交及结论见PR实际回执。后续仅报告/状态记录改变时不重复全仓审查，最终head与远端CI以PR实际回执为准。
 
 本报告不把候选截图标成3000。主线与3000尚不包含本包；无本包最终head的发布授权，Mog前端业务验收与合并部署待定。生产历史整理范围也仍待确认：既有平台原文/合格本地layout，排除显式云预览，无新识别。没有新模型外发、更换引擎或追加审核体系。

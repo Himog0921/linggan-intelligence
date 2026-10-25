@@ -220,6 +220,22 @@ try {
       await checkWidth(`${scenario.name} ${width}`);
       await snapshot(`standard-dossier-${index + 1}-${width}.png`);
     }
+    if (scenario.name === 'video-transcript') {
+      const mediaOriginals = dossier.materials.filter(unit => ['audio', 'video_frame'].includes(unit.kind));
+      assert.equal(mediaOriginals.length, 2);
+      for (const unit of mediaOriginals) {
+        const source = panel.locator(`[data-source-unit-ref="${unit.ref}"]`);
+        const link = source.getByRole('link', { name: '查看音视频原件', exact: true });
+        const url = new URL(await link.getAttribute('href'), origin);
+        assert.equal(url.origin, origin, 'video original stays on the owned candidate');
+        assert.equal(await source.locator('img').count(), 0, 'an original video is never decoded as an image');
+        const original = await context.request.get(url.href);
+        assert.equal(original.status(), 200);
+        assert.match(original.headers()['content-type'], /^video\/mp4/);
+        assert.ok((await original.body()).length > 0, 'saved original bytes are readable');
+      }
+      report.steps.push('Both video-derived units expose the actual local MP4 original through links, with successful same-origin video/mp4 GETs and no image decoder.');
+    }
     if (['video-transcript', 'partial-images', 'originals-only'].includes(scenario.name)) {
       for (const width of [1440, 1280]) {
         await page.setViewportSize({ width, height: 1000 });
@@ -227,6 +243,9 @@ try {
           const supplements = panel.getByRole('region', { name: '补充材料', exact: true });
           await focusBelowHeader(supplements);
           await snapshot(`standard-dossier-video-supplements-${width}.png`);
+          const audioUnit = dossier.materials.find(unit => unit.kind === 'audio');
+          await focusBelowHeader(panel.locator(`[data-source-unit-ref="${audioUnit.ref}"]`));
+          await snapshot(`standard-dossier-video-originals-${width}.png`);
         } else if (scenario.name === 'partial-images') {
           assert.ok(dossier.materials.some(unit => unit.processing?.state === 'failed'), 'partial fixture contains an actual failed processing receipt');
           const failure = panel.getByText(/^处理失败(?:，已有读本仍可读)?。$/).first();

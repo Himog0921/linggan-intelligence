@@ -71,3 +71,20 @@ it('重复缺口、页码提示与连续表达者标签不挤占正文', async (
   expect(screen.getByText('〔局部无法辨认〕')).toBeVisible();
   expect(screen.queryByText('图片原始页序未知')).not.toBeInTheDocument();
 });
+
+it.each(['audio', 'video_frame'] as const)('%s 的原视频使用音视频链接，不作为图片对照加载', async kind => {
+  const originalUrl = '/api/local/media/synthetic-original-video.mp4';
+  kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1, {
+    kind, page: null, originalUrl,
+    blocks: [{ ref: 'motion-text', kind: 'paragraph', text: '已取得的音视频文字完整保留' }],
+  })] })));
+  const view = mount();
+  expect(await screen.findByText('已取得的音视频文字完整保留')).toBeVisible();
+  const link = screen.getByRole('link', { name: '查看音视频原件' });
+  expect(link).toHaveAttribute('href', originalUrl);
+  expect(link).toHaveAttribute('target', '_blank');
+  expect(screen.queryByText(/^对照原图/)).not.toBeInTheDocument();
+  expect(screen.queryByText('放大查看原图')).not.toBeInTheDocument();
+  expect(view.container.querySelector('img')).toBeNull();
+  expect(screen.getByRole('button', { name: '核对与修正' })).toBeVisible();
+});
