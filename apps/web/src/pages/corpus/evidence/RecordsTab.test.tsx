@@ -72,14 +72,15 @@ describe('评论深采（Mog 2026-10-23）', () => {
     { observedAt: '2026-10-14T21:59:48Z', state: 'PARTIAL', collectionScope: 'detail_window', requestedLimit: 30, pageCommentCount: 37, expectedCount: 30, uniqueCollectedCount: 21, collectionState: 'partial', producerAcquired: 18, retained: 18, failed: 0 },
   ];
 
-  function setup(options: DetailOptions = {}) {
+  function setup(options: DetailOptions = {}, cumulative: number | null = 48) {
     const { item, inspector } = detail({ comments: 37, commentsHistory: history, commentsCoverage: { count: 18, countState: 'KNOWN', retained: 18 }, ...options });
+    inspector.commentsReceipt = { total: cumulative, returned: 0, truncated: true, nextCursor: null };
     return renderWithProviders(<CommentDeepCollect item={item} inspector={inspector} domain={DOMAIN} />);
   }
 
   it('先说现在采到多少、以前怎么采的；点「采全部评论」先确认，取消不发请求', async () => {
     const view = setup();
-    expect(screen.getByText('平台显示 37 条评论 · 最近记录：评论 18 条、回复 3 条')).toBeInTheDocument();
+    expect(screen.getByText('平台显示 37 条评论 · 累计已采到 48 条')).toBeInTheDocument();
     expect(screen.getByText('2026-10-15 05:59 · 随详情顺带采（最多 30 条） · 采到 21 条，当时页面显示 37 条')).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: '采全部评论' }));
     const dialog = screen.getByRole('dialog', { name: '确认评论深采' });
@@ -105,11 +106,11 @@ describe('评论深采（Mog 2026-10-23）', () => {
     expect(screen.getByRole('button', { name: '评论深采已提交' })).toBeDisabled();
   });
 
-  it.each([37, null])('各自最近记录与本轮采回%s条、首次新增0条分别展示，不拼接不同采集段', async received => {
+  it.each([37, null])('累计总数与本轮采回%s条、首次新增0条分别展示', async received => {
     kit.route('POST', RUNS, ok({ runRef: RUN, domainRef: DOMAIN, replayed: false }));
     kit.route('GET', `${RUNS}/${RUN}`, ok(runJson({ ended: true, received_comments: received, new_comments: 0 })));
-    const view = setup({ commentsCoverage: { count: 4, countState: 'KNOWN', retained: 4 } });
-    expect(screen.getByText('平台显示 37 条评论 · 最近记录：评论 4 条、回复 3 条')).toBeInTheDocument();
+    const view = setup({ commentsCoverage: { count: 8, countState: 'KNOWN', retained: 8 } }, 37);
+    expect(screen.getByText('平台显示 37 条评论 · 累计已采到 37 条')).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: '采全部评论' }));
     await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
     expect(await screen.findByText(`本轮已结束 · 本轮采回 ${received === null ? '未知' : received} 条 · 首次新增 0 条`)).toBeInTheDocument();
@@ -117,9 +118,27 @@ describe('评论深采（Mog 2026-10-23）', () => {
     expect(kit.of('GET', `${RUNS}/${RUN}`)).toHaveLength(1);
   });
 
-  it('最近评论数未知不抹掉已知回复数，也不把未知写成0', () => {
-    setup({ commentsCoverage: null });
-    expect(screen.getByText('平台显示 37 条评论 · 最近记录：评论 未知 条、回复 3 条')).toBeInTheDocument();
+  it.each([0, null])('累计数为%s时保留零/未知，不拿平台数、最近记录或历史合计补值', total => {
+    setup({}, total);
+    expect(screen.getByText(`平台显示 37 条评论 · 累计已采到 ${total === null ? '未知' : total} 条`)).toBeInTheDocument();
+  });
+
+  it('顶部读跨历史去重累计37，最近8和更早29/30保留在下面分段记录，不相加', () => {
+    setup({
+      commentsCoverage: { count: 8, countState: 'KNOWN', retained: 8 },
+      commentsHistory: [8, 29, 30].map((collected, index) => ({ ...history[0], observedAt: `2026-10-${14 - index}T10:01:00Z`, uniqueCollectedCount: collected })),
+    }, 37);
+    expect(screen.getByText('平台显示 37 条评论 · 累计已采到 37 条')).toBeInTheDocument();
+    const rows = within(screen.getByRole('list', { name: '评论采集记录' })).getAllByRole('listitem');
+    expect(rows).toHaveLength(3);
+    for (const [index, collected] of [8, 29, 30].entries()) expect(rows[index]).toHaveTextContent(`采到 ${collected} 条`);
+    expect(kit.calls).toHaveLength(0);
+  });
+
+  it('没有累计回执时写未知，即使最近记录和平台数都已知', () => {
+    const { item, inspector } = detail({ comments: 37 });
+    renderWithProviders(<CommentDeepCollect item={item} inspector={{ ...inspector, commentsReceipt: null }} domain={DOMAIN} />);
+    expect(screen.getByText('平台显示 37 条评论 · 累计已采到 未知 条')).toBeInTheDocument();
   });
 
   it('服务器明确拒绝：说「没有建立」和原因，按钮恢复，下一次是新请求', async () => {
