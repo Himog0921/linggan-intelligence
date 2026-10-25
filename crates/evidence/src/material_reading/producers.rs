@@ -50,12 +50,10 @@ pub async fn publish_job_in(
             .unwrap_or(&claim.processor_version)
             .to_owned()
     };
-    let publication = if producer == "local_vision" {
-        Publication::Candidate
-    } else {
-        Publication::Automatic {
-            expected_current: row.get("reading_base_ref"),
-        }
+    // This completion entry belongs to daily processing. Explicit cloud previews use
+    // publish_cloud_in below; historical candidates are never republished by a read.
+    let publication = Publication::Automatic {
+        expected_current: row.get("reading_base_ref"),
     };
     publish_source_in(
         conn,

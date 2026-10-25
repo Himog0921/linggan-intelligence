@@ -10,6 +10,11 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-10-25 · 统一研究底稿 STANDARD-DOSSIER-001
+
+- [实施、系统测试与问题报告](audits/standard-dossier-001-2026-10-25.md)：候选、截图、T01–T14证据及独立审查；正式发布另按最终版本授权。
+- [唯一底稿合同](data-contracts/research-dossier.md)：统一标题、主文/补充引用、部分可读和固定版本分段读取。
+
 ## 2026-10-23 · 研究底稿 v2
 
 - [唯一底稿合同](data-contracts/research-dossier.md)：完整区块、显式当前、独立校正、精确引用与按需表示。

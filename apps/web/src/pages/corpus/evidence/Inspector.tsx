@@ -1,3 +1,7 @@
+import { useQuery } from '@tanstack/react-query';
+import { fetchDossier } from './dossierApi';
+import { dossierKey } from './evidenceKeys';
+import { hideCachedReading } from './dossierPresent';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { CommentDeepCollect } from './CommentDeepCollect';
 import { DossierPanel } from './DossierPanel';
@@ -84,10 +88,11 @@ interface BodyProps {
   tab: TabKey;
   onRefresh: () => Promise<boolean>;
   onApplied: () => void;
+  displayedTitle: string;
 }
 
 /** 一件作品的面板内容。按作品引用重建：评论原文、复观测结果、底稿状态都不跨作品保留。 */
-function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyProps) {
+function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied, displayedTitle }: BodyProps) {
   const { item, inspector, channels } = detail;
   const commentsUrl = apiPath(channels.commentsUrl);
   const comments = useCommentChannel(commentsUrl);
@@ -111,7 +116,7 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied }: BodyP
       <Panel id="dossier" active={tab === 'dossier'}>
         <DossierPanel
           work={item.ref}
-          displayedTitle={workTitle(item)}
+          displayedTitle={displayedTitle}
           domain={domain}
           active={tab === 'dossier'}
           onOpenImage={media => setViewer({ objects: [singleViewerObject(media)], index: 0 })}
@@ -165,7 +170,10 @@ export function Inspector(props: InspectorProps) {
   const state = stateText(props);
   const note = unavailableNote(detail);
   const work = detail.data?.item ?? listItem;
-  const title = work ? workTitle(work) : '请选择一个作品材料集合';
+  // Subscribe to the canonical reading already fetched by the active panel; never prepare on read.
+  const canonical = useQuery({ queryKey: dossierKey(domain, selectedRef ?? ''), queryFn: ({ signal }) => fetchDossier(selectedRef ?? '', domain, signal), enabled: false, gcTime: 0 });
+  const dossier = hideCachedReading(canonical.error) ? undefined : canonical.data?.dossier;
+  const title = dossier && work ? dossier.note.displayTitle ?? '无标题' : work ? workTitle(work) : '请选择一个作品材料集合';
 
   useEffect(() => {
     if (drawer && open) back.current?.focus({ preventScroll: true });
@@ -242,7 +250,8 @@ export function Inspector(props: InspectorProps) {
           </div>
         )}
         {work ? <div className={styles.workSummary}>
-          <h3 className={styles.workTitle} title={title}>{title}</h3>
+          <h3 className={styles.workTitle} title={title} data-work-title>{title}</h3>
+          {dossier?.note.displayTitleBasis === 'cover' ? <span className={styles.workPlatform}>封面整理标题</span> : null}
           <div className={styles.workByline}>
             <AuthorFact item={work} />
             <span className={styles.workPlatform}>{work.platform.toUpperCase()}</span>
@@ -285,7 +294,7 @@ export function Inspector(props: InspectorProps) {
       </header>
       <div className={styles.body} data-current-tab={tab}>
         {detail.status === 'ready' && detail.data && selectedRef ? (
-          <WorkBody key={selectedRef} detail={detail.data} listItem={listItem} domain={domain} tab={tab} onRefresh={onRefresh} onApplied={onApplied} />
+          <WorkBody key={selectedRef} detail={detail.data} listItem={listItem} domain={domain} tab={tab} onRefresh={onRefresh} onApplied={onApplied} displayedTitle={title} />
         ) : (
           TABS.map(([key]) => (
             <Panel key={key} id={key} active={tab === key}>

@@ -6,6 +6,8 @@ use uuid::Uuid;
 #[path = "support/research_dossier_fixture.rs"]
 mod support;
 use support::{DOMAIN, fixture};
+#[path = "support/standard_dossier_fixture.rs"]
+mod standard;
 
 async fn counts(db: &Database) -> Value {
     sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_media_ocr_layout),(SELECT count(*) FROM linggan_media_ocr_line),(SELECT count(*) FROM linggan_runtime_capture_package),(SELECT count(*) FROM linggan_material_reading),(SELECT count(*) FROM linggan_material_reading_selection),(SELECT count(*) FROM linggan_model_invocation))")
@@ -556,4 +558,123 @@ async fn cover_candidate_counts_after_dedup_without_reassigning_reading_or_later
         "只有封面来源拥有完整候选"
     );
     assert_ne!(exact.material["ref"], pages[0]["ref"]);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn standard_partial_results_and_video_keep_the_shared_complete_input() {
+    let db = fixture::proof_database("standard_partial").await;
+    let work = standard::scenario(&db, "partial-five", None, 5, false, true, false).await;
+    let before = counts(&db).await;
+    let read = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(read.coverage["imageInventory"]["processedPages"], 3);
+    assert_eq!(read.coverage["imageInventory"]["acquiredPages"], 4);
+    assert_eq!(
+        read.reading_view["mainBlockRefs"].as_array().unwrap().len(),
+        6
+    );
+    assert_eq!(
+        read.materials.iter().find(|m| m["page"] == 4).unwrap()["processing"]["state"],
+        "failed"
+    );
+    let input = dossier_input::read(&db, DOMAIN, work).await.unwrap();
+    assert!(!input.ready, "completeness stays honest");
+    assert_eq!(input.fragments.len(), 6);
+    let author = creator_discovery::load_topic_materials_for_works(&db, DOMAIN, &[work])
+        .await
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(&author.works[0].fragments).unwrap(),
+        serde_json::to_value(&read.fragments).unwrap()
+    );
+    assert_eq!(before, counts(&db).await);
+    let video = standard::scenario(&db, "video", None, 1, true, false, false).await;
+    let read = dossier::read(&db, video).await.unwrap().unwrap();
+    assert_eq!(
+        read.reading_view["mainBlockRefs"].as_array().unwrap().len(),
+        3
+    );
+    assert_eq!(
+        read.reading_view["supplementBlockRefs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        read.fragments
+            .iter()
+            .any(|f| f.field == "transcript" && f.structure["time"]["startMs"] == 1000)
+    );
+    assert_eq!(dossier::context_sources(&read).len(), 4);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn standard_audio_silence_absence_and_failure_are_distinct_without_fake_text() {
+    let db = fixture::proof_database("standard_audio_states").await;
+    for (name, reason, expected) in [
+        ("no-audio", "no_audio_stream_observed", "not_applicable"),
+        ("no-speech", "no_speech_observed", "known_empty"),
+        ("asr-failure", "synthetic_asr_failure", "present"),
+    ] {
+        let work = standard::scenario(&db, name, None, 1, true, false, false).await;
+        ensure_media_processing_work(&db).await.unwrap();
+        let worker = Uuid::new_v4();
+        let MediaProcessingClaimOutcome::Claimed(claim) =
+            claim_media_processing_work(&db, worker, &["asr".into()])
+                .await
+                .unwrap()
+        else {
+            panic!("asr claim")
+        };
+        assert_eq!(claim.content_public_ref, work);
+        if name == "asr-failure" {
+            fail_media_processing_work(&db, &claim, worker, reason)
+                .await
+                .unwrap();
+        } else {
+            complete_media_processing_without_output(&db, &claim, worker, reason)
+                .await
+                .unwrap();
+        }
+        let read = dossier::read(&db, work).await.unwrap().unwrap();
+        let audio = read
+            .materials
+            .iter()
+            .find(|m| m["kind"] == "audio")
+            .unwrap();
+        assert_eq!(audio["sourceState"], expected);
+        assert_eq!(audio["processing"]["reason"], reason);
+        if name == "asr-failure" {
+            assert_eq!(audio["processing"]["state"], "failed");
+            assert!(
+                audio["blocks"].to_string().contains("合成口播"),
+                "failed rerun retains current text"
+            );
+        } else {
+            assert!(audio["blocks"].as_array().unwrap().is_empty());
+            assert!(
+                read.fragments
+                    .iter()
+                    .all(|f| !f.text.contains("识别未返回文字"))
+            );
+            assert!(
+                read.reading_view["mainBlockRefs"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|r| read
+                        .materials
+                        .iter()
+                        .filter(|m| m["kind"] == "video_frame")
+                        .any(|m| m["blocks"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|b| b["ref"] == *r))),
+                "frame text is usable while no speech exists"
+            );
+        }
+    }
 }

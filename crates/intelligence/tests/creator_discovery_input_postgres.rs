@@ -158,3 +158,86 @@ async fn canonical_creator_input_keeps_full_content_and_exact_provenance_without
     assert_eq!(body_input["sourceRef"], json!(old.source_ref));
     assert_eq!(body_input["content"]["text"], body);
 }
+
+#[path = "../../evidence/tests/support/standard_dossier_fixture.rs"]
+mod standard;
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and no provider"]
+async fn standard_dossier_partial_and_video_share_creator_workbench_and_offline_blocks() {
+    use linggan_evidence::{dossier_input, research_dossier};
+    use linggan_intelligence::{
+        content_workbench_sources::materials, note_interpretation_offline as offline,
+    };
+    use uuid::Uuid;
+    let db = dossier::fixture::proof_database("standard_consumers").await;
+    for (name, images, video, partial) in [
+        ("consumer-partial", 5, false, true),
+        ("consumer-video", 1, true, false),
+    ] {
+        let work = standard::scenario(&db, name, None, images, video, partial, false).await;
+        let d = research_dossier::read(&db, work).await.unwrap().unwrap();
+        let input = dossier_input::read(&db, standard::DOMAIN, work)
+            .await
+            .unwrap();
+        let preview = offline::prepare_input(&offline::Input {
+            material: input,
+            direction_version_ref: Uuid::new_v4(),
+            skill_version_ref: Uuid::new_v4(),
+            direction_refs: vec![Uuid::new_v4()],
+        })
+        .unwrap();
+        assert_eq!(preview.reading_title, research_dossier::reading_title(&d));
+        assert_eq!(
+            preview
+                .fragments
+                .iter()
+                .map(|f| f.logical_position.as_str())
+                .collect::<Vec<_>>(),
+            research_dossier::ordered_refs(&d)
+        );
+        let data = linggan_evidence::creator_discovery::load_topic_materials_for_works(
+            &db,
+            standard::DOMAIN,
+            &[work],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            data.works[0].title.as_deref(),
+            d.note["displayTitle"].as_str()
+        );
+        let (provider, fragments) = prepare(&data.domain, &data.works[0], &data.as_of);
+        assert_eq!(
+            fragments
+                .iter()
+                .map(|f| f.fragment_id.as_str())
+                .collect::<Vec<_>>(),
+            research_dossier::ordered_refs(&d)
+        );
+        assert_eq!(
+            provider["readingTitle"],
+            research_dossier::reading_title(&d)
+        );
+        assert_eq!(
+            provider["materials"].as_array().unwrap().len(),
+            fragments.len()
+        );
+        let q=serde_json::from_value(json!({"domainRef":standard::DOMAIN,"sourceKind":"note","sourceRef":work,"workRef":work})).unwrap();
+        let document = materials::read_document(&db, &q).await.unwrap();
+        assert_eq!(document["title"], d.note["displayTitle"]);
+        assert_eq!(
+            document["fragments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| f["blockRef"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            research_dossier::ordered_refs(&d)
+        );
+        assert_eq!(
+            document["context"]["dossier"]["readingView"],
+            d.reading_view
+        );
+    }
+}

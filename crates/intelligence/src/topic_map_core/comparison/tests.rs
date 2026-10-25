@@ -39,6 +39,7 @@ fn input(work: u128, fragments: Vec<Fragment>) -> ResearchInput {
     })).collect();
     let mut input = ResearchInput {
         work: DiscoveryWork {
+            reading_title: serde_json::Value::Null,
             work_ref,
             usage_roles: vec!["primary".into()],
             creator_key: None,

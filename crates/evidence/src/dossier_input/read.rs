@@ -88,6 +88,7 @@ pub(super) async fn read_in(
             domain_ref: domain,
             work_ref: *work,
             as_of: as_of.into(),
+            reading_title: crate::research_dossier::reading_title(&dossier),
             dossier_revision: dossier.revision,
             material_fingerprint: String::new(),
             provenance_hash: String::new(),
@@ -139,7 +140,7 @@ pub(super) async fn check_revision(
 fn canonical_columns(note: &serde_json::Value, materials: &[serde_json::Value]) -> Vec<Column> {
     let mut columns = vec![Column {
         field: "title".into(),
-        state: if note["platformTitle"].is_string() {
+        state: if note["displayTitle"].is_string() {
             ColumnState::Available
         } else {
             ColumnState::NotProvided

@@ -80,8 +80,13 @@ impl Input {
         {
             return Err(Invalid("offline_material_contract_mismatch"));
         }
-        if !self.material.ready || !self.material.not_ready_reasons.is_empty() {
-            return Err(Invalid("offline_material_not_ready"));
+        if !self
+            .material
+            .fragments
+            .iter()
+            .any(|f| !f.text.trim().is_empty())
+        {
+            return Err(Invalid("offline_material_no_readable_text"));
         }
         if self.material.domain_ref.is_nil()
             || self.material.work_ref.is_nil()
@@ -108,6 +113,7 @@ pub struct InputPreview {
     pub identity: Identity,
     pub as_of: String,
     pub columns: Vec<Column>,
+    pub reading_title: serde_json::Value,
     pub fragments: Vec<Fragment>,
 }
 
@@ -151,10 +157,16 @@ pub fn prepare_input(input: &Input) -> Result<InputPreview, Invalid> {
         {
             return Err(Invalid("offline_input_structure_invalid"));
         }
-        if !columns
-            .iter()
-            .any(|c| c.field == fragment.field && c.state == ColumnState::Available)
-        {
+        if !columns.iter().any(|c| {
+            c.field == fragment.field
+                && matches!(
+                    c.state,
+                    ColumnState::Available
+                        | ColumnState::Waiting
+                        | ColumnState::NotAcquired
+                        | ColumnState::Restricted
+                )
+        }) {
             return Err(Invalid("offline_input_column_conflict"));
         }
     }
@@ -164,6 +176,7 @@ pub fn prepare_input(input: &Input) -> Result<InputPreview, Invalid> {
         identity: input.identity(),
         as_of: input.material.as_of.clone(),
         columns,
+        reading_title: input.material.reading_title.clone(),
         fragments,
     })
 }
@@ -277,7 +290,14 @@ pub fn validate_output(input: &Input, output: &Output) -> Result<(), Invalid> {
         if fragments.next().is_some()
             || !canonical_field(&fragment.field)
             || !input.material.columns.iter().any(|c| {
-                c.field == fragment.field && c.state == dossier_input::ColumnState::Available
+                c.field == fragment.field
+                    && matches!(
+                        c.state,
+                        ColumnState::Available
+                            | ColumnState::Waiting
+                            | ColumnState::NotAcquired
+                            | ColumnState::Restricted
+                    )
             })
             || fragment.end.checked_sub(fragment.start) != Some(fragment.text.chars().count())
             || keyword.start < fragment.start

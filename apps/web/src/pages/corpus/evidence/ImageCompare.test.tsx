@@ -20,5 +20,5 @@ it('完整长文与表格、对话直接可读，未知表达者不变成作者'
     { ref: 'talk', kind: 'dialogue', turns: [{ speaker: 'other', text: '他人的说法' }, { speaker: 'author', text: '作者回应' }] },
   ] }); const unit = parseDossierPayload(dossierJson(1, { materials: [raw] })).dossier.materials[0]!;
   const { container } = render(<DossierBlocks blocks={unit.blocks} />);
-  expect(screen.getByText(long)).toBeVisible(); expect(container.querySelector('details')).toBeNull(); expect(screen.getByRole('table')).toHaveTextContent('-0.25'); expect(container.querySelector('ol')).toHaveAttribute('start', '4'); expect(screen.getByText('表达者未确认')).toBeInTheDocument(); expect(screen.getByText('他人的说法')).toBeVisible();
+  expect(screen.getByText(long)).toBeVisible(); expect(container.querySelector('details')).toBeNull(); expect(screen.getByRole('table')).toHaveTextContent('-0.25'); expect(container.querySelector('ol')).toHaveAttribute('start', '4'); expect(screen.queryByText('表达者未确认')).not.toBeInTheDocument(); expect(container.querySelector('[data-block-ref="long"]')).toHaveAttribute('data-speaker', 'unconfirmed'); expect(screen.getByText('他人的说法')).toBeVisible();
 });

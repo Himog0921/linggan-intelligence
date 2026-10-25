@@ -23,6 +23,18 @@ describe('research-dossier.v2', () => {
       const value = dossierJson(1); expect(() => parseDossierPayload({ ...value, dossier: { ...value.dossier, ...patch } })).toThrow(ApiError);
     }
   });
+  it('阅读编排仅包含唯一且存在的引用，标题保留来源引用而不复制文字', () => {
+    const raw = dossierJson(1); const refs = raw.dossier.readingView;
+    const dto = parseDossierPayload(raw).dossier;
+    expect(dto.readingView).toEqual(refs);
+    for (const readingView of [
+      { mainBlockRefs: ['missing'], supplementBlockRefs: refs.supplementBlockRefs },
+      { mainBlockRefs: refs.mainBlockRefs, supplementBlockRefs: [...refs.mainBlockRefs, ...refs.supplementBlockRefs] },
+      { mainBlockRefs: [], supplementBlockRefs: [] },
+    ]) expect(() => parseDossierPayload({ ...raw, dossier: { ...raw.dossier, readingView } })).toThrow(ApiError);
+    expect(() => parseDossierPayload({ ...raw, dossier: { ...raw.dossier, note: { ...raw.dossier.note, titleBlockRefs: ['missing'] } } })).toThrow(ApiError);
+    expect(() => parseDossierPayload({ ...raw, dossier: { ...raw.dossier, note: { ...raw.dossier.note, displayTitleBasis: 'image_heading' } } })).toThrow(ApiError);
+  });
   it('未知总页数与已知零分别保留，不推算进度或页码', () => {
     const base = dossierJson(1);
     base.dossier.coverage.imageInventory = { basis: 'observed_set', expectedPages: null, acquiredPages: 0, processedPages: 0, missingPages: [], unknownOrder: true } as unknown as typeof base.dossier.coverage.imageInventory;

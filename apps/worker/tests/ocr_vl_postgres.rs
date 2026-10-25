@@ -124,7 +124,7 @@ pub(crate) async fn execute_one(db: &Database) -> MediaProcessingClaim {
 
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL runner only"]
-async fn synthetic_worker_keeps_visual_candidates_separate_until_explicit_review() {
+async fn synthetic_daily_worker_publishes_reading_before_optional_review() {
     use linggan_evidence::material_reading::{
         ReviewReadingRequest, read_candidates, review_reading,
     };
@@ -140,9 +140,18 @@ async fn synthetic_worker_keeps_visual_candidates_separate_until_explicit_review
     execute_one(&db).await;
     admit(&db, "ocr-synthetic", 2, b"synthetic-interior", "image/png").await;
     execute_one(&db).await;
-    let candidates = read_candidates(&db, work).await.unwrap();
+    assert!(
+        read_candidates(&db, work).await.unwrap().is_empty(),
+        "daily current is not an extra review candidate"
+    );
+    let current = research_dossier::read(&db, work).await.unwrap().unwrap();
+    let candidates:Vec<_>=current.materials.iter().filter(|m|m["kind"]=="image").map(|m|json!({"unitRef":m["ref"],"candidateRevisionRef":m["currentRevisionRef"],"currentRevisionRef":m["currentRevisionRef"],"blocks":m["blocks"]})).collect();
     assert_eq!(candidates.len(), 2);
-    assert!(candidates.iter().all(|c| c["currentRevisionRef"].is_null()));
+    assert!(
+        candidates
+            .iter()
+            .all(|c| c["currentRevisionRef"] == c["candidateRevisionRef"])
+    );
     assert!(
         candidates
             .iter()
@@ -154,14 +163,17 @@ async fn synthetic_worker_keeps_visual_candidates_separate_until_explicit_review
         d.materials
             .iter()
             .filter(|m| m["kind"] == "image")
-            .all(|m| m["blocks"] == json!([])),
-        "generation cannot select itself"
+            .all(|m| !m["blocks"].as_array().unwrap().is_empty()),
+        "daily machine publication is readable without mandatory review"
     );
     for candidate in &candidates {
         let unit = serde_json::from_value(candidate["unitRef"].clone()).unwrap();
         let review = ReviewReadingRequest {
             command_ref: Uuid::new_v4(),
-            expected_current_revision_ref: None,
+            expected_current_revision_ref: serde_json::from_value(
+                candidate["currentRevisionRef"].clone(),
+            )
+            .unwrap(),
             candidate_revision_ref: serde_json::from_value(
                 candidate["candidateRevisionRef"].clone(),
             )

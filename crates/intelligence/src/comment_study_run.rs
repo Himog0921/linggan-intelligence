@@ -458,7 +458,7 @@ pub fn full_context_manifest(manifest: &Value) -> Value {
     json!({"contract":"comment-study.context.v2","workRef":manifest["workRef"],
         "cleanerVersion":manifest["cleanerVersion"],"dossierRevision":manifest["dossierRevision"],
         "dossierContract":manifest["dossierContract"],"includedCharacterCount":count,
-        "orderBasis":"dossier_canonical_block_order","sources":sources})
+        "readingTitle":manifest["readingTitle"],"orderBasis":"dossier_canonical_block_order","sources":sources})
 }
 
 fn hash_text(value: &str) -> String {

@@ -63,7 +63,7 @@ export function MetricIcon({ kind, label }: { kind: keyof typeof ICON_PATHS; lab
 /** 互动行。表格里列头已有图标，行内只留数字（读屏靠隐藏文字读出名称）。 */
 export function Engagement({ engagement, numbersOnly = false }: { engagement: EngagementFacts; numbersOnly?: boolean }) {
   return (
-    <div className={styles.engagement}>
+    <div className={styles.engagement} data-engagement-metrics>
       {ENGAGEMENT_KINDS.map(([kind, label]) => (
         <span key={kind}>
           {numbersOnly ? <span className="v7-sr-only">{label}</span> : <MetricIcon kind={kind} label={label} />}

@@ -8,6 +8,7 @@ use uuid::Uuid;
 fn input() -> Input {
     Input {
         material: Material {
+            reading_title: serde_json::json!({"text":null,"basis":"missing","blockRefs":[],"platformSource":null}),
             contract: dossier_input::VERSION.into(),
             fingerprint_contract: dossier_input::FINGERPRINT_VERSION.into(),
             domain_ref: Uuid::from_u128(1),
@@ -90,13 +91,27 @@ fn mock_is_stable_explicit_unknown_and_bound_to_versions() {
 }
 
 #[test]
-fn nonready_and_restricted_material_does_not_become_mock_input() {
+fn partial_material_keeps_available_fragments_and_empty_text_is_explicit() {
     let mut input = input();
     input.material.ready = false;
     input.material.not_ready_reasons = vec!["restricted".into()];
-    assert!(mock_unknown(&input).is_err());
-    input.material.ready = true;
-    assert!(mock_unknown(&input).is_err());
+    for state in [
+        ColumnState::Waiting,
+        ColumnState::NotAcquired,
+        ColumnState::Restricted,
+    ] {
+        for c in &mut input.material.columns {
+            if c.field == "body" {
+                c.state = state.clone();
+            }
+        }
+        assert!(mock_unknown(&input).is_ok());
+    }
+    input.material.fragments.clear();
+    assert_eq!(
+        mock_unknown(&input).unwrap_err(),
+        Invalid("offline_material_no_readable_text")
+    );
 }
 
 #[test]
@@ -147,7 +162,7 @@ fn keyword_offsets_use_unicode_scalars_and_absolute_fragment_positions() {
 }
 
 #[test]
-fn missing_ambiguous_restricted_and_ineligible_citations_are_rejected() {
+fn partial_field_keeps_good_citations_while_missing_ambiguous_and_ineligible_are_rejected() {
     let mut input = input();
     let mut output = mock_unknown(&input).unwrap();
     output.keywords = vec![Keyword {
@@ -163,7 +178,7 @@ fn missing_ambiguous_restricted_and_ineligible_citations_are_rejected() {
     }
     input.material.fragments[0].field = "body".into();
     input.material.columns[0].state = ColumnState::Restricted;
-    assert!(validate_output(&input, &output).is_err());
+    validate_output(&input, &output).unwrap(); // aggregate coverage cannot invalidate an admitted block
     input.material.columns[0].state = ColumnState::Available;
     input
         .material
@@ -241,7 +256,7 @@ fn preview_preserves_all_canonical_fields_order_roles_structure_and_missing_stat
 fn preview_rejects_missing_duplicate_and_contradictory_columns() {
     let mut input = input();
     input.material.columns[0].state = ColumnState::Restricted;
-    assert!(prepare_input(&input).is_err());
+    assert!(prepare_input(&input).is_ok()); // individual restricted sources are omitted by the shared reader
     input.material.columns[0].state = ColumnState::Available;
     input
         .material
@@ -430,7 +445,7 @@ fn sample_does_not_silently_drop_or_mix_invalid_members() {
                 second.direction_refs.pop();
             }
             "skill" => second.skill_version_ref = Uuid::from_u128(99),
-            "restricted" => second.material.ready = false,
+            "restricted" => second.material.fragments.clear(),
             _ => second.material.work_ref = Uuid::nil(),
         }
         assert!(

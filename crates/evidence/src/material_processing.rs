@@ -901,22 +901,21 @@ pub async fn complete_media_processing_without_output(
         "image_ocr" | "asr" | "video_frame_ocr"
     ) {
         let no_audio = reason == "no_audio_stream_observed" && claim.processor_kind == "asr";
-        let blocks = if no_audio {
-            vec![]
-        } else {
-            vec![
-                json!({"kind":"gap","speaker":"unconfirmed","text":"〔识别未返回文字，尚未确认原始材料无文字〕","issues":[{"key":"recognition_empty","code":"recognition_empty","message":"需核对原始材料","resolution":"reading_edit"}]}),
-            ]
-        };
+        // Empty recognition is status, never invented source text. ASR silence is
+        // distinct from no audio; failures use the existing failed-work path.
+        let no_speech = reason == "no_speech_observed" && claim.processor_kind == "asr";
+        let blocks = vec![];
         crate::material_reading::producers::publish_job_in(
             &mut tx,
             claim,
             None,
             crate::material_reading::producers::ReadingContent {
                 blocks,
-                issues: vec![],
+                issues: if no_audio || no_speech { vec![] } else { vec![json!({"key":"recognition_empty","code":"recognition_empty","message":"识别未返回文字，需核对原件","resolution":"reading_edit"})] },
                 source_state: if no_audio {
                     "not_applicable"
+                } else if no_speech {
+                    "known_empty"
                 } else {
                     "present"
                 }

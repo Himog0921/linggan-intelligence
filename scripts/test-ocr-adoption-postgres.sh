@@ -7,7 +7,7 @@ source scripts/cargo-proof.sh
 case "${1:-}" in
   '')
     [[ -z "${OCR_CHAIN_MANIFEST:-}" ]] || { echo "private manifest requires explicit --private-local" >&2; exit 2; }
-    test_name=synthetic_worker_keeps_visual_candidates_separate_until_explicit_review
+    test_name=synthetic_daily_worker_publishes_reading_before_optional_review
     ;;
   --private-local)
     [[ -z "${GITHUB_ACTIONS:-}" && -f "${OCR_CHAIN_MANIFEST:-}" && -n "${OCR_CHAIN_OUTPUT:-}" && -f "${LINGGAN_PADDLE_VL_SCRIPT:-}" ]] || { echo "private local prerequisites missing or forbidden in CI" >&2; exit 2; }

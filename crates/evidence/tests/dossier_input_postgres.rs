@@ -97,7 +97,16 @@ async fn explicit_native_rebuild_is_atomic_idempotent_and_not_a_read_side_effect
         .await
         .unwrap();
     let before = dossier::read(&db, work).await.unwrap().unwrap();
-    assert!(before.fragments.iter().all(|f| f.field != "body"));
+    assert_eq!(
+        before
+            .fragments
+            .iter()
+            .find(|f| f.field == "body")
+            .unwrap()
+            .text,
+        body,
+        "existing platform text is readable without persistence side effects"
+    );
     assert!(
         before
             .materials

@@ -165,7 +165,7 @@ fn current_reasons(
         && document.context["parentWork"]["state"] == "known"
     {
         let dossier = &document.context["parentWork"]["dossier"];
-        let parent = dossier["note"]["platformTitle"]
+        let parent = dossier["note"]["displayTitle"]
             .as_str()
             .map(str::to_owned)
             .into_iter()

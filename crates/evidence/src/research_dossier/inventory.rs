@@ -27,6 +27,13 @@ WITH origins AS (
 )
 SELECT o.content_public_ref,o.slot_key,o.purpose,o.display_ordinal,o.display_order_state,component.kind AS component_kind,
  o.package_ref,o.observation_ref,o.source_generation,m.materialization_ref,m.blob_sha256,
+ (SELECT jsonb_object_agg(latest.processor_kind,jsonb_build_object('state',latest.state,'reason',latest.reason)) FROM (
+   SELECT DISTINCT ON(j.processor_kind) j.processor_kind,e.state,e.reason
+   FROM linggan_media_processing_job j
+   LEFT JOIN LATERAL(SELECT CASE state WHEN 'succeeded' THEN 'completed' ELSE state END AS state,reason FROM linggan_media_processing_job_event e WHERE e.job_ref=j.job_ref AND e.occurred_at<=$2::timestamptz ORDER BY e.occurred_at DESC LIMIT 1) e ON true
+   WHERE j.slot_key=o.slot_key AND j.blob_sha256=m.blob_sha256 AND j.created_at<=$2::timestamptz
+   ORDER BY j.processor_kind,j.created_at DESC,j.job_ref DESC
+ ) latest) AS processing,
  EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d
  WHERE d.state='WITHDRAWN_OR_RESTRICTED' AND (d.slot_key=o.slot_key OR d.blob_sha256=m.blob_sha256
  OR d.materialization_ref=m.materialization_ref)) AS restricted,
@@ -60,7 +67,7 @@ ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.slot_key,component.
         };
         result.entry(work).or_default().slots.push(json!({
             "slotKey":row.get::<String,_>("slot_key"),"purpose":row.get::<String,_>("purpose"),
-            "component":row.get::<String,_>("component_kind"),
+            "component":row.get::<String,_>("component_kind"),"processing":row.get::<Option<Value>,_>("processing"),
             "page":row.get::<Option<i32>,_>("display_ordinal"),
             "displayOrderState":row.get::<String,_>("display_order_state"),
             "packageRef":row.get::<Uuid,_>("package_ref"),"observationRef":row.get::<Uuid,_>("observation_ref"),

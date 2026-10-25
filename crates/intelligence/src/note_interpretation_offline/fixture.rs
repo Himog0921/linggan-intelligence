@@ -144,6 +144,7 @@ fn material(i: usize) -> Material {
         })
         .collect();
     Material {
+        reading_title: serde_json::json!({"text":null,"basis":"missing","blockRefs":[],"platformSource":null}),
         contract: dossier_input::VERSION.into(),
         fingerprint_contract: dossier_input::FINGERPRINT_VERSION.into(),
         domain_ref: Uuid::from_u128(1),

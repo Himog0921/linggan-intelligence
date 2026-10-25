@@ -94,6 +94,7 @@ if [[ "${1:-}" == "--target-inspection" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-writing" || "${1:-}" == "--ai-service" || "${1:-}" == "--ai-install" || "${1:-}" == "--ai-readonly" || "${1:-}" == "--ai-compatibility" ]]; then
+  mkdir -p "$project_root/artifacts/private/ai-gen1-pr1b"
   ledger_asset_root="$(mktemp -d "$project_root/artifacts/private/ai-gen1-pr1b/ledger-assets.XXXXXX")"
   export LINGGAN_CREATION_ASSET_ROOT="$ledger_asset_root"
   export LINGGAN_LOCAL_MEDIA_ROOT="$ledger_asset_root/source-media"
@@ -192,7 +193,7 @@ if [[ "${1:-}" == "--http" ]]; then
 fi
 cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
 cargo_proof -p linggan-evidence --test creator_discovery_postgres --locked -- --ignored --nocapture
-for test in source_context_admits_only_the_latest a_reobserved_media_slot source_gate_excludes_withdrawn_ocr; do
+for test in source_context_keeps_each_current_nonretired_image_reading_distinct a_reobserved_media_slot source_gate_excludes_withdrawn_ocr; do
   cargo_proof -p linggan-intelligence --test comment_study_rebuild_postgres "$test" --locked -- --ignored --nocapture
 done
 for test in dossier_partial_image_body_reaches_v2_frozen_context concurrent_ preview_and_two_runs_cover_different_comments_from_688 new_run_is_frozen_and_method_bound_dispatch missing_parent_reaches_model; do

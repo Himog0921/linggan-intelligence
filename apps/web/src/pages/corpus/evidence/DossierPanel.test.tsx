@@ -28,7 +28,9 @@ it('总页数未知时仍展示已处理页数，未知页码图片有独立编�
     materials: [dossierMaterialJson(1, { page: null }), dossierMaterialJson(2, { page: null })],
     coverage: { imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 2, processedPages: 1, missingPages: [], unknownOrder: true } },
   })));
-  mount();
+  const view = mount();
+  await screen.findByRole('heading', { name: '图片 1 · 页码未知' });
+  await view.user.click(screen.getByText('材料详情'));
   expect(await screen.findByText('已取得 2 张图片，已有读本 1 页，原作总页数未知。')).toBeVisible();
   expect(screen.getByRole('heading', { name: '图片 1 · 页码未知' })).toBeVisible();
   expect(screen.getByRole('heading', { name: '图片 2 · 页码未知' })).toBeVisible();
@@ -64,7 +66,8 @@ it('重复缺口、页码提示与连续表达者标签不挤占正文', async (
   })));
   mount();
   await screen.findByText('第一段原文');
-  expect(screen.getAllByText('表达者未确认')).toHaveLength(1);
+  expect(screen.queryByText('表达者未确认')).not.toBeInTheDocument();
+  expect(document.querySelectorAll('[data-speaker="unconfirmed"]')).toHaveLength(2);
   expect(screen.getByText('〔局部无法辨认〕')).toBeVisible();
   expect(screen.queryByText('图片原始页序未知')).not.toBeInTheDocument();
 });

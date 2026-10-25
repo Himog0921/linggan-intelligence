@@ -380,25 +380,33 @@ export function dossierMaterialJson(n: number, overrides: Record<string, unknown
     ], issues: [], ...overrides,
   };
 }
-export interface DossierOptions { bodyText?: string; materials?: unknown[]; plan?: Record<string, unknown>; coverage?: Record<string, unknown>; note?: Record<string, unknown> }
+export interface DossierOptions { bodyText?: string; materials?: unknown[]; plan?: Record<string, unknown>; coverage?: Record<string, unknown>; note?: Record<string, unknown>; readingView?: { mainBlockRefs: string[]; supplementBlockRefs: string[] } }
 export function dossierJson(n: number, options: DossierOptions = {}) {
   const ref = workRef(n); const base = `/api/local/work-resources/${ref}/research-dossier`;
-  return {
+  const result = {
     dossier: {
       contract: 'research-dossier.v2', workRef: ref, revision: REVISION, materialRevision: 'm'.repeat(64), asOf: '2026-10-23T08:00:00Z',
-      note: { platform: 'xhs', externalId: `synthetic-ext-${n}`, sourceUrl: null, platformTitle: '合成作品标题', titleSource: { sourceRef: mediaRef(500), sourceVersion: 'native-1' }, displayTitle: '合成作品标题', displayTitleBasis: 'platform', ...options.note },
+      note: { platform: 'xhs', externalId: `synthetic-ext-${n}`, sourceUrl: null, platformTitle: '合成作品标题', titleSource: { sourceRef: mediaRef(500), sourceVersion: 'native-1' }, displayTitle: '合成作品标题', displayTitleBasis: 'platform', titleBlockRefs: [], ...options.note },
       materials: options.materials ?? [
         { ref: mediaRef(900), kind: 'body', slotKey: null, page: null, sourceState: 'present', sourceRef: mediaRef(501), sourceVersion: 'native-1', currentRevisionRef: mediaRef(901), originalUrl: null,
           reading: { generatedBy: 'platform', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2', review: null },
           blocks: [{ ref: `${ref}.${mediaRef(901)}.0`, kind: 'paragraph', speaker: 'author', text: options.bodyText ?? '合成正文。'.repeat(120) }], issues: [] },
         dossierMaterialJson(1),
       ],
+      readingView: { mainBlockRefs: [] as string[], supplementBlockRefs: [] as string[] },
       coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 2, acquiredPages: 1, processedPages: 1, missingPages: [2], unknownOrder: false },
         sources: { body: { state: 'available', units: 1, readings: 1 }, images: { state: 'partial', units: 2, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } }, issues: [], ...options.coverage },
       attachments: { comments: { href: `${base}/comments` }, author: { href: `${base}/metadata?sections=author` }, interaction: { href: `${base}/metadata?sections=interaction` }, versions: { href: `${base}/candidates` } },
       selection: { mode: 'full', kinds: [], unitRefs: [], blockRefs: [], imagePages: [], omittedUnits: 0, completeRevision: REVISION },
     }, relayerPlan: planJson(options.plan),
   };
+  const materials = result.dossier.materials as { kind: string; blocks: { ref: string }[] }[];
+  const hasBody = materials.some(unit => unit.kind === 'body' && unit.blocks.length > 0);
+  result.dossier.readingView = options.readingView ?? {
+    mainBlockRefs: materials.filter(unit => hasBody ? unit.kind === 'body' : unit.kind === 'image').flatMap(unit => unit.blocks.map(block => block.ref)),
+    supplementBlockRefs: materials.filter(unit => hasBody ? unit.kind !== 'body' : unit.kind !== 'image').flatMap(unit => unit.blocks.map(block => block.ref)),
+  };
+  return result;
 }
 
 export function dossierCommentsJson(count: number, options: { cursor?: string | null; offset?: number; total?: number } = {}) {

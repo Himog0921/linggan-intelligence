@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchDossier } from './dossierApi';
 import { dossierKey } from './evidenceKeys';
-import { DossierBlocks } from './DossierBlocks';
-import { emptyMaterialNote, hideCachedReading } from './dossierPresent';
+import { DossierReading } from './DossierReading';
+import { hideCachedReading } from './dossierPresent';
 import { DossierComments } from './DossierComments';
 import { InlineState, Section, SourceNote, StateLine } from './Primitives';
 import { MediaRail } from './MediaRail';
@@ -26,14 +26,14 @@ export function ReadingPanel({ context, domain, active }: { context: PanelContex
   const { item, inspector, listItem, onOpenViewer } = context;
   const objects = mediaObjects(inspector, (listItem ?? item).fragment);
   const reading = useQuery({ queryKey: dossierKey(domain, item.ref), queryFn: ({ signal }) => fetchDossier(item.ref, domain, signal), enabled: active, staleTime: 30_000, gcTime: 0 });
-  const body = hideCachedReading(reading.error) ? undefined : reading.data?.dossier.materials.find(unit => unit.kind === 'body');
+  const dossier = hideCachedReading(reading.error) ? undefined : reading.data?.dossier;
   const ocr = laneSummary(item.lanes, 'ocr')?.state;
   const asr = laneSummary(item.lanes, 'asr')?.state;
   return <div className={styles.readingBody}>
-    <Section title="正文">
-      {reading.isPending ? <p role="status">正在读取正文…</p> : reading.isError && !body ? <p role="status">正文读本暂不可读。<button type="button" onClick={() => void reading.refetch()}>重试读取</button></p> : body ? <>{body.blocks.length ? <DossierBlocks blocks={body.blocks} issues={body.issues} /> : <SourceNote>{emptyMaterialNote(body)}</SourceNote>}</> : <SourceNote>正文来源尚未取得。</SourceNote>}
-      {reading.isError && body ? <p role="status">刷新未完成，保留上次读到的正文版本。</p> : null}
-    </Section>
+    <section aria-label="作品文字">
+      {reading.isPending ? <p role="status">正在读取正文…</p> : reading.isError && !dossier ? <p role="status">正文读本暂不可读。<button type="button" onClick={() => void reading.refetch()}>重试读取</button></p> : dossier ? <DossierReading dossier={dossier} titleRendered /> : <SourceNote>暂无可读文字。</SourceNote>}
+      {reading.isError && dossier ? <p role="status">刷新未完成，保留上次读到的正文版本。</p> : null}
+    </section>
     <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} domain={domain} onOpenSource={(image, opener) => {
       const index = objects.findIndex(object => object.slotKeys.some(key => key === image.slotKey || image.aliases.includes(key)));
       if (index >= 0) onOpenViewer(index, opener);

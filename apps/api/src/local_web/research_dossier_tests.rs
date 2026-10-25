@@ -11,6 +11,8 @@ use uuid::Uuid;
 mod browser;
 #[path = "../../../../crates/evidence/tests/support/research_dossier_fixture.rs"]
 mod dossier_fixture;
+#[path = "../../../../crates/evidence/tests/support/standard_dossier_fixture.rs"]
+mod standard_fixture;
 
 async fn call(app: Router, uri: &str, body: Option<Value>) -> (StatusCode, Value) {
     let mut builder = Request::builder().uri(uri).header("Host", "127.0.0.1:3000");
@@ -344,4 +346,130 @@ async fn dossier_http_comments_keep_full_text_likes_parent_and_page_boundaries()
     let reply = items.iter().find(|v| v["relation"] == "REPLY").unwrap();
     assert_eq!(reply["parentSourceRef"], root["sourceRef"]);
     assert_eq!(reply["likeCount"], 7);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_blocks() {
+    let db = dossier_fixture::fixture::proof_database("standard_segments").await;
+    let work = standard_fixture::scenario(
+        &db,
+        "segment-note",
+        Some(
+            &((0..457)
+                .map(|i| format!("第{i}段完整原文🙂"))
+                .collect::<Vec<_>>()
+                .join("\n\n")),
+        ),
+        3,
+        false,
+        false,
+        false,
+    )
+    .await;
+    let app = app_with_database(db.clone());
+    let base = format!(
+        "/api/local/work-resources/{work}/research-dossier?domain={}",
+        standard_fixture::DOMAIN
+    );
+    let (_, full) = call(app.clone(), &base, None).await;
+    let expected: Vec<_> = ["mainBlockRefs", "supplementBlockRefs"]
+        .iter()
+        .flat_map(|k| {
+            full["dossier"]["readingView"][k]
+                .as_array()
+                .unwrap()
+                .clone()
+        })
+        .collect();
+    let mut offset = 0;
+    let mut received = vec![];
+    let mut pinned = None::<(String, String)>;
+    loop {
+        let suffix = pinned
+            .as_ref()
+            .map(|(as_of, rev)| format!("&asOf={as_of}&expectedRevision={rev}"))
+            .unwrap_or_default();
+        let (status, page) = call(
+            app.clone(),
+            &format!("{base}&segmentSize=37&segmentOffset={offset}{suffix}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{page}");
+        let segment = &page["segment"];
+        if pinned.is_none() {
+            pinned = Some((
+                segment["asOf"].as_str().unwrap().into(),
+                segment["completeRevision"].as_str().unwrap().into(),
+            ));
+        }
+        let refs: Vec<_> = ["mainBlockRefs", "supplementBlockRefs"]
+            .iter()
+            .flat_map(|k| {
+                page["dossier"]["readingView"][k]
+                    .as_array()
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+        assert_eq!(
+            refs.len(),
+            segment["end"].as_u64().unwrap() as usize - offset
+        );
+        received.extend(refs);
+        if let Some(next) = segment["nextOffset"].as_u64() {
+            offset = next as usize;
+        } else {
+            break;
+        }
+        if offset == 37 {
+            dossier_fixture::fixture::submit_package(&db,"content_detail",json!({"contentExternalId":"segment-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"segment-note"},"payload":{"bodyText":"研究期间新正文，不得混入旧研究"}})).await;
+        }
+    }
+    assert_eq!(received, expected);
+    assert_eq!(received.len(), 463);
+    let (as_of, revision) = pinned.as_ref().unwrap();
+    let (status, empty) = call(
+        app.clone(),
+        &format!(
+            "{base}&segmentSize=37&asOf={as_of}&expectedRevision={revision}&segmentOffset=463"
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(empty["segment"]["scope"], "full");
+    assert!(empty["segment"]["nextOffset"].is_null());
+    assert!(empty["dossier"]["materials"].as_array().unwrap().is_empty());
+    assert!(
+        empty["dossier"]["note"]["titleBlockRefs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let (status, _) = call(
+        app.clone(),
+        &format!("{base}&segmentSize=37&segmentOffset=37"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (as_of, revision) = pinned.unwrap();
+    let (status, _) = call(
+        app.clone(),
+        &format!("{base}&segmentSize=37&asOf={as_of}&expectedRevision=wrong"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, _) = call(
+        app,
+        &format!(
+            "{base}&segmentSize=37&asOf={as_of}&expectedRevision={revision}&segmentOffset=9999"
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

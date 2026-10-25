@@ -33,12 +33,13 @@ export interface DossierMaterial {
   sourceState: SourceState; sourceRef: string | null; sourceVersion: string | null;
   currentRevisionRef: string | null; originalUrl: string | null;
   reading: { generatedBy: ReadingProducer; adoption: Adoption; verification: Verification; ruleVersion: string; review: ReadingReviewSummary | null } | null;
+  processing?: { state: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'invalidated'; reason: string | null } | null;
   blocks: DossierBlock[]; issues: DossierIssue[];
 }
 export interface DossierNote {
   platform: string; sourceUrl: string | null; platformTitle: string | null;
   titleSource: { sourceRef: string | null; sourceVersion: string | null } | null;
-  displayTitle: string | null; displayTitleBasis: 'platform' | 'image_heading' | 'missing';
+  displayTitle: string | null; displayTitleBasis: 'platform' | 'cover' | 'missing'; titleBlockRefs: string[];
 }
 export interface DossierCoverage {
   imageInventory: { basis: 'platform_image_list' | 'observed_set'; expectedPages: number | null; acquiredPages: number; processedPages: number; missingPages: number[]; unknownOrder: boolean };
@@ -51,7 +52,7 @@ export interface DossierSelection {
 }
 export interface Dossier {
   contract: 'research-dossier.v2'; workRef: string; revision: string; materialRevision: string; asOf: string;
-  note: DossierNote; materials: DossierMaterial[]; coverage: DossierCoverage;
+  note: DossierNote; materials: DossierMaterial[]; readingView: { mainBlockRefs: string[]; supplementBlockRefs: string[] }; coverage: DossierCoverage;
   attachments: Record<'comments' | 'author' | 'interaction' | 'versions', { href: string }>;
   selection: DossierSelection; raw: unknown;
 }
