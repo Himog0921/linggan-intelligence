@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.61`（统一单次采集与评论分段候选；未加载到 Chrome）
+> 版本: `0.8.62`（评论末页扫描修复候选；实际加载与真实链路另行核对）
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -9,6 +9,10 @@
 这是 Linggan Intelligence 自有的 Chrome Manifest V3 插件源码包。它从
 `Himog0921/linggan-boom@8a00cc1`（审计版本 `2.0.91`）迁入完整浏览器端
 源码、资产和操作界面；旧内容工作台不是运行依赖、数据中转或发布来源。
+
+## 评论末页扫描修复
+
+DOM 评论扫描期间，下一页可能追加主评论并同时出现 `THE END`。采集器必须重新读取变化后的节点集合，才可声明主评论与回复均已遍历；分段预算耗尽时保留部分结果，下一段继续取得未交付的 ID。结束标记不能替代最后一页实际扫描。
 
 ## 本轮实际迁入
 

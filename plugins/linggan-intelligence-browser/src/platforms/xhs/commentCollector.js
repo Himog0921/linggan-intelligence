@@ -108,7 +108,7 @@ function readCommentSignalsSafe(container) {
 
 function getCommentSurfaceFingerprint(container) {
   const items = [...(container?.querySelectorAll?.('.parent-comment, .comment-item') || [])];
-  const ids = items.slice(0, 80).map((item, index) => String(item?.dataset?.commentId || item?.dataset?.id || item?.id || index)).join('|');
+  const ids = items.map((item, index) => String(item?.dataset?.commentId || item?.dataset?.id || item?.id || index)).join('|');
   const signals = readCommentSignalsSafe(container);
   return `${items.length}:${ids}:${signals.hasEndMarker ? 'end' : 'open'}`;
 }
@@ -897,6 +897,7 @@ async function collectCommentsFromDom({
   let unreliableIdentitySeen = !initialIdentityReliable;
   let bottomNudgeCount = 0;
   let riskStopped = false;
+  let lastScannedSurface = null;
 
   while (!shouldStop()) {
     if (budgetState && (budgetState.remainingRounds-- <= 0 || Date.now() >= budgetState.deadline)) { budgetState.exhausted = true; break; }
@@ -925,6 +926,7 @@ async function collectCommentsFromDom({
       break;
     }
 
+    const scannedSurface = getCommentSurfaceFingerprint(container);
     const parentComments = container.querySelectorAll('.parent-comment');
     let foundNew = false;
 
@@ -1011,6 +1013,7 @@ async function collectCommentsFromDom({
       }
     }
 
+    lastScannedSurface = scannedSurface;
     if (foundNew) {
       bottomNudgeCount = 0;
       const context = getActiveCommentsContext();
@@ -1062,6 +1065,14 @@ async function collectCommentsFromDom({
           if (findNextExpandableReplyTarget(container, { stalledReplyControls })) continue;
         }
       }
+    }
+
+    // querySelectorAll returns a static NodeList. A scroll/reply request can append the
+    // final page while the awaited scan is still reading the previous list. Consume that
+    // changed surface before THE END or the no-progress limit can terminate this Attempt.
+    if (getCommentSurfaceFingerprint(resolveContainer() || container) !== scannedSurface) {
+      noNewCount = 0;
+      continue;
     }
 
     if (!foundNew) {
@@ -1131,13 +1142,16 @@ async function collectCommentsFromDom({
     await commentStore.bulkUpsert(allComments);
   }
 
-  const finalSignals = readCommentSignalsSafe(resolveContainer() || container);
+  const finalContainer = resolveContainer() || container;
+  const finalSignals = readCommentSignalsSafe(finalContainer);
+  const finalSurfaceScanned = lastScannedSurface === getCommentSurfaceFingerprint(finalContainer)
+    && !shouldStop() && !(maxTotal > 0 && allComments.length >= maxTotal);
   return {
     total: allComments.length,
     comments: allComments,
     traversal: {
-      mainExhausted: finalSignals.hasEndMarker && !(maxTotal > 0 && allComments.length >= maxTotal),
-      repliesExhausted: finalSignals.hasEndMarker && !finalSignals.hasExpandableReplies,
+      mainExhausted: finalSurfaceScanned && finalSignals.hasEndMarker,
+      repliesExhausted: finalSurfaceScanned && finalSignals.hasEndMarker && !finalSignals.hasExpandableReplies,
       identityReliable: !unreliableIdentitySeen && allComments.every(c => c.qualityReason !== 'synthetic_comment_id'),
     },
     stopReason: riskStopped
@@ -1146,7 +1160,7 @@ async function collectCommentsFromDom({
         ? 'manual_stop'
         : (maxTotal > 0 && allComments.length >= maxTotal
         ? 'comment_cap_reached'
-        : (finalSignals.hasEndMarker ? 'comment_area_end' : 'no_progress'))),
+        : (finalSurfaceScanned && finalSignals.hasEndMarker ? 'comment_area_end' : 'no_progress'))),
   };
 }
 

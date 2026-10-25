@@ -416,6 +416,69 @@ test('incremental actual DOM fallback excludes synthetic root and reply IDs', as
  assert.deepEqual(result.comments.map((c)=>c.commentId),['stable-root']); assert.equal(result.total,1);
 });
 
+test('DOM pagination arriving during a scan is consumed before THE END can close a segment', async (t) => {
+  const saved = { window: globalThis.window, document: globalThis.document, chrome: globalThis.chrome };
+  const node = (id) => ({
+    id, innerText: `合成评论 ${id}`, querySelector: () => null,
+    querySelectorAll: () => [], getAttribute: () => null,
+  });
+  const parents = Array.from({ length: 18 }, (_, i) => {
+    const main = node(`root-${i}`);
+    const replies = i === 0 ? Array.from({ length: 19 }, (_, n) => node(`reply-${n}`)) : [];
+    return { id: `parent-${i}`, querySelector: () => main,
+      querySelectorAll: (selector) => selector === '.comment-item.comment-item-sub' ? replies : [] };
+  });
+  let visibleRoots = 10;
+  let scans = 0;
+  const container = {
+    get innerText() { return `共 37 条评论${visibleRoots === 18 ? ' - THE END -' : ''}`; },
+    getBoundingClientRect: () => ({ width: 300, height: 300 }),
+    querySelector: () => null,
+    querySelectorAll(selector) {
+      if (selector === '.parent-comment') {
+        const snapshot = parents.slice(0, visibleRoots);
+        // Each pass queries roots for parsing and again for reply controls. The third
+        // query is the second parsing pass; its static NodeList predates the final page.
+        if (++scans === 3) queueMicrotask(() => { visibleRoots = 18; });
+        return snapshot;
+      }
+      return selector === '.parent-comment, .comment-item' ? parents.slice(0, visibleRoots) : [];
+    },
+  };
+  globalThis.window = { location: { href: 'https://www.xiaohongshu.com/explore/late-page', pathname: '/explore/late-page' },
+    getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }) };
+  globalThis.document = { body: { innerText: '' }, documentElement: container,
+    querySelector: () => null, querySelectorAll: (selector) => selector === '.comments-container' ? [container] : [] };
+  globalThis.chrome = { runtime: { getURL: () => '' } };
+  t.after(() => Object.assign(globalThis, saved));
+  const collect = (knownCommentIds, maxScrollRounds = 10) => collectComments({ noteId: 'late-page', observedNoteId: 'late-page',
+    persist: false, emitReceipt: false, executionPolicy: { minimumCooldownMs: 0 },
+    taskSpec: { commentMode: 'all_public', incrementalCommentBudget: {
+      knownCommentIds, newUniqueLimit: 30, maxScrollRounds, maxDurationSeconds: 180,
+    } },
+  });
+  const first = await collect([]);
+  assert.equal(first.total, 30, 'must read the late roots instead of claiming 29 is complete');
+  assert.equal(first.collectionReceipt.state, 'partial');
+  assert.equal(first.traversal.mainExhausted, false);
+  const second = await collect(first.comments.map((c) => c.commentId));
+  assert.equal(second.total, 7);
+  assert.equal(second.collectionReceipt.state, 'complete');
+  assert.equal(new Set([...first.comments, ...second.comments].map((c) => c.commentId)).size, 37);
+
+  visibleRoots = 10;
+  scans = 0;
+  const exhausted = await collect([], 3);
+  assert.equal(exhausted.total, 29);
+  assert.equal(exhausted.collectionReceipt.state, 'partial');
+  assert.equal(exhausted.traversal.mainExhausted, false);
+  assert.equal(exhausted.traversal.repliesExhausted, false);
+  assert.equal(exhausted.stopReason, 'no_progress');
+  const remaining = await collect(exhausted.comments.map((c) => c.commentId));
+  assert.equal(remaining.total, 8);
+  assert.equal(remaining.collectionReceipt.state, 'complete');
+});
+
 // A real API collector traverses one root with 64 replies over bounded segments.
 test('all_public progresses beyond 30 and two replies with traversal evidence', async (t) => {
   const saved={window:globalThis.window,document:globalThis.document,chrome:globalThis.chrome};
