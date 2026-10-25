@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../../shared/api";
 import { ActionButton } from "../../shared/ActionButton";
@@ -27,8 +27,6 @@ export function NativeViewBatchDialog({ publications, close }: { publications: r
   const [retrySameRequest, setRetrySameRequest] = useState(false);
   const [message, setMessage] = useState("");
   const [results, setResults] = useState<{ ordinal: number; status: number; code: string }[]>([]);
-  const requestIdsRef = useRef(requestIds);
-  requestIdsRef.current = requestIds;
   const locked = submitting || retrySameRequest;
   const entries = publications.filter(item => Object.hasOwn(selected, item.ref));
 
@@ -63,7 +61,7 @@ export function NativeViewBatchDialog({ publications, close }: { publications: r
     if (Number.isNaN(asOfInstant.getTime())) { setMessage("请选择有效的采样时间。"); return; }
     const invalid = entries.find(item => !Number.isSafeInteger(Number(selected[item.ref])) || Number(selected[item.ref]) < 0);
     if (invalid) { setMessage(`“${invalid.title || "无标题发布"}”的阅读量必须是非负整数；0 是有效实际值。`); return; }
-    const ids = { ...requestIdsRef.current };
+    const ids = { ...requestIds };
     for (const item of entries) ids[item.ref] ||= crypto.randomUUID();
     setRequestIds(ids); setSubmitting(true); setMessage("");
     try {

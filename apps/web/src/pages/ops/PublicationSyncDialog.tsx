@@ -38,13 +38,12 @@ function ref(value: string | null) { return value ? value.slice(0, 8) : null; }
 export function PublicationSyncDialog({ publications, requestRef, close }: { publications: readonly api.Publication[]; requestRef?: string; close: () => void }) {
   const [selected, setSelected] = useState<readonly string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const [refreshing, setRefreshing] = useState(false);
+  const [refreshing, setRefreshing] = useState(() => Boolean(requestRef));
   const [receipt, setReceipt] = useState<api.PublicationSyncReceipt | null>(null);
   const [message, setMessage] = useState("");
   useEffect(() => {
     if (!requestRef) return;
     let live = true;
-    setRefreshing(true); setMessage("");
     void api.publicationSync(requestRef).then(value => {
       if (live) setReceipt(value);
     }).catch(error => {
@@ -91,7 +90,7 @@ export function PublicationSyncDialog({ publications, requestRef, close }: { pub
             </label>)}
           </fieldset>
           {message ? <p role="status" className={c("ops-sync-error")}>{message}</p> : null}
-        </> : receipt ? <SyncResult receipt={receipt} refresh={refresh} refreshing={refreshing} /> : <p role="status" className={c("ops-note")}>{refreshing ? "正在读取同步状态…" : "同步状态暂时无法读取。"}</p>}
+        </> : receipt ? <SyncResult receipt={receipt} refreshing={refreshing} /> : <p role="status" className={c("ops-note")}>{refreshing ? "正在读取同步状态…" : "同步状态暂时无法读取。"}</p>}
         {receipt && message ? <p role="status" className={c("ops-sync-error")}>{message}</p> : null}
       </div>
       <footer>
@@ -102,7 +101,7 @@ export function PublicationSyncDialog({ publications, requestRef, close }: { pub
   </Dialog>;
 }
 
-function SyncResult({ receipt, refresh, refreshing }: { receipt: api.PublicationSyncReceipt; refresh: () => void; refreshing: boolean }) {
+function SyncResult({ receipt, refreshing }: { receipt: api.PublicationSyncReceipt; refreshing: boolean }) {
   return <section className={c("ops-sync-result")} aria-live="polite">
     <p className={c("ops-sync-receipt")}>命令回执 {ref(receipt.requestRef)} · {receipt.replayed ? "已重放原命令" : "已写入本次命令"} · 共 {receipt.selectedCount} 条</p>
     <p className={c("ops-note")}>“已关联材料”只表示 Receipt→Material 关联成立；运营字段和媒体仍未采用。{refreshing ? " 正在刷新…" : ""}</p>

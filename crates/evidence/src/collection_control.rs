@@ -2351,12 +2351,13 @@ const MONITOR_COMMAND_REASONS: &[&str] = &[
     "authorization_target_limit_reached",
     "authorization_work_unit_limit_reached",
     "authorization_expired_or_revoked",
-    // 人工观察的失败（`manual_observe_error_reason` 的全部十一个）。
+    // 人工观察的失败（`manual_observe_error_reason` 的全部十二个）。
     "baseline_not_ready",
     "target_domain_unassigned",
     "schema_unavailable",
     "unknown_target",
     "invalid_material_targets",
+    "invalid_ops_publication_scope",
     "progressive_archive_authorization_too_small",
     "progressive_archive_authorization_missing",
     "progressive_archive_purpose_mismatch",
@@ -3693,11 +3694,12 @@ mod monitor_command_reason_tests {
             AcquisitionChainError::TargetNotRequestable { .. } => 3,
             AcquisitionChainError::KeywordArchiveIncomplete => 4,
             AcquisitionChainError::InvalidMaterialTargets => 5,
-            AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => 6,
-            AcquisitionChainError::ProgressiveArchiveAuthorizationMissing => 7,
-            AcquisitionChainError::ProgressiveArchivePurposeMismatch => 8,
-            AcquisitionChainError::ProgressiveArchiveNotReady { .. } => 9,
-            AcquisitionChainError::Database(_) => 10,
+            AcquisitionChainError::InvalidOpsPublicationScope => 6,
+            AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => 7,
+            AcquisitionChainError::ProgressiveArchiveAuthorizationMissing => 8,
+            AcquisitionChainError::ProgressiveArchivePurposeMismatch => 9,
+            AcquisitionChainError::ProgressiveArchiveNotReady { .. } => 10,
+            AcquisitionChainError::Database(_) => 11,
         }
     }
 
@@ -3711,6 +3713,7 @@ mod monitor_command_reason_tests {
             AcquisitionChainError::SchemaUnavailable,
             AcquisitionChainError::UnknownTarget,
             AcquisitionChainError::InvalidMaterialTargets,
+            AcquisitionChainError::InvalidOpsPublicationScope,
             AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { current_bound: 50 },
             AcquisitionChainError::ProgressiveArchiveAuthorizationMissing,
             AcquisitionChainError::ProgressiveArchivePurposeMismatch,
