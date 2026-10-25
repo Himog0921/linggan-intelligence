@@ -36,7 +36,7 @@ try {
    await page.getByRole('button',{name:'显示密码'}).click();assert.equal(await page.locator('#password').getAttribute('type'),'text');await capture('show-password');
    await page.getByText('登录遇到问题？',{exact:true}).click();await capture('help');await page.keyboard.press('Escape');assert.equal(await page.locator('#login-help').getAttribute('open'),null);
    await page.getByLabel('邮箱',{exact:true}).fill('demo@example.com');await page.getByLabel('记住邮箱').check();await capture('ready');
-   await page.getByRole('button',{name:'登录',exact:true}).click();await page.waitForURL(/\/corpus(?:\/evidence)?(?:\?|$)/);
+   await page.getByRole('button',{name:'登录',exact:true}).click();await page.waitForURL(/\/ops\/overview(?:\?|$)/);
    assert.deepEqual(await page.evaluate(()=>Object.entries(localStorage)),[['linggan.login.remembered-email','demo@example.com']]);
    await context.close();
   }
