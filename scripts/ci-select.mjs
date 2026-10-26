@@ -6,11 +6,10 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-export const suites = ['ai', 'ocr_adoption', 'ocr_audit', 'web', 'topic'];
+export const suites = ['ai', 'ocr_adoption', 'ocr_audit', 'web', 'web_real_chain', 'topic'];
 
-// These patterns preserve the former pull_request.paths coverage of the five
-// reusable workflows. Unknown paths and changes to the delivery mechanism run
-// all five. Do not remove a pattern without evidence about its consumers.
+// These patterns preserve the former pull_request.paths coverage while splitting
+// the Web proof in two. Unknown paths and delivery changes run every proof.
 const paths = {
   ai: [
     'crates/contracts/src/ai_*', 'crates/intelligence/**',
@@ -39,7 +38,18 @@ const paths = {
     'apps/worker/tests/ocr_recognition_postgres.rs', 'apps/worker/tests/ocr_vl_postgres.rs',
     'database/migrations/0144_ocr_manual_recognition.sql',
     'apps/api/src/local_web/ocr_recognition*', 'apps/api/src/local_web/ocr_audit.rs',
-    'apps/web/**', 'apps/pi-adapter/**',
+    'apps/web/src/pages/settings/OcrAudit*', 'apps/web/src/pages/settings/AuditReadingReview*',
+    'apps/web/src/pages/settings/ocrAuditApi.ts',
+    'apps/web/src/pages/settings/AiSettingsExperience.tsx',
+    'apps/web/src/pages/settings/aiSettingsModel.ts',
+    'apps/web/src/pages/corpus/evidence/OcrRecognition*',
+    'apps/web/src/pages/corpus/evidence/OcrReadingReview*',
+    'apps/web/src/pages/corpus/evidence/ocrRecognition*',
+    'apps/web/src/pages/corpus/evidence/ReadingPanel.tsx',
+    'apps/web/src/shared/api.ts', 'apps/web/src/shared/decode.ts',
+    'apps/web/src/app/pages.ts', 'apps/web/src/app/App.tsx',
+    'apps/web/package.json', 'apps/web/package-lock.json',
+    'apps/web/test/e2e/ocr*', 'apps/pi-adapter/**',
     'apps/worker/tests/ocr_quality_audit_postgres.rs', 'apps/worker/tests/support/ocr_audit_endpoint.rs',
     'database/migrations/0143_ocr_quality_audit.sql',
     'scripts/test-ocr-quality-audit-postgres.sh', 'scripts/local-runtime.sh',
@@ -72,12 +82,68 @@ const paths = {
     'crates/intelligence/tests/support/content_workbench_fixture.rs',
     'database/migrations/0127_content_workbench.sql', 'database/migrations/0128_content_workbench_ai.sql',
   ],
+  web_real_chain: [],
   topic: [
     'apps/web/src/styles/**', 'apps/web/src/pages/topics/**', 'apps/web/test/e2e/topic*',
     'apps/web/package-lock.json', 'apps/api/src/local_web/topic_workspace*',
     'apps/api/src/local_web/web_app*',
   ],
 };
+
+// Keep all existing backend consumers covered when the web route grows. Only
+// presentation tooling and page-local React files are exempt from the costly
+// Rust/PostgreSQL proof; shared wiring, package changes and API clients are not.
+const frontendOnlyWebPatterns = new Set([
+  'apps/web/**', 'docs/design/lids/**', 'docs/design/changes/lids-component-change.json',
+  'scripts/lids*', 'scripts/sync-lids*', 'scripts/check-web-react-*',
+  'scripts/login-anatomy/**',
+]);
+paths.web_real_chain = [
+  ...paths.web.filter(pattern => !frontendOnlyWebPatterns.has(pattern)),
+  'apps/web/src/app/**', 'apps/web/src/corpus/**', 'apps/web/src/shared/**',
+  'apps/web/src/main.tsx',
+  'apps/web/package.json', 'apps/web/package-lock.json',
+  // Existing OCR hosts and decoder participate in the actual reading/settings chain.
+  'apps/web/src/pages/settings/AiSettingsExperience.tsx',
+  'apps/web/src/pages/settings/aiSettingsModel.ts',
+  'apps/web/src/pages/corpus/evidence/ReadingPanel.tsx',
+  'apps/web/src/pages/**/*Api.ts', 'apps/web/src/pages/**/*Api.tsx',
+  'apps/web/src/pages/**/api.ts', 'apps/web/src/pages/**/api.tsx',
+  // These existing page components make HTTP requests directly. Keep this list
+  // aligned with the source scan in ci-select.test.mjs as new clients appear.
+  'apps/web/src/pages/collection/collectionCommand.ts',
+  'apps/web/src/pages/collection/CollectionFrame.tsx',
+  'apps/web/src/pages/collection/targets/inspection/useInspectionRead.ts',
+  'apps/web/src/pages/collection/targets/inspection/ContentComparisonPanel.tsx',
+  'apps/web/src/pages/collection/targets/useWorkspace.ts',
+  'apps/web/src/pages/collection/tasks/runRequests.ts',
+  'apps/web/src/pages/corpus/evidence/DossierSections.tsx',
+  'apps/web/src/pages/login/sceneRuntime.ts',
+  'apps/web/src/pages/login/AcceptInvitationPage.tsx',
+  'apps/web/src/pages/login/LoginPage.tsx',
+  'apps/web/src/pages/ops/targetSave.ts',
+  'apps/web/src/pages/ops/OpsPage.tsx',
+  'apps/web/src/pages/settings/AccountSecurityPage.tsx',
+  'apps/web/src/pages/topics/topicRequest.ts',
+  'apps/web/src/pages/topics/TopicsPage.tsx',
+  // These scripts are launched by the Rust/PostgreSQL proof runners below.
+  // A test-only edit must execute the test it changes.
+  'apps/web/test/e2e/comments-real-chain.mjs',
+  'apps/web/test/e2e/creators-real-chain.mjs',
+  'apps/web/test/e2e/evidence-plugin-entry.mjs',
+  'apps/web/test/e2e/evidence-real-chain.mjs',
+  'apps/web/test/e2e/login-react.mjs',
+  'apps/web/test/e2e/login-lifecycle.mjs',
+  'apps/web/test/e2e/shell-layout.mjs',
+  'apps/web/test/e2e/topic-workspace-real-chain.mjs',
+  'apps/web/test/e2e/offline-preview.mjs',
+  'apps/web/test/e2e/ops-real-chain.mjs',
+  'apps/web/test/e2e/research-dossier-v2.mjs',
+  'apps/web/test/e2e/settings-real-chain.mjs',
+  'apps/web/test/e2e/settings-trials-real-chain.mjs',
+  'apps/web/test/e2e/topics-real-chain.mjs',
+  'apps/web/test/e2e/workbench-real-chain.mjs',
+];
 
 function globRegex(pattern) {
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
@@ -100,7 +166,8 @@ export function selectSuites(changedPaths) {
       full = true;
       continue;
     }
-    const matched = suites.filter(suite => matchers[suite].some(pattern => pattern.test(path)));
+    const matched = suites.filter(suite => matchers[suite].some(pattern => pattern.test(path))
+      && (!/^apps\/web\/.*\.css$/.test(path) || !['ocr_audit', 'web_real_chain'].includes(suite)));
     if (matched.length) {
       for (const suite of matched) selected[suite] = true;
     } else if (!/^docs\/.*\.md$/.test(path) && path !== 'README.md') {

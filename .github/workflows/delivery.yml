@@ -26,6 +26,7 @@ jobs:
       ocr_adoption: ${{ steps.route.outputs.ocr_adoption }}
       ocr_audit: ${{ steps.route.outputs.ocr_audit }}
       web: ${{ steps.route.outputs.web }}
+      web_real_chain: ${{ steps.route.outputs.web_real_chain }}
       topic: ${{ steps.route.outputs.topic }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -62,6 +63,10 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.web == 'true'
     uses: ./.github/workflows/web-app.yml
+  web-real-chain:
+    needs: [preflight, web]
+    if: needs.preflight.outputs.web_real_chain == 'true'
+    uses: ./.github/workflows/web-real-chain.yml
   topic:
     needs: preflight
     if: needs.preflight.outputs.topic == 'true'
@@ -71,7 +76,7 @@ jobs:
     # A skipped check is considered passing by GitHub; give metadata-only runs a
     # different name so they cannot overwrite the required Delivery gate result.
     name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'Metadata edit (no validation)' || 'Delivery gate' }}
-    needs: [preflight, ai, ocr-adoption, ocr-audit, web, topic]
+    needs: [preflight, ai, ocr-adoption, ocr-audit, web, web-real-chain, topic]
     if: always() && (github.event.action != 'edited' || github.event.changes.base)
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -83,7 +88,7 @@ jobs:
           node --input-type=module <<'JS'
           const needs = JSON.parse(process.env.DELIVERY_NEEDS);
           if (needs.preflight.result !== 'success') throw new Error('Preflight did not succeed');
-          for (const [job, output] of Object.entries({ ai: 'ai', 'ocr-adoption': 'ocr_adoption', 'ocr-audit': 'ocr_audit', web: 'web', topic: 'topic' })) {
+          for (const [job, output] of Object.entries({ ai: 'ai', 'ocr-adoption': 'ocr_adoption', 'ocr-audit': 'ocr_audit', web: 'web', 'web-real-chain': 'web_real_chain', topic: 'topic' })) {
             const selected = needs.preflight.outputs[output];
             if (!['true', 'false'].includes(selected)) throw new Error(`Missing route for ${job}`);
             const expected = selected === 'true' ? 'success' : 'skipped';
