@@ -136,7 +136,10 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
         get(|| async { Redirect::temporary("/settings/models") }),
     );
     for page in REACT_PAGES {
-        if *page == "/login" || *page == "/invite/accept" || AUTHENTICATED_REACT_PAGES.contains(page) {
+        if *page == "/login"
+            || *page == "/invite/accept"
+            || AUTHENTICATED_REACT_PAGES.contains(page)
+        {
             continue;
         }
         pages = if *page == "/topics/{canonical_key}" {
@@ -206,7 +209,10 @@ async fn entry(State(config): State<WebAppConfig>) -> Response {
 /// Team and operations pages are served only after the same request has passed the local-origin
 /// guard and an active team session check. The creation workspace intentionally keeps its
 /// existing boundary until its own team migration is implemented.
-async fn authenticated_entry(State(state): State<super::LocalWebState>, headers: HeaderMap) -> Response {
+async fn authenticated_entry(
+    State(state): State<super::LocalWebState>,
+    headers: HeaderMap,
+) -> Response {
     if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
         return response;
     }

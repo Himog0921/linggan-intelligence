@@ -336,26 +336,30 @@ require_runtime_target_mismatch_is_rejected() {
 
 require_runtime_target_mismatch_is_rejected
 
+# Keep compilation outside the bounded health wait and serve the current React build.
+cargo build --locked -p linggan-api -p linggan-worker --bins
+"$project_root/scripts/runtime/prepare-web.sh" --build "$(git rev-parse --short HEAD)"
+
 start_server
 require_contains "$proof_directory/health.json" '"state":"READY"' "health did not report a ready database"
 require_contains "$proof_directory/health.json" '"schema":"PLUGIN_RUNTIME_002_SCHEMA_READY"' "health did not report all local migrations"
 curl --fail --silent --show-error -H 'content-type: application/json' --data-binary @"$payload_path" \
   "http://localhost:${proof_port}/api/local/discovery-packages" >"$proof_directory/ingress.json"
 require_contains "$proof_directory/ingress.json" '"admission":"accepted"' "synthetic discovery was not accepted"
-# The removed legacy evidence route is not part of the runtime proof. Read through the current
-# Comment Study page instead; canonical Work Resource admission is covered by its own API proof.
+# Curl proves the current React entry is served, not client-rendered page text.
+# Comment Study rendering and canonical admission have their own browser/API proofs.
 curl --fail --silent "http://localhost:${proof_port}/corpus/comments?domain=00000000-0000-4000-8000-000000000001" \
   >"$proof_directory/comment-study-before-restart.html"
-require_contains "$proof_directory/comment-study-before-restart.html" '评论研究' \
-  "the current Comment Study page did not render"
+require_contains "$proof_directory/comment-study-before-restart.html" '<div id="root"></div>' \
+  "the current Comment Study React entry was not served"
 stop_server
 
 start_server
 require_contains "$proof_directory/health.json" '"state":"READY"' "restarted health did not report ready"
 curl --fail --silent "http://localhost:${proof_port}/corpus/comments?domain=00000000-0000-4000-8000-000000000001" \
   >"$proof_directory/comment-study-after-restart.html"
-require_contains "$proof_directory/comment-study-after-restart.html" '评论研究' \
-  "Comment Study page did not survive the runtime restart"
+require_contains "$proof_directory/comment-study-after-restart.html" '<div id="root"></div>' \
+  "Comment Study React entry did not survive the runtime restart"
 
 # This removes only new connections to the exact disposable proof database and terminates
 # only its sessions. The already-running API must stop reporting READY after its pool loses
@@ -381,4 +385,4 @@ if [[ "$read_after_loss_status" != "503" ]]; then
 fi
 stop_server
 
-echo "local runtime proof passed: target mismatch rejection, first-time Comment Study bootstrap, migration, accepted synthetic discovery, current Comment Study page, restart, and post-start database-loss readiness"
+echo "local runtime proof passed: target mismatch rejection, first-time Comment Study bootstrap, migration, accepted synthetic discovery, current Comment Study React entry, restart, and post-start database-loss readiness"
