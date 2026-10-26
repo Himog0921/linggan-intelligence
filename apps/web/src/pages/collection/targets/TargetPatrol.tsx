@@ -1,6 +1,7 @@
 import { Link } from 'react-router';
 import type { Drawer } from './api';
 import { listHref, returnFields, type Commands } from './useWorkspace';
+import { TargetMaintenance } from './TargetOverview';
 import { Section } from './TargetSection';
 import { patrolLabels, rankings } from './targetLabels';
 export function Patrol({
@@ -17,8 +18,9 @@ export function Patrol({
     t = data.target;
   return (
     <>
+      <details><summary>资料维护</summary><TargetMaintenance data={data} params={params} commands={commands}/></details>
       {i ? (
-        <Section title="巡查变化" note="按时间查看" className="c-dw-patrol">
+        <Section title="巡查变化" note="最近记录" className="c-dw-patrol">
           <ol className="c-dw-timeline">
             <li>
               <time>{i.next ?? (i.patrol === 'disabled' ? '未开启' : '待排定')}</time>
@@ -32,13 +34,13 @@ export function Patrol({
               <div>
                 <b>最近一次成功巡查</b>
                 <p>
-                  命中 {i.hits ?? '尚未取得'} · 新增 {i.latestNew ?? '尚未取得'}
+                  命中 {i.hits ?? '尚未取得'} · 本目标首次发现 {i.latestNew ?? '尚未取得'}
                 </p>
               </div>
             </li>
           </ol>
           <p className="c-dw-note">
-            当前只显示目标级成功结果与下一次安排；没有可核验的历史差分时，不生成运行日志或“零变化”。
+            历史作品与变化见「最近观察」。
           </p>
           <Link className="c-btn-secondary" to={listHref(params, { rule: t.targetRef })}>
             管理巡查
@@ -57,7 +59,7 @@ export function Patrol({
         note={rules === null ? '读取暂不可用' : rules.length ? `${rules.length} 条` : '还没有'}
       >
         {rules === null ? (
-          <p className="c-dw-note">当前读不到这个目标的规则。未知不表示没有规则，也不表示规则正常。</p>
+          <p className="c-dw-note">规则暂不可读。</p>
         ) : (
           <>
             {rules.length ? (
@@ -154,7 +156,7 @@ export function Patrol({
                   </table>
                 </div>
                 <p className="c-dw-note">
-                  一个关键词可以同时盯几个榜，各有各的周期。这里的暂停只停这一条；列表上那个开关一起开关全部规则。停用只是不再排期，它签发过的工单与材料仍然留着——删掉会让那些材料说不清是按什么口径取回来的。
+                  暂停和停用只影响后续排期，历史材料保留。
                 </p>
               </>
             ) : (

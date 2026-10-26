@@ -68,7 +68,7 @@ fi
 # check in exactly the situation AGENTS.md requires (protected delivery works in a worktree and
 # must run this script before committing). The first entry of `git worktree list` is the main
 # worktree.
-  main_worktree="$(git worktree list --porcelain | awk '/^worktree / && !found {print substr($0,10); found=1}')"
+main_worktree="$(git worktree list --porcelain | awk '/^worktree / && !found {print substr($0,10); found=1}')"
 runtime_worktree="$HOME/Library/Application Support/Linggan Intelligence/runtime-main"
 while IFS= read -r worktree_path; do
   [[ "$worktree_path" == "$main_worktree" ]] && continue

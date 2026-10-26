@@ -2,7 +2,7 @@ import { useEffect,useState,type CSSProperties } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
 import { MediaImage } from '../../../corpus/evidence/Media';
 import { limitationCopy } from '../../../corpus/evidence/evidencePresent';
-import { TargetSelect } from '../TargetSelect';
+import { InspectorSelect as TargetSelect } from './InspectorSelect';
 import { decodeWorkComparison,inspectionUrl,METRICS,type MetricKey,type Snapshot } from './inspectionApi';
 import { age,metricLabels,metricValue,moment,number,reason } from './inspectionPresent';
 import { Cutoff,EvidenceLink,MetricPicker,ReadFeedback,ResearchPanel } from './ResearchParts';
@@ -29,8 +29,8 @@ export function WorkComparisonPanel(){
     <ActionButton variant="quiet" aria-pressed={mode==='current'} onClick={()=>context.patch({inspect_mode:'current'})}>当前累计</ActionButton>
     <ActionButton variant="quiet" aria-pressed={mode==='age_24h'} onClick={()=>context.patch({inspect_mode:'age_24h'})}>发布后 24 小时</ActionButton>
   </div>}>
-    <div className={styles.toolbar}><MetricPicker value={metric} onChange={next=>context.patch({inspect_metric:next})}/>{data&&<Cutoff value={data.knowledgeCutoff}/>}</div>
-    <p className={styles.meta}>{mode==='current'?'并列各作品截至标注时点的累计值，不是同期成绩。':'使用发布后 24 小时附近的真实观察；每篇实际年龄单独标注，不推算缺失记录。'}</p>
+    <div className={styles.toolbar}>{context.selected.length>1&&<TargetSelect label="主作品" value={context.selected[0]??''} options={context.selected.map((id,index)=>({value:id,label:context.data.catalog?.find(work=>work.publicRef===id)?.title??`作品 ${index+1}`}))} onChange={id=>context.patch({inspect_works:[id,...context.selected.filter(work=>work!==id)].join(','),inspect_comparison_request:null})}/>}<MetricPicker value={metric} onChange={next=>context.patch({inspect_metric:next})}/>{data&&<Cutoff value={data.knowledgeCutoff}/>}</div>
+    <p className={styles.meta}>{mode==='current'?'各作品标注时点的累计值。':'发布后 24 小时附近的真实观察；缺失不推算。'}</p>
     {message&&<div role="status" className={styles.notice}>{message}</div>}
     <ReadFeedback read={read}/>
     {context.selected.length<2?<div className={styles.empty}><strong>还需选择一篇参照作品</strong><p>返回列表或分布图继续选择，已选作品会保留。</p><ActionButton onClick={context.back}>返回选择</ActionButton></div>:data&&<>
@@ -56,7 +56,7 @@ export function WorkComparisonPanel(){
           </div>)}</div>
         </div>
       </div>
-      {references&&<div className={styles.inlineSummary}><span>所选参照的{metricLabels[metric]}中位数 <b>{number(references.median)}</b></span><span>可用参照 <b>{references.count}</b> 篇</span><span>不含第一列；仅说明所选作品，不代表作者整体规律。</span></div>}
+      {references&&<div className={styles.inlineSummary}><span>所选参照的{metricLabels[metric]}中位数 <b>{number(references.median)}</b></span><span>可用参照 <b>{references.count}</b> 篇</span><span>不含主作品。</span></div>}
       {context.data.target.kind==='creator'&&<ContentComparisonPanel/>}
       <div className={styles.footer}><ActionButton variant="quiet" onClick={context.back}>返回原列表或图表</ActionButton><ActionButton variant="quiet" onClick={read.reload}>重读固定截点</ActionButton></div>
     </>}
