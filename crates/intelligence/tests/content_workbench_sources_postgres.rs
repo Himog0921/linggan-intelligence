@@ -125,7 +125,7 @@ async fn exact_sources_keep_domain_version_parent_and_ocr_image_identity() {
     );
     tx.commit().await.unwrap();
     let work = c.work_ref.unwrap();
-    dossier::ordinary_ocr(&db).await;
+    dossier::current_image_reading(&db).await;
     let canonical = linggan_evidence::research_dossier::read(&db, work)
         .await
         .unwrap()

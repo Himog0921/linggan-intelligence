@@ -47,6 +47,13 @@ cleanup() {
   task_exit=$?
   trap - EXIT
   cleanup_failed=0
+  if [[ -n "${dossier_input_media_root:-}" ]]; then
+    if [[ "$dossier_input_media_root" == "${TMPDIR:-/tmp}/linggan-dossier-input-media."* ]]; then
+      rm -rf -- "$dossier_input_media_root" || cleanup_failed=1
+    else
+      echo "Dossier input proof refused an unowned asset path" >&2; cleanup_failed=1
+    fi
+  fi
   if [[ -n "${ledger_asset_root:-}" ]]; then
     if [[ "$ledger_asset_root" == "$project_root"/artifacts/private/ai-gen1-pr1b/ledger-assets.* ]]; then
       rm -rf -- "$ledger_asset_root" || cleanup_failed=1
@@ -178,6 +185,8 @@ if [[ "${1:-}" == "--dossier-ui" ]]; then
   exit 0
 fi
 if [[ "${1:-}" == "--dossier-input" ]]; then
+  dossier_input_media_root="$(mktemp -d "${TMPDIR:-/tmp}/linggan-dossier-input-media.XXXXXX")"
+  export LINGGAN_LOCAL_MEDIA_ROOT="$dossier_input_media_root"
   cargo_proof -p linggan-evidence --test local_producer_postgres full_runtime_accepts_each_capability_without_collapsing_partial_media_or_replay --locked -- --ignored --exact --nocapture
   cargo_proof -p linggan-evidence --test local_producer_postgres every_declared_capability_admits_one_typed_package --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test dossier_input_postgres --locked -- --ignored --nocapture

@@ -1,6 +1,5 @@
 import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BATCH_KEY } from './batchStore';
 import { DOMAIN, OTHER_DOMAIN, dossierJson, shellJson, workRef } from './evidenceFixtures';
 import { assignLocation } from './navigation';
 import { LIST_PATH, commentsPathOf, detailPathOf, ocrPathOf, pageRoutes, pageUrl, renderEvidencePage, stubViewport } from './pageKit';
@@ -96,37 +95,14 @@ describe('勾选与批量动作', () => {
     expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 201 篇');
     expect(screen.getByText('最多 200 篇，请减少勾选')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '评论深采' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '整理图片文字' })).toBeDisabled();
   });
 
-  it('「整理图片文字」打开批量弹窗并登记断点（只有作品引用与状态）；关闭后可「继续上次整理」', async () => {
-    pageRoutes(kit);
-    const view = await opened();
-    expect(screen.queryByRole('button', { name: '继续上次整理' })).not.toBeInTheDocument();
+  it('已移除旧图片整理与续跑入口', async () => {
+    pageRoutes(kit); const view = await opened();
     await view.user.click(screen.getByRole('button', { name: '选择' }));
     await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
-    await view.user.click(screen.getByRole('button', { name: '整理图片文字' }));
-    const dialog = await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });
-    expect(within(dialog).getByText('3 篇固定作品 · 已处理 0 篇 · 失败 0 篇 · 尚未处理 3 篇')).toBeInTheDocument();
-    const saved = JSON.parse(sessionStorage.getItem(BATCH_KEY) ?? 'null') as { domain: string; items: { work: string; state: string }[] };
-    expect(saved.domain).toBe(DOMAIN);
-    expect(saved.items.map(item => item.work)).toEqual([workRef(1), workRef(2), workRef(3)]);
-    expect(JSON.stringify(saved)).not.toMatch(/合成/);
-
-    await view.user.click(within(dialog).getByRole('button', { name: '关闭' }));
-    expect(screen.queryByRole('dialog', { name: '重新整理选定作品的图片文字' })).not.toBeInTheDocument();
-    await view.user.click(await screen.findByRole('button', { name: '继续上次整理' }));
-    expect(await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' })).toBeInTheDocument();
-  });
-
-  it('刷新之后（重新打开页面）也能「继续上次整理」', async () => {
-    sessionStorage.setItem(BATCH_KEY, JSON.stringify({ domain: DOMAIN, items: [{ work: workRef(1), state: 'pending' }] }));
-    pageRoutes(kit);
-    const view = await opened();
-    await view.user.click(screen.getByRole('button', { name: '选择' }));
-    await view.user.click(screen.getByRole('button', { name: '继续上次整理' }));
-    const dialog = await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });
-    expect(within(dialog).getByText('1 篇固定作品 · 已处理 0 篇 · 失败 0 篇 · 尚未处理 1 篇')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '整理图片文字' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '继续上次整理' })).not.toBeInTheDocument();
   });
 });
 
@@ -356,16 +332,14 @@ describe('敏感面', () => {
     expect(screen.getByRole('tab', { name: '采集记录' })).toHaveAttribute('aria-selected', 'true');
   });
 
-  it('只写三类存储键，且值里没有作品内容', async () => {
+  it('只写宽度偏好与选择引用，且值里没有作品内容', async () => {
     pageRoutes(kit);
     const view = await opened();
     await view.user.click(screen.getByRole('button', { name: '加宽' }));
     await view.user.click(screen.getByRole('button', { name: '选择' }));
     await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
-    await view.user.click(screen.getByRole('button', { name: '整理图片文字' }));
-    await screen.findByRole('dialog', { name: '重新整理选定作品的图片文字' });
     expect(Object.keys(localStorage)).toEqual(['linggan.evidence.inspectorWidth']);
-    expect(Object.keys(sessionStorage).sort()).toEqual([BATCH_KEY, selectionKey].sort());
+    expect(Object.keys(sessionStorage).sort()).toEqual([selectionKey]);
     for (const store of [localStorage, sessionStorage]) {
       for (const key of Object.keys(store)) expect(store.getItem(key) ?? '').not.toMatch(/合成|先做两分钟/);
     }

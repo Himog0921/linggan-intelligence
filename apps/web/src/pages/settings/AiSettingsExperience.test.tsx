@@ -223,3 +223,24 @@ it('作品内容对照的正式材料许可可由设置表单提交，保存不�
   expect(calls.find(c=>c.method==='POST')?.body).toMatchObject({taskKey:'work_comparison',materialClass:'note_material',allowed:true});
   expect(calls.some(c=>/batches|content-comparison/.test(c.path))).toBe(false);
 });
+
+it('当前图片识别可单独配置原图许可，选择或保存原因不会发图', async () => {
+  const raw = settingsFixture();
+  const configuration = { ...raw.configurations[0]!, taskKey: 'ocr_recognition', taskConfigRef: 'ocr-config', executionContract: 'ocr-recognition.v1' };
+  raw.tasks.push({ ...raw.tasks[0]!, taskKey: 'ocr_recognition', label: '图片文字识别', configuration });
+  raw.configurations.push(configuration);
+  const data = parseAiSettings(raw), connection = data.connections[0]!;
+  function Form() { return <EgressForm data={data} connection={connection} action={useAiAction()} />; }
+  respond = call => call.method === 'POST' ? ok({ eventRef: '00000000-0000-4000-8000-000000000009', allowed: true }) : ok(raw);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><Form /></QueryClientProvider>);
+  const user = userEvent.setup();
+  await user.selectOptions(screen.getByLabelText('工作与材料'), 'ocr_recognition:manual_ocr_image');
+  await user.type(screen.getByLabelText('外发许可原因'), '仅配置本篇手动图片识别的材料许可');
+  expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+  expect(screen.getByRole('option', { name: '图片文字识别 · 本篇手动识别原图' })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '批准这项材料外发' }));
+  await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toHaveLength(1));
+  expect(calls.find(call => call.method === 'POST')?.body).toMatchObject({ taskKey: 'ocr_recognition', materialClass: 'manual_ocr_image', allowed: true });
+  expect(calls.some(call => /batches|ocr-recognition/.test(call.path))).toBe(false);
+});

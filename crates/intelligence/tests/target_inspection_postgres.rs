@@ -175,7 +175,7 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
     );
     assert!(dossier.fragments.iter().any(|f| f.field == "body"));
     assert_eq!(counts(&db).await, before);
-    linggan_evidence::admit_media_blob(
+    let materialization = linggan_evidence::admit_media_blob(
         &db,
         observation,
         &"a".repeat(64),
@@ -184,26 +184,13 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
         "blobs/synthetic-empty.jpg",
     )
     .await
-    .unwrap();
-    linggan_evidence::ensure_media_processing_work(&db)
-        .await
-        .unwrap();
-    let worker = Uuid::new_v4();
-    let linggan_evidence::MediaProcessingClaimOutcome::Claimed(claim) =
-        linggan_evidence::claim_media_processing_work(&db, worker, &["image_ocr".into()])
-            .await
-            .unwrap()
-    else {
-        panic!("owned image processing claim");
-    };
-    linggan_evidence::complete_media_processing_without_output(
-        &db,
-        &claim,
-        worker,
-        "no_text_observed",
-    )
-    .await
-    .unwrap();
+    .unwrap()
+    .materialization_ref;
+    let mut tx = db.pool().begin().await.unwrap();
+    linggan_evidence::material_reading::publish_in(&mut tx,linggan_evidence::material_reading::NewReading {
+        content_public_ref:a,unit_key:"image:xhs:inspector-a:image:1".into(),kind:"image".into(),slot_key:Some("xhs:inspector-a:image:1".into()),page:Some(1),source_version:materialization.to_string(),source_state:"present".into(),derivative_ref:None,producer_ref:Some(Uuid::new_v4()),generated_by:"cloud_vision".into(),rule_version:"dossier-content.v2:synthetic-empty".into(),blocks:vec![],issues:vec![json!({"key":"recognition_empty","code":"no_text_observed","message":"未检出文字","resolution":"reading_edit"})],source_location:json!({"blobSha256":"a".repeat(64),"materializationRef":materialization}),publication:linggan_evidence::material_reading::Publication::Automatic{expected_current:None}
+    }).await.unwrap();
+    tx.commit().await.unwrap();
     let raw_empty = inspection::read_dossier(&db, &scope, a).await.unwrap();
     assert!(
         raw_empty.partial,
@@ -229,7 +216,8 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
         &linggan_evidence::material_reading::ReviewReadingRequest {
             command_ref: Uuid::new_v4(),
             expected_current_revision_ref: Some(reading),
-            candidate_revision_ref: reading,
+            unit_ref: image["ref"].as_str().unwrap().into(),
+            source_version: image["sourceVersion"].as_str().unwrap().into(),
             action: "edit".into(),
             actor: "synthetic-human-proof".into(),
             reason: "synthetic explicit image has no text".into(),
@@ -292,13 +280,13 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
         work(&db, "dossier-note", 0).await,
         work(&db, "comparison-b", 8).await,
     ];
-    fixture::dossier::ordinary_ocr(&db).await;
+    fixture::dossier::current_image_reading(&db).await;
     let image_row=sqlx::query("SELECT u.*,r.source_location,r.derivative_ref FROM linggan_material_unit u JOIN linggan_material_reading r ON r.reading_ref=u.current_reading_ref WHERE u.content_public_ref=$1 AND u.kind='image'").bind(works[0]).fetch_one(db.pool()).await.unwrap();
     let image_reading: Uuid = image_row.get("current_reading_ref");
     let mut tx = db.pool().begin().await.unwrap();
     let rich=linggan_evidence::material_reading::publish_in(&mut tx,linggan_evidence::material_reading::NewReading {
         content_public_ref:works[0],unit_key:image_row.get("unit_key"),kind:"image".into(),slot_key:image_row.get("slot_key"),page:image_row.get("page_ordinal"),source_version:image_row.get("source_version"),source_state:"present".into(),
-        derivative_ref:image_row.get("derivative_ref"),producer_ref:None,generated_by:"ordinary_ocr".into(),rule_version:"dossier-content.v2:synthetic-structure-proof".into(),
+        derivative_ref:image_row.get("derivative_ref"),producer_ref:None,generated_by:"cloud_vision".into(),rule_version:"dossier-content.v2:synthetic-structure-proof".into(),
         blocks:vec![json!({"kind":"table","speaker":"other","columns":["条件","行动"],"rows":[["5mg TABLE-CANARY","不要加量"]],"bbox":[0.1,0.28,0.75,0.025]}),
             json!({"kind":"dialogue","turns":[{"speaker":"other","text":"没有改善 DIALOGUE-CANARY"},{"speaker":"author","text":"先复核"}]}),
             json!({"kind":"paragraph","speaker":"unconfirmed","text":"局部待核对","issues":[{"key":"synthetic-local","code":"unclear","message":"合成局部问题","resolution":"reading_edit"}]})],

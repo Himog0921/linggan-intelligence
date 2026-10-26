@@ -6,7 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { appendFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
-export const suites = ['ai', 'ocr_adoption', 'ocr_audit', 'web', 'web_real_chain', 'topic'];
+export const suites = ['ai', 'material_reading', 'ocr_recognition', 'web', 'web_real_chain', 'topic'];
 
 // These patterns preserve the former pull_request.paths coverage while splitting
 // the Web proof in two. Unknown paths and delivery changes run every proof.
@@ -18,41 +18,36 @@ const paths = {
     'scripts/runtime/**', 'scripts/local-runtime.sh',
     'scripts/test-research-dossier-postgres.sh',
   ],
-  ocr_adoption: [
-    'crates/evidence/src/ocr_adoption.rs', 'crates/evidence/src/ocr_adoption/**',
-    'crates/evidence/src/ocr_adoption_persistence.rs', 'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**',
+  material_reading: [
+    'crates/evidence/src/ocr_adoption*', 'crates/evidence/src/ocr_adoption/**',
+    'crates/evidence/src/ocr_adoption_persistence/**', 'crates/evidence/src/ocr_layering.rs',
+    'crates/evidence/tests/ocr_adoption*', 'crates/evidence/tests/ocr_adoption/**',
+    'apps/worker/tests/ocr_vl_postgres.rs', 'apps/worker/tests/ocr_cleanup_postgres.rs',
+    'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**',
     'crates/evidence/src/material_processing.rs', 'crates/evidence/src/material_media_read.rs',
     'crates/evidence/src/material_evidence_fragment.rs', 'crates/evidence/src/research_dossier.rs',
     'apps/worker/src/bin/media_worker.rs', 'apps/worker/src/bin/media_worker_support/**',
-    'apps/worker/tests/ocr_vl_postgres.rs', 'database/migrations/0142_ocr_adoption.sql',
-    'scripts/test-ocr-adoption-postgres.sh', 'crates/evidence/src/ocr_layering.rs',
-    'crates/evidence/src/lib.rs', 'crates/evidence/examples/ocr_adoption_replay.rs',
-    'crates/evidence/tests/ocr_adoption.rs', 'crates/evidence/tests/ocr_adoption/**',
-    'crates/evidence/Cargo.toml',
+    'crates/evidence/src/lib.rs', 'crates/evidence/src/ocr_source.rs',
+    'crates/evidence/examples/ocr_adoption_replay.rs', 'database/migrations/0142_ocr_adoption.sql', 'scripts/test-ocr-recognition-postgres.sh',
+    'crates/evidence/tests/material_reading_postgres.rs', 'crates/evidence/Cargo.toml',
   ],
-  ocr_audit: [
-    'crates/intelligence/src/ocr_quality_audit*', 'crates/intelligence/src/ocr_quality_audit/**',
+  ocr_recognition: [
+    'crates/intelligence/src/ocr_recognition_schema.rs',
     'crates/intelligence/src/ai_foundation/**', 'crates/intelligence/src/pi_*',
-    'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**', 'crates/evidence/src/ocr_adoption_persistence.rs', 'crates/evidence/src/cloud_ocr_adoption*',
-    'crates/evidence/src/research_dossier.rs', 'crates/evidence/tests/cloud_ocr*',
-    'apps/worker/tests/ocr_recognition_postgres.rs', 'apps/worker/tests/ocr_vl_postgres.rs',
-    'database/migrations/0144_ocr_manual_recognition.sql',
-    'apps/api/src/local_web/ocr_recognition*', 'apps/api/src/local_web/ocr_audit.rs',
-    'apps/web/src/pages/settings/OcrAudit*', 'apps/web/src/pages/settings/AuditReadingReview*',
-    'apps/web/src/pages/settings/ocrAuditApi.ts',
-    'apps/web/src/pages/settings/AiSettingsExperience.tsx',
-    'apps/web/src/pages/settings/aiSettingsModel.ts',
-    'apps/web/src/pages/corpus/evidence/OcrRecognition*',
-    'apps/web/src/pages/corpus/evidence/OcrReadingReview*',
-    'apps/web/src/pages/corpus/evidence/ocrRecognition*',
+    'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**',
+    'crates/evidence/src/cloud_ocr_adoption.rs', 'crates/evidence/src/ocr_source.rs',
+    'apps/worker/tests/ocr_recognition_postgres.rs', 'apps/worker/tests/ocr_recognition_postgres/**',
+    'apps/worker/tests/support/ocr_image_fixture.rs', 'apps/worker/tests/support/ocr_audit_endpoint.rs',
+    'apps/api/src/local_web/ocr_recognition*', 'apps/pi-adapter/**',
+    'crates/evidence/src/ocr_adoption_persistence.rs', 'apps/worker/tests/ocr_vl_postgres.rs',
+    'apps/web/src/pages/settings/AiSettingsExperience.tsx', 'apps/web/src/pages/settings/aiSettingsModel.ts',
+    'apps/web/src/pages/corpus/evidence/OcrRecognition*', 'apps/web/src/pages/corpus/evidence/ocrRecognition*',
     'apps/web/src/pages/corpus/evidence/ReadingPanel.tsx',
     'apps/web/src/shared/api.ts', 'apps/web/src/shared/decode.ts',
     'apps/web/src/app/pages.ts', 'apps/web/src/app/App.tsx',
-    'apps/web/package.json', 'apps/web/package-lock.json',
-    'apps/web/test/e2e/ocr*', 'apps/pi-adapter/**',
-    'apps/worker/tests/ocr_quality_audit_postgres.rs', 'apps/worker/tests/support/ocr_audit_endpoint.rs',
-    'database/migrations/0143_ocr_quality_audit.sql',
-    'scripts/test-ocr-quality-audit-postgres.sh', 'scripts/local-runtime.sh',
+    'apps/web/package.json', 'apps/web/package-lock.json', 'apps/web/test/e2e/ocr*',
+    'database/migrations/0144_ocr_manual_recognition.sql',
+    'scripts/test-ocr-recognition-postgres.sh', 'scripts/local-runtime.sh',
     'scripts/runtime/tests/test_ai_guard.py',
   ],
   web: [
@@ -158,7 +153,7 @@ export function selectSuites(changedPaths) {
     // Dossier/readings are shared by OCR, AI input and the three reading surfaces.
     // Their schema or public source contract must run every existing consumer proof.
     if (/^crates\/evidence\/src\/(?:research_dossier|material_reading|dossier_input)(?:\.rs$|\/)/.test(path)
-      || /^database\/migrations\/\d+_(research_dossier_v2|comment_study_full_context|dossier_consumer_contracts)\.sql$/.test(path)) {
+      || /^database\/migrations\/\d+_(research_dossier_v2|comment_study_full_context|dossier_consumer_contracts|dossier_ocr_cleanup)\.sql$/.test(path)) {
       full = true;
       continue;
     }
@@ -167,7 +162,7 @@ export function selectSuites(changedPaths) {
       continue;
     }
     const matched = suites.filter(suite => matchers[suite].some(pattern => pattern.test(path))
-      && (!/^apps\/web\/.*\.css$/.test(path) || !['ocr_audit', 'web_real_chain'].includes(suite)));
+      && (!/^apps\/web\/.*\.css$/.test(path) || !['ocr_recognition', 'web_real_chain'].includes(suite)));
     if (matched.length) {
       for (const suite of matched) selected[suite] = true;
     } else if (!/^docs\/.*\.md$/.test(path) && path !== 'README.md') {

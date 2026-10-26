@@ -237,30 +237,62 @@ async fn read_text_candidates(
     retirement_ready: bool,
     image_layer: bool,
 ) -> Result<HashMap<Uuid, MaterialEvidenceFragment>, sqlx::Error> {
+    if image_layer {
+        let readings = crate::material_reading::read_current_in(&mut **tx, refs, as_of).await?;
+        let mut output = HashMap::new();
+        for (work, units) in readings {
+            for unit in units
+                .iter()
+                .filter(|u| u["kind"] == "image" && u["sourceState"] == "present")
+            {
+                let text = unit["blocks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|b| query.is_some() || b["kind"] != "heading")
+                    .map(|b| crate::research_dossier::content::block_text(b))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let excerpt = if let Some(q) = query {
+                    match_in(&text, q)
+                } else {
+                    (!text.trim().is_empty()).then(|| window(&text, None))
+                };
+                if let Some(excerpt) = excerpt {
+                    output.insert(
+                        work,
+                        fragment_from(
+                            excerpt,
+                            "image_substantive_text",
+                            if query.is_some() {
+                                "SEARCH_MATCH"
+                            } else {
+                                "FIRST_AVAILABLE"
+                            },
+                            unit["currentRevisionRef"]
+                                .as_str()
+                                .and_then(|s| Uuid::parse_str(s).ok()),
+                            unit["slotKey"].as_str().map(str::to_owned),
+                        ),
+                    );
+                    break;
+                }
+            }
+        }
+        return Ok(output);
+    }
     let retirement_filter = if retirement_ready {
         " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
     } else {
         ""
     };
     // All SQL fragments are private compile-time literals; search and identity stay bound.
-    let sql = if image_layer {
-        "SELECT DISTINCT ON (layout.content_public_ref) layout.content_public_ref,derivative.derivative_ref,layer.image_substantive_text AS display_text,'image_substantive_text'::text AS kind,job.slot_key \
-         FROM linggan_media_ocr_layering_result layer JOIN linggan_media_ocr_layout layout USING(layout_ref) \
-         JOIN linggan_media_derivative derivative ON derivative.derivative_ref=layout.ocr_derivative_ref \
-         JOIN linggan_media_processing_job job ON job.job_ref=derivative.job_ref \
-         WHERE layout.content_public_ref=ANY($1) AND layer.state='ACCEPTED' AND layer.created_at <= $2::timestamptz \
-           AND nullif(btrim(layer.image_substantive_text),'') IS NOT NULL \
-           AND ($3::text IS NULL OR lower(layer.image_substantive_text) LIKE '%' || lower($3) || '%') \
-           AND ($3::text IS NOT NULL OR job.slot_key NOT LIKE '%:cover:%') \
-           AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref) \
-           AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition d WHERE d.state='WITHDRAWN_OR_RESTRICTED' AND (d.derivative_ref=derivative.derivative_ref OR d.blob_sha256=job.blob_sha256 OR d.slot_key=job.slot_key)) \
-         ORDER BY layout.content_public_ref,layer.created_at DESC".to_owned()
-    } else {
+    let sql = {
         format!(
             "SELECT DISTINCT ON (derived.content_public_ref) derived.content_public_ref,derived.derivative_ref,derived.kind,derived.display_text,job.slot_key \
          FROM linggan_material_derived_text derived JOIN linggan_media_derivative derivative USING(derivative_ref) \
          JOIN linggan_media_processing_job job USING(job_ref) \
-         WHERE derived.content_public_ref=ANY($1) AND derived.created_at <= $2::timestamptz \
+         WHERE derived.kind='asr_text' AND derived.content_public_ref=ANY($1) AND derived.created_at <= $2::timestamptz \
            AND ($3::text IS NULL OR lower(derived.display_text) LIKE '%' || lower($3) || '%') \
            AND ($3::text IS NOT NULL OR job.slot_key NOT LIKE '%:cover:%'){retirement_filter} \
            AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition d WHERE d.state='WITHDRAWN_OR_RESTRICTED' AND (d.derivative_ref=derivative.derivative_ref OR d.blob_sha256=job.blob_sha256 OR d.slot_key=job.slot_key)) \

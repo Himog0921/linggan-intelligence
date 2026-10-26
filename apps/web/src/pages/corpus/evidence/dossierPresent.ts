@@ -2,6 +2,10 @@ import { ApiError } from '../../../shared/api';
 import type { DossierBlock, DossierMaterial, SourceState } from './dossierTypes';
 const SOURCE_STATES: Record<SourceState, string> = { present: '已取得', known_empty: '来源明确为空', not_acquired: '尚未取得', not_applicable: '不适用', restricted: '材料受限' };
 export function sourceStateLabel(state: SourceState): string { return SOURCE_STATES[state]; }
+/** Slot identity survives the first correction creating a persisted material unit. */
+export function materialIdentity(unit: DossierMaterial): string {
+  return `${unit.kind}:${unit.slotKey ?? (unit.kind === 'body' ? 'native' : unit.ref)}`;
+}
 export function materialLabel(unit: DossierMaterial, imageNumber?: number): string {
   if (unit.kind === 'body') return '正文';
   if (unit.kind === 'tags') return '独立标签';

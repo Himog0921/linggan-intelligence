@@ -359,7 +359,7 @@ async fn canonical_full_image_reading_reopens_exact_frozen_tuple_and_obeys_restr
     let (db, original_config) = setup("topic_saved_canonical_media").await;
     let config = tail_fixture_config(&db, original_config).await;
     let work = dossier_fixture::work(&db).await;
-    let derivative = dossier_fixture::ordinary_ocr(&db).await;
+    let previous_reading = dossier_fixture::current_image_reading(&db).await;
     let initial = linggan_evidence::research_dossier::read(&db, work)
         .await
         .unwrap()
@@ -383,9 +383,9 @@ async fn canonical_full_image_reading_reopens_exact_frozen_tuple_and_obeys_restr
         page: Some(1),
         source_version: image.source_version.clone(),
         source_state: "present".into(),
-        derivative_ref: Some(derivative),
+        derivative_ref: None,
         producer_ref: Some(Uuid::new_v4()),
-        generated_by: "ordinary_ocr".into(),
+        generated_by: "cloud_vision".into(),
         rule_version: "synthetic-canonical-proof.v2".into(),
         blocks: vec![
             json!({"kind":"paragraph","text":text,"speaker":"author","bbox":[0.1,0.1,0.8,0.8]}),
@@ -460,7 +460,7 @@ async fn canonical_full_image_reading_reopens_exact_frozen_tuple_and_obeys_restr
     for field in ["sourceRef", "sourceVersion", "blockRef", "asOf"] {
         let mut wrong = frozen.clone();
         match field {
-            "sourceRef" => wrong.source_ref = derivative, // a derivative/job alias never authorizes a block
+            "sourceRef" => wrong.source_ref = previous_reading, // another immutable reading never authorizes a block
             "sourceVersion" => wrong.source_version = Uuid::new_v4().to_string(),
             "blockRef" => wrong.block_ref.push_str(".foreign"),
             _ => wrong.as_of = "2000-01-01T00:00:00Z".into(),
@@ -505,8 +505,8 @@ async fn canonical_full_image_reading_reopens_exact_frozen_tuple_and_obeys_restr
     assert_eq!(after_update["core"]["coverage"]["state"], "partial");
     assert_eq!(after_update["core"]["coverage"]["completedWindows"], 0);
     assert_eq!(after_update["core"]["coverage"]["coveredChars"], 0);
-    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,derivative_ref,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-proof','restricted canonical source',scope_001_now())")
-        .bind(Uuid::new_v4()).bind(derivative).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,materialization_ref,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-proof','restricted canonical source',scope_001_now())")
+        .bind(Uuid::new_v4()).bind(image.source_version.parse::<Uuid>().unwrap()).execute(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
     assert!(
         linggan_evidence::read_frozen_work_text_in_transaction(&mut tx, work, &frozen)

@@ -1,3 +1,6 @@
+#[allow(dead_code)]
+#[path = "support/research_dossier_fixture.rs"]
+mod dossier_fixture;
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
@@ -45,7 +48,7 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
     )
     .await;
     let blob_sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    admit_media_blob(
+    let materialization = admit_media_blob(
         &database,
         observation_ref,
         blob_sha256,
@@ -54,60 +57,15 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
         "blobs/aa/cover-ocr-fallback",
     )
     .await
-    .expect("the local image produces an image_ocr job");
-    let (content_ref, job_ref): (Uuid, Uuid) = sqlx::query_as(
-        "SELECT content.public_ref,job.job_ref FROM linggan_material_content content \
-         JOIN linggan_media_slot slot ON slot.platform=content.platform AND slot.content_external_id=content.content_external_id \
-         JOIN linggan_media_processing_job job USING(slot_key) \
-         WHERE content.platform='xhs' AND content.content_external_id=$1 AND job.processor_kind='image_ocr'",
-    )
-    .bind(content_id)
-    .fetch_one(database.pool())
-    .await
-    .expect("the admitted cover has a current Paddle job");
-    let derivative_ref = Uuid::new_v4();
-    let layout_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) \
-         VALUES($1,$2,'ocr_text',$3,24,'derivatives/ocr-raw/fallback/raw.txt')",
-    )
-    .bind(derivative_ref)
-    .bind(job_ref)
-    .bind("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-    .execute(database.pool())
-    .await
-    .expect("the raw OCR derivative is appendable");
-    sqlx::query(
-        "INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) \
-         VALUES($1,$2,$3,$4,'paddleocr','paddle-test',1080,1440,$5,20,'derivatives/ocr-layout/fallback/layout.json')",
-    )
-    .bind(layout_ref)
-    .bind(derivative_ref)
-    .bind(content_ref)
-    .bind(blob_sha256)
-    .bind("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-    .execute(database.pool())
-    .await
-    .expect("the layout is appendable");
-    sqlx::query(
-        "INSERT INTO linggan_media_ocr_layering_result(layering_ref,layout_ref,layer_version,state,decision_source,cover_headline,image_substantive_text,retained_line_refs,excluded_lines) \
-         VALUES($1,$2,'rules-v1','ACCEPTED','rules','封面里的作者标题','封面噪声不可作为默认引用','[]'::jsonb,'[]'::jsonb)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(layout_ref)
-    .execute(database.pool())
-    .await
-    .expect("the accepted cover headline is appendable");
-    sqlx::query(
-        "INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason,occurred_at) \
-         VALUES($1,$2,'succeeded','synthetic OCR completion',clock_timestamp())",
-    )
-    .bind(Uuid::new_v4())
-    .bind(job_ref)
-    .execute(database.pool())
-    .await
-    .expect("the synthetic OCR job reaches succeeded before its result is projected");
-
+    .unwrap()
+    .materialization_ref;
+    let content_ref:Uuid=sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1").bind(content_id).fetch_one(database.pool()).await.unwrap();
+    let mut tx = database.pool().begin().await.unwrap();
+    linggan_evidence::material_reading::publish_in(&mut tx,linggan_evidence::material_reading::NewReading {
+        content_public_ref:content_ref,unit_key:format!("image:{slot_key}"),kind:"image".into(),slot_key:Some(slot_key.clone()),page:None,source_version:materialization.to_string(),source_state:"present".into(),derivative_ref:None,producer_ref:Some(Uuid::new_v4()),generated_by:"cloud_vision".into(),rule_version:"synthetic-cover-current.v1".into(),
+        blocks:vec![serde_json::json!({"kind":"heading","text":"封面里的作者标题","speaker":"unconfirmed"})],issues:vec![],source_location:serde_json::json!({"blobSha256":blob_sha256,"materializationRef":materialization,"titleClaim":{"status":"present","text":"封面里的作者标题","eligible":true}}),publication:linggan_evidence::material_reading::Publication::Automatic{expected_current:None}
+    }).await.unwrap();
+    tx.commit().await.unwrap();
     let item = read_work_resource(&database, content_ref)
         .await
         .expect("the shared read projection succeeds")
@@ -125,7 +83,128 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
         Some(&serde_json::json!("cover_ocr")),
         "the fallback is disclosed instead of being presented as a platform field"
     );
+    assert_eq!(item.media["ocr"]["state"], "ACQUIRED");
+    assert_eq!(
+        item.lane_summaries
+            .iter()
+            .find(|lane| lane.lane == "ocr")
+            .unwrap()
+            .state,
+        "ACQUIRED"
+    );
     assert_topic_overview_matches_detail(&database, content_ref).await;
+
+    let current = linggan_evidence::research_dossier::read(&database, content_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    let image = current
+        .materials
+        .iter()
+        .find(|unit| unit["kind"] == "image")
+        .unwrap();
+    let unit: Uuid = serde_json::from_value(image["ref"].clone()).unwrap();
+    let saved=linggan_evidence::material_reading::review_reading(&database,unit,&linggan_evidence::material_reading::ReviewReadingRequest {
+        command_ref:Uuid::new_v4(),unit_ref:unit.to_string(),source_version:image["sourceVersion"].as_str().unwrap().into(),expected_current_revision_ref:serde_json::from_value(image["currentRevisionRef"].clone()).unwrap(),action:"edit".into(),actor:"synthetic-cover-human".into(),reason:"核对完整合成封面标题".into(),edited_blocks:Some(vec![serde_json::json!({"kind":"heading","text":"人工核对封面标题","speaker":"unconfirmed"})]),verified:true,resolved_issue_keys:vec![]
+    }).await.unwrap();
+    let next_observation = Uuid::new_v4();
+    submit_package(&database,"media_slots",serde_json::json!({"contentExternalId":content_id}),serde_json::json!({"kind":"media_slot","slotKey":slot_key,"observationRef":next_observation,"slot":{"role":"cover","ordinal":1},"observation":{"externalUri":"https://media.example/cover-reobserved.jpg","candidateUris":["https://media.example/cover-reobserved.jpg"],"observedAt":"2026-10-20T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":content_id}})).await;
+    let same = admit_media_blob(
+        &database,
+        next_observation,
+        blob_sha256,
+        "image/jpeg",
+        4096,
+        "blobs/aa/cover-ocr-fallback",
+    )
+    .await
+    .unwrap()
+    .materialization_ref;
+    assert_ne!(
+        same, materialization,
+        "same verified bytes have a genuinely new materialization"
+    );
+    let same_read = linggan_evidence::research_dossier::read(&database, content_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    let human = same_read
+        .materials
+        .iter()
+        .find(|unit| unit["kind"] == "image")
+        .unwrap();
+    assert_eq!(human["currentRevisionRef"], saved["currentRevisionRef"]);
+    assert_eq!(human["sourceVersion"], materialization.to_string());
+    assert_eq!(same_read.note["displayTitle"], "人工核对封面标题");
+    let shared = read_work_resource(&database, content_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(shared.display.title.as_deref(), Some("人工核对封面标题"));
+    assert_topic_overview_matches_detail(&database, content_ref).await;
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+
+    let changed_observation = Uuid::new_v4();
+    submit_package(&database,"media_slots",serde_json::json!({"contentExternalId":content_id}),serde_json::json!({"kind":"media_slot","slotKey":slot_key,"observationRef":changed_observation,"slot":{"role":"cover","ordinal":1},"observation":{"externalUri":"https://media.example/cover-changed.jpg","candidateUris":["https://media.example/cover-changed.jpg"],"observedAt":"2026-10-21T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":content_id}})).await;
+    admit_media_blob(
+        &database,
+        changed_observation,
+        &"b".repeat(64),
+        "image/jpeg",
+        4096,
+        "blobs/bb/cover-changed",
+    )
+    .await
+    .unwrap();
+    assert!(
+        read_work_resource(&database, content_ref)
+            .await
+            .unwrap()
+            .unwrap()
+            .display
+            .title
+            .is_none(),
+        "changed bytes cannot borrow the old human title"
+    );
+    let changed = linggan_evidence::research_dossier::read(&database, content_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(changed.note["displayTitle"].is_null());
+    let domain: Uuid = "00000000-0000-4000-8000-000000000001".parse().unwrap();
+    let frozen =
+        linggan_evidence::read_work_resource_overviews(&database, domain, &[content_ref], &cutoff)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+    assert_eq!(
+        frozen.display.title.as_deref(),
+        Some("人工核对封面标题"),
+        "historical asOf still uses its then-current verified bytes"
+    );
+    linggan_evidence::record_materialization_disposition(
+        &database,
+        materialization,
+        linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
+        "synthetic",
+        "original reading source withdrawn",
+    )
+    .await
+    .unwrap();
+    let hidden =
+        linggan_evidence::read_work_resource_overviews(&database, domain, &[content_ref], &cutoff)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+    assert!(
+        hidden.display.title.is_none(),
+        "current source restrictions also gate historical shared titles"
+    );
 }
 
 #[tokio::test]
@@ -1419,4 +1498,152 @@ async fn batched_media_replicas_preserve_cutoff_fallback_and_global_dispositions
             );
         }
     }
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn shared_ocr_state_uses_canonical_reading_gap_empty_and_task_receipts_at_the_same_cutoff() {
+    use linggan_evidence::material_reading::{NewReading, Publication, publish_in};
+    let db = proof_database("shared_canonical_ocr_states").await;
+    let work = dossier_fixture::work(&db).await;
+    dossier_fixture::current_image_reading(&db).await;
+    let dossier = linggan_evidence::research_dossier::read(&db, work)
+        .await
+        .unwrap()
+        .unwrap();
+    let image = dossier
+        .materials
+        .iter()
+        .find(|unit| unit["kind"] == "image")
+        .unwrap();
+    let initial: Uuid = serde_json::from_value(image["currentRevisionRef"].clone()).unwrap();
+    let slot = image["slotKey"].as_str().unwrap();
+    let source = image["sourceVersion"].as_str().unwrap();
+    let first = read_work_resource(&db, work).await.unwrap().unwrap();
+    assert_eq!(first.media["ocr"]["state"], "ACQUIRED");
+    assert_eq!(
+        first.media["ocr"]["resources"][0]["readingRef"],
+        image["currentRevisionRef"]
+    );
+    assert_eq!(
+        first
+            .lane_summaries
+            .iter()
+            .find(|lane| lane.lane == "ocr")
+            .unwrap()
+            .state,
+        "ACQUIRED"
+    );
+    for forbidden in ["blocks", "displayText", "ocrLayering"] {
+        assert!(first.media["ocr"]["resources"][0].get(forbidden).is_none());
+    }
+    assert!(
+        !first.media["ocr"]
+            .to_string()
+            .contains("用途不清的背景文字"),
+        "media status must not transport another OCR full text"
+    );
+    assert_topic_overview_matches_detail(&db, work).await;
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let mut expected = Some(initial);
+    for (state, blocks, label) in [
+        (
+            "present",
+            vec![
+                serde_json::json!({"kind":"paragraph","text":"仍然可读的周围文字"}),
+                serde_json::json!({"kind":"gap","text":"此处未读清"}),
+            ],
+            "PARTIAL",
+        ),
+        ("known_empty", vec![], "KNOWN_EMPTY"),
+        ("present", vec![], "QUEUED"),
+    ] {
+        let mut tx = db.pool().begin().await.unwrap();
+        let result = publish_in(
+            &mut tx,
+            NewReading {
+                content_public_ref: work,
+                unit_key: format!("image:{slot}"),
+                kind: "image".into(),
+                slot_key: Some(slot.into()),
+                page: Some(1),
+                source_version: source.into(),
+                source_state: state.into(),
+                derivative_ref: None,
+                producer_ref: Some(Uuid::new_v4()),
+                generated_by: "cloud_vision".into(),
+                rule_version: format!("dossier-content.v2:state-{label}"),
+                blocks,
+                issues: vec![],
+                source_location: serde_json::json!({"blobSha256":"a".repeat(64)}),
+                publication: Publication::Automatic {
+                    expected_current: expected,
+                },
+            },
+        )
+        .await
+        .unwrap();
+        assert!(result.current);
+        tx.commit().await.unwrap();
+        expected = Some(result.reading_ref);
+        let current = read_work_resource(&db, work).await.unwrap().unwrap();
+        assert_eq!(current.media["ocr"]["state"], label);
+        assert_eq!(
+            current
+                .lane_summaries
+                .iter()
+                .find(|lane| lane.lane == "ocr")
+                .unwrap()
+                .state,
+            label
+        );
+    }
+    let job:Uuid=sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE slot_key=$1 AND processor_kind='image_ocr' ORDER BY created_at DESC LIMIT 1").bind(slot).fetch_one(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason)VALUES($1,$2,'failed','synthetic_latest_failure')").bind(Uuid::new_v4()).bind(job).execute(db.pool()).await.unwrap();
+    assert_eq!(
+        read_work_resource(&db, work).await.unwrap().unwrap().media["ocr"]["state"],
+        "FAILED",
+        "a terminal job without readable canonical blocks cannot become acquired"
+    );
+    let frozen = linggan_evidence::read_work_resource_overviews(
+        &db,
+        dossier_fixture::DOMAIN,
+        &[work],
+        &cutoff,
+    )
+    .await
+    .unwrap()
+    .pop()
+    .unwrap();
+    assert_eq!(
+        frozen
+            .lane_summaries
+            .iter()
+            .find(|lane| lane.lane == "ocr")
+            .unwrap()
+            .state,
+        "ACQUIRED",
+        "later job/reading states do not rewrite an older asOf"
+    );
+    linggan_evidence::record_materialization_disposition(
+        &db,
+        source.parse().unwrap(),
+        linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
+        "synthetic",
+        "current source restriction",
+    )
+    .await
+    .unwrap();
+    let restricted = read_work_resource(&db, work).await.unwrap().unwrap();
+    assert_eq!(restricted.media["ocr"]["state"], "WITHDRAWN_OR_RESTRICTED");
+    assert!(
+        restricted.media["ocr"]["resources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|resource| resource["readingRef"].is_null())
+    );
 }

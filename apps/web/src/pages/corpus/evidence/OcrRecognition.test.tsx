@@ -2,7 +2,6 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { OcrRecognition } from './OcrRecognition';
-import { OcrRecognitionResults } from './OcrRecognitionResults';
 import { parseOcrRecognition, type OcrRecognitionRun } from './ocrRecognitionTypes';
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
@@ -16,21 +15,21 @@ async function clickButton(name: string) { await act(async () => { fireEvent.cli
 describe('work-scoped OCR state and receipts', () => {
   it('shows the concrete unavailable reason and keeps dispatch disabled', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => reply(run({ runRef: null, state: 'unavailable', currentStage: '当前配置不可用。', unavailableReason: '图片文字识别工作开关尚未启用。' }))));
-    render(<OcrRecognition domain="domain-a" workRef="work-a"/>);
+    render(<OcrRecognition workRef="work-a"/>);
     await screen.findByText('图片文字识别工作开关尚未启用。');
     expect(screen.getByRole('button', { name: 'OCR 识别' })).toBeDisabled();
   });
   it('does not keep saying stopping after the persisted batch has stopped', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => reply(run({ state: 'stopped', cancelRequested: true }))));
-    render(<OcrRecognition domain="domain-a" workRef="work-a"/>);
+    render(<OcrRecognition workRef="work-a"/>);
     expect(await screen.findByRole('button', { name: '已停止 33%' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '正在停止' })).not.toBeInTheDocument();
   });
-  it.each([['running', 1, 33, '识别中 33%'], ['finalizing', 3, 99, '整理结果 99%'], ['succeeded', 3, 100, '查看识别结果']] as const)(
+  it.each([['running', 1, 33, '识别中 33%'], ['finalizing', 3, 99, '整理结果 99%'], ['succeeded', 3, 100, '识别完成 100%']] as const)(
     'shows persisted %s percentage, and never announces completion before readable results',
     async (state, completedImages, percent, label) => {
       vi.stubGlobal('fetch', vi.fn(async () => reply(run({ state, completedImages }))));
-      render(<OcrRecognition domain="domain-a" workRef="work-a"/>);
+      render(<OcrRecognition workRef="work-a"/>);
       await waitFor(() => expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', String(percent)));
       expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
       expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuetext', percent + '%');
@@ -48,12 +47,12 @@ describe('work-scoped OCR state and receipts', () => {
       return reply(accepted ? run({ state: 'succeeded', completedImages: 3 }) : ready);
     });
     vi.stubGlobal('fetch', fetch); const user = userEvent.setup();
-    render(<OcrRecognition domain="domain-a" workRef="work-a"/>);
+    render(<OcrRecognition workRef="work-a"/>);
     await user.click(await screen.findByRole('button', { name: 'OCR 识别' }));
     expect(commands).toHaveLength(0);
     await user.click(screen.getByRole('button', { name: '确认并开始识别' }));
     await user.click(await screen.findByRole('button', { name: '核对本次请求' }));
-    await screen.findByRole('button', { name: '查看识别结果' });
+    await screen.findByRole('button', { name: '识别完成 100%' });
     expect(commands).toHaveLength(2); expect(commands[0]).toEqual(commands[1]);
   });
   it.each(['network', 503])('retries the exact stop request after polling revisions and terminal state change (%s), then gives a new run its own stop command', async failure => {
@@ -77,7 +76,7 @@ describe('work-scoped OCR state and receipts', () => {
       starts.push(body); current = run({ runRef: 'run-b', batchRef: 'batch-b', batchRevision: 1 });
       return reply({ runRef: 'run-b' });
     }));
-    await act(async () => { render(<OcrRecognition domain="domain-a" workRef="work-a"/>); });
+    await act(async () => { render(<OcrRecognition workRef="work-a"/>); });
     await clickButton('停止本次识别');
     expect(screen.getByRole('button', { name: '核对本次停止请求' })).toBeEnabled();
     await act(async () => { await vi.advanceTimersByTimeAsync(1500); });
@@ -114,7 +113,7 @@ describe('work-scoped OCR state and receipts', () => {
       current = run({ state: 'stopped', batchRef: 'batch-a', batchRevision: 10, cancelRequested: true });
       return reply({ batchRef: body.batchRef, cancelRequested: true });
     }));
-    await act(async () => { render(<OcrRecognition domain="domain-a" workRef="work-a"/>); });
+    await act(async () => { render(<OcrRecognition workRef="work-a"/>); });
     await clickButton('停止本次识别');
     expect(screen.getByText(/停止请求未被接纳，任务版本已变化/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '核对本次停止请求' })).not.toBeInTheDocument();
@@ -133,51 +132,51 @@ describe('work-scoped OCR state and receipts', () => {
     vi.stubGlobal('fetch', vi.fn((path: string) => path.includes('work-a')
       ? new Promise<Response>(resolve => { releaseA = resolve; })
       : Promise.resolve(reply(run({ workRef: 'work-b', state: 'unavailable', unavailableReason: 'B 尚无原图', currentStage: 'B 尚无原图' })))));
-    const view = render(<OcrRecognition domain="domain-a" key="work-a" workRef="work-a"/>);
-    view.rerender(<OcrRecognition domain="domain-a" key="work-b" workRef="work-b"/>);
+    const view = render(<OcrRecognition key="work-a" workRef="work-a"/>);
+    view.rerender(<OcrRecognition key="work-b" workRef="work-b"/>);
     await screen.findByText('B 尚无原图');
     await act(async () => releaseA?.(reply(run({ currentStage: 'A 私有结果' }))));
     expect(screen.queryByText('A 私有结果')).not.toBeInTheDocument();
     expect(screen.queryByText('A 标题')).not.toBeInTheDocument();
   });
-  it('shows complete candidate blocks without adopting, including local uncertainty and the untouched raw result', async () => {
-    const raw = '{"regions":[{"text":"读🌱叶片边缘清晰。"}]}';
-    const image = {
-      imageRef: 'image-a', ordinal: 2, role: 'page' as const, state: 'succeeded' as const, slotKey: 'slot-a', aliases: [], originalUrl: '/api/local/media/image-a',
-      candidateRevisionRef: 'reading-a', rawResultRef: 'raw-a', rawResultSha256: 'a'.repeat(64), rawJson: raw, invocationRef: 'invocation-a', finishReason: 'stop', usage: null, estimatedCostUsd: null,
-      blocks: [{ ref: 'block-a', kind: 'paragraph' as const, text: '读🌱叶片边缘清晰。', speaker: 'unconfirmed' as const }],
-      issues: [{ key: 'uncertainty', code: 'glyph', message: '图形或文字待确认', resolution: 'reading_edit' as const, blockRef: 'block-a' }],
-    };
-    const result = run({ state: 'succeeded', completedImages: 1, totalImages: 1, pendingCount: 1, images: [image] });
-    const { rerender } = render(<OcrRecognitionResults domain="domain-a" onSaved={vi.fn()} run={result}/>);
-    expect(screen.getByText('读🌱叶片边缘清晰。')).toBeVisible(); expect(screen.getByText('图形或文字待确认')).toBeVisible();
-    expect(screen.getByText('候选读本')).toBeInTheDocument(); expect(screen.queryByText('当前采用，未人工核验')).not.toBeInTheDocument();
-    const user = userEvent.setup(); await user.click(screen.getByText('原始识别与运行回执')); await user.click(screen.getByText('第 2 页 · 原始 JSON 与用量'));
-    expect(screen.getByLabelText('第 2 页原始 JSON').textContent).toBe(raw);
-    expect(screen.getByRole('link', { name: '核对原图' })).toHaveAttribute('href', '/api/local/media/image-a');
-    rerender(<OcrRecognitionResults domain="domain-a" onSaved={vi.fn()} run={{ ...result, images: [{ ...image, originalUrl: null }] }} />);
-    expect(screen.getByText('原图当前不可用')).toBeInTheDocument();
+  it.each([true, false])('canonical publication is based on the actual reading pointer: %s', async isCurrent => {
+    const image = { imageRef: 'image-a', ordinal: 1, role: 'page' as const, state: 'succeeded' as const, slotKey: 'slot-a', aliases: [], originalUrl: null, readingRef: 'reading-a', isCurrent, rawResultRef: null, rawResultSha256: null, rawJson: null, invocationRef: null, finishReason: null, usage: null, estimatedCostUsd: null, blocks: [{ ref: 'block-a', kind: 'paragraph' as const, text: '只可在 canonical 阅读的文字' }], issues: [] };
+    vi.stubGlobal('fetch', vi.fn(async () => reply(run({ state: 'succeeded', completedImages: 1, totalImages: 1, images: [image] }))));
+    const applied = vi.fn(); render(<OcrRecognition workRef="work-a" onApplied={applied} />);
+    expect(await screen.findByText(isCurrent ? '识别已完成，1 张图片已进入当前底稿。' : '识别已完成，当前底稿未替换。')).toBeVisible();
+    expect(screen.queryByText('只可在 canonical 阅读的文字')).not.toBeInTheDocument();
+    expect(screen.queryByText(/候选|确认采用|待核验/)).not.toBeInTheDocument();
+    expect(applied).toHaveBeenCalledTimes(1);
   });
   it('rejects invalid coordinates, old region payloads and impossible progress', () => {
     expect(() => parseOcrRecognition(run({ completedImages: 4 }))).toThrow();
-    const image = { imageRef: 'image', ordinal: 1, role: 'page', state: 'succeeded', slotKey: null, aliases: [], originalUrl: null, candidateRevisionRef: 'candidate', rawResultRef: null, rawResultSha256: null, rawJson: null, invocationRef: null, finishReason: null, usage: null, estimatedCostUsd: null, blocks: [{ ref: 'r', kind: 'paragraph', text: '字', bbox: [0, 0, 999, 999] }], issues: [] };
+    const image = { imageRef: 'image', ordinal: 1, role: 'page', state: 'succeeded', slotKey: null, aliases: [], originalUrl: null, readingRef: 'reading', isCurrent: true, rawResultRef: null, rawResultSha256: null, rawJson: null, invocationRef: null, finishReason: null, usage: null, estimatedCostUsd: null, blocks: [{ ref: 'r', kind: 'paragraph', text: '字', bbox: [0, 0, 999, 999] }], issues: [] };
     expect(() => parseOcrRecognition({ ...run(), images: [image] })).toThrow();
     expect(() => parseOcrRecognition({ ...run(), images: [{ ...image, blocks: [], regions: [] }] })).toThrow();
+  });
+  it('refreshes actual publication status after a canonical edit without dispatching again', async () => {
+    let current=true;
+    const fetch=vi.fn(async (_path:string,init?:RequestInit)=>{expect(init?.method).not.toBe('POST');return reply(run({state:'succeeded',completedImages:1,totalImages:1,images:[{imageRef:'image-a',ordinal:1,role:'page',state:'succeeded',slotKey:'slot-a',aliases:[],originalUrl:null,readingRef:'reading-a',isCurrent:current,rawResultRef:null,rawResultSha256:null,rawJson:null,invocationRef:null,finishReason:null,usage:null,estimatedCostUsd:null,blocks:[],issues:[]}]}));});
+    vi.stubGlobal('fetch',fetch);
+    const view=render(<OcrRecognition workRef="work-a" readingRevision="before-edit"/>);
+    await screen.findByText('识别已完成，1 张图片已进入当前底稿。');
+    current=false;view.rerender(<OcrRecognition workRef="work-a" readingRevision="after-edit"/>);
+    await screen.findByText('识别已完成，当前底稿未替换。');expect(fetch).toHaveBeenCalledTimes(2);
   });
   it('sends only explicitly selected slots, preserving original inventory fingerprint', async () => {
     const ready = run({ runRef: null, state: 'ready', completedImages: 0, scope: { sha256: 'a'.repeat(64), imageCount: 3, modelLabel: 'Synthetic vision', endpointUrl: 'http://127.0.0.1:9/v1', images: [1,2,3].map(n => ({ slotKey: `slot-${n}`, ordinal: n, role: 'page' as const, originalUrl: null })) } });
     const commands: Record<string, unknown>[] = []; let accepted = false;
     vi.stubGlobal('fetch', vi.fn(async (_path: string, init?: RequestInit) => { if (init?.method === 'POST') { commands.push(JSON.parse(String(init.body))); accepted = true; return reply({ runRef: 'run-a' }); } return reply(accepted ? run({ state: 'succeeded', completedImages: 3 }) : ready); }));
-    const user = userEvent.setup(); render(<OcrRecognition domain="domain-a" workRef="work-a"/>);
+    const user = userEvent.setup(); render(<OcrRecognition workRef="work-a"/>);
     await user.click(await screen.findByRole('button', { name: 'OCR 识别' })); await user.click(screen.getByRole('checkbox', { name: '第 2 页' }));
-    await user.click(screen.getByRole('button', { name: '确认并开始识别' })); await screen.findByRole('button', { name: '查看识别结果' });
+    await user.click(screen.getByRole('button', { name: '确认并开始识别' })); await screen.findByRole('button', { name: '识别完成 100%' });
     expect(commands[0]).toMatchObject({ expectedScopeSha256: 'a'.repeat(64), slotKeys: ['slot-1','slot-3'] });
   });
   it.each(['succeeded','stopped'] as const)('offers a separate reviewed scope for a new run after %s', async state => {
     const scope = { sha256: 'b'.repeat(64), imageCount: 2, modelLabel: 'New model', endpointUrl: 'http://127.0.0.1:9/v1', images: [1,2].map(n => ({ slotKey: `new-slot-${n}`, ordinal: n, role: 'page' as const, originalUrl: null })) };
     const commands: Record<string, unknown>[] = [];
     vi.stubGlobal('fetch', vi.fn(async (_path: string, init?: RequestInit) => { if (init?.method === 'POST') { commands.push(JSON.parse(String(init.body))); return reply({ runRef: 'run-next' }); } return reply(run({ state, scope })); }));
-    const user = userEvent.setup(); render(<OcrRecognition domain="domain-a" workRef="work-a"/>);
+    const user = userEvent.setup(); render(<OcrRecognition workRef="work-a"/>);
     await user.click(await screen.findByRole('button', { name: '选择图片重新识读' }));
     expect(commands).toHaveLength(0); expect(screen.getByText(/New model/)).toBeVisible();
     await user.click(screen.getByRole('checkbox', { name: '第 1 页' })); await user.click(screen.getByRole('button', { name: '确认并开始识别' }));
@@ -192,7 +191,7 @@ it.each([
 ])('停止原因可读且不触发重发：%s', async (failureCode, message) => {
   const fetch = vi.fn(async () => reply(run({ state: 'stopped', failureCode })));
   vi.stubGlobal('fetch', fetch);
-  render(<OcrRecognition domain="domain-a" workRef="work-a"/>);
-  expect(await screen.findByText(`${message}，本次已停止。已保存结果可查看，后续图片未发送。`)).toBeVisible();
+  render(<OcrRecognition workRef="work-a"/>);
+  expect(await screen.findByText(`${message}，本次已停止。后续图片未发送。`)).toBeVisible();
   expect(fetch).toHaveBeenCalledTimes(1);
 });

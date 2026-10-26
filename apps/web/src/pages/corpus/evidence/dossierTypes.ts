@@ -5,9 +5,9 @@ export type Speaker = 'author' | 'other' | 'unconfirmed';
 export type ReadingProducer = 'platform' | 'ordinary_ocr' | 'local_vision' | 'cloud_vision' | 'asr' | 'frame_ocr' | 'human_edit';
 export type Adoption = 'automatic' | 'human_adopted' | 'human_edited';
 export type Verification = 'unchecked' | 'verified';
-export type ReadingReviewAction = 'adopt' | 'edit' | 'keep' | 'pending' | 'reject';
+export type ReadingReviewAction = 'edit';
 export interface ReadingReviewSummary {
-  commandRef: string; actor: string; reason: string; action: ReadingReviewAction; reviewedAt: string;
+  commandRef: string; actor: string; reason: string; action: 'adopt' | 'edit' | 'keep' | 'pending' | 'reject'; reviewedAt: string;
 }
 export interface DossierIssue {
   key: string; code: string; message: string; resolution: 'reading_edit' | 'source_refresh'; blockRef?: string | null;
@@ -53,27 +53,18 @@ export interface DossierSelection {
 export interface Dossier {
   contract: 'research-dossier.v2'; workRef: string; revision: string; materialRevision: string; asOf: string;
   note: DossierNote; materials: DossierMaterial[]; readingView: { mainBlockRefs: string[]; supplementBlockRefs: string[] }; coverage: DossierCoverage;
-  attachments: Record<'comments' | 'author' | 'interaction' | 'versions', { href: string }>;
+  attachments: Record<'comments' | 'author' | 'interaction', { href: string }>;
   selection: DossierSelection; raw: unknown;
 }
-export interface RelayerPlan {
-  workCount: number | null; imageSlots: number | null; imageJobs: number | null;
-  layoutCount: number; pendingLayouts: number; alreadyCurrent: number; needsOcr: number; needsAcquisition: number; pendingReviewCount: number; expectedRevision: string;
-}
-export interface DossierPayload { dossier: Dossier; relayerPlan: RelayerPlan }
-export interface ReadingCandidate {
-  unitRef: string; slotKey: string | null; candidateRevisionRef: string; currentRevisionRef: string | null;
-  blocks: DossierBlock[]; issues: DossierIssue[]; generatedBy: ReadingProducer; verification: Verification; createdAt: string; review: ReadingReviewSummary | null;
-}
+export interface DossierPayload { dossier: Dossier }
 export interface ReadingReviewRequest {
-  commandRef: string; expectedCurrentRevisionRef: string | null; candidateRevisionRef: string;
-  action: ReadingReviewAction; editedBlocks?: DossierBlock[]; verified: boolean; resolvedIssueKeys: string[];
+  commandRef: string; unitRef: string; sourceVersion: string | null; expectedCurrentRevisionRef: string | null;
+  action: ReadingReviewAction; editedBlocks: DossierBlock[]; verified: boolean; resolvedIssueKeys: string[];
   actor: string; reason: string;
 }
 export interface ReadingReviewReceipt {
-  commandRef: string; unitRef: string; candidateRevisionRef: string; action: ReadingReviewAction;
+  commandRef: string; unitRef: string; action: ReadingReviewAction;
   currentRevisionRef: string | null; adoption: Adoption | null; verification: Verification | null; reviewRef: string | null;
 }
 export interface DossierComment { sourceRef: string; parentSourceRef: string | null; relation: 'ROOT' | 'REPLY'; body: string | null; likeCount: number | null }
 export interface DossierCommentPage { items: DossierComment[]; total: number | null; nextCursor: string | null }
-export interface RelayerReceipt { scopeCount: number; updated: number; alreadyCurrent: number; skipped: number; needsOcr: number; needsAcquisition: number }

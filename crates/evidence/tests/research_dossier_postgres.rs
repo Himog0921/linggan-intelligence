@@ -10,7 +10,7 @@ use support::{DOMAIN, fixture};
 mod standard;
 
 async fn counts(db: &Database) -> Value {
-    sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_media_ocr_layout),(SELECT count(*) FROM linggan_media_ocr_line),(SELECT count(*) FROM linggan_runtime_capture_package),(SELECT count(*) FROM linggan_material_reading),(SELECT count(*) FROM linggan_material_reading_selection),(SELECT count(*) FROM linggan_model_invocation))")
+    sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_media_materialization),(SELECT count(*) FROM linggan_media_derivative),(SELECT count(*) FROM linggan_runtime_capture_package),(SELECT count(*) FROM linggan_material_reading),(SELECT count(*) FROM linggan_material_reading_selection),(SELECT count(*) FROM linggan_model_invocation))")
         .fetch_one(db.pool()).await.unwrap()
 }
 
@@ -34,7 +34,7 @@ fn material<'a>(read: &'a dossier::ResearchDossier, kind: &str) -> &'a Value {
 async fn full_dossier_is_read_only_and_all_consumers_receive_complete_blocks() {
     let db = fixture::proof_database("dossier_v2_full").await;
     let work = support::work(&db).await;
-    support::ordinary_ocr(&db).await;
+    support::current_image_reading(&db).await;
     let before = counts(&db).await;
     let read = dossier::read(&db, work).await.unwrap().unwrap();
     assert_eq!(read.contract, "research-dossier.v2");
@@ -94,28 +94,6 @@ async fn full_dossier_is_read_only_and_all_consumers_receive_complete_blocks() {
         read.revision,
         dossier::read(&db, work).await.unwrap().unwrap().revision
     );
-    assert!(dossier::relayer_work(&db, work, "stale").await.is_err());
-    let receipt = dossier::relayer_work(&db, work, &read.revision)
-        .await
-        .unwrap();
-    assert_eq!(
-        receipt["updated"], 1,
-        "explicit relayer upgrades the fixture's older normalization rules"
-    );
-    let after = dossier::read(&db, work).await.unwrap().unwrap();
-    assert_eq!(
-        dossier::relayer_work(&db, work, &after.revision)
-            .await
-            .unwrap()["alreadyCurrent"],
-        1
-    );
-    let final_counts = counts(&db).await;
-    for index in [0, 1, 2, 3, 6] {
-        assert_eq!(
-            before[index], final_counts[index],
-            "normalization cannot dispatch OCR or copy source facts"
-        );
-    }
     assert_eq!(
         dossier::read_at(&db, work, Some(&read.as_of))
             .await
@@ -309,7 +287,7 @@ async fn page_holes_repeated_images_and_cover_dedup_require_explicit_first_page_
 async fn explicit_selection_never_truncates_blocks_and_rejects_unknown_references() {
     let db = fixture::proof_database("dossier_v2_selection").await;
     let work = support::work(&db).await;
-    support::ordinary_ocr(&db).await;
+    support::current_image_reading(&db).await;
     let full = dossier::read(&db, work).await.unwrap().unwrap();
     let mut selected = full.clone();
     dossier::select(
@@ -381,7 +359,7 @@ async fn publish_image(
             source_state: "present".into(),
             derivative_ref: None,
             producer_ref: Some(Uuid::new_v4()),
-            generated_by: "ordinary_ocr".into(),
+            generated_by: "cloud_vision".into(),
             rule_version: "synthetic-cover.v2".into(),
             blocks: vec![
                 json!({"ref":"source-line","kind":"paragraph","text":text,"speaker":"unconfirmed"}),
@@ -393,10 +371,6 @@ async fn publish_image(
     )
     .await
     .unwrap();
-    assert_eq!(
-        result.current,
-        matches!(publication, material_reading::Publication::Automatic { .. })
-    );
     tx.commit().await.unwrap();
     result
 }
@@ -447,7 +421,8 @@ async fn cover_dedup_keeps_available_and_human_readings_with_real_page_provenanc
         &material_reading::ReviewReadingRequest {
             command_ref: Uuid::new_v4(),
             expected_current_revision_ref: Some(cover.reading_ref),
-            candidate_revision_ref: cover.reading_ref,
+            unit_ref: cover.unit_ref.to_string(),
+            source_version: sources[0].to_string(),
             action: "edit".into(),
             edited_blocks: Some(vec![edited]),
             verified: true,
@@ -491,73 +466,6 @@ async fn cover_dedup_keeps_available_and_human_readings_with_real_page_provenanc
         .unwrap()
         .unwrap();
     assert_eq!(frozen.materials, first.materials);
-}
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof"]
-async fn cover_candidate_counts_after_dedup_without_reassigning_reading_or_later_page() {
-    let db = fixture::proof_database("dossier_v2_cover_candidate").await;
-    let work = detail(
-        &db,
-        "cover-candidate",
-        json!({"bodyText":"候选保留真实来源"}),
-    )
-    .await;
-    let sources = images(
-        &db,
-        "cover-candidate",
-        2,
-        &[("cover", 1, 'd'), ("image", 1, 'd'), ("image", 2, 'd')],
-    )
-    .await;
-    let candidate = publish_image(
-        &db,
-        work,
-        "xhs:cover-candidate:cover:1",
-        sources[0],
-        "只有封面来源拥有完整候选",
-        material_reading::Publication::Candidate,
-    )
-    .await;
-    let read = dossier::read(&db, work).await.unwrap().unwrap();
-    let plan = dossier::relayer_plan(&read);
-    assert_eq!(plan["imageSlots"], 2);
-    assert_eq!(plan["pendingReviewCount"], 1);
-    assert_eq!(
-        plan["needsOcr"], 1,
-        "the repeated real second page still needs its own reading"
-    );
-    assert_eq!(plan["layoutCount"], 0);
-    let pages: Vec<_> = read
-        .materials
-        .iter()
-        .filter(|m| m["kind"] == "image")
-        .collect();
-    assert_eq!(pages.len(), 2);
-    assert_eq!(pages[0]["slotKey"], "xhs:cover-candidate:image:1");
-    assert_eq!(pages[1]["slotKey"], "xhs:cover-candidate:image:2");
-    assert!(pages.iter().all(|m| m["currentRevisionRef"].is_null()));
-    assert!(
-        !serde_json::to_string(&read)
-            .unwrap()
-            .contains("只有封面来源拥有完整候选")
-    );
-    let candidates = material_reading::read_candidates(&db, work).await.unwrap();
-    assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0]["unitRef"], candidate.unit_ref.to_string());
-    assert_eq!(candidates[0]["slotKey"], "xhs:cover-candidate:cover:1");
-    let exact = dossier::read_version(&db, work, candidate.reading_ref)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(exact.current_revision_ref, None);
-    assert_eq!(exact.material["ref"], candidate.unit_ref.to_string());
-    assert_eq!(exact.material["sourceVersion"], sources[0].to_string());
-    assert_eq!(
-        exact.material["blocks"][0]["text"],
-        "只有封面来源拥有完整候选"
-    );
-    assert_ne!(exact.material["ref"], pages[0]["ref"]);
 }
 
 #[tokio::test]
@@ -712,12 +620,12 @@ async fn unknown_page_order_preserves_observed_ordinals_beyond_nine() {
         images.iter().all(|m| m["page"].is_null()),
         "observation ordinal is never promoted to platform page"
     );
-    let plan = dossier::relayer_plan(&read);
-    assert_eq!(
-        plan["needsOcr"], 0,
-        "unacquired sources cannot be recognized"
+    assert!(
+        images
+            .iter()
+            .all(|image| image["sourceState"] == "not_acquired")
     );
-    assert_eq!(plan["needsAcquisition"], 12);
+    assert_eq!(read.coverage["imageInventory"]["acquiredPages"], 0);
     assert!(
         !read.reading_view["mainBlockRefs"]
             .as_array()
@@ -725,77 +633,4 @@ async fn unknown_page_order_preserves_observed_ordinals_beyond_nine() {
             .is_empty()
     );
     assert_eq!(counts(&db).await, before, "reads do not prepare materials");
-}
-
-#[tokio::test]
-#[ignore = "isolated PostgreSQL proof"]
-async fn saved_legacy_image_layout_is_pending_until_explicit_existing_normalization() {
-    let db = fixture::proof_database("dossier_saved_layout_pending").await;
-    let work = detail(
-        &db,
-        "saved-layout",
-        json!({"bodyText":"正文先读，图片随后整理"}),
-    )
-    .await;
-    images(&db, "saved-layout", 1, &[("image", 1, 'a')]).await;
-    let job: Uuid = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE slot_key='xhs:saved-layout:image:1' AND processor_kind='image_ocr' ORDER BY created_at DESC LIMIT 1")
-        .fetch_one(db.pool()).await.unwrap();
-    let derivative = Uuid::new_v4();
-    let layout = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,storage_key,byte_size) VALUES($1,$2,'ocr_text',$3,'legacy/image.txt',12)")
-        .bind(derivative).bind(job).bind("b".repeat(64)).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) VALUES($1,$2,$3,$4,'paddleocr','legacy-synthetic',100,100,$5,12,'legacy/layout.json')")
-        .bind(layout).bind(derivative).bind(work).bind("a".repeat(64)).bind("c".repeat(64)).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_media_ocr_line(layout_ref,line_ref,ordinal,text_content,confidence,left_norm,top_norm,right_norm,bottom_norm) VALUES($1,$2,0,'原有图片全文，不重跑识别',0.98,0.1,0.2,0.9,0.3)")
-        .bind(layout).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state) VALUES($1,$2,'succeeded')")
-        .bind(Uuid::new_v4()).bind(job).execute(db.pool()).await.unwrap();
-    let before = counts(&db).await;
-    let read = dossier::read(&db, work).await.unwrap().unwrap();
-    let image = material(&read, "image");
-    assert!(image["blocks"].as_array().unwrap().is_empty());
-    assert_eq!(image["processing"]["state"], "completed");
-    assert!(
-        image["issues"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|i| i["code"] == "existing_result_pending")
-    );
-    assert!(
-        !image["issues"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|i| i["code"] == "not_processed")
-    );
-    let plan = dossier::relayer_plan(&read);
-    assert_eq!(plan["pendingLayouts"], 1);
-    assert_eq!(plan["needsOcr"], 0);
-    assert_eq!(plan["needsAcquisition"], 0);
-    assert_eq!(
-        counts(&db).await,
-        before,
-        "read cannot adopt the saved layout"
-    );
-    let receipt = dossier::relayer_work(&db, work, &read.revision)
-        .await
-        .unwrap();
-    assert_eq!(receipt["updated"], 1);
-    let after = dossier::read(&db, work).await.unwrap().unwrap();
-    assert_eq!(
-        material(&after, "image")["blocks"][0]["text"],
-        "原有图片全文，不重跑识别"
-    );
-    assert!(
-        !material(&after, "image")["issues"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|i| i["code"] == "existing_result_pending")
-    );
-    let end = counts(&db).await;
-    for i in [0, 1, 2, 3, 6] {
-        assert_eq!(before[i], end[i]);
-    }
 }

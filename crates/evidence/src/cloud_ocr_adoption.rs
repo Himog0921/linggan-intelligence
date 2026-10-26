@@ -1,15 +1,13 @@
-//! Cloud OCR observation storage and canonical candidate blocks. A successful
-//! recognition never selects itself as the current material reading.
-use crate::ocr_adoption::{ImageIdentity, ImageRole};
+//! Current cloud OCR output conversion into canonical reading blocks.
+use crate::ocr_source::{ImageIdentity, ImageRole};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 pub const PROCESSOR_VERSION: &str = "cloud-manual-v3";
 pub const RULE_VERSION: &str = "cloud-ocr-observation.v3";
 pub fn is_processor_version(version: &str) -> bool {
-    ["cloud-manual-v2", PROCESSOR_VERSION].iter().any(|prefix| {
+    [PROCESSOR_VERSION].iter().any(|prefix| {
         version == *prefix
             || version
                 .strip_prefix(prefix)
@@ -141,28 +139,6 @@ pub fn blocks_from_visual(visual: &Value) -> Result<Vec<Value>, sqlx::Error> {
     Ok(output)
 }
 
-pub async fn persist_in(
-    tx: &mut Transaction<'_, Postgres>,
-    source: &CloudSource,
-    derivative: Uuid,
-    layout: Uuid,
-    raw: &str,
-    visual: &Value,
-) -> Result<Vec<Value>, sqlx::Error> {
-    if source.image.width == 0 || source.image.height == 0 {
-        return Err(invalid("cloud_source_invalid"));
-    }
-    let blocks = blocks_from_visual(visual)?;
-    let observation = json!({"producer":"cloud_vision","source":source,"rawSha256":crate::ocr_adoption::content_hash(raw.as_bytes()),"result":visual});
-    let fingerprint = crate::ocr_adoption::content_hash(observation.to_string().as_bytes());
-    // Original producer diagnostics stay immutable and never serve as a second
-    // material projection. The common reading table owns all user/agent content.
-    sqlx::query("INSERT INTO linggan_media_ocr_adoption(adoption_ref,derivative_ref,layout_ref,rule_version,input_fingerprint,observation,assessment,line_ref_map) VALUES($1,$2,$3,$4,$5,$6,$7,'[]')")
-        .bind(Uuid::new_v4()).bind(derivative).bind(layout).bind(RULE_VERSION).bind(fingerprint).bind(observation)
-        .bind(json!({"producer":"cloud_vision","sourceRelation":"image_transcription","ruleVersion":RULE_VERSION})).execute(&mut **tx).await?;
-    Ok(blocks)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -173,7 +149,7 @@ mod tests {
         assert_eq!(blocks[0]["text"], "禁止 … 10 mg");
         assert_eq!(blocks[0]["kind"], "paragraph");
         assert_eq!(blocks[0]["issues"][0]["resolution"], "reading_edit");
-        assert!(is_processor_version("cloud-manual-v2"));
+        assert!(!is_processor_version("cloud-manual-v2"));
         assert!(is_processor_version(&format!(
             "{PROCESSOR_VERSION}:{}",
             Uuid::nil()

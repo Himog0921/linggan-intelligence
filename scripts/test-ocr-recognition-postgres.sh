@@ -7,11 +7,15 @@ source "$project_root/scripts/cargo-proof.sh"
 audit_tmp_root="${TMPDIR:-/tmp}"
 audit_tmp_root="${audit_tmp_root%/}"
 export AI_FOUNDATION_PROOF_NODE="$(command -v node)"
-manual_adoption_only=0
+reading_only=0
+local_only=0
+purge_only=0
 browser_proof=0
 case "${1:-}" in
  '') ;;
- --manual-adoption) manual_adoption_only=1 ;;
+ --reading-only) reading_only=1 ;;
+ --local-only) local_only=1 ;;
+ --purge-only) purge_only=1 ;;
  --browser)
   browser_proof=1
   npm --prefix apps/web run build
@@ -30,7 +34,7 @@ PYCODE
   export OCR_AUDIT_BROWSER_PROOF_BINARY
   [[ -x "$OCR_AUDIT_BROWSER_PROOF_BINARY" ]] || exit 2
   ;;
- *) echo 'usage: test-ocr-quality-audit-postgres.sh [--browser|--manual-adoption]' >&2;exit 2;;
+ *) echo 'usage: test-ocr-recognition-postgres.sh [--browser|--reading-only|--local-only|--purge-only]' >&2;exit 2;;
 esac
 export LINGGAN_COLLECTION_UPGRADE_PHASE=governance RUST_TEST_THREADS=1
 suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
@@ -68,21 +72,23 @@ proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:
 [[ "$proof_port" =~ ^[0-9]+$ ]] || exit 2
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 export LINGGAN_LOCAL_MEDIA_ROOT="$proof_assets/media"
-export LINGGAN_PADDLE_OCR_PYTHON="$(command -v python3)"
-export LINGGAN_PADDLE_VL_SCRIPT="$proof_assets/synthetic-bridge.py"
 export OCR_AUDIT_PROOF_OUTPUT="$proof_assets/receipts"
-if [[ "$manual_adoption_only" == 1 ]]; then
- cargo_proof -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
+if [[ "$purge_only" == 1 ]]; then
+ cargo_proof -p linggan-worker --test ocr_cleanup_postgres --locked -- --ignored --nocapture
  exit 0
 fi
-cargo_proof -p linggan-worker --test ocr_quality_audit_postgres synthetic_audit_blind_read_review_report_and_withdrawal --locked -- --ignored --nocapture
-if [[ "$browser_proof" == 1 ]]; then
- cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable --locked -- --ignored --nocapture
+if [[ "$local_only" == 1 ]]; then
+ export LINGGAN_PADDLE_OCR_PYTHON="$(command -v python3)"
+ export LINGGAN_PADDLE_VL_SCRIPT="$proof_assets/synthetic-bridge.py"
+ cargo_proof -p linggan-worker --test ocr_vl_postgres synthetic_daily_worker_publishes_reading_before_optional_review --locked -- --ignored --exact --nocapture
+ cargo_proof -p linggan-worker --test ocr_vl_postgres latest_frame_completion_and_empty_outcome_publish_current_readings --locked -- --ignored --exact --nocapture
+ exit 0
 fi
-cargo_proof -p linggan-worker --test ocr_recognition_postgres cloud_manual_human_adoption_is_append_only_and_not_an_audit_sample --locked -- --ignored --nocapture
-cargo_proof -p linggan-worker --test ocr_recognition_postgres second_image_schema_failure_stops_without_sending_the_third_image --locked -- --ignored --nocapture
-cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_cancel_and_attempted_lease_recovery_are_read_without_resend --locked -- --ignored --nocapture
-cargo_proof -p linggan-worker --test ocr_recognition_postgres manual_ocr_freezes_only_explicit_current_work_images_not_context_or_history --locked -- --ignored --nocapture
+if [[ "$reading_only" == 1 ]]; then
+ cargo_proof -p linggan-evidence --test material_reading_postgres --locked -- --ignored --nocapture
+ exit 0
+fi
+cargo_proof -p linggan-worker --test ocr_recognition_postgres --locked -- --ignored --nocapture
 if [[ -n "${OCR_AUDIT_SAVE_DIR:-}" ]];then
  [[ "$OCR_AUDIT_SAVE_DIR" == "${audit_tmp_root}/linggan-ocr-audit-"* ]] || exit 2
  mkdir -p "$OCR_AUDIT_SAVE_DIR"

@@ -2650,7 +2650,7 @@ async fn partial_problem_stage_usage_above_reservation_blocks_followup_request()
 async fn dossier_partial_image_body_reaches_v2_frozen_context() {
     let (db, mut command, _) = setup("dossier_comment_start", 0).await;
     let work = dossier_fixture::work(&db).await;
-    dossier_fixture::ordinary_ocr(&db).await;
+    dossier_fixture::current_image_reading(&db).await;
     comment_with_author(
         &db,
         "dossier-note",

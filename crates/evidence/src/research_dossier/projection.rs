@@ -16,27 +16,6 @@ pub(super) fn assemble(
     }
     let slots = super::duplicates::collapse(inventory.slots.clone(), &readings);
     let mut media = media_materials(work, &readings, &slots);
-    for material in &mut media {
-        if material["kind"] == "image"
-            && material["sourceState"] == "present"
-            && material["blocks"].as_array().is_some_and(Vec::is_empty)
-            && material["processing"]["reason"] != "no_text_observed"
-            && layouts.iter().any(|layout| {
-                super::same_image_source(material, layout)
-                    && layout["humanProtected"] != true
-                    && layout["ruleVersion"] != super::relayer::rule_version()
-            })
-        {
-            let issues = material["issues"].as_array_mut().expect("material issues");
-            issues.retain(|issue| issue["code"] != "not_processed");
-            issues.push(issue(
-                "existing_result_pending",
-                "existing_result_pending",
-                "已有识别结果，待整理",
-                "source_refresh",
-            ));
-        }
-    }
     if let Some(expected) = expected_pages(&inventory) {
         for page in 1..=expected {
             if !media
@@ -76,7 +55,7 @@ pub(super) fn assemble(
         coverage,
         attachments: json!({"comments":{"href":format!("{base}/comments")},
             "author":{"href":format!("{base}/metadata?sections=author")},"interaction":{"href":format!("{base}/metadata?sections=interaction")},
-            "versions":{"href":format!("{base}/candidates")}}),
+            "publication":{"href":format!("{base}/metadata?sections=publication")}}),
         selection: Value::Null,
         fragments,
         media: layouts,
@@ -250,7 +229,9 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
                 )
             };
             material["sourceRef"] = slot["sourceRef"].clone();
-            material["sourceVersion"] = slot["sourceVersion"].clone();
+            if reading.is_none() {
+                material["sourceVersion"] = slot["sourceVersion"].clone();
+            }
             material["page"] = if *kind == "image" {
                 if slot["displayOrderState"] == "KNOWN" {
                     slot["page"].clone()
@@ -430,5 +411,9 @@ fn metadata(work: &WorkResourceCurrent) -> Value {
         "comments":{"value":work.comment_count,"state":work.comment_count_state,"sourceRef":work.comment_source.material_ref,"observedAt":work.comment_source.observed_at},
         "collects":{"value":work.collect_count,"state":work.collect_count_state,"sourceRef":work.collect_source.material_ref,"observedAt":work.collect_source.observed_at},
         "shares":{"value":work.share_count,"state":work.share_count_state,"sourceRef":work.share_source.material_ref,"observedAt":work.share_source.observed_at}},
-        "publishedAt":work.published_at,"publishedPrecision":work.published_at_precision,"observedAt":work.observed_at})
+        "publication":{"publishedAt":work.published_at,"localDate":work.published_local_date,
+        "sourceText":work.published_at_source_text,"sourceField":work.published_at_source_field,
+        "sourceKind":work.published_at_source_kind,"precision":work.published_at_precision,
+        "referenceObservedAt":work.published_at_reference_observed_at,"parserVersion":work.published_at_parser_version,
+        "sourceRef":work.published_source.material_ref,"sourceObservedAt":work.published_source.observed_at,"observedAt":work.observed_at}})
 }

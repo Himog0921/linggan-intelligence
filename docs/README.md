@@ -1,11 +1,11 @@
 # 文档总索引
 
-- [OCR 封面标题选择与异常内容拦截](plans/active/ocr-title-quality-454.md)：#454/#464 的区块采用、局部复核与自有库链路验证；生产默认、共享运行与业务签收仍另列。
-- [OCR 手动图片文字识别：实施与验收](plans/active/ocr-manual-recognition-454.md)：#454 当前候选；图组手动 OCR、真实持久化百分比、检查器结果与 OCR 模型设置，未合并、未部署。
+- [OCR 封面标题与异常内容旧计划](plans/active/ocr-title-quality-454.md)：#454/#464 交付记录；现行阅读与修正以[唯一底稿合同](data-contracts/research-dossier.md)为准，最新版本地能力见[Paddle 运行手册](runbooks/paddle-ocr-runtime.md)。
+- [OCR 手动图片文字识别：实施与验收](plans/active/ocr-manual-recognition-454.md)：#454 当前候选；保留 local-v4/local-vl-v1/DeepSeek，统一当前读本、按需编辑与历次结果清理，未合并、未部署。
 采集完整交付入口：[COLLECTION-JTBD-001 单次采集](plans/active/collection-single-run-398.md)（Issue #398 / Draft PR #406；替代 #400 的限制，含 UI 与验收矩阵）。[运行与数据合同](data-contracts/collection-single-run-001.md)、[正式 UI 核对](design/changes/collection-single-run-398.md)、[单独 UI 审美审查](design/changes/collection-single-run-398-visual-audit.md)。旧[两页导航](plans/active/collection-jtbd-001.md)保留历史范围。
 
 > 状态: 权威当前
-> 最后核对: 2026-09-30
+> 最后核对: 2026-10-26（研究底稿与 OCR 入口同步；其余事实按各文档）
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -17,8 +17,8 @@
 
 ## 2026-10-23 · 研究底稿 v2
 
-- [唯一底稿合同](data-contracts/research-dossier.md)：完整区块、显式当前、独立校正、精确引用与按需表示。
-- [实施与验收](plans/active/research-dossier-v2.md)：当前授权、表面/状态/依赖、测试矩阵与实际交付状态；取代 v1 并行输入的实施边界。
+- [唯一底稿合同](data-contracts/research-dossier.md)：完整区块、唯一当前、按需 edit、精确引用与 publication/四类互动元信息。
+- [v2 历次实施与验收](plans/active/research-dossier-v2.md)：原交付的表面、依赖、测试与回执；其中候选采用及抽检流程已由 2026-10-26 唯一底稿合同替代。
 
 ## 2026-10-22 · COMMENT-WORD-CLOUD-V23（候选）
 
@@ -32,10 +32,10 @@
 
 协作与风险分级统一读[工作包协作协议](governance/agent-collaboration.md)。业务行为、数据、权限和外部调用先读[安全与领域约束](agents/safety-invariants.md)；该文件保留原根 AGENTS 的不变量。运行状态仅在运行/发布/跨包依赖任务中读取，不作为所有实现的预读门。
 
-- [手动云端 OCR 的人工采用合同](data-contracts/ocr-manual-human-adoption.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
-- [手动云端 OCR 人工采用实施计划](archive/plans/ocr-manual-human-adoption-454.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
-- [手动云端 OCR 人工采用发布运行手册](runbooks/ocr-manual-human-adoption-release-454.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
-- [UI 变更清单](design/changes/ocr-manual-human-adoption-454-ui-change-manifest.md) / [验收记录](design/acceptance/ocr-manual-human-adoption-454-acceptance.md)：#479 历史记录；当前实现与采用合同统一见 research-dossier.v2，不作为并行入口或当前发布步骤。
+- [旧 OCR 人工采用入口移除说明](data-contracts/ocr-manual-human-adoption.md)：旧入口只保留替代指针，当前统一使用底稿 canonical edit。
+- [手动云端 OCR 人工采用实施计划](archive/plans/ocr-manual-human-adoption-454.md)：#479 历史交付记录，已停用；不作为当前读写、启用或发布步骤。
+- [手动云端 OCR 人工采用发布运行手册](runbooks/ocr-manual-human-adoption-release-454.md)：#479 历史交付记录，已停用；不作为当前读写、启用或发布步骤。
+- [UI 变更清单](design/changes/ocr-manual-human-adoption-454-ui-change-manifest.md) / [验收记录](design/acceptance/ocr-manual-human-adoption-454-acceptance.md)：#479 历史交付记录，已停用；不作为当前读写、启用或发布步骤。
 
 
 - [主题图谱紧凑工作区变更](design/changes/topic-map-compact-382.md)：#382 当前 UI 后续，取代旧工作区布局，不改研究与来源合同。
@@ -74,7 +74,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 ## 研究底稿第一阶段历史
 
 - [第一阶段历史计划](plans/active/research-dossier-001.md)：Issue #420 历史实施；当前实现与验收统一转入 [v2](plans/active/research-dossier-v2.md)。
-- [底稿与任务材料合同](data-contracts/research-dossier.md)：本期数据、分层和输入范围。
+- [底稿与任务材料合同](data-contracts/research-dossier.md)：现行 canonical 读本、来源、编辑及任务输入范围。
 - [第一阶段 UI 变更历史](design/changes/research-dossier-001-ui-change-manifest.md)：旧详情、对照和预览记录；当前表面与验收统一见 [v2 实施计划](plans/active/research-dossier-v2.md)。
 
 ## 评论研究产品化 · 当前交付入口
@@ -508,10 +508,10 @@ AI-GEN1 PR-1B 当前执行：[底座实施包](plans/active/ai-gen1-pr1b-foundat
 - [组件同步合同](design/lids/component-sync.md)、[生成组件目录](design/lids/component-library.generated.md)：C09/C16规则、实现、展示同源。
 - [运营页规格](design/pages/ops-page.md)、[创作页规格](design/pages/content-workbench-page.md)：数据/创作二级及Z02三级导航，发布证据沿LIDS-UI-001计划与验收。
 
-- [OCR质量抽检与人工修正](plans/active/ocr-quality-audit-454.md)：#454 后续隔离实施，默认关闭；状态/证据在计划与PR。
+- [旧 OCR 质量抽检删除收口](plans/active/ocr-quality-audit-454.md)：只跟踪旧能力删除，不再作为抽检启用计划。
 
-- [OCR可选质量抽检数据合同](data-contracts/ocr-quality-audit.md)：冻结样本、盲读、人工版本、来源撤回、质量分母与未验证边界。
+- [旧 OCR 质量抽检能力移除说明](data-contracts/ocr-quality-audit.md)：旧契约已由唯一底稿阅读与 edit 合同取代。
 
-- [OCR-DOSSIER-SYSTEM-50：识别管线整改与五十篇验证](plans/active/ocr-dossier-system-50.md) · 活跃计划；真实清理/识别授权与候选修复分层记录。
+- [OCR-DOSSIER-SYSTEM-50：五十篇调查与早期修复](plans/active/ocr-dossier-system-50.md)：历史范围与验证记录；当前识别、编辑和清理边界按唯一底稿合同。
 
 - [研究底稿与 OCR 五十篇审查报告](audits/ocr-dossier-system-50-2026-10-24.md) · 一次性报告；含真实识别、内容对照、清理和候选修正边界。

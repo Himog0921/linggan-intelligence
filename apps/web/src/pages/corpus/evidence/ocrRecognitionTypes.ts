@@ -8,7 +8,7 @@ export interface OcrRecognitionImage {
   imageRef: string; ordinal: number | null; role: 'cover' | 'page' | 'unknown';
   state: 'pending' | 'running' | 'succeeded' | 'failed' | 'unattempted' | 'unknown';
   slotKey: string | null; aliases: readonly string[]; originalUrl: string | null;
-  candidateRevisionRef: string | null; blocks: DossierBlock[]; issues: DossierIssue[];
+  readingRef: string | null; isCurrent: boolean; blocks: DossierBlock[]; issues: DossierIssue[];
   rawResultRef: string | null; rawResultSha256: string | null; rawJson: string | null;
   invocationRef: string | null; finishReason: string | null;
   usage: { inputTokens: number | null; outputTokens: number | null; measuredTokens: number | null } | null;
@@ -34,9 +34,9 @@ function array<T>(value: unknown, parse: (entry: unknown) => T): T[] { return Ar
 function choice<const T extends string>(value: unknown, values: readonly T[]): T { return values.find(entry => entry === value) ?? invalid(); }
 function image(value: unknown): OcrRecognitionImage {
   const row = record(value); const usage = row.usage === undefined || row.usage === null ? null : record(row.usage);
-  if ('regions' in row) return invalid();
+  if ('regions' in row || 'candidateRevisionRef' in row || typeof row.isCurrent !== 'boolean' || (row.isCurrent && (typeof row.readingRef !== 'string' || !row.readingRef))) return invalid();
   return { imageRef: string(row.imageRef), ordinal: optionalInteger(row.ordinal), role: choice(row.role, ['cover','page','unknown']), state: choice(row.state, ['pending','running','succeeded','failed','unattempted','unknown']), slotKey: optionalString(row.slotKey), aliases: array(row.aliases, string), originalUrl: mediaPath(row.originalUrl),
-    candidateRevisionRef: optionalString(row.candidateRevisionRef), blocks: parseBlocks(row), issues: list(row, 'issues', parseIssue),
+    readingRef: optionalString(row.readingRef), isCurrent: row.isCurrent, blocks: parseBlocks(row), issues: list(row, 'issues', parseIssue),
     rawResultRef: optionalString(row.rawResultRef), rawResultSha256: optionalString(row.rawResultSha256), rawJson: optionalString(row.rawJson), invocationRef: optionalString(row.invocationRef), finishReason: optionalString(row.finishReason), estimatedCostUsd: optionalString(row.estimatedCostUsd),
     usage: usage ? { inputTokens: optionalInteger(usage.inputTokens), outputTokens: optionalInteger(usage.outputTokens), measuredTokens: optionalInteger(usage.measuredTokens) } : null };
 }

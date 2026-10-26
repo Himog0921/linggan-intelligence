@@ -130,14 +130,15 @@ mod title_tests {
     }
 
     #[test]
-    fn cover_heading_requires_exact_source_and_reading_and_real_first_page() {
+    fn cover_heading_requires_verified_source_reading_and_real_first_page() {
         for required in [
             "origin.content_public_ref = $1",
             "origin.display_ordinal=1",
             "selected.reading_ref",
-            "materialization.materialization_ref::text=reading.source_version",
+            "reading_source.materialization_ref::text=reading.source_version",
+            "reading_source.blob_sha256=materialization.blob_sha256",
+            "reading_origin.slot_key=origin.slot_key",
             "WITHDRAWN_OR_RESTRICTED",
-            "BYTES_CLEANED",
             "package.accepted_at <= $2",
             "retired.retired_job_ref",
             "block->>'kind'='heading'",

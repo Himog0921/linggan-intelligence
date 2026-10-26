@@ -29,7 +29,7 @@ impl HistoricalSource {
         self.text.trim().is_empty()
             && matches!(
                 self.reason.as_deref(),
-                Some("no_audio_stream_observed" | "no_speech_observed" | "no_frame_text_observed")
+                Some("no_audio_stream_observed" | "no_speech_observed")
             )
     }
     fn usable(&self) -> bool {
@@ -78,7 +78,7 @@ WITH origins AS (
  AND (x.slot_key=o.slot_key OR x.blob_sha256=m.blob_sha256 OR x.materialization_ref=m.materialization_ref))
 )
 SELECT m.slot_key,m.materialization_ref,m.blob_sha256,k.kind,result.* FROM motion m
-CROSS JOIN (VALUES ('audio','asr','asr_text'),('video_frame','video_frame_ocr','frame_ocr_text')) k(kind,processor,derivative_kind)
+CROSS JOIN (VALUES ('audio','asr','asr_text')) k(kind,processor,derivative_kind)
 LEFT JOIN LATERAL (
  SELECT j.job_ref,j.processor_version,d.derivative_ref,d.content_hash,t.text_content,t.display_text,t.source_location,e.event_ref,e.reason
  FROM linggan_media_processing_job j JOIN linggan_media_processing_work w USING(job_ref)

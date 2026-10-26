@@ -15,7 +15,7 @@ struct Effects {
     work_orders: i64,
     leases: i64,
     model_invocations: i64,
-    layering_rows: i64,
+    reading_rows: i64,
 }
 
 async fn effects(db: &Database) -> Effects {
@@ -31,7 +31,7 @@ async fn effects(db: &Database) -> Effects {
         work_orders: count("SELECT count(*) FROM collection_work_order").await,
         leases: count("SELECT count(*) FROM collection_work_order_lease").await,
         model_invocations: count("SELECT count(*) FROM linggan_model_invocation").await,
-        layering_rows: count("SELECT count(*) FROM linggan_media_ocr_layering_result").await,
+        reading_rows: count("SELECT count(*) FROM linggan_material_reading").await,
     }
 }
 
@@ -154,23 +154,15 @@ async fn evidence_page_real_chain_browser_proof() {
         .iter()
         .filter(|write| write.path.ends_with("/reobserve"))
         .count();
-    let relayer = writes
-        .iter()
-        .filter(|write| write.path.ends_with("/relayer"))
-        .count();
     let runs = writes
         .iter()
         .filter(|write| write.path == "/api/collection/runs")
         .count();
-    assert_eq!(
-        reobserve + relayer + runs,
-        writes.len(),
-        "页面只有三类写请求：立即复观测、重新分层与评论深采"
-    );
+    assert_eq!(reobserve + runs, writes.len(), "页面只提交复观测与评论深采");
     assert!(writes.iter().all(|write| write.status == 200));
     // 脚本里的写动作是固定的：复观测两次（先建工单，再合并）；重新分层五次（底稿里两次、批量弹窗里三篇）；
     // 评论深采两次（富作品尽量采全、视频作品指定 40 条）。
-    assert_eq!((reobserve, relayer, runs), (2, 5, 2));
+    assert_eq!((reobserve, runs), (2, 2));
     // 评论深采与采集页同一条合同：每次一个只含该作品的单次采集（富作品尽量采全；视频作品采到 40 条就停）。
     // 建立时只冻结范围，采集请求、工单与租约要等调度推进才形成，所以下面的计数不受它影响。
     let runs: Vec<(Uuid, String, Option<i32>, String, i32)> = sqlx::query_as(
@@ -221,11 +213,8 @@ async fn evidence_page_real_chain_browser_proof() {
         after.model_invocations, before.model_invocations,
         "预览 AI 输入、导出、读取都不调用模型"
     );
-    let updated: i64 = writes.iter().filter_map(|write| write.updated).sum();
-    assert_eq!(updated, 1, "只有富作品有一个待分层版面");
     assert_eq!(
-        after.layering_rows - before.layering_rows,
-        updated,
-        "重新分层只追加分层结果，条数与回执一致"
+        after.reading_rows, before.reading_rows,
+        "read-only browsing and collection requests do not rewrite canonical text"
     );
 }

@@ -5,7 +5,6 @@ import { useCorpusShell } from '../../../corpus/useCorpusShell';
 import { DomainChoiceDialog } from './DomainChoiceDialog';
 import { EvidenceControls } from './EvidenceControls';
 import { Inspector } from './Inspector';
-import { RelayerBatchDialog } from './RelayerBatchDialog';
 import { ReadReceipt, ResultsArea } from './ResultsArea';
 import { ReturnBanners } from './ReturnBanners';
 import { SelectionBar } from './SelectionBar';
@@ -18,7 +17,6 @@ import { useCollectionSelection } from './useCollectionSelection';
 import { useDrawerWork, useEvidenceAddress } from './useEvidenceAddress';
 import { DRAWER_QUERY, matches, useMediaQuery } from './useMediaQuery';
 import { usePanelWidthPreference } from './usePanelWidthPreference';
-import { useRelayerBatch } from './useRelayerBatch';
 import { useWorkDetail } from './useWorkDetail';
 import { useWorkList } from './useWorkList';
 import styles from './EvidencePage.module.css';
@@ -88,7 +86,6 @@ export function EvidencePage() {
   // ── 勾选与批量动作 ──────────────────────────────────────────────────────────────
   const { selection, toggle, togglePage, clear } = useCollectionSelection(domain);
   const [selecting, setSelecting] = useState(false);
-  const batch = useRelayerBatch();
   const loadedRefs = items.map(item => item.ref);
   const visibleSelected = loadedRefs.filter(ref => selection.has(ref)).length;
   const allPageSelected = loadedRefs.length > 0 && visibleSelected === loadedRefs.length;
@@ -141,11 +138,8 @@ export function EvidencePage() {
               visibleCount={items.length}
               visibleSelected={visibleSelected}
               hasDomain={hasDomain}
-              hasPendingBatch={batch.pending}
               onClear={cancelSelection}
               onDeepCollect={deepCollect}
-              onOpenBatch={() => domain !== null && batch.open([...selection], domain)}
-              onResumeBatch={batch.resume}
             /> : null}
           </EvidenceControls>
         </div>
@@ -201,7 +195,6 @@ export function EvidencePage() {
         {shell !== null && !hasDomain && !choiceDismissed ? (
           <DomainChoiceDialog domains={shell.domains} pendingWork={query.work} onClose={() => setChoiceDismissed(true)} />
         ) : null}
-        {batch.batch ? <RelayerBatchDialog initial={batch.batch} onClose={batch.close} onChange={batch.refresh} /> : null}
       </div>
     </CorpusFrame>
   );

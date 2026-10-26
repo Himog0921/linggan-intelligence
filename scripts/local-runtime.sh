@@ -500,6 +500,7 @@ migrate() {
   apply_migration_once "0165_ops_publication_media_projection" "$project_root/database/migrations/0165_ops_publication_media_projection.sql"
   apply_migration_once "0166_collection_command_reason_ops_publication_scope" "$project_root/database/migrations/0166_collection_command_reason_ops_publication_scope.sql"
   apply_migration_once "0167_ops_historical_owner_resolution" "$project_root/database/migrations/0167_ops_historical_owner_resolution.sql"
+  apply_migration_once "0168_dossier_ocr_cleanup" "$project_root/database/migrations/0168_dossier_ocr_cleanup.sql"
 }
 
 case "$command_name" in

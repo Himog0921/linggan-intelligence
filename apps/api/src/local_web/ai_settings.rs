@@ -32,7 +32,6 @@ use serde_json::json;
 
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
-        .merge(super::ocr_audit::routes())
         .route("/api/local/ai-settings", get(read))
         .route("/api/local/ai-settings/invocations", get(invocations))
         .route(

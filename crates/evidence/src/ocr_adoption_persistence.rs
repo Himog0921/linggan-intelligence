@@ -138,7 +138,7 @@ pub async fn complete(
     let lines = anchor_lines(&prepared.observation);
     let refs = insert_ocr_lines(&mut tx, layout, &lines).await?;
     insert_adoption(&mut tx, &prepared, derivative, layout, adoption, &refs).await?;
-    let blocks = candidate_blocks(&prepared);
+    let blocks = reading_blocks(&prepared);
     crate::material_reading::producers::publish_job_in(&mut tx, claim, Some(derivative), crate::material_reading::producers::ReadingContent {
         blocks,issues:vec![],source_state:"present".into(),source_location:json!({"layoutRef":layout,"imageWidth":image.width,"imageHeight":image.height})
     }).await.map_err(Error::Internal)?;
@@ -202,7 +202,7 @@ async fn insert_adoption(
     Ok(())
 }
 
-fn candidate_blocks(p: &PreparedOcrAdoption) -> Vec<Value> {
+fn reading_blocks(p: &PreparedOcrAdoption) -> Vec<Value> {
     let mut ordered: Vec<_> = p.observation.layout.blocks.iter().collect();
     ordered.sort_by_key(|b| b.reading_order);
     let mut result = vec![];

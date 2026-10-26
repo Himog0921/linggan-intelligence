@@ -204,6 +204,12 @@ async fn ai_foundation_queue_requires_current_controls_config_and_egress_but_doe
 async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cannot_replace_current_version()
  {
     let db = fixture::proof_database("ai_skill_activation").await;
+    let base_revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='note_interpretation'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
 
     let connection = new_connection(&db).await;
     let version = version(&db, connection, 1, "https://trials.example/api").await;
@@ -231,7 +237,7 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
             task_key: TaskKey::NoteInterpretation,
-            expected_revision: 0,
+            expected_revision: base_revision,
             model: Some(selection.clone()),
             skill_version_ref: None,
             material_columns: [MaterialColumn::Title].into(),
@@ -265,7 +271,7 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
             task_key: TaskKey::NoteInterpretation,
-            expected_revision: 1,
+            expected_revision: base_revision + 1,
             model: Some(selection.clone()),
             skill_version_ref: Some(first.version_ref),
             material_columns: [MaterialColumn::Title].into(),
@@ -275,11 +281,11 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
     .await
     .unwrap();
     assert!(!candidate.applied);
-    assert_eq!(candidate.revision, 1);
+    assert_eq!(candidate.revision, base_revision + 1);
     let initial = ActivateSkill {
         command_ref: Uuid::new_v4(),
         task_key: TaskKey::NoteInterpretation,
-        expected_task_revision: 1,
+        expected_task_revision: base_revision + 1,
         expected_binding_revision: 0,
         candidate_config_ref: candidate.task_config_ref,
         trial_comparison_ref: None,
@@ -297,7 +303,7 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
     };
     let approved = activate_skill(&db, &first_approval).await.unwrap();
     assert_eq!(approved.approval_source, "first_version");
-    assert_eq!(approved.task_revision, 2);
+    assert_eq!(approved.task_revision, base_revision + 2);
     assert_eq!(approved.binding_revision, 1);
     let mut package = skills::package();
     package.files[0].content.push_str("Changed method\n");
@@ -315,7 +321,7 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
     let saved = SaveTaskConfig {
         command_ref: Uuid::new_v4(),
         task_key: TaskKey::NoteInterpretation,
-        expected_revision: 2,
+        expected_revision: base_revision + 2,
         model: Some(selection.clone()),
         skill_version_ref: Some(second.version_ref),
         material_columns: [MaterialColumn::Title].into(),
@@ -326,7 +332,7 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
     let activate = ActivateSkill {
         command_ref: Uuid::new_v4(),
         task_key: TaskKey::NoteInterpretation,
-        expected_task_revision: 2,
+        expected_task_revision: base_revision + 2,
         expected_binding_revision: 1,
         candidate_config_ref: candidate.task_config_ref,
         trial_comparison_ref: None,
@@ -342,7 +348,7 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
         &CreateTrial {
             command_ref: Uuid::new_v4(),
             task_key: TaskKey::NoteInterpretation,
-            expected_task_revision: 2,
+            expected_task_revision: base_revision + 2,
             baseline_config_ref: Some(approved.task_config_ref),
             candidate_config_ref: candidate.task_config_ref,
             items: vec![BatchInput {
@@ -426,7 +432,7 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
         &ActivateSkill {
             command_ref: Uuid::new_v4(),
             task_key: TaskKey::NoteInterpretation,
-            expected_task_revision: 3,
+            expected_task_revision: base_revision + 3,
             expected_binding_revision: 2,
             candidate_config_ref: approved.task_config_ref,
             trial_comparison_ref: None,

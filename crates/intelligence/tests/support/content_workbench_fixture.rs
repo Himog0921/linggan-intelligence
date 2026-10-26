@@ -7,66 +7,9 @@ use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
 pub async fn db(name: &str) -> Database {
-    let db = dossier::fixture::proof_database(name).await;
-    sqlx::raw_sql(include_str!(
-        "../../../../database/migrations/0127_content_workbench.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../../database/migrations/0128_content_workbench_ai.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../../database/migrations/0140_ai_gen1_writing.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../../database/migrations/0141_ai_gen1_legacy_settings.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../../database/migrations/0148_dossier_consumer_contracts.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    // These migrations really ran above. Record their exact sources for the dedicated
-    // executor's startup check; the minimal material fixture intentionally omits them.
-    for (id, source) in [
-        (
-            "0148_dossier_consumer_contracts",
-            include_str!("../../../../database/migrations/0148_dossier_consumer_contracts.sql"),
-        ),
-        (
-            "0141_ai_gen1_legacy_settings",
-            include_str!("../../../../database/migrations/0141_ai_gen1_legacy_settings.sql"),
-        ),
-        (
-            "0127_content_workbench",
-            include_str!("../../../../database/migrations/0127_content_workbench.sql"),
-        ),
-        (
-            "0128_content_workbench_ai",
-            include_str!("../../../../database/migrations/0128_content_workbench_ai.sql"),
-        ),
-        (
-            "0140_ai_gen1_writing",
-            include_str!("../../../../database/migrations/0140_ai_gen1_writing.sql"),
-        ),
-    ] {
-        sqlx::query("INSERT INTO linggan_local_schema_migration(migration_id,migration_sha256) VALUES($1,$2)")
-            .bind(id).bind(text_hash(source)).execute(db.pool()).await.unwrap();
-    }
-    db
+    dossier::fixture::proof_database(name).await
 }
+
 pub fn page(kind: PageKind) -> ImagePage {
     ImagePage {
         id: Uuid::new_v4(),

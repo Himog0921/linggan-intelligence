@@ -14,11 +14,9 @@ mod inventory;
 pub mod native;
 mod projection;
 mod reading;
-mod relayer;
 mod render;
 mod selection;
 pub use reading::ordered_refs;
-pub use relayer::relayer_work;
 pub use render::{context_sources, markdown, render_materials};
 pub use selection::{Selection, segment, select};
 
@@ -68,19 +66,15 @@ pub async fn read_in(
         let mut readings =
             crate::material_reading::read_current_in(&mut **tx, batch, as_of).await?;
         let mut inventories = inventory::read_in(tx, batch, as_of).await?;
-        let mut layouts = relayer::source_layouts_in(&mut **tx, batch, as_of).await?;
-        let mut candidates =
-            crate::material_reading::candidate_statuses_in(&mut **tx, batch, as_of).await?;
         for work in currents {
             let reference = work.public_ref;
             let mut dossier = projection::assemble(
                 &work,
                 readings.remove(&reference).unwrap_or_default(),
                 inventories.remove(&reference).unwrap_or_default(),
-                layouts.remove(&reference).unwrap_or_default(),
+                vec![],
                 as_of,
             );
-            dossier.candidate_statuses = candidates.remove(&reference).unwrap_or_default();
             refresh_revision(&mut dossier);
             dossier.selection["completeRevision"] = json!(dossier.revision);
             output.insert(reference, dossier);
@@ -166,77 +160,6 @@ pub async fn read_version(
     };
     tx.commit().await?;
     Ok(result)
-}
-
-pub async fn plan(
-    database: &linggan_storage_postgres::Database,
-    work: Uuid,
-) -> Result<Option<Value>, sqlx::Error> {
-    Ok(read(database, work).await?.map(|d| relayer_plan(&d)))
-}
-
-pub fn relayer_plan(dossier: &ResearchDossier) -> Value {
-    let layouts: Vec<_> = dossier
-        .media
-        .iter()
-        .filter(|v| v["layoutRef"].is_string())
-        .collect();
-    let current = layouts
-        .iter()
-        .filter(|v| v["ruleVersion"] == relayer::rule_version())
-        .count();
-    let protected = layouts
-        .iter()
-        .filter(|v| v["humanProtected"] == true)
-        .count();
-    let pending = layouts
-        .iter()
-        .filter(|v| v["humanProtected"] != true && v["ruleVersion"] != relayer::rule_version())
-        .count();
-    let image_slots: Vec<_> = dossier
-        .media_inventory
-        .iter()
-        .filter(|v| v["component"] == "image")
-        .collect();
-    let pending_review = image_slots
-        .iter()
-        .filter(|s| {
-            dossier
-                .candidate_statuses
-                .iter()
-                .any(|c| c["kind"] == "image" && same_image_source(s, c))
-        })
-        .count();
-    let needs_ocr = image_slots
-        .iter()
-        .filter(|s| {
-            s["sourceState"] == "present"
-                && !dossier
-                    .materials
-                    .iter()
-                    .any(|m| same_image_source(s, m) && m["currentRevisionRef"].is_string())
-                && !layouts.iter().any(|m| same_image_source(s, m))
-                && !dossier
-                    .candidate_statuses
-                    .iter()
-                    .any(|c| c["kind"] == "image" && same_image_source(s, c))
-        })
-        .count();
-    json!({"workCount":1,"imageSlots":image_slots.len(),"imageJobs":layouts.len(),"layoutCount":layouts.len(),
-        "pendingLayouts":pending,"pendingReviewCount":pending_review,"alreadyCurrent":current,"humanProtected":protected,"needsOcr":needs_ocr,
-        "needsAcquisition":image_slots.iter().filter(|s|s["sourceState"]=="not_acquired").count(),
-        "expectedRevision":dossier.revision})
-}
-
-fn same_image_source(slot: &Value, reading: &Value) -> bool {
-    let matches = |source: &Value| {
-        source["slotKey"] == reading["slotKey"]
-            && source["sourceVersion"] == reading["sourceVersion"]
-    };
-    matches(slot)
-        || slot["sameBytesSources"]
-            .as_array()
-            .is_some_and(|sources| sources.iter().any(matches))
 }
 
 pub(super) fn refresh_revision(dossier: &mut ResearchDossier) {

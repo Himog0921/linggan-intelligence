@@ -1,11 +1,11 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DossierPanel } from './DossierPanel';
 import { DOMAIN, dossierJson, dossierMaterialJson, workRef } from './evidenceFixtures';
 import { createFetchMock, fail, ok, renderWithProviders, type FetchKit } from './testKit';
 const path = `/api/local/work-resources/${workRef(1)}/research-dossier`;
 let kit: FetchKit;
-beforeEach(() => { kit = createFetchMock(); kit.install(); });
+beforeEach(() => { kit = createFetchMock(); kit.install(); HTMLElement.prototype.scrollIntoView = vi.fn(); });
 afterEach(() => vi.unstubAllGlobals());
 function mount() { return renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active onOpenImage={vi.fn()} onApplied={vi.fn()} />); }
 
@@ -14,7 +14,7 @@ it.each([401,403,404,410])('刷新得到 %i 后撤下旧内容与导出入口', 
   const view = mount(); await screen.findByText('已有缓存但随后失去权限的正文');
   await view.user.click(screen.getByRole('button', { name: '刷新底稿' })); await screen.findByText('研究底稿暂时不可读。');
   expect(screen.queryByText('已有缓存但随后失去权限的正文')).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: '导出 JSON' })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '导出 Markdown' })).not.toBeInTheDocument();
+  await waitFor(() => { expect(screen.queryByRole('button', { name: '导出 JSON' })).not.toBeInTheDocument(); expect(screen.queryByRole('button', { name: '导出 Markdown' })).not.toBeInTheDocument(); });
 });
 it('临时服务故障保留并标记最后读到的版本，不把故障表示为无内容', async () => {
   kit.route('GET', path, ok(dossierJson(1, { bodyText: '最后成功读取的完整正文' })), fail(503, 'temporarily_unavailable'));
@@ -53,7 +53,7 @@ it('与检查器标题相同时不复读平台标题，空材料只保留一处�
   expect(await screen.findByText('来源尚未取得，不能判断原作是否没有内容。')).toBeVisible();
   expect(screen.queryByText('合成作品标题')).not.toBeInTheDocument();
   expect(screen.queryByText('尚未取得', { exact: true })).not.toBeInTheDocument();
-  expect(screen.queryByRole('button', { name: '核对与修正' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '修正文字' })).not.toBeInTheDocument();
 });
 
 it('重复缺口、页码提示与连续表达者标签不挤占正文', async () => {
@@ -80,53 +80,56 @@ it.each(['audio', 'video_frame'] as const)('%s 的原视频使用音视频链接
   })] })));
   const view = mount();
   expect(await screen.findByText('已取得的音视频文字完整保留')).toBeVisible();
+  await view.user.click(screen.getByRole('button', { name: '查看来源' }));
   const link = screen.getByRole('link', { name: '查看音视频原件' });
   expect(link).toHaveAttribute('href', originalUrl);
   expect(link).toHaveAttribute('target', '_blank');
   expect(screen.queryByText(/^对照原图/)).not.toBeInTheDocument();
   expect(screen.queryByText('放大查看原图')).not.toBeInTheDocument();
   expect(view.container.querySelector('img')).toBeNull();
-  expect(screen.getByRole('button', { name: '核对与修正' })).toBeVisible();
+  expect(screen.getByRole('button', { name: '修正文字' })).toBeVisible();
 });
 
-it('已有合格版面时导航展开既有整理面板，原件待取得与待识字独立，导航不执行写入', async () => {
-  kit.route('GET', path, ok(dossierJson(1, { materials: [
-    dossierMaterialJson(1, { currentRevisionRef: null, reading: null, blocks: [], processing: { state: 'completed', reason: null }, issues: [{ key: 'saved-layout', code: 'existing_result_pending', message: '已有识别结果，待整理。', resolution: 'source_refresh' }] }),
-    dossierMaterialJson(2, { sourceState: 'not_acquired', currentRevisionRef: null, reading: null, blocks: [], originalUrl: null }),
-  ], plan: { layoutCount: 1, pendingLayouts: 1, needsOcr: 0, needsAcquisition: 1 } })));
-  kit.route('GET', `${path}/candidates`, ok({ candidates: [] }));
-  const view = mount();
-  expect(await screen.findByText('已有识别结果，待整理。')).toBeVisible();
-  expect(screen.getAllByText('已有识别结果，待整理。')).toHaveLength(1);
-  expect(screen.queryByText('处理完成，暂无可读文字。')).not.toBeInTheDocument();
-  const summary = screen.getByText('整理已有识别版面'); const scroll = vi.fn(); summary.scrollIntoView = scroll;
-  const maintenance = summary.closest('details'); const details = screen.getByText('材料详情').closest('details');
-  expect(maintenance).not.toHaveAttribute('open'); expect(details).not.toHaveAttribute('open');
-  await view.user.click(screen.getByRole('button', { name: '核对与修正' }));
-  const go = await screen.findByRole('button', { name: '前往整理已有结果' });
-  expect(screen.queryByText('尚无可核对的读本，请先完成图片识别。')).not.toBeInTheDocument();
-  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
-  const reads = kit.calls.length;
-  await view.user.click(go);
-  expect(maintenance).toHaveAttribute('open'); expect(details).toHaveAttribute('open');
-  expect(summary).toHaveFocus(); expect(scroll).toHaveBeenCalledWith({ block: 'center' });
-  expect(screen.getByRole('button', { name: '重新整理' })).toBeVisible();
-  expect(screen.getByText(/待取得 1 · 待识字 0/)).toBeVisible();
-  expect(kit.calls).toHaveLength(reads); expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
-});
-it('cloud预览仍须显式选择与采用，不因为处理完成而进入当前读本', async () => {
-  const material = dossierMaterialJson(1, { currentRevisionRef: null, reading: null, blocks: [], processing: { state: 'completed', reason: null } });
+it('页面不再读取旧候选或版面整理，缺少读本仍保留原图入口', async () => {
+  const material = dossierMaterialJson(1, { blocks: [], currentRevisionRef: null, reading: null });
   kit.route('GET', path, ok(dossierJson(1, { materials: [material] })));
-  kit.route('GET', `${path}/candidates`, ok({ candidates: [{ unitRef: material.ref, slotKey: material.slotKey, candidateRevisionRef: 'cloud-preview', currentRevisionRef: null,
-    blocks: [{ ref: 'preview-block', kind: 'paragraph', text: '仅在候选预览中的文字' }], issues: [], generatedBy: 'cloud_vision', verification: 'unchecked', createdAt: '2026-10-26T00:00:00Z', review: null }] }));
-  const view = mount(); await screen.findByText('处理完成，尚无当前读本。');
-  expect(screen.queryByText('仅在候选预览中的文字')).not.toBeInTheDocument();
-  await view.user.click(screen.getByRole('button', { name: '核对与修正' }));
-  const select = await screen.findByLabelText('核对版本');
+  mount(); await screen.findByText('对照原图 · 第 1 页');
   expect(screen.queryByRole('button', { name: '前往整理已有结果' })).not.toBeInTheDocument();
-  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
-  await view.user.selectOptions(select, 'cloud-preview');
-  expect(screen.getByText('仅在候选预览中的文字')).toBeVisible();
-  expect(screen.getByRole('button', { name: '采用此候选' })).toBeDisabled();
-  expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
+  expect(screen.queryByRole('button', { name: '采用此候选' })).not.toBeInTheDocument();
+  expect(kit.of('GET', `${path}/candidates`)).toHaveLength(0);
+  expect(kit.of('GET', `${path}/relayer-plan`)).toHaveLength(0);
+  expect(kit.of('POST', `${path}/relayer`)).toHaveLength(0);
+});
+it('主文优先，材料状态和原件默认收起，查看来源会展开并聚焦原图', async () => {
+  const gap = dossierMaterialJson(2, { blocks: [], currentRevisionRef: null, reading: null, issues: [{ key: 'wait', code: 'not_processed', message: '此页尚未处理', resolution: 'source_refresh' }] });
+  kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1), gap] })));
+  const view = mount(); await screen.findByText('第0行连续的图片正文，完整可用。');
+  expect(screen.getByText('材料状态 · 1 项').closest('details')).not.toHaveAttribute('open');
+  const originals = screen.getByText('原件与修正 · 2 项').closest('details'); expect(originals).not.toHaveAttribute('open');
+  await view.user.click(screen.getAllByRole('button', { name: '查看来源' })[0]!);
+  expect(originals).toHaveAttribute('open');
+  expect(screen.getByText('对照原图 · 第 1 页').closest('details')).toHaveAttribute('open');
+  expect(document.activeElement).toHaveAttribute('data-source-unit-ref', dossierMaterialJson(1).ref);
+});
+it('作者、发布时间原始表达和精度、观察时间及四类互动按需可查', async () => {
+  kit.route('GET', path, ok(dossierJson(1)));
+  kit.route('GET', `${path}/metadata`, ok({ metadata: { author: { displayName: '合成作者' }, interaction: { likes: { value: 0 }, comments: { value: null }, collects: { value: 2 }, shares: { value: 3 } }, publication: { publishedAt: '2026-10-23T04:00:00Z', localDate: '2026-10-23', sourceText: '3小时前', sourceField: 'publishTime', sourceKind: 'source_text', precision: 'minute', observedAt: '2026-10-23T07:00:00Z', referenceObservedAt: '2026-10-23T07:00:00Z', sourceObservedAt: '2026-10-23T07:00:00Z', sourceRef: null, parserVersion: 'v1' } } }));
+  const view = mount(); await screen.findByText('合成作品标题');
+  expect(kit.of('GET', `${path}/metadata`)).toHaveLength(0);
+  await view.user.click(screen.getByText('作者、时间与互动'));
+  expect(await screen.findByText('合成作者')).toBeVisible();
+  expect(screen.getByText('发布时间：3小时前 · 精度：分钟')).toBeVisible();
+  expect(screen.getByText('观察时间：2026-10-23 15:00')).toBeVisible();
+  expect(screen.getByText('点赞 0 · 评论 未知 · 收藏 2 · 分享 3')).toBeVisible();
+  expect(screen.getByText('观察与来源诊断').closest('details')).not.toHaveAttribute('open');
+  expect(kit.of('GET', `${path}/metadata`)[0]!.search.get('sections')).toBe('author,interaction,publication');
+});
+
+it('平台毫秒时间优先显示已核实的日期时间，原始数值留在来源诊断', async () => {
+  kit.route('GET', path, ok(dossierJson(1)));
+  kit.route('GET', `${path}/metadata`, ok({ metadata: { author: null, interaction: null, publication: { publishedAt: '2026-10-09 00:35', localDate: '2026-10-09', sourceText: '1791477313000', sourceKind: 'platform_epoch', precision: 'millisecond', observedAt: null, referenceObservedAt: null } } }));
+  const { user } = mount(); await screen.findByRole('heading', { name: '研究底稿' });
+  await user.click(screen.getByText('作者、时间与互动', { exact: true }));
+  expect(await screen.findByText('发布时间：2026-10-09 00:35 · 精度：毫秒')).toBeVisible();
+  expect(screen.queryByText('发布时间：1791477313000 · 精度：未知')).not.toBeInTheDocument();
 });

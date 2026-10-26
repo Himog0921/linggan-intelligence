@@ -8,7 +8,7 @@ use uuid::Uuid;
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof only"]
 async fn batched_media_read_keeps_accepted_ocr_and_current_withdrawal() {
-    use linggan_evidence::material_reading::{NewReading, Publication, producers, publish_in};
+    use linggan_evidence::material_reading::{NewReading, Publication, publish_in};
     let db = fixture::proof_database("creator_discovery_batch_media").await;
     let mut refs = Vec::new();
     let mut image_readings = Vec::new();
@@ -64,7 +64,7 @@ async fn batched_media_read_keeps_accepted_ocr_and_current_withdrawal() {
         sqlx::query("INSERT INTO linggan_media_ocr_line(line_ref,layout_ref,ordinal,text_content,confidence,left_norm,top_norm,right_norm,bottom_norm) VALUES($1,$2,0,$3,0.98,0.1,0.2,0.9,0.3)")
             .bind(Uuid::new_v4()).bind(layout_ref).bind(text).execute(db.pool()).await.unwrap();
         let mut tx = db.pool().begin().await.unwrap();
-        let reading = producers::publish_layout_in(&mut tx, layout_ref, None)
+        let reading = publish_in(&mut tx,NewReading { content_public_ref:work_ref,unit_key:format!("image:{slot_key}"),kind:"image".into(),slot_key:Some(slot_key.clone()),page:None,source_version:admitted.materialization_ref.to_string(),source_state:"present".into(),derivative_ref:Some(derivative_ref),producer_ref:Some(job_ref),generated_by:"ordinary_ocr".into(),rule_version:"dossier-content.v2:synthetic-current-local".into(),blocks:vec![json!({"kind":"paragraph","text":text,"speaker":"unconfirmed"})],issues:vec![],source_location:json!({"materializationRef":admitted.materialization_ref,"blobSha256":blob}),publication:Publication::Automatic{expected_current:None} })
             .await
             .unwrap();
         assert!(reading.current);
@@ -130,11 +130,34 @@ async fn batched_media_read_keeps_accepted_ocr_and_current_withdrawal() {
             .iter()
             .any(|derivative| derivative["dispositionState"] == "WITHDRAWN_OR_RESTRICTED")
     );
+    assert!(
+        !detail.inspector["derivatives"]
+            .to_string()
+            .contains("已经撤回的 OCR 正文"),
+        "restricted OCR diagnostics expose metadata only, never a second transcription"
+    );
+    let available = linggan_evidence::read_work_resource(&db, refs[0])
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        available.inspector["derivatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["processorKind"] == "image_ocr")
+    );
+    assert!(
+        !available.inspector["derivatives"]
+            .to_string()
+            .contains("可用的 OCR 正文"),
+        "OCR content is read from canonical, never derived diagnostics"
+    );
     let first_slot = "xhs:batch-media-1:cover:1";
     let first_blob: String = sqlx::query_scalar(
         "SELECT blob_sha256 FROM linggan_media_processing_job WHERE slot_key=$1 LIMIT 1",
     )
-    .bind(first_slot)
+    .bind(&first_slot)
     .fetch_one(db.pool())
     .await
     .unwrap();
@@ -181,7 +204,7 @@ async fn batched_media_read_keeps_accepted_ocr_and_current_withdrawal() {
     let retired_job = Uuid::new_v4();
     let retired_derivative = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr','batch-retired','full')")
-        .bind(retired_job).bind(&first_blob).bind(first_slot).execute(db.pool()).await.unwrap();
+        .bind(retired_job).bind(&first_blob).bind(&first_slot).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) VALUES($1,$2,'ocr_text',$3,24,'derivatives/batch/retired.txt')")
         .bind(retired_derivative).bind(retired_job).bind("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
         .execute(db.pool()).await.unwrap();
@@ -195,7 +218,7 @@ async fn batched_media_read_keeps_accepted_ocr_and_current_withdrawal() {
         .bind(retired_job).execute(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
     let retired_reading =
-        producers::publish_layout_in(&mut tx, retired_layout, Some(image_readings[0]))
+        publish_in(&mut tx,NewReading { content_public_ref:refs[0],unit_key:format!("image:{first_slot}"),kind:"image".into(),slot_key:Some(first_slot.to_owned()),page:None,source_version:image_versions[0].to_string(),source_state:"present".into(),derivative_ref:Some(retired_derivative),producer_ref:Some(retired_job),generated_by:"ordinary_ocr".into(),rule_version:"dossier-content.v2:synthetic-retired".into(),blocks:vec![json!({"kind":"paragraph","text":"不能出现的退役 OCR 文本","speaker":"unconfirmed"})],issues:vec![],source_location:json!({"materializationRef":image_versions[0],"blobSha256":first_blob}),publication:Publication::Automatic{expected_current:Some(image_readings[0])} })
             .await
             .unwrap();
     assert!(

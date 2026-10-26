@@ -256,13 +256,14 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
             COALESCE((SELECT jsonb_agg(item_slot_key ORDER BY item_slot_key)
               FROM linggan_ocr_recognition_slot_alias a WHERE a.item_ref=i.item_ref),'[]') aliases,
             ctl.state AS control_state,ctl.failure_code AS control_failure_code,
-            COALESCE(reading.blocks,'[]'::jsonb) blocks,COALESCE(reading.issues,'[]'::jsonb) issues
+            COALESCE(u.current_reading_ref=i.reading_ref AND u.source_version=reading.source_version,false) is_current,COALESCE(reading.blocks,'[]'::jsonb) blocks,COALESCE(reading.issues,'[]'::jsonb) issues
          FROM linggan_ocr_recognition_item i
          LEFT JOIN linggan_model_invocation inv ON inv.invocation_ref=i.invocation_ref
          LEFT JOIN linggan_ocr_recognition_run owning_run ON owning_run.run_ref=i.run_ref
          LEFT JOIN linggan_ai_batch_item bi ON bi.batch_ref=owning_run.batch_ref AND bi.item_key=i.item_ref::text
          LEFT JOIN linggan_ai_batch_item_control ctl ON ctl.item_ref=bi.item_ref
-         LEFT JOIN linggan_material_reading reading ON reading.reading_ref=i.candidate_reading_ref
+         LEFT JOIN linggan_material_reading reading ON reading.reading_ref=i.reading_ref
+         LEFT JOIN linggan_material_unit u ON u.unit_ref=reading.unit_ref
          WHERE i.run_ref=$1 ORDER BY i.position",
     )
     .bind(run_ref)
@@ -326,6 +327,25 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
                     .sum::<usize>()
         })
         .sum();
+    // A persisted pointer alone can outlive the source. Reuse the canonical reader's
+    // current source/restriction rules when reporting that a result is in the dossier.
+    let mut conn = db.pool().acquire().await?;
+    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *conn)
+        .await?;
+    let current =
+        linggan_evidence::material_reading::read_current_in(&mut conn, &[work], &now).await?;
+    let current_refs: std::collections::HashSet<Uuid> = current
+        .get(&work)
+        .into_iter()
+        .flatten()
+        .filter_map(|u| {
+            u["currentRevisionRef"]
+                .as_str()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
+        .collect();
+    drop(conn);
     let image_json = items
         .iter()
         .map(|i| {
@@ -360,7 +380,7 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
                 "estimatedCostUsd":if visible { pico_usd(i.get::<Option<String>,_>("cost_pico_usd")) } else { Value::Null },
                 "blocks":if visible{i.get::<Value,_>("blocks")}else{json!([])},
                 "issues":if visible{i.get::<Value,_>("issues")}else{json!([])},
-                "candidateRevisionRef":if visible{json!(i.get::<Option<Uuid>,_>("candidate_reading_ref"))}else{Value::Null},"generatedBy":"cloud_vision"
+                "readingRef":if visible{json!(i.get::<Option<Uuid>,_>("reading_ref"))}else{Value::Null},"isCurrent":visible && i.get::<bool,_>("is_current") && i.get::<Option<Uuid>,_>("reading_ref").is_some_and(|r|current_refs.contains(&r)),"generatedBy":"cloud_vision"
             })
         })
         .collect::<Vec<_>>();

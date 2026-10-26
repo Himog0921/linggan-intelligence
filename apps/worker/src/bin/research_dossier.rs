@@ -59,7 +59,6 @@ fn parse(args: &[String]) -> Result<Command, &'static str> {
     let operation = match flags.get("--operation").copied() {
         Some("native_body") => BatchOperation::NativeBody,
         Some("hashtags") => BatchOperation::Hashtags,
-        Some("relayer") => BatchOperation::Relayer,
         Some("snapshot") => BatchOperation::Snapshot,
         Some("historical_media") => BatchOperation::HistoricalMedia,
         _ => return Err("operation_required"),
@@ -173,8 +172,8 @@ mod tests {
         use serde_json::json;
         use std::io::Read;
         let details: Vec<_> = (1..=500).map(Uuid::from_u128).collect();
-        let entries:Vec<_>=(1000..1200).map(|n|json!({"workRef":Uuid::from_u128(n),"expectedRevision":"a".repeat(64),"materialFingerprint":"b".repeat(64),"relayerSourceHash":"c".repeat(64),"detailRefs":details,"pendingTagDetails":500,"sourceNotProvided":0,"sourceInvalid":0,"sourceNonempty":500,"relayer":{}})).collect();
-        let value = json!({"contract":"research-dossier-plan.v2","domainRef":Uuid::nil(),"asOf":"2026-10-19T00:00:00Z","layerVersion":"rules-v3","maximumWorks":200,"operation":"hashtags","entries":entries,"planHash":"d".repeat(64)});
+        let entries:Vec<_>=(1000..1200).map(|n|json!({"workRef":Uuid::from_u128(n),"expectedRevision":"a".repeat(64),"materialFingerprint":"b".repeat(64),"detailRefs":details,"pendingTagDetails":500,"sourceNotProvided":0,"sourceInvalid":0,"sourceNonempty":500})).collect();
+        let value = json!({"contract":"research-dossier-plan.v3","domainRef":Uuid::nil(),"asOf":"2026-10-19T00:00:00Z","layerVersion":"rules-v3","maximumWorks":200,"operation":"hashtags","entries":entries,"planHash":"d".repeat(64)});
         let bytes = serde_json::to_vec_pretty(&value).unwrap();
         assert!(bytes.len() > 1024 * 1024);
         assert_eq!(decode_plan(bytes.as_slice()).unwrap().entries.len(), 200);

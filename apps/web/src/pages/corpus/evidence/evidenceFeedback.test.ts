@@ -1,48 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../../../shared/api';
-import { admissionCopy, classifyAdmission, errorCode, readErrorText, relayerFailure, relayerSuccess, relayerSummary, reobservationFailure, reobservationReceipt } from './evidenceFeedback';
+import { admissionCopy, classifyAdmission, errorCode, readErrorText, reobservationFailure, reobservationReceipt } from './evidenceFeedback';
 import { operationJson } from './evidenceFixtures';
 import { parseOperation } from './reobservationApi';
 
 const operation = (overrides: Partial<Record<string, unknown>> = {}) => parseOperation(operationJson(overrides));
 const http = (status: number, code: string | null) => new ApiError({ kind: 'http', status, code });
-
-describe('重新分层的回执（W1）', () => {
-  it('成功文案：本次 N 个版面：更新、已是当前版本、跳过', () => {
-    const feedback = relayerSuccess({ scopeCount: 3, updated: 1, alreadyCurrent: 1, skipped: 1, needsOcr: 2, needsAcquisition: 1 });
-    expect(feedback).toMatchObject({ tone: 'success', label: '已完成' });
-    expect(feedback.text).toContain('本次 3 个版面：更新 1 个，已是当前版本 1 个，跳过 1 个。');
-    expect(feedback.text).toContain('跳过的版面缺少可用识别行，没有处理');
-    expect(feedback.text).toContain('待识字 2 张图片。');
-    expect(feedback.text).toContain('待取得 1 张图片。');
-    expect(feedback.text).not.toContain('识字或补采');
-  });
-
-  it('更新 0 且已是当前版本：无变化也算完成，明说已是当前版本', () => {
-    expect(relayerSummary({ scopeCount: 1, updated: 0, alreadyCurrent: 1, skipped: 0, needsOcr: 0, needsAcquisition: 0 })).toMatch(/^已是当前版本，无需更新。本次 1 个版面/);
-  });
-
-  it('有明确答复的拒绝是「未完成」，一律声明没有写入；409 解释旧修订并提示可能已生效', () => {
-    const stale = relayerFailure(http(409, 'dossier_changed_or_scope_unavailable'));
-    expect(stale).toMatchObject({ tone: 'error', label: '未完成', code: 'dossier_changed_or_scope_unavailable' });
-    expect(stale.text).toContain('本次没有写入');
-    expect(stale.text).toContain('刷新后会显示已是当前版本');
-    expect(relayerFailure(http(404, 'material_not_found')).text).toContain('本次没有写入');
-    expect(relayerFailure(http(503, 'dossier_relayer_failed')).text).toBe('暂时无法完成，已取得的原始材料仍保留。本次没有写入。');
-    expect(relayerFailure(http(422, null))).toMatchObject({ tone: 'error', code: null });
-    expect(relayerFailure(new Error('x')).tone).toBe('error');
-  });
-
-  it('没有得到答复，或得到 2xx 却看不懂：是「未确认」，写入可能已发生，不当成失败', () => {
-    const silent = relayerFailure(new ApiError({ kind: 'network' }));
-    expect(silent).toMatchObject({ tone: 'unknown', label: '未确认' });
-    expect(silent.text).toContain('可能已经生效');
-    expect(silent.text).toContain('刷新底稿');
-    const garbled = relayerFailure(new ApiError({ kind: 'invalid_response', status: 200 }));
-    expect(garbled).toMatchObject({ tone: 'unknown', label: '未确认' });
-    expect(garbled.text).toContain('可能已经生效');
-  });
-});
 
 describe('立即复观测的回执（W3 / DR-3）：四种结局分开', () => {
   it('已提交：ADMITTED 带工单引用——不是已读取，也不是已刷新', () => {

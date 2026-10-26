@@ -8,7 +8,7 @@
 //! 为什么需要它、抬版本号的规矩，见 `crates/evidence/src/material_processing.rs`。
 //!
 //! ```text
-//! linggan-media-requeue --kinds image_ocr,video_frame_ocr --dry-run
+//! linggan-media-requeue --kinds asr --dry-run
 //! linggan-media-requeue --kinds asr
 //! ```
 

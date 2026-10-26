@@ -131,7 +131,7 @@ pub async fn scenario(
                     generated_by: match *kind {
                         "audio" => "asr",
                         "video_frame" => "frame_ocr",
-                        _ => "ordinary_ocr",
+                        _ => "cloud_vision",
                     }
                     .into(),
                     rule_version: "standard-synthetic-replay.v1".into(),

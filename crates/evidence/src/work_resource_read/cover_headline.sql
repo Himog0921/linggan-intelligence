@@ -30,7 +30,15 @@ JOIN LATERAL (
       AND materialization.verified_at <= $2::timestamptz
       AND blob.mime_type LIKE 'image/%'
     ORDER BY materialization.verified_at DESC,materialization.materialization_ref DESC LIMIT 1
-) materialization ON materialization.materialization_ref::text=reading.source_version
+) materialization ON true
+JOIN linggan_media_materialization reading_source ON reading_source.materialization_ref::text=reading.source_version
+  AND reading_source.verified_at <= $2::timestamptz
+  AND reading_source.blob_sha256=materialization.blob_sha256
+JOIN linggan_media_download_attempt reading_attempt ON reading_attempt.download_attempt_ref=reading_source.download_attempt_ref
+JOIN linggan_material_media_origin reading_origin ON reading_origin.observation_ref=reading_attempt.media_observation_ref
+  AND reading_origin.content_public_ref=origin.content_public_ref AND reading_origin.slot_key=origin.slot_key
+JOIN linggan_runtime_record_disposition reading_disposition ON reading_disposition.package_ref=reading_origin.package_ref
+  AND reading_disposition.record_ordinal=reading_origin.record_ordinal AND reading_disposition.disposition='accepted_for_media_identity'
 JOIN LATERAL (
     WITH blocks AS (
         SELECT block,ordinal FROM jsonb_array_elements(reading.blocks) WITH ORDINALITY AS blocks(block,ordinal)
@@ -50,9 +58,10 @@ WHERE (origin.purpose='cover' OR (origin.display_order_state='KNOWN' AND origin.
   AND linggan_dossier_slot_active(origin.content_public_ref,origin.slot_key,$2::timestamptz)
   AND NOT EXISTS (
     SELECT 1 FROM linggan_current_material_media_disposition disposition
-    WHERE disposition.state IN ('WITHDRAWN_OR_RESTRICTED','BYTES_CLEANED')
+    WHERE disposition.state='WITHDRAWN_OR_RESTRICTED'
       AND (disposition.slot_key=origin.slot_key OR disposition.blob_sha256=materialization.blob_sha256
         OR disposition.materialization_ref=materialization.materialization_ref
+        OR disposition.materialization_ref=reading_source.materialization_ref
         OR disposition.derivative_ref=reading.derivative_ref)
   )
   AND NOT EXISTS (

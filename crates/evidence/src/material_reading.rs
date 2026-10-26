@@ -12,15 +12,14 @@ mod read;
 mod review;
 mod source;
 mod write;
-pub(crate) use read::{candidate_statuses_in, current_reference_in};
-pub use read::{read_candidates, read_current_in, read_versions_in};
-pub use review::review_reading;
+pub(crate) use read::current_reference_in;
+pub use read::{read_current_in, read_versions_in};
+pub use review::{review_reading, review_work_reading};
 pub use write::publish_in;
 
 #[derive(Clone, Copy, Debug)]
 pub enum Publication {
     Automatic { expected_current: Option<Uuid> },
-    Candidate,
 }
 
 #[derive(Debug)]
@@ -55,7 +54,8 @@ pub struct PublishedReading {
 pub struct ReviewReadingRequest {
     pub command_ref: Uuid,
     pub expected_current_revision_ref: Option<Uuid>,
-    pub candidate_revision_ref: Uuid,
+    pub unit_ref: String,
+    pub source_version: String,
     pub action: String,
     pub actor: String,
     pub reason: String,

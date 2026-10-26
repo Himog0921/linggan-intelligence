@@ -637,10 +637,15 @@ fn apply_media(item: &mut MaterialLibraryItem, media: material_media_read::Media
             .find(|summary| summary.lane == lane)
         {
             if (lane == "media_slots" && !media.slots.is_empty())
+                || lane == "ocr"
                 || (lane != "media_slots" && state != "UNKNOWN")
             {
                 summary.state = state;
-                summary.value_state = "KNOWN";
+                summary.value_state = if state == "UNKNOWN" {
+                    "UNKNOWN"
+                } else {
+                    "KNOWN"
+                };
             }
             if lane == "media_slots" && !media.slots.is_empty() {
                 summary.observed = Some(media.slots.len() as i64);
@@ -688,8 +693,7 @@ async fn apply_cover_ocr_titles(
         return Ok(());
     }
     let ocr_schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('linggan_media_ocr_layout') IS NOT NULL \
-                AND to_regclass('linggan_media_ocr_layering_result') IS NOT NULL \
+        "SELECT to_regclass('linggan_material_reading') IS NOT NULL \
                 AND to_regclass('linggan_media_ocr_retirement') IS NOT NULL",
     )
     .fetch_one(&mut **tx)

@@ -9,14 +9,11 @@ use crate::{
     ai_foundation::{TaskKey, admission, batch_store::InputRef, transport_store},
     model_invocation::finish_invocation_in,
     model_secrets::ModelSecretStore,
-    ocr_quality_audit as visual,
+    ocr_recognition_schema as visual,
     pi_adapter::{PiAdapter, PiImage, PiRequest, PiResponse, safe_result},
     research_text::content_hash,
 };
-use linggan_evidence::{
-    cloud_ocr_adoption::CloudSource,
-    ocr_adoption::{ImageIdentity, ImageRole},
-};
+use linggan_evidence::ocr_source::ImageRole;
 use linggan_storage_postgres::Database;
 use serde_json::json;
 use sqlx::Row;
@@ -30,10 +27,9 @@ struct Prepared {
     content: Uuid,
     slot_key: String,
     materialization_ref: Uuid,
-    role: String,
-    ordinal: Option<i32>,
     width: u32,
     height: u32,
+    expected_reading_ref: Option<Uuid>,
 }
 fn image(
     storage: &str,
@@ -59,7 +55,7 @@ fn image(
         return Err(ExecutorError::Invalid);
     }
     let bytes = std::fs::read(file).map_err(|_| ExecutorError::Invalid)?;
-    if bytes.len() as i64 != size || linggan_evidence::ocr_adoption::content_hash(&bytes) != hash {
+    if bytes.len() as i64 != size || linggan_evidence::ocr_source::content_hash(&bytes) != hash {
         return Err(ExecutorError::Invalid);
     }
     let fmt = image::guess_format(&bytes).map_err(|_| ExecutorError::Invalid)?;
@@ -207,8 +203,10 @@ async fn prepare(
     }
     sqlx::query("UPDATE linggan_ocr_recognition_item SET state='running',invocation_ref=$2 WHERE item_ref=$1").bind(item_ref).bind(invocation).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_ocr_recognition_run SET state='running',updated_at=scope_001_now() WHERE run_ref=$1").bind(r.get::<Uuid,_>("run_ref")).execute(&mut *tx).await?;
+    let expected_reading_ref:Option<Uuid>=sqlx::query_scalar("SELECT current_reading_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND unit_key=$2").bind(r.get::<Uuid,_>("content_public_ref")).bind(format!("image:{}",r.get::<String,_>("slot_key"))).fetch_optional(&mut *tx).await?.flatten();
     tx.commit().await?;
     Ok(Prepared {
+        expected_reading_ref,
         invocation,
         request,
         item: item_ref,
@@ -217,8 +215,6 @@ async fn prepare(
         content: r.get("content_public_ref"),
         slot_key: r.get("slot_key"),
         materialization_ref: r.get("materialization_ref"),
-        role,
-        ordinal,
         width: w,
         height: h,
     })
@@ -312,34 +308,8 @@ async fn settle(
         sqlx::query("INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) VALUES($1,$2,$3,$4,'cloud_manual',$5,$6,$7,$8,$9,$10)")
             .bind(layout).bind(derivative).bind(p.content).bind(&p.blob).bind(&processor_version).bind(p.width as i32).bind(p.height as i32).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) VALUES($1,$2,'succeeded','cloud_manual_ocr_saved')").bind(Uuid::new_v4()).bind(job).execute(&mut *tx).await?;
-        let image_role = if p.role == "cover" {
-            ImageRole::ExplicitCover
-        } else if p.role == "page" {
-            ImageRole::Interior
-        } else {
-            ImageRole::Unknown
-        };
-        let source = CloudSource {
-            image: ImageIdentity {
-                work_ref: p.content,
-                image_ref: p.slot_key.clone(),
-                blob_sha256: p.blob.clone(),
-                width: p.width,
-                height: p.height,
-            },
-            image_role,
-            sequence_ordinal: p.ordinal.map(|n| n as u32),
-        };
         let visual_json = serde_json::to_value(&v).map_err(|_| ExecutorError::Invalid)?;
-        let blocks = linggan_evidence::cloud_ocr_adoption::persist_in(
-            &mut tx,
-            &source,
-            derivative,
-            layout,
-            raw.ok_or(ExecutorError::Invalid)?,
-            &visual_json,
-        )
-        .await?;
+        let blocks = linggan_evidence::cloud_ocr_adoption::blocks_from_visual(&visual_json)?;
         let reading = linggan_evidence::material_reading::producers::publish_cloud_in(
             &mut tx,
             p.content,
@@ -347,15 +317,14 @@ async fn settle(
             p.materialization_ref,
             derivative,
             blocks,
+            p.expected_reading_ref,
         )
         .await?;
-        sqlx::query(
-            "UPDATE linggan_ocr_recognition_item SET candidate_reading_ref=$2 WHERE item_ref=$1",
-        )
-        .bind(p.item)
-        .bind(reading.reading_ref)
-        .execute(&mut *tx)
-        .await?;
+        sqlx::query("UPDATE linggan_ocr_recognition_item SET reading_ref=$2 WHERE item_ref=$1")
+            .bind(p.item)
+            .bind(reading.reading_ref)
+            .execute(&mut *tx)
+            .await?;
     }
     let mut result = response
         .map(safe_result)
