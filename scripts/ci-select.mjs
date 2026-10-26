@@ -40,9 +40,12 @@ const paths = {
     'apps/api/src/local_web/ocr_recognition*', 'apps/api/src/local_web/ocr_audit.rs',
     'apps/web/src/pages/settings/OcrAudit*', 'apps/web/src/pages/settings/AuditReadingReview*',
     'apps/web/src/pages/settings/ocrAuditApi.ts',
+    'apps/web/src/pages/settings/AiSettingsExperience.tsx',
+    'apps/web/src/pages/settings/aiSettingsModel.ts',
     'apps/web/src/pages/corpus/evidence/OcrRecognition*',
     'apps/web/src/pages/corpus/evidence/OcrReadingReview*',
     'apps/web/src/pages/corpus/evidence/ocrRecognition*',
+    'apps/web/src/pages/corpus/evidence/ReadingPanel.tsx',
     'apps/web/src/shared/api.ts', 'apps/web/src/shared/decode.ts',
     'apps/web/src/app/pages.ts', 'apps/web/src/app/App.tsx',
     'apps/web/package.json', 'apps/web/package-lock.json',
@@ -100,6 +103,10 @@ paths.web_real_chain = [
   'apps/web/src/app/**', 'apps/web/src/corpus/**', 'apps/web/src/shared/**',
   'apps/web/src/main.tsx',
   'apps/web/package.json', 'apps/web/package-lock.json',
+  // Existing OCR hosts and decoder participate in the actual reading/settings chain.
+  'apps/web/src/pages/settings/AiSettingsExperience.tsx',
+  'apps/web/src/pages/settings/aiSettingsModel.ts',
+  'apps/web/src/pages/corpus/evidence/ReadingPanel.tsx',
   'apps/web/src/pages/**/*Api.ts', 'apps/web/src/pages/**/*Api.tsx',
   'apps/web/src/pages/**/api.ts', 'apps/web/src/pages/**/api.tsx',
   // These existing page components make HTTP requests directly. Keep this list

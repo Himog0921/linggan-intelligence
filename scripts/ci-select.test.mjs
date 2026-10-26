@@ -63,6 +63,9 @@ test('page-local UI changes avoid OCR and PostgreSQL proofs; shared and API chan
   const cases = [
     ['apps/web/src/pages/settings/TeamSettingsPage.module.css', ['web']],
     ['apps/web/src/pages/settings/TeamSettingsPage.tsx', ['web']],
+    ['apps/web/src/pages/settings/AiSettingsExperience.tsx', ['ocr_audit', 'web', 'web_real_chain']],
+    ['apps/web/src/pages/settings/aiSettingsModel.ts', ['ocr_audit', 'web', 'web_real_chain']],
+    ['apps/web/src/pages/corpus/evidence/ReadingPanel.tsx', ['ocr_audit', 'web', 'web_real_chain']],
     ['apps/web/test/e2e/team-member-scroll.mjs', ['web']],
     ['apps/web/src/pages/settings/teamSettingsApi.ts', ['web', 'web_real_chain']],
     ['apps/web/src/app/AppShell.module.css', ['web']],
