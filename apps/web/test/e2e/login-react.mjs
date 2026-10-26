@@ -12,6 +12,7 @@ const loginEmail = process.env.WEB_LOGIN_EMAIL ?? 'demo@example.com';
 const loginPassword = process.env.WEB_LOGIN_PASSWORD ?? 'demo-only';
 assert.ok(candidate && directory); for (const origin of [candidate, baseline].filter(Boolean)) assert.equal(new URL(origin).hostname,'127.0.0.1');
 await mkdir(directory,{recursive:true});
+let shellStorageState;
 const browser = await chromium.launch({headless:true}), report = {views:[], errors:[], blocked:[]};
 try {
  for (const [name, origin] of [['before',baseline],['candidate',candidate]].filter(([,origin])=>origin)) {
@@ -42,10 +43,11 @@ try {
    await page.getByLabel('邮箱',{exact:true}).fill(loginEmail);await page.getByLabel('记住邮箱').check();await capture('ready');
    await page.getByRole('button',{name:'登录',exact:true}).click();await page.waitForURL(/\/ops\/overview(?:\?|$)/);
    assert.deepEqual(await page.evaluate(()=>Object.entries(localStorage)),[['linggan.login.remembered-email',loginEmail]]);
+   if (name === "candidate") shellStorageState = await context.storageState();
    await context.close();
   }
  }
- report.shell = await verifyShellLayout(browser,candidate,path.join(directory,'shell'));
+ report.shell = await verifyShellLayout(browser,candidate,path.join(directory,'shell'),shellStorageState);
  report.lifecycle = await verifyLoginLifecycle(browser, candidate, path.join(directory, 'lifecycle'));
  assert.deepEqual(report.errors,[]);assert.deepEqual(report.blocked,[]);
 } finally {await browser.close();await writeFile(path.join(directory,'report.json'),JSON.stringify(report,null,2));}

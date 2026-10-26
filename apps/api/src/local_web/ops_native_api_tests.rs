@@ -575,11 +575,22 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
             && item.month_followers_gained.is_none()
             && item.execution == "not_filled"
     }));
+    let (wrong_status, wrong) = post(
+        app.clone(),
+        "/api/local/ops/native/daily-reports",
+        Some(&owner_cookie),
+        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-20",
+                "linksOpenedCount": 99, "followersGained": 99, "expectedVersion": 1,
+                "dailyRef": Uuid::new_v4() }),
+    )
+    .await;
+    assert_eq!(wrong_status, StatusCode::FORBIDDEN);
+    assert_eq!(wrong["receipt"]["code"], "ops_native_daily_not_owned");
     let (status, updated) = post(
         app.clone(),
         "/api/local/ops/native/daily-reports",
         Some(&owner_cookie),
-        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-20", "linksOpenedCount": 0, "followersGained": 0, "expectedVersion": 1 }),
+        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-20", "linksOpenedCount": 0, "followersGained": 0, "expectedVersion": 1, "dailyRef": daily_ref }),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -588,7 +599,7 @@ async fn native_commands_are_session_bound_idempotent_and_versioned() {
         app,
         "/api/local/ops/native/daily-reports",
         Some(&owner_cookie),
-        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-20", "linksOpenedCount": 1, "followersGained": 1, "expectedVersion": 1 }),
+        json!({ "requestId": Uuid::new_v4(), "businessDate": "2026-10-20", "linksOpenedCount": 1, "followersGained": 1, "expectedVersion": 1, "dailyRef": daily_ref }),
     )
     .await;
     assert_eq!(stale.0, StatusCode::CONFLICT);
@@ -1346,6 +1357,20 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
             .unwrap(),
         0
     );
+    let (wrong_status, wrong) = post(
+        app.clone(),
+        &format!("/api/local/ops/native/publications/{publication_ref}/execution-locators"),
+        Some(&owner_cookie),
+        json!({ "requestId": Uuid::new_v4(), "signedLocator":
+            "https://www.xiaohongshu.com/explore/aaaaaaaaaaaaaaaaaaaaaaaa?xsec_token=SYNTHETIC&xsec_source=pc_user" }),
+    ).await;
+    assert_eq!(wrong_status, StatusCode::CONFLICT);
+    assert_eq!(
+        wrong["receipt"]["code"],
+        "ops_native_execution_locator_identity_conflict"
+    );
+    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_ops_publication_execution_locator WHERE publication_ref=$1")
+        .bind(publication_ref).fetch_one(database.pool()).await.unwrap(), 0);
     let signed_locator = format!(
         "https://www.xiaohongshu.com/explore/{note}?xsec_token=SYNTHETIC_SIGNED_INPUT&xsec_source=pc_user"
     );

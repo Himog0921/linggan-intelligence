@@ -59,7 +59,7 @@ export function NativeViewBatchDialog({ publications, close }: { publications: r
     if (entries.length > 100) { setMessage("单次最多补充 100 条阅读量。请缩小筛选范围后继续。 "); return; }
     const asOfInstant = new Date(asOf);
     if (Number.isNaN(asOfInstant.getTime())) { setMessage("请选择有效的采样时间。"); return; }
-    const invalid = entries.find(item => !Number.isSafeInteger(Number(selected[item.ref])) || Number(selected[item.ref]) < 0);
+    const invalid = entries.find(item => !selected[item.ref]!.trim() || !Number.isSafeInteger(Number(selected[item.ref])) || Number(selected[item.ref]) < 0);
     if (invalid) { setMessage(`“${invalid.title || "无标题发布"}”的阅读量必须是非负整数；0 是有效实际值。`); return; }
     const ids = { ...requestIds };
     for (const item of entries) ids[item.ref] ||= crypto.randomUUID();
@@ -82,7 +82,7 @@ export function NativeViewBatchDialog({ publications, close }: { publications: r
       setRequestIds({}); setRetrySameRequest(false);
       setMessage(`已写入 ${entries.length - failed.length} 条；失败项已保留，可修正后仅重试它们。`);
     } catch (error) {
-      if (error instanceof ApiError && !error.answered) {
+      if (!(error instanceof ApiError) || !error.answered || (error.failure.kind === "http" && error.failure.status >= 500)) {
         setRetrySameRequest(true);
         setMessage("提交结果未确认。请保持选择、数值和采样时间不变并重试同一批请求，系统会按每条原请求身份返回既有结果。");
       } else {
@@ -102,7 +102,7 @@ export function NativeViewBatchDialog({ publications, close }: { publications: r
           const checked = Object.hasOwn(selected, item.ref);
           return <li key={item.ref}>
             <label><input type="checkbox" checked={checked} onChange={event => toggle(item, event.target.checked)} />选择：{label}</label>
-            <label>阅读量：{label}<input type="number" min="0" step="1" inputMode="numeric" value={selected[item.ref] || ""} onChange={event => changeValue(item.ref, event.target.value)} disabled={!checked || locked} /></label>
+            <label>阅读量：{label}<input type="number" required={checked} min="0" step="1" inputMode="numeric" value={selected[item.ref] || ""} onChange={event => changeValue(item.ref, event.target.value)} disabled={!checked || locked} /></label>
           </li>;
         })}
       </ul>

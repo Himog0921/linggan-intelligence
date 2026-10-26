@@ -22,12 +22,12 @@ async function verifyDeclaredFontsLoad(page) {
 }
 
 // Guards the visible navigation regressions previously covered by retired Rust CSS assertions.
-export async function verifyShellLayout(browser, origin, out) {
+export async function verifyShellLayout(browser, origin, out, storageState) {
   await mkdir(out, {recursive:true});
   const report = { views: [], errors: [], blocked: [] };
   const near = (actual, expected, message) => assert.ok(Math.abs(actual - expected) <= 1, `${message}: expected ${expected}, got ${actual}`);
   for (const width of [1440,1280,1024,390]) {
-    const context=await browser.newContext({viewport:{width,height:900},reducedMotion:'reduce'});
+    const context=await browser.newContext({storageState,viewport:{width,height:900},reducedMotion:'reduce'});
     const page=await context.newPage();
     page.on('pageerror',error=>report.errors.push(String(error)));
     await page.route('**/*',route=>{

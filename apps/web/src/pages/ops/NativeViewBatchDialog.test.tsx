@@ -33,10 +33,10 @@ it("retains only answered failed view reports for a corrected targeted retry", a
   expect(screen.getByLabelText("批量阅读量结果")).toHaveTextContent("ops_native_view_count_invalid");
 });
 
-it("locks an unconfirmed batch and retries each original request identity", async () => {
+for (const failure of [{ kind: "network" } as const, { kind: "http", status: 503, code: "unavailable" } as const]) it(`locks a ${failure.kind} batch and retries each original request identity`, async () => {
   const close = vi.fn();
   vi.mocked(api.recordNativeViewBatch)
-    .mockRejectedValueOnce(new ApiError({ kind: "network" }))
+    .mockRejectedValueOnce(new ApiError(failure))
     .mockResolvedValueOnce({ items: [{ ordinal: 1, status: 201, requestRef: "ignored", outcome: "accepted" as const, code: "accepted", replayed: true }] });
   render(<QueryClientProvider client={new QueryClient()}><NativeViewBatchDialog publications={[publication("one", "第一条")]} close={close} /></QueryClientProvider>);
   fireEvent.click(screen.getByLabelText("选择：第一条"));
@@ -50,4 +50,14 @@ it("locks an unconfirmed batch and retries each original request identity", asyn
   const second = vi.mocked(api.recordNativeViewBatch).mock.calls[1]![0][0]!;
   expect(second.requestId).toBe(first.requestId);
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
+});
+
+it("does not convert an untouched unknown reading into a zero report", async () => {
+  render(<QueryClientProvider client={new QueryClient()}><NativeViewBatchDialog publications={[publication("one", "第一条")]} close={vi.fn()} /></QueryClientProvider>);
+  fireEvent.click(screen.getByLabelText("选择：第一条"));
+  const input = screen.getByLabelText("阅读量：第一条");
+  expect(input).toBeRequired();
+  fireEvent.submit(input.closest("form")!);
+  expect(api.recordNativeViewBatch).not.toHaveBeenCalled();
+  expect(screen.getByRole("status")).toHaveTextContent("必须是非负整数");
 });

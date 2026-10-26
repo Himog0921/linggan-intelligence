@@ -183,6 +183,7 @@ struct RecordExecutionLocatorBody {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RecordDailyBody {
     request_id: Uuid,
+    daily_ref: Option<Uuid>,
     business_date: String,
     links_opened_count: Option<i32>,
     followers_gained: Option<i32>,
@@ -1416,10 +1417,10 @@ async fn write_execution_locator(
             .map_err(|_| WriteError::Unavailable)?;
         return Ok((status_for(&receipt), receipt));
     }
-    let publication: Option<(Uuid, String, Option<i64>, bool, Option<String>)> = sqlx::query_as(
+    let publication: Option<(Uuid, String, Option<i64>, bool, Option<String>, String, String, Option<String>)> = sqlx::query_as(
         "SELECT publication.account_ref,publication.platform,publication.native_version, \
                 publication.source_system='linggan_native' AND publication.native_record_state='active' AS active, \
-                account.platform_user_id \
+                account.platform_user_id,publication.publication_url,publication.canonical_url,publication.platform_content_id \
            FROM linggan_ops_publication publication \
            JOIN linggan_ops_account account ON account.account_ref=publication.account_ref \
           WHERE publication.publication_ref=$1 FOR SHARE OF publication",
@@ -1428,7 +1429,17 @@ async fn write_execution_locator(
     .fetch_optional(&mut *transaction)
     .await
     .map_err(|_| WriteError::Unavailable)?;
-    let Some((account_ref, platform, version, active, author_id)) = publication else {
+    let Some((
+        account_ref,
+        platform,
+        version,
+        active,
+        author_id,
+        registered_url,
+        canonical_url,
+        registered_id,
+    )) = publication
+    else {
         return rejected(
             transaction,
             request_id,
@@ -1481,6 +1492,28 @@ async fn write_execution_locator(
             version,
             "ops_native_forbidden",
             StatusCode::FORBIDDEN,
+        )
+        .await;
+    }
+    if [
+        registered_id,
+        xhs_note_id(&registered_url),
+        xhs_note_id(&canonical_url),
+    ]
+    .into_iter()
+    .flatten()
+    .any(|known| known != content_id)
+    {
+        return rejected(
+            transaction,
+            request_id,
+            "publication_locator_record",
+            &member,
+            &payload,
+            Some(publication_ref),
+            version,
+            "ops_native_execution_locator_identity_conflict",
+            StatusCode::CONFLICT,
         )
         .await;
     }
@@ -1721,6 +1754,7 @@ async fn write_daily_report(
         "linksOpenedCount": report.links_opened_count,
         "followersGained": report.followers_gained,
         "expectedVersion": report.expected_version,
+        "dailyRef": report.daily_ref,
     }));
     let mut transaction = database
         .pool()
@@ -1746,6 +1780,20 @@ async fn write_daily_report(
     let existing =
         daily_for_update(&mut transaction, member.member_ref, &report.business_date).await?;
     match existing {
+        Some((daily_ref, _)) if report.daily_ref.is_some_and(|target| target != daily_ref) => {
+            rejected(
+                transaction,
+                report.request_id,
+                "daily_report_record",
+                &member,
+                &payload,
+                report.daily_ref,
+                None,
+                "ops_native_daily_not_owned",
+                StatusCode::FORBIDDEN,
+            )
+            .await
+        }
         Some((daily_ref, current)) if report.expected_version != Some(current) => {
             stale(
                 transaction,
@@ -2486,6 +2534,7 @@ impl PreparedViewReport {
 
 struct PreparedDailyReport {
     request_id: Uuid,
+    daily_ref: Option<Uuid>,
     business_date: String,
     links_opened_count: Option<i32>,
     followers_gained: Option<i32>,
@@ -2499,11 +2548,13 @@ impl PreparedDailyReport {
             || body.links_opened_count.is_some_and(|value| value < 0)
             || body.followers_gained.is_some_and(|value| value < 0)
             || body.expected_version.is_some_and(|value| value < 1)
+            || (body.expected_version.is_some() != body.daily_ref.is_some())
         {
             return Err(WriteError::Invalid("ops_native_daily_invalid"));
         }
         Ok(Self {
             request_id: body.request_id,
+            daily_ref: body.daily_ref,
             business_date,
             links_opened_count: body.links_opened_count,
             followers_gained: body.followers_gained,

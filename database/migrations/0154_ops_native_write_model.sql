@@ -204,6 +204,11 @@ ALTER TABLE linggan_ops_daily_report
         )
     );
 
+DROP INDEX linggan_ops_daily_report_operator_day_idx;
+CREATE UNIQUE INDEX linggan_ops_daily_report_operator_day_idx
+    ON linggan_ops_daily_report (operator_name, business_date)
+    WHERE missing_since_batch_ref IS NULL AND source_system <> 'linggan_native';
+
 CREATE UNIQUE INDEX linggan_ops_native_daily_member_day_idx
     ON linggan_ops_daily_report (native_member_ref, business_date)
     WHERE source_system = 'linggan_native';

@@ -265,6 +265,11 @@ async fn native_ops_rows_preserve_source_boundaries_null_semantics_and_receipts(
         "unfilled native daily values stay unknown"
     );
 
+    let same_name_member = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) VALUES($1,'same-name@example.test','原生运营','operator','active','synthetic-hash',scope_001_now())")
+        .bind(same_name_member).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO linggan_ops_daily_report (daily_ref,source_system,source_record_id,operator_name,business_date,links_opened_count,followers_gained,review_status,native_member_ref,native_version,native_created_by_member_ref,native_updated_by_member_ref) VALUES($1,'linggan_native',$1::text,'原生运营','2026-10-23',0,0,'confirmed',$2,1,$2,$2)")
+        .bind(Uuid::new_v4()).bind(same_name_member).execute(pool).await.unwrap();
     let duplicate_daily = sqlx::query(
         "INSERT INTO linggan_ops_daily_report \
          (daily_ref,source_system,source_record_id,operator_name,business_date,links_opened_count,\

@@ -56,6 +56,7 @@ export function NativeDailyDialog({ close, item }: { close: () => void; item?: a
     try {
       const result = await api.recordNativeDaily({
         requestId: id,
+        dailyRef: item?.ref || null,
         businessDate,
         linksOpenedCount,
         followersGained: followersGainedCount,

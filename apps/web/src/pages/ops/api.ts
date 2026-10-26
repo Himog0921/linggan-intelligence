@@ -427,6 +427,7 @@ export async function createNativePublicationBatch(commands: readonly (NativePub
 }
 
 export type NativeDailyCommand = {
+  dailyRef?: string | null;
   businessDate: string; linksOpenedCount: number | null; followersGained: number | null;
   expectedVersion: number | null;
 };
