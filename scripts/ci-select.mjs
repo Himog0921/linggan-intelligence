@@ -126,6 +126,20 @@ paths.web_real_chain = [
   'apps/web/src/pages/settings/AccountSecurityPage.tsx',
   'apps/web/src/pages/topics/topicRequest.ts',
   'apps/web/src/pages/topics/TopicsPage.tsx',
+  // These scripts are launched by the Rust/PostgreSQL proof runners below.
+  // A test-only edit must execute the test it changes.
+  'apps/web/test/e2e/comments-real-chain.mjs',
+  'apps/web/test/e2e/creators-real-chain.mjs',
+  'apps/web/test/e2e/evidence-plugin-entry.mjs',
+  'apps/web/test/e2e/evidence-real-chain.mjs',
+  'apps/web/test/e2e/login-react.mjs',
+  'apps/web/test/e2e/offline-preview.mjs',
+  'apps/web/test/e2e/ops-real-chain.mjs',
+  'apps/web/test/e2e/research-dossier-v2.mjs',
+  'apps/web/test/e2e/settings-real-chain.mjs',
+  'apps/web/test/e2e/settings-trials-real-chain.mjs',
+  'apps/web/test/e2e/topics-real-chain.mjs',
+  'apps/web/test/e2e/workbench-real-chain.mjs',
 ];
 
 function globRegex(pattern) {

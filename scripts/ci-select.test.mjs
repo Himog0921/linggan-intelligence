@@ -74,6 +74,9 @@ test('page-local UI changes avoid OCR and PostgreSQL proofs; shared and API chan
     ['apps/web/src/corpus/corpusShellApi.ts', ['web', 'web_real_chain']],
     ['apps/web/src/shared/api.ts', ['ocr_audit', 'web', 'web_real_chain']],
     ['apps/web/src/pages/corpus/evidence/DossierSections.tsx', ['web', 'web_real_chain']],
+    ['apps/web/test/e2e/workbench-real-chain.mjs', ['web', 'web_real_chain']],
+    ['apps/web/test/e2e/settings-real-chain.mjs', ['web', 'web_real_chain']],
+    ['apps/web/test/e2e/ocr-audit-real-chain.mjs', ['ocr_audit', 'web']],
     ['apps/web/src/pages/settings/OcrAudit.module.css', ['web']],
     ['apps/web/src/pages/settings/OcrAuditSettings.tsx', ['ocr_audit', 'web']],
   ];
@@ -91,6 +94,29 @@ test('page files with direct HTTP calls cannot silently enter the UI-only route'
     if (!/\b(?:fetch|requestJson)\s*\(/.test(readFileSync(file, 'utf8'))) continue;
     const path = file.slice(root.length).replaceAll('\\', '/');
     assert.ok(selected([path]).includes('web_real_chain'), `${path} makes direct HTTP calls`);
+  }
+});
+
+test('every current browser script has an explicit proof or manual-only classification', () => {
+  const realChain = [
+    'comments-real-chain.mjs', 'creators-real-chain.mjs', 'evidence-plugin-entry.mjs',
+    'evidence-real-chain.mjs', 'login-react.mjs', 'offline-preview.mjs',
+    'ops-real-chain.mjs', 'research-dossier-v2.mjs', 'settings-real-chain.mjs',
+    'settings-trials-real-chain.mjs', 'topics-real-chain.mjs', 'workbench-real-chain.mjs',
+  ];
+  const ocrAudit = ['ocr-audit-real-chain.mjs', 'ocr-recognition-real-chain.mjs'];
+  const manualOnly = [
+    'login-lifecycle.mjs', 'ops-visual.mjs', 'shell-layout.mjs',
+    'team-member-scroll.mjs', 'topic-workspace-real-chain.mjs',
+    'topics-performance.mjs', 'topics-pixels.py', 'topics-visual.mjs',
+  ];
+  assert.deepEqual(readdirSync(join(root, 'apps/web/test/e2e')).sort(),
+    [...realChain, ...ocrAudit, ...manualOnly].sort(), 'new scripts need a deliberate CI route');
+  for (const name of realChain) {
+    assert.ok(selected([`apps/web/test/e2e/${name}`]).includes('web_real_chain'), name);
+  }
+  for (const name of ocrAudit) {
+    assert.ok(selected([`apps/web/test/e2e/${name}`]).includes('ocr_audit'), name);
   }
 });
 
