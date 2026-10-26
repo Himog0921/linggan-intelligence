@@ -22,7 +22,7 @@ async fn public_admin_access_requires_live_session_and_preserves_inner_origin_gu
     .await
     .unwrap();
     let admin = active_member(database.pool(), "admin-public@example.test", "admin").await;
-    active_member(database.pool(), "operator-public@example.test", "operator").await;
+    let operator = active_member(database.pool(), "operator-public@example.test", "operator").await;
     let app = router_with_public_access(
         LocalWebState {
             database: LocalDatabaseState::Ready(Arc::new(database.clone())),
@@ -70,11 +70,9 @@ async fn public_admin_access_requires_live_session_and_preserves_inner_origin_gu
         r#"{"email":"operator-public@example.test","password":"synthetic-password-only"}"#,
     );
     let operator_login = app.clone().oneshot(operator_login).await.unwrap();
-    assert_eq!(operator_login.status(), StatusCode::OK);
-    let operator_cookie = operator_login.headers()[header::SET_COOKIE]
-        .to_str()
-        .unwrap()
-        .to_owned();
+    assert_eq!(operator_login.status(), StatusCode::UNAUTHORIZED);
+    assert!(!operator_login.headers().contains_key(header::SET_COOKIE));
+    let operator_cookie = fresh_session(database.pool(), operator).await;
     let operator_session =
         public_request("GET", "/api/local/auth/session", Some(&operator_cookie), "");
     assert_eq!(
@@ -90,6 +88,15 @@ async fn public_admin_access_requires_live_session_and_preserves_inner_origin_gu
     assert_eq!(
         app.clone().oneshot(admin_session).await.unwrap().status(),
         StatusCode::OK
+    );
+    let anonymous_logout = public_request("POST", "/api/local/auth/logout", None, "");
+    assert_eq!(
+        app.clone()
+            .oneshot(anonymous_logout)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
     );
     let command = public_request(
         "POST",

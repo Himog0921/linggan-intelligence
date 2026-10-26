@@ -50,7 +50,7 @@ impl PublicAccess {
         })
     }
 
-    fn is_public_host(&self, host: &str) -> bool {
+    pub(super) fn is_public_host(&self, host: &str) -> bool {
         self.host.as_deref() == Some(host)
     }
 
@@ -111,7 +111,9 @@ fn anonymous_path(method: &Method, path: &str) -> bool {
         || (method == Method::POST
             && matches!(
                 path,
-                "/api/local/auth/login" | "/api/local/auth/invitations/accept"
+                "/api/local/auth/login"
+                    | "/api/local/auth/logout"
+                    | "/api/local/auth/invitations/accept"
             ))
 }
 
@@ -221,9 +223,10 @@ mod tests {
     }
 
     #[test]
-    fn only_login_and_static_assets_are_anonymous_on_the_public_host() {
+    fn public_anonymous_routes_cover_login_logout_and_static_assets() {
         assert!(anonymous_path(&Method::GET, "/login"));
         assert!(anonymous_path(&Method::POST, "/api/local/auth/login"));
+        assert!(anonymous_path(&Method::POST, "/api/local/auth/logout"));
         assert!(!anonymous_path(&Method::GET, "/corpus/evidence"));
         assert!(!anonymous_path(&Method::GET, "/api/local/work-resources"));
         assert!(!anonymous_path(&Method::GET, "/api/local/media/id/hash"));
