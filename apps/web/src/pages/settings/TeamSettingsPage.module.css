@@ -1,4 +1,4 @@
-.page{width:100%;max-width:var(--lgi-page-max-workbench);margin:0 auto;padding:var(--lgi-space-6);display:grid;gap:var(--lgi-space-5);box-sizing:border-box;color:var(--lgi-ink)}
+.page{width:100%;max-width:var(--lgi-page-max-workbench);min-height:0;margin:0 auto;padding:var(--lgi-space-6);display:grid;gap:var(--lgi-space-5);overflow-y:auto;box-sizing:border-box;color:var(--lgi-ink)}
 .crumb{display:flex;align-items:center;gap:var(--lgi-space-2)}
 .header{display:flex;justify-content:space-between;align-items:flex-start;gap:var(--lgi-space-5);padding-bottom:var(--lgi-space-5);border-bottom:1px solid var(--lgi-border)}
 .header>div{display:grid;gap:var(--lgi-space-2);max-width:calc(var(--lgi-space-24) * 7.5)}.header h1,.header p,.panel h2,.panel p,.receipt h2,.receipt p,.roster h2,.roster p{margin:0}
