@@ -198,7 +198,10 @@ fn embedding_probe_error_code(error: &EmbeddingError) -> &'static str {
 }
 
 pub(super) async fn local_comment_study_guard(request: Request, next: Next) -> Response {
-    if !allowed_origin(request.headers()) {
+    let public_access = request.extensions().get::<super::public_access::PublicAccess>();
+    if !allowed_origin(request.headers())
+        && !public_access.is_some_and(|access| access.allows_public_origin(request.headers()))
+    {
         return error(StatusCode::FORBIDDEN, "local_comment_study_origin_rejected");
     }
     let mut response = next.run(request).await;

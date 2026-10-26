@@ -22,7 +22,7 @@ const packageJson = JSON.parse(read(path.join(root, 'package.json')));
 assert(packageJson.name === 'linggan-intelligence-browser', 'package must identify Linggan ownership');
 assert(manifest.name === 'Linggan Intelligence Browser', 'manifest must identify Linggan ownership');
 assert(!(manifest.host_permissions || []).some((value) => /lingganboom\.fun/i.test(value)), 'manifest must not grant old workbench host access');
-assert((manifest.host_permissions || []).includes('http://localhost:3000/*'), 'manifest must retain the narrow Linggan loopback target');
+assert((manifest.host_permissions || []).includes('http://localhost:3001/*'), 'manifest must retain the narrow Linggan loopback target');
 for (const permission of ['cookies', 'downloads', 'declarativeNetRequest', 'declarativeNetRequestWithHostAccess', 'notifications']) {
   assert(!(manifest.permissions || []).includes(permission), `unsupported legacy capability must not retain ${permission} permission`);
 }

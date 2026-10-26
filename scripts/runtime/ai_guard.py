@@ -183,7 +183,8 @@ def plist(args):
     if binary == "linggan-ai-worker":
         environment["LINGGAN_AI_DRAIN_ACK_PATH"] = str(Path(support) / "runtime-drain/ai-drain-ack")
     if port:
-        need(binary == "linggan-api" and port == "3000")
+        need(binary == "linggan-api" and re.fullmatch(r"[1-9][0-9]{0,4}", port) is not None
+             and int(port) <= 65535)
         environment["LINGGAN_LOCAL_PORT"] = port
     value = {"Label": label, "ProgramArguments": ["/bin/zsh", str(Path(runtime) / "scripts/runtime/launch.sh"), binary],
              "WorkingDirectory": runtime, "EnvironmentVariables": environment, "RunAtLoad": True, "KeepAlive": True,

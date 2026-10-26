@@ -25,6 +25,11 @@ ensure_env() {
   # shellcheck disable=SC1091
   source "$project_root/.env"
   set +a
+  if [[ -n "${LINGGAN_RUSTUP_BIN_DIR:-}" ]]; then
+    [[ -x "$LINGGAN_RUSTUP_BIN_DIR/cargo" ]] \
+      || { echo "LINGGAN_RUSTUP_BIN_DIR has no cargo executable" >&2; exit 1; }
+    export PATH="$LINGGAN_RUSTUP_BIN_DIR:$PATH"
+  fi
 
   if [[ "${POSTGRES_PASSWORD:-}" == replace-* || "${#POSTGRES_PASSWORD}" -lt 24 ]]; then
     echo "POSTGRES_PASSWORD must be a non-placeholder local secret with at least 24 characters" >&2
@@ -137,8 +142,13 @@ verify_persistent_runtime_is_stopped_for_migration() {
       exit 1
     fi
   done
-  if lsof -nP -iTCP:3000 -sTCP:LISTEN >/dev/null 2>&1; then
-    echo "port 3000 is still serving; refusing persistent database migration" >&2
+  local application_port="${LINGGAN_LOCAL_PORT:-3000}"
+  if [[ ! "$application_port" =~ ^[1-9][0-9]{0,4}$ ]] || (( application_port > 65535 )); then
+    echo "LINGGAN_LOCAL_PORT must be a valid non-zero TCP port" >&2
+    exit 1
+  fi
+  if lsof -nP -iTCP:"$application_port" -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "port ${application_port} is still serving; refusing persistent database migration" >&2
     exit 1
   fi
 }

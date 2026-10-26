@@ -1,4 +1,4 @@
-export const LINGGAN_LOCAL_ORIGIN = 'http://localhost:3000';
+export const LINGGAN_LOCAL_ORIGIN = 'http://localhost:3001';
 const TASK_SPEC_VERSION = 'linggan.producer.task-spec.v2';
 const ATTEMPT_VERSION = 'linggan.producer.attempt.v1';
 const SUBMISSION_VERSION = 'linggan.producer.capture-package.v1';

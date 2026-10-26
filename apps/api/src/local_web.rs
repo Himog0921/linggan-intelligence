@@ -73,6 +73,7 @@ mod offline_preview_tests;
 mod ops;
 mod ops_api;
 mod ops_auth;
+mod public_access;
 #[cfg(test)]
 mod ops_auth_tests;
 mod ops_native_api;
@@ -320,7 +321,15 @@ fn collection_api_routes() -> Router<LocalWebState> {
         .merge(collection_dispatch::routes())
 }
 
+#[cfg(test)]
 fn router(state: LocalWebState) -> Router {
+    router_with_public_access(state, public_access::PublicAccess::default())
+}
+
+fn router_with_public_access(
+    state: LocalWebState,
+    public_access: public_access::PublicAccess,
+) -> Router {
     Router::new()
         .route("/", get(local_entry))
         .route("/health", get(health))
@@ -401,6 +410,10 @@ fn router(state: LocalWebState) -> Router {
         .merge(content_workbench_ai_api::routes())
         .route("/corpus", get(corpus_entry))
         .route("/collection", get(collection_entry))
+        .layer(axum::middleware::from_fn_with_state(
+            (state.clone(), public_access),
+            public_access::guard,
+        ))
         .with_state(state)
 }
 
@@ -499,11 +512,11 @@ pub async fn serve() -> Result<(), std::io::Error> {
     if let Some(connected) = database.database() {
         collection_run_api::spawn_run_advancer(connected.clone());
     }
-    let application = router(LocalWebState {
+    let application = router_with_public_access(LocalWebState {
         database,
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
         account_digest_key: configured_account_digest_key(),
-    });
+    }, public_access::PublicAccess::from_environment()?);
     let local_port = configured_local_port()?;
     let address = SocketAddr::from((LOCAL_HOST, local_port));
     let listener = tokio::net::TcpListener::bind(address).await?;

@@ -67,6 +67,11 @@ fi
 set -a
 source ./.env
 set +a
+if [[ -n "${LINGGAN_RUSTUP_BIN_DIR:-}" ]]; then
+  [[ -x "$LINGGAN_RUSTUP_BIN_DIR/cargo" ]] \
+    || { log "LINGGAN_RUSTUP_BIN_DIR has no cargo executable"; exit 1; }
+  export PATH="$LINGGAN_RUSTUP_BIN_DIR:$PATH"
+fi
 
 pending=()
 migration_head=""

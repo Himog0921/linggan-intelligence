@@ -90,7 +90,7 @@ test('a detail risk signal only uses the health-advertised local route and retur
     installKey: 'install-1', installationCredential: 'credential-1', taskId: 'task-1',
     riskSignalId: 'signal-1', detectorVersion: 'xhs-risk-interstitial.v1',
   });
-  assert.match(request.url, /^http:\/\/localhost:3000\/api\/local\/dispatch\//);
+  assert.match(request.url, /^http:\/\/localhost:3001\/api\/local\/dispatch\//);
   assert.deepEqual(result, { reported: true, cooldownActive: true, cooldownUntil: '2026-09-21T00:00:00Z' });
   assert.equal(JSON.stringify(result).includes('credential-1'), false);
 });

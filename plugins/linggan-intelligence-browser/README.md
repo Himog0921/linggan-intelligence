@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.63`（评论分页推进修复候选；实际加载与真实链路另行核对）
+> 版本: `0.8.64`（本机 3001 端口候选；实际加载与真实链路另行核对）
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -9,6 +9,8 @@
 这是 Linggan Intelligence 自有的 Chrome Manifest V3 插件源码包。它从
 `Himog0921/linggan-boom@8a00cc1`（审计版本 `2.0.91`）迁入完整浏览器端
 源码、资产和操作界面；旧内容工作台不是运行依赖、数据中转或发布来源。
+
+`0.8.64` 的唯一 Linggan 后端地址为 `http://localhost:3001`。在 3001 的正式 API、数据库迁移和工位身份均核验前，不要把构建通过当作已加载或已可接活。
 
 ## 评论末页扫描修复
 

@@ -22,7 +22,7 @@ runtime_ai_snapshot() {
 }
 
 runtime_no_binary_processes() {
-  local binary result sockets
+  local binary result sockets runtime_port
   for binary in linggan-api linggan-worker linggan-media-worker linggan-ai-worker; do
     if pgrep -x "$binary" >/dev/null 2>&1; then
       print -r -- "$binary 仍在运行；未继续切换代码" >&2
@@ -32,7 +32,9 @@ runtime_no_binary_processes() {
       (( result == 1 )) || return 1
     fi
   done
-  if sockets="$(lsof -nP -iTCP:3000 -sTCP:LISTEN 2>&1)"; then return 1; else
+  runtime_port="$(source "$runtime_env"; print -r -- "${LINGGAN_LOCAL_PORT:-3000}")" || return 1
+  [[ "$runtime_port" =~ '^[1-9][0-9]{0,4}$' ]] && (( runtime_port <= 65535 )) || return 1
+  if sockets="$(lsof -nP -iTCP:${runtime_port} -sTCP:LISTEN 2>&1)"; then return 1; else
     result=$?
     [[ "$result" == "1" && -z "$sockets" ]]
   fi
