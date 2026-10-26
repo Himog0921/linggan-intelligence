@@ -82,7 +82,9 @@ pub async fn current_image_reading_with_bytes(
 ) -> Uuid {
     let (work, version, sha) = acquired_image_source_with_bytes(db, preview_bytes).await;
     let row = (work, version);
-    let mut blocks:Vec<_>=(0..4).map(|i|json!({"kind":"paragraph","text":format!("第{i}行连续的图片正文，完整可用。"),"speaker":"unconfirmed"})).collect();
+    // Keep the fixture's explicit image geometry for exact-citation consumers.
+    // Canonical blocks use x/y/width/height, rather than OCR corner coordinates.
+    let mut blocks:Vec<_>=(0..4).map(|i|json!({"kind":"paragraph","text":format!("第{i}行连续的图片正文，完整可用。"),"speaker":"unconfirmed","bbox":[0.12,0.28+f64::from(i)*0.05,0.76,0.025]})).collect();
     blocks.push(json!({"kind":"heading","text":"封面大字独立保留","speaker":"unconfirmed"}));
     blocks.push(json!({"kind":"paragraph","text":"用途不清的背景文字","speaker":"unconfirmed","issues":[{"key":"background","code":"uncertain_reading","message":"背景文字，归属待核验","resolution":"reading_edit"}]}));
     let mut tx = db.pool().begin().await.unwrap();
