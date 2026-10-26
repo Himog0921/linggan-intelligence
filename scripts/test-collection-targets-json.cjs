@@ -103,6 +103,19 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     await page.getByRole('button', { name: '并排对照', exact: true }).click();
     await page.getByRole('heading', { name: '作品并排对照', exact: true }).waitFor();
     await page.getByRole('button', { name: '当前累计', exact: true }).waitFor();
+    // Exercise this toolbar before opening the long dossier below it. Scrolling an
+    // ancestor dismisses an open shared selector, so automatic scrolling is not part of this choice.
+    const [switched]=await Promise.all([
+      page.waitForResponse(response=>response.url().includes('/inspection/work-comparison?')&&new URL(response.url()).searchParams.get('works')?.split(',')[0]===populated.works[1].workRef),
+      (async()=>{
+        await page.getByRole('combobox',{name:'主作品',exact:true}).click();
+        await page.getByRole('listbox',{name:'主作品',exact:true}).getByRole('option',{name:populated.works[1].title,exact:true}).click();
+      })(),
+    ]);
+    assert.equal(switched.status(),200);
+    const switchedPayload=await switched.json();assert.equal(switchedPayload.items[0].workRef,populated.works[1].workRef);
+    assert.equal(new URL(page.url()).searchParams.get('inspect_works').split(',')[0],populated.works[1].workRef);
+    reports.push('shared primary-work selector reorders the actual persisted comparison request');
     const canonicalResponse = page.waitForResponse(response => response.url().includes('/api/local/work-resources/') && response.url().includes('/research-dossier?'));
     await page.getByRole('button', { name: '展开已取得的底稿', exact: true }).first().click();
     const canonical = await canonicalResponse; assert.equal(canonical.status(), 200);
@@ -110,13 +123,6 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     const canonicalUrl = new URL(canonical.url()); assert.equal(canonicalUrl.searchParams.get('asOf'), new URL(page.url()).searchParams.get('inspect_as_of'));
     await page.getByText('以下按当前研究截点读取正式底稿。', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(directory, 'targets-v4-canonical-dossier.png') });
-    const switchPrimary=page.waitForResponse(response=>response.url().includes('/inspection/work-comparison?')&&new URL(response.url()).searchParams.get('works')?.split(',')[0]===populated.works[1].workRef);
-    await page.getByRole('combobox',{name:'主作品',exact:true}).click();
-    await page.getByRole('listbox',{name:'主作品',exact:true}).getByRole('option').nth(1).click();
-    const switched=await switchPrimary;assert.equal(switched.status(),200);
-    const switchedPayload=await switched.json();assert.equal(switchedPayload.items[0].workRef,populated.works[1].workRef);
-    assert.equal(new URL(page.url()).searchParams.get('inspect_works').split(',')[0],populated.works[1].workRef);
-    reports.push('shared primary-work selector reorders the actual persisted comparison request');
     for(const width of [1440,1024,390]){
       await page.setViewportSize({width,height:900});
       const geometry=await page.locator('#c-drawer').evaluate(el=>({width:el.getBoundingClientRect().width,
@@ -264,5 +270,9 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     assert.deepEqual(errors, []);
     await fs.writeFile(path.join(directory, 'targets-react-proof.json'), JSON.stringify({ reports, writes, errors }, null, 2));
     console.log(JSON.stringify({ targetProofs: reports.length, scriptErrors: errors.length }));
+  } catch(error) {
+    await fs.writeFile(path.join(directory,'targets-react-failure.json'),JSON.stringify({url:page.url(),reports,writes,errors,drawer:await page.locator('#c-drawer').innerText().catch(()=>null)},null,2));
+    await page.screenshot({path:path.join(directory,'targets-react-failure.png')}).catch(()=>{});
+    throw error;
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });
