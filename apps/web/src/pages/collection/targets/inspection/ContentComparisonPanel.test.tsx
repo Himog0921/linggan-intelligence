@@ -82,7 +82,8 @@ it('历史轮次默认不被当前启用规则过滤，保留规则未记录的�
   render(harness(client,[],vi.fn(),<KeywordRounds/>,drawer));
   await waitFor(()=>expect(paths.length).toBeGreaterThan(0));
   expect(paths.every(path=>!new URL(path,'http://localhost').searchParams.has('rule'))).toBe(true);
-  expect(screen.getByRole('option',{name:'全部已取得轮次（含规则未记录）'})).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('combobox',{name:'观察规则'}));
+  expect(screen.getByRole('option',{name:'全部规则'})).toBeInTheDocument();
 });
 
 it('完整阅读复用 V2 正式入口和同一截点，保留表格、对话、角色与位置',async()=>{

@@ -53,3 +53,17 @@
 ## 验收
 
 详见 `docs/design/acceptance/target-inspector-performance-001-acceptance.md`。本变更同步更新 `PAGE-COLLECTION-001`、LIDS migration log 和 2026-09 progress；未部署页面与共享数据库均不能作为已验收事实。
+
+## 2026-10-26 · 已确认交互原型正式接入
+
+用户已确认独立原型结构，并授权实现、测试、独立审查后合并及本机3000发布；仍禁止真实采集与模型调用。本节替代旧「概览」及作品默认视图的布局结论，不改变领域数据与命令合同。
+
+工作包 `TARGET-INSPECTOR-UI-20261026`，协调者 root；base `05c24175`，分支 `codex/target-inspector-ui-20261026`，仓库 `.worktrees/target-inspector-ui-20261026`。root独占检查器TSX/CSS、直接相关测试和本页规格；独立审阅者只读。后端、迁移、插件、其他页面和共享视觉参数不在修改范围；跨包冲突才升级。
+
+采用 L2 Split Inspector，最大960px，身份/导航固定，正文局部滚动。默认「最近观察」并列显示首次发现与所选两轮的精确指标变化；作品提供目录/图表与2–3篇对照，轮次、对照、轨迹作为可返回的展开。巡查集中既有规则与资料维护。采用LIDS B字级、M2按钮/下拉、C焦点和S1返回；控件为现有ActionButton、SelectField的页面接入（implementation_fix），不新建共享标准或Token。
+
+创作者与关键词均读取现有rounds/round-comparison。只有明确同ruleRef且更早的轮次自动作参照；未知不冒充同规则。变化使用服务端comparable及delta；部分覆盖、账号限制、未知、已知零分别保留。首次发现不等于刚发布，未命中不表示删除；主作品以有序作品引用改变服务端参照统计。非必要解释折叠或删除。
+
+验收覆盖默认首屏、历史轮次/最早轮次/无规则、未知与零、部分/失败、2–3篇及主作品切换、24h缺失、搜索分页、图表明细、返回焦点/滚动、下拉键盘/Esc、长文本、桌面与390px。自动测试与浏览器GET读取证明分别记录；不执行采集/恢复/模型按钮。私有日志与截图保留在artifacts/private/target-inspector-ui-20261026，不入Git。正式发布身份与Mog视觉验收单独记录。
+
+验证直接依赖：本机已有大量合法worktree时，必跑预检的 `git worktree list | awk ... exit` 在pipefail下实测返回141，未完成后续门禁。本包只将该awk改成读完输入、仍只输出首项；不删除或放宽任何检查，已在相同环境通过完整preflight。该一行与UI候选一起独立审阅。

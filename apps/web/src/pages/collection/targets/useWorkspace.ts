@@ -150,8 +150,8 @@ export function listHref(params: URLSearchParams, updates: Record<string, string
   if (updates.rule || updates.assign_domain || ('drawer' in updates && updates.drawer !== next.get('drawer'))) {
     for (const key of [...next.keys()])
       if (
-        ['drawer', 'dtab', 'wview', 'catalog_query', 'catalog_filter'].includes(key) ||
-        key.startsWith('life_')
+        ['drawer', 'dtab', 'wview', 'catalog_query', 'catalog_filter', 'catalog_page'].includes(key) ||
+        key.startsWith('life_') || key.startsWith('inspect_')
       )
         next.delete(key);
   }

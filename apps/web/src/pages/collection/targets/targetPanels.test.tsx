@@ -15,7 +15,7 @@ import type { Lifecycle } from './api';
 import { Toolbar } from './TargetToolbar';
 import { Modal } from './TargetModals';
 import { RuleModal } from './TargetModals';
-import { Overview } from './TargetOverview';
+import { TargetMaintenance as Overview } from './TargetOverview';
 import { decodeDrawer } from './api';
 import type { TargetList } from './api';
 import type { Commands } from './useWorkspace';
@@ -75,8 +75,8 @@ describe('监控规则原回执与失败语义', () => {
     expect(screen.queryByRole('button', { name: '保存新版本' })).not.toBeInTheDocument();
   });
 });
-describe('概览的原目标种类边界', () => {
-  it.each(['creator', 'keyword'])('材料失效判断只属于 creator 概览：%s', kind => {
+describe('巡查资料维护的目标种类边界', () => {
+  it.each(['creator', 'keyword'])('材料失效判断只属于 creator 资料维护：%s', kind => {
     const known = { state: 'known', value: 1 };
     const data = decodeDrawer({ target: {
       targetRef, kind, platform: 'xhs', identity: 'synthetic-target', handle: 'synthetic-target', name: '合成目标',
@@ -92,7 +92,7 @@ describe('概览的原目标种类边界', () => {
     });
     const { container } = render(<MemoryRouter><Overview data={data} params={new URLSearchParams()} commands={commands()} /></MemoryRouter>);
     expect(Boolean(screen.queryByRole('button', { name: '确认这些作品已失效' }))).toBe(kind === 'creator');
-    expect(container.querySelector(kind === 'creator' ? '#archive-problems' : '#required-action')).not.toBeNull();
+    expect(container.querySelector('#archive-problems')).not.toBeNull();
   });
 });
 
