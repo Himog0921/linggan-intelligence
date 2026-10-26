@@ -35,7 +35,7 @@ function Card({ object, total, onOpen }: { object: MediaObject; total: number; o
     >
       <span className={styles.frame}>
         {object.assetUrl && object.mime.startsWith('video/') ? (
-          <span className={styles.absent}><b>▶ 视频</b><span>点击播放</span></span>
+          <span className={styles.absent}><span>▶ 视频</span><span>点击播放</span></span>
         ) : object.assetUrl && !failed ? (
           // 单张图读取失败只在原位提示：一个坏对象不能让整个作品看起来没有媒体。
           <img src={object.assetUrl} alt={label} loading="lazy" decoding="async" onLoad={() => setPhase('loaded')} onError={() => setPhase('failed')} />

@@ -369,7 +369,7 @@ try {
   });
 
   // ⑥ 媒体轨道与查看器
-  await step('媒体轨道：受控本机图片；查看器缩放、Esc、焦点回位；视频不内联', async () => {
+  await step('媒体轨道：受控本机图片；查看器缩放、Esc、焦点回位；视频原件及失败反馈', async () => {
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
     const cards = panel('作品').locator('button[data-index]');
@@ -398,7 +398,7 @@ try {
     await dialog.waitFor({ state: 'hidden' });
     assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-index')), '0', '关闭后焦点回到打开它的那一张');
     assert.equal(await cards.count(), 4);
-    // 视频：不内联播放，也不当图片渲染——卡片只写字节状态词；封面等其余对象不受影响。
+    // 视频先显示明确播放入口，不自动载入播放器，也不当图片渲染；封面不受影响。
     await open(`&work=${video}`);
     await waitInspector(TITLE.video);
     const videoCard = panel('作品').locator('button[data-index]').filter({ hasText: '视频' });
@@ -406,13 +406,29 @@ try {
     assert.equal(await page.locator('video').count(), 0);
     assert.equal(await videoCard.count(), 1);
     assert.equal(await videoCard.locator('img').count(), 0, '视频不当图片渲染');
-    assert.match(await videoCard.innerText(), /已取得/);
+    assert.match(await videoCard.innerText(), /点击播放/);
     assert.equal(await panel('作品').locator('img[alt$="本地媒体对象"]').count(), 1, '同一作品的封面仍是受控图片');
     // 封面与正文第 1 张是同一份文件（两个槽位、同一字节指纹）：图组只显示一张，并写全它的两个角色。
     const videoCards = panel('作品').locator('button[data-index]');
     assert.equal(await videoCards.count(), 2, '三个槽位、两份文件 → 两张卡');
     assert.deepEqual(await videoCards.locator('b').allTextContents(), ['封面 · 正文第 1 张', '视频']);
     assert.match(await panel('作品').innerText(), /02 个本地媒体对象/);
+    await videoCard.click();
+    await dialog.waitFor();
+    // The fixture deliberately contains non-playable synthetic MP4 bytes. Verify the real
+    // decoder failure, then recovery to the existing image viewer; actual playback is a separate proof.
+    await dialog.getByRole('status').filter({ hasText: '本地副本读取失败' }).waitFor();
+    assert.equal(await dialog.locator('img').count(), 0, '视频失败不会转成破图');
+    assert.equal(await dialog.getByRole('group', { name: '缩放' }).count(), 0);
+    await dialog.getByRole('button', { name: '上一张' }).click();
+    await dialog.locator('img').waitFor();
+    await page.waitForFunction(() => { const image = document.querySelector('dialog[open] img'); return image?.complete && image.naturalWidth > 0; });
+    assert.equal(await dialog.locator('video').count(), 0, '切回图片卸载视频');
+    await dialog.getByRole('button', { name: '放大' }).click();
+    await dialog.getByRole('button', { name: '150%' }).waitFor();
+    await page.keyboard.press('Escape');
+    await dialog.waitFor({ state: 'hidden' });
+    assert.equal(await page.locator('video').count(), 0, '关闭查看器没有残留播放器');
   });
 
   // ⑦ 评论
