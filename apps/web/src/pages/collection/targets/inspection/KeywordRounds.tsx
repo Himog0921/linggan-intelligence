@@ -1,6 +1,7 @@
+import { previousRound } from './useObservationRounds';
 import { useEffect } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
-import { TargetSelect } from '../TargetSelect';
+import { InspectorSelect as TargetSelect } from './InspectorSelect';
 import { decodeRoundComparison,decodeRoundResult,decodeRounds,inspectionUrl,METRICS,type MetricKey,type Round,type RoundWork } from './inspectionApi';
 import { discoveryLabels,metricLabels,metricValue,moment,number,reason,ruleLabels } from './inspectionPresent';
 import { Cutoff,Delta,MetricPicker,ReadFeedback } from './ResearchParts';
@@ -25,7 +26,7 @@ export function KeywordRounds(){
     if(rule&&!context.params.has('inspect_rule'))updates.inspect_rule=rule;
     if(!right&&page.data.rounds[0])updates.inspect_right_round=page.data.rounds[0].roundRef;
     if(comparing&&!left){const newest=page.data.rounds.find(item=>item.roundRef===(right??page.data?.rounds[0]?.roundRef));
-      const previous=page.data.rounds.find(item=>item.roundRef!==newest?.roundRef&&item.ruleRef===newest?.ruleRef&&item.observedEpochMs<=(newest?.observedEpochMs??0));
+      const previous=previousRound(page.data.rounds,newest);
       if(previous)updates.inspect_left_round=previous.roundRef;}
     if(Object.keys(updates).length)context.patch(updates,true);
   },[page.data,rule,right,left,comparing,context]);
@@ -35,7 +36,7 @@ export function KeywordRounds(){
   const refresh=()=>context.patch({inspect_as_of:null,inspect_left_round:null,inspect_right_round:null,inspect_round_offset:null});
   return <section className={styles.root} aria-label="关键词轮次观察">
     <div className={styles.toolbar}>
-      {rules.length>0&&<TargetSelect name="inspection-rule" label="观察规则" value={rule??''} onChange={value=>context.patch({inspect_rule:value,inspect_left_round:null,inspect_right_round:null,inspect_round_offset:null})} options={[{value:'',label:'全部已取得轮次（含规则未记录）'},...rules.map(item=>({value:item.ruleRef,label:ruleLabels[item.slot]??'历史规则'}))]}/>}
+      {rules.length>0&&<TargetSelect name="inspection-rule" label="观察规则" value={rule??''} onChange={value=>context.patch({inspect_rule:value,inspect_left_round:null,inspect_right_round:null,inspect_round_offset:null})} options={[{value:'',label:'全部规则'},...rules.map(item=>({value:item.ruleRef,label:ruleLabels[item.slot]??'历史规则'}))]}/>}
       <ActionButton variant="quiet" aria-pressed={!comparing} onClick={()=>context.patch({inspect_round_view:'latest'})}>本轮结果</ActionButton>
       <ActionButton variant="quiet" aria-pressed={comparing} onClick={()=>context.patch({inspect_round_view:'compare'})}>与上轮对照</ActionButton>
       <ActionButton variant="quiet" onClick={refresh}>读取最新轮次</ActionButton>
@@ -46,11 +47,11 @@ export function KeywordRounds(){
       <TargetSelect name="inspection-right-round" label="本轮" value={right??''} onChange={value=>context.patch({inspect_right_round:value||null,inspect_left_round:null})} options={[{value:'',label:'选择本轮'},...options]}/>
       <MetricPicker value={metric} onChange={value=>context.patch({inspect_metric:value})}/>
     </div>}
-    {page.data?.rounds.length===0&&<p className={styles.empty}>当前规则尚无可还原的观察轮次；可切换“全部作品”查看已有目录。</p>}
+    {page.data?.rounds.length===0&&<p className={styles.empty}>尚无可还原轮次，可查看作品目录。</p>}
     {comparing&&!left&&right&&<p className={styles.notice}>当前可选轮次中，未找到本轮之前的同规则观察。可更换本轮或查看“本轮结果”。</p>}
     {comparing?<><ReadFeedback read={compared}/>{compared.data&&<>
       <div className={styles.inlineSummary}><span>共同命中 <b>{number(compared.data.commonCount)}</b></span><span>本轮新出现 <b>{number(compared.data.enteredCount)}</b></span><span>本轮未命中 <b>{number(compared.data.absentCount)}</b></span><Cutoff value={compared.data.knowledgeCutoff}/></div>
-      {compared.data.reasons.length>0&&<div className={styles.notice}><p>{compared.data.reasons.map(reason).join('；')}。仍保留两侧原值，不外推整个入口的涨跌。</p></div>}
+      {compared.data.reasons.length>0&&<div className={styles.notice}><p>{compared.data.reasons.map(reason).join('；')}。保留两侧原值。</p></div>}
       <RoundConditions left={compared.data.left} right={compared.data.right}/>
       <div className={styles.tableScroll} tabIndex={0} aria-label="关键词两轮作品对照，可横向滚动"><table className={styles.table}>
         <colgroup><col style={{width:'36%'}}/><col style={{width:'22%'}}/><col style={{width:'13%'}}/><col style={{width:'13%'}}/><col style={{width:'16%'}}/></colgroup>
@@ -67,9 +68,9 @@ export function KeywordRounds(){
       {result.data.truncated&&<p className={styles.notice}>当前仅展示有界部分作品，不将此名单当成完整结果。</p>}
       <SingleRound rows={result.data.works} metric={metric}/>
     </>}</>}
-    {page.data&&<div className={styles.footer}><span className={styles.meta}>未命中仅表示本轮范围没有取得，不表示作品已删除。</span><div className={styles.rowActions}>
-      <ActionButton variant="quiet" disabled={offset===0} onClick={()=>context.patch({inspect_round_offset:String(Math.max(0,offset-50))})}>较新轮次</ActionButton>
-      <ActionButton variant="quiet" disabled={page.data.nextOffset===null} onClick={()=>{if(page.data?.nextOffset!=null)context.patch({inspect_round_offset:String(page.data.nextOffset)});}}>更早轮次</ActionButton>
+    {page.data&&<div className={styles.footer}><span className={styles.meta}>未命中不表示删除。</span><div className={styles.rowActions}>
+      <ActionButton variant="quiet" disabled={offset===0} onClick={()=>context.patch({inspect_round_offset:String(Math.max(0,offset-50)),inspect_right_round:null,inspect_left_round:null})}>较新轮次</ActionButton>
+      <ActionButton variant="quiet" disabled={page.data.nextOffset===null} onClick={()=>{if(page.data?.nextOffset!=null)context.patch({inspect_round_offset:String(page.data.nextOffset),inspect_right_round:null,inspect_left_round:null});}}>更早轮次</ActionButton>
     </div></div>}
   </section>;
 }

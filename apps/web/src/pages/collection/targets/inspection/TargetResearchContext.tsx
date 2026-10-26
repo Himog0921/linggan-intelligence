@@ -23,12 +23,12 @@ export function TargetResearchProvider({data,params,children}:{data:Drawer;param
     if(selected.length===3){setMessage('最多同时对照 3 篇，请先移除或替换一篇。');return;}
     patch({inspect_works:[...selected,work].join(','),inspect_comparison_request:null});setMessage(null);
   };
-  const open=(panel:Panel,work?:string)=>{
+  const open=(panel:Panel,work?:string,values:Record<string,string|null>={})=>{
     if(panel==='compare'&&(!valid||selected.length<2)){setMessage('请先选择 2—3 篇作品。');return;}
     if(work&&!uuid.test(work))return;
     const active=document.activeElement;
     returns.current.push({url:listHref(params),scroll:document.querySelector('.c-dw-body')?.scrollTop??0,focus:active instanceof HTMLElement?active.id:null});
-    patch({inspect_panel:panel,inspect_work:work??null});
+    patch({...values,inspect_panel:panel,inspect_work:work??null});
     requestAnimationFrame(()=>{document.querySelector('.c-dw-body')?.scrollTo({top:0});});
   };
   const back=()=>{

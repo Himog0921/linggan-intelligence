@@ -141,12 +141,15 @@ describe('采集目标数据与动作边界', () => {
 });
 describe('目标导航上下文', () => {
   it('换目标或关闭抽屉不携带上一目标的表现/筛选条件，列表领域与排序保留', () => {
-    const params = new URLSearchParams('domain=all&filter=creator&sort=last&drawer=old&dtab=works&wview=performance&life_metric=comments&catalog_query=old');
+    const params = new URLSearchParams('domain=all&filter=creator&sort=last&drawer=old&dtab=works&wview=performance&life_metric=comments&catalog_query=old&catalog_page=3&inspect_right_round=old&inspect_works=old');
     const changed = new URL(listHref(params, { drawer: target.targetRef }), 'http://localhost');
     expect(changed.searchParams.get('drawer')).toBe(target.targetRef);
     expect(changed.searchParams.has('dtab')).toBe(false);
     expect(changed.searchParams.has('life_metric')).toBe(false);
     expect(changed.searchParams.has('catalog_query')).toBe(false);
+    expect(changed.searchParams.has('catalog_page')).toBe(false);
+    expect(changed.searchParams.has('inspect_right_round')).toBe(false);
+    expect(changed.searchParams.has('inspect_works')).toBe(false);
     expect(changed.searchParams.get('domain')).toBe('all');
     expect(changed.searchParams.get('sort')).toBe('last');
     expect(new URL(listHref(params, { drawer: null }), 'http://localhost').searchParams.has('wview')).toBe(false);

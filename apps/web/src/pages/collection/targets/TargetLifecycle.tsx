@@ -2,7 +2,8 @@ import { Chart } from './LifecycleChart';
 import { WorkResearchActions } from './inspection/TargetResearchContext';
 import styles from './inspection/TargetResearch.module.css';
 import { Review } from './LifecycleReview';
-import { Link } from 'react-router';
+import { Link,useNavigate } from 'react-router';
+import { InspectorSelect } from './inspection/InspectorSelect';
 import type { Drawer } from './api';
 import { listHref } from './useWorkspace';
 
@@ -22,6 +23,7 @@ export function LifecyclePanel({
   lifecycle: Drawer['lifecycle'];
   params: URLSearchParams;
 }) {
+  const navigate=useNavigate();
   if (lifecycle.state === 'invalid')
     return (
       <State
@@ -59,49 +61,9 @@ export function LifecyclePanel({
     <section className="c-dw-section life-panel" id="creator-lifecycle">
       <div className="life-performance-controls">
         <div>
-          <div className="life-controls" aria-label="生命周期口径">
-            <div className="life-control-row">
-              <span className="life-control-label">时间</span>
-              {[
-                ['recent_90_days', '近 90 天'],
-                ['all', '全部周期'],
-              ].map(([key, label]) => (
-                <Link
-                  key={key}
-                  className="life-chip"
-                  aria-current={p.window === key ? 'true' : undefined}
-                  to={listHref(
-                    viewParams,
-                    { life_work: null, life_window: key ?? 'all', life_metric: p.metric },
-                    'creator-lifecycle',
-                  )}
-                >
-                  {label}
-                </Link>
-              ))}
-            </div>
-            <div className="life-control-row">
-              <span className="life-control-label">指标</span>
-              {[
-                ['likes', '点赞'],
-                ['comments', '评论'],
-                ['collects', '收藏'],
-                ['shares', '转发'],
-              ].map(([key, label]) => (
-                <Link
-                  key={key}
-                  className="life-chip"
-                  aria-current={p.metric === key ? 'true' : undefined}
-                  to={listHref(
-                    viewParams,
-                    { life_work: null, life_window: p.window, life_metric: key ?? 'likes' },
-                    'creator-lifecycle',
-                  )}
-                >
-                  {label}
-                </Link>
-              ))}
-            </div>
+          <div className={styles.toolbar} aria-label="生命周期口径">
+            <InspectorSelect label="时间范围" value={p.window} options={[{value:'recent_90_days',label:'近 90 天'},{value:'all',label:'全部周期'}]} onChange={value=>navigate(listHref(viewParams,{life_work:null,life_bucket:null,life_window:value,life_metric:p.metric}))}/>
+            <InspectorSelect label="图表指标" value={p.metric} options={[{value:'likes',label:'点赞'},{value:'comments',label:'评论'},{value:'collects',label:'收藏'},{value:'shares',label:'转发'}]} onChange={value=>navigate(listHref(viewParams,{life_work:null,life_window:p.window,life_metric:value}))}/>
           </div>
         </div>
         <p>
@@ -129,7 +91,7 @@ export function LifecyclePanel({
             <div className="life-review-head"><b>选中作品</b><Link to={listHref(viewParams,{life_work:null},'creator-lifecycle')}>返回复核摘要</Link></div>
             <h3>{selected.title??'标题未取得'}</h3>
             <p className={styles.meta}>{selected.date} · {metricLabel(p.metric)} {selected.value}</p>
-            <p className={styles.meta}>单篇数值来自当前有资格的作品样本，尚不能当作发布后同期表现。</p>
+            <p className={styles.meta}>当前累计值。</p>
             <WorkResearchActions work={selected.publicRef}/>
           </aside>
         ) : <Review p={p} week={week} distribution={distribution} buckets={buckets} />)}
@@ -145,10 +107,10 @@ export function LifecyclePanel({
           </tr>)}</tbody>
         </table></div>
       </section>}
-      <section className="life-evidence">
+      {!selectedBucket&&<section className="life-evidence">
         <div className="life-evidence-head">
           <h2>近期作品证据</h2>
-          <p>展示当前窗口最后 4 篇可分析作品；选择一篇可继续进入语料核验。</p>
+          <p>当前窗口最近 4 篇。</p>
         </div>
         {p.points.length ? (
           <div className="life-evidence-table-wrap">
@@ -188,7 +150,7 @@ export function LifecyclePanel({
         ) : (
           <p className="life-evidence-empty">当前窗口没有可展示的单篇作品；未知数据不会替换成占位读数。</p>
         )}
-      </section>
+      </section>}
       {(exclusions.some(([, count]) => count > 0) || p.receipt.truncated) && (
         <ul className="life-exclusions" aria-label="未进入当前曲线的原因">
           {exclusions
@@ -220,7 +182,7 @@ export function LifecyclePanel({
           </Link>
         </section>
       )}
-      <details className={styles.conditions}><summary>覆盖与图表口径</summary><p>作品目录、作者已确认和当前可分析分别表示目录范围、作者归属和当前时间窗及指标资格；数量相同不代表完成了内容分析。图表只比较该创作者自己的作品表现，尚未按内容主题分类。</p></details>
+      <details className={styles.conditions}><summary>覆盖与图表口径</summary><p>可分析指当前时间窗和指标资格，不代表内容分析完成。</p></details>
     </section>
   );
 }

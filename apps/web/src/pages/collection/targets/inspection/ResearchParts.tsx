@@ -1,7 +1,7 @@
 import { useEffect,useRef,type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { ActionButton } from '../../../../shared/ActionButton';
-import { TargetSelect } from '../TargetSelect';
+import { InspectorSelect as TargetSelect } from './InspectorSelect';
 import type { InspectionRead } from './useInspectionRead';
 import { METRICS,type MetricKey,type Difference } from './inspectionApi';
 import { duration,metricLabels,moment,number,reason } from './inspectionPresent';

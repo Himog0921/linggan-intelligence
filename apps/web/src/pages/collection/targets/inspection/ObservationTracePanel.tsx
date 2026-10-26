@@ -31,7 +31,7 @@ export function ObservationTracePanel({work}:{work:string}){
   return <ResearchPanel title="观察轨迹" actions={<EvidenceLink work={work}>查看作品</EvidenceLink>}>
     <h3>{context.data.catalog?.find(item=>item.publicRef===work)?.title??'作品标题未取得'}</h3>
     <div className={styles.toolbar}><MetricPicker value={metric} onChange={value=>context.patch({inspect_metric:value})}/>{read.data&&<Cutoff value={read.data.knowledgeCutoff}/>}</div>
-    <p className={styles.meta}>同一作品在不同时间、不同入口的真实观察。勾选两次，核对当时实际取得的值。</p>
+    <p className={styles.meta}>勾选两次观察进行对照。</p>
     <ReadFeedback read={read}/>{message&&<p role="status" className={styles.notice}>{message}</p>}
     {read.data&&<div className={styles.tableScroll} tabIndex={0} aria-label="作品观察记录，可横向滚动"><table className={styles.table}>
       <colgroup><col style={{width:'6%'}}/><col style={{width:'22%'}}/><col style={{width:'28%'}}/><col style={{width:'16%'}}/><col style={{width:'14%'}}/><col style={{width:'14%'}}/></colgroup>
@@ -54,6 +54,6 @@ export function ObservationTracePanel({work}:{work:string}){
       <p><span className={styles.meta}>{moment(compared.data.left.observedAt)} → {moment(compared.data.right.observedAt)}</span><br/>{metricLabels[metric]} {metricValue(compared.data.left.metrics[metric])} → {metricValue(compared.data.right.metrics[metric])}</p>
       <Delta value={compared.data.metrics[metric]}/>
     </div>}
-    <p className={styles.meta}>采样位置仅属于对应入口与轮次，不连成跨入口排名趋势。重新读取已有详情，不增加作品数或已取详情篇数。</p>
+    <p className={styles.meta}>采样位置只适用于对应入口和轮次。</p>
   </ResearchPanel>;
 }
