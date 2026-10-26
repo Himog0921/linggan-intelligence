@@ -1,9 +1,9 @@
-import { Link } from 'react-router';
+import { useNavigate } from 'react-router';
+import { ActionButton } from '../../../shared/ActionButton';
 import type { Drawer } from './api';
 import { listHref, returnFields, type Commands } from './useWorkspace';
-import { TargetMaintenance } from './TargetOverview';
 import { Section } from './TargetSection';
-import { patrolLabels, rankings } from './targetLabels';
+import { rankings } from './targetLabels';
 export function Patrol({
   data,
   params,
@@ -13,50 +13,14 @@ export function Patrol({
   params: URLSearchParams;
   commands: Commands;
 }) {
-  const i = data.inspector,
-    rules = data.rules,
+  const navigate=useNavigate();
+  const rules = data.rules,
     t = data.target;
   return (
     <>
-      <details><summary>资料维护</summary><TargetMaintenance data={data} params={params} commands={commands}/></details>
-      {i ? (
-        <Section title="巡查变化" note="最近记录" className="c-dw-patrol">
-          <ol className="c-dw-timeline">
-            <li>
-              <time>{i.next ?? (i.patrol === 'disabled' ? '未开启' : '待排定')}</time>
-              <div>
-                <b>下次巡查</b>
-                <p>{patrolLabels[i.patrol] ?? i.patrol}</p>
-              </div>
-            </li>
-            <li>
-              <time>{i.last ?? '尚未取得成功结果'}</time>
-              <div>
-                <b>最近一次成功巡查</b>
-                <p>
-                  命中 {i.hits ?? '尚未取得'} · 本目标首次发现 {i.latestNew ?? '尚未取得'}
-                </p>
-              </div>
-            </li>
-          </ol>
-          <p className="c-dw-note">
-            历史作品与变化见「最近观察」。
-          </p>
-          <Link className="c-btn-secondary" to={listHref(params, { rule: t.targetRef })}>
-            管理巡查
-          </Link>
-        </Section>
-      ) : (
-        <Section title="巡查变化" note="读取暂不可用">
-          <div className="life-state">
-            <b>当前读不到巡查状态</b>
-            <p>未知不表示没有巡查结果，也不表示规则正常。</p>
-          </div>
-        </Section>
-      )}
       <Section
-        title="巡检规则"
-        note={rules === null ? '读取暂不可用' : rules.length ? `${rules.length} 条` : '还没有'}
+        title="巡查规则"
+        note={rules === null ? '读取暂不可用' : rules.length ? `${rules.length} 条` : '未设置'}
       >
         {rules === null ? (
           <p className="c-dw-note">规则暂不可读。</p>
@@ -106,12 +70,7 @@ export function Patrol({
                           <td>{r.next ?? '未排定'}</td>
                           <td>{r.last ?? '尚未成功巡查'}</td>
                           <td className="c-dw-rule-actions">
-                            <Link
-                              className="c-btn-quiet"
-                              to={listHref(params, { rule: t.targetRef, rule_slot: r.slot })}
-                            >
-                              编辑
-                            </Link>
+                            <ActionButton variant="quiet" onClick={()=>navigate(listHref(params,{rule:t.targetRef,rule_slot:r.slot}))}>编辑</ActionButton>
                             <form
                               onSubmit={(e) => {
                                 e.preventDefault();
@@ -127,9 +86,9 @@ export function Patrol({
                                 });
                               }}
                             >
-                              <button className="c-btn-quiet" disabled={commands.busy}>
+                              <ActionButton type="submit" variant="quiet" disabled={commands.busy}>
                                 {r.enabled ? '暂停' : '启用'}
-                              </button>
+                              </ActionButton>
                             </form>
                             {rules.length > 1 && (
                               <form
@@ -144,9 +103,9 @@ export function Patrol({
                                   });
                                 }}
                               >
-                                <button className="c-btn-quiet" disabled={commands.busy}>
+                                <ActionButton type="submit" variant="quiet" disabled={commands.busy}>
                                   停用
-                                </button>
+                                </ActionButton>
                               </form>
                             )}
                           </td>
@@ -155,22 +114,15 @@ export function Patrol({
                     </tbody>
                   </table>
                 </div>
-                <p className="c-dw-note">
-                  暂停和停用只影响后续排期，历史材料保留。
-                </p>
+
               </>
             ) : (
               <p className="c-dw-note">
-                这个目标还没有巡检规则。建档是一次性的历史挖掘，巡检是此后每周看新增——两件事，需要各自的口径。
+                尚未设置巡查规则
               </p>
             )}
             {t.kind === 'keyword' && (
-              <Link
-                className="c-btn-secondary"
-                to={listHref(params, { rule: t.targetRef, rule_slot: 'new' })}
-              >
-                加一条规则
-              </Link>
+              <ActionButton onClick={()=>navigate(listHref(params,{rule:t.targetRef,rule_slot:'new'}))}>添加规则</ActionButton>
             )}
           </>
         )}

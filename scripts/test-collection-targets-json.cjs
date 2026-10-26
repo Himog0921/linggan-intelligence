@@ -83,7 +83,7 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     const populated={target:inspectionTarget,base,round,works:result.body.works};
     assert(populated, 'V4 browser proof requires a real accepted round with at least two works');
     await goto({ domain: inspectionDomain, drawer: populated.target.targetRef });
-    await page.getByRole('heading',{name:'最近一次已取得观察',exact:true}).waitFor();
+    await page.getByRole('heading',{name:'观察结果',exact:true}).waitFor();
     await page.getByRole('combobox',{name:'选择观察轮次',exact:true}).waitFor();
     assert.equal(await page.getByRole('link',{name:'最近观察',exact:true}).getAttribute('aria-current'),'page');
     await page.getByRole('combobox',{name:'选择观察轮次',exact:true}).click();
@@ -182,16 +182,17 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     await openRule(creator.targetRef, 'new');
     await page.locator('[name=automatic_enabled]').uncheck();
     await page.locator('[name=creator_follow_details]').uncheck();
-    await page.locator('#fixed_interval_seconds').selectOption('21600');
+    await page.getByRole('combobox',{name:'观察间隔',exact:true}).click();
+    await page.getByRole('listbox',{name:'观察间隔',exact:true}).getByRole('option',{name:'6 小时',exact:true}).click();
     await mutate('rules', () => page.getByRole('button', { name: '保存新版本', exact: true }).click());
     const disabledCreatorRule = (await get(`/api/collection/workspace/target/${creator.targetRef}/rules`)).body.form;
     assert.equal(disabledCreatorRule.automatic_enabled, false);
     assert.equal(disabledCreatorRule.creator_follow_details, false);
     await openRule(creator.targetRef);
-    await mutate('rules', () => page.getByRole('button', { name: '恢复自动调度', exact: true }).click());
+    await mutate('rules', () => page.getByRole('button', { name: '恢复自动巡查', exact: true }).click());
     assert.equal((await get(`/api/collection/workspace/target/${creator.targetRef}/rules`)).body.form.automatic_enabled, true);
     await openRule(creator.targetRef);
-    await mutate('rules', () => page.getByRole('button', { name: '暂停未来自动调度', exact: true }).click());
+    await mutate('rules', () => page.getByRole('button', { name: '暂停自动巡查', exact: true }).click());
     assert.equal((await get(`/api/collection/workspace/target/${creator.targetRef}/rules`)).body.form.automatic_enabled, false);
     reports.push('creator rule UI saves a fixed cadence, resumes and pauses with real version receipts');
 
@@ -200,8 +201,10 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     const qualified = await get(`/api/collection/workspace/target/${qualifiedRef}?domain=${qualifiedDomain}`);
     assert.equal(qualified.body.target.kind, 'keyword'); assert.equal(qualified.body.target.archiveLabel, '档案已建立', 'accepted search baseline and every discovered detail must qualify');
     await openRule(qualifiedRef, 'new', qualifiedDomain);
-    await page.locator('.c-rule-form select[name=ranking_key]').selectOption('most_liked');
-    await page.locator('#fixed_interval_seconds').selectOption('21600');
+    await page.getByRole('combobox',{name:'排序依据',exact:true}).click();
+    await page.getByRole('listbox',{name:'排序依据',exact:true}).getByRole('option',{name:'最多点赞',exact:true}).click();
+    await page.getByRole('combobox',{name:'观察间隔',exact:true}).click();
+    await page.getByRole('listbox',{name:'观察间隔',exact:true}).getByRole('option',{name:'6 小时',exact:true}).click();
     await mutate('rules', () => page.getByRole('button', { name: '保存新版本', exact: true }).click());
     let panel = await get(`/api/collection/workspace/target/${qualifiedRef}/rules`);
     assert.equal(panel.body.form.expected_revision, 1); assert.equal(panel.body.form.ranking_key, 'most_liked');
@@ -210,7 +213,8 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
 
     // Add a second independent ranking, then retire it from the real per-rule table.
     await openRule(qualifiedRef, 'new', qualifiedDomain);
-    await page.locator('.c-rule-form select[name=ranking_key]').selectOption('latest');
+    await page.getByRole('combobox',{name:'排序依据',exact:true}).click();
+    await page.getByRole('listbox',{name:'排序依据',exact:true}).getByRole('option',{name:'最新',exact:true}).click();
     await mutate('rules', () => page.getByRole('button', { name: '保存新版本', exact: true }).click());
     let detail = await get(`/api/collection/workspace/target/${qualifiedRef}?domain=${qualifiedDomain}`);
     assert.equal(detail.body.rules.length, 2);

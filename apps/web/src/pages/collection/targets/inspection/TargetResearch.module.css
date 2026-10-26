@@ -85,18 +85,12 @@
 .conditions summary{cursor:pointer}
 .conditions dl{display:grid;grid-template-columns:auto 1fr;gap:var(--lgi-space-2) var(--lgi-space-4)}
 .conditions dt,.conditions dd{margin:0;overflow-wrap:anywhere}
-.overviewHeading{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--lgi-space-4);margin-bottom:var(--lgi-space-4)}
-.overviewHeading h2{margin:0;font:var(--lgi-type-object-weight) var(--lgi-type-object-size)/var(--lgi-type-object-leading) var(--lgi-font-ui)}
-.overviewHeading p{margin:var(--lgi-space-2) 0 0;color:var(--lgi-muted)}
-.maintenance{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);flex-wrap:wrap;border-block:var(--lgi-action-border-width) solid var(--lgi-hairline);padding-block:var(--lgi-space-3);margin-top:var(--lgi-space-6)}
-.maintenance p{margin:0;color:var(--lgi-muted);font-size:var(--lgi-type-label-size)}
-.maintenance b{color:var(--lgi-ink);font-family:var(--lgi-font-data)}
 .check{accent-color:var(--lgi-ink);width:var(--lgi-space-4);height:var(--lgi-space-4);vertical-align:middle;margin:0;cursor:pointer}
 .pickCell{width:var(--lgi-space-10);text-align:center}
 .diffRow{display:grid;grid-template-columns:var(--lgi-space-24) minmax(0,1fr) minmax(0,1fr);gap:var(--lgi-space-4);padding-block:var(--lgi-space-4);border-top:var(--lgi-action-border-width) solid var(--lgi-hairline)}
 .diffRow p{margin:0;line-height:var(--lgi-lh-body)}
 .citation{color:var(--lgi-signal-ink);font-size:var(--lgi-type-aux-size)}
-@media(max-width:760px){.drawer{width:100vw}.drawer :global(.c-dw-title-row){flex-wrap:wrap}.drawer :global(.c-dw-actions){width:100%;flex-direction:row;flex-wrap:wrap;justify-content:flex-end}.drawer :global(.c-dw-body){padding:var(--lgi-space-4)}.drawer :global(.life-performance-grid){grid-template-columns:1fr}.drawer :global(.life-review){grid-template-columns:repeat(2,minmax(0,1fr))}.modes{margin-left:0}.toolbar label{flex:1 1 100%;max-width:100%}.selectedNames{display:none}.overviewHeading{flex-direction:column}.diffRow{grid-template-columns:1fr}.cutoff{margin-left:0;width:100%}}
+@media(max-width:760px){.drawer{width:100vw}.drawer :global(.c-dw-title-row){flex-wrap:wrap}.drawer :global(.c-dw-actions){width:100%;flex-direction:row;flex-wrap:wrap;justify-content:flex-end}.drawer :global(.c-dw-body){padding:var(--lgi-space-4)}.drawer :global(.life-performance-grid){grid-template-columns:1fr}.drawer :global(.life-review){grid-template-columns:repeat(2,minmax(0,1fr))}.modes{margin-left:0}.toolbar label{flex:1 1 100%;max-width:100%}.selectedNames{display:none}.diffRow{grid-template-columns:1fr}.cutoff{margin-left:0;width:100%}}
 
 
 .contentResearch{border-top:var(--lgi-action-rail-width) solid var(--lgi-ink);padding-block:var(--lgi-space-5);margin-top:var(--lgi-space-5)}
@@ -165,3 +159,14 @@
 .drawer :global(.c-dw-view-tab){border:0;padding-inline:0;min-height:var(--lgi-action-height);background:transparent;transform:none}
 .drawer :global(.c-dw-view-tab[aria-current="page"]),.drawer :global(.c-dw-view-tab[aria-current="page"]:hover){background:transparent;color:var(--lgi-ink);font-weight:var(--lgi-weight-semibold)}
 .drawer :global(.c-dw-view-tab[aria-current="page"]::after){display:block;height:calc(var(--lgi-space-1) - var(--lgi-action-border-width));background:var(--lgi-signal)}
+
+.drawer .inspectorActions{flex-direction:row;flex-wrap:wrap;align-items:center;justify-content:flex-end;max-width:100%;gap:var(--lgi-space-2)}
+.drawer :global(.c-dw-identity){min-width:0;flex:1}
+.sourceAction{text-decoration:none;white-space:nowrap}
+.sourceAction>span{display:inline-flex;align-items:center;gap:var(--lgi-space-2)}
+.observationStatus{display:flex;align-items:center;flex-wrap:wrap;gap:var(--lgi-space-3);color:var(--lgi-muted);font-size:var(--lgi-type-label-size);margin-bottom:var(--lgi-space-4)}
+.observationStatus>span,.observationStatus summary{background:var(--lgi-canvas-sunken);padding:var(--lgi-space-1) var(--lgi-space-2)}
+.observationStatus summary{cursor:pointer}
+.observationStatus p{margin:var(--lgi-space-2) 0 0}
+.recentEmpty{margin:0;padding:var(--lgi-space-4) 0;color:var(--lgi-muted);font-size:var(--lgi-type-body-size)}
+@media(max-width:760px){.drawer .inspectorActions{justify-content:flex-start}.drawer :global(.c-dw-title-row){gap:var(--lgi-space-3)}}

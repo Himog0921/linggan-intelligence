@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router';
 import { AssignDomain } from './TargetAssignment';
@@ -15,7 +15,7 @@ import type { Lifecycle } from './api';
 import { Toolbar } from './TargetToolbar';
 import { Modal } from './TargetModals';
 import { RuleModal } from './TargetModals';
-import { TargetMaintenance as Overview } from './TargetOverview';
+import { Patrol } from './TargetPatrol';
 import { decodeDrawer } from './api';
 import type { TargetList } from './api';
 import type { Commands } from './useWorkspace';
@@ -49,20 +49,16 @@ describe('领域分配的独立目标与资格', () => {
   });
 });
 describe('监控规则原回执与失败语义', () => {
-  it('展示中文结果、已应用版本与原回执编号', () => {
-    render(<RuleReceipt receipt={{ receiptRef: targetRef, outcome: 'applied', reason: 'rule_saved', expectedRevision: 0,
-      recordedAt: '2026-01-01 09:00', appliedRuleRevisionRef: domainRef }} />);
-    expect(screen.getByText('命令已应用')).toBeInTheDocument();
-    expect(screen.getByText('规则已保存。没有据此声称采集已开始或完成。')).toBeInTheDocument();
-    expect(screen.getByText('规则 00000000')).toBeInTheDocument();
-    expect(screen.getByText(targetRef)).toBeInTheDocument();
-    expect(screen.getByText('命令已应用').closest('section')).toHaveClass('c-rule-feedback-ok');
+  it.each(['applied','replay'])('历史成功回执不占用规则表单：%s',outcome=>{
+    const {container}=render(<RuleReceipt receipt={{receiptRef:targetRef,outcome,reason:'rule_saved',expectedRevision:0,recordedAt:'2026-01-01 09:00',appliedRuleRevisionRef:domainRef}}/>);
+    expect(container).toBeEmptyDOMElement();
   });
   it('过期不误报成功并明确保留草稿和当前版本', () => {
     render(<><RuleReceipt receipt={{ receiptRef: targetRef, outcome: 'stale_revision', reason: 'stale_revision', expectedRevision: 1,
       recordedAt: '2026-01-01 09:00', appliedRuleRevisionRef: null }} /><RuleErrors code="stale_revision" /></>);
     expect(screen.getByText('规则版本已经变化').closest('section')).toHaveClass('c-rule-feedback-warn');
-    expect(screen.getByText('未产生规则版本')).toBeInTheDocument();
+    expect(screen.queryByText(targetRef)).not.toBeInTheDocument();
+    expect(screen.queryByText('未产生规则版本')).not.toBeInTheDocument();
     expect(screen.getByRole('alert')).toHaveTextContent('下面保留了你提交的值，没有覆盖当前版本');
   });
   it('规则读取失败沿用紧凑失败面板，未知不提供保存', async () => {
@@ -75,8 +71,8 @@ describe('监控规则原回执与失败语义', () => {
     expect(screen.queryByRole('button', { name: '保存新版本' })).not.toBeInTheDocument();
   });
 });
-describe('巡查资料维护的目标种类边界', () => {
-  it.each(['creator', 'keyword'])('材料失效判断只属于 creator 资料维护：%s', kind => {
+describe('巡查页只保留规则', () => {
+  it.each(['creator', 'keyword'])('对象状态与维护不在巡查页重复展开：%s', kind => {
     const known = { state: 'known', value: 1 };
     const data = decodeDrawer({ target: {
       targetRef, kind, platform: 'xhs', identity: 'synthetic-target', handle: 'synthetic-target', name: '合成目标',
@@ -90,9 +86,11 @@ describe('巡查资料维护的目标种类边界', () => {
       contentGapAction: null, decision: { title: '需要建立档案', note: '合成说明', action: null },
       blocked: [{ publicRef: domainRef, externalId: 'synthetic-content', title: '合成作品' }], catalog: [], rules: [], lifecycle: { state: 'not_read' },
     });
-    const { container } = render(<MemoryRouter><Overview data={data} params={new URLSearchParams()} commands={commands()} /></MemoryRouter>);
-    expect(Boolean(screen.queryByRole('button', { name: '确认这些作品已失效' }))).toBe(kind === 'creator');
-    expect(container.querySelector('#archive-problems')).not.toBeNull();
+    const { container } = render(<MemoryRouter><Patrol data={data} params={new URLSearchParams()} commands={commands()} /></MemoryRouter>);
+    expect(screen.queryByText('资料维护')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button',{name:'确认这些作品已失效'})).not.toBeInTheDocument();
+    expect(screen.getByText('巡查规则')).toBeInTheDocument();
+    expect(container.querySelector('#archive-problems')).toBeNull();
   });
 });
 
@@ -111,14 +109,15 @@ describe('规则拒绝后的表单生命周期', () => {
       } }) : answer(panel));
     const actions = commands(), params = new URLSearchParams(`rule=${targetRef}`);
     const { rerender } = render(<MemoryRouter><RuleModal targetRef={targetRef} params={params} commands={actions} revision={0} /></MemoryRouter>);
-    const input = await screen.findByLabelText('观察间隔（仅可选择下列 5 档）');
-    fireEvent.change(input, { target: { value: '21600' } });
+    const input=await screen.findByRole('combobox',{name:'观察间隔'});
+    fireEvent.click(input);
+    fireEvent.click(within(screen.getByRole('listbox',{name:'观察间隔'})).getByRole('option',{name:'6 小时'}));
     const rejected = { ...actions, feedback: { requestRef: domainRef, action: 'rules', code: 'monitor_rule_command_stale',
       text: '拒绝', applied: false, unknown: false,
       location: `/collection/targets?rule=${targetRef}&rule_receipt=${domainRef}&error=monitor_rule_command_stale` } };
     rerender(<MemoryRouter><RuleModal targetRef={targetRef} params={params} commands={rejected} revision={0} /></MemoryRouter>);
     await screen.findByText('规则版本已经变化');
-    expect(screen.getByLabelText('观察间隔（仅可选择下列 5 档）')).toHaveValue('21600');
+    expect(screen.getByRole('combobox',{name:'观察间隔'})).toHaveTextContent('6 小时');
     expect(screen.getByRole('alert')).toHaveTextContent('下面保留了你提交的值');
     expect(actions.run).not.toHaveBeenCalled();
   });
@@ -226,4 +225,35 @@ it.each([['OTHER_LANES_NOT_EVALUATED',null],['SOURCE_INCOMPLETE','来源信息�
   const item:Snapshot={workRef:resource.ref,status:'available',resource,metrics:{likes:unknown,comments:unknown,collects:unknown,shares:unknown},publishedEpochMs:null,reasons:[]};
   render(<WorkIntroduction item={item}/>);expect(screen.queryByText(code)).not.toBeInTheDocument();
   if(copy)expect(screen.getByText(copy)).toBeVisible();else expect(screen.queryByText('其他材料通道尚未评估')).not.toBeInTheDocument();
+});
+
+describe('规则表单统一控件与真实字段',()=>{
+  it.each(['creator','keyword'])('%s 共享下拉保留保存字段，Esc不关闭弹窗，所有操作使用C09',async kind=>{
+    const panel={targetRef,name:'合成规则目标',kind,lifecycle:'paused',slot:kind==='creator'?'primary':'new',rankings:['latest','most_liked'],
+      form:{expected_revision:kind==='creator'?1:0,idempotency_key:domainRef,automatic_enabled:false,creator_follow_details:false,
+        fixed_interval_seconds:'86400',surface_key:kind==='creator'?'creator_profile':'keyword_search',ranking_key:kind==='creator'?'':'latest',
+        scroll_rounds:'3',top_by_likes:'20',published_within_days:'',task_contract_version:'v2'},receipt:null};
+    vi.spyOn(globalThis,'fetch').mockResolvedValue(answer(panel));const actions=commands();
+    render(<MemoryRouter><RuleModal targetRef={targetRef} params={new URLSearchParams('rule='+targetRef)} commands={actions} revision={0}/></MemoryRouter>);
+    const interval=await screen.findByRole('combobox',{name:'观察间隔'});
+    fireEvent.click(interval);expect(screen.getAllByRole('option')).toHaveLength(5);
+    fireEvent.keyDown(interval,{key:'Escape'});expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    fireEvent.click(interval);fireEvent.click(screen.getByRole('option',{name:'6 小时'}));
+    if(kind==='keyword'){
+      fireEvent.click(screen.getByRole('combobox',{name:'排序依据'}));fireEvent.click(screen.getByRole('option',{name:'最多点赞'}));
+      fireEvent.click(screen.getByRole('combobox',{name:'发布时间'}));fireEvent.click(screen.getByRole('option',{name:'一周内'}));
+    }
+    for(const name of ['关闭监控规则','立即采一次','保存新版本',...(kind==='creator'?['恢复自动巡查']:[])])
+      expect(screen.getByRole('button',{name})).toHaveAttribute('data-lids-component','C09');
+    fireEvent.click(screen.getByRole('button',{name:'保存新版本'}));
+    expect(actions.run).toHaveBeenCalledWith('rules',expect.objectContaining({command_kind:'save_rule',fixed_interval_seconds:'21600',
+      expected_revision:kind==='creator'?1:0,idempotency_key:domainRef,ranking_key:kind==='creator'?'':'most_liked',published_within_days:kind==='creator'?'':'7'}));
+  });
+});
+
+it.each([['baseline_not_ready','关键词建档尚未完成'],['stale_revision','页面基于旧版本提交']])('失败重放保留失败语义：%s',(reason,message)=>{
+  render(<RuleReceipt receipt={{receiptRef:targetRef,outcome:'replay',reason,expectedRevision:1,recordedAt:'2026-01-01',appliedRuleRevisionRef:null}}/>);
+  expect(screen.getByText(new RegExp(message))).toBeInTheDocument();
+  expect(screen.queryByText('命令已应用')).not.toBeInTheDocument();
 });

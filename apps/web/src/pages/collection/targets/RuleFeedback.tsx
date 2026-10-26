@@ -2,18 +2,8 @@ import type { ReactNode } from 'react';
 import type { RulePanel } from './api';
 
 function receiptMeaning(outcome: string, reason: string) {
-  if (outcome === 'replay') return '相同命令已处理过；这里显示的是耐久重放结果。';
-  if (outcome === 'stale_revision') return '页面基于旧版本提交，没有覆盖当前规则。请核对当前值后重试。';
-  if (outcome === 'identity_conflict') return '同一命令标识携带了不同内容，没有覆盖原命令。';
-  const applied: Record<string, string> = {
-    rule_saved: '规则已保存。没有据此声称采集已开始或完成。',
-    monitor_paused: '未来自动调度已暂停；人工观察仍可申请。',
-    monitor_resumed: '自动调度已恢复；尚未据此声称已经派出任务。',
-    monitor_stopped: '目标已停止新增工作，既有历史仍保留。',
-    manual_observe_created: '人工观察工单已入队，尚未被插件认领；这不是执行或采集回执。',
-    manual_observe_reused: '已有工作覆盖这次人工观察，没有重复创建。',
-  };
-  if (outcome === 'applied' && applied[reason]) return applied[reason];
+  if (outcome === 'stale_revision'||reason==='stale_revision') return '页面基于旧版本提交，没有覆盖当前规则。请核对当前值后重试。';
+  if (outcome === 'identity_conflict'||reason==='identity_conflict') return '同一命令标识携带了不同内容，没有覆盖原命令。';
   const rejected: Record<string, string> = {
     baseline_not_ready: '关键词建档尚未完成：先完成搜索面和待补详情，再保存或恢复巡查规则。',
     invalid_interval: '观察间隔只支持 6 小时、12 小时、24 小时、2 天或 7 天。',
@@ -23,19 +13,14 @@ function receiptMeaning(outcome: string, reason: string) {
   return rejected[reason] ?? '命令没有改变当前规则，也没有创建采集事实。';
 }
 export function RuleReceipt({ receipt }: { receipt: RulePanel['receipt'] }) {
-  if (!receipt) return null;
+  if (!receipt||receipt.outcome==='applied'||(receipt.outcome==='replay'&&['rule_saved','monitor_paused','monitor_resumed','monitor_stopped','manual_observe_created','manual_observe_reused'].includes(receipt.reason))) return null;
+  const outcome=receipt.outcome==='replay'?receipt.reason:receipt.outcome;
   const [tone, title] = ({
-    applied: ['ok', '命令已应用'], replay: ['info', '已返回原命令结果'],
     stale_revision: ['warn', '规则版本已经变化'], identity_conflict: ['bad', '命令标识发生冲突'],
-  } as Record<string, [string, string]>)[receipt.outcome] ?? ['bad', '命令未应用'];
+  } as Record<string, [string, string]>)[outcome] ?? ['bad', '命令未应用'];
   return <section className={`c-rule-feedback c-rule-feedback-${tone}`} data-outcome={receipt.outcome}>
-    <div><b>{title}</b><span>{receipt.reason}</span></div>
+    <div><b>{title}</b></div>
     <p>{receiptMeaning(receipt.outcome, receipt.reason)}</p>
-    <dl>
-      <div><dt>回执</dt><dd>{receipt.receiptRef}</dd></div>
-      <div><dt>记录时间</dt><dd>{receipt.recordedAt}</dd></div>
-      <div><dt>结果</dt><dd>{receipt.appliedRuleRevisionRef ? `规则 ${receipt.appliedRuleRevisionRef.slice(0, 8)}` : '未产生规则版本'}</dd></div>
-    </dl>
   </section>;
 }
 export function RuleErrors({ code }: { code: string | null }) {

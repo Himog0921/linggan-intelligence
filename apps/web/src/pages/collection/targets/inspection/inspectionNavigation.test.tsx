@@ -58,7 +58,7 @@ function installReads(paged=false,kind='keyword',equalTime=false,recent=false,ca
     if(u.pathname.endsWith('/round-comparison')){
       const left=availableRounds.find(o=>o.roundRef===u.searchParams.get('left')),right=availableRounds.find(o=>o.roundRef===u.searchParams.get('right'));
       if(!left||!right||left.observedEpochMs>right.observedEpochMs)return answer({code:'left_round_must_not_be_newer'},400);
-      return answer({targetRef:target,knowledgeCutoff:cutoff,methodVersion:'v1',left,right,comparisonState:recent?'limited':'comparable',reasons:recent?['right_round_incomplete']:[],rows:recent?[19,0,null].map((delta,index)=>({workRef:id(50+index),membership:'common',discoveryLabel:'repeat',
+      return answer({targetRef:target,knowledgeCutoff:cutoff,methodVersion:'v1',left,right,comparisonState:recent&&roundVariant!=='mixed'?'limited':'comparable',reasons:recent&&roundVariant!=='mixed'?['right_round_incomplete']:[],rows:recent?(roundVariant==='mixed'?[0,0,null]:[19,0,null]).map((delta,index)=>({workRef:id(50+index),membership:'common',discoveryLabel:'repeat',
         left:{workRef:id(50+index),title:`变化作品${index}`,creator:null,position:1,metrics:observations[1]!.metrics,firstSeenInScope:false,libraryPresence:'existing',seenBeforeLeft:true},
         right:{workRef:id(50+index),title:`变化作品${index}`,creator:null,position:1,metrics:observations[0]!.metrics,firstSeenInScope:false,libraryPresence:'existing',seenBeforeLeft:true},
         metrics:Object.fromEntries(['likes','comments','collects','shares'].map(key=>[key,{left:observations[1]!.metrics.likes,right:observations[0]!.metrics.likes,delta,elapsedSeconds:86400,percent:null,comparable:delta!==null,reason:delta===null?'metric_not_observed':null}]))})):[],
@@ -68,7 +68,7 @@ function installReads(paged=false,kind='keyword',equalTime=false,recent=false,ca
     if(current){
       await new Promise(resolve=>setTimeout(resolve,15));
       return answer({targetRef:target,knowledgeCutoff:cutoff,methodVersion:'v1',round:current,
-        works:[{workRef:work,title:'合成作品',creator:null,position:1,metrics:observations[0]!.metrics,firstSeenInScope:recent,libraryPresence:roundVariant==='unknown'?'unknown':'existing',seenBeforeLeft:true}],truncated:false});
+        works:[{workRef:work,title:'合成作品',creator:null,position:1,metrics:observations[0]!.metrics,firstSeenInScope:recent&&roundVariant!=='mixed',libraryPresence:roundVariant==='unknown'?'unknown':'existing',seenBeforeLeft:true}],truncated:roundVariant==='mixed'});
     }
     throw new Error('Unexpected read: '+u.pathname);
   });
@@ -163,7 +163,9 @@ it.each(['creator','keyword'])('默认首屏读取%s真实轮次，展示首次�
   installReads(false,kind,false,true);mount({dtab:'overview'});
   expect(await screen.findByRole('link',{name:'最近观察'})).toHaveAttribute('aria-current','page');
   expect(await screen.findByText('+19')).toBeInTheDocument();
-  expect(screen.getByText('本轮只取得部分结果。')).toBeInTheDocument();
+  expect(screen.getByText('比较受限')).toBeInTheDocument();
+  fireEvent.click(screen.getByText('比较受限'));
+  expect(screen.getByText('本轮只取得部分结果')).toBeInTheDocument();
   expect(await screen.findByRole('button',{name:'合成作品'})).toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'变化作品1'})).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'变化作品2'})).not.toBeInTheDocument();
@@ -178,7 +180,7 @@ it('最近观察进入本轮明细与轨迹后返回原首屏，Esc先关闭共�
   await waitFor(()=>expect(screen.getByRole('button',{name:'合成作品'})).toHaveFocus());
   fireEvent.click(screen.getByRole('combobox',{name:'选择观察轮次'}));
   fireEvent.keyDown(screen.getByRole('combobox',{name:'选择观察轮次'}),{key:'Escape'});
-  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();expect(screen.getByRole('link',{name:'关闭'})).toBeInTheDocument();
+  expect(screen.queryByRole('listbox')).not.toBeInTheDocument();expect(screen.getByRole('button',{name:'关闭'})).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'本轮作品'}));
   expect(await screen.findByRole('heading',{name:'历史轮次'})).toBeInTheDocument();
   expect(await screen.findByRole('button',{name:'合成作品'})).toBeInTheDocument();
@@ -211,20 +213,41 @@ it('作品分页与筛选保留跨页选择，不重新读取目标，巡查隐�
   expect(screen.queryByRole('checkbox',{name:'将合成作品加入对照'})).not.toBeInTheDocument();
   expect(requests.filter(u=>!u.pathname.includes('/inspection/'))).toHaveLength(1);
   fireEvent.click(screen.getByRole('link',{name:'巡查'}));
-  await screen.findByText('巡检规则');expect(screen.queryByLabelText('作品对照选择')).not.toBeInTheDocument();
+  await screen.findByText('巡查规则');expect(screen.queryByLabelText('作品对照选择')).not.toBeInTheDocument();
 });
 
 it('历史规则与入库先后未知时只说本目标首次发现，不自动比较未知规则',async()=>{
   installReads(false,'creator',false,true,1,'unknown');mount({dtab:'overview'});
   await screen.findByRole('button',{name:'合成作品'});
   expect(screen.getByRole('heading',{name:'本目标首次发现'})).toBeInTheDocument();
-  expect(screen.getByText(/入库先后未确认/)).toBeInTheDocument();
+  expect(screen.getByText(/入库待核对/)).toBeInTheDocument();
   expect(screen.queryByText(/库内已有/)).not.toBeInTheDocument();
   expect(requests.filter(u=>u.pathname.endsWith('/round-comparison'))).toHaveLength(0);
 });
 it.each(['overview','works'])('轮次分页%s选择新页首轮，不把旧本轮和跨页远轮比较',async dtab=>{
   installReads(false,'keyword',false,true,1,'paged');mount({dtab,inspect_round_view:'compare'});
-  await screen.findByText('共同命中');fireEvent.click(screen.getByRole('button',{name:'更早轮次'}));
+  await screen.findByText(dtab==='overview'?'共同':'共同命中');fireEvent.click(screen.getByRole('button',{name:'更早轮次'}));
   await waitFor(()=>expect(screen.getByLabelText('导航状态')).toHaveTextContent('inspect_right_round='+id(31)));
   expect(requests.filter(u=>u.pathname.endsWith('/round-comparison')).some(u=>u.searchParams.get('right')===id(33)&&u.searchParams.get('left')===id(31))).toBe(false);
+});
+
+it.each(['creator','keyword'])('检查器%s常用操作直接可达，管理巡查突出且导航不发送命令',async kind=>{
+  installReads(false,kind,false,true);mount({dtab:'overview'});
+  const manage=await screen.findByRole('button',{name:'管理巡查'});
+  expect(manage).toHaveAttribute('data-variant','primary');
+  for(const name of ['管理巡查','立即采一次','关闭'])expect(screen.getByRole('button',{name})).toHaveAttribute('data-lids-component','C09');
+  expect(screen.queryByRole('button',{name:'更多'})).not.toBeInTheDocument();
+  if(kind==='creator')expect(screen.getByRole('link',{name:'打开小红书'})).toHaveAttribute('rel','noreferrer');
+  fireEvent.click(manage);
+  expect(screen.getByLabelText('导航状态')).toHaveTextContent('rule='+target);
+  expect(commands.run).not.toHaveBeenCalled();
+});
+
+it('零差值与未知指标并存时限定可比记录，截断名单不概括整轮',async()=>{
+  installReads(false,'creator',false,true,1,'mixed');mount({dtab:'overview'});
+  expect(await screen.findByText('可比记录未见变化')).toBeInTheDocument();
+  expect(await screen.findByText('当前名单无新发现')).toBeInTheDocument();
+  expect(screen.getByText('名单未完整取得')).toBeInTheDocument();
+  expect(screen.queryByText('本轮未见变化')).not.toBeInTheDocument();
+  expect(commands.run).not.toHaveBeenCalled();
 });
