@@ -128,7 +128,7 @@ it('作者、发布时间原始表达和精度、观察时间及四类互动按�
 it('平台毫秒时间优先显示已核实的日期时间，原始数值留在来源诊断', async () => {
   kit.route('GET', path, ok(dossierJson(1)));
   kit.route('GET', `${path}/metadata`, ok({ metadata: { author: null, interaction: null, publication: { publishedAt: '2026-10-09 00:35', localDate: '2026-10-09', sourceText: '1791477313000', sourceKind: 'platform_epoch', precision: 'millisecond', observedAt: null, referenceObservedAt: null } } }));
-  const { user } = mount(); await screen.findByRole('heading', { name: '研究底稿', exact: true });
+  const { user } = mount(); await screen.findByRole('heading', { name: '研究底稿' });
   await user.click(screen.getByText('作者、时间与互动', { exact: true }));
   expect(await screen.findByText('发布时间：2026-10-09 00:35 · 精度：毫秒')).toBeVisible();
   expect(screen.queryByText('发布时间：1791477313000 · 精度：未知')).not.toBeInTheDocument();
