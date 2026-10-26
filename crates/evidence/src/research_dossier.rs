@@ -9,15 +9,18 @@ use uuid::Uuid;
 pub mod content;
 mod coverage;
 mod duplicates;
+pub mod historical;
 mod inventory;
 pub mod native;
 mod projection;
+mod reading;
 mod relayer;
 mod render;
 mod selection;
+pub use reading::ordered_refs;
 pub use relayer::relayer_work;
 pub use render::{context_sources, markdown, render_materials};
-pub use selection::{Selection, select};
+pub use selection::{Selection, segment, select};
 
 pub const VERSION: &str = "research-dossier.v2";
 
@@ -31,6 +34,7 @@ pub struct ResearchDossier {
     pub as_of: String,
     pub note: Value,
     pub materials: Vec<Value>,
+    pub reading_view: Value,
     pub coverage: Value,
     pub attachments: Value,
     pub selection: Value,
@@ -44,6 +48,11 @@ pub struct ResearchDossier {
     pub candidate_statuses: Vec<Value>,
     #[serde(skip_serializing)]
     pub metadata: Value,
+}
+
+/// Display metadata for internal adapters; source text remains in the canonical blocks.
+pub fn reading_title(dossier: &ResearchDossier) -> Value {
+    json!({"text":dossier.note["displayTitle"],"basis":dossier.note["displayTitleBasis"],"blockRefs":dossier.note["titleBlockRefs"],"platformSource":dossier.note["titleSource"]})
 }
 
 /// A query batch is not a material limit: every requested work and every block is returned.
@@ -201,7 +210,7 @@ pub fn relayer_plan(dossier: &ResearchDossier) -> Value {
     let needs_ocr = image_slots
         .iter()
         .filter(|s| {
-            s["sourceState"] != "restricted"
+            s["sourceState"] == "present"
                 && !dossier
                     .materials
                     .iter()
@@ -215,6 +224,7 @@ pub fn relayer_plan(dossier: &ResearchDossier) -> Value {
         .count();
     json!({"workCount":1,"imageSlots":image_slots.len(),"imageJobs":layouts.len(),"layoutCount":layouts.len(),
         "pendingLayouts":pending,"pendingReviewCount":pending_review,"alreadyCurrent":current,"humanProtected":protected,"needsOcr":needs_ocr,
+        "needsAcquisition":image_slots.iter().filter(|s|s["sourceState"]=="not_acquired").count(),
         "expectedRevision":dossier.revision})
 }
 
@@ -230,8 +240,15 @@ fn same_image_source(slot: &Value, reading: &Value) -> bool {
 }
 
 pub(super) fn refresh_revision(dossier: &mut ResearchDossier) {
-    dossier.material_revision =
-        hash(&json!([VERSION, dossier.note, dossier.materials]).to_string());
+    dossier.material_revision = hash(
+        &json!([
+            VERSION,
+            dossier.note,
+            dossier.materials,
+            dossier.reading_view
+        ])
+        .to_string(),
+    );
     dossier.revision = hash(
         &json!([
             dossier.material_revision,

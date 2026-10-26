@@ -28,7 +28,9 @@ it('总页数未知时仍展示已处理页数，未知页码图片有独立编�
     materials: [dossierMaterialJson(1, { page: null }), dossierMaterialJson(2, { page: null })],
     coverage: { imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 2, processedPages: 1, missingPages: [], unknownOrder: true } },
   })));
-  mount();
+  const view = mount();
+  await screen.findByRole('heading', { name: '图片 1 · 页码未知' });
+  await view.user.click(screen.getByText('材料详情'));
   expect(await screen.findByText('已取得 2 张图片，已有读本 1 页，原作总页数未知。')).toBeVisible();
   expect(screen.getByRole('heading', { name: '图片 1 · 页码未知' })).toBeVisible();
   expect(screen.getByRole('heading', { name: '图片 2 · 页码未知' })).toBeVisible();
@@ -64,7 +66,67 @@ it('重复缺口、页码提示与连续表达者标签不挤占正文', async (
   })));
   mount();
   await screen.findByText('第一段原文');
-  expect(screen.getAllByText('表达者未确认')).toHaveLength(1);
+  expect(screen.queryByText('表达者未确认')).not.toBeInTheDocument();
+  expect(document.querySelectorAll('[data-speaker="unconfirmed"]')).toHaveLength(2);
   expect(screen.getByText('〔局部无法辨认〕')).toBeVisible();
   expect(screen.queryByText('图片原始页序未知')).not.toBeInTheDocument();
+});
+
+it.each(['audio', 'video_frame'] as const)('%s 的原视频使用音视频链接，不作为图片对照加载', async kind => {
+  const originalUrl = '/api/local/media/synthetic-original-video.mp4';
+  kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1, {
+    kind, page: null, originalUrl,
+    blocks: [{ ref: 'motion-text', kind: 'paragraph', text: '已取得的音视频文字完整保留' }],
+  })] })));
+  const view = mount();
+  expect(await screen.findByText('已取得的音视频文字完整保留')).toBeVisible();
+  const link = screen.getByRole('link', { name: '查看音视频原件' });
+  expect(link).toHaveAttribute('href', originalUrl);
+  expect(link).toHaveAttribute('target', '_blank');
+  expect(screen.queryByText(/^对照原图/)).not.toBeInTheDocument();
+  expect(screen.queryByText('放大查看原图')).not.toBeInTheDocument();
+  expect(view.container.querySelector('img')).toBeNull();
+  expect(screen.getByRole('button', { name: '核对与修正' })).toBeVisible();
+});
+
+it('已有合格版面时导航展开既有整理面板，原件待取得与待识字独立，导航不执行写入', async () => {
+  kit.route('GET', path, ok(dossierJson(1, { materials: [
+    dossierMaterialJson(1, { currentRevisionRef: null, reading: null, blocks: [], processing: { state: 'completed', reason: null }, issues: [{ key: 'saved-layout', code: 'existing_result_pending', message: '已有识别结果，待整理。', resolution: 'source_refresh' }] }),
+    dossierMaterialJson(2, { sourceState: 'not_acquired', currentRevisionRef: null, reading: null, blocks: [], originalUrl: null }),
+  ], plan: { layoutCount: 1, pendingLayouts: 1, needsOcr: 0, needsAcquisition: 1 } })));
+  kit.route('GET', `${path}/candidates`, ok({ candidates: [] }));
+  const view = mount();
+  expect(await screen.findByText('已有识别结果，待整理。')).toBeVisible();
+  expect(screen.getAllByText('已有识别结果，待整理。')).toHaveLength(1);
+  expect(screen.queryByText('处理完成，暂无可读文字。')).not.toBeInTheDocument();
+  const summary = screen.getByText('整理已有识别版面'); const scroll = vi.fn(); summary.scrollIntoView = scroll;
+  const maintenance = summary.closest('details'); const details = screen.getByText('材料详情').closest('details');
+  expect(maintenance).not.toHaveAttribute('open'); expect(details).not.toHaveAttribute('open');
+  await view.user.click(screen.getByRole('button', { name: '核对与修正' }));
+  const go = await screen.findByRole('button', { name: '前往整理已有结果' });
+  expect(screen.queryByText('尚无可核对的读本，请先完成图片识别。')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
+  const reads = kit.calls.length;
+  await view.user.click(go);
+  expect(maintenance).toHaveAttribute('open'); expect(details).toHaveAttribute('open');
+  expect(summary).toHaveFocus(); expect(scroll).toHaveBeenCalledWith({ block: 'center' });
+  expect(screen.getByRole('button', { name: '重新整理' })).toBeVisible();
+  expect(screen.getByText(/待取得 1 · 待识字 0/)).toBeVisible();
+  expect(kit.calls).toHaveLength(reads); expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
+});
+it('cloud预览仍须显式选择与采用，不因为处理完成而进入当前读本', async () => {
+  const material = dossierMaterialJson(1, { currentRevisionRef: null, reading: null, blocks: [], processing: { state: 'completed', reason: null } });
+  kit.route('GET', path, ok(dossierJson(1, { materials: [material] })));
+  kit.route('GET', `${path}/candidates`, ok({ candidates: [{ unitRef: material.ref, slotKey: material.slotKey, candidateRevisionRef: 'cloud-preview', currentRevisionRef: null,
+    blocks: [{ ref: 'preview-block', kind: 'paragraph', text: '仅在候选预览中的文字' }], issues: [], generatedBy: 'cloud_vision', verification: 'unchecked', createdAt: '2026-10-26T00:00:00Z', review: null }] }));
+  const view = mount(); await screen.findByText('处理完成，尚无当前读本。');
+  expect(screen.queryByText('仅在候选预览中的文字')).not.toBeInTheDocument();
+  await view.user.click(screen.getByRole('button', { name: '核对与修正' }));
+  const select = await screen.findByLabelText('核对版本');
+  expect(screen.queryByRole('button', { name: '前往整理已有结果' })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
+  await view.user.selectOptions(select, 'cloud-preview');
+  expect(screen.getByText('仅在候选预览中的文字')).toBeVisible();
+  expect(screen.getByRole('button', { name: '采用此候选' })).toBeDisabled();
+  expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
 });

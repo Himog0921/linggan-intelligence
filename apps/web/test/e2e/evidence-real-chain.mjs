@@ -465,6 +465,9 @@ try {
     const dossier = panel('研究底稿');
     await dossier.getByRole('heading', { name: '研究底稿' }).waitFor();
     assert.equal(requestsTo('GET', /research-dossier$/).length, before + 1, '切入研究底稿复用 canonical 读本');
+    const materialDetails = dossier.locator('summary').filter({ hasText: /^材料详情$/ }).locator('xpath=..');
+    assert.equal(await materialDetails.getAttribute('open'), null, 'diagnostics stay folded before the user opens them');
+    await materialDetails.locator(':scope > summary').click();
     await dossier.locator('details > summary').filter({ hasText: '整理已有识别版面' }).click();
     assert.match(await dossier.innerText(), /可整理 1 · 待整理 1 · 已是当前规则 0/);
     await shot('evidence-1440-dossier');

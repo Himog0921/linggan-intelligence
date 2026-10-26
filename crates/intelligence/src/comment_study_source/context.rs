@@ -2,7 +2,7 @@
 use super::StudySourceError;
 use crate::comment_cleaning::{CLEANER_VERSION, clean};
 use serde_json::{Value, json};
-use sqlx::{AssertSqlSafe, Postgres, Row, Transaction};
+use sqlx::{Postgres, Row, Transaction};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -14,27 +14,8 @@ pub(crate) async fn read_titles(
     if works.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let ctes = linggan_evidence::work_display_title_ctes()
-        .map_err(|_| sqlx::Error::Protocol("shared work title projection unavailable".into()))?;
-    let sql = format!(
-        "WITH cs_title_scope AS (SELECT unnest($1::uuid[]) AS work_ref), {ctes} SELECT * FROM cs_display_titles"
-    );
-    let rows = sqlx::query(AssertSqlSafe(sql))
-        .bind(works)
-        .bind(as_of)
-        .fetch_all(&mut **tx)
-        .await?;
-    rows.into_iter()
-        .map(|row| {
-            Ok((
-                row.try_get("work_ref")?,
-                json!({
-                    "displayTitle":row.try_get::<Option<String>,_>("display_title")?,
-                    "displayTitleSource":row.try_get::<String,_>("display_title_source")?
-                }),
-            ))
-        })
-        .collect()
+    let dossiers = linggan_evidence::research_dossier::read_in(tx, works, as_of).await?;
+    Ok(dossiers.into_iter().map(|(work,d)| (work,json!({"displayTitle":d.note["displayTitle"],"displayTitleSource":d.note["displayTitleBasis"]}))).collect())
 }
 
 pub(crate) async fn read_work_contexts(
@@ -58,14 +39,19 @@ pub(crate) async fn read_work_contexts(
     if allowed as usize != unique.len() {
         return Err(StudySourceError::InvalidDomain);
     }
-    let titles = read_titles(tx, works, as_of).await?;
     let dossiers = linggan_evidence::research_dossier::read_in(tx, works, as_of).await?;
-    Ok(dossiers.into_iter().map(|(work,dossier)| {
-        let full=dossier_manifest(&dossier);
-        (work,json!({"workRef":work,"displayTitle":titles.get(&work).and_then(|t|t.get("displayTitle")),
-            "displayTitleSource":titles.get(&work).and_then(|t|t.get("displayTitleSource")),
-            "contextManifest":full}))
-    }).collect())
+    Ok(dossiers
+        .into_iter()
+        .map(|(work, dossier)| {
+            let full = dossier_manifest(&dossier);
+            (
+                work,
+                json!({"workRef":work,"displayTitle":dossier.note["displayTitle"],
+            "displayTitleSource":dossier.note["displayTitleBasis"],
+            "contextManifest":full}),
+            )
+        })
+        .collect())
 }
 
 pub(crate) fn dossier_manifest(
@@ -73,6 +59,7 @@ pub(crate) fn dossier_manifest(
 ) -> Value {
     crate::comment_study_run::full_context_manifest(&json!({
         "contract":"comment-study.context.v2","workRef":dossier.work_ref,
+        "readingTitle":linggan_evidence::research_dossier::reading_title(dossier),
         "dossierRevision":dossier.material_revision,"dossierContract":dossier.contract,
         "cleanerVersion":CLEANER_VERSION,
         "sources":linggan_evidence::research_dossier::context_sources(dossier)

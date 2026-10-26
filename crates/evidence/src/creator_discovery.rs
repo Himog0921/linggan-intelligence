@@ -78,6 +78,7 @@ pub struct DiscoveryWork {
     pub author_external_id: Option<String>,
     pub display_name: Option<String>,
     pub title: Option<String>,
+    pub reading_title: Value,
     pub published_date: Option<String>,
     pub published_epoch: Option<i64>,
     pub likes: Option<i64>,
@@ -535,8 +536,10 @@ async fn load_materials_in(
                 .map(|f| f.text.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
+            let reading_title = crate::research_dossier::reading_title(&dossier);
+            let display_title = dossier.note["displayTitle"].as_str().map(str::to_owned);
             let fragments = dossier.fragments;
-            let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments,"rule":RULE_VERSION,"config":policy["configRef"]}).to_string());
+            let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments,"readingTitle":reading_title,"rule":RULE_VERSION,"config":policy["configRef"]}).to_string());
             let mut result = json!({});
             let mut manual = json!({});
             let mut state = "not_analyzed".to_string();
@@ -648,7 +651,8 @@ async fn load_materials_in(
             platform: c.platform,
             author_external_id: c.author_external_id,
             display_name: current_name.map(str::to_owned).or_else(|| profile_name.map(str::to_owned)),
-            title: c.title,
+            title: display_title,
+            reading_title,
             published_date: c.published_local_date,
             published_epoch: c.published_at_epoch_ms,
             likes: c.like_count,

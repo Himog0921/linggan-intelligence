@@ -168,7 +168,7 @@ it('离开旧材料后迟到的保存回执不会修改新材料界面', async (
 });
 
 it('无当前读本和候选时不显示审核表单或无法执行的提交动作', async () => {
-  const material = unit({ currentRevisionRef: null, reading: null, blocks: [] });
+  const material = unit({ currentRevisionRef: null, reading: null, blocks: [], processing: { state: 'completed', reason: null } });
   vi.mocked(api.fetchCandidates).mockResolvedValue([]);
   mount(material); const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: '核对与修正' }));
@@ -203,4 +203,23 @@ it('无当前读本且候选读取失败时不给出可修正承诺', async () =
   expect(screen.queryByText(/当前读本仍可核对|可直接对照来源修正/)).not.toBeInTheDocument();
   expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
   expect(screen.getByRole('button', { name: '重读候选' })).toBeEnabled();
+});
+
+it.each(['audio', 'video_frame'] as const)('%s 旧结果待接入时不指向图片整理或要求重新图片识别', async kind => {
+  const material = unit({ kind, currentRevisionRef: null, reading: null, blocks: [], issues: [{ key: 'saved-result', code: 'existing_result_pending', message: '已有处理结果', resolution: 'source_refresh' }] });
+  vi.mocked(api.fetchCandidates).mockResolvedValue([]); mount(material); const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '核对与修正' }));
+  expect(await screen.findByText('已有处理结果，尚未接入当前读本。')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '前往整理已有结果' })).not.toBeInTheDocument();
+  expect(screen.queryByText(/请先完成图片识别/)).not.toBeInTheDocument();
+  expect(api.reviewReading).not.toHaveBeenCalled();
+});
+it.each([
+  ['audio', '尚无可核对的读本，请先取得音轨转写结果。'],
+  ['video_frame', '尚无可核对的读本，请先取得画面识别结果。'],
+] as const)('%s 没有读本或已有结果时使用对应来源提示', async (kind, message) => {
+  vi.mocked(api.fetchCandidates).mockResolvedValue([]); mount(unit({ kind, currentRevisionRef: null, reading: null, blocks: [] })); const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '核对与修正' }));
+  expect(await screen.findByText(message)).toBeVisible();
+  expect(screen.queryByText(/请先完成图片识别/)).not.toBeInTheDocument();
 });

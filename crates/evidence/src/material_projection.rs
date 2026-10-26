@@ -739,7 +739,9 @@ fn apply_cover_ocr_title(item: &mut MaterialLibraryItem, candidate: &PgRow) {
                 "source":"cover_ocr",
                 "slotKey":candidate.get::<String,_>("slot_key"),
                 "displayOrdinal":candidate.get::<Option<i32>,_>("display_ordinal"),
-                "layoutRef":candidate.get::<Uuid,_>("layout_ref"),
+                "layoutRef":candidate.get::<Option<String>,_>("layout_ref"),
+                "readingRef":candidate.get::<Uuid,_>("reading_ref"),
+                "unitRef":candidate.get::<Uuid,_>("unit_ref"),
                 "originalTitleState":"UNKNOWN"
             }),
         );

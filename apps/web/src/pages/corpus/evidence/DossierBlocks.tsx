@@ -25,8 +25,8 @@ function Content({ block }: { block: DossierBlock }) {
 /** Continuous full reading. Structure and attribution stay with the source words. */
 export function DossierBlocks({ blocks, issues = [] }: { blocks: readonly DossierBlock[]; issues?: readonly DossierIssue[] }) {
   const localKeys = new Set(blocks.flatMap(block => (block.issues ?? []).map(issue => issue.key)));
-  return <div className={styles.blocks}>{blocks.map((block, index) => <div key={block.ref} className={styles.block} data-block-ref={block.ref}>
-    {block.speaker && block.speaker !== 'author' && block.kind !== 'dialogue' && (index === 0 || blocks[index - 1]?.speaker !== block.speaker || blocks[index - 1]?.kind === 'dialogue') ? <p className={styles.attribution}>{SPEAKERS[block.speaker]}</p> : null}
+  return <div className={styles.blocks}>{blocks.map((block, index) => <div key={block.ref} className={styles.block} data-block-ref={block.ref} data-speaker={block.speaker}>
+    {block.speaker === 'other' && block.kind !== 'dialogue' && (index === 0 || blocks[index - 1]?.speaker !== block.speaker || blocks[index - 1]?.kind === 'dialogue') ? <p className={styles.attribution}>{SPEAKERS[block.speaker]}</p> : null}
     {block.time ? <p className={styles.attribution}>{block.time.startMs === block.time.endMs ? `${(block.time.startMs / 1000).toFixed(3)} 秒` : `${(block.time.startMs / 1000).toFixed(3)}–${(block.time.endMs / 1000).toFixed(3)} 秒`}</p> : null}
     <Content block={block} />
     <DossierIssues issues={[...(block.issues ?? []), ...issues.filter(issue => issue.blockRef === block.ref && !localKeys.has(issue.key))]} />

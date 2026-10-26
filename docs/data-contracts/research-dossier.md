@@ -1,7 +1,7 @@
-# 研究底稿 v2：完整材料与唯一读取合同
+# 研究底稿 v2：统一阅读与唯一读取合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-24
+> 最后核对: 2026-10-26（STANDARD-DOSSIER-001 固定100篇候选回归）
 > 适用范围: RESEARCH-DOSSIER-V2；v2 已在主线及本机3000运行，后续修正按各包回执区分
 > 事实来源: Mog 本轮确认的研究底稿标准、开发期直接替换要求与本合同验收矩阵
 > 冲突时以谁为准: 用户最新确认、真实来源与验证；本稿替代 v1 及 note-material-input 的并行对外合同
@@ -9,6 +9,14 @@
 2026-10-24 核对主线与3000均为 `93f03a579b954b0850d405a33f1f83a6a5704d26`，已提供 `research-dossier.v2`；历史材料并未自动生成全部 v2 读本。[本轮50篇审查](../audits/ocr-dossier-system-50-2026-10-24.md)记录真实数据准备、内容问题及尚未部署的修正。
 
 ## 用户结果与范围
+
+STANDARD-DOSSIER-001 更新：平台非空标题优先，否则从明确封面（无封面时为已知第一页）的主要标题块整理 displayTitle，依据为 platform / cover / missing，并保留 titleBlockRefs。页序未知不猜封面。无正文时图片按页序成为主文；视频优先口播，尚无口播时已有画面文字可读；有可读口播/画面时封面归补充，只有封面文字可用时才作为主文。混合媒体中的正文图片仍按原图片规则。有任意非空平台正文时正文为主文，其余均为补充；短句、表情、标签正文同样保留。
+
+`readingView.mainBlockRefs` 与 `supplementBlockRefs` 仅引用 `materials[].blocks`，由后端唯一组装。JSON、Markdown、前端与内部 AI 片段适配采用该顺序；显式 selection 后重建标题与编排，不泄漏未选图片内容。coverage 保留材料实际缺失、处理和失败；它不是整篇读取资格。没有文字时仍返回底稿及原件，文本消费者明确返回无可读文字。
+
+分段读取复用同一 GET：`segmentSize`（1–200）与 `segmentOffset`（从 0 起），返回有序块的显式选择和 `segment` 范围。后续请求必须携带首段 `asOf` 与 `expectedRevision`，固定完整底稿 revision；来源受限仍按当前访问规则处理。分段只筛选完整底稿的主文/补充有序引用，不因本段缺少正文而提升补充或重排；显式用户 selection 仍重新编排。遍历到 nextOffset 为 null 即覆盖全部可用块，不按字符截断。
+
+日常任务完成直接发布机器读本；显式预览继续为 candidate，历史预览不追溯自动采用。人工修正保持优先，GET 不准备/识别。复用 native/relayer/dossier_input 整理历史已有材料，生产回填另随最终版本确认。
 
 人打开一篇笔记，应能连续读到已取得的所有图片文字，保留数字、单位、否定、清单、表格、对话、引述及不确定处，并能回到原图。Agent 读取相同材料，按明确任务选择调用；主题图谱、评论研究、作者研究不各自重建另一份笔记事实。
 
@@ -22,15 +30,15 @@
 
 Markdown 通过 `format=markdown` 单独生成，与同一次读取的区块顺序和内容一致。评论、作者与互动元数据分别按需读取；评论页数不冒充平台评论总量。原图和识别诊断通过来源引用读取，不把原始布局/任务账本塞入每次 Agent 输入。
 
-Markdown 顶层标题只使用原生平台标题，缺失时使用“研究底稿”。图片派生展示标题仍在其真实图片 heading 区块中输出一次，角色、来源时间和局部问题随块保留；不同来源出现同文标题仍各自保留。显式选择未包含的图片块不会仅因它曾作为展示标题而被带入导出。
+Markdown 顶层采用同一 displayTitle；为空时仅用界面占位“无标题”。标题来源块继续保留角色、时间、局部问题和精确引用，不同来源出现同文标题各自保留。显式选择后重建展示标题，未选图片文字不会带入导出。
 
-顶层字段：`contract`、`workRef`、`revision`、`materialRevision`、`asOf`、`note`、`materials`、`coverage`、`attachments`、`selection`。`materialRevision` 绑定材料、来源和结构；`revision` 还绑定覆盖、辅助元数据与同截点可审候选的身份；候选全文不进入默认读取。时间戳本身不令未变材料失效。
+顶层字段：`contract`、`workRef`、`revision`、`materialRevision`、`asOf`、`note`、`materials`、`readingView`、`coverage`、`attachments`、`selection`。`materialRevision` 绑定材料、来源和结构；`revision` 还绑定覆盖、辅助元数据与同截点可审候选的身份；候选全文不进入默认读取。时间戳本身不令未变材料失效。
 
-`note` 保留平台、作品身份、平台标题及来源、展示标题及采用依据。平台标题与图片标题是不同事实。仅显式封面或已证明的第一页标题可补展示标题，不能伪造平台标题。图片派生展示标题不另复制到 Markdown H1；不同来源的同文区块仍各自保留。
+`note` 保留平台、作品身份、平台标题及来源、展示标题及采用依据。平台标题与图片标题是不同事实。仅显式封面或已证明的第一页标题可补展示标题，不能伪造平台标题。titleBlockRefs 记录封面整理标题的实际块；不同来源的同文区块仍各自保留。
 
 ## 材料与结构化区块
 
-材料字段：`ref`、`kind`、`slotKey`、`page`、`sourceState`、`sourceRef`、`sourceVersion`、`currentRevisionRef`、`originalUrl`、`reading`、`blocks`、`issues`；仅在字节证明建立页序关系时增加 `pageSource`。材料种类为 body、tags、image、audio、video_frame。未知页码为 null；不按数据库遍历序号猜平台页码。
+材料可附 `purpose` 与 `processing:{state,reason}`（来自固定 asOf 的 job event；succeeded 映射 completed），不读取可变 work 状态冒充历史。材料字段：`ref`、`kind`、`slotKey`、`page`、`sourceState`、`sourceRef`、`sourceVersion`、`currentRevisionRef`、`originalUrl`、`reading`、`blocks`、`issues`；仅在字节证明建立页序关系时增加 `pageSource`。材料种类为 body、tags、image、audio、video_frame。未知页码为 null；不按数据库遍历序号猜平台页码。已知页序优先，未知页序沿真实 producer_ordinal 的稳定观察顺序，再以 slot_key 稳定打破同序关系；不按槽位字符串把第10次观察排到第2次之前。
 
 `reading` 分开表达生成者 `generatedBy`、采用状态 `adoption`、核对状态 `verification`、规范化规则 `ruleVersion`，以及可空的 `review:{commandRef,actor,reason,action,reviewedAt}`。review 只来自该次 selection 的命令，后来的暂缓/拒绝不能改写已采用版本的审核人和依据；自动读本及原生标签为 null。机器生成、被采用、人工核对是三件事。生成者取 platform、ordinary_ocr、local_vision、cloud_vision、asr、frame_ocr、human_edit。
 
@@ -48,7 +56,7 @@ Markdown 顶层标题只使用原生平台标题，缺失时使用“研究底�
 
 所有区块默认角色不明为 `unconfirmed`，确定角色为 `author` 或 `other`。角色未知不等于删去文字；必须随上下文进入研究任务。坐标仅在真实来源支持时输出，格式 `[x,y,width,height]`，范围 0..1；音视频位置为真实毫秒区间 `time:{startMs,endMs}`。帧只证明一个采样时点时，起止相等，不虚构持续时间。没有真实坐标或时间时省略，不编造。
 
-OCR 低置信度局部成为 gap；可信的周围文字保留。原始识别行留作诊断，不通过白名单、UI 词表或“作者正文资格”把整张截图的可读内容过滤掉。无法可靠恢复列顺序、表格或角色时，明确记录结构问题；不能把估计说成原图事实。
+OCR 低置信度局部成为 gap；可信的周围文字保留。gap 文字是识别诊断，不计作原文资格：全部为 gap 时公开底稿保留块和原件，文本消费者获得无可读文字；真实原文与 gap 混合时保留局部缺口及出处。原始识别行留作诊断，不通过白名单、UI 词表或“作者正文资格”把整张截图的可读内容过滤掉。无法可靠恢复列顺序、表格或角色时，明确记录结构问题；不能把估计说成原图事实。
 
 ## 唯一当前版本与不可变历史
 
@@ -65,9 +73,13 @@ Live Photo 的静态图片与动态视频按实际已验证媒体类型分别选
 
 平台标签沿用不可变 `content-hashtags.v1` 来源投影，保留原序与重复条目，不从正文猜标签。其 `currentRevisionRef` 为 null，sourceVersion 绑定 material 与投影规则，区块引用绑定 material；这属于同一底稿的原生材料，不另建可编辑标签读本或另一份正文。
 
-普通 OCR、平台正文、ASR、帧 OCR 可自动发布，但须以捕获的 expected current 作 CAS，并保护同来源的人工作品。显式重新识别只形成 candidate，不按模型名、图片尺寸、文字长度或完成时间自动更换当前。
+日常 OCR（包括本地视觉任务）、平台正文、ASR、帧 OCR 完成直接自动发布，但须以捕获的 expected current 作 CAS，并保护同来源的人工作品。显式重新识别只形成 candidate，不按模型名、图片尺寸、文字长度或完成时间自动更换当前。
 
-正文在来源接纳时规范化并持久化。GET 不生成、不升级、不重新解释正文。旧开发数据缺少 canonical reading 时显示 not_processed，并可由显式命令重建；读取不能退回原生 bodyText 来假装已处理。
+正文在来源接纳时规范化并持久化。已有平台原文但缺规范读本时，GET 只读投影原文块及不可变 material 来源，不伪造 currentRevisionRef；显式 native 准备可补持久读本。重复准备幂等，GET 不写库、不启动识别；已存在的人工作品优先。
+
+图片计划和回执分别返回 `needsAcquisition`（image sourceState=not_acquired）与 `needsOcr`（已取得且无合格当前读本、已有版面或候选）。完成任务但尚无当前读本不等于没有文字；匹配现有合格图片版面时返回 `existing_result_pending`，界面引导到原有整理面板，导航本身不执行整理。明确 no_text/no_speech/no_audio/no_frame_text 原因优先于一般完成状态。
+
+历史音视频沿现有 `dossier_input` 冻结计划与逐作品事务显式准备，CLI 操作为 `historical_media`。只接入当前合格 video/live_photo 素材、真实成功旧任务及非退休/受限的本地结果，保留 job、derivative、materialization、blob 与全文哈希；旧任务缺少 reading_source_version 时不伪补冻结字段或重跑识别。计划另冻结历史结果来源指纹，来源改变拒绝应用；同源兼容当前读本及人工读本优先，原计划重复应用只读幂等。全文取 text_content，不用截断 display_text；没有时间元数据的旧结果保留时间未知和未核实问题，不补造时码或作者身份。明确无语音/画面文字以 canonical 空读本闭合 known_empty，无音轨为 not_applicable，不造文字块。无合格旧结果逐项回执 unavailable，不阻止其他来源及已有正文。
 
 来源改变后旧 reading 不再冒充当前；新 reading 不继承旧来源的人工核对。迟到的旧源任务可留下生成记录，但不能抢占新源当前指针。来源限制在任务发送和精确引用回查时再次验证。
 
@@ -109,7 +121,7 @@ OCR 抽检仅记录质量判断 confirmed/dismissed/pending，可关联材料命
 
 coverage.imageInventory 分别给出 basis、expectedPages（未知为 null）、acquiredPages、processedPages、missingPages、unknownOrder。已知总页数时统计只覆盖对应真实页，不能把额外封面算成第 N+1 页；处理数 ≤ 取得数 ≤ 已知总数。
 
-音频采用实际转写 segment 的时间。帧 OCR 保留所有实际采样帧及真实 PTS，不设固定 12 帧读入上限、不跨时间全局去重。采样视频明确标 incomplete；未采样位置未知。只有已证明无音轨才是 not_applicable；识别器无输出不证明源内容为空。
+音频采用实际转写 segment 的时间。帧 OCR 保留所有实际采样帧及真实 PTS，不设固定 12 帧读入上限、不跨时间全局去重。采样视频明确标 incomplete；未采样位置未知。只有已证明无音轨才是 not_applicable；ASR 成功完成但未检出语音为 known_empty（不声称原视频无文字），失败为 processing.failed 并保留此前同源可读读本。其他识别器无输出不证明源内容为空，也不生成诊断占位正文。
 
 重建计划只枚举同源、同截点的普通本地 OCR layout。`pendingReviewCount` 统计有可审候选的图片槽位，仅云端候选存在时 `layoutCount=0`、`pendingLayouts=0`、`needsOcr=0` 并显示待核对；本地与云端并存时仍处理本地 target，保护人工 current。
 
@@ -127,7 +139,7 @@ readings/{readingRef} 在同一只读快照返回 workRef、所请求版本 mate
 
 识读引用必须绑定作品、unit、reading、blockRef、sourceRef、sourceVersion 与 asOf；blockRef 采用 `workUUID.readingUUID.ordinal`。不可变原生标签使用 `workUUID.materialUUID.ordinal` 并绑定投影规则。相同文本不是相同来源。冻结引用精确匹配，不按字段名或相似文本找新内容顶替；旧引用缺少必要字段则明确不可解析。
 
-内部任务 adapter 可以生成短引用编号和来源映射，但正文只发送一次，结构、角色、问题与真实位置必须保留。评论研究携带选定评论、必要父回复和完整作品语境；作者研究携带所选作品及独立作者材料；主题研究窗口不得截取一篇的前 N 字冒充整篇。
+内部任务 adapter 的 readingTitle 元数据复用统一展示标题、basis、titleBlockRefs及平台来源；封面标题不标为平台标题，不发送“无标题”占位。adapter 可以生成短引用编号和来源映射，但正文只发送一次，结构、角色、问题与真实位置必须保留。评论研究携带选定评论、必要父回复和完整作品语境；作者研究携带所选作品及独立作者材料；主题研究窗口不得截取一篇的前 N 字冒充整篇。
 
 主题已保存来源按请求的统一 asOf 恢复正文、读本、当时的作者标记及已完成评论研究血缘；新增读本、Signal 或人工标记不得改写旧请求的来源身份。当前来源限制、研究域与定义资格仍单独核验。历史结果的可读性与当前材料覆盖率分责：只有仍匹配当前精确来源的分析区块计入当前覆盖，新增或更新材料不能因旧结果存在而被报告为已经完成分析。
 
@@ -135,6 +147,6 @@ readings/{readingRef} 在同一只读快照返回 workRef、所请求版本 mate
 
 ## 验证与切换
 
-实际验证与交付状态统一记录于 [RESEARCH-DOSSIER-V2](../plans/active/research-dossier-v2.md)。必须验证完整内容、结构、来源位置、并发 CAS、重试幂等、历史与当前限制、同源页面/API、副作用和多消费者输入。单元测试与合成数据库不替代真实识别质量；后者没有调用证据就不能声明通过。
+STANDARD-DOSSIER-001 候选实施及验证见[本包报告](../audits/standard-dossier-001-2026-10-25.md)；此前交付保留于 [RESEARCH-DOSSIER-V2](../plans/active/research-dossier-v2.md)。必须验证完整内容、结构、来源位置、并发 CAS、重试幂等、历史与当前限制、同源页面/API、副作用和多消费者输入。单元测试与合成数据库不替代真实识别质量；后者没有调用证据就不能声明通过。
 
 迁移直接移除旧派生采用/任务输入表和运行分支，保留原始证据。历史数据库 migration 不回写。代码合并、共享库迁移、服务部署及业务签收分别报告，本轮实现授权不自动触发这些后续动作。

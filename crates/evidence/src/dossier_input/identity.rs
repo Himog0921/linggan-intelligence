@@ -12,7 +12,13 @@ pub(super) fn finish(material: &mut Material) {
     material.not_ready_reasons.sort();
     material.not_ready_reasons.dedup();
     material.ready = material.not_ready_reasons.is_empty();
-    material.material_fingerprint = content_fingerprint(&material.columns, &material.fragments);
+    material.material_fingerprint = hash(
+        &json!([
+            content_fingerprint(&material.columns, &material.fragments),
+            material.reading_title
+        ])
+        .to_string(),
+    );
     let sources: Vec<_> = material
         .fragments
         .iter()

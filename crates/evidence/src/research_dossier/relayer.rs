@@ -127,7 +127,7 @@ pub async fn relayer_work(
     }
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(
-        json!({"workRef":work,"layerVersion":ocr_layering::VERSION,"needsOcr":plan["needsOcr"],"scopeCount":results.len(),
+        json!({"workRef":work,"layerVersion":ocr_layering::VERSION,"needsOcr":plan["needsOcr"],"needsAcquisition":plan["needsAcquisition"],"scopeCount":results.len(),
         "updated":results.iter().filter(|r|r["state"]=="updated").count(),"alreadyCurrent":results.iter().filter(|r|r["state"]=="already_current").count(),
         "skipped":results.iter().filter(|r|r["state"]=="skipped").count(),"results":results}),
     )

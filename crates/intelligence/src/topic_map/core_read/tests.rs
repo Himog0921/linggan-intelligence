@@ -93,6 +93,7 @@ fn input(field: &str) -> ResearchInput {
     let author = crate::topic_map_research_analysis::fragment_role(&fragment) == "author";
     ResearchInput {
         work: DiscoveryWork {
+            reading_title: serde_json::Value::Null,
             work_ref,
             usage_roles: vec!["primary".into()],
             creator_key: None,

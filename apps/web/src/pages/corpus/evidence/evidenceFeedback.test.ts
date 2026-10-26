@@ -9,15 +9,17 @@ const http = (status: number, code: string | null) => new ApiError({ kind: 'http
 
 describe('重新分层的回执（W1）', () => {
   it('成功文案：本次 N 个版面：更新、已是当前版本、跳过', () => {
-    const feedback = relayerSuccess({ scopeCount: 3, updated: 1, alreadyCurrent: 1, skipped: 1, needsOcr: 2 });
+    const feedback = relayerSuccess({ scopeCount: 3, updated: 1, alreadyCurrent: 1, skipped: 1, needsOcr: 2, needsAcquisition: 1 });
     expect(feedback).toMatchObject({ tone: 'success', label: '已完成' });
     expect(feedback.text).toContain('本次 3 个版面：更新 1 个，已是当前版本 1 个，跳过 1 个。');
     expect(feedback.text).toContain('跳过的版面缺少可用识别行，没有处理');
-    expect(feedback.text).toContain('仍有 2 张图片没有识别结果，需先识字或补采，本操作不会识字');
+    expect(feedback.text).toContain('待识字 2 张图片。');
+    expect(feedback.text).toContain('待取得 1 张图片。');
+    expect(feedback.text).not.toContain('识字或补采');
   });
 
   it('更新 0 且已是当前版本：无变化也算完成，明说已是当前版本', () => {
-    expect(relayerSummary({ scopeCount: 1, updated: 0, alreadyCurrent: 1, skipped: 0, needsOcr: 0 })).toMatch(/^已是当前版本，无需更新。本次 1 个版面/);
+    expect(relayerSummary({ scopeCount: 1, updated: 0, alreadyCurrent: 1, skipped: 0, needsOcr: 0, needsAcquisition: 0 })).toMatch(/^已是当前版本，无需更新。本次 1 个版面/);
   });
 
   it('有明确答复的拒绝是「未完成」，一律声明没有写入；409 解释旧修订并提示可能已生效', () => {

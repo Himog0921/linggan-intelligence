@@ -96,6 +96,67 @@ pub fn select(dossier: &mut ResearchDossier, selection: &Selection) -> Result<()
         .retain(|f| f.field == "title" || included.contains(f.fragment_id.as_str()));
     dossier.selection = json!({"mode":"explicit","kinds":selection.kinds,"unitRefs":selection.unit_refs,"blockRefs":selection.block_refs,
         "imagePages":selection.image_pages,"omittedUnits":original-dossier.materials.len(),"completeRevision":complete});
+    super::reading::rebuild(dossier);
     super::refresh_revision(dossier);
     Ok(())
+}
+
+/// A range in the fixed reading order. Whole blocks and their exact sources stay intact.
+pub fn segment(
+    dossier: &mut ResearchDossier,
+    offset: usize,
+    size: usize,
+) -> Result<serde_json::Value, String> {
+    if !(1..=200).contains(&size) {
+        return Err("invalid_segment_size".into());
+    }
+    let refs = super::ordered_refs(dossier);
+    let total = refs.len();
+    if offset > total {
+        return Err("segment_offset_out_of_range".into());
+    }
+    let end = offset.saturating_add(size).min(total);
+    let selected: Vec<_> = refs[offset..end].iter().map(|r| (*r).to_owned()).collect();
+    let frozen_order = dossier.reading_view.clone();
+    let complete = dossier.revision.clone();
+    let scope = if dossier.selection["mode"] == "explicit" {
+        "selected"
+    } else {
+        "full"
+    };
+    if selected.is_empty() {
+        let omitted = dossier.materials.len();
+        dossier.materials.clear();
+        dossier.fragments.retain(|f| f.field == "title");
+        dossier.selection = json!({"mode":"explicit","kinds":[],"unitRefs":[],"blockRefs":[],"imagePages":[],"omittedUnits":omitted,"completeRevision":complete});
+        super::reading::rebuild(dossier);
+        super::refresh_revision(dossier);
+    } else {
+        select(
+            dossier,
+            &Selection {
+                block_refs: selected.clone(),
+                ..Default::default()
+            },
+        )?;
+        // A transport segment is a slice of one frozen reading order. Unlike an
+        // explicit user selection, it cannot promote supplements after filtering.
+        for key in ["mainBlockRefs", "supplementBlockRefs"] {
+            dossier.reading_view[key] = json!(
+                frozen_order[key]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|r| r.as_str().is_some_and(|r| selected.iter().any(|s| s == r)))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            );
+        }
+        super::reading::order_fragments(dossier);
+        super::refresh_revision(dossier);
+    }
+    Ok(
+        json!({"completeRevision":complete,"asOf":dossier.as_of,"offset":offset,"end":end,"totalBlocks":total,
+        "nextOffset":if end<total{Some(end)}else{None},"scope":scope}),
+    )
 }

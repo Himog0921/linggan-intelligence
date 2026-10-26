@@ -18,6 +18,9 @@ pub(super) struct Params {
     block_refs: Option<String>,
     image_pages: Option<String>,
     sections: Option<String>,
+    segment_size: Option<usize>,
+    segment_offset: Option<usize>,
+    expected_revision: Option<String>,
 }
 
 async fn ensure_scope(
@@ -109,6 +112,10 @@ pub(super) async fn read(
                 )
                     .into_response();
             }
+            let segment = match segment(&mut value, &params) {
+                Ok(value) => value,
+                Err(response) => return response,
+            };
             if params.format.as_deref() == Some("markdown") {
                 (
                     [(header::CONTENT_TYPE, "text/markdown; charset=utf-8")],
@@ -116,12 +123,58 @@ pub(super) async fn read(
                 )
                     .into_response()
             } else {
-                Json(json!({"dossier":value,"relayerPlan":plan})).into_response()
+                Json(json!({"dossier":value,"relayerPlan":plan,"segment":segment})).into_response()
             }
         }
         Ok(None) => local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
         Err(error) => read_error(error),
     }
+}
+
+fn segment(
+    value: &mut dossier::ResearchDossier,
+    params: &Params,
+) -> Result<Option<Value>, Response> {
+    let Some(size) = params.segment_size else {
+        if params.segment_offset.is_some() || params.expected_revision.is_some() {
+            return Err(local_read_json_error(
+                StatusCode::BAD_REQUEST,
+                "segment_size_required",
+            ));
+        }
+        return Ok(None);
+    };
+    let offset = params.segment_offset.unwrap_or(0);
+    if !(1..=200).contains(&size)
+        || (offset > 0 && (params.as_of.is_none() || params.expected_revision.is_none()))
+    {
+        return Err(local_read_json_error(
+            StatusCode::BAD_REQUEST,
+            "invalid_segment_or_unpinned_continuation",
+        ));
+    }
+    if params
+        .expected_revision
+        .as_ref()
+        .is_some_and(|r| *r != value.revision)
+    {
+        return Err(local_read_json_error(
+            StatusCode::CONFLICT,
+            "dossier_revision_changed",
+        ));
+    }
+    dossier::segment(value, offset, size)
+        .map(Some)
+        .map_err(|reason| {
+            local_read_json_error(
+                StatusCode::BAD_REQUEST,
+                if reason == "segment_offset_out_of_range" {
+                    "segment_offset_out_of_range"
+                } else {
+                    "invalid_segment"
+                },
+            )
+        })
 }
 
 pub(super) async fn candidates(

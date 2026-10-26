@@ -73,8 +73,10 @@
   font-variant-numeric: tabular-nums;
 }
 
-.engagement span {
+.engagement > span {
   display: inline-flex;
+  flex: none;
+  white-space: nowrap;
   align-items: center;
   gap: var(--lgi-space-1);
 }

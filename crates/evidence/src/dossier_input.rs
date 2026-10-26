@@ -82,6 +82,7 @@ pub struct Material {
     pub work_ref: Uuid,
     pub as_of: String,
     pub dossier_revision: String,
+    pub reading_title: serde_json::Value,
     pub material_fingerprint: String,
     pub provenance_hash: String,
     pub snapshot_identity: String,

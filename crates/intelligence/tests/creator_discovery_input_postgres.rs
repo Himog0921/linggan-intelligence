@@ -158,3 +158,156 @@ async fn canonical_creator_input_keeps_full_content_and_exact_provenance_without
     assert_eq!(body_input["sourceRef"], json!(old.source_ref));
     assert_eq!(body_input["content"]["text"], body);
 }
+
+#[path = "../../evidence/tests/support/standard_dossier_fixture.rs"]
+mod standard;
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and no provider"]
+async fn standard_dossier_partial_and_video_share_creator_workbench_and_offline_blocks() {
+    use linggan_evidence::{dossier_input, research_dossier};
+    use linggan_intelligence::{
+        content_workbench_sources::materials, note_interpretation_offline as offline,
+    };
+    use uuid::Uuid;
+    let db = dossier::fixture::proof_database("standard_consumers").await;
+    for (name, images, video, partial) in [
+        ("consumer-partial", 5, false, true),
+        ("consumer-video", 1, true, false),
+    ] {
+        let work = standard::scenario(&db, name, None, images, video, partial, false).await;
+        let d = research_dossier::read(&db, work).await.unwrap().unwrap();
+        let input = dossier_input::read(&db, standard::DOMAIN, work)
+            .await
+            .unwrap();
+        let preview = offline::prepare_input(&offline::Input {
+            material: input,
+            direction_version_ref: Uuid::new_v4(),
+            skill_version_ref: Uuid::new_v4(),
+            direction_refs: vec![Uuid::new_v4()],
+        })
+        .unwrap();
+        assert_eq!(preview.reading_title, research_dossier::reading_title(&d));
+        assert_eq!(
+            preview
+                .fragments
+                .iter()
+                .map(|f| f.logical_position.as_str())
+                .collect::<Vec<_>>(),
+            research_dossier::ordered_refs(&d)
+        );
+        let data = linggan_evidence::creator_discovery::load_topic_materials_for_works(
+            &db,
+            standard::DOMAIN,
+            &[work],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            data.works[0].title.as_deref(),
+            d.note["displayTitle"].as_str()
+        );
+        let (provider, fragments) = prepare(&data.domain, &data.works[0], &data.as_of);
+        assert_eq!(
+            fragments
+                .iter()
+                .map(|f| f.fragment_id.as_str())
+                .collect::<Vec<_>>(),
+            research_dossier::ordered_refs(&d)
+        );
+        assert_eq!(
+            provider["readingTitle"],
+            research_dossier::reading_title(&d)
+        );
+        assert_eq!(
+            provider["materials"].as_array().unwrap().len(),
+            fragments.len()
+        );
+        let q=serde_json::from_value(json!({"domainRef":standard::DOMAIN,"sourceKind":"note","sourceRef":work,"workRef":work})).unwrap();
+        let document = materials::read_document(&db, &q).await.unwrap();
+        assert_eq!(document["title"], d.note["displayTitle"]);
+        assert_eq!(
+            document["fragments"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| f["blockRef"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            research_dossier::ordered_refs(&d)
+        );
+        assert_eq!(
+            document["context"]["dossier"]["readingView"],
+            d.reading_view
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and no provider"]
+async fn standard_gap_only_results_remain_diagnostics_without_research_words() {
+    use linggan_evidence::{dossier_input, material_reading as reading, research_dossier};
+    use linggan_intelligence::{
+        content_workbench_sources::{SourceError, materials},
+        note_interpretation_offline as offline,
+    };
+    use uuid::Uuid;
+    let db = dossier::fixture::proof_database("standard_gap_only").await;
+    let work = standard::scenario(&db, "gap-only", None, 1, false, false, false).await;
+    let before = research_dossier::read(&db, work).await.unwrap().unwrap();
+    let image = before
+        .materials
+        .iter()
+        .find(|m| m["kind"] == "image")
+        .unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    reading::publish_in(&mut tx, reading::NewReading {
+        content_public_ref: work, unit_key: format!("image:{}", image["slotKey"].as_str().unwrap()), kind: "image".into(), slot_key: image["slotKey"].as_str().map(str::to_owned), page: Some(1), source_version: image["sourceVersion"].as_str().unwrap().into(), source_state: "present".into(), derivative_ref: None, producer_ref: Some(Uuid::new_v4()), generated_by: "ordinary_ocr".into(), rule_version: "gap-only-proof.v1".into(), blocks: vec![json!({"ref":"gap", "kind":"gap", "text":"识别未返回可靠文字，请对照原图", "speaker":"unconfirmed"})], issues: vec![], source_location: json!({"synthetic":true}), publication: reading::Publication::Automatic{expected_current: serde_json::from_value(image["currentRevisionRef"].clone()).unwrap()}
+    }).await.unwrap();
+    tx.commit().await.unwrap();
+    let d = research_dossier::read(&db, work).await.unwrap().unwrap();
+    let current = d.materials.iter().find(|m| m["kind"] == "image").unwrap();
+    assert_eq!(current["blocks"][0]["kind"], "gap");
+    assert!(
+        current["blocks"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("识别未返回")
+    );
+    assert!(current["currentRevisionRef"].is_string());
+    assert!(d.fragments.is_empty());
+    let input = dossier_input::read(&db, standard::DOMAIN, work)
+        .await
+        .unwrap();
+    assert!(input.fragments.is_empty());
+    let error = offline::prepare_input(&offline::Input {
+        material: input,
+        direction_version_ref: Uuid::new_v4(),
+        skill_version_ref: Uuid::new_v4(),
+        direction_refs: vec![Uuid::new_v4()],
+    })
+    .unwrap_err();
+    assert_eq!(error.0, "offline_material_no_readable_text");
+    let creator = linggan_evidence::creator_discovery::load_topic_materials_for_works(
+        &db,
+        standard::DOMAIN,
+        &[work],
+    )
+    .await
+    .unwrap();
+    assert!(creator.works[0].fragments.is_empty());
+    let q = serde_json::from_value(
+        json!({"domainRef":standard::DOMAIN,"sourceKind":"note","sourceRef":work,"workRef":work}),
+    )
+    .unwrap();
+    assert!(matches!(
+        materials::read_document(&db, &q).await,
+        Err(SourceError::Unavailable)
+    ));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        0
+    );
+}

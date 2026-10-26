@@ -94,15 +94,23 @@ print(json.dumps(b,ensure_ascii=False))
     ocr::execute_one(&db).await;
     let package:Uuid=sqlx::query_scalar("SELECT package_ref FROM linggan_material_content_detail WHERE content_public_ref=$1 LIMIT 1").bind(work).fetch_one(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(work).bind(fixture::dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
-    let candidate = linggan_evidence::material_reading::read_candidates(&db, work)
+    let current = linggan_evidence::research_dossier::read(&db, work)
         .await
         .unwrap()
-        .remove(0);
-    let reading: Uuid = serde_json::from_value(candidate["candidateRevisionRef"].clone()).unwrap();
-    let unit: Uuid = serde_json::from_value(candidate["unitRef"].clone()).unwrap();
+        .unwrap();
+    let candidate = current
+        .materials
+        .iter()
+        .find(|m| m["kind"] == "image")
+        .unwrap();
+    let reading: Uuid = serde_json::from_value(candidate["currentRevisionRef"].clone()).unwrap();
+    let unit: Uuid = serde_json::from_value(candidate["ref"].clone()).unwrap();
     let adopt = linggan_evidence::material_reading::ReviewReadingRequest {
         command_ref: Uuid::new_v4(),
-        expected_current_revision_ref: None,
+        expected_current_revision_ref: serde_json::from_value(
+            candidate["currentRevisionRef"].clone(),
+        )
+        .unwrap(),
         candidate_revision_ref: reading,
         action: "adopt".into(),
         edited_blocks: None,

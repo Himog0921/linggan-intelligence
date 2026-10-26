@@ -10,7 +10,7 @@ WITH current_origin AS MATERIALIZED (
       AND package.accepted_at <= $2::timestamptz AND disposition.disposition<>'quarantined'
     ORDER BY origin.slot_key,origin.source_generation DESC
 )
-SELECT heading.block->>'text' AS cover_headline,origin.display_ordinal,origin.slot_key
+SELECT heading.block->>'text' AS cover_headline,origin.display_ordinal,origin.slot_key,reading.reading_ref,unit.unit_ref,reading.source_location->>'layoutRef' AS layout_ref
 FROM current_origin origin
 JOIN linggan_material_unit unit ON unit.content_public_ref=origin.content_public_ref
   AND unit.slot_key=origin.slot_key AND unit.kind='image'
@@ -32,11 +32,21 @@ JOIN LATERAL (
     ORDER BY materialization.verified_at DESC,materialization.materialization_ref DESC LIMIT 1
 ) materialization ON materialization.materialization_ref::text=reading.source_version
 JOIN LATERAL (
-    SELECT block,ordinal FROM jsonb_array_elements(reading.blocks) WITH ORDINALITY AS blocks(block,ordinal)
-    WHERE block->>'kind'='heading' AND nullif(btrim(block->>'text'),'') IS NOT NULL
-    ORDER BY ordinal LIMIT 1
+    WITH blocks AS (
+        SELECT block,ordinal FROM jsonb_array_elements(reading.blocks) WITH ORDINALITY AS blocks(block,ordinal)
+    ), first_heading AS (
+        SELECT min(ordinal) AS start FROM blocks WHERE block->>'kind'='heading' AND nullif(btrim(block->>'text'),'') IS NOT NULL
+    ), title_lines AS (
+        SELECT btrim(line, U&'\0009\000A\000B\000C\000D\0020\0085\00A0\1680\2000\2001\2002\2003\2004\2005\2006\2007\2008\2009\200A\2028\2029\202F\205F\3000') AS text,ordinal,line_ordinal
+        FROM blocks,first_heading, LATERAL regexp_split_to_table(block->>'text', E'\\r?\\n') WITH ORDINALITY AS lines(line,line_ordinal)
+        WHERE ordinal>=start AND block->>'kind'='heading'
+        AND NOT EXISTS(SELECT 1 FROM blocks gap WHERE gap.ordinal>=start AND gap.ordinal<blocks.ordinal AND gap.block->>'kind'<>'heading')
+    ), connected AS (
+        SELECT text,ordinal,line_ordinal,lag(text) OVER(ORDER BY ordinal,line_ordinal) AS previous FROM title_lines WHERE text<>''
+    )
+    SELECT jsonb_build_object('text',string_agg(CASE WHEN previous~'[A-Za-z0-9]$' AND text~'^[A-Za-z0-9]' THEN ' ' ELSE '' END || text,'' ORDER BY ordinal,line_ordinal)) AS block,min(ordinal) AS ordinal FROM connected HAVING count(*)>0
 ) heading ON true
-WHERE (origin.purpose='cover' OR (origin.display_order_state='KNOWN' AND origin.display_ordinal=1))
+WHERE (origin.purpose='cover' OR (origin.display_order_state='KNOWN' AND origin.display_ordinal=1 AND NOT EXISTS(SELECT 1 FROM current_origin cover WHERE cover.purpose='cover')))
   AND linggan_dossier_slot_active(origin.content_public_ref,origin.slot_key,$2::timestamptz)
   AND NOT EXISTS (
     SELECT 1 FROM linggan_current_material_media_disposition disposition

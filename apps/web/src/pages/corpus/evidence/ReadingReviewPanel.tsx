@@ -5,17 +5,25 @@ import { ApiError } from '../../../shared/api';
 import { fetchCandidates, reviewReading } from './dossierApi';
 import { DossierBlocks, DossierIssues } from './DossierBlocks';
 import { DossierBlockEditor } from './DossierBlockEditor';
-import { hideCachedReading } from './dossierPresent';
+import { existingResultPending, hideCachedReading, processingLabel } from './dossierPresent';
 import type { DossierBlock, DossierMaterial, ReadingCandidate, ReadingReviewRequest, ReadingReviewReceipt } from './dossierTypes';
 import styles from './Dossier.module.css';
 
 interface Props {
   unit: DossierMaterial; work: string; domain: string; onApplied: (receipt: ReadingReviewReceipt) => void;
-  initialCandidate?: ReadingCandidate; initiallyOpen?: boolean; originalReadable?: boolean; showCurrentReading?: boolean;
+  initialCandidate?: ReadingCandidate; initiallyOpen?: boolean; originalReadable?: boolean; showCurrentReading?: boolean; onOpenMaintenance?: () => void;
 }
 const PRODUCER = { platform: '平台原文', ordinary_ocr: '普通识字', local_vision: '本地重新识读', cloud_vision: '云端重新识读', asr: '音频转写', frame_ocr: '画面识字', human_edit: '人工修正' };
 const ACTION_LABEL = { adopt: '采用候选', edit: '人工修正', keep: '保留当前读本', pending: '待核验', reject: '拒绝候选' };
 function copyBlocks(blocks: DossierBlock[]): DossierBlock[] { return structuredClone(blocks); }
+function MissingReading({ unit, onOpenMaintenance }: Pick<Props, 'unit' | 'onOpenMaintenance'>) {
+  if (existingResultPending(unit)) return unit.kind === 'image'
+    ? <><p className={styles.note}>已有识别结果，可先整理为读本。</p>{onOpenMaintenance ? <ActionButton variant="quiet" onClick={onOpenMaintenance}>前往整理已有结果</ActionButton> : null}</>
+    : <p className={styles.note}>已有处理结果，尚未接入当前读本。</p>;
+  if (unit.sourceState === 'known_empty' || unit.sourceState === 'not_applicable') return <p className={styles.note}>{processingLabel(unit) ?? '当前来源没有可核对的文字。'}</p>;
+  return <p className={styles.note}>{unit.kind === 'image' ? '尚无可核对的读本，请先完成图片识别。' : unit.kind === 'audio' ? '尚无可核对的读本，请先取得音轨转写结果。' : unit.kind === 'video_frame' ? '尚无可核对的读本，请先取得画面识别结果。' : '尚无可核对的读本，请先取得来源文字。'}</p>;
+}
+
 /** Each material session owns its request identity; uncertain writes stay retryable with that identity. */
 export function ReadingReviewPanel(props: Props) {
   const [open, setOpen] = useState(props.initiallyOpen ?? false); const [activated, setActivated] = useState(props.initiallyOpen ?? false);
@@ -23,7 +31,7 @@ export function ReadingReviewPanel(props: Props) {
     {activated ? <div hidden={!open}><ReviewContent key={`${props.domain}:${props.work}:${props.unit.ref}`} {...props} /></div> : null}
   </section>;
 }
-function ReviewContent({ unit, work, domain, onApplied, initialCandidate, originalReadable, showCurrentReading }: Props) {
+function ReviewContent({ unit, work, domain, onApplied, initialCandidate, originalReadable, showCurrentReading, onOpenMaintenance }: Props) {
   const versionLabel = useId();
   const query = useQuery({ queryKey: ['dossier-candidates', domain, work], queryFn: ({ signal }) => fetchCandidates(work, domain, signal), retry: false, gcTime: 0 });
   const [expected, setExpected] = useState(unit.currentRevisionRef);
@@ -83,7 +91,7 @@ function ReviewContent({ unit, work, domain, onApplied, initialCandidate, origin
     {query.isError ? <p role="status">{expected === null ? '候选版本暂时不可读。' : '候选版本暂时不可读；当前读本仍可核对。'}<button type="button" onClick={() => void query.refetch()}>重读候选</button></p> : null}
     {options.length > 0 ? <label><span id={versionLabel}>核对版本</span><select aria-labelledby={versionLabel} disabled={busy || pending !== null || changed} value={candidate?.candidateRevisionRef ?? ''} onChange={event => select(event.target.value)}>
       <option value="">{expected === null ? '尚未采用读本' : '当前采用读本'}</option>{options.map((value, index) => <option key={value.candidateRevisionRef} value={value.candidateRevisionRef}>{`${PRODUCER[value.generatedBy]} · 候选 ${index + 1} · ${value.createdAt}`}</option>)}
-    </select></label> : !query.isPending && !query.isError ? <p className={styles.note}>{expected === null ? '尚无可核对的读本，请先完成图片识别。' : '当前没有其他候选版本。'}</p> : null}
+    </select></label> : !query.isPending && !query.isError ? expected === null ? <MissingReading unit={unit} onOpenMaintenance={onOpenMaintenance} /> : <p className={styles.note}>当前没有其他候选版本。</p> : null}
     {changed && pending === null ? <p role="status">底稿已有新版本，未提交的修改仍保留。<button type="button" onClick={reset}>使用最新读本</button></p> : null}
     {selectedRef !== null || pending !== null ? <>
     {originalUnavailable ? <p role="status">原始媒体当前不可读，已有文字仍可阅读。恢复原始媒体后才能提交新的人工决定。</p> : null}

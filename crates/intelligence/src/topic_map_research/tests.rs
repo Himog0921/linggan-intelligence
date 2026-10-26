@@ -32,6 +32,7 @@ fn input(fragments: Vec<Fragment>) -> ResearchInput {
     let work_ref = Uuid::from_u128(1);
     let mut input = ResearchInput {
         work: DiscoveryWork {
+            reading_title: serde_json::Value::Null,
             work_ref,
             usage_roles: vec!["primary".into()],
             creator_key: None,

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, requestText } from '../../../shared/api';
 import { parseBlock } from './dossierBlockDecode';
-import { parseCandidates, parseDossierComments, parseDossierPayload, parseReadingReceipt } from './dossierDecode';
+import { parseCandidates, parseDossierComments, parseDossierPayload, parseReadingReceipt, parseRelayerPlanResponse, parseRelayerReceipt } from './dossierDecode';
 import { fetchDossier, fetchDossierMarkdown, fetchReadingVersion, reviewReading } from './dossierApi';
 import { nestComments } from './dossierPresent';
 import { DOMAIN, dossierCommentsJson, dossierJson, dossierMaterialJson, mediaHandle, workRef } from './evidenceFixtures';
@@ -22,6 +22,18 @@ describe('research-dossier.v2', () => {
     for (const patch of [{ contract: 'research-dossier.v1' }, { fragments: [] }, { media: [] }, { materials: [dossierMaterialJson(1), dossierMaterialJson(1)] }, { materials: [dossierMaterialJson(1, { sourceState: 'UNKNOWN' })] }]) {
       const value = dossierJson(1); expect(() => parseDossierPayload({ ...value, dossier: { ...value.dossier, ...patch } })).toThrow(ApiError);
     }
+  });
+  it('阅读编排仅包含唯一且存在的引用，标题保留来源引用而不复制文字', () => {
+    const raw = dossierJson(1); const refs = raw.dossier.readingView;
+    const dto = parseDossierPayload(raw).dossier;
+    expect(dto.readingView).toEqual(refs);
+    for (const readingView of [
+      { mainBlockRefs: ['missing'], supplementBlockRefs: refs.supplementBlockRefs },
+      { mainBlockRefs: refs.mainBlockRefs, supplementBlockRefs: [...refs.mainBlockRefs, ...refs.supplementBlockRefs] },
+      { mainBlockRefs: [], supplementBlockRefs: [] },
+    ]) expect(() => parseDossierPayload({ ...raw, dossier: { ...raw.dossier, readingView } })).toThrow(ApiError);
+    expect(() => parseDossierPayload({ ...raw, dossier: { ...raw.dossier, note: { ...raw.dossier.note, titleBlockRefs: ['missing'] } } })).toThrow(ApiError);
+    expect(() => parseDossierPayload({ ...raw, dossier: { ...raw.dossier, note: { ...raw.dossier.note, displayTitleBasis: 'image_heading' } } })).toThrow(ApiError);
   });
   it('未知总页数与已知零分别保留，不推算进度或页码', () => {
     const base = dossierJson(1);
@@ -106,4 +118,15 @@ describe('on-demand reads and scoped writes', () => {
     const nodes = nestComments([{ sourceRef: 'r', parentSourceRef: null, relation: 'ROOT' as const }, { sourceRef: 'a', parentSourceRef: 'missing', relation: 'REPLY' as const }]);
     expect(nodes[1]?.orphan).toBe(true);
   });
+});
+
+it('待取得计数是plan与回执的必填非负整数，与待识字分开', () => {
+  const raw = dossierJson(1, { plan: { needsAcquisition: 1, needsOcr: 0 } });
+  expect(parseDossierPayload(raw).relayerPlan).toMatchObject({ needsAcquisition: 1, needsOcr: 0 });
+  const receipt = { scopeCount: 10, updated: 10, alreadyCurrent: 0, skipped: 0, needsAcquisition: 1, needsOcr: 0 };
+  expect(parseRelayerReceipt(receipt)).toMatchObject({ needsAcquisition: 1, needsOcr: 0 });
+  for (const needsAcquisition of [undefined, -1, 1.5, '1']) {
+    expect(() => parseRelayerPlanResponse({ relayerPlan: { ...raw.relayerPlan, needsAcquisition } })).toThrow(ApiError);
+    expect(() => parseRelayerReceipt({ ...receipt, needsAcquisition })).toThrow(ApiError);
+  }
 });

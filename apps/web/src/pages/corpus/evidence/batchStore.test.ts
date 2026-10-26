@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { BATCH_KEY, createBatch, hasPendingBatch, loadBatch, saveBatch } from './batchStore';
-import { DOMAIN, workRef } from './evidenceFixtures';
+import { DOMAIN, planJson, workRef } from './evidenceFixtures';
 
 afterEach(() => sessionStorage.clear());
 
@@ -40,4 +40,26 @@ describe('批量整理断点（L16）', () => {
       expect(loadBatch(), bad).toBeNull();
     }
   });
+});
+
+it('恢复真实旧格式session JSON时只失效未完成预览，保留固定范围、已完成结果与待确认语义', () => {
+  // Serialized v1 checkpoint shape before needsAcquisition existed; needsOcr included missing originals.
+  const stored = `{"domain":"${DOMAIN}","items":[
+    {"work":"${workRef(1)}","state":"ready","plan":{"workCount":1,"imageSlots":11,"imageJobs":36,"layoutCount":10,"pendingLayouts":10,"alreadyCurrent":0,"needsOcr":1,"pendingReviewCount":0,"expectedRevision":"old-revision"}},
+    {"work":"${workRef(2)}","state":"done","result":{"updated":1,"alreadyCurrent":0,"skipped":0}},
+    {"work":"${workRef(3)}","state":"failed","failure":"unconfirmed","plan":{"layoutCount":1,"pendingLayouts":1,"alreadyCurrent":0,"needsOcr":0,"pendingReviewCount":0,"expectedRevision":"uncertain-revision"}}
+  ]}`;
+  sessionStorage.setItem(BATCH_KEY, stored);
+  const batch = loadBatch();
+  expect(batch?.items.map(item => item.work)).toEqual([workRef(1), workRef(2), workRef(3)]);
+  expect(batch?.items[0]).toEqual({ work: workRef(1), state: 'pending', plan: null });
+  expect(batch?.items[1]).toEqual({ work: workRef(2), state: 'done', result: { updated: 1, alreadyCurrent: 0, skipped: 0 } });
+  expect(batch?.items[2]).toEqual({ work: workRef(3), state: 'failed', failure: 'unconfirmed', plan: null });
+  expect(sessionStorage.getItem(BATCH_KEY)).toBe(stored);
+  expect(hasPendingBatch()).toBe(true);
+});
+it('新版预览保留待取得与待识字独立计数，不因恢复断点而重置', () => {
+  const plan = planJson({ needsAcquisition: 1, needsOcr: 0 });
+  sessionStorage.setItem(BATCH_KEY, JSON.stringify({ domain: DOMAIN, items: [{ work: workRef(1), state: 'ready', plan }] }));
+  expect(loadBatch()?.items[0]).toEqual({ work: workRef(1), state: 'ready', plan });
 });

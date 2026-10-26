@@ -218,3 +218,13 @@
 .editorBlock { min-width: 0; display: grid; gap: var(--lgi-space-2); }
 .editorGrid { min-width: 0; display: flex; flex-wrap: wrap; gap: var(--lgi-space-2); }
 .editorGrid > label { flex: 1 1 var(--lgi-space-24); }
+
+/* STANDARD-DOSSIER-001 reuses the inspector reading hierarchy and LIDS tokens. */
+.readingTitle { margin-block: var(--lgi-space-4); min-width: 0; }
+.readingTitle h2 { margin: 0; overflow-wrap: anywhere; font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
+.readingHeading { margin: var(--lgi-space-4) 0 var(--lgi-space-3); font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
+.readingGroup { min-width: 0; margin-block: var(--lgi-space-3); }
+.materialHead h4 { margin: 0; font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); }
+.sourceLink { padding: 0; border: 0; background: transparent; color: var(--lgi-muted); font: inherit; text-decoration: underline; cursor: pointer; }
+.originals { margin-top: var(--lgi-space-5); }
+.material { scroll-margin-top: var(--lgi-space-4); }

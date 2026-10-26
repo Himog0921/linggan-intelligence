@@ -11,7 +11,7 @@ pub fn prepare(domain: &Value, work: &DiscoveryWork, as_of: &str) -> (Value, Vec
     let fragments = work.fragments.clone();
     let materials = provider_materials(&fragments);
     let input = json!({"domain":domain,"workRef":work.work_ref,"asOf":as_of,"sourceFingerprint":work.fingerprint,
-        "materialContract":research_dossier::VERSION,"materials":materials,
+        "materialContract":research_dossier::VERSION,"readingTitle":work.reading_title,"materials":materials,
         "acquisitionContext":{"kind":work.acquisition_kind,"selectionBiased":true}});
     (input, fragments)
 }

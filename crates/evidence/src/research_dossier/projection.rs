@@ -16,6 +16,27 @@ pub(super) fn assemble(
     }
     let slots = super::duplicates::collapse(inventory.slots.clone(), &readings);
     let mut media = media_materials(work, &readings, &slots);
+    for material in &mut media {
+        if material["kind"] == "image"
+            && material["sourceState"] == "present"
+            && material["blocks"].as_array().is_some_and(Vec::is_empty)
+            && material["processing"]["reason"] != "no_text_observed"
+            && layouts.iter().any(|layout| {
+                super::same_image_source(material, layout)
+                    && layout["humanProtected"] != true
+                    && layout["ruleVersion"] != super::relayer::rule_version()
+            })
+        {
+            let issues = material["issues"].as_array_mut().expect("material issues");
+            issues.retain(|issue| issue["code"] != "not_processed");
+            issues.push(issue(
+                "existing_result_pending",
+                "existing_result_pending",
+                "已有识别结果，待整理",
+                "source_refresh",
+            ));
+        }
+    }
     if let Some(expected) = expected_pages(&inventory) {
         for page in 1..=expected {
             if !media
@@ -33,17 +54,8 @@ pub(super) fn assemble(
             }
         }
     }
-    media.sort_by_key(|m| {
-        (
-            match m["kind"].as_str() {
-                Some("image") => 0,
-                Some("audio") => 1,
-                _ => 2,
-            },
-            m["page"].as_u64().unwrap_or(u64::MAX),
-            m["slotKey"].to_string(),
-        )
-    });
+    // Stable observed media order; known pages retain platform sequence.
+    media.sort_by_key(|m| m["page"].as_u64().unwrap_or(u64::MAX));
     materials.extend(media);
     let note = note(work, &materials, &slots);
     let fragments = fragments(work, &materials);
@@ -60,6 +72,7 @@ pub(super) fn assemble(
         as_of: as_of.into(),
         note,
         materials,
+        reading_view: Value::Null,
         coverage,
         attachments: json!({"comments":{"href":format!("{base}/comments")},
             "author":{"href":format!("{base}/metadata?sections=author")},"interaction":{"href":format!("{base}/metadata?sections=interaction")},
@@ -71,6 +84,7 @@ pub(super) fn assemble(
         candidate_statuses: vec![],
         metadata: metadata(work),
     };
+    super::reading::rebuild(&mut dossier);
     super::refresh_revision(&mut dossier);
     dossier.selection = json!({"mode":"full","kinds":[],"unitRefs":[],"blockRefs":[],"imagePages":[],"omittedUnits":0,"completeRevision":dossier.revision});
     dossier
@@ -113,7 +127,32 @@ fn body(work: &WorkResourceCurrent, readings: &[Value]) -> Value {
     );
     unit["sourceRef"] = json!(work.body_source.material_ref);
     unit["sourceVersion"] = json!(source);
-    if source.is_some() {
+    if let Some(text) = work
+        .body_text
+        .as_deref()
+        .filter(|_| work.body_state == "KNOWN" && source.is_some())
+    {
+        unit["blocks"] = json!(
+            content::blocks_from_text(text, "author")
+                .into_iter()
+                .enumerate()
+                .map(|(i, mut b)| {
+                    b["ref"] = json!(format!(
+                        "{}.{}.body.{i}",
+                        work.public_ref,
+                        source.as_deref().unwrap_or("")
+                    ));
+                    b
+                })
+                .collect::<Vec<_>>()
+        );
+        unit["sourceState"] = json!(if text.trim().is_empty() {
+            "known_empty"
+        } else {
+            "present"
+        });
+        unit["reading"] = json!({"generatedBy":"platform","adoption":"automatic","verification":"unchecked","ruleVersion":content::RULE_VERSION,"review":null});
+    } else if source.is_some() {
         unit["issues"] = json!([issue(
             "body_not_processed",
             "not_processed",
@@ -213,15 +252,23 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
             material["sourceRef"] = slot["sourceRef"].clone();
             material["sourceVersion"] = slot["sourceVersion"].clone();
             material["page"] = if *kind == "image" {
-                slot["page"].clone()
+                if slot["displayOrderState"] == "KNOWN" {
+                    slot["page"].clone()
+                } else {
+                    Value::Null
+                }
             } else {
                 Value::Null
             };
-            material["originalUrl"] = if *kind == "image" {
-                slot["originalUrl"].clone()
-            } else {
-                Value::Null
-            };
+            material["originalUrl"] = slot["originalUrl"].clone();
+            material["purpose"] = slot["purpose"].clone();
+            if let Some(processing) = slot["processing"].get(match *kind {
+                "audio" => "asr",
+                "video_frame" => "video_frame_ocr",
+                _ => "image_ocr",
+            }) {
+                material["processing"] = processing.clone();
+            }
             if let Some(page_source) = slot.get("pageSource") {
                 material["pageSource"] = page_source.clone();
             }
@@ -284,21 +331,10 @@ fn note(work: &WorkResourceCurrent, materials: &[Value], slots: &[Value]) -> Val
             && work.title_qualification == "source_value"
             && !title.trim().is_empty()
     });
-    let heading = materials
-        .iter()
-        .filter(|m| {
-            m["kind"] == "image"
-                && (m["page"] == 1
-                    || slots
-                        .iter()
-                        .any(|s| s["purpose"] == "cover" && s["slotKey"] == m["slotKey"]))
-        })
-        .flat_map(|m| m["blocks"].as_array().into_iter().flatten())
-        .find(|b| b["kind"] == "heading")
-        .and_then(|b| b["text"].as_str());
+    let _ = (materials, slots);
     json!({"platform":work.platform,"externalId":work.content_external_id,"sourceUrl":source_url(work),
         "platformTitle":title,"titleSource":work.title_source.material_ref.map(|r|json!({"sourceRef":r,"sourceVersion":r.to_string()})),
-        "displayTitle":title.or(heading),"displayTitleBasis":if title.is_some(){"platform"}else if heading.is_some(){"image_heading"}else{"missing"}})
+        "displayTitle":title,"displayTitleBasis":if title.is_some(){"platform"}else{"missing"},"titleBlockRefs":[]})
 }
 
 fn source_url(work: &WorkResourceCurrent) -> Option<String> {

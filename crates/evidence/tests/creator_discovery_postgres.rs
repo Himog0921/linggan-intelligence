@@ -260,9 +260,15 @@ async fn handbook_fixture_and_same_work_counterexamples() {
     let data = load(&db, &q).await.unwrap();
     let after_metric = data.works.iter().find(|w| w.work_ref == refs[10]).unwrap();
     assert_eq!(after_metric.likes, Some(901));
-    assert_eq!(
+    assert_ne!(
         after_metric.fingerprint, before_metric_fingerprint,
-        "a like refresh with unchanged text must not queue new semantic analysis"
+        "a new admitted source version has different precise citations even when its text is unchanged"
+    );
+    assert!(
+        after_metric
+            .fragments
+            .iter()
+            .any(|f| f.field == "body" && f.text == "这是作品11的具体实践过程")
     );
     for (i, (_, _, relevance, personal)) in fixture.iter().enumerate() {
         let w = data.works.iter().find(|w| w.work_ref == refs[i]).unwrap();

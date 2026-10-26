@@ -26,9 +26,38 @@ function dossierResponse(response) {
 function material(dossier, ref) { const unit = dossier.materials.find(unit => unit.ref === ref); assert.ok(unit, `material ${ref} exists`); return unit; }
 function issueList(unit) { return [...new Map([...unit.issues, ...unit.blocks.flatMap(block => block.issues ?? [])].map(issue => [issue.key, issue])).values()]; }
 async function snapshot(name) { await page.screenshot({ path: path.join(directory, name) }); }
+async function focusBelowHeader(target) {
+  const position = await target.evaluate(node => {
+    const inspector = node.closest('aside'); const header = inspector.querySelector(':scope > header');
+    const inset = parseFloat(getComputedStyle(inspector).getPropertyValue('--lgi-space-4'));
+    inspector.scrollTop += node.getBoundingClientRect().top - header.getBoundingClientRect().bottom - inset;
+    return { targetTop: node.getBoundingClientRect().top, headerBottom: header.getBoundingClientRect().bottom };
+  });
+  assert.ok(position.targetTop >= position.headerBottom - 1, `focused evidence clears the sticky header: ${JSON.stringify(position)}`);
+}
+
 async function checkWidth(stage) {
   const size = await page.evaluate(() => ({ actual: document.documentElement.scrollWidth, viewport: innerWidth }));
   report.widths.push({ stage, ...size }); assert.ok(size.actual <= size.viewport, `${stage}: ${JSON.stringify(size)}`);
+  if (size.viewport >= 1280) {
+    const clippedMetrics = await page.locator('[data-layout="research"] [data-engagement-metrics]').evaluateAll(rows => rows.flatMap(row => [...row.children].filter(item => {
+      const text = item.querySelector('b'); const box = item.getBoundingClientRect(); const available = row.getBoundingClientRect();
+      return text && (text.scrollHeight > Math.ceil(parseFloat(getComputedStyle(text).lineHeight)) || box.right > available.right + 1 || box.height > available.height + 1);
+    }).map(item => item.textContent)));
+    assert.deepEqual(clippedMetrics, [], `${stage}: interaction labels fit one unclipped line`);
+  }
+}
+async function assertReading(dossier, panel) {
+  const refs = [...dossier.readingView.mainBlockRefs, ...dossier.readingView.supplementBlockRefs].filter(ref => !dossier.note.titleBlockRefs.includes(ref));
+  assert.deepEqual(await panel.locator('[data-block-ref]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-block-ref'))), refs, 'the reading follows the canonical ref order exactly once');
+  const title = dossier.note.displayTitle ?? '无标题';
+  assert.equal(await page.locator('[data-work-title]').count(), 1, 'one visible work title');
+  assert.equal(await page.locator('[data-work-title]').textContent(), title, 'the shared header uses the canonical title');
+  for (const ref of refs) {
+    const block = dossier.materials.flatMap(unit => unit.blocks).find(block => block.ref === ref);
+    const rendered = panel.locator(`[data-block-ref="${ref}"]`);
+    if (typeof block.text === 'string') assert.ok((await rendered.textContent()).includes(block.text), `complete source text ${ref}`);
+  }
 }
 async function jsonResponse(response) { assert.equal(response.status(), 200, await response.text()); return response.json(); }
 async function download(label, filename) {
@@ -84,10 +113,14 @@ try {
   }
   assert.equal(await bodyView.locator('table').count(), body.blocks.filter(block => block.kind === 'table').length);
   report.steps.push('Actual v2 GET renders more than 100k characters, lists, table and quotation continuously without a content fold.');
+  await assertReading(initial, panel);
+  assert.equal(await panel.getByLabel('审核人', { exact: true }).count(), 0, 'reading does not open an empty review form');
   await checkWidth('1440 initial reading'); await snapshot('research-dossier-v2-1440.png');
   const tail = body.blocks.find(block => typeof block.text === 'string' && block.text.includes(longTail));
   await bodyView.locator(`[data-block-ref="${tail.ref}"]`).evaluate(node => node.scrollIntoView({ block: 'end' }));
   await snapshot('research-dossier-v2-tail-1440.png');
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await checkWidth('1280 full reading'); await snapshot('research-dossier-v2-1280.png');
   await page.setViewportSize({ width: 390, height: 844 });
   await checkWidth('390 full reading');
   assert.ok((await bodyView.textContent()).includes(longTail)); await snapshot('research-dossier-v2-390.png');
@@ -102,7 +135,8 @@ try {
   assert.ok(markdown.length > 100000); assert.ok(markdown.includes(longTail));
   report.steps.push('JSON download equals the original payload; separate Markdown download uses the same cutoff and contains the complete long body.');
 
-  const image = panel.locator(`[data-unit-ref="${imageUnitRef}"]`);
+  const image = panel.locator(`[data-source-unit-ref="${imageUnitRef}"]`);
+  const imageReading = panel.locator(`[data-unit-ref="${imageUnitRef}"]`);
   const before = material(initial, imageUnitRef); assert.ok(before.currentRevisionRef);
   await image.locator('summary').filter({ hasText: /^对照原图/ }).click();
   const sourceImage = image.getByRole('img'); await sourceImage.waitFor();
@@ -157,7 +191,7 @@ try {
   assert.equal(editedUnit.blocks.find(block => block.kind === 'table').rows[0][0], editedCell);
   const unresolved = issueList(editedUnit);
   for (const issue of issues) assert.equal(unresolved.some(value => value.key === issue.key), issue.resolution === 'source_refresh');
-  await image.getByText(editedCell, { exact: true }).first().waitFor();
+  await imageReading.getByText(editedCell, { exact: true }).first().waitFor();
   report.steps.push('Edited table/list/dialogue structures on the adopted current reading; full fields survived 390px layout; only selected reading issues were resolved.');
 
   const kept = await applyReview('keep', image.getByRole('button', { name: '保留当前读本', exact: true }));
@@ -171,6 +205,73 @@ try {
   assert.ok(JSON.stringify(finalExport).includes(longTail));
   report.steps.push('Keep-current preserved the edited revision; final canonical JSON contains the complete revised blocks and untouched long body.');
   assert.deepEqual(commands.map(command => command.action), ['adopt', 'edit', 'keep']); assert.equal(new Set(commands.map(command => command.commandRef)).size, 3);
+  for (const [index, scenario] of (fixture.scenarios ?? []).entries()) {
+    assert.match(scenario.work, /^[0-9a-f-]{36}$/i);
+    const scenarioDomain = scenario.domain ?? domain;
+    const read = page.waitForResponse(response => new URL(response.url()).pathname === `/api/local/work-resources/${scenario.work}/research-dossier` && response.request().method() === 'GET');
+    await page.goto(`${origin}/corpus/evidence?domain=${scenarioDomain}&work=${scenario.work}&tab=dossier&panel=wide`);
+    const dossier = (await jsonResponse(await read)).dossier;
+    await panel.getByRole('heading', { name: '研究底稿', exact: true }).waitFor();
+    await assertReading(dossier, panel);
+    assert.equal(await panel.getByLabel('审核人', { exact: true }).count(), 0);
+    assert.equal(await panel.locator('[data-source-unit-ref]').count(), dossier.materials.length);
+    for (const width of [1440, 1280]) {
+      await page.setViewportSize({ width, height: 1000 });
+      await checkWidth(`${scenario.name} ${width}`);
+      await snapshot(`standard-dossier-${index + 1}-${width}.png`);
+    }
+    if (scenario.name === 'video-transcript') {
+      const mediaOriginals = dossier.materials.filter(unit => ['audio', 'video_frame'].includes(unit.kind));
+      assert.equal(mediaOriginals.length, 2);
+      for (const unit of mediaOriginals) {
+        const source = panel.locator(`[data-source-unit-ref="${unit.ref}"]`);
+        const link = source.getByRole('link', { name: '查看音视频原件', exact: true });
+        const url = new URL(await link.getAttribute('href'), origin);
+        assert.equal(url.origin, origin, 'video original stays on the owned candidate');
+        assert.equal(await source.locator('img').count(), 0, 'an original video is never decoded as an image');
+        const original = await context.request.get(url.href);
+        assert.equal(original.status(), 200);
+        assert.match(original.headers()['content-type'], /^video\/mp4/);
+        assert.ok((await original.body()).length > 0, 'saved original bytes are readable');
+      }
+      report.steps.push('Both video-derived units expose the actual local MP4 original through links, with successful same-origin video/mp4 GETs and no image decoder.');
+    }
+    if (['video-transcript', 'partial-images', 'originals-only'].includes(scenario.name)) {
+      for (const width of [1440, 1280]) {
+        await page.setViewportSize({ width, height: 1000 });
+        if (scenario.name === 'video-transcript') {
+          const supplements = panel.getByRole('region', { name: '补充材料', exact: true });
+          await focusBelowHeader(supplements);
+          await snapshot(`standard-dossier-video-supplements-${width}.png`);
+          const audioUnit = dossier.materials.find(unit => unit.kind === 'audio');
+          await focusBelowHeader(panel.locator(`[data-source-unit-ref="${audioUnit.ref}"]`));
+          await snapshot(`standard-dossier-video-originals-${width}.png`);
+        } else if (scenario.name === 'partial-images') {
+          assert.ok(dossier.materials.some(unit => unit.processing?.state === 'failed'), 'partial fixture contains an actual failed processing receipt');
+          const failure = panel.getByText(/^处理失败(?:，已有读本仍可读)?。$/).first();
+          await focusBelowHeader(failure.locator('xpath=ancestor::section[1]'));
+          await snapshot(`standard-dossier-partial-failure-${width}.png`);
+        } else {
+          const originals = panel.getByRole('region', { name: '原件与修正', exact: true });
+          const imageUnit = dossier.materials.find(unit => unit.kind === 'image' && unit.originalUrl);
+          if (imageUnit) {
+            const source = originals.locator(`[data-source-unit-ref="${imageUnit.ref}"]`);
+            const compare = source.locator('details').filter({ hasText: /^对照原图/ }).first();
+            if (await compare.getAttribute('open') === null) await compare.locator('summary').first().click();
+            const image = source.getByRole('img');
+            await image.evaluate(node => {
+              if (node.complete) { if (node.naturalWidth === 0) throw new Error('Synthetic attachment image failed to load'); return; }
+              return new Promise((resolve, reject) => { node.addEventListener('load', resolve, { once: true }); node.addEventListener('error', () => reject(new Error('Synthetic attachment image failed to load')), { once: true }); });
+            });
+          }
+          await focusBelowHeader(originals);
+          await snapshot(`standard-dossier-empty-originals-${width}.png`);
+        }
+        await checkWidth(`${scenario.name} focused ${width}`);
+      }
+    }
+    report.steps.push(`Canonical scenario ${scenario.name}: ${dossier.readingView.mainBlockRefs.length} main and ${dossier.readingView.supplementBlockRefs.length} supplement refs.`);
+  }
   assert.deepEqual(report.blockedRequests, []); assert.deepEqual(report.pageErrors, []); assert.deepEqual(report.consoleErrors, []);
   report.finished = true;
   console.log('research-dossier.v2 browser proof: full reading, exact exports, candidate adoption, structured edit and keep-current PASS');
