@@ -103,11 +103,11 @@ test('every current browser script has an explicit proof or manual-only classifi
     'evidence-real-chain.mjs', 'login-react.mjs', 'offline-preview.mjs',
     'ops-real-chain.mjs', 'research-dossier-v2.mjs', 'settings-real-chain.mjs',
     'settings-trials-real-chain.mjs', 'topics-real-chain.mjs', 'workbench-real-chain.mjs',
+    'login-lifecycle.mjs', 'shell-layout.mjs', 'topic-workspace-real-chain.mjs',
   ];
   const ocrAudit = ['ocr-audit-real-chain.mjs', 'ocr-recognition-real-chain.mjs'];
   const manualOnly = [
-    'login-lifecycle.mjs', 'ops-visual.mjs', 'shell-layout.mjs',
-    'team-member-scroll.mjs', 'topic-workspace-real-chain.mjs',
+    'ops-visual.mjs', 'team-member-scroll.mjs',
     'topics-performance.mjs', 'topics-pixels.py', 'topics-visual.mjs',
   ];
   assert.deepEqual(readdirSync(join(root, 'apps/web/test/e2e')).sort(),
