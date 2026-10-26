@@ -155,7 +155,7 @@ try {
   const current=afterHuman.dossier.materials.find(item=>item.ref===unit.ref);
   assert.equal(current.currentRevisionRef,receipt.currentRevisionRef);assert.ok(current.blocks.some(block=>block.text===manualText));
   assert.equal(current.reading.review.actor,human.actor);assert.equal(current.reading.review.reason,human.reason);
-  await dossier.getByText(manualText,{exact:true}).waitFor();
+  await dossier.getByText(manualText,{exact:true}).first().waitFor();
   await dossier.getByText(/2 张图片已进入当前底稿/).waitFor();
   const sameRun=await readJson(statePath);assert.equal(sameRun.runRef,final.runRef);
   assert.equal(sameRun.images[0].isCurrent,false);assert.equal(sameRun.images[0].rawJson,final.images[0].rawJson);

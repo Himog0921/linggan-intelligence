@@ -154,3 +154,90 @@ async fn unexpected_human_dependency_aborts_atomically_without_deleting_transcri
         .unwrap()
     );
 }
+
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL only; no provider calls"]
+async fn comment_bootstrap_batch_only_ocr_dependency_is_purged_and_unrelated_comment_results_survive()
+ {
+    let db = baseline("purge_cs").await;
+    let work = support::work(&db).await;
+    support::current_image_reading(&db).await;
+    support::model_config(&db).await;
+    support::fixture::submit_package(&db, "comments", json!({"contentExternalId":"dossier-note"}), json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"commentId":"keep-original-comment","noteId":"dossier-note","text":"Preserve this original comment."}})).await;
+    for schema in [
+        include_str!("../../../database/bootstrap/comment-study-001.sql"),
+        include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql"),
+        include_str!("../../../database/migrations/0108_comment_study_policy_constraints.sql"),
+        include_str!("../../../database/migrations/0109_comment_study_start_constraints.sql"),
+        include_str!(
+            "../../../database/migrations/0110_comment_study_request_snapshot_constraints.sql"
+        ),
+        include_str!("../../../database/migrations/0111_comment_study_pair_failure_state.sql"),
+        include_str!("../../../database/migrations/0112_comment_study_membership_revision.sql"),
+        include_str!("../../../database/migrations/0114_comment_study_effective_head.sql"),
+        include_str!("../../../database/migrations/0147_comment_study_full_context.sql"),
+        include_str!("support/ocr_cleanup_comment_study.sql"),
+    ] {
+        sqlx::raw_sql(schema).execute(db.pool()).await.unwrap();
+    }
+    let before = counts(&db).await;
+    let guards: Value = sqlx::query_scalar("SELECT jsonb_object_agg(c.relname||'.'||t.tgname,t.tgenabled) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.relname NOT LIKE 'linggan_ocr_audit_%'").fetch_one(db.pool()).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::raw_sql(PURGE).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(counts(&db).await, before);
+    for (table, key, dirty, clean) in [
+        ("linggan_comment_study_run", "run_ref", 2, 3),
+        ("linggan_comment_study_work", "run_ref", 2, 3),
+        ("linggan_comment_study_batch", "batch_ref", 4, 5),
+        ("linggan_model_invocation", "invocation_ref", 6, 7),
+        (
+            "linggan_comment_study_model_request",
+            "invocation_ref",
+            6,
+            7,
+        ),
+        ("linggan_comment_study_start_request", "request_ref", 8, 9),
+    ] {
+        let (dirty, clean) = (
+            Uuid::parse_str(&format!("b1680000-0000-4000-8000-{dirty:012}")).unwrap(),
+            Uuid::parse_str(&format!("b1680000-0000-4000-8000-{clean:012}")).unwrap(),
+        );
+        let query = format!("SELECT count(*) FROM {table} WHERE {key}=$1");
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(query.clone()))
+                .bind(dirty)
+                .fetch_one(db.pool())
+                .await
+                .unwrap(),
+            0,
+            "dirty {table}"
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(query))
+                .bind(clean)
+                .fetch_one(db.pool())
+                .await
+                .unwrap(),
+            1,
+            "keep {table}"
+        );
+    }
+    let result: String = sqlx::query_scalar("SELECT result->>'syntheticText' FROM linggan_model_invocation WHERE invocation_ref='b1680000-0000-4000-8000-000000000007'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(result, "KEEP-UNRELATED-COMMENT-RESULT");
+    let after_guards: Value = sqlx::query_scalar("SELECT jsonb_object_agg(c.relname||'.'||t.tgname,t.tgenabled) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.relname NOT LIKE 'linggan_ocr_audit_%'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        guards, after_guards,
+        "all surviving trigger states restored exactly"
+    );
+    for sql in [
+        "DELETE FROM linggan_comment_study_run WHERE run_ref='b1680000-0000-4000-8000-000000000003'",
+        "DELETE FROM linggan_comment_study_start_request WHERE request_ref='b1680000-0000-4000-8000-000000000009'",
+        "DELETE FROM linggan_comment_study_model_request WHERE invocation_ref='b1680000-0000-4000-8000-000000000007'",
+    ] {
+        assert!(
+            sqlx::query(sql).execute(db.pool()).await.is_err(),
+            "restored immutable guard must reject deletion"
+        );
+    }
+}
