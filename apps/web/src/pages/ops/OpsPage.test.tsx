@@ -16,14 +16,16 @@ let noAccounts = false;
 let nativeOnly = false;
 let persistedSync = false;
 let fieldConflict = false;
+let sessionRole = 'admin';
 const requests: URL[] = [];
 const requestBodies: unknown[] = [];
 beforeEach(() => {
-  requests.length = 0; requestBodies.length = 0; failPublications = false; noAccounts = false; nativeOnly = false; persistedSync = false; fieldConflict = false;
+  requests.length = 0; requestBodies.length = 0; failPublications = false; noAccounts = false; nativeOnly = false; persistedSync = false; fieldConflict = false; sessionRole = 'admin';
   vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const url = new URL(path, 'http://localhost'); requests.push(url);
     if (options?.body) requestBodies.push(JSON.parse(String(options.body)));
     const endpoint = url.pathname.split('/').at(-1);
+    if (endpoint === 'session') return new Response(JSON.stringify({ member: { ref: 'member-1', displayName: '合成成员', role: sessionRole } }), { headers: { 'Content-Type': 'application/json' } });
     if (endpoint === 'publication-syncs') return new Response(JSON.stringify({
       requestRef: 'sync-request', selectedCount: 1, replayed: false, items: [{
         publicationRef: 'pub', decision: 'accepted', code: 'accepted', acquisitionRequestRef: 'request', workOrderRef: 'work-order',
@@ -67,6 +69,15 @@ it('uses two secondary destinations and data tabs in Z02, preserving selected bu
   expect(within(nav).getAllByRole('link').map(link => link.textContent)).toEqual(['概览','发布记录','账号管理','每日数据']);
   expect(screen.queryByText('导入导出')).not.toBeInTheDocument();
   expect(within(nav).getByRole('link', { name: '账号管理' })).toHaveAttribute('href', '/ops/accounts?domain=d1');
+});
+it('limits the operator navigation and keeps prior sync state noninteractive on localhost', async () => {
+  sessionRole = 'operator'; persistedSync = true; show();
+  await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
+  expect(within(screen.getByLabelText('运营导航')).queryByRole('link', { name: '创作' })).not.toBeInTheDocument();
+  expect(within(screen.getByRole('navigation', { name: '数据页面' })).getAllByRole('link').map(link => link.textContent)).toEqual(['发布记录', '账号管理', '每日数据']);
+  expect(screen.queryByRole('button', { name: '同步数据' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '等待分派' })).not.toBeInTheDocument();
+  expect(screen.getByText('等待分派')).toBeInTheDocument();
 });
 it('retires the IO screen and redirects its old deep link without executing export/import', async () => {
   show('/ops/io?domain=d1');

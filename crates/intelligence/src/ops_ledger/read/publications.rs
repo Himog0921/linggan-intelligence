@@ -291,12 +291,26 @@ const FILTERED: &str = "kept AS ( \
        AND ($4::text IS NULL OR a.account_name ILIKE $4 ESCAPE '\\') \
        AND ($5::date IS NULL OR coalesce(p.published_business_date,p.native_published_on) >= $5::date) \
        AND ($6::date IS NULL OR coalesce(p.published_business_date,p.native_published_on) <= $6::date) \
-       AND (NOT $7 OR (p.platform = 'xhs' AND lv.view_count IS NULL)))";
+       AND (NOT $7 OR (p.platform = 'xhs' AND lv.view_count IS NULL)) \
+       AND ($8::uuid[] IS NULL OR (p.source_system='linggan_native' AND (p.native_publisher_member_ref=ANY($8) OR a.current_responsible_member_ref=ANY($8))) \
+            OR (p.source_system='content_workbench' AND (SELECT resolution.resolved_member_ref \
+                 FROM linggan_ops_historical_owner_resolution resolution \
+                WHERE resolution.publication_ref=p.publication_ref \
+                ORDER BY resolution.decided_at DESC,resolution.resolution_ref DESC LIMIT 1)=ANY($8))))";
 
 pub async fn read_ops_publications(
     database: &Database,
     business: OpsBusiness,
     filter: OpsPublicationFilter,
+) -> Result<OpsPublicationPage, OpsReadError> {
+    read_ops_publications_scoped(database, business, filter, None).await
+}
+
+pub async fn read_ops_publications_scoped(
+    database: &Database,
+    business: OpsBusiness,
+    filter: OpsPublicationFilter,
+    member_refs: Option<&[Uuid]>,
 ) -> Result<OpsPublicationPage, OpsReadError> {
     let filter = filter.validated()?;
     ensure_business(database, business).await?;
@@ -309,9 +323,17 @@ pub async fn read_ops_publications(
         .bind(filter.from.as_deref())
         .bind(filter.to.as_deref())
         .bind(filter.pending_views)
+        .bind(member_refs)
         .fetch_one(database.pool())
         .await?;
-    let items = read_page(database, business, &filter, Some(OPS_PAGE_SIZE)).await?;
+    let items = read_page(
+        database,
+        business,
+        &filter,
+        Some(OPS_PAGE_SIZE),
+        member_refs,
+    )
+    .await?;
     let operators = names(
         sqlx::query(
             "SELECT DISTINCT coalesce(p.publisher_name,publisher.display_name) AS publisher_name \
@@ -322,9 +344,15 @@ pub async fn read_ops_publications(
                 AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
                 AND coalesce(p.publisher_name,publisher.display_name) IS NOT NULL \
                 AND ($1::uuid IS NULL OR a.domain_ref = $1) \
+                AND ($2::uuid[] IS NULL OR (p.source_system='linggan_native' AND (p.native_publisher_member_ref=ANY($2) OR a.current_responsible_member_ref=ANY($2))) \
+                     OR (p.source_system='content_workbench' AND (SELECT resolution.resolved_member_ref \
+                          FROM linggan_ops_historical_owner_resolution resolution \
+                         WHERE resolution.publication_ref=p.publication_ref \
+                         ORDER BY resolution.decided_at DESC,resolution.resolution_ref DESC LIMIT 1)=ANY($2))) \
               ORDER BY 1",
         )
         .bind(business.domain_ref())
+        .bind(member_refs)
         .fetch_all(database.pool())
         .await?,
     )?;
@@ -345,6 +373,7 @@ async fn read_page(
     business: OpsBusiness,
     filter: &OpsPublicationFilter,
     limit: Option<i64>,
+    member_refs: Option<&[Uuid]>,
 ) -> Result<Vec<OpsPublicationItem>, OpsReadError> {
     let sql = format!(
         "WITH {LATEST_VIEWS_CTE}, {FILTERED} \
@@ -440,7 +469,7 @@ async fn read_page(
           ORDER BY CASE WHEN $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END ASC, \
                    CASE WHEN NOT $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END DESC, \
                    kept.source_created_at DESC NULLS LAST, kept.publication_ref DESC \
-          LIMIT $9 OFFSET $8"
+          LIMIT $10 OFFSET $9"
     );
     let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(business.domain_ref())
@@ -450,6 +479,7 @@ async fn read_page(
         .bind(filter.from.as_deref())
         .bind(filter.to.as_deref())
         .bind(filter.pending_views)
+        .bind(member_refs)
         .bind((filter.page - 1) * OPS_PAGE_SIZE)
         .bind(limit)
         .fetch_all(database.pool())
@@ -464,12 +494,20 @@ pub async fn read_ops_publication_export(
     database: &Database,
     business: OpsBusiness,
 ) -> Result<Vec<OpsPublicationItem>, OpsReadError> {
+    read_ops_publication_export_scoped(database, business, None).await
+}
+
+pub async fn read_ops_publication_export_scoped(
+    database: &Database,
+    business: OpsBusiness,
+    member_refs: Option<&[Uuid]>,
+) -> Result<Vec<OpsPublicationItem>, OpsReadError> {
     ensure_business(database, business).await?;
     let filter = OpsPublicationFilter {
         page: 1,
         ..Default::default()
     };
-    read_page(database, business, &filter, None).await
+    read_page(database, business, &filter, None, member_refs).await
 }
 
 fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError> {

@@ -10,7 +10,7 @@ use super::comment_study::local_comment_study_guard;
 use axum::{
     Router,
     extract::{Path, State},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, Uri, header},
     middleware,
     response::{Html, IntoResponse, Redirect, Response},
     routing::get,
@@ -212,9 +212,16 @@ async fn entry(State(config): State<WebAppConfig>) -> Response {
 async fn authenticated_entry(
     State(state): State<super::LocalWebState>,
     headers: HeaderMap,
+    uri: Uri,
 ) -> Response {
-    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
-        return response;
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    if member.role != "admin"
+        && matches!(uri.path(), "/ops/overview" | "/ops/io" | "/settings/team")
+    {
+        return StatusCode::FORBIDDEN.into_response();
     }
     entry(State(WebAppConfig::from_environment())).await
 }

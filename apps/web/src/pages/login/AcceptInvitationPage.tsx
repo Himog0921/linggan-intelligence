@@ -23,7 +23,7 @@ function errorText(error: unknown) {
 }
 
 /** Invitation material is deliberately held in the fragment: it never reaches page routing logs. */
-export function AcceptInvitationPage({ onEnter = () => window.location.assign('/ops/overview') }: { onEnter?: () => void } = {}) {
+export function AcceptInvitationPage({ onEnter = () => window.location.assign('/ops/publications') }: { onEnter?: () => void } = {}) {
   const token = invitationToken(window.location.hash);
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');

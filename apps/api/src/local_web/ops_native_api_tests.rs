@@ -29,6 +29,227 @@ mod ops_export;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn operator_reads_own_records_and_lead_reads_only_current_group() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_scope_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let domain = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES($1,'合成团队范围领域')")
+        .bind(domain)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let lead = member(
+        database.pool(),
+        "scope-lead@example.test",
+        "合成组长",
+        "lead",
+    )
+    .await;
+    let first = member(
+        database.pool(),
+        "scope-first@example.test",
+        "合成甲",
+        "operator",
+    )
+    .await;
+    let second = member(
+        database.pool(),
+        "scope-second@example.test",
+        "合成乙",
+        "operator",
+    )
+    .await;
+    let outsider = member(
+        database.pool(),
+        "scope-outsider@example.test",
+        "组外运营",
+        "operator",
+    )
+    .await;
+    let group = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_ops_group (group_ref,display_name,state,created_by_member_ref) VALUES($1,'合成运营组','active',$2)")
+        .bind(group).bind(lead).execute(database.pool()).await.unwrap();
+    for member_ref in [lead, first, second] {
+        sqlx::query("INSERT INTO linggan_ops_group_membership_event (event_ref,group_ref,member_ref,action,acted_by_member_ref,reason,request_ref) VALUES($1,$2,$3,'joined',$4,'合成成员归组',$5)")
+            .bind(Uuid::new_v4()).bind(group).bind(member_ref).bind(lead).bind(Uuid::new_v4())
+            .execute(database.pool()).await.unwrap();
+    }
+    let app = app_with_database(database.clone());
+    let cookies = [
+        session(database.pool(), first).await,
+        session(database.pool(), second).await,
+        session(database.pool(), outsider).await,
+    ];
+    let mut first_account = None;
+    let mut first_publication = None;
+    for (index, cookie) in cookies.iter().enumerate() {
+        let (status, account) = post(
+            app.clone(),
+            "/api/local/ops/native/accounts",
+            Some(cookie),
+            json!({
+                "requestId": Uuid::new_v4(), "domainRef": domain, "platform": "xhs",
+                "accountName": format!("合成账号{index}"),
+                "profileUrl": format!("https://example.test/xhs/scope-{index}"),
+                "platformUserId": format!("0123456789abcdef012345{:02x}", index),
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        let account_ref = uuid(&account["receipt"]["recordRef"]);
+        let (status, publication) = post(app.clone(), "/api/local/ops/native/publications", Some(cookie), json!({
+            "requestId": Uuid::new_v4(), "accountRef": account_ref,
+            "publicationUrl": format!("https://www.xiaohongshu.com/explore/65a1b2c3d4e5f60718293a{:02x}", index),
+            "publishedOn": "2026-10-20",
+        })).await;
+        assert_eq!(status, StatusCode::CREATED);
+        if index == 0 {
+            first_account = Some(account_ref);
+            first_publication = Some(uuid(&publication["receipt"]["recordRef"]));
+        }
+        let (status, _) = post(app.clone(), "/api/local/ops/native/daily-reports", Some(cookie), json!({
+            "requestId": Uuid::new_v4(), "dailyRef": null, "businessDate": "2026-10-20",
+            "linksOpenedCount": index + 1, "followersGained": index + 1, "expectedVersion": null,
+        })).await;
+        assert_eq!(status, StatusCode::CREATED);
+    }
+    let lead_cookie = session(database.pool(), lead).await;
+    for (cookie, expected) in [(&cookies[0], 1), (&lead_cookie, 2)] {
+        for (path, field) in [
+            ("/api/local/ops/accounts", "total"),
+            ("/api/local/ops/publications", "total"),
+        ] {
+            let (status, body) = get(app.clone(), path, Some(cookie)).await;
+            assert_eq!(status, StatusCode::OK, "{path}");
+            assert_eq!(body[field], expected, "{path}");
+        }
+        let (status, daily) = get(app.clone(), "/api/local/ops/daily", Some(cookie)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(daily["items"].as_array().unwrap().len(), expected as usize);
+        let (status, summary) = get(app.clone(), "/api/local/ops/summary", Some(cookie)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(summary["ledgerAccounts"], expected);
+    }
+    let batch = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_import_batch (batch_ref,preview_hash,rule_version,source_system,source_workspace_id,exported_at,domain_ref,accounts_sha256,publications_sha256,daily_sha256,account_rows,publication_rows,daily_rows,accounts_inserted,accounts_updated,accounts_unchanged,publications_inserted,publications_updated,publications_unchanged,publications_marked_missing,daily_inserted,daily_updated,daily_unchanged,daily_marked_missing,view_reports_appended) \
+         VALUES($1,repeat('a',64),'ops-import.v1','content_workbench','synthetic-scope',scope_001_now(),$2,repeat('b',64),repeat('c',64),repeat('d',64),1,2,2,1,0,0,2,0,0,0,2,0,0,0,0)",
+    ).bind(batch).bind(domain).execute(database.pool()).await.unwrap();
+    let imported_account = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_ops_account (account_ref,source_system,source_record_id,domain_ref,ledger_state,platform,account_name,status,is_retained,operator_name,responsible_user_source_id,profile_link_state,review_status,source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref,current_responsible_member_ref) \
+         VALUES($1,'content_workbench','scope-imported-account',$2,'in_ledger','xhs','合成迁入账号','active',true,'合成甲','source-first','missing','confirmed',scope_001_now(),scope_001_now(),$3,$3,$4)",
+    ).bind(imported_account).bind(domain).bind(batch).bind(first).execute(database.pool()).await.unwrap();
+    for (index, state) in [(0, "matched"), (1, "conflict_pending")] {
+        let publication_ref = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO linggan_ops_publication (publication_ref,source_system,source_record_id,account_ref,platform,publication_url,canonical_url,content_id_state,published_at,published_date_state,publisher_name,responsible_user_source_id,entry_source,review_status,legacy_effective_publication,legacy_data_sync_status,source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref) \
+             VALUES($1,'content_workbench',$2,$3,'xhs',$4,$4,'pending_match',scope_001_now(),'as_recorded','合成甲',$5,'manual','confirmed',false,'needs_link',scope_001_now(),scope_001_now(),$6,$6)",
+        ).bind(publication_ref).bind(format!("scope-historical-publication-{index}"))
+         .bind(imported_account).bind(format!("https://example.test/historical/{index}"))
+         .bind(if index == 0 { "source-first" } else { "source-second" }).bind(batch)
+         .execute(database.pool()).await.unwrap();
+        let daily_ref = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO linggan_ops_daily_report (daily_ref,source_system,source_record_id,operator_name,business_date,links_opened_count,followers_gained,responsible_user_source_id,review_status,source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref) \
+             VALUES($1,'content_workbench',$2,'合成甲',$3::date,0,0,$4,'confirmed',scope_001_now(),scope_001_now(),$5,$5)",
+        ).bind(daily_ref).bind(format!("scope-historical-daily-{index}"))
+         .bind(if index == 0 { "2026-10-18" } else { "2026-10-19" })
+         .bind(if index == 0 { "source-first" } else { "source-second" }).bind(batch)
+         .execute(database.pool()).await.unwrap();
+        for (publication, daily) in [(Some(publication_ref), None), (None, Some(daily_ref))] {
+            sqlx::query(
+                "INSERT INTO linggan_ops_historical_owner_resolution (resolution_ref,request_ref,publication_ref,daily_ref,source_display_name,responsible_user_source_id,source_member_display_name,resolved_member_ref,state,import_batch_ref,rule_version,decided_by_member_ref) \
+                 VALUES($1,$2,$3,$4,'合成甲',$5,$6,$7,$8,$9,'ops-historical-owner.v1',$10)",
+            ).bind(Uuid::new_v4()).bind(Uuid::new_v4()).bind(publication).bind(daily)
+             .bind(if index == 0 { "source-first" } else { "source-second" })
+             .bind(if index == 0 { "合成甲" } else { "合成乙" })
+             .bind(if index == 0 { Some(first) } else { None })
+             .bind(state).bind(batch).bind(lead)
+             .execute(database.pool()).await.unwrap();
+        }
+    }
+    let (status, accounts) = get(app.clone(), "/api/local/ops/accounts", Some(&cookies[0])).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(accounts["total"], 2);
+    let (status, publications) = get(
+        app.clone(),
+        "/api/local/ops/publications",
+        Some(&cookies[0]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        publications["total"], 2,
+        "conflicted history must stay out of member scope"
+    );
+    let (status, daily) = get(app.clone(), "/api/local/ops/daily", Some(&cookies[0])).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(daily["items"].as_array().unwrap().len(), 2);
+    for kind in ["accounts", "publications", "daily"] {
+        let path = format!("/api/local/ops/export?kind={kind}&format=json");
+        let (status, export) = get(app.clone(), &path, Some(&cookies[0])).await;
+        assert_eq!(status, StatusCode::OK, "{kind} export");
+        assert_eq!(
+            export["items"].as_array().unwrap().len(),
+            2,
+            "{kind} export scope"
+        );
+    }
+    let first_account = first_account.unwrap();
+    let first_publication = first_publication.unwrap();
+    sqlx::query(
+        "UPDATE linggan_ops_account SET current_responsible_member_ref=$2 WHERE account_ref=$1",
+    )
+    .bind(first_account)
+    .bind(second)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let (status, current_owner_publications) = get(
+        app.clone(),
+        "/api/local/ops/publications",
+        Some(&cookies[1]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        current_owner_publications["total"], 2,
+        "current account owner can see a native publication created by its former owner"
+    );
+    let (status, exported) = get(
+        app.clone(),
+        "/api/local/ops/export?kind=publications&format=json",
+        Some(&cookies[1]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(exported["items"].as_array().unwrap().len(), 2);
+    let view_path = format!("/api/local/ops/native/publications/{first_publication}/view-reports");
+    let report = || json!({ "requestId": Uuid::new_v4(), "reportKind": "value", "viewCount": 12, "asOf": "2026-10-23T08:00:00+08:00" });
+    let (status, _) = post(app.clone(), &view_path, Some(&cookies[0]), report()).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "former account owner cannot edit views after handover"
+    );
+    let (status, _) = post(app.clone(), &view_path, Some(&cookies[1]), report()).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "current account owner can maintain that publication"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
 async fn native_only_summary_is_available_without_forging_an_import_batch() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("ops_nsum_{}", Uuid::new_v4().simple());

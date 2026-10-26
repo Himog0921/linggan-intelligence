@@ -11,16 +11,20 @@ workspace = true
 [dependencies]
 argon2 = "0.5.3"
 axum = { workspace = true, features = ["query", "form"] }
+hex = "0.4"
 linggan-contracts = { path = "../../crates/contracts" }
 linggan-evidence = { path = "../../crates/evidence" }
 linggan-intelligence = { path = "../../crates/intelligence" }
 linggan-storage-postgres = { path = "../../crates/storage-postgres" }
+scrypt = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11.0"
 sqlx.workspace = true
+subtle = "2.6"
 tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
 tokio-util = { version = "0.7", features = ["io"] }
+unicode-normalization = "0.1"
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]

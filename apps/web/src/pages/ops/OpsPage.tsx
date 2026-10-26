@@ -8,6 +8,7 @@ import { Status } from "./ui";
 import { c } from "./styles";
 import { LedgerPage } from "./LedgerPage";
 import { OverviewPage } from "./OverviewPage";
+import { requestJson } from "../../shared/api";
 const entries = [['overview', '概览'], ['publications', '发布记录'], ['accounts', '账号管理'], ['daily', '每日数据']] as const;
 export type LedgerKind = "publications" | "accounts" | "daily";
 export function OpsPage() {
@@ -16,6 +17,13 @@ export function OpsPage() {
   return <OpsDataPage />;
 }
 function OpsDataPage() {
+  const session = useQuery({
+    queryKey: ['auth', 'session'],
+    queryFn: ({ signal }) => requestJson('/api/local/auth/session', { signal }),
+  });
+  const role = (session.data as { member?: { role?: string } } | undefined)?.member?.role;
+  const displayName = (session.data as { member?: { displayName?: string } } | undefined)?.member?.displayName;
+  const restricted = role !== 'admin';
   const location = useLocation();
   const [params, setParams] = useSearchParams();
   const business = params.get("domain") || "all";
@@ -59,13 +67,15 @@ function OpsDataPage() {
     : summary.isPending || summary.isError
       ? "数据截至时间未知"
       : "尚未迁入数据";
+  if (session.isPending) return <p role="status">正在核对团队身份…</p>;
+  if (session.isError) return <p role="alert">团队身份读取失败，请刷新页面后重试。</p>;
   return (
-    <OpsFrame section="data" domain={business} foot={foot}
+    <OpsFrame section="data" domain={business} foot={foot} restricted={restricted}
       scope={<OpsScopePicker options={options.data ?? []} value={business} loading={options.isPending} failed={options.isError}
         onChange={domain => setParams({ domain })} />}
-      tabs={entries.map(([name, title]) => <a key={name} href={`/ops/${name}?domain=${encodeURIComponent(business)}`}
+      tabs={(restricted ? entries.slice(1) : entries).map(([name, title]) => <a key={name} href={`/ops/${name}?domain=${encodeURIComponent(business)}`}
         aria-current={current[0] === name ? 'page' : undefined}>{title}</a>)}
-      meta={<><span>只读台账</span><span>迁入数据</span></>}>
+      meta={<><span>可录入台账</span><span>历史迁入数据只读</span></>}>
         <main className={c("ops-main")} aria-labelledby="ops-title">
           <h1 id="ops-title" className="v7-sr-only">
             {current[1]}
@@ -83,6 +93,9 @@ function OpsDataPage() {
               key={`${current[0]}:${business}`}
               kind={current[0]}
               business={business}
+              restricted={restricted}
+              displayName={displayName ?? ''}
+              role={role ?? ''}
             />
           )}
         </main>

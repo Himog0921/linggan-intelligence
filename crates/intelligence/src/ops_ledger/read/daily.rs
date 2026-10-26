@@ -64,6 +64,11 @@ const DAILY_SQL: &str = "per_day AS ( \
      WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
        AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
        AND coalesce(p.publisher_name,publisher.display_name) IS NOT NULL \
+       AND ($4::uuid[] IS NULL OR (p.source_system='linggan_native' AND p.native_publisher_member_ref=ANY($4)) \
+            OR (p.source_system='content_workbench' AND (SELECT resolution.resolved_member_ref \
+                 FROM linggan_ops_historical_owner_resolution resolution \
+                WHERE resolution.publication_ref=p.publication_ref \
+                ORDER BY resolution.decided_at DESC,resolution.resolution_ref DESC LIMIT 1)=ANY($4))) \
      GROUP BY 1, 2), \
   days AS ( \
     SELECT d.daily_ref, d.source_record_id, d.source_system, d.native_version, d.business_date, d.operator_name, d.links_opened_count, d.followers_gained, \
@@ -71,7 +76,12 @@ const DAILY_SQL: &str = "per_day AS ( \
            coalesce(pd.pending_overdue, 0) AS pending_overdue \
       FROM linggan_ops_daily_report d \
       LEFT JOIN per_day pd ON pd.publisher_name = d.operator_name AND pd.business_date = d.business_date \
-     WHERE d.missing_since_batch_ref IS NULL AND ($1::text IS NULL OR d.operator_name = $1)) \
+     WHERE d.missing_since_batch_ref IS NULL AND ($1::text IS NULL OR d.operator_name = $1) \
+       AND ($4::uuid[] IS NULL OR (d.source_system='linggan_native' AND d.native_member_ref=ANY($4)) \
+            OR (d.source_system='content_workbench' AND (SELECT resolution.resolved_member_ref \
+                 FROM linggan_ops_historical_owner_resolution resolution \
+                WHERE resolution.daily_ref=d.daily_ref \
+                ORDER BY resolution.decided_at DESC,resolution.resolution_ref DESC LIMIT 1)=ANY($4)))) \
   SELECT daily_ref, source_record_id, source_system, native_version, business_date::text AS business_date, extract(isodow FROM business_date)::int AS isodow, \
          operator_name, links_opened_count, followers_gained, published, hits, pending_overdue, \
          (sum(followers_gained) OVER month_window)::bigint AS month_followers, \
@@ -88,6 +98,16 @@ pub async fn read_ops_daily(
     operator: Option<&str>,
     limit: Option<i64>,
 ) -> Result<OpsDailyPage, OpsReadError> {
+    read_ops_daily_scoped(database, business, operator, limit, None).await
+}
+
+pub async fn read_ops_daily_scoped(
+    database: &Database,
+    business: OpsBusiness,
+    operator: Option<&str>,
+    limit: Option<i64>,
+    member_refs: Option<&[Uuid]>,
+) -> Result<OpsDailyPage, OpsReadError> {
     ensure_business(database, business).await?;
     let operator = operator.map(str::trim).filter(|text| !text.is_empty());
     let limit = limit.unwrap_or(OPS_DAILY_LIMIT);
@@ -97,14 +117,22 @@ pub async fn read_ops_daily(
     .bind(operator)
     .bind(XHS_HIT_VIEW_THRESHOLD)
     .bind(limit)
+    .bind(member_refs)
     .fetch_all(database.pool())
     .await?;
     let items = rows.iter().map(item).collect::<Result<Vec<_>, _>>()?;
     let operators = names(
         sqlx::query(
             "SELECT DISTINCT operator_name FROM linggan_ops_daily_report \
-              WHERE missing_since_batch_ref IS NULL ORDER BY 1",
+              WHERE missing_since_batch_ref IS NULL \
+                AND ($1::uuid[] IS NULL OR (source_system='linggan_native' AND native_member_ref=ANY($1)) \
+                     OR (source_system='content_workbench' AND (SELECT resolution.resolved_member_ref \
+                          FROM linggan_ops_historical_owner_resolution resolution \
+                         WHERE resolution.daily_ref=linggan_ops_daily_report.daily_ref \
+                         ORDER BY resolution.decided_at DESC,resolution.resolution_ref DESC LIMIT 1)=ANY($1))) \
+              ORDER BY 1",
         )
+        .bind(member_refs)
         .fetch_all(database.pool())
         .await?,
     )?;
