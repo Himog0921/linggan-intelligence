@@ -4,13 +4,23 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 
-./scripts/new-machine-check.sh
 ./scripts/setup-local-env.sh
 
 set -a
 # shellcheck disable=SC1091
 source .env
 set +a
+if [[ -n "${LINGGAN_RUSTUP_BIN_DIR:-}" ]]; then
+  [[ -x "$LINGGAN_RUSTUP_BIN_DIR/cargo" ]] \
+    || { echo "LINGGAN_RUSTUP_BIN_DIR has no cargo executable" >&2; exit 1; }
+  export PATH="$LINGGAN_RUSTUP_BIN_DIR:$PATH"
+fi
+if [[ -n "${LINGGAN_WEB_NODE:-}" ]]; then
+  [[ -x "$LINGGAN_WEB_NODE" ]] \
+    || { echo "LINGGAN_WEB_NODE is not executable" >&2; exit 1; }
+  export PATH="$(dirname "$LINGGAN_WEB_NODE"):$PATH"
+fi
+./scripts/new-machine-check.sh
 
 if [[ "${POSTGRES_PASSWORD:-}" == replace-* || "${#POSTGRES_PASSWORD}" -lt 24 ]]; then
   echo "POSTGRES_PASSWORD must be a non-placeholder local secret with at least 24 characters" >&2

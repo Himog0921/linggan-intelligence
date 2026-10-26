@@ -129,6 +129,10 @@ request_worker_drain() {
 }
 
 [[ -f "$repo_root/.env" ]] || { print -r -- "缺少 $repo_root/.env，先照 env.example 建好" >&2; exit 1; }
+source "$repo_root/.env"
+runtime_port="${LINGGAN_LOCAL_PORT:-3000}"
+[[ "$runtime_port" =~ '^[1-9][0-9]{0,4}$' ]] && (( runtime_port <= 65535 )) \
+  || { print -r -- "LINGGAN_LOCAL_PORT must be a valid non-zero TCP port" >&2; exit 1; }
 
 mkdir -p "$log_dir" "$agents_dir" "$drain_dir"
 install_lock="$drain_dir/install.lock"
@@ -195,7 +199,7 @@ rm -f "$sync_copy"
 [[ "$(git -C "$runtime_dir" rev-parse HEAD)" == "$target_revision" ]] \
   || { print -r -- "运行目录未同步到目标 revision；未重启服务" >&2; exit 1; }
 
-write_plist local-runtime linggan-api          api           3000
+write_plist local-runtime linggan-api          api           "$runtime_port"
 write_plist patrol-worker linggan-worker       worker
 write_plist media-worker  linggan-media-worker media-worker
 write_plist ai-executor   linggan-ai-worker    ai-worker

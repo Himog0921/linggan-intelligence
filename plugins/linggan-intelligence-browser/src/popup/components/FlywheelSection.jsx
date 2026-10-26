@@ -1,6 +1,6 @@
 import React from 'react';
 
-const LOCAL_ORIGIN = 'http://localhost:3000';
+const LOCAL_ORIGIN = 'http://localhost:3001';
 
 export default function FlywheelSection({
   flywheelStatus,
@@ -32,7 +32,7 @@ export default function FlywheelSection({
         <div className="section-heading">
           <h2>Linggan Intelligence</h2>
           <div className="flywheel-heading-side">
-            <div className="flywheel-preset-row"><span className="flywheel-preset-chip active">本机 3000</span></div>
+            <div className="flywheel-preset-row"><span className="flywheel-preset-chip active">本机 3001</span></div>
             <span id="flywheelStatus" className={`flywheel-status ${flywheelStatus}`}>{statusText}</span>
           </div>
         </div>

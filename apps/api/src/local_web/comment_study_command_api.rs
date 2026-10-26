@@ -51,8 +51,8 @@ fn routes() -> Router<LocalWebState> {
 }
 
 async fn command_guard(request: Request, next: Next) -> Response {
-    // Reuse the existing Host/Origin predicate, not a second access policy.
-    let mut response = if super::super::allowed_origin(request.headers()) {
+    // Reuse the same origin policy as the outer Comment Study guard.
+    let mut response = if super::super::allowed_local_or_public_origin(&request) {
         next.run(request).await
     } else {
         error(

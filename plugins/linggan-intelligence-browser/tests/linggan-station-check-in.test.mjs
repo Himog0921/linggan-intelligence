@@ -56,7 +56,7 @@ test('an install that reports in without a station says so plainly', async () =>
       return { ok: true, async json() { return { state: 'awaiting_claim', installationRef: 'i-1' }; } };
     },
   });
-  assert.equal(sent[0][0], 'http://localhost:3000/api/local/stations/installations');
+  assert.equal(sent[0][0], 'http://localhost:3001/api/local/stations/installations');
   // 报的是「这次安装」，不含任何工位选择——工位由人在 Linggan 里决定。
   assert.deepEqual(sent[0][1], {
     installKey: 'install-1',
@@ -120,7 +120,7 @@ test('credential activation is health-advertised and sends the stored secret onl
   });
   assert.deepEqual(result, { activated: true });
   assert.deepEqual(sent[0], [
-    'http://localhost:3000/api/local/stations/installation-credentials/activate',
+    'http://localhost:3001/api/local/stations/installation-credentials/activate',
     {
       installationRef: 'installation-1',
       credentialRef: 'credential-1',
