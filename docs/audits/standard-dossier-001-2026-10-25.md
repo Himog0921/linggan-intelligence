@@ -113,3 +113,12 @@ F02相同字节的封面/首图观测是否误合并、F03数字标题的源头�
 私有原始证明与最终报告在 `artifacts/private/standard-dossier-001/regression100-2026-10-26/`：FINAL-REPORT.md、independent-review.md、validate-prepared100-report.json、raw-ui-observed.json、ui-comparisons.json、screenshot-manifest.json、production-final-check.json及resource-cleanup.json。原件/正文/截图不上传Git或GitHub CI。当前候选证明不等于识别Gold、Mog业务验收、生产回填、合并或3000部署；这些按最终候选及已有授权分别办理。
 
 独立审查最终增量已完成：候选实现与固定100隔离回归PASS，未解决P1/P2为0；已独立复算1544源码文件、240原件元数据、32AV全文及真实来源、4空状态、65OCR诊断GET、132截图hash及各阶段副作用。私有harness注册已移除，compiled到final仅EOF换行差异已逐字节坐实。F02/F03及识别Gold仍未证，发布/生产/业务边界不变。具体记录为同一私有independent-review.md，不新增审核体系。
+
+
+### 收尾新增主线的集成补验
+
+`2c9e6ad38e07a92b4d8348872274056fbcca8343` 的 [Delivery 40272087312](https://github.com/Himog0921/linggan-intelligence/actions/runs/40272087312) 已全部成功（含8个任务及实际底稿/输入/浏览器/工作台/采集链路）。该结果只归属于2c9候选。最终收尾发现另一包PR #497已将origin/main推进至`f9fb8192d0b5d4215e935f44fb7539d7f418d817`，当时3000仍为05c24175、health ready，生产八类计数仍全零变化。
+
+已将新main合入形成`ac16f82092380611bb7e7cadfc4241124fb4d72e`。新增main仅采集目标检查器、其规格/测试及预检脚本；唯一冲突是相同SIGPIPE修复的两格缩进，保留main写法。原2c9工作包78个文件逐字节对照，底稿、API及全部Rust源码无变化，唯一包内差异为该脚本缩进。未改既有产品方案或增加审核。集成后的预检通过，完整Web类型/lint/测试/构建、固定100准备后快照的最新前端核查及原审阅者增量身份核对继续执行；最后提交及其CI以PR #496实际回执为准，不把2c9的CI冒称后继提交通过。
+
+补验仅恢复已冻结的原100源事实及准备后canonical快照，不重抽样、不再生产导出、不重跑识别或准备。新版前端dist单列build-info；只读API复用Rust源码相同的已建测试二进制，组合身份与runtime unknown如实登记，不伪造新Git运行版本。新截图/DOM、独立复核及新资源清理在私有`regression100-2026-10-26/integration-main-f9/`保存，原完整100回归和失败纠偏证据保留。
