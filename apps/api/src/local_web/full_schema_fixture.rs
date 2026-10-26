@@ -284,6 +284,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0166_collection_command_reason_ops_publication_scope.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0167_ops_historical_owner_resolution.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -389,4 +391,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0164_ops_publication_field_adoption','7a129d08af79844dfa7e7ac81ff84f6c39af8c7e1d5c088d7798452dd295ed24');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0165_ops_publication_media_projection','452a475e293a6ac9e5091bcbc2bdaee7cdc028310bd0a35b9a2415703647f2eb');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0166_collection_command_reason_ops_publication_scope','0527700d451f623f9f2da0f7d1d26397d2c678ec3ccdfe4cad0ed46f6c9d42b6');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0167_ops_historical_owner_resolution','913b4cb63d2b5691e4066cceecc6ef24fb229d9cbcc13c09d6a6f93b166fba4c');\n",
 );
