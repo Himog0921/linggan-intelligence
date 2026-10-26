@@ -5,7 +5,7 @@ write_plist() {
   local plist="$agents_dir/$full_label.plist"
   disabled_flag="$(python3 "$ai_guard" disabled-value "$disabled_snapshot" "$full_label")" || return 1
   python3 "$ai_guard" plist "$plist" "$full_label" "$binary" "$runtime_dir" \
-    "$support_dir" "$log_dir" "$logname" "$drain_grace_seconds" "$port" || return 1
+    "$support_dir" "$log_dir" "$logname" "$drain_grace_seconds" "$port" "$docker_cli" || return 1
   plutil -lint "$plist" >/dev/null || return 1
   if [[ "$disabled_flag" == "true" ]]; then
     # Also records the new AI label's explicit initial off state.

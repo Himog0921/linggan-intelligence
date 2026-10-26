@@ -115,13 +115,15 @@ class GuardContracts(unittest.TestCase):
 
     def test_plist_escapes_paths_and_retains_log_names_and_derived_timeout(self):
         file = self.root / "job.plist"; runtime = str(self.root / "Runtime & <source>")
+        docker = self.root / "docker"; docker.write_text("#!/bin/sh\n"); docker.chmod(0o700)
         guard.plist([str(file), guard.LABELS[3], "linggan-ai-worker", runtime, str(self.root),
-                     str(self.root / "logs"), "ai-worker", "3616", ""])
+                     str(self.root / "logs"), "ai-worker", "3616", "", str(docker)])
         value = plistlib.loads(file.read_bytes())
         self.assertEqual(value["WorkingDirectory"], runtime)
         self.assertEqual(value["ExitTimeOut"], 3616)
         self.assertEqual(value["StandardOutPath"], str(self.root / "logs/ai-worker.out.log"))
         self.assertEqual(value["EnvironmentVariables"]["LINGGAN_AI_DRAIN_ACK_PATH"], str(self.root / "runtime-drain/ai-drain-ack"))
+        self.assertEqual(value["EnvironmentVariables"]["PATH"].split(":")[0], str(self.root))
 
     def test_signal_zero_checks_a_real_owned_pid_without_sending_a_signal(self):
         helper = Path(__file__).resolve().parents[1] / "ai_guard.py"

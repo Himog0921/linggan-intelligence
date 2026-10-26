@@ -133,6 +133,10 @@ source "$repo_root/.env"
 runtime_port="${LINGGAN_LOCAL_PORT:-3000}"
 [[ "$runtime_port" =~ '^[1-9][0-9]{0,4}$' ]] && (( runtime_port <= 65535 )) \
   || { print -r -- "LINGGAN_LOCAL_PORT must be a valid non-zero TCP port" >&2; exit 1; }
+docker_cli="$(command -v docker)" \
+  || { print -r -- "Docker CLI is required for launchd migration checks" >&2; exit 1; }
+[[ "$docker_cli" == /* && -x "$docker_cli" ]] \
+  || { print -r -- "Docker CLI must resolve to an absolute executable path" >&2; exit 1; }
 
 mkdir -p "$log_dir" "$agents_dir" "$drain_dir"
 install_lock="$drain_dir/install.lock"
