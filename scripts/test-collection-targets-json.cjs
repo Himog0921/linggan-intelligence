@@ -82,7 +82,18 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     assert.equal(result.status,200);assert.equal(result.body.works.length,2);
     const populated={target:inspectionTarget,base,round,works:result.body.works};
     assert(populated, 'V4 browser proof requires a real accepted round with at least two works');
-    await goto({ domain: inspectionDomain, drawer: populated.target.targetRef, dtab: 'works', inspect_right_round: populated.round.roundRef });
+    await goto({ domain: inspectionDomain, drawer: populated.target.targetRef });
+    await page.getByRole('heading',{name:'最近一次已取得观察',exact:true}).waitFor();
+    await page.getByRole('combobox',{name:'选择观察轮次',exact:true}).waitFor();
+    assert.equal(await page.getByRole('link',{name:'最近观察',exact:true}).getAttribute('aria-current'),'page');
+    await page.getByRole('combobox',{name:'选择观察轮次',exact:true}).click();
+    await page.getByRole('listbox',{name:'选择观察轮次',exact:true}).waitFor();
+    await page.getByRole('combobox',{name:'选择观察轮次',exact:true}).press('Escape');
+    assert.equal(await page.getByRole('listbox',{name:'选择观察轮次',exact:true}).count(),0);
+    assert(await page.locator('#c-drawer').isVisible(),'Esc closes the selector before the inspector');
+    assert.equal(writes.length,0,'default recent observations and shared dropdown never mutate');
+    reports.push('default recent observations and shared historical selector stay read-only; Esc keeps inspector');
+    await goto({ domain: inspectionDomain, drawer: populated.target.targetRef, dtab: 'works', inspect_keyword_view:'rounds', inspect_right_round: populated.round.roundRef });
     for(const work of populated.works.slice(0,2)){
       const row=page.getByRole('row').filter({has:page.getByRole('button',{name:work.title,exact:true})});
       await row.getByRole('button',{name:'加入对照',exact:true}).click();
@@ -99,12 +110,19 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     const canonicalUrl = new URL(canonical.url()); assert.equal(canonicalUrl.searchParams.get('asOf'), new URL(page.url()).searchParams.get('inspect_as_of'));
     await page.getByText('以下按当前研究截点读取正式底稿。', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(directory, 'targets-v4-canonical-dossier.png') });
+    const switchPrimary=page.waitForResponse(response=>response.url().includes('/inspection/work-comparison?')&&new URL(response.url()).searchParams.get('works')?.split(',')[0]===populated.works[1].workRef);
+    await page.getByRole('combobox',{name:'主作品',exact:true}).click();
+    await page.getByRole('listbox',{name:'主作品',exact:true}).getByRole('option').nth(1).click();
+    const switched=await switchPrimary;assert.equal(switched.status(),200);
+    const switchedPayload=await switched.json();assert.equal(switchedPayload.items[0].workRef,populated.works[1].workRef);
+    assert.equal(new URL(page.url()).searchParams.get('inspect_works').split(',')[0],populated.works[1].workRef);
+    reports.push('shared primary-work selector reorders the actual persisted comparison request');
     for(const width of [1440,1024,390]){
       await page.setViewportSize({width,height:900});
       const geometry=await page.locator('#c-drawer').evaluate(el=>({width:el.getBoundingClientRect().width,
         overflow:el.scrollWidth-el.clientWidth,headOverflow:el.querySelector('.c-dw-head').scrollWidth-el.querySelector('.c-dw-head').clientWidth,
         bodyOverflow:el.querySelector('.c-dw-body').scrollWidth-el.querySelector('.c-dw-body').clientWidth}));
-      assert(Math.abs(geometry.width-(width<=760?width:Math.min(960,width-96)))<=1,JSON.stringify(geometry));
+      assert(Math.abs(geometry.width-(width<=760?width:Math.min(960,width)))<=1,JSON.stringify(geometry));
       assert(geometry.overflow<=1&&geometry.headOverflow<=1&&geometry.bodyOverflow<=1,'drawer stays bounded; comparison scrolls locally: '+JSON.stringify(geometry));
       await page.screenshot({path:path.join(directory,`targets-v4-compact-${width}.png`)});
     }
@@ -145,7 +163,7 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
     await page.getByText('作品分布的查询条件无效', { exact: true }).waitFor();
     await page.screenshot({ path: path.join(directory, 'targets-invalid-lifecycle.png') });
     await goto({ domain: fixture.domainRef, drawer: creator.targetRef, dtab: 'works', wview: 'list' });
-    await page.locator('.c-dw-catalog-summary').waitFor();
+    await page.getByRole('searchbox',{name:'搜索作品标题或作品 ID',exact:true}).waitFor();
     assert((await page.locator('.c-dw-body').innerText()).includes('当前筛选没有匹配的作品'));
     reports.push('URL refresh preserves creator works subview; invalid lifecycle query remains invalid');
 
