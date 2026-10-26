@@ -174,10 +174,17 @@ def atomic(name, value):
 
 
 def plist(args):
-    name, label, binary, runtime, support, logs, logname, grace_seconds, port = args
+    name, label, binary, runtime, support, logs, logname, grace_seconds, port, docker_cli = args
     need(label in LABELS and binary == dict(zip(LABELS, (
         "linggan-api", "linggan-worker", "linggan-media-worker", "linggan-ai-worker")))[label])
-    environment = {"LINGGAN_RUNTIME_DIR": runtime, "LINGGAN_SUPPORT_DIR": support}
+    need(Path(docker_cli).is_absolute() and Path(docker_cli).name == "docker"
+         and Path(docker_cli).is_file() and os.access(docker_cli, os.X_OK))
+    # launchd's default PATH omits common Docker CLI locations. Keep only the verified CLI
+    # directory plus system tools, so the pre-start migration check can actually query its ledger.
+    launch_path = ":".join(dict.fromkeys((str(Path(docker_cli).parent),
+                                         "/usr/bin", "/bin", "/usr/sbin", "/sbin")))
+    environment = {"LINGGAN_RUNTIME_DIR": runtime, "LINGGAN_SUPPORT_DIR": support,
+                   "PATH": launch_path}
     if binary == "linggan-worker":
         environment["LINGGAN_WORKER_DRAIN_ACK_PATH"] = str(Path(support) / "runtime-drain/worker-drain-ack")
     if binary == "linggan-ai-worker":

@@ -80,6 +80,7 @@ class InstallFlow(unittest.TestCase):
             self.assertEqual(value["WorkingDirectory"], str(self.runtime))
         api = plistlib.loads((self.agents / (LABELS[0] + ".plist")).read_bytes())
         self.assertEqual(api["EnvironmentVariables"]["LINGGAN_LOCAL_PORT"], "3001")
+        self.assertEqual(api["EnvironmentVariables"]["PATH"].split(":")[0], str(self.bin))
         self.assertFalse(any("-iTCP:3000" in row for row in self.trace if row[0] == "lsof"))
         permit = json.loads((self.support / "runtime-drain/worker-update-permit").read_text())
         self.assertEqual(permit["from"], "a" * 40); self.assertEqual(permit["target"], "b" * 40)
