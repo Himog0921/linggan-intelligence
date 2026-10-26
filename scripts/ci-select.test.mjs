@@ -19,7 +19,7 @@ test('governance, delivery infrastructure and unknown paths select every proof',
   for (const path of [
     'AGENTS.md', 'CLAUDE.md', 'codx.md', 'Cargo.toml', 'Cargo.lock', '.nvmrc',
     'rust-toolchain.toml', 'docs/governance/agent-collaboration.md', 'docs/agents/issue-tracker.md',
-    '.github/workflows/delivery.yml', '.github/workflows/web-app.yml',
+    '.github/workflows/delivery.yml', '.github/workflows/web-app.yml', '.github/workflows/web-real-chain.yml',
     'scripts/ci-preflight.sh', 'scripts/ci-select.test.mjs', 'scripts/check-project-governance.sh',
     'scripts/verify-ui-design-handbook.sh', 'scripts/verify-lids-alignment.py',
     'crates/new-domain/src/lib.rs', 'plugins/new-plugin/background.js', 'docs/new-runtime-input.json',
@@ -29,34 +29,66 @@ test('governance, delivery infrastructure and unknown paths select every proof',
 
 test('existing domain proof coverage is retained and unions across files', () => {
   const cases = [
-    ['apps/web/src/pages/collection/TasksPage.tsx', ['ocr_audit', 'web']],
-    ['apps/web/src/pages/topics/TopicsPage.tsx', ['ocr_audit', 'web', 'topic']],
-    ['apps/web/src/styles/theme.css', ['ocr_audit', 'web', 'topic']],
-    ['apps/web/package-lock.json', ['ocr_audit', 'web', 'topic']],
-    ['apps/web/test/e2e/topic-main.mjs', ['ocr_audit', 'web', 'topic']],
-    ['apps/api/src/local_web/topic_workspace.rs', ['ai', 'web', 'topic']],
-    ['apps/api/src/local_web/web_app_tests.rs', ['ai', 'web', 'topic']],
-    ['apps/api/src/local_web/ocr_recognition.rs', ['ai', 'ocr_audit', 'web']],
-    ['apps/api/src/main.rs', ['web']],
+    ['apps/web/src/pages/collection/TasksPage.tsx', ['web']],
+    ['apps/web/src/pages/topics/TopicsPage.tsx', ['web', 'web_real_chain', 'topic']],
+    ['apps/web/src/styles/theme.css', ['web', 'topic']],
+    ['apps/web/package-lock.json', ['ocr_audit', 'web', 'web_real_chain', 'topic']],
+    ['apps/web/test/e2e/topic-main.mjs', ['web', 'topic']],
+    ['apps/api/src/local_web/topic_workspace.rs', ['ai', 'web', 'web_real_chain', 'topic']],
+    ['apps/api/src/local_web/web_app_tests.rs', ['ai', 'web', 'web_real_chain', 'topic']],
+    ['apps/api/src/local_web/ocr_recognition.rs', ['ai', 'ocr_audit', 'web', 'web_real_chain']],
+    ['apps/api/src/main.rs', ['web', 'web_real_chain']],
     ['apps/pi-adapter/src/index.ts', ['ai', 'ocr_audit']],
     ['crates/intelligence/src/ai_foundation/executor/ocr_audit.rs', ['ai', 'ocr_audit']],
-    ['crates/intelligence/src/content_workbench/source_usage.rs', ['ai', 'web']],
-    ['crates/intelligence/src/comment_study_run/submit.rs', ['ai', 'web']],
+    ['crates/intelligence/src/content_workbench/source_usage.rs', ['ai', 'web', 'web_real_chain']],
+    ['crates/intelligence/src/comment_study_run/submit.rs', ['ai', 'web', 'web_real_chain']],
     ['crates/evidence/src/ocr_adoption/selection.rs', ['ocr_adoption']],
     ['crates/evidence/src/ocr_adoption_persistence.rs', ['ocr_adoption', 'ocr_audit']],
-    ['crates/evidence/src/material_media_read.rs', ['ocr_adoption', 'web']],
+    ['crates/evidence/src/material_media_read.rs', ['ocr_adoption', 'web', 'web_real_chain']],
     ['crates/evidence/src/research_dossier.rs', suites],
     ['apps/worker/tests/ocr_vl_postgres.rs', ['ai', 'ocr_adoption', 'ocr_audit']],
     ['database/migrations/0142_ocr_adoption.sql', ['ai', 'ocr_adoption']],
     ['database/migrations/0143_ocr_quality_audit.sql', ['ai', 'ocr_audit']],
-    ['scripts/test-research-dossier-postgres.sh', ['ai', 'web']],
-    ['scripts/runtime/prepare-web.sh', ['ai', 'web']],
+    ['scripts/test-research-dossier-postgres.sh', ['ai', 'web', 'web_real_chain']],
+    ['scripts/runtime/prepare-web.sh', ['ai', 'web', 'web_real_chain']],
     ['scripts/local-runtime.sh', ['ai', 'ocr_audit']],
     ['docs/design/lids/tokens.md', ['web']],
     ['docs/design/changes/lids-component-change.json', ['web']],
   ];
   for (const [path, expected] of cases) assert.deepEqual(selected([path]), expected, path);
-  assert.deepEqual(selected(['docs/README.md', 'apps/web/src/pages/topics/TopicsPage.tsx', 'crates/evidence/src/ocr_adoption.rs']), ['ocr_adoption', 'ocr_audit', 'web', 'topic']);
+  assert.deepEqual(selected(['docs/README.md', 'apps/web/src/pages/topics/TopicsPage.tsx', 'crates/evidence/src/ocr_adoption.rs']), ['ocr_adoption', 'web', 'web_real_chain', 'topic']);
+});
+
+test('page-local UI changes avoid OCR and PostgreSQL proofs; shared and API changes retain them', () => {
+  const cases = [
+    ['apps/web/src/pages/settings/TeamSettingsPage.module.css', ['web']],
+    ['apps/web/src/pages/settings/TeamSettingsPage.tsx', ['web']],
+    ['apps/web/test/e2e/team-member-scroll.mjs', ['web']],
+    ['apps/web/src/pages/settings/teamSettingsApi.ts', ['web', 'web_real_chain']],
+    ['apps/web/src/app/AppShell.module.css', ['web']],
+    ['apps/web/src/app/App.tsx', ['ocr_audit', 'web', 'web_real_chain']],
+    ['apps/web/src/main.tsx', ['web', 'web_real_chain']],
+    ['apps/web/src/corpus/corpusShellApi.ts', ['web', 'web_real_chain']],
+    ['apps/web/src/shared/api.ts', ['ocr_audit', 'web', 'web_real_chain']],
+    ['apps/web/src/pages/corpus/evidence/DossierSections.tsx', ['web', 'web_real_chain']],
+    ['apps/web/src/pages/settings/OcrAudit.module.css', ['web']],
+    ['apps/web/src/pages/settings/OcrAuditSettings.tsx', ['ocr_audit', 'web']],
+  ];
+  for (const [path, expected] of cases) assert.deepEqual(selected([path]), expected, path);
+  assert.deepEqual(selected(['apps/web/src/pages/settings/TeamSettingsPage.tsx', 'apps/api/src/main.rs']), ['web', 'web_real_chain']);
+});
+
+test('page files with direct HTTP calls cannot silently enter the UI-only route', () => {
+  const walk = directory => readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name);
+    return entry.isDirectory() ? walk(path) : entry.isFile() ? [path] : [];
+  });
+  for (const file of walk(join(root, 'apps/web/src/pages'))) {
+    if (!/\.tsx?$/.test(file) || /\.test\.tsx?$/.test(file)) continue;
+    if (!/\b(?:fetch|requestJson)\s*\(/.test(readFileSync(file, 'utf8'))) continue;
+    const path = file.slice(root.length).replaceAll('\\', '/');
+    assert.ok(selected([path]).includes('web_real_chain'), `${path} makes direct HTTP calls`);
+  }
 });
 
 test('the canonical dossier and reading schema exercise every current consumer', () => {
@@ -71,8 +103,8 @@ test('the canonical dossier and reading schema exercise every current consumer',
     'database/migrations/0147_comment_study_full_context.sql',
     'database/migrations/0148_dossier_consumer_contracts.sql',
   ]) assert.deepEqual(selected([path]), suites, path);
-  assert.deepEqual(selected(['apps/worker/src/bin/research_dossier.rs']), ['ai', 'web']);
-  assert.deepEqual(selected(['crates/evidence/tests/dossier_input_postgres.rs']), ['web']);
+  assert.deepEqual(selected(['apps/worker/src/bin/research_dossier.rs']), ['ai', 'web', 'web_real_chain']);
+  assert.deepEqual(selected(['crates/evidence/tests/dossier_input_postgres.rs']), ['web', 'web_real_chain']);
 });
 
 test('Git diff uses merge-base, includes deleted and renamed paths, and preserves unusual filenames', () => {
@@ -108,7 +140,7 @@ test('Git diff uses merge-base, includes deleted and renamed paths, and preserve
 
 const delivery = readFileSync(join(root, '.github/workflows/delivery.yml'), 'utf8');
 const gate = delivery.split("node --input-type=module <<'JS'\n")[1]?.split('\n          JS')[0];
-const jobs = { ai: 'ai', 'ocr-adoption': 'ocr_adoption', 'ocr-audit': 'ocr_audit', web: 'web', topic: 'topic' };
+const jobs = { ai: 'ai', 'ocr-adoption': 'ocr_adoption', 'ocr-audit': 'ocr_audit', web: 'web', 'web-real-chain': 'web_real_chain', topic: 'topic' };
 function gateResult(selectedSuites, mutate = () => {}) {
   const needs = { preflight: { result: 'success', outputs: {} } };
   for (const [job, suite] of Object.entries(jobs)) {
@@ -128,15 +160,18 @@ test('the actual final gate rejects missing, failed, cancelled or skipped select
   assert.equal(gateResult(suites), 0, 'full verification');
   assert.equal(gateResult(['web', 'ocr_audit']), 0, 'selected modules');
   for (const status of ['failure', 'cancelled', 'skipped']) {
-    assert.notEqual(gateResult(suites, needs => { needs.web.result = status; }), 0, status);
+    for (const job of Object.keys(jobs)) {
+      assert.notEqual(gateResult(suites, needs => { needs[job].result = status; }), 0, `${job}: ${status}`);
+    }
     assert.notEqual(gateResult(suites, needs => { needs.preflight.result = status; }), 0, `preflight ${status}`);
   }
   assert.notEqual(gateResult([], needs => { delete needs.preflight.outputs.web; }), 0);
+  assert.notEqual(gateResult([], needs => { delete needs.preflight.outputs.web_real_chain; }), 0);
   assert.notEqual(gateResult([], needs => { needs.web.result = 'failure'; }), 0);
 });
 
 test('active workflows have a single PR entrypoint and all proofs depend on preflight', () => {
-  const workflows = ['ai-gen1-foundation', 'ocr-adoption', 'ocr-quality-audit', 'web-app', 'topic-map-compact-ui'];
+  const workflows = ['ai-gen1-foundation', 'ocr-adoption', 'ocr-quality-audit', 'web-app', 'web-real-chain', 'topic-map-compact-ui'];
   for (const workflow of workflows) {
     const source = readFileSync(join(root, `.github/workflows/${workflow}.yml`), 'utf8');
     assert.match(source, /on:\n  workflow_call:/);
@@ -144,11 +179,12 @@ test('active workflows have a single PR entrypoint and all proofs depend on pref
     assert.ok(delivery.includes(`uses: ./.github/workflows/${workflow}.yml`));
   }
   for (const [job, output] of Object.entries(jobs)) {
-    assert.ok(delivery.includes(`  ${job}:\n    needs: preflight\n    if: needs.preflight.outputs.${output} == 'true'`));
+    const needs = job === 'web-real-chain' ? '[preflight, web]' : 'preflight';
+    assert.ok(delivery.includes(`  ${job}:\n    needs: ${needs}\n    if: needs.preflight.outputs.${output} == 'true'`));
   }
   assert.match(delivery, /ready_for_review/);
   assert.doesNotMatch(delivery, /\.draft/);
-  assert.match(delivery, /needs: \[preflight, ai, ocr-adoption, ocr-audit, web, topic\]/);
+  assert.match(delivery, /needs: \[preflight, ai, ocr-adoption, ocr-audit, web, web-real-chain, topic\]/);
   assert.match(delivery, /if: always\(\)/);
 });
 
@@ -185,7 +221,7 @@ test('metadata edits cannot cancel proof or overwrite its required gate; base re
 });
 
 test('preflight and every reusable proof check out the same PR event head', () => {
-  const workflows = ['delivery', 'ai-gen1-foundation', 'ocr-adoption', 'ocr-quality-audit', 'web-app', 'topic-map-compact-ui'];
+  const workflows = ['delivery', 'ai-gen1-foundation', 'ocr-adoption', 'ocr-quality-audit', 'web-app', 'web-real-chain', 'topic-map-compact-ui'];
   for (const workflow of workflows) {
     const source = readFileSync(join(root, `.github/workflows/${workflow}.yml`), 'utf8');
     const checkouts = source.match(/uses: actions\/checkout@/g) ?? [];
