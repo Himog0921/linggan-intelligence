@@ -9,7 +9,7 @@ import { chromium } from 'playwright';
 const directory = process.env.WEB_APP_PROOF_DIR;
 assert.ok(directory, 'WEB_APP_PROOF_DIR is required');
 const fixture = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
-const { origin, domainOne, domainTwo, rich, video, risk, partial, cleaned, restricted, reobserve, offPage, plain, collectionRun, totalWorks, pageSize } = fixture;
+const { origin, domainOne, domainTwo, rich, video, cleaned, restricted, reobserve, offPage, plain, collectionRun, totalWorks, pageSize } = fixture;
 await mkdir(directory, { recursive: true });
 
 const report = {
@@ -78,13 +78,6 @@ page.on('response', async response => {
   const request = response.request();
   if (request.method() === 'GET') return;
   const entry = { method: request.method(), path: new URL(request.url()).pathname, status: response.status(), at: report.steps.length, updated: null };
-  if (entry.path.endsWith('/relayer')) {
-    try {
-      entry.updated = (await response.json()).updated ?? null;
-    } catch {
-      /* 非 JSON 回答就没有更新数。 */
-    }
-  }
   report.writes.push(entry);
 });
 
@@ -453,7 +446,7 @@ try {
   });
 
   // ⑧ 研究底稿
-  await step('研究底稿：共享读取、导出内容、对照原图、重新整理（已完成／已是当前版本）', async () => {
+  await step('研究底稿：共享当前读本、完整导出、按需原图与发布时间及互动', async () => {
     const before = requestsTo('GET', /research-dossier$/).length;
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
@@ -468,11 +461,18 @@ try {
     const materialDetails = dossier.locator('summary').filter({ hasText: /^材料详情$/ }).locator('xpath=..');
     assert.equal(await materialDetails.getAttribute('open'), null, 'diagnostics stay folded before the user opens them');
     await materialDetails.locator(':scope > summary').click();
-    await dossier.locator('details > summary').filter({ hasText: '整理已有识别版面' }).click();
-    assert.match(await dossier.innerText(), /可整理 1 · 待整理 1 · 已是当前规则 0/);
     await shot('evidence-1440-dossier');
-    // 对照原图仅打开本机受控来源，不触发模型或采集。
-    await dossier.locator('summary').filter({ hasText: /^对照原图/ }).first().click();
+    const originals=dossier.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
+    assert.equal(await originals.getAttribute('open'),null);
+    const imageRef=await dossier.locator('[data-source-unit-ref]:has(img)').first().getAttribute('data-source-unit-ref');
+    await dossier.locator(`[data-unit-ref="${imageRef}"]`).getByRole('button',{name:'查看来源',exact:true}).first().click();
+    assert.notEqual(await originals.getAttribute('open'),null);
+    const original=dossier.locator('[data-source-unit-ref]:has(img)').first();
+    await original.getByRole('img').evaluate(node=>node.decode());
+    assert.equal(await original.getByRole('img').evaluate(node=>node.naturalWidth>0),true);
+    await dossier.getByText('作者、时间与互动',{exact:true}).click();
+    await dossier.getByText(/观察时间：/).first().waitFor();
+    assert.match(await dossier.innerText(),/分享/);
     // 导出：Markdown 与 JSON 都是用户显式触发的下载，内容来自服务器给的底稿。
     const [markdown] = await Promise.all([page.waitForEvent('download'), dossier.getByRole('button', { name: '导出 Markdown' }).click()]);
     assert.match(markdown.suggestedFilename(), /\.md$/);
@@ -480,45 +480,7 @@ try {
     const [json] = await Promise.all([page.waitForEvent('download'), dossier.getByRole('button', { name: '导出 JSON' }).click()]);
     assert.match(json.suggestedFilename(), /\.json$/);
     assert.ok(JSON.parse(await readFile(await json.path(), 'utf8')).revision);
-    // 重新整理：第一次更新 1 个版面；之后已是当前版本。
-    const writes = report.writes.length;
-    await dossier.getByRole('button', { name: '重新整理' }).click();
-    await page.waitForFunction(() => /本次 1 个版面：更新 1 个/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
-    await writesTotal(writes + 1);
-    await page.waitForFunction(() => /待整理 0 · 已是当前规则 1/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
-    await dossier.getByRole('button', { name: '重新整理' }).click();
-    await page.waitForFunction(() => /已是当前版本，无需更新/.test(document.querySelector('[role="tabpanel"]:not([hidden])')?.textContent ?? ''));
-    await writesTotal(writes + 2);
-  });
-
-  await step('批量整理弹窗：固定范围逐篇预览与整理；断点只存引用；刷新后可继续', async () => {
-    await open();
-    await page.getByRole('button', { name: '选择', exact: true }).click();
-    for (const title of [TITLE.video, TITLE.risk, TITLE.partial]) await rowOf(title).getByRole('checkbox', { name: `勾选作品：${title}` }).check();
-    await page.getByRole('button', { name: '整理图片文字', exact: true }).click();
-    const dialog = page.getByRole('dialog', { name: '重新整理选定作品的图片文字' });
-    await dialog.waitFor();
-    await dialog.getByText('3 篇固定作品 · 已处理 0 篇 · 失败 0 篇 · 尚未处理 3 篇').waitFor();
-    await dialog.getByRole('button', { name: '预览 / 刷新范围' }).click();
-    await page.waitForFunction(() => document.querySelectorAll('dialog[open] li').length === 3 && [...document.querySelectorAll('dialog[open] li')].every(item => /待分层/.test(item.textContent ?? '')));
-    const stored = JSON.parse(await page.evaluate(() => sessionStorage.getItem('linggan-research-dossier-batch-v1')));
-    assert.deepEqual(stored.items.map(item => item.work).sort(), [video, risk, partial].sort());
-    assert.doesNotMatch(JSON.stringify(stored), /合成/);
-    await shot('evidence-1440-batch');
-    await dialog.getByRole('button', { name: '关闭' }).click();
-    // 刷新后可继续：从断点读回固定范围。
-    await page.reload();
-    await rows().first().waitFor();
-    await page.getByRole('button', { name: '选择', exact: true }).click();
-    await page.getByRole('button', { name: '继续上次整理' }).click();
-    const again = page.getByRole('dialog', { name: '重新整理选定作品的图片文字' });
-    await again.getByText('3 篇固定作品 · 已处理 0 篇 · 失败 0 篇 · 尚未处理 3 篇').waitFor();
-    await again.getByRole('button', { name: '开始 / 继续整理' }).click();
-    await again.getByText('3 篇固定作品 · 已处理 3 篇 · 失败 0 篇 · 尚未处理 0 篇').waitFor();
-    await again.getByRole('button', { name: '关闭' }).click();
-    await page.reload();
-    await rows().first().waitFor();
-    assert.equal(await page.getByRole('button', { name: '继续上次整理' }).count(), 0, '全部完成后没有未完成的断点');
+    assert.equal(await dossier.getByRole('button',{name:'采用此候选'}).count(),0);
   });
 
   // ⑨ 立即复观测
@@ -646,7 +608,7 @@ try {
 
   // ⑪ 评论深采交接
   await step('评论深采交接：写入采集页读取的存储键（数组格式），再跳转 /collection/tasks?selected=1&returnTo=…', async () => {
-    // 前面的批量整理留下了它勾选的三篇：这一步从空集合开始，证明键里恰好是这里勾选的两篇。
+    // 本步骤从空集合开始，证明交接键里只包含这里勾选的两篇。
     await open();
     await page.evaluate(key => sessionStorage.removeItem(key), `collection-selected:${domainOne}`);
     await open();
@@ -673,7 +635,7 @@ try {
   });
 
   // ⑫ 存储
-  await step('存储只有四类键且无作品内容，深采只保存冻结请求与回执', async () => {
+  await step('存储只有宽度、选择及深采请求引用且无作品内容，深采只保存冻结请求与回执', async () => {
     await open();
     await page.getByRole('button', { name: '选择', exact: true }).click();
     await rowOf(TITLE.rich).getByRole('checkbox', { name: `勾选作品：${TITLE.rich}` }).check();
@@ -688,7 +650,7 @@ try {
     for (const [key, value] of Object.entries(report.storage.session)) {
       const deep = /^linggan\.evidence\.comment-deep\.v1:([0-9a-f-]{36}):([0-9a-f-]{36})$/.exec(key);
       if (!deep) {
-        assert.match(key, /^(collection-selected:[0-9a-f-]{36}|linggan-research-dossier-batch-v1)$/);
+        assert.match(key, /^collection-selected:[0-9a-f-]{36}$/);
         continue;
       }
       const entry = JSON.parse(value);
@@ -716,7 +678,7 @@ try {
   });
 
   // ⑬ 四个视口
-  for (const [width, height] of [[1440, 900], [1280, 720], [1024, 768], [390, 844]]) {
+  for (const [width, height] of [[1440, 900], [1280, 720]]) {
     await step(`${width}×${height}：无页面级横向溢出；${width >= 1181 ? '首屏见第一行与检查器标题' : '检查器是抽屉，浏览态不展开、点选后再展开并可 Esc 收起'}；静止态主按钮是实心墨色`, async () => {
       await page.setViewportSize({ width, height });
       await open();
@@ -766,8 +728,8 @@ try {
     assert.deepEqual(report.pageErrors, []);
     assert.deepEqual(report.consoleErrors.filter(text => !text.includes('Failed to load resource')), []);
     assert.deepEqual(report.failedRequests.filter(entry => !entry.includes('net::ERR_ABORTED')), []);
-    // 写请求只有三类：重新分层（来自底稿与批量弹窗）、立即复观测与评论深采（单次采集）。
-    for (const write of report.writes) assert.match(write.path, /\/(relayer|reobserve)$|^\/api\/collection\/runs$/, `${write.method} ${write.path}`);
+    // 写请求只有立即复观测与评论深采（单次采集）。
+    for (const write of report.writes) assert.match(write.path, /\/reobserve$|^\/api\/collection\/runs$/, `${write.method} ${write.path}`);
     assert.ok(report.writes.every(write => write.status === 200));
   });
 

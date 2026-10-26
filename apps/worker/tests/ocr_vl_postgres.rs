@@ -125,9 +125,7 @@ pub(crate) async fn execute_one(db: &Database) -> MediaProcessingClaim {
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL runner only"]
 async fn synthetic_daily_worker_publishes_reading_before_optional_review() {
-    use linggan_evidence::material_reading::{
-        ReviewReadingRequest, read_candidates, review_reading,
-    };
+    use linggan_evidence::material_reading::{ReviewReadingRequest, review_reading};
     assert!(std::env::var_os("OCR_CHAIN_MANIFEST").is_none());
     let script = PathBuf::from(std::env::var_os("LINGGAN_PADDLE_VL_SCRIPT").unwrap());
     std::fs::write(&script, SYNTHETIC_BRIDGE).unwrap();
@@ -140,17 +138,13 @@ async fn synthetic_daily_worker_publishes_reading_before_optional_review() {
     execute_one(&db).await;
     admit(&db, "ocr-synthetic", 2, b"synthetic-interior", "image/png").await;
     execute_one(&db).await;
-    assert!(
-        read_candidates(&db, work).await.unwrap().is_empty(),
-        "daily current is not an extra review candidate"
-    );
     let current = research_dossier::read(&db, work).await.unwrap().unwrap();
-    let candidates:Vec<_>=current.materials.iter().filter(|m|m["kind"]=="image").map(|m|json!({"unitRef":m["ref"],"candidateRevisionRef":m["currentRevisionRef"],"currentRevisionRef":m["currentRevisionRef"],"blocks":m["blocks"]})).collect();
+    let candidates:Vec<_>=current.materials.iter().filter(|m|m["kind"]=="image").map(|m|json!({"unitRef":m["ref"],"sourceVersion":m["sourceVersion"],"currentRevisionRef":m["currentRevisionRef"],"blocks":m["blocks"]})).collect();
     assert_eq!(candidates.len(), 2);
     assert!(
         candidates
             .iter()
-            .all(|c| c["currentRevisionRef"] == c["candidateRevisionRef"])
+            .all(|c| c["currentRevisionRef"].is_string())
     );
     assert!(
         candidates
@@ -167,19 +161,17 @@ async fn synthetic_daily_worker_publishes_reading_before_optional_review() {
         "daily machine publication is readable without mandatory review"
     );
     for candidate in &candidates {
-        let unit = serde_json::from_value(candidate["unitRef"].clone()).unwrap();
+        let unit: Uuid = serde_json::from_value(candidate["unitRef"].clone()).unwrap();
         let review = ReviewReadingRequest {
             command_ref: Uuid::new_v4(),
             expected_current_revision_ref: serde_json::from_value(
                 candidate["currentRevisionRef"].clone(),
             )
             .unwrap(),
-            candidate_revision_ref: serde_json::from_value(
-                candidate["candidateRevisionRef"].clone(),
-            )
-            .unwrap(),
-            action: "adopt".into(),
-            edited_blocks: None,
+            unit_ref: unit.to_string(),
+            source_version: candidate["sourceVersion"].as_str().unwrap().into(),
+            action: "edit".into(),
+            edited_blocks: Some(serde_json::from_value(candidate["blocks"].clone()).unwrap()),
             verified: false,
             resolved_issue_keys: vec![],
             actor: "synthetic-reviewer".into(),
@@ -192,7 +184,7 @@ async fn synthetic_daily_worker_publishes_reading_before_optional_review() {
         d.materials
             .iter()
             .filter(|m| m["kind"] == "image")
-            .all(|m| m["reading"]["adoption"] == "human_adopted")
+            .all(|m| m["reading"]["adoption"] == "human_edited")
     );
     assert!(json!(d.materials).to_string().contains("Synthetic body"));
     let mut tx = db.pool().begin().await.unwrap();
@@ -310,14 +302,12 @@ async fn private_unseen_images_use_actual_worker_and_database() {
         let p = store::prepare(&saved).unwrap();
         assert_eq!(row.get::<Value, _>("observation"), json!(p.observation));
         assert_eq!(row.get::<Value, _>("assessment"), json!(p.assessment));
-        let candidate = linggan_evidence::material_reading::read_candidates(&db, work)
-            .await
-            .unwrap();
+        let reading = research_dossier::read(&db, work).await.unwrap().unwrap();
         assert_eq!(
             p.assessment.image.blob_sha256,
             image["sha256"].as_str().unwrap()
         );
-        let receipt = json!({"id":image["id"],"workRef":work,"seconds":elapsed.elapsed().as_secs_f64(),"adoptionRef":row.get::<Uuid,_>("adoption_ref"),"derivativeRef":row.get::<Uuid,_>("derivative_ref"),"layoutRef":row.get::<Uuid,_>("layout_ref"),"observation":row.get::<Value,_>("observation"),"assessment":row.get::<Value,_>("assessment"),"candidates":candidate});
+        let receipt = json!({"id":image["id"],"workRef":work,"seconds":elapsed.elapsed().as_secs_f64(),"adoptionRef":row.get::<Uuid,_>("adoption_ref"),"derivativeRef":row.get::<Uuid,_>("derivative_ref"),"layoutRef":row.get::<Uuid,_>("layout_ref"),"observation":row.get::<Value,_>("observation"),"assessment":row.get::<Value,_>("assessment"),"reading":reading});
         std::fs::write(
             out.join(format!("{}.raw.json", image["id"].as_str().unwrap())),
             saved,
@@ -334,10 +324,10 @@ async fn private_unseen_images_use_actual_worker_and_database() {
     for work in &works {
         let dossier = research_dossier::read(&db, *work).await.unwrap().unwrap();
         assert!(
-            !linggan_evidence::material_reading::read_candidates(&db, *work)
-                .await
-                .unwrap()
-                .is_empty()
+            dossier
+                .materials
+                .iter()
+                .any(|u| u["kind"] == "image" && u["currentRevisionRef"].is_string())
         );
         std::fs::write(
             out.join(format!("work-{work}.json")),
@@ -394,3 +384,45 @@ a=encoded(anchors);v=encoded(dict(paddle=dict(res=dict(width=100,height=100,pars
 ob=dict(schemaVersion=1,image=i,imageRole=m['imageRole'],sequenceOrdinal=m['sequenceOrdinal'],anchors=dict(image=i,pipeline=dict(version='synthetic-anchor',rawSha256=sha(a)),lines=[dict(lineRef=str(n),readingOrder=n,text=t,confidence=.99,bbox=boxes[n])for n,t in enumerate(texts[:2])]),layout=dict(image=i,pipeline=dict(version='synthetic-vl',rawSha256=sha(v)),completed=True,requireTermination=True,blocks=[dict(blockRef=str(n),readingOrder=n,label='text',text=t,bbox=boxes[n])for n,t in enumerate(texts)],terminations=terms),rechecks=[])
 print(encoded(dict(schemaVersion=2,ok=True,observation=ob,anchorRawJson=a,vlRawJson=v)))
 "#;
+
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL runner only"]
+async fn latest_frame_completion_and_empty_outcome_publish_current_readings() {
+    use linggan_evidence::material_reading::producers::ReadingContent;
+    let db = database("frame_current_completion").await;
+    for (name, no_text) in [("frame-text", false), ("frame-empty", true)] {
+        let work = admit_with_slot_role(&db, name, 1, name.as_bytes(), "video/mp4", "video").await;
+        let job: Uuid = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE processor_kind='video_frame_ocr' AND blob_sha256=$1 AND processor_version='local-v4'").bind(support::sha256_hex(name.as_bytes())).fetch_one(db.pool()).await.unwrap();
+        ensure_media_processing_work(&db).await.unwrap();
+        let worker = Uuid::new_v4();
+        let MediaProcessingClaimOutcome::Claimed(claim) =
+            claim_media_processing_work(&db, worker, &["video_frame_ocr".into()])
+                .await
+                .unwrap()
+        else {
+            panic!("current frame job must be claimable")
+        };
+        assert_eq!(claim.job_ref, job);
+        if no_text {
+            complete_media_processing_without_output(&db, &claim, worker, "no_frame_text_observed")
+                .await
+                .unwrap();
+        } else {
+            let text = "synthetic literal frame text";
+            complete_media_processing_text(&db, &claim, worker, "frame_ocr_text", &support::sha256_hex(text.as_bytes()), text.len() as i64, "derivatives/frame-ocr/synthetic.txt", text, text, None, ReadingContent { blocks: vec![json!({"ref":"synthetic","kind":"paragraph","text":text,"speaker":"unconfirmed"})], issues: vec![], source_state:"present".into(), source_location:json!({"layerVersion":"rules-v3"}) }).await.unwrap();
+        }
+        let dossier = research_dossier::read(&db, work).await.unwrap().unwrap();
+        let frame = dossier
+            .materials
+            .iter()
+            .find(|m| m["kind"] == "video_frame")
+            .unwrap();
+        assert!(frame["currentRevisionRef"].is_string());
+        assert_eq!(frame["reading"]["generatedBy"], "frame_ocr");
+        assert_eq!(frame["blocks"].as_array().unwrap().is_empty(), no_text);
+        assert_eq!(frame["processing"]["state"], "completed");
+        if no_text {
+            assert_eq!(frame["processing"]["reason"], "no_frame_text_observed");
+        }
+    }
+}

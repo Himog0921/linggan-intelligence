@@ -584,7 +584,8 @@ pub async fn complete_media_processing_ocr(
 }
 
 fn valid_ocr_completion_input(claim: &MediaProcessingClaim, input: &OcrCompletionInput) -> bool {
-    derivative_matches_processor(&claim.processor_kind, "ocr_text")
+    claim.processor_version == processor_version_for_kind("image_ocr").unwrap()
+        && derivative_matches_processor(&claim.processor_kind, "ocr_text")
         && is_sha256(&input.raw_content_hash)
         && is_sha256(&input.layout_content_hash)
         && !input.raw_text.trim().is_empty()
@@ -600,10 +601,8 @@ fn valid_ocr_completion_input(claim: &MediaProcessingClaim, input: &OcrCompletio
             "ACCEPTED" | "PARTIAL" | "NEEDS_REVIEW" | "FAILED"
         )
         && valid_ocr_layering_input(&input.layering, input.lines.len())
-        && (!matches!(
-            input.layering.layer_version.as_str(),
-            "rules-v2" | "rules-v3"
-        ) || crate::ocr_layering::has_exact_provenance(&input.lines, &input.layering))
+        && input.layering.layer_version == crate::ocr_layering::VERSION
+        && crate::ocr_layering::has_exact_provenance(&input.lines, &input.layering)
         && input.lines.iter().all(valid_ocr_line)
 }
 
@@ -649,13 +648,11 @@ fn valid_ocr_layering_input(input: &OcrLayeringInput, line_count: usize) -> bool
             .image_substantive_text
             .as_ref()
             .is_some_and(|value| !value.trim().is_empty());
-    matches!(
-        input.layer_version.as_str(),
-        "rules-v1" | "rules-v2" | "rules-v3"
-    ) && input
-        .substantive_ordinals
-        .iter()
-        .all(|o| retained.contains(o) && !headline.contains(o))
+    input.layer_version == crate::ocr_layering::VERSION
+        && input
+            .substantive_ordinals
+            .iter()
+            .all(|o| retained.contains(o) && !headline.contains(o))
         && retained.len() == input.retained_ordinals.len()
         && headline.len() == input.headline_ordinals.len()
         && excluded.len() == input.excluded_lines.len()

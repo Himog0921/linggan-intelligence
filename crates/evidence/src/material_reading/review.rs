@@ -1,28 +1,156 @@
 use super::*;
 use std::collections::BTreeSet;
 
+/// Resolve an acquired source with no reading yet, without manufacturing machine content.
+pub async fn review_work_reading(
+    db: &Database,
+    work: Uuid,
+    locator: &str,
+    r: &ReviewReadingRequest,
+) -> Result<Value, ReadingError> {
+    validate(r)?;
+    if locator != r.unit_ref {
+        return Err(ReadingError::Invalid);
+    }
+    let mut tx = db.pool().begin().await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(421,hashtext($1::text))")
+        .bind(r.command_ref.to_string())
+        .execute(&mut *tx)
+        .await?;
+    lock_work(&mut tx, work).await?;
+    let unit = if let Ok(id) = Uuid::parse_str(locator) {
+        sqlx::query_scalar("SELECT unit_ref FROM linggan_material_unit WHERE unit_ref=$1 AND content_public_ref=$2").bind(id).bind(work).fetch_optional(&mut *tx).await?.ok_or(ReadingError::NotFound)?
+    } else {
+        let rest = locator
+            .strip_prefix(&format!("{work}."))
+            .ok_or(ReadingError::NotFound)?;
+        let (kind, slot) = rest.split_once('.').ok_or(ReadingError::NotFound)?;
+        if !["body", "image", "audio", "video_frame"].contains(&kind) {
+            return Err(ReadingError::NotFound);
+        }
+        let key = if kind == "body" && slot == "native" {
+            "body".to_owned()
+        } else {
+            format!("{kind}:{slot}")
+        };
+        let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+            .fetch_one(&mut *tx)
+            .await?;
+        let existing:Option<Uuid>=sqlx::query_scalar("SELECT unit_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND unit_key=$2").bind(work).bind(&key).fetch_optional(&mut *tx).await?;
+        if let Some(id) = existing {
+            let row =
+                sqlx::query("SELECT * FROM linggan_material_unit WHERE unit_ref=$1 FOR UPDATE")
+                    .bind(id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            let mut stored = Unit::from_row(&row);
+            if stored.source != r.source_version {
+                if r.expected_current_revision_ref.is_some()
+                    || read::current_reference_in(&mut tx, work, id, &now)
+                        .await?
+                        .is_some()
+                {
+                    return Err(ReadingError::Conflict);
+                }
+                let dossier = crate::research_dossier::read_in(&mut tx, &[work], &now)
+                    .await?
+                    .remove(&work)
+                    .ok_or(ReadingError::NotFound)?;
+                let material = dossier
+                    .materials
+                    .iter()
+                    .find(|m| {
+                        m["ref"] == locator
+                            && m["sourceVersion"] == r.source_version
+                            && m["sourceState"] == "present"
+                    })
+                    .ok_or(ReadingError::SourceChanged)?;
+                stored.source = r.source_version.clone();
+                stored.state = "present".into();
+                stored.current = None;
+                stored.adoption = "automatic".into();
+                stored.verification = "unchecked".into();
+                stored.page = material["page"]
+                    .as_i64()
+                    .and_then(|v| i32::try_from(v).ok());
+                update_unit(&mut tx, &mut stored).await?;
+                record_selection(&mut tx, &stored, "source_changed", None).await?;
+            }
+            id
+        } else {
+            let dossier = crate::research_dossier::read_in(&mut tx, &[work], &now)
+                .await?
+                .remove(&work)
+                .ok_or(ReadingError::NotFound)?;
+            let material = dossier
+                .materials
+                .iter()
+                .find(|m| {
+                    m["ref"] == locator
+                        && m["sourceVersion"] == r.source_version
+                        && m["sourceState"] == "present"
+                })
+                .ok_or(ReadingError::SourceChanged)?;
+            let input = NewReading {
+                content_public_ref: work,
+                unit_key: key,
+                kind: kind.into(),
+                slot_key: material["slotKey"].as_str().map(str::to_owned),
+                page: material["page"]
+                    .as_i64()
+                    .and_then(|v| i32::try_from(v).ok()),
+                source_version: r.source_version.clone(),
+                source_state: "present".into(),
+                derivative_ref: None,
+                producer_ref: None,
+                generated_by: "human_edit".into(),
+                rule_version: crate::research_dossier::content::RULE_VERSION.into(),
+                blocks: vec![],
+                issues: vec![],
+                source_location: json!({}),
+                publication: Publication::Automatic {
+                    expected_current: None,
+                },
+            };
+            write::ensure_unit(&mut tx, &input).await?.id
+        }
+    };
+    let receipt = review_reading_in(&mut tx, unit, r).await?;
+    tx.commit().await?;
+    Ok(receipt)
+}
+
+/// Human corrections apply to the displayed current reading, never a separate candidate.
 pub async fn review_reading(
     db: &Database,
     unit_ref: Uuid,
-    request: &ReviewReadingRequest,
+    r: &ReviewReadingRequest,
 ) -> Result<Value, ReadingError> {
-    validate(request)?;
-    let request_hash =
-        crate::ocr_adoption::content_hash(json!([unit_ref, request]).to_string().as_bytes());
     let mut tx = db.pool().begin().await?;
+    let receipt = review_reading_in(&mut tx, unit_ref, r).await?;
+    tx.commit().await?;
+    Ok(receipt)
+}
+async fn review_reading_in(
+    tx: &mut PgConnection,
+    unit_ref: Uuid,
+    r: &ReviewReadingRequest,
+) -> Result<Value, ReadingError> {
+    validate(r)?;
+    let request_hash = crate::ocr_source::content_hash(json!([unit_ref, r]).to_string().as_bytes());
     sqlx::query("SELECT pg_advisory_xact_lock(421,hashtext($1::text))")
-        .bind(request.command_ref.to_string())
+        .bind(r.command_ref.to_string())
         .execute(&mut *tx)
         .await?;
     let replay = sqlx::query(
         "SELECT request_hash,response FROM linggan_material_reading_command WHERE command_ref=$1",
     )
-    .bind(request.command_ref)
+    .bind(r.command_ref)
     .fetch_optional(&mut *tx)
     .await?;
     if replay
         .as_ref()
-        .is_some_and(|r| r.get::<String, _>("request_hash") != request_hash)
+        .is_some_and(|row| row.get::<String, _>("request_hash") != request_hash)
     {
         return Err(ReadingError::Conflict);
     }
@@ -33,179 +161,120 @@ pub async fn review_reading(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(ReadingError::NotFound)?;
-    lock_work(&mut tx, work).await?;
+    lock_work(tx, work).await?;
     let row = sqlx::query("SELECT * FROM linggan_material_unit WHERE unit_ref=$1 FOR UPDATE")
         .bind(unit_ref)
         .fetch_one(&mut *tx)
         .await?;
     let mut unit = Unit::from_row(&row);
-    let candidate =
-        sqlx::query("SELECT * FROM linggan_material_reading WHERE reading_ref=$1 AND unit_ref=$2")
-            .bind(request.candidate_revision_ref)
-            .bind(unit.id)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(ReadingError::NotFound)?;
-    // Current source eligibility also gates retries; a receipt cannot bypass withdrawal.
-    require_current_source(&mut tx, &unit, &candidate).await?;
-    if let Some(replay) = replay {
-        return Ok(replay.get("response"));
+    let locator = format!(
+        "{}.{}.{}",
+        unit.work,
+        unit.kind,
+        unit.slot.as_deref().unwrap_or("native")
+    );
+    if r.unit_ref != unit.id.to_string() && r.unit_ref != locator {
+        return Err(ReadingError::Invalid);
     }
+
     let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut *tx)
         .await?;
-    let effective_current = read::current_reference_in(&mut tx, work, unit.id, &now).await?;
-    if effective_current != request.expected_current_revision_ref {
-        return Err(ReadingError::Conflict);
-    }
-    if !source::bytes_available(&mut tx, &unit).await? {
-        return Err(ReadingError::OriginalUnavailable);
-    }
-    if request.action == "keep" {
-        require_current_reading(&mut tx, &unit).await?;
-    }
-    apply(&mut tx, &mut unit, request, &candidate).await?;
-    // Opinions preserve the stored selection, including an ineligible historical pointer.
-    let resulting = if matches!(request.action.as_str(), "pending" | "reject") {
-        effective_current
-    } else {
-        unit.current
-    };
-    let receipt = json!({"commandRef":request.command_ref,"unitRef":unit.id,
-        "candidateRevisionRef":request.candidate_revision_ref,"action":request.action,
-        "currentRevisionRef":resulting,
-        "adoption":resulting.map(|_| &unit.adoption),
-        "verification":resulting.map(|_| &unit.verification)});
-    sqlx::query("INSERT INTO linggan_material_reading_command(command_ref,request_hash,unit_ref,candidate_reading_ref,expected_reading_ref,resulting_reading_ref,action,actor,reason,verified,response) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)")
-        .bind(request.command_ref).bind(request_hash).bind(unit.id).bind(request.candidate_revision_ref)
-        .bind(request.expected_current_revision_ref).bind(resulting).bind(&request.action)
-        .bind(&request.actor).bind(&request.reason).bind(request.verified).bind(&receipt)
-        .execute(&mut *tx).await?;
-    tx.commit().await?;
-    Ok(receipt)
-}
-
-async fn require_current_source(
-    conn: &mut PgConnection,
-    unit: &Unit,
-    reading: &sqlx::postgres::PgRow,
-) -> Result<(), ReadingError> {
-    let blocks: Vec<Value> =
-        serde_json::from_value(reading.get("blocks")).map_err(|_| ReadingError::Invalid)?;
-    let issues: Vec<Value> =
-        serde_json::from_value(reading.get("issues")).map_err(|_| ReadingError::Invalid)?;
-    validate_content(&blocks, &issues).map_err(|_| ReadingError::Invalid)?;
-    let version: String = reading.get("source_version");
-    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut *conn)
-        .await?;
-    if version != unit.source
+    if unit.source != r.source_version
         || !source::current(
-            conn,
-            unit.work,
+            tx,
+            work,
             &unit.kind,
             unit.slot.as_deref(),
-            &version,
-            reading.get("derivative_ref"),
+            &r.source_version,
+            None,
             &now,
         )
         .await?
     {
         return Err(ReadingError::SourceChanged);
     }
-    Ok(())
-}
-
-async fn require_current_reading(conn: &mut PgConnection, unit: &Unit) -> Result<(), ReadingError> {
-    let current = unit.current.ok_or(ReadingError::Invalid)?;
-    let reading =
-        sqlx::query("SELECT * FROM linggan_material_reading WHERE reading_ref=$1 AND unit_ref=$2")
-            .bind(current)
+    // Replay remains source gated, but is checked before CAS so a lost receipt is safe to retry.
+    if let Some(replay) = replay {
+        return Ok(replay.get("response"));
+    }
+    let current = read::current_reference_in(tx, work, unit.id, &now).await?;
+    if current != r.expected_current_revision_ref {
+        return Err(ReadingError::Conflict);
+    }
+    if !source::bytes_available(tx, &unit).await? {
+        return Err(ReadingError::OriginalUnavailable);
+    }
+    let before = if let Some(id) = current {
+        Some(
+            sqlx::query(
+                "SELECT * FROM linggan_material_reading WHERE reading_ref=$1 AND unit_ref=$2",
+            )
+            .bind(id)
             .bind(unit.id)
-            .fetch_one(&mut *conn)
-            .await?;
-    require_current_source(conn, unit, &reading).await
+            .fetch_one(&mut *tx)
+            .await?,
+        )
+    } else {
+        None
+    };
+    let original_blocks: Vec<Value> = before
+        .as_ref()
+        .map(|row| serde_json::from_value(row.get("blocks")))
+        .transpose()
+        .map_err(|_| ReadingError::Invalid)?
+        .unwrap_or_default();
+    let mut issues: Vec<Value> = before
+        .as_ref()
+        .map(|row| serde_json::from_value(row.get("issues")))
+        .transpose()
+        .map_err(|_| ReadingError::Invalid)?
+        .unwrap_or_default();
+    let mut blocks = r.edited_blocks.clone().ok_or(ReadingError::Invalid)?;
+    retain_unresolved(
+        &original_blocks,
+        &mut blocks,
+        &mut issues,
+        &r.resolved_issue_keys,
+    )?;
+    let id = Uuid::new_v4();
+    normalize_refs(work, id, &mut blocks, &mut issues);
+    validate_content(&blocks, &issues).map_err(|_| ReadingError::Invalid)?;
+    let derivative: Option<Uuid> = before.as_ref().and_then(|row| row.get("derivative_ref"));
+    let location: Value = if let Some(row) = &before {
+        row.get("source_location")
+    } else {
+        let blob:Option<String>=sqlx::query_scalar("SELECT blob_sha256 FROM linggan_media_materialization WHERE materialization_ref::text=$1").bind(&unit.source).fetch_optional(&mut *tx).await?;
+        json!({"slotKey":unit.slot,"sourceVersion":unit.source,"materializationRef":unit.source,"blobSha256":blob})
+    };
+    sqlx::query("INSERT INTO linggan_material_reading(reading_ref,unit_ref,content_public_ref,source_version,derivative_ref,producer_ref,producer_kind,rule_version,blocks,issues,source_location,based_on_reading_ref,publication,source_state,page_ordinal) VALUES($1,$2,$3,$4,$5,$6,'human_edit',$7,$8,$9,$10,$11,'human_edit',$12,$13)")
+        .bind(id).bind(unit.id).bind(work).bind(&unit.source).bind(derivative).bind(r.command_ref).bind(crate::research_dossier::content::RULE_VERSION).bind(json!(blocks)).bind(json!(issues)).bind(location).bind(current).bind(&unit.state).bind(unit.page).execute(&mut *tx).await?;
+    unit.current = Some(id);
+    unit.adoption = "human_edited".into();
+    unit.verification = if r.verified { "verified" } else { "unchecked" }.into();
+    update_unit(tx, &mut unit).await?;
+    record_selection(tx, &unit, "edit", Some(r.command_ref)).await?;
+    let receipt = json!({"commandRef":r.command_ref,"unitRef":r.unit_ref,"action":"edit","currentRevisionRef":id,"adoption":unit.adoption,"verification":unit.verification});
+    sqlx::query("INSERT INTO linggan_material_reading_command(command_ref,request_hash,unit_ref,base_reading_ref,expected_reading_ref,resulting_reading_ref,action,actor,reason,verified,response) VALUES($1,$2,$3,$4,$4,$5,'edit',$6,$7,$8,$9)")
+        .bind(r.command_ref).bind(request_hash).bind(unit.id).bind(current).bind(id).bind(&r.actor).bind(&r.reason).bind(r.verified).bind(&receipt).execute(&mut *tx).await?;
+    Ok(receipt)
 }
-
 fn validate(r: &ReviewReadingRequest) -> Result<(), ReadingError> {
-    if !["adopt", "edit", "keep", "pending", "reject"].contains(&r.action.as_str())
+    if r.action != "edit"
+        || Uuid::parse_str(&r.source_version).is_err()
         || r.actor.trim().is_empty()
         || r.actor.chars().count() > 120
         || r.reason.trim().is_empty()
         || r.reason.chars().count() > 300
-        || (["pending", "reject"].contains(&r.action.as_str()) && r.verified)
-        || (r.action == "edit") != r.edited_blocks.is_some()
-        || (r.action != "edit" && !r.resolved_issue_keys.is_empty())
+        || r.edited_blocks.is_none()
         || r.resolved_issue_keys.iter().any(|k| k.is_empty())
         || r.resolved_issue_keys.iter().collect::<BTreeSet<_>>().len()
             != r.resolved_issue_keys.len()
     {
         return Err(ReadingError::Invalid);
     }
-    if let Some(blocks) = &r.edited_blocks {
-        crate::research_dossier::content::validate_blocks(blocks)
-            .map_err(|_| ReadingError::Invalid)?;
-    }
-    Ok(())
-}
-
-async fn apply(
-    conn: &mut PgConnection,
-    unit: &mut Unit,
-    r: &ReviewReadingRequest,
-    candidate: &sqlx::postgres::PgRow,
-) -> Result<(), ReadingError> {
-    match r.action.as_str() {
-        "adopt" => {
-            unit.current = Some(r.candidate_revision_ref);
-            unit.state = candidate.get("source_state");
-            unit.page = candidate.get("page_ordinal");
-            unit.adoption = "human_adopted".into();
-        }
-        "edit" => {
-            unit.current = Some(insert_edit(conn, unit, r, candidate).await?);
-            unit.state = candidate.get("source_state");
-            unit.page = candidate.get("page_ordinal");
-            unit.adoption = "human_edited".into();
-        }
-        "keep" => {
-            if unit.current.is_none() && r.verified {
-                return Err(ReadingError::Invalid);
-            }
-            if unit.current.is_some() && unit.adoption == "automatic" {
-                unit.adoption = "human_adopted".into();
-            }
-        }
-        "pending" | "reject" => return Ok(()),
-        _ => return Err(ReadingError::Invalid),
-    }
-    unit.verification = if r.verified { "verified" } else { "unchecked" }.into();
-    update_unit(conn, unit).await?;
-    record_selection(conn, unit, &r.action, Some(r.command_ref)).await?;
-    Ok(())
-}
-
-async fn insert_edit(
-    conn: &mut PgConnection,
-    unit: &Unit,
-    r: &ReviewReadingRequest,
-    candidate: &sqlx::postgres::PgRow,
-) -> Result<Uuid, ReadingError> {
-    let id = Uuid::new_v4();
-    let mut blocks = r.edited_blocks.clone().ok_or(ReadingError::Invalid)?;
-    let before: Vec<Value> =
-        serde_json::from_value(candidate.get("blocks")).map_err(|_| ReadingError::Invalid)?;
-    let mut issues: Vec<Value> =
-        serde_json::from_value(candidate.get("issues")).map_err(|_| ReadingError::Invalid)?;
-    retain_unresolved(&before, &mut blocks, &mut issues, &r.resolved_issue_keys)?;
-    normalize_refs(unit.work, id, &mut blocks, &mut issues);
-    validate_content(&blocks, &issues).map_err(|_| ReadingError::Invalid)?;
-    sqlx::query("INSERT INTO linggan_material_reading(reading_ref,unit_ref,content_public_ref,source_version,derivative_ref,producer_ref,producer_kind,rule_version,blocks,issues,source_location,based_on_reading_ref,publication,source_state,page_ordinal) VALUES($1,$2,$3,$4,$5,$6,'human_edit',$7,$8,$9,$10,$11,'human_edit',$12,$13)")
-        .bind(id).bind(unit.id).bind(unit.work).bind(&unit.source).bind(candidate.get::<Option<Uuid>,_>("derivative_ref"))
-        .bind(r.command_ref).bind(crate::research_dossier::content::RULE_VERSION).bind(json!(blocks)).bind(json!(issues))
-        .bind(candidate.get::<Value,_>("source_location")).bind(r.candidate_revision_ref)
-        .bind(candidate.get::<String,_>("source_state")).bind(candidate.get::<Option<i32>,_>("page_ordinal")).execute(conn).await?;
-    Ok(id)
+    crate::research_dossier::content::validate_blocks(r.edited_blocks.as_ref().unwrap())
+        .map_err(|_| ReadingError::Invalid)
 }
 
 fn retain_unresolved(

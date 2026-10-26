@@ -6,13 +6,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-const PLAN_VERSION: &str = "research-dossier-plan.v2";
+const PLAN_VERSION: &str = "research-dossier-plan.v3";
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BatchOperation {
     NativeBody,
     Hashtags,
-    Relayer,
     Snapshot,
     HistoricalMedia,
 }
@@ -23,13 +22,11 @@ pub struct PlanEntry {
     pub expected_revision: String,
     pub material_fingerprint: String,
     pub body_source_version: Option<String>,
-    pub relayer_source_hash: String,
     pub detail_refs: Vec<Uuid>,
     pub pending_tag_details: usize,
     pub source_not_provided: usize,
     pub source_invalid: usize,
     pub source_nonempty: usize,
-    pub relayer: Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub historical_source_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -56,7 +53,7 @@ impl BatchPlan {
     fn validate(&self) -> Result<(), Error> {
         validate_works(&self.entries.iter().map(|e| e.work_ref).collect::<Vec<_>>())?;
         if self.contract != PLAN_VERSION
-            || self.layer_version != crate::ocr_layering::VERSION
+            || self.layer_version != crate::research_dossier::content::RULE_VERSION
             || self.maximum_works != MAX_WORKS
             || self.plan_hash != self.digest()
             || (self.operation == BatchOperation::HistoricalMedia
@@ -118,13 +115,11 @@ pub async fn plan(
                 .iter()
                 .find(|m| m["kind"] == "body")
                 .and_then(|m| m["sourceVersion"].as_str().map(str::to_owned)),
-            relayer_source_hash: relayer_source_hash(&dossiers[&input.work_ref]),
             detail_refs: details.iter().map(|(r, _, _)| *r).collect(),
             pending_tag_details: details.iter().filter(|(_, _, done)| !*done).count(),
             source_not_provided: parsed.iter().filter(|p| p.state == "not_provided").count(),
             source_invalid: parsed.iter().filter(|p| p.state == "invalid").count(),
             source_nonempty: parsed.iter().filter(|p| !p.tags.is_empty()).count(),
-            relayer: crate::research_dossier::relayer_plan(&dossiers[&input.work_ref]),
             historical_source_hash: historical.as_ref().map(|inventory| inventory.fingerprint()),
             historical: historical.as_ref().map(|inventory| inventory.summary()),
         });
@@ -134,7 +129,7 @@ pub async fn plan(
         contract: PLAN_VERSION.into(),
         domain_ref: domain,
         as_of,
-        layer_version: crate::ocr_layering::VERSION.into(),
+        layer_version: crate::research_dossier::content::RULE_VERSION.into(),
         maximum_works: MAX_WORKS,
         operation,
         entries,
@@ -180,7 +175,7 @@ impl BatchReceipt {
 pub async fn apply_plan(database: &Database, plan: &BatchPlan) -> Result<BatchReceipt, Error> {
     plan.validate()?;
     let mut report = BatchReceipt {
-        contract: "research-dossier-receipt.v2",
+        contract: "research-dossier-receipt.v3",
         plan_hash: plan.plan_hash.clone(),
         operation: plan.operation,
         work_count: plan.entries.len(),
@@ -206,26 +201,12 @@ pub async fn apply_plan(database: &Database, plan: &BatchPlan) -> Result<BatchRe
                     || result["needsOcr"].as_u64().unwrap_or(0) > 0
                     || result["needsAcquisition"].as_u64().unwrap_or(0) > 0
                     || result["unavailable"].as_u64().unwrap_or(0) > 0;
-                report.layout_updated += result["updated"]
-                    .as_u64()
-                    .filter(|_| plan.operation == BatchOperation::Relayer)
-                    .unwrap_or(0);
-                report.layout_already_current += result["alreadyCurrent"]
-                    .as_u64()
-                    .filter(|_| plan.operation == BatchOperation::Relayer)
-                    .unwrap_or(0);
-                report.layout_skipped += result["skipped"]
-                    .as_u64()
-                    .filter(|_| plan.operation == BatchOperation::Relayer)
-                    .unwrap_or(0);
                 report.needs_ocr += result["needsOcr"].as_u64().unwrap_or(0);
                 report.needs_acquisition += result["needsAcquisition"].as_u64().unwrap_or(0);
                 let changed = match plan.operation {
                     BatchOperation::NativeBody => result["state"] == "updated",
                     BatchOperation::Hashtags => result["projected"].as_u64().unwrap_or(0) > 0,
-                    BatchOperation::Relayer | BatchOperation::HistoricalMedia => {
-                        result["updated"].as_u64().unwrap_or(0) > 0
-                    }
+                    BatchOperation::HistoricalMedia => result["updated"].as_u64().unwrap_or(0) > 0,
                     BatchOperation::Snapshot => result["inserted"] == true,
                 };
                 if partial {
@@ -282,39 +263,6 @@ async fn apply_work(
             )
             .await?
         )),
-        BatchOperation::Relayer => {
-            // Reuse the canonical full-source transaction; all eligible layouts are retained.
-            // On replay, a fully current work needs no mutation; a changed work that
-            // still has pending layouts must retain the original revision guard.
-            let mut tx = database.pool().begin().await?;
-            read::scope(&mut tx, plan.domain_ref, &[entry.work_ref], &plan.as_of).await?;
-            let now = cutoff(&mut tx, None).await?;
-            let current = crate::research_dossier::read_in(&mut tx, &[entry.work_ref], &now)
-                .await?
-                .remove(&entry.work_ref)
-                .ok_or(Error::NotFound)?;
-            let status = crate::research_dossier::relayer_plan(&current);
-            tx.commit().await?;
-            if current.revision != entry.expected_revision {
-                // Nothing is written on an already-current replay. Explicitly report
-                // revision drift, rather than pretending the frozen source stayed unchanged.
-                if relayer_source_hash(&current) == entry.relayer_source_hash
-                    && status["pendingLayouts"] == 0
-                {
-                    return Ok(
-                        json!({"updated":0,"alreadyCurrent":status["alreadyCurrent"],"skipped":0,"needsOcr":status["needsOcr"],"needsAcquisition":status["needsAcquisition"],"layerOutputChanged":true,"readOnlyReplay":true}),
-                    );
-                }
-                return Err(Error::Conflict);
-            }
-            crate::research_dossier::relayer_work(
-                database,
-                entry.work_ref,
-                &entry.expected_revision,
-            )
-            .await
-            .map_err(Error::from)
-        }
     }
 }
 
@@ -393,28 +341,6 @@ async fn native_body(
     Ok(result)
 }
 
-// Outputs change during normalization; source membership and restrictions may not.
-fn relayer_source_hash(dossier: &crate::research_dossier::ResearchDossier) -> String {
-    let media: Vec<_> = dossier
-        .media
-        .iter()
-        .map(|m| {
-            json!([
-                m["slotKey"],
-                m["sourceVersion"],
-                m["layoutRef"],
-                m["humanProtected"]
-            ])
-        })
-        .collect();
-    let native: Vec<_> = dossier
-        .fragments
-        .iter()
-        .filter(|f| matches!(f.field.as_str(), "title" | "body" | "tags"))
-        .collect();
-    hash(&json!([native, dossier.media_inventory, media]).to_string())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,7 +350,7 @@ mod tests {
             contract: PLAN_VERSION.into(),
             domain_ref: Uuid::nil(),
             as_of: "x".into(),
-            layer_version: crate::ocr_layering::VERSION.into(),
+            layer_version: crate::research_dossier::content::RULE_VERSION.into(),
             maximum_works: MAX_WORKS,
             operation: BatchOperation::Hashtags,
             entries: vec![],
@@ -435,13 +361,15 @@ mod tests {
         assert!(serde_json::from_value::<BatchPlan>(json!({"unexpected":true})).is_err());
     }
     #[test]
-    fn old_operation_plan_hashes_survive_optional_history_fields_but_new_operation_requires_source_hash()
-     {
-        // Exact pre-adapter serialized field order: absent historical fields must remain absent.
+    fn current_plan_is_frozen_and_history_requires_its_source_hash() {
+        // Current fields have one frozen serialized identity; removed relayer fields are rejected.
         let old = format!(
-            r#"{{"contract":"research-dossier-plan.v2","domainRef":"00000000-0000-4000-8000-000000000001","asOf":"2026-10-25T00:00:00Z","layerVersion":"{}","maximumWorks":200,"operation":"hashtags","entries":[{{"workRef":"00000000-0000-4000-8000-000000000010","expectedRevision":"revision","materialFingerprint":"fingerprint","bodySourceVersion":null,"relayerSourceHash":"source","detailRefs":[],"pendingTagDetails":0,"sourceNotProvided":0,"sourceInvalid":0,"sourceNonempty":0,"relayer":{{}}}}],"planHash":""}}"#,
-            crate::ocr_layering::VERSION
+            r#"{{"contract":"research-dossier-plan.v3","domainRef":"00000000-0000-4000-8000-000000000001","asOf":"2026-10-25T00:00:00Z","layerVersion":"{}","maximumWorks":200,"operation":"hashtags","entries":[{{"workRef":"00000000-0000-4000-8000-000000000010","expectedRevision":"revision","materialFingerprint":"fingerprint","bodySourceVersion":null,"detailRefs":[],"pendingTagDetails":0,"sourceNotProvided":0,"sourceInvalid":0,"sourceNonempty":0}}],"planHash":""}}"#,
+            crate::research_dossier::content::RULE_VERSION
         );
+        let mut obsolete: Value = serde_json::from_str(&old).unwrap();
+        obsolete["entries"][0]["relayerSourceHash"] = json!("obsolete");
+        assert!(serde_json::from_value::<BatchPlan>(obsolete).is_err());
         let mut plan: BatchPlan = serde_json::from_str(&old).unwrap();
         assert_eq!(serde_json::to_string(&plan).unwrap(), old);
         assert_eq!(plan.digest(), hash(&old));

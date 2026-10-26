@@ -104,7 +104,6 @@ pub(super) async fn read(
     };
     match dossier::read_at(db, work, params.as_of.as_deref()).await {
         Ok(Some(mut value)) => {
-            let plan = dossier::relayer_plan(&value);
             if let Err(reason) = dossier::select(&mut value, &selection) {
                 return (
                     StatusCode::BAD_REQUEST,
@@ -123,7 +122,7 @@ pub(super) async fn read(
                 )
                     .into_response()
             } else {
-                Json(json!({"dossier":value,"relayerPlan":plan,"segment":segment})).into_response()
+                Json(json!({"dossier":value,"segment":segment})).into_response()
             }
         }
         Ok(None) => local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
@@ -177,26 +176,9 @@ fn segment(
         })
 }
 
-pub(super) async fn candidates(
-    State(state): State<LocalWebState>,
-    Path(work): Path<Uuid>,
-    Query(params): Query<Params>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    if let Err(response) = ensure_scope(db, work, params.domain).await {
-        return response;
-    }
-    match material_reading::read_candidates(db, work).await {
-        Ok(candidates) => Json(json!({"candidates":candidates})).into_response(),
-        Err(error) => reading_error(error),
-    }
-}
-
 pub(super) async fn review(
     State(state): State<LocalWebState>,
-    Path((work, unit)): Path<(Uuid, Uuid)>,
+    Path((work, unit)): Path<(Uuid, String)>,
     Query(params): Query<Params>,
     Json(input): Json<material_reading::ReviewReadingRequest>,
 ) -> Response {
@@ -206,14 +188,7 @@ pub(super) async fn review(
     if let Err(response) = ensure_scope(db, work, params.domain).await {
         return response;
     }
-    let belongs:Result<bool,_>=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_unit WHERE unit_ref=$1 AND content_public_ref=$2)")
-        .bind(unit).bind(work).fetch_one(db.pool()).await;
-    match belongs {
-        Ok(true) => {}
-        Ok(false) => return local_read_json_error(StatusCode::NOT_FOUND, "reading_not_found"),
-        Err(_) => return unavailable(),
-    }
-    match material_reading::review_reading(db, unit, &input).await {
+    match material_reading::review_work_reading(db, work, &unit, &input).await {
         Ok(receipt) => Json(receipt).into_response(),
         Err(error) => reading_error(error),
     }
@@ -267,7 +242,7 @@ pub(super) async fn metadata(
         Ok(v)
             if !v.is_empty()
                 && v.iter()
-                    .all(|s| matches!(s.as_str(), "author" | "interaction")) =>
+                    .all(|s| matches!(s.as_str(), "author" | "interaction" | "publication")) =>
         {
             v
         }
@@ -303,50 +278,6 @@ pub(super) async fn comments(
     match linggan_evidence::read_dossier_comments(db, work, params.cursor).await {
         Ok(value) => Json(value).into_response(),
         Err(_) => unavailable(),
-    }
-}
-
-pub(super) async fn plan(
-    State(state): State<LocalWebState>,
-    Path(work): Path<Uuid>,
-    Query(params): Query<Params>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    if let Err(response) = ensure_scope(db, work, params.domain).await {
-        return response;
-    }
-    match dossier::plan(db, work).await {
-        Ok(Some(value)) => Json(json!({"relayerPlan":value})).into_response(),
-        Ok(None) => local_read_json_error(StatusCode::NOT_FOUND, "material_not_found"),
-        Err(error) => read_error(error),
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(super) struct Relayer {
-    expected_revision: String,
-    domain: Option<Uuid>,
-}
-pub(super) async fn relayer(
-    State(state): State<LocalWebState>,
-    Path(work): Path<Uuid>,
-    Json(input): Json<Relayer>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    if let Err(response) = ensure_scope(db, work, input.domain).await {
-        return response;
-    }
-    match dossier::relayer_work(db, work, &input.expected_revision).await {
-        Ok(value) => Json(value).into_response(),
-        Err(linggan_evidence::ProducerRuntimeError::MaterialIdentityConflict) => {
-            local_read_json_error(StatusCode::CONFLICT, "dossier_changed_or_scope_unavailable")
-        }
-        Err(_) => local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "dossier_relayer_failed"),
     }
 }
 

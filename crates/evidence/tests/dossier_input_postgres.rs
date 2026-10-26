@@ -26,7 +26,7 @@ async fn seed(db: &Database, id: &str, body: &str) -> Uuid {
 async fn snapshots_store_exact_block_references_and_do_not_copy_source_text() {
     let db = fixture::proof_database("dossier_input_identity").await;
     let work = support::work(&db).await;
-    support::ordinary_ocr(&db).await;
+    support::current_image_reading(&db).await;
     let first = input::read(&db, DOMAIN, work).await.unwrap();
     let canonical = dossier::read_at(&db, work, Some(&first.as_of))
         .await

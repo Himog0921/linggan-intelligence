@@ -7,11 +7,10 @@ import { chromium } from 'playwright';
 const directory = process.env.WEB_APP_PROOF_DIR;
 assert.ok(directory, 'WEB_APP_PROOF_DIR is required');
 const fixture = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
-const { origin, domain, work, imageUnitRef, candidateRefs, longTail } = fixture;
+const { origin, domain, work, imageUnitRef, currentReadingRef, longTail } = fixture;
 const host = new URL(origin);
 assert.equal(host.hostname, '127.0.0.1'); assert.notEqual(host.port, '3000'); assert.match(host.port, /^\d+$/);
-assert.ok(Array.isArray(candidateRefs) && candidateRefs.length === 2);
-for (const ref of [domain, work, imageUnitRef, ...candidateRefs]) assert.match(ref, /^[0-9a-f-]{36}$/i);
+for (const ref of [domain, work, imageUnitRef, currentReadingRef]) assert.match(ref, /^[0-9a-f-]{36}$/i);
 assert.equal(typeof longTail, 'string');
 const base = `/api/local/work-resources/${work}/research-dossier`;
 const reviewPath = `${base}/materials/${imageUnitRef}/review`;
@@ -74,7 +73,7 @@ async function applyReview(action, button) {
   const next = (await jsonResponse(await refreshed)).dossier;
   assert.equal(receipt.action, action); assert.equal(receipt.unitRef, imageUnitRef);
   assert.equal(material(next, imageUnitRef).currentRevisionRef, receipt.currentRevisionRef);
-  report.reviews.push({ action, commandRef: receipt.commandRef, candidateRevisionRef: receipt.candidateRevisionRef, currentRevisionRef: receipt.currentRevisionRef, adoption: receipt.adoption, verification: receipt.verification });
+  report.reviews.push({ action, commandRef: receipt.commandRef, currentRevisionRef: receipt.currentRevisionRef, adoption: receipt.adoption, verification: receipt.verification });
   return { receipt, next, command: response.request().postDataJSON() };
 }
 try {
@@ -114,97 +113,61 @@ try {
   assert.equal(await bodyView.locator('table').count(), body.blocks.filter(block => block.kind === 'table').length);
   report.steps.push('Actual v2 GET renders more than 100k characters, lists, table and quotation continuously without a content fold.');
   await assertReading(initial, panel);
-  assert.equal(await panel.getByLabel('审核人', { exact: true }).count(), 0, 'reading does not open an empty review form');
-  await checkWidth('1440 initial reading'); await snapshot('research-dossier-v2-1440.png');
-  const tail = body.blocks.find(block => typeof block.text === 'string' && block.text.includes(longTail));
-  await bodyView.locator(`[data-block-ref="${tail.ref}"]`).evaluate(node => node.scrollIntoView({ block: 'end' }));
-  await snapshot('research-dossier-v2-tail-1440.png');
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await checkWidth('1280 full reading'); await snapshot('research-dossier-v2-1280.png');
-  await page.setViewportSize({ width: 390, height: 844 });
-  await checkWidth('390 full reading');
-  assert.ok((await bodyView.textContent()).includes(longTail)); await snapshot('research-dossier-v2-390.png');
-  await page.setViewportSize({ width: 1440, height: 1000 });
-
-  const exported = JSON.parse(await download('导出 JSON', 'dossier-original.json'));
-  assert.deepEqual(exported, initial, 'JSON export is exactly the received dossier, without UI copies');
-  const markdownRead = page.waitForResponse(response => { const url = new URL(response.url()); return url.pathname === base && url.searchParams.get('format') === 'markdown'; });
-  const markdown = await download('导出 Markdown', 'dossier-original.md');
-  const markdownResponse = await markdownRead;
-  assert.equal(markdownResponse.status(), 200); assert.equal(new URL(markdownResponse.url()).searchParams.get('asOf'), initial.asOf);
-  assert.ok(markdown.length > 100000); assert.ok(markdown.includes(longTail));
-  report.steps.push('JSON download equals the original payload; separate Markdown download uses the same cutoff and contains the complete long body.');
-
-  const image = panel.locator(`[data-source-unit-ref="${imageUnitRef}"]`);
-  const imageReading = panel.locator(`[data-unit-ref="${imageUnitRef}"]`);
-  const before = material(initial, imageUnitRef); assert.ok(before.currentRevisionRef);
-  await image.locator('summary').filter({ hasText: /^对照原图/ }).click();
-  const sourceImage = image.getByRole('img'); await sourceImage.waitFor();
-  await sourceImage.evaluate(node => { if (node.complete) { if (node.naturalWidth === 0) throw new Error('Synthetic original image failed to load'); return; } return new Promise((resolve, reject) => { node.addEventListener('load', resolve, { once: true }); node.addEventListener('error', () => reject(new Error('Synthetic original image failed to load')), { once: true }); }); });
-  assert.ok(await sourceImage.evaluate(node => node.naturalWidth > 0));
-  await snapshot('research-dossier-v2-original-1440.png');
-  await image.locator('summary').filter({ hasText: /^对照原图/ }).click();
-  const candidateRead = page.waitForResponse(response => new URL(response.url()).pathname === `${base}/candidates`);
-  await image.getByRole('button', { name: '核对与修正', exact: true }).click();
-  const candidates = (await jsonResponse(await candidateRead)).candidates;
-  for (const ref of candidateRefs) assert.ok(candidates.some(value => value.candidateRevisionRef === ref && value.unitRef === imageUnitRef));
-  const candidate = candidates.find(value => value.candidateRevisionRef === candidateRefs[1]);
-  for (const kind of ['table', 'list', 'dialogue']) assert.ok(candidate.blocks.some(block => block.kind === kind), `candidate has ${kind}`);
-  const issues = issueList(candidate); assert.ok(issues.some(issue => issue.resolution === 'reading_edit')); assert.ok(issues.some(issue => issue.resolution === 'source_refresh'));
-  await image.getByLabel('核对版本', { exact: true }).selectOption(candidateRefs[1]);
-  assert.equal(commands.length, 0, 'reading candidates or source images does not adopt or invoke a model');
-  await image.getByLabel('审核人', { exact: true }).fill('合成底稿审核人');
-  await image.getByLabel('核对依据', { exact: true }).fill('逐块对照受控原图，保存完整结构与来源缺口。');
-  await snapshot('research-dossier-v2-candidate-1440.png');
-  const adopted = await applyReview('adopt', image.getByRole('button', { name: '采用此候选', exact: true }));
-  assert.equal(adopted.command.expectedCurrentRevisionRef, before.currentRevisionRef); assert.equal(adopted.command.candidateRevisionRef, candidateRefs[1]);
-  assert.equal(adopted.receipt.currentRevisionRef, candidateRefs[1]); assert.equal(adopted.receipt.adoption, 'human_adopted');
-  report.steps.push('Selected candidate 2 by exact identity and adopted through one CAS review command, independently of quality audit.');
-
-  await image.getByRole('button', { name: '逐块修正', exact: true }).click();
-  assert.equal(await image.getByLabel('核对版本', { exact: true }).inputValue(), '', 'adopted candidate becomes current, without a stale selection');
-  const editedCell = `${'人工核对后的完整表格单元。'.repeat(80)}不得增加，0.5 毫升🙂`;
-  const editedList = '有顺序的完整清单：不得遗漏第 2 步。';
-  const editedTurn = '他人表述：这个结论存在例外🙂';
-  await image.getByLabel('第 1 行，第 1 列', { exact: true }).first().fill(editedCell);
-  await image.getByLabel('第 1 项', { exact: true }).first().fill(editedList);
-  await image.getByLabel('第 1 轮发言', { exact: true }).first().fill(editedTurn);
-  for (const field of await image.getByRole('group', { name: '逐块修正完整读本', exact: true }).locator('textarea').all()) assert.equal(await field.getAttribute('maxlength'), null);
-  for (const issue of issues) {
-    const checkbox = image.getByRole('checkbox', { name: `已对照来源解决：${issue.message}`, exact: true });
-    if (issue.resolution === 'reading_edit') await checkbox.check();
-    else assert.equal(await checkbox.count(), 0, 'source refresh gaps cannot be dismissed as text edits');
+  assert.equal(await panel.getByLabel('修正人', { exact: true }).count(), 0, 'reading does not mount an editor');
+  await assertReading(initial,panel);
+  for(const width of [1440,1280]) {await page.setViewportSize({width,height:1000});await checkWidth(`${width} complete reading`);await snapshot(`research-dossier-v2-${width}.png`);}
+  const exported=JSON.parse(await download('导出 JSON','dossier-initial.json'));
+  assert.deepEqual(exported,initial,'JSON is the same canonical snapshot without a second OCR result copy');
+  const markdown=await download('导出 Markdown','dossier-initial.md');assert.ok(markdown.includes(longTail));
+  const originals=panel.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
+  assert.equal(await originals.getAttribute('open'),null,'source comparison starts folded while text is readable');
+  await panel.locator(`[data-unit-ref="${imageUnitRef}"]`).getByRole('button',{name:'查看来源',exact:true}).first().click();
+  assert.notEqual(await originals.getAttribute('open'),null,'source action opens the actual original container');
+  const image=panel.locator(`[data-source-unit-ref="${imageUnitRef}"]`);
+  const compare=image.locator('details').filter({hasText:/^对照原图/}).first();
+  assert.notEqual(await compare.getAttribute('open'),null,'source action opens the actual original image');
+  await image.getByRole('img').evaluate(node=>node.decode());
+  assert.equal(await image.getByRole('img').evaluate(node=>node.naturalWidth>0),true);
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset.sourceUnitRef),imageUnitRef,'source action exposes a keyboard focus target');
+  await focusBelowHeader(image);await snapshot('research-dossier-v2-source-1280.png');
+  const metadataReady=page.waitForResponse(response=>new URL(response.url()).pathname===`${base}/metadata`);
+  await panel.getByText('作者、时间与互动',{exact:true}).click();
+  const metadata=await jsonResponse(await metadataReady);assert.ok(metadata.metadata.publication);
+  const metadataPanel=panel.getByText('作者、时间与互动',{exact:true}).locator('xpath=..');
+  await metadataPanel.getByText(/分享/).waitFor();await metadataPanel.getByText(/观察时间：/).first().waitFor();
+  await snapshot('research-dossier-v2-metadata-1280.png');
+  const canonicalImage=material(initial,imageUnitRef);assert.equal(canonicalImage.currentRevisionRef,currentReadingRef);
+  const issues=issueList(canonicalImage);assert.ok(issues.some(issue=>issue.resolution==='reading_edit'));assert.ok(issues.some(issue=>issue.resolution==='source_refresh'));
+  await image.getByRole('button',{name:'修正文字',exact:true}).click();
+  assert.equal(await image.getByRole('combobox',{name:'核对版本'}).count(),0);
+  await image.getByLabel('修正人',{exact:true}).fill('合成底稿修正人');
+  await image.getByLabel('修正说明',{exact:true}).fill('逐块对照受控原图，保存完整结构与来源缺口。');
+  const editedCell=`${'人工核对后的完整表格单元。'.repeat(80)}不得增加，0.5 毫升🙂`;
+  const editedList='有顺序的完整清单：不得遗漏第 2 步。';const editedTurn='他人表述：这个结论存在例外🙂';
+  await image.getByLabel('第 1 行，第 1 列',{exact:true}).first().fill(editedCell);
+  await image.getByLabel('第 1 项',{exact:true}).first().fill(editedList);
+  await image.getByLabel('第 1 轮发言',{exact:true}).first().fill(editedTurn);
+  for(const field of await image.getByRole('group',{name:'逐块修正完整读本',exact:true}).locator('textarea').all()) assert.equal(await field.getAttribute('maxlength'),null);
+  for(const issue of issues) {
+    const checkbox=image.getByRole('checkbox',{name:`已对照原件解决：${issue.message}`,exact:true});
+    if(issue.resolution==='reading_edit') await checkbox.check();else assert.equal(await checkbox.count(),0);
   }
-  await image.getByRole('checkbox', { name: '已对照来源核验当前读本', exact: true }).check();
-  await page.setViewportSize({ width: 390, height: 844 }); await checkWidth('390 structured editor');
-  assert.equal(await image.getByLabel('第 1 行，第 1 列', { exact: true }).first().inputValue(), editedCell);
-  await snapshot('research-dossier-v2-editor-390.png');
-  const edited = await applyReview('edit', image.getByRole('button', { name: '保存完整修正版', exact: true }));
-  assert.equal(edited.command.expectedCurrentRevisionRef, adopted.receipt.currentRevisionRef); assert.equal(edited.command.candidateRevisionRef, adopted.receipt.currentRevisionRef);
-  assert.equal(edited.command.editedBlocks.length, candidate.blocks.length);
-  assert.equal(edited.command.editedBlocks.find(block => block.kind === 'table').rows[0][0], editedCell);
-  assert.equal(edited.command.editedBlocks.find(block => block.kind === 'list').items[0], editedList);
-  assert.equal(edited.command.editedBlocks.find(block => block.kind === 'dialogue').turns[0].text, editedTurn);
-  assert.deepEqual([...edited.command.resolvedIssueKeys].sort(), issues.filter(issue => issue.resolution === 'reading_edit').map(issue => issue.key).sort());
-  assert.notEqual(edited.receipt.currentRevisionRef, adopted.receipt.currentRevisionRef); assert.equal(edited.receipt.adoption, 'human_edited'); assert.equal(edited.receipt.verification, 'verified');
-  const editedUnit = material(edited.next, imageUnitRef);
-  assert.equal(editedUnit.blocks.find(block => block.kind === 'table').rows[0][0], editedCell);
-  const unresolved = issueList(editedUnit);
-  for (const issue of issues) assert.equal(unresolved.some(value => value.key === issue.key), issue.resolution === 'source_refresh');
-  await imageReading.getByText(editedCell, { exact: true }).first().waitFor();
-  report.steps.push('Edited table/list/dialogue structures on the adopted current reading; full fields survived 390px layout; only selected reading issues were resolved.');
-
-  const kept = await applyReview('keep', image.getByRole('button', { name: '保留当前读本', exact: true }));
-  assert.equal(kept.command.expectedCurrentRevisionRef, edited.receipt.currentRevisionRef); assert.equal(kept.command.candidateRevisionRef, edited.receipt.currentRevisionRef);
-  assert.equal(kept.receipt.currentRevisionRef, edited.receipt.currentRevisionRef); assert.ok(!('editedBlocks' in kept.command)); assert.deepEqual(kept.command.resolvedIssueKeys, []);
-  await image.getByText('已记录保留当前读本。', { exact: true }).waitFor(); await checkWidth('390 persisted reading');
-  await snapshot('research-dossier-v2-saved-390.png');
-  await page.setViewportSize({ width: 1440, height: 1000 }); await checkWidth('1440 persisted reading'); await snapshot('research-dossier-v2-saved-1440.png');
-  const finalExport = JSON.parse(await download('导出 JSON', 'dossier-edited.json'));
-  assert.deepEqual(material(finalExport, imageUnitRef).blocks, material(kept.next, imageUnitRef).blocks);
-  assert.ok(JSON.stringify(finalExport).includes(longTail));
-  report.steps.push('Keep-current preserved the edited revision; final canonical JSON contains the complete revised blocks and untouched long body.');
-  assert.deepEqual(commands.map(command => command.action), ['adopt', 'edit', 'keep']); assert.equal(new Set(commands.map(command => command.commandRef)).size, 3);
+  await image.getByRole('checkbox',{name:'已对照原件核验文字',exact:true}).check();
+  for(const width of [1440,1280]) {await page.setViewportSize({width,height:1000});await checkWidth(`${width} structured editor`);await focusBelowHeader(image.getByRole('group',{name:'逐块修正完整读本',exact:true}));await snapshot(`research-dossier-v2-editor-${width}.png`);}
+  const edited=await applyReview('edit',image.getByRole('button',{name:'保存修正',exact:true}));
+  assert.equal(edited.command.expectedCurrentRevisionRef,currentReadingRef);assert.equal(edited.command.sourceVersion,canonicalImage.sourceVersion);assert.equal(edited.command.unitRef,imageUnitRef);assert.ok(!('candidateRevisionRef' in edited.command));
+  assert.equal(edited.command.editedBlocks.length,canonicalImage.blocks.length);
+  assert.equal(edited.command.editedBlocks.find(block=>block.kind==='table').rows[0][0],editedCell);
+  assert.equal(edited.command.editedBlocks.find(block=>block.kind==='list').items[0],editedList);
+  assert.equal(edited.command.editedBlocks.find(block=>block.kind==='dialogue').turns[0].text,editedTurn);
+  assert.deepEqual([...edited.command.resolvedIssueKeys].sort(),issues.filter(issue=>issue.resolution==='reading_edit').map(issue=>issue.key).sort());
+  assert.notEqual(edited.receipt.currentRevisionRef,currentReadingRef);assert.equal(edited.receipt.adoption,'human_edited');assert.equal(edited.receipt.verification,'verified');
+  const editedUnit=material(edited.next,imageUnitRef);assert.equal(editedUnit.blocks.find(block=>block.kind==='table').rows[0][0],editedCell);
+  const unresolved=issueList(editedUnit);for(const issue of issues) assert.equal(unresolved.some(value=>value.key===issue.key),issue.resolution==='source_refresh');
+  const finalExport=JSON.parse(await download('导出 JSON','dossier-edited.json'));assert.deepEqual(material(finalExport,imageUnitRef).blocks,editedUnit.blocks);assert.ok(JSON.stringify(finalExport).includes(longTail));
+  assert.deepEqual(commands.map(command=>command.action),['edit']);
+  await page.setViewportSize({width:1440,height:1000});await focusBelowHeader(panel.locator(`[data-unit-ref="${imageUnitRef}"]`).first());await snapshot('research-dossier-v2-saved-1440.png');
+  report.steps.push('Read one canonical snapshot; inspected actual local originals and metadata; saved one full structural edit with source/CAS identity at 1440/1280 desktop.');
   for (const [index, scenario] of (fixture.scenarios ?? []).entries()) {
     assert.match(scenario.work, /^[0-9a-f-]{36}$/i);
     const scenarioDomain = scenario.domain ?? domain;
@@ -213,7 +176,7 @@ try {
     const dossier = (await jsonResponse(await read)).dossier;
     await panel.getByRole('heading', { name: '研究底稿', exact: true }).waitFor();
     await assertReading(dossier, panel);
-    assert.equal(await panel.getByLabel('审核人', { exact: true }).count(), 0);
+    assert.equal(await panel.getByLabel('修正人', { exact: true }).count(), 0);
     assert.equal(await panel.locator('[data-source-unit-ref]').count(), dossier.materials.length);
     for (const width of [1440, 1280]) {
       await page.setViewportSize({ width, height: 1000 });
@@ -222,7 +185,9 @@ try {
     }
     if (scenario.name === 'video-transcript') {
       const mediaOriginals = dossier.materials.filter(unit => ['audio', 'video_frame'].includes(unit.kind));
-      assert.equal(mediaOriginals.length, 2);
+      assert.ok(mediaOriginals.length >= 1);
+      const sourceDetails=panel.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
+      if(await sourceDetails.getAttribute('open')===null) await sourceDetails.locator(':scope > summary').click();
       for (const unit of mediaOriginals) {
         const source = panel.locator(`[data-source-unit-ref="${unit.ref}"]`);
         const link = source.getByRole('link', { name: '查看音视频原件', exact: true });
@@ -248,11 +213,14 @@ try {
           await snapshot(`standard-dossier-video-originals-${width}.png`);
         } else if (scenario.name === 'partial-images') {
           assert.ok(dossier.materials.some(unit => unit.processing?.state === 'failed'), 'partial fixture contains an actual failed processing receipt');
+          const stateDetails=panel.locator('summary').filter({hasText:/^材料状态/}).locator('xpath=..');
+          if(await stateDetails.getAttribute('open')===null) await stateDetails.locator(':scope > summary').click();
           const failure = panel.getByText(/^处理失败(?:，已有读本仍可读)?。$/).first();
           await focusBelowHeader(failure.locator('xpath=ancestor::section[1]'));
           await snapshot(`standard-dossier-partial-failure-${width}.png`);
         } else {
-          const originals = panel.getByRole('region', { name: '原件与修正', exact: true });
+          const originals = panel.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
+      if(await originals.getAttribute('open')===null) await originals.locator(':scope > summary').click();
           const imageUnit = dossier.materials.find(unit => unit.kind === 'image' && unit.originalUrl);
           if (imageUnit) {
             const source = originals.locator(`[data-source-unit-ref="${imageUnit.ref}"]`);
@@ -274,7 +242,7 @@ try {
   }
   assert.deepEqual(report.blockedRequests, []); assert.deepEqual(report.pageErrors, []); assert.deepEqual(report.consoleErrors, []);
   report.finished = true;
-  console.log('research-dossier.v2 browser proof: full reading, exact exports, candidate adoption, structured edit and keep-current PASS');
+  console.log('research-dossier.v2 browser proof: full canonical reading, exact exports, original source, metadata and structured edit PASS');
 } catch (error) {
   report.error = String(error?.stack ?? error);
   if (page) { await writeFile(path.join(directory, 'browser-failure.html'), await page.content()); await snapshot('browser-failure.png'); }

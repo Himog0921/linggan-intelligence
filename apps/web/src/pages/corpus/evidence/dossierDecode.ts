@@ -1,13 +1,13 @@
-import { bool, decode, list, num, obj, optNum, optObj, optStr, ShapeError, str, type Json } from '../../../shared/decode';
+import { bool, decode, list, obj, optNum, optObj, optStr, ShapeError, str, type Json } from '../../../shared/decode';
 import { apiPath, mediaPath } from './evidencePaths';
 import { choice, count, parseBlocks, parseIssue, strings } from './dossierBlockDecode';
-import type { Dossier, DossierCommentPage, DossierCoverage, DossierMaterial, DossierPayload, DossierSelection, ReadingCandidate, ReadingReviewReceipt, ReadingReviewSummary, RelayerPlan, RelayerReceipt } from './dossierTypes';
+import type { Dossier, DossierCommentPage, DossierCoverage, DossierMaterial, DossierPayload, DossierSelection, ReadingReviewReceipt, ReadingReviewSummary } from './dossierTypes';
 
 const KINDS = ['body', 'tags', 'image', 'audio', 'video_frame'] as const;
 const PRODUCERS = ['platform', 'ordinary_ocr', 'local_vision', 'cloud_vision', 'asr', 'frame_ocr', 'human_edit'] as const;
 const ADOPTIONS = ['automatic', 'human_adopted', 'human_edited'] as const;
 const VERIFICATIONS = ['unchecked', 'verified'] as const;
-const REVIEW_ACTIONS = ['adopt', 'edit', 'keep', 'pending', 'reject'] as const;
+const REVIEW_ACTIONS = ['edit'] as const;
 const COVERAGE = ['available', 'known_empty', 'not_acquired', 'not_applicable', 'restricted', 'partial', 'not_processed'] as const;
 function optionalCount(row: Json, name: string, minimum = 0): number | null {
   const value = optNum(row, name); return value === null ? null : count(value, name, minimum);
@@ -18,7 +18,7 @@ function parseReview(row: Json): ReadingReviewSummary | null {
   if (review === null) return null;
   const actor = str(review, 'actor'); const reason = str(review, 'reason');
   if (!actor.trim() || !reason.trim() || Array.from(actor).length > 120 || Array.from(reason).length > 300) throw new ShapeError('review');
-  return { commandRef: str(review, 'commandRef'), actor, reason, action: choice(review.action, REVIEW_ACTIONS, 'review.action'), reviewedAt: str(review, 'reviewedAt') };
+  return { commandRef: str(review, 'commandRef'), actor, reason, action: choice(review.action, ['adopt', 'edit', 'keep', 'pending', 'reject'], 'review.action'), reviewedAt: str(review, 'reviewedAt') };
 }
 function parseMaterial(row: Json): DossierMaterial {
   const reading = optObj(row, 'reading');
@@ -75,38 +75,22 @@ function parseDossierRow(row: Json): Dossier {
     note: { platform: str(note, 'platform'), sourceUrl: optStr(note, 'sourceUrl'), platformTitle: optStr(note, 'platformTitle'),
       titleSource: titleSource === null ? null : { sourceRef: optStr(titleSource, 'sourceRef'), sourceVersion: optStr(titleSource, 'sourceVersion') },
       displayTitle: optStr(note, 'displayTitle'), displayTitleBasis: choice(note.displayTitleBasis, ['platform', 'cover', 'missing'], 'displayTitleBasis'), titleBlockRefs },
-    materials, readingView: { mainBlockRefs, supplementBlockRefs }, coverage: parseCoverage(obj(row, 'coverage')), attachments: { comments: attachment('comments'), author: attachment('author'), interaction: attachment('interaction'), versions: attachment('versions') }, selection: parseSelection(obj(row, 'selection')), raw: row,
+    materials, readingView: { mainBlockRefs, supplementBlockRefs }, coverage: parseCoverage(obj(row, 'coverage')), attachments: { comments: attachment('comments'), author: attachment('author'), interaction: attachment('interaction') }, selection: parseSelection(obj(row, 'selection')), raw: row,
   };
 }
 export function parseDossier(value: unknown): Dossier { return decode(value, parseDossierRow); }
-export function parseReadingVersion(value: unknown): { workRef: string; currentRevisionRef: string | null; material: DossierMaterial } {
-  return decode(value, row => {
-    if (row.currentRevisionRef === undefined) throw new ShapeError('currentRevisionRef');
-    return { workRef: str(row, 'workRef'), currentRevisionRef: optStr(row, 'currentRevisionRef'), material: parseMaterial(obj(row, 'material')) };
-  });
-}
 export function parseDossierPayload(value: unknown): DossierPayload {
-  return decode(value, root => ({ dossier: parseDossierRow(obj(root, 'dossier')), relayerPlan: parseRelayerPlan(obj(root, 'relayerPlan')) }));
-}
-export function parseRelayerPlan(row: Json): RelayerPlan {
-  return { workCount: optionalCount(row, 'workCount'), imageSlots: optionalCount(row, 'imageSlots'), imageJobs: optionalCount(row, 'imageJobs'), layoutCount: count(row.layoutCount, 'layoutCount'), pendingLayouts: count(row.pendingLayouts, 'pendingLayouts'), alreadyCurrent: count(row.alreadyCurrent, 'alreadyCurrent'), needsOcr: count(row.needsOcr, 'needsOcr'), needsAcquisition: count(row.needsAcquisition, 'needsAcquisition'), pendingReviewCount: count(row.pendingReviewCount, 'pendingReviewCount'), expectedRevision: str(row, 'expectedRevision') };
-}
-export function parseRelayerPlanResponse(value: unknown): RelayerPlan { return decode(value, root => parseRelayerPlan(obj(root, 'relayerPlan'))); }
-export function parseCandidates(value: unknown): ReadingCandidate[] {
-  return decode(value, root => list(root, 'candidates', row => ({ unitRef: str(row, 'unitRef'), slotKey: optStr(row, 'slotKey'), candidateRevisionRef: str(row, 'candidateRevisionRef'), currentRevisionRef: optStr(row, 'currentRevisionRef'), blocks: parseBlocks(row), issues: list(row, 'issues', parseIssue), generatedBy: choice(row.generatedBy, PRODUCERS, 'generatedBy'), verification: choice(row.verification, VERIFICATIONS, 'verification'), createdAt: str(row, 'createdAt'), review: parseReview(row) })));
+  return decode(value, root => ({ dossier: parseDossierRow(obj(root, 'dossier')) }));
 }
 export function parseReadingReceipt(value: unknown): ReadingReviewReceipt {
   return decode(value, row => {
     const action = choice(row.action, REVIEW_ACTIONS, 'action'); const currentRevisionRef = optStr(row, 'currentRevisionRef');
     const adoption = row.adoption === null ? null : choice(row.adoption, ADOPTIONS, 'adoption');
     const verification = row.verification === null ? null : choice(row.verification, VERIFICATIONS, 'verification');
-    if (currentRevisionRef === null ? adoption !== null || verification !== null || ['adopt', 'edit', 'keep'].includes(action) : adoption === null || verification === null) throw new ShapeError('currentRevisionRef');
-    return { commandRef: str(row, 'commandRef'), unitRef: str(row, 'unitRef'), candidateRevisionRef: str(row, 'candidateRevisionRef'), action, currentRevisionRef, adoption, verification, reviewRef: optStr(row, 'reviewRef') };
+    if (currentRevisionRef === null || adoption !== 'human_edited' || verification === null || 'candidateRevisionRef' in row) throw new ShapeError('currentRevisionRef');
+    return { commandRef: str(row, 'commandRef'), unitRef: str(row, 'unitRef'), action, currentRevisionRef, adoption, verification, reviewRef: optStr(row, 'reviewRef') };
   });
 }
 export function parseDossierComments(value: unknown): DossierCommentPage {
   return decode(value, root => ({ items: list(root, 'items', row => ({ sourceRef: str(row, 'sourceRef'), parentSourceRef: optStr(row, 'parentSourceRef'), relation: choice(row.relation, ['ROOT', 'REPLY'], 'relation'), body: optStr(row, 'body'), likeCount: optionalCount(row, 'likeCount') })), total: optionalCount(root, 'total'), nextCursor: optStr(root, 'nextCursor') }));
-}
-export function parseRelayerReceipt(value: unknown): RelayerReceipt {
-  return decode(value, root => ({ scopeCount: num(root, 'scopeCount'), updated: num(root, 'updated'), alreadyCurrent: num(root, 'alreadyCurrent'), skipped: num(root, 'skipped'), needsOcr: num(root, 'needsOcr'), needsAcquisition: count(root.needsAcquisition, 'needsAcquisition') }));
 }

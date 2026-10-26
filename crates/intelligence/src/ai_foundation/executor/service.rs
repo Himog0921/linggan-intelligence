@@ -84,7 +84,6 @@ async fn work_loop(
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut recovery = Instant::now();
-    let mut audit_due = Instant::now();
     loop {
         if drain.is_requested() && tasks.is_empty() {
             return failure.map_or(Ok(()), Err);
@@ -96,7 +95,7 @@ async fn work_loop(
             },
             _=poll.tick()=>{
                 if drain.is_requested(){continue;}
-                if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery,&mut audit_due).await{
+                if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery).await{
                     failure.get_or_insert(error);drain.request();
                 }
             }
@@ -112,17 +111,10 @@ async fn fill_slots(
     adapter: &PiAdapter,
     drain: &ModelWorkerDrain,
     recovery: &mut Instant,
-    audit_due: &mut Instant,
 ) -> Result<(), ExecutorError> {
     if Instant::now() >= *recovery {
         queue::recover_expired(db, fence).await?;
         *recovery = Instant::now() + Duration::from_secs(5);
-    }
-    if Instant::now() >= *audit_due {
-        if crate::ocr_quality_audit::schedule::tick(db).await.is_err() {
-            eprintln!("ocr_audit_schedule_deferred");
-        }
-        *audit_due = Instant::now() + Duration::from_secs(60);
     }
     while tasks.len() < concurrency as usize && !drain.is_requested() {
         let claimed = match queue::claim_next(db, fence).await {
@@ -142,9 +134,6 @@ async fn fill_slots(
             match item.task_key {
                 TaskKey::ModelProbe => {
                     probe::execute_probe(&db, &item, secrets.as_ref(), &adapter).await
-                }
-                TaskKey::OcrQualityAudit => {
-                    super::ocr_audit::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 TaskKey::OcrRecognition => {
                     ocr_recognition::execute(&db, &item, secrets.as_ref(), &adapter).await

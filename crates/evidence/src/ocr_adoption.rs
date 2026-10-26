@@ -38,13 +38,7 @@ pub fn assess(input: &ImageInput) -> Result<Assessment, InputError> {
     })
 }
 
-pub fn content_hash(bytes: &[u8]) -> String {
-    use sha2::{Digest, Sha256};
-    Sha256::digest(bytes)
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
-}
+pub use crate::ocr_source::content_hash;
 
 /// Derives visual order for a single crop without changing its raw line ordinals.
 pub(crate) fn ordered_line_text(lines: &[Line]) -> String {

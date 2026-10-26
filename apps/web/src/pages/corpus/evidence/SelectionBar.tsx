@@ -8,14 +8,11 @@ interface SelectionBarProps {
   visibleCount: number;
   visibleSelected: number;
   hasDomain: boolean;
-  hasPendingBatch: boolean;
   onClear: () => void;
   onDeepCollect: () => void;
-  onOpenBatch: () => void;
-  onResumeBatch: () => void;
 }
 /** 只有明确进入选择模式时出现；选择列表与详情阅读互不干扰。 */
-export function SelectionBar({ count, visibleCount, visibleSelected, hasDomain, hasPendingBatch, onClear, onDeepCollect, onOpenBatch, onResumeBatch }: SelectionBarProps) {
+export function SelectionBar({ count, visibleCount, visibleSelected, hasDomain, onClear, onDeepCollect }: SelectionBarProps) {
   const usable = hasDomain && count > 0 && count <= SELECTION_LIMIT;
   return <div className={styles.selection} role="group" aria-label="批量操作">
     <span className={styles.selectedCount} role="status" aria-live="polite">
@@ -24,8 +21,6 @@ export function SelectionBar({ count, visibleCount, visibleSelected, hasDomain, 
     <span aria-hidden="true" className={styles.selectionDivider} />
     <ActionButton variant="quiet" disabled={count === 0} onClick={onClear}>清空已选</ActionButton>
     <ActionButton variant="quiet" disabled={!usable} onClick={onDeepCollect}>评论深采</ActionButton>
-    <ActionButton variant="quiet" disabled={!usable} onClick={onOpenBatch}>整理图片文字</ActionButton>
-    {hasPendingBatch ? <ActionButton variant="quiet" className={styles.resume} onClick={onResumeBatch}>继续上次整理</ActionButton> : null}
     {count > SELECTION_LIMIT ? <span className={styles.limit}>{`最多 ${SELECTION_LIMIT} 篇，请减少勾选`}</span> : null}
   </div>;
 }

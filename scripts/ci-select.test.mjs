@@ -32,53 +32,55 @@ test('existing domain proof coverage is retained and unions across files', () =>
     ['apps/web/src/pages/collection/TasksPage.tsx', ['web']],
     ['apps/web/src/pages/topics/TopicsPage.tsx', ['web', 'web_real_chain', 'topic']],
     ['apps/web/src/styles/theme.css', ['web', 'topic']],
-    ['apps/web/package-lock.json', ['ocr_audit', 'web', 'web_real_chain', 'topic']],
+    ['apps/web/package-lock.json', ['ocr_recognition', 'web', 'web_real_chain', 'topic']],
     ['apps/web/test/e2e/topic-main.mjs', ['web', 'topic']],
     ['apps/api/src/local_web/topic_workspace.rs', ['ai', 'web', 'web_real_chain', 'topic']],
     ['apps/api/src/local_web/web_app_tests.rs', ['ai', 'web', 'web_real_chain', 'topic']],
-    ['apps/api/src/local_web/ocr_recognition.rs', ['ai', 'ocr_audit', 'web', 'web_real_chain']],
+    ['apps/api/src/local_web/ocr_recognition.rs', ['ai', 'ocr_recognition', 'web', 'web_real_chain']],
     ['apps/api/src/main.rs', ['web', 'web_real_chain']],
-    ['apps/pi-adapter/src/index.ts', ['ai', 'ocr_audit']],
-    ['crates/intelligence/src/ai_foundation/executor/ocr_audit.rs', ['ai', 'ocr_audit']],
+    ['apps/pi-adapter/src/index.ts', ['ai', 'ocr_recognition']],
+    ['crates/intelligence/src/ai_foundation/executor/ocr_recognition.rs', ['ai', 'ocr_recognition']],
     ['crates/intelligence/src/content_workbench/source_usage.rs', ['ai', 'web', 'web_real_chain']],
     ['crates/intelligence/src/comment_study_run/submit.rs', ['ai', 'web', 'web_real_chain']],
-    ['crates/evidence/src/ocr_adoption/selection.rs', ['ocr_adoption']],
-    ['crates/evidence/src/ocr_adoption_persistence.rs', ['ocr_adoption', 'ocr_audit']],
-    ['crates/evidence/src/material_media_read.rs', ['ocr_adoption', 'web', 'web_real_chain']],
+    ['crates/evidence/src/ocr_adoption/selection.rs', ['material_reading']],
+    ['crates/evidence/src/ocr_adoption_persistence.rs', ['material_reading', 'ocr_recognition']],
+    ['crates/evidence/src/material_media_read.rs', ['material_reading', 'web', 'web_real_chain']],
     ['crates/evidence/src/research_dossier.rs', suites],
-    ['apps/worker/tests/ocr_vl_postgres.rs', ['ai', 'ocr_adoption', 'ocr_audit']],
-    ['database/migrations/0142_ocr_adoption.sql', ['ai', 'ocr_adoption']],
-    ['database/migrations/0143_ocr_quality_audit.sql', ['ai', 'ocr_audit']],
+    ['apps/worker/tests/ocr_vl_postgres.rs', ['ai', 'material_reading', 'ocr_recognition']],
+    ['database/migrations/0142_ocr_adoption.sql', ['ai', 'material_reading']],
+    ['database/migrations/0168_dossier_ocr_cleanup.sql', suites],
+    ['crates/evidence/src/ocr_source.rs', ['material_reading', 'ocr_recognition']],
+    ['apps/worker/tests/ocr_cleanup_postgres.rs', ['ai', 'material_reading']],
     ['scripts/test-research-dossier-postgres.sh', ['ai', 'web', 'web_real_chain']],
     ['scripts/runtime/prepare-web.sh', ['ai', 'web', 'web_real_chain']],
-    ['scripts/local-runtime.sh', ['ai', 'ocr_audit']],
+    ['scripts/local-runtime.sh', ['ai', 'ocr_recognition']],
     ['docs/design/lids/tokens.md', ['web']],
     ['docs/design/changes/lids-component-change.json', ['web']],
   ];
   for (const [path, expected] of cases) assert.deepEqual(selected([path]), expected, path);
-  assert.deepEqual(selected(['docs/README.md', 'apps/web/src/pages/topics/TopicsPage.tsx', 'crates/evidence/src/ocr_adoption.rs']), ['ocr_adoption', 'web', 'web_real_chain', 'topic']);
+  assert.deepEqual(selected(['docs/README.md', 'apps/web/src/pages/topics/TopicsPage.tsx', 'crates/evidence/src/ocr_adoption.rs']), ['material_reading', 'web', 'web_real_chain', 'topic']);
 });
 
 test('page-local UI changes avoid OCR and PostgreSQL proofs; shared and API changes retain them', () => {
   const cases = [
     ['apps/web/src/pages/settings/TeamSettingsPage.module.css', ['web']],
     ['apps/web/src/pages/settings/TeamSettingsPage.tsx', ['web']],
-    ['apps/web/src/pages/settings/AiSettingsExperience.tsx', ['ocr_audit', 'web', 'web_real_chain']],
-    ['apps/web/src/pages/settings/aiSettingsModel.ts', ['ocr_audit', 'web', 'web_real_chain']],
-    ['apps/web/src/pages/corpus/evidence/ReadingPanel.tsx', ['ocr_audit', 'web', 'web_real_chain']],
+    ['apps/web/src/pages/settings/AiSettingsExperience.tsx', ['ocr_recognition', 'web', 'web_real_chain']],
+    ['apps/web/src/pages/settings/aiSettingsModel.ts', ['ocr_recognition', 'web', 'web_real_chain']],
+    ['apps/web/src/pages/corpus/evidence/ReadingPanel.tsx', ['ocr_recognition', 'web', 'web_real_chain']],
     ['apps/web/test/e2e/team-member-scroll.mjs', ['web']],
     ['apps/web/src/pages/settings/teamSettingsApi.ts', ['web', 'web_real_chain']],
     ['apps/web/src/app/AppShell.module.css', ['web']],
-    ['apps/web/src/app/App.tsx', ['ocr_audit', 'web', 'web_real_chain']],
+    ['apps/web/src/app/App.tsx', ['ocr_recognition', 'web', 'web_real_chain']],
     ['apps/web/src/main.tsx', ['web', 'web_real_chain']],
     ['apps/web/src/corpus/corpusShellApi.ts', ['web', 'web_real_chain']],
-    ['apps/web/src/shared/api.ts', ['ocr_audit', 'web', 'web_real_chain']],
+    ['apps/web/src/shared/api.ts', ['ocr_recognition', 'web', 'web_real_chain']],
     ['apps/web/src/pages/corpus/evidence/DossierSections.tsx', ['web', 'web_real_chain']],
     ['apps/web/test/e2e/workbench-real-chain.mjs', ['web', 'web_real_chain']],
     ['apps/web/test/e2e/settings-real-chain.mjs', ['web', 'web_real_chain']],
-    ['apps/web/test/e2e/ocr-audit-real-chain.mjs', ['ocr_audit', 'web']],
-    ['apps/web/src/pages/settings/OcrAudit.module.css', ['web']],
-    ['apps/web/src/pages/settings/OcrAuditSettings.tsx', ['ocr_audit', 'web']],
+    ['apps/web/test/e2e/ocr-recognition-real-chain.mjs', ['ocr_recognition', 'web']],
+    ['apps/web/src/pages/corpus/evidence/OcrRecognition.module.css', ['web']],
+    ['apps/web/src/pages/corpus/evidence/OcrRecognition.tsx', ['ocr_recognition', 'web']],
   ];
   for (const [path, expected] of cases) assert.deepEqual(selected([path]), expected, path);
   assert.deepEqual(selected(['apps/web/src/pages/settings/TeamSettingsPage.tsx', 'apps/api/src/main.rs']), ['web', 'web_real_chain']);
@@ -105,7 +107,7 @@ test('every current browser script has an explicit proof or manual-only classifi
     'settings-trials-real-chain.mjs', 'topics-real-chain.mjs', 'workbench-real-chain.mjs',
     'login-lifecycle.mjs', 'shell-layout.mjs', 'topic-workspace-real-chain.mjs',
   ];
-  const ocrAudit = ['ocr-audit-real-chain.mjs', 'ocr-recognition-real-chain.mjs'];
+  const ocrAudit = ['ocr-recognition-real-chain.mjs'];
   const manualOnly = [
     'ops-visual.mjs', 'team-member-scroll.mjs',
     'topics-performance.mjs', 'topics-pixels.py', 'topics-visual.mjs',
@@ -116,7 +118,7 @@ test('every current browser script has an explicit proof or manual-only classifi
     assert.ok(selected([`apps/web/test/e2e/${name}`]).includes('web_real_chain'), name);
   }
   for (const name of ocrAudit) {
-    assert.ok(selected([`apps/web/test/e2e/${name}`]).includes('ocr_audit'), name);
+    assert.ok(selected([`apps/web/test/e2e/${name}`]).includes('ocr_recognition'), name);
   }
 });
 
@@ -169,7 +171,7 @@ test('Git diff uses merge-base, includes deleted and renamed paths, and preserve
 
 const delivery = readFileSync(join(root, '.github/workflows/delivery.yml'), 'utf8');
 const gate = delivery.split("node --input-type=module <<'JS'\n")[1]?.split('\n          JS')[0];
-const jobs = { ai: 'ai', 'ocr-adoption': 'ocr_adoption', 'ocr-audit': 'ocr_audit', web: 'web', 'web-real-chain': 'web_real_chain', topic: 'topic' };
+const jobs = { ai: 'ai', 'material-reading': 'material_reading', 'ocr-recognition': 'ocr_recognition', web: 'web', 'web-real-chain': 'web_real_chain', topic: 'topic' };
 function gateResult(selectedSuites, mutate = () => {}) {
   const needs = { preflight: { result: 'success', outputs: {} } };
   for (const [job, suite] of Object.entries(jobs)) {
@@ -187,7 +189,7 @@ test('the actual final gate rejects missing, failed, cancelled or skipped select
   assert.ok(gate, 'extract the gate script directly from the workflow');
   assert.equal(gateResult([]), 0, 'ordinary docs');
   assert.equal(gateResult(suites), 0, 'full verification');
-  assert.equal(gateResult(['web', 'ocr_audit']), 0, 'selected modules');
+  assert.equal(gateResult(['web', 'ocr_recognition']), 0, 'selected modules');
   for (const status of ['failure', 'cancelled', 'skipped']) {
     for (const job of Object.keys(jobs)) {
       assert.notEqual(gateResult(suites, needs => { needs[job].result = status; }), 0, `${job}: ${status}`);
@@ -200,7 +202,7 @@ test('the actual final gate rejects missing, failed, cancelled or skipped select
 });
 
 test('active workflows have a single PR entrypoint and all proofs depend on preflight', () => {
-  const workflows = ['ai-gen1-foundation', 'ocr-adoption', 'ocr-quality-audit', 'web-app', 'web-real-chain', 'topic-map-compact-ui'];
+  const workflows = ['ai-gen1-foundation', 'material-reading', 'ocr-recognition', 'web-app', 'web-real-chain', 'topic-map-compact-ui'];
   for (const workflow of workflows) {
     const source = readFileSync(join(root, `.github/workflows/${workflow}.yml`), 'utf8');
     assert.match(source, /on:\n  workflow_call:/);
@@ -213,7 +215,7 @@ test('active workflows have a single PR entrypoint and all proofs depend on pref
   }
   assert.match(delivery, /ready_for_review/);
   assert.doesNotMatch(delivery, /\.draft/);
-  assert.match(delivery, /needs: \[preflight, ai, ocr-adoption, ocr-audit, web, web-real-chain, topic\]/);
+  assert.match(delivery, /needs: \[preflight, ai, material-reading, ocr-recognition, web, web-real-chain, topic\]/);
   assert.match(delivery, /if: always\(\)/);
 });
 
@@ -250,7 +252,7 @@ test('metadata edits cannot cancel proof or overwrite its required gate; base re
 });
 
 test('preflight and every reusable proof check out the same PR event head', () => {
-  const workflows = ['delivery', 'ai-gen1-foundation', 'ocr-adoption', 'ocr-quality-audit', 'web-app', 'web-real-chain', 'topic-map-compact-ui'];
+  const workflows = ['delivery', 'ai-gen1-foundation', 'material-reading', 'ocr-recognition', 'web-app', 'web-real-chain', 'topic-map-compact-ui'];
   for (const workflow of workflows) {
     const source = readFileSync(join(root, `.github/workflows/${workflow}.yml`), 'utf8');
     const checkouts = source.match(/uses: actions\/checkout@/g) ?? [];
@@ -304,32 +306,17 @@ test('Delivery executes current creator, saved-source and OCR proof targets with
   assert.doesNotMatch(runner, /\bcargo test\b/, 'all filtered dossier proof calls guard against zero selected tests');
   const workflow = readFileSync(join(root, '.github/workflows/ai-gen1-foundation.yml'), 'utf8');
   assert.match(workflow, /test-research-dossier-postgres\.sh --ai-readonly/);
-  const ocr = readFileSync(join(root, 'scripts/test-ocr-adoption-postgres.sh'), 'utf8');
-  const name = ocr.match(/test_name=(synthetic_[a-z_]+)/)?.[1];
-  assert.ok(name);
-  assert.ok(readFileSync(join(root, 'apps/worker/tests/ocr_vl_postgres.rs'), 'utf8').includes(`async fn ${name}()`));
-  assert.match(ocr, /source scripts\/cargo-proof\.sh/);
-  assert.match(ocr, /cargo_proof .*"\$test_name" --locked -- --ignored --exact --nocapture/);
-  assert.doesNotMatch(readFileSync(join(root, '.github/workflows/ocr-adoption.yml'), 'utf8'), /--lib ocr_adoption_persistence::/);
+  const ocr = readFileSync(join(root, 'scripts/test-ocr-recognition-postgres.sh'), 'utf8');
+  assert.match(ocr, /source .*scripts\/cargo-proof\.sh/);
+  assert.match(ocr, /cargo_proof -p linggan-evidence --test material_reading_postgres --locked -- --ignored/);
+  const workflowReading=readFileSync(join(root,'.github/workflows/material-reading.yml'),'utf8');
+  assert.match(workflowReading,/test-ocr-recognition-postgres\.sh --reading-only/);
+
 });
 
-test('OCR audit runner filters name actual Rust tests, including split modules', () => {
-  const runner = readFileSync(join(root, 'scripts/test-ocr-quality-audit-postgres.sh'), 'utf8');
-  const calls = [...runner.matchAll(/cargo_proof -p linggan-worker --test (\w+) (\w+) --locked/g)];
-  assert.ok(calls.length > 0, 'inspect the actual audit proof calls');
-  assert.equal(calls.length, [...runner.matchAll(/^\s*cargo_proof\b/gm)].length, 'every audit proof call must be checked');
-  const rustSources = directory => readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) return rustSources(path);
-    return entry.isFile() && entry.name.endsWith('.rs') ? [readFileSync(path, 'utf8')] : [];
-  });
-  for (const [, target, filter] of calls) {
-    const entrypoint = join(root, 'apps/worker/tests', `${target}.rs`);
-    const modules = join(root, 'apps/worker/tests', target);
-    const sources = [readFileSync(entrypoint, 'utf8'), ...(existsSync(modules) ? rustSources(modules) : [])];
-    const names = sources.flatMap(source => [...source.matchAll(
-      /#\[(?:tokio::)?test(?:\([^]*?\))?\]\s*(?:#\[[^\]]*\]\s*)*(?:async\s+)?fn\s+(\w+)\s*\(/g,
-    )].map(match => match[1]));
-    assert.ok(names.includes(filter), `${target}: ${filter} must select a declared Rust test`);
-  }
+test('current OCR runner selects every declared current execution test without legacy audit', () => {
+ const runner=readFileSync(join(root,'scripts/test-ocr-recognition-postgres.sh'),'utf8');
+ assert.match(runner,/cargo_proof -p linggan-worker --test ocr_recognition_postgres --locked -- --ignored/);
+ assert.doesNotMatch(runner,/--test ocr_quality_audit|manual-adoption/);
+ assert.match(readFileSync(join(root,'.github/workflows/ocr-recognition.yml'),'utf8'),/test-ocr-recognition-postgres\.sh --browser/);
 });

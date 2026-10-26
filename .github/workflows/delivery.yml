@@ -23,8 +23,8 @@ jobs:
     timeout-minutes: 10
     outputs:
       ai: ${{ steps.route.outputs.ai }}
-      ocr_adoption: ${{ steps.route.outputs.ocr_adoption }}
-      ocr_audit: ${{ steps.route.outputs.ocr_audit }}
+      material_reading: ${{ steps.route.outputs.material_reading }}
+      ocr_recognition: ${{ steps.route.outputs.ocr_recognition }}
       web: ${{ steps.route.outputs.web }}
       web_real_chain: ${{ steps.route.outputs.web_real_chain }}
       topic: ${{ steps.route.outputs.topic }}
@@ -51,14 +51,14 @@ jobs:
     needs: preflight
     if: needs.preflight.outputs.ai == 'true'
     uses: ./.github/workflows/ai-gen1-foundation.yml
-  ocr-adoption:
+  material-reading:
     needs: preflight
-    if: needs.preflight.outputs.ocr_adoption == 'true'
-    uses: ./.github/workflows/ocr-adoption.yml
-  ocr-audit:
+    if: needs.preflight.outputs.material_reading == 'true'
+    uses: ./.github/workflows/material-reading.yml
+  ocr-recognition:
     needs: preflight
-    if: needs.preflight.outputs.ocr_audit == 'true'
-    uses: ./.github/workflows/ocr-quality-audit.yml
+    if: needs.preflight.outputs.ocr_recognition == 'true'
+    uses: ./.github/workflows/ocr-recognition.yml
   web:
     needs: preflight
     if: needs.preflight.outputs.web == 'true'
@@ -76,7 +76,7 @@ jobs:
     # A skipped check is considered passing by GitHub; give metadata-only runs a
     # different name so they cannot overwrite the required Delivery gate result.
     name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'Metadata edit (no validation)' || 'Delivery gate' }}
-    needs: [preflight, ai, ocr-adoption, ocr-audit, web, web-real-chain, topic]
+    needs: [preflight, ai, material-reading, ocr-recognition, web, web-real-chain, topic]
     if: always() && (github.event.action != 'edited' || github.event.changes.base)
     runs-on: ubuntu-24.04
     timeout-minutes: 2
@@ -88,7 +88,7 @@ jobs:
           node --input-type=module <<'JS'
           const needs = JSON.parse(process.env.DELIVERY_NEEDS);
           if (needs.preflight.result !== 'success') throw new Error('Preflight did not succeed');
-          for (const [job, output] of Object.entries({ ai: 'ai', 'ocr-adoption': 'ocr_adoption', 'ocr-audit': 'ocr_audit', web: 'web', 'web-real-chain': 'web_real_chain', topic: 'topic' })) {
+          for (const [job, output] of Object.entries({ ai: 'ai', 'material-reading': 'material_reading', 'ocr-recognition': 'ocr_recognition', web: 'web', 'web-real-chain': 'web_real_chain', topic: 'topic' })) {
             const selected = needs.preflight.outputs[output];
             if (!['true', 'false'].includes(selected)) throw new Error(`Missing route for ${job}`);
             const expected = selected === 'true' ? 'success' : 'skipped';

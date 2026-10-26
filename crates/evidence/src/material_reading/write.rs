@@ -21,8 +21,29 @@ pub async fn publish_in(
         &now,
     )
     .await?;
+    let preserve_human = if unit.current.is_some() && unit.adoption != "automatic" {
+        let derivative: Option<Uuid> = sqlx::query_scalar(
+            "SELECT derivative_ref FROM linggan_material_reading WHERE reading_ref=$1",
+        )
+        .bind(unit.current)
+        .fetch_one(&mut *conn)
+        .await?;
+        source::unrestricted(conn, &unit, derivative, &unit.source).await?
+            && source::current(
+                conn,
+                unit.work,
+                &unit.kind,
+                unit.slot.as_deref(),
+                &unit.source,
+                derivative,
+                &now,
+            )
+            .await?
+    } else {
+        false
+    };
     let original_current = unit.current;
-    if current_source && unit.source != input.source_version {
+    if current_source && unit.source != input.source_version && !preserve_human {
         unit.source.clone_from(&input.source_version);
         unit.state.clone_from(&input.source_state);
         unit.page = input.page;
@@ -34,7 +55,6 @@ pub async fn publish_in(
     }
     let expected_matches = match input.publication {
         Publication::Automatic { expected_current } => expected_current == original_current,
-        Publication::Candidate => false,
     };
     if current_source
         && expected_matches
@@ -94,7 +114,10 @@ fn validate_input(input: &NewReading) -> Result<(), sqlx::Error> {
     validate_content(&input.blocks, &input.issues)
 }
 
-async fn ensure_unit(conn: &mut PgConnection, input: &NewReading) -> Result<Unit, sqlx::Error> {
+pub(super) async fn ensure_unit(
+    conn: &mut PgConnection,
+    input: &NewReading,
+) -> Result<Unit, sqlx::Error> {
     let id = Uuid::new_v4();
     let inserted = sqlx::query("INSERT INTO linggan_material_unit(unit_ref,content_public_ref,unit_key,kind,slot_key,page_ordinal,source_version,source_state) VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(content_public_ref,unit_key) DO NOTHING")
         .bind(id).bind(input.content_public_ref).bind(&input.unit_key).bind(&input.kind).bind(&input.slot_key)
@@ -123,7 +146,6 @@ async fn existing_or_new(
     validate_content(&input.blocks, &input.issues)?;
     let publication = match input.publication {
         Publication::Automatic { .. } => "automatic",
-        Publication::Candidate => "candidate",
     };
     if let Some(r) = previous {
         if r.get::<Value, _>("blocks") != json!(input.blocks)

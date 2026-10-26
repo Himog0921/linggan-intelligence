@@ -18,7 +18,7 @@ async fn dossier_v2_browser_proof() {
     );
     dossier_fixture::fixture::submit_package(&db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成底稿验收","bodyText":body,"authorId":"synthetic-author","likedCount":0,"hashtags":["#合成验收"]}})).await;
     let image_bytes = super::super::evidence_fixture::png_bytes(240, 320, [232, 238, 247]);
-    dossier_fixture::ordinary_ocr_with_bytes(&db, Some(image_bytes)).await;
+    dossier_fixture::current_image_reading_with_bytes(&db, Some(image_bytes)).await;
     let read = dossier::read(&db, work).await.unwrap().unwrap();
     let image = read
         .materials
@@ -26,8 +26,14 @@ async fn dossier_v2_browser_proof() {
         .find(|m| m["kind"] == "image")
         .unwrap()
         .clone();
-    let first = candidate(&db, work, &image, 1).await;
-    let second = candidate(&db, work, &image, 2).await;
+    let mut tx = db.pool().begin().await.unwrap();
+    let rich=reading::publish_in(&mut tx,reading::NewReading{
+        content_public_ref:work,unit_key:format!("image:{}",image["slotKey"].as_str().unwrap()),kind:"image".into(),slot_key:image["slotKey"].as_str().map(str::to_owned),page:Some(1),source_version:image["sourceVersion"].as_str().unwrap().into(),source_state:"present".into(),derivative_ref:None,producer_ref:Some(Uuid::new_v4()),generated_by:"cloud_vision".into(),rule_version:"dossier-content.v2:synthetic-browser".into(),
+        blocks:vec![json!({"ref":"image-heading","kind":"heading","text":"图片完整读本","speaker":"unconfirmed"}),json!({"ref":"image-table","kind":"table","columns":["条件","读数"],"rows":[["不适用","0.5 mg"]],"speaker":"unconfirmed","bbox":[0.1,0.2,0.7,0.2]}),json!({"ref":"image-list","kind":"list","ordered":true,"start":2,"items":["不可删除否定","条件有先后"],"speaker":"unconfirmed"}),json!({"ref":"image-dialogue","kind":"dialogue","turns":[{"speaker":"other","text":"他人的经验"},{"speaker":"author","text":"作者补充适用范围"}]})],
+        issues:vec![json!({"key":"image-word","code":"glyph_uncertain","message":"表格的一字待核对","resolution":"reading_edit","blockRef":"image-table"}),json!({"key":"image-source","code":"source_boundary","message":"来源范围仍需单独确认","resolution":"source_refresh"})],source_location:json!({"materializationRef":image["sourceVersion"],"originalUrl":image["originalUrl"]}),publication:reading::Publication::Automatic{expected_current:serde_json::from_value(image["currentRevisionRef"].clone()).unwrap()}
+    }).await.unwrap();
+    assert!(rich.current);
+    tx.commit().await.unwrap();
     let mut scenarios = vec![];
     for (name, body, images, video, partial, empty) in [
         ("multi-image", None, 3, false, false, false),
@@ -62,7 +68,7 @@ async fn dossier_v2_browser_proof() {
     let before:Value=sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_model_invocation),(SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_runtime_capture_package))").fetch_one(db.pool()).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fixture = json!({"origin":format!("http://{}",listener.local_addr().unwrap()),"domain":dossier_fixture::DOMAIN,"work":work,
-        "imageUnitRef":image["ref"],"candidateRefs":[first,second],"longTail":long_tail,"scenarios":scenarios});
+        "imageUnitRef":image["ref"],"currentReadingRef":rich.reading_ref,"longTail":long_tail,"scenarios":scenarios});
     std::fs::write(directory.join("fixture.json"), fixture.to_string()).unwrap();
     let app = app_with_database(db.clone());
     let server = tokio::spawn(async move {
@@ -92,8 +98,8 @@ async fn dossier_v2_browser_proof() {
         .await
         .unwrap();
     assert_eq!(
-        commands, 3,
-        "adopt, complete edit and keep are independent recorded decisions"
+        commands, 1,
+        "one explicit complete edit is recorded without a candidate adoption workflow"
     );
     let final_read = dossier::read(&db, work).await.unwrap().unwrap();
     let final_image = final_read
@@ -107,14 +113,14 @@ async fn dossier_v2_browser_proof() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|i| i["key"] == "candidate-source")
+            .any(|i| i["key"] == "image-source")
     );
     assert!(
         !final_image["issues"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|i| i["key"] == "candidate-word")
+            .any(|i| i["key"] == "image-word")
     );
     db.pool().close().await;
 }

@@ -39,62 +39,12 @@ async fn call(app: Router, uri: &str, body: Option<Value>) -> (StatusCode, Value
 async fn counts(db: &Database) -> Value {
     sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_runtime_capture_package),(SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_material_reading),(SELECT count(*) FROM linggan_material_reading_selection),(SELECT count(*) FROM linggan_material_reading_command),(SELECT count(*) FROM linggan_dossier_snapshot),(SELECT count(*) FROM linggan_model_invocation))").fetch_one(db.pool()).await.unwrap()
 }
-async fn candidate(db: &Database, work: Uuid, image: &Value, index: u32) -> Uuid {
-    let slot = image["slotKey"].as_str().unwrap();
-    let blocks = if index == 2 {
-        vec![
-            json!({"ref":"candidate-heading","kind":"heading","level":2,"text":"候选二完整读本","speaker":"unconfirmed"}),
-            json!({"ref":"candidate-table","kind":"table","columns":["条件","读数"],"rows":[["不适用","0.5 mg"]],"speaker":"unconfirmed","bbox":[0.1,0.2,0.7,0.2]}),
-            json!({"ref":"candidate-list","kind":"list","ordered":true,"start":2,"items":["不可删除否定","条件有先后"],"speaker":"unconfirmed"}),
-            json!({"ref":"candidate-dialogue","kind":"dialogue","turns":[{"speaker":"other","text":"他人的经验"},{"speaker":"author","text":"作者补充适用范围"}]}),
-        ]
-    } else {
-        vec![
-            json!({"ref":"candidate-first","kind":"paragraph","text":"候选一，尚未采用","speaker":"unconfirmed"}),
-        ]
-    };
-    let issues = if index == 2 {
-        vec![
-            json!({"key":"candidate-word","code":"glyph_uncertain","message":"表格的一字待核对","resolution":"reading_edit","blockRef":"candidate-table"}),
-            json!({"key":"candidate-source","code":"source_boundary","message":"来源范围仍需单独确认","resolution":"source_refresh"}),
-        ]
-    } else {
-        vec![]
-    };
-    let mut tx = db.pool().begin().await.unwrap();
-    let published = reading::publish_in(
-        &mut tx,
-        reading::NewReading {
-            content_public_ref: work,
-            unit_key: format!("image:{slot}"),
-            kind: "image".into(),
-            slot_key: Some(slot.into()),
-            page: Some(1),
-            source_version: image["sourceVersion"].as_str().unwrap().into(),
-            source_state: "present".into(),
-            derivative_ref: None,
-            producer_ref: Some(Uuid::new_v4()),
-            generated_by: "cloud_vision".into(),
-            rule_version: "synthetic-provider.v2".into(),
-            blocks,
-            issues,
-            source_location: json!({"fixture":"synthetic-only","originalUrl":image["originalUrl"]}),
-            publication: reading::Publication::Candidate,
-        },
-    )
-    .await
-    .unwrap();
-    assert!(!published.current);
-    tx.commit().await.unwrap();
-    published.reading_ref
-}
-
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
 async fn dossier_http_single_contract_exports_selection_metadata_and_read_only_guards() {
     let db = dossier_fixture::fixture::proof_database("dossier_http_v2_read").await;
     let work = dossier_fixture::work(&db).await;
-    dossier_fixture::ordinary_ocr(&db).await;
+    dossier_fixture::current_image_reading(&db).await;
     let app = app_with_database(db.clone());
     let base = format!("/api/local/work-resources/{work}/research-dossier");
     let initial = counts(&db).await;
@@ -124,6 +74,31 @@ async fn dossier_http_single_contract_exports_selection_metadata_and_read_only_g
     .await;
     assert_eq!(metadata["metadata"]["interaction"]["likes"]["value"], 0);
     assert!(metadata["metadata"].get("author").is_none());
+    let (status, publication) = call(
+        app.clone(),
+        &format!("{base}/metadata?sections=publication"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(publication["metadata"]["publication"]["observedAt"].is_string());
+    for key in [
+        "publishedAt",
+        "localDate",
+        "sourceText",
+        "sourceKind",
+        "precision",
+        "referenceObservedAt",
+        "sourceObservedAt",
+        "parserVersion",
+    ] {
+        assert!(
+            publication["metadata"]["publication"].get(key).is_some(),
+            "publication preserves {key}"
+        );
+    }
+    assert!(publication["metadata"].get("author").is_none());
+
     for query in [
         "?kinds=unknown",
         "?budget=500",
@@ -146,7 +121,12 @@ async fn dossier_http_single_contract_exports_selection_metadata_and_read_only_g
         .0,
         StatusCode::NOT_FOUND
     );
-    for retired in ["note-material", "creator-preview"] {
+    for retired in [
+        "note-material",
+        "creator-preview",
+        "candidates",
+        "relayer-plan",
+    ] {
         assert_eq!(
             call(app.clone(), &format!("{base}/{retired}"), None)
                 .await
@@ -171,89 +151,115 @@ async fn dossier_http_single_contract_exports_selection_metadata_and_read_only_g
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn dossier_http_candidates_review_replay_conflict_and_restricted_history() {
-    let db = dossier_fixture::fixture::proof_database("dossier_http_v2_review").await;
+async fn dossier_http_current_edit_replays_conflicts_and_honors_source_restriction() {
+    let db = dossier_fixture::fixture::proof_database("dossier_http_v2_edit").await;
     let work = dossier_fixture::work(&db).await;
-    dossier_fixture::ordinary_ocr(&db).await;
+    dossier_fixture::current_image_reading(&db).await;
     let before = dossier::read(&db, work).await.unwrap().unwrap();
     let image = before
         .materials
         .iter()
-        .find(|m| m["kind"] == "image")
+        .find(|unit| unit["kind"] == "image")
         .unwrap();
-    let first = candidate(&db, work, image, 1).await;
-    let second = candidate(&db, work, image, 2).await;
     let app = app_with_database(db.clone());
     let base = format!("/api/local/work-resources/{work}/research-dossier");
-    let (_, choices) = call(app.clone(), &format!("{base}/candidates"), None).await;
-    assert_eq!(choices["candidates"].as_array().unwrap().len(), 2);
-    let with_candidates = dossier::read(&db, work).await.unwrap().unwrap();
-    assert_eq!(with_candidates.material_revision, before.material_revision);
-    assert_ne!(
-        with_candidates.revision, before.revision,
-        "candidate identities affect the review plan, not the current text"
+    let endpoint = format!(
+        "{base}/materials/{}/review?domain={}",
+        image["ref"].as_str().unwrap(),
+        dossier_fixture::DOMAIN
     );
-    let endpoint = format!("{base}/materials/{}/review", image["ref"].as_str().unwrap());
-    let command = json!({"commandRef":Uuid::new_v4(),"expectedCurrentRevisionRef":image["currentRevisionRef"],"candidateRevisionRef":second,"action":"adopt","actor":"synthetic-http-reviewer","reason":"Compare saved image with candidate","verified":false,"resolvedIssueKeys":[]});
+    let mut blocks = image["blocks"].clone();
+    blocks[0]["text"] = json!("人工修正，保留否定与0.5 mg。");
+    let command = json!({"commandRef":Uuid::new_v4(),"unitRef":image["ref"],"sourceVersion":image["sourceVersion"],"expectedCurrentRevisionRef":image["currentRevisionRef"],"action":"edit","editedBlocks":blocks,"actor":"synthetic-http-reviewer","reason":"Compare the complete original image","verified":true,"resolvedIssueKeys":[]});
     let (status, receipt) = call(app.clone(), &endpoint, Some(command.clone())).await;
     assert_eq!(status, StatusCode::OK, "{receipt}");
-    assert_eq!(receipt["currentRevisionRef"], second.to_string());
-    let replay = call(app.clone(), &endpoint, Some(command.clone())).await;
-    assert_eq!(replay, (StatusCode::OK, receipt));
-    let stale = json!({"commandRef":Uuid::new_v4(),"expectedCurrentRevisionRef":image["currentRevisionRef"],"candidateRevisionRef":first,"action":"adopt","actor":"synthetic-http-reviewer","reason":"Compare saved image with candidate","verified":false,"resolvedIssueKeys":[]});
+    assert_ne!(receipt["currentRevisionRef"], image["currentRevisionRef"]);
+    assert_eq!(receipt["adoption"], "human_edited");
+    assert_eq!(receipt["unitRef"], image["ref"]);
+    let after = counts(&db).await;
+    assert_eq!(
+        call(app.clone(), &endpoint, Some(command.clone())).await,
+        (StatusCode::OK, receipt.clone())
+    );
+    assert_eq!(counts(&db).await, after);
+    let mut stale = command.clone();
+    stale["commandRef"] = json!(Uuid::new_v4());
     assert_eq!(
         call(app.clone(), &endpoint, Some(stale)).await.0,
         StatusCode::CONFLICT
     );
-    let commands: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_material_reading_command")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
+    let mut changed = command.clone();
+    changed["reason"] = json!("Different request under the original UUID");
     assert_eq!(
-        commands, 1,
-        "a replay and a stale command cannot append another decision"
+        call(app.clone(), &endpoint, Some(changed)).await.0,
+        StatusCode::CONFLICT
     );
-    let (_, adopted_version) = call(app.clone(), &format!("{base}/readings/{second}"), None).await;
-    assert_eq!(adopted_version["currentRevisionRef"], second.to_string());
-    assert_eq!(
-        adopted_version["material"]["currentRevisionRef"],
-        second.to_string()
-    );
-    let replacement = json!({"commandRef":Uuid::new_v4(),"expectedCurrentRevisionRef":second,
-        "candidateRevisionRef":first,"action":"adopt","actor":"another-http-reviewer",
-        "reason":"A later explicit review of the full saved image","verified":true,"resolvedIssueKeys":[]});
-    assert_eq!(
-        call(app.clone(), &endpoint, Some(replacement)).await.0,
-        StatusCode::OK
-    );
-    let (_, old_version) = call(app.clone(), &format!("{base}/readings/{second}"), None).await;
-    assert_eq!(
-        old_version["material"], adopted_version["material"],
-        "exact immutable content never follows the new current pointer"
+    let mut old_action = command.clone();
+    old_action["commandRef"] = json!(Uuid::new_v4());
+    old_action["action"] = json!("adopt");
+    assert!(
+        call(app.clone(), &endpoint, Some(old_action))
+            .await
+            .0
+            .is_client_error()
     );
     assert_eq!(
-        old_version["currentRevisionRef"],
-        first.to_string(),
-        "old receipts cannot replace the current unit pointer, including deduplicated units"
+        counts(&db).await,
+        after,
+        "rejected and replayed commands cannot append state"
     );
-    let source = image["sourceRef"].as_str().unwrap().parse().unwrap();
+    let source: Uuid = serde_json::from_value(image["sourceVersion"].clone()).unwrap();
+    linggan_evidence::record_materialization_disposition(
+        &db,
+        source,
+        linggan_evidence::MaterialMediaDisposition::BytesCleaned,
+        "synthetic",
+        "synthetic bytes cleanup",
+    )
+    .await
+    .unwrap();
+    let mut next = command.clone();
+    next["commandRef"] = json!(Uuid::new_v4());
+    next["expectedCurrentRevisionRef"] = receipt["currentRevisionRef"].clone();
+    assert_eq!(
+        call(app.clone(), &endpoint, Some(next)).await.0,
+        StatusCode::CONFLICT
+    );
+    assert_eq!(
+        call(app.clone(), &endpoint, Some(command.clone())).await.0,
+        StatusCode::OK,
+        "an existing receipt is not a new edit"
+    );
+    let kept = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(
+        kept.materials
+            .iter()
+            .find(|u| u["kind"] == "image")
+            .unwrap()["blocks"][0]["text"],
+        "人工修正，保留否定与0.5 mg。"
+    );
     linggan_evidence::record_materialization_disposition(
         &db,
         source,
         linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
-        "synthetic-proof",
-        "test withdrawal",
+        "synthetic",
+        "source withdrawn",
     )
     .await
     .unwrap();
     assert_eq!(
-        call(app.clone(), &format!("{base}/readings/{second}"), None)
-            .await
-            .0,
-        StatusCode::NOT_FOUND
+        call(app.clone(), &endpoint, Some(command)).await.0,
+        StatusCode::CONFLICT
     );
-    let (_, current) = call(app, &base, None).await;
-    assert!(!current.to_string().contains("候选二完整读本"));
+    let hidden = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(
+        hidden
+            .materials
+            .iter()
+            .find(|u| u["kind"] == "image")
+            .unwrap()["blocks"],
+        json!([])
+    );
 }
 
 #[tokio::test]

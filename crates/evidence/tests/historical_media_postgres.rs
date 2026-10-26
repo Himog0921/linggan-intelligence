@@ -23,7 +23,6 @@ async fn source(db: &Database, work: Uuid) -> (String, String, Uuid) {
 async fn legacy(
     db: &Database,
     work: Uuid,
-    kind: &str,
     version: &str,
     text: Option<&str>,
     reason: Option<&str>,
@@ -31,15 +30,11 @@ async fn legacy(
     let (slot, blob, _) = source(db, work).await;
     let job = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,$4,$5,'full_blob')")
-        .bind(job).bind(&blob).bind(slot).bind(kind).bind(version).execute(db.pool()).await.unwrap();
+        .bind(job).bind(&blob).bind(slot).bind("asr").bind(version).execute(db.pool()).await.unwrap();
     ensure_media_processing_work(db).await.unwrap();
     let derivative = if let Some(text) = text {
         let derivative = Uuid::new_v4();
-        let kind = if kind == "asr" {
-            "asr_text"
-        } else {
-            "frame_ocr_text"
-        };
+        let kind = "asr_text";
         sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) VALUES($1,$2,$3,$4,$5,$6)")
             .bind(derivative).bind(job).bind(kind).bind(hash(text)).bind(text.len() as i64).bind(format!("legacy/{derivative}.txt")).execute(db.pool()).await.unwrap();
         sqlx::query("INSERT INTO linggan_material_derived_text(derivative_ref,content_public_ref,kind,text_content,display_text,source_location) VALUES($1,$2,$3,$4,$5,$6)")
@@ -80,78 +75,54 @@ async fn current(db: &Database, work: Uuid, kind: &str) -> Value {
 
 #[tokio::test]
 #[ignore = "owned isolated PostgreSQL only"]
-async fn legacy_null_freeze_retains_full_text_unknown_time_and_actual_provenance_without_jobs() {
+async fn legacy_asr_retains_full_text_unknown_time_and_actual_provenance_without_jobs() {
     let db = fixture::proof_database("historical_media_full").await;
     let work = support::scenario(&db, "legacy-full", None, 0, true, false, true).await;
     let full = format!(
         "{}否定和0.5 mg不能丢失🙂",
         "历史口播完整段落。\n".repeat(3500)
     );
-    let frame = "疑似水印 / 合成乱码 abc123 / 画面文字均保留";
-    let (asr, asr_derivative) = legacy(&db, work, "asr", "legacy-asr.v1", Some(&full), None).await;
-    let (ocr, frame_derivative) = legacy(
-        &db,
-        work,
-        "video_frame_ocr",
-        "legacy-frame.v1",
-        Some(frame),
-        None,
-    )
-    .await;
+    let (job, derivative) = legacy(&db, work, "legacy-asr.v1", Some(&full), None).await;
     let (_, blob, materialization) = source(&db, work).await;
     let before = counters(&db).await;
-    let plan = plan(&db, work).await;
-    assert_eq!(plan.entries[0].historical.as_ref().unwrap()["eligible"], 2);
+    let frozen = plan(&db, work).await;
+    assert_eq!(
+        frozen.entries[0].historical.as_ref().unwrap()["eligible"],
+        1
+    );
     assert_eq!(counters(&db).await, before, "planning is read only");
-    let applied = input::apply_plan(&db, &plan).await.unwrap();
-    assert_eq!(applied.updated, 1);
+    let applied = input::apply_plan(&db, &frozen).await.unwrap();
     assert!(applied.complete());
-    assert_eq!(applied.results[0].result["updated"], 2);
-    for (kind, text, job, derivative, generated) in [
-        ("audio", full.as_str(), asr, asr_derivative.unwrap(), "asr"),
-        (
-            "video_frame",
-            frame,
-            ocr,
-            frame_derivative.unwrap(),
-            "frame_ocr",
-        ),
-    ] {
-        let unit = current(&db, work, kind).await;
-        assert_eq!(unit["sourceVersion"], materialization.to_string());
-        assert_eq!(
-            unit["blocks"][0]["text"], text,
-            "bounded display_text cannot truncate the imported original"
-        );
-        assert_eq!(unit["blocks"][0]["kind"], "paragraph");
-        assert_eq!(unit["blocks"][0]["speaker"], "unconfirmed");
-        assert!(
-            unit["blocks"][0].get("time").is_none(),
-            "unknown is not zero milliseconds"
-        );
-        assert_eq!(unit["reading"]["generatedBy"], generated);
-        assert_eq!(unit["reading"]["adoption"], "automatic");
-        assert_ne!(unit["reading"]["verification"], "verified");
-        let stored: (Uuid, Uuid, Value) = sqlx::query_as("SELECT producer_ref,derivative_ref,source_location FROM linggan_material_reading WHERE reading_ref=$1")
-            .bind(unit["currentRevisionRef"].as_str().unwrap().parse::<Uuid>().unwrap()).fetch_one(db.pool()).await.unwrap();
-        assert_eq!((stored.0, stored.1), (job, derivative));
-        assert_eq!(stored.2["materializationRef"], materialization.to_string());
-        assert_eq!(stored.2["blobSha256"], blob);
-        assert_eq!(stored.2["timeUnknown"], true);
-        assert_eq!(stored.2["fullTextHash"], hash(text));
+    assert_eq!(applied.results[0].result["updated"], 1);
+    let unit = current(&db, work, "audio").await;
+    assert_eq!(unit["sourceVersion"], materialization.to_string());
+    assert_eq!(
+        unit["blocks"][0]["text"], full,
+        "full text cannot be truncated to display_text"
+    );
+    assert_eq!(unit["blocks"][0]["kind"], "paragraph");
+    assert_eq!(unit["blocks"][0]["speaker"], "unconfirmed");
+    assert!(
+        unit["blocks"][0].get("time").is_none(),
+        "unknown is not zero milliseconds"
+    );
+    assert_eq!(unit["reading"]["generatedBy"], "asr");
+    assert_eq!(unit["reading"]["adoption"], "automatic");
+    assert_ne!(unit["reading"]["verification"], "verified");
+    let stored:(Uuid,Uuid,Value)=sqlx::query_as("SELECT producer_ref,derivative_ref,source_location FROM linggan_material_reading WHERE reading_ref=$1")
+        .bind(unit["currentRevisionRef"].as_str().unwrap().parse::<Uuid>().unwrap()).fetch_one(db.pool()).await.unwrap();
+    assert_eq!((stored.0, stored.1), (job, derivative.unwrap()));
+    assert_eq!(stored.2["materializationRef"], materialization.to_string());
+    assert_eq!(stored.2["blobSha256"], blob);
+    assert_eq!(stored.2["timeUnknown"], true);
+    assert_eq!(stored.2["fullTextHash"], hash(&full));
+    for code in ["time_unknown", "machine_unchecked"] {
         assert!(
             unit["issues"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|i| i["code"] == "time_unknown")
-        );
-        assert!(
-            unit["issues"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|i| i["code"] == "machine_unchecked")
+                .any(|issue| issue["code"] == code)
         );
     }
     let after = counters(&db).await;
@@ -159,17 +130,16 @@ async fn legacy_null_freeze_retains_full_text_unknown_time_and_actual_provenance
         (after.0, after.1, after.2, after.3),
         (before.0, before.1, before.2, before.3)
     );
-    assert_eq!(after.4 - before.4, 2);
-    let frozen: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_media_processing_work WHERE job_ref=ANY($1) AND reading_source_version IS NOT NULL")
-        .bind(&[asr, ocr][..]).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(after.4 - before.4, 1);
+    let frozen_jobs:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_media_processing_work WHERE job_ref=$1 AND reading_source_version IS NOT NULL").bind(job).fetch_one(db.pool()).await.unwrap();
     assert_eq!(
-        frozen, 0,
-        "legacy jobs never acquire an invented frozen source"
+        frozen_jobs, 0,
+        "historical jobs do not acquire an invented frozen source"
     );
-    let replay = input::apply_plan(&db, &plan).await.unwrap();
+    let replay = input::apply_plan(&db, &frozen).await.unwrap();
     assert_eq!(replay.already_current, 1);
     assert_eq!(replay.results[0].result["readOnlyReplay"], true);
-    assert_eq!(replay.results[0].result["alreadyCurrent"], 2);
+    assert_eq!(replay.results[0].result["alreadyCurrent"], 1);
     assert_eq!(counters(&db).await, after);
 }
 
@@ -182,19 +152,9 @@ async fn human_current_survives_same_bytes_reobservation_and_legacy_repreparatio
     legacy(
         &db,
         work,
-        "asr",
         "legacy-asr.v1",
         Some("原始完整口播，不能被重接入覆盖。"),
         None,
-    )
-    .await;
-    legacy(
-        &db,
-        work,
-        "video_frame_ocr",
-        "legacy-frame.v1",
-        None,
-        Some("no_frame_text_observed"),
     )
     .await;
     input::apply_plan(&db, &plan(&db, work).await)
@@ -208,8 +168,9 @@ async fn human_current_survives_same_bytes_reobservation_and_legacy_repreparatio
         unit,
         &reading::ReviewReadingRequest {
             command_ref: Uuid::new_v4(),
+            unit_ref: unit.to_string(),
+            source_version: audio["sourceVersion"].as_str().unwrap().into(),
             expected_current_revision_ref: Some(old),
-            candidate_revision_ref: old,
             action: "edit".into(),
             actor: "synthetic-reviewer".into(),
             reason: "核对合成视频原件".into(),
@@ -241,41 +202,28 @@ async fn human_current_survives_same_bytes_reobservation_and_legacy_repreparatio
         .await
         .unwrap();
     assert!(response.complete());
-    assert_eq!(response.results[0].result["alreadyCurrent"], 2);
+    assert_eq!(response.results[0].result["alreadyCurrent"], 1);
     assert_eq!(
         response.results[0].result["results"][0]["humanProtected"],
         true
     );
-    let preserved = current(&db, work, "audio").await;
-    assert_eq!(
-        preserved["currentRevisionRef"],
-        edited["currentRevisionRef"]
-    );
-    assert_eq!(preserved["blocks"][0]["text"], "人工核对后的口播。");
-    assert_eq!(preserved["reading"]["adoption"], "human_edited");
+    let kept = current(&db, work, "audio").await;
+    assert_eq!(kept["currentRevisionRef"], edited["currentRevisionRef"]);
+    assert_eq!(kept["blocks"][0]["text"], "人工核对后的口播。");
+    assert_eq!(kept["reading"]["adoption"], "human_edited");
     assert_eq!(counters(&db).await, before);
 }
 
 #[tokio::test]
 #[ignore = "owned isolated PostgreSQL only"]
-async fn legacy_source_change_conflicts_before_writes_and_retired_or_restricted_text_is_excluded() {
+async fn legacy_source_change_conflicts_before_writes_and_restricted_asr_is_excluded() {
     let db = fixture::proof_database("historical_media_conflict").await;
     let work = support::scenario(&db, "legacy-conflict", None, 0, true, false, true).await;
-    let (_, old_asr) = legacy(&db, work, "asr", "legacy-asr.v1", Some("旧口播"), None).await;
-    let (frame_job, _) = legacy(
-        &db,
-        work,
-        "video_frame_ocr",
-        "legacy-frame.v1",
-        Some("画面原文"),
-        None,
-    )
-    .await;
+    let (_, old_asr) = legacy(&db, work, "legacy-asr.v1", Some("旧口播"), None).await;
     let frozen = plan(&db, work).await;
     let (_, new_asr) = legacy(
         &db,
         work,
-        "asr",
         "legacy-asr.v2",
         Some("来源全文变更，旧预览不得写入"),
         None,
@@ -288,17 +236,15 @@ async fn legacy_source_change_conflicts_before_writes_and_retired_or_restricted_
     assert_eq!(
         counters(&db).await,
         before,
-        "source conflict cannot partially publish the frame"
+        "source conflict cannot partially publish a reading"
     );
-    sqlx::query("INSERT INTO linggan_media_ocr_retirement(retired_job_ref,reason) VALUES($1,'tesseract_replaced_by_paddleocr')")
-        .bind(frame_job).execute(db.pool()).await.unwrap();
     for derivative in [old_asr.unwrap(), new_asr.unwrap()] {
         record_derivative_disposition(
             &db,
             derivative,
             MaterialMediaDisposition::WithdrawnOrRestricted,
             "synthetic-policy",
-            "legacy source restriction",
+            "historical source restriction",
         )
         .await
         .unwrap();
@@ -309,34 +255,16 @@ async fn legacy_source_change_conflicts_before_writes_and_retired_or_restricted_
     let skipped = input::apply_plan(&db, &next).await.unwrap();
     assert_eq!(skipped.partial, 1);
     assert_eq!(skipped.results[0].result["updated"], 0);
-    assert_eq!(skipped.results[0].result["unavailable"], 2);
+    assert_eq!(skipped.results[0].result["unavailable"], 1);
     assert_eq!(counters(&db).await, before);
 }
 
 #[tokio::test]
 #[ignore = "owned isolated PostgreSQL only"]
-async fn explicit_empty_receipts_close_source_and_coverage_without_text_and_missing_images_are_acquisition_not_ocr()
- {
+async fn explicit_empty_asr_receipts_close_audio_coverage_and_keep_revision_guards() {
     let db = fixture::proof_database("historical_media_empty").await;
     let work = support::scenario(&db, "legacy-empty", None, 0, true, false, true).await;
-    let (asr, _) = legacy(
-        &db,
-        work,
-        "asr",
-        "legacy-asr.v1",
-        None,
-        Some("no_speech_observed"),
-    )
-    .await;
-    let (frame, _) = legacy(
-        &db,
-        work,
-        "video_frame_ocr",
-        "legacy-frame.v1",
-        None,
-        Some("no_frame_text_observed"),
-    )
-    .await;
+    let (asr, _) = legacy(&db, work, "legacy-asr.v1", None, Some("no_speech_observed")).await;
     let unprepared = plan(&db, work).await;
     fixture::submit_package(&db,"content_detail",json!({"contentExternalId":"legacy-empty"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"legacy-empty"},"payload":{"bodyText":"无关正文修订，不得被历史空结果伪装成只读回放"}})).await;
     let frozen = plan(&db, work).await;
@@ -350,93 +278,51 @@ async fn explicit_empty_receipts_close_source_and_coverage_without_text_and_miss
     );
     let before = counters(&db).await;
     let drift = input::apply_plan(&db, &unprepared).await.unwrap();
-    assert_eq!(
-        drift.failed, 1,
-        "unprepared empty sources require the original revision guard"
-    );
+    assert_eq!(drift.failed, 1);
     assert_eq!(drift.results[0].result["reason"], "material_changed");
-    assert_eq!(
-        counters(&db).await,
-        before,
-        "a claimed read-only replay cannot publish empty readings"
-    );
+    assert_eq!(counters(&db).await, before);
     let receipt = input::apply_plan(&db, &frozen).await.unwrap();
     assert!(receipt.complete());
-    assert_eq!(receipt.results[0].result["knownEmpty"], 2);
+    assert_eq!(receipt.results[0].result["knownEmpty"], 1);
     let empty = dossier::read(&db, work).await.unwrap().unwrap();
-    for kind in ["audio", "video_frame"] {
-        let material = empty.materials.iter().find(|m| m["kind"] == kind).unwrap();
-        assert_eq!(material["sourceState"], "known_empty");
-        assert!(material["currentRevisionRef"].is_string());
-        let stored: (Option<Uuid>, Uuid, Value) = sqlx::query_as("SELECT derivative_ref,producer_ref,source_location FROM linggan_material_reading WHERE reading_ref=$1")
-            .bind(material["currentRevisionRef"].as_str().unwrap().parse::<Uuid>().unwrap()).fetch_one(db.pool()).await.unwrap();
-        assert!(stored.0.is_none());
-        assert_eq!(stored.1, if kind == "audio" { asr } else { frame });
-        assert_eq!(
-            stored.2["materializationRef"],
-            source(&db, work).await.2.to_string()
-        );
-        assert_eq!(
-            stored.2["recognitionOutcome"],
-            if kind == "audio" {
-                "no_speech_observed"
-            } else {
-                "no_frame_text_observed"
-            }
-        );
-        assert!(stored.2.get("fullTextHash").is_none());
-        assert_eq!(
-            material["blocks"],
-            json!([]),
-            "empty recognition cannot invent words or times"
-        );
-        assert!(
-            material["issues"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .all(|i| i["code"] != "not_processed")
-        );
-    }
-    assert_eq!(empty.coverage["sources"]["audio"]["state"], "known_empty");
-    assert_eq!(
-        empty.coverage["sources"]["videoFrames"]["state"],
-        "known_empty"
+    let material = empty
+        .materials
+        .iter()
+        .find(|m| m["kind"] == "audio")
+        .unwrap();
+    assert_eq!(material["sourceState"], "known_empty");
+    assert_eq!(material["blocks"], json!([]));
+    let stored:(Option<Uuid>,Uuid,Value)=sqlx::query_as("SELECT derivative_ref,producer_ref,source_location FROM linggan_material_reading WHERE reading_ref=$1").bind(material["currentRevisionRef"].as_str().unwrap().parse::<Uuid>().unwrap()).fetch_one(db.pool()).await.unwrap();
+    assert!(stored.0.is_none());
+    assert_eq!(stored.1, asr);
+    assert_eq!(stored.2["recognitionOutcome"], "no_speech_observed");
+    assert!(stored.2.get("fullTextHash").is_none());
+    assert!(
+        material["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|i| i["code"] != "not_processed")
     );
-    assert_eq!(receipt.results[0].result["updated"], 2);
+    assert_eq!(empty.coverage["sources"]["audio"]["state"], "known_empty");
+    assert_eq!(receipt.results[0].result["updated"], 1);
     let after = counters(&db).await;
     assert_eq!(
         (after.0, after.1, after.2, after.3),
         (before.0, before.1, before.2, before.3)
     );
-    assert_eq!(
-        after.4 - before.4,
-        2,
-        "only canonical empty observations are appended"
-    );
+    assert_eq!(after.4 - before.4, 1);
     let replay = input::apply_plan(&db, &frozen).await.unwrap();
-    assert!(replay.complete());
     assert_eq!(replay.results[0].result["readOnlyReplay"], true);
-    assert_eq!(replay.results[0].result["alreadyCurrent"], 2);
-    assert_eq!(replay.results[0].result["updated"], 0);
+    assert_eq!(replay.results[0].result["alreadyCurrent"], 1);
     assert_eq!(counters(&db).await, after);
     let no_audio = support::scenario(&db, "legacy-no-audio", None, 0, true, false, true).await;
     legacy(
         &db,
         no_audio,
-        "asr",
         "legacy-asr.v1",
         None,
         Some("no_audio_stream_observed"),
-    )
-    .await;
-    legacy(
-        &db,
-        no_audio,
-        "video_frame_ocr",
-        "legacy-frame.v1",
-        None,
-        Some("no_frame_text_observed"),
     )
     .await;
     assert!(
@@ -458,24 +344,6 @@ async fn explicit_empty_receipts_close_source_and_coverage_without_text_and_miss
         no_audio.coverage["sources"]["audio"]["state"],
         "not_applicable"
     );
-    let missing = support::scenario(&db, "relayer-acquisition", None, 2, false, true, true).await;
-    let relayer = input::plan(
-        &db,
-        DOMAIN,
-        &[missing],
-        None,
-        input::BatchOperation::Relayer,
-    )
-    .await
-    .unwrap();
-    assert_eq!(relayer.entries[0].relayer["needsAcquisition"], 1);
-    assert_eq!(relayer.entries[0].relayer["needsOcr"], 1);
-    let receipt = input::apply_plan(&db, &relayer).await.unwrap();
-    assert_eq!(receipt.partial, 1);
-    assert_eq!(receipt.needs_acquisition, 1);
-    assert_eq!(receipt.needs_ocr, 1);
-    assert_eq!(receipt.results[0].result["needsAcquisition"], 1);
-    assert_eq!(receipt.results[0].result["needsOcr"], 1);
 }
 
 #[tokio::test]
@@ -499,7 +367,6 @@ async fn image_slots_with_abnormal_motion_bytes_are_not_invisible_historical_med
     let (job, derivative) = legacy(
         &db,
         work,
-        "asr",
         "legacy-asr.v1",
         Some("不属于图像组件的隐藏口播"),
         None,

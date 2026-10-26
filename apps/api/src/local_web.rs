@@ -63,7 +63,6 @@ mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
 mod model_settings;
-mod ocr_audit;
 mod ocr_recognition;
 #[cfg(test)]
 mod ocr_recognition_browser_tests;
@@ -427,12 +426,6 @@ fn material_api_routes() -> Router<LocalWebState> {
             )),
         )
         .route(
-            "/api/local/work-resources/{public_ref}/research-dossier/candidates",
-            get(research_dossier::candidates).layer(axum::middleware::from_fn(
-                comment_study::local_comment_study_guard,
-            )),
-        )
-        .route(
             "/api/local/work-resources/{public_ref}/research-dossier/materials/{unit_ref}/review",
             post(research_dossier::review).layer(axum::middleware::from_fn(
                 comment_study::local_comment_study_guard,
@@ -459,18 +452,6 @@ fn material_api_routes() -> Router<LocalWebState> {
         .route(
             "/api/local/work-resources/{public_ref}/research-dossier/comments",
             get(research_dossier::comments).layer(axum::middleware::from_fn(
-                comment_study::local_comment_study_guard,
-            )),
-        )
-        .route(
-            "/api/local/work-resources/{public_ref}/research-dossier/relayer-plan",
-            get(research_dossier::plan).layer(axum::middleware::from_fn(
-                comment_study::local_comment_study_guard,
-            )),
-        )
-        .route(
-            "/api/local/work-resources/{public_ref}/research-dossier/relayer",
-            post(research_dossier::relayer).layer(axum::middleware::from_fn(
                 comment_study::local_comment_study_guard,
             )),
         )

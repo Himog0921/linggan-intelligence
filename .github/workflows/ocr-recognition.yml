@@ -1,10 +1,10 @@
-name: OCR quality audit isolated proof
+name: Current OCR recognition isolated proof
 on:
   workflow_call:
 permissions:
   contents: read
 jobs:
-  synthetic-audit-chain:
+  synthetic-recognition-chain:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
@@ -32,14 +32,12 @@ jobs:
         run: |
           python3 -B scripts/runtime/tests/test_ai_guard.py MigrationRegistry
           cargo test -p linggan-intelligence --lib --locked
-          cargo test -p linggan-intelligence --test ocr_quality_audit --locked
-          cargo test -p linggan-evidence --test ocr_adoption --locked
           cargo test -p linggan-evidence --lib --locked
           npm --prefix apps/pi-adapter test
           npm --prefix apps/web run lint
           npm --prefix apps/web run test
       - name: Actual owned worker, database and React main path
-        run: bash scripts/test-ocr-quality-audit-postgres.sh --browser
-      - name: OCR audit source formatting
+        run: bash scripts/test-ocr-recognition-postgres.sh --browser
+      - name: Current OCR source formatting
         run: |
-          rustfmt --check --edition 2024 --config skip_children=true crates/intelligence/src/ocr_quality_audit.rs crates/intelligence/src/ocr_quality_audit/*.rs crates/intelligence/src/ai_foundation/executor/ocr_audit.rs crates/evidence/src/material_reading.rs crates/evidence/src/material_reading/*.rs crates/intelligence/tests/ocr_quality_audit.rs apps/worker/tests/ocr_quality_audit_postgres.rs apps/worker/tests/support/ocr_audit_endpoint.rs apps/api/src/local_web/ocr_audit.rs crates/evidence/src/cloud_ocr_adoption.rs crates/evidence/tests/cloud_ocr_saved.rs crates/intelligence/src/ai_foundation/ocr_recognition.rs crates/intelligence/src/ai_foundation/executor/ocr_recognition.rs apps/worker/tests/ocr_recognition_postgres.rs apps/api/src/local_web/ocr_recognition.rs apps/api/src/local_web/ocr_recognition_browser_tests.rs
+          rustfmt --check --edition 2024 --config skip_children=true crates/intelligence/src/ocr_recognition_schema.rs crates/evidence/src/ocr_source.rs crates/evidence/src/cloud_ocr_adoption.rs crates/evidence/src/material_reading.rs crates/evidence/src/material_reading/*.rs crates/intelligence/src/ai_foundation/ocr_recognition.rs crates/intelligence/src/ai_foundation/executor/ocr_recognition.rs apps/worker/tests/ocr_recognition_postgres.rs

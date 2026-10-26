@@ -26,9 +26,19 @@ pub async fn publish_job_in(
         {
             ("image", "local_vision")
         }
-        "image_ocr" => ("image", "ordinary_ocr"),
+        "image_ocr"
+            if claim.processor_version
+                == crate::processor_version_for_kind("image_ocr").unwrap() =>
+        {
+            ("image", "ordinary_ocr")
+        }
         "asr" => ("audio", "asr"),
-        "video_frame_ocr" => ("video_frame", "frame_ocr"),
+        "video_frame_ocr"
+            if claim.processor_version
+                == crate::processor_version_for_kind("video_frame_ocr").unwrap() =>
+        {
+            ("video_frame", "frame_ocr")
+        }
         _ => return Err(invalid("material_reading_processor_invalid")),
     };
     let source = media_source_in(
@@ -129,61 +139,6 @@ async fn publish_source_in(
     .await
 }
 
-pub async fn publish_layout_in(
-    conn: &mut PgConnection,
-    layout_ref: Uuid,
-    expected_current: Option<Uuid>,
-) -> Result<PublishedReading, sqlx::Error> {
-    let row = sqlx::query("SELECT l.content_public_ref,l.ocr_derivative_ref,l.image_width,l.image_height,d.job_ref FROM linggan_media_ocr_layout l JOIN linggan_media_derivative d ON d.derivative_ref=l.ocr_derivative_ref WHERE layout_ref=$1 AND engine='paddleocr'")
-        .bind(layout_ref).fetch_one(&mut *conn).await?;
-    let work: Uuid = row.get("content_public_ref");
-    let job: Uuid = row.get("job_ref");
-    let source = media_source_in(conn, work, job, None).await?;
-    let rows = sqlx::query("SELECT line_ref,ordinal,text_content AS text,confidence::float8 AS confidence,left_norm::float8 AS x1,top_norm::float8 AS y1,right_norm::float8 AS x2,bottom_norm::float8 AS y2 FROM linggan_media_ocr_line WHERE layout_ref=$1 ORDER BY ordinal")
-        .bind(layout_ref).fetch_all(&mut *conn).await?;
-    let lines: Vec<Value> = rows.iter().map(|r| json!({"ref":r.get::<Uuid,_>("line_ref"),"text":r.get::<String,_>("text"),"confidence":r.get::<f64,_>("confidence"),"bbox":[r.get::<f64,_>("x1"),r.get::<f64,_>("y1"),r.get::<f64,_>("x2")-r.get::<f64,_>("x1"),r.get::<f64,_>("y2")-r.get::<f64,_>("y1")]})).collect();
-    let layering: Option<Value> = sqlx::query_scalar("SELECT retained_line_refs FROM linggan_media_ocr_layering_result WHERE layout_ref=$1 AND layer_version=$2 ORDER BY created_at DESC LIMIT 1")
-        .bind(layout_ref).bind(crate::ocr_layering::VERSION).fetch_optional(&mut *conn).await?;
-    let mut lines = lines;
-    for line in &mut lines {
-        let heading = layering
-            .as_ref()
-            .and_then(Value::as_array)
-            .is_some_and(|items| {
-                items
-                    .iter()
-                    .any(|v| v["lineRef"] == line["ref"] && v["classification"] == "primary_copy")
-            });
-        line["kind"] = json!(if heading { "heading" } else { "paragraph" });
-        line["speaker"] = json!("unconfirmed");
-    }
-    let content = ReadingContent {
-        blocks: crate::research_dossier::content::ocr_blocks(&lines),
-        issues: vec![],
-        source_state: "present".into(),
-        source_location: json!({"layoutRef":layout_ref,"imageWidth":row.get::<i32,_>("image_width"),"imageHeight":row.get::<i32,_>("image_height")}),
-    };
-    publish_source_in(
-        conn,
-        MediaPublication {
-            source,
-            work,
-            kind: "image",
-            producer: "ordinary_ocr",
-            producer_ref: job,
-            derivative: Some(row.get("ocr_derivative_ref")),
-            rule: format!(
-                "{}:{}",
-                crate::research_dossier::content::RULE_VERSION,
-                crate::ocr_layering::VERSION
-            ),
-            content,
-            publication: Publication::Automatic { expected_current },
-        },
-    )
-    .await
-}
-
 /// Explicit legacy text preparation: retain actual provenance without rewriting the old job freeze.
 pub async fn publish_historical_in(
     conn: &mut PgConnection,
@@ -200,8 +155,7 @@ JOIN LATERAL(SELECT e.* FROM linggan_media_processing_job_event e WHERE e.job_re
 LEFT JOIN linggan_media_derivative d ON d.job_ref=j.job_ref AND d.derivative_ref=$2
 LEFT JOIN linggan_material_derived_text t ON t.derivative_ref=d.derivative_ref AND t.content_public_ref=$3
 WHERE j.job_ref=$1 AND w.reading_source_version IS NULL AND e.state='succeeded'
-AND ((j.processor_kind='asr' AND ((d.derivative_kind='asr_text' AND t.kind='asr_text') OR ($2::uuid IS NULL AND e.reason IN ('no_audio_stream_observed','no_speech_observed'))))
- OR (j.processor_kind='video_frame_ocr' AND ((d.derivative_kind='frame_ocr_text' AND t.kind='frame_ocr_text') OR ($2::uuid IS NULL AND e.reason='no_frame_text_observed'))))
+AND j.processor_kind='asr' AND ((d.derivative_kind='asr_text' AND t.kind='asr_text') OR ($2::uuid IS NULL AND e.reason IN ('no_audio_stream_observed','no_speech_observed')))
 AND NOT EXISTS(SELECT 1 FROM linggan_media_ocr_retirement WHERE retired_job_ref=j.job_ref)
 "#).bind(job).bind(derivative).bind(work).fetch_one(&mut *conn).await?;
     let text: Option<String> = row.get("text_content");
@@ -212,11 +166,7 @@ AND NOT EXISTS(SELECT 1 FROM linggan_media_ocr_retirement WHERE retired_job_ref=
     {
         return Err(invalid("historical_text_hash_or_content_invalid"));
     }
-    let (kind, producer) = if row.get::<String, _>("processor_kind") == "asr" {
-        ("audio", "asr")
-    } else {
-        ("video_frame", "frame_ocr")
-    };
+    let (kind, producer) = ("audio", "asr");
     let source = media_source_in(conn, work, job, Some(&materialization.to_string())).await?;
     if !matches!(source["purpose"].as_str(), Some("video" | "live_photo")) {
         return Err(invalid("historical_media_purpose_invalid"));
@@ -324,6 +274,7 @@ pub async fn publish_cloud_in(
     materialization: Uuid,
     derivative: Uuid,
     blocks: Vec<Value>,
+    expected_current: Option<Uuid>,
 ) -> Result<PublishedReading, sqlx::Error> {
     let source = media_source_in(conn, work, job, Some(&materialization.to_string())).await?;
     let content = ReadingContent {
@@ -347,7 +298,7 @@ pub async fn publish_cloud_in(
                 crate::cloud_ocr_adoption::RULE_VERSION
             ),
             content,
-            publication: Publication::Candidate,
+            publication: Publication::Automatic { expected_current },
         },
     )
     .await

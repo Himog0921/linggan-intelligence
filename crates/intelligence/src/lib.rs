@@ -72,4 +72,4 @@ pub mod comment_study_source;
 
 pub mod topic_map_structure;
 
-pub mod ocr_quality_audit;
+pub mod ocr_recognition_schema;

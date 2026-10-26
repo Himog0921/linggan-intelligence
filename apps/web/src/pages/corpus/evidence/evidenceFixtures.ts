@@ -365,22 +365,19 @@ export function commentsJson(count: number, options: { cursor?: string | null; t
 
 export const REVISION = 'r'.repeat(64);
 
-export function planJson(overrides: Partial<Record<string, unknown>> = {}) {
-  return { alreadyCurrent: 0, expectedRevision: REVISION, imageJobs: 4, imageSlots: 4, layoutCount: 1, needsOcr: 3, needsAcquisition: 0, pendingReviewCount: 0, pendingLayouts: 1, workCount: 1, ...overrides };
-}
 export function dossierMaterialJson(n: number, overrides: Record<string, unknown> = {}) {
   const reading = mediaRef(800 + n);
   return {
     ref: mediaRef(700 + n), kind: 'image', slotKey: `xhs:ext:image:${n}`, page: n,
     sourceState: 'present', sourceRef: mediaRef(500 + n), sourceVersion: `source-${n}`, currentRevisionRef: reading,
-    originalUrl: mediaHandle(n), reading: { generatedBy: 'ordinary_ocr', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2', review: null },
+    originalUrl: mediaHandle(n), reading: { generatedBy: 'cloud_vision', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'dossier-content.v2', review: null },
     blocks: [
       { ref: `${workRef(1)}.${reading}.0`, kind: 'heading', text: '封面大字独立保留', speaker: 'author', bbox: [0.1, 0.1, 0.75, 0.07] },
       { ref: `${workRef(1)}.${reading}.1`, kind: 'paragraph', text: '第0行连续的图片正文，完整可用。', speaker: 'unconfirmed', bbox: [0.12, 0.28, 0.76, 0.025] },
     ], issues: [], ...overrides,
   };
 }
-export interface DossierOptions { bodyText?: string; materials?: unknown[]; plan?: Record<string, unknown>; coverage?: Record<string, unknown>; note?: Record<string, unknown>; readingView?: { mainBlockRefs: string[]; supplementBlockRefs: string[] } }
+export interface DossierOptions { bodyText?: string; materials?: unknown[]; coverage?: Record<string, unknown>; note?: Record<string, unknown>; readingView?: { mainBlockRefs: string[]; supplementBlockRefs: string[] } }
 export function dossierJson(n: number, options: DossierOptions = {}) {
   const ref = workRef(n); const base = `/api/local/work-resources/${ref}/research-dossier`;
   const result = {
@@ -396,9 +393,9 @@ export function dossierJson(n: number, options: DossierOptions = {}) {
       readingView: { mainBlockRefs: [] as string[], supplementBlockRefs: [] as string[] },
       coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 2, acquiredPages: 1, processedPages: 1, missingPages: [2], unknownOrder: false },
         sources: { body: { state: 'available', units: 1, readings: 1 }, images: { state: 'partial', units: 2, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } }, issues: [], ...options.coverage },
-      attachments: { comments: { href: `${base}/comments` }, author: { href: `${base}/metadata?sections=author` }, interaction: { href: `${base}/metadata?sections=interaction` }, versions: { href: `${base}/candidates` } },
+      attachments: { comments: { href: `${base}/comments` }, author: { href: `${base}/metadata?sections=author` }, interaction: { href: `${base}/metadata?sections=interaction` } },
       selection: { mode: 'full', kinds: [], unitRefs: [], blockRefs: [], imagePages: [], omittedUnits: 0, completeRevision: REVISION },
-    }, relayerPlan: planJson(options.plan),
+    },
   };
   const materials = result.dossier.materials as { kind: string; blocks: { ref: string }[] }[];
   const hasBody = materials.some(unit => unit.kind === 'body' && unit.blocks.length > 0);
@@ -432,9 +429,7 @@ export function dossierCommentsJson(count: number, options: { cursor?: string | 
   };
 }
 
-export function relayerReceiptJson(overrides: Partial<Record<string, unknown>> = {}) {
-  return { alreadyCurrent: 0, layerVersion: 'rules-v2', needsOcr: 0, needsAcquisition: 0, results: [], scopeCount: 1, skipped: 0, updated: 1, workRef: workRef(1), ...overrides };
-}
+
 
 // ───────────────────────── 复观测 ─────────────────────────
 

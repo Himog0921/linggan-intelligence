@@ -179,62 +179,8 @@ async fn dead_controls_never_return_results_by_construction() {
     }
 }
 
-async fn layering_rows(db: &Database) -> i64 {
-    count(db, "SELECT count(*) FROM linggan_media_ocr_layering_result").await
-}
-
-/// 重新分层只追加分层结果：同一规则版本重复提交不会产生第二条；带着过期修订再发得到 409，且库不变
-/// （这个 409 不表示第一次失败，只说明手里的修订已经过期）。
-async fn relayer_is_append_only_and_idempotent(db: &Database, app: &Router, data: &Dataset) {
-    let (rich, domain) = (data.rich, data.domain_one);
-    let base = format!("/api/local/work-resources/{rich}/research-dossier");
-    let before = layering_rows(db).await;
-    let plan = get(app, &format!("{base}/relayer-plan?domain={domain}")).await;
-    assert_eq!(plan.status, StatusCode::OK, "{}", plan.text);
-    assert_eq!(plan.json["relayerPlan"]["pendingLayouts"], 1);
-    let stale = plan.json["relayerPlan"]["expectedRevision"]
-        .as_str()
-        .unwrap()
-        .to_owned();
-    let body = json!({"expectedRevision": stale, "domain": domain});
-    let first = post(app, &format!("{base}/relayer"), Some(body.clone())).await;
-    assert_eq!(first.status, StatusCode::OK, "{}", first.text);
-    assert_eq!(
-        [
-            first.json["updated"].as_i64(),
-            first.json["alreadyCurrent"].as_i64(),
-            first.json["skipped"].as_i64()
-        ],
-        [Some(1), Some(0), Some(0)],
-        "{}",
-        first.text
-    );
-    assert_eq!(
-        layering_rows(db).await,
-        before + 1,
-        "第一次提交恰好追加一条分层结果"
-    );
-    let again = post(app, &format!("{base}/relayer"), Some(body)).await;
-    assert_eq!(again.status, StatusCode::CONFLICT, "{}", again.text);
-    assert_eq!(again.json["code"], "dossier_changed_or_scope_unavailable");
-    assert_eq!(layering_rows(db).await, before + 1, "过期修订被拒，库不变");
-    let plan = get(app, &format!("{base}/relayer-plan?domain={domain}")).await;
-    assert_eq!(plan.json["relayerPlan"]["pendingLayouts"], 0);
-    assert_eq!(plan.json["relayerPlan"]["alreadyCurrent"], 1);
-    let fresh = plan.json["relayerPlan"]["expectedRevision"]
-        .as_str()
-        .unwrap();
-    let body = json!({"expectedRevision": fresh, "domain": domain});
-    let noop = post(app, &format!("{base}/relayer"), Some(body)).await;
-    assert_eq!(noop.status, StatusCode::OK, "{}", noop.text);
-    assert_eq!(
-        [
-            noop.json["updated"].as_i64(),
-            noop.json["alreadyCurrent"].as_i64()
-        ],
-        [Some(0), Some(1)]
-    );
-    assert_eq!(layering_rows(db).await, before + 1, "已是当前版本：库不变");
+async fn reading_rows(db: &Database) -> i64 {
+    count(db, "SELECT count(*) FROM linggan_material_reading").await
 }
 
 async fn reobservation_counts(db: &Database) -> [i64; 4] {
@@ -292,7 +238,7 @@ async fn reobservation_merges_and_never_leases(db: &Database, app: &Router, data
 async fn rejected_writes_change_nothing(db: &Database, app: &Router, data: &Dataset) {
     let domain = data.domain_one;
     let plain = public_ref(db, "ev-plain-00").await;
-    let before = (reobservation_counts(db).await, layering_rows(db).await);
+    let before = (reobservation_counts(db).await, reading_rows(db).await);
     let reobserve = |work: Uuid, scope: Uuid| {
         format!("/api/local/work-resources/{work}/reobserve?domain={scope}")
     };
@@ -310,14 +256,20 @@ async fn rejected_writes_change_nothing(db: &Database, app: &Router, data: &Data
         other_domain.text
     );
     assert_eq!(other_domain.json["code"], "material_not_found");
-    let relayer = format!(
-        "/api/local/work-resources/{}/research-dossier/relayer",
-        data.rich
-    );
+    let base = format!("/api/local/work-resources/{}/research-dossier", data.rich);
+    let dossier = get(app, &format!("{base}?domain={domain}")).await;
+    let image = dossier.json["dossier"]["materials"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|m| m["kind"] == "image")
+        .unwrap();
+    let review = format!("{base}/materials/{}/review", image["ref"].as_str().unwrap());
+    let body = json!({"commandRef":Uuid::new_v4(),"unitRef":image["ref"],"sourceVersion":image["sourceVersion"],"expectedCurrentRevisionRef":image["currentRevisionRef"],"action":"edit","editedBlocks":image["blocks"],"actor":"synthetic","reason":"test boundary","verified":false,"resolvedIssueKeys":[]});
     let wrong_scope = post(
         app,
-        &relayer,
-        Some(json!({"expectedRevision": "x", "domain": data.domain_two})),
+        &format!("{review}?domain={}", data.domain_two),
+        Some(body.clone()),
     )
     .await;
     assert_eq!(
@@ -326,17 +278,10 @@ async fn rejected_writes_change_nothing(db: &Database, app: &Router, data: &Data
         "{}",
         wrong_scope.text
     );
-    let extra = post(
-        app,
-        &relayer,
-        Some(json!({"expectedRevision": "x", "domain": domain, "extra": 1})),
-    )
-    .await;
-    assert!(
-        extra.status.is_client_error(),
-        "多余字段被拒：{}",
-        extra.status
-    );
+    let mut extra = body;
+    extra["extra"] = json!(1);
+    let invalid = post(app, &format!("{review}?domain={domain}"), Some(extra)).await;
+    assert!(invalid.status.is_client_error());
     let headless = send(
         app.clone(),
         "POST",
@@ -347,7 +292,7 @@ async fn rejected_writes_change_nothing(db: &Database, app: &Router, data: &Data
     .await;
     assert_eq!(headless.status, StatusCode::FORBIDDEN);
     assert_eq!(
-        (reobservation_counts(db).await, layering_rows(db).await),
+        (reobservation_counts(db).await, reading_rows(db).await),
         before,
         "被拒的写入不改库"
     );
@@ -360,7 +305,6 @@ async fn write_paths_leave_exactly_the_expected_database_records() {
     let db = isolated("ev_writes").await;
     let data = seed_dataset(&db).await;
     let app = app_with_database(db.clone());
-    relayer_is_append_only_and_idempotent(&db, &app, &data).await;
     reobservation_merges_and_never_leases(&db, &app, &data).await;
     rejected_writes_change_nothing(&db, &app, &data).await;
 }

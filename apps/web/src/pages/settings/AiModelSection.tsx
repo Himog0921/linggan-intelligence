@@ -32,7 +32,7 @@ export function ConnectionForm({ connection, data, action }: { connection: Conne
     <SaveBar busy={action.busy !== null}>保存连接</SaveBar>
   </form>;
 }
-const PERMISSIONS: Record<string, string[]> = { ocr_quality_audit: ['synthetic_image_probe', 'ocr_quality_image'], model_probe: ['synthetic_probe', 'model_catalog'], note_interpretation: ['note_material'], work_comparison: ['note_material'], direction_list_draft: ['note_material'], direction_proposal: ['note_material'], author_org_identity: ['public_author_bio'], writing_assistant: ['selected_writing_material'], writing_legacy: ['selected_writing_material'] };
+const PERMISSIONS: Record<string, string[]> = { ocr_recognition: ['manual_ocr_image'], model_probe: ['synthetic_probe', 'model_catalog'], note_interpretation: ['note_material'], work_comparison: ['note_material'], direction_list_draft: ['note_material'], direction_proposal: ['note_material'], author_org_identity: ['public_author_bio'], writing_assistant: ['selected_writing_material'], writing_legacy: ['selected_writing_material'] };
 export function EgressForm({ data, connection, action }: { data: AiSettings; connection: Connection; action: AiAction }) {
   const [selection, setSelection] = useState('model_probe:synthetic_probe');
   const [taskKey = '', materialClass = ''] = selection.split(':');

@@ -71,6 +71,7 @@ async fn read_media_batch(
     }
     let mut slots = read_slots_batch(tx, refs, as_of).await?;
     let mut derivatives = read_derivatives_batch(tx, refs, as_of).await?;
+    let mut dossiers = crate::research_dossier::read_in(tx, refs, as_of).await?;
     Ok(refs
         .iter()
         .map(|content_ref| {
@@ -80,9 +81,16 @@ async fn read_media_batch(
             let derivatives = derivatives
                 .remove(content_ref)
                 .unwrap_or_else(|| project_derivative_rows(Vec::new()));
+            let ocr = canonical_ocr_projection(
+                dossiers
+                    .remove(content_ref)
+                    .as_ref()
+                    .map(|dossier| dossier.materials.as_slice())
+                    .unwrap_or_default(),
+            );
             (
                 *content_ref,
-                project_media_for_read(slots, derivatives, overview),
+                project_media_for_read(slots, derivatives, ocr, overview),
             )
         })
         .collect())
@@ -90,20 +98,24 @@ async fn read_media_batch(
 
 fn project_media_for_read(
     slots: SlotReadProjection,
-    (derivatives, derivative_receipt, ocr_state, asr_state, derivative_restricted): (
+    (derivatives, derivative_receipt, asr_state, derivative_restricted): (
         Vec<Value>,
         Value,
         &'static str,
-        &'static str,
         bool,
     ),
+    ocr: OcrReadProjection,
     overview: bool,
 ) -> MediaReadProjection {
-    let (resource, preview_url, preview_purpose) = if overview {
+    let ocr_state = ocr.state;
+    let (mut resource, preview_url, preview_purpose) = if overview {
         build_media_overview(&slots.slots, &derivatives)
     } else {
         build_media_resource(&slots.slots, &derivatives, ocr_state, asr_state)
     };
+    if !overview {
+        resource["ocr"]["resources"] = Value::Array(ocr.resources);
+    }
     MediaReadProjection {
         slots: slots.slots,
         derivatives,
@@ -156,7 +168,7 @@ fn build_media_resource(
     let (avatars, covers, images, videos, comment_images) = partition_resource_slots(slots);
     let avatar = select_avatar(&avatars);
     let cover = select_cover(&covers, &images, &videos, derivatives);
-    let (ocr_resources, transcript_resources) = derivative_resources(derivatives);
+    let transcript_resources = transcript_resources(derivatives);
     let resource = serde_json::json!({
         "contractVersion":"linggan.media-resource.v1",
         "state":if slots.is_empty() && derivatives.is_empty(){"NOT_OBSERVED"}else{"OBSERVED"},
@@ -169,7 +181,7 @@ fn build_media_resource(
             "relationship":"content.video",
             "items":videos
         },
-        "ocr":{"state":ocr_state,"relationship":"content.ocr","resources":ocr_resources},
+        "ocr":{"state":ocr_state,"relationship":"content.ocr","resources":[]},
         "transcript":{"state":asr_state,"relationship":"content.transcript","resources":transcript_resources},
         "commentImages":{
             "state":if comment_images.is_empty(){"NOT_OBSERVED"}else{"OBSERVED"},
@@ -367,23 +379,73 @@ fn select_cover(
     }
 }
 
-fn derivative_resources(derivatives: &[Value]) -> (Vec<Value>, Vec<Value>) {
-    let ocr = derivatives
-        .iter()
-        .filter(|item| {
-            matches!(
-                item.get("kind").and_then(Value::as_str),
-                Some("ocr_text" | "frame_ocr_text")
-            )
-        })
-        .cloned()
-        .collect();
-    let transcript = derivatives
+fn transcript_resources(derivatives: &[Value]) -> Vec<Value> {
+    derivatives
         .iter()
         .filter(|item| item.get("kind").and_then(Value::as_str) == Some("asr_text"))
         .cloned()
+        .collect()
+}
+
+struct OcrReadProjection {
+    state: &'static str,
+    resources: Vec<Value>,
+}
+
+/// OCR status follows the exact same current/source/empty/page owner as dossier reading.
+/// Only references and status leave this adapter; OCR text is never copied into media resources.
+fn canonical_ocr_projection(materials: &[Value]) -> OcrReadProjection {
+    let resources: Vec<Value> = materials.iter().filter(|unit| matches!(unit["kind"].as_str(), Some("image" | "video_frame"))).map(|unit| {
+        let blocks = unit["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
+        let has_gaps = blocks.iter().any(|block| block["kind"] == "gap");
+        let current = unit["currentRevisionRef"].is_string();
+        let state = if unit["sourceState"] == "restricted" { "WITHDRAWN_OR_RESTRICTED" }
+        else if current && (unit["sourceState"] == "known_empty" || (blocks.is_empty() && unit["reading"]["generatedBy"] == "human_edit" && unit["reading"]["verification"] == "verified")) { "KNOWN_EMPTY" }
+        else if current && has_gaps { "PARTIAL" }
+        else if current && blocks.iter().any(crate::research_dossier::content::has_source_text) { "ACQUIRED" }
+        else { match (unit["processing"]["state"].as_str(), unit["processing"]["reason"].as_str()) {
+            (Some("running"), _) => "PROCESSING",
+            (Some("pending"), Some("provider_not_enabled")) => "NOT_ENABLED",
+            (Some("pending"), _) => "QUEUED",
+            (Some("failed"), _) => "FAILED",
+            (Some("completed" | "cancelled" | "invalidated"), _) => "UNKNOWN",
+            _ => "NOT_OBSERVED",
+        }};
+        serde_json::json!({"unitRef":unit["ref"],"slotKey":unit["slotKey"],"kind":unit["kind"],"state":state,"sourceState":unit["sourceState"],"sourceVersion":unit["sourceVersion"],"readingRef":unit["currentRevisionRef"],"hasGaps":has_gaps})
+    }).collect();
+    let states: Vec<_> = resources
+        .iter()
+        .filter_map(|unit| unit["state"].as_str())
         .collect();
-    (ocr, transcript)
+    let same = |state| !states.is_empty() && states.iter().all(|value| *value == state);
+    let state = if states.is_empty() || same("NOT_OBSERVED") {
+        "NOT_OBSERVED"
+    } else if same("KNOWN_EMPTY") {
+        "KNOWN_EMPTY"
+    } else if states
+        .iter()
+        .all(|state| matches!(*state, "ACQUIRED" | "KNOWN_EMPTY"))
+    {
+        "ACQUIRED"
+    } else if states
+        .iter()
+        .any(|state| matches!(*state, "ACQUIRED" | "KNOWN_EMPTY" | "PARTIAL"))
+    {
+        "PARTIAL"
+    } else if states.contains(&"PROCESSING") {
+        "PROCESSING"
+    } else if states.contains(&"QUEUED") {
+        "QUEUED"
+    } else if states.contains(&"WITHDRAWN_OR_RESTRICTED") {
+        "WITHDRAWN_OR_RESTRICTED"
+    } else if states.contains(&"FAILED") {
+        "FAILED"
+    } else if states.contains(&"NOT_ENABLED") {
+        "NOT_ENABLED"
+    } else {
+        "UNKNOWN"
+    };
+    OcrReadProjection { state, resources }
 }
 
 async fn read_slots_batch(
@@ -694,12 +756,12 @@ fn media_blob_contract(
 }
 
 /// One owner for detail and multi-work consumers. Each work keeps the detail reader's
-/// 256 + 1 row boundary and the same disposition, retirement, and OCR qualification.
+/// 256 + 1 row boundary and disposition/retirement checks for the retained derivatives.
 pub(crate) async fn read_derivatives_batch(
     tx: &mut Transaction<'_, Postgres>,
     content_refs: &[Uuid],
     as_of: &str,
-) -> Result<HashMap<Uuid, (Vec<Value>, Value, &'static str, &'static str, bool)>, sqlx::Error> {
+) -> Result<HashMap<Uuid, (Vec<Value>, Value, &'static str, bool)>, sqlx::Error> {
     let rows = read_derivative_rows(
         tx,
         content_refs,
@@ -735,7 +797,6 @@ async fn read_derivative_rows(
     }
     let retirement_join =
         "LEFT JOIN linggan_media_ocr_retirement retired ON retired.retired_job_ref=job.job_ref";
-    let layering_join = "LEFT JOIN LATERAL (SELECT layout.image_width,layout.image_height,layout.engine_version,layer.layout_ref,layer.layering_ref,layer.layer_version,layer.state,layer.decision_source,layer.cover_headline,layer.image_substantive_text,layer.retained_line_refs,layer.excluded_lines FROM linggan_media_ocr_layout layout JOIN linggan_media_ocr_layering_result layer USING(layout_ref) WHERE layout.ocr_derivative_ref=derivative.derivative_ref AND layout.created_at<=$2::timestamptz AND layer.created_at<=$2::timestamptz ORDER BY layer.created_at DESC,layer.layering_ref DESC LIMIT 1) layering ON true";
     let derivative_rows = sqlx::query(AssertSqlSafe(format!(
         "WITH restricted_disposition AS MATERIALIZED ( \
              SELECT slot_key,blob_sha256,derivative_ref \
@@ -754,7 +815,6 @@ async fn read_derivative_rows(
          SELECT requested_slots.content_public_ref,requested_slots.context_only,job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope,job.blob_sha256 AS input_blob_sha256,slot.ordinal AS slot_ordinal,job.created_at::text AS job_created_at, \
              event.state,event.reason,derivative.derivative_ref,derivative.derivative_kind,derivative.storage_key, \
              derived.display_text,derived.text_content AS research_text,derived.source_location AS derived_source_location,derived.language_state,derived.language_tag, \
-             layering.image_width,layering.image_height,layering.engine_version,layering.layering_ref,layering.layer_version,layering.retained_line_refs,layering.excluded_lines,layering.layout_ref AS ocr_layout_ref,layering.state AS ocr_layering_state,layering.decision_source AS ocr_decision_source,layering.cover_headline,layering.image_substantive_text, \
              (restricted_slot.slot_key IS NOT NULL OR restricted_blob.blob_sha256 IS NOT NULL OR restricted_derivative.derivative_ref IS NOT NULL) AS disposition_restricted, \
              (retired.retired_job_ref IS NOT NULL) AS retired, \
              count(*) OVER(PARTITION BY requested_slots.content_public_ref) AS total_count, \
@@ -767,8 +827,7 @@ async fn read_derivative_rows(
          LEFT JOIN restricted_blobs restricted_blob ON restricted_blob.blob_sha256=job.blob_sha256 \
          LEFT JOIN restricted_derivatives restricted_derivative ON restricted_derivative.derivative_ref=derivative.derivative_ref \
          {retirement_join} \
-         {layering_join} \
-         WHERE job.created_at <= $2::timestamptz \
+         WHERE job.processor_kind IN ('thumbnail','audio_extract','asr') AND job.created_at <= $2::timestamptz \
          ) SELECT * FROM derivative_rows WHERE row_ordinal > $3 AND row_ordinal <= $3 + $4 \
          ORDER BY content_public_ref,row_ordinal"
     )))
@@ -783,7 +842,7 @@ async fn read_derivative_rows(
 
 fn project_derivative_rows(
     mut derivative_rows: Vec<PgRow>,
-) -> (Vec<Value>, Value, &'static str, &'static str, bool) {
+) -> (Vec<Value>, Value, &'static str, bool) {
     let total = derivative_rows
         .first()
         .map_or(0_i64, |row| row.get("total_count"));
@@ -799,7 +858,6 @@ fn project_derivative_rows(
         })
         .flatten();
     let mut derivatives = Vec::with_capacity(derivative_rows.len());
-    let mut ocr_state = "UNKNOWN";
     let mut asr_state = "UNKNOWN";
     let mut any_restricted = false;
     for row in &derivative_rows {
@@ -810,7 +868,6 @@ fn project_derivative_rows(
             .get::<Option<bool>, _>("disposition_restricted")
             .unwrap_or(false);
         let retired: bool = row.get("retired");
-        let layering_state: Option<String> = row.get("ocr_layering_state");
         any_restricted |= restricted;
         let state = match (
             retired,
@@ -838,13 +895,6 @@ fn project_derivative_rows(
             _ => "UNKNOWN",
         };
         let kind: String = row.get("processor_kind");
-        if kind == "image_ocr" || kind == "video_frame_ocr" {
-            ocr_state = if layering_state.as_deref() == Some("PARTIAL") && state == "ACQUIRED" {
-                "PARTIAL"
-            } else {
-                state
-            };
-        }
         if kind == "asr" {
             asr_state = state;
         }
@@ -863,28 +913,7 @@ fn project_derivative_rows(
         } else {
             Value::Null
         };
-        let clean_corpus_eligible = !restricted
-            && !retired
-            && state == "ACQUIRED"
-            && (layering_state.as_deref() == Some("ACCEPTED")
-                || (matches!(
-                    row.get::<Option<String>, _>("layer_version").as_deref(),
-                    Some("rules-v2" | "rules-v3")
-                ) && layering_state.as_deref() == Some("PARTIAL")))
-            && (!matches!(
-                row.get::<Option<String>, _>("layer_version").as_deref(),
-                Some("rules-v2" | "rules-v3")
-            ) || row
-                .get::<Option<Value>, _>("retained_line_refs")
-                .and_then(|v| v.as_array().cloned())
-                .is_some_and(|refs| {
-                    refs.iter()
-                        .any(|r| r["classification"] == "substantive_text")
-                }))
-            && row
-                .get::<Option<String>, _>("image_substantive_text")
-                .is_some_and(|text| !text.trim().is_empty());
-        derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"slotOrdinal":row.get::<Option<i32>,_>("slot_ordinal"),"jobCreatedAt":row.get::<String,_>("job_created_at"),"processorKind":row.get::<String,_>("processor_kind"),"contextOnly":row.get::<bool,_>("context_only"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"displayText":if restricted || retired {None}else{row.get::<Option<String>,_>("display_text")},"languageState":row.get::<Option<String>,_>("language_state"),"languageTag":if restricted || retired {None}else{row.get::<Option<String>,_>("language_tag")},"dispositionState":if retired{"OCR_RETIRED"}else if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceScope":row.get::<String,_>("input_scope"),"sourceLocation":source_location,"reason":reason,"ocrLayering":if retired || restricted {Value::Null}else if let Some(layering_state)=layering_state {serde_json::json!({"layoutRef":row.get::<Option<Uuid>,_>("ocr_layout_ref"),"layeringRef":row.get::<Option<Uuid>,_>("layering_ref"),"imageWidth":row.get::<Option<i32>,_>("image_width"),"imageHeight":row.get::<Option<i32>,_>("image_height"),"engineVersion":row.get::<Option<String>,_>("engine_version"),"layerVersion":row.get::<Option<String>,_>("layer_version"),"retainedLines":row.get::<Option<Value>,_>("retained_line_refs"),"excludedLines":row.get::<Option<Value>,_>("excluded_lines"),"state":layering_state,"decisionSource":row.get::<Option<String>,_>("ocr_decision_source"),"coverHeadline":row.get::<Option<String>,_>("cover_headline"),"imageSubstantiveText":if clean_corpus_eligible {row.get::<Option<String>,_>("image_substantive_text")} else {None::<String>},"cleanCorpusEligible":clean_corpus_eligible})}else{Value::Null}}));
+        derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"slotOrdinal":row.get::<Option<i32>,_>("slot_ordinal"),"jobCreatedAt":row.get::<String,_>("job_created_at"),"processorKind":row.get::<String,_>("processor_kind"),"contextOnly":row.get::<bool,_>("context_only"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"displayText":if restricted || retired {None}else{row.get::<Option<String>,_>("display_text")},"languageState":row.get::<Option<String>,_>("language_state"),"languageTag":if restricted || retired {None}else{row.get::<Option<String>,_>("language_tag")},"dispositionState":if retired{"OCR_RETIRED"}else if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceScope":row.get::<String,_>("input_scope"),"sourceLocation":source_location,"reason":reason,"ocrLayering":Value::Null}));
     }
     (
         derivatives,
@@ -892,7 +921,6 @@ fn project_derivative_rows(
             "total":total,"returned":derivative_rows.len(),"truncated":truncated,
             "nextCursor":next_cursor,"limit":DETAIL_DERIVATIVE_LIMIT
         }),
-        ocr_state,
         asr_state,
         any_restricted,
     )
@@ -926,6 +954,50 @@ fn aggregate_bytes_state(
 mod overview_tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn canonical_ocr_metadata_never_turns_a_job_or_gap_into_full_text() {
+        let unit = |state: &str, blocks: Vec<Value>, processing: Value| json!({"ref":"unit","kind":"image","slotKey":"slot","sourceState":state,"sourceVersion":"source","currentRevisionRef":"reading","reading":{"generatedBy":"cloud_vision","verification":"unchecked"},"blocks":blocks,"processing":processing});
+        let acquired = unit(
+            "present",
+            vec![json!({"kind":"paragraph","text":"source words"})],
+            Value::Null,
+        );
+        let gap = unit(
+            "present",
+            vec![json!({"kind":"gap","text":"unreadable"})],
+            Value::Null,
+        );
+        let empty = unit("known_empty", vec![], Value::Null);
+        let no_reading = unit("present", vec![], json!({"state":"completed"}));
+        assert_eq!(
+            canonical_ocr_projection(std::slice::from_ref(&acquired)).state,
+            "ACQUIRED"
+        );
+        assert_eq!(
+            canonical_ocr_projection(std::slice::from_ref(&gap)).state,
+            "PARTIAL"
+        );
+        assert_eq!(
+            canonical_ocr_projection(std::slice::from_ref(&empty)).state,
+            "KNOWN_EMPTY"
+        );
+        assert_eq!(
+            canonical_ocr_projection(std::slice::from_ref(&no_reading)).state,
+            "UNKNOWN"
+        );
+        assert_eq!(
+            canonical_ocr_projection(&[acquired, empty, gap]).state,
+            "PARTIAL"
+        );
+        let result = canonical_ocr_projection(&[no_reading]);
+        assert!(
+            !serde_json::to_string(&result.resources)
+                .unwrap()
+                .contains("source words")
+        );
+        assert!(result.resources[0].get("blocks").is_none());
+    }
+
     #[test]
     fn overview_preserves_canonical_cover_selection_and_never_claims_empty_details() {
         let image = json!({"purpose":"body_image","slotKey":"image", "localAssetUrl":"/media/synthetic-image", "blob":{"deliveryState":"INLINE_SAFE"}});

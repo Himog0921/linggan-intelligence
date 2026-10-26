@@ -145,35 +145,6 @@ pub(crate) async fn check_queue_input_scope(
         let endpoint:Uuid=sqlx::query_scalar("SELECT cap.endpoint_ref FROM linggan_ai_task_config t JOIN linggan_model_config m ON m.config_ref=t.model_config_ref JOIN linggan_model_capability cap ON cap.capability_ref=m.capability_ref WHERE t.task_config_ref=$1")
             .bind(config).fetch_one(&mut **tx).await?;
         let material = match task {
-            TaskKey::OcrQualityAudit => {
-                let InputRef::OcrAuditSample { sample_ref } = input else {
-                    return Err(FoundationError::Invalid);
-                };
-                let pool: String = sqlx::query_scalar(
-                    "SELECT pool FROM linggan_ocr_audit_sample WHERE sample_ref=$1",
-                )
-                .bind(sample_ref)
-                .fetch_one(&mut **tx)
-                .await?;
-                if pool == "probe" {
-                    "synthetic_image_probe"
-                } else {
-                    let reading: Uuid = sqlx::query_scalar(
-                        "SELECT reading_ref FROM linggan_ocr_audit_sample WHERE sample_ref=$1",
-                    )
-                    .bind(sample_ref)
-                    .fetch_one(&mut **tx)
-                    .await?;
-                    if !crate::ocr_quality_audit::source::external_clearance_in(&mut **tx, reading)
-                        .await?
-                    {
-                        return Err(FoundationError::AdmissionDenied(vec![
-                            "audit_privacy_unreviewed".into(),
-                        ]));
-                    }
-                    "ocr_quality_image"
-                }
-            }
             TaskKey::OcrRecognition => {
                 let InputRef::OcrRecognitionItem { item_ref } = input else {
                     return Err(FoundationError::Invalid);

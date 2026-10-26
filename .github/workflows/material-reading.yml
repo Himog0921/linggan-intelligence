@@ -1,0 +1,36 @@
+name: Canonical material reading
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  synthetic-ocr-contracts:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: '0'
+      CARGO_BUILD_JOBS: '2'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version-file: .nvmrc
+      - name: Locked Rust runtime
+        run: |
+          rustup toolchain install 1.95.0 --profile minimal
+          rustup default 1.95.0
+      - name: Canonical reading contracts
+        run: |
+          cargo test -p linggan-evidence --lib --locked
+          cargo test -p linggan-evidence --test ocr_adoption --locked
+          cargo test -p linggan-worker --bin linggan-media-worker --locked
+          python3 -B apps/worker/src/bin/media_worker_support/test_paddle_vl_receipts.py
+          bash scripts/test-ocr-recognition-postgres.sh --purge-only
+          bash scripts/test-ocr-recognition-postgres.sh --reading-only
+          bash scripts/test-ocr-recognition-postgres.sh --local-only

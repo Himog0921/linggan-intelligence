@@ -1,5 +1,4 @@
 import { ApiError } from '../../../shared/api';
-import type { RelayerReceipt } from './dossierTypes';
 import type { ReobservationOperation } from './reobservationApi';
 
 /**
@@ -58,44 +57,6 @@ export function readErrorText(error: unknown): string | null {
 
 export function errorCode(error: unknown): string | null {
   return error instanceof ApiError && error.failure.kind === 'http' ? error.failure.code : null;
-}
-
-// ───────────────────────── 重新分层（写） ─────────────────────────
-
-/** 「本次 N 个版面：更新 a 个，已是当前版本 b 个，跳过 c 个。」及待取得、待识字的独立计数。 */
-export function relayerSummary(receipt: RelayerReceipt): string {
-  let text = `本次 ${receipt.scopeCount} 个版面：更新 ${receipt.updated} 个，已是当前版本 ${receipt.alreadyCurrent} 个，跳过 ${receipt.skipped} 个。`;
-  if (receipt.updated === 0 && receipt.alreadyCurrent > 0) text = `已是当前版本，无需更新。${text}`;
-  if (receipt.skipped > 0) text += ` 跳过的版面缺少可用识别行，没有处理。`;
-  if (receipt.needsAcquisition > 0) text += ` 待取得 ${receipt.needsAcquisition} 张图片。`;
-  if (receipt.needsOcr > 0) text += ` 待识字 ${receipt.needsOcr} 张图片。`;
-  return text;
-}
-
-export function relayerSuccess(receipt: RelayerReceipt): Feedback {
-  return feedback('success', relayerSummary(receipt));
-}
-
-const RELAYER_ERROR_TEXT: Readonly<Record<string, string>> = {
-  dossier_changed_or_scope_unavailable:
-    '材料已变化，或本次图片超过处理范围。请刷新底稿后重试；本次没有写入。如果刚才那次其实已经生效，刷新后会显示已是当前版本。',
-  material_not_found: '这篇作品不在所选领域，或当前材料不可读取。本次没有写入。',
-  read_model_not_connected: '本机数据库没有连接。本次没有写入。',
-  local_comment_study_origin_rejected: '这个页面只能在本机访问。本次没有写入。',
-};
-
-export function relayerFailure(error: unknown): Feedback {
-  if (error instanceof ApiError) {
-    const failure = error.failure;
-    if (failure.kind === 'network') {
-      return feedback('unknown', '请求没有得到答复，结果未确认，可能已经生效。请先刷新底稿查看（读到“待分层 0 个”就是已经生效），再决定是否重新分层。');
-    }
-    if (failure.kind === 'invalid_response') {
-      return feedback('unknown', '服务返回的内容无法识别，结果未确认，可能已经生效。请先刷新底稿查看，再决定是否重新分层。');
-    }
-    return feedback('error', (failure.code ? RELAYER_ERROR_TEXT[failure.code] : undefined) ?? '暂时无法完成，已取得的原始材料仍保留。本次没有写入。', failure.code);
-  }
-  return feedback('error', '暂时无法完成，已取得的原始材料仍保留。本次没有写入。');
 }
 
 // ───────────────────────── 立即复观测（写） ─────────────────────────

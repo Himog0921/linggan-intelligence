@@ -6,10 +6,8 @@ use super::evidence_fixture::{
 };
 use super::*;
 use linggan_evidence::{
-    AccountEligibilityObservation, MaterialMediaDisposition, MediaProcessingClaimOutcome,
-    OcrCompletionInput, OcrLayeringInput, OcrLineInput, activate_installation_credential,
-    bind_observation_account, claim_media_processing_work, complete_media_processing_ocr,
-    ensure_media_processing_work, record_materialization_disposition, report_account_eligibility,
+    AccountEligibilityObservation, MaterialMediaDisposition, activate_installation_credential,
+    bind_observation_account, record_materialization_disposition, report_account_eligibility,
     rotate_installation_credential, set_station_accepting,
 };
 use uuid::Uuid;
@@ -86,71 +84,35 @@ async fn slot_package(db: &Database, external: &str, slots: &[(&str, i32)]) -> V
 }
 
 async fn complete_first_image_ocr(db: &Database) {
-    ensure_media_processing_work(db).await.unwrap();
-    let worker = Uuid::new_v4();
-    let MediaProcessingClaimOutcome::Claimed(claim) =
-        claim_media_processing_work(db, worker, &["image_ocr".to_owned()])
-            .await
-            .unwrap()
-    else {
-        panic!("OCR claim");
-    };
-    let mut lines: Vec<_> = (0..4)
-        .map(|index| OcrLineInput {
-            text: format!("第{index}行连续的图片正文，完整可用。"),
-            confidence: 0.98,
-            bbox_norm: [
-                0.12,
-                0.28 + f64::from(index) * 0.05,
-                0.88,
-                0.305 + f64::from(index) * 0.05,
+    let row:(Uuid,String,Uuid,String)=sqlx::query_as("SELECT o.content_public_ref,o.slot_key,m.materialization_ref,m.blob_sha256 FROM linggan_material_media_origin o JOIN linggan_media_download_attempt a ON a.media_observation_ref=o.observation_ref JOIN linggan_media_materialization m USING(download_attempt_ref) JOIN linggan_media_blob b ON b.sha256=m.blob_sha256 WHERE b.mime_type LIKE 'image/%' ORDER BY o.created_at LIMIT 1").fetch_one(db.pool()).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    linggan_evidence::material_reading::publish_in(
+        &mut tx,
+        linggan_evidence::material_reading::NewReading {
+            content_public_ref: row.0,
+            unit_key: format!("image:{}", row.1),
+            kind: "image".into(),
+            slot_key: Some(row.1.clone()),
+            page: None,
+            source_version: row.2.to_string(),
+            source_state: "present".into(),
+            derivative_ref: None,
+            producer_ref: Some(Uuid::new_v4()),
+            generated_by: "cloud_vision".into(),
+            rule_version: "dossier-content.v2:synthetic-current".into(),
+            blocks: vec![
+                json!({"kind":"paragraph","text":"图片正文完整保留。","speaker":"unconfirmed"}),
             ],
-        })
-        .collect();
-    lines.push(OcrLineInput {
-        text: "封面大字独立保留".into(),
-        confidence: 0.98,
-        bbox_norm: [0.1, 0.10, 0.85, 0.17],
-    });
-    lines.push(OcrLineInput {
-        text: "用途不清的背景文字".into(),
-        confidence: 0.6,
-        bbox_norm: [0.0, 0.9, 0.2, 0.92],
-    });
-    let raw = lines
-        .iter()
-        .map(|line| line.text.as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
-    complete_media_processing_ocr(
-        db,
-        &claim,
-        worker,
-        &OcrCompletionInput {
-            engine_version: "synthetic-paddle".into(),
-            image_width: 240,
-            image_height: 320,
-            raw_text: raw,
-            raw_content_hash: "b".repeat(64),
-            raw_storage_key: "derived/ev-rich.txt".into(),
-            layout_content_hash: "c".repeat(64),
-            layout_byte_size: 12,
-            layout_storage_key: "derived/ev-rich.json".into(),
-            lines,
-            layering: OcrLayeringInput {
-                layer_version: "rules-v1".into(),
-                state: "PARTIAL".into(),
-                cover_headline: None,
-                image_substantive_text: None,
-                retained_ordinals: vec![0, 1, 2, 3, 4, 5],
-                headline_ordinals: vec![],
-                substantive_ordinals: vec![],
-                excluded_lines: vec![],
+            issues: vec![],
+            source_location: json!({"slotKey":row.1,"blobSha256":row.3,"materializationRef":row.2}),
+            publication: linggan_evidence::material_reading::Publication::Automatic {
+                expected_current: None,
             },
         },
     )
     .await
     .unwrap();
+    tx.commit().await.unwrap();
 }
 
 /// 评论：根评论一个包，回复一个包（回复指向第一条根评论）。

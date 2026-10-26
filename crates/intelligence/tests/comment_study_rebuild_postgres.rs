@@ -7,9 +7,8 @@ mod research_fixture;
 
 use fixture::{proof_database, submit_package};
 use linggan_evidence::{
-    MaterialMediaDisposition, MediaProcessingClaimOutcome, OcrCompletionInput, OcrLayeringInput,
-    OcrLineInput, admit_media_blob, claim_media_processing_work, complete_media_processing_ocr,
-    ensure_media_processing_work, record_derivative_disposition,
+    MaterialMediaDisposition, admit_media_blob, material_reading,
+    record_materialization_disposition,
 };
 use linggan_intelligence::comment_study_source::{
     StudySourceError, eligible_sources, preview_sources,
@@ -76,26 +75,6 @@ fn domain_read_query(run_ref: Option<Uuid>) -> CommentStudyReadQuery {
         run_ref,
         ..Default::default()
     }
-}
-
-/// Dossier v2 exposes image text only after the user-visible, explicit relayer
-/// has published a canonical reading. Comment Study must consume that reading,
-/// never an OCR table row directly.
-async fn relayer_note(database: &linggan_storage_postgres::Database, comment_id: &str) {
-    let work: Uuid = sqlx::query_scalar(
-        "SELECT content_public_ref FROM linggan_material_comment WHERE comment_external_id=$1",
-    )
-    .bind(comment_id)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    let dossier = linggan_evidence::research_dossier::read(database, work)
-        .await
-        .unwrap()
-        .unwrap();
-    linggan_evidence::research_dossier::relayer_work(database, work, &dossier.revision)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
@@ -347,10 +326,40 @@ async fn setup_preview_counts_the_same_source_gate_that_freezes_targets() {
     assert_eq!(preview.works[0].eligible_comment_count, 1);
 }
 
+async fn current_study_image(
+    database: &linggan_storage_postgres::Database,
+    content: &str,
+    ordinal: u8,
+    text: &str,
+) -> (Uuid, Uuid) {
+    let observation = Uuid::new_v4();
+    let slot = format!("xhs:{content}:image:{ordinal}");
+    let blob = format!("{ordinal:x}").repeat(64);
+    submit_package(database,"media_slots",serde_json::json!({"contentExternalId":content}),serde_json::json!({"kind":"media_slot","slotKey":slot,"observationRef":observation,"slot":{"role":"image","ordinal":ordinal},"observation":{"externalUri":format!("https://media.example/{content}/{ordinal}.jpg"),"candidateUris":[format!("https://media.example/{content}/{ordinal}.jpg")],"observedAt":"2026-09-16T08:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":content}})).await;
+    let materialization = admit_media_blob(
+        database,
+        observation,
+        &blob,
+        "image/jpeg",
+        12,
+        &format!("blobs/study-{ordinal}.jpg"),
+    )
+    .await
+    .unwrap()
+    .materialization_ref;
+    let work:Uuid=sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1").bind(content).fetch_one(database.pool()).await.unwrap();
+    let mut tx = database.pool().begin().await.unwrap();
+    let result=material_reading::publish_in(&mut tx,material_reading::NewReading {
+        content_public_ref:work,unit_key:format!("image:{slot}"),kind:"image".into(),slot_key:Some(slot),page:Some(i32::from(ordinal)),source_version:materialization.to_string(),source_state:"present".into(),derivative_ref:None,producer_ref:Some(Uuid::new_v4()),generated_by:"cloud_vision".into(),rule_version:"dossier-content.v2:synthetic-comment-context".into(),blocks:vec![serde_json::json!({"kind":"paragraph","text":text,"speaker":"unconfirmed"})],issues:vec![],source_location:serde_json::json!({"blobSha256":blob,"materializationRef":materialization}),publication:material_reading::Publication::Automatic{expected_current:None}
+    }).await.unwrap();
+    assert!(result.current);
+    tx.commit().await.unwrap();
+    (result.reading_ref, materialization)
+}
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
-    let database = proof_database("comment_study_withdrawn_ocr").await;
+async fn source_gate_excludes_withdrawn_image_reading_but_keeps_the_comment_target() {
+    let database = proof_database("comment_study_image_context_withdrawal").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
         .execute(database.pool())
         .await
@@ -371,483 +380,160 @@ async fn source_gate_excludes_withdrawn_ocr_but_keeps_the_comment_target() {
         "2026-09-16T08:00:00Z",
     )
     .await;
-    let observation_ref = Uuid::new_v4();
-    submit_package(
-        &database,
-        "media_slots",
-        serde_json::json!({"contentExternalId":"study-ocr-note"}),
-        serde_json::json!({
-            "kind":"media_slot",
-            "slotKey":"xhs:study-ocr-note:image:1",
-            "observationRef":observation_ref,
-            "slot":{"role":"image","ordinal":1},
-            "observation":{
-                "externalUri":"https://media.example/study-ocr-note.jpg",
-                "candidateUris":["https://media.example/study-ocr-note.jpg"],
-                "observedAt":"2026-09-16T08:00:00Z"
-            },
-            "sourceObject":{"platform":"xhs","type":"content","externalId":"study-ocr-note"}
-        }),
-    )
-    .await;
-    let admission = admit_media_blob(
-        &database,
-        observation_ref,
-        "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
-        "image/jpeg",
-        12,
-        "blobs/8a/study-ocr-note.jpg",
-    )
-    .await
-    .unwrap();
-    ensure_media_processing_work(&database).await.unwrap();
-    let worker_ref = Uuid::new_v4();
-    let claim = match claim_media_processing_work(&database, worker_ref, &["image_ocr".to_owned()])
-        .await
-        .unwrap()
-    {
-        MediaProcessingClaimOutcome::Claimed(claim) => claim,
-        other => panic!("the freshly admitted OCR job is claimable: {other:?}"),
-    };
-    assert_eq!(claim.processor_kind, "image_ocr");
-    assert!(admission.processing_jobs.contains(&claim.job_ref));
-    let derivative_ref = complete_media_processing_ocr(
-        &database,
-        &claim,
-        worker_ref,
-        &OcrCompletionInput {
-            engine_version: "paddle-test".to_owned(),
-            image_width: 100,
-            image_height: 100,
-            raw_text: "原始 OCR 不能直接进入研究语境".to_owned(),
-            raw_content_hash: "1320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a"
-                .to_owned(),
-            raw_storage_key: "derived/study-ocr-note.txt".to_owned(),
-            layout_content_hash: "2320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a"
-                .to_owned(),
-            layout_byte_size: 12,
-            layout_storage_key: "derived/study-ocr-note-layout.json".to_owned(),
-            lines: vec![OcrLineInput {
-                text: "图片中的作业计划".to_owned(),
-                confidence: 0.99,
-                bbox_norm: [0.0, 0.0, 1.0, 1.0],
-            }],
-            layering: OcrLayeringInput {
-                layer_version: "rules-v1".into(),
-                substantive_ordinals: vec![],
-                state: "ACCEPTED".to_owned(),
-                cover_headline: None,
-                image_substantive_text: Some("图片中的作业计划".to_owned()),
-                retained_ordinals: vec![0],
-                headline_ordinals: vec![],
-                excluded_lines: vec![],
-            },
-        },
-    )
-    .await
-    .unwrap();
-    relayer_note(&database, "study-ocr-comment").await;
-    let domain_ref = PROOF_DOMAIN_REF;
-    let as_of = "2099-01-01T00:00:00Z";
-    let before_withdrawal = eligible_sources(&database, domain_ref, as_of, 10)
+    let (_, materialization) =
+        current_study_image(&database, "study-ocr-note", 1, "图片中的作业计划").await;
+    let before = eligible_sources(&database, PROOF_DOMAIN_REF, "2099-01-01T00:00:00Z", 10)
         .await
         .unwrap();
     assert!(
-        before_withdrawal[0].context_manifest["sources"]
+        before[0].context_manifest["sources"]
             .as_array()
             .unwrap()
             .iter()
             .any(|source| source["kind"] == "image_substantive_text")
     );
-
-    record_derivative_disposition(
+    record_materialization_disposition(
         &database,
-        derivative_ref,
+        materialization,
         MaterialMediaDisposition::WithdrawnOrRestricted,
         "isolated-proof",
-        "synthetic withdrawn OCR",
+        "synthetic withdrawn image source",
     )
     .await
     .unwrap();
-    let after_withdrawal = eligible_sources(&database, domain_ref, as_of, 10)
+    let after = eligible_sources(&database, PROOF_DOMAIN_REF, "2099-01-01T00:00:00Z", 10)
         .await
         .unwrap();
-    assert_eq!(after_withdrawal.len(), 1);
+    assert_eq!(after.len(), 1);
     assert!(
-        !after_withdrawal[0].context_manifest["sources"]
+        !after[0].context_manifest["sources"]
             .as_array()
             .unwrap()
             .iter()
             .any(|source| source["kind"] == "image_substantive_text")
     );
 }
-
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn source_context_keeps_each_current_nonretired_image_reading_distinct() {
-    let database = proof_database("comment_study_ocr_context_qualification").await;
+async fn source_context_keeps_each_current_image_reading_distinct_and_excludes_restricted_sources()
+{
+    let database = proof_database("comment_study_current_image_context").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
         .execute(database.pool())
         .await
         .unwrap();
     detail_with_author(
         &database,
-        "study-ocr-qualification-note",
+        "study-images",
         "ADHD 作品上下文",
         Some("creator-1"),
     )
     .await;
     comment_with_author(
         &database,
-        "study-ocr-qualification-note",
-        "study-ocr-qualification-comment",
+        "study-images",
+        "study-images-comment",
         "孩子一写作业就拖延，我很着急。",
         Some("reader-1"),
         "2026-09-16T08:00:00Z",
     )
     .await;
-    let (accepted_derivative, _) = complete_study_context_ocr(
+    let first = current_study_image(&database, "study-images", 1, "第一张完整图片文字").await;
+    let second = current_study_image(&database, "study-images", 2, "第二张独立图片文字").await;
+    let (_, restricted) =
+        current_study_image(&database, "study-images", 3, "已受限来源不得进入模型材料").await;
+    record_materialization_disposition(
         &database,
-        "study-ocr-qualification-note",
-        1,
-        "ACCEPTED",
-        "可以进入研究语境的图片实质文本",
+        restricted,
+        MaterialMediaDisposition::WithdrawnOrRestricted,
+        "isolated-proof",
+        "synthetic restriction",
     )
-    .await;
-    relayer_note(&database, "study-ocr-qualification-comment").await;
-    let (superseded_derivative, _) = complete_study_context_ocr(
-        &database,
-        "study-ocr-qualification-note",
-        2,
-        "ACCEPTED",
-        "旧的 accepted 文本不能越过最新 partial",
-    )
-    .await;
-    let superseded_layout: Uuid = sqlx::query_scalar(
-        "SELECT layout_ref FROM linggan_media_ocr_layout WHERE ocr_derivative_ref=$1",
-    )
-    .bind(superseded_derivative)
-    .fetch_one(database.pool())
     .await
     .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_media_ocr_layering_result( \
-           layering_ref,layout_ref,layer_version,state,decision_source,image_substantive_text, \
-           retained_line_refs,excluded_lines,created_at \
-         ) VALUES($1,$2,'rules-v2','PARTIAL','rules',$3,'[]'::jsonb,'[]'::jsonb, \
-                  scope_001_now()+interval '1 second')",
-    )
-    .bind(Uuid::new_v4())
-    .bind(superseded_layout)
-    .bind("最新 partial 不能进入研究语境")
-    .execute(database.pool())
-    .await
-    .unwrap();
-    let (retired_derivative, retired_job) = complete_study_context_ocr(
-        &database,
-        "study-ocr-qualification-note",
-        3,
-        "ACCEPTED",
-        "已退役 OCR 不能进入研究语境",
-    )
-    .await;
-    sqlx::query(
-        "INSERT INTO linggan_media_ocr_retirement(retired_job_ref,reason) \
-         VALUES($1,'tesseract_replaced_by_paddleocr')",
-    )
-    .bind(retired_job)
-    .execute(database.pool())
-    .await
-    .unwrap();
-
     let sources = eligible_sources(&database, PROOF_DOMAIN_REF, "2099-01-01T00:00:00Z", 10)
         .await
         .unwrap();
-    let ocr_fragments: Vec<_> = sources[0].context_manifest["sources"]
+    let fragments: Vec<_> = sources[0].context_manifest["sources"]
         .as_array()
         .unwrap()
         .iter()
-        .filter(|fragment| fragment["kind"] == "image_substantive_text")
+        .filter(|source| source["kind"] == "image_substantive_text")
         .collect();
-    assert_eq!(ocr_fragments.len(), 2, "{ocr_fragments:?}");
+    assert_eq!(fragments.len(), 2);
+    assert!(fragments.iter().any(|f| f["text"] == "第一张完整图片文字"));
+    assert!(fragments.iter().any(|f| f["text"] == "第二张独立图片文字"));
     assert!(
-        ocr_fragments
-            .iter()
-            .any(|fragment| fragment["text"] == "可以进入研究语境的图片实质文本")
+        !sources[0]
+            .context_manifest
+            .to_string()
+            .contains("已受限来源不得进入模型材料")
     );
-    assert!(
-        ocr_fragments.iter().any(|fragment| {
-            fragment["text"] == "旧的 accepted 文本不能越过最新 partial"
-        }),
-        "separate current image slots remain separate dossier materials"
-    );
+    assert_ne!(first.0, second.0);
     assert!(
         sources[0].context_manifest["sources"]
             .as_array()
             .unwrap()
             .iter()
-            .all(|fragment| fragment["kind"] != "ocr_text"),
-        "the raw OCR derivative must never enter the context manifest"
+            .all(|f| f["kind"] != "ocr_text")
     );
-    let manifest = sources[0].context_manifest.to_string();
-    assert!(
-        !manifest.contains("原始 OCR 1"),
-        "the raw derivative itself is never a context fragment: {manifest}"
-    );
-    assert!(
-        !manifest.contains("最新 partial 不能进入研究语境"),
-        "a non-canonical PARTIAL layer must not rewrite the canonical reading: {manifest}"
-    );
-    assert!(
-        !manifest.contains("已退役 OCR 不能进入研究语境"),
-        "retired OCR must remain unavailable even if its layer was accepted: {manifest}"
-    );
-    assert_ne!(accepted_derivative, retired_derivative);
 }
-
-async fn complete_study_context_ocr(
-    database: &linggan_storage_postgres::Database,
-    content_external_id: &str,
-    ordinal: u8,
-    layering_state: &str,
-    image_substantive_text: &str,
-) -> (Uuid, Uuid) {
-    let observation_ref = Uuid::new_v4();
-    let slot_key = format!("xhs:{content_external_id}:image:{ordinal}");
-    submit_package(
-        database,
-        "media_slots",
-        serde_json::json!({"contentExternalId":content_external_id}),
-        serde_json::json!({
-            "kind":"media_slot",
-            "slotKey":slot_key,
-            "observationRef":observation_ref,
-            "slot":{"role":"image","ordinal":ordinal},
-            "observation":{
-                "externalUri":format!("https://media.example/{content_external_id}-{ordinal}.jpg"),
-                "candidateUris":[format!("https://media.example/{content_external_id}-{ordinal}.jpg")],
-                "observedAt":"2026-09-16T08:00:00Z"
-            },
-            "sourceObject":{"platform":"xhs","type":"content","externalId":content_external_id}
-        }),
-    )
-    .await;
-    let blob_hash = format!("{ordinal:x}").repeat(64);
-    admit_media_blob(
-        database,
-        observation_ref,
-        &blob_hash,
-        "image/jpeg",
-        12,
-        &format!("blobs/study-ocr-{ordinal}.jpg"),
-    )
-    .await
-    .unwrap();
-    ensure_media_processing_work(database).await.unwrap();
-    let worker_ref = Uuid::new_v4();
-    let claim = match claim_media_processing_work(database, worker_ref, &["image_ocr".to_owned()])
-        .await
-        .unwrap()
-    {
-        MediaProcessingClaimOutcome::Claimed(claim) => claim,
-        other => panic!("the synthetic OCR job is claimable: {other:?}"),
-    };
-    let derivative_ref = complete_media_processing_ocr(
-        database,
-        &claim,
-        worker_ref,
-        &OcrCompletionInput {
-            engine_version: "paddle-test".to_owned(),
-            image_width: 100,
-            image_height: 100,
-            raw_text: format!("原始 OCR {ordinal}"),
-            raw_content_hash: format!("{:x}", ordinal + 3).repeat(64),
-            raw_storage_key: format!("derived/study-ocr-{ordinal}.txt"),
-            layout_content_hash: format!("{:x}", ordinal + 6).repeat(64),
-            layout_byte_size: 12,
-            layout_storage_key: format!("derived/study-ocr-{ordinal}-layout.json"),
-            lines: vec![OcrLineInput {
-                text: image_substantive_text.to_owned(),
-                confidence: 0.99,
-                bbox_norm: [0.0, 0.0, 1.0, 1.0],
-            }],
-            layering: OcrLayeringInput {
-                layer_version: "rules-v1".into(),
-                substantive_ordinals: vec![],
-                state: layering_state.to_owned(),
-                cover_headline: None,
-                image_substantive_text: Some(image_substantive_text.to_owned()),
-                retained_ordinals: vec![0],
-                headline_ordinals: vec![],
-                excluded_lines: vec![],
-            },
-        },
-    )
-    .await
-    .unwrap();
-    (derivative_ref, claim.job_ref)
-}
-
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn a_reobserved_media_slot_contributes_one_context_fragment_per_derived_text() {
+async fn a_reobserved_media_slot_contributes_one_context_fragment_per_current_reading() {
     let database = proof_database("comment_study_reobserved_slot").await;
     sqlx::raw_sql(STUDY_SCHEMA_SQL)
         .execute(database.pool())
         .await
         .unwrap();
-    detail_with_author(
-        &database,
-        "study-reobserved-note",
-        "ADHD 作品上下文",
-        Some("creator-1"),
-    )
-    .await;
+    let content = "study-reobserved-note";
+    detail_with_author(&database, content, "ADHD 作品上下文", Some("creator-1")).await;
     comment_with_author(
         &database,
-        "study-reobserved-note",
+        content,
         "study-reobserved-comment",
         "孩子一写作业就拖延，我很着急。",
         Some("reader-1"),
         "2026-09-16T08:00:00Z",
     )
     .await;
-    let slot_key = "xhs:study-reobserved-note:image:1";
-    let first_observation_ref = Uuid::new_v4();
-    submit_package(
-        &database,
-        "media_slots",
-        serde_json::json!({"contentExternalId":"study-reobserved-note"}),
-        serde_json::json!({
-            "kind":"media_slot",
-            "slotKey":slot_key,
-            "observationRef":first_observation_ref,
-            "slot":{"role":"image","ordinal":1},
-            "observation":{
-                "externalUri":"https://media.example/study-reobserved-note.jpg",
-                "candidateUris":["https://media.example/study-reobserved-note.jpg"],
-                "observedAt":"2026-09-16T08:00:00Z"
-            },
-            "sourceObject":{"platform":"xhs","type":"content","externalId":"study-reobserved-note"}
-        }),
-    )
-    .await;
+    current_study_image(&database, content, 1, "图片中的作业计划").await;
+    let observation = Uuid::new_v4();
+    let slot = format!("xhs:{content}:image:1");
+    submit_package(&database,"media_slots",serde_json::json!({"contentExternalId":content}),serde_json::json!({"kind":"media_slot","slotKey":slot,"observationRef":observation,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/reobserved.jpg","candidateUris":["https://media.example/reobserved.jpg"],"observedAt":"2026-09-17T08:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":content}})).await;
     admit_media_blob(
         &database,
-        first_observation_ref,
-        "6a45d0f1e3c7b2984f5a0d6c8e1b3a7952d4c6e8f0a2b4c6d8e0f2a4b6c8d0e2",
+        observation,
+        &"1".repeat(64),
         "image/jpeg",
         12,
-        "blobs/6a/study-reobserved-note.jpg",
-    )
-    .await
-    .unwrap();
-    ensure_media_processing_work(&database).await.unwrap();
-    let worker_ref = Uuid::new_v4();
-    let claim = match claim_media_processing_work(&database, worker_ref, &["image_ocr".to_owned()])
-        .await
-        .unwrap()
-    {
-        MediaProcessingClaimOutcome::Claimed(claim) => claim,
-        other => panic!("the freshly admitted OCR job is claimable: {other:?}"),
-    };
-    complete_media_processing_ocr(
-        &database,
-        &claim,
-        worker_ref,
-        &OcrCompletionInput {
-            engine_version: "paddle-test".to_owned(),
-            image_width: 100,
-            image_height: 100,
-            raw_text: "原始 OCR 不作为评论研究语境".to_owned(),
-            raw_content_hash: "2c8e0a4f6b1d3e5a7c9f0b2d4e6a8c0f1b3d5e7a9c1f3b5d7e9a1c3f5b7d9e1a"
-                .to_owned(),
-            raw_storage_key: "derived/study-reobserved-note.txt".to_owned(),
-            layout_content_hash: "3c8e0a4f6b1d3e5a7c9f0b2d4e6a8c0f1b3d5e7a9c1f3b5d7e9a1c3f5b7d9e1a"
-                .to_owned(),
-            layout_byte_size: 12,
-            layout_storage_key: "derived/study-reobserved-note-layout.json".to_owned(),
-            lines: vec![OcrLineInput {
-                text: "图片中的作业计划".to_owned(),
-                confidence: 0.99,
-                bbox_norm: [0.0, 0.0, 1.0, 1.0],
-            }],
-            layering: OcrLayeringInput {
-                layer_version: "rules-v1".into(),
-                substantive_ordinals: vec![],
-                state: "ACCEPTED".to_owned(),
-                cover_headline: None,
-                image_substantive_text: Some("图片中的作业计划".to_owned()),
-                retained_ordinals: vec![0],
-                headline_ordinals: vec![],
-                excluded_lines: vec![],
-            },
-        },
-    )
-    .await
-    .unwrap();
-    relayer_note(&database, "study-reobserved-comment").await;
-
-    // The same slot is captured a second time, which is ordinary re-observation rather than new
-    // material: the OCR text behind it is still one derived document. Re-admit
-    // the unchanged verified bytes; Dossier v2 may preserve its canonical reading
-    // across materializations only when this byte identity remains exact.
-    let second_observation_ref = Uuid::new_v4();
-    submit_package(
-        &database,
-        "media_slots",
-        serde_json::json!({"contentExternalId":"study-reobserved-note"}),
-        serde_json::json!({
-            "kind":"media_slot",
-            "slotKey":slot_key,
-            "observationRef":second_observation_ref,
-            "slot":{"role":"image","ordinal":1},
-            "observation":{
-                "externalUri":"https://media.example/study-reobserved-note.jpg",
-                "candidateUris":["https://media.example/study-reobserved-note.jpg"],
-                "observedAt":"2026-09-17T08:00:00Z"
-            },
-            "sourceObject":{"platform":"xhs","type":"content","externalId":"study-reobserved-note"}
-        }),
-    )
-    .await;
-    admit_media_blob(
-        &database,
-        second_observation_ref,
-        "6a45d0f1e3c7b2984f5a0d6c8e1b3a7952d4c6e8f0a2b4c6d8e0f2a4b6c8d0e2",
-        "image/jpeg",
-        12,
-        "blobs/6a/study-reobserved-note.jpg",
+        "blobs/study-1.jpg",
     )
     .await
     .unwrap();
     let generations: i64 =
         sqlx::query_scalar("SELECT count(*) FROM linggan_material_media_origin WHERE slot_key=$1")
-            .bind(slot_key)
+            .bind(slot)
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(
-        generations, 2,
-        "the fixture has to produce a genuinely re-observed slot for this proof to mean anything"
-    );
-
-    let domain_ref = PROOF_DOMAIN_REF;
-    let sources = eligible_sources(&database, domain_ref, "2099-01-01T00:00:00Z", 10)
+    assert_eq!(generations, 2);
+    let sources = eligible_sources(&database, PROOF_DOMAIN_REF, "2099-01-01T00:00:00Z", 10)
         .await
         .unwrap();
     assert_eq!(sources.len(), 1);
-    let ocr_fragments: Vec<_> = sources[0].context_manifest["sources"]
+    let fragments: Vec<_> = sources[0].context_manifest["sources"]
         .as_array()
         .unwrap()
         .iter()
         .filter(|source| source["kind"] == "image_substantive_text")
         .collect();
     assert_eq!(
-        ocr_fragments.len(),
+        fragments.len(),
         1,
-        "a slot observed twice still holds one OCR text, so the context must not carry it twice: {ocr_fragments:?}"
+        "same verified bytes and slot do not duplicate canonical context: {fragments:?}"
     );
+    assert_eq!(fragments[0]["text"], "图片中的作业计划");
 }
 
 #[tokio::test]

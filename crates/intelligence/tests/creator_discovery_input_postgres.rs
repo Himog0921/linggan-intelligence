@@ -18,7 +18,7 @@ async fn canonical_creator_input_keeps_full_content_and_exact_provenance_without
  {
     let db = dossier::fixture::proof_database("creator_dossier_input").await;
     let work = dossier::work(&db).await;
-    dossier::ordinary_ocr(&db).await;
+    dossier::current_image_reading(&db).await;
     let body = format!(
         "CREATOR_EXPECT_2000:{}CREATOR_FULL_TAIL🙂",
         "家庭实践过程。".repeat(2000)
@@ -261,7 +261,7 @@ async fn standard_gap_only_results_remain_diagnostics_without_research_words() {
         .unwrap();
     let mut tx = db.pool().begin().await.unwrap();
     reading::publish_in(&mut tx, reading::NewReading {
-        content_public_ref: work, unit_key: format!("image:{}", image["slotKey"].as_str().unwrap()), kind: "image".into(), slot_key: image["slotKey"].as_str().map(str::to_owned), page: Some(1), source_version: image["sourceVersion"].as_str().unwrap().into(), source_state: "present".into(), derivative_ref: None, producer_ref: Some(Uuid::new_v4()), generated_by: "ordinary_ocr".into(), rule_version: "gap-only-proof.v1".into(), blocks: vec![json!({"ref":"gap", "kind":"gap", "text":"识别未返回可靠文字，请对照原图", "speaker":"unconfirmed"})], issues: vec![], source_location: json!({"synthetic":true}), publication: reading::Publication::Automatic{expected_current: serde_json::from_value(image["currentRevisionRef"].clone()).unwrap()}
+        content_public_ref: work, unit_key: format!("image:{}", image["slotKey"].as_str().unwrap()), kind: "image".into(), slot_key: image["slotKey"].as_str().map(str::to_owned), page: Some(1), source_version: image["sourceVersion"].as_str().unwrap().into(), source_state: "present".into(), derivative_ref: None, producer_ref: Some(Uuid::new_v4()), generated_by: "cloud_vision".into(), rule_version: "gap-only-proof.v1".into(), blocks: vec![json!({"ref":"gap", "kind":"gap", "text":"识别未返回可靠文字，请对照原图", "speaker":"unconfirmed"})], issues: vec![], source_location: json!({"synthetic":true}), publication: reading::Publication::Automatic{expected_current: serde_json::from_value(image["currentRevisionRef"].clone()).unwrap()}
     }).await.unwrap();
     tx.commit().await.unwrap();
     let d = research_dossier::read(&db, work).await.unwrap().unwrap();
