@@ -63,7 +63,7 @@ async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headlin
     let mut tx = database.pool().begin().await.unwrap();
     linggan_evidence::material_reading::publish_in(&mut tx,linggan_evidence::material_reading::NewReading {
         content_public_ref:content_ref,unit_key:format!("image:{slot_key}"),kind:"image".into(),slot_key:Some(slot_key.clone()),page:None,source_version:materialization.to_string(),source_state:"present".into(),derivative_ref:None,producer_ref:Some(Uuid::new_v4()),generated_by:"cloud_vision".into(),rule_version:"synthetic-cover-current.v1".into(),
-        blocks:vec![serde_json::json!({"kind":"heading","text":"封面里的作者标题","speaker":"unconfirmed","role":"main_title"})],issues:vec![],source_location:serde_json::json!({"blobSha256":blob_sha256,"materializationRef":materialization,"titleClaim":{"status":"present","text":"封面里的作者标题","eligible":true}}),publication:linggan_evidence::material_reading::Publication::Automatic{expected_current:None}
+        blocks:vec![serde_json::json!({"kind":"heading","text":"封面里的作者标题","speaker":"unconfirmed"})],issues:vec![],source_location:serde_json::json!({"blobSha256":blob_sha256,"materializationRef":materialization,"titleClaim":{"status":"present","text":"封面里的作者标题","eligible":true}}),publication:linggan_evidence::material_reading::Publication::Automatic{expected_current:None}
     }).await.unwrap();
     tx.commit().await.unwrap();
     let item = read_work_resource(&database, content_ref)

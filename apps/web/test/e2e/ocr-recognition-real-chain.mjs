@@ -155,14 +155,14 @@ try {
   const current=afterHuman.dossier.materials.find(item=>item.ref===unit.ref);
   assert.equal(current.currentRevisionRef,receipt.currentRevisionRef);assert.ok(current.blocks.some(block=>block.text===manualText));
   assert.equal(current.reading.review.actor,human.actor);assert.equal(current.reading.review.reason,human.reason);
-  await dossier.getByText(manualText,{exact:true}).first().waitFor();
+  await dossier.locator(`[data-unit-ref="${unit.ref}"]`).getByText(manualText,{exact:true}).waitFor();
   await dossier.getByText(/2 张图片已进入当前底稿/).waitFor();
   const sameRun=await readJson(statePath);assert.equal(sameRun.runRef,final.runRef);
   assert.equal(sameRun.images[0].isCurrent,false);assert.equal(sameRun.images[0].rawJson,final.images[0].rawJson);
   assert.deepEqual(sameRun.images.map(image=>image.readingRef),final.images.map(image=>image.readingRef));
   await page.screenshot({path:path.join(directory,'recognition-human-edit-1440.png'),fullPage:true});
   report.steps.push('Source navigation opens an actual decoded image; one edit command updates canonical content and the recognition status refreshes its actual current pointer.');
-  await page.reload();await page.getByRole('tabpanel',{name:'研究底稿',exact:true}).getByText(manualText,{exact:true}).waitFor();
+  await page.reload();await page.getByRole('tabpanel',{name:'研究底稿',exact:true}).locator(`[data-unit-ref="${unit.ref}"]`).getByText(manualText,{exact:true}).waitFor();
   const reloaded=await readJson(statePath);assert.equal(reloaded.runRef,final.runRef);
   await page.setViewportSize({width:1280,height:1000});
   await page.screenshot({path:path.join(directory,'recognition-human-edit-1280.png'),fullPage:true});

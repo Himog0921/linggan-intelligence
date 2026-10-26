@@ -57,4 +57,3 @@ BEGIN
   VALUES(start_id,domain,policy,repeat('4',64),'manual','{}','created',run_id,'{}');
  END LOOP;
 END $fixture$;
-

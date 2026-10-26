@@ -29,4 +29,3 @@ pub fn content_hash(bytes: &[u8]) -> String {
         .map(|b| format!("{b:02x}"))
         .collect()
 }
-
