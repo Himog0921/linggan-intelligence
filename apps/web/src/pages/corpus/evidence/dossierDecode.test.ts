@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, requestText } from '../../../shared/api';
 import { parseBlock } from './dossierBlockDecode';
-import { parseCandidates, parseDossierComments, parseDossierPayload, parseReadingReceipt } from './dossierDecode';
+import { parseCandidates, parseDossierComments, parseDossierPayload, parseReadingReceipt, parseRelayerPlanResponse, parseRelayerReceipt } from './dossierDecode';
 import { fetchDossier, fetchDossierMarkdown, fetchReadingVersion, reviewReading } from './dossierApi';
 import { nestComments } from './dossierPresent';
 import { DOMAIN, dossierCommentsJson, dossierJson, dossierMaterialJson, mediaHandle, workRef } from './evidenceFixtures';
@@ -118,4 +118,15 @@ describe('on-demand reads and scoped writes', () => {
     const nodes = nestComments([{ sourceRef: 'r', parentSourceRef: null, relation: 'ROOT' as const }, { sourceRef: 'a', parentSourceRef: 'missing', relation: 'REPLY' as const }]);
     expect(nodes[1]?.orphan).toBe(true);
   });
+});
+
+it('待取得计数是plan与回执的必填非负整数，与待识字分开', () => {
+  const raw = dossierJson(1, { plan: { needsAcquisition: 1, needsOcr: 0 } });
+  expect(parseDossierPayload(raw).relayerPlan).toMatchObject({ needsAcquisition: 1, needsOcr: 0 });
+  const receipt = { scopeCount: 10, updated: 10, alreadyCurrent: 0, skipped: 0, needsAcquisition: 1, needsOcr: 0 };
+  expect(parseRelayerReceipt(receipt)).toMatchObject({ needsAcquisition: 1, needsOcr: 0 });
+  for (const needsAcquisition of [undefined, -1, 1.5, '1']) {
+    expect(() => parseRelayerPlanResponse({ relayerPlan: { ...raw.relayerPlan, needsAcquisition } })).toThrow(ApiError);
+    expect(() => parseRelayerReceipt({ ...receipt, needsAcquisition })).toThrow(ApiError);
+  }
 });

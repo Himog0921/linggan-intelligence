@@ -50,7 +50,7 @@ FROM origins o CROSS JOIN LATERAL (
  (component.kind='motion' AND (b.mime_type LIKE 'video/%' OR (o.purpose<>'live_photo' AND b.mime_type LIKE 'audio/%'))))
  ORDER BY m.verified_at DESC,m.materialization_ref DESC LIMIT 1
 ) m ON true WHERE linggan_dossier_slot_active(o.content_public_ref,o.slot_key,$2::timestamptz)
-ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.slot_key,component.kind
+ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NULLS LAST,o.slot_key,component.kind
 "#).bind(works).bind(as_of).fetch_all(&mut **tx).await?;
     for row in rows {
         let work: Uuid = row.get("content_public_ref");

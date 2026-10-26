@@ -75,16 +75,16 @@ mod ops_api;
 mod ops_auth;
 #[cfg(test)]
 mod ops_auth_tests;
+#[cfg(test)]
+mod ops_browser_tests;
+mod ops_export;
 mod ops_native_api;
 #[cfg(test)]
 mod ops_native_api_tests;
 #[cfg(test)]
 mod ops_native_model_tests;
-mod ops_sync_api;
-#[cfg(test)]
-mod ops_browser_tests;
-mod ops_export;
 mod ops_overview_api;
+mod ops_sync_api;
 mod research_dossier;
 #[cfg(test)]
 mod research_dossier_tests;
@@ -413,16 +413,36 @@ fn material_api_routes() -> Router<LocalWebState> {
                 comment_study::local_comment_study_guard,
             )),
         )
-        .route("/api/local/work-resources/{public_ref}/research-dossier/candidates",
-            get(research_dossier::candidates).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/materials/{unit_ref}/review",
-            post(research_dossier::review).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/readings/{reading_ref}",
-            get(research_dossier::version).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/work-resources/{public_ref}/research-dossier/metadata",
-            get(research_dossier::metadata).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
-        .route("/api/local/research-dossiers/read",
-            post(research_dossier::batch).layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)))
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/candidates",
+            get(research_dossier::candidates).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/materials/{unit_ref}/review",
+            post(research_dossier::review).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/readings/{reading_ref}",
+            get(research_dossier::version).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/research-dossier/metadata",
+            get(research_dossier::metadata).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
+        .route(
+            "/api/local/research-dossiers/read",
+            post(research_dossier::batch).layer(axum::middleware::from_fn(
+                comment_study::local_comment_study_guard,
+            )),
+        )
         .route(
             "/api/local/work-resources/{public_ref}/research-dossier/comments",
             get(research_dossier::comments).layer(axum::middleware::from_fn(
@@ -1200,7 +1220,9 @@ async fn collection_material_deepening(
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
-                AcquisitionChainError::InvalidOpsPublicationScope => "ops_publication_scope_invalid",
+                AcquisitionChainError::InvalidOpsPublicationScope => {
+                    "ops_publication_scope_invalid"
+                }
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
                     "progressive_archive_authorization_too_small"
                 }
@@ -1294,7 +1316,9 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
-                AcquisitionChainError::InvalidOpsPublicationScope => "ops_publication_scope_invalid",
+                AcquisitionChainError::InvalidOpsPublicationScope => {
+                    "ops_publication_scope_invalid"
+                }
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
                     "progressive_archive_authorization_too_small"
                 }

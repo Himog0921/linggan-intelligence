@@ -39,7 +39,13 @@ export function loadBatch(): Batch | null {
     if (typeof value !== 'object' || value === null) return null;
     const batch = value as { domain?: unknown; items?: unknown };
     if (typeof batch.domain !== 'string' || !Array.isArray(batch.items) || batch.items.length === 0 || batch.items.length > BATCH_LIMIT) return null;
-    return batch.items.every(isItem) ? { domain: batch.domain, items: batch.items } : null;
+    if (!batch.items.every(isItem)) return null;
+    const items = batch.items.map(item => {
+      if (item.state === 'done' || !item.plan || Number.isSafeInteger(item.plan.needsAcquisition) && item.plan.needsAcquisition >= 0) return item;
+      // Older previews used a combined acquisition/OCR count. Re-preview unfinished work; preserve uncertain outcomes.
+      return { ...item, plan: null, ...(item.state === 'ready' ? { state: 'pending' as const } : {}) };
+    });
+    return { domain: batch.domain, items };
   } catch {
     return null;
   }

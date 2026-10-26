@@ -61,6 +61,7 @@ fn parse(args: &[String]) -> Result<Command, &'static str> {
         Some("hashtags") => BatchOperation::Hashtags,
         Some("relayer") => BatchOperation::Relayer,
         Some("snapshot") => BatchOperation::Snapshot,
+        Some("historical_media") => BatchOperation::HistoricalMedia,
         _ => return Err("operation_required"),
     };
     Ok(Command::Plan {
@@ -152,6 +153,7 @@ mod tests {
     fn commands_require_bounded_explicit_scope_and_apply_is_explicit() {
         let args = |s: &str| s.split_whitespace().map(str::to_owned).collect::<Vec<_>>();
         assert!(parse(&args("--domain 00000000-0000-4000-8000-000000000001 --works 00000000-0000-4000-8000-000000000010 --operation hashtags")).is_ok());
+        assert!(matches!(parse(&args("--domain 00000000-0000-4000-8000-000000000001 --works 00000000-0000-4000-8000-000000000010 --operation historical_media")).unwrap(), Command::Plan { operation: BatchOperation::HistoricalMedia, .. }));
         for s in [
             "",
             "apply",

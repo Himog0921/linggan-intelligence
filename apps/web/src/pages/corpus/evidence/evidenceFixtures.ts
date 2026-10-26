@@ -366,7 +366,7 @@ export function commentsJson(count: number, options: { cursor?: string | null; t
 export const REVISION = 'r'.repeat(64);
 
 export function planJson(overrides: Partial<Record<string, unknown>> = {}) {
-  return { alreadyCurrent: 0, expectedRevision: REVISION, imageJobs: 4, imageSlots: 4, layoutCount: 1, needsOcr: 3, pendingReviewCount: 0, pendingLayouts: 1, workCount: 1, ...overrides };
+  return { alreadyCurrent: 0, expectedRevision: REVISION, imageJobs: 4, imageSlots: 4, layoutCount: 1, needsOcr: 3, needsAcquisition: 0, pendingReviewCount: 0, pendingLayouts: 1, workCount: 1, ...overrides };
 }
 export function dossierMaterialJson(n: number, overrides: Record<string, unknown> = {}) {
   const reading = mediaRef(800 + n);
@@ -433,7 +433,7 @@ export function dossierCommentsJson(count: number, options: { cursor?: string | 
 }
 
 export function relayerReceiptJson(overrides: Partial<Record<string, unknown>> = {}) {
-  return { alreadyCurrent: 0, layerVersion: 'rules-v2', needsOcr: 0, results: [], scopeCount: 1, skipped: 0, updated: 1, workRef: workRef(1), ...overrides };
+  return { alreadyCurrent: 0, layerVersion: 'rules-v2', needsOcr: 0, needsAcquisition: 0, results: [], scopeCount: 1, skipped: 0, updated: 1, workRef: workRef(1), ...overrides };
 }
 
 // ───────────────────────── 复观测 ─────────────────────────

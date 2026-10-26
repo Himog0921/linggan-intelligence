@@ -42,7 +42,7 @@ export function DossierReading({ dossier, titleRendered = false, onSource }: { d
     {emptyUnits.map(unit => <section key={unit.ref} className={styles.readingGroup} aria-label={`${materialLabel(unit, imageNumbers.get(unit.ref))}材料状态`}>
       <header className={styles.materialHead}><h4>{materialLabel(unit, imageNumbers.get(unit.ref))}</h4>{onSource ? <button type="button" className={styles.sourceLink} onClick={() => onSource(unit)}>查看来源</button> : null}</header>
       {processingLabel(unit) || !unit.issues.some(issue => issue.code === 'not_processed') ? <p className={styles.note}>{processingLabel(unit) ?? emptyMaterialNote(unit)}</p> : null}
-      <DossierIssues issues={unit.issues.filter(issue => !(issue.code === 'page_order_unknown' && unit.page === null))} />
+      <DossierIssues issues={unit.issues.filter(issue => !(issue.code === 'page_order_unknown' && unit.page === null) && !(processingLabel(unit) && ['not_processed', 'existing_result_pending'].includes(issue.code)))} />
     </section>)}
   </div>;
 }

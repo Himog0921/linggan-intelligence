@@ -9,6 +9,7 @@ use uuid::Uuid;
 pub mod content;
 mod coverage;
 mod duplicates;
+pub mod historical;
 mod inventory;
 pub mod native;
 mod projection;
@@ -209,7 +210,7 @@ pub fn relayer_plan(dossier: &ResearchDossier) -> Value {
     let needs_ocr = image_slots
         .iter()
         .filter(|s| {
-            s["sourceState"] != "restricted"
+            s["sourceState"] == "present"
                 && !dossier
                     .materials
                     .iter()
@@ -223,6 +224,7 @@ pub fn relayer_plan(dossier: &ResearchDossier) -> Value {
         .count();
     json!({"workCount":1,"imageSlots":image_slots.len(),"imageJobs":layouts.len(),"layoutCount":layouts.len(),
         "pendingLayouts":pending,"pendingReviewCount":pending_review,"alreadyCurrent":current,"humanProtected":protected,"needsOcr":needs_ocr,
+        "needsAcquisition":image_slots.iter().filter(|s|s["sourceState"]=="not_acquired").count(),
         "expectedRevision":dossier.revision})
 }
 

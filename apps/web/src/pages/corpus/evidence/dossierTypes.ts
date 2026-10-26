@@ -58,7 +58,7 @@ export interface Dossier {
 }
 export interface RelayerPlan {
   workCount: number | null; imageSlots: number | null; imageJobs: number | null;
-  layoutCount: number; pendingLayouts: number; alreadyCurrent: number; needsOcr: number; pendingReviewCount: number; expectedRevision: string;
+  layoutCount: number; pendingLayouts: number; alreadyCurrent: number; needsOcr: number; needsAcquisition: number; pendingReviewCount: number; expectedRevision: string;
 }
 export interface DossierPayload { dossier: Dossier; relayerPlan: RelayerPlan }
 export interface ReadingCandidate {
@@ -76,4 +76,4 @@ export interface ReadingReviewReceipt {
 }
 export interface DossierComment { sourceRef: string; parentSourceRef: string | null; relation: 'ROOT' | 'REPLY'; body: string | null; likeCount: number | null }
 export interface DossierCommentPage { items: DossierComment[]; total: number | null; nextCursor: string | null }
-export interface RelayerReceipt { scopeCount: number; updated: number; alreadyCurrent: number; skipped: number; needsOcr: number }
+export interface RelayerReceipt { scopeCount: number; updated: number; alreadyCurrent: number; skipped: number; needsOcr: number; needsAcquisition: number }

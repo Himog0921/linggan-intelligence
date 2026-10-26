@@ -27,7 +27,7 @@ function itemText(item: BatchItem, running: Running): string {
   if (item.state === 'failed') {
     return `${head}${item.failure === 'unconfirmed' ? '本篇结果未确认，可能已经生效；请重新预览确认后再试' : '本篇处理失败，可重新预览后重试'}`;
   }
-  if (item.plan) return `${head}${item.plan.pendingLayouts} 个待分层，${item.plan.alreadyCurrent} 个已是当前版本，${item.plan.needsOcr} 个需先识字`;
+  if (item.plan) return `${head}${item.plan.pendingLayouts} 个待分层，${item.plan.alreadyCurrent} 个已是当前版本，${item.plan.needsAcquisition} 个待取得，${item.plan.needsOcr} 个需先识字`;
   return `${head}${running === 'preview' ? '正在读取处理范围…' : '范围尚未读取'}`;
 }
 

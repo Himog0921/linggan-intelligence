@@ -88,3 +88,45 @@ it.each(['audio', 'video_frame'] as const)('%s 的原视频使用音视频链接
   expect(view.container.querySelector('img')).toBeNull();
   expect(screen.getByRole('button', { name: '核对与修正' })).toBeVisible();
 });
+
+it('已有合格版面时导航展开既有整理面板，原件待取得与待识字独立，导航不执行写入', async () => {
+  kit.route('GET', path, ok(dossierJson(1, { materials: [
+    dossierMaterialJson(1, { currentRevisionRef: null, reading: null, blocks: [], processing: { state: 'completed', reason: null }, issues: [{ key: 'saved-layout', code: 'existing_result_pending', message: '已有识别结果，待整理。', resolution: 'source_refresh' }] }),
+    dossierMaterialJson(2, { sourceState: 'not_acquired', currentRevisionRef: null, reading: null, blocks: [], originalUrl: null }),
+  ], plan: { layoutCount: 1, pendingLayouts: 1, needsOcr: 0, needsAcquisition: 1 } })));
+  kit.route('GET', `${path}/candidates`, ok({ candidates: [] }));
+  const view = mount();
+  expect(await screen.findByText('已有识别结果，待整理。')).toBeVisible();
+  expect(screen.getAllByText('已有识别结果，待整理。')).toHaveLength(1);
+  expect(screen.queryByText('处理完成，暂无可读文字。')).not.toBeInTheDocument();
+  const summary = screen.getByText('整理已有识别版面'); const scroll = vi.fn(); summary.scrollIntoView = scroll;
+  const maintenance = summary.closest('details'); const details = screen.getByText('材料详情').closest('details');
+  expect(maintenance).not.toHaveAttribute('open'); expect(details).not.toHaveAttribute('open');
+  await view.user.click(screen.getByRole('button', { name: '核对与修正' }));
+  const go = await screen.findByRole('button', { name: '前往整理已有结果' });
+  expect(screen.queryByText('尚无可核对的读本，请先完成图片识别。')).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
+  const reads = kit.calls.length;
+  await view.user.click(go);
+  expect(maintenance).toHaveAttribute('open'); expect(details).toHaveAttribute('open');
+  expect(summary).toHaveFocus(); expect(scroll).toHaveBeenCalledWith({ block: 'center' });
+  expect(screen.getByRole('button', { name: '重新整理' })).toBeVisible();
+  expect(screen.getByText(/待取得 1 · 待识字 0/)).toBeVisible();
+  expect(kit.calls).toHaveLength(reads); expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
+});
+it('cloud预览仍须显式选择与采用，不因为处理完成而进入当前读本', async () => {
+  const material = dossierMaterialJson(1, { currentRevisionRef: null, reading: null, blocks: [], processing: { state: 'completed', reason: null } });
+  kit.route('GET', path, ok(dossierJson(1, { materials: [material] })));
+  kit.route('GET', `${path}/candidates`, ok({ candidates: [{ unitRef: material.ref, slotKey: material.slotKey, candidateRevisionRef: 'cloud-preview', currentRevisionRef: null,
+    blocks: [{ ref: 'preview-block', kind: 'paragraph', text: '仅在候选预览中的文字' }], issues: [], generatedBy: 'cloud_vision', verification: 'unchecked', createdAt: '2026-10-26T00:00:00Z', review: null }] }));
+  const view = mount(); await screen.findByText('处理完成，尚无当前读本。');
+  expect(screen.queryByText('仅在候选预览中的文字')).not.toBeInTheDocument();
+  await view.user.click(screen.getByRole('button', { name: '核对与修正' }));
+  const select = await screen.findByLabelText('核对版本');
+  expect(screen.queryByRole('button', { name: '前往整理已有结果' })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
+  await view.user.selectOptions(select, 'cloud-preview');
+  expect(screen.getByText('仅在候选预览中的文字')).toBeVisible();
+  expect(screen.getByRole('button', { name: '采用此候选' })).toBeDisabled();
+  expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
+});

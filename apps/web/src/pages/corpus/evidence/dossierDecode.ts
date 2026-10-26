@@ -89,7 +89,7 @@ export function parseDossierPayload(value: unknown): DossierPayload {
   return decode(value, root => ({ dossier: parseDossierRow(obj(root, 'dossier')), relayerPlan: parseRelayerPlan(obj(root, 'relayerPlan')) }));
 }
 export function parseRelayerPlan(row: Json): RelayerPlan {
-  return { workCount: optionalCount(row, 'workCount'), imageSlots: optionalCount(row, 'imageSlots'), imageJobs: optionalCount(row, 'imageJobs'), layoutCount: count(row.layoutCount, 'layoutCount'), pendingLayouts: count(row.pendingLayouts, 'pendingLayouts'), alreadyCurrent: count(row.alreadyCurrent, 'alreadyCurrent'), needsOcr: count(row.needsOcr, 'needsOcr'), pendingReviewCount: count(row.pendingReviewCount, 'pendingReviewCount'), expectedRevision: str(row, 'expectedRevision') };
+  return { workCount: optionalCount(row, 'workCount'), imageSlots: optionalCount(row, 'imageSlots'), imageJobs: optionalCount(row, 'imageJobs'), layoutCount: count(row.layoutCount, 'layoutCount'), pendingLayouts: count(row.pendingLayouts, 'pendingLayouts'), alreadyCurrent: count(row.alreadyCurrent, 'alreadyCurrent'), needsOcr: count(row.needsOcr, 'needsOcr'), needsAcquisition: count(row.needsAcquisition, 'needsAcquisition'), pendingReviewCount: count(row.pendingReviewCount, 'pendingReviewCount'), expectedRevision: str(row, 'expectedRevision') };
 }
 export function parseRelayerPlanResponse(value: unknown): RelayerPlan { return decode(value, root => parseRelayerPlan(obj(root, 'relayerPlan'))); }
 export function parseCandidates(value: unknown): ReadingCandidate[] {
@@ -108,5 +108,5 @@ export function parseDossierComments(value: unknown): DossierCommentPage {
   return decode(value, root => ({ items: list(root, 'items', row => ({ sourceRef: str(row, 'sourceRef'), parentSourceRef: optStr(row, 'parentSourceRef'), relation: choice(row.relation, ['ROOT', 'REPLY'], 'relation'), body: optStr(row, 'body'), likeCount: optionalCount(row, 'likeCount') })), total: optionalCount(root, 'total'), nextCursor: optStr(root, 'nextCursor') }));
 }
 export function parseRelayerReceipt(value: unknown): RelayerReceipt {
-  return decode(value, root => ({ scopeCount: num(root, 'scopeCount'), updated: num(root, 'updated'), alreadyCurrent: num(root, 'alreadyCurrent'), skipped: num(root, 'skipped'), needsOcr: num(root, 'needsOcr') }));
+  return decode(value, root => ({ scopeCount: num(root, 'scopeCount'), updated: num(root, 'updated'), alreadyCurrent: num(root, 'alreadyCurrent'), skipped: num(root, 'skipped'), needsOcr: num(root, 'needsOcr'), needsAcquisition: count(root.needsAcquisition, 'needsAcquisition') }));
 }

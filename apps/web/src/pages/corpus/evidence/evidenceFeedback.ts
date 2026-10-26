@@ -62,12 +62,13 @@ export function errorCode(error: unknown): string | null {
 
 // ───────────────────────── 重新分层（写） ─────────────────────────
 
-/** 「本次 N 个版面：更新 a 个，已是当前版本 b 个，跳过 c 个。」及部分处理、仍需识字的补充说明。 */
+/** 「本次 N 个版面：更新 a 个，已是当前版本 b 个，跳过 c 个。」及待取得、待识字的独立计数。 */
 export function relayerSummary(receipt: RelayerReceipt): string {
   let text = `本次 ${receipt.scopeCount} 个版面：更新 ${receipt.updated} 个，已是当前版本 ${receipt.alreadyCurrent} 个，跳过 ${receipt.skipped} 个。`;
   if (receipt.updated === 0 && receipt.alreadyCurrent > 0) text = `已是当前版本，无需更新。${text}`;
   if (receipt.skipped > 0) text += ` 跳过的版面缺少可用识别行，没有处理。`;
-  if (receipt.needsOcr > 0) text += ` 仍有 ${receipt.needsOcr} 张图片没有识别结果，需先识字或补采，本操作不会识字。`;
+  if (receipt.needsAcquisition > 0) text += ` 待取得 ${receipt.needsAcquisition} 张图片。`;
+  if (receipt.needsOcr > 0) text += ` 待识字 ${receipt.needsOcr} 张图片。`;
   return text;
 }
 

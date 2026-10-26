@@ -23,7 +23,7 @@ export function CoverageSection({ payload }: { payload: DossierPayload }) {
     <DossierIssues issues={summaryIssues} />
   </section>;
 }
-export function MaterialsSection({ payload, work, domain, displayedTitle, onOpenImage, onApplied }: { payload: DossierPayload; displayedTitle?: string; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void }) {
+export function MaterialsSection({ payload, work, domain, displayedTitle, onOpenImage, onApplied, onOpenMaintenance }: { payload: DossierPayload; displayedTitle?: string; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void; onOpenMaintenance: () => void }) {
   const { dossier } = payload;
   const originals = useRef<HTMLDivElement>(null);
   function openSource(unit: DossierMaterial) {
@@ -36,11 +36,11 @@ export function MaterialsSection({ payload, work, domain, displayedTitle, onOpen
     <DossierReading dossier={dossier} titleRendered onSource={openSource} />
     <section className={styles.originals} aria-label="原件与修正"><h3 className={styles.readingHeading}>原件与修正</h3><div ref={originals}>
       {dossier.materials.length === 0 ? <p className={styles.note}>暂无已取得的原件。</p> : null}
-      {dossier.materials.map((unit, index) => <MaterialSource key={unit.ref} unit={unit} imageNumber={dossier.materials.slice(0, index + 1).filter(material => material.kind === 'image').length} work={work} domain={domain} onOpenImage={onOpenImage} onApplied={onApplied} />)}
+      {dossier.materials.map((unit, index) => <MaterialSource key={unit.ref} unit={unit} imageNumber={dossier.materials.slice(0, index + 1).filter(material => material.kind === 'image').length} work={work} domain={domain} onOpenImage={onOpenImage} onApplied={onApplied} onOpenMaintenance={onOpenMaintenance} />)}
     </div></section>
   </>;
 }
-function MaterialSource({ unit, work, domain, imageNumber, onOpenImage, onApplied }: { unit: DossierMaterial; imageNumber: number; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void }) {
+function MaterialSource({ unit, work, domain, imageNumber, onOpenImage, onApplied, onOpenMaintenance }: { unit: DossierMaterial; imageNumber: number; work: string; domain: string; onOpenImage: (unit: DossierMaterial) => void; onApplied: () => void; onOpenMaintenance: () => void }) {
   const [originalReadable, setOriginalReadable] = useState(true);
   if (unit.kind === 'body' && unit.blocks.length === 0 && unit.sourceState !== 'present') return <details className={styles.disclosure} data-source-unit-ref={unit.ref} tabIndex={-1}>
     <summary>正文来源状态</summary><p className={styles.note}>{emptyMaterialNote(unit)}</p><DossierIssues issues={unit.issues} />
@@ -49,7 +49,7 @@ function MaterialSource({ unit, work, domain, imageNumber, onOpenImage, onApplie
   return <section className={styles.material} data-source-unit-ref={unit.ref} tabIndex={-1}>
     <header className={styles.materialHead}><h4>{materialLabel(unit, imageNumber)} · 原件</h4></header>
     {unit.kind === 'image' ? <ImageCompare key={unit.originalUrl} material={unit} onOpenImage={onOpenImage} onReadable={setOriginalReadable} /> : unit.originalUrl ? <a href={unit.originalUrl} target="_blank" rel="noreferrer">查看音视频原件</a> : null}
-    {unit.kind !== 'tags' && unit.sourceState === 'present' && (unit.currentRevisionRef !== null || unit.kind === 'image') ? <ReadingReviewPanel unit={unit} work={work} domain={domain} onApplied={onApplied} originalReadable={originalReadable} /> : null}
+    {unit.kind !== 'tags' && unit.sourceState === 'present' && (unit.currentRevisionRef !== null || unit.kind === 'image') ? <ReadingReviewPanel unit={unit} work={work} domain={domain} onApplied={onApplied} onOpenMaintenance={onOpenMaintenance} originalReadable={originalReadable} /> : null}
     <details className={styles.disclosure}><summary>来源与读本版本</summary>{unit.reading !== null ? <p className={styles.note}>{readingLabel(unit)}</p> : null}{unit.pageSource ? <p className={styles.note}>页序由已验证的同图来源确认。</p> : null}<pre className={styles.pre}>{JSON.stringify({ unitRef: unit.ref, sourceRef: unit.sourceRef, sourceVersion: unit.sourceVersion, currentRevisionRef: unit.currentRevisionRef, processing: unit.processing, issues: unit.issues, pageSource: unit.pageSource, reading: unit.reading }, null, 2)}</pre></details>
   </section>;
 }

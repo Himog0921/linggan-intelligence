@@ -1,7 +1,7 @@
 # 研究底稿 v2：统一阅读与唯一读取合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-25（STANDARD-DOSSIER-001 候选实施）
+> 最后核对: 2026-10-26（STANDARD-DOSSIER-001 固定100篇候选回归）
 > 适用范围: RESEARCH-DOSSIER-V2；v2 已在主线及本机3000运行，后续修正按各包回执区分
 > 事实来源: Mog 本轮确认的研究底稿标准、开发期直接替换要求与本合同验收矩阵
 > 冲突时以谁为准: 用户最新确认、真实来源与验证；本稿替代 v1 及 note-material-input 的并行对外合同
@@ -38,7 +38,7 @@ Markdown 顶层采用同一 displayTitle；为空时仅用界面占位“无标�
 
 ## 材料与结构化区块
 
-材料可附 `purpose` 与 `processing:{state,reason}`（来自固定 asOf 的 job event；succeeded 映射 completed），不读取可变 work 状态冒充历史。材料字段：`ref`、`kind`、`slotKey`、`page`、`sourceState`、`sourceRef`、`sourceVersion`、`currentRevisionRef`、`originalUrl`、`reading`、`blocks`、`issues`；仅在字节证明建立页序关系时增加 `pageSource`。材料种类为 body、tags、image、audio、video_frame。未知页码为 null；不按数据库遍历序号猜平台页码。
+材料可附 `purpose` 与 `processing:{state,reason}`（来自固定 asOf 的 job event；succeeded 映射 completed），不读取可变 work 状态冒充历史。材料字段：`ref`、`kind`、`slotKey`、`page`、`sourceState`、`sourceRef`、`sourceVersion`、`currentRevisionRef`、`originalUrl`、`reading`、`blocks`、`issues`；仅在字节证明建立页序关系时增加 `pageSource`。材料种类为 body、tags、image、audio、video_frame。未知页码为 null；不按数据库遍历序号猜平台页码。已知页序优先，未知页序沿真实 producer_ordinal 的稳定观察顺序，再以 slot_key 稳定打破同序关系；不按槽位字符串把第10次观察排到第2次之前。
 
 `reading` 分开表达生成者 `generatedBy`、采用状态 `adoption`、核对状态 `verification`、规范化规则 `ruleVersion`，以及可空的 `review:{commandRef,actor,reason,action,reviewedAt}`。review 只来自该次 selection 的命令，后来的暂缓/拒绝不能改写已采用版本的审核人和依据；自动读本及原生标签为 null。机器生成、被采用、人工核对是三件事。生成者取 platform、ordinary_ocr、local_vision、cloud_vision、asr、frame_ocr、human_edit。
 
@@ -76,6 +76,10 @@ Live Photo 的静态图片与动态视频按实际已验证媒体类型分别选
 日常 OCR（包括本地视觉任务）、平台正文、ASR、帧 OCR 完成直接自动发布，但须以捕获的 expected current 作 CAS，并保护同来源的人工作品。显式重新识别只形成 candidate，不按模型名、图片尺寸、文字长度或完成时间自动更换当前。
 
 正文在来源接纳时规范化并持久化。已有平台原文但缺规范读本时，GET 只读投影原文块及不可变 material 来源，不伪造 currentRevisionRef；显式 native 准备可补持久读本。重复准备幂等，GET 不写库、不启动识别；已存在的人工作品优先。
+
+图片计划和回执分别返回 `needsAcquisition`（image sourceState=not_acquired）与 `needsOcr`（已取得且无合格当前读本、已有版面或候选）。完成任务但尚无当前读本不等于没有文字；匹配现有合格图片版面时返回 `existing_result_pending`，界面引导到原有整理面板，导航本身不执行整理。明确 no_text/no_speech/no_audio/no_frame_text 原因优先于一般完成状态。
+
+历史音视频沿现有 `dossier_input` 冻结计划与逐作品事务显式准备，CLI 操作为 `historical_media`。只接入当前合格 video/live_photo 素材、真实成功旧任务及非退休/受限的本地结果，保留 job、derivative、materialization、blob 与全文哈希；旧任务缺少 reading_source_version 时不伪补冻结字段或重跑识别。计划另冻结历史结果来源指纹，来源改变拒绝应用；同源兼容当前读本及人工读本优先，原计划重复应用只读幂等。全文取 text_content，不用截断 display_text；没有时间元数据的旧结果保留时间未知和未核实问题，不补造时码或作者身份。明确无语音/画面文字以 canonical 空读本闭合 known_empty，无音轨为 not_applicable，不造文字块。无合格旧结果逐项回执 unavailable，不阻止其他来源及已有正文。
 
 来源改变后旧 reading 不再冒充当前；新 reading 不继承旧来源的人工核对。迟到的旧源任务可留下生成记录，但不能抢占新源当前指针。来源限制在任务发送和精确引用回查时再次验证。
 

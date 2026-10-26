@@ -184,6 +184,139 @@ pub async fn publish_layout_in(
     .await
 }
 
+/// Explicit legacy text preparation: retain actual provenance without rewriting the old job freeze.
+pub async fn publish_historical_in(
+    conn: &mut PgConnection,
+    work: Uuid,
+    job: Uuid,
+    materialization: Uuid,
+    derivative: Option<Uuid>,
+) -> Result<PublishedReading, sqlx::Error> {
+    lock_work(conn, work).await?;
+    let row = sqlx::query(r#"
+SELECT j.processor_kind,j.processor_version,j.blob_sha256,d.content_hash,t.text_content,t.source_location,e.reason
+FROM linggan_media_processing_job j JOIN linggan_media_processing_work w USING(job_ref)
+JOIN LATERAL(SELECT e.* FROM linggan_media_processing_job_event e WHERE e.job_ref=j.job_ref ORDER BY e.occurred_at DESC,e.event_ref DESC LIMIT 1) e ON true
+LEFT JOIN linggan_media_derivative d ON d.job_ref=j.job_ref AND d.derivative_ref=$2
+LEFT JOIN linggan_material_derived_text t ON t.derivative_ref=d.derivative_ref AND t.content_public_ref=$3
+WHERE j.job_ref=$1 AND w.reading_source_version IS NULL AND e.state='succeeded'
+AND ((j.processor_kind='asr' AND ((d.derivative_kind='asr_text' AND t.kind='asr_text') OR ($2::uuid IS NULL AND e.reason IN ('no_audio_stream_observed','no_speech_observed'))))
+ OR (j.processor_kind='video_frame_ocr' AND ((d.derivative_kind='frame_ocr_text' AND t.kind='frame_ocr_text') OR ($2::uuid IS NULL AND e.reason='no_frame_text_observed'))))
+AND NOT EXISTS(SELECT 1 FROM linggan_media_ocr_retirement WHERE retired_job_ref=j.job_ref)
+"#).bind(job).bind(derivative).bind(work).fetch_one(&mut *conn).await?;
+    let text: Option<String> = row.get("text_content");
+    let text_hash = text.as_deref().map(crate::creator_discovery::hash);
+    if derivative.is_some()
+        && (text.as_deref().is_none_or(|t| t.trim().is_empty())
+            || row.get::<Option<String>, _>("content_hash") != text_hash)
+    {
+        return Err(invalid("historical_text_hash_or_content_invalid"));
+    }
+    let (kind, producer) = if row.get::<String, _>("processor_kind") == "asr" {
+        ("audio", "asr")
+    } else {
+        ("video_frame", "frame_ocr")
+    };
+    let source = media_source_in(conn, work, job, Some(&materialization.to_string())).await?;
+    if !matches!(source["purpose"].as_str(), Some("video" | "live_photo")) {
+        return Err(invalid("historical_media_purpose_invalid"));
+    }
+    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *conn)
+        .await?;
+    let slot = source["slotKey"]
+        .as_str()
+        .ok_or_else(|| invalid("media_reading_slot_missing"))?;
+    if !source::current(
+        conn,
+        work,
+        kind,
+        Some(slot),
+        &materialization.to_string(),
+        derivative,
+        &now,
+    )
+    .await?
+    {
+        return Err(invalid("historical_media_source_changed"));
+    }
+    // The canonical reader recognizes same-byte re-observations and protects their human/current reading.
+    let current = read_current_in(conn, &[work], &now)
+        .await?
+        .remove(&work)
+        .unwrap_or_default();
+    if let Some(existing) = current
+        .iter()
+        .find(|m| m["kind"] == kind && m["slotKey"] == slot && m["currentRevisionRef"].is_string())
+    {
+        return Ok(PublishedReading {
+            unit_ref: serde_json::from_value(existing["ref"].clone())
+                .map_err(|_| invalid("historical_current_invalid"))?,
+            reading_ref: serde_json::from_value(existing["currentRevisionRef"].clone())
+                .map_err(|_| invalid("historical_current_invalid"))?,
+            current: true,
+        });
+    }
+    let expected_current = sqlx::query_scalar::<_,Option<Uuid>>("SELECT current_reading_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND kind=$2 AND slot_key=$3")
+        .bind(work).bind(kind).bind(slot).fetch_optional(&mut *conn).await?.flatten();
+    let reason: Option<String> = row.get("reason");
+    let mut location = json!({"jobRef":job,"derivativeRef":derivative,"materializationRef":materialization,"blobSha256":row.get::<String,_>("blob_sha256"),"processorVersion":row.get::<String,_>("processor_version"),"recognitionOutcome":reason});
+    let content = if let Some(text) = text {
+        location["fullTextHash"] = json!(text_hash);
+        location["timeUnknown"] = json!(true);
+        location["legacySourceLocation"] = row
+            .get::<Option<Value>, _>("source_location")
+            .unwrap_or(Value::Null);
+        ReadingContent {
+            blocks: vec![
+                json!({"ref":"legacy-text","kind":"paragraph","text":text,"speaker":"unconfirmed"}),
+            ],
+            issues: vec![
+                json!({"key":"historical_time_unknown","code":"time_unknown","message":"历史结果无时间定位。","resolution":"source_refresh"}),
+                json!({"key":"historical_machine_unchecked","code":"machine_unchecked","message":"机器识读结果，尚未人工核验。","resolution":"reading_edit"}),
+            ],
+            source_state: "present".into(),
+            source_location: location,
+        }
+    } else {
+        ReadingContent {
+            blocks: vec![],
+            issues: if kind == "video_frame" {
+                vec![
+                    json!({"key":"historical_video_sampling_incomplete","code":"sampling_incomplete","message":"历史采样帧未检出文字，不代表整段视频无文字。","resolution":"source_refresh"}),
+                ]
+            } else {
+                vec![]
+            },
+            source_state: if reason.as_deref() == Some("no_audio_stream_observed") {
+                "not_applicable"
+            } else {
+                "known_empty"
+            }
+            .into(),
+            source_location: location,
+        }
+    };
+    publish_source_in(
+        conn,
+        MediaPublication {
+            source,
+            work,
+            kind,
+            producer,
+            producer_ref: job,
+            derivative,
+            rule: format!(
+                "{}:historical-media.v1",
+                crate::research_dossier::content::RULE_VERSION
+            ),
+            content,
+            publication: Publication::Automatic { expected_current },
+        },
+    )
+    .await
+}
+
 pub async fn publish_cloud_in(
     conn: &mut PgConnection,
     work: Uuid,

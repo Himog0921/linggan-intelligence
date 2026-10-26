@@ -115,3 +115,21 @@ it.each([
   expect(screen.getByRole('button', { name: '查看来源' })).toBeVisible();
   if (hasText) expect(screen.getByText('已经识别的真实文字')).toBeVisible();
 });
+
+it.each(['image', 'video_frame'] as const)('%s 的明确空识别原因与完成但无读本区分', kind => {
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind, sourceState: 'known_empty', blocks: [], reading: null, currentRevisionRef: null,
+    processing: { state: 'completed', reason: kind === 'image' ? 'no_text_observed' : 'no_frame_text_observed' } })] })).dossier;
+  render(<DossierReading dossier={dossier} titleRendered />);
+  expect(screen.getByText('处理完成，未检出文字。')).toBeVisible();
+  expect(screen.queryByText('处理完成，尚无当前读本。')).not.toBeInTheDocument();
+});
+it('completed不能证明已有可用结果；明确pending issue才展示待整理', () => {
+  const first = dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null, processing: { state: 'completed', reason: null } });
+  const second = dossierMaterialJson(2, { blocks: [], reading: null, currentRevisionRef: null, processing: { state: 'completed', reason: null },
+    issues: [{ key: 'pending-layout', code: 'existing_result_pending', message: '已有识别结果，待整理。', resolution: 'source_refresh' }] });
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [first, second] })).dossier;
+  render(<DossierReading dossier={dossier} titleRendered />);
+  expect(screen.getAllByText('已有识别结果，待整理。')).toHaveLength(1);
+  expect(screen.getByText('处理完成，尚无当前读本。')).toBeVisible();
+  expect(screen.queryByText('处理完成，暂无可读文字。')).not.toBeInTheDocument();
+});

@@ -678,3 +678,124 @@ async fn standard_audio_silence_absence_and_failure_are_distinct_without_fake_te
         }
     }
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn unknown_page_order_preserves_observed_ordinals_beyond_nine() {
+    let db = fixture::proof_database("dossier_observed_order").await;
+    let work = detail(&db, "observed-order", json!({"bodyText":"已有正文仍可读"})).await;
+    let records = (1..=12).map(|ordinal| json!({
+        "kind":"media_slot", "slotKey":format!("xhs:observed-order:image:{ordinal}"),
+        "observationRef":Uuid::new_v4(), "slot":{"role":"image","ordinal":ordinal},
+        "observation":{"externalUri":format!("https://media.example/image/{ordinal}"),"candidateUris":[format!("https://media.example/image/{ordinal}")],"observedAt":"2026-10-14T00:00:00Z"},
+        "sourceObject":{"platform":"xhs","type":"content","externalId":"observed-order"}
+    })).collect();
+    fixture::submit_custom_package(&db,"xhs",&["media_slots"],json!({"contentExternalId":"observed-order"}),"media_slots","xhs",json!({"target":{"contentExternalId":"observed-order"},"layers":[fixture::coverage_layer("media_slots",12)]}),records).await;
+    let before = counts(&db).await;
+    let read = dossier::read(&db, work).await.unwrap().unwrap();
+    let images: Vec<_> = read
+        .materials
+        .iter()
+        .filter(|m| m["kind"] == "image")
+        .collect();
+    assert_eq!(images.len(), 12);
+    assert_eq!(
+        images
+            .iter()
+            .map(|m| m["slotKey"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>(),
+        (1..=12)
+            .map(|n| format!("xhs:observed-order:image:{n}"))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        images.iter().all(|m| m["page"].is_null()),
+        "observation ordinal is never promoted to platform page"
+    );
+    let plan = dossier::relayer_plan(&read);
+    assert_eq!(
+        plan["needsOcr"], 0,
+        "unacquired sources cannot be recognized"
+    );
+    assert_eq!(plan["needsAcquisition"], 12);
+    assert!(
+        !read.reading_view["mainBlockRefs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(counts(&db).await, before, "reads do not prepare materials");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn saved_legacy_image_layout_is_pending_until_explicit_existing_normalization() {
+    let db = fixture::proof_database("dossier_saved_layout_pending").await;
+    let work = detail(
+        &db,
+        "saved-layout",
+        json!({"bodyText":"正文先读，图片随后整理"}),
+    )
+    .await;
+    images(&db, "saved-layout", 1, &[("image", 1, 'a')]).await;
+    let job: Uuid = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE slot_key='xhs:saved-layout:image:1' AND processor_kind='image_ocr' ORDER BY created_at DESC LIMIT 1")
+        .fetch_one(db.pool()).await.unwrap();
+    let derivative = Uuid::new_v4();
+    let layout = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,storage_key,byte_size) VALUES($1,$2,'ocr_text',$3,'legacy/image.txt',12)")
+        .bind(derivative).bind(job).bind("b".repeat(64)).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) VALUES($1,$2,$3,$4,'paddleocr','legacy-synthetic',100,100,$5,12,'legacy/layout.json')")
+        .bind(layout).bind(derivative).bind(work).bind("a".repeat(64)).bind("c".repeat(64)).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_ocr_line(layout_ref,line_ref,ordinal,text_content,confidence,left_norm,top_norm,right_norm,bottom_norm) VALUES($1,$2,0,'原有图片全文，不重跑识别',0.98,0.1,0.2,0.9,0.3)")
+        .bind(layout).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state) VALUES($1,$2,'succeeded')")
+        .bind(Uuid::new_v4()).bind(job).execute(db.pool()).await.unwrap();
+    let before = counts(&db).await;
+    let read = dossier::read(&db, work).await.unwrap().unwrap();
+    let image = material(&read, "image");
+    assert!(image["blocks"].as_array().unwrap().is_empty());
+    assert_eq!(image["processing"]["state"], "completed");
+    assert!(
+        image["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["code"] == "existing_result_pending")
+    );
+    assert!(
+        !image["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["code"] == "not_processed")
+    );
+    let plan = dossier::relayer_plan(&read);
+    assert_eq!(plan["pendingLayouts"], 1);
+    assert_eq!(plan["needsOcr"], 0);
+    assert_eq!(plan["needsAcquisition"], 0);
+    assert_eq!(
+        counts(&db).await,
+        before,
+        "read cannot adopt the saved layout"
+    );
+    let receipt = dossier::relayer_work(&db, work, &read.revision)
+        .await
+        .unwrap();
+    assert_eq!(receipt["updated"], 1);
+    let after = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(
+        material(&after, "image")["blocks"][0]["text"],
+        "原有图片全文，不重跑识别"
+    );
+    assert!(
+        !material(&after, "image")["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["code"] == "existing_result_pending")
+    );
+    let end = counts(&db).await;
+    for i in [0, 1, 2, 3, 6] {
+        assert_eq!(before[i], end[i]);
+    }
+}

@@ -16,6 +16,27 @@ pub(super) fn assemble(
     }
     let slots = super::duplicates::collapse(inventory.slots.clone(), &readings);
     let mut media = media_materials(work, &readings, &slots);
+    for material in &mut media {
+        if material["kind"] == "image"
+            && material["sourceState"] == "present"
+            && material["blocks"].as_array().is_some_and(Vec::is_empty)
+            && material["processing"]["reason"] != "no_text_observed"
+            && layouts.iter().any(|layout| {
+                super::same_image_source(material, layout)
+                    && layout["humanProtected"] != true
+                    && layout["ruleVersion"] != super::relayer::rule_version()
+            })
+        {
+            let issues = material["issues"].as_array_mut().expect("material issues");
+            issues.retain(|issue| issue["code"] != "not_processed");
+            issues.push(issue(
+                "existing_result_pending",
+                "existing_result_pending",
+                "已有识别结果，待整理",
+                "source_refresh",
+            ));
+        }
+    }
     if let Some(expected) = expected_pages(&inventory) {
         for page in 1..=expected {
             if !media

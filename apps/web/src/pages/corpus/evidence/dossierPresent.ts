@@ -15,18 +15,26 @@ export function readingLabel(unit: DossierMaterial): string {
   const adoption = { automatic: '自动采用', human_adopted: '人工采用', human_edited: '人工修正' }[unit.reading.adoption];
   return `${adoption} · ${unit.reading.verification === 'verified' ? '已人工核验' : '尚未人工核验'}`;
 }
+/** The canonical issue identifies an eligible saved result; execution completion alone does not. */
+export function existingResultPending(unit: DossierMaterial): boolean {
+  return unit.sourceState === 'present' && unit.blocks.length === 0 && unit.issues.some(issue => issue.code === 'existing_result_pending');
+}
 /** A processing receipt describes execution, never the accuracy of source words. */
 export function processingLabel(unit: DossierMaterial): string | null {
   const processing = unit.processing;
-  if (!processing || unit.sourceState === 'restricted') return null;
-  if (processing.state === 'completed' && unit.kind === 'audio') {
-    if (processing.reason === 'no_audio_stream_observed' && ['present', 'not_applicable'].includes(unit.sourceState)) return '未发现音轨。';
-    if (processing.reason === 'no_speech_observed' && ['present', 'known_empty'].includes(unit.sourceState)) return '处理完成，未检出语音。';
+  if (unit.sourceState === 'restricted') return null;
+  if (processing?.state === 'completed') {
+    if (unit.kind === 'audio') {
+      if (processing.reason === 'no_audio_stream_observed' && ['present', 'not_applicable'].includes(unit.sourceState)) return '未发现音轨。';
+      if (processing.reason === 'no_speech_observed' && ['present', 'known_empty'].includes(unit.sourceState)) return '处理完成，未检出语音。';
+    }
+    if ((unit.kind === 'image' && processing.reason === 'no_text_observed' || unit.kind === 'video_frame' && processing.reason === 'no_frame_text_observed')
+      && ['present', 'known_empty'].includes(unit.sourceState)) return '处理完成，未检出文字。';
   }
   if (unit.sourceState !== 'present') return null;
-  if (processing.state === 'completed') {
-    return unit.blocks.length > 0 ? null : '处理完成，暂无可读文字。';
-  }
+  if (existingResultPending(unit)) return unit.kind === 'image' ? '已有识别结果，待整理。' : '已有处理结果，待接入。';
+  if (!processing) return null;
+  if (processing.state === 'completed') return unit.blocks.length > 0 ? null : '处理完成，尚无当前读本。';
   const labels = { pending: '待处理', running: '处理中', failed: '处理失败', cancelled: '处理已取消', invalidated: '处理结果已失效' };
   return `${labels[processing.state]}${unit.blocks.length > 0 ? '，已有读本仍可读。' : '。'}`;
 }
