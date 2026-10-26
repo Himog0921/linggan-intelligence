@@ -22,7 +22,8 @@ function caption(object: ViewerObject): string {
 function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerObject; total: number; titleId: string; onIndex: (index: number) => void; onClose: () => void }) {
   const frame = useRef<HTMLDivElement>(null);
   const image = useRef<HTMLImageElement>(null);
-  const zoom = useZoomPan(frame, image, object.index);
+  const isVideo = object.mime?.startsWith('video/') === true;
+  const zoom = useZoomPan(frame, image, object.index, !isVideo);
   const mediaKey = `${object.index}:${object.assetUrl ?? ''}`;
   const [imageState, setImageState] = useState<{ key: string; phase: 'loading' | 'loaded' | 'failed' }>({ key: mediaKey, phase: 'loading' });
   if (imageState.key !== mediaKey) setImageState({ key: mediaKey, phase: 'loading' });
@@ -32,6 +33,8 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
   const next = object.index < total - 1;
 
   function onKeyDown(event: KeyboardEvent) {
+    // Native player arrows/space belong to seeking and playback, not gallery navigation.
+    if (event.target instanceof HTMLVideoElement) return;
     const actions: Record<string, () => void> = {
       ArrowLeft: () => previous && onIndex(object.index - 1),
       ArrowRight: () => next && onIndex(object.index + 1),
@@ -56,7 +59,7 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
           <span className={styles.subtitle}>{subtitle}</span>
         </div>
         <div className={styles.tools}>
-          <div className={styles.zoom} role="group" aria-label="缩放">
+          {!isVideo ? <div className={styles.zoom} role="group" aria-label="缩放">
             <button type="button" aria-label="缩小" disabled={!zoom.canZoomOut} onClick={zoom.zoomOut}>
               <span aria-hidden="true">−</span>
             </button>
@@ -66,7 +69,7 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
             <button type="button" aria-label="放大" disabled={!zoom.canZoomIn} onClick={zoom.zoomIn}>
               <span aria-hidden="true">+</span>
             </button>
-          </div>
+          </div> : null}
           <button type="button" className={styles.close} aria-label="关闭查看器" onClick={onClose}>
             <span aria-hidden="true">×</span>
           </button>
@@ -91,7 +94,11 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
             onPointerUp={zoom.onPointerEnd}
             onPointerCancel={zoom.onPointerEnd}
           >
-            {object.assetUrl && phase !== 'failed' ? (
+            {object.assetUrl && phase !== 'failed' && isVideo ? (
+              <video key={object.assetUrl} src={object.assetUrl} controls playsInline preload="metadata" aria-label={`${object.label} 本地视频`}
+                onLoadedMetadata={() => setImageState({ key: mediaKey, phase: 'loaded' })}
+                onError={() => setImageState({ key: mediaKey, phase: 'failed' })} />
+            ) : object.assetUrl && phase !== 'failed' ? (
               <img key={object.index} ref={image} src={object.assetUrl} alt={`${object.label} 原尺寸本地副本`} onLoad={() => setImageState({ key: mediaKey, phase: 'loaded' })} onError={() => setImageState({ key: mediaKey, phase: 'failed' })} style={{ transform: `translate(${zoom.pan.x}px, ${zoom.pan.y}px) scale(${zoom.zoom})` }} />
             ) : null}
             {!object.assetUrl || phase !== 'loaded' ? <span className={styles.mediaState} role="status">{!object.assetUrl ? `未取得可内联副本 · ${stateMeta(object.bytesState)[0]}` : phase === 'failed' ? '本地副本读取失败；可切换其他对象或关闭查看器。' : '正在读取本地副本…'}</span> : null}

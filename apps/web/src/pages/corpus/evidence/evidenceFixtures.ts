@@ -250,6 +250,7 @@ function currentMetric(value: number | null, previous: number | null = null) {
 }
 
 export interface DetailOptions extends ItemOptions {
+  sourceNoteUrl?: string | null;
   body?: string | null;
   slots?: ReturnType<typeof slotJson>[];
   derivatives?: unknown[];
@@ -272,6 +273,7 @@ export function detailJson(n: number, options: DetailOptions = {}) {
   const body = options.body === undefined ? `合成正文 ${n}：先做两分钟，再决定要不要继续。` : options.body;
   const likes = options.likes === undefined ? 1200 + n : options.likes;
   const inspector = {
+    sourceNote: { url: options.sourceNoteUrl ?? null, state: options.sourceNoteUrl ? 'KNOWN' : 'UNKNOWN' },
     authorContext: options.authorContext === undefined ? null : options.authorContext,
     commentThreads: [],
     commentsAccess: { accessLevel: 'RESTRICTED_SOURCE', bodyReturned: false, externalIdentityReturned: false },

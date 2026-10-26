@@ -14,7 +14,7 @@ const FIT: View = { zoom: ZOOM_MIN, pan: { x: 0, y: 0 } };
  * `resetKey` 一变（换了一张图）就回到「适合」：在渲染期间重置状态，而不是靠重建整个查看器——重建会把
  * 键盘用户刚按下的「下一张」按钮换成新节点，焦点就丢了。
  */
-export function useZoomPan(frame: RefObject<HTMLDivElement | null>, image: RefObject<HTMLImageElement | null>, resetKey: string | number) {
+export function useZoomPan(frame: RefObject<HTMLDivElement | null>, image: RefObject<HTMLImageElement | null>, resetKey: string | number, enabled = true) {
   const [view, setView] = useState<View>(FIT);
   const [grabbing, setGrabbing] = useState(false);
   const [seenKey, setSeenKey] = useState(resetKey);
@@ -56,14 +56,14 @@ export function useZoomPan(frame: RefObject<HTMLDivElement | null>, image: RefOb
   });
   useEffect(() => {
     const element = frame.current;
-    if (!element) return;
+    if (!element || !enabled) return;
     const onWheel = (event: WheelEvent) => {
       event.preventDefault();
       latest.current.wheel?.(event);
     };
     element.addEventListener('wheel', onWheel, { passive: false });
     return () => element.removeEventListener('wheel', onWheel);
-  }, [frame]);
+  }, [frame, enabled]);
 
   return {
     zoom: view.zoom,
@@ -76,6 +76,7 @@ export function useZoomPan(frame: RefObject<HTMLDivElement | null>, image: RefOb
     reset,
     /** 双击在「适合」与工作倍率之间切换，锚在点击处——看文字卡片一角再回来最快。 */
     onDoubleClick: (event: MouseEvent) => {
+      if (!enabled) return;
       if (view.zoom > ZOOM_MIN) reset();
       else zoomTo(DOUBLE_CLICK_ZOOM, anchorOf(event));
     },

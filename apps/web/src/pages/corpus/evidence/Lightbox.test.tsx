@@ -25,6 +25,25 @@ const keys = () => screen.getByRole('button', { name: '关闭查看器' });
 const zoomText = () => screen.getByRole('group', { name: '缩放' }).querySelector('button:nth-child(2)')?.textContent;
 
 describe('原尺寸查看器', () => {
+  it('视频使用原生播放器、无自动播放；播放器方向键不切换媒体，错误可见', () => {
+    const { onIndex } = setup(objects(1, [slotJson(2, ref, { ordinal: 2, purpose: 'video', mime: 'video/mp4' })]), 1);
+    const video = screen.getByLabelText('视频 本地视频');
+    expect(video.tagName).toBe('VIDEO');
+    expect(video).toHaveAttribute('src', mediaHandle(2));
+    expect(video).toHaveAttribute('controls');
+    expect(video).not.toHaveAttribute('autoplay');
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.queryByRole('group', { name: '缩放' })).toBeNull();
+    const key = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true });
+    fireEvent(video, key);
+    expect(key.defaultPrevented).toBe(false);
+    expect(onIndex).not.toHaveBeenCalled();
+    fireEvent.loadedMetadata(video);
+    expect(screen.queryByRole('status')).toBeNull();
+    fireEvent.error(video);
+    expect(screen.getByRole('status')).toHaveTextContent('本地副本读取失败');
+  });
+
   it('模态对话框：标题「用途 · 第 NN / MM 个」，副标题给出对象编号与采集序号，图注写字节与文字状态', () => {
     setup();
     const dialog = screen.getByRole('dialog', { name: /正文图片 · 第 01 \/ 03 个/ });

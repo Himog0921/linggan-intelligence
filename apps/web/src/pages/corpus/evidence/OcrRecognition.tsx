@@ -48,7 +48,7 @@ function stageCopy(run: OcrRecognitionRun) {
   return run.unavailableReason ?? '保存模型不会自动发图。';
 }
 /** Parent keys this work-scoped session, so late A responses cannot appear in B. */
-export function OcrRecognition({ workRef, active = true, onApplied, children, readingRevision }: { workRef: string; active?: boolean; readingRevision?: string; onApplied?: () => void; children?: ReactNode }) {
+export function OcrRecognition({ workRef, active = true, onApplied, children, readingRevision, mediaTitle = '图组' }: { workRef: string; active?: boolean; readingRevision?: string; onApplied?: () => void; children?: ReactNode; mediaTitle?: string }) {
   const [run, setRun] = useState<OcrRecognitionRun | null>(null);
   const [loading, setLoading] = useState(true); const [readFailed, setReadFailed] = useState(false);
   const [sending, setSending] = useState(false); const [message, setMessage] = useState('');
@@ -135,7 +135,7 @@ export function OcrRecognition({ workRef, active = true, onApplied, children, re
     disabled={loading || sending || (!live && run?.state !== 'succeeded' && run?.state !== 'stopped' && !canStart)} aria-busy={live || sending} onClick={act}>
     <i className={styles.fill} aria-hidden="true"/><span>{loading ? '读取状态中' : actionCopy(run)}</span>
   </ActionButton>{run?.runRef ? <span className={styles.progressSemantics} role="progressbar" aria-label="图片文字识别进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-valuetext={value + '%'}/> : null}</>;
-  return <Section title={children ? "图组" : "图片文字"} actions={action}>
+  return <Section title={children ? mediaTitle : "图片文字"} actions={action}>
     <div className={styles.module} data-ocr-recognition data-state={run?.state ?? 'loading'}>
       <div ref={result} className={styles.feedbackRow}><p className={styles.status} role="status" aria-live="polite">{run ? stageCopy(run) : loading ? '正在读取图片文字识别状态…' : '尚未取得识别资格。'}</p>
         <a href="/settings/models?view=advanced&area=work&task=ocr_recognition">OCR 模型设置</a>

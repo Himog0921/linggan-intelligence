@@ -29,6 +29,22 @@ async function opened(search?: string) {
 }
 
 describe('打开页面', () => {
+  it('采集记录直达仍在标题上方提供实际原文链接；换作品不保留旧链接', async () => {
+    const sourceUrl = 'https://www.xiaohongshu.com/search_result/0123456789abcdef01234567?xsec_token=synthetic';
+    pageRoutes(kit, { detail: n => ({ sourceNoteUrl: n === 1 ? sourceUrl : null }) });
+    const view = renderEvidencePage(pageUrl(`domain=${DOMAIN}&work=${workRef(1)}&tab=trace`));
+    const link = await screen.findByRole('link', { name: '打开原文' });
+    expect(link).toHaveAttribute('href', sourceUrl);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    const title = within(aside()).getByRole('heading', { level: 3, name: '合成作品 1' });
+    expect(link.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await view.user.click(rowButton(2));
+    await screen.findByRole('heading', { level: 3, name: '合成作品 2' });
+    expect(screen.queryByRole('link', { name: '打开原文' })).toBeNull();
+    expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
+  });
+
   it('默认只显示作品列表，不选中第一项；用户点击后再读取详情', async () => {
     pageRoutes(kit);
     const view = renderEvidencePage();

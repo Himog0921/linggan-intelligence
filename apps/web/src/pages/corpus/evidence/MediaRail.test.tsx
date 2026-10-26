@@ -63,7 +63,8 @@ describe('媒体轨道', () => {
       />,
     );
     expect(screen.getByText('本地副本已验证，但 image/svg+xml 不在可内联集合中。')).toBeInTheDocument();
-    expect(screen.getByText('已取得')).toBeInTheDocument();
+    expect(screen.getByText('点击播放')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: /视频/ })).toBeNull();
     expect(screen.getByText('尚未形成观察')).toBeInTheDocument();
     fireEvent.error(screen.getByRole('img', { name: '正文图片 第 1 个本地媒体对象' }));
     expect(screen.getByText('这个对象的本地副本读取失败；其余对象不受影响。')).toBeInTheDocument();
