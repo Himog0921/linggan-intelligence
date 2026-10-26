@@ -499,6 +499,7 @@ migrate() {
   apply_migration_once "0164_ops_publication_field_adoption" "$project_root/database/migrations/0164_ops_publication_field_adoption.sql"
   apply_migration_once "0165_ops_publication_media_projection" "$project_root/database/migrations/0165_ops_publication_media_projection.sql"
   apply_migration_once "0166_collection_command_reason_ops_publication_scope" "$project_root/database/migrations/0166_collection_command_reason_ops_publication_scope.sql"
+  apply_migration_once "0167_ops_historical_owner_resolution" "$project_root/database/migrations/0167_ops_historical_owner_resolution.sql"
 }
 
 case "$command_name" in

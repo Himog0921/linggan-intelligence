@@ -30,7 +30,8 @@ CREATE TABLE linggan_ops_historical_owner_resolution (
             responsible_user_source_id IS NOT NULL
             AND source_member_display_name IS NOT NULL
             AND (
-                (state = 'matched' AND source_display_name = source_member_display_name)
+                (state = 'matched' AND source_display_name IS NOT NULL
+                    AND source_display_name = source_member_display_name)
                 OR (state = 'conflict_pending' AND source_display_name IS NOT NULL
                     AND source_display_name <> source_member_display_name)
                 OR (state = 'unresolved' AND source_display_name IS NULL)
