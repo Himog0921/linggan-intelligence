@@ -54,11 +54,18 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
         serde_json::from_slice(&to_bytes(unfiltered.into_body(), usize::MAX).await.unwrap())
             .unwrap();
     for ordinal in [5, 6, 7, 8] {
+        let lane = unfiltered
+            .pointer(&format!("/items/0/laneSummaries/{ordinal}/lane"))
+            .and_then(Value::as_str);
         assert_eq!(
             unfiltered
                 .pointer(&format!("/items/0/laneSummaries/{ordinal}/state"))
                 .and_then(Value::as_str),
-            Some("UNKNOWN")
+            Some(if lane == Some("ocr") {
+                "NOT_OBSERVED"
+            } else {
+                "UNKNOWN"
+            })
         );
         assert_eq!(
             unfiltered.pointer(&format!("/items/0/laneSummaries/{ordinal}/observed")),
@@ -68,7 +75,11 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
             unfiltered
                 .pointer(&format!("/items/0/laneSummaries/{ordinal}/valueState"))
                 .and_then(Value::as_str),
-            Some("UNKNOWN")
+            Some(if lane == Some("ocr") {
+                "KNOWN"
+            } else {
+                "UNKNOWN"
+            })
         );
     }
 }

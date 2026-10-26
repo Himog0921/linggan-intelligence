@@ -181,7 +181,7 @@ async fn comment_bootstrap_batch_only_ocr_dependency_is_purged_and_unrelated_com
         sqlx::raw_sql(schema).execute(db.pool()).await.unwrap();
     }
     let before = counts(&db).await;
-    let guards: Value = sqlx::query_scalar("SELECT jsonb_object_agg(c.relname||'.'||t.tgname,t.tgenabled) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.relname NOT LIKE 'linggan_ocr_audit_%'").fetch_one(db.pool()).await.unwrap();
+    let guards: Value = sqlx::query_scalar("SELECT jsonb_object_agg(c.relname||'.'||t.tgname,t.tgenabled) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.relnamespace=(SELECT oid FROM pg_namespace WHERE nspname=current_schema()) AND c.relname NOT LIKE 'linggan_ocr_audit_%'").fetch_one(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
     sqlx::raw_sql(PURGE).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
@@ -225,19 +225,29 @@ async fn comment_bootstrap_batch_only_ocr_dependency_is_purged_and_unrelated_com
     }
     let result: String = sqlx::query_scalar("SELECT result->>'syntheticText' FROM linggan_model_invocation WHERE invocation_ref='b1680000-0000-4000-8000-000000000007'").fetch_one(db.pool()).await.unwrap();
     assert_eq!(result, "KEEP-UNRELATED-COMMENT-RESULT");
-    let after_guards: Value = sqlx::query_scalar("SELECT jsonb_object_agg(c.relname||'.'||t.tgname,t.tgenabled) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.relname NOT LIKE 'linggan_ocr_audit_%'").fetch_one(db.pool()).await.unwrap();
+    let after_guards: Value = sqlx::query_scalar("SELECT jsonb_object_agg(c.relname||'.'||t.tgname,t.tgenabled) FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid WHERE NOT t.tgisinternal AND c.relnamespace=(SELECT oid FROM pg_namespace WHERE nspname=current_schema()) AND c.relname NOT LIKE 'linggan_ocr_audit_%'").fetch_one(db.pool()).await.unwrap();
     assert_eq!(
         guards, after_guards,
         "all surviving trigger states restored exactly"
     );
-    for sql in [
-        "DELETE FROM linggan_comment_study_run WHERE run_ref='b1680000-0000-4000-8000-000000000003'",
-        "DELETE FROM linggan_comment_study_start_request WHERE request_ref='b1680000-0000-4000-8000-000000000009'",
-        "DELETE FROM linggan_comment_study_model_request WHERE invocation_ref='b1680000-0000-4000-8000-000000000007'",
+    for (sql, expected) in [
+        (
+            "DELETE FROM linggan_comment_study_run WHERE run_ref='b1680000-0000-4000-8000-000000000003'",
+            "comment_study_run_immutable",
+        ),
+        (
+            "DELETE FROM linggan_comment_study_start_request WHERE request_ref='b1680000-0000-4000-8000-000000000009'",
+            "comment_study_start_receipt_immutable",
+        ),
+        (
+            "DELETE FROM linggan_comment_study_model_request WHERE invocation_ref='b1680000-0000-4000-8000-000000000007'",
+            "comment_study_model_request_immutable",
+        ),
     ] {
+        let error = sqlx::query(sql).execute(db.pool()).await.unwrap_err();
         assert!(
-            sqlx::query(sql).execute(db.pool()).await.is_err(),
-            "restored immutable guard must reject deletion"
+            error.to_string().contains(expected),
+            "expected restored guard {expected}, got {error}"
         );
     }
 }

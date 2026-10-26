@@ -130,6 +130,29 @@ async fn batched_media_read_keeps_accepted_ocr_and_current_withdrawal() {
             .iter()
             .any(|derivative| derivative["dispositionState"] == "WITHDRAWN_OR_RESTRICTED")
     );
+    assert!(
+        !detail.inspector["derivatives"]
+            .to_string()
+            .contains("已经撤回的 OCR 正文"),
+        "restricted OCR diagnostics expose metadata only, never a second transcription"
+    );
+    let available = linggan_evidence::read_work_resource(&db, refs[0])
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        available.inspector["derivatives"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["processorKind"] == "image_ocr")
+    );
+    assert!(
+        !available.inspector["derivatives"]
+            .to_string()
+            .contains("可用的 OCR 正文"),
+        "OCR content is read from canonical, never derived diagnostics"
+    );
     let first_slot = "xhs:batch-media-1:cover:1";
     let first_blob: String = sqlx::query_scalar(
         "SELECT blob_sha256 FROM linggan_media_processing_job WHERE slot_key=$1 LIMIT 1",

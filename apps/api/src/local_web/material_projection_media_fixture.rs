@@ -9,6 +9,7 @@ use linggan_evidence::{
     record_materialization_disposition, record_media_derivative_completion,
 };
 use tower::ServiceExt;
+use uuid::Uuid;
 
 const PROOF_BLOB_SHA256: &str = "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62";
 const OCR_PROOF_SHA256: &str = "1320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a";
@@ -167,7 +168,7 @@ async fn assert_derivative_disposition(
         .oneshot(
             Request::builder()
                 .header("Host", "127.0.0.1:3000")
-                .uri(format!("/api/local/work-resources?lane=ocr&restriction=WITHDRAWN_OR_RESTRICTED&domain={ADHD_DOMAIN_REF}"))
+                .uri(format!("/api/local/work-resources?restriction=WITHDRAWN_OR_RESTRICTED&domain={ADHD_DOMAIN_REF}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -206,7 +207,13 @@ async fn detail_for_list(database: &Database, list: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap();
     let response = app_with_database(database.clone())
-        .oneshot(Request::builder().uri(url).header("Host", "127.0.0.1:3000").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri(url)
+                .header("Host", "127.0.0.1:3000")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
@@ -262,7 +269,7 @@ pub(super) async fn complete_ocr_derivative(
     database: &Database,
     job_ref: uuid::Uuid,
 ) -> uuid::Uuid {
-    record_media_derivative_completion(
+    let derivative = record_media_derivative_completion(
         database,
         job_ref,
         "ocr_text",
@@ -271,7 +278,17 @@ pub(super) async fn complete_ocr_derivative(
         Some("derivatives/ocr/proof"),
     )
     .await
-    .unwrap()
+    .unwrap();
+    // A completed derivative alone is not a current reading. Seed the same canonical
+    // publication that current daily processing must persist before claiming ACQUIRED.
+    let (work, slot, source, sha):(Uuid,String,Uuid,String)=sqlx::query_as("SELECT o.content_public_ref,j.slot_key,m.materialization_ref,j.blob_sha256 FROM linggan_media_processing_job j JOIN linggan_material_media_origin o ON o.slot_key=j.slot_key JOIN linggan_media_download_attempt a ON a.media_observation_ref=o.observation_ref JOIN linggan_media_materialization m USING(download_attempt_ref) WHERE j.job_ref=$1 AND m.blob_sha256=j.blob_sha256 ORDER BY o.source_generation DESC,m.verified_at DESC LIMIT 1").bind(job_ref).fetch_one(database.pool()).await.unwrap();
+    let mut tx = database.pool().begin().await.unwrap();
+    let reading=linggan_evidence::material_reading::publish_in(&mut tx,linggan_evidence::material_reading::NewReading {
+        content_public_ref:work,unit_key:format!("image:{slot}"),kind:"image".into(),slot_key:Some(slot),page:None,source_version:source.to_string(),source_state:"present".into(),derivative_ref:Some(derivative),producer_ref:Some(job_ref),generated_by:"ordinary_ocr".into(),rule_version:"dossier-content.v2:synthetic-current-local".into(),blocks:vec![json!({"kind":"paragraph","text":"Synthetic current OCR proof.","speaker":"unconfirmed"})],issues:vec![],source_location:json!({"materializationRef":source,"blobSha256":sha}),publication:linggan_evidence::material_reading::Publication::Automatic{expected_current:None}
+    }).await.unwrap();
+    assert!(reading.current);
+    tx.commit().await.unwrap();
+    derivative
 }
 
 pub(super) async fn seed_media_refresh(database: &Database) {

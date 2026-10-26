@@ -465,7 +465,16 @@ try {
     const originals=dossier.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
     assert.equal(await originals.getAttribute('open'),null);
     const imageRef=await dossier.locator('[data-source-unit-ref]:has(img)').first().getAttribute('data-source-unit-ref');
-    await dossier.locator(`[data-unit-ref="${imageRef}"]`).getByRole('button',{name:'查看来源',exact:true}).first().click();
+    const readableImage=dossier.locator(`[data-unit-ref="${imageRef}"]`);
+    if (await readableImage.count()) {
+      await readableImage.getByRole('button',{name:'查看来源',exact:true}).first().click();
+    } else {
+      const label=(await dossier.locator(`[data-source-unit-ref="${imageRef}"] h4`).textContent())?.replace(/\s*·\s*原件$/, '').trim();
+      assert.ok(label, 'empty material source has an explicit source label');
+      const emptyState=dossier.locator('summary').filter({hasText:/^材料状态/}).locator('xpath=..');
+      if (await emptyState.getAttribute('open')===null) await emptyState.locator(':scope > summary').click();
+      await dossier.getByRole('region',{name:`${label}材料状态`,exact:true}).getByRole('button',{name:'查看来源',exact:true}).click();
+    }
     assert.notEqual(await originals.getAttribute('open'),null);
     const original=dossier.locator('[data-source-unit-ref]:has(img)').first();
     await original.getByRole('img').evaluate(node=>node.decode());

@@ -329,10 +329,22 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
         .sum();
     // A persisted pointer alone can outlive the source. Reuse the canonical reader's
     // current source/restriction rules when reporting that a result is in the dossier.
-    let mut conn=db.pool().acquire().await?;
-    let now:String=sqlx::query_scalar("SELECT scope_001_now()::text").fetch_one(&mut *conn).await?;
-    let current=linggan_evidence::material_reading::read_current_in(&mut conn,&[work],&now).await?;
-    let current_refs:std::collections::HashSet<Uuid>=current.get(&work).into_iter().flatten().filter_map(|u|u["currentRevisionRef"].as_str().and_then(|s|Uuid::parse_str(s).ok())).collect();
+    let mut conn = db.pool().acquire().await?;
+    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *conn)
+        .await?;
+    let current =
+        linggan_evidence::material_reading::read_current_in(&mut conn, &[work], &now).await?;
+    let current_refs: std::collections::HashSet<Uuid> = current
+        .get(&work)
+        .into_iter()
+        .flatten()
+        .filter_map(|u| {
+            u["currentRevisionRef"]
+                .as_str()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
+        .collect();
     drop(conn);
     let image_json = items
         .iter()

@@ -12,7 +12,8 @@ async fn storage_batch(db: &Database, task: &str, count: i32) -> Uuid {
     let mut tx = db.pool().begin().await.unwrap();
     sqlx::query("INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt) VALUES($1,'synthetic_storage_fixture','{\"syntheticFixture\":true}','{\"syntheticFixture\":true}')")
         .bind(command).execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,execution_contract,material_columns,budget_mode,origin,command_ref) VALUES($1,$2,'synthetic.round-storage.v1','[\"title\"]','unconfigured','human',$3)")
+    // Enforce an active task's current contract; dormant tasks retain an explicit synthetic stamp.
+    sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,execution_contract,material_columns,budget_mode,origin,command_ref) VALUES($1,$2,COALESCE((SELECT handler_contract FROM linggan_ai_task WHERE task_key=$2),'synthetic.round-storage.v1'),'[\"title\"]','unconfigured','human',$3)")
         .bind(config).bind(task).bind(command).execute(&mut *tx).await.unwrap();
     sqlx::query("INSERT INTO linggan_ai_batch(batch_ref,task_key,task_config_ref,kind,inputs_sha256,item_count,command_ref) VALUES($1,$2,$3,CASE WHEN $4>50 THEN 'interactive' ELSE 'trial' END,repeat('0',64),$4,$5)")
         .bind(batch).bind(task).bind(config).bind(count).bind(command).execute(&mut *tx).await.unwrap();

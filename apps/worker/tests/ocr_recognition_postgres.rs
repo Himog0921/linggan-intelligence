@@ -239,10 +239,27 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
             .any(|b| b["issues"].as_array().is_some_and(|i| !i.is_empty()))
     );
     let current_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_material_unit WHERE content_public_ref=$1 AND kind='image' AND current_reading_ref IS NOT NULL").bind(work).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(current_count,3,"successful cloud recognition publishes actual canonical readings");
-    assert!(images.iter().all(|image|image["readingRef"].is_string() && image["isCurrent"]==true));
-    let dossier=linggan_evidence::research_dossier::read(&db,work).await.unwrap().unwrap();
-    assert_eq!(dossier.materials.iter().filter(|u|u["kind"]=="image" && u["currentRevisionRef"].is_string()).count(),3);
+    assert_eq!(
+        current_count, 3,
+        "successful cloud recognition publishes actual canonical readings"
+    );
+    assert!(
+        images
+            .iter()
+            .all(|image| image["readingRef"].is_string() && image["isCurrent"] == true)
+    );
+    let dossier = linggan_evidence::research_dossier::read(&db, work)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        dossier
+            .materials
+            .iter()
+            .filter(|u| u["kind"] == "image" && u["currentRevisionRef"].is_string())
+            .count(),
+        3
+    );
     linggan_evidence::ensure_media_processing_work(&db)
         .await
         .unwrap();

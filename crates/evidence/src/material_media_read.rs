@@ -822,12 +822,12 @@ async fn read_derivative_rows(
          FROM requested_slots JOIN linggan_media_processing_job job USING(slot_key) JOIN linggan_media_slot slot USING (slot_key) \
          LEFT JOIN LATERAL (SELECT state,reason FROM linggan_media_processing_job_event event WHERE event.job_ref=job.job_ref AND occurred_at <= $2::timestamptz ORDER BY occurred_at DESC LIMIT 1) event ON true \
          LEFT JOIN linggan_media_derivative derivative ON derivative.job_ref=job.job_ref AND derivative.created_at <= $2::timestamptz \
-         LEFT JOIN linggan_material_derived_text derived ON derived.derivative_ref=derivative.derivative_ref AND derived.created_at <= $2::timestamptz \
+         LEFT JOIN linggan_material_derived_text derived ON derived.derivative_ref=derivative.derivative_ref AND job.processor_kind='asr' AND derived.created_at <= $2::timestamptz \
          LEFT JOIN restricted_slots restricted_slot ON restricted_slot.slot_key=job.slot_key \
          LEFT JOIN restricted_blobs restricted_blob ON restricted_blob.blob_sha256=job.blob_sha256 \
          LEFT JOIN restricted_derivatives restricted_derivative ON restricted_derivative.derivative_ref=derivative.derivative_ref \
          {retirement_join} \
-         WHERE job.processor_kind IN ('thumbnail','audio_extract','asr') AND job.created_at <= $2::timestamptz \
+         WHERE job.processor_kind IN ('image_ocr','video_frame_ocr','thumbnail','audio_extract','asr') AND job.created_at <= $2::timestamptz \
          ) SELECT * FROM derivative_rows WHERE row_ordinal > $3 AND row_ordinal <= $3 + $4 \
          ORDER BY content_public_ref,row_ordinal"
     )))

@@ -29,7 +29,7 @@ use linggan_intelligence::{
     model_secrets::SyntheticModelSecrets,
     pi_adapter::PiAdapter,
 };
-use linggan_storage_postgres::Database;
+use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use serde_json::{Value, json};
 use std::{path::PathBuf, time::Duration};
 use uuid::Uuid;
@@ -40,6 +40,15 @@ fn adapter() -> PiAdapter {
         ),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/pi-adapter/src/adapter.mjs"),
     )
+}
+
+async fn pre_writing_bridge_database(schema: &str) -> Database {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
+    // This historical subset extends through 0150 but deliberately
+    // omits creation 0127/0128 and writing cutovers 0140/0141/0148, applied below.
+    isolated_proof_schema(&url, schema, fixture::dossier::fixture::MIGRATIONS)
+        .await
+        .expect("pre-writing-bridge proof schema is created")
 }
 
 #[tokio::test]
@@ -108,7 +117,7 @@ async fn dossier_contract_cutover_keeps_history_inert_and_accepts_v2_preview() {
 #[tokio::test]
 #[ignore = "disposable PostgreSQL deferred-constraint migration proof; no provider"]
 async fn dossier_contract_cutover_validates_pending_seed_constraints_before_ddl() {
-    let db = fixture::dossier::fixture::proof_database("dossier_deferred_seed").await;
+    let db = pre_writing_bridge_database("dossier_deferred_seed").await;
     let mut tx = db.pool().begin().await.unwrap();
     for migration in [
         include_str!("../../../database/migrations/0127_content_workbench.sql"),
@@ -151,7 +160,7 @@ async fn dossier_contract_cutover_validates_pending_seed_constraints_before_ddl(
 #[ignore = "disposable PostgreSQL migration proof; synthetic legacy rows only"]
 async fn writing_upgrade_rejects_old_inflight_without_rewriting_history_then_accepts_a_settled_legacy_receipt()
  {
-    let db = fixture::dossier::fixture::proof_database("ai_writing_upgrade").await;
+    let db = pre_writing_bridge_database("ai_writing_upgrade").await;
     for migration in [
         include_str!("../../../database/migrations/0127_content_workbench.sql"),
         include_str!("../../../database/migrations/0128_content_workbench_ai.sql"),

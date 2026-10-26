@@ -53,7 +53,37 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     let _fixture_files = LocalFixtureFiles::new(vec![blob_path.clone(), derivative_path.clone()]);
     std::fs::create_dir_all(derivative_path.parent().unwrap()).unwrap();
     std::fs::write(&derivative_path, b"ocr-proof-bytes").unwrap();
+    let reference: uuid::Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_media_origin WHERE observation_ref=$1",
+    )
+    .bind(observation_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let before_refresh = linggan_evidence::research_dossier::read(&database, reference)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        before_refresh
+            .materials
+            .iter()
+            .any(|m| m["kind"] == "image" && m["currentRevisionRef"].is_string()),
+        "qualified source has the seeded canonical OCR reading"
+    );
     seed_media_refresh(&database).await;
+    let after_refresh = linggan_evidence::research_dossier::read(&database, reference)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        after_refresh
+            .materials
+            .iter()
+            .filter(|m| m["kind"] == "image")
+            .all(|m| m["sourceState"] == "not_acquired" && m["currentRevisionRef"].is_null()),
+        "a changed observation without verified bytes cannot borrow an old OCR reading"
+    );
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
@@ -252,7 +282,7 @@ fn assert_media_payload(payload: &Value) {
         payload
             .pointer("/laneSummaries/7/state")
             .and_then(Value::as_str),
-        Some("ACQUIRED")
+        Some("NOT_OBSERVED")
     );
     assert!(
         payload
