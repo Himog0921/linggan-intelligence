@@ -59,6 +59,15 @@ pub async fn read_ops_accounts(
     business: OpsBusiness,
     operator: Option<&str>,
 ) -> Result<OpsAccountPage, OpsReadError> {
+    read_ops_accounts_scoped(database, business, operator, None).await
+}
+
+pub async fn read_ops_accounts_scoped(
+    database: &Database,
+    business: OpsBusiness,
+    operator: Option<&str>,
+    member_refs: Option<&[Uuid]>,
+) -> Result<OpsAccountPage, OpsReadError> {
     ensure_business(database, business).await?;
     let operator = operator.map(str::trim).filter(|text| !text.is_empty());
     let scope = sqlx::query(
@@ -66,9 +75,11 @@ pub async fn read_ops_accounts(
              AND (source_system='content_workbench' OR native_record_state='active')) AS active \
            FROM linggan_ops_account WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
              OR source_system='linggan_native') \
-             AND ($1::uuid IS NULL OR domain_ref = $1)",
+             AND ($1::uuid IS NULL OR domain_ref = $1) \
+             AND ($2::uuid[] IS NULL OR current_responsible_member_ref=ANY($2))",
     )
     .bind(business.domain_ref())
+    .bind(member_refs)
     .fetch_one(database.pool())
     .await?;
     let rows = sqlx::query(
@@ -84,10 +95,12 @@ pub async fn read_ops_accounts(
              OR account.source_system='linggan_native') \
             AND ($1::uuid IS NULL OR account.domain_ref = $1) \
             AND ($2::text IS NULL OR account.operator_name = $2) \
+            AND ($3::uuid[] IS NULL OR account.current_responsible_member_ref=ANY($3)) \
           ORDER BY account.operator_name NULLS LAST, account.platform, account.account_name, account.account_ref",
     )
     .bind(business.domain_ref())
     .bind(operator)
+    .bind(member_refs)
     .fetch_all(database.pool())
     .await?;
     let items = rows
@@ -125,9 +138,11 @@ pub async fn read_ops_accounts(
               WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
                  OR source_system='linggan_native') \
                 AND operator_name IS NOT NULL \
-                AND ($1::uuid IS NULL OR domain_ref = $1) ORDER BY 1",
+                AND ($1::uuid IS NULL OR domain_ref = $1) \
+                AND ($2::uuid[] IS NULL OR current_responsible_member_ref=ANY($2)) ORDER BY 1",
         )
         .bind(business.domain_ref())
+        .bind(member_refs)
         .fetch_all(database.pool())
         .await?,
     )?;

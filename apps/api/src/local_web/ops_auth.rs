@@ -3,7 +3,7 @@
 use super::*;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
-    Extension, Json, Router,
+    Json, Router,
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
@@ -14,6 +14,8 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Transaction};
+use subtle::ConstantTimeEq;
+use unicode_normalization::UnicodeNormalization;
 use uuid::Uuid;
 
 const SESSION_COOKIE: &str = "linggan_ops_session";
@@ -98,7 +100,6 @@ pub(super) struct AuthenticatedMember {
 
 async fn login(
     State(state): State<LocalWebState>,
-    Extension(public_access): Extension<super::public_access::PublicAccess>,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> Response {
@@ -107,10 +108,6 @@ async fn login(
     };
     let email = normalize_email(&request.email);
     let token = new_session_token();
-    let is_public = headers
-        .get(header::HOST)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|host| public_access.is_public_host(host));
     let result: Result<Option<AuthenticatedMember>, sqlx::Error> = async {
         let mut transaction = database.pool().begin().await?;
         let member = sqlx::query_as::<_, (Uuid, String, String, String)>(
@@ -125,9 +122,6 @@ async fn login(
             return Ok(None);
         };
         if !password_matches(&member.3, &request.password) {
-            return Ok(None);
-        }
-        if is_public && member.2 != "admin" {
             return Ok(None);
         }
         issue_session_transaction(&mut transaction, member.0, &token).await?;
@@ -178,9 +172,28 @@ async fn list_members(State(state): State<LocalWebState>, headers: HeaderMap) ->
     .await;
     match members {
         Ok(members) => {
-            let members = members.into_iter().map(|(member_ref, email, display_name, role, state, version, current_account_count)| TeamMemberView {
-                member_ref, email, display_name, role, state, version, current_account_count,
-            }).collect::<Vec<_>>();
+            let members = members
+                .into_iter()
+                .map(
+                    |(
+                        member_ref,
+                        email,
+                        display_name,
+                        role,
+                        state,
+                        version,
+                        current_account_count,
+                    )| TeamMemberView {
+                        member_ref,
+                        email,
+                        display_name,
+                        role,
+                        state,
+                        version,
+                        current_account_count,
+                    },
+                )
+                .collect::<Vec<_>>();
             let mut response = Json(json!({"members":members})).into_response();
             secure_headers(&mut response);
             response
@@ -297,8 +310,15 @@ async fn deactivate_member(
         Err(response) => return response,
     };
     let reason = request.reason.trim();
-    if request.expected_version <= 0 || reason.is_empty() || reason.len() > 1000 || target_member_ref == actor.member_ref {
-        return request_error(StatusCode::UNPROCESSABLE_ENTITY, "ops_member_deactivation_invalid");
+    if request.expected_version <= 0
+        || reason.is_empty()
+        || reason.len() > 1000
+        || target_member_ref == actor.member_ref
+    {
+        return request_error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "ops_member_deactivation_invalid",
+        );
     }
     let Some(database) = state.database.database() else {
         return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable");
@@ -344,10 +364,22 @@ async fn deactivate_member(
         let status = if outcome == "accepted" || outcome == "unchanged" { StatusCode::OK } else { StatusCode::CONFLICT };
         Ok((status, json!({"requestId":request.request_id,"outcome":outcome,"code":code,"unassignedAccountCount":count,"resultingVersion":result_version,"replayed":false})))
     }.await;
-    match result { Ok((status, body)) => { let mut response = (status, Json(body)).into_response(); secure_headers(&mut response); response }, Err(response) => response }
+    match result {
+        Ok((status, body)) => {
+            let mut response = (status, Json(body)).into_response();
+            secure_headers(&mut response);
+            response
+        }
+        Err(response) => response,
+    }
 }
 
-async fn deactivate_in(transaction: &mut Transaction<'_, Postgres>, target: Uuid, actor: Uuid, reason: &str) -> Result<(&'static str, &'static str, Option<i64>, i32), sqlx::Error> {
+async fn deactivate_in(
+    transaction: &mut Transaction<'_, Postgres>,
+    target: Uuid,
+    actor: Uuid,
+    reason: &str,
+) -> Result<(&'static str, &'static str, Option<i64>, i32), sqlx::Error> {
     let version: i64 = sqlx::query_scalar("UPDATE linggan_ops_member SET state='disabled',disabled_at=scope_001_now(),version=version+1 WHERE member_ref=$1 RETURNING version")
         .bind(target).fetch_one(&mut **transaction).await?;
     sqlx::query("UPDATE linggan_ops_session SET revoked_at=scope_001_now(),revoked_reason='member_disabled' WHERE member_ref=$1 AND revoked_at IS NULL")
@@ -362,7 +394,12 @@ async fn deactivate_in(transaction: &mut Transaction<'_, Postgres>, target: Uuid
         sqlx::query("INSERT INTO linggan_ops_account_responsibility_change (change_ref,account_ref,previous_member_ref,next_member_ref,changed_by_member_ref,reason,request_ref,resulting_version) VALUES($1,$2,$3,NULL,$4,$5,$6,$7)")
             .bind(Uuid::new_v4()).bind(account_ref).bind(target).bind(actor).bind(format!("成员停用：{reason}")).bind(Uuid::new_v4()).bind(resulting_version).execute(&mut **transaction).await?;
     }
-    Ok(("accepted", "ops_member_deactivated", Some(version), i32::try_from(accounts.len()).unwrap_or(i32::MAX)))
+    Ok((
+        "accepted",
+        "ops_member_deactivated",
+        Some(version),
+        i32::try_from(accounts.len()).unwrap_or(i32::MAX),
+    ))
 }
 
 async fn create_invitation(
@@ -607,12 +644,67 @@ fn normalize_email(value: &str) -> String {
 }
 
 fn password_matches(password_hash: &str, password: &str) -> bool {
+    if let Some(workbench_hash) = password_hash.strip_prefix("workbench-scrypt$") {
+        return workbench_password_matches(workbench_hash, password);
+    }
     let Ok(parsed) = PasswordHash::new(password_hash) else {
         return false;
     };
     Argon2::default()
         .verify_password(password.as_bytes(), &parsed)
         .is_ok()
+}
+
+/// Better Auth 1.6.9 stores `hex(salt):hex(scrypt(N=16384,r=16,p=1,dkLen=64))`.
+/// Its salt input is the ASCII hex text and its password input is NFKC-normalized.
+/// The prefix keeps imported verifiers distinct from Intelligence's Argon2 hashes.
+fn workbench_password_matches(hash: &str, password: &str) -> bool {
+    let Some((salt, expected)) = hash.split_once(':') else {
+        return false;
+    };
+    if salt.len() != 32
+        || expected.len() != 128
+        || !salt.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return false;
+    }
+    let Ok(expected) = hex::decode(expected) else {
+        return false;
+    };
+    let Ok(params) = scrypt::Params::new(14, 16, 1, 64) else {
+        return false;
+    };
+    let mut calculated = [0_u8; 64];
+    let normalized = password.nfkc().collect::<String>();
+    if scrypt::scrypt(
+        normalized.as_bytes(),
+        salt.as_bytes(),
+        &params,
+        &mut calculated,
+    )
+    .is_err()
+    {
+        return false;
+    }
+    bool::from(calculated.ct_eq(expected.as_slice()))
+}
+
+#[cfg(test)]
+mod workbench_password_tests {
+    use super::password_matches;
+
+    #[test]
+    fn imported_better_auth_verifier_accepts_existing_password_without_reset() {
+        // Synthetic Better Auth 1.6.9 vector; no real member credential is in the test.
+        let hash = "workbench-scrypt$00112233445566778899aabbccddeeff:503d058ffa344ded3ade56ae37c931eeefdf127685942056bd9f50687f4fc3ced01bc958abc4957631dbc6774e6ff941d25010d5b60c8ae0b261cb36ada8b5bb";
+        assert!(password_matches(hash, "Ｐassword１２３"));
+        assert!(password_matches(hash, "Password123"));
+        assert!(!password_matches(hash, "wrong-password"));
+        assert!(!password_matches(
+            "workbench-scrypt$not-a-hash",
+            "Password123"
+        ));
+    }
 }
 
 fn hash_password(password: &str) -> Result<String, argon2::password_hash::Error> {

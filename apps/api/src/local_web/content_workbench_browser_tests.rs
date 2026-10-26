@@ -142,7 +142,9 @@ async fn content_workbench_real_chain_browser_proof() {
         )
         .unwrap()
         .to_string();
-    sqlx::query("INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) VALUES($1,'workbench-browser@example.test','创作合成运营','operator','active',$2,scope_001_now())")
+    // This proof traverses the creation workbench and selects a seeded account across
+    // the full fixture. The public operator contract is limited to three Ops ledgers.
+    sqlx::query("INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) VALUES($1,'workbench-browser@example.test','创作合成管理员','admin','active',$2,scope_001_now())")
         .bind(Uuid::new_v4()).bind(password_hash).execute(db.pool()).await.unwrap();
     let before = side_effect_counts(&db).await;
     let application = app_with_database(db.clone());

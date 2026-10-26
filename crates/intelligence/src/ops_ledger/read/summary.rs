@@ -3,6 +3,7 @@
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use sqlx::Row;
+use uuid::Uuid;
 
 use super::{
     LATEST_VIEWS_CTE, OpsAsOf, OpsBusiness, OpsReadError, ensure_business, read_ops_as_of,
@@ -42,6 +43,14 @@ pub async fn read_ops_summary(
     database: &Database,
     business: OpsBusiness,
 ) -> Result<OpsSummary, OpsReadError> {
+    read_ops_summary_scoped(database, business, None).await
+}
+
+pub async fn read_ops_summary_scoped(
+    database: &Database,
+    business: OpsBusiness,
+    member_refs: Option<&[Uuid]>,
+) -> Result<OpsSummary, OpsReadError> {
     ensure_business(database, business).await?;
     let as_of = read_ops_as_of(database).await?;
     let month: String =
@@ -53,12 +62,17 @@ pub async fn read_ops_summary(
     };
     let native_data_present: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_ops_account \
-                         WHERE source_system='linggan_native' AND native_record_state='active') \
+                         WHERE source_system='linggan_native' AND native_record_state='active' \
+                           AND ($1::uuid[] IS NULL OR current_responsible_member_ref=ANY($1))) \
              OR EXISTS (SELECT 1 FROM linggan_ops_publication \
-                         WHERE source_system='linggan_native' AND native_record_state='active') \
+                         WHERE source_system='linggan_native' AND native_record_state='active' \
+                           AND ($1::uuid[] IS NULL OR native_publisher_member_ref=ANY($1) \
+                                OR account_ref IN (SELECT account_ref FROM linggan_ops_account WHERE current_responsible_member_ref=ANY($1)))) \
              OR EXISTS (SELECT 1 FROM linggan_ops_daily_report \
-                         WHERE source_system='linggan_native' AND missing_since_batch_ref IS NULL)",
+                         WHERE source_system='linggan_native' AND missing_since_batch_ref IS NULL \
+                           AND ($1::uuid[] IS NULL OR native_member_ref=ANY($1)))",
     )
+    .bind(member_refs)
     .fetch_one(database.pool())
     .await?;
     if as_of.is_none() && !native_data_present {
@@ -82,9 +96,11 @@ pub async fn read_ops_summary(
            FROM linggan_ops_account \
           WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
              OR (source_system='linggan_native' AND native_record_state='active')) \
-            AND ($1::uuid IS NULL OR domain_ref = $1)",
+            AND ($1::uuid IS NULL OR domain_ref = $1) \
+            AND ($2::uuid[] IS NULL OR current_responsible_member_ref=ANY($2))",
     )
     .bind(business.domain_ref())
+    .bind(member_refs)
     .fetch_one(database.pool())
     .await?;
     let publications = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -97,20 +113,32 @@ pub async fn read_ops_summary(
           WHERE p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL \
             AND (p.source_system <> 'linggan_native' OR p.native_record_state = 'active') \
             AND ($1::uuid IS NULL OR a.domain_ref = $1) \
-            AND to_char(coalesce(p.published_business_date,p.native_published_on), 'YYYY-MM') = $3"
+            AND to_char(coalesce(p.published_business_date,p.native_published_on), 'YYYY-MM') = $3 \
+            AND ($4::uuid[] IS NULL OR (p.source_system='linggan_native' AND (p.native_publisher_member_ref=ANY($4) OR a.current_responsible_member_ref=ANY($4))) \
+                 OR (p.source_system='content_workbench' AND (SELECT resolution.resolved_member_ref \
+                      FROM linggan_ops_historical_owner_resolution resolution \
+                     WHERE resolution.publication_ref=p.publication_ref \
+                     ORDER BY resolution.decided_at DESC,resolution.resolution_ref DESC LIMIT 1)=ANY($4)))"
     )))
     .bind(business.domain_ref())
     .bind(XHS_HIT_VIEW_THRESHOLD)
     .bind(&month)
+    .bind(member_refs)
     .fetch_one(database.pool())
     .await?;
     // Daily reports are kept per operator, not per business; with no row this month the sum is
     // unknown rather than zero.
     let followers: Option<i64> = sqlx::query_scalar(
         "SELECT sum(followers_gained)::bigint FROM linggan_ops_daily_report \
-          WHERE missing_since_batch_ref IS NULL AND to_char(business_date, 'YYYY-MM') = $1",
+          WHERE missing_since_batch_ref IS NULL AND to_char(business_date, 'YYYY-MM') = $1 \
+            AND ($2::uuid[] IS NULL OR (source_system='linggan_native' AND native_member_ref=ANY($2)) \
+                 OR (source_system='content_workbench' AND (SELECT resolution.resolved_member_ref \
+                      FROM linggan_ops_historical_owner_resolution resolution \
+                     WHERE resolution.daily_ref=linggan_ops_daily_report.daily_ref \
+                     ORDER BY resolution.decided_at DESC,resolution.resolution_ref DESC LIMIT 1)=ANY($2)))",
     )
     .bind(&month)
+    .bind(member_refs)
     .fetch_one(database.pool())
     .await?;
     Ok(OpsSummary {

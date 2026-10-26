@@ -24,6 +24,7 @@ interface AppShellProps {
   children: ReactNode;
   /** V3 创作专用空间；其他页面继续使用迁移期标准页头。 */
   workbenchMode?: 'compact' | 'immersive';
+  restrictedOps?: boolean;
 }
 
 interface EntryStates {
@@ -67,7 +68,7 @@ function PrimaryEntryLink({ entry, active, states }: { entry: PrimaryEntry; acti
 /**
  * 全站唯一 React 页头；样式由 apps/web/src/styles/shell.css 提供。
  */
-export function AppShell({ className, active, activeState, collectionState, boundaryLabel, crumb, contextNav, meta, children, workbenchMode }: AppShellProps) {
+export function AppShell({ className, active, activeState, collectionState, boundaryLabel, crumb, contextNav, meta, children, workbenchMode, restrictedOps = false }: AppShellProps) {
   const states: EntryStates = { activeState, collectionState };
   const [collapsed, setCollapsed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -139,8 +140,8 @@ export function AppShell({ className, active, activeState, collectionState, boun
           }}>
             <summary>intelligence <span aria-hidden="true">⌄</span></summary>
             <nav aria-label="一级导航">
-              {PRIMARY_ENTRIES.map(entry => entry.href ? <a key={entry.zh} href={entry.href} aria-current={entry.surface === active ? 'page' : undefined}>{entry.zh}</a> : <span key={entry.zh} aria-disabled="true">{entry.zh} · 未开放</span>)}
-              {PERSONAL_MENU_LINKS.map(link => <a key={link.href} href={link.href}>{link.label}</a>)}
+              {PRIMARY_ENTRIES.filter(entry => !restrictedOps || entry.surface === 'ops').map(entry => entry.href ? <a key={entry.zh} href={entry.href} aria-current={entry.surface === active ? 'page' : undefined}>{entry.zh}</a> : <span key={entry.zh} aria-disabled="true">{entry.zh} · 未开放</span>)}
+              {PERSONAL_MENU_LINKS.filter(link => !restrictedOps || link.href === '/settings/account').map(link => <a key={link.href} href={link.href}>{link.label}</a>)}
               <FontNotice/>
             </nav>
           </details>
@@ -165,7 +166,7 @@ export function AppShell({ className, active, activeState, collectionState, boun
             </div>
           </div>
           <nav className="v7-primary-nav" aria-label="一级导航">
-            {PRIMARY_ENTRIES.map(entry => (
+            {PRIMARY_ENTRIES.filter(entry => !restrictedOps || entry.surface === 'ops').map(entry => (
               <PrimaryEntryLink key={entry.zh} entry={entry} active={active} states={states} />
             ))}
           </nav>
@@ -175,7 +176,7 @@ export function AppShell({ className, active, activeState, collectionState, boun
             <details className="v7-personal-menu">
               <summary className="v7-global-command">个人菜单</summary>
               <nav aria-label="个人菜单">
-                {PERSONAL_MENU_LINKS.map(link => (
+                {PERSONAL_MENU_LINKS.filter(link => !restrictedOps || link.href === '/settings/account').map(link => (
                   <a key={link.href} href={link.href}>
                     {link.label}
                   </a>

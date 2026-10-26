@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; set LOCAL_001_PROOF_DATABASE_URL"]
-async fn public_admin_access_requires_live_session_and_preserves_inner_origin_guards() {
+async fn public_team_access_requires_live_session_and_preserves_inner_origin_guards() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("public_access_{}", Uuid::new_v4().simple());
     let database = linggan_storage_postgres::testing::isolated_proof_schema(
@@ -23,6 +23,14 @@ async fn public_admin_access_requires_live_session_and_preserves_inner_origin_gu
     .unwrap();
     let admin = active_member(database.pool(), "admin-public@example.test", "admin").await;
     let operator = active_member(database.pool(), "operator-public@example.test", "operator").await;
+    // This synthetic Better Auth credential exercises the same imported verifier path as the
+    // production handover, through real PostgreSQL and the public login route.
+    sqlx::query("UPDATE linggan_ops_member SET password_hash=$2 WHERE member_ref=$1")
+        .bind(operator)
+        .bind("workbench-scrypt$00112233445566778899aabbccddeeff:503d058ffa344ded3ade56ae37c931eeefdf127685942056bd9f50687f4fc3ced01bc958abc4957631dbc6774e6ff941d25010d5b60c8ae0b261cb36ada8b5bb")
+        .execute(database.pool())
+        .await
+        .unwrap();
     let app = router_with_public_access(
         LocalWebState {
             database: LocalDatabaseState::Ready(Arc::new(database.clone())),
@@ -67,11 +75,11 @@ async fn public_admin_access_requires_live_session_and_preserves_inner_origin_gu
         "POST",
         "/api/local/auth/login",
         None,
-        r#"{"email":"operator-public@example.test","password":"synthetic-password-only"}"#,
+        r#"{"email":"operator-public@example.test","password":"Password123"}"#,
     );
     let operator_login = app.clone().oneshot(operator_login).await.unwrap();
-    assert_eq!(operator_login.status(), StatusCode::UNAUTHORIZED);
-    assert!(!operator_login.headers().contains_key(header::SET_COOKIE));
+    assert_eq!(operator_login.status(), StatusCode::OK);
+    assert!(operator_login.headers().contains_key(header::SET_COOKIE));
     let operator_cookie = fresh_session(database.pool(), operator).await;
     let operator_session =
         public_request("GET", "/api/local/auth/session", Some(&operator_cookie), "");
@@ -81,6 +89,35 @@ async fn public_admin_access_requires_live_session_and_preserves_inner_origin_gu
             .await
             .unwrap()
             .status(),
+        StatusCode::OK
+    );
+    let operator_ledger =
+        public_request("GET", "/api/local/ops/accounts", Some(&operator_cookie), "");
+    assert_eq!(
+        app.clone().oneshot(operator_ledger).await.unwrap().status(),
+        StatusCode::OK
+    );
+    for (method, path) in [
+        ("POST", "/api/local/ops/publication-syncs"),
+        (
+            "GET",
+            "/api/local/ops/publication-syncs/00000000-0000-0000-0000-000000000001",
+        ),
+    ] {
+        let blocked = public_request(method, path, Some(&operator_cookie), "{}");
+        assert_eq!(
+            app.clone().oneshot(blocked).await.unwrap().status(),
+            StatusCode::FORBIDDEN
+        );
+    }
+    let operator_unsafe = public_request(
+        "GET",
+        "/api/local/comment-study/selection-preview",
+        Some(&operator_cookie),
+        "",
+    );
+    assert_eq!(
+        app.clone().oneshot(operator_unsafe).await.unwrap().status(),
         StatusCode::FORBIDDEN
     );
 
@@ -284,11 +321,20 @@ async fn administrator_roster_exposes_lifecycle_and_current_responsibility_witho
     let operator = active_member(database.pool(), "operator@example.test", "operator").await;
     let app = app_with_database(database.clone());
     let operator_cookie = stored_session(
-        database.pool(), operator, "roster_operator_session", "0 seconds", "1 hour",
-    ).await;
+        database.pool(),
+        operator,
+        "roster_operator_session",
+        "0 seconds",
+        "1 hour",
+    )
+    .await;
     assert_eq!(
         app.clone()
-            .oneshot(session_request("/api/local/auth/members", &operator_cookie, "GET"))
+            .oneshot(session_request(
+                "/api/local/auth/members",
+                &operator_cookie,
+                "GET"
+            ))
             .await
             .unwrap()
             .status(),
@@ -296,12 +342,21 @@ async fn administrator_roster_exposes_lifecycle_and_current_responsibility_witho
         "the active roster selector is not a management roster"
     );
     let admin_cookie = stored_session(
-        database.pool(), admin, "roster_admin_session", "0 seconds", "1 hour",
-    ).await;
+        database.pool(),
+        admin,
+        "roster_admin_session",
+        "0 seconds",
+        "1 hour",
+    )
+    .await;
     let (status, roster) = json_response(
-        app.oneshot(session_request("/api/local/auth/members", &admin_cookie, "GET"))
-            .await
-            .unwrap(),
+        app.oneshot(session_request(
+            "/api/local/auth/members",
+            &admin_cookie,
+            "GET",
+        ))
+        .await
+        .unwrap(),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -449,16 +504,13 @@ async fn ops_ledger_routes_require_an_active_team_session_without_claiming_the_c
         .await
         .unwrap();
     assert_eq!(redirect.status(), StatusCode::SEE_OTHER);
-    assert_eq!(redirect.headers()[header::LOCATION], "/ops/creation");
+    assert_eq!(redirect.headers()[header::LOCATION], "/ops/publications");
     let page = app
         .clone()
         .oneshot(session_request("/ops/overview", &cookie, "GET"))
         .await
         .unwrap();
-    assert!(matches!(
-        page.status(),
-        StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-    ));
+    assert_eq!(page.status(), StatusCode::FORBIDDEN);
     for (method, path) in protected {
         let response = app
             .clone()

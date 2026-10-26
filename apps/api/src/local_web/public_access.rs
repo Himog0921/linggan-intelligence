@@ -117,6 +117,31 @@ fn anonymous_path(method: &Method, path: &str) -> bool {
             ))
 }
 
+/// The public member surface is limited to the three Operations ledgers and account security.
+/// Other Intelligence areas remain available to the administrator only.
+fn member_path(method: &Method, path: &str) -> bool {
+    (method == Method::GET
+        && matches!(
+            path,
+            "/ops"
+                | "/ops/publications"
+                | "/ops/accounts"
+                | "/ops/daily"
+                | "/settings/account"
+                | "/api/local/auth/session"
+                | "/api/local/ops/businesses"
+                | "/api/local/ops/summary"
+                | "/api/local/ops/publications"
+                | "/api/local/ops/accounts"
+                | "/api/local/ops/members"
+                | "/api/local/ops/daily"
+                | "/api/local/ops/export"
+        ))
+        || (method == Method::GET && path.starts_with("/ops/covers/"))
+        || (method == Method::POST && path == "/api/local/auth/password/change")
+        || (method == Method::POST && path.starts_with("/api/local/ops/native/"))
+}
+
 pub(super) async fn guard(
     State((state, access)): State<(LocalWebState, PublicAccess)>,
     mut request: Request,
@@ -159,7 +184,10 @@ pub(super) async fn guard(
             }
             if !anonymous_path(request.method(), path) {
                 match ops_auth::current_member(&state, request.headers()).await {
-                    Ok(member) if member.role == "admin" || path == "/api/local/auth/logout" => {}
+                    Ok(member)
+                        if member.role == "admin"
+                            || member_path(request.method(), path)
+                            || path == "/api/local/auth/logout" => {}
                     Ok(_) => return StatusCode::FORBIDDEN.into_response(),
                     Err(response) => return response,
                 }

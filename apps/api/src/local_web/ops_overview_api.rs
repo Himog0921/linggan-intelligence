@@ -50,7 +50,7 @@ async fn overview(
     headers: HeaderMap,
     Query(query): Query<OverviewQuery>,
 ) -> Response {
-    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+    if let Err(response) = require_admin(&state, &headers).await {
         return response;
     }
     let Some(database) = state.database.database() else {
@@ -77,7 +77,7 @@ async fn trend(
     headers: HeaderMap,
     Query(query): Query<OverviewQuery>,
 ) -> Response {
-    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+    if let Err(response) = require_admin(&state, &headers).await {
         return response;
     }
     let Some(database) = state.database.database() else {
@@ -96,7 +96,7 @@ async fn targets(
     headers: HeaderMap,
     Query(query): Query<TargetQuery>,
 ) -> Response {
-    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+    if let Err(response) = require_admin(&state, &headers).await {
         return response;
     }
     let Some(database) = state.database.database() else {
@@ -120,7 +120,7 @@ async fn save_target(
     headers: HeaderMap,
     body: Result<Json<SaveTargetBody>, JsonRejection>,
 ) -> Response {
-    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+    if let Err(response) = require_admin(&state, &headers).await {
         return response;
     }
     let Some(database) = state.database.database() else {
@@ -145,6 +145,18 @@ async fn save_target(
     match set_ops_target(database, &request).await {
         Ok(receipt) => Json(receipt).into_response(),
         Err(error) => target_error(error),
+    }
+}
+
+async fn require_admin(state: &LocalWebState, headers: &HeaderMap) -> Result<(), Response> {
+    let member = super::ops_auth::current_member(state, headers).await?;
+    if member.role == "admin" {
+        Ok(())
+    } else {
+        Err(local_read_json_error(
+            axum::http::StatusCode::FORBIDDEN,
+            "ops_auth_forbidden",
+        ))
     }
 }
 

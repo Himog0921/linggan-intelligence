@@ -28,7 +28,7 @@ describe('受邀团队登录', () => {
     fireEvent.click(screen.getByLabelText('记住邮箱'));
     fireEvent.click(screen.getByRole('button',{name:'登录'}));
     expect(screen.getByRole('button',{name:'正在进入'})).toBeDisabled();
-    await waitFor(() => expect(enter).toHaveBeenCalledWith('/ops/overview'));
+    await waitFor(() => expect(enter).toHaveBeenCalledWith('/ops/publications'));
     expect(fetch).toHaveBeenCalledWith('/api/local/auth/login', expect.objectContaining({ method: 'POST', credentials: 'same-origin' }));
     expect(screen.getByLabelText('密码')).toHaveValue('');
     expect(Object.entries(localStorage)).toEqual([['linggan.login.remembered-email','demo@example.com']]);
@@ -66,7 +66,7 @@ describe('受邀团队登录', () => {
     fireEvent.input(screen.getByLabelText('邮箱'),{target:{value:'demo@example.com'}});
     fireEvent.input(screen.getByLabelText('密码'),{target:{value:'demo-only'}});
     fireEvent.submit(document.getElementById('login-form')!);
-    await waitFor(() => expect(enter).toHaveBeenCalledWith('/ops/overview'));
+    await waitFor(() => expect(enter).toHaveBeenCalledWith('/ops/publications'));
     window.history.replaceState({}, '', '/');
   });
 });

@@ -14,20 +14,21 @@ use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
-pub use accounts::{OpsAccountItem, OpsAccountPage, read_ops_accounts};
+pub use accounts::{OpsAccountItem, OpsAccountPage, read_ops_accounts, read_ops_accounts_scoped};
 pub use creation_read::{
     CreationPublication, creation_publication_directory_in, read_creation_publications,
 };
-pub use daily::{OpsDailyItem, OpsDailyPage, read_ops_daily};
+pub use daily::{OpsDailyItem, OpsDailyPage, read_ops_daily, read_ops_daily_scoped};
 pub use overview::{
     OpsOverview, OpsOverviewQuery, OpsOverviewTrend, OverviewSlice, read_ops_overview,
     read_ops_overview_trend,
 };
 pub use publications::{
     OpsPublicationFilter, OpsPublicationItem, OpsPublicationPage, OpsViews,
-    read_ops_publication_export, read_ops_publications,
+    read_ops_publication_export, read_ops_publication_export_scoped, read_ops_publications,
+    read_ops_publications_scoped,
 };
-pub use summary::{OpsSummary, read_ops_summary};
+pub use summary::{OpsSummary, read_ops_summary, read_ops_summary_scoped};
 
 /// Shared CTE: the latest view-count report per publication (`value` or `cleared`).
 pub(super) const LATEST_VIEWS_CTE: &str = "latest_views AS ( \
@@ -97,6 +98,15 @@ pub struct OpsBusinessOption {
 pub async fn read_ops_businesses(
     database: &Database,
 ) -> Result<Vec<OpsBusinessOption>, OpsReadError> {
+    read_ops_businesses_scoped(database, None).await
+}
+
+/// `None` is administrator scope; a member/lead receives the current group member refs.
+/// The scope is supplied by the authenticated HTTP boundary, never by request parameters.
+pub async fn read_ops_businesses_scoped(
+    database: &Database,
+    member_refs: Option<&[Uuid]>,
+) -> Result<Vec<OpsBusinessOption>, OpsReadError> {
     let rows = sqlx::query(
         "SELECT d.domain_ref, d.name, count(*) AS account_count \
            FROM observation_domain d \
@@ -104,9 +114,11 @@ pub async fn read_ops_businesses(
              ON a.domain_ref = d.domain_ref \
             AND ((a.source_system='content_workbench' AND a.ledger_state='in_ledger') \
               OR (a.source_system='linggan_native' AND a.native_record_state='active')) \
+            AND ($1::uuid[] IS NULL OR a.current_responsible_member_ref=ANY($1)) \
           GROUP BY d.domain_ref, d.name, d.created_at \
           ORDER BY d.created_at, d.domain_ref",
     )
+    .bind(member_refs)
     .fetch_all(database.pool())
     .await?;
     rows.into_iter()

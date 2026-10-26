@@ -67,8 +67,9 @@ async fn operations_five_pages_real_chain_browser_proof() {
         .await
         .unwrap();
     // These React routes are protected by the actual server-side team-session boundary.
-    // Seed one active, synthetic operator and one opaque session only in this proof schema;
-    // the browser receives the raw token while PostgreSQL stores its digest.
+    // This full-ledger and target proof traverses administrator-wide data and controls.
+    // Member-scoped routes and writes are covered by the isolated ops auth/native proofs.
+    // The browser receives the raw token while PostgreSQL stores its digest.
     let browser_member = Uuid::new_v4();
     let password_hash = Argon2::default()
         .hash_password(
@@ -80,7 +81,7 @@ async fn operations_five_pages_real_chain_browser_proof() {
     sqlx::query(
         "INSERT INTO linggan_ops_member \
          (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) \
-         VALUES($1,'ops-browser@example.test','合成浏览器运营','operator','active',$2,scope_001_now())",
+         VALUES($1,'ops-browser@example.test','合成浏览器管理员','admin','active',$2,scope_001_now())",
     )
     .bind(browser_member)
     .bind(password_hash)

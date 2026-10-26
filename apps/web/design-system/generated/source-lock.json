@@ -1,5 +1,5 @@
 {
-  "fingerprint": "84a0215d30c07a95243464def994a671f08d7cace081cf387a8f5b614110c5f4",
+  "fingerprint": "1d5b0be4761015afcb0a8a120917b4a24d7bce55653135ca6b7066e6f2de2350",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -239,7 +239,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/LedgerPage.tsx",
-      "sha256": "f3247760d348d040e9f9c12800e143bb06bcd8ce7faf25e4bb09a6b6006fa1be"
+      "sha256": "5d2b0469da69b2ba7f37a6f014b09de91d08bc662c21d2de51a6fb7159b71eae"
     },
     {
       "path": "apps/web/src/pages/ops/Ops.module.css",
@@ -247,11 +247,11 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "630f8356010a0c783d9e6f876b07fff19d1bdd44b47bfb165a1ba47a1d36a92f"
+      "sha256": "eb094364b226bfca46c74d2369f95b30a771caf0cfd79edd8cca29dd2facbaff"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
-      "sha256": "e08e3aee605be4b1a5d6027e34829d7f7180a8e7589a43324663929020b1a058"
+      "sha256": "d3f8153f1675678a187eadb588b709fc5abe8a0dd0bd240b1b870e591745161a"
     },
     {
       "path": "apps/web/src/pages/ops/OpsScopePicker.tsx",

@@ -27,13 +27,19 @@ async fn entry(
     headers: HeaderMap,
     Query(query): Query<BusinessQuery>,
 ) -> Response {
-    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
-        return response;
-    }
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) => member,
+        Err(response) => return response,
+    };
+    let destination = if member.role == "admin" {
+        "creation"
+    } else {
+        "publications"
+    };
     match OpsBusiness::parse(query.domain.as_deref()) {
-        Ok(OpsBusiness::All) => Redirect::to("/ops/creation").into_response(),
+        Ok(OpsBusiness::All) => Redirect::to(&format!("/ops/{destination}")).into_response(),
         Ok(OpsBusiness::Domain(domain)) => {
-            Redirect::to(&format!("/ops/creation?domain={domain}")).into_response()
+            Redirect::to(&format!("/ops/{destination}?domain={domain}")).into_response()
         }
         Err(error) => super::ops_api::read_error(error),
     }
