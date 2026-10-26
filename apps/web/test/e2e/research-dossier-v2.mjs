@@ -126,8 +126,16 @@ try {
   const image=panel.locator(`[data-source-unit-ref="${imageUnitRef}"]`);
   const compare=image.locator('details').filter({hasText:/^对照原图/}).first();
   assert.notEqual(await compare.getAttribute('open'),null,'source action opens the actual original image');
-  await image.getByRole('img').evaluate(node=>node.decode());
-  assert.equal(await image.getByRole('img').evaluate(node=>node.naturalWidth>0),true);
+  const originalImage = image.getByRole('img');
+  // A lazy image can still have a pending request when its details first opens.
+  // Bring it into view and wait for the actual bytes before asking the decoder.
+  await originalImage.scrollIntoViewIfNeeded();
+  await page.waitForFunction(ref => {
+    const node = document.querySelector(`[data-source-unit-ref="${ref}"] img`);
+    return node instanceof HTMLImageElement && node.complete && node.naturalWidth > 0;
+  }, imageUnitRef);
+  await originalImage.evaluate(node=>node.decode());
+  assert.equal(await originalImage.evaluate(node=>node.naturalWidth>0),true);
   assert.equal(await page.evaluate(()=>document.activeElement?.dataset.sourceUnitRef),imageUnitRef,'source action exposes a keyboard focus target');
   await focusBelowHeader(image);await snapshot('research-dossier-v2-source-1280.png');
   const metadataReady=page.waitForResponse(response=>new URL(response.url()).pathname===`${base}/metadata`);
