@@ -1,11 +1,10 @@
 import { createPortal } from 'react-dom';
 import { useEffect,useRef } from 'react';
-import { Link } from 'react-router';
+import { Link,useNavigate } from 'react-router';
 import { decodeDrawer,type Drawer } from './api';
 import { useRead,listHref,type Commands } from './useWorkspace';
 import { Avatar } from './TargetControls';
 import { LifecyclePanel } from './TargetLifecycle';
-import { InspectorHeaderActions } from './inspection/InspectorHeaderActions';
 import { RecentObservation } from './inspection/RecentObservation';
 import { Works } from './TargetWorks';
 import { Patrol } from './TargetPatrol';
@@ -18,8 +17,10 @@ import { RelatedWorksPanel } from './inspection/RelatedWorksPanel';
 import { KeywordRounds } from './inspection/KeywordRounds';
 import { ActionButton } from '../../../shared/ActionButton';
 import styles from './inspection/TargetResearch.module.css';
+import actionStyles from '../../../shared/ActionButton.module.css';
 
 export function TargetDrawer({targetRef,params,commands,revision}:{targetRef:string;params:URLSearchParams;commands:Commands;revision:number}){
+  const navigate=useNavigate();
   const legacyLife=[...params.keys()].some(key=>key.startsWith('life_'));
   const rawTab=params.get('dtab');
   const tab=rawTab===null?(legacyLife?'works':'overview'):['works','baseline','archive'].includes(rawTab)?'works':rawTab==='patrol'?'patrol':'overview';
@@ -49,12 +50,11 @@ export function TargetDrawer({targetRef,params,commands,revision}:{targetRef:str
         </div>
         {t&&<div className="c-dw-meta"><span>{t.platform==='xhs'?'小红书':t.platform}</span>{t.kind==='creator'?` · ${t.handle}`:''}<i className="c-dw-meta-dot" aria-hidden="true"/><span>{t.group}</span></div>}
       </div></div>
-      <div className="c-dw-actions">
-        {t&&<InspectorHeaderActions>
-        {t.lifecycle!=='dismissed'&&<Link className="c-btn-secondary" to={`/collection/tasks?once=1&target=${targetRef}&domain=${encodeURIComponent(params.get('domain')??'all')}&returnTo=${encodeURIComponent(listHref(params))}`}>立即采一次</Link>}
-        {source&&<a className="c-btn-secondary c-dw-source" href={source} target="_blank" rel="noreferrer"><span>打开小红书主页</span><svg className="c-dw-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-9 9M19 14v5H5V5h5"/></svg></a>}
-        </InspectorHeaderActions>}
-        <Link id="target-drawer-close" className="c-btn-secondary c-dw-close" to={close}><svg className="c-dw-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg><span>关闭</span></Link>
+      <div className={`c-dw-actions ${styles.inspectorActions}`}>
+        {t&&<ActionButton variant="primary" onClick={()=>navigate(listHref(params,{rule:targetRef}))}>管理巡查</ActionButton>}
+        {t&&t.lifecycle!=='dismissed'&&<ActionButton onClick={()=>navigate(`/collection/tasks?once=1&target=${targetRef}&domain=${encodeURIComponent(params.get('domain')??'all')}&returnTo=${encodeURIComponent(listHref(params))}`)}>立即采一次</ActionButton>}
+        {source&&<a className={`${actionStyles.action} ${actionStyles.outline} ${styles.sourceAction}`} data-action-button="v8" data-lids-component="C09" data-variant="outline" href={source} target="_blank" rel="noreferrer"><span className={actionStyles.label}>打开小红书<svg className="c-dw-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-9 9M19 14v5H5V5h5"/></svg></span></a>}
+        <ActionButton id="target-drawer-close" onClick={()=>navigate(close)}>关闭</ActionButton>
       </div>
     </div></div>
     {t&&<nav className="c-dw-tabs" aria-label="目标检查器页签">{[['overview','最近观察'],['works','作品'],['patrol','巡查']].map(([key,label])=><Link key={key} className={`c-dw-tab${tab===key?' c-dw-tab-on':''}`} aria-current={tab===key?'page':undefined} to={listHref(params,{dtab:key??'overview',inspect_panel:null,inspect_work:null})}>{label}</Link>)}</nav>}
