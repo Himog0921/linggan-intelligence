@@ -14,8 +14,10 @@ use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
-pub use creation_read::{CreationPublication, read_creation_publications, creation_publication_directory_in};
 pub use accounts::{OpsAccountItem, OpsAccountPage, read_ops_accounts};
+pub use creation_read::{
+    CreationPublication, creation_publication_directory_in, read_creation_publications,
+};
 pub use daily::{OpsDailyItem, OpsDailyPage, read_ops_daily};
 pub use overview::{
     OpsOverview, OpsOverviewQuery, OpsOverviewTrend, OverviewSlice, read_ops_overview,
@@ -81,8 +83,9 @@ pub struct OpsAsOf {
     pub batch_ref: Uuid,
 }
 
-/// A business with at least one account still in the ledger; only those can be selected. A domain
-/// whose accounts were all deleted in the workbench is history, not a current business.
+/// A business with at least one active historical or native Operations account; only those can be
+/// selected. A domain whose accounts were all deleted or archived is history, not a current
+/// business.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpsBusinessOption {
@@ -98,7 +101,9 @@ pub async fn read_ops_businesses(
         "SELECT d.domain_ref, d.name, count(*) AS account_count \
            FROM observation_domain d \
            JOIN linggan_ops_account a \
-             ON a.domain_ref = d.domain_ref AND a.ledger_state = 'in_ledger' \
+             ON a.domain_ref = d.domain_ref \
+            AND ((a.source_system='content_workbench' AND a.ledger_state='in_ledger') \
+              OR (a.source_system='linggan_native' AND a.native_record_state='active')) \
           GROUP BY d.domain_ref, d.name, d.created_at \
           ORDER BY d.created_at, d.domain_ref",
     )
@@ -164,8 +169,8 @@ pub async fn read_ops_cover(
     .transpose()
 }
 
-/// A selected domain must exist and own at least one account; otherwise the selection is refused
-/// instead of silently showing an empty business.
+/// A selected domain must own at least one active historical or native Operations account;
+/// otherwise the selection is refused instead of silently showing an empty business.
 pub(super) async fn ensure_business(
     database: &Database,
     business: OpsBusiness,
@@ -175,7 +180,9 @@ pub(super) async fn ensure_business(
     };
     let known: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_ops_account \
-                         WHERE domain_ref = $1 AND ledger_state = 'in_ledger')",
+                         WHERE domain_ref = $1 \
+                           AND ((source_system='content_workbench' AND ledger_state='in_ledger') \
+                             OR (source_system='linggan_native' AND native_record_state='active')))",
     )
     .bind(domain_ref)
     .fetch_one(database.pool())

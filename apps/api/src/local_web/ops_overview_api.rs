@@ -3,6 +3,7 @@
 //! only a same-origin page on this machine can call it.
 use super::*;
 use axum::extract::rejection::JsonRejection;
+use axum::http::HeaderMap;
 use linggan_intelligence::ops_ledger::read::{
     OpsBusiness, OpsOverviewQuery, OverviewSlice, read_ops_overview, read_ops_overview_trend,
 };
@@ -46,8 +47,12 @@ struct SaveTargetBody {
 
 async fn overview(
     State(state): State<LocalWebState>,
+    headers: HeaderMap,
     Query(query): Query<OverviewQuery>,
 ) -> Response {
+    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+        return response;
+    }
     let Some(database) = state.database.database() else {
         return super::ops_api::not_connected();
     };
@@ -67,7 +72,14 @@ async fn overview(
     }
 }
 
-async fn trend(State(state): State<LocalWebState>, Query(query): Query<OverviewQuery>) -> Response {
+async fn trend(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Query(query): Query<OverviewQuery>,
+) -> Response {
+    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+        return response;
+    }
     let Some(database) = state.database.database() else {
         return super::ops_api::not_connected();
     };
@@ -79,7 +91,14 @@ async fn trend(State(state): State<LocalWebState>, Query(query): Query<OverviewQ
     }
 }
 
-async fn targets(State(state): State<LocalWebState>, Query(query): Query<TargetQuery>) -> Response {
+async fn targets(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    Query(query): Query<TargetQuery>,
+) -> Response {
+    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+        return response;
+    }
     let Some(database) = state.database.database() else {
         return super::ops_api::not_connected();
     };
@@ -98,8 +117,12 @@ async fn targets(State(state): State<LocalWebState>, Query(query): Query<TargetQ
 
 async fn save_target(
     State(state): State<LocalWebState>,
+    headers: HeaderMap,
     body: Result<Json<SaveTargetBody>, JsonRejection>,
 ) -> Response {
+    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+        return response;
+    }
     let Some(database) = state.database.database() else {
         return super::ops_api::not_connected();
     };

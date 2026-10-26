@@ -93,7 +93,9 @@ pub(super) fn profile_identity(
     }
 }
 
-fn xhs_note_id(url: &str) -> Option<String> {
+/// Parses the stable Xiaohongshu note identity from a full note URL without visiting the
+/// platform. Short links deliberately do not pass this boundary.
+pub fn xhs_note_id(url: &str) -> Option<String> {
     xhs_path_id(url, &[&["explore"], &["discovery", "item"]])
 }
 

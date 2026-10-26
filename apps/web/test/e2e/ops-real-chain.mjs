@@ -9,12 +9,23 @@ const fixture = JSON.parse(
   await readFile(path.join(dir, "fixture.json"), "utf8"),
 );
 const { origin, domainOne, domainTwo, cover } = fixture;
+const sessionToken = process.env.WEB_APP_PROOF_SESSION_TOKEN;
+if (!sessionToken) throw new Error("WEB_APP_PROOF_SESSION_TOKEN required");
 const report = { steps: [], errors: [], writes: [], blocked: [] };
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({
   viewport: { width: 1440, height: 900 },
   reducedMotion: "reduce",
 });
+await context.addCookies([
+  {
+    name: "linggan_ops_session",
+    value: sessionToken,
+    url: origin,
+    httpOnly: true,
+    sameSite: "Strict",
+  },
+]);
 await context.route("**/*", (route) => {
   const request = route.request();
   if (

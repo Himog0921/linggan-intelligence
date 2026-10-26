@@ -40,6 +40,70 @@ it("does not allow missing data to manufacture a success receipt", () => {
     }).outcome,
   ).toBe("stale");
 });
+it("requires explicit native-data provenance on a summary", () => {
+  const summary = {
+    asOf: null,
+    nativeDataPresent: true,
+    month: "2026-10",
+    activeAccounts: 1,
+    ledgerAccounts: 1,
+    monthPublished: 0,
+    effectivePublication: { state: "not_connected" },
+    monthFollowersGained: { value: null, scope: "all_businesses" },
+    monthHits: 0,
+  };
+  expect(api.summary(summary).nativeDataPresent).toBe(true);
+  expect(() => api.summary(without(summary, "nativeDataPresent"))).toThrow();
+});
+it("requires separately labelled native facts instead of treating them as historical coverage", () => {
+  const value = {
+    asOf: null, businessSelected: false,
+    window: { slice: "week", today: "2026-10-23", thisWeek: "2026-W43", thisMonth: "2026-10", completeThrough: null, current: { from: "2026-10-19", to: "2026-10-23", days: 5 }, covered: null, previous: null },
+    nativeFacts: { observed: true, latestBusinessDate: "2026-10-23", published: 1, linksOpened: null, followersGained: 0, hits: 0 },
+    kpi: { current: { published: null, linksOpened: null, followersGained: null, conversionRate: null, hits: null }, previous: { published: null, linksOpened: null, followersGained: null, conversionRate: null, hits: null }, delta: { publishedPct: null, linksOpenedPct: null, followersGainedPct: null, hitsPct: null } },
+    funnel: { publishToOpenAvailable: true, current: { publishToOpen: null, openToFollow: null } },
+    target: { state: "not_set", periodType: "week", periodKey: "2026-W43", revision: null, elapsedDays: null, periodFollowers: null, achievedPct: null, timeProgressPct: null, dailyNeeded: null, projectedEnd: null, pace: null },
+    insights: [], attention: { items: [], rest: [], hiddenCount: 0, totalCount: 0 }, ranking: [], rankingCovered: false,
+    dailyOutput: { days: [], coveredTo: null, operators: [], published: [], followers: [] }, platformShare: null,
+    matrix: { covered: false, operators: [], accounts: [], cells: [] },
+  };
+  expect(api.overview(value).nativeFacts).toMatchObject({ observed: true, linksOpened: null, followersGained: 0 });
+  expect(() => api.overview(without(value, "nativeFacts"))).toThrow();
+});
+it("accepts only the durable native receipt for its own request identity", () => {
+  const receipt = {
+    receipt: {
+      requestRef: "r", outcome: "accepted", code: "accepted", recordRef: "account",
+      resultingVersion: 1, replayed: false,
+    },
+  };
+  expect(api.nativeReceipt(receipt, "r").recordRef).toBe("account");
+  expect(() => api.nativeReceipt(receipt, "other")).toThrow();
+  expect(() => api.nativeReceipt({ receipt: { ...receipt.receipt, outcome: "success" } }, "r")).toThrow();
+});
+it("keeps batch receipts positionally bound to their submitted request identities", () => {
+  const result = {
+    items: [
+      { ordinal: 1, status: 201, receipt: { requestRef: "one", outcome: "accepted", code: "accepted", replayed: false } },
+      { ordinal: 2, status: 422, receipt: { requestRef: "two", outcome: "rejected", code: "ops_native_view_count_invalid", replayed: false } },
+    ],
+  };
+  expect(api.nativeBatchReceipts(result, ["one", "two"]).items[1]).toMatchObject({ status: 422, outcome: "rejected" });
+  expect(() => api.nativeBatchReceipts({ ...result, items: [{ ...result.items[0], ordinal: 2 }, result.items[1]] }, ["one", "two"])).toThrow();
+  expect(() => api.nativeBatchReceipts({ ...result, items: [result.items[1], result.items[0]] }, ["one", "two"])).toThrow();
+  expect(() => api.nativeBatchReceipts({ ...result, items: [result.items[0]] }, ["one", "two"])).toThrow();
+});
+it("keeps native daily provenance, version, and null metrics distinct", () => {
+  const page = api.daily({
+    asOf: null, scope: "all_businesses", limit: 200, operators: ["甲"], items: [{
+      ref: "daily", source: "native", nativeVersion: 1, businessDate: "2026-10-23", weekday: "五", operator: "甲",
+      published: 0, linksOpened: null, followersGained: 0, addRate: null, hits: 0,
+      monthFollowersGained: 0, monthPublished: 0, execution: "not_published",
+    }],
+  });
+  expect(page.items[0]).toMatchObject({ source: "native", nativeVersion: 1, linksOpened: null, followersGained: 0 });
+  expect(() => api.daily({ ...page, items: [{ ...page.items[0], nativeVersion: null, source: "unknown" }] })).toThrow();
+});
 it("rejects invalid state enums rather than inferring a platform or execution status", () => {
   expect(() =>
     api.daily({
@@ -114,12 +178,19 @@ it("requires explicit null for an absent current target", () => {
 it("requires nullable account fields without replacing missing values with unknown", () => {
   const account = {
     ref: "r",
+    source: "imported",
     platform: "xhs",
     name: "合成账号",
     profileUrl: null,
     deviceCode: null,
     followerCount: null,
     ipLocation: null,
+    currentResponsibleMemberRef: null,
+    currentResponsibleName: null,
+    responsibilityVersion: 1,
+    nativeVersion: null,
+    nativeState: null,
+    handle: null,
     operator: null,
     status: null,
     health: { state: "not_filled" },
@@ -129,9 +200,10 @@ it("requires nullable account fields without replacing missing values with unkno
   expect(
     api.accounts({ ...page, items: [account] }).items[0]?.followerCount,
   ).toBeNull();
-  for (const key of ["profileUrl", "followerCount", "isRetained"]) {
+  for (const key of ["profileUrl", "followerCount", "currentResponsibleName", "responsibilityVersion", "nativeVersion", "nativeState", "handle", "isRetained"]) {
     expect(() =>
       api.accounts({ ...page, items: [without(account, key)] }),
     ).toThrow();
   }
+  expect(() => api.accounts({ ...page, items: [{ ...account, nativeState: "retired" }] })).toThrow();
 });

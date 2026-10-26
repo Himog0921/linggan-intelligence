@@ -47,6 +47,7 @@ export function businesses(value: unknown) {
 export function summary(value: unknown) {
   return d.decode(value, (r) => ({
     ...base(r),
+    nativeDataPresent: b(r, "nativeDataPresent"),
     month: s(r, "month"),
     activeAccounts: nn(r, "activeAccounts"),
     ledgerAccounts: nn(r, "ledgerAccounts"),
@@ -69,10 +70,12 @@ function publication(r: R) {
   const views = d.obj(r, "views");
   const state = enumeration(views, "state", ["value", "pending", "optional"]);
   const value = nn(views, "value");
+  const sync = d.obj(r, "sync");
   if ((state === "value") !== (value !== null))
     throw new d.ShapeError("views.value");
   return {
     ref: s(r, "ref"),
+    source: enumeration(r, "source", ["imported", "native"]),
     businessDate: s(r, "businessDate"),
     dateState: enumeration(r, "dateState", ["as_recorded", "suspect_year"]),
     platform: platform(r),
@@ -84,6 +87,7 @@ function publication(r: R) {
       ledgerState: enumeration(a, "ledgerState", [
         "in_ledger",
         "absent_from_export",
+        "native_active",
       ]),
     })),
     publisher: sn(r, "publisher"),
@@ -93,6 +97,32 @@ function publication(r: R) {
     comments: nn(r, "comments"),
     coverClickRate: nn(r, "coverClickRate"),
     systemCheck: enumeration(r, "systemCheck", ["not_checked"]),
+    sync: {
+      requestRef: sn(sync, "requestRef"),
+      decision: (() => {
+        const value = d.field(sync, "decision");
+        return value === null ? null : enumeration(sync, "decision", ["blocked", "forbidden", "invalid", "conflict", "accepted", "existing"] as const);
+      })(),
+      state: syncState(sync, "state"),
+    },
+    media: (() => {
+      const media = d.obj(r, "media");
+      return {
+        state: enumeration(media, "state", ["not_requested", "waiting_for_slots", "processing", "partial", "available", "failed", "unavailable"] as const),
+        observed: n(media, "observed"),
+        available: n(media, "available"),
+        failed: n(media, "failed"),
+        unavailable: n(media, "unavailable"),
+      };
+    })(),
+    fieldAdoption: (() => {
+      const adoption = d.obj(r, "fieldAdoption");
+      const state = (key: string) => enumeration(adoption, key, ["adopted", "not_provided", "conflict"] as const);
+      return {
+        title: state("title"), body: state("body"), likes: state("likes"),
+        collects: state("collects"), comments: state("comments"), publishedAt: state("publishedAt"),
+      };
+    })(),
     duplicates: d.list(r, "duplicates", (item) => ({
       businessDate: s(item, "businessDate"),
     })),
@@ -110,15 +140,75 @@ export function publications(value: unknown) {
     items: d.list(r, "items", publication),
   }));
 }
+const syncState = (r: R, key: string) => enumeration(r, key, [
+  "not_requested",
+  "not_submitted",
+  "queued",
+  "waiting_execution",
+  "awaiting_collection",
+  "collecting",
+  "package_pending_receipt",
+  "receipt_accepted_projection_pending",
+  "receipt_lost_authority",
+  "receipt_accepted",
+  "material_projected",
+  "no_qualified_result",
+  "stopped",
+  "chain_unavailable",
+] as const);
+function syncReceipt(value: unknown) {
+  return d.decode(value, (r) => ({
+    requestRef: s(r, "requestRef"),
+    selectedCount: n(r, "selectedCount"),
+    replayed: b(r, "replayed"),
+    items: d.list(r, "items", (item) => {
+      const execution = d.obj(item, "execution");
+      return {
+        publicationRef: s(item, "publicationRef"),
+        decision: enumeration(item, "decision", ["blocked", "forbidden", "invalid", "conflict", "accepted", "existing"] as const),
+        code: s(item, "code"),
+        acquisitionRequestRef: sn(item, "acquisitionRequestRef"),
+        workOrderRef: sn(item, "workOrderRef"),
+        execution: {
+          state: syncState(execution, "state"),
+          taskId: sn(execution, "taskId"),
+          attemptId: sn(execution, "attemptId"),
+          packageRef: sn(execution, "packageRef"),
+          receiptRef: sn(execution, "receiptRef"),
+          receiptEffect: sn(execution, "receiptEffect"),
+          materialRef: sn(execution, "materialRef"),
+        },
+      };
+    }),
+  }));
+}
+export async function createPublicationSync(publicationRefs: readonly string[], idempotencyKey = crypto.randomUUID()) {
+  return syncReceipt(await requestJson("/api/local/ops/publication-syncs", {
+    method: "POST", body: { idempotencyKey, publicationRefs },
+  }));
+}
+export async function publicationSync(requestRef: string, signal?: AbortSignal) {
+  return syncReceipt(await requestJson(`/api/local/ops/publication-syncs/${encodeURIComponent(requestRef)}`, { signal }));
+}
 function account(r: R) {
   return {
     ref: s(r, "ref"),
+    source: enumeration(r, "source", ["imported", "native"]),
     platform: platform(r),
     name: s(r, "name"),
     profileUrl: sn(r, "profileUrl"),
     deviceCode: sn(r, "deviceCode"),
     followerCount: nn(r, "followerCount"),
     ipLocation: sn(r, "ipLocation"),
+    currentResponsibleMemberRef: sn(r, "currentResponsibleMemberRef"),
+    currentResponsibleName: sn(r, "currentResponsibleName"),
+    responsibilityVersion: n(r, "responsibilityVersion"),
+    nativeVersion: nn(r, "nativeVersion"),
+    nativeState: (() => {
+      const value = d.field(r, "nativeState");
+      return value === null ? null : enumeration(r, "nativeState", ["active", "archived"] as const);
+    })(),
+    handle: sn(r, "handle"),
     operator: sn(r, "operator"),
     status: sn(r, "status"),
     health: enumeration(d.obj(r, "health"), "state", ["not_filled"]),
@@ -135,21 +225,32 @@ export function accounts(value: unknown) {
     items: d.list(r, "items", account),
   }));
 }
+export function members(value: unknown) {
+  if (!Array.isArray(value)) throw new ApiError({ kind: "invalid_response", status: 200 });
+  return value.map((item) => d.decode(item, (r) => ({
+    memberRef: s(r, "memberRef"),
+    displayName: s(r, "displayName"),
+    role: enumeration(r, "role", ["admin", "lead", "operator"]),
+  })));
+}
 function dailyItem(r: R) {
   return {
     ref: s(r, "ref"),
+    source: enumeration(r, "source", ["imported", "native"]),
+    nativeVersion: nn(r, "nativeVersion"),
     businessDate: s(r, "businessDate"),
     weekday: s(r, "weekday"),
     operator: s(r, "operator"),
     published: n(r, "published"),
-    linksOpened: n(r, "linksOpened"),
-    followersGained: n(r, "followersGained"),
+    linksOpened: nn(r, "linksOpened"),
+    followersGained: nn(r, "followersGained"),
     addRate: nn(r, "addRate"),
     hits: n(r, "hits"),
-    monthFollowersGained: n(r, "monthFollowersGained"),
+    monthFollowersGained: nn(r, "monthFollowersGained"),
     monthPublished: n(r, "monthPublished"),
     execution: enumeration(r, "execution", [
       "not_published",
+      "not_filled",
       "praise",
       "pending_views",
       "done",
@@ -205,6 +306,147 @@ export function receipt(value: unknown) {
       current,
     };
   });
+}
+
+/** A native-write receipt is the durable result of one request identity, not a toast outcome. */
+export function nativeReceipt(value: unknown, requestId: string) {
+  return d.decode(value, (r) => {
+    const receipt = d.obj(r, "receipt");
+    const requestRef = s(receipt, "requestRef");
+    if (requestRef !== requestId) throw new d.ShapeError("receipt.requestRef");
+    return {
+      requestRef,
+      outcome: enumeration(receipt, "outcome", ["accepted", "unchanged", "rejected", "stale"]),
+      code: s(receipt, "code"),
+      recordRef: sn(receipt, "recordRef"),
+      resultingVersion: nn(receipt, "resultingVersion"),
+      replayed: b(receipt, "replayed"),
+    };
+  });
+}
+
+/**
+ * Native commands may deliberately return a durable `stale` or `rejected`
+ * receipt with a non-2xx status.  Decode that receipt when it is present;
+ * authentication and transport failures remain failures, never a synthetic
+ * command result.
+ */
+async function nativeCommand(path: string, body: unknown, requestId: string) {
+  try {
+    return nativeReceipt(await requestJson(path, { method: "POST", body }), requestId);
+  } catch (error) {
+    if (error instanceof ApiError && error.answered) {
+      try {
+        return nativeReceipt(error.responseBody, requestId);
+      } catch {
+        // This was an answered HTTP failure, but not a command receipt.
+      }
+    }
+    throw error;
+  }
+}
+
+export type NativeAccountCommand = {
+  domainRef: string; platform: "xhs" | "douyin"; accountName: string;
+  profileUrl: string | null; platformUserId: string | null; handle: string | null;
+  status: string | null; isRetained: boolean | null; followerCount: number | null;
+  deviceCode: string | null; ipLocation: string | null; notes: string | null;
+};
+
+/** The caller owns the UUID so an unanswered request can be retried without duplicating facts. */
+export async function createNativeAccount(command: NativeAccountCommand & { requestId: string }) {
+  return nativeCommand("/api/local/ops/native/accounts", command, command.requestId);
+}
+
+export type NativeAccountUpdateCommand = {
+  expectedVersion: number; accountName: string; profileUrl: string | null; handle: string | null;
+  status: "active" | "warming" | "paused"; isRetained: boolean; followerCount: number | null;
+  deviceCode: string | null; ipLocation: string | null; notes: string | null;
+};
+export async function updateNativeAccount(accountRef: string, command: NativeAccountUpdateCommand & { requestId: string }) {
+  return nativeCommand(`/api/local/ops/native/accounts/${encodeURIComponent(accountRef)}`, command, command.requestId);
+}
+export type NativeAccountLifecycleCommand = { expectedVersion: number; reason: string };
+export async function archiveNativeAccount(accountRef: string, command: NativeAccountLifecycleCommand & { requestId: string }) {
+  return nativeCommand(`/api/local/ops/native/accounts/${encodeURIComponent(accountRef)}/archive`, command, command.requestId);
+}
+export async function restoreNativeAccount(accountRef: string, command: NativeAccountLifecycleCommand & { requestId: string }) {
+  return nativeCommand(`/api/local/ops/native/accounts/${encodeURIComponent(accountRef)}/restore`, command, command.requestId);
+}
+
+export type NativeAccountResponsibilityCommand = {
+  nextMemberRef: string | null; expectedVersion: number; reason: string;
+};
+export async function transferNativeAccountResponsibility(
+  accountRef: string,
+  command: NativeAccountResponsibilityCommand & { requestId: string },
+) {
+  return nativeCommand(
+    `/api/local/ops/native/accounts/${encodeURIComponent(accountRef)}/responsibility`,
+    command,
+    command.requestId,
+  );
+}
+
+export type NativePublicationCommand = {
+  accountRef: string; publicationUrl: string; canonicalUrl: string | null;
+  publishedOn: string | null; title: string | null; body: string | null;
+};
+export async function createNativePublication(command: NativePublicationCommand & { requestId: string }) {
+  return nativeCommand("/api/local/ops/native/publications", { ...command, publishedAt: null }, command.requestId);
+}
+/**
+ * Batch writes still carry a receipt for every caller-owned request identity.
+ * The transport response is not evidence of success unless every returned
+ * position and receipt maps back to the request submitted at that position.
+ */
+export function nativeBatchReceipts(value: unknown, requestIds: readonly string[]) {
+  return d.decode(value, r => {
+    const items = d.list(r, "items", item => {
+      const receipt = d.obj(item, "receipt");
+      return {
+        ordinal: n(item, "ordinal"), status: n(item, "status"),
+        requestRef: s(receipt, "requestRef"),
+        outcome: enumeration(receipt, "outcome", ["accepted", "unchanged", "rejected", "stale"]),
+        code: s(receipt, "code"), replayed: b(receipt, "replayed"),
+      };
+    });
+    if (items.length !== requestIds.length) throw new d.ShapeError("items");
+    for (const [index, item] of items.entries()) {
+      if (!Number.isSafeInteger(item.ordinal) || item.ordinal !== index + 1) throw new d.ShapeError("items.ordinal");
+      if (!Number.isSafeInteger(item.status) || item.status < 100 || item.status > 599) throw new d.ShapeError("items.status");
+      if (item.requestRef !== requestIds[index]) throw new d.ShapeError("items.receipt.requestRef");
+    }
+    return { items };
+  });
+}
+export async function createNativePublicationBatch(commands: readonly (NativePublicationCommand & { requestId: string })[]) {
+  return nativeBatchReceipts(await requestJson("/api/local/ops/native/publications/batch", {
+    method: "POST", body: { publications: commands.map(command => ({ ...command, publishedAt: null })) },
+  }), commands.map(command => command.requestId));
+}
+
+export type NativeDailyCommand = {
+  dailyRef?: string | null;
+  businessDate: string; linksOpenedCount: number | null; followersGained: number | null;
+  expectedVersion: number | null;
+};
+export async function recordNativeDaily(command: NativeDailyCommand & { requestId: string }) {
+  return nativeCommand("/api/local/ops/native/daily-reports", command, command.requestId);
+}
+
+export type NativeViewCommand = {
+  reportKind: "value" | "cleared"; viewCount: number | null; asOf: string;
+};
+export async function recordNativeView(publicationRef: string, command: NativeViewCommand & { requestId: string }) {
+  return nativeCommand(`/api/local/ops/native/publications/${encodeURIComponent(publicationRef)}/view-reports`, command, command.requestId);
+}
+export type NativeViewBatchReport = NativeViewCommand & { requestId: string; publicationRef: string };
+/** The server isolates each report; this decoder preserves that per-row result boundary. */
+export async function recordNativeViewBatch(reports: readonly NativeViewBatchReport[]) {
+  return nativeBatchReceipts(await requestJson("/api/local/ops/native/view-reports/batch", {
+    method: "POST", body: { reports },
+  }), reports.map(report => report.requestId));
 }
 const figures = (r: R) => ({
   published: nn(r, "published"),
@@ -315,6 +557,14 @@ export function overview(value: unknown) {
       ...base(r),
       businessSelected: b(r, "businessSelected"),
       window: windowDTO(d.obj(r, "window")),
+      nativeFacts: {
+        observed: b(d.obj(r, "nativeFacts"), "observed"),
+        latestBusinessDate: sn(d.obj(r, "nativeFacts"), "latestBusinessDate"),
+        published: n(d.obj(r, "nativeFacts"), "published"),
+        linksOpened: nn(d.obj(r, "nativeFacts"), "linksOpened"),
+        followersGained: nn(d.obj(r, "nativeFacts"), "followersGained"),
+        hits: n(d.obj(r, "nativeFacts"), "hits"),
+      },
       kpi: {
         current: figures(d.obj(k, "current")),
         previous: figures(d.obj(k, "previous")),
@@ -392,13 +642,17 @@ export function trend(value: unknown) {
       hits: nn(p, "hits"),
       coverage: enumeration(p, "coverage", ["full", "partial", "not_migrated"]),
       coveredTo: sn(p, "coveredTo"),
+      nativeFacts: b(p, "nativeFacts"),
     })),
+    nativeLatestBusinessDate: sn(r, "nativeLatestBusinessDate"),
   }));
 }
 export type Summary = ReturnType<typeof summary>;
 export type AsOf = Summary["asOf"];
 export type Publication = ReturnType<typeof publications>["items"][number];
+export type PublicationSyncReceipt = ReturnType<typeof syncReceipt>;
 export type Account = ReturnType<typeof accounts>["items"][number];
+export type ActiveMember = ReturnType<typeof members>[number];
 export type Daily = ReturnType<typeof daily>["items"][number];
 export type Overview = ReturnType<typeof overview>;
 export type Window = Overview["window"];

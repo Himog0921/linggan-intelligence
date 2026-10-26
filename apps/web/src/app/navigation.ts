@@ -23,4 +23,6 @@ export const PRIMARY_ENTRIES: readonly PrimaryEntry[] = [
 
 export const PERSONAL_MENU_LINKS: readonly { label: string; href: string }[] = [
   { label: '设置', href: '/settings' },
+  { label: '账户安全', href: '/settings/account' },
+  { label: '团队成员', href: '/settings/team' },
 ];

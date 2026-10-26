@@ -70,7 +70,23 @@ function PrimaryEntryLink({ entry, active, states }: { entry: PrimaryEntry; acti
 export function AppShell({ className, active, activeState, collectionState, boundaryLabel, crumb, contextNav, meta, children, workbenchMode }: AppShellProps) {
   const states: EntryStates = { activeState, collectionState };
   const [collapsed, setCollapsed] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signOutError, setSignOutError] = useState('');
   const header = useRef<HTMLElement>(null);
+  async function signOut() {
+    if (signingOut) return;
+    setSigningOut(true); setSignOutError('');
+    try {
+      const response = await fetch('/api/local/auth/logout', {
+        method: 'POST', cache: 'no-store', credentials: 'same-origin', headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error('logout_rejected');
+      window.location.assign('/login');
+    } catch {
+      setSignOutError('退出未完成；当前会话仍可能有效，请重试。');
+      setSigningOut(false);
+    }
+  }
 
   // 固定抽屉的起点必须等于实际共享页头的下沿：窄屏一级导航换行、三级导航及字体完成加载都会改变它。
   // Collection 抽屉经 portal 挂到 body，故写入既有根变量；卸载时原样恢复，工作台特例不受影响。
@@ -164,6 +180,8 @@ export function AppShell({ className, active, activeState, collectionState, boun
                     {link.label}
                   </a>
                 ))}
+                <button type="button" onClick={() => void signOut()} disabled={signingOut}>{signingOut ? '正在退出…' : '退出登录'}</button>
+                {signOutError ? <p role="status">{signOutError}</p> : null}
                 <FontNotice/>
               </nav>
             </details>

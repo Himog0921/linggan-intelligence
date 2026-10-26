@@ -2,6 +2,7 @@
 //! 以及一条在隔离 PostgreSQL 上用真实浏览器走完设置页的证明（默认忽略）。
 use super::web_app::{WebAppConfig, routes_for, test_support};
 use super::*;
+use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
 use axum::{
     body::{Body, to_bytes},
     http::{HeaderMap, Request, StatusCode, header},
@@ -496,7 +497,10 @@ async fn health_reports_the_frontend_build() {
         health["webApp"]["pages"],
         json!([
             "/login",
+            "/invite/accept",
             "/settings/models",
+            "/settings/account",
+            "/settings/team",
             "/ops/creation",
             "/corpus/creators",
             "/corpus/evidence",
@@ -520,16 +524,10 @@ async fn health_reports_the_frontend_build() {
 #[tokio::test]
 async fn workbench_entry_is_registered_and_ops_preserves_explicit_domain() {
     let domain = "00000000-0000-4000-8000-000000000001";
-    let (status, headers, _) =
-        send(app(), &format!("/ops?domain={domain}"), "127.0.0.1:3000").await;
-    assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(
-        headers[header::LOCATION],
-        format!("/ops/creation?domain={domain}")
-    );
-    let (status, headers, _) = send(app(), "/ops", "127.0.0.1:3000").await;
-    assert_eq!(status, StatusCode::SEE_OTHER);
-    assert_eq!(headers[header::LOCATION], "/ops/creation");
+    let (status, _, _) = send(app(), &format!("/ops?domain={domain}"), "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    let (status, _, _) = send(app(), "/ops", "127.0.0.1:3000").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     let (status, _, _) = send(app(), "/ops/creation", "127.0.0.1:3000").await;
     assert!(matches!(
         status,
@@ -568,6 +566,20 @@ async fn settings_page_real_chain_browser_proof() {
     )
     .await
     .expect("migrations apply");
+    let login_password = "synthetic-settings-browser-password";
+    let password_hash = Argon2::default()
+        .hash_password(
+            login_password.as_bytes(),
+            &SaltString::encode_b64(b"settings-browser-proof-salt").unwrap(),
+        )
+        .unwrap()
+        .to_string();
+    sqlx::query("INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) VALUES($1,'settings-browser@example.test','设置页合成运营','operator','active',$2,scope_001_now())")
+    .bind(uuid::Uuid::new_v4())
+    .bind(password_hash)
+    .execute(database.pool())
+    .await
+    .unwrap();
     let application = router(LocalWebState {
         database: LocalDatabaseState::Ready(Arc::new(database.clone())),
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
@@ -598,6 +610,8 @@ async fn settings_page_real_chain_browser_proof() {
                 .arg(login)
                 .env("WEB_LOGIN_CANDIDATE", &origin)
                 .env("WEB_LOGIN_PROOF_DIR", FsPath::new(&directory).join("login"))
+                .env("WEB_LOGIN_EMAIL", "settings-browser@example.test")
+                .env("WEB_LOGIN_PASSWORD", login_password)
                 .env_remove("WEB_LOGIN_BASELINE")
                 .status()
                 .unwrap(),
@@ -633,10 +647,7 @@ async fn settings_page_real_chain_browser_proof() {
 async fn operations_five_pages_are_react_and_native_assets_are_retired() {
     for page in ["overview", "publications", "accounts", "daily", "io"] {
         let (status, _, body) = send(app(), &format!("/ops/{page}"), "127.0.0.1:3000").await;
-        assert!(matches!(
-            status,
-            StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-        ));
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
         assert!(!body.contains("data-ops-page"));
     }
     for asset in ["ops.css", "ops.js", "ops-overview.js"] {
@@ -739,17 +750,19 @@ async fn comments_entry_preserves_json_routes_and_retires_legacy_assets() {
 }
 
 #[tokio::test]
-async fn login_is_the_same_react_entry_without_a_session_or_credential_post() {
+async fn public_auth_pages_are_uncached_react_entries_without_a_session_or_credential_post() {
     let router = web(synthetic_dist(Some("284cd3a9"), true), "284cd3a9");
-    let (status, headers, body) = send(router.clone(), "/login", "127.0.0.1:3000").await;
-    assert_eq!(status, StatusCode::OK);
-    assert_eq!(body, ENTRY);
-    assert!(!headers.contains_key(header::SET_COOKIE));
-    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
-    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
-    let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
-    assert!(csp.contains("form-action 'none'"));
-    assert!(csp.contains("script-src 'self'"));
+    for path in ["/login", "/invite/accept"] {
+        let (status, headers, body) = send(router.clone(), path, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::OK, "{path}");
+        assert_eq!(body, ENTRY, "{path}");
+        assert!(!headers.contains_key(header::SET_COOKIE), "{path}");
+        assert_eq!(headers[header::CACHE_CONTROL], "no-store", "{path}");
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{path}");
+        let csp = headers[header::CONTENT_SECURITY_POLICY].to_str().unwrap();
+        assert!(csp.contains("form-action 'none'"), "{path}");
+        assert!(csp.contains("script-src 'self'"), "{path}");
+    }
     let response = router
         .oneshot(
             Request::builder()

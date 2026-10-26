@@ -45,6 +45,8 @@ pub enum AcquisitionChainError {
     KeywordArchiveIncomplete,
     #[error("material deepening needs between 1 and 200 distinct content targets")]
     InvalidMaterialTargets,
+    #[error("the frozen Operations publication locator does not define this exact execution scope")]
+    InvalidOpsPublicationScope,
     #[error(
         "progressive creator archiving requires an authorization that permits 200 works; current bound is {current_bound}"
     )]
@@ -189,6 +191,20 @@ pub struct MaterialDeepeningTarget {
     pub acquire_media: bool,
     pub allow_ocr: bool,
     pub allow_asr: bool,
+}
+
+/// The one legal Collection scope for an explicitly selected Operations publication.
+///
+/// This is intentionally not a `MaterialDeepeningTarget`: a registered Operations post has
+/// not yet been captured, so representing it as a Material would fabricate discovery evidence.
+/// The immutable locator tuple is the complete, detail-only execution boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OpsPublicationExactTarget {
+    pub publication_ref: Uuid,
+    pub publication_version: i64,
+    pub locator_ref: Uuid,
+    pub content_external_id: String,
+    pub author_external_id: String,
 }
 
 /// 一条笔记的详情读默认带回来的东西（ADR-0002 的固定窗口）。
@@ -356,6 +372,353 @@ pub async fn request_and_admit_for_domain(
     .await?;
     transaction.commit().await?;
     Ok(outcome)
+}
+
+/// Admit one Operations-selected publication into the ordinary Collection chain.
+///
+/// The scope is exact and immutable: this writes the same Request → Admission → Work Order
+/// records as every other collection action, but never creates a discovery finding, Package, or
+/// Material.  A control-only creator Target is created only when the frozen author identity has
+/// no Target yet; it is not advanced into `archiving`, because this order is not a profile
+/// archive.
+pub async fn request_and_admit_exact_ops_publication_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain_ref: Uuid,
+    purpose: &str,
+    target: &OpsPublicationExactTarget,
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_work_order_ops_publication_target') IS NOT NULL \
+                AND to_regclass('linggan_ops_publication_execution_locator') IS NOT NULL",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !schema_ready {
+        return Err(AcquisitionChainError::SchemaUnavailable);
+    }
+
+    // Re-read the protected source relation inside the write transaction.  The caller may have
+    // used a snapshot to decide eligibility, but the chain must not trust a detached tuple.
+    let locator_matches: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_ops_publication_execution_locator locator \
+         WHERE locator.locator_ref=$1 AND locator.publication_ref=$2 \
+           AND locator.publication_version=$3 AND locator.expected_content_id=$4 \
+           AND locator.expected_author_id=$5 \
+           AND locator.validation_state='accepted_xhs_signed_locator')",
+    )
+    .bind(target.locator_ref)
+    .bind(target.publication_ref)
+    .bind(target.publication_version)
+    .bind(&target.content_external_id)
+    .bind(&target.author_external_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !locator_matches {
+        return Err(AcquisitionChainError::InvalidOpsPublicationScope);
+    }
+
+    let domain_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM observation_domain \
+         WHERE domain_ref=$1 AND status='active' FOR SHARE)",
+    )
+    .bind(domain_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !domain_active {
+        return Err(AcquisitionChainError::TargetDomainUnassigned);
+    }
+
+    let proposed_target_ref = Uuid::new_v4();
+    let inserted_target: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES($1,'xhs','creator',$2,NULL,'manual') \
+         ON CONFLICT(platform,target_kind,identity_key) DO NOTHING \
+         RETURNING target_ref",
+    )
+    .bind(proposed_target_ref)
+    .bind(&target.author_external_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let target_ref: Uuid = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target \
+         WHERE platform='xhs' AND target_kind='creator' AND identity_key=$1 FOR UPDATE",
+    )
+    .bind(&target.author_external_id)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if inserted_target.is_some() {
+        sqlx::query(
+            "INSERT INTO collection_observation_target_transition \
+                 (transition_ref,target_ref,from_state,to_state,actor,reason_code,reason) \
+             VALUES($1,$2,NULL,'pending_decision','person','ops_publication_sync_control_target', \
+                    '由已冻结的运营发布同步请求建立；不是发现或归档结果')",
+        )
+        .bind(Uuid::new_v4())
+        .bind(target_ref)
+        .execute(&mut **transaction)
+        .await?;
+    }
+
+    // Do not rewrite an existing creator's primary Domain.  An exact sync may legitimately use
+    // a reference membership in the publication's own Domain; the Request freezes that role.
+    let relation_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM observation_domain_target \
+         WHERE domain_ref=$1 AND target_ref=$2 FOR UPDATE)",
+    )
+    .bind(domain_ref)
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !relation_exists {
+        let has_other_primary: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM observation_domain_target \
+             WHERE target_ref=$1 AND domain_ref<>$2 AND role='primary' FOR SHARE)",
+        )
+        .bind(target_ref)
+        .bind(domain_ref)
+        .fetch_one(&mut **transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO observation_domain_target(domain_ref,target_ref,role) \
+             VALUES($1,$2,$3)",
+        )
+        .bind(domain_ref)
+        .bind(target_ref)
+        .bind(if has_other_primary {
+            "reference"
+        } else {
+            "primary"
+        })
+        .execute(&mut **transaction)
+        .await?;
+    }
+
+    let lifecycle_state: String = sqlx::query_scalar(
+        "SELECT lifecycle_state FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if lifecycle_state == "dismissed" {
+        return Err(AcquisitionChainError::TargetNotRequestable {
+            state: lifecycle_state,
+        });
+    }
+
+    let request_ref = Uuid::new_v4();
+    let observation_role: String = sqlx::query_scalar(
+        "SELECT role FROM observation_domain_target WHERE domain_ref=$1 AND target_ref=$2",
+    )
+    .bind(domain_ref)
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request \
+             (request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) \
+         VALUES($1,$2,$3,$4,'deep_archive',$5,'person')",
+    )
+    .bind(request_ref)
+    .bind(target_ref)
+    .bind(domain_ref)
+    .bind(&observation_role)
+    .bind(purpose)
+    .execute(&mut **transaction)
+    .await?;
+
+    let authorization_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT authorization_ref FROM collection_acquisition_authorization \
+         WHERE platform='xhs' AND target_kind='creator' AND lane='deep_archive' \
+           AND revoked_at IS NULL AND expires_at>scope_001_now() \
+           AND 'ops_publication_sync'=ANY(allowed_task_templates) \
+           AND 'batch'=ANY(allowed_dispatch_lanes) \
+           AND (max_works_per_target IS NULL OR max_works_per_target>=1) \
+           AND max_work_units>=1 \
+         ORDER BY expires_at DESC,authorization_ref LIMIT 1 FOR UPDATE",
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let authorization_failure = if authorization_ref.is_some() {
+        None
+    } else {
+        let status: (bool, bool, bool, bool) = sqlx::query_as(
+            "SELECT \
+             EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+                     WHERE platform='xhs' AND target_kind='creator' AND lane='deep_archive' \
+                       AND revoked_at IS NULL AND expires_at>scope_001_now()), \
+             EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+                     WHERE platform='xhs' AND target_kind='creator' AND lane='deep_archive' \
+                       AND revoked_at IS NULL AND expires_at>scope_001_now() \
+                       AND 'ops_publication_sync'=ANY(allowed_task_templates) \
+                       AND 'batch'=ANY(allowed_dispatch_lanes)), \
+             EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+                     WHERE platform='xhs' AND target_kind='creator' AND lane='deep_archive' \
+                       AND revoked_at IS NULL AND expires_at>scope_001_now() \
+                       AND 'ops_publication_sync'=ANY(allowed_task_templates) \
+                       AND 'batch'=ANY(allowed_dispatch_lanes) \
+                       AND (max_works_per_target IS NULL OR max_works_per_target>=1) \
+                       AND max_work_units>=1), \
+             EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+                     WHERE platform='xhs' AND target_kind='creator' AND lane='deep_archive')",
+        )
+        .fetch_one(&mut **transaction)
+        .await?;
+        Some(if status.0 && !status.1 {
+            AuthorizationBoundaryFailure::ScopeMismatch
+        } else if status.1 && !status.2 {
+            AuthorizationBoundaryFailure::WorkUnitLimitReached
+        } else if status.3 {
+            AuthorizationBoundaryFailure::ExpiredOrRevoked
+        } else {
+            AuthorizationBoundaryFailure::Missing
+        })
+    };
+
+    let merge_work_order_ref = if let Some(authorization_ref) = authorization_ref {
+        sqlx::query_scalar(
+            "SELECT work_order.work_order_ref \
+             FROM collection_work_order work_order \
+             JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
+             JOIN collection_work_order_ops_publication_target scope \
+               ON scope.work_order_ref=work_order.work_order_ref \
+             WHERE work_order.target_ref=$1 AND work_order.lane='deep_archive' \
+               AND work_order.dispatch_lane='batch' AND work_order.queue_state='queued' \
+               AND decision.authorization_ref=$2 \
+               AND scope.publication_ref=$3 AND scope.publication_version=$4 AND scope.locator_ref=$5 \
+               AND NOT EXISTS (SELECT 1 FROM collection_work_order_material_target material \
+                               WHERE material.work_order_ref=work_order.work_order_ref) \
+               AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease lease \
+                               WHERE lease.work_order_ref=work_order.work_order_ref) \
+               AND NOT EXISTS (SELECT 1 FROM collection_work_order_domain_usage usage \
+                               JOIN observation_domain domain USING(domain_ref) \
+                               WHERE usage.work_order_ref=work_order.work_order_ref \
+                                 AND domain.status<>'active') \
+             ORDER BY work_order.created_at,work_order.work_order_ref LIMIT 1",
+        )
+        .bind(target_ref)
+        .bind(authorization_ref)
+        .bind(target.publication_ref)
+        .bind(target.publication_version)
+        .bind(target.locator_ref)
+        .fetch_optional(&mut **transaction)
+        .await?
+    } else {
+        None
+    };
+    let facts = AdmissionFacts {
+        authorization_ref: authorization_ref.map(|value| value.to_string()),
+        authorization_failure,
+        mergeable_work_order_exists: merge_work_order_ref.is_some(),
+        need_already_satisfied: false,
+        capacity: Capacity::Queueable,
+        stop_conditions_expressible: true,
+    };
+    let outcome = decide_admission(&facts);
+    let decision_reason_code = reason_code(&outcome, &facts);
+    let decision_ref = Uuid::new_v4();
+    let decision_authorization = match &outcome {
+        AdmissionOutcome::Admitted { authorization_ref } => Uuid::parse_str(authorization_ref).ok(),
+        _ => None,
+    };
+    sqlx::query(
+        "INSERT INTO collection_admission_decision \
+             (decision_ref,request_ref,outcome,unanswered_question,reason_code,reason,authorization_ref, \
+              target_ref,station_ref,installation_ref,account_ref,eligibility_ref,monitor_rule_revision_ref) \
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,NULL,NULL,NULL,NULL,NULL)",
+    )
+    .bind(decision_ref)
+    .bind(request_ref)
+    .bind(outcome.code())
+    .bind(outcome.unanswered_question().map(|question| question.number()))
+    .bind(decision_reason_code)
+    .bind(reason_text(&outcome))
+    .bind(decision_authorization)
+    .bind(target_ref)
+    .execute(&mut **transaction)
+    .await?;
+
+    let work_order_ref = match outcome {
+        AdmissionOutcome::Admitted { .. } => {
+            let work_order_ref = Uuid::new_v4();
+            let dedupe_key = format!(
+                "batch:{target_ref}:ops_publication_sync:{}:{}:{}:{request_ref}",
+                target.publication_ref, target.publication_version, target.locator_ref
+            );
+            sqlx::query(
+                "INSERT INTO collection_work_order \
+                     (work_order_ref,decision_ref,target_ref,lane,max_works,station_ref,installation_ref,account_ref, \
+                      eligibility_ref,monitor_rule_revision_ref,stop_conditions,dispatch_lane,queue_state,scheduled_for, \
+                      dedupe_key,estimated_work_units,dispatch_group_key,retry_not_before_at,execution_input_frozen_at) \
+                 VALUES($1,$2,$3,'deep_archive',1,NULL,NULL,NULL,NULL,NULL,$4,'batch','queued', \
+                        scope_001_now(),$5,1,$6,scope_001_now(),scope_001_now())",
+            )
+            .bind(work_order_ref)
+            .bind(decision_ref)
+            .bind(target_ref)
+            .bind(json!({
+                "maximumQuota": 1,
+                "stopOn": ["exact_publication_detail_complete", "risk_stop", "time_budget"],
+                "opsPublicationSync": {"publicationRef": target.publication_ref, "publicationVersion": target.publication_version}
+            }))
+            .bind(dedupe_key)
+            .bind(format!("target:{target_ref}"))
+            .execute(&mut **transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO collection_work_order_domain_usage \
+                     (work_order_ref,request_ref,domain_ref,role,basis_kind) \
+                 VALUES($1,$2,$3,$4,'admitted')",
+            )
+            .bind(work_order_ref)
+            .bind(request_ref)
+            .bind(domain_ref)
+            .bind(&observation_role)
+            .execute(&mut **transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO collection_work_order_ops_publication_target \
+                     (work_order_ref,publication_ref,publication_version,locator_ref,content_external_id,author_external_id,ordinal,acquire_media) \
+                 VALUES($1,$2,$3,$4,$5,$6,1,true)",
+            )
+            .bind(work_order_ref)
+            .bind(target.publication_ref)
+            .bind(target.publication_version)
+            .bind(target.locator_ref)
+            .bind(&target.content_external_id)
+            .bind(&target.author_external_id)
+            .execute(&mut **transaction)
+            .await?;
+            Some(work_order_ref)
+        }
+        AdmissionOutcome::Merge { .. } => {
+            let work_order_ref = merge_work_order_ref.ok_or_else(|| {
+                sqlx::Error::Protocol(
+                    "merge outcome has no exact Ops publication Work Order".to_owned(),
+                )
+            })?;
+            sqlx::query(
+                "INSERT INTO collection_work_order_domain_usage \
+                     (work_order_ref,request_ref,domain_ref,role,basis_kind) \
+                 VALUES($1,$2,$3,$4,'merged')",
+            )
+            .bind(work_order_ref)
+            .bind(request_ref)
+            .bind(domain_ref)
+            .bind(&observation_role)
+            .execute(&mut **transaction)
+            .await?;
+            Some(work_order_ref)
+        }
+        _ => None,
+    };
+    Ok(RequestOutcome {
+        request_ref,
+        decision_ref,
+        outcome,
+        reason_code: decision_reason_code,
+        work_order_ref,
+    })
 }
 
 /// Legacy convenience path that additionally tries to claim the just-created queued Work Order.

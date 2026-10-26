@@ -78,6 +78,7 @@ describe("OPS-HTTP-001 display contracts", () => {
         hits: 2,
         coverage: "partial",
         coveredTo: "2026-10-11",
+          nativeFacts: false,
       }),
     ).toBe("按 2026-10-11 及以前计算");
   });

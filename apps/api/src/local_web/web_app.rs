@@ -10,7 +10,7 @@ use super::comment_study::local_comment_study_guard;
 use axum::{
     Router,
     extract::{Path, State},
-    http::{HeaderValue, StatusCode, header},
+    http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
     response::{Html, IntoResponse, Redirect, Response},
     routing::get,
@@ -21,7 +21,10 @@ use std::{path::PathBuf, sync::Arc};
 /// 由 React 应用提供的正式页面。必须与 `apps/web/src/app/pages.ts` 逐项相同（前端测试对照）。
 const REACT_PAGES: &[&str] = &[
     "/login",
+    "/invite/accept",
     "/settings/models",
+    "/settings/account",
+    "/settings/team",
     "/ops/creation",
     "/corpus/creators",
     "/corpus/evidence",
@@ -38,6 +41,19 @@ const REACT_PAGES: &[&str] = &[
     "/topics",
     "/topics/offline-review",
     "/topics/{canonical_key}",
+];
+
+/// Pages that contain organisation data must be checked by the server before the React entry is
+/// returned.  This is distinct from the local-origin guard: a same-origin browser without an
+/// active team session must not receive the management surface and rely on client-side hiding.
+const AUTHENTICATED_REACT_PAGES: &[&str] = &[
+    "/settings/account",
+    "/settings/team",
+    "/ops/overview",
+    "/ops/publications",
+    "/ops/accounts",
+    "/ops/daily",
+    "/ops/io",
 ];
 
 /// 静态资源只允许这些类型：Vite 产物的脚本、样式、图片和字体。入口 HTML 与构建信息不经这里。
@@ -105,6 +121,14 @@ pub(super) fn routes<S: Clone + Send + Sync + 'static>() -> Router<S> {
     routes_for(WebAppConfig::from_environment())
 }
 
+pub(super) fn authenticated_routes() -> Router<super::LocalWebState> {
+    let mut pages = Router::new();
+    for page in AUTHENTICATED_REACT_PAGES {
+        pages = pages.route(page, get(authenticated_entry));
+    }
+    pages.layer(middleware::from_fn(local_comment_study_guard))
+}
+
 pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig) -> Router<S> {
     // 一级入口的默认子页由服务器决定，不放进前端路由：书签与旧链接不依赖脚本也能到达。
     let mut pages = Router::new().route(
@@ -112,7 +136,10 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
         get(|| async { Redirect::temporary("/settings/models") }),
     );
     for page in REACT_PAGES {
-        if *page == "/login" {
+        if *page == "/login"
+            || *page == "/invite/accept"
+            || AUTHENTICATED_REACT_PAGES.contains(page)
+        {
             continue;
         }
         pages = if *page == "/topics/{canonical_key}" {
@@ -123,7 +150,8 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
     }
     pages
         .layer(middleware::from_fn(local_comment_study_guard))
-        .route("/login", get(login_entry))
+        .route("/login", get(public_auth_entry))
+        .route("/invite/accept", get(public_auth_entry))
         .route("/ui-assets/{*file}", get(asset))
         .with_state(config)
 }
@@ -178,8 +206,21 @@ async fn entry(State(config): State<WebAppConfig>) -> Response {
     }
 }
 
+/// Team and operations pages are served only after the same request has passed the local-origin
+/// guard and an active team session check. The creation workspace intentionally keeps its
+/// existing boundary until its own team migration is implemented.
+async fn authenticated_entry(
+    State(state): State<super::LocalWebState>,
+    headers: HeaderMap,
+) -> Response {
+    if let Err(response) = super::ops_auth::current_member(&state, &headers).await {
+        return response;
+    }
+    entry(State(WebAppConfig::from_environment())).await
+}
+
 /// Login remains a local development entry: no credential submission or session.
-async fn login_entry(State(config): State<WebAppConfig>) -> Response {
+async fn public_auth_entry(State(config): State<WebAppConfig>) -> Response {
     let mut response = entry(State(config)).await;
     response
         .headers_mut()

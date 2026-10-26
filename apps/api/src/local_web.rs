@@ -72,6 +72,15 @@ mod offline_preview;
 mod offline_preview_tests;
 mod ops;
 mod ops_api;
+mod ops_auth;
+#[cfg(test)]
+mod ops_auth_tests;
+mod ops_native_api;
+#[cfg(test)]
+mod ops_native_api_tests;
+#[cfg(test)]
+mod ops_native_model_tests;
+mod ops_sync_api;
 #[cfg(test)]
 mod ops_browser_tests;
 mod ops_export;
@@ -383,7 +392,9 @@ fn router(state: LocalWebState) -> Router {
         .merge(model_settings::routes())
         .merge(ai_settings::routes())
         .merge(offline_preview::routes())
+        .merge(ops_auth::routes())
         .merge(web_app::routes())
+        .merge(web_app::authenticated_routes())
         .merge(ops::routes())
         .merge(content_workbench_api::routes())
         .merge(content_workbench_sources_api::routes())
@@ -1189,6 +1200,7 @@ async fn collection_material_deepening(
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
+                AcquisitionChainError::InvalidOpsPublicationScope => "ops_publication_scope_invalid",
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
                     "progressive_archive_authorization_too_small"
                 }
@@ -1282,6 +1294,7 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::KeywordArchiveIncomplete => "keyword_archive_incomplete",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
+                AcquisitionChainError::InvalidOpsPublicationScope => "ops_publication_scope_invalid",
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
                     "progressive_archive_authorization_too_small"
                 }
@@ -3565,6 +3578,7 @@ fn creator_archive_error_receipt(error: &RequestLeaseError) -> &'static str {
             | AcquisitionChainError::KeywordArchiveIncomplete
             | AcquisitionChainError::ProgressiveArchiveNotReady { .. }
             | AcquisitionChainError::InvalidMaterialTargets
+            | AcquisitionChainError::InvalidOpsPublicationScope
             | AcquisitionChainError::Database(_),
         ) => "archive_request_failed",
     }

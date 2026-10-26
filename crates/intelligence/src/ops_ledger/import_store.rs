@@ -17,6 +17,14 @@ pub(super) async fn write_changes(
     domain_ref: Uuid,
     as_of: &str,
 ) -> Result<(), OpsImportError> {
+    // D1-only schemas remain useful for historic-ledger proofs and rolling upgrades. The
+    // registration write must keep working until 0159 is present; once it is, field facts are
+    // appended in the same transaction as the import.
+    let field_adoption_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_ops_publication_field_adoption') IS NOT NULL",
+    )
+    .fetch_one(&mut *connection)
+    .await?;
     for (account_ref, account) in &changes.accounts {
         upsert_account(connection, *account_ref, account, batch_ref, domain_ref).await?;
     }
@@ -35,6 +43,7 @@ pub(super) async fn write_changes(
             publication,
             (account_ref, merged_into),
             batch_ref,
+            field_adoption_ready,
         )
         .await?;
     }
@@ -126,6 +135,7 @@ async fn upsert_publication(
     publication: &PlannedPublication,
     (account_ref, merged_into_ref): (Option<Uuid>, Option<Uuid>),
     batch_ref: Uuid,
+    field_adoption_ready: bool,
 ) -> Result<(), OpsImportError> {
     let missing_since = publication.missing.then_some(batch_ref);
     sqlx::query(
@@ -187,6 +197,55 @@ async fn upsert_publication(
     .bind(&publication.source_created_at)
     .bind(&publication.source_updated_at)
     .bind(batch_ref)
+    .execute(&mut *connection)
+    .await?;
+    if field_adoption_ready {
+        append_imported_publication_field_adoptions(connection, publication_ref, publication, batch_ref)
+            .await?;
+    }
+    Ok(())
+}
+
+/// Imports retain their own source timestamp and batch identity in the field-adoption stream.
+/// This is deliberately separate from the mutable registration projection: a blank in a later
+/// export is an explicit `not_provided` current decision, never a hidden fallback to old text.
+async fn append_imported_publication_field_adoptions(
+    connection: &mut PgConnection,
+    publication_ref: Uuid,
+    publication: &PlannedPublication,
+    batch_ref: Uuid,
+) -> Result<(), OpsImportError> {
+    sqlx::query(
+        "INSERT INTO linggan_ops_publication_field_adoption \
+         (adoption_ref,publication_ref,field_name,disposition,source_kind,source_batch_ref, \
+          value_text,value_count,value_instant,observed_at) \
+         SELECT gen_random_uuid(),$1,candidate.field_name,candidate.disposition, \
+                'workbench_import',$2,candidate.value_text,candidate.value_count, \
+                candidate.value_instant,$3 \
+           FROM (VALUES \
+             ('title'::text,CASE WHEN $4::text IS NULL THEN 'not_provided' ELSE 'adopted' END, \
+                $4::text,NULL::bigint,NULL::timestamptz), \
+             ('body'::text,CASE WHEN $5::text IS NULL THEN 'not_provided' ELSE 'adopted' END, \
+                $5::text,NULL::bigint,NULL::timestamptz), \
+             ('like_count'::text,CASE WHEN $6::bigint IS NULL THEN 'not_provided' ELSE 'adopted' END, \
+                NULL::text,$6::bigint,NULL::timestamptz), \
+             ('collect_count'::text,CASE WHEN $7::bigint IS NULL THEN 'not_provided' ELSE 'adopted' END, \
+                NULL::text,$7::bigint,NULL::timestamptz), \
+             ('comment_count'::text,CASE WHEN $8::bigint IS NULL THEN 'not_provided' ELSE 'adopted' END, \
+                NULL::text,$8::bigint,NULL::timestamptz), \
+             ('published_at'::text,'adopted',NULL::text,NULL::bigint,$9::timestamptz) \
+           ) AS candidate(field_name,disposition,value_text,value_count,value_instant) \
+         ON CONFLICT (source_batch_ref,publication_ref,field_name) DO NOTHING",
+    )
+    .bind(publication_ref)
+    .bind(batch_ref)
+    .bind(&publication.source_updated_at)
+    .bind(&publication.title)
+    .bind(&publication.body)
+    .bind(publication.like_count)
+    .bind(publication.collect_count)
+    .bind(publication.comment_count)
+    .bind(&publication.published_at)
     .execute(&mut *connection)
     .await?;
     Ok(())

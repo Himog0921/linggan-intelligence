@@ -54,6 +54,8 @@ function OpsDataPage() {
   });
   const foot = summary.data?.asOf
     ? `数据截至 ${summary.data.asOf.exportedAtBeijing.slice(5)}`
+    : summary.data?.nativeDataPresent
+      ? "原生台账数据（历史尚未迁入）"
     : summary.isPending || summary.isError
       ? "数据截至时间未知"
       : "尚未迁入数据";
