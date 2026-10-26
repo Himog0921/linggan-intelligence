@@ -18,11 +18,24 @@ npm_bin="$(dirname "$node_bin")/npm"
 [[ -x "$npm_bin" ]] || npm_bin="$(command -v npm)"
 export PATH="$(dirname "$node_bin"):$PATH"
 
-# 前端：锁定依赖、重新构建，证明用的就是当前源码。
-if [[ ! -d apps/web/node_modules ]]; then
-  "$npm_bin" ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+# Native Ops proofs exercise only Axum and PostgreSQL.  Do not make that focused backend proof
+# depend on a generated browser build (or its unrelated design-system drift); every browser scope
+# still builds the current frontend before starting its isolated database.
+proof_scope="${WEB_APP_PROOF_SCOPE:-all}"
+# This focused proof intentionally exercises a synthetic exact publication through a new shared
+# lease.  It must declare the same governance phase as the dedicated Operations proof runner;
+# missing phase remains fail-closed for every other invocation.
+if [[ "$proof_scope" == "ops-native" ]]; then
+  export LINGGAN_COLLECTION_UPGRADE_PHASE=governance
 fi
-"$npm_bin" --prefix apps/web run build
+# These focused scopes exercise Axum + isolated PostgreSQL only.  Do not make
+# their security/model proofs fail on unrelated generated frontend drift.
+if [[ "$proof_scope" != "ops-native" && "$proof_scope" != "ops-auth" ]]; then
+  if [[ ! -d apps/web/node_modules ]]; then
+    "$npm_bin" ci --prefix apps/web --ignore-scripts --no-audit --no-fund
+  fi
+  "$npm_bin" --prefix apps/web run build
+fi
 
 suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
 proof_database="linggan_web_app_proof_${suffix}"
@@ -106,6 +119,14 @@ run_proof() {
 # Focused local reruns use the same disposable environment; CI defaults to every stage.
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == ops ]]; then
   run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::ops_browser_tests -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == ops-auth ]]; then
+  run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::ops_auth_tests -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == ops-native ]]; then
+  run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::ops_native_ -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == workbench ]]; then

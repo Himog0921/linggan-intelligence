@@ -1,12 +1,14 @@
 # PAGE-OPS-002 · 运营 · 总览
 
-> 状态: 权威当前
-> 最后核对: 2026-10-14
-> 适用范围: OPS-MIGRATION-001 第 D3 步（Issue #409）：「运营」左侧栏「总览」二级页的五块驾驶舱、周与月加微目标的设定，以及每日数据「执行状态」列的新口径
+> 状态: 历史归档
+> 最后核对: 2026-10-23
+> 适用范围: OPS-MIGRATION-001 第 D3 步（Issue #409）的迁入数据总览、历史目标设定和每日数据执行状态口径；不规定原生日报、成员权限、同步回填或交接后的总览逻辑
 > 事实来源: Mog 2026-10-12～13 的去留裁定与 D3 开工前确认（见第 10 节）；内容工作台 `main@489b9cb8` 总览的只读代码走查（`src/components/data-management/overview/`、`src/lib/services/data-management-overview-service.ts`、`operation-target.ts`、`overview-slice.ts`、`daily-execution.ts`）；[PAGE-OPS-001](ops-page.md)；[OPS-LEDGER-001](../../data-contracts/ops-ledger-001.md)；[OPS-HTTP-001](../../data-contracts/ops-http-001.md)；LIDS v7.0
-> 冲突时以谁为准: Mog 最新确认、AGENTS.md、DEC-0009、真实 API/schema/代码
+> 冲突时以谁为准: [OPS-LAUNCH-001](../../plans/active/ops-launch-001.md)、Mog 最新确认、AGENTS.md、真实 API/schema/代码
 > 页面层级与模式: L1；沿用 PAGE-OPS-001 的壳层、面包屑业务选择与左侧栏，正文是五块从上到下的连续工作面，不新造页面骨架
 > 当前实现证据: PR #415 已合并为 `main@6feefefe` 并上线本机 3000；[ACC-OPS-PAGE-002](../acceptance/ops-page-002-visual-acceptance.md) 分层记录上线证明；业务验收待 Mog。三处合并后修复随 PR #418 上线为 14ee80b1；Issue #417 的读屏说明跟进为候选，尚未合并部署
+
+> **2026-10-23 边界：** 本文的迁入期间截断、旧日报 `0`/未填不可区分等事实仍可读；原生数据写入后不得继续以最近导出批次决定可计算日期，也不得把历史目标接口当作团队权限模型。新的指标、覆盖与状态词典随 OPS-LAUNCH-001 的正式合同收口。
 
 ## 1. 页面责任
 

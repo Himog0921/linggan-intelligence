@@ -233,14 +233,23 @@ async function generateWithV8BusyProof(locator) {
 }
 
 try {
+  await step('合成团队会话允许读取受保护的运营账号', async()=>{
+    const password=process.env.CW_BROWSER_AUTH_PASSWORD;
+    assert.ok(password,'isolated fixture supplies synthetic team credentials');
+    const response=await context.request.post(`${origin}/api/local/auth/login`,{
+      headers:{Origin:origin},data:{email:'workbench-browser@example.test',password},
+    });
+    assert.equal(response.status(),200);
+    assert.ok((await response.json()).member.ref);
+  });
   await step('设置页不加载创作模块或本地图页字体',async()=>{
     await page.goto(`${origin}/settings/models`);await page.getByRole('heading',{name:'AI 设置'}).waitFor();
     const resources=await page.evaluate(()=>performance.getEntriesByType('resource').map(entry=>entry.name));
     assert.ok(resources.every(url=>!url.includes('WorkbenchPage')&&!url.includes('noto-sans-sc')));
     report.settingsResources=resources.map(url=>new URL(url).pathname);
   });
-  await step('运营入口建立真实服务器作品并保存角度提纲账号',async()=>{
-    await page.goto(`${origin}/ops`);assert.equal(new URL(page.url()).pathname,'/ops/creation');
+  await step('创作入口建立真实服务器作品并保存角度提纲账号',async()=>{
+    await page.goto(`${origin}/ops/creation`);assert.equal(new URL(page.url()).pathname,'/ops/creation');
     await page.getByLabel('创作领域',{exact:true}).click();await page.getByRole('navigation',{name:'可选创作领域'}).getByRole('button').first().click();await until(async()=>new URL(page.url()).searchParams.get('domain')===domainRef,'chosen fixture domain');await page.getByLabel('新选题标题').fill('作业启动');
     await page.getByRole('button',{name:'建立选题',exact:true}).click();await page.getByRole('button',{name:'编辑方案',exact:true}).click();await page.getByLabel('切入角度').waitFor();
     workId=new URL(page.url()).searchParams.get('work');assert.ok(workId);workUrl=page.url();report.workId=workId;

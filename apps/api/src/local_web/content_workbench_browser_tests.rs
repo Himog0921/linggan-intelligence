@@ -1,5 +1,6 @@
 //! Formal React workbench proof over real Axum + isolated PostgreSQL and synthetic materials.
 use super::*;
+use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
 use std::{fs, path::Path as ProofPath};
 use uuid::Uuid;
 
@@ -133,6 +134,16 @@ async fn content_workbench_real_chain_browser_proof() {
             .unwrap(),
         0
     );
+    let login_password = "synthetic-workbench-browser-password";
+    let password_hash = Argon2::default()
+        .hash_password(
+            login_password.as_bytes(),
+            &SaltString::encode_b64(b"workbench-browser-proof-salt").unwrap(),
+        )
+        .unwrap()
+        .to_string();
+    sqlx::query("INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state,password_hash,activated_at) VALUES($1,'workbench-browser@example.test','创作合成运营','operator','active',$2,scope_001_now())")
+        .bind(Uuid::new_v4()).bind(password_hash).execute(db.pool()).await.unwrap();
     let before = side_effect_counts(&db).await;
     let application = app_with_database(db.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -172,6 +183,7 @@ async fn content_workbench_real_chain_browser_proof() {
             std::process::Command::new(node)
                 .arg(script)
                 .env("CW_BROWSER_PROOF_DIR", &directory)
+                .env("CW_BROWSER_AUTH_PASSWORD", login_password)
                 .status(),
         )
     };

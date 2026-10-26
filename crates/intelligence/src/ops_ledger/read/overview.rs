@@ -13,7 +13,10 @@ use linggan_storage_postgres::Database;
 use serde::Serialize;
 use sqlx::Row;
 
-use super::{OpsAsOf, OpsBusiness, OpsReadError, ensure_business, read_ops_as_of};
+use super::{
+    LATEST_VIEWS_CTE, OpsAsOf, OpsBusiness, OpsReadError, ensure_business, read_ops_as_of,
+};
+use crate::ops_ledger::XHS_HIT_VIEW_THRESHOLD;
 use crate::ops_ledger::is_business_date;
 
 pub use attention::OverviewAttention;
@@ -106,6 +109,20 @@ pub struct OverviewWindow {
     pub previous: Option<DateRange>,
 }
 
+/// Facts entered natively in this calendar slice.  These are intentionally separate from
+/// `window.covered`: a few operator entries prove those facts, not that every day in the slice
+/// has been historically mirrored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OverviewNativeFacts {
+    pub observed: bool,
+    pub latest_business_date: Option<String>,
+    pub published: i64,
+    pub links_opened: Option<i64>,
+    pub followers_gained: Option<i64>,
+    pub hits: i64,
+}
+
 impl OverviewWindow {
     /// The counted current days and the previous window, both present or both absent.
     pub(super) fn counted(&self) -> Option<(&DateRange, &DateRange)> {
@@ -120,6 +137,7 @@ pub struct OpsOverview {
     /// True when one business is selected: daily-report figures then still cover all businesses.
     pub business_selected: bool,
     pub window: OverviewWindow,
+    pub native_facts: OverviewNativeFacts,
     pub kpi: OverviewKpi,
     pub funnel: OverviewFunnel,
     pub target: OverviewTarget,
@@ -139,6 +157,7 @@ pub async fn read_ops_overview(
 ) -> Result<OpsOverview, OpsReadError> {
     ensure_business(database, business).await?;
     let window = resolve_window(database, query).await?;
+    let native_facts = native_facts(database, business, &window).await?;
     let kpi = figures::kpi(database, business, &window).await?;
     let funnel = figures::funnel(&kpi, business);
     let target = figures::target(database, &window).await?;
@@ -148,6 +167,7 @@ pub async fn read_ops_overview(
     Ok(OpsOverview {
         as_of: read_ops_as_of(database).await?,
         business_selected: business.domain_ref().is_some(),
+        native_facts,
         ranking: people::ranking(&operators, &attention),
         ranking_covered: window.covered.is_some(),
         daily_output: output::daily_output(database, business, &window).await?,
@@ -159,6 +179,51 @@ pub async fn read_ops_overview(
         target,
         insights,
         attention,
+    })
+}
+
+async fn native_facts(
+    database: &Database,
+    business: OpsBusiness,
+    window: &OverviewWindow,
+) -> Result<OverviewNativeFacts, OpsReadError> {
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "WITH {LATEST_VIEWS_CTE}, \
+         native_publications AS ( \
+           SELECT coalesce(p.published_business_date,p.native_published_on) AS business_date,p.platform,lv.view_count \
+             FROM linggan_ops_publication p \
+             LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref \
+             LEFT JOIN latest_views lv ON lv.publication_ref=p.publication_ref \
+            WHERE p.source_system='linggan_native' AND p.merged_into_ref IS NULL \
+              AND p.missing_since_batch_ref IS NULL \
+              AND coalesce(p.published_business_date,p.native_published_on) BETWEEN $3::date AND $4::date \
+              AND ($2::uuid IS NULL OR a.domain_ref=$2)), \
+         native_daily AS ( \
+           SELECT business_date,links_opened_count,followers_gained \
+             FROM linggan_ops_daily_report \
+            WHERE source_system='linggan_native' AND missing_since_batch_ref IS NULL \
+              AND business_date BETWEEN $3::date AND $4::date), \
+         native_dates AS (SELECT business_date FROM native_publications UNION ALL SELECT business_date FROM native_daily) \
+         SELECT EXISTS(SELECT 1 FROM native_dates) AS observed, \
+                (SELECT max(business_date)::text FROM native_dates) AS latest_business_date, \
+                (SELECT count(*) FROM native_publications) AS published, \
+                (SELECT sum(links_opened_count)::bigint FROM native_daily) AS links_opened, \
+                (SELECT sum(followers_gained)::bigint FROM native_daily) AS followers_gained, \
+                (SELECT count(*) FROM native_publications WHERE platform='xhs' AND view_count >= $1) AS hits"
+    )))
+    .bind(XHS_HIT_VIEW_THRESHOLD)
+    .bind(business.domain_ref())
+    .bind(&window.current.from)
+    .bind(&window.current.to)
+    .fetch_one(database.pool())
+    .await?;
+    Ok(OverviewNativeFacts {
+        observed: row.try_get("observed")?,
+        latest_business_date: row.try_get("latest_business_date")?,
+        published: row.try_get("published")?,
+        links_opened: row.try_get("links_opened")?,
+        followers_gained: row.try_get("followers_gained")?,
+        hits: row.try_get("hits")?,
     })
 }
 

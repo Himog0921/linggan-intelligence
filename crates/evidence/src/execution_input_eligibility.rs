@@ -192,13 +192,37 @@ pub(crate) async fn blocked_object_refs_in_transaction(
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)
     .await?;
-    Ok(BlockedObjects { material })
+    let ops_publication: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT scope.publication_ref \
+         FROM collection_work_order_ops_publication_target scope \
+         JOIN collection_work_order order_row USING(work_order_ref) \
+         JOIN linggan_ops_publication_execution_locator locator ON locator.locator_ref=scope.locator_ref \
+         WHERE scope.work_order_ref=$1 \
+           AND EXISTS (SELECT 1 FROM collection_execution_input_eligibility eligibility \
+                       WHERE eligibility.target_ref=order_row.target_ref \
+                         AND eligibility.domain_scope='own_domain' \
+                         AND eligibility.object_kind='ops_publication' \
+                         AND eligibility.object_ref=scope.publication_ref \
+                         AND eligibility.capability='content_detail' \
+                         AND eligibility.state='input_blocked' \
+                         AND eligibility.resolver_version=$2 \
+                         AND eligibility.input_fingerprint IS NOT DISTINCT FROM encode(locator.locator_sha256,'hex'))",
+    )
+    .bind(work_order_ref)
+    .bind(EXECUTION_INPUT_RESOLVER_VERSION)
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok(BlockedObjects {
+        material,
+        ops_publication,
+    })
 }
 
 /// 一个工单里被停掉的材料成员。
 #[derive(Debug, Default, Clone)]
 pub(crate) struct BlockedObjects {
     pub material: Vec<Uuid>,
+    pub ops_publication: Vec<Uuid>,
 }
 
 /// 停掉一个成员的执行资格：台账记下原因，同一篇的其余通道一并收束。
@@ -224,11 +248,30 @@ pub(crate) async fn stop_material_for_missing_execution_input_in_transaction(
     let Some(target_ref) = subject.target_ref else {
         return Ok(None);
     };
-    let Some(object_ref) = subject.content_public_ref else {
-        return Ok(None);
-    };
-    let (domain_scope, object_kind) = ("own_domain", "material_content");
-    let locator = candidate_locator_sql("$9");
+    let (object_ref, object_kind, locator, locator_parameter) =
+        if let Some(content_public_ref) = subject.content_public_ref {
+            (
+                content_public_ref,
+                "material_content",
+                candidate_locator_sql("$9"),
+                ExecutionLocatorParameter::ContentExternalId(&subject.content_external_id),
+            )
+        } else if let (Some(publication_ref), Some(locator_ref)) =
+            (subject.ops_publication_ref, subject.ops_locator_ref)
+        {
+            (
+                publication_ref,
+                "ops_publication",
+                "SELECT locator.locator_url AS url,'ops_execution_locator'::text AS source_kind, \
+                        locator.locator_ref AS source_ref,locator.provided_at AS observed_at \
+                 FROM linggan_ops_publication_execution_locator locator WHERE locator.locator_ref=$9"
+                    .to_owned(),
+                ExecutionLocatorParameter::LocatorRef(locator_ref),
+            )
+        } else {
+            return Ok(None);
+        };
+    let domain_scope = "own_domain";
     // 台账是 upsert 而不是 insert：同一篇在同一个 epoch 里，**同一份输入**只有一条资格
     // （身份键含指纹），同一件事重复上报不该长出第二行。`input_fingerprint` 按**此刻**重新
     // 解析，所以「输入变了没有」是这一行随时可核对的当前值，而不是一次性的历史快照。
@@ -236,7 +279,7 @@ pub(crate) async fn stop_material_for_missing_execution_input_in_transaction(
     // 冲突目标用约束名而不是列清单：这条键是 `NULLS NOT DISTINCT` 的，缺地址时的指纹是空值，
     // 而空值能不能参与推断是一件依赖 PostgreSQL 版本行为的事。按名字指定，语义就写作字面上
     // 的样子——「和这条约束冲突时改写它」，与推断规则无关。
-    let rows: Vec<(Uuid, String)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+    let query = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO collection_execution_input_eligibility \
              (eligibility_ref,target_ref,domain_scope,object_kind,object_ref,capability, \
               state,reason_code,input_fingerprint,input_source_kind,input_source_ref, \
@@ -269,8 +312,11 @@ pub(crate) async fn stop_material_for_missing_execution_input_in_transaction(
     .bind(reason_code)
     .bind(EXECUTION_INPUT_RESOLVER_VERSION)
     .bind(subject.scope_was_frozen)
-    .bind(Uuid::new_v4())
-    .bind(&subject.content_external_id)
+    .bind(Uuid::new_v4());
+    let rows: Vec<(Uuid, String)> = match locator_parameter {
+        ExecutionLocatorParameter::ContentExternalId(value) => query.bind(value),
+        ExecutionLocatorParameter::LocatorRef(value) => query.bind(value),
+    }
     .bind(EXECUTION_INPUT_POLICY_VERSION)
     .fetch_all(&mut **transaction)
     .await?;
@@ -498,6 +544,8 @@ async fn reopened_input_predecessors(
 struct TaskExecutionSubject {
     target_ref: Option<Uuid>,
     content_public_ref: Option<Uuid>,
+    ops_publication_ref: Option<Uuid>,
+    ops_locator_ref: Option<Uuid>,
     content_external_id: String,
     lease_ref: Uuid,
     /// 这张工单作用域内的输入此前有没有被冻结过。决定台账行如实记 `frozen` 还是
@@ -512,7 +560,7 @@ async fn load_task_execution_subject_in_transaction(
     // 「这张工单冻过输入没有」问的是**工单**，不是台账。反过来由台账推会得出相反的答案：
     // 一次停止也会为某个对象写下 `input_source_status='frozen'`，于是「这个对象停过」会被
     // 读成「这张工单冻过输入」。冻结发生在建单那一刻，标记就记在建单事务里（`0097`）。
-    let material_sql = "SELECT order_row.target_ref,material.content_public_ref, \
+    let material_sql = "SELECT order_row.target_ref,material.content_public_ref,NULL::uuid,NULL::uuid, \
                 material_content.content_external_id,lease.lease_ref, \
                 order_row.execution_input_frozen_at IS NOT NULL \
          FROM collection_work_order_lease_task task \
@@ -525,22 +573,49 @@ async fn load_task_execution_subject_in_transaction(
            ON material_content.public_ref=material.content_public_ref \
          WHERE task.task_id=$1 \
            AND material_content.content_external_id=runtime.task_spec #>> '{target,contentExternalId}'";
-    let row: Option<(Option<Uuid>, Option<Uuid>, String, Uuid, bool)> =
+    let row: Option<(Option<Uuid>, Option<Uuid>, Option<Uuid>, Option<Uuid>, String, Uuid, bool)> =
         sqlx::query_as(sqlx::AssertSqlSafe(material_sql))
             .bind(task_id)
             .fetch_optional(&mut **transaction)
             .await?;
+    let row = if row.is_some() {
+        row
+    } else {
+        sqlx::query_as(
+            "SELECT order_row.target_ref,NULL::uuid,target.publication_ref,target.locator_ref, \
+                    target.content_external_id,lease.lease_ref, \
+                    order_row.execution_input_frozen_at IS NOT NULL \
+             FROM collection_work_order_lease_task task \
+             JOIN collection_work_order_lease lease USING(lease_ref) \
+             JOIN collection_work_order order_row USING(work_order_ref) \
+             JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+             JOIN collection_work_order_ops_publication_target target \
+               ON target.work_order_ref=order_row.work_order_ref \
+             WHERE task.task_id=$1 \
+               AND target.content_external_id=runtime.task_spec #>> '{target,contentExternalId}'",
+        )
+        .bind(task_id)
+        .fetch_optional(&mut **transaction)
+        .await?
+    };
     Ok(row.map(
-        |(target_ref, content_public_ref, content_external_id, lease_ref, scope_was_frozen)| {
+        |(target_ref, content_public_ref, ops_publication_ref, ops_locator_ref, content_external_id, lease_ref, scope_was_frozen)| {
             TaskExecutionSubject {
                 target_ref,
                 content_public_ref,
+                ops_publication_ref,
+                ops_locator_ref,
                 content_external_id,
                 lease_ref,
                 scope_was_frozen,
             }
         },
     ))
+}
+
+enum ExecutionLocatorParameter<'a> {
+    ContentExternalId(&'a str),
+    LocatorRef(Uuid),
 }
 
 /// 页面失败预算：同一个需求范围**跨工单**累计几次 `page_read_failed` 之后停止自动重试。
@@ -632,7 +707,10 @@ pub(crate) async fn budget_exhausted_object_refs_in_transaction(
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)
     .await?;
-    Ok(BlockedObjects { material })
+    Ok(BlockedObjects {
+        material,
+        ops_publication: Vec::new(),
+    })
 }
 
 /// 记一次「页面读了一次没读成」，把预算累计到台账的当前行上。

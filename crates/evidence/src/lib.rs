@@ -30,7 +30,8 @@ mod local_producer;
 mod material_admission;
 mod material_hashtag;
 pub use material_admission::{
-    ReplyRequalification, TargetMaterialReprojection, reproject_accepted_target_materials,
+    OpsPublicationProjectionReplay, ReplyRequalification, TargetMaterialReprojection,
+    replay_exact_ops_publication_projections, reproject_accepted_target_materials,
     requalify_reply_contract_records,
 };
 pub mod cloud_ocr_adoption;
@@ -94,10 +95,12 @@ mod work_resource_read;
 
 pub use acquisition_chain::{
     AcquisitionChainError, AuthorizationGrant, DETAIL_WINDOW_COMMENT_LIMIT,
-    DETAIL_WINDOW_REPLY_EXPAND_LIMIT, MaterialDeepeningTarget, ProgressiveArchiveTickSummary,
+    DETAIL_WINDOW_REPLY_EXPAND_LIMIT, MaterialDeepeningTarget, OpsPublicationExactTarget,
+    ProgressiveArchiveTickSummary,
     RequestLeaseError, RequestLeaseOutcome, RequestOutcome, acquisition_chain_schema_is_ready,
     grant_authorization, read_capacity, request_admit_and_lease,
     request_admit_material_targets_and_lease, request_and_admit, request_and_admit_for_domain,
+    request_and_admit_exact_ops_publication_in_transaction,
     request_and_admit_keyword_search_for_domain_in_transaction, request_and_admit_material_targets,
     request_and_admit_material_targets_for_domain,
     request_and_admit_material_targets_for_domain_in_transaction,

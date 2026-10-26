@@ -6,10 +6,12 @@ cd "$project_root"
 
 usage() {
   cat >&2 <<'EOF'
-usage: ./scripts/local-runtime.sh {migrate|repair-password|serve} [--database database_name]
+usage: ./scripts/local-runtime.sh {migrate|repair-password|bootstrap-ops-admin|serve} [--database database_name]
 
   migrate          apply the approved local Linggan migrations exactly once
   repair-password  explicitly align the local persistent database role with .env
+  bootstrap-ops-admin
+                   create exactly one invited first Ops administrator from controlled console input
 serve            migrate, then start API, patrol, media and the controlled AI executor
 
 The optional --database form is reserved for an exact, disposable runtime proof
@@ -191,6 +193,87 @@ repair_password() {
   '
   verify_application_database_credentials
   echo "local database role password aligned with the existing .env; persisted data was not reset or removed"
+}
+
+require_ops_first_admin_bootstrap_schema() {
+  local expected_hash recorded_hash relation
+  expected_hash="$(shasum -a 256 "$project_root/database/migrations/0153_ops_first_admin_bootstrap.sql" | awk '{print $1}')"
+  recorded_hash="$(psql_in_container -At -c "SELECT migration_sha256 FROM linggan_local_schema_migration WHERE migration_id='0153_ops_first_admin_bootstrap'")"
+  relation="$(psql_in_container -At -c "SELECT to_regclass('linggan_ops_first_admin_bootstrap')")"
+  if [[ "$recorded_hash" != "$expected_hash" || "$relation" != "linggan_ops_first_admin_bootstrap" ]]; then
+    echo "0153_ops_first_admin_bootstrap is not the verified current schema; run the explicit migrate workflow first" >&2
+    exit 1
+  fi
+}
+
+bootstrap_ops_admin() {
+  local email display_name confirmation raw_token token_digest email_base64 display_name_base64
+  confirmation="${LINGGAN_OPS_BOOTSTRAP_CONFIRM:-}"
+  if [[ "$confirmation" != "CREATE_FIRST_OPS_ADMIN" ]]; then
+    echo "set LINGGAN_OPS_BOOTSTRAP_CONFIRM=CREATE_FIRST_OPS_ADMIN to acknowledge this one-time action" >&2
+    exit 1
+  fi
+  if ! IFS= read -r raw_token || ! IFS= read -r email || ! IFS= read -r display_name; then
+    echo "provide bootstrap token, email and display name as exactly three stdin lines" >&2
+    exit 1
+  fi
+  if [[ ! "$email" =~ ^[^[:space:]@]+@[^[:space:]@]+$ ]] || (( ${#email} > 320 )); then
+    echo "bootstrap email must contain one nonblank local and domain part" >&2
+    exit 1
+  fi
+  if [[ -z "${display_name//[[:space:]]/}" || ${#display_name} -gt 160 ]]; then
+    echo "bootstrap display name must be 1 to 160 nonblank characters" >&2
+    exit 1
+  fi
+  if [[ ! "$raw_token" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+    echo "bootstrap token must be exactly 64 hexadecimal characters" >&2
+    exit 1
+  fi
+  token_digest="$(printf '%s' "$raw_token" | shasum -a 256 | awk '{print $1}')"
+  email_base64="$(printf '%s' "$email" | base64 | tr -d '\n')"
+  display_name_base64="$(printf '%s' "$display_name" | base64 | tr -d '\n')"
+  unset raw_token email display_name
+
+  verify_persistent_runtime_is_stopped_for_migration
+  "$project_root/scripts/dev-db.sh" up >/dev/null
+  verify_runtime_port_binding
+  verify_application_database_credentials
+  require_ops_first_admin_bootstrap_schema
+  psql_in_container -q -v ON_ERROR_STOP=1 <<SQL
+BEGIN;
+SELECT pg_advisory_xact_lock(hashtext('linggan_ops_first_admin_bootstrap'));
+DO \$\$ BEGIN
+    IF EXISTS (SELECT 1 FROM linggan_ops_first_admin_bootstrap)
+       OR EXISTS (SELECT 1 FROM linggan_ops_member) THEN
+        RAISE EXCEPTION 'first Ops administrator bootstrap is no longer available';
+    END IF;
+END \$\$;
+CREATE TEMP TABLE first_admin_bootstrap_input (
+    member_ref uuid NOT NULL,
+    invite_ref uuid NOT NULL,
+    email text NOT NULL,
+    display_name text NOT NULL,
+    token_digest bytea NOT NULL
+) ON COMMIT DROP;
+INSERT INTO first_admin_bootstrap_input
+SELECT gen_random_uuid(),gen_random_uuid(),
+       convert_from(decode('${email_base64}','base64'),'UTF8'),
+       convert_from(decode('${display_name_base64}','base64'),'UTF8'),
+       decode('${token_digest}','hex');
+INSERT INTO linggan_ops_member (member_ref,email_normalized,display_name,role,state)
+SELECT member_ref,lower(btrim(email)),btrim(display_name),'admin','invited'
+FROM first_admin_bootstrap_input;
+INSERT INTO linggan_ops_invite (invite_ref,member_ref,token_sha256,invited_by_member_ref,expires_at)
+SELECT invite_ref,member_ref,token_digest,member_ref,scope_001_now() + make_interval(secs => 604800)
+FROM first_admin_bootstrap_input;
+INSERT INTO linggan_ops_first_admin_bootstrap
+    (bootstrap_ref,member_ref,invite_ref,request_ref,control_channel)
+SELECT gen_random_uuid(),member_ref,invite_ref,gen_random_uuid(),'local_runtime_console'
+FROM first_admin_bootstrap_input;
+COMMIT;
+SQL
+  unset email_base64 display_name_base64 token_digest
+  echo "first Ops administrator invitation created; deliver the stdin token through an approved channel, then use invitation acceptance to set the password"
 }
 
 ensure_migration_ledger() {
@@ -386,6 +469,22 @@ migrate() {
   apply_migration_once "0148_dossier_consumer_contracts" "$project_root/database/migrations/0148_dossier_consumer_contracts.sql"
   apply_migration_once "0149_target_inspector_comparison" "$project_root/database/migrations/0149_target_inspector_comparison.sql"
   apply_migration_once "0150_collection_run_comment_target" "$project_root/database/migrations/0150_collection_run_comment_target.sql"
+  apply_migration_once "0151_ops_team_auth" "$project_root/database/migrations/0151_ops_team_auth.sql"
+  apply_migration_once "0152_ops_team_responsibility" "$project_root/database/migrations/0152_ops_team_responsibility.sql"
+  apply_migration_once "0153_ops_first_admin_bootstrap" "$project_root/database/migrations/0153_ops_first_admin_bootstrap.sql"
+  apply_migration_once "0154_ops_native_write_model" "$project_root/database/migrations/0154_ops_native_write_model.sql"
+  apply_migration_once "0155_ops_native_publication_date_precision" "$project_root/database/migrations/0155_ops_native_publication_date_precision.sql"
+  apply_migration_once "0156_ops_publication_sync_request" "$project_root/database/migrations/0156_ops_publication_sync_request.sql"
+  apply_migration_once "0157_ops_publication_execution_locator" "$project_root/database/migrations/0157_ops_publication_execution_locator.sql"
+  apply_migration_once "0158_ops_account_responsibility_command" "$project_root/database/migrations/0158_ops_account_responsibility_command.sql"
+  apply_migration_once "0159_ops_member_deactivation" "$project_root/database/migrations/0159_ops_member_deactivation.sql"
+  apply_migration_once "0160_ops_exact_publication_work_scope" "$project_root/database/migrations/0160_ops_exact_publication_work_scope.sql"
+  apply_migration_once "0161_ops_exact_publication_detail_session" "$project_root/database/migrations/0161_ops_exact_publication_detail_session.sql"
+  apply_migration_once "0162_ops_publication_execution_input_eligibility" "$project_root/database/migrations/0162_ops_publication_execution_input_eligibility.sql"
+  apply_migration_once "0163_ops_publication_material_projection" "$project_root/database/migrations/0163_ops_publication_material_projection.sql"
+  apply_migration_once "0164_ops_publication_field_adoption" "$project_root/database/migrations/0164_ops_publication_field_adoption.sql"
+  apply_migration_once "0165_ops_publication_media_projection" "$project_root/database/migrations/0165_ops_publication_media_projection.sql"
+  apply_migration_once "0166_collection_command_reason_ops_publication_scope" "$project_root/database/migrations/0166_collection_command_reason_ops_publication_scope.sql"
 }
 
 case "$command_name" in
@@ -402,6 +501,11 @@ case "$command_name" in
       exit 1
     fi
     repair_password
+    ;;
+  bootstrap-ops-admin)
+    ensure_env
+    database_name="${database_name:-$POSTGRES_DB}"
+    bootstrap_ops_admin
     ;;
   serve)
     ensure_env

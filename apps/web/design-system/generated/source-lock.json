@@ -1,5 +1,5 @@
 {
-  "fingerprint": "f1d0968ab03ba78178e3348159e7d29ed39bcdec6260083f9c23b7733254cd4c",
+  "fingerprint": "84a0215d30c07a95243464def994a671f08d7cace081cf387a8f5b614110c5f4",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -235,15 +235,15 @@
     },
     {
       "path": "apps/web/src/pages/ops/Charts.tsx",
-      "sha256": "5e5e573998c25433ddaa6265ea0d1f9f4da293b416ec980adcf09dae466337bc"
+      "sha256": "30dbf9c066dc4daddd4a58cdcd269feb2441c80bca72696dbc0680c260458b0b"
     },
     {
       "path": "apps/web/src/pages/ops/LedgerPage.tsx",
-      "sha256": "d3446978cb8ae01f226790f97a405bbfbe448302a897cc40c2502f0ddd1f5532"
+      "sha256": "f3247760d348d040e9f9c12800e143bb06bcd8ce7faf25e4bb09a6b6006fa1be"
     },
     {
       "path": "apps/web/src/pages/ops/Ops.module.css",
-      "sha256": "2d3013da5bcfba5f071a2638ad0fb00d8997037b9f344aa300541f7c3d2fb8fd"
+      "sha256": "8b165a05d9f3d88c56bad40631f0552c90b5fea5c00b65646c0083e9442361cf"
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
@@ -251,7 +251,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
-      "sha256": "0617156480931e60b8484d03dce930112b4308e1e4cc2b8dff6c5470ead2d2c3"
+      "sha256": "e08e3aee605be4b1a5d6027e34829d7f7180a8e7589a43324663929020b1a058"
     },
     {
       "path": "apps/web/src/pages/ops/OpsScopePicker.tsx",
@@ -263,7 +263,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OverviewPage.tsx",
-      "sha256": "4ac72a786115bc769b7799cb447ca2f65fd5a05ee0062068a84af603e152c6f4"
+      "sha256": "8efc00b2e8e92c9c8e247a22fe8f74359b7165025e2720936b708cd80658fd56"
     },
     {
       "path": "apps/web/src/pages/ops/TargetDialog.tsx",
@@ -335,7 +335,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "4d61745bb05b549c053fa45ff0640e190863f87798a03e372f33f24ca62d15bd"
+      "sha256": "659fde2209c8d9f64e32cbefbc7ac861b27ad82b7f389fd05c9884b13c8c085b"
     },
     {
       "path": "apps/web/src/styles/typography.css",

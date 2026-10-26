@@ -8,7 +8,6 @@ import * as api from "./api";
 import * as f from "./format";
 import {
   Dialog,
-  DisabledActions,
   Empty,
   External,
   Missing,
@@ -18,7 +17,15 @@ import {
   Tabs,
   TextCell,
 } from "./ui";
-import { c, peopleTabs, readonly } from "./styles";
+import { c, peopleTabs } from "./styles";
+import { NativeAccountDialog } from "./NativeAccountDialog";
+import { NativePublicationDialog } from "./NativePublicationDialog";
+import { NativeDailyDialog } from "./NativeDailyDialog";
+import { NativeViewDialog } from "./NativeViewDialog";
+import { NativeViewBatchDialog } from "./NativeViewBatchDialog";
+import { AccountResponsibilityDialog } from "./AccountResponsibilityDialog";
+import { NativeAccountArchiveDialog, NativeAccountEditDialog } from "./NativeAccountLifecycleDialog";
+import { PublicationSyncDialog } from "./PublicationSyncDialog";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
   publications: [
@@ -46,7 +53,7 @@ const columns = {
     "设备编号",
     "粉丝",
     "IP所在地",
-    "运营人",
+    "当前负责人 / 历史运营人",
     "账号状态",
     "账号健康",
     "保留",
@@ -144,6 +151,17 @@ export function LedgerPage({
   const [cover, setCover] = useState<string | null>(null);
   const [coverFailed, setCoverFailed] = useState(false);
   const [detail, setDetail] = useState<api.Publication | null>(null);
+  const [newAccount, setNewAccount] = useState(false);
+  const [newPublication, setNewPublication] = useState(false);
+  const [syncPublications, setSyncPublications] = useState(false);
+  const [syncRequestRef, setSyncRequestRef] = useState<string | null>(null);
+  const [newDaily, setNewDaily] = useState(false);
+  const [editDaily, setEditDaily] = useState<api.Daily | null>(null);
+  const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
+  const [batchViews, setBatchViews] = useState(false);
+  const [responsibilityAccount, setResponsibilityAccount] = useState<api.Account | null>(null);
+  const [editingAccount, setEditingAccount] = useState<api.Account | null>(null);
+  const [lifecycleAccount, setLifecycleAccount] = useState<{ account: api.Account; restore: boolean } | null>(null);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
@@ -165,7 +183,7 @@ export function LedgerPage({
         api.accounts,
         signal,
       ),
-    enabled: kind === "accounts",
+    enabled: kind === "accounts" || kind === "publications",
   });
   const daily = useQuery({
     queryKey: ["ops", "daily", business, operator],
@@ -176,6 +194,11 @@ export function LedgerPage({
         signal,
       ),
     enabled: kind === "daily",
+  });
+  const members = useQuery({
+    queryKey: ["ops", "members"],
+    queryFn: ({ signal }) => api.get("/api/local/ops/members", api.members, signal),
+    enabled: kind === "accounts",
   });
   const result =
     kind === "publications" ? pubs : kind === "accounts" ? accounts : daily;
@@ -287,19 +310,26 @@ export function LedgerPage({
               迁入自内容工作台 · 发布数按发布记录自动统计
             </span>
           )}
-          <small className={c("ops-note")}>切换前只读</small>
+          <small className={c("ops-note")}>原生录入和责任交接会保留来源与回执；历史迁入事实仍只读</small>
           {kind === "publications" ? (
             <>
-              <ActionButton type="button" disabled title={readonly}>
+              <ActionButton type="button" disabled={!accounts.data?.items.length} title={!accounts.data?.items.length ? "当前业务没有可用账号" : undefined} onClick={() => setNewPublication(true)}>
                 新增发布
               </ActionButton>
-              <ActionButton type="button" disabled title="自动发现我方帖子上线后可用">
+              <ActionButton type="button" disabled={!pubs.data?.items.length} title={!pubs.data?.items.length ? "当前筛选下没有可选择的发布记录" : undefined} onClick={() => setSyncPublications(true)}>
                 同步数据
+              </ActionButton>
+              <ActionButton type="button" disabled={!pubs.data?.items.length} title={!pubs.data?.items.length ? "当前筛选下没有可选择的发布记录" : undefined} onClick={() => setBatchViews(true)}>
+                批量补阅读量
               </ActionButton>
             </>
           ) : kind === "accounts" ? (
-            <ActionButton type="button" disabled title={readonly}>
+            <ActionButton type="button" disabled={business === "all"} title={business === "all" ? "请先选择一个业务" : undefined} onClick={() => setNewAccount(true)}>
               新增账号
+            </ActionButton>
+          ) : kind === "daily" ? (
+            <ActionButton type="button" onClick={() => setNewDaily(true)}>
+              填写日报
             </ActionButton>
           ) : null}
         </div>
@@ -373,15 +403,17 @@ export function LedgerPage({
                   item={item}
                   openCover={openCover}
                   openDetail={setDetail}
+                  recordView={setViewPublication}
+                  openSync={requestRef => { setSyncRequestRef(requestRef); setSyncPublications(true); }}
                 />
               ))
             ) : kind === "accounts" && accounts.data?.items.length ? (
               accounts.data.items.map((item, i) => (
-                <AccountRow key={item.ref} item={item} index={i} />
+                <AccountRow key={item.ref} item={item} index={i} transfer={setResponsibilityAccount} edit={setEditingAccount} lifecycle={(account, restore) => setLifecycleAccount({ account, restore })} ready={members.isSuccess} />
               ))
             ) : kind === "daily" && daily.data?.items.length ? (
               daily.data.items.map((item) => (
-                <DailyRow key={item.ref} item={item} />
+                <DailyRow key={item.ref} item={item} edit={setEditDaily} />
               ))
             ) : data && !result.isFetching ? (
               <Empty
@@ -475,17 +507,34 @@ export function LedgerPage({
         <header className={c('ops-detail-head')}><h2>{detail.title || '无标题发布记录'}</h2><ActionButton onClick={() => setDetail(null)}>关闭详情</ActionButton></header>
         <div className={c('ops-dialog-body')}>
           <p>{detail.businessDate} · {f.platformLabel[detail.platform]} · {detail.account?.name || '账号未知'}</p>
-          <p className={c('ops-note')}>迁入记录 · 系统尚未核对平台发布状态</p>
+          <p className={c('ops-note')}>
+            {detail.source === "native" ? "运营台账原生登记" : "工作台历史迁入"}
+            {' · '}系统尚未核对平台发布状态
+          </p>
           <External href={detail.url} title="原发布链接">查看原发布链接 ↗</External>
           <dl className={c('ops-detail-facts')}>
             <div><dt>阅读量</dt><dd>{detail.views.state === 'value' ? f.count(detail.views.value).text : detail.views.state === 'pending' ? '待补' : '选填，未知'}</dd></div>
             <div><dt>点赞</dt><dd>{f.count(detail.likes).text}</dd></div><div><dt>收藏</dt><dd>{f.count(detail.collects).text}</dd></div><div><dt>评论</dt><dd>{f.count(detail.comments).text}</dd></div>
           </dl>
+          <p className={c('ops-note')}>
+            采集媒体：{mediaLabels[detail.media.state]}{detail.media.observed ? `（已观察 ${detail.media.observed}，本地可用 ${detail.media.available}，失败 ${detail.media.failed}，当前不可用 ${detail.media.unavailable}）` : ''}
+          </p>
+          <FieldAdoptionNotice adoption={detail.fieldAdoption} />
           <h3>发布正文</h3><p className={c('ops-full-text')}>{detail.body || '未迁入正文'}</p>
           {detail.duplicates.length ? <p>合并的重复登记日期：{detail.duplicates.map(row => row.businessDate).join('、')}</p> : null}
           {detail.cover.available ? <ActionButton onClick={() => openCover(`/ops/covers/${encodeURIComponent(detail.ref)}`)}>查看封面大图</ActionButton> : <p>封面未迁入</p>}
         </div>
       </Dialog> : null}
+      {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
+      {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items.filter(account => account.nativeState !== "archived")} close={() => setNewPublication(false)} /> : null}
+      {syncPublications && pubs.data ? <PublicationSyncDialog publications={pubs.data.items} requestRef={syncRequestRef || undefined} close={() => { setSyncPublications(false); setSyncRequestRef(null); }} /> : null}
+      {newDaily ? <NativeDailyDialog close={() => setNewDaily(false)} /> : null}
+      {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
+      {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
+      {batchViews && pubs.data ? <NativeViewBatchDialog publications={pubs.data.items} close={() => setBatchViews(false)} /> : null}
+      {responsibilityAccount && members.data ? <AccountResponsibilityDialog account={responsibilityAccount} members={members.data} close={() => setResponsibilityAccount(null)} /> : null}
+      {editingAccount ? <NativeAccountEditDialog account={editingAccount} close={() => setEditingAccount(null)} /> : null}
+      {lifecycleAccount ? <NativeAccountArchiveDialog account={lifecycleAccount.account} restore={lifecycleAccount.restore} close={() => setLifecycleAccount(null)} /> : null}
       {cover ? (
         <Dialog
           label="封面大图" outsideClose
@@ -510,10 +559,14 @@ export function LedgerPage({
 function PublicationRow({
   item,
   openCover, openDetail,
+  recordView,
+  openSync,
 }: {
   item: api.Publication;
   openCover: (src: string) => void;
   openDetail: (item: api.Publication) => void;
+  recordView: (item: api.Publication) => void;
+  openSync: (requestRef: string) => void;
 }) {
   return (
     <tr>
@@ -537,9 +590,9 @@ function PublicationRow({
       </td>
       <td>
         <div className={c("ops-stack")}>
-          <Tag title="系统还没去主页核对过这篇帖子；自动发现上线后接入">
-            未检查
-          </Tag>
+          <SyncTag item={item} openSync={openSync} />
+          <MediaTag media={item.media} />
+          <FieldAdoptionTag adoption={item.fieldAdoption} />
           <span className={c("ops-secondary")}>
             {item.views.state === "value"
               ? "阅读量已填"
@@ -598,7 +651,7 @@ function PublicationRow({
             <span className={c("ops-ellipsis")} title={item.account.name}>
               {item.account.name}
             </span>
-            {item.account.ledgerState !== "in_ledger" ? (
+            {item.account.ledgerState === "absent_from_export" ? (
               <Tag title="这个账号已在工作台删除，旧状态未知">已停用</Tag>
             ) : null}
           </div>
@@ -607,7 +660,7 @@ function PublicationRow({
         )}
       </td>
       <TextCell value={item.publisher} />
-      <DisabledActions />
+      <td><ActionButton type="button" onClick={() => recordView(item)}>补阅读量</ActionButton></td>
       <td className={c("ops-number")}>
         <div className={c("ops-stack")} style={{ alignItems: "flex-end" }}>
           {item.views.state === "value" ? (
@@ -653,7 +706,75 @@ function PublicationRow({
     </tr>
   );
 }
-function AccountRow({ item, index }: { item: api.Account; index: number }) {
+
+const syncLabels: Record<api.Publication["sync"]["state"], string> = {
+  not_requested: "未提交同步",
+  not_submitted: "未进入采集链",
+  queued: "等待分派",
+  waiting_execution: "等待执行工位",
+  awaiting_collection: "已分派，等待采集",
+  collecting: "正在采集",
+  package_pending_receipt: "回包等待核验",
+  receipt_accepted_projection_pending: "回执合格，等待材料关联",
+  receipt_lost_authority: "回执失去授权",
+  receipt_accepted: "回执已接受",
+  material_projected: "已关联材料",
+  no_qualified_result: "未得到合格结果",
+  stopped: "执行已停止",
+  chain_unavailable: "状态暂不可读",
+};
+const mediaLabels: Record<api.Publication["media"]["state"], string> = {
+  not_requested: "未请求采集媒体",
+  waiting_for_slots: "等待读取图片/视频",
+  processing: "图片/视频处理中",
+  partial: "媒体部分可用",
+  available: "媒体已本地验证",
+  failed: "媒体处理失败",
+  unavailable: "媒体当前不可用",
+};
+function MediaTag({ media }: { media: api.Publication["media"] }) {
+  const tone = media.state === "available" ? "success" : media.state === "failed" || media.state === "partial" || media.state === "unavailable" ? "warning" : undefined;
+  const title = media.observed
+    ? `已观察 ${media.observed} 项；本地验证 ${media.available} 项；失败 ${media.failed} 项；当前不可用 ${media.unavailable} 项。远程地址不等于可用媒体。`
+    : "媒体状态独立于文字回填；远程地址不等于本地可用资源。";
+  return <Tag tone={tone} title={title}>{mediaLabels[media.state]}</Tag>;
+}
+const adoptionLabels: Record<api.Publication["fieldAdoption"]["title"], string> = {
+  adopted: "已采用",
+  not_provided: "未提供",
+  conflict: "待核实",
+};
+const adoptionNames: Record<keyof api.Publication["fieldAdoption"], string> = {
+  title: "标题", body: "正文", likes: "点赞", collects: "收藏", comments: "评论", publishedAt: "发布时间",
+};
+function conflictingFields(adoption: api.Publication["fieldAdoption"]) {
+  return (Object.entries(adoption) as [keyof typeof adoption, typeof adoption.title][])
+    .filter(([, state]) => state === "conflict")
+    .map(([field]) => adoptionNames[field]);
+}
+function FieldAdoptionTag({ adoption }: { adoption: api.Publication["fieldAdoption"] }) {
+  const conflicts = conflictingFields(adoption);
+  if (!conflicts.length) return null;
+  return <Tag tone="warning" title={`采集观察与原生登记不一致：${conflicts.join("、")}。当前保留冲突，尚未自动覆盖。`}>字段待核实</Tag>;
+}
+function FieldAdoptionNotice({ adoption }: { adoption: api.Publication["fieldAdoption"] }) {
+  const conflicts = conflictingFields(adoption);
+  if (conflicts.length) return <p className={c("ops-note")}>字段采用：{conflicts.join("、")}待核实；当前保留原登记，尚未自动覆盖。</p>;
+  const missing = (Object.entries(adoption) as [keyof typeof adoption, typeof adoption.title][])
+    .filter(([, state]) => state === "not_provided")
+    .map(([field]) => adoptionNames[field]);
+  return missing.length ? <p className={c("ops-note")}>字段采用：{missing.join("、")}未由当前来源提供。</p> : <p className={c("ops-note")}>字段采用：{adoptionLabels.adopted}的观察已按当前身份版本显示。</p>;
+}
+function SyncTag({ item, openSync }: { item: api.Publication; openSync: (requestRef: string) => void }) {
+  const { sync } = item;
+  const requestRef = sync.requestRef;
+  const tone = sync.state === "material_projected" ? "success" : ["receipt_lost_authority", "no_qualified_result", "stopped"].includes(sync.state) ? "warning" : undefined;
+  if (!requestRef) return <Tag title="尚未为这条发布提交同步命令">{syncLabels[sync.state]}</Tag>;
+  return <button type="button" className={c("ops-sync-status")} onClick={() => openSync(requestRef)} title="打开这次同步的真实执行状态">
+    <Tag tone={tone}>{syncLabels[sync.state]}</Tag>
+  </button>;
+}
+function AccountRow({ item, index, transfer, edit, lifecycle, ready }: { item: api.Account; index: number; transfer: (item: api.Account) => void; edit: (item: api.Account) => void; lifecycle: (item: api.Account, restore: boolean) => void; ready: boolean }) {
   return (
     <tr>
       <td className={c("ops-number")}>{index + 1}</td>
@@ -668,11 +789,18 @@ function AccountRow({ item, index }: { item: api.Account; index: number }) {
             {item.name}
           </span>
         )}
+        {item.source === "native" ? <Tag title="由运营台账原生创建">原生</Tag> : null}
+        {item.nativeState === "archived" ? <Tag tone="warning" title="归档账号保留以便恢复，不可继续登记发布">已归档</Tag> : null}
       </td>
       <TextCell value={item.deviceCode} />
       <NumberCell value={item.followerCount} />
       <TextCell value={item.ipLocation} />
-      <TextCell value={item.operator} />
+      <td>
+        <div className={c("ops-stack")}>
+          {item.currentResponsibleName ? <span>{item.currentResponsibleName}</span> : <Missing title="尚未分配 Linggan 当前负责人">待接管</Missing>}
+          {item.operator ? <small className={c("ops-secondary")}>历史：{item.operator}</small> : null}
+        </div>
+      </td>
       <td>
         {item.status ? (
           <span>{f.accountStatus[item.status] || item.status}</span>
@@ -691,12 +819,17 @@ function AccountRow({ item, index }: { item: api.Account; index: number }) {
         )}
       </td>
       <TextCell value={item.notes} />
-      <DisabledActions />
+      <td><div className={c("ops-stack")}>
+        {item.source === "native" && item.nativeVersion !== null && item.nativeState !== "archived" ? <><ActionButton type="button" onClick={() => edit(item)}>编辑</ActionButton><ActionButton type="button" onClick={() => lifecycle(item, false)}>归档</ActionButton></> : null}
+        {item.source === "native" && item.nativeVersion !== null && item.nativeState === "archived" ? <ActionButton type="button" onClick={() => lifecycle(item, true)}>恢复</ActionButton> : null}
+        {item.nativeState !== "archived" ? <ActionButton type="button" disabled={!ready} title={ready ? "按当前权限与同组关系校验" : "正在读取可选成员"} onClick={() => transfer(item)}>交接</ActionButton> : null}
+      </div></td>
     </tr>
   );
 }
 const execution = {
   not_published: ["未完成", "warning", "当天没有这个运营人的发布登记"],
+  not_filled: ["待补数据", "warning", "当天已有发布登记，但加微尚未填写"],
   praise: ["可表扬", "success", "当天有爆款或有加微"],
   pending_views: [
     "待补阅读量",
@@ -705,7 +838,7 @@ const execution = {
   ],
   done: ["已完成", "", "当天有发布登记，没有待处理项"],
 };
-function DailyRow({ item }: { item: api.Daily }) {
+function DailyRow({ item, edit }: { item: api.Daily; edit: (item: api.Daily) => void }) {
   const [label, tone, title] = execution[item.execution];
   return (
     <tr>
@@ -722,7 +855,7 @@ function DailyRow({ item }: { item: api.Daily }) {
       <NumberCell value={item.followersGained} />
       <td className={c("ops-number")}>
         {item.addRate === null ? (
-          <Missing title="打开为 0 时没有添加率" />
+          <Missing title="打开为 0 或打开/加微尚未填写时，没有添加率" />
         ) : (
           <span>{f.percent(item.addRate * 100)}</span>
         )}
@@ -731,9 +864,13 @@ function DailyRow({ item }: { item: api.Daily }) {
       <NumberCell value={item.monthFollowersGained} />
       <NumberCell value={item.monthPublished} />
       <td>
-        <ActionButton type="button" disabled title={readonly}>
-          编辑
-        </ActionButton>
+        {item.source === "native" && item.nativeVersion !== null ? (
+          <ActionButton type="button" onClick={() => edit(item)} title="仅当前会话具备权限时可保存修正；并发更新不会被覆盖">
+            编辑
+          </ActionButton>
+        ) : <ActionButton type="button" disabled title="历史迁入日报保持来源只读">
+          历史只读
+        </ActionButton>}
       </td>
     </tr>
   );

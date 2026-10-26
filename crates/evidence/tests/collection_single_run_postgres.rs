@@ -16,6 +16,13 @@ use linggan_evidence::{
 use serde_json::json;
 use uuid::Uuid;
 
+/// Dispatch now shares the current Operations-aware lease and input gate.  These collection
+/// scenarios are therefore run against the complete current schema, while the material fixture's
+/// ordinary baseline remains available to tests that intentionally exercise pre-Ops boundaries.
+async fn proof_current_collection_database(schema: &str) -> linggan_storage_postgres::Database {
+    fixture::proof_database_with_ops_ledger(schema).await
+}
+
 pub async fn station(db: &linggan_storage_postgres::Database) -> (Uuid, String) {
     let install = Uuid::new_v4();
     let station = Uuid::new_v4();
@@ -66,7 +73,7 @@ pub async fn deliver(
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn actual_search_dispatch_receipt_freezes_37_in_rank_order_and_never_refills_50() {
-    let db = fixture::proof_database("single_run_search_37").await;
+    let db = proof_current_collection_database("single_run_search_37").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let created = create_run(
@@ -270,7 +277,7 @@ pub async fn deliver_work_segment(
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn standard_30_deep_500_standard_30_keep_versions_and_scope_results() {
-    let db = fixture::proof_database("single_run_30_500_30").await;
+    let db = proof_current_collection_database("single_run_30_500_30").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let first = create_run(
@@ -420,7 +427,7 @@ async fn standard_30_deep_500_standard_30_keep_versions_and_scope_results() {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn fifty_fixed_works_deepen_in_shared_queue_without_thirty_or_two_reply_truncation() {
-    let db = fixture::proof_database("single_run_fifty_deep").await;
+    let db = proof_current_collection_database("single_run_fifty_deep").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let run = create_run(
@@ -532,7 +539,7 @@ async fn domain(db: &linggan_storage_postgres::Database) -> Uuid {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn temporary_run_is_transactional_idempotent_and_not_a_long_term_target() {
-    let db = fixture::proof_database("single_run_identity").await;
+    let db = proof_current_collection_database("single_run_identity").await;
     let d = domain(&db).await;
     let before: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_observation_target WHERE purpose_kind='long_term'",
@@ -607,7 +614,7 @@ async fn temporary_run_is_transactional_idempotent_and_not_a_long_term_target() 
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn stop_is_durable_versioned_and_cannot_be_reversed_by_replay() {
-    let db = fixture::proof_database("single_run_controls").await;
+    let db = proof_current_collection_database("single_run_controls").await;
     let d = domain(&db).await;
     let created = create_run(
         &db,
@@ -696,7 +703,7 @@ async fn stop_is_durable_versioned_and_cannot_be_reversed_by_replay() {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn existing_keyword_uses_selected_domain_without_mutating_identity_or_rules() {
-    let db = fixture::proof_database("single_run_existing_domains").await;
+    let db = proof_current_collection_database("single_run_existing_domains").await;
     let primary = domain(&db).await;
     let chosen = domain(&db).await;
     let target = Uuid::new_v4();
@@ -773,7 +780,7 @@ async fn existing_keyword_uses_selected_domain_without_mutating_identity_or_rule
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn pause_resume_stop_late_and_duplicate_delivery_do_not_restart_or_refill() {
-    let db = fixture::proof_database("single_run_late_delivery").await;
+    let db = proof_current_collection_database("single_run_late_delivery").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let receipt = create_run(
@@ -890,7 +897,7 @@ async fn pause_resume_stop_late_and_duplicate_delivery_do_not_restart_or_refill(
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn old_plugin_waits_instead_of_silently_sampling_all_public() {
-    let db = fixture::proof_database("single_run_old_protocol").await;
+    let db = proof_current_collection_database("single_run_old_protocol").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     sqlx::query("UPDATE plugin_installation SET capabilities=capabilities-'collection.all_public.v1' WHERE installation_ref=$1").bind(install).execute(db.pool()).await.unwrap();
@@ -930,7 +937,7 @@ async fn old_plugin_waits_instead_of_silently_sampling_all_public() {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn stop_and_real_dispatch_compete_without_post_stop_execution() {
-    let db = fixture::proof_database("single_run_stop_dispatch_race").await;
+    let db = proof_current_collection_database("single_run_stop_dispatch_race").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let run = create_run(
@@ -1002,7 +1009,7 @@ async fn stop_and_real_dispatch_compete_without_post_stop_execution() {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn unfinished_replies_and_one_risk_gap_do_not_complete_or_block_other_work() {
-    let db = fixture::proof_database("single_run_reply_and_gap").await;
+    let db = proof_current_collection_database("single_run_reply_and_gap").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let run = create_run(
@@ -1098,7 +1105,7 @@ async fn configured_periodic_rule_remains_byte_equal_after_one_off() {
         MonitorCommandActor, MonitorCommandKind, MonitorRuleCommand, MonitorRuleDraft,
         MonitorRuleMode, apply_monitor_rule_command,
     };
-    let db = fixture::proof_database("single_run_configured_rule").await;
+    let db = proof_current_collection_database("single_run_configured_rule").await;
     let d = domain(&db).await;
     let target = Uuid::new_v4();
     sqlx::query("INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,display_name,source) VALUES($1,'xhs','creator','syntheticperiodic','合成周期创作者','manual')").bind(target).execute(db.pool()).await.unwrap();
@@ -1169,7 +1176,7 @@ async fn configured_periodic_rule_remains_byte_equal_after_one_off() {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn partial_sample_pause_resume_preserves_30_total_and_prior_reply_caps() {
-    let db = fixture::proof_database("single_run_sample_resume").await;
+    let db = proof_current_collection_database("single_run_sample_resume").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let created = create_run(
@@ -1292,7 +1299,7 @@ async fn partial_sample_pause_resume_preserves_30_total_and_prior_reply_caps() {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn existing_work_occupies_its_rank_and_resume_cannot_replace_with_51() {
-    let db = fixture::proof_database("single_run_existing_rank").await;
+    let db = proof_current_collection_database("single_run_existing_rank").await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let seed = create_run(
@@ -1422,7 +1429,7 @@ async fn existing_work_occupies_its_rank_and_resume_cannot_replace_with_51() {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn legacy_grouping_keeps_archive_rounds_supplements_and_unknown_history_separate() {
-    let db = fixture::proof_database("single_run_legacy_groups").await;
+    let db = proof_current_collection_database("single_run_legacy_groups").await;
     let d = domain(&db).await;
     let other = domain(&db).await;
     let target = Uuid::new_v4();
@@ -1546,7 +1553,7 @@ async fn legacy_grouping_keeps_archive_rounds_supplements_and_unknown_history_se
 
 /// 指定条数（Mog 2026-10-23）：一篇作品、只要 `target` 条。返回每个评论段向插件要的条数与结束时的汇总。
 async fn targeted_run(name: &str, target: i32, available: usize) -> (Vec<u64>, serde_json::Value) {
-    let db = fixture::proof_database(name).await;
+    let db = proof_current_collection_database(name).await;
     let d = domain(&db).await;
     let (install, credential) = station(&db).await;
     let created = create_run(
@@ -1683,7 +1690,7 @@ async fn a_targeted_count_also_ends_when_the_comment_area_runs_out_first() {
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
 async fn waiting_runs_rotate_without_resetting_admission_retry_time() {
-    let db = fixture::proof_database("single_run_rotation").await;
+    let db = proof_current_collection_database("single_run_rotation").await;
     let d = domain(&db).await;
     for n in 0..21 {
         create_run(
@@ -1750,7 +1757,7 @@ async fn control_probe_waits_for_serialization_and_rechecks_authority_after_wait
     use std::time::Duration;
 
     for scenario in ["running", "paused", "expired", "revoked"] {
-        let db = fixture::proof_database(&format!("run_control_wait_{scenario}")).await;
+        let db = proof_current_collection_database(&format!("run_control_wait_{scenario}")).await;
         let domain_ref = domain(&db).await;
         let (install, credential) = station(&db).await;
         let created = create_run(

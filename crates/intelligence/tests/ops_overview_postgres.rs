@@ -6,7 +6,7 @@ mod fixture;
 #[path = "support/ops_export_fixture.rs"]
 mod ops;
 
-use fixture::proof_database;
+use fixture::proof_database_with_ops_ledger as proof_database;
 use linggan_intelligence::ops_ledger::read::{
     OpsBusiness, OpsOverview, OpsOverviewQuery, OverviewSlice, read_ops_daily, read_ops_overview,
     read_ops_overview_trend,

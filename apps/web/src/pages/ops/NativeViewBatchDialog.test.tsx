@@ -1,0 +1,63 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { ApiError } from "../../shared/api";
+import * as api from "./api";
+import { NativeViewBatchDialog } from "./NativeViewBatchDialog";
+
+vi.mock("./api", async () => ({ ...(await vi.importActual<typeof import("./api")>("./api")), recordNativeViewBatch: vi.fn() }));
+
+const publication = (ref: string, title: string) => ({
+  ref, source: "native" as const, businessDate: "2026-10-23", dateState: "as_recorded" as const, platform: "xhs" as const, title, url: `https://example.test/${ref}`,
+  publisher: null, account: null, views: { state: "pending" as const, value: null, hit: false, overdue: false }, likes: null, collects: null, comments: null,
+  coverClickRate: null, body: null, systemCheck: "not_checked" as const, cover: { available: false }, duplicates: [], sync: { state: "not_requested" as const, requestRef: null, decision: null },
+  media: { state: "not_requested" as const, observed: 0, available: 0, failed: 0, unavailable: 0 },
+  fieldAdoption: { title: "not_provided" as const, body: "not_provided" as const, likes: "not_provided" as const, collects: "not_provided" as const, comments: "not_provided" as const, publishedAt: "not_provided" as const },
+});
+
+it("retains only answered failed view reports for a corrected targeted retry", async () => {
+  vi.mocked(api.recordNativeViewBatch).mockResolvedValue({ items: [
+    { ordinal: 1, status: 201, requestRef: "one", outcome: "accepted" as const, code: "accepted", replayed: false },
+    { ordinal: 2, status: 422, requestRef: "two", outcome: "rejected" as const, code: "ops_native_view_count_invalid", replayed: false },
+  ] });
+  render(<QueryClientProvider client={new QueryClient()}><NativeViewBatchDialog publications={[publication("one", "第一条"), publication("two", "第二条")]} close={vi.fn()} /></QueryClientProvider>);
+  fireEvent.click(screen.getByLabelText("选择：第一条"));
+  fireEvent.change(screen.getByLabelText("阅读量：第一条"), { target: { value: "0" } });
+  fireEvent.click(screen.getByLabelText("选择：第二条"));
+  fireEvent.change(screen.getByLabelText("阅读量：第二条"), { target: { value: "12" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存批量阅读量" }));
+  await waitFor(() => expect(api.recordNativeViewBatch).toHaveBeenCalledOnce());
+  expect(screen.getByRole("status")).toHaveTextContent("已写入 1 条；失败项已保留");
+  expect(screen.getByLabelText("选择：第一条")).not.toBeChecked();
+  expect(screen.getByLabelText("选择：第二条")).toBeChecked();
+  expect(screen.getByLabelText("批量阅读量结果")).toHaveTextContent("ops_native_view_count_invalid");
+});
+
+for (const failure of [{ kind: "network" } as const, { kind: "http", status: 503, code: "unavailable" } as const]) it(`locks a ${failure.kind} batch and retries each original request identity`, async () => {
+  const close = vi.fn();
+  vi.mocked(api.recordNativeViewBatch)
+    .mockRejectedValueOnce(new ApiError(failure))
+    .mockResolvedValueOnce({ items: [{ ordinal: 1, status: 201, requestRef: "ignored", outcome: "accepted" as const, code: "accepted", replayed: true }] });
+  render(<QueryClientProvider client={new QueryClient()}><NativeViewBatchDialog publications={[publication("one", "第一条")]} close={close} /></QueryClientProvider>);
+  fireEvent.click(screen.getByLabelText("选择：第一条"));
+  fireEvent.change(screen.getByLabelText("阅读量：第一条"), { target: { value: "0" } });
+  fireEvent.click(screen.getByRole("button", { name: "保存批量阅读量" }));
+  await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("提交结果未确认"));
+  expect(screen.getByLabelText("阅读量：第一条")).toBeDisabled();
+  fireEvent.click(screen.getByRole("button", { name: "重试同一批请求" }));
+  await waitFor(() => expect(api.recordNativeViewBatch).toHaveBeenCalledTimes(2));
+  const first = vi.mocked(api.recordNativeViewBatch).mock.calls[0]![0][0]!;
+  const second = vi.mocked(api.recordNativeViewBatch).mock.calls[1]![0][0]!;
+  expect(second.requestId).toBe(first.requestId);
+  await waitFor(() => expect(close).toHaveBeenCalledOnce());
+});
+
+it("does not convert an untouched unknown reading into a zero report", async () => {
+  render(<QueryClientProvider client={new QueryClient()}><NativeViewBatchDialog publications={[publication("one", "第一条")]} close={vi.fn()} /></QueryClientProvider>);
+  fireEvent.click(screen.getByLabelText("选择：第一条"));
+  const input = screen.getByLabelText("阅读量：第一条");
+  expect(input).toBeRequired();
+  fireEvent.submit(input.closest("form")!);
+  expect(api.recordNativeViewBatch).not.toHaveBeenCalled();
+  expect(screen.getByRole("status")).toHaveTextContent("必须是非负整数");
+});

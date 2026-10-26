@@ -6,24 +6,44 @@ import { OpsPage } from './OpsPage';
 vi.mock('./OverviewPage', () => ({ OverviewPage: () => <p>概览内容</p> }));
 const asOf = { exportedAt: '2026-10-19T02:00:00Z', exportedAtBeijing: '2026-10-19 10:00', batchRef: 'batch' };
 const publication = {
-  ref: 'pub', businessDate: '2026-10-18', dateState: 'as_recorded', platform: 'xhs', title: '测试发布标题', body: '完整正文\n保留第二段',
+  ref: 'pub', source: 'imported', businessDate: '2026-10-18', dateState: 'as_recorded', platform: 'xhs', title: '测试发布标题', body: '完整正文\n保留第二段',
   url: 'https://example.com/post', account: { name: '合成账号', ledgerState: 'in_ledger' }, publisher: '甲',
   views: { state: 'pending', value: null, overdue: false, hit: false }, likes: null, collects: 0, comments: null,
-  coverClickRate: null, systemCheck: 'not_checked', duplicates: [], cover: { available: true },
+  coverClickRate: null, systemCheck: 'not_checked', sync: { requestRef: null, decision: null, state: 'not_requested' }, media: { state: 'not_requested', observed: 0, available: 0, failed: 0, unavailable: 0 }, fieldAdoption: { title: 'adopted', body: 'adopted', likes: 'not_provided', collects: 'adopted', comments: 'not_provided', publishedAt: 'adopted' }, duplicates: [], cover: { available: true },
 };
 let failPublications = false;
 let noAccounts = false;
+let nativeOnly = false;
+let persistedSync = false;
+let fieldConflict = false;
 const requests: URL[] = [];
+const requestBodies: unknown[] = [];
 beforeEach(() => {
-  requests.length = 0; failPublications = false; noAccounts = false;
-  vi.stubGlobal('fetch', vi.fn(async (path: string) => {
+  requests.length = 0; requestBodies.length = 0; failPublications = false; noAccounts = false; nativeOnly = false; persistedSync = false; fieldConflict = false;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
     const url = new URL(path, 'http://localhost'); requests.push(url);
+    if (options?.body) requestBodies.push(JSON.parse(String(options.body)));
     const endpoint = url.pathname.split('/').at(-1);
+    if (endpoint === 'publication-syncs') return new Response(JSON.stringify({
+      requestRef: 'sync-request', selectedCount: 1, replayed: false, items: [{
+        publicationRef: 'pub', decision: 'accepted', code: 'accepted', acquisitionRequestRef: 'request', workOrderRef: 'work-order',
+        execution: { state: 'queued', taskId: null, attemptId: null, packageRef: null, receiptRef: null, receiptEffect: null, materialRef: null },
+      }],
+    }), { status: 201, headers: { 'Content-Type': 'application/json' } });
+    if (url.pathname.includes('/publication-syncs/')) return new Response(JSON.stringify({
+      requestRef: 'sync-request', selectedCount: 1, replayed: false, items: [{
+        publicationRef: 'pub', decision: 'accepted', code: 'accepted', acquisitionRequestRef: 'request', workOrderRef: 'work-order',
+        execution: { state: 'material_projected', taskId: 'task', attemptId: 'attempt', packageRef: 'package', receiptRef: 'receipt', receiptEffect: 'COMPLETED_LIVE_STEP', materialRef: 'material' },
+      }],
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     const result = endpoint === 'businesses' ? [{ domainRef: 'd1', name: '合成业务', accountCount: 1 }] : endpoint === 'summary' ? {
-      asOf, month: '2026-10', activeAccounts: 1, ledgerAccounts: 1, monthPublished: 1,
+      asOf: nativeOnly ? null : asOf, nativeDataPresent: nativeOnly, month: '2026-10', activeAccounts: 1, ledgerAccounts: 1, monthPublished: 1,
       effectivePublication: { state: 'not_connected' }, monthFollowersGained: { value: null, scope: 'all_businesses' }, monthHits: null,
     } : endpoint === 'accounts' ? { asOf: noAccounts ? null : asOf, total: 0, active: 0, operators: [], items: [] }
-    : { asOf, page: Number(url.searchParams.get('page') || 1), pageSize: 50, total: 100, totalPages: 2, operators: ['甲'], items: [publication] };
+    : { asOf, page: Number(url.searchParams.get('page') || 1), pageSize: 50, total: 100, totalPages: 2, operators: ['甲'], items: [
+      fieldConflict ? { ...publication, fieldAdoption: { ...publication.fieldAdoption, publishedAt: 'conflict' } }
+      : persistedSync ? { ...publication, sync: { requestRef: 'sync-request', decision: 'accepted', state: 'queued' } } : publication,
+    ] };
     return new Response(JSON.stringify(failPublications && endpoint === 'publications' ? { error: 'unavailable' } : result), {
       status: failPublications && endpoint === 'publications' ? 503 : 200, headers: { 'Content-Type': 'application/json' },
     });
@@ -84,6 +104,13 @@ it('opens full publication content, preserves unknown vs zero, and restores focu
   expect(screen.getByRole('dialog', { name: '发布记录详情' })).toBeInTheDocument();
   fireEvent.click(within(detail).getByRole('button', { name: '关闭详情' })); expect(opener).toHaveFocus();
 });
+it('keeps a receipt field conflict visible instead of treating it as an absent value', async () => {
+  fieldConflict = true; show();
+  const opener = await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
+  expect(screen.getByText('字段待核实')).toBeInTheDocument();
+  fireEvent.click(opener);
+  expect(within(screen.getByRole('dialog', { name: '发布记录详情' })).getByText(/发布时间待核实；当前保留原登记/)).toBeInTheDocument();
+});
 it('keeps scope picker in the breadcrumb and clears filters when switching business', async () => {
   show('/ops/publications?domain=d1&platform=xhs&page=2');
   const picker = await screen.findByLabelText('切换业务');
@@ -104,6 +131,36 @@ it('retains no-import as a distinct state from an empty imported account list', 
   noAccounts = true; show('/ops/accounts?domain=d1');
   await screen.findByText('还没有迁入数据。');
   expect(screen.queryByText('当前筛选下没有账号。')).not.toBeInTheDocument();
+});
+it('does not label native-only Operations facts as an absent import', async () => {
+  nativeOnly = true; show();
+  await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
+  expect(screen.getByText('原生台账数据（历史尚未迁入）')).toBeInTheDocument();
+});
+
+it('submits only explicitly selected publications and refreshes shared execution facts', async () => {
+  show();
+  await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
+  fireEvent.click(screen.getByRole('button', { name: '同步数据' }));
+  const dialog = screen.getByRole('dialog', { name: '同步已登记发布' });
+  expect(within(dialog).getByText('只为选中的精确发布申请采集；不会自动发现、不会改写台账字段。')).toBeInTheDocument();
+  expect(within(dialog).getByRole('button', { name: '提交' })).toBeDisabled();
+  fireEvent.click(within(dialog).getByRole('checkbox'));
+  fireEvent.click(within(dialog).getByRole('button', { name: '提交 1 条' }));
+  await within(dialog).findByText('等待分派');
+  expect(requestBodies).toContainEqual(expect.objectContaining({ publicationRefs: ['pub'] }));
+  fireEvent.click(within(dialog).getByRole('button', { name: '刷新执行状态' }));
+  await within(dialog).findByText('已关联材料（字段尚未采用）');
+  expect(requests.some(url => url.pathname === '/api/local/ops/publication-syncs/sync-request')).toBe(true);
+});
+
+it('keeps a persisted sync status on the row and can reopen its request after returning', async () => {
+  persistedSync = true; show();
+  await screen.findByRole('button', { name: '等待分派' });
+  fireEvent.click(screen.getByRole('button', { name: '等待分派' }));
+  const dialog = screen.getByRole('dialog', { name: '同步已登记发布' });
+  await within(dialog).findByText('已关联材料（字段尚未采用）');
+  expect(requests.some(url => url.pathname === '/api/local/ops/publication-syncs/sync-request')).toBe(true);
 });
 
 it('protects unapplied dates and restores the draft after cancelling a close', async () => {

@@ -4,7 +4,9 @@
 > 最后核对: 2026-10-13
 > 适用范围: OPS-MIGRATION-001 第 D1 步（Issue #402）：运营台账五张表的含义与约束、内容工作台运营导出的导入规则 `ops-import.v1`、新旧对账口径，以及后续页面读取这些表时必须遵守的约定
 > 事实来源: 内容工作台 `main@489b9cb8` 只读代码（导出接口、Prisma 模型、每日发布数计算、账号与同步状态词表）；Mog 2026-10-12～13 的六项裁定与 10-13「只管小红书」确认；三份导出文件的结构核对（只统计字段、类型与数量）
-> 冲突时以谁为准: Mog 最新确认、[DEC-0009](../decisions/0009-stage-one-job-topic-pool.md)、`AGENTS.md`、迁移 `0123_ops_ledger.sql` 与导入代码的真实行为
+> 冲突时以谁为准: [OPS-LAUNCH-001](../plans/active/ops-launch-001.md)、Mog 最新确认、[DEC-0009](../decisions/0009-stage-one-job-topic-pool.md)、`AGENTS.md`、迁移 `0123_ops_ledger.sql` 与导入代码的真实行为
+
+> **2026-10-23 边界：** 本文继续定义已迁入数据的来源、未知语义、封面和对账，不再把“迁入台账永远只读”或“历史名称即人员身份”推广到原生记录。新的稳定人员身份、当前责任、原生发布/日报和版本化手工阅读量必须在 OPS-LAUNCH-001 的后续迁移与合同中显式实现，不能伪造 `workbench_import` 批次来复用本文的历史路径。
 > 当前实现状态: 分支 `feat/ops-migration-d1`；未合并；共享库尚未执行迁移和导入
 
 范围与先后见 [OPS-MIGRATION-001](../plans/active/ops-module-migration-001.md)，去留依据见[能力继承审计](../audits/ops-module-inheritance-audit-2026-10-13.md)。

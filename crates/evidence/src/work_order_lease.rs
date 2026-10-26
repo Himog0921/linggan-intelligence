@@ -60,6 +60,7 @@ pub async fn lease_schema_is_ready(database: &Database) -> Result<bool, sqlx::Er
         "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
                 AND to_regclass('collection_work_order_lease_task') IS NOT NULL \
                 AND to_regclass('collection_work_order_domain_usage') IS NOT NULL \
+                AND to_regclass('collection_work_order_ops_publication_target') IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_name='collection_work_order' \
                               AND column_name='retry_not_before_at')",
@@ -199,7 +200,7 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
         });
     }
     reject_if_already_leased(transaction, work_order_ref).await?;
-    reject_if_authorization_lapsed(transaction, &subject).await?;
+    reject_if_authorization_lapsed(transaction, work_order_ref, &subject).await?;
     reject_if_rule_changed(&subject)?;
 
     // One installation may hold only one active Lease. Serialize on its installation first so an
@@ -970,6 +971,7 @@ async fn reject_if_already_leased(
 
 async fn reject_if_authorization_lapsed(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
     subject: &LeaseSubject,
 ) -> Result<(), LeaseError> {
     let Some(authorization_ref) = subject.authorization_ref else {
@@ -978,9 +980,17 @@ async fn reject_if_authorization_lapsed(
     let valid: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM collection_acquisition_authorization \
                         WHERE authorization_ref = $1 AND revoked_at IS NULL \
-                          AND expires_at > scope_001_now())",
+                          AND expires_at > scope_001_now() \
+                          AND (NOT EXISTS (SELECT 1 \
+                                          FROM collection_work_order_ops_publication_target scope \
+                                          WHERE scope.work_order_ref=$2) \
+                               OR ('ops_publication_sync'=ANY(allowed_task_templates) \
+                                   AND 'batch'=ANY(allowed_dispatch_lanes) \
+                                   AND (max_works_per_target IS NULL OR max_works_per_target>=1) \
+                                   AND max_work_units>=1)))",
     )
     .bind(authorization_ref)
+    .bind(work_order_ref)
     .fetch_one(&mut **transaction)
     .await?;
     if !valid {
@@ -1047,10 +1057,19 @@ async fn remaining_steps_for_work_order(
             work_order_ref,
         )
         .await?;
-    let mut blocked_contents =
-        content_external_ids_for_object_refs_in_transaction(transaction, &blocked).await?;
+    let mut blocked_contents = content_external_ids_for_object_refs_in_transaction(
+        transaction,
+        work_order_ref,
+        &blocked,
+    )
+    .await?;
     blocked_contents.extend(
-        content_external_ids_for_object_refs_in_transaction(transaction, &budget_exhausted).await?,
+        content_external_ids_for_object_refs_in_transaction(
+            transaction,
+            work_order_ref,
+            &budget_exhausted,
+        )
+        .await?,
     );
 
     let mut stopped_members = 0_usize;
@@ -1092,6 +1111,7 @@ async fn remaining_steps_for_work_order(
 /// 引用时才去查它。
 async fn content_external_ids_for_object_refs_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
     objects: &crate::execution_input_eligibility::BlockedObjects,
 ) -> Result<std::collections::HashSet<String>, sqlx::Error> {
     let mut contents: Vec<String> = Vec::new();
@@ -1101,6 +1121,18 @@ async fn content_external_ids_for_object_refs_in_transaction(
                 "SELECT content_external_id FROM linggan_material_content WHERE public_ref=ANY($1)",
             )
             .bind(&objects.material)
+            .fetch_all(&mut **transaction)
+            .await?,
+        );
+    }
+    if !objects.ops_publication.is_empty() {
+        contents.extend(
+            sqlx::query_scalar::<_, String>(
+                "SELECT content_external_id FROM collection_work_order_ops_publication_target \
+                 WHERE work_order_ref=$1 AND publication_ref=ANY($2)",
+            )
+            .bind(work_order_ref)
+            .bind(&objects.ops_publication)
             .fetch_all(&mut **transaction)
             .await?,
         );
@@ -1375,12 +1407,20 @@ async fn load_material_targets(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
 ) -> Result<Vec<MaterialTarget>, LeaseError> {
+    // Both relations are immutable, exact scopes.  The Operations relation deliberately has no
+    // Material row behind it, but its detail-only policy has the same task-expansion shape.
     let rows: Vec<(String, i32, i32, bool)> = sqlx::query_as(
-        "SELECT content.content_external_id,target.comment_limit,target.reply_expand_limit, \
-                target.acquire_media \
-         FROM collection_work_order_material_target target \
-         JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
-         WHERE target.work_order_ref=$1 ORDER BY target.ordinal",
+        "SELECT scope.content_external_id,scope.comment_limit,scope.reply_expand_limit,scope.acquire_media \
+         FROM ( \
+             SELECT content.content_external_id,target.comment_limit,target.reply_expand_limit,target.acquire_media,target.ordinal \
+             FROM collection_work_order_material_target target \
+             JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
+             WHERE target.work_order_ref=$1 \
+             UNION ALL \
+             SELECT target.content_external_id,target.comment_limit,target.reply_expand_limit,target.acquire_media,target.ordinal \
+             FROM collection_work_order_ops_publication_target target \
+             WHERE target.work_order_ref=$1 \
+         ) scope ORDER BY scope.ordinal",
     )
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)
