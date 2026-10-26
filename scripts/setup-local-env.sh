@@ -22,6 +22,7 @@ umask 077
   printf '%s\n' 'POSTGRES_USER=linggan_dev_admin'
   printf 'POSTGRES_PASSWORD=%s\n' "$postgres_password"
   printf '%s\n' 'POSTGRES_PORT=55432'
+  printf '%s\n' 'LINGGAN_LOCAL_PORT=3001'
   printf 'DATABASE_ADMIN_URL=postgresql://linggan_dev_admin:%s@127.0.0.1:55432/linggan_intelligence_dev\n' "$postgres_password"
   printf '%s\n' 'RUST_LOG=info'
 } > .env

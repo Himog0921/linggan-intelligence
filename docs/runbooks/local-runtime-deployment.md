@@ -1,10 +1,22 @@
 # 本机常驻服务部署手册
 
 > 状态: 权威当前
-> 最后核对: 2026-10-20（仅AI-GEN1候选源码/owned证明；其余运行回执保留各节原核对日）
+> 最后核对: 2026-10-26（新增 3001 并行部署候选；既有运行回执保留各节原核对日）
 > 适用范围: AI-GEN1第四进程候选合同，以及本机既有三个 launchd 常驻服务（API / 巡检 worker / 媒体 worker）的运行来源、更新方式、故障处置与运行诊断
 > 事实来源: Mog 于 2026-09-03 的明确要求「本地以 `/Users/moglenny/proma/linggan-intelligence` 为准，跟远端同步，不要到处复制」、当前 launchd 配置与实际运行验证、2026-09-17 更新入口用旧副本失败的实测（见 §3）、2026-09-21 按 COLLECTION-UPGRADE-001 S4 的实现与隔离库用例写成 §7（**样例为手工构造**，不是运行抓取；其余各节未重新实测，最后核对的口径见各节标注的日期）
 > 冲突时以谁为准: 实际运行输出与 launchd 当前加载的配置；本手册不授予平台访问或迁移执行权限
+
+## 2026-10-26 · 与内容工作台并行的 3001 部署候选
+
+本机内容工作台继续使用 `127.0.0.1:3000`。Intelligence 的 `.env` 设置 `LINGGAN_LOCAL_PORT=3001`，PostgreSQL Compose 继续使用独立卷和 `127.0.0.1:55432`。`install.sh` 从 `.env` 生成 API plist；`migrate` 与首次 Comment Study 初始化只检查配置的 Intelligence 端口，不将另一服务的 3000 监听误认为本项目未停机。插件 `0.8.64` 的唯一目标也同步为 `http://localhost:3001`；构建 ZIP 不等于 Chrome 已重载。
+
+本机首次准备先核对 Rust `1.95.0`、Node `24.13.0`、Docker Compose、PostgreSQL 16，然后运行 `setup-local-env.sh`、`dev-db.sh up` 和 `verify-development-environment.sh`。固定工具链不在登录 shell PATH 时，可在私有 `.env` 中设置 `LINGGAN_RUSTUP_BIN_DIR`、`RUSTUP_HOME`、`CARGO_HOME`、`LINGGAN_PI_NODE` 和 `LINGGAN_WEB_NODE`；具体路径不入 Git。构建、迁移与常驻服务应使用同一组路径。首次迁移与 Comment Study 基础表的顺序沿用本手册 §2；运行目录必须从干净、已核对的 `origin/main` 建立，不能把本机开发分支直接作为正式 runtime。
+
+公网入口必须是另一个独立域名，Tunnel 指向 `http://127.0.0.1:3001`，保留浏览器原始 Host，并向本机 API 传递 `X-Forwarded-Proto: https`。域名和团队访问策略确定后，在私有 `.env` 同时设置精确的 `LINGGAN_PUBLIC_ORIGIN=https://<hostname>` 与 `LINGGAN_OPS_COOKIE_SECURE=1`，再逐项验收公网登录。API 仍只监听 loopback；公网 Host 仅在该配置下开放，跨站来源、未知 Host、插件写入、工位接口、旧采集授权/归档/租约/深化接口和公网 `/health` 拒绝访问。现有业务写接口尚未逐条接入角色和资源授权，因此公网首阶段仅允许 active admin 会话；非管理员仍可在本机按原有边界使用，正式团队范围开放须另补授权与审计。Cloudflare Tunnel 的路由与访问策略是独立配置，应用环境变量不会自动创建它们。
+
+上线验收分别核对 `127.0.0.1:3001/health` 的数据库与源码身份、登录/邀请/退出、管理员对各业务页面和媒体的授权、未登录与跨站负例、插件在本机 3001 的签到/回执，以及备份恢复和整版回退。巡检、媒体、AI 的禁用状态和真实平台/模型额度按原有合同保留；安装完成不自动宣称这些链路已运行。
+
+2026-10-26 的首次本机库已按 `migrate → init-comment-study → migrate` 到 0166（账本 167 条）。使用容器内 PostgreSQL 16 `pg_dump -Fc` 经 `age` 加密的首装快照已用 `pg_restore --list` 检查，并恢复到一次性异库核对 167 条账本和团队表，随后删除验证库；身份密钥和快照都在仅当前用户可读的本机支持目录，不入 Git。该回执只证明本机快照可恢复；上线前仍需安排持续备份、密钥异地保管和整版回退窗口。
 
 ## AI-GEN1 / PR-1B 独立执行进程候选（未部署）
 

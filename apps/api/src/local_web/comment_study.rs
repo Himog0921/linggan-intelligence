@@ -198,7 +198,7 @@ fn embedding_probe_error_code(error: &EmbeddingError) -> &'static str {
 }
 
 pub(super) async fn local_comment_study_guard(request: Request, next: Next) -> Response {
-    if !allowed_origin(request.headers()) {
+    if !allowed_local_or_public_origin(&request) {
         return error(StatusCode::FORBIDDEN, "local_comment_study_origin_rejected");
     }
     let mut response = next.run(request).await;
@@ -211,6 +211,14 @@ pub(super) async fn local_comment_study_guard(request: Request, next: Next) -> R
         header::HeaderValue::from_static("nosniff"),
     );
     response
+}
+
+fn allowed_local_or_public_origin(request: &Request) -> bool {
+    allowed_origin(request.headers())
+        || request
+            .extensions()
+            .get::<super::public_access::PublicAccess>()
+            .is_some_and(|access| access.allows_public_origin(request.headers()))
 }
 
 fn allowed_origin(headers: &HeaderMap) -> bool {

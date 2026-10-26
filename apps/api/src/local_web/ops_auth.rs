@@ -3,7 +3,7 @@
 use super::*;
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
-    Json, Router,
+    Extension, Json, Router,
     extract::{Path, State},
     http::{HeaderMap, HeaderValue, StatusCode, header},
     middleware,
@@ -98,6 +98,7 @@ pub(super) struct AuthenticatedMember {
 
 async fn login(
     State(state): State<LocalWebState>,
+    Extension(public_access): Extension<super::public_access::PublicAccess>,
     headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> Response {
@@ -106,6 +107,10 @@ async fn login(
     };
     let email = normalize_email(&request.email);
     let token = new_session_token();
+    let is_public = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|host| public_access.is_public_host(host));
     let result: Result<Option<AuthenticatedMember>, sqlx::Error> = async {
         let mut transaction = database.pool().begin().await?;
         let member = sqlx::query_as::<_, (Uuid, String, String, String)>(
@@ -120,6 +125,9 @@ async fn login(
             return Ok(None);
         };
         if !password_matches(&member.3, &request.password) {
+            return Ok(None);
+        }
+        if is_public && member.2 != "admin" {
             return Ok(None);
         }
         issue_session_transaction(&mut transaction, member.0, &token).await?;

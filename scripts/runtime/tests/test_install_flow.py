@@ -32,7 +32,7 @@ class InstallFlow(unittest.TestCase):
             shutil.copy2(SOURCE_ROOT / "crates/contracts/src/ai_limits.json", resource)
             migrations = base / "database/migrations"; migrations.mkdir(parents=True)
             for name in ("0131_ai_gen1_provider", "0140_ai_gen1_writing"): (migrations / (name + ".sql")).write_text("-- synthetic migration name only\n")
-            (base / ".env").write_text("POSTGRES_USER=linggan_dev_admin\nPOSTGRES_PASSWORD=SYNTHETIC-NOT-A-SHARED-CREDENTIAL\nPOSTGRES_DB=synthetic_owned\nPOSTGRES_PORT=54321\n")
+            (base / ".env").write_text("POSTGRES_USER=linggan_dev_admin\nPOSTGRES_PASSWORD=SYNTHETIC-NOT-A-SHARED-CREDENTIAL\nPOSTGRES_DB=synthetic_owned\nPOSTGRES_PORT=54321\nLINGGAN_LOCAL_PORT=3001\n")
             worker = base / "apps/worker/src/shutdown.rs"; worker.parent.mkdir(parents=True)
             worker.write_text("// synthetic marker: write_drain_ack\n")
         fixture = SOURCE_ROOT / "scripts/runtime/tests/fake_commands.py"
@@ -78,6 +78,9 @@ class InstallFlow(unittest.TestCase):
             value = plistlib.loads((self.agents / (label + ".plist")).read_bytes())
             self.assertEqual(value["ExitTimeOut"], 3616)
             self.assertEqual(value["WorkingDirectory"], str(self.runtime))
+        api = plistlib.loads((self.agents / (LABELS[0] + ".plist")).read_bytes())
+        self.assertEqual(api["EnvironmentVariables"]["LINGGAN_LOCAL_PORT"], "3001")
+        self.assertFalse(any("-iTCP:3000" in row for row in self.trace if row[0] == "lsof"))
         permit = json.loads((self.support / "runtime-drain/worker-update-permit").read_text())
         self.assertEqual(permit["from"], "a" * 40); self.assertEqual(permit["target"], "b" * 40)
         self.assertEqual(permit["ai"]["state"], "drained")

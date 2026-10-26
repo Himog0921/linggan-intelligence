@@ -253,7 +253,7 @@ test('eligibility reporting uses only the health-advertised station route', asyn
       rawPlatformAccountId: 'stable-user-3',
     },
   });
-  assert.match(request.url, /^http:\/\/localhost:3000\/api\/local\/stations\//);
+  assert.match(request.url, /^http:\/\/localhost:3001\/api\/local\/stations\//);
   assert.equal(JSON.stringify(result).includes('stable-user-3'), false);
   assert.equal(JSON.stringify(result).includes('high-entropy-fixture-credential'), false);
 });

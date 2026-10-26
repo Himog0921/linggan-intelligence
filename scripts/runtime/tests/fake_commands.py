@@ -111,6 +111,9 @@ elif tool == "pgrep":
     if args[:1] != ["-x"]: fail()
     sys.exit(2 if state.get("process_probe_unreadable") else 1)
 elif tool == "lsof":
+    if any("-iTCP:3000" in argument for argument in args):
+        print("the unrelated workbench owns port 3000", file=sys.stderr)
+        sys.exit(0)
     if state.get("port_probe_unreadable"): print("synthetic_inspection_failed", file=sys.stderr)
     sys.exit(1)
 elif tool == "sleep":
