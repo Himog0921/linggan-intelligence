@@ -22,7 +22,7 @@ describe('本机媒体对象（J01）', () => {
     expect(positionText(0, 12)).toBe('01 / 12');
   });
 
-  it('只有服务器标记为可内联的图片才给地址；有句柄但不可内联要说明；视频不当图片', () => {
+  it('只有服务器标记为可内联的图片/视频才给地址；有句柄但不可内联要说明；保留视频MIME', () => {
     const objects = mediaObjects(
       inspectorWith([
         slotJson(1, ref, { ordinal: 1 }),
@@ -34,7 +34,7 @@ describe('本机媒体对象（J01）', () => {
     );
     expect(objects[0]).toMatchObject({ assetUrl: mediaHandle(1), inlineBlocked: false });
     expect(objects[1]).toMatchObject({ assetUrl: null, inlineBlocked: true, mime: 'image/svg+xml' });
-    expect(objects[2]).toMatchObject({ assetUrl: null, inlineBlocked: false, mime: 'video/mp4' });
+    expect(objects[2]).toMatchObject({ assetUrl: mediaHandle(3), inlineBlocked: false, mime: 'video/mp4' });
     expect(objects[3]).toMatchObject({ assetUrl: null, inlineBlocked: false, bytesState: 'NOT_OBSERVED' });
   });
 

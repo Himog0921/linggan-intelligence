@@ -406,6 +406,7 @@
 
 /* V2.2: a shared, scannable work header, three tabs and compact reading surfaces. */
 .workSummary { margin:var(--lgi-space-3) 0 var(--lgi-space-2);min-width:0; }
+.openOriginal { margin-right:auto;text-decoration:none; }
 .workTitle { margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
   font:600 var(--lgi-type-object-size)/1.35 var(--lgi-font-ui); }
 .workByline { display:flex;align-items:center;gap:var(--lgi-space-3);flex-wrap:wrap;margin-top:var(--lgi-space-2);

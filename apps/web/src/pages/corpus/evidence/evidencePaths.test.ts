@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { apiPath, controlledPath, detailPath, directDetailPath, imagePath, mediaPath } from './evidencePaths';
+import { apiPath, controlledPath, detailPath, directDetailPath, imagePath, mediaPath, xhsNoteUrl } from './evidencePaths';
 import { DOMAIN, workRef } from './evidenceFixtures';
 
 const ORIGIN = 'http://127.0.0.1:3000';
 const REF = workRef(1);
+
+it('原文导航仅接受小红书笔记HTTPS地址，保留实际来源查询参数', () => {
+  const url = 'https://www.xiaohongshu.com/explore/0123456789abcdef01234567?xsec_token=synthetic';
+  expect(xhsNoteUrl(url)).toBe(url);
+  for (const value of [null, '', 'javascript:alert(1)', '//www.xiaohongshu.com/explore/0123456789abcdef01234567', 'https://www.xiaohongshu.com.evil.test/explore/0123456789abcdef01234567', 'https://www.xiaohongshu.com/user/profile/0123456789abcdef01234567']) expect(xhsNoteUrl(value)).toBeNull();
+});
 
 describe('受控地址', () => {
   it('同源且在允许前缀下才通过；返回路径加查询串', () => {

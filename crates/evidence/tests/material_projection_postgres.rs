@@ -17,6 +17,75 @@ use uuid::Uuid;
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn source_navigation_uses_latest_accepted_exact_note_link_without_reviving_old_signatures() {
+    let database = proof_database("material_source_note_navigation").await;
+    let id = "0123456789abcdef01234567";
+    let original = format!(
+        "https://www.xiaohongshu.com/search_result/{id}?xsec_token=synthetic&xsec_source=pc_search"
+    );
+    for (index, url) in [
+        Some(original.as_str()),
+        Some("https://www.xiaohongshu.com/search_result/other?xsec_token=wrong-note"),
+        None,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        submit_package_at(
+            &database,
+            "discovery_search",
+            serde_json::json!({"query":"synthetic"}),
+            serde_json::json!({
+                "kind":"discovery_card","resultPosition":1,
+                "sourceObject":{"platform":"xhs","type":"content","externalId":id},
+                "payload":{"title":"Synthetic source navigation","url":url}
+            }),
+            &format!("2026-08-28T10:0{index}:00Z"),
+        )
+        .await;
+        let work: Uuid = sqlx::query_scalar(
+            "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+        )
+        .bind(id)
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        let before: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_capture_package")
+                .fetch_one(database.pool())
+                .await
+                .unwrap();
+        let item = read_work_resource(&database, work).await.unwrap().unwrap();
+        if index == 0 {
+            assert_eq!(item.inspector["sourceNote"]["url"], original);
+            assert_eq!(item.inspector["sourceNote"]["state"], "KNOWN");
+            assert!(item.inspector["sourceNote"]["sourceRef"].is_string());
+        } else {
+            assert!(item.inspector["sourceNote"]["url"].is_null());
+            assert_eq!(item.inspector["sourceNote"]["state"], "UNKNOWN");
+        }
+        let dossier = linggan_evidence::research_dossier::read(&database, work)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            !serde_json::to_string(&dossier)
+                .unwrap()
+                .contains("xsec_token")
+        );
+        let after: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_capture_package")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+        assert_eq!(
+            before, after,
+            "navigation reads cannot collect or rewrite evidence"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headline() {
     let database = proof_database("material_cover_ocr_title_fallback").await;
     let content_id = "note-cover-ocr-fallback";

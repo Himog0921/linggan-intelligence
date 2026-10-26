@@ -62,7 +62,9 @@ pub async fn read_material_detail(
     engagement_rows.reverse();
     let engagement_current = read_engagement_current(&mut tx, &current, &as_of).await?;
     let detail_current = read_detail_current(&current);
+    let source_note = read_source_note(&mut tx, &current, &as_of).await?;
     if let Some(inspector) = item.inspector.as_object_mut() {
+        inspector.insert("sourceNote".to_owned(), source_note);
         inspector.insert(
             "engagementTimeline".to_owned(),
             Value::Array(engagement_rows.clone()),
@@ -78,6 +80,67 @@ pub async fn read_material_detail(
     }
     tx.commit().await?;
     Ok(Some(item))
+}
+
+/// Navigation uses the latest accepted discovery link, never a URL fabricated from an ID.
+/// Keep short-lived signatures out of the canonical dossier and its AI/Markdown inputs.
+async fn read_source_note(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    current: &WorkResourceCurrent,
+    as_of: &str,
+) -> Result<Value, sqlx::Error> {
+    let row: Option<(Option<String>, Uuid)> = sqlx::query_as(
+        "SELECT record.value->'payload'->>'url',finding.material_ref \
+         FROM linggan_material_discovery_finding finding \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') WITH ORDINALITY record(value,ordinality) \
+         WHERE finding.content_public_ref=$1 AND package.accepted_at<=$2::timestamptz \
+           AND finding.created_at<=$2::timestamptz AND record.ordinality=finding.record_ordinal+1 \
+           AND record.value->'sourceObject'->>'platform'=$3 \
+           AND record.value->'sourceObject'->>'externalId'=$4 \
+         ORDER BY package.accepted_at DESC,finding.created_at DESC,finding.material_ref DESC LIMIT 1",
+    ).bind(current.public_ref).bind(as_of).bind(&current.platform).bind(&current.content_external_id)
+        .fetch_optional(&mut **tx).await?;
+    let source_ref = row.as_ref().map(|(_, source)| *source);
+    let url = row.and_then(|(url, _)| url).filter(|url| {
+        current.platform == "xhs" && xhs_note_link_matches(url, &current.content_external_id)
+    });
+    Ok(
+        serde_json::json!({"url":url,"state":if url.is_some(){"KNOWN"}else{"UNKNOWN"},"sourceRef":source_ref}),
+    )
+}
+
+fn xhs_note_link_matches(url: &str, id: &str) -> bool {
+    let Some((base, query)) = url.split_once('?') else {
+        return false;
+    };
+    ["explore", "search_result", "discovery/item"]
+        .iter()
+        .any(|path| base == format!("https://www.xiaohongshu.com/{path}/{id}"))
+        && query.split('&').any(|part| {
+            part.strip_prefix("xsec_token=")
+                .is_some_and(|token| !token.is_empty())
+        })
+}
+
+#[cfg(test)]
+mod source_note_tests {
+    use super::xhs_note_link_matches;
+    #[test]
+    fn navigation_requires_the_exact_note_and_a_real_signed_link() {
+        assert!(xhs_note_link_matches(
+            "https://www.xiaohongshu.com/search_result/note?xsec_token=synthetic&xsec_source=pc_search",
+            "note"
+        ));
+        for url in [
+            "https://www.xiaohongshu.com/explore/note",
+            "https://www.xiaohongshu.com/explore/note?xsec_token=",
+            "https://www.xiaohongshu.com/explore/other?xsec_token=synthetic",
+            "https://www.xiaohongshu.com.evil.test/explore/note?xsec_token=synthetic",
+        ] {
+            assert!(!xhs_note_link_matches(url, "note"));
+        }
+    }
 }
 
 fn engagement_row(row: &sqlx::postgres::PgRow) -> Value {

@@ -169,7 +169,7 @@
   box-shadow: var(--lgi-shadow-brutal);
 }
 
-.frame img {
+.frame :is(img, video) {
   display: block;
   max-width: min(56vw, calc(var(--lgi-space-24) * 8 - var(--lgi-space-4)));
   max-height: min(76vh, calc(var(--lgi-space-24) * 9 + var(--lgi-space-8)));
@@ -213,5 +213,6 @@
 
 .mediaState { position: relative; grid-area: 1 / 1; padding: var(--lgi-space-4); background: var(--lgi-canvas); color: var(--lgi-muted); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); }
 .frame img { grid-area: 1 / 1; }
+.frame video { grid-area: 1 / 1; }
 .frame:has(.mediaState) { min-width: var(--lgi-space-24); min-height: var(--lgi-space-24); }
 @media (max-width: 640px) { .head { flex-wrap: wrap; gap: var(--lgi-space-2); } .tools { margin-left: auto; } .subtitle { overflow-wrap: anywhere; } }

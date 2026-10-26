@@ -221,6 +221,7 @@ export interface Provenance {
 }
 
 export interface Inspector {
+  sourceNoteUrl: string | null;
   detail: Record<'title' | 'creator' | 'publishedAt' | 'body', DetailField | null>;
   engagement: Record<'likeCount' | 'commentCount' | 'collectCount' | 'shareCount', CurrentMetric | null>;
   timeline: TimelinePoint[];

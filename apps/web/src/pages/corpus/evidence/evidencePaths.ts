@@ -9,6 +9,17 @@ export const API_ROOT = '/api/local/work-resources';
 export const MEDIA_PREFIX = '/api/local/media/';
 export const DERIVATIVE_PREFIX = '/api/local/derivative/';
 
+/** Explicit navigation only; never use a platform note URL as a local asset or API. */
+export function xhsNoteUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && ['www.xiaohongshu.com', 'xiaohongshu.com'].includes(url.hostname)
+      && !url.username && !url.password && !url.port
+      && /^\/(?:explore|search_result|discovery\/item)\/[a-f0-9]{24}\/?$/i.test(url.pathname) ? url.href : null;
+  } catch { return null; }
+}
+
 function currentOrigin(): string {
   return globalThis.location?.origin ?? 'http://localhost';
 }

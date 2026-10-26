@@ -28,6 +28,7 @@ import { useCommentChannel } from './useCommentChannel';
 import { useReobservation } from './useReobservation';
 import page from './EvidencePage.module.css';
 import styles from './Inspector.module.css';
+import actionStyles from '../../../shared/ActionButton.module.css';
 
 export interface DetailState {
   status: 'idle' | 'loading' | 'error' | 'ready' | 'incomplete';
@@ -174,6 +175,8 @@ export function Inspector(props: InspectorProps) {
   const canonical = useQuery({ queryKey: dossierKey(domain, selectedRef ?? ''), queryFn: ({ signal }) => fetchDossier(selectedRef ?? '', domain, signal), enabled: false, gcTime: 0 });
   const dossier = hideCachedReading(canonical.error) ? undefined : canonical.data?.dossier;
   const title = dossier && work ? dossier.note.displayTitle ?? '无标题' : work ? workTitle(work) : '请选择一个作品材料集合';
+  const originalUrl = work?.platform === 'xhs' ? detail.data?.inspector.sourceNoteUrl : null;
+  const originalLink = originalUrl ? <a className={`${actionStyles.action} ${actionStyles.outline} ${styles.openOriginal}`} href={originalUrl} target="_blank" rel="noopener noreferrer">打开原文</a> : null;
 
   useEffect(() => {
     if (drawer && open) back.current?.focus({ preventScroll: true });
@@ -235,6 +238,7 @@ export function Inspector(props: InspectorProps) {
         </h2>
         {drawer ? null : (
           <div className={styles.tools}>
+            {originalLink}
             <div className={styles.widths} role="group" aria-label="检查器宽度">
               {PANELS.map(candidate => (
                 <button key={candidate} type="button" aria-pressed={width === candidate} title={WIDTH_TITLES[candidate]} onClick={() => onWidth(candidate)}>
@@ -250,6 +254,7 @@ export function Inspector(props: InspectorProps) {
           </div>
         )}
         {work ? <div className={styles.workSummary}>
+          {drawer ? originalLink : null}
           <h3 className={styles.workTitle} title={title} data-work-title>{title}</h3>
           {dossier?.note.displayTitleBasis === 'cover' ? <span className={styles.workPlatform}>封面整理标题</span> : null}
           <div className={styles.workByline}>

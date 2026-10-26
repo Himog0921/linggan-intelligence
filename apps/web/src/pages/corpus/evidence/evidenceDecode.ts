@@ -15,7 +15,7 @@ import {
   strList,
   type Json,
 } from '../../../shared/decode';
-import { imagePath, mediaPath } from './evidencePaths';
+import { imagePath, mediaPath, xhsNoteUrl } from './evidencePaths';
 import type {
   AuthorContext,
   Channels,
@@ -332,6 +332,7 @@ function parseInspector(record: Json): Inspector {
   const detail = optObj(record, 'detailCurrent') ?? {};
   const engagement = optObj(optObj(record, 'engagementCurrent') ?? {}, 'metrics') ?? {};
   return {
+    sourceNoteUrl: xhsNoteUrl(optObj(record, 'sourceNote')?.url),
     detail: {
       title: parseDetailField(optObj(detail, 'title')),
       creator: parseDetailField(optObj(detail, 'creator')),

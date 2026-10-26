@@ -21,7 +21,9 @@ export interface ViewerObject {
   bytesState: string;
   /** 这一槽位的图片文字／转录处理状态；没有处理记录是 null（界面写「文字未处理」）。 */
   derivedState: string | null;
-  /** 可内联显示的受控本地图片；视频、实况动态部分与不安全类型没有。 */
+  /** MIME selects the native viewer; legacy single-image callers omit it. */
+  mime?: string;
+  /** Server-approved local image or video; other types have no inline URL. */
   assetUrl: string | null;
 }
 
@@ -97,7 +99,7 @@ function groupLabel(group: readonly MediaSlot[], fallbackOrdinal: number): strin
 }
 
 function inlineUrl(slot: MediaSlot): string | null {
-  return slot.deliveryState === 'INLINE_SAFE' && slot.mime.startsWith('image/') ? slot.assetUrl : null;
+  return slot.deliveryState === 'INLINE_SAFE' && (slot.mime.startsWith('image/') || slot.mime.startsWith('video/')) ? slot.assetUrl : null;
 }
 
 export function mediaObjects(inspector: Inspector, fragment: Pick<Fragment, 'slotKey'> | null): MediaObject[] {
