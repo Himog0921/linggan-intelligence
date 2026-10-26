@@ -32,7 +32,7 @@ impl PublicAccess {
         }
     }
 
-    fn parse(value: &str) -> io::Result<Self> {
+    pub(super) fn parse(value: &str) -> io::Result<Self> {
         let uri: axum::http::Uri = value.parse().map_err(|_| invalid_origin())?;
         let authority = uri.authority().ok_or_else(invalid_origin)?;
         if uri.scheme_str() != Some("https")
@@ -142,6 +142,13 @@ pub(super) async fn guard(
             let path = request.uri().path();
             if path == "/health"
                 || path == "/api/local/discovery-packages"
+                || matches!(
+                    path,
+                    "/api/local/collection/authorizations"
+                        | "/api/local/collection/archive-requests"
+                        | "/api/local/collection/work-order-leases"
+                        | "/api/local/collection/material-deepening"
+                )
                 || path.starts_with("/api/local/producer/")
                 || path.starts_with("/api/local/stations")
                 || path.starts_with("/api/local/dispatch/")
@@ -149,8 +156,10 @@ pub(super) async fn guard(
                 return StatusCode::FORBIDDEN.into_response();
             }
             if !anonymous_path(request.method(), path) {
-                if let Err(response) = ops_auth::current_member(&state, request.headers()).await {
-                    return response;
+                match ops_auth::current_member(&state, request.headers()).await {
+                    Ok(member) if member.role == "admin" || path == "/api/local/auth/logout" => {}
+                    Ok(_) => return StatusCode::FORBIDDEN.into_response(),
+                    Err(response) => return response,
                 }
             }
         } else if !is_local_host(host)
@@ -247,6 +256,18 @@ mod tests {
                 "intelligence.example.com",
                 "https",
                 "/api/local/discovery-packages",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "intelligence.example.com",
+                "https",
+                "/api/local/collection/authorizations",
+                StatusCode::FORBIDDEN,
+            ),
+            (
+                "intelligence.example.com",
+                "https",
+                "/api/local/collection/work-order-leases",
                 StatusCode::FORBIDDEN,
             ),
             (

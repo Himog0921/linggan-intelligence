@@ -28,7 +28,7 @@ Linggan 的接收合同或平台访问授权。
 ## 当前行为与明确边界
 
 当前活跃 service worker 是 `src/linggan/background.js`。它只连接 Linggan 本机
-`http://localhost:3000`；旧工作台的站点授权、任务轮询、lease、工位调度、旧
+`http://localhost:3001`；旧工作台的站点授权、任务轮询、lease、工位调度、旧
 endpoint、同步和 fallback 都不是当前运行路径。
 
 小红书的「按目标发现」会以任务请求数量为上限，继续滚动和去重：达到目标、确认页面

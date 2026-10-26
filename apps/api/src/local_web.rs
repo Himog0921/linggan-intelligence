@@ -73,7 +73,6 @@ mod offline_preview_tests;
 mod ops;
 mod ops_api;
 mod ops_auth;
-mod public_access;
 #[cfg(test)]
 mod ops_auth_tests;
 mod ops_native_api;
@@ -86,6 +85,7 @@ mod ops_sync_api;
 mod ops_browser_tests;
 mod ops_export;
 mod ops_overview_api;
+mod public_access;
 mod research_dossier;
 #[cfg(test)]
 mod research_dossier_tests;
@@ -512,11 +512,14 @@ pub async fn serve() -> Result<(), std::io::Error> {
     if let Some(connected) = database.database() {
         collection_run_api::spawn_run_advancer(connected.clone());
     }
-    let application = router_with_public_access(LocalWebState {
-        database,
-        active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
-        account_digest_key: configured_account_digest_key(),
-    }, public_access::PublicAccess::from_environment()?);
+    let application = router_with_public_access(
+        LocalWebState {
+            database,
+            active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
+            account_digest_key: configured_account_digest_key(),
+        },
+        public_access::PublicAccess::from_environment()?,
+    );
     let local_port = configured_local_port()?;
     let address = SocketAddr::from((LOCAL_HOST, local_port));
     let listener = tokio::net::TcpListener::bind(address).await?;

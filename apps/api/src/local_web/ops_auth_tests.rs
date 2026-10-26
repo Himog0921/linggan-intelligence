@@ -10,6 +10,143 @@ use tower::ServiceExt;
 use uuid::Uuid;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; set LOCAL_001_PROOF_DATABASE_URL"]
+async fn public_admin_access_requires_live_session_and_preserves_inner_origin_guards() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("public_access_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let admin = active_member(database.pool(), "admin-public@example.test", "admin").await;
+    active_member(database.pool(), "operator-public@example.test", "operator").await;
+    let app = router_with_public_access(
+        LocalWebState {
+            database: LocalDatabaseState::Ready(Arc::new(database.clone())),
+            active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
+            account_digest_key: None,
+        },
+        public_access::PublicAccess::parse("https://intelligence.example.com").unwrap(),
+    );
+    let public_request = |method: &str, path: &str, cookie: Option<&str>, body: &'static str| {
+        let mut builder = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::HOST, "intelligence.example.com")
+            .header("x-forwarded-proto", "https")
+            .header(header::ORIGIN, "https://intelligence.example.com")
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(cookie) = cookie {
+            builder = builder.header(header::COOKIE, cookie.split(';').next().unwrap());
+        }
+        builder.body(Body::from(body)).unwrap()
+    };
+
+    let anonymous = public_request("GET", "/api/local/auth/session", None, "");
+    assert_eq!(
+        app.clone().oneshot(anonymous).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let admin_login = public_request(
+        "POST",
+        "/api/local/auth/login",
+        None,
+        r#"{"email":"admin-public@example.test","password":"synthetic-password-only"}"#,
+    );
+    let admin_login = app.clone().oneshot(admin_login).await.unwrap();
+    assert_eq!(admin_login.status(), StatusCode::OK);
+    let admin_cookie = admin_login.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    assert!(admin_cookie.contains("; Secure"));
+    let operator_login = public_request(
+        "POST",
+        "/api/local/auth/login",
+        None,
+        r#"{"email":"operator-public@example.test","password":"synthetic-password-only"}"#,
+    );
+    let operator_login = app.clone().oneshot(operator_login).await.unwrap();
+    assert_eq!(operator_login.status(), StatusCode::OK);
+    let operator_cookie = operator_login.headers()[header::SET_COOKIE]
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let operator_session =
+        public_request("GET", "/api/local/auth/session", Some(&operator_cookie), "");
+    assert_eq!(
+        app.clone()
+            .oneshot(operator_session)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+
+    let admin_session = public_request("GET", "/api/local/auth/session", Some(&admin_cookie), "");
+    assert_eq!(
+        app.clone().oneshot(admin_session).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let command = public_request(
+        "POST",
+        "/api/local/comment-study/selection-preview",
+        Some(&admin_cookie),
+        "{}",
+    );
+    assert_eq!(
+        app.clone().oneshot(command).await.unwrap().status(),
+        StatusCode::BAD_REQUEST
+    );
+    let media = public_request(
+        "GET",
+        "/api/local/media/invalid/invalid",
+        Some(&admin_cookie),
+        "",
+    );
+    assert_ne!(
+        app.clone().oneshot(media).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+    let machine = public_request(
+        "POST",
+        "/api/local/collection/authorizations",
+        Some(&admin_cookie),
+        "{}",
+    );
+    assert_eq!(
+        app.clone().oneshot(machine).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    let cross_site = Request::builder()
+        .method("POST")
+        .uri("/api/local/comment-study/selection-preview")
+        .header(header::HOST, "intelligence.example.com")
+        .header("x-forwarded-proto", "https")
+        .header(header::ORIGIN, "https://other.example.com")
+        .header(header::COOKIE, admin_cookie.split(';').next().unwrap())
+        .body(Body::from("{}"))
+        .unwrap();
+    assert_eq!(
+        app.clone().oneshot(cross_site).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
+    sqlx::query("UPDATE linggan_ops_member SET state='disabled', disabled_at=scope_001_now() WHERE member_ref=$1")
+        .bind(admin)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let disabled = public_request("GET", "/api/local/auth/session", Some(&admin_cookie), "");
+    assert_eq!(
+        app.oneshot(disabled).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
 async fn login_session_logout_and_disabled_member_do_not_leak_credentials() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();

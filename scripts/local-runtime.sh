@@ -20,11 +20,15 @@ EOF
 }
 
 ensure_env() {
+  local requested_port="${LINGGAN_LOCAL_PORT:-}"
   "$project_root/scripts/setup-local-env.sh" >/dev/null
   set -a
   # shellcheck disable=SC1091
   source "$project_root/.env"
   set +a
+  if [[ -n "$requested_port" ]]; then
+    export LINGGAN_LOCAL_PORT="$requested_port"
+  fi
   if [[ -n "${LINGGAN_RUSTUP_BIN_DIR:-}" ]]; then
     [[ -x "$LINGGAN_RUSTUP_BIN_DIR/cargo" ]] \
       || { echo "LINGGAN_RUSTUP_BIN_DIR has no cargo executable" >&2; exit 1; }
