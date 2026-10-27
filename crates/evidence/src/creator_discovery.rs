@@ -329,7 +329,7 @@ async fn load_topic_material_scope(
         .await?;
     let as_of = crate::research_dossier::cutoff_in(&mut tx, as_of).await?;
     let mut platforms: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 AND ($2::uuid[] IS NULL OR usage.content_public_ref=ANY($2)) ORDER BY content.platform",
+        "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 AND usage.use_kind='domain_research' AND ($2::uuid[] IS NULL OR usage.content_public_ref=ANY($2)) ORDER BY content.platform",
     )
     .bind(domain)
     .bind(work_refs)
@@ -407,7 +407,7 @@ async fn load_materials_in(
     if q.sort == "viral_works" && policy["likeThreshold"].as_i64().is_none() {
         return Err(DiscoveryError::Invalid("viral_threshold_unset"));
     }
-    let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 AND ($3::uuid[] IS NULL OR content_public_ref=ANY($3)) GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).bind(work_refs).fetch_all(&mut **tx).await?;
+    let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 AND use_kind='domain_research' AND ($3::uuid[] IS NULL OR content_public_ref=ANY($3)) GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).bind(work_refs).fetch_all(&mut **tx).await?;
     let added: HashMap<Uuid, String> = rows
         .iter()
         .map(|r| (r.get("content_public_ref"), r.get("first_added")))
