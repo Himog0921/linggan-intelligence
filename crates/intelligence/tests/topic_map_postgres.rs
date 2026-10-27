@@ -846,7 +846,7 @@ async fn manual_alternative_without_classification_keeps_sources_and_rejects_fal
         map.works[0].topic_refs.is_empty(),
         "saving a human idea must not classify its source"
     );
-    let tasks: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_map_research_task")
+    let tasks: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_research_window")
         .fetch_one(db.pool())
         .await
         .unwrap();
@@ -971,15 +971,13 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
     assert_eq!(compact["statistics"], first.statistics);
     assert!(compact["works"][0].get("sourceManifest").is_none());
     // Producer state and patrol fairness are separate from material permissions.
-    sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint)VALUES($1,'xhs','synthetic-cache-author','synthetic')")
+    sqlx::query("INSERT INTO linggan_creator_author_override(domain_ref,platform,author_external_id)VALUES($1,'xhs','synthetic-cache-author')")
         .bind(domain()).execute(db.pool()).await.unwrap();
     let target = Uuid::new_v4();
     sqlx::query("INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,source)VALUES($1,'xhs','creator','synthetic-cache-target','manual')")
         .bind(target).execute(db.pool()).await.unwrap();
     let controlled = model.read(&db, &query).await.unwrap();
     let control_revision = source_revision(&db).await.unwrap();
-    sqlx::query("UPDATE linggan_creator_discovery_author_analysis SET job_state='running',attempt_count=1,lease_token=$1,lease_expires_at=scope_001_now()+interval '5 minutes',next_attempt_at=scope_001_now()+interval '1 minute',last_error_code='synthetic',updated_at=scope_001_now()")
-        .bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
     sqlx::query("UPDATE collection_observation_target SET last_scheduler_considered_at=scope_001_now() WHERE target_ref=$1")
         .bind(target).execute(db.pool()).await.unwrap();
     assert_eq!(control_revision, source_revision(&db).await.unwrap());
@@ -987,12 +985,16 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
         &controlled,
         &model.read(&db, &query).await.unwrap()
     ));
-    sqlx::query("UPDATE linggan_creator_discovery_author_analysis SET result_json='{\"syntheticProbe\":true}'")
-        .execute(db.pool()).await.unwrap();
+    sqlx::query(
+        "UPDATE linggan_creator_author_override SET manual_overrides='{\"syntheticProbe\":true}'",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
     let result_revision = source_revision(&db).await.unwrap();
     assert_ne!(
         control_revision, result_revision,
-        "author result fields are never discarded with lease state"
+        "human annotations invalidate the current source projection"
     );
     sqlx::query(
         "UPDATE collection_observation_target SET lifecycle_state='dismissed' WHERE target_ref=$1",
@@ -1078,17 +1080,10 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
     let updated = model.read(&db, &query).await.unwrap();
     assert_eq!(updated.scope["totalWorkCount"], 14);
     assert!(updated.works.iter().any(|w| w.work_ref == added));
-    sqlx::query("INSERT INTO linggan_creator_discovery_policy(domain_ref,platform,like_threshold) VALUES($1,'xhs',10)")
+    sqlx::query("INSERT INTO linggan_creator_discovery_threshold(domain_ref,platform,like_threshold) VALUES($1,'xhs',10)")
         .bind(domain()).execute(db.pool()).await.unwrap();
     let settings = model.read(&db, &query).await.unwrap();
     let before_tick = source_revision(&db).await.unwrap();
-    sqlx::query(
-        "UPDATE linggan_creator_discovery_policy SET scan_after=$1,updated_at=scope_001_now()",
-    )
-    .bind(added)
-    .execute(db.pool())
-    .await
-    .unwrap();
     let mut executor = linggan_intelligence::ai_foundation::executor::ExecutorSession::acquire(
         &db,
         "synthetic-topic-read-heartbeat",
@@ -1109,7 +1104,7 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
         &model.read(&db, &query).await.unwrap()
     ));
     sqlx::query(
-        "UPDATE linggan_creator_discovery_policy SET like_threshold=11,revision=revision+1",
+        "UPDATE linggan_creator_discovery_threshold SET like_threshold=11,revision=revision+1",
     )
     .execute(db.pool())
     .await

@@ -24,7 +24,7 @@ WITH latest AS MATERIALIZED (
             AND restriction.comment_external_id = source.comment_external_id
       )
       AND NOT EXISTS (
-          SELECT 1 FROM linggan_comment_study_clean_cache cache
+          SELECT 1 FROM linggan_comment_clean_cache cache
           WHERE cache.source_ref = source.material_ref AND cache.cleaner_version = $1
       )
     ORDER BY source.created_at, source.material_ref

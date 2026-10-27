@@ -176,12 +176,6 @@ async fn domain_management_page_queries_real_lane_receipts_without_english_or_fa
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn retired_policy_endpoint_cannot_write_even_for_a_paused_domain() {
     let database = domain_management_fixture::proof_database("comment_policy_paused_domain").await;
-    sqlx::raw_sql(include_str!(
-        "../../../../database/bootstrap/comment-study-001.sql"
-    ))
-    .execute(database.pool())
-    .await
-    .expect("the Comment Study derived schema is initialized for the API route proof");
     let domain_ref = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
     sqlx::query("UPDATE observation_domain SET status='paused' WHERE domain_ref=$1")
         .bind(domain_ref)
@@ -215,16 +209,14 @@ async fn retired_policy_endpoint_cannot_write_even_for_a_paused_domain() {
     let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(payload["error"], "ai_legacy_execution_retired");
     assert_eq!(payload["taskKey"], "comment_study");
-    let policy_count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_comment_study_policy \
-         WHERE domain_ref=$1 AND model_config_ref=$2",
-    )
-    .bind(domain_ref)
-    .bind(model_config_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(policy_count, 0, "a paused Domain retains no new policy");
+    assert!(
+        !sqlx::query_scalar::<_, bool>(
+            "SELECT to_regclass('linggan_comment_study_policy') IS NOT NULL"
+        )
+        .fetch_one(database.pool())
+        .await
+        .unwrap()
+    );
 }
 
 #[test]

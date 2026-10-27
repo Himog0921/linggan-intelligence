@@ -281,7 +281,7 @@ pub(crate) async fn research_result_sources_current(
     db: &Database,
     result: Uuid,
 ) -> Result<bool, ResearchError> {
-    let row=sqlx::query("SELECT r.domain_ref,r.work_public_ref,r.output_json->>'contract' AS contract,run.config_ref,q.request_manifest AS input_refs FROM linggan_topic_map_research_result r JOIN linggan_topic_map_research_request q USING(invocation_ref) JOIN linggan_topic_map_research_task t USING(task_ref) JOIN linggan_topic_map_research_run run ON run.run_ref=t.run_ref WHERE r.result_ref=$1").bind(result).fetch_optional(db.pool()).await?;
+    let row=sqlx::query("SELECT run.domain_ref,t.work_ref AS work_public_ref,r.output_json->>'contract' AS contract,(run.configurations->>0)::uuid AS config_ref,t.input_refs FROM linggan_topic_research_result r JOIN linggan_topic_research_window t USING(window_ref) JOIN linggan_topic_research_run run USING(run_ref) WHERE r.result_ref=$1").bind(result).fetch_optional(db.pool()).await?;
     let Some(row) = row else {
         return Ok(false);
     };

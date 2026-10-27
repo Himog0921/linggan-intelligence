@@ -38,6 +38,8 @@ jobs:
           cargo test -p linggan-contracts --lib --locked
           cargo test -p linggan-intelligence --lib --locked
           npm --prefix apps/pi-adapter test
+      - name: Fresh and repeat runtime schema migration
+        run: bash scripts/test-local-runtime-schema.sh
       - name: Owned PostgreSQL foundation, transport and writing upgrade
         run: bash scripts/test-research-dossier-postgres.sh --ai-foundation 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-foundation.log
       - name: Actual executor concurrency, fault and process proofs

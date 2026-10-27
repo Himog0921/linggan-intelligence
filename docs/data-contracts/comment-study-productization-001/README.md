@@ -1,10 +1,12 @@
 # 评论研究产品化 · 机器可读合同
 
-> 状态: 权威当前
+> 状态: 历史归档
 > 最后核对: 2026-09-23
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001
 > 事实来源: 用户交付的 v1.0 手册 validation 目录
 > 冲突时以谁为准: 对应数据库和HTTP合同；实际语义由Rust接受器证明
+
+**执行合同替代（2026-10-27）**：评论三阶段、研究底稿、共享 AI 配置及旧表退役以[研究自动化执行合同](../research-automation.md)为当前候选。本文及旧 Schema 仅保留历史依据，不用于新执行或旧表初始化。
 
 此目录是原手册 `validation/` 中四个JSON Schema及开始命令示例的仓库书架。入库仅压缩JSON空白，不改变解析后的数据。完整入口见 [手册入口](../../runbooks/comment-study-productization-package.md)。
 

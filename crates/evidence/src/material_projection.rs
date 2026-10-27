@@ -900,7 +900,7 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
                 AND to_regclass('linggan_material_media_origin') IS NOT NULL \
                 AND to_regclass('linggan_material_discovery_finding') IS NOT NULL \
                 AND to_regclass('linggan_material_comment_current') IS NOT NULL \
-                AND to_regclass('linggan_creator_discovery_policy') IS NOT NULL \
+                AND to_regclass('linggan_creator_discovery_threshold') IS NOT NULL \
                 AND to_regproc('linggan_material_content_author_at') IS NOT NULL",
     )
     .fetch_one(database.pool())

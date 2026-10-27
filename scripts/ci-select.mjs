@@ -106,6 +106,12 @@ paths.web_real_chain = [
   'apps/web/src/pages/**/api.ts', 'apps/web/src/pages/**/api.tsx',
   // These existing page components make HTTP requests directly. Keep this list
   // aligned with the source scan in ci-select.test.mjs as new clients appear.
+  'apps/web/src/pages/corpus/comments/CommentResearch.tsx',
+  'apps/web/src/pages/corpus/comments/CommentResearchSelection.tsx',
+  'apps/web/src/pages/corpus/comments/ResearchDashboard.tsx',
+  'apps/web/src/pages/corpus/creators/CreatorWorkResearch.tsx',
+  'apps/web/src/pages/corpus/creators/CreatorAccountResearch.tsx',
+  'apps/web/src/pages/topics/TopicResearchFlow.tsx',
   'apps/web/src/pages/collection/collectionCommand.ts',
   'apps/web/src/pages/collection/CollectionFrame.tsx',
   'apps/web/src/pages/collection/targets/inspection/useInspectionRead.ts',
@@ -138,6 +144,7 @@ paths.web_real_chain = [
   'apps/web/test/e2e/settings-trials-real-chain.mjs',
   'apps/web/test/e2e/topics-real-chain.mjs',
   'apps/web/test/e2e/workbench-real-chain.mjs',
+  'apps/web/test/e2e/unified-research-real-chain.mjs',
 ];
 
 function globRegex(pattern) {

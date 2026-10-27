@@ -13,7 +13,7 @@ use axum::{
 };
 use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
 use linggan_intelligence::topic_map::{TopicMapCommand, TopicMapQuery};
-use linggan_intelligence::topic_map_research::{ResearchCommand, ResearchError};
+use linggan_intelligence::topic_map_research::ResearchError;
 use serde::Deserialize;
 use serde_json::json;
 use std::sync::Arc;
@@ -46,6 +46,16 @@ pub(super) fn routes(
         });
     }
     Router::new()
+        .route("/api/local/topic-research", post(current_research_start))
+        .route("/api/local/topic-research/runs", get(current_research_runs))
+        .route(
+            "/api/local/topic-research/cancel",
+            post(current_research_cancel),
+        )
+        .route(
+            "/api/local/topic-map/collection",
+            get(current_collection_progress),
+        )
         .route("/api/local/topic-map", get(snapshot))
         .route("/api/local/topic-map/context", get(page_context))
         .route("/api/local/topic-map/overview", get(overview))
@@ -286,39 +296,11 @@ fn map_error(err: linggan_intelligence::topic_map::TopicMapError) -> Response {
 struct ResearchQuery {
     domain_ref: Uuid,
 }
-async fn research_progress(
-    State(state): State<LocalWebState>,
-    query: Result<Query<ResearchQuery>, QueryRejection>,
-) -> Response {
-    let Ok(Query(query)) = query else {
-        return error(StatusCode::BAD_REQUEST, "invalid_topic_map_query");
-    };
-    let db = match database(&state) {
-        Ok(db) => db,
-        Err(response) => return response,
-    };
-    match linggan_intelligence::topic_map_research::read_research_progress(db, query.domain_ref)
-        .await
-    {
-        Ok(value) => Json(value).into_response(),
-        Err(err) => research_error(err),
-    }
+async fn research_progress() -> Response {
+    crate::local_web::ai_settings::legacy_closed("legacy_topic_map")
 }
-async fn research_command(
-    State(state): State<LocalWebState>,
-    body: Result<Json<ResearchCommand>, JsonRejection>,
-) -> Response {
-    let Ok(Json(body)) = body else {
-        return error(StatusCode::BAD_REQUEST, "invalid_topic_research_command");
-    };
-    let db = match database(&state) {
-        Ok(db) => db,
-        Err(response) => return response,
-    };
-    match linggan_intelligence::topic_map_research::apply_research_command(db, &body).await {
-        Ok(value) => Json(value).into_response(),
-        Err(err) => research_error(err),
-    }
+async fn research_command() -> Response {
+    crate::local_web::ai_settings::legacy_closed("legacy_topic_map")
 }
 fn research_error(err: ResearchError) -> Response {
     if err.code() == "ai_legacy_execution_retired" {
@@ -639,4 +621,62 @@ async fn search_command(
         Ok(value) => Json(value).into_response(),
         Err(err) => research_error(err),
     }
+}
+
+async fn current_research_start(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::ai_foundation::topic_research::Start>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research::start(db, &body).await,
+    )
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CurrentResearchRuns {
+    domain_ref: Uuid,
+}
+async fn current_research_runs(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CurrentResearchRuns>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research::read(db, query.domain_ref).await,
+    )
+}
+
+async fn current_collection_progress(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CurrentResearchRuns>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    match linggan_intelligence::topic_map_research_collection::read_collection_progress(
+        db,
+        query.domain_ref,
+    )
+    .await
+    {
+        Ok(value) => Json(value).into_response(),
+        Err(_) => crate::local_web::ai_settings::unavailable(),
+    }
+}
+
+async fn current_research_cancel(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::ai_foundation::topic_research::Cancel>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research::cancel(db, &body).await,
+    )
 }

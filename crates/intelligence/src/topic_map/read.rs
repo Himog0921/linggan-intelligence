@@ -512,7 +512,7 @@ async fn attach_research(
     topics: &mut [TopicMapTopic],
 ) -> Result<Vec<Value>, TopicMapError> {
     let installed: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_topic_map_research_result')IS NOT NULL")
+        sqlx::query_scalar("SELECT to_regclass('linggan_topic_research_result')IS NOT NULL")
             .fetch_one(database.pool())
             .await?;
     let candidates = Vec::new();

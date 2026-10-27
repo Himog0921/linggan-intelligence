@@ -12,7 +12,7 @@ export function commentStatus(item: CommentItem) {
   const latest = label(targetStateLabel, item.latestStudy.state) ?? item.latestStudy.state;
   if (item.effectiveState === 'source_changed') return `${latest}；原声已变化，旧结果失效`;
   if (item.effectiveState === 'source_unavailable') return `${latest}；来源不可用，旧结果失效`;
-  if (item.effectiveStudy && item.latestStudy.targetRef !== item.effectiveStudy.targetRef) return `${latest}；历史有效结果：${label(targetStateLabel, item.effectiveStudy.state) ?? item.effectiveStudy.state}`;
+  if (item.effectiveStudy && item.latestStudy.requestRef !== item.effectiveStudy.requestRef) return `${latest}；较早完成的研究：${label(targetStateLabel, item.effectiveStudy.state) ?? item.effectiveStudy.state}`;
   return latest;
 }
 export function commentEligibility(item: CommentItem) {

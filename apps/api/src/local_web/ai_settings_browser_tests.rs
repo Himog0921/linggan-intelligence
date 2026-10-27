@@ -95,7 +95,6 @@ async fn ai_settings_skill_trial_real_chain_browser_proof() {
             expected_binding_revision: 0,
             candidate_config_ref: baseline.task_config_ref,
             trial_comparison_ref: None,
-            first_version_exception: true,
             reason: "Synthetic UI baseline".into(),
         },
     )

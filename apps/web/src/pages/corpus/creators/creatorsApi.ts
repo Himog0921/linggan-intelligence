@@ -95,6 +95,7 @@ export function parseAnalysis(value: unknown): Analysis {
   const supportFragments = optFragments(record, 'supportFragments');
   const identitySupportFragments = optFragments(record, 'identitySupportFragments');
   return {
+    origin: optStr(record, 'origin'),
     state: optStr(record, 'state'),
     lastErrorCode: optStr(record, 'lastErrorCode'),
     resultAt: optStr(record, 'resultAt'),
@@ -196,9 +197,6 @@ function parsePolicy(record: Json): CreatorPolicy {
   return {
     likeThreshold: optNum(record, 'likeThreshold'),
     revision: num(record, 'revision'),
-    analysisEnabled: optBool(record, 'analysisEnabled') === true,
-    configRef: optStr(record, 'configRef'),
-    dailyTokenLimit: optNum(record, 'dailyTokenLimit'),
   };
 }
 

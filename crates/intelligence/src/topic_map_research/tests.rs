@@ -1,7 +1,9 @@
 //! Input qualification, stable identity and lossless window regression proofs.
-use super::queue::{overlaps_unknown_dispatch, should_queue_input};
+use super::queue::overlaps_unknown_dispatch;
 use super::windows::{is_research_evidence, update_source_coverage};
 use super::*;
+use linggan_evidence::creator_discovery;
+use serde_json::json;
 
 fn source(field: &str, text: &str, id: u128) -> Fragment {
     let work = Uuid::from_u128(1);
@@ -33,6 +35,9 @@ fn input(fragments: Vec<Fragment>) -> ResearchInput {
     let mut input = ResearchInput {
         work: DiscoveryWork {
             reading_title: serde_json::Value::Null,
+            dossier_revision: String::new(),
+            dossier_material_revision: String::new(),
+            dossier_coverage: Value::Null,
             work_ref,
             usage_roles: vec!["primary".into()],
             creator_key: None,
@@ -278,28 +283,6 @@ fn comment_reobservation_cannot_substitute_frozen_source_or_parent() {
 }
 
 #[test]
-fn explicit_retry_keeps_unknown_dispatch_and_successes_closed() {
-    let states = |values: &[&str]| values.iter().map(|v| v.to_string()).collect::<Vec<_>>();
-    assert!(should_queue_input(&[], "incremental"));
-    assert!(!should_queue_input(&states(&["failed"]), "incremental"));
-    assert!(should_queue_input(&states(&["failed"]), "on_demand"));
-    assert!(should_queue_input(&states(&["stopped"]), "on_demand"));
-    assert!(!should_queue_input(
-        &states(&["unknown_dispatch"]),
-        "on_demand"
-    ));
-    assert!(!should_queue_input(
-        &states(&["failed", "unknown_dispatch"]),
-        "on_demand"
-    ));
-    assert!(!should_queue_input(
-        &states(&["failed", "succeeded"]),
-        "on_demand"
-    ));
-    assert!(!should_queue_input(&states(&["running"]), "on_demand"));
-}
-
-#[test]
 fn unknown_dispatch_cannot_be_replayed_through_another_window_hash() {
     let original = input(vec![source(
         "body",
@@ -356,9 +339,22 @@ fn two_works() -> Vec<ResearchInput> {
 
 #[test]
 fn comparison_restores_each_work_and_checks_other_works_roles_and_restrictions() {
-    let all = two_works();
+    let mut all = two_works();
+    for item in &mut all {
+        item.coverage["dossiers"] = json!({(item.work.work_ref.to_string()): {
+            "coverage":{"imageInventory":{"processedPages":0}}
+        }});
+    }
     let comparison = with_comparison_context(all[0].clone(), &all, &[all[1].work.work_ref]);
     let manifest = reference_manifest(&comparison);
+    assert_eq!(
+        manifest["coverage"]["dossiers"].as_object().unwrap().len(),
+        2
+    );
+    let mut coverage_changed = comparison.clone();
+    coverage_changed.coverage["dossiers"][all[1].work.work_ref.to_string()]["coverage"]["imageInventory"]
+        ["processedPages"] = json!(1);
+    assert_ne!(input_identity(&coverage_changed), comparison.hash);
     assert_eq!(manifest["topics"], json!([]));
     assert_eq!(
         manifest["fragments"][1]["workRef"],

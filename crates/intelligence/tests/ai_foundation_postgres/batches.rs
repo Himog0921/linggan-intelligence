@@ -201,7 +201,7 @@ async fn ai_foundation_queue_requires_current_controls_config_and_egress_but_doe
 
 #[tokio::test]
 #[ignore = "disposable PostgreSQL proof only"]
-async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cannot_replace_current_version()
+async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_replace_current_version()
  {
     let db = fixture::proof_database("ai_skill_activation").await;
     let base_revision: i64 = sqlx::query_scalar(
@@ -289,20 +289,10 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
         expected_binding_revision: 0,
         candidate_config_ref: candidate.task_config_ref,
         trial_comparison_ref: None,
-        first_version_exception: false,
         reason: "synthetic first approval".into(),
     };
-    assert!(matches!(
-        activate_skill(&db, &initial).await,
-        Err(FoundationError::SkillTrialRequired)
-    ));
-    let first_approval = ActivateSkill {
-        command_ref: Uuid::new_v4(),
-        first_version_exception: true,
-        ..initial
-    };
-    let approved = activate_skill(&db, &first_approval).await.unwrap();
-    assert_eq!(approved.approval_source, "first_version");
+    let approved = activate_skill(&db, &initial).await.unwrap();
+    assert_eq!(approved.approval_source, "manual");
     assert_eq!(approved.task_revision, base_revision + 2);
     assert_eq!(approved.binding_revision, 1);
     let mut package = skills::package();
@@ -336,13 +326,8 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
         expected_binding_revision: 1,
         candidate_config_ref: candidate.task_config_ref,
         trial_comparison_ref: None,
-        first_version_exception: true,
         reason: "synthetic candidate approval".into(),
     };
-    assert!(matches!(
-        activate_skill(&db, &activate).await,
-        Err(FoundationError::SkillTrialRequired)
-    ));
     let trial = create_trial(
         &db,
         &CreateTrial {
@@ -364,7 +349,6 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
     let activate = ActivateSkill {
         command_ref: Uuid::new_v4(),
         trial_comparison_ref: Some(trial.comparison_ref),
-        first_version_exception: false,
         ..activate
     };
     let pending = linggan_intelligence::ai_foundation::settings_read::read_comparison(
@@ -436,13 +420,12 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
             expected_binding_revision: 2,
             candidate_config_ref: approved.task_config_ref,
             trial_comparison_ref: None,
-            first_version_exception: false,
             reason: "explicit reuse of approved immutable version".into(),
         },
     )
     .await
     .unwrap();
-    assert_eq!(rollback.approval_source, "prior_approval");
+    assert_eq!(rollback.approval_source, "manual");
     assert_eq!(activate_skill(&db, &activate).await.unwrap(), enabled);
     assert_eq!(
         sqlx::query_scalar::<_, Uuid>(
@@ -473,6 +456,24 @@ async fn ai_foundation_skill_activation_requires_candidate_trial_and_replay_cann
     assert!(
         frozen.contains(&approved.task_config_ref) && frozen.contains(&candidate.task_config_ref)
     );
+    let direct = activate_skill(
+        &db,
+        &ActivateSkill {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::NoteInterpretation,
+            expected_task_revision: base_revision + 4,
+            expected_binding_revision: 3,
+            candidate_config_ref: candidate.task_config_ref,
+            trial_comparison_ref: None,
+            reason: "directly switch to the edited version".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(direct.approval_source, "manual");
+    assert_eq!(direct.version_ref, second.version_ref);
+    assert_eq!(activate_skill(&db, &activate).await.unwrap(), enabled);
+    assert_eq!(sqlx::query_scalar::<_, Uuid>("SELECT current_version_ref FROM linggan_skill_binding WHERE task_key='note_interpretation'").fetch_one(db.pool()).await.unwrap(), second.version_ref);
     assert_eq!(
         serde_json::to_value(BudgetPolicy::Capped(i64::MAX as u64)).unwrap(),
         json!({"mode":"capped","tokens":i64::MAX.to_string()})

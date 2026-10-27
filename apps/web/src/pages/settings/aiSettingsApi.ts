@@ -15,6 +15,9 @@ const receipts = {
   'task-configs': object({ taskKey: text, taskConfigRef: text, modelConfigRef: nullable(text), revision: integer, applied: bool }),
   'skills/import': object({ skillRef: text, versionRef: text, versionNo: integer, packageSha256: text, reused: bool }),
   'skills/activate': object({ versionRef: text, taskConfigRef: text, taskRevision: integer, bindingRevision: integer, approvalSource: text }),
+  'skills/switch': object({ versionRef: text, taskConfigRef: text, taskRevision: integer, bindingRevision: integer, approvalSource: text }),
+  'prompts/save': object({ versionRef: text, versionNo: integer }),
+  'prompts/activate': object({ versionRef: text, taskConfigRef: text, taskRevision: integer }),
   trials: object({ comparisonRef: text, baselineBatchRef: nullable(text), candidateBatchRef: text, inputsSha256: text, accepted: bool }),
   batches: object({ batchRef: text, inputsSha256: text, itemCount: integer, accepted: bool }),
   'batches/cancel': object({ batchRef: text, revision: integer, state: text, cancelRequested: bool }),
@@ -38,9 +41,15 @@ export async function fetchCatalog(api: string, modelId: string, signal?: AbortS
 export const parseSkill = object({ versionRef: text, skillRef: text, name: text, versionNo: integer,
   description: text, body: text, frontmatter: json, disableModelInvocation: bool,
   loaderVersion: text, packageSha256: text, sourceSha256: text,
-  files: list(object({ path: text, sha256: text, bytes: integer, content: nullable(text), kind: text })) });
+  files: list(object({ path: text, sha256: text, bytes: integer, content: nullable(text), contentBase64: nullable(text), kind: text })) });
 export async function fetchSkill(reference: string, signal?: AbortSignal) {
   return parseSkill(await requestJson(`${ROOT}/skills/${encodeURIComponent(reference)}`, { signal }));
+}
+const prompts = object({ taskKey: text, revision: integer, activeVersionRef: nullable(text), versions: list(object({
+  versionRef: text, versionNo: integer, systemText: text, instructionText: text, createdAt: text,
+})) });
+export async function fetchPrompts(task: string, signal?: AbortSignal) {
+  return prompts(await requestJson(`${ROOT}/prompts/${encodeURIComponent(task)}`, { signal }));
 }
 const batchRead = object({ batch: object({ batchRef: text, taskKey: text, taskConfigRef: text, kind: text,
   itemCount: integer, createdAt: text, state: text, revision: integer, cancelRequested: bool, stopReason: nullable(text), lastRoundNo: integer, finishedAt: nullable(text) }),

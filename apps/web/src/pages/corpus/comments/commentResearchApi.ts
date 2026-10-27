@@ -1,0 +1,5 @@
+import { decode, obj, num, optNum, str } from '../../../shared/decode';
+export type Preview = { domainRef: string; workRef: string; sourceRef: string; observationRole: string; knowledgeCutoff: string; inputHash: string; taskConfigRef: string; taskRevision: number; parentState: string; expectedPages: number | null; acquiredPages: number; processedPages: number };
+export function preview(value: unknown): Preview {
+  return decode(value, row => { const inventory = obj(obj(row, 'coverage'), 'imageInventory'); return ({ expectedPages: optNum(inventory, 'expectedPages'), acquiredPages: num(inventory, 'acquiredPages'), processedPages: num(inventory, 'processedPages'), domainRef: str(row, 'domainRef'), workRef: str(row, 'workRef'), sourceRef: str(row, 'sourceRef'), observationRole: str(row, 'observationRole'), knowledgeCutoff: str(row, 'knowledgeCutoff'), inputHash: str(row, 'inputHash'), taskConfigRef: str(row, 'taskConfigRef'), taskRevision: num(row, 'taskRevision'), parentState: str(row, 'parentState') }); });
+}

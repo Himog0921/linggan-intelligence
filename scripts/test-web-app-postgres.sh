@@ -148,18 +148,10 @@ if [[ "${WEB_APP_PROOF_SCOPE:-all}" == topics ]]; then
   run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_browser_tests -- --ignored --nocapture --test-threads=1
   exit 0
 fi
-if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments-contracts ]]; then
-  mkdir -p "$proof_dir/comments"
-  run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
-    local_web::comment_study::catalog_api::command_api::postgres_tests:: \
-    -- --ignored --nocapture --test-threads=1
-  exit 0
-fi
-if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments ]]; then
-  mkdir -p "$proof_dir/comments"
-  run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
-    local_web::comment_study::catalog_api::command_api::postgres_tests::browser_real_axum_postgres_ \
-    -- --ignored --nocapture --test-threads=1
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments-contracts || "${WEB_APP_PROOF_SCOPE:-all}" == comments || "${WEB_APP_PROOF_SCOPE:-all}" == research ]]; then
+  mkdir -p "$proof_dir/research"
+  run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked \
+    unified_research_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 [[ "${WEB_APP_PROOF_SCOPE:-all}" == all ]] || { echo 'Unknown proof scope' >&2; exit 1; }
@@ -221,3 +213,6 @@ run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
   local_web::comment_study::catalog_api::command_api::postgres_tests::browser_real_axum_postgres_ \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 D3 comments four-view real-chain proof passed (isolated database; no provider)'
+
+mkdir -p "$proof_dir/research"
+run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked unified_research_real_chain_browser_proof -- --ignored --nocapture --test-threads=1

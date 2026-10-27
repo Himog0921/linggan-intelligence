@@ -14,22 +14,7 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 async fn database(name: &str) -> Database {
-    let db = fixture::proof_database(name).await;
-    sqlx::raw_sql(concat!(
-        include_str!("../../../database/bootstrap/comment-study-001.sql"),
-        "\n",
-        include_str!("../../../database/migrations/0114_comment_study_effective_head.sql")
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0107_comment_study_productization_schema.sql"
-    ))
-    .execute(db.pool())
-    .await
-    .unwrap();
-    db
+    fixture::proof_database(name).await
 }
 fn domain() -> Uuid {
     Uuid::parse_str(ADHD_DOMAIN_REF).unwrap()
@@ -157,7 +142,7 @@ async fn p1_maintenance_is_bounded_local_and_completes_late_unindexed_rows() {
     assert_eq!(second.inserted_count, 2);
     let third = maintain_comment_catalog(&db).await.unwrap().unwrap();
     assert_eq!(third.examined_count, 0);
-    let effects:Value=sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_comment_study_run),(SELECT count(*) FROM linggan_model_invocation))")
+    let effects:Value=sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_comment_research_request),(SELECT count(*) FROM linggan_model_invocation))")
         .fetch_one(db.pool()).await.unwrap();
     assert_eq!(effects, json!([0, 0]));
 }

@@ -94,6 +94,9 @@ fn input(field: &str) -> ResearchInput {
     ResearchInput {
         work: DiscoveryWork {
             reading_title: serde_json::Value::Null,
+            dossier_revision: String::new(),
+            dossier_material_revision: String::new(),
+            dossier_coverage: Value::Null,
             work_ref,
             usage_roles: vec!["primary".into()],
             creator_key: None,

@@ -115,6 +115,15 @@ export function analysisStatus(
   analysis: Analysis,
   value: string | null | undefined,
 ): { kind: AnalysisKind; text: string } {
+  if (analysis.origin === 'creator_research') {
+    switch (analysis.state) {
+      case 'pending': return { kind: 'off', text: '研究已排队，等待执行' };
+      case 'running': return { kind: 'off', text: '正在研究' };
+      case 'failed': return { kind: 'failed', text: '研究未完成，请检查运行记录' };
+      case 'skipped': return { kind: 'insufficient', text: '材料当前不可用，未执行研究' };
+      case 'cancelled': return { kind: 'off', text: '研究已取消' };
+    }
+  }
   switch (analysis.state) {
     case 'running':
       return { kind: 'off', text: '历史分析中记录 · 已停用，不再执行' };

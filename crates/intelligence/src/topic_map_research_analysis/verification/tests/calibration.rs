@@ -132,7 +132,6 @@ fn a_journey_quote_does_not_change_the_discussions_exact_citation_mapping() {
     // The other item's exact quote remains visible in the same model request.
     // This is explicit mapping plus a reviewer constraint, not physical per-check isolation.
     assert!(packet.to_string().contains(duration));
-    assert!(VERIFY_SYSTEM.contains("每项事实只允许其自身evidenceIds"));
     let failed = reject(&packet, "semantic_discussion_unsupported", "fail");
     assert_eq!(
         validate_verification(&failed, &packet["checks"]),

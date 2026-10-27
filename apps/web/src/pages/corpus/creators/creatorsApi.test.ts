@@ -33,7 +33,7 @@ describe('列表解码（运行时校验）', () => {
     const item = list.items[0];
     expect(list.total).toBe(1);
     expect(list.domain).toMatchObject({ domainRef: DOMAIN, name: '合成领域一', status: 'active' });
-    expect(list.policy).toMatchObject({ likeThreshold: 100, analysisEnabled: true, revision: 0 });
+    expect(list.policy).toMatchObject({ likeThreshold: 100, revision: 0 });
     expect(item).toMatchObject({ displayName: '合成作者 1', relatedWorkCount: 3, unknownRelevanceWorkCount: 2, followerCount: 2001 });
     expect(item?.authorAnalysis.state).toBe('queued');
     expect(item?.representatives).toHaveLength(2);
@@ -50,7 +50,6 @@ describe('列表解码（运行时校验）', () => {
     expect(list.stats.outside).toBeNull();
     expect(list.stats.outsideViral).toBeNull();
     expect(list.policy.likeThreshold).toBeNull();
-    expect(list.policy.dailyTokenLimit).toBeNull();
   });
 
   it('没有分析记录时服务器给 {}：所有字段都是未知，页面不崩', () => {
