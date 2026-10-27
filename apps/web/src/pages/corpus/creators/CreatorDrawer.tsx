@@ -7,6 +7,7 @@ import { formatCount, type CreatorQuery, type LinkContext } from './creatorsQuer
 import type { CreatorItem, CreatorList } from './creatorsTypes';
 import { Metric, type DrawerTab } from './CreatorTable';
 import { EvidencePanel, OverviewPanel, ProfilePanel, type PanelContext } from './DrawerPanels';
+import { CreatorHomepagePanel } from './CreatorHomepagePanel';
 import { Avatar } from './Media';
 import { useJoinPending } from './useCreatorWrites';
 import type { WorkResources } from './useWorkResources';
@@ -38,8 +39,9 @@ interface CreatorDrawerProps {
 
 const TABS: readonly { id: DrawerTab; label: string }[] = [
   { id: 'overview', label: '概览' },
-  { id: 'evidence', label: '作品与依据' },
-  { id: 'profile', label: '作者资料' },
+  { id: 'works', label: '主页作品' },
+  { id: 'evidence', label: '研究线索' },
+  { id: 'profile', label: '观察记录' },
 ];
 
 /** 抽屉自页头下沿起，覆盖右侧；页头高度会随窗口变化（窄屏页头会折行），所以量实际位置。 */
@@ -65,8 +67,8 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
   const idBase = useId();
   const body = useRef<HTMLDivElement>(null);
   // 每个分区各记一个滚动位置；从证据库返回时，恢复离开时所在分区的位置。
-  const positions = useRef<Record<DrawerTab, number>>({ overview: 0, evidence: 0, profile: 0, [restore?.tab ?? initialTab]: restore?.drawerScroll ?? 0 });
-  const tabButtons = useRef<Record<DrawerTab, HTMLButtonElement | null>>({ overview: null, evidence: null, profile: null });
+  const positions = useRef<Record<DrawerTab, number>>({ overview: 0, works: 0, evidence: 0, profile: 0, [restore?.tab ?? initialTab]: restore?.drawerScroll ?? 0 });
+  const tabButtons = useRef<Record<DrawerTab, HTMLButtonElement | null>>({ overview: null, works: null, evidence: null, profile: null });
   const [tab, setTab] = useState<DrawerTab>(initialTab);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(restore?.expanded ?? []));
   const joinPending = useJoinPending(item.creatorKey);
@@ -128,7 +130,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
         <div className={styles.title}>
           <Avatar name={name} url={avatarUrl} pending={resources.pending} className={`${pageStyles.avatar} ${pageStyles.avatarLarge}`} />
           <div>
-            <small>创作者 · 判断依据</small>
+            <small>创作者 · 作者研究</small>
             <h2 id={titleId} title={name}>
               {name}
             </h2>
@@ -137,7 +139,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
               {item.displayNameKind === 'observation_target' ? '观察目标名称 · ' : ''}粉丝 <Metric value={item.followerCount} />
             </p>
           </div>
-          <button type="button" className={`${styles.textButton} ${styles.close}`} aria-label="关闭发现依据" onClick={onClose}>
+          <button type="button" className={`${styles.textButton} ${styles.close}`} aria-label="关闭作者研究" onClick={onClose}>
             关闭
           </button>
         </div>
@@ -184,6 +186,9 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       >
         <div role="tabpanel" id={`${idBase}-panel-overview`} aria-labelledby={`${idBase}-tab-overview`} hidden={tab !== 'overview'}>
           <OverviewPanel ctx={context} />
+        </div>
+        <div role="tabpanel" id={`${idBase}-panel-works`} aria-labelledby={`${idBase}-tab-works`} hidden={tab !== 'works'}>
+          <CreatorHomepagePanel ctx={context} />
         </div>
         <div role="tabpanel" id={`${idBase}-panel-evidence`} aria-labelledby={`${idBase}-tab-evidence`} hidden={tab !== 'evidence'}>
           <EvidencePanel

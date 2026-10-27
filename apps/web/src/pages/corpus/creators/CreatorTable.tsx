@@ -17,7 +17,7 @@ import { useJoinPending } from './useCreatorWrites';
 import type { WorkResources } from './useWorkResources';
 import styles from './CreatorsPage.module.css';
 
-export type DrawerTab = 'overview' | 'evidence' | 'profile';
+export type DrawerTab = 'overview' | 'works' | 'evidence' | 'profile';
 
 /** 数字单元：≥1 万缩写成「x.x万」，精确值始终在悬停里；未知是「—」，不是 0。 */
 export function Metric({ value, className }: { value: number | null; className?: string }) {

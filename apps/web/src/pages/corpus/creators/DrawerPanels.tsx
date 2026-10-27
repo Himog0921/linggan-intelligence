@@ -78,6 +78,14 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
   const focus = authorFocus(item);
   return (
     <>
+      <div className={styles.homepagePrompt}>
+        <div>
+          <span className={styles.homepageKicker}>DISCOVER / READ / DECIDE</span>
+          <h3>先浅看作者，再决定读哪篇</h3>
+          <p>当前领域已取得 {formatCount(item.collectedWorkCount)} 篇作品。主页浅看最多 30 篇卡片，先了解这个人最近能提供哪些可读材料，不自动深采或加入观察。</p>
+        </div>
+        <button type="button" className={styles.homepageAction} onClick={() => ctx.onTab('works')}>浅看主页作品 →</button>
+      </div>
       <section aria-label="作者内容倾向">
         <h3>作者内容倾向</h3>
         <JudgmentBlock
