@@ -1,6 +1,7 @@
 import { bool, decode, list, obj, optNum, optObj, optStr, ShapeError, str, type Json } from '../../../shared/decode';
 import { apiPath, mediaPath } from './evidencePaths';
 import { choice, count, parseBlocks, parseIssue, strings } from './dossierBlockDecode';
+import { parseReadingSections } from './dossierReadingDecode';
 import type { Dossier, DossierCommentPage, DossierCoverage, DossierMaterial, DossierPayload, DossierSelection, ReadingReviewReceipt, ReadingReviewSummary } from './dossierTypes';
 
 const KINDS = ['body', 'tags', 'image', 'audio', 'video_frame'] as const;
@@ -70,12 +71,14 @@ function parseDossierRow(row: Json): Dossier {
   const orderedRefs = [...mainBlockRefs, ...supplementBlockRefs];
   if (new Set(orderedRefs).size !== orderedRefs.length || orderedRefs.some(ref => !blockRefs.has(ref)) || orderedRefs.length !== blocks.length
     || new Set(titleBlockRefs).size !== titleBlockRefs.length || titleBlockRefs.some(ref => !blockRefs.has(ref))) throw new ShapeError('readingView.blockRefs');
+  const coverage = parseCoverage(obj(row, 'coverage'));
+  const sections = parseReadingSections(reading, materials, mainBlockRefs, supplementBlockRefs, coverage.imageInventory);
   return {
     contract: 'research-dossier.v2', workRef: str(row, 'workRef'), revision: str(row, 'revision'), materialRevision: str(row, 'materialRevision'), asOf: str(row, 'asOf'),
     note: { platform: str(note, 'platform'), sourceUrl: optStr(note, 'sourceUrl'), platformTitle: optStr(note, 'platformTitle'),
       titleSource: titleSource === null ? null : { sourceRef: optStr(titleSource, 'sourceRef'), sourceVersion: optStr(titleSource, 'sourceVersion') },
       displayTitle: optStr(note, 'displayTitle'), displayTitleBasis: choice(note.displayTitleBasis, ['platform', 'cover', 'missing'], 'displayTitleBasis'), titleBlockRefs },
-    materials, readingView: { mainBlockRefs, supplementBlockRefs }, coverage: parseCoverage(obj(row, 'coverage')), attachments: { comments: attachment('comments'), author: attachment('author'), interaction: attachment('interaction') }, selection: parseSelection(obj(row, 'selection')), raw: row,
+    materials, readingView: { mainBlockRefs, supplementBlockRefs, sections }, coverage, attachments: { comments: attachment('comments'), author: attachment('author'), interaction: attachment('interaction') }, selection: parseSelection(obj(row, 'selection')), raw: row,
   };
 }
 export function parseDossier(value: unknown): Dossier { return decode(value, parseDossierRow); }

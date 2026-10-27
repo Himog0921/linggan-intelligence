@@ -2,6 +2,7 @@
  * 证据库测试用的合成数据（服务器响应的形状）。形状照 `GET /api/local/work-resources` 与
  * `…/{ref}` 的真实输出（由隔离库上的合成夹具实际调用得到），内容全是合成的，不是任何真实作者、作品或原声。
  */
+import type { ReadingSection, ReadingSectionKind } from './dossierTypes';
 export const DOMAIN = '00000000-0000-4000-8000-000000000001';
 export const OTHER_DOMAIN = '00000000-0000-4000-8000-000000000002';
 
@@ -379,7 +380,27 @@ export function dossierMaterialJson(n: number, overrides: Record<string, unknown
     ], issues: [], ...overrides,
   };
 }
-export interface DossierOptions { bodyText?: string; materials?: unknown[]; coverage?: Record<string, unknown>; note?: Record<string, unknown>; readingView?: { mainBlockRefs: string[]; supplementBlockRefs: string[] } }
+export interface DossierOptions { bodyText?: string; materials?: unknown[]; coverage?: Record<string, unknown>; note?: Record<string, unknown>; readingView?: { mainBlockRefs: string[]; supplementBlockRefs: string[]; sections?: ReadingSection[] } }
+/** Synthetic transport fixtures only; production ordering belongs to the Rust reading owner. */
+function fixtureReadingSections(materials: { kind: string; blocks: { ref: string; kind?: string }[] }[], refs: string[], work: string): ReadingSection[] {
+  const mapping: Record<string, ReadingSectionKind> = { body: 'publication', tags: 'publication', image: 'images', audio: 'audio', video_frame: 'frames' };
+  const entries = new Map(materials.flatMap(unit => unit.blocks.map(block => [block.ref, { unit, block }] as const)));
+  const sections: ReadingSection[] = [];
+  const kindOrder: ReadingSectionKind[] = ['publication', 'images', 'audio', 'frames'];
+  const sorted = [...refs].sort((a, b) => kindOrder.indexOf(mapping[entries.get(a)?.unit.kind ?? ''] ?? 'publication') - kindOrder.indexOf(mapping[entries.get(b)?.unit.kind ?? ''] ?? 'publication'));
+  for (const ref of sorted) {
+    const entry = entries.get(ref);
+    if (!entry) continue; // Invalid-reference fixtures are rejected by the real decoder.
+    const kind = mapping[entry.unit.kind] ?? 'publication';
+    let section = sections.at(-1);
+    if (!section || section.kind !== kind) { section = { ref: `${work}:section:${sections.length}`, kind, groups: [], gaps: [] }; sections.push(section); }
+    const base = { ref: `${work}:group:${ref}`, blockRefs: [ref], continuation: { fromPrevious: false, toNext: false } };
+    section.groups.push(kind === 'audio' && entry.block.kind === 'paragraph'
+      ? { ...base, mode: 'transcript_paragraph', joiners: [] }
+      : { ...base, mode: 'blocks' });
+  }
+  return sections;
+}
 export function dossierJson(n: number, options: DossierOptions = {}) {
   const ref = workRef(n); const base = `/api/local/work-resources/${ref}/research-dossier`;
   const result = {
@@ -392,19 +413,21 @@ export function dossierJson(n: number, options: DossierOptions = {}) {
           blocks: [{ ref: `${ref}.${mediaRef(901)}.0`, kind: 'paragraph', speaker: 'author', text: options.bodyText ?? '合成正文。'.repeat(120) }], issues: [] },
         dossierMaterialJson(1),
       ],
-      readingView: { mainBlockRefs: [] as string[], supplementBlockRefs: [] as string[] },
+      readingView: { mainBlockRefs: [] as string[], supplementBlockRefs: [] as string[], sections: [] as ReadingSection[] },
       coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 2, acquiredPages: 1, processedPages: 1, missingPages: [2], unknownOrder: false },
         sources: { body: { state: 'available', units: 1, readings: 1 }, images: { state: 'partial', units: 2, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } }, issues: [], ...options.coverage },
       attachments: { comments: { href: `${base}/comments` }, author: { href: `${base}/metadata?sections=author` }, interaction: { href: `${base}/metadata?sections=interaction` } },
       selection: { mode: 'full', kinds: [], unitRefs: [], blockRefs: [], imagePages: [], omittedUnits: 0, completeRevision: REVISION },
     },
   };
-  const materials = result.dossier.materials as { kind: string; blocks: { ref: string }[] }[];
+  const materials = result.dossier.materials as { kind: string; blocks: { ref: string; kind?: string }[] }[];
   const hasBody = materials.some(unit => unit.kind === 'body' && unit.blocks.length > 0);
-  result.dossier.readingView = options.readingView ?? {
+  const readingView = options.readingView ?? {
     mainBlockRefs: materials.filter(unit => hasBody ? unit.kind === 'body' : unit.kind === 'image').flatMap(unit => unit.blocks.map(block => block.ref)),
     supplementBlockRefs: materials.filter(unit => hasBody ? unit.kind !== 'body' : unit.kind !== 'image').flatMap(unit => unit.blocks.map(block => block.ref)),
   };
+  const sections = readingView.sections ?? fixtureReadingSections(materials, [...readingView.mainBlockRefs, ...readingView.supplementBlockRefs], ref);
+  result.dossier.readingView = { mainBlockRefs: readingView.mainBlockRefs, supplementBlockRefs: readingView.supplementBlockRefs, sections };
   return result;
 }
 

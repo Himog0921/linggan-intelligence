@@ -1,4 +1,4 @@
-// Production React → actual Axum → owned synthetic PostgreSQL. No response mocks or model calls.
+// Production React → actual Axum → isolated synthetic PostgreSQL. No response mocks or model calls.
 import assert from 'node:assert/strict';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,250 +7,209 @@ import { chromium } from 'playwright';
 const directory = process.env.WEB_APP_PROOF_DIR;
 assert.ok(directory, 'WEB_APP_PROOF_DIR is required');
 const fixture = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
-const { origin, domain, work, imageUnitRef, currentReadingRef, longTail } = fixture;
+const { origin, domain, work, longTail } = fixture;
 const host = new URL(origin);
-assert.equal(host.hostname, '127.0.0.1'); assert.notEqual(host.port, '3000'); assert.match(host.port, /^\d+$/);
-for (const ref of [domain, work, imageUnitRef, currentReadingRef]) assert.match(ref, /^[0-9a-f-]{36}$/i);
-assert.equal(typeof longTail, 'string');
-const base = `/api/local/work-resources/${work}/research-dossier`;
-const reviewPath = `${base}/materials/${imageUnitRef}/review`;
-const commands = [];
-const report = { finished: false, contract: 'research-dossier.v2', steps: [], widths: [], pageErrors: [], consoleErrors: [], blockedRequests: [], dossierReads: 0, reviews: [] };
+assert.equal(host.hostname, '127.0.0.1');
+assert.notEqual(host.port, '3000');
+assert.match(host.port, /^\d+$/);
+for (const ref of [domain, work]) assert.match(ref, /^[0-9a-f-]{36}$/i);
+const report = { finished: false, contract: 'research-dossier.v2', steps: [], widths: [], pageErrors: [], consoleErrors: [], blockedRequests: [], markdownSnapshots: [] };
 const browser = await chromium.launch({ headless: true, ...(process.env.DOSSIER_BROWSER_EXECUTABLE ? { executablePath: process.env.DOSSIER_BROWSER_EXECUTABLE } : {}) });
 let page;
-function dossierResponse(response) {
+let active;
+const apiPath = ref => `/api/local/work-resources/${ref}/research-dossier`;
+const responseFor = (ref, markdown = false) => response => {
   const url = new URL(response.url());
-  return url.pathname === base && url.searchParams.get('format') !== 'markdown' && response.request().method() === 'GET';
-}
-function material(dossier, ref) { const unit = dossier.materials.find(unit => unit.ref === ref); assert.ok(unit, `material ${ref} exists`); return unit; }
-function issueList(unit) { return [...new Map([...unit.issues, ...unit.blocks.flatMap(block => block.issues ?? [])].map(issue => [issue.key, issue])).values()]; }
+  return url.pathname === apiPath(ref) && (url.searchParams.get('format') === 'markdown') === markdown && response.request().method() === 'GET';
+};
 async function snapshot(name) { await page.screenshot({ path: path.join(directory, name) }); }
-async function focusBelowHeader(target) {
-  const position = await target.evaluate(node => {
-    const inspector = node.closest('aside'); const header = inspector.querySelector(':scope > header');
-    const inset = parseFloat(getComputedStyle(inspector).getPropertyValue('--lgi-space-4'));
-    inspector.scrollTop += node.getBoundingClientRect().top - header.getBoundingClientRect().bottom - inset;
-    return { targetTop: node.getBoundingClientRect().top, headerBottom: header.getBoundingClientRect().bottom };
-  });
-  assert.ok(position.targetTop >= position.headerBottom - 1, `focused evidence clears the sticky header: ${JSON.stringify(position)}`);
-}
-
+async function readResponse(response) { assert.equal(response.status(), 200, await response.text()); return response.json(); }
 async function checkWidth(stage) {
   const size = await page.evaluate(() => ({ actual: document.documentElement.scrollWidth, viewport: innerWidth }));
-  report.widths.push({ stage, ...size }); assert.ok(size.actual <= size.viewport, `${stage}: ${JSON.stringify(size)}`);
-  if (size.viewport >= 1280) {
-    const clippedMetrics = await page.locator('[data-layout="research"] [data-engagement-metrics]').evaluateAll(rows => rows.flatMap(row => [...row.children].filter(item => {
-      const text = item.querySelector('b'); const box = item.getBoundingClientRect(); const available = row.getBoundingClientRect();
-      return text && (text.scrollHeight > Math.ceil(parseFloat(getComputedStyle(text).lineHeight)) || box.right > available.right + 1 || box.height > available.height + 1);
-    }).map(item => item.textContent)));
-    assert.deepEqual(clippedMetrics, [], `${stage}: interaction labels fit one unclipped line`);
-  }
+  report.widths.push({ stage, ...size });
+  assert.ok(size.actual <= size.viewport, `${stage}: ${JSON.stringify(size)}`);
+  assert.ok(await page.locator('[data-dossier-document]').evaluate(node => node.scrollWidth <= node.clientWidth + 1), `${stage}: document has no horizontal overflow`);
 }
-async function assertReading(dossier, panel) {
-  const refs = [...dossier.readingView.mainBlockRefs, ...dossier.readingView.supplementBlockRefs].filter(ref => !dossier.note.titleBlockRefs.includes(ref));
-  assert.deepEqual(await panel.locator('[data-block-ref]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-block-ref'))), refs, 'the reading follows the canonical ref order exactly once');
-  const title = dossier.note.displayTitle ?? '无标题';
-  assert.equal(await page.locator('[data-work-title]').count(), 1, 'one visible work title');
-  assert.equal(await page.locator('[data-work-title]').textContent(), title, 'the shared header uses the canonical title');
-  for (const ref of refs) {
-    const block = dossier.materials.flatMap(unit => unit.blocks).find(block => block.ref === ref);
-    const rendered = panel.locator(`[data-block-ref="${ref}"]`);
-    if (typeof block.text === 'string') assert.ok((await rendered.textContent()).includes(block.text), `complete source text ${ref}`);
-  }
+async function openReading(item) {
+  const response = page.waitForResponse(responseFor(item.work));
+  await page.goto(`${origin}/corpus/evidence?domain=${item.domain}&work=${item.work}&tab=dossier&panel=wide`);
+  const dossier = (await readResponse(await response)).dossier;
+  await page.getByRole('article', { name: '连续阅读文档', exact: true }).waitFor();
+  active = { ...item, dossier };
+  return dossier;
 }
-async function jsonResponse(response) { assert.equal(response.status(), 200, await response.text()); return response.json(); }
+async function assertReading(dossier) {
+  const panel = page.locator('#evidence-panel-dossier');
+  const sections = dossier.readingView.sections;
+  assert.deepEqual(await panel.locator('[data-section-ref]').evaluateAll(nodes => nodes.map(node => node.dataset.sectionRef).filter(ref => ref !== 'reading:missing')), sections.map(section => section.ref));
+  const refs = sections.flatMap(section => section.groups.flatMap(group => group.blockRefs));
+  assert.equal(new Set(refs).size, refs.length, 'the sole reading plan references each canonical block once');
+  assert.deepEqual(new Set(refs), new Set([...dossier.readingView.mainBlockRefs, ...dossier.readingView.supplementBlockRefs]), 'legacy Works and new reading cover the same blocks without imposing a new Works order');
+  const blocks = new Map(dossier.materials.flatMap(unit => unit.blocks).map(block => [block.ref, block]));
+  for (const section of sections) for (const group of section.groups) {
+    const node = panel.locator(`[data-reading-anchor="${group.ref}"]`);
+    assert.equal(await node.count(), 1, 'each stable reading group appears once');
+    const text = await node.textContent();
+    for (const ref of group.blockRefs) {
+      const block = blocks.get(ref); assert.ok(block);
+      const pieces = typeof block.text === 'string' ? [block.text]
+        : block.kind === 'list' ? block.items
+          : block.kind === 'table' ? block.rows.flat()
+            : block.kind === 'dialogue' ? block.turns.map(turn => turn.text) : [];
+      if (group.mode !== 'tags') for (const piece of pieces) assert.ok(text.includes(piece), `full canonical text survives: ${ref}`);
+    }
+    const hidden = await node.evaluate(element => ({ folded: Boolean(element.closest('details:not([open]), [hidden]')), clamp: getComputedStyle(element).webkitLineClamp }));
+    assert.equal(hidden.folded, false);
+    assert.ok(!hidden.clamp || hidden.clamp === 'none');
+  }
+  assert.equal(await page.locator('[data-work-title]').count(), 1, 'the shared title is not duplicated in the document');
+  for (const text of ['查看来源', '原件与修正', '映射来源', '查看原始发布文案']) assert.equal(await panel.getByText(text, { exact: true }).count(), 0);
+  assert.equal(await panel.locator('img').count(), 0, 'the dossier is the reading, including multi-image works');
+}
 async function download(label, filename) {
   const ready = page.waitForEvent('download');
   await page.getByRole('button', { name: label, exact: true }).click();
   const file = await ready; assert.equal(await file.failure(), null);
   const target = path.join(directory, filename); await file.saveAs(target); return readFile(target, 'utf8');
 }
-async function applyReview(action, button) {
-  const posted = page.waitForResponse(response => new URL(response.url()).pathname === reviewPath && response.request().method() === 'POST' && response.request().postDataJSON().action === action);
-  const refreshed = page.waitForResponse(dossierResponse);
-  await button.click();
-  const response = await posted; const receipt = await jsonResponse(response);
-  const next = (await jsonResponse(await refreshed)).dossier;
-  assert.equal(receipt.action, action); assert.equal(receipt.unitRef, imageUnitRef);
-  assert.equal(material(next, imageUnitRef).currentRevisionRef, receipt.currentRevisionRef);
-  report.reviews.push({ action, commandRef: receipt.commandRef, currentRevisionRef: receipt.currentRevisionRef, adoption: receipt.adoption, verification: receipt.verification });
-  return { receipt, next, command: response.request().postDataJSON() };
+async function exportSnapshot(label) {
+  const root = page.locator('[data-dossier-document]');
+  const before = await root.evaluate(node => node.scrollTop);
+  const received = page.waitForResponse(responseFor(active.work, true));
+  await page.locator('#evidence-panel-dossier').getByRole('button', { name: '导出', exact: true }).click();
+  const response = await received;
+  assert.equal(response.status(), 200);
+  const url = new URL(response.url());
+  assert.ok(url.searchParams.get('asOf'));
+  assert.ok(url.searchParams.get('expectedRevision'));
+  const pinnedUrl = new URL(url); pinnedUrl.searchParams.delete('format');
+  const pinnedResponse = await page.context().request.get(pinnedUrl.href);
+  assert.equal(pinnedResponse.status(), 200);
+  const pinned = (await pinnedResponse.json()).dossier;
+  assert.equal(url.searchParams.get('asOf'), pinned.asOf);
+  assert.equal(url.searchParams.get('expectedRevision'), pinned.revision);
+  const markdown = await response.text();
+  const dialog = page.getByRole('dialog', { name: '导出研究底稿' });
+  await dialog.getByRole('article', { name: 'Markdown 排版预览' }).waitFor();
+  await dialog.getByRole('button', { name: '源码', exact: true }).click();
+  assert.equal(await dialog.getByLabel('Markdown 源码', { exact: true }).textContent(), markdown);
+  assert.equal(await download('下载 .md', `${label}.md`), markdown, 'download uses exactly the preview bytes');
+  await dialog.getByRole('button', { name: '复制内容', exact: true }).click();
+  await dialog.getByText('已复制完整底稿', { exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => navigator.clipboard.readText()), markdown, 'clipboard contains the same complete file');
+  await dialog.getByRole('button', { name: 'JSON', exact: true }).click();
+  const json = await download('下载 .json', `${label}.json`);
+  assert.equal(await dialog.getByLabel('JSON 源码', { exact: true }).textContent(), json);
+  assert.deepEqual(JSON.parse(json), pinned, 'JSON is the canonical snapshot frozen by this export session');
+  assert.ok(!markdown.includes('## 来源材料') && !markdown.includes('## 映射来源'));
+  report.markdownSnapshots.push({ work: active.work, asOf: pinned.asOf, revision: pinned.revision, bytes: Buffer.byteLength(markdown) });
+  await page.keyboard.press('Escape');
+  await dialog.waitFor({ state: 'detached' });
+  assert.ok(Math.abs(await root.evaluate(node => node.scrollTop) - before) <= 2, 'closing export preserves reading position');
+  assert.equal(await page.getByRole('tab', { name: '研究底稿', exact: true }).getAttribute('aria-selected'), 'true');
+  return markdown;
+}
+async function jumpToAudio(dossier) {
+  const sectionRef = dossier.readingView.sections.find(section => section.kind === 'audio').ref;
+  await page.getByRole('button', { name: /^章节导航/ }).click();
+  await page.getByRole('navigation', { name: '底稿章节', exact: true }).getByRole('button', { name: /视频口播/ }).click();
+  await page.waitForFunction(ref => {
+    const section = document.querySelector(`[data-section-ref="${ref}"]`);
+    const root = document.querySelector('[data-dossier-document]');
+    if (!section || !root) return false;
+    const offset = section.getBoundingClientRect().top - root.firstElementChild.getBoundingClientRect().bottom;
+    return offset >= 0 && offset < 32;
+  }, sectionRef);
+  return page.locator(`[data-section-ref="${sectionRef}"]`);
 }
 try {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, locale: 'zh-CN', acceptDownloads: true });
+  const context = await browser.newContext({ viewport: { width: 1363, height: 936 }, locale: 'zh-CN', acceptDownloads: true, reducedMotion: 'reduce', permissions: ['clipboard-read', 'clipboard-write'] });
   await context.route('**/*', route => {
-    const request = route.request(); const url = new URL(request.url());
-    const allowedReview = request.method() === 'POST' && url.pathname === reviewPath && url.searchParams.get('domain') === domain;
-    if (url.origin !== origin || (request.method() !== 'GET' && !allowedReview)) {
+    const request = route.request(), url = new URL(request.url());
+    if (url.protocol === 'blob:') return route.continue();
+    if (url.origin !== origin || !['GET', 'HEAD'].includes(request.method())) {
       report.blockedRequests.push(`${request.method()} ${request.url()}`); return route.abort();
     }
-    if (allowedReview) commands.push(request.postDataJSON());
     return route.continue();
   });
   page = await context.newPage(); page.setDefaultTimeout(25000);
   page.on('pageerror', error => report.pageErrors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') report.consoleErrors.push(message.text()); });
-  page.on('request', request => { if (request.method() === 'GET' && new URL(request.url()).pathname === base) report.dossierReads++; });
-  const first = page.waitForResponse(dossierResponse);
-  await page.goto(`${origin}/corpus/evidence?domain=${domain}&work=${work}&tab=dossier&panel=wide`);
-  const initial = (await jsonResponse(await first)).dossier;
-  assert.equal(initial.contract, 'research-dossier.v2'); assert.equal(initial.workRef, work);
-  for (const forbidden of ['fragments', 'media', 'markdown', 'inputs']) assert.ok(!(forbidden in initial), `${forbidden} is not a parallel reading`);
-  const panel = page.locator('#evidence-panel-dossier');
-  await panel.getByRole('heading', { name: '研究底稿', exact: true }).waitFor();
-  const body = initial.materials.find(unit => unit.kind === 'body'); assert.ok(body);
-  const bodyText = body.blocks.filter(block => typeof block.text === 'string').map(block => block.text).join('\n');
-  assert.ok(bodyText.length > 100000, `fixture body must exercise full reading: ${bodyText.length}`); assert.ok(bodyText.includes(longTail));
-  for (const kind of ['list', 'table', 'quote']) assert.ok(body.blocks.some(block => block.kind === kind), `body preserves ${kind}`);
-  const bodyView = panel.locator(`[data-unit-ref="${body.ref}"]`);
-  assert.equal(await bodyView.locator(':scope > div > [data-block-ref]').count(), body.blocks.length);
-  for (const block of body.blocks.filter(block => typeof block.text === 'string')) {
-    const rendered = bodyView.locator(`[data-block-ref="${block.ref}"]`);
-    assert.ok((await rendered.textContent()).includes(block.text), `whole ${block.kind} remains in the visible reading`);
-    const folding = await rendered.evaluate(node => ({ hiddenDetails: Boolean(node.closest('details:not([open])')), hidden: Boolean(node.closest('[hidden]')), clamp: getComputedStyle(node).webkitLineClamp }));
-    assert.equal(folding.hiddenDetails, false); assert.equal(folding.hidden, false); assert.ok(!folding.clamp || folding.clamp === 'none');
-  }
-  assert.equal(await bodyView.locator('table').count(), body.blocks.filter(block => block.kind === 'table').length);
-  report.steps.push('Actual v2 GET renders more than 100k characters, lists, table and quotation continuously without a content fold.');
-  await assertReading(initial, panel);
-  assert.equal(await panel.getByLabel('修正人', { exact: true }).count(), 0, 'reading does not mount an editor');
-  await assertReading(initial,panel);
-  for(const width of [1440,1280]) {await page.setViewportSize({width,height:1000});await checkWidth(`${width} complete reading`);await snapshot(`research-dossier-v2-${width}.png`);}
-  const exported=JSON.parse(await download('导出 JSON','dossier-initial.json'));
-  assert.deepEqual(exported,initial,'JSON is the same canonical snapshot without a second OCR result copy');
-  const markdown=await download('导出 Markdown','dossier-initial.md');assert.ok(markdown.includes(longTail));
-  const originals=panel.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
-  assert.equal(await originals.getAttribute('open'),null,'source comparison starts folded while text is readable');
-  await panel.locator(`[data-unit-ref="${imageUnitRef}"]`).getByRole('button',{name:'查看来源',exact:true}).first().click();
-  assert.notEqual(await originals.getAttribute('open'),null,'source action opens the actual original container');
-  const image=panel.locator(`[data-source-unit-ref="${imageUnitRef}"]`);
-  const compare=image.locator('details').filter({hasText:/^对照原图/}).first();
-  assert.notEqual(await compare.getAttribute('open'),null,'source action opens the actual original image');
-  const originalImage = image.getByRole('img');
-  // A lazy image can still have a pending request when its details first opens.
-  // Bring it into view and wait for the actual bytes before asking the decoder.
-  await originalImage.scrollIntoViewIfNeeded();
-  await page.waitForFunction(ref => {
-    const node = document.querySelector(`[data-source-unit-ref="${ref}"] img`);
-    return node instanceof HTMLImageElement && node.complete && node.naturalWidth > 0;
-  }, imageUnitRef);
-  await originalImage.evaluate(node=>node.decode());
-  assert.equal(await originalImage.evaluate(node=>node.naturalWidth>0),true);
-  assert.equal(await page.evaluate(()=>document.activeElement?.dataset.sourceUnitRef),imageUnitRef,'source action exposes a keyboard focus target');
-  await focusBelowHeader(image);await snapshot('research-dossier-v2-source-1280.png');
-  const metadataReady=page.waitForResponse(response=>new URL(response.url()).pathname===`${base}/metadata`);
-  await panel.getByText('作者、时间与互动',{exact:true}).click();
-  const metadata=await jsonResponse(await metadataReady);assert.ok(metadata.metadata.publication);
-  const metadataPanel=panel.getByText('作者、时间与互动',{exact:true}).locator('xpath=..');
-  await metadataPanel.getByText(/分享/).waitFor();await metadataPanel.getByText(/观察时间：/).first().waitFor();
-  await snapshot('research-dossier-v2-metadata-1280.png');
-  const canonicalImage=material(initial,imageUnitRef);assert.equal(canonicalImage.currentRevisionRef,currentReadingRef);
-  const issues=issueList(canonicalImage);assert.ok(issues.some(issue=>issue.resolution==='reading_edit'));assert.ok(issues.some(issue=>issue.resolution==='source_refresh'));
-  await image.getByRole('button',{name:'修正文字',exact:true}).click();
-  assert.equal(await image.getByRole('combobox',{name:'核对版本'}).count(),0);
-  await image.getByLabel('修正人',{exact:true}).fill('合成底稿修正人');
-  await image.getByLabel('修正说明',{exact:true}).fill('逐块对照受控原图，保存完整结构与来源缺口。');
-  const editedCell=`${'人工核对后的完整表格单元。'.repeat(80)}不得增加，0.5 毫升🙂`;
-  const editedList='有顺序的完整清单：不得遗漏第 2 步。';const editedTurn='他人表述：这个结论存在例外🙂';
-  await image.getByLabel('第 1 行，第 1 列',{exact:true}).first().fill(editedCell);
-  await image.getByLabel('第 1 项',{exact:true}).first().fill(editedList);
-  await image.getByLabel('第 1 轮发言',{exact:true}).first().fill(editedTurn);
-  for(const field of await image.getByRole('group',{name:'逐块修正完整读本',exact:true}).locator('textarea').all()) assert.equal(await field.getAttribute('maxlength'),null);
-  for(const issue of issues) {
-    const checkbox=image.getByRole('checkbox',{name:`已对照原件解决：${issue.message}`,exact:true});
-    if(issue.resolution==='reading_edit') await checkbox.check();else assert.equal(await checkbox.count(),0);
-  }
-  await image.getByRole('checkbox',{name:'已对照原件核验文字',exact:true}).check();
-  for(const width of [1440,1280]) {await page.setViewportSize({width,height:1000});await checkWidth(`${width} structured editor`);await focusBelowHeader(image.getByRole('group',{name:'逐块修正完整读本',exact:true}));await snapshot(`research-dossier-v2-editor-${width}.png`);}
-  const edited=await applyReview('edit',image.getByRole('button',{name:'保存修正',exact:true}));
-  assert.equal(edited.command.expectedCurrentRevisionRef,currentReadingRef);assert.equal(edited.command.sourceVersion,canonicalImage.sourceVersion);assert.equal(edited.command.unitRef,imageUnitRef);assert.ok(!('candidateRevisionRef' in edited.command));
-  assert.equal(edited.command.editedBlocks.length,canonicalImage.blocks.length);
-  assert.equal(edited.command.editedBlocks.find(block=>block.kind==='table').rows[0][0],editedCell);
-  assert.equal(edited.command.editedBlocks.find(block=>block.kind==='list').items[0],editedList);
-  assert.equal(edited.command.editedBlocks.find(block=>block.kind==='dialogue').turns[0].text,editedTurn);
-  assert.deepEqual([...edited.command.resolvedIssueKeys].sort(),issues.filter(issue=>issue.resolution==='reading_edit').map(issue=>issue.key).sort());
-  assert.notEqual(edited.receipt.currentRevisionRef,currentReadingRef);assert.equal(edited.receipt.adoption,'human_edited');assert.equal(edited.receipt.verification,'verified');
-  const editedUnit=material(edited.next,imageUnitRef);assert.equal(editedUnit.blocks.find(block=>block.kind==='table').rows[0][0],editedCell);
-  const unresolved=issueList(editedUnit);for(const issue of issues) assert.equal(unresolved.some(value=>value.key===issue.key),issue.resolution==='source_refresh');
-  const finalExport=JSON.parse(await download('导出 JSON','dossier-edited.json'));assert.deepEqual(material(finalExport,imageUnitRef).blocks,editedUnit.blocks);assert.ok(JSON.stringify(finalExport).includes(longTail));
-  assert.deepEqual(commands.map(command=>command.action),['edit']);
-  await page.setViewportSize({width:1440,height:1000});await focusBelowHeader(panel.locator(`[data-unit-ref="${imageUnitRef}"]`).first());await snapshot('research-dossier-v2-saved-1440.png');
-  report.steps.push('Read one canonical snapshot; inspected actual local originals and metadata; saved one full structural edit with source/CAS identity at 1440/1280 desktop.');
-  for (const [index, scenario] of (fixture.scenarios ?? []).entries()) {
-    assert.match(scenario.work, /^[0-9a-f-]{36}$/i);
-    const scenarioDomain = scenario.domain ?? domain;
-    const read = page.waitForResponse(response => new URL(response.url()).pathname === `/api/local/work-resources/${scenario.work}/research-dossier` && response.request().method() === 'GET');
-    await page.goto(`${origin}/corpus/evidence?domain=${scenarioDomain}&work=${scenario.work}&tab=dossier&panel=wide`);
-    const dossier = (await jsonResponse(await read)).dossier;
-    await panel.getByRole('heading', { name: '研究底稿', exact: true }).waitFor();
-    await assertReading(dossier, panel);
-    assert.equal(await panel.getByLabel('修正人', { exact: true }).count(), 0);
-    assert.equal(await panel.locator('[data-source-unit-ref]').count(), dossier.materials.length);
-    for (const width of [1440, 1280]) {
-      await page.setViewportSize({ width, height: 1000 });
-      await checkWidth(`${scenario.name} ${width}`);
-      await snapshot(`standard-dossier-${index + 1}-${width}.png`);
-    }
-    if (scenario.name === 'video-transcript') {
-      const mediaOriginals = dossier.materials.filter(unit => ['audio', 'video_frame'].includes(unit.kind));
-      assert.ok(mediaOriginals.length >= 1);
-      const sourceDetails=panel.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
-      if(await sourceDetails.getAttribute('open')===null) await sourceDetails.locator(':scope > summary').click();
-      for (const unit of mediaOriginals) {
-        const source = panel.locator(`[data-source-unit-ref="${unit.ref}"]`);
-        const link = source.getByRole('link', { name: '查看音视频原件', exact: true });
-        const url = new URL(await link.getAttribute('href'), origin);
-        assert.equal(url.origin, origin, 'video original stays on the owned candidate');
-        assert.equal(await source.locator('img').count(), 0, 'an original video is never decoded as an image');
-        const original = await context.request.get(url.href);
-        assert.equal(original.status(), 200);
-        assert.match(original.headers()['content-type'], /^video\/mp4/);
-        assert.ok((await original.body()).length > 0, 'saved original bytes are readable');
+  const initial = await openReading({ domain, work });
+  assert.equal(initial.contract, 'research-dossier.v2');
+  const body = initial.materials.find(unit => unit.kind === 'body');
+  assert.ok(body.blocks.map(block => block.text ?? '').join('').length > 100000);
+  assert.ok(body.blocks.some(block => block.text?.includes(longTail)));
+  await assertReading(initial);
+  assert.ok((await exportSnapshot('full-reading')).includes(longTail));
+  report.steps.push('Full 100k+ character canonical body and all structures survive reading, Markdown, JSON, copy and download.');
+  for (const scenario of fixture.scenarios) {
+    const dossier = await openReading(scenario);
+    await assertReading(dossier);
+    await checkWidth(`${scenario.name} standard`);
+    if (scenario.name === 'approved-demo') {
+      await snapshot('approved-demo-reading.png');
+      const root = page.locator('[data-dossier-document]');
+      const audio = await jumpToAudio(dossier);
+      assert.ok((await audio.textContent()).includes('出现缺口时下一步怎么办。'), 'all 4m52s speech is visible in the main document');
+      assert.equal(await audio.locator('[data-transcript-paragraph]').count(), 12);
+      await snapshot('approved-demo-transcript.png');
+      const before = await root.evaluate(node => node.scrollTop);
+      await audio.getByRole('button', { name: '专注阅读', exact: true }).click();
+      const focus = page.getByRole('dialog', { name: '视频口播 · 专注阅读' });
+      await focus.waitFor({ state: 'visible' });
+      await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      assert.equal(await focus.locator('[data-transcript-paragraph]').count(), 12);
+      assert.ok((await focus.textContent()).includes('出现缺口时下一步怎么办。'));
+      await focus.getByLabel('定位口播时间', { exact: true }).selectOption({ label: '02:53' });
+      await page.waitForFunction(() => document.querySelector('[aria-label="完整口播正文"]').scrollTop > 0);
+      const focusTop = await focus.getByLabel('完整口播正文', { exact: true }).evaluate(node => node.scrollTop);
+      await snapshot('approved-demo-focus.png');
+      await page.keyboard.press('Escape');
+      await focus.waitFor({ state: 'detached' });
+      assert.ok(Math.abs(await root.evaluate(node => node.scrollTop) - before) <= 2);
+      await audio.getByRole('button', { name: '专注阅读', exact: true }).click();
+      await focus.waitFor({ state: 'visible' });
+      await page.waitForFunction(top => Math.abs(document.querySelector('[aria-label="完整口播正文"]').scrollTop - top) <= 2, focusTop);
+      await page.keyboard.press('Escape');
+      await focus.waitFor({ state: 'detached' });
+      assert.ok(Math.abs(await root.evaluate(node => node.scrollTop) - before) <= 2, 'focus reopening preserves both the focus and main document positions');
+      await page.getByRole('tab', { name: '作品', exact: true }).click();
+      await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
+      await page.waitForFunction(top => Math.abs(document.querySelector('[data-dossier-document]').scrollTop - top) <= 2, before);
+      assert.ok(Math.abs(await root.evaluate(node => node.scrollTop) - before) <= 2, 'switching Works returns to the same reading position');
+      await exportSnapshot('approved-demo');
+      for (const width of [1280, 900, 680, 390]) {
+        await page.setViewportSize({ width, height: 936 });
+        await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+        await checkWidth(`approved-demo ${width}`);
+        await snapshot(`approved-demo-${width}.png`);
       }
-      report.steps.push('Both video-derived units expose the actual local MP4 original through links, with successful same-origin video/mp4 GETs and no image decoder.');
+      await page.setViewportSize({ width: 1363, height: 936 });
+      report.steps.push('Approved demo: continuous 26-segment / 4m52s speech, focus/Esc/tab return, and narrow viewports.');
     }
-    if (['video-transcript', 'partial-images', 'originals-only'].includes(scenario.name)) {
-      for (const width of [1440, 1280]) {
-        await page.setViewportSize({ width, height: 1000 });
-        if (scenario.name === 'video-transcript') {
-          const supplements = panel.getByRole('region', { name: '补充材料', exact: true });
-          await focusBelowHeader(supplements);
-          await snapshot(`standard-dossier-video-supplements-${width}.png`);
-          const audioUnit = dossier.materials.find(unit => unit.kind === 'audio');
-          await focusBelowHeader(panel.locator(`[data-source-unit-ref="${audioUnit.ref}"]`));
-          await snapshot(`standard-dossier-video-originals-${width}.png`);
-        } else if (scenario.name === 'partial-images') {
-          assert.ok(dossier.materials.some(unit => unit.processing?.state === 'failed'), 'partial fixture contains an actual failed processing receipt');
-          const stateDetails=panel.locator('summary').filter({hasText:/^材料状态/}).locator('xpath=..');
-          if(await stateDetails.getAttribute('open')===null) await stateDetails.locator(':scope > summary').click();
-          const failure = panel.getByText(/^处理失败(?:，已有读本仍可读)?。$/).first();
-          await focusBelowHeader(failure.locator('xpath=ancestor::section[1]'));
-          await snapshot(`standard-dossier-partial-failure-${width}.png`);
-        } else {
-          const originals = panel.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
-      if(await originals.getAttribute('open')===null) await originals.locator(':scope > summary').click();
-          const imageUnit = dossier.materials.find(unit => unit.kind === 'image' && unit.originalUrl);
-          if (imageUnit) {
-            const source = originals.locator(`[data-source-unit-ref="${imageUnit.ref}"]`);
-            const compare = source.locator('details').filter({ hasText: /^对照原图/ }).first();
-            if (await compare.getAttribute('open') === null) await compare.locator('summary').first().click();
-            const image = source.getByRole('img');
-            await image.evaluate(node => {
-              if (node.complete) { if (node.naturalWidth === 0) throw new Error('Synthetic attachment image failed to load'); return; }
-              return new Promise((resolve, reject) => { node.addEventListener('load', resolve, { once: true }); node.addEventListener('error', () => reject(new Error('Synthetic attachment image failed to load')), { once: true }); });
-            });
-          }
-          await focusBelowHeader(originals);
-          await snapshot(`standard-dossier-empty-originals-${width}.png`);
-        }
-        await checkWidth(`${scenario.name} focused ${width}`);
-      }
+    if (['twelve-images', 'thirteen-images'].includes(scenario.name)) {
+      const total = scenario.name === 'twelve-images' ? 12 : 13;
+      assert.equal(dossier.materials.filter(unit => unit.kind === 'image').length, total);
+      assert.ok((await page.locator('[data-dossier-document]').textContent()).includes(`第${total}页完整文字`));
+      await exportSnapshot(scenario.name);
     }
-    report.steps.push(`Canonical scenario ${scenario.name}: ${dossier.readingView.mainBlockRefs.length} main and ${dossier.readingView.supplementBlockRefs.length} supplement refs.`);
+    if (scenario.name === 'partial-images') {
+      assert.ok(dossier.materials.some(unit => unit.processing?.state === 'failed'));
+      assert.ok((await page.locator('[data-dossier-document]').textContent()).includes('待补全'));
+      await snapshot('partial-images-reading.png');
+    }
+    if (scenario.name === 'originals-only') {
+      assert.equal(dossier.readingView.sections.length, 0);
+      assert.ok((await page.locator('[data-dossier-document]').textContent()).includes('缺失内容'));
+    }
+    report.steps.push(`Read-only scenario ${scenario.name}: ${dossier.readingView.sections.length} sections, ${dossier.materials.length} actual materials.`);
   }
-  assert.deepEqual(report.blockedRequests, []); assert.deepEqual(report.pageErrors, []); assert.deepEqual(report.consoleErrors, []);
+  assert.deepEqual(report.blockedRequests, []);
+  assert.deepEqual(report.pageErrors, []);
+  assert.deepEqual(report.consoleErrors, []);
   report.finished = true;
-  console.log('research-dossier.v2 browser proof: full canonical reading, exact exports, original source, metadata and structured edit PASS');
+  console.log('research-dossier.v2 browser proof PASS: continuous reading, frozen exports, 12/13 images, long speech and no writes');
 } catch (error) {
   report.error = String(error?.stack ?? error);
   if (page) { await writeFile(path.join(directory, 'browser-failure.html'), await page.content()); await snapshot('browser-failure.png'); }

@@ -2,22 +2,12 @@ import { ApiError } from '../../../shared/api';
 import type { DossierBlock, DossierMaterial, SourceState } from './dossierTypes';
 const SOURCE_STATES: Record<SourceState, string> = { present: '已取得', known_empty: '来源明确为空', not_acquired: '尚未取得', not_applicable: '不适用', restricted: '材料受限' };
 export function sourceStateLabel(state: SourceState): string { return SOURCE_STATES[state]; }
-/** Slot identity survives the first correction creating a persisted material unit. */
-export function materialIdentity(unit: DossierMaterial): string {
-  return `${unit.kind}:${unit.slotKey ?? (unit.kind === 'body' ? 'native' : unit.ref)}`;
-}
 export function materialLabel(unit: DossierMaterial, imageNumber?: number): string {
   if (unit.kind === 'body') return '正文';
   if (unit.kind === 'tags') return '独立标签';
   if (unit.kind === 'audio') return '音轨转写';
   if (unit.kind === 'video_frame') return '视频画面文字';
   return unit.page === null ? `图片${imageNumber === undefined ? '' : ` ${imageNumber}`} · 页码未知` : `第 ${unit.page} 页`;
-}
-export function readingLabel(unit: DossierMaterial): string {
-  if (unit.sourceState !== 'present') return sourceStateLabel(unit.sourceState);
-  if (unit.reading === null) return unit.kind === 'tags' ? '来源标签' : '尚未整理';
-  const adoption = { automatic: '自动采用', human_adopted: '人工采用', human_edited: '人工修正' }[unit.reading.adoption];
-  return `${adoption} · ${unit.reading.verification === 'verified' ? '已人工核验' : '尚未人工核验'}`;
 }
 /** The canonical issue identifies an eligible saved result; execution completion alone does not. */
 export function existingResultPending(unit: DossierMaterial): boolean {

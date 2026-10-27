@@ -5,7 +5,6 @@ import { hideCachedReading } from './dossierPresent';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { CommentDeepCollect } from './CommentDeepCollect';
 import { DossierPanel } from './DossierPanel';
-import { EvidencePanel } from './EvidencePanel';
 import { Lightbox } from './Lightbox';
 import { TechnicalFacts } from './TechnicalFacts';
 import { ReobservationSection } from './ReobservationSection';
@@ -22,12 +21,13 @@ import { apiPath } from './evidencePaths';
 import { workTitle } from './evidencePresent';
 import { PANELS, TABS, type PanelWidth, type TabKey } from './evidenceQuery';
 import type { WorkDetail, WorkItem } from './evidenceTypes';
-import { mediaObjects, singleViewerObject, type ViewerObject } from './mediaObjects';
+import { mediaObjects, type ViewerObject } from './mediaObjects';
 import { reobservationAccess } from './reobservationAccess';
 import { useCommentChannel } from './useCommentChannel';
 import { useReobservation } from './useReobservation';
 import page from './EvidencePage.module.css';
 import styles from './Inspector.module.css';
+import dossierStyles from './DossierDocument.module.css';
 import actionStyles from '../../../shared/ActionButton.module.css';
 
 export interface DetailState {
@@ -55,8 +55,6 @@ export interface InspectorProps {
   onRetry: () => void;
   /** 重新读取作品详情；返回是否成功（复观测终态后用来对账）。 */
   onRefresh: () => Promise<boolean>;
-  /** 重新分层成功：列表与详情一并重读。 */
-  onApplied: () => void;
 }
 
 const WIDTH_LABELS: Record<PanelWidth, string> = { normal: '标准', wide: '加宽', focus: '专注' };
@@ -88,12 +86,10 @@ interface BodyProps {
   domain: string;
   tab: TabKey;
   onRefresh: () => Promise<boolean>;
-  onApplied: () => void;
-  displayedTitle: string;
 }
 
 /** 一件作品的面板内容。按作品引用重建：评论原文、复观测结果、底稿状态都不跨作品保留。 */
-function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied, displayedTitle }: BodyProps) {
+function WorkBody({ detail, listItem, domain, tab, onRefresh }: BodyProps) {
   const { item, inspector, channels } = detail;
   const commentsUrl = apiPath(channels.commentsUrl);
   const comments = useCommentChannel(commentsUrl);
@@ -117,16 +113,9 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh, onApplied, display
       <Panel id="dossier" active={tab === 'dossier'}>
         <DossierPanel
           work={item.ref}
-          displayedTitle={displayedTitle}
           domain={domain}
           active={tab === 'dossier'}
-          onOpenImage={media => setViewer({ objects: [singleViewerObject(media)], index: 0 })}
-          onApplied={onApplied}
         />
-        <details className={styles.technical}>
-          <summary>原始识别、评论通道与来源回执（高级核对）</summary>
-          <EvidencePanel context={context} />
-        </details>
       </Panel>
       {/* 采集记录（Mog 2026-10-23）：先答「看过几次、数字怎么变、要不要再看、评论要不要采全」；
           材料完整度、媒体台账、来源编号与技术事实一项不删，统一收进默认折叠的「技术信息」。 */}
@@ -163,7 +152,7 @@ function Panel({ id, active, children }: { id: TabKey; active: boolean; children
  * 抽屉模式下 Esc 关闭、「← 返回当前作品」把所选行滚入视野。关闭着的抽屉是惰性的（不在 tab 顺序里、读屏读不到）。
  */
 export function Inspector(props: InspectorProps) {
-  const { domain, selectedRef, listItem, detail, tab, width, drawer, open, onTab, onWidth, onClose, onBack, onRetry, onRefresh, onApplied } = props;
+  const { domain, selectedRef, listItem, detail, tab, width, drawer, open, onTab, onWidth, onClose, onBack, onRetry, onRefresh } = props;
   const titleId = useId();
   const surface = useRef<HTMLElement>(null);
   const back = useRef<HTMLButtonElement>(null);
@@ -228,7 +217,7 @@ export function Inspector(props: InspectorProps) {
   }
 
   return (
-    <aside ref={surface} className={styles.inspector} aria-labelledby={titleId} data-width={width} data-drawer-open={drawer && open} inert={drawer && !open ? true : undefined}>
+    <aside ref={surface} className={`${styles.inspector}${tab === 'dossier' ? ` ${dossierStyles.dossierInspector}` : ''}`} aria-labelledby={titleId} data-width={width} data-drawer-open={drawer && open} inert={drawer && !open ? true : undefined}>
       <header className={styles.head}>
         <button ref={back} type="button" className={styles.back} onClick={onBack}>
           ← 返回当前作品
@@ -297,9 +286,9 @@ export function Inspector(props: InspectorProps) {
           ))}
         </div>
       </header>
-      <div className={styles.body} data-current-tab={tab}>
+      <div className={`${styles.body}${tab === 'dossier' ? ` ${dossierStyles.dossierHost}` : ''}`} data-current-tab={tab}>
         {detail.status === 'ready' && detail.data && selectedRef ? (
-          <WorkBody key={selectedRef} detail={detail.data} listItem={listItem} domain={domain} tab={tab} onRefresh={onRefresh} onApplied={onApplied} displayedTitle={title} />
+          <WorkBody key={selectedRef} detail={detail.data} listItem={listItem} domain={domain} tab={tab} onRefresh={onRefresh} />
         ) : (
           TABS.map(([key]) => (
             <Panel key={key} id={key} active={tab === key}>

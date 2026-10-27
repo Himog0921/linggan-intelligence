@@ -6,6 +6,9 @@ use linggan_evidence::{material_reading as reading, *};
 use linggan_storage_postgres::Database;
 use serde_json::json;
 use uuid::Uuid;
+#[path = "dossier_reading_demo_fixture.rs"]
+mod reading_demo;
+pub use reading_demo::seed as approved_demo;
 pub const DOMAIN: Uuid = Uuid::from_u128(0x00000000000040008000000000000001);
 
 pub async fn scenario(
@@ -28,7 +31,7 @@ pub async fn scenario(
     sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(work).bind(DOMAIN).bind(package).execute(db.pool()).await.unwrap();
     let mut slots = vec![];
     for page in 1..=images {
-        slots.push((if video && page == 1 { "cover" } else { "image" }, page));
+        slots.push((if video && images == 1 { "cover" } else { "image" }, page));
     }
     if video {
         slots.push(("video", 1));
@@ -40,7 +43,7 @@ pub async fn scenario(
         let uri=format!("https://media.example/{name}/{role}/{page}");
         json!({"kind":"media_slot","slotKey":format!("xhs:{name}:{role}:{page}"),"observationRef":observation,"slot":slot,"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":name}})
     }).collect();
-    fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":name}),"media_slots","xhs",json!({"target":if video{json!({"contentExternalId":name})}else{json!({"contentExternalId":name,"imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":images}})},"layers":[fixture::coverage_layer("media_slots",slots.len() as i64)]}),records).await;
+    fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":name}),"media_slots","xhs",json!({"target":if video && images <= 1{json!({"contentExternalId":name})}else{json!({"contentExternalId":name,"imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":images}})},"layers":[fixture::coverage_layer("media_slots",slots.len() as i64)]}),records).await;
     for ((role, page), observation) in slots.iter().zip(observations) {
         if partial && *page == images {
             continue;

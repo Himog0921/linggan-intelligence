@@ -468,6 +468,58 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
             read_run(&db, browser_work).await.unwrap()["completedImages"],
             3
         );
+        // The current UI exposes OCR and reading, but no human-edit form. The browser
+        // proof uses the actual correction HTTP API and declares that narrower coverage.
+        let browser_report: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(out.join("recognition-browser-result.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(browser_report["result"], "PASS");
+        assert_eq!(browser_report["manualCorrection"]["transport"], "http-api");
+        assert_eq!(browser_report["manualCorrection"]["uiEntryPoint"], false);
+        let reviews = browser_report["reviewCommands"].as_array().unwrap();
+        assert_eq!(reviews.len(), 3);
+        for (review, status) in reviews.iter().zip([200, 200, 409]) {
+            assert_eq!(review["transport"], "http-api");
+            assert_eq!(review["status"], status);
+            assert_eq!(review["command"]["action"], "edit");
+        }
+        let corrected_unit: Uuid =
+            serde_json::from_value(browser_report["manualCorrection"]["unitRef"].clone()).unwrap();
+        let correction_count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_material_reading_command
+             WHERE unit_ref=$1",
+        )
+        .bind(corrected_unit)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            correction_count, 1,
+            "replay and stale CAS create no extra edit"
+        );
+        let corrected_reading: Uuid = sqlx::query_scalar(
+            "SELECT current_reading_ref FROM linggan_material_unit
+             WHERE unit_ref=$1 AND content_public_ref=$2",
+        )
+        .bind(corrected_unit)
+        .bind(browser_work)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            serde_json::json!(corrected_reading),
+            browser_report["manualCorrection"]["currentRevisionRef"]
+        );
+        let corrected_blocks: serde_json::Value =
+            sqlx::query_scalar("SELECT blocks FROM linggan_material_reading WHERE reading_ref=$1")
+                .bind(corrected_reading)
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert!(corrected_blocks.as_array().unwrap().iter().any(|block| {
+            block["text"] == "合成浏览器人工修正文：完整保留数字 42、否定与来源。"
+        }));
         browser_wire.finish().await;
     }
     let first_materialization: Uuid = sqlx::query_scalar(

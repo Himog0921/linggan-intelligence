@@ -3,6 +3,9 @@ use super::{ResearchDossier, content};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+mod groups;
+pub(super) use groups::{clip_sections, image_text_gap_pages, tags_for_group};
+
 pub(super) fn rebuild(dossier: &mut ResearchDossier) {
     title(&mut dossier.note, &dossier.materials);
     let has_body = dossier
@@ -42,6 +45,9 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
         }
     }
     dossier.reading_view = json!({"mainBlockRefs":main,"supplementBlockRefs":supplement});
+    dossier.reading_view["sections"] = groups::sections(dossier);
+    // The shared Works view retains its established main/supplement order.
+    // Research reading and machine adapters use the sole new section order below.
     // Public materials retain diagnostics. Text consumers need at least one
     // actual source block, including after an explicit selection of only gaps.
     if !dossier
@@ -157,9 +163,12 @@ fn title(note: &mut Value, materials: &[Value]) {
 }
 
 pub fn ordered_refs(dossier: &ResearchDossier) -> Vec<&str> {
-    ["mainBlockRefs", "supplementBlockRefs"]
+    dossier.reading_view["sections"]
+        .as_array()
         .into_iter()
-        .flat_map(|key| dossier.reading_view[key].as_array().into_iter().flatten())
+        .flatten()
+        .flat_map(|section| section["groups"].as_array().into_iter().flatten())
+        .flat_map(|group| group["blockRefs"].as_array().into_iter().flatten())
         .filter_map(Value::as_str)
         .collect()
 }

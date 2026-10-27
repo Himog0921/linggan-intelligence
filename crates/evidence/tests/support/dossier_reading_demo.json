@@ -1,0 +1,403 @@
+{
+  "fixture": "approved-demo-reading-20261027",
+  "synthetic": true,
+  "source": "Approved synthetic demo 2026-10-27; no personal source material",
+  "title": "把一项任务写清楚",
+  "body": "一项任务反复确认，有时不是执行慢，而是开始时没有说清楚。把动作、结果和时间写完整，再补一个参考样例，接收任务的人就更容易判断从哪里开始、做到什么程度可以交付。",
+  "tags": [
+    "任务沟通",
+    "团队协作",
+    "工作清单"
+  ],
+  "images": [
+    [
+      {
+        "ref": "demo-image-1-1",
+        "kind": "heading",
+        "speaker": "unconfirmed",
+        "level": 1,
+        "text": "一、先写清楚三个要素"
+      },
+      {
+        "ref": "demo-image-1-2",
+        "kind": "paragraph",
+        "speaker": "unconfirmed",
+        "text": "“尽快整理一下资料”听起来像一项任务，却没有说明资料的范围、最终形式和截止时间。接到这句话的人，可能把聊天记录逐条汇总，也可能只整理已经确定的结论；两种做法都有道理，却未必符合发出任务时的预期。先把这三个空白补上，再讨论细节，不必一开始就写成长篇说明书。对于需要多人接力的工作，还可以补充使用场景：这份资料最后由谁阅读，用来作什么决定，哪些信息必须保留。把这些边界写在同一处，交接时就不必靠每个人重新猜测。"
+      },
+      {
+        "ref": "demo-image-1-3",
+        "kind": "table",
+        "speaker": "unconfirmed",
+        "columns": [
+          "术语",
+          "解释"
+        ],
+        "rows": [
+          [
+            "动作",
+            "说明具体要做什么，并限定范围。例如：整理本周三次会议的记录，而不是泛泛地“整理资料”。"
+          ],
+          [
+            "结果",
+            "说明最终要交付什么。例如：一页摘要，包含已经作出的决定、待办事项和对应负责人。"
+          ],
+          [
+            "时间",
+            "写明交付节点；需要中途确认时，也把节点写出来。例如：周五 16:00 前完成，周四先确认目录。"
+          ]
+        ]
+      },
+      {
+        "ref": "demo-image-1-4",
+        "kind": "quote",
+        "speaker": "unconfirmed",
+        "text": "请把本周三次会议的记录整理成一页摘要，列出决定、待办和负责人，周五 16:00 前放到项目文档。"
+      }
+    ],
+    [
+      {
+        "ref": "demo-image-2-1",
+        "kind": "heading",
+        "speaker": "unconfirmed",
+        "level": 1,
+        "text": "二、把一句模糊的话改成能够开始、可以核对、遇到缺口也知道如何继续的任务说明"
+      },
+      {
+        "ref": "demo-image-2-2",
+        "kind": "list",
+        "speaker": "unconfirmed",
+        "ordered": true,
+        "items": [
+          "圈出原话中的模糊词，例如“尽快”“完善”“处理一下”，先不急着扩写。",
+          "把每个模糊词换成可观察的动作、明确的交付物或具体时间。",
+          "补一个参考样例，说明哪些内容必须包含，哪些暂时不用做。",
+          "请接收任务的人复述交付内容；出现不同理解时，当场补清楚。"
+        ],
+        "start": 1
+      },
+      {
+        "ref": "demo-image-2-3",
+        "kind": "table",
+        "speaker": "unconfirmed",
+        "columns": [
+          "常见说法",
+          "可以补充的信息"
+        ],
+        "rows": [
+          [
+            "尽快整理一下资料",
+            "整理哪几份资料；输出表格还是摘要；具体何时交付。"
+          ],
+          [
+            "把这个页面优化一下",
+            "先说明这次要解决的阅读或操作问题，再圈定需要调整的区域。例如：让使用者能够完整阅读口播，并在切换内容后回到刚才的位置。写明哪些现有信息需要保留，以及用什么具体行为核对结果；不要仅用“更高级”“更有设计感”作为完成标准。"
+          ],
+          [
+            "有问题及时沟通",
+            "资料缺失或预计延期时，向谁说明，最晚何时反馈。"
+          ]
+        ]
+      },
+      {
+        "ref": "demo-image-2-4",
+        "kind": "heading",
+        "speaker": "unconfirmed",
+        "level": 1,
+        "text": "三、交付前做一次小检查"
+      },
+      {
+        "ref": "demo-image-2-5",
+        "kind": "paragraph",
+        "speaker": "unconfirmed",
+        "text": "明确任务不等于把所有选择都替对方作好。保留执行方式的空间，只检查结果边界是否清楚。遇到暂时无法确认的信息，标出缺口和确认人，比把猜测写成要求更有用。"
+      },
+      {
+        "ref": "demo-image-2-6",
+        "kind": "list",
+        "speaker": "unconfirmed",
+        "ordered": false,
+        "items": [
+          "交付物是否能被看见、打开或核对？",
+          "时间节点与确认人是否已经写明？",
+          "现有资料是否足够开始；不足时先补什么？"
+        ]
+      }
+    ]
+  ],
+  "audio": [
+    {
+      "ref": "demo-audio-1",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "交代任务时，我们很容易说“你尽快处理一下”。对方接到了动作，却未必知道结果要长什么样。",
+      "time": {
+        "startMs": 0,
+        "endMs": 12000
+      }
+    },
+    {
+      "ref": "demo-audio-2",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "先补三件事：具体做什么、交付什么、何时完成。比如整理会议记录，就说明是哪几次会议，以及摘要里必须有哪些内容。",
+      "time": {
+        "startMs": 12000,
+        "endMs": 27000
+      }
+    },
+    {
+      "ref": "demo-audio-3",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "如果任务需要配合，再写清楚找谁确认。遇到资料不足，可以先交一份缺口清单，不必靠猜测把空白补满。",
+      "time": {
+        "startMs": 27000,
+        "endMs": 41000
+      }
+    },
+    {
+      "ref": "demo-audio-4",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "最后请对方说一遍下一步怎么开始。能说清第一步，也知道最终要交付什么，这项任务就更容易推进。",
+      "time": {
+        "startMs": 41000,
+        "endMs": 54000
+      }
+    },
+    {
+      "ref": "demo-audio-5",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "拿整理会议记录来说，第一步不是选择一个漂亮的模板，而是确认这次摘要给谁看。项目负责人可能关心已经作出的决定，执行同事则更需要知道下一项待办。",
+      "time": {
+        "startMs": 54000,
+        "endMs": 66000
+      }
+    },
+    {
+      "ref": "demo-audio-6",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "读者不同，必须保留的信息就可能不同；先写清使用场景，后面的结构才有依据，也能避免把所有内容原样搬过去。",
+      "time": {
+        "startMs": 66000,
+        "endMs": 78000
+      }
+    },
+    {
+      "ref": "demo-audio-7",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "接着把范围写出来。是本周三次正式会议，还是还包括会后的补充讨论？已经取消的决定要不要保留？这些问题不用全部写进正文，可以用一句范围说明先排除。",
+      "time": {
+        "startMs": 78000,
+        "endMs": 89000
+      }
+    },
+    {
+      "ref": "demo-audio-8",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "如果暂时没有答案，就把它放进待确认项，并写明谁来确认。范围还没定时，不要把遗漏直接算成执行者的问题。",
+      "time": {
+        "startMs": 89000,
+        "endMs": 101000
+      }
+    },
+    {
+      "ref": "demo-audio-9",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "第三步是描述交付物，而不只是描述动作。“整理”是动作，“一页摘要”才是可见的结果。",
+      "time": {
+        "startMs": 101000,
+        "endMs": 109000
+      }
+    },
+    {
+      "ref": "demo-audio-10",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "可以再加一条完成标准：读者打开后，能找到决定、负责人和截止时间，不需要回到聊天记录里反复查找。",
+      "time": {
+        "startMs": 109000,
+        "endMs": 117000
+      }
+    },
+    {
+      "ref": "demo-audio-11",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "这样的标准可以核对，也为执行者保留了排版和组织表达的空间。",
+      "time": {
+        "startMs": 117000,
+        "endMs": 125000
+      }
+    },
+    {
+      "ref": "demo-audio-12",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "时间节点也要与任务的依赖关系放在一起看。如果周五需要交付，但关键资料周四下午才能拿到，就应提前说清这段等待，而不是只写一个最终期限。",
+      "time": {
+        "startMs": 125000,
+        "endMs": 137000
+      }
+    },
+    {
+      "ref": "demo-audio-13",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "可以约定周三先确认目录，资料到齐后补内容，周五再核对。中间节点的作用是尽早发现偏差，不是把任务拆成越来越密的催促。",
+      "time": {
+        "startMs": 137000,
+        "endMs": 149000
+      }
+    },
+    {
+      "ref": "demo-audio-14",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "参考样例能减少解释，但不能只丢一个链接就结束。最好指出要参考的是结构、内容范围，还是表达方式；如果样例里的某些部分这次不需要，也一起说明。",
+      "time": {
+        "startMs": 149000,
+        "endMs": 161000
+      }
+    },
+    {
+      "ref": "demo-audio-15",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "比如说“沿用它的三列表格，但不必附完整会议逐字稿”。这样既给了方向，也避免为了模仿形式而增加无用工作。",
+      "time": {
+        "startMs": 161000,
+        "endMs": 173000
+      }
+    },
+    {
+      "ref": "demo-audio-16",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "写完任务后，可以请对方复述一次，不必像考试一样检查记忆，只问三个问题：准备先做什么，最后会交出什么，遇到资料不足时找谁。",
+      "time": {
+        "startMs": 173000,
+        "endMs": 185000
+      }
+    },
+    {
+      "ref": "demo-audio-17",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "如果复述与自己的预期不同，先修改任务说明。把不同理解写到同一份文档里，通常比在聊天中反复补充一句更方便后续核对。",
+      "time": {
+        "startMs": 185000,
+        "endMs": 197000
+      }
+    },
+    {
+      "ref": "demo-audio-18",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "任务开始后仍可能发生变化。新的需求进来时，先判断它是否改变原来的范围、交付物或时间，再把影响说明白，不要只在聊天里说“顺便再加一点”。",
+      "time": {
+        "startMs": 197000,
+        "endMs": 209000
+      }
+    },
+    {
+      "ref": "demo-audio-19",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "如果新增内容需要更多时间，就重新确认优先顺序。保留原有约定和修改后的结果，团队才能知道现在应该按哪一版执行。",
+      "time": {
+        "startMs": 209000,
+        "endMs": 221000
+      }
+    },
+    {
+      "ref": "demo-audio-20",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "收到交付物时，也沿用事先约定的完成标准检查。先看必要内容是否齐全，再讨论可以改善的表达。",
+      "time": {
+        "startMs": 221000,
+        "endMs": 229000
+      }
+    },
+    {
+      "ref": "demo-audio-21",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "如果验收时才出现新的要求，把它标为新增修改，不要让执行者误以为自己遗漏了从未说明的部分。",
+      "time": {
+        "startMs": 229000,
+        "endMs": 237000
+      }
+    },
+    {
+      "ref": "demo-audio-22",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "对于做得合适的地方，也说清楚原因，方便下次继续沿用。",
+      "time": {
+        "startMs": 237000,
+        "endMs": 245000
+      }
+    },
+    {
+      "ref": "demo-audio-23",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "这套写法不要求每件小事都做一张复杂表格。很短的任务，用两三句话就够了；涉及多人配合或容易返工的事情，再补上范围、样例和确认节点。",
+      "time": {
+        "startMs": 245000,
+        "endMs": 257000
+      }
+    },
+    {
+      "ref": "demo-audio-24",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "判断要写多少，取决于对方还需要猜多少。能口头说清的小事不必堆字段，需要留下交接记录的事情则值得多写一点。",
+      "time": {
+        "startMs": 257000,
+        "endMs": 269000
+      }
+    },
+    {
+      "ref": "demo-audio-25",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "最后，把任务说明当成双方共同使用的工作材料。发出前看一遍，执行中变化时改一遍，交付时再按同一份说明核对。",
+      "time": {
+        "startMs": 269000,
+        "endMs": 280000
+      }
+    },
+    {
+      "ref": "demo-audio-26",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "要做的不是把文字写得越来越长，而是逐步减少关键处的含糊：动作是什么，结果是什么，时间怎么安排，以及出现缺口时下一步怎么办。",
+      "time": {
+        "startMs": 280000,
+        "endMs": 292000
+      }
+    }
+  ],
+  "frames": [
+    {
+      "ref": "demo-frame-1",
+      "kind": "paragraph",
+      "speaker": "unconfirmed",
+      "text": "任务说明检查单：动作明确，结果可核对，时间有节点，遇到缺口知道找谁确认。"
+    },
+    {
+      "ref": "demo-frame-2",
+      "kind": "quote",
+      "speaker": "unconfirmed",
+      "text": "让接收任务的人看完就能开始，而不是带着一串问号离开。"
+    }
+  ]
+}

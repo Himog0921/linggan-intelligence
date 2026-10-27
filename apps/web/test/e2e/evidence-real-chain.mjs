@@ -24,6 +24,7 @@ const report = {
   writes: [],
   storage: null,
   sources: {},
+  dossier: null,
 };
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 const UUID_EXACT = new RegExp(`^${UUID.source}$`, 'i');
@@ -73,7 +74,7 @@ page.on('request', request => {
   const url = new URL(request.url());
   report.requests.push({ method: request.method(), path: url.pathname, search: url.search, at: report.steps.length });
 });
-// 所有非 GET：记下方法、路径、状态与（重新分层的）回执。打开、筛选、切换、读取都不应该产生写请求。
+// 所有非 GET：记下方法、路径与状态。打开、筛选、切换、读取与导出都不应该产生写请求。
 page.on('response', async response => {
   const request = response.request();
   if (request.method() === 'GET') return;
@@ -87,7 +88,7 @@ const shot = async name => {
   report.screenshots.push({ name, ...layout });
   return layout;
 };
-// 写请求的记账在响应事件里（重新分层还要读回执），比页面上的结果晚一拍：先等它记完再核对数量。
+// 写请求的记账在响应事件里，比页面上的结果晚一拍：先等它记完再核对数量。
 const writesTotal = async expected => {
   for (let attempt = 0; attempt < 50 && report.writes.length < expected; attempt += 1) await page.waitForTimeout(100);
   assert.equal(report.writes.length, expected);
@@ -357,7 +358,7 @@ try {
     await open(`&work=${rich}&tab=evidence`);
     await page.getByRole('tab', { name: '研究底稿' }).waitFor();
     assert.equal(await page.getByRole('tab', { name: '研究底稿' }).getAttribute('aria-selected'), 'true');
-    await page.getByRole('heading', { name: '研究底稿' }).waitFor();
+    await panel('研究底稿').getByRole('article', { name: '连续阅读文档' }).waitFor();
     await open(`&work=${rich}&tab=materials`);
     assert.equal(await page.getByRole('tab', { name: '采集记录' }).getAttribute('aria-selected'), 'true');
     await page.getByRole('heading', { name: '观察记录' }).waitFor();
@@ -462,50 +463,81 @@ try {
   });
 
   // ⑧ 研究底稿
-  await step('研究底稿：共享当前读本、完整导出、按需原图与发布时间及互动', async () => {
+  await step('研究底稿：共享当前读本、连续全文；统一导出弹窗的排版/源码及同版本 MD、JSON', async () => {
     const before = requestsTo('GET', /research-dossier$/).length;
+    const writesBefore = report.writes.length;
+    const snapshotResponse = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === `/api/local/work-resources/${rich}/research-dossier` && !url.searchParams.has('format');
+    });
     await open(`&work=${rich}`);
     await waitInspector(TITLE.rich);
-    const reading = panel('作品');
-    await reading.getByText('第1段。', { exact: false }).waitFor();
-    // 「作品」的完整正文与「研究底稿」共享同一 canonical snapshot：打开作品先读一次，切换标签不得重读。
+    await panel('作品').getByText('第1段。', { exact: false }).waitFor();
+    const response = await snapshotResponse;
+    assert.equal(response.status(), 200);
+    const snapshot = (await response.json()).dossier;
+    assert.equal(snapshot.contract, 'research-dossier.v2');
     assert.equal(requestsTo('GET', /research-dossier$/).length, before + 1, '作品正文读取 canonical 读本一次');
     await page.getByRole('tab', { name: '研究底稿' }).click();
     const dossier = panel('研究底稿');
-    await dossier.getByRole('heading', { name: '研究底稿' }).waitFor();
+    const document = dossier.getByRole('article', { name: '连续阅读文档' });
+    await document.waitFor();
+    await document.getByText('合成长文结尾标记。', { exact: false }).waitFor();
     assert.equal(requestsTo('GET', /research-dossier$/).length, before + 1, '切入研究底稿复用 canonical 读本');
-    const materialDetails = dossier.locator('summary').filter({ hasText: /^材料详情$/ }).locator('xpath=..');
-    assert.equal(await materialDetails.getAttribute('open'), null, 'diagnostics stay folded before the user opens them');
-    await materialDetails.locator(':scope > summary').click();
+    const groupRefs = snapshot.readingView.sections.flatMap(section => section.groups.map(group => group.ref));
+    const renderedGroups = (await document.locator('[data-reading-anchor]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-reading-anchor')))).filter(ref => groupRefs.includes(ref));
+    assert.deepEqual(renderedGroups, groupRefs, '连续文档按服务端同一编排完整显示全部组');
+    assert.equal(await dossier.getByRole('button', { name: '查看来源', exact: true }).count(), 0);
+    assert.equal(await dossier.locator('[data-source-unit-ref]').count(), 0);
+    assert.equal(await dossier.locator('summary').filter({ hasText: /^(材料详情|原件与修正)/ }).count(), 0);
+    assert.equal(await dossier.getByRole('button', { name: '采用此候选' }).count(), 0);
+    assert.doesNotMatch(await dossier.innerText(), UUID);
     await shot('evidence-1440-dossier');
-    const originals=dossier.locator('summary').filter({hasText:/^原件与修正/}).locator('xpath=..');
-    assert.equal(await originals.getAttribute('open'),null);
-    const imageRef=await dossier.locator('[data-source-unit-ref]:has(img)').first().getAttribute('data-source-unit-ref');
-    const readableImage=dossier.locator(`[data-unit-ref="${imageRef}"]`);
-    if (await readableImage.count()) {
-      await readableImage.getByRole('button',{name:'查看来源',exact:true}).first().click();
-    } else {
-      const label=(await dossier.locator(`[data-source-unit-ref="${imageRef}"] h4`).textContent())?.replace(/\s*·\s*原件$/, '').trim();
-      assert.ok(label, 'empty material source has an explicit source label');
-      const emptyState=dossier.locator('summary').filter({hasText:/^材料状态/}).locator('xpath=..');
-      if (await emptyState.getAttribute('open')===null) await emptyState.locator(':scope > summary').click();
-      await dossier.getByRole('region',{name:`${label}材料状态`,exact:true}).getByRole('button',{name:'查看来源',exact:true}).click();
-    }
-    assert.notEqual(await originals.getAttribute('open'),null);
-    const original=dossier.locator('[data-source-unit-ref]:has(img)').first();
-    await original.getByRole('img').evaluate(node=>node.decode());
-    assert.equal(await original.getByRole('img').evaluate(node=>node.naturalWidth>0),true);
-    await dossier.getByText('作者、时间与互动',{exact:true}).click();
-    await dossier.getByText(/观察时间：/).first().waitFor();
-    assert.match(await dossier.innerText(),/分享/);
-    // 导出：Markdown 与 JSON 都是用户显式触发的下载，内容来自服务器给的底稿。
-    const [markdown] = await Promise.all([page.waitForEvent('download'), dossier.getByRole('button', { name: '导出 Markdown' }).click()]);
+
+    // 打开导出冻结本次快照；读取排版和源码都不改正文，也不启动识读或人工修正。
+    const markdownResponse = page.waitForResponse(result => {
+      const url = new URL(result.url());
+      return url.pathname === `/api/local/work-resources/${rich}/research-dossier` && url.searchParams.get('format') === 'markdown';
+    });
+    await dossier.getByRole('button', { name: '导出', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '导出研究底稿' });
+    await dialog.waitFor();
+    const markdownResult = await markdownResponse;
+    assert.equal(markdownResult.status(), 200);
+    const markdownText = await markdownResult.text();
+    const pinnedUrl = new URL(markdownResult.url());
+    assert.equal(pinnedUrl.searchParams.get('domain'), domainOne);
+    assert.ok(pinnedUrl.searchParams.get('asOf'));
+    assert.ok(pinnedUrl.searchParams.get('expectedRevision'));
+    // 用导出请求自身的截点/选择/版本读取对照，避免把更早页面读取的时间当作导出截点。
+    pinnedUrl.searchParams.set('format', 'json');
+    const pinnedResponse = await context.request.get(pinnedUrl.href);
+    assert.equal(pinnedResponse.status(), 200);
+    const frozen = (await pinnedResponse.json()).dossier;
+    assert.equal(frozen.revision, pinnedUrl.searchParams.get('expectedRevision'));
+    assert.equal(frozen.asOf, pinnedUrl.searchParams.get('asOf'));
+    await dialog.getByRole('article', { name: 'Markdown 排版预览' }).getByText('合成长文结尾标记。', { exact: false }).waitFor();
+    await shot('evidence-1440-dossier-export');
+    await dialog.getByRole('button', { name: '源码', exact: true }).click();
+    assert.equal(await dialog.locator('pre[aria-label="Markdown 源码"]').textContent(), markdownText);
+    const [markdown] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: '下载 .md', exact: true }).click()]);
     assert.match(markdown.suggestedFilename(), /\.md$/);
-    assert.ok((await readFile(await markdown.path(), 'utf8')).includes('合成长文'));
-    const [json] = await Promise.all([page.waitForEvent('download'), dossier.getByRole('button', { name: '导出 JSON' }).click()]);
+    assert.equal(await readFile(await markdown.path(), 'utf8'), markdownText);
+    const paragraphs = [...markdownText.matchAll(/第(\d+)段。/g)].map(match => Number(match[1]));
+    assert.deepEqual(paragraphs, Array.from({ length: 40 }, (_, index) => index + 1), '40段原文按序完整导出');
+    assert.ok(markdownText.includes('合成长文结尾标记。'));
+    assert.doesNotMatch(markdownText, /来源块：|覆盖与来源|\[查看原件\]/);
+    await dialog.getByRole('button', { name: 'JSON', exact: true }).click();
+    const [json] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: '下载 .json', exact: true }).click()]);
     assert.match(json.suggestedFilename(), /\.json$/);
-    assert.ok(JSON.parse(await readFile(await json.path(), 'utf8')).revision);
-    assert.equal(await dossier.getByRole('button',{name:'采用此候选'}).count(),0);
+    const exported = JSON.parse(await readFile(await json.path(), 'utf8'));
+    assert.deepEqual(exported, frozen, 'JSON原样导出同一canonical快照，没有第二份正文');
+    assert.equal(report.writes.length, writesBefore, '阅读与导出没有写请求');
+    report.dossier = { workRef: rich, asOf: frozen.asOf, snapshotRevision: frozen.revision,
+      jsonRevision: exported.revision, markdownRevision: pinnedUrl.searchParams.get('expectedRevision'),
+      groupRefs: renderedGroups, markdownBodyParagraphs: paragraphs.length, writes: report.writes.length - writesBefore };
+    await dialog.getByRole('button', { name: '关闭导出窗口' }).click();
+    await dialog.waitFor({ state: 'hidden' });
   });
 
   // ⑨ 立即复观测
@@ -660,7 +692,7 @@ try {
   });
 
   // ⑫ 存储
-  await step('存储只有宽度、选择及深采请求引用且无作品内容，深采只保存冻结请求与回执', async () => {
+  await step('存储只有宽度、阅读位置几何、选择及深采请求引用且无作品内容，深采只保存冻结请求与回执', async () => {
     await open();
     await page.getByRole('button', { name: '选择', exact: true }).click();
     await rowOf(TITLE.rich).getByRole('checkbox', { name: `勾选作品：${TITLE.rich}` }).check();
@@ -671,7 +703,19 @@ try {
       local: Object.fromEntries(Object.keys(localStorage).map(key => [key, localStorage.getItem(key)])),
       session: Object.fromEntries(Object.keys(sessionStorage).map(key => [key, sessionStorage.getItem(key)])),
     }));
-    assert.deepEqual(Object.keys(report.storage.local), ['linggan.evidence.inspectorWidth']);
+    assert.ok(Object.hasOwn(report.storage.local, 'linggan.evidence.inspectorWidth'));
+    for (const [key, value] of Object.entries(report.storage.local)) {
+      if (key === 'linggan.evidence.inspectorWidth') continue;
+      const positionKey = new RegExp(`^dossier-reading:v3:(${UUID.source}):(${UUID.source}):(.*)$`, 'i').exec(key);
+      assert.ok(positionKey, `unexpected local preference: ${key}`);
+      assert.equal(positionKey[1], domainOne);
+      assert.deepEqual(JSON.parse(positionKey[3]), ['full', [], [], [], []], '当前阅读位置只绑定完整选择与稳定引用');
+      const position = JSON.parse(value);
+      assert.deepEqual(Object.keys(position).sort(), ['anchor', 'offset', 'top', 'within']);
+      assert.ok(position.anchor === null || position.anchor === 'reading:missing' || (typeof position.anchor === 'string' && new RegExp(`^${positionKey[2]}\\.(?:section|group)\\.[0-9a-f]{64}$`, 'i').test(position.anchor)));
+      for (const name of ['offset', 'top', 'within']) assert.ok(typeof position[name] === 'number' && Number.isFinite(position[name]));
+      assert.ok(position.top >= 0 && position.within >= 0 && position.within <= 1);
+    }
     for (const [key, value] of Object.entries(report.storage.session)) {
       const deep = /^linggan\.evidence\.comment-deep\.v1:([0-9a-f-]{36}):([0-9a-f-]{36})$/.exec(key);
       if (!deep) {

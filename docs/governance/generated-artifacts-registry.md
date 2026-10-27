@@ -8,6 +8,13 @@
 
 任何未列入本表的生成型文件，默认不得写入项目目录或提交 Git。确需新增时，先登记再生成。
 
+## RESEARCH-DOSSIER-READING-20261027
+
+- 维护的合成测试输入：`crates/evidence/tests/support/dossier_reading_demo.json`，从 Mog 已确认 Demo 的 `EXAMPLE_READING_SECTIONS` 显式适配并逐块核对。原文全部保留；秒转换为毫秒，显示说话人改为真实合同的 `unconfirmed` 角色，明确的术语/解释结构映射为双列表格。该文件是人工维护的 canonical fixture，不是运行时生成物，不含 Demo 的真实样本分支。
+- 私有 UI 验收：`artifacts/private/research-dossier-reading-20261027/` 保存实际 React/Axum/独占合成 PostgreSQL 的截图、下载文件和核对摘要；忽略不提交。原始截图不修改；仅合成材料，无凭据、真实来源正文或模型调用。
+- 本次隔离环境、日志和 GET/HEAD 浏览器桥接脚本放系统临时目录 `/tmp/intelligence-dossier-*`；正式前端构建仍使用已登记的 `apps/web/dist/`。验证源码为维护的 ignored Rust 预览入口和既有 E2E 脚本，不生成另一套产品实现。
+- 责任 root；保留至 Mog 验收，只停止和清理本任务的进程与测试数据，不处理共享运行时、线上数据、其他工作树或依赖。
+
 `artifacts/private/evidence-original-link-2026-10-27/`：本次检查器原文入口/视频原件修复的日志、只读媒体事实、独立审阅和实际桌面截图，root负责，忽略不提交，保留至Mog验收；不保存秘密或旧OCR结果，不运行模型或采集。只清理本任务自有服务与独立工作树，遵循本机60分钟无写入规则。
 
 | 类别 | 固定位置 | 来源/生成方式 | Git 策略 | 手工修改 | 保留与清理 |

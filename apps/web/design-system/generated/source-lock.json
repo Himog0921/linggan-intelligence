@@ -1,5 +1,5 @@
 {
-  "fingerprint": "1d5b0be4761015afcb0a8a120917b4a24d7bce55653135ca6b7066e6f2de2350",
+  "fingerprint": "8c46dde96fd3fb3200506629943a850af55659a7050cb4fabee4a55c823d297c",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -175,7 +175,7 @@
     },
     {
       "path": "apps/web/package.json",
-      "sha256": "2c7cc75921cc049cc9b81c2832cb832264f5033a3c47a0032a46b3ffb812a72c"
+      "sha256": "4909afd62b48464249dd740b75ea3ea5be023d91527b30b7c732a134a204c310"
     },
     {
       "path": "apps/web/public/fonts/lids/albertsans/AlbertSans[wght].woff2",

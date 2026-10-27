@@ -1,7 +1,7 @@
 # 研究底稿 v2：统一阅读与唯一读取合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-26（统一当前读本、按需修正与 OCR 结果清理候选）
+> 最后核对: 2026-10-27（唯一 v2 的研究底稿阅读编排与导出候选）
 > 适用范围: RESEARCH-DOSSIER-V2 / STANDARD-DOSSIER-001；字段与行为合同，发布状态单独核对
 > 事实来源: Mog 本轮确认的研究底稿标准、开发期直接替换要求与本合同验收矩阵
 > 冲突时以谁为准: 用户最新确认、真实来源与验证；本稿替代 v1 及 note-material-input 的并行对外合同
@@ -12,9 +12,13 @@
 
 STANDARD-DOSSIER-001 更新：平台非空标题优先，否则从明确封面（无封面时为已知第一页）的主要标题块整理 displayTitle，依据为 platform / cover / missing，并保留 titleBlockRefs。页序未知不猜封面。无正文时图片按页序成为主文；视频优先口播，尚无口播时已有画面文字可读；有可读口播/画面时封面归补充，只有封面文字可用时才作为主文。混合媒体中的正文图片仍按原图片规则。有任意非空平台正文时正文为主文，其余均为补充；短句、表情、标签正文同样保留。
 
-`readingView.mainBlockRefs` 与 `supplementBlockRefs` 仅引用 `materials[].blocks`，由后端唯一组装。JSON、Markdown、前端与内部 AI 片段适配采用该顺序；显式 selection 后重建标题与编排，不泄漏未选图片内容。coverage 保留材料实际缺失、处理和失败；它不是整篇读取资格。没有文字时仍返回底稿及原件，文本消费者明确返回无可读文字。
+2026-10-27 阅读编排更新仍使用唯一 `research-dossier.v2`，不另建成品正文合同。`materials[].blocks` 只存储和发送一次；同一后端 owner 生成引用型 `readingView.sections`，研究底稿 UI、人工 Markdown 与内部 `ordered_refs` / 片段适配依此全序读取。章节顺序固定为发布文案、图片文字、视频口播、画面文字；空章不生成。显式 selection 后重建标题与编排，不泄漏未选图片内容。
 
-分段读取复用同一 GET：`segmentSize`（1–200）与 `segmentOffset`（从 0 起），返回有序块的显式选择和 `segment` 范围。后续请求必须携带首段 `asOf` 与 `expectedRevision`，固定完整底稿 revision；来源受限仍按当前访问规则处理。分段只筛选完整底稿的主文/补充有序引用，不因本段缺少正文而提升补充或重排；显式用户 selection 仍重新编排。遍历到 nextOffset 为 null 即覆盖全部可用块，不按字符截断。
+`readingView.mainBlockRefs` 与 `supplementBlockRefs` 保留既有作品详情的主次成员及原顺序，供共享 Works 阅读组件继续使用；不按新章节重排它们。它们与 sections 引用同一套 canonical blocks，由同一 owner 生成，用途有明确区分；两数组互斥、无重复，合起来与 sections 的引用全集一致，但不要求拼接或各自顺序等于新章节顺序。研究底稿前端不再次排序、分组或合稿。coverage 保留材料实际缺失、处理和失败；它不是整篇读取资格。没有文字时仍返回底稿及来源状态，文本消费者明确返回无可读文字。
+
+分段读取复用同一 GET：`segmentSize`（1–200）与 `segmentOffset`（从 0 起），按 sections 的有序 blockRefs 返回完整块及 `segment` 范围。后续请求必须携带首段 `asOf` 与 `segment.completeRevision` 作为 `expectedRevision`，固定分段前的选定快照；来源受限仍按当前访问规则处理。服务端先应用相同显式 selection，再对未分段的 `value.revision` 校验 expectedRevision，最后才裁切 segment；不拿 selection.completeRevision 代替当前选定 revision。
+
+分段筛选冻结 sections / groups、既有主次引用及缺页定位；保留 section/group ref，不因本段缺少正文而提升补充、重新排序或重新分段。文本组只保留本段仍相邻块之间的原 joiners，并通过 continuation 表明组首或组尾在本段之外。空尾段返回空 materials 与 sections。遍历到 nextOffset 为 null 即覆盖全部可用块，不按字符截断。显式用户 selection 是另外的操作，仍由 owner 重新编排。
 
 本地常规 OCR、本地 VL 与手动 DeepSeek 识别完成后，都经同一 canonical owner 自动发布完整读本。发布使用任务冻结的 expected current 作 CAS，同来源人工修正优先。GET 不准备或识别；原生材料与历史 ASR 的显式准备继续复用内部 dossier_input，旧图片 relayer 及其批量界面已从本次候选移除。
 
@@ -28,15 +32,63 @@ STANDARD-DOSSIER-001 更新：平台非空标题优先，否则从明确封面�
 
 ## 一份内容，按需表示
 
-默认 JSON 只有作品身份 `note`、按阅读顺序排列的 `materials[].blocks`、覆盖说明 `coverage`、按需读取入口 `attachments` 和明确选择 `selection`。每份材料正文只出现一次，不同时序列化 fragments、raw OCR、media 文本、Markdown 与多个任务预览。
+默认 JSON 包含作品身份 `note`、按来源保存的 `materials[].blocks`、仅含引用和布局指令的 `readingView`、覆盖说明 `coverage`、按需读取入口 `attachments` 和明确选择 `selection`。每份材料正文只出现一次，不同时序列化 fragments、raw OCR、media 文本、Markdown 与多个任务预览。
 
 Markdown 通过 `format=markdown` 单独生成，与同一次读取的区块顺序和内容一致。评论、作者与互动元数据分别按需读取；评论页数不冒充平台评论总量。原图和识别诊断通过来源引用读取，不把原始布局/任务账本塞入每次 Agent 输入。
 
-Markdown 顶层采用同一 displayTitle；为空时仅用界面占位“无标题”。标题来源块继续保留角色、时间、局部问题和精确引用，不同来源出现同文标题各自保留。显式选择后重建展示标题，未选图片文字不会带入导出。
+Markdown 顶层采用同一 displayTitle；为空时仅用界面占位“无标题”。所有正文引用继续由同一 sections 解析，标题来源块的正文、角色、真实时间和局部问题仍保留；不同来源出现同文标题各自保留。人读 Markdown 不输出材料 ID、来源块 ID、原件链接或技术来源清单；精确引用仍完整保留在 canonical JSON 与机器任务 adapter 中。显式选择后重建展示标题，未选图片文字不会带入导出。
+
+Markdown 依据 canonical block 的结构生成标题、段落、列表、表格与引用，纯文本中的 Markdown/HTML 符号按字面量转义；不会把 `<product-id>`、星号或反引号误解析为隐藏内容或新结构。表格单元格的真实换行使用序列化器生成的 `<br>`；原文里的同名标签仍转义。预览只允许这一精确换行标记，其他来源 HTML 一律按文字处理，保留清理器。时间展示为可读时码，JSON 的单位始终为毫秒。连续相同来源角色只在开头标注一次，角色切换（包括他人回到作者）、新章节、独立音频材料或对话结束后重新标注；dialogue 各 turn 的归属继续保留，unconfirmed 不推断人物。原生 tags 材料与已证明等价的 tags 组使用相同单行标签表示，保持顺序和重复；普通列表仍按原列表表示。执行状态按真实 pending / running / failed / cancelled / invalidated 表达，不把更新中或失败覆盖成来源无文字，既有有效空读本与文字读本均保留。
 
 顶层字段：`contract`、`workRef`、`revision`、`materialRevision`、`asOf`、`note`、`materials`、`readingView`、`coverage`、`attachments`、`selection`。`materialRevision` 绑定材料、来源和结构；`revision` 还绑定同截点的覆盖及辅助元数据；默认读取不附带另一份识别全文。时间戳本身不令未变材料失效。
 
 `note` 保留平台、作品身份、平台标题及来源、展示标题及采用依据。平台标题与图片标题是不同事实。仅显式封面或已证明的第一页标题可补展示标题，不能伪造平台标题。titleBlockRefs 记录封面整理标题的实际块；不同来源的同文区块仍各自保留。
+
+## 引用型阅读编排
+
+所有字段都由后端同一纯投影函数生成；不写入额外正文表或成品状态表，不在前端接入静态 Demo 正文。以下为 v2 内的阅读字段，`text` 仍只在原 blocks 中：
+
+```ts
+interface ReadingSection {
+  ref: string;
+  kind: 'publication' | 'images' | 'audio' | 'frames';
+  groups: ReadingGroup[]; // 非空；每个 kind 至多一章
+  gaps: { beforeGroupRef: string | null; missingPages: number[] }[];
+}
+type ReadingGroup = {
+  ref: string;
+  blockRefs: string[]; // 非空，按 canonical 阅读顺序
+  continuation: { fromPrevious: boolean; toNext: boolean };
+} & (
+  { mode: 'blocks' | 'list' | 'table' | 'tags' }
+  | { mode: 'paragraph' | 'transcript_paragraph'; joiners: ('' | ' ' | '\n')[] }
+);
+```
+
+section 与 group 的 ref 是后端从作品、模式和被引用的块确定的身份；相同冻结编排稳定，运输分段保持不变。没有复制全文或 AI 改写。每个实际可读引用恰好出现在一个 group；受限材料不进入阅读引用。文本模式必须只引用 paragraph，joiners 数量为 blockRefs 数量减一，仅允许空串、空格或换行。非文本模式不带 joiners。完整编排的 continuation 两项均为 false；分段裁切可设置为 true。
+
+- `blocks`：保留各原始块及其结构，不能跨不同来源删除正常重复文字。
+- `paragraph`：只在可靠的相邻图片页面之间接续原文，合并依据见下节；不是摘要或润色。
+- `transcript_paragraph`：仅在同一音频材料中组织原始 paragraph 段；不拼接不同视频或来源角色，不把 author / other / unconfirmed 当声纹身份或讲话人数。
+- `list`：同一连续有序列表；下一块必须有明确 start，并等于前块 start（缺省为 1）加条目数。保留原起始编号与所有条目；独立重编号、跳号或普通无序列表不强合。
+- `table`：列名、列数一致，且有真实相邻页边界及第一列序号连续的证据；一次显示表头并保留全部行。相同列名本身不能证明两张表是同一张。
+- `tags`：只用于同一非空 sourceRef、单块平台正文与单块非有序原生标签的已证明等价呈现。正文必须完全由有闭合 `#` 的标签组成，标签间只有空白；逐项 trim、去一个尾部 `[话题]` 后与原生标签逐项相等，保持原序和重复。含实质正文、未闭合标签、不同来源或角色不得进入此模式。两个原始事实及引用仍保留；运输段只剩一边时仍按同一规则显示一次完整标签列表。
+
+角色按 `speaker ?? 'unconfirmed'` 比较；用于合组的角色必须一致。任何相关块或材料的未解决问题都会阻止合组，原块及问题继续阅读。问题 key 仅在所属材料内唯一；前端和 MD 以 material ref 与 key 共同去重，coverage 使用独立作用域，不跨图片吞掉相同 key 的问题。
+
+`gaps` 必有。非 images 章节恒为空；images 的 missingPages 表示当前待补文字的真实已知页，不等于“原图尚未取得”：其候选集合是 coverage.imageInventory.missingPages 与实际 image 材料中无可读来源块的已知页并集，排除 known_empty / not_applicable；未知页码不补猜，各项非空、正整数升序，整章不重复。可读来源块沿用 content.has_source_text：gap 不计作原文，文本形态须非空，列表/表格/对话保留原结构资格。有可读块即使局部有问题或最新处理失败也不标整页文字缺失，而是保留原文和局部问题。beforeGroupRef 指向本章后续第一组，null 表示章尾；它们是文字覆盖状态的阅读定位，不是新增来源文字；文案为“文字待补全”，具体来源未取得、处理中或失败仍分别由原材料状态说明。页序未知时不定位，不猜缺口位置；没有任何图中文字时不为缺口生成空章，仍显示覆盖状态。
+
+完整范围展示真实缺页；显式选择全部 image 时保留图片范围，选择特定 imagePages / unitRefs 时只纳入所选缺页，不把选择外缺页混入本次正文。分段仅在保留目标组原始第一块时保留该组前缺口；章尾缺口仅在保留原末组最后一块时保留，防止多段重复或遗漏。运输段同时保留本段定位缺口所需的真实 image unit 状态元数据，blocks 仅含本段选中块（可为空），不增添未选原文；否则已取得但无文字的页面会在分段时失去缺口依据。UI 和 MD 直接依该位置提示，不能各自猜测缺页位置。
+
+## 多图连续成稿与长口播
+
+图片数量不设 12 张硬上限。已知页序沿真实页码，未知页序沿既有稳定观察顺序；不从文字主题猜页序。合稿不是把 N 张图压成 N 个摘要，也不是展示 N 张图片卡片：全部当前 canonical 文字、列表和表格按同一章节连续阅读；原始 OCR 行、坐标与处理证据仍在内部原证据链中，不再增设一层重复原文。
+
+跨页段落合组同时要求：两端为 present 的不同 image 材料、真实页码相邻递增、前页最后一个块与后页第一个块、相同角色、块与材料均无未解决问题，以及真实 bbox 显示页底/页顶边界。位置本身不足以证明同句，还需明确未完分句的标点或未闭合引号/括号。独立短语即使一页靠底、一页靠顶，也保留为独立段。缺页、未知页序、无坐标、结构待确认或任意块显式选择使边界无法证明时，不强合。保留必要的空白连接，不补造过渡句、标题或逻辑。内容不发生改变，编排变化进入既有 revision 哈希。
+
+ASR 精细原始块、真实 startMs/endMs 和来源角色全部保留。自然段是引用组：同一材料、同角色、真实时间不倒退的连续 paragraph 才可合组；完整句子结束后，遇到真实停顿或已积累的阅读时段才分段。当前确定性规则以句末加不少于 600 ms 停顿，或句末加约 20 秒已读时段作为软边界；不按固定字数切未完句，不调用模型，不补造说话人。无时码的历史全文仍完整保留并标明时间未知；不同视频的时间零点不合成一个新视频。
+
+没有取得、已取得待识读、处理失败、已确认无文字、不适用、局部不可辨与已有可读结果各自保留原状态。known_empty 可来自平台明确空正文，不一律声称识别器已处理；最新处理失败时，已有同源有效空读本或文字读本仍有效，只说明更新未完成。前端就绪/部分可读的轻状态是现有字段的派生表示，不再新增持久化状态。
 
 ## 材料与结构化区块
 
@@ -120,7 +172,7 @@ Live Photo 的静态图片与动态视频按实际已验证媒体类型分别选
 
 最新完整平台图片清单使已移除的旧槽位失去当前资格；后续局部观察只增加自身取得的槽位，不能复活被移除的旧页。读取、任务领取、当前发布、修正、显式准备与检索共享同一成员判定。当前观察未提供完整清单时，平台总数继续标为未知。
 
-coverage.imageInventory 分别给出 basis、expectedPages（未知为 null）、acquiredPages、processedPages、missingPages、unknownOrder。已知总页数时统计只覆盖对应真实页，不能把额外封面算成第 N+1 页；处理数 ≤ 取得数 ≤ 已知总数。
+coverage.imageInventory 分别给出 basis、expectedPages（未知为 null）、acquiredPages、processedPages、missingPages、unknownOrder。这里 missingPages 继续只表示尚未取得的来源页；已取得但无可读文字的页只扩入 readingView.sections.gaps 的文字覆盖提示，不改写来源取得事实。已知总页数时统计只覆盖对应真实页，不能把额外封面算成第 N+1 页；处理数 ≤ 取得数 ≤ 已知总数。
 
 音频采用实际转写 segment 的时间。帧 OCR 保留所有实际采样帧及真实 PTS，不设固定 12 帧读入上限、不跨时间全局去重。采样视频明确标 incomplete；未采样位置未知。只有已证明无音轨才是 not_applicable；ASR 成功完成但未检出语音为 known_empty（不声称原视频无文字），失败为 processing.failed 并保留此前同源可读读本。其他识别器无输出不证明源内容为空，也不生成诊断占位正文。
 
@@ -128,7 +180,7 @@ coverage.imageInventory 分别给出 basis、expectedPages（未知为 null）�
 
 ## 读取、选择、引用与任务接入
 
-现有 `/api/local/work-resources/{workRef}/research-dossier` 成为唯一笔记读取入口。支持 asOf 与 format。默认 full；kinds、unitRefs、blockRefs、imagePages 是显式选择，采用并集；空值、未知 ID 或非法枚举返回错误。selection 报实际选择、省略材料数与完整材料 revision，禁止把局部表示标成完整。
+现有 `/api/local/work-resources/{workRef}/research-dossier` 成为唯一笔记读取入口。支持 asOf 与 format。非分段 JSON / Markdown 同样支持 expectedRevision，校验位置与分段一致：应用相同 selection 后、segment 前，对比当前 payload.dossier.revision；不匹配返回 409 dossier_revision_changed。单独 expectedRevision 不再要求 segmentSize；单独 segmentOffset 仍返回 segment_size_required。非分段请求可无 asOf 使用当前快照的 revision 检查，导出 UI 应同时携带已打开快照的 asOf 与 revision。默认 full；kinds、unitRefs、blockRefs、imagePages 是显式选择，采用并集；空值、未知 ID 或非法枚举返回错误。selection 报实际选择、省略材料数与完整材料 revision，禁止把局部表示标成完整。
 
 readings/{readingRef} 在同一只读快照返回 workRef、所请求版本 material，以及顶层 currentRevisionRef（当前仍有来源资格的 unit 指针，可为 null）。material.currentRevisionRef 保持请求的版本身份；旧成功回执不能替代最新 current，去重隐藏的 unit 也按该指针精确读取，不重复运输当前全文。
 
@@ -150,9 +202,11 @@ publication 返回 publishedAt、localDate、sourceText、sourceField、sourceKi
 
 interaction 包含 likes、comments、collects、shares。四项分别保留来源与值，已知零显示 0，未知显示未知。作者、发布时间、观察时间与四项互动集中在同一按需信息入口；原始解析与来源诊断折叠。
 
-## 默认阅读与原件入口
+## 研究底稿阅读与既有原件能力
 
-作品文字与研究底稿都按 readingView 显示连续主文和补充材料，默认不加载编辑器或另一份 OCR 全文。重复材料状态、原件、版本与诊断按需展开。查看来源必须展开对应原件、滚动定位并提供键盘焦点；没有可读文字时仍提供直接可达的原件入口。人工保存后刷新同一底稿。
+研究底稿是成品阅读与导出页面，只依 sections 显示连续正文、轻量状态、章节/时码定位与必要缺口；移除右侧来源材料栏、查看来源入口、平台原文另一次展开及导出来源映射开关。原始追溯、精确引用和处理证据仍在唯一 v2 及既有材料能力内；不因阅读页移除入口而删除事实。阅读位置以作品、研究域和显式选择形成稳定空间，仅保存 section/group 锚点、段内比例 within、段外 offset 与回退 scrollTop，不保存正文；revision 变化后在当前编排中按稳定锚点恢复，锚点已不存在时回退保存的滚动位置。
+
+共享作品详情继续使用既有 mainBlockRefs / supplementBlockRefs，原件与按需人工修正能力维持原行为。本次不改证据库其他页面，也不把研究底稿的章节重排传给 Works 组件。人工保存后刷新同一 canonical 底稿。
 
 手动云端识别沿现有图组/原件附近的 OCR 入口确认当前作品、选定图片、模型和地址。每张一次，首个失败停止；未知回执沿原 UUID 核对，停止使用既有批次合同。每张回执以 readingRef 标识保存的读本，isCurrent 由真实当前指针及来源匹配计算。只有 isCurrent=true 才能提示已进入当前底稿；成功或百分比不代替此证明。canonical materialRevision 变化（包括人工修正）后只读刷新识别状态，及时反映 isCurrent，不创建新任务。
 
@@ -161,3 +215,10 @@ interaction 包含 likes、comments、collects、shares。四项分别保留来�
 本次候选保留最新本地 Paddle local-v4、local-vl-v1、当前 DeepSeek-v4-flash 接口与本机现用安装。清理范围覆盖历次机器 OCR 结果、旧机器版本和关联下游副本，包括此前 DeepSeek 试跑；不为这些结果建立备份、归档或兼容读取。平台原文、原图、真正人工内容及共用连接/密钥继续按既有合同保留。历史 migration 源文件保持不可变，清理通过当前迁移办理。
 
 必须验证结构与完整内容、来源位置、CAS、人工作品保护、原请求重试、字节/来源限制、冻结输入和多消费者读取。技术测试、实际供应商识别效果、生产数据清理、合并部署与业务签收分别报告；单元、合成库或 loopback 证明不能当成真实供应商质量或 Gold。新的模型外发另行确认，生产回填、不可逆清理和合并部署按已有授权及最终候选办理。
+
+
+### 本轮必要验证
+
+至少覆盖真实 canonical 形状的 12 张与 13 张合成材料、跨页明确续句与独立短语反例、列表 start 连续/跳号、同表接续/独立表、未知顺序、缺页位置、不同材料相同 issue key、部分可读及有效空读本更新失败；长口播验证每个原始字与时码仍在 JSON，UI/MD 组顺序与全部引用一致。运输分段拼回时验证 refs、joiners、continuation、缺页定位恰好一次以及空尾段。
+
+HTTP 验证完整与显式选择的 JSON/Markdown expectedRevision 成功和冲突、错误比较 selection.completeRevision 的反例、读取前后无写入，并继续覆盖领域权限、受限来源和既有人工保护。共享 Works 的旧主次序列必须保持不变；内部 context_sources / render_materials 保留精确引用与完整结构。静态 Demo 与合成 fixture 只证明交互/序列化和规则，不证明真实 12 图 OCR、供应商识读质量或生产就绪。
