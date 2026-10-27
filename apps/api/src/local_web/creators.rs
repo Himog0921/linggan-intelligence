@@ -149,9 +149,9 @@ async fn preview(
         let Ok(Some(work))=current else {continue};
         let source=serde_json::to_value(work).unwrap_or(json!({}));
         works.push(json!({"workRef":work_ref,"ordinal":ordinal,
-            "title":source["display"]["title"],"likes":source["engagement"]["likes"]["value"],
-            "comments":source["engagement"]["comments"]["value"],
-            "collects":source["engagement"]["collects"]["value"]}));
+            "title":source["display"]["title"],"likes":source["display"]["engagement"]["likeCount"],
+            "comments":source["display"]["engagement"]["commentCount"],
+            "collects":source["display"]["engagement"]["collectCount"]}));
     }
     let phase:String=row.get("phase");
     let control:String=row.get("control_intent");
