@@ -12,26 +12,26 @@ function renderWithQuery(child: React.ReactNode) {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{child}</QueryClientProvider>);
 }
 function response(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }); }
-describe('frozen business AI uses the same control', () => {
+describe('current creator research uses shared controls', () => {
   it('reads only the foundation and preserves an explicit unknown when it cannot be read', async () => {
     const fetch = vi.fn(async (path: string) => { expect(path).toBe('/api/local/ai-settings'); return response({ error: 'ai_database_unavailable' }, 503); }); vi.stubGlobal('fetch', fetch);
-    renderWithQuery(<AiBusinessStatus taskKey="comment_study" />);
+    renderWithQuery(<AiBusinessStatus taskKey="creator_research" />);
     expect(await screen.findByText('开关读取失败，当前值待核对。')).toBeInTheDocument();
-    expect(screen.getByText(/已停用，接入时间另定/)).toBeInTheDocument();
+    expect(screen.getByText(/使用当前研究底稿/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '暂停此项 AI' })).toBeDisabled();
-    expect(screen.getByRole('link', { name: '去 AI 设置' })).toHaveAttribute('href', '/settings/models?view=advanced&area=work&task=comment_study');
+    expect(screen.getByRole('link', { name: '去 AI 设置' })).toHaveAttribute('href', '/settings/models?view=advanced&area=work&task=creator_research');
     expect(fetch).toHaveBeenCalledTimes(1); expect(fetch.mock.calls[0]?.[0]).toBe('/api/local/ai-settings');
   });
   it('pauses by task CAS and reports a confirmed receipt; no legacy API or queue is used', async () => {
     const base = settingsFixture(); let enabled = true; const posts: Record<string, unknown>[] = [];
     const fetch = vi.fn(async (path: string, init?: RequestInit) => {
-      if (init?.method === 'POST') { const body = JSON.parse(String(init.body)); posts.push(body); enabled = false; return response({ scopeKey: 'task:legacy_creator_discovery', revision: 5, enabled: false, commandRef: body.commandRef }); }
-      return response({ ...base, tasks: base.tasks.map(t => ({ ...t, taskKey: 'legacy_creator_discovery', label: '旧创作者分析', lifecycle: 'retired', configuration: { ...t.configuration, taskKey: 'legacy_creator_discovery' } })), controls: [{ ...base.controls[0], taskKey: 'legacy_creator_discovery', scope: 'task:legacy_creator_discovery', lifecycle: 'retired', enabled, revision: 4, commandRef: 'old-command' }] });
+      if (init?.method === 'POST') { const body = JSON.parse(String(init.body)); posts.push(body); enabled = false; return response({ scopeKey: 'task:creator_account_research', revision: 5, enabled: false, commandRef: body.commandRef }); }
+      return response({ ...base, tasks: base.tasks.map(t => ({ ...t, taskKey: 'creator_account_research', label: '账号样本研究', lifecycle: 'active', configuration: { ...t.configuration, taskKey: 'creator_account_research' } })), controls: [{ ...base.controls[0], taskKey: 'creator_account_research', scope: 'task:creator_account_research', lifecycle: 'active', enabled, revision: 4, commandRef: 'old-command' }] });
     }); vi.stubGlobal('fetch', fetch);
-    renderWithQuery(<AiBusinessStatus taskKey="legacy_creator_discovery" />);
+    renderWithQuery(<AiBusinessStatus taskKey="creator_account_research" />);
     const user = userEvent.setup(); await waitFor(() => expect(screen.getByRole('button', { name: '暂停此项 AI' })).toBeEnabled()); await user.click(screen.getByRole('button', { name: '暂停此项 AI' }));
     expect(await screen.findByText('统一工作开关已关闭，未创建新任务。')).toBeInTheDocument();
-    expect(posts).toHaveLength(1); expect(posts[0]).toMatchObject({ scope: { kind: 'task', task: 'legacy_creator_discovery' }, expectedRevision: 4, enabled: false });
+    expect(posts).toHaveLength(1); expect(posts[0]).toMatchObject({ scope: { kind: 'task', task: 'creator_account_research' }, expectedRevision: 4, enabled: false });
     await waitFor(() => expect(screen.getByRole('button', { name: '工作开关已关闭' })).toBeDisabled());
     expect(fetch.mock.calls.every(([path]) => path === '/api/local/ai-settings' || path === '/api/local/ai-settings/control')).toBe(true);
     expect(screen.queryByRole('button', { name: /启用|重试/ })).not.toBeInTheDocument();

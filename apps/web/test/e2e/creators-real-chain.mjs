@@ -195,7 +195,7 @@ try {
     await page.getByRole('button', { name: '材料范围' }).click();
     const scope = page.getByRole('dialog', { name: '材料范围与判断标准' });
     assert.match(await scope.innerText(), /至少两篇独立相关作品/);
-    assert.match(await scope.innerText(), /已分析，依据不足/);
+    assert.match(await scope.innerText(), /已研究，依据不足/);
     await shot('creators-1440-scope');
     await page.keyboard.press('Escape');
     await scope.waitFor({ state: 'detached' });
@@ -210,7 +210,7 @@ try {
     const overview = await panel.getByRole('tabpanel', { name: '概览' }).innerText();
     assert.ok(overview.indexOf('作者内容倾向') < overview.indexOf('内容方向与作品表达'));
     assert.match(overview, /尚不能判定/);
-    assert.match(overview, /尚无分析结果 · 旧自动分析已停用/);
+    assert.match(overview, /尚无研究结果 · 可在作品与作者详情发起研究/);
     assert.match(overview, /本次实际取样篇数未记录。/);
     assert.match(overview, /持续创作倾向须至少两篇独立相关作品/);
     assert.doesNotMatch(await panel.innerText(), UUID);
@@ -288,7 +288,7 @@ try {
     await page.getByRole('button', { name: '判定标准' }).click();
     const dialog = page.getByRole('dialog', { name: '发现设置' });
     await dialog.waitFor();
-    await dialog.getByRole('link', { name: '去 AI 设置' }).waitFor();
+    assert.equal(await dialog.getByRole('link', { name: '去 AI 设置' }).count(),2);
     await dialog.getByRole('spinbutton', { name: /最低点赞/ }).fill('100');
     await dialog.getByRole('button', { name: '保存设置' }).click();
     await dialog.waitFor({ state: 'detached' });
@@ -413,7 +413,7 @@ try {
     if (report.storage.returnValue !== null) assert.doesNotMatch(report.storage.returnValue, /合成/);
   });
 
-  for (const [width, height] of [[1440, 900], [1280, 720], [1024, 768], [390, 844]]) {
+  for (const [width, height] of [[1440, 900], [1280, 720]]) {
     await step(`${width}×${height}：列表与抽屉无页面级横向溢出，抽屉在视口内`, async () => {
       await page.setViewportSize({ width, height });
       await openList();

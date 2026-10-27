@@ -1,6 +1,6 @@
 import { ApiError, isRecord } from '../../shared/api';
 
-export const CREATOR_AI_RETIREMENT_NOTICE = '旧自动分析已停用';
+export const CREATOR_RESEARCH_GUIDANCE = '可在作品与作者详情发起研究';
 
 type Decoder<T> = (value: unknown) => T;
 type Fields = Record<string, Decoder<unknown>>;

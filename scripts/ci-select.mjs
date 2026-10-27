@@ -129,7 +129,6 @@ paths.web_real_chain = [
   'apps/web/src/pages/topics/TopicsPage.tsx',
   // These scripts are launched by the Rust/PostgreSQL proof runners below.
   // A test-only edit must execute the test it changes.
-  'apps/web/test/e2e/comments-real-chain.mjs',
   'apps/web/test/e2e/creators-real-chain.mjs',
   'apps/web/test/e2e/evidence-plugin-entry.mjs',
   'apps/web/test/e2e/evidence-real-chain.mjs',

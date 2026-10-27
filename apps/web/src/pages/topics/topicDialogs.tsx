@@ -269,7 +269,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
               <>
                 <p role={"status"}>
                   {
-                    "正在复核原文、评论与研究来源资格；旧研究片段和解释暂不展示。"
+                    "正在复核原文、评论与研究来源资格；上次结果的片段和解释暂不展示。"
                   }
                 </p>
               </>
@@ -619,10 +619,10 @@ export function createTopicDialogs(context: TopicDialogsContext) {
               </p>
             </section>
             <section className={cls("lgi-tm-rail-box")}>
-              <h3>{"已有结果继续可读"}</h3>
-              <p>{"旧主题研究已退役，材料与历史结果继续保留。"}</p>
+              <h3>{"继续研究"}</h3>
+              <p>{"选择作品后开始四阶段研究，方法与额度在 AI 设置管理。"}</p>
 
-              {btn("AI 状态与历史研究", "research", "", "lgi-tm-quiet")}
+              {btn("主题研究与阶段回执", "research", "", "lgi-tm-quiet")}
             </section>
           </aside>
         </div>
@@ -746,7 +746,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
             ))
           : empty(
               "当前没有已研究、可引用的不同角度",
-              "已有作品可继续读；旧模型研究已停用。",
+              "已有作品可继续读；可选择作品发起主题研究。",
             )}
       </>
     );

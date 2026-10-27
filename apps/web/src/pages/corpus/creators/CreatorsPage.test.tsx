@@ -59,7 +59,7 @@ describe('创作者页 · 列表', () => {
     expect(cells[0]).toHaveTextContent('粉丝 2,001');
     expect(cells[1]).toHaveTextContent('任务启动 · 晚间练习');
     expect(cells[2]).toHaveTextContent('本领域持续创作');
-    expect(within(cells[2]!).getByRole('button')).toHaveAttribute('title', expect.stringContaining('已有分析结果'));
+    expect(within(cells[2]!).getByRole('button')).toHaveAttribute('title', expect.stringContaining('已有研究结果'));
     expect(cells[3]).toHaveTextContent('亲历自述');
     expect(cells[4]).toHaveTextContent('3');
     expect(cells[4]).toHaveTextContent('待判断 2');
@@ -96,7 +96,7 @@ describe('创作者页 · 列表', () => {
         listJson({
           analysisEnabled: true,
           items: [
-            itemJson(1, { authorState: 'queued', authorResult: false, focusValue: 'unknown' }),
+            itemJson(1, { authorState: 'pending', authorResult: false, focusValue: 'unknown' }),
             itemJson(2, { authorState: 'failed', authorErrorCode: 'model_budget_exhausted', authorResult: false, focusValue: 'unknown' }),
             itemJson(3, { authorState: 'idle', authorResult: true, focusValue: 'unknown' }),
             itemJson(4, { authorState: 'idle', authorResult: false, focusValue: 'unknown' }),
@@ -105,25 +105,25 @@ describe('创作者页 · 列表', () => {
       ),
     );
     await loaded();
-    expect(within(rowFor('合成作者 1')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('历史排队记录 · 已停用，不再执行'));
-    expect(within(rowFor('合成作者 2')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('历史分析失败 · 本日额度已用尽'));
-    expect(within(rowFor('合成作者 3')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('已分析，依据不足'));
-    expect(within(rowFor('合成作者 4')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('尚无分析结果 · 旧自动分析已停用'));
+    expect(within(rowFor('合成作者 1')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('研究已排队，等待执行'));
+    expect(within(rowFor('合成作者 2')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('研究未完成 · 本日额度已用尽'));
+    expect(within(rowFor('合成作者 3')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('已研究，依据不足'));
+    expect(within(rowFor('合成作者 4')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('尚无研究结果 · 可在作品与作者详情发起研究'));
   });
 
-  it.each([true, false])('历史开关 %s 不改变退役展示，摘要、材料范围和筛选提示一致', async analysisEnabled => {
+  it.each([true, false])('旧开关字段 %s 不改变当前显式研究入口，材料范围说明一致', async analysisEnabled => {
     defaultRoutes(kit, ok(listJson({ analysisEnabled, items: [itemJson(1, { authorState: null, authorResult: false, focusValue: 'unknown' })] })));
     const { user } = await loaded(`/corpus/creators?domain=${DOMAIN}&focus=unknown`);
-    expect(within(rowFor('合成作者 1')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('尚无分析结果 · 旧自动分析已停用'));
+    expect(within(rowFor('合成作者 1')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('尚无研究结果 · 可在作品与作者详情发起研究'));
     expect(screen.getByRole('button', { name: '判定标准' })).toBeInTheDocument();
-    expect(screen.queryByText('旧自动分析已停用')).not.toBeInTheDocument();
-    expect(screen.getByText('仅检索已有判断；旧自动分析已停用。')).toBeInTheDocument();
+    expect(screen.queryByText('可在作品与作者详情发起研究')).not.toBeInTheDocument();
+    expect(screen.getByText('仅检索已有判断；可在作品与作者详情发起研究。')).toBeInTheDocument();
     expect(screen.queryByText(/自动分析已开启|自动分析未开启/)).toBeNull();
     await user.click(screen.getByRole('button', { name: '材料范围' }));
     const scope = await screen.findByRole('dialog', { name: '材料范围与判断标准' });
-    expect(scope).toHaveTextContent('旧自动分析已停用，当前标签仅统计已有判断');
-    expect(scope).toHaveTextContent('这些记录不会继续执行');
-    expect(scope).toHaveTextContent('旧分析不再提供重试');
+    expect(scope).toHaveTextContent('可在作品与作者详情发起研究，当前标签仅统计已有判断');
+    expect(scope).toHaveTextContent('按本次固定的模型、提示词和 Skill 执行');
+    expect(scope).toHaveTextContent('未知回执不得重复发送');
     expect(scope).not.toHaveTextContent('本领域已开启');
     expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
   });
@@ -621,7 +621,7 @@ describe('创作者页 · 材料范围与判断标准', () => {
     expect(dialog).toHaveTextContent('当前范围 80 篇作品 · 已确认相关 20 位作者');
     expect(dialog).toHaveTextContent('领域说明：尚未填写');
     expect(dialog).toHaveTextContent('研究目标：尚未填写');
-    expect(dialog).toHaveTextContent('旧自动分析已停用');
+    expect(dialog).toHaveTextContent('可在作品与作者详情发起研究');
     const unknownAuthors = within(dialog).getByRole('link', { name: '作者身份待补 4 篇' });
     expect(unknownAuthors.getAttribute('href')).toContain('/corpus/evidence?');
     expect(JSON.parse(new URL(unknownAuthors.getAttribute('href') as string, 'http://x').searchParams.get('creatorFilter') as string)).toMatchObject({ unknownAuthor: true });
@@ -652,7 +652,7 @@ describe('创作者页 · 材料范围与判断标准', () => {
     expect(criteria).toHaveTextContent('「作品」层面的表达');
     expect(criteria).toHaveTextContent('「作者」层面的倾向');
     const states = within(dialog).getByRole('region', { name: '分析状态说明' });
-    expect(states).toHaveTextContent('已分析，依据不足');
+    expect(states).toHaveTextContent('已研究，依据不足');
     expect(states).toHaveTextContent('不代表失败');
   });
 

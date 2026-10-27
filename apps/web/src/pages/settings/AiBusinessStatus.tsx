@@ -1,15 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { ActionButton } from '../../shared/ActionButton';
 import { AI_SETTINGS_KEY, command, fetchAiSettings } from './aiSettingsApi';
-import { controlStatus, CREATOR_AI_RETIREMENT_NOTICE, TASK_STATE } from './aiSettingsModel';
+import { controlStatus, TASK_STATE } from './aiSettingsModel';
 import { NoticeLine } from './AiSettingsFields';
 import { useAiAction } from './useAiAction';
 import styles from './AiSettings.module.css';
 
 const LANES = {
-  comment_study: { label: '评论研究 AI', description: '已停用，接入时间另定；历史结果仍可读。' },
-  legacy_creator_discovery: { label: '创作者 AI', description: `${CREATOR_AI_RETIREMENT_NOTICE}；作者简介判断在第二步接入。` },
-  legacy_topic_map: { label: '主题研究 AI', description: '旧主题研究已退役；材料与历史结果仍可读。' },
+  creator_research: {label:'单篇作品研究',description:'使用当前研究底稿判断作品相关性、特征与内容方向。'},
+  creator_account_research: {label:'账号样本研究',description:'固定作品样本与可用公开简介，形成有依据和限制的账号判断。'},
 };
 export function AiBusinessStatus({ taskKey }: { taskKey: keyof typeof LANES }) {
   const lane = LANES[taskKey];

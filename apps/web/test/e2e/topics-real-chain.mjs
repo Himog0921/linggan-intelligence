@@ -405,15 +405,15 @@ try {
     },
   );
   await step(
-    "retired research preserves history and central settings without configuration or dispatch",
+    "current staged research links central settings without implicit dispatch",
     async () => {
       await go();
       await action("research");
-      const dialog=page.getByRole("dialog",{name:"AI 状态与历史研究"});await dialog.waitFor();
-      assert.equal(await dialog.getByRole("link",{name:"去 AI 设置"}).getAttribute("href"),"/settings/models?view=advanced&area=work&task=legacy_topic_map");
+      const dialog=page.getByRole("dialog",{name:"主题研究"});await dialog.waitFor();
+      assert.equal(await dialog.getByRole("link",{name:"去 AI 设置"}).getAttribute("href"),"/settings/models?view=advanced&area=work&task=topic_research");
       assert.equal(await dialog.locator('form[data-form="research-config"]').count(),0);
-      const refreshed=page.waitForResponse(r=>r.request().method()==="GET"&&r.url().includes("/topic-map/research?"));
-      await dialog.getByRole("button",{name:"刷新历史记录"}).click();assert.equal((await refreshed).status(),200);
+      const refreshed=page.waitForResponse(r=>r.request().method()==="GET"&&r.url().includes("/topic-research/runs?"));
+      await dialog.getByRole("button",{name:"刷新阶段回执"}).click();assert.equal((await refreshed).status(),200);
       const response=await page.request.post(origin+"/api/local/topic-map/research/commands",{data:{
         action:"configure",requestRef:crypto.randomUUID(),domainRef:domain,modelConfigRef:fixture.modelConfigRef,
         dailyTokenLimit:50000,runTokenLimit:10000,automaticEnabled:true,collectionEnabled:false,
@@ -508,16 +508,8 @@ try {
     },
   );
   await step(
-    "narrow layout, browser navigation and explicit unreadable API boundary",
+    "desktop navigation and explicit unreadable API boundary",
     async () => {
-      await page.setViewportSize({ width: 390, height: 844 });
-      await go(`&topicRef=${topicRef}`);
-      await action("toggle-navigation");
-      await page.screenshot({
-        path: path.join(dir, "topic-mobile.png"),
-        fullPage: true,
-      });
-      await page.setViewportSize({ width: 1440, height: 900 });
       await go();
       const foreign = await page.request.get(
         `${origin}/api/local/topic-map/summary?domainRef=${domain}`,

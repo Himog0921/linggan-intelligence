@@ -101,7 +101,7 @@ test('page files with direct HTTP calls cannot silently enter the UI-only route'
 
 test('every current browser script has an explicit proof or manual-only classification', () => {
   const realChain = [
-    'comments-real-chain.mjs', 'creators-real-chain.mjs', 'evidence-plugin-entry.mjs',
+    'creators-real-chain.mjs', 'evidence-plugin-entry.mjs',
     'evidence-real-chain.mjs', 'login-react.mjs', 'offline-preview.mjs',
     'ops-real-chain.mjs', 'research-dossier-v2.mjs', 'settings-real-chain.mjs',
     'settings-trials-real-chain.mjs', 'topics-real-chain.mjs', 'workbench-real-chain.mjs',

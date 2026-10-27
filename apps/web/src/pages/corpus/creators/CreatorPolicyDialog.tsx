@@ -79,7 +79,7 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
             </label>
             <p className={styles.help}>仅重算已有材料的表现，不启动采集或模型。</p>
           </section>
-          <AiBusinessStatus taskKey="legacy_creator_discovery" />
+          <AiBusinessStatus taskKey="creator_research" /><AiBusinessStatus taskKey="creator_account_research" />
         </div>
         <footer className={styles.foot}>
           <div className={styles.footNote}>
