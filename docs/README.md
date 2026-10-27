@@ -12,6 +12,7 @@
 
 ## 2026-10-27 · 统一研究自动化
 
+- [统一研究自动化收口回执](audits/unified-research-automation-2026-10-27.md)：实现、审查修复、隔离与真实材料流程证明、发布边界。
 - [研究自动化执行合同](data-contracts/research-automation.md)：评论、主题与创作者各自业务流程、统一输入、版本设置、取消与来源资格。
 - [统一研究自动化工作包](plans/active/unified-research-automation-001.md)：旧链路/旧表退役、统一底稿及九阶段 AI 版本设置的当前候选与验证边界；尚未发布。
 
