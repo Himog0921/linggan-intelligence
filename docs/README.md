@@ -10,6 +10,15 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-10-27 · 创作模块（资产版）开工准备 CREATION-ASSETS-001（草案）
+
+- [现状继承审计](audits/creation-assets-inheritance-audit-2026-10-27.md)：交互 Demo 每项能力对应到现有代码与合同（复用/扩展/新建/冲突），冲突项选项与建议。
+- [DEC-0012 创作资产层（草案）](decisions/0012-creation-asset-layer.md)：资产层、选题框、衔接句口径、三级检查；含 DEC-0009 修订段草案与 Codex D01–D12 对照。
+- [创作流程规格（草案）](product/creation-asset-workflow.md)：用户、路径、对象与状态、第一版范围、验收场景、检查规则全表、领域对象与数据草案。
+- [页面与交互规格（草案）](design/pages/creation-assets-pages.md)：写稿、材料桌、资产库、证据库“复刻成样板”、入口。
+- [实施切片计划（草案）](plans/active/creation-assets-001.md)：S0–S5、依赖、授权、PR 拆分、试用与可用性测试方案；Mog 确认前不授权开工。
+- [技术小样报告](audits/creation-assets-prototype-2026-10-27.md)：中文输入与撤销、200 张卡、复制格式真机步骤、样板复刻试做方案。
+
 ## 2026-10-25 · 统一研究底稿 STANDARD-DOSSIER-001
 
 - [实施、系统测试与问题报告](audits/standard-dossier-001-2026-10-25.md)：候选、截图、T01–T14证据及独立审查；正式发布另按最终版本授权。
