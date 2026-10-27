@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { findAuthorButton } from './findAuthor';
@@ -72,6 +72,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
   const [tab, setTab] = useState<DrawerTab>(initialTab);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(restore?.expanded ?? []));
   const joinPending = useJoinPending(item.creatorKey);
+  const resizeStart = useRef<{ x: number; width: number } | null>(null);
 
   const domainActive = data.domain.status === 'active';
   const name = authorName(item);
@@ -111,6 +112,25 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
     onTab: switchTab,
   };
 
+  function onResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (window.innerWidth <= 600) return;
+    const dialog = event.currentTarget.closest('dialog');
+    if (!dialog) return;
+    resizeStart.current = { x: event.clientX, width: dialog.getBoundingClientRect().width };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function onResizePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!resizeStart.current) return;
+    const dialog = event.currentTarget.closest('dialog');
+    if (!dialog) return;
+    const width = resizeStart.current.width + resizeStart.current.x - event.clientX;
+    dialog.style.width = `${Math.min(window.innerWidth, Math.max(600, width))}px`;
+  }
+  function onResizePointerUp(event: PointerEvent<HTMLDivElement>) {
+    resizeStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
   const observation = item.observation;
   const kept = preservedLifecycle(observation);
   const blocked = query.usageRole === 'primary' && observation.hasOtherPrimaryDomain === true;
@@ -126,6 +146,25 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       setup={positionBelowHeader}
       closeOnBackdrop
     >
+      <div
+        className={styles.resizeHandle}
+        role="separator"
+        tabIndex={0}
+        aria-label="调整作者研究抽屉宽度"
+        aria-orientation="vertical"
+        onPointerDown={onResizePointerDown}
+        onPointerMove={onResizePointerMove}
+        onPointerUp={onResizePointerUp}
+        onPointerCancel={onResizePointerUp}
+        onKeyDown={event => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          const dialog = event.currentTarget.closest('dialog');
+          if (!dialog) return;
+          const width = dialog.getBoundingClientRect().width + (event.key === 'ArrowLeft' ? 24 : -24);
+          dialog.style.width = `${Math.min(window.innerWidth, Math.max(Math.min(window.innerWidth, 600), width))}px`;
+        }}
+      />
       <header className={styles.head}>
         <div className={styles.title}>
           <Avatar name={name} url={avatarUrl} pending={resources.pending} className={`${pageStyles.avatar} ${pageStyles.avatarLarge}`} />
