@@ -731,13 +731,7 @@ async fn comments_entry_preserves_json_routes_and_retires_legacy_assets() {
         assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
     }
     let domain = "00000000-0000-4000-8000-000000000001";
-    for path in [
-        "overview",
-        "comments",
-        "runs",
-        "problem-cards",
-        "problem-candidates",
-    ] {
+    for path in ["comments", "catalog-summary", "works", "word-cloud"] {
         let url = format!("/api/local/comment-study/{path}?domain={domain}");
         let (status, headers, body) = send(app(), &url, "127.0.0.1:3000").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
@@ -748,6 +742,33 @@ async fn comments_entry_preserves_json_routes_and_retires_legacy_assets() {
                 .starts_with("application/json")
         );
         assert!(!body.contains("<div id=\"root\">"), "{path}");
+    }
+    for path in ["runs", "problems"] {
+        let url = format!("/api/local/comment-research/{path}?domainRef={domain}");
+        let (status, headers, body) = send(app(), &url, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
+        assert!(
+            headers[header::CONTENT_TYPE]
+                .to_str()
+                .unwrap()
+                .starts_with("application/json")
+        );
+        assert!(!body.contains("<div id=\"root\">"));
+    }
+    for (path, expected) in [
+        ("overview", StatusCode::NOT_FOUND),
+        ("runs", StatusCode::METHOD_NOT_ALLOWED),
+        ("problem-cards", StatusCode::NOT_FOUND),
+        ("problem-candidates", StatusCode::NOT_FOUND),
+    ] {
+        let (status, _, body) = send(
+            app(),
+            &format!("/api/local/comment-study/{path}?domain={domain}"),
+            "127.0.0.1:3000",
+        )
+        .await;
+        assert_eq!(status, expected, "{path}");
+        assert!(!body.contains("<div id=\"root\">"));
     }
 }
 

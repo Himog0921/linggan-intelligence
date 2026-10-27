@@ -9,20 +9,15 @@ use sqlx::Row;
 use uuid::Uuid;
 const PURGE: &str = include_str!("../../../database/migrations/0168_dossier_ocr_cleanup.sql");
 async fn baseline(name: &str) -> Database {
-    let source = schema::FULL_MIGRATIONS.replacen(PURGE, "", 1);
-    let source = source
-        .lines()
-        .filter(|line| !line.contains("VALUES ('0168_dossier_ocr_cleanup'"))
-        .collect::<Vec<_>>()
-        .join("\n");
+    // This migration test must start immediately before 0168. Applying later
+    // retirement migrations would remove the very historical owners being tested.
+    let (source, _) = schema::FULL_MIGRATIONS
+        .split_once(PURGE)
+        .expect("0168 fixture boundary");
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
-    isolated_proof_schema(
-        &url,
-        &format!("{name}_{}", Uuid::new_v4().simple()),
-        &source,
-    )
-    .await
-    .unwrap()
+    isolated_proof_schema(&url, &format!("{name}_{}", Uuid::new_v4().simple()), source)
+        .await
+        .unwrap()
 }
 async fn native_human(db: &Database, work: Uuid) -> Uuid {
     let row=sqlx::query("SELECT u.unit_ref,u.source_version,u.revision,r.reading_ref FROM linggan_material_unit u JOIN linggan_material_reading r ON r.reading_ref=u.current_reading_ref WHERE u.content_public_ref=$1 AND u.kind='body'").bind(work).fetch_one(db.pool()).await.unwrap();

@@ -20,6 +20,7 @@ cleanup(){
  exit "$task_exit"
 }
 trap cleanup EXIT
+"$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
 docker volume create "$proof_volume" >/dev/null;volume_created=1
 docker run -d --name "$proof_container" --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" --env POSTGRES_DB="$proof_database" --env POSTGRES_USER="$proof_user" --env POSTGRES_PASSWORD="$proof_password" linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1 -c max_locks_per_transaction=1024 >/dev/null
 created=1
