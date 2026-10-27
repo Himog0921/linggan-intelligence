@@ -7,7 +7,7 @@ use super::*;
 use std::{fs, path::Path as ProofPath};
 use uuid::Uuid;
 
-/// 浏览器路径在库里留下的后果：采集请求、准入决定、工单、租约、模型调用、重新分层结果。
+/// 浏览器路径在库里留下的后果：采集请求、准入决定、工单、租约、模型调用与 canonical 读本。
 #[derive(Debug, PartialEq, Eq)]
 struct Effects {
     requests: i64,
@@ -16,6 +16,10 @@ struct Effects {
     leases: i64,
     model_invocations: i64,
     reading_rows: i64,
+    reading_selections: i64,
+    reading_commands: i64,
+    dossier_snapshots: i64,
+    media_jobs: i64,
 }
 
 async fn effects(db: &Database) -> Effects {
@@ -32,6 +36,10 @@ async fn effects(db: &Database) -> Effects {
         leases: count("SELECT count(*) FROM collection_work_order_lease").await,
         model_invocations: count("SELECT count(*) FROM linggan_model_invocation").await,
         reading_rows: count("SELECT count(*) FROM linggan_material_reading").await,
+        reading_selections: count("SELECT count(*) FROM linggan_material_reading_selection").await,
+        reading_commands: count("SELECT count(*) FROM linggan_material_reading_command").await,
+        dossier_snapshots: count("SELECT count(*) FROM linggan_dossier_snapshot").await,
+        media_jobs: count("SELECT count(*) FROM linggan_media_processing_job").await,
     }
 }
 
@@ -56,7 +64,7 @@ fn writes(report: &Value) -> Vec<Write> {
 }
 
 /// 浏览器真实链路：打开与外壳 → 未选领域 → 三种排版与续读 → 检索与筛选 → 阅读主序 → 媒体与查看器 → 评论 →
-/// 研究底稿（预览、导出、重新分层、批量弹窗）→ 立即复观测 → 评论深采 → 入站链接 → 评论深采交接 → 存储 →
+/// 研究底稿（共享读本、连续阅读、同版本 MD/JSON 导出）→ 立即复观测 → 评论深采 → 入站链接 → 评论深采交接 → 存储 →
 /// 四个视口 → 负例。
 // 多线程：浏览器子进程运行期间，服务器任务必须能在其他线程上继续响应。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -149,6 +157,7 @@ async fn evidence_page_real_chain_browser_proof() {
     assert_eq!(report["finished"], true);
     assert_eq!(report["pageErrors"], json!([]));
     assert_eq!(report["blockedRequests"], json!([]), "没有外域请求");
+    assert_dossier_reading_proof(&db, data.rich, &report["dossier"]).await;
     let writes = writes(&report);
     let reobserve = writes
         .iter()
@@ -160,8 +169,8 @@ async fn evidence_page_real_chain_browser_proof() {
         .count();
     assert_eq!(reobserve + runs, writes.len(), "页面只提交复观测与评论深采");
     assert!(writes.iter().all(|write| write.status == 200));
-    // 脚本里的写动作是固定的：复观测两次（先建工单，再合并）；重新分层五次（底稿里两次、批量弹窗里三篇）；
-    // 评论深采两次（富作品尽量采全、视频作品指定 40 条）。
+    // 写动作固定为复观测两次（先建工单，再合并）与评论深采两次（富作品尽量采全、视频指定 40 条）。
+    // 研究底稿只阅读和导出，不产生原件修正、模型或识读请求。
     assert_eq!((reobserve, runs), (2, 2));
     // 评论深采与采集页同一条合同：每次一个只含该作品的单次采集（富作品尽量采全；视频作品采到 40 条就停）。
     // 建立时只冻结范围，采集请求、工单与租约要等调度推进才形成，所以下面的计数不受它影响。
@@ -211,10 +220,57 @@ async fn evidence_page_real_chain_browser_proof() {
     assert_eq!(after.leases, before.leases, "请求时从不形成租约");
     assert_eq!(
         after.model_invocations, before.model_invocations,
-        "预览 AI 输入、导出、读取都不调用模型"
+        "底稿阅读、预览与导出都不调用模型"
     );
     assert_eq!(
         after.reading_rows, before.reading_rows,
         "read-only browsing and collection requests do not rewrite canonical text"
+    );
+    assert_eq!(
+        (
+            after.reading_selections,
+            after.reading_commands,
+            after.dossier_snapshots,
+            after.media_jobs
+        ),
+        (
+            before.reading_selections,
+            before.reading_commands,
+            before.dossier_snapshots,
+            before.media_jobs
+        ),
+        "reading and export cannot change adoption, create reviews/snapshots, or start recognition"
+    );
+}
+
+async fn assert_dossier_reading_proof(db: &Database, work: Uuid, proof: &Value) {
+    assert_eq!(proof["workRef"], json!(work));
+    assert_eq!(
+        proof["markdownBodyParagraphs"], 40,
+        "the synthetic long body is complete"
+    );
+    assert_eq!(proof["writes"], 0);
+    let as_of = proof["asOf"]
+        .as_str()
+        .expect("the export pins its own cutoff");
+    let canonical = linggan_evidence::research_dossier::read_at(db, work, Some(as_of))
+        .await
+        .unwrap()
+        .expect("the same canonical snapshot remains readable");
+    for key in ["snapshotRevision", "jsonRevision", "markdownRevision"] {
+        assert_eq!(proof[key], canonical.revision, "{key}");
+    }
+    let group_refs: Vec<_> = canonical.reading_view["sections"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|section| section["groups"].as_array().into_iter().flatten())
+        .map(|group| group["ref"].clone())
+        .collect();
+    assert!(!group_refs.is_empty());
+    assert_eq!(
+        proof["groupRefs"],
+        json!(group_refs),
+        "the rendered groups are the complete owner plan"
     );
 }

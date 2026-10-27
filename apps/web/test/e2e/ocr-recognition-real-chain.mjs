@@ -2,6 +2,7 @@
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 const directory = process.env.OCR_AUDIT_PROOF_OUTPUT;
@@ -14,8 +15,7 @@ for (const ref of [workRef, domain]) assert.match(ref, /^[0-9a-f-]{36}$/i);
 const statePath = `/api/local/work-resources/${workRef}/ocr-recognition`;
 const dossierPath = `/api/local/work-resources/${workRef}/research-dossier`;
 const configPath = '/api/local/ai-settings/task-configs';
-const reviewPaths = new Set();
-const report = { result: 'FAIL', scope: 'actual React/API/owned PG; loopback supplier mock; no real provider calls', writes: [], startCommands: [], reviewCommands: [], blockedRequests: [], errors: [], steps: [] };
+const report = { result: 'FAIL', scope: 'actual React OCR/reading UI and HTTP correction API/owned PG; no human-edit UI entry; loopback supplier mock; no real provider calls', writes: [], startCommands: [], reviewCommands: [], blockedRequests: [], errors: [], steps: [] };
 const browser = await chromium.launch({ headless: true, ...(process.env.DOSSIER_BROWSER_EXECUTABLE ? { executablePath: process.env.DOSSIER_BROWSER_EXECUTABLE } : {}) });
 let page;
 async function readJson(requestPath) {
@@ -37,14 +37,12 @@ try {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1100 }, locale: 'zh-CN' });
   await context.route('**/*', route => {
     const request = route.request(); const url = new URL(request.url());
-    const allowedReview = request.method() === 'POST' && reviewPaths.has(url.pathname) && url.searchParams.get('domain') === domain;
-    const allowedWrite = request.method() === 'POST' && ([configPath, statePath].includes(url.pathname) || allowedReview);
+    const allowedWrite = request.method() === 'POST' && [configPath, statePath].includes(url.pathname);
     if (url.origin !== origin || (request.method() !== 'GET' && !allowedWrite)) {
       report.blockedRequests.push(`${request.method()} ${request.url()}`); return route.abort();
     }
     if (allowedWrite) report.writes.push(url.pathname);
     if (allowedWrite && url.pathname === statePath) report.startCommands.push(request.postDataJSON());
-    if (allowedReview) report.reviewCommands.push({ path: url.pathname, command: request.postDataJSON() });
     return route.continue();
   });
   page = await context.newPage(); page.setDefaultTimeout(30000);
@@ -130,47 +128,94 @@ try {
   await page.screenshot({path:path.join(directory,'recognition-current-1440.png'),fullPage:true});
   report.steps.push('Completed image outputs are actual canonical current readings; the work view refreshes the same reading without a duplicate candidate panel.');
 
-  await page.getByRole('tab',{name:'研究底稿',exact:true}).click();
-  const dossier=page.getByRole('tabpanel',{name:'研究底稿',exact:true});
-  await dossier.getByRole('heading',{name:'研究底稿',exact:true}).waitFor();
-  const unit=imageUnits.find(unit=>unit.currentRevisionRef===final.images[0].readingRef);assert.ok(unit);
-  await dossier.locator(`[data-unit-ref="${unit.ref}"]`).getByRole('button',{name:'查看来源',exact:true}).first().click();
-  const original=dossier.locator(`[data-source-unit-ref="${unit.ref}"]`);
-  await loadedImage(original.getByRole('img'));
-  await original.getByRole('button',{name:'修正文字',exact:true}).click();
-  const reviewPath=`${dossierPath}/materials/${unit.ref}/review`;reviewPaths.add(reviewPath);
-  const manualText='合成浏览器人工修正文：完整保留数字 42、否定与来源。';
-  await original.getByLabel('段落文字',{exact:true}).first().fill(manualText);
-  await original.getByLabel('修正人',{exact:true}).fill('合成浏览器修正人');
-  await original.getByLabel('修正说明',{exact:true}).fill('对照受控原图保存完整修正。');
-  await original.getByRole('checkbox',{name:'已对照原件核验文字',exact:true}).check();
-  const savedHuman=page.waitForResponse(response=>new URL(response.url()).pathname===reviewPath && response.request().method()==='POST');
-  await original.getByRole('button',{name:'保存修正',exact:true}).click();
-  const response=await savedHuman;assert.equal(response.status(),200,await response.text());const receipt=await response.json();
-  assert.equal(receipt.adoption,'human_edited');assert.equal(receipt.verification,'verified');
-  const human=report.reviewCommands[0].command;
-  assert.equal(human.action,'edit');assert.equal(human.unitRef,unit.ref);assert.equal(human.sourceVersion,unit.sourceVersion);
-  assert.equal(human.expectedCurrentRevisionRef,unit.currentRevisionRef);assert.ok(!('candidateRevisionRef' in human));
-  const afterHuman=await readJson(`${dossierPath}?domain=${domain}`);
-  const current=afterHuman.dossier.materials.find(item=>item.ref===unit.ref);
-  assert.equal(current.currentRevisionRef,receipt.currentRevisionRef);assert.ok(current.blocks.some(block=>block.text===manualText));
-  assert.equal(current.reading.review.actor,human.actor);assert.equal(current.reading.review.reason,human.reason);
-  await dossier.locator(`[data-unit-ref="${unit.ref}"]`).getByText(manualText,{exact:true}).waitFor();
-  await dossier.getByText(/2 张图片已进入当前底稿/).waitFor();
-  const sameRun=await readJson(statePath);assert.equal(sameRun.runRef,final.runRef);
-  assert.equal(sameRun.images[0].isCurrent,false);assert.equal(sameRun.images[0].rawJson,final.images[0].rawJson);
-  assert.deepEqual(sameRun.images.map(image=>image.readingRef),final.images.map(image=>image.readingRef));
-  await page.screenshot({path:path.join(directory,'recognition-human-edit-1440.png'),fullPage:true});
-  report.steps.push('Source navigation opens an actual decoded image; one edit command updates canonical content and the recognition status refreshes its actual current pointer.');
-  await page.reload();await page.getByRole('tabpanel',{name:'研究底稿',exact:true}).locator(`[data-unit-ref="${unit.ref}"]`).getByText(manualText,{exact:true}).waitFor();
-  const reloaded=await readJson(statePath);assert.equal(reloaded.runRef,final.runRef);
-  await page.setViewportSize({width:1280,height:1000});
-  await page.screenshot({path:path.join(directory,'recognition-human-edit-1280.png'),fullPage:true});
+  // Original-image inspection belongs to the existing Works media rail, not the dossier document.
+  const originalUrl = new URL(final.images[0].originalUrl, origin);
+  assert.equal(originalUrl.origin, origin);
+  const rail = page.getByRole('region', { name: '本机媒体材料轨道', exact: true });
+  const thumbnails = rail.getByRole('img');
+  const imageIndex = (await thumbnails.evaluateAll(images => images.map(image => image.src))).indexOf(originalUrl.href);
+  assert.ok(imageIndex >= 0, 'the current OCR source is an existing Works media object');
+  const thumbnail = thumbnails.nth(imageIndex);
+  await thumbnail.scrollIntoViewIfNeeded(); await loadedImage(thumbnail); await thumbnail.click();
+  const viewer = page.getByRole('dialog');
+  await loadedImage(viewer.getByRole('img'));
+  assert.equal(await viewer.getByRole('img').evaluate(image => image.src), originalUrl.href);
+  await page.screenshot({ path: path.join(directory, 'recognition-source-works.png'), fullPage: true });
+  await viewer.getByRole('button', { name: '关闭查看器', exact: true }).click();
+  report.steps.push('The existing Works media rail opens the actual decoded local image used by the current OCR reading.');
+
+  await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
+  const dossier = page.getByRole('tabpanel', { name: '研究底稿', exact: true });
+  const document = dossier.getByRole('article', { name: '连续阅读文档', exact: true });
+  await document.getByRole('heading', { name: '图片文字', exact: true }).waitFor();
+  assert.equal(await dossier.getByRole('button', { name: '查看来源', exact: true }).count(), 0);
+  assert.equal(await dossier.getByRole('button', { name: '修正文字', exact: true }).count(), 0);
+  assert.equal((await document.innerText()).match(/SYNTHETIC BRAND/g)?.length, 3, 'the continuous document retains all repeated source lines');
+  const unit = imageUnits.find(unit => unit.currentRevisionRef === final.images[0].readingRef); assert.ok(unit);
+  const reviewPath = `${dossierPath}/materials/${encodeURIComponent(unit.ref)}/review`;
+  const reviewUrl = new URL(`${reviewPath}?domain=${domain}`, origin);
+  assert.equal(reviewUrl.origin, origin);
+  const manualText = '合成浏览器人工修正文：完整保留数字 42、否定与来源。';
+  const editedBlocks = structuredClone(unit.blocks);
+  const paragraph = editedBlocks.find(block => block.kind === 'paragraph'); assert.ok(paragraph);
+  paragraph.text = manualText;
+  const human = {
+    commandRef: randomUUID(), unitRef: unit.ref, sourceVersion: unit.sourceVersion,
+    expectedCurrentRevisionRef: unit.currentRevisionRef, action: 'edit', editedBlocks,
+    actor: '合成 API 修正人', reason: '浏览器已打开受控原图；经真实 API 保存完整修正。',
+    verified: true, resolvedIssueKeys: [],
+  };
+  // The product intentionally has no human-edit UI entry. APIRequestContext is a real HTTP
+  // client, not page routing; log this separately so it cannot be reported as a UI command.
+  async function reviewByApi(command) {
+    const response = await page.request.post(reviewUrl.href, { data: command });
+    const body = await response.json();
+    report.reviewCommands.push({ path: reviewPath, transport: 'http-api', command, status: response.status() });
+    return { status: response.status(), body };
+  }
+  const savedHuman = await reviewByApi(human);
+  assert.equal(savedHuman.status, 200, JSON.stringify(savedHuman.body));
+  const receipt = savedHuman.body;
+  assert.equal(receipt.adoption, 'human_edited'); assert.equal(receipt.verification, 'verified');
+  assert.notEqual(receipt.currentRevisionRef, unit.currentRevisionRef);
+  assert.equal(receipt.unitRef, unit.ref); assert.equal(receipt.commandRef, human.commandRef);
+  assert.ok(!('candidateRevisionRef' in human));
+  const replay = await reviewByApi(human);
+  assert.equal(replay.status, 200); assert.deepEqual(replay.body, receipt, 'the same command reuses its receipt');
+  const stale = await reviewByApi({ ...human, commandRef: randomUUID() });
+  assert.equal(stale.status, 409); assert.equal(stale.body.code, 'reading_revision_conflict');
+  const afterHuman = await readJson(`${dossierPath}?domain=${domain}`);
+  const current = afterHuman.dossier.materials.find(item => item.ref === unit.ref); assert.ok(current);
+  assert.equal(current.currentRevisionRef, receipt.currentRevisionRef); assert.ok(current.blocks.some(block => block.text === manualText));
+  assert.equal(current.reading.review.actor, human.actor); assert.equal(current.reading.review.reason, human.reason);
+  assert.deepEqual(current.blocks.filter(block => block.kind !== 'paragraph').map(block => block.text), unit.blocks.filter(block => block.kind !== 'paragraph').map(block => block.text));
+  report.manualCorrection = { transport: 'http-api', uiEntryPoint: false, unitRef: unit.ref, currentRevisionRef: receipt.currentRevisionRef };
+  report.steps.push('Actual correction API applies one source-version/current-reading CAS edit; replay returns the same receipt and a new stale command returns 409. No human-edit UI is covered.');
+
+  const refreshed = page.waitForResponse(response => new URL(response.url()).pathname === dossierPath && response.request().method() === 'GET');
+  await dossier.getByRole('button', { name: '刷新底稿', exact: true }).click();
+  const refreshedResponse = await refreshed; assert.equal(refreshedResponse.status(), 200, await refreshedResponse.text());
+  await document.getByText(manualText, { exact: false }).waitFor();
+  assert.equal((await document.innerText()).match(/SYNTHETIC BRAND/g)?.length, 3);
+  await page.screenshot({ path: path.join(directory, 'recognition-api-correction-1440.png'), fullPage: true });
+  await page.getByRole('tab', { name: '作品', exact: true }).click();
+  await workReading.getByText(manualText, { exact: false }).waitFor();
+  await page.getByRole('tabpanel', { name: '作品', exact: true }).getByText(/2 张图片已进入当前底稿/).waitFor();
+  const sameRun = await readJson(statePath); assert.equal(sameRun.runRef, final.runRef);
+  assert.equal(sameRun.images[0].isCurrent, false); assert.equal(sameRun.images[0].rawJson, final.images[0].rawJson);
+  assert.deepEqual(sameRun.images.map(image => image.readingRef), final.images.map(image => image.readingRef));
+  await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
+  await page.reload(); await document.getByText(manualText, { exact: false }).waitFor();
+  const reloaded = await readJson(statePath); assert.equal(reloaded.runRef, final.runRef);
+  await page.setViewportSize({ width: 1280, height: 1000 });
+  await page.screenshot({ path: path.join(directory, 'recognition-api-correction-1280.png'), fullPage: true });
+  report.steps.push('Dossier refresh, Works reading/status and a page reload show the persisted API correction; original OCR readings and provider JSON remain unchanged.');
   assert.deepEqual(report.errors,[]);assert.deepEqual(report.blockedRequests,[]);
   assert.equal(report.writes.filter(value=>value===statePath).length,1);assert.equal(report.writes.filter(value=>value===configPath).length,1);
-  assert.deepEqual(report.reviewCommands.map(value=>value.command.action),['edit']);
+  assert.deepEqual(report.reviewCommands.map(value=>value.command.action),['edit', 'edit', 'edit']);
+  assert.deepEqual(report.reviewCommands.map(value=>value.status),[200, 200, 409]);
   Object.assign(report,{result:'PASS',runRef:final.runRef,readingRefs:final.images.map(image=>image.readingRef),observedPercentage:33,finalPercentage:100});
-  console.log('Current OCR browser: explicit source scope → persisted progress → canonical reading → source image → edit-only → refresh PASS');
+  console.log('Current OCR proof: Works source scope/progress/image UI → actual correction API replay/CAS → continuous dossier/Works refresh PASS; no human-edit UI covered');
 } catch (error) {
   report.error = String(error?.stack ?? error);
   if (page) { await writeFile(path.join(directory, 'recognition-browser-failure.html'), await page.content()); await page.screenshot({ path: path.join(directory, 'recognition-browser-failure.png'), fullPage: true }); }
