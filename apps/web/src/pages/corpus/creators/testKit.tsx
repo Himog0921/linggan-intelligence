@@ -313,6 +313,10 @@ export function defaultRoutes(kit: FetchKit, list: Responder = ok(listJson())) {
   kit.route('GET', '/api/local/corpus/shell', ok(shellJson()));
   kit.route('GET', '/api/local/creators', list);
   kit.route('GET', '/api/local/work-resources', ok({ items: [] }));
+  for (let n=1; n<=40; n++) {
+    kit.route('GET', `/api/local/creators/${creatorKeyFor(`author-${n}`)}/preview`,
+      ok({state:'not_requested',runRef:null,requestedLimit:30,sampleCount:0,works:[]}));
+  }
   kit.route('GET', '/api/local/ai-settings', ok(businessSettingsFixture()));
 }
 
