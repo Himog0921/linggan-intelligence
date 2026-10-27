@@ -2,6 +2,9 @@
 use super::*;
 use std::path::PathBuf;
 
+#[path = "research_dossier_manual_preview.rs"]
+mod manual_preview;
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "owned PostgreSQL, production React build and browser only"]
 async fn dossier_v2_browser_proof() {
@@ -34,9 +37,14 @@ async fn dossier_v2_browser_proof() {
     }).await.unwrap();
     assert!(rich.current);
     tx.commit().await.unwrap();
-    let mut scenarios = vec![];
+    let demo = standard_fixture::approved_demo(&db).await;
+    let mut scenarios = vec![
+        json!({"name":"approved-demo","work":demo,"domain":standard_fixture::DOMAIN,
+        "dataSource":"approved synthetic demo: 26 saved segments / 292 seconds, no recognizer invoked"}),
+    ];
     for (name, body, images, video, partial, empty) in [
-        ("multi-image", None, 3, false, false, false),
+        ("twelve-images", None, 12, false, false, false),
+        ("thirteen-images", None, 13, false, false, false),
         (
             "body-plus-images",
             Some("一句话正文🙂"),
@@ -65,7 +73,7 @@ async fn dossier_v2_browser_proof() {
     }
     // Saved-result replay includes a completed lifecycle; no recognizer is invoked.
     sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) SELECT gen_random_uuid(),j.job_ref,'succeeded','offline_saved_result_replay' FROM linggan_media_processing_job j JOIN linggan_material_unit u ON u.slot_key=j.slot_key AND u.current_reading_ref IS NOT NULL AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' WHEN 'video_frame_ocr' THEN 'video_frame' ELSE '' END").execute(db.pool()).await.unwrap();
-    let before:Value=sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_model_invocation),(SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_runtime_capture_package))").fetch_one(db.pool()).await.unwrap();
+    let before = counts(&db).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fixture = json!({"origin":format!("http://{}",listener.local_addr().unwrap()),"domain":dossier_fixture::DOMAIN,"work":work,
         "imageUnitRef":image["ref"],"currentReadingRef":rich.reading_ref,"longTail":long_tail,"scenarios":scenarios});
@@ -88,18 +96,18 @@ async fn dossier_v2_browser_proof() {
     server.abort();
     let _ = server.await;
     assert!(status.success(), "actual browser proof failed");
-    let after:Value=sqlx::query_scalar("SELECT jsonb_build_array((SELECT count(*) FROM linggan_model_invocation),(SELECT count(*) FROM linggan_media_processing_job),(SELECT count(*) FROM linggan_runtime_capture_package))").fetch_one(db.pool()).await.unwrap();
+    let after = counts(&db).await;
     assert_eq!(
         before, after,
-        "review cannot dispatch a provider or recollect source material"
+        "reading and exporting cannot dispatch providers, recollect, edit or persist a second reading"
     );
     let commands: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_material_reading_command")
         .fetch_one(db.pool())
         .await
         .unwrap();
     assert_eq!(
-        commands, 1,
-        "one explicit complete edit is recorded without a candidate adoption workflow"
+        commands, 0,
+        "the approved dossier tab contains no editing command surface"
     );
     let final_read = dossier::read(&db, work).await.unwrap().unwrap();
     let final_image = final_read
@@ -107,7 +115,7 @@ async fn dossier_v2_browser_proof() {
         .iter()
         .find(|m| m["ref"] == image["ref"])
         .unwrap();
-    assert_eq!(final_image["reading"]["adoption"], "human_edited");
+    assert_eq!(final_image["currentRevisionRef"], json!(rich.reading_ref));
     assert!(
         final_image["issues"]
             .as_array()
@@ -116,7 +124,7 @@ async fn dossier_v2_browser_proof() {
             .any(|i| i["key"] == "image-source")
     );
     assert!(
-        !final_image["issues"]
+        final_image["issues"]
             .as_array()
             .unwrap()
             .iter()

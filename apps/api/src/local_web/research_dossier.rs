@@ -111,6 +111,9 @@ pub(super) async fn read(
                 )
                     .into_response();
             }
+            if let Err(response) = validate_expected_revision(&value, &params) {
+                return response;
+            }
             let segment = match segment(&mut value, &params) {
                 Ok(value) => value,
                 Err(response) => return response,
@@ -130,12 +133,30 @@ pub(super) async fn read(
     }
 }
 
+/// The selected, unsegmented snapshot is the comparison object for both formats.
+fn validate_expected_revision(
+    value: &dossier::ResearchDossier,
+    params: &Params,
+) -> Result<(), Response> {
+    if params
+        .expected_revision
+        .as_ref()
+        .is_some_and(|revision| *revision != value.revision)
+    {
+        return Err(local_read_json_error(
+            StatusCode::CONFLICT,
+            "dossier_revision_changed",
+        ));
+    }
+    Ok(())
+}
+
 fn segment(
     value: &mut dossier::ResearchDossier,
     params: &Params,
 ) -> Result<Option<Value>, Response> {
     let Some(size) = params.segment_size else {
-        if params.segment_offset.is_some() || params.expected_revision.is_some() {
+        if params.segment_offset.is_some() {
             return Err(local_read_json_error(
                 StatusCode::BAD_REQUEST,
                 "segment_size_required",
@@ -150,16 +171,6 @@ fn segment(
         return Err(local_read_json_error(
             StatusCode::BAD_REQUEST,
             "invalid_segment_or_unpinned_continuation",
-        ));
-    }
-    if params
-        .expected_revision
-        .as_ref()
-        .is_some_and(|r| *r != value.revision)
-    {
-        return Err(local_read_json_error(
-            StatusCode::CONFLICT,
-            "dossier_revision_changed",
         ));
     }
     dossier::segment(value, offset, size)

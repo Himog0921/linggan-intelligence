@@ -46,136 +46,8 @@ fn field_label(field: &str) -> &str {
     }
 }
 
-pub fn markdown(dossier: &ResearchDossier) -> String {
-    let title = dossier.note["displayTitle"].as_str().unwrap_or("无标题");
-    let mut out = format!(
-        "# {title}\n\n作品：{}\n截点：{}\n合同：{}\n\n",
-        dossier.work_ref, dossier.as_of, dossier.contract
-    );
-    if dossier.selection["mode"] == "explicit" {
-        out.push_str("> 当前导出为显式选择的材料。\n\n");
-    }
-    for (key, section) in [
-        ("mainBlockRefs", "主文"),
-        ("supplementBlockRefs", "补充材料"),
-    ] {
-        out.push_str(&format!("## {section}\n\n"));
-        let mut previous = None;
-        for reference in dossier.reading_view[key].as_array().into_iter().flatten() {
-            let Some((unit, block)) = dossier.materials.iter().find_map(|u| {
-                u["blocks"]
-                    .as_array()?
-                    .iter()
-                    .find(|b| b["ref"] == *reference)
-                    .map(|b| (u, b))
-            }) else {
-                continue;
-            };
-            if previous != unit["ref"].as_str() {
-                let label = match unit["kind"].as_str() {
-                    Some("image") => unit["page"]
-                        .as_u64()
-                        .map_or("图片（页序未知）".into(), |p| format!("图片 {p}")),
-                    Some("body") => "正文".into(),
-                    Some("tags") => "话题标签".into(),
-                    Some("audio") => "音频转写".into(),
-                    _ => "视频帧文字".into(),
-                };
-                out.push_str(&format!("### {label}\n\n"));
-                previous = unit["ref"].as_str();
-                for issue in unit["issues"].as_array().into_iter().flatten() {
-                    render_issue(&mut out, issue);
-                }
-            }
-            render_block(&mut out, block);
-            out.push_str(&format!(
-                "*来源块：{}*\n\n",
-                block["ref"].as_str().unwrap_or("")
-            ));
-        }
-    }
-    for unit in &dossier.materials {
-        if unit["blocks"].as_array().is_none_or(Vec::is_empty) {
-            out.push_str(&format!(
-                "- {}：{}\n",
-                unit["kind"].as_str().unwrap_or("材料"),
-                empty_label(unit)
-            ));
-        }
-        if let Some(url) = unit["originalUrl"].as_str() {
-            out.push_str(&format!("[查看原件]({url})\n\n"));
-        }
-    }
-    out.push_str("## 覆盖与来源\n\n");
-    let inventory = &dossier.coverage["imageInventory"];
-    let total = inventory["expectedPages"]
-        .as_u64()
-        .map_or("未知".into(), |n| n.to_string());
-    out.push_str(&format!(
-        "图片总页数：{total}；已取得：{}；已识读：{}。\n\n",
-        inventory["acquiredPages"], inventory["processedPages"]
-    ));
-    for unit in &dossier.materials {
-        if let Some(source) = unit["sourceRef"].as_str() {
-            out.push_str(&format!(
-                "- 材料 {}；来源 {}；版本 {}；识读 {}\n",
-                unit["ref"].as_str().unwrap_or(""),
-                source,
-                unit["sourceVersion"].as_str().unwrap_or(""),
-                unit["currentRevisionRef"].as_str().unwrap_or("未生成")
-            ));
-        }
-    }
-    out
-}
-
-fn empty_label(unit: &Value) -> &'static str {
-    match unit["sourceState"].as_str() {
-        Some("known_empty") => "来源明确为空。",
-        Some("restricted") => "来源已受限，内容不可读取。",
-        Some("not_applicable") => "此材料不适用。",
-        Some("present") => "来源已取得，尚未生成可读底稿。",
-        _ => "尚未取得此材料。",
-    }
-}
-
-fn render_block(out: &mut String, block: &Value) {
-    if block["speaker"] != "author" && block["kind"] != "dialogue" {
-        out.push_str(&format!(
-            "*{}*\n\n",
-            content::speaker_label(block["speaker"].as_str().unwrap_or("unconfirmed"))
-        ));
-    }
-    let text = content::block_text(block);
-    match block["kind"].as_str() {
-        Some("heading") => out.push_str(&format!("### {text}\n\n")),
-        Some("quote") => out.push_str(&format!("> {}\n\n", text.replace('\n', "\n> "))),
-        Some("gap") => out.push_str(&format!("〔{text}〕\n\n")),
-        _ => {
-            out.push_str(&text);
-            out.push_str("\n\n");
-        }
-    }
-    if let Some(time) = block.get("time") {
-        if time["startMs"] == time["endMs"] {
-            out.push_str(&format!("*来源时间：{} ms*\n\n", time["startMs"]));
-        } else {
-            out.push_str(&format!(
-                "*来源时间：{}–{} ms*\n\n",
-                time["startMs"], time["endMs"]
-            ));
-        }
-    }
-    for issue in block["issues"].as_array().into_iter().flatten() {
-        render_issue(out, issue);
-    }
-}
-
-fn render_issue(out: &mut String, issue: &Value) {
-    if let Some(message) = issue["message"].as_str() {
-        out.push_str(&format!("> 待确认：{message}\n\n"));
-    }
-}
+mod document;
+pub use document::markdown;
 
 #[cfg(test)]
 mod tests {
@@ -221,20 +93,26 @@ mod tests {
     }
 
     #[test]
-    fn markdown_uses_the_same_ordered_blocks_and_keeps_source_positions() {
+    fn markdown_uses_the_same_ordered_blocks_and_human_readable_positions() {
         let d = fixture(None, Some("同名标题"));
         let output = markdown(&d);
         assert!(output.starts_with("# 同名标题\n"));
         assert!(output.find("正文后续").unwrap() < output.find("图片后续").unwrap());
         for text in [
-            "来源时间：10–20 ms",
-            "来源时间：40 ms",
+            "00:00.010–00:00.020",
+            "00:00.040",
             "正文标题待确认",
             "图片标题待确认",
-            "body-heading",
-            "image-heading",
         ] {
             assert_eq!(output.matches(text).count(), 1, "{text}");
+        }
+        for technical in [
+            "来源块",
+            "body-heading",
+            "image-heading",
+            "research-dossier.v2",
+        ] {
+            assert!(!output.contains(technical), "{technical}");
         }
         assert_eq!(
             output.matches("### 同名标题").count(),
@@ -270,5 +148,132 @@ mod tests {
         let output = markdown(&d);
         assert!(output.starts_with("# 平台标题\n"));
         assert!(output.contains("正文标题") && output.contains("图片标题待确认"));
+    }
+
+    #[test]
+    fn issue_keys_are_local_to_their_material_and_empty_readings_stay_valid() {
+        let mut d = fixture(Some("平台标题"), Some("正文标题"));
+        for (index, unit) in d.materials.iter_mut().enumerate() {
+            unit["issues"] =
+                json!([{"key":"ocr_low_confidence_0","message":format!("第{index}处独立问题")}]);
+        }
+        d.coverage["issues"] = json!([{"key":"ocr_low_confidence_0","message":"独立覆盖问题"}]);
+        d.materials.push(json!({"ref":"empty-audio","kind":"audio","sourceState":"known_empty",
+            "currentRevisionRef":"known-empty-reading","processing":{"state":"failed"},"blocks":[],"issues":[]}));
+        d.coverage["sources"] = json!({"audio":{"state":"known_empty"}});
+        let output = markdown(&d);
+        for message in ["第0处独立问题", "第1处独立问题", "独立覆盖问题"] {
+            assert_eq!(output.matches(message).count(), 1);
+        }
+        assert!(output.contains("来源已确认无可读文字"));
+        assert!(output.contains("既有已确认无文字的结果仍有效"));
+        assert!(!output.contains("已处理，未检出可读文字"));
+        assert!(!output.contains("处理失败，尚无当前可用"));
+    }
+
+    #[test]
+    fn markdown_attribution_marks_role_runs_dialogue_and_independent_audio() {
+        let mut d = fixture(Some("合成归属验证"), None);
+        let paragraph = |reference: &str, speaker: &str| json!({"ref":reference,"kind":"paragraph","text":format!("{reference}的完整原话。"),"speaker":speaker});
+        let mut body = vec![
+            paragraph("a1", "author"),
+            paragraph("a2", "author"),
+            paragraph("o1", "other"),
+            paragraph("o2", "other"),
+            paragraph("a3", "author"),
+        ];
+        body.push(json!({"ref":"dialogue","kind":"dialogue","turns":[{"speaker":"author","text":"作者对话原句"},{"speaker":"other","text":"他人对话原句"}]}));
+        body.extend([
+            paragraph("a4", "author"),
+            paragraph("u1", "unconfirmed"),
+            paragraph("u2", "unconfirmed"),
+        ]);
+        let audio: Vec<_> = (0..26).map(|i| json!({"ref":format!("audio-{i}"),"kind":"paragraph","text":format!("第{i}段口播原话。"),"speaker":"unconfirmed","time":{"startMs":i*2000,"endMs":i*2000+1000}})).collect();
+        d.materials = vec![
+            json!({"ref":"body","kind":"body","blocks":body}),
+            json!({"ref":"image1","kind":"image","page":1,"blocks":[paragraph("image1", "unconfirmed")]}),
+            json!({"ref":"image2","kind":"image","page":2,"blocks":[paragraph("image2", "unconfirmed")]}),
+            json!({"ref":"audio1","kind":"audio","blocks":audio}),
+            json!({"ref":"audio2","kind":"audio","blocks":[paragraph("other-audio1", "unconfirmed"),paragraph("other-audio2", "unconfirmed")]}),
+            json!({"ref":"frames","kind":"video_frame","blocks":[paragraph("frame", "unconfirmed")]}),
+        ];
+        super::super::reading::rebuild(&mut d);
+        let before = serde_json::to_value(&d).unwrap();
+        let output = markdown(&d);
+        assert_eq!(
+            output.matches("*角色未确认*").count(),
+            5,
+            "one run in body/images/frames and one in each audio material"
+        );
+        assert_eq!(output.matches("*他人*").count(), 1);
+        assert_eq!(
+            output.matches("*作者*").count(),
+            3,
+            "first author, other→author, and dialogue→author must all be explicit"
+        );
+        assert!(
+            output.contains("作者：作者对话原句\n\n他人：他人对话原句\n\n*作者*\n\na4的完整原话。")
+        );
+        for i in 0..26 {
+            assert_eq!(output.matches(&format!("第{i}段口播原话。")).count(), 1);
+        }
+        assert_eq!(serde_json::to_value(&d).unwrap(), before);
+    }
+
+    #[test]
+    fn native_tags_use_one_line_without_changing_ordinary_lists_or_source_text() {
+        let mut d = fixture(Some("合成标签验证"), None);
+        d.materials = vec![
+            json!({"ref":"body","kind":"body","sourceRef":"native-source","blocks":[
+                {"ref":"body-p","kind":"paragraph","text":"保留实际发布文案。","speaker":"author"},
+                {"ref":"body-list","kind":"list","ordered":false,"items":["第一条任务","第二条任务"],"speaker":"author"}]}),
+            json!({"ref":"tags","kind":"tags","sourceRef":"native-source","blocks":[
+                {"ref":"native-tags","kind":"list","ordered":false,"items":[" 任务[话题] ","任务","边界","<literal>[话题]"],"speaker":"author"}]}),
+        ];
+        super::super::reading::rebuild(&mut d);
+        let before = serde_json::to_value(&d).unwrap();
+        let output = markdown(&d);
+        assert_eq!(
+            output
+                .matches("#任务　#任务　#边界　#\\<literal\\>")
+                .count(),
+            1
+        );
+        assert!(output.contains("- 第一条任务\n- 第二条任务"));
+        assert!(!output.contains("- 任务"));
+        assert!(output.contains("保留实际发布文案。"));
+        assert_eq!(serde_json::to_value(&d).unwrap(), before);
+    }
+
+    #[test]
+    fn markdown_preserves_execution_state_and_valid_empty_results() {
+        for (state, label) in [
+            ("pending", "待处理"),
+            ("running", "处理中"),
+            ("failed", "处理失败"),
+            ("cancelled", "处理已取消"),
+            ("invalidated", "处理结果已失效"),
+        ] {
+            let mut d = fixture(Some("合成处理状态验证"), None);
+            d.materials = vec![
+                json!({"ref":"image","kind":"image","page":1,"sourceState":"present",
+                "currentRevisionRef":null,"blocks":[],"processing":{"state":state}}),
+            ];
+            d.coverage["sources"] = json!({"images":{"state":"not_processed"}});
+            super::super::reading::rebuild(&mut d);
+            assert!(markdown(&d).contains(&format!("图片文字第 1 页：{label}。")));
+            d.materials[0]["sourceState"] = json!("known_empty");
+            d.materials[0]["currentRevisionRef"] = json!("valid-empty-reading");
+            d.coverage["sources"]["images"]["state"] = json!("known_empty");
+            let output = markdown(&d);
+            assert!(output.contains(&format!("{label}；既有已确认无文字的结果仍有效。")));
+            assert!(!output.contains("尚无当前可用的识读文字"));
+            d.materials[0]["sourceState"] = json!("present");
+            d.materials[0]["blocks"] = json!([{"ref":"readable","kind":"paragraph","text":"既有有效文字。","speaker":"author"}]);
+            d.coverage["sources"]["images"]["state"] = json!("available");
+            super::super::reading::rebuild(&mut d);
+            assert!(markdown(&d).contains(&format!("{label}，已有读本仍可读。")));
+            assert!(markdown(&d).contains("既有有效文字。"));
+        }
     }
 }

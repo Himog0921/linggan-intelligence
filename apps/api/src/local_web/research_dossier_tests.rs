@@ -380,15 +380,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
         standard_fixture::DOMAIN
     );
     let (_, full) = call(app.clone(), &base, None).await;
-    let expected: Vec<_> = ["mainBlockRefs", "supplementBlockRefs"]
-        .iter()
-        .flat_map(|k| {
-            full["dossier"]["readingView"][k]
-                .as_array()
-                .unwrap()
-                .clone()
-        })
-        .collect();
+    let expected = section_refs(&full["dossier"]);
     let mut offset = 0;
     let mut received = vec![];
     let mut pinned = None::<(String, String)>;
@@ -411,15 +403,7 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
                 segment["completeRevision"].as_str().unwrap().into(),
             ));
         }
-        let refs: Vec<_> = ["mainBlockRefs", "supplementBlockRefs"]
-            .iter()
-            .flat_map(|k| {
-                page["dossier"]["readingView"][k]
-                    .as_array()
-                    .unwrap()
-                    .clone()
-            })
-            .collect();
+        let refs = section_refs(&page["dossier"]);
         assert_eq!(
             refs.len(),
             segment["end"].as_u64().unwrap() as usize - offset
@@ -479,4 +463,113 @@ async fn dossier_http_standard_continuous_segments_pin_revision_and_cover_all_bl
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+fn section_refs(dossier: &Value) -> Vec<Value> {
+    dossier["readingView"]["sections"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|s| s["groups"].as_array().unwrap())
+        .flat_map(|g| g["blockRefs"].as_array().unwrap())
+        .cloned()
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn dossier_http_nonsegmented_exports_pin_the_selected_snapshot_revision() {
+    let db = dossier_fixture::fixture::proof_database("dossier_export_pin").await;
+    let work = standard_fixture::scenario(
+        &db,
+        "export-pin",
+        Some("发布文案不可丢失。"),
+        3,
+        false,
+        false,
+        false,
+    )
+    .await;
+    let app = app_with_database(db.clone());
+    let base = format!(
+        "/api/local/work-resources/{work}/research-dossier?domain={}",
+        standard_fixture::DOMAIN
+    );
+    let before = counts(&db).await;
+    let (status, full) = call(app.clone(), &base, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let as_of = full["dossier"]["asOf"].as_str().unwrap();
+    let full_revision = full["dossier"]["revision"].as_str().unwrap();
+    let selected_uri = format!("{base}&asOf={as_of}&kinds=image");
+    let (status, selected) = call(app.clone(), &selected_uri, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let revision = selected["dossier"]["revision"].as_str().unwrap();
+    assert_ne!(revision, full_revision);
+    assert_eq!(
+        selected["dossier"]["selection"]["completeRevision"],
+        full_revision
+    );
+    for (uri, expected) in [(&base, full_revision), (&selected_uri, revision)] {
+        for format in ["json", "markdown"] {
+            let (status, result) = call(
+                app.clone(),
+                &format!("{uri}&format={format}&expectedRevision={expected}"),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::OK, "{result}");
+            if format == "markdown" {
+                let text = result.as_str().unwrap();
+                assert!(text.contains("第3页完整文字"));
+                for hidden in [
+                    "来源块",
+                    "sourceRef",
+                    "readingView",
+                    "查看原件",
+                    "覆盖与来源",
+                ] {
+                    assert!(!text.contains(hidden), "{text}");
+                }
+                if uri == &selected_uri {
+                    assert!(!text.contains("发布文案不可丢失"));
+                }
+            }
+            let (status, result) = call(
+                app.clone(),
+                &format!("{uri}&format={format}&expectedRevision=wrong"),
+                None,
+            )
+            .await;
+            assert_eq!(status, StatusCode::CONFLICT);
+            assert_eq!(result["code"], "dossier_revision_changed");
+        }
+    }
+    let (status, _) = call(
+        app.clone(),
+        &format!("{selected_uri}&format=markdown&expectedRevision={full_revision}"),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::CONFLICT,
+        "compare selected revision, not selection.completeRevision"
+    );
+    let (status, result) = call(
+        app.clone(),
+        &format!("{selected_uri}&segmentSize=2&expectedRevision={revision}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(result["segment"]["completeRevision"], revision);
+    let (status, result) = call(
+        app,
+        &format!("{base}&segmentOffset=0&expectedRevision={full_revision}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(result["code"], "segment_size_required");
+    assert_eq!(counts(&db).await, before);
 }

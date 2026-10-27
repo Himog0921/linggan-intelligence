@@ -27,15 +27,15 @@ it('视频口播作为主文、画面和图片作为补充，保持实际时间�
   expect(within(screen.getByRole('region', { name: '补充材料' })).getByText('画面文字')).toBeVisible();
   expect(screen.getByText('1.250 秒')).toBeVisible();
 });
-it('只读打开保留空文字原件与局部失败，不默认加载候选或提交准备', async () => {
+it('研究底稿只读打开保留局部失败，不默认加载候选或提交准备', async () => {
   const kit = createFetchMock(); kit.install();
   const path = `/api/local/work-resources/${workRef(1)}/research-dossier`;
   kit.route('GET', path, ok(dossierJson(1, { note: { platformTitle: null, displayTitle: null, displayTitleBasis: 'missing' }, materials: [dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null, issues: [{ key: 'ocr', code: 'recognition_failed', message: '此页识别失败', resolution: 'source_refresh' }] })] })));
   try {
-    renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active onOpenImage={vi.fn()} onApplied={vi.fn()} />);
-    expect(await screen.findByText('暂无可读文字。')).toBeVisible();
-    expect(screen.getByText('此页识别失败')).toBeVisible();
-    expect(screen.getByText('对照原图 · 第 1 页')).toBeVisible();
+    renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active />);
+    expect(await screen.findByText('此页识别失败')).toBeVisible();
+    expect(screen.getByRole('heading', { name: '缺失内容' })).toBeVisible();
+    expect(screen.queryByText('对照原图 · 第 1 页')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
     expect(kit.of('GET', `${path}/candidates`)).toHaveLength(0);
     expect(kit.of('POST', `${path}/prepare`)).toHaveLength(0);
@@ -76,23 +76,19 @@ it('普通机器块不重复未知署名，显式引述和对话角色继续可�
   expect(container.querySelector('[data-block-ref="ordinary"]')).toHaveAttribute('data-speaker', 'unconfirmed');
   expect(container.querySelector('[data-block-ref="another"]')).toHaveAttribute('data-speaker', 'unconfirmed');
 });
-it('只有附件时未取得正文收进来源详情，原件入口仍默认可达', async () => {
+it('只有附件时研究底稿直接说明正文未取得，不再需要展开来源详情', async () => {
   const kit = createFetchMock(); kit.install();
   const path = `/api/local/work-resources/${workRef(1)}/research-dossier`;
   kit.route('GET', path, ok(dossierJson(1, { note: { platformTitle: null, displayTitle: null, displayTitleBasis: 'missing' }, materials: [
     dossierMaterialJson(2, { kind: 'body', sourceState: 'not_acquired', blocks: [], reading: null, currentRevisionRef: null, originalUrl: null }),
     dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null }),
-  ] })));
+  ], coverage: { sources: { body: { state: 'not_acquired', units: 1, readings: 0 }, images: { state: 'not_processed', units: 1, readings: 0 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })));
   try {
-    const view = renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active onOpenImage={vi.fn()} onApplied={vi.fn()} />);
-    expect(await screen.findByText('暂无可读文字。')).toBeVisible();
-    expect(screen.getByText('对照原图 · 第 1 页')).toBeVisible();
-    const disclosure = screen.getByText('正文来源状态').closest('details');
-    expect(disclosure).not.toHaveAttribute('open');
-    expect(screen.getByText('来源尚未取得，不能判断原作是否没有内容。')).not.toBeVisible();
+    renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active />);
+    expect(await screen.findByText('来源尚未取得，不能判断原作是否没有内容。')).toBeVisible();
+    expect(screen.queryByText('对照原图 · 第 1 页')).not.toBeInTheDocument();
+    expect(screen.queryByText('正文来源状态')).not.toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: '正文' })).not.toBeInTheDocument();
-    await view.user.click(screen.getByText('正文来源状态'));
-    expect(screen.getByText('来源尚未取得，不能判断原作是否没有内容。')).toBeVisible();
   } finally { vi.unstubAllGlobals(); }
 });
 

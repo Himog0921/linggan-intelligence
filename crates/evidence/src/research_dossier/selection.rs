@@ -1,7 +1,7 @@
 use super::ResearchDossier;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -130,8 +130,18 @@ pub fn segment(
         dossier.fragments.retain(|f| f.field == "title");
         dossier.selection = json!({"mode":"explicit","kinds":[],"unitRefs":[],"blockRefs":[],"imagePages":[],"omittedUnits":omitted,"completeRevision":complete});
         super::reading::rebuild(dossier);
+        dossier.reading_view["sections"] = json!([]);
         super::refresh_revision(dossier);
     } else {
+        let clipped_sections = super::reading::clip_sections(&frozen_order, &selected);
+        let gap_context = segment_gap_context(dossier, &clipped_sections);
+        let original_units = dossier.materials.len();
+        let material_order: BTreeMap<_, _> = dossier
+            .materials
+            .iter()
+            .enumerate()
+            .filter_map(|(index, unit)| unit["ref"].as_str().map(|r| (r.to_owned(), index)))
+            .collect();
         select(
             dossier,
             &Selection {
@@ -139,6 +149,22 @@ pub fn segment(
                 ..Default::default()
             },
         )?;
+        for unit in gap_context {
+            if !dossier
+                .materials
+                .iter()
+                .any(|included| included["ref"] == unit["ref"])
+            {
+                dossier.materials.push(unit);
+            }
+        }
+        dossier.materials.sort_by_key(|unit| {
+            unit["ref"]
+                .as_str()
+                .and_then(|r| material_order.get(r))
+                .copied()
+        });
+        dossier.selection["omittedUnits"] = json!(original_units - dossier.materials.len());
         // A transport segment is a slice of one frozen reading order. Unlike an
         // explicit user selection, it cannot promote supplements after filtering.
         for key in ["mainBlockRefs", "supplementBlockRefs"] {
@@ -152,6 +178,7 @@ pub fn segment(
                     .collect::<Vec<_>>()
             );
         }
+        dossier.reading_view["sections"] = clipped_sections;
         super::reading::order_fragments(dossier);
         super::refresh_revision(dossier);
     }
@@ -159,4 +186,44 @@ pub fn segment(
         json!({"completeRevision":complete,"asOf":dossier.as_of,"offset":offset,"end":end,"totalBlocks":total,
         "nextOffset":if end<total{Some(end)}else{None},"scope":scope}),
     )
+}
+
+/// A positioned text gap must travel with the actual unit state that proves it.
+/// This transports metadata only; no unselected source or diagnostic block is added.
+fn segment_gap_context(
+    dossier: &ResearchDossier,
+    sections: &serde_json::Value,
+) -> Vec<serde_json::Value> {
+    let pages: BTreeSet<_> = sections
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|section| section["gaps"].as_array().into_iter().flatten())
+        .flat_map(|gap| gap["missingPages"].as_array().into_iter().flatten())
+        .filter_map(serde_json::Value::as_u64)
+        .collect();
+    dossier
+        .materials
+        .iter()
+        .filter(|unit| {
+            unit["kind"] == "image"
+                && unit["page"]
+                    .as_u64()
+                    .is_some_and(|page| pages.contains(&page))
+                && !matches!(
+                    unit["sourceState"].as_str(),
+                    Some("known_empty" | "not_applicable")
+                )
+                && !unit["blocks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(super::content::has_source_text)
+        })
+        .map(|unit| {
+            let mut metadata = unit.clone();
+            metadata["blocks"] = json!([]);
+            metadata
+        })
+        .collect()
 }

@@ -82,7 +82,7 @@ describe('on-demand reads and scoped writes', () => {
   it('GET 默认只要 JSON，Markdown 带相同快照截止时间单独读取', async () => {
     const mock = vi.fn().mockResolvedValueOnce(response(dossierJson(1))).mockResolvedValueOnce(new Response('# 完整底稿', { headers: { 'Content-Type': 'text/markdown; charset=utf-8' } })); vi.stubGlobal('fetch', mock);
     await fetchDossier(workRef(1), DOMAIN); expect(mock.mock.calls[0]?.[0]).toBe(`/api/local/work-resources/${workRef(1)}/research-dossier?domain=${DOMAIN}`);
-    expect(await fetchDossierMarkdown(workRef(1), DOMAIN, '2026-10-23T08:00:00Z')).toBe('# 完整底稿');
+    expect(await fetchDossierMarkdown(workRef(1), DOMAIN, parseDossierPayload(dossierJson(1)).dossier)).toBe('# 完整底稿');
     const url = new URL(String(mock.mock.calls[1]?.[0]), 'http://localhost'); expect(url.searchParams.get('asOf')).toBe('2026-10-23T08:00:00Z'); expect(url.searchParams.get('format')).toBe('markdown');
   });
   it('文本导出仍执行同源边界并拒绝 HTML', async () => {

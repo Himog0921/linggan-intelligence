@@ -28,8 +28,15 @@ describe('页面源码的敏感面', () => {
     expect(sources.length).toBeGreaterThan(40);
   });
 
-  it('没有把字符串变成 HTML 的写法：dangerouslySetInnerHTML、innerHTML、outerHTML、insertAdjacentHTML、document.write、eval', () => {
-    expect(offenders(/dangerouslySetInnerHTML|\binnerHTML\b|\bouterHTML\b|insertAdjacentHTML|document\.write|\beval\s*\(|new Function\s*\(/)).toEqual([]);
+  it('仅已净化的实际 MD 预览可以接 HTML，其他页面禁止任意 HTML 与脚本 sink', () => {
+    expect(offenders(/\binnerHTML\b|\bouterHTML\b|insertAdjacentHTML|document\.write|\beval\s*\(|new Function\s*\(/)).toEqual([]);
+    expect(offenders(/dangerouslySetInnerHTML/)).toEqual(['DossierExportDialog.tsx']);
+    const preview = sources.find(source => source.file === 'DossierExportDialog.tsx')!.code;
+    expect(preview).toContain("import DOMPurify from 'dompurify'");
+    expect(preview).toContain('DOMPurify.sanitize(marked.parse(text');
+    expect(preview).toContain('ALLOWED_TAGS:');
+    expect(preview).toContain("ALLOWED_ATTR: ['href','title','start']");
+    expect(preview.match(/dangerouslySetInnerHTML/g)).toHaveLength(1);
   });
 
   it('不引用平台用户标识：authorExternalId 与作品的外部编号不在任何渲染代码里（底稿导出用服务器原样给的对象，不按名字取）', () => {
@@ -49,7 +56,7 @@ describe('页面源码的敏感面', () => {
     expect(offenders(/api\/local\/evidence-library\/legacy|api\/local\/cross-industry|crossIndustry|ACK 完整/)).toEqual([]);
   });
 
-  it('本机存储只包含检查器宽度偏好、评论深采交接与请求身份；评论与作品内容不进存储', () => {
+  it('本机存储仅偏好、请求身份和阅读锚点几何；评论与作品正文不进存储', () => {
     const keys = sources.flatMap(({ file, code }) => [...code.matchAll(/(?:localStorage|sessionStorage)\.(?:setItem|getItem|removeItem)\(\s*([^,)]+)/g)].map(match => `${file}:${match[1]?.trim()}`));
     expect(keys.sort()).toEqual(
       [
@@ -61,6 +68,9 @@ describe('页面源码的敏感面', () => {
         'usePanelWidthPreference.ts:STORAGE_KEY',
         'useCollectionSelection.ts:selectionKey(domain',
         'useCollectionSelection.ts:selectionKey(domain',
+        'useDossierReadingPosition.ts:key',
+        'useDossierReadingPosition.ts:key',
+        'useDossierReadingPosition.ts:key',
       ].sort(),
     );
     expect(offenders(/document\.cookie|indexedDB|caches\.open/)).toEqual([]);

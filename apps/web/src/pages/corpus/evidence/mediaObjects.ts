@@ -1,4 +1,3 @@
-import type { DossierMaterial } from './dossierTypes';
 import { purposeLabel } from './evidencePresent';
 import type { Fragment, Inspector, MediaSlot } from './evidenceTypes';
 
@@ -160,18 +159,4 @@ export function mediaSlotLedger(inspector: Inspector, fragment: Pick<Fragment, '
 /** 轨道卡与查看器上的序号：`NN / MM`。 */
 export function positionText(index: number, total: number): string {
   return `${String(index + 1).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
-}
-
-/** 底稿里「放大查看原图」用的单图对象：同一个查看器，单图模式，不能前后翻。 */
-export function singleViewerObject(media: DossierMaterial): ViewerObject {
-  return {
-    index: 0,
-    purpose: 'body_image',
-    label: purposeLabel('body_image'),
-    ordinal: media.page ?? 1,
-    objectRef: media.sourceRef,
-    bytesState: 'ACQUIRED',
-    derivedState: media.sourceState,
-    assetUrl: media.originalUrl,
-  };
 }

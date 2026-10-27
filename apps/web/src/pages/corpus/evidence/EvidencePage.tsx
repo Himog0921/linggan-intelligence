@@ -188,7 +188,6 @@ export function EvidencePage() {
               onBack={backToList}
               onRetry={() => void refetchDetail()}
               onRefresh={refetchDetail}
-              onApplied={() => void refetchDetail()}
             />
           </div>
         </div>

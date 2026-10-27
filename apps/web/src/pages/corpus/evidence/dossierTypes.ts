@@ -50,9 +50,22 @@ export interface DossierSelection {
   mode: 'full' | 'explicit'; kinds: MaterialKind[]; unitRefs: string[]; blockRefs: string[]; imagePages: number[];
   omittedUnits: number; completeRevision: string;
 }
+export type ReadingSectionKind = 'publication' | 'images' | 'audio' | 'frames';
+interface ReadingGroupBase {
+  ref: string;
+  blockRefs: string[];
+  continuation: { fromPrevious: boolean; toNext: boolean };
+}
+/** A reference-only arrangement produced by the canonical backend owner. */
+export type ReadingGroup = ReadingGroupBase & (
+  | { mode: 'blocks' | 'list' | 'table' | 'tags' }
+  | { mode: 'paragraph' | 'transcript_paragraph'; joiners: ('' | ' ' | '\n')[] }
+);
+export interface ReadingSection { ref: string; kind: ReadingSectionKind; groups: ReadingGroup[]; gaps: { beforeGroupRef: string | null; missingPages: number[] }[] }
+export interface DossierReadingView { mainBlockRefs: string[]; supplementBlockRefs: string[]; sections: ReadingSection[] }
 export interface Dossier {
   contract: 'research-dossier.v2'; workRef: string; revision: string; materialRevision: string; asOf: string;
-  note: DossierNote; materials: DossierMaterial[]; readingView: { mainBlockRefs: string[]; supplementBlockRefs: string[] }; coverage: DossierCoverage;
+  note: DossierNote; materials: DossierMaterial[]; readingView: DossierReadingView; coverage: DossierCoverage;
   attachments: Record<'comments' | 'author' | 'interaction', { href: string }>;
   selection: DossierSelection; raw: unknown;
 }
