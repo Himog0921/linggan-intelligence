@@ -54,12 +54,23 @@ pub const MAX_COMMENT_TARGET: i32 = 1000;
     deny_unknown_fields
 )]
 pub enum RunSource {
-    TemporaryKeyword { query: String },
-    ObservationTarget { target_ref: Uuid },
-    SelectedWorks { work_refs: Vec<Uuid> },
+    TemporaryKeyword {
+        query: String,
+    },
+    ObservationTarget {
+        target_ref: Uuid,
+    },
+    SelectedWorks {
+        work_refs: Vec<Uuid>,
+    },
     /// One-off author profile + discovery cards, never a permanent observation target.
-    CreatorPreview { author_external_id: String },
-    CreatorSelectedWorks { preview_ref: Uuid, work_refs: Vec<Uuid> },
+    CreatorPreview {
+        author_external_id: String,
+    },
+    CreatorSelectedWorks {
+        preview_ref: Uuid,
+        work_refs: Vec<Uuid>,
+    },
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -120,10 +131,17 @@ impl CreateRun {
                 Err(RunError::Invalid("invalid_creator_preview_identity"))
             }
             RunSource::CreatorSelectedWorks { work_refs, .. }
-                if work_refs.is_empty() || work_refs.len()>30
-                    || work_refs.iter().collect::<std::collections::HashSet<_>>().len()!=work_refs.len()
-                    || work_refs.len()!=self.work_limit as usize =>
-            { Err(RunError::Invalid("invalid_creator_selected_works")) }
+                if work_refs.is_empty()
+                    || work_refs.len() > 30
+                    || work_refs
+                        .iter()
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        != work_refs.len()
+                    || work_refs.len() != self.work_limit as usize =>
+            {
+                Err(RunError::Invalid("invalid_creator_selected_works"))
+            }
             RunSource::SelectedWorks { work_refs }
                 if work_refs.is_empty()
                     || work_refs.len() > 200
@@ -217,11 +235,22 @@ pub async fn create_run(db: &Database, input: &CreateRun) -> Result<Value, RunEr
                 format!("主页浅看 · {author_external_id}"),
             )
         }
-        RunSource::CreatorSelectedWorks { preview_ref, work_refs } => {
+        RunSource::CreatorSelectedWorks {
+            preview_ref,
+            work_refs,
+        } => {
             let count:i64=sqlx::query_scalar("SELECT count(*) FROM collection_run_work work JOIN collection_run preview ON preview.run_ref=work.run_ref WHERE preview.run_ref=$1 AND preview.domain_ref=$2 AND preview.source_kind='creator_preview' AND preview.scope_frozen_at IS NOT NULL AND work.content_public_ref=ANY($3)")
                 .bind(preview_ref).bind(input.domain_ref).bind(work_refs).fetch_one(&mut *tx).await?;
-            if count != work_refs.len() as i64 {return Err(RunError::Invalid("invalid_creator_preview_selection"));}
-            ("creator_selected_works",None,"keyword".to_owned(),None,format!("精选研究 · {} 篇",work_refs.len()))
+            if count != work_refs.len() as i64 {
+                return Err(RunError::Invalid("invalid_creator_preview_selection"));
+            }
+            (
+                "creator_selected_works",
+                None,
+                "keyword".to_owned(),
+                None,
+                format!("精选研究 · {} 篇", work_refs.len()),
+            )
         }
         RunSource::SelectedWorks { work_refs } => {
             let count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_material_content c WHERE c.public_ref=ANY($1) AND c.platform='xhs' AND EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=c.public_ref AND u.domain_ref=$2)").bind(work_refs).bind(input.domain_ref).fetch_one(&mut *tx).await?;
@@ -265,7 +294,9 @@ pub async fn create_run(db: &Database, input: &CreateRun) -> Result<Value, RunEr
     .bind(auth)
     .execute(&mut *tx)
     .await?;
-    if let RunSource::SelectedWorks { work_refs } | RunSource::CreatorSelectedWorks { work_refs, .. } = &input.source {
+    if let RunSource::SelectedWorks { work_refs }
+    | RunSource::CreatorSelectedWorks { work_refs, .. } = &input.source
+    {
         for (n, work) in work_refs.iter().enumerate() {
             sqlx::query("INSERT INTO collection_run_work(run_ref,content_public_ref,ordinal) VALUES($1,$2,$3)").bind(run).bind(work).bind(n as i32+1).execute(&mut *tx).await?;
         }
@@ -353,7 +384,13 @@ pub(crate) async fn admit_stage(
     if let Some(order) = result.work_order_ref {
         // 插件只认 sample_30／all_public：指定条数按「尽量采全」的遍历方式执行，条数由每段的
         // newUniqueLimit 收住；原始意图另记 commentTarget，便于执行诊断核对。
-        let plugin_mode = if mode == "up_to" { "all_public" } else if mode == "none" { "sample_30" } else { mode.as_str() };
+        let plugin_mode = if mode == "up_to" {
+            "all_public"
+        } else if mode == "none" {
+            "sample_30"
+        } else {
+            mode.as_str()
+        };
         let mut directive = json!({"runRef":run,"stage":stage,"commentMode":plugin_mode,"commentTarget":comment_target,"searchQuery":r.get::<Option<String>,_>("search_query"),"ranking":r.get::<Option<String>,_>("ranking").unwrap_or_else(||"comprehensive".into()),"workLimit":r.get::<i32,_>("work_limit"),"segment":segment});
         if stage == "comments" && (!sample || !known.is_empty()) {
             directive["commentBudget"] = json!({"knownCommentIds":known,"newUniqueLimit":comment_limit,"maxScrollRounds":50,"maxDurationSeconds":180});
