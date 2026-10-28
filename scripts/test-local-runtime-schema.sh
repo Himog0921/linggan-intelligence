@@ -24,7 +24,10 @@ trap cleanup EXIT
 docker volume create "$proof_volume" >/dev/null;volume_created=1
 docker run -d --name "$proof_container" --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" --env POSTGRES_DB="$proof_database" --env POSTGRES_USER="$proof_user" --env POSTGRES_PASSWORD="$proof_password" linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1 -c max_locks_per_transaction=1024 >/dev/null
 created=1
-for _ in {1..30};do docker exec "$proof_container" pg_isready -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break;sleep 1;done
+# The image's init server accepts Unix-socket clients before it is stopped and restarted; only the final
+# server listens on TCP, so readiness is judged there (same rule as scripts/test-web-app-postgres.sh).
+for _ in {1..30};do docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 && break;sleep 1;done
+docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" -d "$proof_database" >/dev/null 2>&1 || { echo 'runtime schema proof PostgreSQL did not become TCP-ready within 30 seconds' >&2; exit 1; }
 psql_in_container(){ docker exec -i "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d "$proof_database" "$@"; }
 # Evaluate the source functions, with only the migration body's connection/startup
 # preamble omitted. Production ordering, historical scaffold and checksums are unchanged.
