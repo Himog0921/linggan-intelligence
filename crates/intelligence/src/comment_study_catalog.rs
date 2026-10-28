@@ -133,9 +133,18 @@ pub async fn refresh_clean_cache(
     sqlx::query("SET LOCAL lock_timeout = '3s'")
         .execute(&mut *transaction)
         .await?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)")
+            .bind(domain_ref)
+            .fetch_one(&mut *transaction)
+            .await?;
+    if !exists {
+        return Err(StudyCatalogError::UnsupportedDomain);
+    }
     let rows = sqlx::query(include_str!("comment_study_catalog/refresh_candidates.sql"))
         .bind(CLEANER_VERSION)
         .bind(limit)
+        .bind(domain_ref)
         .fetch_all(&mut *transaction)
         .await?;
     let mut report = CleanCacheRefresh {
@@ -153,6 +162,7 @@ pub async fn refresh_clean_cache(
             .bind(&item.research_text)
             .bind(&item.clean_state)
             .bind(json!(item.clean_reasons))
+            .bind(domain_ref)
             .execute(&mut *transaction)
             .await?;
         if written.rows_affected() == 1 {
@@ -198,13 +208,19 @@ pub async fn maintain_comment_catalog(
     if !installed {
         return Ok(None);
     }
-    let domain: Option<Uuid> = sqlx::query_scalar(
-        "SELECT domain_ref FROM observation_domain WHERE status='active' ORDER BY created_at,domain_ref LIMIT 1",
-    ).fetch_optional(database.pool()).await?;
-    let Some(domain) = domain else {
+    let domains:Vec<Uuid>=sqlx::query_scalar("SELECT domain_ref FROM observation_domain WHERE status='active' ORDER BY created_at,domain_ref").fetch_all(database.pool()).await?;
+    if domains.is_empty() {
         return Ok(None);
-    };
-    refresh_clean_cache(database, domain, 128).await.map(Some)
+    }
+    let mut total = CleanCacheRefresh::default();
+    for domain in domains {
+        let report = refresh_clean_cache(database, domain, 128).await?;
+        total.examined_count += report.examined_count;
+        total.inserted_count += report.inserted_count;
+        total.already_present_count += report.already_present_count;
+        total.skipped_count += report.skipped_count;
+    }
+    Ok(Some(total))
 }
 
 /// A bind parameter for `ILIKE $n ESCAPE E'\\\\'`, not a SQL expression or FTS query.
