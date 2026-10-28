@@ -463,7 +463,7 @@ describe('调整判断', () => {
   it('作品层的判断带 workRef；服务器拒绝时「未完成」+ 中文原因 + 错误码，对话框保持打开', async () => {
     kit.route('PUT', overrides, () => error(400, 'invalid_support_fragment'));
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('tab', { name: '作品与依据' }));
+    await user.click(within(drawer).getByRole('tab', { name: '研究线索' }));
     const group = drawer.querySelector('details[data-work]') as HTMLElement;
     await user.click(within(group).getAllByRole('button', { name: '调整判断' })[1] as HTMLElement); // 亲历自述
     const dialog = await screen.findByRole('dialog', { name: '调整亲历自述' });
@@ -505,8 +505,8 @@ describe('调整判断', () => {
     cancel();
     await user.click(await screen.findByRole('button', { name: '收起并继续跟踪' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整作者倾向' })).toBeNull());
-    // 为同一位作者的另一项（机构／品牌自述，在「作者资料」分区）打开新的对话框，写上还没保存的内容。
-    await user.click(within(drawer).getByRole('tab', { name: '作者资料' }));
+    // 为同一位作者的另一项（机构／品牌自述，在「观察记录」分区）打开新的对话框，写上还没保存的内容。
+    await user.click(within(drawer).getByRole('tab', { name: '观察记录' }));
     await user.click(within(drawer.querySelector('[role="tabpanel"]:not([hidden])') as HTMLElement).getByRole('button', { name: /调整判断|补充判断/ }));
     const second = await screen.findByRole('dialog', { name: /机构／品牌自述/ });
     await user.type(within(second).getByRole('textbox', { name: /调整原因/ }), '新的尚未保存的说明');
@@ -528,7 +528,7 @@ describe('旧分析退役后的历史读取', () => {
     await user.click(screen.getByRole('button', { name: '合成作者 1' }));
     let drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
-    await user.click(within(drawer).getByRole('tab', { name: '作品与依据' }));
+    await user.click(within(drawer).getByRole('tab', { name: '研究线索' }));
     expect(drawer).toHaveTextContent('model_budget_exhausted');
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     cancel();
