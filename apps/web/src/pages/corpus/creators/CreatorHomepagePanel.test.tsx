@@ -6,6 +6,7 @@ import { DOMAIN, createFetchMock, creatorKeyFor, defaultRoutes, ok, renderCreato
 // 请求路径里的作者标识带冒号，浏览器按 encodeURIComponent 发出，假 fetch 看到的是百分号编码后的路径。
 const PREVIEW = `/api/local/creators/${encodeURIComponent(creatorKeyFor('author-1'))}/preview`;
 const RUN = '40000000-0000-4000-8000-000000000001';
+const RUN_NEXT = '40000000-0000-4000-8000-000000000008';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function card(n: number, over: Record<string, unknown> = {}) {
@@ -70,7 +71,7 @@ describe('主页作品 · 浅看入口', () => {
     expect((first!.body as { commandRef: string }).commandRef).toBe((second!.body as { commandRef: string }).commandRef);
   });
 
-  it('停止、范围不完整、或一篇也没取到之后，给「重新浅看」，重新发起用新的请求标识', async () => {
+  it('停止、范围不完整、或一篇也没取到之后，给「重新浅看」，点击发出一个带请求标识的新请求', async () => {
     for (const [label, body] of [
       ['已停止', snapshot({ state: 'stopped', works: [card(1)], sampleCount: 1, frozenCount: 1 })],
       ['范围不完整', snapshot({ state: 'partial', works: [card(1)], sampleCount: 1, frozenCount: 1 })],
@@ -90,6 +91,25 @@ describe('主页作品 · 浅看入口', () => {
       expect(await within(panel).findByText(/正在浅看/), label).toBeVisible();
       unmount();
     }
+  });
+
+  it('上一次浅看已得到回执之后再「重新浅看」，请求标识与上一次不同（否则会被当作重试重放成同一次）', async () => {
+    defaultRoutes(kit);
+    kit.route('GET', PREVIEW,
+      ok(NOT_REQUESTED),
+      ok(snapshot({ state: 'stopped', works: [card(1)], sampleCount: 1, frozenCount: 1 })),
+      ok(snapshot({ state: 'running', runRef: RUN_NEXT, scopeFrozenAt: null, works: [], sampleCount: 0, frozenCount: 0 })));
+    kit.route('POST', PREVIEW,
+      ok({ runRef: RUN, domainRef: DOMAIN, replayed: false }),
+      ok({ runRef: RUN_NEXT, domainRef: DOMAIN, replayed: false }));
+    const { user, panel } = await openHomepage();
+    await user.click(await within(panel).findByRole('button', { name: '浅看主页' }));
+    await user.click(await within(panel).findByRole('button', { name: '重新浅看' }));
+    await waitFor(() => expect(kit.of('POST', PREVIEW)).toHaveLength(2));
+    const [first, second] = kit.of('POST', PREVIEW).map(call => (call.body as { commandRef: string }).commandRef);
+    expect(first).toMatch(UUID);
+    expect(second).toMatch(UUID);
+    expect(second).not.toBe(first);
   });
 
   it('完成且有卡片时没有「重新浅看」（完成后刷新样本是产品取舍，不在这里偷偷开放）', async () => {
@@ -174,6 +194,44 @@ describe('主页作品 · 冻结样本与精选研究', () => {
     const [first, second] = kit.of('POST', '/api/collection/runs');
     expect(first!.body).toEqual(second!.body);
     expect(second!.body).toMatchObject({ commentMode: 'sample_30', workLimit: 3, source: { kind: 'creator_selected_works', previewRef: RUN } });
+  });
+
+  it('精选请求没得到回执时样本换成了新的一次：旧请求标识不沿用，范围是新样本的建议而不是旧选择', async () => {
+    defaultRoutes(kit);
+    kit.route('GET', PREVIEW,
+      ok(WITH_KNOWN()),
+      ok(snapshot({ runRef: RUN_NEXT, works: [card(4, { inDomain: true }), card(5), card(6)] })));
+    kit.route('POST', '/api/collection/runs', () => 'network', ok({ runRef: '40000000-0000-4000-8000-000000000003', domainRef: DOMAIN, replayed: false }));
+    const { user, panel } = await openHomepage();
+    await within(panel).findByText('本次主页样本 3 篇');
+    await user.click(within(panel).getByRole('button', { name: '研究已选 3 篇' }));
+    const confirm = within(panel).getByRole('region', { name: '精选研究确认' });
+    await user.click(within(confirm).getByRole('button', { name: '确认精选范围' }));
+    expect(await within(panel).findByText(/精选任务未得到确定回执/)).toBeVisible();
+    // 样本被换成新的一次（例如另一个页签重新浅看过）。
+    await user.click(within(panel).getByRole('button', { name: '更新' }));
+    await within(panel).findByRole('button', { name: '移除 主页卡片 4' });
+    await user.click(within(panel).getByRole('button', { name: '确认精选范围' }));
+    await waitFor(() => expect(kit.of('POST', '/api/collection/runs')).toHaveLength(2));
+    const [first, second] = kit.of('POST', '/api/collection/runs').map(call => call.body as {
+      idempotencyKey: string; source: { previewRef: string; workRefs: string[] };
+    });
+    expect(second!.idempotencyKey).not.toBe(first!.idempotencyKey);
+    expect(second!.source).toEqual({ kind: 'creator_selected_works', previewRef: RUN_NEXT, workRefs: [workRef(104), workRef(105), workRef(106)] });
+  });
+
+  it('新的一次浅看还没有卡片时，「已选研究」不沿用旧样本的选择', async () => {
+    defaultRoutes(kit);
+    kit.route('GET', PREVIEW,
+      ok(WITH_KNOWN()),
+      ok(snapshot({ state: 'running', runRef: RUN_NEXT, scopeFrozenAt: null, works: [], sampleCount: 0, frozenCount: 0 })));
+    const { user, panel } = await openHomepage();
+    await within(panel).findByText('本次主页样本 3 篇');
+    expect(panel).toHaveTextContent(/已选研究\s*3/);
+    await user.click(within(panel).getByRole('button', { name: '更新' }));
+    await within(panel).findByText(/正在浅看/);
+    expect(panel).toHaveTextContent(/已选研究\s*0/);
+    expect(panel).not.toHaveTextContent(/已选研究\s*3/);
   });
 
   it('有几篇暂时读不出来时如实说，不把读不出的当作没有', async () => {

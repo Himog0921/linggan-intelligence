@@ -65,7 +65,8 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [studyRun, setStudyRun] = useState<string | null>(null);
   const previewCommand = useRef<string | null>(null);
-  const studyCommand = useRef<string | null>(null);
+  // The identity of an unconfirmed study request is only valid for the run it was made against.
+  const studyCommand = useRef<{ run: string; key: string } | null>(null);
   const stopCommand = useRef<string | null>(null);
   const [seededRun, setSeededRun] = useState<string | null>(null);
 
@@ -89,6 +90,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
     try {
       await startHomepagePreview(domain, item.creatorKey, previewCommand.current);
       previewCommand.current = null;
+      setStudyRun(null);
       await query.refetch();
     } catch {
       setFeedback('浅看请求尚未确认。可再次点击，系统会按同一请求识别重试。');
@@ -124,10 +126,10 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
   async function study() {
     if (pending || !canWrite || !preview?.runRef || !preview.scopeFrozenAt || selectedNotes.length === 0) return;
     setBusy('study'); setFeedback(null);
-    studyCommand.current ??= newCommandRef();
+    if (studyCommand.current?.run !== preview.runRef) studyCommand.current = { run: preview.runRef, key: newCommandRef() };
     try {
       const receipt = await studyCreatorWorks(
-        domain, preview.runRef, selectedNotes.map(note => note.workRef), preset, studyCommand.current,
+        domain, preview.runRef, selectedNotes.map(note => note.workRef), preset, studyCommand.current.key,
       );
       studyCommand.current = null;
       setStudyRun(receipt.runRef);
@@ -198,7 +200,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
           <div className={styles.snapshotMetrics}>
             <span>已取得 <strong><Metric value={notes.length} /></strong></span>
             <span>点赞已知 <strong><Metric value={seenLikes} /></strong></span>
-            <span>已选研究 <strong><Metric value={selected.size} /></strong></span>
+            <span>已选研究 <strong><Metric value={selectedNotes.length} /></strong></span>
           </div>
         </div>
       ) : null}
@@ -208,7 +210,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
           <div className={styles.tools}>
             <div className={styles.segment} role="group" aria-label="主页作品范围">
               <button type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>全部样本 {notes.length}</button>
-              <button type="button" aria-pressed={filter === 'selected'} onClick={() => setFilter('selected')}>已选 {selected.size}</button>
+              <button type="button" aria-pressed={filter === 'selected'} onClick={() => setFilter('selected')}>已选 {selectedNotes.length}</button>
             </div>
             <div className={styles.segment} role="group" aria-label="作品排版">
               <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}>封面</button>
@@ -239,8 +241,8 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
           {filter === 'selected' && displayed.length === 0 ? <p className={styles.info}>尚未选中任何作品，切到全部样本查看。</p> : null}
           <div className={styles.studyDock}>
             <div><strong>精选研究</strong><p>默认从已知领域作品、已知高赞和另一篇对照卡片中建议最多 3 篇，你可以自由调整。</p></div>
-            <ActionButton disabled={!canWrite || selected.size === 0 || pending || !preview?.scopeFrozenAt || state === 'running'} variant="primary" onClick={() => { setShowConfirm(true); setFeedback(null); }}>
-              研究已选 {selected.size} 篇
+            <ActionButton disabled={!canWrite || selectedNotes.length === 0 || pending || !preview?.scopeFrozenAt || state === 'running'} variant="primary" onClick={() => { setShowConfirm(true); setFeedback(null); }}>
+              研究已选 {selectedNotes.length} 篇
             </ActionButton>
           </div>
           {showConfirm ? (
