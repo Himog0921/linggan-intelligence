@@ -468,7 +468,9 @@ try {
     await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${workId}&view=body`);
     const panel=page.getByRole('complementary',{name:'检查与复制'}),copy=panel.getByRole('button',{name:'复制到小红书',exact:true});
     await until(async()=>await panel.getByLabel('本篇的衔接句').inputValue()===bridgeSentence,'the approved sentence is placed in the draft');
-    await panel.getByText(/^必改 0 · /).waitFor();
+    const account=panel.getByLabel('所属账号');await account.selectOption('');
+    await panel.getByText('这篇还没选账号，不知道能不能放衔接句').waitFor();await panel.getByText(/^必改 1 · /).waitFor();assert.equal(await copy.isDisabled(),true,'a 必改 left keeps the copy button disabled');
+    await account.selectOption(accountRef);await panel.getByText(/^必改 0 · /).waitFor();
     const first=page.getByLabel('正文第 1 段');await first.fill('今天先把示例课的练习本放到桌上。');
     const wording='“示例课”不是产品的可用叫法，建议统一为“示例营”';await panel.getByText(wording).waitFor();
     await panel.getByRole('button',{name:'统一叫法',exact:true}).click();
