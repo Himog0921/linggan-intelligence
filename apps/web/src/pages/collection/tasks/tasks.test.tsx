@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../shared/api';
 import { RunCreationDialog } from './RunCreationDialog';
 import { controlRun, createRun } from './runRequests';
-import { commentModeLabel, parseRun, parseWorks, readRun } from './tasksApi';
+import { commentModeLabel, parseRun, parseWorks, readRun, sourceLabel } from './tasksApi';
 
 const domain = 'a0000000-0000-4000-8000-000000000001';
 const run = 'a0000000-0000-4000-8000-000000000002';
@@ -40,6 +40,21 @@ describe('采集任务数据与失联恢复', () => {
     expect(commentModeLabel(parseRun({ ...current, comment_mode: 'up_to' }), '样本')).toBe('每篇采到指定条数，含回复');
     expect(commentModeLabel(parseRun({ ...current, comment_mode: 'sample_30' }), '每篇最多30条总样本')).toBe('每篇最多30条总样本');
     expect(() => parseRun({ ...current, comment_mode: 'up_to', comment_target: -1 })).toThrow(ApiError);
+  });
+  it('主页浅看与精选研究：文字版写成「只取笔记文字」，来源有自己的名字，文字版以详情完成为收尾', () => {
+    const current = { ...legacy, legacy: false, control_intent: 'running', revision: 1 };
+    expect(commentModeLabel(parseRun({ ...current, comment_mode: 'none' }), '每篇最多30条总样本')).toBe('只取笔记文字，不采评论与媒体');
+    expect(sourceLabel('creator_preview')).toBe('作者主页浅看');
+    expect(sourceLabel('creator_selected_works')).toBe('主页精选研究');
+    expect(sourceLabel('something_new')).toBe('既有采集');
+    const works = (checkpoint: unknown) => parseWorks({
+      runRef: run, domainRef: domain, total: 1,
+      items: [{ publicRef: run, ordinal: 1, title: '作品', creator: '作者', gapReason: null, checkpoint }],
+    }).items[0]!.commentsComplete;
+    expect(works({ detailComplete: true, commentsNotRequested: true })).toBe(true);
+    expect(works({ commentsComplete: true })).toBe(true);
+    expect(works({})).toBeNull();
+    expect(works(null)).toBeNull();
   });
   it('历史记录允许不存在的控制版本，保留未知与真实零；新版记录缺版本拒绝展示', () => {
     const r = parseRun(legacy); expect(r.revision).toBeNull(); expect(r.new_comments).toBeNull(); expect(r.available_details).toBe(0);

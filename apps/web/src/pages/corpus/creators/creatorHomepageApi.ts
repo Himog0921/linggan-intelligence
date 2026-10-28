@@ -4,6 +4,8 @@ export type PreviewState = 'not_requested' | 'running' | 'complete' | 'partial' 
 export interface HomepageNote {
   workRef: string;
   ordinal: number;
+  /** The server says whether this card is already formal research material of the domain. */
+  inDomain: boolean;
   title: string | null;
   likes: number | null;
   comments: number | null;
@@ -15,6 +17,8 @@ export interface HomepagePreview {
   revision: number | null;
   requestedLimit: number;
   sampleCount: number;
+  /** Cards frozen into the sample; may exceed the listed ones when some cannot be read right now. */
+  frozenCount: number | null;
   scopeFrozenAt: string | null;
   stopReason: string | null;
   works: HomepageNote[];
@@ -54,6 +58,7 @@ export function parseHomepagePreview(value: unknown): HomepagePreview {
     return {
       workRef: item.workRef,
       ordinal: item.ordinal,
+      inDomain: item.inDomain === true,
       title: optionalString(item.title),
       likes: optionalNumber(item.likes),
       comments: optionalNumber(item.comments),
@@ -66,6 +71,7 @@ export function parseHomepagePreview(value: unknown): HomepagePreview {
     revision: optionalNumber(raw.revision),
     requestedLimit: optionalNumber(raw.requestedLimit) ?? 30,
     sampleCount: works.length,
+    frozenCount: optionalNumber(raw.frozenCount),
     scopeFrozenAt: optionalString(raw.scopeFrozenAt),
     stopReason: optionalString(raw.stopReason),
     works,

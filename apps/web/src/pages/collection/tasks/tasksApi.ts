@@ -52,7 +52,7 @@ export function readDomains(signal?: AbortSignal) { return requestJson('/api/col
 export function parseTargets(value: unknown) { const v = object(value); return { total: number(v.total), items: array(v.items, value => { const t = object(value); return { target_ref: uuid(t.target_ref), name: text(t.name), target_kind: text(t.target_kind) }; }) }; }
 export function readTargets(domain: string, q: string, page: number, selected: string, signal?: AbortSignal) { return requestJson(`/api/collection/runs/targets?${new URLSearchParams({ domainRef: domain, q, page: String(page), selected })}`, { signal }).then(parseTargets); }
 export function parseWorks(value: unknown) {
-  const v = object(value); return { runRef: uuid(v.runRef), domainRef: uuid(v.domainRef), total: number(v.total), items: array(v.items, value => { const w = object(value); const checkpoint = w.checkpoint == null ? null : object(w.checkpoint); return { publicRef: uuid(w.publicRef), ordinal: optional(w.ordinal, number), title: optional(w.title, text), creator: optional(w.creator, text), gapReason: optional(w.gapReason, text), commentsComplete: checkpoint ? optional(checkpoint.commentsComplete, bool) : null }; }) };
+  const v = object(value); return { runRef: uuid(v.runRef), domainRef: uuid(v.domainRef), total: number(v.total), items: array(v.items, value => { const w = object(value); const checkpoint = w.checkpoint == null ? null : object(w.checkpoint); return { publicRef: uuid(w.publicRef), ordinal: optional(w.ordinal, number), title: optional(w.title, text), creator: optional(w.creator, text), gapReason: optional(w.gapReason, text), commentsComplete: checkpoint ? (optional(checkpoint.commentsComplete, bool) ?? optional(checkpoint.detailComplete, bool)) : null }; }) };
 }
 export function readWorks(id: string, domain: string, page: number, signal?: AbortSignal) { return requestJson(`/api/collection/runs/${uuid(id)}/works?${new URLSearchParams({ domainRef: domain, page: String(page) })}`, { signal }).then(value => { const v = parseWorks(value); if (v.runRef !== id || v.domainRef !== domain) throw new ApiError({ kind: 'invalid_response', status: 200 }); return v; }); }
 export function parseCreationReceipt(value: unknown) { const v = object(value); return { runRef: uuid(v.runRef), domainRef: uuid(v.domainRef) }; }
@@ -68,11 +68,12 @@ export function runStatus(r: Run): string {
 }
 /** 评论范围的写法；`sample` 是两处列表原有的不同短语（台账写「总样本」、抽屉写「评论样本」）。 */
 export function commentModeLabel(r: Pick<Run, 'comment_mode' | 'comment_target'>, sample: string): string {
+  if (r.comment_mode === 'none') return '只取笔记文字，不采评论与媒体';
   if (r.comment_mode === 'all_public') return '尽量采全，含回复';
   if (r.comment_mode === 'up_to') return r.comment_target === null ? '每篇采到指定条数，含回复' : `每篇采到 ${r.comment_target} 条就停，含回复`;
   return sample;
 }
-export function sourceLabel(kind: string): string { return ({ temporary_keyword: '临时关键词', observation_target: '观察目标', selected_works: '语料已选作品', archive: '建档', patrol: '本轮巡查', supplement: '显式补采' } as Record<string, string>)[kind] ?? '既有采集'; }
+export function sourceLabel(kind: string): string { return ({ temporary_keyword: '临时关键词', observation_target: '观察目标', selected_works: '语料已选作品', archive: '建档', patrol: '本轮巡查', supplement: '显式补采', creator_preview: '作者主页浅看', creator_selected_works: '主页精选研究' } as Record<string, string>)[kind] ?? '既有采集'; }
 export function discoveryLabel(reason: string | null): string { return reason === null ? '等待发现结果' : ({ surface_ended: '本轮可见作品已发现完毕', maximum_quota: '已达到本次作品上限', accepted_discovery_scope: '已固定本次发现结果', person_selected_exact_set: '沿用勾选的作品集合', discovery_execution_stopped: '发现未完成，需要处理' } as Record<string, string>)[reason] ?? '发现原因见执行诊断'; }
 export function errorText(error: unknown): string {
   if (error instanceof ApiError) {

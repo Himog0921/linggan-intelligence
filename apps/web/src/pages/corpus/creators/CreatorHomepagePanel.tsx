@@ -15,15 +15,16 @@ type Preset = 'standard' | 'text_only';
 // A stable empty list keeps the memoised ref list from changing on every render before data arrives.
 const NO_NOTES: HomepageNote[] = [];
 
-function suggested(notes: HomepageNote[], knownDomainRefs: readonly string[]): string[] {
+function suggested(notes: HomepageNote[]): string[] {
   if (notes.length === 0) return [];
   const chosen: string[] = [];
   const add = (ref: string | undefined) => {
     if (ref && !chosen.includes(ref)) chosen.push(ref);
   };
-  // The first discovered domain work, the highest observed like count,
-  // and a separate comparison card. This does not claim to detect a semantic counterexample.
-  add(notes.find(w => knownDomainRefs.includes(w.workRef))?.workRef);
+  // The first card the domain already holds as research material (the server says so, whatever filter
+  // the page is showing), the highest observed like count, and a separate comparison card.
+  // This does not claim to detect a semantic counterexample.
+  add(notes.find(w => w.inDomain)?.workRef);
   const ranked = [...notes].filter(w => w.likes !== null).sort((a, b) => (b.likes ?? 0) - (a.likes ?? 0));
   add(ranked[0]?.workRef);
   add(notes.find(w => !chosen.includes(w.workRef))?.workRef);
@@ -67,12 +68,11 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
   const studyCommand = useRef<string | null>(null);
   const stopCommand = useRef<string | null>(null);
   const [seededRun, setSeededRun] = useState<string | null>(null);
-  const domainRefs = item.matchedWorkRefs;
 
   // Seed the suggested cards once per run; later polling and the user's own toggles never reseed.
   if (preview?.runRef && preview.works.length > 0 && seededRun !== preview.runRef) {
     setSeededRun(preview.runRef);
-    setSelected(new Set(suggested(preview.works, domainRefs)));
+    setSelected(new Set(suggested(preview.works)));
   }
 
   const displayed = filter === 'selected' ? notes.filter(n => selected.has(n.workRef)) : notes;
@@ -178,6 +178,11 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
                 {busy === 'stop' ? '停止中…' : '停止这次浅看'}
               </button>
             ) : null}
+            {canWrite && (state === 'stopped' || state === 'partial' || (state === 'complete' && notes.length === 0)) ? (
+              <button type="button" className={styles.textButton} disabled={pending} onClick={() => void start()}>
+                {busy === 'preview' ? '浅看中…' : '重新浅看'}
+              </button>
+            ) : null}
             <button type="button" className={styles.textButton} disabled={pending} onClick={() => void query.refetch()}>更新</button>
           </div>
           <p>{state === 'complete'
@@ -187,6 +192,9 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
             : state === 'running'
               ? '正在取得主页卡片。可以在已有结果中先阅读，未结束前不发起精选。'
               : '本次仍有未确定范围，已取得的卡片保留；不把剩余数量推算成缺失篇数。'}</p>
+          {preview.frozenCount !== null && preview.frozenCount > notes.length ? (
+            <p className={styles.muted}>另有 {formatCount(preview.frozenCount - notes.length)} 篇暂时无法读取，仍算在本次样本里；稍后点「更新」重试。</p>
+          ) : null}
           <div className={styles.snapshotMetrics}>
             <span>已取得 <strong><Metric value={notes.length} /></strong></span>
             <span>点赞已知 <strong><Metric value={seenLikes} /></strong></span>
@@ -212,7 +220,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
               const resource = media.byRef.get(note.workRef) ?? resources.byRef.get(note.workRef);
               const chosen = selected.has(note.workRef);
               const title = resource?.title || note.title || '标题暂未取得';
-              const seenBefore = domainRefs.includes(note.workRef);
+              const seenBefore = note.inDomain;
               return (
                 <div key={note.workRef} className={styles.note} data-selected={chosen}>
                   <button className={styles.noteChoice} type="button" onClick={() => toggle(note.workRef)} aria-pressed={chosen} aria-label={chosen ? `移除 ${title}` : `选择 ${title}`}>
