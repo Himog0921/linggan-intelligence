@@ -28,6 +28,7 @@ pub mod ops_ledger;
 pub mod content_workbench;
 pub mod content_workbench_ai;
 pub mod content_workbench_sources;
+pub mod creation_assets;
 
 pub mod model_secrets;
 pub mod model_settings;

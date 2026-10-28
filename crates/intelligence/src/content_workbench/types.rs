@@ -233,9 +233,46 @@ pub struct MaterialPreparation {
     pub state: String,
     pub gaps: Vec<String>,
 }
+/// Whose voice a bridge sentence is written in; the account identity decides which group applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BridgeGroup {
+    Parent,
+    Coach,
+}
+/// The library sentence a draft uses. `text` is what this draft says and may be rewritten
+/// locally (`edited`), after which it no longer follows the library.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeUse {
+    pub sentence_code: String,
+    pub sentence_revision: i32,
+    pub group: BridgeGroup,
+    pub text: String,
+    #[serde(default)]
+    pub edited: bool,
+}
+/// The bridge slot of a draft (CREATION-ASSETS-001). `skip` is "这篇不植入"; an absent
+/// sentence with `skip == false` is an undecided slot.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BridgeChoice {
+    #[serde(default)]
+    pub skip: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sentence: Option<BridgeUse>,
+    /// The bridge follows this paragraph; absent or no longer present means the default slot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub after_paragraph: Option<Uuid>,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bridge: Option<BridgeChoice>,
+    /// Whether the cover image is AI-made; absent means not recorded, never "no".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_ai: Option<bool>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub materials: Vec<MaterialSelection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -258,6 +295,8 @@ impl Default for WorkDocument {
     fn default() -> Self {
         Self {
             contract: "content-workbench.v1".into(),
+            bridge: None,
+            cover_ai: None,
             materials: vec![],
             material_preparation: None,
             tags: vec![],

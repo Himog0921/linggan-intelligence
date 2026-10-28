@@ -29,6 +29,9 @@ mod content_workbench_api_tests;
 mod content_workbench_browser_tests;
 mod content_workbench_sources_api;
 mod corpus_shell_api;
+mod creation_assets_api;
+#[cfg(test)]
+mod creation_assets_api_tests;
 mod creator_lifecycle_api;
 #[cfg(test)]
 mod creator_lifecycle_tests;
@@ -411,6 +414,7 @@ fn router_with_public_access(
         .merge(content_workbench_api::routes())
         .merge(content_workbench_sources_api::routes())
         .merge(content_workbench_ai_api::routes())
+        .merge(creation_assets_api::routes())
         .route("/corpus", get(corpus_entry))
         .route("/collection", get(collection_entry))
         .layer(axum::middleware::from_fn_with_state(

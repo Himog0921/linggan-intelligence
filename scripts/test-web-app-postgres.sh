@@ -159,7 +159,7 @@ fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments-contracts || "${WEB_APP_PROOF_SCOPE:-all}" == comments || "${WEB_APP_PROOF_SCOPE:-all}" == research ]]; then
   mkdir -p "$proof_dir/research"
   run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked \
-    unified_research_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
+    local_web::research_browser_tests -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 [[ "${WEB_APP_PROOF_SCOPE:-all}" == all ]] || { echo 'Unknown proof scope' >&2; exit 1; }
@@ -221,4 +221,4 @@ run_proof "$proof_dir/topics" \
 printf '%s\n' 'WEB-REACT-001 F Topics and Workspace real-chain proof passed (isolated database only)'
 
 mkdir -p "$proof_dir/research"
-run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked unified_research_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
+run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked local_web::research_browser_tests -- --ignored --nocapture --test-threads=1

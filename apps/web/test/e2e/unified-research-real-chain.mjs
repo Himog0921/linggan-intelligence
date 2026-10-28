@@ -16,6 +16,23 @@ async function get(url){const r=await page.request.get(origin+url);assert.equal(
 async function until(url,ready){const deadline=Date.now()+25000;let r;do {r=await get(url);if(ready(r))return r;await page.waitForTimeout(100);}while(Date.now()<deadline);assert.fail('workflow did not settle: '+JSON.stringify(r));}
 async function step(name,action){await action();await page.screenshot({path:path.join(directory,`research-${report.steps.length+1}.png`),fullPage:true});report.steps.push({name,result:'PASS'});console.log('Research UI PASS: '+name);}
 try {
+ await step('restored borderless overview retains source counts, curve and period controls after an empty research reset',async()=>{
+  await page.goto(`${origin}/corpus/comments?domain=${domain}&view=overview`);
+  const hero=page.getByRole('region',{name:'评论研究概览',exact:true});
+  await hero.getByText('可研究评论',{exact:true}).waitFor();
+  const reading=await get(`/api/local/comment-research/overview?domainRef=${domain}`);
+  assert.equal(reading.corpusSummary.eligibleCommentCount,2);assert.equal(reading.researchSummary.currentSignalCount,0);
+  const metrics=page.locator('[aria-label="研究累计读数与昨日活动"]');
+  const chart=page.getByRole('region',{name:'评论观察趋势',exact:true});
+  const a=await metrics.boundingBox(),b=await chart.boundingBox();assert.ok(a&&b&&a.x+a.width<=b.x+1,'approved left metrics/right observation layout');
+  await page.getByRole('button',{name:'近 7 天',exact:true}).click();await page.getByRole('button',{name:'表格',exact:true}).click();
+  assert.equal(await hero.getByRole('row').count(),8);
+  await page.getByRole('button',{name:'用户评论',exact:true}).click();await page.getByRole('searchbox',{name:'字面搜索',exact:true}).waitFor();
+  await page.getByRole('button',{name:'概览',exact:true}).click();
+  assert.equal(await page.getByRole('button',{name:'表格',exact:true}).getAttribute('aria-pressed'),'true');
+  await page.getByRole('button',{name:'近 56 天',exact:true}).click();await page.getByRole('button',{name:'图表',exact:true}).click();
+  await hero.getByRole('img',{name:'评论柱状与研究信号渐变曲线，共同横轴及采集覆盖',exact:true}).waitFor();
+ });
  await step('select actual catalog comments, inspect dossier and start semantic/problem/review chain',async()=>{
   await page.goto(`${origin}/corpus/comments?domain=${domain}&view=comments`);
   await page.getByRole('button',{name:'选择评论',exact:true}).click();
@@ -33,6 +50,13 @@ try {
   await page.getByRole('button',{name:'查看评论与研究依据',exact:true}).first().click();
   const detail=page.getByRole('region',{name:'研究这条评论',exact:true});await detail.getByText('合成测试需要提醒',{exact:true}).waitFor();
   await detail.getByText('我的孩子需要每天有人提醒',{exact:true}).waitFor();
+ });
+ await step('current overview counts qualified semantic outputs and independently reviewed problems',async()=>{
+  await page.goto(`${origin}/corpus/comments?domain=${domain}&view=overview`);
+  await page.getByRole('region',{name:'评论研究概览',exact:true}).waitFor();
+  const reading=await get(`/api/local/comment-research/overview?domainRef=${domain}`);
+  assert.equal(reading.researchSummary.succeededCommentCount,2);assert.equal(reading.researchSummary.currentSignalCount,2);assert.equal(reading.knowledgeSummary.problemCount,1);
+  await page.getByRole('heading',{name:'每日提醒需求',exact:true}).waitFor();
  });
  await step('creator work and explicit account sample use their own configured tasks',async()=>{
   await page.goto(`${origin}/corpus/creators?domain=${domain}`);

@@ -8,6 +8,7 @@ pub mod capability;
 pub mod catalog;
 pub mod comment_problem;
 pub mod comment_research;
+pub mod comment_research_overview;
 pub mod control;
 pub mod control_store;
 mod creator_account_input;

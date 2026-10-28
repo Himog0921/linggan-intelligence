@@ -128,10 +128,14 @@ if [[ "${1:-}" == "--browser" ]]; then
 fi
 if [[ "${1:-}" == "--http" ]]; then
   cargo test -p linggan-api --bin linggan-api content_workbench_http_ --locked -- --ignored --nocapture
+  cargo test -p linggan-api --bin linggan-api creation_assets_http_ --locked -- --ignored --nocapture
   exit 0
 fi
 cargo test -p linggan-intelligence --test content_workbench_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test content_workbench_sources_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test content_workbench_ai_postgres --locked -- --ignored --nocapture
+cargo test -p linggan-intelligence --test creation_assets_postgres --locked -- --ignored --nocapture
+cargo test -p linggan-intelligence --lib --locked -- creation_assets::
 cargo test -p linggan-api --bin linggan-api content_workbench_http_ --locked -- --ignored --nocapture
+cargo test -p linggan-api --bin linggan-api creation_assets_http_ --locked -- --ignored --nocapture
 echo "UIUX-CONTENT-WORKBENCH-001 isolated PostgreSQL checks passed; real provider, shared runtime and Mog acceptance are not proved"

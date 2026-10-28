@@ -1,7 +1,7 @@
 # CONTENT-WORKBENCH-001 · 作品与材料使用合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-20
+> 最后核对: 2026-10-28
 > 适用范围: Issue #425 后端候选，供 WEB-REACT-001 阶段 C 消费
 > 事实来源: Mog 实施授权、已认可 V3、main@0a90fd4a React 底座与阶段 C 候选源码
 > 冲突时以谁为准: 用户最新确认、真实来源资格；运行事实以实际代码与验证回执为准
@@ -14,9 +14,11 @@ JSON 统一 camelCase、UUID 稳定身份；范围为 Unicode scalar / code-poin
 
 ## 文档与修订
 
-`WorkDocument` contract 为 `content-workbench.v1`，含 title/tags/accountRef/topicRef/angle/outline/paragraphs/excerpts/canvas/pages/uses/materials/materialPreparation。具体 Rust 类型唯一放 `content_workbench/types.rs`，对外所有写入 deny_unknown_fields 并验证类型、长度、数量、UUID唯一、引用完整及资产所属作品。文档 JSON 是有闭集类型的不可变修订，不是任意 JSON 兼容层。
+`WorkDocument` contract 为 `content-workbench.v1`，含 title/tags/accountRef/topicRef/angle/outline/paragraphs/excerpts/canvas/pages/uses/materials/materialPreparation，以及两个可选字段 bridge/coverAi（CREATION-ASSETS-001，见下）。具体 Rust 类型唯一放 `content_workbench/types.rs`，对外所有写入 deny_unknown_fields 并验证类型、长度、数量、UUID唯一、引用完整及资产所属作品。文档 JSON 是有闭集类型的不可变修订，不是任意 JSON 兼容层。
 
 - paragraphs：id/text；作者分段保留身份，无法可靠还原定位的关联进入 needs_review。
+- bridge（可选，缺省即未决定）：`{skip, sentence?, afterParagraph?}`。`skip` 是“这篇不植入”；`sentence` 是本稿使用的衔接句 `{sentenceCode, sentenceRevision, group, text, edited}`，`text` 是本稿实际所说，改写过则 `edited` 为真、不再跟库同步；`afterParagraph` 指向某个段落 id，缺失或该段已删除时落在默认位置（最后一段之前）。写入时校验编码 `XJ-` 加数字、修订号为正、文本为一行且不超过 500 字。衔接句库、规则与复制格式见 [CREATION-ASSETS-001](creation-assets-001.md)。
+- coverAi（可选）：封面是否 AI 作图；缺省表示未记录，不等于“否”。
 - excerpts：id/citation/selectedText/textHash；source 原文与自己的表达分开。
 - canvas：id/excerptId/group/note/expression/expressionRevision；group 限 inbox/opening/argument/example/ending。
 - pages：id/kind(cover/opinion/voice/steps)/templateVersion/title/subtitle/blocks{id,text}/assetId/crop/style。宽1080高1440；crop归一化且finite，V3 模板版本 creation-v3-type（留白大字）/ creation-v3-split（双色分栏）/ creation-v3-list（清单笔记）；creation-v1 / creation-v1-editorial 保留旧版原始绘图含义，palette cream/sage/ink；alignment start/center/end。自有图 PNG/JPEG/WebP 解码验真，禁止任意远程URL和SVG。

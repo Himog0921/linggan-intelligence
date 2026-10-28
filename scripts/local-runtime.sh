@@ -492,6 +492,7 @@ migrate() {
   apply_migration_once "0178_creator_manual_annotations" "$project_root/database/migrations/0178_creator_manual_annotations.sql"
   apply_migration_once "0179_retire_research_relations" "$project_root/database/migrations/0179_retire_research_relations.sql"
   apply_migration_once "0180_creator_preview_discovery_only" "$project_root/database/migrations/0180_creator_preview_discovery_only.sql"
+  apply_migration_once "0181_creation_assets_s1a" "$project_root/database/migrations/0181_creation_assets_s1a.sql"
 }
 
 case "$command_name" in
