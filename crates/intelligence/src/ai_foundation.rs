@@ -6,10 +6,16 @@ pub mod batch_control;
 pub mod batch_store;
 pub mod capability;
 pub mod catalog;
+pub mod comment_problem;
+pub mod comment_research;
 pub mod control;
 pub mod control_store;
+mod creator_account_input;
+pub mod creator_account_research;
+pub mod creator_research;
 pub mod executor;
 mod number;
+pub mod prompt;
 pub mod provider_store;
 pub mod rounds;
 pub mod settings_inputs;
@@ -19,6 +25,8 @@ pub mod skill_package;
 pub mod skill_store;
 pub mod store;
 pub mod task_config;
+pub mod topic_research;
+mod topic_research_packet;
 pub mod transport;
 pub mod transport_store;
 pub mod usage;
@@ -52,6 +60,14 @@ pub enum TaskKey {
     OcrRecognition,
     WorkComparison,
     CommentStudy,
+    CommentProblemResolution,
+    CommentProblemPairReview,
+    TopicResearch,
+    TopicResearchExtractReview,
+    TopicResearchResolve,
+    TopicResearchResolveReview,
+    CreatorResearch,
+    CreatorAccountResearch,
     CommentEmbedding,
     LegacyCreatorDiscovery,
     LegacyTopicMap,
@@ -70,10 +86,35 @@ impl TaskKey {
             Self::OcrRecognition => "ocr_recognition",
             Self::WorkComparison => "work_comparison",
             Self::CommentStudy => "comment_study",
+            Self::CommentProblemResolution => "comment_problem_resolution",
+            Self::CommentProblemPairReview => "comment_problem_pair_review",
+            Self::TopicResearch => "topic_research",
+            Self::TopicResearchExtractReview => "topic_research_extract_review",
+            Self::TopicResearchResolve => "topic_research_resolve",
+            Self::TopicResearchResolveReview => "topic_research_resolve_review",
+            Self::CreatorResearch => "creator_research",
+            Self::CreatorAccountResearch => "creator_account_research",
             Self::CommentEmbedding => "comment_embedding",
             Self::LegacyCreatorDiscovery => "legacy_creator_discovery",
             Self::LegacyTopicMap => "legacy_topic_map",
             Self::LegacyUnclassified => "legacy_unclassified",
+        }
+    }
+    pub(crate) fn comment_stage(self) -> Option<u8> {
+        match self {
+            Self::CommentStudy => Some(0),
+            Self::CommentProblemResolution => Some(1),
+            Self::CommentProblemPairReview => Some(2),
+            _ => None,
+        }
+    }
+    pub(crate) fn topic_stage(self) -> Option<u8> {
+        match self {
+            Self::TopicResearch => Some(0),
+            Self::TopicResearchExtractReview => Some(1),
+            Self::TopicResearchResolve => Some(2),
+            Self::TopicResearchResolveReview => Some(3),
+            _ => None,
         }
     }
     pub fn uses_automatic_brake(self) -> bool {

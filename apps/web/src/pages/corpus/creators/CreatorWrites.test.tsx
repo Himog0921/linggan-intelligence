@@ -268,7 +268,7 @@ describe('发现设置', () => {
     kit.route('PUT', '/api/local/creator-discovery-policy', ok({ revision: 4, saved: true }));
     const { user, dialog } = await openPolicy();
     expect(within(dialog).queryByRole('combobox')).toBeNull();
-    expect(within(dialog).getByRole('link', { name: '去 AI 设置' })).toHaveAttribute('href', '/settings/models?view=advanced&area=work&task=legacy_creator_discovery');
+    expect(within(dialog).getAllByRole('link',{name:'去 AI 设置'})).toHaveLength(2);
     await user.type(within(dialog).getByRole('spinbutton', { name: /最低点赞/ }), '100');
     await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
@@ -279,9 +279,9 @@ describe('发现设置', () => {
     await waitFor(() => expect(creators().length).toBeGreaterThanOrEqual(2));
   });
 
-  it('旧分析开关已开启也只读展示退役状态，不能配置或重试旧执行链', async () => {
+  it('发现设置分别连接单篇与账号的当前AI任务，不恢复旧执行字段', async () => {
     const { dialog } = await openPolicy(listJson({ analysisEnabled: true, items: [itemJson(1)] }));
-    expect(within(dialog).getByText(/旧自动分析已停用/)).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('link',{name:'去 AI 设置'}).map(link=>link.getAttribute('href'))).toEqual(['/settings/models?view=advanced&area=work&task=creator_research','/settings/models?view=advanced&area=work&task=creator_account_research']);
     expect(within(dialog).queryByRole('checkbox')).toBeNull();
     expect(within(dialog).queryByRole('combobox')).toBeNull();
     expect(within(dialog).queryByRole('spinbutton', { name: /词元/ })).toBeNull();
@@ -307,7 +307,7 @@ describe('发现设置', () => {
     await screen.findByRole('table');
     await user.click(screen.getByRole('button', { name: '判定标准' }));
     const dialog = await screen.findByRole('dialog', { name: '发现设置' });
-    expect(await within(dialog).findByText('开关读取失败，当前值待核对。')).toBeInTheDocument();
+    expect(await within(dialog).findAllByText('开关读取失败，当前值待核对。')).toHaveLength(2);
     await user.type(within(dialog).getByRole('spinbutton', { name: /最低点赞/ }), '50');
     await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
     await waitFor(() => expect(kit.of('PUT', '/api/local/creator-discovery-policy')).toHaveLength(1));
@@ -455,7 +455,7 @@ describe('调整判断', () => {
     await second.user.click(within(dialog).getByRole('button', { name: '撤销人工调整' }));
     await waitFor(() => expect(kit.of('PUT', overrides)).toHaveLength(1));
     expect(kit.of('PUT', overrides)[0]?.body).toMatchObject({ value: null, reason: null, supportFragmentIds: [], field: 'focus' });
-    expect(await screen.findByText('人工调整已撤销；显示已有分析结果，尚无结果则显示尚不能判定。未启动新分析。')).toBeInTheDocument();
+    expect(await screen.findByText('人工调整已撤销；显示已有研究结果，尚无结果则显示尚不能判定。未启动新分析。')).toBeInTheDocument();
     expect(screen.queryByText(/这一项使用你的判断/)).toBeNull();
     expect(kit.calls.filter(call => call.method === 'POST')).toHaveLength(0);
   });

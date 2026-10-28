@@ -144,7 +144,7 @@ describe('依据抽屉 · 作品与依据（按作品分组）', () => {
           items: [
             itemJson(1, {
               works: [
-                workJson(11, { state: 'queued', withResult: false }),
+                workJson(11, { state: 'pending', withResult: false }),
                 workJson(12, { state: 'failed', lastErrorCode: 'model_provider_unavailable', withResult: false }),
                 workJson(13, { state: 'idle', withResult: true, relevance: 'unknown' }),
               ],
@@ -156,14 +156,14 @@ describe('依据抽屉 · 作品与依据（按作品分组）', () => {
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '作品与依据' }));
     const [queued, failed, insufficient] = Array.from(dialog.querySelectorAll('details[data-work]')) as HTMLElement[];
-    expect(queued).toHaveTextContent('历史排队记录 · 已停用，不再执行');
+    expect(queued).toHaveTextContent('研究已排队，等待执行');
     expect(within(queued!).queryByRole('button', { name: /重试/ })).toBeNull();
-    expect(failed).toHaveTextContent('历史分析失败 · 模型服务暂不可用');
+    expect(failed).toHaveTextContent('研究未完成 · 模型服务暂不可用');
     expect(within(failed!).queryByRole('button', { name: /重试/ })).toBeNull();
     const processing = within(failed!).getByText('处理信息').closest('details') as HTMLElement;
     expect(processing).toHaveTextContent('model_provider_unavailable');
     expect(failed!.textContent?.replace(processing.textContent ?? '', '')).not.toContain('model_provider_unavailable');
-    expect(insufficient).toHaveTextContent('已分析，依据不足');
+    expect(insufficient).toHaveTextContent('已研究，依据不足');
   });
 
   it('分析没开启时失败的作品也不出现重试', async () => {

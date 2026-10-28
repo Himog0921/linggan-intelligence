@@ -313,7 +313,6 @@ async fn ai_foundation_control_commands_are_cas_idempotent_and_system_never_resu
         Err(FoundationError::NotConnected)
     ));
     for task in [
-        TaskKey::CommentStudy,
         TaskKey::CommentEmbedding,
         TaskKey::LegacyCreatorDiscovery,
         TaskKey::LegacyTopicMap,

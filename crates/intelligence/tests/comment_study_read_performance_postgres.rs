@@ -16,16 +16,6 @@ use serde_json::json;
 #[ignore = "requires isolated pg_stat_statements from test-comment-study-read-performance-postgres.sh"]
 async fn catalog_reads_skip_jit_and_restore_pool_defaults() {
     let database = fixture::proof_database("study_read_performance").await;
-    sqlx::raw_sql(concat!(
-        include_str!("../../../database/bootstrap/comment-study-001.sql"),
-        "\n",
-        include_str!("../../../database/migrations/0114_comment_study_effective_head.sql"),
-        "\n",
-        include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql")
-    ))
-    .execute(database.pool())
-    .await
-    .unwrap();
     research_fixture::detail_with_author(&database, "jit-proof", "SYNTHETIC work", Some("creator"))
         .await;
     let source = research_fixture::comment_with_author(

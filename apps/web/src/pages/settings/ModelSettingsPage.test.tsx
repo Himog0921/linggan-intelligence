@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelSettingsPage } from './ModelSettingsPage';
 import { settingsFixture } from './aiSettingsFixture.test-support';
+import { AI_SETTINGS_KEY } from './aiSettingsApi';
+import { parseAiSettings } from './aiSettingsModel';
 
 type Reply = { status: number; body: unknown } | 'network';
 type Call = { path: string; method: string; body: Record<string, unknown> };
@@ -21,12 +23,152 @@ beforeEach(() => {
   }));
 });
 afterEach(() => vi.unstubAllGlobals());
-function renderPage(entry = '/settings/models?section=models') {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+function renderPage(entry = '/settings/models?section=models', client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   return render(<MemoryRouter initialEntries={[entry]}><QueryClientProvider client={client}><ModelSettingsPage /></QueryClientProvider></MemoryRouter>);
 }
 const posts = () => calls.filter(call => call.method === 'POST');
 describe('AI 设置四区', () => {
+  it('图片识别提示词可编辑、保存、启用和回退，保存不运行模型', async () => {
+    const seed = settingsFixture();
+    const config = { ...seed.configurations[0]!, taskKey: 'ocr_recognition', taskConfigRef: 'ocr-config' };
+    const settings = { ...seed, tasks: [{ ...seed.tasks[0]!, taskKey: 'ocr_recognition', label: '图片文字识别', skillAllowed: true, configuration: config }], configurations: [config] };
+    const first = { versionRef: 'prompt-v1', versionNo: 1, systemText: '原系统提示词', instructionText: '原识别指令', createdAt: '2026-10-27T00:00:00Z' };
+    const second = { ...first, versionRef: 'prompt-v2', versionNo: 2, systemText: '更新后的系统提示词' };
+    let versions = [first], active = 'prompt-v1', revision = 0;
+    handler = call => {
+      if (call.path.endsWith('/prompts/ocr_recognition')) return ok({ taskKey: 'ocr_recognition', revision, activeVersionRef: active, versions });
+      if (call.path.endsWith('/prompts/save')) { versions = [second, first]; return ok({ versionRef: second.versionRef, versionNo: 2 }); }
+      if (call.path.endsWith('/prompts/activate')) { active = String(call.body.versionRef); revision += 1; return ok({ versionRef: active, taskConfigRef: `config-${revision}`, taskRevision: revision }); }
+      if (call.path.includes('/writing-samples')) return ok({ state: 'connected', samples: [], examined: 0, limit: 50 });
+      return ok(settings);
+    };
+    renderPage('/settings/models?section=skills&task=ocr_recognition');
+    const system = await screen.findByLabelText('系统提示词');
+    fireEvent.change(system, { target: { value: '更新后的系统提示词' } });
+    await userEvent.click(screen.getByRole('button', { name: '保存提示词新版本' }));
+    expect(await screen.findByText('提示词 v2 已保存，尚未启用。')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText('提示词版本')).toHaveValue('prompt-v2'));
+    expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/prompts/save', body: { taskKey: 'ocr_recognition', expectedTaskRevision: 0, systemText: '更新后的系统提示词', instructionText: '原识别指令' } });
+    await userEvent.click(screen.getByRole('button', { name: '启用此提示词版本' }));
+    await waitFor(() => expect(active).toBe('prompt-v2'));
+    await waitFor(() => expect(screen.getByRole('button', { name: '启用此提示词版本' })).toBeDisabled());
+    fireEvent.change(screen.getByLabelText('提示词版本'), { target: { value: 'prompt-v1' } });
+    fireEvent.change(screen.getByLabelText('系统提示词'), { target: { value: '尚未保存的修改' } });
+    expect(screen.getByRole('button', { name: '启用此提示词版本' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('系统提示词'), { target: { value: '原系统提示词' } });
+    await userEvent.click(screen.getByRole('button', { name: '启用此提示词版本' }));
+    await waitFor(() => expect(active).toBe('prompt-v1'));
+    expect(posts().map(call => call.path)).toEqual(['/api/local/ai-settings/prompts/save', '/api/local/ai-settings/prompts/activate', '/api/local/ai-settings/prompts/activate']);
+  });
+  it('直接创建做法，不启动任务或模型', async () => {
+    handler = call => call.method === 'GET' ? ok(settingsFixture()) : ok({ skillRef: 'skill', versionRef: 'v1', versionNo: 1, packageSha256: 'a'.repeat(64), reused: false });
+    renderPage('/settings/models?section=skills');
+    const name = await screen.findByLabelText('做法名称');
+    fireEvent.change(name, { target: { value: 'new-method' } });
+    fireEvent.change(screen.getByLabelText('SKILL.md 内容'), { target: { value: '---\nname: new-method\ndescription: A method\n---\nInstructions' } });
+    await userEvent.click(screen.getByRole('button', { name: '创建做法' }));
+    expect(await screen.findByText('已创建做法 v1；尚未启用或运行。')).toBeInTheDocument();
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/skills/import', body: { expectedVersionRef: null, package: { directory: 'new-method', files: [{ path: 'SKILL.md', encoding: 'utf8' }] } } });
+  });
+  it('直接编辑做法并保存新版本，保留二进制引用和版本冲突草稿', async () => {
+    const seed = settingsFixture();
+    const version = { versionRef: 'v1', versionNo: 1, description: 'Synthetic skill', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, createdAt: '2026-10-27T00:00:00Z', fileCount: 2 };
+    const data = { ...seed, skills: [{ skillRef: 'skill', name: 'example-skill', versions: [version] }] };
+    const snapshot = { versionRef: 'v1', versionNo: 1, description: 'Synthetic skill', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, skillRef: 'skill', name: 'example-skill', body: 'original', frontmatter: '---', loaderVersion: 'test', files: [
+      { path: 'SKILL.md', sha256: 'c'.repeat(64), bytes: 8, content: 'original', contentBase64: null, kind: 'utf8' },
+      { path: 'assets/example.bin', sha256: 'd'.repeat(64), bytes: 3, content: null, contentBase64: '/wD+', kind: 'binary' },
+    ] };
+    let conflict = true;
+    handler = call => call.method === 'POST' ? conflict ? { status: 409, body: { error: 'ai_revision_conflict' } } : ok({ skillRef: 'skill', versionRef: 'v2', versionNo: 2, packageSha256: 'a'.repeat(64), reused: false })
+      : call.path === '/api/local/ai-settings/skills/v1' ? ok(snapshot) : ok(data);
+    renderPage('/settings/models?section=skills&version=v1');
+    const editor = await screen.findByLabelText('SKILL.md');
+    fireEvent.change(editor, { target: { value: 'updated method' } });
+    await userEvent.click(screen.getByRole('button', { name: '保存新版本' }));
+    expect(await screen.findByText(/草稿已保留/)).toBeInTheDocument();
+    expect(editor).toHaveValue('updated method');
+    expect(posts()[0]?.body).toMatchObject({ expectedVersionRef: 'v1', package: { directory: 'example-skill', files: [
+      { path: 'SKILL.md', encoding: 'utf8', content: 'updated method' },
+      { path: 'assets/example.bin', encoding: 'base64', content: '/wD+' },
+    ] } });
+    conflict = false;
+    await userEvent.click(screen.getByRole('button', { name: '保存新版本' }));
+    expect(await screen.findByText('已保存做法 v2；尚未启用或运行。')).toBeInTheDocument();
+    expect(posts()).toHaveLength(2);
+  });
+  it('后台刷新出现新版本时，编辑草稿仍使用打开时的版本作为并发基线', async () => {
+    const seed = settingsFixture();
+    const version = { versionRef: 'v1', versionNo: 1, description: 'Synthetic skill', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, createdAt: '2026-10-27T00:00:00Z', fileCount: 1 };
+    const data = { ...seed, skills: [{ skillRef: 'skill', name: 'example-skill', versions: [version] }] };
+    const snapshot = { versionRef: 'v1', versionNo: 1, description: 'Synthetic skill', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, skillRef: 'skill', name: 'example-skill', body: 'original', frontmatter: '---', loaderVersion: 'test', files: [
+      { path: 'SKILL.md', sha256: 'c'.repeat(64), bytes: 8, content: 'original', contentBase64: null, kind: 'utf8' },
+    ] };
+    handler = call => call.method === 'POST' ? { status: 409, body: { error: 'ai_revision_conflict' } }
+      : call.path === '/api/local/ai-settings/skills/v1' ? ok(snapshot) : ok(data);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    renderPage('/settings/models?section=skills&version=v1', client);
+    const editor = await screen.findByLabelText('SKILL.md');
+    fireEvent.change(editor, { target: { value: 'my draft' } });
+    const concurrent = { ...data, skills: [{ ...data.skills[0]!, versions: [{ ...version, versionRef: 'v2', versionNo: 2 }, version] }] };
+    await act(async () => { client.setQueryData(AI_SETTINGS_KEY, parseAiSettings(concurrent)); });
+    expect(await screen.findByRole('link', { name: /example-skill · v2/ })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '保存新版本' }));
+    expect(await screen.findByText(/草稿已保留/)).toBeInTheDocument();
+    expect(posts()[0]?.body.expectedVersionRef).toBe('v1');
+    expect(editor).toHaveValue('my draft');
+  });
+  it('无需试跑即可直接切换版本，切换不创建模型任务', async () => {
+    const seed = settingsFixture();
+    const candidate = { ...seed.configurations[0]!, taskKey: 'writing_legacy', taskConfigRef: 'config-1', skillVersionRef: 'version-1' };
+    const version = { versionRef: 'version-1', versionNo: 1, description: 'Synthetic', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, createdAt: candidate.createdAt, fileCount: 1 };
+    const data = { ...seed, configurations: [candidate], skills: [{ skillRef: 'skill-1', name: 'example', versions: [version] }],
+      tasks: [{ ...seed.tasks[0]!, taskKey: 'writing_legacy', label: '写作', lifecycle: 'active', skillAllowed: true, configuration: candidate }] };
+    handler = call => call.method === 'POST' ? ok({ versionRef: 'version-1', taskConfigRef: 'new-config', taskRevision: 1, bindingRevision: 1, approvalSource: 'manual' })
+      : call.path.includes('/writing-samples') ? ok({ state: 'connected', samples: [], examined: 0, limit: 50 }) : ok(data);
+    renderPage('/settings/models?section=skills&task=writing_legacy');
+    const reason = await screen.findByLabelText('启用理由');
+    await userEvent.type(reason, '切换做法');
+    await userEvent.click(screen.getByRole('button', { name: '启用候选做法' }));
+    expect(await screen.findByText(/固定做法版本已启用/)).toBeInTheDocument();
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/skills/activate', body: { candidateConfigRef: 'config-1', trialComparisonRef: null, reason: '切换做法' } });
+    expect(posts()[0]?.body).not.toHaveProperty('firstVersionException');
+  });
+  it('做法版本可在设置中直接切换，不要求先重配模型', async () => {
+    const seed = settingsFixture();
+    const config = { ...seed.configurations[0]!, taskKey: 'writing_legacy', skillVersionRef: 'version-1' };
+    const version = { versionRef: 'version-1', versionNo: 1, description: 'Synthetic', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, createdAt: config.createdAt, fileCount: 1 };
+    const data = { ...seed, configurations: [config], skills: [{ skillRef: 'skill', name: 'example', versions: [{ ...version, versionRef: 'version-2', versionNo: 2 }, version] }],
+      tasks: [{ ...seed.tasks[0]!, taskKey: 'writing_legacy', label: '写作', lifecycle: 'active', skillAllowed: true, activeSkillVersionRef: 'version-1', configuration: config }] };
+    handler = call => call.method === 'POST' ? ok({ versionRef: 'version-2', taskConfigRef: 'new-config', taskRevision: 1, bindingRevision: 1, approvalSource: 'manual' })
+      : call.path.includes('/prompts/') ? ok({ taskKey: 'writing_legacy', revision: 0, activeVersionRef: null, versions: [] })
+      : call.path.includes('/writing-samples') ? ok({ state: 'connected', samples: [], examined: 0, limit: 50 }) : ok(data);
+    renderPage('/settings/models?section=skills&task=writing_legacy');
+    const select = await screen.findByLabelText('切换做法版本');
+    fireEvent.change(select, { target: { value: 'version-2' } });
+    await userEvent.click(screen.getByRole('button', { name: '切换做法版本' }));
+    expect(await screen.findByText('做法已切换，当前模型、提示词和额度保持不变。')).toBeInTheDocument();
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/skills/switch', body: { taskKey: 'writing_legacy', versionRef: 'version-2', expectedTaskRevision: 0, expectedBindingRevision: 0 } });
+  });
+  it.each(['comment_study','comment_problem_resolution','comment_problem_pair_review','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research'])('研究阶段 %s 可编辑提示词与切换做法', async taskKey => {
+    const seed = settingsFixture();
+    const config = { ...seed.configurations[0]!, taskKey, skillVersionRef: null, executionContract: null };
+    const version = { versionRef: 'version-1', versionNo: 1, description: 'Synthetic', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, createdAt: config.createdAt, fileCount: 1 };
+    const data = { ...seed, configurations: [config], skills: [{ skillRef: 'skill', name: 'example', versions: [version] }],
+      tasks: [{ ...seed.tasks[0]!, taskKey, label: '研究', lifecycle: 'active', skillAllowed: true, handlerContract: null, configuration: config }] };
+    handler = call => call.method === 'POST' ? ok({ versionRef: 'version-1', taskConfigRef: 'new-config', taskRevision: 1, bindingRevision: 1, approvalSource: 'manual' })
+      : call.path.endsWith(`/prompts/${taskKey}`) ? ok({ taskKey, revision: 0, activeVersionRef: 'prompt-v1', versions: [{ versionRef: 'prompt-v1', versionNo: 1, systemText: '系统', instructionText: '任务', createdAt: config.createdAt }] }) : ok(data);
+    renderPage(`/settings/models?section=skills&task=${taskKey}`);
+    expect(await screen.findByLabelText('系统提示词')).toHaveValue('系统');
+    expect(screen.queryByText(/此工作尚未接入执行/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('切换做法版本'), { target: { value: 'version-1' } });
+    await userEvent.click(screen.getByRole('button', { name: '切换做法版本' }));
+    expect(await screen.findByText('做法已切换，当前模型、提示词和额度保持不变。')).toBeInTheDocument();
+    expect(posts()).toHaveLength(1);
+    expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/skills/switch', body: { taskKey, versionRef: 'version-1' } });
+  });
   it('原入口呈现四区；导航、样本读取与刷新不产生写操作', async () => {
     const user = userEvent.setup(); renderPage();
     expect(document.querySelector('h1#ai-settings-page-title.v7-sr-only')).toBeInTheDocument();

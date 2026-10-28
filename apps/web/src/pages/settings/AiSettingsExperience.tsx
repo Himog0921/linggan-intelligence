@@ -15,17 +15,25 @@ import { BATCH_STATE, MATERIAL, TASK_STATE, budgetText, count, type AiSettings, 
 import type { AiAction } from './useAiAction';
 import styles from './AiSettingsExperience.module.css';
 
-const ORDER = ['ocr_recognition', 'writing_legacy', 'note_interpretation', 'work_comparison', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'legacy_creator_discovery', 'legacy_topic_map'];
+const ORDER = ['ocr_recognition', 'writing_legacy', 'note_interpretation', 'work_comparison', 'creator_research', 'creator_account_research', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_study', 'comment_problem_resolution', 'comment_problem_pair_review', 'topic_research', 'topic_research_extract_review', 'topic_research_resolve', 'topic_research_resolve_review', 'legacy_creator_discovery', 'legacy_topic_map'];
 const COPY: Record<string, { group: string; description: string }> = {
   ocr_recognition: { group: '图片文字', description: '手动识别当前作品的已有本地原图；保存模型配置不会发图，默认关闭。' },
   writing_legacy: { group: '内容工作台', description: '基于选中的作品材料，提供可审阅的写作建议与修改方案。' },
   note_interpretation: { group: '内容理解', description: '提炼笔记观点、表达方式与值得验证的关键信息。' },
   work_comparison: { group: '作品研究', description: '显式比较同一作者所选作品的已取得材料，保留双侧来源与覆盖限制。' },
+  creator_account_research: { group: '创作者研究', description: '综合明确选定的作品底稿与公开简介，研究账号内容倾向并保留样本限制。' },
+  creator_research: { group: '创作者研究', description: '研究选定作品的研究底稿，并保留引用与覆盖限制。' },
+  topic_research: { group: '主题研究', description: '从限定的完整底稿及评论窗口提炼带引用的讨论。' },
+  topic_research_extract_review: { group: '主题研究', description: '独立核对讨论与精确引用，未通过时阻止归属。' },
+  topic_research_resolve: { group: '主题研究', description: '比较当前主题的定义及纳入排除条件，形成候选归属。' },
+  topic_research_resolve_review: { group: '主题研究', description: '独立核验主题归属与层级，再接纳到图谱。' },
   author_org_identity: { group: '创作者研究', description: '辅助判断公开作者简介与账号定位，结论需要保留来源证据。' },
   direction_list_draft: { group: '主题研究', description: '从已有证据中整理候选研究方向，供人工审查。' },
   direction_proposal: { group: '市场洞察', description: '辅助提出值得验证的新切入点，而非自动立项。' },
   writing_assistant: { group: '内容工作台', description: '为内容工作台提供辅助写作支持。' },
-  comment_study: { group: '评论研究', description: '从真实讨论中研究需求、冲突和问题。' },
+  comment_study: { group: '评论研究', description: '从目标评论提取带原声依据的信号；底稿和父评论只提供语境。' },
+  comment_problem_resolution: { group: '评论研究', description: '将可研究的需求和问题与现有问题定义比较，提出归并候选。' },
+  comment_problem_pair_review: { group: '评论研究', description: '独立核对归并候选与原声依据，通过后形成用户问题。' },
   comment_embedding: { group: '评论研究', description: '为评论语义召回提供本机向量支持。' },
   legacy_creator_discovery: { group: '历史工作', description: '旧版自动分析已退役；历史数据按现有规则保留。' },
   legacy_topic_map: { group: '历史工作', description: '旧主题研究已退役，仅供查看历史记录。' },
@@ -37,11 +45,11 @@ const STATES: Record<string, { name: string; tone: string; note: string }> = {
   retired: { name: '已退役', tone: 'history', note: '仅保留历史' },
   legacy: { name: '保留历史', tone: 'history', note: '仅保留历史' },
 };
-const MATERIAL_BY_TASK: Record<string, string> = {
-  ocr_recognition: 'manual_ocr_image',
-  note_interpretation: 'note_material', work_comparison: 'note_material', direction_list_draft: 'note_material', direction_proposal: 'note_material',
-  author_org_identity: 'public_author_bio', writing_assistant: 'selected_writing_material',
-  writing_legacy: 'selected_writing_material', model_probe: 'synthetic_probe',
+const MATERIAL_BY_TASK: Record<string, string[]> = {
+  ocr_recognition: ['manual_ocr_image'],
+  note_interpretation: ['note_material'], work_comparison: ['note_material'], creator_research: ['note_material'], creator_account_research: ['note_material', 'public_author_bio'], comment_study: ['note_material', 'comment_material'], comment_problem_resolution: ['note_material', 'comment_material'], comment_problem_pair_review: ['note_material', 'comment_material'], topic_research: ['note_material', 'comment_material'], topic_research_extract_review: ['note_material', 'comment_material'], topic_research_resolve: ['note_material', 'comment_material'], topic_research_resolve_review: ['note_material', 'comment_material'], direction_list_draft: ['note_material'], direction_proposal: ['note_material'],
+  author_org_identity: ['public_author_bio'], writing_assistant: ['selected_writing_material'],
+  writing_legacy: ['selected_writing_material'], model_probe: ['synthetic_probe'],
 };
 const fmt = (value: string | number | null | undefined) => value == null ? '—' : count(value);
 function Status({ stage }: { stage: string }) {
@@ -103,7 +111,7 @@ function checksFor(data: AiSettings, task: Task): Check[] {
   const requiredScopes = ['global', 'executor', 'task:' + task.taskKey];
   const controlsComplete = requiredScopes.every(scope => requiredControls.some(control => control.scope === scope));
   const material = MATERIAL_BY_TASK[task.taskKey];
-  const license = material && model ? data.egress.find(eg => eg.endpointRef === model.endpointRef && eg.taskKey === task.taskKey && eg.materialClass === material) : null;
+  const licenses = material && model ? material.map(item => data.egress.find(eg => eg.endpointRef === model.endpointRef && eg.taskKey === task.taskKey && eg.materialClass === item)) : [];
   const hasModel = Boolean(configuration.model && model?.capability && model?.selectionModelRef && connection?.enabled && model.probe?.state === 'succeeded' && model.probe.modelCallable === true);
   return [
     { title: '业务执行接入', okay: task.lifecycle === 'active' && Boolean(task.handlerContract) && task.handlerContract === configuration.executionContract, detail: task.lifecycle === 'active' ? '执行处理器与配置版本需匹配' : TASK_STATE[task.lifecycle] ?? '接入状态未知' },
@@ -111,7 +119,7 @@ function checksFor(data: AiSettings, task: Task): Check[] {
     { title: '当前模型与调用资格', okay: hasModel, detail: configuration.model ? (model?.probe?.modelCallable === true && model.probe.state === 'succeeded' ? '模型已响应，仍由服务端复核' : '当前模型的有效调用测试尚未通过') : '未分配已验证的模型' },
     { title: '每日额度', okay: configuration.budget.mode !== 'unconfigured', detail: budgetText(configuration.budget) },
     { title: '固定做法版本', okay: !task.requiresSkill || (Boolean(configuration.skillVersionRef) && configuration.skillVersionRef === task.activeSkillVersionRef), detail: task.requiresSkill ? (task.activeSkillVersionRef ? '需与当前已启用做法一致' : '尚未启用必须的做法') : '该工作不强制绑定做法' },
-    { title: '当前地址的材料许可', okay: material ? (model ? license?.allowed === true : null) : null, detail: material ? (license?.allowed ? (MATERIAL[material] ?? material) + '已批准' : '需核对端点、工作与材料许可') : '当前业务的许可类别需要服务端确认' },
+    { title: '当前地址的材料许可', okay: material ? (model ? licenses.every(license => license?.allowed === true) : null) : null, detail: material ? (model ? material.map((item, index) => (MATERIAL[item] ?? item) + (licenses[index]?.allowed ? '已批准' : '未批准')).join('、') : '需核对端点、工作与材料许可') : '当前业务的许可类别需要服务端确认' },
   ];
 }
 function CapabilityDrawer({ data, task, action, onClose }: { data: AiSettings; task: Task; action: AiAction; onClose: () => void }) {

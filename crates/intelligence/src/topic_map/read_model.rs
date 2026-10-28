@@ -137,12 +137,6 @@ pub async fn source_revision(db: &Database) -> Result<SourceRevision, sqlx::Erro
         // Keep every business setting: a config, threshold, permission or identity
         // change must invalidate even when the row count stays unchanged.
         let content = match relation.as_str() {
-            "linggan_creator_discovery_policy" => {
-                Some("(to_jsonb(r)-'scan_after'-'updated_at')::text")
-            }
-            "linggan_creator_discovery_author_analysis" => Some(
-                "(to_jsonb(r)-'job_state'-'attempt_count'-'next_attempt_at'-'lease_token'-'lease_expires_at'-'last_error_code'-'updated_at')::text",
-            ),
             "collection_observation_target" => {
                 Some("(to_jsonb(r)-'last_scheduler_considered_at')::text")
             }

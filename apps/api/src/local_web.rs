@@ -85,6 +85,8 @@ mod ops_native_model_tests;
 mod ops_overview_api;
 mod ops_sync_api;
 mod public_access;
+#[cfg(test)]
+mod research_browser_tests;
 mod research_dossier;
 #[cfg(test)]
 mod research_dossier_tests;

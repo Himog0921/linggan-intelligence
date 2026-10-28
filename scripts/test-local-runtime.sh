@@ -194,43 +194,14 @@ require_password_repair_uses_current_env
 docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres \
   -c "CREATE DATABASE ${proof_database};" >/dev/null
 
-# A brand-new application database has the retained Evidence/model schema after the ordinary
-# migration chain, but the clean Comment Study base schema is an explicit initialization step.
-# Let the runtime migration runner stop at that boundary, initialize only this disposable proof
-# database, then prove the same runner applies the productization delta in order.
-if "$project_root/scripts/local-runtime.sh" --database "$proof_database" migrate \
-  >"$proof_directory/migrate-before-comment-study-init.log" 2>&1; then
-  echo "runtime proof expected the uninitialized Comment Study prerequisite to stop the first migration pass" >&2
-  exit 1
-fi
-if ! grep -q 'comment_study_schema_prerequisite_missing: linggan_comment_study_policy' \
-  "$proof_directory/migrate-before-comment-study-init.log"; then
-  cat "$proof_directory/migrate-before-comment-study-init.log" >&2
-  echo "runtime proof stopped for a reason other than the documented Comment Study initialization boundary" >&2
-  exit 1
-fi
-
-bootstrap_table_count="$(docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -At \
+# A fresh database traverses the historical scaffold inside migrate and retires it
+# in the same ordered migration chain. Repeating migrate cannot recreate old tables.
+"$project_root/scripts/local-runtime.sh" --database "$proof_database" migrate
+"$project_root/scripts/local-runtime.sh" --database "$proof_database" migrate
+legacy_count="$(docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -At \
   -U "$POSTGRES_USER" -d "$proof_database" \
   -c "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'linggan_comment_study_%';")"
-if [[ "$bootstrap_table_count" != "0" ]]; then
-  echo "runtime proof refused to bootstrap a disposable database with existing Comment Study tables" >&2
-  exit 1
-fi
-"$project_root/scripts/init-comment-study.sh" --database "$proof_database"
-if "$project_root/scripts/init-comment-study.sh" --database "$proof_database" \
-  >"$proof_directory/bootstrap-second-run.log" 2>&1; then
-  echo "runtime proof expected first-time Comment Study initialization to refuse a second bootstrap" >&2
-  exit 1
-fi
-if ! grep -q 'Comment Study tables already exist or are partial' \
-  "$proof_directory/bootstrap-second-run.log"; then
-  cat "$proof_directory/bootstrap-second-run.log" >&2
-  echo "runtime proof second bootstrap stopped for an unexpected reason" >&2
-  exit 1
-fi
-
-"$project_root/scripts/local-runtime.sh" --database "$proof_database" migrate
+[[ "$legacy_count" == 0 ]] || { echo 'Retired Comment Study tables were recreated' >&2; exit 1; }
 
 # The first Ops administrator is a controlled console bootstrap, never a browser registration.
 # Use only a synthetic token and address inside this disposable database, then prove it cannot

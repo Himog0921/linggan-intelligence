@@ -35,7 +35,7 @@ pub(crate) async fn qualify_definitions_and_inputs(
     domain: Option<Uuid>,
     additional_scopes: &FrozenScopes,
 ) -> Result<(HashSet<Uuid>, QualifiedInputs), ModelError> {
-    let rows = sqlx::query("SELECT rule.definition_ref,rule.domain_ref,task.work_public_ref,run.config_ref,request.request_manifest FROM linggan_topic_map_concept_rule rule LEFT JOIN linggan_topic_map_research_request request ON request.invocation_ref=rule.invocation_ref LEFT JOIN linggan_topic_map_research_task task USING(task_ref) LEFT JOIN linggan_topic_map_research_run run ON run.run_ref=task.run_ref WHERE ($1::uuid IS NULL OR rule.domain_ref=$1)")
+    let rows = sqlx::query("SELECT rule.definition_ref,rule.domain_ref,task.work_ref AS work_public_ref,(run.configurations->>0)::uuid AS config_ref,task.input_refs AS request_manifest,jsonb_build_object('core',result.core_json,'dispatch',dispatch.context) AS definition_context FROM linggan_topic_map_concept_rule rule LEFT JOIN linggan_topic_research_result result ON result.invocation_ref=rule.invocation_ref LEFT JOIN linggan_topic_research_dispatch dispatch ON dispatch.invocation_ref=result.invocation_ref LEFT JOIN linggan_topic_research_window task USING(window_ref) LEFT JOIN linggan_topic_research_run run USING(run_ref) WHERE ($1::uuid IS NULL OR rule.domain_ref=$1)")
         .bind(domain).fetch_all(db.pool()).await?;
     let mut scopes = additional_scopes.clone();
     for row in &rows {
@@ -96,7 +96,7 @@ pub(crate) async fn qualify_definitions_and_inputs(
         };
         dependencies.insert(
             row.get::<Uuid, _>("definition_ref"),
-            definition_dependencies(&manifest),
+            definition_dependencies(&row.get::<Value, _>("definition_context")),
         );
         let qualified = topic_map_research::manifest_as_of(&manifest)
             .and_then(|as_of| frozen.get(&(domain, config, as_of.to_owned())))

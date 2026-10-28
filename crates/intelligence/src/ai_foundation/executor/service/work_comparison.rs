@@ -6,7 +6,7 @@ use super::super::{
 };
 use crate::{
     ai_foundation::{
-        TaskKey, admission, batch_store::InputRef, store::FoundationError, transport_store,
+        TaskKey, admission, batch_store::InputRef, prompt, store::FoundationError, transport_store,
         work_comparison as owner,
     },
     model_invocation::finish_invocation_in,
@@ -21,6 +21,7 @@ struct Prepared {
     invocation: Uuid,
     request: PiRequest,
     request_ref: Uuid,
+    prompt_version_ref: Uuid,
 }
 
 async fn prepare(
@@ -39,7 +40,7 @@ async fn prepare(
         &mut tx,
         TaskKey::WorkComparison,
         item.task_config_ref,
-        false,
+        true,
     )
     .await?;
     admission::check_queue_input_scope(
@@ -79,7 +80,13 @@ async fn prepare(
             FoundationError::AdmissionDenied(vec!["synthetic_endpoint_required".into()]).into(),
         );
     }
-    let (system, prompt) = owner::prompt(&materials);
+    let (prompt_version_ref, mut system, instruction, skill) =
+        prompt::frozen_in(&mut tx, item.task_config_ref, TaskKey::WorkComparison).await?;
+    if let Some(skill) = skill {
+        system.push_str("\n\n");
+        system.push_str(&skill);
+    }
+    let prompt = owner::prompt(&materials, &instruction);
     let schema = crate::ai_foundation::transport::ResponseSchema {
         name: "work_content_comparison".into(),
         schema: owner::response_schema(),
@@ -116,8 +123,8 @@ async fn prepare(
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,task_config_ref,batch_ref,round_no,quota_bucket,classification_source,dispatch_admitted_at,deadline_at,egress_event_ref,result,created_at) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,'work_comparison',$7,$8,$9,'task_day','producer_v1',$10::text::timestamptz,$10::text::timestamptz+make_interval(secs=>$11),$12,$13,$10::text::timestamptz)")
         .bind(invocation).bind(model.connection_version_ref).bind(model.current_model_ref).bind(cfg).bind(hash).bind(reservation as i64).bind(item.task_config_ref).bind(item.batch_ref)
         .bind((item.position/linggan_contracts::ai_limits::AI_LIMITS.round_size+1) as i32).bind(admitted).bind(request.timeout_ms as f64/1000.0+10.0)
-        .bind(egress).bind(json!({"producer":"ai-gen1-executor.v1","purpose":"work_comparison","requestRef":request_ref,"methodVersion":owner::CONTRACT})).execute(&mut *tx).await?;
-    let changed=sqlx::query("UPDATE linggan_ai_batch_item_control SET invocation_ref=$2,attempt_count=attempt_count+1,executed_config_ref=$3,execution_contract=$4 WHERE item_ref=$1 AND attempt_count=0")
+        .bind(egress).bind(json!({"producer":"ai-gen1-executor.v1","purpose":"work_comparison","requestRef":request_ref,"methodVersion":owner::CONTRACT,"promptVersion":prompt_version_ref})).execute(&mut *tx).await?;
+    let changed=sqlx::query("UPDATE linggan_ai_batch_item_control SET invocation_ref=$2,attempt_count=attempt_count+1,executed_config_ref=$3,executed_skill_version_ref=(SELECT skill_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$3),execution_contract=$4 WHERE item_ref=$1 AND attempt_count=0")
         .bind(item.item_ref).bind(invocation).bind(item.task_config_ref).bind(owner::CONTRACT).execute(&mut *tx).await?;
     if changed.rows_affected() != 1 {
         return Err(ExecutorError::FenceLost);
@@ -127,6 +134,7 @@ async fn prepare(
         invocation,
         request,
         request_ref: *request_ref,
+        prompt_version_ref,
     })
 }
 
@@ -184,14 +192,9 @@ async fn settle(
         });
     let allowed = !cancelled
         && sources.is_ok()
-        && admission::check_queue_configuration(
-            &mut tx,
-            item.task_key,
-            item.task_config_ref,
-            false,
-        )
-        .await
-        .is_ok()
+        && admission::check_queue_configuration(&mut tx, item.task_key, item.task_config_ref, true)
+            .await
+            .is_ok()
         && admission::check_queue_input_scope(
             &mut tx,
             item.task_key,
@@ -217,6 +220,7 @@ async fn settle(
         .unwrap_or_else(|| json!({"ok":false}));
     result["executorReceipt"] = json!(item.lease_token);
     result["requestRef"] = json!(prepared.request_ref);
+    result["promptVersion"] = json!(prepared.prompt_version_ref);
     sqlx::query("INSERT INTO linggan_work_comparison_result(request_ref,invocation_ref,result,failure_code) VALUES($1,$2,$3,$4)")
         .bind(prepared.request_ref).bind(prepared.invocation).bind(if success{parsed.as_ref().map(|a|json!(a))}else{None}).bind(failure).execute(&mut *tx).await?;
     receipt::observe_in(&mut tx, prepared.invocation, response).await?;

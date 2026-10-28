@@ -6,10 +6,7 @@ import { CorpusSideNav } from '../../../corpus/CorpusSideNav';
 import { DomainPicker } from '../../../corpus/DomainPicker';
 import { useCorpusShell } from '../../../corpus/useCorpusShell';
 import { CommentsView } from './CommentsView';
-import { Overview } from './Overview';
-import { initialOverviewPreferences } from './overviewState';
-import { ProblemsView } from './ProblemsView';
-import { RunPicker, RunsView } from './RunsView';
+import { ResearchDashboard } from './ResearchDashboard';
 import type { SelectedComment } from './studyApi';
 import type { StudyNavigation } from './studyApi';
 import { c } from './styles';
@@ -17,7 +14,7 @@ import { errorText, num } from './format';
 import type { CommentCounts } from './CommentsView';
 
 type View = 'overview' | 'comments' | 'runs' | 'problems';
-const views: readonly [View, string][] = [['overview', '概览'], ['comments', '用户评论'], ['runs', '研究批次'], ['problems', '用户问题']];
+const views: readonly [View, string][] = [['overview', '概览'], ['comments', '用户评论'], ['runs', '研究记录'], ['problems', '用户问题']];
 const activeView = (value: string | null): View => value === 'targets' ? 'runs' : value === 'pending' ? 'problems' : views.some(([key]) => key === value) ? value as View : 'overview';
 
 export function CommentsPage() {
@@ -32,7 +29,6 @@ export function CommentsPage() {
 
 function Workspace({ domain, domainName, domainStatus, collectionState, crumb, loading, shellError, fatalShellError, retryShell }: { domain: string | null; domainName: string; domainStatus: string; collectionState?: string; crumb: ReactNode; loading: boolean; shellError: string; fatalShellError: boolean; retryShell: () => void }) {
   const location = useLocation(), navigate = useNavigate(), params = new URLSearchParams(location.search), view = activeView(params.get('view'));
-  const [overviewPreferences, setOverviewPreferences] = useState(initialOverviewPreferences);
   const [savedViews, setSavedViews] = useState<Partial<Record<View, { search: string; state: unknown }>>>({});
   const [selectedComments, setSelectedComments] = useState<SelectedComment[]>([]);
   const [commentCounts, setCommentCounts] = useState<CommentCounts | null>(null);
@@ -52,17 +48,15 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
   }
   const nav: StudyNavigation = {
     view: next => { const to = destination(next); void navigate(to.url, { state: to.state }); },
-    run: (runRef, panel = 'targets', targetRef = null, signalRef = null) => { const to = destination('runs', { runRef, panel, targetRef, signalRef }); void navigate(to.url, { state: to.state }); },
-    problem: problemRef => { const to = destination('problems', { problemRef }); void navigate(to.url, { state: to.state }); },
-    candidates: state => { const to = destination('problems', { state: 'clues', cursor: null, q: null, problemRef: null }, { problemResults: { domain, view: 'clues', q: '', order: 'recent', cursor: null, candidate: state, density: 'standard' } }); void navigate(to.url, { state: to.state }); },
+    research: (requestRef, key) => { const to=destination('comments',{commentWorkRef:key.workRef,commentExternalId:key.commentExternalId,detail:'comment',researchRequestRef:requestRef},{commentDetail:true,commentDomain:domain});void navigate(to.url,{state:to.state}); },
     comment: key => {
-      const to = destination('comments', { commentWorkRef: key.workRef, commentExternalId: key.commentExternalId, detail: 'comment' }, { commentDetail: true, commentDomain: domain });
+      const to = destination('comments', { commentWorkRef: key.workRef, commentExternalId: key.commentExternalId, detail: 'comment', researchRequestRef: null }, { commentDetail: true, commentDomain: domain });
       void (async () => { await navigate(location.pathname + location.search, { replace: true, state: { ...(location.state as object | null), commentScrollY: window.scrollY } }); await navigate(to.url, { state: to.state }); })();
     },
   };
   function closeComment() {
     if ((location.state as { commentDetail?: boolean } | null)?.commentDetail) { void navigate(-1); return; }
-    const next = new URLSearchParams(location.search); for (const key of ['commentWorkRef', 'commentExternalId', 'detail']) next.delete(key);
+    const next = new URLSearchParams(location.search); for (const key of ['commentWorkRef', 'commentExternalId', 'detail', 'researchRequestRef']) next.delete(key);
     void navigate(`/corpus/comments?${next}`, { replace: true, state: location.state as unknown });
   }
   const contextNav = <nav className="v7-tertiary-nav" data-comment-study-context aria-label="评论研究视图">{views.map(([key, label]) => <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => nav.view(key)}>{label}</button>)}<select aria-label="切换评论研究视图" className="v7-tertiary-select" value={view} onChange={event => nav.view(event.target.value as View)}>{views.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></nav>;
@@ -77,13 +71,13 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
     </div>
   </details> : `${domainName} · 状态 ${domainStatus}`;
   return <AppShell active="corpus" collectionState={collectionState} boundaryLabel="本机服务状态" crumb={crumb} contextNav={contextNav} meta={contextMeta}>
-    <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>只读呈现新评论研究链路<br />自动排程保持关闭</>} />
+    <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>原声提取 · 问题归并 · 独立核验</>} />
     {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> :
     <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1>
     {shellError ? <p className={c('study-table-status')} role="status">领域信息刷新失败；当前显示上次读取结果。{shellError} <button type="button" onClick={retryShell}>重新读取领域信息</button></p> : null}
-    {domain && view === 'runs' ? <RunPicker domain={domain} selected={params.get('runRef')} nav={nav} /> : <div id="study-run-picker" className={c('study-run-picker')} hidden />}
+
     <section id="study-tab-result" className={view === 'comments' ? c('study-tab-comments') : undefined} aria-live="polite" data-comment-study-content aria-busy={loading}>
-      {loading ? <p className={c('study-empty')}>正在读取评论研究…</p> : !domain ? <p className={c('study-empty')}>请先在页头选择观察领域，再查看评论研究。</p> : view === 'comments' ? <CommentsView domain={domain} nav={nav} selected={selectedComments} onSelected={setSelectedComments} onCounts={setCommentCounts} requestRefs={usageRefs} closeDetail={closeComment} /> : view === 'runs' ? <RunsView domain={domain} nav={nav} initialFeedback="" /> : view === 'problems' ? <ProblemsView domain={domain} nav={nav} /> : <Overview domain={domain} nav={nav} preferences={overviewPreferences} onPreferences={setOverviewPreferences} />}
+      {loading ? <p className={c('study-empty')}>正在读取评论研究…</p> : !domain ? <p className={c('study-empty')}>请先在页头选择观察领域，再查看评论研究。</p> : view === 'comments' ? <CommentsView domain={domain} nav={nav} selected={selectedComments} onSelected={setSelectedComments} onCounts={setCommentCounts} requestRefs={usageRefs} closeDetail={closeComment} /> : <ResearchDashboard domain={domain} view={view} nav={nav} />}
     </section>
     </main>}</div></AppShell>;
 }

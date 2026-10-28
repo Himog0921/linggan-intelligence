@@ -157,34 +157,13 @@ verify_persistent_runtime_is_stopped_for_migration() {
   fi
 }
 
-verify_comment_study_base_schema() {
-  local missing_relation
-  missing_relation="$(psql_in_container -At <<'SQL'
-WITH required(relation_name) AS (
-  SELECT unnest(ARRAY[
-    'observation_domain','linggan_material_comment','linggan_model_invocation',
-    'linggan_comment_study_policy','linggan_comment_study_run','linggan_comment_study_target',
-    'linggan_comment_study_batch','linggan_comment_study_resolution',
-    'linggan_comment_study_problem_pair','linggan_comment_study_problem_revision',
-    'linggan_comment_study_problem_membership'
-  ])
-)
-SELECT relation_name FROM required
-WHERE to_regclass(relation_name) IS NULL
-ORDER BY array_position(ARRAY[
-    'observation_domain','linggan_material_comment','linggan_model_invocation',
-    'linggan_comment_study_policy','linggan_comment_study_run','linggan_comment_study_target',
-    'linggan_comment_study_batch','linggan_comment_study_resolution',
-    'linggan_comment_study_problem_pair','linggan_comment_study_problem_revision',
-    'linggan_comment_study_problem_membership'
-  ], relation_name)
-LIMIT 1;
-SQL
-)"
-  if [[ -n "$missing_relation" ]]; then
-    echo "comment_study_schema_prerequisite_missing: ${missing_relation}" >&2
-    echo "For a first clean-study installation, run ./scripts/init-comment-study.sh, then retry migrate." >&2
-    exit 1
+prepare_historical_comment_schema() {
+  # Historical deltas 0107–0178 require this scaffold. It is removed by 0179 and
+  # must never be recreated on a current or already-upgraded database.
+  local legacy_count
+  legacy_count="$(psql_in_container -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name LIKE 'linggan_comment_study_%'")"
+  if [[ "$legacy_count" == 0 ]]; then
+    { printf 'BEGIN;\n'; cat "$project_root/database/bootstrap/comment-study-001.sql"; printf '\nCOMMIT;\n'; } | psql_in_container >/dev/null
   fi
 }
 
@@ -438,7 +417,7 @@ migrate() {
   apply_migration_once "0104_unified_domain_schema_cleanup" "$project_root/database/migrations/0104_unified_domain_schema_cleanup.sql"
   apply_migration_once "0105_reply_disposition_requalification" "$project_root/database/migrations/0105_reply_disposition_requalification.sql"
   apply_migration_once "0106_reply_disposition_quota_requalification" "$project_root/database/migrations/0106_reply_disposition_quota_requalification.sql"
-  verify_comment_study_base_schema
+  if [[ "$(psql_in_container -Atc "SELECT EXISTS(SELECT 1 FROM linggan_local_schema_migration WHERE migration_id='0107_comment_study_productization_schema')")" != t ]]; then prepare_historical_comment_schema; fi
   apply_migration_once "0107_comment_study_productization_schema" "$project_root/database/migrations/0107_comment_study_productization_schema.sql"
   apply_migration_once "0108_comment_study_policy_constraints" "$project_root/database/migrations/0108_comment_study_policy_constraints.sql"
   apply_migration_once "0109_comment_study_start_constraints" "$project_root/database/migrations/0109_comment_study_start_constraints.sql"
@@ -501,6 +480,17 @@ migrate() {
   apply_migration_once "0166_collection_command_reason_ops_publication_scope" "$project_root/database/migrations/0166_collection_command_reason_ops_publication_scope.sql"
   apply_migration_once "0167_ops_historical_owner_resolution" "$project_root/database/migrations/0167_ops_historical_owner_resolution.sql"
   apply_migration_once "0168_dossier_ocr_cleanup" "$project_root/database/migrations/0168_dossier_ocr_cleanup.sql"
+  apply_migration_once "0169_ai_manual_skill_activation" "$project_root/database/migrations/0169_ai_manual_skill_activation.sql"
+  apply_migration_once "0170_ai_prompt_versions" "$project_root/database/migrations/0170_ai_prompt_versions.sql"
+  apply_migration_once "0171_ai_writing_comparison_prompts" "$project_root/database/migrations/0171_ai_writing_comparison_prompts.sql"
+  apply_migration_once "0172_research_method_settings" "$project_root/database/migrations/0172_research_method_settings.sql"
+  apply_migration_once "0173_creator_research_execution" "$project_root/database/migrations/0173_creator_research_execution.sql"
+  apply_migration_once "0174_comment_research_execution" "$project_root/database/migrations/0174_comment_research_execution.sql"
+  apply_migration_once "0175_creator_account_research" "$project_root/database/migrations/0175_creator_account_research.sql"
+  apply_migration_once "0176_topic_research_execution" "$project_root/database/migrations/0176_topic_research_execution.sql"
+  apply_migration_once "0177_comment_problem_workflow" "$project_root/database/migrations/0177_comment_problem_workflow.sql"
+  apply_migration_once "0178_creator_manual_annotations" "$project_root/database/migrations/0178_creator_manual_annotations.sql"
+  apply_migration_once "0179_retire_research_relations" "$project_root/database/migrations/0179_retire_research_relations.sql"
 }
 
 case "$command_name" in

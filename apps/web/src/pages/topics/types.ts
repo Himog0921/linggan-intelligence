@@ -466,59 +466,12 @@ export interface Diagnostic {
   decisionCount?: number;
   semanticChecks?: { checkId: string; verdict: string; rule: string }[];
 }
-export interface TaskIssue {
-  phase: string;
-  state: string;
-  reason: string | null;
-  validationDiagnostic: Diagnostic | null;
-  taskRef: string;
-}
-export interface Run extends Counts {
-  runRef: string;
-  state: string;
-  lastReason: string | null;
-  trigger: string;
-  methodVersion: string;
-  createdAt: string;
-  taskIssues: TaskIssue[];
-}
-export interface Policy {
-  status: string;
-  modelConfigRef: string;
-  dailyTokenLimit: number;
-  runTokenLimit: number;
-  automaticEnabled: boolean;
-  collectionEnabled: boolean;
-}
 export interface CollectionRound {
   roundRef: string;
   kind: string;
   state: string;
   reason: string | null;
   detailSlotsReserved: number;
-}
-export interface ResearchProgress {
-  domainRef: string;
-  methodVersion: string;
-  policy: Policy | null;
-  currentMethodSummary: Counts;
-  summary: Counts;
-  runs: Run[];
-  runListLimit: number;
-  models: {
-    configRef: string;
-    modelId: string;
-    inputTokenLimit: number;
-    outputTokenLimit: number;
-  }[];
-  usage: { chargedTokens: number; reservedTokens: number; timezone: string };
-  processingLimits: {
-    automaticBatchWindows: number;
-    materialSelection: 'whole_note';
-    primaryCommentsPerWindow: number;
-  };
-  targets: { targetRef: string; displayName: string; kind: string }[];
-  collectionRounds: CollectionRound[];
 }
 export interface SearchRound {
   roundRef: string;
@@ -584,7 +537,7 @@ export interface CommandReceipt {
   action: string;
   idempotencyKey?: string;
 }
-export interface ResearchReceipt {
+export interface CollectionReceipt {
   requestRef: string;
   domainRef?: string | null;
   state?: string;
@@ -652,14 +605,13 @@ export interface DialogState {
   saveRequestKey?: string;
   alternative?: Alternative;
   alternativeRef?: string;
-  progress?: ResearchProgress;
   moveTopicRef?: string;
   sources?: string[];
   destinationCount?: number;
   plan?: StructurePlan;
   preview?: StructurePreview;
   structureApplied?: boolean;
-  collection?: ResearchProgress;
+  collection?: { policy: { enabled: boolean; revision: number }; targets: { targetRef: string; kind: string; displayName: string }[]; collectionRounds: CollectionRound[] };
   search?: SearchProgress;
   collectionError?: string;
   searchError?: string;

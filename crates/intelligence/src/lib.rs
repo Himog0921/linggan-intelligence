@@ -4,7 +4,6 @@
 pub mod ai_foundation;
 pub mod creator_discovery_analysis;
 pub mod creator_discovery_input;
-pub mod creator_discovery_worker;
 pub mod note_interpretation_offline;
 pub mod research_text;
 pub mod topic_map;
@@ -13,7 +12,6 @@ pub mod topic_map_core;
 pub mod topic_map_research;
 pub mod topic_map_research_analysis;
 pub mod topic_map_research_collection;
-pub mod topic_map_research_worker;
 mod topic_workspace;
 
 pub use topic_workspace::{
@@ -40,32 +38,10 @@ mod pi_skills;
 
 pub mod model_invocation;
 
-pub mod model_runner;
-
 pub mod model_worker_drain;
 
 pub(crate) mod comment_cleaning;
-pub mod comment_study_acceptance;
-pub mod comment_study_batch;
-pub mod comment_study_batch_acceptance;
-pub mod comment_study_batch_worker;
-pub mod comment_study_candidate_recall;
-pub mod comment_study_canonical;
 pub mod comment_study_catalog;
-pub mod comment_study_comparison_cache;
-pub mod comment_study_embedding;
-pub mod comment_study_model_dispatch;
-pub mod comment_study_model_runner;
-pub mod comment_study_observation;
-pub mod comment_study_pair_worker;
-pub mod comment_study_policy;
-pub mod comment_study_problem_resolution;
-pub mod comment_study_problem_store;
-pub mod comment_study_read;
-pub mod comment_study_recall;
-pub(crate) mod comment_study_request_ledger;
-pub mod comment_study_resolution_worker;
-pub mod comment_study_run;
 pub mod comment_study_selection;
 pub mod comment_study_semantic;
 pub mod comment_study_source;

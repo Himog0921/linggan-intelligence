@@ -20,27 +20,32 @@ WITH latest AS MATERIALIZED (
     ORDER BY comment.content_public_ref, comment.comment_external_id,
              comment.observed_at::timestamptz DESC, comment.created_at DESC, comment.material_ref DESC
 ), history AS MATERIALIZED (
-    SELECT target.target_ref, target.run_ref, target.source_ref, target.state,
-           target.created_at, target.finished_at, original.content_public_ref,
-           original.comment_external_id, run.dispatch_state
-    FROM linggan_comment_study_target target
-    JOIN linggan_material_comment original ON original.material_ref = target.source_ref
-    JOIN linggan_comment_study_run run ON run.run_ref = target.run_ref
-    JOIN linggan_comment_study_policy policy ON policy.policy_ref = run.policy_ref
-    WHERE policy.domain_ref = $1 AND target.created_at <= $2::timestamptz
-      AND ($4::uuid IS NULL OR original.content_public_ref = $4)
-      AND ($5::text IS NULL OR original.comment_external_id = $5)
+    SELECT request.request_ref, request.source_ref,
+           CASE WHEN bool_or(control.state IN ('pending','running')) THEN 'running'
+                WHEN bool_or(control.state='failed' OR (control.state='skipped' AND control.failure_code IS DISTINCT FROM 'comment_no_problem_signal')) THEN 'failed'
+                WHEN bool_or(control.state='cancelled') THEN 'cancelled'
+                ELSE 'succeeded' END AS state,
+           request.created_at,max(control.finished_at) AS finished_at,
+           original.content_public_ref,original.comment_external_id
+    FROM linggan_comment_research_request request
+    JOIN linggan_material_comment original ON original.material_ref=request.source_ref
+    JOIN linggan_comment_research_stage stage USING(request_ref)
+    JOIN linggan_ai_batch_item_control control USING(item_ref)
+    WHERE request.domain_ref=$1 AND request.created_at<=$2::timestamptz
+      AND ($4::uuid IS NULL OR original.content_public_ref=$4)
+      AND ($5::text IS NULL OR original.comment_external_id=$5)
+    GROUP BY request.request_ref,original.content_public_ref,original.comment_external_id
 ), last_attempt AS (
     SELECT DISTINCT ON (content_public_ref, comment_external_id) * FROM history
-    ORDER BY content_public_ref, comment_external_id, created_at DESC, target_ref DESC
+    ORDER BY content_public_ref, comment_external_id, created_at DESC, request_ref DESC
 ), success AS (
     -- Select the success head BEFORE checking equality. Do not resurrect an older result.
     SELECT DISTINCT ON (content_public_ref, comment_external_id) * FROM history
     WHERE state IN ('succeeded', 'no_signal')
-    ORDER BY content_public_ref, comment_external_id, created_at DESC, target_ref DESC
+    ORDER BY content_public_ref, comment_external_id, created_at DESC, request_ref DESC
 ), active AS (
     SELECT DISTINCT content_public_ref, comment_external_id FROM history
-    WHERE state IN ('ready', 'queued', 'running') AND dispatch_state IN ('enabled', 'paused')
+    WHERE state IN ('pending','running')
 ), facts AS MATERIALIZED (
     SELECT latest.*, cache.source_ref AS cached_source_ref, cache.clean_state,
            cache.research_text, cache.clean_reasons,
@@ -62,15 +67,15 @@ WITH latest AS MATERIALIZED (
                WHERE restriction.content_public_ref = latest.content_public_ref
                  AND restriction.comment_external_id = latest.comment_external_id
            ) AS source_restricted,
-           last_attempt.target_ref AS latest_target_ref,
-           last_attempt.run_ref AS latest_run_ref, last_attempt.state AS latest_state,
+           last_attempt.request_ref AS latest_request_ref,
+           last_attempt.state AS latest_state,
            last_attempt.created_at AS latest_created_at,
            last_attempt.finished_at AS latest_finished_at,
            CASE WHEN last_raw.body_state = 'KNOWN' AND last_raw.body_text IS NOT NULL
                 THEN last_raw.body_text IS NOT DISTINCT FROM raw.body_text ELSE NULL END AS latest_raw_same,
            CASE WHEN last_raw.body_state = 'KNOWN' AND last_raw.body_text IS NOT NULL
                 THEN 'known' ELSE 'unknown' END AS latest_source_state,
-           success.target_ref AS effective_target_ref, success.run_ref AS effective_run_ref,
+           success.request_ref AS effective_request_ref,
            success.source_ref AS effective_source_ref, success.state AS effective_state,
            success.created_at AS effective_created_at, success.finished_at AS effective_finished_at,
            CASE WHEN success_raw.body_state = 'KNOWN' AND success_raw.body_text IS NOT NULL
@@ -80,7 +85,7 @@ WITH latest AS MATERIALIZED (
            active.content_public_ref IS NOT NULL AS in_progress
     FROM latest
     JOIN linggan_material_comment raw ON raw.material_ref = latest.material_ref
-    LEFT JOIN linggan_comment_study_clean_cache cache
+    LEFT JOIN linggan_comment_clean_cache cache
       ON cache.source_ref = latest.material_ref AND cache.cleaner_version = $3
     LEFT JOIN linggan_material_content_author author ON author.content_public_ref = latest.content_public_ref
     LEFT JOIN last_attempt ON last_attempt.content_public_ref = latest.content_public_ref

@@ -307,3 +307,259 @@ async fn ai_foundation_settings_use_connection_cas_and_preserve_selection_withou
         .unwrap();
     assert_eq!(calls, 0);
 }
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL proof only"]
+async fn prompt_switch_preserves_an_unqualified_model_without_qualifying_it() {
+    use linggan_intelligence::ai_foundation::prompt::{self, ActivatePrompt, SavePrompt};
+    use linggan_intelligence::ai_foundation::skill_binding::{SwitchSkill, switch_skill};
+    use linggan_intelligence::ai_foundation::skill_store::{ImportSkill, import_skill};
+    let db = fixture::proof_database("ai_prompt_legacy_selection").await;
+    let conn = new_connection(&db).await;
+    let v = version(&db, conn, 1, "https://legacy.example/api").await;
+    let selected = model(&db, v).await;
+    let model_config = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) VALUES($1,$2,8192,2048,45,2)")
+        .bind(model_config).bind(selected).execute(db.pool()).await.unwrap();
+    let seeded = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,model_config_ref,skill_version_ref,execution_contract,material_columns,budget_mode,daily_token_limit,allowed_tools,origin,prompt_version_ref) SELECT $1,c.task_key,$2,c.skill_version_ref,c.execution_contract,c.material_columns,c.budget_mode,c.daily_token_limit,c.allowed_tools,'seed',c.prompt_version_ref FROM linggan_ai_task_setting s JOIN linggan_ai_task_config c ON c.task_config_ref=s.current_config_ref WHERE s.task_key='writing_legacy'")
+        .bind(seeded).bind(model_config).execute(db.pool()).await.unwrap();
+    sqlx::query("UPDATE linggan_ai_task_setting SET current_config_ref=$1,revision=revision+1 WHERE task_key='writing_legacy'")
+        .bind(seeded).execute(db.pool()).await.unwrap();
+    let current = prompt::read(&db, TaskKey::WritingLegacy).await.unwrap();
+    let revision = current["revision"].as_i64().unwrap();
+    let saved = prompt::save(
+        &db,
+        &SavePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WritingLegacy,
+            expected_task_revision: revision,
+            system_text: "synthetic system".into(),
+            instruction_text: "synthetic instruction".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let enabled = prompt::activate(
+        &db,
+        &ActivatePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WritingLegacy,
+            expected_task_revision: revision,
+            version_ref: saved.version_ref,
+        },
+    )
+    .await
+    .unwrap();
+    let (stored, capability): (Uuid, Option<Uuid>) = sqlx::query_as("SELECT c.model_config_ref,m.capability_ref FROM linggan_ai_task_config c JOIN linggan_model_config m ON m.config_ref=c.model_config_ref WHERE c.task_config_ref=$1")
+        .bind(enabled.task_config_ref).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(stored, model_config);
+    assert!(
+        capability.is_none(),
+        "switching a prompt cannot qualify the model"
+    );
+    let skill = import_skill(
+        &db,
+        &linggan_intelligence::pi_adapter::PiAdapter::configured(),
+        &ImportSkill {
+            command_ref: Uuid::new_v4(),
+            expected_version_ref: None,
+            package: super::skills::package(),
+        },
+    )
+    .await
+    .unwrap();
+    let switch = SwitchSkill {
+        command_ref: Uuid::new_v4(),
+        task_key: TaskKey::WritingLegacy,
+        expected_task_revision: enabled.task_revision,
+        expected_binding_revision: 0,
+        version_ref: skill.version_ref,
+    };
+    let skill_switched = switch_skill(&db, &switch).await.unwrap();
+    assert_eq!(switch_skill(&db, &switch).await.unwrap(), skill_switched);
+    let (stored_model, stored_prompt):(Uuid, Uuid) = sqlx::query_as("SELECT model_config_ref,prompt_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$1")
+        .bind(skill_switched.task_config_ref).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        (stored_model, stored_prompt),
+        (model_config, saved.version_ref)
+    );
+    let denied = sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,model_config_ref,skill_version_ref,execution_contract,material_columns,budget_mode,daily_token_limit,allowed_tools,origin,command_ref,prompt_version_ref) SELECT $1,task_key,NULL,skill_version_ref,execution_contract,material_columns,budget_mode,daily_token_limit,allowed_tools,'prompt_activation',$2,prompt_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$3")
+        .bind(Uuid::new_v4()).bind(Uuid::new_v4()).bind(enabled.task_config_ref).execute(db.pool()).await.unwrap_err();
+    assert!(
+        denied
+            .to_string()
+            .contains("ai_prompt_activation_changed_other_settings")
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL; configuration changes never dispatch"]
+async fn research_methods_are_editable_and_switching_never_dispatches() {
+    use linggan_intelligence::ai_foundation::control_store::{
+        Actor, ChangeControl, ControlScope, change_control,
+    };
+    use linggan_intelligence::ai_foundation::prompt::{self, ActivatePrompt, SavePrompt};
+    use linggan_intelligence::ai_foundation::skill_binding::{SwitchSkill, switch_skill};
+    use linggan_intelligence::ai_foundation::skill_store::{ImportSkill, import_skill};
+    use linggan_intelligence::ai_foundation::store::FoundationError;
+    let db = fixture::proof_database("ai_research_methods_current").await;
+    let skill = import_skill(
+        &db,
+        &linggan_intelligence::pi_adapter::PiAdapter::configured(),
+        &ImportSkill {
+            command_ref: Uuid::new_v4(),
+            expected_version_ref: None,
+            package: super::skills::package(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut revised_package = super::skills::package();
+    revised_package.files[0]
+        .content
+        .push_str("\nA revised synthetic method.\n");
+    let second_skill = import_skill(
+        &db,
+        &linggan_intelligence::pi_adapter::PiAdapter::configured(),
+        &ImportSkill {
+            command_ref: Uuid::new_v4(),
+            expected_version_ref: Some(skill.version_ref),
+            package: revised_package,
+        },
+    )
+    .await
+    .unwrap();
+    for task in [
+        TaskKey::CommentStudy,
+        TaskKey::CommentProblemResolution,
+        TaskKey::CommentProblemPairReview,
+        TaskKey::TopicResearch,
+        TaskKey::TopicResearchExtractReview,
+        TaskKey::TopicResearchResolve,
+        TaskKey::TopicResearchResolveReview,
+        TaskKey::CreatorResearch,
+        TaskKey::CreatorAccountResearch,
+    ] {
+        let original = prompt::read(&db, task).await.unwrap();
+        let original_ref: Uuid =
+            serde_json::from_value(original["activeVersionRef"].clone()).unwrap();
+        let revision = original["revision"].as_i64().unwrap();
+        let saved = prompt::save(
+            &db,
+            &SavePrompt {
+                command_ref: Uuid::new_v4(),
+                task_key: task,
+                expected_task_revision: revision,
+                system_text: "synthetic editable system".into(),
+                instruction_text: "synthetic editable instruction".into(),
+            },
+        )
+        .await
+        .unwrap();
+        let enabled = prompt::activate(
+            &db,
+            &ActivatePrompt {
+                command_ref: Uuid::new_v4(),
+                task_key: task,
+                expected_task_revision: revision,
+                version_ref: saved.version_ref,
+            },
+        )
+        .await
+        .unwrap();
+        let rollback = prompt::activate(
+            &db,
+            &ActivatePrompt {
+                command_ref: Uuid::new_v4(),
+                task_key: task,
+                expected_task_revision: enabled.task_revision,
+                version_ref: original_ref,
+            },
+        )
+        .await
+        .unwrap();
+        let changed = switch_skill(
+            &db,
+            &SwitchSkill {
+                command_ref: Uuid::new_v4(),
+                task_key: task,
+                expected_task_revision: rollback.task_revision,
+                expected_binding_revision: 0,
+                version_ref: skill.version_ref,
+            },
+        )
+        .await
+        .unwrap();
+        let newer = switch_skill(
+            &db,
+            &SwitchSkill {
+                command_ref: Uuid::new_v4(),
+                task_key: task,
+                expected_task_revision: changed.task_revision,
+                expected_binding_revision: changed.binding_revision,
+                version_ref: second_skill.version_ref,
+            },
+        )
+        .await
+        .unwrap();
+        let restored = switch_skill(
+            &db,
+            &SwitchSkill {
+                command_ref: Uuid::new_v4(),
+                task_key: task,
+                expected_task_revision: newer.task_revision,
+                expected_binding_revision: newer.binding_revision,
+                version_ref: skill.version_ref,
+            },
+        )
+        .await
+        .unwrap();
+        let stored: (String, Option<String>, Option<Uuid>, Option<Uuid>, bool) = sqlx::query_as(
+            "SELECT t.lifecycle,t.handler_contract,c.prompt_version_ref,c.skill_version_ref,ctl.enabled \
+             FROM linggan_ai_task t JOIN linggan_ai_task_setting s USING(task_key) \
+             JOIN linggan_ai_task_config c ON c.task_config_ref=s.current_config_ref \
+             JOIN linggan_ai_control ctl ON ctl.task_key=t.task_key WHERE t.task_key=$1")
+            .bind(task.as_str()).fetch_one(db.pool()).await.unwrap();
+        assert_eq!(
+            stored,
+            (
+                "active".into(),
+                Some(
+                    match task {
+                        TaskKey::CommentStudy => "comment-research-semantic.v1",
+                        TaskKey::CommentProblemResolution | TaskKey::CommentProblemPairReview =>
+                            "comment-problem-stage.v1",
+                        TaskKey::CreatorResearch => "creator-work-research.v1",
+                        TaskKey::CreatorAccountResearch => "creator-account-research.v1",
+                        _ => "topic-research-stage.v1",
+                    }
+                    .into()
+                ),
+                Some(original_ref),
+                Some(skill.version_ref),
+                false
+            )
+        );
+        assert_eq!(changed.task_revision, rollback.task_revision + 1);
+        assert_eq!(restored.task_revision, rollback.task_revision + 3);
+        let attempted = change_control(
+            &db,
+            &ChangeControl {
+                command_ref: Uuid::new_v4(),
+                scope: ControlScope::Task(task),
+                expected_revision: 0,
+                enabled: true,
+                reason: "synthetic proof".into(),
+            },
+            Actor::Human,
+        )
+        .await;
+        assert!(attempted.is_ok());
+    }
+    let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(calls, 0);
+}

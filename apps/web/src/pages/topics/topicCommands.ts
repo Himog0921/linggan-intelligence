@@ -69,29 +69,8 @@ function validateReceipt(path: string, body: Body, value: unknown) {
     return;
   }
   equal(value.requestRef, body.requestRef);
-  if (path.endsWith("/research/commands")) {
-    equal(value.domainRef, body.domainRef);
-    const states: Record<string, string[]> = {
-      configure: ["configured", "queued", "no_new_input"],
-      start: ["queued", "no_new_input"],
-      pause: ["paused"],
-      resume: ["queued"],
-      stop: ["stopped"],
-    };
-    if (!states[String(body.action)]?.includes(String(value.state)))
-      throw new ShapeError("research state");
-    if ("runRef" in body) equal(value.runRef, body.runRef);
-    if (value.state === "configured") {
-      equal(value.automaticEnabled, body.automaticEnabled);
-      equal(value.collectionEnabled, body.collectionEnabled);
-    }
-    if (
-      value.state === "queued" &&
-      ["start", "configure"].includes(String(body.action)) &&
-      !uuid(value.runRef)
-    )
-      throw new ShapeError("queued runRef");
-    return;
+  if (body.action === "configure" && path.endsWith("/collection/commands")) {
+    equal(value.domainRef, body.domainRef); equal(value.collectionEnabled, body.collectionEnabled);equal(value.revision, Number(body.expectedRevision) + 1);equal(value.state, 'configured'); return;
   }
   if (!uuid(value.roundRef)) throw new ShapeError("roundRef");
   if (body.roundRef) equal(value.roundRef, body.roundRef);

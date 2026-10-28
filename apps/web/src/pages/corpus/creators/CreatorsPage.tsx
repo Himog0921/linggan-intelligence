@@ -1,4 +1,4 @@
-import { CREATOR_AI_RETIREMENT_NOTICE } from '../../settings/aiSettingsModel';
+import { CREATOR_RESEARCH_GUIDANCE } from '../../settings/aiSettingsModel';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useSearchParams } from 'react-router';
@@ -287,7 +287,7 @@ export function CreatorsPage() {
     // 刷新失败但页面上还有上一次读到的内容：如实说明下面显示的不是最新的。
     if (list.isError && data) notes.push('最新读取没有成功，下方仍是上一次读取到的内容。');
     if (data) {
-      if (query.traits.length > 0 || query.focus || query.topicHint) notes.push(`仅检索已有判断；${CREATOR_AI_RETIREMENT_NOTICE}。`);
+      if (query.traits.length > 0 || query.focus || query.topicHint) notes.push(`仅检索已有判断；${CREATOR_RESEARCH_GUIDANCE}。`);
       if (data.domain.status !== 'active') notes.push('当前领域已暂停，历史材料仍可读，写入操作不可用。');
     }
     if (listResources.failed) notes.push('媒体暂不可用；文字、作品链接与查询仍可使用。');
@@ -469,7 +469,7 @@ export function CreatorsPage() {
             target={dialog.target}
             onSaved={cleared => {
               setDialog(null);
-              setNotice({ tone: 'success', text: cleared ? '人工调整已撤销；显示已有分析结果，尚无结果则显示尚不能判定。未启动新分析。' : '判断已保存；这一项使用你的判断，可随时撤销人工调整。', code: null });
+              setNotice({ tone: 'success', text: cleared ? '人工调整已撤销；显示已有研究结果，尚无结果则显示尚不能判定。未启动新分析。' : '判断已保存；这一项使用你的判断，可随时撤销人工调整。', code: null });
             }}
             onClose={() => setDialog(null)}
           />

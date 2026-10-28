@@ -21,28 +21,29 @@ import type { Analysis, Observation } from './creatorsTypes';
 const empty = parseAnalysis({});
 const analysis = (patch: Partial<Analysis>): Analysis => ({ ...empty, ...patch });
 
-describe('分析状态：五种结局含义不同，分别显示（#384 发现 2）', () => {
-  it('排队和执行中只表示历史记录，不能暗示当前仍会执行', () => {
-    expect(analysisStatus(analysis({ state: 'queued' }), 'unknown')).toEqual({ kind: 'off', text: '历史排队记录 · 已停用，不再执行' });
-    expect(analysisStatus(analysis({ state: 'running' }), 'unknown')).toEqual({ kind: 'off', text: '历史分析中记录 · 已停用，不再执行' });
+describe('当前单篇与账号研究状态', () => {
+  it('单篇和账号的当前队列状态不依赖旧 origin 标记', () => {
+    expect(analysisStatus(analysis({ state: 'pending' }), 'unknown')).toEqual({ kind: 'off', text: '研究已排队，等待执行' });
+    expect(analysisStatus(analysis({ state: 'running' }), 'unknown')).toEqual({ kind: 'off', text: '正在研究' });
   });
 
-  it('失败与暂停写明原因（中文），认不得的原因码不猜', () => {
-    expect(analysisStatus(analysis({ state: 'failed', lastErrorCode: 'model_budget_exhausted' }), 'unknown').text).toBe('历史分析失败 · 本日额度已用尽');
-    expect(analysisStatus(analysis({ state: 'paused', lastErrorCode: 'model_disabled' }), 'unknown').text).toBe('历史分析暂停 · 模型配置未启用');
-    expect(analysisStatus(analysis({ state: 'failed', lastErrorCode: 'something_new' }), 'unknown').text).toBe('历史分析失败 · 历史失败原因未识别，可查看处理信息');
-    expect(failureReason(null)).toBe('历史失败原因未识别，可查看处理信息');
+  it('失败与资料变化分别显示，未知原因码不猜', () => {
+    expect(analysisStatus(analysis({ state: 'failed', lastErrorCode: 'model_budget_exhausted' }), 'unknown').text).toBe('研究未完成 · 本日额度已用尽');
+    expect(analysisStatus(analysis({ state: 'stale' }), 'unknown').text).toBe('材料已变化，需重新研究');
+    expect(analysisStatus(analysis({ state: 'failed', lastErrorCode: 'something_new' }), 'unknown').text).toBe('研究未完成 · 失败原因未识别，可查看运行记录');
+    expect(failureReason('ai_dispatch_unknown')).toBe('发送结果未知，请先核对运行记录');
+    expect(failureReason(null)).toBe('失败原因未识别，可查看运行记录');
   });
 
   it('已分析但依据不足：分析做过了、结论仍是未知，不是失败', () => {
-    const done = analysis({ state: 'idle', resultAt: '2026-10-14 10:00:00+08' });
-    expect(analysisStatus(done, 'unknown')).toEqual({ kind: 'insufficient', text: '已分析，依据不足' });
+    const done = analysis({ state: 'succeeded', resultAt: '2026-10-14 10:00:00+08' });
+    expect(analysisStatus(done, 'unknown')).toEqual({ kind: 'insufficient', text: '已研究，依据不足' });
     expect(analysisStatus(done, undefined).kind).toBe('insufficient');
-    expect(analysisStatus(done, 'vertical_tendency')).toEqual({ kind: 'done', text: '已有分析结果' });
+    expect(analysisStatus(done, 'vertical_tendency')).toEqual({ kind: 'done', text: '已有研究结果' });
   });
 
-  it('没有结果时明确已停用，不暗示仍在等待分析', () => {
-    expect(analysisStatus(empty, 'unknown')).toEqual({ kind: 'off', text: '尚无分析结果 · 旧自动分析已停用' });
+  it('没有结果时提供当前显式研究入口', () => {
+    expect(analysisStatus(empty, 'unknown')).toEqual({ kind: 'off', text: '尚无研究结果 · 可在作品与作者详情发起研究' });
   });
 });
 

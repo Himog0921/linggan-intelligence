@@ -4,33 +4,12 @@ use crate::topic_map_research_analysis::{self as analysis, ResearchOutput};
 use sqlx::{Row, postgres::PgRow};
 
 const RESULTS: &str = r#"
-    SELECT DISTINCT ON(r.domain_ref,r.work_public_ref,r.input_hash)
-        r.work_public_ref,r.domain_ref,r.output_json,r.core_json,r.method_version,
-        r.result_ref,r.created_at::text AS time,request.request_manifest AS input_refs,
-        t.task_ref,run.config_ref
-    FROM linggan_topic_map_research_result r
-    JOIN linggan_topic_map_research_request request USING(invocation_ref)
-    JOIN linggan_topic_map_research_task t ON t.task_ref=request.task_ref
-    JOIN linggan_topic_map_research_run run ON run.run_ref=request.run_ref
-    WHERE ($1::uuid IS NULL OR r.domain_ref=$1)
-    ORDER BY r.domain_ref,r.work_public_ref,r.input_hash,r.created_at DESC,r.result_ref DESC
-"#;
-
-const PARTIALS: &str = r#"
-    SELECT DISTINCT ON(t.domain_ref,t.work_public_ref,t.input_hash)
-        t.work_public_ref,t.domain_ref,t.distilled_json AS output_json,
-        jsonb_build_object('units',t.resolutions_json) AS core_json,run.method_version,
-        NULL::uuid AS result_ref,t.updated_at::text AS time,t.input_refs,t.task_ref,run.config_ref
-    FROM linggan_topic_map_research_task t
-    JOIN linggan_topic_map_research_run run USING(run_ref)
-    WHERE ($1::uuid IS NULL OR t.domain_ref=$1) AND t.phase='resolve'
-        AND run.method_version='topic-map.research.v6'
-        AND jsonb_typeof(t.resolutions_json)='array' AND jsonb_array_length(t.resolutions_json)>0
-        AND COALESCE(t.input_refs#>>'{source,coverage,kind}',t.input_refs#>>'{coverage,kind}','source')<>'comparison'
-        AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_research_request request
-            JOIN linggan_topic_map_research_result result USING(invocation_ref)
-            WHERE request.task_ref=t.task_ref)
-    ORDER BY t.domain_ref,t.work_public_ref,t.input_hash,t.updated_at DESC,t.task_ref DESC
+ SELECT DISTINCT ON(run.domain_ref,w.work_ref,w.input_hash)
+  w.work_ref AS work_public_ref,run.domain_ref,r.output_json,r.core_json,r.method_version,r.result_ref,r.created_at::text AS time,
+  w.input_refs,w.window_ref AS task_ref,(run.configurations->>0)::uuid AS config_ref
+ FROM linggan_topic_research_result r JOIN linggan_topic_research_window w USING(window_ref) JOIN linggan_topic_research_run run USING(run_ref)
+ WHERE ($1::uuid IS NULL OR run.domain_ref=$1)
+ ORDER BY run.domain_ref,w.work_ref,w.input_hash,r.created_at DESC,r.result_ref DESC
 "#;
 
 pub(super) async fn load_windows(
@@ -43,12 +22,6 @@ pub(super) async fn load_windows(
         .bind(q.domain_ref)
         .fetch_all(db.pool())
         .await?;
-    rows.extend(
-        sqlx::query(PARTIALS)
-            .bind(q.domain_ref)
-            .fetch_all(db.pool())
-            .await?,
-    );
     // A work may have qualified comments while the author's original is unavailable.
     let visible: HashSet<_> = works.iter().map(|w| w.work_ref).collect();
     rows.retain(|row| {

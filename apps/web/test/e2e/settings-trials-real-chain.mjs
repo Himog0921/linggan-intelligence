@@ -22,7 +22,7 @@ page.on('pageerror',error=>report.errors.push(error.message));
 const root=async()=>{
  const response=await page.request.get(origin+'/api/local/ai-settings');assert.equal(response.status(),200);return response.json();
 };
-async function goto(section){await page.goto(origin+'/settings/models?section='+section+'&task=writing_legacy');await page.getByRole('heading',{name:'AI 设置',exact:true}).waitFor();}
+async function goto(section,task='writing_legacy'){await page.goto(origin+'/settings/models?section='+section+'&task='+task);await page.getByRole('heading',{name:'AI 设置',exact:true}).waitFor();}
 async function post(button,suffix){
  const received=page.waitForResponse(response=>response.request().method()==='POST'&&new URL(response.url()).pathname.endsWith(suffix));
  await button.click();const response=await received;assert.ok(response.ok(),await response.text());return response.json();
@@ -35,10 +35,11 @@ let candidate,comparison,frozenComparison;
 try{
  if(phase==='trial'){
   let version;
-  await step('local directory reimport preserves v1 and creates immutable v2 without a new call',async()=>{
+  await step('editing a skill in settings preserves v1 and creates immutable v2 without a new call',async()=>{
    await goto('skills');
-   await page.getByLabel('选择做法目录',{exact:true}).setInputFiles(fixture.package);
-   version=await post(page.getByRole('button',{name:'导入做法包',exact:true}),'/skills/import');
+   await page.getByRole('link',{name:/writing-method · v1/}).click();
+   await page.getByLabel('SKILL.md',{exact:true}).fill('---\nname: writing-method\ndescription: Synthetic fixed writing method\n---\ncandidate-v2\n');
+   version=await post(page.getByRole('button',{name:'保存新版本',exact:true}),'/skills/import');
    assert.equal(version.versionNo,2);assert.notEqual(version.versionRef,fixture.firstVersionRef);
    const data=await root();assert.equal(data.skills.find(skill=>skill.name==='writing-method').versions.length,2);
    assert.equal(data.execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),1);
@@ -81,6 +82,59 @@ try{
    assert.equal(task.activeSkillVersionRef,version.versionRef);assert.equal(task.configuration.taskConfigRef,activated.taskConfigRef);
    assert.equal(data.execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),3);
    await writeFile(path.join(directory,'trial-receipt.json'),JSON.stringify({candidateConfigRef:candidate.taskConfigRef,comparisonRef:comparison.comparisonRef,inputRef:frozenComparison.inputRef,baselineOutput:frozenComparison.baseline.output,candidateOutput:frozenComparison.candidate.output}));
+  });
+  await step('rollback and direct switch use saved versions without running another model',async()=>{
+   await page.getByLabel('切换做法版本',{exact:true}).selectOption(fixture.firstVersionRef);
+   const rollback=await post(page.getByRole('button',{name:'切换做法版本',exact:true}),'/skills/switch');
+   assert.equal(rollback.versionRef,fixture.firstVersionRef);assert.equal(rollback.approvalSource,'manual');
+   await goto('skills');
+   await page.getByLabel('切换做法版本',{exact:true}).selectOption(version.versionRef);
+   const switched=await post(page.getByRole('button',{name:'切换做法版本',exact:true}),'/skills/switch');
+   assert.equal(switched.versionRef,version.versionRef);assert.equal(switched.approvalSource,'manual');
+   const data=await root(),task=data.tasks.find(item=>item.taskKey==='writing_legacy');
+   assert.equal(task.activeSkillVersionRef,version.versionRef);
+   assert.equal(data.execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),3);
+  });
+  await step('OCR prompt can be edited, enabled and rolled back from settings',async()=>{
+   await goto('skills','ocr_recognition');
+   const initial=await page.request.get(origin+'/api/local/ai-settings/prompts/ocr_recognition');assert.equal(initial.status(),200);
+   const before=await initial.json();
+   await page.getByLabel('系统提示词',{exact:true}).fill('SYNTHETIC OCR SYSTEM V2');
+   await page.getByLabel('任务指令',{exact:true}).fill('SYNTHETIC OCR INSTRUCTION V2');
+   const saved=await post(page.getByRole('button',{name:'保存提示词新版本',exact:true}),'/prompts/save');
+   await goto('skills','ocr_recognition');
+   await page.getByLabel('提示词版本',{exact:true}).selectOption(saved.versionRef);
+   const enabled=await post(page.getByRole('button',{name:'启用此提示词版本',exact:true}),'/prompts/activate');
+   assert.equal(enabled.versionRef,saved.versionRef);
+   await goto('skills','ocr_recognition');
+   await page.getByLabel('提示词版本',{exact:true}).selectOption(before.activeVersionRef);
+   const restored=await post(page.getByRole('button',{name:'启用此提示词版本',exact:true}),'/prompts/activate');
+   assert.equal(restored.versionRef,before.activeVersionRef);
+   assert.equal((await root()).execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),3);
+  });
+  await step('each research method can edit and roll back prompts and skills without dispatch',async()=>{
+   for(const taskKey of ['comment_study','comment_problem_resolution','comment_problem_pair_review','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research']){
+    await goto('skills',taskKey);
+    const initial=await page.request.get(`${origin}/api/local/ai-settings/prompts/${taskKey}`);assert.equal(initial.status(),200);
+    const before=await initial.json();
+    await page.getByLabel('系统提示词',{exact:true}).fill(`SYNTHETIC ${taskKey} SYSTEM V2`);
+    await page.getByLabel('任务指令',{exact:true}).fill(`SYNTHETIC ${taskKey} INSTRUCTION V2`);
+    const saved=await post(page.getByRole('button',{name:'保存提示词新版本',exact:true}),'/prompts/save');
+    await goto('skills',taskKey);await page.getByLabel('提示词版本',{exact:true}).selectOption(saved.versionRef);
+    assert.equal((await post(page.getByRole('button',{name:'启用此提示词版本',exact:true}),'/prompts/activate')).versionRef,saved.versionRef);
+    await goto('skills',taskKey);await page.getByLabel('提示词版本',{exact:true}).selectOption(before.activeVersionRef);
+    assert.equal((await post(page.getByRole('button',{name:'启用此提示词版本',exact:true}),'/prompts/activate')).versionRef,before.activeVersionRef);
+    await goto('skills',taskKey);await page.getByLabel('切换做法版本',{exact:true}).selectOption(fixture.firstVersionRef);
+    assert.equal((await post(page.getByRole('button',{name:'切换做法版本',exact:true}),'/skills/switch')).versionRef,fixture.firstVersionRef);
+    await goto('skills',taskKey);await page.getByLabel('切换做法版本',{exact:true}).selectOption(version.versionRef);
+    assert.equal((await post(page.getByRole('button',{name:'切换做法版本',exact:true}),'/skills/switch')).versionRef,version.versionRef);
+    await goto('skills',taskKey);await page.getByLabel('切换做法版本',{exact:true}).selectOption(fixture.firstVersionRef);
+    assert.equal((await post(page.getByRole('button',{name:'切换做法版本',exact:true}),'/skills/switch')).versionRef,fixture.firstVersionRef);
+    const task=(await root()).tasks.find(item=>item.taskKey===taskKey);
+    assert.equal(task.lifecycle,'active');
+    assert.equal(task.handlerContract,taskKey==='creator_research'?'creator-work-research.v1':taskKey==='creator_account_research'?'creator-account-research.v1':taskKey==='comment_study'?'comment-research-semantic.v1':taskKey.startsWith('comment_problem_')?'comment-problem-stage.v1':'topic-research-stage.v1');
+   }
+   assert.equal((await root()).execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),3);
   });
  }else{
   const saved=JSON.parse(await readFile(path.join(directory,'trial-receipt.json'),'utf8'));

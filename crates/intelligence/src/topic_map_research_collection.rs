@@ -16,6 +16,12 @@ use uuid::Uuid;
     deny_unknown_fields
 )]
 pub enum CollectionCommand {
+    Configure {
+        request_ref: Uuid,
+        domain_ref: Uuid,
+        expected_revision: i64,
+        collection_enabled: bool,
+    },
     StartCollection {
         request_ref: Uuid,
         domain_ref: Uuid,
@@ -45,6 +51,11 @@ pub enum CollectionCommand {
 impl CollectionCommand {
     fn identity(&self) -> (Uuid, Uuid) {
         match self {
+            Self::Configure {
+                request_ref,
+                domain_ref,
+                ..
+            } => (*request_ref, *domain_ref),
             Self::StartCollection {
                 request_ref,
                 domain_ref,
@@ -78,7 +89,7 @@ pub async fn apply_collection_command(
         .execute(&mut *tx)
         .await?;
     if let Some(r) = sqlx::query(
-        "SELECT command_hash,receipt FROM linggan_topic_map_research_command WHERE request_ref=$1",
+        "SELECT command_hash,receipt FROM linggan_topic_collection_command WHERE request_ref=$1",
     )
     .bind(request)
     .fetch_optional(&mut *tx)
@@ -90,7 +101,28 @@ pub async fn apply_collection_command(
             Err(ResearchError::Conflict)
         };
     }
-    let receipt = if let CollectionCommand::StopCollection { round_ref, .. } = command {
+    let receipt = if let CollectionCommand::Configure {
+        expected_revision,
+        collection_enabled,
+        ..
+    } = command
+    {
+        let active:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1 AND status='active')").bind(domain).fetch_one(&mut *tx).await?;
+        if !active || *expected_revision < 0 {
+            return Err(ResearchError::Invalid("domain_paused_or_missing"));
+        }
+        let revision: Option<i64> = sqlx::query_scalar(
+            "SELECT revision FROM linggan_topic_collection_policy WHERE domain_ref=$1 FOR UPDATE",
+        )
+        .bind(domain)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if revision.unwrap_or(0) != *expected_revision {
+            return Err(ResearchError::Conflict);
+        }
+        sqlx::query("INSERT INTO linggan_topic_collection_policy(domain_ref,collection_enabled,revision) VALUES($1,$2,$3) ON CONFLICT(domain_ref) DO UPDATE SET collection_enabled=EXCLUDED.collection_enabled,status='active',revision=EXCLUDED.revision,updated_at=scope_001_now()").bind(domain).bind(collection_enabled).bind(expected_revision+1).execute(&mut *tx).await?;
+        json!({"requestRef":request,"domainRef":domain,"state":"configured","collectionEnabled":collection_enabled,"revision":expected_revision+1})
+    } else if let CollectionCommand::StopCollection { round_ref, .. } = command {
         let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_map_collection_round WHERE round_ref=$1 AND domain_ref=$2)").bind(round_ref).bind(domain).fetch_one(&mut *tx).await?;
         if !exists {
             return Err(ResearchError::NotFound);
@@ -144,7 +176,7 @@ pub async fn apply_collection_command(
         if unique.len() != works.len() {
             return Err(ResearchError::Invalid("duplicate_collection_work"));
         }
-        let policy:Option<bool>=sqlx::query_scalar("SELECT p.collection_enabled AND p.status='active'AND d.status='active'FROM linggan_topic_map_research_policy p JOIN observation_domain d USING(domain_ref)WHERE p.domain_ref=$1 FOR UPDATE OF p").bind(domain).fetch_optional(&mut *tx).await?;
+        let policy:Option<bool>=sqlx::query_scalar("SELECT p.collection_enabled AND p.status='active'AND d.status='active'FROM linggan_topic_collection_policy p JOIN observation_domain d USING(domain_ref)WHERE p.domain_ref=$1 FOR UPDATE OF p").bind(domain).fetch_optional(&mut *tx).await?;
         if policy != Some(true) {
             return Err(ResearchError::Invalid("collection_not_enabled"));
         }
@@ -205,26 +237,17 @@ pub async fn apply_collection_command(
             json!({"requestRef":request,"roundRef":round,"collectionRequestRef":outcome.request_ref,"workOrderRef":outcome.work_order_ref,"state":if admitted{"active"}else{"blocked"},"reason":outcome.reason_code,"detailSlotsReserved":works.len(),"newCommentsLimit":if kind=="comments"{Some(30)}else{None},"detailLimit":10,"actualAcquired":0})
         }
     };
-    sqlx::query("INSERT INTO linggan_topic_map_research_command(request_ref,domain_ref,command_hash,receipt)VALUES($1,$2,$3,$4)").bind(request).bind(domain).bind(hash).bind(&receipt).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_topic_collection_command(request_ref,domain_ref,command_hash,receipt)VALUES($1,$2,$3,$4)").bind(request).bind(domain).bind(hash).bind(&receipt).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(receipt)
 }
 
-/// Maintain durable comment round completion after the dialog closes; never admit more work.
-pub(crate) async fn advance_comment_rounds_once(db: &Database) -> Result<(), ResearchError> {
-    let rows:Vec<(Uuid,bool)>=sqlx::query_as("SELECT round_ref,created_at<scope_001_now()-interval '15 minutes'FROM linggan_topic_map_collection_round WHERE kind='comments'AND state='active'ORDER BY created_at LIMIT 32").fetch_all(db.pool()).await?;
-    for (round, expired) in rows {
-        let mut tx = db.pool().begin().await?;
-        let live:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_map_collection_slot s JOIN collection_work_order w USING(work_order_ref)WHERE s.round_ref=$1 AND w.queue_state IN('queued','leased'))").bind(round).fetch_one(&mut *tx).await?;
-        if !live || expired {
-            let count:i64=sqlx::query_scalar("SELECT count(DISTINCT c.comment_external_id)FROM linggan_topic_map_collection_slot s JOIN linggan_topic_map_comment_budget b USING(work_order_ref)JOIN collection_work_order_lease l USING(work_order_ref)JOIN collection_work_order_lease_task t USING(lease_ref)JOIN linggan_runtime_capture_package p ON p.task_id=t.task_id JOIN linggan_material_comment c ON c.package_ref=p.package_ref AND c.content_public_ref=b.content_public_ref WHERE s.round_ref=$1 AND NOT(b.known_comment_ids ? c.comment_external_id)").bind(round).fetch_one(&mut *tx).await?;
-            if expired && live {
-                sqlx::query("UPDATE collection_work_order_lease SET released_at=COALESCE(released_at,scope_001_now())WHERE work_order_ref IN(SELECT work_order_ref FROM linggan_topic_map_collection_slot WHERE round_ref=$1)").bind(round).execute(&mut *tx).await?;
-                sqlx::query("UPDATE collection_work_order SET queue_state='cancelled'WHERE work_order_ref IN(SELECT work_order_ref FROM linggan_topic_map_collection_slot WHERE round_ref=$1)AND queue_state IN('queued','leased')").bind(round).execute(&mut *tx).await?;
-            }
-            sqlx::query("UPDATE linggan_topic_map_collection_round SET state=$2,last_reason=$3 WHERE round_ref=$1 AND state='active'").bind(round).bind(if count>=30{"completed"}else{"partial"}).bind(if count>=30{"new_comment_limit_reached"}else if expired{"time_budget"}else{"partial_comments_retained"}).execute(&mut *tx).await?;
-        }
-        tx.commit().await?;
-    }
-    Ok(())
+/// Collection receipts have their own read model, independent of AI stage configuration.
+pub async fn read_collection_progress(db: &Database, domain: Uuid) -> Result<Value, ResearchError> {
+    let policy:Option<Value>=sqlx::query_scalar("SELECT jsonb_build_object('enabled',collection_enabled AND status='active','revision',revision) FROM linggan_topic_collection_policy WHERE domain_ref=$1").bind(domain).fetch_optional(db.pool()).await?;
+    let targets=sqlx::query("SELECT t.target_ref,t.target_kind,COALESCE(t.display_name,t.identity_key) AS display_name FROM collection_observation_target t JOIN observation_domain_target membership USING(target_ref) WHERE membership.domain_ref=$1 AND t.lifecycle_state<>'dismissed' ORDER BY t.target_ref LIMIT 100").bind(domain).fetch_all(db.pool()).await?;
+    let rounds=sqlx::query("SELECT r.round_ref,r.kind,r.state,r.last_reason,(SELECT count(*) FROM linggan_topic_map_collection_slot slot WHERE slot.round_ref=r.round_ref) AS slots FROM linggan_topic_map_collection_round r WHERE r.domain_ref=$1 ORDER BY r.created_at DESC,r.round_ref DESC LIMIT 30").bind(domain).fetch_all(db.pool()).await?;
+    Ok(
+        json!({"domainRef":domain,"policy":policy.unwrap_or(json!({"enabled":false,"revision":0})),"targets":targets.iter().map(|r|json!({"targetRef":r.get::<Uuid,_>("target_ref"),"kind":r.get::<String,_>("target_kind"),"displayName":r.get::<String,_>("display_name")})).collect::<Vec<_>>(),"collectionRounds":rounds.iter().map(|r|json!({"roundRef":r.get::<Uuid,_>("round_ref"),"kind":r.get::<String,_>("kind"),"state":r.get::<String,_>("state"),"reason":r.get::<Option<String>,_>("last_reason"),"detailSlotsReserved":r.get::<i64,_>("slots")})).collect::<Vec<_>>()}),
+    )
 }

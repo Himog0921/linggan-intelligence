@@ -295,7 +295,7 @@ pub async fn save_topic_map_command(
                             "research source changed or unavailable",
                         ));
                     }
-                    let row = sqlx::query("SELECT r.work_public_ref,r.method_version,r.output_json,t.input_refs FROM linggan_topic_map_research_result r JOIN linggan_topic_map_research_request request USING(invocation_ref) JOIN linggan_topic_map_research_task t USING(task_ref) WHERE r.result_ref=$1 AND r.domain_ref=$2").bind(result).bind(domain_ref).fetch_optional(&mut *tx).await?.ok_or(TopicMapError::NotFound)?;
+                    let row = sqlx::query("SELECT w.work_ref AS work_public_ref,r.method_version,r.output_json,w.input_refs FROM linggan_topic_research_result r JOIN linggan_topic_research_window w USING(window_ref) JOIN linggan_topic_research_run run USING(run_ref) WHERE r.result_ref=$1 AND run.domain_ref=$2").bind(result).bind(domain_ref).fetch_optional(&mut *tx).await?.ok_or(TopicMapError::NotFound)?;
                     if !refs.contains(&row.get::<Uuid, _>("work_public_ref"))
                         || row.get::<String, _>("method_version") != *method_version
                     {

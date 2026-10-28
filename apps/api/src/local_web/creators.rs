@@ -13,6 +13,18 @@ pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/creators", get(list))
         .route(
+            "/api/local/creator-account-research/preview",
+            get(account_preview),
+        )
+        .route("/api/local/creator-account-research", post(account_start))
+        .route(
+            "/api/local/creator-account-research/{request}",
+            get(account_read),
+        )
+        .route("/api/local/creator-research/preview", get(research_preview))
+        .route("/api/local/creator-research", post(research_start))
+        .route("/api/local/creator-research/{request}", get(research_read))
+        .route(
             "/api/local/creators/{key}/observation-target",
             post(register),
         )
@@ -30,6 +42,90 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .layer(axum::middleware::from_fn(
             super::comment_study::local_comment_study_guard,
         ))
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountPreview {
+    domain_ref: Uuid,
+    platform: String,
+    author_external_id: String,
+}
+async fn account_preview(
+    State(state): State<LocalWebState>,
+    Query(query): Query<AccountPreview>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return super::ai_settings::unavailable();
+    };
+    super::ai_settings::respond(
+        linggan_intelligence::ai_foundation::creator_account_research::preview(
+            db,
+            query.domain_ref,
+            &query.platform,
+            &query.author_external_id,
+        )
+        .await,
+    )
+}
+async fn account_start(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::ai_foundation::creator_account_research::Start>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return super::ai_settings::unavailable();
+    };
+    super::ai_settings::respond(
+        linggan_intelligence::ai_foundation::creator_account_research::start(db, &body).await,
+    )
+}
+async fn account_read(State(state): State<LocalWebState>, Path(request): Path<Uuid>) -> Response {
+    let Some(db) = state.database.database() else {
+        return super::ai_settings::unavailable();
+    };
+    super::ai_settings::respond(
+        linggan_intelligence::ai_foundation::creator_account_research::read(db, request).await,
+    )
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResearchPreview {
+    domain_ref: Uuid,
+    work_ref: Uuid,
+}
+async fn research_preview(
+    State(state): State<LocalWebState>,
+    Query(query): Query<ResearchPreview>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return super::ai_settings::unavailable();
+    };
+    super::ai_settings::respond(
+        linggan_intelligence::ai_foundation::creator_research::preview(
+            db,
+            query.domain_ref,
+            query.work_ref,
+        )
+        .await,
+    )
+}
+async fn research_start(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::ai_foundation::creator_research::Start>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return super::ai_settings::unavailable();
+    };
+    super::ai_settings::respond(
+        linggan_intelligence::ai_foundation::creator_research::start(db, &body).await,
+    )
+}
+async fn research_read(State(state): State<LocalWebState>, Path(request): Path<Uuid>) -> Response {
+    let Some(db) = state.database.database() else {
+        return super::ai_settings::unavailable();
+    };
+    super::ai_settings::respond(
+        linggan_intelligence::ai_foundation::creator_research::read(db, request).await,
+    )
 }
 fn error(e: DiscoveryError) -> Response {
     let (status, code) = match e {
@@ -103,17 +199,8 @@ struct Policy {
     domain: Uuid,
     like_threshold: Option<i64>,
     revision: i64,
-    analysis_enabled: Option<bool>,
-    config_ref: Option<Uuid>,
-    daily_token_limit: Option<i64>,
 }
 async fn policy(State(state): State<LocalWebState>, Json(body): Json<Policy>) -> Response {
-    if body.analysis_enabled.is_some()
-        || body.config_ref.is_some()
-        || body.daily_token_limit.is_some()
-    {
-        return crate::local_web::ai_settings::legacy_closed("legacy_creator_discovery");
-    }
     let Some(db) = state.database.database() else {
         return error(DiscoveryError::Invalid("read_model_not_connected"));
     };
@@ -131,14 +218,14 @@ async fn policy(State(state): State<LocalWebState>, Json(body): Json<Policy>) ->
         if status.as_deref() != Some("active") {
             return Err(DiscoveryError::Invalid("domain_paused_or_missing"));
         }
-        sqlx::query("INSERT INTO linggan_creator_discovery_policy(domain_ref,platform,revision) VALUES($1,'xhs',0) ON CONFLICT DO NOTHING")
+        sqlx::query("INSERT INTO linggan_creator_discovery_threshold(domain_ref,platform,revision) VALUES($1,'xhs',0) ON CONFLICT DO NOTHING")
             .bind(body.domain).execute(&mut *tx).await?;
-        let existing = sqlx::query("SELECT revision,analysis_enabled,config_ref,daily_token_limit FROM linggan_creator_discovery_policy WHERE domain_ref=$1 AND platform='xhs' FOR UPDATE")
+        let existing = sqlx::query("SELECT revision FROM linggan_creator_discovery_threshold WHERE domain_ref=$1 AND platform='xhs' FOR UPDATE")
             .bind(body.domain).fetch_one(&mut *tx).await?;
         if existing.get::<i64, _>("revision") != body.revision {
             return Err(DiscoveryError::Invalid("policy_revision_conflict"));
         }
-        let row = sqlx::query("UPDATE linggan_creator_discovery_policy SET like_threshold=$2,revision=revision+1,updated_at=scope_001_now() WHERE domain_ref=$1 AND platform='xhs' AND revision=$3 RETURNING revision")
+        let row = sqlx::query("UPDATE linggan_creator_discovery_threshold SET like_threshold=$2,revision=revision+1,updated_at=scope_001_now() WHERE domain_ref=$1 AND platform='xhs' AND revision=$3 RETURNING revision")
             .bind(body.domain).bind(body.like_threshold).bind(body.revision).fetch_one(&mut *tx).await?;
         tx.commit().await?;
         Ok::<_, DiscoveryError>(json!({"revision":row.get::<i64, _>("revision"),"saved":true}))
@@ -195,11 +282,11 @@ async fn override_field(
   if status.as_deref()!=Some("active"){return Err(DiscoveryError::Invalid("domain_paused_or_missing"));}
   if body.field=="focus" || body.field=="institution_or_brand"{
    let key=body.creator_key.as_deref().ok_or(DiscoveryError::Invalid("creator_key_required"))?;let w=data.works.iter().find(|w|w.creator_key.as_deref()==Some(key)).ok_or(DiscoveryError::NotFound)?;
-   sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint,manual_overrides,job_state) VALUES($1,$2,$3,'manual',CASE WHEN $4 THEN '{}'::jsonb ELSE jsonb_build_object($6::text,$5::jsonb) END,'idle') ON CONFLICT(domain_ref,platform,author_external_id) DO UPDATE SET manual_overrides=CASE WHEN $4 THEN linggan_creator_discovery_author_analysis.manual_overrides-$6::text ELSE linggan_creator_discovery_author_analysis.manual_overrides||jsonb_build_object($6::text,$5::jsonb) END,updated_at=scope_001_now()").bind(body.domain).bind(&w.platform).bind(&w.author_external_id).bind(body.value.is_none()).bind(annotation).bind(&body.field).execute(&mut *tx).await?;
+   sqlx::query("INSERT INTO linggan_creator_author_override(domain_ref,platform,author_external_id,manual_overrides) VALUES($1,$2,$3,CASE WHEN $4 THEN '{}'::jsonb ELSE jsonb_build_object($6::text,$5::jsonb) END) ON CONFLICT(domain_ref,platform,author_external_id) DO UPDATE SET manual_overrides=CASE WHEN $4 THEN linggan_creator_author_override.manual_overrides-$6::text ELSE linggan_creator_author_override.manual_overrides||jsonb_build_object($6::text,$5::jsonb) END,updated_at=scope_001_now()").bind(body.domain).bind(&w.platform).bind(&w.author_external_id).bind(body.value.is_none()).bind(annotation).bind(&body.field).execute(&mut *tx).await?;
   }else{
    let w=data.works.iter().find(|w|Some(w.work_ref)==body.work_ref).ok_or(DiscoveryError::NotFound)?;
    if body.creator_key.as_deref().is_some_and(|key|w.creator_key.as_deref()!=Some(key)){return Err(DiscoveryError::Invalid("creator_work_mismatch"));}
-   sqlx::query("INSERT INTO linggan_creator_discovery_work_analysis(domain_ref,work_public_ref,requested_fingerprint,manual_overrides,job_state) VALUES($1,$2,$3,CASE WHEN $5 THEN '{}'::jsonb ELSE jsonb_build_object($4::text,$6::jsonb) END,'queued') ON CONFLICT(domain_ref,work_public_ref) DO UPDATE SET manual_overrides=CASE WHEN $5 THEN linggan_creator_discovery_work_analysis.manual_overrides-$4::text ELSE linggan_creator_discovery_work_analysis.manual_overrides||jsonb_build_object($4::text,$6::jsonb) END,updated_at=scope_001_now()").bind(body.domain).bind(w.work_ref).bind(&w.fingerprint).bind(&body.field).bind(body.value.is_none()).bind(annotation).execute(&mut *tx).await?;
+   sqlx::query("INSERT INTO linggan_creator_work_override(domain_ref,work_public_ref,manual_overrides) VALUES($1,$2,CASE WHEN $4 THEN '{}'::jsonb ELSE jsonb_build_object($3::text,$5::jsonb) END) ON CONFLICT(domain_ref,work_public_ref) DO UPDATE SET manual_overrides=CASE WHEN $4 THEN linggan_creator_work_override.manual_overrides-$3::text ELSE linggan_creator_work_override.manual_overrides||jsonb_build_object($3::text,$5::jsonb) END,updated_at=scope_001_now()").bind(body.domain).bind(w.work_ref).bind(&body.field).bind(body.value.is_none()).bind(annotation).execute(&mut *tx).await?;
   }
   tx.commit().await?;
   Ok::<_,DiscoveryError>(json!({"saved":true}))

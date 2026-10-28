@@ -56,6 +56,23 @@ pub enum InputRef {
     WorkComparison {
         request_ref: Uuid,
     },
+    TopicResearch {
+        window_ref: Uuid,
+        stage_number: u8,
+    },
+    CreatorAccountResearch {
+        request_ref: Uuid,
+    },
+    CreatorWorkResearch {
+        request_ref: Uuid,
+    },
+    CommentProblemStage {
+        request_ref: Uuid,
+        stage_number: u8,
+    },
+    CommentResearch {
+        request_ref: Uuid,
+    },
     WritingRequest {
         request_ref: Uuid,
     },
@@ -90,6 +107,17 @@ impl InputRef {
             }
             Self::OcrRecognitionItem { .. } => task == TaskKey::OcrRecognition,
             Self::WorkComparison { .. } => task == TaskKey::WorkComparison && !trial,
+            Self::TopicResearch { stage_number, .. } => {
+                task.topic_stage() == Some(*stage_number) && !trial
+            }
+            Self::CreatorAccountResearch { .. } => {
+                task == TaskKey::CreatorAccountResearch && !trial
+            }
+            Self::CreatorWorkResearch { .. } => task == TaskKey::CreatorResearch && !trial,
+            Self::CommentProblemStage { stage_number, .. } => {
+                task.comment_stage() == Some(*stage_number) && *stage_number > 0 && !trial
+            }
+            Self::CommentResearch { .. } => task == TaskKey::CommentStudy && !trial,
             Self::WritingRequest { .. } => task == TaskKey::WritingLegacy && !trial,
             Self::WritingPreview { .. } => task == TaskKey::WritingLegacy && trial,
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
@@ -128,9 +156,15 @@ impl BatchKind {
         }
     }
     fn permits(self, task: TaskKey) -> bool {
+        if task.topic_stage().is_some() || task.comment_stage().is_some() {
+            return self == Self::Interactive;
+        }
         match task {
             TaskKey::ModelProbe => self == Self::Probe,
-            TaskKey::WorkComparison => self == Self::Interactive,
+            TaskKey::WorkComparison
+            | TaskKey::CreatorResearch
+            | TaskKey::CreatorAccountResearch
+            | TaskKey::CommentStudy => self == Self::Interactive,
             TaskKey::WritingLegacy
             | TaskKey::WritingAssistant
             | TaskKey::DirectionListDraft
@@ -261,7 +295,16 @@ pub async fn create_batch(
         return Err(FoundationError::Invalid);
     }
     // Work comparison must freeze its exact material scope through its owning command.
-    if request.task_key == TaskKey::WorkComparison {
+    if request.task_key.comment_stage().is_some()
+        || request.task_key.topic_stage().is_some()
+        || matches!(
+            request.task_key,
+            TaskKey::WorkComparison
+                | TaskKey::CreatorResearch
+                | TaskKey::CreatorAccountResearch
+                | TaskKey::CommentStudy
+        )
+    {
         return Err(FoundationError::Invalid);
     }
     let hash = input_hash(request.task_key, &request.items, false)?;

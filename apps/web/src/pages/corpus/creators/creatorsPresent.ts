@@ -2,7 +2,7 @@
  * 创作者页的文字与派生：服务器给出的判断值、状态码如何用中文说给人听。
  * 这里只翻译与归类，不重算任何业务结论（资格、相关性、观察关系都以服务器为准）。
  */
-import { CREATOR_AI_RETIREMENT_NOTICE } from '../../settings/aiSettingsModel';
+import { CREATOR_RESEARCH_GUIDANCE } from '../../settings/aiSettingsModel';
 import { humanMoment } from '../../../shared/formatting';
 import { LABELS } from './creatorsQuery';
 import type { Analysis, CreatorItem, Fragment, Judgement, Observation, Work } from './creatorsTypes';
@@ -88,6 +88,14 @@ export function preservedLifecycle(observation: Observation): string | null {
 
 /** 分析失败或暂停的原因：服务器给的是受控代码，这里只翻译；认不得的代码不猜，引导看处理信息。 */
 const FAILURE_REASONS: Record<string, string> = {
+  ai_provider_failed: '模型调用失败',
+  ai_dispatch_unknown: '发送结果未知，请先核对运行记录',
+  ai_output_invalid: '结果未通过结构或引用校验',
+  ai_source_unavailable: '研究底稿当前不可用',
+  creator_publication_withheld: '来源、许可或控制状态已变化',
+  ai_input_limit_before_dispatch: '完整材料超过模型输入额度，未发送',
+  ai_prior_dispatch_unresolved: '相同材料还有未确认的调用',
+
   provider_unavailable: '模型服务暂不可用',
   model_provider_unavailable: '模型服务暂不可用',
   budget_exhausted: '本日额度已用尽',
@@ -105,32 +113,25 @@ const FAILURE_REASONS: Record<string, string> = {
 };
 
 export function failureReason(code: string | null): string {
-  return (code && FAILURE_REASONS[code]) || '历史失败原因未识别，可查看处理信息';
+  return (code && FAILURE_REASONS[code]) || '失败原因未识别，可查看运行记录';
 }
 
-/** 旧分析已退役；保留历史执行记录和结果，不将历史 running/queued 当作当前执行。 */
+/** Work and account research use the shared queue's current states. */
 export type AnalysisKind = 'failed' | 'paused' | 'insufficient' | 'done' | 'off';
 
-export function analysisStatus(
-  analysis: Analysis,
-  value: string | null | undefined,
-): { kind: AnalysisKind; text: string } {
+export function analysisStatus(analysis: Analysis,value: string | null | undefined): { kind: AnalysisKind; text: string } {
   switch (analysis.state) {
-    case 'running':
-      return { kind: 'off', text: '历史分析中记录 · 已停用，不再执行' };
-    case 'queued':
-      return { kind: 'off', text: '历史排队记录 · 已停用，不再执行' };
-    case 'failed':
-      return { kind: 'failed', text: `历史分析失败 · ${failureReason(analysis.lastErrorCode)}` };
-    case 'paused':
-      return { kind: 'paused', text: `历史分析暂停 · ${failureReason(analysis.lastErrorCode)}` };
+    case 'pending': return {kind:'off',text:'研究已排队，等待执行'};
+    case 'running': return {kind:'off',text:'正在研究'};
+    case 'failed': return {kind:'failed',text:`研究未完成 · ${failureReason(analysis.lastErrorCode)}`};
+    case 'skipped': return {kind:'insufficient',text:'材料或运行条件不满足，未执行研究'};
+    case 'cancelled': return {kind:'off',text:'研究已取消'};
+    case 'stale': return {kind:'insufficient',text:'材料已变化，需重新研究'};
   }
   if (analysis.resultAt !== null || analysis.resultAtDisplay !== null) {
-    return value === 'unknown' || !value
-      ? { kind: 'insufficient', text: '已分析，依据不足' }
-      : { kind: 'done', text: '已有分析结果' };
+    return value === 'unknown' || !value ? {kind:'insufficient',text:'已研究，依据不足'} : {kind:'done',text:'已有研究结果'};
   }
-  return { kind: 'off', text: `尚无分析结果 · ${CREATOR_AI_RETIREMENT_NOTICE}` };
+  return {kind:'off',text:`尚无研究结果 · ${CREATOR_RESEARCH_GUIDANCE}`};
 }
 
 /** 实际取样篇数：服务器记录了才显示，没记录就明说没记录，绝不显示成 0 或候选数。 */

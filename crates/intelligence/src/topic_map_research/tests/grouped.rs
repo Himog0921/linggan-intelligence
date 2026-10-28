@@ -278,26 +278,12 @@ fn missing_parent_pages_never_reopen_unknown_child_when_short_voices_are_packed(
         .unwrap()
         .extend(voices.iter().map(|c| comment_metadata(c, None, json!([]))));
     update_source_coverage(&mut expanded);
-    let pending = super::super::admission::pending_input(&expanded, &[], &refs);
     assert!(
-        !pending
-            .fragments
+        research_windows(&expanded)
             .iter()
-            .any(|f| f.fragment_id == child.fragment_id)
+            .any(|w| overlaps_unknown_dispatch(w, &expanded, &refs)),
+        "the prior child remains blocked even when it shares a packed window with new voices"
     );
-    let windows = research_windows(&pending);
-    assert_eq!(windows.len(), 2);
-    assert_eq!(
-        windows
-            .iter()
-            .map(|w| w.comment_study.as_array().unwrap().len())
-            .sum::<usize>(),
-        5
-    );
-    for window in &windows {
-        assert!(!overlaps_unknown_dispatch(window, &expanded, &refs));
-        assert!(window.comment_study.as_array().unwrap().len() <= 3);
-    }
 }
 
 #[test]

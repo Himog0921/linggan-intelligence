@@ -1,5 +1,0 @@
-import type { ProblemCard } from './problemDtos';
-export const changeKinds: Record<string, string> = { first_record: '首次建档', definition_revision: '定义版本更新', evidence_added: '仅补入依据', unchanged: '已有问题' };
-export const candidateStates: Record<string, string> = { all: '全部处理状态', pending: '正在归并', deferred_novel: '新表达，尚未建档', deferred_ambiguous: '问题边界待判断', deferred_context: '等待语境', retrieval_incomplete: '候选检索未完成', budget_stopped: '额度用尽，处理未完成', protocol_rejected: '模型输出未接纳', failed: '归并失败' };
-export const resultDate = (value: string | null) => { const date = new Date(value || ''); return Number.isNaN(date.valueOf()) ? '时间未记录' : new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date); };
-export const problemWarning = (problem: ProblemCard) => !problem.definitionReadable ? '定义依据当前不可读取' : problem.definitionCurrent === false ? '当前定义依据已变化，需核对适用范围' : problem.supportWorkCount === 1 ? '依据集中在 1 篇作品' : problem.supportCommentCount === 0 ? '当前暂无可读支持原声' : '';

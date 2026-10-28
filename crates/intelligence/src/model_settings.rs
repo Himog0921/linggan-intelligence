@@ -64,12 +64,6 @@ impl ModelError {
     }
 }
 
-/// Permanent cutoff for the retired execution entry points, before leases, credentials or I/O.
-/// The unified executor owns the active handlers; legacy flags cannot reopen an old handler.
-pub(crate) fn legacy_execution_gate() -> Result<(), ModelError> {
-    Err(ModelError::LegacyRetired)
-}
-
 pub async fn ensure_model_schema(db: &Database) -> Result<(), ModelError> {
     let ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_model_workspace') IS NOT NULL")

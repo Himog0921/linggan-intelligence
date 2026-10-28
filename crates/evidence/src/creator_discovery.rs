@@ -79,6 +79,12 @@ pub struct DiscoveryWork {
     pub display_name: Option<String>,
     pub title: Option<String>,
     pub reading_title: Value,
+    #[serde(skip_serializing)]
+    pub dossier_revision: String,
+    #[serde(skip_serializing)]
+    pub dossier_material_revision: String,
+    #[serde(skip_serializing)]
+    pub dossier_coverage: Value,
     pub published_date: Option<String>,
     pub published_epoch: Option<i64>,
     pub likes: Option<i64>,
@@ -321,19 +327,43 @@ async fn load_topic_material_scope(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
+    let data = load_topic_material_scope_in(&mut tx, domain, work_refs, as_of).await?;
+    tx.commit().await?;
+    Ok(data)
+}
+
+/// Resolve an explicit work scope within the caller's transaction, so source
+/// qualification, its cutoff, and a research command can share one snapshot.
+/// Callers needing a stable multi-query snapshot must use REPEATABLE READ.
+/// An empty list remains an empty scope and never means the whole domain.
+pub async fn load_topic_materials_for_works_at_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    work_refs: &[Uuid],
+    as_of: Option<&str>,
+) -> Result<DiscoveryData, DiscoveryError> {
+    load_topic_material_scope_in(tx, domain, Some(work_refs), as_of).await
+}
+
+async fn load_topic_material_scope_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    work_refs: Option<&[Uuid]>,
+    as_of: Option<&str>,
+) -> Result<DiscoveryData, DiscoveryError> {
     // Qualification reconstructs finite source windows, not an analytical scan.
     // Keep planner settings local so returning a pooled connection changes no caller.
-    sqlx::query("SET LOCAL jit=off").execute(&mut *tx).await?;
+    sqlx::query("SET LOCAL jit=off").execute(&mut **tx).await?;
     sqlx::query("SET LOCAL plan_cache_mode=force_custom_plan")
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-    let as_of = crate::research_dossier::cutoff_in(&mut tx, as_of).await?;
+    let as_of = crate::research_dossier::cutoff_in(tx, as_of).await?;
     let mut platforms: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 AND ($2::uuid[] IS NULL OR usage.content_public_ref=ANY($2)) ORDER BY content.platform",
     )
     .bind(domain)
     .bind(work_refs)
-    .fetch_all(&mut *tx)
+    .fetch_all(&mut **tx)
     .await?;
     // An empty scope still returns the real domain definition and observation cutoff.
     if platforms.is_empty() {
@@ -344,7 +374,7 @@ async fn load_topic_material_scope(
         let scope: CreatorScope =
             serde_json::from_value(json!({"domain":domain,"platform":platform}))
                 .map_err(|_| DiscoveryError::Invalid("invalid_topic_material_scope"))?;
-        let mut part = load_materials_in(&mut tx, &scope, work_refs, Some(&as_of)).await?;
+        let mut part = load_materials_in(tx, &scope, work_refs, Some(&as_of)).await?;
         if let Some(data) = data.as_mut() {
             data.works.append(&mut part.works);
             data.work_name_sources.extend(part.work_name_sources);
@@ -357,7 +387,6 @@ async fn load_topic_material_scope(
     }
     let mut data = data.ok_or(DiscoveryError::NotFound)?;
     data.works.sort_by_key(|work| work.work_ref);
-    tx.commit().await?;
     Ok(data)
 }
 
@@ -403,7 +432,7 @@ async fn load_materials_in(
         }
     }
     let domain:Value=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'name',name,'description',description,'researchGoal',research_goal,'status',status,'updatedAt',updated_at::text) FROM observation_domain WHERE domain_ref=$1").bind(q.domain).fetch_optional(&mut **tx).await?.ok_or(DiscoveryError::NotFound)?;
-    let policy:Value=sqlx::query_scalar("SELECT jsonb_build_object('likeThreshold',like_threshold,'revision',revision,'analysisEnabled',analysis_enabled,'configRef',config_ref,'dailyTokenLimit',daily_token_limit,'updatedAt',updated_at::text) FROM linggan_creator_discovery_policy WHERE domain_ref=$1 AND platform=$2").bind(q.domain).bind(&q.platform).fetch_optional(&mut **tx).await?.unwrap_or(json!({"likeThreshold":null,"revision":0,"analysisEnabled":false,"configRef":null}));
+    let policy:Value=sqlx::query_scalar("SELECT jsonb_build_object('likeThreshold',like_threshold,'revision',revision,'updatedAt',updated_at::text) FROM linggan_creator_discovery_threshold WHERE domain_ref=$1 AND platform=$2").bind(q.domain).bind(&q.platform).fetch_optional(&mut **tx).await?.unwrap_or(json!({"likeThreshold":null,"revision":0}));
     if q.sort == "viral_works" && policy["likeThreshold"].as_i64().is_none() {
         return Err(DiscoveryError::Invalid("viral_threshold_unset"));
     }
@@ -439,10 +468,16 @@ async fn load_materials_in(
         sqlx::query("SELECT moment,linggan_human_moment(moment::timestamptz) AS display FROM unnest($1::text[]) AS moment")
             .bind(&like_moments).fetch_all(&mut **tx).await?.into_iter().map(|r|(r.get("moment"),r.get("display"))).collect()
     };
-    let analyses=sqlx::query("SELECT work_public_ref,result_json,manual_overrides,result_fingerprint,job_state,result_at::text AS result_at,linggan_human_moment(result_at) AS result_at_display,last_error_code FROM linggan_creator_discovery_work_analysis WHERE domain_ref=$1 AND work_public_ref=ANY($2)").bind(q.domain).bind(&refs).fetch_all(&mut **tx).await?;
+    let analyses=sqlx::query("SELECT work_public_ref,manual_overrides FROM linggan_creator_work_override WHERE domain_ref=$1 AND work_public_ref=ANY($2)").bind(q.domain).bind(&refs).fetch_all(&mut **tx).await?;
     let analyses: HashMap<Uuid, _> = analyses
         .into_iter()
         .map(|r| (r.get("work_public_ref"), r))
+        .collect();
+    let research=sqlx::query("SELECT DISTINCT ON(r.work_ref) r.work_ref,r.input_fingerprint,c.state,c.failure_code,result.result,result.created_at::text AS result_at,linggan_human_moment(result.created_at) AS result_at_display FROM linggan_creator_research_request r JOIN linggan_ai_batch_item i USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) LEFT JOIN linggan_creator_research_result result ON result.request_ref=r.request_ref AND result.created_at<=$3::timestamptz WHERE r.domain_ref=$1 AND r.work_ref=ANY($2) AND r.created_at<=$3::timestamptz ORDER BY r.work_ref,r.created_at DESC,r.request_ref DESC")
+        .bind(q.domain).bind(&refs).bind(&as_of).fetch_all(&mut **tx).await?;
+    let research: HashMap<Uuid, _> = research
+        .into_iter()
+        .map(|r| (r.get("work_ref"), r))
         .collect();
     let profiles=sqlx::query("SELECT DISTINCT ON(author.author_external_id) author.author_external_id,jsonb_build_object('displayName',author.display_name,'biography',author.biography,'followerCount',author.follower_count,'sourceRef',author.material_ref,'observedAt',author.observed_at) AS profile FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package package USING(package_ref) WHERE author.platform=$1 AND package.accepted_at<=$2::timestamptz AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3) ORDER BY author.author_external_id,author.observed_at::timestamptz DESC,author.created_at DESC,author.material_ref DESC").bind(&q.platform).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
     let profiles: HashMap<String, Value> = profiles
@@ -486,7 +521,8 @@ async fn load_materials_in(
         .into_iter()
         .map(|r| (r.get("identity_key"), r.get("observation")))
         .collect();
-    let focus_rows=sqlx::query("SELECT author_external_id,result_json,manual_overrides,result_fingerprint,job_state,result_at::text AS result_at,linggan_human_moment(result_at) AS result_at_display,last_error_code FROM linggan_creator_discovery_author_analysis WHERE domain_ref=$1 AND platform=$2").bind(q.domain).bind(&q.platform).fetch_all(&mut **tx).await?;
+    let focus_rows=sqlx::query("WITH latest AS (SELECT DISTINCT ON(author_external_id) * FROM linggan_creator_account_research_request WHERE domain_ref=$1 AND platform=$2 AND created_at<=$3::timestamptz ORDER BY author_external_id,created_at DESC,request_ref DESC), manual AS (SELECT author_external_id,manual_overrides FROM linggan_creator_author_override WHERE domain_ref=$1 AND platform=$2) SELECT COALESCE(r.author_external_id,m.author_external_id) AS author_external_id,result.result AS result_json,COALESCE(m.manual_overrides,'{}'::jsonb) AS manual_overrides,r.input_fingerprint AS result_fingerprint,COALESCE(c.state,'unattempted') AS job_state,result.created_at::text AS result_at,linggan_human_moment(result.created_at) AS result_at_display,c.failure_code AS last_error_code,COALESCE(r.work_refs,'{}'::uuid[]) AS work_refs FROM latest r FULL JOIN manual m USING(author_external_id) LEFT JOIN linggan_ai_batch_item item ON item.batch_ref=r.batch_ref LEFT JOIN linggan_ai_batch_item_control c USING(item_ref) LEFT JOIN linggan_creator_account_research_result result ON result.request_ref=r.request_ref AND result.created_at<=$3::timestamptz")
+        .bind(q.domain).bind(&q.platform).bind(&as_of).fetch_all(&mut **tx).await?;
     let focus_rows: HashMap<
         String,
         (
@@ -497,6 +533,7 @@ async fn load_materials_in(
             Option<String>,
             Option<String>,
             Option<String>,
+            Vec<Uuid>,
         ),
     > = focus_rows
         .into_iter()
@@ -504,13 +541,15 @@ async fn load_materials_in(
             (
                 r.get("author_external_id"),
                 (
-                    r.get("result_json"),
+                    r.get::<Option<Value>, _>("result_json")
+                        .unwrap_or(Value::Null),
                     r.get("manual_overrides"),
                     r.get("result_fingerprint"),
                     r.get("job_state"),
                     r.get("last_error_code"),
                     r.get("result_at"),
                     r.get("result_at_display"),
+                    r.get("work_refs"),
                 ),
             )
         })
@@ -538,24 +577,32 @@ async fn load_materials_in(
                 .join("\n");
             let reading_title = crate::research_dossier::reading_title(&dossier);
             let display_title = dossier.note["displayTitle"].as_str().map(str::to_owned);
+            let dossier_revision = dossier.revision;
+            let dossier_material_revision = dossier.material_revision;
+            let dossier_coverage = dossier.coverage;
             let fragments = dossier.fragments;
-            let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments,"readingTitle":reading_title,"rule":RULE_VERSION,"config":policy["configRef"]}).to_string());
+            let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments,"readingTitle":reading_title,"dossierRevision":dossier_revision,"dossierMaterialRevision":dossier_material_revision,"dossierCoverage":dossier_coverage,"contract":"creator-work-input.v1"}).to_string());
             let mut result = json!({});
             let mut manual = json!({});
             let mut state = "not_analyzed".to_string();
+            let mut analysis_origin: Option<&str> = None;
             let mut error_code: Option<String> = None;
             let mut result_at: Option<String> = None;
             let mut result_at_display: Option<String> = None;
             if let Some(a) = analyses.get(&c.public_ref) {
-                state = a.get("job_state");
-                error_code = a.get("last_error_code");
                 manual = a.get("manual_overrides");
-                if a.get::<Option<String>, _>("result_fingerprint").as_deref() == Some(&fingerprint)
-                {
-                    result = a.get("result_json");
-                    result_at = a.get("result_at");
-                    result_at_display = a.get("result_at_display");
-                }
+            }
+            if let Some(a) = research.get(&c.public_ref)
+                && a.get::<String, _>("input_fingerprint") == fingerprint
+            {
+                analysis_origin = Some("creator_research");
+                state = a.get("state");
+                error_code = a.get("failure_code");
+                result = a
+                    .get::<Option<Value>, _>("result")
+                    .unwrap_or_else(|| json!({}));
+                result_at = a.get("result_at");
+                result_at_display = a.get("result_at_display");
             }
             let allowed: HashSet<String> =
                 fragments.iter().map(|f| f.fragment_id.clone()).collect();
@@ -626,7 +673,7 @@ async fn load_materials_in(
                 .author_external_id
                 .as_ref()
                 .and_then(|a| focus_rows.get(a))
-                .map(|(_, m, _, _, _, _, _)| effective_value(&json!({}), m, "focus"))
+                .map(|(_, m, _, _, _, _, _, _)| effective_value(&json!({}), m, "focus"))
                 .unwrap_or(json!({"value":"unknown"}));
             let mut evidence = Vec::new();
             for f in &fragments {
@@ -653,6 +700,9 @@ async fn load_materials_in(
             display_name: current_name.map(str::to_owned).or_else(|| profile_name.map(str::to_owned)),
             title: display_title,
             reading_title,
+            dossier_revision,
+            dossier_material_revision,
+            dossier_coverage,
             published_date: c.published_local_date,
             published_epoch: c.published_at_epoch_ms,
             likes: c.like_count,
@@ -668,7 +718,7 @@ async fn load_materials_in(
             relevance,
             traits,
             topic_hints: hints,
-            analysis: json!({"automatic":result,"manual":manual,"evidence":evidence,"supportFragments":support_fragments,"state":state,"lastErrorCode":error_code,"resultAt":result_at,"resultAtDisplay":result_at_display}),
+            analysis: json!({"automatic":result,"manual":manual,"evidence":evidence,"supportFragments":support_fragments,"origin":analysis_origin,"state":state,"lastErrorCode":error_code,"resultAt":result_at,"resultAtDisplay":result_at_display}),
             analysis_state: state,
             observation,
             profile,
@@ -687,14 +737,24 @@ async fn load_materials_in(
             .iter()
             .filter(|w| w.author_external_id.as_deref() == Some(&author))
             .collect();
-        let profile = scoped
-            .first()
-            .map(|w| w.profile.clone())
-            .unwrap_or(Value::Null);
-        let fingerprint = focus_fingerprint(&profile, &scoped, &policy["configRef"]);
-        if let Some((result, manual, stored, state, error_code, result_at, result_at_display)) =
-            focus_rows.get(&author)
+        if let Some((
+            result,
+            manual,
+            stored,
+            state,
+            error_code,
+            result_at,
+            result_at_display,
+            selected_refs,
+        )) = focus_rows.get(&author)
         {
+            let selected: Vec<_> = scoped
+                .iter()
+                .copied()
+                .filter(|w| selected_refs.contains(&w.work_ref))
+                .collect();
+            let fingerprint = account_research_fingerprint(&selected);
+            let sample_current = selected.len() == selected_refs.len() && !selected.is_empty();
             let focus_fragments = author_support_fragments(&scoped, "focus");
             let identity_fragments = author_support_fragments(&scoped, "institution_or_brand");
             let mut projected_manual = manual.clone();
@@ -709,7 +769,7 @@ async fn load_materials_in(
             project_manual_field(&mut projected_manual, "focus", &focus_ids);
             project_manual_field(&mut projected_manual, "institution_or_brand", &identity_ids);
             let effective = effective_value(
-                if stored.as_deref() == Some(&fingerprint) {
+                if sample_current && stored.as_deref() == Some(&fingerprint) {
                     result
                 } else {
                     &Value::Null
@@ -717,7 +777,7 @@ async fn load_materials_in(
                 &projected_manual,
                 "focus",
             );
-            let mut automatic = if stored.as_deref() == Some(&fingerprint) {
+            let mut automatic = if sample_current && stored.as_deref() == Some(&fingerprint) {
                 result.clone()
             } else {
                 json!({})
@@ -729,7 +789,7 @@ async fn load_materials_in(
                 .filter(|w| w.author_external_id.as_deref() == Some(&author))
             {
                 w.focus = effective.clone();
-                w.author_analysis = json!({"automatic":automatic,"manual":projected_manual,"institution_or_brand":identity,"supportFragments":focus_fragments,"identitySupportFragments":identity_fragments,"state":state,"lastErrorCode":error_code,"resultAt":if stored.as_deref()==Some(&fingerprint){result_at.clone()}else{None},"resultAtDisplay":if stored.as_deref()==Some(&fingerprint){result_at_display.clone()}else{None}});
+                w.author_analysis = json!({"automatic":automatic,"manual":projected_manual,"institution_or_brand":identity,"supportFragments":focus_fragments,"identitySupportFragments":identity_fragments,"state":if state == "succeeded" && !(sample_current && stored.as_deref()==Some(&fingerprint)){"stale"}else{state},"lastErrorCode":error_code,"resultAt":if sample_current && stored.as_deref()==Some(&fingerprint){result_at.clone()}else{None},"resultAtDisplay":if sample_current && stored.as_deref()==Some(&fingerprint){result_at_display.clone()}else{None}});
             }
         }
     }
@@ -1096,21 +1156,11 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
 }
 
 /// Semantic-only author input identity, shared by scheduling and reads.
-pub fn focus_fingerprint(profile: &Value, works: &[&DiscoveryWork], config: &Value) -> String {
-    let mut sources: Vec<_> = works
-        .iter()
-        .map(|w| {
-            (
-                w.work_ref,
-                &w.fingerprint,
-                &w.relevance,
-                &w.topic_hints,
-                &w.acquisition_kind,
-            )
-        })
-        .collect();
-    sources.sort_by_key(|x| x.0);
-    hash(&json!({"biography":profile["biography"],"works":sources,"rule":RULE_VERSION,"config":config}).to_string())
+/// Identity of an explicitly selected account sample; AI configuration is a separate version.
+pub fn account_research_fingerprint(works: &[&DiscoveryWork]) -> String {
+    let mut sources: Vec<_> = works.iter().map(|w| json!({"work":w.work_ref,"material":w.fingerprint,"relevance":w.relevance,"hints":w.topic_hints,"acquisition":w.acquisition_kind,"profile":w.profile})).collect();
+    sources.sort_by_key(|s| s["work"].as_str().unwrap_or("").to_owned());
+    hash(&json!({"contract":"creator-account-input.v1","works":sources}).to_string())
 }
 
 #[cfg(test)]

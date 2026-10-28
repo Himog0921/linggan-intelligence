@@ -62,7 +62,7 @@ async fn unicode_tail_survives_save_and_same_text_refresh_across_model_configs()
     let next = source_task(&db, work, second_config, "body", None, 12000).await;
     seed_accepted_source_task(&db, next).await;
     assert_tail_angle_citation(&db, next, "body", &body, "👩‍👧").await;
-    let accepted: serde_json::Value = sqlx::query_scalar("SELECT fragment FROM linggan_topic_map_research_request request JOIN linggan_topic_map_research_result result USING(invocation_ref) CROSS JOIN LATERAL jsonb_array_elements(request.request_manifest#>'{source,fragments}') fragment WHERE request.task_ref=$1 AND fragment->>'field'='body'")
+    let accepted: serde_json::Value = sqlx::query_scalar("SELECT fragment FROM linggan_topic_research_window w JOIN linggan_topic_research_result result USING(window_ref) CROSS JOIN LATERAL jsonb_array_elements(w.input_refs->'fragments') fragment WHERE w.window_ref=$1 AND fragment->>'field'='body'")
         .bind(next).fetch_one(db.pool()).await.unwrap();
     assert_ne!(accepted["sourceRef"], json!(source));
     assert_eq!(
@@ -102,6 +102,18 @@ async fn unicode_tail_survives_save_and_same_text_refresh_across_model_configs()
     let current = super::load_inputs_for_works(&db, D, second_config, &[work])
         .await
         .unwrap();
+    let dossier = linggan_evidence::research_dossier::read(&db, work)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        current[0].coverage["dossiers"][work.to_string()]["revision"],
+        dossier.revision
+    );
+    assert_eq!(
+        current[0].coverage["dossiers"][work.to_string()]["coverage"],
+        dossier.coverage
+    );
     assert_eq!(current[0].role_metadata["own"], true);
     assert_eq!(current[0].role_metadata["manualOwnBreakout"], true);
     work_at(&db, "saved-tail", "", "", 1000, "2026-10-01T10:00:00Z").await;
@@ -200,7 +212,7 @@ async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_toget
     seed_research_inputs(&db, config, &vec![work]).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM linggan_topic_map_research_task WHERE work_public_ref=$1"
+            "SELECT count(*) FROM linggan_topic_research_window WHERE work_ref=$1"
         )
         .bind(work)
         .fetch_one(db.pool())
@@ -209,7 +221,7 @@ async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_toget
         12,
         "36 primary comments pack into twelve groups, without independent creator-parent task"
     );
-    let mut selected_comments: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT (f->>'sourceRef')::uuid FROM linggan_topic_map_research_task t CROSS JOIN LATERAL jsonb_array_elements(t.input_refs->'fragments') f WHERE t.work_public_ref=$1 AND f->>'field' IN('studied_comment','unresearched_comment')")
+    let mut selected_comments: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT (f->>'sourceRef')::uuid FROM linggan_topic_research_window t CROSS JOIN LATERAL jsonb_array_elements(t.input_refs->'fragments') f WHERE t.work_ref=$1 AND f->>'field' IN('studied_comment','unresearched_comment')")
         .bind(work).fetch_all(db.pool()).await.unwrap();
     selected_comments.sort();
     expected_comments.sort();
@@ -586,7 +598,7 @@ async fn assert_definition_withdrawal_hides_saved(indirect: bool) {
             .is_some()
     );
     if indirect {
-        let compared: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_map_research_request q WHERE q.task_ref=$1 AND q.phase='resolve' AND q.request_manifest::text LIKE '%'||$2::text||'%')")
+        let compared: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_research_result result CROSS JOIN LATERAL jsonb_array_elements(result.core_json->'units') unit WHERE result.window_ref=$1 AND unit->'comparedDefinitionRefs' @> to_jsonb(ARRAY[$2]::uuid[]))")
             .bind(task).bind(original_definition).fetch_one(db.pool()).await.unwrap();
         assert!(
             compared,
@@ -605,6 +617,17 @@ async fn assert_definition_withdrawal_hides_saved(indirect: bool) {
             .find(|w| w.work_ref == second)
             .is_some_and(|w| !w.fragments.is_empty()),
         "the angle's own source remains qualified; only its definition dependency was withdrawn"
+    );
+    let catalog = crate::topic_map_core::catalog(&db, D).await.unwrap();
+    assert!(
+        !catalog.as_array().unwrap().iter().any(|definition| Some(
+            definition["definitionRef"]
+                .as_str()
+                .unwrap()
+                .parse::<Uuid>()
+                .unwrap()
+        ) == *definition_ref),
+        "withdrawn definition dependencies must disappear from the next model catalog"
     );
     let hidden = topic_map::read_saved_alternative(&db, D, saved)
         .await
