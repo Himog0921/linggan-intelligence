@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { Cover } from './Media';
 import { Metric } from './CreatorTable';
@@ -11,6 +11,9 @@ import styles from './CreatorHomepagePanel.module.css';
 
 type View = 'grid' | 'list';
 type Preset = 'standard' | 'text_only';
+
+// A stable empty list keeps the memoised ref list from changing on every render before data arrives.
+const NO_NOTES: HomepageNote[] = [];
 
 function suggested(notes: HomepageNote[], knownDomainRefs: readonly string[]): string[] {
   if (notes.length === 0) return [];
@@ -49,7 +52,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
     retry: 1,
   });
   const preview = query.data;
-  const notes = preview?.works ?? [];
+  const notes = preview?.works ?? NO_NOTES;
   const noteRefs = useMemo(() => notes.map(note => note.workRef), [notes]);
   const media = useWorkResources(domain, noteRefs);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
@@ -63,15 +66,14 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
   const previewCommand = useRef<string | null>(null);
   const studyCommand = useRef<string | null>(null);
   const stopCommand = useRef<string | null>(null);
-  const selectedForRun = useRef<string | null>(null);
+  const [seededRun, setSeededRun] = useState<string | null>(null);
   const domainRefs = item.matchedWorkRefs;
 
-  useEffect(() => {
-    if (!preview?.runRef || selectedForRun.current === preview.runRef) return;
-    if (preview.works.length === 0) return;
-    selectedForRun.current = preview.runRef;
+  // Seed the suggested cards once per run; later polling and the user's own toggles never reseed.
+  if (preview?.runRef && preview.works.length > 0 && seededRun !== preview.runRef) {
+    setSeededRun(preview.runRef);
     setSelected(new Set(suggested(preview.works, domainRefs)));
-  }, [preview?.runRef, preview?.works, domainRefs]);
+  }
 
   const displayed = filter === 'selected' ? notes.filter(n => selected.has(n.workRef)) : notes;
   const selectedNotes = notes.filter(note => selected.has(note.workRef));
