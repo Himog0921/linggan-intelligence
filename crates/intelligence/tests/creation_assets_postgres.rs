@@ -17,6 +17,47 @@ const FILL: &str = "\u{3164}";
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn empty_experience_slot_is_reported_and_blocks_copy() {
+    let db = db("assets_experience_gap").await;
+    let (account, _, _) = accounts(&db).await;
+    let mut doc = draft(Some(account), &["合成正文", ""]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    doc.experience_gaps.push(doc.paragraphs[1].id);
+    let report = check_draft(&db, &doc).await.unwrap();
+    assert!(
+        report
+            .findings
+            .iter()
+            .any(|f| f.rule == "R-M8" && f.level == Level::Must)
+    );
+    let mut selected_but_empty = doc.clone();
+    selected_but_empty.experience_gaps.clear();
+    selected_but_empty.experience_slots.push(ExperienceSlot {
+        paragraph_id: selected_but_empty.paragraphs[1].id,
+        experience_ref: Uuid::new_v4(),
+        experience_revision: 1,
+    });
+    assert!(
+        check_draft(&db, &selected_but_empty)
+            .await
+            .unwrap()
+            .findings
+            .iter()
+            .any(|f| f.rule == "R-M8")
+    );
+    let saved = create(&db, doc).await;
+    assert!(
+        matches!(prepare_copy(&db, saved.work_id, &CopyCommand { request_id: Uuid::new_v4(), expected_revision: saved.revision.id }).await,
+        Err(AssetsError::Blocked(findings)) if findings.iter().any(|f| f.rule == "R-M8"))
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     let db = db("assets_experience_draft").await;
     let (account, _, other) = accounts(&db).await;
@@ -50,6 +91,7 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
             subject_confirmed: true,
             draft_use: true,
             send_to_model: None,
+            confirmation_method: "subject_present".into(),
         },
     )
     .await
@@ -109,6 +151,31 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
             .text,
         "合成改写经历，只供测试。"
     );
+    for variant in 0..3 {
+        let mut copied = doc.clone();
+        let text = copied.paragraphs[0].text.clone();
+        match variant {
+            0 => {
+                copied.experience_slots.clear();
+                copied.paragraphs[0].id = Uuid::new_v4();
+            }
+            1 => copied.title = text,
+            _ => copied.pages[0].blocks[0].text = text,
+        }
+        assert!(matches!(
+            save(
+                &db,
+                made.work_id,
+                &SaveRequest {
+                    request_id: Uuid::new_v4(),
+                    expected_revision: made.revision.id,
+                    document: copied,
+                }
+            )
+            .await,
+            Err(WorkbenchError::Invalid("experience_untracked_text"))
+        ));
+    }
     let mut detached = doc.clone();
     detached.experience_slots.clear();
     assert!(matches!(
@@ -122,7 +189,7 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
             }
         )
         .await,
-        Err(WorkbenchError::Invalid("experience_reference_removed"))
+        Err(WorkbenchError::Invalid("experience_untracked_text"))
     ));
     let mut revised_doc = doc.clone();
     revised_doc.paragraphs[0].text = "另一版合成改写经历。".into();
@@ -133,6 +200,39 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
             request_id: Uuid::new_v4(),
             expected_revision: made.revision.id,
             document: revised_doc,
+        },
+    )
+    .await
+    .unwrap();
+    edit_experience(
+        &db,
+        id,
+        &ExperienceEdit {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            title: "虚构新版本".into(),
+            body: "另一段合成经历。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut new_work = request.clone();
+    new_work.request_id = Uuid::new_v4();
+    assert!(matches!(
+        create_work(&db, &new_work).await,
+        Err(WorkbenchError::Source)
+    ));
+    let mut continuing = saved.revision.document.clone();
+    continuing.title = "仍在编辑原稿".into();
+    let saved = save(
+        &db,
+        made.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: saved.revision.id,
+            document: continuing,
         },
     )
     .await
@@ -156,6 +256,20 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
         expected_revision: saved.revision.id,
     };
     assert!(prepare_copy(&db, made.work_id, &copy).await.is_ok());
+    let mut no_person = identity(1, OrgRelation::Parent, None, None);
+    no_person.has_real_person = Some(false);
+    put_identity(&db, account, &no_person).await.unwrap();
+    assert!(matches!(
+        prepare_copy(&db, made.work_id, &copy).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    put_identity(
+        &db,
+        account,
+        &identity(2, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap();
     withdraw_experience(&db, id, Uuid::new_v4()).await.unwrap();
     assert_eq!(
         read_work(&db, made.work_id)
@@ -238,6 +352,7 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
         subject_confirmed: false,
         draft_use: true,
         send_to_model: Some(false),
+        confirmation_method: "subject_statement".into(),
     };
     assert!(matches!(
         confirm_experience(&db, id, &confirm).await,
@@ -248,6 +363,18 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
     assert_eq!(confirmed.experience.state, "confirmed");
     assert_eq!(confirmed.experience.send_to_model, Some(false));
     assert!(confirmed.experience.confirmed_at.is_some());
+    assert_eq!(
+        confirmed.experience.confirmed_subject_account_ref,
+        Some(account)
+    );
+    assert_eq!(
+        confirmed.experience.confirmed_subject_role.as_deref(),
+        Some("妈妈")
+    );
+    assert_eq!(
+        confirmed.experience.confirmation_method.as_deref(),
+        Some("subject_statement")
+    );
     assert!(
         read_usable_experience(&db, id, 1, Some(account))
             .await
@@ -287,11 +414,10 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
         read_usable_experience(&db, id, 2, Some(account)).await,
         Err(AssetsError::SourceUnavailable)
     ));
-    assert!(
-        read_usable_experience(&db, id, 1, Some(account))
-            .await
-            .is_ok()
-    );
+    assert!(matches!(
+        read_usable_experience(&db, id, 1, Some(account)).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
     let stale = ExperienceEdit {
         request_id: Uuid::new_v4(),
         ..edit.clone()

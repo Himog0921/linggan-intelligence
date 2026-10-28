@@ -10,6 +10,7 @@ pub struct Subject {
     pub title: String,
     pub cover_title: String,
     pub paragraphs: Vec<(Uuid, String)>,
+    pub experience_gaps: Vec<Uuid>,
     pub tags: Vec<String>,
     pub bridge: Option<BridgeChoice>,
     pub cover_ai: Option<bool>,
@@ -30,6 +31,18 @@ impl Subject {
                 .paragraphs
                 .iter()
                 .map(|p| (p.id, p.text.clone()))
+                .collect(),
+            experience_gaps: doc
+                .experience_gaps
+                .iter()
+                .copied()
+                .chain(doc.experience_slots.iter().filter_map(|slot| {
+                    doc.paragraphs
+                        .iter()
+                        .find(|p| p.id == slot.paragraph_id)
+                        .filter(|p| p.text.trim().is_empty())
+                        .map(|p| p.id)
+                }))
                 .collect(),
             tags: doc.tags.clone(),
             bridge: doc.bridge.clone(),

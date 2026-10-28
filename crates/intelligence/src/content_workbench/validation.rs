@@ -8,6 +8,7 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
         || doc.outline.len() > 100
         || doc.paragraphs.len() > 1000
         || doc.experience_slots.len() > 1000
+        || doc.experience_gaps.len() > 1000
         || doc.excerpts.len() > 200
         || doc.canvas.len() > 500
         || doc.pages.len() > 30
@@ -73,6 +74,18 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
             || !doc.paragraphs.iter().any(|p| p.id == slot.paragraph_id)
         {
             return Err(WorkbenchError::Invalid("experience_slot"));
+        }
+    }
+    let mut gaps = HashSet::new();
+    for id in &doc.experience_gaps {
+        if !gaps.insert(id)
+            || experience_paragraphs.contains(id)
+            || !doc
+                .paragraphs
+                .iter()
+                .any(|p| p.id == *id && p.text.trim().is_empty())
+        {
+            return Err(WorkbenchError::Invalid("experience_gap"));
         }
     }
     for e in &doc.excerpts {

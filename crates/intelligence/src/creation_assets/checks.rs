@@ -40,8 +40,8 @@ const GROUP_CLAIMS: &[&[Tok]] = &[
 const A_WA: &[&[Tok]] = &[&[Tok::Lit("a"), Tok::Gap, Tok::Lit("娃")]];
 
 const RULE_ORDER: &[&str] = &[
-    "R-M1", "R-M2", "R-M3", "R-M4", "R-W10", "R-W11", "R-W1", "R-W2", "R-W3", "R-W6", "R-W7",
-    "R-W8", "R-W9", "R-I1", "R-I2", "R-L1", "R-L2", "R-L3", "R-L4", "R-L5", "R-L6", "R-L7",
+    "R-M1", "R-M2", "R-M3", "R-M4", "R-M8", "R-W10", "R-W11", "R-W1", "R-W2", "R-W3", "R-W6",
+    "R-W7", "R-W8", "R-W9", "R-I1", "R-I2", "R-L1", "R-L2", "R-L3", "R-L4", "R-L5", "R-L6", "R-L7",
 ];
 
 fn rank(rule: &str) -> usize {
@@ -466,6 +466,19 @@ pub fn check_manuscript(subject: &Subject, ctx: &Context) -> CheckReport {
     let state = ctx.bridge_state(subject);
     let cards = ctx.cards.as_ref();
     let mut findings = bridge_slot_findings(subject, ctx, state);
+    for id in &subject.experience_gaps {
+        findings.push(finding(
+            "R-M8",
+            Level::Must,
+            "这里还需要一段本人确认的真实经历".into(),
+            Location::Paragraph {
+                id: *id,
+                start: 0,
+                end: 0,
+            },
+            vec![fix("处理经历位", FixAction::EditByHand)],
+        ));
+    }
     findings.extend(content_findings(
         &fields(subject, ctx.bridge_output(subject)),
         cards,
@@ -625,6 +638,7 @@ mod tests {
                 .map(|t| (Uuid::new_v4(), (*t).to_string()))
                 .collect(),
             tags: vec![],
+            experience_gaps: vec![],
             bridge: None,
             cover_ai: None,
         }

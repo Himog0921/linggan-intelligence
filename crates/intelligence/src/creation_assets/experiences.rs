@@ -17,7 +17,7 @@ async fn snapshot_revision(
     id: Uuid,
     revision: Option<i32>,
 ) -> Result<Experience, AssetsError> {
-    let row = sqlx::query("SELECT e.experience_ref,e.code,e.account_ref,e.state,COALESCE($2,e.current_revision) AS current_revision,e.created_at::text AS created_at,e.withdrawn_at::text AS withdrawn_at,r.title,r.body,r.tags,r.origin,c.send_to_model,c.confirmed_at::text AS confirmed_at FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=COALESCE($2,e.current_revision) LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
+    let row = sqlx::query("SELECT e.experience_ref,e.code,e.account_ref,e.state,COALESCE($2,e.current_revision) AS current_revision,e.created_at::text AS created_at,e.withdrawn_at::text AS withdrawn_at,r.title,r.body,r.tags,r.origin,c.send_to_model,c.subject_account_ref,c.subject_role,c.confirmation_method,c.confirmed_at::text AS confirmed_at FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=COALESCE($2,e.current_revision) LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
         .bind(id).bind(revision).fetch_optional(&mut **tx).await?.ok_or(AssetsError::NotFound)?;
     Ok(Experience {
         id: row.try_get("experience_ref")?,
@@ -31,6 +31,9 @@ async fn snapshot_revision(
         origin: row.try_get("origin")?,
         send_to_model: row.try_get("send_to_model")?,
         confirmed_at: row.try_get("confirmed_at")?,
+        confirmed_subject_account_ref: row.try_get("subject_account_ref")?,
+        confirmed_subject_role: row.try_get("subject_role")?,
+        confirmation_method: row.try_get("confirmation_method")?,
         created_at: row.try_get("created_at")?,
         withdrawn_at: row.try_get("withdrawn_at")?,
     })
@@ -89,6 +92,9 @@ async fn replay_result(
     if experience.state == "awaiting_subject" {
         experience.confirmed_at = None;
         experience.send_to_model = None;
+        experience.confirmed_subject_account_ref = None;
+        experience.confirmed_subject_role = None;
+        experience.confirmation_method = None;
     }
     Ok(ExperienceReceipt {
         experience,
@@ -124,8 +130,13 @@ pub async fn read_usable_experience(
     account: Option<Uuid>,
 ) -> Result<UsableExperience, AssetsError> {
     let mut tx = db.pool().begin().await?;
-    let row = sqlx::query("SELECT e.code,e.account_ref,e.state,r.body,c.draft_use FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=$2 LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
+    let row = sqlx::query("SELECT e.code,e.account_ref,e.state,e.current_revision,r.body,c.draft_use,(SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) AS has_real_person FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=$2 LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
         .bind(id).bind(revision).fetch_optional(&mut *tx).await?.ok_or(AssetsError::NotFound)?;
+    if row.try_get::<Option<bool>, _>("has_real_person")? != Some(true)
+        || row.try_get::<i32, _>("current_revision")? != revision
+    {
+        return Err(AssetsError::SourceUnavailable);
+    }
     let state: String = row.try_get("state")?;
     let draft_use: Option<bool> = row.try_get("draft_use")?;
     let state = match state.as_str() {
@@ -272,7 +283,13 @@ pub async fn confirm_experience(
     id: Uuid,
     cmd: &ExperienceConfirm,
 ) -> Result<ExperienceReceipt, AssetsError> {
-    if !cmd.subject_confirmed || !cmd.draft_use {
+    if !cmd.subject_confirmed
+        || !cmd.draft_use
+        || !matches!(
+            cmd.confirmation_method.as_str(),
+            "subject_present" | "subject_statement"
+        )
+    {
         return Err(AssetsError::Invalid("subject_consent"));
     }
     let hash = command_hash(
@@ -283,6 +300,7 @@ pub async fn confirm_experience(
             cmd.subject_confirmed,
             cmd.draft_use,
             cmd.send_to_model,
+            &cmd.confirmation_method,
         ),
     )?;
     let mut tx = db.pool().begin().await?;
@@ -299,8 +317,14 @@ pub async fn confirm_experience(
     if current.state != "awaiting_subject" {
         return Err(AssetsError::Invalid("experience_state"));
     }
-    sqlx::query("INSERT INTO linggan_creation_experience_consent(experience_ref,revision,draft_use,send_to_model,recorded_by) VALUES($1,$2,true,$3,'local_machine')")
-        .bind(id).bind(cmd.expected_revision).bind(cmd.send_to_model).execute(&mut *tx).await?;
+    lock(&mut tx, &format!("identity:{}", current.account_ref)).await?;
+    let identity = super::identity::latest_in(&mut tx, current.account_ref).await?;
+    let Some(identity) = identity.filter(|value| value.has_real_person == Some(true)) else {
+        return Err(AssetsError::Invalid("account_has_no_confirmed_person"));
+    };
+    sqlx::query("INSERT INTO linggan_creation_experience_consent(experience_ref,revision,draft_use,send_to_model,subject_account_ref,subject_role,confirmation_method,recorded_by) VALUES($1,$2,true,$3,$4,$5,$6,'local_machine')")
+        .bind(id).bind(cmd.expected_revision).bind(cmd.send_to_model).bind(current.account_ref)
+        .bind(identity.backing_person_role).bind(&cmd.confirmation_method).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_creation_experience SET state='confirmed' WHERE experience_ref=$1")
         .bind(id)
         .execute(&mut *tx)

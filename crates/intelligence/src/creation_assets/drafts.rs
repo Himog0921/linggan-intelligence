@@ -7,7 +7,7 @@ use super::fact_cards::confirmed_terms_in;
 use super::identity::latest_in as latest_identity_in;
 use super::requests::{Claim, claim, command_hash, lock};
 use super::subject::{Context, Subject};
-use super::{AssetsError, types::*, words::RULESET_VERSION};
+use super::{AssetsError, types::*};
 use crate::content_workbench::{
     self as workbench, ContentOrigin, UseTarget, WorkDocument, WorkbenchError,
 };
@@ -140,6 +140,7 @@ fn ready(
     work: Uuid,
     revision: Uuid,
     copy: CopyText,
+    ruleset_version: String,
     warn: usize,
     hint: usize,
     replayed: bool,
@@ -148,7 +149,7 @@ fn ready(
         receipt_ref,
         work_id: work,
         revision_id: revision,
-        ruleset_version: RULESET_VERSION.into(),
+        ruleset_version,
         title: copy.title,
         body: copy.body,
         tags: copy.tags,
@@ -179,7 +180,7 @@ async fn replay(
     request: Uuid,
 ) -> Result<CopyReady, AssetsError> {
     let row = sqlx::query(
-        "SELECT receipt_ref,revision_ref,warn_rules,hint_rules,text_sha256 FROM linggan_creation_copy_receipt WHERE request_ref=$1 AND work_ref=$2",
+        "SELECT receipt_ref,revision_ref,ruleset_version,warn_rules,hint_rules,text_sha256 FROM linggan_creation_copy_receipt WHERE request_ref=$1 AND work_ref=$2",
     )
     .bind(request)
     .bind(work)
@@ -201,6 +202,7 @@ async fn replay(
         work,
         revision_ref,
         copy,
+        row.try_get("ruleset_version")?,
         total(row.try_get("warn_rules")?),
         total(row.try_get("hint_rules")?),
         true,
@@ -259,6 +261,7 @@ pub async fn prepare_copy(
         work,
         revision_id,
         copy,
+        report.ruleset_version.clone(),
         report.count(Level::Warn),
         report.count(Level::Hint),
         false,

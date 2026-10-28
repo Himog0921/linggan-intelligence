@@ -18,6 +18,9 @@ pub struct Experience {
     pub origin: Option<String>,
     pub send_to_model: Option<bool>,
     pub confirmed_at: Option<String>,
+    pub confirmed_subject_account_ref: Option<Uuid>,
+    pub confirmed_subject_role: Option<String>,
+    pub confirmation_method: Option<String>,
     pub created_at: String,
     pub withdrawn_at: Option<String>,
 }
@@ -53,6 +56,8 @@ pub struct ExperienceConfirm {
     pub subject_confirmed: bool,
     pub draft_use: bool,
     pub send_to_model: Option<bool>,
+    /// How the subject's actual confirmation was obtained, never the subject's real name.
+    pub confirmation_method: String,
 }
 
 #[derive(Serialize)]

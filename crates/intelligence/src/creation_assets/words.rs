@@ -2,7 +2,7 @@
 //! starting point that has not been calibrated against real notes, which is why every list-based
 //! rule only reminds and never blocks copying; revise [`RULESET_VERSION`] with any change.
 
-pub const RULESET_VERSION: &str = "creation-checks.v1";
+pub const RULESET_VERSION: &str = "creation-checks.v2";
 
 /// 疗效承诺
 pub const CURE_PROMISES: &[&str] = &[

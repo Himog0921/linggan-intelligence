@@ -284,7 +284,7 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
     assert_eq!(report["bridgeState"], "unconfirmed");
     assert_eq!(report["findings"][0]["rule"], "R-M1");
     assert_eq!(report["findings"][0]["level"], "must");
-    assert_eq!(report["rulesetVersion"], "creation-checks.v1");
+    assert_eq!(report["rulesetVersion"], "creation-checks.v2");
     let mut repeated = work["revision"]["document"].clone();
     repeated["tags"] = json!(["ADHD", "ADHD", "#adhd"]);
     let (status, checked) = call(

@@ -279,6 +279,9 @@ pub struct BridgeChoice {
 pub struct WorkDocument {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub experience_slots: Vec<ExperienceSlot>,
+    /// Paragraphs explicitly reserved for a real experience that has not yet been supplied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub experience_gaps: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge: Option<BridgeChoice>,
     /// Whether the cover image is AI-made; absent means not recorded, never "no".
@@ -307,6 +310,7 @@ impl Default for WorkDocument {
         Self {
             contract: "content-workbench.v1".into(),
             experience_slots: vec![],
+            experience_gaps: vec![],
             bridge: None,
             cover_ai: None,
             materials: vec![],
