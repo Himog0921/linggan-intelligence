@@ -49,7 +49,7 @@ function Results({ r }: { r: Run }) {
   const context=new URLSearchParams({domain:r.domain_ref,collectionRunRef:r.run_ref,returnTo:`/collection/tasks?domain=${r.domain_ref}&run=${r.run_ref}`});
   return <section className={styles.results}><header><h3>作品与缺口</h3><a href={`/corpus/evidence?${context}`}>查看本次作品与评论 ↗</a></header><div data-run-works>{query.error ? <p role="alert">作品读取失败：{errorText(query.error)}</p> : !query.data ? <p role="status">正在读取作品…</p> : <>
     {query.data.items.map(w=>{
-      const gap=({access_restricted:'访问受限，已保留可用成果',detail_not_accepted:'详情尚未取得',discussion_partial_or_not_delivered:'评论或回复有缺口',execution_stopped_or_unavailable:'采集中断',no_progress_after_bounded_retries:'多次尝试未取得新评论，待处理'} as Record<string,string>)[w.gapReason??''] ?? (w.gapReason ? '成果情况待核对' : r.legacy ? '已有材料可查看，历史完成情况待核对' : w.commentsComplete ? '本轮范围已采集完成' : '等待采集');
+      const gap=({access_restricted:'访问受限，已保留可用成果',detail_not_accepted:'详情尚未取得',discussion_partial_or_not_delivered:'评论或回复有缺口',execution_stopped_or_unavailable:'采集中断',no_progress_after_bounded_retries:'多次尝试未取得新评论，待处理'} as Record<string,string>)[w.gapReason??''] ?? (w.gapReason ? '成果情况待核对' : r.legacy ? '已有材料可查看，历史完成情况待核对' : r.source_kind === 'creator_preview' ? '主页卡片，浅看只到发现' : w.commentsComplete ? '本轮范围已采集完成' : '等待采集');
       const link=new URLSearchParams(context);link.set('work',w.publicRef);
       return <article key={w.publicRef} className={styles.work}><a href={`/corpus/evidence?${link}`}>{w.title||'标题未知'}</a><p><span>{w.creator||'作者未知'}</span><span>{gap}</span></p></article>;
     })}

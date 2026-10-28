@@ -48,3 +48,15 @@ it('主页浅看与文字版精选：进展里不把「本来就不做」写成 
   expect(screen.getByText('本次不采评论')).toBeInTheDocument();
   expect(screen.queryByText(/0 篇已结束本轮采集/)).not.toBeInTheDocument();
 });
+
+it('主页浅看的「成果」页：卡片写「浅看只到发现」，不写永远等不到的「等待采集」',async()=>{
+  const card=(n:number)=>({publicRef:`a0000000-0000-4000-8000-0000000000a${n}`,ordinal:n,title:`主页卡片 ${n}`,creator:'合成作者',gapReason:null,checkpoint:null});
+  const works={runRef:run,domainRef:domain,total:2,items:[card(1),card(2)]};
+  const fetch=vi.fn(async(path:string)=>new Response(JSON.stringify(path.includes('/works')?works:{...data,source_kind:'creator_preview',comment_mode:'none',ended:true,phase:'ended',control_intent:'running'}),{status:200,headers:{'Content-Type':'application/json'}}));vi.stubGlobal('fetch',fetch);
+  render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RunDrawer id={run} domain={domain} onClose={()=>{}}/></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('button',{name:'成果'}));
+  expect(await screen.findByText('主页卡片 1')).toBeInTheDocument();
+  expect(screen.getAllByText('主页卡片，浅看只到发现')).toHaveLength(2);
+  expect(screen.queryByText('等待采集')).not.toBeInTheDocument();
+});
+
