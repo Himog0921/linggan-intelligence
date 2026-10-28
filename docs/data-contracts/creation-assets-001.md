@@ -16,7 +16,7 @@
 
 | 对象 | 身份与版本 | 要点 |
 |---|---|---|
-| 账号身份 | `accountRef` + `revision`（从 1 起） | `orgRelation`：`parent`/`coach`/`none`/`unknown`；`bioDisclosesRelation`、`hasRealPerson`、`canProvideExperience` 为三态（`null` 即未知，不是“否”）；`backingPersonRole` 只写角色，需 `hasRealPerson=true`；简介核对时间在答案不变时沿用。只列小红书、台账在册、状态为在用/养号中的账号 |
+| 账号身份 | `accountRef` + `revision`（从 1 起） | `orgRelation`：`parent`/`coach`/`none`/`unknown`；`bioDisclosesRelation`、`hasRealPerson`、`canProvideExperience` 为三态（`null` 即未知，不是“否”）；`backingPersonRole` 只写角色，需 `hasRealPerson=true`；关系和简介答案均不变时沿用核对时间，换关系后需重新确认。只列小红书、台账在册、状态为在用/养号中的账号 |
 | 产品事实卡 | `CP-0001` 起的编码 + `revision` | 名称、可用叫法、禁用叫法（两者不得重叠）、是什么/适合谁/能讲/不能讲/必带提示。修订只含内容；**确认**是另一条追加记录，只有已确认的修订参与检查，新修订确认前沿用上一个已确认的修订 |
 | 衔接句 | `XJ-0001` 起的编码 + `revision` | 身份分组 `parent`/`coach`、一行文字（≤500 字）、来源 `manual`/`saved_back`；入库时跑入库检查并保存结果；状态 `review`/`ok`/`off`/`fix` 是追加的状态事件，无事件即待审；任何改写生成新修订并回到待审；停用后重新启用回到待审 |
 | 复制回执 | `receiptRef` | 稿件修订、规则集版本、所用事实卡修订、提醒与提示的规则计数、文本指纹；**不保存文本**。确认记录单独追加 |
@@ -32,7 +32,7 @@
 | `GET accounts/{id}/candidates` | 该账号可用的已审核衔接句，按编码排序 | 只有身份已确认且简介已写明时才有；`state` 说明原因 |
 | `GET fact-cards` / `POST fact-cards` / `PUT fact-cards/{code}` | 列表（最新与已确认修订）/ 新建 / 追加修订 | 新建 `expectedRevision=0` |
 | `POST fact-cards/{code}/confirm` | 确认最新修订 | 已确认再确认为 400 |
-| `GET bridge-sentences?group=&status=` | 每句的最新修订及状态、使用次数 | 使用次数 = 当前修订里带该编码的稿件数 |
+| `GET bridge-sentences?group=&status=` | 每句的最新修订及状态、稿件选用数 | 当前修订选了该编码且未选“不植入”的稿件数；不表示复制或发布次数 |
 | `POST bridge-sentences` / `PUT bridge-sentences/{code}` | 入库 / 改写 | 含疗效承诺的被拒，409 `creation_assets_blocked` 并附 `findings` |
 | `POST bridge-sentences/{code}/review` | `approve`/`request_fix`/`disable`/`enable` | `request_fix` 必须有说明；越过流转 400 |
 | `POST bridge-sentences/check` | 输入时的入库检查 | 不写任何东西 |

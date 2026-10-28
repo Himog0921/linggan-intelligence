@@ -10,6 +10,17 @@ vi.mock('./workbenchApi');
 vi.mock('./ImagePages', () => ({
   ImagePages: () => <div>图页组件</div>
 }));
+// The check panel and the asset library have their own tests; these tests are about the editor.
+let checkPanelProps: { saveCurrent: () => Promise<{ number: number }>; pendingConfirmation: string | null; setPendingConfirmation: (receipt: string | null) => void } | null = null;
+vi.mock('./assets/CheckPanel', () => ({
+  CheckPanel: (props: NonNullable<typeof checkPanelProps>) => {
+    checkPanelProps = props;
+    return <div>检查面板 <span>{props.pendingConfirmation}</span><button onClick={() => props.setPendingConfirmation('待确认回执')}>测试待确认回执</button></div>;
+  }
+}));
+vi.mock('./assets/AssetsLibrary', () => ({
+  AssetsLibrary: ({ domainRef }: { domainRef: string }) => <div>资产库页 {domainRef}</div>
+}));
 const domain = '00000000-0000-4000-8000-000000000001',
   work = '00000000-0000-4000-8000-000000000002',
   revision = '00000000-0000-4000-8000-000000000003',
@@ -849,4 +860,54 @@ it('keeps every editor step reachable locally after adopting the two-item Ops si
   fireEvent.click(within(nav).getByRole('button', { name: '正文' }));
   await waitFor(() => expect(within(nav).getByRole('button', { name: '正文' })).toHaveAttribute('aria-current', 'step'));
   await screen.findByLabelText('正文第 1 段');
+});
+
+it('opens the asset library from its own tab for the chosen domain and leaves it again', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  render(<QueryClientProvider client={client}>
+    <MemoryRouter initialEntries={[`/ops/creation?domain=${domain}`]}><WorkbenchPage /></MemoryRouter>
+  </QueryClientProvider>);
+  const tab = await screen.findByRole('button', { name: '资产库' });
+  expect(tab).not.toHaveAttribute('aria-current');
+  fireEvent.click(tab);
+  expect(await screen.findByText(`资产库页 ${domain}`)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '资产库' })).toHaveAttribute('aria-current', 'page');
+  fireEvent.click(screen.getByRole('button', { name: '我的创作' }));
+  await waitFor(() => expect(screen.queryByText(`资产库页 ${domain}`)).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: '我的创作' })).toHaveAttribute('aria-current', 'page');
+});
+
+it('lets the copy wait for a save already in flight, then saves what was typed meanwhile', async () => {
+  show();
+  const body = await screen.findByLabelText('正文第 1 段');
+  const receipt = (r: Parameters<typeof api.save>[1], number: number): SaveReceipt => ({
+    requestId: r.requestId, workId: work, outcome: 'accepted', replayed: false,
+    revision: { id: crypto.randomUUID(), number, savedAt: 'now', document: r.document }
+  });
+  let finishFirst!: () => void;
+  vi.mocked(api.save)
+    .mockImplementationOnce((_id, r) => new Promise<SaveReceipt>(resolve => { finishFirst = () => resolve(receipt(r, 2)); }))
+    .mockImplementationOnce(async (_id, r) => receipt(r, 3));
+  fireEvent.change(body, { target: { value: '第一次输入' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByLabelText('正文第 1 段'), { target: { value: '第二次输入' } });
+  const saving = checkPanelProps!.saveCurrent();
+  await new Promise(resolve => setTimeout(resolve, 150));
+  expect(api.save).toHaveBeenCalledTimes(1);
+  await act(async () => { finishFirst(); });
+  expect((await saving).number).toBe(3);
+  expect(api.save).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api.save).mock.calls[1]?.[1].document.paragraphs[0]?.text).toBe('第二次输入');
+});
+
+it('keeps the unconfirmed copy receipt while moving to the cover and back', async () => {
+  show();
+  await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(screen.getByRole('button', { name: '测试待确认回执' }));
+  expect(screen.getByText('待确认回执')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '制作封面 →' }));
+  expect(screen.queryByText('待确认回执')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '正文' }));
+  expect(await screen.findByText('待确认回执')).toBeInTheDocument();
 });

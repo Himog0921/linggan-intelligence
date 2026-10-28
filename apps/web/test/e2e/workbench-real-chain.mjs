@@ -1,7 +1,7 @@
 // WEB-REACT-001 C: formal React UI + real Axum + isolated PostgreSQL, synthetic materials only.
 // The Rust fixture owns the server/database lifecycle. All authoring writes below use the visible UI.
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { inflateRawSync, inflateSync } from 'node:zlib';
@@ -51,6 +51,12 @@ const envelope = async () => {
   const response = await context.request.get(`${origin}/ops/api/creation/works/${workId}`);
   assert.equal(response.status(),200); return response.json();
 };
+// CREATION-ASSETS-001 S1a read-backs: what the page claims is compared with what the server stored.
+const creationJson = async path => {
+  const response = await context.request.get(`${origin}/ops/api/creation${path}`);
+  assert.equal(response.status(),200,path); return response.json();
+};
+const bridgeSentence = '我也是示例营里的家长，和孩子一起慢慢练。';
 async function step(name, run) {
   try { await run(); report.steps.push({name,result:'PASS'}); console.log(`PASS ${name}`); }
   catch(error) { report.steps.push({name,result:'FAIL',error:String(error?.stack ?? error)}); throw error; }
@@ -420,10 +426,71 @@ try {
     const history=page.getByRole('button',{name:'历史',exact:true});await history.focus();await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'历史与恢复'}).waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
     assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'历史');assert.ok(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches));
   });
+  await step('资产库：账号身份、产品事实卡、衔接句经页面写入，接口回读与填写一致',async()=>{
+    await page.setViewportSize({width:1440,height:900});
+    const mineNow=async()=>(await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item=>item.accountRef===accountRef);
+    const mine=await mineNow();assert.ok(mine,'the fixture account is a writable Xiaohongshu account');assert.equal(mine.identity,null,'nothing is assumed about an account nobody described');
+    await page.goto(`${origin}/ops/creation?domain=${domainRef}&section=assets`);
+    const kinds=page.getByRole('navigation',{name:'资产类型'});
+    await page.getByRole('region',{name:'账号身份'}).getByRole('button').filter({hasText:mine.accountName}).click();
+    const identity=page.getByRole('form',{name:`${mine.accountName} · 账号身份`});
+    await identity.getByLabel('陪跑营学员家长',{exact:true}).check();await identity.getByLabel('已写明',{exact:true}).check();
+    await identity.getByRole('button',{name:'保存',exact:true}).click();
+    await until(async()=>(await mineNow()).identity?.revision===1,'identity revision stored');
+    const stored=(await mineNow()).identity;assert.equal(stored.orgRelation,'parent');assert.equal(stored.bioDisclosesRelation,true);
+    assert.equal(stored.hasRealPerson,null,'a question nobody answered stays unknown, not "no"');assert.equal(stored.canProvideExperience,null);assert.equal(stored.savedBy,'local_machine');
+    await screenshot('workbench-assets-identity');
+    await kinds.getByRole('button',{name:'产品事实卡',exact:true}).click();
+    await page.getByRole('region',{name:'产品事实卡'}).getByRole('button',{name:'＋ 新建',exact:true}).click();
+    const draft=page.getByRole('form',{name:'新建产品事实卡'});
+    await draft.getByLabel('规范名称',{exact:true}).fill('示例营');await draft.getByLabel(/^可用叫法/).fill('示例陪跑营');await draft.getByLabel(/^不要用的叫法/).fill('示例课');
+    await draft.getByRole('button',{name:'保存',exact:true}).click();
+    const card=page.getByRole('form',{name:'产品事实卡 CP-0001'});await card.getByText(/这一版还没有确认/).waitFor();
+    assert.equal((await creationJson('/fact-cards')).items[0].confirmed,null,'saving a card does not put it in force');
+    await card.getByRole('button',{name:'确认这一版',exact:true}).click();await card.getByText(/这一版已确认/).waitFor();
+    const confirmed=(await creationJson('/fact-cards')).items[0];assert.equal(confirmed.confirmed.revision,1);assert.deepEqual(confirmed.latest.allowedNames,['示例陪跑营']);assert.deepEqual(confirmed.latest.bannedNames,['示例课']);
+    await screenshot('workbench-assets-fact-card');
+    await kinds.getByRole('button',{name:'衔接句',exact:true}).click();
+    await page.getByRole('region',{name:'衔接句'}).getByRole('button',{name:'＋ 新增一句',exact:true}).click();
+    const entry=page.getByRole('form',{name:'新增衔接句'});await entry.getByLabel('这句话').fill(bridgeSentence);
+    const add=entry.getByRole('button',{name:'加入句库（待审）',exact:true});await until(async()=>await add.isEnabled(),'entry check came back');await add.click();
+    const review=page.getByRole('region',{name:'审核'});await review.getByText(/现在是“待审”/).waitFor();
+    assert.equal((await creationJson('/bridge-sentences?status=ok')).items.length,0,'a new sentence is not usable before review');
+    await review.getByRole('button',{name:'审核通过',exact:true}).click();await review.getByText(/现在是“可用”/).waitFor();
+    const usable=(await creationJson('/bridge-sentences?status=ok')).items;assert.equal(usable.length,1);assert.equal(usable[0].text,bridgeSentence);assert.equal(usable[0].group,'parent');assert.equal(usable[0].usedCount,0);
+    await screenshot('workbench-assets-sentences');
+  });
+  await step('检查与复制：必改挡住复制，选句并统一叫法后才能复制，剪贴板内容与服务器记录一致',async()=>{
+    await context.grantPermissions(['clipboard-read','clipboard-write'],{origin});
+    const refused=await context.request.post(`${origin}/ops/api/creation/works/${workId}/copy`,{headers:{Origin:origin},data:{requestId:randomUUID(),expectedRevision:(await envelope()).revision.id}});
+    assert.equal(refused.status(),409);assert.equal((await refused.json()).code,'creation_assets_blocked','the server refuses a copy with a 必改 left even when the page is bypassed');
+    assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied,null,'a refused copy leaves no record');
+    await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${workId}&view=body`);
+    const panel=page.getByRole('complementary',{name:'检查与复制'}),copy=panel.getByRole('button',{name:'复制到小红书',exact:true});
+    await until(async()=>await panel.getByLabel('本篇的衔接句').inputValue()===bridgeSentence,'the approved sentence is placed in the draft');
+    const account=panel.getByLabel('所属账号');await account.selectOption('');
+    await panel.getByText('这篇还没选账号，不知道能不能放衔接句').waitFor();await panel.getByText(/^必改 1 · /).waitFor();assert.equal(await copy.isDisabled(),true,'a 必改 left keeps the copy button disabled');
+    await account.selectOption(accountRef);await panel.getByText(/^必改 0 · /).waitFor();
+    const first=page.getByLabel('正文第 1 段');await first.fill('今天先把示例课的练习本放到桌上。');
+    const wording='“示例课”不是产品的可用叫法，建议统一为“示例营”';await panel.getByText(wording).waitFor();
+    await panel.getByRole('button',{name:'统一叫法',exact:true}).click();
+    await until(async()=>await first.inputValue()==='今天先把示例营的练习本放到桌上。','the one-click wording fix rewrote the located text');
+    await panel.getByText(wording).waitFor({state:'detached'});await screenshot('workbench-1440-checks-before-copy');
+    await until(async()=>await copy.isEnabled(),'copy opens once the check is clear');await copy.click();await panel.getByText(/已复制到剪贴板/).waitFor();
+    const clipboard=await page.evaluate(()=>navigator.clipboard.readText());
+    assert.equal(clipboard,['今天先把示例营的练习本放到桌上。',bridgeSentence,'本页版本：保留自己的新表达。'].join('\nㅤ\n')+'\n#家庭养育 #作业启动');
+    const current=await envelope();assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied.revisionId,current.revision.id,'the copy is recorded against the saved revision it came from');
+    assert.equal(current.revision.document.bridge.sentence.sentenceCode,'XJ-0001');assert.equal((await creationJson('/bridge-sentences?status=ok')).items[0].usedCount,1);
+    await panel.getByText('已复制（还没有发布）',{exact:true}).waitFor();await screenshot('workbench-1440-checks-copied');
+    await panel.getByRole('button',{name:'复制标题',exact:true}).click();await panel.getByText('标题已复制。').waitFor();
+    assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),current.revision.document.title.trim());
+    await page.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达，再补一句。');await panel.getByText('草稿中',{exact:true}).waitFor();await save();
+  });
   for(const [width,height] of [[1440,900],[1280,720],[1024,768],[390,844]]){
     await step(`${width}×${height} 正文与图组可操作，无页面横向溢出`,async()=>{
       await page.setViewportSize({width,height});await stage('正文');
       for(const name of ['正文标题','正文第 1 段','确认发布标签'])await assertHorizontalReachability(page.getByLabel(name,{exact:true}),name);
+      await assertHorizontalReachability(page.getByRole('complementary',{name:'检查与复制'}),'检查与复制面板');await assertHorizontalReachability(page.getByRole('button',{name:'复制到小红书',exact:true}),'复制到小红书');
       let layout=await screenshot(`workbench-${width}x${height}-body`);assert.ok(layout.documentWidth<=layout.viewport);
       await stage('封面');
       for(const name of ['图页标题','副标题','图页文字对齐'])await assertHorizontalReachability(imageSection().getByLabel(name,{exact:true}),name);

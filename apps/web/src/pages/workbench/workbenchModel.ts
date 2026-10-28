@@ -143,8 +143,28 @@ export interface MaterialCollection extends MaterialPreparation {
   nextCursor: number | null;
   searchScope: string;
 }
+/** Whose voice a bridge sentence is written in (CREATION-ASSETS-001). */
+export type BridgeGroup = 'parent' | 'coach';
+/** The library sentence a draft uses; `text` is what this draft says and may be rewritten locally. */
+export interface BridgeUse {
+  sentenceCode: string;
+  sentenceRevision: number;
+  group: BridgeGroup;
+  text: string;
+  edited: boolean;
+}
+/** The bridge slot: `skip` is "这篇不植入"; no sentence and no skip means still undecided. */
+export interface BridgeChoice {
+  skip: boolean;
+  sentence: BridgeUse | null;
+  afterParagraph: string | null;
+}
 export interface WorkDocument {
   contract: string;
+  /** Absent in older revisions; null means the bridge slot has not been decided. */
+  bridge: BridgeChoice | null;
+  /** Whether the cover image is AI-made; null means not recorded, never "no". */
+  coverAi: boolean | null;
   materials: MaterialSelection[];
   materialPreparation: MaterialPreparation | null;
   title: string;
@@ -532,8 +552,19 @@ export const parseMaterialSelection = shape<MaterialSelection>({
 const parseMaterialPreparation = shape<MaterialPreparation>({
   methodVersion: str, query: str, terms: array(str), state: choice('ready', 'insufficient'), gaps: array(str)
 });
+const parseBridgeUse = shape<BridgeUse>({
+  sentenceCode: str, sentenceRevision: integer, group: choice('parent', 'coach'),
+  text: str, edited: v => v === undefined ? false : bool(v)
+});
+export const parseBridgeChoice = shape<BridgeChoice>({
+  skip: v => v === undefined ? false : bool(v),
+  sentence: v => v === undefined ? null : nullable(parseBridgeUse)(v),
+  afterParagraph: v => v === undefined ? null : nullable(uuid)(v)
+});
 export const parseWorkDocument = shape<WorkDocument>({
   contract: v => v === 'content-workbench.v1' ? v : bad(),
+  bridge: v => v === undefined ? null : nullable(parseBridgeChoice)(v),
+  coverAi: v => v === undefined ? null : nullable(bool)(v),
   materials: v => v === undefined ? [] : array(parseMaterialSelection)(v),
   materialPreparation: v => v === undefined ? null : nullable(parseMaterialPreparation)(v),
   title: str,
@@ -766,6 +797,8 @@ export const parseAiStatus = shape<AiStatus>({
 export function newDocument(title = ''): WorkDocument {
   return {
     contract: 'content-workbench.v1',
+    bridge: null,
+    coverAi: null,
     materials: [],
     materialPreparation: null,
     title,

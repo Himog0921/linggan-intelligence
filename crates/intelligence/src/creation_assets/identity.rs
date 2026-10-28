@@ -119,10 +119,13 @@ pub async fn put_identity(
     if current.as_ref().map_or(0, |i| i.revision) != cmd.expected_revision {
         return Err(AssetsError::Stale);
     }
-    // The bio check keeps its original time while the answer is unchanged.
+    // A bio check applies to the specific relationship, not just the yes/no answer.
     let carried = current
         .as_ref()
-        .filter(|i| i.bio_discloses_relation == cmd.bio_discloses_relation)
+        .filter(|i| {
+            i.org_relation == cmd.org_relation
+                && i.bio_discloses_relation == cmd.bio_discloses_relation
+        })
         .and_then(|i| i.bio_checked_at.clone());
     sqlx::query(
         "INSERT INTO linggan_creation_account_identity(identity_ref,account_ref,revision_number,request_ref,org_relation,bio_discloses_relation,bio_checked_at,bio_checked_by,has_real_person,backing_person_role,can_provide_experience,saved_by)

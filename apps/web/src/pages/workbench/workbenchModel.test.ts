@@ -154,6 +154,23 @@ describe('independent reading collection', () => {
     expect(parseMaterialCollection(collection).gaps).toEqual(['评论不足']);
     expect(() => parseMaterialCollection({...collection, documents: [{...source, qualification:'everything_allowed'}]})).toThrow(WorkbenchContractError);
   });
+  it('reads the bridge slot as undecided when a revision predates it, and rejects anything outside the closed shape', () => {
+    const legacy = Object.fromEntries(Object.entries(newDocument()).filter(([key]) => !['bridge', 'coverAi'].includes(key)));
+    expect(parseWorkDocument(legacy)).toMatchObject({ bridge: null, coverAi: null });
+    // The server omits absent fields: only `skip` is always present.
+    expect(parseWorkDocument({ ...newDocument(), bridge: { skip: true } }).bridge).toEqual({ skip: true, sentence: null, afterParagraph: null });
+    const sentence = { sentenceCode: 'XJ-0001', sentenceRevision: 2, group: 'parent', text: '我也是学员家长' };
+    const used = parseWorkDocument({ ...newDocument(), bridge: { skip: false, sentence, afterParagraph: id }, coverAi: true });
+    expect(used.bridge).toEqual({ skip: false, sentence: { ...sentence, edited: false }, afterParagraph: id });
+    expect(used.coverAi).toBe(true);
+    expect(parseWorkDocument({ ...newDocument(), coverAi: false }).coverAi).toBe(false);
+    for (const bad of [{ skip: 'yes' }, { skip: false, extra: 1 }, { skip: false, sentence: { ...sentence, group: 'nobody' } },
+      { skip: false, sentence: { ...sentence, sentenceRevision: -1 } }, { skip: false, sentence: { ...sentence, unexpected: true } },
+      { skip: false, afterParagraph: 'not-a-uuid' }]) {
+      expect(() => parseWorkDocument({ ...newDocument(), bridge: bad })).toThrow(WorkbenchContractError);
+    }
+    expect(() => parseWorkDocument({ ...newDocument(), coverAi: 'maybe' })).toThrow(WorkbenchContractError);
+  });
   it('reads an older document with an empty collection and rejects prose in identity metadata', () => {
     const legacy = Object.fromEntries(Object.entries(newDocument()).filter(([key]) => !['materials', 'materialPreparation'].includes(key)));
     expect(parseWorkDocument(legacy).materials).toEqual([]);
