@@ -101,19 +101,22 @@ mkdir -p "$proof_dir"
 run_proof() {
   local evidence_dir="$1"
   shift
-  env \
-    LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}" \
-    WEB_APP_BROWSER_PROOF=1 \
-    P1_BROWSER_PROOF=1 \
-    WEB_APP_PROOF_DIR="$evidence_dir" \
-    WEB_APP_PROOF_NODE="$node_bin" \
-    LINGGAN_WEB_DIST="$project_root/apps/web/dist" \
-    LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE \
-    LINGGAN_SUPPORT_DIR="$support_dir" \
-    LINGGAN_LOCAL_MEDIA_ROOT="$support_dir/media" \
-    LINGGAN_PI_NODE="$support_dir/no-model-process" \
-    RUST_TEST_THREADS=1 \
-    "$@"
+  local -a proof_environment=(
+    "LOCAL_001_PROOF_DATABASE_URL=postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
+    "WEB_APP_BROWSER_PROOF=1" "P1_BROWSER_PROOF=1"
+    "WEB_APP_PROOF_DIR=$evidence_dir" "WEB_APP_PROOF_NODE=$node_bin"
+    "LINGGAN_WEB_DIST=$project_root/apps/web/dist"
+    "LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE"
+    "LINGGAN_SUPPORT_DIR=$support_dir" "LINGGAN_LOCAL_MEDIA_ROOT=$support_dir/media"
+    "LINGGAN_PI_NODE=$support_dir/no-model-process" "RUST_TEST_THREADS=1"
+  )
+  local selected_tests
+  selected_tests="$(env "${proof_environment[@]}" "$@" --list)" || return "$?"
+  if ! grep -Eq '^[^[:space:]].*: test$' <<< "$selected_tests"; then
+    echo 'Browser proof selected no tests; refusing an empty success' >&2
+    return 1
+  fi
+  env "${proof_environment[@]}" "$@"
 }
 
 # Focused local reruns use the same disposable environment; CI defaults to every stage.
@@ -142,24 +145,20 @@ if [[ "${WEB_APP_PROOF_SCOPE:-all}" == settings ]]; then
   run_proof "$proof_dir" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked settings_page_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
   exit 0
 fi
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == creators ]]; then
+  run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::creators_browser_tests -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == topics ]]; then
   mkdir -p "$proof_dir/topics"
   run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_workspace_tests -- --ignored --nocapture --test-threads=1
   run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_browser_tests -- --ignored --nocapture --test-threads=1
   exit 0
 fi
-if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments-contracts ]]; then
-  mkdir -p "$proof_dir/comments"
-  run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
-    local_web::comment_study::catalog_api::command_api::postgres_tests:: \
-    -- --ignored --nocapture --test-threads=1
-  exit 0
-fi
-if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments ]]; then
-  mkdir -p "$proof_dir/comments"
-  run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
-    local_web::comment_study::catalog_api::command_api::postgres_tests::browser_real_axum_postgres_ \
-    -- --ignored --nocapture --test-threads=1
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments-contracts || "${WEB_APP_PROOF_SCOPE:-all}" == comments || "${WEB_APP_PROOF_SCOPE:-all}" == research ]]; then
+  mkdir -p "$proof_dir/research"
+  run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked \
+    unified_research_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 [[ "${WEB_APP_PROOF_SCOPE:-all}" == all ]] || { echo 'Unknown proof scope' >&2; exit 1; }
@@ -215,9 +214,5 @@ run_proof "$proof_dir/topics" \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 F Topics and Workspace real-chain proof passed (isolated database only)'
 
-# D3: immutable methods, preview/start replay, CAS stop/recovery and positive comment→run→problem flow.
-mkdir -p "$proof_dir/comments"
-run_proof "$proof_dir/comments" cargo test -p linggan-api --bins --locked \
-  local_web::comment_study::catalog_api::command_api::postgres_tests::browser_real_axum_postgres_ \
-  -- --ignored --nocapture --test-threads=1
-printf '%s\n' 'WEB-REACT-001 D3 comments four-view real-chain proof passed (isolated database; no provider)'
+mkdir -p "$proof_dir/research"
+run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked unified_research_real_chain_browser_proof -- --ignored --nocapture --test-threads=1

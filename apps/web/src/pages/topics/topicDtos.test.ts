@@ -1,3 +1,4 @@
+import { parseTopicProgress } from './topicResearchModel';
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../shared/api";
 import {
@@ -5,7 +6,6 @@ import {
   decodeCommand,
   decodeComments,
   decodeEvidence,
-  decodeProgress,
   decodeSnapshot,
 } from "./topicDtos";
 import { topicProgress, topicSnapshot, topicWork } from "./topicTestFixture";
@@ -42,10 +42,10 @@ describe("Topic JSON runtime boundary", () => {
       decodeEvidence({ works: [{ ...topicWork(), likes: "0" }] }),
     ).toThrow(ApiError);
   });
-  it("does not substitute historical summary for missing current-method counts", () => {
+  it("requires current workflow counts without historical defaults", () => {
     const body: Record<string, unknown> = { ...topicProgress() };
-    delete body.currentMethodSummary;
-    expect(() => decodeProgress(body)).toThrow(ApiError);
+    delete body.summary;
+    expect(() => parseTopicProgress(body)).toThrow(ApiError);
   });
   it("accepts optional parent context while keeping an exact empty comments set", () => {
     expect(

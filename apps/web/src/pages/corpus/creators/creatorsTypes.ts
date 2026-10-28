@@ -29,6 +29,7 @@ export interface ManualEntry {
 }
 
 export interface Analysis {
+  origin?: string | null;
   /** idle / queued / running / failed / paused；没有分析记录时为 null。 */
   state: string | null;
   lastErrorCode: string | null;
@@ -118,9 +119,6 @@ export interface CreatorStats {
 export interface CreatorPolicy {
   likeThreshold: number | null;
   revision: number;
-  analysisEnabled: boolean;
-  configRef: string | null;
-  dailyTokenLimit: number | null;
 }
 
 export interface CreatorDomain {

@@ -1,16 +1,18 @@
 # 评论研究产品化：数据库与数据合同
 
-> 状态: 权威当前
+> 状态: 历史归档
 > 最后核对: 2026-09-27
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 数据库字段、迁移与事务合同
 > 事实来源: GREENFIELD v1.0 手册与其数据库规格
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、当前 migration/schema 与真实 PostgreSQL 证明
-> 当前实现状态: P2/P3 迁移候选 0105–0109 仅在 disposable PostgreSQL 验证，未应用共享库
+> 历史实现记录: P2/P3 迁移候选 0105–0109 仅在 disposable PostgreSQL 验证，未应用共享库
 > 交付包：COMMENT-STUDY-PRODUCTIZATION-001 · 文档版 1.0
 > 核对日期：2026-09-22
 > 源码基线：`main@c74d72e3d17b9d5ecfb9953de025713c47e4560e`
 > 责任：本包设计由 ChatGPT 整理；开发、共享库操作、真实模型调用与发布由 Mog 单独授权
 > 事实与设计：标为“现状”的内容来自固定版本源码；“规定／新增／必须”为本次目标合同
+
+**执行合同替代（2026-10-27）**：评论三阶段、研究底稿、共享 AI 配置及旧表退役以[研究自动化执行合同](research-automation.md)为当前候选。本文及旧 Schema 仅保留历史依据，不用于新执行或旧表初始化。
 
 ## 1. 规范范围与记法
 

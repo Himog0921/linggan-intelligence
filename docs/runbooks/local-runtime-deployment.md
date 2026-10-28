@@ -73,12 +73,10 @@ git clone <repo> && cd linggan-intelligence
 cp env.example .env && $EDITOR .env      # 填数据库口令
 ./scripts/dev-db.sh up                   # 起 PostgreSQL
 ./scripts/local-runtime.sh migrate       # 应用迁移
-./scripts/init-comment-study.sh          # 仅首次安装：初始化 clean-study 基础 schema
-./scripts/local-runtime.sh migrate       # 应用 clean-study 增量迁移
 ./scripts/runtime/install.sh             # 建运行目录、写 launchd、启动三个服务
 ```
 
-若数据库已经有完整 clean-study 基础表，跳过 `init-comment-study.sh`，只运行一次 `migrate`。如果首次 `migrate` 因 Comment Study 基础表缺失而停止，先运行初始化脚本再重试。初始化脚本会拒绝任何已有或部分存在的 `linggan_comment_study_*` 表，不执行 reset，也不恢复旧研究派生数据。
+候选迁移链已将首次建库所需的历史研究脚手架纳入有序迁移，并在 0179 删除旧表；不再单独初始化评论旧库。升级及重复运行不会重建已退役表。此行为须在本包发布后生效。
 
 `install.sh` 幂等：已装好时重跑只刷新 plist 并重启。它**不**跑迁移、不装依赖、不碰远端环境。
 

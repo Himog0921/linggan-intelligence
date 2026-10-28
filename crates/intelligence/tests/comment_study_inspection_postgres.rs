@@ -16,25 +16,12 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-const BASE: &str = concat!(
-    include_str!("../../../database/bootstrap/comment-study-001.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0114_comment_study_effective_head.sql")
-);
-const DELTA: &str =
-    include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql");
-
 fn domain() -> Uuid {
     Uuid::parse_str(ADHD_DOMAIN_REF).unwrap()
 }
 
 async fn database(name: &str) -> Database {
-    let db = proof_database(name).await;
-    sqlx::raw_sql(BASE).execute(db.pool()).await.unwrap();
-    let mut tx = db.pool().begin().await.unwrap();
-    sqlx::raw_sql(DELTA).execute(&mut *tx).await.unwrap();
-    tx.commit().await.unwrap();
-    db
+    proof_database(name).await
 }
 
 async fn key(db: &Database, source: Uuid, id: &str) -> CommentDetailQuery {
@@ -100,9 +87,9 @@ async fn retained_counts(db: &Database) -> Value {
     sqlx::query_scalar(
         "SELECT jsonb_build_array( \
         (SELECT count(*) FROM linggan_material_comment), \
-        (SELECT count(*) FROM linggan_comment_study_clean_cache), \
-        (SELECT count(*) FROM linggan_comment_study_run), \
-        (SELECT count(*) FROM linggan_comment_study_target), \
+        (SELECT count(*) FROM linggan_comment_clean_cache), \
+        (SELECT count(*) FROM linggan_comment_research_request), \
+        (SELECT count(*) FROM linggan_comment_research_stage), \
         (SELECT count(*) FROM linggan_model_invocation))",
     )
     .fetch_one(db.pool())
@@ -266,120 +253,6 @@ async fn restricted_unknown_and_dropped_current_sources_do_not_leak_history_text
         readable["comment"]["studyEligibility"]["reasons"],
         json!(["commentAuthorUnknown"])
     );
-}
-
-async fn record_attempt(
-    db: &Database,
-    key: &CommentDetailQuery,
-    source: Uuid,
-    ordinal: u128,
-    state: &str,
-) -> Uuid {
-    let policy = Uuid::new_v4();
-    let run = Uuid::new_v4();
-    let target = Uuid::from_u128(1000 + ordinal);
-    sqlx::query("INSERT INTO linggan_comment_study_policy(policy_ref,domain_ref,contract,comment_budget,context_character_budget) \
-        VALUES($1,$2,'comment-study.v1',100,6000)")
-        .bind(policy).bind(domain()).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_comment_study_run(run_ref,policy_ref,as_of,state,selection_manifest,selection_hash) \
-        VALUES($1,$2,scope_001_now(),'prepared','{}',repeat('0',64))")
-        .bind(run).bind(policy).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_comment_study_work(run_ref,content_public_ref,domain_ref,observation_role,selection_reason,context_state,context_manifest,context_hash) \
-        VALUES($1,$2,$3,'primary','user_selected','missing',$4,repeat('0',64))")
-        .bind(run).bind(key.work_ref).bind(domain()).bind(json!({"workRef":key.work_ref,"sources":[]}))
-        .execute(db.pool()).await.unwrap();
-    // Equal timestamps deliberately exercise the UUID tie-breaker across every page.
-    sqlx::query("INSERT INTO linggan_comment_study_target(target_ref,run_ref,content_public_ref,source_ref, \
-        research_text,research_sha256,dependency_state,state,input_manifest,input_hash,created_at) \
-        VALUES($1,$2,$3,$4,'SYNTHETIC TARGET_SECRET',repeat('0',64),'self_contained',$5,'{}',repeat('0',64),'2026-09-22T10:00:00Z')")
-        .bind(target).bind(run).bind(key.work_ref).bind(source).bind(state).execute(db.pool()).await.unwrap();
-    target
-}
-
-#[tokio::test]
-#[ignore = "random isolated PostgreSQL proof; no shared database"]
-async fn history_paginates_all_attempts_of_one_stable_comment_and_keeps_success_head() {
-    let db = database("inspection_complete_history").await;
-    detail_with_author(
-        &db,
-        "inspect-history",
-        "SYNTHETIC 全部研究历史",
-        Some("creator"),
-    )
-    .await;
-    let old = comment_with_author(
-        &db,
-        "inspect-history",
-        "same",
-        "SYNTHETIC COMMENT_HISTORY_SECRET",
-        Some("reader"),
-        "2026-09-21T08:00:00Z",
-    )
-    .await;
-    let new = comment_with_author(
-        &db,
-        "inspect-history",
-        "same",
-        "SYNTHETIC COMMENT_HISTORY_SECRET",
-        Some("reader"),
-        "2026-09-22T08:00:00Z",
-    )
-    .await;
-    let key = key(&db, new, "same").await;
-    for index in 0..124 {
-        let state = if index == 122 {
-            "no_signal"
-        } else if index == 123 {
-            "failed"
-        } else {
-            "succeeded"
-        };
-        record_attempt(
-            &db,
-            &key,
-            if index % 2 == 0 { old } else { new },
-            index,
-            state,
-        )
-        .await;
-    }
-    cache(&db).await;
-    let before = retained_counts(&db).await;
-    let initial = read_comment_detail(&db, &key).await.unwrap();
-    assert_eq!(
-        initial["studyHistory"]["items"].as_array().unwrap().len(),
-        50
-    );
-    assert_eq!(initial["studyHistory"]["totalCount"], 124);
-    assert_eq!(initial["comment"]["latestStudy"]["state"], "failed");
-    assert_eq!(initial["comment"]["effectiveStudy"]["state"], "no_signal");
-    let mut query = history_query(&key, 31);
-    let mut seen = BTreeSet::new();
-    let mut first_as_of = None;
-    for number in 0..8 {
-        let result = read_comment_history(&db, &query).await.unwrap();
-        assert_eq!(result["totalCount"], 124);
-        if let Some(as_of) = &first_as_of {
-            assert_eq!(&result["page"]["asOf"], as_of);
-        } else {
-            first_as_of = Some(result["page"]["asOf"].clone());
-        }
-        assert!(!result.to_string().contains("TARGET_SECRET"));
-        assert!(!result.to_string().contains("COMMENT_HISTORY_SECRET"));
-        for row in result["items"].as_array().unwrap() {
-            assert!(seen.insert(row["targetRef"].as_str().unwrap().to_owned()));
-            assert_eq!(row["method"]["recordingState"], "legacy_unrecorded");
-            assert!(row.get("problemFrame").is_none());
-        }
-        query.cursor = result["page"]["nextCursor"].as_str().map(str::to_owned);
-        if query.cursor.is_none() {
-            break;
-        }
-        assert!(number < 7, "history pagination did not terminate");
-        query.limit = Some(27);
-    }
-    assert_eq!(seen.len(), 124);
-    assert_eq!(retained_counts(&db).await, before);
 }
 
 #[tokio::test]

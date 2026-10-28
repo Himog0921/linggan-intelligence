@@ -58,29 +58,21 @@ docker exec "$proof_container" pg_isready -h 127.0.0.1 -p 5432 -U "$proof_user" 
 proof_port="$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$proof_container")"
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
-  --test comment_study_productization_postgres \
   --test comment_study_catalog_postgres \
   --test comment_study_catalog_read_postgres \
   --test comment_study_inspection_postgres \
   --test comment_study_work_catalog_postgres \
   --test comment_study_p1_closure_postgres \
-  --test comment_study_policy_postgres \
   --test comment_study_start_postgres --locked \
   -- --ignored --nocapture --test-threads=1
-# P3 Problem lifecycle matrix (AC040–AC052), including current T06 unknown-author exclusion and pairing.
-RUST_TEST_THREADS=1 cargo test -p linggan-intelligence --test comment_study_rebuild_postgres \
-  --locked -- --ignored --nocapture --test-threads=1
-# These are actual Axum requests over the same disposable PostgreSQL proof database.
-# Run the ignored group explicitly; absence of a test file is never treated as a pass.
-P1_BROWSER_PROOF=1 RUST_TEST_THREADS=1 cargo test -p linggan-api --locked \
-  local_web::comment_study::catalog_api::command_api::postgres_tests:: \
-  -- --ignored --nocapture --test-threads=1
+# Current three-stage workflow is exercised through the shared executor and an owned loopback provider.
+AI_FOUNDATION_PROOF_NODE="$(command -v node)" RUST_TEST_THREADS=1 cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked -- --ignored --nocapture --test-threads=1
 # Patrol now owns only local maintenance. The AI owner/signal/usage proofs run in
 # test-research-dossier-postgres.sh --ai-service with its explicit pinned Node/SDK setup.
 RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \
-  patrol_maintains_local_catalog_but_never_dispatches_a_ready_legacy_run \
+  patrol_maintains_local_catalog_without_instantiating_model_transport \
   -- --ignored --nocapture --test-threads=1
 RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \
   sigterm_drains_even_while_the_collection_tick_is_blocked \
   -- --ignored --nocapture --test-threads=1
-printf '%s\n' 'Implemented Comment Study productization PostgreSQL subset passed; not the complete T01-T54 suite'
+printf '%s\n' 'Current comment catalog, three-stage workflow and patrol ownership proofs passed'

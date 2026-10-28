@@ -11,15 +11,17 @@ use axum::{
 };
 use linggan_intelligence::{
     ai_foundation::{
+        TaskKey,
         batch_control::{CancelBatch, cancel_batch, read_batch},
         batch_store::{CreateBatch, CreateTrial, create_batch, create_trial},
         catalog::{CatalogQuery, read_catalog},
         control_store::{Actor, ChangeControl, change_control},
+        prompt::{self, ActivatePrompt, SavePrompt},
         provider_store::{
             ChangeEgress, SaveCapability, SavePrice, change_egress, save_capability, save_price,
         },
         settings_read::read_settings,
-        skill_binding::{ActivateSkill, activate_skill},
+        skill_binding::{ActivateSkill, SwitchSkill, activate_skill, switch_skill},
         skill_store::{ImportSkill, import_skill},
         store::FoundationError,
         task_config::{SaveTaskConfig, save_task_config},
@@ -46,6 +48,12 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/ai-settings/batches/cancel", post(batch_cancel))
         .route("/api/local/ai-settings/batches/{batch}", get(batch_read))
         .route("/api/local/ai-settings/task-configs", post(task_config))
+        .route("/api/local/ai-settings/prompts/{task}", get(prompt_read))
+        .route("/api/local/ai-settings/prompts/save", post(prompt_save))
+        .route(
+            "/api/local/ai-settings/prompts/activate",
+            post(prompt_activate),
+        )
         .route(
             "/api/local/ai-settings/task-configs/{config}",
             get(config_read),
@@ -54,6 +62,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/api/local/ai-settings/skills/activate",
             post(skill_activate),
         )
+        .route("/api/local/ai-settings/skills/switch", post(skill_switch))
         .route(
             "/api/local/ai-settings/trials/{comparison}",
             get(trial_read),
@@ -131,6 +140,30 @@ async fn skill_import(State(state): State<LocalWebState>, body: Bytes) -> Respon
     };
     respond(import_skill(db, &PiAdapter::configured(), &request).await)
 }
+async fn prompt_read(State(state): State<LocalWebState>, Path(task): Path<TaskKey>) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    respond(prompt::read(db, task).await)
+}
+async fn prompt_save(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    let Ok(request) = serde_json::from_slice::<SavePrompt>(&body) else {
+        return invalid();
+    };
+    respond(prompt::save(db, &request).await)
+}
+async fn prompt_activate(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    let Ok(request) = serde_json::from_slice::<ActivatePrompt>(&body) else {
+        return invalid();
+    };
+    respond(prompt::activate(db, &request).await)
+}
 async fn task_config(State(state): State<LocalWebState>, body: Bytes) -> Response {
     let Some(db) = state.database.database() else {
         return unavailable();
@@ -159,6 +192,15 @@ async fn skill_activate(State(state): State<LocalWebState>, body: Bytes) -> Resp
         return invalid();
     };
     respond(activate_skill(db, &request).await)
+}
+async fn skill_switch(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    let Ok(request) = serde_json::from_slice::<SwitchSkill>(&body) else {
+        return invalid();
+    };
+    respond(switch_skill(db, &request).await)
 }
 async fn batch_create(State(state): State<LocalWebState>, body: Bytes) -> Response {
     let Some(db) = state.database.database() else {

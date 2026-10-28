@@ -10,23 +10,15 @@ use axum::{
 };
 use linggan_intelligence::comment_study_catalog::{
     CatalogSummaryQuery, CommentCatalogQuery, CommentDetailQuery, CommentHistoryQuery,
-    StudyCatalogError, WordCloudQuery, WorkCatalogQuery, read_catalog_summary, read_comment_catalog,
-    read_comment_detail, read_comment_history, read_comment_versions, read_word_cloud,
-    read_work_catalog,
+    StudyCatalogError, WordCloudQuery, WorkCatalogQuery, read_catalog_summary,
+    read_comment_catalog, read_comment_detail, read_comment_history, read_comment_versions,
+    read_word_cloud, read_work_catalog,
 };
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 
-#[path = "comment_study_problem_cards.rs"]
-mod problem_cards;
-
-#[path = "comment_study_policy_api.rs"]
-mod policy_api;
-
 #[path = "comment_study_command_api.rs"]
 pub(super) mod command_api;
-
-pub(super) use command_api::{retired, start};
 
 pub(super) fn command_routes() -> Router<LocalWebState> {
     command_api::additional_routes()
@@ -41,8 +33,6 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/comment-study/catalog-summary", get(summary))
         .route("/api/local/comment-study/works", get(works))
         .route("/api/local/comment-study/word-cloud", get(word_cloud))
-        .merge(policy_api::routes())
-        .merge(problem_cards::routes())
 }
 
 async fn works(

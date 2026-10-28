@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 struct Prepared {
     invocation: Uuid,
+    prompt_version_ref: Uuid,
     request: PiRequest,
     request_ref: Option<Uuid>,
     input: execution::Input,
@@ -81,6 +82,12 @@ async fn prepare(
     let model = execution::model_in(&mut tx, item.task_config_ref).await?;
     let current_model = model.current_model_ref.ok_or(AiError::Model)?;
     let system = execution::system_in(&mut tx, item.task_config_ref).await?;
+    let prompt_version_ref: Uuid = sqlx::query_scalar(
+        "SELECT prompt_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
+    )
+    .bind(item.task_config_ref)
+    .fetch_one(&mut *tx)
+    .await?;
     let prompt = input.payload.to_string();
     let reservation = model
         .limits
@@ -157,6 +164,7 @@ async fn prepare(
     tx.commit().await?;
     Ok(Prepared {
         invocation,
+        prompt_version_ref,
         request,
         request_ref,
         input,
@@ -245,6 +253,7 @@ async fn settle(
         .unwrap_or_else(|| json!({"ok":false}));
     result["adapterVersion"] = json!(PI_PROTOCOL);
     result["executorReceipt"] = json!(item.lease_token);
+    result["promptVersion"] = json!(prepared.prompt_version_ref);
     result["writingQualified"] = json!(suggestion.is_some());
     result["sourceQualifiedAtSettlement"] = json!(readable);
     receipt::observe_in(&mut tx, prepared.invocation, response).await?;

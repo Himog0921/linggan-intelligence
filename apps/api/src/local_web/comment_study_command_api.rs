@@ -1,22 +1,15 @@
-//! P2/P3 local commands mounted in the existing Comment Study router.
-//! Tests exercise these same handlers; there is no alternate public URL or enable flag.
+//! Explicit comment research commands and source-catalog post-usage annotations.
 use super::{LocalDatabaseState, LocalWebState};
 use axum::{
     Json, Router,
-    extract::{Path, RawQuery, Request, State, rejection::JsonRejection},
+    extract::{Path, Query, RawQuery, Request, State, rejection::JsonRejection},
     http::{StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::post,
+    routing::{get, post},
 };
-use linggan_intelligence::{
-    comment_study_catalog::{PostUsageCommand, PostUsageError, record_comment_post_usage},
-    comment_study_policy::{StudyPolicyContractError, StudyPolicyStoreError},
-    comment_study_run::{
-        StudyRunControlAction, StudyRunControlCommand, StudyStartError, cancel_study_run,
-        control_study_run, preview_study_selection,
-    },
-    comment_study_selection::{SelectionPreviewCommand, StudySelectionError, StudySelectionMode},
+use linggan_intelligence::comment_study_catalog::{
+    PostUsageCommand, PostUsageError, record_comment_post_usage,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -24,16 +17,18 @@ use uuid::Uuid;
 
 pub(super) fn additional_routes() -> Router<LocalWebState> {
     Router::new()
-        .route("/api/local/comment-study/selection-preview", post(preview))
-        .route("/api/local/comment-study/runs/{id}/cancel", post(cancel))
-        .route("/api/local/comment-study/runs/{id}/pause", post(pause))
-        .route("/api/local/comment-study/runs/{id}/resume", post(resume))
-        .route("/api/local/comment-study/runs/{id}/stop", post(stop))
-        .route("/api/local/comment-study/runs/{id}/recover", post(recover))
+        .route("/api/local/comment-research/preview", get(research_preview))
+        .route("/api/local/comment-research/latest", get(research_latest))
+        .route("/api/local/comment-research/runs", get(research_runs))
         .route(
-            "/api/local/comment-study/policies/{policy_ref}/activate",
-            post(activate),
+            "/api/local/comment-research/problems",
+            get(research_problems),
         )
+        .route("/api/local/comment-research/cancel", post(research_cancel))
+        .route("/api/local/comment-research", post(research_start))
+        .route("/api/local/comment-research/{request}", get(research_read))
+        .route("/api/local/comment-study/runs", post(retired))
+        .route("/api/local/comment-study/policy", post(retired))
         .route(
             "/api/local/comment-study/comments/post-usage",
             post(post_usage),
@@ -41,13 +36,113 @@ pub(super) fn additional_routes() -> Router<LocalWebState> {
         .layer(middleware::from_fn(command_guard))
 }
 
-#[cfg(test)]
-fn routes() -> Router<LocalWebState> {
-    Router::new()
-        .route("/api/local/comment-study/runs", post(start))
-        .route("/api/local/comment-study/policy", post(retired))
-        .merge(additional_routes())
-        .layer(middleware::from_fn(command_guard))
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResearchPreview {
+    domain_ref: Uuid,
+    work_ref: Uuid,
+    source_ref: Uuid,
+    observation_role: linggan_intelligence::comment_study_source::StudySourceRole,
+}
+async fn research_preview(
+    State(state): State<LocalWebState>,
+    Query(query): Query<ResearchPreview>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::comment_research::preview(
+            db,
+            query.domain_ref,
+            query.work_ref,
+            query.source_ref,
+            query.observation_role,
+        )
+        .await,
+    )
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResearchLatest {
+    domain_ref: Uuid,
+    work_ref: Uuid,
+    source_ref: Uuid,
+}
+async fn research_latest(
+    State(state): State<LocalWebState>,
+    Query(query): Query<ResearchLatest>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::comment_research::latest(
+            db,
+            query.domain_ref,
+            query.work_ref,
+            query.source_ref,
+        )
+        .await,
+    )
+}
+async fn research_start(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::ai_foundation::comment_research::Start>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::comment_research::start(db, &body).await,
+    )
+}
+async fn research_read(State(state): State<LocalWebState>, Path(request): Path<Uuid>) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::comment_research::read(db, request).await,
+    )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResearchDomain {
+    domain_ref: Uuid,
+}
+async fn research_runs(
+    State(state): State<LocalWebState>,
+    Query(q): Query<ResearchDomain>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::comment_research::runs(db, q.domain_ref).await,
+    )
+}
+async fn research_problems(
+    State(state): State<LocalWebState>,
+    Query(q): Query<ResearchDomain>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::comment_problem::read_problems(db, q.domain_ref).await,
+    )
+}
+async fn research_cancel(
+    State(state): State<LocalWebState>,
+    Json(q): Json<linggan_intelligence::ai_foundation::comment_research::Cancel>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::comment_research::cancel(db, &q).await,
+    )
 }
 
 async fn command_guard(request: Request, next: Next) -> Response {
@@ -74,182 +169,9 @@ async fn command_guard(request: Request, next: Next) -> Response {
     response
 }
 
-async fn preview(
-    State(state): State<LocalWebState>,
-    RawQuery(query): RawQuery,
-    body: Result<Json<SelectionPreviewCommand>, JsonRejection>,
-) -> Response {
-    if query.is_some_and(|q| !q.is_empty()) {
-        return invalid(None);
-    }
-    let Ok(Json(command)) = body else {
-        return invalid(None);
-    };
-    if command.mode == StudySelectionMode::ContinueReady {
-        return invalid(None);
-    }
-    let command = match command.normalize() {
-        Ok(command) => command,
-        Err(e) => return failure(e.into(), None),
-    };
-    let LocalDatabaseState::Ready(db) = &state.database else {
-        return database_unavailable(&state, None);
-    };
-    match preview_study_selection(db, command).await {
-        Ok(value) => Json(value).into_response(),
-        Err(e) => failure(e, None),
-    }
-}
-
-pub(crate) async fn start() -> Response {
+async fn retired() -> Response {
     crate::local_web::ai_settings::legacy_closed("comment_study")
 }
-
-async fn cancel(
-    State(state): State<LocalWebState>,
-    Path(reference): Path<String>,
-    RawQuery(query): RawQuery,
-    body: Result<Json<CancelStudyRunRequest>, JsonRejection>,
-) -> Response {
-    if query.is_some_and(|query| !query.is_empty()) {
-        return invalid(None);
-    }
-    let Ok(run_ref) = Uuid::parse_str(&reference) else {
-        return invalid(None);
-    };
-    let Ok(Json(command)) = body else {
-        return invalid(None);
-    };
-    if run_ref.is_nil() || command.domain_ref.is_nil() {
-        return invalid(None);
-    }
-    let LocalDatabaseState::Ready(db) = &state.database else {
-        return database_unavailable(&state, None);
-    };
-    match cancel_study_run(db, command.domain_ref, run_ref).await {
-        Ok(receipt) => {
-            let as_of = receipt.as_of.clone();
-            Json(json!({
-                "request_id":Uuid::new_v4(),
-                "data_as_of":as_of,
-                "data":receipt
-            }))
-            .into_response()
-        }
-        Err(error) => failure(error, None),
-    }
-}
-
-async fn recover() -> Response {
-    crate::local_web::ai_settings::legacy_closed("comment_study")
-}
-
-async fn pause(
-    State(state): State<LocalWebState>,
-    Path(reference): Path<String>,
-    RawQuery(query): RawQuery,
-    body: Result<Json<StudyRunControlCommand>, JsonRejection>,
-) -> Response {
-    run_control(state, reference, query, body, StudyRunControlAction::Pause).await
-}
-
-async fn resume() -> Response {
-    crate::local_web::ai_settings::legacy_closed("comment_study")
-}
-
-async fn stop(
-    State(state): State<LocalWebState>,
-    Path(reference): Path<String>,
-    RawQuery(query): RawQuery,
-    body: Result<Json<StudyRunControlCommand>, JsonRejection>,
-) -> Response {
-    run_control(state, reference, query, body, StudyRunControlAction::Stop).await
-}
-
-async fn run_control(
-    state: LocalWebState,
-    reference: String,
-    query: Option<String>,
-    body: Result<Json<StudyRunControlCommand>, JsonRejection>,
-    action: StudyRunControlAction,
-) -> Response {
-    if query.is_some_and(|query| !query.is_empty()) {
-        return invalid(None);
-    }
-    let Ok(run_ref) = Uuid::parse_str(&reference) else {
-        return invalid(None);
-    };
-    let Ok(Json(command)) = body else {
-        return invalid(None);
-    };
-    if run_ref.is_nil() || command.validate().is_err() {
-        return invalid(None);
-    }
-    let LocalDatabaseState::Ready(db) = &state.database else {
-        return database_unavailable(&state, None);
-    };
-    match control_study_run(db, run_ref, command, action).await {
-        Ok(receipt) => {
-            let as_of = receipt.as_of.clone();
-            Json(json!({
-                "request_id":Uuid::new_v4(),
-                "data_as_of":as_of,
-                "data":receipt
-            }))
-            .into_response()
-        }
-        Err(StudyStartError::ControlVersionConflict(receipt)) => run_control_error(
-            StatusCode::CONFLICT,
-            "control_version_conflict",
-            "运行状态已变化，请读取当前状态后重试。",
-            *receipt,
-        ),
-        Err(StudyStartError::RunStopped(receipt)) => run_control_error(
-            StatusCode::CONFLICT,
-            "run_stopped",
-            "此运行已停止或结束，不能再恢复或更改控制状态。",
-            *receipt,
-        ),
-        Err(StudyStartError::ResumeUnavailable(receipt)) => run_control_error(
-            StatusCode::CONFLICT,
-            "policy_unavailable",
-            "原方法或运行预算当前不可用，未恢复运行。",
-            *receipt,
-        ),
-        Err(error) => failure(error, None),
-    }
-}
-
-fn run_control_error(
-    status: StatusCode,
-    code: &str,
-    message: &str,
-    current: linggan_intelligence::comment_study_run::StudyRunControlReceipt,
-) -> Response {
-    (
-        status,
-        Json(json!({
-            "error":{"code":code,"message":message,"retryable":false,"details":{"current":current}},
-            "requestRef":null
-        })),
-    )
-        .into_response()
-}
-
-async fn activate() -> Response {
-    crate::local_web::ai_settings::legacy_closed("comment_study")
-}
-
-pub(crate) async fn retired() -> Response {
-    crate::local_web::ai_settings::legacy_closed("comment_study")
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CancelStudyRunRequest {
-    domain_ref: Uuid,
-}
-
 /// COMMENT-LIKE-LIBRARY-001 · 记录或撤销「已改成帖子」。页面只按这里的回执更新状态。
 async fn post_usage(
     State(state): State<LocalWebState>,
@@ -309,170 +231,24 @@ async fn post_usage(
     }
 }
 
-fn invalid(reference: Option<Uuid>) -> Response {
+fn database_unavailable(_state: &LocalWebState, reference: Option<Uuid>) -> Response {
     error(
-        StatusCode::BAD_REQUEST,
-        "invalid_request",
-        "研究命令参数不符合约定。",
-        false,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "catalog_unavailable",
+        "数据库暂不可用。",
+        true,
         reference,
     )
 }
-
-fn database_unavailable(state: &LocalWebState, reference: Option<Uuid>) -> Response {
-    if matches!(&state.database, LocalDatabaseState::SchemaUnavailable(_)) {
-        failure(StudyStartError::SchemaUnavailable, reference)
-    } else {
-        error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "catalog_unavailable",
-            "数据库暂不可用；重试开始请求时请沿用原请求编号。",
-            true,
-            reference,
-        )
-    }
+fn database_failure(_code: Option<&str>, reference: Option<Uuid>) -> Response {
+    error(
+        StatusCode::SERVICE_UNAVAILABLE,
+        "catalog_unavailable",
+        "标记未获确认，请读取后核对。",
+        true,
+        reference,
+    )
 }
-
-fn failure(cause: StudyStartError, reference: Option<Uuid>) -> Response {
-    use StudyPolicyContractError as C;
-    use StudyPolicyStoreError as P;
-    use StudySelectionError as S;
-    use StudyStartError as E;
-    let (status, code, message, retryable) = match cause {
-        E::Selection(S::InvalidRequest) | E::Policy(P::Contract(C::InvalidRequest)) => {
-            return invalid(reference);
-        }
-        E::Selection(S::InvalidLimit) => (
-            StatusCode::BAD_REQUEST,
-            "invalid_limit",
-            "本次研究预算超出允许范围。",
-            false,
-        ),
-        E::Selection(S::UnsupportedDomain) | E::Policy(P::Contract(C::UnsupportedDomain)) => (
-            StatusCode::BAD_REQUEST,
-            "unsupported_domain",
-            "当前评论研究不支持这个领域。",
-            false,
-        ),
-        E::NotFound | E::Policy(P::NotFound) => (
-            StatusCode::NOT_FOUND,
-            "resource_not_found",
-            "未找到可访问的方法或所选材料。",
-            false,
-        ),
-        E::NoRecoveryTargets => (
-            StatusCode::CONFLICT,
-            "no_recovery_targets",
-            "原运行没有待补跑的目标。",
-            false,
-        ),
-        E::IdempotencyConflict => (
-            StatusCode::CONFLICT,
-            "idempotency_conflict",
-            "请求编号已用于其他命令；新意图须使用新编号。",
-            false,
-        ),
-        E::ControlVersionConflict(_) => (
-            StatusCode::CONFLICT,
-            "control_version_conflict",
-            "运行状态已变化，请读取当前状态后重试。",
-            false,
-        ),
-        E::RunStopped(_) => (
-            StatusCode::CONFLICT,
-            "run_stopped",
-            "此运行已停止或结束，不能再恢复或更改控制状态。",
-            false,
-        ),
-        E::ResumeUnavailable(_) => (
-            StatusCode::CONFLICT,
-            "policy_unavailable",
-            "原方法或运行预算当前不可用，未恢复运行。",
-            false,
-        ),
-        E::Policy(P::ActiveConflict) => (
-            StatusCode::CONFLICT,
-            "control_version_conflict",
-            "默认方法已变化，请刷新后再确认。",
-            false,
-        ),
-        E::Policy(P::Unrecorded) => (
-            StatusCode::CONFLICT,
-            "policy_unrecorded",
-            "历史方法未完整记录，请新建完整版本。",
-            false,
-        ),
-        E::Policy(P::DomainUnavailable) => (
-            StatusCode::CONFLICT,
-            "domain_not_active",
-            "当前领域已暂停，不能保存或启用研究方法。",
-            false,
-        ),
-        E::Policy(P::ModelDisabled | P::ModelUnavailable | P::Contract(_)) => (
-            StatusCode::CONFLICT,
-            "policy_unavailable",
-            "方法版本或模型配置当前不可用。",
-            false,
-        ),
-        E::SchemaUnavailable | E::Policy(P::SchemaUnavailable) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "study_schema_unavailable",
-            "研究升级尚未就绪；不会自动建表。",
-            false,
-        ),
-        E::Busy => (
-            StatusCode::CONFLICT,
-            "study_busy",
-            "研究正在处理并发命令，可使用原请求编号重试。",
-            true,
-        ),
-        E::QueryTimeout => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "query_timeout",
-            "研究查询超时，可使用原请求编号重试。",
-            true,
-        ),
-        E::BuildUnrecorded => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "model_runtime_unavailable",
-            "当前构建未完整记录，不能开始研究。",
-            false,
-        ),
-        E::Database(sqlx::Error::Database(e))
-        | E::Policy(P::Database(sqlx::Error::Database(e))) => {
-            return database_failure(e.code().as_deref(), reference);
-        }
-        E::ReceiptInvalid | E::Selection(S::InvalidSnapshot) => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "catalog_unavailable",
-            "研究记录完整性检查未通过。",
-            false,
-        ),
-        _ => (
-            StatusCode::SERVICE_UNAVAILABLE,
-            "catalog_unavailable",
-            "数据库暂不可用；重试开始请求时请沿用原请求编号。",
-            true,
-        ),
-    };
-    error(status, code, message, retryable, reference)
-}
-
-fn database_failure(code: Option<&str>, reference: Option<Uuid>) -> Response {
-    match code {
-        Some("40001" | "40P01" | "55P03") => failure(StudyStartError::Busy, reference),
-        Some("57014") => failure(StudyStartError::QueryTimeout, reference),
-        Some("42P01" | "42703" | "42883") => failure(StudyStartError::SchemaUnavailable, reference),
-        _ => error(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "catalog_unavailable",
-            "数据库暂不可用；重试开始请求时请沿用原请求编号。",
-            true,
-            reference,
-        ),
-    }
-}
-
 fn error(
     status: StatusCode,
     code: &str,
@@ -489,10 +265,3 @@ fn error(
     )
         .into_response()
 }
-
-#[cfg(test)]
-#[path = "comment_study_command_postgres.rs"]
-mod postgres_tests;
-#[cfg(test)]
-#[path = "comment_study_command_tests.rs"]
-mod tests;

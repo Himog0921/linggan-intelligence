@@ -67,6 +67,7 @@ async fn ai_foundation_skill_import_uses_pinned_loader_canonical_versions_and_se
         .unwrap();
     assert_eq!(binary["kind"], "binary");
     assert!(binary["content"].is_null());
+    assert_eq!(binary["contentBase64"], STANDARD.encode([0xff, 0x00, 0xfe]));
     let mut normalized = ImportSkill {
         command_ref: Uuid::new_v4(),
         expected_version_ref: Some(one.version_ref),

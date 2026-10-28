@@ -16,7 +16,11 @@ use linggan_intelligence::ai_foundation::{
     TaskKey,
     control::BudgetPolicy,
     control_store::{Actor, ControlScope},
+    prompt::{self, ActivatePrompt, SavePrompt},
     provider_store::{ChangeEgress, MaterialClass, change_egress},
+    skill_binding::{ActivateSkill, activate_skill},
+    skill_package::{Encoding, SkillPackage, UploadFile},
+    skill_store::{ImportSkill, import_skill},
     task_config::{MaterialColumn, ModelSelection, SaveTaskConfig, save_task_config},
     work_comparison as comparison,
 };
@@ -311,12 +315,18 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();
     drop(owner);
+    let comparison_revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='work_comparison'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
     let config = save_task_config(
         &db,
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
             task_key: TaskKey::WorkComparison,
-            expected_revision: 0,
+            expected_revision: comparison_revision,
             model: Some(ModelSelection {
                 model_ref: configured.model,
                 capability_ref: configured.capability,
@@ -333,6 +343,78 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
             ]
             .into(),
             budget: BudgetPolicy::Unlimited,
+        },
+    )
+    .await
+    .unwrap();
+    let skill = import_skill(&db, &adapter, &ImportSkill { command_ref: Uuid::new_v4(), expected_version_ref: None,
+        package: SkillPackage { directory: "comparison-method".into(), files: vec![UploadFile { path: "SKILL.md".into(), encoding: Encoding::Utf8,
+            content: "---\nname: comparison-method\ndescription: Synthetic comparison method\n---\nSYNTHETIC COMPARISON SKILL\n".into() }] } }).await.unwrap();
+    let skill_candidate = save_task_config(
+        &db,
+        &SaveTaskConfig {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WorkComparison,
+            expected_revision: config.revision,
+            model: Some(ModelSelection {
+                model_ref: configured.model,
+                capability_ref: configured.capability,
+                limits: configured.limits.clone(),
+            }),
+            skill_version_ref: Some(skill.version_ref),
+            material_columns: [
+                MaterialColumn::Title,
+                MaterialColumn::Body,
+                MaterialColumn::Tags,
+                MaterialColumn::Ocr,
+                MaterialColumn::Transcript,
+                MaterialColumn::FrameText,
+            ]
+            .into(),
+            budget: BudgetPolicy::Unlimited,
+        },
+    )
+    .await
+    .unwrap();
+    let enabled_skill = activate_skill(
+        &db,
+        &ActivateSkill {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WorkComparison,
+            expected_task_revision: config.revision,
+            expected_binding_revision: 0,
+            candidate_config_ref: skill_candidate.task_config_ref,
+            trial_comparison_ref: None,
+            reason: "synthetic comparison skill".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let initial = prompt::read(&db, TaskKey::WorkComparison).await.unwrap();
+    let original: Uuid = initial["activeVersionRef"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let edited = prompt::save(
+        &db,
+        &SavePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WorkComparison,
+            expected_task_revision: enabled_skill.task_revision,
+            system_text: "SYNTHETIC COMPARISON SYSTEM".into(),
+            instruction_text: "SYNTHETIC COMPARISON INSTRUCTION".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let enabled_prompt = prompt::activate(
+        &db,
+        &ActivatePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WorkComparison,
+            expected_task_revision: enabled_skill.task_revision,
+            version_ref: edited.version_ref,
         },
     )
     .await
@@ -370,8 +452,8 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
         work_refs: works.clone(),
         knowledge_cutoff: preview.knowledge_cutoff,
         expected_material_revisions: preview.material_revisions,
-        task_config_ref: config.task_config_ref,
-        expected_task_revision: config.revision,
+        task_config_ref: enabled_prompt.task_config_ref,
+        expected_task_revision: enabled_prompt.task_revision,
     };
     let receipt = comparison::start(&db, &start).await.unwrap();
     assert_eq!(
@@ -389,6 +471,17 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
     .unwrap();
     assert!(second.reused);
     assert_eq!(second.batch_ref, receipt.batch_ref);
+    prompt::activate(
+        &db,
+        &ActivatePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WorkComparison,
+            expected_task_revision: enabled_prompt.task_revision,
+            version_ref: original,
+        },
+    )
+    .await
+    .unwrap();
     let read = comparison::read(&db, &scope, receipt.request_ref)
         .await
         .unwrap();
@@ -493,7 +586,10 @@ async fn comparison_authorization_start_replay_and_revoke_use_formal_commands() 
     let public = serde_json::to_value(&result.materials).unwrap();
     assert!(public[0]["fragments"][0].get("text").is_none());
     let requests = endpoint.requests.lock().unwrap();
+    assert!(wire::text(requests.last().unwrap(), "system").contains("SYNTHETIC COMPARISON SYSTEM"));
+    assert!(wire::text(requests.last().unwrap(), "system").contains("SYNTHETIC COMPARISON SKILL"));
     let prompt = wire::text(requests.last().unwrap(), "user");
+    assert!(prompt.contains("SYNTHETIC COMPARISON INSTRUCTION"));
     assert_eq!(prompt.matches("TABLE-CANARY").count(), 1);
     assert_eq!(prompt.matches("DIALOGUE-CANARY").count(), 1);
     let packet: Value = serde_json::from_str(&prompt).unwrap();

@@ -95,7 +95,7 @@ pub async fn apply_search_command(
         .execute(&mut *tx)
         .await?;
     if let Some(r) = sqlx::query(
-        "SELECT command_hash,receipt FROM linggan_topic_map_research_command WHERE request_ref=$1",
+        "SELECT command_hash,receipt FROM linggan_topic_collection_command WHERE request_ref=$1",
     )
     .bind(request)
     .fetch_optional(&mut *tx)
@@ -130,7 +130,7 @@ pub async fn apply_search_command(
             {
                 return Err(ResearchError::Invalid("invalid_search_scope"));
             }
-            let enabled:Option<bool>=sqlx::query_scalar("SELECT p.collection_enabled AND p.status='active' AND d.status='active' FROM linggan_topic_map_research_policy p JOIN observation_domain d USING(domain_ref)WHERE p.domain_ref=$1 FOR UPDATE OF p").bind(domain).fetch_optional(&mut *tx).await?;
+            let enabled:Option<bool>=sqlx::query_scalar("SELECT p.collection_enabled AND p.status='active' AND d.status='active' FROM linggan_topic_collection_policy p JOIN observation_domain d USING(domain_ref)WHERE p.domain_ref=$1 FOR UPDATE OF p").bind(domain).fetch_optional(&mut *tx).await?;
             if enabled != Some(true) {
                 return Err(ResearchError::Invalid("collection_not_enabled"));
             }
@@ -187,7 +187,7 @@ pub async fn apply_search_command(
             ..
         } => {
             // Recheck the current opt-in before reserving any new detail slots.
-            let enabled: Option<bool> = sqlx::query_scalar("SELECT p.collection_enabled AND p.status='active' AND d.status='active' FROM linggan_topic_map_research_policy p JOIN observation_domain d USING(domain_ref) WHERE p.domain_ref=$1 FOR UPDATE OF p,d").bind(domain).fetch_optional(&mut *tx).await?;
+            let enabled: Option<bool> = sqlx::query_scalar("SELECT p.collection_enabled AND p.status='active' AND d.status='active' FROM linggan_topic_collection_policy p JOIN observation_domain d USING(domain_ref) WHERE p.domain_ref=$1 FOR UPDATE OF p,d").bind(domain).fetch_optional(&mut *tx).await?;
             if enabled != Some(true) {
                 return Err(ResearchError::Invalid("collection_not_enabled"));
             }
@@ -279,7 +279,7 @@ pub async fn apply_search_command(
             json!({"requestRef":request,"roundRef":round_ref,"state":"stopped","remoteCallsAlreadySentMayComplete":true})
         }
     };
-    sqlx::query("INSERT INTO linggan_topic_map_research_command(request_ref,domain_ref,command_hash,receipt)VALUES($1,$2,$3,$4)").bind(request).bind(domain).bind(hash).bind(&receipt).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_topic_collection_command(request_ref,domain_ref,command_hash,receipt)VALUES($1,$2,$3,$4)").bind(request).bind(domain).bind(hash).bind(&receipt).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(receipt)
 }

@@ -1,3 +1,4 @@
+import { parseTopicProgress, type TopicProgress } from "./topicResearchModel";
 import type { ChangeEvent, FormEvent, KeyboardEvent, ToggleEvent } from "react";
 import { Fragment } from "react";
 import { ApiError, isRecord } from "../../shared/api";
@@ -10,10 +11,10 @@ import {
   decodeAlternative,
   decodeCommand,
   decodeComments,
+  decodeCollectionProgress,
   decodeEvidence,
   decodePreview,
-  decodeProgress,
-  decodeResearchReceipt,
+  decodeCollectionReceipt,
   decodeResource,
   decodeSearch,
   decodeSnapshot,
@@ -217,7 +218,7 @@ export function createTopicEngine() {
     progressLoading = false,
     progressEpoch = 0;
   let snapshot: T.Snapshot | null = null,
-    progress: T.ResearchProgress | null = null,
+    progress: TopicProgress | null = null,
     loading = false,
     materialsLoading = false,
     materialsError = "",
@@ -450,9 +451,6 @@ export function createTopicEngine() {
     get topicName() {
       return topicName;
     },
-    get progress() {
-      return progress;
-    },
   });
   const mutations = createTopicCommands(
     (path, body, parse) => request(path, parse, { method: "POST", body }),
@@ -600,8 +598,8 @@ export function createTopicEngine() {
     renderReadiness();
     try {
       const value = await request(
-        `/api/local/topic-map/research?domainRef=${encodeURIComponent(domainRef)}`,
-        decodeProgress,
+        `/api/local/topic-research/runs?domainRef=${encodeURIComponent(domainRef)}`,
+        parseTopicProgress,
       );
       if (current()) {
         progress = value;
@@ -635,10 +633,10 @@ export function createTopicEngine() {
     notify();
   }
   function readiness() {
-    const counts = progress?.currentMethodSummary;
-    const operation = progressLoading ? "历史研究记录读取中" : progressError ? "历史记录读取失败" : "旧研究已退役";
+    const counts = progress?.summary;
+    const operation = progressLoading ? "研究进度读取中" : progressError ? "研究进度读取失败" : "主题研究";
     const summary = counts
-      ? `接纳 ${number(counts.succeededCount)} · 失败 ${number(counts.failedCount)} · 派发未知 ${number(counts.unknownDispatchCount)}`
+      ? `接纳 ${number(counts.succeededStageCount)} · 失败 ${number(counts.failedStageCount)} · 待完成 ${number(counts.pendingStageCount)}`
       : "当前方法统计尚未取得";
     return btn(
       <>
@@ -648,9 +646,9 @@ export function createTopicEngine() {
             <small className={cls("lgi-tm-operation-counts")}>
               {[
                 "失败 ",
-                number(counts.failedCount),
-                " · 派发未知 ",
-                number(counts.unknownDispatchCount),
+                number(counts.failedStageCount),
+                " · 待完成 ",
+                number(counts.pendingStageCount),
               ].join("")}
             </small>
           </>
@@ -662,8 +660,8 @@ export function createTopicEngine() {
       "",
       "lgi-tm-quiet lgi-tm-research-status",
       {
-        title: `${summary}；打开AI 状态与历史研究`,
-        "aria-label": `${operation}；${summary}；打开AI 状态与历史研究`,
+        title: `${summary}；打开主题研究与阶段回执`,
+        "aria-label": `${operation}；${summary}；打开主题研究与阶段回执`,
       },
     );
   }
@@ -852,7 +850,7 @@ export function createTopicEngine() {
       identity: "我方矩阵与观察范围",
       saved: "我的备选",
       save: "保留角度与依据",
-      research: "AI 状态与历史研究",
+      research: "主题研究",
       rules: "样本表现规则",
       method: "方法与统计边界",
       changes: "结构与依据变化",
@@ -1311,27 +1309,9 @@ export function createTopicEngine() {
   }
 
   async function openResearch() {
-    if (!state.domainRef) {
-      notice = "先选择实际领域，再读取历史研究记录。";
-      renderNotice();
-      return;
-    }
-    openDialog("research", { loading: true });
-    const current = requireDialog();
-    try {
-      const value = await readResearchProgress(state.domainRef);
-      if (!value) return;
-      current.progress = value;
-    } catch (caughtError) {
-      const error = caught(caughtError);
-      current.error = error.message;
-    }
-    if (dialogState === current) {
-      current.loading = false;
-      drawDialog();
-    }
+    if (!state.domainRef) { notice="先选择实际领域。"; renderNotice(); return; }
+    openDialog("research",{});
   }
-
 
   async function previewStructure(form: HTMLFormElement, data: FormData) {
     const activeDialog = requireDialog();
@@ -1578,7 +1558,7 @@ export function createTopicEngine() {
     try {
       const value = await readResearchProgress(state.domainRef);
       if (value && dialogState === current) {
-        current.progress = value;
+        progress = value;
         delete current.error;
         drawDialog();
       }
@@ -1609,7 +1589,7 @@ export function createTopicEngine() {
           ? "/api/local/topic-map/search/commands"
           : "/api/local/topic-map/collection/commands",
         { ...payload, requestRef: uuid(), domainRef: domain },
-        decodeResearchReceipt,
+        decodeCollectionReceipt,
         async (result) => {
           feedback(
             `已获得后端回执：${labelState(result.state)}。实际取得材料与研究结果不由提交成功代替。`,
@@ -1663,8 +1643,8 @@ export function createTopicEngine() {
     try {
       const results = await Promise.allSettled([
         request(
-          `/api/local/topic-map/research?domainRef=${encodeURIComponent(state.domainRef)}`,
-          decodeProgress,
+          `/api/local/topic-map/collection?domainRef=${encodeURIComponent(state.domainRef)}`,
+          decodeCollectionProgress,
         ),
         request(
           `/api/local/topic-map/search?domainRef=${encodeURIComponent(state.domainRef)}`,
@@ -2265,6 +2245,13 @@ export function createTopicEngine() {
       );
       if (result) await refreshIdentity();
       else if (dialogState === owner) dialogFeedback(notice);
+      return;
+    }
+    if (action === "capture-configure") {
+      const policy=requireDialog().collection?.policy;
+      if (!policy) return;
+      const result=await collectionCommand({action:'configure',expectedRevision:policy.revision,collectionEnabled:!policy.enabled});
+      if (result) await refreshCapture();
       return;
     }
     if (action === "capture-refresh") {

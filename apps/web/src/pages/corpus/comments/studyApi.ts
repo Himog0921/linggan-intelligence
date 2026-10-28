@@ -40,10 +40,8 @@ export interface CommentKey { workRef: string; commentExternalId: string }
 export const commentIdentity = (key: CommentKey) => JSON.stringify([key.workRef, key.commentExternalId]);
 export interface StudyNavigation {
   view(view: 'overview' | 'comments' | 'runs' | 'problems'): void;
-  run(runRef: string, panel?: string, targetRef?: string | null, signalRef?: string | null): void;
-  problem(problemRef: string): void;
+  research(requestRef: string, key: CommentKey): void;
   comment(key: CommentKey): void;
-  candidates(state: string): void;
 }
 
-export interface SelectedComment { commentKey: CommentKey; observationRole: string }
+export interface SelectedComment { sourceRef: string; commentKey: CommentKey; observationRole: string }

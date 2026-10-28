@@ -25,6 +25,17 @@ const MIGRATIONS: &[(&str, &str)] = &[
     migration!("0141_ai_gen1_legacy_settings"),
     migration!("0146_research_dossier_v2"),
     migration!("0148_dossier_consumer_contracts"),
+    migration!("0169_ai_manual_skill_activation"),
+    migration!("0170_ai_prompt_versions"),
+    migration!("0171_ai_writing_comparison_prompts"),
+    migration!("0172_research_method_settings"),
+    migration!("0173_creator_research_execution"),
+    migration!("0174_comment_research_execution"),
+    migration!("0175_creator_account_research"),
+    migration!("0176_topic_research_execution"),
+    migration!("0177_comment_problem_workflow"),
+    migration!("0178_creator_manual_annotations"),
+    migration!("0179_retire_research_relations"),
 ];
 
 pub(super) async fn require_ready(db: &Database) -> Result<(), ExecutorError> {

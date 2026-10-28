@@ -7,8 +7,8 @@ mod research_fixture;
 use fixture::{proof_database, submit_package_at};
 use linggan_intelligence::comment_study_catalog::{
     CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
-    StudyCatalogError, WordCloudQuery, read_catalog_summary, read_comment_catalog,
-    read_word_cloud, refresh_clean_cache,
+    StudyCatalogError, WordCloudQuery, read_catalog_summary, read_comment_catalog, read_word_cloud,
+    refresh_clean_cache,
 };
 use linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF;
 use linggan_storage_postgres::Database;
@@ -17,21 +17,8 @@ use serde_json::json;
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-const BASE: &str = concat!(
-    include_str!("../../../database/bootstrap/comment-study-001.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0114_comment_study_effective_head.sql")
-);
-const DELTA: &str =
-    include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql");
-
 async fn database(name: &str) -> Database {
-    let db = proof_database(name).await;
-    sqlx::raw_sql(BASE).execute(db.pool()).await.unwrap();
-    let mut tx = db.pool().begin().await.unwrap();
-    sqlx::raw_sql(DELTA).execute(&mut *tx).await.unwrap();
-    tx.commit().await.unwrap();
-    db
+    proof_database(name).await
 }
 
 fn query() -> CommentCatalogQuery {
@@ -126,7 +113,7 @@ async fn catalog_paginates_more_than_100_comments_without_a_run_and_searches_lit
         result["items"][0]["commentKey"]["commentExternalId"],
         "literal"
     );
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_run")
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_research_request")
         .fetch_one(db.pool())
         .await
         .unwrap();
@@ -238,107 +225,15 @@ async fn newer_unknown_or_restricted_source_never_resurrects_old_cached_text() {
         .bind(restricted).execute(db.pool()).await.unwrap();
     let result = read_comment_catalog(&db, &query()).await.unwrap();
     assert!(result["items"].as_array().unwrap().is_empty());
-    let retained: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_comment_study_clean_cache WHERE source_ref=$1",
-    )
-    .bind(old)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
+    let retained: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_clean_cache WHERE source_ref=$1")
+            .bind(old)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(
         retained, 1,
         "read restrictions must not delete retained cache or raw history"
-    );
-}
-
-async fn record_target(db: &Database, source: Uuid, state: &str, at: &str) -> Uuid {
-    let run = Uuid::new_v4();
-    let policy = Uuid::new_v4();
-    let work: Uuid = sqlx::query_scalar(
-        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
-    )
-    .bind(source)
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    sqlx::query("INSERT INTO linggan_comment_study_policy(policy_ref,domain_ref,contract,comment_budget,context_character_budget) \
-        VALUES($1,$2,'comment-study.v1',100,6000)")
-        .bind(policy).bind(query().domain).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_comment_study_run(run_ref,policy_ref,as_of,state,selection_manifest,selection_hash,created_at) \
-        VALUES($1,$2,$3::timestamptz,'prepared','{}',repeat('0',64),$3::timestamptz)")
-        .bind(run).bind(policy).bind(at).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_comment_study_work \
-        (run_ref,content_public_ref,domain_ref,observation_role,selection_reason,context_state,context_manifest,context_hash) \
-        VALUES($1,$2,$3,'primary','user_selected','missing',$4,repeat('0',64))")
-        .bind(run).bind(work).bind(query().domain).bind(json!({"workRef":work,"sources":[]}))
-        .execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_comment_study_target \
-        (target_ref,run_ref,content_public_ref,source_ref,research_text,research_sha256,dependency_state,state,input_manifest,input_hash,created_at) \
-        VALUES($1,$2,$3,$4,'SYNTHETIC history',repeat('0',64),'self_contained',$5,'{}',repeat('0',64),$6::timestamptz)")
-        .bind(Uuid::new_v4()).bind(run).bind(work).bind(source).bind(state).bind(at)
-        .execute(db.pool()).await.unwrap();
-    run
-}
-
-#[tokio::test]
-#[ignore = "random isolated PostgreSQL proof; no shared database"]
-async fn stable_comment_history_separates_last_attempt_from_success_head() {
-    let db = database("catalog_read_history").await;
-    detail_with_author(
-        &db,
-        "catalog-history",
-        "SYNTHETIC 研究历史",
-        Some("creator"),
-    )
-    .await;
-    let source = add_comment(
-        &db,
-        "catalog-history",
-        "one",
-        "SYNTHETIC 一条原声",
-        Some("reader"),
-    )
-    .await;
-    let success = record_target(&db, source, "succeeded", "2026-09-21T10:00:00Z").await;
-    let failed = record_target(&db, source, "failed", "2026-09-21T11:00:00Z").await;
-    cache(&db).await;
-    let result = read_comment_catalog(&db, &query()).await.unwrap();
-    assert_eq!(
-        result["items"][0]["latestStudy"]["runRef"],
-        failed.to_string()
-    );
-    assert_eq!(
-        result["items"][0]["effectiveStudy"]["runRef"],
-        success.to_string()
-    );
-    assert_eq!(result["items"][0]["effectiveState"], "effective");
-    assert_eq!(
-        result["items"][0]["effectiveStudy"]["inputComparison"],
-        "unknown"
-    );
-    let no_signal = record_target(&db, source, "no_signal", "2026-09-21T12:00:00Z").await;
-    let result = read_comment_catalog(&db, &query()).await.unwrap();
-    assert_eq!(
-        result["items"][0]["effectiveStudy"]["runRef"],
-        no_signal.to_string()
-    );
-    assert_eq!(result["items"][0]["effectiveStudy"]["state"], "no_signal");
-    comment_with_author(
-        &db,
-        "catalog-history",
-        "one",
-        "SYNTHETIC 修改后的正文",
-        Some("reader"),
-        "2026-09-22T08:00:00Z",
-    )
-    .await;
-    cache(&db).await;
-    let result = read_comment_catalog(&db, &query()).await.unwrap();
-    assert_eq!(result["items"].as_array().unwrap().len(), 1);
-    assert_eq!(result["items"][0]["effectiveState"], "source_changed");
-    assert_eq!(
-        result["items"][0]["effectiveStudy"]["runRef"],
-        no_signal.to_string()
     );
 }
 
@@ -393,31 +288,66 @@ async fn domain_phrase_frequency_counts_distinct_eligible_comments_and_retains_s
         r#"SELECT to_char((scope_001_now() - interval '2 days') AT TIME ZONE 'UTC',
                          'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')"#,
     )
-    .fetch_one(db.pool()).await.unwrap();
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
     detail_with_author(&db, "word-a", "SYNTHETIC 第一篇", Some("creator")).await;
     detail_with_author(&db, "word-b", "SYNTHETIC 第二篇", Some("creator")).await;
     for index in 0..5 {
         let note = if index < 3 { "word-a" } else { "word-b" };
-        comment_with_author(&db, note, &format!("c-{index}"),
-            "作业拖拉，作业拖拉；每天还是作业拖拉", Some("reader"), &observed).await;
+        comment_with_author(
+            &db,
+            note,
+            &format!("c-{index}"),
+            "作业拖拉，作业拖拉；每天还是作业拖拉",
+            Some("reader"),
+            &observed,
+        )
+        .await;
     }
     // The creator's own comment must never contribute to reader-language frequency.
-    comment_with_author(&db, "word-a", "creator-voice", "作业拖拉",
-        Some("creator"), &observed).await;
+    comment_with_author(
+        &db,
+        "word-a",
+        "creator-voice",
+        "作业拖拉",
+        Some("creator"),
+        &observed,
+    )
+    .await;
     cache(&db).await;
     let domain = query().domain;
-    let read = read_word_cloud(&db, &WordCloudQuery { domain, days: Some(7) })
-        .await.unwrap();
+    let read = read_word_cloud(
+        &db,
+        &WordCloudQuery {
+            domain,
+            days: Some(7),
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(read["eligibleCommentCount"], 5);
     assert_eq!(read["processedCommentCount"], 5);
     assert_eq!(read["truncated"], false);
     let words = read["items"].as_array().unwrap();
-    let phrase = words.iter().find(|item| item["text"] == "作业拖拉").unwrap();
+    let phrase = words
+        .iter()
+        .find(|item| item["text"] == "作业拖拉")
+        .unwrap();
     assert_eq!(phrase["count"], 5);
     assert_eq!(phrase["workCount"], 2);
     assert_eq!(phrase["category"], "scenario");
     assert_eq!(phrase["examples"].as_array().unwrap().len(), 3);
     assert!(phrase["examples"][0].get("commentText").is_none());
-    assert!(read_word_cloud(&db, &WordCloudQuery { domain, days: Some(30) })
-        .await.is_err());
+    assert!(
+        read_word_cloud(
+            &db,
+            &WordCloudQuery {
+                domain,
+                days: Some(30)
+            }
+        )
+        .await
+        .is_err()
+    );
 }

@@ -1,5 +1,5 @@
 -- A recheck at write time limits propagation; every later reader must still check restrictions.
-INSERT INTO linggan_comment_study_clean_cache
+INSERT INTO linggan_comment_clean_cache
     (source_ref, cleaner_version, raw_sha256, research_text, clean_state, clean_reasons)
 SELECT source.material_ref, $2, $3, $4, $5, $6
 FROM linggan_material_comment source

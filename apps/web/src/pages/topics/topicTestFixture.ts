@@ -1,8 +1,8 @@
+import type { TopicProgress } from './topicResearchModel';
 /** Handwritten synthetic UI contract fixtures; no copied source material. */
 import type {
   Counts,
   Journey,
-  ResearchProgress,
   Snapshot,
   Statistics,
   Work,
@@ -184,26 +184,7 @@ export function topicCounts(): Counts {
     },
   };
 }
-export function topicProgress(): ResearchProgress {
-  return {
-    domainRef: topicDomain,
-    methodVersion: "synthetic-method.v1",
-    policy: null,
-    currentMethodSummary: topicCounts(),
-    summary: topicCounts(),
-    runs: [],
-    runListLimit: 30,
-    models: [],
-    usage: { chargedTokens: 0, reservedTokens: 0, timezone: "Asia/Shanghai" },
-    processingLimits: {
-      automaticBatchWindows: 20,
-      materialSelection: 'whole_note',
-      primaryCommentsPerWindow: 3,
-    },
-    targets: [],
-    collectionRounds: [],
-  };
-}
+export function topicProgress(): TopicProgress { return { summary: {pendingStageCount:0,succeededStageCount:0,failedStageCount:0},runs:[] }; }
 export const topicContext = {
   defaultDomainRef: topicDomain,
   domains: [

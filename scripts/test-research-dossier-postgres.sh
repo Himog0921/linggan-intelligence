@@ -12,7 +12,7 @@ source scripts/cargo-proof.sh
 export RUST_TEST_THREADS=1
 
 case "${1:-}" in
-  ""|--dossier-ui|--dossier-input|--http|--target-inspection|--ai-foundation|--ai-ledger|--ai-writing|--ai-service|--ai-install|--ai-readonly|--ai-compatibility) ;;
+  ""|--dossier-ui|--dossier-input|--comment-context|--creator-input|--creator-executor|--comment-executor|--topic-executor|--http|--target-inspection|--ai-foundation|--ai-ledger|--ai-writing|--ai-service|--ai-install|--ai-readonly|--ai-retirement|--research-methods|--ai-compatibility) ;;
   *) echo "Unsupported proof selection: ${1:-}" >&2; exit 2 ;;
 esac
 
@@ -95,17 +95,53 @@ docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 docker exec "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d "$proof_database" -c "CREATE EXTENSION pg_stat_statements" >/dev/null
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
+if [[ "${1:-}" == "--comment-context" ]]; then
+  cargo_proof -p linggan-intelligence --test comment_study_start_postgres selected_comment_keeps_target_parent_and_dossier_separate --locked -- --ignored --exact --nocapture
+  echo "Comment research frozen dossier context proof passed"
+  exit 0
+fi
+if [[ "${1:-}" == "--creator-input" ]]; then
+  CREATOR_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test creator_discovery_input_postgres --locked -- --ignored --nocapture
+  echo "Creator research canonical dossier input proof passed"
+  exit 0
+fi
 if [[ "${1:-}" == "--target-inspection" ]]; then
   AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test target_inspection_postgres --locked -- --ignored --nocapture --test-threads=1
   echo "TARGET-INSPECTOR-V4 isolated PostgreSQL proof passed"
   exit 0
 fi
-if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-writing" || "${1:-}" == "--ai-service" || "${1:-}" == "--ai-install" || "${1:-}" == "--ai-readonly" || "${1:-}" == "--ai-compatibility" ]]; then
+if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-writing" || "${1:-}" == "--ai-service" || "${1:-}" == "--ai-install" || "${1:-}" == "--ai-readonly" || "${1:-}" == "--ai-retirement" || "${1:-}" == "--research-methods" || "${1:-}" == "--creator-executor" || "${1:-}" == "--comment-executor" || "${1:-}" == "--topic-executor" || "${1:-}" == "--ai-compatibility" ]]; then
   mkdir -p "$project_root/artifacts/private/ai-gen1-pr1b"
   ledger_asset_root="$(mktemp -d "$project_root/artifacts/private/ai-gen1-pr1b/ledger-assets.XXXXXX")"
   export LINGGAN_CREATION_ASSET_ROOT="$ledger_asset_root"
   export LINGGAN_LOCAL_MEDIA_ROOT="$ledger_asset_root/source-media"
   export LINGGAN_PI_NODE="$(command -v node)"
+  if [[ "${1:-}" == "--topic-executor" ]]; then
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test topic_research_executor_postgres --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test research_transport_postgres --locked -- --ignored --nocapture
+    echo "Topic research executor proof passed"
+    exit 0
+  fi
+  if [[ "${1:-}" == "--comment-executor" ]]; then
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test comment_research_executor_postgres --locked -- --ignored --nocapture
+    echo "Comment research executor proof passed"
+    exit 0
+  fi
+  if [[ "${1:-}" == "--creator-executor" ]]; then
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test creator_research_executor_postgres --locked -- --ignored --nocapture
+    echo "Creator research executor proof passed"
+    exit 0
+  fi
+  if [[ "${1:-}" == "--research-methods" ]]; then
+    cargo_proof -p linggan-intelligence --test ai_foundation_postgres research_methods_are_editable_and_switching_never_dispatches --locked -- --ignored --nocapture
+    echo "Pending research method settings proof passed"
+    exit 0
+  fi
+  if [[ "${1:-}" == "--ai-retirement" ]]; then
+    cargo_proof -p linggan-intelligence --test ai_foundation_postgres retirement:: --locked -- --ignored --nocapture
+    echo "Retired execution entry proof passed"
+    exit 0
+  fi
   if [[ "${1:-}" == "--ai-readonly" ]]; then
     export CREATOR_PROOF_NODE="$(command -v node)"
     cargo_proof -p linggan-intelligence --test topic_map_postgres --locked -- --ignored --nocapture
@@ -146,12 +182,12 @@ if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == 
   fi
   if [[ "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-compatibility" ]]; then
     export CREATOR_PROOF_NODE="$(command -v node)"
-    ledger_consumers=(creator_discovery_input_postgres content_workbench_ai_postgres comment_study_start_postgres topic_map_research_postgres)
+    ledger_consumers=(creator_discovery_input_postgres content_workbench_ai_postgres comment_study_start_postgres)
     if [[ $# -gt 1 ]]; then
       ledger_consumers=()
       for ledger_selection in "${@:2}"; do
         case "$ledger_selection" in
-          creator_discovery_input_postgres|content_workbench_ai_postgres|comment_study_start_postgres|comment_study_rebuild_postgres|topic_map_research_postgres) ledger_consumers+=("$ledger_selection") ;;
+          creator_discovery_input_postgres|content_workbench_ai_postgres|comment_study_start_postgres) ledger_consumers+=("$ledger_selection") ;;
           *) echo "unsupported AI ledger consumer proof" >&2; exit 1 ;;
         esac
       done
@@ -203,12 +239,7 @@ if [[ "${1:-}" == "--http" ]]; then
 fi
 cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
 cargo_proof -p linggan-evidence --test creator_discovery_postgres --locked -- --ignored --nocapture
-for test in source_context_keeps_each_current_nonretired_image_reading_distinct a_reobserved_media_slot source_gate_excludes_withdrawn_ocr; do
-  cargo_proof -p linggan-intelligence --test comment_study_rebuild_postgres "$test" --locked -- --ignored --nocapture
-done
-for test in dossier_partial_image_body_reaches_v2_frozen_context concurrent_ preview_and_two_runs_cover_different_comments_from_688 new_run_is_frozen_and_method_bound_dispatch missing_parent_reaches_model; do
-  cargo_proof -p linggan-intelligence --test comment_study_start_postgres "$test" --locked -- --ignored --nocapture
-done
+cargo_proof -p linggan-intelligence --test comment_study_start_postgres --locked -- --ignored --nocapture
 export CREATOR_PROOF_NODE="$(command -v node)"
 cargo_proof -p linggan-intelligence --test creator_discovery_input_postgres --locked -- --ignored --nocapture
 cargo_proof -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture

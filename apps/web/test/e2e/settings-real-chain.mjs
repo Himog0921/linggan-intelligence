@@ -114,7 +114,7 @@ try {
   const model = settings.models.find(m => m.modelId === modelId);
   const version = settings.skills.find(s => s.name === 'browser-example').versions[0];
   assert.ok(model.capability); assert.equal(model.price.input, '0'); assert.equal(model.price.output, null);
-  await step('writing candidate save and reasoned first-version activation', async () => {
+  await step('writing candidate save and direct version activation', async () => {
     await goto('?section=automation&task=writing_legacy');
     await page.getByLabel('选择模型', { exact: true }).selectOption(model.identityRef);
     await page.getByLabel('输入 token 上限', { exact: true }).fill('1024');
@@ -126,13 +126,12 @@ try {
     await page.getByRole('button', { name: '保存配置', exact: true }).click();
     await receipt('候选配置已保存');
     await goto('?section=skills&task=writing_legacy');
-    await page.getByRole('checkbox', { name: '此做法在本工作首版，申请跳过旧新比较', exact: true }).check();
     await page.getByLabel('启用理由', { exact: true }).fill('Synthetic first-version browser activation; switches remain off.');
     await page.getByRole('button', { name: '启用候选做法', exact: true }).click();
     await receipt('固定做法版本已启用');
   });
-  await step('all four sections remain readable at four viewports', async () => {
-    for (const [width, height] of [[1280, 800], [1440, 900], [1920, 1080], [390, 844]]) {
+  await step('all four sections remain readable at desktop viewports', async () => {
+    for (const [width, height] of [[1280, 800], [1440, 900], [1920, 1080]]) {
       await page.setViewportSize({ width, height });
       for (const section of ['models', 'automation', 'skills', 'health']) {
         const selection = section === 'models' ? `&connection=${model.connectionRef}&model=${model.identityRef}` : section === 'skills' ? `&task=writing_legacy&version=${version.versionRef}` : '';

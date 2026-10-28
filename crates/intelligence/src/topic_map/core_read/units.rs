@@ -8,7 +8,7 @@ pub(super) async fn attach_rules(
     topics: &mut [TopicMapTopic],
     unavailable: &HashSet<Uuid>,
 ) -> Result<(), TopicMapError> {
-    let rows = sqlx::query("SELECT c.definition_ref,c.inclusion_criteria,c.exclusion_criteria,c.method_version,r.method_version AS induction_method FROM linggan_topic_map_concept_rule c LEFT JOIN linggan_topic_map_research_request q ON q.invocation_ref=c.invocation_ref LEFT JOIN linggan_topic_map_research_run r USING(run_ref) WHERE ($1::uuid IS NULL OR c.domain_ref=$1)")
+    let rows = sqlx::query("SELECT c.definition_ref,c.inclusion_criteria,c.exclusion_criteria,c.method_version,r.method_version AS induction_method FROM linggan_topic_map_concept_rule c LEFT JOIN linggan_topic_research_result r ON r.invocation_ref=c.invocation_ref WHERE ($1::uuid IS NULL OR c.domain_ref=$1)")
         .bind(q.domain_ref).fetch_all(db.pool()).await?;
     for topic in topics {
         let rule = rows

@@ -138,8 +138,22 @@ pub async fn save_task_config(
         || request.expected_revision == i64::MAX
         || matches!(request.budget,BudgetPolicy::Capped(v) if v>i64::MAX as u64)
         || (request.task_key == TaskKey::ModelProbe && request.model.is_some())
-        || (request.task_key == TaskKey::WorkComparison
-            && request.model.as_ref().is_some_and(|m| m.limits.attempts != 1))
+        || (matches!(
+            request.task_key,
+            TaskKey::TopicResearch
+                | TaskKey::TopicResearchExtractReview
+                | TaskKey::TopicResearchResolve
+                | TaskKey::TopicResearchResolveReview
+                | TaskKey::CommentProblemResolution
+                | TaskKey::CommentProblemPairReview
+                | TaskKey::WorkComparison
+                | TaskKey::CreatorResearch
+                | TaskKey::CreatorAccountResearch
+                | TaskKey::CommentStudy
+        ) && request
+            .model
+            .as_ref()
+            .is_some_and(|m| m.limits.attempts != 1))
         || (matches!(
             request.task_key,
             TaskKey::NoteInterpretation | TaskKey::DirectionListDraft | TaskKey::DirectionProposal
@@ -151,7 +165,8 @@ pub async fn save_task_config(
     if let Some(receipt) = command.replay()? {
         return Ok(receipt);
     }
-    lock_setting(&mut command.tx, request.task_key, request.expected_revision).await?;
+    let current_config =
+        lock_setting(&mut command.tx, request.task_key, request.expected_revision).await?;
     let lifecycle: String =
         sqlx::query_scalar("SELECT lifecycle FROM linggan_ai_task WHERE task_key=$1")
             .bind(request.task_key.as_str())
@@ -188,9 +203,9 @@ pub async fn save_task_config(
         BudgetPolicy::Unlimited => ("unlimited", None),
         BudgetPolicy::Capped(v) => ("capped", Some(v as i64)),
     };
-    sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,model_config_ref,skill_version_ref,material_columns,budget_mode,daily_token_limit,origin,command_ref,execution_contract) VALUES($1,$2,$3,$4,$5,$6,$7,'human',$1,(SELECT handler_contract FROM linggan_ai_task WHERE task_key=$2))")
+    sqlx::query("INSERT INTO linggan_ai_task_config(task_config_ref,task_key,model_config_ref,skill_version_ref,material_columns,budget_mode,daily_token_limit,origin,command_ref,execution_contract,prompt_version_ref) VALUES($1,$2,$3,$4,$5,$6,$7,'human',$1,(SELECT handler_contract FROM linggan_ai_task WHERE task_key=$2),(SELECT prompt_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$8))")
         .bind(request.command_ref).bind(request.task_key.as_str()).bind(model_config_ref).bind(request.skill_version_ref)
-        .bind(serde_json::json!(request.material_columns)).bind(mode).bind(daily).execute(&mut *command.tx).await?;
+        .bind(serde_json::json!(request.material_columns)).bind(mode).bind(daily).bind(current_config).execute(&mut *command.tx).await?;
     let active_skill: Option<Uuid> = sqlx::query_scalar(
         "SELECT current_version_ref FROM linggan_skill_binding WHERE task_key=$1",
     )

@@ -17,7 +17,6 @@ pub(super) const D: Uuid = dossier_fixture::DOMAIN;
 
 pub(super) async fn setup(name: &str) -> (Database, Uuid) {
     let db = fixture::proof_database(name).await;
-    super::signal_support::install_schema(&db).await;
     let (connection, version, model, config) = (
         Uuid::new_v4(),
         Uuid::new_v4(),
@@ -162,46 +161,18 @@ pub(super) async fn seed_research_inputs(db: &Database, config: Uuid, works: &[U
         .fetch_one(db.pool())
         .await
         .unwrap();
-    for command in [
-        research::ResearchCommand::Configure {
-            request_ref: Uuid::new_v4(),
-            domain_ref: D,
-            model_config_ref: config,
-            daily_token_limit: 100000,
-            run_token_limit: 100000,
-            automatic_enabled: false,
-            collection_enabled: false,
-        },
-        research::ResearchCommand::Start {
-            request_ref: Uuid::new_v4(),
-            domain_ref: D,
-            trigger: "on_demand".into(),
-            work_refs: works.to_vec(),
-            topic_ref: None,
-        },
-    ] {
-        assert_eq!(
-            research::apply_research_command(db, &command)
-                .await
-                .unwrap_err()
-                .code(),
-            "ai_legacy_execution_retired"
-        );
-    }
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
-            .fetch_one(db.pool())
-            .await
-            .unwrap(),
-        before
-    );
     let inputs = research::load_inputs_for_works(db, D, config, works)
         .await
         .unwrap();
     assert_eq!(inputs.len(), works.len());
     let run = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_topic_map_research_run(run_ref,domain_ref,request_ref,trigger,config_ref,method_version,token_limit,state,last_reason) VALUES($1,$2,$3,'on_demand',$4,$5,100000,'completed','SYNTHETIC accepted-record fixture; no execution')")
-        .bind(run).bind(D).bind(Uuid::new_v4()).bind(config).bind(analysis::METHOD_VERSION).execute(db.pool()).await.unwrap();
+    let command = Uuid::new_v4();
+    let cutoff = research::manifest_as_of(&research::reference_manifest(&inputs[0]))
+        .unwrap()
+        .to_owned();
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query("INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt) VALUES($1,'SYNTHETIC_ACCEPTED_SOURCE','{}','{}')").bind(command).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_topic_research_run(run_ref,command_ref,domain_ref,work_refs,knowledge_cutoff,configurations) VALUES($1,$2,$3,$4,$5::timestamptz,$6)").bind(run).bind(command).bind(D).bind(works).bind(cutoff).bind(json!([config,config,config,config])).execute(&mut *tx).await.unwrap();
     for input in inputs {
         for window in research::research_windows(&input) {
             let manifest = research::reference_manifest(&window);
@@ -211,14 +182,21 @@ pub(super) async fn seed_research_inputs(db: &Database, config: Uuid, works: &[U
                 assert!(fragment["asOf"].as_str().is_some());
                 assert!(fragment["blockRef"].as_str().is_some());
             }
-            sqlx::query("INSERT INTO linggan_topic_map_research_task(task_ref,run_ref,domain_ref,work_public_ref,input_hash,input_refs,state,last_reason) VALUES($1,$2,$3,$4,$5,$6,'stopped','SYNTHETIC accepted-record fixture; no dispatch')")
-                .bind(Uuid::new_v4()).bind(run).bind(D).bind(input.work.work_ref).bind(&window.hash).bind(manifest).execute(db.pool()).await.unwrap();
+            sqlx::query("INSERT INTO linggan_topic_research_window(window_ref,run_ref,work_ref,input_hash,input_refs) VALUES($1,$2,$3,$4,$5)").bind(Uuid::new_v4()).bind(run).bind(input.work.work_ref).bind(&window.hash).bind(manifest).execute(&mut *tx).await.unwrap();
         }
     }
+    tx.commit().await.unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        before
+    );
 }
 
 pub(super) async fn seed_all_accepted(db: &Database) {
-    let tasks:Vec<Uuid>=sqlx::query_scalar("SELECT task_ref FROM linggan_topic_map_research_task WHERE state='stopped' ORDER BY created_at,task_ref")
+    let tasks:Vec<Uuid>=sqlx::query_scalar("SELECT w.window_ref FROM linggan_topic_research_window w WHERE NOT EXISTS(SELECT 1 FROM linggan_topic_research_result r WHERE r.window_ref=w.window_ref) ORDER BY w.created_at,w.window_ref")
         .fetch_all(db.pool()).await.unwrap();
     for task in tasks {
         seed_accepted_source_task(db, task).await;
@@ -228,7 +206,7 @@ pub(super) async fn seed_all_accepted(db: &Database) {
 /// Test-only construction of an already accepted decision. Production scheduling
 /// remains retired; this fixture proves input identity, persistence, and readers.
 pub(super) async fn seed_accepted_source_task(db: &Database, task: Uuid) {
-    let row=sqlx::query("SELECT task.work_public_ref,task.input_refs,run.run_ref,run.config_ref,model.model_id FROM linggan_topic_map_research_task task JOIN linggan_topic_map_research_run run USING(run_ref) JOIN linggan_model_config config USING(config_ref) JOIN linggan_model_entry model USING(model_ref) WHERE task.task_ref=$1")
+    let row=sqlx::query("SELECT task.work_ref AS work_public_ref,task.input_refs,run.run_ref,(run.configurations->>0)::uuid AS config_ref,model.model_id FROM linggan_topic_research_window task JOIN linggan_topic_research_run run USING(run_ref) JOIN linggan_model_config config ON config.config_ref=(run.configurations->>0)::uuid JOIN linggan_model_entry model USING(model_ref) WHERE task.window_ref=$1")
         .bind(task).fetch_one(db.pool()).await.unwrap();
     let work: Uuid = row.get("work_public_ref");
     let config: Uuid = row.get("config_ref");
@@ -332,8 +310,6 @@ pub(super) async fn seed_accepted_source_task(db: &Database, task: Uuid) {
     let mut tx = db.pool().begin().await.unwrap();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at) SELECT $1,model.connection_version_ref,model.model_ref,$2,'analyze',$3,'succeeded',0,0,$4,scope_001_now() FROM linggan_model_config config JOIN linggan_model_entry model USING(model_ref) WHERE config.config_ref=$2")
         .bind(invocation).bind(config).bind(&request_hash).bind(json!({"synthetic":true,"fixture":"SYNTHETIC / NOT EVIDENCE; no provider call"})).execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT INTO linggan_topic_map_research_request(invocation_ref,task_ref,run_ref,attempt_ordinal,request_hash,request_manifest,budget_day,deadline_at,phase) VALUES($1,$2,$3,1,$4,$5,current_date,scope_001_now(),'resolve')")
-        .bind(invocation).bind(task).bind(row.get::<Uuid,_>("run_ref")).bind(&request_hash).bind(json!({"source":manifest,"topics":candidates,"synthetic":true})).execute(&mut *tx).await.unwrap();
     let eligible: Vec<Uuid> = candidates
         .as_array()
         .unwrap()
@@ -356,10 +332,8 @@ pub(super) async fn seed_accepted_source_task(db: &Database, task: Uuid) {
     )
     .await
     .unwrap();
-    sqlx::query("INSERT INTO linggan_topic_map_research_result(result_ref,domain_ref,work_public_ref,input_hash,output_json,method_version,invocation_ref,core_json) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
-        .bind(Uuid::new_v4()).bind(D).bind(work).bind(&input.hash).bind(json!(output)).bind(analysis::METHOD_VERSION).bind(invocation).bind(json!({"methodVersion":crate::topic_map_core::METHOD_VERSION,"coverage":input.coverage,"units":accepted})).execute(&mut *tx).await.unwrap();
-    sqlx::query("UPDATE linggan_topic_map_research_task SET state='succeeded',phase='resolve',last_reason='SYNTHETIC accepted record; no execution' WHERE task_ref=$1")
-        .bind(task).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_topic_research_result(result_ref,window_ref,output_json,method_version,invocation_ref,core_json) VALUES($1,$2,$3,$4,$5,$6)")
+        .bind(Uuid::new_v4()).bind(task).bind(json!(output)).bind(analysis::METHOD_VERSION).bind(invocation).bind(json!({"methodVersion":crate::topic_map_core::METHOD_VERSION,"coverage":input.coverage,"units":accepted})).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
 }
 
@@ -371,7 +345,7 @@ pub(super) async fn source_task(
     source: Option<Uuid>,
     start: usize,
 ) -> Uuid {
-    sqlx::query_scalar("SELECT t.task_ref FROM linggan_topic_map_research_task t JOIN linggan_topic_map_research_run run USING(run_ref) WHERE t.work_public_ref=$1 AND run.config_ref=$2 AND EXISTS(SELECT 1 FROM jsonb_array_elements(t.input_refs->'fragments') f WHERE f->>'field'=$3 AND ($4::uuid IS NULL OR f->>'sourceRef'=$4::text) AND (f->>'start')::bigint<=$5 AND (f->>'end')::bigint>$5) ORDER BY t.created_at,t.task_ref LIMIT 1")
+    sqlx::query_scalar("SELECT t.window_ref FROM linggan_topic_research_window t JOIN linggan_topic_research_run run USING(run_ref) WHERE t.work_ref=$1 AND (run.configurations->>0)::uuid=$2 AND EXISTS(SELECT 1 FROM jsonb_array_elements(t.input_refs->'fragments') f WHERE f->>'field'=$3 AND ($4::uuid IS NULL OR f->>'sourceRef'=$4::text) AND (f->>'start')::bigint<=$5 AND (f->>'end')::bigint>$5) ORDER BY t.created_at,t.window_ref LIMIT 1")
         .bind(work).bind(config).bind(field).bind(source).bind(start as i64).fetch_one(db.pool()).await.unwrap()
 }
 
@@ -381,7 +355,7 @@ pub(super) async fn task_angle_command(
     work: Uuid,
     key: &str,
 ) -> TopicMapCommand {
-    let row = sqlx::query("SELECT result.result_ref,result.method_version,result.core_json FROM linggan_topic_map_research_result result JOIN linggan_topic_map_research_request request USING(invocation_ref) WHERE request.task_ref=$1 ORDER BY result.created_at DESC LIMIT 1")
+    let row = sqlx::query("SELECT result.result_ref,result.method_version,result.core_json FROM linggan_topic_research_result result WHERE result.window_ref=$1 ORDER BY result.created_at DESC LIMIT 1")
         .bind(task).fetch_one(db.pool()).await.unwrap();
     let core: Value = row.get("core_json");
     let assignment = &core["units"][0]["assignments"][0];
@@ -422,7 +396,7 @@ pub(super) async fn assert_tail_angle_citation(
     source: &str,
     emoji: &str,
 ) {
-    let row = sqlx::query("SELECT result.output_json,task.input_refs FROM linggan_topic_map_research_result result JOIN linggan_topic_map_research_request request USING(invocation_ref) JOIN linggan_topic_map_research_task task USING(task_ref) WHERE request.task_ref=$1 ORDER BY result.created_at DESC LIMIT 1")
+    let row = sqlx::query("SELECT result.output_json,task.input_refs FROM linggan_topic_research_result result JOIN linggan_topic_research_window task USING(window_ref) WHERE task.window_ref=$1 ORDER BY result.created_at DESC LIMIT 1")
         .bind(task).fetch_one(db.pool()).await.unwrap();
     let output: Value = row.get("output_json");
     let manifest: Value = row.get("input_refs");

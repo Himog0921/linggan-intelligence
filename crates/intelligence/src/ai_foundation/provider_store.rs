@@ -19,6 +19,7 @@ pub enum MaterialClass {
     ModelCatalog,
     ManualOcrImage,
     NoteMaterial,
+    CommentMaterial,
     PublicAuthorBio,
     SelectedWritingMaterial,
 }
@@ -29,6 +30,7 @@ impl MaterialClass {
             Self::ModelCatalog => "model_catalog",
             Self::ManualOcrImage => "manual_ocr_image",
             Self::NoteMaterial => "note_material",
+            Self::CommentMaterial => "comment_material",
             Self::PublicAuthorBio => "public_author_bio",
             Self::SelectedWritingMaterial => "selected_writing_material",
         }
@@ -41,10 +43,32 @@ impl MaterialClass {
                 task,
                 TaskKey::NoteInterpretation
                     | TaskKey::WorkComparison
+                    | TaskKey::CreatorResearch
+                    | TaskKey::CreatorAccountResearch
+                    | TaskKey::CommentStudy
+                    | TaskKey::CommentProblemResolution
+                    | TaskKey::CommentProblemPairReview
+                    | TaskKey::TopicResearch
+                    | TaskKey::TopicResearchExtractReview
+                    | TaskKey::TopicResearchResolve
+                    | TaskKey::TopicResearchResolveReview
                     | TaskKey::DirectionListDraft
                     | TaskKey::DirectionProposal
             ),
-            Self::PublicAuthorBio => task == TaskKey::AuthorOrgIdentity,
+            Self::CommentMaterial => matches!(
+                task,
+                TaskKey::CommentStudy
+                    | TaskKey::CommentProblemResolution
+                    | TaskKey::CommentProblemPairReview
+                    | TaskKey::TopicResearch
+                    | TaskKey::TopicResearchExtractReview
+                    | TaskKey::TopicResearchResolve
+                    | TaskKey::TopicResearchResolveReview
+            ),
+            Self::PublicAuthorBio => matches!(
+                task,
+                TaskKey::AuthorOrgIdentity | TaskKey::CreatorAccountResearch
+            ),
             Self::SelectedWritingMaterial => {
                 matches!(task, TaskKey::WritingAssistant | TaskKey::WritingLegacy)
             }

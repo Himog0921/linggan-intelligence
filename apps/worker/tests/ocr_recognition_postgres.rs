@@ -18,7 +18,11 @@ use linggan_intelligence::{
         control_store::ControlScope,
         executor::{ExecutorSession, ocr_recognition, queue},
         ocr_recognition::{StartRun, read_run, start_run},
+        prompt::{self, ActivatePrompt, SavePrompt},
         provider_store::MaterialClass,
+        skill_binding::{ActivateSkill, activate_skill},
+        skill_package::{Encoding, SkillPackage, UploadFile},
+        skill_store::{ImportSkill, import_skill},
         task_config::{ModelSelection, SaveTaskConfig, save_task_config},
     },
     model_secrets::SyntheticModelSecrets,
@@ -95,6 +99,177 @@ async fn configure_recognition(
 }
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL and loopback Pi only"]
+async fn ocr_prompt_and_skill_versions_are_frozen_and_independently_switchable() {
+    let db = fixture::db("ocr_prompt_switch").await;
+    let first_work = ocr::admit(&db, "ocr-prompt-first", 1, &image(21), "image/png").await;
+    let second_work = ocr::admit(&db, "ocr-prompt-second", 1, &image(22), "image/png").await;
+    let wire = endpoint::Endpoint::start(false).await;
+    let adapter = adapter();
+    let owner = ExecutorSession::acquire(&db, "synthetic-prompt-switch", 4)
+        .await
+        .unwrap();
+    let model = configure_recognition(&db, &wire.url, &owner, &adapter).await;
+    let initial = prompt::read(&db, TaskKey::OcrRecognition).await.unwrap();
+    let initial_prompt: Uuid = initial["activeVersionRef"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let skill = import_skill(&db, &adapter, &ImportSkill {
+        command_ref: Uuid::new_v4(), expected_version_ref: None,
+        package: SkillPackage { directory: "ocr-method".into(), files: vec![UploadFile {
+            path: "SKILL.md".into(), encoding: Encoding::Utf8,
+            content: "---\nname: ocr-method\ndescription: Synthetic OCR method\n---\nSYNTHETIC OCR SKILL\n".into(),
+        }] },
+    }).await.unwrap();
+    let revision = initial["revision"].as_i64().unwrap();
+    let candidate = save_task_config(
+        &db,
+        &SaveTaskConfig {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::OcrRecognition,
+            expected_revision: revision,
+            model: Some(ModelSelection {
+                model_ref: model.model,
+                capability_ref: model.capability,
+                limits: model.limits.clone(),
+            }),
+            skill_version_ref: Some(skill.version_ref),
+            material_columns: Default::default(),
+            budget: BudgetPolicy::Unlimited,
+        },
+    )
+    .await
+    .unwrap();
+    let binding = activate_skill(
+        &db,
+        &ActivateSkill {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::OcrRecognition,
+            expected_task_revision: revision,
+            expected_binding_revision: 0,
+            candidate_config_ref: candidate.task_config_ref,
+            trial_comparison_ref: None,
+            reason: "synthetic OCR method".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let ready = read_run(&db, first_work).await.unwrap();
+    start_run(
+        &db,
+        first_work,
+        &StartRun {
+            command_ref: Uuid::new_v4(),
+            expected_scope_sha256: ready["scope"]["sha256"].as_str().unwrap().into(),
+            slot_keys: selected_slots(&ready),
+        },
+    )
+    .await
+    .unwrap();
+    let saved = prompt::save(
+        &db,
+        &SavePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::OcrRecognition,
+            expected_task_revision: binding.task_revision,
+            system_text: "SYNTHETIC SYSTEM V2".into(),
+            instruction_text: "SYNTHETIC INSTRUCTION V2".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let activated = prompt::activate(
+        &db,
+        &ActivatePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::OcrRecognition,
+            expected_task_revision: binding.task_revision,
+            version_ref: saved.version_ref,
+        },
+    )
+    .await
+    .unwrap();
+    let ready = read_run(&db, second_work).await.unwrap();
+    start_run(
+        &db,
+        second_work,
+        &StartRun {
+            command_ref: Uuid::new_v4(),
+            expected_scope_sha256: ready["scope"]["sha256"].as_str().unwrap().into(),
+            slot_keys: selected_slots(&ready),
+        },
+    )
+    .await
+    .unwrap();
+    for _ in 0..2 {
+        let item = queue::claim_next(&db, owner.fence())
+            .await
+            .unwrap()
+            .unwrap();
+        ocr_recognition::execute(&db, &item, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap();
+    }
+    let requests = wire.requests.lock().unwrap().clone();
+    let visuals: Vec<_> = requests
+        .iter()
+        .filter(|request| endpoint::text(request, "user").contains("ocr-visual-audit.v1"))
+        .collect();
+    assert_eq!(visuals.len(), 2);
+    assert!(endpoint::text(visuals[0], "system").contains("SYNTHETIC OCR SKILL"));
+    assert!(!endpoint::text(visuals[0], "system").contains("SYNTHETIC SYSTEM V2"));
+    assert!(endpoint::text(visuals[1], "system").contains("SYNTHETIC OCR SKILL"));
+    assert!(endpoint::text(visuals[1], "system").contains("SYNTHETIC SYSTEM V2"));
+    assert!(endpoint::text(visuals[1], "user").contains("SYNTHETIC INSTRUCTION V2"));
+    let skill_after_prompt = activate_skill(
+        &db,
+        &ActivateSkill {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::OcrRecognition,
+            expected_task_revision: activated.task_revision,
+            expected_binding_revision: binding.binding_revision,
+            candidate_config_ref: candidate.task_config_ref,
+            trial_comparison_ref: None,
+            reason: "reuse old skill candidate".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let retained_prompt: Uuid = sqlx::query_scalar(
+        "SELECT prompt_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
+    )
+    .bind(skill_after_prompt.task_config_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        retained_prompt, saved.version_ref,
+        "switching skill must not restore an old prompt"
+    );
+    let rollback = prompt::activate(
+        &db,
+        &ActivatePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::OcrRecognition,
+            expected_task_revision: skill_after_prompt.task_revision,
+            version_ref: initial_prompt,
+        },
+    )
+    .await
+    .unwrap();
+    let preserved: Option<Uuid> = sqlx::query_scalar(
+        "SELECT skill_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
+    )
+    .bind(rollback.task_config_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(preserved, Some(skill.version_ref));
+    wire.finish().await;
+}
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL and loopback Pi only"]
 async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() {
     let db = fixture::db("ocr_recognition_owned").await;
     let work_key = "ocr-recognition-three-synthetic";
@@ -118,12 +293,18 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
         .await
         .unwrap();
     let model = setup::prepare_with_actual_probe(&db, &wire.url, &owner, &adapter).await;
+    let revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='ocr_recognition'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
     let configured = save_task_config(
         &db,
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
             task_key: TaskKey::OcrRecognition,
-            expected_revision: 0,
+            expected_revision: revision,
             model: Some(ModelSelection {
                 model_ref: model.model,
                 capability_ref: model.capability,

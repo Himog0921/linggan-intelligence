@@ -3,11 +3,17 @@
 -- $14 sort (received_desc | like_desc); $15 minimum known likes; $16 post usage (all | used | unused);
 -- $17 like-count-after (NULL with a cursor means the page continues inside the unknown-likes tail).
 , signal_kinds AS MATERIALIZED (
-    SELECT content_public_ref, comment_external_id,
-           array_agg(DISTINCT kind::text ORDER BY kind::text) AS kinds
-    FROM linggan_comment_study_effective_signal
-    WHERE domain_ref = $1
-    GROUP BY content_public_ref, comment_external_id
+    SELECT original.content_public_ref,original.comment_external_id,
+           array_agg(DISTINCT signal.value->>'kind' ORDER BY signal.value->>'kind') AS kinds
+    FROM success
+    JOIN linggan_comment_research_result result USING(request_ref)
+    JOIN linggan_material_comment original ON original.material_ref=success.source_ref
+    JOIN latest ON latest.material_ref=original.material_ref
+    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(result.result->'signals','[]'::jsonb)) signal
+    WHERE NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction
+        WHERE restriction.content_public_ref=original.content_public_ref
+          AND restriction.comment_external_id IN (original.comment_external_id,original.parent_comment_external_id))
+    GROUP BY original.content_public_ref,original.comment_external_id
 ), like_heads AS MATERIALIZED (
     -- The comment's own latest KNOWN count before asOf; an UNKNOWN newer observation does not hide
     -- an older known one, and nothing is ever inferred from the work's likes.
@@ -56,9 +62,9 @@
       END
       AND CASE $8
           WHEN 'all' THEN true
-          WHEN 'never_studied' THEN latest_target_ref IS NULL
+          WHEN 'never_studied' THEN latest_request_ref IS NULL
           WHEN 'in_progress' THEN in_progress
-          WHEN 'studied' THEN effective_target_ref IS NOT NULL
+          WHEN 'studied' THEN effective_request_ref IS NOT NULL
           WHEN 'needs_context' THEN latest_state = 'needs_context'
           WHEN 'failed' THEN latest_state = 'failed'
           ELSE false
@@ -121,7 +127,7 @@ SELECT jsonb_build_object(
     'summary', jsonb_build_object(
         'displayableCommentCount', (SELECT count(*) FROM visible),
         'eligibleCommentCount', (SELECT count(*) FROM visible WHERE exclusion_reason IS NULL),
-        'studiedCommentCount', (SELECT count(*) FROM visible WHERE effective_target_ref IS NOT NULL),
+        'studiedCommentCount', (SELECT count(*) FROM visible WHERE effective_request_ref IS NOT NULL),
         'inProgressCommentCount', (SELECT count(*) FROM visible WHERE in_progress),
         'needsContextCount', (SELECT count(*) FROM visible WHERE latest_state = 'needs_context'),
         'failedCount', (SELECT count(*) FROM visible WHERE latest_state = 'failed'),
@@ -145,25 +151,25 @@ SELECT jsonb_build_object(
             'cleanState', page.clean_state, 'cleanReasons', page.clean_reasons, 'sourceState', 'known',
             'studyEligibility', jsonb_build_object('eligible', page.exclusion_reason IS NULL,
                 'reasons', CASE WHEN page.exclusion_reason IS NULL THEN '[]'::jsonb ELSE jsonb_build_array(page.exclusion_reason) END),
-            'latestStudy', CASE WHEN page.latest_target_ref IS NULL THEN NULL ELSE jsonb_build_object(
-                'runRef', page.latest_run_ref, 'targetRef', page.latest_target_ref, 'state', page.latest_state,
+            'latestStudy', CASE WHEN page.latest_request_ref IS NULL THEN NULL ELSE jsonb_build_object(
+                'requestRef', page.latest_request_ref, 'state', page.latest_state,
                 'createdAt', to_char(page.latest_created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
                 'finishedAt', to_char(page.latest_finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
                 'inputComparison', CASE WHEN NOT page.latest_raw_same THEN 'changed' ELSE 'unknown' END,
                 'sourceState', page.latest_source_state
             ) END,
-            'effectiveStudy', CASE WHEN page.effective_target_ref IS NULL THEN NULL ELSE jsonb_build_object(
-                'runRef', page.effective_run_ref, 'targetRef', page.effective_target_ref, 'state', page.effective_state,
+            'effectiveStudy', CASE WHEN page.effective_request_ref IS NULL THEN NULL ELSE jsonb_build_object(
+                'requestRef', page.effective_request_ref, 'state', page.effective_state,
                 'createdAt', to_char(page.effective_created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
                 'finishedAt', to_char(page.effective_finished_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
                 'inputComparison', CASE WHEN NOT page.effective_raw_same THEN 'changed' ELSE 'unknown' END,
                 'sourceState', page.effective_source_state
             ) END,
             'effectiveState', CASE
-                WHEN page.effective_target_ref IS NULL THEN 'none'
+                WHEN page.effective_request_ref IS NULL THEN 'none'
                 WHEN NOT page.effective_raw_same THEN 'source_changed'
                 WHEN page.exclusion_reason IS NOT NULL OR page.effective_source_state <> 'known' THEN 'source_unavailable'
-                ELSE 'effective'
+                ELSE 'recorded'
             END,
             'signalKinds', to_jsonb(page.signal_kinds),
             'observedAt', to_char(page.observed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),

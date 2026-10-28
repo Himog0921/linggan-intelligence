@@ -146,7 +146,7 @@ describe('work-scoped OCR state and receipts', () => {
     expect(await screen.findByText(isCurrent ? '识别已完成，1 张图片已进入当前底稿。' : '识别已完成，当前底稿未替换。')).toBeVisible();
     expect(screen.queryByText('只可在 canonical 阅读的文字')).not.toBeInTheDocument();
     expect(screen.queryByText(/候选|确认采用|待核验/)).not.toBeInTheDocument();
-    expect(applied).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(applied).toHaveBeenCalledTimes(1));
   });
   it('rejects invalid coordinates, old region payloads and impossible progress', () => {
     expect(() => parseOcrRecognition(run({ completedImages: 4 }))).toThrow();

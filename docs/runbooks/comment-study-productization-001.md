@@ -1,11 +1,12 @@
 # 评论研究产品化：开发、数据库升级与验收手册
 
-> 状态: 权威当前
+> 状态: 历史归档
+> 替代入口: [统一研究自动化工作包](../plans/active/unified-research-automation-001.md)
 > 最后核对: 2026-10-06
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 开发、数据库升级与验收操作合同
 > 事实来源: 已批准 GREENFIELD v1.0 手册及用户授权边界
 > 冲突时以谁为准: 用户最新授权、AGENTS.md、实际代码/数据库/发布证明
-> 当前实现状态: #359 已合并为 main@8ec92f3d；本机 runtime identity 为同版、migration head 0114，健康及评论研究概览读取正常。部署后的新真实 Run、模型质量与 Mog 业务验收仍待独立回执；以下发布顺序保留为操作合同，不冒充本次逐步执行记录。
+> 历史实现记录: #359 已合并为 main@8ec92f3d；本机 runtime identity 为同版、migration head 0114，健康及评论研究概览读取正常。部署后的新真实 Run、模型质量与 Mog 业务验收仍待独立回执；以下发布顺序保留为操作合同，不冒充本次逐步执行记录。
 > 交付包：COMMENT-STUDY-PRODUCTIZATION-001 · 文档版 1.0
 > 核对日期：2026-09-22
 > 源码基线：`main@c74d72e3d17b9d5ecfb9953de025713c47e4560e`
@@ -63,7 +64,7 @@ COMMIT;
 
 **已有 clean-study：**仅执行新 delta。不调用 bootstrap，不调用 reset。缺必需表／列时报告 schema mismatch，不能自认成空库。
 
-**第一次安装 clean-study：**新增受控脚本 `scripts/init-comment-study.sh`，只在整个 clean-study 基础表集合均不存在、保留材料／通用模型 schema 完整、无模型进程外发、用户明确授权时执行原 `database/bootstrap/comment-study-001.sql`，再由普通 migrate 应用 delta。它只建新 clean 表，不读取／转换旧 V1 研究数据，不运行 comment-study-reset.sql；如果 clean 基础表只存在一部分，拒绝并要求调查。历史迁移形成的旧空表不是新运行路径，不借此接回旧代码。
+**历史首次安装流程（已被候选统一迁移替代）：**当时使用单独初始化脚本，只在整个 clean-study 基础表集合均不存在、保留材料／通用模型 schema 完整、无模型进程外发、用户明确授权时执行原 `database/bootstrap/comment-study-001.sql`，再由普通 migrate 应用 delta。它只建新 clean 表，不读取／转换旧 V1 研究数据，不运行 comment-study-reset.sql；如果 clean 基础表只存在一部分，拒绝并要求调查。历史迁移形成的旧空表不是新运行路径，不借此接回旧代码。
 
 `local-runtime.sh migrate` 的新 delta 注册前显式检查 clean schema 前提：未初始化则退出并说明初始化入口，不自动创建或重置。普通 `serve` 当前会先 migrate，因而带真实副作用；上线必须预先独立执行并验收 migrate，禁止把 serve 当只读试启动命令。
 
