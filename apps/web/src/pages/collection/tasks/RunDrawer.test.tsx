@@ -29,3 +29,22 @@ it('进展仅呈现业务信息，历史与内部诊断不渲染也不请求',as
   expect(screen.queryByText(/有效租约|冻结范围|Attempt|Package|Receipt/)).not.toBeInTheDocument();
   expect(fetch.mock.calls).toHaveLength(1);
 });
+
+it('主页浅看与文字版精选：进展里不把「本来就不做」写成 0 篇',async()=>{
+  const open=async(over:object)=>{
+    const fetch=vi.fn(async()=>new Response(JSON.stringify({...data,ended:true,phase:'ended',control_intent:'running',...over}),{status:200,headers:{'Content-Type':'application/json'}}));vi.stubGlobal('fetch',fetch);
+    return render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><RunDrawer id={run} domain={domain} onClose={()=>{}}/></QueryClientProvider>);
+  };
+  const preview=await open({source_kind:'creator_preview',comment_mode:'none',available_details:0,completed_discussions:0});
+  await screen.findByText('只看主页卡片，不取详情、评论与媒体');
+  expect(screen.getByText('浅看只到发现，不取详情')).toBeInTheDocument();
+  expect(screen.getByText('本次不采评论')).toBeInTheDocument();
+  expect(screen.queryByText(/已取得 0 篇/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/0 篇已结束本轮采集/)).not.toBeInTheDocument();
+  preview.unmount();
+  await open({source_kind:'creator_selected_works',comment_mode:'none',available_details:2,completed_discussions:0});
+  await screen.findByText('只取笔记文字，不采评论与媒体');
+  expect(screen.getByText('已取得 2 篇')).toBeInTheDocument();
+  expect(screen.getByText('本次不采评论')).toBeInTheDocument();
+  expect(screen.queryByText(/0 篇已结束本轮采集/)).not.toBeInTheDocument();
+});

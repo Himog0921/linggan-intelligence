@@ -67,8 +67,9 @@ export function runStatus(r: Run): string {
   return r.live_leases !== null && r.live_leases > 0 ? '执行中' : '等待派发';
 }
 /** 评论范围的写法；`sample` 是两处列表原有的不同短语（台账写「总样本」、抽屉写「评论样本」）。 */
-export function commentModeLabel(r: Pick<Run, 'comment_mode' | 'comment_target'>, sample: string): string {
-  if (r.comment_mode === 'none') return '只取笔记文字，不采评论与媒体';
+export function commentModeLabel(r: Pick<Run, 'comment_mode' | 'comment_target' | 'source_kind'>, sample: string): string {
+  // The homepage look only discovers cards; only the text-only selected study fetches note text.
+  if (r.comment_mode === 'none') return r.source_kind === 'creator_preview' ? '只看主页卡片，不取详情、评论与媒体' : '只取笔记文字，不采评论与媒体';
   if (r.comment_mode === 'all_public') return '尽量采全，含回复';
   if (r.comment_mode === 'up_to') return r.comment_target === null ? '每篇采到指定条数，含回复' : `每篇采到 ${r.comment_target} 条就停，含回复`;
   return sample;

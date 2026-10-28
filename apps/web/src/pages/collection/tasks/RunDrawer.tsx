@@ -35,8 +35,8 @@ function Progress({ r, control, locked, feedback }: { r: Run; control: (action: 
     </dl>
     <section className={styles.phases} aria-labelledby="run-phases-title"><h3 id="run-phases-title">采集进展</h3><ol>
       <li><span>发现作品</span><span>{frozen ? `${count(r.selected_works)} 篇已确定` : '范围待确定'}</span></li>
-      <li><span>取得详情</span><span>{r.available_details === null ? '尚未取得数量' : `已取得 ${count(r.available_details)} 篇`}</span></li>
-      <li><span>评论采集</span><span>{r.completed_discussions === null ? '完成范围尚未确认' : `${count(r.completed_discussions)} 篇已结束本轮采集`}</span></li>
+      <li><span>取得详情</span><span>{r.source_kind === 'creator_preview' ? '浅看只到发现，不取详情' : r.available_details === null ? '尚未取得数量' : `已取得 ${count(r.available_details)} 篇`}</span></li>
+      <li><span>评论采集</span><span>{r.comment_mode === 'none' ? '本次不采评论' : r.completed_discussions === null ? '完成范围尚未确认' : `${count(r.completed_discussions)} 篇已结束本轮采集`}</span></li>
     </ol></section>
     {r.stations.length > 0 && <div className={styles.stations}><span>执行工位</span>{r.stations.map(s => <a key={s.stationRef} href={`/collection/runtime?${new URLSearchParams({station:s.stationRef,return_to:`/collection/tasks?domain=${r.domain_ref}&run=${r.run_ref}`})}`}>{s.name}</a>)}</div>}
     {!r.legacy && !r.ended && r.control_intent !== 'stopped' && <div className={styles.actions}><ActionButton disabled={locked} onClick={() => control(r.control_intent === 'paused' ? 'continue' : 'pause')}>{r.control_intent === 'paused' ? '继续' : '暂停'}</ActionButton><ActionButton variant="quiet" disabled={locked} onClick={() => setConfirming(true)}>停止本次</ActionButton></div>}

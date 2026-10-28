@@ -43,7 +43,9 @@ describe('采集任务数据与失联恢复', () => {
   });
   it('主页浅看与精选研究：文字版写成「只取笔记文字」，来源有自己的名字，文字版以详情完成为收尾', () => {
     const current = { ...legacy, legacy: false, control_intent: 'running', revision: 1 };
-    expect(commentModeLabel(parseRun({ ...current, comment_mode: 'none' }), '每篇最多30条总样本')).toBe('只取笔记文字，不采评论与媒体');
+    expect(commentModeLabel(parseRun({ ...current, source_kind: 'creator_selected_works', comment_mode: 'none' }), '每篇最多30条总样本')).toBe('只取笔记文字，不采评论与媒体');
+    // 浅看只发现主页卡片，不取笔记文字；不能写成「只取笔记文字」。
+    expect(commentModeLabel(parseRun({ ...current, source_kind: 'creator_preview', comment_mode: 'none' }), '每篇最多30条总样本')).toBe('只看主页卡片，不取详情、评论与媒体');
     expect(sourceLabel('creator_preview')).toBe('作者主页浅看');
     expect(sourceLabel('creator_selected_works')).toBe('主页精选研究');
     expect(sourceLabel('something_new')).toBe('既有采集');
