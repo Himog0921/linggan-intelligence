@@ -1,0 +1,2 @@
+SELECT jsonb_build_object('displayableCommentCount',count(*) FILTER(WHERE readable AND clean_state IN('direct','context') AND voice_role<>'creator'),'eligibleCommentCount',count(*) FILTER(WHERE exclusion_reason IS NULL),'rawReadableCommentCount',count(*) FILTER(WHERE readable AND voice_role<>'creator'),'studiedCommentCount',count(*) FILTER(WHERE latest_request_ref IS NOT NULL AND exclusion_reason IS NULL),'indexedCount',count(*) FILTER(WHERE cached_source_ref IS NOT NULL),'pendingCount',count(*) FILTER(WHERE readable AND cached_source_ref IS NULL))
+FROM qualified
