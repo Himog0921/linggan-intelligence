@@ -17,10 +17,10 @@ mod detail;
 mod post_usage;
 #[path = "comment_study_catalog/read.rs"]
 mod read;
-#[path = "comment_study_catalog/works.rs"]
-mod works;
 #[path = "comment_study_catalog/word_cloud.rs"]
 mod word_cloud;
+#[path = "comment_study_catalog/works.rs"]
+mod works;
 
 pub use read::{
     CatalogPostUsage, CatalogSort, CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole,
@@ -34,8 +34,8 @@ pub use detail::{
 pub use post_usage::{
     PostUsageAction, PostUsageCommand, PostUsageError, record_comment_post_usage,
 };
-pub use works::{WorkCatalogQuery, read_work_catalog};
 pub use word_cloud::{WordCloudQuery, read_word_cloud};
+pub use works::{WorkCatalogQuery, read_work_catalog};
 
 pub(super) fn facts_sql() -> String {
     include_str!("comment_study_catalog/facts.sql").replace(
@@ -162,7 +162,7 @@ pub async fn refresh_clean_cache(
         // A concurrent refresher can win this key. Never turn conflicting content into success.
         let existing = sqlx::query(
             "SELECT raw_sha256,research_text,clean_state,clean_reasons \
-             FROM linggan_comment_study_clean_cache WHERE source_ref=$1 AND cleaner_version=$2",
+             FROM linggan_comment_clean_cache WHERE source_ref=$1 AND cleaner_version=$2",
         )
         .bind(source_ref)
         .bind(CLEANER_VERSION)
@@ -192,7 +192,7 @@ pub async fn maintain_comment_catalog(
     database: &Database,
 ) -> Result<Option<CleanCacheRefresh>, StudyCatalogError> {
     let installed: bool =
-        sqlx::query_scalar("SELECT to_regclass('linggan_comment_study_clean_cache') IS NOT NULL")
+        sqlx::query_scalar("SELECT to_regclass('linggan_comment_clean_cache') IS NOT NULL")
             .fetch_one(database.pool())
             .await?;
     if !installed {

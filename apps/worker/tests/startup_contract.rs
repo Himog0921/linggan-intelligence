@@ -15,14 +15,7 @@ use std::time::Duration;
 mod fixture;
 #[path = "../../../crates/intelligence/tests/support/comment_research_fixture.rs"]
 mod research_fixture;
-use linggan_intelligence::{
-    comment_study_catalog::refresh_clean_cache,
-    comment_study_policy::{
-        CreateStudyPolicyCommand, StudyPolicyDefaults, StudyStageInstructions, create_study_policy,
-    },
-    comment_study_run::{TrustedStudyOrigin, start_study_run},
-    comment_study_selection::StartStudyRunCommand,
-};
+use linggan_intelligence::comment_study_catalog::refresh_clean_cache;
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use serde_json::json;
 use uuid::Uuid;
@@ -435,13 +428,13 @@ async fn sigterm_drains_even_while_the_collection_tick_is_blocked() {
 // source remains at pre-B main; the replacement owner is tested in ai_worker_contract.rs.
 #[tokio::test]
 #[ignore = "owned PostgreSQL only; a trap child forbids any model transport"]
-async fn patrol_maintains_local_catalog_but_never_dispatches_a_ready_legacy_run() {
+async fn patrol_maintains_local_catalog_without_instantiating_model_transport() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("owned runner supplies URL");
     let schema = "patrol_without_ai";
     let db = isolated_proof_schema(&url, schema, &migrations_missing("none"))
         .await
         .unwrap();
-    let run_ref = seed_synthetic_study(&db).await;
+    seed_synthetic_study(&db).await;
     research_fixture::comment_with_author(
         &db,
         "worker-drain",
@@ -451,7 +444,7 @@ async fn patrol_maintains_local_catalog_but_never_dispatches_a_ready_legacy_run(
         "2026-09-28T09:00:00Z",
     )
     .await;
-    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_clean_cache")
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_clean_cache")
         .fetch_one(db.pool())
         .await
         .unwrap();
@@ -498,7 +491,7 @@ async fn patrol_maintains_local_catalog_but_never_dispatches_a_ready_legacy_run(
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
             let cached: i64 =
-                sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_clean_cache")
+                sqlx::query_scalar("SELECT count(*) FROM linggan_comment_clean_cache")
                     .fetch_one(db.pool())
                     .await
                     .unwrap();
@@ -520,8 +513,6 @@ async fn patrol_maintains_local_catalog_but_never_dispatches_a_ready_legacy_run(
         .await
         .unwrap();
     assert_eq!(invoices, 0);
-    let requests:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_model_request request JOIN linggan_comment_study_batch batch USING(batch_ref) WHERE batch.run_ref=$1").bind(run_ref).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(requests, 0);
     assert!(
         Command::new("/bin/kill")
             .args(["-TERM", &worker.0.id().to_string()])
@@ -565,86 +556,6 @@ async fn seed_synthetic_study(database: &Database) -> Uuid {
         "2026-09-28T08:00:00Z",
     )
     .await;
-    let work_ref: Uuid = sqlx::query_scalar(
-        "SELECT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 LIMIT 1",
-    )
-    .bind(domain)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    let connection = Uuid::new_v4();
-    let version = Uuid::new_v4();
-    let model = Uuid::new_v4();
-    let config = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO linggan_model_connection(connection_ref,enabled,revision) VALUES($1,true,1)",
-    )
-    .bind(connection)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_model_connection_version( \
-           version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref) \
-         VALUES($1,$2,1,'SYNTHETIC','openai-completions','http://127.0.0.1:18080',true,$3)",
-    )
-    .bind(version)
-    .bind(connection)
-    .bind(Uuid::new_v4())
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) \
-         VALUES($1,$2,'synthetic','manual')",
-    )
-    .bind(model)
-    .bind(version)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) \
-         VALUES($1,$2,8192,1024,30,2)",
-    )
-    .bind(config)
-    .bind(model)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    let policy = create_study_policy(
-        database,
-        CreateStudyPolicyCommand {
-            domain_ref: domain,
-            method_name: "WORKER_SIGTERM_DRAIN_SYNTHETIC".into(),
-            parent_policy_ref: None,
-            model_config_ref: config,
-            defaults: StudyPolicyDefaults { comment_budget: 1 },
-            stage_instructions: StudyStageInstructions {
-                semantic: "synthetic test only".into(),
-                resolution: String::new(),
-                pair: String::new(),
-            },
-        },
-    )
-    .await
-    .unwrap();
-    let policy_ref: Uuid = serde_json::from_value(policy["policy"]["policyRef"].clone()).unwrap();
     refresh_clean_cache(database, domain, 128).await.unwrap();
-    let command: StartStudyRunCommand = serde_json::from_value(json!({
-        "requestRef": Uuid::new_v4(),
-        "domainRef": domain,
-        "policyRef": policy_ref,
-        "scope": {"kind":"works","workRefs":[work_ref]},
-        "mode":"new_only",
-        "limits":{"commentBudget":1,"tokenLimit":100000},
-        "reason":null
-    }))
-    .unwrap();
-    let run_ref = start_study_run(database, command, TrustedStudyOrigin::Manual)
-        .await
-        .unwrap()
-        .run_ref
-        .unwrap();
-    run_ref
+    Uuid::nil()
 }

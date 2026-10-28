@@ -17,6 +17,7 @@ use linggan_intelligence::{
             queue::{claim_next, recover_expired},
             writing::execute_writing,
         },
+        prompt::{self, ActivatePrompt, SavePrompt},
         settings_read::read_comparison,
         skill_binding::{ActivateSkill, activate_skill},
         skill_package::{Encoding, SkillPackage, UploadFile},
@@ -681,7 +682,6 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
             expected_binding_revision: 0,
             candidate_config_ref: baseline.task_config_ref,
             trial_comparison_ref: None,
-            first_version_exception: true,
             reason: "Synthetic first version exception".into(),
         },
     )
@@ -693,7 +693,7 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
     let frozen_body = frozen_source(&db, &body).await;
     let work = fixture::create(&db, document).await;
     let input = preview(&work, config.task.model_config_ref.unwrap(), "");
-    ai::preview(&db, &input).await.unwrap();
+    let frozen_preview = ai::preview(&db, &input).await.unwrap();
     let second = import_skill(
         &db,
         &adapter(),
@@ -711,10 +711,8 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
         expected_binding_revision: enabled.binding_revision,
         candidate_config_ref: candidate.task_config_ref,
         trial_comparison_ref: None,
-        first_version_exception: false,
         reason: "Synthetic paired trial approval".into(),
     };
-    assert!(activate_skill(&db, &activate).await.is_err());
     let trial = create_trial(
         &db,
         &CreateTrial {
@@ -733,6 +731,12 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
     )
     .await
     .unwrap();
+    let pending_trial = ActivateSkill {
+        command_ref: Uuid::new_v4(),
+        trial_comparison_ref: Some(trial.comparison_ref),
+        ..activate.clone()
+    };
+    assert!(activate_skill(&db, &pending_trial).await.is_err());
     run(&db, &owner).await;
     run(&db, &owner).await;
     let compared = read_comparison(&db, trial.comparison_ref, 0).await.unwrap();
@@ -760,14 +764,71 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
         .await
         .unwrap();
     assert_eq!(requests, 0);
+    let queued_before_switch = ai::ExecuteRequest {
+        request_id: Uuid::new_v4(),
+        preview_ref: input.preview_ref,
+        expected_revision: input.expected_revision,
+        confirmed_input_hash: frozen_preview["inputHash"].as_str().unwrap().into(),
+        budget_tokens: frozen_preview["reservedTokens"].as_i64().unwrap(),
+        confirmed: true,
+    };
+    assert_eq!(
+        ai::execute(&db, &queued_before_switch).await.unwrap()["state"],
+        "queued"
+    );
     let approve = ActivateSkill {
         command_ref: Uuid::new_v4(),
         trial_comparison_ref: Some(trial.comparison_ref),
         ..activate
     };
-    activate_skill(&db, &approve).await.unwrap();
+    let switched_skill = activate_skill(&db, &approve).await.unwrap();
+    let prompt = prompt::save(
+        &db,
+        &SavePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WritingLegacy,
+            expected_task_revision: switched_skill.task_revision,
+            system_text: "SYNTHETIC WRITING SYSTEM V2".into(),
+            instruction_text: "SYNTHETIC WRITING INSTRUCTION V2".into(),
+        },
+    )
+    .await
+    .unwrap();
+    prompt::activate(
+        &db,
+        &ActivatePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::WritingLegacy,
+            expected_task_revision: switched_skill.task_revision,
+            version_ref: prompt.version_ref,
+        },
+    )
+    .await
+    .unwrap();
+    run(&db, &owner).await;
+    let old = ai::status(&db, queued_before_switch.request_id)
+        .await
+        .unwrap();
+    assert_eq!(old["state"], "succeeded");
+    assert_eq!(old["suggestion"]["paragraphs"][0]["text"], "合成基线建议");
+    let after_switch = preview(&work, config.task.model_config_ref.unwrap(), "");
+    let queued_after_switch = enqueue(&db, &after_switch).await;
+    run(&db, &owner).await;
+    let new = ai::status(&db, queued_after_switch.request_id)
+        .await
+        .unwrap();
+    assert_eq!(new["state"], "succeeded");
+    assert_eq!(new["suggestion"]["paragraphs"][0]["text"], "合成候选建议");
+    let actual = endpoint.requests.lock().unwrap().clone();
+    let systems = actual
+        .iter()
+        .map(|request| endpoint::text(request, "system"))
+        .collect::<Vec<_>>();
+    assert!(!systems[3].contains("SYNTHETIC WRITING SYSTEM V2"));
+    assert!(systems[4].contains("SYNTHETIC WRITING SYSTEM V2"));
+    assert!(systems[4].contains("SYNTHETIC WRITING INSTRUCTION V2"));
     assert!(claim_next(&db, owner.fence()).await.unwrap().is_none());
-    assert_eq!(endpoint.requests.lock().unwrap().len(), 3);
+    assert_eq!(endpoint.requests.lock().unwrap().len(), 5);
     observe_new_body(&db, &body).await;
     assert_eq!(frozen_source(&db, &body).await, frozen_body);
     let after_observation = read_comparison(&db, trial.comparison_ref, 0).await.unwrap();
@@ -785,6 +846,6 @@ async fn actual_skill_versions_compare_the_same_preview_then_activate_without_en
     assert_eq!(redacted["sourceQualification"], "unavailable");
     assert!(redacted["baseline"]["output"].is_null());
     assert!(redacted["candidate"]["output"].is_null());
-    assert_eq!(endpoint.requests.lock().unwrap().len(), 3);
+    assert_eq!(endpoint.requests.lock().unwrap().len(), 5);
     endpoint.finish().await;
 }

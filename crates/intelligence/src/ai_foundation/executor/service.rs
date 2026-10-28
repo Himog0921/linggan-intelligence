@@ -13,6 +13,12 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use uuid::Uuid;
+mod comment_problem;
+mod comment_research;
+mod creator_account_research;
+mod creator_research;
+mod research_call;
+mod topic_research;
 mod work_comparison;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -143,6 +149,21 @@ async fn fill_slots(
                 }
                 TaskKey::WorkComparison => {
                     work_comparison::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                TaskKey::CommentProblemResolution | TaskKey::CommentProblemPairReview => {
+                    comment_problem::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                TaskKey::CommentStudy => {
+                    comment_research::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                TaskKey::CreatorAccountResearch => {
+                    creator_account_research::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                TaskKey::CreatorResearch => {
+                    creator_research::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                task if task.topic_stage().is_some() => {
+                    topic_research::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 _ => Err(ExecutorError::Invalid),
             }

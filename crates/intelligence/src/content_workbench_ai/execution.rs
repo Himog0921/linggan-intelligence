@@ -1,7 +1,7 @@
 //! Reuses the writing domain's source and output contracts; trials never mutate a normal request.
 use super::{
-    AiError, METHOD, PreviewRequest, SYSTEM, WritingSuggestion, inputs_in, qualify_frozen_inputs,
-    sources, validate_suggestion,
+    AiError, METHOD, PreviewRequest, WritingSuggestion, inputs_in, qualify_frozen_inputs, sources,
+    validate_suggestion,
 };
 use crate::ai_foundation::transport_store::{FrozenModel, load_frozen_in};
 use serde_json::{Value, json};
@@ -12,12 +12,19 @@ pub(crate) async fn system_in(
     tx: &mut Transaction<'_, Postgres>,
     config: Uuid,
 ) -> Result<String, AiError> {
-    let invocation:Option<String>=sqlx::query_scalar("SELECT v.invocation FROM linggan_ai_task_config c LEFT JOIN linggan_skill_version v ON v.version_ref=c.skill_version_ref WHERE c.task_config_ref=$1 AND c.task_key='writing_legacy' AND c.execution_contract=$2")
-        .bind(config).bind(METHOD).fetch_one(&mut **tx).await?;
-    Ok(match invocation {
-        Some(invocation) => format!("{SYSTEM}\n\n{invocation}"),
-        None => SYSTEM.into(),
-    })
+    let (_, mut system, instruction, invocation) = crate::ai_foundation::prompt::frozen_in(
+        tx,
+        config,
+        crate::ai_foundation::TaskKey::WritingLegacy,
+    )
+    .await?;
+    system.push_str("\n\n");
+    system.push_str(&instruction);
+    if let Some(invocation) = invocation {
+        system.push_str("\n\n");
+        system.push_str(&invocation);
+    }
+    Ok(system)
 }
 pub(crate) fn preview_hash(config: Uuid, body_hash: &str, system: &str) -> String {
     sources::text_hash(&json!([METHOD, config, body_hash, system]).to_string())

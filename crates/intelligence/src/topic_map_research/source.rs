@@ -8,14 +8,6 @@ use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
-pub(crate) async fn load_inputs(
-    db: &Database,
-    domain: Uuid,
-    config: Uuid,
-) -> Result<Vec<ResearchInput>, ResearchError> {
-    load_scoped_inputs(db, domain, config, None, None).await
-}
-
 pub(crate) async fn load_inputs_for_works(
     db: &Database,
     domain: Uuid,
@@ -151,6 +143,16 @@ async fn load_scoped_inputs(
             "lowFollowerHighLikes":"unknown unless configured rule and known followers","publishedAt":work.published_date,
             "authorTextAvailable":!work.fragments.is_empty(),"commentOnly":work.fragments.is_empty(),
         });
+        let mut dossier_versions = serde_json::Map::new();
+        dossier_versions.insert(
+            work.work_ref.to_string(),
+            json!({
+                "contract":linggan_evidence::research_dossier::VERSION,
+                "revision":work.dossier_revision,
+                "materialRevision":work.dossier_material_revision,
+                "coverage":work.dossier_coverage,
+            }),
+        );
         let mut input = ResearchInput {
             work,
             fragments,
@@ -160,7 +162,8 @@ async fn load_scoped_inputs(
             context_work_refs: Vec::new(),
             comment_study: json!(comments),
             role_metadata,
-            coverage: json!({"inputContract":INPUT_CONTRACT,"configRef":config,"asOf":data.as_of}),
+            coverage: json!({"inputContract":INPUT_CONTRACT,"configRef":config,"asOf":data.as_of,
+                "dossiers":dossier_versions}),
         };
         update_source_coverage(&mut input);
         input.hash = input_identity(&input);
@@ -237,11 +240,28 @@ async fn comment_lineage(
             .bind(as_of)
             .fetch_all(db.pool())
             .await?;
+        let mut tx = db.pool().begin().await?;
         for row in rows {
-            signals.entry((row.get("content_public_ref"),row.get("comment_external_id"))).or_default()
-                .push(json!({"signalRef":row.get::<Uuid,_>("signal_ref"),"kind":row.get::<String,_>("kind"),
-                    "proposition":row.get::<String,_>("proposition")}));
+            let request: Uuid = row.get("request_ref");
+            match crate::ai_foundation::comment_research::frozen_in(&mut tx, request).await {
+                Ok(_) => {}
+                Err(crate::ai_foundation::store::FoundationError::AdmissionDenied(_)) => continue,
+                Err(crate::ai_foundation::store::FoundationError::Database(e)) => {
+                    return Err(ResearchError::Database(e));
+                }
+                Err(_) => return Err(ResearchError::Invalid("comment_lineage_unavailable")),
+            }
+            let result: Value = row.get("result");
+            for (ordinal, signal) in result["signals"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                signals.entry((row.get("content_public_ref"),row.get("comment_external_id"))).or_default().push(json!({"signalRef":format!("{request}:{ordinal}"),"requestRef":request,"signalOrdinal":ordinal,"kind":signal["kind"],"proposition":signal["proposition"]}));
+            }
         }
+        tx.commit().await?;
     }
     Ok((ids, signals))
 }

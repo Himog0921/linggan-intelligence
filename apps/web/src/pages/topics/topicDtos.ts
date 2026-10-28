@@ -380,50 +380,6 @@ export const decodeSnapshot = (value: unknown): T.Snapshot =>
       canonicalWorkCount: d.num(r, "canonicalWorkCount"),
     }))(d.obj(row, "scope")),
   }));
-const phases = (r: Json): T.Phases => ({
-  extracting: d.num(r, "extracting"),
-  extractQueued: d.num(r, "extractQueued"),
-  resolving: d.num(r, "resolving"),
-  resolveQueued: d.num(r, "resolveQueued"),
-  comparing: d.num(r, "comparing"),
-  compareQueued: d.num(r, "compareQueued"),
-});
-const counts = (r: Json): T.Counts => ({
-  correctiveQueuedCount: d.num(r, "correctiveQueuedCount"),
-  correctiveRunningCount: d.num(r, "correctiveRunningCount"),
-  reviewQueuedCount: d.num(r, "reviewQueuedCount"),
-  reviewRunningCount: d.num(r, "reviewRunningCount"),
-  queuedCount: d.num(r, "queuedCount"),
-  runningCount: d.num(r, "runningCount"),
-  succeededCount: d.num(r, "succeededCount"),
-  noSignalCount: d.num(r, "noSignalCount"),
-  insufficientCount: d.num(r, "insufficientCount"),
-  failedCount: d.num(r, "failedCount"),
-  unknownDispatchCount: d.num(r, "unknownDispatchCount"),
-  extractedWindowCount: d.num(r, "extractedWindowCount"),
-  staleCount: d.num(r, "staleCount"),
-  stoppedCount: d.num(r, "stoppedCount"),
-  initialQueuedCount: d.num(r, "initialQueuedCount"),
-  completedInitialWindowCount: d.num(r, "completedInitialWindowCount"),
-  coveredWorkCount: d.num(r, "coveredWorkCount"),
-  reassessmentQueuedCount: d.num(r, "reassessmentQueuedCount"),
-  reassessmentCompletedCount: d.num(r, "reassessmentCompletedCount"),
-  totalRunCount: optionalNumber(r, "totalRunCount"),
-  totalTaskCount: d.num(r, "totalTaskCount"),
-  phases: phases(d.obj(r, "phases")),
-});
-const diagnostic = (r: Json): T.Diagnostic => ({
-  rule: optionalText(r, "rule"),
-  schemaPath: optionalText(r, "schemaPath"),
-  candidateCount: optionalNumber(r, "candidateCount"),
-  unitCount: optionalNumber(r, "unitCount"),
-  decisionCount: optionalNumber(r, "decisionCount"),
-  semanticChecks: optionalList(r, "semanticChecks", (r) => ({
-    checkId: d.str(r, "checkId"),
-    verdict: d.str(r, "verdict"),
-    rule: d.str(r, "rule"),
-  })),
-});
 const round = (r: Json): T.CollectionRound => ({
   roundRef: d.str(r, "roundRef"),
   kind: d.str(r, "kind"),
@@ -431,65 +387,6 @@ const round = (r: Json): T.CollectionRound => ({
   reason: nullable(r, "reason", text),
   detailSlotsReserved: d.num(r, "detailSlotsReserved"),
 });
-export const decodeProgress = (value: unknown): T.ResearchProgress =>
-  d.decode(value, (r) => ({
-    domainRef: d.str(r, "domainRef"),
-    methodVersion: d.str(r, "methodVersion"),
-    policy: nullable(r, "policy", (value) => {
-      const p = object(value);
-      return {
-        status: d.str(p, "status"),
-        modelConfigRef: d.str(p, "modelConfigRef"),
-        dailyTokenLimit: d.num(p, "dailyTokenLimit"),
-        runTokenLimit: d.num(p, "runTokenLimit"),
-        automaticEnabled: d.bool(p, "automaticEnabled"),
-        collectionEnabled: d.bool(p, "collectionEnabled"),
-      };
-    }),
-    currentMethodSummary: counts(d.obj(r, "currentMethodSummary")),
-    summary: counts(d.obj(r, "summary")),
-    runs: d.list(r, "runs", (r) => ({
-      ...counts(r),
-      runRef: d.str(r, "runRef"),
-      state: d.str(r, "state"),
-      lastReason: nullable(r, "lastReason", text),
-      trigger: d.str(r, "trigger"),
-      methodVersion: d.str(r, "methodVersion"),
-      createdAt: d.str(r, "createdAt"),
-      taskIssues: d.list(r, "taskIssues", (r) => ({
-        phase: d.str(r, "phase"),
-        state: d.str(r, "state"),
-        reason: nullable(r, "reason", text),
-        taskRef: d.str(r, "taskRef"),
-        validationDiagnostic: nullable(r, "validationDiagnostic", (v) =>
-          diagnostic(object(v)),
-        ),
-      })),
-    })),
-    runListLimit: d.num(r, "runListLimit"),
-    models: d.list(r, "models", (r) => ({
-      configRef: d.str(r, "configRef"),
-      modelId: d.str(r, "modelId"),
-      inputTokenLimit: d.num(r, "inputTokenLimit"),
-      outputTokenLimit: d.num(r, "outputTokenLimit"),
-    })),
-    usage: ((r) => ({
-      chargedTokens: d.num(r, "chargedTokens"),
-      reservedTokens: d.num(r, "reservedTokens"),
-      timezone: d.str(r, "timezone"),
-    }))(d.obj(r, "usage")),
-    processingLimits: ((r) => ({
-      automaticBatchWindows: d.num(r, "automaticBatchWindows"),
-      materialSelection: (() => { const value = d.str(r, "materialSelection"); if (value !== 'whole_note') throw new d.ShapeError('materialSelection'); return 'whole_note' as const; })(),
-      primaryCommentsPerWindow: d.num(r, "primaryCommentsPerWindow"),
-    }))(d.obj(r, "processingLimits")),
-    targets: d.list(r, "targets", (r) => ({
-      targetRef: d.str(r, "targetRef"),
-      displayName: d.str(r, "displayName"),
-      kind: d.str(r, "kind"),
-    })),
-    collectionRounds: d.list(r, "collectionRounds", round),
-  }));
 export const decodeSearch = (value: unknown): T.SearchProgress =>
   d.decode(value, (r) => ({
     domainRef: d.str(r, "domainRef"),
@@ -552,7 +449,7 @@ export const decodeCommand = (v: unknown): T.CommandReceipt =>
     revision: d.num(r, "revision"),
     persistedAt: d.str(r, "persistedAt"),
   }));
-export const decodeResearchReceipt = (v: unknown): T.ResearchReceipt =>
+export const decodeCollectionReceipt = (v: unknown): T.CollectionReceipt =>
   d.decode(v, (r) => ({
     requestRef: d.str(r, "requestRef"),
     domainRef: d.optStr(r, "domainRef"),
@@ -582,3 +479,8 @@ export const decodeStructure = (v: unknown): T.StructureReceipt =>
       topicRef: d.str(r, "topicRef"),
     })),
   }));
+
+export const decodeCollectionProgress = (value: unknown) => d.decode(value, root => ({
+  policy: { enabled: d.bool(d.obj(root, 'policy'), 'enabled'), revision: d.num(d.obj(root, 'policy'), 'revision') },
+  targets: d.list(root, 'targets', row => ({ targetRef: d.str(row, 'targetRef'), kind: d.str(row, 'kind'), displayName: d.str(row, 'displayName') })), collectionRounds: d.list(root, 'collectionRounds', round),
+}));

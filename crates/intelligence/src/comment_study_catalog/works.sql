@@ -6,13 +6,13 @@
            count(*) FILTER (WHERE readable AND cached_source_ref IS NOT NULL) AS indexed,
            count(*) FILTER (WHERE readable AND cached_source_ref IS NULL) AS pending,
            count(*) FILTER (WHERE readable AND clean_state IN ('direct','context')
-                            AND effective_target_ref IS NOT NULL) AS studied,
+                            AND effective_request_ref IS NOT NULL) AS studied,
            count(*) FILTER (WHERE readable AND clean_state IN ('direct','context') AND in_progress) AS in_progress,
            count(*) FILTER (WHERE readable AND clean_state IN ('direct','context')
                             AND latest_state = 'needs_context') AS needs_context,
            count(*) FILTER (WHERE readable AND clean_state IN ('direct','context')
                             AND latest_state = 'failed') AS failed,
-           count(*) FILTER (WHERE exclusion_reason IS NULL AND latest_target_ref IS NULL) AS never_studied,
+           count(*) FILTER (WHERE exclusion_reason IS NULL AND latest_request_ref IS NULL) AS never_studied,
            max(latest_created_at) AS last_study_at
     FROM qualified GROUP BY content_public_ref
 ), work_rows AS MATERIALIZED (

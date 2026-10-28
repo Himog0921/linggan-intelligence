@@ -53,6 +53,54 @@ pub struct StudySource {
     pub observation_role: StudySourceRole,
 }
 
+/// Exact selected target and parent as observed in the same transaction. Raw
+/// text stays in memory; callers store only source identities and hashes.
+pub struct SelectedStudySource {
+    pub source: StudySource,
+    pub comment_external_id: String,
+    pub raw_text: String,
+    pub parent: Option<Value>,
+}
+
+pub async fn selected_source_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    work: Uuid,
+    source_ref: Uuid,
+    role: StudySourceRole,
+    as_of: &str,
+) -> Result<Option<SelectedStudySource>, StudySourceError> {
+    let row = sqlx::query("SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.parent_comment_external_id,c.body_state,c.body_text,c.author_external_id,author.author_external_id AS work_author_external_id,$5::text AS observation_role,EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS source_restricted FROM linggan_material_comment c JOIN linggan_runtime_capture_package p USING(package_ref) LEFT JOIN linggan_material_content_author author ON author.content_public_ref=c.content_public_ref WHERE c.material_ref=$1 AND c.content_public_ref=$2 AND p.accepted_at<=$3::timestamptz AND c.created_at<=$3::timestamptz AND EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=c.content_public_ref AND u.domain_ref=$4 AND u.role=$5) AND c.material_ref=(SELECT newer.material_ref FROM linggan_material_comment newer JOIN linggan_runtime_capture_package np USING(package_ref) WHERE newer.content_public_ref=c.content_public_ref AND newer.comment_external_id=c.comment_external_id AND np.accepted_at<=$3::timestamptz AND newer.created_at<=$3::timestamptz ORDER BY newer.observed_at::timestamptz DESC,newer.created_at DESC,newer.material_ref DESC LIMIT 1)")
+        .bind(source_ref).bind(work).bind(as_of).bind(domain).bind(role.as_str())
+        .fetch_optional(&mut **tx).await?;
+    let Some(row) = row else { return Ok(None) };
+    let Some(raw_text) = row.try_get::<Option<String>, _>("body_text")? else {
+        return Ok(None);
+    };
+    let comment_external_id = row.try_get("comment_external_id")?;
+    let parent_id: Option<String> = row.try_get("parent_comment_external_id")?;
+    let Ok(candidate) = classify(&row)? else {
+        return Ok(None);
+    };
+    let parent = if let Some(id) = parent_id {
+        context::read_parents(tx, &[(work, id.clone())], as_of)
+            .await?
+            .remove(&(work, id))
+    } else {
+        None
+    };
+    let source = attach_context(tx, domain, as_of, vec![candidate])
+        .await?
+        .into_iter()
+        .next();
+    Ok(source.map(|source| SelectedStudySource {
+        source,
+        comment_external_id,
+        raw_text,
+        parent,
+    }))
+}
+
 /// A read-only explanation of the exact source gate used by StudyRun freezing.  It deliberately
 /// reports source facts and deterministic cleaning outcomes only; it is not a second eligibility
 /// engine for the setup page.
@@ -151,16 +199,6 @@ async fn load_sources(
     .await?;
     tx.commit().await?;
     Ok(result)
-}
-
-pub(crate) async fn eligible_sources_in_transaction_for_selections(
-    tx: &mut Transaction<'_, Postgres>,
-    domain: Uuid,
-    as_of: &str,
-    selections: &[(Uuid, StudySourceRole)],
-    limit: i64,
-) -> Result<Vec<StudySource>, StudySourceError> {
-    fetch_eligible_sources(tx, domain, as_of, Some(selections), None, limit).await
 }
 
 struct Candidate {

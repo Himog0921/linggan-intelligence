@@ -300,6 +300,12 @@ pub(crate) fn with_comparison_context(
             ) {
                 target.extend(more.clone());
             }
+            if let (Some(target), Some(more)) = (
+                input.coverage["dossiers"].as_object_mut(),
+                other.coverage["dossiers"].as_object(),
+            ) {
+                target.extend(more.clone());
+            }
         }
     }
     if !context.is_empty() {

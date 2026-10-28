@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../shared/api";
 import { createTopicCommands } from "./topicCommands";
-import { decodeCommand, decodeResearchReceipt } from "./topicDtos";
+import { decodeCommand, decodeCollectionReceipt } from "./topicDtos";
 import { topicDomain } from "./topicTestFixture";
 const id = "50000000-0000-4000-8000-000000000001";
 const receipt = {
@@ -105,12 +105,13 @@ describe("Topic commands preserve whole requests until a qualified answer", () =
     await commands.retry();
     expect(commands.unconfirmed).toBe(false);
   });
-  it("validates research request, domain and state; supports automatic configure queue receipt", async () => {
+  it("validates independent collection settings with request, domain and revision", async () => {
     let value = {
       requestRef: id,
       domainRef: topicDomain,
-      state: "queued",
-      runRef: id,
+      state: "configured",
+      collectionEnabled: true,
+      revision: 1,
     };
     const commands = createTopicCommands(
       async (_p, _b, parse) => parse(value),
@@ -120,19 +121,20 @@ describe("Topic commands preserve whole requests until a qualified answer", () =
       action: "configure",
       requestRef: id,
       domainRef: topicDomain,
-      automaticEnabled: true,
+      collectionEnabled: true,
+      expectedRevision: 0,
     };
     await commands.submit(
-      "/api/local/topic-map/research/commands",
+      "/api/local/topic-map/collection/commands",
       body,
-      decodeResearchReceipt,
+      decodeCollectionReceipt,
     );
     value = { ...value, domainRef: id };
     await expect(
       commands.submit(
-        "/api/local/topic-map/research/commands",
+        "/api/local/topic-map/collection/commands",
         body,
-        decodeResearchReceipt,
+        decodeCollectionReceipt,
       ),
     ).rejects.toBeInstanceOf(ApiError);
   });

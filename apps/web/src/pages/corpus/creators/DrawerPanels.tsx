@@ -1,5 +1,7 @@
 import { humanMoment } from '../../../shared/formatting';
 import { Cover } from './Media';
+import { CreatorWorkResearch } from './CreatorWorkResearch';
+import { CreatorAccountResearch } from './CreatorAccountResearch';
 import { JudgmentBlock } from './JudgmentBlock';
 import {
   acquisitionText,
@@ -86,6 +88,7 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
         </div>
         <button type="button" className={styles.homepageAction} onClick={() => ctx.onTab('works')}>浅看主页作品 →</button>
       </div>
+      {item.authorExternalId ? <CreatorAccountResearch domain={data.domain.domainRef} platform={ctx.query.platform} author={item.authorExternalId} disabled={!ctx.writable} /> : null}
       <section aria-label="作者内容倾向">
         <h3>作者内容倾向</h3>
         <JudgmentBlock
@@ -197,6 +200,7 @@ export function EvidencePanel({
             <a href={evidenceLink(link, item.creatorKey, work.workRef)} data-return-key={item.creatorKey}>
               打开原作品 →
             </a>
+            <CreatorWorkResearch domain={ctx.data.domain.domainRef} work={work.workRef} disabled={!ctx.writable} />
             {(['relevance', 'personal_experience', 'professional_output', 'explicit_promotion'] as const).map(field => (
               <JudgmentBlock
                 key={field}

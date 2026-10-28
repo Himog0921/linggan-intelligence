@@ -29,7 +29,8 @@ pub(crate) fn exclusion(flags: [bool; 7]) -> Option<&'static str> {
         .find_map(|((code, _), excluded)| excluded.then_some(*code))
 }
 
-pub(crate) fn rule_index(code: &str) -> Option<usize> {
+#[cfg(test)]
+fn rule_index(code: &str) -> Option<usize> {
     RULES.iter().position(|(rule, _)| *rule == code)
 }
 

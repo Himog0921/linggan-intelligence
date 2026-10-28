@@ -23,7 +23,7 @@ pub(crate) async fn available(
     {
         // Public manifests intentionally omit propositions and selected discussion
         // summaries. Their private immutable task/result still owns dependencies.
-        let row = sqlx::query("SELECT r.core_json,t.input_refs,q.request_manifest FROM linggan_topic_map_research_result r JOIN linggan_topic_map_research_request q USING(invocation_ref) JOIN linggan_topic_map_research_task t USING(task_ref) WHERE r.result_ref=$1 AND r.domain_ref=$2")
+        let row = sqlx::query("SELECT r.core_json,w.input_refs,COALESCE(dispatch.context,'{}'::jsonb) AS request_manifest FROM linggan_topic_research_result r JOIN linggan_topic_research_window w USING(window_ref) JOIN linggan_topic_research_run run USING(run_ref) LEFT JOIN linggan_topic_research_dispatch dispatch USING(invocation_ref) WHERE r.result_ref=$1 AND run.domain_ref=$2")
             .bind(result).bind(domain).fetch_optional(&mut **tx).await?;
         let Some(row) = row else {
             return Ok(false);

@@ -188,7 +188,8 @@ pub async fn read_skill_version(
       'packageSha256',v.package_sha256,'sourceSha256',v.source_sha256,'loaderVersion',v.loader_version,
       'disableModelInvocation',v.disable_model_invocation,
       'files',(SELECT jsonb_agg(jsonb_build_object('path',path,'sha256',sha256,'bytes',octet_length(bytes),
-        'content',text_content,'kind',CASE WHEN text_content IS NULL THEN 'binary' ELSE 'utf8' END) ORDER BY path COLLATE \"C\")
+        'content',text_content,'contentBase64',CASE WHEN text_content IS NULL THEN replace(encode(bytes,'base64'),E'\\n','') ELSE NULL END,
+        'kind',CASE WHEN text_content IS NULL THEN 'binary' ELSE 'utf8' END) ORDER BY path COLLATE \"C\")
        FROM linggan_skill_file WHERE version_ref=v.version_ref)) FROM linggan_skill_version v WHERE version_ref=$1")
       .bind(version).fetch_optional(db.pool()).await?.ok_or(FoundationError::NotFound)
 }

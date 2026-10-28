@@ -254,6 +254,70 @@ async fn ai_settings_http_batch_cancel_is_cas_idempotent_and_never_revived_by_re
 
 #[tokio::test]
 #[ignore = "disposable PostgreSQL proof only"]
+async fn ai_settings_http_ocr_prompt_save_switch_and_rollback_do_not_dispatch() {
+    let db = fixture::proof_database("ai_ocr_prompt_http").await;
+    let app = app_with_database(db.clone());
+    let (status, initial) = call(
+        app.clone(),
+        "/api/local/ai-settings/prompts/ocr_recognition",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{initial}");
+    let old = initial["activeVersionRef"].clone();
+    let revision = initial["revision"].as_i64().unwrap();
+    let save = json!({"commandRef":Uuid::new_v4(),"taskKey":"ocr_recognition","expectedTaskRevision":revision,
+        "systemText":"Synthetic OCR system","instructionText":"Synthetic OCR instructions"});
+    let (status, version) = call(
+        app.clone(),
+        "/api/local/ai-settings/prompts/save",
+        Some(save.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{version}");
+    assert_eq!(
+        call(
+            app.clone(),
+            "/api/local/ai-settings/prompts/save",
+            Some(save)
+        )
+        .await
+        .1,
+        version
+    );
+    let enable = json!({"commandRef":Uuid::new_v4(),"taskKey":"ocr_recognition","expectedTaskRevision":revision,"versionRef":version["versionRef"]});
+    let (status, enabled) = call(
+        app.clone(),
+        "/api/local/ai-settings/prompts/activate",
+        Some(enable),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{enabled}");
+    let (status, current) = call(
+        app.clone(),
+        "/api/local/ai-settings/prompts/ocr_recognition",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(current["activeVersionRef"], version["versionRef"]);
+    let rollback = json!({"commandRef":Uuid::new_v4(),"taskKey":"ocr_recognition","expectedTaskRevision":enabled["taskRevision"],"versionRef":old});
+    let (status, _) = call(
+        app.clone(),
+        "/api/local/ai-settings/prompts/activate",
+        Some(rollback),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL proof only"]
 async fn ai_settings_http_skill_import_handles_large_files_without_enabling_or_running_them() {
     let db = fixture::proof_database("ai_skills_http").await;
     let app = app_with_database(db.clone());
@@ -761,22 +825,7 @@ async fn ai_settings_http_comment_creator_and_topic_execution_cannot_be_reenable
     let app = app_with_database(db.clone());
     for (uri, payload) in [
         ("/api/local/comment-study/runs".to_string(), json!({})),
-        (
-            format!("/api/local/comment-study/runs/{}/resume", Uuid::new_v4()),
-            json!({}),
-        ),
-        (
-            format!("/api/local/comment-study/runs/{}/recover", Uuid::new_v4()),
-            json!({}),
-        ),
-        ("/api/local/comment-study/policies".to_string(), json!({})),
-        (
-            format!(
-                "/api/local/comment-study/policies/{}/activate",
-                Uuid::new_v4()
-            ),
-            json!({}),
-        ),
+        ("/api/local/comment-study/policy".to_string(), json!({})),
         (
             "/api/local/creator-discovery-analysis/retry".to_string(),
             json!({"domain":Uuid::new_v4()}),
@@ -792,7 +841,11 @@ async fn ai_settings_http_comment_creator_and_topic_execution_cannot_be_reenable
     }
     let response=app.clone().oneshot(Request::builder().method("PUT").uri("/api/local/creator-discovery-policy").header("Host","127.0.0.1:3000").header("Content-Type","application/json")
         .body(Body::from(json!({"domain":Uuid::new_v4(),"revision":0,"likeThreshold":10,"analysisEnabled":true,"configRef":Uuid::new_v4(),"dailyTokenLimit":1024}).to_string())).unwrap()).await.unwrap();
-    assert_eq!(response.status(), StatusCode::GONE);
+    assert_eq!(
+        response.status(),
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "the current threshold DTO rejects retired AI-policy fields"
+    );
     let count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
         .fetch_one(db.pool())
         .await

@@ -151,7 +151,7 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
             <CreatorSelect label="你的判断" value={value} onChange={next => { setValue(next); dropStaleHint(); }}
               options={choices.map(([optionValue, label]) => ({ value: optionValue, label }))} />
           </div>
-          <p className={styles.help}>保存后，这一项使用你的判断。撤销人工调整后显示已有分析结果；尚无结果则显示尚不能判定，不会启动新分析。</p>
+          <p className={styles.help}>保存后，这一项使用你的判断。撤销人工调整后显示已有研究结果；尚无结果则显示尚不能判定，不会启动新分析。</p>
           <fieldset>
             <legend>选择支持这项判断的材料</legend>
             {groups.length === 0 ? <p className={styles.help}>当前没有可选支持材料；仍可选择尚不能判定或撤销人工调整。</p> : null}

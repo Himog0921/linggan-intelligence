@@ -43,7 +43,13 @@ async fn policy(db: &Database, domain: Uuid) {
     sqlx::query("INSERT INTO linggan_model_connection_version(version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref)VALUES($1,$2,1,'Synthetic','openai-completions','http://127.0.0.1:18080',true,$3)").bind(version).bind(conn).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin)VALUES($1,$2,'synthetic-no-call','manual')").bind(model).bind(version).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts)VALUES($1,$2,8192,1000,30,3)").bind(config).bind(model).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_topic_map_research_policy(domain_ref,model_config_ref,daily_token_limit,run_token_limit,collection_enabled)VALUES($1,$2,100000,100000,true)").bind(domain).bind(config).execute(db.pool()).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_topic_collection_policy(domain_ref,collection_enabled)VALUES($1,true)",
+    )
+    .bind(domain)
+    .execute(db.pool())
+    .await
+    .unwrap();
 }
 #[tokio::test]
 #[ignore = "disposable PostgreSQL proof harness"]
@@ -123,7 +129,7 @@ async fn temporary_search_reuses_round_hides_targets_and_never_fans_out() {
     assert_eq!(progress["rounds"][0]["candidateCount"], 0);
     assert_eq!(progress["rounds"][0]["detailSlotsReserved"], 0);
     sqlx::query(
-        "UPDATE linggan_topic_map_research_policy SET collection_enabled=false WHERE domain_ref=$1",
+        "UPDATE linggan_topic_collection_policy SET collection_enabled=false WHERE domain_ref=$1",
     )
     .bind(domain)
     .execute(db.pool())
@@ -147,7 +153,7 @@ async fn temporary_search_reuses_round_hides_targets_and_never_fans_out() {
         0
     );
     sqlx::query(
-        "UPDATE linggan_topic_map_research_policy SET collection_enabled=true WHERE domain_ref=$1",
+        "UPDATE linggan_topic_collection_policy SET collection_enabled=true WHERE domain_ref=$1",
     )
     .bind(domain)
     .execute(db.pool())

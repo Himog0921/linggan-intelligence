@@ -2,6 +2,8 @@
 mod fixture;
 #[path = "creator_discovery/media.rs"]
 mod media;
+#[path = "support/creator_research_fixture.rs"]
+mod research;
 use linggan_contracts::{
     EvidenceQuery,
     creator_discovery::{CreatorScope, creator_key},
@@ -245,7 +247,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         refs.push(work);
         sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(work).bind(D).bind(package).execute(db.pool()).await.unwrap();
     }
-    sqlx::query("INSERT INTO linggan_creator_discovery_policy(domain_ref,platform,like_threshold) VALUES($1,'xhs',1000)").bind(D).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_creator_discovery_threshold(domain_ref,platform,like_threshold) VALUES($1,'xhs',1000)").bind(D).execute(db.pool()).await.unwrap();
     let mut q: CreatorScope = serde_json::from_value(json!({"domain":D})).unwrap();
     let data = load(&db, &q).await.unwrap();
     assert_eq!(data.works.len(), 12);
@@ -274,7 +276,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         let w = data.works.iter().find(|w| w.work_ref == refs[i]).unwrap();
         let ids: Vec<_> = w.fragments.iter().map(|f| &f.fragment_id).take(1).collect();
         let result = json!({"relevance":{"value":relevance,"reason":"合成依据","evidenceFragmentIds":ids},"traits":{"personal_experience":{"value":if *personal{"yes"}else{"no"},"reason":"合成依据","evidenceFragmentIds":ids}},"topicHints":[]});
-        sqlx::query("INSERT INTO linggan_creator_discovery_work_analysis(domain_ref,work_public_ref,requested_fingerprint,result_fingerprint,result_json,job_state) VALUES($1,$2,$3,$3,$4,'idle')").bind(D).bind(w.work_ref).bind(&w.fingerprint).bind(result).execute(db.pool()).await.unwrap();
+        research::seed_work(db, D, w.work_ref, &w.fingerprint, result).await;
     }
     for author in [1, 2] {
         let key = format!("A{author}");
@@ -286,7 +288,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
             .fragments[0]
             .fragment_id
             .clone();
-        sqlx::query("INSERT INTO linggan_creator_discovery_author_analysis(domain_ref,platform,author_external_id,requested_fingerprint,manual_overrides,job_state) VALUES($1,'xhs',$2,'manual',$3,'idle')").bind(D).bind(key).bind(json!({"focus":{"value":{"value":"vertical_tendency"},"supportFragmentIds":[supporting],"actor":"fixture","at":"2026-10-08"}})).execute(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_creator_author_override(domain_ref,platform,author_external_id,manual_overrides) VALUES($1,'xhs',$2,$3)").bind(D).bind(key).bind(json!({"focus":{"value":{"value":"vertical_tendency"},"supportFragmentIds":[supporting],"actor":"fixture","at":"2026-10-08"}})).execute(db.pool()).await.unwrap();
     }
     for (author, domain, state) in [
         (1, D, "archived"),
@@ -410,7 +412,13 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         "A5",
         "an explicit recent sort must win over the viral filter"
     );
-    sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET result_json=jsonb_set(result_json,'{topicHints}', '[{\"text\":\"具体方向\",\"evidenceFragmentIds\":[]}]'::jsonb),result_at=scope_001_now() WHERE domain_ref=$1 AND work_public_ref=$2").bind(D).bind(refs[2]).execute(db.pool()).await.unwrap();
+    research::replace_hints(
+        &db,
+        D,
+        refs[2],
+        json!([{"text":"具体方向","evidenceFragmentIds":[]}]),
+    )
+    .await;
     let topic_data = load(&db, &q).await.unwrap();
     let mut hint_scope = q.base();
     hint_scope.topic_hint = Some("具体方向".into());
@@ -437,7 +445,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         (refs[0], r#"[{"text":"方向 A"},{"text":"方向 B"}]"#),
         (refs[1], r#"[{"text":"方向 C"}]"#),
     ] {
-        sqlx::query("UPDATE linggan_creator_discovery_work_analysis SET result_json=jsonb_set(result_json,'{topicHints}',$3::jsonb) WHERE domain_ref=$1 AND work_public_ref=$2").bind(D).bind(work).bind(hints).execute(db.pool()).await.unwrap();
+        research::replace_hints(&db, D, work, hints).await;
     }
     let multi_hint_data = load(&db, &q).await.unwrap();
     let a1_global = aggregate(&multi_hint_data, &q)["items"]
@@ -632,7 +640,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         .unwrap();
     assert_eq!(jobs, 0);
     sqlx::query(
-        "UPDATE linggan_creator_discovery_policy SET like_threshold=NULL WHERE domain_ref=$1",
+        "UPDATE linggan_creator_discovery_threshold SET like_threshold=NULL WHERE domain_ref=$1",
     )
     .bind(D)
     .execute(db.pool())
@@ -724,7 +732,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         fixture::submit_package(&db,"content_detail",json!({"contentExternalId":id}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"title":format!("{id} 时间反例"),"bodyText":"亲历时间反例","authorId":author,"likes":likes,"publishedAt":epoch,"publishedAtText":date,"publishedAtSourceField":"publishTime","publishedAtSourceKind":"platform_epoch"}})).await;
     }
     sqlx::query(
-        "UPDATE linggan_creator_discovery_policy SET like_threshold=1000 WHERE domain_ref=$1",
+        "UPDATE linggan_creator_discovery_threshold SET like_threshold=1000 WHERE domain_ref=$1",
     )
     .bind(D)
     .execute(db.pool())
@@ -755,7 +763,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         a1.author_analysis["manual"]["focus"]["supportUnavailable"],
         true
     );
-    let stored:serde_json::Value=sqlx::query_scalar("SELECT manual_overrides FROM linggan_creator_discovery_author_analysis WHERE domain_ref=$1 AND author_external_id='A1'").bind(D).fetch_one(db.pool()).await.unwrap();
+    let stored:serde_json::Value=sqlx::query_scalar("SELECT manual_overrides FROM linggan_creator_author_override WHERE domain_ref=$1 AND author_external_id='A1'").bind(D).fetch_one(db.pool()).await.unwrap();
     assert_eq!(
         stored["focus"]["value"]["value"], "vertical_tendency",
         "the manual record remains available for review"

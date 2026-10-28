@@ -347,7 +347,7 @@ async fn creators_page_real_chain_browser_proof() {
         "浏览器路径不得产生采集请求、工单或模型调用"
     );
     // 调整判断：人工覆盖写在那篇作品上，引用了当前的支持片段，且是人工身份。
-    let manual: Value = sqlx::query_scalar("SELECT manual_overrides FROM linggan_creator_discovery_work_analysis WHERE domain_ref=$1 AND work_public_ref=$2")
+    let manual: Value = sqlx::query_scalar("SELECT manual_overrides FROM linggan_creator_work_override WHERE domain_ref=$1 AND work_public_ref=$2")
         .bind(first)
         .bind(works[2])
         .fetch_one(db.pool())
@@ -362,7 +362,7 @@ async fn creators_page_real_chain_browser_proof() {
             .is_empty()
     );
     // 发现设置：点赞标准存下，版本号加一。
-    let (threshold, revision): (Option<i64>, i64) = sqlx::query_as("SELECT like_threshold,revision FROM linggan_creator_discovery_policy WHERE domain_ref=$1 AND platform='xhs'")
+    let (threshold, revision): (Option<i64>, i64) = sqlx::query_as("SELECT like_threshold,revision FROM linggan_creator_discovery_threshold WHERE domain_ref=$1 AND platform='xhs'")
         .bind(first)
         .fetch_one(db.pool())
         .await

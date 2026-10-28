@@ -1,21 +1,48 @@
 //! Canonical creator preparation reaches a synthetic local Pi child in full.
-//! This is a data-consumer proof; the retired production scheduler remains closed.
+//! This is a data-consumer proof; it does not dispatch production research.
 #[path = "../../evidence/tests/support/research_dossier_fixture.rs"]
 mod dossier;
 use linggan_evidence::creator_discovery::load_topic_materials;
 use linggan_intelligence::{
     creator_discovery_input::{citation_map, prepare},
-    creator_discovery_worker::run_once,
-    model_secrets::SyntheticModelSecrets,
-    model_settings::ModelError,
     pi_adapter::{PI_PROTOCOL, PiAdapter, PiRequest},
 };
 use serde_json::{Value, json};
 
 #[tokio::test]
+#[ignore = "isolated PostgreSQL; no provider"]
+async fn creator_input_distinguishes_an_unread_image_from_a_complete_note() {
+    let db = dossier::fixture::proof_database("creator_dossier_coverage").await;
+    let work = dossier::work(&db).await;
+    let before = load_topic_materials(&db, dossier::DOMAIN).await.unwrap();
+    let old = before.works.iter().find(|w| w.work_ref == work).unwrap();
+    let (old_input, old_fragments) = prepare(&before.domain, old, &before.as_of);
+    dossier::acquired_image_source(&db).await;
+    let after = load_topic_materials(&db, dossier::DOMAIN).await.unwrap();
+    let current = after.works.iter().find(|w| w.work_ref == work).unwrap();
+    let (new_input, new_fragments) = prepare(&after.domain, current, &after.as_of);
+    assert_eq!(
+        old_fragments
+            .iter()
+            .map(|f| &f.fragment_id)
+            .collect::<Vec<_>>(),
+        new_fragments
+            .iter()
+            .map(|f| &f.fragment_id)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(new_input["coverage"]["imageInventory"]["acquiredPages"], 1);
+    assert_eq!(new_input["coverage"]["imageInventory"]["processedPages"], 0);
+    assert_ne!(old_input["coverage"], new_input["coverage"]);
+    assert_ne!(
+        old_input["sourceFingerprint"],
+        new_input["sourceFingerprint"]
+    );
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL and fixed synthetic child only; no provider or production dispatch"]
-async fn canonical_creator_input_keeps_full_content_and_exact_provenance_without_reviving_retired_worker()
- {
+async fn canonical_creator_input_keeps_full_content_and_exact_provenance() {
     let db = dossier::fixture::proof_database("creator_dossier_input").await;
     let work = dossier::work(&db).await;
     dossier::current_image_reading(&db).await;
@@ -35,8 +62,48 @@ async fn canonical_creator_input_keeps_full_content_and_exact_provenance_without
     let data = load_topic_materials(&db, dossier::DOMAIN).await.unwrap();
     let source = data.works.iter().find(|w| w.work_ref == work).unwrap();
     let (input, fragments) = prepare(&data.domain, source, &data.as_of);
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let same_snapshot = linggan_evidence::creator_discovery::load_topic_materials_for_works_at_in(
+        &mut tx,
+        dossier::DOMAIN,
+        &[work],
+        Some(&data.as_of),
+    )
+    .await
+    .unwrap();
+    let frozen = same_snapshot
+        .works
+        .iter()
+        .find(|item| item.work_ref == work)
+        .unwrap();
+    assert_eq!(frozen.fingerprint, source.fingerprint);
+    assert_eq!(frozen.dossier_coverage, source.dossier_coverage);
+    let empty = linggan_evidence::creator_discovery::load_topic_materials_for_works_at_in(
+        &mut tx,
+        dossier::DOMAIN,
+        &[],
+        Some(&data.as_of),
+    )
+    .await
+    .unwrap();
+    assert!(
+        empty.works.is_empty(),
+        "empty scope must not scan the domain"
+    );
+    tx.rollback().await.unwrap();
     assert_eq!(input["materialContract"], "research-dossier.v2");
     assert_eq!(input["asOf"], data.as_of);
+    let dossier = linggan_evidence::research_dossier::read(&db, work)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(input["dossierRevision"], dossier.revision);
+    assert_eq!(input["dossierMaterialRevision"], dossier.material_revision);
+    assert_eq!(input["coverage"], dossier.coverage);
     assert!(input.get("fragments").is_none());
     let materials = input["materials"].as_array().unwrap();
     assert_eq!(materials.len(), fragments.len());
@@ -78,17 +145,11 @@ async fn canonical_creator_input_keeps_full_content_and_exact_provenance_without
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("tests/support/creator_discovery_adapter.mjs"),
     );
-    assert!(matches!(
-        run_once(&db, &SyntheticModelSecrets, &adapter).await,
-        Err(ModelError::LegacyRetired)
-    ));
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM linggan_creator_discovery_work_analysis"
-        )
-        .fetch_one(db.pool())
-        .await
-        .unwrap(),
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_creator_research_result")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
         0
     );
     assert_eq!(
@@ -110,7 +171,7 @@ async fn canonical_creator_input_keeps_full_content_and_exact_provenance_without
             model_id: "synthetic-creator-proof".into(),
             timeout_ms: 30000,
             max_output_tokens: 1000,
-            system: linggan_intelligence::creator_discovery_analysis::SYSTEM.into(),
+            system: "Synthetic input contract test".into(),
             prompt: input.to_string(),
             images: vec![],
             execution: None,

@@ -10,6 +10,12 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-10-27 · 统一研究自动化
+
+- [统一研究自动化收口回执](audits/unified-research-automation-2026-10-27.md)：实现、审查修复、隔离与真实材料流程证明、发布边界。
+- [研究自动化执行合同](data-contracts/research-automation.md)：评论、主题与创作者各自业务流程、统一输入、版本设置、取消与来源资格。
+- [统一研究自动化工作包](plans/active/unified-research-automation-001.md)：旧链路/旧表退役、统一底稿及九阶段 AI 版本设置的当前候选与验证边界；尚未发布。
+
 ## 2026-10-25 · 统一研究底稿 STANDARD-DOSSIER-001
 
 - [实施、系统测试与问题报告](audits/standard-dossier-001-2026-10-25.md)：候选、截图、T01–T14证据及独立审查；正式发布另按最终版本授权。
@@ -79,7 +85,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 
 ## 评论研究产品化 · 当前交付入口
 
-Mog 已批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 将当前目标明确为手册 P0–P5 的完整可用页面和真实接口端到端验收；旧 P6–P8 快照及逐 T 形式测试不再阻塞功能开发，自动每日计划仍是下阶段。先读[完整手册入口](runbooks/comment-study-productization-package.md)，再按职责读取其中的八个分册、机器合同与验收台账。当前事实与未验证项以[当前项目账本](audits/comment-study-productization-001/README.md)及实际运行回执为准，不将文档入库视为代码、数据库或 UI 已交付；页面合同见[评论研究产品化 UI 规格](design/pages/comment-study-productization-001.md)。
+**历史产品化包（研究执行合同已替代）**：Mog 当时批准 COMMENT-STUDY-PRODUCTIZATION-001 增量开发，并于 2026-10-02 将当前目标明确为手册 P0–P5 的完整可用页面和真实接口端到端验收；旧 P6–P8 快照及逐 T 形式测试不再阻塞功能开发，自动每日计划仍是下阶段。先读[完整手册入口](runbooks/comment-study-productization-package.md)，再按职责读取其中的八个分册、机器合同与验收台账。当前事实与未验证项以[当前项目账本](audits/comment-study-productization-001/README.md)及实际运行回执为准，不将文档入库视为代码、数据库或 UI 已交付；页面合同见[评论研究产品化 UI 规格](design/pages/comment-study-productization-001.md)。
 
 本包保留当前 clean-study 合法历史，不延用 DEC-0006 的旧 reset 授权；取代旧版五视图与旧启动交互目标规格，不恢复 V1 路径。自动化分册是后续 P6 设计，不是定时外发授权。2026-09-28 的 P0–P8 推进快照见 COMMENT-STUDY-PRODUCTIZATION-001 验收账本；P2 收口的实施与 UI 边界见 [P2 closeout 清单](design/changes/comment-study-p2-closeout-001-ui-change-manifest.md)。
 

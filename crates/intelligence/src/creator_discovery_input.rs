@@ -5,18 +5,18 @@ use linggan_evidence::{
 };
 use serde_json::{Value, json};
 
-pub(crate) const ENVELOPE_BYTES: usize = 128;
-
 pub fn prepare(domain: &Value, work: &DiscoveryWork, as_of: &str) -> (Value, Vec<Fragment>) {
     let fragments = work.fragments.clone();
     let materials = provider_materials(&fragments);
     let input = json!({"domain":domain,"workRef":work.work_ref,"asOf":as_of,"sourceFingerprint":work.fingerprint,
         "materialContract":research_dossier::VERSION,"readingTitle":work.reading_title,"materials":materials,
+        "dossierRevision":work.dossier_revision,"dossierMaterialRevision":work.dossier_material_revision,
+        "coverage":work.dossier_coverage,
         "acquisitionContext":{"kind":work.acquisition_kind,"selectionBiased":true}});
     (input, fragments)
 }
 
-fn provider_materials(fragments: &[Fragment]) -> Vec<Value> {
+pub(crate) fn provider_materials(fragments: &[Fragment]) -> Vec<Value> {
     fragments.iter().enumerate().map(|(index, f)| json!({
         "citation":format!("S{}",index+1),"blockRef":f.fragment_id,"field":f.field,
         "sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,

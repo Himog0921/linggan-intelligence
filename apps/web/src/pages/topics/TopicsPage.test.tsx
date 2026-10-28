@@ -32,7 +32,7 @@ function page() {
 function defaultRead(path: string) {
   if (path === "/api/local/ai-settings") return businessSettingsFixture();
   if (path.includes("/context")) return topicContext;
-  if (path.includes("/research")) return topicProgress();
+  if (path.includes("topic-research")) return topicProgress();
   if (path.includes("/comments"))
     return { items: [], total: 0, nextCursor: null };
   return topicSnapshot();
@@ -240,7 +240,7 @@ describe("Topic React interaction and lifetime", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (path: string) =>
-        path.includes("/research")
+        path.includes("topic-research")
           ? jsonResponse({ code: "research_unavailable" }, 503)
           : jsonResponse(defaultRead(path)),
       ),
@@ -251,7 +251,7 @@ describe("Topic React interaction and lifetime", () => {
         screen.getByRole("button", { name: "合成材料 0" }),
       ).toBeInTheDocument(),
     );
-    expect(await screen.findByRole("button", { name: /历史记录读取失败/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /研究进度读取失败/ })).toBeInTheDocument();
     expect(screen.queryByText("研究未设置")).not.toBeInTheDocument();
   });
   it("discards an old domain read after popstate even if the transport ignores abort", async () => {
@@ -284,7 +284,7 @@ describe("Topic React interaction and lifetime", () => {
               ],
             }),
           );
-        if (path.includes("/research"))
+        if (path.includes("topic-research"))
           return Promise.resolve(
             jsonResponse({
               ...topicProgress(),
@@ -332,7 +332,7 @@ describe("Topic React interaction and lifetime", () => {
         jsonResponse(
           path.includes("/context")
             ? topicContext
-            : path.includes("/research")
+            : path.includes("topic-research")
               ? topicProgress()
               : snapshot,
         ),
@@ -418,28 +418,28 @@ describe("Topic React interaction and lifetime", () => {
           );
         return Promise.resolve(jsonResponse(
           path === "/api/local/ai-settings" ? businessSettingsFixture() : path.includes("/context") ? topicContext
-            : path.includes("/research") ? progress : topicSnapshot(),
+            : path.includes("topic-research") ? progress : topicSnapshot(),
         ));
       });
       vi.stubGlobal("fetch", fetcher);
       page();
       if (mode === "failed") await screen.findByText("当前读取未成功");
       const trigger = await screen.findByRole("button", {
-        name: /旧研究已退役|历史研究记录读取中/,
+        name: /主题研究|研究进度读取中/,
       });
       await userEvent.click(trigger);
       expect(await screen.findByRole("dialog", {
-        name: "AI 状态与历史研究",
+        name: "主题研究",
       })).toBeInTheDocument();
-      await screen.findByRole("button", { name: "刷新历史记录" });
+      await screen.findByRole("button", { name: "刷新阶段回执" });
       expect(writes).toEqual([]);
       const researchReads = () => fetcher.mock.calls.filter(
-        ([path]) => path.includes("/research?"),
+        ([path]) => path.includes("/topic-research/runs?"),
       ).length;
       const readsBefore = researchReads();
-      await userEvent.click(screen.getByRole("button", { name: "刷新历史记录" }));
+      await userEvent.click(screen.getByRole("button", { name: "刷新阶段回执" }));
       await waitFor(() => expect(researchReads()).toBeGreaterThan(readsBefore));
-      expect(screen.getByRole("link", { name: "去 AI 设置" })).toHaveAttribute("href", "/settings/models?view=advanced&area=work&task=legacy_topic_map");
+      expect(screen.getByRole("link", { name: "去 AI 设置" })).toHaveAttribute("href", "/settings/models?view=advanced&area=work&task=topic_research");
       expect(screen.queryByLabelText("已有模型配置")).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "保存明确设置" })).not.toBeInTheDocument();
       expect(writes).toEqual([]);
@@ -465,7 +465,7 @@ describe("Topic React interaction and lifetime", () => {
       jsonResponse(
         path.includes("/context")
           ? topicContext
-          : path.includes("/research")
+          : path.includes("topic-research")
             ? topicProgress()
             : snapshot,
       ),
@@ -521,7 +521,7 @@ describe("Topic React interaction and lifetime", () => {
             ? alternative
             : path.includes("/context")
               ? topicContext
-              : path.includes("/research")
+              : path.includes("topic-research")
                 ? topicProgress()
                 : body,
         ),

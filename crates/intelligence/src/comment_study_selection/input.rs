@@ -1,7 +1,6 @@
 //! Build content equivalence separately from the exact immutable evidence references.
 use super::{CommentKey, StudySelectionError};
 use crate::comment_cleaning::{CLEANER_VERSION, clean};
-use crate::comment_study_policy::json_hash;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -214,10 +213,10 @@ pub fn prepare_study_input(
         parent_context(key, parent)?;
     let raw_sha256 = hash_text(raw);
     let research_sha256 = hash_text(&cleaned.text);
-    let input_fingerprint = hash(&json!({"contract":"comment-study.input-fingerprint.v2",
+    let input_fingerprint = hash(&json!({"contract":"comment-study.input-fingerprint.v3",
         "commentKey":key,"rawSha256":raw_sha256,"researchSha256":research_sha256,
         "cleanerVersion":CLEANER_VERSION,"dependencyState":dependency_state,
-        "workContext":context,"parentContext":parent_identity}))?;
+        "workContext":context,"workCoverage":work_context["coverage"],"parentContext":parent_identity}))?;
     let input_manifest = json!({"contract":"comment-study.target-input.v2","targetSourceRef":source_ref,
         "workRef":key.work_ref,"workContextHash":hash(work_context)?,"parentContext":parent_manifest,
         "rawSha256":raw_sha256,"cleanerVersion":CLEANER_VERSION});
@@ -232,4 +231,55 @@ pub fn prepare_study_input(
         input_hash,
         input_fingerprint,
     })
+}
+
+pub fn canonical_json_v2(value: &Value) -> Result<Vec<u8>, StudySelectionError> {
+    fn write(value: &Value, out: &mut Vec<u8>, depth: usize) -> Result<(), StudySelectionError> {
+        if depth > 64 {
+            return Err(StudySelectionError::InvalidSnapshot);
+        }
+        match value {
+            Value::Object(map) => {
+                out.push(b'{');
+                let mut keys: Vec<_> = map.keys().collect();
+                keys.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+                for (index, key) in keys.iter().enumerate() {
+                    if index != 0 {
+                        out.push(b',');
+                    }
+                    serde_json::to_writer(&mut *out, key)
+                        .map_err(|_| StudySelectionError::InvalidSnapshot)?;
+                    out.push(b':');
+                    write(&map[*key], out, depth + 1)?;
+                }
+                out.push(b'}');
+            }
+            Value::Array(items) => {
+                out.push(b'[');
+                for (index, item) in items.iter().enumerate() {
+                    if index != 0 {
+                        out.push(b',');
+                    }
+                    write(item, out, depth + 1)?;
+                }
+                out.push(b']');
+            }
+            Value::Number(n) if n.as_f64().is_none_or(|v| !v.is_finite()) => {
+                return Err(StudySelectionError::InvalidSnapshot);
+            }
+            _ => serde_json::to_writer(out, value)
+                .map_err(|_| StudySelectionError::InvalidSnapshot)?,
+        }
+        Ok(())
+    }
+    let mut bytes = Vec::new();
+    write(value, &mut bytes, 0)?;
+    Ok(bytes)
+}
+
+pub fn json_hash(value: &Value) -> Result<String, StudySelectionError> {
+    Ok(Sha256::digest(canonical_json_v2(value)?)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }

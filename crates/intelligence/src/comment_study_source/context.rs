@@ -57,10 +57,11 @@ pub(crate) async fn read_work_contexts(
 pub(crate) fn dossier_manifest(
     dossier: &linggan_evidence::research_dossier::ResearchDossier,
 ) -> Value {
-    crate::comment_study_run::full_context_manifest(&json!({
+    full_context_manifest(&json!({
         "contract":"comment-study.context.v2","workRef":dossier.work_ref,
         "readingTitle":linggan_evidence::research_dossier::reading_title(dossier),
-        "dossierRevision":dossier.material_revision,"dossierContract":dossier.contract,
+        "dossierRevision":dossier.material_revision,"dossierCompleteRevision":dossier.revision,
+        "dossierContract":dossier.contract,"coverage":dossier.coverage,
         "cleanerVersion":CLEANER_VERSION,
         "sources":linggan_evidence::research_dossier::context_sources(dossier)
     }))
@@ -101,4 +102,21 @@ pub(crate) async fn read_parents(
             Ok(((work, id), value))
         })
         .collect()
+}
+
+pub fn full_context_manifest(manifest: &Value) -> Value {
+    let sources = manifest["sources"].as_array().cloned().unwrap_or_default();
+    let count: usize = sources
+        .iter()
+        .map(|source| {
+            source["text"]
+                .as_str()
+                .map_or(0, |text| text.chars().count())
+        })
+        .sum();
+    json!({"contract":"comment-study.context.v2","workRef":manifest["workRef"],
+        "cleanerVersion":manifest["cleanerVersion"],"dossierRevision":manifest["dossierRevision"],
+        "dossierCompleteRevision":manifest["dossierCompleteRevision"],"coverage":manifest["coverage"],
+        "dossierContract":manifest["dossierContract"],"includedCharacterCount":count,
+        "readingTitle":manifest["readingTitle"],"orderBasis":"dossier_canonical_block_order","sources":sources})
 }

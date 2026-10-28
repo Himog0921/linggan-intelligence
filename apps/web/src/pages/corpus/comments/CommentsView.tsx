@@ -1,3 +1,4 @@
+import { CommentResearchSelection } from './CommentResearchSelection';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { LikeCount, PostUsageControl } from './CommentCells';
@@ -68,7 +69,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
   }
   const detailWork = params.get('commentWorkRef') || (params.get('detail') === 'comment' ? params.get('workRef') : null), detailId = params.get('commentExternalId');
   const saved = async (message: string) => { notify(message); if (filter.cursor) route({ cursor: null, history: [] }, true); else { const result = await query.refetch(); if (result.error) throw result.error; } };
-  const detail = detailWork && detailId ? <CommentDetail key={commentIdentity({ workRef: detailWork, commentExternalId: detailId })} domain={domain} commentKey={{ workRef: detailWork, commentExternalId: detailId }} nav={nav} close={closeDetail} filterWork={(workRef, workLabel) => route({ q: workLabel, searchScope: 'work', workRef, workLabel, workChoices: [{ workRef, displayTitle: workLabel }], cursor: null, history: [] }, false, true)} /> : null;
+  const detail = detailWork && detailId ? <CommentDetail key={commentIdentity({ workRef: detailWork, commentExternalId: detailId })} domain={domain} commentKey={{ workRef: detailWork, commentExternalId: detailId }} nav={nav} request={params.get('researchRequestRef')} close={closeDetail} filterWork={(workRef, workLabel) => route({ q: workLabel, searchScope: 'work', workRef, workLabel, workChoices: [{ workRef, displayTitle: workLabel }], cursor: null, history: [] }, false, true)} /> : null;
 
   const extraCount = Number(draft.voiceRole !== 'reader_and_unknown') + Number(!!draft.minLikes) + Number(draft.postUsage !== 'all');
   const loadedEligible = rows.filter(item => item.studyEligibility.eligible && ['primary','reference'].includes(item.observationRole));
@@ -80,14 +81,15 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
     for (const item of loadedEligible) {
       const key = commentIdentity(item.commentKey);
       if (ids.has(key)) continue;
-      if (next.length >= 3000) break;
+      if (next.length >= 50) break;
       if (!works.has(item.commentKey.workRef) && works.size >= 100) continue;
-      next.push({ commentKey: item.commentKey, observationRole: item.observationRole });
+      next.push({ sourceRef: item.sourceRef, commentKey: item.commentKey, observationRole: item.observationRole });
       ids.add(key); works.add(item.commentKey.workRef);
     }
     onSelected(next);
   }
   return <div className={c('study-results-comments')}>
+    {selected.length ? <CommentResearchSelection key={selected.map(p => p.sourceRef).join(',')} domain={domain} selected={selected} nav={nav} clear={() => onSelected([])} /> : null}
     {query.isPending ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>正在读取评论研究…</p></div> : query.isError ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>评论目录读取失败：{errorText(query.error)} <button type="button" onClick={() => { void query.refetch(); }}>重试</button></p></div> :
     <section className={c('study-comments')} aria-label="用户评论">
       {toast ? <p className={c('study-comment-toast')} data-comment-toast data-error={toast.error || undefined} role="status">{toast.message}</p> : null}
@@ -138,12 +140,12 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
         <thead><tr>{(selecting ? ['选择'] : []).concat(['原声','点赞','所属作品','研究状态','研究标签','作者','点赞采集日','观测时间','改帖']).map(title=><th className={title === '点赞' ? c('study-comment-like-heading') : undefined} scope="col" key={title}>{title}</th>)}</tr></thead>
         <tbody>{rows.length ? rows.map(item => {
           const key = commentIdentity(item.commentKey), eligible = item.studyEligibility.eligible && ['primary','reference'].includes(item.observationRole), checked = selectedIds.has(key),
-            capped = !checked && (selected.length >= 3000 || (!selectedWorks.has(item.commentKey.workRef) && selectedWorks.size >= 100)),
+            capped = !checked && (selected.length >= 50 || (!selectedWorks.has(item.commentKey.workRef) && selectedWorks.size >= 100)),
             kinds = item.signalKinds.filter(kind => Object.hasOwn(signalKindLabel, kind)), fullKinds = kinds.map(kind => signalKindLabel[kind]).join('、');
           const eligibilityText = eligible ? '' : commentEligibility(item), statusText = commentStatus(item);
           return <tr key={key} data-selected={checked ? 'true' : undefined}>
             {selecting ? <td className={c('study-comment-check-cell')}><label className={c('study-comment-check')}><input type="checkbox" data-select-comment data-work-ref={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} data-eligible={eligible} aria-label="选择这条评论" title={!eligible ? eligibilityText : capped ? '本次选择已达到评论或作品数量上限' : undefined} checked={checked} disabled={!eligible || capped} onChange={event => {
-              if (event.target.checked && eligible && !capped) onSelected([...selected, { commentKey: item.commentKey, observationRole: item.observationRole }]);
+              if (event.target.checked && eligible && !capped) onSelected([...selected, { sourceRef: item.sourceRef, commentKey: item.commentKey, observationRole: item.observationRole }]);
               else onSelected(selected.filter(row => commentIdentity(row.commentKey) !== key));
             }} /></label></td> : null}
             <td><button type="button" className={c('study-comment-open')} aria-label={item.commentText || '评论原声不可用'} title={item.commentText || '评论原声不可用'} data-comment-work={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} onClick={() => nav.comment(item.commentKey)}>

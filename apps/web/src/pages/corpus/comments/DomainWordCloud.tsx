@@ -2,10 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { errorText, num } from './format';
 import { useStudyRead, type StudyNavigation } from './studyApi';
 import { parseWordCloud } from './wordCloudDtos';
-import type { WordCloudCategory } from './overviewState';
 import { c } from './styles';
 
-type Category = WordCloudCategory;
+export type Category = 'all' | 'scenario' | 'emotion' | 'approach';
 const TABS: readonly { key: Category; label: string }[] = [
   { key: 'all', label: '全部表达' },
   { key: 'scenario', label: '困难场景' },

@@ -132,12 +132,22 @@ pub(super) fn input_identity_for(input: &ResearchInput, contract: &str, method: 
         .collect();
     comparison_scope.sort();
     comparison_scope.dedup();
+    // Coverage changes the conclusions supported by the same readable blocks.
+    // The revision itself remains provenance: a same-text recapture with the
+    // same coverage should not manufacture a new semantic discussion.
+    let dossier_coverage: serde_json::Map<String, Value> = input.coverage["dossiers"]
+        .as_object()
+        .into_iter()
+        .flat_map(|dossiers| dossiers.iter())
+        .map(|(work, dossier)| (work.clone(), dossier["coverage"].clone()))
+        .collect();
     creator_discovery::hash(&json!({
         "contract":contract,"kind":input.coverage["kind"].as_str().unwrap_or("source"),
         "domain":domain_identity(&input.domain),"workRef":input.work.work_ref,
         "fragments":input.fragments.iter().map(|f|semantic_fragment(input,f)).collect::<Vec<_>>(),
         "commentStudy":semantic_comment_study(input),"roles":role_identity(input),
         "selectedDiscussions":semantic_discussions(input),
+        "dossierCoverage":dossier_coverage,
         "comparisonScope":if input.coverage["kind"] == "comparison" { json!(comparison_scope) } else { Value::Null },
         "method":method,"config":input.coverage["configRef"],
     }).to_string())

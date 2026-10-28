@@ -46,49 +46,23 @@ async fn ai_foundation_retired_handlers_cannot_read_a_secret_touch_work_or_spawn
             }
         };
     }
-    retired!(ai::model_runner::run_model_work_once(
-        &db, &secrets, &adapter
-    ));
-    retired!(ai::model_runner::prepare_next_batch_across_runs(&db));
-    retired!(ai::creator_discovery_worker::run_once(
-        &db, &secrets, &adapter
-    ));
-    retired!(ai::topic_map_research_worker::run_once(
-        &db, &secrets, &adapter
-    ));
-    retired!(ai::comment_study_model_runner::call_study_batch_model(
-        &db,
-        &secrets,
-        &adapter,
-        Uuid::new_v4(),
-        Uuid::new_v4()
-    ));
-    retired!(ai::comment_study_pair_worker::run_one_problem_pair(
-        &db, &secrets, &adapter
-    ));
-    retired!(
-        ai::comment_study_resolution_worker::run_one_problem_resolution(&db, &secrets, &adapter)
-    );
-    retired!(ai::comment_study_embedding::embed_pending_signals(
-        &db, &adapter
-    ));
-    retired!(ai::comment_study_embedding::probe_and_register_embedding_profile(&db, &adapter));
+    for relation in [
+        "linggan_comment_study_policy",
+        "linggan_topic_map_research_run",
+        "linggan_creator_discovery_policy",
+    ] {
+        assert!(
+            !sqlx::query_scalar::<_, bool>("SELECT to_regclass($1) IS NOT NULL")
+                .bind(relation)
+                .fetch_one(db.pool())
+                .await
+                .unwrap()
+        );
+    }
     retired!(ai::model_invocation::connection_request(
         &db,
         &secrets,
         Uuid::new_v4()
-    ));
-    let request = ai::topic_map_research::ResearchCommand::Configure {
-        request_ref: Uuid::new_v4(),
-        domain_ref: Uuid::new_v4(),
-        model_config_ref: Uuid::new_v4(),
-        daily_token_limit: 1024,
-        run_token_limit: 1024,
-        automatic_enabled: true,
-        collection_enabled: true,
-    };
-    retired!(ai::topic_map_research::apply_research_command(
-        &db, &request
     ));
     assert_eq!(secrets.0.load(Ordering::SeqCst), 0);
     assert!(!root.join("child-started").exists());

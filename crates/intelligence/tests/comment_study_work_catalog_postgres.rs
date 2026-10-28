@@ -16,21 +16,8 @@ use serde_json::{Value, json};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-const BASE: &str = concat!(
-    include_str!("../../../database/bootstrap/comment-study-001.sql"),
-    "\n",
-    include_str!("../../../database/migrations/0114_comment_study_effective_head.sql")
-);
-const DELTA: &str =
-    include_str!("../../../database/migrations/0107_comment_study_productization_schema.sql");
-
 async fn database(name: &str) -> Database {
-    let db = proof_database(name).await;
-    sqlx::raw_sql(BASE).execute(db.pool()).await.unwrap();
-    let mut tx = db.pool().begin().await.unwrap();
-    sqlx::raw_sql(DELTA).execute(&mut *tx).await.unwrap();
-    tx.commit().await.unwrap();
-    db
+    proof_database(name).await
 }
 
 fn query() -> WorkCatalogQuery {
@@ -183,7 +170,7 @@ async fn all_125_works_are_pageable_and_titles_after_the_first_100_are_searchabl
     assert_eq!(found["totalWorkCount"], 1);
     assert_eq!(found["items"][0]["workRef"], last_work["workRef"]);
     assert_eq!(found["page"]["hasMore"], false);
-    let runs: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_run")
+    let runs: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_research_request")
         .fetch_one(db.pool())
         .await
         .unwrap();
@@ -254,7 +241,7 @@ async fn work_counts_share_comment_qualification_and_hide_zero_eligible_works() 
     let restricted_view = read_work_catalog(&db, &query()).await.unwrap();
     assert_eq!(find_work(&restricted_view, work)["eligibleCommentCount"], 1);
     assert_eq!(restricted_view["totalWorkCount"], 1);
-    let cached: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_study_clean_cache")
+    let cached: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_clean_cache")
         .fetch_one(db.pool())
         .await
         .unwrap();
