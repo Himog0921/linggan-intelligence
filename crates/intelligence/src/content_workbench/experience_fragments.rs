@@ -39,38 +39,23 @@ pub(super) fn strip(doc: &mut WorkDocument) {
 
 /// A known full experience paragraph may occur only in paragraphs retaining that experience's
 /// binding. This covers exact moves/copies, not arbitrary human paraphrases or external paste.
-fn metadata(doc: &WorkDocument) -> Vec<(String, &str)> {
+fn metadata(doc: &WorkDocument) -> Vec<&str> {
     let mut out = Vec::new();
     if let Some(p) = &doc.material_preparation {
-        out.push(("query".into(), p.query.as_str()));
-        out.extend(
-            p.terms
-                .iter()
-                .enumerate()
-                .map(|(i, s)| (format!("term:{i}"), s.as_str())),
-        );
-        out.extend(
-            p.gaps
-                .iter()
-                .enumerate()
-                .map(|(i, s)| (format!("gap:{i}"), s.as_str())),
-        );
+        out.push(p.query.as_str());
+        out.extend(p.terms.iter().map(String::as_str));
+        out.extend(p.gaps.iter().map(String::as_str));
     }
     for m in &doc.materials {
-        out.extend(
-            m.match_reasons
-                .iter()
-                .enumerate()
-                .map(|(i, s)| (format!("material:{}:{i}", m.document_id), s.as_str())),
-        );
+        out.extend(m.match_reasons.iter().map(String::as_str));
     }
     for e in &doc.excerpts {
         if let Some(text) = &e.selected_text {
-            out.push((format!("excerpt:{}", e.id), text.as_str()));
+            out.push(text.as_str());
         }
     }
     if let Some(b) = doc.bridge.as_ref().and_then(|b| b.sentence.as_ref()) {
-        out.push(("bridge".into(), b.text.as_str()));
+        out.push(b.text.as_str());
     }
     out
 }
@@ -91,24 +76,19 @@ fn copied_to_unbound_text(
     if raw.is_empty() || raw == WITHDRAWN || raw == UNAVAILABLE {
         return false;
     }
-    let target_copy = super::source_usage::authored_targets(doc).iter().any(|target| {
-        let bound_to_same = matches!(target, UseTarget::Paragraph { paragraph_id }
-            if doc.experience_slots.iter().any(|slot| slot.paragraph_id == *paragraph_id && slot.experience_ref == experience));
-        if bound_to_same { return false; }
-        let previous_was_bound = old.is_some_and(|old| matches!(target, UseTarget::Paragraph { paragraph_id }
-            if old.experience_slots.iter().any(|slot| slot.paragraph_id == *paragraph_id && slot.experience_ref == experience)));
-        let before = if previous_was_bound { 0 } else { old.and_then(|old| super::validation::target_text(old, target)).map_or(0, |text| occurrences(text, raw)) };
-        super::validation::target_text(doc, target).is_some_and(|text| occurrences(text, raw) > before)
-    });
-    let before = old.map(metadata).unwrap_or_default();
-    let metadata_copy = metadata(doc).iter().any(|(key, text)| {
-        let previous = before
-            .iter()
-            .find(|(old_key, _)| old_key == key)
-            .map_or(0, |(_, text)| occurrences(text, raw));
-        occurrences(text, raw) > previous
-    });
-    target_copy || metadata_copy
+    let count = |document: &WorkDocument| {
+        let fields = super::source_usage::authored_targets(document).iter().filter_map(|target| {
+            let bound_to_same = matches!(target, UseTarget::Paragraph { paragraph_id }
+                if document.experience_slots.iter().any(|slot| slot.paragraph_id == *paragraph_id && slot.experience_ref == experience));
+            (!bound_to_same).then(|| super::validation::target_text(document, target)).flatten()
+        }).map(|text| occurrences(text, raw)).sum::<usize>();
+        fields
+            + metadata(document)
+                .iter()
+                .map(|text| occurrences(text, raw))
+                .sum::<usize>()
+    };
+    count(doc) > old.map_or(0, count)
 }
 
 pub(super) async fn prepare(
@@ -168,9 +148,15 @@ pub(super) async fn prepare(
     let mut fragments = Vec::new();
     for slot in &doc.experience_slots {
         lock_experience(tx, slot.experience_ref).await?;
+        if let Some(account) = doc.account_ref {
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+                .bind(format!("creation_assets:identity:{account}"))
+                .execute(&mut **tx)
+                .await?;
+        }
         let continuing =
             old.is_some_and(|old| old.experience_slots.iter().any(|existing| existing == slot));
-        let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience e JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=$2 JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1 AND e.account_ref=$3 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND ($4 OR (e.state='confirmed' AND e.current_revision=$2)) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE)")
+        let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience e JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=$2 JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1 AND e.account_ref=$3 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND c.subject_ref=e.subject_ref AND EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref AND p.subject_ref=e.subject_ref) AND ($4 OR (e.state='confirmed' AND e.current_revision=$2)) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE)")
             .bind(slot.experience_ref).bind(slot.experience_revision).bind(doc.account_ref).bind(continuing)
             .fetch_one(&mut **tx).await?;
         if !allowed {
@@ -215,7 +201,7 @@ pub(super) async fn project(
     doc: &mut WorkDocument,
 ) -> Result<(), WorkbenchError> {
     for slot in &doc.experience_slots {
-        let row = sqlx::query("SELECT f.body FROM linggan_creation_experience_fragment f JOIN linggan_creation_experience e ON e.experience_ref=f.experience_ref JOIN linggan_creation_experience_consent c ON c.experience_ref=f.experience_ref AND c.revision=f.experience_revision WHERE f.revision_ref=$1 AND f.paragraph_ref=$2 AND f.experience_ref=$3 AND f.experience_revision=$4 AND e.account_ref=$5 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE")
+        let row = sqlx::query("SELECT f.body FROM linggan_creation_experience_fragment f JOIN linggan_creation_experience e ON e.experience_ref=f.experience_ref JOIN linggan_creation_experience_consent c ON c.experience_ref=f.experience_ref AND c.revision=f.experience_revision WHERE f.revision_ref=$1 AND f.paragraph_ref=$2 AND f.experience_ref=$3 AND f.experience_revision=$4 AND e.account_ref=$5 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND c.subject_ref=e.subject_ref AND EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref AND p.subject_ref=e.subject_ref) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE")
             .bind(revision).bind(slot.paragraph_id).bind(slot.experience_ref).bind(slot.experience_revision).bind(doc.account_ref).fetch_optional(&mut **tx).await?;
         let mut text = row.map(|r| r.try_get::<String, _>("body")).transpose()?;
         if text.is_none() {
@@ -248,7 +234,7 @@ pub async fn all_available(
     doc: &WorkDocument,
 ) -> Result<bool, WorkbenchError> {
     for slot in &doc.experience_slots {
-        let ok: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience_fragment f JOIN linggan_creation_experience e ON e.experience_ref=f.experience_ref JOIN linggan_creation_experience_consent c ON c.experience_ref=f.experience_ref AND c.revision=f.experience_revision WHERE f.revision_ref=$1 AND f.paragraph_ref=$2 AND f.experience_ref=$3 AND f.experience_revision=$4 AND e.account_ref=$5 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE)")
+        let ok: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience_fragment f JOIN linggan_creation_experience e ON e.experience_ref=f.experience_ref JOIN linggan_creation_experience_consent c ON c.experience_ref=f.experience_ref AND c.revision=f.experience_revision WHERE f.revision_ref=$1 AND f.paragraph_ref=$2 AND f.experience_ref=$3 AND f.experience_revision=$4 AND e.account_ref=$5 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND c.subject_ref=e.subject_ref AND EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref AND p.subject_ref=e.subject_ref) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE)")
             .bind(revision).bind(slot.paragraph_id).bind(slot.experience_ref).bind(slot.experience_revision).bind(doc.account_ref).fetch_one(&mut **tx).await?;
         if !ok {
             return Ok(false);

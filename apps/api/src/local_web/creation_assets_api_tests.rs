@@ -78,6 +78,44 @@ fn rid() -> serde_json::Value {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn creation_assets_http_person_correction_and_replacement_require_explicit_choice() {
+    let db = proof("assets_http_person").await;
+    let (account, _) = seed_accounts(&db).await;
+    let app = app_with_database(db);
+    let uri = format!("/ops/api/creation/accounts/{account}/identity");
+    let mut input = json!({"requestId":rid(), "expectedRevision":0, "orgRelation":"parent",
+        "bioDisclosesRelation":null,"hasRealPerson":true,"backingPersonRole":"妈妈","canProvideExperience":null});
+    let (status, first) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["identity"]["hasKnownPerson"], true);
+    input["requestId"] = rid();
+    input["expectedRevision"] = json!(1);
+    input["backingPersonRole"] = json!("爸爸");
+    let (status, missing) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
+    assert_eq!(
+        (status, missing["code"].as_str()),
+        (
+            StatusCode::BAD_REQUEST,
+            Some("creation_person_change_required")
+        )
+    );
+    input["personChange"] = json!("correction");
+    let (status, corrected) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(corrected["identity"]["revision"], 2);
+    input["requestId"] = rid();
+    input["expectedRevision"] = json!(2);
+    input["personChange"] = json!("replacement");
+    let (status, replaced) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replaced["identity"]["revision"], 3);
+    let (status, replay) = call(&app, Method::PUT, &uri, Some(input)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["replayed"], true);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
 async fn creation_assets_http_identity_cards_and_sentences_follow_the_contract() {
     let db = proof("assets_http_library").await;
     let (xhs, douyin) = seed_accounts(&db).await;

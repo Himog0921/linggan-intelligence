@@ -49,6 +49,32 @@ beforeEach(() => {
 });
 
 describe('账号身份', () => {
+  it('requires the author to distinguish a role correction from a replacement', async () => {
+    const current = identity({ hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '妈妈' });
+    vi.mocked(api.listAccounts).mockResolvedValue([account(A1, '甲号', { identity: current })]);
+    vi.mocked(api.putIdentity).mockResolvedValue({ identity: identity({ revision: 3, hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '爸爸' }), replayed: false });
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: /甲号/ }));
+    const form = await screen.findByRole('form', { name: '甲号 · 账号身份' });
+    fireEvent.change(within(form).getByLabelText(/真人的角色/), { target: { value: '爸爸' } });
+    expect(within(form).getByRole('button', { name: '保存' })).toBeDisabled();
+    fireEvent.click(within(form).getByLabelText('同一位真人，更正信息'));
+    fireEvent.click(within(form).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(api.putIdentity).toHaveBeenCalledWith(A1, expect.objectContaining({ personChange: 'correction', backingPersonRole: '爸爸' })));
+  });
+
+  it('can record replacement even when the role label stays the same', async () => {
+    const current = identity({ hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '妈妈' });
+    vi.mocked(api.listAccounts).mockResolvedValue([account(A1, '甲号', { identity: current })]);
+    vi.mocked(api.putIdentity).mockResolvedValue({ identity: identity({ revision: 3, hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '妈妈' }), replayed: false });
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: /甲号/ }));
+    const form = await screen.findByRole('form', { name: '甲号 · 账号身份' });
+    fireEvent.click(within(form).getByLabelText('更换了真人'));
+    fireEvent.click(within(form).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(api.putIdentity).toHaveBeenCalledWith(A1, expect.objectContaining({ personChange: 'replacement', backingPersonRole: '妈妈' })));
+  });
+
   it('lists accounts with what is known and never fills in an answer nobody gave', async () => {
     vi.mocked(api.listAccounts).mockResolvedValue([
       account(A1, '甲号', { identity: identity({ bioDisclosesRelation: true }), operatorName: '小王' }), account(A2, '乙号'),

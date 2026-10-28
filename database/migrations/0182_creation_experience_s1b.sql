@@ -2,16 +2,65 @@
 -- This candidate is not a complete draft integration and must not be deployed on its own.
 CREATE SEQUENCE linggan_creation_experience_code_seq;
 
+-- A pseudonymous subject identifies the person behind an account, not their legal identity.
+-- Corrections keep it; a confirmed replacement creates a new subject.
+CREATE TABLE linggan_creation_person_subject (
+    subject_ref uuid PRIMARY KEY,
+    account_ref uuid NOT NULL REFERENCES linggan_ops_account(account_ref),
+    created_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    UNIQUE (subject_ref, account_ref)
+);
+CREATE TABLE linggan_creation_account_person (
+    account_ref uuid PRIMARY KEY REFERENCES linggan_ops_account(account_ref),
+    subject_ref uuid NOT NULL,
+    FOREIGN KEY (subject_ref, account_ref) REFERENCES linggan_creation_person_subject(subject_ref, account_ref)
+);
+CREATE TABLE linggan_creation_person_assignment (
+    identity_ref uuid PRIMARY KEY REFERENCES linggan_creation_account_identity(identity_ref),
+    account_ref uuid NOT NULL,
+    subject_ref uuid NOT NULL,
+    action text NOT NULL CHECK (action IN ('bootstrap', 'created', 'unchanged', 'corrected', 'replaced', 'unavailable')),
+    recorded_by text NOT NULL CHECK (recorded_by = 'local_machine'),
+    recorded_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    FOREIGN KEY (subject_ref, account_ref) REFERENCES linggan_creation_person_subject(subject_ref, account_ref)
+);
+CREATE TRIGGER linggan_creation_person_subject_immutable
+    BEFORE UPDATE OR DELETE ON linggan_creation_person_subject
+    FOR EACH ROW EXECUTE FUNCTION linggan_ops_forbid_mutation();
+CREATE TRIGGER linggan_creation_person_assignment_immutable
+    BEFORE UPDATE OR DELETE ON linggan_creation_person_assignment
+    FOR EACH ROW EXECUTE FUNCTION linggan_ops_forbid_mutation();
+
+-- S1a had no personal experience objects: seed one pseudonym for each current known person.
+WITH latest AS (
+    SELECT DISTINCT ON (account_ref) account_ref, has_real_person
+    FROM linggan_creation_account_identity ORDER BY account_ref, revision_number DESC
+), seeded AS (
+    INSERT INTO linggan_creation_person_subject(subject_ref,account_ref)
+    SELECT gen_random_uuid(), account_ref FROM latest WHERE has_real_person IS TRUE
+    RETURNING subject_ref,account_ref
+)
+INSERT INTO linggan_creation_account_person(account_ref,subject_ref)
+SELECT account_ref,subject_ref FROM seeded;
+INSERT INTO linggan_creation_person_assignment(identity_ref,account_ref,subject_ref,action,recorded_by)
+SELECT i.identity_ref, p.account_ref, p.subject_ref, 'bootstrap', 'local_machine'
+FROM linggan_creation_account_person p
+JOIN LATERAL (SELECT identity_ref FROM linggan_creation_account_identity
+              WHERE account_ref=p.account_ref ORDER BY revision_number DESC LIMIT 1) i ON true;
+
 CREATE TABLE linggan_creation_experience (
     experience_ref uuid PRIMARY KEY,
     code text NOT NULL UNIQUE CHECK (code ~ '^JL-[0-9]{4,}$'),
     account_ref uuid NOT NULL REFERENCES linggan_ops_account(account_ref),
+    subject_ref uuid NOT NULL,
     state text NOT NULL CHECK (state IN ('awaiting_subject', 'confirmed', 'disabled', 'withdrawn')),
     current_revision integer NOT NULL CHECK (current_revision > 0),
     created_by text NOT NULL CHECK (created_by = 'local_machine'),
     created_at timestamptz NOT NULL DEFAULT scope_001_now(),
     withdrawn_at timestamptz,
-    CHECK ((state = 'withdrawn') = (withdrawn_at IS NOT NULL))
+    CHECK ((state = 'withdrawn') = (withdrawn_at IS NOT NULL)),
+    UNIQUE (experience_ref, subject_ref),
+    FOREIGN KEY (subject_ref, account_ref) REFERENCES linggan_creation_person_subject(subject_ref, account_ref)
 );
 
 -- Unlike ordinary creation revisions this payload is deliberately erasable. Consent is tied to
@@ -33,11 +82,14 @@ CREATE TABLE linggan_creation_experience_consent (
     draft_use boolean NOT NULL CHECK (draft_use),
     send_to_model boolean,
     subject_account_ref uuid NOT NULL REFERENCES linggan_ops_account(account_ref),
+    subject_ref uuid NOT NULL,
     subject_role text NOT NULL CHECK (length(subject_role) BETWEEN 1 AND 40),
     confirmation_method text NOT NULL CHECK (confirmation_method IN ('subject_present', 'subject_statement')),
     recorded_by text NOT NULL CHECK (recorded_by = 'local_machine'),
     confirmed_at timestamptz NOT NULL DEFAULT scope_001_now(),
     PRIMARY KEY (experience_ref, revision),
+    FOREIGN KEY (subject_ref, subject_account_ref) REFERENCES linggan_creation_person_subject(subject_ref, account_ref),
+    FOREIGN KEY (experience_ref, subject_ref) REFERENCES linggan_creation_experience(experience_ref, subject_ref),
     FOREIGN KEY (experience_ref, revision)
         REFERENCES linggan_creation_experience_revision(experience_ref, revision) ON DELETE CASCADE
 );

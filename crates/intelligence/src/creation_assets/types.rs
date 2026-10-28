@@ -10,6 +10,7 @@ pub struct Experience {
     pub id: Uuid,
     pub code: String,
     pub account_ref: Uuid,
+    pub current_person: bool,
     pub state: String,
     pub revision: i32,
     pub title: Option<String>,
@@ -140,6 +141,7 @@ pub struct Identity {
     pub has_real_person: Option<bool>,
     pub backing_person_role: Option<String>,
     pub can_provide_experience: Option<bool>,
+    pub has_known_person: bool,
     pub saved_at: String,
     pub saved_by: String,
 }
@@ -155,6 +157,16 @@ pub struct IdentityCommand {
     /// A role such as "妈妈" or "老师", never a real name.
     pub backing_person_role: Option<String>,
     pub can_provide_experience: Option<bool>,
+    /// Required for a changed role or for re-enabling an account with a known prior person.
+    #[serde(default)]
+    pub person_change: Option<PersonChange>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonChange {
+    Correction,
+    Replacement,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -24,6 +24,7 @@ export interface Identity {
   hasRealPerson: boolean | null;
   backingPersonRole: string | null;
   canProvideExperience: boolean | null;
+  hasKnownPerson?: boolean | null;
   savedAt: string;
   savedBy: string;
 }
@@ -149,6 +150,7 @@ export function parseIdentity(r: Json): Identity {
     bioDisclosesRelation: optBool(r, 'bioDisclosesRelation'), bioCheckedAt: optStr(r, 'bioCheckedAt'),
     bioCheckedBy: optStr(r, 'bioCheckedBy'), hasRealPerson: optBool(r, 'hasRealPerson'),
     backingPersonRole: optStr(r, 'backingPersonRole'), canProvideExperience: optBool(r, 'canProvideExperience'),
+    hasKnownPerson: optBool(r, 'hasKnownPerson'),
     savedAt: str(r, 'savedAt'), savedBy: str(r, 'savedBy'),
   };
 }

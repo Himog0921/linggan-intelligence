@@ -39,12 +39,15 @@ export function IdentityForm({ accountRef, accountName, identity, onSaved, onSta
   const [bio, setBio] = useState<Answer>(toAnswer(identity?.bioDisclosesRelation ?? null));
   const [person, setPerson] = useState<Answer>(toAnswer(identity?.hasRealPerson ?? null));
   const [role, setRole] = useState(identity?.backingPersonRole ?? '');
+  const [personChange, setPersonChange] = useState<'' | 'correction' | 'replacement'>('');
   const [experience, setExperience] = useState<Answer>(toAnswer(identity?.canProvideExperience ?? null));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const related = relation === 'parent' || relation === 'coach';
   const roleText = role.trim();
-  const invalid = person === 'yes' && roleText.length > 40;
+  const hasKnownPerson = identity?.hasKnownPerson === true || (identity?.hasKnownPerson == null && identity?.hasRealPerson === true);
+  const needsPersonChoice = Boolean(hasKnownPerson && person === 'yes' && (identity?.hasRealPerson !== true || roleText !== (identity?.backingPersonRole ?? '')));
+  const invalid = (person === 'yes' && roleText.length > 40) || (needsPersonChoice && !personChange);
 
   async function save() {
     if (busy || invalid) return;
@@ -55,6 +58,7 @@ export function IdentityForm({ accountRef, accountName, identity, onSaved, onSta
       bioDisclosesRelation: related ? fromAnswer(bio) : null,
       hasRealPerson: fromAnswer(person), backingPersonRole: person === 'yes' && roleText ? roleText : null,
       canProvideExperience: fromAnswer(experience),
+      ...(person === 'yes' && personChange ? { personChange } : {}),
     };
     const requestId = identities.keyFor('identity', JSON.stringify(body));
     try {
@@ -87,6 +91,12 @@ export function IdentityForm({ accountRef, accountName, identity, onSaved, onSta
     {person === 'yes' ? <label>真人的角色（如“妈妈”“老师”）
       <input value={role} maxLength={40} disabled={busy} onChange={event => setRole(event.target.value)} />
     </label> : null}
+    {person === 'yes' && hasKnownPerson ? <>
+      <Choice legend="这次是更正原真人的信息，还是更换了真人？" name={`${uid}-person-change`} value={personChange} disabled={busy}
+        options={[{ value: 'correction', label: '同一位真人，更正信息' }, { value: 'replacement', label: '更换了真人' }]}
+        onChange={value => setPersonChange(value as 'correction' | 'replacement')} />
+      <p className={styles.hint}>更换真人后，原真人的经历不能作为新真人的经历使用。{needsPersonChoice ? '请先选择。' : '只有涉及更正或换人时需要选择。'}</p>
+    </> : null}
     <Choice legend="能不能每周提供经历" name={`${uid}-experience`} value={experience} disabled={busy}
       options={[{ value: 'yes', label: '能' }, { value: 'no', label: '不能' }, { value: 'unknown', label: '不清楚' }]} onChange={value => setExperience(value as Answer)} />
     {message ? <p role="alert" className={styles.problem}>{message}</p> : null}

@@ -80,6 +80,9 @@ fn reply<T: serde::Serialize>(result: Result<T, AssetsError>) -> Response {
 
 fn failure(error: AssetsError) -> Response {
     let (status, code) = match error {
+        AssetsError::Invalid("person_change_required") => {
+            (StatusCode::BAD_REQUEST, "creation_person_change_required")
+        }
         AssetsError::Invalid(_) => (StatusCode::BAD_REQUEST, "creation_assets_parameter_invalid"),
         AssetsError::NotFound => (StatusCode::NOT_FOUND, "creation_assets_not_found"),
         AssetsError::RequestConflict => (StatusCode::CONFLICT, "creation_assets_request_conflict"),

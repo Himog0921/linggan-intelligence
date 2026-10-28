@@ -3,6 +3,8 @@
 #[path = "support/content_workbench_fixture.rs"]
 #[allow(dead_code)]
 mod fixture;
+#[path = "../../../apps/api/src/local_web/full_schema_fixture.rs"]
+mod full_schema;
 use fixture::*;
 use linggan_intelligence::content_workbench::{
     BridgeChoice, BridgeGroup, BridgeUse, CreateRequest, ExperienceSlot, FreezeRequest, PageKind,
@@ -14,6 +16,252 @@ use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
 const FILL: &str = "\u{3164}";
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL migration proof; no shared database"]
+async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() {
+    let migration = include_str!("../../../database/migrations/0182_creation_experience_s1b.sql");
+    let ledger = format!(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0182_creation_experience_s1b','{}');\n",
+        linggan_intelligence::content_workbench_sources::text_hash(migration)
+    );
+    assert!(full_schema::FULL_MIGRATIONS.contains(migration));
+    assert!(full_schema::FULL_MIGRATIONS.contains(&ledger));
+    let before = full_schema::FULL_MIGRATIONS
+        .replace(migration, "")
+        .replace(&ledger, "");
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let db = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        "assets_person_upgrade",
+        &before,
+    )
+    .await
+    .unwrap();
+    let (account, _, _) = accounts(&db).await;
+    let cmd = identity(0, OrgRelation::Parent, None, Some("妈妈"));
+    let hash = linggan_intelligence::content_workbench_sources::text_hash(&serde_json::json!({
+        "kind":"identity", "command": {"account":account,"expected":0,"relation":"parent","bio":null,"person":true,"role":"妈妈","experience":null}
+    }).to_string());
+    sqlx::query("INSERT INTO linggan_creation_assets_request(request_ref,kind,command_sha256) VALUES($1,'identity',$2)").bind(cmd.request_id).bind(hash).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_creation_account_identity(identity_ref,account_ref,revision_number,request_ref,org_relation,has_real_person,backing_person_role,saved_by) VALUES($1,$2,1,$3,'parent',true,'妈妈','local_machine')")
+        .bind(Uuid::new_v4()).bind(account).bind(cmd.request_id).execute(db.pool()).await.unwrap();
+    sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
+    assert!(
+        read_identity(&db, account)
+            .await
+            .unwrap()
+            .unwrap()
+            .has_known_person
+    );
+    let subject: Uuid = sqlx::query_scalar(
+        "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
+    )
+    .bind(account)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let replay = put_identity(&db, account, &cmd).await.unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.identity.revision, 1);
+    let recorded: Uuid = sqlx::query_scalar("SELECT subject_ref FROM linggan_creation_person_assignment WHERE account_ref=$1 AND action='bootstrap'").bind(account).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(subject, recorded);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn person_correction_keeps_consent_but_replacement_cannot_use_former_experiences() {
+    let db = db("assets_person_change").await;
+    let (account, _, _) = accounts(&db).await;
+    put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap();
+    let original_subject: Uuid = sqlx::query_scalar(
+        "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
+    )
+    .bind(account)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let created = create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            title: "虚构经历".into(),
+            body: "合成经历正文。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let experience = created.experience.id;
+    confirm_experience(
+        &db,
+        experience,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+            confirmation_method: "subject_present".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut doc = draft(Some(account), &["合成经历正文。"]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: doc.paragraphs[0].id,
+        experience_ref: experience,
+        experience_revision: 1,
+    });
+    let work = create(&db, doc.clone()).await;
+    let ambiguous = identity(1, OrgRelation::Parent, None, Some("爸爸"));
+    assert!(matches!(
+        put_identity(&db, account, &ambiguous).await,
+        Err(AssetsError::Invalid("person_change_required"))
+    ));
+    put_identity(
+        &db,
+        account,
+        &correction(identity(1, OrgRelation::Parent, None, Some("爸爸"))),
+    )
+    .await
+    .unwrap();
+    let same_subject: Uuid = sqlx::query_scalar(
+        "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
+    )
+    .bind(account)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(same_subject, original_subject);
+    assert!(
+        read_usable_experience(&db, experience, 1, Some(account))
+            .await
+            .is_ok()
+    );
+    assert_eq!(
+        read_work(&db, work.work_id)
+            .await
+            .unwrap()
+            .revision
+            .document
+            .paragraphs[0]
+            .text,
+        "合成经历正文。"
+    );
+    let mut replacement = identity(2, OrgRelation::Parent, None, Some("爸爸"));
+    replacement.person_change = Some(PersonChange::Replacement);
+    put_identity(&db, account, &replacement).await.unwrap();
+    assert!(
+        put_identity(&db, account, &replacement)
+            .await
+            .unwrap()
+            .replayed
+    );
+    let new_subject: Uuid = sqlx::query_scalar(
+        "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
+    )
+    .bind(account)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_ne!(new_subject, original_subject);
+    assert!(
+        !read_experience(&db, experience)
+            .await
+            .unwrap()
+            .current_person
+    );
+    assert!(matches!(
+        read_usable_experience(&db, experience, 1, Some(account)).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert_eq!(
+        read_work(&db, work.work_id)
+            .await
+            .unwrap()
+            .revision
+            .document
+            .paragraphs[0]
+            .text,
+        "[这段经历当前不可使用]"
+    );
+    assert!(matches!(
+        create_work(
+            &db,
+            &CreateRequest {
+                request_id: Uuid::new_v4(),
+                domain_ref: fixture::dossier::DOMAIN,
+                document: doc
+            }
+        )
+        .await,
+        Err(WorkbenchError::Source)
+    ));
+    assert!(matches!(
+        prepare_copy(
+            &db,
+            work.work_id,
+            &CopyCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: work.revision.id
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let new_experience = create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            title: "新真人的合成经历".into(),
+            body: "另一段合成经历。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let new_id = new_experience.experience.id;
+    assert!(new_experience.experience.current_person);
+    assert!(matches!(
+        read_usable_experience(&db, new_id, 1, Some(account)).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    confirm_experience(
+        &db,
+        new_id,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+            confirmation_method: "subject_present".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        read_usable_experience(&db, new_id, 1, Some(account))
+            .await
+            .is_ok()
+    );
+}
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
@@ -127,6 +375,68 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
                 request_id: Uuid::new_v4(),
                 expected_revision: short_work.revision.id,
                 document: short
+            }
+        )
+        .await
+        .is_ok()
+    );
+    // Independently authored identical text remains movable after a later experience binding
+    // is removed; an unchanged amount of unbound text is not an added copy.
+    let mut independent = draft(Some(account), &["独立正文"]);
+    independent.title = "独立同文".into();
+    independent.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    let independent_work = create(&db, independent.clone()).await;
+    let bound_id = Uuid::new_v4();
+    independent.paragraphs.push(Paragraph {
+        id: bound_id,
+        text: "独立同文".into(),
+    });
+    independent.experience_slots.push(ExperienceSlot {
+        paragraph_id: bound_id,
+        experience_ref: id,
+        experience_revision: 1,
+    });
+    let bound = save(
+        &db,
+        independent_work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: independent_work.revision.id,
+            document: independent.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    independent.experience_slots.clear();
+    independent.paragraphs.retain(|p| p.id != bound_id);
+    let unbound = save(
+        &db,
+        independent_work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: bound.revision.id,
+            document: independent.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    independent.title = "另外的标题".into();
+    independent.paragraphs.push(Paragraph {
+        id: Uuid::new_v4(),
+        text: "独立同文".into(),
+    });
+    assert!(
+        save(
+            &db,
+            independent_work.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: unbound.revision.id,
+                document: independent
             }
         )
         .await
@@ -378,7 +688,7 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     put_identity(
         &db,
         account,
-        &identity(2, OrgRelation::Parent, None, Some("妈妈")),
+        &correction(identity(2, OrgRelation::Parent, None, Some("妈妈"))),
     )
     .await
     .unwrap();
@@ -474,7 +784,7 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
     put_identity(
         &db,
         account,
-        &identity(1, OrgRelation::Parent, None, Some("妈妈")),
+        &correction(identity(1, OrgRelation::Parent, None, Some("妈妈"))),
     )
     .await
     .unwrap();
@@ -497,7 +807,7 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
     put_identity(
         &db,
         account,
-        &identity(2, OrgRelation::Parent, None, Some("爸爸")),
+        &correction(identity(2, OrgRelation::Parent, None, Some("爸爸"))),
     )
     .await
     .unwrap();
@@ -723,7 +1033,12 @@ fn identity(
         has_real_person: role.map(|_| true),
         backing_person_role: role.map(str::to_string),
         can_provide_experience: None,
+        person_change: None,
     }
+}
+fn correction(mut command: IdentityCommand) -> IdentityCommand {
+    command.person_change = Some(PersonChange::Correction);
+    command
 }
 fn card(expected: i32, name: &str, allowed: &[&str], banned: &[&str]) -> FactCardCommand {
     FactCardCommand {
@@ -854,7 +1169,7 @@ async fn identity_revisions_replay_conflict_stale_and_keep_unknown_unknown() {
     let carried = put_identity(
         &db,
         xhs_a,
-        &identity(2, OrgRelation::Parent, Some(true), Some("奶奶")),
+        &correction(identity(2, OrgRelation::Parent, Some(true), Some("奶奶"))),
     )
     .await
     .unwrap()

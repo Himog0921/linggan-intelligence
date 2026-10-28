@@ -613,6 +613,7 @@ mod tests {
             has_real_person: None,
             backing_person_role: None,
             can_provide_experience: None,
+            has_known_person: false,
             saved_at: String::new(),
             saved_by: "local_machine".into(),
         }
