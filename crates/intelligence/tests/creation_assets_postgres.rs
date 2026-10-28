@@ -202,9 +202,22 @@ async fn identity_revisions_replay_conflict_stale_and_keep_unknown_unknown() {
         read_identity(&db, xhs_a).await.unwrap().unwrap().revision,
         5
     );
+    put_identity(
+        &db,
+        xhs_a,
+        &identity(5, OrgRelation::Parent, Some(true), None),
+    )
+    .await
+    .unwrap();
+    let changed_relation = put_identity(&db, xhs_a, &identity(6, OrgRelation::Coach, None, None))
+        .await
+        .unwrap()
+        .identity;
+    assert_eq!(changed_relation.bio_discloses_relation, None);
+    assert!(changed_relation.bio_checked_at.is_none());
     let listed = list_accounts(&db, None).await.unwrap();
     let row = listed.iter().find(|a| a.account_ref == xhs_a).unwrap();
-    assert_eq!(row.identity.as_ref().unwrap().revision, 5);
+    assert_eq!(row.identity.as_ref().unwrap().revision, 7);
     assert!(
         listed
             .iter()
@@ -557,10 +570,15 @@ async fn bridge_sentence_library_reviews_and_serves_only_approved_matching_voice
     let approved_now = approved(&db, BridgeGroup::Parent, "我是学员家长，也在学习").await;
     let mut document = draft(Some(xhs_a), &["正文"]);
     document.bridge = Some(using(&approved_now));
+    create(&db, document.clone()).await;
+    document.bridge.as_mut().unwrap().skip = true;
     create(&db, document).await;
     let listed = list_sentences(&db, None, None).await.unwrap();
     let used = listed.iter().find(|s| s.code == approved_now.code).unwrap();
-    assert_eq!(used.used_count, 1);
+    assert_eq!(
+        used.used_count, 1,
+        "skipped bridges do not count as selected"
+    );
     assert_eq!(
         listed
             .iter()
@@ -591,6 +609,23 @@ async fn copy_checks_the_saved_revision_and_records_receipt_then_confirmation() 
     .await
     .unwrap();
     let sentence = approved(&db, BridgeGroup::Parent, "我也是学员家长，慢慢来").await;
+
+    // A bridge cannot turn an otherwise empty note into a copyable body.
+    let mut empty = draft(Some(xhs_a), &[" "]);
+    empty.bridge = Some(using(&sentence));
+    let empty = create(&db, empty).await;
+    assert!(matches!(
+        prepare_copy(
+            &db,
+            empty.work_id,
+            &CopyCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: empty.revision.id
+            }
+        )
+        .await,
+        Err(AssetsError::Invalid("body_empty"))
+    ));
 
     // 必改 blocks the copy and writes nothing.
     let mut blocked = draft(Some(xhs_a), &["开头。", "观点。", "收尾。"]);

@@ -11,11 +11,11 @@ vi.mock('./ImagePages', () => ({
   ImagePages: () => <div>图页组件</div>
 }));
 // The check panel and the asset library have their own tests; these tests are about the editor.
-let checkPanelProps: { saveCurrent: () => Promise<{ number: number }> } | null = null;
+let checkPanelProps: { saveCurrent: () => Promise<{ number: number }>; pendingConfirmation: string | null; setPendingConfirmation: (receipt: string | null) => void } | null = null;
 vi.mock('./assets/CheckPanel', () => ({
   CheckPanel: (props: NonNullable<typeof checkPanelProps>) => {
     checkPanelProps = props;
-    return <div>检查面板</div>;
+    return <div>检查面板 <span>{props.pendingConfirmation}</span><button onClick={() => props.setPendingConfirmation('待确认回执')}>测试待确认回执</button></div>;
   }
 }));
 vi.mock('./assets/AssetsLibrary', () => ({
@@ -899,4 +899,15 @@ it('lets the copy wait for a save already in flight, then saves what was typed m
   expect((await saving).number).toBe(3);
   expect(api.save).toHaveBeenCalledTimes(2);
   expect(vi.mocked(api.save).mock.calls[1]?.[1].document.paragraphs[0]?.text).toBe('第二次输入');
+});
+
+it('keeps the unconfirmed copy receipt while moving to the cover and back', async () => {
+  show();
+  await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(screen.getByRole('button', { name: '测试待确认回执' }));
+  expect(screen.getByText('待确认回执')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '制作封面 →' }));
+  expect(screen.queryByText('待确认回执')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '正文' }));
+  expect(await screen.findByText('待确认回执')).toBeInTheDocument();
 });

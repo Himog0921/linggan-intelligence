@@ -11,18 +11,18 @@ import styles from './Assets.module.css';
  * library; nothing here writes one for the writer.
  */
 export function BridgeSlot({ state, document, usable, disabled, textRef, onChange, onSaveBack }: {
-  state: BridgeState | null; document: WorkDocument; usable: readonly Sentence[]; disabled: boolean;
+  state: BridgeState | null; document: WorkDocument; usable: readonly Sentence[] | null; disabled: boolean;
   textRef: Ref<HTMLTextAreaElement>; onChange: (next: WorkDocument) => void;
   onSaveBack: (sentence: { group: 'parent' | 'coach'; text: string }) => void;
 }) {
   const bridge = document.bridge;
   const used = bridge?.sentence ?? null;
-  const library = used ? usable.find(item => item.code === used.sentenceCode) ?? null : null;
+  const library = used ? usable?.find(item => item.code === used.sentenceCode) ?? null : null;
   const skipped = bridge?.skip === true;
-  const at = used ? usable.findIndex(item => item.code === used.sentenceCode) : -1;
+  const at = used ? usable?.findIndex(item => item.code === used.sentenceCode) ?? -1 : -1;
   const position = at >= 0 ? at + 1 : 0;
   // Another usable sentence exists unless the only one is the one already in the draft.
-  const alternative = usable.length > 1 || (usable.length === 1 && at < 0);
+  const alternative = !!usable && (usable.length > 1 || (usable.length === 1 && at < 0));
   return <section className={styles.slot} aria-label="衔接位">
     <h3>衔接位</h3>
     <p>{state ? bridgeStateText[state] : '正在读取账号身份…'}</p>
@@ -42,16 +42,16 @@ export function BridgeSlot({ state, document, usable, disabled, textRef, onChang
         </label>
         <div className={styles.actions}>
           <ActionButton variant="outline" disabled={disabled || !alternative} onClick={() => {
-            const next = nextSentence(usable, used.sentenceCode);
+            const next = nextSentence(usable ?? [], used.sentenceCode);
             if (next) onChange(withBridge(document, { sentence: bridgeFromSentence(next) }));
-          }}>换一句{position ? ` ${position}/${usable.length}` : ''}</ActionButton>
+          }}>换一句{position && usable ? ` ${position}/${usable.length}` : ''}</ActionButton>
           {used.edited && library ? <ActionButton variant="outline" disabled={disabled}
             onClick={() => onChange(withBridge(document, { sentence: bridgeFromSentence(library) }))}>用回库里的</ActionButton> : null}
           {used.edited && used.text.trim() ? <ActionButton variant="outline" disabled={disabled}
             onClick={() => onSaveBack({ group: used.group, text: used.text.trim() })}>存回衔接句库（待审）</ActionButton> : null}
           <ActionButton variant="quiet" disabled={disabled} onClick={() => onChange(withBridge(document, { skip: true }))}>这篇不植入</ActionButton>
         </div>
-      </> : usable.length === 0 ? <p>这个身份还没有审核通过的衔接句，先去资产库的“衔接句”里添加并审核。</p> : null}
+      </> : usable?.length === 0 ? <p>这个身份还没有审核通过的衔接句，先去资产库的“衔接句”里添加并审核。</p> : null}
     </> : null}
   </section>;
 }

@@ -93,6 +93,19 @@ describe('账号身份', () => {
     expect(vi.mocked(api.putIdentity).mock.calls[0]?.[1]).toMatchObject({ orgRelation: 'none', bioDisclosesRelation: null, hasRealPerson: false, backingPersonRole: null });
   });
 
+  it('asks about the bio again when the relationship changes', async () => {
+    vi.mocked(api.listAccounts).mockResolvedValue([account(A1, '甲号', { identity: identity({ bioDisclosesRelation: true }) })]);
+    vi.mocked(api.putIdentity).mockResolvedValue({ identity: identity({ revision: 3, orgRelation: 'coach', bioDisclosesRelation: null }), replayed: false });
+    show();
+    fireEvent.click(await screen.findByRole('button', { name: /甲号/ }));
+    const form = await screen.findByRole('form', { name: '甲号 · 账号身份' });
+    expect(within(form).getByLabelText('已写明')).toBeChecked();
+    fireEvent.click(within(form).getByLabelText('陪跑老师'));
+    expect(within(form).getByLabelText('已写明')).not.toBeChecked();
+    fireEvent.click(within(form).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(api.putIdentity).toHaveBeenCalledWith(A1, expect.objectContaining({ orgRelation: 'coach', bioDisclosesRelation: null })));
+  });
+
   it('says the revision is stale instead of overwriting, and re-reads', async () => {
     vi.mocked(api.listAccounts).mockResolvedValue([account(A1, '甲号', { identity: identity() })]);
     vi.mocked(api.putIdentity).mockRejectedValue(new ApiError({ kind: 'http', status: 409, code: 'creation_assets_stale' }));
@@ -223,7 +236,7 @@ describe('衔接句', () => {
     vi.mocked(api.listSentences).mockResolvedValue([sentence({ status: 'ok' }), sentence({ code: 'XJ-0002', group: 'coach', text: '陪跑老师的一句', usedCount: 0 })]);
     show();
     open('衔接句');
-    expect(await screen.findByText('用过 3 篇')).toBeInTheDocument();
+    expect(await screen.findByText('稿件选用 3 篇')).toBeInTheDocument();
     expect(screen.getByText('陪跑老师的一句')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('按身份筛选'), { target: { value: 'coach' } });
     fireEvent.change(screen.getByLabelText('按状态筛选'), { target: { value: 'ok' } });

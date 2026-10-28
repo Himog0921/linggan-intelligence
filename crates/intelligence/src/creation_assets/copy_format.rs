@@ -81,6 +81,13 @@ pub struct CopyText {
 
 /// `None` when the note has no body to copy.
 pub fn format_copy(subject: &Subject, bridge: Option<(&str, Option<Uuid>)>) -> Option<CopyText> {
+    if subject
+        .paragraphs
+        .iter()
+        .all(|(_, text)| text.trim().is_empty())
+    {
+        return None;
+    }
     let parts: Vec<String> = blocks(&subject.paragraphs, bridge)
         .iter()
         .map(|block| block.text().replace("\r\n", "\n").trim_end().to_string())
@@ -151,6 +158,7 @@ mod tests {
         let s = subject(&["甲  ", "", "   ", "乙\r\n丙"], &[]);
         assert_eq!(format_copy(&s, None).unwrap().body, "甲\n\u{3164}\n乙\n丙");
         assert!(format_copy(&subject(&["", " "], &["x"]), None).is_none());
+        assert!(format_copy(&subject(&["", " "], &["x"]), Some(("衔接", None))).is_none());
     }
 
     #[test]

@@ -1,7 +1,9 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../shared/api';
+import { RequestIdentities } from '../../../shared/requestIdentity';
 import { newDocument, type Revision, type WorkDocument } from '../workbenchModel';
 import * as api from './assetsApi';
 import type { AccountView, CheckReport, Finding, Identity, Sentence } from './assetsModel';
@@ -49,9 +51,14 @@ function show(props: Props = {}) {
   const onTagsChange = vi.fn();
   const onGoCover = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const confirmationIdentities = new RequestIdentities();
+  function TestPanel(next: Props) {
+    const [pendingConfirmation, setPendingConfirmation] = useState<string | null>(null);
+    return <CheckPanel workId={WORK} domainRef={DOMAIN} document={document} revision={revisionOf(document)} saveState="saved" composing={false}
+      locked={false} active pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft="" onTagsChange={onTagsChange} edit={edit} saveCurrent={saveCurrent} onGoCover={onGoCover} {...props} {...next} />;
+  }
   const element = (next: Props = {}) => <QueryClientProvider client={client}>
-    <CheckPanel workId={WORK} domainRef={DOMAIN} document={document} revision={revisionOf(document)} saveState="saved" composing={false}
-      locked={false} tagsDraft="" onTagsChange={onTagsChange} edit={edit} saveCurrent={saveCurrent} onGoCover={onGoCover} {...props} {...next} />
+    <TestPanel {...next} />
   </QueryClientProvider>;
   const view = render(element());
   return { ...view, edit, saveCurrent, onTagsChange, onGoCover, rerenderWith: (next: Props) => view.rerender(element(next)) };
@@ -123,6 +130,24 @@ describe('check results', () => {
     expect(vi.mocked(api.checkDraft)).toHaveBeenCalledTimes(2);
     expect(vi.mocked(api.checkDraft).mock.calls[1]?.[0].paragraphs[0]?.text).toContain('nihao');
   });
+
+  it('checks the current topic input before it is saved', async () => {
+    const view = show();
+    await ready();
+    view.rerenderWith({ tagsDraft: 'ADHD #adhd' });
+    await waitFor(() => expect(api.checkDraft).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['ADHD', '#adhd'] }), expect.anything()));
+  });
+
+  it('offers retry when candidates fail instead of claiming the library is empty', async () => {
+    vi.mocked(api.candidates).mockRejectedValueOnce(new ApiError({ kind: 'network' }));
+    show();
+    const error = await screen.findByRole('alert');
+    expect(error).toHaveTextContent('衔接句读取失败');
+    expect(screen.queryByText(/还没有审核通过的衔接句/)).not.toBeInTheDocument();
+    vi.mocked(api.candidates).mockResolvedValue({ state: 'ready', group: 'parent', items: [] });
+    fireEvent.click(within(error).getByRole('button', { name: '重试' }));
+    expect(await screen.findByText(/还没有审核通过的衔接句/)).toBeInTheDocument();
+  });
 });
 
 describe('fixes', () => {
@@ -179,16 +204,25 @@ describe('fixes', () => {
     expect(onGoCover).toHaveBeenCalledTimes(1);
   });
 
-  it('picks the first usable sentence for an empty slot and the next one when swapping', async () => {
+  it('automatically picks the first usable sentence for an empty slot', async () => {
     vi.mocked(api.checkDraft).mockResolvedValue(report([
       finding({ rule: 'R-M4', level: 'must', message: '还没选衔接句', fixes: [{ label: '自动选一句', action: 'autoPickBridge' }] }),
     ]));
     const { edit } = show();
     await ready();
-    fireEvent.click(await screen.findByRole('button', { name: '自动选一句' }));
     await waitFor(() => expect(edit).toHaveBeenCalledTimes(1));
     expect(edit.mock.calls[0]?.[0].bridge).toEqual({ skip: false, afterParagraph: null,
       sentence: { sentenceCode: 'XJ-0001', sentenceRevision: 1, group: 'parent', text: '我也是学员家长', edited: false } });
+  });
+
+  it('does not automatically change a background draft', async () => {
+    vi.mocked(api.checkDraft).mockResolvedValue(report([finding({ rule: 'R-M4', level: 'must', message: '还没选衔接句' })]));
+    const view = show({ active: false });
+    await ready();
+    await waitFor(() => expect(api.candidates).toHaveBeenCalled());
+    expect(view.edit).not.toHaveBeenCalled();
+    view.rerenderWith({ active: true });
+    await waitFor(() => expect(view.edit).toHaveBeenCalledTimes(1));
   });
 
   it('keeps an empty library honest instead of inventing a sentence', async () => {
@@ -286,6 +320,23 @@ describe('copy', () => {
     fireEvent.click(screen.getByRole('button', { name: '我已复制' }));
     await waitFor(() => expect(vi.mocked(api.confirmCopy)).toHaveBeenCalledTimes(1));
     await screen.findByText(/已记录为已复制/);
+  });
+
+  it('retains the receipt and retries the same confirmation if the reply is lost', async () => {
+    vi.mocked(api.prepareCopy).mockResolvedValue({ receiptRef: RECEIPT, workId: WORK, revisionId: REV, rulesetVersion: 'v', title: 't', body: 'b',
+      tags: [], text: '正文', warnCount: 0, hintCount: 0, replayed: false });
+    vi.mocked(api.confirmCopy).mockRejectedValueOnce(new ApiError({ kind: 'network' }))
+      .mockResolvedValueOnce({ receiptRef: RECEIPT, revisionId: REV, copiedAt: 't' });
+    show();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '复制到小红书' }));
+    await screen.findByText(/复制记录结果未确认/);
+    expect(screen.getByRole('button', { name: '复制到小红书' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '重新确认记录' }));
+    await screen.findByText(/已记录为已复制/);
+    expect(clipboard.writeText).toHaveBeenCalledTimes(1);
+    expect(api.confirmCopy).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(api.confirmCopy).mock.calls[1]).toEqual(vi.mocked(api.confirmCopy).mock.calls[0]);
   });
 
   it('tells "已复制" from "草稿中" by the revision, and drops back after another edit', async () => {

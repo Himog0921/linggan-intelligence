@@ -12,7 +12,7 @@ use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
 const SELECT: &str = "SELECT s.sentence_ref,s.code,s.revision_number,s.bridge_group,s.body,s.origin,s.entry_findings,s.saved_at::text AS saved_at,s.saved_by,COALESCE(st.status,'review') AS status,st.note AS status_note,
- (SELECT count(*) FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref WHERE r.document->'bridge'->'sentence'->>'sentenceCode'=s.code) AS used_count
+ (SELECT count(*) FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref WHERE r.document->'bridge'->'sentence'->>'sentenceCode'=s.code AND COALESCE((r.document->'bridge'->>'skip')::boolean,false)=false) AS used_count
  FROM linggan_creation_bridge_sentence s
  LEFT JOIN LATERAL (SELECT status,note FROM linggan_creation_bridge_sentence_status WHERE sentence_ref=s.sentence_ref ORDER BY seq DESC LIMIT 1) st ON true";
 const LATEST: &str = "s.revision_number=(SELECT max(revision_number) FROM linggan_creation_bridge_sentence WHERE code=s.code)";

@@ -76,7 +76,10 @@ export function IdentityForm({ accountRef, accountName, identity, onSaved, onSta
     <h3 id={`${uid}-title`}>{accountName} · 账号身份</h3>
     <p className={styles.hint}>只写角色，不写真名、孩子姓名、学校；不清楚就选“不清楚”，系统不会把它当成“没有”。</p>
     <Choice legend="和机构的关系" name={`${uid}-relation`} value={relation} disabled={busy}
-      options={RELATIONS.map(value => ({ value, label: relationLabel[value] }))} onChange={value => setRelation(value as OrgRelation)} />
+      options={RELATIONS.map(value => ({ value, label: relationLabel[value] }))} onChange={value => {
+        if (value !== relation) setBio('unknown');
+        setRelation(value as OrgRelation);
+      }} />
     {related ? <Choice legend="账号简介里写明这层关系了吗" name={`${uid}-bio`} value={bio} disabled={busy}
       options={[{ value: 'yes', label: '已写明' }, { value: 'no', label: '没写明' }, { value: 'unknown', label: '不清楚' }]} onChange={value => setBio(value as Answer)} /> : null}
     <Choice legend="背后有没有真人" name={`${uid}-person`} value={person} disabled={busy}

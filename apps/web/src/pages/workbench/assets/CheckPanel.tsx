@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ApiError } from '../../../shared/api';
@@ -42,8 +42,9 @@ function useSettled(document: WorkDocument, hold: boolean) {
  * shows what they found, applies the fixes the server offered through the normal save, and only
  * copies the saved revision once nothing is left in 必改.
  */
-export function CheckPanel({ workId, domainRef, document, revision, saveState, composing, locked, tagsDraft, onTagsChange, edit, saveCurrent, onGoCover }: {
-  workId: string; domainRef: string; document: WorkDocument; revision: Revision; saveState: SaveState; composing: boolean; locked: boolean;
+export function CheckPanel({ workId, domainRef, document, revision, saveState, composing, locked, active, pendingConfirmation, setPendingConfirmation, confirmationIdentities, tagsDraft, onTagsChange, edit, saveCurrent, onGoCover }: {
+  workId: string; domainRef: string; document: WorkDocument; revision: Revision; saveState: SaveState; composing: boolean; locked: boolean; active: boolean;
+  pendingConfirmation: string | null; setPendingConfirmation: (receipt: string | null) => void; confirmationIdentities: RequestIdentities;
   tagsDraft: string; onTagsChange: (value: string) => void; edit: (next: WorkDocument) => void; saveCurrent: () => Promise<Revision>; onGoCover: () => void;
 }) {
   const uid = useId();
@@ -58,7 +59,9 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
   const accountSelect = useRef<HTMLSelectElement>(null);
   const bridgeText = useRef<HTMLTextAreaElement>(null);
   const slotTop = useRef<HTMLDivElement>(null);
-  const { settled, settledKey, currentKey } = useSettled(document, composing);
+  const skipChosen = useRef(false);
+  const checkInput = useMemo(() => ({ ...document, tags: tagsDraft.split(/\s+/u).filter(Boolean) }), [document, tagsDraft]);
+  const { settled, settledKey, currentKey } = useSettled(checkInput, composing);
   const fresh = settledKey === currentKey && !composing;
 
   const accounts = useQuery({ queryKey: ['creation-assets', 'accounts', domainRef], queryFn: ({ signal }) => api.listAccounts(domainRef, signal), gcTime: 0 });
@@ -79,9 +82,15 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
   const reportOk = report.isSuccess && fresh && !report.isFetching;
   const wasCopied = copied.data?.copied?.revisionId === revision.id && saveState === 'saved';
   const saveBlocked = saveState === 'failed' || saveState === 'unknown' || saveState === 'conflict';
-  const canCopy = reportOk && counts.must === 0 && !saveBlocked && !copying && !locked && !composing;
+  const canCopy = reportOk && counts.must === 0 && !saveBlocked && !copying && !locked && !composing && !pendingConfirmation;
   const copyWhy = composing ? '请先完成中文输入' : saveBlocked ? '稿件还没有保存成功' : !reportOk ? '正在检查…' : counts.must > 0 ? '必改清零后才能复制' : '';
   const fixable = reportOk && !locked && !busy;
+
+  useEffect(() => {
+    if (!active || !reportOk || state !== 'ready' || !report.data?.findings.some(f => f.rule === 'R-M4') || locked || busy || copying || skipChosen.current || document.bridge?.skip || document.bridge?.sentence || !usable.data?.items.length) return;
+    const first = usable.data.items[0];
+    if (first) edit(withBridge(document, { skip: false, sentence: bridgeFromSentence(first) }));
+  }, [active, reportOk, report.data, state, locked, busy, copying, document, usable.data, edit]);
 
   function reload() {
     void queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
@@ -128,7 +137,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     setNotice('');
     try {
       switch (action.action) {
-        case 'skipBridge': return edit(withBridge(document, { skip: true }));
+        case 'skipBridge': skipChosen.current = true; return edit(withBridge(document, { skip: true }));
         case 'autoPickBridge': return await pick(false);
         case 'swapBridge': return await pick(true);
         case 'chooseAccount': return accountSelect.current?.focus();
@@ -180,10 +189,23 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     }
   }
   async function confirmClipboard(receiptRef: string) {
-    const requestId = identities.keyFor('confirm', receiptRef);
+    const requestId = confirmationIdentities.keyFor('confirm', receiptRef);
     await api.confirmCopy(workId, receiptRef, { requestId });
-    identities.settle('confirm');
+    confirmationIdentities.settle('confirm');
     await queryClient.invalidateQueries({ queryKey: ['creation-assets', 'copy-status', workId] });
+  }
+  async function recordClipboard(receiptRef: string, warnCount = 0) {
+    setPendingConfirmation(receiptRef);
+    setCopying(true);
+    try {
+      await confirmClipboard(receiptRef);
+      setPendingConfirmation(null);
+      setNotice(warnCount ? `已复制到剪贴板（还有 ${warnCount} 条提醒没处理）。这不等于已发布。` : '已复制到剪贴板，已记录为已复制。这不等于已发布。');
+    } catch (error) {
+      setNotice(`复制已完成，记录结果未确认：${api.assetsErrorText(error)}`);
+    } finally {
+      setCopying(false);
+    }
   }
   async function copy() {
     if (!canCopy) return;
@@ -205,8 +227,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
         setManual({ text: ready.text, receiptRef: ready.receiptRef });
         return;
       }
-      await confirmClipboard(ready.receiptRef);
-      setNotice(ready.warnCount ? `已复制到剪贴板（还有 ${ready.warnCount} 条提醒没处理）。这不等于已发布。` : '已复制到剪贴板。这不等于已发布。');
+      await recordClipboard(ready.receiptRef, ready.warnCount);
     } catch (error) {
       const refused = blockedFindings(error);
       if (error instanceof ApiError && error.answered) identities.settle('copy');
@@ -235,7 +256,9 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
       {accounts.isError ? <p role="alert" className={styles.problem}>账号读取失败，可以<ActionButton variant="quiet" onClick={() => void accounts.refetch()}>重试</ActionButton></p> : null}
       {account ? <p className={styles.hint}>{account.identity ? '' : '这个号的身份还没有填写。'}<ActionButton variant="quiet" disabled={locked} onClick={() => setIdentityOpen(true)}>编辑账号身份</ActionButton></p> : null}
     </div>
-    <BridgeSlot state={report.data ? state : null} document={document} usable={usable.data?.items ?? []} disabled={!fixable} textRef={bridgeText} onChange={edit} onSaveBack={sentence => void saveBack(sentence)} />
+    <BridgeSlot state={report.data ? state : null} document={document} usable={usable.data?.items ?? null} disabled={!fixable} textRef={bridgeText} onChange={next => { skipChosen.current = next.bridge?.skip === true; edit(next); }} onSaveBack={sentence => void saveBack(sentence)} />
+    {state === 'ready' && usable.isPending ? <p>正在读取可用衔接句…</p> : null}
+    {state === 'ready' && usable.isError ? <p role="alert" className={styles.problem}>衔接句读取失败。<ActionButton variant="quiet" onClick={() => void usable.refetch()}>重试</ActionButton></p> : null}
     <section aria-label="检查结果" aria-live="polite">
       <h3>检查结果</h3>
       {report.isPending ? <p>正在检查…</p> : report.isError ? <p role="alert" className={styles.problem}>检查读取失败。{api.assetsErrorText(report.error)}<ActionButton variant="quiet" onClick={() => void report.refetch()}>重试</ActionButton></p> : <>
@@ -262,6 +285,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
         <ActionButton variant="outline" disabled={!document.title.trim() || counts.must > 0 || !reportOk || composing} onClick={() => void copyTitle()}>复制标题</ActionButton>
       </div>
       {!canCopy && copyWhy ? <p className={styles.hint}>{copyWhy}</p> : null}
+      {pendingConfirmation ? <p role="status">复制记录结果未确认。<ActionButton variant="outline" disabled={copying} onClick={() => void recordClipboard(pendingConfirmation)}>重新确认记录</ActionButton></p> : null}
       {notice ? <p role="status">{notice}</p> : null}
     </section>
     {identityOpen && document.accountRef && account ? <ModalDialog labelledBy={`${uid}-identity`} className={styles.dialog} onClose={() => setIdentityOpen(false)}>
@@ -284,7 +308,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
         <ActionButton variant="primary" onClick={() => {
           const receiptRef = manual.receiptRef;
           setManual(null);
-          void confirmClipboard(receiptRef).then(() => setNotice('已记录为已复制。这不等于已发布。'), error => setNotice(api.assetsErrorText(error)));
+          void recordClipboard(receiptRef);
         }}>我已复制</ActionButton>
         <ActionButton variant="outline" onClick={() => setManual(null)}>放弃</ActionButton>
       </div>

@@ -462,13 +462,11 @@ try {
   });
   await step('检查与复制：必改挡住复制，选句并统一叫法后才能复制，剪贴板内容与服务器记录一致',async()=>{
     await context.grantPermissions(['clipboard-read','clipboard-write'],{origin});
-    await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${workId}&view=body`);
-    const panel=page.getByRole('complementary',{name:'检查与复制'}),copy=panel.getByRole('button',{name:'复制到小红书',exact:true});
-    await panel.getByText(/^必改 1 · 提醒 0 · 提示 0/).waitFor();await panel.getByText('还没选衔接句').waitFor();assert.equal(await copy.isDisabled(),true);
     const refused=await context.request.post(`${origin}/ops/api/creation/works/${workId}/copy`,{headers:{Origin:origin},data:{requestId:randomUUID(),expectedRevision:(await envelope()).revision.id}});
     assert.equal(refused.status(),409);assert.equal((await refused.json()).code,'creation_assets_blocked','the server refuses a copy with a 必改 left even when the page is bypassed');
     assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied,null,'a refused copy leaves no record');
-    await panel.getByRole('button',{name:'自动选一句',exact:true}).click();
+    await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${workId}&view=body`);
+    const panel=page.getByRole('complementary',{name:'检查与复制'}),copy=panel.getByRole('button',{name:'复制到小红书',exact:true});
     await until(async()=>await panel.getByLabel('本篇的衔接句').inputValue()===bridgeSentence,'the approved sentence is placed in the draft');
     await panel.getByText(/^必改 0 · /).waitFor();
     const first=page.getByLabel('正文第 1 段');await first.fill('今天先把示例课的练习本放到桌上。');

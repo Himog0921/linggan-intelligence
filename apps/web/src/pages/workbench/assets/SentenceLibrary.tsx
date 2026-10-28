@@ -169,7 +169,7 @@ export function SentenceLibrary() {
         <button type="button" aria-current={item.code === selected ? 'true' : undefined} onClick={() => setSelected(item.code)}>
           <span>{item.text}</span>
           <small className={styles.meta}><span>{item.code}</span><span>{groupLabel[item.group]}</span>
-            <span className={styles.statusChip}>{sentenceStatusLabel[item.status]}</span><span>用过 {item.usedCount} 篇</span></small>
+            <span className={styles.statusChip}>{sentenceStatusLabel[item.status]}</span><span>稿件选用 {item.usedCount} 篇</span></small>
         </button>
       </li>)}</ul>
     </div>

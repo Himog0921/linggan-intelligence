@@ -285,6 +285,25 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
     assert_eq!(report["findings"][0]["rule"], "R-M1");
     assert_eq!(report["findings"][0]["level"], "must");
     assert_eq!(report["rulesetVersion"], "creation-checks.v1");
+    let mut repeated = work["revision"]["document"].clone();
+    repeated["tags"] = json!(["ADHD", "ADHD", "#adhd"]);
+    let (status, checked) = call(
+        &app,
+        Method::POST,
+        "/ops/api/creation/checks",
+        Some(json!({"document": repeated})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{checked}");
+    let repeats: Vec<_> = checked["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|f| f["rule"] == "R-W7")
+        .collect();
+    assert_eq!(repeats.len(), 2);
+    assert_eq!(repeats[0]["location"]["index"], 1);
+    assert_eq!(repeats[1]["location"]["index"], 2);
     let mut unknown_field = work["revision"]["document"].clone();
     unknown_field["serverOverride"] = json!(true);
     assert!(

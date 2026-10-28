@@ -39,7 +39,15 @@ async fn load_context(
 /// Runs every manuscript rule against a draft as the editor currently holds it, with the account
 /// identity and the confirmed fact cards as they are now.
 pub async fn check_draft(db: &Database, doc: &WorkDocument) -> Result<CheckReport, AssetsError> {
-    workbench::validate_document(doc).map_err(workbench_error)?;
+    // Unsaved editor input may contain duplicate topics, which this check must report.
+    // Keep the normal size limit and validate the remaining document on a deduplicated copy.
+    if doc.tags.len() > 30 {
+        return Err(AssetsError::Invalid("document"));
+    }
+    let mut valid_shape = doc.clone();
+    let mut seen = std::collections::HashSet::new();
+    valid_shape.tags.retain(|tag| seen.insert(tag.clone()));
+    workbench::validate_document(&valid_shape).map_err(workbench_error)?;
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
         .execute(&mut *tx)
