@@ -99,7 +99,9 @@ async fn queue_materials(
     mode: &str,
 ) -> Result<(), RunError> {
     // One small request per work preserves fairness and independent failures in the common queue.
-    let works:Vec<Uuid>=sqlx::query_scalar("SELECT content_public_ref FROM collection_run_work w WHERE run_ref=$1 AND NOT EXISTS(SELECT 1 FROM collection_run_order o WHERE o.run_ref=w.run_ref AND o.content_public_ref=w.content_public_ref) ORDER BY ordinal LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
+    // A text-only work that reuses an older detail is finished without any order of its own; it must leave
+    // this three-work window or the works behind it are never queued.
+    let works:Vec<Uuid>=sqlx::query_scalar("SELECT content_public_ref FROM collection_run_work w WHERE run_ref=$1 AND NOT COALESCE((w.checkpoint->>'detailComplete')::boolean,false) AND NOT EXISTS(SELECT 1 FROM collection_run_order o WHERE o.run_ref=w.run_ref AND o.content_public_ref=w.content_public_ref) ORDER BY ordinal LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
     for work in works {
         let reused:Option<Uuid>=sqlx::query_scalar("SELECT d.package_ref FROM linggan_material_content_detail d JOIN linggan_runtime_capture_package p USING(package_ref) JOIN linggan_runtime_submission_receipt r USING(package_ref) JOIN collection_run run ON run.run_ref=$2 WHERE d.content_public_ref=$1 AND p.accepted_at<run.created_at AND r.material_admission='ACCEPTED' ORDER BY p.accepted_at DESC LIMIT 1").bind(work).bind(run).fetch_optional(&mut **tx).await?;
         sqlx::query("UPDATE collection_run_work SET reused_detail_package_ref=$3 WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).bind(reused).execute(&mut **tx).await?;
@@ -112,7 +114,13 @@ async fn queue_materials(
             tx,
             run,
             Some(work),
-            if mode == "none" { "detail" } else if mode == "sample_30" || reused.is_some() { "comments" } else { "detail" },
+            if mode == "none" {
+                "detail"
+            } else if mode == "sample_30" || reused.is_some() {
+                "comments"
+            } else {
+                "detail"
+            },
             1,
         )
         .await?;
@@ -140,7 +148,9 @@ async fn reconcile_materials(
     mode: &str,
     target: Option<i32>,
 ) -> Result<(), RunError> {
-    let latest=sqlx::query("SELECT * FROM (SELECT DISTINCT ON(o.content_public_ref) o.content_public_ref,o.stage,o.segment,o.work_order_ref,w.queue_state,member.checkpoint FROM collection_run_order o JOIN collection_run_work member ON member.run_ref=o.run_ref AND member.content_public_ref=o.content_public_ref LEFT JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=$1 AND o.content_public_ref IS NOT NULL AND member.gap_reason IS NULL AND NOT COALESCE((member.checkpoint->>'commentsComplete')::boolean,false) ORDER BY o.content_public_ref,CASE WHEN o.stage='comments' THEN 2 ELSE 1 END DESC,o.segment DESC,o.created_at DESC,o.request_ref DESC) latest WHERE queue_state IN('completed','cancelled') LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
+    // Finished works leave this three-work window: `commentsComplete` for runs that collect comments,
+    // `detailComplete` for text-only runs (they never get a comments order that would move them out).
+    let latest=sqlx::query("SELECT * FROM (SELECT DISTINCT ON(o.content_public_ref) o.content_public_ref,o.stage,o.segment,o.work_order_ref,w.queue_state,member.checkpoint FROM collection_run_order o JOIN collection_run_work member ON member.run_ref=o.run_ref AND member.content_public_ref=o.content_public_ref LEFT JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=$1 AND o.content_public_ref IS NOT NULL AND member.gap_reason IS NULL AND NOT COALESCE((member.checkpoint->>'commentsComplete')::boolean,false) AND NOT COALESCE((member.checkpoint->>'detailComplete')::boolean,false) ORDER BY o.content_public_ref,CASE WHEN o.stage='comments' THEN 2 ELSE 1 END DESC,o.segment DESC,o.created_at DESC,o.request_ref DESC) latest WHERE queue_state IN('completed','cancelled') LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
     for row in latest {
         let work: Uuid = row.get("content_public_ref");
         let order: Option<Uuid> = row.get("work_order_ref");

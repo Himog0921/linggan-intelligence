@@ -270,15 +270,38 @@ async fn preview(
             "creator_preview_unavailable",
         );
     };
+    // Whether a card is already formal domain-research material comes from the server, never from the
+    // page's current filter: it labels the card and seeds the default suggestion.
+    let frozen: Vec<Uuid> = refs.iter().map(|(work_ref, _)| *work_ref).collect();
+    let known: Result<Vec<Uuid>, _> = sqlx::query_scalar("SELECT DISTINCT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 AND use_kind='domain_research' AND content_public_ref=ANY($2)")
+        .bind(params.domain).bind(&frozen).fetch_all(db.pool()).await;
+    let Ok(known) = known else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "creator_preview_unavailable",
+        );
+    };
     let mut works = Vec::new();
     for (work_ref, ordinal) in refs {
-        let current = linggan_evidence::read_work_resource(db, work_ref).await;
-        let Ok(Some(work)) = current else { continue };
+        // A card that cannot be read right now is counted in `frozenCount` but not listed. A read that
+        // fails outright is not "no card": answer unavailable instead of a silently shorter sample.
+        let work = match linggan_evidence::read_work_resource(db, work_ref).await {
+            Ok(Some(work)) => work,
+            Ok(None) => continue,
+            Err(_) => {
+                return local_read_json_error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "creator_preview_unavailable",
+                );
+            }
+        };
         let source = serde_json::to_value(work).unwrap_or(json!({}));
-        works.push(json!({"workRef":work_ref,"ordinal":ordinal,
+        works.push(
+            json!({"workRef":work_ref,"ordinal":ordinal,"inDomain":known.contains(&work_ref),
             "title":source["display"]["title"],"likes":source["display"]["engagement"]["likeCount"],
             "comments":source["display"]["engagement"]["commentCount"],
-            "collects":source["display"]["engagement"]["collectCount"]}));
+            "collects":source["display"]["engagement"]["collectCount"]}),
+        );
     }
     let phase: String = row.get("phase");
     let control: String = row.get("control_intent");
@@ -293,7 +316,7 @@ async fn preview(
     };
     Json(
         json!({"state":snapshot,"runRef":run_ref,"revision":row.get::<i32,_>("revision"),
-        "requestedLimit":row.get::<i32,_>("work_limit"),"sampleCount":works.len(),
+        "requestedLimit":row.get::<i32,_>("work_limit"),"sampleCount":works.len(),"frozenCount":frozen.len(),
         "scopeFrozenAt":row.get::<Option<String>,_>("frozen_at"),
         "stopReason":row.get::<Option<String>,_>("discovery_reason"),"works":works}),
     )

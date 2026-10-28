@@ -124,6 +124,36 @@ async fn deliver(
         .unwrap();
 }
 
+/// 与 `deliver` 相同的合成交卷，但走插件真正使用的两个 HTTP 入口（开始尝试、提交包），返回提交的响应。
+/// 目标观察登记的守卫在路由层，只有走这里才会被覆盖。
+async fn deliver_via_routes(
+    db: &Database,
+    install: Uuid,
+    spec: &Value,
+    kind: &str,
+    records: Vec<Value>,
+    target: Value,
+) -> Value {
+    let attempt = Uuid::new_v4();
+    let count = records.len();
+    let (status, started) = post_json(
+        db,
+        "/api/local/producer/runtime-attempts",
+        json!({"contractVersion":"linggan.producer.attempt.v1","taskId":spec["taskId"],"attemptId":attempt,"producerInstanceId":install}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let package = json!({"contractVersion":"linggan.producer.capture-package.v1","packageRef":Uuid::new_v4(),"packageKind":kind,"platform":"xhs","observedAt":"2026-10-13T09:00:00Z","capturedAt":"2026-10-13T09:00:01Z","coverage":{"target":target,"layers":[{"capability":kind,"observed":count,"attempted":count,"acquired":count,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"surface_ended"}]},"records":records});
+    let (status, response) = post_json(
+        db,
+        "/api/local/producer/runtime-submissions",
+        json!({"contractVersion":"linggan.producer.capture-package.v1","taskId":spec["taskId"],"attemptId":attempt,"producerInstanceId":install,"submissionId":Uuid::new_v4(),"capturePackage":package}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    response
+}
+
 /// 工位领下一个任务；没有可领的就是 None。
 async fn next_task(db: &Database, install: Uuid, credential: &str) -> Option<Value> {
     match linggan_evidence::decide_dispatch(db, &install.to_string(), credential)
@@ -320,7 +350,7 @@ async fn creator_preview_and_selected_study_reject_every_out_of_scope_request() 
 }
 
 /// 全链路：开始浅看 → 工位交卷 → 冻结 30 篇以内的主页样本 → 只到发现为止 → 精选研究只认样本里的作品，
-/// 文字版不取媒体与评论，标准版仍然继续评论采集；浅看与精选运行的材料用途不进入领域研究名单。
+/// 文字版不取媒体与评论，标准版仍然继续评论采集；浅看与精选运行的材料用途被标成创作者语境。
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL proof; run by scripts/test-web-app-postgres.sh"]
 async fn creator_homepage_preview_ends_at_discovery_and_selected_study_takes_only_frozen_cards() {
@@ -456,7 +486,14 @@ async fn creator_homepage_preview_ends_at_discovery_and_selected_study_takes_onl
         match kind.as_str() {
             "author_profile" => {
                 let profile = json!({"kind": "author_profile", "sourceObject": {"platform": "xhs", "type": "author", "externalId": author}, "payload": {"userId": author, "nickname": "预览作者", "fans": 17}});
-                deliver(&db, install, &spec, &kind, vec![profile], target).await;
+                // 作者资料走插件真正使用的提交入口：浅看的作者资料不得悄悄登记成长期观察目标。
+                let response =
+                    deliver_via_routes(&db, install, &spec, &kind, vec![profile], target).await;
+                assert_eq!(
+                    response["targetSync"],
+                    json!({"state": "notApplicable", "reason": "creator_preview_is_not_observation"}),
+                    "{response}"
+                );
             }
             "profile_discovery" => {
                 deliver(&db, install, &spec, &kind, cards.clone(), target).await;
@@ -544,6 +581,20 @@ async fn creator_homepage_preview_ends_at_discovery_and_selected_study_takes_onl
     );
     assert_eq!(works[1]["likes"], 120);
     assert_eq!(works[0]["likes"], Value::Null);
+    // 「本领域已是研究材料」由服务端逐张标出：只有库里原有的那篇是，新发现的卡片不是。
+    assert_eq!(
+        works
+            .iter()
+            .map(|w| w["inDomain"].clone())
+            .collect::<Vec<_>>(),
+        vec![json!(false), json!(true), json!(false), json!(false)]
+    );
+    assert_eq!(done["frozenCount"], 4);
+    // 领域隔离：别的领域读不到这份浅看，也读不到它的卡片。
+    let (status, foreign) = get_json(&db, &format!("{uri}?domain={other_domain}")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(foreign["state"], "not_requested");
+    assert_eq!(foreign["works"], json!([]));
     let frozen_refs: Vec<Uuid> = works
         .iter()
         .map(|w| serde_json::from_value(w["workRef"].clone()).unwrap())
@@ -835,12 +886,13 @@ async fn creator_homepage_preview_ends_at_discovery_and_selected_study_takes_onl
         count(&db, "SELECT count(*) FROM collection_run_work w JOIN collection_run r USING(run_ref) WHERE r.source_kind='creator_preview' AND r.phase='ended'").await,
         4
     );
-    // 材料用途：浅看与精选运行带来的材料只是「创作者语境」，不进入领域研究名单。
+    // 材料用途：浅看与精选运行带来的材料在库里被标成「创作者语境」。目前只有创作者发现与账号研究按这个标记读取；
+    // 领域样本数、语料列表等其他读取点是否也要排除，是待产品决定的口径（见 collection-single-run-001.md），这里不断言。
     let leaked: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_material_domain_usage usage JOIN collection_run_order relation ON relation.work_order_ref=usage.work_order_ref JOIN collection_run run ON run.run_ref=relation.run_ref WHERE run.source_kind IN ('creator_preview','creator_selected_works') AND usage.use_kind<>'creator_context'")
         .fetch_one(db.pool())
         .await
         .unwrap();
-    assert_eq!(leaked, 0, "浅看与精选运行的材料不得成为领域研究成员");
+    assert_eq!(leaked, 0, "浅看与精选运行写入的用量行一律标成创作者语境");
     let context: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_material_domain_usage WHERE use_kind='creator_context'",
     )
@@ -864,4 +916,213 @@ async fn creator_homepage_preview_ends_at_discovery_and_selected_study_takes_onl
         0,
         "整条链没有任何模型调用"
     );
+}
+
+fn detail_record_for(note: &str, author: &str) -> Value {
+    json!({
+        "kind": "content_detail",
+        "sourceObject": {"platform": "xhs", "type": "content", "externalId": note},
+        "payload": {"noteId": note, "title": format!("详情 {note}"), "bodyText": "合成正文：先做两分钟。", "authorId": author, "authorName": "多篇作者", "likedCount": 9}
+    })
+}
+
+/// 工位把一次文字版精选运行的详情任务领完并交卷，每轮先推进再领；返回被要求取详情的笔记。
+async fn drive_text_only(
+    db: &Database,
+    install: Uuid,
+    credential: &str,
+    run: Uuid,
+    author: &str,
+) -> Vec<String> {
+    let mut asked = Vec::new();
+    for _ in 0..40 {
+        linggan_evidence::collection_run_progress::advance_runs(db)
+            .await
+            .unwrap();
+        while let Some(spec) = next_task(db, install, credential).await {
+            assert_eq!(spec["capabilitiesRequested"][0], "content_detail");
+            assert_eq!(
+                spec["collectionRunRef"],
+                json!(run),
+                "领到的任务属于这次运行"
+            );
+            let note = spec["target"]["contentExternalId"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            deliver(
+                db,
+                install,
+                &spec,
+                "content_detail",
+                vec![detail_record_for(&note, author)],
+                json!({"basis": "known_set", "contentExternalId": note}),
+            )
+            .await;
+            asked.push(note);
+        }
+        if run_phase(db, run).await == "ended" {
+            break;
+        }
+    }
+    linggan_evidence::collection_run_progress::advance_runs(db)
+        .await
+        .unwrap();
+    asked
+}
+
+/// 文字版精选一次选很多篇：推进每次只看 3 篇，处理完的作品必须让出窗口——
+/// 否则前 3 篇有旧详情时第 4 篇起永远排不上队，或同时完成 4 篇以上时后面的永远收不了尾，运行永不结束。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL proof; run by scripts/test-web-app-postgres.sh"]
+async fn text_only_study_of_many_works_ends_even_when_the_first_ones_already_have_details() {
+    require_governance_phase();
+    let db = isolated("preview_many").await;
+    let domain = linggan_evidence::observation_domain::create_observation_domain_with_details(
+        &db,
+        "合成领域",
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .domain_ref;
+    let author = "many-author";
+    // 26 篇库里已有详情的领域作品（前 3 篇会进主页样本），再加后面 8 张卡片取详情后，作者名下共 34 篇，超过账号研究的 30 篇窗口。
+    let mut known_refs = Vec::new();
+    for index in 1..=26 {
+        known_refs.push(
+            seed_work(
+                &db,
+                domain,
+                &format!("many-known-{index}"),
+                author,
+                "多篇作者",
+                &format!("已知作品 {index}"),
+                10 * index,
+            )
+            .await,
+        );
+    }
+    let uri = format!(
+        "/api/local/creators/{}/preview",
+        linggan_contracts::creator_discovery::creator_key("xhs", author)
+    );
+    let (install, credential) = proof_station(&db).await;
+    let (status, started) = post_json(
+        &db,
+        &uri,
+        json!({"domain": domain, "commandRef": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    // 11 张卡片：库里已有详情的 3 篇排在最前，后面是 8 张全新卡片。
+    let externals: Vec<String> = (1..=3)
+        .map(|n| format!("many-known-{n}"))
+        .chain((1..=8).map(|n| format!("many-card-{n}")))
+        .collect();
+    let cards: Vec<Value> = externals
+        .iter()
+        .enumerate()
+        .map(|(index, external)| {
+            json!({
+                "kind": "profile_discovery_card",
+                "resultPosition": index + 1,
+                "sourceObject": {"platform": "xhs", "type": "content", "externalId": external},
+                "payload": {"title": format!("卡片 {external}"), "url": format!("https://www.xiaohongshu.com/explore/{external}?xsec_token=t{index}")}
+            })
+        })
+        .collect();
+    for _ in 0..6 {
+        let Some(spec) = next_task(&db, install, &credential).await else {
+            break;
+        };
+        let kind = spec["capabilitiesRequested"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let target = json!({"basis": "known_set", "authorExternalId": author});
+        if kind == "author_profile" {
+            let profile = json!({"kind": "author_profile", "sourceObject": {"platform": "xhs", "type": "author", "externalId": author}, "payload": {"userId": author, "nickname": "多篇作者", "fans": 3}});
+            deliver(&db, install, &spec, &kind, vec![profile], target).await;
+        } else {
+            deliver(&db, install, &spec, &kind, cards.clone(), target).await;
+        }
+        linggan_evidence::collection_run_progress::advance_runs(&db)
+            .await
+            .unwrap();
+    }
+    let (_, snapshot) = get_json(&db, &format!("{uri}?domain={domain}")).await;
+    assert_eq!(snapshot["state"], "complete", "{snapshot}");
+    let preview: Uuid = serde_json::from_value(snapshot["runRef"].clone()).unwrap();
+    let refs: Vec<Uuid> = snapshot["works"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|work| serde_json::from_value(work["workRef"].clone()).unwrap())
+        .collect();
+    assert_eq!(refs.len(), 11);
+
+    // 前 3 篇已有详情、第 4 篇是新卡片：已有详情的不再取，第 4 篇必须被排上，运行结束。
+    let first = [refs[0], refs[1], refs[2], refs[3]];
+    let (status, receipt) = post_json(
+        &db,
+        "/api/collection/runs",
+        selected_study(Uuid::new_v4(), domain, preview, &first, "none"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{receipt}");
+    let reused_first: Uuid = serde_json::from_value(receipt["runRef"].clone()).unwrap();
+    let asked = drive_text_only(&db, install, &credential, reused_first, author).await;
+    assert_eq!(asked, vec!["many-card-1"]);
+    assert_eq!(
+        run_phase(&db, reused_first).await,
+        "ended",
+        "前 3 篇已有详情时，后面的新作品仍要被排上队并收尾"
+    );
+
+    // 7 张全新卡片一起取：同时完成的篇数超过窗口，后面的也必须收得了尾。
+    let many: Vec<Uuid> = refs[4..11].to_vec();
+    let (status, receipt) = post_json(
+        &db,
+        "/api/collection/runs",
+        selected_study(Uuid::new_v4(), domain, preview, &many, "none"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{receipt}");
+    let seven: Uuid = serde_json::from_value(receipt["runRef"].clone()).unwrap();
+    let mut asked = drive_text_only(&db, install, &credential, seven, author).await;
+    asked.sort();
+    assert_eq!(
+        asked,
+        (2..=8)
+            .map(|n| format!("many-card-{n}"))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        run_phase(&db, seven).await,
+        "ended",
+        "一次选 7 篇的文字版精选必须结束"
+    );
+
+    // 账号研究的样本只取领域研究作品：作者名下 34 篇（26 篇领域作品 + 8 张创作者语境卡片）时，
+    // 样本仍是那 26 篇，不会被卡片挤出 30 篇的窗口。
+    let (status, account) = get_json(
+        &db,
+        &format!(
+            "/api/local/creator-account-research/preview?domainRef={domain}&platform=xhs&authorExternalId={author}"
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{account}");
+    let mut sampled: Vec<Uuid> = account["workRefs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|work| serde_json::from_value(work.clone()).unwrap())
+        .collect();
+    sampled.sort();
+    let mut expected = known_refs.clone();
+    expected.sort();
+    assert_eq!(sampled, expected, "账号研究样本恰好是 26 篇领域研究作品");
 }

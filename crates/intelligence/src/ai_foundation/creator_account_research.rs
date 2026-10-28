@@ -81,7 +81,9 @@ pub async fn preview(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let works:Vec<Uuid>=sqlx::query_scalar("SELECT DISTINCT content.public_ref FROM linggan_material_content content JOIN linggan_material_content_author author ON author.content_public_ref=content.public_ref JOIN linggan_material_domain_usage usage ON usage.content_public_ref=content.public_ref WHERE usage.domain_ref=$1 AND content.platform=$2 AND author.author_external_id=$3 ORDER BY content.public_ref LIMIT 30")
+    // Only formal domain-research works make the sample. Homepage-preview context cards are dropped by the
+    // loader below anyway; selecting them here first would crowd real works out of the 30-work window.
+    let works:Vec<Uuid>=sqlx::query_scalar("SELECT DISTINCT content.public_ref FROM linggan_material_content content JOIN linggan_material_content_author author ON author.content_public_ref=content.public_ref JOIN linggan_material_domain_usage usage ON usage.content_public_ref=content.public_ref WHERE usage.domain_ref=$1 AND usage.use_kind='domain_research' AND content.platform=$2 AND author.author_external_id=$3 ORDER BY content.public_ref LIMIT 30")
         .bind(domain).bind(platform).bind(author).fetch_all(&mut *tx).await?;
     let mut data =
         creator_discovery::load_topic_materials_for_works_at_in(&mut tx, domain, &works, None)
