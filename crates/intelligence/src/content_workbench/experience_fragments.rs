@@ -45,6 +45,11 @@ async fn lock_references(
     if experiences.is_empty() {
         return Ok(());
     }
+    // One gate spans all source locks in a transaction, including historical revisions.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut **tx)
+        .await?;
     for id in experiences {
         lock_experience(tx, id).await?;
     }

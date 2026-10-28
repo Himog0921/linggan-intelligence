@@ -108,6 +108,7 @@ pub async fn put_identity(
             replayed: true,
         });
     }
+    lock(&mut tx, "experience-gate").await?;
     lock(&mut tx, &format!("identity:{account}")).await?;
     let known: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_ops_account WHERE account_ref=$1 AND ledger_state='in_ledger')",

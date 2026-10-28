@@ -10,6 +10,7 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 async fn lock_subject(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<(), AssetsError> {
+    lock(tx, "experience-gate").await?;
     let account: Uuid = sqlx::query_scalar(
         "SELECT account_ref FROM linggan_creation_experience WHERE experience_ref=$1",
     )
@@ -236,6 +237,7 @@ pub async fn create_experience(
         tx.commit().await?;
         return Ok(receipt);
     }
+    lock(&mut tx, "experience-gate").await?;
     lock(&mut tx, &format!("identity:{}", cmd.account_ref)).await?;
     let identity = super::identity::latest_in(&mut tx, cmd.account_ref).await?;
     if identity.is_none_or(|value| value.has_real_person != Some(true)) {
@@ -294,6 +296,7 @@ pub async fn edit_experience(
         tx.commit().await?;
         return Ok(receipt);
     }
+    lock(&mut tx, "experience-gate").await?;
     lock(&mut tx, &format!("experience:{id}")).await?;
     let current = snapshot(&mut tx, id).await?;
     if current.revision != cmd.expected_revision {
@@ -355,6 +358,7 @@ pub async fn confirm_experience(
         tx.commit().await?;
         return Ok(receipt);
     }
+    lock(&mut tx, "experience-gate").await?;
     lock(&mut tx, &format!("experience:{id}")).await?;
     let current = snapshot(&mut tx, id).await?;
     if current.revision != cmd.expected_revision {
@@ -403,6 +407,7 @@ pub async fn withdraw_experience(
         tx.commit().await?;
         return Ok(receipt);
     }
+    lock(&mut tx, "experience-gate").await?;
     lock(&mut tx, &format!("experience:{id}")).await?;
     let current = snapshot(&mut tx, id).await?;
     if current.state == "withdrawn" {

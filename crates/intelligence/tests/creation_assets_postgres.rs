@@ -8,8 +8,8 @@ mod full_schema;
 use fixture::*;
 use linggan_intelligence::content_workbench::{
     BridgeChoice, BridgeGroup, BridgeUse, CreateRequest, ExperienceSlot, FreezeRequest, PageKind,
-    Paragraph, PlaceRequest, SaveRequest, UseTarget, WorkDocument, WorkbenchError, create_work,
-    freeze_export, place, read_request, read_work, revisions, save,
+    Paragraph, PlaceRequest, RestoreRequest, SaveRequest, UseTarget, WorkDocument, WorkbenchError,
+    create_work, freeze_export, place, read_request, read_work, restore, revisions, save,
 };
 use linggan_intelligence::creation_assets::*;
 use linggan_storage_postgres::Database;
@@ -328,13 +328,19 @@ async fn replacement_committed_before_copy_rechecks_the_person() {
     });
     let work = create(&db, doc).await;
 
-    // Hold the source lock until the copy transaction is observed waiting on it.
+    // Queue replacement before copying, so the latter must recheck after the former commits.
     let mut hold = db.pool().begin().await.unwrap();
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
-        .bind(format!("creation_assets:experience:{experience}"))
+        .bind("creation_assets:experience-gate")
         .execute(&mut *hold)
         .await
         .unwrap();
+    let replacement_db = db.clone();
+    let mut replacement = identity(1, OrgRelation::Parent, None, Some("妈妈"));
+    replacement.person_change = Some(PersonChange::Replacement);
+    let change =
+        tokio::spawn(async move { put_identity(&replacement_db, account, &replacement).await });
+    wait_for_advisory_waiters(&db, 1).await;
     let copy_db = db.clone();
     let copy = tokio::spawn(async move {
         prepare_copy(
@@ -347,30 +353,192 @@ async fn replacement_committed_before_copy_rechecks_the_person() {
         )
         .await
     });
+    wait_for_advisory_waiters(&db, 2).await;
+    hold.commit().await.unwrap();
+    change.await.unwrap().unwrap();
+    assert!(matches!(
+        copy.await.unwrap(),
+        Err(AssetsError::SourceUnavailable)
+    ));
+}
+
+async fn wait_for_advisory_waiters(db: &Database, expected: i64) {
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
         loop {
-            let waiting: bool = sqlx::query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted)",
+            let count: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted",
             )
             .fetch_one(db.pool())
             .await
             .unwrap();
-            if waiting {
+            if count >= expected {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("copy did not reach the source lock");
-    let mut replacement = identity(1, OrgRelation::Parent, None, Some("妈妈"));
-    replacement.person_change = Some(PersonChange::Replacement);
-    put_identity(&db, account, &replacement).await.unwrap();
+    .expect("operation did not reach its advisory lock");
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn history_edit_and_restore_save_serialize_without_deadlock() {
+    let db = db("assets_history_lock_order").await;
+    let (account, _, _) = accounts(&db).await;
+    put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap();
+    let mut ids = Vec::new();
+    for text in ["甲合成经历。", "乙合成经历。"] {
+        let id = create_experience(
+            &db,
+            &ExperienceCreate {
+                request_id: Uuid::new_v4(),
+                account_ref: account,
+                title: "合成经历".into(),
+                body: text.into(),
+                tags: vec![],
+                origin: "oral".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .experience
+        .id;
+        confirm_experience(
+            &db,
+            id,
+            &ExperienceConfirm {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                subject_confirmed: true,
+                draft_use: true,
+                send_to_model: None,
+                confirmation_method: "subject_present".into(),
+            },
+        )
+        .await
+        .unwrap();
+        ids.push(id);
+    }
+    let mut doc = draft(Some(account), &["甲合成经历。"]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: doc.paragraphs[0].id,
+        experience_ref: ids[0],
+        experience_revision: 1,
+    });
+    let first = create(&db, doc.clone()).await;
+    let second_id = Uuid::new_v4();
+    doc.paragraphs.push(Paragraph {
+        id: second_id,
+        text: "乙合成经历。".into(),
+    });
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: second_id,
+        experience_ref: ids[1],
+        experience_revision: 1,
+    });
+    let second = save(
+        &db,
+        first.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: first.revision.id,
+            document: doc.clone(),
+        },
+    )
+    .await
+    .unwrap();
+
+    let mut hold = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let history_db = db.clone();
+    let work_id = first.work_id;
+    let history = tokio::spawn(async move { revisions(&history_db, work_id).await });
+    wait_for_advisory_waiters(&db, 1).await;
+    let edit_db = db.clone();
+    let experience = ids[1];
+    let edit = tokio::spawn(async move {
+        edit_experience(
+            &edit_db,
+            experience,
+            &ExperienceEdit {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                title: "合成修订".into(),
+                body: "乙合成修订。".into(),
+                tags: vec![],
+                origin: "oral".into(),
+            },
+        )
+        .await
+    });
+    wait_for_advisory_waiters(&db, 2).await;
     hold.commit().await.unwrap();
-    assert!(matches!(
-        copy.await.unwrap(),
-        Err(AssetsError::SourceUnavailable)
-    ));
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        assert_eq!(history.await.unwrap().unwrap().len(), 2);
+        edit.await.unwrap().unwrap();
+    })
+    .await
+    .expect("history and edit did not finish");
+
+    let mut hold = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let restore_db = db.clone();
+    let old_revision = first.revision.id;
+    let latest_revision = second.revision.id;
+    let restoring = tokio::spawn(async move {
+        restore(
+            &restore_db,
+            work_id,
+            &RestoreRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: latest_revision,
+                restore_revision: old_revision,
+            },
+        )
+        .await
+    });
+    wait_for_advisory_waiters(&db, 1).await;
+    let save_db = db.clone();
+    let saving = tokio::spawn(async move {
+        save(
+            &save_db,
+            work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: latest_revision,
+                document: doc,
+            },
+        )
+        .await
+    });
+    wait_for_advisory_waiters(&db, 2).await;
+    hold.commit().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        assert_eq!(restoring.await.unwrap().unwrap().outcome, "accepted");
+        assert_eq!(saving.await.unwrap().unwrap().outcome, "stale");
+    })
+    .await
+    .expect("restore and save did not finish");
 }
 
 #[tokio::test]

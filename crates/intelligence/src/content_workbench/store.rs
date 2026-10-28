@@ -312,6 +312,8 @@ pub async fn restore(
 ) -> Result<SaveReceipt, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
     let command = hash(serde_json::to_vec(&json!(["restore", work, r]))?);
+    ensure_request_owner_in(&mut tx, r.request_id, RequestOwner::Work).await?;
+    lock(&mut tx, work.to_string()).await?;
     let (_, revision) = read_revision_in(&mut tx, work, Some(r.restore_revision)).await?;
     let mut out = save_in(
         &mut tx,
