@@ -4,6 +4,8 @@ mod bridge_sentences;
 mod checks;
 mod copy_format;
 mod drafts;
+pub mod experience_policy;
+mod experiences;
 mod fact_cards;
 mod identity;
 mod requests;
@@ -19,6 +21,10 @@ pub use bridge_sentences::{
 pub use checks::{blocks_entry, check_manuscript, check_sentence};
 pub use copy_format::{CopyText, SPACER, format_copy, normalize_tags};
 pub use drafts::{check_draft, confirm_copy, copy_status, prepare_copy};
+pub use experiences::{
+    confirm_experience, create_experience, edit_experience, read_experience,
+    read_usable_experience, withdraw_experience,
+};
 pub use fact_cards::{confirm_fact_card, list_fact_cards, put_fact_card};
 pub use identity::{list_accounts, put_identity, read_identity};
 pub use subject::{CardTerms, Context, Subject};
@@ -39,6 +45,8 @@ pub enum AssetsError {
     /// The editor started from a revision that is no longer the latest.
     #[error("creation_assets_stale")]
     Stale,
+    #[error("creation_assets_source_unavailable")]
+    SourceUnavailable,
     /// Rules refuse the command; the findings say why.
     #[error("creation_assets_blocked")]
     Blocked(Vec<Finding>),

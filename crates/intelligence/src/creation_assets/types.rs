@@ -3,6 +3,74 @@ use crate::content_workbench::BridgeGroup;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Sensitive content is intentionally not Debug: it must not be written to ordinary logs.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Experience {
+    pub id: Uuid,
+    pub code: String,
+    pub account_ref: Uuid,
+    pub state: String,
+    pub revision: i32,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub origin: Option<String>,
+    pub send_to_model: Option<bool>,
+    pub confirmed_at: Option<String>,
+    pub created_at: String,
+    pub withdrawn_at: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExperienceCreate {
+    pub request_id: Uuid,
+    pub account_ref: Uuid,
+    pub title: String,
+    pub body: String,
+    pub tags: Vec<String>,
+    pub origin: String,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExperienceEdit {
+    pub request_id: Uuid,
+    pub expected_revision: i32,
+    pub title: String,
+    pub body: String,
+    pub tags: Vec<String>,
+    pub origin: String,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExperienceConfirm {
+    pub request_id: Uuid,
+    pub expected_revision: i32,
+    /// The operator records an actual confirmation by the subject; this is not identity proof.
+    pub subject_confirmed: bool,
+    pub draft_use: bool,
+    pub send_to_model: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExperienceReceipt {
+    pub experience: Experience,
+    pub replayed: bool,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsableExperience {
+    pub id: Uuid,
+    pub code: String,
+    pub revision: i32,
+    pub body: String,
+}
+
 /// How an account relates to the organisation, as the operator knows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

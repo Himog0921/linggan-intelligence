@@ -437,6 +437,15 @@ pub async fn redact_revision_in(
     Ok(())
 }
 
+/// Like `redact_revision_in`, and also returns the current qualification of each excerpt.
+pub async fn redact_revision_with_statuses_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    revision: &mut Revision,
+) -> Result<Vec<SourceStatus>, WorkbenchError> {
+    redact(tx, domain, &mut revision.document).await
+}
+
 /// Coordinates use Unicode scalars, matching Citation and browser code-point offsets.
 pub(crate) fn scalar_slice(text: &str, start: usize, end: usize) -> Option<String> {
     if start >= end || end > text.chars().count() {

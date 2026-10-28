@@ -163,6 +163,7 @@ describe('asset requests', () => {
   it('turns failures into plain sentences without blaming the user or hiding that the input is kept', () => {
     const http = (code: string | null) => assetsErrorText(new ApiError({ kind: 'http', status: 409, code }));
     expect(http('creation_assets_stale')).toContain('刷新');
+    expect(http('creation_assets_source_unavailable')).toContain('来源当前不可使用');
     expect(http('creation_assets_blocked')).toContain('规则');
     expect(http('something_new')).toContain('当前输入仍保留');
     expect(http(null)).toContain('当前输入仍保留');

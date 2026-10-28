@@ -53,6 +53,15 @@ pub struct Paragraph {
     pub id: Uuid,
     pub text: String,
 }
+/// Provenance of a whole paragraph containing a personal experience or an edit derived from it.
+/// The paragraph text is projected from erasable storage and is not embedded in revisions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExperienceSlot {
+    pub paragraph_id: Uuid,
+    pub experience_ref: Uuid,
+    pub experience_revision: i32,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Excerpt {
@@ -268,6 +277,8 @@ pub struct BridgeChoice {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub experience_slots: Vec<ExperienceSlot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge: Option<BridgeChoice>,
     /// Whether the cover image is AI-made; absent means not recorded, never "no".
@@ -295,6 +306,7 @@ impl Default for WorkDocument {
     fn default() -> Self {
         Self {
             contract: "content-workbench.v1".into(),
+            experience_slots: vec![],
             bridge: None,
             cover_ai: None,
             materials: vec![],

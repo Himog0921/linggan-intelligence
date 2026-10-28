@@ -41,15 +41,15 @@ pub async fn read_revision_in(
     id: Option<Uuid>,
 ) -> Result<(Uuid, Revision), WorkbenchError> {
     let row=sqlx::query("SELECT w.domain_ref,r.revision_ref,r.revision_number,r.saved_at::text,r.document FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.work_ref=w.work_ref AND r.revision_ref=COALESCE($2,w.current_revision_ref) WHERE w.work_ref=$1").bind(work).bind(id).fetch_optional(&mut **tx).await?.ok_or(WorkbenchError::NotFound)?;
-    Ok((
-        row.try_get("domain_ref")?,
-        Revision {
-            id: row.try_get("revision_ref")?,
-            number: row.try_get("revision_number")?,
-            saved_at: row.try_get("saved_at")?,
-            document: stored_document(row.try_get("document")?)?,
-        },
-    ))
+    let domain = row.try_get("domain_ref")?;
+    let mut revision = Revision {
+        id: row.try_get("revision_ref")?,
+        number: row.try_get("revision_number")?,
+        saved_at: row.try_get("saved_at")?,
+        document: stored_document(row.try_get("document")?)?,
+    };
+    super::experience_fragments::project(tx, revision.id, &mut revision.document).await?;
+    Ok((domain, revision))
 }
 pub async fn list_works(
     db: &Database,
@@ -124,8 +124,11 @@ async fn append(
 ) -> Result<Revision, WorkbenchError> {
     let id = Uuid::new_v4();
     let number = previous.map_or(1, |r| r.number + 1);
-    let bytes = serde_json::to_vec(&doc)?;
-    let saved_at:String=sqlx::query_scalar("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,previous_revision_ref,document,document_sha256) VALUES($1,$2,$3,$4,$5,$6) RETURNING saved_at::text").bind(id).bind(work).bind(number).bind(previous.map(|r|r.id)).bind(serde_json::to_value(&doc)?).bind(hash(bytes)).fetch_one(&mut **tx).await?;
+    let (stored, fragments) =
+        super::experience_fragments::prepare(tx, previous.map(|r| &r.document), &doc).await?;
+    let bytes = serde_json::to_vec(&stored)?;
+    let saved_at:String=sqlx::query_scalar("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,previous_revision_ref,document,document_sha256) VALUES($1,$2,$3,$4,$5,$6) RETURNING saved_at::text").bind(id).bind(work).bind(number).bind(previous.map(|r|r.id)).bind(serde_json::to_value(&stored)?).bind(hash(bytes)).fetch_one(&mut **tx).await?;
+    super::experience_fragments::insert(tx, id, &fragments).await?;
     sqlx::query("UPDATE linggan_creation_work SET current_revision_ref=$2 WHERE work_ref=$1")
         .bind(work)
         .bind(id)

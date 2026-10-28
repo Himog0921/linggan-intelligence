@@ -8,7 +8,9 @@ use super::identity::latest_in as latest_identity_in;
 use super::requests::{Claim, claim, command_hash, lock};
 use super::subject::{Context, Subject};
 use super::{AssetsError, types::*, words::RULESET_VERSION};
-use crate::content_workbench::{self as workbench, WorkDocument, WorkbenchError};
+use crate::content_workbench::{
+    self as workbench, ContentOrigin, UseTarget, WorkDocument, WorkbenchError,
+};
 use linggan_storage_postgres::Database;
 use sqlx::{Postgres, Row, Transaction};
 use std::collections::BTreeMap;
@@ -59,6 +61,70 @@ pub async fn check_draft(db: &Database, doc: &WorkDocument) -> Result<CheckRepor
 
 fn text_sha(copy: &CopyText) -> String {
     crate::content_workbench::hash(format!("{}\n{}", copy.title, copy.text))
+}
+
+/// A saved revision contains its original source text. Requalify it before both the first copy
+/// and a replay, and refuse if the copy would include text hidden by the workbench projection.
+async fn copy_subject(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    mut revision: workbench::Revision,
+    ctx: &Context,
+) -> Result<Subject, AssetsError> {
+    if !workbench::experience_fragments_available_in(tx, revision.id, &revision.document)
+        .await
+        .map_err(workbench_error)?
+    {
+        return Err(AssetsError::SourceUnavailable);
+    }
+    let original_document = revision.document.clone();
+    let original = Subject::from_document(&original_document);
+    let statuses = workbench::redact_revision_with_statuses_in(tx, domain, &mut revision)
+        .await
+        .map_err(workbench_error)?;
+    let public = Subject::from_document(&revision.document);
+    let restricted_use = original_document.uses.iter().any(|usage| {
+        usage.content_origin == ContentOrigin::Excerpt
+            && statuses.iter().any(|status| {
+                usage.excerpt_id == Some(status.excerpt_id) && status.state != "readable"
+            })
+            && match usage.target {
+                UseTarget::Title => true,
+                UseTarget::Paragraph { paragraph_id } => original_document
+                    .paragraphs
+                    .iter()
+                    .any(|p| p.id == paragraph_id),
+                UseTarget::Tag { index } => index < original_document.tags.len(),
+                _ => false,
+            }
+    });
+    let restricted_quote = original_document.excerpts.iter().any(|excerpt| {
+        let unavailable = statuses
+            .iter()
+            .any(|status| status.excerpt_id == excerpt.id && status.state != "readable");
+        unavailable
+            && excerpt.selected_text.as_deref().is_some_and(|raw| {
+                !raw.is_empty()
+                    && (original.title.contains(raw)
+                        || original
+                            .paragraphs
+                            .iter()
+                            .any(|(_, text)| text.contains(raw))
+                        || original.tags.iter().any(|tag| tag.contains(raw))
+                        || ctx
+                            .bridge_output(&original)
+                            .is_some_and(|(text, _)| text.contains(raw)))
+            })
+    });
+    if original.title != public.title
+        || original.paragraphs != public.paragraphs
+        || original.tags != public.tags
+        || restricted_use
+        || restricted_quote
+    {
+        return Err(AssetsError::SourceUnavailable);
+    }
+    Ok(public)
 }
 
 fn rule_counts(report: &CheckReport, level: Level) -> BTreeMap<String, usize> {
@@ -121,11 +187,11 @@ async fn replay(
     .await?
     .ok_or(AssetsError::NotFound)?;
     let revision_ref: Uuid = row.try_get("revision_ref")?;
-    let (_, revision) = workbench::read_revision_in(tx, work, Some(revision_ref))
+    let (domain, revision) = workbench::read_revision_in(tx, work, Some(revision_ref))
         .await
         .map_err(workbench_error)?;
-    let subject = Subject::from_document(&revision.document);
     let ctx = load_context(tx, revision.document.account_ref).await?;
+    let subject = copy_subject(tx, domain, revision, &ctx).await?;
     let copy = format_copy(&subject, ctx.bridge_output(&subject)).ok_or(AssetsError::Stale)?;
     if text_sha(&copy) != row.try_get::<String, _>("text_sha256")? {
         return Err(AssetsError::Stale);
@@ -156,14 +222,15 @@ pub async fn prepare_copy(
         return Ok(done);
     }
     lock(&mut tx, &format!("copy:{work}")).await?;
-    let (_, revision) = workbench::read_revision_in(&mut tx, work, None)
+    let (domain, revision) = workbench::read_revision_in(&mut tx, work, None)
         .await
         .map_err(workbench_error)?;
     if revision.id != cmd.expected_revision {
         return Err(AssetsError::Stale);
     }
-    let subject = Subject::from_document(&revision.document);
     let ctx = load_context(&mut tx, revision.document.account_ref).await?;
+    let revision_id = revision.id;
+    let subject = copy_subject(&mut tx, domain, revision, &ctx).await?;
     let report = check_manuscript(&subject, &ctx);
     if report.count(Level::Must) > 0 {
         return Err(AssetsError::Blocked(report.findings));
@@ -177,7 +244,7 @@ pub async fn prepare_copy(
     )
     .bind(receipt)
     .bind(work)
-    .bind(revision.id)
+    .bind(revision_id)
     .bind(cmd.request_id)
     .bind(&report.ruleset_version)
     .bind(serde_json::to_value(&report.fact_cards)?)
@@ -190,7 +257,7 @@ pub async fn prepare_copy(
     Ok(ready(
         receipt,
         work,
-        revision.id,
+        revision_id,
         copy,
         report.count(Level::Warn),
         report.count(Level::Hint),

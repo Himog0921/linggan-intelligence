@@ -84,6 +84,9 @@ fn failure(error: AssetsError) -> Response {
         AssetsError::NotFound => (StatusCode::NOT_FOUND, "creation_assets_not_found"),
         AssetsError::RequestConflict => (StatusCode::CONFLICT, "creation_assets_request_conflict"),
         AssetsError::Stale => (StatusCode::CONFLICT, "creation_assets_stale"),
+        AssetsError::SourceUnavailable => {
+            (StatusCode::CONFLICT, "creation_assets_source_unavailable")
+        }
         AssetsError::Blocked(findings) => {
             return (
                 StatusCode::CONFLICT,

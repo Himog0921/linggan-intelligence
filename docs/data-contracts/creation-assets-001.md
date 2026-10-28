@@ -37,7 +37,7 @@
 | `POST bridge-sentences/{code}/review` | `approve`/`request_fix`/`disable`/`enable` | `request_fix` 必须有说明；越过流转 400 |
 | `POST bridge-sentences/check` | 输入时的入库检查 | 不写任何东西 |
 | `POST checks` | 对编辑器当前稿件（`{document}`）跑全部稿件规则 | 不写任何东西；文档先过同一套校验 |
-| `POST works/{id}/copy` | 检查**已保存的当前修订**，通过则返回文本并写回执 | `expectedRevision` 须是当前修订，否则 409 stale；有必改 409 blocked 并附 `findings`；正文为空 400 |
+| `POST works/{id}/copy` | 检查**已保存的当前修订**，通过则返回文本并写回执 | `expectedRevision` 须是当前修订，否则 409 stale；有必改 409 blocked 并附 `findings`；当前不可用的来源仍出现在复制范围时返回 409 `creation_assets_source_unavailable`；正文为空 400。原请求重放也重新核验来源 |
 | `POST works/{id}/copy/{receipt}/confirm` | 剪贴板成功后写确认 | 重复确认返回第一次 |
 | `GET works/{id}/copy-status` | 最近一次已确认的复制 | 编辑器比较其 `revisionId` 与当前修订，区分“已复制”与“草稿中” |
 

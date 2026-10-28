@@ -264,7 +264,7 @@ export function ImagePages(props: Props) {
         </div>)}</div>
         <aside className={styles.exportPanel}>
           <section><h3>笔记正文</h3><div className={styles.exportCopy}><strong>{documentValue.title || '尚未填写标题'}</strong><p>{documentValue.paragraphs.map(item => item.text).join('\n\n')}</p>{documentValue.tags.length > 0 && <p>{documentValue.tags.map(tag => `#${tag}`).join(' ')}</p>}</div>
-            <ActionButton onClick={() => { void navigator.clipboard.writeText([documentValue.title,documentValue.paragraphs.map(item => item.text).join('\n\n'),documentValue.tags.map(tag => `#${tag}`).join(' ')].filter(Boolean).join('\n\n')).then(() => setMessage('标题与正文已复制')).catch(() => setError('复制未完成，请手动选取正文复制')); }}>复制标题与正文</ActionButton>
+            <ActionButton disabled={!props.onStepChange} onClick={() => props.onStepChange?.('body')}>前往正文检查与复制</ActionButton>
           </section>
           <section><h3>导出前检查</h3>{currentValidation === null ? <p className={styles.note} role="status">正在检查字体、图片与文字画幅…</p> : currentValidation.length ? currentValidation.map(issue => <p key={issue} className={styles.error}>{issue}</p>) : <>
             <p className={styles.check}>✓ 标题与正文已填写</p><p className={styles.check}>✓ {documentValue.pages.length} 张图片完整，文字未溢出</p></>}

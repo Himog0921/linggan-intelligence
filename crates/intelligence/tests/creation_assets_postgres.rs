@@ -5,13 +5,433 @@
 mod fixture;
 use fixture::*;
 use linggan_intelligence::content_workbench::{
-    BridgeChoice, BridgeGroup, BridgeUse, PageKind, Paragraph, SaveRequest, WorkDocument, save,
+    BridgeChoice, BridgeGroup, BridgeUse, CreateRequest, ExperienceSlot, FreezeRequest, PageKind,
+    Paragraph, PlaceRequest, SaveRequest, UseTarget, WorkDocument, WorkbenchError, create_work,
+    freeze_export, place, read_request, read_work, revisions, save,
 };
 use linggan_intelligence::creation_assets::*;
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
 const FILL: &str = "\u{3164}";
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
+    let db = db("assets_experience_draft").await;
+    let (account, _, other) = accounts(&db).await;
+    put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap();
+    let made = create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            title: "虚构".into(),
+            body: "合成经历，只供测试。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let id = made.experience.id;
+    confirm_experience(
+        &db,
+        id,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+        },
+    )
+    .await
+    .unwrap();
+    let mut doc = draft(Some(account), &["合成改写经历，只供测试。"]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: doc.paragraphs[0].id,
+        experience_ref: id,
+        experience_revision: 1,
+    });
+    let request = CreateRequest {
+        request_id: Uuid::new_v4(),
+        domain_ref: fixture::dossier::DOMAIN,
+        document: doc.clone(),
+    };
+    let mut other_request = request.clone();
+    other_request.request_id = Uuid::new_v4();
+    other_request.document.account_ref = Some(other);
+    assert!(matches!(
+        create_work(&db, &other_request).await,
+        Err(WorkbenchError::Source)
+    ));
+    let made = create_work(&db, &request).await.unwrap();
+    assert_eq!(
+        made.revision.document.paragraphs[0].text,
+        "合成改写经历，只供测试。"
+    );
+    let stored: serde_json::Value =
+        sqlx::query_scalar("SELECT document FROM linggan_creation_revision WHERE revision_ref=$1")
+            .bind(made.revision.id)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored["paragraphs"][0]["text"], "");
+    let stored_receipt: serde_json::Value =
+        sqlx::query_scalar("SELECT receipt FROM linggan_creation_request WHERE request_ref=$1")
+            .bind(request.request_id)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        stored_receipt["revision"]["document"]["paragraphs"][0]["text"],
+        ""
+    );
+    assert_eq!(
+        read_work(&db, made.work_id)
+            .await
+            .unwrap()
+            .revision
+            .document
+            .paragraphs[0]
+            .text,
+        "合成改写经历，只供测试。"
+    );
+    let mut detached = doc.clone();
+    detached.experience_slots.clear();
+    assert!(matches!(
+        save(
+            &db,
+            made.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: made.revision.id,
+                document: detached
+            }
+        )
+        .await,
+        Err(WorkbenchError::Invalid("experience_reference_removed"))
+    ));
+    let mut revised_doc = doc.clone();
+    revised_doc.paragraphs[0].text = "另一版合成改写经历。".into();
+    let saved = save(
+        &db,
+        made.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: made.revision.id,
+            document: revised_doc,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        freeze_export(
+            &db,
+            made.work_id,
+            &FreezeRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: saved.revision.id,
+                renderer_version: "creation-renderer.v1".into(),
+                font_version: "synthetic".into()
+            }
+        )
+        .await,
+        Err(WorkbenchError::Source)
+    ));
+    let copy = CopyCommand {
+        request_id: Uuid::new_v4(),
+        expected_revision: saved.revision.id,
+    };
+    assert!(prepare_copy(&db, made.work_id, &copy).await.is_ok());
+    withdraw_experience(&db, id, Uuid::new_v4()).await.unwrap();
+    assert_eq!(
+        read_work(&db, made.work_id)
+            .await
+            .unwrap()
+            .revision
+            .document
+            .paragraphs[0]
+            .text,
+        "[本人已撤回这段经历]"
+    );
+    assert_eq!(
+        revisions(&db, made.work_id).await.unwrap()[0]
+            .document
+            .paragraphs[0]
+            .text,
+        "[本人已撤回这段经历]"
+    );
+    assert!(
+        revisions(&db, made.work_id)
+            .await
+            .unwrap()
+            .iter()
+            .all(|revision| revision.document.paragraphs[0].text == "[本人已撤回这段经历]")
+    );
+    let replay = read_request(&db, request.request_id).await.unwrap();
+    assert_eq!(
+        replay["receipt"]["revision"]["document"]["paragraphs"][0]["text"],
+        "[本人已撤回这段经历]"
+    );
+    assert!(matches!(
+        prepare_copy(&db, made.work_id, &copy).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let fragments: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_creation_experience_fragment WHERE experience_ref=$1",
+    )
+    .bind(id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(fragments, 0);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
+    let db = db("assets_experience").await;
+    let (account, _, _) = accounts(&db).await;
+    let cmd = ExperienceCreate {
+        request_id: Uuid::new_v4(),
+        account_ref: account,
+        title: "合成经历".into(),
+        body: "这是一段仅用于测试的虚构经历。".into(),
+        tags: vec!["合成".into()],
+        origin: "oral".into(),
+    };
+    assert!(matches!(
+        create_experience(&db, &cmd).await,
+        Err(AssetsError::Invalid(_))
+    ));
+    put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap();
+    let made = create_experience(&db, &cmd).await.unwrap();
+    assert_eq!(made.experience.state, "awaiting_subject");
+    let id = made.experience.id;
+    assert!(create_experience(&db, &cmd).await.unwrap().replayed);
+    assert!(matches!(
+        read_usable_experience(&db, id, 1, Some(account)).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let mut confirm = ExperienceConfirm {
+        request_id: Uuid::new_v4(),
+        expected_revision: 1,
+        subject_confirmed: false,
+        draft_use: true,
+        send_to_model: Some(false),
+    };
+    assert!(matches!(
+        confirm_experience(&db, id, &confirm).await,
+        Err(AssetsError::Invalid(_))
+    ));
+    confirm.subject_confirmed = true;
+    let confirmed = confirm_experience(&db, id, &confirm).await.unwrap();
+    assert_eq!(confirmed.experience.state, "confirmed");
+    assert_eq!(confirmed.experience.send_to_model, Some(false));
+    assert!(confirmed.experience.confirmed_at.is_some());
+    assert!(
+        read_usable_experience(&db, id, 1, Some(account))
+            .await
+            .is_ok()
+    );
+    assert!(matches!(
+        read_usable_experience(&db, id, 1, Some(Uuid::new_v4())).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let edit = ExperienceEdit {
+        request_id: Uuid::new_v4(),
+        expected_revision: 1,
+        title: "合成经历修订".into(),
+        body: "另一段虚构测试内容。".into(),
+        tags: vec!["合成".into()],
+        origin: "oral".into(),
+    };
+    let revised = edit_experience(&db, id, &edit).await.unwrap();
+    assert_eq!(
+        (
+            revised.experience.revision,
+            revised.experience.state.as_str()
+        ),
+        (2, "awaiting_subject")
+    );
+    assert!(revised.experience.confirmed_at.is_none());
+    let create_replay = create_experience(&db, &cmd).await.unwrap();
+    assert!(create_replay.replayed);
+    assert_eq!(create_replay.experience.revision, 1);
+    assert_eq!(create_replay.experience.state, "awaiting_subject");
+    assert!(create_replay.experience.confirmed_at.is_none());
+    let confirm_replay = confirm_experience(&db, id, &confirm).await.unwrap();
+    assert!(confirm_replay.replayed);
+    assert_eq!(confirm_replay.experience.revision, 1);
+    assert_eq!(confirm_replay.experience.state, "confirmed");
+    assert!(matches!(
+        read_usable_experience(&db, id, 2, Some(account)).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(
+        read_usable_experience(&db, id, 1, Some(account))
+            .await
+            .is_ok()
+    );
+    let stale = ExperienceEdit {
+        request_id: Uuid::new_v4(),
+        ..edit.clone()
+    };
+    assert!(matches!(
+        edit_experience(&db, id, &stale).await,
+        Err(AssetsError::Stale)
+    ));
+    let mut second_consent = confirm.clone();
+    second_consent.request_id = Uuid::new_v4();
+    second_consent.expected_revision = 2;
+    assert_eq!(
+        confirm_experience(&db, id, &second_consent)
+            .await
+            .unwrap()
+            .experience
+            .state,
+        "confirmed"
+    );
+    let withdrawal = Uuid::new_v4();
+    let removed = withdraw_experience(&db, id, withdrawal).await.unwrap();
+    assert_eq!(removed.experience.state, "withdrawn");
+    assert!(matches!(
+        read_usable_experience(&db, id, 1, Some(account)).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(matches!(
+        read_usable_experience(&db, id, 2, Some(account)).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(
+        removed.experience.body.is_none()
+            && removed.experience.title.is_none()
+            && removed.experience.tags.is_none()
+    );
+    assert!(
+        withdraw_experience(&db, id, withdrawal)
+            .await
+            .unwrap()
+            .replayed
+    );
+    assert!(matches!(
+        create_experience(&db, &cmd).await,
+        Err(AssetsError::NotFound)
+    ));
+    assert!(matches!(
+        confirm_experience(&db, id, &confirm).await,
+        Err(AssetsError::NotFound)
+    ));
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_creation_experience_revision WHERE experience_ref=$1",
+    )
+    .bind(id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows, 0);
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_creation_experience_consent WHERE experience_ref=$1",
+    )
+    .bind(id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows, 0);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_creation_experience_request WHERE experience_ref=$1 AND kind <> 'withdraw' AND command_sha256 IS NOT NULL").bind(id).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(rows, 0);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn copy_and_replay_requalify_restricted_sources_without_blocking_unrelated_text() {
+    let db = db("assets_copy_source").await;
+    let mut document = comment_doc(&db).await;
+    document.account_ref = Some(account(&db).await);
+    document.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    let source_work = document.excerpts[0].citation.work_ref.unwrap();
+    let first = create(&db, document).await;
+    let placed = place(
+        &db,
+        first.work_id,
+        &PlaceRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: first.revision.id,
+            canvas_id: first.revision.document.canvas[0].id,
+            targets: vec![UseTarget::Paragraph {
+                paragraph_id: first.revision.document.paragraphs[0].id,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    let copy = CopyCommand {
+        request_id: Uuid::new_v4(),
+        expected_revision: placed.revision.id,
+    };
+    assert!(prepare_copy(&db, first.work_id, &copy).await.is_ok());
+    restrict_comment(&db, source_work).await;
+    assert!(matches!(
+        prepare_copy(&db, first.work_id, &copy).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let fresh = CopyCommand {
+        request_id: Uuid::new_v4(),
+        expected_revision: placed.revision.id,
+    };
+    assert!(matches!(
+        prepare_copy(&db, first.work_id, &fresh).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let mut own = read_work(&db, first.work_id)
+        .await
+        .unwrap()
+        .revision
+        .document;
+    own.paragraphs[0].text = "合成的独立正文".into();
+    let saved = save(
+        &db,
+        first.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: placed.revision.id,
+            document: own,
+        },
+    )
+    .await
+    .unwrap();
+    let independent = CopyCommand {
+        request_id: Uuid::new_v4(),
+        expected_revision: saved.revision.id,
+    };
+    let output = prepare_copy(&db, first.work_id, &independent)
+        .await
+        .unwrap();
+    assert_eq!(output.body, "合成的独立正文");
+}
 
 async fn account_by_source(db: &Database, source: &str) -> Uuid {
     sqlx::query_scalar("SELECT account_ref FROM linggan_ops_account WHERE source_record_id=$1")

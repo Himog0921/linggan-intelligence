@@ -7,6 +7,7 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
         || doc.angle.chars().count() > 4000
         || doc.outline.len() > 100
         || doc.paragraphs.len() > 1000
+        || doc.experience_slots.len() > 1000
         || doc.excerpts.len() > 200
         || doc.canvas.len() > 500
         || doc.pages.len() > 30
@@ -63,6 +64,16 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
     for p in &doc.paragraphs {
         add(p.id)?;
         text(&p.text)?;
+    }
+    let mut experience_paragraphs = HashSet::new();
+    for slot in &doc.experience_slots {
+        if slot.experience_ref.is_nil()
+            || slot.experience_revision <= 0
+            || !experience_paragraphs.insert(slot.paragraph_id)
+            || !doc.paragraphs.iter().any(|p| p.id == slot.paragraph_id)
+        {
+            return Err(WorkbenchError::Invalid("experience_slot"));
+        }
     }
     for e in &doc.excerpts {
         add(e.id)?;

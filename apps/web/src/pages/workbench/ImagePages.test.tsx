@@ -90,6 +90,8 @@ describe('V3 controlled image steps',()=>{
     fireEvent.click(screen.getByRole('button',{name:/03 步骤/}));expect(screen.getByLabelText('图页标题')).toHaveValue('步骤二');
     view.rerender(<ImagePages step="export" document={doc} workId="work" onChange={vi.fn()} onUploadAsset={vi.fn()} onStepChange={onStepChange}/>);
     expect(screen.queryByLabelText('图页标题')).not.toBeInTheDocument();expect(screen.getByRole('heading',{name:'笔记正文'})).toBeVisible();
+    expect(screen.queryByRole('button',{name:'复制标题与正文'})).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button',{name:'前往正文检查与复制'}));expect(onStepChange).toHaveBeenCalledWith('body');
     expect(screen.getAllByRole('button',{name:/放大(封面|观点|步骤)/})).toHaveLength(3);
     await act(async()=>{});
   });

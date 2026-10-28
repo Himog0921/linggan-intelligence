@@ -102,6 +102,7 @@ export async function copyStatus(workId: string, signal?: AbortSignal) {
 
 const messages: Record<string, string> = {
   creation_assets_stale: '别处刚改过这里，请刷新后再试，当前输入仍保留。',
+  creation_assets_source_unavailable: '稿件引用的来源当前不可使用，请刷新稿件并处理后再复制。',
   creation_assets_request_conflict: '同一个请求被用在了另一件事上，请刷新后重试。',
   creation_assets_parameter_invalid: '填写的内容不符合要求，请检查后再提交。',
   creation_assets_not_found: '没有找到要改的对象，请刷新后再试。',

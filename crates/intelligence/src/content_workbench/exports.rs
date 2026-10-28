@@ -161,6 +161,11 @@ pub(crate) async fn qualify(
     revision: Uuid,
 ) -> Result<Revision, WorkbenchError> {
     let (domain, r) = super::store::read_revision_in(tx, work, Some(revision)).await?;
+    // A rendered file would outlive the erasable fragment. Support it only after the
+    // withdrawal operation can invalidate and remove every derived export.
+    if !r.document.experience_slots.is_empty() {
+        return Err(WorkbenchError::Source);
+    }
     if r.document.account_ref.is_none() {
         return Err(WorkbenchError::Invalid("accountRef"));
     }
