@@ -970,7 +970,42 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     )
     .await
     .unwrap();
-    withdraw_experience(&db, id, Uuid::new_v4()).await.unwrap();
+    // A second editor still holds a copy after the current draft removed the reference.
+    // Queue withdrawal first; an unbound save must not persist the stale text afterward.
+    let mut hold = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let withdraw_db = db.clone();
+    let withdrawal =
+        tokio::spawn(async move { withdraw_experience(&withdraw_db, id, Uuid::new_v4()).await });
+    wait_for_advisory_waiters(&db, 1).await;
+    let save_db = db.clone();
+    let mut stale_text = removed_slot.revision.document.clone();
+    stale_text.title = "合成改写经历，只供测试。".into();
+    let saving = tokio::spawn(async move {
+        save(
+            &save_db,
+            historical_work.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: removed_slot.revision.id,
+                document: stale_text,
+            },
+        )
+        .await
+    });
+    wait_for_advisory_waiters(&db, 2).await;
+    hold.commit().await.unwrap();
+    withdrawal.await.unwrap().unwrap();
+    assert!(matches!(
+        saving.await.unwrap(),
+        Err(WorkbenchError::Invalid(
+            "experience_withdrawal_requires_reset"
+        ))
+    ));
     assert_eq!(
         read_work(&db, made.work_id)
             .await

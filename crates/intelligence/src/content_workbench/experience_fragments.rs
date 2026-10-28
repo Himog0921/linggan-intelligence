@@ -141,7 +141,21 @@ pub(super) async fn prepare(
     old: Option<&WorkDocument>,
     doc: &WorkDocument,
 ) -> Result<(WorkDocument, Vec<Fragment>), WorkbenchError> {
+    // Even an unbound current document can have sensitive experience in its history.
+    // Serialize this check with withdrawal before examining any historical fragments.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut **tx)
+        .await?;
     lock_references(tx, old, doc).await?;
+    let withdrawn_history: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_revision r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.document->'experienceSlots','[]'::jsonb)) AS slot(value) JOIN linggan_creation_experience e ON e.experience_ref::text=slot.value->>'experienceRef' WHERE r.work_ref=$1 AND e.state='withdrawn')")
+        .bind(work).fetch_one(&mut **tx).await?;
+    if withdrawn_history {
+        // Until editors can prove they discarded stale text, do not persist any new revision.
+        return Err(WorkbenchError::Invalid(
+            "experience_withdrawal_requires_reset",
+        ));
+    }
     // Removing a reference cannot silently reclassify its existing text as ordinary authored text.
     if let Some(old) = old {
         for slot in &old.experience_slots {
