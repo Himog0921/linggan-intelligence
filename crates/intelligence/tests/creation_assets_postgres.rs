@@ -163,6 +163,42 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
         Err(WorkbenchError::Source)
     ));
     let made = create_work(&db, &request).await.unwrap();
+    let mut history_request = request.clone();
+    history_request.request_id = Uuid::new_v4();
+    let historical_work = create_work(&db, &history_request).await.unwrap();
+    let mut removed_slot = historical_work.revision.document.clone();
+    removed_slot.experience_slots.clear();
+    removed_slot.paragraphs.clear();
+    removed_slot.paragraphs.push(Paragraph {
+        id: Uuid::new_v4(),
+        text: "独立正文".into(),
+    });
+    let removed_slot = save(
+        &db,
+        historical_work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: historical_work.revision.id,
+            document: removed_slot,
+        },
+    )
+    .await
+    .unwrap();
+    let mut pasted_history = removed_slot.revision.document.clone();
+    pasted_history.title = "合成改写经历，只供测试。".into();
+    assert!(matches!(
+        save(
+            &db,
+            historical_work.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: removed_slot.revision.id,
+                document: pasted_history
+            }
+        )
+        .await,
+        Err(WorkbenchError::Invalid("experience_untracked_text"))
+    ));
     assert_eq!(
         made.revision.document.paragraphs[0].text,
         "合成改写经历，只供测试。"

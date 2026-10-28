@@ -149,6 +149,9 @@ pub(super) async fn prepare(
                 .flat_map(|old| old.experience_slots.iter().map(|s| s.experience_ref)),
         )
         .collect();
+    let historical: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT f.experience_ref FROM linggan_creation_experience_fragment f JOIN linggan_creation_revision r ON r.revision_ref=f.revision_ref WHERE r.work_ref=$1")
+        .bind(work).fetch_all(&mut **tx).await?;
+    ids.extend(historical);
     ids.sort_unstable();
     ids.dedup();
     if !ids.is_empty() {
