@@ -39,37 +39,81 @@ pub(super) fn strip(doc: &mut WorkDocument) {
 
 /// A known full experience paragraph may occur only in paragraphs retaining that experience's
 /// binding. This covers exact moves/copies, not arbitrary human paraphrases or external paste.
-fn copied_to_unbound_text(doc: &WorkDocument, experience: Uuid, raw: &str) -> bool {
-    if raw.is_empty() || raw == WITHDRAWN {
+fn metadata(doc: &WorkDocument) -> Vec<(String, &str)> {
+    let mut out = Vec::new();
+    if let Some(p) = &doc.material_preparation {
+        out.push(("query".into(), p.query.as_str()));
+        out.extend(
+            p.terms
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (format!("term:{i}"), s.as_str())),
+        );
+        out.extend(
+            p.gaps
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (format!("gap:{i}"), s.as_str())),
+        );
+    }
+    for m in &doc.materials {
+        out.extend(
+            m.match_reasons
+                .iter()
+                .enumerate()
+                .map(|(i, s)| (format!("material:{}:{i}", m.document_id), s.as_str())),
+        );
+    }
+    for e in &doc.excerpts {
+        if let Some(text) = &e.selected_text {
+            out.push((format!("excerpt:{}", e.id), text.as_str()));
+        }
+    }
+    if let Some(b) = doc.bridge.as_ref().and_then(|b| b.sentence.as_ref()) {
+        out.push(("bridge".into(), b.text.as_str()));
+    }
+    out
+}
+fn occurrences(text: &str, raw: &str) -> usize {
+    // A single character is too common to infer a copy inside an unrelated sentence.
+    if raw.chars().count() == 1 {
+        usize::from(text == raw)
+    } else {
+        text.matches(raw).count()
+    }
+}
+fn copied_to_unbound_text(
+    doc: &WorkDocument,
+    old: Option<&WorkDocument>,
+    experience: Uuid,
+    raw: &str,
+) -> bool {
+    if raw.is_empty() || raw == WITHDRAWN || raw == UNAVAILABLE {
         return false;
     }
     let target_copy = super::source_usage::authored_targets(doc).iter().any(|target| {
         let bound_to_same = matches!(target, UseTarget::Paragraph { paragraph_id }
             if doc.experience_slots.iter().any(|slot| slot.paragraph_id == *paragraph_id && slot.experience_ref == experience));
-        !bound_to_same && super::validation::target_text(doc, target).is_some_and(|text| text.contains(raw))
+        if bound_to_same { return false; }
+        let previous_was_bound = old.is_some_and(|old| matches!(target, UseTarget::Paragraph { paragraph_id }
+            if old.experience_slots.iter().any(|slot| slot.paragraph_id == *paragraph_id && slot.experience_ref == experience)));
+        let before = if previous_was_bound { 0 } else { old.and_then(|old| super::validation::target_text(old, target)).map_or(0, |text| occurrences(text, raw)) };
+        super::validation::target_text(doc, target).is_some_and(|text| occurrences(text, raw) > before)
     });
-    let metadata_copy = doc.material_preparation.as_ref().is_some_and(|p| {
-        p.query.contains(raw)
-            || p.terms.iter().any(|v| v.contains(raw))
-            || p.gaps.iter().any(|v| v.contains(raw))
-    }) || doc
-        .materials
-        .iter()
-        .any(|m| m.match_reasons.iter().any(|v| v.contains(raw)))
-        || doc
-            .excerpts
+    let before = old.map(metadata).unwrap_or_default();
+    let metadata_copy = metadata(doc).iter().any(|(key, text)| {
+        let previous = before
             .iter()
-            .any(|e| e.selected_text.as_ref().is_some_and(|v| v.contains(raw)))
-        || doc
-            .bridge
-            .as_ref()
-            .and_then(|b| b.sentence.as_ref())
-            .is_some_and(|b| b.text.contains(raw));
+            .find(|(old_key, _)| old_key == key)
+            .map_or(0, |(_, text)| occurrences(text, raw));
+        occurrences(text, raw) > previous
+    });
     target_copy || metadata_copy
 }
 
 pub(super) async fn prepare(
     tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
     old: Option<&WorkDocument>,
     doc: &WorkDocument,
 ) -> Result<(WorkDocument, Vec<Fragment>), WorkbenchError> {
@@ -82,7 +126,7 @@ pub(super) async fn prepare(
                 .find(|p| p.id == slot.paragraph_id)
                 .map(|p| p.text.as_str())
             {
-                if copied_to_unbound_text(doc, slot.experience_ref, text) {
+                if copied_to_unbound_text(doc, Some(old), slot.experience_ref, text) {
                     return Err(WorkbenchError::Invalid("experience_untracked_text"));
                 }
             }
@@ -93,6 +137,28 @@ pub(super) async fn prepare(
                     .any(|p| p.id == slot.paragraph_id && !p.text.is_empty())
             {
                 return Err(WorkbenchError::Invalid("experience_reference_removed"));
+            }
+        }
+    }
+    let mut ids: Vec<Uuid> = doc
+        .experience_slots
+        .iter()
+        .map(|s| s.experience_ref)
+        .chain(
+            old.into_iter()
+                .flat_map(|old| old.experience_slots.iter().map(|s| s.experience_ref)),
+        )
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    if !ids.is_empty() {
+        let known = sqlx::query("SELECT f.experience_ref,f.body FROM linggan_creation_experience_fragment f JOIN linggan_creation_revision r ON r.revision_ref=f.revision_ref WHERE r.work_ref=$1 AND f.experience_ref=ANY($2) UNION ALL SELECT experience_ref,body FROM linggan_creation_experience_revision WHERE experience_ref=ANY($2)")
+            .bind(work).bind(&ids).fetch_all(&mut **tx).await?;
+        for row in known {
+            let id: Uuid = row.try_get("experience_ref")?;
+            let body: String = row.try_get("body")?;
+            if copied_to_unbound_text(doc, old, id, &body) {
+                return Err(WorkbenchError::Invalid("experience_untracked_text"));
             }
         }
     }
@@ -112,7 +178,7 @@ pub(super) async fn prepare(
             .iter()
             .find(|p| p.id == slot.paragraph_id)
             .ok_or(WorkbenchError::Invalid("experience_slot"))?;
-        if copied_to_unbound_text(doc, slot.experience_ref, &paragraph.text) {
+        if copied_to_unbound_text(doc, old, slot.experience_ref, &paragraph.text) {
             return Err(WorkbenchError::Invalid("experience_untracked_text"));
         }
         fragments.push(Fragment {

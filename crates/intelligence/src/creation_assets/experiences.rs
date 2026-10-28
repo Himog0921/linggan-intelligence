@@ -322,9 +322,12 @@ pub async fn confirm_experience(
     let Some(identity) = identity.filter(|value| value.has_real_person == Some(true)) else {
         return Err(AssetsError::Invalid("account_has_no_confirmed_person"));
     };
+    let role = identity
+        .backing_person_role
+        .ok_or(AssetsError::Invalid("subject_role"))?;
     sqlx::query("INSERT INTO linggan_creation_experience_consent(experience_ref,revision,draft_use,send_to_model,subject_account_ref,subject_role,confirmation_method,recorded_by) VALUES($1,$2,true,$3,$4,$5,$6,'local_machine')")
         .bind(id).bind(cmd.expected_revision).bind(cmd.send_to_model).bind(current.account_ref)
-        .bind(identity.backing_person_role).bind(&cmd.confirmation_method).execute(&mut *tx).await?;
+        .bind(role).bind(&cmd.confirmation_method).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_creation_experience SET state='confirmed' WHERE experience_ref=$1")
         .bind(id)
         .execute(&mut *tx)

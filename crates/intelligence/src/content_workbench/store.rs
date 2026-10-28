@@ -125,7 +125,7 @@ async fn append(
     let id = Uuid::new_v4();
     let number = previous.map_or(1, |r| r.number + 1);
     let (stored, fragments) =
-        super::experience_fragments::prepare(tx, previous.map(|r| &r.document), &doc).await?;
+        super::experience_fragments::prepare(tx, work, previous.map(|r| &r.document), &doc).await?;
     let bytes = serde_json::to_vec(&stored)?;
     let saved_at:String=sqlx::query_scalar("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,previous_revision_ref,document,document_sha256) VALUES($1,$2,$3,$4,$5,$6) RETURNING saved_at::text").bind(id).bind(work).bind(number).bind(previous.map(|r|r.id)).bind(serde_json::to_value(&stored)?).bind(hash(bytes)).fetch_one(&mut **tx).await?;
     super::experience_fragments::insert(tx, id, &fragments).await?;

@@ -33,7 +33,7 @@ CREATE TABLE linggan_creation_experience_consent (
     draft_use boolean NOT NULL CHECK (draft_use),
     send_to_model boolean,
     subject_account_ref uuid NOT NULL REFERENCES linggan_ops_account(account_ref),
-    subject_role text,
+    subject_role text NOT NULL CHECK (length(subject_role) BETWEEN 1 AND 40),
     confirmation_method text NOT NULL CHECK (confirmation_method IN ('subject_present', 'subject_statement')),
     recorded_by text NOT NULL CHECK (recorded_by = 'local_machine'),
     confirmed_at timestamptz NOT NULL DEFAULT scope_001_now(),

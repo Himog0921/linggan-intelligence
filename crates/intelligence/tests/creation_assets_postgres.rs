@@ -96,6 +96,42 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     )
     .await
     .unwrap();
+    let mut short = draft(Some(account), &["我"]);
+    short.title = "我今天的想法".into();
+    short.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    short.experience_slots.push(ExperienceSlot {
+        paragraph_id: short.paragraphs[0].id,
+        experience_ref: id,
+        experience_revision: 1,
+    });
+    let short_work = create_work(
+        &db,
+        &CreateRequest {
+            request_id: Uuid::new_v4(),
+            domain_ref: fixture::dossier::DOMAIN,
+            document: short.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    short.tags.push("合成".into());
+    assert!(
+        save(
+            &db,
+            short_work.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: short_work.revision.id,
+                document: short
+            }
+        )
+        .await
+        .is_ok()
+    );
     let mut doc = draft(Some(account), &["合成改写经历，只供测试。"]);
     doc.bridge = Some(BridgeChoice {
         skip: true,
@@ -112,6 +148,13 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
         domain_ref: fixture::dossier::DOMAIN,
         document: doc.clone(),
     };
+    let mut initial_leak = request.clone();
+    initial_leak.request_id = Uuid::new_v4();
+    initial_leak.document.title = "合成经历，只供测试。".into();
+    assert!(matches!(
+        create_work(&db, &initial_leak).await,
+        Err(WorkbenchError::Invalid("experience_untracked_text"))
+    ));
     let mut other_request = request.clone();
     other_request.request_id = Uuid::new_v4();
     other_request.document.account_ref = Some(other);
@@ -204,6 +247,39 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     )
     .await
     .unwrap();
+    let mut copied_old = saved.revision.document.clone();
+    copied_old.paragraphs.push(Paragraph {
+        id: Uuid::new_v4(),
+        text: "合成改写经历，只供测试。".into(),
+    });
+    assert!(matches!(
+        save(
+            &db,
+            made.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: saved.revision.id,
+                document: copied_old
+            }
+        )
+        .await,
+        Err(WorkbenchError::Invalid("experience_untracked_text"))
+    ));
+    let mut copied_asset = saved.revision.document.clone();
+    copied_asset.title = "合成经历，只供测试。".into();
+    assert!(matches!(
+        save(
+            &db,
+            made.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: saved.revision.id,
+                document: copied_asset
+            }
+        )
+        .await,
+        Err(WorkbenchError::Invalid("experience_untracked_text"))
+    ));
     edit_experience(
         &db,
         id,
@@ -331,13 +407,9 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
         create_experience(&db, &cmd).await,
         Err(AssetsError::Invalid(_))
     ));
-    put_identity(
-        &db,
-        account,
-        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
-    )
-    .await
-    .unwrap();
+    let mut unknown_role = identity(0, OrgRelation::Parent, None, None);
+    unknown_role.has_real_person = Some(true);
+    put_identity(&db, account, &unknown_role).await.unwrap();
     let made = create_experience(&db, &cmd).await.unwrap();
     assert_eq!(made.experience.state, "awaiting_subject");
     let id = made.experience.id;
@@ -359,6 +431,17 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
         Err(AssetsError::Invalid(_))
     ));
     confirm.subject_confirmed = true;
+    assert!(matches!(
+        confirm_experience(&db, id, &confirm).await,
+        Err(AssetsError::Invalid("subject_role"))
+    ));
+    put_identity(
+        &db,
+        account,
+        &identity(1, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap();
     let confirmed = confirm_experience(&db, id, &confirm).await.unwrap();
     assert_eq!(confirmed.experience.state, "confirmed");
     assert_eq!(confirmed.experience.send_to_model, Some(false));
@@ -374,6 +457,21 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
     assert_eq!(
         confirmed.experience.confirmation_method.as_deref(),
         Some("subject_statement")
+    );
+    put_identity(
+        &db,
+        account,
+        &identity(2, OrgRelation::Parent, None, Some("爸爸")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        read_experience(&db, id)
+            .await
+            .unwrap()
+            .confirmed_subject_role
+            .as_deref(),
+        Some("妈妈")
     );
     assert!(
         read_usable_experience(&db, id, 1, Some(account))
@@ -1239,6 +1337,34 @@ async fn copy_checks_the_saved_revision_and_records_receipt_then_confirmation() 
         (ready.receipt_ref, ready.text.as_str())
     );
     assert_eq!(replayed.warn_count, 2);
+    // A receipt made under v1 remains attributed to v1 after the v2 rules are installed.
+    let old_request = Uuid::new_v4();
+    let fingerprint = linggan_intelligence::content_workbench_sources::text_hash(
+        &serde_json::json!({
+            "kind": "copy_prepare", "command": [first.work_id, saved.revision.id]
+        })
+        .to_string(),
+    );
+    sqlx::query("INSERT INTO linggan_creation_assets_request(request_ref,kind,command_sha256) VALUES($1,'copy_prepare',$2)")
+        .bind(old_request).bind(fingerprint).execute(db.pool()).await.unwrap();
+    let text_hash = linggan_intelligence::content_workbench_sources::text_hash(&format!(
+        "{}\n{}",
+        ready.title, ready.text
+    ));
+    sqlx::query("INSERT INTO linggan_creation_copy_receipt(receipt_ref,work_ref,revision_ref,request_ref,ruleset_version,fact_cards,warn_rules,hint_rules,text_sha256,saved_by) VALUES($1,$2,$3,$4,'creation-checks.v1','[]','{}','{}',$5,'local_machine')")
+        .bind(Uuid::new_v4()).bind(first.work_id).bind(saved.revision.id).bind(old_request).bind(text_hash).execute(db.pool()).await.unwrap();
+    let old_replay = prepare_copy(
+        &db,
+        first.work_id,
+        &CopyCommand {
+            request_id: old_request,
+            expected_revision: saved.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(old_replay.replayed);
+    assert_eq!(old_replay.ruleset_version, "creation-checks.v1");
     assert!(matches!(
         prepare_copy(
             &db,
