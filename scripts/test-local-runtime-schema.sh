@@ -51,6 +51,6 @@ migrate > "$proof_dir/repeat.log" 2>&1
 legacy="$(psql_in_container -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND (table_name LIKE 'linggan_comment_study_%' OR table_name LIKE 'linggan_topic_map_research_%' OR table_name IN('linggan_creator_discovery_policy','linggan_creator_discovery_work_analysis','linggan_creator_discovery_author_analysis'))")"
 [[ "$legacy" == 0 ]] || { echo 'Retired research tables remain' >&2;exit 1; }
 head="$(psql_in_container -Atc "SELECT max(migration_id) FROM linggan_local_schema_migration")"
-[[ "$head" == 0179_retire_research_relations ]] || exit 1
+[[ "$head" == 0180_creator_preview_discovery_only ]] || exit 1
 printf '{"head":"%s","retiredTables":%s,"freshAndRepeatPassed":true,"scope":"ordered schema migration only"}\n' "$head" "$legacy" > "$proof_dir/result.json"
 echo 'Fresh and repeat runtime schema migration passed; retired tables absent.'
