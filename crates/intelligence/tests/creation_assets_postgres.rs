@@ -87,34 +87,27 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
     .fetch_one(db.pool())
     .await
     .unwrap();
-    let created = create_experience(
-        &db,
-        &ExperienceCreate {
-            request_id: Uuid::new_v4(),
-            account_ref: account,
-            title: "虚构经历".into(),
-            body: "合成经历正文。".into(),
-            tags: vec![],
-            origin: "oral".into(),
-        },
-    )
-    .await
-    .unwrap();
+    let original_create = ExperienceCreate {
+        request_id: Uuid::new_v4(),
+        account_ref: account,
+        title: "虚构经历".into(),
+        body: "合成经历正文。".into(),
+        tags: vec![],
+        origin: "oral".into(),
+    };
+    let created = create_experience(&db, &original_create).await.unwrap();
     let experience = created.experience.id;
-    confirm_experience(
-        &db,
-        experience,
-        &ExperienceConfirm {
-            request_id: Uuid::new_v4(),
-            expected_revision: 1,
-            subject_confirmed: true,
-            draft_use: true,
-            send_to_model: None,
-            confirmation_method: "subject_present".into(),
-        },
-    )
-    .await
-    .unwrap();
+    let original_confirm = ExperienceConfirm {
+        request_id: Uuid::new_v4(),
+        expected_revision: 1,
+        subject_confirmed: true,
+        draft_use: true,
+        send_to_model: None,
+        confirmation_method: "subject_present".into(),
+    };
+    confirm_experience(&db, experience, &original_confirm)
+        .await
+        .unwrap();
     let mut doc = draft(Some(account), &["合成经历正文。"]);
     doc.bridge = Some(BridgeChoice {
         skip: true,
@@ -162,6 +155,15 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
             .text,
         "合成经历正文。"
     );
+    let edit = ExperienceEdit {
+        request_id: Uuid::new_v4(),
+        expected_revision: 1,
+        title: "虚构经历修订".into(),
+        body: "另一版合成正文。".into(),
+        tags: vec![],
+        origin: "oral".into(),
+    };
+    edit_experience(&db, experience, &edit).await.unwrap();
     let mut replacement = identity(2, OrgRelation::Parent, None, Some("爸爸"));
     replacement.person_change = Some(PersonChange::Replacement);
     put_identity(&db, account, &replacement).await.unwrap();
@@ -179,12 +181,21 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
     .await
     .unwrap();
     assert_ne!(new_subject, original_subject);
-    assert!(
-        !read_experience(&db, experience)
-            .await
-            .unwrap()
-            .current_person
-    );
+    let former = read_experience(&db, experience).await.unwrap();
+    assert!(!former.current_person);
+    assert!(former.title.is_none() && former.body.is_none() && former.tags.is_none());
+    assert!(matches!(
+        create_experience(&db, &original_create).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(matches!(
+        edit_experience(&db, experience, &edit).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(matches!(
+        confirm_experience(&db, experience, &original_confirm).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
     assert!(matches!(
         read_usable_experience(&db, experience, 1, Some(account)).await,
         Err(AssetsError::SourceUnavailable)
@@ -261,6 +272,105 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
             .await
             .is_ok()
     );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn replacement_committed_before_copy_rechecks_the_person() {
+    let db = db("assets_person_copy_race").await;
+    let (account, _, _) = accounts(&db).await;
+    put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap();
+    let experience = create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            title: "合成经历".into(),
+            body: "合成并发正文。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .experience
+    .id;
+    confirm_experience(
+        &db,
+        experience,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+            confirmation_method: "subject_present".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut doc = draft(Some(account), &["合成并发正文。"]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: doc.paragraphs[0].id,
+        experience_ref: experience,
+        experience_revision: 1,
+    });
+    let work = create(&db, doc).await;
+
+    // Hold the source lock until the copy transaction is observed waiting on it.
+    let mut hold = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind(format!("creation_assets:experience:{experience}"))
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let copy_db = db.clone();
+    let copy = tokio::spawn(async move {
+        prepare_copy(
+            &copy_db,
+            work.work_id,
+            &CopyCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: work.revision.id,
+            },
+        )
+        .await
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND NOT granted)",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if waiting {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("copy did not reach the source lock");
+    let mut replacement = identity(1, OrgRelation::Parent, None, Some("妈妈"));
+    replacement.person_change = Some(PersonChange::Replacement);
+    put_identity(&db, account, &replacement).await.unwrap();
+    hold.commit().await.unwrap();
+    assert!(matches!(
+        copy.await.unwrap(),
+        Err(AssetsError::SourceUnavailable)
+    ));
 }
 
 #[tokio::test]

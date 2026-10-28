@@ -9,6 +9,19 @@ use linggan_storage_postgres::Database;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
+async fn lock_subject(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<(), AssetsError> {
+    let account: Uuid = sqlx::query_scalar(
+        "SELECT account_ref FROM linggan_creation_experience WHERE experience_ref=$1",
+    )
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(AssetsError::NotFound)?;
+    lock(tx, &format!("experience:{id}")).await?;
+    lock(tx, &format!("identity:{account}")).await?;
+    Ok(())
+}
+
 async fn snapshot(tx: &mut Transaction<'_, Postgres>, id: Uuid) -> Result<Experience, AssetsError> {
     snapshot_revision(tx, id, None).await
 }
@@ -17,7 +30,7 @@ async fn snapshot_revision(
     id: Uuid,
     revision: Option<i32>,
 ) -> Result<Experience, AssetsError> {
-    let row = sqlx::query("SELECT e.experience_ref,e.code,e.account_ref,e.state,COALESCE((SELECT p.subject_ref=e.subject_ref FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref),false) AS current_person,COALESCE($2,e.current_revision) AS current_revision,e.created_at::text AS created_at,e.withdrawn_at::text AS withdrawn_at,r.title,r.body,r.tags,r.origin,c.send_to_model,c.subject_account_ref,c.subject_role,c.confirmation_method,c.confirmed_at::text AS confirmed_at FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=COALESCE($2,e.current_revision) LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
+    let row = sqlx::query("SELECT e.experience_ref,e.code,e.account_ref,e.state,COALESCE((SELECT p.subject_ref=e.subject_ref FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref),false) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE AS current_person,COALESCE($2,e.current_revision) AS current_revision,e.created_at::text AS created_at,e.withdrawn_at::text AS withdrawn_at,r.title,r.body,r.tags,r.origin,c.send_to_model,c.subject_account_ref,c.subject_role,c.confirmation_method,c.confirmed_at::text AS confirmed_at FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=COALESCE($2,e.current_revision) LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
         .bind(id).bind(revision).fetch_optional(&mut **tx).await?.ok_or(AssetsError::NotFound)?;
     Ok(Experience {
         id: row.try_get("experience_ref")?,
@@ -85,9 +98,13 @@ async fn replay_result(
     tx: &mut Transaction<'_, Postgres>,
     prior: PriorResult,
 ) -> Result<ExperienceReceipt, AssetsError> {
+    lock_subject(tx, prior.id).await?;
     let mut experience = snapshot_revision(tx, prior.id, Some(prior.revision)).await?;
     if experience.state == "withdrawn" && prior.state != "withdrawn" {
         return Err(AssetsError::NotFound);
+    }
+    if !experience.current_person && prior.state != "withdrawn" {
+        return Err(AssetsError::SourceUnavailable);
     }
     experience.state = prior.state;
     if experience.state == "awaiting_subject" {
@@ -117,7 +134,19 @@ async fn record(
 
 pub async fn read_experience(db: &Database, id: Uuid) -> Result<Experience, AssetsError> {
     let mut tx = db.pool().begin().await?;
-    let value = snapshot(&mut tx, id).await?;
+    lock_subject(&mut tx, id).await?;
+    let mut value = snapshot(&mut tx, id).await?;
+    if !value.current_person {
+        value.title = None;
+        value.body = None;
+        value.tags = None;
+        value.origin = None;
+        value.send_to_model = None;
+        value.confirmed_at = None;
+        value.confirmed_subject_account_ref = None;
+        value.confirmed_subject_role = None;
+        value.confirmation_method = None;
+    }
     tx.commit().await?;
     Ok(value)
 }
@@ -131,6 +160,7 @@ pub async fn read_usable_experience(
     account: Option<Uuid>,
 ) -> Result<UsableExperience, AssetsError> {
     let mut tx = db.pool().begin().await?;
+    lock_subject(&mut tx, id).await?;
     let row = sqlx::query("SELECT e.code,e.account_ref,e.state,e.current_revision,r.body,c.draft_use,(SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) AS has_real_person, (SELECT p.subject_ref=e.subject_ref FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref) AS same_person, (c.subject_ref=e.subject_ref) AS consent_for_person FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=$2 LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
         .bind(id).bind(revision).fetch_optional(&mut *tx).await?.ok_or(AssetsError::NotFound)?;
     if row.try_get::<Option<bool>, _>("has_real_person")? != Some(true)

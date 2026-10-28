@@ -25,6 +25,45 @@ async fn lock_experience(
     Ok(())
 }
 
+/// Keep every referenced experience and its account identity stable until this transaction ends.
+async fn lock_references(
+    tx: &mut Transaction<'_, Postgres>,
+    old: Option<&WorkDocument>,
+    doc: &WorkDocument,
+) -> Result<(), WorkbenchError> {
+    let mut experiences: Vec<Uuid> = doc
+        .experience_slots
+        .iter()
+        .map(|s| s.experience_ref)
+        .chain(
+            old.into_iter()
+                .flat_map(|o| o.experience_slots.iter().map(|s| s.experience_ref)),
+        )
+        .collect();
+    experiences.sort_unstable();
+    experiences.dedup();
+    if experiences.is_empty() {
+        return Ok(());
+    }
+    for id in experiences {
+        lock_experience(tx, id).await?;
+    }
+    let mut accounts: Vec<Uuid> = doc
+        .account_ref
+        .into_iter()
+        .chain(old.and_then(|o| o.account_ref))
+        .collect();
+    accounts.sort_unstable();
+    accounts.dedup();
+    for account in accounts {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!("creation_assets:identity:{account}"))
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}
+
 pub(super) fn strip(doc: &mut WorkDocument) {
     for slot in &doc.experience_slots {
         if let Some(paragraph) = doc
@@ -97,6 +136,7 @@ pub(super) async fn prepare(
     old: Option<&WorkDocument>,
     doc: &WorkDocument,
 ) -> Result<(WorkDocument, Vec<Fragment>), WorkbenchError> {
+    lock_references(tx, old, doc).await?;
     // Removing a reference cannot silently reclassify its existing text as ordinary authored text.
     if let Some(old) = old {
         for slot in &old.experience_slots {
@@ -147,13 +187,6 @@ pub(super) async fn prepare(
     }
     let mut fragments = Vec::new();
     for slot in &doc.experience_slots {
-        lock_experience(tx, slot.experience_ref).await?;
-        if let Some(account) = doc.account_ref {
-            sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
-                .bind(format!("creation_assets:identity:{account}"))
-                .execute(&mut **tx)
-                .await?;
-        }
         let continuing =
             old.is_some_and(|old| old.experience_slots.iter().any(|existing| existing == slot));
         let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience e JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=$2 JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1 AND e.account_ref=$3 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND c.subject_ref=e.subject_ref AND EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref AND p.subject_ref=e.subject_ref) AND ($4 OR (e.state='confirmed' AND e.current_revision=$2)) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE)")
@@ -200,6 +233,7 @@ pub(super) async fn project(
     revision: Uuid,
     doc: &mut WorkDocument,
 ) -> Result<(), WorkbenchError> {
+    lock_references(tx, None, doc).await?;
     for slot in &doc.experience_slots {
         let row = sqlx::query("SELECT f.body FROM linggan_creation_experience_fragment f JOIN linggan_creation_experience e ON e.experience_ref=f.experience_ref JOIN linggan_creation_experience_consent c ON c.experience_ref=f.experience_ref AND c.revision=f.experience_revision WHERE f.revision_ref=$1 AND f.paragraph_ref=$2 AND f.experience_ref=$3 AND f.experience_revision=$4 AND e.account_ref=$5 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND c.subject_ref=e.subject_ref AND EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref AND p.subject_ref=e.subject_ref) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE")
             .bind(revision).bind(slot.paragraph_id).bind(slot.experience_ref).bind(slot.experience_revision).bind(doc.account_ref).fetch_optional(&mut **tx).await?;
@@ -233,6 +267,7 @@ pub async fn all_available(
     revision: Uuid,
     doc: &WorkDocument,
 ) -> Result<bool, WorkbenchError> {
+    lock_references(tx, None, doc).await?;
     for slot in &doc.experience_slots {
         let ok: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience_fragment f JOIN linggan_creation_experience e ON e.experience_ref=f.experience_ref JOIN linggan_creation_experience_consent c ON c.experience_ref=f.experience_ref AND c.revision=f.experience_revision WHERE f.revision_ref=$1 AND f.paragraph_ref=$2 AND f.experience_ref=$3 AND f.experience_revision=$4 AND e.account_ref=$5 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND c.subject_ref=e.subject_ref AND EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref AND p.subject_ref=e.subject_ref) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE)")
             .bind(revision).bind(slot.paragraph_id).bind(slot.experience_ref).bind(slot.experience_revision).bind(doc.account_ref).fetch_one(&mut **tx).await?;
