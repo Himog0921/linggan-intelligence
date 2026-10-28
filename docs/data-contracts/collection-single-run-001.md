@@ -1,7 +1,7 @@
 # COLLECTION-SINGLE-RUN-001 · 一次采集的持久范围与读取合同
 
 > 状态: 代码事实优先
-> 最后核对: 2026-10-25（up_to 增量、控制探针锁争用修复候选）
+> 最后核对: 2026-10-28（0180 增量：主页浅看、精选研究、none 评论模式；此前 2026-10-25 up_to 增量、控制探针锁争用修复候选）
 > 适用范围: Issue #398 / Draft PR #406 的单次采集候选；0125 migration、Rust、正式插件 0.8.61
 > 事实来源: Mog 完整交接授权；本分支 collection_run、原 Request/Admission/WorkOrder/Lease/Package/Receipt 与共享材料代码
 > 冲突时以谁为准: 用户最新授权、可执行合同和真实运行结果；本合同不代表合并、业务库迁移或发布
@@ -31,12 +31,20 @@
 | sample_30 | 每篇最多 30 条唯一总记录，含回复；每主评论最多 2 回复 | 首段为原标准窗口；部分交付后扣除本轮原始稳定 ID，续段只派剩余额度，并带 knownReplyCounts 保留跨段每主评论回复额度 |
 | all_public | 尽量遍历本轮可访问主评论及回复，保留开始/结束与缺口 | newUniqueLimit=30 为一次执行的有界新增额度，maxScrollRounds/maxDurationSeconds 是执行预算；不是采全目标上限，没有每主评论 2 回复或总 30 上限 |
 | up_to（2026-10-23 新增，`commentTarget` 1–1000） | 每篇采到 `commentTarget` 条不重复记录（含回复）就停；评论区先走到尽头也结束 | 与 all_public 同一遍历（TaskSpec 对插件仍写 `all_public`，原意图另记 `commentTarget`），每段 `newUniqueLimit=min(30, 目标−本轮已接纳稳定 ID)`；本轮已接纳稳定 ID 达到目标即完成，否则按 all_public 的遍历判据收尾。只有它带 `commentTarget`，其余范围带了即 422；请求未带该字段时指纹与旧请求逐字节一致 |
+| none（0180 新增，仅主页浅看与文字版精选） | 不采评论、不取媒体：浅看只做作者主页发现；文字版精选只取笔记详情正文 | TaskSpec 对插件仍写 `sample_30`，但详情阶段 commentLimit 与 replyExpandLimit 为 0、不请求媒体与识别；已有合格详情的作品直接复用、不新建工单，其余取到详情即以 `checkpoint.detailComplete` 收尾；run 在全部作品 detailComplete 后结束 |
 
 `collectionRunRef`、`commentMode` 和可选 `incrementalCommentBudget` 贯穿工单、TaskSpec、页面计划、采集器和回执。detail-only 0 表示不要求评论；all_public 由明确模式表示，绝不用 0 或超大整数替代目标。knownCommentIds 来自本轮原始接纳包，包含清洗掉的记录，避免为凑 30 条有效文本另采。knownReplyCounts 只允许单次标准模式，根 ID 有界、数值 0–2。
 
 插件宣告 `collection.single_run.v1`；深采（all_public 与 up_to）另需 `collection.all_public.v1`。未支持的旧插件保持等待，不认领新合同、不悄悄降为采样。旧任务不带新字段时继续原 v1/v2 校验、outbox 和回执路径。
 
 新的 all_public 完成回执必须具有 mainExhausted、repliesExhausted、identityReliable 的真实遍历依据。显示计数达到、no_progress 或主评论到底不能单独证明整篇采全。回复关系/稳定身份不足保留未知或部分；连续三段无新稳定 ID 后保留可说明的缺口，不无限自动重试。风控/访问受限停止受影响执行，不切换账号规避；一篇失败不连坐其他合格材料。
+
+## 主页浅看与精选研究（0180）
+
+- 来源 `creator_preview{authorExternalId}`：一次性读取某作者在小红书的主页资料与最多 30 张发现卡片。`workLimit` 固定 30、`commentMode` 固定 `none`，其余取值被拒绝（`creator_preview_scope_invalid`）；作者须已在该领域被发现过（`creator_not_discovered_in_domain`）。发现完成后 run 直接 `ended`：不排详情、评论或媒体阶段，不登记长期观察目标（提交作者资料包时，目标同步对浅看任务返回 `notApplicable`；判断「是否浅看任务」的查询失败时返回 503 `author_target_sync_pending` 让插件重试，不当作「不是浅看」）。
+- 页面入口 `GET/POST /api/local/creators/{key}/preview`：POST 只接受 `domain` 与 `commandRef`（多余字段整条拒绝），同一 `commandRef` 重放同一 run、换内容返回 409；GET 读该领域＋作者最近一次浅看的冻结样本，逐张卡片带 `inDomain`（该作品在本领域是否已是正式研究材料，由服务端给出）与 `frozenCount`（冻结篇数，读不出的卡片只计入这里）；没有浅看过读到 `not_requested`。
+- 来源 `creator_selected_works{previewRef, workRefs}`：只接受同一领域、已冻结（`scope_frozen_at` 已写）的浅看里的作品，1–30 篇、不重复、篇数等于 `workLimit`；`commentMode` 为 `none`（文字版）或 `sample_30`（标准版，同普通精确勾选）。范围在建立时冻结，不会扩大。浅看、精选运行都可用 `POST /api/collection/runs/{runRef}/commands` 停止。
+- 材料用途 `linggan_material_domain_usage.use_kind`：这两类 run 的工单写入的用量行由触发器标为 `creator_context`，其余一律 `domain_research`（含存量）。创作者发现与账号研究样本只读 `domain_research`。**其余领域读取点（领域样本数、语料作品列表、主题图谱、评论研究目录与候选、采集管理统计）目前不按 `use_kind` 过滤**，所以浅看发现的新作品会计入这些位置；卡片作品按作品引用打开不受影响。是否让这些读取点排除创作者语境材料是待 Mog 决定的产品口径（默认值与存量不变，决定后只需加过滤）。
 
 ## 控制、恢复与交付
 
