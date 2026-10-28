@@ -18,6 +18,7 @@
 - [页面与交互规格（草案）](design/pages/creation-assets-pages.md)：写稿、材料桌、资产库、证据库“复刻成样板”、入口；每个页面在对应切片开工前再评审。
 - [实施切片计划](plans/active/creation-assets-001.md)：S1a–S5 与后置的 S0、依赖、授权、PR 拆分、开工条件对账、扩充团队时的试用方案；每一片开工仍须开工评审。
 - [技术小样报告](audits/creation-assets-prototype-2026-10-27.md)：中文输入与撤销、200 张卡、复制格式真机步骤、样板复刻试做方案。
+- [CREATION-ASSETS-001 合同](data-contracts/creation-assets-001.md)：S1a 的账号身份、产品事实卡、衔接句库、稿件检查与复制接口（候选，随 PR 生效）。
 
 ## 2026-10-27 · 统一研究自动化
 

@@ -1,0 +1,843 @@
+//! CREATION-ASSETS-001 S1a isolated PostgreSQL proof. Synthetic data, no external calls.
+#![recursion_limit = "256"]
+#[path = "support/content_workbench_fixture.rs"]
+#[allow(dead_code)]
+mod fixture;
+use fixture::*;
+use linggan_intelligence::content_workbench::{
+    BridgeChoice, BridgeGroup, BridgeUse, PageKind, Paragraph, SaveRequest, WorkDocument, save,
+};
+use linggan_intelligence::creation_assets::*;
+use linggan_storage_postgres::Database;
+use uuid::Uuid;
+
+const FILL: &str = "\u{3164}";
+
+async fn account_by_source(db: &Database, source: &str) -> Uuid {
+    sqlx::query_scalar("SELECT account_ref FROM linggan_ops_account WHERE source_record_id=$1")
+        .bind(source)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+}
+/// Seeds the ops ledger and returns (xhs account 1, douyin account, xhs account 3).
+async fn accounts(db: &Database) -> (Uuid, Uuid, Uuid) {
+    let _ = fixture::account(db).await;
+    (
+        account_by_source(db, "acc-1").await,
+        account_by_source(db, "acc-2").await,
+        account_by_source(db, "acc-3").await,
+    )
+}
+fn identity(
+    expected: i32,
+    relation: OrgRelation,
+    bio: Option<bool>,
+    role: Option<&str>,
+) -> IdentityCommand {
+    IdentityCommand {
+        request_id: Uuid::new_v4(),
+        expected_revision: expected,
+        org_relation: relation,
+        bio_discloses_relation: bio,
+        has_real_person: role.map(|_| true),
+        backing_person_role: role.map(str::to_string),
+        can_provide_experience: None,
+    }
+}
+fn card(expected: i32, name: &str, allowed: &[&str], banned: &[&str]) -> FactCardCommand {
+    FactCardCommand {
+        request_id: Uuid::new_v4(),
+        expected_revision: expected,
+        name: name.into(),
+        allowed_names: allowed.iter().map(|s| (*s).into()).collect(),
+        banned_names: banned.iter().map(|s| (*s).into()).collect(),
+        what: "合成：一个示例产品".into(),
+        who: String::new(),
+        can_say: String::new(),
+        cannot_say: String::new(),
+        must_note: String::new(),
+    }
+}
+fn draft(account: Option<Uuid>, paragraphs: &[&str]) -> WorkDocument {
+    WorkDocument {
+        title: "合成标题".into(),
+        account_ref: account,
+        paragraphs: paragraphs
+            .iter()
+            .map(|text| Paragraph {
+                id: Uuid::new_v4(),
+                text: (*text).into(),
+            })
+            .collect(),
+        pages: vec![page(PageKind::Cover)],
+        ..WorkDocument::default()
+    }
+}
+fn using(sentence: &Sentence) -> BridgeChoice {
+    BridgeChoice {
+        skip: false,
+        sentence: Some(BridgeUse {
+            sentence_code: sentence.code.clone(),
+            sentence_revision: sentence.revision,
+            group: sentence.group,
+            text: sentence.text.clone(),
+            edited: false,
+        }),
+        after_paragraph: None,
+    }
+}
+async fn approved(db: &Database, group: BridgeGroup, text: &str) -> Sentence {
+    let made = create_sentence(
+        db,
+        &SentenceCreate {
+            request_id: Uuid::new_v4(),
+            group,
+            text: text.into(),
+            origin: SentenceOrigin::Manual,
+        },
+    )
+    .await
+    .unwrap();
+    review_sentence(
+        db,
+        &made.sentence.code,
+        &SentenceReview {
+            request_id: Uuid::new_v4(),
+            expected_revision: made.sentence.revision,
+            action: ReviewAction::Approve,
+            note: None,
+        },
+    )
+    .await
+    .unwrap()
+    .sentence
+}
+fn rules(report: &CheckReport) -> Vec<&str> {
+    report.findings.iter().map(|f| f.rule.as_str()).collect()
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn identity_revisions_replay_conflict_stale_and_keep_unknown_unknown() {
+    let db = db("assets_identity").await;
+    let (xhs_a, douyin, xhs_c) = accounts(&db).await;
+    assert!(read_identity(&db, xhs_a).await.unwrap().is_none());
+
+    let listed = list_accounts(&db, None).await.unwrap();
+    let ids: Vec<Uuid> = listed.iter().map(|a| a.account_ref).collect();
+    assert!(
+        ids.contains(&xhs_a) && ids.contains(&xhs_c),
+        "xhs accounts are listed"
+    );
+    assert!(
+        !ids.contains(&douyin),
+        "only Xiaohongshu accounts are written for"
+    );
+    assert!(listed.iter().all(|a| a.identity.is_none()));
+
+    let first = identity(0, OrgRelation::Parent, None, Some("妈妈"));
+    let made = put_identity(&db, xhs_a, &first).await.unwrap();
+    assert_eq!((made.identity.revision, made.replayed), (1, false));
+    assert_eq!(
+        made.identity.bio_discloses_relation, None,
+        "unknown stays unknown"
+    );
+    assert!(made.identity.bio_checked_at.is_none() && made.identity.bio_checked_by.is_none());
+    assert_eq!(made.identity.backing_person_role.as_deref(), Some("妈妈"));
+
+    let again = put_identity(&db, xhs_a, &first).await.unwrap();
+    assert!(again.replayed);
+    assert_eq!(again.identity, made.identity);
+    let mut changed = first.clone();
+    changed.org_relation = OrgRelation::Coach;
+    assert!(matches!(
+        put_identity(&db, xhs_a, &changed).await,
+        Err(AssetsError::RequestConflict)
+    ));
+    assert!(matches!(
+        put_identity(&db, xhs_a, &identity(0, OrgRelation::Coach, None, None)).await,
+        Err(AssetsError::Stale)
+    ));
+
+    let checked = put_identity(
+        &db,
+        xhs_a,
+        &identity(1, OrgRelation::Parent, Some(true), Some("妈妈")),
+    )
+    .await
+    .unwrap()
+    .identity;
+    assert_eq!(checked.revision, 2);
+    assert!(checked.bio_checked_at.is_some());
+    assert_eq!(checked.bio_checked_by.as_deref(), Some("local_machine"));
+    let carried = put_identity(
+        &db,
+        xhs_a,
+        &identity(2, OrgRelation::Parent, Some(true), Some("奶奶")),
+    )
+    .await
+    .unwrap()
+    .identity;
+    assert_eq!(
+        carried.bio_checked_at, checked.bio_checked_at,
+        "an unchanged answer keeps its time"
+    );
+    let flipped = put_identity(
+        &db,
+        xhs_a,
+        &identity(3, OrgRelation::Parent, Some(false), None),
+    )
+    .await
+    .unwrap()
+    .identity;
+    assert_eq!(flipped.bio_discloses_relation, Some(false));
+    assert!(flipped.bio_checked_at.is_some());
+    let cleared = put_identity(&db, xhs_a, &identity(4, OrgRelation::Unknown, None, None))
+        .await
+        .unwrap()
+        .identity;
+    assert!(cleared.bio_checked_at.is_none());
+    assert_eq!(
+        read_identity(&db, xhs_a).await.unwrap().unwrap().revision,
+        5
+    );
+    let listed = list_accounts(&db, None).await.unwrap();
+    let row = listed.iter().find(|a| a.account_ref == xhs_a).unwrap();
+    assert_eq!(row.identity.as_ref().unwrap().revision, 5);
+    assert!(
+        listed
+            .iter()
+            .find(|a| a.account_ref == xhs_c)
+            .unwrap()
+            .identity
+            .is_none()
+    );
+
+    // A role needs a real person behind the account; an unknown account does not exist.
+    let mut bad = identity(0, OrgRelation::Parent, None, None);
+    bad.backing_person_role = Some("妈妈".into());
+    assert!(matches!(
+        put_identity(&db, xhs_c, &bad).await,
+        Err(AssetsError::Invalid("backing_person_role"))
+    ));
+    assert!(matches!(
+        put_identity(
+            &db,
+            Uuid::new_v4(),
+            &identity(0, OrgRelation::NoRelation, None, None)
+        )
+        .await,
+        Err(AssetsError::NotFound)
+    ));
+    assert!(
+        sqlx::query("UPDATE linggan_creation_account_identity SET org_relation='none'")
+            .execute(db.pool())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn only_a_confirmed_fact_card_revision_drives_the_checks() {
+    let db = db("assets_fact_card").await;
+    let (xhs_a, _, _) = accounts(&db).await;
+    assert!(list_fact_cards(&db).await.unwrap().is_empty());
+    let text = "我报了示例课，也喜欢示例营，还有示例活动";
+    let skip = BridgeChoice {
+        skip: true,
+        ..BridgeChoice::default()
+    };
+    let mut document = draft(Some(xhs_a), &[text]);
+    document.bridge = Some(skip);
+
+    let made = put_fact_card(&db, None, &card(0, "示例营", &["示例营"], &["示例课"]))
+        .await
+        .unwrap();
+    assert_eq!(
+        (made.card.code.as_str(), made.card.revision),
+        ("CP-0001", 1)
+    );
+    assert!(made.card.confirmed_at.is_none());
+    let before = check_draft(&db, &document).await.unwrap();
+    assert!(
+        before.not_run.iter().any(|n| n.rule == "R-W3"),
+        "unconfirmed cards do not run"
+    );
+    assert!(!rules(&before).contains(&"R-W3"));
+    assert!(before.fact_cards.is_empty());
+
+    let confirmed = confirm_fact_card(
+        &db,
+        "CP-0001",
+        &ConfirmCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        confirmed.card.confirmed_by.as_deref(),
+        Some("local_machine")
+    );
+    let report = check_draft(&db, &document).await.unwrap();
+    assert!(rules(&report).contains(&"R-W3") && rules(&report).contains(&"R-I2"));
+    assert!(report.not_run.is_empty());
+    assert_eq!(
+        report.fact_cards,
+        vec![CardRevision {
+            code: "CP-0001".into(),
+            revision: 1
+        }]
+    );
+
+    // A new revision waits for confirmation while revision 1 stays in force.
+    let second = put_fact_card(
+        &db,
+        Some("CP-0001"),
+        &card(1, "示例营", &["示例营"], &["示例课", "示例"]),
+    )
+    .await
+    .unwrap();
+    assert_eq!(second.card.revision, 2);
+    assert!(second.card.confirmed_at.is_none());
+    let views = list_fact_cards(&db).await.unwrap();
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0].latest.revision, 2);
+    assert_eq!(views[0].confirmed.as_ref().unwrap().revision, 1);
+    let still = check_draft(&db, &document).await.unwrap();
+    assert_eq!(still.fact_cards[0].revision, 1);
+    assert_eq!(
+        still.findings.iter().filter(|f| f.rule == "R-W3").count(),
+        1,
+        "revision 1 bans only 示例课; revision 2 would also ban a bare 示例"
+    );
+    confirm_fact_card(
+        &db,
+        "CP-0001",
+        &ConfirmCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: 2,
+        },
+    )
+    .await
+    .unwrap();
+    let now = check_draft(&db, &document).await.unwrap();
+    assert_eq!(now.fact_cards[0].revision, 2);
+    assert_eq!(
+        now.findings.iter().filter(|f| f.rule == "R-W3").count(),
+        2,
+        "示例课 and the bare 示例 in 示例活动; 示例营 stays allowed whole"
+    );
+
+    // Replay, stale, overlap, double confirmation and numbering.
+    let again = card(0, "第二张", &[], &[]);
+    let one = put_fact_card(&db, None, &again).await.unwrap();
+    assert_eq!(one.card.code, "CP-0002");
+    assert!(put_fact_card(&db, None, &again).await.unwrap().replayed);
+    assert!(matches!(
+        put_fact_card(&db, Some("CP-0001"), &card(1, "示例营", &[], &[])).await,
+        Err(AssetsError::Stale)
+    ));
+    assert!(matches!(
+        put_fact_card(&db, Some("CP-9999"), &card(1, "x", &[], &[])).await,
+        Err(AssetsError::NotFound)
+    ));
+    assert!(matches!(
+        put_fact_card(&db, Some("CP-0001"), &card(0, "示例营", &[], &[])).await,
+        Err(AssetsError::Invalid("expected_revision"))
+    ));
+    assert!(matches!(
+        put_fact_card(&db, None, &card(0, "名称", &["甲"], &["甲"])).await,
+        Err(AssetsError::Invalid("names_overlap"))
+    ));
+    assert!(matches!(
+        confirm_fact_card(
+            &db,
+            "CP-0001",
+            &ConfirmCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: 2
+            }
+        )
+        .await,
+        Err(AssetsError::Invalid("already_confirmed"))
+    ));
+    assert!(
+        sqlx::query("DELETE FROM linggan_creation_fact_card_confirmation")
+            .execute(db.pool())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn bridge_sentence_library_reviews_and_serves_only_approved_matching_voices() {
+    let db = db("assets_sentences").await;
+    let (xhs_a, _, xhs_c) = accounts(&db).await;
+    put_identity(
+        &db,
+        xhs_a,
+        &identity(0, OrgRelation::Parent, Some(true), Some("妈妈")),
+    )
+    .await
+    .unwrap();
+    put_identity(
+        &db,
+        xhs_c,
+        &identity(0, OrgRelation::Coach, Some(false), None),
+    )
+    .await
+    .unwrap();
+
+    // A cure promise cannot enter; nothing is written for the refused command.
+    let refused = SentenceCreate {
+        request_id: Uuid::new_v4(),
+        group: BridgeGroup::Parent,
+        text: "我家孩子保证能好".into(),
+        origin: SentenceOrigin::Manual,
+    };
+    match create_sentence(&db, &refused).await {
+        Err(AssetsError::Blocked(findings)) => assert_eq!(findings[0].rule, "R-L1"),
+        other => panic!("{other:?}"),
+    }
+    assert!(list_sentences(&db, None, None).await.unwrap().is_empty());
+
+    let create_cmd = SentenceCreate {
+        request_id: Uuid::new_v4(),
+        group: BridgeGroup::Parent,
+        text: "我也是陪跑营学员家长，欢迎交流".into(),
+        origin: SentenceOrigin::Manual,
+    };
+    let made = create_sentence(&db, &create_cmd).await.unwrap();
+    let sentence = made.sentence.clone();
+    assert_eq!((sentence.code.as_str(), sentence.revision), ("XJ-0001", 1));
+    assert_eq!(sentence.status, SentenceStatus::Review);
+    assert!(
+        sentence
+            .entry_findings
+            .iter()
+            .all(|f| f.level != Level::Must)
+    );
+    let replay = create_sentence(&db, &create_cmd).await.unwrap();
+    assert!(replay.replayed);
+    assert_eq!(
+        replay.sentence.code, "XJ-0001",
+        "a repeat does not consume another code"
+    );
+    let mut different = create_cmd.clone();
+    different.text = "换了一句话".into();
+    assert!(matches!(
+        create_sentence(&db, &different).await,
+        Err(AssetsError::RequestConflict)
+    ));
+
+    // Waiting for review means not usable.
+    assert!(
+        candidates_for_account(&db, xhs_a)
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    let review = |expected: i32, action: ReviewAction, note: Option<&str>| SentenceReview {
+        request_id: Uuid::new_v4(),
+        expected_revision: expected,
+        action,
+        note: note.map(str::to_string),
+    };
+    assert!(matches!(
+        review_sentence(&db, "XJ-0001", &review(1, ReviewAction::RequestFix, None)).await,
+        Err(AssetsError::Invalid("review"))
+    ));
+    assert!(matches!(
+        review_sentence(&db, "XJ-0001", &review(1, ReviewAction::Enable, None)).await,
+        Err(AssetsError::Invalid("transition"))
+    ));
+    let sent_back = review_sentence(
+        &db,
+        "XJ-0001",
+        &review(1, ReviewAction::RequestFix, Some("太像招揽")),
+    )
+    .await
+    .unwrap()
+    .sentence;
+    assert_eq!(sent_back.status, SentenceStatus::Fix);
+    assert_eq!(sent_back.status_note.as_deref(), Some("太像招揽"));
+    let ok = review_sentence(&db, "XJ-0001", &review(1, ReviewAction::Approve, None))
+        .await
+        .unwrap()
+        .sentence;
+    assert_eq!(ok.status, SentenceStatus::Ok);
+    assert!(matches!(
+        review_sentence(&db, "XJ-0001", &review(1, ReviewAction::Approve, None)).await,
+        Err(AssetsError::Invalid("transition"))
+    ));
+
+    let ready = candidates_for_account(&db, xhs_a).await.unwrap();
+    assert_eq!(ready.state, BridgeState::Ready);
+    assert_eq!(
+        ready
+            .items
+            .iter()
+            .map(|s| s.code.as_str())
+            .collect::<Vec<_>>(),
+        vec!["XJ-0001"]
+    );
+    let wrong_voice = candidates_for_account(&db, xhs_c).await.unwrap();
+    assert_eq!(wrong_voice.state, BridgeState::BioMissing);
+    assert!(
+        wrong_voice.items.is_empty(),
+        "no bridge until the bio says so"
+    );
+    assert!(
+        list_sentences(&db, Some(BridgeGroup::Coach), None)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    // Rewriting goes back to review; the old approved revision is no longer served.
+    let edit = |expected: i32| SentenceEdit {
+        request_id: Uuid::new_v4(),
+        expected_revision: expected,
+        group: BridgeGroup::Parent,
+        text: "我也是陪跑营学员家长，一起慢慢来".into(),
+    };
+    let rewritten = edit_sentence(&db, "XJ-0001", &edit(1))
+        .await
+        .unwrap()
+        .sentence;
+    assert_eq!(
+        (rewritten.revision, rewritten.status),
+        (2, SentenceStatus::Review)
+    );
+    assert!(
+        candidates_for_account(&db, xhs_a)
+            .await
+            .unwrap()
+            .items
+            .is_empty()
+    );
+    assert!(matches!(
+        edit_sentence(&db, "XJ-0001", &edit(1)).await,
+        Err(AssetsError::Stale)
+    ));
+    assert!(matches!(
+        review_sentence(&db, "XJ-0001", &review(1, ReviewAction::Approve, None)).await,
+        Err(AssetsError::Stale)
+    ));
+    let off = review_sentence(
+        &db,
+        "XJ-0001",
+        &review(2, ReviewAction::Disable, Some("不用了")),
+    )
+    .await
+    .unwrap()
+    .sentence;
+    assert_eq!(off.status, SentenceStatus::Off);
+    let back = review_sentence(&db, "XJ-0001", &review(2, ReviewAction::Enable, None))
+        .await
+        .unwrap()
+        .sentence;
+    assert_eq!(
+        back.status,
+        SentenceStatus::Review,
+        "re-enabling never skips review"
+    );
+    assert!(matches!(
+        edit_sentence(&db, "XJ-9999", &edit(1)).await,
+        Err(AssetsError::NotFound)
+    ));
+
+    // Usage counts come from the current revision of drafts that carry the sentence.
+    let approved_now = approved(&db, BridgeGroup::Parent, "我是学员家长，也在学习").await;
+    let mut document = draft(Some(xhs_a), &["正文"]);
+    document.bridge = Some(using(&approved_now));
+    create(&db, document).await;
+    let listed = list_sentences(&db, None, None).await.unwrap();
+    let used = listed.iter().find(|s| s.code == approved_now.code).unwrap();
+    assert_eq!(used.used_count, 1);
+    assert_eq!(
+        listed
+            .iter()
+            .find(|s| s.code == "XJ-0001")
+            .unwrap()
+            .used_count,
+        0
+    );
+    assert_eq!(
+        list_sentences(&db, None, Some(SentenceStatus::Ok))
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn copy_checks_the_saved_revision_and_records_receipt_then_confirmation() {
+    let db = db("assets_copy").await;
+    let (xhs_a, _, _) = accounts(&db).await;
+    put_identity(
+        &db,
+        xhs_a,
+        &identity(0, OrgRelation::Parent, Some(true), Some("妈妈")),
+    )
+    .await
+    .unwrap();
+    let sentence = approved(&db, BridgeGroup::Parent, "我也是学员家长，慢慢来").await;
+
+    // 必改 blocks the copy and writes nothing.
+    let mut blocked = draft(Some(xhs_a), &["开头。", "观点。", "收尾。"]);
+    blocked.tags = vec!["ADHD".into(), "#adhd".into()];
+    let first = create(&db, blocked.clone()).await;
+    let ask = |expected: Uuid| CopyCommand {
+        request_id: Uuid::new_v4(),
+        expected_revision: expected,
+    };
+    match prepare_copy(&db, first.work_id, &ask(first.revision.id)).await {
+        Err(AssetsError::Blocked(findings)) => {
+            assert_eq!(findings[0].rule, "R-M4");
+            assert_eq!(findings[0].level, Level::Must);
+        }
+        other => panic!("{other:?}"),
+    }
+    let receipts: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_creation_copy_receipt")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(receipts, 0);
+    assert!(matches!(
+        prepare_copy(&db, first.work_id, &ask(Uuid::new_v4())).await,
+        Err(AssetsError::Stale)
+    ));
+    assert!(matches!(
+        prepare_copy(&db, Uuid::new_v4(), &ask(Uuid::new_v4())).await,
+        Err(AssetsError::NotFound)
+    ));
+
+    // Decide the bridge and save: the next revision can be copied.
+    let mut fixed = first.revision.document.clone();
+    fixed.bridge = Some(using(&sentence));
+    fixed.paragraphs[0].text = "开头，会根治拖拉。".into();
+    let saved = save(
+        &db,
+        first.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: first.revision.id,
+            document: fixed.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    let command = ask(saved.revision.id);
+    let ready = prepare_copy(&db, first.work_id, &command).await.unwrap();
+    assert_eq!(
+        ready.text,
+        format!(
+            "开头，会根治拖拉。\n{FILL}\n观点。\n{FILL}\n我也是学员家长，慢慢来\n{FILL}\n收尾。\n#ADHD"
+        )
+    );
+    assert_eq!(ready.title, "合成标题");
+    assert_eq!(
+        (ready.warn_count, ready.hint_count),
+        (2, 0),
+        "cure promise and repeated topic only remind"
+    );
+    assert!(!ready.replayed);
+    let replayed = prepare_copy(&db, first.work_id, &command).await.unwrap();
+    assert!(replayed.replayed);
+    assert_eq!(
+        (replayed.receipt_ref, replayed.text.as_str()),
+        (ready.receipt_ref, ready.text.as_str())
+    );
+    assert_eq!(replayed.warn_count, 2);
+    assert!(matches!(
+        prepare_copy(
+            &db,
+            first.work_id,
+            &CopyCommand {
+                request_id: command.request_id,
+                expected_revision: first.revision.id
+            }
+        )
+        .await,
+        Err(AssetsError::RequestConflict)
+    ));
+
+    // A receipt is not a copy until the clipboard confirms it.
+    assert!(
+        copy_status(&db, first.work_id)
+            .await
+            .unwrap()
+            .copied
+            .is_none()
+    );
+    let confirm = CopyConfirm {
+        request_id: Uuid::new_v4(),
+    };
+    let mark = confirm_copy(&db, first.work_id, ready.receipt_ref, &confirm)
+        .await
+        .unwrap();
+    assert_eq!(mark.revision_id, saved.revision.id);
+    let twice = confirm_copy(
+        &db,
+        first.work_id,
+        ready.receipt_ref,
+        &CopyConfirm {
+            request_id: Uuid::new_v4(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        twice.copied_at, mark.copied_at,
+        "a second confirmation returns the first"
+    );
+    assert!(matches!(
+        confirm_copy(
+            &db,
+            Uuid::new_v4(),
+            ready.receipt_ref,
+            &CopyConfirm {
+                request_id: Uuid::new_v4()
+            }
+        )
+        .await,
+        Err(AssetsError::NotFound)
+    ));
+    let status = copy_status(&db, first.work_id).await.unwrap();
+    assert_eq!(status.copied.unwrap().revision_id, saved.revision.id);
+
+    // Editing after the copy leaves the copied mark on the older revision.
+    let mut later = fixed;
+    later.paragraphs[1].text = "改过的观点。".into();
+    let newer = save(
+        &db,
+        first.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: saved.revision.id,
+            document: later,
+        },
+    )
+    .await
+    .unwrap();
+    assert_ne!(
+        copy_status(&db, first.work_id)
+            .await
+            .unwrap()
+            .copied
+            .unwrap()
+            .revision_id,
+        newer.revision.id
+    );
+
+    // Skipping the bridge needs no account; an empty body is not copyable.
+    let mut plain = draft(None, &["只有正文"]);
+    plain.bridge = Some(BridgeChoice {
+        skip: true,
+        ..BridgeChoice::default()
+    });
+    let plain = create(&db, plain).await;
+    let text = prepare_copy(&db, plain.work_id, &ask(plain.revision.id))
+        .await
+        .unwrap()
+        .text;
+    assert_eq!(text, "只有正文");
+    let mut empty = draft(None, &["", "  "]);
+    empty.bridge = Some(BridgeChoice {
+        skip: true,
+        ..BridgeChoice::default()
+    });
+    let empty = create(&db, empty).await;
+    assert!(matches!(
+        prepare_copy(&db, empty.work_id, &ask(empty.revision.id)).await,
+        Err(AssetsError::Invalid("body_empty"))
+    ));
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn request_ids_belong_to_one_command_and_every_new_table_is_append_only() {
+    let db = db("assets_requests").await;
+    let (xhs_a, _, _) = accounts(&db).await;
+    let shared = Uuid::new_v4();
+    let mut as_identity = identity(0, OrgRelation::NoRelation, None, None);
+    as_identity.request_id = shared;
+    put_identity(&db, xhs_a, &as_identity).await.unwrap();
+    let mut as_card = card(0, "名称", &[], &[]);
+    as_card.request_id = shared;
+    assert!(matches!(
+        put_fact_card(&db, None, &as_card).await,
+        Err(AssetsError::RequestConflict)
+    ));
+    assert!(list_fact_cards(&db).await.unwrap().is_empty());
+    let sentence = approved(&db, BridgeGroup::Parent, "一句普通的话").await;
+    let first = create(&db, draft(Some(xhs_a), &["正文"])).await;
+    let mut skipped = first.revision.document.clone();
+    skipped.bridge = Some(BridgeChoice {
+        skip: true,
+        ..BridgeChoice::default()
+    });
+    let saved = save(
+        &db,
+        first.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: first.revision.id,
+            document: skipped,
+        },
+    )
+    .await
+    .unwrap();
+    let ready = prepare_copy(
+        &db,
+        first.work_id,
+        &CopyCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: saved.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    confirm_copy(
+        &db,
+        first.work_id,
+        ready.receipt_ref,
+        &CopyConfirm {
+            request_id: Uuid::new_v4(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(sentence.status, SentenceStatus::Ok);
+    for table in [
+        "linggan_creation_assets_request",
+        "linggan_creation_account_identity",
+        "linggan_creation_bridge_sentence",
+        "linggan_creation_bridge_sentence_status",
+        "linggan_creation_copy_receipt",
+        "linggan_creation_copy_confirmation",
+    ] {
+        let count: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) FROM {table}")))
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert!(count > 0, "{table} should have been written by this test");
+        assert!(
+            sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM {table}")))
+                .execute(db.pool())
+                .await
+                .is_err(),
+            "{table} must refuse deletes"
+        );
+    }
+}

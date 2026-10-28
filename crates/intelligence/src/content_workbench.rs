@@ -13,6 +13,7 @@ pub use exports::{
 };
 pub use requests::read_request;
 pub(crate) use requests::{RequestOwner, ensure_request_owner_in};
+pub(crate) use validation::document as validate_document;
 use sha2::{Digest, Sha256};
 pub use source_usage::{propagate_adopted_sources_in, redact_revision_in};
 pub use store::{
