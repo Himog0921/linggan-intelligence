@@ -11,8 +11,12 @@ vi.mock('./ImagePages', () => ({
   ImagePages: () => <div>图页组件</div>
 }));
 // The check panel and the asset library have their own tests; these tests are about the editor.
+let checkPanelProps: { saveCurrent: () => Promise<{ number: number }> } | null = null;
 vi.mock('./assets/CheckPanel', () => ({
-  CheckPanel: () => <div>检查面板</div>
+  CheckPanel: (props: NonNullable<typeof checkPanelProps>) => {
+    checkPanelProps = props;
+    return <div>检查面板</div>;
+  }
 }));
 vi.mock('./assets/AssetsLibrary', () => ({
   AssetsLibrary: ({ domainRef }: { domainRef: string }) => <div>资产库页 {domainRef}</div>
@@ -871,4 +875,28 @@ it('opens the asset library from its own tab for the chosen domain and leaves it
   fireEvent.click(screen.getByRole('button', { name: '我的创作' }));
   await waitFor(() => expect(screen.queryByText(`资产库页 ${domain}`)).not.toBeInTheDocument());
   expect(screen.getByRole('button', { name: '我的创作' })).toHaveAttribute('aria-current', 'page');
+});
+
+it('lets the copy wait for a save already in flight, then saves what was typed meanwhile', async () => {
+  show();
+  const body = await screen.findByLabelText('正文第 1 段');
+  const receipt = (r: Parameters<typeof api.save>[1], number: number): SaveReceipt => ({
+    requestId: r.requestId, workId: work, outcome: 'accepted', replayed: false,
+    revision: { id: crypto.randomUUID(), number, savedAt: 'now', document: r.document }
+  });
+  let finishFirst!: () => void;
+  vi.mocked(api.save)
+    .mockImplementationOnce((_id, r) => new Promise<SaveReceipt>(resolve => { finishFirst = () => resolve(receipt(r, 2)); }))
+    .mockImplementationOnce(async (_id, r) => receipt(r, 3));
+  fireEvent.change(body, { target: { value: '第一次输入' } });
+  fireEvent.click(screen.getByRole('button', { name: '保存' }));
+  await waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
+  fireEvent.change(screen.getByLabelText('正文第 1 段'), { target: { value: '第二次输入' } });
+  const saving = checkPanelProps!.saveCurrent();
+  await new Promise(resolve => setTimeout(resolve, 150));
+  expect(api.save).toHaveBeenCalledTimes(1);
+  await act(async () => { finishFirst(); });
+  expect((await saving).number).toBe(3);
+  expect(api.save).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(api.save).mock.calls[1]?.[1].document.paragraphs[0]?.text).toBe('第二次输入');
 });

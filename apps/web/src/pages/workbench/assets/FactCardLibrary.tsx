@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ApiError } from '../../../shared/api';
+import { humanMoment } from '../../../shared/formatting';
 import { RequestIdentities } from '../../../shared/requestIdentity';
 import * as api from './assetsApi';
 import type { FactCard, FactCardView } from './assetsModel';
@@ -78,7 +79,7 @@ function CardForm({ card, onChanged }: { card: FactCard | null; onChanged: (code
       <ActionButton type="submit" variant="primary" busy={busy} disabled={!name.trim()}>{card ? '保存为新的一版' : '保存'}</ActionButton>
       {card && !confirmed ? <ActionButton variant="outline" disabled={busy} onClick={() => void run('confirm')}>确认这一版</ActionButton> : null}
     </div>
-    {card ? <p className={styles.hint}>{confirmed ? `这一版已确认（${card.confirmedAt}），检查按它执行。` : '这一版还没有确认：检查仍按上一个已确认的版本执行，没有已确认的版本时叫法检查不运行。'}</p> : null}
+    {card ? <p className={styles.hint}>{confirmed ? `这一版已确认（${humanMoment(card.confirmedAt)}），检查按它执行。` : '这一版还没有确认：检查仍按上一个已确认的版本执行，没有已确认的版本时叫法检查不运行。'}</p> : null}
   </form>;
 }
 

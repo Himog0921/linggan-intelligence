@@ -147,6 +147,15 @@ describe('产品事实卡', () => {
     await waitFor(() => expect(api.confirmFactCard).toHaveBeenCalledWith('CP-0001', expect.objectContaining({ expectedRevision: 1 })));
   });
 
+  it('writes the confirmation time the way the rest of the site does', async () => {
+    const confirmed = card({ confirmedAt: '2026-10-28 15:23:39.566182+08' });
+    vi.mocked(api.listFactCards).mockResolvedValue(views(confirmed, confirmed));
+    show();
+    open('产品事实卡');
+    fireEvent.click(await screen.findByRole('button', { name: /示例营/ }));
+    expect(await screen.findByText('这一版已确认（2026-10-28 15:23），检查按它执行。')).toBeInTheDocument();
+  });
+
   it('saves an edit as the next revision of the same card', async () => {
     vi.mocked(api.listFactCards).mockResolvedValue(views(card({ revision: 3, confirmedAt: 't' }), card({ revision: 3, confirmedAt: 't' })));
     vi.mocked(api.saveFactCard).mockResolvedValue({ card: card({ revision: 4 }), replayed: false });
@@ -191,7 +200,7 @@ describe('衔接句', () => {
     fireEvent.change(within(form).getByLabelText(/这句话/), { target: { value: ' 我是陪跑老师 ' } });
     expect(within(form).getByRole('button', { name: '加入句库（待审）' })).toBeDisabled();
     expect(await within(form).findByText(/这句有 80 个字/)).toBeInTheDocument();
-    expect(within(form).getByText(/未检查（R-L4）/)).toBeInTheDocument();
+    expect(within(form).getByText(/未检查：产品事实卡还没有确认，产品叫法没有检查。/)).toBeInTheDocument();
     await waitFor(() => expect(within(form).getByRole('button', { name: '加入句库（待审）' })).toBeEnabled());
     fireEvent.click(within(form).getByRole('button', { name: '加入句库（待审）' }));
     await waitFor(() => expect(api.createSentence).toHaveBeenCalledWith(expect.objectContaining({ group: 'coach', text: '我是陪跑老师', origin: 'manual' })));

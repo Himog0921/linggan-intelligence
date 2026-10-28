@@ -80,7 +80,7 @@ function SentenceEditor({ sentence, onSaved }: { sentence: Sentence | null; onSa
       <small>一行，不换行；如实说明自己和机构的关系，不写效果承诺。</small>
     </label>
     <FindingList findings={refused.length ? refused : check.data?.findings ?? []} />
-    {check.data?.notRun.map(item => <p key={item.rule} className={styles.hint}>未检查（{item.rule}）：{item.reason}。</p>)}
+    {check.data?.notRun.map(item => <p key={item.rule} className={styles.hint}>未检查：{item.reason}。</p>)}
     {blocked ? <p role="alert" className={styles.problem}>含有疗效承诺，不能加入句库。</p> : null}
     {message ? <p role="alert" className={styles.problem}>{message}</p> : null}
     <div className={styles.actions}>

@@ -92,7 +92,7 @@ describe('check results', () => {
     vi.mocked(api.checkDraft).mockResolvedValue(report([], { notRun: [{ rule: 'R-W3', reason: '产品事实卡还没有确认，产品叫法没有检查' }] }));
     show();
     await screen.findByText('没有发现问题。');
-    expect(screen.getByText(/未检查（R-W3）：产品事实卡还没有确认/)).toBeInTheDocument();
+    expect(screen.getByText(/未检查：产品事实卡还没有确认/)).toBeInTheDocument();
   });
 
   it('shows a failed check as a failure with a retry, never as "nothing found", and blocks copying', async () => {

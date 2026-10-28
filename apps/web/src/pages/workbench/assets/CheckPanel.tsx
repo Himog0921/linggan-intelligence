@@ -252,7 +252,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
             </div>
           </li>)}</ul>
         </section>)}
-        {report.data?.notRun.map(item => <p key={item.rule} className={styles.hint}>未检查（{item.rule}）：{item.reason}。</p>)}
+        {report.data?.notRun.map(item => <p key={item.rule} className={styles.hint}>未检查：{item.reason}。</p>)}
       </>}
     </section>
     <section aria-label="复制" className={styles.copy}>
