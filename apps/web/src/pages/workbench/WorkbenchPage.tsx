@@ -14,6 +14,8 @@ import { CanvasBoard } from './CanvasBoard';
 import { RevisionCompare } from './RevisionCompare';
 import { TopicLibrary } from './TopicLibrary';
 import { TopicDetail } from './TopicDetail';
+import { CheckPanel } from './assets/CheckPanel';
+import { AssetsLibrary } from './assets/AssetsLibrary';
 import { MaterialBrowser } from './MaterialBrowser';
 import { newImagePage } from './imagePageFactory';
 import { ImagePages } from './ImagePages';
@@ -73,6 +75,7 @@ function targetLocation(target: UseTarget, document: WorkDocument): {
       }
   }
 }
+const SECTION_TITLE = { today: '今日选题', works: '我的创作', assets: '资产库' } as const;
 function viewValue(value: string | null): View {
   return VIEWS.find(v => v.id === value)?.id ?? 'topic';
 }
@@ -108,7 +111,8 @@ export function WorkbenchPage() {
   const [params, setParams] = useSearchParams();
   const domain = params.get('domain') ?? '';
   const work = params.get('work');
-  const section = params.get('section') === 'works' || work ? 'works' : 'today';
+  const sectionParam = params.get('section');
+  const section = work ? 'works' : sectionParam === 'works' || sectionParam === 'assets' ? sectionParam : 'today';
   const [title, setTitle] = useState('');
   const [immersive, setImmersive] = useState(false);
   const [error, setError] = useState('');
@@ -130,7 +134,7 @@ export function WorkbenchPage() {
     staleTime: 0
   });
   const validDomain = domainQuery.data?.some(option => option.domainRef === domain) === true;
-  useEffect(() => { window.document.title = `${work ? '作品编辑' : section === 'today' ? '今日选题' : '我的创作'} · 运营`; }, [work, section]);
+  useEffect(() => { window.document.title = `${work ? '作品编辑' : SECTION_TITLE[section]} · 运营`; }, [work, section]);
   const works = useQuery({
     queryKey: ['creation-works', domain],
     queryFn: ({
@@ -207,14 +211,14 @@ export function WorkbenchPage() {
   return <OpsFrame section="creation" domain={domain} immersive={immersive && !!work}
     scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
       disabled={creating || createUnknown} onChange={next => { if (createPending.current) return; setError(''); setParams({ domain: next, section }); }} />}
-    tabs={<>{(['today', 'works'] as const).map(value => <button type="button" key={value}
+    tabs={<>{(['today', 'works', 'assets'] as const).map(value => <button type="button" key={value}
       aria-current={!work && section === value ? 'page' : undefined} onClick={() => setParams({ ...(domain ? { domain } : {}), section: value })}>
-      {value === 'today' ? '今日选题' : '我的创作'}</button>)}{work ? <span aria-current="page">作品编辑</span> : null}</>}
+      {SECTION_TITLE[value]}</button>)}{work ? <span aria-current="page">作品编辑</span> : null}</>}
     meta={<span>个人创作空间</span>}>
 <main className={`${styles.workspace} ${immersive && work ? styles.immersiveWorkspace : ''}`} aria-label="运营创作">
     {domainQuery.error ? <p className={styles.error} role="alert">{api.errorText(domainQuery.error)}</p> : null}
     {domainQuery.isPending ? <div className={styles.empty} role="status">正在读取创作领域…</div> : !domain || !validDomain ? <div className={styles.entryEmpty}><span className={styles.entryIndex} aria-hidden="true">01 / CREATE</span><h1>{domain ? '当前领域不可用于创作' : '从一个领域开始创作'}</h1><p>{domain ? '请在上方面包屑中切换可用领域，再查看选题和稿件。' : '在上方面包屑选择创作领域，随后可以建立选题，或继续已保存的稿件。'}</p>{domainQuery.isError ? <ActionButton onClick={() => void domainQuery.refetch()}>重新读取领域</ActionButton> : <p>今日选题 · 方案与材料 / 我的创作 · 正文与图页</p>}</div> : work ? <>{current.isPending ? <p>恢复服务器草稿中…</p> : current.error ? <p role="alert" className={styles.error}>{api.errorText(current.error)} <ActionButton variant="outline" onClick={() => void current.refetch()}>重新读取</ActionButton>
-</p> : current.data && current.data.domainRef === domain ? null : <p className={styles.error}>作品不属于当前领域。</p>}</> : <section className={styles.library}>
+</p> : current.data && current.data.domainRef === domain ? null : <p className={styles.error}>作品不属于当前领域。</p>}</> : section === 'assets' ? <AssetsLibrary key={domain} domainRef={domain} /> : <section className={styles.library}>
 <div className={styles.libraryTools}>
 <h1 className={styles.srOnly}>{section === 'today' ? '今日选题' : '我的创作'}</h1>
 <small>{works.isError ? '作品读取失败' : works.data ? `${works.data.length} 篇已保存作品` : '读取中'}</small>
@@ -354,6 +358,11 @@ function WorkEditor({
       setSaveState(previous => previous === 'failed' || previous === 'unknown' || previous === 'conflict' ? previous : equalsServer ? 'saved' : 'dirty');
       if (saveState !== 'failed') setFeedback('');
     }
+  }
+  function changeTags(value: string) {
+    tagsLive.current = value;
+    setTagsDraft(value);
+    setSaveState(previous => previous === 'unknown' || previous === 'conflict' || previous === 'failed' ? previous : 'dirty');
   }
   function applyReceipt(r: SaveReceipt, snapshot: WorkDocument | null) {
     server.current = r.revision;
@@ -865,7 +874,7 @@ function WorkEditor({
 </div>
 </div>
 {aiComparison&&ai?.suggestion&&ai.staleBase?<div className={styles.warning}><p>本次采用已改变原底稿，其余改稿仍保留在右侧，不能继续直接采用。</p><ActionButton variant="outline" onClick={()=>void copyUnadoptedAi()}>复制未采用改稿</ActionButton>{aiCopyFallback?<label>未采用改稿，可手动复制<textarea readOnly value={unadoptedAiText()}/></label>:null}</div>:null}
-{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className={`${styles.writingLayout} ${sourcePanel ? styles.sourcesVisible : ''}`}><ManuscriptEditor document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={value=>{tagsLive.current=value;setTagsDraft(value);setSaveState(previous=>previous==='unknown'||previous==='conflict'||previous==='failed'?previous:'dirty');}} />{sourcePanel ? <aside className={styles.writingSources}><h3>这篇的材料与出处</h3>{document.excerpts.map(excerpt => <section key={excerpt.id}><blockquote>{excerpt.selectedText ?? '来源已受限或不可用'}</blockquote><ActionButton variant="quiet" onClick={() => {setSourceFocus(excerpt.citation);setFocusSequence(n=>n+1);onView('materials');}}>回到原文 ↗</ActionButton></section>)}</aside> : null}</div>}<div className={styles.studioFooter}><ActionButton variant="quiet" onClick={() => setSourcePanel(!sourcePanel)}>{sourcePanel ? '收起来源' : `材料与出处 · ${document.excerpts.length}`}</ActionButton><ActionButton variant="primary" onClick={() => onView('cover')}>制作封面 →</ActionButton></div>
+{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className={`${styles.writingLayout} ${styles.withChecks} ${sourcePanel ? styles.sourcesVisible : ''}`}><ManuscriptEditor document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} />{sourcePanel ? <aside className={styles.writingSources}><h3>这篇的材料与出处</h3>{document.excerpts.map(excerpt => <section key={excerpt.id}><blockquote>{excerpt.selectedText ?? '来源已受限或不可用'}</blockquote><ActionButton variant="quiet" onClick={() => {setSourceFocus(excerpt.citation);setFocusSequence(n=>n+1);onView('materials');}}>回到原文 ↗</ActionButton></section>)}</aside> : null}<CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveCurrent} onGoCover={() => onView('cover')} /></div>}<div className={styles.studioFooter}><ActionButton variant="quiet" onClick={() => setSourcePanel(!sourcePanel)}>{sourcePanel ? '收起来源' : `材料与出处 · ${document.excerpts.length}`}</ActionButton><ActionButton variant="primary" onClick={() => onView('cover')}>制作封面 →</ActionButton></div>
 </div> : null}
     <div hidden={!['cover','inner','export'].includes(view)}>
 <ImagePages step={view === 'inner' ? 'inner' : view === 'export' ? 'export' : 'cover'} onStepChange={onView} onOpenSource={excerptId => { const excerpt=document.excerpts.find(item=>item.id===excerptId);if(excerpt){setSourceFocus(excerpt.citation);setFocusSequence(n=>n+1);onView('materials');} }} document={document} workId={initial.workId} currentRevisionId={dirty ? undefined : revision.id} onChange={edit} onUploadAsset={async file => {

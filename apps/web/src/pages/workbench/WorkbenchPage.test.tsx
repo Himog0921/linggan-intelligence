@@ -10,6 +10,13 @@ vi.mock('./workbenchApi');
 vi.mock('./ImagePages', () => ({
   ImagePages: () => <div>图页组件</div>
 }));
+// The check panel and the asset library have their own tests; these tests are about the editor.
+vi.mock('./assets/CheckPanel', () => ({
+  CheckPanel: () => <div>检查面板</div>
+}));
+vi.mock('./assets/AssetsLibrary', () => ({
+  AssetsLibrary: ({ domainRef }: { domainRef: string }) => <div>资产库页 {domainRef}</div>
+}));
 const domain = '00000000-0000-4000-8000-000000000001',
   work = '00000000-0000-4000-8000-000000000002',
   revision = '00000000-0000-4000-8000-000000000003',
@@ -849,4 +856,19 @@ it('keeps every editor step reachable locally after adopting the two-item Ops si
   fireEvent.click(within(nav).getByRole('button', { name: '正文' }));
   await waitFor(() => expect(within(nav).getByRole('button', { name: '正文' })).toHaveAttribute('aria-current', 'step'));
   await screen.findByLabelText('正文第 1 段');
+});
+
+it('opens the asset library from its own tab for the chosen domain and leaves it again', async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  render(<QueryClientProvider client={client}>
+    <MemoryRouter initialEntries={[`/ops/creation?domain=${domain}`]}><WorkbenchPage /></MemoryRouter>
+  </QueryClientProvider>);
+  const tab = await screen.findByRole('button', { name: '资产库' });
+  expect(tab).not.toHaveAttribute('aria-current');
+  fireEvent.click(tab);
+  expect(await screen.findByText(`资产库页 ${domain}`)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '资产库' })).toHaveAttribute('aria-current', 'page');
+  fireEvent.click(screen.getByRole('button', { name: '我的创作' }));
+  await waitFor(() => expect(screen.queryByText(`资产库页 ${domain}`)).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: '我的创作' })).toHaveAttribute('aria-current', 'page');
 });
