@@ -42,7 +42,7 @@ try {
   const receipt=await post(account.getByRole('button',{name:'开始账号研究',exact:true}),'/api/local/creator-account-research');
   await until(`/api/local/creator-account-research/${receipt.requestRef}`,r=>r.state==='succeeded');
   await account.getByRole('button',{name:'刷新研究状态',exact:true}).click();
-  await page.getByRole('tab',{name:'作品与依据',exact:true}).click();
+  await page.getByRole('tab',{name:'研究线索',exact:true}).click();
   await page.locator('details').filter({hasText:'合成底稿验收'}).first().locator('summary').click();
   const single=page.getByRole('region',{name:'单篇作品研究',exact:true});
   await single.getByRole('button',{name:'检查研究底稿',exact:true}).click();

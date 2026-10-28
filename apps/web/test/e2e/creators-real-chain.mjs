@@ -214,14 +214,14 @@ try {
     assert.match(overview, /本次实际取样篇数未记录。/);
     assert.match(overview, /持续创作倾向须至少两篇独立相关作品/);
     assert.doesNotMatch(await panel.innerText(), UUID);
-    await panel.getByRole('tab', { name: '作品与依据' }).click();
+    await panel.getByRole('tab', { name: '研究线索' }).click();
     const group = panel.locator('details[data-work]').first();
     await group.locator('summary').click();
     assert.equal(await group.getByText('判定门槛：').count(), 4);
     // 还没有任何分析结果：没有被引用的片段，如实说明，而不是显示一个空的依据。
     assert.match(await group.innerText(), /暂无可回查的支持片段。/);
-    await panel.getByRole('tab', { name: '作者资料' }).click();
-    assert.match(await panel.getByRole('tabpanel', { name: '作者资料' }).innerText(), /合成公开简介|公开简介尚未取得/);
+    await panel.getByRole('tab', { name: '观察记录' }).click();
+    assert.match(await panel.getByRole('tabpanel', { name: '观察记录' }).innerText(), /合成公开简介|公开简介尚未取得/);
     await panel.getByRole('tab', { name: '概览' }).click();
     await shot('creators-1440-drawer');
     await page.keyboard.press('Escape');
@@ -234,7 +234,7 @@ try {
     await page.getByRole('button', { name: '合成作者 03', exact: true }).click();
     const panel = drawer('合成作者 03');
     await panel.waitFor();
-    await panel.getByRole('tab', { name: '作品与依据' }).click();
+    await panel.getByRole('tab', { name: '研究线索' }).click();
     const group = panel.locator('details[data-work]').first();
     await group.locator('summary').click();
     await group.getByRole('button', { name: '补充判断' }).first().click();

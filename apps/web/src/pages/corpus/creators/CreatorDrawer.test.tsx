@@ -250,8 +250,11 @@ describe('依据抽屉 · 键盘、焦点与头像', () => {
   it('方向键 / Home / End 在分区之间移动，焦点跟着走', async () => {
     defaultRoutes(kit);
     const { dialog, user } = await openDrawer();
-    const [overview, evidence, profile] = within(dialog).getAllByRole('tab');
+    const [overview, works, evidence, profile] = within(dialog).getAllByRole('tab');
     overview!.focus();
+    await user.keyboard('{ArrowRight}');
+    expect(works).toHaveAttribute('aria-selected', 'true');
+    expect(works).toHaveFocus();
     await user.keyboard('{ArrowRight}');
     expect(evidence).toHaveAttribute('aria-selected', 'true');
     expect(evidence).toHaveFocus();
@@ -274,7 +277,7 @@ describe('依据抽屉 · 键盘、焦点与头像', () => {
     expect(screen.getByRole('button', { name: '合成作者 1' })).toHaveFocus();
     expect(screen.getByRole('button', { name: '合成作者 1' }).closest('tr')).toHaveAttribute('data-selected', 'false');
     await user.click(screen.getByRole('button', { name: '合成作者 2' }));
-    await user.click(await screen.findByRole('button', { name: '关闭发现依据' }));
+    await user.click(await screen.findByRole('button', { name: '关闭作者研究' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.getByRole('button', { name: '合成作者 2' })).toHaveFocus();
   });
