@@ -34,6 +34,8 @@ mod creator_lifecycle_api;
 mod creator_lifecycle_tests;
 mod creators;
 #[cfg(test)]
+mod creator_preview_proof_tests;
+#[cfg(test)]
 mod creators_browser_tests;
 #[cfg(test)]
 mod evidence_api_proof_tests;

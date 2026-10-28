@@ -9,7 +9,7 @@ import { chromium } from 'playwright';
 const directory = process.env.WEB_APP_PROOF_DIR;
 assert.ok(directory, 'WEB_APP_PROOF_DIR is required');
 const fixture = JSON.parse(await readFile(path.join(directory, 'fixture.json'), 'utf8'));
-const { origin, domainOne, domainTwo, authorTotal } = fixture;
+const { origin, domainOne, domainTwo, authorTotal, previewAuthor, previewTitles } = fixture;
 await mkdir(directory, { recursive: true });
 
 const report = { origin, steps: [], screenshots: [], pageErrors: [], consoleErrors: [], failedRequests: [], httpErrors: [], writes: [], storage: null };
@@ -400,6 +400,66 @@ try {
     await shot('creators-1440-after-evidence-return');
   });
 
+  await step('主页作品：未展开的作者读到「尚未展开」，已冻结样本读到卡片与默认建议；读取不产生写请求', async () => {
+    const before = report.writes.length;
+    await openList();
+    await page.getByRole('button', { name: '合成作者 27', exact: true }).click();
+    const empty = drawer('合成作者 27');
+    await empty.waitFor();
+    await empty.getByRole('tab', { name: '主页作品' }).click();
+    const intro = empty.getByRole('tabpanel', { name: '主页作品' });
+    await intro.getByText('先展开这位作者的主页').waitFor();
+    assert.match(await intro.innerText(), /本次不自动打开全部详情、不采集评论，也不会自动加入长期观察。/);
+    assert.ok(await intro.getByRole('button', { name: '浅看主页' }).isEnabled());
+    await page.keyboard.press('Escape');
+    await empty.waitFor({ state: 'detached' });
+
+    await page.getByRole('button', { name: previewAuthor, exact: true }).click();
+    const panel = drawer(previewAuthor);
+    await panel.waitFor();
+    await panel.getByRole('tab', { name: '主页作品' }).click();
+    const homepage = panel.getByRole('tabpanel', { name: '主页作品' });
+    await homepage.getByText(`本次主页样本 ${previewTitles.length} 篇`).waitFor();
+    for (const title of previewTitles) await homepage.getByRole('link', { name: title, exact: true }).waitFor();
+    const text = await homepage.innerText();
+    assert.match(text, /目标上限\s*30/);
+    // 默认建议：本领域已见的那篇、点赞最高的一篇、另一篇对照，共 3 篇；用户可以再改。
+    assert.match(text, /已选研究\s*3/);
+    assert.doesNotMatch(await panel.innerText(), UUID);
+    await shot('creators-1440-homepage-snapshot');
+    assert.equal(report.writes.length, before, '读取主页样本不产生写请求');
+  });
+
+  await step('精选研究：确认之前不发请求；文字版只带所选两篇；回执后才显示「精选任务已建立」', async () => {
+    const before = report.writes.length;
+    const panel = drawer(previewAuthor);
+    const homepage = panel.getByRole('tabpanel', { name: '主页作品' });
+    // 把中间那篇从默认建议里拿掉，剩两篇。
+    await homepage.getByRole('button', { name: `移除 ${previewTitles[1]}` }).click();
+    await homepage.getByRole('button', { name: '研究已选 2 篇' }).click();
+    const confirm = homepage.getByRole('region', { name: '精选研究确认' });
+    await confirm.waitFor();
+    assert.match(await confirm.innerText(), /只处理当前快照中精确选定的\s*2\s*篇/);
+    assert.equal(report.writes.length, before, '确认之前不发请求');
+    await confirm.getByRole('button', { name: /^仅补文字资料/ }).click();
+    await confirm.getByRole('button', { name: '确认精选范围' }).click();
+    await homepage.getByText('精选任务已建立').waitFor();
+    assert.equal(report.writes.length, before + 1);
+    const post = report.writes.at(-1);
+    assert.equal(post.method, 'POST');
+    assert.equal(post.path, '/api/collection/runs');
+    const { idempotencyKey, source, ...rest } = JSON.parse(post.body);
+    assert.match(idempotencyKey, UUID);
+    assert.equal(source.kind, 'creator_selected_works');
+    assert.match(source.previewRef, UUID);
+    assert.equal(source.workRefs.length, 2);
+    assert.deepEqual(rest, { domainRef: domainOne, ranking: null, workLimit: 2, commentMode: 'none', commentTarget: null });
+    assert.match(await homepage.innerText(), /已按所选作品建立有界任务/);
+    await shot('creators-1440-homepage-study');
+    await page.keyboard.press('Escape');
+    await panel.waitFor({ state: 'detached' });
+  });
+
   await step('存储只记位置不记内容：localStorage 为空；创作者页自己的 sessionStorage 记录只有位置', async () => {
     report.storage = await page.evaluate(() => ({
       local: Object.keys(localStorage),
@@ -434,6 +494,27 @@ try {
       await panel.waitFor({ state: 'detached' });
     });
   }
+
+  await step('1280×720：主页作品的卡片与精选面板在视口内，无页面级横向溢出', async () => {
+    await page.setViewportSize({ width: 1280, height: 720 });
+    await openList();
+    await resultCount(`${authorTotal} 位创作者`);
+    await page.getByRole('button', { name: previewAuthor, exact: true }).click();
+    const panel = drawer(previewAuthor);
+    await panel.waitFor();
+    await panel.getByRole('tab', { name: '主页作品' }).click();
+    const homepage = panel.getByRole('tabpanel', { name: '主页作品' });
+    await homepage.getByText(`本次主页样本 ${previewTitles.length} 篇`).waitFor();
+    const box = await panel.boundingBox();
+    assert.ok(box && box.x >= -1 && box.x + box.width <= 1280 + 1, '抽屉应在视口内');
+    const dock = homepage.getByRole('button', { name: /^研究已选 \d+ 篇$/ });
+    await dock.scrollIntoViewIfNeeded();
+    assert.ok(await dock.isVisible(), '精选研究的动作在视口内可见');
+    const layout = await shot('creators-1280-homepage');
+    assert.ok(layout.documentWidth <= layout.viewport, '1280 宽度的主页作品不应横向溢出');
+    await page.keyboard.press('Escape');
+    await panel.waitFor({ state: 'detached' });
+  });
 
   await step('页面没有脚本错误；失败请求只有有意拦截的一次', async () => {
     await Promise.allSettled(responseReads);
