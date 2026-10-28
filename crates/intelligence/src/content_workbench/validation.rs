@@ -41,6 +41,7 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
     if doc.outline.iter().any(|s| s.chars().count() > 4000) {
         return Err(WorkbenchError::Invalid("outline"));
     }
+    bridge(doc)?;
     let mut tags = HashSet::new();
     if doc.tags.iter().any(|tag| {
         tag.is_empty()
@@ -133,6 +134,22 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
     }
     if serde_json::to_vec(doc)?.len() > 2 * 1024 * 1024 {
         return Err(WorkbenchError::Invalid("document_size"));
+    }
+    Ok(())
+}
+/// The bridge slot (CREATION-ASSETS-001): a library code, a positive revision and one plain line.
+fn bridge(doc: &WorkDocument) -> Result<(), WorkbenchError> {
+    let Some(sentence) = doc.bridge.as_ref().and_then(|b| b.sentence.as_ref()) else {
+        return Ok(());
+    };
+    let code = sentence.sentence_code.as_bytes();
+    if !(code.len() >= 7 && code.starts_with(b"XJ-") && code[3..].iter().all(u8::is_ascii_digit))
+        || sentence.sentence_revision < 1
+        || sentence.text.trim().is_empty()
+        || sentence.text.chars().count() > 500
+        || sentence.text.chars().any(char::is_control)
+    {
+        return Err(WorkbenchError::Invalid("bridge"));
     }
     Ok(())
 }
