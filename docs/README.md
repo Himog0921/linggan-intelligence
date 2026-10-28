@@ -10,6 +10,15 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-10-27 · 创作模块（资产版）开工准备 CREATION-ASSETS-001（范围已确认，2026-10-28）
+
+- [现状继承审计](audits/creation-assets-inheritance-audit-2026-10-27.md)：交互 Demo 每项能力对应到现有代码与合同（复用/扩展/新建/冲突），冲突项选项与建议；第 8 节记录 Mog 的决定。
+- [DEC-0012 创作资产层](decisions/0012-creation-asset-layer.md)：资产层、选题框、衔接句口径、三级检查、补充决定，以及模型外发与采集的授权记录；含 Codex D01–D12 对照。DEC-0009 顶部已写入对应修订段，DEC-0011 加了范围补充。
+- [创作流程规格](product/creation-asset-workflow.md)：用户、路径、对象与状态、第一版范围、验收场景、检查规则全表；附录 B 的领域对象与数据仍是草案。
+- [页面与交互规格（草案）](design/pages/creation-assets-pages.md)：写稿、材料桌、资产库、证据库“复刻成样板”、入口；每个页面在对应切片开工前再评审。
+- [实施切片计划](plans/active/creation-assets-001.md)：S1a–S5 与后置的 S0、依赖、授权、PR 拆分、开工条件对账、扩充团队时的试用方案；每一片开工仍须开工评审。
+- [技术小样报告](audits/creation-assets-prototype-2026-10-27.md)：中文输入与撤销、200 张卡、复制格式真机步骤、样板复刻试做方案。
+
 ## 2026-10-27 · 统一研究自动化
 
 - [统一研究自动化收口回执](audits/unified-research-automation-2026-10-27.md)：实现、审查修复、隔离与真实材料流程证明、发布边界。
