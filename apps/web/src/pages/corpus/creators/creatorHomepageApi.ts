@@ -21,7 +21,7 @@ export interface HomepagePreview {
 }
 export interface RunReceipt {
   runRef: string;
-  domainRef: string;
+  domainRef: string | null;
   replayed: boolean;
 }
 
@@ -78,10 +78,10 @@ export async function getHomepagePreview(domain: string, creatorKey: string, sig
 }
 function parseRunReceipt(value: unknown): RunReceipt {
   const raw = asObject(value);
-  if (typeof raw.runRef !== 'string' || typeof raw.domainRef !== 'string' || typeof raw.replayed !== 'boolean') {
+  if (typeof raw.runRef !== 'string' || (raw.domainRef !== undefined && typeof raw.domainRef !== 'string') || typeof raw.replayed !== 'boolean') {
     throw new Error('采集回执缺少必须字段');
   }
-  return { runRef: raw.runRef, domainRef: raw.domainRef, replayed: raw.replayed };
+  return { runRef: raw.runRef, domainRef: typeof raw.domainRef === 'string' ? raw.domainRef : null, replayed: raw.replayed };
 }
 export function newCommandRef(): string { return uuid(); }
 export async function startHomepagePreview(domain: string, creatorKey: string, commandRef: string): Promise<RunReceipt> {
