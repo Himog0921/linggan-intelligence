@@ -84,7 +84,7 @@ async fn creation_assets_http_person_correction_and_replacement_require_explicit
     let app = app_with_database(db);
     let uri = format!("/ops/api/creation/accounts/{account}/identity");
     let mut input = json!({"requestId":rid(), "expectedRevision":0, "orgRelation":"parent",
-        "bioDisclosesRelation":null,"hasRealPerson":true,"backingPersonRole":"妈妈","canProvideExperience":null});
+        "bioDisclosesRelation":true,"hasRealPerson":true,"backingPersonRole":"妈妈","canProvideExperience":null});
     let (status, first) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(first["identity"]["hasKnownPerson"], true);
@@ -103,12 +103,17 @@ async fn creation_assets_http_person_correction_and_replacement_require_explicit
     let (status, corrected) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(corrected["identity"]["revision"], 2);
+    assert_eq!(corrected["identity"]["orgRelation"], "parent");
+    assert_eq!(corrected["identity"]["bioDisclosesRelation"], true);
     input["requestId"] = rid();
     input["expectedRevision"] = json!(2);
     input["personChange"] = json!("replacement");
     let (status, replaced) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(replaced["identity"]["revision"], 3);
+    assert_eq!(replaced["identity"]["orgRelation"], "unknown");
+    assert!(replaced["identity"]["bioDisclosesRelation"].is_null());
+    assert!(replaced["identity"]["bioCheckedAt"].is_null());
     let (status, replay) = call(&app, Method::PUT, &uri, Some(input)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(replay["replayed"], true);

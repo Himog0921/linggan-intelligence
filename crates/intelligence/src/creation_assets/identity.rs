@@ -163,13 +163,21 @@ pub async fn put_identity(
     } else {
         (existing_subject, "unavailable")
     };
+    // A new person must not inherit the former person's relationship or bio confirmation.
+    let relation = if assignment == "replaced" {
+        OrgRelation::Unknown
+    } else {
+        cmd.org_relation
+    };
+    let bio = if assignment == "replaced" {
+        None
+    } else {
+        cmd.bio_discloses_relation
+    };
     // A bio check applies to the specific relationship, not just the yes/no answer.
     let carried = current
         .as_ref()
-        .filter(|i| {
-            i.org_relation == cmd.org_relation
-                && i.bio_discloses_relation == cmd.bio_discloses_relation
-        })
+        .filter(|i| i.org_relation == relation && i.bio_discloses_relation == bio)
         .and_then(|i| i.bio_checked_at.clone());
     let identity_ref = Uuid::new_v4();
     sqlx::query(
@@ -183,8 +191,8 @@ pub async fn put_identity(
     .bind(account)
     .bind(cmd.expected_revision + 1)
     .bind(cmd.request_id)
-    .bind(cmd.org_relation.as_str())
-    .bind(cmd.bio_discloses_relation)
+    .bind(relation.as_str())
+    .bind(bio)
     .bind(carried)
     .bind(cmd.has_real_person)
     .bind(&cmd.backing_person_role)

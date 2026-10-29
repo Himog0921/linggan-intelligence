@@ -73,10 +73,10 @@ async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() 
 async fn person_correction_keeps_consent_but_replacement_cannot_use_former_experiences() {
     let db = db("assets_person_change").await;
     let (account, _, _) = accounts(&db).await;
-    put_identity(
+    let initial = put_identity(
         &db,
         account,
-        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+        &identity(0, OrgRelation::Parent, Some(true), Some("妈妈")),
     )
     .await
     .unwrap();
@@ -120,18 +120,24 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
         experience_revision: 1,
     });
     let work = create(&db, doc.clone()).await;
-    let ambiguous = identity(1, OrgRelation::Parent, None, Some("爸爸"));
+    let ambiguous = identity(1, OrgRelation::Parent, Some(true), Some("爸爸"));
     assert!(matches!(
         put_identity(&db, account, &ambiguous).await,
         Err(AssetsError::Invalid("person_change_required"))
     ));
-    put_identity(
+    let corrected = put_identity(
         &db,
         account,
-        &correction(identity(1, OrgRelation::Parent, None, Some("爸爸"))),
+        &correction(identity(1, OrgRelation::Parent, Some(true), Some("爸爸"))),
     )
     .await
     .unwrap();
+    assert_eq!(corrected.identity.org_relation, OrgRelation::Parent);
+    assert_eq!(corrected.identity.bio_discloses_relation, Some(true));
+    assert_eq!(
+        corrected.identity.bio_checked_at,
+        initial.identity.bio_checked_at
+    );
     let same_subject: Uuid = sqlx::query_scalar(
         "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
     )
@@ -164,9 +170,16 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
         origin: "oral".into(),
     };
     edit_experience(&db, experience, &edit).await.unwrap();
-    let mut replacement = identity(2, OrgRelation::Parent, None, Some("爸爸"));
+    let mut replacement = identity(2, OrgRelation::Parent, Some(true), Some("爸爸"));
     replacement.person_change = Some(PersonChange::Replacement);
-    put_identity(&db, account, &replacement).await.unwrap();
+    let replaced = put_identity(&db, account, &replacement).await.unwrap();
+    assert_eq!(replaced.identity.org_relation, OrgRelation::Unknown);
+    assert_eq!(replaced.identity.bio_discloses_relation, None);
+    assert_eq!(replaced.identity.bio_checked_at, None);
+    assert_eq!(replaced.identity.bio_checked_by, None);
+    let historical: (String, Option<bool>) = sqlx::query_as("SELECT org_relation,bio_discloses_relation FROM linggan_creation_account_identity WHERE account_ref=$1 AND revision_number=1")
+        .bind(account).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(historical, ("parent".to_owned(), Some(true)));
     assert!(
         put_identity(&db, account, &replacement)
             .await
@@ -181,6 +194,37 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
     .await
     .unwrap();
     assert_ne!(new_subject, original_subject);
+    let mut bridge_doc = draft(Some(account), &["合成正文"]);
+    bridge_doc.bridge = None;
+    assert!(
+        check_draft(&db, &bridge_doc)
+            .await
+            .unwrap()
+            .findings
+            .iter()
+            .any(|f| f.rule == "R-M1" && f.level == Level::Must)
+    );
+    let bridge_work = create(&db, bridge_doc).await;
+    assert!(matches!(
+        prepare_copy(&db, bridge_work.work_id, &CopyCommand { request_id: Uuid::new_v4(), expected_revision: bridge_work.revision.id }).await,
+        Err(AssetsError::Blocked(findings)) if findings.iter().any(|f| f.rule == "R-M1")
+    ));
+    let reconfirmed = put_identity(
+        &db,
+        account,
+        &identity(3, OrgRelation::Parent, Some(true), Some("爸爸")),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reconfirmed.identity.org_relation, OrgRelation::Parent);
+    assert_eq!(reconfirmed.identity.bio_discloses_relation, Some(true));
+    let old_replay = put_identity(&db, account, &replacement).await.unwrap();
+    assert!(old_replay.replayed);
+    assert_eq!(old_replay.identity.org_relation, OrgRelation::Unknown);
+    let latest = read_identity(&db, account).await.unwrap().unwrap();
+    assert_eq!(latest.revision, 4);
+    assert_eq!(latest.org_relation, OrgRelation::Parent);
+    assert_eq!(latest.bio_discloses_relation, Some(true));
     let former = read_experience(&db, experience).await.unwrap();
     assert!(!former.current_person);
     assert!(former.title.is_none() && former.body.is_none() && former.tags.is_none());

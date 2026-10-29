@@ -50,7 +50,7 @@ beforeEach(() => {
 
 describe('账号身份', () => {
   it('requires the author to distinguish a role correction from a replacement', async () => {
-    const current = identity({ hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '妈妈' });
+    const current = identity({ hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '妈妈', bioDisclosesRelation: true });
     vi.mocked(api.listAccounts).mockResolvedValue([account(A1, '甲号', { identity: current })]);
     vi.mocked(api.putIdentity).mockResolvedValue({ identity: identity({ revision: 3, hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '爸爸' }), replayed: false });
     show();
@@ -64,15 +64,22 @@ describe('账号身份', () => {
   });
 
   it('can record replacement even when the role label stays the same', async () => {
-    const current = identity({ hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '妈妈' });
+    const current = identity({ hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '妈妈', bioDisclosesRelation: true });
     vi.mocked(api.listAccounts).mockResolvedValue([account(A1, '甲号', { identity: current })]);
     vi.mocked(api.putIdentity).mockResolvedValue({ identity: identity({ revision: 3, hasRealPerson: true, hasKnownPerson: true, backingPersonRole: '妈妈' }), replayed: false });
     show();
     fireEvent.click(await screen.findByRole('button', { name: /甲号/ }));
     const form = await screen.findByRole('form', { name: '甲号 · 账号身份' });
     fireEvent.click(within(form).getByLabelText('更换了真人'));
+    expect(within(form).getByText(/机构关系和简介状态都将设为未确认/)).toBeInTheDocument();
+    expect(within(form).getByLabelText('还没确认')).toBeChecked();
+    expect(within(form).getByLabelText('还没确认')).toBeDisabled();
+    expect(within(form).queryByLabelText('已写明')).not.toBeInTheDocument();
+    fireEvent.click(within(form).getByLabelText('同一位真人，更正信息'));
+    expect(within(form).getByLabelText('已写明')).toBeChecked();
+    fireEvent.click(within(form).getByLabelText('更换了真人'));
     fireEvent.click(within(form).getByRole('button', { name: '保存' }));
-    await waitFor(() => expect(api.putIdentity).toHaveBeenCalledWith(A1, expect.objectContaining({ personChange: 'replacement', backingPersonRole: '妈妈' })));
+    await waitFor(() => expect(api.putIdentity).toHaveBeenCalledWith(A1, expect.objectContaining({ personChange: 'replacement', backingPersonRole: '妈妈', orgRelation: 'unknown', bioDisclosesRelation: null })));
   });
 
   it('lists accounts with what is known and never fills in an answer nobody gave', async () => {
