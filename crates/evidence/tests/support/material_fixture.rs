@@ -509,3 +509,34 @@ pub async fn make_creator_context_only(
     tx.commit().await.expect("commit");
     work
 }
+
+/// Rewrites the role (`primary` / `reference`) of a fixture work's usage rows in `domain`; tests only,
+/// same `session_replication_role=replica` reason as `make_creator_context_only`.
+#[allow(dead_code)]
+pub async fn set_usage_role(
+    database: &Database,
+    domain: uuid::Uuid,
+    content_external_id: &str,
+    role: &str,
+) {
+    let mut tx = database.pool().begin().await.expect("begin");
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .expect("replica role for the fixture rewrite");
+    let changed = sqlx::query(
+        "UPDATE linggan_material_domain_usage SET role=$3 WHERE domain_ref=$2 AND content_public_ref=(SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1)",
+    )
+    .bind(content_external_id)
+    .bind(domain)
+    .bind(role)
+    .execute(&mut *tx)
+    .await
+    .expect("rewrite usage role")
+    .rows_affected();
+    assert!(
+        changed >= 1,
+        "the fixture work must already be in the domain"
+    );
+    tx.commit().await.expect("commit");
+}

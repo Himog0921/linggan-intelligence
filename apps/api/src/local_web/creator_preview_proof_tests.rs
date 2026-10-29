@@ -1415,4 +1415,29 @@ async fn creator_context_works_stay_out_of_domain_wide_lists_and_statistics() {
         );
     }
     tx.rollback().await.unwrap();
+
+    // 精选研究（文字版）把三张新卡片的详情取回来之后，领域级读取仍然一个字没变：
+    // 取回详情的作品还是作者语境，不会因此变成领域研究材料；详情通道的分类也不把它们算进领域。
+    let new_cards: Vec<Uuid> = frozen
+        .iter()
+        .filter(|(external, _)| external.starts_with("context-card-"))
+        .map(|(_, work)| *work)
+        .collect();
+    assert_eq!(new_cards.len(), 3);
+    let (status, receipt) = post_json(
+        &db,
+        "/api/collection/runs",
+        selected_study(Uuid::new_v4(), domain, run, &new_cards, "none"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{receipt}");
+    let study: Uuid = serde_json::from_value(receipt["runRef"].clone()).unwrap();
+    let asked = drive_text_only(&db, install, &credential, study, author).await;
+    assert_eq!(asked.len(), 3, "三张新卡片各取一次详情：{asked:?}");
+    assert_eq!(run_phase(&db, study).await, "ended");
+    let after_study = domain_wide_reads(&db, domain).await;
+    assert_eq!(
+        after_study, before,
+        "精选研究取回详情后，领域级的列表与统计仍不变"
+    );
 }

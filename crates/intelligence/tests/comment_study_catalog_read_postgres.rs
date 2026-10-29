@@ -482,3 +482,121 @@ async fn creator_context_comments_stay_out_of_the_domain_catalog_cloud_works_can
         .unwrap();
     assert_eq!(selected.len(), 2);
 }
+
+/// 一条「作者语境」用途的用量行（作品另有研究用途的行）：走「准入复用」这条合法的写入形态。
+async fn add_creator_context_usage(db: &Database, domain: Uuid, work: Uuid, role: &str) {
+    let package: Uuid = sqlx::query_scalar(
+        "SELECT first_package_ref FROM linggan_material_content WHERE public_ref=$1",
+    )
+    .bind(work)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let target = Uuid::new_v4();
+    let request = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,source) VALUES($1,'xhs','keyword',$2,'manual')",
+    )
+    .bind(target)
+    .bind(format!("synthetic-context-usage-{work}"))
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request(request_ref,target_ref,lane,purpose,requested_by,domain_ref,observation_role) VALUES($1,$2,'patrol','synthetic creator context usage proof','person',$3,$4)",
+    )
+    .bind(request)
+    .bind(target)
+    .bind(domain)
+    .bind(role)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_admission_decision(decision_ref,request_ref,outcome,reason_code) VALUES($1,$2,'reuse','synthetic_creator_context_usage_proof')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(request)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,request_ref,package_ref,use_kind) VALUES($1,$2,$3,$4,'admission_reuse',$5,$6,'creator_context')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(work)
+    .bind(domain)
+    .bind(role)
+    .bind(request)
+    .bind(package)
+    .execute(db.pool())
+    .await
+    .unwrap();
+}
+
+/// 一篇作品在领域里的「观察角色」只看研究用途的那一行：研究用途是「参照」、
+/// 同一作品另有一行作者语境的「主研究」时，仍然是「参照」。
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn the_observation_role_of_a_work_ignores_creator_context_usage_rows() {
+    let db = database("catalog_role_creator_context").await;
+    detail_with_author(&db, "role-work", "SYNTHETIC 角色作品", Some("creator")).await;
+    add_comment(
+        &db,
+        "role-work",
+        "role-c1",
+        "SYNTHETIC 评论",
+        Some("reader"),
+    )
+    .await;
+    let domain = query().domain;
+    fixture::set_usage_role(&db, domain, "role-work", "reference").await;
+    let work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id='role-work'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    add_creator_context_usage(&db, domain, work, "primary").await;
+    cache(&db).await;
+    let list = read_comment_catalog(&db, &query()).await.unwrap();
+    assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
+    assert_eq!(list["items"][0]["observationRole"], "reference", "{list}");
+}
+
+/// 领域里只有作者语境作品带评论时，总览的观察序列是空的：既没有新观察到的评论，也没有评论覆盖记录。
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn creator_context_comments_alone_leave_the_overview_observation_series_empty() {
+    let db = database("overview_series_creator_context").await;
+    detail_with_author(&db, "series-context", "SYNTHETIC 序列作品", Some("creator")).await;
+    for index in 0..2 {
+        add_comment(
+            &db,
+            "series-context",
+            &format!("series-c{index}"),
+            "SYNTHETIC 评论",
+            Some("reader"),
+        )
+        .await;
+    }
+    let domain = query().domain;
+    fixture::make_creator_context_only(&db, domain, "series-context").await;
+    let overview = comment_research_overview::read(&db, domain).await.unwrap();
+    let points = overview["observationSeries"]["points"].as_array().unwrap();
+    assert!(!points.is_empty(), "{overview}");
+    let total = |key: &str| -> i64 {
+        points
+            .iter()
+            .map(|point| point[key].as_i64().unwrap())
+            .sum()
+    };
+    assert_eq!(total("newObservedCommentCount"), 0, "{overview}");
+    assert_eq!(total("coveredWorkCount"), 0, "{overview}");
+    assert!(
+        points
+            .iter()
+            .all(|point| point["observationCoverage"] == "none"),
+        "{overview}"
+    );
+}
