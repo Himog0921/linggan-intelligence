@@ -59,4 +59,3 @@ it('主页浅看的「成果」页：卡片写「浅看只到发现」，不写�
   expect(screen.getAllByText('主页卡片，浅看只到发现')).toHaveLength(2);
   expect(screen.queryByText('等待采集')).not.toBeInTheDocument();
 });
-
