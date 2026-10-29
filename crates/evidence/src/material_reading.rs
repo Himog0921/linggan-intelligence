@@ -13,6 +13,7 @@ mod review;
 mod source;
 mod write;
 pub(crate) use read::current_reference_in;
+pub(crate) use read::read_current_from_currents_in;
 pub use read::{read_current_in, read_versions_in};
 pub use review::{review_reading, review_work_reading};
 pub use write::publish_in;

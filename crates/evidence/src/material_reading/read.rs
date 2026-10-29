@@ -5,7 +5,22 @@ pub async fn read_current_in(
     works: &[Uuid],
     as_of: &str,
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
-    read_rows(conn, works, as_of, None).await
+    read_rows(conn, works, as_of, None, None).await
+}
+
+/// Reuse the canonical body source from the caller's same-transaction Current.
+/// Restriction checks and selected reading version checks are still applied below.
+pub(crate) async fn read_current_from_currents_in(
+    conn: &mut PgConnection,
+    currents: &[&crate::work_resource_current::WorkResourceCurrent],
+    as_of: &str,
+) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
+    let works: Vec<_> = currents.iter().map(|current| current.public_ref).collect();
+    let bodies: BTreeMap<_, _> = currents
+        .iter()
+        .map(|current| (current.public_ref, current.body_source.material_ref))
+        .collect();
+    read_rows(conn, &works, as_of, None, Some(&bodies)).await
 }
 
 /// Exact immutable versions are resolved without substituting a newer current reading.
@@ -15,7 +30,7 @@ pub async fn read_versions_in(
     as_of: &str,
     readings: &[Uuid],
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
-    read_rows(conn, works, as_of, Some(readings)).await
+    read_rows(conn, works, as_of, Some(readings), None).await
 }
 
 /// A current pointer requires the same source eligibility as the canonical current reader.
@@ -53,6 +68,7 @@ async fn read_rows(
     works: &[Uuid],
     as_of: &str,
     readings: Option<&[Uuid]>,
+    bodies: Option<&BTreeMap<Uuid, Option<Uuid>>>,
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
     if works.is_empty() {
         return Ok(BTreeMap::new());
@@ -94,9 +110,14 @@ async fn read_rows(
         if readings.is_some() && !unrestricted {
             continue;
         }
-        if readings.is_none()
-            && unrestricted
-            && !source::current(
+        let current = if readings.is_some() || !unrestricted {
+            true
+        } else if unit.kind == "body"
+            && let Some(bodies) = bodies
+        {
+            source::body_current(bodies.get(&unit.work).copied().flatten(), &unit.source)
+        } else {
+            source::current(
                 conn,
                 unit.work,
                 &unit.kind,
@@ -106,7 +127,8 @@ async fn read_rows(
                 as_of,
             )
             .await?
-        {
+        };
+        if !current {
             continue;
         }
         if readings.is_some() {
