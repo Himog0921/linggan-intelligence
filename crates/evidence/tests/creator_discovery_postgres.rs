@@ -1,5 +1,7 @@
 #[path = "support/material_fixture.rs"]
 mod fixture;
+#[path = "creator_discovery/list_read.rs"]
+mod list_read;
 #[path = "creator_discovery/media.rs"]
 mod media;
 #[path = "support/creator_research_fixture.rs"]
@@ -251,6 +253,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
     let mut q: CreatorScope = serde_json::from_value(json!({"domain":D})).unwrap();
     let data = load(&db, &q).await.unwrap();
     assert_eq!(data.works.len(), 12);
+    list_read::assert_equivalent(&db, &q).await;
     let before_metric_fingerprint = data
         .works
         .iter()
@@ -276,7 +279,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         let w = data.works.iter().find(|w| w.work_ref == refs[i]).unwrap();
         let ids: Vec<_> = w.fragments.iter().map(|f| &f.fragment_id).take(1).collect();
         let result = json!({"relevance":{"value":relevance,"reason":"合成依据","evidenceFragmentIds":ids},"traits":{"personal_experience":{"value":if *personal{"yes"}else{"no"},"reason":"合成依据","evidenceFragmentIds":ids}},"topicHints":[]});
-        research::seed_work(db, D, w.work_ref, &w.fingerprint, result).await;
+        research::seed_work(&db, D, w.work_ref, &w.fingerprint, result).await;
     }
     for author in [1, 2] {
         let key = format!("A{author}");
@@ -316,6 +319,19 @@ async fn handbook_fixture_and_same_work_counterexamples() {
     }
     let data = load(&db, &q).await.unwrap();
     let a = aggregate(&data, &q);
+    for scope in [
+        json!({"domain":D}),
+        json!({"domain":D,"usageRole":"reference"}),
+        json!({"domain":D,"relevance":"related","traits":"personal_experience","minLikes":1000}),
+        json!({"domain":D,"sort":"high_likes"}),
+        json!({"domain":D,"sort":"viral_works","observation":"outside"}),
+        json!({"domain":D,"focus":"vertical_tendency"}),
+        json!({"domain":D,"searchMode":"work","query":"实践"}),
+        json!({"domain":D,"searchMode":"author","query":"同名"}),
+        json!({"domain":D,"page":1,"pageSize":25}),
+    ] {
+        list_read::assert_equivalent(&db, &serde_json::from_value(scope).unwrap()).await;
+    }
     assert_eq!(
         data.works.len(),
         12,
@@ -445,7 +461,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         (refs[0], r#"[{"text":"方向 A"},{"text":"方向 B"}]"#),
         (refs[1], r#"[{"text":"方向 C"}]"#),
     ] {
-        research::replace_hints(&db, D, work, hints).await;
+        research::replace_hints(&db, D, work, serde_json::from_str(hints).unwrap()).await;
     }
     let multi_hint_data = load(&db, &q).await.unwrap();
     let a1_global = aggregate(&multi_hint_data, &q)["items"]
@@ -750,6 +766,7 @@ async fn handbook_fixture_and_same_work_counterexamples() {
         "recent low-like work cannot borrow an older viral work"
     );
     let changed = load(&db, &q.base()).await.unwrap();
+    list_read::assert_equivalent(&db, &q.base()).await;
     let a1 = changed
         .works
         .iter()

@@ -159,8 +159,8 @@ async fn list(State(state): State<LocalWebState>, Query(q): Query<CreatorScope>)
             "read_model_not_connected",
         );
     };
-    match discovery::load(db, &q).await {
-        Ok(data) => Json(discovery::aggregate(&data, &q)).into_response(),
+    match discovery::load_list(db, &q).await {
+        Ok(data) => Json(data).into_response(),
         Err(e) => {
             #[cfg(test)]
             if std::env::var("LINGGAN_MODEL_SYNTHETIC_PREVIEW").as_deref()

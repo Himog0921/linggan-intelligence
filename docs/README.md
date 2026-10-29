@@ -459,6 +459,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 - [评论情报离线评测合同](audits/comment-intelligence-evaluation-contract.md)：历史归档；对应旧评测器已删除，不是 V1 质量门。
 
 - [CREATOR-DISCOVERY-001 执行规格](plans/active/creator-discovery-001.md)：活跃计划，当前对话派定的语料与创作者集成交付。
+- [创作者读取性能](plans/active/creator-read-performance-001.md)：已授权候选实施；完整统计、同作品匹配和来源资格不放宽，正式迁移/部署另验。
 - [CREATOR-DISCOVERY-001 实施验收](audits/creator-discovery-001-acceptance.md)：隔离验证、独立审查、浏览器限制及发布边界；2026-10-11追加PR #386八列/分区抽屉发布收口。
 
 ## TOPIC-MAP-V41-001
