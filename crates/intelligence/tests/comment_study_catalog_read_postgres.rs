@@ -5,12 +5,15 @@ mod fixture;
 mod research_fixture;
 
 use fixture::{proof_database, submit_package_at};
+use linggan_intelligence::ai_foundation::comment_research_overview;
 use linggan_intelligence::comment_study_catalog::{
     CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
     StudyCatalogError, WordCloudQuery, read_catalog_summary, read_comment_catalog, read_word_cloud,
-    refresh_clean_cache,
+    read_work_catalog, refresh_clean_cache,
 };
-use linggan_intelligence::comment_study_source::ADHD_DOMAIN_REF;
+use linggan_intelligence::comment_study_source::{
+    ADHD_DOMAIN_REF, eligible_sources, eligible_sources_for_works,
+};
 use linggan_storage_postgres::Database;
 use research_fixture::{comment_with_author, detail_with_author};
 use serde_json::json;
@@ -350,4 +353,132 @@ async fn domain_phrase_frequency_counts_distinct_eligible_comments_and_retains_s
         .await
         .is_err()
     );
+}
+
+/// 只在作者主页上出现过的作品（作者语境）及其评论，不进评论研究的领域级列表与统计：
+/// 评论目录、词云、作品目录、研究候选、总览的语料摘要与观察序列。
+/// 按作品引用读取（指定了作品）不受影响。
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn creator_context_comments_stay_out_of_the_domain_catalog_cloud_works_candidates_and_overview()
+ {
+    let db = database("catalog_creator_context").await;
+    // Producer packages require an explicit UTC timestamp, not PostgreSQL's display format.
+    let observed: String = sqlx::query_scalar(
+        r#"SELECT to_char((scope_001_now() - interval '2 days') AT TIME ZONE 'UTC',
+                         'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')"#,
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    for note in ["ctx-research", "ctx-context"] {
+        detail_with_author(&db, note, &format!("SYNTHETIC {note}"), Some("creator")).await;
+        for index in 0..2 {
+            comment_with_author(
+                &db,
+                note,
+                &format!("{note}-c{index}"),
+                "作业拖拉，作业拖拉；每天还是作业拖拉",
+                Some("reader"),
+                &observed,
+            )
+            .await;
+        }
+    }
+    let domain = query().domain;
+    let context_work = fixture::make_creator_context_only(&db, domain, "ctx-context").await;
+    let research_work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id='ctx-research'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    cache(&db).await;
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let only_research = BTreeSet::from([research_work.to_string()]);
+
+    // 评论目录与它的可显示数。
+    let list = read_comment_catalog(&db, &query()).await.unwrap();
+    let listed: BTreeSet<String> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["commentKey"]["workRef"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(listed, only_research, "{list}");
+    assert_eq!(list["items"].as_array().unwrap().len(), 2);
+    assert_eq!(list["summary"]["displayableCommentCount"], 2);
+
+    // 词云：只数领域研究作品的评论。
+    let cloud = read_word_cloud(
+        &db,
+        &WordCloudQuery {
+            domain,
+            days: Some(7),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(cloud["eligibleCommentCount"], 2, "{cloud}");
+    let phrase = cloud["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["text"] == "作业拖拉")
+        .unwrap();
+    assert_eq!(
+        (phrase["count"].clone(), phrase["workCount"].clone()),
+        (json!(2), json!(1))
+    );
+
+    // 作品目录。
+    let works = read_work_catalog(
+        &db,
+        &serde_json::from_value(json!({"domain": ADHD_DOMAIN_REF})).unwrap(),
+    )
+    .await
+    .unwrap();
+    let work_refs: BTreeSet<String> = works["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["workRef"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(work_refs, only_research, "{works}");
+
+    // 研究候选：领域级枚举只给研究作品的评论。
+    let sources = eligible_sources(&db, domain, &as_of, 100).await.unwrap();
+    assert_eq!(sources.len(), 2);
+    assert!(
+        sources
+            .iter()
+            .all(|source| source.content_public_ref == research_work)
+    );
+
+    // 总览：语料摘要与 56 天观察序列都不含作者语境作品的评论。
+    let overview = comment_research_overview::read(&db, domain).await.unwrap();
+    assert_eq!(
+        overview["corpusSummary"]["displayableCommentCount"], 2,
+        "{overview}"
+    );
+    let observed_comments: i64 = overview["observationSeries"]["points"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|point| point["newObservedCommentCount"].as_i64().unwrap())
+        .sum();
+    assert_eq!(observed_comments, 2, "{overview}");
+
+    // 指定了作品（按引用）时不过滤：同一批评论照常读得到、也能被选作研究来源。
+    let mut by_work = query();
+    by_work.work_ref = Some(context_work);
+    let one = read_comment_catalog(&db, &by_work).await.unwrap();
+    assert_eq!(one["items"].as_array().unwrap().len(), 2, "{one}");
+    let selected = eligible_sources_for_works(&db, domain, &as_of, &[context_work], 100)
+        .await
+        .unwrap();
+    assert_eq!(selected.len(), 2);
 }

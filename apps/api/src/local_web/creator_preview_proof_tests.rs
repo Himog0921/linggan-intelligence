@@ -9,6 +9,9 @@ use axum::{
 use tower::ServiceExt;
 use uuid::Uuid;
 
+#[path = "../../../../crates/evidence/tests/support/material_fixture.rs"]
+mod material_fixture;
+
 // ── 创作者主页浅看与精选研究（迁移 0180）的真实库证明 ─────────────────────────────────
 // 浅看只到发现为止：不自动深采、不登记长期观察目标；精选研究只认已冻结样本里的作品。
 // 工位交卷全部是合成的；不访问平台、不调用模型。
@@ -886,8 +889,8 @@ async fn creator_homepage_preview_ends_at_discovery_and_selected_study_takes_onl
         count(&db, "SELECT count(*) FROM collection_run_work w JOIN collection_run r USING(run_ref) WHERE r.source_kind='creator_preview' AND r.phase='ended'").await,
         4
     );
-    // 材料用途：浅看与精选运行带来的材料在库里被标成「创作者语境」。目前只有创作者发现与账号研究按这个标记读取；
-    // 领域样本数、语料列表等其他读取点是否也要排除，是待产品决定的口径（见 collection-single-run-001.md），这里不断言。
+    // 材料用途：浅看与精选运行带来的材料在库里被标成「创作者语境」。读取侧哪些点按这个标记过滤、哪些按引用读取不过滤，
+    // 见 collection-single-run-001.md；整个领域的列表与统计不含它们，由 creator_context_works_stay_out_of_domain_wide_lists_and_statistics 证明。
     let leaked: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_material_domain_usage usage JOIN collection_run_order relation ON relation.work_order_ref=usage.work_order_ref JOIN collection_run run ON run.run_ref=relation.run_ref WHERE run.source_kind IN ('creator_preview','creator_selected_works') AND usage.use_kind<>'creator_context'")
         .fetch_one(db.pool())
         .await
@@ -1125,4 +1128,291 @@ async fn text_only_study_of_many_works_ends_even_when_the_first_ones_already_hav
     let mut expected = known_refs.clone();
     expected.sort();
     assert_eq!(sampled, expected, "账号研究样本恰好是 26 篇领域研究作品");
+}
+
+/// 一篇只在作者主页上出现过、并且带一条评论的作品（例如某次标准版精选研究取回了它的评论）。
+async fn seed_context_work_with_comment(db: &Database, domain: Uuid, external: &str) -> Uuid {
+    seed_work(
+        db,
+        domain,
+        external,
+        "context-author",
+        "语境作者",
+        "语境评论作品",
+        1,
+    )
+    .await;
+    material_fixture::submit_package(
+        db,
+        "comments",
+        json!({"contentExternalId": external}),
+        json!({
+            "kind": "comment",
+            "sourceObject": {"platform": "xhs", "type": "content", "externalId": external},
+            "payload": {"commentId": format!("{external}-c1"), "noteId": external, "text": "合成评论：只出现在作者主页的作品下。", "authorId": "reader"}
+        }),
+    )
+    .await;
+    material_fixture::make_creator_context_only(db, domain, external).await
+}
+
+/// 一次领域级读取的快照：「整个领域的列表与统计」里各取一个有代表性的读取点。
+async fn domain_wide_reads(db: &Database, domain: Uuid) -> Value {
+    let domains = linggan_evidence::observation_domain::read_observation_domains(db)
+        .await
+        .unwrap();
+    let sample_count = domains
+        .iter()
+        .find(|item| item.domain_ref == domain)
+        .expect("domain is readable")
+        .sample_count;
+    let (status, management) = get_json(db, "/api/collection/workspace/domains").await;
+    assert_eq!(status, StatusCode::OK, "{management}");
+    let entry = management["domains"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["domainRef"] == json!(domain))
+        .expect("domain is in the management statistics")
+        .clone();
+    let (status, list) = get_json(db, &format!("/api/local/work-resources?domain={domain}")).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let mut listed: Vec<String> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["identity"]["publicRef"].as_str().unwrap().to_owned())
+        .collect();
+    listed.sort();
+    let mut tx = db.pool().begin().await.unwrap();
+    let (mut directory, total) =
+        linggan_evidence::research_dossier::creation_work_directory_in(&mut tx, domain, None, 0)
+            .await
+            .unwrap();
+    tx.rollback().await.unwrap();
+    directory.sort();
+    json!({
+        "sampleCount": sample_count,
+        "management": {
+            "sampleCount": entry["sampleCount"],
+            "commentCount": entry["commentCount"],
+            "lastObservation": entry["lastObservation"],
+            "lanes": entry["lanes"],
+        },
+        "listed": listed,
+        "creationDirectory": directory,
+        "creationTotal": total,
+    })
+}
+
+/// 浅看新发现的作品只是这位作者的语境：不进领域样本数、管理页统计、语料作品列表和创作作品目录；
+/// 按运行、按作品引用读取它们不受影响；库里原有的作品即使同时出现在这次的卡片里，也只算一次。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL proof; run by scripts/test-web-app-postgres.sh"]
+async fn creator_context_works_stay_out_of_domain_wide_lists_and_statistics() {
+    require_governance_phase();
+    let db = isolated("preview_reads").await;
+    let domain = linggan_evidence::observation_domain::create_observation_domain_with_details(
+        &db,
+        "合成领域",
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .domain_ref;
+    let author = "context-author";
+    let known = seed_work(
+        &db,
+        domain,
+        "context-known-1",
+        author,
+        "语境作者",
+        "已知作品",
+        120,
+    )
+    .await;
+    let other = seed_work(
+        &db,
+        domain,
+        "context-other-1",
+        "other-author",
+        "其他作者",
+        "其他作品",
+        5,
+    )
+    .await;
+    let (install, credential) = proof_station(&db).await;
+
+    // 浅看之前：领域里就是这两篇研究作品。
+    let before = domain_wide_reads(&db, domain).await;
+    let mut research = vec![known.to_string(), other.to_string()];
+    research.sort();
+    assert_eq!(before["sampleCount"], 2, "{before}");
+    assert_eq!(before["listed"], json!(research), "{before}");
+    assert_eq!(before["creationDirectory"], json!(research), "{before}");
+    // 另有一篇只在作者主页上出现过、带评论的作品：它的评论不能让管理页的评论数多出一条。
+    let commented = seed_context_work_with_comment(&db, domain, "context-commented-1").await;
+
+    // 浅看：作者资料 + 4 张主页卡片，其中一张是库里已有的作品。
+    let uri = format!(
+        "/api/local/creators/{}/preview",
+        linggan_contracts::creator_discovery::creator_key("xhs", author)
+    );
+    let (status, started) = post_json(
+        &db,
+        &uri,
+        json!({"domain": domain, "commandRef": Uuid::new_v4()}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    let run: Uuid = serde_json::from_value(started["runRef"].clone()).unwrap();
+    let cards: Vec<Value> = [
+        (1, "context-card-1"),
+        (2, "context-known-1"),
+        (3, "context-card-3"),
+        (4, "context-card-4"),
+    ]
+    .iter()
+    .map(|(position, external)| {
+        json!({
+            "kind": "profile_discovery_card",
+            "resultPosition": position,
+            "sourceObject": {"platform": "xhs", "type": "content", "externalId": external},
+            "payload": {
+                "title": format!("主页卡片 {position}"),
+                "url": format!("https://www.xiaohongshu.com/explore/{external}?xsec_token=proof{position}")
+            }
+        })
+    })
+    .collect();
+    for _ in 0..6 {
+        let Some(spec) = next_task(&db, install, &credential).await else {
+            break;
+        };
+        let kind = spec["capabilitiesRequested"][0]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let target = json!({"basis": "known_set", "authorExternalId": author});
+        match kind.as_str() {
+            "author_profile" => {
+                let profile = json!({"kind": "author_profile", "sourceObject": {"platform": "xhs", "type": "author", "externalId": author}, "payload": {"userId": author, "nickname": "语境作者", "fans": 17}});
+                deliver(&db, install, &spec, &kind, vec![profile], target).await;
+            }
+            "profile_discovery" => {
+                deliver(&db, install, &spec, &kind, cards.clone(), target).await;
+            }
+            other => panic!("浅看只该要作者资料和主页卡片，却被要求 {other}"),
+        }
+        linggan_evidence::collection_run_progress::advance_runs(&db)
+            .await
+            .unwrap();
+    }
+    linggan_evidence::collection_run_progress::advance_runs(&db)
+        .await
+        .unwrap();
+    assert_eq!(run_phase(&db, run).await, "ended");
+
+    // 写入侧：4 篇只在作者主页上出现过的作品只有「作者语境」用途；库里原有、又出现在卡片里的那篇同时有两种用途。
+    let kinds: Vec<(String, Vec<String>)> = sqlx::query_as(
+        "SELECT c.content_external_id, array_agg(DISTINCT u.use_kind ORDER BY u.use_kind) \
+         FROM linggan_material_domain_usage u JOIN linggan_material_content c ON c.public_ref=u.content_public_ref \
+         WHERE u.domain_ref=$1 GROUP BY c.content_external_id ORDER BY c.content_external_id",
+    )
+    .bind(domain)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let context = || vec!["creator_context".to_owned()];
+    assert_eq!(
+        kinds,
+        vec![
+            ("context-card-1".to_owned(), context()),
+            ("context-card-3".to_owned(), context()),
+            ("context-card-4".to_owned(), context()),
+            ("context-commented-1".to_owned(), context()),
+            (
+                "context-known-1".to_owned(),
+                vec!["creator_context".to_owned(), "domain_research".to_owned()]
+            ),
+            (
+                "context-other-1".to_owned(),
+                vec!["domain_research".to_owned()]
+            ),
+        ]
+    );
+
+    // 读取侧：整个领域的列表与统计一个字都没变——新卡片没有被算进去，已知作品也没有被算两次。
+    let after = domain_wide_reads(&db, domain).await;
+    assert_eq!(after, before, "浅看不得改变领域级的列表与统计");
+
+    // 按运行读取不受影响：这次浅看的 4 张卡片仍能按运行取到；新作品也能按作品引用取到、算作在本领域内。
+    let frozen: Vec<(String, Uuid)> = sqlx::query_as(
+        "SELECT c.content_external_id,c.public_ref FROM collection_run_work w JOIN linggan_material_content c ON c.public_ref=w.content_public_ref WHERE w.run_ref=$1 ORDER BY w.ordinal",
+    )
+    .bind(run)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(frozen.len(), 4);
+    let mut frozen_refs: Vec<String> = frozen.iter().map(|(_, work)| work.to_string()).collect();
+    frozen_refs.sort();
+    let (status, by_run) = get_json(
+        &db,
+        &format!("/api/local/work-resources?domain={domain}&collectionRunRef={run}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{by_run}");
+    let mut run_listed: Vec<String> = by_run["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["identity"]["publicRef"].as_str().unwrap().to_owned())
+        .collect();
+    run_listed.sort();
+    assert_eq!(
+        run_listed, frozen_refs,
+        "按运行读取仍列出这次浅看的全部卡片"
+    );
+    let new_work = frozen
+        .iter()
+        .find(|(external, _)| external == "context-card-1")
+        .unwrap()
+        .1;
+    let (status, by_ref) = get_json(
+        &db,
+        &format!("/api/local/work-resources?domain={domain}&publicRefs={new_work}"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{by_ref}");
+    assert_eq!(
+        by_ref["items"][0]["identity"]["publicRef"],
+        json!(new_work.to_string()),
+        "按作品引用仍能读到浅看新发现的作品"
+    );
+    // 带筛选条件（读取通道「发现」）的领域列表走另一段取数：只剩库里原有、同时出现在卡片里的那一篇。
+    let (status, by_lane) = get_json(
+        &db,
+        &format!("/api/local/work-resources?domain={domain}&lane=discovery"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{by_lane}");
+    let discovered: Vec<String> = by_lane["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["identity"]["publicRef"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(discovered, vec![known.to_string()], "{by_lane}");
+    let mut tx = db.pool().begin().await.unwrap();
+    for work in [new_work, commented] {
+        assert!(
+            linggan_evidence::research_dossier::creation_work_in_domain(&mut tx, work, domain)
+                .await
+                .unwrap(),
+            "按引用判断「是否在本领域」不过滤用途"
+        );
+    }
+    tx.rollback().await.unwrap();
 }
