@@ -493,6 +493,7 @@ migrate() {
   apply_migration_once "0179_retire_research_relations" "$project_root/database/migrations/0179_retire_research_relations.sql"
   apply_migration_once "0180_creator_preview_discovery_only" "$project_root/database/migrations/0180_creator_preview_discovery_only.sql"
   apply_migration_once "0181_creation_assets_s1a" "$project_root/database/migrations/0181_creation_assets_s1a.sql"
+  apply_migration_once "0182_creator_read_indexes" "$project_root/database/migrations/0182_creator_read_indexes.sql"
 }
 
 case "$command_name" in

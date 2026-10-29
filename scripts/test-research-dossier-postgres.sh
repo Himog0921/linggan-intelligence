@@ -12,7 +12,7 @@ source scripts/cargo-proof.sh
 export RUST_TEST_THREADS=1
 
 case "${1:-}" in
-  ""|--dossier-ui|--dossier-input|--comment-context|--creator-input|--creator-executor|--comment-executor|--topic-executor|--http|--target-inspection|--ai-foundation|--ai-ledger|--ai-writing|--ai-service|--ai-install|--ai-readonly|--ai-retirement|--research-methods|--ai-compatibility) ;;
+  ""|--creator-read|--dossier-ui|--dossier-input|--comment-context|--creator-input|--creator-executor|--comment-executor|--topic-executor|--http|--target-inspection|--ai-foundation|--ai-ledger|--ai-writing|--ai-service|--ai-install|--ai-readonly|--ai-retirement|--research-methods|--ai-compatibility) ;;
   *) echo "Unsupported proof selection: ${1:-}" >&2; exit 2 ;;
 esac
 
@@ -95,6 +95,12 @@ docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 docker exec "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d "$proof_database" -c "CREATE EXTENSION pg_stat_statements" >/dev/null
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
+if [[ "${1:-}" == "--creator-read" ]]; then
+  cargo_proof -p linggan-evidence --test creator_discovery_postgres --locked -- --ignored --nocapture
+  cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
+  echo "Creator read statistics, qualification, pagination and bounded dossier proof passed"
+  exit 0
+fi
 if [[ "${1:-}" == "--comment-context" ]]; then
   cargo_proof -p linggan-intelligence --test comment_study_start_postgres selected_comment_keeps_target_parent_and_dossier_separate --locked -- --ignored --exact --nocapture
   echo "Comment research frozen dossier context proof passed"
