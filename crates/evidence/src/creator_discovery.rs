@@ -9,7 +9,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
 mod list_read;
-pub use list_read::load_list;
+mod material_read;
+mod read_timing;
+use crate::work_resource_current::WorkResourceCurrent;
+pub use list_read::{load_list, load_list_timed};
+pub use read_timing::ReadTimings;
+use std::time::Instant;
 
 pub const RULE_VERSION: &str = "creator-discovery.v3-dossier";
 #[derive(Debug, thiserror::Error)]
@@ -421,7 +426,7 @@ async fn load_materials_in(
     work_refs: Option<&[Uuid]>,
     as_of: Option<&str>,
 ) -> Result<DiscoveryData, DiscoveryError> {
-    load_materials_scoped_in(tx, q, work_refs, as_of, None).await
+    load_materials_scoped_in(tx, q, work_refs, as_of, None, &mut ReadTimings::default()).await
 }
 
 // Only the private list adapter may defer unjudged dossiers. Deferred works are
@@ -431,8 +436,10 @@ async fn load_materials_scoped_in(
     q: &CreatorScope,
     work_refs: Option<&[Uuid]>,
     as_of: Option<&str>,
-    mut deferred: Option<&mut HashSet<Uuid>>,
+    mut deferred: Option<&mut HashMap<Uuid, WorkResourceCurrent>>,
+    timing: &mut ReadTimings,
 ) -> Result<DiscoveryData, DiscoveryError> {
+    let scope_started = Instant::now();
     let as_of = crate::research_dossier::cutoff_in(tx, as_of).await?;
     let clock=sqlx::query("SELECT linggan_human_moment($1::timestamptz) AS display_now,(extract(epoch FROM $1::timestamptz)*1000)::bigint AS epoch").bind(&as_of).fetch_one(&mut **tx).await?;
     let display_as_of: String = clock.get("display_now");
@@ -465,12 +472,14 @@ async fn load_materials_scoped_in(
         .iter()
         .map(|r| (r.get("content_public_ref"), r.get("roles")))
         .collect();
-    let mut currents = Vec::new();
-    for batch in refs.chunks(500) {
-        currents.extend(
-            crate::work_resource_current::read_work_resource_currents(tx, batch, &as_of).await?,
-        );
-    }
+    timing.scope += scope_started.elapsed();
+    let current_started = Instant::now();
+    // All of these works already stay in memory for exact statistics. Reading
+    // the complete scope once avoids repeating the same source joins per batch.
+    let currents =
+        crate::work_resource_current::read_work_resource_currents(tx, &refs, &as_of).await?;
+    timing.current += current_started.elapsed();
+    let qualification_started = Instant::now();
     let mut like_moments: Vec<String> = currents
         .iter()
         .filter_map(|c| c.like_source.observed_at.clone())
@@ -570,6 +579,9 @@ async fn load_materials_scoped_in(
         })
         .collect();
     let broad_refs:Vec<Uuid>=sqlx::query_scalar("SELECT DISTINCT finding.content_public_ref FROM linggan_material_discovery_finding finding JOIN linggan_runtime_capture_package package USING(package_ref) WHERE finding.content_public_ref=ANY($1) AND package.package_kind='profile_discovery' AND package.accepted_at<=$2::timestamptz AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3)").bind(&refs).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
+    timing.qualification += qualification_started.elapsed();
+    let projection_started = Instant::now();
+    let dossier_before = timing.dossier;
     let mut works = Vec::new();
     let mut work_name_sources = HashMap::new();
     let mut current_iter = currents.into_iter().filter(|c| c.platform == q.platform);
@@ -590,19 +602,20 @@ async fn load_materials_scoped_in(
                         .as_ref()
                         .is_some_and(|author| focus_rows.contains_key(author))
             })
-            .map(|current| current.public_ref)
             .collect();
-        let mut dossiers = crate::research_dossier::read_in(tx, &required, &as_of).await?;
+        let required_refs: HashSet<_> = required.iter().map(|current| current.public_ref).collect();
+        let dossier_started = Instant::now();
+        let mut dossiers =
+            crate::research_dossier::read_from_currents_in(tx, &required, &as_of).await?;
+        timing.dossier += dossier_started.elapsed();
         for c in batch {
             let dossier = dossiers.remove(&c.public_ref);
-            if dossier.is_none() {
-                if required.contains(&c.public_ref) {
+            let expand_later = dossier.is_none();
+            if expand_later {
+                if required_refs.contains(&c.public_ref) {
                     return Err(DiscoveryError::Invalid("dossier_unavailable"));
                 }
-                deferred
-                    .as_deref_mut()
-                    .expect("private list scope")
-                    .insert(c.public_ref);
+                debug_assert!(deferred.is_some(), "only list reads may defer dossiers");
             }
             let (
                 reading_title,
@@ -636,7 +649,18 @@ async fn load_materials_scoped_in(
                 .map(|f| f.text.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments,"readingTitle":reading_title,"dossierRevision":dossier_revision,"dossierMaterialRevision":dossier_material_revision,"dossierCoverage":dossier_coverage,"contract":"creator-work-input.v1"}).to_string());
+            let fingerprint = if expand_later {
+                String::new()
+            } else {
+                material_read::fingerprint(
+                    &domain,
+                    &fragments,
+                    &reading_title,
+                    &dossier_revision,
+                    &dossier_material_revision,
+                    &dossier_coverage,
+                )
+            };
             let mut result = json!({});
             let mut manual = json!({});
             let mut state = "not_analyzed".to_string();
@@ -731,8 +755,9 @@ async fn load_materials_scoped_in(
                 .map(|(_, m, _, _, _, _, _, _)| effective_value(&json!({}), m, "focus"))
                 .unwrap_or(json!({"value":"unknown"}));
             let mut evidence = Vec::new();
+            let result_text = result.to_string();
             for f in &fragments {
-                if result.to_string().contains(&f.fragment_id) {
+                if result_text.contains(&f.fragment_id) {
                     evidence.push(json!({"fragmentId":f.fragment_id,"sourceType":"work_material","workRef":c.public_ref,"sourceRef":f.source_ref,"field":f.field,"text":f.text.chars().take(200).collect::<String>(),"start":f.start,"end":f.end,"sourceVersion":f.source_version}));
                 }
             }
@@ -750,18 +775,18 @@ async fn load_materials_scoped_in(
                 .author_external_id
                 .as_ref()
                 .map(|a| creator_key(&c.platform, a)),
-            platform: c.platform,
-            author_external_id: c.author_external_id,
+            platform: c.platform.clone(),
+            author_external_id: c.author_external_id.clone(),
             display_name: current_name.map(str::to_owned).or_else(|| profile_name.map(str::to_owned)),
             title: display_title,
             reading_title,
             dossier_revision,
             dossier_material_revision,
             dossier_coverage,
-            published_date: c.published_local_date,
+            published_date: c.published_local_date.clone(),
             published_epoch: c.published_at_epoch_ms,
             likes: c.like_count,
-            likes_observed_at: c.like_source.observed_at,
+            likes_observed_at: c.like_source.observed_at.clone(),
             likes_observed_display,
             comments: c.comment_count,
             collects: c.collect_count,
@@ -781,16 +806,18 @@ async fn load_materials_scoped_in(
             author_analysis: json!({}),
             acquisition_kind: if broad_refs.contains(&c.public_ref){"profile_discovery"}else{"limited_domain_sample"}.into(),
         });
+            if expand_later {
+                deferred
+                    .as_deref_mut()
+                    .expect("private list scope")
+                    .insert(c.public_ref, c);
+            }
         }
     }
-    let author_keys: std::collections::HashSet<_> = works
-        .iter()
-        .filter_map(|w| w.author_external_id.clone())
-        .collect();
-    for author in author_keys {
+    for author in focus_rows.keys() {
         let scoped: Vec<_> = works
             .iter()
-            .filter(|w| w.author_external_id.as_deref() == Some(&author))
+            .filter(|w| w.author_external_id.as_ref() == Some(author))
             .collect();
         if let Some((
             result,
@@ -801,7 +828,7 @@ async fn load_materials_scoped_in(
             result_at,
             result_at_display,
             selected_refs,
-        )) = focus_rows.get(&author)
+        )) = focus_rows.get(author)
         {
             let selected: Vec<_> = scoped
                 .iter()
@@ -841,13 +868,16 @@ async fn load_materials_scoped_in(
             let identity = effective_value(&automatic, &projected_manual, "institution_or_brand");
             for w in works
                 .iter_mut()
-                .filter(|w| w.author_external_id.as_deref() == Some(&author))
+                .filter(|w| w.author_external_id.as_ref() == Some(author))
             {
                 w.focus = effective.clone();
                 w.author_analysis = json!({"automatic":automatic,"manual":projected_manual,"institution_or_brand":identity,"supportFragments":focus_fragments,"identitySupportFragments":identity_fragments,"state":if state == "succeeded" && !(sample_current && stored.as_deref()==Some(&fingerprint)){"stale"}else{state},"lastErrorCode":error_code,"resultAt":if sample_current && stored.as_deref()==Some(&fingerprint){result_at.clone()}else{None},"resultAtDisplay":if sample_current && stored.as_deref()==Some(&fingerprint){result_at_display.clone()}else{None}});
             }
         }
     }
+    timing.projection += projection_started
+        .elapsed()
+        .saturating_sub(timing.dossier - dossier_before);
     Ok(DiscoveryData {
         works,
         as_of,

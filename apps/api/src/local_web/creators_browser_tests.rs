@@ -148,6 +148,79 @@ pub(super) async fn isolated(prefix: &str) -> Database {
     .expect("full migrations apply to isolated schema")
 }
 
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn creator_list_timings_preserve_json_and_have_only_fixed_numeric_phases() {
+    let db = isolated("creator_timing").await;
+    let domain = linggan_evidence::observation_domain::create_observation_domain_with_details(
+        &db,
+        "计时合成领域",
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .domain_ref;
+    seed_work(
+        &db,
+        domain,
+        "timing-work",
+        "timing-author",
+        "合成作者",
+        "合成标题",
+        12,
+    )
+    .await;
+    let before = forbidden_side_effects(&db).await;
+    let response = app_with_database(db.clone())
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/local/creators?domain={domain}"))
+                .header("host", "127.0.0.1:3001")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let timing = response.headers()["server-timing"].to_str().unwrap();
+    let phases: Vec<_> = timing
+        .split(", ")
+        .map(|phase| {
+            let (name, value) = phase.split_once(";dur=").unwrap();
+            let elapsed: f64 = value.parse().unwrap();
+            assert!(elapsed.is_finite() && elapsed >= 0.0);
+            name
+        })
+        .collect();
+    assert_eq!(
+        phases,
+        [
+            "pool",
+            "scope",
+            "current",
+            "qualification",
+            "projection",
+            "dossier",
+            "aggregate",
+            "representatives",
+            "read",
+            "response",
+            "total"
+        ]
+    );
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["stats"]["works"], 1);
+    assert_eq!(body["items"][0]["representatives"][0]["title"], "合成标题");
+    assert!(
+        body.get("timing").is_none(),
+        "timing must not change the business JSON contract"
+    );
+    assert_eq!(forbidden_side_effects(&db).await, before);
+}
+
 pub(super) async fn get_json(db: &Database, uri: &str) -> (StatusCode, Value) {
     let response = app_with_database(db.clone())
         .oneshot(

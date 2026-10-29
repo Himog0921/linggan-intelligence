@@ -96,8 +96,14 @@ proof_database_created=1
 docker exec "$proof_container" psql -X -v ON_ERROR_STOP=1 -U "$proof_user" -d "$proof_database" -c "CREATE EXTENSION pg_stat_statements" >/dev/null
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 if [[ "${1:-}" == "--creator-read" ]]; then
+  dossier_input_media_root="$(mktemp -d "${TMPDIR:-/tmp}/linggan-dossier-input-media.XXXXXX")"
+  export LINGGAN_LOCAL_MEDIA_ROOT="$dossier_input_media_root"
   cargo_proof -p linggan-evidence --test creator_discovery_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
+  for suite in material_projection_postgres material_reading_postgres corpus_performance_postgres; do
+    cargo_proof -p linggan-evidence --test "$suite" --locked -- --ignored --nocapture
+  done
+  cargo_proof -p linggan-api --bin linggan-api --locked local_web::creators_browser_tests::creator_list_timings_preserve_json_and_have_only_fixed_numeric_phases -- --ignored --exact --nocapture
   echo "Creator read statistics, qualification, pagination and bounded dossier proof passed"
   exit 0
 fi

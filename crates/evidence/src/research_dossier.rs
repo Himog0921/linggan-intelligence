@@ -63,13 +63,29 @@ pub async fn read_in(
     for batch in works.chunks(100) {
         let currents =
             crate::work_resource_current::read_work_resource_currents(tx, batch, as_of).await?;
+        output
+            .extend(read_from_currents_in(tx, &currents.iter().collect::<Vec<_>>(), as_of).await?);
+    }
+    Ok(output)
+}
+
+/// Internal reuse of Current already read by a caller in this transaction/as_of.
+/// Reading adoption, source eligibility, inventory and assembly still have one owner.
+pub(crate) async fn read_from_currents_in(
+    tx: &mut Transaction<'_, Postgres>,
+    currents: &[&crate::work_resource_current::WorkResourceCurrent],
+    as_of: &str,
+) -> Result<BTreeMap<Uuid, ResearchDossier>, sqlx::Error> {
+    let mut output = BTreeMap::new();
+    for batch in currents.chunks(100) {
+        let references: Vec<_> = batch.iter().map(|work| work.public_ref).collect();
         let mut readings =
-            crate::material_reading::read_current_in(&mut **tx, batch, as_of).await?;
-        let mut inventories = inventory::read_in(tx, batch, as_of).await?;
-        for work in currents {
+            crate::material_reading::read_current_from_currents_in(&mut **tx, batch, as_of).await?;
+        let mut inventories = inventory::read_in(tx, &references, as_of).await?;
+        for work in batch {
             let reference = work.public_ref;
             let mut dossier = projection::assemble(
-                &work,
+                work,
                 readings.remove(&reference).unwrap_or_default(),
                 inventories.remove(&reference).unwrap_or_default(),
                 vec![],

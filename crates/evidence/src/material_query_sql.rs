@@ -6,44 +6,42 @@
 //! engagement Current adjudication.
 
 const WORK_RESOURCE_CURRENT_CTES: &str = r#"
-latest_detail AS (
-  SELECT DISTINCT ON (detail.content_public_ref)
-    detail.content_public_ref,detail.material_ref,detail.package_ref,detail.record_ordinal,
-    detail.observed_at,detail.created_at
-  FROM linggan_material_content_detail detail
+current_detail AS MATERIALIZED (
+  SELECT detail.* FROM linggan_material_content_detail detail
   JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz
+), current_observation AS MATERIALIZED (
+  SELECT observation.* FROM linggan_material_engagement_observation observation
+  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
+  JOIN linggan_runtime_capture_package package USING(package_ref)
+  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz
+), latest_detail AS (
+  SELECT DISTINCT ON (detail.content_public_ref)
+    detail.content_public_ref,detail.material_ref,detail.package_ref,detail.record_ordinal,
+    detail.observed_at,detail.created_at
+  FROM current_detail detail
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_title AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.title,detail.title_state,detail.material_ref,
     detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
-  FROM linggan_material_content_detail detail
-  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz AND detail.title_state='KNOWN'
+  FROM current_detail detail WHERE detail.title_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_body AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.body_text,detail.body_state,detail.material_ref,
     detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
-  FROM linggan_material_content_detail detail
-  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz AND detail.body_state='KNOWN'
+  FROM current_detail detail WHERE detail.body_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_creator AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.creator_display_name,detail.creator_display_name_state,
     detail.material_ref,detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
-  FROM linggan_material_content_detail detail
-  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz AND detail.creator_display_name_state='KNOWN'
+  FROM current_detail detail WHERE detail.creator_display_name_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_published_at AS (
@@ -54,10 +52,7 @@ latest_detail AS (
     detail.published_at_source_field,detail.published_at_source_kind,
     detail.published_at_precision,detail.published_at_reference_observed_at,
     detail.published_at_parser_version
-  FROM linggan_material_content_detail detail
-  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz AND detail.published_at IS NOT NULL
+  FROM current_detail detail WHERE detail.published_at IS NOT NULL
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_published_text AS (
@@ -67,11 +62,7 @@ latest_detail AS (
     detail.published_at_source_text_state,detail.published_at_source_field,
     detail.published_at_source_kind,detail.published_at_precision,
     detail.published_at_reference_observed_at,detail.published_at_parser_version
-  FROM linggan_material_content_detail detail
-  JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz
-    AND detail.published_at_source_text_state='KNOWN'
+  FROM current_detail detail WHERE detail.published_at_source_text_state='KNOWN'
   ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_discovery AS (
@@ -86,40 +77,28 @@ latest_detail AS (
   SELECT DISTINCT ON (observation.content_public_ref)
     observation.content_public_ref,observation.like_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
-  FROM linggan_material_engagement_observation observation
-  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND observation.like_count_state='KNOWN'
+  FROM current_observation observation WHERE observation.like_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_comment_count AS (
   SELECT DISTINCT ON (observation.content_public_ref)
     observation.content_public_ref,observation.comment_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
-  FROM linggan_material_engagement_observation observation
-  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND observation.comment_count_state='KNOWN'
+  FROM current_observation observation WHERE observation.comment_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_collect AS (
   SELECT DISTINCT ON (observation.content_public_ref)
     observation.content_public_ref,observation.collect_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
-  FROM linggan_material_engagement_observation observation
-  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND observation.collect_count_state='KNOWN'
+  FROM current_observation observation WHERE observation.collect_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_share AS (
   SELECT DISTINCT ON (observation.content_public_ref)
     observation.content_public_ref,observation.share_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
-  FROM linggan_material_engagement_observation observation
-  JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
-  JOIN linggan_runtime_capture_package package USING(package_ref)
-  WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND observation.share_count_state='KNOWN'
+  FROM current_observation observation WHERE observation.share_count_state='KNOWN'
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_lane AS (

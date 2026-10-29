@@ -159,8 +159,22 @@ async fn list(State(state): State<LocalWebState>, Query(q): Query<CreatorScope>)
             "read_model_not_connected",
         );
     };
-    match discovery::load_list(db, &q).await {
-        Ok(data) => Json(data).into_response(),
+    let started = std::time::Instant::now();
+    match discovery::load_list_timed(db, &q).await {
+        Ok((data, timing)) => {
+            let response_started = std::time::Instant::now();
+            let mut response = Json(data).into_response();
+            let phases = format!(
+                "{}, response;dur={:.2}, total;dur={:.2}",
+                timing.server_timing(),
+                response_started.elapsed().as_secs_f64() * 1000.0,
+                started.elapsed().as_secs_f64() * 1000.0,
+            );
+            if let Ok(value) = axum::http::HeaderValue::from_str(&phases) {
+                response.headers_mut().insert("server-timing", value);
+            }
+            response
+        }
         Err(e) => {
             #[cfg(test)]
             if std::env::var("LINGGAN_MODEL_SYNTHETIC_PREVIEW").as_deref()
