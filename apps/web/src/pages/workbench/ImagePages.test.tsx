@@ -77,6 +77,36 @@ describe('image editing author control',()=>{
 });
 
 describe('V3 controlled image steps',()=>{
+  it('drops old title proposals on an experience reset while preserving an unconfirmed upload', async()=>{
+    const doc=initial(), file=new File(['synthetic'],'own.png',{type:'image/png'});
+    const upload=vi.fn().mockRejectedValueOnce(new ApiError({kind:'network'})).mockResolvedValue({id:crypto.randomUUID(),workId:'work',sha256:'a'.repeat(64),byteSize:5,mimeType:'image/png',width:400,height:300});
+    const props={step:'cover' as const,document:doc,workId:'work',onChange:vi.fn(),onUploadAsset:upload};
+    const view=render(<ImagePages {...props}/>);
+    fireEvent.click(screen.getByRole('button',{name:'预览带入正文标题'}));
+    expect(screen.getByText(/将使用/)).toHaveTextContent(doc.title);
+    fireEvent.change(screen.getByLabelText('自有图片'),{target:{files:[file]}});
+    await screen.findByRole('button',{name:'核实并重试原图片上传'});
+    const epoch=crypto.randomUUID();
+    view.rerender(<ImagePages {...props} document={{...doc,title:'服务器安全标题',experienceEpoch:epoch}}/>);
+    expect(screen.queryByRole('button',{name:'确认带入标题'})).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'核实并重试原图片上传'})).toBeEnabled();
+    fireEvent.click(screen.getByRole('button',{name:'核实并重试原图片上传'}));
+    await waitFor(()=>expect(props.onChange).toHaveBeenCalled());
+    expect(upload.mock.calls[1]?.[0]).toBe(file);
+    expect(props.onChange.mock.calls[0]?.[0]).toMatchObject({title:'服务器安全标题',experienceEpoch:epoch});
+  });
+  it('keeps the pending upload when its original page no longer exists',async()=>{
+    const doc=initial(), upload=vi.fn().mockRejectedValue(new ApiError({kind:'network'}));
+    const props={step:'cover' as const,document:doc,workId:'work',onChange:vi.fn(),onUploadAsset:upload};
+    const view=render(<ImagePages {...props}/>);
+    fireEvent.change(screen.getByLabelText('自有图片'),{target:{files:[new File(['synthetic'],'own.png',{type:'image/png'})]}});
+    await screen.findByRole('button',{name:'核实并重试原图片上传'});
+    view.rerender(<ImagePages {...props} document={{...doc,pages:[],experienceEpoch:crypto.randomUUID()}}/>);
+    fireEvent.click(screen.getByRole('button',{name:'核实并重试原图片上传'}));
+    expect(screen.getByRole('alert')).toHaveTextContent('原目标页已不存在');
+    expect(screen.getByRole('button',{name:'核实并重试原图片上传'})).toBeInTheDocument();
+    expect(upload).toHaveBeenCalledTimes(1);
+  });
   it('keeps cover, inner pages, and export in separate surfaces while preserving stable page selection',async()=>{
     const doc=initial(),onStepChange=vi.fn();
     const view=render(<ImagePages step="cover" document={doc} workId="work" onChange={vi.fn()} onUploadAsset={vi.fn()} onStepChange={onStepChange}/>);

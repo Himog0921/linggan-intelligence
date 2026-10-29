@@ -78,6 +78,84 @@ fn rid() -> serde_json::Value {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn creation_assets_http_experience_uses_subject_confirmation_and_withdrawal() {
+    let db = proof("assets_http_experience").await;
+    let (account, other) = seed_accounts(&db).await;
+    let app = app_with_database(db);
+    let identity = json!({"requestId":rid(),"expectedRevision":0,"orgRelation":"parent","bioDisclosesRelation":null,
+        "hasRealPerson":true,"backingPersonRole":"妈妈","canProvideExperience":null});
+    let (status, identity_result) = call(
+        &app,
+        Method::PUT,
+        &format!("/ops/api/creation/accounts/{account}/identity"),
+        Some(identity),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let create_request = rid();
+    let create = json!({"requestId":create_request,"accountRef":account,"expectedPersonRef":identity_result["identity"]["personRef"],"title":"合成经历","body":"合成经历正文","tags":[],"origin":"oral"});
+    let (status, created) = call(
+        &app,
+        Method::POST,
+        "/ops/api/creation/experiences",
+        Some(create),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let id = created["experience"]["id"].as_str().unwrap();
+    assert_eq!(created["experience"]["state"], "awaiting_subject");
+    let (_, other_list) = call(
+        &app,
+        Method::GET,
+        &format!("/ops/api/creation/experiences?accountRef={other}"),
+        None,
+    )
+    .await;
+    assert!(other_list["items"].as_array().unwrap().is_empty());
+    let confirm = json!({"requestId":rid(),"expectedRevision":1,"subjectConfirmed":true,"draftUse":true,"sendToModel":null,"confirmationMethod":"subject_present"});
+    let (status, confirmed) = call(
+        &app,
+        Method::POST,
+        &format!("/ops/api/creation/experiences/{id}/confirm"),
+        Some(confirm),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(confirmed["experience"]["state"], "confirmed");
+    let (status, withdrawn) = call(
+        &app,
+        Method::POST,
+        &format!("/ops/api/creation/experiences/{id}/withdraw"),
+        Some(json!({"requestId":rid()})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(withdrawn["experience"]["body"].is_null());
+    let (status, listed) = call(
+        &app,
+        Method::GET,
+        &format!("/ops/api/creation/experiences?accountRef={account}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!listed.to_string().contains("合成经历正文"));
+    let (_, status) = call(
+        &app,
+        Method::GET,
+        &format!(
+            "/ops/api/creation/experience-requests/{}",
+            create_request.as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status["result"]["kind"], "create");
+    assert!(!status.to_string().contains("合成经历正文"));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
 async fn creation_assets_http_person_correction_and_replacement_require_explicit_choice() {
     let db = proof("assets_http_person").await;
     let (account, _) = seed_accounts(&db).await;
@@ -320,14 +398,14 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
         &app,
         Method::POST,
         "/ops/api/creation/checks",
-        Some(json!({"document": work["revision"]["document"]})),
+        Some(json!({"document": work["revision"]["document"], "workRef": id})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{report}");
     assert_eq!(report["bridgeState"], "unconfirmed");
     assert_eq!(report["findings"][0]["rule"], "R-M1");
     assert_eq!(report["findings"][0]["level"], "must");
-    assert_eq!(report["rulesetVersion"], "creation-checks.v2");
+    assert_eq!(report["rulesetVersion"], "creation-checks.v3");
     let mut repeated = work["revision"]["document"].clone();
     repeated["tags"] = json!(["ADHD", "ADHD", "#adhd"]);
     let (status, checked) = call(

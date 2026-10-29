@@ -1,6 +1,6 @@
 import { humanMoment } from '../../shared/formatting';
 import { ActionButton } from '../../shared/ActionButton';
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router';
 import { OpsFrame } from '../ops/OpsFrame';
@@ -8,7 +8,7 @@ import { OpsScopePicker } from '../ops/OpsScopePicker';
 import { ApiError } from '../../shared/api';
 import { RequestIdentities } from '../../shared/requestIdentity';
 import * as api from './workbenchApi';
-import { newDocument, newCanvasBlock, parseAsset, scalarRange, type AiPreview, type AiReadiness, type AiStatus, type Citation, type CanvasBlock, type CanvasGroup, type Revision, type SaveReceipt, type UseTarget, type ValidatedAnchor, type WorkDocument, type WorkEnvelope, type WritingAction, type WritingSelection } from './workbenchModel';
+import { newDocument, newCanvasBlock, parseAsset, scalarRange, type AiPreview, type AiReadiness, type AiStatus, type Citation, type CanvasBlock, type CanvasGroup, type Revision, type SaveReceipt, type UseTarget, type ValidatedAnchor, type WorkDocument, type WorkEnvelope, type WorkSummary, type WritingAction, type WritingSelection } from './workbenchModel';
 import { ManuscriptEditor } from './ManuscriptEditor';
 import { CanvasBoard } from './CanvasBoard';
 import { RevisionCompare } from './RevisionCompare';
@@ -118,6 +118,8 @@ export function WorkbenchPage() {
   const [error, setError] = useState('');
   const [creating, setCreating] = useState(false);
   const [createUnknown, setCreateUnknown] = useState(false);
+  const [assetPending, setAssetPending] = useState(false);
+  const [assetDirty, setAssetDirty] = useState(false);
   const [identities] = useState(() => new RequestIdentities());
   const createPending = useRef<{
     requestId: string;
@@ -164,11 +166,11 @@ export function WorkbenchPage() {
   }
   useEffect(() => {
     const protectCreate = (event: BeforeUnloadEvent) => {
-      if (creating || createUnknown || title.trim()) { event.preventDefault(); event.returnValue = ''; }
+      if (creating || createUnknown || assetPending || assetDirty || title.trim()) { event.preventDefault(); event.returnValue = ''; }
     };
     window.addEventListener('beforeunload', protectCreate);
     return () => window.removeEventListener('beforeunload', protectCreate);
-  }, [creating, createUnknown, title]);
+  }, [creating, createUnknown, assetPending, assetDirty, title]);
   async function createWork() {
     if (!domain || creating) return;
     setCreating(true);
@@ -210,15 +212,15 @@ export function WorkbenchPage() {
   }
   return <OpsFrame section="creation" domain={domain} immersive={immersive && !!work}
     scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
-      disabled={creating || createUnknown} onChange={next => { if (createPending.current) return; setError(''); setParams({ domain: next, section }); }} />}
+      disabled={creating || createUnknown || assetPending} onChange={next => { if (createPending.current || assetPending || (assetDirty && !window.confirm('这段经历有未保存内容，切换会丢弃本页编辑。确定切换吗？'))) return; setAssetDirty(false); setError(''); setParams({ domain: next, section }); }} />}
     tabs={<>{(['today', 'works', 'assets'] as const).map(value => <button type="button" key={value}
-      aria-current={!work && section === value ? 'page' : undefined} onClick={() => setParams({ ...(domain ? { domain } : {}), section: value })}>
+      disabled={assetPending} aria-current={!work && section === value ? 'page' : undefined} onClick={() => { if (!work && section === value) return; if (assetDirty && !window.confirm('这段经历有未保存内容，切换会丢弃本页编辑。确定切换吗？')) return; setAssetDirty(false); setParams({ ...(domain ? { domain } : {}), section: value }); }}>
       {SECTION_TITLE[value]}</button>)}{work ? <span aria-current="page">作品编辑</span> : null}</>}
     meta={<span>个人创作空间</span>}>
 <main className={`${styles.workspace} ${immersive && work ? styles.immersiveWorkspace : ''}`} aria-label="运营创作">
     {domainQuery.error ? <p className={styles.error} role="alert">{api.errorText(domainQuery.error)}</p> : null}
     {domainQuery.isPending ? <div className={styles.empty} role="status">正在读取创作领域…</div> : !domain || !validDomain ? <div className={styles.entryEmpty}><span className={styles.entryIndex} aria-hidden="true">01 / CREATE</span><h1>{domain ? '当前领域不可用于创作' : '从一个领域开始创作'}</h1><p>{domain ? '请在上方面包屑中切换可用领域，再查看选题和稿件。' : '在上方面包屑选择创作领域，随后可以建立选题，或继续已保存的稿件。'}</p>{domainQuery.isError ? <ActionButton onClick={() => void domainQuery.refetch()}>重新读取领域</ActionButton> : <p>今日选题 · 方案与材料 / 我的创作 · 正文与图页</p>}</div> : work ? <>{current.isPending ? <p>恢复服务器草稿中…</p> : current.error ? <p role="alert" className={styles.error}>{api.errorText(current.error)} <ActionButton variant="outline" onClick={() => void current.refetch()}>重新读取</ActionButton>
-</p> : current.data && current.data.domainRef === domain ? null : <p className={styles.error}>作品不属于当前领域。</p>}</> : section === 'assets' ? <AssetsLibrary key={domain} domainRef={domain} /> : <section className={styles.library}>
+</p> : current.data && current.data.domainRef === domain ? null : <p className={styles.error}>作品不属于当前领域。</p>}</> : section === 'assets' ? <AssetsLibrary key={domain} domainRef={domain} onPendingChange={setAssetPending} onDirtyChange={setAssetDirty} /> : <section className={styles.library}>
 <div className={styles.libraryTools}>
 <h1 className={styles.srOnly}>{section === 'today' ? '今日选题' : '我的创作'}</h1>
 <small>{works.isError ? '作品读取失败' : works.data ? `${works.data.length} 篇已保存作品` : '读取中'}</small>
@@ -230,7 +232,7 @@ export function WorkbenchPage() {
 <input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={creating || createUnknown} onChange={e => setTitle(e.target.value)} />
 <ActionButton type="submit" variant="primary" busy={creating} disabled={!title.trim() || creating}>{creating ? '建立中…' : createUnknown ? '核实原请求并重试' : '建立选题'}</ActionButton>
 </form>} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
-<WorkEditor immersive={immersive} onImmersive={setImmersive} initial={w} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
+<WorkEditor immersive={immersive} onImmersive={setImmersive} initial={w} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
           domain: w.domainRef,
           work: w.workId,
           view
@@ -249,6 +251,9 @@ interface Pending {
 }
 function WorkEditor({
   initial,
+  drafts,
+  draftsStatus,
+  onOpenDraft,
   active,
   view,
   onView,
@@ -256,6 +261,9 @@ function WorkEditor({
   onImmersive
 }: {
   initial: WorkEnvelope;
+  drafts: WorkSummary[];
+  draftsStatus: 'loading' | 'error' | 'ready';
+  onOpenDraft: (id: string) => void;
   active: boolean;
   view: View;
   onView: (v: View) => void;
@@ -277,6 +285,10 @@ function WorkEditor({
   const [aiUnknown, setAiUnknown] = useState(false);
   const [conflictVisible, setConflictVisible] = useState(true);
   const [feedback, setFeedback] = useState('');
+  const [resetRequired, setResetRequired] = useState(initial.experienceResetRequired === true);
+  const [recheckStatus, setRecheckStatus] = useState<'checking' | 'ready' | 'failed'>('checking');
+  const [recheckAttempt, setRecheckAttempt] = useState(0);
+  const [resetPrompt, setResetPrompt] = useState(false);
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving' | 'failed' | 'unknown' | 'conflict'>('saved');
   const [conflict, setConflict] = useState<SaveReceipt | null>(null);
   const [history, setHistory] = useState<Revision[] | null>(null);
@@ -301,6 +313,7 @@ function WorkEditor({
   const [compareVisible,setCompareVisible]=useState(false);
   const [compareBase, setCompareBase] = useState<WorkDocument | null>(null);
   const [sourcePanel, setSourcePanel] = useState(false);
+  const [copyContainer, setCopyContainer] = useState<HTMLDivElement | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiAction, setAiAction] = useState<WritingAction>('draft');
   const [instruction, setInstruction] = useState('');
@@ -320,6 +333,7 @@ function WorkEditor({
   const server = useRef(revision);
   const pending = useRef<Pending | null>(null);
   const lock = useRef(false);
+  const deferredRecheck = useRef(false);
   const composition = useRef(false);
   const undo = useRef<WorkDocument[]>([]);
   const redo = useRef<WorkDocument[]>([]);
@@ -339,6 +353,7 @@ function WorkEditor({
     gcTime: 0
   });
   const dirty = JSON.stringify(document) !== JSON.stringify(revision.document) || tagsDraft !== document.tags.join(' ');
+  const hasWithdrawnParagraph = document.experienceSlots.some(slot => document.paragraphs.some(p => p.id === slot.paragraphId && p.text === '[本人已撤回这段经历]'));
   function edit(next: WorkDocument, record = true) {
     if (pending.current && pending.current.action !== 'save') return;
     if (record) {
@@ -424,6 +439,7 @@ function WorkEditor({
         setHasPending(false);
         identities.settle(p.action);
       } else if (e instanceof ApiError && e.answered) {
+        if (e.failure.kind === 'http' && e.failure.code === 'creation_experience_reset_required') setResetRequired(true);
         pending.current = null;
         setHasPending(false);
         identities.settle(p.action);
@@ -435,9 +451,11 @@ function WorkEditor({
       lock.current = false;
       setBusy(false);
       setEditingLocked(!!pending.current && pending.current.action !== 'save');
+      if (deferredRecheck.current) { deferredRecheck.current = false; setRecheckAttempt(value => value + 1); }
     }
   }
   async function saveCurrent(): Promise<Revision> {
+    if (resetRequired || recheckStatus !== 'ready') throw new api.WorkbenchActionError('请先核验并处理已撤回的经历');
     if (composition.current) throw new api.WorkbenchActionError('请先完成中文输入');
     if (lock.current) throw new api.WorkbenchActionError('保存仍在进行，请稍后重试');
     if (pending.current) {
@@ -482,16 +500,59 @@ function WorkEditor({
     for (let waited = 0; lock.current && waited < 5000; waited += 50) await new Promise<void>(resolve => window.setTimeout(resolve, 50));
     return saveCurrent();
   }
+  function clearStaleEditor() {
+    undo.current = []; redo.current = []; setUndoState({ canUndo: false, canRedo: false });
+    comparisonDirty.current = false;
+    setRecoveries([]); setHistory(null); setSelection(null); setPlacement(null);
+    setCompareBase(null); setComparisonDrafts(null); setAiDrafts(null); setAi(null); setPreview(null);
+  }
+  async function resumeAfterWithdrawal() {
+    const expectedRevision = server.current.id;
+    const fingerprint = JSON.stringify({ expectedRevision });
+    const requestId = identities.keyFor('reset-withdrawn', fingerprint);
+    try {
+      await run({ requestId, action: 'reset-withdrawn', fingerprint, snapshot: null,
+        run: () => api.resetWithdrawn(initial.workId, { requestId, expectedRevision }),
+        afterReceipt: () => { clearStaleEditor(); setResetRequired(false); setResetPrompt(false); },
+      });
+    } catch { setResetPrompt(false); /* The error and retry state are shown by run. */ }
+  }
   const autoSave = useEffectEvent(() => {
     void saveCurrent().catch(() => undefined);
   });
   useEffect(() => {
-    if (!dirty || composing || saveState === 'unknown' || saveState === 'conflict' || saveState === 'failed') return;
+    if (resetRequired || recheckStatus !== 'ready' || !dirty || composing || saveState === 'unknown' || saveState === 'conflict' || saveState === 'failed') return;
     const timer = window.setTimeout(() => {
       if (!lock.current && !pending.current) autoSave();
     }, 900);
     return () => window.clearTimeout(timer);
-  }, [document, tagsDraft, dirty, composing, saveState]);
+  }, [document, tagsDraft, dirty, composing, saveState, resetRequired, recheckStatus]);
+  // A withdrawal in another tab invalidates the visible editor without silently discarding edits.
+  useLayoutEffect(() => {
+    if (!active) return;
+    let disposed = false;
+    let generation = 0;
+    async function recheck() {
+      setRecheckStatus('checking');
+      const current = ++generation;
+      if (lock.current) { deferredRecheck.current = true; return; }
+      try {
+        const latest = await api.readWork(initial.workId);
+        if (disposed || current !== generation) return;
+        if (latest.experienceResetRequired || latest.revision.document.experienceEpoch !== server.current.document.experienceEpoch) {
+          setResetRequired(true);
+          setHistory(null); setPlacement(null); setCompareVisible(false); setAiComparison(false);
+          setAiOpen(false); setSelection(null);
+        }
+        setRecheckStatus('ready');
+      } catch { if (!disposed && current === generation) setRecheckStatus('failed'); }
+    }
+    const channel = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('linggan-creation-experience-events');
+    if (channel) channel.onmessage = event => { if (event.data === 'withdrawn') void recheck(); };
+    window.addEventListener('focus', recheck);
+    void recheck();
+    return () => { disposed = true; channel?.close(); window.removeEventListener('focus', recheck); };
+  }, [active, initial.workId, recheckAttempt]);
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (JSON.stringify(live.current) !== JSON.stringify(server.current.document) || tagsLive.current !== live.current.tags.join(' ') || pending.current || pendingConfirmation || comparisonDirty.current) {
@@ -855,20 +916,22 @@ function WorkEditor({
 <p>未确认编辑仅保留在本页内存；关闭页面前请完成保存。</p>
 </details>
 <ActionButton variant="outline" busy={busy&&saveState==='saving'} disabled={busy || composing || !!conflict} onClick={() => void saveCurrent().catch(() => undefined)}>{hasPending && saveState === 'unknown' ? '核实并重试' : saveState === 'saving' ? '保存中…' : '保存'}</ActionButton>
-<ActionButton variant="quiet" onClick={() => void showHistory()}>历史</ActionButton><ActionButton variant="quiet" onClick={() => onImmersive(!immersive)}>{immersive ? '退出沉浸' : '收起导航'}</ActionButton>{view === 'materials' || view === 'canvas' ? <ActionButton variant="primary" onClick={() => onView('body')}>进入正文 →</ActionButton> : null}
+<ActionButton variant="quiet" disabled={resetRequired || recheckStatus !== 'ready'} onClick={() => void showHistory()}>历史</ActionButton><ActionButton variant="quiet" onClick={() => onImmersive(!immersive)}>{immersive ? '退出沉浸' : '收起导航'}</ActionButton>{view === 'materials' || view === 'canvas' ? <ActionButton variant="primary" onClick={() => onView('body')}>进入正文 →</ActionButton> : null}
 </div>
 </div>
     {(feedback && ['failed', 'unknown', 'conflict'].includes(saveState)) || conflict ? <div className={styles.error} role="alert">
-<p>{feedback}</p>{conflict ? <ActionButton variant="outline" onClick={() => setConflictVisible(true)}>比较版本并解决</ActionButton> : null}{hasPending ? <ActionButton variant="outline" disabled={busy} onClick={() => void run(pending.current!).catch(() => undefined)}>沿用原请求重试</ActionButton> : null}</div> : null}<span role="status" className={styles.srOnly}>{feedback}</span>
+<p>{feedback}</p>{conflict ? <ActionButton variant="outline" onClick={() => setConflictVisible(true)}>比较版本并解决</ActionButton> : null}{resetRequired ? <ActionButton variant="outline" disabled={busy || recheckStatus !== 'ready'} onClick={() => setResetPrompt(true)}>撤回后重新开始编辑</ActionButton> : null}{hasPending ? <ActionButton variant="outline" disabled={busy} onClick={() => void run(pending.current!).catch(() => undefined)}>沿用原请求重试</ActionButton> : null}</div> : null}<span role="status" className={styles.srOnly}>{feedback}</span>
+    {(hasWithdrawnParagraph || resetRequired) && saveState !== 'failed' ? <div className={styles.warning}><p>稿件历史中有已撤回的经历，请先重新开始编辑。</p><ActionButton variant="outline" disabled={busy || recheckStatus !== 'ready'} onClick={() => setResetPrompt(true)}>撤回后重新开始编辑</ActionButton></div> : null}
     {initial.sourceStatuses.some(s => s.state !== 'readable') || document.excerpts.some(e => e.selectedText === null) || document.uses.some(u => u.state === 'needs_review') ? <details className={styles.warning}>
 <summary>部分来源需要核验</summary>{initial.sourceStatuses.filter(s => s.state !== 'readable').map(s => <p key={s.excerptId}>{s.state === 'restricted' ? '来源已受限' : s.state === 'changed' ? '来源已变化' : '来源暂不可用'}</p>)}<details><summary>来源诊断详情</summary><pre>{JSON.stringify(initial.sourceStatuses, null, 2)}</pre></details></details> : null}
-    <fieldset disabled={editingLocked} className={styles.editingSurface}>{view === 'topic' ? <TopicDetail accountsState={accounts.status} onRetryAccounts={()=>void accounts.refetch()} document={document} accounts={accounts.data ?? []} accountError={accounts.error ? api.errorText(accounts.error) : undefined} onChange={edit} onCompose={compose} onRead={() => onView('materials')} onWrite={() => onView('body')} /> : null}
+    {recheckStatus === 'checking' ? <p role="status">正在核验稿件来源…</p> : recheckStatus === 'failed' ? <p role="alert">暂时无法核验稿件来源。未保存的编辑仍在本页。<ActionButton variant="quiet" onClick={() => setRecheckAttempt(value => value + 1)}>重新核验</ActionButton></p> : null}
+    <fieldset hidden={resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>{view === 'topic' ? <TopicDetail accountsState={accounts.status} onRetryAccounts={()=>void accounts.refetch()} document={document} accounts={accounts.data ?? []} accountError={accounts.error ? api.errorText(accounts.error) : undefined} onChange={edit} onCompose={compose} onRead={() => onView('materials')} onWrite={() => onView('body')} /> : null}
     <div hidden={view !== 'materials'}>
 <MaterialBrowser key={`${initial.domainRef}:${focusSequence}`} contextKey={initial.workId} active={active && view === 'materials'} domain={initial.domainRef} document={document} onChange={next=>edit({...live.current,materials:next.materials,materialPreparation:next.materialPreparation})} onCollect={collect} focusCitation={sourceFocus} onCanvas={() => onView('canvas')} />
 </div>
     {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);setFocusSequence(n=>n+1);onView('materials');}} onMaterials={()=>onView('materials')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={card=>{setPlacement(card);setBodyTarget(document.uses.flatMap(use=>use.canvasId===card.id&&use.target.kind==='paragraph'?[use.target.paragraphId]:[])[0]??'new');setWantBody(true);setWantPage(false);setPageTarget(document.pages.find(page=>page.kind!=='cover')?.id??'');}} /> : null}
     {view === 'body' ? <div className={styles.bodyWorkspace}>
-{compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}<div className={styles.writeControls}><div className={styles.steps}><button aria-pressed={!compareVisible} onClick={() => setCompareVisible(false)}>沉浸编辑</button><button aria-pressed={compareVisible} onClick={() => {setCompareVisible(true);if(!compareBase){setCompareBase(live.current);setComparisonDrafts(null);}}}>改稿对照</button></div>
+{compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}<div className={styles.writeControls}><div className={styles.steps}><button aria-pressed={!compareVisible} onClick={() => setCompareVisible(false)}>沉浸编辑</button><button disabled={document.experienceGaps.length > 0} title={document.experienceGaps.length ? '请先填好或删除经历位' : undefined} aria-pressed={compareVisible} onClick={() => {setCompareVisible(true);if(!compareBase){setCompareBase(live.current);setComparisonDrafts(null);}}}>改稿对照</button></div>
 <div className={styles.row}>
 <ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={undoHistory}>撤销</ActionButton>
 <ActionButton variant="quiet" disabled={!undoState.canRedo || busy} onClick={redoHistory}>重做</ActionButton>
@@ -881,7 +944,7 @@ function WorkEditor({
 </div>
 </div>
 {aiComparison&&ai?.suggestion&&ai.staleBase?<div className={styles.warning}><p>本次采用已改变原底稿，其余改稿仍保留在右侧，不能继续直接采用。</p><ActionButton variant="outline" onClick={()=>void copyUnadoptedAi()}>复制未采用改稿</ActionButton>{aiCopyFallback?<label>未采用改稿，可手动复制<textarea readOnly value={unadoptedAiText()}/></label>:null}</div>:null}
-{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className={`${styles.writingLayout} ${styles.withChecks} ${sourcePanel ? styles.sourcesVisible : ''}`}><ManuscriptEditor document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} />{sourcePanel ? <aside className={styles.writingSources}><h3>这篇的材料与出处</h3>{document.excerpts.map(excerpt => <section key={excerpt.id}><blockquote>{excerpt.selectedText ?? '来源已受限或不可用'}</blockquote><ActionButton variant="quiet" onClick={() => {setSourceFocus(excerpt.citation);setFocusSequence(n=>n+1);onView('materials');}}>回到原文 ↗</ActionButton></section>)}</aside> : null}<CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} /></div>}<div className={styles.studioFooter}><ActionButton variant="quiet" onClick={() => setSourcePanel(!sourcePanel)}>{sourcePanel ? '收起来源' : `材料与出处 · ${document.excerpts.length}`}</ActionButton><ActionButton variant="primary" onClick={() => onView('cover')}>制作封面 →</ActionButton></div>
+{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase && document.experienceGaps.length === 0 ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className={`${styles.writingLayout} ${styles.withChecks} ${sourcePanel ? styles.sourcesVisible : ''}`}><aside className={styles.draftRail} aria-label="稿件列表"><div className={styles.draftRailHeading}><strong>我的稿件</strong><small>{draftsStatus === 'loading' ? '正在读取稿件…' : draftsStatus === 'error' ? '稿件读取失败' : `${drafts.length} 篇已保存`}</small></div>{drafts.length ? <ul>{drafts.map(item => <li key={item.workId}><button type="button" aria-current={item.workId === initial.workId ? 'page' : undefined} onClick={() => onOpenDraft(item.workId)}><b>{item.title || '未命名稿件'}</b><small>更新于 {humanMoment(item.savedAt)}</small></button></li>)}</ul> : draftsStatus === 'ready' ? <p>还没有其他已保存稿件。</p> : null}</aside><ManuscriptEditor workId={initial.workId} onCover={() => onView('cover')} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} />{sourcePanel ? <aside className={styles.writingSources}><h3>这篇的材料与出处</h3>{document.excerpts.map(excerpt => <section key={excerpt.id}><blockquote>{excerpt.selectedText ?? '来源已受限或不可用'}</blockquote><ActionButton variant="quiet" onClick={() => {setSourceFocus(excerpt.citation);setFocusSequence(n=>n+1);onView('materials');}}>回到原文 ↗</ActionButton></section>)}</aside> : null}<CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} copyContainer={copyContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div>}<div className={styles.studioFooter}><ActionButton variant="quiet" onClick={() => setSourcePanel(!sourcePanel)}>{sourcePanel ? '收起来源' : `材料与出处 · ${document.excerpts.length}`}</ActionButton><div ref={setCopyContainer} className={styles.footerCopyMount} /><ActionButton variant="primary" onClick={() => onView('cover')}>制作封面 →</ActionButton></div>
 </div> : null}
     <div hidden={!['cover','inner','export'].includes(view)}>
 <ImagePages step={view === 'inner' ? 'inner' : view === 'export' ? 'export' : 'cover'} onStepChange={onView} onOpenSource={excerptId => { const excerpt=document.excerpts.find(item=>item.id===excerptId);if(excerpt){setSourceFocus(excerpt.citation);setFocusSequence(n=>n+1);onView('materials');} }} document={document} workId={initial.workId} currentRevisionId={dirty ? undefined : revision.id} onChange={edit} onUploadAsset={async file => {
@@ -910,7 +973,27 @@ function WorkEditor({
         }} />
 </div>
 </fieldset>
-    {conflict && conflictVisible ? <Modal title="服务器已有新版本" onClose={() => setConflictVisible(false)}>
+    {recheckStatus === 'ready' && conflict && conflictVisible ? <Modal title="服务器已有新版本" onClose={() => { if (!resetRequired && conflict.revision.document.experienceEpoch === document.experienceEpoch) setConflictVisible(false); }}>
+{resetRequired ? <>
+<p>服务器稿件已经变化。先丢弃本页未保存的编辑并读取服务器版本，再继续处理撤回。</p>
+<ActionButton variant="primary" onClick={() => void (async () => {
+          clearStaleEditor();
+          applyReceipt(conflict, null);
+          try {
+            const latest = await api.readWork(initial.workId);
+            const ready = latest.revision.id === conflict.revision.id && !latest.experienceResetRequired;
+            setResetRequired(!ready);
+            setFeedback(ready ? '已使用服务器版本，可以继续编辑' : '已读取服务器版本，请继续处理撤回');
+          } catch { setFeedback('无法核验服务器版本，请继续处理撤回。'); }
+        })()}>丢弃本页编辑，使用服务器版本</ActionButton>
+</> : conflict.revision.document.experienceEpoch !== document.experienceEpoch ? <>
+<p>经历已撤回，服务器已重新整理稿件。为避免保留撤回前的文字，请丢弃本页未保存的编辑并使用服务器版本。</p>
+<ActionButton variant="primary" onClick={() => {
+          clearStaleEditor();
+          applyReceipt(conflict, null);
+          setFeedback('已使用服务器版本，可以继续编辑');
+        }}>丢弃本页编辑，使用服务器版本</ActionButton>
+</> : <>
 <div className={styles.compare}>
 <section>
 <h3>本页未确认编辑</h3>
@@ -937,8 +1020,14 @@ function WorkEditor({
           setFeedback('已保留本页编辑，请保存为新版本');
         }}>保留本页编辑，另存新版本</ActionButton>
 </div>
+</>}
 </Modal> : null}
-    {history ? <Modal title="历史与恢复" onClose={() => setHistory(null)}>
+    {resetPrompt ? <Modal title="撤回后重新开始编辑" onClose={() => setResetPrompt(false)}>
+<p>将以服务器已保存的稿件重新开始，移除已撤回的经历段落。本页尚未保存的编辑和本页恢复副本会被丢弃。</p>
+<div className={styles.row}><ActionButton variant="outline" disabled={busy} onClick={() => setResetPrompt(false)}>取消</ActionButton>
+<ActionButton variant="primary" busy={busy} disabled={busy || recheckStatus !== 'ready'} onClick={() => void resumeAfterWithdrawal()}>丢弃本页编辑并继续</ActionButton></div>
+</Modal> : null}
+    {recheckStatus === 'ready' && !resetRequired && history ? <Modal title="历史与恢复" onClose={() => setHistory(null)}>
 <div className={styles.history}>{history.map(r => <section key={r.id}>
 <div className={styles.row}>
 <strong>版本 {r.number} · {r.document.title || '未命名'}</strong>
@@ -961,7 +1050,7 @@ function WorkEditor({
           }}>恢复到编辑区</ActionButton>
 </section>)}</div>
 </Modal> : null}
-    {placement ? <Modal title="放入作品" onClose={() => setPlacement(null)}>
+    {recheckStatus === 'ready' && !resetRequired && placement ? <Modal title="放入作品" onClose={() => setPlacement(null)}>
 <p className={styles.ownQuote}>{placement.expression || document.excerpts.find(e => e.id === placement.excerptId)?.selectedText}</p>
 <div className={styles.placement}>
 <label>
@@ -975,7 +1064,7 @@ function WorkEditor({
 </div><div className={styles.row}><ActionButton disabled={busy||document.pages.length>=30} onClick={()=>createPlacementPage('opinion')}>新建内页</ActionButton><ActionButton variant="quiet" disabled={busy||document.pages.length>=30} onClick={()=>createPlacementPage('steps')}>新建步骤页</ActionButton></div><p>原文摘录与我的表达保持独立；放入后手改文字会保留。</p>
 <ActionButton variant="primary" busy={busy} disabled={busy || !wantBody && (!wantPage || !pageTarget)} onClick={() => void place()}>确认放入</ActionButton>
 </Modal> : null}
-    {aiOpen ? <Modal title={aiAction === 'draft' ? '按所选材料起草' : aiAction === 'rewrite_selection' ? '改写选段' : '图组文案建议'} onClose={() => setAiOpen(false)}>
+    {aiOpen && !resetRequired && recheckStatus === 'ready' ? <Modal title={aiAction === 'draft' ? '按所选材料起草' : aiAction === 'rewrite_selection' ? '改写选段' : '图组文案建议'} onClose={() => setAiOpen(false)}>
 <div className={styles.aiPanel}>
 <p>{!readiness ? readinessFailed ? '模型配置读取失败，请关闭后重新打开。' : '正在读取模型配置' : <>{!readiness.configured ? '尚未配置创作模型' : readiness.transportCallable === true ? '模型可连接' : readiness.transportCallable === false ? '模型连接测试尚未通过' : '连接情况尚未确认'} · {readiness.writingQualified === true ? '创作输出格式已验证' : readiness.writingQualified === false ? '创作输出格式未通过验证' : '创作输出格式尚未验证'}</>}</p>{selection && aiAction === 'rewrite_selection' ? <p className={styles.ownQuote}>{selection.text}</p> : null}<details>
 <summary>本次使用的材料（{aiMaterials.length}）</summary>{document.excerpts.map(e => <label key={e.id}>

@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router';
+import { MemoryRouter, useNavigate } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../shared/api';
 import { WorkbenchPage } from './WorkbenchPage';
@@ -88,6 +88,134 @@ beforeEach(() => {
   vi.mocked(api.conflictReceipt).mockReturnValue(null);
 });
 describe('React workbench author control', () => {
+  it('offers withdrawal recovery even when the current draft no longer has an experience slot', async () => {
+    vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
+    show();
+    expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+  });
+  it('hides an open editor on return after another page withdraws an experience', async () => {
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.change(body, { target: { value: '尚未保存的合成文字' } });
+    vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
+    fireEvent.focus(window);
+    expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+    expect(api.resetWithdrawn).not.toHaveBeenCalled();
+  });
+  it('keeps the editor covered when rechecking fails and allows retry', async () => {
+    show();
+    await screen.findByLabelText('正文第 1 段');
+    vi.mocked(api.readWork).mockRejectedValueOnce(new Error('offline'));
+    fireEvent.focus(window);
+    expect(await screen.findByText(/暂时无法核验稿件来源/)).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '重新核验' }));
+    expect(await screen.findByLabelText('正文第 1 段')).toBeVisible();
+  });
+  it('covers an old editor even when another page already completed the withdrawal reset', async () => {
+    show();
+    await screen.findByLabelText('正文第 1 段');
+    const latest = envelope();
+    latest.revision.document.experienceEpoch = '00000000-0000-4000-8000-000000000099';
+    vi.mocked(api.readWork).mockResolvedValue(latest);
+    fireEvent.focus(window);
+    expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+  });
+  it('waits for a pending recheck before allowing a withdrawal reset', async () => {
+    let finish!: (value: WorkEnvelope) => void;
+    const response = new Promise<WorkEnvelope>(resolve => { finish = resolve; });
+    const withdrawn = { ...envelope(), experienceResetRequired: true };
+    vi.mocked(api.readWork).mockResolvedValueOnce(withdrawn).mockImplementationOnce(() => response);
+    show();
+    const button = await screen.findByRole('button', { name: '撤回后重新开始编辑' });
+    expect(button).toBeDisabled();
+    await act(async () => finish(withdrawn));
+    await waitFor(() => expect(button).toBeEnabled());
+  });
+  it('rechecks a cached draft when switching away and back after a withdrawal', async () => {
+    const other = '00000000-0000-4000-8000-000000000098';
+    let withdrawn = false;
+    vi.mocked(api.readWork).mockImplementation(async id => id === other
+      ? { ...envelope(), workId: other }
+      : { ...envelope(), experienceResetRequired: withdrawn });
+    function Navigation() {
+      const navigate = useNavigate();
+      return <><button onClick={() => navigate(`/ops/creation?domain=${domain}&work=${other}&view=body`)}>打开合成稿 B</button>
+        <button onClick={() => navigate(`/ops/creation?domain=${domain}&work=${work}&view=body`)}>返回合成稿 A</button></>;
+    }
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><Navigation /><WorkbenchPage /></MemoryRouter></QueryClientProvider>);
+    await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByRole('button', { name: '打开合成稿 B' }));
+    await waitFor(() => expect(api.readWork).toHaveBeenCalledWith(other, expect.anything()));
+    withdrawn = true;
+    fireEvent.click(screen.getByRole('button', { name: '返回合成稿 A' }));
+    expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+  });
+  it('closes the selection dialog when rechecking finds a withdrawal', async () => {
+    show();
+    const body = await screen.findByLabelText('正文第 1 段') as HTMLTextAreaElement;
+    body.setSelectionRange(0, 2);
+    fireEvent.select(body);
+    fireEvent.click(screen.getByRole('button', { name: '改写选段' }));
+    expect(await screen.findByRole('dialog', { name: '改写选段' })).toBeInTheDocument();
+    vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
+    fireEvent.focus(window);
+    await screen.findByRole('button', { name: '撤回后重新开始编辑' });
+    expect(screen.queryByRole('dialog', { name: '改写选段' })).not.toBeInTheDocument();
+  });
+  it('rechecks an open draft after a withdrawal notification from another page', async () => {
+    let channel: { onmessage: ((event: { data: string }) => void) | null } | undefined;
+    class SyntheticChannel {
+      onmessage: ((event: { data: string }) => void) | null = null;
+      constructor() { channel = this; }
+      close() {}
+    }
+    vi.stubGlobal('BroadcastChannel', SyntheticChannel);
+    try {
+      show();
+      await screen.findByLabelText('正文第 1 段');
+      vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
+      act(() => channel?.onmessage?.({ data: 'withdrawn' }));
+      expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
+      expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('covers the editor immediately when withdrawal arrives during an in-flight save', async () => {
+    let channel: { onmessage: ((event: { data: string }) => void) | null } | undefined;
+    class SyntheticChannel {
+      onmessage: ((event: { data: string }) => void) | null = null;
+      constructor() { channel = this; }
+      close() {}
+    }
+    vi.stubGlobal('BroadcastChannel', SyntheticChannel);
+    let finish!: () => void;
+    vi.mocked(api.save).mockImplementationOnce((_id, request) => new Promise<SaveReceipt>(resolve => {
+      finish = () => resolve({ requestId: request.requestId, workId: work, outcome: 'accepted', replayed: false,
+        revision: { ...envelope().revision, document: request.document } });
+    }));
+    try {
+      show();
+      fireEvent.change(await screen.findByLabelText('正文第 1 段'), { target: { value: '合成编辑' } });
+      fireEvent.click(screen.getByRole('button', { name: '保存' }));
+      await waitFor(() => expect(api.save).toHaveBeenCalled());
+      vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
+      act(() => channel?.onmessage?.({ data: 'withdrawn' }));
+      expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+      await act(async () => finish());
+      expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('does not allow the comparison editor to fill an unresolved experience gap', async () => {
+    show(); await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByRole('button', { name: '留一个经历位' }));
+    expect(screen.getByLabelText('正文第 2 段')).toHaveAttribute('readonly');
+    expect(screen.getByRole('button', { name: '改稿对照' })).toBeDisabled();
+  });
   it('does not invoke AI when mounted or while typing; composition blocks save until completed', async () => {
     show();
     const body = await screen.findByLabelText('正文第 1 段');
@@ -214,6 +342,43 @@ describe('React workbench author control', () => {
       name: '保留本页编辑，另存新版本'
     }));
     expect(body).toHaveValue('本页新稿');
+  });
+  it('does not offer to keep stale editor text after an experience reset', async () => {
+    const next = envelope().revision;
+    next.id = crypto.randomUUID();
+    next.number = 2;
+    next.document = { ...next.document, experienceEpoch: crypto.randomUUID(), paragraphs: [{ id: paragraph, text: '服务器安全版本' }] };
+    const conflict: SaveReceipt = { requestId: '', workId: work, outcome: 'stale', replayed: false, revision: next };
+    vi.mocked(api.save).mockImplementationOnce(async (_id, request) => {
+      conflict.requestId = request.requestId;
+      throw new ApiError({ kind: 'http', status: 409, code: 'creation_stale' });
+    });
+    vi.mocked(api.conflictReceipt).mockReturnValue(conflict);
+    show();
+    fireEvent.change(await screen.findByLabelText('正文第 1 段'), { target: { value: '合成的旧编辑' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).queryByText('合成的旧编辑')).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '保留本页编辑，另存新版本' })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '丢弃本页编辑，使用服务器版本' }));
+    expect(screen.getByLabelText('正文第 1 段')).toHaveValue('服务器安全版本');
+  });
+  it('asks before discarding an editor after withdrawal and resumes from the server copy', async () => {
+    vi.mocked(api.save).mockRejectedValueOnce(new ApiError({ kind: 'http', status: 409, code: 'creation_experience_reset_required' }));
+    vi.mocked(api.resetWithdrawn).mockImplementation(async (_id, command) => ({
+      requestId: command.requestId, workId: work, outcome: 'accepted', replayed: false,
+      revision: { ...envelope().revision, id: crypto.randomUUID(), number: 2,
+        document: { ...envelope().revision.document, experienceEpoch: crypto.randomUUID(), paragraphs: [{ id: paragraph, text: '服务器保留正文' }] } },
+    }));
+    show();
+    fireEvent.change(await screen.findByLabelText('正文第 1 段'), { target: { value: '合成的未保存编辑' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    fireEvent.click(await screen.findByRole('button', { name: '撤回后重新开始编辑' }));
+    const dialog = await screen.findByRole('dialog', { name: '撤回后重新开始编辑' });
+    expect(within(dialog).getByText(/尚未保存的编辑/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: '丢弃本页编辑并继续' }));
+    await waitFor(() => expect(screen.getByLabelText('正文第 1 段')).toHaveValue('服务器保留正文'));
+    expect(api.resetWithdrawn).toHaveBeenCalledTimes(1);
   });
   it('keeps stable paragraph identities when Enter splits a Chinese/emoji paragraph', async () => {
     show();

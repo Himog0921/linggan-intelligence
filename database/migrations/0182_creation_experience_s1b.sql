@@ -105,6 +105,14 @@ CREATE TABLE linggan_creation_experience_request (
     command_sha256 text CHECK (command_sha256 IS NULL OR command_sha256 ~ '^[0-9a-f]{64}$'),
     created_at timestamptz NOT NULL DEFAULT scope_001_now()
 );
+-- A cancelled unknown request cannot arrive late and execute after the operator abandons it.
+CREATE TABLE linggan_creation_experience_request_cancel (
+    request_ref uuid PRIMARY KEY,
+    cancelled_at timestamptz NOT NULL DEFAULT scope_001_now()
+);
+CREATE TRIGGER linggan_creation_experience_request_cancel_immutable
+    BEFORE UPDATE OR DELETE ON linggan_creation_experience_request_cancel
+    FOR EACH ROW EXECUTE FUNCTION linggan_ops_forbid_mutation();
 
 -- Draft revisions carry references only; text associated with an experience stays in the
 -- erasable fragment store. This table is not an authorization to expose the feature yet.
@@ -117,3 +125,16 @@ CREATE TABLE linggan_creation_experience_fragment (
     PRIMARY KEY (revision_ref, paragraph_ref)
 );
 CREATE INDEX linggan_creation_experience_fragment_owner ON linggan_creation_experience_fragment(experience_ref);
+
+-- A server-built reset advances a work past withdrawn history without accepting a stale editor body.
+CREATE TABLE linggan_creation_experience_reset (
+    request_ref uuid NOT NULL,
+    work_ref uuid NOT NULL REFERENCES linggan_creation_work(work_ref),
+    experience_ref uuid NOT NULL REFERENCES linggan_creation_experience(experience_ref),
+    created_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    PRIMARY KEY (request_ref, experience_ref)
+);
+CREATE INDEX linggan_creation_experience_reset_work ON linggan_creation_experience_reset(work_ref, experience_ref);
+CREATE TRIGGER linggan_creation_experience_reset_immutable
+    BEFORE UPDATE OR DELETE ON linggan_creation_experience_reset
+    FOR EACH ROW EXECUTE FUNCTION linggan_ops_forbid_mutation();

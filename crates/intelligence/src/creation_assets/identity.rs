@@ -5,7 +5,7 @@ use linggan_storage_postgres::Database;
 use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use uuid::Uuid;
 
-pub(super) const COLUMNS: &str = "i.account_ref,i.revision_number,i.org_relation,i.bio_discloses_relation,i.bio_checked_at::text AS bio_checked_at,i.bio_checked_by,i.has_real_person,i.backing_person_role,i.can_provide_experience,EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=i.account_ref) AS has_known_person,i.saved_at::text AS saved_at,i.saved_by";
+pub(super) const COLUMNS: &str = "i.account_ref,i.revision_number,i.org_relation,i.bio_discloses_relation,i.bio_checked_at::text AS bio_checked_at,i.bio_checked_by,i.has_real_person,i.backing_person_role,i.can_provide_experience,EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=i.account_ref) AS has_known_person,(SELECT a.subject_ref FROM linggan_creation_person_assignment a WHERE a.identity_ref=i.identity_ref) AS person_ref,i.saved_at::text AS saved_at,i.saved_by";
 
 pub(super) fn from_row(row: &PgRow) -> Result<Identity, AssetsError> {
     Ok(Identity {
@@ -20,6 +20,7 @@ pub(super) fn from_row(row: &PgRow) -> Result<Identity, AssetsError> {
         backing_person_role: row.try_get("backing_person_role")?,
         can_provide_experience: row.try_get("can_provide_experience")?,
         has_known_person: row.try_get("has_known_person")?,
+        person_ref: row.try_get("person_ref")?,
         saved_at: row.try_get("saved_at")?,
         saved_by: row.try_get("saved_by")?,
     })
@@ -217,7 +218,7 @@ pub async fn list_accounts(
     domain: Option<Uuid>,
 ) -> Result<Vec<AccountView>, AssetsError> {
     let rows = sqlx::query("SELECT a.account_ref AS account_ref_a,a.account_name,a.platform,a.status AS account_status,a.operator_name,
-                i.account_ref,i.revision_number,i.org_relation,i.bio_discloses_relation,i.bio_checked_at::text AS bio_checked_at,i.bio_checked_by,i.has_real_person,i.backing_person_role,i.can_provide_experience,EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=i.account_ref) AS has_known_person,i.saved_at::text AS saved_at,i.saved_by
+                i.account_ref,i.revision_number,i.org_relation,i.bio_discloses_relation,i.bio_checked_at::text AS bio_checked_at,i.bio_checked_by,i.has_real_person,i.backing_person_role,i.can_provide_experience,EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=i.account_ref) AS has_known_person,(SELECT a.subject_ref FROM linggan_creation_person_assignment a WHERE a.identity_ref=i.identity_ref) AS person_ref,i.saved_at::text AS saved_at,i.saved_by
          FROM linggan_ops_account a
          LEFT JOIN LATERAL (SELECT * FROM linggan_creation_account_identity WHERE account_ref=a.account_ref ORDER BY revision_number DESC LIMIT 1) i ON true
          WHERE a.platform='xhs' AND a.ledger_state='in_ledger' AND a.status IN ('active','warming') AND ($1::uuid IS NULL OR a.domain_ref=$1)

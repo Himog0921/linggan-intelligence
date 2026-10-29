@@ -9,6 +9,8 @@ use tower::ServiceExt;
 use uuid::Uuid;
 #[path = "../../../../crates/evidence/tests/support/research_dossier_fixture.rs"]
 mod dossier;
+#[path = "../../../../crates/intelligence/tests/support/content_workbench_fixture.rs"]
+mod work_fixture;
 async fn proof(name: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     linggan_storage_postgres::testing::isolated_proof_schema(
@@ -43,6 +45,122 @@ async fn call(
         status,
         serde_json::from_slice(&bytes).unwrap_or_else(|_| json!({"rawLength":bytes.len()})),
     )
+}
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn content_workbench_http_withdrawal_reset_requires_discard() {
+    use assets::{ExperienceConfirm, ExperienceCreate, IdentityCommand, OrgRelation};
+    use linggan_intelligence::creation_assets as assets;
+    let db = proof("creation_http_experience_reset").await;
+    let (account, _) = work_fixture::ops_seed(&db).await;
+    assets::put_identity(
+        &db,
+        account,
+        &IdentityCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: 0,
+            org_relation: OrgRelation::Parent,
+            bio_discloses_relation: None,
+            has_real_person: Some(true),
+            backing_person_role: Some("妈妈".into()),
+            can_provide_experience: None,
+            person_change: None,
+        },
+    )
+    .await
+    .unwrap();
+    let id = assets::create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            expected_person_ref: assets::read_identity(&db, account)
+                .await
+                .unwrap()
+                .unwrap()
+                .person_ref
+                .unwrap(),
+            title: "合成经历".into(),
+            body: "合成经历正文".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .experience
+    .id;
+    assets::confirm_experience(
+        &db,
+        id,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+            confirmation_method: "subject_present".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let paragraph = Uuid::new_v4();
+    let mut doc = WorkDocument::default();
+    doc.account_ref = Some(account);
+    doc.paragraphs.push(Paragraph {
+        id: paragraph,
+        text: "合成经历正文".into(),
+    });
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: paragraph,
+        experience_ref: id,
+        experience_revision: 1,
+    });
+    let work = core::create_work(
+        &db,
+        &CreateRequest {
+            request_id: Uuid::new_v4(),
+            domain_ref: dossier::DOMAIN,
+            document: doc,
+        },
+    )
+    .await
+    .unwrap();
+    assets::withdraw_experience(&db, id, Uuid::new_v4())
+        .await
+        .unwrap();
+    let app = app_with_database(db);
+    let uri = format!("/ops/api/creation/works/{}", work.work_id);
+    let (_, read) = call(app.clone(), &uri, None).await;
+    let mut edited = read["revision"]["document"].clone();
+    edited["title"] = json!("合成改动");
+    let (status, failure) = call(app.clone(), &format!("{uri}/save"), Some(json!({"requestId": Uuid::new_v4(), "expectedRevision":work.revision.id,"document":edited.clone()}))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(failure["code"], "creation_experience_reset_required");
+    let command = json!({"requestId":Uuid::new_v4(),"expectedRevision":work.revision.id});
+    let (status, result) = call(
+        app.clone(),
+        &format!("{uri}/experience-reset"),
+        Some(command.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(result["revision"]["document"]["experienceSlots"].is_null());
+    assert!(result["revision"]["document"]["experienceEpoch"].is_string());
+    assert!(!result.to_string().contains("合成经历正文"));
+    let (status, old_page) = call(app.clone(), &format!("{uri}/save"), Some(json!({"requestId":Uuid::new_v4(), "expectedRevision":result["revision"]["id"], "document":edited}))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(
+        old_page["code"],
+        "creation_experience_editor_reset_required"
+    );
+    let (_, current) = call(app.clone(), &uri, None).await;
+    let (_, history) = call(app.clone(), &format!("{uri}/revisions"), None).await;
+    assert!(!current.to_string().contains("合成经历正文"));
+    assert!(!history.to_string().contains("合成经历正文"));
+    let (status, replay) = call(app, &format!("{uri}/experience-reset"), Some(command)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["replayed"], true);
 }
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof; no shared database"]

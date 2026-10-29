@@ -206,7 +206,9 @@ async fn inputs_in(
         .map_err(|_| AiError::NotFound)?;
     // Until experience-derived AI inputs and suggestions have a withdrawal path, do not freeze
     // or send them through the existing immutable writing-command store.
-    if !revision.document.experience_slots.is_empty() {
+    if !revision.document.experience_slots.is_empty()
+        || !revision.document.experience_gaps.is_empty()
+    {
         return Err(AiError::Source);
     }
     if revision.id != r.expected_revision {
@@ -317,7 +319,9 @@ async fn qualify_frozen_inputs(
         content_workbench::read_revision_in(tx, input.work_ref, Some(input.expected_revision))
             .await
             .map_err(|_| AiError::NotFound)?;
-    if !revision.document.experience_slots.is_empty() {
+    if !revision.document.experience_slots.is_empty()
+        || !revision.document.experience_gaps.is_empty()
+    {
         return Ok(false);
     }
     let citations = outbound_known_citations(&revision.document, input)?;

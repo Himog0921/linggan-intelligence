@@ -45,6 +45,26 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(review_sentence),
         )
         .route("/ops/api/creation/checks", post(check_draft))
+        .route(
+            "/ops/api/creation/experiences",
+            get(list_experiences).post(create_experience),
+        )
+        .route(
+            "/ops/api/creation/experience-requests/{id}",
+            get(experience_request_status).post(cancel_experience_request),
+        )
+        .route(
+            "/ops/api/creation/experiences/{id}",
+            get(read_experience).put(edit_experience),
+        )
+        .route(
+            "/ops/api/creation/experiences/{id}/confirm",
+            post(confirm_experience),
+        )
+        .route(
+            "/ops/api/creation/experiences/{id}/withdraw",
+            post(withdraw_experience),
+        )
         .route("/ops/api/creation/works/{id}/copy", post(prepare_copy))
         .route(
             "/ops/api/creation/works/{id}/copy/{receipt}/confirm",
@@ -130,6 +150,71 @@ async fn candidates(State(state): State<LocalWebState>, Path(id): Path<Uuid>) ->
     reply(assets::candidates_for_account(database!(state), id).await)
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExperiencesQuery {
+    account_ref: Uuid,
+}
+async fn list_experiences(
+    State(state): State<LocalWebState>,
+    Query(q): Query<ExperiencesQuery>,
+) -> Response {
+    match assets::list_experiences(database!(state), q.account_ref).await {
+        Ok(items) => Json(json!({"items": items})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn create_experience(
+    State(state): State<LocalWebState>,
+    Json(command): Json<ExperienceCreate>,
+) -> Response {
+    reply(assets::create_experience(database!(state), &command).await)
+}
+async fn experience_request_status(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    match assets::experience_request_status(database!(state), id).await {
+        Ok(value) => Json(json!({"result": value})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn cancel_experience_request(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    reply(assets::cancel_experience_request(database!(state), id).await)
+}
+async fn read_experience(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
+    reply(assets::read_experience(database!(state), id).await)
+}
+async fn edit_experience(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<ExperienceEdit>,
+) -> Response {
+    reply(assets::edit_experience(database!(state), id, &command).await)
+}
+async fn confirm_experience(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<ExperienceConfirm>,
+) -> Response {
+    reply(assets::confirm_experience(database!(state), id, &command).await)
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WithdrawCommand {
+    request_id: Uuid,
+}
+async fn withdraw_experience(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<WithdrawCommand>,
+) -> Response {
+    reply(assets::withdraw_experience(database!(state), id, command.request_id).await)
+}
+
 async fn list_fact_cards(State(state): State<LocalWebState>) -> Response {
     match assets::list_fact_cards(database!(state)).await {
         Ok(items) => Json(json!({"items": items})).into_response(),
@@ -203,12 +288,13 @@ async fn check_sentence(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DraftCheck {
     document: WorkDocument,
+    work_ref: Option<Uuid>,
 }
 async fn check_draft(
     State(state): State<LocalWebState>,
     Json(request): Json<DraftCheck>,
 ) -> Response {
-    reply(assets::check_draft(database!(state), &request.document).await)
+    reply(assets::check_draft_for_work(database!(state), &request.document, request.work_ref).await)
 }
 async fn prepare_copy(
     State(state): State<LocalWebState>,

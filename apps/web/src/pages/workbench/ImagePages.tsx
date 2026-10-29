@@ -1,7 +1,7 @@
 import { humanMoment } from '../../shared/formatting';
 import { newImagePage as newPage } from './imagePageFactory';
 import { ActionButton } from '../../shared/ActionButton';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { AssetRecord, ExportRecord, ImagePage, Revision, WorkDocument } from './workbenchModel';
 import { ExportWorkflow, exportPackageUrl, exportPageUrl } from './exportWorkflow';
 import type { ExportProgress, ExportTransport } from './exportWorkflow';
@@ -88,9 +88,19 @@ export function ImagePages(props: Props) {
   const [bodyChanges, setBodyChanges] = useState<BodyChange[]>([]);
   const dismissedChanges = useRef(new Set<string>());
   const latestDocument = useRef(documentValue);
+  const contentGeneration = useRef(0);
+  const lastEpoch = useRef(documentValue.experienceEpoch);
   const [exportRetryAvailable, setExportRetryAvailable] = useState(false);
   const [exportUnconfirmed, setExportUnconfirmed] = useState(false);
-  useEffect(() => { latestDocument.current = documentValue; }, [documentValue]);
+  useLayoutEffect(() => {
+    latestDocument.current = documentValue;
+    if (lastEpoch.current === documentValue.experienceEpoch) return;
+    lastEpoch.current = documentValue.experienceEpoch;
+    contentGeneration.current += 1;
+    setDeleted([]); setTitleProposal(null); setTitleUndo(null); setSplit(null);
+    setValidation(null); setLastGeneratedDocument(null); setBodyChanges([]);
+    dismissedChanges.current.clear();
+  }, [documentValue]);
   const workflow = useRef<ExportWorkflow | null>(null);
   const editablePages = documentValue.pages.filter(item => props.step === 'cover' ? item.kind === 'cover' : props.step === 'inner' ? item.kind !== 'cover' : true);
   const page = editablePages.find(item => item.id === selectedId) ?? editablePages[0];
@@ -191,13 +201,21 @@ export function ImagePages(props: Props) {
     onChange({ ...documentValue, pages }); setDeleted(current => current.slice(0, -1)); setSelectedId(last.page.id);
   };
   const upload = async (file?: File, retryPageId?: string) => {
-    if (!file || !page) return;
-    const targetId = retryPageId ?? page.id;
+    if (!file) return;
+    const targetId = retryPageId ?? page?.id;
+    if (!targetId || !latestDocument.current.pages.some(item => item.id === targetId)) {
+      setError('原目标页已不存在，待核对的图片仍保留；请先恢复原目标页再重试。');
+      return;
+    }
     setPendingUpload({file,pageId:targetId});
     setBusy(true); setError('');
     try {
       const asset = await props.onUploadAsset(file);
       const latest = latestDocument.current;
+      if (!latest.pages.some(item => item.id === targetId)) {
+        setError('图片已登记，但原目标页已不存在；待核对的图片仍保留，请先恢复原目标页再重试。');
+        return;
+      }
       onChange({ ...latest, pages: latest.pages.map(item => item.id === targetId ? { ...item, assetId: asset.id, crop: {x: 0, y: 0, width: 1, height: 1} } : item) });
       setMessage('自有图片已上传；保存作品后保留图片关联');
       setPendingUpload(null);
@@ -216,7 +234,7 @@ export function ImagePages(props: Props) {
         await workflow.current.start(workId, props.onSave, progress, singlePageId);
       setLocalExports(current => [result, ...current.filter(item => item.id !== result.id)]);
       props.onExportComplete?.(result);
-      if (mode === 'new') setLastGeneratedDocument(documentValue);
+      if (mode === 'new' && latestDocument.current.experienceEpoch === documentValue.experienceEpoch) setLastGeneratedDocument(documentValue);
       if (singlePageId) setMessage('单页 PNG 已生成，可在下方下载；其余图页可继续生成图文包');
     } catch (cause) {
       const prefix = workflow.current.hasUnconfirmed ? '生成结果尚未确认，请先核实原请求' : '生成未完成';
@@ -306,7 +324,7 @@ export function ImagePages(props: Props) {
             <details className={styles.controlSection} open={!!page.assetId}><summary>自有图片与裁切{page.assetId ? ' · 已关联' : ''}</summary><label>自有图片<input aria-label="自有图片" type="file" disabled={pendingUpload !== null} accept="image/png,image/jpeg,image/webp" onChange={event => { void upload(event.target.files?.[0]); event.target.value = ''; }}/></label>
               {page.assetId && <><div className={styles.twoFields}>{(['x','y','width','height'] as const).map(key => <label key={key}>{({x:'横向位置',y:'纵向位置',width:'裁切宽度',height:'裁切高度'})[key]}<input type="number" min={key === 'width' || key === 'height' ? 1 : 0} max={100} value={Math.round(page.crop[key] * 100)} onChange={event => { const raw = Number(event.target.value) / 100; const crop = {...page.crop, [key]: Math.min(1, Math.max(key === 'width' || key === 'height' ? 0.01 : 0, raw))}; crop.x = Math.min(crop.x, 1 - crop.width); crop.y = Math.min(crop.y, 1 - crop.height); patch({crop}); }}/></label>)}</div><ActionButton variant="danger" onClick={() => patch({assetId: null})}>移除图片</ActionButton></>}
             </details>
-            <div className={styles.controlSection}><ActionButton onClick={() => { setBusy(true); setError(''); void previewSplit(page, {assetUrl: page.assetId ? `/ops/api/creation/works/${workId}/assets/${page.assetId}` : undefined}).then(pages => setSplit({original: page, pages})).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '拆页预览失败')).finally(() => setBusy(false)); }}>预览长文拆页</ActionButton>
+            <div className={styles.controlSection}><ActionButton onClick={() => { const generation = contentGeneration.current; setBusy(true); setError(''); void previewSplit(page, {assetUrl: page.assetId ? `/ops/api/creation/works/${workId}/assets/${page.assetId}` : undefined}).then(pages => { if (contentGeneration.current === generation) setSplit({original: page, pages}); }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '拆页预览失败')).finally(() => setBusy(false)); }}>预览长文拆页</ActionButton>
               {page.kind !== 'cover' && <div className={styles.pageTools}><div className={styles.actions}><ActionButton onClick={() => movePage(-1)} disabled={locked || documentValue.pages.indexOf(page) <= (documentValue.pages[0]?.kind === 'cover' ? 1 : 0)}>上移</ActionButton><ActionButton onClick={() => movePage(1)} disabled={locked || documentValue.pages.at(-1)?.id === selected}>下移</ActionButton></div><ActionButton variant="quiet" onClick={deletePage}>删除此页</ActionButton></div>}
               {(!props.step || props.step === 'inner') && <div className={styles.actions}>{(['opinion','voice','steps'] as const).map(kind => <ActionButton variant="quiet" key={kind} disabled={documentValue.pages.length >= 30} onClick={() => addPage(kind)}>添加{LABELS[kind]}页</ActionButton>)}</div>}
             </div>

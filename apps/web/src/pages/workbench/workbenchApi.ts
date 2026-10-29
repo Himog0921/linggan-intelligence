@@ -46,6 +46,9 @@ export async function restore(id: string, body: {
 }) {
   return receipt(await post(`${base}/works/${uuid(id)}/restore`, body), body.requestId, id);
 }
+export async function resetWithdrawn(id: string, body: { requestId: string; expectedRevision: string }) {
+  return receipt(await post(`${base}/works/${uuid(id)}/experience-reset`, body), body.requestId, id);
+}
 function receipt(value: unknown, requestId: string, workId?: string) {
   const r = parseSaveReceipt(value);
   if (r.requestId !== requestId || workId && r.workId !== workId) throw new WorkbenchContractError();
@@ -341,6 +344,8 @@ export function errorText(error: unknown): string {
     const messages: Record<string, string> = {
       creation_stale: '服务器已有新版本，请比较并选择保留方式。',
       creation_source_unavailable: '来源可用情况已变化，请回到材料核对。',
+      creation_experience_reset_required: '经历已撤回。请先重新载入服务器版本，再继续编辑。',
+      creation_experience_editor_reset_required: '本页编辑来自撤回前的版本，请丢弃旧编辑并使用服务器版本。',
       source_changed: '来源版本已变化，请重新读取并选取。',
       source_restricted: '来源已受限，不能继续引用。',
       source_unavailable: '来源暂不可读。',

@@ -20,10 +20,11 @@ pub use bridge_sentences::{
 };
 pub use checks::{blocks_entry, check_manuscript, check_sentence};
 pub use copy_format::{CopyText, SPACER, format_copy, normalize_tags};
-pub use drafts::{check_draft, confirm_copy, copy_status, prepare_copy};
+pub use drafts::{check_draft, check_draft_for_work, confirm_copy, copy_status, prepare_copy};
 pub use experiences::{
-    confirm_experience, create_experience, edit_experience, read_experience,
-    read_usable_experience, withdraw_experience,
+    cancel_experience_request, confirm_experience, create_experience, edit_experience,
+    experience_request_status, list_experiences, read_experience, read_usable_experience,
+    withdraw_experience,
 };
 pub use fact_cards::{confirm_fact_card, list_fact_cards, put_fact_card};
 pub use identity::{list_accounts, put_identity, read_identity};

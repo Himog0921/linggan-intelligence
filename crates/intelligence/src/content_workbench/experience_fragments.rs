@@ -148,9 +148,7 @@ pub(super) async fn prepare(
         .execute(&mut **tx)
         .await?;
     lock_references(tx, old, doc).await?;
-    let withdrawn_history: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_revision r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.document->'experienceSlots','[]'::jsonb)) AS slot(value) JOIN linggan_creation_experience e ON e.experience_ref::text=slot.value->>'experienceRef' WHERE r.work_ref=$1 AND e.state='withdrawn')")
-        .bind(work).fetch_one(&mut **tx).await?;
-    if withdrawn_history {
+    if !withdrawn_history(tx, work).await?.is_empty() {
         // Until editors can prove they discarded stale text, do not persist any new revision.
         return Err(WorkbenchError::Invalid(
             "experience_withdrawal_requires_reset",
@@ -206,8 +204,34 @@ pub(super) async fn prepare(
     }
     let mut fragments = Vec::new();
     for slot in &doc.experience_slots {
-        let continuing =
-            old.is_some_and(|old| old.experience_slots.iter().any(|existing| existing == slot));
+        let new_target =
+            old.is_some_and(|old| !old.experience_slots.iter().any(|existing| existing == slot));
+        // A split or move within this work retains the same already-qualified source revision.
+        let continuing = old.is_some_and(|old| {
+            old.experience_slots.iter().any(|existing| {
+                existing.experience_ref == slot.experience_ref
+                    && existing.experience_revision == slot.experience_revision
+            })
+        });
+        if new_target && continuing {
+            let contents = |document: &WorkDocument| -> String {
+                document
+                    .paragraphs
+                    .iter()
+                    .filter(|paragraph| {
+                        document.experience_slots.iter().any(|source| {
+                            source.paragraph_id == paragraph.id
+                                && source.experience_ref == slot.experience_ref
+                                && source.experience_revision == slot.experience_revision
+                        })
+                    })
+                    .map(|paragraph| paragraph.text.as_str())
+                    .collect()
+            };
+            if old.is_none_or(|old| contents(old) != contents(doc)) {
+                return Err(WorkbenchError::Invalid("experience_split_changed"));
+            }
+        }
         let allowed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience e JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=$2 JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1 AND e.account_ref=$3 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND c.subject_ref=e.subject_ref AND EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref AND p.subject_ref=e.subject_ref) AND ($4 OR (e.state='confirmed' AND e.current_revision=$2)) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE)")
             .bind(slot.experience_ref).bind(slot.experience_revision).bind(doc.account_ref).bind(continuing)
             .fetch_one(&mut **tx).await?;
@@ -232,6 +256,14 @@ pub(super) async fn prepare(
     let mut stored = doc.clone();
     strip(&mut stored);
     Ok((stored, fragments))
+}
+
+pub(super) async fn withdrawn_history(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+) -> Result<Vec<Uuid>, WorkbenchError> {
+    Ok(sqlx::query_scalar("SELECT DISTINCT e.experience_ref FROM linggan_creation_revision r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.document->'experienceSlots','[]'::jsonb)) AS slot(value) JOIN linggan_creation_experience e ON e.experience_ref::text=slot.value->>'experienceRef' WHERE r.work_ref=$1 AND e.state='withdrawn' AND NOT EXISTS (SELECT 1 FROM linggan_creation_experience_reset s WHERE s.work_ref=r.work_ref AND s.experience_ref=e.experience_ref)")
+        .bind(work).fetch_all(&mut **tx).await?)
 }
 
 pub(super) async fn insert(

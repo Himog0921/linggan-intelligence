@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../shared/api';
 import { RequestIdentities } from '../../../shared/requestIdentity';
 import { newDocument, type Revision, type WorkDocument } from '../workbenchModel';
+import * as workbenchApi from '../workbenchApi';
 import * as api from './assetsApi';
 import type { AccountView, CheckReport, Finding, Identity, Sentence } from './assetsModel';
 import { CheckPanel } from './CheckPanel';
@@ -16,6 +17,7 @@ vi.mock('./assetsApi', async importOriginal => {
     prepareCopy: vi.fn(), confirmCopy: vi.fn(), putIdentity: vi.fn(), createSentence: vi.fn(),
   };
 });
+vi.mock('../workbenchApi', async importOriginal => ({ ...await importOriginal<typeof import('../workbenchApi')>(), readWork: vi.fn() }));
 
 const WORK = '00000000-0000-4000-8000-000000000010';
 const DOMAIN = '00000000-0000-4000-8000-000000000011';
@@ -135,7 +137,15 @@ describe('check results', () => {
     const view = show();
     await ready();
     view.rerenderWith({ tagsDraft: 'ADHD #adhd' });
-    await waitFor(() => expect(api.checkDraft).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['ADHD', '#adhd'] }), expect.anything()));
+    await waitFor(() => expect(api.checkDraft).toHaveBeenLastCalledWith(expect.objectContaining({ tags: ['ADHD', '#adhd'] }), expect.anything(), WORK));
+  });
+  it('refreshes checks when a cached draft becomes active again', async () => {
+    const view = show();
+    await ready();
+    const before = vi.mocked(api.checkDraft).mock.calls.length;
+    view.rerenderWith({ active: false });
+    view.rerenderWith({ active: true });
+    await waitFor(() => expect(vi.mocked(api.checkDraft).mock.calls.length).toBeGreaterThan(before));
   });
 
   it('offers retry when candidates fail instead of claiming the library is empty', async () => {
@@ -259,6 +269,92 @@ describe('fixes', () => {
 });
 
 describe('copy', () => {
+  it('keeps the same checked copy action available in the writing footer', async () => {
+    const footer = window.document.createElement('div');
+    window.document.body.appendChild(footer);
+    try {
+      show({ copyContainer: footer });
+      await ready();
+      expect(within(footer).getByRole('button', { name: '复制到小红书' })).toBeEnabled();
+    } finally { footer.remove(); }
+  });
+  it('keeps an unconfirmed copy receipt retry in the footer', async () => {
+    const footer = window.document.createElement('div');
+    window.document.body.appendChild(footer);
+    vi.mocked(api.prepareCopy).mockResolvedValue({ receiptRef: RECEIPT, workId: WORK, revisionId: REV, rulesetVersion: 'v', title: 't', body: 'b',
+      tags: [], text: '合成正文', warnCount: 0, hintCount: 0, replayed: false });
+    vi.mocked(api.confirmCopy).mockRejectedValueOnce(new ApiError({ kind: 'network' }))
+      .mockResolvedValueOnce({ receiptRef: RECEIPT, revisionId: REV, copiedAt: 't' });
+    try {
+      show({ copyContainer: footer });
+      await ready();
+      fireEvent.click(within(footer).getByRole('button', { name: '复制到小红书' }));
+      const retry = await within(footer).findByRole('button', { name: '重新确认记录' });
+      fireEvent.click(retry);
+      await within(footer).findByText(/已记录为已复制/);
+      expect(api.confirmCopy).toHaveBeenCalledTimes(2);
+    } finally { footer.remove(); }
+  });
+  it('hides manual-copy text during source recheck and clears it after withdrawal', async () => {
+    clipboard.writeText.mockRejectedValueOnce(new Error('clipboard unavailable'));
+    vi.mocked(api.prepareCopy).mockResolvedValue({ receiptRef: RECEIPT, workId: WORK, revisionId: REV, rulesetVersion: 'v', title: 't', body: 'b',
+      tags: [], text: '合成旧经历文本', warnCount: 0, hintCount: 0, replayed: false });
+    const view = show();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '复制到小红书' }));
+    expect(await screen.findByLabelText('待复制的文字')).toHaveValue('合成旧经历文本');
+    view.rerenderWith({ sensitiveVisible: false });
+    expect(screen.queryByLabelText('待复制的文字')).not.toBeInTheDocument();
+    view.rerenderWith({ sensitiveVisible: true });
+    expect(await screen.findByLabelText('待复制的文字')).toHaveValue('合成旧经历文本');
+    view.rerenderWith({ sensitiveVisible: false, withdrawalInvalidated: true });
+    view.rerenderWith({ sensitiveVisible: true, withdrawalInvalidated: false });
+    expect(screen.queryByLabelText('待复制的文字')).not.toBeInTheDocument();
+  });
+  it('does not copy a late receipt after the draft becomes inactive or is withdrawn', async () => {
+    let finish!: () => void;
+    vi.mocked(api.prepareCopy).mockImplementationOnce(() => new Promise(resolve => {
+      finish = () => resolve({ receiptRef: RECEIPT, workId: WORK, revisionId: REV, rulesetVersion: 'v', title: 't', body: 'b',
+        tags: [], text: '合成旧经历文本', warnCount: 0, hintCount: 0, replayed: false });
+    }));
+    const view = show();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '复制到小红书' }));
+    await waitFor(() => expect(api.prepareCopy).toHaveBeenCalledTimes(1));
+    view.rerenderWith({ active: false, sensitiveVisible: false, withdrawalInvalidated: true });
+    await act(async () => finish());
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+    view.rerenderWith({ active: true, sensitiveVisible: true, withdrawalInvalidated: false });
+    expect(screen.queryByLabelText('待复制的文字')).not.toBeInTheDocument();
+  });
+  it('does not copy a late receipt after the writing panel unmounts', async () => {
+    let finish!: () => void;
+    vi.mocked(api.prepareCopy).mockImplementationOnce(() => new Promise(resolve => {
+      finish = () => resolve({ receiptRef: RECEIPT, workId: WORK, revisionId: REV, rulesetVersion: 'v', title: 't', body: 'b',
+        tags: [], text: '合成旧正文', warnCount: 0, hintCount: 0, replayed: false });
+    }));
+    const view = show();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '复制到小红书' }));
+    await waitFor(() => expect(api.prepareCopy).toHaveBeenCalledTimes(1));
+    view.unmount();
+    await act(async () => finish());
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+  it('does not open a stale manual-copy dialog if clipboard failure arrives after withdrawal', async () => {
+    let fail!: () => void;
+    clipboard.writeText.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = () => reject(new Error('clipboard unavailable')); }));
+    vi.mocked(api.prepareCopy).mockResolvedValue({ receiptRef: RECEIPT, workId: WORK, revisionId: REV, rulesetVersion: 'v', title: 't', body: 'b',
+      tags: [], text: '合成旧经历文本', warnCount: 0, hintCount: 0, replayed: false });
+    const view = show();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '复制到小红书' }));
+    await waitFor(() => expect(clipboard.writeText).toHaveBeenCalledTimes(1));
+    view.rerenderWith({ sensitiveVisible: false, withdrawalInvalidated: true });
+    await act(async () => fail());
+    view.rerenderWith({ sensitiveVisible: true, withdrawalInvalidated: false });
+    expect(screen.queryByLabelText('待复制的文字')).not.toBeInTheDocument();
+  });
   it('stays closed until 必改 is clear and says why', async () => {
     vi.mocked(api.checkDraft).mockResolvedValue(report([finding({ rule: 'R-M1', level: 'must', message: '账号身份还没确认' })]));
     show();
@@ -317,7 +413,7 @@ describe('copy', () => {
     fireEvent.click(screen.getByRole('button', { name: '复制到小红书' }));
     expect(await screen.findByLabelText('待复制的文字')).toHaveValue('要手动复制的文字');
     expect(vi.mocked(api.confirmCopy)).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: '我已复制' }));
+    fireEvent.click(await screen.findByRole('button', { name: '我已复制' }));
     await waitFor(() => expect(vi.mocked(api.confirmCopy)).toHaveBeenCalledTimes(1));
     await screen.findByText(/已记录为已复制/);
   });
@@ -348,12 +444,49 @@ describe('copy', () => {
   });
 
   it('copies the title alone without recording a copy of the note', async () => {
-    show({ document: doc({ title: '  合成标题  ' }) });
+    const document = doc({ title: '  合成标题  ' });
+    vi.mocked(workbenchApi.readWork).mockResolvedValue({ workId: WORK, domainRef: DOMAIN, savedBy: 'local', revision: revisionOf(document), sourceStatuses: [], exports: [] });
+    show({ document });
     await ready();
     fireEvent.click(screen.getByRole('button', { name: '复制标题' }));
     await screen.findByText('标题已复制。');
     expect(clipboard.writeText).toHaveBeenCalledWith('合成标题');
     expect(vi.mocked(api.prepareCopy)).not.toHaveBeenCalled();
+  });
+
+  it('does not copy a cached title after another page withdraws an experience', async () => {
+    const document = doc({ title: '合成旧文字' });
+    vi.mocked(workbenchApi.readWork).mockResolvedValue({ workId: WORK, domainRef: DOMAIN, savedBy: 'local', revision: revisionOf(document), sourceStatuses: [], exports: [], experienceResetRequired: true });
+    show({ document });
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '复制标题' }));
+    await screen.findByText(/请先重新读取并处理撤回的经历/);
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+  it('does not copy a title if the user switches drafts while server recheck is pending', async () => {
+    const document = doc({ title: '合成标题' });
+    let finish!: () => void;
+    vi.mocked(workbenchApi.readWork).mockImplementationOnce(() => new Promise(resolve => {
+      finish = () => resolve({ workId: WORK, domainRef: DOMAIN, savedBy: 'local', revision: revisionOf(document), sourceStatuses: [], exports: [] });
+    }));
+    const view = show({ document });
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '复制标题' }));
+    await waitFor(() => expect(workbenchApi.readWork).toHaveBeenCalledTimes(1));
+    view.rerenderWith({ active: false, sensitiveVisible: false });
+    await act(async () => finish());
+    expect(clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it('does not copy a title redacted after a comment source becomes restricted', async () => {
+    const document = doc({ title: '合成评论原文' });
+    const redacted = doc({ title: '[来源当前不可使用]' });
+    vi.mocked(workbenchApi.readWork).mockResolvedValue({ workId: WORK, domainRef: DOMAIN, savedBy: 'local', revision: revisionOf(redacted), sourceStatuses: [{ excerptId: P1, state: 'restricted', code: 'restricted' }], exports: [] });
+    show({ document });
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '复制标题' }));
+    await screen.findByText(/标题中的来源当前不可使用/);
+    expect(clipboard.writeText).not.toHaveBeenCalled();
   });
 });
 

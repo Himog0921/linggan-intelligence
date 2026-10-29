@@ -1,4 +1,4 @@
-//! Local, erasable experience storage. Not yet connected to draft or HTTP operations.
+//! Local, erasable experience storage and subject-confirmation operations.
 //!
 //! Confirmation is a record of the subject's actual confirmation, not authentication of the
 //! person entering the record. Never put the content into immutable receipts or ordinary logs.
@@ -31,7 +31,7 @@ async fn snapshot_revision(
     id: Uuid,
     revision: Option<i32>,
 ) -> Result<Experience, AssetsError> {
-    let row = sqlx::query("SELECT e.experience_ref,e.code,e.account_ref,e.state,COALESCE((SELECT p.subject_ref=e.subject_ref FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref),false) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE AS current_person,COALESCE($2,e.current_revision) AS current_revision,e.created_at::text AS created_at,e.withdrawn_at::text AS withdrawn_at,r.title,r.body,r.tags,r.origin,c.send_to_model,c.subject_account_ref,c.subject_role,c.confirmation_method,c.confirmed_at::text AS confirmed_at FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=COALESCE($2,e.current_revision) LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
+    let row = sqlx::query("SELECT e.experience_ref,e.code,e.account_ref,e.state,COALESCE((SELECT p.subject_ref=e.subject_ref FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref),false) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE AS current_person,COALESCE($2,e.current_revision) AS current_revision,(SELECT count(*) FROM linggan_creation_work w JOIN linggan_creation_revision current ON current.revision_ref=w.current_revision_ref WHERE EXISTS (SELECT 1 FROM jsonb_array_elements(COALESCE(current.document->'experienceSlots','[]'::jsonb)) slot WHERE slot->>'experienceRef'=e.experience_ref::text)) AS used_count,e.created_at::text AS created_at,e.withdrawn_at::text AS withdrawn_at,r.title,r.body,r.tags,r.origin,c.send_to_model,c.subject_account_ref,c.subject_role,c.confirmation_method,c.confirmed_at::text AS confirmed_at FROM linggan_creation_experience e LEFT JOIN linggan_creation_experience_revision r ON r.experience_ref=e.experience_ref AND r.revision=COALESCE($2,e.current_revision) LEFT JOIN linggan_creation_experience_consent c ON c.experience_ref=r.experience_ref AND c.revision=r.revision WHERE e.experience_ref=$1")
         .bind(id).bind(revision).fetch_optional(&mut **tx).await?.ok_or(AssetsError::NotFound)?;
     Ok(Experience {
         id: row.try_get("experience_ref")?,
@@ -40,6 +40,7 @@ async fn snapshot_revision(
         current_person: row.try_get("current_person")?,
         state: row.try_get("state")?,
         revision: row.try_get("current_revision")?,
+        used_count: row.try_get("used_count")?,
         title: row.try_get("title")?,
         body: row.try_get("body")?,
         tags: row.try_get("tags")?,
@@ -67,6 +68,11 @@ async fn previous(
     hash: &str,
 ) -> Result<Option<PriorResult>, AssetsError> {
     lock(tx, &format!("experience-request:{request}")).await?;
+    let cancelled: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience_request_cancel WHERE request_ref=$1)")
+        .bind(request).fetch_one(&mut **tx).await?;
+    if cancelled {
+        return Err(AssetsError::Invalid("request_cancelled"));
+    }
     let row = sqlx::query("SELECT experience_ref,kind,command_sha256,result_revision,result_state FROM linggan_creation_experience_request WHERE request_ref=$1")
         .bind(request).fetch_optional(&mut **tx).await?;
     match row {
@@ -133,10 +139,7 @@ async fn record(
     Ok(())
 }
 
-pub async fn read_experience(db: &Database, id: Uuid) -> Result<Experience, AssetsError> {
-    let mut tx = db.pool().begin().await?;
-    lock_subject(&mut tx, id).await?;
-    let mut value = snapshot(&mut tx, id).await?;
+fn mask_former_person(mut value: Experience) -> Experience {
     if !value.current_person {
         value.title = None;
         value.body = None;
@@ -148,8 +151,66 @@ pub async fn read_experience(db: &Database, id: Uuid) -> Result<Experience, Asse
         value.confirmed_subject_role = None;
         value.confirmation_method = None;
     }
+    value
+}
+
+pub async fn read_experience(db: &Database, id: Uuid) -> Result<Experience, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    lock_subject(&mut tx, id).await?;
+    let value = mask_former_person(snapshot(&mut tx, id).await?);
     tx.commit().await?;
     Ok(value)
+}
+
+pub async fn list_experiences(
+    db: &Database,
+    account: Uuid,
+) -> Result<Vec<Experience>, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    lock(&mut tx, "experience-gate").await?;
+    let ids: Vec<Uuid> = sqlx::query_scalar("SELECT experience_ref FROM linggan_creation_experience WHERE account_ref=$1 ORDER BY created_at DESC,experience_ref LIMIT 200")
+        .bind(account).fetch_all(&mut *tx).await?;
+    let mut items = Vec::with_capacity(ids.len());
+    for id in ids {
+        lock_subject(&mut tx, id).await?;
+        items.push(mask_former_person(snapshot(&mut tx, id).await?));
+    }
+    tx.commit().await?;
+    Ok(items)
+}
+
+/// Reconcile a lost reply without returning the sensitive command or experience body.
+pub async fn experience_request_status(
+    db: &Database,
+    request: Uuid,
+) -> Result<Option<serde_json::Value>, AssetsError> {
+    let row = sqlx::query("SELECT kind,experience_ref,result_revision,result_state FROM linggan_creation_experience_request WHERE request_ref=$1")
+        .bind(request).fetch_optional(db.pool()).await?;
+    row.map(|row| -> Result<_, AssetsError> { Ok(serde_json::json!({
+        "kind":row.try_get::<String,_>("kind")?, "experienceRef":row.try_get::<Uuid,_>("experience_ref")?,
+        "revision":row.try_get::<i32,_>("result_revision")?, "state":row.try_get::<String,_>("result_state")?
+    })) }).transpose()
+}
+
+/// Serialize with a possibly in-flight command before abandoning its request ID.
+pub async fn cancel_experience_request(
+    db: &Database,
+    request: Uuid,
+) -> Result<serde_json::Value, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    lock(&mut tx, &format!("experience-request:{request}")).await?;
+    let committed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_creation_experience_request WHERE request_ref=$1)",
+    )
+    .bind(request)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !committed {
+        sqlx::query("INSERT INTO linggan_creation_experience_request_cancel(request_ref) VALUES($1) ON CONFLICT DO NOTHING")
+            .bind(request).execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
+    Ok(serde_json::json!({"outcome":if committed {"committed"} else {"cancelled"}}))
 }
 
 /// Qualification uses the stored owner and the consent attached to the exact revision. This is
@@ -229,7 +290,14 @@ pub async fn create_experience(
     validate_payload(title, body, &cmd.tags, &cmd.origin)?;
     let hash = command_hash(
         "experience_create",
-        &(cmd.account_ref, title, body, &cmd.tags, &cmd.origin),
+        &(
+            cmd.account_ref,
+            cmd.expected_person_ref,
+            title,
+            body,
+            &cmd.tags,
+            &cmd.origin,
+        ),
     )?;
     let mut tx = db.pool().begin().await?;
     if let Some(prior) = previous(&mut tx, cmd.request_id, "create", &hash).await? {
@@ -250,6 +318,9 @@ pub async fn create_experience(
     .fetch_optional(&mut *tx)
     .await?
     .ok_or(AssetsError::Invalid("person_unavailable"))?;
+    if subject != cmd.expected_person_ref {
+        return Err(AssetsError::Stale);
+    }
     let id = Uuid::new_v4();
     let sequence: i64 =
         sqlx::query_scalar("SELECT nextval('linggan_creation_experience_code_seq')")

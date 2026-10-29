@@ -41,6 +41,15 @@ async fn load_context(
 /// Runs every manuscript rule against a draft as the editor currently holds it, with the account
 /// identity and the confirmed fact cards as they are now.
 pub async fn check_draft(db: &Database, doc: &WorkDocument) -> Result<CheckReport, AssetsError> {
+    check_draft_for_work(db, doc, None).await
+}
+
+/// When the current work is known, distinguish this draft's own reference from other drafts.
+pub async fn check_draft_for_work(
+    db: &Database,
+    doc: &WorkDocument,
+    work: Option<Uuid>,
+) -> Result<CheckReport, AssetsError> {
     // Unsaved editor input may contain duplicate topics, which this check must report.
     // Keep the normal size limit and validate the remaining document on a deduplicated copy.
     if doc.tags.len() > 30 {
@@ -55,8 +64,74 @@ pub async fn check_draft(db: &Database, doc: &WorkDocument) -> Result<CheckRepor
         .execute(&mut *tx)
         .await?;
     let ctx = load_context(&mut tx, doc.account_ref).await?;
+    let mut report = check_manuscript(&Subject::from_document(doc), &ctx);
+    add_repeated_experience_warnings(&mut tx, doc, work, &mut report).await?;
     tx.commit().await?;
-    Ok(check_manuscript(&Subject::from_document(doc), &ctx))
+    Ok(report)
+}
+
+async fn add_repeated_experience_warnings(
+    tx: &mut Transaction<'_, Postgres>,
+    doc: &WorkDocument,
+    work: Option<Uuid>,
+    report: &mut CheckReport,
+) -> Result<(), AssetsError> {
+    if doc.experience_slots.is_empty() {
+        return Ok(());
+    }
+    let Some(work) = work else {
+        report.not_run.push(NotRun {
+            rule: "R-W5".into(),
+            reason: "未指定当前稿件，无法检查经历是否在其他稿件中引用".into(),
+        });
+        return Ok(());
+    };
+    let refs: Vec<String> = doc
+        .experience_slots
+        .iter()
+        .map(|slot| slot.experience_ref.to_string())
+        .collect();
+    let account = doc.account_ref.map(|id| id.to_string());
+    let repeated: Vec<String> = sqlx::query_scalar("SELECT DISTINCT slot->>'experienceRef' FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.document->'experienceSlots','[]'::jsonb)) slot WHERE w.work_ref<>$1 AND r.document->>'accountRef'=$2 AND slot->>'experienceRef'=ANY($3)")
+        .bind(work).bind(account).bind(&refs).fetch_all(&mut **tx).await?;
+    let mut emitted = 0;
+    for slot in &doc.experience_slots {
+        if emitted >= super::words::MAX_FINDINGS_PER_RULE {
+            break;
+        }
+        if !repeated.contains(&slot.experience_ref.to_string()) {
+            continue;
+        }
+        if let Some(paragraph) = doc.paragraphs.iter().find(|p| p.id == slot.paragraph_id) {
+            let finding = Finding {
+                rule: "R-W5".into(),
+                level: Level::Warn,
+                message: "这段经历已在其他已保存稿件中引用；可以换一段，或换角度和说法。".into(),
+                location: Location::Paragraph {
+                    id: paragraph.id,
+                    start: 0,
+                    end: paragraph.text.encode_utf16().count(),
+                },
+                fixes: vec![Fix {
+                    label: "找到这段".into(),
+                    action: FixAction::EditByHand,
+                }],
+            };
+            let position = report
+                .findings
+                .iter()
+                .position(|item| {
+                    matches!(
+                        item.rule.as_str(),
+                        "R-W6" | "R-W7" | "R-W8" | "R-W9" | "R-I1" | "R-I2"
+                    )
+                })
+                .unwrap_or(report.findings.len());
+            report.findings.insert(position, finding);
+            emitted += 1;
+        }
+    }
+    Ok(())
 }
 
 fn text_sha(copy: &CopyText) -> String {
@@ -232,8 +307,10 @@ pub async fn prepare_copy(
     }
     let ctx = load_context(&mut tx, revision.document.account_ref).await?;
     let revision_id = revision.id;
+    let report_doc = revision.document.clone();
     let subject = copy_subject(&mut tx, domain, revision, &ctx).await?;
-    let report = check_manuscript(&subject, &ctx);
+    let mut report = check_manuscript(&subject, &ctx);
+    add_repeated_experience_warnings(&mut tx, &report_doc, Some(work), &mut report).await?;
     if report.count(Level::Must) > 0 {
         return Err(AssetsError::Blocked(report.findings));
     }

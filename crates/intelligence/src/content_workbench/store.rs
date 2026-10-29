@@ -91,6 +91,13 @@ pub async fn list_works(
 pub async fn read_work(db: &Database, work: Uuid) -> Result<WorkEnvelope, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
     let (domain, mut revision) = read_revision_in(&mut tx, work, None).await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *tx)
+        .await?;
+    let experience_reset_required = !super::experience_fragments::withdrawn_history(&mut tx, work)
+        .await?
+        .is_empty();
     let statuses = redact(&mut tx, domain, &mut revision.document).await?;
     let exports = super::exports::exports_in(&mut tx, work).await?;
     tx.commit().await?;
@@ -99,6 +106,7 @@ pub async fn read_work(db: &Database, work: Uuid) -> Result<WorkEnvelope, Workbe
         domain_ref: domain,
         saved_by: "local_machine".into(),
         revision,
+        experience_reset_required,
         source_statuses: statuses,
         exports,
     })
@@ -197,6 +205,7 @@ pub async fn save(
         &command,
         None,
         false,
+        false,
     )
     .await?;
     let (domain, _) = read_revision_in(&mut tx, work, None).await?;
@@ -250,6 +259,7 @@ async fn save_in(
     command: &str,
     adoption: Option<&AdoptionLink>,
     force_revision: bool,
+    allow_epoch_rotation: bool,
 ) -> Result<SaveReceipt, WorkbenchError> {
     ensure_request_owner_in(tx, request, RequestOwner::Work).await?;
     lock(tx, work.to_string()).await?;
@@ -260,6 +270,9 @@ async fn save_in(
     let (outcome, revision) = if current.id != expected {
         ("stale", current)
     } else {
+        if !allow_epoch_rotation && doc.experience_epoch != current.document.experience_epoch {
+            return Err(WorkbenchError::Invalid("experience_editor_reset_required"));
+        }
         prepare(tx, work, domain, Some(&current.document), &mut doc).await?;
         if doc == current.document && adoption.is_none() && !force_revision {
             ("unchanged", current)
@@ -300,7 +313,18 @@ pub async fn adopt_in(
     let command = hash(serde_json::to_vec(&json!([
         "adopt", work, request, expected, &doc, link
     ]))?);
-    let mut receipt = save_in(tx, work, request, expected, doc, &command, Some(link), true).await?;
+    let mut receipt = save_in(
+        tx,
+        work,
+        request,
+        expected,
+        doc,
+        &command,
+        Some(link),
+        true,
+        false,
+    )
+    .await?;
     let (domain, _) = read_revision_in(tx, work, None).await?;
     redact(tx, domain, &mut receipt.revision.document).await?;
     Ok(receipt)
@@ -324,9 +348,72 @@ pub async fn restore(
         &command,
         None,
         true,
+        false,
     )
     .await?;
     let (domain, _) = read_revision_in(&mut tx, work, None).await?;
+    redact(&mut tx, domain, &mut out.revision.document).await?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+/// Resume after withdrawal from the stored server revision, never from the editor's stale body.
+pub async fn reset_withdrawn(
+    db: &Database,
+    work: Uuid,
+    r: &ResetWithdrawnRequest,
+) -> Result<SaveReceipt, WorkbenchError> {
+    let command = hash(serde_json::to_vec(&json!(["reset_withdrawn", work, r]))?);
+    let mut tx = db.pool().begin().await?;
+    ensure_request_owner_in(&mut tx, r.request_id, RequestOwner::Work).await?;
+    lock(&mut tx, work.to_string()).await?;
+    if let Some(mut result) = replay(&mut tx, r.request_id, &command).await? {
+        let (domain, _) = read_revision_in(&mut tx, work, None).await?;
+        redact(&mut tx, domain, &mut result.revision.document).await?;
+        tx.commit().await?;
+        return Ok(result);
+    }
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *tx)
+        .await?;
+    let (domain, current) = read_revision_in(&mut tx, work, None).await?;
+    let mut doc = current.document.clone();
+    if current.id == r.expected_revision {
+        let withdrawn = super::experience_fragments::withdrawn_history(&mut tx, work).await?;
+        if withdrawn.is_empty() {
+            return Err(WorkbenchError::Invalid("experience_reset_not_required"));
+        }
+        doc.experience_epoch = Some(Uuid::new_v4());
+        let removed: Vec<Uuid> = doc
+            .experience_slots
+            .iter()
+            .filter(|slot| withdrawn.contains(&slot.experience_ref))
+            .map(|slot| slot.paragraph_id)
+            .collect();
+        doc.paragraphs
+            .retain(|paragraph| !removed.contains(&paragraph.id));
+        doc.experience_slots
+            .retain(|slot| !withdrawn.contains(&slot.experience_ref));
+        doc.experience_gaps.retain(|id| !removed.contains(id));
+        doc.uses.retain(|usage| !matches!(usage.target, UseTarget::Paragraph { paragraph_id } if removed.contains(&paragraph_id)));
+        for id in withdrawn {
+            sqlx::query("INSERT INTO linggan_creation_experience_reset(request_ref,work_ref,experience_ref) VALUES($1,$2,$3)")
+                .bind(r.request_id).bind(work).bind(id).execute(&mut *tx).await?;
+        }
+    }
+    let mut out = save_in(
+        &mut tx,
+        work,
+        r.request_id,
+        r.expected_revision,
+        doc,
+        &command,
+        None,
+        true,
+        true,
+    )
+    .await?;
     redact(&mut tx, domain, &mut out.revision.document).await?;
     tx.commit().await?;
     Ok(out)

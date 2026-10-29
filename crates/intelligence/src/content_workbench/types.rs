@@ -277,6 +277,9 @@ pub struct BridgeChoice {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    /// Changes when the server discards stale editor state following a withdrawal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experience_epoch: Option<Uuid>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub experience_slots: Vec<ExperienceSlot>,
     /// Paragraphs explicitly reserved for a real experience that has not yet been supplied.
@@ -309,6 +312,7 @@ impl Default for WorkDocument {
     fn default() -> Self {
         Self {
             contract: "content-workbench.v1".into(),
+            experience_epoch: None,
             experience_slots: vec![],
             experience_gaps: vec![],
             bridge: None,
@@ -360,6 +364,12 @@ pub struct RestoreRequest {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResetWithdrawnRequest {
+    pub request_id: Uuid,
+    pub expected_revision: Uuid,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlaceRequest {
     pub request_id: Uuid,
     pub expected_revision: Uuid,
@@ -389,6 +399,7 @@ pub struct WorkEnvelope {
     pub domain_ref: Uuid,
     pub saved_by: String,
     pub revision: Revision,
+    pub experience_reset_required: bool,
     pub source_statuses: Vec<SourceStatus>,
     pub exports: Vec<ExportRecord>,
 }

@@ -13,6 +13,13 @@ export type Level = 'must' | 'warn' | 'hint';
 export type SentenceStatus = 'review' | 'ok' | 'off' | 'fix';
 export type SentenceOrigin = 'manual' | 'saved_back';
 export type ReviewAction = 'approve' | 'request_fix' | 'disable' | 'enable';
+export interface Experience {
+  id: string; code: string; accountRef: string; currentPerson: boolean;
+  state: 'awaiting_subject' | 'confirmed' | 'disabled' | 'withdrawn'; revision: number;
+  usedCount?: number;
+  title: string | null; body: string | null; tags: string[] | null; origin: string | null;
+  sendToModel: boolean | null; confirmedAt: string | null; confirmedSubjectRole: string | null;
+}
 
 export interface Identity {
   accountRef: string;
@@ -25,6 +32,7 @@ export interface Identity {
   backingPersonRole: string | null;
   canProvideExperience: boolean | null;
   hasKnownPerson?: boolean | null;
+  personRef?: string | null;
   savedAt: string;
   savedBy: string;
 }
@@ -143,6 +151,21 @@ const ORG: readonly OrgRelation[] = ['parent', 'coach', 'none', 'unknown'];
 const GROUPS: readonly BridgeGroup[] = ['parent', 'coach'];
 const STATES: readonly BridgeState[] = ['no_account', 'unconfirmed', 'no_relation', 'skipped', 'bio_missing', 'ready'];
 const LEVELS: readonly Level[] = ['must', 'warn', 'hint'];
+function parseExperience(r: Json): Experience {
+  const tags = field(r, 'tags');
+  if (tags !== null && (!Array.isArray(tags) || tags.some(value => typeof value !== 'string'))) throw new ShapeError('tags');
+  return { id: uuid(r, 'id'), code: str(r, 'code'), accountRef: uuid(r, 'accountRef'), currentPerson: bool(r, 'currentPerson'),
+    state: oneOf(r, 'state', ['awaiting_subject', 'confirmed', 'disabled', 'withdrawn'] as const), revision: count(r, 'revision'),
+    usedCount: r.usedCount === undefined ? undefined : count(r, 'usedCount'),
+    title: optStr(r, 'title'), body: optStr(r, 'body'), tags: tags as string[] | null, origin: optStr(r, 'origin'),
+    sendToModel: optBool(r, 'sendToModel'), confirmedAt: optStr(r, 'confirmedAt'), confirmedSubjectRole: optStr(r, 'confirmedSubjectRole') };
+}
+export const decodeExperiences = (value: unknown) => decode(value, r => list(r, 'items', parseExperience));
+export const decodeExperienceReceipt = (value: unknown) => decode(value, r => ({ experience: parseExperience(obj(r, 'experience')), replayed: bool(r, 'replayed') }));
+export const decodeExperienceRequest = (value: unknown) => decode(value, r => { const item = optObj(r, 'result');
+  return item ? { kind: oneOf(item, 'kind', ['create', 'edit', 'confirm', 'withdraw'] as const), experienceRef: uuid(item, 'experienceRef'), revision: count(item, 'revision'), state: str(item, 'state') } : null;
+});
+export const decodeExperienceCancellation = (value: unknown) => decode(value, r => oneOf(r, 'outcome', ['committed', 'cancelled'] as const));
 
 export function parseIdentity(r: Json): Identity {
   return {
@@ -151,6 +174,7 @@ export function parseIdentity(r: Json): Identity {
     bioCheckedBy: optStr(r, 'bioCheckedBy'), hasRealPerson: optBool(r, 'hasRealPerson'),
     backingPersonRole: optStr(r, 'backingPersonRole'), canProvideExperience: optBool(r, 'canProvideExperience'),
     hasKnownPerson: optBool(r, 'hasKnownPerson'),
+    personRef: r.personRef == null ? null : uuid(r, 'personRef'),
     savedAt: str(r, 'savedAt'), savedBy: str(r, 'savedBy'),
   };
 }

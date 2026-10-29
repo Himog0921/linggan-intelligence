@@ -13,6 +13,8 @@ pub struct Experience {
     pub current_person: bool,
     pub state: String,
     pub revision: i32,
+    /// Number of current saved drafts that still reference this experience, not publications.
+    pub used_count: i64,
     pub title: Option<String>,
     pub body: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -31,6 +33,7 @@ pub struct Experience {
 pub struct ExperienceCreate {
     pub request_id: Uuid,
     pub account_ref: Uuid,
+    pub expected_person_ref: Uuid,
     pub title: String,
     pub body: String,
     pub tags: Vec<String>,
@@ -142,6 +145,7 @@ pub struct Identity {
     pub backing_person_role: Option<String>,
     pub can_provide_experience: Option<bool>,
     pub has_known_person: bool,
+    pub person_ref: Option<Uuid>,
     pub saved_at: String,
     pub saved_by: String,
 }

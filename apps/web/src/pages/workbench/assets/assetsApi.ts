@@ -4,13 +4,35 @@ import type { BridgeGroup, WorkDocument } from '../workbenchModel';
 import { newDocument } from '../workbenchModel';
 import {
   decodeAccounts, decodeCandidates, decodeCheckReport, decodeCopiedMark, decodeCopyReady, decodeCopyStatus,
-  decodeFactCardReceipt, decodeFactCards, decodeIdentityReceipt, decodeSentenceCheck, decodeSentenceReceipt,
+  decodeFactCardReceipt, decodeFactCards, decodeIdentityReceipt, decodeSentenceCheck, decodeSentenceReceipt, decodeExperiences, decodeExperienceReceipt, decodeExperienceRequest, decodeExperienceCancellation,
   decodeSentences, type OrgRelation, type ReviewAction, type SentenceOrigin, type SentenceStatus,
 } from './assetsModel';
 
 const base = '/ops/api/creation';
 const send = (method: 'POST' | 'PUT', path: string, body: unknown) => requestJson(`${base}${path}`, { method, body });
 const id = (value: string) => encodeURIComponent(value);
+
+export async function listExperiences(accountRef: string, signal?: AbortSignal) {
+  return decodeExperiences(await requestJson(`${base}/experiences?accountRef=${id(accountRef)}`, { signal }));
+}
+export async function experienceRequestStatus(requestId: string) {
+  return decodeExperienceRequest(await requestJson(`${base}/experience-requests/${id(requestId)}`));
+}
+export async function cancelExperienceRequest(requestId: string) {
+  return decodeExperienceCancellation(await send('POST', `/experience-requests/${id(requestId)}`, {}));
+}
+export async function createExperience(command: { requestId: string; accountRef: string; expectedPersonRef: string; title: string; body: string; tags: string[]; origin: string }) {
+  return decodeExperienceReceipt(await send('POST', '/experiences', command));
+}
+export async function editExperience(experience: string, command: { requestId: string; expectedRevision: number; title: string; body: string; tags: string[]; origin: string }) {
+  return decodeExperienceReceipt(await send('PUT', `/experiences/${id(experience)}`, command));
+}
+export async function confirmExperience(experience: string, command: { requestId: string; expectedRevision: number; subjectConfirmed: true; draftUse: true; sendToModel: null; confirmationMethod: string }) {
+  return decodeExperienceReceipt(await send('POST', `/experiences/${id(experience)}/confirm`, command));
+}
+export async function withdrawExperience(experience: string, command: { requestId: string }) {
+  return decodeExperienceReceipt(await send('POST', `/experiences/${id(experience)}/withdraw`, command));
+}
 
 export interface IdentityCommand {
   requestId: string;
@@ -84,12 +106,13 @@ export async function checkSentence(text: string, signal?: AbortSignal) {
 export function checkDocument(document: WorkDocument): WorkDocument {
   return {
     ...newDocument(), title: document.title, accountRef: document.accountRef, tags: document.tags,
-    paragraphs: document.paragraphs, pages: document.pages.filter(page => page.kind === 'cover').slice(0, 1),
+    paragraphs: document.paragraphs, experienceSlots: document.experienceSlots, experienceGaps: document.experienceGaps,
+    pages: document.pages.filter(page => page.kind === 'cover').slice(0, 1),
     bridge: document.bridge, coverAi: document.coverAi,
   };
 }
-export async function checkDraft(document: WorkDocument, signal?: AbortSignal) {
-  return decodeCheckReport(await requestJson(`${base}/checks`, { method: 'POST', body: { document: checkDocument(document) }, signal }));
+export async function checkDraft(document: WorkDocument, signal?: AbortSignal, workRef?: string) {
+  return decodeCheckReport(await requestJson(`${base}/checks`, { method: 'POST', body: { document: checkDocument(document), ...(workRef ? { workRef: id(workRef) } : {}) }, signal }));
 }
 export async function prepareCopy(workId: string, command: { requestId: string; expectedRevision: string }) {
   return decodeCopyReady(await send('POST', `/works/${id(workId)}/copy`, command));

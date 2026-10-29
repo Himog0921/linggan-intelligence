@@ -85,6 +85,14 @@ describe('asset responses', () => {
 });
 
 describe('asset requests', () => {
+  it('sends experience slots and empty gaps to the local manuscript check', async () => {
+    const f = stub(reply(report));
+    const doc = { ...newDocument(), paragraphs: [{ id, text: '' }, { id: other, text: '合成' }],
+      experienceGaps: [id], experienceSlots: [{ paragraphId: other, experienceRef: id, experienceRevision: 1 }] };
+    await checkDraft(doc, undefined, other);
+    expect(call(f).body.document).toMatchObject({ experienceGaps: [id], experienceSlots: doc.experienceSlots });
+    expect(call(f).body.workRef).toBe(other);
+  });
   it('reads accounts, candidates, cards and sentences with the documented paths', async () => {
     const f = stub(
       reply({ items: [{ accountRef: id, accountName: '甲', platform: 'xhs', status: 'active', operatorName: null, identity }] }),

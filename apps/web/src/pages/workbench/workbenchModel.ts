@@ -159,8 +159,17 @@ export interface BridgeChoice {
   sentence: BridgeUse | null;
   afterParagraph: string | null;
 }
+/** Each paragraph derived from an experience retains its originating revision. */
+export interface ExperienceSlot {
+  paragraphId: string;
+  experienceRef: string;
+  experienceRevision: number;
+}
 export interface WorkDocument {
   contract: string;
+  experienceEpoch: string | null;
+  experienceSlots: ExperienceSlot[];
+  experienceGaps: string[];
   /** Absent in older revisions; null means the bridge slot has not been decided. */
   bridge: BridgeChoice | null;
   /** Whether the cover image is AI-made; null means not recorded, never "no". */
@@ -217,6 +226,7 @@ export interface ExportRecord {
   packageByteSize: number | null;
 }
 export interface WorkEnvelope {
+  experienceResetRequired?: boolean;
   workId: string;
   domainRef: string;
   savedBy: string;
@@ -563,6 +573,9 @@ export const parseBridgeChoice = shape<BridgeChoice>({
 });
 export const parseWorkDocument = shape<WorkDocument>({
   contract: v => v === 'content-workbench.v1' ? v : bad(),
+  experienceEpoch: v => v === undefined ? null : nullable(uuid)(v),
+  experienceSlots: v => v === undefined ? [] : array(shape<ExperienceSlot>({ paragraphId: uuid, experienceRef: uuid, experienceRevision: integer }))(v),
+  experienceGaps: v => v === undefined ? [] : array(uuid)(v),
   bridge: v => v === undefined ? null : nullable(parseBridgeChoice)(v),
   coverAi: v => v === undefined ? null : nullable(bool)(v),
   materials: v => v === undefined ? [] : array(parseMaterialSelection)(v),
@@ -611,6 +624,7 @@ export const parseExportRecord = shape<ExportRecord>({
   packageByteSize: nullable(integer)
 });
 export const parseEnvelope = shape<WorkEnvelope>({
+  experienceResetRequired: v => v === undefined ? false : bool(v),
   workId: uuid,
   domainRef: uuid,
   savedBy: str,
@@ -797,6 +811,9 @@ export const parseAiStatus = shape<AiStatus>({
 export function newDocument(title = ''): WorkDocument {
   return {
     contract: 'content-workbench.v1',
+    experienceEpoch: null,
+    experienceSlots: [],
+    experienceGaps: [],
     bridge: null,
     coverAi: null,
     materials: [],

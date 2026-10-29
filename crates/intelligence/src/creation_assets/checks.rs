@@ -614,6 +614,7 @@ mod tests {
             backing_person_role: None,
             can_provide_experience: None,
             has_known_person: false,
+            person_ref: None,
             saved_at: String::new(),
             saved_by: "local_machine".into(),
         }

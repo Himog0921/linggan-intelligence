@@ -8,8 +8,9 @@ mod full_schema;
 use fixture::*;
 use linggan_intelligence::content_workbench::{
     BridgeChoice, BridgeGroup, BridgeUse, CreateRequest, ExperienceSlot, FreezeRequest, PageKind,
-    Paragraph, PlaceRequest, RestoreRequest, SaveRequest, UseTarget, WorkDocument, WorkbenchError,
-    create_work, freeze_export, place, read_request, read_work, restore, revisions, save,
+    Paragraph, PlaceRequest, ResetWithdrawnRequest, RestoreRequest, SaveRequest, UseTarget,
+    WorkDocument, WorkbenchError, create_work, freeze_export, place, read_request, read_work,
+    reset_withdrawn, restore, revisions, save,
 };
 use linggan_intelligence::creation_assets::*;
 use linggan_storage_postgres::Database;
@@ -73,13 +74,8 @@ async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() 
 async fn person_correction_keeps_consent_but_replacement_cannot_use_former_experiences() {
     let db = db("assets_person_change").await;
     let (account, _, _) = accounts(&db).await;
-    let initial = put_identity(
-        &db,
-        account,
-        &identity(0, OrgRelation::Parent, Some(true), Some("妈妈")),
-    )
-    .await
-    .unwrap();
+    let initial_command = identity(0, OrgRelation::Parent, Some(true), Some("妈妈"));
+    let initial = put_identity(&db, account, &initial_command).await.unwrap();
     let original_subject: Uuid = sqlx::query_scalar(
         "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
     )
@@ -90,12 +86,35 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
     let original_create = ExperienceCreate {
         request_id: Uuid::new_v4(),
         account_ref: account,
+        expected_person_ref: read_identity(&db, account)
+            .await
+            .unwrap()
+            .and_then(|value| value.person_ref)
+            .unwrap_or(Uuid::nil()),
         title: "虚构经历".into(),
         body: "合成经历正文。".into(),
         tags: vec![],
         origin: "oral".into(),
     };
     let created = create_experience(&db, &original_create).await.unwrap();
+    assert_eq!(
+        cancel_experience_request(&db, original_create.request_id)
+            .await
+            .unwrap()["outcome"],
+        "committed"
+    );
+    let mut cancelled_create = original_create.clone();
+    cancelled_create.request_id = Uuid::new_v4();
+    assert_eq!(
+        cancel_experience_request(&db, cancelled_create.request_id)
+            .await
+            .unwrap()["outcome"],
+        "cancelled"
+    );
+    assert!(matches!(
+        create_experience(&db, &cancelled_create).await,
+        Err(AssetsError::Invalid("request_cancelled"))
+    ));
     let experience = created.experience.id;
     let original_confirm = ExperienceConfirm {
         request_id: Uuid::new_v4(),
@@ -146,6 +165,9 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
     .await
     .unwrap();
     assert_eq!(same_subject, original_subject);
+    let mut correction_capture = original_create.clone();
+    correction_capture.request_id = Uuid::new_v4();
+    assert!(create_experience(&db, &correction_capture).await.is_ok());
     assert!(
         read_usable_experience(&db, experience, 1, Some(account))
             .await
@@ -170,6 +192,46 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
         origin: "oral".into(),
     };
     edit_experience(&db, experience, &edit).await.unwrap();
+    // Splitting a paragraph retains the existing confirmed source revision, even when the
+    // library has since received a newer version that is awaiting confirmation.
+    let mut split_doc = doc.clone();
+    split_doc.paragraphs[0].text = "合成经历".into();
+    let split_id = Uuid::new_v4();
+    split_doc.paragraphs.push(Paragraph {
+        id: split_id,
+        text: "正文。".into(),
+    });
+    split_doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: split_id,
+        experience_ref: experience,
+        experience_revision: 1,
+    });
+    let mut unrelated = split_doc.clone();
+    unrelated.paragraphs[1].text = "无关的合成原创".into();
+    assert!(matches!(
+        save(
+            &db,
+            work.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: work.revision.id,
+                document: unrelated
+            }
+        )
+        .await,
+        Err(WorkbenchError::Invalid("experience_split_changed"))
+    ));
+    let split = save(
+        &db,
+        work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: work.revision.id,
+            document: split_doc,
+        },
+    )
+    .await
+    .unwrap();
     let mut replacement = identity(2, OrgRelation::Parent, Some(true), Some("爸爸"));
     replacement.person_change = Some(PersonChange::Replacement);
     let replaced = put_identity(&db, account, &replacement).await.unwrap();
@@ -194,6 +256,15 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
     .await
     .unwrap();
     assert_ne!(new_subject, original_subject);
+    let historic_replay = put_identity(&db, account, &initial_command).await.unwrap();
+    assert!(historic_replay.replayed);
+    assert_eq!(historic_replay.identity.person_ref, Some(original_subject));
+    let mut stale_capture = original_create.clone();
+    stale_capture.request_id = Uuid::new_v4();
+    assert!(matches!(
+        create_experience(&db, &stale_capture).await,
+        Err(AssetsError::Stale)
+    ));
     let mut bridge_doc = draft(Some(account), &["合成正文"]);
     bridge_doc.bridge = None;
     assert!(
@@ -272,7 +343,7 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
             work.work_id,
             &CopyCommand {
                 request_id: Uuid::new_v4(),
-                expected_revision: work.revision.id
+                expected_revision: split.revision.id
             }
         )
         .await,
@@ -283,6 +354,11 @@ async fn person_correction_keeps_consent_but_replacement_cannot_use_former_exper
         &ExperienceCreate {
             request_id: Uuid::new_v4(),
             account_ref: account,
+            expected_person_ref: read_identity(&db, account)
+                .await
+                .unwrap()
+                .and_then(|value| value.person_ref)
+                .unwrap_or(Uuid::nil()),
             title: "新真人的合成经历".into(),
             body: "另一段合成经历。".into(),
             tags: vec![],
@@ -335,6 +411,11 @@ async fn replacement_committed_before_copy_rechecks_the_person() {
         &ExperienceCreate {
             request_id: Uuid::new_v4(),
             account_ref: account,
+            expected_person_ref: read_identity(&db, account)
+                .await
+                .unwrap()
+                .and_then(|value| value.person_ref)
+                .unwrap_or(Uuid::nil()),
             title: "合成经历".into(),
             body: "合成并发正文。".into(),
             tags: vec![],
@@ -444,6 +525,11 @@ async fn history_edit_and_restore_save_serialize_without_deadlock() {
             &ExperienceCreate {
                 request_id: Uuid::new_v4(),
                 account_ref: account,
+                expected_person_ref: read_identity(&db, account)
+                    .await
+                    .unwrap()
+                    .and_then(|value| value.person_ref)
+                    .unwrap_or(Uuid::nil()),
                 title: "合成经历".into(),
                 body: text.into(),
                 tags: vec![],
@@ -628,6 +714,87 @@ async fn empty_experience_slot_is_reported_and_blocks_copy() {
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn first_person_advertising_copy_does_not_require_personal_experience_binding() {
+    let db = db("assets_narrative_without_personal_slot").await;
+    let (account, _, _) = accounts(&db).await;
+    let mut doc = draft(Some(account), &["合成示例：我也遇到过这样的日常。"]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    let report = check_draft(&db, &doc).await.unwrap();
+    assert!(!report.findings.iter().any(|finding| finding.rule == "R-M7"));
+    let work = create(&db, doc).await;
+    assert!(
+        prepare_copy(
+            &db,
+            work.work_id,
+            &CopyCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: work.revision.id
+            }
+        )
+        .await
+        .is_ok()
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn anonymous_comment_can_be_used_with_its_source_and_copied_without_personal_binding() {
+    let db = db("assets_comment_reference").await;
+    let (account, _, _) = accounts(&db).await;
+    let mut document = comment_doc(&db).await;
+    document.account_ref = Some(account);
+    document.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    let source = document.excerpts[0].citation.source_ref;
+    let work = create(&db, document).await;
+    let placed = place(
+        &db,
+        work.work_id,
+        &PlaceRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: work.revision.id,
+            canvas_id: work.revision.document.canvas[0].id,
+            targets: vec![UseTarget::Paragraph {
+                paragraph_id: work.revision.document.paragraphs[0].id,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    let saved = read_work(&db, work.work_id).await.unwrap();
+    assert_eq!(saved.revision.id, placed.revision.id);
+    assert_eq!(
+        saved.revision.document.excerpts[0].citation.source_ref,
+        source
+    );
+    assert_eq!(
+        serde_json::to_value(&saved.revision.document.excerpts[0].citation.source_kind).unwrap(),
+        "comment"
+    );
+    assert_eq!(saved.revision.document.uses.len(), 1);
+    assert!(saved.revision.document.experience_slots.is_empty());
+    let ready = prepare_copy(
+        &db,
+        work.work_id,
+        &CopyCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: saved.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(ready.text.contains("合成匿名原声"));
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     let db = db("assets_experience_draft").await;
     let (account, _, other) = accounts(&db).await;
@@ -643,6 +810,11 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
         &ExperienceCreate {
             request_id: Uuid::new_v4(),
             account_ref: account,
+            expected_person_ref: read_identity(&db, account)
+                .await
+                .unwrap()
+                .and_then(|value| value.person_ref)
+                .unwrap_or(Uuid::nil()),
             title: "虚构".into(),
             body: "合成经历，只供测试。".into(),
             tags: vec![],
@@ -652,6 +824,7 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     .await
     .unwrap();
     let id = made.experience.id;
+    assert_eq!(made.experience.used_count, 0);
     confirm_experience(
         &db,
         id,
@@ -688,6 +861,7 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     )
     .await
     .unwrap();
+    assert_eq!(read_experience(&db, id).await.unwrap().used_count, 1);
     short.tags.push("合成".into());
     assert!(
         save(
@@ -701,6 +875,114 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
         )
         .await
         .is_ok()
+    );
+    assert_eq!(read_experience(&db, id).await.unwrap().used_count, 1);
+    let repeated_doc = read_work(&db, short_work.work_id)
+        .await
+        .unwrap()
+        .revision
+        .document;
+    let own_check = check_draft_for_work(&db, &repeated_doc, Some(short_work.work_id))
+        .await
+        .unwrap();
+    assert!(
+        !own_check
+            .findings
+            .iter()
+            .any(|finding| finding.rule == "R-W5")
+    );
+    let other_work = create(&db, repeated_doc.clone()).await;
+    assert_eq!(read_experience(&db, id).await.unwrap().used_count, 2);
+    let repeated_check = check_draft_for_work(&db, &repeated_doc, Some(short_work.work_id))
+        .await
+        .unwrap();
+    assert!(
+        repeated_check
+            .findings
+            .iter()
+            .any(|finding| finding.rule == "R-W5" && finding.level == Level::Warn)
+    );
+    let mut different_account = repeated_doc.clone();
+    different_account.account_ref = Some(other);
+    assert!(
+        !check_draft_for_work(&db, &different_account, Some(short_work.work_id))
+            .await
+            .unwrap()
+            .findings
+            .iter()
+            .any(|finding| finding.rule == "R-W5")
+    );
+    let mut with_spelling_warning = repeated_doc.clone();
+    with_spelling_warning.paragraphs.push(Paragraph {
+        id: Uuid::new_v4(),
+        text: "adhd".into(),
+    });
+    let order = check_draft_for_work(&db, &with_spelling_warning, Some(short_work.work_id))
+        .await
+        .unwrap()
+        .findings;
+    assert!(
+        order
+            .iter()
+            .position(|finding| finding.rule == "R-W5")
+            .unwrap()
+            < order
+                .iter()
+                .position(|finding| finding.rule == "R-W6")
+                .unwrap()
+    );
+    let mut many = repeated_doc.clone();
+    for _ in 0..35 {
+        let paragraph_id = Uuid::new_v4();
+        many.paragraphs.push(Paragraph {
+            id: paragraph_id,
+            text: "合成段落".into(),
+        });
+        many.experience_slots.push(ExperienceSlot {
+            paragraph_id,
+            experience_ref: id,
+            experience_revision: 1,
+        });
+    }
+    let warnings = check_draft_for_work(&db, &many, Some(short_work.work_id))
+        .await
+        .unwrap();
+    assert_eq!(
+        warnings
+            .findings
+            .iter()
+            .filter(|finding| finding.rule == "R-W5")
+            .count(),
+        MAX_FINDINGS_PER_RULE
+    );
+    let copy = prepare_copy(
+        &db,
+        other_work.work_id,
+        &CopyCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: other_work.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(copy.warn_count > 0);
+    let warnings: serde_json::Value = sqlx::query_scalar(
+        "SELECT warn_rules FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+    )
+    .bind(copy.receipt_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(warnings["R-W5"], 1);
+    let mut unbound = repeated_doc.clone();
+    unbound.experience_slots.clear();
+    assert!(
+        !check_draft_for_work(&db, &unbound, Some(other_work.work_id))
+            .await
+            .unwrap()
+            .findings
+            .iter()
+            .any(|finding| finding.rule == "R-W5")
     );
     // Independently authored identical text remains movable after a later experience binding
     // is removed; an unchanged amount of unbound text is not an added copy.
@@ -1016,6 +1298,7 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     .unwrap();
     // A second editor still holds a copy after the current draft removed the reference.
     // Queue withdrawal first; an unbound save must not persist the stale text afterward.
+    let references_before_withdrawal = read_experience(&db, id).await.unwrap().used_count;
     let mut hold = db.pool().begin().await.unwrap();
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
         .bind("creation_assets:experience-gate")
@@ -1029,13 +1312,15 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     let save_db = db.clone();
     let mut stale_text = removed_slot.revision.document.clone();
     stale_text.title = "合成改写经历，只供测试。".into();
+    let old_revision = removed_slot.revision.id;
+    let historical_id = historical_work.work_id;
     let saving = tokio::spawn(async move {
         save(
             &save_db,
-            historical_work.work_id,
+            historical_id,
             &SaveRequest {
                 request_id: Uuid::new_v4(),
-                expected_revision: removed_slot.revision.id,
+                expected_revision: old_revision,
                 document: stale_text,
             },
         )
@@ -1044,12 +1329,80 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     wait_for_advisory_waiters(&db, 2).await;
     hold.commit().await.unwrap();
     withdrawal.await.unwrap().unwrap();
+    assert_eq!(
+        read_experience(&db, id).await.unwrap().used_count,
+        references_before_withdrawal
+    );
     assert!(matches!(
         saving.await.unwrap(),
         Err(WorkbenchError::Invalid(
             "experience_withdrawal_requires_reset"
         ))
     ));
+    assert!(
+        read_work(&db, historical_id)
+            .await
+            .unwrap()
+            .experience_reset_required
+    );
+    let reset = ResetWithdrawnRequest {
+        request_id: Uuid::new_v4(),
+        expected_revision: old_revision,
+    };
+    let resumed = reset_withdrawn(&db, historical_id, &reset).await.unwrap();
+    assert_eq!(resumed.outcome, "accepted");
+    assert_ne!(resumed.revision.id, old_revision);
+    assert!(
+        !read_work(&db, historical_id)
+            .await
+            .unwrap()
+            .experience_reset_required
+    );
+    assert!(
+        reset_withdrawn(&db, historical_id, &reset)
+            .await
+            .unwrap()
+            .replayed
+    );
+    let old_page = save(
+        &db,
+        historical_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: old_revision,
+            document: removed_slot.revision.document.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(old_page.outcome, "stale");
+    assert!(matches!(
+        save(
+            &db,
+            historical_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: resumed.revision.id,
+                document: removed_slot.revision.document.clone()
+            }
+        )
+        .await,
+        Err(WorkbenchError::Invalid("experience_editor_reset_required"))
+    ));
+    let mut safe = resumed.revision.document.clone();
+    safe.paragraphs[0].text = "重新开始的独立正文".into();
+    let saved_after = save(
+        &db,
+        historical_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: resumed.revision.id,
+            document: safe,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved_after.outcome, "accepted");
     assert_eq!(
         read_work(&db, made.work_id)
             .await
@@ -1091,6 +1444,21 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     .await
     .unwrap();
     assert_eq!(fragments, 0);
+    let current = read_work(&db, made.work_id).await.unwrap();
+    reset_withdrawn(
+        &db,
+        made.work_id,
+        &ResetWithdrawnRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: current.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        read_experience(&db, id).await.unwrap().used_count,
+        references_before_withdrawal - 1
+    );
 }
 
 #[tokio::test]
@@ -1098,9 +1466,14 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
 async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
     let db = db("assets_experience").await;
     let (account, _, _) = accounts(&db).await;
-    let cmd = ExperienceCreate {
+    let mut cmd = ExperienceCreate {
         request_id: Uuid::new_v4(),
         account_ref: account,
+        expected_person_ref: read_identity(&db, account)
+            .await
+            .unwrap()
+            .and_then(|value| value.person_ref)
+            .unwrap_or(Uuid::nil()),
         title: "合成经历".into(),
         body: "这是一段仅用于测试的虚构经历。".into(),
         tags: vec!["合成".into()],
@@ -1113,6 +1486,12 @@ async fn experience_payload_is_erasable_and_confirmation_is_explicit() {
     let mut unknown_role = identity(0, OrgRelation::Parent, None, None);
     unknown_role.has_real_person = Some(true);
     put_identity(&db, account, &unknown_role).await.unwrap();
+    cmd.expected_person_ref = read_identity(&db, account)
+        .await
+        .unwrap()
+        .unwrap()
+        .person_ref
+        .unwrap();
     let made = create_experience(&db, &cmd).await.unwrap();
     assert_eq!(made.experience.state, "awaiting_subject");
     let id = made.experience.id;
