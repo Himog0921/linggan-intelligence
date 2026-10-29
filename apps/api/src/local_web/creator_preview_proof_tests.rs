@@ -1441,3 +1441,80 @@ async fn creator_context_works_stay_out_of_domain_wide_lists_and_statistics() {
         "精选研究取回详情后，领域级的列表与统计仍不变"
     );
 }
+
+/// 把外部编号以 `prefix` 开头的作品批量标成只在作者主页上出现过（测试辅助，原因同 `make_creator_context_only`）。
+async fn make_many_creator_context_only(db: &Database, domain: Uuid, prefix: &str) -> u64 {
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let changed = sqlx::query("UPDATE linggan_material_domain_usage SET use_kind='creator_context' WHERE domain_ref=$1 AND content_public_ref IN (SELECT public_ref FROM linggan_material_content WHERE content_external_id LIKE $2)")
+        .bind(domain)
+        .bind(format!("{prefix}%"))
+        .execute(&mut *tx)
+        .await
+        .unwrap()
+        .rows_affected();
+    tx.commit().await.unwrap();
+    changed
+}
+
+/// 领域里有很多只在作者主页上出现过的作品，而且排在研究作品前面时，领域列表仍然列出研究作品：
+/// 无筛选的列表先按页取最近的 51 篇再往下处理，语境作品若先占满这一页、事后才被过滤，整页会是空的。
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL proof; run by scripts/test-web-app-postgres.sh"]
+async fn many_creator_context_works_do_not_crowd_research_works_out_of_the_domain_list() {
+    let db = isolated("preview_crowd").await;
+    let domain = linggan_evidence::observation_domain::create_observation_domain_with_details(
+        &db,
+        "合成领域",
+        None,
+        None,
+    )
+    .await
+    .unwrap()
+    .domain_ref;
+    let mut research = Vec::new();
+    for n in 1..=2 {
+        let work = seed_work(
+            &db,
+            domain,
+            &format!("z-research-{n}"),
+            "research-author",
+            "研究作者",
+            &format!("研究作品 {n}"),
+            10,
+        )
+        .await;
+        research.push(work.to_string());
+    }
+    // 外部编号排在研究作品之前；合成包的观察时间都相同，列表按外部编号排，所以它们排在最前。
+    for n in 0..60 {
+        seed_work(
+            &db,
+            domain,
+            &format!("a-crowd-{n:03}"),
+            "crowd-author",
+            "语境作者",
+            &format!("语境作品 {n}"),
+            1,
+        )
+        .await;
+    }
+    assert_eq!(
+        make_many_creator_context_only(&db, domain, "a-crowd-").await,
+        60
+    );
+    research.sort();
+    let (status, list) = get_json(&db, &format!("/api/local/work-resources?domain={domain}")).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let mut listed: Vec<String> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["identity"]["publicRef"].as_str().unwrap().to_owned())
+        .collect();
+    listed.sort();
+    assert_eq!(listed, research, "60 篇语境作品不能把研究作品挤出领域列表");
+}
