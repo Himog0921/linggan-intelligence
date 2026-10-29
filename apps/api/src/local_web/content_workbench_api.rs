@@ -8,6 +8,7 @@ use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/ops/api/creation/works", get(list).post(create))
+        .route("/ops/api/creation/idea-boxes", get(ideas))
         .route("/ops/api/creation/storage", get(storage))
         .route("/ops/api/creation/requests/{id}", get(request_receipt))
         .route("/ops/api/creation/works/{id}", get(read))
@@ -62,6 +63,15 @@ struct ListQuery {
 }
 async fn list(State(state): State<LocalWebState>, Query(q): Query<ListQuery>) -> Response {
     match core::list_works(database!(state), q.domain_ref).await {
+        Ok(items) => Json(json!({"items":items})).into_response(),
+        Err(e) => error(e),
+    }
+}
+async fn ideas(State(state): State<LocalWebState>, Query(q): Query<ListQuery>) -> Response {
+    let Some(domain) = q.domain_ref else {
+        return error(WorkbenchError::Invalid("domainRef"));
+    };
+    match core::list_idea_boxes(database!(state), domain).await {
         Ok(items) => Json(json!({"items":items})).into_response(),
         Err(e) => error(e),
     }
@@ -216,6 +226,13 @@ pub(super) fn error(e: WorkbenchError) -> Response {
             StatusCode::CONFLICT,
             "creation_experience_editor_reset_required",
         ),
+        WorkbenchError::Invalid("idea_account_limit") => {
+            (StatusCode::CONFLICT, "creation_idea_account_limit")
+        }
+        WorkbenchError::Invalid("idea_anchor") => (StatusCode::CONFLICT, "creation_idea_anchor"),
+        WorkbenchError::Invalid("idea_not_found") => {
+            (StatusCode::CONFLICT, "creation_idea_not_found")
+        }
         WorkbenchError::Invalid(_) => (StatusCode::BAD_REQUEST, "creation_parameter_invalid"),
         WorkbenchError::NotFound => (StatusCode::NOT_FOUND, "creation_not_found"),
         WorkbenchError::RequestConflict => (StatusCode::CONFLICT, "creation_request_conflict"),

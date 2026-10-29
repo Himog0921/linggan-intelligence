@@ -81,6 +81,20 @@ afterEach(() => vi.useRealTimers());
 const ready = async () => { await screen.findByText(/必改 \d+ · 提醒 \d+ · 提示 \d+$/); };
 
 describe('check results', () => {
+  it('switches between real check, material, title and draft preview views', async () => {
+    const view = show();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '素材' }));
+    expect(screen.getByText('还没有加入材料。可以从材料桌选择。')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '标题' }));
+    expect(screen.getByRole('region', { name: '稿件标题' })).toHaveTextContent('合成标题');
+    fireEvent.click(screen.getByRole('button', { name: '编辑封面' }));
+    expect(view.onGoCover).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: '预览' }));
+    expect(screen.getByRole('region', { name: '稿件预览' })).toHaveTextContent('甲😀孩子变好了，真好');
+    fireEvent.click(screen.getByRole('button', { name: '检查' }));
+    expect(screen.getByText('没有发现问题。')).toBeVisible();
+  });
   it('groups findings by level with a word for each level, and counts them', async () => {
     vi.mocked(api.checkDraft).mockResolvedValue(report([
       finding({ rule: 'R-M4', level: 'must', message: '还没选衔接句' }),
@@ -499,6 +513,20 @@ describe('account and bridge slot', () => {
     expect(edit).toHaveBeenLastCalledWith(expect.objectContaining({ accountRef: '00000000-0000-4000-8000-000000000099' }));
     fireEvent.click(screen.getByRole('button', { name: '编辑账号身份' }));
     expect(await screen.findByRole('heading', { name: /示例账号 · 账号身份/ })).toBeInTheDocument();
+  });
+
+  it('broadcasts an identity change saved from the writing panel', async () => {
+    const postMessage = vi.fn();
+    class Channel { postMessage = postMessage; close() {} }
+    vi.stubGlobal('BroadcastChannel', Channel);
+    try {
+      vi.mocked(api.putIdentity).mockResolvedValue({ identity: identity({ revision: 2 }), replayed: false });
+      show(); await ready();
+      fireEvent.click(screen.getByRole('button', { name: '编辑账号身份' }));
+      const form = await screen.findByRole('form', { name: /示例账号 · 账号身份/ });
+      fireEvent.submit(form);
+      await waitFor(() => expect(postMessage).toHaveBeenCalledWith('identity-changed'));
+    } finally { vi.unstubAllGlobals(); }
   });
 
   it('shows the chosen sentence, cycles the library and marks a rewrite as local', async () => {

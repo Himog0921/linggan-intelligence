@@ -71,6 +71,62 @@ pub struct ExperienceReceipt {
     pub replayed: bool,
 }
 
+/// Persona fact payloads must never enter ordinary logs or immutable receipts.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaFact {
+    pub id: Uuid,
+    pub account_ref: Uuid,
+    pub key: Option<String>,
+    pub version: i32,
+    pub current_revision: i32,
+    pub current_person: bool,
+    pub state: String,
+    pub text: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
+    pub confirmation_method: Option<String>,
+}
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PersonaFactPut {
+    pub request_id: Uuid,
+    pub account_ref: Uuid,
+    pub expected_person_ref: Uuid,
+    pub key: String,
+    pub expected_version: i32,
+    pub text: String,
+    pub source: String,
+    pub conflict_decision: Option<String>,
+}
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PersonaFactConfirm {
+    pub request_id: Uuid,
+    pub expected_version: i32,
+    pub subject_confirmed: bool,
+    pub confirmation_method: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaFactReceipt {
+    /// Current visible state; on replay this may be newer than the operation result.
+    pub fact: PersonaFact,
+    /// Version produced by this request, not necessarily the version in `fact`.
+    pub result_version: i32,
+    pub replayed: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaFactRevision {
+    pub revision: i32,
+    pub text: String,
+    pub source: String,
+    pub status: String,
+    pub applied: bool,
+    pub recorded_at: String,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UsableExperience {

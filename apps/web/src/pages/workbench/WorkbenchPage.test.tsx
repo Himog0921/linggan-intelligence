@@ -69,6 +69,7 @@ beforeEach(() => {
     name: '合成领域'
   }]);
   vi.mocked(api.listWorks).mockResolvedValue([]);
+  vi.mocked(api.listIdeaBoxes).mockResolvedValue([]);
   vi.mocked(api.accounts).mockResolvedValue([]);
   vi.mocked(api.readWork).mockResolvedValue(envelope());
   vi.mocked(api.sources).mockResolvedValue({
@@ -103,6 +104,22 @@ describe('React workbench author control', () => {
     expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
     expect(api.resetWithdrawn).not.toHaveBeenCalled();
+  });
+  it('clears unfinished candidate and idea inputs when a withdrawal invalidates the editor', async () => {
+    show();
+    await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByText('添加笔记标题候选'));
+    fireEvent.change(screen.getByLabelText('新标题候选'), { target: { value: '待撤回的合成输入' } });
+    fireEvent.click(screen.getByText('补一个选题框'));
+    fireEvent.change(screen.getByLabelText('新选题框名称'), { target: { value: '待撤回的合成选题' } });
+    vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
+    fireEvent.focus(window);
+    await screen.findByRole('button', { name: '撤回后重新开始编辑' });
+    await waitFor(() => {
+      const event = new Event('beforeunload', { cancelable: true });
+      window.dispatchEvent(event);
+      expect(event.defaultPrevented).toBe(false);
+    });
   });
   it('keeps the editor covered when rechecking fails and allows retry', async () => {
     show();
@@ -172,6 +189,7 @@ describe('React workbench author control', () => {
     let channel: { onmessage: ((event: { data: string }) => void) | null } | undefined;
     class SyntheticChannel {
       onmessage: ((event: { data: string }) => void) | null = null;
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       constructor() { channel = this; }
       close() {}
     }
@@ -189,6 +207,7 @@ describe('React workbench author control', () => {
     let channel: { onmessage: ((event: { data: string }) => void) | null } | undefined;
     class SyntheticChannel {
       onmessage: ((event: { data: string }) => void) | null = null;
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
       constructor() { channel = this; }
       close() {}
     }
@@ -1014,17 +1033,37 @@ it('keeps the current editor and unsaved text mounted while entering and leaving
 });
 
 
-it('keeps every editor step reachable locally after adopting the two-item Ops sidebar', async () => {
+it('keeps every editor step reachable from the writing workflow menu', async () => {
+  vi.mocked(api.prepareMaterials).mockResolvedValue({ contract: 'content-workbench-materials.v1', asOf: 'now', methodVersion: 'test', query: '', terms: [], state: 'insufficient', gaps: [], documents: [], nextCursor: null, searchScope: 'test' });
   show(); await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(screen.getByText('创作步骤', { selector: 'summary' }));
   const nav = screen.getByRole('navigation', { name: '创作步骤' });
   for (const name of ['选题方案','材料浏览','创作画布','正文','封面','内页','预览与导出']) {
     expect(within(nav).getByRole('button', { name })).toBeInTheDocument();
   }
   fireEvent.click(within(nav).getByRole('button', { name: '材料浏览' }));
-  await waitFor(() => expect(within(nav).getByRole('button', { name: '材料浏览' })).toHaveAttribute('aria-current', 'step'));
-  fireEvent.click(within(nav).getByRole('button', { name: '正文' }));
-  await waitFor(() => expect(within(nav).getByRole('button', { name: '正文' })).toHaveAttribute('aria-current', 'step'));
+  const materialNav = await screen.findByRole('navigation', { name: '创作步骤' });
+  await waitFor(() => expect(within(materialNav).getByRole('button', { name: '材料浏览' })).toHaveAttribute('aria-current', 'step'));
+  fireEvent.click(within(materialNav).getByRole('button', { name: '正文' }));
   await screen.findByLabelText('正文第 1 段');
+});
+
+it('keeps unfinished candidate and idea inputs across editor steps and warns before leaving', async () => {
+  show(); await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(screen.getByText('添加笔记标题候选'));
+  fireEvent.change(screen.getByLabelText('新标题候选'), { target: { value: '尚未添加的候选' } });
+  fireEvent.click(screen.getByText('补一个选题框'));
+  fireEvent.change(screen.getByLabelText('新选题框名称'), { target: { value: '尚未建立的选题' } });
+  const leaving = new Event('beforeunload', { cancelable: true });
+  window.dispatchEvent(leaving);
+  expect(leaving.defaultPrevented).toBe(true);
+  fireEvent.click(screen.getByText('创作步骤', { selector: 'summary' }));
+  fireEvent.click(within(screen.getByRole('navigation', { name: '创作步骤' })).getByRole('button', { name: '选题方案' }));
+  fireEvent.click(within(await screen.findByRole('navigation', { name: '创作步骤' })).getByRole('button', { name: '正文' }));
+  fireEvent.click(await screen.findByText('添加笔记标题候选'));
+  expect(screen.getByLabelText('新标题候选')).toHaveValue('尚未添加的候选');
+  fireEvent.click(screen.getByText('补一个选题框'));
+  expect(screen.getByLabelText('新选题框名称')).toHaveValue('尚未建立的选题');
 });
 
 it('opens the asset library from its own tab for the chosen domain and leaves it again', async () => {

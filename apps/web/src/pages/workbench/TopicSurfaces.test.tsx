@@ -33,6 +33,20 @@ beforeEach(() => {
   vi.mocked(api.isLegacyReferenceUnavailable).mockReturnValue(false);
 });
 describe("unknown values remain unknown on topic surfaces", () => {
+  it('does not read or open a member draft as the idea when the idea list fails', () => {
+    const retry = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(['creation-proposal', id, id], { revision: { document: { ...newDocument(), angle: '不应显示的成员稿角度' } } });
+    render(<QueryClientProvider client={client}>
+      <TopicLibrary section="today" works={[{ ...works[0]!, ideaRef: id }]} ideasStatus="error" onRetryIdeas={retry} onOpen={vi.fn()} />
+    </QueryClientProvider>);
+    expect(screen.getByRole('button', { name: /选题信息暂不可用/ })).toBeDisabled();
+    expect(screen.queryByText('不应显示的成员稿角度')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0 份本篇材料/)).not.toBeInTheDocument();
+    expect(api.readWork).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重新读取选题框' }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
   it("does not turn an unread draft into zero words or an unwritten match", async () => {
     vi.mocked(api.readWork).mockImplementation(
       () => new Promise(() => undefined),

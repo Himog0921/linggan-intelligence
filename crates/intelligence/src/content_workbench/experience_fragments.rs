@@ -85,6 +85,11 @@ pub(super) fn strip(doc: &mut WorkDocument) {
 /// binding. This covers exact moves/copies, not arbitrary human paraphrases or external paste.
 fn metadata(doc: &WorkDocument) -> Vec<&str> {
     let mut out = Vec::new();
+    if let Some(name) = &doc.idea_name {
+        out.push(name.as_str());
+    }
+    out.extend(doc.cover_title_candidates.iter().map(String::as_str));
+    out.extend(doc.note_title_candidates.iter().map(String::as_str));
     if let Some(p) = &doc.material_preparation {
         out.push(p.query.as_str());
         out.extend(p.terms.iter().map(String::as_str));

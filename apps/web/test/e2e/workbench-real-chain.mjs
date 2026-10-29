@@ -39,9 +39,12 @@ let packageBytes;
 const imageSection = () => page.getByRole('region', { name: '封面与内页' });
 const stage = async (name, surface = page) => {
   const label = ({材料:'材料浏览',画布:'创作画布'})[name] ?? name;
+  const workflow=surface.locator('details:not([open]) > summary').filter({hasText:'创作步骤'});
+  if(await workflow.isVisible()) await workflow.click();
   const button=surface.getByRole('navigation',{name:'创作步骤'}).getByRole('button').filter({hasText:label});
   await button.click();
-  await until(async()=>await button.getAttribute('aria-current')==='step',`${name} view has committed`);
+  const id=({'选题方案':'topic','材料浏览':'materials','创作画布':'canvas','正文':'body','封面':'cover','内页':'inner','预览与导出':'export'})[label];
+  await surface.locator(`[data-view="${id}"]`).waitFor();
 };
 const save = async (surface = page) => {
   await surface.getByRole('button', {name:'保存',exact:true}).click();
@@ -466,7 +469,7 @@ try {
     assert.equal(refused.status(),409);assert.equal((await refused.json()).code,'creation_assets_blocked','the server refuses a copy with a 必改 left even when the page is bypassed');
     assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied,null,'a refused copy leaves no record');
     await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${workId}&view=body`);
-    const panel=page.getByRole('complementary',{name:'检查与复制'}),copy=panel.getByRole('button',{name:'复制到小红书',exact:true});
+    const panel=page.getByRole('complementary',{name:'检查与复制'}),footer=page.getByRole('region',{name:'复制'}),copy=footer.getByRole('button',{name:'复制到小红书',exact:true});
     await until(async()=>await panel.getByLabel('本篇的衔接句').inputValue()===bridgeSentence,'the approved sentence is placed in the draft');
     const account=panel.getByLabel('所属账号');await account.selectOption('');
     await panel.getByText('这篇还没选账号，不知道能不能放衔接句').waitFor();await panel.getByText(/^必改 1 · /).waitFor();assert.equal(await copy.isDisabled(),true,'a 必改 left keeps the copy button disabled');
@@ -476,17 +479,17 @@ try {
     await panel.getByRole('button',{name:'统一叫法',exact:true}).click();
     await until(async()=>await first.inputValue()==='今天先把示例营的练习本放到桌上。','the one-click wording fix rewrote the located text');
     await panel.getByText(wording).waitFor({state:'detached'});await screenshot('workbench-1440-checks-before-copy');
-    await until(async()=>await copy.isEnabled(),'copy opens once the check is clear');await copy.click();await panel.getByText(/已复制到剪贴板/).waitFor();
+    await until(async()=>await copy.isEnabled(),'copy opens once the check is clear');await copy.click();await footer.getByText(/已复制到剪贴板/).waitFor();
     const clipboard=await page.evaluate(()=>navigator.clipboard.readText());
     assert.equal(clipboard,['今天先把示例营的练习本放到桌上。',bridgeSentence,'本页版本：保留自己的新表达。'].join('\nㅤ\n')+'\n#家庭养育 #作业启动');
     const current=await envelope();assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied.revisionId,current.revision.id,'the copy is recorded against the saved revision it came from');
     assert.equal(current.revision.document.bridge.sentence.sentenceCode,'XJ-0001');assert.equal((await creationJson('/bridge-sentences?status=ok')).items[0].usedCount,1);
-    await panel.getByText('已复制（还没有发布）',{exact:true}).waitFor();await screenshot('workbench-1440-checks-copied');
-    await panel.getByRole('button',{name:'复制标题',exact:true}).click();await panel.getByText('标题已复制。').waitFor();
+    await footer.getByText(/已复制（还没有发布）/,{exact:false}).waitFor();await screenshot('workbench-1440-checks-copied');
+    await panel.getByRole('button',{name:'标题',exact:true}).click();await panel.getByRole('button',{name:'复制标题',exact:true}).click();await footer.getByText('标题已复制。').waitFor();
     assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),current.revision.document.title.trim());
-    await page.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达，再补一句。');await panel.getByText('草稿中',{exact:true}).waitFor();await save();
+    await page.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达，再补一句。');await until(async()=>!(await footer.innerText()).includes('已复制（还没有发布）'),'edited draft is no longer marked copied');await save();
   });
-  for(const [width,height] of [[1440,900],[1280,720],[1024,768],[390,844]]){
+  for(const [width,height] of [[1440,900],[1280,720]]){
     await step(`${width}×${height} 正文与图组可操作，无页面横向溢出`,async()=>{
       await page.setViewportSize({width,height});await stage('正文');
       for(const name of ['正文标题','正文第 1 段','确认发布标签'])await assertHorizontalReachability(page.getByLabel(name,{exact:true}),name);

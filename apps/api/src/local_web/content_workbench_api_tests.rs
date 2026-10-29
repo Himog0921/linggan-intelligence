@@ -257,3 +257,66 @@ async fn content_workbench_http_denies_unknown_fields_and_nonexistent_domain() {
     let (status, _) = call(app, "/ops/api/creation/works", Some(request)).await;
     assert!(status.is_client_error());
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn content_workbench_http_idea_box_and_title_candidates_round_trip() {
+    let db = proof("creation_http_idea_box").await;
+    let app = app_with_database(db);
+    let idea = Uuid::new_v4();
+    let mut anchor = WorkDocument::default();
+    anchor.title = "独立的笔记标题".into();
+    anchor.idea_ref = Some(idea);
+    anchor.idea_name = Some("合成选题".into());
+    anchor.angle = "这篇想说的合成意图".into();
+    anchor.note_title_candidates.push("合成标题候选".into());
+    anchor.cover_title_candidates.push("合成封面".into());
+    let (status, created) = call(
+        app.clone(),
+        "/ops/api/creation/works",
+        Some(json!({"requestId":Uuid::new_v4(),"domainRef":dossier::DOMAIN,"document":anchor})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(created["revision"]["document"]["title"], "独立的笔记标题");
+    assert_eq!(
+        created["revision"]["document"]["noteTitleCandidates"][0],
+        "合成标题候选"
+    );
+    let (status, boxes) = call(
+        app.clone(),
+        &format!("/ops/api/creation/idea-boxes?domainRef={}", dossier::DOMAIN),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(boxes["items"][0]["ideaRef"], idea.to_string());
+    assert_eq!(boxes["items"][0]["name"], "合成选题");
+    assert_eq!(boxes["items"][0]["intent"], "这篇想说的合成意图");
+    let mut other = WorkDocument::default();
+    other.title = "另一个笔记".into();
+    other.idea_ref = Some(idea);
+    let (status, linked) = call(
+        app.clone(),
+        "/ops/api/creation/works",
+        Some(json!({"requestId":Uuid::new_v4(),"domainRef":dossier::DOMAIN,"document":other})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(linked["revision"]["document"]["ideaRef"], idea.to_string());
+    let (_, works) = call(
+        app,
+        &format!("/ops/api/creation/works?domainRef={}", dossier::DOMAIN),
+        None,
+    )
+    .await;
+    assert_eq!(
+        works["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item["ideaRef"] == idea.to_string())
+            .count(),
+        2
+    );
+}

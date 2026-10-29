@@ -9,8 +9,8 @@ use fixture::*;
 use linggan_intelligence::content_workbench::{
     BridgeChoice, BridgeGroup, BridgeUse, CreateRequest, ExperienceSlot, FreezeRequest, PageKind,
     Paragraph, PlaceRequest, ResetWithdrawnRequest, RestoreRequest, SaveRequest, UseTarget,
-    WorkDocument, WorkbenchError, create_work, freeze_export, place, read_request, read_work,
-    reset_withdrawn, restore, revisions, save,
+    WorkDocument, WorkbenchError, create_work, freeze_export, list_idea_boxes, list_works, place,
+    read_request, read_work, reset_withdrawn, restore, revisions, save,
 };
 use linggan_intelligence::creation_assets::*;
 use linggan_storage_postgres::Database;
@@ -19,11 +19,462 @@ use uuid::Uuid;
 const FILL: &str = "\u{3164}";
 
 #[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn idea_box_links_drafts_without_conflating_note_title_or_research_topic() {
+    let db = db("assets_idea_box").await;
+    let (a, b, c) = accounts(&db).await;
+    let fourth = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_ops_account(account_ref,source_system,source_record_id,domain_ref,ledger_state,platform,account_name,status,is_retained,review_status,profile_link_state,source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref) SELECT $1,source_system,'synthetic-fourth',domain_ref,ledger_state,platform,'合成第四号',status,is_retained,review_status,'missing',source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref FROM linggan_ops_account WHERE account_ref=$2")
+        .bind(fourth).bind(a).execute(db.pool()).await.unwrap();
+    let idea = Uuid::new_v4();
+    let original = create_work(
+        &db,
+        &CreateRequest {
+            request_id: Uuid::new_v4(),
+            domain_ref: fixture::dossier::DOMAIN,
+            document: draft(Some(a), &["合成正文"]),
+        },
+    )
+    .await
+    .unwrap();
+    let mut anchor_doc = original.revision.document.clone();
+    anchor_doc.idea_ref = Some(idea);
+    anchor_doc.idea_name = Some("合成选题".into());
+    anchor_doc.angle = "合成选题意图".into();
+    let anchor = save(
+        &db,
+        original.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: original.revision.id,
+            document: anchor_doc,
+        },
+    )
+    .await
+    .unwrap();
+    for account in [b, c] {
+        let mut doc = draft(Some(account), &["第二份合成正文"]);
+        doc.idea_ref = Some(idea);
+        let work = create_work(
+            &db,
+            &CreateRequest {
+                request_id: Uuid::new_v4(),
+                domain_ref: fixture::dossier::DOMAIN,
+                document: doc,
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(work.revision.document.idea_ref, Some(idea));
+        assert_eq!(work.revision.document.topic_ref, None);
+    }
+    let mut too_many = draft(Some(fourth), &["第四份合成正文"]);
+    too_many.idea_ref = Some(idea);
+    assert!(matches!(
+        create_work(
+            &db,
+            &CreateRequest {
+                request_id: Uuid::new_v4(),
+                domain_ref: fixture::dossier::DOMAIN,
+                document: too_many
+            }
+        )
+        .await,
+        Err(WorkbenchError::Invalid("idea_account_limit"))
+    ));
+    let mut changed = anchor.revision.document.clone();
+    changed.idea_name = Some("更正的选题".into());
+    changed.title = "独立的笔记标题".into();
+    let saved = save(
+        &db,
+        anchor.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: anchor.revision.id,
+            document: changed,
+        },
+    )
+    .await
+    .unwrap();
+    let boxes = list_idea_boxes(&db, fixture::dossier::DOMAIN)
+        .await
+        .unwrap();
+    assert_eq!(boxes.len(), 1);
+    assert_eq!(
+        (&boxes[0].name, &boxes[0].intent, boxes[0].anchor_work_id),
+        (
+            &"更正的选题".to_string(),
+            &"合成选题意图".to_string(),
+            anchor.work_id
+        )
+    );
+    assert_eq!(saved.revision.document.title, "独立的笔记标题");
+    let mut invalid = saved.revision.document.clone();
+    invalid.idea_ref = None;
+    invalid.idea_name = None;
+    assert!(matches!(
+        save(
+            &db,
+            anchor.work_id,
+            &SaveRequest {
+                request_id: Uuid::new_v4(),
+                expected_revision: saved.revision.id,
+                document: invalid
+            }
+        )
+        .await,
+        Err(WorkbenchError::Invalid("idea_anchor"))
+    ));
+    let restored = restore(
+        &db,
+        anchor.work_id,
+        &RestoreRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: saved.revision.id,
+            restore_revision: original.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(restored.revision.document.idea_ref, Some(idea));
+    assert_eq!(
+        restored.revision.document.idea_name.as_deref(),
+        Some("更正的选题")
+    );
+    assert_eq!(restored.revision.document.angle, "合成选题意图");
+    assert_eq!(restored.revision.document.title, "合成标题");
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn idea_save_waits_for_experience_gate_before_taking_idea_lock() {
+    let db = db("assets_idea_lock_order").await;
+    let idea = Uuid::new_v4();
+    let mut held_gate = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *held_gate)
+        .await
+        .unwrap();
+    let worker_db = db.clone();
+    let saving = tokio::spawn(async move {
+        let mut doc = draft(None, &["合成正文"]);
+        doc.idea_ref = Some(idea);
+        doc.idea_name = Some("合成选题".into());
+        create_work(
+            &worker_db,
+            &CreateRequest {
+                request_id: Uuid::new_v4(),
+                domain_ref: fixture::dossier::DOMAIN,
+                document: doc,
+            },
+        )
+        .await
+    });
+    wait_for_advisory_waiters(&db, 1).await;
+    let mut check = db.pool().begin().await.unwrap();
+    let available: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1,0))")
+            .bind(format!("creation_idea:{idea}"))
+            .fetch_one(&mut *check)
+            .await
+            .unwrap();
+    check.rollback().await.unwrap();
+    held_gate.commit().await.unwrap();
+    assert!(
+        available,
+        "a writer waiting for the experience gate must not hold the idea lock"
+    );
+    saving.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn idea_list_does_not_drop_older_boxes_after_two_hundred() {
+    let db = db("assets_idea_list").await;
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query("CREATE TEMP TABLE synthetic_ideas(work_ref uuid,revision_ref uuid,idea_ref uuid) ON COMMIT DROP")
+        .execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO synthetic_ideas SELECT gen_random_uuid(),gen_random_uuid(),gen_random_uuid() FROM generate_series(1,201)")
+        .execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_creation_work(work_ref,domain_ref,saved_by) SELECT work_ref,$1,'local_machine' FROM synthetic_ideas")
+        .bind(fixture::dossier::DOMAIN).execute(&mut *tx).await.unwrap();
+    let blank = serde_json::to_value(WorkDocument::default()).unwrap();
+    sqlx::query("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,document,document_sha256) SELECT revision_ref,work_ref,1,$1::jsonb || jsonb_build_object('ideaRef',idea_ref::text,'ideaName','合成选题'),repeat('0',64) FROM synthetic_ideas")
+        .bind(blank).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE linggan_creation_work w SET current_revision_ref=s.revision_ref FROM synthetic_ideas s WHERE w.work_ref=s.work_ref")
+        .execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_creation_idea_box(idea_ref,domain_ref,anchor_work_ref) SELECT idea_ref,$1,work_ref FROM synthetic_ideas")
+        .bind(fixture::dossier::DOMAIN).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(
+        list_idea_boxes(&db, fixture::dossier::DOMAIN)
+            .await
+            .unwrap()
+            .len(),
+        201
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn persona_facts_keep_conflicts_subject_ownership_and_erasable_history() {
+    let db = db("assets_persona_facts").await;
+    let (account, _, _) = accounts(&db).await;
+    put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("合成角色")),
+    )
+    .await
+    .unwrap();
+    let person = read_identity(&db, account)
+        .await
+        .unwrap()
+        .unwrap()
+        .person_ref
+        .unwrap();
+    let create_fact = PersonaFactPut {
+        request_id: Uuid::new_v4(),
+        account_ref: account,
+        expected_person_ref: person,
+        key: "年级".into(),
+        expected_version: 0,
+        text: "三年级".into(),
+        source: "oral".into(),
+        conflict_decision: None,
+    };
+    let first = put_persona_fact(&db, &create_fact).await.unwrap();
+    assert_eq!(first.fact.status.as_deref(), Some("new"));
+    assert!(put_persona_fact(&db, &create_fact).await.unwrap().replayed);
+    let mut draft_with_grade = draft(Some(account), &["合成示例：今年四年级"]);
+    draft_with_grade.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    let before_confirmation = check_draft(&db, &draft_with_grade).await.unwrap();
+    assert!(
+        before_confirmation
+            .not_run
+            .iter()
+            .any(|item| item.rule == "R-W4")
+    );
+    assert!(
+        !before_confirmation
+            .findings
+            .iter()
+            .any(|item| item.rule == "R-W4")
+    );
+    let id = first.fact.id;
+    let confirmed = confirm_persona_fact(
+        &db,
+        id,
+        &PersonaFactConfirm {
+            request_id: Uuid::new_v4(),
+            expected_version: 1,
+            subject_confirmed: true,
+            confirmation_method: "subject_statement".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(confirmed.fact.status.as_deref(), Some("confirmed"));
+    let replay_after_confirmation = put_persona_fact(&db, &create_fact).await.unwrap();
+    assert!(replay_after_confirmation.replayed);
+    assert_eq!(replay_after_confirmation.result_version, 1);
+    assert_eq!(replay_after_confirmation.fact.version, 2);
+    let unchanged = PersonaFactPut {
+        request_id: Uuid::new_v4(),
+        expected_version: 2,
+        ..create_fact.clone()
+    };
+    let unchanged_result = put_persona_fact(&db, &unchanged).await.unwrap();
+    assert_eq!(unchanged_result.fact.version, 2);
+    assert_eq!(unchanged_result.fact.status.as_deref(), Some("confirmed"));
+    let mismatch = check_draft(&db, &draft_with_grade).await.unwrap();
+    assert!(
+        mismatch
+            .findings
+            .iter()
+            .any(|item| item.rule == "R-W4" && item.level == Level::Warn)
+    );
+    // A directly placed comment is the commenter's statement, not the account person's fact.
+    let mut quoted = comment_doc_with_text(&db, "合成评论：今年四年级").await;
+    quoted.account_ref = Some(account);
+    quoted.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    let quote_work = create(&db, quoted).await;
+    let placed = place(
+        &db,
+        quote_work.work_id,
+        &PlaceRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: quote_work.revision.id,
+            canvas_id: quote_work.revision.document.canvas[0].id,
+            targets: vec![UseTarget::Paragraph {
+                paragraph_id: quote_work.revision.document.paragraphs[0].id,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    let quoted = read_work(&db, quote_work.work_id)
+        .await
+        .unwrap()
+        .revision
+        .document;
+    assert!(
+        !check_draft(&db, &quoted)
+            .await
+            .unwrap()
+            .findings
+            .iter()
+            .any(|item| item.rule == "R-W4")
+    );
+    let quoted_copy = prepare_copy(
+        &db,
+        quote_work.work_id,
+        &CopyCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: placed.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    let quoted_rules: serde_json::Value = sqlx::query_scalar(
+        "SELECT warn_rules FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+    )
+    .bind(quoted_copy.receipt_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(quoted_rules.get("R-W4").is_none());
+    let saved = create(&db, draft_with_grade.clone()).await;
+    let ready = prepare_copy(
+        &db,
+        saved.work_id,
+        &CopyCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: saved.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    let rules: serde_json::Value = sqlx::query_scalar(
+        "SELECT warn_rules FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+    )
+    .bind(ready.receipt_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rules["R-W4"], 1);
+    draft_with_grade.paragraphs[0].text = "合成示例：今年三年级".into();
+    assert!(
+        !check_draft(&db, &draft_with_grade)
+            .await
+            .unwrap()
+            .findings
+            .iter()
+            .any(|item| item.rule == "R-W4")
+    );
+    let mut conflict = PersonaFactPut {
+        request_id: Uuid::new_v4(),
+        expected_version: 2,
+        text: "四年级".into(),
+        ..create_fact.clone()
+    };
+    assert!(matches!(
+        put_persona_fact(&db, &conflict).await,
+        Err(AssetsError::Invalid("persona_conflict_decision"))
+    ));
+    conflict.conflict_decision = Some("keep_old".into());
+    let kept = put_persona_fact(&db, &conflict).await.unwrap();
+    assert_eq!(kept.fact.text.as_deref(), Some("三年级"));
+    assert_eq!(kept.fact.status.as_deref(), Some("confirmed"));
+    let versions: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_creation_persona_fact_revision WHERE fact_ref=$1",
+    )
+    .bind(id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(versions, 3);
+    let history = persona_fact_history(&db, id).await.unwrap();
+    assert!(
+        history
+            .iter()
+            .any(|revision| revision.text == "四年级" && !revision.applied)
+    );
+    let abandoned = PersonaFactPut {
+        request_id: Uuid::new_v4(),
+        key: "合成其他事实".into(),
+        ..create_fact.clone()
+    };
+    assert_eq!(
+        cancel_persona_request(&db, abandoned.request_id)
+            .await
+            .unwrap()["outcome"],
+        "cancelled"
+    );
+    assert!(matches!(
+        put_persona_fact(&db, &abandoned).await,
+        Err(AssetsError::Invalid("request_cancelled"))
+    ));
+    let new = PersonaFactPut {
+        request_id: Uuid::new_v4(),
+        expected_version: 3,
+        conflict_decision: Some("use_new".into()),
+        ..conflict
+    };
+    let changed = put_persona_fact(&db, &new).await.unwrap();
+    assert_eq!(changed.fact.text.as_deref(), Some("四年级"));
+    assert_eq!(changed.fact.status.as_deref(), Some("new"));
+    put_identity(
+        &db,
+        account,
+        &correction(identity(1, OrgRelation::Parent, None, Some("合成角色更正"))),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        list_persona_facts(&db, account).await.unwrap()[0]
+            .text
+            .as_deref(),
+        Some("四年级")
+    );
+    let mut replacement = identity(2, OrgRelation::Unknown, None, Some("另一合成角色"));
+    replacement.person_change = Some(PersonChange::Replacement);
+    put_identity(&db, account, &replacement).await.unwrap();
+    let former = list_persona_facts(&db, account).await.unwrap().remove(0);
+    assert!(!former.current_person && former.text.is_none() && former.key.is_none());
+    let withdrawn = withdraw_persona_fact(&db, id, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert_eq!(withdrawn.fact.state, "withdrawn");
+    let remaining: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_creation_persona_fact_revision WHERE fact_ref=$1",
+    )
+    .bind(id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(remaining, 0);
+    assert!(matches!(
+        put_persona_fact(&db, &create_fact).await,
+        Err(AssetsError::NotFound)
+    ));
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL migration proof; no shared database"]
 async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() {
-    let migration = include_str!("../../../database/migrations/0182_creation_experience_s1b.sql");
+    let migration = include_str!("../../../database/migrations/0183_creation_experience_s1b.sql");
     let ledger = format!(
-        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0182_creation_experience_s1b','{}');\n",
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0183_creation_experience_s1b','{}');\n",
         linggan_intelligence::content_workbench_sources::text_hash(migration)
     );
     assert!(full_schema::FULL_MIGRATIONS.contains(migration));
@@ -1067,6 +1518,16 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     initial_leak.document.title = "合成经历，只供测试。".into();
     assert!(matches!(
         create_work(&db, &initial_leak).await,
+        Err(WorkbenchError::Invalid("experience_untracked_text"))
+    ));
+    let mut candidate_leak = request.clone();
+    candidate_leak.request_id = Uuid::new_v4();
+    candidate_leak
+        .document
+        .note_title_candidates
+        .push("合成经历，只供测试。".into());
+    assert!(matches!(
+        create_work(&db, &candidate_leak).await,
         Err(WorkbenchError::Invalid("experience_untracked_text"))
     ));
     let mut other_request = request.clone();
@@ -2438,8 +2899,9 @@ async fn copy_checks_the_saved_revision_and_records_receipt_then_confirmation() 
         "{}\n{}",
         ready.title, ready.text
     ));
+    let old_receipt = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_creation_copy_receipt(receipt_ref,work_ref,revision_ref,request_ref,ruleset_version,fact_cards,warn_rules,hint_rules,text_sha256,saved_by) VALUES($1,$2,$3,$4,'creation-checks.v1','[]','{}','{}',$5,'local_machine')")
-        .bind(Uuid::new_v4()).bind(first.work_id).bind(saved.revision.id).bind(old_request).bind(text_hash).execute(db.pool()).await.unwrap();
+        .bind(old_receipt).bind(first.work_id).bind(saved.revision.id).bind(old_request).bind(text_hash).execute(db.pool()).await.unwrap();
     let old_replay = prepare_copy(
         &db,
         first.work_id,
@@ -2472,6 +2934,16 @@ async fn copy_checks_the_saved_revision_and_records_receipt_then_confirmation() 
             .unwrap()
             .copied
             .is_none()
+    );
+    let summary = list_works(&db, Some(fixture::dossier::DOMAIN))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|item| item.work_id == first.work_id)
+        .unwrap();
+    assert_eq!(
+        summary.copied_revision_id, None,
+        "preparing text is not clipboard confirmation"
     );
     let confirm = CopyConfirm {
         request_id: Uuid::new_v4(),
@@ -2508,6 +2980,13 @@ async fn copy_checks_the_saved_revision_and_records_receipt_then_confirmation() 
     ));
     let status = copy_status(&db, first.work_id).await.unwrap();
     assert_eq!(status.copied.unwrap().revision_id, saved.revision.id);
+    let summary = list_works(&db, Some(fixture::dossier::DOMAIN))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|item| item.work_id == first.work_id)
+        .unwrap();
+    assert_eq!(summary.copied_revision_id, Some(saved.revision.id));
 
     // Editing after the copy leaves the copied mark on the older revision.
     let mut later = fixed;
@@ -2524,6 +3003,57 @@ async fn copy_checks_the_saved_revision_and_records_receipt_then_confirmation() 
     .await
     .unwrap();
     assert_ne!(
+        copy_status(&db, first.work_id)
+            .await
+            .unwrap()
+            .copied
+            .unwrap()
+            .revision_id,
+        newer.revision.id
+    );
+    let summary = list_works(&db, Some(fixture::dossier::DOMAIN))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|item| item.work_id == first.work_id)
+        .unwrap();
+    assert_eq!(summary.revision_id, newer.revision.id);
+    assert_eq!(summary.copied_revision_id, None);
+    let new_copy = prepare_copy(&db, first.work_id, &ask(newer.revision.id))
+        .await
+        .unwrap();
+    confirm_copy(
+        &db,
+        first.work_id,
+        new_copy.receipt_ref,
+        &CopyConfirm {
+            request_id: Uuid::new_v4(),
+        },
+    )
+    .await
+    .unwrap();
+    confirm_copy(
+        &db,
+        first.work_id,
+        old_receipt,
+        &CopyConfirm {
+            request_id: Uuid::new_v4(),
+        },
+    )
+    .await
+    .unwrap();
+    let summary = list_works(&db, Some(fixture::dossier::DOMAIN))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|item| item.work_id == first.work_id)
+        .unwrap();
+    assert_eq!(
+        summary.copied_revision_id,
+        Some(newer.revision.id),
+        "late confirmation of an older version must not hide a confirmed current version"
+    );
+    assert_eq!(
         copy_status(&db, first.work_id)
             .await
             .unwrap()

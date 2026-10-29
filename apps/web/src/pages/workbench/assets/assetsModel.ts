@@ -20,6 +20,12 @@ export interface Experience {
   title: string | null; body: string | null; tags: string[] | null; origin: string | null;
   sendToModel: boolean | null; confirmedAt: string | null; confirmedSubjectRole: string | null;
 }
+export interface PersonaFact {
+  id: string; accountRef: string; key: string | null; version: number; currentRevision: number;
+  currentPerson: boolean; state: 'active' | 'withdrawn'; text: string | null; source: string | null;
+  status: string | null; confirmationMethod: string | null;
+}
+export interface PersonaRevision { revision: number; text: string; source: string; status: string; applied: boolean; recordedAt: string }
 
 export interface Identity {
   accountRef: string;
@@ -161,6 +167,15 @@ function parseExperience(r: Json): Experience {
     sendToModel: optBool(r, 'sendToModel'), confirmedAt: optStr(r, 'confirmedAt'), confirmedSubjectRole: optStr(r, 'confirmedSubjectRole') };
 }
 export const decodeExperiences = (value: unknown) => decode(value, r => list(r, 'items', parseExperience));
+function parsePersonaFact(r: Json): PersonaFact {
+  return { id: uuid(r, 'id'), accountRef: uuid(r, 'accountRef'), key: optStr(r, 'key'), version: count(r, 'version'),
+    currentRevision: count(r, 'currentRevision'), currentPerson: bool(r, 'currentPerson'), state: oneOf(r, 'state', ['active','withdrawn'] as const),
+    text: optStr(r, 'text'), source: optStr(r, 'source'), status: optStr(r, 'status'), confirmationMethod: optStr(r, 'confirmationMethod') };
+}
+export const decodePersonaFacts = (value: unknown) => decode(value, r => list(r, 'items', parsePersonaFact));
+export const decodePersonaReceipt = (value: unknown) => decode(value, r => ({ fact: parsePersonaFact(obj(r, 'fact')), resultVersion: count(r, 'resultVersion'), replayed: bool(r, 'replayed') }));
+export const decodePersonaHistory = (value: unknown) => decode(value, r => list(r, 'items', item => ({ revision: count(item, 'revision'), text: str(item, 'text'), source: str(item, 'source'), status: str(item, 'status'), applied: bool(item, 'applied'), recordedAt: str(item, 'recordedAt') })));
+export const decodePersonaRequest = (value: unknown) => decode(value, r => { const item = optObj(r, 'result'); return item ? { kind: str(item, 'kind'), factRef: uuid(item, 'factRef'), version: count(item, 'version') } : null; });
 export const decodeExperienceReceipt = (value: unknown) => decode(value, r => ({ experience: parseExperience(obj(r, 'experience')), replayed: bool(r, 'replayed') }));
 export const decodeExperienceRequest = (value: unknown) => decode(value, r => { const item = optObj(r, 'result');
   return item ? { kind: oneOf(item, 'kind', ['create', 'edit', 'confirm', 'withdraw'] as const), experienceRef: uuid(item, 'experienceRef'), revision: count(item, 'revision'), state: str(item, 'state') } : null;

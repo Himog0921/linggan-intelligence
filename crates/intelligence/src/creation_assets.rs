@@ -8,6 +8,7 @@ pub mod experience_policy;
 mod experiences;
 mod fact_cards;
 mod identity;
+mod persona_facts;
 mod requests;
 mod subject;
 mod text;
@@ -28,6 +29,9 @@ pub use experiences::{
 };
 pub use fact_cards::{confirm_fact_card, list_fact_cards, put_fact_card};
 pub use identity::{list_accounts, put_identity, read_identity};
+pub use persona_facts::{
+    cancel_persona_request, confirm_persona_fact, list_persona_facts, persona_fact_history, persona_request_status, put_persona_fact, withdraw_persona_fact,
+};
 pub use subject::{CardTerms, Context, Subject};
 pub use types::*;
 pub use words::*;

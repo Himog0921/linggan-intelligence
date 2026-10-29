@@ -138,3 +138,48 @@ CREATE INDEX linggan_creation_experience_reset_work ON linggan_creation_experien
 CREATE TRIGGER linggan_creation_experience_reset_immutable
     BEFORE UPDATE OR DELETE ON linggan_creation_experience_reset
     FOR EACH ROW EXECUTE FUNCTION linggan_ops_forbid_mutation();
+
+-- Persona facts are subject-specific and their content is erasable on withdrawal.
+CREATE TABLE linggan_creation_persona_fact (
+    fact_ref uuid PRIMARY KEY,
+    account_ref uuid NOT NULL REFERENCES linggan_ops_account(account_ref),
+    subject_ref uuid NOT NULL,
+    fact_key text CHECK (fact_key IS NULL OR length(fact_key) BETWEEN 1 AND 40),
+    version integer NOT NULL CHECK (version > 0),
+    current_revision integer NOT NULL CHECK (current_revision > 0),
+    state text NOT NULL CHECK (state IN ('active', 'withdrawn')),
+    created_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    withdrawn_at timestamptz,
+    CHECK ((state = 'withdrawn') = (withdrawn_at IS NOT NULL)),
+    CHECK ((state = 'active') = (fact_key IS NOT NULL)),
+    FOREIGN KEY (subject_ref, account_ref) REFERENCES linggan_creation_person_subject(subject_ref, account_ref)
+);
+CREATE UNIQUE INDEX linggan_creation_persona_fact_active_key
+    ON linggan_creation_persona_fact(subject_ref, fact_key) WHERE state = 'active';
+CREATE TABLE linggan_creation_persona_fact_revision (
+    fact_ref uuid NOT NULL REFERENCES linggan_creation_persona_fact(fact_ref),
+    revision integer NOT NULL CHECK (revision > 0),
+    text text NOT NULL CHECK (length(text) BETWEEN 1 AND 500),
+    source text NOT NULL CHECK (source IN ('oral', 'manuscript', 'manual', 'inferred')),
+    status text NOT NULL CHECK (status IN ('new', 'inferred', 'confirmed')),
+    applied boolean NOT NULL,
+    confirmation_method text CHECK (confirmation_method IN ('subject_present', 'subject_statement')),
+    recorded_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    PRIMARY KEY (fact_ref, revision),
+    CHECK ((status = 'confirmed') = (confirmation_method IS NOT NULL))
+);
+CREATE TABLE linggan_creation_persona_fact_request (
+    request_ref uuid PRIMARY KEY,
+    fact_ref uuid NOT NULL REFERENCES linggan_creation_persona_fact(fact_ref),
+    kind text NOT NULL CHECK (kind IN ('put', 'confirm', 'withdraw')),
+    command_sha256 text CHECK (command_sha256 IS NULL OR command_sha256 ~ '^[0-9a-f]{64}$'),
+    result_version integer NOT NULL CHECK (result_version > 0),
+    created_at timestamptz NOT NULL DEFAULT scope_001_now()
+);
+CREATE TABLE linggan_creation_persona_fact_request_cancel (
+    request_ref uuid PRIMARY KEY,
+    cancelled_at timestamptz NOT NULL DEFAULT scope_001_now()
+);
+CREATE TRIGGER linggan_creation_persona_fact_request_cancel_immutable
+    BEFORE UPDATE OR DELETE ON linggan_creation_persona_fact_request_cancel
+    FOR EACH ROW EXECUTE FUNCTION linggan_ops_forbid_mutation();

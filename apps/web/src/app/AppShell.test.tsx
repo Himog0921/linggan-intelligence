@@ -71,7 +71,7 @@ describe('全站唯一React导航', () => {
     render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>页面</AppShell>);
     const navigation = screen.getByRole('navigation', {name:'一级导航'});
     const links = within(navigation).getAllByRole('link');
-    expect(links.map(link => link.getAttribute('href'))).toEqual(['/topics','/corpus','/collection','/ops']);
+    expect(links.map(link => link.getAttribute('href'))).toEqual(['/topics','/corpus','/collection','/ops','/ops/creation']);
     expect(within(navigation).getByRole('button',{name:/雷达/})).toBeDisabled();
     expect(within(navigation).getByRole('button',{name:/洞察/})).toBeDisabled();
     expect(screen.getByRole('link',{name:'设置'})).toHaveAttribute('href','/settings');

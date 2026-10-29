@@ -1,5 +1,6 @@
 import { ApiError, requestJson, requestBinaryJson } from '../../shared/api';
-import { parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseSaveReceipt, parseSourceList, parseWorkList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { listAccounts as listCreationAccounts } from './assets/assetsApi';
 const base = '/ops/api/creation';
 const post = (path: string, body: unknown) => requestJson(path, {
   method: 'POST',
@@ -9,6 +10,9 @@ export async function listWorks(domain: string, signal?: AbortSignal) {
   return parseWorkList(await requestJson(`${base}/works?domainRef=${encodeURIComponent(domain)}`, {
     signal
   })).items;
+}
+export async function listIdeaBoxes(domain: string, signal?: AbortSignal) {
+  return parseIdeaBoxList(await requestJson(`${base}/idea-boxes?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
 }
 export async function readWork(id: string, signal?: AbortSignal) {
   const value = parseEnvelope(await requestJson(`${base}/works/${uuid(id)}`, {
@@ -266,24 +270,8 @@ export async function domains(signal?: AbortSignal): Promise<DomainOption[]> {
   });
 }
 export async function accounts(domain: string, signal?: AbortSignal): Promise<AccountOption[]> {
-  try {
-    const r = object(await requestJson(`/api/local/ops/accounts?domain=${encodeURIComponent(domain)}`, {
-      signal
-    }));
-    if (!Array.isArray(r.items)) throw new WorkbenchContractError();
-    return r.items.map(v => {
-      const i = object(v);
-      if (typeof i.name !== 'string' || typeof i.platform !== 'string') throw new WorkbenchContractError();
-      return {
-        ref: uuid(i.ref),
-        name: i.name,
-        platform: i.platform
-      };
-    });
-  } catch (e) {
-    if (e instanceof ApiError && e.failure.kind === 'http' && e.failure.status === 404 && e.failure.code === 'ops_business_not_found') return [];
-    throw e;
-  }
+  const accounts = await listCreationAccounts(domain, signal);
+  return accounts.map(item => ({ ref: item.accountRef, name: item.accountName, platform: item.platform }));
 }
 export function conflictReceipt(error: unknown) {
   if (error instanceof ApiError && error.failure.kind === 'http' && error.failure.status === 409) {
@@ -346,6 +334,9 @@ export function errorText(error: unknown): string {
       creation_source_unavailable: '来源可用情况已变化，请回到材料核对。',
       creation_experience_reset_required: '经历已撤回。请先重新载入服务器版本，再继续编辑。',
       creation_experience_editor_reset_required: '本页编辑来自撤回前的版本，请丢弃旧编辑并使用服务器版本。',
+      creation_idea_account_limit: '这个选题已关联三个账号，请先调整关联账号，当前编辑仍保留。',
+      creation_idea_anchor: '此稿是选题框的来源稿，不能解除或换成其他选题；当前编辑仍保留。',
+      creation_idea_not_found: '选题框已不可用，请重新读取并选择，当前编辑仍保留。',
       source_changed: '来源版本已变化，请重新读取并选取。',
       source_restricted: '来源已受限，不能继续引用。',
       source_unavailable: '来源暂不可读。',

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, requestJson } from '../../shared/api';
-import { lookupWorkRequest, save, readWork } from './workbenchApi';
+import { accounts, lookupWorkRequest, save, readWork } from './workbenchApi';
 import { newDocument, WorkbenchContractError } from './workbenchModel';
 vi.mock('../../shared/api', async () => {
   const actual = await vi.importActual<typeof import('../../shared/api')>('../../shared/api');
@@ -25,6 +25,11 @@ const receipt = {
   }
 };
 beforeEach(() => vi.clearAllMocks());
+it('reads writable accounts from the creation endpoint without requiring the Ops login', async () => {
+  vi.mocked(requestJson).mockResolvedValue({ items: [{ accountRef: id, accountName: '合成账号', platform: 'xhs', status: 'active', operatorName: null, identity: null }] });
+  expect(await accounts(other)).toEqual([{ ref: id, name: '合成账号', platform: 'xhs' }]);
+  expect(requestJson).toHaveBeenCalledWith(`/ops/api/creation/accounts?domainRef=${other}`, { signal: undefined });
+});
 describe('workbench command receipt identity', () => {
   it('checks request and work identities before accepting save feedback', async () => {
     vi.mocked(requestJson).mockResolvedValue({

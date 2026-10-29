@@ -296,10 +296,21 @@ pub struct WorkDocument {
     pub material_preparation: Option<MaterialPreparation>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Manually entered alternatives, kept with the draft revision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cover_title_candidates: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub note_title_candidates: Vec<String>,
     pub contract: String,
     pub title: String,
     pub account_ref: Option<Uuid>,
     pub topic_ref: Option<Uuid>,
+    /// Creation idea identity is distinct from topic_ref, which belongs to the research graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idea_ref: Option<Uuid>,
+    /// Only the idea's anchor work owns its name; its angle holds the idea's intent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idea_name: Option<String>,
     pub angle: String,
     pub outline: Vec<String>,
     pub paragraphs: Vec<Paragraph>,
@@ -320,9 +331,13 @@ impl Default for WorkDocument {
             materials: vec![],
             material_preparation: None,
             tags: vec![],
+            cover_title_candidates: vec![],
+            note_title_candidates: vec![],
             title: String::new(),
             account_ref: None,
             topic_ref: None,
+            idea_ref: None,
+            idea_name: None,
             angle: String::new(),
             outline: vec![],
             paragraphs: vec![],
@@ -411,6 +426,19 @@ pub struct WorkSummary {
     pub title: String,
     pub revision_id: Uuid,
     pub saved_at: String,
+    /// The current revision if confirmed copied to the clipboard; this is not a publication.
+    pub copied_revision_id: Option<Uuid>,
+    pub idea_ref: Option<Uuid>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeaBoxSummary {
+    pub idea_ref: Uuid,
+    pub anchor_work_id: Uuid,
+    pub anchor_revision_id: Uuid,
+    pub saved_at: String,
+    pub name: String,
+    pub intent: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

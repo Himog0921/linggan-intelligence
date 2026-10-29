@@ -1,5 +1,5 @@
 /** 全站唯一一级导航登记；WEB-REACT-001 H 后不再维护 Rust 页头副本。 */
-export type PrimarySurface = 'corpus' | 'collection' | 'topic' | 'settings' | 'ops';
+export type PrimarySurface = 'corpus' | 'collection' | 'topic' | 'settings' | 'ops' | 'creation';
 
 export interface PrimaryEntry {
   zh: string;
@@ -19,6 +19,7 @@ export const PRIMARY_ENTRIES: readonly PrimaryEntry[] = [
   { zh: '洞察', technicalKey: 'INSIGHTS', state: '尚未接通', surface: null, href: null },
   { zh: '采集', technicalKey: 'COLLECTION', state: '状态未知', surface: 'collection', href: '/collection' },
   { zh: '运营', technicalKey: '', state: '只读', surface: 'ops', href: '/ops' },
+  { zh: '创作', technicalKey: '', state: '创作', surface: 'creation', href: '/ops/creation' },
 ];
 
 export const PERSONAL_MENU_LINKS: readonly { label: string; href: string }[] = [

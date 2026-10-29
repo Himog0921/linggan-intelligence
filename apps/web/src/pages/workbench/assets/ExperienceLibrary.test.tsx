@@ -26,6 +26,84 @@ async function selectItem() {
   fireEvent.click(await screen.findByRole('button', { name: /合成经历/ }));
 }
 describe('经历库', () => {
+  it('covers an open experience during another window’s withdrawal and reloads its redacted state', async () => {
+    const channels: Array<{ onmessage: ((event: MessageEvent) => void) | null }> = [];
+    class Channel { onmessage: ((event: MessageEvent) => void) | null = null; constructor() { channels.push(this); } close() {} postMessage() {} }
+    vi.stubGlobal('BroadcastChannel', Channel);
+    try {
+      show(); await selectItem();
+      let finish!: (items: Experience[]) => void;
+      vi.mocked(api.listExperiences).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+      act(() => channels.forEach(channel => channel.onmessage?.(new MessageEvent('message', { data: 'withdrawn' }))));
+      expect(screen.getByDisplayValue('合成经历正文')).not.toBeVisible();
+      await act(async () => finish([{ ...item, state: 'withdrawn', title: null, body: null, tags: null, origin: null }]));
+      expect(await screen.findByText('本人已撤回，经历内容已移除。')).toBeVisible();
+      expect(screen.queryByDisplayValue('合成经历正文')).not.toBeInTheDocument();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('preserves an unsaved experience during temporary uncertainty but clears it after a confirmed replacement', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={client}><ExperienceLibrary domainRef={account}/></QueryClientProvider>);
+    await selectItem();
+    fireEvent.change(screen.getByLabelText('经历正文'), { target: { value: '尚未保存的合成经历' } });
+    const rows = await api.listAccounts(account);
+    act(() => { client.setQueryData(['creation-assets','accounts',account], rows.map(row => ({ ...row, identity: { ...row.identity!, hasRealPerson: null, personRef: null } })));
+      client.setQueryData(['creation-assets','experiences',account], [{ ...item, currentPerson: false, title: null, body: null, tags: null, origin: null }]); });
+    await screen.findByText('账号真人暂未确认，草稿暂时隐藏；确认仍是同一位真人后可继续编辑。');
+    expect(await screen.findByText('账号真人暂未确认，草稿暂时隐藏；确认仍是同一位真人后可继续编辑。')).toBeVisible();
+    act(() => { client.setQueryData(['creation-assets','accounts',account], rows); client.setQueryData(['creation-assets','experiences',account], [item]); });
+    expect(await screen.findByDisplayValue('尚未保存的合成经历')).toBeVisible();
+    act(() => { client.setQueryData(['creation-assets','accounts',account], rows.map(row => ({ ...row, identity: { ...row.identity!, personRef: account } })));
+      client.setQueryData(['creation-assets','experiences',account], [{ ...item, currentPerson: false, title: null, body: null, tags: null, origin: null }]); });
+    expect(await screen.findByText('这是上一位真人的经历，不能用于当前真人。')).toBeVisible();
+    expect(screen.queryByDisplayValue('尚未保存的合成经历')).not.toBeInTheDocument();
+  });
+  it('preserves the draft while account and experience rechecks finish in different orders', async () => {
+    const channels: Array<{ onmessage: ((event: MessageEvent) => void) | null }> = [];
+    class Channel { onmessage: ((event: MessageEvent) => void) | null = null; constructor() { channels.push(this); } close() {} postMessage() {} }
+    vi.stubGlobal('BroadcastChannel', Channel);
+    try {
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      render(<QueryClientProvider client={client}><ExperienceLibrary domainRef={account}/></QueryClientProvider>);
+      await selectItem();
+      fireEvent.change(screen.getByLabelText('经历正文'), { target: { value: '保留的合成编辑' } });
+      const rows = await api.listAccounts(account);
+      act(() => { client.setQueryData(['creation-assets','accounts',account], rows.map(row => ({ ...row, identity: { ...row.identity!, hasRealPerson: null, personRef: null } })));
+        client.setQueryData(['creation-assets','experiences',account], [{ ...item, currentPerson: false, title: null, body: null, tags: null, origin: null }]); });
+      await screen.findByText('账号真人暂未确认，草稿暂时隐藏；确认仍是同一位真人后可继续编辑。');
+      let finishAccounts!: (items: typeof rows) => void; let finishExperiences!: (items: Experience[]) => void;
+      vi.mocked(api.listAccounts).mockImplementationOnce(() => new Promise(resolve => { finishAccounts = resolve; }));
+      vi.mocked(api.listExperiences).mockImplementationOnce(() => new Promise(resolve => { finishExperiences = resolve; }));
+      act(() => channels.forEach(channel => channel.onmessage?.(new MessageEvent('message', { data: 'identity-changed' }))));
+      await act(async () => finishAccounts(rows));
+      await act(async () => finishExperiences([item]));
+      expect(await screen.findByDisplayValue('保留的合成编辑')).toBeVisible();
+    } finally { vi.unstubAllGlobals(); }
+  });
+  it('keeps an uncertain confirmation locked while identity is unknown and retries the same request', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    vi.mocked(api.confirmExperience).mockRejectedValueOnce(new ApiError({ kind: 'network' })).mockResolvedValueOnce({ experience: { ...item, state: 'confirmed', revision: 2 }, replayed: true });
+    vi.mocked(api.experienceRequestStatus).mockResolvedValue({ kind: 'confirm', experienceRef: id, revision: 2, state: 'confirmed' });
+    render(<QueryClientProvider client={client}><ExperienceLibrary domainRef={account}/></QueryClientProvider>);
+    await selectItem(); fireEvent.click(screen.getByLabelText('本人已确认这版内容并同意用于稿件'));
+    fireEvent.click(screen.getByRole('button', { name: '登记本人确认' }));
+    await screen.findByRole('button', { name: '核对并重试原请求' });
+    const rows = await api.listAccounts(account);
+    act(() => { client.setQueryData(['creation-assets','accounts',account], rows.map(row => ({ ...row, identity: { ...row.identity!, hasRealPerson: null, personRef: null } })));
+      client.setQueryData(['creation-assets','experiences',account], [{ ...item, currentPerson: false, title: null, body: null, tags: null, origin: null }]); });
+    await screen.findByText('账号真人暂未确认，草稿暂时隐藏；确认仍是同一位真人后可继续编辑。');
+    fireEvent.click(await screen.findByRole('button', { name: '核对并重试原请求' }));
+    await waitFor(() => expect(api.experienceRequestStatus).toHaveBeenCalledTimes(1));
+    await screen.findByText('原请求已登记；确认真人后，请继续核对原请求以读取最新结果。');
+    expect(screen.getByLabelText('账号')).toBeDisabled();
+    vi.mocked(api.listExperiences).mockResolvedValue([{ ...item, state: 'confirmed', revision: 2 }]);
+    act(() => { client.setQueryData(['creation-assets','accounts',account], rows); client.setQueryData(['creation-assets','experiences',account], [{ ...item, state: 'confirmed', revision: 2 }]); });
+    await screen.findByDisplayValue('合成经历正文');
+    fireEvent.click(await screen.findByRole('button', { name: '核对并重试原请求' }));
+    await waitFor(() => expect(api.confirmExperience).toHaveBeenCalledTimes(2));
+    expect(vi.mocked(api.confirmExperience).mock.calls[0]![1].requestId).toBe(vi.mocked(api.confirmExperience).mock.calls[1]![1].requestId);
+    expect(await screen.findByText('本人已确认 · 修改内容后需要再次确认。')).toBeVisible();
+  });
   it('shows saved draft references without implying publication', async () => {
     vi.mocked(api.listExperiences).mockResolvedValue([{ ...item, usedCount: 2 }]);
     show(); await selectItem();

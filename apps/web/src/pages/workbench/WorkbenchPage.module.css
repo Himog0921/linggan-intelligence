@@ -54,6 +54,17 @@
 .steps {display:flex;gap:var(--lgi-space-6);min-width:0;max-width:100%;flex:1;overflow-x:auto;}
 .steps button:not([data-action-button]) {border:0;border-radius:0;padding:var(--lgi-space-3) 0;background:none;color:var(--lgi-muted);white-space:nowrap;}
 .steps button:not([data-action-button])[aria-current=step] {color:var(--lgi-ink);box-shadow:inset 0 -3px var(--lgi-signal-ink);font-weight:var(--lgi-weight-semibold);}
+.workflowMenu {position:relative;margin-right:auto;color:var(--lgi-body);}
+.workflowMenu summary {cursor:pointer;list-style:none;padding:var(--lgi-space-2) var(--lgi-space-3);border:1px solid var(--lgi-border);}
+.workflowMenu summary::after {content:' ▾';color:var(--lgi-muted);}
+.workflowOptions {position:absolute;top:100%;left:0;z-index:var(--lgi-z-popover);display:grid;min-width:var(--cw-strip-min);padding:var(--lgi-space-2);border:1px solid var(--lgi-border);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-overlay);}
+.workflowOptions button:not([data-action-button]) {text-align:left;border:0;background:transparent;}
+.workflowOptions button[aria-current=step] {font-weight:var(--lgi-weight-semibold);box-shadow:inset 3px 0 var(--lgi-signal-ink);}
+.toolbarFieldset {border:0;min-width:0;margin:0;padding:0;flex:1;}
+.editorWorkspace[data-view='body'] .workflowMenu {margin-right:0;}
+.editorWorkspace[data-view='body'] .commandRow {margin-bottom:0;}
+.editorWorkspace[data-view='body'] .writeControls {justify-content:flex-end;flex-wrap:nowrap;}
+.editorWorkspace[data-view='body'] .writeControls .steps {flex:0 0 auto;gap:var(--lgi-space-3);}
 .saveDetails {position:relative;color:var(--lgi-muted);font-size:var(--lgi-text-data);}
 .saveDetails summary {cursor:pointer;list-style:none;padding:var(--lgi-space-2);}
 .saveDetails[open] {z-index:var(--lgi-z-popover);}
@@ -130,14 +141,19 @@
 .manuscript {max-width:var(--cw-editor-width);margin:var(--lgi-space-8) auto;}
 .manuscript .manuscriptTitle {display:block;font-size:var(--lgi-text-page-title);line-height:var(--lgi-lh-heading);font-weight:var(--lgi-weight-semibold);border:0;padding:0;width:100%;margin-bottom:var(--lgi-space-6);border-radius:0;}
 .titleArea {display:flex;align-items:flex-start;gap:var(--lgi-space-5);margin-bottom:var(--lgi-space-8);}
+.manuscriptContext {display:flex;align-items:center;gap:var(--lgi-space-4);min-height:var(--lgi-header-height-compact);margin-bottom:var(--lgi-space-4);border-bottom:1px solid var(--lgi-hairline);}
+.manuscriptContext strong {white-space:nowrap;}
+.manuscriptContext button {text-align:left;min-width:0;overflow:hidden;text-overflow:ellipsis;}
 .coverPreview {flex:0 0 10rem;padding:0;border:0;background:none;cursor:pointer;}
 .coverPreview img {display:block;width:100%;aspect-ratio:3/4;object-fit:cover;}
+.workspace .emptyCover {display:flex;align-items:center;justify-content:center;aspect-ratio:3/4;min-height:0;background:var(--lgi-canvas-low);border:1px solid var(--lgi-border);color:var(--lgi-muted);font-size:var(--lgi-text-data);}
 .titleFields {flex:1;min-width:0;display:grid;gap:var(--lgi-space-4);}
 .titleFields label {display:grid;gap:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-text-label);}
 .titleFields input,.manuscript .titleFields .manuscriptTitle {width:100%;margin:0;padding:var(--lgi-space-3);border:1px solid var(--lgi-border);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body);font-weight:var(--lgi-weight-regular);color:var(--lgi-ink);}
 .manuscriptHeading {display:flex;align-items:baseline;justify-content:space-between;border-bottom:2px solid var(--lgi-ink);padding-bottom:var(--lgi-space-2);margin-bottom:var(--lgi-space-5);}
 .manuscriptHeading small {color:var(--lgi-muted);font-size:var(--lgi-text-label);}
 .paragraph {position:relative;margin-bottom:var(--lgi-space-5);}
+.paragraphIndex {position:absolute;right:calc(100% + var(--lgi-space-4));top:0;white-space:nowrap;color:var(--lgi-muted);font-size:var(--lgi-text-label);}
 .sourceLabel {margin:0 0 var(--lgi-space-1);font-size:var(--lgi-text-label);color:var(--lgi-muted);}
 .paragraph textarea {display:block;field-sizing:content;width:100%;min-height:var(--lgi-space-16);padding:0;border:0;border-radius:0;resize:none;font-size:var(--lgi-text-longform);line-height:var(--lgi-lh-longform);background:transparent;}
 .paragraph details {font-size:var(--lgi-text-label);color:var(--lgi-muted);opacity:0;transition:opacity var(--lgi-duration-state);}
@@ -257,8 +273,9 @@
 .writingSources blockquote {font-size:var(--lgi-text-data);}
 .writingSources button:not([data-action-button]) {border:0;font-size:var(--lgi-text-data);padding:0;}
 .manuscript {width:100%;padding:0 var(--lgi-space-5);}
-.studioFooter {position:sticky;bottom:0;z-index:var(--lgi-z-sticky);display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);border-top:1px solid var(--lgi-border);background:var(--lgi-canvas);padding:var(--lgi-space-3) 0;}
-.footerCopyMount {margin-left:auto;min-width:0;}
+.editorWorkspace[data-view='body'] .manuscript {margin-top:var(--lgi-space-3);}
+.studioFooter {position:sticky;bottom:0;z-index:var(--lgi-z-sticky);display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);border-top:1px solid var(--lgi-border);background:var(--lgi-canvas);padding:var(--lgi-space-3) 0 var(--lgi-space-3) min(calc(var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-12)), 20%);}
+.footerCopyMount {flex:1;min-width:0;}
 .writeControls {flex-wrap:wrap;gap:var(--lgi-space-2);}
 .writeControls>.row {gap:var(--lgi-space-2);}
 .writeControls button:not([data-action-button]) {font-size:var(--lgi-text-data);padding:var(--lgi-space-2);}
@@ -291,7 +308,7 @@
 .canvasCard label {margin:var(--lgi-space-2) 0;}
 .canvasCard textarea {min-height:var(--lgi-space-16);border:0;background:var(--lgi-canvas-low);padding:var(--lgi-space-2);field-sizing:content;}
 .cardNotes select {margin-top:var(--lgi-space-2);}
-.paragraph {margin-bottom:var(--lgi-space-3);}
+.paragraph {margin:0 0 var(--lgi-space-5) var(--lgi-space-16);}
 .paragraph textarea {min-height:0;}
 .paragraph details {position:absolute;right:100%;top:0;width:var(--lgi-space-6);}
 .paragraph details summary {font-size:0;cursor:pointer;}
@@ -398,3 +415,19 @@
 .entryIndex {color:var(--lgi-signal-ink);font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-brand);}
 .libraryTools {justify-content:flex-end;padding:var(--lgi-space-2) 0;margin-bottom:var(--lgi-space-3);}
 @media(max-width:820px) {.workspace {min-height:65vh;overflow:visible;}.workspace>.library {max-height:none;overflow:visible;}.libraryToolbar {align-items:stretch;}.libraryToolbar>[data-find],.libraryToolbar .createForm {flex-basis:100%;}}
+.draftGroupHeading {display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-2);padding:var(--lgi-space-2) var(--lgi-space-4);background:var(--lgi-canvas-low);color:var(--lgi-muted);font-size:var(--lgi-text-label);}
+.titleCandidates {display:grid;gap:var(--lgi-space-2);}
+.candidateList {display:flex;flex-wrap:wrap;gap:var(--lgi-space-2);}
+.candidateList span {display:inline-flex;border:1px solid var(--lgi-border);background:var(--lgi-canvas);}
+.candidateList button {border:0;background:transparent;padding:var(--lgi-space-1) var(--lgi-space-2);font-size:var(--lgi-text-label);color:var(--lgi-ink);}
+.candidateList button:hover {background:var(--lgi-canvas-low);}
+.candidateInput {display:flex;align-items:center;gap:var(--lgi-space-2);}
+.candidateInput input {min-width:0;flex:1;}
+.ideaBar {display:flex;align-items:center;flex-wrap:wrap;gap:var(--lgi-space-3);margin-bottom:var(--lgi-space-4);color:var(--lgi-ink);}
+.ideaBar small {color:var(--lgi-muted);font-size:var(--lgi-text-label);}
+.ideaBar details {position:relative;color:var(--lgi-ink);}
+.ideaBar details[open] {display:grid;gap:var(--lgi-space-2);width:100%;padding:var(--lgi-space-3);border:1px solid var(--lgi-border);}
+.ideaBar details label {display:grid;gap:var(--lgi-space-1);margin-top:var(--lgi-space-2);}
+.ideaBar input,.ideaBar textarea,.ideaBar select {width:100%;padding:var(--lgi-space-2);border:1px solid var(--lgi-border);}
+
+.candidateList button[aria-pressed='true'] {background:var(--lgi-ink);color:var(--lgi-canvas);}

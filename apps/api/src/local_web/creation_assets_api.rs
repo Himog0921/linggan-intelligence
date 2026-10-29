@@ -46,6 +46,26 @@ pub(super) fn routes() -> Router<LocalWebState> {
         )
         .route("/ops/api/creation/checks", post(check_draft))
         .route(
+            "/ops/api/creation/persona-facts",
+            get(list_persona_facts).post(put_persona_fact),
+        )
+        .route(
+            "/ops/api/creation/persona-facts/{id}/history",
+            get(persona_fact_history),
+        )
+        .route(
+            "/ops/api/creation/persona-requests/{id}",
+            get(persona_request_status).post(cancel_persona_request),
+        )
+        .route(
+            "/ops/api/creation/persona-facts/{id}/confirm",
+            post(confirm_persona_fact),
+        )
+        .route(
+            "/ops/api/creation/persona-facts/{id}/withdraw",
+            post(withdraw_persona_fact),
+        )
+        .route(
             "/ops/api/creation/experiences",
             get(list_experiences).post(create_experience),
         )
@@ -103,6 +123,10 @@ fn failure(error: AssetsError) -> Response {
         AssetsError::Invalid("person_change_required") => {
             (StatusCode::BAD_REQUEST, "creation_person_change_required")
         }
+        AssetsError::Invalid("persona_conflict_decision") => (
+            StatusCode::BAD_REQUEST,
+            "creation_persona_conflict_decision",
+        ),
         AssetsError::Invalid(_) => (StatusCode::BAD_REQUEST, "creation_assets_parameter_invalid"),
         AssetsError::NotFound => (StatusCode::NOT_FOUND, "creation_assets_not_found"),
         AssetsError::RequestConflict => (StatusCode::CONFLICT, "creation_assets_request_conflict"),
@@ -148,6 +172,64 @@ async fn put_identity(
 }
 async fn candidates(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
     reply(assets::candidates_for_account(database!(state), id).await)
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PersonaFactsQuery {
+    account_ref: Uuid,
+}
+async fn list_persona_facts(
+    State(state): State<LocalWebState>,
+    Query(q): Query<PersonaFactsQuery>,
+) -> Response {
+    match assets::list_persona_facts(database!(state), q.account_ref).await {
+        Ok(items) => Json(json!({"items":items})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn put_persona_fact(
+    State(state): State<LocalWebState>,
+    Json(command): Json<PersonaFactPut>,
+) -> Response {
+    reply(assets::put_persona_fact(database!(state), &command).await)
+}
+async fn persona_fact_history(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    match assets::persona_fact_history(database!(state), id).await {
+        Ok(items) => Json(json!({"items":items})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn persona_request_status(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    match assets::persona_request_status(database!(state), id).await {
+        Ok(result) => Json(json!({"result":result})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn cancel_persona_request(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    reply(assets::cancel_persona_request(database!(state), id).await)
+}
+async fn confirm_persona_fact(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<PersonaFactConfirm>,
+) -> Response {
+    reply(assets::confirm_persona_fact(database!(state), id, &command).await)
+}
+async fn withdraw_persona_fact(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<WithdrawCommand>,
+) -> Response {
+    reply(assets::withdraw_persona_fact(database!(state), id, command.request_id).await)
 }
 
 #[derive(Deserialize)]

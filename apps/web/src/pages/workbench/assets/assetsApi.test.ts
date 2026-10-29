@@ -153,6 +153,17 @@ describe('asset requests', () => {
     expect(call(f).body.document.excerpts).toEqual([]);
   });
 
+  it('preserves a direct comment citation and placement in the check projection', () => {
+    const doc = { ...newDocument(), paragraphs: [{ id, text: '合成评论：今年四年级' }],
+      excerpts: [{ id: other, citation: { sourceKind: 'comment' }, selectedText: '合成评论：今年四年级' }] as never,
+      canvas: [{ id: 'canvas', excerptId: other, note: '无关笔记', expression: '无关表达' }] as never,
+      uses: [{ id: 'use', canvasId: 'canvas', excerptId: other, target: { kind: 'paragraph', paragraphId: id }, contentOrigin: 'excerpt', sourceSpan: { start: 0, end: 11, textHash: 'hash' } }] as never };
+    const projected = checkDocument(doc);
+    expect(projected.excerpts).toEqual(doc.excerpts);
+    expect(projected.uses).toEqual(doc.uses);
+    expect(projected.canvas[0]).toMatchObject({ note: '', expression: '' });
+  });
+
   it('copies in two steps and reads the copied mark', async () => {
     const ready = { receiptRef: other, workId: id, revisionId: id, rulesetVersion: 'creation-checks.v1', title: '标题', body: '正文', tags: ['#ADHD'],
       text: '正文\n#ADHD', warnCount: 1, hintCount: 0, replayed: false };

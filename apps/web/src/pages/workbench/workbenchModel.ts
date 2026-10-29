@@ -179,9 +179,13 @@ export interface WorkDocument {
   title: string;
   accountRef: string | null;
   topicRef: string | null;
+  ideaRef: string | null;
+  ideaName: string | null;
   angle: string;
   outline: string[];
   tags: string[];
+  coverTitleCandidates: string[];
+  noteTitleCandidates: string[];
   paragraphs: Paragraph[];
   excerpts: Excerpt[];
   canvas: CanvasBlock[];
@@ -240,7 +244,10 @@ export interface WorkSummary {
   title: string;
   revisionId: string;
   savedAt: string;
+  copiedRevisionId?: string | null;
+  ideaRef?: string | null;
 }
+export interface IdeaBoxSummary { ideaRef: string; anchorWorkId: string; anchorRevisionId: string; savedAt: string; name: string; intent: string }
 export interface AssetRecord {
   id: string;
   workId: string;
@@ -583,9 +590,13 @@ export const parseWorkDocument = shape<WorkDocument>({
   title: str,
   accountRef: nullable(uuid),
   topicRef: nullable(uuid),
+  ideaRef: v => v === undefined ? null : nullable(uuid)(v),
+  ideaName: v => v === undefined ? null : nullable(str)(v),
   angle: str,
   outline: array(str),
   tags: array(str),
+  coverTitleCandidates: v => v === undefined ? [] : array(str)(v),
+  noteTitleCandidates: v => v === undefined ? [] : array(str)(v),
   paragraphs: array(paragraph),
   excerpts: array(excerpt),
   canvas: array(canvas),
@@ -644,9 +655,14 @@ export const parseWorkList = shape<{
     domainRef: uuid,
     title: str,
     revisionId: uuid,
-    savedAt: str
+    savedAt: str,
+    copiedRevisionId: value => value === undefined ? undefined : nullable(uuid)(value),
+    ideaRef: value => value === undefined ? undefined : nullable(uuid)(value)
   }))
 });
+export const parseIdeaBoxList = shape<{ items: IdeaBoxSummary[] }>({ items: array(shape<IdeaBoxSummary>({
+  ideaRef: uuid, anchorWorkId: uuid, anchorRevisionId: uuid, savedAt: str, name: str, intent: str,
+})) });
 export const parseHistory = shape<{
   items: Revision[];
 }>({
@@ -821,9 +837,13 @@ export function newDocument(title = ''): WorkDocument {
     title,
     accountRef: null,
     topicRef: null,
+    ideaRef: null,
+    ideaName: null,
     angle: '',
     outline: [],
     tags: [],
+    coverTitleCandidates: [],
+    noteTitleCandidates: [],
     paragraphs: [],
     excerpts: [],
     canvas: [],

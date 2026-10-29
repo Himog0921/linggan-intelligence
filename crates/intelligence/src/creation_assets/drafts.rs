@@ -9,7 +9,7 @@ use super::requests::{Claim, claim, command_hash, lock};
 use super::subject::{Context, Subject};
 use super::{AssetsError, types::*};
 use crate::content_workbench::{
-    self as workbench, ContentOrigin, UseTarget, WorkDocument, WorkbenchError,
+    self as workbench, ContentOrigin, SourceKind, UseTarget, WorkDocument, WorkbenchError,
 };
 use linggan_storage_postgres::Database;
 use sqlx::{Postgres, Row, Transaction};
@@ -65,9 +65,117 @@ pub async fn check_draft_for_work(
         .await?;
     let ctx = load_context(&mut tx, doc.account_ref).await?;
     let mut report = check_manuscript(&Subject::from_document(doc), &ctx);
+    add_grade_warnings(&mut tx, doc, &mut report).await?;
     add_repeated_experience_warnings(&mut tx, doc, work, &mut report).await?;
     tx.commit().await?;
     Ok(report)
+}
+
+async fn add_grade_warnings(
+    tx: &mut Transaction<'_, Postgres>,
+    doc: &WorkDocument,
+    report: &mut CheckReport,
+) -> Result<(), AssetsError> {
+    const GRADES: [&str; 6] = ["一年级", "二年级", "三年级", "四年级", "五年级", "六年级"];
+    let mut mentions = Vec::new();
+    for paragraph in &doc.paragraphs {
+        for prefix in ["现在", "今年", "已经"] {
+            for (start, _) in paragraph.text.match_indices(prefix) {
+                let after_prefix = start + prefix.len();
+                let tail = &paragraph.text[after_prefix..];
+                let trimmed = tail.trim_start_matches(char::is_whitespace);
+                let whitespace_bytes = tail.len() - trimmed.len();
+                for grade in GRADES {
+                    if trimmed.starts_with(grade) {
+                        let end = after_prefix + whitespace_bytes + grade.len();
+                        let scalar_start = paragraph.text[..start].chars().count();
+                        let scalar_end = paragraph.text[..end].chars().count();
+                        let quoted_comment = doc.uses.iter().any(|usage| {
+                            let UseTarget::Paragraph { paragraph_id } = usage.target else {
+                                return false;
+                            };
+                            if paragraph_id != paragraph.id
+                                || usage.content_origin != ContentOrigin::Excerpt
+                            {
+                                return false;
+                            }
+                            let Some(span) = &usage.source_span else {
+                                return false;
+                            };
+                            if span.start > scalar_start || span.end < scalar_end {
+                                return false;
+                            }
+                            let Some(excerpt) = doc.excerpts.iter().find(|item| {
+                                Some(item.id) == usage.excerpt_id
+                                    && item.citation.source_kind == SourceKind::Comment
+                            }) else {
+                                return false;
+                            };
+                            let placed: String = paragraph
+                                .text
+                                .chars()
+                                .skip(span.start)
+                                .take(span.end.saturating_sub(span.start))
+                                .collect();
+                            excerpt.selected_text.as_deref() == Some(placed.as_str())
+                        });
+                        if quoted_comment {
+                            continue;
+                        }
+                        mentions.push((paragraph, start, end, grade));
+                    }
+                }
+            }
+        }
+    }
+    if mentions.is_empty() {
+        return Ok(());
+    }
+    let grade: Option<String> = sqlx::query_scalar("SELECT r.text FROM linggan_creation_persona_fact f JOIN linggan_creation_persona_fact_revision r ON r.fact_ref=f.fact_ref AND r.revision=f.current_revision JOIN linggan_creation_account_person p ON p.account_ref=f.account_ref AND p.subject_ref=f.subject_ref WHERE f.account_ref=$1 AND f.fact_key='年级' AND f.state='active' AND r.status='confirmed' AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=f.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE")
+        .bind(doc.account_ref).fetch_optional(&mut **tx).await?;
+    let Some(grade) = grade.filter(|value| GRADES.contains(&value.trim())) else {
+        report.not_run.push(NotRun {
+            rule: "R-W4".into(),
+            reason: "账号的年级事实尚未确认，无法检查年级是否一致".into(),
+        });
+        return Ok(());
+    };
+    let mut emitted = 0;
+    for (paragraph, start, end, mentioned) in mentions {
+        if mentioned == grade.trim() {
+            continue;
+        }
+        if emitted >= super::words::MAX_FINDINGS_PER_RULE {
+            break;
+        }
+        let finding = Finding {
+            rule: "R-W4".into(),
+            level: Level::Warn,
+            message: "这里的年级与账号已确认的年级不同，请结合引用或叙述对象核对。".into(),
+            location: Location::Paragraph {
+                id: paragraph.id,
+                start: paragraph.text[..start].encode_utf16().count(),
+                end: paragraph.text[..end].encode_utf16().count(),
+            },
+            fixes: vec![Fix {
+                label: "找到这段".into(),
+                action: FixAction::EditByHand,
+            }],
+        };
+        let position = report
+            .findings
+            .iter()
+            .position(|item| {
+                matches!(
+                    item.rule.as_str(),
+                    "R-W5" | "R-W6" | "R-W7" | "R-W8" | "R-W9" | "R-I1" | "R-I2"
+                )
+            })
+            .unwrap_or(report.findings.len());
+        report.findings.insert(position, finding);
+        emitted += 1;
+    }
+    Ok(())
 }
 
 async fn add_repeated_experience_warnings(
@@ -310,6 +418,7 @@ pub async fn prepare_copy(
     let report_doc = revision.document.clone();
     let subject = copy_subject(&mut tx, domain, revision, &ctx).await?;
     let mut report = check_manuscript(&subject, &ctx);
+    add_grade_warnings(&mut tx, &report_doc, &mut report).await?;
     add_repeated_experience_warnings(&mut tx, &report_doc, Some(work), &mut report).await?;
     if report.count(Level::Must) > 0 {
         return Err(AssetsError::Blocked(report.findings));
@@ -399,11 +508,10 @@ pub async fn confirm_copy(
     Ok(mark)
 }
 
-/// The latest confirmed copy of a draft, if any. The editor compares its revision with the
-/// current one to tell "已复制" from "草稿中".
+/// Prefer a confirmed copy of the current revision; otherwise return the latest older copy.
 pub async fn copy_status(db: &Database, work: Uuid) -> Result<CopyStatus, AssetsError> {
     let row = sqlx::query(
-        "SELECT r.receipt_ref,r.revision_ref,c.copied_at::text AS copied_at FROM linggan_creation_copy_confirmation c JOIN linggan_creation_copy_receipt r ON r.receipt_ref=c.receipt_ref WHERE r.work_ref=$1 ORDER BY c.copied_at DESC,r.created_at DESC LIMIT 1",
+        "SELECT r.receipt_ref,r.revision_ref,c.copied_at::text AS copied_at FROM linggan_creation_copy_confirmation c JOIN linggan_creation_copy_receipt r ON r.receipt_ref=c.receipt_ref JOIN linggan_creation_work w ON w.work_ref=r.work_ref WHERE r.work_ref=$1 ORDER BY (r.revision_ref=w.current_revision_ref) DESC,c.copied_at DESC,r.created_at DESC LIMIT 1",
     )
     .bind(work)
     .fetch_optional(db.pool())

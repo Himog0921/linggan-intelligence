@@ -3,7 +3,23 @@ use std::collections::HashSet;
 pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
     if doc.contract != "content-workbench.v1"
         || doc.title.chars().count() > 500
+        || doc
+            .idea_name
+            .as_ref()
+            .is_some_and(|s| s.trim().is_empty() || s.chars().count() > 200)
+        || (doc.idea_name.is_some() && doc.idea_ref.is_none())
+        || doc.idea_ref.is_some_and(|id| id.is_nil())
         || doc.tags.len() > 30
+        || doc.cover_title_candidates.len() > 20
+        || doc.note_title_candidates.len() > 20
+        || doc
+            .cover_title_candidates
+            .iter()
+            .any(|s| s.trim().is_empty() || s.chars().count() > 10)
+        || doc
+            .note_title_candidates
+            .iter()
+            .any(|s| s.trim().is_empty() || s.chars().count() > 200)
         || doc.angle.chars().count() > 4000
         || doc.outline.len() > 100
         || doc.paragraphs.len() > 1000

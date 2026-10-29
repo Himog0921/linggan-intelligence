@@ -65,6 +65,11 @@ export function IdentityForm({ accountRef, accountName, identity, onSaved, onSta
     try {
       const receipt = await api.putIdentity(accountRef, { ...body, requestId });
       identities.settle('identity');
+      if (typeof BroadcastChannel !== 'undefined') {
+        const channel = new BroadcastChannel('linggan-creation-experience-events');
+        channel.postMessage('identity-changed');
+        channel.close();
+      }
       onSaved(receipt.identity);
     } catch (error) {
       if (error instanceof ApiError && error.answered) {

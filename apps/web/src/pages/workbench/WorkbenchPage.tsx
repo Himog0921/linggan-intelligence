@@ -1,4 +1,5 @@
 import { humanMoment } from '../../shared/formatting';
+import { DraftRail } from './DraftRail';
 import { ActionButton } from '../../shared/ActionButton';
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -7,8 +8,9 @@ import { OpsFrame } from '../ops/OpsFrame';
 import { OpsScopePicker } from '../ops/OpsScopePicker';
 import { ApiError } from '../../shared/api';
 import { RequestIdentities } from '../../shared/requestIdentity';
+import { NavIcon } from '../../shared/Sidebar';
 import * as api from './workbenchApi';
-import { newDocument, newCanvasBlock, parseAsset, scalarRange, type AiPreview, type AiReadiness, type AiStatus, type Citation, type CanvasBlock, type CanvasGroup, type Revision, type SaveReceipt, type UseTarget, type ValidatedAnchor, type WorkDocument, type WorkEnvelope, type WorkSummary, type WritingAction, type WritingSelection } from './workbenchModel';
+import { newDocument, newCanvasBlock, parseAsset, scalarRange, type AiPreview, type AiReadiness, type AiStatus, type Citation, type CanvasBlock, type CanvasGroup, type Revision, type SaveReceipt, type UseTarget, type ValidatedAnchor, type WorkDocument, type WorkEnvelope, type WorkSummary, type IdeaBoxSummary, type WritingAction, type WritingSelection } from './workbenchModel';
 import { ManuscriptEditor } from './ManuscriptEditor';
 import { CanvasBoard } from './CanvasBoard';
 import { RevisionCompare } from './RevisionCompare';
@@ -128,6 +130,7 @@ export function WorkbenchPage() {
   } | null>(null);
   const queryClient = useQueryClient();
   const [openWorks, setOpenWorks] = useState<WorkEnvelope[]>([]);
+  const lastWork = work ?? [...openWorks].reverse().find(item => item.domainRef === domain)?.workId;
   const domainQuery = useQuery({
     queryKey: ['creation-domains'],
     queryFn: ({
@@ -145,6 +148,7 @@ export function WorkbenchPage() {
     enabled: !!domain && validDomain,
     gcTime: 0
   });
+  const ideas = useQuery({ queryKey: ['creation-idea-boxes', domain], queryFn: ({ signal }) => api.listIdeaBoxes(domain, signal), enabled: !!domain && validDomain, gcTime: 0 });
   const current = useQuery({
     queryKey: ['creation-work', domain, work],
     queryFn: ({
@@ -211,9 +215,23 @@ export function WorkbenchPage() {
     }
   }
   return <OpsFrame section="creation" domain={domain} immersive={immersive && !!work}
+    sidebar={<>
+      <button type="button" className="v7-side-nav" disabled={assetPending} aria-current={section !== 'assets' && (!work || !['materials', 'canvas'].includes(viewValue(params.get('view')))) ? 'page' : undefined} onClick={() => {
+        if (assetDirty && !window.confirm('当前内容有未保存编辑，切换会丢弃本页编辑。确定切换吗？')) return;
+        setAssetDirty(false); setParams(lastWork ? { domain, work: lastWork, view: 'body' } : { domain, section: 'works' });
+      }}><NavIcon name="publications"/><span>写稿</span></button>
+      <button type="button" className="v7-side-nav" disabled={!lastWork || assetPending} aria-current={work && ['materials', 'canvas'].includes(viewValue(params.get('view'))) ? 'page' : undefined} onClick={() => {
+        if (!lastWork || (assetDirty && !window.confirm('当前内容有未保存编辑，切换会丢弃本页编辑。确定切换吗？'))) return;
+        setAssetDirty(false); setParams({ domain, work: lastWork, view: 'materials' });
+      }}><NavIcon name="evidence"/><span>材料桌</span></button>
+      <button type="button" className="v7-side-nav" disabled={assetPending} aria-current={!work && section === 'assets' ? 'page' : undefined} onClick={() => {
+        if (assetDirty && !window.confirm('当前内容有未保存编辑，切换会丢弃本页编辑。确定切换吗？')) return;
+        setAssetDirty(false); setParams({ domain, section: 'assets' });
+      }}><NavIcon name="default"/><span>资产库</span></button>
+    </>}
     scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
       disabled={creating || createUnknown || assetPending} onChange={next => { if (createPending.current || assetPending || (assetDirty && !window.confirm('这段经历有未保存内容，切换会丢弃本页编辑。确定切换吗？'))) return; setAssetDirty(false); setError(''); setParams({ domain: next, section }); }} />}
-    tabs={<>{(['today', 'works', 'assets'] as const).map(value => <button type="button" key={value}
+    tabs={<>{(['today', 'works'] as const).map(value => <button type="button" key={value}
       disabled={assetPending} aria-current={!work && section === value ? 'page' : undefined} onClick={() => { if (!work && section === value) return; if (assetDirty && !window.confirm('这段经历有未保存内容，切换会丢弃本页编辑。确定切换吗？')) return; setAssetDirty(false); setParams({ ...(domain ? { domain } : {}), section: value }); }}>
       {SECTION_TITLE[value]}</button>)}{work ? <span aria-current="page">作品编辑</span> : null}</>}
     meta={<span>个人创作空间</span>}>
@@ -225,14 +243,14 @@ export function WorkbenchPage() {
 <h1 className={styles.srOnly}>{section === 'today' ? '今日选题' : '我的创作'}</h1>
 <small>{works.isError ? '作品读取失败' : works.data ? `${works.data.length} 篇已保存作品` : '读取中'}</small>
 </div>
-{error ? <p role="alert" className={styles.error}>{error}</p> : null}{works.error ? <p role="alert" className={styles.error}>{api.errorText(works.error)}</p> : null}<TopicLibrary key={domain} section={section} works={works.isError ? [] : works.data ?? []} loading={works.isPending} failed={works.isError} onOpen={open} action={<form className={styles.createForm} onSubmit={e => {
+{error ? <p role="alert" className={styles.error}>{error}</p> : null}{works.error ? <p role="alert" className={styles.error}>{api.errorText(works.error)}</p> : null}<TopicLibrary key={domain} section={section} works={works.isError ? [] : works.data ?? []} ideas={ideas.data ?? []} ideasStatus={ideas.status} onRetryIdeas={() => void ideas.refetch()} loading={works.isPending} failed={works.isError} onOpen={open} action={<form className={styles.createForm} onSubmit={e => {
           e.preventDefault();
           void createWork();
         }}>
 <input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={creating || createUnknown} onChange={e => setTitle(e.target.value)} />
 <ActionButton type="submit" variant="primary" busy={creating} disabled={!title.trim() || creating}>{creating ? '建立中…' : createUnknown ? '核实原请求并重试' : '建立选题'}</ActionButton>
 </form>} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
-<WorkEditor immersive={immersive} onImmersive={setImmersive} initial={w} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
+<WorkEditor immersive={immersive} onImmersive={setImmersive} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenTopic={id => setParams({ domain: w.domainRef, work: id, view: 'topic' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
           domain: w.domainRef,
           work: w.workId,
           view
@@ -251,6 +269,7 @@ interface Pending {
 }
 function WorkEditor({
   initial,
+  ideas, ideaState, onOpenTopic,
   drafts,
   draftsStatus,
   onOpenDraft,
@@ -261,6 +280,7 @@ function WorkEditor({
   onImmersive
 }: {
   initial: WorkEnvelope;
+  ideas: IdeaBoxSummary[]; ideaState: 'pending' | 'error' | 'success'; onOpenTopic: (id: string) => void;
   drafts: WorkSummary[];
   draftsStatus: 'loading' | 'error' | 'ready';
   onOpenDraft: (id: string) => void;
@@ -270,6 +290,7 @@ function WorkEditor({
   immersive: boolean;
   onImmersive: (value: boolean) => void;
 }) {
+  const queryClient = useQueryClient();
   const [document, setDocument] = useState(initial.revision.document);
   const [tagsDraft, setTagsDraft] = useState(initial.revision.document.tags.join(' '));
   const tagsLive = useRef(tagsDraft);
@@ -286,6 +307,11 @@ function WorkEditor({
   const [conflictVisible, setConflictVisible] = useState(true);
   const [feedback, setFeedback] = useState('');
   const [resetRequired, setResetRequired] = useState(initial.experienceResetRequired === true);
+  const [draftInputs, setDraftInputs] = useState({ cover: '', note: '', idea: '' });
+  useEffect(() => { if (resetRequired) {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDraftInputs({ cover: '', note: '', idea: '' });
+  } }, [resetRequired]);
   const [recheckStatus, setRecheckStatus] = useState<'checking' | 'ready' | 'failed'>('checking');
   const [recheckAttempt, setRecheckAttempt] = useState(0);
   const [resetPrompt, setResetPrompt] = useState(false);
@@ -312,7 +338,6 @@ function WorkEditor({
   const [aiComparison, setAiComparison] = useState(false);
   const [compareVisible,setCompareVisible]=useState(false);
   const [compareBase, setCompareBase] = useState<WorkDocument | null>(null);
-  const [sourcePanel, setSourcePanel] = useState(false);
   const [copyContainer, setCopyContainer] = useState<HTMLDivElement | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiAction, setAiAction] = useState<WritingAction>('draft');
@@ -382,6 +407,8 @@ function WorkEditor({
     setSaveState(previous => previous === 'unknown' || previous === 'conflict' || previous === 'failed' ? previous : 'dirty');
   }
   function applyReceipt(r: SaveReceipt, snapshot: WorkDocument | null) {
+    void queryClient.invalidateQueries({ queryKey: ['creation-works', initial.domainRef] });
+    void queryClient.invalidateQueries({ queryKey: ['creation-idea-boxes', initial.domainRef] });
     server.current = r.revision;
     setRevision(r.revision);
     if (snapshot === null || JSON.stringify(live.current) === JSON.stringify(snapshot)) {
@@ -555,14 +582,14 @@ function WorkEditor({
   }, [active, initial.workId, recheckAttempt]);
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
-      if (JSON.stringify(live.current) !== JSON.stringify(server.current.document) || tagsLive.current !== live.current.tags.join(' ') || pending.current || pendingConfirmation || comparisonDirty.current) {
+      if (JSON.stringify(live.current) !== JSON.stringify(server.current.document) || tagsLive.current !== live.current.tags.join(' ') || pending.current || pendingConfirmation || comparisonDirty.current || Object.values(draftInputs).some(value => value.trim())) {
         e.preventDefault();
         e.returnValue = '';
       }
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [pendingConfirmation]);
+  }, [pendingConfirmation, draftInputs]);
   function collect(a: ValidatedAnchor, group: CanvasGroup) {
     const existing = live.current.excerpts.find(e => e.citation.sourceRef === a.citation.sourceRef && e.citation.sourceVersion === a.citation.sourceVersion && e.citation.start === a.citation.start && e.citation.end === a.citation.end);
     if (existing && live.current.canvas.some(c => c.excerptId === existing.id)) {
@@ -905,9 +932,27 @@ function WorkEditor({
     composition.current = value;
     setComposing(value);
   }
+  const linkedIdea = document.ideaRef && document.ideaName === null ? ideas.find(idea => idea.ideaRef === document.ideaRef) : undefined;
+  const topicUnavailable = !!document.ideaRef && document.ideaName === null && !linkedIdea;
+  function goView(next: View) {
+    if (next === 'topic' && linkedIdea) onOpenTopic(linkedIdea.anchorWorkId);
+    else if (next !== 'topic' || !topicUnavailable) onView(next);
+  }
   return <div className={styles.editorWorkspace} data-view={view}>
     <div className={styles.commandRow}>
-<nav aria-label="创作步骤" className={styles.steps}>{VIEWS.map((item, index) => <button key={item.id} aria-current={view === item.id ? 'step' : undefined} onClick={() => onView(item.id)}><small aria-hidden="true">{String(index + 1).padStart(2, '0')} </small>{item.label}</button>)}</nav>
+{view === 'body' ? <details className={styles.workflowMenu}><summary>创作步骤</summary><nav aria-label="创作步骤" className={styles.workflowOptions}>{VIEWS.map(item => <button key={item.id} disabled={item.id === 'topic' && topicUnavailable} aria-current={view === item.id ? 'step' : undefined} onClick={() => goView(item.id)}>{item.label}</button>)}</nav></details> : <nav aria-label="创作步骤" className={styles.steps}>{VIEWS.map((item, index) => <button key={item.id} disabled={item.id === 'topic' && topicUnavailable} aria-current={view === item.id ? 'step' : undefined} onClick={() => goView(item.id)}><small aria-hidden="true">{String(index + 1).padStart(2, '0')} </small>{item.label}</button>)}</nav>}
+{view === 'body' ? <fieldset disabled={editingLocked || resetRequired || recheckStatus !== 'ready'} className={styles.toolbarFieldset}><div className={styles.writeControls}><div className={styles.steps}><button aria-pressed={!compareVisible} onClick={() => setCompareVisible(false)}>沉浸编辑</button><button disabled={document.experienceGaps.length > 0} title={document.experienceGaps.length ? '请先填好或删除经历位' : undefined} aria-pressed={compareVisible} onClick={() => {setCompareVisible(true);if(!compareBase){setCompareBase(live.current);setComparisonDrafts(null);}}}>改稿对照</button></div>
+<div className={styles.row}>
+<ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={undoHistory}>撤销</ActionButton>
+<ActionButton variant="quiet" disabled={!undoState.canRedo || busy} onClick={redoHistory}>重做</ActionButton>
+<span>{Array.from(document.paragraphs.map(p => p.text).join('\n\n')).length} 字</span>
+</div>
+<div className={styles.row}>
+<ActionButton variant="outline" onClick={() => void openAi('draft')}>按材料起草</ActionButton>
+<ActionButton variant="outline" disabled={!selection} onClick={() => void openAi('rewrite_selection')}>改写选段</ActionButton>
+<ActionButton variant="outline" onClick={() => void openAi('page_copy')}>图组文案</ActionButton>
+</div>
+</div></fieldset> : null}
 <div className={styles.row}>
 <details className={styles.saveDetails}>
 <summary aria-label={`保存状态：${saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中' : saveState === 'dirty' ? '未保存' : saveState === 'unknown' ? '结果未确认' : saveState === 'conflict' ? '版本冲突' : '保存失败'}`}>{saveState === 'saved' ? '✓' : saveState === 'saving' ? '保存中…' : saveState === 'dirty' ? '未保存' : '!'}<span className={styles.srOnly}>保存状态</span>
@@ -925,26 +970,15 @@ function WorkEditor({
     {initial.sourceStatuses.some(s => s.state !== 'readable') || document.excerpts.some(e => e.selectedText === null) || document.uses.some(u => u.state === 'needs_review') ? <details className={styles.warning}>
 <summary>部分来源需要核验</summary>{initial.sourceStatuses.filter(s => s.state !== 'readable').map(s => <p key={s.excerptId}>{s.state === 'restricted' ? '来源已受限' : s.state === 'changed' ? '来源已变化' : '来源暂不可用'}</p>)}<details><summary>来源诊断详情</summary><pre>{JSON.stringify(initial.sourceStatuses, null, 2)}</pre></details></details> : null}
     {recheckStatus === 'checking' ? <p role="status">正在核验稿件来源…</p> : recheckStatus === 'failed' ? <p role="alert">暂时无法核验稿件来源。未保存的编辑仍在本页。<ActionButton variant="quiet" onClick={() => setRecheckAttempt(value => value + 1)}>重新核验</ActionButton></p> : null}
-    <fieldset hidden={resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>{view === 'topic' ? <TopicDetail accountsState={accounts.status} onRetryAccounts={()=>void accounts.refetch()} document={document} accounts={accounts.data ?? []} accountError={accounts.error ? api.errorText(accounts.error) : undefined} onChange={edit} onCompose={compose} onRead={() => onView('materials')} onWrite={() => onView('body')} /> : null}
+    <fieldset hidden={resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>{view === 'topic' ? <TopicDetail drafts={drafts} draftsStatus={draftsStatus} onOpenDraft={onOpenDraft} accountsState={accounts.status} onRetryAccounts={()=>void accounts.refetch()} document={document} accounts={accounts.data ?? []} accountError={accounts.error ? api.errorText(accounts.error) : undefined} onChange={edit} onCompose={compose} onRead={() => onView('materials')} onWrite={() => onView('body')} /> : null}
     <div hidden={view !== 'materials'}>
 <MaterialBrowser key={`${initial.domainRef}:${focusSequence}`} contextKey={initial.workId} active={active && view === 'materials'} domain={initial.domainRef} document={document} onChange={next=>edit({...live.current,materials:next.materials,materialPreparation:next.materialPreparation})} onCollect={collect} focusCitation={sourceFocus} onCanvas={() => onView('canvas')} />
 </div>
     {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);setFocusSequence(n=>n+1);onView('materials');}} onMaterials={()=>onView('materials')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={card=>{setPlacement(card);setBodyTarget(document.uses.flatMap(use=>use.canvasId===card.id&&use.target.kind==='paragraph'?[use.target.paragraphId]:[])[0]??'new');setWantBody(true);setWantPage(false);setPageTarget(document.pages.find(page=>page.kind!=='cover')?.id??'');}} /> : null}
     {view === 'body' ? <div className={styles.bodyWorkspace}>
-{compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}<div className={styles.writeControls}><div className={styles.steps}><button aria-pressed={!compareVisible} onClick={() => setCompareVisible(false)}>沉浸编辑</button><button disabled={document.experienceGaps.length > 0} title={document.experienceGaps.length ? '请先填好或删除经历位' : undefined} aria-pressed={compareVisible} onClick={() => {setCompareVisible(true);if(!compareBase){setCompareBase(live.current);setComparisonDrafts(null);}}}>改稿对照</button></div>
-<div className={styles.row}>
-<ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={undoHistory}>撤销</ActionButton>
-<ActionButton variant="quiet" disabled={!undoState.canRedo || busy} onClick={redoHistory}>重做</ActionButton>
-<span>{Array.from(document.paragraphs.map(p => p.text).join('\n\n')).length} 字</span>
-</div>
-<div className={styles.row}>
-<ActionButton variant="outline" onClick={() => void openAi('draft')}>按材料起草</ActionButton>
-<ActionButton variant="outline" disabled={!selection} onClick={() => void openAi('rewrite_selection')}>改写选段</ActionButton>
-<ActionButton variant="outline" onClick={() => void openAi('page_copy')}>图组文案</ActionButton>
-</div>
-</div>
+{compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}
 {aiComparison&&ai?.suggestion&&ai.staleBase?<div className={styles.warning}><p>本次采用已改变原底稿，其余改稿仍保留在右侧，不能继续直接采用。</p><ActionButton variant="outline" onClick={()=>void copyUnadoptedAi()}>复制未采用改稿</ActionButton>{aiCopyFallback?<label>未采用改稿，可手动复制<textarea readOnly value={unadoptedAiText()}/></label>:null}</div>:null}
-{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase && document.experienceGaps.length === 0 ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className={`${styles.writingLayout} ${styles.withChecks} ${sourcePanel ? styles.sourcesVisible : ''}`}><aside className={styles.draftRail} aria-label="稿件列表"><div className={styles.draftRailHeading}><strong>我的稿件</strong><small>{draftsStatus === 'loading' ? '正在读取稿件…' : draftsStatus === 'error' ? '稿件读取失败' : `${drafts.length} 篇已保存`}</small></div>{drafts.length ? <ul>{drafts.map(item => <li key={item.workId}><button type="button" aria-current={item.workId === initial.workId ? 'page' : undefined} onClick={() => onOpenDraft(item.workId)}><b>{item.title || '未命名稿件'}</b><small>更新于 {humanMoment(item.savedAt)}</small></button></li>)}</ul> : draftsStatus === 'ready' ? <p>还没有其他已保存稿件。</p> : null}</aside><ManuscriptEditor workId={initial.workId} onCover={() => onView('cover')} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} />{sourcePanel ? <aside className={styles.writingSources}><h3>这篇的材料与出处</h3>{document.excerpts.map(excerpt => <section key={excerpt.id}><blockquote>{excerpt.selectedText ?? '来源已受限或不可用'}</blockquote><ActionButton variant="quiet" onClick={() => {setSourceFocus(excerpt.citation);setFocusSequence(n=>n+1);onView('materials');}}>回到原文 ↗</ActionButton></section>)}</aside> : null}<CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} copyContainer={copyContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div>}<div className={styles.studioFooter}><ActionButton variant="quiet" onClick={() => setSourcePanel(!sourcePanel)}>{sourcePanel ? '收起来源' : `材料与出处 · ${document.excerpts.length}`}</ActionButton><div ref={setCopyContainer} className={styles.footerCopyMount} /><ActionButton variant="primary" onClick={() => onView('cover')}>制作封面 →</ActionButton></div>
+{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase && document.experienceGaps.length === 0 ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className={`${styles.writingLayout} ${styles.withChecks}`}><DraftRail drafts={drafts} ideas={ideas} status={draftsStatus} currentId={initial.workId} onOpen={onOpenDraft} /><ManuscriptEditor draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenTopic={onOpenTopic} workId={initial.workId} onCover={() => onView('cover')} onTopic={() => goView('topic')} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); setFocusSequence(n => n + 1); onView('materials'); }} copyContainer={copyContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div>}<div className={styles.studioFooter}><div ref={setCopyContainer} className={styles.footerCopyMount} /><ActionButton variant="quiet" onClick={() => onView('cover')}>制作封面 →</ActionButton></div>
 </div> : null}
     <div hidden={!['cover','inner','export'].includes(view)}>
 <ImagePages step={view === 'inner' ? 'inner' : view === 'export' ? 'export' : 'cover'} onStepChange={onView} onOpenSource={excerptId => { const excerpt=document.excerpts.find(item=>item.id===excerptId);if(excerpt){setSourceFocus(excerpt.citation);setFocusSequence(n=>n+1);onView('materials');} }} document={document} workId={initial.workId} currentRevisionId={dirty ? undefined : revision.id} onChange={edit} onUploadAsset={async file => {

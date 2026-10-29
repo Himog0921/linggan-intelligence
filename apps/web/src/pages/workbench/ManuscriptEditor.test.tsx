@@ -10,11 +10,14 @@ const experience = '00000000-0000-4000-8000-000000000002';
 
 function Editor({ initial }: { initial: WorkDocument }) {
   const [document, setDocument] = useState(initial);
+  const [draftInputs, setDraftInputs] = useState({ cover: "", note: "", idea: "" });
   const [client] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   return <QueryClientProvider client={client}>
-    <ManuscriptEditor document={document} edit={setDocument} compose={() => {}} isComposing={() => false}
+    <ManuscriptEditor draftInputs={draftInputs} onDraftInputs={setDraftInputs} document={document} edit={setDocument} compose={() => {}} isComposing={() => false}
       textSelection={() => {}} tagsDraft="" onTagsChange={() => {}} />
     <output aria-label="来源记录">{JSON.stringify(document.experienceSlots)}</output>
+    <output aria-label="标题候选记录">{JSON.stringify(document.noteTitleCandidates)}</output>
+    <output aria-label="封面记录">{JSON.stringify(document.pages.filter(page => page.kind === 'cover'))}</output>
   </QueryClientProvider>;
 }
 
@@ -45,5 +48,27 @@ describe('经历来源', () => {
     fireEvent.click(within(firstParagraph).getByText('段落与来源'));
     fireEvent.click(within(firstParagraph).getByRole('button', { name: '删除这一段' }));
     expect(JSON.parse(output.textContent ?? '[]')).toEqual([]);
+  });
+});
+
+describe('标题候选', () => {
+  it('writes the cover headline directly and creates a cover only when the user types', () => {
+    render(<Editor initial={newDocument('笔记标题')} />);
+    expect(JSON.parse(screen.getByLabelText('封面记录').textContent ?? '[]')).toEqual([]);
+    fireEvent.change(screen.getByLabelText('封面大字'), { target: { value: '合成封面' } });
+    expect(JSON.parse(screen.getByLabelText('封面记录').textContent ?? '[]')[0]).toMatchObject({ kind: 'cover', title: '合成封面', assetId: null });
+    expect(screen.getByLabelText('正文标题')).toHaveValue('笔记标题');
+  });
+  it('saves manually entered alternatives with the document and applies the selected title', () => {
+    render(<Editor initial={newDocument('原笔记标题')} />);
+    fireEvent.click(screen.getByText('添加笔记标题候选'));
+    fireEvent.change(screen.getByLabelText('新标题候选'), { target: { value: '合成候选标题' } });
+    const area = screen.getByLabelText('笔记标题候选');
+    fireEvent.click(within(area).getByRole('button', { name: '添加候选' }));
+    expect(JSON.parse(screen.getByLabelText('标题候选记录').textContent ?? '[]')).toEqual(['合成候选标题']);
+    fireEvent.click(within(area).getByRole('button', { name: '合成候选标题' }));
+    expect(screen.getByLabelText('正文标题')).toHaveValue('合成候选标题');
+    fireEvent.click(within(area).getByRole('button', { name: '删除标题候选 合成候选标题' }));
+    expect(JSON.parse(screen.getByLabelText('标题候选记录').textContent ?? '[]')).toEqual([]);
   });
 });
