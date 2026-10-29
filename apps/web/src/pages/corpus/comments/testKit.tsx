@@ -21,6 +21,9 @@ export function wordCloud(domain = DOMAIN, days = 56) {
    { text: '三分钟关卡', count: 2, workCount: 1, category: 'approach', examples: [] },
   ] };
 }
+export function overview(domain=DOMAIN) {
+ return {contract:'comment-research.overview.v1',domainRef:domain,asOf:'2026-10-28T08:00:00Z',corpusSummary:{displayableCommentCount:200,eligibleCommentCount:100,rawReadableCommentCount:200},indexCoverage:{indexedCount:200,pendingCount:0},researchSummary:{studiedCommentCount:0,succeededCommentCount:0,noSignalCommentCount:0,currentSignalCount:0},knowledgeSummary:{problemCount:0,pendingCandidateCount:0,solutionSignalCount:0,experienceSignalCount:0,solutionWorkCount:0,experienceWorkCount:0,solutionPreview:[],experiencePreview:[],problemPreview:[]},yesterdayNewProblemCount:0,observationSeries:{timezone:'Asia/Shanghai',points:Array.from({length:56},(_,i)=>({date:new Date(Date.UTC(2026,8,3+i)).toISOString().slice(0,10),newObservedCommentCount:i===55?200:0,studiedCommentCount:0,acceptedSignalCount:0,coveredWorkCount:i===55?2:0,observationCoverage:i===55?'partial':'none'}))}};
+}
 export const calls: { url: URL; method: string; body: Record<string, unknown> | null; signal: AbortSignal | null }[] = [];
 export function defaultReply(url: URL) {
  if (url.pathname === '/api/local/ai-settings') return businessSettingsFixture();
@@ -29,8 +32,9 @@ export function defaultReply(url: URL) {
  if (endpoint === 'word-cloud') return wordCloud(domain, Number(url.searchParams.get('days') || 56));
  if (endpoint === 'comments') return { domainRef: domain, items: [comment(), comment('c2', false)], summary: { displayableCommentCount: 200, eligibleCommentCount: 100 }, indexCoverage: { indexedCount: 200, pendingCount: null }, page: { nextCursor: null } };
  if (endpoint === 'works') return { domainRef: domain, items: [{ workRef: WORK, displayTitle: '合成作品', displayTitleSource: 'platform_title', observationRole: 'primary', eligibleCommentCount: 100 }], totalWorkCount: 1, indexCoverage: { indexedCount: 100, pendingCount: null }, page: { nextCursor: null } };
+ if (url.pathname === '/api/local/comment-research/overview') return overview(url.searchParams.get('domainRef') || DOMAIN);
  if (url.pathname === '/api/local/comment-research/runs') return { domainRef: domain, runs: [], limit: 100 };
- if (url.pathname === '/api/local/comment-research/problems') return { domainRef: domain, problems: [] };
+ if (url.pathname === '/api/local/comment-research/problems') return { domainRef: domain, problems: [], candidates: [] };
  throw new Error('Unexpected test endpoint ' + url.pathname);
 }
 export function installFetch(custom?: (url: URL, options: RequestInit) => Promise<Response> | Response | undefined) {

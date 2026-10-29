@@ -9,7 +9,7 @@ WITH latest AS MATERIALIZED (
     JOIN linggan_runtime_capture_package package ON package.package_ref = comment.package_ref
     WHERE EXISTS (
         SELECT 1 FROM linggan_material_domain_usage usage
-        WHERE usage.content_public_ref = content.public_ref
+        WHERE usage.content_public_ref = content.public_ref AND usage.domain_ref = $3
     ) AND package.accepted_at <= scope_001_now()
       AND comment.created_at <= scope_001_now()
     ORDER BY comment.content_public_ref, comment.comment_external_id,

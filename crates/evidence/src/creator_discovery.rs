@@ -8,6 +8,9 @@ use sqlx::{Postgres, Row, Transaction};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use uuid::Uuid;
 
+mod list_read;
+pub use list_read::load_list;
+
 pub const RULE_VERSION: &str = "creator-discovery.v3-dossier";
 #[derive(Debug, thiserror::Error)]
 pub enum DiscoveryError {
@@ -359,7 +362,7 @@ async fn load_topic_material_scope_in(
         .await?;
     let as_of = crate::research_dossier::cutoff_in(tx, as_of).await?;
     let mut platforms: Vec<String> = sqlx::query_scalar(
-        "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 AND ($2::uuid[] IS NULL OR usage.content_public_ref=ANY($2)) ORDER BY content.platform",
+        "SELECT DISTINCT content.platform FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref WHERE usage.domain_ref=$1 AND usage.use_kind='domain_research' AND ($2::uuid[] IS NULL OR usage.content_public_ref=ANY($2)) ORDER BY content.platform",
     )
     .bind(domain)
     .bind(work_refs)
@@ -418,6 +421,18 @@ async fn load_materials_in(
     work_refs: Option<&[Uuid]>,
     as_of: Option<&str>,
 ) -> Result<DiscoveryData, DiscoveryError> {
+    load_materials_scoped_in(tx, q, work_refs, as_of, None).await
+}
+
+// Only the private list adapter may defer unjudged dossiers. Deferred works are
+// never returned directly: every visible representative is hydrated before JSON.
+async fn load_materials_scoped_in(
+    tx: &mut Transaction<'_, Postgres>,
+    q: &CreatorScope,
+    work_refs: Option<&[Uuid]>,
+    as_of: Option<&str>,
+    mut deferred: Option<&mut HashSet<Uuid>>,
+) -> Result<DiscoveryData, DiscoveryError> {
     let as_of = crate::research_dossier::cutoff_in(tx, as_of).await?;
     let clock=sqlx::query("SELECT linggan_human_moment($1::timestamptz) AS display_now,(extract(epoch FROM $1::timestamptz)*1000)::bigint AS epoch").bind(&as_of).fetch_one(&mut **tx).await?;
     let display_as_of: String = clock.get("display_now");
@@ -436,7 +451,7 @@ async fn load_materials_in(
     if q.sort == "viral_works" && policy["likeThreshold"].as_i64().is_none() {
         return Err(DiscoveryError::Invalid("viral_threshold_unset"));
     }
-    let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 AND ($3::uuid[] IS NULL OR content_public_ref=ANY($3)) GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).bind(work_refs).fetch_all(&mut **tx).await?;
+    let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 AND use_kind='domain_research' AND ($3::uuid[] IS NULL OR content_public_ref=ANY($3)) GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).bind(work_refs).fetch_all(&mut **tx).await?;
     let added: HashMap<Uuid, String> = rows
         .iter()
         .map(|r| (r.get("content_public_ref"), r.get("first_added")))
@@ -563,24 +578,64 @@ async fn load_materials_in(
         if batch.is_empty() {
             break;
         }
-        let work_refs: Vec<_> = batch.iter().map(|current| current.public_ref).collect();
-        let mut dossiers = crate::research_dossier::read_in(tx, &work_refs, &as_of).await?;
+        let required: Vec<_> = batch
+            .iter()
+            .filter(|current| {
+                deferred.is_none()
+                    || (q.search_mode == "work" && q.query.is_some())
+                    || analyses.contains_key(&current.public_ref)
+                    || research.contains_key(&current.public_ref)
+                    || current
+                        .author_external_id
+                        .as_ref()
+                        .is_some_and(|author| focus_rows.contains_key(author))
+            })
+            .map(|current| current.public_ref)
+            .collect();
+        let mut dossiers = crate::research_dossier::read_in(tx, &required, &as_of).await?;
         for c in batch {
-            let dossier = dossiers
-                .remove(&c.public_ref)
-                .ok_or(DiscoveryError::Invalid("dossier_unavailable"))?;
-            let search_text = dossier
-                .fragments
+            let dossier = dossiers.remove(&c.public_ref);
+            if dossier.is_none() {
+                if required.contains(&c.public_ref) {
+                    return Err(DiscoveryError::Invalid("dossier_unavailable"));
+                }
+                deferred
+                    .as_deref_mut()
+                    .expect("private list scope")
+                    .insert(c.public_ref);
+            }
+            let (
+                reading_title,
+                display_title,
+                dossier_revision,
+                dossier_material_revision,
+                dossier_coverage,
+                fragments,
+            ) = if let Some(dossier) = dossier {
+                (
+                    crate::research_dossier::reading_title(&dossier),
+                    dossier.note["displayTitle"].as_str().map(str::to_owned),
+                    dossier.revision,
+                    dossier.material_revision,
+                    dossier.coverage,
+                    dossier.fragments,
+                )
+            } else {
+                // Internal, unexpanded material, not a published unknown fact.
+                (
+                    Value::Null,
+                    None,
+                    String::new(),
+                    String::new(),
+                    Value::Null,
+                    Vec::new(),
+                )
+            };
+            let search_text = fragments
                 .iter()
                 .map(|f| f.text.as_str())
                 .collect::<Vec<_>>()
                 .join("\n");
-            let reading_title = crate::research_dossier::reading_title(&dossier);
-            let display_title = dossier.note["displayTitle"].as_str().map(str::to_owned);
-            let dossier_revision = dossier.revision;
-            let dossier_material_revision = dossier.material_revision;
-            let dossier_coverage = dossier.coverage;
-            let fragments = dossier.fragments;
             let fingerprint=hash(&json!({"domain":{ "id":domain["domainRef"],"name":domain["name"],"description":domain["description"],"researchGoal":domain["researchGoal"]},"fragments":fragments,"readingTitle":reading_title,"dossierRevision":dossier_revision,"dossierMaterialRevision":dossier_material_revision,"dossierCoverage":dossier_coverage,"contract":"creator-work-input.v1"}).to_string());
             let mut result = json!({});
             let mut manual = json!({});

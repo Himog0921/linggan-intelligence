@@ -88,7 +88,8 @@ async fn freeze_discovery(tx: &mut Transaction<'_, Postgres>, run: Uuid) -> Resu
       ORDER BY f.content_public_ref,p.accepted_at,f.result_position,f.record_ordinal,p.package_ref) first_seen
      ORDER BY accepted_at,result_position,record_ordinal,package_ref LIMIT (SELECT work_limit FROM collection_run WHERE run_ref=$1)"#).bind(run).execute(&mut **tx).await?;
     let reason:Option<String>=sqlx::query_scalar("SELECT p.coverage #>> '{layers,0,stoppedReason}' FROM collection_run_package r JOIN linggan_runtime_capture_package p USING(package_ref) WHERE r.run_ref=$1 AND p.package_kind IN('discovery_search','profile_discovery') ORDER BY p.accepted_at DESC LIMIT 1").bind(run).fetch_optional(&mut **tx).await?.flatten();
-    sqlx::query("UPDATE collection_run SET phase='materials',scope_frozen_at=scope_001_now(),discovery_reason=COALESCE($2,'accepted_discovery_scope'),updated_at=scope_001_now() WHERE run_ref=$1").bind(run).bind(reason).execute(&mut **tx).await?;
+    // A one-off author preview ends with accepted cards; no automatic detail/comment phase.
+    sqlx::query("UPDATE collection_run SET phase=CASE WHEN source_kind='creator_preview' THEN 'ended' ELSE 'materials' END,ended_at=CASE WHEN source_kind='creator_preview' THEN scope_001_now() ELSE ended_at END,scope_frozen_at=scope_001_now(),discovery_reason=COALESCE($2,'accepted_discovery_scope'),updated_at=scope_001_now() WHERE run_ref=$1").bind(run).bind(reason).execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -98,15 +99,24 @@ async fn queue_materials(
     mode: &str,
 ) -> Result<(), RunError> {
     // One small request per work preserves fairness and independent failures in the common queue.
-    let works:Vec<Uuid>=sqlx::query_scalar("SELECT content_public_ref FROM collection_run_work w WHERE run_ref=$1 AND NOT EXISTS(SELECT 1 FROM collection_run_order o WHERE o.run_ref=w.run_ref AND o.content_public_ref=w.content_public_ref) ORDER BY ordinal LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
+    // A text-only work that reuses an older detail is finished without any order of its own; it must leave
+    // this three-work window or the works behind it are never queued.
+    let works:Vec<Uuid>=sqlx::query_scalar("SELECT content_public_ref FROM collection_run_work w WHERE run_ref=$1 AND NOT COALESCE((w.checkpoint->>'detailComplete')::boolean,false) AND NOT EXISTS(SELECT 1 FROM collection_run_order o WHERE o.run_ref=w.run_ref AND o.content_public_ref=w.content_public_ref) ORDER BY ordinal LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
     for work in works {
         let reused:Option<Uuid>=sqlx::query_scalar("SELECT d.package_ref FROM linggan_material_content_detail d JOIN linggan_runtime_capture_package p USING(package_ref) JOIN linggan_runtime_submission_receipt r USING(package_ref) JOIN collection_run run ON run.run_ref=$2 WHERE d.content_public_ref=$1 AND p.accepted_at<run.created_at AND r.material_admission='ACCEPTED' ORDER BY p.accepted_at DESC LIMIT 1").bind(work).bind(run).fetch_optional(&mut **tx).await?;
         sqlx::query("UPDATE collection_run_work SET reused_detail_package_ref=$3 WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).bind(reused).execute(&mut **tx).await?;
+        if mode == "none" && reused.is_some() {
+            sqlx::query("UPDATE collection_run_work SET checkpoint=checkpoint||'{\"detailComplete\":true,\"commentsNotRequested\":true}'::jsonb WHERE run_ref=$1 AND content_public_ref=$2")
+                .bind(run).bind(work).execute(&mut **tx).await?;
+            continue;
+        }
         admit_stage(
             tx,
             run,
             Some(work),
-            if mode == "sample_30" || reused.is_some() {
+            if mode == "none" {
+                "detail"
+            } else if mode == "sample_30" || reused.is_some() {
                 "comments"
             } else {
                 "detail"
@@ -138,7 +148,9 @@ async fn reconcile_materials(
     mode: &str,
     target: Option<i32>,
 ) -> Result<(), RunError> {
-    let latest=sqlx::query("SELECT * FROM (SELECT DISTINCT ON(o.content_public_ref) o.content_public_ref,o.stage,o.segment,o.work_order_ref,w.queue_state,member.checkpoint FROM collection_run_order o JOIN collection_run_work member ON member.run_ref=o.run_ref AND member.content_public_ref=o.content_public_ref LEFT JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=$1 AND o.content_public_ref IS NOT NULL AND member.gap_reason IS NULL AND NOT COALESCE((member.checkpoint->>'commentsComplete')::boolean,false) ORDER BY o.content_public_ref,CASE WHEN o.stage='comments' THEN 2 ELSE 1 END DESC,o.segment DESC,o.created_at DESC,o.request_ref DESC) latest WHERE queue_state IN('completed','cancelled') LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
+    // Finished works leave this three-work window: `commentsComplete` for runs that collect comments,
+    // `detailComplete` for text-only runs (they never get a comments order that would move them out).
+    let latest=sqlx::query("SELECT * FROM (SELECT DISTINCT ON(o.content_public_ref) o.content_public_ref,o.stage,o.segment,o.work_order_ref,w.queue_state,member.checkpoint FROM collection_run_order o JOIN collection_run_work member ON member.run_ref=o.run_ref AND member.content_public_ref=o.content_public_ref LEFT JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=$1 AND o.content_public_ref IS NOT NULL AND member.gap_reason IS NULL AND NOT COALESCE((member.checkpoint->>'commentsComplete')::boolean,false) AND NOT COALESCE((member.checkpoint->>'detailComplete')::boolean,false) ORDER BY o.content_public_ref,CASE WHEN o.stage='comments' THEN 2 ELSE 1 END DESC,o.segment DESC,o.created_at DESC,o.request_ref DESC) latest WHERE queue_state IN('completed','cancelled') LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
     for row in latest {
         let work: Uuid = row.get("content_public_ref");
         let order: Option<Uuid> = row.get("work_order_ref");
@@ -162,7 +174,11 @@ async fn reconcile_materials(
                 .iter()
                 .any(|p| p.get::<String, _>("package_kind") == "content_detail")
             {
-                admit_stage(tx, run, Some(work), "comments", 1).await?;
+                if mode == "none" {
+                    sqlx::query("UPDATE collection_run_work SET checkpoint=checkpoint||'{\"detailComplete\":true,\"commentsNotRequested\":true}'::jsonb WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).execute(&mut **tx).await?;
+                } else {
+                    admit_stage(tx, run, Some(work), "comments", 1).await?;
+                }
             } else {
                 sqlx::query("UPDATE collection_run_work SET gap_reason='detail_not_accepted' WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).execute(&mut **tx).await?;
             }
@@ -218,7 +234,7 @@ async fn reconcile_materials(
         sqlx::query("UPDATE collection_run_work SET checkpoint=checkpoint||jsonb_build_object('emptySegments',$3::integer,'lastOrder',$4::uuid,'lastSegment',$5::integer,'capturedUnique',$6::bigint) WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).bind(no_progress as i32).bind(order).bind(segment).bind(captured).execute(&mut **tx).await?;
         admit_stage(tx, run, Some(work), "comments", segment + 1).await?;
     }
-    let done:bool=sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM collection_run_work WHERE run_ref=$1 AND gap_reason IS NULL AND NOT COALESCE((checkpoint->>'commentsComplete')::boolean,false)) AND scope_frozen_at IS NOT NULL FROM collection_run WHERE run_ref=$1").bind(run).fetch_one(&mut **tx).await?;
+    let done:bool=sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM collection_run_work WHERE run_ref=$1 AND gap_reason IS NULL AND NOT CASE WHEN $2='none' THEN COALESCE((checkpoint->>'detailComplete')::boolean,false) ELSE COALESCE((checkpoint->>'commentsComplete')::boolean,false) END) AND scope_frozen_at IS NOT NULL FROM collection_run WHERE run_ref=$1").bind(run).bind(mode).fetch_one(&mut **tx).await?;
     if done {
         sqlx::query("UPDATE collection_run SET phase='ended',ended_at=scope_001_now(),updated_at=scope_001_now() WHERE run_ref=$1").bind(run).execute(&mut **tx).await?;
     }

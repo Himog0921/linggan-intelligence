@@ -17,6 +17,10 @@ use uuid::Uuid;
 
 pub(super) fn additional_routes() -> Router<LocalWebState> {
     Router::new()
+        .route(
+            "/api/local/comment-research/overview",
+            get(research_overview),
+        )
         .route("/api/local/comment-research/preview", get(research_preview))
         .route("/api/local/comment-research/latest", get(research_latest))
         .route("/api/local/comment-research/runs", get(research_runs))
@@ -110,6 +114,18 @@ async fn research_read(State(state): State<LocalWebState>, Path(request): Path<U
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ResearchDomain {
     domain_ref: Uuid,
+}
+async fn research_overview(
+    State(state): State<LocalWebState>,
+    Query(q): Query<ResearchDomain>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::comment_research_overview::read(db, q.domain_ref)
+            .await,
+    )
 }
 async fn research_runs(
     State(state): State<LocalWebState>,

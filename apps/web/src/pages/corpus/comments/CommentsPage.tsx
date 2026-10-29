@@ -7,6 +7,7 @@ import { DomainPicker } from '../../../corpus/DomainPicker';
 import { useCorpusShell } from '../../../corpus/useCorpusShell';
 import { CommentsView } from './CommentsView';
 import { ResearchDashboard } from './ResearchDashboard';
+import { Overview, type OverviewPreferences } from './Overview';
 import type { SelectedComment } from './studyApi';
 import type { StudyNavigation } from './studyApi';
 import { c } from './styles';
@@ -31,6 +32,7 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
   const location = useLocation(), navigate = useNavigate(), params = new URLSearchParams(location.search), view = activeView(params.get('view'));
   const [savedViews, setSavedViews] = useState<Partial<Record<View, { search: string; state: unknown }>>>({});
   const [selectedComments, setSelectedComments] = useState<SelectedComment[]>([]);
+  const [overviewPreferences, setOverviewPreferences] = useState<OverviewPreferences>({seriesDays:56,seriesView:'chart',wordCategory:'all',method:'solution'});
   const [commentCounts, setCommentCounts] = useState<CommentCounts | null>(null);
   const queryClient = useQueryClient();
   const [usageRefs] = useState(() => new Map<string, string>());
@@ -47,7 +49,7 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
     return { url: `/corpus/comments?${target}`, state: { ...(saved?.state && typeof saved.state === 'object' ? saved.state : {}), ...stateExtra } };
   }
   const nav: StudyNavigation = {
-    view: next => { const to = destination(next); void navigate(to.url, { state: to.state }); },
+    view: (next, filters) => { const to = destination(next, filters ? {signalKind: filters.signalKind ?? null} : {}); void navigate(to.url, { state: to.state }); },
     research: (requestRef, key) => { const to=destination('comments',{commentWorkRef:key.workRef,commentExternalId:key.commentExternalId,detail:'comment',researchRequestRef:requestRef},{commentDetail:true,commentDomain:domain});void navigate(to.url,{state:to.state}); },
     comment: key => {
       const to = destination('comments', { commentWorkRef: key.workRef, commentExternalId: key.commentExternalId, detail: 'comment', researchRequestRef: null }, { commentDetail: true, commentDomain: domain });
@@ -77,7 +79,7 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
     {shellError ? <p className={c('study-table-status')} role="status">领域信息刷新失败；当前显示上次读取结果。{shellError} <button type="button" onClick={retryShell}>重新读取领域信息</button></p> : null}
 
     <section id="study-tab-result" className={view === 'comments' ? c('study-tab-comments') : undefined} aria-live="polite" data-comment-study-content aria-busy={loading}>
-      {loading ? <p className={c('study-empty')}>正在读取评论研究…</p> : !domain ? <p className={c('study-empty')}>请先在页头选择观察领域，再查看评论研究。</p> : view === 'comments' ? <CommentsView domain={domain} nav={nav} selected={selectedComments} onSelected={setSelectedComments} onCounts={setCommentCounts} requestRefs={usageRefs} closeDetail={closeComment} /> : <ResearchDashboard domain={domain} view={view} nav={nav} />}
+      {loading ? <p className={c('study-empty')}>正在读取评论研究…</p> : !domain ? <p className={c('study-empty')}>请先在页头选择观察领域，再查看评论研究。</p> : view === 'comments' ? <CommentsView domain={domain} nav={nav} selected={selectedComments} onSelected={setSelectedComments} onCounts={setCommentCounts} requestRefs={usageRefs} closeDetail={closeComment} /> : view === 'overview' ? <Overview domain={domain} nav={nav} preferences={overviewPreferences} onPreferences={setOverviewPreferences}/> : <ResearchDashboard domain={domain} view={view} nav={nav} />}
     </section>
     </main>}</div></AppShell>;
 }

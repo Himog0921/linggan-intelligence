@@ -39,7 +39,7 @@ export interface StudyPage { nextCursor?: string | null; hasMore?: boolean; tota
 export interface CommentKey { workRef: string; commentExternalId: string }
 export const commentIdentity = (key: CommentKey) => JSON.stringify([key.workRef, key.commentExternalId]);
 export interface StudyNavigation {
-  view(view: 'overview' | 'comments' | 'runs' | 'problems'): void;
+  view(view: 'overview' | 'comments' | 'runs' | 'problems', filters?: {signalKind?: string}): void;
   research(requestRef: string, key: CommentKey): void;
   comment(key: CommentKey): void;
 }

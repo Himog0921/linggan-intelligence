@@ -52,3 +52,7 @@ path = "src/bin/research_dossier.rs"
 [[bin]]
 name = "linggan-ai-worker"
 path = "src/bin/ai_worker.rs"
+
+[[bin]]
+name = "linggan-comment-catalog"
+path = "src/bin/comment_catalog.rs"

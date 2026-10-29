@@ -35,6 +35,8 @@ mod creation_assets_api_tests;
 mod creator_lifecycle_api;
 #[cfg(test)]
 mod creator_lifecycle_tests;
+#[cfg(test)]
+mod creator_preview_proof_tests;
 mod creators;
 #[cfg(test)]
 mod creators_browser_tests;
@@ -1644,20 +1646,37 @@ async fn submit_producer_package_route(
             // the accepted public author facts; failure is returned as retryable so the browser
             // outbox never reports the submission delivered while the requested target is absent.
             let package = submission.capture_package();
-            let target_sync = match sync_target_from_author_profile(
-                database,
-                package.package_kind(),
-                package.platform(),
-                package.records(),
-            )
-            .await
-            {
-                Ok(target_sync) => target_sync,
-                Err(_) => {
-                    return local_producer_error(
-                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                        "author_target_sync_pending",
-                    );
+            // A preview author_profile must not quietly create a long-term target. If the lookup itself
+            // fails the answer is unknown, so fail closed like the target-sync failure below and let the
+            // browser outbox retry (the Package is idempotent) instead of assuming "not a preview".
+            let one_off_preview = if package.package_kind() == "author_profile" {
+                match sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM collection_run_order relation JOIN collection_run run USING(run_ref) JOIN collection_work_order_lease lease ON lease.work_order_ref=relation.work_order_ref JOIN collection_work_order_lease_task task USING(lease_ref) WHERE task.task_id=$1 AND run.source_kind='creator_preview')")
+                    .bind(submission.task_id()).fetch_one(database.pool()).await {
+                    Ok(value) => value,
+                    Err(_) => return local_producer_error(axum::http::StatusCode::SERVICE_UNAVAILABLE, "author_target_sync_pending"),
+                }
+            } else {
+                false
+            };
+            let target_sync = if one_off_preview {
+                json!({"state":"notApplicable","reason":"creator_preview_is_not_observation"})
+            } else {
+                match sync_target_from_author_profile(
+                    database,
+                    package.package_kind(),
+                    package.platform(),
+                    package.records(),
+                )
+                .await
+                {
+                    Ok(value) => serde_json::to_value(value)
+                        .unwrap_or_else(|_| json!({"state":"notApplicable"})),
+                    Err(_) => {
+                        return local_producer_error(
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            "author_target_sync_pending",
+                        );
+                    }
                 }
             };
             let mut response = serde_json::to_value(outcome).unwrap_or_else(|_| {
@@ -1666,15 +1685,7 @@ async fn submit_producer_package_route(
                 })
             });
             if let Some(object) = response.as_object_mut() {
-                object.insert(
-                    "targetSync".to_owned(),
-                    serde_json::to_value(target_sync).unwrap_or_else(|_| {
-                        json!({
-                            "state": "notApplicable",
-                            "reason": "target_sync_serialization_failed"
-                        })
-                    }),
-                );
+                object.insert("targetSync".to_owned(), target_sync);
             }
             Json(response).into_response()
         }

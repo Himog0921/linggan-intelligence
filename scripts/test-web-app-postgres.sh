@@ -147,6 +147,7 @@ if [[ "${WEB_APP_PROOF_SCOPE:-all}" == settings ]]; then
 fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == creators ]]; then
   run_proof "$proof_dir" cargo test -p linggan-api --bins --locked local_web::creators_browser_tests -- --ignored --nocapture --test-threads=1
+  run_proof "$proof_dir" env LINGGAN_COLLECTION_UPGRADE_PHASE=governance cargo test -p linggan-api --bins --locked local_web::creator_preview_proof_tests -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == topics ]]; then
@@ -158,7 +159,7 @@ fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments-contracts || "${WEB_APP_PROOF_SCOPE:-all}" == comments || "${WEB_APP_PROOF_SCOPE:-all}" == research ]]; then
   mkdir -p "$proof_dir/research"
   run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked \
-    unified_research_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
+    local_web::research_browser_tests -- --ignored --nocapture --test-threads=1
   exit 0
 fi
 [[ "${WEB_APP_PROOF_SCOPE:-all}" == all ]] || { echo 'Unknown proof scope' >&2; exit 1; }
@@ -180,6 +181,11 @@ mkdir -p "$proof_dir/creators"
 run_proof "$proof_dir/creators" \
   cargo test -p linggan-api --bins --locked \
   local_web::creators_browser_tests \
+  -- --ignored --nocapture --test-threads=1
+# 创作者主页浅看与精选研究：走真实派发，须与常驻服务一样声明 governance 阶段（其余证明保持原样）。
+run_proof "$proof_dir/creators" \
+  env LINGGAN_COLLECTION_UPGRADE_PHASE=governance cargo test -p linggan-api --bins --locked \
+  local_web::creator_preview_proof_tests \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 D1 corpus shell API and creators page real-chain proofs passed (isolated database; synthetic data only)'
 
@@ -215,4 +221,4 @@ run_proof "$proof_dir/topics" \
 printf '%s\n' 'WEB-REACT-001 F Topics and Workspace real-chain proof passed (isolated database only)'
 
 mkdir -p "$proof_dir/research"
-run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked unified_research_real_chain_browser_proof -- --ignored --nocapture --test-threads=1
+run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked local_web::research_browser_tests -- --ignored --nocapture --test-threads=1
