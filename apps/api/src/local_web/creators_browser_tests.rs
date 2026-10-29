@@ -16,7 +16,7 @@ mod fixture;
 const FIRST_DOMAIN_AUTHORS: usize = 27;
 
 /// 一篇合成作品，归到某个领域的主研究用途下。`likes` 随作者序号变化，便于核对爆款标准与排序。
-async fn seed_work(
+pub(super) async fn seed_work(
     db: &Database,
     domain: Uuid,
     external: &str,
@@ -123,12 +123,12 @@ async fn seed(db: &Database) -> (Uuid, Uuid, Vec<Uuid>) {
     (first, second, works)
 }
 
-async fn count(db: &Database, sql: &'static str) -> i64 {
+pub(super) async fn count(db: &Database, sql: &'static str) -> i64 {
     sqlx::query_scalar(sql).fetch_one(db.pool()).await.unwrap()
 }
 
 /// 浏览器路径里本不该发生的副作用：采集请求、工单、模型调用。
-async fn forbidden_side_effects(db: &Database) -> (i64, i64, i64) {
+pub(super) async fn forbidden_side_effects(db: &Database) -> (i64, i64, i64) {
     (
         count(db, "SELECT count(*) FROM collection_acquisition_request").await,
         count(db, "SELECT count(*) FROM collection_work_order").await,
@@ -136,7 +136,7 @@ async fn forbidden_side_effects(db: &Database) -> (i64, i64, i64) {
     )
 }
 
-async fn isolated(prefix: &str) -> Database {
+pub(super) async fn isolated(prefix: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("isolated proof URL supplied");
     let schema = format!("{prefix}_{}", Uuid::new_v4().simple());
     linggan_storage_postgres::testing::isolated_proof_schema(
@@ -148,7 +148,7 @@ async fn isolated(prefix: &str) -> Database {
     .expect("full migrations apply to isolated schema")
 }
 
-async fn get_json(db: &Database, uri: &str) -> (StatusCode, Value) {
+pub(super) async fn get_json(db: &Database, uri: &str) -> (StatusCode, Value) {
     let response = app_with_database(db.clone())
         .oneshot(
             Request::builder()
@@ -286,6 +286,33 @@ async fn creators_page_real_chain_browser_proof() {
     );
     let db = isolated("creators").await;
     let (first, second, works) = seed(&db).await;
+    // 一份已冻结的主页浅看样本（作者 08 的 3 张卡片）：直接落库，不经派发，所以不产生采集请求或工单。
+    // 顺序与真实流程一致：先放作品，再冻结范围（库里的触发器不许往已冻结的范围里再放作品）。
+    let preview_run = Uuid::new_v4();
+    sqlx::query("INSERT INTO collection_run(run_ref,idempotency_key,request_hash,domain_ref,source_kind,name,search_query,work_limit,comment_mode) VALUES($1,$2,repeat('0',64),$3,'creator_preview','主页浅看 · 合成作者 08',$4,30,'none')")
+        .bind(preview_run)
+        .bind(Uuid::new_v4())
+        .bind(first)
+        .bind(author_id(8))
+        .execute(db.pool())
+        .await
+        .unwrap();
+    for (ordinal, work) in works[7..10].iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO collection_run_work(run_ref,content_public_ref,ordinal) VALUES($1,$2,$3)",
+        )
+        .bind(preview_run)
+        .bind(work)
+        .bind(ordinal as i32 + 1)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    }
+    sqlx::query("UPDATE collection_run SET phase='ended',scope_frozen_at=scope_001_now(),ended_at=scope_001_now(),discovery_reason='surface_ended' WHERE run_ref=$1")
+        .bind(preview_run)
+        .execute(db.pool())
+        .await
+        .unwrap();
     let before = forbidden_side_effects(&db).await;
     assert_eq!(before, (0, 0, 0), "播种本身不创建采集请求、工单或模型调用");
 
@@ -307,6 +334,8 @@ async fn creators_page_real_chain_browser_proof() {
             "correctedWork": works[2],
             "joinedAuthor": "合成作者 05",
             "retriedAuthor": "合成作者 06",
+            "previewAuthor": "合成作者 08",
+            "previewTitles": ["合成作品 08", "合成作品 09", "合成作品 10"],
         })
         .to_string(),
     )
@@ -368,6 +397,36 @@ async fn creators_page_real_chain_browser_proof() {
         .await
         .unwrap();
     assert_eq!((threshold, revision), (Some(100), 1));
+    // 精选研究：页面发出的请求在库里恰好建出一个精选运行——只含所选的两篇、指向那份浅看、文字版、没有排工单。
+    let studies: Vec<(Uuid, i32, String, String)> = sqlx::query_as("SELECT run_ref,work_limit,comment_mode,phase FROM collection_run WHERE source_kind='creator_selected_works'")
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(studies.len(), 1, "页面确认一次，库里恰好一个精选运行");
+    let (study, limit, mode, phase) = &studies[0];
+    assert_eq!(
+        (*limit, mode.as_str(), phase.as_str()),
+        (2, "none", "materials")
+    );
+    let chosen: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT content_public_ref FROM collection_run_work WHERE run_ref=$1 ORDER BY ordinal",
+    )
+    .bind(study)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        chosen,
+        vec![works[7], works[9]],
+        "取消了中间那篇，只剩第一篇与第三篇"
+    );
+    let frozen: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM collection_run_work WHERE run_ref=$1")
+            .bind(preview_run)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(frozen, 3, "精选研究没有改动浅看冻结的样本");
     assert!(
         result.expect("browser subprocess starts").success(),
         "React creators browser proof failed; see the evidence directory"

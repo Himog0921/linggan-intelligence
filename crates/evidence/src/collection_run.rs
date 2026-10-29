@@ -30,6 +30,8 @@ pub enum CommentMode {
     AllPublic,
     /// 每篇采到 `comment_target` 条不重复评论（含回复）就停；评论区先走到尽头也结束（Mog 2026-10-23）。
     UpTo,
+    /// The run did not request comment collection.
+    None,
 }
 impl CommentMode {
     pub fn as_str(self) -> &'static str {
@@ -37,6 +39,7 @@ impl CommentMode {
             Self::Sample30 => "sample_30",
             Self::AllPublic => "all_public",
             Self::UpTo => "up_to",
+            Self::None => "none",
         }
     }
 }
@@ -51,9 +54,23 @@ pub const MAX_COMMENT_TARGET: i32 = 1000;
     deny_unknown_fields
 )]
 pub enum RunSource {
-    TemporaryKeyword { query: String },
-    ObservationTarget { target_ref: Uuid },
-    SelectedWorks { work_refs: Vec<Uuid> },
+    TemporaryKeyword {
+        query: String,
+    },
+    ObservationTarget {
+        target_ref: Uuid,
+    },
+    SelectedWorks {
+        work_refs: Vec<Uuid>,
+    },
+    /// One-off author profile + discovery cards, never a permanent observation target.
+    CreatorPreview {
+        author_external_id: String,
+    },
+    CreatorSelectedWorks {
+        preview_ref: Uuid,
+        work_refs: Vec<Uuid>,
+    },
 }
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -78,6 +95,11 @@ fn hash<T: Serialize>(v: &T) -> Result<String, RunError> {
 }
 impl CreateRun {
     fn validate(&self) -> Result<(), RunError> {
+        if matches!(&self.source, RunSource::CreatorPreview { .. })
+            && (self.work_limit != 30 || self.comment_mode != CommentMode::None)
+        {
+            return Err(RunError::Invalid("creator_preview_scope_invalid"));
+        }
         if !(1..=200).contains(&self.work_limit) {
             return Err(RunError::Invalid("invalid_work_limit"));
         }
@@ -100,6 +122,25 @@ impl CreateRun {
                 if query.trim().is_empty() || query.chars().count() > 80 =>
             {
                 Err(RunError::Invalid("invalid_keyword"))
+            }
+            RunSource::CreatorPreview { author_external_id }
+                if author_external_id.trim().is_empty()
+                    || author_external_id.chars().count() > 256
+                    || author_external_id.chars().any(char::is_control) =>
+            {
+                Err(RunError::Invalid("invalid_creator_preview_identity"))
+            }
+            RunSource::CreatorSelectedWorks { work_refs, .. }
+                if work_refs.is_empty()
+                    || work_refs.len() > 30
+                    || work_refs
+                        .iter()
+                        .collect::<std::collections::HashSet<_>>()
+                        .len()
+                        != work_refs.len()
+                    || work_refs.len() != self.work_limit as usize =>
+            {
+                Err(RunError::Invalid("invalid_creator_selected_works"))
             }
             RunSource::SelectedWorks { work_refs }
                 if work_refs.is_empty()
@@ -175,6 +216,42 @@ pub async fn create_run(db: &Database, input: &CreateRun) -> Result<Value, RunEr
                 row.get::<String, _>("name"),
             )
         }
+        RunSource::CreatorPreview { author_external_id } => {
+            let known: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM linggan_material_domain_usage usage JOIN linggan_material_content content ON content.public_ref=usage.content_public_ref JOIN LATERAL linggan_material_content_author_at(content.public_ref,scope_001_now()) attribution ON true WHERE usage.domain_ref=$1 AND content.platform='xhs' AND attribution.author_external_id=$2)",
+            )
+            .bind(input.domain_ref)
+            .bind(author_external_id)
+            .fetch_one(&mut *tx)
+            .await?;
+            if !known {
+                return Err(RunError::Invalid("creator_not_discovered_in_domain"));
+            }
+            (
+                "creator_preview",
+                None,
+                "creator".to_owned(),
+                Some(author_external_id.clone()),
+                format!("主页浅看 · {author_external_id}"),
+            )
+        }
+        RunSource::CreatorSelectedWorks {
+            preview_ref,
+            work_refs,
+        } => {
+            let count:i64=sqlx::query_scalar("SELECT count(*) FROM collection_run_work work JOIN collection_run preview ON preview.run_ref=work.run_ref WHERE preview.run_ref=$1 AND preview.domain_ref=$2 AND preview.source_kind='creator_preview' AND preview.scope_frozen_at IS NOT NULL AND work.content_public_ref=ANY($3)")
+                .bind(preview_ref).bind(input.domain_ref).bind(work_refs).fetch_one(&mut *tx).await?;
+            if count != work_refs.len() as i64 {
+                return Err(RunError::Invalid("invalid_creator_preview_selection"));
+            }
+            (
+                "creator_selected_works",
+                None,
+                "keyword".to_owned(),
+                None,
+                format!("精选研究 · {} 篇", work_refs.len()),
+            )
+        }
         RunSource::SelectedWorks { work_refs } => {
             let count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_material_content c WHERE c.public_ref=ANY($1) AND c.platform='xhs' AND EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=c.public_ref AND u.domain_ref=$2)").bind(work_refs).bind(input.domain_ref).fetch_one(&mut *tx).await?;
             if count != work_refs.len() as i64 {
@@ -217,7 +294,9 @@ pub async fn create_run(db: &Database, input: &CreateRun) -> Result<Value, RunEr
     .bind(auth)
     .execute(&mut *tx)
     .await?;
-    if let RunSource::SelectedWorks { work_refs } = &input.source {
+    if let RunSource::SelectedWorks { work_refs }
+    | RunSource::CreatorSelectedWorks { work_refs, .. } = &input.source
+    {
         for (n, work) in work_refs.iter().enumerate() {
             sqlx::query("INSERT INTO collection_run_work(run_ref,content_public_ref,ordinal) VALUES($1,$2,$3)").bind(run).bind(work).bind(n as i32+1).execute(&mut *tx).await?;
         }
@@ -271,7 +350,7 @@ pub(crate) async fn admit_stage(
     } else {
         30
     };
-    if stage == "comments" && comment_limit == 0 {
+    if stage == "comments" && (comment_limit == 0 || mode == "none") {
         return Ok(());
     }
     let materials: Vec<MaterialDeepeningTarget> = work
@@ -280,9 +359,9 @@ pub(crate) async fn admit_stage(
             content_public_ref,
             comment_limit,
             reply_expand_limit: if stage == "detail" { 0 } else { 2 },
-            acquire_media: stage == "detail" || (sample && segment == 1),
-            allow_ocr: stage == "detail" || (sample && segment == 1),
-            allow_asr: stage == "detail" || (sample && segment == 1),
+            acquire_media: (stage == "detail" && mode != "none") || (sample && segment == 1),
+            allow_ocr: (stage == "detail" && mode != "none") || (sample && segment == 1),
+            allow_asr: (stage == "detail" && mode != "none") || (sample && segment == 1),
         })
         .collect();
     let result = request_and_admit_in_transaction_scoped(
@@ -307,6 +386,8 @@ pub(crate) async fn admit_stage(
         // newUniqueLimit 收住；原始意图另记 commentTarget，便于执行诊断核对。
         let plugin_mode = if mode == "up_to" {
             "all_public"
+        } else if mode == "none" {
+            "sample_30"
         } else {
             mode.as_str()
         };

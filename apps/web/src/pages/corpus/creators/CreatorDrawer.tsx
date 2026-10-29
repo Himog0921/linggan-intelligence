@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { findAuthorButton } from './findAuthor';
@@ -7,6 +7,7 @@ import { formatCount, type CreatorQuery, type LinkContext } from './creatorsQuer
 import type { CreatorItem, CreatorList } from './creatorsTypes';
 import { Metric, type DrawerTab } from './CreatorTable';
 import { EvidencePanel, OverviewPanel, ProfilePanel, type PanelContext } from './DrawerPanels';
+import { CreatorHomepagePanel } from './CreatorHomepagePanel';
 import { Avatar } from './Media';
 import { useJoinPending } from './useCreatorWrites';
 import type { WorkResources } from './useWorkResources';
@@ -38,8 +39,9 @@ interface CreatorDrawerProps {
 
 const TABS: readonly { id: DrawerTab; label: string }[] = [
   { id: 'overview', label: '概览' },
-  { id: 'evidence', label: '作品与依据' },
-  { id: 'profile', label: '作者资料' },
+  { id: 'works', label: '主页作品' },
+  { id: 'evidence', label: '研究线索' },
+  { id: 'profile', label: '观察记录' },
 ];
 
 /** 抽屉自页头下沿起，覆盖右侧；页头高度会随窗口变化（窄屏页头会折行），所以量实际位置。 */
@@ -65,11 +67,12 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
   const idBase = useId();
   const body = useRef<HTMLDivElement>(null);
   // 每个分区各记一个滚动位置；从证据库返回时，恢复离开时所在分区的位置。
-  const positions = useRef<Record<DrawerTab, number>>({ overview: 0, evidence: 0, profile: 0, [restore?.tab ?? initialTab]: restore?.drawerScroll ?? 0 });
-  const tabButtons = useRef<Record<DrawerTab, HTMLButtonElement | null>>({ overview: null, evidence: null, profile: null });
+  const positions = useRef<Record<DrawerTab, number>>({ overview: 0, works: 0, evidence: 0, profile: 0, [restore?.tab ?? initialTab]: restore?.drawerScroll ?? 0 });
+  const tabButtons = useRef<Record<DrawerTab, HTMLButtonElement | null>>({ overview: null, works: null, evidence: null, profile: null });
   const [tab, setTab] = useState<DrawerTab>(initialTab);
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(restore?.expanded ?? []));
   const joinPending = useJoinPending(item.creatorKey);
+  const resizeStart = useRef<{ x: number; width: number } | null>(null);
 
   const domainActive = data.domain.status === 'active';
   const name = authorName(item);
@@ -109,6 +112,25 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
     onTab: switchTab,
   };
 
+  function onResizePointerDown(event: PointerEvent<HTMLDivElement>) {
+    if (window.innerWidth <= 600) return;
+    const dialog = event.currentTarget.closest('dialog');
+    if (!dialog) return;
+    resizeStart.current = { x: event.clientX, width: dialog.getBoundingClientRect().width };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+  function onResizePointerMove(event: PointerEvent<HTMLDivElement>) {
+    if (!resizeStart.current) return;
+    const dialog = event.currentTarget.closest('dialog');
+    if (!dialog) return;
+    const width = resizeStart.current.width + resizeStart.current.x - event.clientX;
+    dialog.style.width = `${Math.min(window.innerWidth, Math.max(600, width))}px`;
+  }
+  function onResizePointerUp(event: PointerEvent<HTMLDivElement>) {
+    resizeStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
   const observation = item.observation;
   const kept = preservedLifecycle(observation);
   const blocked = query.usageRole === 'primary' && observation.hasOtherPrimaryDomain === true;
@@ -124,11 +146,30 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       setup={positionBelowHeader}
       closeOnBackdrop
     >
+      <div
+        className={styles.resizeHandle}
+        role="separator"
+        tabIndex={0}
+        aria-label="调整作者研究抽屉宽度"
+        aria-orientation="vertical"
+        onPointerDown={onResizePointerDown}
+        onPointerMove={onResizePointerMove}
+        onPointerUp={onResizePointerUp}
+        onPointerCancel={onResizePointerUp}
+        onKeyDown={event => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          const dialog = event.currentTarget.closest('dialog');
+          if (!dialog) return;
+          const width = dialog.getBoundingClientRect().width + (event.key === 'ArrowLeft' ? 24 : -24);
+          dialog.style.width = `${Math.min(window.innerWidth, Math.max(Math.min(window.innerWidth, 600), width))}px`;
+        }}
+      />
       <header className={styles.head}>
         <div className={styles.title}>
           <Avatar name={name} url={avatarUrl} pending={resources.pending} className={`${pageStyles.avatar} ${pageStyles.avatarLarge}`} />
           <div>
-            <small>创作者 · 判断依据</small>
+            <small>创作者 · 作者研究</small>
             <h2 id={titleId} title={name}>
               {name}
             </h2>
@@ -137,7 +178,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
               {item.displayNameKind === 'observation_target' ? '观察目标名称 · ' : ''}粉丝 <Metric value={item.followerCount} />
             </p>
           </div>
-          <button type="button" className={`${styles.textButton} ${styles.close}`} aria-label="关闭发现依据" onClick={onClose}>
+          <button type="button" className={`${styles.textButton} ${styles.close}`} aria-label="关闭作者研究" onClick={onClose}>
             关闭
           </button>
         </div>
@@ -184,6 +225,9 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       >
         <div role="tabpanel" id={`${idBase}-panel-overview`} aria-labelledby={`${idBase}-tab-overview`} hidden={tab !== 'overview'}>
           <OverviewPanel ctx={context} />
+        </div>
+        <div role="tabpanel" id={`${idBase}-panel-works`} aria-labelledby={`${idBase}-tab-works`} hidden={tab !== 'works'}>
+          <CreatorHomepagePanel ctx={context} />
         </div>
         <div role="tabpanel" id={`${idBase}-panel-evidence`} aria-labelledby={`${idBase}-tab-evidence`} hidden={tab !== 'evidence'}>
           <EvidencePanel

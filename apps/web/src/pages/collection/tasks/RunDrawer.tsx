@@ -35,8 +35,8 @@ function Progress({ r, control, locked, feedback }: { r: Run; control: (action: 
     </dl>
     <section className={styles.phases} aria-labelledby="run-phases-title"><h3 id="run-phases-title">采集进展</h3><ol>
       <li><span>发现作品</span><span>{frozen ? `${count(r.selected_works)} 篇已确定` : '范围待确定'}</span></li>
-      <li><span>取得详情</span><span>{r.available_details === null ? '尚未取得数量' : `已取得 ${count(r.available_details)} 篇`}</span></li>
-      <li><span>评论采集</span><span>{r.completed_discussions === null ? '完成范围尚未确认' : `${count(r.completed_discussions)} 篇已结束本轮采集`}</span></li>
+      <li><span>取得详情</span><span>{r.source_kind === 'creator_preview' ? '浅看只到发现，不取详情' : r.available_details === null ? '尚未取得数量' : `已取得 ${count(r.available_details)} 篇`}</span></li>
+      <li><span>评论采集</span><span>{r.comment_mode === 'none' ? '本次不采评论' : r.completed_discussions === null ? '完成范围尚未确认' : `${count(r.completed_discussions)} 篇已结束本轮采集`}</span></li>
     </ol></section>
     {r.stations.length > 0 && <div className={styles.stations}><span>执行工位</span>{r.stations.map(s => <a key={s.stationRef} href={`/collection/runtime?${new URLSearchParams({station:s.stationRef,return_to:`/collection/tasks?domain=${r.domain_ref}&run=${r.run_ref}`})}`}>{s.name}</a>)}</div>}
     {!r.legacy && !r.ended && r.control_intent !== 'stopped' && <div className={styles.actions}><ActionButton disabled={locked} onClick={() => control(r.control_intent === 'paused' ? 'continue' : 'pause')}>{r.control_intent === 'paused' ? '继续' : '暂停'}</ActionButton><ActionButton variant="quiet" disabled={locked} onClick={() => setConfirming(true)}>停止本次</ActionButton></div>}
@@ -49,7 +49,7 @@ function Results({ r }: { r: Run }) {
   const context=new URLSearchParams({domain:r.domain_ref,collectionRunRef:r.run_ref,returnTo:`/collection/tasks?domain=${r.domain_ref}&run=${r.run_ref}`});
   return <section className={styles.results}><header><h3>作品与缺口</h3><a href={`/corpus/evidence?${context}`}>查看本次作品与评论 ↗</a></header><div data-run-works>{query.error ? <p role="alert">作品读取失败：{errorText(query.error)}</p> : !query.data ? <p role="status">正在读取作品…</p> : <>
     {query.data.items.map(w=>{
-      const gap=({access_restricted:'访问受限，已保留可用成果',detail_not_accepted:'详情尚未取得',discussion_partial_or_not_delivered:'评论或回复有缺口',execution_stopped_or_unavailable:'采集中断',no_progress_after_bounded_retries:'多次尝试未取得新评论，待处理'} as Record<string,string>)[w.gapReason??''] ?? (w.gapReason ? '成果情况待核对' : r.legacy ? '已有材料可查看，历史完成情况待核对' : w.commentsComplete ? '本轮范围已采集完成' : '等待采集');
+      const gap=({access_restricted:'访问受限，已保留可用成果',detail_not_accepted:'详情尚未取得',discussion_partial_or_not_delivered:'评论或回复有缺口',execution_stopped_or_unavailable:'采集中断',no_progress_after_bounded_retries:'多次尝试未取得新评论，待处理'} as Record<string,string>)[w.gapReason??''] ?? (w.gapReason ? '成果情况待核对' : r.legacy ? '已有材料可查看，历史完成情况待核对' : r.source_kind === 'creator_preview' ? '主页卡片，浅看只到发现' : w.commentsComplete ? '本轮范围已采集完成' : '等待采集');
       const link=new URLSearchParams(context);link.set('work',w.publicRef);
       return <article key={w.publicRef} className={styles.work}><a href={`/corpus/evidence?${link}`}>{w.title||'标题未知'}</a><p><span>{w.creator||'作者未知'}</span><span>{gap}</span></p></article>;
     })}

@@ -13,6 +13,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/creators", get(list))
         .route(
+            "/api/local/creators/{key}/preview",
+            get(preview).post(start_preview),
+        )
+        .route(
             "/api/local/creator-account-research/preview",
             get(account_preview),
         )
@@ -168,6 +172,157 @@ async fn list(State(state): State<LocalWebState>, Query(q): Query<CreatorScope>)
         }
     }
 }
+
+#[derive(Deserialize)]
+struct PreviewQuery {
+    domain: Uuid,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PreviewRequest {
+    domain: Uuid,
+    command_ref: Uuid,
+}
+async fn start_preview(
+    State(state): State<LocalWebState>,
+    Path(key): Path<String>,
+    Json(body): Json<PreviewRequest>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Some((platform, author)) = linggan_contracts::creator_discovery::decode_creator_key(&key)
+    else {
+        return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "invalid_creator_key");
+    };
+    if platform != "xhs" {
+        return local_read_json_error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "unsupported_creator_platform",
+        );
+    }
+    let request = linggan_evidence::collection_run::CreateRun {
+        idempotency_key: body.command_ref,
+        domain_ref: body.domain,
+        source: linggan_evidence::collection_run::RunSource::CreatorPreview {
+            author_external_id: author,
+        },
+        ranking: None,
+        work_limit: 30,
+        comment_mode: linggan_evidence::collection_run::CommentMode::None,
+        comment_target: None,
+    };
+    match linggan_evidence::collection_run::create_run(db, &request).await {
+        Ok(mut value) => {
+            value["domainRef"] = json!(body.domain);
+            Json(value).into_response()
+        }
+        Err(linggan_evidence::collection_run::RunError::Invalid(code)) => {
+            local_read_json_error(axum::http::StatusCode::UNPROCESSABLE_ENTITY, code)
+        }
+        Err(linggan_evidence::collection_run::RunError::Conflict) => local_read_json_error(
+            axum::http::StatusCode::CONFLICT,
+            "creator_preview_request_conflict",
+        ),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "creator_preview_start_unavailable",
+        ),
+    }
+}
+async fn preview(
+    State(state): State<LocalWebState>,
+    Path(key): Path<String>,
+    Query(params): Query<PreviewQuery>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Some((platform, author)) = linggan_contracts::creator_discovery::decode_creator_key(&key)
+    else {
+        return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "invalid_creator_key");
+    };
+    if platform != "xhs" {
+        return local_read_json_error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "unsupported_creator_platform",
+        );
+    }
+    let row = sqlx::query("SELECT run_ref,phase,control_intent,revision,work_limit,scope_frozen_at::text AS frozen_at,discovery_reason FROM collection_run WHERE domain_ref=$1 AND source_kind='creator_preview' AND search_query=$2 ORDER BY created_at DESC,run_ref DESC LIMIT 1")
+        .bind(params.domain).bind(author).fetch_optional(db.pool()).await;
+    let row = match row {
+        Ok(Some(value)) => value,
+        Ok(None) => return Json(json!({"state":"not_requested","runRef":null,"requestedLimit":30,"sampleCount":0,"works":[]})).into_response(),
+        Err(_) => return local_read_json_error(axum::http::StatusCode::SERVICE_UNAVAILABLE, "creator_preview_unavailable"),
+    };
+    let run_ref: Uuid = row.get("run_ref");
+    let refs:Result<Vec<(Uuid,i32)>,_>=sqlx::query_as("SELECT content_public_ref,ordinal FROM collection_run_work WHERE run_ref=$1 ORDER BY ordinal LIMIT 30")
+        .bind(run_ref).fetch_all(db.pool()).await;
+    let Ok(refs) = refs else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "creator_preview_unavailable",
+        );
+    };
+    // Whether a card is already formal domain-research material comes from the server, never from the
+    // page's current filter: it labels the card and seeds the default suggestion.
+    let frozen: Vec<Uuid> = refs.iter().map(|(work_ref, _)| *work_ref).collect();
+    let known: Result<Vec<Uuid>, _> = sqlx::query_scalar("SELECT DISTINCT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 AND use_kind='domain_research' AND content_public_ref=ANY($2)")
+        .bind(params.domain).bind(&frozen).fetch_all(db.pool()).await;
+    let Ok(known) = known else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "creator_preview_unavailable",
+        );
+    };
+    let mut works = Vec::new();
+    for (work_ref, ordinal) in refs {
+        // A card that cannot be read right now is counted in `frozenCount` but not listed. A read that
+        // fails outright is not "no card": answer unavailable instead of a silently shorter sample.
+        let work = match linggan_evidence::read_work_resource(db, work_ref).await {
+            Ok(Some(work)) => work,
+            Ok(None) => continue,
+            Err(_) => {
+                return local_read_json_error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "creator_preview_unavailable",
+                );
+            }
+        };
+        let source = serde_json::to_value(work).unwrap_or(json!({}));
+        works.push(
+            json!({"workRef":work_ref,"ordinal":ordinal,"inDomain":known.contains(&work_ref),
+            "title":source["display"]["title"],"likes":source["display"]["engagement"]["likeCount"],
+            "comments":source["display"]["engagement"]["commentCount"],
+            "collects":source["display"]["engagement"]["collectCount"]}),
+        );
+    }
+    let phase: String = row.get("phase");
+    let control: String = row.get("control_intent");
+    let snapshot = if control == "stopped" {
+        "stopped"
+    } else if phase == "ended" {
+        "complete"
+    } else if phase == "blocked" {
+        "partial"
+    } else {
+        "running"
+    };
+    Json(
+        json!({"state":snapshot,"runRef":run_ref,"revision":row.get::<i32,_>("revision"),
+        "requestedLimit":row.get::<i32,_>("work_limit"),"sampleCount":works.len(),"frozenCount":frozen.len(),
+        "scopeFrozenAt":row.get::<Option<String>,_>("frozen_at"),
+        "stopReason":row.get::<Option<String>,_>("discovery_reason"),"works":works}),
+    )
+    .into_response()
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Register {
