@@ -275,6 +275,19 @@ try {
     const saved=await envelope();assert.equal(saved.revision.document.accountRef,accountRef);assert.equal(saved.revision.document.outline.length,3);
     await screenshot('workbench-1440-topic');
   });
+  await step('创作归属运营，三个工作分区共用同一导航，稿件步骤按需展开', async()=>{
+    const primary=page.getByRole('navigation',{name:'一级导航'});
+    assert.deepEqual(await primary.locator('.v7-nav-zh').allTextContents(),['雷达','主题图谱','语料','洞察','采集','运营']);
+    assert.equal(await primary.getByRole('link',{name:/运营/}).getAttribute('aria-current'),'page');
+    const sidebar=page.getByRole('complementary',{name:'运营导航'});
+    assert.equal(await sidebar.getByRole('link',{name:'创作',exact:true}).getAttribute('aria-current'),'page');
+    assert.equal(await sidebar.getByRole('link',{name:'数据',exact:true}).count(),1);
+    const sections=page.getByRole('navigation',{name:'创作页面'});
+    assert.deepEqual(await sections.getByRole('button').allTextContents(),['写稿','材料桌','资产库']);
+    assert.equal(await sections.getByRole('button',{name:'写稿',exact:true}).getAttribute('aria-current'),'page');
+    assert.equal(await page.getByRole('navigation',{name:'创作步骤'}).isVisible(),false);
+    await screenshot('creation-navigation-hierarchy');
+  });
   await step('V8 缺正文与图页时的真实禁用态与请求边界',async()=>{await stage('预览与导出');await assertV8DisabledAction(imageSection().getByRole('button',{name:'保存并生成图文包',exact:true}));});
   await step('封面和四张内页：模板配色对齐、自有图片裁切、稳定排序与撤销',async()=>{
     await stage('封面');const area=imageSection();assert.equal(await area.getAttribute('data-step'),'cover');await area.getByRole('button',{name:'添加封面',exact:true}).click();

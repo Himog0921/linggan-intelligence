@@ -8,7 +8,6 @@ import { OpsFrame } from '../ops/OpsFrame';
 import { OpsScopePicker } from '../ops/OpsScopePicker';
 import { ApiError } from '../../shared/api';
 import { RequestIdentities } from '../../shared/requestIdentity';
-import { NavIcon } from '../../shared/Sidebar';
 import * as api from './workbenchApi';
 import { newDocument, newCanvasBlock, parseAsset, scalarRange, type AiPreview, type AiReadiness, type AiStatus, type TitleStatus, type Citation, type CanvasBlock, type CanvasGroup, type Revision, type SaveReceipt, type UseTarget, type ValidatedAnchor, type WorkDocument, type WorkEnvelope, type WorkSummary, type IdeaBoxSummary, type WritingAction, type WritingSelection } from './workbenchModel';
 import { ManuscriptEditor } from './ManuscriptEditor';
@@ -232,24 +231,19 @@ export function WorkbenchPage() {
     }
   }
   return <OpsFrame section="creation" domain={domain} immersive={immersive && !!work}
-    sidebar={<>
-      <button type="button" className="v7-side-nav" disabled={assetPending} aria-current={section !== 'assets' && (!work || !['materials', 'canvas'].includes(viewValue(params.get('view')))) ? 'page' : undefined} onClick={() => {
-        setParams(lastWork ? { domain, work: lastWork, view: 'body' } : { domain, section: 'works' });
-      }}><NavIcon name="publications"/><span>写稿</span></button>
-      <button type="button" className="v7-side-nav" disabled={!lastWork || assetPending} aria-current={work && ['materials', 'canvas'].includes(viewValue(params.get('view'))) ? 'page' : undefined} onClick={() => {
-        if (!lastWork) return;
-        setParams({ domain, work: lastWork, view: 'materials' });
-      }}><NavIcon name="evidence"/><span>材料桌</span></button>
-      <button type="button" className="v7-side-nav" disabled={assetPending} aria-current={!work && section === 'assets' ? 'page' : undefined} onClick={() => {
-        if (!work && section === 'assets') return;
-        setParams({ domain, section: 'assets' });
-      }}><NavIcon name="default"/><span>资产库</span></button>
-    </>}
     scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
       disabled={creating || createUnknown || assetPending} onChange={next => { if (createPending.current || assetPending) return; setError(''); setParams({ domain: next, section }); }} />}
-    tabs={<>{(['today', 'works'] as const).map(value => <button type="button" key={value}
-      disabled={assetPending} aria-current={!work && section === value ? 'page' : undefined} onClick={() => { if (!work && section === value) return; setParams({ ...(domain ? { domain } : {}), section: value }); }}>
-      {SECTION_TITLE[value]}</button>)}{work ? <span aria-current="page">作品编辑</span> : null}</>}
+    tabs={<>
+      <button type="button" disabled={assetPending} aria-current={section !== 'assets' && (!work || !['materials', 'canvas'].includes(viewValue(params.get('view')))) ? 'page' : undefined} onClick={() => {
+        setParams(lastWork ? { domain, work: lastWork, view: 'body' } : { domain, section: 'works' });
+      }}>写稿</button>
+      <button type="button" disabled={!lastWork || assetPending} aria-current={work && ['materials', 'canvas'].includes(viewValue(params.get('view'))) ? 'page' : undefined} onClick={() => {
+        if (lastWork) setParams({ domain, work: lastWork, view: 'materials' });
+      }}>材料桌</button>
+      <button type="button" disabled={assetPending} aria-current={!work && section === 'assets' ? 'page' : undefined} onClick={() => {
+        if (work || section !== 'assets') setParams({ domain, section: 'assets' });
+      }}>资产库</button>
+    </>}
     meta={<span>个人创作空间</span>}>
 <main className={`${styles.workspace} ${immersive && work ? styles.immersiveWorkspace : ''}`} aria-label="运营创作">
     {blocker.state === 'blocked' ? assetDirty && !assetPending && !anyTemplatePending && !anyPublicationPending && !anyTitlePending && !anyWritingPending ? <p role="alert" className={styles.error}>当前内容有未保存编辑。 <button type="button" onClick={() => blocker.reset()}>继续编辑</button> <button type="button" onClick={() => { setAssetDirty(false); setAssetReset(value => value + 1); blocker.proceed(); }}>丢弃编辑并离开</button></p> : <p role="alert" className={styles.error}>操作结果尚未确认，请先留在当前页面并沿用原请求重试。 <button type="button" onClick={() => blocker.reset()}>返回当前页面</button></p> : null}
@@ -258,6 +252,7 @@ export function WorkbenchPage() {
 </p> : current.data && current.data.domainRef === domain ? null : <p className={styles.error}>作品不属于当前领域。</p>}</> : section === 'assets' ? <AssetsLibrary key={`${domain}:${assetReset}`} domainRef={domain} onPendingChange={setAssetPending} onDirtyChange={setAssetDirty} /> : <section className={styles.library}>
 <div className={styles.libraryTools}>
 <h1 className={styles.srOnly}>{section === 'today' ? '今日选题' : '我的创作'}</h1>
+<div role="group" aria-label="写稿内容" className={styles.steps}>{(['today', 'works'] as const).map(value => <button type="button" key={value} aria-pressed={section === value} onClick={() => setParams({ domain, section: value })}>{value === 'today' ? '今日选题' : '我的稿件'}</button>)}</div>
 <small>{works.isError ? '作品读取失败' : works.data ? `${works.data.length} 篇已保存作品` : '读取中'}</small>
 </div>
 {error ? <p role="alert" className={styles.error}>{error}</p> : null}{works.error ? <p role="alert" className={styles.error}>{api.errorText(works.error)}</p> : null}<TopicLibrary key={domain} section={section} works={works.isError ? [] : works.data ?? []} ideas={ideas.data ?? []} ideasStatus={ideas.status} onRetryIdeas={() => void ideas.refetch()} loading={works.isPending} failed={works.isError} onOpen={open} action={<form className={styles.createForm} onSubmit={e => {
@@ -267,7 +262,7 @@ export function WorkbenchPage() {
 <input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={creating || createUnknown} onChange={e => setTitle(e.target.value)} />
 <ActionButton type="submit" variant="primary" busy={creating} disabled={!title.trim() || creating}>{creating ? '建立中…' : createUnknown ? '核实原请求并重试' : '建立选题'}</ActionButton>
 </form>} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
-<WorkEditor onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} immersive={immersive} onImmersive={setImmersive} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenTopic={id => setParams({ domain: w.domainRef, work: id, view: 'topic' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
+<WorkEditor onOpenLibrary={() => setParams({ domain: w.domainRef, section: 'works' })} onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} immersive={immersive} onImmersive={setImmersive} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenTopic={id => setParams({ domain: w.domainRef, work: id, view: 'topic' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
           domain: w.domainRef,
           work: w.workId,
           view
@@ -286,6 +281,7 @@ interface Pending {
 }
 function WorkEditor({
   initial,
+  onOpenLibrary,
   templateBlocked, onResetTemplateBlock, onTemplatePending, onPublicationPending, onTitlePending, onWritingPending,
   ideas, ideaState, onOpenTopic,
   drafts,
@@ -298,6 +294,7 @@ function WorkEditor({
   onImmersive
 }: {
   initial: WorkEnvelope;
+  onOpenLibrary: () => void;
   onTitlePending: (workId: string, pending: boolean) => void;
   onWritingPending: (workId: string, pending: boolean) => void;
   templateBlocked: boolean; onResetTemplateBlock: () => void; onTemplatePending: (workId: string, pending: boolean) => void; onPublicationPending: (workId: string, pending: boolean) => void;
@@ -1149,7 +1146,7 @@ function WorkEditor({
     else if (next !== 'topic' || !topicUnavailable) onView(next);
   }
   const commandContents = <>
-{view === 'body' ? <details className={styles.workflowMenu}><summary>创作步骤</summary><nav aria-label="创作步骤" className={styles.workflowOptions}>{VIEWS.map(item => <button key={item.id} disabled={item.id === 'topic' && topicUnavailable} aria-current={view === item.id ? 'step' : undefined} onClick={() => goView(item.id)}>{item.label}</button>)}</nav></details> : <nav aria-label="创作步骤" className={styles.steps}>{VIEWS.map((item, index) => <button key={item.id} disabled={item.id === 'topic' && topicUnavailable} aria-current={view === item.id ? 'step' : undefined} onClick={() => goView(item.id)}><small aria-hidden="true">{String(index + 1).padStart(2, '0')} </small>{item.label}</button>)}</nav>}
+<details className={styles.workflowMenu}><summary>创作步骤 · {VIEWS.find(item => item.id === view)?.label}</summary><nav aria-label="创作步骤" className={styles.workflowOptions}>{VIEWS.map(item => <button type="button" key={item.id} disabled={item.id === 'topic' && topicUnavailable} aria-current={view === item.id ? 'step' : undefined} onClick={event => { goView(item.id); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{item.label}</button>)}</nav></details>
 {view === 'body' ? <fieldset disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} className={styles.toolbarFieldset}><div className={styles.writeControls}><div className={styles.steps}><button aria-pressed={!compareVisible} onClick={() => setCompareVisible(false)}>沉浸编辑</button><button disabled={document.experienceGaps.length > 0} title={document.experienceGaps.length ? '请先填好或删除经历位' : undefined} aria-pressed={compareVisible} onClick={() => {setCompareVisible(true);if(!compareBase){setCompareBase(live.current);setComparisonDrafts(null);}}}>改稿对照</button></div>
 <div className={styles.row}>
 <ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={undoHistory}>撤销</ActionButton>
@@ -1170,7 +1167,7 @@ function WorkEditor({
 <p>未确认编辑仅保留在本页内存；关闭页面前请完成保存。</p>
 </details>
 <ActionButton variant="outline" busy={busy&&saveState==='saving'} disabled={busy || composing || !!conflict} onClick={() => void saveCurrent().catch(() => undefined)}>{hasPending && saveState === 'unknown' ? '核实并重试' : saveState === 'saving' ? '保存中…' : '保存'}</ActionButton>
-<ActionButton variant="quiet" disabled={resetRequired || recheckStatus !== 'ready'} onClick={() => void showHistory()}>历史</ActionButton><ActionButton variant="quiet" onClick={() => onImmersive(!immersive)}>{immersive ? '退出沉浸' : '收起导航'}</ActionButton>{view === 'materials' || view === 'canvas' ? <ActionButton variant="primary" onClick={() => onView('body')}>进入正文 →</ActionButton> : null}
+<ActionButton variant="quiet" onClick={onOpenLibrary}>全部稿件</ActionButton><ActionButton variant="quiet" disabled={resetRequired || recheckStatus !== 'ready'} onClick={() => void showHistory()}>历史</ActionButton><ActionButton variant="quiet" onClick={() => onImmersive(!immersive)}>{immersive ? '退出沉浸' : '收起导航'}</ActionButton>{view === 'materials' || view === 'canvas' ? <ActionButton variant="primary" onClick={() => onView('body')}>进入正文 →</ActionButton> : null}
 </div>
   </>;
   return <div className={styles.editorWorkspace} data-view={view}>

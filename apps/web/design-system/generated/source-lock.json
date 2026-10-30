@@ -1,5 +1,5 @@
 {
-  "fingerprint": "c397f57209533924ac277327166381126297ad7acf0dafc0253324388b02c209",
+  "fingerprint": "648552a2481bd2f89f99716aea3336101e4eaacfaebfcfdd47d95daec8a7c85a",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -247,7 +247,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "228a3d27ea0e9a49e89a3f017489196613e257773980a1d8c767c56a00664e54"
+      "sha256": "0e3ed30c096455b597e274684f29b9ee3a553b3771955ff9f03e2e2c5f523a2c"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -291,11 +291,11 @@
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.module.css",
-      "sha256": "9b0efa26325e19a82401e8de43b509cef846c3b887e0d5fa28b1b8fcca581697"
+      "sha256": "8b89798fe019c58cb9022089fd1f7d04f24bb693e935bd7ddf1b01c4e210b60d"
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "b3fd2d74a7e2a276acb3c4b9ae008cfca52fc2878bb04bbe580d65e0e4219cc1"
+      "sha256": "3a2c0e1eafddc482c36306c730bffbf77a6d75b2d56a33a97fa4ced295445cc0"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",
@@ -347,7 +347,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "901db23a4ba790ef688aa68554b769f4fbe8d3cf893c7ce9a33bddb6310dfe87"
+      "sha256": "7c299460028edf15040cb9d31ee60012b913b8a7cfc944fac0788b808bb454c0"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

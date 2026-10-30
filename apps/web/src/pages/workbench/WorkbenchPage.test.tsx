@@ -487,12 +487,9 @@ describe('pending command and version protection', () => {
       }
     });
     fireEvent.click(screen.getByRole('button', {
-      name: '我的创作'
+      name: '全部稿件'
     }));
     fireEvent.click(await screen.findByRole('button', { name: /真实选题.*继续创作/s }));
-    fireEvent.click(screen.getByRole('button', {
-      name: '正文'
-    }));
     expect(await screen.findByLabelText('正文第 1 段')).toHaveValue('未确认正文😀');
     expect(screen.getByLabelText('确认发布标签')).toHaveValue('新标签 保留空格');
     expect(screen.getByRole('button', {
@@ -1077,12 +1074,14 @@ it('keeps the current editor and unsaved text mounted while entering and leaving
 it('keeps every editor step reachable from the writing workflow menu', async () => {
   vi.mocked(api.prepareMaterials).mockResolvedValue({ contract: 'content-workbench-materials.v1', asOf: 'now', methodVersion: 'test', query: '', terms: [], state: 'insufficient', gaps: [], documents: [], nextCursor: null, searchScope: 'test' });
   show(); await screen.findByLabelText('正文第 1 段');
-  fireEvent.click(screen.getByText('创作步骤', { selector: 'summary' }));
+  fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   const nav = screen.getByRole('navigation', { name: '创作步骤' });
   for (const name of ['选题方案','材料浏览','创作画布','正文','封面','内页','预览与导出']) {
     expect(within(nav).getByRole('button', { name })).toBeInTheDocument();
   }
   fireEvent.click(within(nav).getByRole('button', { name: '材料浏览' }));
+  await screen.findByText('创作步骤 · 材料浏览', { selector: 'summary' });
+  fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   const materialNav = await screen.findByRole('navigation', { name: '创作步骤' });
   await waitFor(() => expect(within(materialNav).getByRole('button', { name: '材料浏览' })).toHaveAttribute('aria-current', 'step'));
   fireEvent.click(within(materialNav).getByRole('button', { name: '正文' }));
@@ -1098,8 +1097,9 @@ it('keeps unfinished candidate and idea inputs across editor steps and warns bef
   const leaving = new Event('beforeunload', { cancelable: true });
   window.dispatchEvent(leaving);
   expect(leaving.defaultPrevented).toBe(true);
-  fireEvent.click(screen.getByText('创作步骤', { selector: 'summary' }));
+  fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   fireEvent.click(within(screen.getByRole('navigation', { name: '创作步骤' })).getByRole('button', { name: '选题方案' }));
+  fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   fireEvent.click(within(await screen.findByRole('navigation', { name: '创作步骤' })).getByRole('button', { name: '正文' }));
   fireEvent.click(await screen.findByText('添加笔记标题候选'));
   expect(screen.getByLabelText('新标题候选')).toHaveValue('尚未添加的候选');
@@ -1117,9 +1117,9 @@ it('opens the asset library from its own tab for the chosen domain and leaves it
   fireEvent.click(tab);
   expect(await screen.findByText(`资产库页 ${domain}`)).toBeInTheDocument();
   expect(screen.getByRole('button', { name: '资产库' })).toHaveAttribute('aria-current', 'page');
-  fireEvent.click(screen.getByRole('button', { name: '我的创作' }));
+  fireEvent.click(screen.getByRole('button', { name: '写稿' }));
   await waitFor(() => expect(screen.queryByText(`资产库页 ${domain}`)).not.toBeInTheDocument());
-  expect(screen.getByRole('button', { name: '我的创作' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByRole('button', { name: '写稿' })).toHaveAttribute('aria-current', 'page');
 });
 
 it('lets the copy wait for a save already in flight, then saves what was typed meanwhile', async () => {
@@ -1153,6 +1153,7 @@ it('keeps the unconfirmed copy receipt while moving to the cover and back', asyn
   expect(screen.getByText('待确认回执')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '制作封面 →' }));
   expect(screen.queryByText('待确认回执')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   fireEvent.click(screen.getByRole('button', { name: '正文' }));
   expect(await screen.findByText('待确认回执')).toBeInTheDocument();
 });
@@ -1408,4 +1409,24 @@ it('keeps an uncertain writing request but hides a late result after experience 
   const requestId=vi.mocked(api.execute).mock.calls[0]![0].requestId;await act(async()=>resolve(status(requestId,true)));
   expect(screen.queryByText(/已撤回经历的模型结果/)).not.toBeInTheDocument();fireEvent.click(await screen.findByRole('button',{name:'核实上次生成'}));
   await waitFor(()=>expect(api.aiStatus).toHaveBeenCalledWith(requestId));expect(api.execute).toHaveBeenCalledTimes(1);expect(screen.queryByText(/已撤回经历的模型结果/)).not.toBeInTheDocument();
+});
+
+
+it('keeps creation under operations and exposes one set of three creation destinations', async () => {
+  show(); await screen.findByLabelText('正文第 1 段');
+  const primary = screen.getByRole('navigation', { name: '一级导航' });
+  expect(within(primary).getAllByRole('link').map(link => link.getAttribute('href'))).toEqual(['/topics', '/corpus', '/collection', '/ops']);
+  expect(within(primary).getByRole('link', { name: /运营/ })).toHaveAttribute('aria-current', 'page');
+  const sidebar = screen.getByRole('complementary', { name: '运营导航' });
+  expect(within(sidebar).getByRole('link', { name: '创作' })).toHaveAttribute('aria-current', 'page');
+  expect(within(sidebar).getByRole('link', { name: '数据' })).toHaveAttribute('href', `/ops/overview?domain=${domain}`);
+  const pages = screen.getByRole('navigation', { name: '创作页面' });
+  expect(within(pages).getAllByRole('button').map(button => button.textContent)).toEqual(['写稿', '材料桌', '资产库']);
+  expect(within(pages).getByRole('button', { name: '写稿' })).toHaveAttribute('aria-current', 'page');
+  expect(screen.getByText(/^创作步骤/, { selector: 'summary' }).closest('details')).not.toHaveAttribute('open');
+  fireEvent.click(screen.getByRole('button', { name: '全部稿件' }));
+  const content = await screen.findByRole('group', { name: '写稿内容' });
+  expect(within(content).getByRole('button', { name: '我的稿件' })).toHaveAttribute('aria-pressed', 'true');
+  fireEvent.click(within(content).getByRole('button', { name: '今日选题' }));
+  expect(within(screen.getByRole('group', { name: '写稿内容' })).getByRole('button', { name: '今日选题' })).toHaveAttribute('aria-pressed', 'true');
 });

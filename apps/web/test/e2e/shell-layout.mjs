@@ -75,7 +75,7 @@ export async function verifyShellLayout(browser, origin, out, storageState) {
       const noContext = await shellGeometry('without-context-nav');
       const nav=page.locator('.v7-primary-nav');
       const entries=await nav.locator(':scope > :is(a,button)').evaluateAll(nodes=>nodes.map(node=>({name:node.querySelector('.v7-nav-zh')?.textContent,box:node.getBoundingClientRect().toJSON(),display:getComputedStyle(node).display})));
-      assert.equal(entries.length,6);
+      assert.deepEqual(entries.map(entry=>entry.name),['雷达','主题图谱','语料','洞察','采集','运营'],'global navigation follows the six approved responsibilities; creation stays under operations');
       for(const entry of entries){assert.ok(entry.box.width>0&&entry.box.height>0,entry.name);assert.notEqual(entry.display,'none');}
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`${width}: global horizontal overflow`);
       let rail=null;
