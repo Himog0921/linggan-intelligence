@@ -373,7 +373,7 @@ try {
   await step('正文修改后刷新仍定位关联图页，采用一页保留其他手改',async()=>{
     const doc=(await envelope()).revision.document;const linked=doc.uses.find(item=>item.target.kind==='pageBlock'&&item.canvasId===doc.uses.find(use=>use.target.kind==='paragraph'&&use.target.paragraphId===doc.paragraphs[0].id).canvasId);
     const targetPage=doc.pages.find(item=>item.id===linked.target.pageId),other=doc.pages.find(item=>item.kind==='steps');
-    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await stage('内页');
+    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await page.getByLabel('正文第 1 段').waitFor();await stage('内页');
     await imageSection().getByRole('navigation',{name:'图页顺序'}).getByRole('button').filter({hasText:targetPage.title}).click();
     await imageSection().getByRole('button',{name:'带入这一段',exact:true}).waitFor();await imageSection().getByRole('button',{name:'带入这一段',exact:true}).click();await save();
     const after=(await envelope()).revision.document;assert.equal(after.pages.find(item=>item.id===targetPage.id).blocks.find(item=>item.id===linked.target.blockId).text,'先把练习本放好，只做眼前这一小步。');assert.deepEqual(after.pages.find(item=>item.id===other.id),other);
@@ -469,7 +469,7 @@ try {
     assert.equal(refused.status(),409);assert.equal((await refused.json()).code,'creation_assets_blocked','the server refuses a copy with a 必改 left even when the page is bypassed');
     assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied,null,'a refused copy leaves no record');
     await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${workId}&view=body`);
-    const panel=page.getByRole('complementary',{name:'检查与复制'}),footer=page.getByRole('region',{name:'复制'}),copy=footer.getByRole('button',{name:'复制到小红书',exact:true});
+    const panel=page.getByRole('complementary',{name:'检查与复制'}),footer=page.getByRole('region',{name:'复制',exact:true}),copy=footer.getByRole('button',{name:'复制到小红书',exact:true});
     await until(async()=>await panel.getByLabel('本篇的衔接句').inputValue()===bridgeSentence,'the approved sentence is placed in the draft');
     const account=panel.getByLabel('所属账号');await account.selectOption('');
     await panel.getByText('这篇还没选账号，不知道能不能放衔接句').waitFor();await panel.getByText(/^必改 1 · /).waitFor();assert.equal(await copy.isDisabled(),true,'a 必改 left keeps the copy button disabled');

@@ -36,16 +36,14 @@ CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(request.receipt->
  THEN request.receipt->'revision'->'document'->'experienceSlots' ELSE '[]'::jsonb END) slot(value)
 JOIN linggan_creation_experience experience ON experience.experience_ref::text=slot.value->>'experienceRef'
 ON CONFLICT DO NOTHING;
--- Old stale receipts contain the server revision, not the submitted document. The submitted
--- text cannot be reconstructed from a hash, so conservatively link them to all experiences
--- known in that work's history; withdrawal will invalidate their old replay fingerprint.
+-- Old stale receipts contain the server revision, not the submitted document. An experience
+-- in the rejected submission need not appear in that work's history. Since a hash cannot
+-- reveal which experience was submitted, conservatively link old stale requests to every
+-- existing experience; withdrawing any of them invalidates those old replay fingerprints.
 INSERT INTO linggan_creation_experience_command_link(request_ref,experience_ref)
 SELECT DISTINCT request.request_ref, experience.experience_ref
 FROM linggan_creation_request request
-JOIN linggan_creation_revision revision ON revision.work_ref=request.work_ref
-CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(revision.document->'experienceSlots')='array'
- THEN revision.document->'experienceSlots' ELSE '[]'::jsonb END) slot(value)
-JOIN linggan_creation_experience experience ON experience.experience_ref::text=slot.value->>'experienceRef'
+CROSS JOIN linggan_creation_experience experience
 WHERE request.receipt->>'outcome'='stale'
 ON CONFLICT DO NOTHING;
 DROP TRIGGER linggan_creation_request_immutable ON linggan_creation_request;
@@ -86,3 +84,14 @@ BEGIN
 END $$;
 CREATE TRIGGER linggan_creation_copy_receipt_immutable BEFORE UPDATE OR DELETE ON linggan_creation_copy_receipt
  FOR EACH ROW EXECUTE FUNCTION linggan_creation_copy_receipt_erasure_guard();
+
+-- Also erase digests when the experience had already been withdrawn before this upgrade.
+DO $$ BEGIN
+PERFORM set_config('linggan.experience_erasure','on',true);
+UPDATE linggan_creation_request SET command_sha256=repeat('0',64)
+ WHERE request_ref IN (SELECT l.request_ref FROM linggan_creation_experience_command_link l
+ JOIN linggan_creation_experience e ON e.experience_ref=l.experience_ref WHERE e.state='withdrawn');
+UPDATE linggan_creation_copy_receipt SET text_sha256=repeat('0',64)
+ WHERE receipt_ref IN (SELECT l.receipt_ref FROM linggan_creation_experience_copy_link l
+ JOIN linggan_creation_experience e ON e.experience_ref=l.experience_ref WHERE e.state='withdrawn');
+END $$;

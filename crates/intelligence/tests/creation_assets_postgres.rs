@@ -19,6 +19,162 @@ use uuid::Uuid;
 const FILL: &str = "\u{3164}";
 
 #[tokio::test]
+#[ignore = "isolated PostgreSQL historical migration guard"]
+async fn erasure_migration_stops_on_historical_immutable_private_source_use() {
+    let migration =
+        include_str!("../../../database/migrations/0185_creation_experience_erasure.sql");
+    let ledger = format!(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0185_creation_experience_erasure','{}');\n",
+        linggan_intelligence::content_workbench_sources::text_hash(migration)
+    );
+    let before = full_schema::FULL_MIGRATIONS
+        .replace(migration, "")
+        .replace(&ledger, "");
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let db = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        "legacy_experience_use_guard",
+        &before,
+    )
+    .await
+    .unwrap();
+    let work = Uuid::new_v4();
+    let paragraph = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_creation_work(work_ref,domain_ref,saved_by) VALUES($1,$2,'local_machine')")
+        .bind(work).bind(fixture::dossier::DOMAIN).execute(db.pool()).await.unwrap();
+    let doc = serde_json::json!({"experienceSlots":[{"paragraphId":paragraph}],"uses":[{"target":{"kind":"paragraph","paragraphId":paragraph}}]});
+    sqlx::query("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,document,document_sha256) VALUES($1,$2,1,$3,repeat('a',64))")
+        .bind(Uuid::new_v4()).bind(work).bind(doc).execute(db.pool()).await.unwrap();
+    let error = sqlx::raw_sql(migration)
+        .execute(db.pool())
+        .await
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("experience_source_use_migration_requires_remediation")
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL legacy erasure migration"]
+async fn legacy_stale_and_copy_digests_are_erased_even_for_previously_withdrawn_experiences() {
+    let erasure = include_str!("../../../database/migrations/0185_creation_experience_erasure.sql");
+    let ledger = format!(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0185_creation_experience_erasure','{}');\n",
+        linggan_intelligence::content_workbench_sources::text_hash(erasure)
+    );
+    let before = full_schema::FULL_MIGRATIONS
+        .replace(erasure, "")
+        .replace(&ledger, "");
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    for withdrawn_before in [false, true] {
+        let name = format!("legacy_erasure_{}", Uuid::new_v4().simple());
+        let db = linggan_storage_postgres::testing::isolated_proof_schema(&url, &name, &before)
+            .await
+            .unwrap();
+        let (account, _, _) = accounts(&db).await;
+        let person = put_identity(
+            &db,
+            account,
+            &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+        )
+        .await
+        .unwrap()
+        .identity
+        .person_ref
+        .unwrap();
+        let exp = create_experience(
+            &db,
+            &ExperienceCreate {
+                request_id: Uuid::new_v4(),
+                account_ref: account,
+                expected_person_ref: person,
+                title: "合成".into(),
+                body: "合成经历".into(),
+                tags: vec![],
+                origin: "oral".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .experience
+        .id;
+        let ordinary = create(&db, draft(Some(account), &["独立合成正文"])).await;
+        let stale_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO linggan_creation_request(request_ref,work_ref,command_sha256,receipt) VALUES($1,$2,repeat('9',64),'{\"outcome\":\"stale\"}')")
+            .bind(stale_id).bind(ordinary.work_id).execute(db.pool()).await.unwrap();
+        let work = Uuid::new_v4();
+        let revision = Uuid::new_v4();
+        let receipt = Uuid::new_v4();
+        let request = Uuid::new_v4();
+        let mut document = draft(Some(account), &[""]);
+        document.experience_slots.push(ExperienceSlot {
+            paragraph_id: document.paragraphs[0].id,
+            experience_ref: exp,
+            experience_revision: 1,
+        });
+        sqlx::query("INSERT INTO linggan_creation_work(work_ref,domain_ref,saved_by) VALUES($1,$2,'local_machine')")
+            .bind(work).bind(fixture::dossier::DOMAIN).execute(db.pool()).await.unwrap();
+        let document_json = serde_json::to_value(document).unwrap();
+        sqlx::query("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,document,document_sha256) VALUES($1,$2,1,$3,repeat('a',64))")
+            .bind(revision).bind(work).bind(&document_json).execute(db.pool()).await.unwrap();
+        let accepted_id = Uuid::new_v4();
+        sqlx::query("INSERT INTO linggan_creation_request(request_ref,work_ref,command_sha256,receipt) VALUES($1,$2,repeat('7',64),jsonb_build_object('outcome','accepted','revision',jsonb_build_object('document',$3::jsonb)))")
+            .bind(accepted_id).bind(work).bind(&document_json).execute(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_creation_assets_request(request_ref,kind,command_sha256) VALUES($1,'copy_prepare',repeat('a',64))")
+            .bind(request).execute(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_creation_copy_receipt(receipt_ref,work_ref,revision_ref,request_ref,ruleset_version,fact_cards,warn_rules,hint_rules,text_sha256,saved_by) VALUES($1,$2,$3,$4,'synthetic','[]','{}','{}',repeat('8',64),'local_machine')")
+            .bind(receipt).bind(work).bind(revision).bind(request).execute(db.pool()).await.unwrap();
+        if withdrawn_before {
+            sqlx::query("UPDATE linggan_creation_experience SET state='withdrawn',withdrawn_at=scope_001_now() WHERE experience_ref=$1").bind(exp).execute(db.pool()).await.unwrap();
+            sqlx::query("DELETE FROM linggan_creation_experience_revision WHERE experience_ref=$1")
+                .bind(exp)
+                .execute(db.pool())
+                .await
+                .unwrap();
+        }
+        sqlx::raw_sql(erasure).execute(db.pool()).await.unwrap();
+        let linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience_command_link WHERE request_ref=$1 AND experience_ref=$2)")
+            .bind(stale_id).bind(exp).fetch_one(db.pool()).await.unwrap();
+        assert!(
+            linked,
+            "legacy stale submission has no saved experience in its work history"
+        );
+        let accepted_linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience_command_link WHERE request_ref=$1 AND experience_ref=$2)")
+            .bind(accepted_id).bind(exp).fetch_one(db.pool()).await.unwrap();
+        assert!(accepted_linked);
+        if !withdrawn_before {
+            withdraw_experience(&db, exp, Uuid::new_v4()).await.unwrap();
+        }
+        let stale_hash: String = sqlx::query_scalar(
+            "SELECT command_sha256 FROM linggan_creation_request WHERE request_ref=$1",
+        )
+        .bind(stale_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        let copy_hash: String = sqlx::query_scalar(
+            "SELECT text_sha256 FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+        )
+        .bind(receipt)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        let accepted_hash: String = sqlx::query_scalar(
+            "SELECT command_sha256 FROM linggan_creation_request WHERE request_ref=$1",
+        )
+        .bind(accepted_id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(stale_hash, "0".repeat(64));
+        assert_eq!(accepted_hash, "0".repeat(64));
+        assert_eq!(copy_hash, "0".repeat(64));
+    }
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL experience and public-source erasure"]
 async fn withdrawing_one_of_two_experiences_erases_private_source_uses_and_preserves_order() {
     let db = db("assets_experience_use_order").await;
