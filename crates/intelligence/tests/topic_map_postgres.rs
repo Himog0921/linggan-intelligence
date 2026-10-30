@@ -1129,3 +1129,53 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
         "workspace identity is never discarded with its heartbeat"
     );
 }
+
+/// 把一篇作品标成只在作者主页上出现过（作者语境）。用量表只增不改，所以只在这个事务里临时放开触发器。
+async fn mark_creator_context_only(database: &Database, work: Uuid) {
+    let mut transaction = database.pool().begin().await.unwrap();
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    let changed = sqlx::query("UPDATE linggan_material_domain_usage SET use_kind='creator_context' WHERE content_public_ref=$1 AND domain_ref=$2")
+        .bind(work)
+        .bind(domain())
+        .execute(&mut *transaction)
+        .await
+        .unwrap()
+        .rows_affected();
+    assert!(changed >= 1);
+    transaction.commit().await.unwrap();
+}
+
+/// 主题图谱读的是整个领域的研究材料：只在作者主页上出现过的作品不进图谱的范围与统计。
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn creator_context_works_stay_out_of_the_topic_map_scope() {
+    let database = fixture_database("topic_map_creator_context").await;
+    let mut refs = Vec::new();
+    for i in 0..3 {
+        refs.push(work(&database, i, "xhs", Some(100 + i as i64), 1).await);
+    }
+    let read = || async {
+        read_topic_map(
+            &database,
+            &TopicMapQuery {
+                domain_ref: Some(domain()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+    };
+    let before = read().await;
+    assert_eq!(before.statistics["workCount"], 3);
+    mark_creator_context_only(&database, refs[2]).await;
+    let after = read().await;
+    assert_eq!(after.statistics["workCount"], 2, "{:?}", after.statistics);
+    let mut listed: Vec<Uuid> = after.works.iter().map(|work| work.work_ref).collect();
+    listed.sort();
+    let mut expected = vec![refs[0], refs[1]];
+    expected.sort();
+    assert_eq!(listed, expected);
+}

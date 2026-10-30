@@ -750,3 +750,37 @@ async fn keyword_round_membership_and_exact_observation_changes_preserve_cutoff(
         "inspection reads cannot schedule, collect or invoke"
     );
 }
+
+/// 作者巡检里的「相似旧作」读的是这位作者在领域里的研究材料：只在作者主页上出现过的作品不算。
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL proof only"]
+async fn creator_context_works_are_not_similar_old_works_of_the_observed_creator() {
+    let db = db("inspector_creator_context").await;
+    let scope = creator(&db).await;
+    let current = work(&db, "similar-current", 10).await;
+    let research = work(&db, "similar-research", 8).await;
+    let context = work(&db, "similar-context", 7).await;
+    let related = |label: &'static str| {
+        let (db, scope) = (&db, &scope);
+        async move {
+            let read = inspection::related_works(db, scope, current).await.unwrap();
+            let mut refs: Vec<Uuid> = read.candidates.iter().map(|work| work.work_ref).collect();
+            refs.sort();
+            (label, refs)
+        }
+    };
+    let mut both = vec![research, context];
+    both.sort();
+    assert_eq!(
+        related("control").await,
+        ("control", both),
+        "对照：两篇都还是研究材料时，都是相似旧作的候选"
+    );
+    fixture::dossier::fixture::make_creator_context_only(
+        &db,
+        fixture::dossier::DOMAIN,
+        "similar-context",
+    )
+    .await;
+    assert_eq!(related("after").await, ("after", vec![research]));
+}

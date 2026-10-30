@@ -33,7 +33,7 @@ pub async fn read_topic_map(
     }) {
         return Err(TopicMapError::NotFound);
     }
-    let scope_rows=sqlx::query("SELECT u.content_public_ref,u.domain_ref,array_agg(DISTINCT u.role) AS roles FROM linggan_material_domain_usage u JOIN linggan_material_content c ON c.public_ref=u.content_public_ref WHERE ($1::uuid IS NULL OR u.domain_ref=$1) AND ($2::text IS NULL OR c.platform=$2) AND ($3::bool OR u.role='primary') GROUP BY u.content_public_ref,u.domain_ref ORDER BY u.domain_ref,u.content_public_ref").bind(q.domain_ref).bind(&q.platform).bind(q.include_reference).fetch_all(database.pool()).await?;
+    let scope_rows=sqlx::query("SELECT u.content_public_ref,u.domain_ref,array_agg(DISTINCT u.role) AS roles FROM linggan_material_domain_usage u JOIN linggan_material_content c ON c.public_ref=u.content_public_ref WHERE ($1::uuid IS NULL OR u.domain_ref=$1) AND ($2::text IS NULL OR c.platform=$2) AND ($3::bool OR u.role='primary') AND u.use_kind='domain_research' GROUP BY u.content_public_ref,u.domain_ref ORDER BY u.domain_ref,u.content_public_ref").bind(q.domain_ref).bind(&q.platform).bind(q.include_reference).fetch_all(database.pool()).await?;
     let mut roles: HashMap<Uuid, BTreeSet<String>> = HashMap::new();
     let mut domain_batches: BTreeMap<Uuid, Vec<Uuid>> = BTreeMap::new();
     for r in &scope_rows {
