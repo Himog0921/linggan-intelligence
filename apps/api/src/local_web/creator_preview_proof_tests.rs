@@ -1246,6 +1246,25 @@ async fn creator_context_works_stay_out_of_domain_wide_lists_and_statistics() {
 
     // 浅看之前：领域里就是这两篇研究作品。
     let before = domain_wide_reads(&db, domain).await;
+    // 快照自比对挡不住「查询失败、整段静默降级」：查询坏掉时前后两边会一起变成未知。
+    // 所以先对管理页统计做绝对断言，确认这些数读得出来。
+    assert_eq!(before["management"]["sampleCount"], 2, "{before}");
+    assert!(
+        before["management"]["commentCount"].is_i64(),
+        "管理页评论数读不出来：{before}"
+    );
+    assert!(
+        before["management"]["lastObservation"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty()),
+        "管理页最近观察时间读不出来：{before}"
+    );
+    for lane in before["management"]["lanes"].as_array().unwrap() {
+        assert_eq!(
+            lane["readable"], true,
+            "管理页通道读不出来：{lane} {before}"
+        );
+    }
     let mut research = vec![known.to_string(), other.to_string()];
     research.sort();
     assert_eq!(before["sampleCount"], 2, "{before}");
@@ -1346,6 +1365,10 @@ async fn creator_context_works_stay_out_of_domain_wide_lists_and_statistics() {
     // 读取侧：整个领域的列表与统计一个字都没变——新卡片没有被算进去，已知作品也没有被算两次。
     let after = domain_wide_reads(&db, domain).await;
     assert_eq!(after, before, "浅看不得改变领域级的列表与统计");
+    assert!(
+        after["management"]["commentCount"].is_i64(),
+        "浅看之后管理页统计仍要读得出来：{after}"
+    );
 
     // 按运行读取不受影响：这次浅看的 4 张卡片仍能按运行取到；新作品也能按作品引用取到、算作在本领域内。
     let frozen: Vec<(String, Uuid)> = sqlx::query_as(
