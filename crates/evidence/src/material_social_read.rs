@@ -525,7 +525,7 @@ pub async fn creation_comment_directory_in(
     query: Option<&str>,
     offset: i64,
 ) -> Result<(Vec<Uuid>, i64), sqlx::Error> {
-    let filter = "FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE package.accepted_at<=scope_001_now() AND EXISTS(SELECT 1 FROM linggan_material_domain_usage usage WHERE usage.content_public_ref=c.content_public_ref AND usage.domain_ref=$1) AND NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AND c.body_state='KNOWN' AND ($2::text IS NULL OR lower(c.body_text) LIKE '%'||lower($2)||'%')";
+    let filter = "FROM linggan_material_comment_current c JOIN linggan_runtime_capture_package package USING(package_ref) WHERE package.accepted_at<=scope_001_now() AND EXISTS(SELECT 1 FROM linggan_material_domain_usage usage WHERE usage.content_public_ref=c.content_public_ref AND usage.domain_ref=$1 AND usage.use_kind='domain_research') AND NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AND c.body_state='KNOWN' AND ($2::text IS NULL OR lower(c.body_text) LIKE '%'||lower($2)||'%')";
     let total = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT count(*) {filter}")))
         .bind(domain)
         .bind(query)

@@ -7,7 +7,7 @@ WITH requested_roles AS MATERIALIZED (
     SELECT usage.content_public_ref, $5::text
     FROM linggan_material_domain_usage usage
     WHERE $3::uuid[] IS NULL AND $5::text IS NOT NULL
-      AND usage.domain_ref = $1 AND usage.role = $5
+      AND usage.domain_ref = $1 AND usage.role = $5 AND usage.use_kind = 'domain_research'
 ), eligible_work_roles AS MATERIALIZED (
     SELECT requested.work_ref, requested.observation_role
     FROM requested_roles requested

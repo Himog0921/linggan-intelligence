@@ -471,3 +471,72 @@ pub async fn proof_database_before_domain_cleanup(schema: &str) -> Database {
         .await
         .expect("migrations before 0104 apply")
 }
+
+/// Marks a fixture work as seen only on an author's homepage look (`creator_context`) in `domain`.
+/// The usage table is append-only, so the kind is rewritten with `session_replication_role=replica`
+/// for this one transaction instead of loosening the production trigger.
+#[allow(dead_code)]
+pub async fn make_creator_context_only(
+    database: &Database,
+    domain: uuid::Uuid,
+    content_external_id: &str,
+) -> uuid::Uuid {
+    let mut tx = database.pool().begin().await.expect("begin");
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .expect("replica role for the fixture rewrite");
+    let work: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(&mut *tx)
+    .await
+    .expect("fixture work exists");
+    let changed = sqlx::query(
+        "UPDATE linggan_material_domain_usage SET use_kind='creator_context' WHERE content_public_ref=$1 AND domain_ref=$2",
+    )
+    .bind(work)
+    .bind(domain)
+    .execute(&mut *tx)
+    .await
+    .expect("rewrite usage kind")
+    .rows_affected();
+    assert!(
+        changed >= 1,
+        "the fixture work must already be in the domain"
+    );
+    tx.commit().await.expect("commit");
+    work
+}
+
+/// Rewrites the role (`primary` / `reference`) of a fixture work's usage rows in `domain`; tests only,
+/// same `session_replication_role=replica` reason as `make_creator_context_only`.
+#[allow(dead_code)]
+pub async fn set_usage_role(
+    database: &Database,
+    domain: uuid::Uuid,
+    content_external_id: &str,
+    role: &str,
+) {
+    let mut tx = database.pool().begin().await.expect("begin");
+    sqlx::query("SET LOCAL session_replication_role = replica")
+        .execute(&mut *tx)
+        .await
+        .expect("replica role for the fixture rewrite");
+    let changed = sqlx::query(
+        "UPDATE linggan_material_domain_usage SET role=$3 WHERE domain_ref=$2 AND content_public_ref=(SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1)",
+    )
+    .bind(content_external_id)
+    .bind(domain)
+    .bind(role)
+    .execute(&mut *tx)
+    .await
+    .expect("rewrite usage role")
+    .rows_affected();
+    assert!(
+        changed >= 1,
+        "the fixture work must already be in the domain"
+    );
+    tx.commit().await.expect("commit");
+}

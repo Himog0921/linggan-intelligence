@@ -75,6 +75,23 @@ async fn paged_unjudged_creators_expand_only_visible_dossiers_without_losing_cou
         inventory_batches, 1,
         "75 visible representatives, not all 124 works, may expand media inventories"
     );
+    let current_reads: i64 = sqlx::query_scalar("SELECT coalesce(sum(calls),0)::bigint FROM public.pg_stat_statements WHERE query LIKE 'WITH requested_work AS MATERIALIZED (SELECT * FROM linggan_material_content WHERE public_ref=ANY%'")
+        .fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        current_reads, 1,
+        "statistics and canonical representative dossiers must share the same transaction-local Current read"
+    );
+    for extra in [
+        json!({"sort":"high_likes","pageSize":25}),
+        json!({"searchMode":"author","query":"作者 01","pageSize":25}),
+        json!({"searchMode":"work","query":"完整正文","pageSize":25}),
+        json!({"observation":"outside","pageSize":25}),
+    ] {
+        let mut query = extra;
+        query["domain"] = json!(D);
+        let scope: CreatorScope = serde_json::from_value(query).unwrap();
+        assert_equivalent(&db, &scope).await;
+    }
     let indexes: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_indexes WHERE schemaname=current_schema() AND indexname IN ('linggan_media_download_attempt_observation_idx','linggan_material_lane_observation_work_lane_idx')")
         .fetch_one(db.pool()).await.unwrap();
     assert_eq!(

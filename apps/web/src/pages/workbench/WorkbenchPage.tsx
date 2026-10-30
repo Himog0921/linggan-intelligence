@@ -669,7 +669,7 @@ function WorkEditor({
     window.addEventListener('focus', recheck);
     void recheck();
     return () => { disposed = true; sourceGeneration.current++; channel?.close(); window.removeEventListener('focus', recheck); };
-  }, [active, initial.workId, initial.domainRef, recheckAttempt]);
+  }, [active, initial.workId, initial.domainRef, recheckAttempt, identities]);
   useEffect(() => {
     const handler = (e: BeforeUnloadEvent) => {
       if (JSON.stringify(live.current) !== JSON.stringify(server.current.document) || tagsLive.current !== live.current.tags.join(' ') || pending.current || pendingConfirmation || publicationPending || templatePending || comparisonDirty.current || Object.values(draftInputs).some(value => value.trim())) {

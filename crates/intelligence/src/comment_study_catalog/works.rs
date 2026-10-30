@@ -18,7 +18,7 @@ cs_title_scope AS MATERIALIZED (
     FROM linggan_material_content content
     JOIN linggan_material_domain_usage usage ON usage.content_public_ref = content.public_ref
     JOIN linggan_runtime_capture_package package ON package.package_ref = content.first_package_ref
-    WHERE usage.domain_ref = $1 AND usage.role = $10
+    WHERE usage.domain_ref = $1 AND usage.role = $10 AND usage.use_kind = 'domain_research'
       AND content.created_at <= $2::timestamptz
       AND package.accepted_at <= $2::timestamptz
     GROUP BY content.public_ref,content.created_at,usage.role

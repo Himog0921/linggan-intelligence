@@ -380,7 +380,7 @@ try {
   await step('正文修改后刷新仍定位关联图页，采用一页保留其他手改',async()=>{
     const doc=(await envelope()).revision.document;const linked=doc.uses.find(item=>item.target.kind==='pageBlock'&&item.canvasId===doc.uses.find(use=>use.target.kind==='paragraph'&&use.target.paragraphId===doc.paragraphs[0].id).canvasId);
     const targetPage=doc.pages.find(item=>item.id===linked.target.pageId),other=doc.pages.find(item=>item.kind==='steps');
-    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await stage('内页');
+    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await page.getByLabel('正文第 1 段').waitFor();await stage('内页');
     await imageSection().getByRole('navigation',{name:'图页顺序'}).getByRole('button').filter({hasText:targetPage.title}).click();
     await imageSection().getByRole('button',{name:'带入这一段',exact:true}).waitFor();await imageSection().getByRole('button',{name:'带入这一段',exact:true}).click();await save();
     const after=(await envelope()).revision.document;assert.equal(after.pages.find(item=>item.id===targetPage.id).blocks.find(item=>item.id===linked.target.blockId).text,'先把练习本放好，只做眼前这一小步。');assert.deepEqual(after.pages.find(item=>item.id===other.id),other);
@@ -551,6 +551,13 @@ try {
     await identity.getByLabel('真人的角色（如“妈妈”“老师”）').fill('妈妈');
     await identity.getByRole('button',{name:'保存',exact:true}).click();
     await until(async()=>(await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item=>item.accountRef===accountRef).identity?.hasRealPerson===true,'synthetic person saved');
+    await page.getByRole('navigation',{name:'资产类型'}).getByRole('button',{name:'人设事实',exact:true}).click();
+    const persona=page.getByRole('region',{name:'人设事实'});await persona.locator('select').first().selectOption(accountRef);
+    await persona.getByLabel('事实名称').fill('合成待补充');await persona.getByLabel('缺，待补充').check();
+    await persona.getByRole('button',{name:'保存事实'}).click();
+    await persona.getByText('缺，待补充',{exact:true}).first().waitFor();
+    await until(async()=>(await creationJson(`/persona-facts?accountRef=${accountRef}`)).items.some(item=>item.key==='合成待补充'&&item.status==='missing'&&item.text===''),'missing persona fact saved');
+    assert.equal(await persona.getByRole('button',{name:'登记本人确认'}).count(),0);
     await page.getByRole('navigation',{name:'资产类型'}).getByRole('button',{name:'经历库',exact:true}).click();
     const library=page.getByRole('region',{name:'经历库'});await library.locator('select').first().selectOption(accountRef);
     const testText='合成测试经历：先一起把第一步缩小。';

@@ -106,6 +106,7 @@ async fn domains(
             "WITH domain_content AS ( \
                  SELECT DISTINCT domain_ref,content_public_ref \
                    FROM linggan_material_domain_usage \
+                  WHERE use_kind='domain_research' \
              ), discovery_classified AS ( \
                  SELECT usage.domain_ref,usage.content_public_ref,'discovery'::text AS lane, \
                         'SEARCHABLE'::text AS state \
@@ -115,6 +116,7 @@ async fn domains(
                     AND finding.package_ref=usage.package_ref \
                    JOIN linggan_runtime_capture_package package \
                      ON package.package_ref=finding.package_ref \
+                  WHERE usage.use_kind='domain_research' \
                   GROUP BY usage.domain_ref,usage.content_public_ref \
              ), latest_lane AS ( \
                  SELECT DISTINCT ON (work_usage.domain_ref,lane.content_public_ref,lane.lane) \
@@ -177,6 +179,7 @@ async fn domains(
             "WITH domain_content AS ( \
                  SELECT DISTINCT domain_ref,content_public_ref \
                    FROM linggan_material_domain_usage \
+                  WHERE use_kind='domain_research' \
              ), current_origins AS ( \
                  SELECT DISTINCT ON (dc.domain_ref,dc.content_public_ref,origin.slot_key) \
                         dc.domain_ref,dc.content_public_ref,origin.observation_ref,origin.slot_key \
@@ -234,6 +237,7 @@ async fn domains(
         "SELECT usage.domain_ref,count(DISTINCT comment.material_ref)::bigint \
          FROM linggan_material_domain_usage usage \
          JOIN linggan_material_comment comment USING(content_public_ref) \
+         WHERE usage.use_kind='domain_research' \
          GROUP BY usage.domain_ref",
     )
     .fetch_all(database.pool())
@@ -247,6 +251,7 @@ async fn domains(
             "SELECT usage.domain_ref,max(package.accepted_at)::text \
          FROM linggan_material_domain_usage usage \
          JOIN linggan_runtime_capture_package package USING(package_ref) \
+         WHERE usage.use_kind='domain_research' \
          GROUP BY usage.domain_ref",
         )
         .fetch_all(database.pool())

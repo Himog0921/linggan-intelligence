@@ -1,5 +1,9 @@
 use super::*;
 
+pub(super) fn body_current(material: Option<Uuid>, version: &str) -> bool {
+    material.is_some_and(|reference| reference.to_string() == version)
+}
+
 pub(super) async fn current(
     conn: &mut PgConnection,
     work: Uuid,
@@ -13,11 +17,13 @@ pub(super) async fn current(
         let owners =
             crate::work_resource_current::read_work_resource_currents_in(conn, &[work], as_of)
                 .await?;
-        return Ok(owners
-            .iter()
-            .find(|o| o.public_ref == work)
-            .and_then(|o| o.body_source.material_ref)
-            .is_some_and(|r| r.to_string() == version));
+        return Ok(body_current(
+            owners
+                .iter()
+                .find(|o| o.public_ref == work)
+                .and_then(|o| o.body_source.material_ref),
+            version,
+        ));
     }
     let Some(slot) = slot else { return Ok(false) };
     let Ok(materialization) = Uuid::parse_str(version) else {

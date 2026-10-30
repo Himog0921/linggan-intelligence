@@ -6,7 +6,7 @@ WITH params AS (
  SELECT comment.content_public_ref,comment.comment_external_id,min(package.accepted_at) first_at
  FROM linggan_material_comment comment JOIN linggan_runtime_capture_package package USING(package_ref),params
  WHERE package.accepted_at<=$2::timestamptz AND EXISTS(SELECT 1 FROM linggan_material_domain_usage usage
- WHERE usage.content_public_ref=comment.content_public_ref AND usage.domain_ref=params.domain_ref AND usage.role='primary')
+ WHERE usage.content_public_ref=comment.content_public_ref AND usage.domain_ref=params.domain_ref AND usage.role='primary' AND usage.use_kind='domain_research')
  GROUP BY comment.content_public_ref,comment.comment_external_id
 ), observations AS (
  SELECT (first_at AT TIME ZONE 'Asia/Shanghai')::date AS day,count(*) amount FROM first_observation GROUP BY 1
@@ -33,7 +33,7 @@ WITH params AS (
  FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref),params
  WHERE lane.lane IN('comments','replies') AND package.accepted_at<=$2::timestamptz
  AND EXISTS(SELECT 1 FROM linggan_material_domain_usage usage WHERE usage.content_public_ref=lane.content_public_ref
- AND usage.domain_ref=params.domain_ref AND usage.role='primary') GROUP BY 1
+ AND usage.domain_ref=params.domain_ref AND usage.role='primary' AND usage.use_kind='domain_research') GROUP BY 1
 )
 SELECT jsonb_build_object('timezone','Asia/Shanghai','points',jsonb_agg(jsonb_build_object(
  'date',to_char(days.day,'YYYY-MM-DD'),'newObservedCommentCount',COALESCE(observations.amount,0),
