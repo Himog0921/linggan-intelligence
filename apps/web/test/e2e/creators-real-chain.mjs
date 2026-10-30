@@ -81,7 +81,7 @@ try {
     assert.equal(await page.title(), '创作者 · 语料');
     assert.deepEqual(
       await page.getByRole('columnheader').allTextContents(),
-      ['创作者', '内容方向', '作者倾向', '作品表达', '相关作品', '相关最高赞', '作品预览', '观察状态'],
+      ['创作者', '发现词', '内容方向', '相关作品', '领域最高赞', '作品预览', '首次发现', '观察状态'],
     );
     await resultCount(`${authorTotal} 位创作者`);
     await page.getByText('1 / 2 页', { exact: true }).waitFor();
@@ -277,14 +277,18 @@ try {
     // 列表重读后，这位作者的「相关作品」变成 1。
     await page.waitForFunction(() => {
       const button = [...document.querySelectorAll('tbody button')].find(node => node.textContent === '合成作者 03');
-      return button?.closest('tr')?.querySelectorAll('td')[4]?.innerText.startsWith('1');
+      return button?.closest('tr')?.querySelectorAll('td')[3]?.innerText.startsWith('1');
     });
     assert.match(await panel.innerText(), /人工调整 · \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     await page.keyboard.press('Escape');
     await panel.waitFor({ state: 'detached' });
   });
 
-  await step('真实写入：发现设置（点赞标准，带设置版本号）→ 爆款作者数变化', async () => {
+  await step('真实写入：发现设置（点赞标准，带设置版本号）→ 相关爆款排序从禁用变为可用', async () => {
+    // 还没有爆款标准时，排序里的「命中相关爆款数」不可选。
+    await page.getByRole('combobox', { name: '排序' }).click();
+    assert.equal(await page.getByRole('option', { name: '命中相关爆款数' }).getAttribute('aria-disabled'), 'true');
+    await page.keyboard.press('Escape');
     await page.getByRole('button', { name: '判定标准' }).click();
     const dialog = page.getByRole('dialog', { name: '发现设置' });
     await dialog.waitFor();
@@ -297,8 +301,13 @@ try {
     assert.equal(put.method, 'PUT');
     assert.equal(put.path, '/api/local/creator-discovery-policy');
     assert.deepEqual(JSON.parse(put.body), { domain: domainOne, revision: 0, likeThreshold: 100 });
-    // 合成作者 03 的相关作品有 300 个赞 ≥ 100，且尚未加入观察。
-    await page.getByRole('button', { name: '未观察的爆款作者 1' }).waitFor();
+    // 保存后列表会重读；等新的设置回到页面，排序里的「命中相关爆款数」才变为可用。
+    await page.getByRole('combobox', { name: '排序' }).click();
+    await page.waitForFunction(() => {
+      const option = [...document.querySelectorAll('[role=option]')].find(node => node.textContent.includes('命中相关爆款数'));
+      return option !== undefined && option.getAttribute('aria-disabled') === null;
+    });
+    await page.keyboard.press('Escape');
     // 第二次打开带着新的设置版本号。
     await page.getByRole('button', { name: '判定标准' }).click();
     const again = page.getByRole('dialog', { name: '发现设置' });

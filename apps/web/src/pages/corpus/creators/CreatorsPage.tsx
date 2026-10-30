@@ -6,6 +6,7 @@ import { CorpusFrame } from '../../../corpus/CorpusFrame';
 import { useCorpusShell } from '../../../corpus/useCorpusShell';
 import { ApiError } from '../../../shared/api';
 import { humanMoment } from '../../../shared/formatting';
+import { CreatorBulkBar } from './CreatorBulkBar';
 import { CreatorControls } from './CreatorControls';
 import { CreatorCorrectionDialog, type CorrectionTarget } from './CreatorCorrectionDialog';
 import { CreatorDrawer, type DrawerSnapshot } from './CreatorDrawer';
@@ -15,14 +16,18 @@ import { CreatorPolicyDialog } from './CreatorPolicyDialog';
 import { CreatorScopeDialog } from './CreatorScopeDialog';
 import { CreatorTable, type DrawerTab } from './CreatorTable';
 import { fetchCreators } from './creatorsApi';
+import { downloadCreatorsCsv } from './creatorsCsv';
 import { errorText, type Feedback } from './creatorsFeedback';
 import { authorName, effectiveJudgement, preservedLifecycle, workTitle } from './creatorsPresent';
 import {
   applyQuick,
   clearExtras,
   formatCount,
+  hasWorkFilter,
   parseQuery,
+  presetDates,
   removeCondition,
+  selectionScope,
   toApiParams,
   toPageSearch,
   type ConditionChip,
@@ -133,6 +138,16 @@ export function CreatorsPage() {
   const drawerOnly = useWorkResources(drawerItem ? domain : null, drawerRefs);
   const drawerResources = useMemo(() => mergeResources(listResources, drawerOnly), [listResources, drawerOnly]);
 
+  // ── 批量选择：同一批条件下翻页、换排序都保留；条件一变就清空，不导出范围外的作者 ──────────
+  const selectionKey = domain ? selectionScope(domain, query) : '';
+  const [selectedScope, setSelectedScope] = useState(selectionKey);
+  const [selected, setSelected] = useState<ReadonlyMap<string, CreatorItem>>(new Map());
+  if (selectedScope !== selectionKey) {
+    setSelectedScope(selectionKey);
+    setSelected(new Map());
+  }
+  const selectedKeys = useMemo(() => new Set(selected.keys()), [selected]);
+
   const searchHandle = useRef<SearchFieldHandle>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -239,14 +254,48 @@ export function CreatorsPage() {
   }
 
   function quick(key: QuickKey) {
-    if ((key === 'outside' || key === 'high') && data?.stats.outside === null) return;
-    go(current => applyQuick(current, key, hasThreshold));
+    const leadRule = data?.leadRule ?? null;
+    if ((key === 'outside' || key === 'high') && (data === null || data.stats.outside === null)) return;
+    if (key === 'inside' && (data === null || data.stats.inside === null)) return;
+    if (key === 'high' && leadRule === null) return;
+    const recentFrom = presetDates(7, new Date()).from;
+    go(current => applyQuick(current, key, leadRule, recentFrom));
     setDialog(null);
   }
 
   function refresh() {
     if (query.page !== 0) go(current => ({ ...current, page: 0 }), true);
     else void list.refetch();
+  }
+
+  // ── 批量选择与导出 ─────────────────────────────────────────────────────
+  const toggleSelected = useCallback((item: CreatorItem, checked: boolean) => {
+    setSelected(current => {
+      const next = new Map(current);
+      if (checked) next.set(item.creatorKey, item);
+      else next.delete(item.creatorKey);
+      return next;
+    });
+  }, []);
+
+  const selectPage = useCallback((checked: boolean) => {
+    if (!shown) return;
+    setSelected(current => {
+      const next = new Map(current);
+      for (const item of shown.items) {
+        if (checked) next.set(item.creatorKey, item);
+        else next.delete(item.creatorKey);
+      }
+      return next;
+    });
+  }, [shown]);
+
+  function exportSelected() {
+    if (selected.size === 0) return;
+    // 当前页上还在的作者用最新读数，其他页保留选中时的快照。
+    const items = [...selected.values()].map(item => shown?.items.find(candidate => candidate.creatorKey === item.creatorKey) ?? item);
+    downloadCreatorsCsv(items, hasWorkFilter(query));
+    setNotice({ tone: 'success', text: `已导出 ${formatCount(selected.size)} 位创作者。`, code: null });
   }
 
   // 去证据库看原作品之前，记下位置。抽屉里的链接由抽屉自己记（它还知道分区与展开项）。
@@ -370,6 +419,7 @@ export function CreatorsPage() {
           ) : null}
         </p>
         <FeedbackLine feedback={notice} />
+        <CreatorBulkBar count={selected.size} onExport={exportSelected} onClear={() => setSelected(new Map())} />
         {shown && link && domain ? (
           <CreatorTable
             key={apiKey}
@@ -378,6 +428,7 @@ export function CreatorsPage() {
             link={link}
             resources={listResources}
             selectedKey={drawer?.creatorKey ?? null}
+            selectedKeys={selectedKeys}
             domainActive={domainActive}
             scrollRef={scrollRef}
             busy={list.isFetching}
@@ -388,6 +439,8 @@ export function CreatorsPage() {
             onJoin={openJoin}
             onSort={(sort: SortKey) => go(current => ({ ...current, sort, page: 0 }))}
             onClearExtras={() => go(clearExtras)}
+            onToggleSelect={toggleSelected}
+            onSelectPage={selectPage}
           />
         ) : (
           <div className={styles.tableWrap} aria-busy={shellQuery.isPending || (list.isPending && list.fetchStatus !== 'idle')} />

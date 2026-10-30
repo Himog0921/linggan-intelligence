@@ -24,6 +24,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 const creatorsCalls = () => kit.of('GET', '/api/local/creators');
@@ -42,14 +43,14 @@ describe('创作者页 · 列表', () => {
     defaultRoutes(kit);
     await loaded();
     expect(within(table()).getAllByRole('columnheader').map(header => header.textContent)).toEqual([
-      '创作者', '内容方向', '作者倾向', '作品表达', '相关作品', '相关最高赞', '作品预览', '观察状态',
+      '创作者', '发现词', '内容方向', '相关作品', '领域最高赞', '作品预览', '首次发现', '观察状态',
     ]);
     expect(screen.getByText('2 位创作者')).toBeInTheDocument();
     expect(screen.getByText('读取于 2026-10-15 14:30')).toBeInTheDocument();
     expect(document.title).toBe('创作者 · 语料');
   });
 
-  it('一行里每一格：名字、粉丝、方向、倾向与分析状态、表达、相关作品、最高赞、作品预览、观察状态', async () => {
+  it('一行里每一格：名字、粉丝、发现词、方向、相关作品、领域最高赞、作品预览、首次发现、观察状态', async () => {
     defaultRoutes(kit);
     await loaded();
     const row = rowFor('合成作者 1');
@@ -57,22 +58,50 @@ describe('创作者页 · 列表', () => {
     expect(cells).toHaveLength(8);
     expect(cells[0]).toHaveTextContent('合成作者 1');
     expect(cells[0]).toHaveTextContent('粉丝 2,001');
-    expect(cells[1]).toHaveTextContent('任务启动 · 晚间练习');
-    expect(cells[2]).toHaveTextContent('本领域持续创作');
-    expect(within(cells[2]!).getByRole('button')).toHaveAttribute('title', expect.stringContaining('已有研究结果'));
-    expect(cells[3]).toHaveTextContent('亲历自述');
-    expect(cells[4]).toHaveTextContent('3');
-    expect(cells[4]).toHaveTextContent('待判断 2');
-    expect(cells[5]).toHaveTextContent('1,500');
-    expect(cells[5]).not.toHaveTextContent('已判相关作品');
-    expect(cells[6]).toHaveTextContent('合成作品 11');
-    expect(cells[6]).toHaveTextContent('已判相关 · 赞 1,211');
+    expect(cells[1]).toHaveTextContent('注意力训练');
+    expect(cells[2]).toHaveTextContent('任务启动 · 晚间练习');
+    expect(cells[3]).toHaveTextContent('3');
+    expect(cells[3]).toHaveTextContent('待判断 2');
+    expect(cells[4]).toHaveTextContent('1,500');
+    expect(cells[5]).toHaveTextContent('合成作品 11');
+    expect(cells[5]).toHaveTextContent('已判相关 · 赞 1,211');
+    expect(cells[6]).toHaveTextContent('09.25');
+    expect(cells[6]).toHaveTextContent('本领域首次');
     expect(cells[7]).toHaveTextContent('未加入观察');
     expect(within(cells[7] as HTMLElement).getByRole('button', { name: '加入观察' })).toBeEnabled();
   });
 
+  it('发现词缺失时写「未记录发现词」，不是空白；多个发现词在悬停里全部列出', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { keywords: [] }), itemJson(2, { keywords: ['注意力训练', '写作业'] })] })));
+    await loaded();
+    expect(within(rowFor('合成作者 1')).getByText('未记录发现词')).toHaveAttribute('title', '未记录发现词');
+    expect(within(rowFor('合成作者 2')).getByText('注意力训练')).toHaveAttribute('title', '注意力训练、写作业');
+  });
+
+  it('首次发现的三种说明：本领域首次、近 7 天新见、最早已知记录；没有记录时如实说明', async () => {
+    defaultRoutes(
+      kit,
+      ok(
+        listJson({
+          items: [
+            itemJson(1, { firstSeenPrecision: 'domain_first' }),
+            itemJson(2, { firstSeenPrecision: 'recent' }),
+            itemJson(3, { firstSeenPrecision: 'earliest_record', firstSeenDate: '2026-09-12' }),
+            itemJson(4, { firstSeenDate: null }),
+          ],
+        }),
+      ),
+    );
+    await loaded();
+    expect(rowFor('合成作者 1')).toHaveTextContent('本领域首次');
+    expect(rowFor('合成作者 2')).toHaveTextContent('近 7 天新见');
+    expect(rowFor('合成作者 3')).toHaveTextContent('09.12');
+    expect(rowFor('合成作者 3')).toHaveTextContent('最早已知记录');
+    expect(rowFor('合成作者 4')).toHaveTextContent('首次发现时间未记录');
+  });
+
   it('未知不显示成 0：粉丝、最高赞、点赞缺失时是「—」；≥1 万缩写并在悬停里保留精确值', async () => {
-    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { followers: null, maxLikes: null, works: [workJson(11, { likes: null })] }), itemJson(2, { followers: 123456, maxLikes: 20000 })] })));
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { followers: null, candidateHigh: null, works: [workJson(11, { likes: null })] }), itemJson(2, { followers: 123456, candidateHigh: 20000 })] })));
     await loaded();
     const unknown = rowFor('合成作者 1');
     expect(within(unknown).getAllByTitle('未知').length).toBeGreaterThanOrEqual(3);
@@ -89,32 +118,9 @@ describe('创作者页 · 列表', () => {
     expect(rowFor('合成作者 2')).toHaveTextContent('观察目标名称 · 粉丝');
   });
 
-  it('分析状态分别显示：排队 / 失败（带中文原因）/ 已分析但依据不足 / 未取得', async () => {
-    defaultRoutes(
-      kit,
-      ok(
-        listJson({
-          analysisEnabled: true,
-          items: [
-            itemJson(1, { authorState: 'pending', authorResult: false, focusValue: 'unknown' }),
-            itemJson(2, { authorState: 'failed', authorErrorCode: 'model_budget_exhausted', authorResult: false, focusValue: 'unknown' }),
-            itemJson(3, { authorState: 'idle', authorResult: true, focusValue: 'unknown' }),
-            itemJson(4, { authorState: 'idle', authorResult: false, focusValue: 'unknown' }),
-          ],
-        }),
-      ),
-    );
-    await loaded();
-    expect(within(rowFor('合成作者 1')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('研究已排队，等待执行'));
-    expect(within(rowFor('合成作者 2')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('研究未完成 · 本日额度已用尽'));
-    expect(within(rowFor('合成作者 3')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('已研究，依据不足'));
-    expect(within(rowFor('合成作者 4')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('尚无研究结果 · 可在作品与作者详情发起研究'));
-  });
-
   it.each([true, false])('旧开关字段 %s 不改变当前显式研究入口，材料范围说明一致', async analysisEnabled => {
     defaultRoutes(kit, ok(listJson({ analysisEnabled, items: [itemJson(1, { authorState: null, authorResult: false, focusValue: 'unknown' })] })));
     const { user } = await loaded(`/corpus/creators?domain=${DOMAIN}&focus=unknown`);
-    expect(within(rowFor('合成作者 1')).getAllByRole('button')[2]).toHaveAttribute('title', expect.stringContaining('尚无研究结果 · 可在作品与作者详情发起研究'));
     expect(screen.getByRole('button', { name: '判定标准' })).toBeInTheDocument();
     expect(screen.queryByText('可在作品与作者详情发起研究')).not.toBeInTheDocument();
     expect(screen.getByText('仅检索已有判断；可在作品与作者详情发起研究。')).toBeInTheDocument();
@@ -136,7 +142,8 @@ describe('创作者页 · 列表', () => {
     expect(row).toHaveTextContent('关系待读取');
     expect(within(row).queryByRole('button', { name: '加入观察' })).toBeNull();
     expect(screen.getByRole('button', { name: /^未加入观察/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: /^未观察的高赞作者/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^高赞线索/ })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^已加入观察/ })).toBeDisabled();
   });
 
   it('已加入的作者给出「查看目标」；其他领域已有主研究关系或目标处于暂停时不直接加入', async () => {
@@ -162,6 +169,62 @@ describe('创作者页 · 列表', () => {
     expect(url.searchParams.get('returnTo')).toBe(`/corpus/creators?domain=${DOMAIN}&sort=high_likes`);
     expect(JSON.parse(url.searchParams.get('creatorFilter') as string)).toMatchObject({ domain: DOMAIN, relevance: 'related' });
     expect(url.searchParams.get('creatorKey')).toMatch(/^xhs:/);
+  });
+});
+
+describe('创作者页 · 批量选择与名单导出', () => {
+  // 动作条把数字放在 <strong> 里，整句不是单个文本节点；按整条状态读它。
+  const bulkBar = () => screen.getAllByRole('status').find(node => /已选 \d+ 位创作者/.test(node.textContent ?? ''));
+
+  function stubDownload() {
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:test');
+    const revokeObjectURL = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { value: createObjectURL, configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true });
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+    return { createObjectURL, click };
+  }
+
+  it('勾选后出现批量动作条；导出的 CSV 只含选中的作者，带 BOM、CRLF 与引号', async () => {
+    defaultRoutes(kit);
+    const { user } = await loaded();
+    expect(bulkBar()).toBeUndefined();
+    await user.click(screen.getByRole('checkbox', { name: '选择 合成作者 1' }));
+    expect(bulkBar()).toHaveTextContent('已选 1 位创作者');
+    const { createObjectURL, click } = stubDownload();
+    await user.click(screen.getByRole('button', { name: '导出名单' }));
+    expect(click).toHaveBeenCalled();
+    const blob = createObjectURL.mock.calls[0]![0];
+    // Blob.text() 会按 UTF-8 解码并吃掉开头的 BOM；直接核对字节，Excel 认的是这三个字节。
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    const text = new TextDecoder('utf-8', { ignoreBOM: true }).decode(bytes);
+    expect(text.startsWith('\uFEFF')).toBe(true);
+    expect(text).toContain('\r\n"合成作者 1"');
+    expect(text).toContain('"注意力训练"');
+    expect(text).toContain('"未加入观察"');
+    expect(text).not.toContain('合成作者 2');
+    expect(screen.getByText('已导出 1 位创作者。')).toBeInTheDocument();
+  });
+
+  it('表头全选只选当前页；换筛选条件后选择清空，不会导出范围外的作者', async () => {
+    defaultRoutes(kit);
+    const { user } = await loaded();
+    await user.click(screen.getByRole('checkbox', { name: '选择当前页全部创作者' }));
+    expect(bulkBar()).toHaveTextContent('已选 2 位创作者');
+    expect(screen.getByRole('checkbox', { name: '选择 合成作者 1' })).toBeChecked();
+    expect(screen.getByRole('checkbox', { name: '选择当前页全部创作者' })).toBeChecked();
+    await user.click(screen.getByRole('button', { name: '未加入观察 20' }));
+    await waitFor(() => expect(bulkBar()).toBeUndefined());
+  });
+
+  it('「取消选择」清空选择并收起动作条', async () => {
+    defaultRoutes(kit);
+    const { user } = await loaded();
+    await user.click(screen.getByRole('checkbox', { name: '选择 合成作者 1' }));
+    await user.click(screen.getByRole('button', { name: '取消选择' }));
+    expect(bulkBar()).toBeUndefined();
+    expect(screen.getByRole('checkbox', { name: '选择 合成作者 1' })).not.toBeChecked();
   });
 });
 
@@ -320,19 +383,50 @@ describe('创作者页 · 筛选、快捷视图与重置', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '未加入观察 20' })).toHaveAttribute('aria-pressed', 'true'));
   });
 
-  it('「高赞」快捷视图：没有爆款标准时用高赞线索，有标准时用爆款并按爆款排序', async () => {
+  it('「高赞线索」快捷视图：用服务器口径（未加入观察 + 至少 2 篇 ≥500 赞），按最高赞排序', async () => {
     defaultRoutes(kit, ok(listJson({ threshold: null })));
-    const { user, location, unmount } = await loaded();
-    await user.click(screen.getByRole('button', { name: '未观察的高赞作者' }));
-    await waitFor(() => expect(location()).toContain('highLikes=true'));
+    const { user, location } = await loaded();
+    await user.click(screen.getByRole('button', { name: '高赞线索 5' }));
+    await waitFor(() => expect(lastCreatorsCall()?.search.get('observation')).toBe('outside'));
+    expect(lastCreatorsCall()?.search.get('minLikes')).toBe('500');
+    expect(lastCreatorsCall()?.search.get('minMatchedWorks')).toBe('2');
     expect(location()).toContain('sort=high_likes');
-    unmount();
-    kit.calls.length = 0;
-    defaultRoutes(kit, ok(listJson({ threshold: 100 })));
-    const second = await loaded();
-    await second.user.click(screen.getByRole('button', { name: '未观察的爆款作者 6' }));
-    await waitFor(() => expect(second.location()).toContain('viral=true'));
-    expect(second.location()).toContain('sort=viral_works');
+    expect(location()).not.toContain('viral=true');
+    expect(location()).not.toContain('highLikes=true');
+  });
+
+  it('没有高赞线索口径时该视图不可点，不猜一个默认标准', async () => {
+    defaultRoutes(kit, ok(listJson({ leadRule: null })));
+    await loaded();
+    expect(screen.getByRole('button', { name: /^高赞线索/ })).toBeDisabled();
+  });
+
+  it('「最近新见」：把北京时间最近 7 天的起点写进条件，并按首次发现排序', async () => {
+    defaultRoutes(kit);
+    const { user, location } = await loaded();
+    await user.click(screen.getByRole('button', { name: '最近新见 3' }));
+    await waitFor(() => expect(location()).toContain('firstSeenFrom='));
+    const params = new URLSearchParams(location().split('?')[1]);
+    const from = params.get('firstSeenFrom') as string;
+    const days = (Date.now() - new Date(`${from}T00:00:00+08:00`).getTime()) / 86_400_000;
+    expect(days).toBeGreaterThanOrEqual(6);
+    expect(days).toBeLessThan(7);
+    expect(params.get('sort')).toBe('first_seen');
+    expect(lastCreatorsCall()?.search.get('firstSeenFrom')).toBe(from);
+  });
+
+  it('「已加入观察」按观察关系筛选', async () => {
+    defaultRoutes(kit);
+    const { user, location } = await loaded();
+    await user.click(screen.getByRole('button', { name: '已加入观察 7' }));
+    await waitFor(() => expect(lastCreatorsCall()?.search.get('observation')).toBe('inside'));
+    expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}&observation=inside`);
+  });
+
+  it('按首次发现筛选但没有新作者：说明所选时间内没有，并给出最近入库时间', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [], total: 0, latestAddedDisplay: '2026-10-14 09:00' })));
+    await loaded(`/corpus/creators?domain=${DOMAIN}&firstSeenFrom=2026-10-24&sort=first_seen`);
+    expect(screen.getByText(/所选时间内没有新发现的作者。最近入库 2026-10-14 09:00。/)).toBeInTheDocument();
   });
 
   it('输入后立刻打开筛选，提交待发词后仍保留筛选窗口，应用不丢查询', async () => {
@@ -489,7 +583,7 @@ describe('创作者页 · 筛选、快捷视图与重置', () => {
     const dialog = await screen.findByRole('dialog', { name: '筛选材料与作者' });
     expect(within(dialog).getByRole('combobox', { name: '观察关系' })).toBeDisabled();
     expect(within(dialog).getByRole('checkbox', { name: '有相关爆款' })).toBeDisabled();
-    expect(within(dialog).getByText(/尚未设置爆款标准；仍可筛选高赞线索/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/尚未设置爆款标准；仍可筛出有已知点赞的作品/)).toBeInTheDocument();
   });
 
   it('对话框内「清除额外条件」只重置草稿（含搜索词与排序），应用后才生效', async () => {
@@ -550,18 +644,22 @@ describe('创作者页 · 搜索、排序、分页', () => {
     await user.click(screen.getByRole('combobox', { name: '排序' }));
     await user.click(screen.getByRole('option', { name: '命中最高点赞' }));
     await waitFor(() => expect(lastCreatorsCall()?.search.get('sort')).toBe('high_likes'));
-    // 按最高赞排序时表头改称「命中最高赞」，仍标出当前排序列。
-    expect(screen.getByRole('columnheader', { name: '命中最高赞' })).toHaveAttribute('aria-sort', 'descending');
+    // 只换排序、没有作品条件：列名仍是「领域最高赞」，但标出当前排序列。
+    expect(screen.getByRole('columnheader', { name: '领域最高赞' })).toHaveAttribute('aria-sort', 'descending');
     expect(screen.getByRole('columnheader', { name: '相关作品' })).not.toHaveAttribute('aria-sort');
+    await user.click(screen.getByRole('combobox', { name: '排序' }));
+    await user.click(screen.getByRole('option', { name: '首次发现' }));
+    await waitFor(() => expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}&sort=first_seen`));
+    expect(screen.getByRole('columnheader', { name: '首次发现' })).toHaveAttribute('aria-sort', 'descending');
   });
 
-  it('筛选或高赞模式下，表头改称「命中相关」「命中最高赞」', async () => {
+  it('筛选（作品条件生效）时，表头改称「命中相关」「命中最高赞」，行内显示范围内总数', async () => {
     defaultRoutes(kit);
     await loaded(`/corpus/creators?domain=${DOMAIN}&relevance=related&sort=high_likes`);
     expect(screen.getByRole('button', { name: '命中相关' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '命中最高赞' })).toBeInTheDocument();
     expect(rowFor('合成作者 1')).toHaveTextContent('范围内 3');
-    expect(rowFor('合成作者 1').querySelector('[title="当前命中作品的点赞表现"]')).not.toBeNull();
+    expect(screen.getByRole('columnheader', { name: '命中最高赞' })).toHaveAttribute('aria-sort', 'descending');
   });
 
   it('分页：翻页写进地址，请求的页码从 0 起；改每页数量回到第一页', async () => {
@@ -630,13 +728,25 @@ describe('创作者页 · 材料范围与判断标准', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('没有爆款标准：不拿 0 或默认值冒充，高赞入口写「查看 →」', async () => {
+  it('没有爆款标准：不拿 0 或默认值冒充；高赞线索按自己的口径显示，爆款统计说明不可用', async () => {
     defaultRoutes(kit, ok(listJson({ threshold: null })));
     const { user } = await loaded();
     await user.click(screen.getByRole('button', { name: '材料范围' }));
     const dialog = await screen.findByRole('dialog', { name: '材料范围与判断标准' });
-    expect(dialog).toHaveTextContent('尚未设置爆款标准，高赞线索仅按已有点赞排序');
-    expect(within(dialog).getByRole('button', { name: /未观察的高赞作者/ })).toHaveTextContent('查看 →');
+    expect(dialog).toHaveTextContent('尚未设置爆款标准，爆款相关统计暂不可用');
+    expect(dialog).toHaveTextContent('高赞线索：未加入观察，且同一作者至少 2 篇作品点赞不少于 500');
+    expect(within(dialog).getByRole('button', { name: /高赞线索/ })).toHaveTextContent('5');
+    expect(within(dialog).getByRole('button', { name: /最近新见/ })).toHaveTextContent('3');
+    expect(within(dialog).getByRole('button', { name: /已加入观察/ })).toHaveTextContent('7');
+  });
+
+  it('高赞线索口径不可用时：对话框里的入口不可点，并说明原因', async () => {
+    defaultRoutes(kit, ok(listJson({ leadRule: null })));
+    const { user } = await loaded();
+    await user.click(screen.getByRole('button', { name: '材料范围' }));
+    const dialog = await screen.findByRole('dialog', { name: '材料范围与判断标准' });
+    expect(within(dialog).getByRole('button', { name: /高赞线索/ })).toBeDisabled();
+    expect(dialog).toHaveTextContent('高赞线索口径暂不可用。');
   });
 
   it('判断标准常驻可见：六项门槛、「作品表达」与「作者倾向」分层且可并存、分析状态的含义（#384 发现 1、2）', async () => {

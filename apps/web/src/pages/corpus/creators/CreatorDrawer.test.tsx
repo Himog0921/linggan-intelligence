@@ -282,14 +282,10 @@ describe('依据抽屉 · 键盘、焦点与头像', () => {
     expect(screen.getByRole('button', { name: '合成作者 2' })).toHaveFocus();
   });
 
-  it('点「作品表达」直接打开「研究线索」分区；点「查看加入方式」打开观察记录分区', async () => {
+  it('点「查看加入方式」直接打开观察记录分区', async () => {
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1), itemJson(2, { hasOtherPrimaryDomain: true, existsInOtherDomains: true })] })));
     const { user } = renderCreatorsPage();
-    const row = (await screen.findByRole('button', { name: '合成作者 1' })).closest('tr') as HTMLElement;
-    await user.click(within(row).getByRole('button', { name: '亲历自述' }));
-    expect(within(await screen.findByRole('dialog')).getByRole('tab', { name: '研究线索' })).toHaveAttribute('aria-selected', 'true');
-    fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await screen.findByRole('button', { name: '合成作者 1' });
     await user.click(within((await screen.findByRole('button', { name: '合成作者 2' })).closest('tr') as HTMLElement).getByRole('button', { name: '查看加入方式' }));
     expect(within(await screen.findByRole('dialog')).getByRole('tab', { name: '观察记录' })).toHaveAttribute('aria-selected', 'true');
   });

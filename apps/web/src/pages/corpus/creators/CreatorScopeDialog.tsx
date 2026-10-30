@@ -27,19 +27,23 @@ const STATE_MEANINGS: readonly (readonly [string, string])[] = [
 /** 范围内的统计 + 领域说明 + 判断标准。统计只跟领域、用途、平台和发表日期变化，不随搜索与筛选改变。 */
 export function CreatorScopeDialog({ data, usageRole, hasDateRange, link, onQuick, onShowAllDates, onClose }: CreatorScopeDialogProps) {
   const titleId = useId();
-  const { stats, policy, domain } = data;
+  const { stats, policy, domain, leadRule } = data;
   const hasRule = policy.likeThreshold !== null;
   const observationKnown = stats.outside !== null;
+  const insideKnown = stats.inside !== null;
+  const leadsKnown = observationKnown && leadRule !== null && stats.highLikeLeads !== null;
   const buttons: readonly { key: QuickKey; text: string; value: string; disabled: boolean }[] = [
     { key: 'all', text: '范围内作者', value: formatCount(stats.authors), disabled: false },
+    { key: 'new', text: '最近新见', value: formatCount(stats.recentlyDiscovered), disabled: false },
     { key: 'vertical', text: '本领域持续创作', value: formatCount(stats.vertical), disabled: false },
     { key: 'personal', text: '有亲历自述作品', value: formatCount(stats.personal), disabled: false },
     { key: 'outside', text: '未加入观察', value: formatCount(stats.outside), disabled: !observationKnown },
+    { key: 'inside', text: '已加入观察', value: formatCount(stats.inside), disabled: !insideKnown },
     {
       key: 'high',
-      text: hasRule ? '未观察的爆款作者' : '未观察的高赞作者',
-      value: hasRule ? formatCount(stats.outsideViral) : '查看 →',
-      disabled: !observationKnown,
+      text: '高赞线索',
+      value: formatCount(stats.highLikeLeads),
+      disabled: !leadsKnown,
     },
   ];
   return (
@@ -72,7 +76,10 @@ export function CreatorScopeDialog({ data, usageRole, hasDateRange, link, onQuic
             </div>
             <p className={styles.help}>
               统计按当前领域、用途和发表日期计算，不随搜索与筛选改变；列表上方的命中数才是当前搜索与筛选的结果。
-              {hasRule ? `相关爆款标准：点赞不少于 ${formatCount(policy.likeThreshold)}。` : '尚未设置爆款标准，高赞线索仅按已有点赞排序。'}
+              {leadRule
+                ? `高赞线索：未加入观察，且同一作者至少 ${leadRule.minWorks} 篇作品点赞不少于 ${formatCount(leadRule.minLikes)}。`
+                : '高赞线索口径暂不可用。'}
+              {hasRule ? `相关爆款标准：点赞不少于 ${formatCount(policy.likeThreshold)}。` : '尚未设置爆款标准，爆款相关统计暂不可用。'}
             </p>
             <p className={styles.coverage}>
               当前范围 {formatCount(stats.works)} 篇作品 · 已确认相关 {formatCount(stats.relatedAuthors)} 位作者。

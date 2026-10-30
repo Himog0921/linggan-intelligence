@@ -29,6 +29,10 @@ pub struct CreatorScope {
     pub viral: bool,
     #[serde(default)]
     pub high_likes: bool,
+    /// Beijing calendar date (`YYYY-MM-DD`); keeps creators first seen on or after it.
+    pub first_seen_from: Option<String>,
+    /// Keeps creators with at least this many works matching the current work conditions.
+    pub min_matched_works: Option<usize>,
     #[serde(default)]
     pub unknown_author: bool,
     #[serde(default)]
@@ -59,7 +63,8 @@ impl CreatorScope {
             || self.min_likes.is_some_and(|x| x < 0)
             || self.query.as_ref().is_some_and(|x| x.chars().count() > 200)
             || self.topic_hint.as_ref().is_some_and(|x| x.trim().is_empty() || x.chars().count() > 120)
-            || !matches!(self.sort.as_str(), "recent" | "high_likes" | "related_works" | "viral_works")
+            || !matches!(self.sort.as_str(), "recent" | "high_likes" | "related_works" | "viral_works" | "first_seen")
+            || self.min_matched_works.is_some_and(|n| n > 1_000)
             || self
                 .relevance
                 .as_deref()
@@ -83,7 +88,7 @@ impl CreatorScope {
         {
             return Err("invalid_creator_scope");
         }
-        for date in [&self.published_from, &self.published_to]
+        for date in [&self.published_from, &self.published_to, &self.first_seen_from]
             .into_iter()
             .flatten()
         {
@@ -124,6 +129,8 @@ impl CreatorScope {
         q.min_likes = None;
         q.viral = false;
         q.high_likes = false;
+        q.first_seen_from = None;
+        q.min_matched_works = None;
         q.unknown_author = false;
         q.page = 0;
         q
