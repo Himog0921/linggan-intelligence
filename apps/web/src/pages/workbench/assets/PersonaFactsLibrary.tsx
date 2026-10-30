@@ -17,6 +17,7 @@ function PersonaForm({ accountRef, personRef, current: observed, checking, onSav
   const [capturePerson] = useState(personRef);
   const [key, setKey] = useState(initial?.key ?? '');
   const [text, setText] = useState(initial?.text ?? '');
+  const [missing, setMissing] = useState(initial?.status === 'missing');
   const [source, setSource] = useState(initial?.source ?? 'manual');
   const [decision, setDecision] = useState<'keep_old' | 'use_new' | ''>('');
   const [confirmed, setConfirmed] = useState(false);
@@ -32,8 +33,10 @@ function PersonaForm({ accountRef, personRef, current: observed, checking, onSav
   const unavailable = !checking && ((!!initial && !!observed && (observed.state === 'withdrawn' || (!!personRef && !observed.currentPerson))) ||
     (!initial && !!capturePerson && !!personRef && personRef !== capturePerson));
   const locked = busy || uncertain !== null;
-  const changed = !!initial && text.trim() !== (initial.text ?? '');
-  const dirty = key.trim() !== (initial?.key ?? '') || text.trim() !== (initial?.text ?? '') || source !== (initial?.source ?? 'manual');
+  const effectiveText = missing ? '' : text.trim();
+  const changed = !!initial && effectiveText !== (initial.text ?? '');
+  const conflict = changed && initial?.status !== 'missing';
+  const dirty = key.trim() !== (initial?.key ?? '') || effectiveText !== (initial?.text ?? '') || source !== (initial?.source ?? 'manual');
   const history = useQuery({ queryKey: ['creation-assets', 'persona-history', initial?.id],
     queryFn: ({ signal }) => api.personaHistory(initial!.id, signal), enabled: !!initial && !unavailable && !paused, gcTime: 0 });
   useEffect(() => { onDirty(dirty && !unavailable); }, [dirty, unavailable, onDirty]);
@@ -65,7 +68,7 @@ function PersonaForm({ accountRef, personRef, current: observed, checking, onSav
       return;
     }
     const payload = kind === 'save' ? { accountRef, expectedPersonRef: capturePerson!, key: key.trim(), expectedVersion: initial?.version ?? 0,
-      text: text.trim(), source, conflictDecision: changed ? decision || null : null }
+      text: effectiveText, source, conflictDecision: conflict ? decision || null : null }
       : kind === 'confirm' ? { expectedVersion: initial!.version, subjectConfirmed: true as const, confirmationMethod: method } : {};
     const requestId = ids.keyFor(kind, JSON.stringify([initial?.id, payload]));
     pendingId.current = requestId; setBusy(true); onPending(true); setNotice('');
@@ -107,21 +110,22 @@ function PersonaForm({ accountRef, personRef, current: observed, checking, onSav
     <h3>{initial ? '编辑人设事实' : '补充人设事实'}</h3>
     <p className={styles.hint}>只记录写稿需要的事实，不写真实姓名、学校或就诊细节。录入不等于本人确认。</p>
     <label>事实名称<input value={key} disabled={!!initial || locked} maxLength={40} onChange={event => setKey(event.target.value)} placeholder="例如：年级" /></label>
-    <label>事实内容<input value={text} disabled={locked} maxLength={500} onChange={event => setText(event.target.value)} /></label>
+    <label><input type="checkbox" checked={missing} disabled={locked} onChange={event => setMissing(event.target.checked)} /> 缺，待补充</label>
+    <label>事实内容<input value={text} disabled={locked || missing} maxLength={500} onChange={event => setText(event.target.value)} /></label>
     <label>来源<select value={source} disabled={locked} onChange={event => setSource(event.target.value)}><option value="manual">人工记录</option><option value="oral">本人口述</option><option value="manuscript">稿件</option><option value="inferred">系统推断</option></select></label>
-    {changed ? <fieldset className={styles.choice} disabled={locked}><legend>新旧事实不一致</legend><p>旧内容：{initial?.text}</p>
+    {conflict ? <fieldset className={styles.choice} disabled={locked}><legend>新旧事实不一致</legend><p>旧内容：{initial?.text}</p>
       <label><input type="radio" name="persona-conflict" checked={decision === 'keep_old'} onChange={() => setDecision('keep_old')} /> 保留原来的</label>
       <label><input type="radio" name="persona-conflict" checked={decision === 'use_new'} onChange={() => setDecision('use_new')} /> 以新的为准</label>
       <p className={styles.hint}>两条都会保留在这条事实的历史中。</p></fieldset> : null}
     {!initial && !capturePerson ? <p className={styles.hint}>请先确认账号背后的真人。</p> : null}
-    <ActionButton type="submit" variant="primary" disabled={locked || (!!initial && !dirty) || (!initial && !capturePerson) || !key.trim() || !text.trim() || (changed && !decision)}>保存事实</ActionButton>
-    {initial?.status !== 'confirmed' && initial ? <fieldset className={styles.choice} disabled={locked}><legend>本人确认</legend>
+    <ActionButton type="submit" variant="primary" disabled={locked || (!!initial && !dirty) || (!initial && !capturePerson) || !key.trim() || (!missing && !text.trim()) || (conflict && !decision)}>保存事实</ActionButton>
+    {initial?.status !== 'confirmed' && initial?.status !== 'missing' && initial ? <fieldset className={styles.choice} disabled={locked}><legend>本人确认</legend>
       <label><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> 本人已确认当前事实</label>
       <label>确认方式<select value={method} onChange={event => setMethod(event.target.value)}><option value="subject_present">本人当面确认</option><option value="subject_statement">本人明确表示同意</option></select></label>
       <ActionButton disabled={!confirmed || dirty} onClick={() => void run('confirm')}>登记本人确认</ActionButton>
-      {dirty ? <p className={styles.hint}>请先保存更改，再确认保存后的事实。</p> : null}</fieldset> : initial ? <p>本人已确认 · 修改后需要再次确认。</p> : null}
+      {dirty ? <p className={styles.hint}>请先保存更改，再确认保存后的事实。</p> : null}</fieldset> : initial?.status === 'confirmed' ? <p>本人已确认 · 修改后需要再次确认。</p> : null}
     {initial ? <><details><summary>查看事实历史</summary>
-      {history.isPending ? <p>正在读取历史…</p> : history.isError ? <p role="alert">历史读取失败。</p> : <ul>{history.data?.map(item => <li key={item.revision}>版本 {item.revision} · {item.applied ? '采用' : '保留为冲突记录'} · {item.status === 'confirmed' ? '本人已确认' : '待确认'}：{item.text}</li>)}</ul>}</details>
+      {history.isPending ? <p>正在读取历史…</p> : history.isError ? <p role="alert">历史读取失败。</p> : <ul>{history.data?.map(item => <li key={item.revision}>版本 {item.revision} · {item.applied ? '采用' : '保留为冲突记录'} · {item.status === 'confirmed' ? '本人已确认' : item.status === 'missing' ? '缺，待补充' : '待确认'}：{item.text}</li>)}</ul>}</details>
       <fieldset className={styles.choice} disabled={locked}><legend>本人撤回</legend><p className={styles.hint}>撤回会移除该事实及其历史内容。</p>
       <label><input type="checkbox" checked={withdraw} onChange={event => setWithdraw(event.target.checked)} /> 本人已要求撤回这条事实</label>
       <ActionButton variant="danger" disabled={!withdraw} onClick={() => void run('withdraw')}>撤回事实</ActionButton></fieldset></> : null}
@@ -173,7 +177,7 @@ export function PersonaFactsLibrary({ domainRef, onDirtyChange = () => {}, onPen
       {(accounts.data ?? []).map(item => <option key={item.accountRef} value={item.accountRef}>{item.accountName}</option>)}</select></label>
     {accounts.isError ? <p role="alert">账号读取失败。</p> : null}{account && facts.isPending ? <p role="status">正在读取事实…</p> : facts.isError ? <p role="alert">事实读取失败。</p> : null}
     <ul className={styles.list}>{facts.data?.map(item => <li key={item.id}><button type="button" disabled={pending} aria-current={item.id === selected ? 'true' : undefined} onClick={() => { if (item.id !== selected && leave()) setSelected(item.id); }}>
-      <b>{item.key ?? '历史事实'}</b><small>{item.state === 'withdrawn' ? '已撤回' : !item.currentPerson ? accounts.data?.find(row => row.accountRef === account)?.identity?.hasRealPerson === true ? '原真人事实' : '真人待确认' : item.status === 'confirmed' ? '本人已确认' : item.status === 'inferred' ? '推断待确认' : '待确认'}</small></button></li>)}</ul>
+      <b>{item.key ?? '历史事实'}</b><small>{item.state === 'withdrawn' ? '已撤回' : !item.currentPerson ? accounts.data?.find(row => row.accountRef === account)?.identity?.hasRealPerson === true ? '原真人事实' : '真人待确认' : item.status === 'confirmed' ? '本人已确认' : item.status === 'inferred' ? '推断待确认' : item.status === 'missing' ? '缺，待补充' : '待确认'}</small></button></li>)}</ul>
   </div><div className={styles.detail}>{account && (!selected || current) ? <PersonaForm key={`${account}:${selected ?? 'new'}:${formVersion}`} accountRef={account}
     personRef={accounts.data?.find(row => row.accountRef === account)?.identity?.hasRealPerson ? accounts.data?.find(row => row.accountRef === account)?.identity?.personRef ?? null : null}
     current={current} checking={rechecking} onDirty={value => { setDirty(value); onDirtyChange(value); }} onPending={value => { setPending(value); onPendingChange(value); }} onReload={() => setFormVersion(value => value + 1)}

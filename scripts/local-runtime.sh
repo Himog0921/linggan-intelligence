@@ -496,6 +496,7 @@ migrate() {
   apply_migration_once "0182_creator_read_indexes" "$project_root/database/migrations/0182_creator_read_indexes.sql"
   apply_migration_once "0183_creation_experience_s1b" "$project_root/database/migrations/0183_creation_experience_s1b.sql"
   apply_migration_once "0184_creation_idea_boxes" "$project_root/database/migrations/0184_creation_idea_boxes.sql"
+  apply_migration_once "0185_creation_experience_erasure" "$project_root/database/migrations/0185_creation_experience_erasure.sql"
 }
 
 case "$command_name" in

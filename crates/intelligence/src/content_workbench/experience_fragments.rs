@@ -11,6 +11,7 @@ pub(super) struct Fragment {
     experience: Uuid,
     revision: i32,
     text: String,
+    uses: Vec<(usize, MaterialUse)>,
 }
 
 /// Lock the same experience key as confirmation and withdrawal before checking its state.
@@ -69,7 +70,7 @@ async fn lock_references(
     Ok(())
 }
 
-pub(super) fn strip(doc: &mut WorkDocument) {
+pub(crate) fn strip(doc: &mut WorkDocument) {
     for slot in &doc.experience_slots {
         if let Some(paragraph) = doc
             .paragraphs
@@ -79,6 +80,18 @@ pub(super) fn strip(doc: &mut WorkDocument) {
             paragraph.text.clear();
         }
     }
+    let paragraphs: Vec<Uuid> = doc
+        .experience_slots
+        .iter()
+        .map(|slot| slot.paragraph_id)
+        .collect();
+    if doc.uses.iter().any(|usage| matches!(&usage.target, UseTarget::Paragraph { paragraph_id } if paragraphs.contains(paragraph_id))) {
+        doc.experience_use_order = doc.uses.iter().map(|usage| usage.id).collect();
+    }
+    doc.uses.retain(|usage| {
+        !matches!(&usage.target, UseTarget::Paragraph { paragraph_id }
+        if paragraphs.contains(paragraph_id))
+    });
 }
 
 /// A known full experience paragraph may occur only in paragraphs retaining that experience's
@@ -256,6 +269,7 @@ pub(super) async fn prepare(
             experience: slot.experience_ref,
             revision: slot.experience_revision,
             text: paragraph.text.clone(),
+            uses: doc.uses.iter().enumerate().filter(|(_,usage)| matches!(&usage.target, UseTarget::Paragraph { paragraph_id } if *paragraph_id == slot.paragraph_id)).map(|(index,usage)| (index,usage.clone())).collect(),
         });
     }
     let mut stored = doc.clone();
@@ -263,7 +277,7 @@ pub(super) async fn prepare(
     Ok((stored, fragments))
 }
 
-pub(super) async fn withdrawn_history(
+pub(crate) async fn withdrawn_history(
     tx: &mut Transaction<'_, Postgres>,
     work: Uuid,
 ) -> Result<Vec<Uuid>, WorkbenchError> {
@@ -279,6 +293,10 @@ pub(super) async fn insert(
     for f in fragments {
         sqlx::query("INSERT INTO linggan_creation_experience_fragment(revision_ref,paragraph_ref,experience_ref,experience_revision,body) VALUES($1,$2,$3,$4,$5)")
             .bind(revision).bind(f.paragraph).bind(f.experience).bind(f.revision).bind(&f.text).execute(&mut **tx).await?;
+        for (ordinal, usage) in &f.uses {
+            sqlx::query("INSERT INTO linggan_creation_experience_use_fragment(revision_ref,paragraph_ref,ordinal,use_value) VALUES($1,$2,$3,$4)")
+                .bind(revision).bind(f.paragraph).bind(*ordinal as i32).bind(serde_json::to_value(usage)?).execute(&mut **tx).await?;
+        }
     }
     Ok(())
 }
@@ -290,10 +308,23 @@ pub(super) async fn project(
     doc: &mut WorkDocument,
 ) -> Result<(), WorkbenchError> {
     lock_references(tx, None, doc).await?;
+    let mut protected_uses: Vec<(usize, MaterialUse)> = Vec::new();
     for slot in &doc.experience_slots {
         let row = sqlx::query("SELECT f.body FROM linggan_creation_experience_fragment f JOIN linggan_creation_experience e ON e.experience_ref=f.experience_ref JOIN linggan_creation_experience_consent c ON c.experience_ref=f.experience_ref AND c.revision=f.experience_revision WHERE f.revision_ref=$1 AND f.paragraph_ref=$2 AND f.experience_ref=$3 AND f.experience_revision=$4 AND e.account_ref=$5 AND e.state IN ('confirmed','awaiting_subject') AND c.draft_use AND c.subject_ref=e.subject_ref AND EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=e.account_ref AND p.subject_ref=e.subject_ref) AND (SELECT i.has_real_person FROM linggan_creation_account_identity i WHERE i.account_ref=e.account_ref ORDER BY i.revision_number DESC LIMIT 1) IS TRUE")
             .bind(revision).bind(slot.paragraph_id).bind(slot.experience_ref).bind(slot.experience_revision).bind(doc.account_ref).fetch_optional(&mut **tx).await?;
         let mut text = row.map(|r| r.try_get::<String, _>("body")).transpose()?;
+        if text.is_some() {
+            let rows = sqlx::query("SELECT ordinal,use_value FROM linggan_creation_experience_use_fragment WHERE revision_ref=$1 AND paragraph_ref=$2 ORDER BY ordinal")
+                .bind(revision).bind(slot.paragraph_id).fetch_all(&mut **tx).await?;
+            for row in rows {
+                let usage: MaterialUse = serde_json::from_value(row.try_get("use_value")?)?;
+                if !matches!(&usage.target, UseTarget::Paragraph { paragraph_id } if *paragraph_id == slot.paragraph_id)
+                {
+                    return Err(WorkbenchError::Source);
+                }
+                protected_uses.push((row.try_get::<i32, _>("ordinal")? as usize, usage));
+            }
+        }
         if text.is_none() {
             let state: Option<String> = sqlx::query_scalar(
                 "SELECT state FROM linggan_creation_experience WHERE experience_ref=$1",
@@ -314,6 +345,33 @@ pub(super) async fn project(
         {
             p.text = text.expect("missing content is replaced above");
         }
+    }
+    let order = std::mem::take(&mut doc.experience_use_order);
+    if !order.is_empty() {
+        let mut by_id = std::collections::HashMap::new();
+        for usage in doc
+            .uses
+            .drain(..)
+            .chain(protected_uses.into_iter().map(|(_, usage)| usage))
+        {
+            if by_id.insert(usage.id, usage).is_some() {
+                return Err(WorkbenchError::Source);
+            }
+        }
+        let mut seen = std::collections::HashSet::new();
+        for id in order {
+            if !seen.insert(id) {
+                return Err(WorkbenchError::Source);
+            }
+            if let Some(usage) = by_id.remove(&id) {
+                doc.uses.push(usage);
+            }
+        }
+        if !by_id.is_empty() {
+            return Err(WorkbenchError::Source);
+        }
+    } else if !protected_uses.is_empty() {
+        return Err(WorkbenchError::Source);
     }
     Ok(())
 }

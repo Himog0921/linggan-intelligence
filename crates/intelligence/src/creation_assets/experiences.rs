@@ -484,6 +484,13 @@ pub async fn withdraw_experience(
     if current.state == "withdrawn" {
         return Err(AssetsError::Invalid("experience_state"));
     }
+    sqlx::query("SELECT set_config('linggan.experience_erasure','on',true)")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("UPDATE linggan_creation_request SET command_sha256=repeat('0',64) WHERE request_ref IN (SELECT request_ref FROM linggan_creation_experience_command_link WHERE experience_ref=$1)")
+        .bind(id).execute(&mut *tx).await?;
+    sqlx::query("UPDATE linggan_creation_copy_receipt SET text_sha256=repeat('0',64) WHERE receipt_ref IN (SELECT receipt_ref FROM linggan_creation_experience_copy_link WHERE experience_ref=$1)")
+        .bind(id).execute(&mut *tx).await?;
     sqlx::query("DELETE FROM linggan_creation_experience_fragment WHERE experience_ref=$1")
         .bind(id)
         .execute(&mut *tx)

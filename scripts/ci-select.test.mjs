@@ -46,6 +46,7 @@ test('existing domain proof coverage is retained and unions across files', () =>
     ['database/migrations/0181_creation_assets_s1a.sql', ['ai', 'web', 'web_real_chain']],
     ['database/migrations/0183_creation_experience_s1b.sql', ['ai', 'web', 'web_real_chain']],
     ['database/migrations/0184_creation_idea_boxes.sql', ['ai', 'web', 'web_real_chain']],
+    ['database/migrations/0185_creation_experience_erasure.sql', ['ai', 'web', 'web_real_chain']],
     ['apps/api/src/local_web/creation_assets_api.rs', ['ai', 'web', 'web_real_chain']],
     ['crates/intelligence/src/comment_study_run/submit.rs', ['ai', 'web', 'web_real_chain']],
     ['crates/evidence/src/ocr_adoption/selection.rs', ['material_reading']],

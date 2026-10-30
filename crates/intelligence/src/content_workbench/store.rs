@@ -355,6 +355,42 @@ async fn save_in(
 ) -> Result<SaveReceipt, WorkbenchError> {
     ensure_request_owner_in(tx, request, RequestOwner::Work).await?;
     lock(tx, work.to_string()).await?;
+    let mut submitted_experiences: Vec<Uuid> = doc
+        .experience_slots
+        .iter()
+        .map(|slot| slot.experience_ref)
+        .collect();
+    submitted_experiences.sort_unstable();
+    submitted_experiences.dedup();
+    if !submitted_experiences.is_empty() {
+        // A stale request can contain an experience even when the current server revision no
+        // longer does. Serialize its fingerprint with withdrawal before accepting a receipt.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind("creation_assets:experience-gate")
+            .execute(&mut **tx)
+            .await?;
+        let available: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_creation_experience WHERE experience_ref=ANY($1) AND state<>'withdrawn'")
+            .bind(&submitted_experiences).fetch_one(&mut **tx).await?;
+        if available != submitted_experiences.len() as i64 {
+            let withdrawn: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience WHERE experience_ref=ANY($1) AND state='withdrawn')")
+                .bind(&submitted_experiences).fetch_one(&mut **tx).await?;
+            return if withdrawn {
+                let (_, current) = read_revision_in(tx, work, None).await?;
+                if !allow_epoch_rotation
+                    && current.id == expected
+                    && doc.experience_epoch != current.document.experience_epoch
+                {
+                    Err(WorkbenchError::Invalid("experience_editor_reset_required"))
+                } else {
+                    Err(WorkbenchError::Invalid(
+                        "experience_withdrawal_requires_reset",
+                    ))
+                }
+            } else {
+                Err(WorkbenchError::Source)
+            };
+        }
+    }
     if let Some(r) = replay(tx, request, command).await? {
         return Ok(r);
     }
@@ -376,7 +412,7 @@ async fn save_in(
             ("accepted", revision)
         }
     };
-    receipt(
+    let out = receipt(
         tx,
         work,
         request,
@@ -389,7 +425,12 @@ async fn save_in(
             revision,
         },
     )
-    .await
+    .await?;
+    for experience in submitted_experiences {
+        sqlx::query("INSERT INTO linggan_creation_experience_command_link(request_ref,experience_ref) VALUES($1,$2) ON CONFLICT DO NOTHING")
+            .bind(request).bind(experience).execute(&mut **tx).await?;
+    }
+    Ok(out)
 }
 pub async fn adopt_in(
     tx: &mut Transaction<'_, Postgres>,

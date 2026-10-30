@@ -23,6 +23,7 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
         || doc.angle.chars().count() > 4000
         || doc.outline.len() > 100
         || doc.paragraphs.len() > 1000
+        || !doc.experience_use_order.is_empty()
         || doc.experience_slots.len() > 1000
         || doc.experience_gaps.len() > 1000
         || doc.excerpts.len() > 200

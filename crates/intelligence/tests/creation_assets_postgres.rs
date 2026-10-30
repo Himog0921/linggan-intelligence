@@ -19,6 +19,129 @@ use uuid::Uuid;
 const FILL: &str = "\u{3164}";
 
 #[tokio::test]
+#[ignore = "isolated PostgreSQL experience and public-source erasure"]
+async fn withdrawing_one_of_two_experiences_erases_private_source_uses_and_preserves_order() {
+    let db = db("assets_experience_use_order").await;
+    let (account, _, _) = accounts(&db).await;
+    let person = put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap()
+    .identity
+    .person_ref
+    .unwrap();
+    let mut refs = Vec::new();
+    for body in ["第一条合成经历。", "第二条合成经历。"] {
+        let item = create_experience(
+            &db,
+            &ExperienceCreate {
+                request_id: Uuid::new_v4(),
+                account_ref: account,
+                expected_person_ref: person,
+                title: "合成经历".into(),
+                body: body.into(),
+                tags: vec![],
+                origin: "oral".into(),
+            },
+        )
+        .await
+        .unwrap()
+        .experience
+        .id;
+        confirm_experience(
+            &db,
+            item,
+            &ExperienceConfirm {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                subject_confirmed: true,
+                draft_use: true,
+                send_to_model: None,
+                confirmation_method: "subject_present".into(),
+            },
+        )
+        .await
+        .unwrap();
+        refs.push(item);
+    }
+    let mut document = comment_doc_with_text(&db, "合成的公开评论").await;
+    document.account_ref = Some(account);
+    let ids = [Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4()];
+    document.paragraphs = vec![
+        Paragraph {
+            id: ids[0],
+            text: "第一条合成经历。合成的公开评论".into(),
+        },
+        Paragraph {
+            id: ids[1],
+            text: "普通段落。合成的公开评论".into(),
+        },
+        Paragraph {
+            id: ids[2],
+            text: "第二条合成经历。合成的公开评论".into(),
+        },
+    ];
+    document.experience_slots = vec![
+        ExperienceSlot {
+            paragraph_id: ids[0],
+            experience_ref: refs[0],
+            experience_revision: 1,
+        },
+        ExperienceSlot {
+            paragraph_id: ids[2],
+            experience_ref: refs[1],
+            experience_revision: 1,
+        },
+    ];
+    let created = create_work(
+        &db,
+        &CreateRequest {
+            request_id: Uuid::new_v4(),
+            domain_ref: fixture::dossier::DOMAIN,
+            document,
+        },
+    )
+    .await
+    .unwrap();
+    let targets = |doc: &WorkDocument| {
+        doc.uses
+            .iter()
+            .filter_map(|u| match u.target {
+                UseTarget::Paragraph { paragraph_id } if ids.contains(&paragraph_id) => {
+                    Some(paragraph_id)
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(targets(&created.revision.document), ids);
+    let stored: String = sqlx::query_scalar(
+        "SELECT document::text FROM linggan_creation_revision WHERE revision_ref=$1",
+    )
+    .bind(created.revision.id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let first_hash = linggan_intelligence::content_workbench_sources::text_hash(
+        "第一条合成经历。合成的公开评论",
+    );
+    assert!(!stored.contains(&first_hash));
+    withdraw_experience(&db, refs[0], Uuid::new_v4())
+        .await
+        .unwrap();
+    let after = read_work(&db, created.work_id).await.unwrap();
+    assert_eq!(targets(&after.revision.document), vec![ids[1], ids[2]]);
+    assert!(
+        after.revision.document.paragraphs[2]
+            .text
+            .contains("第二条合成经历")
+    );
+}
+
+#[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn idea_box_links_drafts_without_conflating_note_title_or_research_topic() {
     let db = db("assets_idea_box").await;
@@ -234,6 +357,52 @@ async fn persona_facts_keep_conflicts_subject_ownership_and_erasable_history() {
         .unwrap()
         .person_ref
         .unwrap();
+    let missing = put_persona_fact(
+        &db,
+        &PersonaFactPut {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            expected_person_ref: person,
+            key: "合成缺失事实".into(),
+            expected_version: 0,
+            text: "".into(),
+            source: "manual".into(),
+            conflict_decision: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(missing.fact.status.as_deref(), Some("missing"));
+    assert!(matches!(
+        confirm_persona_fact(
+            &db,
+            missing.fact.id,
+            &PersonaFactConfirm {
+                request_id: Uuid::new_v4(),
+                expected_version: 1,
+                subject_confirmed: true,
+                confirmation_method: "subject_statement".into(),
+            }
+        )
+        .await,
+        Err(AssetsError::Invalid("persona_fact_missing"))
+    ));
+    let supplied = put_persona_fact(
+        &db,
+        &PersonaFactPut {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            expected_person_ref: person,
+            key: "合成缺失事实".into(),
+            expected_version: 1,
+            text: "合成内容".into(),
+            source: "oral".into(),
+            conflict_decision: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(supplied.fact.status.as_deref(), Some("new"));
     let create_fact = PersonaFactPut {
         request_id: Uuid::new_v4(),
         account_ref: account,
@@ -477,11 +646,18 @@ async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() 
         "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0183_creation_experience_s1b','{}');\n",
         linggan_intelligence::content_workbench_sources::text_hash(migration)
     );
+    let erasure = include_str!("../../../database/migrations/0185_creation_experience_erasure.sql");
+    let erasure_ledger = format!(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0185_creation_experience_erasure','{}');\n",
+        linggan_intelligence::content_workbench_sources::text_hash(erasure)
+    );
     assert!(full_schema::FULL_MIGRATIONS.contains(migration));
     assert!(full_schema::FULL_MIGRATIONS.contains(&ledger));
     let before = full_schema::FULL_MIGRATIONS
         .replace(migration, "")
-        .replace(&ledger, "");
+        .replace(&ledger, "")
+        .replace(erasure, "")
+        .replace(&erasure_ledger, "");
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let db = linggan_storage_postgres::testing::isolated_proof_schema(
         &url,
@@ -499,6 +675,7 @@ async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() 
     sqlx::query("INSERT INTO linggan_creation_account_identity(identity_ref,account_ref,revision_number,request_ref,org_relation,has_real_person,backing_person_role,saved_by) VALUES($1,$2,1,$3,'parent',true,'妈妈','local_machine')")
         .bind(Uuid::new_v4()).bind(account).bind(cmd.request_id).execute(db.pool()).await.unwrap();
     sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
+    sqlx::raw_sql(erasure).execute(db.pool()).await.unwrap();
     assert!(
         read_identity(&db, account)
             .await
@@ -1559,6 +1736,21 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     )
     .await
     .unwrap();
+    let stale_request = SaveRequest {
+        request_id: Uuid::new_v4(),
+        expected_revision: historical_work.revision.id,
+        document: historical_work.revision.document.clone(),
+    };
+    assert_eq!(
+        save(&db, historical_work.work_id, &stale_request)
+            .await
+            .unwrap()
+            .outcome,
+        "stale"
+    );
+    let linked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience_command_link WHERE request_ref=$1 AND experience_ref=$2)")
+        .bind(stale_request.request_id).bind(id).fetch_one(db.pool()).await.unwrap();
+    assert!(linked);
     let mut pasted_history = removed_slot.revision.document.clone();
     pasted_history.title = "合成改写经历，只供测试。".into();
     assert!(matches!(
@@ -1742,7 +1934,15 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
         request_id: Uuid::new_v4(),
         expected_revision: saved.revision.id,
     };
-    assert!(prepare_copy(&db, made.work_id, &copy).await.is_ok());
+    let protected_copy = prepare_copy(&db, made.work_id, &copy).await.unwrap();
+    let digest_before: String = sqlx::query_scalar(
+        "SELECT text_sha256 FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+    )
+    .bind(protected_copy.receipt_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_ne!(digest_before, "0".repeat(64));
     let mut no_person = identity(1, OrgRelation::Parent, None, None);
     no_person.has_real_person = Some(false);
     put_identity(&db, account, &no_person).await.unwrap();
@@ -1790,6 +1990,26 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     wait_for_advisory_waiters(&db, 2).await;
     hold.commit().await.unwrap();
     withdrawal.await.unwrap().unwrap();
+    let stale_digest: String = sqlx::query_scalar(
+        "SELECT command_sha256 FROM linggan_creation_request WHERE request_ref=$1",
+    )
+    .bind(stale_request.request_id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(stale_digest, "0".repeat(64));
+    let digest_after: String = sqlx::query_scalar(
+        "SELECT text_sha256 FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+    )
+    .bind(protected_copy.receipt_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(digest_after, "0".repeat(64));
+    assert!(matches!(
+        prepare_copy(&db, made.work_id, &copy).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
     assert_eq!(
         read_experience(&db, id).await.unwrap().used_count,
         references_before_withdrawal

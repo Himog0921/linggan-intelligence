@@ -170,7 +170,6 @@ pub async fn put_persona_fact(
     let text = cmd.text.trim();
     if key.is_empty()
         || key.chars().count() > 40
-        || text.is_empty()
         || text.chars().count() > 500
         || cmd.expected_version < 0
         || !matches!(
@@ -219,7 +218,9 @@ pub async fn put_persona_fact(
     }
     let existing: Option<Uuid> = sqlx::query_scalar("SELECT fact_ref FROM linggan_creation_persona_fact WHERE subject_ref=$1 AND fact_key=$2 AND state='active'")
         .bind(subject).bind(key).fetch_optional(&mut *tx).await?;
-    let status = if cmd.source == "inferred" {
+    let status = if text.is_empty() {
+        "missing"
+    } else if cmd.source == "inferred" {
         "inferred"
     } else {
         "new"
@@ -238,7 +239,10 @@ pub async fn put_persona_fact(
                 replayed: false,
             });
         }
-        if old.text.as_deref() != Some(text) && cmd.conflict_decision.is_none() {
+        if old.text.as_deref() != Some(text)
+            && old.status.as_deref() != Some("missing")
+            && cmd.conflict_decision.is_none()
+        {
             return Err(AssetsError::Invalid("persona_conflict_decision"));
         }
         let revision = old
@@ -306,6 +310,9 @@ pub async fn confirm_persona_fact(
     }
     if old.version != cmd.expected_version {
         return Err(AssetsError::Stale);
+    }
+    if old.status.as_deref() == Some("missing") {
+        return Err(AssetsError::Invalid("persona_fact_missing"));
     }
     let revision = old
         .version

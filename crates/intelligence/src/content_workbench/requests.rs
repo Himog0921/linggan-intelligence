@@ -90,6 +90,10 @@ pub(super) async fn receipt(
     let mut stored = r.clone();
     super::experience_fragments::strip(&mut stored.revision.document);
     sqlx::query("INSERT INTO linggan_creation_request(request_ref,work_ref,command_sha256,receipt) VALUES($1,$2,$3,$4)").bind(request).bind(work).bind(command).bind(serde_json::to_value(&stored)?).execute(&mut **tx).await?;
+    for slot in &r.revision.document.experience_slots {
+        sqlx::query("INSERT INTO linggan_creation_experience_command_link(request_ref,experience_ref) VALUES($1,$2) ON CONFLICT DO NOTHING")
+            .bind(request).bind(slot.experience_ref).execute(&mut **tx).await?;
+    }
     Ok(r)
 }
 /// Narrow reconciliation for a command whose response was lost. No execution or retry occurs.

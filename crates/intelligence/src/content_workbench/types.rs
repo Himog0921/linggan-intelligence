@@ -277,6 +277,9 @@ pub struct BridgeChoice {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    /// Stable ordering for source uses stored with erasable experience fragments.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub experience_use_order: Vec<Uuid>,
     /// Changes when the server discards stale editor state following a withdrawal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub experience_epoch: Option<Uuid>,
@@ -324,6 +327,7 @@ impl Default for WorkDocument {
         Self {
             contract: "content-workbench.v1".into(),
             experience_epoch: None,
+            experience_use_order: vec![],
             experience_slots: vec![],
             experience_gaps: vec![],
             bridge: None,

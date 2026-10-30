@@ -78,7 +78,7 @@ const paths = {
     'database/migrations/0127_content_workbench.sql', 'database/migrations/0128_content_workbench_ai.sql',
     'crates/intelligence/src/creation_assets*', 'crates/intelligence/src/creation_assets/**',
     'crates/intelligence/tests/creation_assets*', 'database/migrations/0181_creation_assets_s1a.sql',
-    'database/migrations/0183_creation_experience_s1b.sql', 'database/migrations/0184_creation_idea_boxes.sql',
+    'database/migrations/0183_creation_experience_s1b.sql', 'database/migrations/0184_creation_idea_boxes.sql', 'database/migrations/0185_creation_experience_erasure.sql',
   ],
   web_real_chain: [],
   topic: [

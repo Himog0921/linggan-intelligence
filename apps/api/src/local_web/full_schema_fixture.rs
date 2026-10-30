@@ -306,6 +306,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0183_creation_experience_s1b.sql"),
     include_str!("../../../../database/migrations/0184_creation_idea_boxes.sql"),
+    include_str!("../../../../database/migrations/0185_creation_experience_erasure.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -430,4 +431,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0182_creator_read_indexes','22f919c808aa35420308912810d397eaabfefe578f9b3f00147b116265270110');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0183_creation_experience_s1b','718a56fe600f348059845eca79c7386a794403a299d4d22e98089740e0972abc');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0184_creation_idea_boxes','69b10d5d985a004be0cc430fdd65ebff0238f6f6b5f5bca42299073b708b2aa3');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0185_creation_experience_erasure','6d2753050ab8d3439be9c854aea5858c32f584b0599e49f546a10a9bb9a65608');\n",
 );

@@ -441,6 +441,10 @@ pub async fn prepare_copy(
     .bind(text_sha(&copy))
     .execute(&mut *tx)
     .await?;
+    for slot in &report_doc.experience_slots {
+        sqlx::query("INSERT INTO linggan_creation_experience_copy_link(receipt_ref,experience_ref) VALUES($1,$2) ON CONFLICT DO NOTHING")
+            .bind(receipt).bind(slot.experience_ref).execute(&mut *tx).await?;
+    }
     tx.commit().await?;
     Ok(ready(
         receipt,

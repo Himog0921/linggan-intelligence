@@ -29,6 +29,29 @@ async function selectFact() {
   fireEvent.click(await screen.findByRole('button', { name: /年级/ }));
 }
 describe('人设事实', () => {
+  it('records an unknown fact as missing and never offers confirmation for the empty value', async () => {
+    const missing = { ...fact, key: '作息', text: '', source: 'manual', status: 'missing' };
+    vi.mocked(api.listPersonaFacts).mockResolvedValue([]);
+    vi.mocked(api.putPersonaFact).mockResolvedValue({ fact: missing, resultVersion: 1, replayed: false });
+    show(); await screen.findByRole('option', { name: '合成账号' });
+    fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    fireEvent.change(screen.getByLabelText('事实名称'), { target: { value: '作息' } });
+    fireEvent.click(screen.getByLabelText('缺，待补充'));
+    expect(screen.getByLabelText('事实内容')).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '保存事实' }));
+    await waitFor(() => expect(api.putPersonaFact).toHaveBeenCalledWith(expect.objectContaining({ key: '作息', text: '' })));
+    expect(screen.queryByRole('button', { name: '登记本人确认' })).not.toBeInTheDocument();
+  });
+  it('lets an operator fill a missing fact without a false conflict', async () => {
+    vi.mocked(api.listPersonaFacts).mockResolvedValue([{ ...fact, text: '', source: 'manual', status: 'missing' }]);
+    vi.mocked(api.putPersonaFact).mockResolvedValue({ fact, resultVersion: 2, replayed: false });
+    show(); await selectFact();
+    fireEvent.click(screen.getByLabelText('缺，待补充'));
+    fireEvent.change(screen.getByLabelText('事实内容'), { target: { value: '三年级' } });
+    expect(screen.queryByText('新旧事实不一致')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '保存事实' }));
+    await waitFor(() => expect(api.putPersonaFact).toHaveBeenCalledWith(expect.objectContaining({ text: '三年级', conflictDecision: null })));
+  });
   it('requires an explicit choice for conflicting facts and records the decision', async () => {
     vi.mocked(api.putPersonaFact).mockResolvedValue({ fact: { ...fact, version: 2 }, resultVersion: 2, replayed: false });
     show(); await selectFact();
