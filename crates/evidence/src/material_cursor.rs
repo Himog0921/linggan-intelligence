@@ -96,11 +96,49 @@ fn hex_encode(bytes: &[u8]) -> String {
 }
 
 fn hex_decode(value: &str) -> Option<Vec<u8>> {
-    if !value.len().is_multiple_of(2) {
+    if !value.len().is_multiple_of(2) || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
     (0..value.len())
         .step_by(2)
         .map(|index| u8::from_str_radix(&value[index..index + 2], 16).ok())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn query() -> EvidenceQuery {
+        serde_json::from_str(r#"{"scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"}"#).unwrap()
+    }
+
+    #[test]
+    fn rejects_non_hex_cursor_payloads_even_with_a_matching_checksum() {
+        for encoded in ["a中", "😀", "gg", "a", ""] {
+            let checksum = digest(&format!("{CURSOR_VERSION}:{encoded}"));
+            let value = format!("m1.{encoded}.{checksum}");
+            assert!(decode(&query(), &value).is_none(), "payload {encoded:?}");
+        }
+    }
+
+    #[test]
+    fn valid_cursor_round_trips_and_rejects_a_changed_checksum() {
+        let query = query();
+        let value = encode(
+            &query,
+            for_last_item(
+                &query,
+                "2026-10-30T00:00:00Z".into(),
+                "2026-10-29T00:00:00Z".into(),
+                "xhs".into(),
+                "synthetic-note".into(),
+            ),
+        );
+        let decoded = decode(&query, &value).unwrap();
+        assert_eq!(decoded.last_content_external_id, "synthetic-note");
+        assert_eq!(decoded.last_platform, "xhs");
+        assert_eq!(decoded.as_of, "2026-10-30T00:00:00Z");
+        assert!(decode(&query, &(value + "0")).is_none());
+    }
 }
