@@ -8,8 +8,9 @@ use fixture::{proof_database, submit_package_at};
 use linggan_intelligence::ai_foundation::comment_research_overview;
 use linggan_intelligence::comment_study_catalog::{
     CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
-    StudyCatalogError, WordCloudQuery, read_catalog_summary, read_comment_catalog, read_word_cloud,
-    read_work_catalog, refresh_clean_cache,
+    CommentDetailQuery, StudyCatalogError, WordCloudQuery, read_catalog_summary,
+    read_comment_catalog, read_comment_detail, read_word_cloud, read_work_catalog,
+    refresh_clean_cache,
 };
 use linggan_intelligence::comment_study_source::{
     ADHD_DOMAIN_REF, eligible_sources, eligible_sources_for_works,
@@ -562,6 +563,21 @@ async fn the_observation_role_of_a_work_ignores_creator_context_usage_rows() {
     let list = read_comment_catalog(&db, &query()).await.unwrap();
     assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
     assert_eq!(list["items"][0]["observationRole"], "reference", "{list}");
+    // 按作品打开单条评论详情也走同一判定：作者语境的「主研究」行同样不算数。
+    let detail = read_comment_detail(
+        &db,
+        &CommentDetailQuery {
+            domain,
+            work_ref: work,
+            comment_external_id: "role-c1".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        detail["comment"]["observationRole"], "reference",
+        "{detail}"
+    );
 }
 
 /// 领域里只有作者语境作品带评论时，总览的观察序列是空的：既没有新观察到的评论，也没有评论覆盖记录。

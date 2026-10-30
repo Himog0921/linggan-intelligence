@@ -55,7 +55,7 @@ WITH latest AS MATERIALIZED (
                SELECT 1 FROM linggan_material_domain_usage role_usage
                WHERE role_usage.content_public_ref = latest.content_public_ref
                  AND role_usage.domain_ref = $1 AND role_usage.role = 'primary'
-                 AND ($4::uuid IS NOT NULL OR role_usage.use_kind = 'domain_research')
+                 AND role_usage.use_kind = 'domain_research'
            ) THEN 'primary' ELSE 'reference' END AS observation_role,
            CASE
              WHEN NULLIF(btrim(latest.author_external_id), '') IS NULL
