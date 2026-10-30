@@ -212,10 +212,10 @@ export function CreatorFilterDialog({ query, hasThreshold, observationAvailable,
               </label>
               <label>
                 <input type="checkbox" checked={draft.highLikes} onChange={event => update({ highLikes: event.target.checked })} />
-                有高赞线索
+                有已知点赞的作品
               </label>
             </div>
-            <p className={styles.help}>{hasThreshold ? '最低点赞只改变当前筛选，不修改爆款标准。' : '尚未设置爆款标准；仍可筛选高赞线索。'}</p>
+            <p className={styles.help}>{hasThreshold ? '最低点赞只改变当前筛选，不修改爆款标准。' : '尚未设置爆款标准；仍可筛出有已知点赞的作品。'}</p>
             <p className={styles.help}>{CRITERIA.focus}</p>
             <p className={styles.help}>{COEXISTENCE}</p>
             {error ? (

@@ -2,7 +2,7 @@ import type { Ref } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { CreatorSelect } from './CreatorSelect';
 import { SearchField, type SearchFieldHandle } from './SearchField';
-import { conditionChips, formatCount, quickPressed, type ConditionChip, type CreatorQuery, type QuickKey, type SortKey } from './creatorsQuery';
+import { conditionChips, formatCount, presetDates, quickPressed, type ConditionChip, type CreatorQuery, type QuickKey, type SortKey } from './creatorsQuery';
 import type { CreatorList } from './creatorsTypes';
 import styles from './CreatorsPage.module.css';
 
@@ -39,10 +39,15 @@ function rangeText(query: CreatorQuery): string {
 export function CreatorControls(props: CreatorControlsProps) {
   const { query, data, resultText } = props;
   const chips = conditionChips(query);
-  const pressed = quickPressed(query);
+  // 与服务器同一个「最近 7 天」口径：以北京时间的今天为终点。
+  const recentFrom = presetDates(7, new Date()).from;
+  const pressed = quickPressed(query, data?.leadRule ?? null, recentFrom);
   const stats = data?.stats ?? null;
   const hasRule = data !== null && data.policy.likeThreshold !== null;
   const outsideKnown = stats !== null && stats.outside !== null;
+  const insideKnown = stats !== null && stats.inside !== null;
+  const leadsKnown = stats !== null && stats.highLikeLeads !== null && data?.leadRule != null;
+  const lead = data?.leadRule ?? null;
   const scope = `${query.usageRole === 'reference' ? '参照' : '主研究'} · ${rangeText(query)}`;
   return (
     <>
@@ -61,7 +66,8 @@ export function CreatorControls(props: CreatorControlsProps) {
         </ActionButton>
         <CreatorSelect label="排序" value={query.sort} onChange={props.onSort}
           options={[
-            { value: 'recent', label: '最近收录' }, { value: 'related_works', label: '命中相关作品数' },
+            { value: 'recent', label: '最近收录' }, { value: 'first_seen', label: '首次发现' },
+            { value: 'related_works', label: '命中相关作品数' },
             { value: 'high_likes', label: '命中最高点赞' }, { value: 'viral_works', label: '命中相关爆款数', disabled: !hasRule },
           ]} />
         <ActionButton onClick={props.onRefresh} busy={props.refreshing} disabled={data === null}>
@@ -74,12 +80,23 @@ export function CreatorControls(props: CreatorControlsProps) {
           <button type="button" aria-pressed={pressed.all} onClick={() => props.onQuick('all')}>
             全部创作者{stats ? ` ${formatCount(stats.authors)}` : ''}
           </button>
+          <button type="button" aria-pressed={pressed.recent} onClick={() => props.onQuick('new')}>
+            最近新见{stats ? ` ${formatCount(stats.recentlyDiscovered)}` : ''}
+          </button>
           <button type="button" aria-pressed={pressed.outside} disabled={!outsideKnown} onClick={() => props.onQuick('outside')}>
             未加入观察{stats ? ` ${formatCount(stats.outside)}` : ''}
           </button>
-          <button type="button" aria-pressed={pressed.high} disabled={!outsideKnown} onClick={() => props.onQuick('high')}>
-            {hasRule ? '未观察的爆款作者' : '未观察的高赞作者'}
-            {stats && hasRule ? ` ${formatCount(stats.outsideViral)}` : ''}
+          <button
+            type="button"
+            aria-pressed={pressed.high}
+            disabled={!leadsKnown}
+            title={lead ? `未加入观察，且同一作者至少 ${lead.minWorks} 篇作品点赞不少于 ${formatCount(lead.minLikes)}` : '高赞线索口径暂不可用'}
+            onClick={() => props.onQuick('high')}
+          >
+            高赞线索{stats && lead ? ` ${formatCount(stats.highLikeLeads)}` : ''}
+          </button>
+          <button type="button" aria-pressed={pressed.inside} disabled={!insideKnown} onClick={() => props.onQuick('inside')}>
+            已加入观察{stats ? ` ${formatCount(stats.inside)}` : ''}
           </button>
         </nav>
 

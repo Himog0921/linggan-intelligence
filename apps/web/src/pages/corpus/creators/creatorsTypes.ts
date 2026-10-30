@@ -90,6 +90,15 @@ export interface CreatorItem {
   authorAnalysis: Analysis;
   traits: string[];
   topicHints: string[];
+  /** 关键词搜索里发现过这位作者作品的关键词，按首次命中时间排序；空数组＝没有记录（不是「无关键词」这个事实）。 */
+  discoveryKeywords: string[];
+  /** 首次发现（进入本领域或关键词命中，取更早的一刻）；没有记录时为 null。 */
+  firstSeenMs: number | null;
+  /** 北京时间的日期 `YYYY-MM-DD`。 */
+  firstSeenDate: string | null;
+  firstSeenDisplay: string | null;
+  /** recent＝近 7 天新见；earliest_record＝最早已知记录（更早的发现不可知）；domain_first＝本领域首次。 */
+  firstSeenPrecision: string | null;
   observation: Observation;
   collectedWorkCount: number;
   relatedWorkCount: number;
@@ -112,8 +121,22 @@ export interface CreatorStats {
   personal: number;
   /** 观察关系没读到时为 null（未知），不是 0。 */
   outside: number | null;
+  inside: number | null;
   outsideViral: number | null;
+  /** 近 7 天首次发现的作者数（北京时间的 7 个自然日）。 */
+  recentlyDiscovered: number;
+  /** 未加入观察、且同一作者至少 2 篇作品点赞不少于 500 的作者数。 */
+  highLikeLeads: number | null;
+  /** 当前材料范围内最近一次入库的时间。 */
+  latestAddedMs: number | null;
+  latestAddedDisplay: string | null;
   unknownDateWorks: number;
+}
+
+/** 高赞线索的口径由服务器给出，页面不另编一个数字。 */
+export interface LeadRule {
+  minLikes: number;
+  minWorks: number;
 }
 
 export interface CreatorPolicy {
@@ -133,6 +156,8 @@ export interface CreatorList {
   domain: CreatorDomain;
   policy: CreatorPolicy;
   stats: CreatorStats;
+  /** 高赞线索口径；服务器没给时为 null，页面据此关闭该视图，不猜一个默认口径。 */
+  leadRule: LeadRule | null;
   total: number;
   items: CreatorItem[];
   asOf: string | null;

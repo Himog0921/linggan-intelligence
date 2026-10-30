@@ -13,6 +13,7 @@ import {
   quickPressed,
   removeCondition,
   scopeWorkLink,
+  selectionScope,
   toApiParams,
   toPageSearch,
   unknownAuthorLink,
@@ -34,7 +35,7 @@ describe('地址参数 ⇄ 页面状态', () => {
     const state = q({
       usageRole: 'reference', searchMode: 'work', query: '开始', sort: 'high_likes', publishedFrom: '2026-09-16', publishedTo: '2026-10-16',
       traits: ['personal_experience', 'explicit_promotion'], topicHint: '晚间练习', observation: 'outside', minLikes: 100, relevance: 'related',
-      focus: 'vertical_tendency', viral: true, highLikes: true, page: 3, pageSize: 25,
+      focus: 'vertical_tendency', viral: true, highLikes: true, firstSeenFrom: '2026-09-01', minMatchedWorks: 2, page: 3, pageSize: 25,
     });
     const search = toPageSearch(D, state);
     expect(parse(search.toString())).toEqual(state);
@@ -50,9 +51,10 @@ describe('地址参数 ⇄ 页面状态', () => {
   });
 
   it('手改的无效值按默认处理，不把页面带坏（不会变成接口 400）', () => {
-    const bad = parse('usageRole=x&searchMode=y&sort=zzz&publishedFrom=2026-1-1&publishedTo=hello&traits=a,personal_experience&observation=nope&minLikes=-3&relevance=maybe&focus=q&viral=1&page=-1&pageSize=7&platform=douyin');
+    const bad = parse('usageRole=x&searchMode=y&sort=zzz&publishedFrom=2026-1-1&publishedTo=hello&traits=a,personal_experience&observation=nope&minLikes=-3&relevance=maybe&focus=q&viral=1&page=-1&pageSize=7&platform=douyin&firstSeenFrom=2026-1-1&minMatchedWorks=-3');
     expect(bad).toEqual({ ...DEFAULT_QUERY, traits: ['personal_experience'] });
     expect(parse('page=99999999999').page).toBe(1_000_000);
+    expect(parse('minMatchedWorks=999999').minMatchedWorks).toBe(1_000);
     expect(parse(`query=${'x'.repeat(300)}`).query).toHaveLength(200);
   });
 
@@ -73,7 +75,7 @@ describe('额外条件、条件芯片与「重置」', () => {
   const busy = q({
     usageRole: 'reference', publishedFrom: '2026-09-16', publishedTo: '2026-10-16', query: '开始', traits: ['personal_experience', 'professional_output'],
     topicHint: '晚间练习', observation: 'outside', minLikes: 100, relevance: 'related', focus: 'vertical_tendency', viral: true, highLikes: true,
-    sort: 'viral_works', page: 4, pageSize: 100,
+    firstSeenFrom: '2026-09-01', minMatchedWorks: 2, sort: 'viral_works', page: 4, pageSize: 100,
   });
 
   it('「重置」只清列表条件与排序、页码；领域范围（用途、日期、平台）和每页数量保持不动（#384 发现 3）', () => {
@@ -86,14 +88,18 @@ describe('额外条件、条件芯片与「重置」', () => {
   it('每个已选条件一个芯片，表达逐项；移除某一项只动这一项并回到第一页', () => {
     const chips = conditionChips(busy);
     expect(chips.map(chip => chip.text)).toEqual([
-      '作者：开始', '亲历自述', '知识与方法讲解', '方向：晚间练习', '未加入本领域', '最低点赞：100', '已判相关', '本领域持续创作', '有相关爆款', '有高赞线索',
+      '作者：开始', '亲历自述', '知识与方法讲解', '方向：晚间练习', '未加入本领域', '最低点赞：100', '已判相关', '本领域持续创作',
+      '有相关爆款', '有已知点赞的作品', '首次发现：2026-09-01 起', '至少 2 篇命中作品',
     ]);
+    const chip = (key: string) => chips.find(candidate => candidate.key === key) as (typeof chips)[number];
     const withoutOne = removeCondition(busy, chips[1] as (typeof chips)[number]);
     expect(withoutOne.traits).toEqual(['professional_output']);
     expect(withoutOne.page).toBe(0);
     expect(withoutOne.observation).toBe('outside');
-    expect(removeCondition(busy, chips[5] as (typeof chips)[number]).minLikes).toBeNull();
-    expect(removeCondition(busy, chips[8] as (typeof chips)[number]).viral).toBe(false);
+    expect(removeCondition(busy, chip('minLikes')).minLikes).toBeNull();
+    expect(removeCondition(busy, chip('viral')).viral).toBe(false);
+    expect(removeCondition(busy, chip('firstSeenFrom')).firstSeenFrom).toBe('');
+    expect(removeCondition(busy, chip('minMatchedWorks')).minMatchedWorks).toBeNull();
     expect(removeCondition(busy, chips[0] as (typeof chips)[number]).query).toBe('');
   });
 
@@ -111,25 +117,50 @@ describe('额外条件、条件芯片与「重置」', () => {
 });
 
 describe('快捷视图', () => {
+  const LEAD = { minLikes: 500, minWorks: 2 };
+  const RECENT = '2026-10-09';
+
   it('每次先清额外条件再套用，所以点击后的结果与统计数字一致；范围不动', () => {
     const base = q({ usageRole: 'reference', publishedFrom: '2026-09-16', publishedTo: '2026-10-16', query: '旧词', traits: ['explicit_promotion'], page: 3 });
-    expect(applyQuick(base, 'all', true)).toEqual({ ...DEFAULT_QUERY, usageRole: 'reference', publishedFrom: '2026-09-16', publishedTo: '2026-10-16' });
-    expect(applyQuick(base, 'outside', true).observation).toBe('outside');
-    expect(applyQuick(base, 'personal', true).traits).toEqual(['personal_experience']);
-    expect(applyQuick(base, 'vertical', true).focus).toBe('vertical_tendency');
-    expect(applyQuick(base, 'outside', true).query).toBe('');
+    expect(applyQuick(base, 'all', LEAD, RECENT)).toEqual({ ...DEFAULT_QUERY, usageRole: 'reference', publishedFrom: '2026-09-16', publishedTo: '2026-10-16' });
+    expect(applyQuick(base, 'outside', LEAD, RECENT).observation).toBe('outside');
+    expect(applyQuick(base, 'inside', LEAD, RECENT).observation).toBe('inside');
+    expect(applyQuick(base, 'personal', LEAD, RECENT).traits).toEqual(['personal_experience']);
+    expect(applyQuick(base, 'vertical', LEAD, RECENT).focus).toBe('vertical_tendency');
+    expect(applyQuick(base, 'outside', LEAD, RECENT).query).toBe('');
   });
 
-  it('「高赞」：配置了爆款标准用爆款并按爆款排序；没有标准就退回高赞线索，不编一个默认标准', () => {
-    expect(applyQuick(q(), 'high', true)).toMatchObject({ observation: 'outside', viral: true, highLikes: false, sort: 'viral_works' });
-    expect(applyQuick(q(), 'high', false)).toMatchObject({ observation: 'outside', viral: false, highLikes: true, sort: 'high_likes' });
+  it('「最近新见」= 北京时间最近 7 天首次发现，并按首次发现排序', () => {
+    expect(applyQuick(q({ observation: 'outside' }), 'new', LEAD, RECENT)).toMatchObject({ firstSeenFrom: RECENT, sort: 'first_seen', observation: '' });
   });
 
-  it('选中态：全部 = 没有任何额外条件；高赞 = 未加入 + 高赞/爆款；未加入 = 其余的未加入', () => {
-    expect(quickPressed(q())).toEqual({ all: true, outside: false, high: false });
-    expect(quickPressed(q({ observation: 'outside' }))).toEqual({ all: false, outside: true, high: false });
-    expect(quickPressed(q({ observation: 'outside', highLikes: true }))).toEqual({ all: false, outside: false, high: true });
-    expect(quickPressed(q({ query: 'a' })).all).toBe(false);
+  it('「高赞线索」用服务器给的口径：未加入观察 + 至少 N 篇达到 M 赞；没有口径时不编默认值', () => {
+    expect(applyQuick(q(), 'high', LEAD, RECENT)).toMatchObject({
+      observation: 'outside', minLikes: 500, minMatchedWorks: 2, sort: 'high_likes', viral: false, highLikes: false,
+    });
+    expect(applyQuick(q(), 'high', null, RECENT)).toMatchObject({ observation: 'outside', minLikes: null, minMatchedWorks: null });
+  });
+
+  it('选中态：条件（不看页码与排序）与套用视图后完全一致才算选中', () => {
+    expect(quickPressed(q(), LEAD, RECENT)).toEqual({ all: true, recent: false, outside: false, high: false, inside: false });
+    expect(quickPressed(q({ observation: 'outside', page: 3, sort: 'related_works' }), LEAD, RECENT)).toEqual({ all: false, recent: false, outside: true, high: false, inside: false });
+    expect(quickPressed(q({ firstSeenFrom: RECENT }), LEAD, RECENT)).toEqual({ all: false, recent: true, outside: false, high: false, inside: false });
+    expect(quickPressed(q({ observation: 'outside', minLikes: 500, minMatchedWorks: 2, sort: 'high_likes' }), LEAD, RECENT)).toEqual({ all: false, recent: false, outside: false, high: true, inside: false });
+    expect(quickPressed(q({ observation: 'inside' }), LEAD, RECENT)).toMatchObject({ inside: true });
+    expect(quickPressed(q({ query: 'a' }), LEAD, RECENT).all).toBe(false);
+  });
+
+  it('没有高赞线索口径时，即使条件吻合也不把「高赞线索」标成选中', () => {
+    expect(quickPressed(q({ observation: 'outside', minLikes: 500, minMatchedWorks: 2 }), null, RECENT).high).toBe(false);
+  });
+});
+
+describe('批量选择范围', () => {
+  it('翻页与换排序不清空选择；条件或领域一变就换一个范围', () => {
+    const base = q({ page: 2, sort: 'high_likes' });
+    expect(selectionScope(D, base)).toBe(selectionScope(D, q({ page: 0, sort: 'recent' })));
+    expect(selectionScope(D, q())).not.toBe(selectionScope(D, q({ observation: 'outside' })));
+    expect(selectionScope(D, q())).not.toBe(selectionScope('00000000-0000-4000-8000-000000000002', q()));
   });
 });
 

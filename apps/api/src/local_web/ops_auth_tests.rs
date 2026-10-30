@@ -112,7 +112,7 @@ async fn public_team_access_requires_live_session_and_preserves_inner_origin_gua
     }
     let operator_unsafe = public_request(
         "GET",
-        "/api/local/comment-study/selection-preview",
+        "/api/local/comment-research/preview",
         Some(&operator_cookie),
         "",
     );
@@ -136,14 +136,25 @@ async fn public_team_access_requires_live_session_and_preserves_inner_origin_gua
         StatusCode::NO_CONTENT
     );
     let command = public_request(
-        "POST",
-        "/api/local/comment-study/selection-preview",
+        "GET",
+        "/api/local/comment-research/preview",
         Some(&admin_cookie),
         "{}",
     );
     assert_eq!(
         app.clone().oneshot(command).await.unwrap().status(),
         StatusCode::BAD_REQUEST
+    );
+    // The retired endpoint remains absent; the permission test above exercises a live route.
+    let retired = public_request(
+        "POST",
+        "/api/local/comment-study/selection-preview",
+        Some(&admin_cookie),
+        "{}",
+    );
+    assert_eq!(
+        app.clone().oneshot(retired).await.unwrap().status(),
+        StatusCode::NOT_FOUND
     );
     let media = public_request(
         "GET",
@@ -166,8 +177,8 @@ async fn public_team_access_requires_live_session_and_preserves_inner_origin_gua
         StatusCode::FORBIDDEN
     );
     let cross_site = Request::builder()
-        .method("POST")
-        .uri("/api/local/comment-study/selection-preview")
+        .method("GET")
+        .uri("/api/local/comment-research/preview")
         .header(header::HOST, "intelligence.example.com")
         .header("x-forwarded-proto", "https")
         .header(header::ORIGIN, "https://other.example.com")
@@ -1296,3 +1307,6 @@ async fn stored_session(
     .unwrap();
     format!("linggan_ops_session={token}")
 }
+
+#[path = "ops_auth_concurrency_tests.rs"]
+mod concurrency;

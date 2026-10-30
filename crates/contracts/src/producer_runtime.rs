@@ -342,14 +342,13 @@ pub fn parse_producer_task_spec(
     }
     // 预期份数是一个**判据要用的承诺**，不能自己站不住：至少 1，且不超过授权上限——超过
     // 上限的期待是拿不到的数，那样写出来的任务永远不可能被记成完成，而表面上一切正常。
-    if let Some(expected_count) = wire.expected_count {
-        if expected_count == 0
+    if let Some(expected_count) = wire.expected_count
+        && (expected_count == 0
             || wire
                 .maximum_quota
-                .is_some_and(|maximum_quota| expected_count > maximum_quota)
-        {
-            return Err(ProducerRuntimeContractError::UnsupportedValue);
-        }
+                .is_some_and(|maximum_quota| expected_count > maximum_quota))
+    {
+        return Err(ProducerRuntimeContractError::UnsupportedValue);
     }
     Ok(ProducerTaskSpec {
         task_id,
@@ -500,7 +499,6 @@ fn validate_comment_collection_receipt(
         return Err(ProducerRuntimeContractError::InvalidCoverage);
     };
     let exact_string = |key: &str| receipt.get(key).and_then(Value::as_str);
-    let count = |key: &str| receipt.get(key).and_then(Value::as_u64);
     let nullable_count = |key: &str| {
         receipt
             .get(key)
@@ -513,8 +511,69 @@ fn validate_comment_collection_receipt(
     let target_identity = exact_string("targetIdentity");
     let stop_reason = exact_string("stopReason");
     let version = receipt.get("version").and_then(Value::as_u64);
-    let expected = receipt.get("expectedCount").and_then(Value::as_u64);
-    let page_count = receipt.get("pageCommentCount").and_then(Value::as_u64);
+    let acquired = receipt.get("uniqueCollectedCount").and_then(Value::as_u64);
+    let state_matches_identity = matches!(
+        (state, target_identity),
+        (Some("complete"), Some("matched"))
+            | (Some("partial"), Some("matched" | "unverified"))
+            | (Some("invalid_target"), Some("mismatched"))
+    );
+    let usability_matches_identity_and_count = match (target_identity, acquired, usability) {
+        (Some("matched"), Some(0), Some("empty")) => true,
+        (Some("matched"), Some(value), Some("usable")) if value > 0 => true,
+        (Some("mismatched" | "unverified"), Some(_), Some("not_usable")) => true,
+        _ => false,
+    };
+    let complete_has_nonterminal_stop = state != Some("complete")
+        || !matches!(
+            stop_reason,
+            Some(
+                "risk_control"
+                    | "manual_stop"
+                    | "comment_collection_failed"
+                    | "target_identity_mismatch"
+                    | "wrong_content"
+                    | "api_unobserved"
+            )
+        );
+    if version != Some(1)
+        || !valid_comment_collection_counts(receipt)
+        || !matches!(
+            scope,
+            Some("detail_window") | Some("all_public_comments") | Some("incremental_new")
+        )
+        || !matches!(
+            state,
+            Some("complete") | Some("partial") | Some("invalid_target")
+        )
+        || !matches!(
+            usability,
+            Some("usable") | Some("empty") | Some("not_usable")
+        )
+        || !matches!(
+            target_identity,
+            Some("matched") | Some("mismatched") | Some("unverified")
+        )
+        || exact_string("noteId").is_none_or(str::is_empty)
+        || exact_string("stopReason").is_none_or(str::is_empty)
+        || !nullable_count("pageCommentCount")
+        || !nullable_count("expectedCount")
+        || acquired.is_none()
+        || !state_matches_identity
+        || !usability_matches_identity_and_count
+        || !complete_has_nonterminal_stop
+    {
+        return Err(ProducerRuntimeContractError::InvalidCoverage);
+    }
+    Ok(())
+}
+
+fn valid_comment_collection_counts(receipt: &serde_json::Map<String, Value>) -> bool {
+    let count = |key: &str| receipt.get(key).and_then(Value::as_u64);
+    let scope = receipt.get("scope").and_then(Value::as_str);
+    let state = receipt.get("state").and_then(Value::as_str);
+    let expected = count("expectedCount");
+    let page_count = count("pageCommentCount");
     let acquired = count("uniqueCollectedCount");
     let traversal = receipt.get("traversal");
     let traversal_valid = traversal.is_none_or(|value| {
@@ -563,69 +622,16 @@ fn validate_comment_collection_receipt(
                 && acquired.is_some_and(|n| n <= limit)
                 && expected == Some(limit)
         });
-    let state_matches_identity = matches!(
-        (state, target_identity),
-        (Some("complete"), Some("matched"))
-            | (Some("partial"), Some("matched" | "unverified"))
-            | (Some("invalid_target"), Some("mismatched"))
-    );
-    let usability_matches_identity_and_count = match (target_identity, acquired, usability) {
-        (Some("matched"), Some(0), Some("empty")) => true,
-        (Some("matched"), Some(value), Some("usable")) if value > 0 => true,
-        (Some("mismatched" | "unverified"), Some(_), Some("not_usable")) => true,
-        _ => false,
-    };
-    let complete_has_nonterminal_stop = state != Some("complete")
-        || !matches!(
-            stop_reason,
-            Some(
-                "risk_control"
-                    | "manual_stop"
-                    | "comment_collection_failed"
-                    | "target_identity_mismatch"
-                    | "wrong_content"
-                    | "api_unobserved"
-            )
-        );
-    if version != Some(1)
-        || !traversal_valid
-        || (state == Some("complete")
+    traversal_valid
+        && !(state == Some("complete")
             && scope == Some("all_public_comments")
             && traversal.is_some()
             && !traversal_complete)
-        || !matches!(
-            scope,
-            Some("detail_window") | Some("all_public_comments") | Some("incremental_new")
-        )
-        || !matches!(
-            state,
-            Some("complete") | Some("partial") | Some("invalid_target")
-        )
-        || !matches!(
-            usability,
-            Some("usable") | Some("empty") | Some("not_usable")
-        )
-        || !matches!(
-            target_identity,
-            Some("matched") | Some("mismatched") | Some("unverified")
-        )
-        || exact_string("noteId").is_none_or(str::is_empty)
-        || exact_string("stopReason").is_none_or(str::is_empty)
-        || !nullable_count("pageCommentCount")
-        || !nullable_count("expectedCount")
-        || acquired.is_none()
-        || !complete_matches_expected
-        || !complete_all_public_matches_page
-        || !incremental_valid
-        || !detail_window_limit_is_valid
-        || !complete_detail_window_is_full
-        || !state_matches_identity
-        || !usability_matches_identity_and_count
-        || !complete_has_nonterminal_stop
-    {
-        return Err(ProducerRuntimeContractError::InvalidCoverage);
-    }
-    Ok(())
+        && complete_matches_expected
+        && complete_all_public_matches_page
+        && incremental_valid
+        && detail_window_limit_is_valid
+        && complete_detail_window_is_full
 }
 
 /// 风险策略必须与来源配对，两者不是各自独立的字段。
@@ -697,22 +703,77 @@ fn valid_execution_for_capability(wire: &TaskSpecWire) -> bool {
     {
         return false;
     }
-    if let Some(b) = &wire.incremental_search_budget {
-        if capability != "discovery_search"
-            || wire.source != "scheduled"
-            || wire.platform != "xhs"
-            || b.max_scroll_rounds == 0
-            || b.max_scroll_rounds > 3
-            || b.max_duration_seconds == 0
-            || b.max_duration_seconds > 180
-            || b.candidate_quota == 0
-            || b.candidate_quota > 200
-            || wire.maximum_quota != Some(b.candidate_quota)
-            || wire.scroll_rounds.is_some_and(|s| s > b.max_scroll_rounds)
-        {
-            return false;
-        }
+    if !valid_incremental_search_budget(wire, capability)
+        || !valid_incremental_comment_budget(wire, capability)
+    {
+        return false;
     }
+    let search_instruction = wire.ranking.is_some()
+        || wire.scroll_rounds.is_some()
+        || wire.top_by_likes.is_some()
+        || wire.published_within_days.is_some();
+    let discussion_instruction =
+        wire.comment_scope.is_some() || wire.requested_comment_limit.is_some();
+    if (search_instruction && capability != "discovery_search")
+        || (discussion_instruction && !matches!(capability, "comments" | "replies"))
+        || (wire.reply_expand_limit.is_some() && capability != "replies")
+        || (wire.surface.is_some()
+            && !matches!(capability, "discovery_search" | "profile_discovery"))
+    {
+        return false;
+    }
+    if capability == "replies"
+        && wire.source == "scheduled"
+        && wire.comment_mode.as_deref() != Some("all_public")
+        && wire.reply_expand_limit.is_none_or(|limit| limit == 0)
+    {
+        return false;
+    }
+    if wire.reply_expand_limit == Some(0)
+        || wire.scroll_rounds == Some(0)
+        || wire.top_by_likes == Some(0)
+        || wire.published_within_days == Some(0)
+        || wire
+            .ranking
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        || wire
+            .comment_scope
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+        || wire
+            .surface
+            .as_deref()
+            .is_some_and(|value| value.trim().is_empty())
+    {
+        return false;
+    }
+    wire.requested_comment_limit
+        .is_none_or(|limit| limit > 0 && wire.comment_limit.as_u64() == Some(u64::from(limit)))
+}
+
+fn valid_incremental_search_budget(wire: &TaskSpecWire, capability: &str) -> bool {
+    let Some(b) = &wire.incremental_search_budget else {
+        return true;
+    };
+    if capability != "discovery_search"
+        || wire.source != "scheduled"
+        || wire.platform != "xhs"
+        || b.max_scroll_rounds == 0
+        || b.max_scroll_rounds > 3
+        || b.max_duration_seconds == 0
+        || b.max_duration_seconds > 180
+        || b.candidate_quota == 0
+        || b.candidate_quota > 200
+        || wire.maximum_quota != Some(b.candidate_quota)
+        || wire.scroll_rounds.is_some_and(|s| s > b.max_scroll_rounds)
+    {
+        return false;
+    }
+    true
+}
+
+fn valid_incremental_comment_budget(wire: &TaskSpecWire, capability: &str) -> bool {
     if let Some(b) = &wire.incremental_comment_budget {
         let unique: std::collections::HashSet<_> = b.known_comment_ids.iter().collect();
         if !matches!(capability, "comments" | "replies")
@@ -742,48 +803,7 @@ fn valid_execution_for_capability(wire: &TaskSpecWire) -> bool {
             return false;
         }
     }
-    let search_instruction = wire.ranking.is_some()
-        || wire.scroll_rounds.is_some()
-        || wire.top_by_likes.is_some()
-        || wire.published_within_days.is_some();
-    let discussion_instruction =
-        wire.comment_scope.is_some() || wire.requested_comment_limit.is_some();
-    if (search_instruction && capability != "discovery_search")
-        || (discussion_instruction && !matches!(capability, "comments" | "replies"))
-        || (wire.reply_expand_limit.is_some() && capability != "replies")
-        || (wire.surface.is_some()
-            && !matches!(capability, "discovery_search" | "profile_discovery"))
-    {
-        return false;
-    }
-    if capability == "replies"
-        && wire.source == "scheduled"
-        && wire.comment_mode.as_deref() != Some("all_public")
-        && !wire.reply_expand_limit.is_some_and(|limit| limit > 0)
-    {
-        return false;
-    }
-    if wire.reply_expand_limit == Some(0)
-        || wire.scroll_rounds == Some(0)
-        || wire.top_by_likes == Some(0)
-        || wire.published_within_days == Some(0)
-        || wire
-            .ranking
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
-        || wire
-            .comment_scope
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
-        || wire
-            .surface
-            .as_deref()
-            .is_some_and(|value| value.trim().is_empty())
-    {
-        return false;
-    }
-    wire.requested_comment_limit
-        .is_none_or(|limit| limit > 0 && wire.comment_limit.as_u64() == Some(u64::from(limit)))
+    true
 }
 
 fn valid_comment_limit(value: &Value) -> bool {

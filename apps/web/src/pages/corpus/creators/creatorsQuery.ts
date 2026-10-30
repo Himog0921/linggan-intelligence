@@ -5,8 +5,10 @@
  * （`crates/contracts/src/creator_discovery.rs`）一致，也是证据库回链（`creatorFilter`/`returnTo`）
  * 依赖的名字；`page` 与接口一样从 0 开始。无法识别的参数值按默认处理，不让手改的地址把页面带坏。
  */
+import type { LeadRule } from './creatorsTypes';
+
 export const PAGE_SIZES = [25, 50, 100] as const;
-export const SORT_KEYS = ['recent', 'related_works', 'high_likes', 'viral_works'] as const;
+export const SORT_KEYS = ['recent', 'first_seen', 'related_works', 'high_likes', 'viral_works'] as const;
 export const TRAIT_KEYS = ['personal_experience', 'professional_output', 'explicit_promotion', 'institution_or_brand'] as const;
 export const OBSERVATION_KEYS = ['outside', 'inside', 'monitoring', 'paused', 'other_domains_only', 'dismissed'] as const;
 export const RELEVANCE_KEYS = ['related', 'unknown', 'unrelated'] as const;
@@ -32,6 +34,10 @@ export interface CreatorQuery {
   focus: string;
   viral: boolean;
   highLikes: boolean;
+  /** 首次发现不早于这一天（北京时间，`YYYY-MM-DD`）；空串表示不限。 */
+  firstSeenFrom: string;
+  /** 至少有多少篇作品符合当前作品条件；null 表示不限。 */
+  minMatchedWorks: number | null;
   /** 从 0 开始。 */
   page: number;
   pageSize: number;
@@ -53,6 +59,8 @@ export const DEFAULT_QUERY: CreatorQuery = {
   focus: '',
   viral: false,
   highLikes: false,
+  firstSeenFrom: '',
+  minMatchedWorks: null,
   page: 0,
   pageSize: 50,
 };
@@ -66,6 +74,7 @@ function oneOf<T extends string>(allowed: readonly T[], value: string | null, fa
 export function parseQuery(params: URLSearchParams): CreatorQuery {
   const traits = new Set((params.get('traits') ?? '').split(',').filter(Boolean));
   const minLikes = params.get('minLikes');
+  const minMatchedWorks = params.get('minMatchedWorks');
   const page = params.get('page') ?? '';
   const size = Number(params.get('pageSize'));
   const date = (name: string) => {
@@ -88,6 +97,8 @@ export function parseQuery(params: URLSearchParams): CreatorQuery {
     focus: oneOf(['', ...FOCUS_KEYS], params.get('focus'), ''),
     viral: params.get('viral') === 'true',
     highLikes: params.get('highLikes') === 'true',
+    firstSeenFrom: date('firstSeenFrom'),
+    minMatchedWorks: minMatchedWorks !== null && /^\d+$/.test(minMatchedWorks) ? Math.min(Number(minMatchedWorks), 1_000) : null,
     page: /^\d+$/.test(page) ? Math.min(Number(page), 1_000_000) : 0,
     pageSize: PAGE_SIZES.find(item => item === size) ?? 50,
   };
@@ -116,6 +127,8 @@ export function toPageSearch(domain: string | null, query: CreatorQuery): URLSea
   setIf(params, 'focus', query.focus);
   setIf(params, 'viral', query.viral);
   setIf(params, 'highLikes', query.highLikes);
+  setIf(params, 'firstSeenFrom', query.firstSeenFrom);
+  setIf(params, 'minMatchedWorks', query.minMatchedWorks);
   if (query.page > 0) params.set('page', String(query.page));
   if (query.pageSize !== DEFAULT_QUERY.pageSize) params.set('pageSize', String(query.pageSize));
   return params;
@@ -141,6 +154,8 @@ export function toApiParams(domain: string, query: CreatorQuery): URLSearchParam
   setIf(params, 'focus', query.focus);
   setIf(params, 'viral', query.viral);
   setIf(params, 'highLikes', query.highLikes);
+  setIf(params, 'firstSeenFrom', query.firstSeenFrom);
+  setIf(params, 'minMatchedWorks', query.minMatchedWorks);
   params.set('page', String(query.page));
   params.set('pageSize', String(query.pageSize));
   return params;
@@ -159,12 +174,15 @@ const EXTRA_DEFAULTS = {
   focus: '',
   viral: false,
   highLikes: false,
+  firstSeenFrom: '',
+  minMatchedWorks: null,
 };
 
 export function hasExtraConditions(query: CreatorQuery): boolean {
   return (
     query.query !== '' || query.traits.length > 0 || query.topicHint !== '' || query.observation !== '' ||
-    query.minLikes !== null || query.relevance !== '' || query.focus !== '' || query.viral || query.highLikes
+    query.minLikes !== null || query.relevance !== '' || query.focus !== '' || query.viral || query.highLikes ||
+    query.firstSeenFrom !== '' || query.minMatchedWorks !== null
   );
 }
 
@@ -173,7 +191,7 @@ export function clearExtras(query: CreatorQuery): CreatorQuery {
   return { ...query, ...EXTRA_DEFAULTS, traits: [], sort: 'recent', page: 0 };
 }
 
-export type ChipKey = 'query' | 'traits' | 'topicHint' | 'observation' | 'minLikes' | 'relevance' | 'focus' | 'viral' | 'highLikes';
+export type ChipKey = 'query' | 'traits' | 'topicHint' | 'observation' | 'minLikes' | 'relevance' | 'focus' | 'viral' | 'highLikes' | 'firstSeenFrom' | 'minMatchedWorks';
 
 export interface ConditionChip {
   key: ChipKey;
@@ -217,7 +235,9 @@ export function conditionChips(query: CreatorQuery): ConditionChip[] {
   if (query.relevance) chips.push({ key: 'relevance', text: LABELS[query.relevance] ?? query.relevance });
   if (query.focus) chips.push({ key: 'focus', text: LABELS[query.focus] ?? query.focus });
   if (query.viral) chips.push({ key: 'viral', text: '有相关爆款' });
-  if (query.highLikes) chips.push({ key: 'highLikes', text: '有高赞线索' });
+  if (query.highLikes) chips.push({ key: 'highLikes', text: '有已知点赞的作品' });
+  if (query.firstSeenFrom) chips.push({ key: 'firstSeenFrom', text: `首次发现：${query.firstSeenFrom} 起` });
+  if (query.minMatchedWorks !== null) chips.push({ key: 'minMatchedWorks', text: `至少 ${formatCount(query.minMatchedWorks)} 篇命中作品` });
   return chips;
 }
 
@@ -231,37 +251,63 @@ export function removeCondition(query: CreatorQuery, chip: ConditionChip): Creat
       return { ...query, [chip.key]: false, page: 0 };
     case 'minLikes':
       return { ...query, minLikes: null, page: 0 };
+    case 'minMatchedWorks':
+      return { ...query, minMatchedWorks: null, page: 0 };
     default:
       return { ...query, [chip.key]: '', page: 0 };
   }
 }
 
-export type QuickKey = 'all' | 'outside' | 'high' | 'vertical' | 'personal';
+export type QuickKey = 'all' | 'new' | 'outside' | 'high' | 'inside' | 'vertical' | 'personal';
+
+/** 参与「视图是否选中」的字段：页码与排序不参与，翻页或换排序不会让视图失去选中态。 */
+function conditionSignature(query: CreatorQuery): string {
+  return [
+    query.usageRole, query.publishedFrom, query.publishedTo, query.searchMode, query.query, query.traits.join(','),
+    query.topicHint, query.observation, query.minLikes, query.relevance, query.focus, query.viral, query.highLikes,
+    query.firstSeenFrom, query.minMatchedWorks,
+  ].join('\u0001');
+}
+
+/** 批量选择的适用范围：同一批条件内翻页、换排序都保留选择；条件一变就作废，不导出范围外的作者。 */
+export function selectionScope(domain: string, query: CreatorQuery): string {
+  return `${domain}\u0001${conditionSignature(query)}`;
+}
 
 /**
  * 快捷视图：先清掉所有额外条件再套用，所以点击后的结果与统计数字一致（统计只跟范围变化）。
- * 「高赞」：配置了爆款标准用爆款，否则退回高赞线索——不为了让数字好看而编一个默认标准。
+ * 「最近新见」= 北京时间最近 7 个自然日内首次发现，按首次发现排序。
+ * 「高赞线索」= 未加入观察，且同一作者至少有 N 篇作品点赞不少于 M；口径由服务器给出，页面不另编标准。
  */
-export function applyQuick(query: CreatorQuery, key: QuickKey, hasThreshold: boolean): CreatorQuery {
+export function applyQuick(query: CreatorQuery, key: QuickKey, leadRule: LeadRule | null, recentFrom: string): CreatorQuery {
   const next = clearExtras(query);
+  if (key === 'new') {
+    next.firstSeenFrom = recentFrom;
+    next.sort = 'first_seen';
+  }
   if (key === 'outside' || key === 'high') next.observation = 'outside';
-  if (key === 'high') {
-    if (hasThreshold) {
-      next.viral = true;
-      next.sort = 'viral_works';
-    } else {
-      next.highLikes = true;
-      next.sort = 'high_likes';
-    }
+  if (key === 'inside') next.observation = 'inside';
+  if (key === 'high' && leadRule !== null) {
+    next.minLikes = leadRule.minLikes;
+    next.minMatchedWorks = leadRule.minWorks;
+    next.sort = 'high_likes';
   }
   if (key === 'personal') next.traits = ['personal_experience'];
   if (key === 'vertical') next.focus = 'vertical_tendency';
   return next;
 }
 
-export function quickPressed(query: CreatorQuery): { all: boolean; outside: boolean; high: boolean } {
-  const high = query.observation === 'outside' && (query.highLikes || query.viral);
-  return { all: !hasExtraConditions(query), outside: query.observation === 'outside' && !high, high };
+/** 选中态：当前条件与套用该视图后的条件完全一致；没有高赞线索口径时该视图不可选中。 */
+export function quickPressed(
+  query: CreatorQuery,
+  leadRule: LeadRule | null,
+  recentFrom: string,
+): { all: boolean; recent: boolean; outside: boolean; high: boolean; inside: boolean } {
+  const pressed = (key: QuickKey) => {
+    if (key === 'high' && leadRule === null) return false;
+    return conditionSignature(applyQuick(query, key, leadRule, recentFrom)) === conditionSignature(query);
+  };
+  return { all: pressed('all'), recent: pressed('new'), outside: pressed('outside'), high: pressed('high'), inside: pressed('inside') };
 }
 
 /** 作品层条件：命中作品数、最高赞的含义会随之变成「当前命中」。 */

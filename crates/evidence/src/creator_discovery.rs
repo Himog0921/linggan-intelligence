@@ -130,7 +130,46 @@ pub struct DiscoveryData {
     pub observation_lookup_available: bool,
     work_name_sources: HashMap<Uuid, Value>,
     profile_name_candidates: HashMap<String, (String, Uuid)>,
+    /// Lists only: when each work was first seen (domain admission or keyword discovery).
+    #[serde(skip)]
+    work_discovery: HashMap<Uuid, WorkDiscovery>,
+    /// Lists only: per creator first-seen moment and the keywords that surfaced the works.
+    #[serde(skip)]
+    creator_discovery: HashMap<String, CreatorDiscovery>,
+    /// Beijing date of the earliest record this domain holds; earlier discovery cannot be known.
+    #[serde(skip)]
+    earliest_record_date: String,
+    /// Start of the rolling "recently discovered" window (Beijing calendar).
+    #[serde(skip)]
+    recent_from: String,
+    /// Latest domain admission in the current material role: `(epoch ms, display)`.
+    #[serde(skip)]
+    latest_added: Option<(i64, String)>,
 }
+
+/// How one work entered the domain: the earlier of its admission and its keyword discovery.
+#[derive(Clone, Debug, Default)]
+pub struct WorkDiscovery {
+    pub first_seen_ms: i64,
+    pub first_seen_date: String,
+    pub first_seen_display: String,
+    /// `(discovered ms, keyword)` for every long-term keyword search that surfaced it.
+    pub keywords: Vec<(i64, String)>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CreatorDiscovery {
+    pub first_seen_ms: i64,
+    pub first_seen_date: String,
+    pub first_seen_display: String,
+    pub keywords: Vec<String>,
+}
+
+/// A "high-like lead": one creator with at least `LEAD_MIN_WORKS` works at or above
+/// `LEAD_MIN_LIKES`. The same rule drives the `highLikeLeads` statistic and the
+/// `min_likes` + `min_matched_works` list view, so the count and the rows always agree.
+pub const LEAD_MIN_LIKES: i64 = 500;
+pub const LEAD_MIN_WORKS: usize = 2;
 
 pub fn hash(value: &str) -> String {
     Sha256::digest(value.as_bytes())
@@ -388,6 +427,22 @@ async fn load_topic_material_scope_in(
             data.work_name_sources.extend(part.work_name_sources);
             data.profile_name_candidates
                 .extend(part.profile_name_candidates);
+            data.work_discovery.extend(part.work_discovery);
+            data.creator_discovery.extend(part.creator_discovery);
+            if !part.earliest_record_date.is_empty()
+                && (data.earliest_record_date.is_empty()
+                    || part.earliest_record_date < data.earliest_record_date)
+            {
+                data.earliest_record_date = part.earliest_record_date;
+            }
+            if let Some(latest) = part.latest_added
+                && data
+                    .latest_added
+                    .as_ref()
+                    .is_none_or(|current| latest.0 > current.0)
+            {
+                data.latest_added = Some(latest);
+            }
             data.observation_lookup_available &= part.observation_lookup_available;
         } else {
             data = Some(part);
@@ -441,9 +496,10 @@ async fn load_materials_scoped_in(
 ) -> Result<DiscoveryData, DiscoveryError> {
     let scope_started = Instant::now();
     let as_of = crate::research_dossier::cutoff_in(tx, as_of).await?;
-    let clock=sqlx::query("SELECT linggan_human_moment($1::timestamptz) AS display_now,(extract(epoch FROM $1::timestamptz)*1000)::bigint AS epoch").bind(&as_of).fetch_one(&mut **tx).await?;
+    let clock=sqlx::query("SELECT linggan_human_moment($1::timestamptz) AS display_now,(extract(epoch FROM $1::timestamptz)*1000)::bigint AS epoch,to_char(($1::timestamptz AT TIME ZONE 'Asia/Shanghai')::date - 6,'YYYY-MM-DD') AS recent_from").bind(&as_of).fetch_one(&mut **tx).await?;
     let display_as_of: String = clock.get("display_now");
     let now_epoch: i64 = clock.get("epoch");
+    let recent_from: String = clock.get("recent_from");
     for date in [&q.published_from, &q.published_to].into_iter().flatten() {
         let valid: bool = sqlx::query_scalar("SELECT pg_input_is_valid($1,'date')")
             .bind(date)
@@ -458,7 +514,7 @@ async fn load_materials_scoped_in(
     if q.sort == "viral_works" && policy["likeThreshold"].as_i64().is_none() {
         return Err(DiscoveryError::Invalid("viral_threshold_unset"));
     }
-    let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 AND use_kind='domain_research' AND ($3::uuid[] IS NULL OR content_public_ref=ANY($3)) GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).bind(work_refs).fetch_all(&mut **tx).await?;
+    let rows=sqlx::query("SELECT content_public_ref,COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))::text AS first_added,linggan_human_moment(COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at))) AS first_added_display,(extract(epoch FROM COALESCE(min(created_at) FILTER(WHERE role=$2),min(created_at)))*1000)::bigint AS first_added_ms,(extract(epoch FROM min(created_at))*1000)::bigint AS first_domain_added_ms,to_char(min(created_at) AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') AS first_domain_added_date,linggan_human_moment(min(created_at)) AS first_domain_added_display,array_agg(DISTINCT role) AS roles FROM linggan_material_domain_usage WHERE domain_ref=$1 AND use_kind='domain_research' AND ($3::uuid[] IS NULL OR content_public_ref=ANY($3)) GROUP BY content_public_ref").bind(q.domain).bind(&q.usage_role).bind(work_refs).fetch_all(&mut **tx).await?;
     let added: HashMap<Uuid, String> = rows
         .iter()
         .map(|r| (r.get("content_public_ref"), r.get("first_added")))
@@ -472,6 +528,53 @@ async fn load_materials_scoped_in(
         .iter()
         .map(|r| (r.get("content_public_ref"), r.get("roles")))
         .collect();
+    // 首次发现 = 进入本领域（任意用途行）与「关键词搜索命中」两者中更早的一刻。
+    // 只认长期关键词目标（排除「已选 N 篇作品」这类单次伪关键词目标），且只认已准入的作品。
+    let keyword_rows = if refs.is_empty() {
+        Vec::new()
+    } else {
+        sqlx::query("SELECT finding.content_public_ref,target.display_name AS keyword,(extract(epoch FROM min(package.accepted_at))*1000)::bigint AS discovered_ms,to_char(min(package.accepted_at) AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD') AS discovered_date,linggan_human_moment(min(package.accepted_at)) AS discovered_display FROM collection_work_order work_order JOIN collection_work_order_lease lease USING(work_order_ref) JOIN collection_work_order_lease_task lease_task USING(lease_ref) JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id JOIN linggan_runtime_submission_receipt receipt USING(package_ref) JOIN linggan_material_discovery_finding finding USING(package_ref) JOIN collection_work_order_domain_usage work_usage USING(work_order_ref) JOIN collection_observation_target target ON target.target_ref=work_order.target_ref AND target.target_kind='keyword' AND target.purpose_kind='long_term' WHERE work_usage.domain_ref=$1 AND finding.content_public_ref=ANY($2) AND finding.discovery_kind='discovery_search' AND receipt.material_admission='ACCEPTED' AND package.accepted_at<=$3::timestamptz GROUP BY 1,2")
+            .bind(q.domain)
+            .bind(&refs)
+            .bind(&as_of)
+            .fetch_all(&mut **tx)
+            .await?
+    };
+    let mut work_discovery: HashMap<Uuid, WorkDiscovery> = rows
+        .iter()
+        .map(|r| {
+            let reference: Uuid = r.get("content_public_ref");
+            (
+                reference,
+                WorkDiscovery {
+                    first_seen_ms: r.get("first_domain_added_ms"),
+                    first_seen_date: r.get("first_domain_added_date"),
+                    first_seen_display: r.get("first_domain_added_display"),
+                    keywords: Vec::new(),
+                },
+            )
+        })
+        .collect();
+    for row in &keyword_rows {
+        let reference: Uuid = row.get("content_public_ref");
+        let Some(work) = work_discovery.get_mut(&reference) else {
+            continue;
+        };
+        let moment: i64 = row.get("discovered_ms");
+        work.keywords.push((moment, row.get("keyword")));
+        if moment < work.first_seen_ms {
+            work.first_seen_ms = moment;
+            work.first_seen_date = row.get("discovered_date");
+            work.first_seen_display = row.get("discovered_display");
+        }
+    }
+    for work in work_discovery.values_mut() {
+        work.keywords.sort();
+    }
+    let latest_added = rows
+        .iter()
+        .max_by_key(|r| r.get::<i64, _>("first_added_ms"))
+        .map(|r| (r.get::<i64, _>("first_added_ms"), r.get::<String, _>("first_added_display")));
     timing.scope += scope_started.elapsed();
     let current_started = Instant::now();
     // All of these works already stay in memory for exact statistics. Reading
@@ -875,6 +978,45 @@ async fn load_materials_scoped_in(
             }
         }
     }
+    let mut creator_discovery: HashMap<String, CreatorDiscovery> = HashMap::new();
+    let mut creator_keyword_times: HashMap<String, HashMap<String, i64>> = HashMap::new();
+    for work in &works {
+        let (Some(key), Some(discovered)) = (&work.creator_key, work_discovery.get(&work.work_ref)) else {
+            continue;
+        };
+        let entry = creator_discovery.entry(key.clone()).or_insert_with(|| CreatorDiscovery {
+            first_seen_ms: discovered.first_seen_ms,
+            first_seen_date: discovered.first_seen_date.clone(),
+            first_seen_display: discovered.first_seen_display.clone(),
+            keywords: Vec::new(),
+        });
+        if discovered.first_seen_ms < entry.first_seen_ms {
+            entry.first_seen_ms = discovered.first_seen_ms;
+            entry.first_seen_date = discovered.first_seen_date.clone();
+            entry.first_seen_display = discovered.first_seen_display.clone();
+        }
+        for (moment, keyword) in &discovered.keywords {
+            let earliest = creator_keyword_times
+                .entry(key.clone())
+                .or_default()
+                .entry(keyword.clone())
+                .or_insert(*moment);
+            *earliest = (*earliest).min(*moment);
+        }
+    }
+    for (key, times) in creator_keyword_times {
+        let mut ordered: Vec<(i64, String)> = times.into_iter().map(|(k, m)| (m, k)).collect();
+        ordered.sort();
+        if let Some(entry) = creator_discovery.get_mut(&key) {
+            entry.keywords = ordered.into_iter().map(|(_, keyword)| keyword).collect();
+        }
+    }
+    let earliest_record_date = work_discovery
+        .values()
+        .map(|work| work.first_seen_date.as_str())
+        .min()
+        .unwrap_or("")
+        .to_owned();
     timing.projection += projection_started
         .elapsed()
         .saturating_sub(timing.dossier - dossier_before);
@@ -888,6 +1030,11 @@ async fn load_materials_scoped_in(
         observation_lookup_available,
         work_name_sources,
         profile_name_candidates,
+        work_discovery,
+        creator_discovery,
+        earliest_record_date,
+        recent_from,
+        latest_added,
     })
 }
 pub fn in_base(w: &DiscoveryWork, q: &CreatorScope, now: i64) -> bool {
@@ -1096,7 +1243,7 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
             authors.entry(k).or_default().push(w);
         }
     }
-    let mut stats = json!({"authors":authors.len(),"works":base.len(),"unknownAuthorWorks":base.iter().filter(|w|w.creator_key.is_none()).count(),"relatedAuthors":0,"vertical":0,"personal":0,"outside":if data.observation_lookup_available {Some(0)}else{None},"outsideViral":if data.observation_lookup_available {threshold.map(|_|0)}else{None},"unknownDateWorks":data.works.iter().filter(|w|w.published_date.is_none() && w.usage_roles.contains(&q.usage_role) && w.platform==q.platform).count()});
+    let mut stats = json!({"authors":authors.len(),"works":base.len(),"unknownAuthorWorks":base.iter().filter(|w|w.creator_key.is_none()).count(),"relatedAuthors":0,"vertical":0,"personal":0,"outside":if data.observation_lookup_available {Some(0)}else{None},"inside":if data.observation_lookup_available {Some(0)}else{None},"outsideViral":if data.observation_lookup_available {threshold.map(|_|0)}else{None},"recentlyDiscovered":0,"highLikeLeads":if data.observation_lookup_available {Some(0)}else{None},"latestAddedMs":data.latest_added.as_ref().map(|(ms,_)|*ms),"latestAddedDisplay":data.latest_added.as_ref().map(|(_,display)|display.clone()),"unknownDateWorks":data.works.iter().filter(|w|w.published_date.is_none() && w.usage_roles.contains(&q.usage_role) && w.platform==q.platform).count()});
     let mut items = Vec::new();
     for (key, ws) in authors {
         let latest = *ws
@@ -1105,6 +1252,14 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
             .expect("nonempty author");
         let outside =
             data.observation_lookup_available && latest.observation["inCurrentDomain"] == false;
+        let discovery = data.creator_discovery.get(key);
+        let recent = discovery.is_some_and(|d| d.first_seen_date.as_str() >= data.recent_from.as_str());
+        // 与「高赞线索」视图同一口径：该作者至少有 N 篇作品点赞不少于 M，不再附加相关性条件。
+        let leads = ws
+            .iter()
+            .filter(|w| w.likes.is_some_and(|l| l >= LEAD_MIN_LIKES))
+            .count()
+            >= LEAD_MIN_WORKS;
         let related: Vec<_> = ws.iter().filter(|w| w.relevance == "related").collect();
         let vertical = latest.focus["value"] == "vertical_tendency" && !related.is_empty();
         let personal = related
@@ -1123,10 +1278,21 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
                 "outsideViral",
                 data.observation_lookup_available && outside && viral > 0,
             ),
+            ("inside", data.observation_lookup_available && !outside),
+            ("recentlyDiscovered", recent),
+            (
+                "highLikeLeads",
+                data.observation_lookup_available && outside && leads,
+            ),
         ] {
             if yes {
                 stats[field] = json!(stats[field].as_u64().unwrap_or(0) + 1);
             }
+        }
+        if q.first_seen_from.as_ref().is_some_and(|from| {
+            discovery.is_none_or(|d| d.first_seen_date.as_str() < from.as_str())
+        }) {
+            continue;
         }
         if !author_matches(data, latest, &ws, q) {
             continue;
@@ -1137,6 +1303,11 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
             .filter(|w| work_matches(w, q, threshold))
             .collect();
         if candidates.is_empty() {
+            continue;
+        }
+        if q.min_matched_works
+            .is_some_and(|min| candidates.len() < min)
+        {
             continue;
         }
         candidates.sort_by(|a, b| {
@@ -1214,7 +1385,26 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
         }
         hints.truncate(2);
         let (display_name, display_name_source) = author_display(data, latest, &ws);
-        items.push(json!({"creatorKey":key,"displayName":display_name,"displayNameSource":display_name_source,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"matchedRelatedWorkCount":matched_related,"matchedViralWorkCount":threshold.map(|_|matched_viral),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
+        let (first_seen_ms, first_seen_date, first_seen_display, first_seen_precision) = match discovery {
+            Some(d) => {
+                let precision = if d.first_seen_date == data.earliest_record_date {
+                    "earliest_record"
+                } else if d.first_seen_date.as_str() >= data.recent_from.as_str() {
+                    "recent"
+                } else {
+                    "domain_first"
+                };
+                (
+                    Some(d.first_seen_ms),
+                    Some(d.first_seen_date.clone()),
+                    Some(d.first_seen_display.clone()),
+                    Some(precision),
+                )
+            }
+            None => (None, None, None, None),
+        };
+        let keywords = discovery.map(|d| d.keywords.clone()).unwrap_or_default();
+        items.push(json!({"creatorKey":key,"displayName":display_name,"displayNameSource":display_name_source,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"discoveryKeywords":keywords,"firstSeenMs":first_seen_ms,"firstSeenDate":first_seen_date,"firstSeenDisplay":first_seen_display,"firstSeenPrecision":first_seen_precision,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"matchedRelatedWorkCount":matched_related,"matchedViralWorkCount":threshold.map(|_|matched_viral),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
     }
     items.sort_by(|a, b| {
         match q.sort.as_str() {
@@ -1227,6 +1417,7 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
             "high_likes" => b["candidateHighLikeCount"]
                 .as_i64()
                 .cmp(&a["candidateHighLikeCount"].as_i64()),
+            "first_seen" => b["firstSeenMs"].as_i64().cmp(&a["firstSeenMs"].as_i64()),
             _ => b["firstAdded"].as_str().cmp(&a["firstAdded"].as_str()),
         }
         .then_with(|| a["creatorKey"].as_str().cmp(&b["creatorKey"].as_str()))
@@ -1237,7 +1428,7 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
         .skip(q.page * q.page_size)
         .take(q.page_size)
         .collect();
-    json!({"items":items,"total":total,"stats":stats,"policy":data.policy,"domain":data.domain,"asOf":data.as_of,"displayAsOf":data.display_as_of,"observationLookupState":if data.observation_lookup_available {"available"}else{"unavailable"},"page":q.page,"pageSize":q.page_size})
+    json!({"items":items,"total":total,"stats":stats,"policy":data.policy,"leadRule":{"minLikes":LEAD_MIN_LIKES,"minWorks":LEAD_MIN_WORKS},"domain":data.domain,"asOf":data.as_of,"displayAsOf":data.display_as_of,"observationLookupState":if data.observation_lookup_available {"available"}else{"unavailable"},"page":q.page,"pageSize":q.page_size})
 }
 
 /// Semantic-only author input identity, shared by scheduling and reads.
@@ -1270,5 +1461,197 @@ mod topic_material_tests {
         .unwrap();
         assert_ne!(full.fragment_id, later.fragment_id);
         assert_ne!(full.source_ref, later.source_ref);
+    }
+}
+
+#[cfg(test)]
+mod discovery_list_tests {
+    use super::*;
+
+    fn work(
+        id: u128,
+        creator: &str,
+        likes: Option<i64>,
+        relevance: &str,
+        outside: bool,
+        added: &str,
+    ) -> DiscoveryWork {
+        DiscoveryWork {
+            work_ref: Uuid::from_u128(id),
+            usage_roles: vec!["primary".into()],
+            creator_key: Some(creator.into()),
+            platform: "xhs".into(),
+            author_external_id: Some(format!("external-{creator}")),
+            display_name: Some(creator.into()),
+            title: Some("合成作品".into()),
+            reading_title: Value::Null,
+            dossier_revision: String::new(),
+            dossier_material_revision: String::new(),
+            dossier_coverage: Value::Null,
+            published_date: Some("2026-10-01".into()),
+            published_epoch: Some(1_759_000_000),
+            likes,
+            likes_observed_at: None,
+            likes_observed_display: None,
+            comments: None,
+            collects: None,
+            first_added: added.into(),
+            first_added_display: added.into(),
+            fingerprint: format!("fp-{id}"),
+            search_text: String::new(),
+            fragments: Vec::new(),
+            relevance: relevance.into(),
+            traits: Vec::new(),
+            topic_hints: Vec::new(),
+            analysis: json!({}),
+            analysis_state: "idle".into(),
+            observation: json!({"inCurrentDomain": !outside, "lookupState": "available"}),
+            profile: json!({}),
+            focus: json!({"value": "unknown"}),
+            author_analysis: json!({"institution_or_brand": {"value": "unknown"}}),
+            acquisition_kind: String::new(),
+        }
+    }
+
+    fn data(
+        works: Vec<DiscoveryWork>,
+        creators: &[(&str, i64, &str, &[&str])],
+    ) -> DiscoveryData {
+        let work_discovery = works
+            .iter()
+            .map(|w| {
+                (
+                    w.work_ref,
+                    WorkDiscovery {
+                        first_seen_ms: 1,
+                        first_seen_date: "2026-08-01".into(),
+                        first_seen_display: "2026-08-01 09:00".into(),
+                        keywords: Vec::new(),
+                    },
+                )
+            })
+            .collect();
+        let creator_discovery = creators
+            .iter()
+            .map(|(key, ms, date, keywords)| {
+                (
+                    (*key).to_string(),
+                    CreatorDiscovery {
+                        first_seen_ms: *ms,
+                        first_seen_date: (*date).into(),
+                        first_seen_display: format!("{date} 09:00"),
+                        keywords: keywords.iter().map(|k| (*k).to_string()).collect(),
+                    },
+                )
+            })
+            .collect();
+        DiscoveryData {
+            works,
+            as_of: "2026-10-30 12:00:00+08".into(),
+            display_as_of: "2026-10-30 12:00".into(),
+            now_epoch: 1_800_000_000,
+            domain: json!({"domainRef": "00000000-0000-4000-8000-000000000001", "status": "active"}),
+            policy: json!({"likeThreshold": null, "revision": 0}),
+            observation_lookup_available: true,
+            work_name_sources: HashMap::new(),
+            profile_name_candidates: HashMap::new(),
+            work_discovery,
+            creator_discovery,
+            earliest_record_date: "2026-09-01".into(),
+            recent_from: "2026-10-24".into(),
+            latest_added: Some((1, "2026-10-30 10:00".into())),
+        }
+    }
+
+    fn scope() -> CreatorScope {
+        CreatorScope {
+            domain: Uuid::from_u128(1),
+            usage_role: "primary".into(),
+            platform: "xhs".into(),
+            creator_key: None,
+            published_from: None,
+            published_to: None,
+            query: None,
+            search_mode: "author".into(),
+            relevance: None,
+            traits: None,
+            topic_hint: None,
+            focus: None,
+            observation: None,
+            sort: "recent".into(),
+            min_likes: None,
+            viral: false,
+            high_likes: false,
+            first_seen_from: None,
+            min_matched_works: None,
+            unknown_author: false,
+            page: 0,
+            page_size: 50,
+        }
+    }
+
+    #[test]
+    fn high_like_leads_stat_and_view_use_the_same_works() {
+        let d = data(
+            vec![
+                work(1, "a", Some(800), "related", true, "2026-10-10 09:00"),
+                work(2, "a", Some(600), "unrelated", true, "2026-10-11 09:00"),
+                work(3, "b", Some(900), "related", true, "2026-10-12 09:00"),
+            ],
+            &[
+                ("a", 2, "2026-09-02", &["注意力训练"]),
+                ("b", 3, "2026-09-03", &[]),
+            ],
+        );
+        let all = aggregate(&d, &scope());
+        assert_eq!(all["stats"]["highLikeLeads"], 1);
+        let mut leads = scope();
+        leads.min_likes = Some(LEAD_MIN_LIKES);
+        leads.min_matched_works = Some(LEAD_MIN_WORKS);
+        let filtered = aggregate(&d, &leads);
+        assert_eq!(filtered["total"], 1, "视图的行数与统计数字一致");
+        assert_eq!(filtered["items"][0]["creatorKey"], "a");
+        assert_eq!(filtered["items"][0]["candidateHighLikeCount"], 800);
+        assert_eq!(filtered["stats"]["authors"], 2, "范围统计不随筛选变化");
+    }
+
+    #[test]
+    fn first_seen_filter_sort_labels_and_keywords() {
+        let d = data(
+            vec![
+                work(1, "a", Some(10), "related", false, "2026-10-30 09:00"),
+                work(2, "b", Some(10), "related", false, "2026-09-02 09:00"),
+                work(3, "c", Some(10), "related", false, "2026-09-11 09:00"),
+            ],
+            &[
+                ("a", 3_000, "2026-10-30", &["注意力训练", "写作业"]),
+                ("b", 100, "2026-09-01", &[]),
+                ("c", 1_000, "2026-09-10", &[]),
+            ],
+        );
+        let mut sorted = scope();
+        sorted.sort = "first_seen".into();
+        let out = aggregate(&d, &sorted);
+        let keys: Vec<_> = out["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["creatorKey"].as_str().unwrap())
+            .collect();
+        assert_eq!(keys, ["a", "c", "b"]);
+        assert_eq!(out["items"][0]["firstSeenPrecision"], "recent");
+        assert_eq!(out["items"][1]["firstSeenPrecision"], "domain_first");
+        assert_eq!(out["items"][2]["firstSeenPrecision"], "earliest_record");
+        assert_eq!(
+            out["items"][0]["discoveryKeywords"],
+            json!(["注意力训练", "写作业"])
+        );
+        assert_eq!(out["stats"]["recentlyDiscovered"], 1);
+        let mut recent = scope();
+        recent.first_seen_from = Some("2026-10-24".into());
+        let only = aggregate(&d, &recent);
+        assert_eq!(only["total"], 1);
+        assert_eq!(only["items"][0]["creatorKey"], "a");
+        assert_eq!(only["stats"]["latestAddedDisplay"], "2026-10-30 10:00");
     }
 }
