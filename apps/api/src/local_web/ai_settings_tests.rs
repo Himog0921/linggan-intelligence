@@ -320,6 +320,10 @@ async fn ai_settings_http_ocr_prompt_save_switch_and_rollback_do_not_dispatch() 
 #[ignore = "disposable PostgreSQL proof only"]
 async fn ai_settings_http_skill_import_handles_large_files_without_enabling_or_running_them() {
     let db = fixture::proof_database("ai_skills_http").await;
+    let initial_versions: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_skill_version")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     let app = app_with_database(db.clone());
     let manifest = format!(
         "---\nname: example\ndescription: Synthetic skill\n---\n{}",
@@ -392,7 +396,7 @@ async fn ai_settings_http_skill_import_handles_large_files_without_enabling_or_r
             .fetch_one(db.pool())
             .await
             .unwrap(),
-        1
+        initial_versions + 1
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
@@ -525,10 +529,13 @@ async fn ai_settings_http_bounds_cover_exact_budgets_large_batches_and_the_maxim
     .await;
     assert_eq!(status, StatusCode::OK, "{imported}");
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_skill_file")
-            .fetch_one(db.pool())
-            .await
-            .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_skill_file WHERE version_ref=$1"
+        )
+        .bind(Uuid::parse_str(imported["versionRef"].as_str().unwrap()).unwrap())
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
         64
     );
     assert_eq!(
