@@ -222,7 +222,8 @@ requested_work AS MATERIALIZED (
  SELECT content.* FROM linggan_material_content content
  WHERE ($8::uuid IS NULL OR content.public_ref=$8)
  AND ($9::uuid IS NULL OR EXISTS (SELECT 1 FROM linggan_material_domain_usage usage
-      WHERE usage.content_public_ref=content.public_ref AND usage.domain_ref=$9))
+      WHERE usage.content_public_ref=content.public_ref AND usage.domain_ref=$9
+        AND ($8::uuid IS NOT NULL OR $10::uuid[] IS NOT NULL OR usage.use_kind='domain_research')))
  AND ($10::uuid[] IS NULL OR content.public_ref=ANY($10))
 )
 "#;
@@ -234,7 +235,8 @@ scoped_work AS MATERIALIZED (
  SELECT content.* FROM linggan_material_content content
  WHERE ($8::uuid IS NULL OR content.public_ref=$8)
  AND ($9::uuid IS NULL OR EXISTS (SELECT 1 FROM linggan_material_domain_usage usage
-      WHERE usage.content_public_ref=content.public_ref AND usage.domain_ref=$9))
+      WHERE usage.content_public_ref=content.public_ref AND usage.domain_ref=$9
+        AND ($8::uuid IS NOT NULL OR $10::uuid[] IS NOT NULL OR usage.use_kind='domain_research')))
  AND ($10::uuid[] IS NULL OR content.public_ref=ANY($10))
 ), recent_detail_time AS (
  SELECT detail.content_public_ref,max(detail.observed_at::timestamptz) AS observed_at
@@ -312,7 +314,8 @@ AND ($8::uuid IS NULL OR current.public_ref=$8)
 AND ($9::uuid IS NULL OR EXISTS (
   SELECT 1 FROM linggan_material_domain_usage domain_usage
   WHERE domain_usage.content_public_ref=current.public_ref
-    AND domain_usage.domain_ref=$9))
+    AND domain_usage.domain_ref=$9
+    AND ($8::uuid IS NOT NULL OR $10::uuid[] IS NOT NULL OR domain_usage.use_kind='domain_research')))
 AND ($10::uuid[] IS NULL OR current.public_ref=ANY($10))
 AND current.observed_at IS NOT NULL
 AND ($6::text IS NULL

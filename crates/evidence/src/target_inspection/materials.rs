@@ -252,6 +252,7 @@ pub async fn related_works(
              JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
              WHERE usage.content_public_ref=author.content_public_ref \
                AND ($2::uuid IS NULL OR usage.domain_ref=$2) \
+               AND usage.use_kind='domain_research' \
                AND package.accepted_at<=$4::timestamptz AND receipt.material_admission='ACCEPTED') \
          ORDER BY author.content_public_ref LIMIT 2001",
     ).bind(request.target_ref).bind(request.domain_ref).bind(work).bind(&cutoff).fetch_all(&mut *tx).await?;

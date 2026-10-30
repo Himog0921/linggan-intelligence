@@ -54,7 +54,8 @@ pub async fn read_observation_domains(
         "SELECT domain.domain_ref, domain.name, domain.description, domain.research_goal, domain.status, \
                 (SELECT count(DISTINCT usage.content_public_ref) \
                    FROM linggan_material_domain_usage usage \
-                  WHERE usage.domain_ref=domain.domain_ref), \
+                  WHERE usage.domain_ref=domain.domain_ref \
+                    AND usage.use_kind='domain_research'), \
                 count(relation.target_ref), \
                 count(relation.target_ref) FILTER (WHERE relation.role='primary'), \
                 count(relation.target_ref) FILTER (WHERE relation.role='reference') \

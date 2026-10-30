@@ -1095,3 +1095,87 @@ async fn batched_comments_preserve_complete_single_reads_and_refresh_restriction
         json!({"sourceRef":reply,"qualification":"restricted"})
     );
 }
+
+/// 只在作者主页上出现过的作品（作者语境）不进创作页的作品目录和评论目录；
+/// 按引用判断「是否在本领域」的校验不过滤用途。
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn creator_context_works_and_comments_stay_out_of_the_creation_source_directories() {
+    use sources::materials::{SearchQuery, search};
+    let db = fixture::db("creation_creator_context").await;
+    fixture::comment_doc(&db).await;
+    let research_work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='dossier-note'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let package = dossier::fixture::submit_package(
+        &db,
+        "content_detail",
+        json!({"contentExternalId":"context-note"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"context-note"},"payload":{"title":"合成 作者语境笔记","bodyText":"合成 语境正文：先做两分钟。","authorId":"context-author","authorName":"语境作者"}}),
+    )
+    .await;
+    let context_work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='context-note'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+        .bind(Uuid::new_v4())
+        .bind(context_work)
+        .bind(DOMAIN)
+        .bind(package)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    dossier::fixture::submit_package(
+        &db,
+        "comments",
+        json!({"contentExternalId":"context-note"}),
+        json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"context-note"},"payload":{"commentId":"context-comment","noteId":"context-note","text":"合成 语境评论：只出现在作者主页的作品下。"}}),
+    )
+    .await;
+    let query = |kind| SearchQuery {
+        domain_ref: DOMAIN,
+        query: "合成".into(),
+        kind: Some(kind),
+        cursor: None,
+    };
+    let markers = [
+        (SourceKind::Note, "作者语境笔记"),
+        (SourceKind::Comment, "语境评论"),
+    ];
+    // 对照：作品还是研究材料时，两个目录都读得到它。
+    for (kind, marker) in &markers {
+        let listed = search(&db, &query(kind.clone())).await.unwrap()["documents"].to_string();
+        assert!(listed.contains(marker), "{kind:?}: {listed}");
+    }
+    dossier::fixture::make_creator_context_only(&db, DOMAIN, "context-note").await;
+    for (kind, marker) in &markers {
+        let listed = search(&db, &query(kind.clone())).await.unwrap()["documents"].to_string();
+        assert!(
+            !listed.contains(marker),
+            "{kind:?} 目录不应列出作者语境作品：{listed}"
+        );
+        assert!(
+            listed.contains("合成"),
+            "{kind:?} 目录仍列出领域研究材料：{listed}"
+        );
+    }
+    let mut tx = db.pool().begin().await.unwrap();
+    assert!(
+        linggan_evidence::research_dossier::creation_work_in_domain(&mut tx, context_work, DOMAIN)
+            .await
+            .unwrap(),
+        "按引用判断「是否在本领域」不过滤用途"
+    );
+    assert!(
+        linggan_evidence::research_dossier::creation_work_in_domain(&mut tx, research_work, DOMAIN)
+            .await
+            .unwrap()
+    );
+    tx.rollback().await.unwrap();
+}
