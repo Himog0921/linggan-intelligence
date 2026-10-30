@@ -1,5 +1,5 @@
 import { ApiError, requestJson, requestBinaryJson } from '../../shared/api';
-import { parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
 import { listAccounts as listCreationAccounts } from './assets/assetsApi';
 const base = '/ops/api/creation';
 const post = (path: string, body: unknown) => requestJson(path, {
@@ -67,6 +67,11 @@ function receipt(value: unknown, requestId: string, workId?: string) {
     receipt: r
   });
   return r;
+}
+export async function readRevision(id: string, revision: string) {
+  const item = parseRevision(await requestJson(`${base}/works/${uuid(id)}/revisions/${uuid(revision)}`));
+  if (item.id !== revision) throw new WorkbenchContractError();
+  return item;
 }
 export async function history(id: string) {
   return parseHistory(await requestJson(`${base}/works/${uuid(id)}/revisions`)).items;
@@ -148,6 +153,11 @@ export async function anchor(body: {
   if (result.citation.blockRef !== body.blockRef || result.citation.asOf !== body.asOf || result.citation.sourceVersion !== body.sourceVersion || result.citation.sourceRef !== body.sourceRef || result.citation.field !== body.field || result.citation.start !== body.start || result.citation.end !== body.end) throw new WorkbenchContractError();
   return result;
 }
+export async function qualifyCitation(domainRef: string, citation: Citation) {
+  const { asOf, blockRef, sourceKind, sourceRef, workRef, field, sourceVersion, start, end } = citation;
+  const result = await anchor({ asOf, blockRef, sourceKind, sourceRef, workRef, field, sourceVersion, start, end, domainRef });
+  return result.textHash === citation.textHash && JSON.stringify(result.citation.location) === JSON.stringify(citation.location);
+}
 export async function uploadAsset(id: string, file: File, requestId: string) {
   const record = parseAsset(await requestBinaryJson(`${base}/works/${uuid(id)}/assets`, file, {
     method: 'POST',
@@ -201,6 +211,32 @@ export async function readiness(signal?: AbortSignal) {
   return parseReadiness(await requestJson(`${base}/ai/readiness`, {
     signal
   }));
+}
+export async function titleReadiness(signal?: AbortSignal) {
+  return parseReadiness(await requestJson(`${base}/ai/title-readiness`, {signal}));
+}
+export async function titlePreview(body: {previewRef:string; workRef:string; expectedRevision:string; configRef:string}) {
+  const raw = object(await post(`${base}/ai/preview`, {...body, action:'title_ideas', citations:[], paragraphIds:[], selection:null, instruction:''}));
+  if (raw.action !== 'title_ideas' || typeof raw.outboundSystem !== 'string') throw new WorkbenchContractError();
+  return parsePreview({...raw, action:'draft'});
+}
+export async function titleExecute(body: {requestId:string; previewRef:string; expectedRevision:string; confirmedInputHash:string; budgetTokens:number; confirmed:boolean}) {
+  const result = parseTitleStatus(await post(`${base}/ai/requests`, body));
+  if (result.requestId !== body.requestId) throw new WorkbenchContractError();
+  return result;
+}
+export async function titleStatus(id: string) {
+  const result = parseTitleStatus(await requestJson(`${base}/ai/requests/${uuid(id)}`));
+  if (result.requestId !== id) throw new WorkbenchContractError();
+  return result;
+}
+export async function cancelTitle(id: string) {
+  const result = parseTitleStatus(await post(`${base}/ai/requests/${uuid(id)}/cancel`, {}));
+  if (result.requestId !== id) throw new WorkbenchContractError();
+  return result;
+}
+export async function adoptTitle(id: string, body: {requestId:string; expectedRevision:string; kind:'cover'|'note'; index:number}) {
+  return receipt(await post(`${base}/ai/requests/${uuid(id)}/adopt-title`, body), body.requestId);
 }
 export async function preview(body: {
   previewRef: string;
@@ -292,6 +328,9 @@ export function isLegacyReferenceUnavailable(error: unknown): boolean {
 /** Human feedback is separate from the preserved invocation diagnostics. */
 export function aiFailureText(code: string | null): string {
   const messages: Record<string, string> = {
+    ai_creative_month_budget_exhausted: '创作 AI 本月额度不足，这次没有发送。可到 AI 设置调整上限后重新准备。',
+    ai_creative_price_unavailable: '模型价格不完整，这次没有发送。请在 AI 设置补全价格后重新准备。',
+    ai_creative_historic_spend_unknown: '本月有历史调用费用未知，这次没有发送。请先核对调用记录。',
     writing_output_invalid: '这次返回的建议暂时无法使用，正文没有改变。可调整要求后重新准备，也可以继续手写。',
     ai_output_invalid: '这次返回的建议暂时无法使用，正文没有改变。请核对调用用量后重新准备，也可以继续手写。',
     ai_source_unavailable: '选定材料的版本或可用性已变化，正文没有改变。请重新核对材料，再准备建议。',

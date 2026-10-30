@@ -694,3 +694,30 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL budget HTTP proof"]
+async fn creation_assets_http_creative_budget_is_revisioned() {
+    let db = proof("assets_http_ai_budget").await;
+    let app = app_with_database(db);
+    let (status, initial) = call(&app, Method::GET, "/ops/api/creation/ai-budget", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(initial["capCents"], 10000);
+    assert_eq!(initial["unknownCalls"], 0);
+    let body = json!({"requestId":rid(),"expectedRevision":initial["revision"],"capCents":12550});
+    let (status, receipt) = call(
+        &app,
+        Method::PUT,
+        "/ops/api/creation/ai-budget",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(receipt["replayed"], false);
+    assert_eq!(receipt["capCents"], 12550);
+    let (_, replay) = call(&app, Method::PUT, "/ops/api/creation/ai-budget", Some(body)).await;
+    assert_eq!(replay["replayed"], true);
+    let (_, after) = call(&app, Method::GET, "/ops/api/creation/ai-budget", None).await;
+    assert_eq!(after["capCents"], 12550);
+    assert_eq!(after["revision"], 2);
+}

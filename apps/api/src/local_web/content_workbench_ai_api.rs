@@ -13,11 +13,16 @@ use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/ops/api/creation/ai/readiness", get(readiness))
+        .route("/ops/api/creation/ai/title-readiness", get(title_readiness))
         .route("/ops/api/creation/ai/preview", post(preview))
         .route("/ops/api/creation/ai/requests", post(execute))
         .route("/ops/api/creation/ai/requests/{id}", get(status))
         .route("/ops/api/creation/ai/requests/{id}/cancel", post(cancel))
         .route("/ops/api/creation/ai/requests/{id}/adopt", post(adopt))
+        .route(
+            "/ops/api/creation/ai/requests/{id}/adopt-title",
+            post(adopt_title),
+        )
         .layer(middleware::from_fn(
             super::comment_study::local_comment_study_guard,
         ))
@@ -50,6 +55,15 @@ async fn readiness(State(s): State<LocalWebState>) -> Response {
         );
     };
     respond(ai::readiness(db).await)
+}
+async fn title_readiness(State(s): State<LocalWebState>) -> Response {
+    let Some(db) = s.database.database() else {
+        return super::local_read_json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    respond(ai::title_readiness(db).await)
 }
 async fn preview(State(s): State<LocalWebState>, Json(r): Json<ai::PreviewRequest>) -> Response {
     let Some(db) = s.database.database() else {
@@ -99,4 +113,17 @@ async fn adopt(
         );
     };
     respond(ai::adopt(db, id, &r).await)
+}
+async fn adopt_title(
+    State(s): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(r): Json<ai::AdoptTitleRequest>,
+) -> Response {
+    let Some(db) = s.database.database() else {
+        return super::local_read_json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    respond(ai::adopt_title(db, id, &r).await)
 }

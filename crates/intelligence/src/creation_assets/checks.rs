@@ -39,6 +39,11 @@ const GROUP_CLAIMS: &[&[Tok]] = &[
 ];
 const A_WA: &[&[Tok]] = &[&[Tok::Lit("a"), Tok::Gap, Tok::Lit("娃")]];
 
+/// The same reminder rule used for a headline in manuscript checks.
+pub fn title_has_cure_promise(text: &str) -> bool {
+    !find_any(text, CURE_PROMISES).is_empty()
+}
+
 const RULE_ORDER: &[&str] = &[
     "R-M1", "R-M2", "R-M3", "R-M4", "R-M8", "R-W10", "R-W11", "R-W1", "R-W2", "R-W3", "R-W6",
     "R-W7", "R-W8", "R-W9", "R-I1", "R-I2", "R-L1", "R-L2", "R-L3", "R-L4", "R-L5", "R-L6", "R-L7",

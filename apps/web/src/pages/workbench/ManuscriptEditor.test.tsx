@@ -15,6 +15,7 @@ function Editor({ initial }: { initial: WorkDocument }) {
   return <QueryClientProvider client={client}>
     <ManuscriptEditor draftInputs={draftInputs} onDraftInputs={setDraftInputs} document={document} edit={setDocument} compose={() => {}} isComposing={() => false}
       textSelection={() => {}} tagsDraft="" onTagsChange={() => {}} />
+    <output aria-label="AI来源记录">{JSON.stringify(document.derivedSources)}</output>
     <output aria-label="来源记录">{JSON.stringify(document.experienceSlots)}</output>
     <output aria-label="标题候选记录">{JSON.stringify(document.noteTitleCandidates)}</output>
     <output aria-label="封面记录">{JSON.stringify(document.pages.filter(page => page.kind === 'cover'))}</output>
@@ -71,4 +72,36 @@ describe('标题候选', () => {
     fireEvent.click(within(area).getByRole('button', { name: '删除标题候选 合成候选标题' }));
     expect(JSON.parse(screen.getByLabelText('标题候选记录').textContent ?? '[]')).toEqual([]);
   });
+});
+
+
+it('preserves AI source lineage when splitting a paragraph', () => {
+  const initial = { ...newDocument(), paragraphs: [{ id: first, text: '合成改写内容' }], derivedSources: [{
+    target: { kind: 'paragraph' as const, paragraphId: first },
+    citation: { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment' as const, sourceRef: experience, workRef: first, field: 'comment_body' as const, sourceVersion: 'v1', start: 0, end: 1, textHash: 'a'.repeat(64), location: null },
+  }] };
+  render(<Editor initial={initial}/>);
+  const input = screen.getByLabelText('正文第 1 段') as HTMLTextAreaElement;
+  input.setSelectionRange(2, 2); fireEvent.keyDown(input, { key: 'Enter' });
+  expect(screen.getByLabelText('正文第 2 段')).toHaveValue('改写内容');
+  const sources = JSON.parse(screen.getByLabelText('AI来源记录').textContent ?? '[]');
+  expect(sources).toHaveLength(2);
+  expect(sources[1].citation).toEqual(sources[0].citation);
+  expect(sources[1].target.paragraphId).not.toBe(first);
+});
+
+it('retains sources on both halves when Enter replaces a selected range', () => {
+  const initial = { ...newDocument(), paragraphs: [{ id: first, text: '合成改写内容' }], derivedSources: [{
+    target: { kind: 'paragraph' as const, paragraphId: first },
+    citation: { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment' as const, sourceRef: experience, workRef: first, field: 'comment_body' as const, sourceVersion: 'v1', start: 0, end: 1, textHash: 'a'.repeat(64), location: null },
+  }] };
+  render(<Editor initial={initial}/>);
+  const input = screen.getByLabelText('正文第 1 段') as HTMLTextAreaElement;
+  input.setSelectionRange(2, 4); fireEvent.keyDown(input, { key: 'Enter' });
+  expect(screen.getByLabelText('正文第 1 段')).toHaveValue('合成');
+  expect(screen.getByLabelText('正文第 2 段')).toHaveValue('内容');
+  const sources = JSON.parse(screen.getByLabelText('AI来源记录').textContent ?? '[]');
+  expect(sources).toHaveLength(2);
+  expect(sources[1].citation).toEqual(sources[0].citation);
+  expect(sources[1].target.paragraphId).not.toBe(first);
 });

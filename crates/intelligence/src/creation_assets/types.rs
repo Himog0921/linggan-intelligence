@@ -562,6 +562,71 @@ pub struct CheckReport {
     pub not_run: Vec<NotRun>,
     pub fact_cards: Vec<CardRevision>,
 }
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SavedDraftCheckItem {
+    pub work_id: Uuid,
+    pub revision_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SavedDraftCheckRequest {
+    pub domain_ref: Uuid,
+    pub items: Vec<SavedDraftCheckItem>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedDraftCheck {
+    pub work_id: Uuid,
+    pub revision_id: Uuid,
+    pub must: usize,
+    pub warn: usize,
+    pub not_run: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationCandidate {
+    pub publication_ref: Uuid,
+    pub title: Option<String>,
+    pub published_on: Option<String>,
+    pub url: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicationLinkCommand {
+    pub request_id: Uuid,
+    pub expected_revision: Uuid,
+    pub publication_ref: Uuid,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationLinkReceipt {
+    pub link_ref: Uuid,
+    pub revision_id: Uuid,
+    pub publication_ref: Uuid,
+    pub replayed: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationLinkView {
+    pub link_ref: Uuid,
+    pub revision_id: Uuid,
+    pub publication_ref: Uuid,
+    pub title: Option<String>,
+    pub published_on: Option<String>,
+    pub available: bool,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicationUnlinkCommand {
+    pub request_id: Uuid,
+}
 impl CheckReport {
     pub fn count(&self, level: Level) -> usize {
         self.findings.iter().filter(|f| f.level == level).count()

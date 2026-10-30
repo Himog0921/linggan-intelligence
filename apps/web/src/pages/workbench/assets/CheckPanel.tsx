@@ -71,6 +71,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
   const accountSelect = useRef<HTMLSelectElement>(null);
   const bridgeText = useRef<HTMLTextAreaElement>(null);
   const slotTop = useRef<HTMLDivElement>(null);
+  const settings = useRef<HTMLDetailsElement>(null);
   const skipChosen = useRef(false);
   // Discard cached clipboard text when a referenced experience is withdrawn.
   useEffect(() => { if (withdrawalInvalidated) {
@@ -114,6 +115,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
   const canCopy = reportOk && counts.must === 0 && !saveBlocked && !copying && !locked && !composing && !pendingConfirmation;
   const copyWhy = composing ? '请先完成中文输入' : saveBlocked ? '稿件还没有保存成功' : !reportOk ? '正在检查…' : counts.must > 0 ? '必改清零后才能复制' : '';
   const fixable = reportOk && !locked && !busy;
+  const bridgeSummary = document.bridge?.skip ? '这篇不植入' : document.bridge?.sentence ? `${reportOk ? state === 'ready' ? '已放入' : '已选，当前不放入' : report.isError ? '已选，核验失败' : '已选，等待核验'}：${document.bridge.sentence.text}` : '尚未放入衔接句';
 
   useEffect(() => {
     if (!active || !reportOk || state !== 'ready' || !report.data?.findings.some(f => f.rule === 'R-M4') || locked || busy || copying || skipChosen.current || document.bridge?.skip || document.bridge?.sentence || !usable.data?.items.length) return;
@@ -134,10 +136,10 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     switch (location.kind) {
       case 'paragraph': return select(root.querySelector<HTMLTextAreaElement>(`[data-paragraph="${location.id}"]`), location.start, location.end);
       case 'title': return select(root.querySelector<HTMLInputElement>('input[aria-label="正文标题"]'), location.start, location.end);
-      case 'bridge': return select(bridgeText.current, location.start, location.end);
+      case 'bridge': if (settings.current) settings.current.open = true; return select(bridgeText.current, location.start, location.end);
       case 'tag': return root.querySelector<HTMLInputElement>('input[aria-label="确认发布标签"]')?.focus();
       case 'cover': return onGoCover();
-      case 'slot': return slotTop.current?.scrollIntoView?.({ block: 'nearest' });
+      case 'slot': if (settings.current) settings.current.open = true; return slotTop.current?.scrollIntoView?.({ block: 'nearest' });
       case 'text': return undefined;
     }
   }
@@ -169,7 +171,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
         case 'skipBridge': skipChosen.current = true; return edit(withBridge(document, { skip: true }));
         case 'autoPickBridge': return await pick(false);
         case 'swapBridge': return await pick(true);
-        case 'chooseAccount': return accountSelect.current?.focus();
+        case 'chooseAccount': if (settings.current) settings.current.open = true; return accountSelect.current?.focus();
         case 'openIdentity': return setIdentityOpen(true);
         case 'confirmBioWritten': return setBioConfirm(true);
         case 'editByHand': return locate(finding.location);
@@ -337,7 +339,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
         {report.data?.notRun.map(item => <p key={item.rule} className={styles.hint}>未检查：{item.reason}。</p>)}
       </>}
     </section>
-    <div ref={slotTop}>
+    <details ref={settings}><summary>账号与衔接设置 · {bridgeSummary}</summary><div ref={slotTop}>
       <label>所属账号
         <select ref={accountSelect} aria-label="所属账号" disabled={locked || accounts.isPending}
           value={document.accountRef ?? ''} onChange={event => edit({ ...document, accountRef: event.target.value || null })}>
@@ -352,6 +354,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     <BridgeSlot state={report.data ? state : null} document={document} usable={usable.data?.items ?? null} disabled={!fixable} textRef={bridgeText} onChange={next => { skipChosen.current = next.bridge?.skip === true; edit(next); }} onSaveBack={sentence => void saveBack(sentence)} />
     {state === 'ready' && usable.isPending ? <p>正在读取可用衔接句…</p> : null}
     {state === 'ready' && usable.isError ? <p role="alert" className={styles.problem}>衔接句读取失败。<ActionButton variant="quiet" onClick={() => void usable.refetch()}>重试</ActionButton></p> : null}
+    </details>
     </div>
     <section hidden={panelView !== 'materials'} aria-label="稿件素材">
       <h3>这篇的材料与出处</h3>
@@ -362,6 +365,8 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
       {copyContainer ? <ActionButton variant="outline" disabled={!document.title.trim() || !canCopy} onClick={() => void copyTitle()}>复制标题</ActionButton> : null}
       <h3>封面大字</h3><p>{document.pages.find(page => page.kind === 'cover')?.title || '还没有填写封面大字'}</p>
       <ActionButton variant="quiet" onClick={onGoCover}>编辑封面</ActionButton>
+      <h3>标题 skill</h3><p className={styles.hint}>可在设置中编辑和切换标题做法。</p>
+      <a href="/settings/models?section=skills&amp;task=creation_title">管理标题 skill ↗</a>
     </section>
     <section hidden={panelView !== 'preview'} aria-label="稿件预览">
       <h3>{document.title || '未命名稿件'}</h3>

@@ -6,6 +6,7 @@ import {
   decodeAccounts, decodeCandidates, decodeCheckReport, decodeCopiedMark, decodeCopyReady, decodeCopyStatus,
   decodeFactCardReceipt, decodeFactCards, decodeIdentityReceipt, decodeSentenceCheck, decodeSentenceReceipt, decodeExperiences, decodeExperienceReceipt, decodeExperienceRequest, decodeExperienceCancellation,
   decodePersonaFacts, decodePersonaReceipt, decodePersonaHistory, decodePersonaRequest,
+  decodePublicationCandidates, decodePublicationLink, decodePublicationLinks, decodePublicationUnlink,
   decodeSentences, type OrgRelation, type ReviewAction, type SentenceOrigin, type SentenceStatus,
 } from './assetsModel';
 
@@ -153,6 +154,18 @@ export async function confirmCopy(workId: string, receiptRef: string, command: {
 }
 export async function copyStatus(workId: string, signal?: AbortSignal) {
   return decodeCopyStatus(await requestJson(`${base}/works/${id(workId)}/copy-status`, { signal }));
+}
+export async function publicationCandidates(workId: string, signal?: AbortSignal) {
+  return decodePublicationCandidates(await requestJson(`${base}/works/${id(workId)}/publication-candidates`, { signal }));
+}
+export async function linkPublication(workId: string, command: { requestId: string; expectedRevision: string; publicationRef: string }) {
+  return decodePublicationLink(await send('POST', `/works/${id(workId)}/publication-link`, command));
+}
+export async function publicationLinks(workId: string, signal?: AbortSignal) {
+  return decodePublicationLinks(await requestJson(`${base}/works/${id(workId)}/publication-links`, { signal }));
+}
+export async function unlinkPublication(workId: string, linkRef: string, requestId: string) {
+  return decodePublicationUnlink(await send('POST', `/works/${id(workId)}/publication-links/${id(linkRef)}/unlink`, { requestId }));
 }
 
 const messages: Record<string, string> = {

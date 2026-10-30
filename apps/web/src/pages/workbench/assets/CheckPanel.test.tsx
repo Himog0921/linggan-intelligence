@@ -505,6 +505,22 @@ describe('copy', () => {
 });
 
 describe('account and bridge slot', () => {
+  it('keeps account settings compact and opens them when a finding asks to choose an account', async () => {
+    vi.mocked(api.checkDraft).mockResolvedValue(report([finding({ rule:'R-M1', level:'must', message:'还没选账号', fixes:[{label:'选择账号',action:'chooseAccount'}] })]));
+    show(); await ready();
+    const details = screen.getByText(/账号与衔接设置/).closest('details');
+    expect(details).not.toHaveAttribute('open');fireEvent.click(screen.getByRole('button',{name:'选择账号'}));
+    expect(details).toHaveAttribute('open');expect(screen.getByLabelText('所属账号')).toHaveFocus();
+  });
+  it('shows the selected bridge even while settings are collapsed', async () => {
+    show({document:doc({bridge:{skip:false,afterParagraph:P1,sentence:{sentenceCode:'XJ-0001',sentenceRevision:1,group:'parent',text:'我也是学员家长',edited:false}}})});
+    await ready();expect(screen.getByText(/账号与衔接设置 · 已放入：我也是学员家长/)).toBeVisible();
+  });
+  it('does not say a retained bridge will be inserted for an unrelated account', async () => {
+    vi.mocked(api.checkDraft).mockResolvedValue(report([], {bridgeState:'no_relation'}));
+    show({document:doc({bridge:{skip:false,afterParagraph:P1,sentence:{sentenceCode:'XJ-0001',sentenceRevision:1,group:'parent',text:'我也是学员家长',edited:false}}})});
+    await ready();expect(screen.getByText(/已选，当前不放入：我也是学员家长/)).toBeVisible();
+  });
   it('changes the account through the ordinary edit and offers the identity editor', async () => {
     vi.mocked(api.listAccounts).mockResolvedValue([account(), account({ accountRef: '00000000-0000-4000-8000-000000000099', accountName: '另一个号', identity: null })]);
     const { edit } = show();

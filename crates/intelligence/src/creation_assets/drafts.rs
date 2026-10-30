@@ -44,6 +44,95 @@ pub async fn check_draft(db: &Database, doc: &WorkDocument) -> Result<CheckRepor
     check_draft_for_work(db, doc, None).await
 }
 
+/// Summaries contain no manuscript text. Unreadable, stale or withdrawn drafts are omitted.
+pub async fn check_saved_drafts(
+    db: &Database,
+    req: &SavedDraftCheckRequest,
+) -> Result<Vec<SavedDraftCheck>, AssetsError> {
+    if req.items.len() > 25
+        || req
+            .items
+            .iter()
+            .map(|item| item.work_id)
+            .collect::<std::collections::HashSet<_>>()
+            .len()
+            != req.items.len()
+    {
+        return Err(AssetsError::Invalid("items"));
+    }
+    let mut result = Vec::new();
+    for item in &req.items {
+        let mut tx = db.pool().begin().await?;
+        let (domain, mut revision) =
+            match workbench::read_revision_in(&mut tx, item.work_id, None).await {
+                Ok(work) => work,
+                Err(WorkbenchError::Database(e)) => return Err(AssetsError::Database(e)),
+                Err(_) => continue,
+            };
+        if domain != req.domain_ref || revision.id != item.revision_id {
+            continue;
+        }
+        // Only histories that have ever referenced an experience need the withdrawal gate.
+        // Detached current revisions still enter it, just like read_work.
+        let has_experience_history: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_revision WHERE work_ref=$1 AND jsonb_array_length(COALESCE(document->'experienceSlots','[]'::jsonb))>0)")
+            .bind(item.work_id).fetch_one(&mut *tx).await?;
+        if has_experience_history {
+            sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+                .bind("creation_assets:experience-gate")
+                .execute(&mut *tx)
+                .await?;
+        }
+        if (has_experience_history
+            && !workbench::withdrawn_experience_history_in(&mut tx, item.work_id)
+                .await
+                .map_err(workbench_error)?
+                .is_empty())
+            || !workbench::experience_fragments_available_in(
+                &mut tx,
+                revision.id,
+                &revision.document,
+            )
+            .await
+            .map_err(workbench_error)?
+        {
+            continue;
+        }
+        let before_redaction = revision.document.clone();
+        let statuses = workbench::redact_revision_with_statuses_in(&mut tx, domain, &mut revision)
+            .await
+            .map_err(workbench_error)?;
+        if revision.document != before_redaction
+            || statuses.iter().any(|source| source.state != "readable")
+            || revision
+                .document
+                .uses
+                .iter()
+                .any(|usage| usage.state == workbench::UseState::NeedsReview)
+        {
+            continue;
+        }
+        let ctx = load_context(&mut tx, revision.document.account_ref).await?;
+        let mut report = check_manuscript(&Subject::from_document(&revision.document), &ctx);
+        add_grade_warnings(&mut tx, &revision.document, &mut report).await?;
+        add_repeated_experience_warnings(
+            &mut tx,
+            &revision.document,
+            Some(item.work_id),
+            &mut report,
+        )
+        .await?;
+        tx.commit().await?;
+        result.push(SavedDraftCheck {
+            work_id: item.work_id,
+            revision_id: item.revision_id,
+            must: report.count(Level::Must),
+            warn: report.count(Level::Warn),
+            not_run: report.not_run.len(),
+        });
+    }
+    Ok(result)
+}
+
 /// When the current work is known, distinguish this draft's own reference from other drafts.
 pub async fn check_draft_for_work(
     db: &Database,
@@ -441,6 +530,10 @@ pub async fn prepare_copy(
     .bind(text_sha(&copy))
     .execute(&mut *tx)
     .await?;
+    for slot in &report_doc.experience_slots {
+        sqlx::query("INSERT INTO linggan_creation_experience_copy_link(receipt_ref,experience_ref) VALUES($1,$2) ON CONFLICT DO NOTHING")
+            .bind(receipt).bind(slot.experience_ref).execute(&mut *tx).await?;
+    }
     tx.commit().await?;
     Ok(ready(
         receipt,

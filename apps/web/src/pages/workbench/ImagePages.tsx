@@ -2,7 +2,7 @@ import { humanMoment } from '../../shared/formatting';
 import { newImagePage as newPage } from './imagePageFactory';
 import { ActionButton } from '../../shared/ActionButton';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { AssetRecord, ExportRecord, ImagePage, Revision, WorkDocument } from './workbenchModel';
+import type { AssetRecord, Citation, ExportRecord, ImagePage, Revision, WorkDocument } from './workbenchModel';
 import { ExportWorkflow, exportPackageUrl, exportPageUrl } from './exportWorkflow';
 import type { ExportProgress, ExportTransport } from './exportWorkflow';
 import { previewSplit, renderPage } from './renderer';
@@ -17,6 +17,11 @@ interface Props {
   document: WorkDocument;
   workId: string;
   currentRevisionId?: string;
+  sourceRevision?: Revision;
+  onReadRevision?: (revision: string) => Promise<Revision>;
+  onQualifySources?: (citations: Citation[]) => Promise<boolean>;
+  sourceCheckGeneration?: () => number;
+  sourceResetSequence?: number;
   onChange: (document: WorkDocument) => void;
   onUploadAsset: (file: File) => Promise<AssetRecord>;
   disabled?: boolean;
@@ -71,7 +76,7 @@ const progressLabel = (value: ExportProgress) => ({ saving: '正在保存作品'
 export function ImagePages(props: Props) {
   const { document: documentValue, workId, onChange, disabled = false } = props;
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [deleted, setDeleted] = useState<{page: ImagePage; index: number}[]>([]);
+  const [deleted, setDeleted] = useState<{page: ImagePage; index: number; baseline?: Revision; sources: WorkDocument['derivedSources']; excerptIds: string[]; citations: Citation[]}[]>([]);
   const [titleProposal, setTitleProposal] = useState<string | null>(null);
   const [titleUndo, setTitleUndo] = useState<{pageId: string; before: string; after: string} | null>(null);
   const [split, setSplit] = useState<{original: ImagePage; pages: ImagePage[]} | null>(null);
@@ -90,17 +95,19 @@ export function ImagePages(props: Props) {
   const latestDocument = useRef(documentValue);
   const contentGeneration = useRef(0);
   const lastEpoch = useRef(documentValue.experienceEpoch);
+  const lastSourceReset = useRef(props.sourceResetSequence);
   const [exportRetryAvailable, setExportRetryAvailable] = useState(false);
   const [exportUnconfirmed, setExportUnconfirmed] = useState(false);
   useLayoutEffect(() => {
     latestDocument.current = documentValue;
-    if (lastEpoch.current === documentValue.experienceEpoch) return;
+    if (lastEpoch.current === documentValue.experienceEpoch && lastSourceReset.current === props.sourceResetSequence) return;
     lastEpoch.current = documentValue.experienceEpoch;
+    lastSourceReset.current = props.sourceResetSequence;
     contentGeneration.current += 1;
     setDeleted([]); setTitleProposal(null); setTitleUndo(null); setSplit(null);
     setValidation(null); setLastGeneratedDocument(null); setBodyChanges([]);
     dismissedChanges.current.clear();
-  }, [documentValue]);
+  }, [documentValue, props.sourceResetSequence]);
   const workflow = useRef<ExportWorkflow | null>(null);
   const editablePages = documentValue.pages.filter(item => props.step === 'cover' ? item.kind === 'cover' : props.step === 'inner' ? item.kind !== 'cover' : true);
   const page = editablePages.find(item => item.id === selectedId) ?? editablePages[0];
@@ -191,14 +198,45 @@ export function ImagePages(props: Props) {
   };
   const deletePage = () => {
     if (!page || page.kind === 'cover') return;
-    setDeleted(current => [...current, {page, index: documentValue.pages.findIndex(item => item.id === page.id)}]);
+    const sources = documentValue.derivedSources.filter(source => 'pageId' in source.target && source.target.pageId === page.id);
+    const excerptIds = documentValue.uses.flatMap(use => 'pageId' in use.target && use.target.pageId === page.id && use.excerptId ? [use.excerptId] : []);
+    const citations = [...sources.map(source => source.citation), ...excerptIds.flatMap(id => {
+      const excerpt = documentValue.excerpts.find(item => item.id === id);
+      return excerpt ? [excerpt.citation] : [];
+    })];
+    setDeleted(current => [...current, {page, index: documentValue.pages.findIndex(item => item.id === page.id), baseline: props.sourceRevision, sources, excerptIds, citations}]);
     onChange({ ...documentValue, pages: documentValue.pages.filter(item => item.id !== page.id) });
     setSelectedId(null); setSplit(null);
   };
-  const recoverPage = () => {
-    const last = deleted.at(-1); if (!last) return;
-    const pages = [...documentValue.pages]; pages.splice(Math.min(last.index, pages.length), 0, last.page);
-    onChange({ ...documentValue, pages }); setDeleted(current => current.slice(0, -1)); setSelectedId(last.page.id);
+  const recoverPage = async () => {
+    const last = deleted.at(-1); if (!last || busy) return;
+    const generation = props.sourceCheckGeneration?.();
+    setBusy(true); setError('');
+    try {
+      if (last.sources.length || last.excerptIds.length) {
+        const baseline = last.baseline;
+        const oldPage = baseline?.document.pages.find(item => item.id === last.page.id);
+        const knownSources = last.sources.every(item => baseline?.document.derivedSources.some(source => JSON.stringify(source) === JSON.stringify(item)));
+        const knownExcerpts = last.excerptIds.every(id => baseline?.document.excerpts.some(excerpt => excerpt.id === id));
+        if (baseline && oldPage && knownSources && knownExcerpts && props.onReadRevision) {
+          const source = await props.onReadRevision(baseline.id);
+          const original = source.document.pages.find(item => item.id === last.page.id);
+          const unavailable = last.excerptIds.some(id => source.document.excerpts.find(excerpt => excerpt.id === id)?.selectedText === null || !source.document.excerpts.some(excerpt => excerpt.id === id));
+          if (!original || JSON.stringify(original) !== JSON.stringify(oldPage) || unavailable) { setError('来源当前不可用或图页已变化，暂不能恢复此页。'); return; }
+        } else if (last.citations.length < last.sources.length + last.excerptIds.length || !props.onQualifySources || !await props.onQualifySources(last.citations)) {
+          setError('来源当前不可用或无法核验，暂不能恢复此页。'); return;
+        }
+      }
+      if (props.sourceCheckGeneration && generation !== props.sourceCheckGeneration()) {
+        setError('来源状态已变化，请重新核验后再恢复此页。'); return;
+      }
+      const latest = latestDocument.current;
+      const pages = [...latest.pages]; pages.splice(Math.min(last.index, pages.length), 0, last.page);
+      const sources = [...latest.derivedSources];
+      for (const item of last.sources) if (!sources.some(source => JSON.stringify(source) === JSON.stringify(item))) sources.push(item);
+      onChange({ ...latest, pages, derivedSources: sources }); setDeleted(current => current.slice(0, -1)); setSelectedId(last.page.id);
+    } catch { setError('无法核验来源，暂不能恢复此页。'); }
+    finally { setBusy(false); }
   };
   const upload = async (file?: File, retryPageId?: string) => {
     if (!file) return;
@@ -263,7 +301,7 @@ export function ImagePages(props: Props) {
       <div className={styles.actions}>
         {!showingExport && props.onUndo && <ActionButton variant="soft" disabled={locked || !props.canUndo} onClick={props.onUndo}>撤销图页编辑</ActionButton>}
         {!showingExport && props.onRedo && <ActionButton variant="soft" disabled={locked || !props.canRedo} onClick={props.onRedo}>重做图页编辑</ActionButton>}
-        {!showingExport && deleted.length > 0 && <ActionButton disabled={locked || documentValue.pages.length >= 30} onClick={recoverPage}>恢复删除页</ActionButton>}
+        {!showingExport && deleted.length > 0 && <ActionButton disabled={locked || documentValue.pages.length >= 30} onClick={() => void recoverPage()}>恢复删除页</ActionButton>}
       </div>
       {!props.step && <ActionButton aria-pressed={allPreview} onClick={() => setAllPreview(value => !value)}>{allPreview ? '返回编辑' : '整组预览'}</ActionButton>}
     </div>

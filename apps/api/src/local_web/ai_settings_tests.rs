@@ -360,7 +360,13 @@ async fn ai_settings_http_skill_import_handles_large_files_without_enabling_or_r
     assert_eq!(version["files"][0]["content"], manifest);
     let (status, settings) = call(app.clone(), "/api/local/ai-settings", None).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(settings["skills"].as_array().unwrap().len(), 1);
+    assert!(
+        settings["skills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|skill| skill["name"] == "example")
+    );
     assert!(
         settings["controls"]
             .as_array()

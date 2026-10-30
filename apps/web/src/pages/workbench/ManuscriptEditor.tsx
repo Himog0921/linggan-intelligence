@@ -1,6 +1,7 @@
 import { ActionButton } from '../../shared/ActionButton';
 import { IdeaBoxLink } from './IdeaBoxLink';
 import { newImagePage } from './imagePageFactory';
+import type { ReactNode } from 'react';
 import type { IdeaBoxSummary } from './workbenchModel';
 import type { WorkDocument } from "./workbenchModel";
 import styles from "./WorkbenchPage.module.css";
@@ -17,7 +18,7 @@ export function ManuscriptEditor({
   onCover,
   onTopic,
   accountName,
-  ideas = [], ideaState = 'success', onOpenTopic = () => {}, draftInputs, onDraftInputs,
+  ideas = [], ideaState = 'success', onOpenTopic = () => {}, draftInputs, onDraftInputs, titleGenerator,
 }: {
   document: WorkDocument;
   edit: (document: WorkDocument) => void;
@@ -33,6 +34,7 @@ export function ManuscriptEditor({
   ideas?: IdeaBoxSummary[]; ideaState?: 'pending' | 'error' | 'success'; onOpenTopic?: (anchor: string) => void;
   draftInputs: { cover: string; note: string; idea: string };
   onDraftInputs: (inputs: { cover: string; note: string; idea: string }) => void;
+  titleGenerator?: ReactNode;
 }) {
   const cover = document.pages.find(page => page.kind === 'cover');
   const coverCandidate = draftInputs.cover;
@@ -61,6 +63,7 @@ export function ManuscriptEditor({
         </button> : <button type="button" className={`${styles.coverPreview} ${styles.emptyCover}`} onClick={onCover} aria-label="设置封面"><span>设置封面</span></button>}
         <div className={styles.titleFields}>
           <label>封面大字<input aria-label="封面大字" value={cover?.title ?? ''} disabled={!cover && document.pages.length >= 30} onCompositionStart={() => compose(true)} onCompositionEnd={() => compose(false)} onChange={event => setCoverTitle(event.target.value)} /></label>
+          {titleGenerator}
           <div className={styles.titleCandidates} aria-label="封面大字候选">
             <div className={styles.candidateList}>{document.coverTitleCandidates.map((candidate, index) => <span key={`${index}-${candidate}`}><button type="button" disabled={!cover && document.pages.length >= 30} aria-pressed={candidate === cover?.title} onClick={() => setCoverTitle(candidate)}>{candidate}</button><button type="button" aria-label={`删除封面候选 ${candidate}`} onClick={() => edit({ ...document, coverTitleCandidates: document.coverTitleCandidates.filter((_, i) => i !== index) })}>×</button></span>)}</div>
             <details><summary>添加封面候选</summary><div className={styles.candidateInput}><input aria-label="新封面候选" value={coverCandidate} onCompositionStart={() => compose(true)} onCompositionEnd={() => compose(false)} onChange={event => onDraftInputs({ ...draftInputs, cover: event.target.value })} placeholder="手动添加，最多 10 字" /><ActionButton onClick={() => addCandidate('cover')} disabled={!coverCandidate.trim() || Array.from(coverCandidate.trim()).length > 10 || document.coverTitleCandidates.length >= 20}>添加候选</ActionButton></div></details>
@@ -132,6 +135,9 @@ export function ManuscriptEditor({
                 };
                 edit({
                   ...document,
+                  derivedSources: [...document.derivedSources, ...document.derivedSources
+                    .filter(source => source.target.kind === 'paragraph' && source.target.paragraphId === p.id)
+                    .map(source => ({ ...source, target: { kind: 'paragraph' as const, paragraphId: next.id } }))],
                   paragraphs: document.paragraphs.flatMap((x) =>
                     x.id === p.id
                       ? [
@@ -166,6 +172,7 @@ export function ManuscriptEditor({
                   paragraphs: document.paragraphs.filter((x) => x.id !== p.id),
                   experienceSlots: document.experienceSlots.filter(slot => slot.paragraphId !== p.id),
                   experienceGaps: document.experienceGaps.filter(id => id !== p.id),
+                  derivedSources: document.derivedSources.filter(source => source.target.kind !== 'paragraph' || source.target.paragraphId !== p.id),
                   uses: document.uses.filter(
                     (u) =>
                       u.target.kind !== "paragraph" ||
@@ -176,6 +183,7 @@ export function ManuscriptEditor({
             >
               删除这一段
             </ActionButton>
+            {document.derivedSources.some(source => source.target.kind === 'paragraph' && source.target.paragraphId === p.id) ? <p>已记录参考来源；来源不可用时，本段会暂时隐藏。</p> : null}
             {document.uses
               .filter(
                 (u) =>

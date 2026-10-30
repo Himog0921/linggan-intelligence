@@ -191,6 +191,7 @@ export interface WorkDocument {
   canvas: CanvasBlock[];
   pages: ImagePage[];
   uses: MaterialUse[];
+  derivedSources: { target: UseTarget; citation: Citation }[];
 }
 export interface Revision {
   id: string;
@@ -245,6 +246,8 @@ export interface WorkSummary {
   revisionId: string;
   savedAt: string;
   copiedRevisionId?: string | null;
+  publishedRevisionId?: string | null;
+  publicationUnavailable?: boolean;
   ideaRef?: string | null;
 }
 export interface IdeaBoxSummary { ideaRef: string; anchorWorkId: string; anchorRevisionId: string; savedAt: string; name: string; intent: string }
@@ -336,6 +339,7 @@ export interface AiPreview {
   reservedTokens: number;
   maxCalls: number;
   outboundInput: unknown;
+  outboundSystem?: string;
   confirmationRequired: boolean;
   taskConfigRef?: string;
 }
@@ -378,6 +382,11 @@ export interface AiStatus {
     costPicoUsd?: string | null;
   };
 }
+export type TitleStatus = Omit<AiStatus, 'action' | 'suggestion'> & {
+  action: 'title_ideas';
+  suggestion: { coverTitles: string[]; noteTitles: string[] } | null;
+  titleWarnings: { cover: boolean[]; note: boolean[] } | null;
+};
 type Parser<T> = (value: unknown) => T;
 export class WorkbenchContractError extends Error {
   constructor() {
@@ -601,7 +610,8 @@ export const parseWorkDocument = shape<WorkDocument>({
   excerpts: array(excerpt),
   canvas: array(canvas),
   pages: array(parseImagePage),
-  uses: array(materialUse)
+  uses: array(materialUse),
+  derivedSources: v => v === undefined ? [] : array(shape({ target: parseUseTarget, citation: parseCitation }))(v)
 });
 export const parseRevision = shape<Revision>({
   id: uuid,
@@ -657,6 +667,8 @@ export const parseWorkList = shape<{
     revisionId: uuid,
     savedAt: str,
     copiedRevisionId: value => value === undefined ? undefined : nullable(uuid)(value),
+    publishedRevisionId: value => value === undefined ? undefined : nullable(uuid)(value),
+    publicationUnavailable: value => value === undefined ? undefined : bool(value),
     ideaRef: value => value === undefined ? undefined : nullable(uuid)(value)
   }))
 });
@@ -782,6 +794,7 @@ export const parsePreview = shape<AiPreview>({
   reservedTokens: integer,
   maxCalls: integer,
   outboundInput: v => v,
+  outboundSystem: optional(str),
   confirmationRequired: bool,
   taskConfigRef: optional(uuid)
 });
@@ -824,6 +837,17 @@ export const parseAiStatus = shape<AiStatus>({
     costPicoUsd: optional(nullable(str))
   })
 });
+export function parseTitleStatus(value: unknown): TitleStatus {
+  const raw = object(value);
+  if (raw.action !== 'title_ideas') return bad();
+  const { titleWarnings, ...baseFields } = raw;
+  const base = parseAiStatus({ ...baseFields, action: 'draft', suggestion: null });
+  const suggestion = raw.suggestion === null ? null : shape<{coverTitles:string[]; noteTitles:string[]}>({coverTitles:array(str), noteTitles:array(str)})(raw.suggestion);
+  if (suggestion && (suggestion.coverTitles.length === 0 || suggestion.coverTitles.length > 10 || suggestion.noteTitles.length === 0 || suggestion.noteTitles.length > 10 || suggestion.coverTitles.some(title => !title.trim() || Array.from(title).length > 10) || suggestion.noteTitles.some(title => !title.trim() || Array.from(title).length > 20))) return bad();
+  const warnings = titleWarnings === null ? null : shape<{cover:boolean[];note:boolean[]}>({cover:array(bool),note:array(bool)})(titleWarnings);
+  if ((suggestion === null) !== (warnings === null) || (suggestion && warnings && (warnings.cover.length !== suggestion.coverTitles.length || warnings.note.length !== suggestion.noteTitles.length))) return bad();
+  return { ...base, action: 'title_ideas', suggestion, titleWarnings: warnings };
+}
 export function newDocument(title = ''): WorkDocument {
   return {
     contract: 'content-workbench.v1',
@@ -848,7 +872,8 @@ export function newDocument(title = ''): WorkDocument {
     excerpts: [],
     canvas: [],
     pages: [],
-    uses: []
+    uses: [],
+    derivedSources: []
   };
 }
 export function scalarRange(text: string, start: number, end: number): {

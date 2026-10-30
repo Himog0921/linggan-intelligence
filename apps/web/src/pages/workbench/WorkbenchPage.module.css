@@ -328,6 +328,14 @@
 .workspace>div:not([hidden]) {flex:1;min-height:0;}
 .library {width:100%;overflow:auto;max-height:100%;margin:0;padding:var(--lgi-space-5) 0;}
 .editorWorkspace {display:flex;flex-direction:column;height:100%;min-height:0;overflow:hidden;}
+.editorWorkspace[data-view='body'] {position:relative;}
+.compactCommand {position:absolute;top:var(--lgi-space-2);right:calc(var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-5));z-index:var(--lgi-z-popover);}
+.compactCommand>summary {cursor:pointer;list-style:none;border:1px solid var(--lgi-border);background:var(--lgi-canvas);padding:var(--lgi-space-2) var(--lgi-space-3);font-size:var(--lgi-text-data);}
+.compactCommand>summary::after {content:' ▾';}
+.compactCommandPanel {position:absolute;right:0;top:100%;width:calc(var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-8));max-width:65vw;display:flex;flex-direction:column;align-items:stretch;gap:var(--lgi-space-3);padding:var(--lgi-space-4);background:var(--lgi-canvas);border:1px solid var(--lgi-border);box-shadow:var(--lgi-shadow-overlay);}
+.editorWorkspace[data-view='body'] .compactCommandPanel .writeControls {justify-content:flex-start;flex-wrap:wrap;}
+.compactCommandPanel>.row {justify-content:flex-end;}
+.editorWorkspace[data-view='body'] .manuscriptContext {padding-right:calc(var(--lgi-space-24) + var(--lgi-space-16) + var(--lgi-space-4));}
 .commandRow {position:sticky;top:0;z-index:var(--lgi-z-sticky);background:var(--lgi-canvas);flex-shrink:0;margin-bottom:var(--lgi-space-3);}
 .editingSurface {flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;}
 .editorWorkspace[data-view=materials] .editingSurface {display:flex;flex-direction:column;overflow:hidden;}
@@ -420,6 +428,7 @@
 .candidateList {display:flex;flex-wrap:wrap;gap:var(--lgi-space-2);}
 .candidateList span {display:inline-flex;border:1px solid var(--lgi-border);background:var(--lgi-canvas);}
 .candidateList button {border:0;background:transparent;padding:var(--lgi-space-1) var(--lgi-space-2);font-size:var(--lgi-text-label);color:var(--lgi-ink);}
+.candidateList button.titleRisk {color:var(--lgi-danger);background:var(--lgi-danger-soft);}
 .candidateList button:hover {background:var(--lgi-canvas-low);}
 .candidateInput {display:flex;align-items:center;gap:var(--lgi-space-2);}
 .candidateInput input {min-width:0;flex:1;}

@@ -162,3 +162,20 @@ describe('bounded collection requests', () => {
     expect(requestJson).toHaveBeenCalledTimes(1);
   });
 });
+
+it('qualifies an unsaved citation using the exact anchor request contract', async () => {
+  const { qualifyCitation } = await import('./workbenchApi');
+  const citation = { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment' as const, sourceRef: id, workRef: other, field: 'comment_body' as const, sourceVersion: 'v1', start: 0, end: 1, textHash: 'a'.repeat(64), location: null };
+  vi.mocked(requestJson).mockResolvedValue({citation, selectedText: '测', textHash: citation.textHash});
+  expect(await qualifyCitation(other, citation)).toBe(true);
+  expect(requestJson).toHaveBeenCalledWith('/ops/api/creation/sources/validate', {method: 'POST', body: {domainRef: other, asOf: citation.asOf, blockRef: citation.blockRef, sourceKind: citation.sourceKind, sourceRef: id, workRef: other, field: citation.field, sourceVersion: citation.sourceVersion, start: 0, end: 1}});
+});
+
+it('keeps title candidates and server-side warning flags aligned', async () => {
+  const { titleStatus } = await import('./workbenchApi');
+  const status = {requestId:id,workRef:other,invocationRef:id,state:'succeeded',inputRevision:id,action:'title_ideas',methodVersion:'creation-title.v1',suggestion:{coverTitles:['根治拖延'],noteTitles:['陪孩子先做第一步']},titleWarnings:{cover:[true],note:[false]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:1,outputTokens:1,chargedTokens:2,costUsd:null}};
+  vi.mocked(requestJson).mockResolvedValue(status);
+  expect((await titleStatus(id)).titleWarnings?.cover).toEqual([true]);
+  vi.mocked(requestJson).mockResolvedValue({...status,titleWarnings:{cover:[],note:[false]}});
+  await expect(titleStatus(id)).rejects.toThrow(WorkbenchContractError);
+});

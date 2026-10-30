@@ -182,6 +182,28 @@ pub(crate) async fn qualify(
     )
     .await
     .map_err(|_| WorkbenchError::Source)?;
+    let derived = &r.document.derived_sources;
+    let derived_qualification = crate::content_workbench_sources::qualify_citations_in_domain(
+        tx,
+        &derived
+            .iter()
+            .map(|source| source.citation.clone())
+            .collect::<Vec<_>>(),
+        domain,
+    )
+    .await
+    .map_err(|_| WorkbenchError::Source)?;
+    if derived
+        .iter()
+        .zip(derived_qualification)
+        .any(|(source, state)| {
+            state.state != "readable"
+                && super::validation::target_text(&r.document, &source.target)
+                    .is_some_and(|text| !text.is_empty())
+        })
+    {
+        return Err(WorkbenchError::Source);
+    }
     for (e, q) in r.document.excerpts.iter().zip(qualification) {
         if q.state != "readable" {
             let active = r.document.uses.iter().any(|u| {

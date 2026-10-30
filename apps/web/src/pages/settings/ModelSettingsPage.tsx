@@ -7,6 +7,7 @@ import { AiModelSection } from './AiModelSection';
 import { AiTaskSection } from './AiTaskSection';
 import { AiSkillSection } from './AiSkillSection';
 import { AiHealthSection } from './AiHealthSection';
+import { CreativeBudget } from './CreativeBudget';
 import { AiAdvanced, AiCapabilities, AiConnections, AiRuns } from './AiSettingsExperience';
 import { NoticeLine } from './AiSettingsFields';
 import { useAiAction } from './useAiAction';
@@ -42,8 +43,8 @@ export function ModelSettingsPage() {
     {settings.isError ? <div role="alert" className={styles.error}>AI 设置读取失败，无法核对当前状态。{settings.error instanceof ApiError ? ' ' + settings.error.message : ''} {data ? '下方为上一次成功读取的内容。' : ''}</div> : null}
     {settings.isPending ? <p role="status" className={styles.loading}>正在读取 AI 设置…</p> : null}
   </>;
-  const legacySurface = data ? legacy === 'models' ? <AiModelSection data={data} action={action}/> : legacy === 'automation' ? <AiTaskSection data={data} action={action}/> : legacy === 'skills' ? <AiSkillSection data={data} action={action}/> : <AiHealthSection data={data} action={action}/> : null;
-  const viewSurface = data ? view === 'capabilities' ? <AiCapabilities data={data} action={action}/> : view === 'models' ? <AiConnections data={data} action={action}/> : view === 'runs' ? <AiRuns data={data}/> : <AiAdvanced data={data} action={action}/> : null;
+  const legacySurface = data ? legacy === 'models' ? <AiModelSection data={data} action={action}/> : legacy === 'automation' ? <><CreativeBudget/><AiTaskSection data={data} action={action}/></> : legacy === 'skills' ? <AiSkillSection data={data} action={action}/> : <AiHealthSection data={data} action={action}/> : null;
+  const viewSurface = data ? view === 'capabilities' ? <><CreativeBudget/><AiCapabilities data={data} action={action}/></> : view === 'models' ? <AiConnections data={data} action={action}/> : view === 'runs' ? <AiRuns data={data}/> : <AiAdvanced data={data} action={action}/> : null;
 
   return <AppShell active={null} boundaryLabel={data?.synthetic ? '合成隔离环境' : '本机设置'} crumb={crumb} meta={meta}>
     {legacy ? <main className={[legacyStyles.page, styles.root].join(' ')} data-ai-settings-page aria-labelledby="ai-settings-page-title">

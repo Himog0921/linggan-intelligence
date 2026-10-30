@@ -23,12 +23,14 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
         || doc.angle.chars().count() > 4000
         || doc.outline.len() > 100
         || doc.paragraphs.len() > 1000
+        || !doc.experience_use_order.is_empty()
         || doc.experience_slots.len() > 1000
         || doc.experience_gaps.len() > 1000
         || doc.excerpts.len() > 200
         || doc.canvas.len() > 500
         || doc.pages.len() > 30
         || doc.uses.len() > 1000
+        || doc.derived_sources.len() > 1000
         || doc.materials.len() > 60
     {
         return Err(WorkbenchError::Invalid("document"));
@@ -159,6 +161,12 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
     }
     if covers > 1 {
         return Err(WorkbenchError::Invalid("cover"));
+    }
+    for derived in &doc.derived_sources {
+        citation(&derived.citation)?;
+        if target_text(doc, &derived.target).is_none() {
+            return Err(WorkbenchError::Invalid("derived_source_target"));
+        }
     }
     for u in &doc.uses {
         add(u.id)?;

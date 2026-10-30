@@ -23,6 +23,7 @@ pub(crate) enum RequestOwner {
     ExportFreeze,
     ExportCommand,
     AiExecution,
+    Template,
 }
 impl RequestOwner {
     fn name(self) -> &'static str {
@@ -32,6 +33,7 @@ impl RequestOwner {
             Self::ExportFreeze => "export_freeze",
             Self::ExportCommand => "export_command",
             Self::AiExecution => "ai_execution",
+            Self::Template => "template",
         }
     }
 }
@@ -39,7 +41,7 @@ async fn request_owners(
     tx: &mut Transaction<'_, Postgres>,
     request: Uuid,
 ) -> Result<Vec<String>, WorkbenchError> {
-    Ok(sqlx::query_scalar("SELECT 'work' FROM linggan_creation_request WHERE request_ref=$1 UNION ALL SELECT 'asset' FROM linggan_creation_asset WHERE request_ref=$1 UNION ALL SELECT 'export_freeze' FROM linggan_creation_export WHERE request_ref=$1 UNION ALL SELECT 'export_command' FROM linggan_creation_export_request WHERE request_ref=$1 UNION ALL SELECT 'ai_execution' FROM linggan_creation_ai_request WHERE request_ref=$1")
+    Ok(sqlx::query_scalar("SELECT 'work' FROM linggan_creation_request WHERE request_ref=$1 UNION ALL SELECT 'asset' FROM linggan_creation_asset WHERE request_ref=$1 UNION ALL SELECT 'export_freeze' FROM linggan_creation_export WHERE request_ref=$1 UNION ALL SELECT 'export_command' FROM linggan_creation_export_request WHERE request_ref=$1 UNION ALL SELECT 'ai_execution' FROM linggan_creation_ai_request WHERE request_ref=$1 UNION ALL SELECT 'template' FROM linggan_creation_template WHERE request_ref=$1 UNION ALL SELECT 'template' FROM linggan_creation_template_status WHERE request_ref=$1 UNION ALL SELECT 'template' FROM linggan_creation_template_revision WHERE request_ref=$1")
         .bind(request).fetch_all(&mut **tx).await?)
 }
 /// Every creation command uses the same UUID lock, including AI and binary uploads.
@@ -90,6 +92,10 @@ pub(super) async fn receipt(
     let mut stored = r.clone();
     super::experience_fragments::strip(&mut stored.revision.document);
     sqlx::query("INSERT INTO linggan_creation_request(request_ref,work_ref,command_sha256,receipt) VALUES($1,$2,$3,$4)").bind(request).bind(work).bind(command).bind(serde_json::to_value(&stored)?).execute(&mut **tx).await?;
+    for slot in &r.revision.document.experience_slots {
+        sqlx::query("INSERT INTO linggan_creation_experience_command_link(request_ref,experience_ref) VALUES($1,$2) ON CONFLICT DO NOTHING")
+            .bind(request).bind(slot.experience_ref).execute(&mut **tx).await?;
+    }
     Ok(r)
 }
 /// Narrow reconciliation for a command whose response was lost. No execution or retry occurs.

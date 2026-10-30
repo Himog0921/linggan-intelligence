@@ -4,7 +4,7 @@ import { useAiAction } from './useAiAction';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelSettingsPage } from './ModelSettingsPage';
 import { businessSettingsFixture, settingsFixture } from './aiSettingsFixture.test-support';
@@ -16,7 +16,8 @@ let respond: (call: Call) => Reply;
 const ok = (body: unknown): Reply => ({ status: 200, body });
 function mount(url = '/settings/models') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<MemoryRouter initialEntries={[url]}><QueryClientProvider client={client}><ModelSettingsPage/></QueryClientProvider></MemoryRouter>);
+  const router = createMemoryRouter([{ path: '*', element: <ModelSettingsPage /> }], { initialEntries: [url] });
+  return render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
 }
 beforeEach(() => {
   calls = [];

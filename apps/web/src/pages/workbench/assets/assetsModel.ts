@@ -129,6 +129,9 @@ export interface CopyReady {
 }
 export interface CopiedMark { receiptRef: string; revisionId: string; copiedAt: string }
 export interface CopyStatus { copied: CopiedMark | null }
+export interface PublicationCandidate { publicationRef: string; title: string | null; publishedOn: string | null; url: string | null }
+export interface PublicationLinkReceipt { linkRef: string; revisionId: string; publicationRef: string; replayed: boolean }
+export interface PublicationLinkView { linkRef: string; revisionId: string; publicationRef: string; title: string | null; publishedOn: string | null; available: boolean }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function uuid(record: Json, name: string): string {
@@ -136,6 +139,17 @@ function uuid(record: Json, name: string): string {
   if (!UUID.test(value)) throw new ShapeError(name);
   return value;
 }
+export const decodePublicationCandidates = (value: unknown) => decode(value, root => list(root, 'items', item => ({
+  publicationRef: uuid(item, 'publicationRef'), title: optStr(item, 'title'), publishedOn: optStr(item, 'publishedOn'), url: optStr(item, 'url'),
+})));
+export const decodePublicationLink = (value: unknown) => decode(value, item => ({
+  linkRef: uuid(item, 'linkRef'), revisionId: uuid(item, 'revisionId'), publicationRef: uuid(item, 'publicationRef'), replayed: bool(item, 'replayed'),
+}));
+export const decodePublicationLinks = (value: unknown) => decode(value, root => list(root, 'items', item => ({
+  linkRef: uuid(item, 'linkRef'), revisionId: uuid(item, 'revisionId'), publicationRef: uuid(item, 'publicationRef'),
+  title: optStr(item, 'title'), publishedOn: optStr(item, 'publishedOn'), available: bool(item, 'available'),
+})));
+export const decodePublicationUnlink = (value: unknown) => decode(value, item => ({ linkRef: uuid(item, 'linkRef'), replayed: bool(item, 'replayed') }));
 function oneOf<T extends string>(record: Json, name: string, values: readonly T[]): T {
   const value = str(record, name);
   const found = values.find(item => item === value);

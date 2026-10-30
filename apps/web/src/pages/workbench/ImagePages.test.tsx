@@ -95,6 +95,18 @@ describe('V3 controlled image steps',()=>{
     expect(upload.mock.calls[1]?.[0]).toBe(file);
     expect(props.onChange.mock.calls[0]?.[0]).toMatchObject({title:'服务器安全标题',experienceEpoch:epoch});
   });
+  it('clears source-dependent title previews on reread without losing an unconfirmed upload', async()=>{
+    const doc=initial(), file=new File(['synthetic'],'own.png',{type:'image/png'});
+    const upload=vi.fn().mockRejectedValueOnce(new ApiError({kind:'network'}));
+    const props={step:'cover' as const,document:doc,workId:'work',onChange:vi.fn(),onUploadAsset:upload};
+    const view=render(<ImagePages {...props} sourceResetSequence={0}/>);
+    fireEvent.click(screen.getByRole('button',{name:'预览带入正文标题'}));
+    fireEvent.change(screen.getByLabelText('自有图片'),{target:{files:[file]}});
+    await screen.findByRole('button',{name:'核实并重试原图片上传'});
+    view.rerender(<ImagePages {...props} document={{...doc,title:'来源当前不可使用'}} sourceResetSequence={1}/>);
+    expect(screen.queryByRole('button',{name:'确认带入标题'})).not.toBeInTheDocument();
+    expect(screen.getByRole('button',{name:'核实并重试原图片上传'})).toBeEnabled();
+  });
   it('keeps the pending upload when its original page no longer exists',async()=>{
     const doc=initial(), upload=vi.fn().mockRejectedValue(new ApiError({kind:'network'}));
     const props={step:'cover' as const,document:doc,workId:'work',onChange:vi.fn(),onUploadAsset:upload};
@@ -153,4 +165,63 @@ it('keeps generated time and current versus historical frozen versions truthful,
  view.rerender(<ImagePages {...props} exports={[{...record,createdAt:undefined}]} currentRevisionId={undefined}/>);
  expect(screen.getByText(/生成时间未记录 · 历史冻结版本/)).toBeInTheDocument();
  expect(screen.queryByText(/2026-10-19 09:02/)).not.toBeInTheDocument();await act(async()=>{});
+});
+
+
+it('requalifies a deleted AI-derived page before restoring it', async () => {
+  const doc = initial(), page = doc.pages[1]!;
+  doc.derivedSources = [{ target: { kind: 'pageTitle', pageId: page.id }, citation: { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment', sourceRef: crypto.randomUUID(), workRef: crypto.randomUUID(), field: 'comment_body', sourceVersion: 'v1', start: 0, end: 1, textHash: 'a'.repeat(64), location: null } }];
+  const projected = structuredClone(doc); projected.pages[1]!.title = '[来源当前不可使用]';
+  const read = vi.fn().mockResolvedValue({ id: 'revision', number: 1, savedAt: '2026-10-29', document: projected });
+  const changes: WorkDocument[] = [];
+  function Test() { const [current, setCurrent] = useState(doc); return <ImagePages document={current} workId="work" sourceRevision={{ id: 'revision', number: 1, savedAt: '2026-10-29', document: doc }} onReadRevision={read} onUploadAsset={vi.fn()} onChange={next => { changes.push(next); setCurrent(next); }} />; }
+  render(<Test/>); fireEvent.click(screen.getByRole('button',{name:/02 观点/}));
+  fireEvent.click(screen.getByRole('button',{name:'删除此页'}));
+  fireEvent.click(screen.getByRole('button',{name:'恢复删除页'}));
+  expect(await screen.findByText('来源当前不可用或图页已变化，暂不能恢复此页。')).toBeVisible();
+  expect(changes.at(-1)?.pages.some(item => item.id === page.id)).toBe(false);
+  expect(read).toHaveBeenCalledWith('revision');
+});
+it('restores unsaved page edits after checking their saved source version', async () => {
+  const doc = initial(), savedPage = doc.pages[1]!;
+  doc.derivedSources = [{ target: { kind: 'pageTitle', pageId: savedPage.id }, citation: { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment', sourceRef: crypto.randomUUID(), workRef: crypto.randomUUID(), field: 'comment_body', sourceVersion: 'v1', start: 0, end: 1, textHash: 'a'.repeat(64), location: null } }];
+  const baseline = { id: 'revision', number: 1, savedAt: '2026-10-29', document: structuredClone(doc) };
+  const read = vi.fn().mockResolvedValue(baseline); const changes: WorkDocument[] = [];
+  function Test() { const [current, setCurrent] = useState(doc); return <ImagePages document={current} workId="work" sourceRevision={baseline} onReadRevision={read} onUploadAsset={vi.fn()} onChange={next => { changes.push(next); setCurrent(next); }} />; }
+  render(<Test/>); fireEvent.click(screen.getByRole('button',{name:/02 观点/}));
+  fireEvent.change(screen.getByLabelText('图页标题'), { target: { value: '未保存的补充' } });
+  fireEvent.click(screen.getByRole('button',{name:'删除此页'})); fireEvent.click(screen.getByRole('button',{name:'恢复删除页'}));
+  await waitFor(() => expect(changes.at(-1)?.pages.some(item => item.id === savedPage.id && item.title === '未保存的补充')).toBe(true));
+  expect(changes.at(-1)?.derivedSources).toHaveLength(1);
+});
+
+it('recovers a new unsaved page after directly checking its source', async () => {
+  const doc = initial(), page = doc.pages[1]!;
+  const citation = { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment' as const, sourceRef: crypto.randomUUID(), workRef: crypto.randomUUID(), field: 'comment_body' as const, sourceVersion: 'v1', start: 0, end: 1, textHash: 'a'.repeat(64), location: null };
+  doc.derivedSources = [{ target: { kind: 'pageTitle', pageId: page.id }, citation }];
+  const saved = structuredClone(doc); saved.pages = saved.pages.filter(item => item.id !== page.id); saved.derivedSources = [];
+  const baseline = { id: 'revision', number: 1, savedAt: '2026-10-29', document: saved };
+  const qualify = vi.fn().mockResolvedValue(true); const changes: WorkDocument[] = [];
+  function Test() { const [current, setCurrent] = useState(doc); return <ImagePages document={current} workId="work" sourceRevision={baseline} onQualifySources={qualify} onUploadAsset={vi.fn()} onChange={next => { changes.push(next); setCurrent(next); }} />; }
+  render(<Test/>); fireEvent.click(screen.getByRole('button',{name:/02 观点/}));
+  fireEvent.click(screen.getByRole('button',{name:'删除此页'})); fireEvent.click(screen.getByRole('button',{name:'恢复删除页'}));
+  await waitFor(() => expect(changes.at(-1)?.pages.some(item => item.id === page.id)).toBe(true));
+  expect(qualify).toHaveBeenCalledWith([citation]);
+  expect(changes.at(-1)?.derivedSources).toEqual(doc.derivedSources);
+});
+
+it('does not restore a deleted page when source rechecking starts while its read is pending', async () => {
+  const doc = initial(), page = doc.pages[1]!;
+  const citation = { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment' as const, sourceRef: crypto.randomUUID(), workRef: crypto.randomUUID(), field: 'comment_body' as const, sourceVersion: 'v1', start: 0, end: 1, textHash: 'a'.repeat(64), location: null };
+  doc.derivedSources = [{ target: { kind: 'pageTitle', pageId: page.id }, citation }];
+  const baseline = { id: 'revision', number: 1, savedAt: '2026-10-29', document: doc };
+  let finish!: (value: typeof baseline) => void; let generation = 0;
+  const read = vi.fn(() => new Promise<typeof baseline>(resolve => { finish = resolve; }));
+  const changes: WorkDocument[] = [];
+  function Test() { const [current, setCurrent] = useState(doc); return <ImagePages document={current} workId="work" sourceRevision={baseline} sourceCheckGeneration={() => generation} onReadRevision={read} onUploadAsset={vi.fn()} onChange={next => { changes.push(next); setCurrent(next); }} />; }
+  render(<Test/>); fireEvent.click(screen.getByRole('button',{name:/02 观点/}));
+  fireEvent.click(screen.getByRole('button',{name:'删除此页'})); fireEvent.click(screen.getByRole('button',{name:'恢复删除页'}));
+  generation++; await act(async () => { finish(baseline); });
+  expect(screen.getByText('来源状态已变化，请重新核验后再恢复此页。')).toBeVisible();
+  expect(changes.at(-1)?.pages.some(item => item.id === page.id)).toBe(false);
 });

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
+import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ModelSettingsPage } from './ModelSettingsPage';
 import { settingsFixture } from './aiSettingsFixture.test-support';
@@ -14,7 +14,7 @@ let calls: Call[];
 let handler: (call: Call) => Reply | Promise<Reply>;
 const ok = (body: unknown): Reply => ({ status: 200, body });
 beforeEach(() => {
-  calls = []; handler = call => call.method === 'GET' && call.path === '/api/local/ai-settings' ? ok(settingsFixture()) : { status: 503, body: { error: 'fixture_route_unavailable' } };
+  calls = []; handler = call => call.method === 'GET' && call.path === '/api/local/ai-settings' ? ok(settingsFixture()) : call.method === 'GET' && call.path === '/ops/api/creation/ai-budget' ? ok({ capCents: 10000, revision: 1, month: '2026-10', knownPicoUsd: '0', reservedPicoUsd: '0', unknownCalls: 0 }) : { status: 503, body: { error: 'fixture_route_unavailable' } };
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
     const call = { path, method: init?.method ?? 'GET', body: typeof init?.body === 'string' ? JSON.parse(init.body) : {} };
     calls.push(call); const reply = await handler(call);
@@ -24,7 +24,8 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 function renderPage(entry = '/settings/models?section=models', client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
-  return render(<MemoryRouter initialEntries={[entry]}><QueryClientProvider client={client}><ModelSettingsPage /></QueryClientProvider></MemoryRouter>);
+  const router = createMemoryRouter([{ path: '*', element: <ModelSettingsPage /> }], { initialEntries: [entry] });
+  return render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
 }
 const posts = () => calls.filter(call => call.method === 'POST');
 describe('AI 设置四区', () => {
@@ -180,7 +181,7 @@ describe('AI 设置四区', () => {
       expect(await screen.findByRole('heading', { name, level: 2 })).toBeInTheDocument();
     }
     expect(posts()).toHaveLength(0);
-    expect(calls.every(call => call.path.startsWith('/api/local/ai-settings'))).toBe(true);
+    expect(calls.every(call => call.path.startsWith('/api/local/ai-settings') || (call.path === '/ops/api/creation/ai-budget' && call.method === 'GET'))).toBe(true);
   });
   it('连接保存带最新 CAS 修订，明确回执后成功；不测试、不入队', async () => {
     const user = userEvent.setup(); const data = settingsFixture();

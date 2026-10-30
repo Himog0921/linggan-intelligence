@@ -12,6 +12,22 @@ pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/ops/api/creation/accounts", get(accounts))
         .route(
+            "/ops/api/creation/structural-templates",
+            get(list_structural_templates).post(create_structural_template),
+        )
+        .route(
+            "/ops/api/creation/structural-templates/{code}/review",
+            post(review_structural_template),
+        )
+        .route(
+            "/ops/api/creation/structural-templates/{code}/revisions",
+            get(structural_template_history).post(revise_structural_template),
+        )
+        .route(
+            "/ops/api/creation/ai-budget",
+            get(read_creative_budget).put(change_creative_budget),
+        )
+        .route(
             "/ops/api/creation/accounts/{id}/identity",
             put(put_identity),
         )
@@ -45,6 +61,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(review_sentence),
         )
         .route("/ops/api/creation/checks", post(check_draft))
+        .route(
+            "/ops/api/creation/saved-draft-checks",
+            post(check_saved_drafts),
+        )
         .route(
             "/ops/api/creation/persona-facts",
             get(list_persona_facts).post(put_persona_fact),
@@ -91,6 +111,22 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(confirm_copy),
         )
         .route("/ops/api/creation/works/{id}/copy-status", get(copy_status))
+        .route(
+            "/ops/api/creation/works/{id}/publication-candidates",
+            get(publication_candidates),
+        )
+        .route(
+            "/ops/api/creation/works/{id}/publication-link",
+            post(link_publication),
+        )
+        .route(
+            "/ops/api/creation/works/{id}/publication-links",
+            get(publication_links),
+        )
+        .route(
+            "/ops/api/creation/works/{id}/publication-links/{link}/unlink",
+            post(unlink_publication),
+        )
         .layer(DefaultBodyLimit::max(3 * 1024 * 1024))
         .layer(axum::middleware::from_fn(
             super::comment_study::local_comment_study_guard,
@@ -150,6 +186,55 @@ fn failure(error: AssetsError) -> Response {
         ),
     };
     local_read_json_error(status, code)
+}
+
+async fn read_creative_budget(State(state): State<LocalWebState>) -> Response {
+    reply(assets::read_creative_budget(database!(state)).await)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TemplateQuery {
+    domain_ref: Uuid,
+}
+async fn list_structural_templates(
+    State(state): State<LocalWebState>,
+    Query(query): Query<TemplateQuery>,
+) -> Response {
+    reply(assets::list_structural_templates(database!(state), query.domain_ref).await)
+}
+async fn create_structural_template(
+    State(state): State<LocalWebState>,
+    Json(command): Json<assets::CreateTemplate>,
+) -> Response {
+    reply(assets::create_structural_template(database!(state), &command).await)
+}
+async fn review_structural_template(
+    State(state): State<LocalWebState>,
+    Path(code): Path<String>,
+    Json(command): Json<assets::ReviewTemplate>,
+) -> Response {
+    reply(assets::review_structural_template(database!(state), &code, &command).await)
+}
+async fn structural_template_history(
+    State(state): State<LocalWebState>,
+    Path(code): Path<String>,
+) -> Response {
+    reply(assets::structural_template_history(database!(state), &code).await)
+}
+async fn revise_structural_template(
+    State(state): State<LocalWebState>,
+    Path(code): Path<String>,
+    Json(command): Json<assets::ReviseTemplate>,
+) -> Response {
+    reply(assets::revise_structural_template(database!(state), &code, &command).await)
+}
+
+async fn change_creative_budget(
+    State(state): State<LocalWebState>,
+    Json(command): Json<assets::ChangeCreativeBudget>,
+) -> Response {
+    reply(assets::change_creative_budget(database!(state), &command).await)
 }
 
 #[derive(Deserialize)]
@@ -377,6 +462,51 @@ async fn check_draft(
     Json(request): Json<DraftCheck>,
 ) -> Response {
     reply(assets::check_draft_for_work(database!(state), &request.document, request.work_ref).await)
+}
+async fn check_saved_drafts(
+    State(state): State<LocalWebState>,
+    Json(request): Json<SavedDraftCheckRequest>,
+) -> Response {
+    reply(
+        assets::check_saved_drafts(database!(state), &request)
+            .await
+            .map(|items| json!({"items": items})),
+    )
+}
+async fn publication_candidates(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    reply(
+        assets::publication_candidates(database!(state), id)
+            .await
+            .map(|items| json!({"items":items})),
+    )
+}
+async fn link_publication(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<PublicationLinkCommand>,
+) -> Response {
+    reply(assets::link_publication(database!(state), id, &command).await)
+}
+async fn publication_links(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
+    reply(
+        assets::publication_links(database!(state), id)
+            .await
+            .map(|items| json!({"items":items})),
+    )
+}
+async fn unlink_publication(
+    State(state): State<LocalWebState>,
+    Path((id, link)): Path<(Uuid, Uuid)>,
+    Json(command): Json<PublicationUnlinkCommand>,
+) -> Response {
+    reply(
+        assets::unlink_publication(database!(state), id, link, command.request_id)
+            .await
+            .map(|replayed| json!({"linkRef":link,"replayed":replayed})),
+    )
 }
 async fn prepare_copy(
     State(state): State<LocalWebState>,

@@ -154,6 +154,134 @@ pub(crate) async fn prepare(
     old: Option<&WorkDocument>,
     doc: &mut WorkDocument,
 ) -> Result<(), WorkbenchError> {
+    // Preserve server-observed AI provenance through ordinary edits, even when a client
+    // omits the metadata. Clearing/deleting the target is an explicit removal of its text.
+    if let Some(previous) = old {
+        let mut inherited = Vec::new();
+        for derived in &previous.derived_sources {
+            if validation::target_text(doc, &derived.target).is_some_and(|text| !text.is_empty()) {
+                inherited.push(derived.clone());
+            }
+            let Some(old_text) =
+                validation::target_text(previous, &derived.target).filter(|text| !text.is_empty())
+            else {
+                continue;
+            };
+            // A complete copied/moved generated text remains tied to the same inputs.
+            for target in authored_targets(doc) {
+                let Some(text) = validation::target_text(doc, &target) else {
+                    continue;
+                };
+                if target != derived.target
+                    && text == old_text
+                    && validation::target_text(previous, &target) != Some(text)
+                {
+                    inherited.push(DerivedSource {
+                        target,
+                        citation: derived.citation.clone(),
+                    });
+                }
+            }
+            // Enter splits a sourced paragraph into a prefix and a new following paragraph.
+            // Reconstruct that operation even if the client omits the new provenance entry.
+            if let UseTarget::Paragraph { paragraph_id } = derived.target {
+                if let Some(index) = doc
+                    .paragraphs
+                    .iter()
+                    .position(|paragraph| paragraph.id == paragraph_id)
+                {
+                    let head = &doc.paragraphs[index].text;
+                    if let Some(tail) = doc.paragraphs.get(index + 1) {
+                        let is_new = !previous
+                            .paragraphs
+                            .iter()
+                            .any(|paragraph| paragraph.id == tail.id);
+                        if is_new
+                            && !tail.text.is_empty()
+                            && old_text.starts_with(head)
+                            && old_text.ends_with(&tail.text)
+                            && head.len() + tail.text.len() == old_text.len()
+                        {
+                            inherited.push(DerivedSource {
+                                target: UseTarget::Paragraph {
+                                    paragraph_id: tail.id,
+                                },
+                                citation: derived.citation.clone(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        for derived in inherited {
+            if !doc.derived_sources.contains(&derived) {
+                doc.derived_sources.push(derived);
+            }
+        }
+    }
+    // Restoring a deleted paragraph or page can reintroduce a stable target ID from an
+    // older revision. Recover its recorded sources even if the client omitted them.
+    if let Some(previous) = old {
+        let restored: Vec<UseTarget> = authored_targets(doc)
+            .into_iter()
+            .filter(|target| {
+                validation::target_text(previous, target).is_none_or(str::is_empty)
+                    && validation::target_text(doc, target).is_some_and(|text| !text.is_empty())
+            })
+            .collect();
+        if !restored.is_empty() {
+            let old_sources: Vec<(serde_json::Value, serde_json::Value)> = sqlx::query_as(
+                "SELECT source.value,r.document FROM linggan_creation_revision r CROSS JOIN LATERAL jsonb_array_elements(COALESCE(r.document->'derivedSources','[]'::jsonb)) source(value) WHERE r.work_ref=$1 AND source.value->'target' IN (SELECT value FROM jsonb_array_elements($2))"
+            ).bind(work).bind(serde_json::to_value(&restored)?).fetch_all(&mut **tx).await?;
+            for (value, historical_document) in old_sources {
+                let source: DerivedSource = serde_json::from_value(value)?;
+                let historic: WorkDocument = serde_json::from_value(historical_document)?;
+                if validation::target_text(&historic, &source.target)
+                    == validation::target_text(doc, &source.target)
+                    && !doc.derived_sources.contains(&source)
+                {
+                    doc.derived_sources.push(source);
+                }
+            }
+        }
+    }
+    let qualifications = crate::content_workbench_sources::qualify_citations_in_domain(
+        tx,
+        &doc.derived_sources
+            .iter()
+            .map(|d| d.citation.clone())
+            .collect::<Vec<_>>(),
+        domain,
+    )
+    .await
+    .map_err(|_| WorkbenchError::Source)?;
+    for (derived, qualification) in doc.derived_sources.clone().iter().zip(qualifications) {
+        if qualification.state != "readable" {
+            let previous = old
+                .and_then(|old_doc| old_doc.derived_sources.iter().find(|item| *item == derived));
+            if previous.is_none() {
+                return Err(WorkbenchError::Source);
+            }
+            let old_text =
+                old.and_then(|old_doc| validation::target_text(old_doc, &derived.target));
+            let new_text = validation::target_text(doc, &derived.target);
+            match (old_text, new_text) {
+                (_, None | Some("")) => {}
+                (Some(old_text), Some("[来源当前不可使用]")) => {
+                    if let Some(target) = target_mut(doc, &derived.target) {
+                        *target = old_text.to_owned();
+                    }
+                }
+                (Some(old_text), Some(new_text)) if old_text == new_text => {}
+                _ => return Err(WorkbenchError::Source),
+            }
+        }
+    }
+    let source_snapshot = doc.clone();
+    doc.derived_sources.retain(|derived| {
+        validation::target_text(&source_snapshot, &derived.target)
+            .is_some_and(|text| !text.is_empty())
+    });
     if doc.materials.len() > 60 {
         return Err(WorkbenchError::Invalid("materials"));
     }
@@ -421,6 +549,25 @@ pub(crate) async fn redact(
         }
     }
     metadata::redact(doc, &hidden_quotes);
+    // A rewritten result is dependent on its inputs even when it contains no exact quote.
+    let derived = doc.derived_sources.clone();
+    let qualifications = crate::content_workbench_sources::qualify_citations_in_domain(
+        tx,
+        &derived
+            .iter()
+            .map(|d| d.citation.clone())
+            .collect::<Vec<_>>(),
+        domain,
+    )
+    .await
+    .map_err(|_| WorkbenchError::Source)?;
+    for (source, qualification) in derived.iter().zip(qualifications) {
+        if qualification.state != "readable" {
+            if let Some(text) = target_mut(doc, &source.target) {
+                *text = "[来源当前不可使用]".into();
+            }
+        }
+    }
     Ok(statuses)
 }
 
@@ -553,6 +700,17 @@ pub async fn propagate_adopted_sources_in(
     targets: &[UseTarget],
 ) -> Result<(), WorkbenchError> {
     for citation in citations {
+        for target in targets {
+            if validation::target_text(doc, target).is_some_and(|text| !text.is_empty()) {
+                let derived = DerivedSource {
+                    target: target.clone(),
+                    citation: citation.clone(),
+                };
+                if !doc.derived_sources.contains(&derived) {
+                    doc.derived_sources.push(derived);
+                }
+            }
+        }
         let source =
             crate::content_workbench_sources::validate_citation_in_domain(tx, citation, domain)
                 .await
@@ -650,6 +808,12 @@ pub(crate) async fn redact_title_in(
         title: doc.title.clone(),
         uses,
         excerpts,
+        derived_sources: doc
+            .derived_sources
+            .iter()
+            .filter(|source| source.target == UseTarget::Title)
+            .cloned()
+            .collect(),
         ..WorkDocument::default()
     };
     redact(tx, domain, &mut projection).await?;

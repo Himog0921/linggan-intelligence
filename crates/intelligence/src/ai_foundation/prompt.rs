@@ -45,6 +45,7 @@ fn connected(task: TaskKey) -> bool {
         task,
         TaskKey::OcrRecognition
             | TaskKey::WritingLegacy
+            | TaskKey::CreationTitle
             | TaskKey::WorkComparison
             | TaskKey::CommentStudy
             | TaskKey::CommentProblemResolution

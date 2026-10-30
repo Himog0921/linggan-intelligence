@@ -118,8 +118,12 @@ impl InputRef {
                 task.comment_stage() == Some(*stage_number) && *stage_number > 0 && !trial
             }
             Self::CommentResearch { .. } => task == TaskKey::CommentStudy && !trial,
-            Self::WritingRequest { .. } => task == TaskKey::WritingLegacy && !trial,
-            Self::WritingPreview { .. } => task == TaskKey::WritingLegacy && trial,
+            Self::WritingRequest { .. } => {
+                matches!(task, TaskKey::WritingLegacy | TaskKey::CreationTitle) && !trial
+            }
+            Self::WritingPreview { .. } => {
+                matches!(task, TaskKey::WritingLegacy | TaskKey::CreationTitle) && trial
+            }
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
             Self::DirectionSample { .. } => matches!(
                 task,
@@ -166,6 +170,7 @@ impl BatchKind {
             | TaskKey::CreatorAccountResearch
             | TaskKey::CommentStudy => self == Self::Interactive,
             TaskKey::WritingLegacy
+            | TaskKey::CreationTitle
             | TaskKey::WritingAssistant
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => matches!(self, Self::Interactive | Self::Trial),

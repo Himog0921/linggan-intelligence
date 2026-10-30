@@ -448,17 +448,56 @@ impl PiAdapter {
     }
 
     pub async fn call(&self, request: &PiRequest) -> Result<PiResponse, ModelError> {
+        self.call_with_submitted(request, None).await
+    }
+
+    /// Signal only when the adapter has started the provider transport, never from input handoff.
+    pub(crate) async fn call_with_submitted(
+        &self,
+        request: &PiRequest,
+        submitted: Option<tokio::sync::oneshot::Sender<()>>,
+    ) -> Result<PiResponse, ModelError> {
         let input = request.wire_bytes()?;
         let limits = &linggan_contracts::ai_limits::AI_LIMITS;
-        let mut child = tokio::process::Command::new(&self.node)
+        let mut command = tokio::process::Command::new(&self.node);
+        command
             .arg(&self.script)
             .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .kill_on_drop(true)
+            .kill_on_drop(true);
+        if submitted.is_some() {
+            command
+                .env("LINGGAN_DISPATCH_SIGNAL", "1")
+                .stderr(Stdio::piped());
+        } else {
+            command.stderr(Stdio::null());
+        }
+        let mut child = command
             .spawn()
             .map_err(|_| ModelError::AdapterUnavailable)?;
+        if let (Some(mut stderr), Some(sent)) = (child.stderr.take(), submitted) {
+            tokio::spawn(async move {
+                const MARKER: &[u8] = b"LGI_DISPATCH_STARTED\n";
+                let mut pending = Some(sent);
+                let mut tail = Vec::new();
+                let mut bytes = [0u8; 256];
+                while let Ok(count) = stderr.read(&mut bytes).await {
+                    if count == 0 {
+                        break;
+                    }
+                    tail.extend_from_slice(&bytes[..count]);
+                    if tail.windows(MARKER.len()).any(|window| window == MARKER) {
+                        if let Some(sender) = pending.take() {
+                            let _ = sender.send(());
+                        }
+                    }
+                    if tail.len() > MARKER.len() {
+                        tail.drain(..tail.len() - MARKER.len());
+                    }
+                }
+            });
+        }
         let mut stdin = child.stdin.take().ok_or(ModelError::AdapterUnavailable)?;
         let stdout = child.stdout.take().ok_or(ModelError::AdapterUnavailable)?;
         let deadline = Duration::from_millis(

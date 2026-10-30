@@ -222,6 +222,13 @@ pub struct MaterialUse {
     pub state: UseState,
     pub content_origin: ContentOrigin,
 }
+/// An output target derived from a selected source, including paraphrases.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DerivedSource {
+    pub target: UseTarget,
+    pub citation: Citation,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MaterialSelection {
@@ -277,6 +284,9 @@ pub struct BridgeChoice {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    /// Non-sensitive ordering metadata for erasable experience-bound source uses; never client input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub experience_use_order: Vec<Uuid>,
     /// Changes when the server discards stale editor state following a withdrawal.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub experience_epoch: Option<Uuid>,
@@ -318,12 +328,15 @@ pub struct WorkDocument {
     pub canvas: Vec<CanvasBlock>,
     pub pages: Vec<ImagePage>,
     pub uses: Vec<MaterialUse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_sources: Vec<DerivedSource>,
 }
 impl Default for WorkDocument {
     fn default() -> Self {
         Self {
             contract: "content-workbench.v1".into(),
             experience_epoch: None,
+            experience_use_order: vec![],
             experience_slots: vec![],
             experience_gaps: vec![],
             bridge: None,
@@ -345,6 +358,7 @@ impl Default for WorkDocument {
             canvas: vec![],
             pages: vec![],
             uses: vec![],
+            derived_sources: vec![],
         }
     }
 }
@@ -428,6 +442,9 @@ pub struct WorkSummary {
     pub saved_at: String,
     /// The current revision if confirmed copied to the clipboard; this is not a publication.
     pub copied_revision_id: Option<Uuid>,
+    /// Linked Operations record and the revision it describes, never inferred from clipboard state.
+    pub published_revision_id: Option<Uuid>,
+    pub publication_unavailable: bool,
     pub idea_ref: Option<Uuid>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]

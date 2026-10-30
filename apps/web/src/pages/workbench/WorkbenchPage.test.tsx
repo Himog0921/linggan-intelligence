@@ -1,12 +1,26 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, useNavigate } from 'react-router';
+import { createMemoryRouter, Link, RouterProvider, useNavigate } from 'react-router';
+import { useState, type ReactNode } from 'react';
+import { webcrypto } from 'node:crypto';
+function TestRouter({ initialEntries, children }: { initialEntries: string[]; children: ReactNode }) {
+  const [router] = useState(() => createMemoryRouter([{ path: '*', element: children }], { initialEntries }));
+  return <RouterProvider router={router} />;
+}
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../shared/api';
 import { WorkbenchPage } from './WorkbenchPage';
 import * as api from './workbenchApi';
 import { newDocument, type AiStatus, type SaveReceipt, type WorkEnvelope } from './workbenchModel';
+Object.defineProperty(globalThis.crypto, 'subtle', { value: webcrypto.subtle, configurable: true });
 vi.mock('./workbenchApi');
+vi.mock('./MaterialBrowser', async () => {
+  const actual = await vi.importActual<typeof import('./MaterialBrowser')>('./MaterialBrowser');
+  return { MaterialBrowser: (props: Parameters<typeof actual.MaterialBrowser>[0]) => <>
+    <actual.MaterialBrowser {...props}/>
+    <button onClick={() => props.onCollect({citation: {asOf:'2026-10-29',blockRef:'body',sourceKind:'comment',sourceRef:'00000000-0000-4000-8000-000000000002',workRef:'00000000-0000-4000-8000-000000000002',field:'comment_body',sourceVersion:'v1',start:0,end:2,textHash:'a'.repeat(64),location:null},selectedText:'合成',textHash:'a'.repeat(64)}, 'inbox')}>测试收集未保存来源</button>
+  </> };
+});
 vi.mock('./ImagePages', () => ({
   ImagePages: () => <div>图页组件</div>
 }));
@@ -19,7 +33,13 @@ vi.mock('./assets/CheckPanel', () => ({
   }
 }));
 vi.mock('./assets/AssetsLibrary', () => ({
-  AssetsLibrary: ({ domainRef }: { domainRef: string }) => <div>资产库页 {domainRef}</div>
+  AssetsLibrary: ({ domainRef, onDirtyChange }: { domainRef: string; onDirtyChange: (dirty: boolean) => void }) => <div>资产库页 {domainRef}<button onClick={() => onDirtyChange(true)}>测试资产未保存</button><Link to={`/ops/creation?domain=${domainRef}&work=${work}&view=body`}>测试来源链接</Link></div>
+}));
+vi.mock('./assets/PublicationLinker', () => ({
+  PublicationLinker: ({ pending, onPending }: { pending: { kind: string; command?: { requestId: string } } | null; onPending: (value: unknown) => void }) => <div>
+    <span data-testid="pending-publication">{pending?.command?.requestId ?? ''}</span>
+    <button onClick={() => onPending({ kind: 'link', command: { requestId: 'synthetic-request', expectedRevision: revision, publicationRef: work } })}>测试待确认发布关联</button>
+  </div>,
 }));
 const domain = '00000000-0000-4000-8000-000000000001',
   work = '00000000-0000-4000-8000-000000000002',
@@ -56,9 +76,9 @@ function show(view = 'body') {
     }
   });
   return render(<QueryClientProvider client={client}>
-<MemoryRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=${view}`]}>
+<TestRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=${view}`]}>
 <WorkbenchPage />
-</MemoryRouter>
+</TestRouter>
 </QueryClientProvider>);
 }
 beforeEach(() => {
@@ -89,6 +109,18 @@ beforeEach(() => {
   vi.mocked(api.conflictReceipt).mockReturnValue(null);
 });
 describe('React workbench author control', () => {
+  it('keeps editing commands and the save state available in the compact writing menu', async () => {
+    show();
+    await screen.findByLabelText('正文第 1 段');
+    const summary = screen.getByText('写稿工具 · 已保存');
+    const menu = summary.closest('details');
+    expect(menu).not.toHaveAttribute('open');
+    fireEvent.click(summary);
+    expect(menu).toHaveAttribute('open');
+    expect(within(menu!).getByRole('button', { name: '保存' })).toBeInTheDocument();
+    expect(within(menu!).getByRole('button', { name: '历史' })).toBeInTheDocument();
+    expect(within(menu!).getByRole('button', { name: '按材料起草' })).toBeInTheDocument();
+  });
   it('offers withdrawal recovery even when the current draft no longer has an experience slot', async () => {
     vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
     show();
@@ -164,7 +196,7 @@ describe('React workbench author control', () => {
         <button onClick={() => navigate(`/ops/creation?domain=${domain}&work=${work}&view=body`)}>返回合成稿 A</button></>;
     }
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><Navigation /><WorkbenchPage /></MemoryRouter></QueryClientProvider>);
+    render(<QueryClientProvider client={client}><TestRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><Navigation /><WorkbenchPage /></TestRouter></QueryClientProvider>);
     await screen.findByLabelText('正文第 1 段');
     fireEvent.click(screen.getByRole('button', { name: '打开合成稿 B' }));
     await waitFor(() => expect(api.readWork).toHaveBeenCalledWith(other, expect.anything()));
@@ -186,11 +218,10 @@ describe('React workbench author control', () => {
     expect(screen.queryByRole('dialog', { name: '改写选段' })).not.toBeInTheDocument();
   });
   it('rechecks an open draft after a withdrawal notification from another page', async () => {
-    let channel: { onmessage: ((event: { data: string }) => void) | null } | undefined;
+    const channels: Array<{ onmessage: ((event: { data: string }) => void) | null }> = [];
     class SyntheticChannel {
       onmessage: ((event: { data: string }) => void) | null = null;
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
-      constructor() { channel = this; }
+      constructor() { channels.push(this); }
       close() {}
     }
     vi.stubGlobal('BroadcastChannel', SyntheticChannel);
@@ -198,17 +229,16 @@ describe('React workbench author control', () => {
       show();
       await screen.findByLabelText('正文第 1 段');
       vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
-      act(() => channel?.onmessage?.({ data: 'withdrawn' }));
+      act(() => channels.forEach(channel => channel.onmessage?.({ data: 'withdrawn' })));
       expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
       expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
     } finally { vi.unstubAllGlobals(); }
   });
   it('covers the editor immediately when withdrawal arrives during an in-flight save', async () => {
-    let channel: { onmessage: ((event: { data: string }) => void) | null } | undefined;
+    const channels: Array<{ onmessage: ((event: { data: string }) => void) | null }> = [];
     class SyntheticChannel {
       onmessage: ((event: { data: string }) => void) | null = null;
-      // eslint-disable-next-line @typescript-eslint/no-this-alias
-      constructor() { channel = this; }
+      constructor() { channels.push(this); }
       close() {}
     }
     vi.stubGlobal('BroadcastChannel', SyntheticChannel);
@@ -223,7 +253,7 @@ describe('React workbench author control', () => {
       fireEvent.click(screen.getByRole('button', { name: '保存' }));
       await waitFor(() => expect(api.save).toHaveBeenCalled());
       vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
-      act(() => channel?.onmessage?.({ data: 'withdrawn' }));
+      act(() => channels.forEach(channel => channel.onmessage?.({ data: 'withdrawn' })));
       expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
       await act(async () => finish());
       expect(await screen.findByRole('button', { name: '撤回后重新开始编辑' })).toBeInTheDocument();
@@ -417,6 +447,16 @@ describe('React workbench author control', () => {
   });
 });
 describe('pending command and version protection', () => {
+  it('keeps an uncertain publication request and blocks navigation until resolved', async () => {
+    show(); await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByRole('button', { name: '测试待确认发布关联' }));
+    const leave = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(leave);
+    expect(leave.defaultPrevented).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '制作封面 →' }));
+    expect(await screen.findByText(/操作结果尚未确认/)).toBeInTheDocument();
+    expect(screen.getByTestId('pending-publication')).toHaveTextContent('synthetic-request');
+  });
   it('keeps tags and body edits in memory across SPA library navigation without retrying an unknown write', async () => {
     vi.mocked(api.save).mockRejectedValueOnce(new ApiError({
       kind: 'network'
@@ -555,9 +595,9 @@ it('keeps an uncertain create frozen and locks domain until original receipt is 
     }
   });
   render(<QueryClientProvider client={client}>
-<MemoryRouter initialEntries={[`/ops/creation?domain=${domain}`]}>
+<TestRouter initialEntries={[`/ops/creation?domain=${domain}`]}>
 <WorkbenchPage />
-</MemoryRouter>
+</TestRouter>
 </QueryClientProvider>);
   fireEvent.change(await screen.findByLabelText('新选题标题'), {
     target: {
@@ -655,7 +695,7 @@ it('retains the original AI input and action while an execution result is unknow
   await waitFor(() => expect(prepare).toBeEnabled());
   fireEvent.click(prepare);
   fireEvent.click(await screen.findByRole('checkbox', {
-    name: '确认这次输入和额度，执行一次'
+    name: '已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'
   }));
   fireEvent.click(screen.getByRole('button', {
     name: '执行一次'
@@ -810,7 +850,7 @@ it('shows AI failure guidance while retaining the technical reason only in optio
   await waitFor(() => expect(prepare).toBeEnabled());
   fireEvent.click(prepare);
   fireEvent.click(await screen.findByRole('checkbox', {
-    name: '确认这次输入和额度，执行一次'
+    name: '已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'
   }));
   fireEvent.click(screen.getByRole('button', {
     name: '执行一次'
@@ -833,7 +873,7 @@ it('shows an unreserved queued request and lets the user cancel it without showi
   show();await screen.findByLabelText('正文第 1 段');
   fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));
   const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);
-  fireEvent.click(await screen.findByRole('checkbox',{name:'确认这次输入和额度，执行一次'}));
+  fireEvent.click(await screen.findByRole('checkbox',{name:'已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'}));
   fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
   expect(await screen.findByText('等待处理')).toBeVisible();fireEvent.click(screen.getByText('调用记录'));
   expect(screen.getByText('尚未派发，未建立调用账。')).toBeVisible();
@@ -851,7 +891,7 @@ it('retains right hand author edits when a lost AI adoption response is reconcil
   vi.mocked(api.lookupWorkRequest).mockImplementation(async requestId=>({requestId,workId:work,outcome:'accepted',replayed:true,revision:{...envelope().revision,id:crypto.randomUUID(),number:2,document:{...envelope().revision.document,paragraphs:[{id:paragraph,text:'模型建议保留来源'}]}}}));
   show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));
   const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);
-  fireEvent.click(await screen.findByRole('checkbox',{name:'确认这次输入和额度，执行一次'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
+  fireEvent.click(await screen.findByRole('checkbox',{name:'已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
   fireEvent.change(await screen.findByLabelText('编辑改稿 第 1 段'),{target:{value:'作者在对照右侧写的新句子😀'}});
   fireEvent.click(screen.getByRole('button',{name:'采用这一段'}));
   fireEvent.click(await screen.findByRole('button',{name:'沿用原请求重试'}));
@@ -890,7 +930,8 @@ it('retains both AI edits after partial adoption and keeps the unadopted draft a
  vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:20,estimatedInputTokens:20,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
  vi.mocked(api.execute).mockImplementation(async request=>({requestId:request.requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'建议一'},{paragraphId:second,text:'建议二'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
  vi.mocked(api.adopt).mockImplementation(async(_id,request)=>({requestId:request.requestId,workId:work,outcome:'accepted',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2,document:{...initial.revision.document,paragraphs:[{id:paragraph,text:'建议一'},{id:second,text:'原二'}]}}}));
- show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);fireEvent.click(await screen.findByRole('checkbox',{name:'确认这次输入和额度，执行一次'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
+ vi.mocked(api.aiStatus).mockImplementation(async requestId=>({requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'建议一'},{paragraphId:second,text:'建议二'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:true,usage:{state:'measured',inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
+ show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);fireEvent.click(await screen.findByRole('checkbox',{name:'已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
  fireEvent.change(await screen.findByLabelText('编辑改稿 第 1 段'),{target:{value:'作者采用第一段'}});fireEvent.change(screen.getByLabelText('编辑改稿 第 2 段'),{target:{value:'作者未采用第二段😀'}});fireEvent.click(screen.getAllByRole('button',{name:'采用这一段'})[0]!);
  await screen.findByRole('button',{name:'复制未采用改稿'});expect(screen.getByLabelText('编辑改稿 第 2 段')).toHaveValue('作者未采用第二段😀');expect(screen.getAllByRole('button',{name:'采用这一段'})[1]).toBeDisabled();
  fireEvent.click(screen.getByRole('button',{name:'复制未采用改稿'}));expect(await screen.findByLabelText('未采用改稿，可手动复制')).toHaveValue('作者未采用第二段😀');
@@ -1008,7 +1049,7 @@ describe('retained recovery copies preserve manuscript tags', () => {
 
 it('uses the standard shell and Z02 creation tabs, keeps empty scope explicit, and never loads works for all', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/ops/creation?domain=all']}><WorkbenchPage/></MemoryRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><TestRouter initialEntries={['/ops/creation?domain=all']}><WorkbenchPage/></TestRouter></QueryClientProvider>);
   await screen.findByText('当前领域不可用于创作');
   expect(screen.getByLabelText('创作领域').closest('.v7-context-crumb')).not.toBeNull();
   expect(screen.getByRole('navigation', { name: '创作页面' }).closest('.v7-context-main')).not.toBeNull();
@@ -1069,7 +1110,7 @@ it('keeps unfinished candidate and idea inputs across editor steps and warns bef
 it('opens the asset library from its own tab for the chosen domain and leaves it again', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
   render(<QueryClientProvider client={client}>
-    <MemoryRouter initialEntries={[`/ops/creation?domain=${domain}`]}><WorkbenchPage /></MemoryRouter>
+    <TestRouter initialEntries={[`/ops/creation?domain=${domain}`]}><WorkbenchPage /></TestRouter>
   </QueryClientProvider>);
   const tab = await screen.findByRole('button', { name: '资产库' });
   expect(tab).not.toHaveAttribute('aria-current');
@@ -1114,4 +1155,257 @@ it('keeps the unconfirmed copy receipt while moving to the cover and back', asyn
   expect(screen.queryByText('待确认回执')).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '正文' }));
   expect(await screen.findByText('待确认回执')).toBeInTheDocument();
+});
+
+it('protects an uncertain template save from navigation when multiple draft editors are mounted', async () => {
+  const other = '00000000-0000-4000-8000-000000000008';
+  vi.mocked(api.readWork).mockImplementation(async id => id === other ? { ...envelope(), workId: other } : envelope());
+  const templateApi = await import('./assets/structuralTemplatesApi');
+  const create = vi.spyOn(templateApi, 'createTemplate').mockRejectedValue(new Error('offline'));
+  function Navigation() {
+    const navigate = useNavigate();
+    return <><button onClick={() => navigate(`/ops/creation?domain=${domain}&work=${other}&view=body`)}>打开 B</button><button onClick={() => navigate(`/ops/creation?domain=${domain}&work=${work}&view=body`)}>打开 A</button><button onClick={() => navigate('/elsewhere')}>离开创作</button></>;
+  }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><TestRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><Navigation/><WorkbenchPage/></TestRouter></QueryClientProvider>);
+  await screen.findByLabelText('正文第 1 段'); fireEvent.click(screen.getByRole('button', { name: '打开 B' }));
+  await waitFor(() => expect(api.readWork).toHaveBeenCalledWith(other, expect.anything()));
+  fireEvent.click(screen.getByRole('button', { name: '打开 A' }));
+  fireEvent.click(await screen.findByRole('button', { name: '存为样板' }));
+  fireEvent.click(screen.getByRole('button', { name: '＋ 开头' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存待审核' }));
+  await screen.findByText('保存结果尚未确认，请沿用原请求重试。');
+  fireEvent.click(screen.getByRole('button', { name: '离开创作', hidden: true }));
+  expect(await screen.findByText(/样板保存结果未确认，请先留在此稿/)).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '返回稿件' }));
+  fireEvent.click(screen.getByRole('button', { name: '重试保存' }));
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+  expect(create.mock.calls[0]).toEqual(create.mock.calls[1]);
+  create.mockRestore();
+});
+
+it('protects an uncertain publication link from leaving the workbench', async () => {
+  function Navigation() { const navigate = useNavigate(); return <button onClick={() => navigate('/elsewhere')}>离开创作</button>; }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><TestRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><Navigation/><WorkbenchPage/></TestRouter></QueryClientProvider>);
+  fireEvent.click(await screen.findByRole('button', { name: '测试待确认发布关联' }));
+  fireEvent.click(screen.getByRole('button', { name: '离开创作' }));
+  expect(await screen.findByText(/操作结果尚未确认/)).toBeInTheDocument();
+  expect(screen.getByTestId('pending-publication')).toHaveTextContent('synthetic-request');
+});
+
+it('keeps the original template retry available while withdrawal hides the editor', async () => {
+  const templateApi = await import('./assets/structuralTemplatesApi');
+  const create = vi.spyOn(templateApi, 'createTemplate').mockRejectedValue(new Error('offline'));
+  show(); await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(screen.getByRole('button', { name: '存为样板' }));
+  fireEvent.click(screen.getByRole('button', { name: '＋ 开头' }));
+  fireEvent.click(screen.getByRole('button', { name: '保存待审核' }));
+  await screen.findByText('保存结果尚未确认，请沿用原请求重试。');
+  fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+  vi.mocked(api.readWork).mockResolvedValue({ ...envelope(), experienceResetRequired: true });
+  fireEvent.focus(window);
+  await screen.findByRole('button', { name: '撤回后重新开始编辑' });
+  expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '存为样板' }));
+  fireEvent.click(screen.getByRole('button', { name: '重试保存' }));
+  await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+  expect(create.mock.calls[0]).toEqual(create.mock.calls[1]);
+  create.mockRestore();
+});
+
+it('covers stale AI-derived text when its source becomes unavailable and allows a clean reread', async () => {
+  const initial = envelope();
+  initial.revision.document.derivedSources = [{ target: { kind: 'paragraph', paragraphId: paragraph }, citation: {
+    asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment', sourceRef: work, workRef: work,
+    field: 'comment_body', sourceVersion: 'v1', start: 0, end: 1, textHash: 'a'.repeat(64), location: null,
+  } }];
+  vi.mocked(api.readWork).mockResolvedValue(initial);
+  show(); await screen.findByLabelText('正文第 1 段');
+  const unavailable = structuredClone(initial);
+  unavailable.revision.document.paragraphs[0]!.text = '[来源当前不可使用]';
+  vi.mocked(api.readWork).mockResolvedValue(unavailable);
+  fireEvent.focus(window);
+  expect(await screen.findByText(/参考来源的状态已变化/)).toBeVisible();
+  expect(screen.queryByRole('textbox', { name: '正文第 1 段' })).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: '丢弃本页编辑并重新读取' }));
+  const resumed = await screen.findByRole('textbox',{name:'正文第 1 段'}); expect(resumed).toBeVisible(); expect(resumed).toHaveValue('[来源当前不可使用]');
+});
+
+it('rechecks newly collected unsaved source text before revealing the editor again', async () => {
+  vi.mocked(api.qualifyCitation).mockResolvedValue(false);
+  show('materials');
+  const collect = await screen.findByRole('button', {name:'测试收集未保存来源'});
+  fireEvent.click(collect);
+  fireEvent.focus(window);
+  expect(await screen.findByText(/参考来源的状态已变化/)).toBeVisible();
+  expect(api.qualifyCitation).toHaveBeenCalledWith(domain, expect.objectContaining({sourceKind:'comment',textHash:'a'.repeat(64)}));
+  expect(screen.queryByRole('button', {name:'测试收集未保存来源'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', {name:'丢弃本页编辑并重新读取'}));
+  expect(await screen.findByRole('button', {name:'测试收集未保存来源'})).toBeVisible();
+});
+
+it('hides and clears a stale version conflict when its source becomes unavailable', async () => {
+  const initial = envelope();
+  initial.revision.document.derivedSources = [{target:{kind:'paragraph',paragraphId:paragraph},citation:{asOf:'2026-10-29',blockRef:'body',sourceKind:'comment',sourceRef:work,workRef:work,field:'comment_body',sourceVersion:'v1',start:0,end:1,textHash:'a'.repeat(64),location:null}}];
+  const conflict: SaveReceipt = {requestId:'',workId:work,outcome:'stale',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2}};
+  vi.mocked(api.readWork).mockResolvedValue(initial);
+  vi.mocked(api.save).mockImplementationOnce(async (_id, request) => { conflict.requestId=request.requestId; throw new ApiError({kind:'http',status:409,code:'creation_stale'}); });
+  vi.mocked(api.conflictReceipt).mockReturnValue(conflict);
+  show(); const body=await screen.findByLabelText('正文第 1 段');
+  fireEvent.change(body,{target:{value:'本页含来源的编辑'}}); fireEvent.click(screen.getByRole('button',{name:'保存'}));
+  expect(await screen.findByRole('dialog',{name:'服务器已有新版本'})).toBeVisible();
+  const restricted=structuredClone(initial);restricted.revision.document.paragraphs[0]!.text='[来源当前不可使用]';
+  vi.mocked(api.readWork).mockResolvedValue(restricted); fireEvent.focus(window);
+  expect(await screen.findByText(/参考来源的状态已变化/)).toBeVisible();
+  expect(screen.queryByRole('dialog',{name:'服务器已有新版本'})).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button',{name:'丢弃本页编辑并重新读取'}));
+  expect(await screen.findByLabelText('正文第 1 段')).toHaveValue('[来源当前不可使用]');
+  expect(screen.queryByRole('dialog',{name:'服务器已有新版本'})).not.toBeInTheDocument();
+});
+
+it('resumes editing when withdrawn experience and invalidated reference are detected together', async () => {
+  const initial=envelope();
+  initial.revision.document.derivedSources=[{target:{kind:'paragraph',paragraphId:paragraph},citation:{asOf:'2026-10-29',blockRef:'body',sourceKind:'comment',sourceRef:work,workRef:work,field:'comment_body',sourceVersion:'v1',start:0,end:1,textHash:'a'.repeat(64),location:null}}];
+  vi.mocked(api.readWork).mockResolvedValue(initial);
+  show(); await screen.findByLabelText('正文第 1 段');
+  const restricted=structuredClone(initial);restricted.experienceResetRequired=true;restricted.revision.document.paragraphs[0]!.text='[来源当前不可使用]';
+  vi.mocked(api.readWork).mockResolvedValue(restricted);
+  vi.mocked(api.resetWithdrawn).mockImplementation(async (_id, command) => ({requestId:command.requestId,workId:work,outcome:'accepted',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2,document:{...restricted.revision.document,experienceEpoch:crypto.randomUUID()}}}));
+  fireEvent.focus(window);
+  fireEvent.click(await screen.findByRole('button',{name:'撤回后重新开始编辑'}));
+  fireEvent.click(screen.getByRole('button',{name:'丢弃本页编辑并继续'}));
+  const resumed = await screen.findByRole('textbox',{name:'正文第 1 段'}); expect(resumed).toBeVisible(); expect(resumed).toHaveValue('[来源当前不可使用]');
+});
+
+it('generates a source-checked title batch and adopts a selected cover via a saved receipt', async () => {
+  const initial=envelope();
+  vi.mocked(api.readWork).mockResolvedValue(initial);
+  vi.mocked(api.titleReadiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:null,configRef:domain,methodVersion:'creation-title.v1',deniedReasons:[]});
+  vi.mocked(api.titlePreview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'a'.repeat(64),action:'draft',methodVersion:'creation-title.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:10,estimatedInputTokens:10,reservedTokens:100,maxCalls:1,outboundInput:{paragraphs:[{text:'核对的合成正文'}]},outboundSystem:'标题生成指令',confirmationRequired:true});
+  vi.mocked(api.titleExecute).mockImplementation(async command=>({requestId:command.requestId,workRef:work,invocationRef:domain,state:'succeeded',inputRevision:revision,action:'title_ideas',methodVersion:'creation-title.v1',suggestion:{coverTitles:['从第一步开始'],noteTitles:['孩子启动困难时先做这一步']},titleWarnings:{cover:[false],note:[false]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:10,outputTokens:10,chargedTokens:20,costUsd:null}}));
+  vi.mocked(api.titleStatus).mockImplementation(async id=>({...await vi.mocked(api.titleExecute).mock.results[0]!.value,requestId:id}));
+  vi.mocked(api.adoptTitle).mockImplementation(async (_id,command)=>({requestId:command.requestId,workId:work,outcome:'accepted',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2,document:{...initial.revision.document,pages:[{id:crypto.randomUUID(),kind:'cover',templateVersion:'creation-v3-type',title:'从第一步开始',subtitle:'',blocks:[],assetId:null,crop:{x:0,y:0,width:1,height:1},style:{palette:'cream',fontFamily:'system-cjk',width:1080,height:1440,alignment:'start'}}]}}}));
+  show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'换一批'}));
+  expect(await screen.findByRole('dialog',{name:'AI 会看到的内容'})).toHaveTextContent('核对的合成正文'); expect(api.titleExecute).not.toHaveBeenCalled(); fireEvent.click(screen.getByLabelText('我已核对，发送内容不含真实姓名、学校、密码和点赞数')); fireEvent.click(screen.getByRole('button',{name:'确认并生成'}));
+  fireEvent.click(await screen.findByRole('button',{name:'从第一步开始'}));
+  expect(await screen.findByLabelText('封面大字')).toHaveValue('从第一步开始');
+  expect(screen.getByRole('button',{name:'孩子启动困难时先做这一步'})).toBeEnabled();
+  expect(api.titlePreview).toHaveBeenCalledTimes(1);expect(api.titleExecute).toHaveBeenCalledTimes(1);expect(api.adoptTitle).toHaveBeenCalledTimes(1);
+});
+
+it('keeps the first title request identity after a 503 and explicitly retries it', async () => {
+  vi.mocked(api.titleReadiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:null,configRef:domain,methodVersion:'creation-title.v1',deniedReasons:[]});
+  vi.mocked(api.titlePreview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'a'.repeat(64),action:'draft',methodVersion:'creation-title.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:10,estimatedInputTokens:10,reservedTokens:100,maxCalls:1,outboundInput:{paragraphs:[{text:'核对的合成正文'}]},outboundSystem:'标题生成指令',confirmationRequired:true});
+  vi.mocked(api.titleExecute).mockRejectedValueOnce(new ApiError({kind:'http',status:503,code:'creation_ai_unavailable'})).mockImplementationOnce(async command=>({requestId:command.requestId,workRef:work,invocationRef:domain,state:'succeeded',inputRevision:revision,action:'title_ideas',methodVersion:'creation-title.v1',suggestion:{coverTitles:['从第一步开始'],noteTitles:['先做一件小事']},titleWarnings:{cover:[false],note:[false]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:10,outputTokens:10,chargedTokens:20,costUsd:null}}));
+  show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'换一批'}));
+  await screen.findByRole('dialog',{name:'AI 会看到的内容'}); fireEvent.click(screen.getByLabelText('我已核对，发送内容不含真实姓名、学校、密码和点赞数')); fireEvent.click(screen.getByRole('button',{name:'确认并生成'}));
+  fireEvent.click(await screen.findByRole('button',{name:'沿用原请求重试'}));
+  await screen.findByRole('button',{name:'从第一步开始'});
+  expect(vi.mocked(api.titleExecute).mock.calls[0]![0]).toEqual(vi.mocked(api.titleExecute).mock.calls[1]![0]);
+  expect(api.titlePreview).toHaveBeenCalledTimes(1);
+});
+
+it('blocks leaving during a slow title preview before any model request', async () => {
+  function Navigation() { const navigate=useNavigate(); return <button onClick={()=>navigate('/elsewhere')}>离开创作</button>; }
+  let resolve!: (value: Awaited<ReturnType<typeof api.titlePreview>>) => void;
+  vi.mocked(api.titleReadiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:null,configRef:domain,methodVersion:'creation-title.v1',deniedReasons:[]});
+  vi.mocked(api.titlePreview).mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  render(<QueryClientProvider client={client}><TestRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><Navigation/><WorkbenchPage/></TestRouter></QueryClientProvider>);
+  await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'换一批'}));
+  await waitFor(()=>expect(api.titlePreview).toHaveBeenCalledTimes(1));fireEvent.click(screen.getByRole('button',{name:'离开创作'}));
+  expect(await screen.findByText(/标题请求尚未完成/)).toBeVisible();expect(api.titleExecute).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button',{name:'返回标题'}));
+  await act(async()=>resolve({previewRef:paragraph,inputRevision:revision,inputHash:'a'.repeat(64),action:'draft',methodVersion:'creation-title.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:10,estimatedInputTokens:10,reservedTokens:100,maxCalls:1,outboundInput:{},confirmationRequired:true}));
+});
+
+it('discards a title preview that returns after its source was withdrawn and reloaded', async () => {
+  const initial=envelope();
+  initial.revision.document.derivedSources=[{target:{kind:'paragraph',paragraphId:paragraph},citation:{asOf:'2026-10-29',blockRef:'body',sourceKind:'comment',sourceRef:work,workRef:work,field:'comment_body',sourceVersion:'v1',start:0,end:1,textHash:'a'.repeat(64),location:null}}];
+  vi.mocked(api.readWork).mockResolvedValue(initial);
+  vi.mocked(api.titleReadiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:null,configRef:domain,methodVersion:'creation-title.v1',deniedReasons:[]});
+  let resolve!: (value: Awaited<ReturnType<typeof api.titlePreview>>) => void;
+  vi.mocked(api.titlePreview).mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));
+  show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'换一批'}));
+  await waitFor(()=>expect(api.titlePreview).toHaveBeenCalledTimes(1));
+  const restricted=structuredClone(initial);restricted.revision.document.paragraphs[0]!.text='[来源当前不可使用]';
+  vi.mocked(api.readWork).mockResolvedValue(restricted);fireEvent.focus(window);
+  await screen.findByText(/参考来源的状态已变化/);fireEvent.click(screen.getByRole('button',{name:'丢弃本页编辑并重新读取'}));
+  await screen.findByLabelText('正文第 1 段');
+  await act(async()=>resolve({previewRef:paragraph,inputRevision:revision,inputHash:'a'.repeat(64),action:'draft',methodVersion:'creation-title.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:1,inputCharacterCount:10,estimatedInputTokens:10,reservedTokens:100,maxCalls:1,outboundInput:{text:'已撤回的合成文字'},outboundSystem:'标题生成指令',confirmationRequired:true}));
+  expect(screen.queryByRole('dialog',{name:'AI 会看到的内容'})).not.toBeInTheDocument();expect(screen.queryByText(/已撤回的合成文字/)).not.toBeInTheDocument();expect(api.titleExecute).not.toHaveBeenCalled();
+});
+
+it('protects unsaved assets when a source link changes the route', async () => {
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  render(<QueryClientProvider client={client}><TestRouter initialEntries={[`/ops/creation?domain=${domain}&section=assets`]}><WorkbenchPage/></TestRouter></QueryClientProvider>);
+  await screen.findByText(`资产库页 ${domain}`);fireEvent.click(screen.getByRole('button',{name:'测试资产未保存'}));fireEvent.click(screen.getByRole('button',{name:'资产库'}));expect(screen.queryByText(/当前内容有未保存编辑/)).not.toBeInTheDocument();fireEvent.click(screen.getByRole('link',{name:'测试来源链接'}));
+  expect(await screen.findByText(/当前内容有未保存编辑/)).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'继续编辑'}));
+  expect(screen.getByText(`资产库页 ${domain}`)).toBeVisible();fireEvent.click(screen.getByRole('link',{name:'测试来源链接'}));
+  fireEvent.click(await screen.findByRole('button',{name:'丢弃编辑并离开'}));await screen.findByLabelText('正文第 1 段');
+});
+
+it('keeps navigation blocked for an uncertain title adoption even after title status refresh', async () => {
+  function Navigation(){const navigate=useNavigate();return <button onClick={()=>navigate('/elsewhere')}>离开创作</button>;}
+  vi.mocked(api.titleReadiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:null,configRef:domain,methodVersion:'creation-title.v1',deniedReasons:[]});
+  vi.mocked(api.titlePreview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'a'.repeat(64),action:'draft',methodVersion:'creation-title.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:10,estimatedInputTokens:10,reservedTokens:100,maxCalls:1,outboundInput:{},confirmationRequired:true});
+  const titleStatus=(id:string)=>({requestId:id,workRef:work,invocationRef:domain,state:'succeeded',inputRevision:revision,action:'title_ideas' as const,methodVersion:'creation-title.v1',suggestion:{coverTitles:['从第一步开始'],noteTitles:['先做一件小事']},titleWarnings:{cover:[false],note:[false]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:10,outputTokens:10,chargedTokens:20,costUsd:null}});
+  vi.mocked(api.titleExecute).mockImplementation(async command=>titleStatus(command.requestId));vi.mocked(api.titleStatus).mockImplementation(async id=>titleStatus(id));
+  vi.mocked(api.lookupWorkRequest).mockReset().mockResolvedValue(null);
+  vi.mocked(api.adoptTitle).mockRejectedValueOnce(new ApiError({kind:'network'})).mockRejectedValueOnce(new ApiError({kind:'http',status:403,code:'creation_ai_source_unavailable'}));
+  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
+  render(<QueryClientProvider client={client}><TestRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><Navigation/><WorkbenchPage/></TestRouter></QueryClientProvider>);
+  await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'换一批'}));await screen.findByRole('dialog',{name:'AI 会看到的内容'});fireEvent.click(screen.getByLabelText('我已核对，发送内容不含真实姓名、学校、密码和点赞数'));fireEvent.click(screen.getByRole('button',{name:'确认并生成'}));fireEvent.click(await screen.findByRole('button',{name:'从第一步开始'}));
+  await screen.findByRole('button',{name:'沿用原请求重试'});fireEvent.focus(window);
+  await waitFor(()=>expect(api.titleStatus).toHaveBeenCalledTimes(2));fireEvent.click(screen.getByRole('button',{name:'离开创作'}));
+  expect(await screen.findByText(/标题请求尚未完成/)).toBeVisible();fireEvent.click(screen.getByRole('button',{name:'返回标题'}));
+  fireEvent.click(screen.getByRole('button',{name:'沿用原请求重试'}));
+  await waitFor(()=>expect(api.adoptTitle).toHaveBeenCalledTimes(2));
+  await waitFor(()=>expect(screen.queryByRole('button',{name:'沿用原请求重试'})).not.toBeInTheDocument());
+  fireEvent.click(screen.getByRole('button',{name:'离开创作'}));
+  await waitFor(()=>expect(screen.queryByText(/标题请求尚未完成/)).not.toBeInTheDocument());
+});
+
+it('keeps the original writing request after a 503 and retries the same identity', async () => {
+  vi.mocked(api.readiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:true,configRef:domain,methodVersion:'writing.v1'});
+  vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:1,estimatedInputTokens:1,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
+  const status=(id:string):AiStatus=>({requestId:id,workRef:work,invocationRef:null,state:'queued',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:null,sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'not_reserved',inputTokens:null,outputTokens:null,chargedTokens:null,costUsd:null}});
+  vi.mocked(api.execute).mockRejectedValueOnce(new ApiError({kind:'http',status:503,code:'creation_ai_unavailable'})).mockImplementationOnce(async cmd=>status(cmd.requestId));
+  vi.mocked(api.aiStatus).mockRejectedValueOnce(new ApiError({kind:'http',status:404,code:'creation_ai_not_found'}));
+  show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));
+  const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);
+  fireEvent.click(await screen.findByRole('checkbox',{name:'已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
+  fireEvent.click(await screen.findByRole('button',{name:'核实原请求并重试'}));
+  await waitFor(()=>expect(api.execute).toHaveBeenCalledTimes(2));expect(vi.mocked(api.execute).mock.calls[0]).toEqual(vi.mocked(api.execute).mock.calls[1]);
+});
+
+it('does not reveal a late writing preview after experience withdrawal and reset', async () => {
+  const initial=envelope();initial.revision.document.experienceSlots=[{paragraphId:paragraph,experienceRef:work,experienceRevision:1}];
+  vi.mocked(api.readWork).mockResolvedValue(initial);vi.mocked(api.readiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:true,configRef:domain,methodVersion:'writing.v1'});
+  let resolve!: (value: Awaited<ReturnType<typeof api.preview>>) => void;vi.mocked(api.preview).mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));
+  show();const body=await screen.findByLabelText('正文第 1 段') as HTMLTextAreaElement;body.setSelectionRange(0, 3);fireEvent.select(body);fireEvent.click(screen.getByRole('button',{name:'改写选段'}));const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);
+  await waitFor(()=>expect(api.preview).toHaveBeenCalledTimes(1));
+  const restricted=structuredClone(initial);restricted.experienceResetRequired=true;restricted.revision.document.paragraphs[0]!.text='[本人已撤回这段经历]';vi.mocked(api.readWork).mockResolvedValue(restricted);
+  vi.mocked(api.resetWithdrawn).mockImplementation(async (_id,command)=>({requestId:command.requestId,workId:work,outcome:'accepted',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2,document:{...restricted.revision.document,experienceEpoch:crypto.randomUUID(),experienceSlots:[]}}}));
+  fireEvent.focus(window);fireEvent.click(await screen.findByRole('button',{name:'撤回后重新开始编辑'}));fireEvent.click(screen.getByRole('button',{name:'丢弃本页编辑并继续'}));await screen.findByLabelText('正文第 1 段');
+  await act(async()=>resolve({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:1,estimatedInputTokens:1,reservedTokens:200,maxCalls:1,outboundInput:{text:'撤回的合成私密文字'},confirmationRequired:true}));
+  expect(screen.queryByText(/撤回的合成私密文字/)).not.toBeInTheDocument();expect(api.execute).not.toHaveBeenCalled();
+});
+
+it('keeps an uncertain writing request but hides a late result after experience withdrawal', async () => {
+  const initial=envelope();initial.revision.document.experienceSlots=[{paragraphId:paragraph,experienceRef:work,experienceRevision:1}];
+  vi.mocked(api.readWork).mockResolvedValue(initial);vi.mocked(api.readiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:true,configRef:domain,methodVersion:'writing.v1'});
+  vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:1,estimatedInputTokens:1,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
+  let resolve!: (value: AiStatus) => void;vi.mocked(api.execute).mockImplementationOnce(()=>new Promise(done=>{resolve=done;}));
+  const status=(id:string,available:boolean):AiStatus=>({requestId:id,workRef:work,invocationRef:domain,state:'succeeded',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:available?{title:null,paragraphs:[{paragraphId:paragraph,text:'已撤回经历的模型结果'}],pages:[]}:null,sourceQualification:available?'readable':'unavailable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:1,outputTokens:1,chargedTokens:2,costUsd:null}});
+  vi.mocked(api.aiStatus).mockImplementation(async id=>status(id,false));
+  show();const body=await screen.findByLabelText('正文第 1 段') as HTMLTextAreaElement;body.setSelectionRange(0, 3);fireEvent.select(body);fireEvent.click(screen.getByRole('button',{name:'改写选段'}));const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);
+  fireEvent.click(await screen.findByRole('checkbox',{name:'已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));await waitFor(()=>expect(api.execute).toHaveBeenCalledTimes(1));
+  const restricted=structuredClone(initial);restricted.experienceResetRequired=true;restricted.revision.document.paragraphs[0]!.text='[本人已撤回这段经历]';vi.mocked(api.readWork).mockResolvedValue(restricted);
+  vi.mocked(api.resetWithdrawn).mockImplementation(async (_id,command)=>({requestId:command.requestId,workId:work,outcome:'accepted',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2,document:{...restricted.revision.document,experienceEpoch:crypto.randomUUID(),experienceSlots:[]}}}));
+  fireEvent.focus(window);fireEvent.click(await screen.findByRole('button',{name:'撤回后重新开始编辑'}));fireEvent.click(screen.getByRole('button',{name:'丢弃本页编辑并继续'}));await screen.findByLabelText('正文第 1 段');
+  const requestId=vi.mocked(api.execute).mock.calls[0]![0].requestId;await act(async()=>resolve(status(requestId,true)));
+  expect(screen.queryByText(/已撤回经历的模型结果/)).not.toBeInTheDocument();fireEvent.click(await screen.findByRole('button',{name:'核实上次生成'}));
+  await waitFor(()=>expect(api.aiStatus).toHaveBeenCalledWith(requestId));expect(api.execute).toHaveBeenCalledTimes(1);expect(screen.queryByText(/已撤回经历的模型结果/)).not.toBeInTheDocument();
 });

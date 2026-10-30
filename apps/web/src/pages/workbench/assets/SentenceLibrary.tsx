@@ -142,7 +142,10 @@ export function SentenceLibrary() {
   });
   const items = sentences.data ?? [];
   const current = items.find(item => item.code === selected) ?? null;
-  const reload = () => void queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
+  const reload = () => { void (async () => {
+    await queryClient.cancelQueries({ queryKey: ['creation-assets', 'draft-checks'] });
+    await queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
+  })(); };
   return <section className={styles.assetBody} aria-label="衔接句">
     <div>
       <div className={styles.toolbar}>

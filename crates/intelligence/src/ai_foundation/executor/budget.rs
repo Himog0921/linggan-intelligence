@@ -54,3 +54,26 @@ pub(super) async fn latest_price_in(
         WHERE m.model_ref=$1 AND price.endpoint_ref=$2 ORDER BY price.revision_sequence DESC LIMIT 1")
         .bind(model).bind(endpoint).fetch_optional(&mut **tx).await?)
 }
+
+/// Reserve a conservative USD amount before dispatch. The database serializes creative tasks
+/// and leaves ambiguous calls charged at their reservation until a known cost is available.
+pub(super) async fn reserve_creative_in(
+    tx: &mut Transaction<'_, Postgres>,
+    invocation: Uuid,
+    price: Option<Uuid>,
+    tokens: i64,
+    admitted_at: &str,
+) -> Result<(), ExecutorError> {
+    let outcome: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,$3,$4::text::timestamptz)")
+            .bind(invocation)
+            .bind(price)
+            .bind(tokens)
+            .bind(admitted_at)
+            .fetch_one(&mut **tx)
+            .await?;
+    if outcome != "reserved" {
+        return Err(FoundationError::AdmissionDenied(vec![outcome]).into());
+    }
+    Ok(())
+}

@@ -144,7 +144,7 @@ async fn fill_slots(
                 TaskKey::OcrRecognition => {
                     ocr_recognition::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
-                TaskKey::WritingLegacy => {
+                TaskKey::WritingLegacy | TaskKey::CreationTitle => {
                     writing::execute_writing(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 TaskKey::WorkComparison => {

@@ -165,7 +165,9 @@ pub(crate) async fn check_queue_input_scope(
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => "note_material",
             TaskKey::AuthorOrgIdentity => "public_author_bio",
-            TaskKey::WritingAssistant | TaskKey::WritingLegacy => "selected_writing_material",
+            TaskKey::WritingAssistant | TaskKey::WritingLegacy | TaskKey::CreationTitle => {
+                "selected_writing_material"
+            }
             _ => return Err(FoundationError::Invalid),
         };
         (endpoint, material)

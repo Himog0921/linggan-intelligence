@@ -14,6 +14,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/ops/api/creation/works/{id}", get(read))
         .route("/ops/api/creation/works/{id}/save", post(save))
         .route("/ops/api/creation/works/{id}/revisions", get(history))
+        .route(
+            "/ops/api/creation/works/{id}/revisions/{revision}",
+            get(read_revision),
+        )
         .route("/ops/api/creation/works/{id}/restore", post(restore))
         .route(
             "/ops/api/creation/works/{id}/experience-reset",
@@ -92,6 +96,15 @@ async fn save(
 async fn history(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
     match core::revisions(database!(state), id).await {
         Ok(items) => Json(json!({"items":items})).into_response(),
+        Err(e) => error(e),
+    }
+}
+async fn read_revision(
+    State(state): State<LocalWebState>,
+    Path((work, revision)): Path<(Uuid, Uuid)>,
+) -> Response {
+    match core::revision(database!(state), work, revision).await {
+        Ok(item) => Json(item).into_response(),
         Err(e) => error(e),
     }
 }

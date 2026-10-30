@@ -56,7 +56,7 @@ pub async fn list_works(
     domain: Option<Uuid>,
 ) -> Result<Vec<WorkSummary>, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
-    let rows = sqlx::query("SELECT w.work_ref,w.domain_ref,r.revision_ref,r.saved_at::text,r.document, (SELECT cr.revision_ref FROM linggan_creation_copy_receipt cr JOIN linggan_creation_copy_confirmation cc ON cc.receipt_ref=cr.receipt_ref WHERE cr.work_ref=w.work_ref AND cr.revision_ref=r.revision_ref LIMIT 1) AS copied_revision_id FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref WHERE ($1::uuid IS NULL OR w.domain_ref=$1) ORDER BY r.saved_at DESC,w.work_ref LIMIT 200")
+    let rows = sqlx::query("SELECT w.work_ref,w.domain_ref,r.revision_ref,r.saved_at::text,r.document, (SELECT cr.revision_ref FROM linggan_creation_copy_receipt cr JOIN linggan_creation_copy_confirmation cc ON cc.receipt_ref=cr.receipt_ref WHERE cr.work_ref=w.work_ref AND cr.revision_ref=r.revision_ref LIMIT 1) AS copied_revision_id, CASE WHEN pub.available THEN pub.revision_ref ELSE NULL END AS published_revision_id, COALESCE(NOT pub.available,false) AS publication_unavailable FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref LEFT JOIN LATERAL (SELECT l.revision_ref, COALESCE((p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL AND (p.source_system<>'linggan_native' OR p.native_record_state='active') AND p.platform='xhs' AND p.account_ref::text=linked_rev.document->>'accountRef' AND a.domain_ref=w.domain_ref AND a.ledger_state='in_ledger' AND a.platform='xhs'),false) AS available FROM linggan_creation_publication_link l JOIN linggan_ops_publication p ON p.publication_ref=l.publication_ref JOIN linggan_creation_revision linked_rev ON linked_rev.revision_ref=l.revision_ref LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE l.work_ref=w.work_ref AND NOT EXISTS(SELECT 1 FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref) ORDER BY available DESC,l.linked_at DESC,l.link_ref DESC LIMIT 1) pub ON true WHERE ($1::uuid IS NULL OR w.domain_ref=$1) ORDER BY r.saved_at DESC,w.work_ref LIMIT 200")
         .bind(domain).fetch_all(&mut *tx).await?;
     let mut summaries = Vec::new();
     for row in rows {
@@ -81,6 +81,8 @@ pub async fn list_works(
             revision_id,
             saved_at,
             copied_revision_id: row.try_get("copied_revision_id")?,
+            published_revision_id: row.try_get("published_revision_id")?,
+            publication_unavailable: row.try_get("publication_unavailable")?,
             idea_ref,
         });
     }
@@ -200,6 +202,18 @@ pub async fn read_work(db: &Database, work: Uuid) -> Result<WorkEnvelope, Workbe
         source_statuses: statuses,
         exports,
     })
+}
+/// Requalify exactly one historical revision, without loading the complete history.
+pub async fn revision(
+    db: &Database,
+    work: Uuid,
+    revision: Uuid,
+) -> Result<Revision, WorkbenchError> {
+    let mut tx = db.pool().begin().await?;
+    let (domain, mut item) = read_revision_in(&mut tx, work, Some(revision)).await?;
+    redact(&mut tx, domain, &mut item.document).await?;
+    tx.commit().await?;
+    Ok(item)
 }
 pub async fn revisions(db: &Database, work: Uuid) -> Result<Vec<Revision>, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
@@ -355,6 +369,42 @@ async fn save_in(
 ) -> Result<SaveReceipt, WorkbenchError> {
     ensure_request_owner_in(tx, request, RequestOwner::Work).await?;
     lock(tx, work.to_string()).await?;
+    let mut submitted_experiences: Vec<Uuid> = doc
+        .experience_slots
+        .iter()
+        .map(|slot| slot.experience_ref)
+        .collect();
+    submitted_experiences.sort_unstable();
+    submitted_experiences.dedup();
+    if !submitted_experiences.is_empty() {
+        // A stale request can contain an experience even when the current server revision no
+        // longer does. Serialize its fingerprint with withdrawal before accepting a receipt.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind("creation_assets:experience-gate")
+            .execute(&mut **tx)
+            .await?;
+        let available: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_creation_experience WHERE experience_ref=ANY($1) AND state<>'withdrawn'")
+            .bind(&submitted_experiences).fetch_one(&mut **tx).await?;
+        if available != submitted_experiences.len() as i64 {
+            let withdrawn: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience WHERE experience_ref=ANY($1) AND state='withdrawn')")
+                .bind(&submitted_experiences).fetch_one(&mut **tx).await?;
+            return if withdrawn {
+                let (_, current) = read_revision_in(tx, work, None).await?;
+                if !allow_epoch_rotation
+                    && current.id == expected
+                    && doc.experience_epoch != current.document.experience_epoch
+                {
+                    Err(WorkbenchError::Invalid("experience_editor_reset_required"))
+                } else {
+                    Err(WorkbenchError::Invalid(
+                        "experience_withdrawal_requires_reset",
+                    ))
+                }
+            } else {
+                Err(WorkbenchError::Source)
+            };
+        }
+    }
     if let Some(r) = replay(tx, request, command).await? {
         return Ok(r);
     }
@@ -376,7 +426,7 @@ async fn save_in(
             ("accepted", revision)
         }
     };
-    receipt(
+    let out = receipt(
         tx,
         work,
         request,
@@ -389,7 +439,12 @@ async fn save_in(
             revision,
         },
     )
-    .await
+    .await?;
+    for experience in submitted_experiences {
+        sqlx::query("INSERT INTO linggan_creation_experience_command_link(request_ref,experience_ref) VALUES($1,$2) ON CONFLICT DO NOTHING")
+            .bind(request).bind(experience).execute(&mut **tx).await?;
+    }
+    Ok(out)
 }
 pub async fn adopt_in(
     tx: &mut Transaction<'_, Postgres>,

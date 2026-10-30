@@ -100,12 +100,17 @@ function providerFailure(status,url) {
   return 'provider_failed';
 }
 function scopedFetch(base,signal,usage,failure,observation,maxOutputTokens,api) {
+  let signalled=false;
   return async (input,init={}) => {
     let url;try{url=new URL(typeof input==='string'||input instanceof URL?input:input.url);}catch{throw new Rejected('endpoint_rejected');}
     const prefix=base.pathname.replace(/\/$/,'');
     if(url.origin!==base.origin||!(url.pathname===prefix||url.pathname.startsWith(prefix+'/')))throw new Rejected('endpoint_rejected');
     requestSent(observation);
-    let response;try{response=await fetch(input,{...init,redirect:'manual',signal:AbortSignal.any([signal,...(init.signal?[init.signal]:[])])});}catch{
+    let response;try{
+      const pending=fetch(input,{...init,redirect:'manual',signal:AbortSignal.any([signal,...(init.signal?[init.signal]:[])])});
+      if(!signalled && process.env.LINGGAN_DISPATCH_SIGNAL==='1'){signalled=true;process.stderr.write('LGI_DISPATCH_STARTED\n');}
+      response=await pending;
+    }catch{
       failure.code=signal.aborted?'provider_timeout':'provider_network_error';
       throw new Rejected(failure.code);
     }

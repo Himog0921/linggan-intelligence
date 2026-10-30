@@ -20,6 +20,485 @@ const FILL: &str = "\u{3164}";
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn detached_draft_batch_waits_for_prior_experience_withdrawal() {
+    let db = db("assets_batch_withdrawal_race").await;
+    let (account, _, _) = accounts(&db).await;
+    let person = put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap()
+    .identity
+    .person_ref
+    .unwrap();
+    let experience = create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            expected_person_ref: person,
+            title: "合成".into(),
+            body: "合成经历。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .experience
+    .id;
+    confirm_experience(
+        &db,
+        experience,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+            confirmation_method: "subject_present".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut doc = draft(Some(account), &["合成经历。"]);
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: doc.paragraphs[0].id,
+        experience_ref: experience,
+        experience_revision: 1,
+    });
+    let work = create(&db, doc).await;
+    let mut independent = work.revision.document.clone();
+    independent.experience_slots.clear();
+    independent.paragraphs = vec![Paragraph {
+        id: Uuid::new_v4(),
+        text: "独立正文".into(),
+    }];
+    let saved = save(
+        &db,
+        work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: work.revision.id,
+            document: independent,
+        },
+    )
+    .await
+    .unwrap();
+    let mut hold = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let withdraw_db = db.clone();
+    let withdrawal =
+        tokio::spawn(
+            async move { withdraw_experience(&withdraw_db, experience, Uuid::new_v4()).await },
+        );
+    wait_for_advisory_waiters(&db, 1).await;
+    let check_db = db.clone();
+    let checking = tokio::spawn(async move {
+        check_saved_drafts(
+            &check_db,
+            &SavedDraftCheckRequest {
+                domain_ref: fixture::dossier::DOMAIN,
+                items: vec![SavedDraftCheckItem {
+                    work_id: work.work_id,
+                    revision_id: saved.revision.id,
+                }],
+            },
+        )
+        .await
+    });
+    wait_for_advisory_waiters(&db, 2).await;
+    hold.commit().await.unwrap();
+    withdrawal.await.unwrap().unwrap();
+    assert!(
+        checking.await.unwrap().unwrap().is_empty(),
+        "detached history must observe the prior withdrawal"
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn publication_link_rechecks_after_concurrent_operations_update() {
+    let db = db("assets_publication_race").await;
+    let _ = fixture::ops_seed(&db).await;
+    let (publication, account): (Uuid, Uuid) = sqlx::query_as("SELECT p.publication_ref,p.account_ref FROM linggan_ops_publication p JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE a.domain_ref=$1 AND a.ledger_state='in_ledger' AND p.platform='xhs' AND p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL LIMIT 1")
+        .bind(fixture::dossier::DOMAIN).fetch_one(db.pool()).await.unwrap();
+    let different: Uuid = sqlx::query_scalar("SELECT account_ref FROM linggan_ops_account WHERE domain_ref=$1 AND ledger_state='in_ledger' AND account_ref<>$2 AND platform='xhs' LIMIT 1")
+        .bind(fixture::dossier::DOMAIN).bind(account).fetch_one(db.pool()).await.unwrap();
+    let work = create(&db, draft(Some(account), &["合成正文"])).await;
+    let mut update = db.pool().begin().await.unwrap();
+    sqlx::query("UPDATE linggan_ops_account SET account_name=account_name WHERE account_ref=$1")
+        .bind(account)
+        .execute(&mut *update)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE linggan_ops_publication SET account_ref=$2 WHERE publication_ref=$1")
+        .bind(publication)
+        .bind(different)
+        .execute(&mut *update)
+        .await
+        .unwrap();
+    let task_db = db.clone();
+    let mut task = tokio::spawn(async move {
+        link_publication(
+            &task_db,
+            work.work_id,
+            &PublicationLinkCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: work.revision.id,
+                publication_ref: publication,
+            },
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), &mut task)
+            .await
+            .is_err()
+    );
+    update.commit().await.unwrap();
+    assert!(matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(10), task)
+            .await
+            .unwrap()
+            .unwrap(),
+        Err(AssetsError::SourceUnavailable)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn publication_link_is_explicit_idempotent_and_tracks_record_qualification() {
+    let db = db("assets_publication_link").await;
+    let _ = fixture::ops_seed(&db).await;
+    let (publication, account): (Uuid, Uuid) = sqlx::query_as("SELECT p.publication_ref,p.account_ref FROM linggan_ops_publication p JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE a.domain_ref=$1 AND a.ledger_state='in_ledger' AND p.platform='xhs' AND p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL LIMIT 1")
+        .bind(fixture::dossier::DOMAIN).fetch_one(db.pool()).await.unwrap();
+    let work = create(&db, draft(Some(account), &["合成正文"])).await;
+    assert!(
+        publication_candidates(&db, work.work_id)
+            .await
+            .unwrap()
+            .iter()
+            .any(|item| item.publication_ref == publication)
+    );
+    let command = PublicationLinkCommand {
+        request_id: Uuid::new_v4(),
+        expected_revision: work.revision.id,
+        publication_ref: publication,
+    };
+    let receipt = link_publication(&db, work.work_id, &command).await.unwrap();
+    assert!(!receipt.replayed);
+    assert!(
+        link_publication(&db, work.work_id, &command)
+            .await
+            .unwrap()
+            .replayed
+    );
+    let summary = list_works(&db, Some(fixture::dossier::DOMAIN))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|item| item.work_id == work.work_id)
+        .unwrap();
+    assert_eq!(summary.published_revision_id, Some(work.revision.id));
+    assert!(!summary.publication_unavailable);
+    let other = create(&db, draft(Some(account), &["另一篇"])).await;
+    // An Operations import can correct the account independently of its publication.
+    sqlx::query("UPDATE linggan_ops_account SET platform='douyin',platform_user_id=NULL,profile_link_state='pending_match' WHERE account_ref=$1")
+        .bind(account).execute(db.pool()).await.unwrap();
+    assert!(
+        publication_candidates(&db, other.work_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(matches!(
+        link_publication(&db, work.work_id, &command).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(!publication_links(&db, work.work_id).await.unwrap()[0].available);
+    let summary = list_works(&db, Some(fixture::dossier::DOMAIN))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|item| item.work_id == work.work_id)
+        .unwrap();
+    assert!(summary.publication_unavailable);
+    assert!(summary.published_revision_id.is_none());
+    sqlx::query("UPDATE linggan_ops_account SET platform='xhs' WHERE account_ref=$1")
+        .bind(account)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        link_publication(
+            &db,
+            other.work_id,
+            &PublicationLinkCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: other.revision.id,
+                publication_ref: publication
+            }
+        )
+        .await,
+        Err(AssetsError::RequestConflict)
+    ));
+    assert!(matches!(
+        link_publication(
+            &db,
+            other.work_id,
+            &PublicationLinkCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: Uuid::new_v4(),
+                publication_ref: publication
+            }
+        )
+        .await,
+        Err(AssetsError::Stale)
+    ));
+    let different_account: Uuid = sqlx::query_scalar("SELECT account_ref FROM linggan_ops_account WHERE domain_ref=$1 AND ledger_state='in_ledger' AND account_ref<>$2 AND platform='xhs' LIMIT 1")
+        .bind(fixture::dossier::DOMAIN).bind(account).fetch_one(db.pool()).await.unwrap();
+    sqlx::query("UPDATE linggan_ops_publication SET account_ref=$2 WHERE publication_ref=$1")
+        .bind(publication)
+        .bind(different_account)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        link_publication(&db, work.work_id, &command).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(
+        list_works(&db, Some(fixture::dossier::DOMAIN))
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|item| item.work_id == work.work_id)
+            .unwrap()
+            .publication_unavailable
+    );
+    assert!(!publication_links(&db, work.work_id).await.unwrap()[0].available);
+    sqlx::query("UPDATE linggan_ops_publication SET account_ref=$2 WHERE publication_ref=$1")
+        .bind(publication)
+        .bind(account)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE linggan_ops_publication SET missing_since_batch_ref=last_changed_batch_ref WHERE publication_ref=$1").bind(publication).execute(db.pool()).await.unwrap();
+    let summary = list_works(&db, Some(fixture::dossier::DOMAIN))
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|item| item.work_id == work.work_id)
+        .unwrap();
+    assert!(summary.publication_unavailable);
+    assert!(summary.published_revision_id.is_none());
+    let unlink_id = Uuid::new_v4();
+    assert!(
+        !unlink_publication(&db, work.work_id, receipt.link_ref, unlink_id)
+            .await
+            .unwrap()
+    );
+    assert!(
+        unlink_publication(&db, work.work_id, receipt.link_ref, unlink_id)
+            .await
+            .unwrap()
+    );
+    assert!(matches!(
+        link_publication(&db, work.work_id, &command).await,
+        Err(AssetsError::Stale)
+    ));
+    assert!(
+        publication_links(&db, work.work_id)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    sqlx::query(
+        "UPDATE linggan_ops_publication SET missing_since_batch_ref=NULL WHERE publication_ref=$1",
+    )
+    .bind(publication)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    assert!(
+        link_publication(
+            &db,
+            other.work_id,
+            &PublicationLinkCommand {
+                request_id: Uuid::new_v4(),
+                expected_revision: other.revision.id,
+                publication_ref: publication
+            }
+        )
+        .await
+        .is_ok()
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn title_seed_preserves_an_existing_same_name_skill() {
+    let source = include_str!("../../../database/migrations/0185_creation_title_task.sql");
+    let ledger = "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0185_creation_title_task','058344a4fa949e8704f08e071bf725c9ae257e951072e6b56d89713dd9d52ede');\n";
+    let links = include_str!("../../../database/migrations/0186_creation_publication_links.sql");
+    let link_ledger = "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0186_creation_publication_links','bdfbc5f78c25a6ac37718a08315978a3906e70a323e21a9b6b128531c62e775a');\n";
+    let schema = full_schema::FULL_MIGRATIONS
+        .replace(source, "")
+        .replace(ledger, "")
+        .replace(links, "")
+        .replace(link_ledger, "");
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let db = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        "title_existing_skill",
+        &schema,
+    )
+    .await
+    .unwrap();
+    let existing = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_skill(skill_ref,name) VALUES($1,'creation-title-ideas')")
+        .bind(existing)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::raw_sql(source).execute(db.pool()).await.unwrap();
+    let (name, content, package_hash): (String, String, String) = sqlx::query_as("SELECT v.directory_name,f.text_content,v.package_sha256 FROM linggan_skill_binding b JOIN linggan_skill_version v ON v.version_ref=b.current_version_ref JOIN linggan_skill_file f ON f.version_ref=v.version_ref WHERE b.task_key='creation_title' AND f.path='SKILL.md'")
+        .fetch_one(db.pool()).await.unwrap();
+    assert_ne!(name, "creation-title-ideas");
+    assert_eq!(
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT skill_ref FROM linggan_skill WHERE name='creation-title-ideas'"
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        existing
+    );
+    let prepared = linggan_intelligence::ai_foundation::skill_package::SkillPackage {
+        directory: name,
+        files: vec![
+            linggan_intelligence::ai_foundation::skill_package::UploadFile {
+                path: "SKILL.md".into(),
+                encoding: linggan_intelligence::ai_foundation::skill_package::Encoding::Utf8,
+                content,
+            },
+        ],
+    }
+    .prepare()
+    .unwrap();
+    assert_eq!(package_hash, prepared.package_sha256);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn title_task_has_editable_prompt_and_default_skill_with_dispatch_still_disabled() {
+    use linggan_intelligence::ai_foundation::{
+        TaskKey,
+        prompt::{self, SavePrompt},
+        settings_read::read_skill_version,
+    };
+    let db = db("assets_title_seed").await;
+    let row: (String, bool, Uuid) = sqlx::query_as("SELECT t.lifecycle,c.enabled,b.current_version_ref FROM linggan_ai_task t JOIN linggan_ai_control c USING(task_key) JOIN linggan_skill_binding b USING(task_key) WHERE t.task_key='creation_title'")
+        .fetch_one(db.pool()).await.unwrap();
+    assert_eq!(row.0, "active");
+    assert!(!row.1);
+    let skill = read_skill_version(&db, row.2).await.unwrap();
+    assert_eq!(skill["name"], "creation-title-ideas");
+    let before = prompt::read(&db, TaskKey::CreationTitle).await.unwrap();
+    assert_eq!(before["versions"].as_array().unwrap().len(), 1);
+    let saved = prompt::save(
+        &db,
+        &SavePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::CreationTitle,
+            expected_task_revision: 0,
+            system_text: "合成系统提示词".into(),
+            instruction_text: "合成任务指令".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved.version_no, 2);
+    assert_eq!(
+        prompt::read(&db, TaskKey::CreationTitle).await.unwrap()["versions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn saved_draft_batch_checks_actual_revision_and_keeps_unknown_unknown() {
+    let db = db("assets_saved_draft_batch").await;
+    let created = create_work(
+        &db,
+        &CreateRequest {
+            request_id: Uuid::new_v4(),
+            domain_ref: fixture::dossier::DOMAIN,
+            document: draft(None, &["合成正文"]),
+        },
+    )
+    .await
+    .unwrap();
+    let request = SavedDraftCheckRequest {
+        domain_ref: fixture::dossier::DOMAIN,
+        items: vec![SavedDraftCheckItem {
+            work_id: created.work_id,
+            revision_id: created.revision.id,
+        }],
+    };
+    let checks = check_saved_drafts(&db, &request).await.unwrap();
+    let report = check_draft_for_work(&db, &created.revision.document, Some(created.work_id))
+        .await
+        .unwrap();
+    assert_eq!(checks.len(), 1);
+    assert_eq!(
+        (checks[0].must, checks[0].warn, checks[0].not_run),
+        (
+            report.count(Level::Must),
+            report.count(Level::Warn),
+            report.not_run.len()
+        )
+    );
+    let stale = SavedDraftCheckRequest {
+        domain_ref: request.domain_ref,
+        items: vec![SavedDraftCheckItem {
+            work_id: created.work_id,
+            revision_id: Uuid::new_v4(),
+        }],
+    };
+    assert!(check_saved_drafts(&db, &stale).await.unwrap().is_empty());
+    let wrong_domain = SavedDraftCheckRequest {
+        domain_ref: Uuid::new_v4(),
+        items: request.items.clone(),
+    };
+    assert!(
+        check_saved_drafts(&db, &wrong_domain)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let duplicate = SavedDraftCheckRequest {
+        domain_ref: request.domain_ref,
+        items: vec![request.items[0].clone(), request.items[0].clone()],
+    };
+    assert!(matches!(
+        check_saved_drafts(&db, &duplicate).await,
+        Err(AssetsError::Invalid("items"))
+    ));
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn idea_box_links_drafts_without_conflating_note_title_or_research_topic() {
     let db = db("assets_idea_box").await;
     let (a, b, c) = accounts(&db).await;
@@ -481,7 +960,11 @@ async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() 
     assert!(full_schema::FULL_MIGRATIONS.contains(&ledger));
     let before = full_schema::FULL_MIGRATIONS
         .replace(migration, "")
-        .replace(&ledger, "");
+        .replace(&ledger, "")
+        .replace(
+            include_str!("../../../database/migrations/0190_creation_ai_experience_material.sql"),
+            "",
+        );
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let db = linggan_storage_postgres::testing::isolated_proof_schema(
         &url,
@@ -1353,6 +1836,17 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
             .iter()
             .any(|finding| finding.rule == "R-W5" && finding.level == Level::Warn)
     );
+    let current_short = read_work(&db, short_work.work_id).await.unwrap();
+    let batch_request = SavedDraftCheckRequest {
+        domain_ref: fixture::dossier::DOMAIN,
+        items: vec![SavedDraftCheckItem {
+            work_id: short_work.work_id,
+            revision_id: current_short.revision.id,
+        }],
+    };
+    let checked = check_saved_drafts(&db, &batch_request).await.unwrap();
+    assert_eq!(checked.len(), 1);
+    assert_eq!(checked[0].warn, repeated_check.count(Level::Warn));
     let mut different_account = repeated_doc.clone();
     different_account.account_ref = Some(other);
     assert!(
@@ -1742,7 +2236,15 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
         request_id: Uuid::new_v4(),
         expected_revision: saved.revision.id,
     };
-    assert!(prepare_copy(&db, made.work_id, &copy).await.is_ok());
+    let protected_copy = prepare_copy(&db, made.work_id, &copy).await.unwrap();
+    let digest_before: String = sqlx::query_scalar(
+        "SELECT text_sha256 FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+    )
+    .bind(protected_copy.receipt_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_ne!(digest_before, "0".repeat(64));
     let mut no_person = identity(1, OrgRelation::Parent, None, None);
     no_person.has_real_person = Some(false);
     put_identity(&db, account, &no_person).await.unwrap();
@@ -1790,6 +2292,25 @@ async fn experience_draft_reference_erases_history_and_copy_on_withdrawal() {
     wait_for_advisory_waiters(&db, 2).await;
     hold.commit().await.unwrap();
     withdrawal.await.unwrap().unwrap();
+    let digest_after: String = sqlx::query_scalar(
+        "SELECT text_sha256 FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+    )
+    .bind(protected_copy.receipt_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(digest_after, "0".repeat(64));
+    assert!(matches!(
+        prepare_copy(&db, made.work_id, &copy).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(
+        check_saved_drafts(&db, &batch_request)
+            .await
+            .unwrap()
+            .is_empty(),
+        "withdrawn source must not retain an earlier check status"
+    );
     assert_eq!(
         read_experience(&db, id).await.unwrap().used_count,
         references_before_withdrawal
@@ -2160,7 +2681,16 @@ async fn copy_and_replay_requalify_restricted_sources_without_blocking_unrelated
         expected_revision: placed.revision.id,
     };
     assert!(prepare_copy(&db, first.work_id, &copy).await.is_ok());
+    let batch = SavedDraftCheckRequest {
+        domain_ref: fixture::dossier::DOMAIN,
+        items: vec![SavedDraftCheckItem {
+            work_id: first.work_id,
+            revision_id: placed.revision.id,
+        }],
+    };
+    assert_eq!(check_saved_drafts(&db, &batch).await.unwrap().len(), 1);
     restrict_comment(&db, source_work).await;
+    assert!(check_saved_drafts(&db, &batch).await.unwrap().is_empty());
     assert!(matches!(
         prepare_copy(&db, first.work_id, &copy).await,
         Err(AssetsError::SourceUnavailable)
@@ -3164,4 +3694,370 @@ async fn request_ids_belong_to_one_command_and_every_new_table_is_append_only() 
             "{table} must refuse deletes"
         );
     }
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn structural_template_tracks_source_withdrawal_and_reset() {
+    let db = db("assets_structural_template").await;
+    let (account, _, _) = accounts(&db).await;
+    let person = put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap()
+    .identity
+    .person_ref
+    .unwrap();
+    let experience = create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            expected_person_ref: person,
+            title: "合成标题".into(),
+            body: "合成私人经历。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .experience
+    .id;
+    confirm_experience(
+        &db,
+        experience,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+            confirmation_method: "subject_present".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut doc = draft(Some(account), &["合成私人经历。"]);
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: doc.paragraphs[0].id,
+        experience_ref: experience,
+        experience_revision: 1,
+    });
+    let work = create(&db, doc).await;
+    let command = CreateTemplate {
+        request_id: Uuid::new_v4(),
+        work_id: work.work_id,
+        expected_revision: work.revision.id,
+        steps: vec![
+            StructuralStep::Opening,
+            StructuralStep::Experience,
+            StructuralStep::Reflection,
+        ],
+    };
+    let receipt = create_structural_template(&db, &command).await.unwrap();
+    let code = receipt.template.code.clone();
+    assert_eq!(receipt.template.status, "review");
+    assert!(receipt.template.source_available);
+    assert!(
+        create_structural_template(&db, &command)
+            .await
+            .unwrap()
+            .replayed
+    );
+    assert!(matches!(
+        save(
+            &db,
+            work.work_id,
+            &SaveRequest {
+                request_id: command.request_id,
+                expected_revision: work.revision.id,
+                document: work.revision.document.clone()
+            }
+        )
+        .await,
+        Err(WorkbenchError::RequestConflict)
+    ));
+    let stored: String =
+        sqlx::query_scalar("SELECT steps::text FROM linggan_creation_template_revision")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert!(!stored.contains("合成"));
+    assert!(sqlx::query("INSERT INTO linggan_creation_template_revision(template_ref,revision,steps) SELECT template_ref,2,'[\"合成私人经历。\"]'::jsonb FROM linggan_creation_template WHERE code=$1").bind(&code).execute(db.pool()).await.is_err());
+    let review = ReviewTemplate {
+        request_id: Uuid::new_v4(),
+        expected_revision: 1,
+        action: TemplateAction::Approve,
+    };
+    assert_eq!(
+        review_structural_template(&db, &code, &review)
+            .await
+            .unwrap()
+            .template
+            .status,
+        "ok"
+    );
+    let revise = ReviseTemplate {
+        request_id: Uuid::new_v4(),
+        expected_revision: 1,
+        steps: vec![StructuralStep::Opening, StructuralStep::Action],
+    };
+    let revised = revise_structural_template(&db, &code, &revise)
+        .await
+        .unwrap();
+    assert_eq!(
+        (revised.template.revision, revised.template.status.as_str()),
+        (2, "review")
+    );
+    assert!(
+        revise_structural_template(&db, &code, &revise)
+            .await
+            .unwrap()
+            .replayed
+    );
+    assert!(matches!(
+        revise_structural_template(
+            &db,
+            &code,
+            &ReviseTemplate {
+                request_id: Uuid::new_v4(),
+                ..revise
+            }
+        )
+        .await,
+        Err(AssetsError::Stale)
+    ));
+    let versions = structural_template_history(&db, &code).await.unwrap();
+    assert_eq!(
+        versions
+            .iter()
+            .map(|v| (v.revision, v.status.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(2, "review"), (1, "ok")]
+    );
+    withdraw_experience(&db, experience, Uuid::new_v4())
+        .await
+        .unwrap();
+    assert!(matches!(
+        revise_structural_template(
+            &db,
+            &code,
+            &ReviseTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 2,
+                steps: vec![StructuralStep::Opening]
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    assert!(
+        structural_template_history(&db, &code)
+            .await
+            .unwrap()
+            .iter()
+            .all(|v| !v.source_available)
+    );
+    let listed = list_structural_templates(&db, fixture::dossier::DOMAIN)
+        .await
+        .unwrap();
+    assert!(
+        !listed
+            .iter()
+            .find(|item| item.code == code)
+            .unwrap()
+            .source_available
+    );
+    assert!(matches!(
+        create_structural_template(
+            &db,
+            &CreateTemplate {
+                request_id: Uuid::new_v4(),
+                ..command
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let reset = reset_withdrawn(
+        &db,
+        work.work_id,
+        &ResetWithdrawnRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: work.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    let mut fresh = reset.revision.document;
+    fresh.paragraphs.push(Paragraph {
+        id: Uuid::new_v4(),
+        text: "新的独立正文".into(),
+    });
+    let saved = save(
+        &db,
+        work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: reset.revision.id,
+            document: fresh,
+        },
+    )
+    .await
+    .unwrap();
+    let newer = create_structural_template(
+        &db,
+        &CreateTemplate {
+            request_id: Uuid::new_v4(),
+            work_id: work.work_id,
+            expected_revision: saved.revision.id,
+            steps: vec![StructuralStep::Opening],
+        },
+    )
+    .await
+    .unwrap();
+    assert!(newer.template.source_available);
+    sqlx::query("SELECT setval('linggan_creation_template_code_seq',9999,true)")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let large_code = create_structural_template(
+        &db,
+        &CreateTemplate {
+            request_id: Uuid::new_v4(),
+            work_id: work.work_id,
+            expected_revision: saved.revision.id,
+            steps: vec![StructuralStep::Opening],
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(large_code.template.code, "YB-10000");
+    assert!(
+        !list_structural_templates(&db, fixture::dossier::DOMAIN)
+            .await
+            .unwrap()
+            .iter()
+            .find(|item| item.code == code)
+            .unwrap()
+            .source_available
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn structural_template_with_detached_history_waits_for_withdrawal() {
+    let db = db("assets_template_withdrawal_race").await;
+    let (account, _, _) = accounts(&db).await;
+    let person = put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap()
+    .identity
+    .person_ref
+    .unwrap();
+    let experience = create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            expected_person_ref: person,
+            title: "合成".into(),
+            body: "合成经历。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap()
+    .experience
+    .id;
+    confirm_experience(
+        &db,
+        experience,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+            confirmation_method: "subject_present".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut doc = draft(Some(account), &["合成经历。"]);
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: doc.paragraphs[0].id,
+        experience_ref: experience,
+        experience_revision: 1,
+    });
+    let work = create(&db, doc).await;
+    let mut independent = work.revision.document.clone();
+    independent.experience_slots.clear();
+    independent.paragraphs = vec![Paragraph {
+        id: Uuid::new_v4(),
+        text: "独立正文".into(),
+    }];
+    let saved = save(
+        &db,
+        work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: work.revision.id,
+            document: independent,
+        },
+    )
+    .await
+    .unwrap();
+    let template = create_structural_template(
+        &db,
+        &CreateTemplate {
+            request_id: Uuid::new_v4(),
+            work_id: work.work_id,
+            expected_revision: saved.revision.id,
+            steps: vec![StructuralStep::Opening],
+        },
+    )
+    .await
+    .unwrap()
+    .template;
+    let mut hold = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *hold)
+        .await
+        .unwrap();
+    let withdrawal_db = db.clone();
+    let withdrawal = tokio::spawn(async move {
+        withdraw_experience(&withdrawal_db, experience, Uuid::new_v4()).await
+    });
+    wait_for_advisory_waiters(&db, 1).await;
+    let review_db = db.clone();
+    let review = tokio::spawn(async move {
+        review_structural_template(
+            &review_db,
+            &template.code,
+            &ReviewTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                action: TemplateAction::Approve,
+            },
+        )
+        .await
+    });
+    wait_for_advisory_waiters(&db, 2).await;
+    hold.commit().await.unwrap();
+    withdrawal.await.unwrap().unwrap();
+    assert!(matches!(
+        review.await.unwrap(),
+        Err(AssetsError::SourceUnavailable)
+    ));
 }

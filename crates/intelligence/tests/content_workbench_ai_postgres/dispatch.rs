@@ -338,3 +338,238 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     assert_eq!(research_count, 0);
     std::fs::remove_dir_all(root).unwrap();
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL only; synthetic price and no provider calls"]
+async fn creative_monthly_budget_reserves_and_keeps_unknown_spend_unknown() {
+    let db = fixture::db("creative_month_budget").await;
+    let configured = foundation_fixture::declare(&db, "http://127.0.0.1:9").await;
+    let price: Uuid = sqlx::query_scalar("SELECT price_ref FROM linggan_model_price WHERE endpoint_ref=$1 ORDER BY revision_sequence DESC LIMIT 1")
+        .bind(configured.endpoint).fetch_one(db.pool()).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    let missing: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,NULL,2,scope_001_now())")
+            .bind(Uuid::new_v4())
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(missing, "price_unavailable");
+    sqlx::query("UPDATE linggan_creation_ai_budget SET cap_pico_usd=1000000 WHERE singleton")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let refused: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,2,scope_001_now())")
+            .bind(Uuid::new_v4())
+            .bind(price)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(refused, "monthly_budget_exhausted");
+    sqlx::query("UPDATE linggan_creation_ai_budget SET cap_pico_usd=3000000 WHERE singleton")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let invocation = Uuid::new_v4();
+    let allowed: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,2,scope_001_now())")
+            .bind(invocation)
+            .bind(price)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(allowed, "reserved");
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,price_ref) VALUES($1,$2,$3,'analyze',repeat('0',64),'running',2,2,'writing_legacy',$4)")
+        .bind(invocation).bind(configured.version).bind(configured.model).bind(price).execute(&mut *tx).await.unwrap();
+    let blocked: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,2,scope_001_now())")
+            .bind(Uuid::new_v4())
+            .bind(price)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(blocked, "monthly_budget_exhausted");
+    tx.rollback().await.unwrap();
+
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key) VALUES($1,$2,$3,'analyze',repeat('0',64),'running',2,2,'writing_legacy')")
+        .bind(Uuid::new_v4()).bind(configured.version).bind(configured.model).execute(db.pool()).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    let unknown: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,2,scope_001_now())")
+            .bind(Uuid::new_v4())
+            .bind(price)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(unknown, "historic_spend_unknown");
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL budget settings proof"]
+async fn creative_budget_setting_is_revisioned_and_retryable() {
+    use linggan_intelligence::creation_assets::{
+        AssetsError, ChangeCreativeBudget, change_creative_budget, read_creative_budget,
+    };
+    let db = fixture::db("creative_month_setting").await;
+    let initial = read_creative_budget(&db).await.unwrap();
+    assert_eq!(initial.cap_cents, 10_000);
+    assert_eq!(initial.unknown_calls, 0);
+    let request = Uuid::new_v4();
+    let command = ChangeCreativeBudget {
+        request_id: request,
+        expected_revision: initial.revision,
+        cap_cents: 12_345,
+    };
+    let saved = change_creative_budget(&db, &command).await.unwrap();
+    assert_eq!(
+        (saved.cap_cents, saved.revision, saved.replayed),
+        (12_345, 2, false)
+    );
+    assert!(
+        change_creative_budget(&db, &command)
+            .await
+            .unwrap()
+            .replayed
+    );
+    let conflicting = ChangeCreativeBudget {
+        cap_cents: 12_346,
+        ..command
+    };
+    assert!(matches!(
+        change_creative_budget(&db, &conflicting).await,
+        Err(AssetsError::RequestConflict)
+    ));
+    let stale = ChangeCreativeBudget {
+        request_id: Uuid::new_v4(),
+        ..conflicting
+    };
+    assert!(matches!(
+        change_creative_budget(&db, &stale).await,
+        Err(AssetsError::Stale)
+    ));
+    let current = read_creative_budget(&db).await.unwrap();
+    assert_eq!((current.cap_cents, current.revision), (12_345, 2));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL budget concurrency proof"]
+async fn creative_monthly_budget_serializes_competing_reservations() {
+    let db = fixture::db("creative_month_concurrent").await;
+    let configured = foundation_fixture::declare(&db, "http://127.0.0.1:9").await;
+    let price: Uuid = sqlx::query_scalar("SELECT price_ref FROM linggan_model_price WHERE endpoint_ref=$1 ORDER BY revision_sequence DESC LIMIT 1")
+        .bind(configured.endpoint).fetch_one(db.pool()).await.unwrap();
+    sqlx::query("UPDATE linggan_creation_ai_budget SET cap_pico_usd=3000000 WHERE singleton")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let mut first = db.pool().begin().await.unwrap();
+    let invocation = Uuid::new_v4();
+    let result: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,2,scope_001_now())")
+            .bind(invocation)
+            .bind(price)
+            .fetch_one(&mut *first)
+            .await
+            .unwrap();
+    assert_eq!(result, "reserved");
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,price_ref) VALUES($1,$2,$3,'analyze',repeat('0',64),'running',2,2,'writing_legacy',$4)")
+        .bind(invocation).bind(configured.version).bind(configured.model).bind(price).execute(&mut *first).await.unwrap();
+    let other_db = db.clone();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let mut second = tokio::spawn(async move {
+        let mut tx = other_db.pool().begin().await.unwrap();
+        started.send(()).unwrap();
+        let outcome: String =
+            sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,2,scope_001_now())")
+                .bind(Uuid::new_v4())
+                .bind(price)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+        tx.rollback().await.unwrap();
+        outcome
+    });
+    ready.await.unwrap();
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(100), &mut second)
+            .await
+            .is_err()
+    );
+    first.commit().await.unwrap();
+    assert_eq!(second.await.unwrap(), "monthly_budget_exhausted");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL budget gate with local fake transport"]
+async fn creative_budget_denial_is_visible_and_never_dispatches() {
+    let db = fixture::db("creative_budget_no_dispatch").await;
+    let config = foundation_fixture::configure_fake_prerequisites(&db).await;
+    sqlx::query("UPDATE linggan_creation_ai_budget SET cap_pico_usd=0 WHERE singleton")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let work = fixture::create(&db, fixture::doc()).await;
+    let preview = request(&work, config, ai::WritingAction::Draft, "");
+    let command = prepare(&db, &preview).await;
+    ai::execute(&db, &command).await.unwrap();
+    let (adapter, calls, _root) = adapter();
+    run_request(&db, command.request_id, &SyntheticModelSecrets, &adapter)
+        .await
+        .unwrap();
+    assert_eq!(call_count(&calls), 0);
+    let status = ai::status(&db, command.request_id).await.unwrap();
+    assert_eq!(status["state"], "failed");
+    assert_eq!(status["failureCode"], "ai_creative_month_budget_exhausted");
+    assert!(status["invocationRef"].is_null());
+    let count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_creation_ai_budget_reservation")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL budget settlement proof"]
+async fn creative_budget_replaces_a_known_reservation_with_its_actual_cost() {
+    let db = fixture::db("creative_month_settlement").await;
+    let configured = foundation_fixture::declare(&db, "http://127.0.0.1:9").await;
+    let price: Uuid = sqlx::query_scalar("SELECT price_ref FROM linggan_model_price WHERE endpoint_ref=$1 ORDER BY revision_sequence DESC LIMIT 1")
+        .bind(configured.endpoint).fetch_one(db.pool()).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query("UPDATE linggan_creation_ai_budget SET cap_pico_usd=3000000 WHERE singleton")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let invocation = Uuid::new_v4();
+    let result: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,2,scope_001_now())")
+            .bind(invocation)
+            .bind(price)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(result, "reserved");
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,price_ref) VALUES($1,$2,$3,'analyze',repeat('0',64),'running',2,2,'writing_legacy',$4)")
+        .bind(invocation).bind(configured.version).bind(configured.model).bind(price).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE linggan_model_invocation SET state='succeeded',input_tokens=1,output_tokens=0,cached_input_tokens=0,cached_write_tokens=0,finished_at=scope_001_now() WHERE invocation_ref=$1")
+        .bind(invocation).execute(&mut *tx).await.unwrap();
+    let cost: String = sqlx::query_scalar(
+        "SELECT cost_pico_usd::text FROM linggan_model_invocation WHERE invocation_ref=$1",
+    )
+    .bind(invocation)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(cost, "1000000");
+    let another: String =
+        sqlx::query_scalar("SELECT linggan_creation_ai_reserve($1,$2,2,scope_001_now())")
+            .bind(Uuid::new_v4())
+            .bind(price)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(another, "reserved");
+    tx.rollback().await.unwrap();
+}

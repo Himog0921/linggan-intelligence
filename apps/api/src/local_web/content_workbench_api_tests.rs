@@ -223,6 +223,25 @@ async fn content_workbench_http_routes_save_conflict_history_and_guard() {
     let (status, history) = call(app.clone(), &format!("{uri}/revisions"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(history["items"].as_array().unwrap().len(), 2);
+    let (status, prior) = call(
+        app.clone(),
+        &format!(
+            "{uri}/revisions/{}",
+            first["revision"]["id"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(prior["id"], first["revision"]["id"]);
+    assert_eq!(prior["document"]["title"], "");
+    let (status, _) = call(
+        app.clone(),
+        &format!("{uri}/revisions/{}", Uuid::new_v4()),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     let (status, list) = call(
         app.clone(),
         &format!("/ops/api/creation/works?domainRef={domain}"),
@@ -319,4 +338,27 @@ async fn content_workbench_http_idea_box_and_title_candidates_round_trip() {
             .count(),
         2
     );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn content_workbench_http_qualifies_new_page_source_and_rejects_withdrawal() {
+    let db = proof("creation_http_page_source").await;
+    let doc = work_fixture::comment_doc(&db).await;
+    let citation = &doc.excerpts[0].citation;
+    let command = json!({"domainRef":dossier::DOMAIN,"asOf":citation.as_of,"blockRef":citation.block_ref,
+        "sourceKind":citation.source_kind,"sourceRef":citation.source_ref,"workRef":citation.work_ref,
+        "field":citation.field,"sourceVersion":citation.source_version,"start":citation.start,"end":citation.end});
+    let app = app_with_database(db.clone());
+    let (status, answer) = call(
+        app.clone(),
+        "/ops/api/creation/sources/validate",
+        Some(command.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{answer}");
+    assert_eq!(answer["textHash"], citation.text_hash);
+    work_fixture::restrict_comment(&db, citation.work_ref.unwrap()).await;
+    let (status, _) = call(app, "/ops/api/creation/sources/validate", Some(command)).await;
+    assert_ne!(status, StatusCode::OK);
 }

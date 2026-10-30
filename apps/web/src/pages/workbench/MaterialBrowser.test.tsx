@@ -69,7 +69,7 @@ const collection = (documents = [material]): MaterialCollection => ({
   nextCursor: null,
   searchScope: "collected_only",
 });
-function Harness({ prepared = true }: { prepared?: boolean }) {
+function Harness({ prepared = true, contextKey = 'test' }: { prepared?: boolean; contextKey?: string }) {
   const [document, setDocument] = useState<WorkDocument>(() => ({
     ...newDocument("作业启动"),
     materials: prepared ? [selectMaterial(material, "prepared")] : [],
@@ -86,6 +86,7 @@ function Harness({ prepared = true }: { prepared?: boolean }) {
   return (
     <MaterialBrowser
       domain={id}
+      contextKey={contextKey}
       document={document}
       onChange={setDocument}
       onCollect={vi.fn()}
@@ -902,4 +903,16 @@ it.each([[2000, 2], [1000, 4], [1200, 3]])('keeps the last spread aligned after 
     expect(within(reader).getByText(`${count} / ${count}`, { exact: true })).toBeInTheDocument();
     if (count === 2) expect(within(reader).getByText(/第000段/)).toBeInTheDocument();
   } finally { bounds.mockRestore(); }
+});
+
+it('does not show a previously previewed source while the new focus query is pending or fails', async () => {
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  const view = render(<QueryClientProvider client={client}><Harness contextKey="focus-1"/></QueryClientProvider>);
+  expect(await within(screen.getByRole('region', {name:'分组摘录纸条'})).findByRole('button', {name:'第一段😀'})).toBeInTheDocument();
+  let reject!: (error: Error) => void;
+  vi.mocked(api.resolveMaterials).mockImplementationOnce(() => new Promise((_resolve, failure) => {reject=failure;}));
+  view.rerender(<QueryClientProvider client={client}><Harness contextKey="focus-2"/></QueryClientProvider>);
+  expect(within(screen.getByRole('region', {name:'分组摘录纸条'})).queryByRole('button', {name:'第一段😀'})).not.toBeInTheDocument();
+  reject(new Error('source unavailable'));
+  await waitFor(() => expect(within(screen.getByRole('region', {name:'分组摘录纸条'})).queryByRole('button', {name:'第一段😀'})).not.toBeInTheDocument());
 });
