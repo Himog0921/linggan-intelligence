@@ -51,12 +51,28 @@ WITH latest AS MATERIALIZED (
     SELECT latest.*, cache.source_ref AS cached_source_ref, cache.clean_state,
            cache.research_text, cache.clean_reasons,
            raw.body_text IS NOT NULL AS has_body,
-           CASE WHEN EXISTS (
-               SELECT 1 FROM linggan_material_domain_usage role_usage
-               WHERE role_usage.content_public_ref = latest.content_public_ref
-                 AND role_usage.domain_ref = $1 AND role_usage.role = 'primary'
-                 AND role_usage.use_kind = 'domain_research'
-           ) THEN 'primary' ELSE 'reference' END AS observation_role,
+           -- Research usage rows decide the role; a work that only has creator-context
+           -- rows falls back to the role on those rows so its detail stays studyable.
+           CASE
+             WHEN EXISTS (
+                 SELECT 1 FROM linggan_material_domain_usage role_usage
+                 WHERE role_usage.content_public_ref = latest.content_public_ref
+                   AND role_usage.domain_ref = $1 AND role_usage.role = 'primary'
+                   AND role_usage.use_kind = 'domain_research'
+             ) THEN 'primary'
+             WHEN EXISTS (
+                 SELECT 1 FROM linggan_material_domain_usage research_usage
+                 WHERE research_usage.content_public_ref = latest.content_public_ref
+                   AND research_usage.domain_ref = $1
+                   AND research_usage.use_kind = 'domain_research'
+             ) THEN 'reference'
+             WHEN EXISTS (
+                 SELECT 1 FROM linggan_material_domain_usage fallback_usage
+                 WHERE fallback_usage.content_public_ref = latest.content_public_ref
+                   AND fallback_usage.domain_ref = $1 AND fallback_usage.role = 'primary'
+             ) THEN 'primary'
+             ELSE 'reference'
+           END AS observation_role,
            CASE
              WHEN NULLIF(btrim(latest.author_external_id), '') IS NULL
                OR NULLIF(btrim(author.author_external_id), '') IS NULL THEN 'unknown'

@@ -537,6 +537,8 @@ async fn add_creator_context_usage(db: &Database, domain: Uuid, work: Uuid, role
 
 /// 一篇作品在领域里的「观察角色」只看研究用途的那一行：研究用途是「参照」、
 /// 同一作品另有一行作者语境的「主研究」时，仍然是「参照」。
+/// 只有作者语境行的作品没有研究用途可看，详情回退到那一行本来的角色（「主研究」），
+/// 这样按作品打开的详情仍能做评论研究；领域目录照旧不列它。
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn the_observation_role_of_a_work_ignores_creator_context_usage_rows() {
@@ -550,6 +552,21 @@ async fn the_observation_role_of_a_work_ignores_creator_context_usage_rows() {
         Some("reader"),
     )
     .await;
+    detail_with_author(
+        &db,
+        "context-only-work",
+        "SYNTHETIC 仅语境作品",
+        Some("context-only"),
+    )
+    .await;
+    add_comment(
+        &db,
+        "context-only-work",
+        "context-only-c1",
+        "SYNTHETIC 评论",
+        Some("reader"),
+    )
+    .await;
     let domain = query().domain;
     fixture::set_usage_role(&db, domain, "role-work", "reference").await;
     let work: Uuid = sqlx::query_scalar(
@@ -559,6 +576,13 @@ async fn the_observation_role_of_a_work_ignores_creator_context_usage_rows() {
     .await
     .unwrap();
     add_creator_context_usage(&db, domain, work, "primary").await;
+    fixture::make_creator_context_only(&db, domain, "context-only-work").await;
+    let context_work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id='context-only-work'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
     cache(&db).await;
     let list = read_comment_catalog(&db, &query()).await.unwrap();
     assert_eq!(list["items"].as_array().unwrap().len(), 1, "{list}");
@@ -578,6 +602,42 @@ async fn the_observation_role_of_a_work_ignores_creator_context_usage_rows() {
         detail["comment"]["observationRole"], "reference",
         "{detail}"
     );
+    // 只有作者语境行的作品：详情回退到那一行本来的角色，研究入口的闸门才匹配。
+    let context_detail = read_comment_detail(
+        &db,
+        &CommentDetailQuery {
+            domain,
+            work_ref: context_work,
+            comment_external_id: "context-only-c1".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        context_detail["comment"]["observationRole"], "primary",
+        "{context_detail}"
+    );
+    // 研究准入的角色闸门同样能匹配：详情给出的角色就是这一步传回来的角色。
+    let source_ref: Uuid = sqlx::query_scalar(
+        "SELECT material_ref FROM linggan_material_comment WHERE content_public_ref=$1 AND comment_external_id='context-only-c1' ORDER BY observed_at::timestamptz DESC, material_ref DESC LIMIT 1",
+    )
+    .bind(context_work)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    let selected = linggan_intelligence::comment_study_source::selected_source_in(
+        &mut tx,
+        domain,
+        context_work,
+        source_ref,
+        linggan_intelligence::comment_study_source::StudySourceRole::Primary,
+        "9999-12-31T00:00:00Z",
+    )
+    .await
+    .unwrap();
+    tx.rollback().await.unwrap();
+    assert!(selected.is_some(), "作者语境作品的评论应能进入评论研究");
 }
 
 /// 领域里只有作者语境作品带评论时，总览的观察序列是空的：既没有新观察到的评论，也没有评论覆盖记录。
