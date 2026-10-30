@@ -13,8 +13,9 @@ use linggan_evidence::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 use std::time::Duration;
+use tokio::process::Command;
 use uuid::Uuid;
 
 mod media_worker_support;
@@ -274,7 +275,7 @@ async fn execute_image_ocr(
     }
     let input = local_media_root().join(&claim.storage_key);
     ensure_local_input(&input)?;
-    let output = run_paddle_ocr(&input, &claim.mime_type)?;
+    let output = run_paddle_ocr(&input, &claim.mime_type).await?;
     let Some(lines) = output.lines.as_ref() else {
         return Err("paddle_ocr_result_lines_missing".to_owned());
     };
@@ -366,11 +367,11 @@ async fn execute_image_ocr(
 /// blobs under their content hash, deliberately without a filename extension, so pass Paddle a
 /// short-lived local link/copy whose suffix is derived from the admitted MIME fact.  The original
 /// Blob remains the authority and is never renamed or rewritten.
-fn run_paddle_ocr(input: &Path, mime_type: &str) -> Result<PaddleOcrOutput, String> {
+async fn run_paddle_ocr(input: &Path, mime_type: &str) -> Result<PaddleOcrOutput, String> {
     let extension = paddle_image_extension(mime_type)
         .ok_or_else(|| format!("paddle_ocr_unsupported_mime:{mime_type}"))?;
     let staged_input = stage_paddle_input(input, extension)?;
-    let result = run_paddle_ocr_staged(&staged_input);
+    let result = run_paddle_ocr_staged(&staged_input).await;
     // A staging file is an execution scratch artifact, not a media materialization.  It must not
     // survive the attempt (whether Paddle accepts, rejects, or times out on the input).
     let _ = std::fs::remove_file(&staged_input);
@@ -413,14 +414,14 @@ fn paddle_image_extension(mime_type: &str) -> Option<&'static str> {
     }
 }
 
-fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> {
+async fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> {
     let script = paddle_ocr_script();
     if !script.is_file() {
         return Err("paddle_ocr_script_missing".to_owned());
     }
     let mut command = Command::new(paddle_ocr_python());
     command.arg(script).arg(input);
-    let output = run_command(&mut command, PROCESS_TIMEOUT)?;
+    let output = run_command(&mut command, PROCESS_TIMEOUT).await?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr)
             .chars()
@@ -472,7 +473,10 @@ async fn execute_thumbnail(
         .arg(&input)
         .args(["-vf", "thumbnail,scale='min(960,iw)':-2", "-frames:v", "1"])
         .arg(&output_path);
-    require_success(run_command(&mut command, PROCESS_TIMEOUT)?, "thumbnail")?;
+    require_success(
+        run_command(&mut command, PROCESS_TIMEOUT).await?,
+        "thumbnail",
+    )?;
     complete_binary_derivative(
         database,
         worker_instance_ref,
@@ -502,7 +506,10 @@ async fn execute_audio_extract(
         .arg(&input)
         .args(["-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le"])
         .arg(&output_path);
-    require_success(run_command(&mut command, PROCESS_TIMEOUT)?, "audio_extract")?;
+    require_success(
+        run_command(&mut command, PROCESS_TIMEOUT).await?,
+        "audio_extract",
+    )?;
     complete_binary_derivative(
         database,
         worker_instance_ref,
@@ -524,7 +531,7 @@ async fn execute_asr(
     }
     let input = local_media_root().join(&claim.storage_key);
     ensure_local_input(&input)?;
-    if !has_audio_stream(&input)? {
+    if !has_audio_stream(&input).await? {
         complete_media_processing_without_output(
             database,
             claim,
@@ -554,7 +561,7 @@ async fn execute_asr(
         .arg(&output_dir)
         .args(["--fp16", "False"])
         .args(["--initial_prompt", ASR_INITIAL_PROMPT]);
-    require_success(run_command(&mut command, ASR_PROCESS_TIMEOUT)?, "asr")?;
+    require_success(run_command(&mut command, ASR_PROCESS_TIMEOUT).await?, "asr")?;
     let transcript = first_json_file(&output_dir)?;
     let raw = std::fs::read_to_string(&transcript)
         .map_err(|error| format!("asr_output_read_failed:{error}"))?;
@@ -610,7 +617,7 @@ async fn execute_video_frame_ocr(
     ffmpeg.args(["-y","-i"]).arg(&input)
         .args(["-vf","select='isnan(prev_selected_t)+gte(t-prev_selected_t,10)',showinfo,scale='min(1280,iw)':-2","-vsync","vfr"])
         .arg(&pattern);
-    let extracted = run_command(&mut ffmpeg, PROCESS_TIMEOUT)?;
+    let extracted = run_command(&mut ffmpeg, PROCESS_TIMEOUT).await?;
     let timestamps = media_worker_support::timed_text::sampled_pts(&extracted.stderr)?;
     require_success(extracted, "video_frame_extract")?;
     let mut frames = std::fs::read_dir(&frame_dir)
@@ -625,7 +632,7 @@ async fn execute_video_frame_ocr(
     }
     let mut blocks = vec![];
     for (frame_index, (frame, pts)) in frames.iter().zip(&timestamps).enumerate() {
-        let output = run_paddle_ocr(frame, "image/jpeg")?;
+        let output = run_paddle_ocr(frame, "image/jpeg").await?;
         let lines:Vec<_>=output.lines.unwrap_or_default().iter().map(|l|serde_json::json!({"text":l.text,"confidence":l.confidence,
             "bbox":[l.bbox_norm[0],l.bbox_norm[1],l.bbox_norm[2]-l.bbox_norm[0],l.bbox_norm[3]-l.bbox_norm[1]]})).collect();
         let mut frame_blocks = linggan_evidence::research_dossier::content::ocr_blocks(&lines);
@@ -661,7 +668,7 @@ async fn execute_video_frame_ocr(
             source_location:serde_json::json!({"sampledPtsMs":timestamps,"frameCount":frames.len(),"sampling":"at_least_10_seconds_between_selected_source_frames"})}).await
 }
 
-fn has_audio_stream(input: &Path) -> Result<bool, String> {
+async fn has_audio_stream(input: &Path) -> Result<bool, String> {
     let command = std::env::var("LINGGAN_FFPROBE_COMMAND").unwrap_or_else(|_| {
         std::path::PathBuf::from(ffmpeg_command())
             .with_file_name("ffprobe")
@@ -682,7 +689,8 @@ fn has_audio_stream(input: &Path) -> Result<bool, String> {
             ])
             .arg(input),
         PROCESS_TIMEOUT,
-    )?;
+    )
+    .await?;
     if !output.status.success() {
         return Err("audio_stream_probe_failed".into());
     }

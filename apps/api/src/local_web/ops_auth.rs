@@ -108,8 +108,16 @@ async fn login(
     };
     let email = normalize_email(&request.email);
     let token = new_session_token();
-    let result: Result<Option<AuthenticatedMember>, sqlx::Error> = async {
-        let mut transaction = database.pool().begin().await?;
+    let result: Result<Option<AuthenticatedMember>, ()> = async {
+        // Verify without holding a connection or member lock during the expensive calculation.
+        let hash: Option<String> = sqlx::query_scalar(
+            "SELECT password_hash FROM linggan_ops_member WHERE email_normalized=$1 AND state='active'",
+        ).bind(&email).fetch_optional(database.pool()).await.map_err(|_| ())?;
+        let Some(hash) = hash else { return Ok(None) };
+        if !password_matches_async(hash.clone(), request.password).await? {
+            return Ok(None);
+        }
+        let mut transaction = database.pool().begin().await.map_err(|_| ())?;
         let member = sqlx::query_as::<_, (Uuid, String, String, String)>(
             "SELECT member_ref, display_name, role, password_hash \
              FROM linggan_ops_member \
@@ -117,15 +125,12 @@ async fn login(
         )
         .bind(&email)
         .fetch_optional(&mut *transaction)
-        .await?;
-        let Some(member) = member else {
-            return Ok(None);
-        };
-        if !password_matches(&member.3, &request.password) {
-            return Ok(None);
-        }
-        issue_session_transaction(&mut transaction, member.0, &token).await?;
-        transaction.commit().await?;
+        .await.map_err(|_| ())?;
+        let Some(member) = member else { return Ok(None) };
+        // A password change or deactivation during verification must prevent session issuance.
+        if member.3 != hash { return Ok(None) }
+        issue_session_transaction(&mut transaction, member.0, &token).await.map_err(|_| ())?;
+        transaction.commit().await.map_err(|_| ())?;
         Ok(Some(member_identity(member)))
     }
     .await;
@@ -246,6 +251,14 @@ async fn change_password(
     };
     let token = new_session_token();
     let result: Result<PasswordChange, ()> = async {
+        let hash: Option<String> = sqlx::query_scalar(
+            "SELECT password_hash FROM linggan_ops_member WHERE member_ref=$1 AND state='active'",
+        ).bind(member.member_ref).fetch_optional(database.pool()).await.map_err(|_| ())?;
+        let Some(hash) = hash else { return Ok(PasswordChange::InvalidCredentials) };
+        if !password_matches_async(hash.clone(), request.current_password).await? {
+            return Ok(PasswordChange::InvalidCredentials);
+        }
+        let password_hash = hash_password_async(request.new_password).await?;
         let mut transaction = database.pool().begin().await.map_err(|_| ())?;
         let stored = sqlx::query_as::<_, (String, String)>(
             "SELECT password_hash, state FROM linggan_ops_member WHERE member_ref=$1 FOR UPDATE",
@@ -257,10 +270,9 @@ async fn change_password(
         let Some((current_hash, state)) = stored else {
             return Ok(PasswordChange::InvalidCredentials);
         };
-        if state != "active" || !password_matches(&current_hash, &request.current_password) {
+        if state != "active" || current_hash != hash {
             return Ok(PasswordChange::InvalidCredentials);
         }
-        let password_hash = hash_password(&request.new_password).map_err(|_| ())?;
         sqlx::query(
             "UPDATE linggan_ops_member SET password_hash=$2, version=version+1 WHERE member_ref=$1 AND state='active'",
         )
@@ -524,7 +536,7 @@ async fn accept_invitation(
     let Some(database) = state.database.database() else {
         return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable");
     };
-    let Ok(password_hash) = hash_password(&request.password) else {
+    let Ok(password_hash) = hash_password_async(request.password).await else {
         return auth_error(StatusCode::SERVICE_UNAVAILABLE, "ops_auth_unavailable");
     };
     let token = new_session_token();
@@ -641,6 +653,18 @@ pub(super) async fn current_member(
 
 fn normalize_email(value: &str) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+async fn password_matches_async(hash: String, password: String) -> Result<bool, ()> {
+    tokio::task::spawn_blocking(move || password_matches(&hash, &password))
+        .await
+        .map_err(|_| ())
+}
+
+async fn hash_password_async(password: String) -> Result<String, ()> {
+    tokio::task::spawn_blocking(move || hash_password(&password).map_err(|_| ()))
+        .await
+        .map_err(|_| ())?
 }
 
 fn password_matches(password_hash: &str, password: &str) -> bool {
@@ -851,4 +875,57 @@ pub(super) fn secure_headers(response: &mut Response) {
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
+}
+
+#[cfg(test)]
+mod password_scheduling_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn password_hashing_yields_to_other_async_work() {
+        let progressed = Cell::new(false);
+        let (hash, ()) = tokio::join!(
+            async {
+                let hash = hash_password_async("synthetic-password".into())
+                    .await
+                    .unwrap();
+                assert!(progressed.get(), "hashing must let another task run");
+                hash
+            },
+            async {
+                progressed.set(true);
+            }
+        );
+        assert!(password_matches(&hash, "synthetic-password"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn password_verification_yields_and_preserves_imported_scrypt_behavior() {
+        let hash = "workbench-scrypt$00112233445566778899aabbccddeeff:503d058ffa344ded3ade56ae37c931eeefdf127685942056bd9f50687f4fc3ced01bc958abc4957631dbc6774e6ff941d25010d5b60c8ae0b261cb36ada8b5bb";
+        let progressed = Cell::new(false);
+        tokio::join!(
+            async {
+                assert!(
+                    password_matches_async(hash.into(), "Ｐassword１２３".into())
+                        .await
+                        .unwrap()
+                );
+                assert!(progressed.get(), "verification must let another task run");
+            },
+            async {
+                progressed.set(true);
+            }
+        );
+        assert!(
+            !password_matches_async(hash.into(), "wrong".into())
+                .await
+                .unwrap()
+        );
+        assert!(
+            !password_matches_async("invalid-hash".into(), "wrong".into())
+                .await
+                .unwrap()
+        );
+    }
 }

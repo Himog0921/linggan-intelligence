@@ -2,10 +2,10 @@ pub(crate) mod ocr_vl;
 pub(crate) mod timed_text;
 
 use sha2::{Digest, Sha256};
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitStatus, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{ExitStatus, Stdio};
+use std::time::Duration;
+use tokio::{io::AsyncReadExt, process::Command};
 
 pub(crate) struct CommandOutput {
     pub(crate) status: ExitStatus,
@@ -13,59 +13,57 @@ pub(crate) struct CommandOutput {
     pub(crate) stderr: Vec<u8>,
 }
 
-pub(crate) fn run_command(
+/// The deadline includes both process exit and EOF on both output pipes.
+/// Dropping a timed-out read closes our pipe ends even if a descendant inherited the writer.
+pub(crate) async fn run_command(
     command: &mut Command,
     timeout: Duration,
 ) -> Result<CommandOutput, String> {
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|error| format!("process_spawn_failed:{error}"))?;
-    let mut child_stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "process_stdout_unavailable".to_owned())?;
-    let mut child_stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "process_stderr_unavailable".to_owned())?;
-    let stdout_reader = std::thread::spawn(move || {
-        let mut output = Vec::new();
-        child_stdout.read_to_end(&mut output).map(|_| output)
-    });
-    let stderr_reader = std::thread::spawn(move || {
-        let mut output = Vec::new();
-        child_stderr.read_to_end(&mut output).map(|_| output)
-    });
-    let started = Instant::now();
-    let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("process_wait_failed:{error}"))?
-        {
-            break status;
-        }
-        if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err("process_timeout".to_owned());
-        }
-        std::thread::sleep(Duration::from_millis(200));
-    };
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| "process_stdout_reader_panicked".to_owned())?
-        .map_err(|error| format!("process_stdout_read_failed:{error}"))?;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| "process_stderr_reader_panicked".to_owned())?
-        .map_err(|error| format!("process_stderr_read_failed:{error}"))?;
-    Ok(CommandOutput {
-        status,
-        stdout,
-        stderr,
+    let mut stdout = child.stdout.take().ok_or("process_stdout_unavailable")?;
+    let mut stderr = child.stderr.take().ok_or("process_stderr_unavailable")?;
+    let outcome = tokio::time::timeout(timeout, async {
+        let read_stdout = async {
+            let mut bytes = Vec::new();
+            stdout
+                .read_to_end(&mut bytes)
+                .await
+                .map_err(|error| format!("process_stdout_read_failed:{error}"))?;
+            Ok::<_, String>(bytes)
+        };
+        let read_stderr = async {
+            let mut bytes = Vec::new();
+            stderr
+                .read_to_end(&mut bytes)
+                .await
+                .map_err(|error| format!("process_stderr_read_failed:{error}"))?;
+            Ok::<_, String>(bytes)
+        };
+        let wait = async {
+            child
+                .wait()
+                .await
+                .map_err(|error| format!("process_wait_failed:{error}"))
+        };
+        let (status, stdout, stderr) = tokio::try_join!(wait, read_stdout, read_stderr)?;
+        Ok(CommandOutput {
+            status,
+            stdout,
+            stderr,
+        })
     })
+    .await;
+    let result = outcome.unwrap_or_else(|_| Err("process_timeout".to_owned()));
+    if result.is_err() {
+        // Reap the direct child on timeout/read failure; kill_on_drop also covers cancellation.
+        let _ = child.kill().await;
+    }
+    result
 }
 
 pub(crate) fn require_success(output: CommandOutput, prefix: &str) -> Result<(), String> {
@@ -197,7 +195,7 @@ pub(crate) fn apply_ffmpeg_path(command: &mut Command) -> Result<(), String> {
 
 pub(crate) fn command_available(command: &str) -> bool {
     Path::new(command).is_file()
-        || Command::new(command)
+        || std::process::Command::new(command)
             .arg("--version")
             .output()
             .is_ok_and(|output| output.status.success())
@@ -231,4 +229,49 @@ pub(crate) fn emit_startup_event() {
         linggan_evidence::EVENT_STARTUP,
     )
     .emit();
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn command_preserves_exit_status_and_drains_both_full_pipes() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "i=0; while [ $i -lt 10000 ]; do printf 'out\\n'; printf 'err\\n' >&2; i=$((i+1)); done; exit 7"]);
+        let output = run_command(&mut command, Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert_eq!(output.status.code(), Some(7));
+        assert_eq!(output.stdout, b"out\n".repeat(10000));
+        assert_eq!(output.stderr, b"err\n".repeat(10000));
+    }
+
+    #[tokio::test]
+    async fn command_times_out_while_the_direct_child_is_running() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "exec sleep 2"]);
+        let started = std::time::Instant::now();
+        assert_eq!(
+            run_command(&mut command, Duration::from_millis(100))
+                .await
+                .err()
+                .as_deref(),
+            Some("process_timeout")
+        );
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn command_deadline_includes_pipes_inherited_by_descendants() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "sleep 2 & exit 0"]);
+        let started = std::time::Instant::now();
+        let result = run_command(&mut command, Duration::from_millis(100)).await;
+        assert_eq!(result.err().as_deref(), Some("process_timeout"));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "pipe EOF must not extend the deadline"
+        );
+    }
 }
