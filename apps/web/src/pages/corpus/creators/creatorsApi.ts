@@ -165,6 +165,11 @@ function parseItem(record: Json): CreatorItem {
     authorAnalysis: parseAnalysis(record.authorAnalysis),
     traits: strList(record, 'traits'),
     topicHints: strList(record, 'topicHints'),
+    discoveryKeywords: strList(record, 'discoveryKeywords'),
+    firstSeenMs: optNum(record, 'firstSeenMs'),
+    firstSeenDate: optStr(record, 'firstSeenDate'),
+    firstSeenDisplay: optStr(record, 'firstSeenDisplay'),
+    firstSeenPrecision: optStr(record, 'firstSeenPrecision'),
     observation: parseObservation(obj(record, 'observation')),
     collectedWorkCount: num(record, 'collectedWorkCount'),
     relatedWorkCount: num(record, 'relatedWorkCount'),
@@ -188,7 +193,12 @@ function parseStats(record: Json): CreatorStats {
     vertical: num(record, 'vertical'),
     personal: num(record, 'personal'),
     outside: optNum(record, 'outside'),
+    inside: optNum(record, 'inside'),
     outsideViral: optNum(record, 'outsideViral'),
+    recentlyDiscovered: num(record, 'recentlyDiscovered'),
+    highLikeLeads: optNum(record, 'highLikeLeads'),
+    latestAddedMs: optNum(record, 'latestAddedMs'),
+    latestAddedDisplay: optStr(record, 'latestAddedDisplay'),
     unknownDateWorks: num(record, 'unknownDateWorks'),
   };
 }
@@ -211,15 +221,19 @@ function parseDomain(record: Json): CreatorDomain {
 }
 
 export function parseCreatorList(value: unknown): CreatorList {
-  return decode(value, root => ({
-    domain: parseDomain(obj(root, 'domain')),
-    policy: parsePolicy(obj(root, 'policy')),
-    stats: parseStats(obj(root, 'stats')),
-    total: num(root, 'total'),
-    items: list(root, 'items', parseItem),
-    asOf: optStr(root, 'asOf'),
-    displayAsOf: optStr(root, 'displayAsOf'),
-  }));
+  return decode(value, root => {
+    const lead = optObj(root, 'leadRule');
+    return {
+      domain: parseDomain(obj(root, 'domain')),
+      policy: parsePolicy(obj(root, 'policy')),
+      stats: parseStats(obj(root, 'stats')),
+      leadRule: lead === null ? null : { minLikes: num(lead, 'minLikes'), minWorks: num(lead, 'minWorks') },
+      total: num(root, 'total'),
+      items: list(root, 'items', parseItem),
+      asOf: optStr(root, 'asOf'),
+      displayAsOf: optStr(root, 'displayAsOf'),
+    };
+  });
 }
 
 /** 只接受同源的本机媒体路径；其他任何地址都不当图片用。 */

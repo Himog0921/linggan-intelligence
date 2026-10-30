@@ -1,11 +1,9 @@
-import type { RefObject } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import { Avatar, Cover } from './Media';
-import { analysisStatus, authorFocus, authorName, observedText, preservedLifecycle, relevanceLabel, targetHref, valueLabel, workTitle } from './creatorsPresent';
+import { authorName, observedText, preservedLifecycle, relevanceLabel, targetHref, workTitle } from './creatorsPresent';
 import {
-  LABELS,
   formatCount,
   hasWorkFilter,
-  highMode,
   scopeWorkLink,
   workLink,
   type CreatorQuery,
@@ -30,12 +28,26 @@ export function Metric({ value, className }: { value: number | null; className?:
   );
 }
 
+/** 首次发现的两种补充说明：更早的发现不可知，或最近 7 天才见到。 */
+const FIRST_SEEN_LABELS: Record<string, string> = {
+  recent: '近 7 天新见',
+  earliest_record: '最早已知记录',
+  domain_first: '本领域首次',
+};
+
+/** `2026-09-12` → `09.12`；格式不对时原样显示，不改写。 */
+function shortDay(date: string): string {
+  const [, month, day] = date.split('-');
+  return month && day ? `${month}.${day}` : date;
+}
+
 interface CreatorTableProps {
   data: CreatorList;
   query: CreatorQuery;
   link: LinkContext;
   resources: WorkResources;
   selectedKey: string | null;
+  selectedKeys: ReadonlySet<string>;
   domainActive: boolean;
   scrollRef: RefObject<HTMLDivElement | null>;
   busy: boolean;
@@ -43,59 +55,74 @@ interface CreatorTableProps {
   onJoin: (item: CreatorItem, role: 'primary' | 'reference') => void;
   onSort: (sort: SortKey) => void;
   onClearExtras: () => void;
+  onToggleSelect: (item: CreatorItem, checked: boolean) => void;
+  onSelectPage: (checked: boolean) => void;
 }
 
 export function CreatorTable(props: CreatorTableProps) {
-  const { data, query, scrollRef, busy, onSort } = props;
+  const { data, query, scrollRef, busy, onSort, selectedKeys, onSelectPage } = props;
   const filtered = hasWorkFilter(query);
-  const high = highMode(query);
+  const allSelected = data.items.length > 0 && data.items.every(item => selectedKeys.has(item.creatorKey));
+  const someSelected = data.items.some(item => selectedKeys.has(item.creatorKey));
   return (
     <div ref={scrollRef} className={styles.tableWrap} tabIndex={0} role="region" aria-label="创作者表格，可横向滚动" aria-busy={busy}>
       <table className={styles.table}>
-        <caption className="v7-sr-only">当前领域的创作者与作品判断、观察关系</caption>
+        <caption className="v7-sr-only">当前领域的创作者、发现来源、作品判断与观察关系</caption>
         <colgroup>
           <col className={styles.colAuthor} />
+          <col className={styles.colKeyword} />
           <col className={styles.colDirection} />
-          <col className={styles.colFocus} />
-          <col className={styles.colExpression} />
           <col className={styles.colCount} />
           <col className={styles.colLikes} />
           <col />
+          <col className={styles.colFirstSeen} />
           <col className={styles.colObservation} />
         </colgroup>
         <thead>
           <tr>
-            <th scope="col">创作者</th>
+            <th scope="col">
+              <span className={styles.headWithSelect}>
+                <PageSelect all={allSelected} some={someSelected} onChange={onSelectPage} />
+                创作者
+              </span>
+            </th>
+            <th scope="col">发现词</th>
             <th scope="col">内容方向</th>
-            <th scope="col" title="作者层面的倾向：本领域持续创作 / 多主题分享 / 尚不能判定">
-              作者倾向
-            </th>
-            <th scope="col" title="作品层面的表达（亲历自述、知识与方法讲解、推广表达），可以同时出现，与作者倾向互不推出">
-              作品表达
-            </th>
             <th scope="col" className={styles.number} aria-sort={query.sort === 'related_works' ? 'descending' : undefined}>
               <button type="button" onClick={() => onSort('related_works')}>
                 {filtered ? '命中相关' : '相关作品'}
               </button>
             </th>
-            <th scope="col" className={styles.number} aria-sort={query.sort === 'high_likes' ? 'descending' : undefined}>
+            <th
+              scope="col"
+              className={styles.number}
+              aria-sort={query.sort === 'high_likes' ? 'descending' : undefined}
+              title={filtered ? '当前命中作品中点赞最高的一篇（含待判定）' : '本领域已取得作品中点赞最高的一篇（含待判定，不含已判无关）'}
+            >
               <button type="button" onClick={() => onSort('high_likes')}>
-                {high ? '命中最高赞' : '相关最高赞'}
+                {filtered ? '命中最高赞' : '领域最高赞'}
               </button>
             </th>
             <th scope="col">作品预览</th>
+            <th scope="col" aria-sort={query.sort === 'first_seen' ? 'descending' : undefined}>
+              <button type="button" onClick={() => onSort('first_seen')}>
+                首次发现
+              </button>
+            </th>
             <th scope="col">观察状态</th>
           </tr>
         </thead>
         <tbody>
           {data.items.map(item => (
-            <CreatorRow key={item.creatorKey} item={item} {...props} filtered={filtered} high={high} />
+            <CreatorRow key={item.creatorKey} item={item} {...props} filtered={filtered} />
           ))}
         </tbody>
       </table>
       {data.total === 0 ? (
         <div className={styles.empty}>
-          当前条件下没有找到创作者。
+          {query.firstSeenFrom !== ''
+            ? `所选时间内没有新发现的作者。${data.stats.latestAddedDisplay ? `最近入库 ${data.stats.latestAddedDisplay}。` : '最近入库时间未知。'}`
+            : '当前条件下没有找到创作者。'}
           <button type="button" className={styles.textButton} onClick={props.onClearExtras}>
             清除额外条件
           </button>
@@ -105,23 +132,45 @@ export function CreatorTable(props: CreatorTableProps) {
   );
 }
 
-function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: boolean; high: boolean }) {
-  const { item, link, resources, selectedKey, onOpen, filtered, high } = props;
+/** 当前页全选：「部分已选」用半选态表达，不假装全都选中。 */
+function PageSelect({ all, some, onChange }: { all: boolean; some: boolean; onChange: (checked: boolean) => void }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = some && !all;
+  }, [some, all]);
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      className={styles.selectBox}
+      checked={all}
+      onChange={event => onChange(event.target.checked)}
+      aria-label="选择当前页全部创作者"
+    />
+  );
+}
+
+function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: boolean }) {
+  const { item, link, resources, selectedKey, selectedKeys, onOpen, onToggleSelect, filtered } = props;
   const work = item.representatives[0];
-  const focus = authorFocus(item);
-  const state = analysisStatus(item.authorAnalysis, focus.value);
-  const traits = item.traits.filter(key => key !== 'institution_or_brand' && LABELS[key]);
   const matched = filtered ? item.matchedRelatedWorkCount : item.relatedWorkCount;
-  const likes = high ? item.candidateHighLikeCount : item.maxRelatedLikeCount;
   const directions = item.topicHints.filter(Boolean).join(' · ');
   const resource = work ? resources.byRef.get(work.workRef) : undefined;
   const name = authorName(item);
   const nameSource = item.displayNameKind === 'observation_target' ? '观察目标名称 · ' : '';
   const matchedHref = filtered ? workLink(link, item.creatorKey, { relevance: 'related' }) : scopeWorkLink(link, item.creatorKey, 'related');
+  const firstSeenLabel = item.firstSeenPrecision ? FIRST_SEEN_LABELS[item.firstSeenPrecision] : undefined;
   return (
-    <tr data-selected={selectedKey === item.creatorKey}>
+    <tr data-selected={selectedKey === item.creatorKey || selectedKeys.has(item.creatorKey)}>
       <td>
         <div className={`${styles.cell} ${styles.authorCell}`}>
+          <input
+            type="checkbox"
+            className={styles.selectBox}
+            checked={selectedKeys.has(item.creatorKey)}
+            onChange={event => onToggleSelect(item, event.target.checked)}
+            aria-label={`选择 ${name}`}
+          />
           <Avatar name={name} url={resource?.avatarUrl ?? null} pending={resources.pending} className={styles.avatar} />
           <div className={styles.cellCopy}>
             <button
@@ -142,30 +191,18 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
       </td>
       <td>
         <div className={styles.cell}>
+          <span
+            className={`${styles.ellipsis} ${item.discoveryKeywords.length > 0 ? styles.keyword : styles.secondary}`}
+            title={item.discoveryKeywords.length > 0 ? item.discoveryKeywords.join('、') : '未记录发现词'}
+          >
+            {item.discoveryKeywords[0] ?? '未记录发现词'}
+          </span>
+        </div>
+      </td>
+      <td>
+        <div className={styles.cell}>
           <button type="button" className={styles.link} title={directions || '内容方向尚未形成'} onClick={() => onOpen(item.creatorKey)}>
             <span className={styles.clamp}>{directions || '内容方向尚未形成'}</span>
-          </button>
-        </div>
-      </td>
-      <td>
-        <div className={styles.cell}>
-          <button type="button" className={`${styles.link} ${styles.ellipsis}`} title={`${valueLabel(focus.value)} · ${state.text}`} onClick={() => onOpen(item.creatorKey)}>
-            {valueLabel(focus.value)}
-          </button>
-        </div>
-      </td>
-      <td>
-        <div className={styles.cell}>
-          <button
-            type="button"
-            className={styles.link}
-            title={traits.map(key => LABELS[key]).join('、') || '暂无已确认表达'}
-            onClick={() => onOpen(item.creatorKey, 'evidence')}
-          >
-            <span className={styles.expression}>
-              <span>{traits.length > 0 ? LABELS[traits[0] ?? ''] : '—'}</span>
-              {traits.length > 1 ? <small>+{traits.length - 1}</small> : null}
-            </span>
           </button>
         </div>
       </td>
@@ -189,7 +226,7 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
       </td>
       <td className={styles.number}>
         <div className={styles.cell}>
-          <span title={high ? '当前命中作品的点赞表现' : '已判相关作品的点赞表现'}><Metric value={likes} className={styles.metric} /></span>
+          <Metric value={item.candidateHighLikeCount} className={styles.metric} />
         </div>
       </td>
       <td>
@@ -213,6 +250,22 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
             </div>
           ) : (
             <span className={styles.secondary}>暂无可用作品</span>
+          )}
+        </div>
+      </td>
+      <td>
+        <div className={styles.cell}>
+          {item.firstSeenDate ? (
+            <>
+              <span className={styles.ellipsis} title={item.firstSeenDisplay ?? item.firstSeenDate}>
+                {shortDay(item.firstSeenDate)}
+              </span>
+              {firstSeenLabel ? (
+                <span className={item.firstSeenPrecision === 'recent' ? styles.recentMark : styles.secondary}>{firstSeenLabel}</span>
+              ) : null}
+            </>
+          ) : (
+            <span className={styles.secondary}>首次发现时间未记录</span>
           )}
         </div>
       </td>

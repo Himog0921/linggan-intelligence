@@ -38,6 +38,14 @@ describe('列表解码（运行时校验）', () => {
     expect(item?.authorAnalysis.state).toBe('queued');
     expect(item?.representatives).toHaveLength(2);
     expect(item?.observation).toMatchObject({ lookup: 'available', inCurrentDomain: false });
+    expect(item).toMatchObject({ discoveryKeywords: ['注意力训练'], firstSeenDate: '2026-09-25', firstSeenPrecision: 'domain_first' });
+    expect(item?.firstSeenMs).toBeTypeOf('number');
+    expect(list.stats).toMatchObject({ inside: 7, recentlyDiscovered: 3, highLikeLeads: 5, latestAddedDisplay: '2026-10-14 09:00' });
+    expect(list.leadRule).toEqual({ minLikes: 500, minWorks: 2 });
+  });
+
+  it('高赞线索口径缺失时为 null，不猜默认值', () => {
+    expect(parseCreatorList(listJson({ leadRule: null })).leadRule).toBeNull();
   });
 
   it('未知保持未知：缺失的数字是 null，不是 0；观察关系没读到是三态', () => {

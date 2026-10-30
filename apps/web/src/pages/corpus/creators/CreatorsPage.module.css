@@ -296,16 +296,16 @@
   width: calc(var(--lgi-space-24) * 2 + var(--lgi-space-4));
 }
 
+.colKeyword {
+  width: calc(var(--lgi-space-24) + var(--lgi-space-6));
+}
+
 .colDirection {
   width: calc(var(--lgi-space-16) * 2);
 }
 
-.colFocus {
-  width: calc(var(--lgi-space-24) + var(--lgi-space-16));
-}
-
-.colExpression {
-  width: calc(var(--lgi-space-16) + var(--lgi-space-12));
+.colFirstSeen {
+  width: calc(var(--lgi-space-24) + var(--lgi-space-4));
 }
 
 .colCount {
@@ -494,6 +494,63 @@
   line-height: var(--lgi-space-5);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 发现词是来源信息，比内容方向低一级。 */
+.keyword {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--lgi-muted);
+  line-height: var(--lgi-space-5);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 近 7 天新见：时间上最新的一类，给一点信号色便于扫读。 */
+.recentMark {
+  display: block;
+  max-width: 100%;
+  margin-top: calc(var(--lgi-space-1) / 4);
+  overflow: hidden;
+  color: var(--lgi-signal-ink);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-sans);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.headWithSelect {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lgi-space-1);
+}
+
+.selectBox {
+  flex: none;
+  margin: 0;
+  accent-color: var(--lgi-ink);
+}
+
+/* 已选作者的批量动作条：只在有选择时出现在表格上方。 */
+.bulkBar {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-3);
+  min-height: var(--creator-control);
+  border-top: 1px solid var(--lgi-ink);
+  border-bottom: 1px solid var(--lgi-hairline);
+  padding: 0 var(--lgi-space-4);
+  background: var(--lgi-canvas-low);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-sans);
+}
+
+.bulkCount {
+  font: var(--lgi-type-data-weight) var(--lgi-type-data-size)/var(--lgi-type-data-leading) var(--lgi-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.bulkBar > span:first-child {
+  margin-right: auto;
 }
 
 .clamp {

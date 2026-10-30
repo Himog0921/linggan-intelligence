@@ -108,6 +108,10 @@ interface ItemOptions {
   related?: number;
   unknown?: number;
   maxLikes?: number | null;
+  candidateHigh?: number | null;
+  keywords?: string[];
+  firstSeenDate?: string | null;
+  firstSeenPrecision?: string | null;
   authorManual?: Record<string, unknown>;
   displayNameKind?: string;
 }
@@ -152,6 +156,11 @@ export function itemJson(n: number, options: ItemOptions = {}) {
     },
     traits: options.traits ?? ['personal_experience'],
     topicHints: ['任务启动', '晚间练习'],
+    discoveryKeywords: options.keywords ?? ['注意力训练'],
+    firstSeenMs: options.firstSeenDate === null ? null : 1758751200000 + n,
+    firstSeenDate: options.firstSeenDate === undefined ? '2026-09-25' : options.firstSeenDate,
+    firstSeenDisplay: options.firstSeenDate === null ? null : `${options.firstSeenDate ?? '2026-09-25'} 09:00`,
+    firstSeenPrecision: options.firstSeenDate === null ? null : (options.firstSeenPrecision ?? 'domain_first'),
     observation: unavailable
       ? { inCurrentDomain: null, monitoringState: null, existsInOtherDomains: null, hasOtherPrimaryDomain: null, targetRef: null, usageRole: null, lookupState: 'unavailable' }
       : {
@@ -173,7 +182,7 @@ export function itemJson(n: number, options: ItemOptions = {}) {
     knownLikeWorkCount: 3,
     viralWorkCount: null,
     maxRelatedLikeCount: options.maxLikes === undefined ? 1500 : options.maxLikes,
-    candidateHighLikeCount: 1500,
+    candidateHighLikeCount: options.candidateHigh === undefined ? 1500 : options.candidateHigh,
     matchedWorkRefs: works.map(work => work.workRef),
     representatives: works,
     firstAdded: '2026-10-10 08:00:00+08',
@@ -190,6 +199,11 @@ interface ListOptions {
   threshold?: number | null;
   analysisEnabled?: boolean;
   outside?: number | null;
+  inside?: number | null;
+  leads?: number | null;
+  recentlyDiscovered?: number;
+  latestAddedDisplay?: string | null;
+  leadRule?: { minLikes: number; minWorks: number } | null;
   description?: string | null;
   researchGoal?: string | null;
   revision?: number;
@@ -210,9 +224,15 @@ export function listJson(options: ListOptions = {}) {
       vertical: 8,
       personal: 12,
       outside: options.outside === undefined ? 20 : options.outside,
+      inside: options.outside === null ? null : (options.inside === undefined ? 7 : options.inside),
       outsideViral: options.threshold === null || options.threshold === undefined ? null : 6,
+      recentlyDiscovered: options.recentlyDiscovered ?? 3,
+      highLikeLeads: options.outside === null || options.leads === null ? null : (options.leads ?? 5),
+      latestAddedMs: 1760400000000,
+      latestAddedDisplay: options.latestAddedDisplay === undefined ? '2026-10-14 09:00' : options.latestAddedDisplay,
       unknownDateWorks: 3,
     },
+    leadRule: options.leadRule === undefined ? { minLikes: 500, minWorks: 2 } : options.leadRule,
     policy: {
       likeThreshold: options.threshold === undefined ? null : options.threshold,
       revision: options.revision ?? 0,
