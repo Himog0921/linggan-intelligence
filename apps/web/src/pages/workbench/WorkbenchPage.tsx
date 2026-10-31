@@ -9,9 +9,10 @@ import { OpsScopePicker } from '../ops/OpsScopePicker';
 import { ApiError } from '../../shared/api';
 import { RequestIdentities } from '../../shared/requestIdentity';
 import * as api from './workbenchApi';
-import { newDocument, newCanvasBlock, parseAsset, scalarRange, type AiPreview, type AiReadiness, type AiStatus, type TitleStatus, type Citation, type CanvasBlock, type CanvasGroup, type Revision, type SaveReceipt, type UseTarget, type ValidatedAnchor, type WorkDocument, type WorkEnvelope, type WorkSummary, type IdeaBoxSummary, type WritingAction, type WritingSelection } from './workbenchModel';
+import { newDocument, newCanvasBlock, parseAsset, scalarRange, type AiPreview, type AiReadiness, type AiStatus, type TitleStatus, type Citation, type CanvasBlock, type CanvasGroup, type Revision, type RevisionSummary, type SaveReceipt, type UseTarget, type ValidatedAnchor, type WorkDocument, type WorkEnvelope, type WorkSummary, type IdeaBoxSummary, type WritingAction, type WritingSelection } from './workbenchModel';
 import { ManuscriptEditor } from './ManuscriptEditor';
 import { CanvasBoard } from './CanvasBoard';
+import { RevisionHistory } from './RevisionHistory';
 import { RevisionCompare } from './RevisionCompare';
 import { TopicLibrary } from './TopicLibrary';
 import { TopicDetail } from './TopicDetail';
@@ -354,7 +355,7 @@ function WorkEditor({
   const [resetPrompt, setResetPrompt] = useState(false);
   const [saveState, setSaveState] = useState<'saved' | 'dirty' | 'saving' | 'failed' | 'unknown' | 'conflict'>('saved');
   const [conflict, setConflict] = useState<SaveReceipt | null>(null);
-  const [history, setHistory] = useState<Revision[] | null>(null);
+  const [history, setHistory] = useState<RevisionSummary[] | null>(null);
   const [recoveries, setRecoveries] = useState<WorkDocument[]>([]);
   const [focusSequence, setFocusSequence] = useState(0);
   const [sourceFocus, setSourceFocus] = useState<Citation | null>(null);
@@ -1293,17 +1294,7 @@ function WorkEditor({
 <ActionButton variant="primary" busy={busy} disabled={busy || recheckStatus !== 'ready'} onClick={() => void resumeAfterWithdrawal()}>丢弃本页编辑并继续</ActionButton></div>
 </Modal> : null}
     {recheckStatus === 'ready' && !resetRequired && history ? <Modal title="历史与恢复" onClose={() => setHistory(null)}>
-<div className={styles.history}>{history.map(r => <section key={r.id}>
-<div className={styles.row}>
-<strong>版本 {r.number} · {r.document.title || '未命名'}</strong>
-<span>{humanMoment(r.savedAt)}</span>
-<ActionButton variant="quiet" disabled={busy || r.id === revision.id} onClick={() => void restoreVersion(r.id)}>恢复为新版本</ActionButton>
-</div>
-<details>
-<summary>查看正文</summary>
-<pre>{r.document.paragraphs.map(p => p.text).join('\n\n')}</pre>
-</details>
-</section>)}{recoveries.map((d, i) => <section key={i}>
+<div className={styles.history}><RevisionHistory items={history} workId={initial.workId} currentRevisionId={revision.id} disabled={busy} onRestore={id => void restoreVersion(id)} />{recoveries.map((d, i) => <section key={i}>
 <strong>本页保留副本 {i + 1}</strong>
 <pre>{d.paragraphs.map(p => p.text).join('\n\n')}</pre>
 <ActionButton variant="quiet" disabled={busy} onClick={() => {

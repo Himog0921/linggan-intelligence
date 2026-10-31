@@ -199,6 +199,12 @@ export interface Revision {
   savedAt: string;
   document: WorkDocument;
 }
+export interface RevisionSummary {
+  id: string;
+  number: number;
+  savedAt: string;
+  referenceFormat: 'current' | 'legacy_reference' | 'unsupported';
+}
 export interface SaveReceipt {
   requestId: string;
   workId: string;
@@ -676,9 +682,15 @@ export const parseIdeaBoxList = shape<{ items: IdeaBoxSummary[] }>({ items: arra
   ideaRef: uuid, anchorWorkId: uuid, anchorRevisionId: uuid, savedAt: str, name: str, intent: str,
 })) });
 export const parseHistory = shape<{
-  items: Revision[];
+  items: RevisionSummary[];
 }>({
-  items: array(parseRevision)
+  items: array(shape<RevisionSummary>({
+    id: uuid, number: integer, savedAt: str,
+    referenceFormat: value => {
+      if (value !== 'current' && value !== 'legacy_reference' && value !== 'unsupported') throw new Error('Invalid revision format');
+      return value;
+    },
+  }))
 });
 export const parseAsset = shape<AssetRecord>({
   id: uuid,
