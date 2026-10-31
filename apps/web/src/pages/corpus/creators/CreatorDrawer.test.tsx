@@ -40,7 +40,7 @@ describe('依据抽屉 · 结构与结论在先', () => {
     expect(dialog).toHaveTextContent('粉丝2,001');
     expect(dialog).toHaveTextContent('主页资料 · 2026-09-20 10:00');
     expect(dialog).toHaveTextContent('本领域研究作品5');
-    expect(dialog).toHaveTextContent('当前用途范围内已取得');
+    expect(dialog).toHaveTextContent('当前材料范围内已取得');
     expect(dialog).toHaveTextContent('领域最高赞1,500');
     expect(dialog).toHaveTextContent('当前材料范围，含待判断');
     const tabs = within(dialog).getAllByRole('tab');

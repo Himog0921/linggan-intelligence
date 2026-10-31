@@ -199,7 +199,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
           <span>
             <small>{query.usageRole === 'reference' ? '本领域参照作品' : '本领域研究作品'}</small>
             <strong>{formatCount(item.collectedWorkCount)}</strong>
-            <em>当前用途范围内已取得</em>
+            <em>当前材料范围内已取得</em>
           </span>
           <span>
             <small>{filtered ? '命中最高赞' : '领域最高赞'}</small>
