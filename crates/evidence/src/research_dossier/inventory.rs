@@ -25,7 +25,7 @@ WITH origins AS (
  AND o.purpose NOT IN ('comment_image','author_avatar')
  ORDER BY o.slot_key,o.source_generation DESC
 )
-SELECT o.content_public_ref,o.slot_key,o.purpose,o.display_ordinal,o.display_order_state,component.kind AS component_kind,
+SELECT o.content_public_ref,o.slot_key,o.purpose,o.display_ordinal,o.producer_ordinal,o.display_order_state,component.kind AS component_kind,
  o.package_ref,o.observation_ref,o.source_generation,m.materialization_ref,m.blob_sha256,
  (SELECT jsonb_object_agg(latest.processor_kind,jsonb_build_object('state',latest.state,'reason',latest.reason)) FROM (
    SELECT DISTINCT ON(j.processor_kind) j.processor_kind,e.state,e.reason
@@ -69,6 +69,7 @@ ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NU
             "slotKey":row.get::<String,_>("slot_key"),"purpose":row.get::<String,_>("purpose"),
             "component":row.get::<String,_>("component_kind"),"processing":row.get::<Option<Value>,_>("processing"),
             "page":row.get::<Option<i32>,_>("display_ordinal"),
+            "producerOrdinal":row.get::<Option<i32>,_>("producer_ordinal"),
             "displayOrderState":row.get::<String,_>("display_order_state"),
             "packageRef":row.get::<Uuid,_>("package_ref"),"observationRef":row.get::<Uuid,_>("observation_ref"),
             "sourceGeneration":row.get::<i32,_>("source_generation"),"sourceRef":source,

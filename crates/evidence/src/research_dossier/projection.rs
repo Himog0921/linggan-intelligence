@@ -243,6 +243,9 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
             };
             material["originalUrl"] = slot["originalUrl"].clone();
             material["purpose"] = slot["purpose"].clone();
+            if let Some(sources) = slot.get("sameBytesSources") {
+                material["sameBytesSources"] = sources.clone();
+            }
             if let Some(processing) = slot["processing"].get(match *kind {
                 "audio" => "asr",
                 "video_frame" => "video_frame_ocr",

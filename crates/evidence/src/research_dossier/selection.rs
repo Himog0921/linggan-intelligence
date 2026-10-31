@@ -65,6 +65,11 @@ pub fn select(dossier: &mut ResearchDossier, selection: &Selection) -> Result<()
         return Ok(());
     }
     let complete = dossier.revision.clone();
+    let full_order: BTreeMap<_, _> = super::ordered_refs(dossier)
+        .into_iter()
+        .enumerate()
+        .map(|(index, reference)| (reference.to_owned(), index))
+        .collect();
     let original = dossier.materials.len();
     dossier.materials.retain_mut(|unit| {
         let selected = selection.kinds.iter().any(|k| unit["kind"] == *k)
@@ -76,11 +81,22 @@ pub fn select(dossier: &mut ResearchDossier, selection: &Selection) -> Result<()
         if selected {
             return true;
         }
+        let image = unit["kind"] == "image";
         if let Some(blocks) = unit
             .get_mut("blocks")
             .and_then(serde_json::Value::as_array_mut)
         {
             blocks.retain(|b| selection.block_refs.iter().any(|r| b["ref"] == *r));
+            if image {
+                // Removing a middle fragment must not undo an already established line order.
+                blocks.sort_by_key(|b| {
+                    b["ref"]
+                        .as_str()
+                        .and_then(|r| full_order.get(r))
+                        .copied()
+                        .unwrap_or(usize::MAX)
+                });
+            }
             return !blocks.is_empty();
         }
         false

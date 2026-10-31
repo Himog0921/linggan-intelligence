@@ -85,6 +85,24 @@ struct PaddleOcrLine {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let batch = match args.as_slice() {
+        [] => None,
+        [flag, path] if flag == "--jobs-file" => match std::fs::read(path)
+            .ok()
+            .and_then(|raw| serde_json::from_slice::<Vec<Uuid>>(&raw).ok())
+        {
+            Some(jobs) if !jobs.is_empty() => Some(jobs),
+            _ => {
+                eprintln!("jobs file must contain a nonempty JSON array of job UUIDs");
+                return ExitCode::from(2);
+            }
+        },
+        _ => {
+            eprintln!("usage: linggan-media-worker [--jobs-file path]");
+            return ExitCode::from(2);
+        }
+    };
     let Ok(url) = std::env::var("LINGGAN_LOCAL_DATABASE_URL") else {
         // 与巡检 worker 同一条判据（COLLECTION-UPGRADE-001 · T29）：没有地址是配置错误，
         // 不是「没有活干」。以失败退出，让 supervisor 看见；用成功退出等于把故障说成正常。
@@ -97,6 +115,9 @@ async fn main() -> ExitCode {
     let database = connect_when_reachable(&url).await;
     let worker_instance_ref = Uuid::new_v4();
     let enabled_processors = enabled_processors();
+    if let Some(jobs) = batch {
+        return run_job_batch(&database, worker_instance_ref, &enabled_processors, jobs).await;
+    }
     println!(
         "linggan media worker: local processors [{}] every {}s",
         enabled_processors.join(","),
@@ -169,6 +190,62 @@ async fn main() -> ExitCode {
                 );
             }
         }
+    }
+}
+
+/// Consume each named job at most once. No projection, polling or automatic retries.
+async fn run_job_batch(
+    database: &linggan_storage_postgres::Database,
+    worker: Uuid,
+    processors: &[String],
+    mut jobs: Vec<Uuid>,
+) -> ExitCode {
+    jobs.sort_unstable();
+    jobs.dedup();
+    let mut failed = false;
+    while !jobs.is_empty() {
+        let outcome =
+            linggan_evidence::claim_media_processing_jobs(database, worker, processors, &jobs)
+                .await;
+        match outcome {
+            Ok(MediaProcessingClaimOutcome::Claimed(claim)) => {
+                jobs.retain(|job| *job != claim.job_ref);
+                match execute_claim(database, worker, &claim).await {
+                    Ok(()) => {
+                        println!("batch {} {} succeeded", claim.processor_kind, claim.job_ref)
+                    }
+                    Err(error) => {
+                        failed = true;
+                        let recorded =
+                            fail_media_processing_work(database, &claim, worker, &error).await;
+                        eprintln!(
+                            "batch {} failed: {error}; recorded={recorded:?}",
+                            claim.job_ref
+                        );
+                    }
+                }
+            }
+            Ok(MediaProcessingClaimOutcome::Retired {
+                job_ref, reason, ..
+            }) => {
+                jobs.retain(|job| *job != job_ref);
+                failed = true;
+                eprintln!("batch {job_ref} unavailable: {reason}");
+            }
+            Ok(MediaProcessingClaimOutcome::Idle) => {
+                eprintln!("batch stopped: {} named jobs not claimable", jobs.len());
+                return ExitCode::FAILURE;
+            }
+            Err(error) => {
+                eprintln!("batch claim failed: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 

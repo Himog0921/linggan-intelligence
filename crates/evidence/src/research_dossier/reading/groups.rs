@@ -123,7 +123,7 @@ pub(super) fn sections(dossier: &ResearchDossier) -> Value {
                 .materials
                 .iter()
                 .filter(move |material| section_kind(material) == kind)
-                .flat_map(|material| material["blocks"].as_array().into_iter().flatten())
+                .flat_map(ordered_blocks)
                 .filter_map(|block| block["ref"].as_str())
         })
         .filter(|reference| included.contains(reference))
@@ -286,6 +286,30 @@ fn continuation(
     current: Located<'_>,
     dossier: &ResearchDossier,
 ) -> Option<(Mode, Option<&'static str>)> {
+    let page_order_only = |material: &Value| {
+        material["issues"].as_array().is_none_or(|issues| {
+            issues
+                .iter()
+                .all(|issue| issue["code"] == "page_order_unknown")
+        })
+    };
+    if previous.material["kind"] == "image"
+        && previous.material["ref"] == current.material["ref"]
+        && role(previous.block) == role(current.block)
+        && clean(previous.block)
+        && clean(current.block)
+        && page_order_only(current.material)
+        && ((previous.block["kind"] == "paragraph" && current.block["kind"] == "paragraph")
+            || wrapped_heading_prose(previous, current, group.mode))
+        && dossier.selection["blockRefs"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+        && matches!(group.mode, Mode::Blocks | Mode::Paragraph)
+        && (adjacent_lines(previous.block, current.block)
+            || same_line(previous.block, current.block))
+    {
+        return Some((Mode::Paragraph, Some(joiner(previous.block, current.block))));
+    }
     if role(previous.block) != role(current.block)
         || !clean(previous.block)
         || !clean(current.block)
@@ -365,6 +389,124 @@ fn continuation(
         }
         _ => None,
     }
+}
+
+// A tilted printed line may arrive as right/middle/left fragments. Correct only
+// touching fragments on that one baseline, keeping all source blocks unchanged.
+fn ordered_blocks(material: &Value) -> Vec<&Value> {
+    let blocks: Vec<_> = material["blocks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .collect();
+    if material["kind"] != "image" {
+        return blocks;
+    }
+    let mut output = vec![];
+    let mut start = 0;
+    while start < blocks.len() {
+        let mut end = start + 1;
+        while end < blocks.len() && blocks[start..end].iter().any(|b| same_line(b, blocks[end])) {
+            end += 1;
+        }
+        let mut row = blocks[start..end].to_vec();
+        row.sort_by(|a, b| {
+            a["bbox"][0]
+                .as_f64()
+                .unwrap_or(0.0)
+                .total_cmp(&b["bbox"][0].as_f64().unwrap_or(0.0))
+        });
+        output.extend(row);
+        start = end;
+    }
+    output
+}
+
+fn same_line(a: &Value, b: &Value) -> bool {
+    if a["kind"] != "paragraph"
+        || b["kind"] != "paragraph"
+        || !clean(a)
+        || !clean(b)
+        || role(a) != role(b)
+    {
+        return false;
+    }
+    let values = |v: &Value| -> Option<[f64; 4]> {
+        Some([
+            v["bbox"][0].as_f64()?,
+            v["bbox"][1].as_f64()?,
+            v["bbox"][2].as_f64()?,
+            v["bbox"][3].as_f64()?,
+        ])
+    };
+    let (Some(a), Some(b)) = (values(a), values(b)) else {
+        return false;
+    };
+    let overlap = (a[1] + a[3]).min(b[1] + b[3]) - a[1].max(b[1]);
+    let gap = if a[0] < b[0] {
+        b[0] - a[0] - a[2]
+    } else {
+        a[0] - b[0] - b[2]
+    };
+    a[3] > 0.0 && b[3] > 0.0 && overlap >= a[3].min(b[3]) * 0.5 && (-0.005..=0.04).contains(&gap)
+}
+
+// Local OCR can label every full-width line in a large-font paragraph as a heading.
+// A run of at least three wrapped heading lines ending in a same-font paragraph
+// is prose; keep the original blocks and only change their presentation group.
+fn wrapped_heading_prose(previous: Located<'_>, current: Located<'_>, mode: Mode) -> bool {
+    if previous.block["kind"] != "heading"
+        || !matches!(
+            current.block["kind"].as_str(),
+            Some("heading" | "paragraph")
+        )
+    {
+        return false;
+    }
+    if mode == Mode::Paragraph {
+        return true;
+    }
+    let Some(blocks) = previous.material["blocks"].as_array() else {
+        return false;
+    };
+    let mut last = previous.block;
+    let mut headings = 1;
+    for next in &blocks[current.index..] {
+        if !adjacent_lines(last, next) || !clean(next) || role(last) != role(next) {
+            return false;
+        }
+        match next["kind"].as_str() {
+            Some("heading") => headings += 1,
+            Some("paragraph") => return headings >= 3,
+            _ => return false,
+        }
+        last = next;
+    }
+    false
+}
+
+/// Join wrapped lines on one image, stopping at paragraph space or a column boundary.
+pub(super) fn adjacent_lines(left: &Value, right: &Value) -> bool {
+    let bbox = |value: &Value| -> Option<[f64; 4]> {
+        Some([
+            value["bbox"][0].as_f64()?,
+            value["bbox"][1].as_f64()?,
+            value["bbox"][2].as_f64()?,
+            value["bbox"][3].as_f64()?,
+        ])
+    };
+    let (Some(a), Some(b)) = (bbox(left), bbox(right)) else {
+        return false;
+    };
+    let gap = b[1] - a[1] - a[3];
+    a[2] >= 0.45
+        && a[3] > 0.0
+        && b[3] > 0.0
+        && (a[0] - b[0]).abs() <= 0.04
+        && b[3] >= a[3] * 0.6
+        && b[3] <= a[3] * 1.6
+        && gap >= -0.005
+        && gap <= a[3].max(b[3]) * 1.2
 }
 
 fn adjacent_image_pages(left: Located<'_>, right: Located<'_>, dossier: &ResearchDossier) -> bool {

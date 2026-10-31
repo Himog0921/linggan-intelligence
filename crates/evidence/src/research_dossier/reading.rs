@@ -7,7 +7,13 @@ mod groups;
 pub(super) use groups::{clip_sections, image_text_gap_pages, tags_for_group};
 
 pub(super) fn rebuild(dossier: &mut ResearchDossier) {
-    title(&mut dossier.note, &dossier.materials);
+    title(
+        &mut dossier.note,
+        &dossier.materials,
+        dossier.selection["blockRefs"]
+            .as_array()
+            .is_none_or(Vec::is_empty),
+    );
     let has_body = dossier
         .materials
         .iter()
@@ -92,7 +98,7 @@ fn readable(material: &Value) -> bool {
             .any(content::has_source_text)
 }
 
-fn title(note: &mut Value, materials: &[Value]) {
+fn title(note: &mut Value, materials: &[Value], complete_units: bool) {
     if let Some(title) = note["platformTitle"]
         .as_str()
         .filter(|s| !s.trim().is_empty())
@@ -106,7 +112,13 @@ fn title(note: &mut Value, materials: &[Value]) {
     // An explicit cover takes precedence even if it has no reliable heading.
     let cover = materials
         .iter()
-        .find(|m| m["kind"] == "image" && m["purpose"] == "cover")
+        .find(|m| {
+            m["kind"] == "image"
+                && (m["purpose"] == "cover"
+                    || m["sameBytesSources"].as_array().is_some_and(|sources| {
+                        sources.iter().any(|source| source["purpose"] == "cover")
+                    }))
+        })
         .or_else(|| {
             materials
                 .iter()
@@ -121,7 +133,7 @@ fn title(note: &mut Value, materials: &[Value]) {
     let start = blocks
         .iter()
         .position(|b| b["kind"] == "heading" && !content::block_text(b).trim().is_empty());
-    let headings: Vec<_> = start
+    let mut headings: Vec<_> = start
         .map(|i| {
             blocks[i..]
                 .iter()
@@ -130,6 +142,30 @@ fn title(note: &mut Value, materials: &[Value]) {
                 .collect()
         })
         .unwrap_or_default();
+    // A plain-text cover can have a clear opening paragraph without large display type.
+    // Keep its actual words and references; never promote a clipped explicit selection.
+    if headings.is_empty() && complete_units {
+        if let Some(start) = blocks.iter().position(|b| {
+            b["kind"] == "paragraph"
+                && content::block_text(b).chars().count() >= 8
+                && b["bbox"][1].as_f64().is_some_and(|y| y < 0.5)
+                && b["bbox"][2].as_f64().is_some_and(|w| w >= 0.24)
+                && b["issues"].as_array().is_none_or(Vec::is_empty)
+        }) {
+            headings.push(blocks[start]);
+            for block in &blocks[start + 1..] {
+                if block["kind"] != "paragraph"
+                    || !groups::adjacent_lines(headings.last().unwrap(), block)
+                    || block["issues"]
+                        .as_array()
+                        .is_some_and(|issues| !issues.is_empty())
+                {
+                    break;
+                }
+                headings.push(block);
+            }
+        }
+    }
     let mut text = String::new();
     for block in &headings {
         for line in content::block_text(block)
@@ -215,6 +251,31 @@ mod tests {
     }
 
     #[test]
+    fn retained_human_first_image_keeps_cover_title_without_claiming_page_order() {
+        let mut d = fixture(false, None, false);
+        let slots = super::super::duplicates::collapse(
+            vec![
+                json!({"slotKey":"cover","purpose":"cover","component":"image","sourceState":"present","blobSha256":"same","sourceVersion":"cover"}),
+                json!({"slotKey":"first","purpose":"body_image","producerOrdinal":1,"component":"image","sourceState":"present","blobSha256":"same","sourceVersion":"first","displayOrderState":"UNKNOWN"}),
+            ],
+            &[
+                json!({"kind":"image","slotKey":"cover","sourceVersion":"cover","currentRevisionRef":"c","blocks":[],"reading":{"adoption":"automatic"}}),
+                json!({"kind":"image","slotKey":"first","sourceVersion":"first","currentRevisionRef":"h","blocks":d.materials[0]["blocks"],"reading":{"adoption":"human_edited"}}),
+            ],
+        );
+        assert_eq!(slots.len(), 1);
+        assert_eq!(slots[0]["slotKey"], "first");
+        d.materials[0]["purpose"] = slots[0]["purpose"].clone();
+        d.materials[0]["sameBytesSources"] = slots[0]["sameBytesSources"].clone();
+        d.materials[0]["page"] = Value::Null;
+        rebuild(&mut d);
+        assert_eq!(d.note["displayTitle"], "封面标题分行");
+        assert_eq!(d.note["titleBlockRefs"], json!(["h1"]));
+        assert!(d.materials[0]["page"].is_null());
+        assert_eq!(ordered_refs(&d), vec!["h1", "p1"]);
+    }
+
+    #[test]
     fn t01_t03_eight_combinations_keep_every_block_and_short_body_wins() {
         for title in [false, true] {
             for body in [None, Some("🙂")] {
@@ -295,5 +356,26 @@ mod tests {
         empty.materials.clear();
         rebuild(&mut empty);
         assert!(ordered_refs(&empty).is_empty());
+    }
+    #[test]
+    fn plain_cover_opening_supplies_title_but_clipped_body_does_not() {
+        let mut d = fixture(false, None, false);
+        d.materials[0]["blocks"] = json!([
+            {"ref":"ui","kind":"paragraph","text":"Notes","bbox":[0.08,0.04,0.12,0.033]},
+            {"ref":"t1","kind":"paragraph","text":"这是封面上没有大字号的完整","bbox":[0.1,0.14,0.8,0.037]},
+            {"ref":"t2","kind":"paragraph","text":"标题句子","bbox":[0.1,0.20,0.35,0.035]},
+            {"ref":"p","kind":"paragraph","text":"这段普通正文不能冒充标题","bbox":[0.1,0.32,0.8,0.037]}]);
+        rebuild(&mut d);
+        assert_eq!(d.note["displayTitle"], "这是封面上没有大字号的完整标题句子");
+        assert_eq!(d.note["titleBlockRefs"], json!(["t1", "t2"]));
+        crate::research_dossier::select(
+            &mut d,
+            &crate::research_dossier::Selection {
+                block_refs: vec!["p".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(d.note["displayTitle"].is_null());
     }
 }

@@ -87,3 +87,12 @@ it('待补文字页集合同时覆盖识读失败与源未取得，原图片清�
   expect(hasReadingSourceText({ ref: 'table', kind: 'table', columns: [''], rows: [] })).toBe(true);
   expect(hasReadingSourceText({ ref: 'dialogue', kind: 'dialogue', turns: [{ speaker: 'unconfirmed', text: '' }] })).toBe(true);
 });
+
+it('同图大字号正文按服务端 paragraph 读法连接，原始 heading 块保持不变', () => {
+  const material = dossierMaterialJson(1, { blocks: [{ ref: 'a', kind: 'heading', text: '大字号换行', speaker: 'author' }, { ref: 'b', kind: 'paragraph', text: '完整结尾', speaker: 'author' }] });
+  const plan = [group(['a', 'b'], { mode: 'paragraph', joiners: [''] })];
+  const parsed = parseDossierPayload(fixture([material], plan)).dossier;
+  expect(groupText(resolveReadingSections(parsed)[0]!.groups[0]!)).toBe('大字号换行完整结尾');
+  expect(parsed.materials[0]!.blocks[0]!.kind).toBe('heading');
+  expect(() => parseDossierPayload(fixture([{ ...material, kind: 'audio' }], plan, 'audio'))).toThrow();
+});

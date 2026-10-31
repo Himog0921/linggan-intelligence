@@ -182,6 +182,40 @@ pub async fn claim_media_processing_work_for_version(
     enabled_processors: &[String],
     processor_version: Option<&str>,
 ) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
+    claim_media_processing_work_scoped(
+        database,
+        worker_instance_ref,
+        enabled_processors,
+        processor_version,
+        None,
+    )
+    .await
+}
+
+/// Run an explicit batch without claiming or recovering unrelated work.
+pub async fn claim_media_processing_jobs(
+    database: &Database,
+    worker_instance_ref: Uuid,
+    enabled_processors: &[String],
+    jobs: &[Uuid],
+) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
+    claim_media_processing_work_scoped(
+        database,
+        worker_instance_ref,
+        enabled_processors,
+        None,
+        Some(jobs),
+    )
+    .await
+}
+
+async fn claim_media_processing_work_scoped(
+    database: &Database,
+    worker_instance_ref: Uuid,
+    enabled_processors: &[String],
+    processor_version: Option<&str>,
+    jobs: Option<&[Uuid]>,
+) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
     if enabled_processors.is_empty() {
         return Ok(MediaProcessingClaimOutcome::Idle);
     }
@@ -225,9 +259,11 @@ pub async fn claim_media_processing_work_for_version(
            state=CASE WHEN attempt_count >= $1 THEN 'terminal' ELSE 'retry_wait' END, \
            worker_instance_ref=NULL,lease_expires_at=NULL,next_attempt_at=scope_001_now(), \
            last_error='lease_expired',updated_at=scope_001_now() \
-         WHERE state='leased' AND lease_expires_at <= scope_001_now()",
+         WHERE state='leased' AND lease_expires_at <= scope_001_now() \
+           AND ($2::uuid[] IS NULL OR job_ref=ANY($2))",
     )
     .bind(MAX_PROCESSING_ATTEMPTS)
+    .bind(jobs)
     .execute(&mut *tx)
     .await?;
     let candidate = sqlx::query(AssertSqlSafe(format!(
@@ -245,6 +281,7 @@ pub async fn claim_media_processing_work_for_version(
            ON concurrency.processor_kind = job.processor_kind \
          WHERE work.state IN ('pending','retry_wait') AND work.attempt_count < $1 \
            AND job.processor_kind = ANY($2) \
+           AND ($5::uuid[] IS NULL OR job.job_ref=ANY($5)) \
            AND (($3::text IS NULL AND (job.processor_kind || ':' || job.processor_version)=ANY($4)) OR job.processor_version=$3) \
            {retired_job_filter} \
            AND work.next_attempt_at <= scope_001_now() \
@@ -265,6 +302,7 @@ pub async fn claim_media_processing_work_for_version(
     .bind(enabled_processors)
     .bind(processor_version)
     .bind(&supported_versions)
+    .bind(jobs)
     .fetch_optional(&mut *tx)
     .await?;
     let Some(candidate) = candidate else {
