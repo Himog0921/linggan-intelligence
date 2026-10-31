@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react';
 import { Avatar, Cover } from './Media';
-import { authorName, observedText, preservedLifecycle, relevanceLabel, targetHref, workTitle } from './creatorsPresent';
+import { authorName, FIRST_SEEN_LABELS, observedText, preservedLifecycle, relevanceLabel, targetHref, workTitle } from './creatorsPresent';
 import {
   formatCount,
   hasWorkFilter,
@@ -27,13 +27,6 @@ export function Metric({ value, className }: { value: number | null; className?:
     </span>
   );
 }
-
-/** 首次发现的两种补充说明：更早的发现不可知，或最近 7 天才见到。 */
-const FIRST_SEEN_LABELS: Record<string, string> = {
-  recent: '近 7 天新见',
-  earliest_record: '最早已知记录',
-  domain_first: '本领域首次',
-};
 
 /** `2026-09-12` → `09.12`；格式不对时原样显示，不改写。 */
 function shortDay(date: string): string {

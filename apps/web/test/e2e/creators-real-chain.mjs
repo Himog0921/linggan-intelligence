@@ -213,6 +213,11 @@ try {
     assert.match(overview, /尚无研究结果 · 可在作品与作者详情发起研究/);
     assert.match(overview, /本次实际取样篇数未记录。/);
     assert.match(overview, /持续创作倾向须至少两篇独立相关作品/);
+    // 发现来源：发现词、首次发现与当时看到的那篇作品，缺记录时如实说明。
+    const discovery = panel.getByRole('region', { name: '发现来源' });
+    assert.match(await discovery.innerText(), /发现词[\s\S]*首次发现[\s\S]*当时看到的是/);
+    await discovery.scrollIntoViewIfNeeded();
+    await shot('creators-1440-drawer-discovery');
     assert.doesNotMatch(await panel.innerText(), UUID);
     await panel.getByRole('tab', { name: '研究线索' }).click();
     const group = panel.locator('details[data-work]').first();
@@ -322,6 +327,13 @@ try {
     await rowOf('合成作者 05').getByRole('button', { name: '加入观察' }).click();
     const dialog = page.getByRole('dialog', { name: '加入观察目标' });
     await dialog.waitFor();
+    // 加入用途由用户明确选择：默认取当前列表范围，可以切到参照再切回。
+    const primaryRole = dialog.getByRole('radio', { name: /纳入本领域研究/ });
+    const referenceRole = dialog.getByRole('radio', { name: /只作参照/ });
+    assert.equal(await primaryRole.isChecked(), true, '默认取当前列表范围（主研究）');
+    await referenceRole.check();
+    assert.equal(await referenceRole.isChecked(), true);
+    await primaryRole.check();
     assert.match(await dialog.innerText(), /这一步不会：[\s\S]*立即采集作品、评论或主页[\s\S]*开启或关闭巡查[\s\S]*调用模型/);
     await shot('creators-1440-join-confirm');
     assert.equal(report.writes.length, before, '确认之前不发请求');

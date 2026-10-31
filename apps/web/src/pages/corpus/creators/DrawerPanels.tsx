@@ -11,6 +11,7 @@ import {
   CRITERIA,
   effectiveJudgement,
   failureReason,
+  FIRST_SEEN_LABELS,
   observedText,
   relevanceLabel,
   sampleBasisText,
@@ -73,11 +74,13 @@ function WorkPreview({ ctx, work }: { ctx: PanelContext; work: Work }) {
   );
 }
 
-/** 概览：先给结论（作者在本领域的倾向），再给方向与表达、当前条件下的作品预览。 */
+/** 概览：先给结论（作者在本领域的倾向），再给发现来源、方向与表达、当前条件下的作品预览。 */
 export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
   const { item, data } = ctx;
   const analysis = item.authorAnalysis;
   const focus = authorFocus(item);
+  const firstSeenLabel = item.firstSeenPrecision ? FIRST_SEEN_LABELS[item.firstSeenPrecision] : undefined;
+  const earliestWork = item.firstSeenWorkRef ? ctx.resources.byRef.get(item.firstSeenWorkRef) : undefined;
   return (
     <>
       <div className={styles.homepagePrompt}>
@@ -107,6 +110,29 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
           {sampleText(analysis)}
           仅使用本领域已取得材料，不代表账号全部作品。
         </p>
+      </section>
+      <section aria-label="发现来源">
+        <h3>让我们发现他的作品</h3>
+        <dl className={styles.profileList}>
+          <dt>发现词</dt>
+          <dd>{item.discoveryKeywords.length > 0 ? item.discoveryKeywords.join('、') : '未记录发现词'}</dd>
+          <dt>首次发现</dt>
+          <dd>
+            {item.firstSeenDisplay ?? '首次发现时间未记录'}
+            {firstSeenLabel ? ` · ${firstSeenLabel}` : ''}
+          </dd>
+          <dt>当时看到的是</dt>
+          <dd>
+            {item.firstSeenWorkRef ? (
+              <a href={workLink(ctx.link, item.creatorKey, {}, item.firstSeenWorkRef)} data-return-key={item.creatorKey}>
+                {earliestWork?.title ?? (ctx.resources.pending ? '作品标题读取中…' : '作品标题未取得')}
+              </a>
+            ) : (
+              '未记录最早收录的作品'
+            )}
+          </dd>
+        </dl>
+        <p className={styles.help}>发现词来自长期关键词目标，按首次命中先后排列；首次发现取「进入本领域」与「关键词命中」中更早的一刻，更早的发现不可知。</p>
       </section>
       <section aria-label="内容方向与作品表达">
         <h3>内容方向与作品表达</h3>

@@ -53,7 +53,12 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
   const inFlight = useRef(false);
   const [phase, setPhase] = useState<Phase>('confirm');
   const [feedback, setFeedback] = useState<Feedback | null>(null);
-  const roleText = target.role === 'reference' ? '参照' : '主研究';
+  // 加入用途由用户明确选择；其他领域已有主研究关系时只能按参照加入。
+  const [chosen, setChosen] = useState<'primary' | 'reference'>(target.role);
+  const role = target.blockedPrimary ? 'reference' : chosen;
+  const roleText = role === 'reference' ? '参照' : '主研究';
+  // 首次提交后用途就锁定：失败重试仍发送同一个请求体，不换成另一个用途。
+  const locked = target.blockedPrimary || phase !== 'confirm';
 
   const { requestClose, confirmation } = useCreatorLeave({ dirty: false, busy: phase === 'sending', onClose });
 
@@ -64,7 +69,7 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
     setPhase('sending');
     setFeedback(null);
     try {
-      const receipt = await write.mutateAsync({ domain: target.domain, creatorKey: target.creatorKey, usageRole: target.role });
+      const receipt = await write.mutateAsync({ domain: target.domain, creatorKey: target.creatorKey, usageRole: role });
       if (isCurrent()) {
         setFeedback({ tone: 'success', text: successText(target, receipt), code: null });
         setPhase('done');
@@ -94,7 +99,7 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
         </header>
         <div className={styles.body}>
           <p>
-            把「{target.authorName}」加入「{target.domainName}」的观察名单，用途：<b>{roleText}</b>。
+            把「{target.authorName}」加入「{target.domainName}」的观察名单。
           </p>
           {target.blockedPrimary ? (
             <p className={styles.notice}>其他领域已有主研究关系；本领域只能按参照用途加入，不改变原巡查规则。</p>
@@ -102,6 +107,33 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
           {target.keptState ? (
             <p className={styles.notice}>该作者已有观察目标，当前为「{target.keptState}」；加入后保持这个状态，不会自动恢复。</p>
           ) : null}
+          <fieldset className={styles.roles}>
+            <legend>加入用途</legend>
+            <label data-disabled={target.blockedPrimary}>
+              <input
+                type="radio"
+                name={`${titleId}-role`}
+                value="primary"
+                checked={role === 'primary'}
+                disabled={locked || target.blockedPrimary}
+                onChange={() => setChosen('primary')}
+              />
+              <b>纳入本领域研究</b>
+              <small>{target.blockedPrimary ? '其他领域已有主研究关系，本领域不能再用主研究。' : '这位作者的作品作为本领域的主研究材料。'}</small>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name={`${titleId}-role`}
+                value="reference"
+                checked={role === 'reference'}
+                disabled={locked}
+                onChange={() => setChosen('reference')}
+              />
+              <b>只作参照</b>
+              <small>这位作者的作品作为参照材料，不计入主研究。</small>
+            </label>
+          </fieldset>
           <p>这一步会：</p>
           <ul className={styles.list}>
             <li>登记这位作者为本机观察目标（已登记过则沿用，不重复建立）</li>

@@ -134,7 +134,13 @@ export function CreatorsPage() {
   }
 
   const drawerItem = drawer ? (shown?.items.find(item => item.creatorKey === drawer.creatorKey) ?? drawer.snapshot) : null;
-  const drawerRefs = useMemo(() => (drawerItem ? drawerItem.representatives.map(work => work.workRef) : []), [drawerItem]);
+  const drawerRefs = useMemo(
+    () =>
+      drawerItem
+        ? [...drawerItem.representatives.map(work => work.workRef), ...(drawerItem.firstSeenWorkRef ? [drawerItem.firstSeenWorkRef] : [])]
+        : [],
+    [drawerItem],
+  );
   const drawerOnly = useWorkResources(drawerItem ? domain : null, drawerRefs);
   const drawerResources = useMemo(() => mergeResources(listResources, drawerOnly), [listResources, drawerOnly]);
 

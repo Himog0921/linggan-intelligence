@@ -1,9 +1,10 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ModalDialog } from '../../../corpus/ModalDialog';
+import { humanMoment } from '../../../shared/formatting';
 import { findAuthorButton } from './findAuthor';
 import { authorName, observedText, preservedLifecycle, targetHref } from './creatorsPresent';
-import { formatCount, type CreatorQuery, type LinkContext } from './creatorsQuery';
+import { formatCount, hasWorkFilter, type CreatorQuery, type LinkContext } from './creatorsQuery';
 import type { CreatorItem, CreatorList } from './creatorsTypes';
 import { Metric, type DrawerTab } from './CreatorTable';
 import { EvidencePanel, OverviewPanel, ProfilePanel, type PanelContext } from './DrawerPanels';
@@ -136,6 +137,13 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
   const blocked = query.usageRole === 'primary' && observation.hasOtherPrimaryDomain === true;
   const role = blocked ? 'reference' : query.usageRole;
   const joinLabel = blocked ? '按参照用途加入' : kept ? `加入并保持${kept}` : role === 'reference' ? '按参照用途加入' : '加入本领域观察';
+  const filtered = hasWorkFilter(query);
+  const followerNote =
+    item.followerCount === null
+      ? '未记录'
+      : item.followerObservedAt
+        ? `主页资料 · ${humanMoment(item.followerObservedAt)}`
+        : '主页资料 · 时间未记录';
 
   return (
     <ModalDialog
@@ -174,8 +182,8 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
               {name}
             </h2>
             <p>
-              {data.domain.name ?? '当前领域'} · {query.usageRole === 'reference' ? '参照材料' : '主研究材料'} · 小红书 ·{' '}
-              {item.displayNameKind === 'observation_target' ? '观察目标名称 · ' : ''}粉丝 <Metric value={item.followerCount} />
+              {data.domain.name ?? '当前领域'} · {query.usageRole === 'reference' ? '参照材料' : '主研究材料'} · 小红书
+              {item.displayNameKind === 'observation_target' ? ' · 名称来自观察目标档案' : ''}
             </p>
           </div>
           <button type="button" className={`${styles.textButton} ${styles.close}`} aria-label="关闭作者研究" onClick={onClose}>
@@ -184,13 +192,19 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
         </div>
         <div className={styles.metrics}>
           <span>
-            相关作品<strong>{formatCount(item.relatedWorkCount)}</strong>
+            <small>粉丝</small>
+            <strong><Metric value={item.followerCount} /></strong>
+            <em>{followerNote}</em>
           </span>
           <span>
-            待判断<strong>{formatCount(item.unknownRelevanceWorkCount)}</strong>
+            <small>{query.usageRole === 'reference' ? '本领域参照作品' : '本领域研究作品'}</small>
+            <strong>{formatCount(item.collectedWorkCount)}</strong>
+            <em>当前材料范围内已取得</em>
           </span>
           <span>
-            相关最高赞<strong><Metric value={item.maxRelatedLikeCount} /></strong>
+            <small>{filtered ? '命中最高赞' : '领域最高赞'}</small>
+            <strong><Metric value={item.candidateHighLikeCount} /></strong>
+            <em>{filtered ? '当前命中作品，含待判断' : '当前材料范围，含待判断'}</em>
           </span>
         </div>
         <div className={styles.tabs} role="tablist" aria-label="作者详情分区" onKeyDown={onTabKeyDown}>
