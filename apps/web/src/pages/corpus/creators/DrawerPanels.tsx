@@ -12,15 +12,18 @@ import {
   effectiveJudgement,
   failureReason,
   FIRST_SEEN_LABELS,
+  lifecycleLabel,
   observedText,
   relevanceLabel,
   sampleBasisText,
   sampleText,
+  transitionReasonLabel,
   workTitle,
 } from './creatorsPresent';
 import { LABELS, evidenceLink, formatCount, workLink, type LinkContext, type CreatorQuery } from './creatorsQuery';
 import { Metric, type DrawerTab } from './CreatorTable';
-import type { Analysis, CreatorItem, CreatorList, Work } from './creatorsTypes';
+import { useObservationRecord } from './useObservationRecord';
+import type { Analysis, CreatorItem, CreatorList, ObservationRecord, Work } from './creatorsTypes';
 import type { WorkResources } from './useWorkResources';
 import pageStyles from './CreatorsPage.module.css';
 import styles from './CreatorDrawer.module.css';
@@ -257,11 +260,101 @@ export function EvidencePanel({
 }
 
 /** 作者资料：公开简介、公开身份线索、材料与来源；机器标识放在折叠的处理信息里。 */
+/** 本领域的观察记录：加入、档案、巡查与最近变化。未知一律写未记录，不按时间推算。 */
+function ObservationRecordSection({ ctx }: { ctx: PanelContext }) {
+  const { item, data } = ctx;
+  const observation = item.observation;
+  const joined = observation.inCurrentDomain === true;
+  const record = useObservationRecord(data.domain.domainRef, item.creatorKey, joined);
+  return (
+    <section aria-label="观察记录">
+      <h3>观察记录</h3>
+      {observation.lookup === 'unavailable' || observation.inCurrentDomain === null ? (
+        <p className={styles.help}>观察记录暂不可用：现在读不到这位作者与本领域的关系。</p>
+      ) : !joined ? (
+        <p className={styles.help}>未加入本领域观察，所以没有巡查记录。需要时用「加入本领域观察」建立关系。</p>
+      ) : record.pending ? (
+        <p className={styles.help}>观察记录读取中…</p>
+      ) : record.failed || record.record === null ? (
+        <p className={styles.help}>观察记录暂不可用：这次没有读到。</p>
+      ) : record.record.state !== 'joined' ? (
+        <p className={styles.help}>服务器上已经没有这位作者与本领域的观察关系。</p>
+      ) : (
+        <ObservationRecordList record={record.record} />
+      )}
+    </section>
+  );
+}
+
+function ObservationRecordList({ record }: { record: ObservationRecord }) {
+  const patrol = record.patrol;
+  const role = record.usageRole === 'reference' ? '参照' : record.usageRole === 'primary' ? '主研究' : '用途未记录';
+  const status = [
+    lifecycleLabel(record.lifecycleState),
+    record.monitoringState === 'monitoring'
+      ? '自动巡查已开启'
+      : record.monitoringState === 'not_enabled'
+        ? '自动巡查未开启'
+        : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const lastPatrol = patrol?.lastSucceededAt
+    ? `成功于 ${patrol.lastSucceededAt}`
+    : patrol?.lastDispatchedAt
+      ? `派出于 ${patrol.lastDispatchedAt}，还没有成功结果`
+      : '没有巡查记录';
+  const patrolResult =
+    patrol === null || patrol.state === 'unavailable'
+      ? '暂不可用'
+      : patrol.latestHits !== null
+        ? `${formatCount(patrol.latestHits)} 篇${patrol.latestNew !== null ? `，其中 ${formatCount(patrol.latestNew)} 篇新见` : ''}`
+        : patrol.lastSucceededAt
+          ? '作品数未记录'
+          : '还没有成功巡查的结果';
+  const next = patrol?.nextRunAt ?? (patrol?.automaticEnabled ? '尚未排定' : '自动巡查未开启');
+  const change = record.lastTransition
+    ? record.lastTransition.from
+      ? `${record.lastTransition.at} 从 ${lifecycleLabel(record.lastTransition.from)} 到 ${lifecycleLabel(record.lastTransition.to)}：${transitionReasonLabel(record.lastTransition.reasonCode, record.lastTransition.reason)}`
+      : `${record.lastTransition.at} 建立为 ${lifecycleLabel(record.lastTransition.to)}：${transitionReasonLabel(record.lastTransition.reasonCode, record.lastTransition.reason)}`
+    : '没有变化记录';
+  return (
+    <dl className={styles.profileList}>
+      <dt>加入本领域</dt>
+      <dd>
+        {record.joinedAt ?? '时间未记录'} · {role}
+      </dd>
+      <dt>首次保存</dt>
+      <dd>{record.firstStoredAt ?? '未记录'}</dd>
+      <dt>当前状态</dt>
+      <dd>
+        {status}
+        {record.lifecycleChangedAt ? ` · ${record.lifecycleChangedAt}` : ''}
+      </dd>
+      <dt>上次巡查</dt>
+      <dd>{lastPatrol}</dd>
+      <dt>带回作品</dt>
+      <dd>{patrolResult}</dd>
+      <dt>下次巡查</dt>
+      <dd>{next}</dd>
+      {patrol !== null && patrol.missedRuns > 0 ? (
+        <>
+          <dt>错过计划</dt>
+          <dd>{formatCount(patrol.missedRuns)} 次</dd>
+        </>
+      ) : null}
+      <dt>最近变化</dt>
+      <dd>{change}</dd>
+    </dl>
+  );
+}
+
 export function ProfilePanel({ ctx }: { ctx: PanelContext }) {
   const { item, data, query } = ctx;
   const analysis = item.authorAnalysis;
   return (
     <>
+      <ObservationRecordSection ctx={ctx} />
       <section aria-label="公开简介">
         <h3>公开简介</h3>
         <p className={styles.biography}>{item.biography ?? '公开简介尚未取得。'}</p>

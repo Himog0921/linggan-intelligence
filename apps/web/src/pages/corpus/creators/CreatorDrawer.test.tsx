@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DOMAIN,
   createFetchMock,
+  creatorKeyFor,
   defaultRoutes,
   itemJson,
   listJson,
+  observationRecordJson,
   ok,
   renderCreatorsPage,
   workJson,
@@ -298,6 +300,71 @@ describe('依据抽屉 · 观察记录与提交栏', () => {
     await user.click(within(dialog).getByRole('tab', { name: '研究线索' }));
     expect(within(dialog).queryByRole('button', { name: /重试/ })).toBeNull();
     for (const button of within(dialog).getAllByRole('button', { name: /调整判断|补充判断/ })) expect(button).toBeDisabled();
+  });
+});
+
+describe('依据抽屉 · 观察记录分区', () => {
+  it('已加入：加入时间与用途、档案状态、上次巡查结果与最近变化都写明来源', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { inDomain: true })] })));
+    const { dialog, user } = await openDrawer();
+    await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
+    const panel = within(dialog).getByRole('tabpanel', { name: '观察记录' });
+    const record = await within(panel).findByRole('region', { name: '观察记录' });
+    expect(record).toHaveTextContent('加入本领域');
+    expect(record).toHaveTextContent('2026-09-24 12:23 · 主研究');
+    expect(record).toHaveTextContent('首次保存');
+    expect(record).toHaveTextContent('2026-09-22 03:12');
+    expect(record).toHaveTextContent('已暂停 · 2026-10-15 16:26');
+    expect(record).toHaveTextContent('成功于 2026-10-14 14:12');
+    expect(record).toHaveTextContent('12 篇，其中 3 篇新见');
+    expect(record).toHaveTextContent('自动巡查未开启');
+    expect(record).toHaveTextContent('2026-10-15 16:26 从 巡查中 到 已暂停：人工暂停巡查');
+  });
+
+  it('巡查开着且还没有成功结果：下次时间照实显示，结果不写成 0', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { inDomain: true })] })));
+    kit.route(
+      'GET',
+      `/api/local/creators/${encodeURIComponent(creatorKeyFor('author-1'))}/observation-record`,
+      ok(
+        observationRecordJson({
+          lifecycleState: 'monitoring',
+          lifecycleChangedAt: null,
+          monitoringState: 'monitoring',
+          patrol: {
+            automaticEnabled: true,
+            lastDispatchedAt: null,
+            lastSucceededAt: null,
+            nextRunAt: '2026-11-01 09:00',
+            missedRuns: 2,
+            latestHits: null,
+            latestNew: null,
+            state: 'waiting',
+          },
+          lastTransition: null,
+        }),
+      ),
+    );
+    const { dialog, user } = await openDrawer();
+    await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
+    const record = await within(dialog).findByRole('region', { name: '观察记录' });
+    expect(record).toHaveTextContent('巡查中 · 自动巡查已开启');
+    expect(record).toHaveTextContent('下次巡查2026-11-01 09:00');
+    expect(record).toHaveTextContent('没有巡查记录');
+    expect(record).toHaveTextContent('还没有成功巡查的结果');
+    expect(record).toHaveTextContent('错过计划2 次');
+    expect(record).toHaveTextContent('没有变化记录');
+  });
+
+  it('未加入：说明没有巡查记录，且不请求观察记录接口', async () => {
+    defaultRoutes(kit);
+    const { dialog, user } = await openDrawer();
+    await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
+    const panel = within(dialog).getByRole('tabpanel', { name: '观察记录' });
+    expect(await within(panel).findByRole('region', { name: '观察记录' })).toHaveTextContent(
+      '未加入本领域观察，所以没有巡查记录',
+    );
+    expect(kit.of('GET', `/api/local/creators/${encodeURIComponent(creatorKeyFor('author-1'))}/observation-record`)).toHaveLength(0);
   });
 });
 

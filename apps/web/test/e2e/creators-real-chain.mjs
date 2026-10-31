@@ -227,6 +227,8 @@ try {
     assert.match(await group.innerText(), /暂无可回查的支持片段。/);
     await panel.getByRole('tab', { name: '观察记录' }).click();
     assert.match(await panel.getByRole('tabpanel', { name: '观察记录' }).innerText(), /合成公开简介|公开简介尚未取得/);
+    // 未加入观察的作者：观察记录如实说明没有巡查记录，不显示空表或推算的时间。
+    assert.match(await panel.getByRole('region', { name: '观察记录' }).innerText(), /未加入本领域观察，所以没有巡查记录/);
     await panel.getByRole('tab', { name: '概览' }).click();
     await shot('creators-1440-drawer');
     await page.keyboard.press('Escape');
@@ -349,6 +351,20 @@ try {
     await dialog.waitFor({ state: 'detached' });
     await rowOf('合成作者 05').getByRole('link', { name: '查看目标' }).waitFor();
     assert.match(await rowText('合成作者 05'), /已加入 · 巡查未开启/);
+
+    // 刚加入的作者：观察记录立即能读到关系、用途与创建经过；巡查还没开，不编下次时间。
+    await page.getByRole('button', { name: '合成作者 05', exact: true }).click();
+    const joinedPanel = drawer('合成作者 05');
+    await joinedPanel.waitFor();
+    await joinedPanel.getByRole('tab', { name: '观察记录' }).click();
+    const joinedRecord = await joinedPanel.getByRole('region', { name: '观察记录' }).innerText();
+    assert.match(joinedRecord, /加入本领域[\s\S]*主研究/);
+    assert.match(joinedRecord, /自动巡查未开启/);
+    assert.match(joinedRecord, /没有巡查记录/);
+    assert.match(joinedRecord, /建立为 待决定：从创作者页加入观察/);
+    await shot('creators-1440-drawer-record');
+    await page.keyboard.press('Escape');
+    await joinedPanel.waitFor({ state: 'detached' });
   });
 
   await step('加入观察：请求没有得到答复时显示「未确认」，重试发送同一个请求体', async () => {

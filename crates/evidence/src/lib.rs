@@ -72,6 +72,7 @@ pub use monitor_rule_read::{
 };
 
 pub mod observation_domain;
+mod observation_record;
 mod observation_summary;
 mod patrol_scheduler;
 mod producer_runtime;
@@ -213,8 +214,12 @@ pub use media_acquisition::{
     claim_media_acquisition, ensure_discovery_cover_media_work, media_acquisition_schema_is_ready,
     record_media_acquisition_failure,
 };
+pub use observation_record::{
+    CreatorObservationRecord, ObservationTransition, read_creator_observation_record,
+};
 pub use observation_summary::{
-    PatrolReadState, TargetObservationSummary, read_target_observation_summaries,
+    PatrolReadState, TargetObservationSummary, read_patrol_summaries_for_refs,
+    read_target_observation_summaries,
 };
 pub use patrol_scheduler::{
     PatrolStepError, PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready,

@@ -257,8 +257,33 @@ export function listJson(options: ListOptions = {}) {
   };
 }
 
-export function shellJson(overrides: Record<string, unknown> = {}) {
+/** 观察记录接口的默认回答：已加入、巡查暂停、有上次成功记录。 */
+export function observationRecordJson(overrides: Record<string, unknown> = {}) {
   return {
+    state: 'joined',
+    targetRef: '00000000-0000-4000-8000-000000000901',
+    joinedAt: '2026-09-24 12:23',
+    usageRole: 'primary',
+    firstStoredAt: '2026-09-22 03:12',
+    lifecycleState: 'paused',
+    lifecycleChangedAt: '2026-10-15 16:26',
+    monitoringState: 'paused',
+    patrol: {
+      automaticEnabled: false,
+      lastDispatchedAt: '2026-10-14 14:11',
+      lastSucceededAt: '2026-10-14 14:12',
+      nextRunAt: null,
+      missedRuns: 0,
+      latestHits: 12,
+      latestNew: 3,
+      state: 'disabled',
+    },
+    lastTransition: { at: '2026-10-15 16:26', from: 'monitoring', to: 'paused', reasonCode: 'monitor_paused', reason: null },
+    ...overrides,
+  };
+}
+
+export function shellJson(overrides: Record<string, unknown> = {}) {  return {
     domains: [
       { domainRef: DOMAIN, name: '合成领域一', status: 'active', targetCount: 3, sampleCount: 80 },
       { domainRef: OTHER_DOMAIN, name: '合成领域二', status: 'active', targetCount: 1, sampleCount: null },
@@ -338,6 +363,8 @@ export function defaultRoutes(kit: FetchKit, list: Responder = ok(listJson())) {
   for (let n=1; n<=40; n++) {
     kit.route('GET', `/api/local/creators/${creatorKeyFor(`author-${n}`)}/preview`,
       ok({state:'not_requested',runRef:null,requestedLimit:30,sampleCount:0,works:[]}));
+    kit.route('GET', `/api/local/creators/${encodeURIComponent(creatorKeyFor(`author-${n}`))}/observation-record`,
+      ok(observationRecordJson()));
   }
   kit.route('GET', '/api/local/ai-settings', ok(businessSettingsFixture()));
 }
