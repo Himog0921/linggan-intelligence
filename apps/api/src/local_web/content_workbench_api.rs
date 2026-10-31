@@ -94,7 +94,7 @@ async fn save(
     receipt(core::save(database!(state), id, &r).await)
 }
 async fn history(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
-    match core::revisions(database!(state), id).await {
+    match core::revision_index(database!(state), id).await {
         Ok(items) => Json(json!({"items":items})).into_response(),
         Err(e) => error(e),
     }

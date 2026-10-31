@@ -2,6 +2,7 @@
 mod assets;
 mod experience_fragments;
 mod exports;
+pub mod recovery;
 mod requests;
 mod source_usage;
 mod store;
@@ -23,7 +24,7 @@ pub use source_usage::{
 };
 pub use store::{
     adopt_in, create_work, list_idea_boxes, list_works, place, read_revision_in, read_work,
-    reset_withdrawn, restore, revision, revisions, save,
+    reset_withdrawn, restore, revision, revision_index, revisions, save,
 };
 pub use types::*;
 pub(crate) use validation::document as validate_document;

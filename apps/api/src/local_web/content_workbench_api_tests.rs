@@ -223,6 +223,11 @@ async fn content_workbench_http_routes_save_conflict_history_and_guard() {
     let (status, history) = call(app.clone(), &format!("{uri}/revisions"), None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(history["items"].as_array().unwrap().len(), 2);
+    for row in history["items"].as_array().unwrap() {
+        assert_eq!(row.as_object().unwrap().len(), 4);
+        assert_eq!(row["referenceFormat"], "current");
+        assert!(row.get("document").is_none());
+    }
     let (status, prior) = call(
         app.clone(),
         &format!(

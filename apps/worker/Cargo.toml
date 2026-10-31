@@ -56,3 +56,7 @@ path = "src/bin/ai_worker.rs"
 [[bin]]
 name = "linggan-comment-catalog"
 path = "src/bin/comment_catalog.rs"
+
+[[bin]]
+name = "linggan-creation-recovery"
+path = "src/bin/creation_recovery.rs"

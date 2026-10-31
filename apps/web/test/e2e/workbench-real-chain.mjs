@@ -264,6 +264,22 @@ try {
     assert.ok(resources.every(url=>!url.includes('WorkbenchPage')&&!url.includes('noto-sans-sc')));
     report.settingsResources=resources.map(url=>new URL(url).pathname);
   });
+  await step('恢复后历史列表兼容旧引用，正文仅展开时核验读取',async()=>{
+    await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${fixture.legacyWorkId}&view=body`);
+    await page.locator('[data-view]').waitFor();await openWritingTools();
+    await page.getByRole('button',{name:'历史',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'历史与恢复'});await dialog.waitFor();
+    const old=dialog.locator('section').filter({hasText:'版本 1 · 旧版引用'});
+    assert.equal(await old.count(),1);assert.equal(await old.getByRole('button',{name:'恢复为新版本'}).count(),0);
+    assert.equal(await old.getByText('查看正文',{exact:true}).count(),0);
+    const current=dialog.locator('section').filter({hasText:'版本 2 · 已保存'});
+    const detailPath=`/ops/api/creation/works/${fixture.legacyWorkId}/revisions/${fixture.legacyCurrentRevision}`;
+    assert.equal(report.requests.filter(r=>r.path===detailPath).length,0);
+    await current.getByText('查看正文',{exact:true}).click();
+    await current.getByText('手写正文，标点。',{exact:true}).waitFor();
+    assert.equal(report.requests.filter(r=>r.path===detailPath).length,1);
+    await screenshot('workbench-legacy-history');await page.keyboard.press('Escape');
+  });
   await step('创作入口建立真实服务器作品并保存角度提纲账号',async()=>{
     await page.goto(`${origin}/ops/creation`);assert.equal(new URL(page.url()).pathname,'/ops/creation');
     await page.getByLabel('创作领域',{exact:true}).click();await page.getByRole('navigation',{name:'可选创作领域'}).getByRole('button').first().click();await until(async()=>new URL(page.url()).searchParams.get('domain')===domainRef,'chosen fixture domain');await page.getByLabel('新选题标题').fill('作业启动');

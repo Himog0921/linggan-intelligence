@@ -207,12 +207,20 @@ pub async fn validate_selection_in(
     domain: Uuid,
     s: &MaterialSelection,
 ) -> Result<(), SourceError> {
-    validate_selection_shape(s)?;
-    let current = read_document_in(tx, domain, &s.source_kind, s.source_ref, s.work_ref).await?;
+    let current = current_selection_in(tx, domain, s).await?;
     if current.source_version != s.source_version {
         return Err(SourceError::Changed);
     }
     Ok(())
+}
+/// Read the current qualified identity without silently changing a stored selection.
+pub(crate) async fn current_selection_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    s: &MaterialSelection,
+) -> Result<MaterialDocument, SourceError> {
+    validate_selection_shape(s)?;
+    read_document_in(tx, domain, &s.source_kind, s.source_ref, s.work_ref).await
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

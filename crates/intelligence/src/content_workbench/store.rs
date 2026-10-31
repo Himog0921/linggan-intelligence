@@ -215,9 +215,32 @@ pub async fn revision(
     tx.commit().await?;
     Ok(item)
 }
+/// Index contains no authored/source prose. Detail reads retain their strict qualification.
+pub async fn revision_index(
+    db: &Database,
+    work: Uuid,
+) -> Result<Vec<RevisionSummary>, WorkbenchError> {
+    let mut tx = db.pool().begin().await?;
+    let rows=sqlx::query("SELECT revision_ref,revision_number,saved_at::text,CASE WHEN document->>'contract' IS DISTINCT FROM 'content-workbench.v1' OR jsonb_typeof(document->'excerpts') IS DISTINCT FROM 'array' THEN 'unsupported' WHEN EXISTS(SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(document->'excerpts')='array' THEN document->'excerpts' ELSE '[]'::jsonb END) e WHERE jsonb_typeof(e->'citation')='object' AND (NOT(e->'citation' ? 'blockRef') OR NOT(e->'citation' ? 'asOf'))) THEN 'legacy_reference' ELSE 'current' END AS reference_format FROM linggan_creation_revision WHERE work_ref=$1 ORDER BY revision_number DESC LIMIT 200").bind(work).fetch_all(&mut *tx).await?;
+    let out = rows
+        .into_iter()
+        .map(|r| {
+            Ok(RevisionSummary {
+                id: r.try_get("revision_ref")?,
+                number: r.try_get("revision_number")?,
+                saved_at: r.try_get("saved_at")?,
+                reference_format: r.try_get("reference_format")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+/// Bulk qualified documents for domain consumers; the UI uses the metadata-only index.
 pub async fn revisions(db: &Database, work: Uuid) -> Result<Vec<Revision>, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
-    let ids:Vec<Uuid>=sqlx::query_scalar("SELECT revision_ref FROM linggan_creation_revision WHERE work_ref=$1 ORDER BY revision_number DESC LIMIT 200").bind(work).fetch_all(&mut *tx).await?;
+    let ids: Vec<Uuid> = sqlx::query_scalar("SELECT revision_ref FROM linggan_creation_revision WHERE work_ref=$1 ORDER BY revision_number DESC LIMIT 200").bind(work).fetch_all(&mut *tx).await?;
     let mut out = Vec::new();
     for id in ids {
         let (domain, mut r) = read_revision_in(&mut tx, work, Some(id)).await?;
@@ -228,7 +251,7 @@ pub async fn revisions(db: &Database, work: Uuid) -> Result<Vec<Revision>, Workb
     Ok(out)
 }
 
-async fn append(
+pub(super) async fn append(
     tx: &mut Transaction<'_, Postgres>,
     work: Uuid,
     previous: Option<&Revision>,

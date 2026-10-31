@@ -516,7 +516,7 @@ describe('pending command and version protection', () => {
       ...initial.revision,
       id: crypto.randomUUID(),
       number: 0
-    }]);
+    }].map(r => ({ id: r.id, number: r.number, savedAt: r.savedAt, referenceFormat: 'current' as const })));
     show('canvas');
     fireEvent.click(await screen.findByRole('button', {
       name: '放入正文 / 指定图页 →'
@@ -560,7 +560,7 @@ describe('pending command and version protection', () => {
       ...restored,
       id: crypto.randomUUID(),
       number: 0
-    }]);
+    }].map(r => ({ id: r.id, number: r.number, savedAt: r.savedAt, referenceFormat: 'current' as const })));
     vi.mocked(api.restore).mockImplementation(async (_id, r) => ({
       requestId: r.requestId,
       workId: work,
@@ -1015,7 +1015,7 @@ describe('retained recovery copies preserve manuscript tags', () => {
     const historical = { ...initial.revision, id: crypto.randomUUID(), number: 0, document: { ...initial.revision.document, tags: ['历史标签'], paragraphs: [{ id: paragraph, text: '历史正文' }] } };
     const restored = { ...historical, id: crypto.randomUUID(), number: 2 };
     vi.mocked(api.readWork).mockResolvedValue(initial);
-    vi.mocked(api.history).mockResolvedValue([historical]);
+    vi.mocked(api.history).mockResolvedValue([historical].map(r => ({ id: r.id, number: r.number, savedAt: r.savedAt, referenceFormat: 'current' as const })));
     vi.mocked(api.restore).mockImplementation(async (_id, request) => ({ requestId: request.requestId, workId: work, outcome: 'accepted', replayed: false, revision: restored }));
     vi.mocked(api.save).mockImplementation(async (_id, request) => ({ requestId: request.requestId, workId: work, outcome: 'accepted', replayed: false, revision: { ...restored, id: crypto.randomUUID(), number: 3, document: request.document } }));
     const view = show();

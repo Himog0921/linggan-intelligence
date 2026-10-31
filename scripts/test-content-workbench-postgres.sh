@@ -131,6 +131,7 @@ if [[ "${1:-}" == "--http" ]]; then
   cargo test -p linggan-api --bin linggan-api creation_assets_http_ --locked -- --ignored --nocapture
   exit 0
 fi
+cargo test -p linggan-intelligence --test content_workbench_recovery_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test content_workbench_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test content_workbench_sources_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test content_workbench_ai_postgres --locked -- --ignored --nocapture

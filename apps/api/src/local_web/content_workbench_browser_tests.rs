@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 #[path = "../../../../crates/intelligence/tests/support/content_workbench_fixture.rs"]
 mod fixture;
+#[path = "../../../../crates/intelligence/tests/support/legacy_workbench_fixture.rs"]
+mod old_fixture;
 #[path = "content_workbench_private_review.rs"]
 mod private_review;
 #[path = "../../../../crates/intelligence/tests/support/ai_writing_fixture.rs"]
@@ -140,6 +142,20 @@ async fn content_workbench_real_chain_browser_proof() {
             .unwrap(),
         0
     );
+    // Seed an explicit old-reference chain, recover only inside this owned proof DB.
+    let (legacy_work, _) = old_fixture::legacy(&db, fixture::cited_doc(&db).await, 1).await;
+    let legacy_preview =
+        linggan_intelligence::content_workbench::recovery::preview(&db, legacy_work)
+            .await
+            .unwrap();
+    let legacy_saved = linggan_intelligence::content_workbench::recovery::apply(
+        &db,
+        &legacy_preview,
+        &legacy_preview.sha256().unwrap(),
+        Uuid::new_v4(),
+    )
+    .await
+    .unwrap();
     let login_password = "synthetic-workbench-browser-password";
     let password_hash = Argon2::default()
         .hash_password(
@@ -202,6 +218,7 @@ print(json.dumps({'version':'linggan.pi.v1/0.85.1','ok':True,'text':json.dumps(o
         ProofPath::new(&directory).join("fixture.json"),
         json!({
             "origin":origin,"domainRef":fixture::dossier::DOMAIN,
+            "legacyWorkId":legacy_work,"legacyCurrentRevision":legacy_saved.revision.id,
             "otherDomainRef":"00000000-0000-4000-8000-000000000002","accountRef":seeded["accountRef"],
             "noteRefs":seeded["noteRefs"],"voiceRefs":seeded["voiceRefs"],"replyRef":seeded["replyRef"],
             "publicationRef":seeded["publicationRef"],"configRef":config,"privateReview":manual,

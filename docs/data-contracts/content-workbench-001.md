@@ -1,7 +1,7 @@
 # CONTENT-WORKBENCH-001 · 作品与材料使用合同
 
 > 状态: 权威当前
-> 最后核对: 2026-10-28
+> 最后核对: 2026-10-31
 > 适用范围: Issue #425 后端候选，供 WEB-REACT-001 阶段 C 消费
 > 事实来源: Mog 实施授权、已认可 V3、main@0a90fd4a React 底座与阶段 C 候选源码
 > 冲突时以谁为准: 用户最新确认、真实来源资格；运行事实以实际代码与验证回执为准
@@ -121,3 +121,12 @@ AI 采用从冻结 Citation 建立摘录、画布和实际目标的使用关系�
 创作资格提示只说明writing_output_contract_only输出格式是否曾通过当前方法/模型/连接版本的严格验证；不是质量、事实或审美签收。UI分别使用“创作输出格式已验证/未通过验证/尚未验证”；连接true、false、unknown分别显示“模型可连接/模型连接测试尚未通过/连接情况尚未确认”。API和账本保留原始资格状态，不修改账本；重新打开弹窗先读取当前配置，旧读取结果不覆盖较新的配置，不自动准备输入或调用模型。
 
 连接false包含最新探测进行中及未成功的情况，不据此宣称探测已经失败；配置读取中/失败时不显示格式资格结论。
+
+
+## 历史索引与显式旧引用恢复（2026-10-31 候选）
+
+`GET /ops/api/creation/works/{id}/revisions` 返回 `items: [{id,number,savedAt,referenceFormat}]`，不返回标题、摘录或正文。`referenceFormat` 为 current / legacy_reference / unsupported；这是结构提示，不是使用资格。单个旧引用或坏文档不阻止其他版本元数据读取。`GET .../revisions/{revision}` 仍通过原严格解码及当前资格投影；旧版缺少 blockRef/asOf 返回既有不可安全读取错误，绝不补默认值。前端每次展开都重新读取详情，关闭时清除正文，单行失败可重新核验；旧引用不提供直接恢复按钮。
+
+独立工具 `linggan-creation-recovery --work-id UUID` 默认只读预览，唯一连接变量为 `LINGGAN_CREATION_RECOVERY_DATABASE_URL`，不自动加载运行服务配置。预览包含数据库/集群/ schema 身份、当前修订及旧摘要、重新核验时刻、每条旧新引用、材料版本、图片字节/hash和作者内容摘要。原生笔记/评论旧 DTO 使用历史序列化顺序核对 document_sha256；原文身份/哈希/精确范围、唯一当前块、当前领域资格、选材与图片均须通过。新 asOf 只表示本次重新核验，不能冒充历史资格。
+
+`--apply preview.json --preview-hash SHA256 --request-id UUID` 仅在明确授权的目标库使用。工具重建提案核对摘要及当前头，再复用作品锁、请求归属、追加修订和不可变保存回执。同请求同提案幂等；错误目标库、预览被改、旧头变化、当前来源受限或材料/图片不一致均拒绝。可变范围仅限引用 blockRef/asOf/sourceVersion 和选材 sourceVersion，其他作者 JSON 必须一致。全部旧修订原样保留，无迁移、不修写历史、不支持任意 JSON/OCR 兼容层。本轮只授权隔离 apply，正式库只读预览；此候选未合并部署。工作包见[资产实施计划](../plans/active/creation-assets-001.md)。

@@ -370,6 +370,15 @@ pub struct Revision {
     pub saved_at: String,
     pub document: WorkDocument,
 }
+/// Metadata only; a current reference format still requires a qualified detail read.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RevisionSummary {
+    pub id: Uuid,
+    pub number: i64,
+    pub saved_at: String,
+    pub reference_format: String,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SaveRequest {
