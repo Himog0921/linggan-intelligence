@@ -85,6 +85,8 @@ export interface CreatorItem {
   displayNameKind: string | null;
   authorExternalId: string | null;
   followerCount: number | null;
+  /** 粉丝数那次主页资料的观察时间（原始时间串）；没有资料时为 null。 */
+  followerObservedAt: string | null;
   biography: string | null;
   focus: Judgement;
   authorAnalysis: Analysis;
@@ -92,6 +94,8 @@ export interface CreatorItem {
   topicHints: string[];
   /** 关键词搜索里发现过这位作者作品的关键词，按首次命中时间排序；空数组＝没有记录（不是「无关键词」这个事实）。 */
   discoveryKeywords: string[];
+  /** 最早见到的那篇作品；没有作品时为 null。 */
+  firstSeenWorkRef: string | null;
   /** 首次发现（进入本领域或关键词命中，取更早的一刻）；没有记录时为 null。 */
   firstSeenMs: number | null;
   /** 北京时间的日期 `YYYY-MM-DD`。 */

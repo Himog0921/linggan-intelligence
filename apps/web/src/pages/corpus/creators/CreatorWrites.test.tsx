@@ -56,7 +56,9 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     const { user } = await page();
     await user.click(within(row('合成作者 1')).getByRole('button', { name: '加入观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
-    expect(dialog).toHaveTextContent('把「合成作者 1」加入「合成领域一」的观察名单，用途：主研究。');
+    expect(dialog).toHaveTextContent('把「合成作者 1」加入「合成领域一」的观察名单。');
+    expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeChecked();
+    expect(within(dialog).getByRole('radio', { name: /只作参照/ })).not.toBeChecked();
     expect(dialog).toHaveTextContent('这一步会：');
     expect(dialog).toHaveTextContent('登记这位作者为本机观察目标（已登记过则沿用，不重复建立）');
     expect(dialog).toHaveTextContent('这一步不会：');
@@ -162,7 +164,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     expect(dialog).toHaveTextContent('沿用了已有的观察目标。');
   });
 
-  it('其他领域已有主研究关系：只能按参照用途加入，请求里的用途是 reference', async () => {
+  it('其他领域已有主研究关系：只能按参照用途加入，主研究选项不可选，请求里的用途是 reference', async () => {
     kit.route('POST', registerPath(1), ok(receipt({ usageRole: 'reference' })));
     const { user } = await page(listJson({ items: [itemJson(1, { hasOtherPrimaryDomain: true, existsInOtherDomains: true })] }));
     await user.click(within(row('合成作者 1')).getByRole('button', { name: '查看加入方式' }));
@@ -170,7 +172,22 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     await user.click(within(drawer).getByRole('button', { name: '按参照用途加入' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(dialog).toHaveTextContent('其他领域已有主研究关系；本领域只能按参照用途加入，不改变原巡查规则。');
-    expect(dialog).toHaveTextContent('用途：参照。');
+    expect(within(dialog).getByRole('radio', { name: /只作参照/ })).toBeChecked();
+    expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeDisabled();
+    expect(dialog).toHaveTextContent('建立这位作者与本领域的关系（用途：参照）');
+    await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
+    await within(dialog).findByText('已完成');
+    expect(kit.of('POST', registerPath(1))[0]?.body).toEqual({ domain: DOMAIN, usageRole: 'reference' });
+  });
+
+  it('加入用途由用户明确选择：默认取当前范围，选「只作参照」后请求体是 reference', async () => {
+    kit.route('POST', registerPath(1), ok(receipt({ usageRole: 'reference' })));
+    const { user } = await page();
+    await user.click(within(row('合成作者 1')).getByRole('button', { name: '加入观察' }));
+    const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
+    expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeChecked();
+    await user.click(within(dialog).getByRole('radio', { name: /只作参照/ }));
+    expect(dialog).toHaveTextContent('建立这位作者与本领域的关系（用途：参照）');
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
     await within(dialog).findByText('已完成');
     expect(kit.of('POST', registerPath(1))[0]?.body).toEqual({ domain: DOMAIN, usageRole: 'reference' });

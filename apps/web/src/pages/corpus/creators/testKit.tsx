@@ -112,6 +112,7 @@ interface ItemOptions {
   keywords?: string[];
   firstSeenDate?: string | null;
   firstSeenPrecision?: string | null;
+  firstSeenWorkRef?: string | null;
   authorManual?: Record<string, unknown>;
   displayNameKind?: string;
 }
@@ -131,7 +132,7 @@ export function itemJson(n: number, options: ItemOptions = {}) {
     displayNameSource: { kind: options.displayNameKind ?? 'accepted_work', workRef: works[0]?.workRef },
     authorExternalId: externalId,
     platform: 'xhs',
-    profile: { displayName: `合成作者 ${n}`, biography: '合成公开简介：记录学习方法与日常实践。', followerCount: options.followers === undefined ? 2000 + n : options.followers },
+    profile: { displayName: `合成作者 ${n}`, biography: '合成公开简介：记录学习方法与日常实践。', followerCount: options.followers === undefined ? 2000 + n : options.followers, observedAt: '2026-09-20 10:00:00+08' },
     focus,
     authorAnalysis: {
       automatic: authorResult
@@ -157,6 +158,7 @@ export function itemJson(n: number, options: ItemOptions = {}) {
     traits: options.traits ?? ['personal_experience'],
     topicHints: ['任务启动', '晚间练习'],
     discoveryKeywords: options.keywords ?? ['注意力训练'],
+    firstSeenWorkRef: options.firstSeenWorkRef === undefined ? (works[0]?.workRef ?? null) : options.firstSeenWorkRef,
     firstSeenMs: options.firstSeenDate === null ? null : 1758751200000 + n,
     firstSeenDate: options.firstSeenDate === undefined ? '2026-09-25' : options.firstSeenDate,
     firstSeenDisplay: options.firstSeenDate === null ? null : `${options.firstSeenDate ?? '2026-09-25'} 09:00`,

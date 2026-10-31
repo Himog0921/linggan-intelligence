@@ -30,6 +30,13 @@ export function relevanceLabel(value: string | null | undefined): string {
   return '待判断';
 }
 
+/** 首次发现的两种补充说明：更早的发现不可知，或最近 7 天才见到。 */
+export const FIRST_SEEN_LABELS: Record<string, string> = {
+  recent: '近 7 天新见',
+  earliest_record: '最早已知记录',
+  domain_first: '本领域首次',
+};
+
 /** 判断项的名字。作品表达（亲历自述等）属于作品，作者倾向属于作者，两者分开命名。 */
 export const FIELD_NAMES: Record<string, string> = {
   relevance: '与当前领域的关系',

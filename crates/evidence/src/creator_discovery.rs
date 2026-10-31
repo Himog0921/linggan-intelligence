@@ -163,6 +163,8 @@ pub struct CreatorDiscovery {
     pub first_seen_date: String,
     pub first_seen_display: String,
     pub keywords: Vec<String>,
+    /// 最早见到的那篇作品；同一时刻取作品编号较小的，先后不随读取顺序变化。
+    pub first_work: Option<Uuid>,
 }
 
 /// A "high-like lead": one creator with at least `LEAD_MIN_WORKS` works at or above
@@ -984,16 +986,24 @@ async fn load_materials_scoped_in(
         let (Some(key), Some(discovered)) = (&work.creator_key, work_discovery.get(&work.work_ref)) else {
             continue;
         };
-        let entry = creator_discovery.entry(key.clone()).or_insert_with(|| CreatorDiscovery {
-            first_seen_ms: discovered.first_seen_ms,
-            first_seen_date: discovered.first_seen_date.clone(),
-            first_seen_display: discovered.first_seen_display.clone(),
-            keywords: Vec::new(),
-        });
-        if discovered.first_seen_ms < entry.first_seen_ms {
+        let entry = creator_discovery
+            .entry(key.clone())
+            .or_insert_with(|| CreatorDiscovery {
+                first_seen_ms: discovered.first_seen_ms,
+                first_seen_date: discovered.first_seen_date.clone(),
+                first_seen_display: discovered.first_seen_display.clone(),
+                keywords: Vec::new(),
+                first_work: Some(work.work_ref),
+            });
+        let current = (
+            entry.first_seen_ms,
+            entry.first_work.unwrap_or(work.work_ref),
+        );
+        if (discovered.first_seen_ms, work.work_ref) < current {
             entry.first_seen_ms = discovered.first_seen_ms;
             entry.first_seen_date = discovered.first_seen_date.clone();
             entry.first_seen_display = discovered.first_seen_display.clone();
+            entry.first_work = Some(work.work_ref);
         }
         for (moment, keyword) in &discovered.keywords {
             let earliest = creator_keyword_times
@@ -1404,7 +1414,8 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
             None => (None, None, None, None),
         };
         let keywords = discovery.map(|d| d.keywords.clone()).unwrap_or_default();
-        items.push(json!({"creatorKey":key,"displayName":display_name,"displayNameSource":display_name_source,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"discoveryKeywords":keywords,"firstSeenMs":first_seen_ms,"firstSeenDate":first_seen_date,"firstSeenDisplay":first_seen_display,"firstSeenPrecision":first_seen_precision,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"matchedRelatedWorkCount":matched_related,"matchedViralWorkCount":threshold.map(|_|matched_viral),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
+        let first_seen_work = discovery.and_then(|d| d.first_work);
+        items.push(json!({"creatorKey":key,"displayName":display_name,"displayNameSource":display_name_source,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"discoveryKeywords":keywords,"firstSeenWorkRef":first_seen_work,"firstSeenMs":first_seen_ms,"firstSeenDate":first_seen_date,"firstSeenDisplay":first_seen_display,"firstSeenPrecision":first_seen_precision,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"matchedRelatedWorkCount":matched_related,"matchedViralWorkCount":threshold.map(|_|matched_viral),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
     }
     items.sort_by(|a, b| {
         match q.sort.as_str() {
@@ -1534,6 +1545,11 @@ mod discovery_list_tests {
         let creator_discovery = creators
             .iter()
             .map(|(key, ms, date, keywords)| {
+                let first_work = works
+                    .iter()
+                    .filter(|w| w.creator_key.as_deref() == Some(*key))
+                    .map(|w| w.work_ref)
+                    .min();
                 (
                     (*key).to_string(),
                     CreatorDiscovery {
@@ -1541,6 +1557,7 @@ mod discovery_list_tests {
                         first_seen_date: (*date).into(),
                         first_seen_display: format!("{date} 09:00"),
                         keywords: keywords.iter().map(|k| (*k).to_string()).collect(),
+                        first_work,
                     },
                 )
             })
@@ -1645,6 +1662,11 @@ mod discovery_list_tests {
         assert_eq!(
             out["items"][0]["discoveryKeywords"],
             json!(["注意力训练", "写作业"])
+        );
+        // 首次见到的那篇作品随条目下发，页面据此回指作品，不用再猜。
+        assert_eq!(
+            out["items"][0]["firstSeenWorkRef"],
+            json!(Uuid::from_u128(1).to_string())
         );
         assert_eq!(out["stats"]["recentlyDiscovered"], 1);
         let mut recent = scope();

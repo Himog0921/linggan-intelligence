@@ -323,6 +323,49 @@
   font-size:var(--lgi-type-label-size);
 }
 
+/* 加入用途：两个选项各自说明后果，不用一个笼统的单选框。 */
+.roles {
+  display: grid;
+  gap: var(--lgi-space-2);
+  margin: var(--lgi-space-3) 0;
+  border: 1px solid var(--lgi-border);
+  padding: var(--lgi-space-3);
+}
+
+.roles legend {
+  padding: 0 var(--lgi-space-2);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+}
+
+.roles label {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--lgi-space-1) var(--lgi-space-3);
+  align-items: start;
+  cursor: pointer;
+}
+
+.roles label[data-disabled='true'] {
+  color: var(--lgi-ghost);
+  cursor: not-allowed;
+}
+
+.roles input {
+  margin: var(--lgi-space-1) 0 0;
+}
+
+.roles b {
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.roles small {
+  grid-column: 2;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+  line-height: var(--lgi-lh-longform);
+}
+
 .inlineError {
   margin: var(--lgi-space-2) 0 0;
   color: var(--lgi-danger);

@@ -33,30 +33,85 @@ async function openDrawer(name = '合成作者 1', url?: string) {
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 describe('依据抽屉 · 结构与结论在先', () => {
-  it('头部：名字、领域 · 用途 · 小红书 · 粉丝，三项数字；四个分区，默认概览', async () => {
+  it('头部：名字、领域 · 用途 · 小红书，三项数字各带来源；四个分区，默认概览', async () => {
     defaultRoutes(kit);
     const { dialog } = await openDrawer();
-    expect(dialog).toHaveTextContent('合成领域一 · 主研究材料 · 小红书 · 粉丝 2,001');
-    expect(dialog).toHaveTextContent('相关作品3');
-    expect(dialog).toHaveTextContent('待判断2');
-    expect(dialog).toHaveTextContent('相关最高赞1,500');
+    expect(dialog).toHaveTextContent('合成领域一 · 主研究材料 · 小红书');
+    expect(dialog).toHaveTextContent('粉丝2,001');
+    expect(dialog).toHaveTextContent('主页资料 · 2026-09-20 10:00');
+    expect(dialog).toHaveTextContent('本领域研究作品5');
+    expect(dialog).toHaveTextContent('当前用途范围内已取得');
+    expect(dialog).toHaveTextContent('领域最高赞1,500');
+    expect(dialog).toHaveTextContent('当前材料范围，含待判断');
     const tabs = within(dialog).getAllByRole('tab');
     expect(tabs.map(tab => tab.textContent)).toEqual(['概览', '主页作品', '研究线索', '观察记录']);
     expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false', 'false']);
     expect(within(dialog).getByRole('tabpanel', { name: '概览' })).toBeVisible();
   });
 
-  it('概览先给结论：作者内容倾向在最前面，其后才是方向与表达、作品预览', async () => {
+  it('粉丝没有记录时写「未记录」，不写 0；有作品条件时最高赞改叫「命中最高赞」并说明随筛选变化', async () => {
+    kit = createFetchMock();
+    kit.install();
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { followers: null })] })));
+    const first = await openDrawer();
+    const firstHead = first.dialog.querySelector('header') as HTMLElement;
+    expect(firstHead).toHaveTextContent('粉丝—');
+    expect(firstHead).toHaveTextContent('未记录');
+    first.unmount();
+
+    kit = createFetchMock();
+    kit.install();
+    defaultRoutes(kit);
+    const filtered = await openDrawer('合成作者 1', `/corpus/creators?domain=${DOMAIN}&traits=personal_experience`);
+    expect(filtered.dialog).toHaveTextContent('命中最高赞');
+    expect(filtered.dialog).toHaveTextContent('当前命中作品，含待判断');
+  });
+
+  it('概览先给结论：作者内容倾向在最前面，其后是发现来源、方向与表达、作品预览', async () => {
     defaultRoutes(kit);
     const { dialog } = await openDrawer();
     const panel = within(dialog).getByRole('tabpanel', { name: '概览' });
     const headings = within(panel).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent);
-    expect(headings.slice(0, 3)).toEqual(['先浅看作者，再决定读哪篇', '作者内容倾向', '内容方向与作品表达']);
+    expect(headings.slice(0, 4)).toEqual(['先浅看作者，再决定读哪篇', '作者内容倾向', '让我们发现他的作品', '内容方向与作品表达']);
     const conclusion = within(panel).getByRole('region', { name: '作者内容倾向' });
     expect(conclusion).toHaveTextContent('本领域持续创作');
     expect(conclusion).toHaveTextContent('简介与已有作品呈现相近的内容方向');
     expect(conclusion).toHaveTextContent('自动依据更新于 2026-10-14 10:00');
     expect(within(conclusion).getByRole('button', { name: '调整判断' })).toBeEnabled();
+  });
+
+  it('发现来源：发现词、首次发现时间与当时看到的那篇作品，作品标题可回查', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { keywords: ['注意力训练', '写作业'] })] })));
+    kit.route(
+      'GET',
+      '/api/local/work-resources',
+      ok({
+        items: [
+          {
+            identity: { publicRef: workRef(11) },
+            display: { title: '最早见到的作品' },
+            media: { avatar: { localAssetUrl: '/api/local/media/avatar-1', blob: { deliveryState: 'INLINE_SAFE' } }, cover: { localAssetUrl: '/api/local/media/cover-1' } },
+          },
+        ],
+      }),
+    );
+    const { dialog } = await openDrawer();
+    const card = within(dialog).getByRole('region', { name: '发现来源' });
+    expect(card).toHaveTextContent('注意力训练、写作业');
+    expect(card).toHaveTextContent('2026-09-25 09:00 · 本领域首次');
+    const link = await within(card).findByRole('link', { name: '最早见到的作品' });
+    expect(link.getAttribute('href')).toContain('/corpus/evidence?');
+    expect(link.getAttribute('href')).toContain(workRef(11));
+    expect(card).toHaveTextContent('更早的发现不可知');
+  });
+
+  it('发现来源没有记录时如实说明，不写 0 也不猜一篇作品', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { keywords: [], firstSeenDate: null, firstSeenWorkRef: null })] })));
+    const { dialog } = await openDrawer();
+    const card = within(dialog).getByRole('region', { name: '发现来源' });
+    expect(card).toHaveTextContent('未记录发现词');
+    expect(card).toHaveTextContent('首次发现时间未记录');
+    expect(card).toHaveTextContent('未记录最早收录的作品');
   });
 
   it('作者倾向与作品表达是两个层次：各有各的门槛，并存关系写明在抽屉里（#384 发现 1）', async () => {
