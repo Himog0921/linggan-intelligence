@@ -42,7 +42,8 @@ export function parseReadingSections(reading: Json, materials: readonly DossierM
       if (mode !== 'blocks' && new Set(resolved.map(({ block }) => block.speaker ?? 'unconfirmed')).size > 1) throw new ShapeError('readingView.group.speaker');
       if (mode === 'paragraph' || mode === 'transcript_paragraph') {
         const joiners = strings(value.joiners, 'readingView.group.joiners').map(joiner => choice(joiner, ['', ' ', '\n'], 'readingView.group.joiners'));
-        if (joiners.length !== blockRefs.length - 1 || resolved.some(entry => entry.block.kind !== 'paragraph')) throw new ShapeError('readingView.group.paragraph');
+        const imageProse = mode === 'paragraph' && kind === 'images' && new Set(resolved.map(entry => entry.unit.ref)).size === 1;
+        if (joiners.length !== blockRefs.length - 1 || resolved.some(entry => entry.block.kind !== 'paragraph' && !(imageProse && entry.block.kind === 'heading'))) throw new ShapeError('readingView.group.paragraph');
         if (mode === 'transcript_paragraph' && (kind !== 'audio' || new Set(resolved.map(entry => entry.unit.ref)).size !== 1)) throw new ShapeError('readingView.group.transcript');
         return { ...base, mode, joiners } satisfies ReadingGroup;
       }

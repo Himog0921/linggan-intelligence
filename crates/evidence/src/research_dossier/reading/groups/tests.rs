@@ -539,3 +539,105 @@ fn grouping_is_revision_bound_but_a_new_clock_alone_is_not() {
     refresh_revision(&mut d);
     assert_ne!(d.revision, before);
 }
+
+#[test]
+fn wrapped_lines_on_unknown_page_join_without_crossing_paragraphs_or_selections() {
+    let material = json!({"ref":"image","kind":"image","sourceState":"present","page":null,
+        "issues":[{"code":"page_order_unknown"}],"blocks":[
+        {"ref":"p0","kind":"paragraph","speaker":"unconfirmed","text":"这里是一段跨行的完整","bbox":[0.1,0.14,0.8,0.037]},
+        {"ref":"p1","kind":"paragraph","speaker":"unconfirmed","text":"文字。","bbox":[0.1,0.20,0.35,0.035]},
+        {"ref":"p2","kind":"paragraph","speaker":"unconfirmed","text":"这是下一段内容。","bbox":[0.1,0.32,0.8,0.037]}]});
+    let mut d = dossier(vec![material]);
+    let groups = d.reading_view["sections"][0]["groups"].as_array().unwrap();
+    assert_eq!(groups.len(), 2);
+    assert_eq!(groups[0]["mode"], "paragraph");
+    assert_eq!(groups[0]["blockRefs"], json!(["p0", "p1"]));
+    crate::research_dossier::select(
+        &mut d,
+        &crate::research_dossier::Selection {
+            block_refs: vec!["p0".into(), "p2".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        d.reading_view["sections"][0]["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|g| g["blockRefs"].as_array().unwrap().len() == 1)
+    );
+}
+
+#[test]
+fn wrapped_large_font_prose_is_one_paragraph_but_real_heading_stays_separate() {
+    let mut blocks: Vec<Value> = ["第一行大字号正文延续", "第二行正文继续说明", "第三行还在同一个段落", "结束。"]
+        .into_iter().enumerate().map(|(i, text)| json!({
+            "ref":format!("p{i}"),"kind":if i < 3 {"heading"} else {"paragraph"},
+            "text":text,"speaker":"unconfirmed","bbox":[0.1,0.1+i as f64*0.08,if i<3 {0.8} else {0.2},0.06]
+        })).collect();
+    let d = dossier(vec![image(1, blocks.clone())]);
+    assert_eq!(groups(&d).len(), 1);
+    assert_eq!(groups(&d)[0]["mode"], "paragraph");
+    assert_eq!(groups(&d)[0]["blockRefs"], json!(["p0", "p1", "p2", "p3"]));
+    assert_eq!(d.materials[0]["blocks"], json!(blocks));
+    blocks[3]["bbox"] = json!([0.1, 0.6, 0.8, 0.03]);
+    let d = dossier(vec![image(1, blocks)]);
+    assert_eq!(groups(&d).len(), 4);
+}
+
+#[test]
+fn same_image_wrap_never_merges_speakers_or_recognition_issues() {
+    for different_speaker in [false, true] {
+        let mut blocks = vec![
+            paragraph("a", "这是一段换行的内容"),
+            paragraph("b", "后续内容"),
+        ];
+        blocks[0]["bbox"] = json!([0.1, 0.1, 0.8, 0.04]);
+        blocks[1]["bbox"] = json!([0.1, 0.16, 0.8, 0.04]);
+        if different_speaker {
+            blocks[1]["speaker"] = json!("quoted");
+        } else {
+            blocks[1]["issues"] = json!([{"code":"uncertain_text"}]);
+        }
+        let mut material = image(1, blocks);
+        material["issues"] = json!([{"code":"page_order_unknown"}]);
+        let d = dossier(vec![material]);
+        assert_eq!(groups(&d).len(), 2);
+    }
+}
+
+#[test]
+fn tilted_same_line_fragments_read_left_to_right_without_rewriting_blocks() {
+    let blocks = vec![
+        json!({"ref":"right","kind":"paragraph","text":"继续阅读","bbox":[0.686,0.928,0.181,0.024]}),
+        json!({"ref":"middle","kind":"paragraph","text":"列清单，","bbox":[0.583,0.931,0.095,0.028]}),
+        json!({"ref":"left","kind":"paragraph","text":"构建结构。","bbox":[0.197,0.937,0.381,0.037]}),
+    ];
+    let d = dossier(vec![image(1, blocks.clone())]);
+    assert_eq!(ordered_refs(&d), vec!["left", "middle", "right"]);
+    assert_eq!(groups(&d).len(), 1);
+    assert_eq!(group_text(&d, groups(&d)[0]), "构建结构。列清单，继续阅读");
+    assert_eq!(d.materials[0]["blocks"], json!(blocks));
+    let mut selected = d.clone();
+    crate::research_dossier::select(
+        &mut selected,
+        &crate::research_dossier::Selection {
+            block_refs: vec!["left".into(), "right".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(ordered_refs(&selected), vec!["left", "right"]);
+    assert_eq!(groups(&selected).len(), 2);
+    assert_eq!(selected.materials[0]["blocks"][0], blocks[2]);
+    assert_eq!(selected.materials[0]["blocks"][1], blocks[0]);
+    let mut columns = blocks;
+    columns[2]["bbox"][2] = json!(0.2);
+    let d = dossier(vec![image(1, columns)]);
+    assert_eq!(
+        groups(&d).len(),
+        2,
+        "separate columns cannot be joined across a wide gap"
+    );
+}

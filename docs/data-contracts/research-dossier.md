@@ -222,3 +222,15 @@ interaction 包含 likes、comments、collects、shares。四项分别保留来�
 至少覆盖真实 canonical 形状的 12 张与 13 张合成材料、跨页明确续句与独立短语反例、列表 start 连续/跳号、同表接续/独立表、未知顺序、缺页位置、不同材料相同 issue key、部分可读及有效空读本更新失败；长口播验证每个原始字与时码仍在 JSON，UI/MD 组顺序与全部引用一致。运输分段拼回时验证 refs、joiners、continuation、缺页定位恰好一次以及空尾段。
 
 HTTP 验证完整与显式选择的 JSON/Markdown expectedRevision 成功和冲突、错误比较 selection.completeRevision 的反例、读取前后无写入，并继续覆盖领域权限、受限来源和既有人工保护。共享 Works 的旧主次序列必须保持不变；内部 context_sources / render_materials 保留精确引用与完整结构。静态 Demo 与合成 fixture 只证明交互/序列化和规则，不证明真实 12 图 OCR、供应商识读质量或生产就绪。
+
+### 2026-10-31 本地真实识别复测修正
+
+复用现有封面/首图同字节归并：当平台页码未知但 producer 明确记录第一张观察图时，也可建立同字节关系；平台页码继续为未知，不把观察序号伪造成平台页码。沿用人工读本优先与冲突保留规则，其他重复页不归并。
+
+封面没有 heading 时，可从上半部首个有实质文字的段落按原始几何行距拼接显示标题，保留 titleBlockRefs；不改平台标题、不生成新词。显式选取部分 block 时不启用此后备，避免把截取正文误当标题。
+
+同图相邻普通文字行可使用既有 paragraph group 连续阅读；段落空隙、列边界、表达者或实际识别问题断开。平台页序未知不阻断同图合段，显式 block 选取不自动跨未选行拼接。JSON、Markdown、前端沿用同一组 refs 和 joiners，原始块不重写。
+
+同图大字号正文被逐行标成 heading 时，连续至少三行、末尾接同字体段落尾行的整段以 paragraph 引用组呈现；原始 heading 块不变。前端按服务端同图组装结果读取，Markdown 使用同一组引用。折叠到人工首图时，sameBytesSources 保留 cover 的 purpose，供标题组装识别同字节封面来源；不推定平台页码。
+
+同一图中相邻、同基线且间距很小的文字碎片在阅读引用组中按从左到右排列并连接，修正倾斜拍摄导致的片段次序；保留原始 blocks 的文本、次序和引用。跨列大间距、识别问题或角色不同的块不连接。

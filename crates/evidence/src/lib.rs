@@ -197,7 +197,7 @@ pub use material_disposition::{
 pub use material_processing::{
     ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput,
     OcrExcludedLineInput, OcrLayeringInput, OcrLineInput, ProcessorRequeueSummary,
-    REGISTERED_PROCESSOR_KINDS, claim_media_processing_work,
+    REGISTERED_PROCESSOR_KINDS, claim_media_processing_jobs, claim_media_processing_work,
     claim_media_processing_work_for_version, complete_media_processing_derivative,
     complete_media_processing_ocr, complete_media_processing_text,
     complete_media_processing_without_output, ensure_media_processing_work,
