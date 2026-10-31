@@ -9,6 +9,7 @@ import {
   optNum,
   optObj,
   optStr,
+  ShapeError,
   str,
   strList,
   type Json,
@@ -25,6 +26,9 @@ import type {
   Judgement,
   ManualEntry,
   Observation,
+  ObservationPatrol,
+  ObservationRecord,
+  ObservationTransition,
   RegisterReceipt,
   Work,
   WorkResource,
@@ -280,6 +284,57 @@ export function parseRegisterReceipt(value: unknown): RegisterReceipt {
     lifecycleState: optStr(root, 'lifecycleState'),
     monitoringEnabled: optBool(root, 'monitoringEnabled'),
   }));
+}
+
+function parseObservationTransition(value: Json | null): ObservationTransition | null {
+  if (value === null) return null;
+  return {
+    at: str(value, 'at'),
+    from: optStr(value, 'from'),
+    to: str(value, 'to'),
+    reasonCode: str(value, 'reasonCode'),
+    reason: optStr(value, 'reason'),
+  };
+}
+
+function parseObservationPatrol(value: Json | null): ObservationPatrol | null {
+  if (value === null) return null;
+  return {
+    automaticEnabled: bool(value, 'automaticEnabled'),
+    lastDispatchedAt: optStr(value, 'lastDispatchedAt'),
+    lastSucceededAt: optStr(value, 'lastSucceededAt'),
+    nextRunAt: optStr(value, 'nextRunAt'),
+    missedRuns: num(value, 'missedRuns'),
+    latestHits: optNum(value, 'latestHits'),
+    latestNew: optNum(value, 'latestNew'),
+    state: str(value, 'state'),
+  };
+}
+
+export function parseObservationRecord(value: unknown): ObservationRecord {
+  return decode(value, root => {
+    const state = str(root, 'state');
+    if (state !== 'joined' && state !== 'not_joined') throw new ShapeError('state');
+    return {
+      state,
+      targetRef: optStr(root, 'targetRef'),
+      joinedAt: optStr(root, 'joinedAt'),
+      usageRole: optStr(root, 'usageRole'),
+      firstStoredAt: optStr(root, 'firstStoredAt'),
+      lifecycleState: optStr(root, 'lifecycleState'),
+      lifecycleChangedAt: optStr(root, 'lifecycleChangedAt'),
+      monitoringState: optStr(root, 'monitoringState'),
+      patrol: parseObservationPatrol(optObj(root, 'patrol')),
+      lastTransition: parseObservationTransition(optObj(root, 'lastTransition')),
+    };
+  });
+}
+
+export async function fetchObservationRecord(domain: string, creatorKey: string, signal?: AbortSignal): Promise<ObservationRecord> {
+  const params = new URLSearchParams({ domain });
+  return parseObservationRecord(
+    await requestJson(`${API}/creators/${encodeURIComponent(creatorKey)}/observation-record?${params}`, signal ? { signal } : {}),
+  );
 }
 
 // ───────────────────────── 请求 ─────────────────────────

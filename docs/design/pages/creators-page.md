@@ -6,7 +6,19 @@
 > 事实来源: 真实代码（`apps/web/src/pages/corpus/creators/`、`apps/web/src/corpus/`、`apps/api/src/local_web/creators.rs`、`apps/api/src/local_web/corpus_shell_api.rs`、`crates/evidence/src/creator_discovery.rs`）；[CREATOR-DISCOVERY-001](../../plans/active/creator-discovery-001.md) 的产品范围；[WEB-REACT-001 阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §3.1 能力清单（逐项记录旧页能力与 React 落点）；PR #384（未合并）的只读调查结论
 > 冲突时以谁为准: Mog 最新确认、真实运行/代码/数据合同、DEC-0010；能力清单与本规格冲突时以代码和能力清单为准，并回改本文
 > 页面层级与模式: L1；`LIDS-PAT-001` 的 Corpus Explorer（读数条、筛选、连续表格、分页），依据抽屉为右侧受限的 Split Evidence Inspector；不新造页面骨架
-> 当前实现证据: D1历史实现见[原验收](../acceptance/web-react-001-d1-acceptance.md)；LIDS-UI-001/B 续修随 PR #457 上线，见[本轮验收](../acceptance/lids-ui-implementation-001-acceptance.md)；第 1 步随 PR #521 合并部署；第 2 步为本轮候选
+> 当前实现证据: D1历史实现见[原验收](../acceptance/web-react-001-d1-acceptance.md)；LIDS-UI-001/B 续修随 PR #457 上线，见[本轮验收](../acceptance/lids-ui-implementation-001-acceptance.md)；第 1 步随 PR #521、第 2 步随 PR #523 合并部署；第 3 步为本轮候选
+
+## 2026-10-31 · 第 3 步：观察记录分区（已实现，未合并）
+
+抽屉「观察记录」分区最前面新增「观察记录」：把这位作者在本领域的观察关系、档案与巡查写成可核对的事实，未知一律写「未记录」，不按时间推算。
+
+- **加入与用途**：加入本领域的时间（`observation_domain_target`）与用途（主研究 / 参照）。
+- **观察档案**：目标首次保存时间、当前状态（待决定 / 建档中 / 已建档 / 巡查中 / 已暂停 / 已忽略）与这次状态变化的时间；自动巡查是否开启单独写明，不把「没有巡查」混进生命周期状态。
+- **巡查**：上次巡查成功时间、上次派出时间（只有派出没有成功结果时如实说明）、下次计划时间（巡查关着时不显示推算时间）、错过计划次数（只在大于 0 时出现）。
+- **带回什么**：复用采集页同一套巡查结果读取（最近一次合格成功巡查的命中数与其中新见数）；没有合格结果时写「作品数未记录」或「还没有成功巡查的结果」，不写 0。
+- **最近变化**：最近一次生命周期变化的从→到、时间与原因（受控代码翻译成中文；认不得就写「原因未记录」）。
+- 接口 `GET /api/local/creators/{key}/observation-record?domain=`：没有关系返回 `not_joined`，读不到库返回不可用；两者都不能冒充「没观察过」。
+- 本轮不做：观察记录的历史列表（只给最近一次变化）、手动补记、通知与提醒。
 
 ## 2026-10-31 · 第 2 步：抽屉读数、发现来源与加入用途（已实现，未合并）
 
