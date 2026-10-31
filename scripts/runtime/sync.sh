@@ -1,6 +1,5 @@
 #!/bin/zsh
-# 本机常驻服务的同步步骤。三个服务（API / 巡检 worker / 媒体 worker）启动前都先跑这一段，
-# 因此它们永远跑同一个 revision。
+# 本机常驻服务的同步步骤。四个服务启动前都先跑这一段，使用同一固定部署目标。
 #
 # 取代了按 commit 冻结快照的旧做法：那个模式累积到 28 份共 21GB，而且三个服务各自指向
 # 自己那次部署的快照——2026-09-03 实测 API 在 ccf7cca、两个 worker 还停在 7a792c9，
@@ -45,25 +44,29 @@ trap 'rmdir "$lock_file" 2>/dev/null || true' EXIT
 
 previous="$(git rev-parse --short HEAD)"
 
-# 拿不到网络时不要让服务起不来：继续用现有 revision，并把这件事说出来。
-if git fetch --quiet origin main 2>/dev/null; then
-  target="$(git rev-parse origin/main)"
-  current_full="$(git rev-parse HEAD)"
-  if [[ "$current_full" != "$target" ]] && ! runtime_check_permit "$current_full" "$target"; then
-    log "拒绝切换 ${current_full:0:7} → ${target:0:7}：没有匹配的巡检/AI与数据库排空许可"
-    exit 1
+# Installation passes a frozen SHA. Restarts reuse the last installed SHA and never fetch main.
+# A legacy installation without a pin stays on its current checkout until explicitly installed.
+target="${LINGGAN_RUNTIME_TARGET_REVISION:-}"
+if [[ -z "$target" ]]; then
+  if [[ -e "$support_dir/runtime-target-revision" ]]; then
+    target="$(cat "$support_dir/runtime-target-revision")"
+  else
+    target="$(git rev-parse HEAD)"
   fi
-  if [[ "$current_full" != "$target" ]]; then git reset --quiet --hard "$target"; fi
-  current="$(git rev-parse --short HEAD)"
-  [[ "$previous" == "$current" ]] && log "已是最新 origin/main（${current}）" \
-                                  || log "同步 ${previous} → ${current}"
-else
-  log "fetch 失败（离线？），继续使用当前 revision ${previous}"
-  current="$previous"
 fi
+[[ "$target" =~ '^[0-9a-f]{40}$' ]] || { log "invalid installed target SHA; refusing startup"; exit 1; }
+git cat-file -e "${target}^{commit}" || { log "installed target commit is unavailable"; exit 1; }
+current_full="$(git rev-parse HEAD)"
+if [[ "$current_full" != "$target" ]] && ! runtime_check_permit "$current_full" "$target"; then
+  log "拒绝切换 ${current_full:0:7} → ${target:0:7}：没有匹配的巡检/AI与数据库排空许可"
+  exit 1
+fi
+if [[ "$current_full" != "$target" ]]; then git reset --quiet --hard "$target"; fi
+current="$(git rev-parse --short HEAD)"
+[[ "$previous" == "$current" ]] && log "已是固定部署版本（${current}）" \
+                                || log "同步 ${previous} → ${current}"
 
-# 迁移不由服务执行——一个开机自启的服务不该顺手改数据库结构。但代码现在会自动跟到 main，
-# 因此必须主动检查：否则新代码撞上没跑的迁移，报出来的是一堆 SQL 错误而不是「该迁移了」。
+# 迁移不由服务执行；固定部署目标仍必须检查台账，避免新代码撞上未应用的迁移。
 set -a
 source ./.env
 set +a

@@ -1,9 +1,10 @@
 #!/bin/zsh
+{
 set -euo pipefail
 
 # 更新四个服务的配置并保留禁用状态：建运行目录、写 launchd 配置、启动。
 #
-#   ./scripts/runtime/install.sh
+#   ./scripts/runtime/install.sh --target-sha <full-40-character-SHA>
 #
 # 幂等：已装好时重跑只会刷新 plist 并重启服务。重装机器或换机器时，这一条命令加上
 # 一次 `./scripts/local-runtime.sh migrate` 就是全部步骤。
@@ -29,23 +30,33 @@ runtime_env="$repo_root/.env"
 [[ ! -f "$runtime_dir/.env" ]] || runtime_env="$runtime_dir/.env"
 source "$repo_root/scripts/runtime/drain.zsh"
 source "$repo_root/scripts/runtime/plist.zsh"
-drain_grace_seconds="$(python3 "$ai_guard" grace "$repo_root/crates/contracts/src/ai_limits.json" "$runtime_dir/crates/contracts/src/ai_limits.json")"
 allow_legacy_bootstrap=0
 prepare_migration=0
 
 log() { print -r -- "[install] $*"; }
 
-if (( $# > 1 )) || { (( $# == 1 )) && [[ "$1" != "--bootstrap-no-drain" && "$1" != "--prepare-migration" ]]; }; then
-  print -r -- "usage: ./scripts/runtime/install.sh [--prepare-migration | --bootstrap-no-drain]" >&2
-  exit 1
-fi
-if (( $# == 1 )); then
-  if [[ "$1" == "--bootstrap-no-drain" ]]; then
-    allow_legacy_bootstrap=1
-  else
-    prepare_migration=1
-  fi
-fi
+requested_target=""
+target_option_seen=0
+mode_seen=0
+while (( $# > 0 )); do
+  case "$1" in
+    --target-sha)
+      (( $# >= 2 && ! target_option_seen )) || { print -u2 -- "--target-sha requires one full commit SHA"; exit 1; }
+      requested_target="$2"
+      [[ "$requested_target" =~ '^[0-9a-fA-F]{40}$' ]] || { print -u2 -- "--target-sha requires 40 hexadecimal characters"; exit 1; }
+      requested_target="${(L)requested_target}"
+      target_option_seen=1
+      shift 2
+      ;;
+    --prepare-migration|--bootstrap-no-drain)
+      (( ! mode_seen )) || { print -u2 -- "installation modes are mutually exclusive"; exit 1; }
+      mode_seen=1
+      if [[ "$1" == --prepare-migration ]]; then prepare_migration=1; else allow_legacy_bootstrap=1; fi
+      shift
+      ;;
+    *) print -u2 -- "usage: ./scripts/runtime/install.sh [--target-sha <full-sha>] [--prepare-migration | --bootstrap-no-drain]"; exit 1 ;;
+  esac
+done
 
 set_patrol_drain_state() {
   patrol_drain_state="$1"
@@ -138,21 +149,39 @@ docker_cli="$(command -v docker)" \
 [[ "$docker_cli" == /* && -x "$docker_cli" ]] \
   || { print -r -- "Docker CLI must resolve to an absolute executable path" >&2; exit 1; }
 
+# Resolve once, before drain or launchd writes. A later main update cannot select another release.
+git -C "$repo_root" fetch --quiet origin main
+target_revision="${requested_target:-$(git -C "$repo_root" rev-parse origin/main)}"
+[[ "$target_revision" =~ '^[0-9a-f]{40}$' ]] || { print -u2 -- "invalid target revision"; exit 1; }
+git -C "$repo_root" cat-file -e "${target_revision}^{commit}" \
+  || { print -u2 -- "target commit is unavailable; no services stopped"; exit 1; }
+git -C "$repo_root" merge-base --is-ancestor "$target_revision" origin/main \
+  || { print -u2 -- "target must be a commit on origin/main; no services stopped"; exit 1; }
+[[ "$(git -C "$repo_root" rev-parse HEAD)" == "$target_revision" ]] \
+  || { print -u2 -- "installation source HEAD must match target SHA; no services stopped"; exit 1; }
+git -C "$repo_root" diff --quiet "$target_revision" -- \
+  || { print -u2 -- "installation source has uncommitted changes; no services stopped"; exit 1; }
+
 mkdir -p "$log_dir" "$agents_dir" "$drain_dir"
 install_lock="$drain_dir/install.lock"
 mkdir "$install_lock" 2>/dev/null || { print -r -- "已有安装占用锁；未操作服务" >&2; exit 1; }
-trap 'rmdir "$install_lock" 2>/dev/null || true' EXIT
+release_dir=""
+trap '[[ -z "$release_dir" ]] || rm -rf -- "$release_dir"; rmdir "$install_lock" 2>/dev/null || true' EXIT
+# Freeze the small release helpers from Git, not from a checkout another task can advance.
+release_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-release.XXXXXX")"
+mkdir -p "$release_dir/scripts/runtime" "$release_dir/crates/contracts/src"
+for release_file in scripts/runtime/{sync.sh,drain.zsh,plist.zsh,ai_guard.py,ai_snapshot.py} crates/contracts/src/ai_limits.json; do
+  git -C "$repo_root" show "$target_revision:$release_file" > "$release_dir/$release_file"
+done
+guard_source_root="$release_dir"
+source "$release_dir/scripts/runtime/drain.zsh"
+source "$release_dir/scripts/runtime/plist.zsh"
+drain_grace_seconds="$(python3 "$ai_guard" grace "$release_dir/crates/contracts/src/ai_limits.json" "$runtime_dir/crates/contracts/src/ai_limits.json")"
+log "固定部署目标：$target_revision"
 rm -f -- "$worker_update_permit"
 runtime_capture_disabled
 
-# 运行目录是一个 detached worktree，跟随 origin/main。detached 是必须的：main 分支已由
-# 开发目录 checkout，同一个分支不能在两处。
-git -C "$repo_root" fetch --quiet origin main
-target_revision="$(git -C "$repo_root" rev-parse origin/main)"
-[[ "$(git -C "$repo_root" rev-parse HEAD)" == "$target_revision" ]] \
-  || { print -r -- "安装入口必须来自目标origin/main；未操作服务" >&2; exit 1; }
-git -C "$repo_root" diff --quiet HEAD -- scripts/runtime crates/contracts/src/ai_limits.json \
-  || { print -r -- "安装入口或资源合同存在未提交改动；未操作服务" >&2; exit 1; }
+# The runtime stays detached; its update permit remains bound to this exact target.
 if [[ -e "$runtime_dir" ]]; then
   # Linked worktrees keep .git as a file, so -d "$runtime_dir/.git" would
   # wrongly treat a healthy existing runtime as absent.  Never overwrite an
@@ -166,7 +195,7 @@ if [[ -e "$runtime_dir" ]]; then
   log "运行目录已存在：$runtime_dir"
 else
   log "创建运行目录：$runtime_dir"
-  git -C "$repo_root" worktree add --detach "$runtime_dir" origin/main
+  git -C "$repo_root" worktree add --detach "$runtime_dir" "$target_revision"
 fi
 runtime_revision="$(git -C "$runtime_dir" rev-parse HEAD)"
 request_worker_drain
@@ -179,7 +208,7 @@ fi
 runtime_write_permit "$runtime_revision" "$target_revision" "$patrol_drain_state"
 
 # 启动时由新 revision 的 sync.sh 消费上面的 target-specific drain permit，再把运行目录同步到
-# origin/main。安装入口不能先 reset 再去停 worker，否则旧进程可能在已被替换的工作树上
+# 固定目标 SHA。安装入口不能先 reset 再去停 worker，否则旧进程可能在已被替换的工作树上
 # 继续运行，且无法证明其在途模型调用已经落账。
 [[ -x "$runtime_dir/scripts/runtime/launch.sh" ]] \
   || { print -r -- "运行目录缺少 $runtime_dir/scripts/runtime/launch.sh" >&2; exit 1; }
@@ -195,18 +224,20 @@ fi
 
 # The existing runtime may predate a retired binary. Run the target revision's synchronizer from
 # the source checkout, not the runtime copy that is about to be replaced.
-sync_copy="$(mktemp "${TMPDIR:-/tmp}/linggan-sync.XXXXXX")"
-cp "$repo_root/scripts/runtime/sync.sh" "$sync_copy"
-LINGGAN_RUNTIME_SOURCE_DIR="$repo_root" LINGGAN_RUNTIME_DIR="$runtime_dir" LINGGAN_SUPPORT_DIR="$support_dir" /bin/zsh "$sync_copy"
-rm -f "$sync_copy"
+LINGGAN_RUNTIME_TARGET_REVISION="$target_revision" LINGGAN_RUNTIME_SOURCE_DIR="$release_dir" LINGGAN_RUNTIME_DIR="$runtime_dir" LINGGAN_SUPPORT_DIR="$support_dir" /bin/zsh "$release_dir/scripts/runtime/sync.sh"
 
 [[ "$(git -C "$runtime_dir" rev-parse HEAD)" == "$target_revision" ]] \
   || { print -r -- "运行目录未同步到目标 revision；未重启服务" >&2; exit 1; }
+
+# Only a successfully built release becomes the restart target. The write is atomic.
+python3 "$ai_guard" pin "$support_dir/runtime-target-revision" "$target_revision"
 
 write_plist local-runtime linggan-api          api           "$runtime_port"
 write_plist patrol-worker linggan-worker       worker
 write_plist media-worker  linggan-media-worker media-worker
 write_plist ai-executor   linggan-ai-worker    ai-worker
 
-log "配置更新完成；已启用服务跟随origin/main，原禁用服务与新AI初始禁用保持。"
+log "配置更新完成；已启用服务固定到 $target_revision，原禁用服务与新AI初始禁用保持。"
 log "若有未应用的迁移，服务会拒绝启动；届时执行：./scripts/local-runtime.sh migrate"
+
+}

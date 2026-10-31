@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import plistlib
 import sys
+import subprocess
 
 state_file = Path(os.environ["AI_INSTALL_PROOF_STATE"])
 state = json.loads(state_file.read_text())
@@ -28,8 +29,18 @@ if tool == "git":
     if args[:1] == ["-C"]:
         cwd, args = args[1], args[2:]
     if cwd not in (state["source"], state["runtime"]): fail()
+    if state.get("real_git"):
+        os.execv(state["real_git"], [state["real_git"], "-C", cwd, *args])
     if args[:1] == ["fetch"]:
         sys.exit(0)
+    if args[:1] == ["cat-file"]:
+        sys.exit(1 if state.get("target_missing") else 0)
+    if args[:1] == ["merge-base"]:
+        sys.exit(1 if state.get("target_unmerged") else 0)
+    if args[:1] == ["show"]:
+        revision, file = args[-1].split(":", 1)
+        if revision not in ["a" * 40, "b" * 40, "c" * 40]: fail()
+        print((Path(state["source"]) / file).read_text(), end=""); sys.exit(0)
     if args[:1] == ["diff"]:
         sys.exit(1 if state.get("dirty") else 0)
     if args[:2] == ["remote", "get-url"]:
@@ -38,12 +49,12 @@ if tool == "git":
         if args[-1] == "--is-inside-work-tree": print("true")
         elif args[-1] == "origin/main": print(state["target"])
         elif args[-1] == "HEAD":
-            head = state["target"] if cwd == state["source"] else state["head"]
+            head = ("d" * 40 if state.get("source_mismatch") else state.get("source_head", "b" * 40)) if cwd == state["source"] else state["head"]
             print(head[:8] if "--short" in args else head)
         else: fail()
         sys.exit(0)
-    if args[:1] == ["reset"] and args[-1] == state["target"]:
-        state["head"] = state["target"]; save(); sys.exit(0)
+    if args[:1] == ["reset"] and args[-1] in ["a" * 40, "b" * 40, "c" * 40]:
+        state["head"] = args[-1]; save(); sys.exit(0)
     fail()
 elif tool == "launchctl":
     if args[:1] == ["print-disabled"]:
@@ -63,6 +74,15 @@ elif tool == "launchctl":
         label = args[-1].split("/", 2)[-1]
         if not state["loaded"].get(label, False): fail()
         state["loaded"][label] = False
+        if state.get("real_git_advance") and not state.get("advanced_once"):
+            # Both repositories and the file:// origin belong to this one test root.
+            for operation in (["push", "origin", state["real_git_advance"] + ":refs/heads/main"],
+                              ["reset", "--hard", state["real_git_advance"]]):
+                subprocess.run([state["real_git"], "-C", state["source"], *operation], check=True, capture_output=True)
+            state["advanced_once"] = True
+        if state.get("advance_main_on_stop"):
+            state["target"] = state["advance_main_on_stop"]
+            state["source_head"] = state["target"]
         drain = Path(state["support"]) / "runtime-drain"; drain.mkdir(exist_ok=True)
         if label.endswith("patrol-worker"):
             (drain / "worker-drain-ack").write_text(f"pid={state['pid']}\nstate=drained\n")
@@ -99,6 +119,7 @@ elif tool == "docker":
     else: fail()
     sys.exit(0)
 elif tool == "cargo":
+    if state.get("build_failure"): sys.exit(1)
     if args[:1] != ["build"]: fail()
     for binary in ("linggan-api", "linggan-worker", "linggan-media-worker", "linggan-ai-worker"):
         file = Path(state["runtime"]) / "target/debug" / binary; file.parent.mkdir(parents=True, exist_ok=True)
