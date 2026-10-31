@@ -214,6 +214,8 @@ def main(args):
     elif mode == "disabled-value":
         value = read(args[0]); disabled_shape(value)
         print("true" if value[args[1]] else "false")
+    elif mode == "pin":
+        atomic_bytes(args[0], (full_revision(args[1]) + "\n").encode("ascii"))
     elif mode == "plist":
         plist(args)
     elif mode == "process-gone":

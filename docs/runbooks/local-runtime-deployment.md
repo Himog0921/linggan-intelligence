@@ -53,7 +53,7 @@ SIGTERM关闭新领取，保留已派发调用并只重试同次数据库结算�
 ```
 /Users/moglenny/proma/linggan-intelligence          ← 开发。就是本地 main，与 origin/main 同步
 ~/Library/Application Support/Linggan Intelligence/
-    runtime-main/                                   ← 运行。detached，跟随 origin/main
+    runtime-main/                                   ← 运行。detached，固定到安装目标 SHA
 ```
 
 **不再有第三个副本。** 2026-09-03 之前的做法是每次部署新建一个按 commit 命名的冻结快照
@@ -82,35 +82,32 @@ cp env.example .env && $EDITOR .env      # 填数据库口令
 
 ## 3. 更新方式
 
-CI-AUTO-004 源码将版本切换改为先等待评论调用落账。以下是本包发布后的更新合同，不表示当前常驻进程已经使用这版协议。
+2026-10-31 源码合同：安装在停止服务前冻结目标 SHA；普通重启沿用安装目标，不再自动跟随 main。本文描述源码行为，是否已部署须另核对运行身份。
 
 ```bash
-./scripts/runtime/install.sh
+# 从干净且 HEAD 等于目标 SHA 的 checkout 执行；目标须已进入 origin/main。
+./scripts/runtime/install.sh --target-sha <完整40位提交SHA>
 ```
+
+`--target-sha` 可与 `--prepare-migration` 或 `--bootstrap-no-drain` 中的一项组合使用。不传目标时，仅在安装开始解析一次 `origin/main`；源 checkout 的 HEAD 仍须等于解析结果。短 SHA、分支名、不在 main 历史中的提交、源 HEAD 不匹配或已跟踪文件有改动，均在停止服务前拒绝。
+
+安装从目标 Git 对象冻结同步器、排空与 plist 辅助脚本和资源合同。即使其他任务在排空期间推进远端 main 或源 checkout，本次仍只安装原目标。构建成功后原子写入 `~/Library/Application Support/Linggan Intelligence/runtime-target-revision`，普通重启从该文件取版本；旧安装没有此文件时保留当前 HEAD。目标不可用或 pin 损坏时拒绝启动，不回退到 main。构建失败不更新 pin，但运行目录可能已切换且服务已停止，须核对日志和实际状态后恢复。
 
 `install.sh` 先请求巡检 worker 停止领取新模型任务，等待它将当前调用和用量落账，并核对与 PID 对应的退出回执。成功后才生成绑定起止 revision 的更新许可，再同步、构建并重新加载三个服务。未确认退出时停止更新，不把未知调用费用当作零。
 
-**入口脚本必须来自与 `origin/main` 同步的副本。** 2026-09-17 实测踩过：开发目录停在 `c94a3ec`，那份 `install.sh` 里还留着一段「兼容仍会构建已退休二进制」的补丁（`install.sh:168-177`），`cargo build --bin linggan-comment-worker` 当场报 `no bin target named ...` 并以 101 退出。**失败点在 drain 之后、重启服务之前**——巡检 worker 已被 `bootout` 且没有装回去（`launchctl list | grep linggan` 只剩两个 label），另外两个服务仍是旧进程。它不是「什么都没发生」的失败，而是「停了一个、旧了两个」。
+**入口脚本必须来自目标 SHA 的干净副本，且目标已经进入 `origin/main`。** 2026-09-17 实测踩过：开发目录停在 `c94a3ec`，那份 `install.sh` 里还留着一段「兼容仍会构建已退休二进制」的补丁（`install.sh:168-177`），`cargo build --bin linggan-comment-worker` 当场报 `no bin target named ...` 并以 101 退出。**失败点在 drain 之后、重启服务之前**——巡检 worker 已被 `bootout` 且没有装回去（`launchctl list | grep linggan` 只剩两个 label），另外两个服务仍是旧进程。它不是「什么都没发生」的失败，而是「停了一个、旧了两个」。
 
-所以更新前先确认入口副本不落后，或者直接用运行目录里那份：
-
-```bash
-git -C ~/Library/Application\ Support/Linggan\ Intelligence/runtime-main log -1 --date=short --format='%h %ad %s'
-~/Library/Application\ Support/Linggan\ Intelligence/runtime-main/scripts/runtime/install.sh
-```
-
-`install.sh:152-159` 对「安装入口就在运行 worktree 里」的幂等场景有显式处理，`install.sh:161-166` 也写明「旧运行目录可能含已退休的二进制，因此从源 checkout 跑目标 revision 的同步器」。无论用哪份入口，跑完必须核对三件事：`launchctl list | grep linggan` 是**三个** label、`git -C $runtime_dir log -1` 等于目标 revision、三个进程的启动时间是刚才而不是上一次部署。
+更新前先记录完整目标 SHA，使用该提交的独立 checkout 运行入口，避免共享 main 在启动安装前已被切走。保留原 `.env`，不要把开发分支作为正式发布源。安装后分别核对 runtime HEAD、`runtime-target-revision`、运行身份文件及 API `/health` 的完整 SHA，并确认各服务 PID、监听端口与原禁用状态。只有已启用的服务应重新加载；不能用 label 总数替代核验。
 
 启动时 `scripts/runtime/sync.sh` 依次做：
 
-1. 取同步锁（三个服务同时启动时串行化）；
-2. `git fetch origin main`；需要改变 revision 时核对并消费匹配的 worker 更新许可，之后才切换；
+1. 取同步锁，串行处理共同运行目录；
+2. 使用安装传入的固定 SHA，或重启时读取持久化 pin；需要切换 revision 时核对匹配的排空许可；不执行 fetch；
 3. 检查迁移台账，有未应用的迁移就**拒绝启动**（见下）；
-4. 在锁内构建三个二进制；
-5. 在锁内准备网页前端（`scripts/runtime/prepare-web.sh --build <revision>`，WEB-REACT-001 起）；
-6. 释放锁，各服务 `exec` 自己的二进制。
+4. 在锁内构建四个二进制并准备网页前端；
+5. 写入完整源码运行身份，释放锁，各服务 `exec` 自己的二进制。
 
-拿不到网络时不会让服务起不来：fetch 失败会记录一行并继续用当前 revision。
+固定版本的重启不需要 Git 网络访问；首次构建缺失依赖时仍可能需要下载。迁移继续由显式维护步骤执行，安装不自动迁移。
 
 ### 3.1 网页前端（WEB-REACT-001 / DEC-0010 起）
 
