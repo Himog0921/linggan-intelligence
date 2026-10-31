@@ -78,6 +78,7 @@ const paths = {
     'database/migrations/0127_content_workbench.sql', 'database/migrations/0128_content_workbench_ai.sql',
     'crates/intelligence/src/creation_assets*', 'crates/intelligence/src/creation_assets/**',
     'crates/intelligence/tests/creation_assets*', 'database/migrations/0181_creation_assets_s1a.sql',
+    'database/migrations/0183_creation_experience_s1b.sql', 'database/migrations/0184_creation_idea_boxes.sql', 'database/migrations/0185_creation_title_task.sql', 'database/migrations/0186_creation_publication_links.sql', 'database/migrations/0187_creation_ai_monthly_budget.sql', 'database/migrations/0188_creation_structural_templates.sql', 'database/migrations/0189_creation_title_dispatch.sql', 'database/migrations/0190_creation_ai_experience_material.sql',
   ],
   web_real_chain: [],
   topic: [
@@ -127,6 +128,8 @@ paths.web_real_chain = [
   'apps/web/src/pages/ops/targetSave.ts',
   'apps/web/src/pages/ops/OpsPage.tsx',
   'apps/web/src/pages/settings/AccountSecurityPage.tsx',
+  'apps/web/src/pages/settings/CreativeBudget.tsx',
+  'apps/web/src/pages/workbench/draftChecks.ts',
   'apps/web/src/pages/topics/topicRequest.ts',
   'apps/web/src/pages/topics/TopicsPage.tsx',
   // These scripts are launched by the Rust/PostgreSQL proof runners below.

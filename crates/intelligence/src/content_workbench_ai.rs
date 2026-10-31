@@ -9,6 +9,7 @@ use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 pub const METHOD: &str = "content-workbench-writing.v2";
+pub const TITLE_METHOD: &str = "creation-title.v1";
 #[derive(Debug, thiserror::Error)]
 pub enum AiError {
     #[error("creation_ai_invalid")]
@@ -64,6 +65,23 @@ pub enum WritingAction {
     Draft,
     RewriteSelection,
     PageCopy,
+    TitleIdeas,
+}
+impl WritingAction {
+    pub(crate) fn task(&self) -> crate::ai_foundation::TaskKey {
+        if *self == Self::TitleIdeas {
+            crate::ai_foundation::TaskKey::CreationTitle
+        } else {
+            crate::ai_foundation::TaskKey::WritingLegacy
+        }
+    }
+    pub(crate) fn method(&self) -> &'static str {
+        if *self == Self::TitleIdeas {
+            TITLE_METHOD
+        } else {
+            METHOD
+        }
+    }
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -146,12 +164,18 @@ pub struct AdoptRequest {
     pub adopt_title: bool,
 }
 mod adoption;
+pub use adoption::{AdoptTitleRequest, TitleKind};
 pub(crate) mod execution;
 mod queue;
 mod read;
+mod title;
 
 pub async fn readiness(db: &Database) -> Result<Value, AiError> {
-    queue::readiness(db).await
+    queue::readiness(db, crate::ai_foundation::TaskKey::WritingLegacy).await
+}
+
+pub async fn title_readiness(db: &Database) -> Result<Value, AiError> {
+    queue::readiness(db, crate::ai_foundation::TaskKey::CreationTitle).await
 }
 
 fn instruction_valid(r: &PreviewRequest) -> bool {
@@ -185,6 +209,21 @@ fn outbound_known_citations(
         });
     }
     let mut citations = request.citations.clone();
+    // Derived text may contain no verbatim source words; carry the explicitly recorded
+    // lineage when that target is part of the next model input.
+    for derived in &doc.derived_sources {
+        let sent = match &derived.target {
+            UseTarget::Title | UseTarget::Angle | UseTarget::Outline { .. } => true,
+            UseTarget::Paragraph { paragraph_id } => {
+                request.action != WritingAction::RewriteSelection
+                    || request.paragraph_ids.contains(paragraph_id)
+            }
+            _ => false,
+        };
+        if sent && !citations.contains(&derived.citation) {
+            citations.push(derived.citation.clone());
+        }
+    }
     for excerpt in &doc.excerpts {
         if excerpt
             .selected_text
@@ -197,6 +236,26 @@ fn outbound_known_citations(
     }
     Ok(citations)
 }
+/// The first erasable AI path only rewrites the existing paragraph belonging to one experience.
+/// Other actions remain closed until their output targets have equivalent erasure support.
+fn protected_experience(
+    doc: &WorkDocument,
+    request: &PreviewRequest,
+) -> Result<Option<Uuid>, AiError> {
+    if !doc.experience_gaps.is_empty() {
+        return Err(AiError::Source);
+    }
+    if doc.experience_slots.is_empty() {
+        return Ok(None);
+    }
+    if request.action != WritingAction::RewriteSelection
+        || doc.experience_slots.len() != 1
+        || request.paragraph_ids != vec![doc.experience_slots[0].paragraph_id]
+    {
+        return Err(AiError::Source);
+    }
+    Ok(Some(doc.experience_slots[0].experience_ref))
+}
 async fn inputs_in(
     tx: &mut Transaction<'_, Postgres>,
     r: &PreviewRequest,
@@ -204,6 +263,18 @@ async fn inputs_in(
     let (domain, revision) = content_workbench::read_revision_in(tx, r.work_ref, None)
         .await
         .map_err(|_| AiError::NotFound)?;
+    let protected = protected_experience(&revision.document, r)?;
+    if protected.is_some()
+        && !content_workbench::experience_fragments_available_in(
+            tx,
+            revision.id,
+            &revision.document,
+        )
+        .await
+        .map_err(|_| AiError::Source)?
+    {
+        return Err(AiError::Source);
+    }
     if revision.id != r.expected_revision {
         return Err(AiError::Stale);
     }
@@ -252,7 +323,13 @@ async fn inputs_in(
         .collect::<Result<Vec<_>, AiError>>()?;
     let payload = json!({"action":r.action,"title":revision.document.title,"angle":revision.document.angle,"outline":revision.document.outline,"paragraphs":paragraphs,"selection":r.selection,"pages":revision.document.pages.iter().map(|p|json!({"pageId":p.id,"kind":p.kind})).collect::<Vec<_>>(),"materials":materials,"authorInstruction":r.instruction});
     let hash = sources::text_hash(
-        &json!([METHOD, r.expected_revision, r.config_ref, &payload]).to_string(),
+        &json!([
+            r.action.method(),
+            r.expected_revision,
+            r.config_ref,
+            &payload
+        ])
+        .to_string(),
     );
     Ok((revision, payload, hash))
 }
@@ -312,6 +389,21 @@ async fn qualify_frozen_inputs(
         content_workbench::read_revision_in(tx, input.work_ref, Some(input.expected_revision))
             .await
             .map_err(|_| AiError::NotFound)?;
+    let protected = match protected_experience(&revision.document, input) {
+        Ok(value) => value,
+        Err(_) => return Ok(false),
+    };
+    if protected.is_some()
+        && !content_workbench::experience_fragments_available_in(
+            tx,
+            revision.id,
+            &revision.document,
+        )
+        .await
+        .map_err(|_| AiError::Source)?
+    {
+        return Ok(false);
+    }
     let citations = outbound_known_citations(&revision.document, input)?;
     Ok(sources::qualify_citations_in_domain(tx, &citations, domain)
         .await
@@ -366,6 +458,7 @@ fn validate_suggestion(
         return Err(AiError::Invalid);
     }
     match action {
+        WritingAction::TitleIdeas => return Err(AiError::Invalid),
         WritingAction::Draft if output.paragraphs.is_empty() || !output.pages.is_empty() => {
             return Err(AiError::Invalid);
         }
@@ -404,6 +497,9 @@ fn validate_suggestion(
 
 pub async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<Value, AiError> {
     adoption::adopt(db, id, r).await
+}
+pub async fn adopt_title(db: &Database, id: Uuid, r: &AdoptTitleRequest) -> Result<Value, AiError> {
+    adoption::adopt_title(db, id, r).await
 }
 
 #[cfg(test)]

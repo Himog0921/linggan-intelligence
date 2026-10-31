@@ -126,6 +126,12 @@ async fn content_workbench_real_chain_browser_proof() {
         let (account, publication) = fixture::ops_seed(&db).await;
         json!({"noteRefs":[first,second],"voiceRefs":[voice_one,voice_two],"replyRef":reply,"accountRef":account,"publicationRef":publication})
     };
+    let title_proof = std::env::var("CW_BROWSER_TITLE_PROOF").as_deref() == Ok("1");
+    if title_proof {
+        writing_setup::configure_fake_title(&db).await;
+    }
+    // The title fixture declares a model by temporarily configuring writing too. Install the
+    // writing fixture last so its active endpoint and its egress permission match.
     let config = writing_setup::configure_fake_prerequisites(&db).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_creation_work")
@@ -154,6 +160,44 @@ async fn content_workbench_real_chain_browser_proof() {
     let directory =
         std::env::var("CW_BROWSER_PROOF_DIR").expect("proof evidence directory supplied");
     fs::create_dir_all(&directory).unwrap();
+    let title_worker = if title_proof {
+        let path = ProofPath::new(&directory).join("synthetic-title-adapter.py");
+        fs::write(&path, r#"import json,sys,os
+request=json.load(sys.stdin)
+if os.environ.get('LINGGAN_DISPATCH_SIGNAL')=='1':
+    sys.stderr.write('LGI_DISPATCH_STARTED\n');sys.stderr.flush()
+payload=json.loads(request['prompt'])
+if payload['action']=='title_ideas':
+    out={'coverTitles':['先从一小步开始','根治拖延'],'noteTitles':['孩子启动困难时先做这一件小事']}
+else:
+    assert payload['action']=='rewrite_selection'
+    out={'title':None,'paragraphs':[{'paragraphId':payload['paragraphs'][0]['id'],'text':'合成经历改写：先做一小步。'}],'pages':[]}
+print(json.dumps({'version':'linggan.pi.v1/0.85.1','ok':True,'text':json.dumps(out,ensure_ascii=False),'failureCode':None,'modelIds':None,'modelListOrigin':None,'usage':{'inputTokens':12,'outputTokens':8,'costUsd':None},'elapsedMs':300},ensure_ascii=False))
+"#).unwrap();
+        let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
+            "/usr/bin/python3".into(),
+            path,
+        );
+        let worker_db = db.clone();
+        Some(tokio::spawn(async move {
+            loop {
+                let id:Option<Uuid>=sqlx::query_scalar("SELECT r.request_ref FROM linggan_creation_ai_request r JOIN linggan_creation_ai_preview p USING(preview_ref) WHERE p.action IN ('title_ideas','rewrite_selection') AND r.state='queued' ORDER BY r.created_at LIMIT 1").fetch_optional(worker_db.pool()).await.unwrap();
+                if let Some(id) = id {
+                    writing_setup::run_request(
+                        &worker_db,
+                        id,
+                        &linggan_intelligence::model_secrets::SyntheticModelSecrets,
+                        &adapter,
+                    )
+                    .await
+                    .unwrap();
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }))
+    } else {
+        None
+    };
     fs::write(
         ProofPath::new(&directory).join("fixture.json"),
         json!({
@@ -191,10 +235,19 @@ async fn content_workbench_real_chain_browser_proof() {
     };
     server.abort();
     let _ = server.await;
+    if let Some(worker) = title_worker {
+        worker.abort();
+        let _ = worker.await;
+    }
     let after = side_effect_counts(&db).await;
     assert_eq!(
-        before, after,
-        "the browser authorship path must not call a model or create collection work orders"
+        after.1, before.1,
+        "browser proof never creates collection work orders"
+    );
+    assert_eq!(
+        after.0,
+        before.0 + if title_proof { 2 } else { 0 },
+        "only the explicitly enabled synthetic title and experience rewrite calls may run"
     );
     if let Some(result) = result {
         assert!(

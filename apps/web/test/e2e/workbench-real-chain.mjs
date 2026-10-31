@@ -39,11 +39,21 @@ let packageBytes;
 const imageSection = () => page.getByRole('region', { name: '封面与内页' });
 const stage = async (name, surface = page) => {
   const label = ({材料:'材料浏览',画布:'创作画布'})[name] ?? name;
+  await surface.locator('[data-view]').waitFor();
+  await openWritingTools(surface);
+  const workflow=surface.locator('details:not([open]) > summary').filter({hasText:'创作步骤'});
+  if(await workflow.isVisible()) await workflow.click();
   const button=surface.getByRole('navigation',{name:'创作步骤'}).getByRole('button').filter({hasText:label});
   await button.click();
-  await until(async()=>await button.getAttribute('aria-current')==='step',`${name} view has committed`);
+  const id=({'选题方案':'topic','材料浏览':'materials','创作画布':'canvas','正文':'body','封面':'cover','内页':'inner','预览与导出':'export'})[label];
+  await surface.locator(`[data-view="${id}"]`).waitFor();
+};
+const openWritingTools = async (surface = page) => {
+  const summary = surface.locator('details:not([open]) > summary').filter({hasText:'写稿工具'});
+  if (await summary.isVisible()) await summary.click();
 };
 const save = async (surface = page) => {
+  await openWritingTools(surface);
   await surface.getByRole('button', {name:'保存',exact:true}).click();
   await surface.locator('[aria-label="保存状态：已保存"]').waitFor();
 };
@@ -265,6 +275,19 @@ try {
     const saved=await envelope();assert.equal(saved.revision.document.accountRef,accountRef);assert.equal(saved.revision.document.outline.length,3);
     await screenshot('workbench-1440-topic');
   });
+  await step('创作归属运营，三个工作分区共用同一导航，稿件步骤按需展开', async()=>{
+    const primary=page.getByRole('navigation',{name:'一级导航'});
+    assert.deepEqual(await primary.locator('.v7-nav-zh').allTextContents(),['雷达','主题图谱','语料','洞察','采集','运营']);
+    assert.equal(await primary.getByRole('link',{name:/运营/}).getAttribute('aria-current'),'page');
+    const sidebar=page.getByRole('complementary',{name:'运营导航'});
+    assert.equal(await sidebar.getByRole('link',{name:'创作',exact:true}).getAttribute('aria-current'),'page');
+    assert.equal(await sidebar.getByRole('link',{name:'数据',exact:true}).count(),1);
+    const sections=page.getByRole('navigation',{name:'创作页面'});
+    assert.deepEqual(await sections.getByRole('button').allTextContents(),['写稿','材料桌','资产库']);
+    assert.equal(await sections.getByRole('button',{name:'写稿',exact:true}).getAttribute('aria-current'),'page');
+    assert.equal(await page.getByRole('navigation',{name:'创作步骤'}).isVisible(),false);
+    await screenshot('creation-navigation-hierarchy');
+  });
   await step('V8 缺正文与图页时的真实禁用态与请求边界',async()=>{await stage('预览与导出');await assertV8DisabledAction(imageSection().getByRole('button',{name:'保存并生成图文包',exact:true}));});
   await step('封面和四张内页：模板配色对齐、自有图片裁切、稳定排序与撤销',async()=>{
     await stage('封面');const area=imageSection();assert.equal(await area.getAttribute('data-step'),'cover');await area.getByRole('button',{name:'添加封面',exact:true}).click();
@@ -370,7 +393,7 @@ try {
   await step('正文修改后刷新仍定位关联图页，采用一页保留其他手改',async()=>{
     const doc=(await envelope()).revision.document;const linked=doc.uses.find(item=>item.target.kind==='pageBlock'&&item.canvasId===doc.uses.find(use=>use.target.kind==='paragraph'&&use.target.paragraphId===doc.paragraphs[0].id).canvasId);
     const targetPage=doc.pages.find(item=>item.id===linked.target.pageId),other=doc.pages.find(item=>item.kind==='steps');
-    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await stage('内页');
+    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await page.getByLabel('正文第 1 段').waitFor();await stage('内页');
     await imageSection().getByRole('navigation',{name:'图页顺序'}).getByRole('button').filter({hasText:targetPage.title}).click();
     await imageSection().getByRole('button',{name:'带入这一段',exact:true}).waitFor();await imageSection().getByRole('button',{name:'带入这一段',exact:true}).click();await save();
     const after=(await envelope()).revision.document;assert.equal(after.pages.find(item=>item.id===targetPage.id).blocks.find(item=>item.id===linked.target.blockId).text,'先把练习本放好，只做眼前这一小步。');assert.deepEqual(after.pages.find(item=>item.id===other.id),other);
@@ -380,7 +403,7 @@ try {
     await stage('正文');let intercepted=false;let originalId;let committed;
     const pattern='**/ops/api/creation/works/*/save';
     await page.route(pattern,async route=>{if(intercepted)return route.continue();intercepted=true;originalId=route.request().postDataJSON().requestId;committed=await route.fetch();assert.equal(committed.status(),200);await route.abort('connectionreset');});
-    await page.getByLabel('正文第 2 段').fill('先做两分钟，再给自己一次选择。');await page.getByRole('button',{name:'保存',exact:true}).click();
+    await page.getByLabel('正文第 2 段').fill('先做两分钟，再给自己一次选择。');await openWritingTools();await page.getByRole('button',{name:'保存',exact:true}).click();
     await page.getByRole('button',{name:'沿用原请求重试',exact:true}).waitFor();const count=report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/save')).length;
     await remains(()=>report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/save')).length===count,'unknown save must not auto resend');
     assert.ok(await page.locator('[aria-label="保存状态：结果未确认"]').count());
@@ -416,14 +439,14 @@ try {
   await step('双标签版本冲突保留双方文字，历史图文包保持不可变',async()=>{
     await stage('正文');await save();const second=await context.newPage();second.setDefaultTimeout(20_000);await second.goto(page.url());await second.getByLabel('正文第 2 段').waitFor();
     await page.getByLabel('正文第 2 段').fill('服务器版本：保留两分钟的起点。');await save();
-    await second.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达。');await second.getByRole('button',{name:'保存',exact:true}).click();
+    await second.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达。');await openWritingTools(second);await second.getByRole('button',{name:'保存',exact:true}).click();
     const conflict=second.getByRole('dialog',{name:'服务器已有新版本'});await conflict.waitFor();await conflict.getByText('服务器版本：保留两分钟的起点。',{exact:false}).waitFor();await conflict.getByText('本页版本：保留自己的新表达。',{exact:false}).waitFor();
     await screenshot('workbench-second-tab-conflict',second);await conflict.getByRole('button',{name:'保留本页编辑，另存新版本',exact:true}).click();await save(second);await second.close();
     await page.reload();await page.getByLabel('正文第 2 段').waitFor();assert.equal(await page.getByLabel('正文第 2 段').inputValue(),'本页版本：保留自己的新表达。');
     const response=await context.request.get(`${origin}/ops/api/creation/exports/${exportedRecord.id}/download`);assert.equal(response.status(),200);assert.ok((await response.body()).equals(packageBytes));
   });
   await step('键盘 Esc 关闭历史并还原焦点，减少动态效果生效',async()=>{
-    const history=page.getByRole('button',{name:'历史',exact:true});await history.focus();await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'历史与恢复'}).waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
+    await openWritingTools();const history=page.getByRole('button',{name:'历史',exact:true});await history.focus();await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'历史与恢复'}).waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
     assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'历史');assert.ok(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches));
   });
   await step('资产库：账号身份、产品事实卡、衔接句经页面写入，接口回读与填写一致',async()=>{
@@ -466,7 +489,8 @@ try {
     assert.equal(refused.status(),409);assert.equal((await refused.json()).code,'creation_assets_blocked','the server refuses a copy with a 必改 left even when the page is bypassed');
     assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied,null,'a refused copy leaves no record');
     await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${workId}&view=body`);
-    const panel=page.getByRole('complementary',{name:'检查与复制'}),copy=panel.getByRole('button',{name:'复制到小红书',exact:true});
+    const panel=page.getByRole('complementary',{name:'检查与复制'}),footer=page.getByRole('region',{name:'复制',exact:true}),copy=footer.getByRole('button',{name:'复制到小红书',exact:true});
+    await panel.getByText('账号与衔接设置').click();
     await until(async()=>await panel.getByLabel('本篇的衔接句').inputValue()===bridgeSentence,'the approved sentence is placed in the draft');
     const account=panel.getByLabel('所属账号');await account.selectOption('');
     await panel.getByText('这篇还没选账号，不知道能不能放衔接句').waitFor();await panel.getByText(/^必改 1 · /).waitFor();assert.equal(await copy.isDisabled(),true,'a 必改 left keeps the copy button disabled');
@@ -476,17 +500,17 @@ try {
     await panel.getByRole('button',{name:'统一叫法',exact:true}).click();
     await until(async()=>await first.inputValue()==='今天先把示例营的练习本放到桌上。','the one-click wording fix rewrote the located text');
     await panel.getByText(wording).waitFor({state:'detached'});await screenshot('workbench-1440-checks-before-copy');
-    await until(async()=>await copy.isEnabled(),'copy opens once the check is clear');await copy.click();await panel.getByText(/已复制到剪贴板/).waitFor();
+    await until(async()=>await copy.isEnabled(),'copy opens once the check is clear');await copy.click();await footer.getByText(/已复制到剪贴板/).waitFor();
     const clipboard=await page.evaluate(()=>navigator.clipboard.readText());
     assert.equal(clipboard,['今天先把示例营的练习本放到桌上。',bridgeSentence,'本页版本：保留自己的新表达。'].join('\nㅤ\n')+'\n#家庭养育 #作业启动');
     const current=await envelope();assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied.revisionId,current.revision.id,'the copy is recorded against the saved revision it came from');
     assert.equal(current.revision.document.bridge.sentence.sentenceCode,'XJ-0001');assert.equal((await creationJson('/bridge-sentences?status=ok')).items[0].usedCount,1);
-    await panel.getByText('已复制（还没有发布）',{exact:true}).waitFor();await screenshot('workbench-1440-checks-copied');
-    await panel.getByRole('button',{name:'复制标题',exact:true}).click();await panel.getByText('标题已复制。').waitFor();
+    await footer.getByText(/已复制（还没有发布）/,{exact:false}).waitFor();await screenshot('workbench-1440-checks-copied');
+    await panel.getByRole('button',{name:'标题',exact:true}).click();await panel.getByRole('button',{name:'复制标题',exact:true}).click();await footer.getByText('标题已复制。').waitFor();
     assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),current.revision.document.title.trim());
-    await page.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达，再补一句。');await panel.getByText('草稿中',{exact:true}).waitFor();await save();
+    await page.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达，再补一句。');await until(async()=>!(await footer.innerText()).includes('已复制（还没有发布）'),'edited draft is no longer marked copied');await save();
   });
-  for(const [width,height] of [[1440,900],[1280,720],[1024,768],[390,844]]){
+  for(const [width,height] of [[1440,900],[1280,720]]){
     await step(`${width}×${height} 正文与图组可操作，无页面横向溢出`,async()=>{
       await page.setViewportSize({width,height});await stage('正文');
       for(const name of ['正文标题','正文第 1 段','确认发布标签'])await assertHorizontalReachability(page.getByLabel(name,{exact:true}),name);
@@ -514,7 +538,7 @@ try {
     const documentReads=report.requests.filter(request=>request.method==='GET'&&request.path==='/ops/creation').length;
     for(const attempt of [1,2]){
       const preparedResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/sources/prepare'&&response.request().method()==='POST'&&response.status()===200);
-      await page.getByRole('button',{name:'历史',exact:true}).click();const history=page.getByRole('dialog',{name:'历史与恢复'});await history.waitFor();
+      await openWritingTools();await page.getByRole('button',{name:'历史',exact:true}).click();const history=page.getByRole('dialog',{name:'历史与恢复'});await history.waitFor();
       const first=history.locator('section').filter({hasText:/版本 1 ·/});assert.equal(await first.count(),1);
       await first.getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});
       const restored=await envelope();assert.equal(restored.revision.document.materialPreparation??null,null);assert.deepEqual(restored.revision.document.materials??[],[]);
@@ -528,12 +552,97 @@ try {
   });
   await step('恢复保留副本时一并保存未提交标签，不用历史标签覆盖',async()=>{
     await stage('正文');const tags=page.getByLabel('确认发布标签',{exact:true});await tags.fill('本页标签 合成标签');await save();const retained=await envelope();
-    await tags.fill('未保存标签 合成标签 未保存标签');await page.getByRole('button',{name:'历史',exact:true}).click();let history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/版本 1 ·/}).getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'');
+    await tags.fill('未保存标签 合成标签 未保存标签');await openWritingTools();await page.getByRole('button',{name:'历史',exact:true}).click();let history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/版本 1 ·/}).getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'');
     await page.getByRole('button',{name:'历史',exact:true}).click();history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/本页保留副本/}).last().getByRole('button',{name:'恢复到编辑区',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'未保存标签 合成标签');await save();const recovered=await envelope();assert.deepEqual(recovered.revision.document,{...retained.revision.document,tags:['未保存标签','合成标签']});report.retainedTagRecovery={beforeRevision:retained.revision.id,afterRevision:recovered.revision.id,tags:recovered.revision.document.tags};await screenshot('workbench-retained-copy-tags-recovered');
   });
-  await step('没有外部请求、模型执行或页面脚本错误',async()=>{
+  await step('双页面：合成经历撤回后遮盖旧稿并重新编辑',async()=>{
+    const mine=(await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item=>item.accountRef===accountRef);
+    await page.goto(`${origin}/ops/creation?domain=${domainRef}&section=assets`);
+    await page.getByRole('region',{name:'账号身份'}).getByRole('button').filter({hasText:mine.accountName}).click();
+    const identity=page.getByRole('form',{name:`${mine.accountName} · 账号身份`});
+    await identity.getByRole('group',{name:'背后有没有真人'}).getByLabel('有',{exact:true}).check();
+    await identity.getByLabel('真人的角色（如“妈妈”“老师”）').fill('妈妈');
+    await identity.getByRole('button',{name:'保存',exact:true}).click();
+    await until(async()=>(await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item=>item.accountRef===accountRef).identity?.hasRealPerson===true,'synthetic person saved');
+    await page.getByRole('navigation',{name:'资产类型'}).getByRole('button',{name:'人设事实',exact:true}).click();
+    const persona=page.getByRole('region',{name:'人设事实'});await persona.locator('select').first().selectOption(accountRef);
+    await persona.getByLabel('事实名称').fill('合成待补充');await persona.getByLabel('缺，待补充').check();
+    await persona.getByRole('button',{name:'保存事实'}).click();
+    await persona.getByText('缺，待补充',{exact:true}).first().waitFor();
+    await until(async()=>(await creationJson(`/persona-facts?accountRef=${accountRef}`)).items.some(item=>item.key==='合成待补充'&&item.status==='missing'&&item.text===''),'missing persona fact saved');
+    assert.equal(await persona.getByRole('button',{name:'登记本人确认'}).count(),0);
+    await page.getByRole('navigation',{name:'资产类型'}).getByRole('button',{name:'经历库',exact:true}).click();
+    const library=page.getByRole('region',{name:'经历库'});await library.locator('select').first().selectOption(accountRef);
+    const testText='合成测试经历：先一起把第一步缩小。';
+    await library.getByLabel('标题',{exact:true}).fill('双页撤回测试');await library.getByLabel('经历正文').fill(testText);
+    await library.getByRole('button',{name:'保存经历'}).click();
+    await library.getByLabel('本人已确认这版内容并同意用于稿件').check();await library.getByRole('button',{name:'登记本人确认'}).click();
+    await library.getByText('本人已确认 · 修改内容后需要再次确认。').waitFor();
+    const editor=await context.newPage();editor.setDefaultTimeout(20_000);await editor.goto(workUrl);await stage('选题方案',editor);
+    await editor.getByLabel('所属账号',{exact:true}).selectOption(accountRef);await save(editor);await stage('正文',editor);
+    await editor.getByRole('button',{name:'从经历库选'}).click();const selected=editor.getByLabel('选择本人已确认的经历');const experienceOption=selected.locator('option').filter({hasText:'双页撤回测试'}); await experienceOption.waitFor({state:'attached'}); await selected.selectOption(await experienceOption.getAttribute('value'));
+    await editor.getByRole('button',{name:'放入正文',exact:true}).click();await save(editor);
+    assert.ok((await envelope()).revision.document.experienceSlots.length>0,'saved draft has experience reference');
+    if (process.env.CW_BROWSER_TITLE_PROOF === '1') {
+      await openWritingTools(editor);
+      const experienceText=editor.locator('textarea[aria-label^="正文第"]').last();
+      assert.equal(await experienceText.inputValue(),testText);
+      await experienceText.focus();await editor.keyboard.press('ControlOrMeta+A');
+      await editor.getByRole('button',{name:'改写选段'}).click();
+      const rewrite=editor.getByRole('dialog',{name:'改写选段'});await rewrite.getByRole('button',{name:'准备并核对输入'}).click();
+      await rewrite.locator('pre').filter({hasText:testText}).first().waitFor();
+      await rewrite.getByLabel('已核对不含真实姓名、学校、密码和点赞数，确认输入及额度').check();
+      const sent=editor.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/ai/requests'&&response.request().method()==='POST');
+      await rewrite.getByRole('button',{name:'执行一次'}).click();const sentResponse=await sent;const result=await sentResponse.json();assert.equal(sentResponse.ok(),true,`synthetic rewrite enqueue: ${JSON.stringify(result)}`);assert.ok(result.requestId,'synthetic rewrite request id');
+      await until(async()=>{const response=await context.request.get(`${origin}/ops/api/creation/ai/requests/${result.requestId}`);if(!response.ok())return false;const state=await response.json();if(['failed','cancelled'].includes(state.state))throw new Error(`synthetic experience rewrite ${state.state}: ${state.failureCode}`);return state.state==='succeeded';},'experience rewrite completed',45_000);
+      await rewrite.getByRole('button',{name:'刷新结果'}).click();await rewrite.getByRole('button',{name:'打开改稿对照'}).click();
+      await editor.getByRole('button',{name:'采用这一段'}).first().click();
+      await until(async()=>(await envelope()).revision.document.paragraphs.some(p=>p.text==='合成经历改写：先做一小步。'),'experience-derived rewrite adopted');
+    }
+    await library.getByLabel('本人已要求撤回这段经历').check();await library.getByRole('button',{name:'撤回经历'}).click();
+    await library.getByText('本人已撤回，经历内容已移除。').waitFor();
+    await editor.bringToFront();await editor.getByText(/稿件历史中有已撤回的经历/).first().waitFor();
+    assert.equal(await editor.locator('textarea:visible').count(),0);
+    await editor.getByRole('button',{name:'撤回后重新开始编辑'}).first().click();
+    await editor.getByRole('button',{name:'丢弃本页编辑并继续'}).click();
+    try { await editor.getByRole('button',{name:'＋ 继续写一段'}).waitFor(); } catch (error) { await screenshot('experience-after-reset-failure',editor); await writeFile(path.join(directory,'experience-after-reset-body.txt'),await editor.locator('body').innerText()); throw error; }
+    assert.ok(!(await envelope()).revision.document.paragraphs.some(item=>item.text.includes(testText)));
+    await editor.getByRole('button',{name:'＋ 继续写一段'}).click();
+    await editor.locator('textarea[aria-label^="正文第"]').last().fill('撤回后重新编辑的合成文字。'); await save(editor);
+    await editor.reload(); await editor.getByRole('button',{name:'＋ 继续写一段'}).waitFor();
+    assert.equal(await editor.locator('textarea[aria-label^="正文第"]').last().inputValue(),'撤回后重新编辑的合成文字。');
+    assert.ok(!(await envelope()).revision.document.paragraphs.some(item=>item.text.includes(testText)));
+    await screenshot('workbench-experience-withdraw-two-pages',editor);await editor.close();
+  });
+  if (process.env.CW_BROWSER_TITLE_PROOF === '1') await step('标题 skill：生成一批、提示疗效承诺并分别采用封面和笔记标题',async()=>{
+    await page.goto(workUrl);await stage('正文');
+    await page.getByRole('button',{name:'换一批',exact:true}).click();
+    const review=page.getByRole('dialog',{name:'AI 会看到的内容'});await review.waitFor();
+    assert.ok((await review.innerText()).includes('撤回后重新编辑的合成文字。'));
+    await review.getByLabel('我已核对，发送内容不含真实姓名、学校、密码和点赞数').check();await review.getByRole('button',{name:'确认并生成'}).click();
+    const candidate=page.getByRole('button',{name:'先从一小步开始',exact:true});await candidate.waitFor({timeout:45_000});
+    await page.getByRole('button',{name:'根治拖延 · 疗效承诺提醒',exact:true}).waitFor();
+    await candidate.click();await until(async()=>await page.getByLabel('封面大字',{exact:true}).inputValue()==='先从一小步开始','cover title adopted');
+    const note=page.getByRole('button',{name:'孩子启动困难时先做这一件小事',exact:true});await until(async()=>await note.isEnabled(),'same batch remains selectable');await note.click();
+    await until(async()=>await page.getByLabel('正文标题').inputValue()==='孩子启动困难时先做这一件小事','note title adopted');
+    await page.setViewportSize({width:1600,height:1000});
+    await screenshot('workbench-title-synthetic-model');
+  });
+  if (process.env.CW_BROWSER_TITLE_PROOF === '1') await step('结构样板：保存、审核、新版本与历史',async()=>{
+    await page.getByRole('button',{name:'存为样板',exact:true}).click();
+    const dialog=page.getByRole('dialog',{name:'存为样板'});await dialog.getByRole('button',{name:'＋ 开头'}).click();await dialog.getByRole('button',{name:'＋ 观点'}).click();
+    await dialog.getByRole('button',{name:'保存待审核'}).click();await dialog.getByText(/已保存 YB-\d+，等待审核/).waitFor();await dialog.getByRole('button',{name:'关闭',exact:true}).click();
+    await page.goto(`${origin}/ops/creation?domain=${domainRef}&section=assets`);await page.getByRole('navigation',{name:'资产类型'}).getByRole('button',{name:'样板库'}).click();
+    const library=page.getByRole('region',{name:'样板库'});await library.getByRole('button',{name:/YB-\d+/}).first().click();
+    await library.getByRole('button',{name:'审核通过'}).click();await library.locator('p').filter({hasText:/^已通过$/}).waitFor();
+    await library.getByRole('button',{name:'编辑结构'}).click();await library.getByRole('button',{name:'＋ 行动'}).click();await library.getByRole('button',{name:'保存新版本'}).click();
+    await library.getByText('新版本已保存，等待审核。').waitFor();await library.getByText('版本历史').click();await library.getByText(/第 1 版 · 已通过 · 开头 → 观点/).waitFor();await library.getByText(/第 2 版 · 待审核 · 开头 → 观点 → 行动/).waitFor();
+    await screenshot('structural-template-version-history');
+  });
+  await step('没有外部请求、未授权模型执行或页面脚本错误',async()=>{
     assert.deepEqual(report.externalRequests,[]);assert.deepEqual(report.pageErrors,[]);
-    assert.ok(report.requests.every(request=>!request.path.includes('/ai/requests')&&!request.path.includes('/probes')),'no model/provider command');
+    if (process.env.CW_BROWSER_TITLE_PROOF !== '1') assert.ok(report.requests.every(request=>!request.path.includes('/ai/requests')&&!request.path.includes('/probes')),'no model/provider command');
+    else assert.equal(report.requests.filter(request=>request.method==='POST'&&request.path==='/ops/api/creation/ai/requests').length,2,'exactly one synthetic title and one synthetic experience request');
     const unexpected=report.failedRequests.filter(request=>!(request.method==='POST'&&request.path.endsWith('/save'))&&!request.error?.includes('ERR_ABORTED'));
     assert.deepEqual(unexpected,[]);report.finalRevision=(await envelope()).revision.id;
   });

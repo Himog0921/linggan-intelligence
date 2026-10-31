@@ -1,5 +1,6 @@
 import { ApiError, requestJson, requestBinaryJson } from '../../shared/api';
-import { parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseSaveReceipt, parseSourceList, parseWorkList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { listAccounts as listCreationAccounts } from './assets/assetsApi';
 const base = '/ops/api/creation';
 const post = (path: string, body: unknown) => requestJson(path, {
   method: 'POST',
@@ -9,6 +10,9 @@ export async function listWorks(domain: string, signal?: AbortSignal) {
   return parseWorkList(await requestJson(`${base}/works?domainRef=${encodeURIComponent(domain)}`, {
     signal
   })).items;
+}
+export async function listIdeaBoxes(domain: string, signal?: AbortSignal) {
+  return parseIdeaBoxList(await requestJson(`${base}/idea-boxes?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
 }
 export async function readWork(id: string, signal?: AbortSignal) {
   const value = parseEnvelope(await requestJson(`${base}/works/${uuid(id)}`, {
@@ -46,6 +50,9 @@ export async function restore(id: string, body: {
 }) {
   return receipt(await post(`${base}/works/${uuid(id)}/restore`, body), body.requestId, id);
 }
+export async function resetWithdrawn(id: string, body: { requestId: string; expectedRevision: string }) {
+  return receipt(await post(`${base}/works/${uuid(id)}/experience-reset`, body), body.requestId, id);
+}
 function receipt(value: unknown, requestId: string, workId?: string) {
   const r = parseSaveReceipt(value);
   if (r.requestId !== requestId || workId && r.workId !== workId) throw new WorkbenchContractError();
@@ -60,6 +67,11 @@ function receipt(value: unknown, requestId: string, workId?: string) {
     receipt: r
   });
   return r;
+}
+export async function readRevision(id: string, revision: string) {
+  const item = parseRevision(await requestJson(`${base}/works/${uuid(id)}/revisions/${uuid(revision)}`));
+  if (item.id !== revision) throw new WorkbenchContractError();
+  return item;
 }
 export async function history(id: string) {
   return parseHistory(await requestJson(`${base}/works/${uuid(id)}/revisions`)).items;
@@ -141,6 +153,11 @@ export async function anchor(body: {
   if (result.citation.blockRef !== body.blockRef || result.citation.asOf !== body.asOf || result.citation.sourceVersion !== body.sourceVersion || result.citation.sourceRef !== body.sourceRef || result.citation.field !== body.field || result.citation.start !== body.start || result.citation.end !== body.end) throw new WorkbenchContractError();
   return result;
 }
+export async function qualifyCitation(domainRef: string, citation: Citation) {
+  const { asOf, blockRef, sourceKind, sourceRef, workRef, field, sourceVersion, start, end } = citation;
+  const result = await anchor({ asOf, blockRef, sourceKind, sourceRef, workRef, field, sourceVersion, start, end, domainRef });
+  return result.textHash === citation.textHash && JSON.stringify(result.citation.location) === JSON.stringify(citation.location);
+}
 export async function uploadAsset(id: string, file: File, requestId: string) {
   const record = parseAsset(await requestBinaryJson(`${base}/works/${uuid(id)}/assets`, file, {
     method: 'POST',
@@ -194,6 +211,32 @@ export async function readiness(signal?: AbortSignal) {
   return parseReadiness(await requestJson(`${base}/ai/readiness`, {
     signal
   }));
+}
+export async function titleReadiness(signal?: AbortSignal) {
+  return parseReadiness(await requestJson(`${base}/ai/title-readiness`, {signal}));
+}
+export async function titlePreview(body: {previewRef:string; workRef:string; expectedRevision:string; configRef:string}) {
+  const raw = object(await post(`${base}/ai/preview`, {...body, action:'title_ideas', citations:[], paragraphIds:[], selection:null, instruction:''}));
+  if (raw.action !== 'title_ideas' || typeof raw.outboundSystem !== 'string') throw new WorkbenchContractError();
+  return parsePreview({...raw, action:'draft'});
+}
+export async function titleExecute(body: {requestId:string; previewRef:string; expectedRevision:string; confirmedInputHash:string; budgetTokens:number; confirmed:boolean}) {
+  const result = parseTitleStatus(await post(`${base}/ai/requests`, body));
+  if (result.requestId !== body.requestId) throw new WorkbenchContractError();
+  return result;
+}
+export async function titleStatus(id: string) {
+  const result = parseTitleStatus(await requestJson(`${base}/ai/requests/${uuid(id)}`));
+  if (result.requestId !== id) throw new WorkbenchContractError();
+  return result;
+}
+export async function cancelTitle(id: string) {
+  const result = parseTitleStatus(await post(`${base}/ai/requests/${uuid(id)}/cancel`, {}));
+  if (result.requestId !== id) throw new WorkbenchContractError();
+  return result;
+}
+export async function adoptTitle(id: string, body: {requestId:string; expectedRevision:string; kind:'cover'|'note'; index:number}) {
+  return receipt(await post(`${base}/ai/requests/${uuid(id)}/adopt-title`, body), body.requestId);
 }
 export async function preview(body: {
   previewRef: string;
@@ -263,24 +306,8 @@ export async function domains(signal?: AbortSignal): Promise<DomainOption[]> {
   });
 }
 export async function accounts(domain: string, signal?: AbortSignal): Promise<AccountOption[]> {
-  try {
-    const r = object(await requestJson(`/api/local/ops/accounts?domain=${encodeURIComponent(domain)}`, {
-      signal
-    }));
-    if (!Array.isArray(r.items)) throw new WorkbenchContractError();
-    return r.items.map(v => {
-      const i = object(v);
-      if (typeof i.name !== 'string' || typeof i.platform !== 'string') throw new WorkbenchContractError();
-      return {
-        ref: uuid(i.ref),
-        name: i.name,
-        platform: i.platform
-      };
-    });
-  } catch (e) {
-    if (e instanceof ApiError && e.failure.kind === 'http' && e.failure.status === 404 && e.failure.code === 'ops_business_not_found') return [];
-    throw e;
-  }
+  const accounts = await listCreationAccounts(domain, signal);
+  return accounts.map(item => ({ ref: item.accountRef, name: item.accountName, platform: item.platform }));
 }
 export function conflictReceipt(error: unknown) {
   if (error instanceof ApiError && error.failure.kind === 'http' && error.failure.status === 409) {
@@ -301,6 +328,9 @@ export function isLegacyReferenceUnavailable(error: unknown): boolean {
 /** Human feedback is separate from the preserved invocation diagnostics. */
 export function aiFailureText(code: string | null): string {
   const messages: Record<string, string> = {
+    ai_creative_month_budget_exhausted: '创作 AI 本月额度不足，这次没有发送。可到 AI 设置调整上限后重新准备。',
+    ai_creative_price_unavailable: '模型价格不完整，这次没有发送。请在 AI 设置补全价格后重新准备。',
+    ai_creative_historic_spend_unknown: '本月有历史调用费用未知，这次没有发送。请先核对调用记录。',
     writing_output_invalid: '这次返回的建议暂时无法使用，正文没有改变。可调整要求后重新准备，也可以继续手写。',
     ai_output_invalid: '这次返回的建议暂时无法使用，正文没有改变。请核对调用用量后重新准备，也可以继续手写。',
     ai_source_unavailable: '选定材料的版本或可用性已变化，正文没有改变。请重新核对材料，再准备建议。',
@@ -341,6 +371,11 @@ export function errorText(error: unknown): string {
     const messages: Record<string, string> = {
       creation_stale: '服务器已有新版本，请比较并选择保留方式。',
       creation_source_unavailable: '来源可用情况已变化，请回到材料核对。',
+      creation_experience_reset_required: '经历已撤回。请先重新载入服务器版本，再继续编辑。',
+      creation_experience_editor_reset_required: '本页编辑来自撤回前的版本，请丢弃旧编辑并使用服务器版本。',
+      creation_idea_account_limit: '这个选题已关联三个账号，请先调整关联账号，当前编辑仍保留。',
+      creation_idea_anchor: '此稿是选题框的来源稿，不能解除或换成其他选题；当前编辑仍保留。',
+      creation_idea_not_found: '选题框已不可用，请重新读取并选择，当前编辑仍保留。',
       source_changed: '来源版本已变化，请重新读取并选取。',
       source_restricted: '来源已受限，不能继续引用。',
       source_unavailable: '来源暂不可读。',

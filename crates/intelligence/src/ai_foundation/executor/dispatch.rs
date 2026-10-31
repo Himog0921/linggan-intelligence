@@ -10,7 +10,17 @@ pub(super) async fn call(
     adapter: &PiAdapter,
     request: &PiRequest,
 ) -> Option<PiResponse> {
-    let response = adapter.call(request);
+    call_with_submitted(db, item, adapter, request, None).await
+}
+
+pub(super) async fn call_with_submitted(
+    db: &Database,
+    item: &ClaimedItem,
+    adapter: &PiAdapter,
+    request: &PiRequest,
+    submitted: Option<tokio::sync::oneshot::Sender<()>>,
+) -> Option<PiResponse> {
+    let response = adapter.call_with_submitted(request, submitted);
     let renewal = async {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;

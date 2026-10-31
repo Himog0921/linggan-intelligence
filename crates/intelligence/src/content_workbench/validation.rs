@@ -3,14 +3,34 @@ use std::collections::HashSet;
 pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
     if doc.contract != "content-workbench.v1"
         || doc.title.chars().count() > 500
+        || doc
+            .idea_name
+            .as_ref()
+            .is_some_and(|s| s.trim().is_empty() || s.chars().count() > 200)
+        || (doc.idea_name.is_some() && doc.idea_ref.is_none())
+        || doc.idea_ref.is_some_and(|id| id.is_nil())
         || doc.tags.len() > 30
+        || doc.cover_title_candidates.len() > 20
+        || doc.note_title_candidates.len() > 20
+        || doc
+            .cover_title_candidates
+            .iter()
+            .any(|s| s.trim().is_empty() || s.chars().count() > 10)
+        || doc
+            .note_title_candidates
+            .iter()
+            .any(|s| s.trim().is_empty() || s.chars().count() > 200)
         || doc.angle.chars().count() > 4000
         || doc.outline.len() > 100
         || doc.paragraphs.len() > 1000
+        || !doc.experience_use_order.is_empty()
+        || doc.experience_slots.len() > 1000
+        || doc.experience_gaps.len() > 1000
         || doc.excerpts.len() > 200
         || doc.canvas.len() > 500
         || doc.pages.len() > 30
         || doc.uses.len() > 1000
+        || doc.derived_sources.len() > 1000
         || doc.materials.len() > 60
     {
         return Err(WorkbenchError::Invalid("document"));
@@ -63,6 +83,28 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
     for p in &doc.paragraphs {
         add(p.id)?;
         text(&p.text)?;
+    }
+    let mut experience_paragraphs = HashSet::new();
+    for slot in &doc.experience_slots {
+        if slot.experience_ref.is_nil()
+            || slot.experience_revision <= 0
+            || !experience_paragraphs.insert(slot.paragraph_id)
+            || !doc.paragraphs.iter().any(|p| p.id == slot.paragraph_id)
+        {
+            return Err(WorkbenchError::Invalid("experience_slot"));
+        }
+    }
+    let mut gaps = HashSet::new();
+    for id in &doc.experience_gaps {
+        if !gaps.insert(id)
+            || experience_paragraphs.contains(id)
+            || !doc
+                .paragraphs
+                .iter()
+                .any(|p| p.id == *id && p.text.trim().is_empty())
+        {
+            return Err(WorkbenchError::Invalid("experience_gap"));
+        }
     }
     for e in &doc.excerpts {
         add(e.id)?;
@@ -119,6 +161,12 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
     }
     if covers > 1 {
         return Err(WorkbenchError::Invalid("cover"));
+    }
+    for derived in &doc.derived_sources {
+        citation(&derived.citation)?;
+        if target_text(doc, &derived.target).is_none() {
+            return Err(WorkbenchError::Invalid("derived_source_target"));
+        }
     }
     for u in &doc.uses {
         add(u.id)?;

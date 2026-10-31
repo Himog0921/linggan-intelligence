@@ -1,8 +1,7 @@
 {
-  "kind": "page_exception",
-  "reason": "Mog四条运营批注：目标行内编辑与去冗余、发布读数条删除、趋势轻渐变；保持全局M2与业务合同",
-  "authorization": "Mog 2026-10-21 根据批注修改",
-  "exceptionScope": "PAGE-OPS-002-trend-and-target-PAGE-OPS-001-list",
+  "kind": "implementation_fix",
+  "reason": "Restore creation under operations and consolidate duplicate creation navigation per DEC-0012 and existing Z02/Z03 layout",
+  "authorization": "Mog 2026-10-30 explicit navigation repair and hierarchy simplification request",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"

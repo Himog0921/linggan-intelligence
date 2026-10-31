@@ -124,6 +124,7 @@ mod tests {
                 .map(|text| (Uuid::new_v4(), (*text).to_string()))
                 .collect(),
             tags: tags.iter().map(|t| (*t).to_string()).collect(),
+            experience_gaps: vec![],
             bridge: None,
             cover_ai: None,
         }

@@ -70,7 +70,10 @@ impl MaterialClass {
                 TaskKey::AuthorOrgIdentity | TaskKey::CreatorAccountResearch
             ),
             Self::SelectedWritingMaterial => {
-                matches!(task, TaskKey::WritingAssistant | TaskKey::WritingLegacy)
+                matches!(
+                    task,
+                    TaskKey::WritingAssistant | TaskKey::WritingLegacy | TaskKey::CreationTitle
+                )
             }
         }
     }

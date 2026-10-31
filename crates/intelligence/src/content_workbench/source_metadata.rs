@@ -3,6 +3,15 @@ use super::*;
 use std::collections::HashMap;
 
 fn visit_mut(doc: &mut WorkDocument, mut visit: impl FnMut(String, &mut String)) {
+    if let Some(name) = &mut doc.idea_name {
+        visit("idea.name".into(), name);
+    }
+    for (index, text) in doc.cover_title_candidates.iter_mut().enumerate() {
+        visit(format!("cover-candidate.{index}"), text);
+    }
+    for (index, text) in doc.note_title_candidates.iter_mut().enumerate() {
+        visit(format!("note-candidate.{index}"), text);
+    }
     if let Some(preparation) = &mut doc.material_preparation {
         visit("preparation.query".into(), &mut preparation.query);
         for (index, term) in preparation.terms.iter_mut().enumerate() {
@@ -23,6 +32,21 @@ fn visit_mut(doc: &mut WorkDocument, mut visit: impl FnMut(String, &mut String))
 }
 fn values(doc: &WorkDocument) -> Vec<(String, String)> {
     let mut values = Vec::new();
+    if let Some(name) = &doc.idea_name {
+        values.push(("idea.name".into(), name.clone()));
+    }
+    values.extend(
+        doc.cover_title_candidates
+            .iter()
+            .enumerate()
+            .map(|(index, text)| (format!("cover-candidate.{index}"), text.clone())),
+    );
+    values.extend(
+        doc.note_title_candidates
+            .iter()
+            .enumerate()
+            .map(|(index, text)| (format!("note-candidate.{index}"), text.clone())),
+    );
     if let Some(preparation) = &doc.material_preparation {
         values.push(("preparation.query".into(), preparation.query.clone()));
         values.extend(
@@ -102,6 +126,8 @@ mod tests {
     fn old_reason_and_preparation_hide_only_known_quote_preserving_independent_words() {
         let quote = "原声😀第一步".to_owned();
         let mut doc = WorkDocument::default();
+        doc.idea_name = Some(format!("选题{quote}后记"));
+        doc.note_title_candidates.push(format!("标题{quote}后记"));
         doc.material_preparation = Some(MaterialPreparation {
             method_version: "workbench.lexical-context.v1".into(),
             query: format!("作者前言{quote}作者后记"),
@@ -123,6 +149,8 @@ mod tests {
         assert!(!adds_quote(&doc, Some(&doc), &quote));
         redact(&mut doc, &[quote.clone()]);
         assert!(!contains_quote(&doc, &quote));
+        assert_eq!(doc.idea_name.as_deref(), Some("选题…后记"));
+        assert_eq!(doc.note_title_candidates[0], "标题…后记");
         let preparation = doc.material_preparation.unwrap();
         assert_eq!(preparation.terms[0], "作业");
         assert_eq!(preparation.query, "作者前言…作者后记");

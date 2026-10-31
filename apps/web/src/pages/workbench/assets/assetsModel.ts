@@ -13,6 +13,19 @@ export type Level = 'must' | 'warn' | 'hint';
 export type SentenceStatus = 'review' | 'ok' | 'off' | 'fix';
 export type SentenceOrigin = 'manual' | 'saved_back';
 export type ReviewAction = 'approve' | 'request_fix' | 'disable' | 'enable';
+export interface Experience {
+  id: string; code: string; accountRef: string; currentPerson: boolean;
+  state: 'awaiting_subject' | 'confirmed' | 'disabled' | 'withdrawn'; revision: number;
+  usedCount?: number;
+  title: string | null; body: string | null; tags: string[] | null; origin: string | null;
+  sendToModel: boolean | null; confirmedAt: string | null; confirmedSubjectRole: string | null;
+}
+export interface PersonaFact {
+  id: string; accountRef: string; key: string | null; version: number; currentRevision: number;
+  currentPerson: boolean; state: 'active' | 'withdrawn'; text: string | null; source: string | null;
+  status: string | null; confirmationMethod: string | null;
+}
+export interface PersonaRevision { revision: number; text: string; source: string; status: string; applied: boolean; recordedAt: string }
 
 export interface Identity {
   accountRef: string;
@@ -24,6 +37,8 @@ export interface Identity {
   hasRealPerson: boolean | null;
   backingPersonRole: string | null;
   canProvideExperience: boolean | null;
+  hasKnownPerson?: boolean | null;
+  personRef?: string | null;
   savedAt: string;
   savedBy: string;
 }
@@ -114,6 +129,9 @@ export interface CopyReady {
 }
 export interface CopiedMark { receiptRef: string; revisionId: string; copiedAt: string }
 export interface CopyStatus { copied: CopiedMark | null }
+export interface PublicationCandidate { publicationRef: string; title: string | null; publishedOn: string | null; url: string | null }
+export interface PublicationLinkReceipt { linkRef: string; revisionId: string; publicationRef: string; replayed: boolean }
+export interface PublicationLinkView { linkRef: string; revisionId: string; publicationRef: string; title: string | null; publishedOn: string | null; available: boolean }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function uuid(record: Json, name: string): string {
@@ -121,6 +139,17 @@ function uuid(record: Json, name: string): string {
   if (!UUID.test(value)) throw new ShapeError(name);
   return value;
 }
+export const decodePublicationCandidates = (value: unknown) => decode(value, root => list(root, 'items', item => ({
+  publicationRef: uuid(item, 'publicationRef'), title: optStr(item, 'title'), publishedOn: optStr(item, 'publishedOn'), url: optStr(item, 'url'),
+})));
+export const decodePublicationLink = (value: unknown) => decode(value, item => ({
+  linkRef: uuid(item, 'linkRef'), revisionId: uuid(item, 'revisionId'), publicationRef: uuid(item, 'publicationRef'), replayed: bool(item, 'replayed'),
+}));
+export const decodePublicationLinks = (value: unknown) => decode(value, root => list(root, 'items', item => ({
+  linkRef: uuid(item, 'linkRef'), revisionId: uuid(item, 'revisionId'), publicationRef: uuid(item, 'publicationRef'),
+  title: optStr(item, 'title'), publishedOn: optStr(item, 'publishedOn'), available: bool(item, 'available'),
+})));
+export const decodePublicationUnlink = (value: unknown) => decode(value, item => ({ linkRef: uuid(item, 'linkRef'), replayed: bool(item, 'replayed') }));
 function oneOf<T extends string>(record: Json, name: string, values: readonly T[]): T {
   const value = str(record, name);
   const found = values.find(item => item === value);
@@ -142,6 +171,30 @@ const ORG: readonly OrgRelation[] = ['parent', 'coach', 'none', 'unknown'];
 const GROUPS: readonly BridgeGroup[] = ['parent', 'coach'];
 const STATES: readonly BridgeState[] = ['no_account', 'unconfirmed', 'no_relation', 'skipped', 'bio_missing', 'ready'];
 const LEVELS: readonly Level[] = ['must', 'warn', 'hint'];
+function parseExperience(r: Json): Experience {
+  const tags = field(r, 'tags');
+  if (tags !== null && (!Array.isArray(tags) || tags.some(value => typeof value !== 'string'))) throw new ShapeError('tags');
+  return { id: uuid(r, 'id'), code: str(r, 'code'), accountRef: uuid(r, 'accountRef'), currentPerson: bool(r, 'currentPerson'),
+    state: oneOf(r, 'state', ['awaiting_subject', 'confirmed', 'disabled', 'withdrawn'] as const), revision: count(r, 'revision'),
+    usedCount: r.usedCount === undefined ? undefined : count(r, 'usedCount'),
+    title: optStr(r, 'title'), body: optStr(r, 'body'), tags: tags as string[] | null, origin: optStr(r, 'origin'),
+    sendToModel: optBool(r, 'sendToModel'), confirmedAt: optStr(r, 'confirmedAt'), confirmedSubjectRole: optStr(r, 'confirmedSubjectRole') };
+}
+export const decodeExperiences = (value: unknown) => decode(value, r => list(r, 'items', parseExperience));
+function parsePersonaFact(r: Json): PersonaFact {
+  return { id: uuid(r, 'id'), accountRef: uuid(r, 'accountRef'), key: optStr(r, 'key'), version: count(r, 'version'),
+    currentRevision: count(r, 'currentRevision'), currentPerson: bool(r, 'currentPerson'), state: oneOf(r, 'state', ['active','withdrawn'] as const),
+    text: optStr(r, 'text'), source: optStr(r, 'source'), status: optStr(r, 'status'), confirmationMethod: optStr(r, 'confirmationMethod') };
+}
+export const decodePersonaFacts = (value: unknown) => decode(value, r => list(r, 'items', parsePersonaFact));
+export const decodePersonaReceipt = (value: unknown) => decode(value, r => ({ fact: parsePersonaFact(obj(r, 'fact')), resultVersion: count(r, 'resultVersion'), replayed: bool(r, 'replayed') }));
+export const decodePersonaHistory = (value: unknown) => decode(value, r => list(r, 'items', item => ({ revision: count(item, 'revision'), text: str(item, 'text'), source: str(item, 'source'), status: str(item, 'status'), applied: bool(item, 'applied'), recordedAt: str(item, 'recordedAt') })));
+export const decodePersonaRequest = (value: unknown) => decode(value, r => { const item = optObj(r, 'result'); return item ? { kind: str(item, 'kind'), factRef: uuid(item, 'factRef'), version: count(item, 'version') } : null; });
+export const decodeExperienceReceipt = (value: unknown) => decode(value, r => ({ experience: parseExperience(obj(r, 'experience')), replayed: bool(r, 'replayed') }));
+export const decodeExperienceRequest = (value: unknown) => decode(value, r => { const item = optObj(r, 'result');
+  return item ? { kind: oneOf(item, 'kind', ['create', 'edit', 'confirm', 'withdraw'] as const), experienceRef: uuid(item, 'experienceRef'), revision: count(item, 'revision'), state: str(item, 'state') } : null;
+});
+export const decodeExperienceCancellation = (value: unknown) => decode(value, r => oneOf(r, 'outcome', ['committed', 'cancelled'] as const));
 
 export function parseIdentity(r: Json): Identity {
   return {
@@ -149,6 +202,8 @@ export function parseIdentity(r: Json): Identity {
     bioDisclosesRelation: optBool(r, 'bioDisclosesRelation'), bioCheckedAt: optStr(r, 'bioCheckedAt'),
     bioCheckedBy: optStr(r, 'bioCheckedBy'), hasRealPerson: optBool(r, 'hasRealPerson'),
     backingPersonRole: optStr(r, 'backingPersonRole'), canProvideExperience: optBool(r, 'canProvideExperience'),
+    hasKnownPerson: optBool(r, 'hasKnownPerson'),
+    personRef: r.personRef == null ? null : uuid(r, 'personRef'),
     savedAt: str(r, 'savedAt'), savedBy: str(r, 'savedBy'),
   };
 }

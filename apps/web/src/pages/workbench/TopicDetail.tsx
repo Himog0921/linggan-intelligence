@@ -1,6 +1,6 @@
 import { ActionButton } from "../../shared/ActionButton";
 import { useState } from "react";
-import type { WorkDocument } from "./workbenchModel";
+import type { WorkDocument, WorkSummary } from "./workbenchModel";
 import styles from "./WorkbenchPage.module.css";
 
 export function TopicDetail({
@@ -13,6 +13,7 @@ export function TopicDetail({
   onCompose,
   onRead,
   onWrite,
+  drafts = [], draftsStatus = 'ready', onOpenDraft,
 }: {
   document: WorkDocument;
   accounts: { ref: string; name: string; platform: string }[];
@@ -23,6 +24,9 @@ export function TopicDetail({
   onCompose: (value: boolean) => void;
   onRead: () => void;
   onWrite: () => void;
+  drafts?: WorkSummary[];
+  draftsStatus?: 'loading' | 'error' | 'ready';
+  onOpenDraft?: (id: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   return (
@@ -39,14 +43,14 @@ export function TopicDetail({
             选题
             <input
               aria-label="选题标题"
-              value={document.title}
+              value={document.ideaName ?? document.title}
               onCompositionStart={() => onCompose(true)}
               onCompositionEnd={() => onCompose(false)}
-              onChange={(e) => onChange({ ...document, title: e.target.value })}
+              onChange={(e) => onChange(document.ideaName !== null ? { ...document, ideaName: e.target.value } : { ...document, title: e.target.value })}
             />
           </label>
         ) : (
-          <h1>{document.title || "未命名选题"}</h1>
+          <h1>{document.ideaName ?? (document.title || "未命名选题")}</h1>
         )}
         {editing ? (
           <label>
@@ -96,6 +100,11 @@ export function TopicDetail({
         </section>
       </div>
       <aside className={styles.proposalAside}>
+        {document.ideaRef ? <section aria-label="选题关联稿件">
+          <h2>这个选题的稿件</h2>
+          {draftsStatus === 'loading' ? <p>正在读取稿件…</p> : draftsStatus === 'error' ? <p>稿件读取失败。</p> : drafts.filter(item => item.ideaRef === document.ideaRef).map(item => <button key={item.workId} className={styles.materialLink} onClick={() => onOpenDraft?.(item.workId)}>{item.title || '未命名稿件'} <span>→</span></button>)}
+          <small>显示最近保存的稿件，已复制不代表已发布。</small>
+        </section> : null}
         <section>
           <h2>选题依据</h2>
           {document.excerpts.length ? (

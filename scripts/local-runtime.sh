@@ -494,6 +494,14 @@ migrate() {
   apply_migration_once "0180_creator_preview_discovery_only" "$project_root/database/migrations/0180_creator_preview_discovery_only.sql"
   apply_migration_once "0181_creation_assets_s1a" "$project_root/database/migrations/0181_creation_assets_s1a.sql"
   apply_migration_once "0182_creator_read_indexes" "$project_root/database/migrations/0182_creator_read_indexes.sql"
+  apply_migration_once "0183_creation_experience_s1b" "$project_root/database/migrations/0183_creation_experience_s1b.sql"
+  apply_migration_once "0184_creation_idea_boxes" "$project_root/database/migrations/0184_creation_idea_boxes.sql"
+  apply_migration_once "0185_creation_title_task" "$project_root/database/migrations/0185_creation_title_task.sql"
+  apply_migration_once "0186_creation_publication_links" "$project_root/database/migrations/0186_creation_publication_links.sql"
+  apply_migration_once "0187_creation_ai_monthly_budget" "$project_root/database/migrations/0187_creation_ai_monthly_budget.sql"
+  apply_migration_once "0188_creation_structural_templates" "$project_root/database/migrations/0188_creation_structural_templates.sql"
+  apply_migration_once "0189_creation_title_dispatch" "$project_root/database/migrations/0189_creation_title_dispatch.sql"
+  apply_migration_once "0190_creation_ai_experience_material" "$project_root/database/migrations/0190_creation_ai_experience_material.sql"
 }
 
 case "$command_name" in

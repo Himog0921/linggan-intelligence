@@ -4,13 +4,59 @@ import type { BridgeGroup, WorkDocument } from '../workbenchModel';
 import { newDocument } from '../workbenchModel';
 import {
   decodeAccounts, decodeCandidates, decodeCheckReport, decodeCopiedMark, decodeCopyReady, decodeCopyStatus,
-  decodeFactCardReceipt, decodeFactCards, decodeIdentityReceipt, decodeSentenceCheck, decodeSentenceReceipt,
+  decodeFactCardReceipt, decodeFactCards, decodeIdentityReceipt, decodeSentenceCheck, decodeSentenceReceipt, decodeExperiences, decodeExperienceReceipt, decodeExperienceRequest, decodeExperienceCancellation,
+  decodePersonaFacts, decodePersonaReceipt, decodePersonaHistory, decodePersonaRequest,
+  decodePublicationCandidates, decodePublicationLink, decodePublicationLinks, decodePublicationUnlink,
   decodeSentences, type OrgRelation, type ReviewAction, type SentenceOrigin, type SentenceStatus,
 } from './assetsModel';
 
 const base = '/ops/api/creation';
 const send = (method: 'POST' | 'PUT', path: string, body: unknown) => requestJson(`${base}${path}`, { method, body });
 const id = (value: string) => encodeURIComponent(value);
+
+export async function listPersonaFacts(accountRef: string, signal?: AbortSignal) {
+  return decodePersonaFacts(await requestJson(`${base}/persona-facts?accountRef=${id(accountRef)}`, { signal }));
+}
+export async function personaHistory(fact: string, signal?: AbortSignal) {
+  return decodePersonaHistory(await requestJson(`${base}/persona-facts/${id(fact)}/history`, { signal }));
+}
+export async function putPersonaFact(command: { requestId: string; accountRef: string; expectedPersonRef: string; key: string; expectedVersion: number; text: string; source: string; conflictDecision: 'keep_old' | 'use_new' | null }) {
+  return decodePersonaReceipt(await send('POST', '/persona-facts', command));
+}
+export async function confirmPersonaFact(fact: string, command: { requestId: string; expectedVersion: number; subjectConfirmed: true; confirmationMethod: string }) {
+  return decodePersonaReceipt(await send('POST', `/persona-facts/${id(fact)}/confirm`, command));
+}
+export async function withdrawPersonaFact(fact: string, command: { requestId: string }) {
+  return decodePersonaReceipt(await send('POST', `/persona-facts/${id(fact)}/withdraw`, command));
+}
+export async function personaRequestStatus(requestId: string) {
+  return decodePersonaRequest(await requestJson(`${base}/persona-requests/${id(requestId)}`));
+}
+export async function cancelPersonaRequest(requestId: string) {
+  return decodeExperienceCancellation(await send('POST', `/persona-requests/${id(requestId)}`, {}));
+}
+
+export async function listExperiences(accountRef: string, signal?: AbortSignal) {
+  return decodeExperiences(await requestJson(`${base}/experiences?accountRef=${id(accountRef)}`, { signal }));
+}
+export async function experienceRequestStatus(requestId: string) {
+  return decodeExperienceRequest(await requestJson(`${base}/experience-requests/${id(requestId)}`));
+}
+export async function cancelExperienceRequest(requestId: string) {
+  return decodeExperienceCancellation(await send('POST', `/experience-requests/${id(requestId)}`, {}));
+}
+export async function createExperience(command: { requestId: string; accountRef: string; expectedPersonRef: string; title: string; body: string; tags: string[]; origin: string }) {
+  return decodeExperienceReceipt(await send('POST', '/experiences', command));
+}
+export async function editExperience(experience: string, command: { requestId: string; expectedRevision: number; title: string; body: string; tags: string[]; origin: string }) {
+  return decodeExperienceReceipt(await send('PUT', `/experiences/${id(experience)}`, command));
+}
+export async function confirmExperience(experience: string, command: { requestId: string; expectedRevision: number; subjectConfirmed: true; draftUse: true; sendToModel: null; confirmationMethod: string }) {
+  return decodeExperienceReceipt(await send('POST', `/experiences/${id(experience)}/confirm`, command));
+}
+export async function withdrawExperience(experience: string, command: { requestId: string }) {
+  return decodeExperienceReceipt(await send('POST', `/experiences/${id(experience)}/withdraw`, command));
+}
 
 export interface IdentityCommand {
   requestId: string;
@@ -20,6 +66,7 @@ export interface IdentityCommand {
   hasRealPerson: boolean | null;
   backingPersonRole: string | null;
   canProvideExperience: boolean | null;
+  personChange?: 'correction' | 'replacement';
 }
 export interface FactCardCommand {
   requestId: string;
@@ -78,17 +125,26 @@ export async function checkSentence(text: string, signal?: AbortSignal) {
 
 /**
  * The check looks at the account, the title, the cover headline, the body, the topics and the
- * bridge slot, so only those travel; excerpts, canvas and materials stay out of every keystroke.
+ * bridge slot. Only direct comment references attached to paragraphs accompany the text,
+ * so the grade check can distinguish a quoted comment from the account person's own facts.
  */
 export function checkDocument(document: WorkDocument): WorkDocument {
+  const commentIds = new Set(document.excerpts.filter(item => item.citation?.sourceKind === 'comment').map(item => item.id));
+  const uses = document.uses.filter(item => item.target?.kind === 'paragraph' && item.contentOrigin === 'excerpt' && item.sourceSpan && item.excerptId && commentIds.has(item.excerptId));
+  const canvasIds = new Set(uses.map(item => item.canvasId));
+  const canvas = document.canvas.filter(item => canvasIds.has(item.id)).map(item => ({ ...item, note: '', expression: '' }));
+  const excerptIds = new Set([...uses.map(item => item.excerptId), ...canvas.map(item => item.excerptId)]);
+  const excerpts = document.excerpts.filter(item => excerptIds.has(item.id));
   return {
     ...newDocument(), title: document.title, accountRef: document.accountRef, tags: document.tags,
-    paragraphs: document.paragraphs, pages: document.pages.filter(page => page.kind === 'cover').slice(0, 1),
+    paragraphs: document.paragraphs, experienceSlots: document.experienceSlots, experienceGaps: document.experienceGaps,
+    pages: document.pages.filter(page => page.kind === 'cover').slice(0, 1),
     bridge: document.bridge, coverAi: document.coverAi,
+    excerpts, canvas, uses,
   };
 }
-export async function checkDraft(document: WorkDocument, signal?: AbortSignal) {
-  return decodeCheckReport(await requestJson(`${base}/checks`, { method: 'POST', body: { document: checkDocument(document) }, signal }));
+export async function checkDraft(document: WorkDocument, signal?: AbortSignal, workRef?: string) {
+  return decodeCheckReport(await requestJson(`${base}/checks`, { method: 'POST', body: { document: checkDocument(document), ...(workRef ? { workRef: id(workRef) } : {}) }, signal }));
 }
 export async function prepareCopy(workId: string, command: { requestId: string; expectedRevision: string }) {
   return decodeCopyReady(await send('POST', `/works/${id(workId)}/copy`, command));
@@ -99,9 +155,24 @@ export async function confirmCopy(workId: string, receiptRef: string, command: {
 export async function copyStatus(workId: string, signal?: AbortSignal) {
   return decodeCopyStatus(await requestJson(`${base}/works/${id(workId)}/copy-status`, { signal }));
 }
+export async function publicationCandidates(workId: string, signal?: AbortSignal) {
+  return decodePublicationCandidates(await requestJson(`${base}/works/${id(workId)}/publication-candidates`, { signal }));
+}
+export async function linkPublication(workId: string, command: { requestId: string; expectedRevision: string; publicationRef: string }) {
+  return decodePublicationLink(await send('POST', `/works/${id(workId)}/publication-link`, command));
+}
+export async function publicationLinks(workId: string, signal?: AbortSignal) {
+  return decodePublicationLinks(await requestJson(`${base}/works/${id(workId)}/publication-links`, { signal }));
+}
+export async function unlinkPublication(workId: string, linkRef: string, requestId: string) {
+  return decodePublicationUnlink(await send('POST', `/works/${id(workId)}/publication-links/${id(linkRef)}/unlink`, { requestId }));
+}
 
 const messages: Record<string, string> = {
+  creation_persona_conflict_decision: '新旧事实不一致，请选择保留原来的或以新的为准。',
   creation_assets_stale: '别处刚改过这里，请刷新后再试，当前输入仍保留。',
+  creation_person_change_required: '请说明是更正原来的真人信息，还是换了另一位真人。',
+  creation_assets_source_unavailable: '稿件引用的来源当前不可使用，请刷新稿件并处理后再复制。',
   creation_assets_request_conflict: '同一个请求被用在了另一件事上，请刷新后重试。',
   creation_assets_parameter_invalid: '填写的内容不符合要求，请检查后再提交。',
   creation_assets_not_found: '没有找到要改的对象，请刷新后再试。',

@@ -25,7 +25,13 @@ struct Prepared {
     request_ref: Option<Uuid>,
     input: execution::Input,
 }
-fn schema() -> ResponseSchema {
+fn schema(task: TaskKey) -> ResponseSchema {
+    if task == TaskKey::CreationTitle {
+        return ResponseSchema {
+            name: "creation_title_ideas".into(),
+            schema: json!({"type":"object","additionalProperties":false,"properties":{"coverTitles":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","maxLength":10}},"noteTitles":{"type":"array","minItems":1,"maxItems":10,"items":{"type":"string","maxLength":20}}},"required":["coverTitles","noteTitles"]}),
+        };
+    }
     ResponseSchema {
         name: "content_workbench_writing".into(),
         schema: json!({"type":"object","additionalProperties":false,
@@ -40,7 +46,10 @@ async fn prepare(
     item: &ClaimedItem,
     secrets: &dyn ModelSecretStore,
 ) -> Result<Prepared, ExecutorError> {
-    if item.task_key != TaskKey::WritingLegacy {
+    if !matches!(
+        item.task_key,
+        TaskKey::WritingLegacy | TaskKey::CreationTitle
+    ) {
         return Err(ExecutorError::Invalid);
     }
     let mut tx = item.owner.begin(db, true).await?;
@@ -76,12 +85,18 @@ async fn prepare(
         _ => return Err(ExecutorError::Invalid),
     };
     let input = execution::load_in(&mut tx, preview).await?;
+    if input.experience_ref.is_some() && request_ref.is_none() {
+        return Err(AiError::Source.into());
+    }
+    if input.manifest.action.task() != item.task_key {
+        return Err(AiError::Stale.into());
+    }
     if request_ref.is_some() && input.preview_config != item.task_config_ref {
         return Err(AiError::Stale.into());
     }
-    let model = execution::model_in(&mut tx, item.task_config_ref).await?;
+    let model = execution::model_in(&mut tx, item.task_config_ref, item.task_key).await?;
     let current_model = model.current_model_ref.ok_or(AiError::Model)?;
-    let system = execution::system_in(&mut tx, item.task_config_ref).await?;
+    let system = execution::system_in(&mut tx, item.task_config_ref, item.task_key).await?;
     let prompt_version_ref: Uuid = sqlx::query_scalar(
         "SELECT prompt_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
     )
@@ -111,12 +126,12 @@ async fn prepare(
         secrets.get(workspace, model.secret_ref)?,
         system,
         prompt,
-        Some(schema()),
+        Some(schema(item.task_key)),
     );
     request.wire_bytes()?;
     // Connection share lock from load_frozen_in serializes this final permission read with revoke.
-    let egress:Option<Uuid>=sqlx::query_scalar("SELECT event_ref FROM linggan_ai_current_egress WHERE endpoint_ref=$1 AND task_key='writing_legacy' AND material_class='selected_writing_material' AND allowed")
-        .bind(model.endpoint_ref).fetch_optional(&mut *tx).await?;
+    let egress:Option<Uuid>=sqlx::query_scalar("SELECT event_ref FROM linggan_ai_current_egress WHERE endpoint_ref=$1 AND task_key=$2 AND material_class='selected_writing_material' AND allowed")
+        .bind(model.endpoint_ref).bind(item.task_key.as_str()).fetch_optional(&mut *tx).await?;
     let egress =
         egress.ok_or_else(|| AiError::AdmissionDenied(vec!["egress_not_approved".into()]))?;
     let admitted = super::budget::admit_in(
@@ -129,9 +144,10 @@ async fn prepare(
     let price =
         super::budget::latest_price_in(&mut tx, Some(current_model), model.endpoint_ref).await?;
     let invocation = Uuid::new_v4();
+    super::budget::reserve_creative_in(&mut tx, invocation, price, reservation, &admitted).await?;
     let hash = content_hash(
         &json!([
-            writing::METHOD,
+            input.manifest.action.method(),
             item.item_ref,
             item.task_config_ref,
             model.connection_version_ref,
@@ -141,12 +157,12 @@ async fn prepare(
     );
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,
         task_key,task_config_ref,batch_ref,round_no,quota_bucket,classification_source,dispatch_admitted_at,deadline_at,egress_event_ref,result,created_at,price_ref)
-        VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,'writing_legacy',$7,$8,$9,'task_day','producer_v1',$10::text::timestamptz,
+        VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,$15,$7,$8,$9,'task_day','producer_v1',$10::text::timestamptz,
          $10::text::timestamptz+make_interval(secs=>$11),$12,$13,$10::text::timestamptz,$14)")
         .bind(invocation).bind(model.connection_version_ref).bind(current_model).bind(model.config_ref).bind(hash).bind(reservation)
         .bind(item.task_config_ref).bind(item.batch_ref).bind((item.position/AI_LIMITS.round_size+1) as i32).bind(admitted)
         .bind(request.timeout_ms as f64/1000.0+AI_LIMITS.adapter_deadline_allowance_seconds as f64).bind(egress)
-        .bind(json!({"producer":"ai-gen1-executor.v1","purpose":"content_workbench","methodVersion":writing::METHOD})).bind(price).execute(&mut *tx).await?;
+        .bind(json!({"producer":"ai-gen1-executor.v1","purpose":"content_workbench","methodVersion":input.manifest.action.method()})).bind(price).bind(item.task_key.as_str()).execute(&mut *tx).await?;
     let changed=sqlx::query("UPDATE linggan_ai_batch_item_control c SET invocation_ref=$2,attempt_count=attempt_count+1,
         executed_config_ref=cfg.task_config_ref,executed_skill_version_ref=cfg.skill_version_ref,execution_contract=cfg.execution_contract
         FROM linggan_ai_task_config cfg WHERE item_ref=$1 AND cfg.task_config_ref=$3 AND attempt_count=0")
@@ -182,6 +198,16 @@ pub async fn execute_writing(
         | Err(ExecutorError::Configuration(
             crate::ai_foundation::store::FoundationError::AdmissionDenied(reasons),
         )) => {
+            let budget_failure = reasons.iter().find_map(|reason| match reason.as_str() {
+                "monthly_budget_exhausted" => Some("ai_creative_month_budget_exhausted"),
+                "price_unavailable" => Some("ai_creative_price_unavailable"),
+                "historic_spend_unknown" => Some("ai_creative_historic_spend_unknown"),
+                _ => None,
+            });
+            if let Some(code) = budget_failure {
+                item.skip_unattempted(db, code).await?;
+                return Ok(());
+            }
             if reasons.iter().any(|r| r == "writing_cancelled")
                 && let InputRef::WritingRequest { request_ref } = item.input
             {
@@ -203,11 +229,71 @@ pub async fn execute_writing(
         }
         Err(error) => return super::preparation::handle(db, item, error).await,
     };
-    let response = super::dispatch::call(db, item, adapter, &prepared.request).await;
+    let response = if prepared.input.experience_ref.is_some() {
+        // Keep the gate until the adapter starts the provider transport. Once dispatched,
+        // it is an in-flight call and cannot be recalled.
+        let mut guard = db.pool().begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind("creation_assets:experience-gate")
+            .execute(&mut *guard)
+            .await?;
+        let readable = prepared.input.readable_in(&mut guard).await?;
+        if readable {
+            let (sent, received) = tokio::sync::oneshot::channel();
+            let call = super::dispatch::call_with_submitted(
+                db,
+                item,
+                adapter,
+                &prepared.request,
+                Some(sent),
+            );
+            tokio::pin!(call);
+            tokio::select! {
+                response = &mut call => { let _ = guard.rollback().await; response },
+                signal = received => {
+                    if signal.is_ok() { let _ = guard.rollback().await; call.await }
+                    else { let response=call.await; let _ = guard.rollback().await; response }
+                },
+            }
+        } else {
+            let _ = guard.rollback().await;
+            Some(not_sent())
+        }
+    } else {
+        super::dispatch::call(db, item, adapter, &prepared.request).await
+    };
     receipt::finalize(db, item, prepared.invocation, response.as_ref(), || {
         settle(db, item, &prepared, response.as_ref())
     })
     .await
+}
+fn not_sent() -> PiResponse {
+    use crate::pi_adapter::{PiDiagnostic, PiUsage};
+    PiResponse {
+        version: PI_PROTOCOL.into(),
+        ok: false,
+        text: None,
+        failure_code: None,
+        model_ids: None,
+        model_list_origin: None,
+        usage: PiUsage::default(),
+        elapsed_ms: None,
+        diagnostic: Some(PiDiagnostic {
+            schema_version: 1,
+            stage: "request_not_started".into(),
+            request_sent: Some(false),
+            http_status: None,
+            response_started: Some(false),
+            terminal_received: Some(false),
+            received_bytes: Some(0),
+            limit_kind: None,
+            finish_reason: None,
+            elapsed_ms: 0,
+            usage_known: false,
+            sdk_error_type: None,
+            retry_class: "never".into(),
+        }),
+    }
 }
 async fn settle(
     db: &Database,
@@ -230,11 +316,8 @@ async fn settle(
         .filter(|r| r.ok)
         .and_then(|r| r.text.as_deref())
         .and_then(|text| prepared.input.validate(text).ok());
-    let suggestion = suggestion
-        .map(serde_json::to_value)
-        .transpose()
-        .map_err(|_| ExecutorError::Invalid)?
-        .filter(|value| value.to_string().len() <= AI_LIMITS.max_text_bytes as usize);
+    let suggestion =
+        suggestion.filter(|value| value.to_string().len() <= AI_LIMITS.max_text_bytes as usize);
     let provider_ok = response.is_some_and(|r| r.ok);
     let no_send = receipt::not_dispatched(response);
     let failure = if no_send {
@@ -275,9 +358,21 @@ async fn settle(
         failure
     };
     let output = if let Some(reference) = prepared.request_ref {
+        if usable && prepared.input.experience_ref.is_some() {
+            let changed = sqlx::query("UPDATE linggan_creation_ai_experience_material SET suggestion=$2 WHERE preview_ref=$1")
+                .bind(prepared.input.manifest.preview_ref).bind(suggestion.as_ref()).execute(&mut *tx).await?;
+            if changed.rows_affected() != 1 {
+                return Err(AiError::Source.into());
+            }
+        }
+        let public_suggestion = if usable && prepared.input.experience_ref.is_some() {
+            Some(json!({"experienceProtected":true}))
+        } else {
+            suggestion.clone()
+        };
         sqlx::query("UPDATE linggan_creation_ai_request SET state=$2,suggestion=$3,failure_code=$4,finished_at=scope_001_now() WHERE request_ref=$1")
             .bind(reference).bind(if cancelled {"cancelled"} else if usable {"succeeded"} else {"failed"})
-            .bind(if usable {suggestion.as_ref()} else {None}).bind(item_failure).execute(&mut *tx).await?;
+            .bind(if usable {public_suggestion.as_ref()} else {None}).bind(item_failure).execute(&mut *tx).await?;
         if usable {
             sqlx::query("INSERT INTO linggan_creation_ai_suggestion(suggestion_ref,work_ref,request_ref) VALUES($1,$2,$1)")
                 .bind(reference).bind(prepared.input.manifest.work_ref).execute(&mut *tx).await?;
@@ -291,7 +386,7 @@ async fn settle(
     if provider_ok {
         sqlx::query("INSERT INTO linggan_creation_writing_qualification(model_ref,connection_version_ref,method_version,invocation_ref,qualified)
             SELECT model_ref,connection_version_ref,$2,invocation_ref,$3 FROM linggan_model_invocation WHERE invocation_ref=$1")
-            .bind(prepared.invocation).bind(writing::METHOD).bind(output.is_some()&&failure.is_none()).execute(&mut *tx).await?;
+            .bind(prepared.invocation).bind(prepared.input.manifest.action.method()).bind(output.is_some()&&failure.is_none()).execute(&mut *tx).await?;
     }
     receipt::write_item_in(
         &mut tx,

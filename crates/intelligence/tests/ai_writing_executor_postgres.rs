@@ -4,6 +4,8 @@
 mod endpoint;
 #[path = "support/content_workbench_fixture.rs"]
 mod fixture;
+#[path = "../../../apps/api/src/local_web/full_schema_fixture.rs"]
+mod full_schema;
 #[path = "support/ai_writing_fixture.rs"]
 mod setup;
 use linggan_intelligence::{
@@ -171,11 +173,35 @@ async fn writing_upgrade_rejects_old_inflight_without_rewriting_history_then_acc
     fixture::dossier::model_config(&db).await;
     let (config,model,version):(Uuid,Uuid,Uuid)=sqlx::query_as("SELECT config_ref,model_ref,connection_version_ref FROM linggan_model_config JOIN linggan_model_entry USING(model_ref) LIMIT 1")
         .fetch_one(db.pool()).await.unwrap();
-    let work = fixture::create(&db, fixture::doc()).await;
-    let request = preview(&work, config, "");
+    // Seed the historical 0127 shape directly. Current create_work also checks newer asset
+    // tables, which deliberately do not exist at this point in the migration proof.
+    let work = Uuid::new_v4();
+    let revision = Uuid::new_v4();
+    let document = serde_json::to_value(fixture::doc()).unwrap();
+    sqlx::query("INSERT INTO linggan_creation_work(work_ref,domain_ref,saved_by) VALUES($1,$2,'local_machine')")
+        .bind(work).bind(fixture::dossier::DOMAIN).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,document,document_sha256) VALUES($1,$2,1,$3,$4)")
+        .bind(revision).bind(work).bind(&document).bind(text_hash(&document.to_string())).execute(db.pool()).await.unwrap();
+    sqlx::query("UPDATE linggan_creation_work SET current_revision_ref=$1 WHERE work_ref=$2")
+        .bind(revision)
+        .bind(work)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let request = ai::PreviewRequest {
+        preview_ref: Uuid::new_v4(),
+        work_ref: work,
+        expected_revision: revision,
+        action: ai::WritingAction::Draft,
+        config_ref: config,
+        citations: vec![],
+        paragraph_ids: vec![],
+        selection: None,
+        instruction: String::new(),
+    };
     sqlx::query("INSERT INTO linggan_creation_ai_preview(preview_ref,work_ref,input_revision,config_ref,request_hash,method_version,action,input_manifest,reserved_tokens)
         VALUES($1,$2,$3,$4,repeat('0',64),'content-workbench-writing.v1','draft',$5,1000)")
-        .bind(request.preview_ref).bind(work.work_id).bind(work.revision.id).bind(config).bind(serde_json::to_value(&request).unwrap()).execute(db.pool()).await.unwrap();
+        .bind(request.preview_ref).bind(work).bind(revision).bind(config).bind(serde_json::to_value(&request).unwrap()).execute(db.pool()).await.unwrap();
     let invocation = Uuid::new_v4();
     let reference = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result)
@@ -255,6 +281,26 @@ async fn writing_upgrade_rejects_old_inflight_without_rewriting_history_then_acc
     .unwrap();
     assert_eq!(before, after_cutover);
     assert_eq!(before, after);
+    // Finish the remaining real schema upgrades before asking today's reader to project the
+    // old terminal receipt; it must not be run against an intentionally historical schema.
+    let remaining = full_schema::FULL_MIGRATIONS
+        .split_once(include_str!(
+            "../../../database/migrations/0146_research_dossier_v2.sql"
+        ))
+        .unwrap()
+        .1
+        .split_once("INSERT INTO linggan_local_schema_migration")
+        .unwrap()
+        .0
+        .replace(
+            include_str!("../../../database/migrations/0150_collection_run_comment_target.sql"),
+            "",
+        );
+    // Audited: only compile-time migration sources are concatenated; no runtime input.
+    sqlx::raw_sql(sqlx::AssertSqlSafe(remaining))
+        .execute(db.pool())
+        .await
+        .unwrap();
     let historical = ai::status(&db, reference).await.unwrap();
     assert_eq!(historical["state"], "failed");
     assert_eq!(historical["invocationRef"], json!(invocation));

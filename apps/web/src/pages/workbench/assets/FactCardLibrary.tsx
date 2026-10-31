@@ -91,7 +91,10 @@ export function FactCardLibrary() {
   const current = items.find(item => item.code === selected) ?? null;
   const changed = (code: string) => {
     setSelected(code);
-    void queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
+    void (async () => {
+      await queryClient.cancelQueries({ queryKey: ['creation-assets', 'draft-checks'] });
+      await queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
+    })();
   };
   return <section className={styles.assetBody} aria-label="产品事实卡">
     <div>

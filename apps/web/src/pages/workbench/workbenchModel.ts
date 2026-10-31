@@ -159,8 +159,17 @@ export interface BridgeChoice {
   sentence: BridgeUse | null;
   afterParagraph: string | null;
 }
+/** Each paragraph derived from an experience retains its originating revision. */
+export interface ExperienceSlot {
+  paragraphId: string;
+  experienceRef: string;
+  experienceRevision: number;
+}
 export interface WorkDocument {
   contract: string;
+  experienceEpoch: string | null;
+  experienceSlots: ExperienceSlot[];
+  experienceGaps: string[];
   /** Absent in older revisions; null means the bridge slot has not been decided. */
   bridge: BridgeChoice | null;
   /** Whether the cover image is AI-made; null means not recorded, never "no". */
@@ -170,14 +179,19 @@ export interface WorkDocument {
   title: string;
   accountRef: string | null;
   topicRef: string | null;
+  ideaRef: string | null;
+  ideaName: string | null;
   angle: string;
   outline: string[];
   tags: string[];
+  coverTitleCandidates: string[];
+  noteTitleCandidates: string[];
   paragraphs: Paragraph[];
   excerpts: Excerpt[];
   canvas: CanvasBlock[];
   pages: ImagePage[];
   uses: MaterialUse[];
+  derivedSources: { target: UseTarget; citation: Citation }[];
 }
 export interface Revision {
   id: string;
@@ -217,6 +231,7 @@ export interface ExportRecord {
   packageByteSize: number | null;
 }
 export interface WorkEnvelope {
+  experienceResetRequired?: boolean;
   workId: string;
   domainRef: string;
   savedBy: string;
@@ -230,7 +245,12 @@ export interface WorkSummary {
   title: string;
   revisionId: string;
   savedAt: string;
+  copiedRevisionId?: string | null;
+  publishedRevisionId?: string | null;
+  publicationUnavailable?: boolean;
+  ideaRef?: string | null;
 }
+export interface IdeaBoxSummary { ideaRef: string; anchorWorkId: string; anchorRevisionId: string; savedAt: string; name: string; intent: string }
 export interface AssetRecord {
   id: string;
   workId: string;
@@ -319,6 +339,7 @@ export interface AiPreview {
   reservedTokens: number;
   maxCalls: number;
   outboundInput: unknown;
+  outboundSystem?: string;
   confirmationRequired: boolean;
   taskConfigRef?: string;
 }
@@ -361,6 +382,11 @@ export interface AiStatus {
     costPicoUsd?: string | null;
   };
 }
+export type TitleStatus = Omit<AiStatus, 'action' | 'suggestion'> & {
+  action: 'title_ideas';
+  suggestion: { coverTitles: string[]; noteTitles: string[] } | null;
+  titleWarnings: { cover: boolean[]; note: boolean[] } | null;
+};
 type Parser<T> = (value: unknown) => T;
 export class WorkbenchContractError extends Error {
   constructor() {
@@ -563,6 +589,9 @@ export const parseBridgeChoice = shape<BridgeChoice>({
 });
 export const parseWorkDocument = shape<WorkDocument>({
   contract: v => v === 'content-workbench.v1' ? v : bad(),
+  experienceEpoch: v => v === undefined ? null : nullable(uuid)(v),
+  experienceSlots: v => v === undefined ? [] : array(shape<ExperienceSlot>({ paragraphId: uuid, experienceRef: uuid, experienceRevision: integer }))(v),
+  experienceGaps: v => v === undefined ? [] : array(uuid)(v),
   bridge: v => v === undefined ? null : nullable(parseBridgeChoice)(v),
   coverAi: v => v === undefined ? null : nullable(bool)(v),
   materials: v => v === undefined ? [] : array(parseMaterialSelection)(v),
@@ -570,14 +599,19 @@ export const parseWorkDocument = shape<WorkDocument>({
   title: str,
   accountRef: nullable(uuid),
   topicRef: nullable(uuid),
+  ideaRef: v => v === undefined ? null : nullable(uuid)(v),
+  ideaName: v => v === undefined ? null : nullable(str)(v),
   angle: str,
   outline: array(str),
   tags: array(str),
+  coverTitleCandidates: v => v === undefined ? [] : array(str)(v),
+  noteTitleCandidates: v => v === undefined ? [] : array(str)(v),
   paragraphs: array(paragraph),
   excerpts: array(excerpt),
   canvas: array(canvas),
   pages: array(parseImagePage),
-  uses: array(materialUse)
+  uses: array(materialUse),
+  derivedSources: v => v === undefined ? [] : array(shape({ target: parseUseTarget, citation: parseCitation }))(v)
 });
 export const parseRevision = shape<Revision>({
   id: uuid,
@@ -611,6 +645,7 @@ export const parseExportRecord = shape<ExportRecord>({
   packageByteSize: nullable(integer)
 });
 export const parseEnvelope = shape<WorkEnvelope>({
+  experienceResetRequired: v => v === undefined ? false : bool(v),
   workId: uuid,
   domainRef: uuid,
   savedBy: str,
@@ -630,9 +665,16 @@ export const parseWorkList = shape<{
     domainRef: uuid,
     title: str,
     revisionId: uuid,
-    savedAt: str
+    savedAt: str,
+    copiedRevisionId: value => value === undefined ? undefined : nullable(uuid)(value),
+    publishedRevisionId: value => value === undefined ? undefined : nullable(uuid)(value),
+    publicationUnavailable: value => value === undefined ? undefined : bool(value),
+    ideaRef: value => value === undefined ? undefined : nullable(uuid)(value)
   }))
 });
+export const parseIdeaBoxList = shape<{ items: IdeaBoxSummary[] }>({ items: array(shape<IdeaBoxSummary>({
+  ideaRef: uuid, anchorWorkId: uuid, anchorRevisionId: uuid, savedAt: str, name: str, intent: str,
+})) });
 export const parseHistory = shape<{
   items: Revision[];
 }>({
@@ -752,6 +794,7 @@ export const parsePreview = shape<AiPreview>({
   reservedTokens: integer,
   maxCalls: integer,
   outboundInput: v => v,
+  outboundSystem: optional(str),
   confirmationRequired: bool,
   taskConfigRef: optional(uuid)
 });
@@ -794,9 +837,23 @@ export const parseAiStatus = shape<AiStatus>({
     costPicoUsd: optional(nullable(str))
   })
 });
+export function parseTitleStatus(value: unknown): TitleStatus {
+  const raw = object(value);
+  if (raw.action !== 'title_ideas') return bad();
+  const { titleWarnings, ...baseFields } = raw;
+  const base = parseAiStatus({ ...baseFields, action: 'draft', suggestion: null });
+  const suggestion = raw.suggestion === null ? null : shape<{coverTitles:string[]; noteTitles:string[]}>({coverTitles:array(str), noteTitles:array(str)})(raw.suggestion);
+  if (suggestion && (suggestion.coverTitles.length === 0 || suggestion.coverTitles.length > 10 || suggestion.noteTitles.length === 0 || suggestion.noteTitles.length > 10 || suggestion.coverTitles.some(title => !title.trim() || Array.from(title).length > 10) || suggestion.noteTitles.some(title => !title.trim() || Array.from(title).length > 20))) return bad();
+  const warnings = titleWarnings === null ? null : shape<{cover:boolean[];note:boolean[]}>({cover:array(bool),note:array(bool)})(titleWarnings);
+  if ((suggestion === null) !== (warnings === null) || (suggestion && warnings && (warnings.cover.length !== suggestion.coverTitles.length || warnings.note.length !== suggestion.noteTitles.length))) return bad();
+  return { ...base, action: 'title_ideas', suggestion, titleWarnings: warnings };
+}
 export function newDocument(title = ''): WorkDocument {
   return {
     contract: 'content-workbench.v1',
+    experienceEpoch: null,
+    experienceSlots: [],
+    experienceGaps: [],
     bridge: null,
     coverAi: null,
     materials: [],
@@ -804,14 +861,19 @@ export function newDocument(title = ''): WorkDocument {
     title,
     accountRef: null,
     topicRef: null,
+    ideaRef: null,
+    ideaName: null,
     angle: '',
     outline: [],
     tags: [],
+    coverTitleCandidates: [],
+    noteTitleCandidates: [],
     paragraphs: [],
     excerpts: [],
     canvas: [],
     pages: [],
-    uses: []
+    uses: [],
+    derivedSources: []
   };
 }
 export function scalarRange(text: string, start: number, end: number): {

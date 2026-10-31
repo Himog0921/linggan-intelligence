@@ -41,22 +41,22 @@ pub async fn read_revision_in(
     id: Option<Uuid>,
 ) -> Result<(Uuid, Revision), WorkbenchError> {
     let row=sqlx::query("SELECT w.domain_ref,r.revision_ref,r.revision_number,r.saved_at::text,r.document FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.work_ref=w.work_ref AND r.revision_ref=COALESCE($2,w.current_revision_ref) WHERE w.work_ref=$1").bind(work).bind(id).fetch_optional(&mut **tx).await?.ok_or(WorkbenchError::NotFound)?;
-    Ok((
-        row.try_get("domain_ref")?,
-        Revision {
-            id: row.try_get("revision_ref")?,
-            number: row.try_get("revision_number")?,
-            saved_at: row.try_get("saved_at")?,
-            document: stored_document(row.try_get("document")?)?,
-        },
-    ))
+    let domain = row.try_get("domain_ref")?;
+    let mut revision = Revision {
+        id: row.try_get("revision_ref")?,
+        number: row.try_get("revision_number")?,
+        saved_at: row.try_get("saved_at")?,
+        document: stored_document(row.try_get("document")?)?,
+    };
+    super::experience_fragments::project(tx, revision.id, &mut revision.document).await?;
+    Ok((domain, revision))
 }
 pub async fn list_works(
     db: &Database,
     domain: Option<Uuid>,
 ) -> Result<Vec<WorkSummary>, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
-    let rows = sqlx::query("SELECT w.work_ref,w.domain_ref,r.revision_ref,r.saved_at::text,r.document FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref WHERE ($1::uuid IS NULL OR w.domain_ref=$1) ORDER BY r.saved_at DESC,w.work_ref LIMIT 200")
+    let rows = sqlx::query("SELECT w.work_ref,w.domain_ref,r.revision_ref,r.saved_at::text,r.document, (SELECT cr.revision_ref FROM linggan_creation_copy_receipt cr JOIN linggan_creation_copy_confirmation cc ON cc.receipt_ref=cr.receipt_ref WHERE cr.work_ref=w.work_ref AND cr.revision_ref=r.revision_ref LIMIT 1) AS copied_revision_id, CASE WHEN pub.available THEN pub.revision_ref ELSE NULL END AS published_revision_id, COALESCE(NOT pub.available,false) AS publication_unavailable FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref LEFT JOIN LATERAL (SELECT l.revision_ref, COALESCE((p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL AND (p.source_system<>'linggan_native' OR p.native_record_state='active') AND p.platform='xhs' AND p.account_ref::text=linked_rev.document->>'accountRef' AND a.domain_ref=w.domain_ref AND a.ledger_state='in_ledger' AND a.platform='xhs'),false) AS available FROM linggan_creation_publication_link l JOIN linggan_ops_publication p ON p.publication_ref=l.publication_ref JOIN linggan_creation_revision linked_rev ON linked_rev.revision_ref=l.revision_ref LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE l.work_ref=w.work_ref AND NOT EXISTS(SELECT 1 FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref) ORDER BY available DESC,l.linked_at DESC,l.link_ref DESC LIMIT 1) pub ON true WHERE ($1::uuid IS NULL OR w.domain_ref=$1) ORDER BY r.saved_at DESC,w.work_ref LIMIT 200")
         .bind(domain).fetch_all(&mut *tx).await?;
     let mut summaries = Vec::new();
     for row in rows {
@@ -64,10 +64,13 @@ pub async fn list_works(
         let domain_ref = row.try_get("domain_ref")?;
         let revision_id = row.try_get("revision_ref")?;
         let saved_at = row.try_get("saved_at")?;
-        let title = match stored_document(row.try_get("document")?) {
-            Ok(document) => redact_title_in(&mut tx, domain_ref, &document).await?,
+        let (title, idea_ref) = match stored_document(row.try_get("document")?) {
+            Ok(document) => (
+                redact_title_in(&mut tx, domain_ref, &document).await?,
+                document.idea_ref,
+            ),
             Err(WorkbenchError::LegacyReferenceUnavailable) => {
-                "[历史作品：引用版本无法安全读取]".into()
+                ("[历史作品：引用版本无法安全读取]".into(), None)
             }
             Err(error) => return Err(error),
         };
@@ -77,6 +80,10 @@ pub async fn list_works(
             title,
             revision_id,
             saved_at,
+            copied_revision_id: row.try_get("copied_revision_id")?,
+            published_revision_id: row.try_get("published_revision_id")?,
+            publication_unavailable: row.try_get("publication_unavailable")?,
+            idea_ref,
         });
     }
     summaries.sort_by(|a, b| {
@@ -88,9 +95,101 @@ pub async fn list_works(
     Ok(summaries)
 }
 
+/// Idea names and intent are read through the anchor work's ordinary source projection.
+pub async fn list_idea_boxes(
+    db: &Database,
+    domain: Uuid,
+) -> Result<Vec<IdeaBoxSummary>, WorkbenchError> {
+    let mut tx = db.pool().begin().await?;
+    let rows = sqlx::query("SELECT idea_ref,anchor_work_ref FROM linggan_creation_idea_box WHERE domain_ref=$1 ORDER BY created_at DESC,idea_ref")
+        .bind(domain).fetch_all(&mut *tx).await?;
+    let mut result = Vec::new();
+    for row in rows {
+        let idea_ref: Uuid = row.try_get("idea_ref")?;
+        let anchor_work_id: Uuid = row.try_get("anchor_work_ref")?;
+        let (_, mut revision) = read_revision_in(&mut tx, anchor_work_id, None).await?;
+        redact(&mut tx, domain, &mut revision.document).await?;
+        if revision.document.idea_ref != Some(idea_ref) {
+            return Err(WorkbenchError::Invalid("idea_anchor"));
+        }
+        let name = revision
+            .document
+            .idea_name
+            .ok_or(WorkbenchError::Invalid("idea_anchor"))?;
+        result.push(IdeaBoxSummary {
+            idea_ref,
+            anchor_work_id,
+            anchor_revision_id: revision.id,
+            saved_at: revision.saved_at,
+            name,
+            intent: revision.document.angle,
+        });
+    }
+    tx.commit().await?;
+    Ok(result)
+}
+
+async fn ensure_idea_box(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    doc: &WorkDocument,
+) -> Result<(), WorkbenchError> {
+    let existing_anchor: Option<Uuid> = sqlx::query_scalar(
+        "SELECT idea_ref FROM linggan_creation_idea_box WHERE anchor_work_ref=$1",
+    )
+    .bind(work)
+    .fetch_optional(&mut **tx)
+    .await?;
+    if existing_anchor.is_some() && existing_anchor != doc.idea_ref {
+        return Err(WorkbenchError::Invalid("idea_anchor"));
+    }
+    let Some(idea) = doc.idea_ref else {
+        return Ok(());
+    };
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind(format!("creation_idea:{idea}"))
+        .execute(&mut **tx)
+        .await?;
+    let domain: Uuid =
+        sqlx::query_scalar("SELECT domain_ref FROM linggan_creation_work WHERE work_ref=$1")
+            .bind(work)
+            .fetch_one(&mut **tx)
+            .await?;
+    if doc.idea_name.is_some() {
+        sqlx::query("INSERT INTO linggan_creation_idea_box(idea_ref,domain_ref,anchor_work_ref) VALUES($1,$2,$3) ON CONFLICT (idea_ref) DO NOTHING")
+            .bind(idea).bind(domain).bind(work).execute(&mut **tx).await?;
+    }
+    let row = sqlx::query(
+        "SELECT domain_ref,anchor_work_ref FROM linggan_creation_idea_box WHERE idea_ref=$1",
+    )
+    .bind(idea)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(WorkbenchError::Invalid("idea_not_found"))?;
+    let anchor: Uuid = row.try_get("anchor_work_ref")?;
+    if row.try_get::<Uuid, _>("domain_ref")? != domain
+        || (anchor == work) != doc.idea_name.is_some()
+    {
+        return Err(WorkbenchError::Invalid("idea_anchor"));
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(DISTINCT account_ref) FROM (SELECT r.document->>'accountRef' AS account_ref FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref WHERE w.domain_ref=$1 AND w.work_ref<>$2 AND r.document->>'ideaRef'=$3 UNION ALL SELECT $4::text) accounts WHERE account_ref IS NOT NULL")
+        .bind(domain).bind(work).bind(idea.to_string()).bind(doc.account_ref.map(|id| id.to_string())).fetch_one(&mut **tx).await?;
+    if count > 3 {
+        return Err(WorkbenchError::Invalid("idea_account_limit"));
+    }
+    Ok(())
+}
+
 pub async fn read_work(db: &Database, work: Uuid) -> Result<WorkEnvelope, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
     let (domain, mut revision) = read_revision_in(&mut tx, work, None).await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *tx)
+        .await?;
+    let experience_reset_required = !super::experience_fragments::withdrawn_history(&mut tx, work)
+        .await?
+        .is_empty();
     let statuses = redact(&mut tx, domain, &mut revision.document).await?;
     let exports = super::exports::exports_in(&mut tx, work).await?;
     tx.commit().await?;
@@ -99,9 +198,22 @@ pub async fn read_work(db: &Database, work: Uuid) -> Result<WorkEnvelope, Workbe
         domain_ref: domain,
         saved_by: "local_machine".into(),
         revision,
+        experience_reset_required,
         source_statuses: statuses,
         exports,
     })
+}
+/// Requalify exactly one historical revision, without loading the complete history.
+pub async fn revision(
+    db: &Database,
+    work: Uuid,
+    revision: Uuid,
+) -> Result<Revision, WorkbenchError> {
+    let mut tx = db.pool().begin().await?;
+    let (domain, mut item) = read_revision_in(&mut tx, work, Some(revision)).await?;
+    redact(&mut tx, domain, &mut item.document).await?;
+    tx.commit().await?;
+    Ok(item)
 }
 pub async fn revisions(db: &Database, work: Uuid) -> Result<Vec<Revision>, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
@@ -124,8 +236,13 @@ async fn append(
 ) -> Result<Revision, WorkbenchError> {
     let id = Uuid::new_v4();
     let number = previous.map_or(1, |r| r.number + 1);
-    let bytes = serde_json::to_vec(&doc)?;
-    let saved_at:String=sqlx::query_scalar("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,previous_revision_ref,document,document_sha256) VALUES($1,$2,$3,$4,$5,$6) RETURNING saved_at::text").bind(id).bind(work).bind(number).bind(previous.map(|r|r.id)).bind(serde_json::to_value(&doc)?).bind(hash(bytes)).fetch_one(&mut **tx).await?;
+    let (stored, fragments) =
+        super::experience_fragments::prepare(tx, work, previous.map(|r| &r.document), &doc).await?;
+    // Experience reads and writes take the shared gate first; keep that order for idea links too.
+    ensure_idea_box(tx, work, &doc).await?;
+    let bytes = serde_json::to_vec(&stored)?;
+    let saved_at:String=sqlx::query_scalar("INSERT INTO linggan_creation_revision(revision_ref,work_ref,revision_number,previous_revision_ref,document,document_sha256) VALUES($1,$2,$3,$4,$5,$6) RETURNING saved_at::text").bind(id).bind(work).bind(number).bind(previous.map(|r|r.id)).bind(serde_json::to_value(&stored)?).bind(hash(bytes)).fetch_one(&mut **tx).await?;
+    super::experience_fragments::insert(tx, id, &fragments).await?;
     sqlx::query("UPDATE linggan_creation_work SET current_revision_ref=$2 WHERE work_ref=$1")
         .bind(work)
         .bind(id)
@@ -194,6 +311,7 @@ pub async fn save(
         &command,
         None,
         false,
+        false,
     )
     .await?;
     let (domain, _) = read_revision_in(&mut tx, work, None).await?;
@@ -247,9 +365,46 @@ async fn save_in(
     command: &str,
     adoption: Option<&AdoptionLink>,
     force_revision: bool,
+    allow_epoch_rotation: bool,
 ) -> Result<SaveReceipt, WorkbenchError> {
     ensure_request_owner_in(tx, request, RequestOwner::Work).await?;
     lock(tx, work.to_string()).await?;
+    let mut submitted_experiences: Vec<Uuid> = doc
+        .experience_slots
+        .iter()
+        .map(|slot| slot.experience_ref)
+        .collect();
+    submitted_experiences.sort_unstable();
+    submitted_experiences.dedup();
+    if !submitted_experiences.is_empty() {
+        // A stale request can contain an experience even when the current server revision no
+        // longer does. Serialize its fingerprint with withdrawal before accepting a receipt.
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+            .bind("creation_assets:experience-gate")
+            .execute(&mut **tx)
+            .await?;
+        let available: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_creation_experience WHERE experience_ref=ANY($1) AND state<>'withdrawn'")
+            .bind(&submitted_experiences).fetch_one(&mut **tx).await?;
+        if available != submitted_experiences.len() as i64 {
+            let withdrawn: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_creation_experience WHERE experience_ref=ANY($1) AND state='withdrawn')")
+                .bind(&submitted_experiences).fetch_one(&mut **tx).await?;
+            return if withdrawn {
+                let (_, current) = read_revision_in(tx, work, None).await?;
+                if !allow_epoch_rotation
+                    && current.id == expected
+                    && doc.experience_epoch != current.document.experience_epoch
+                {
+                    Err(WorkbenchError::Invalid("experience_editor_reset_required"))
+                } else {
+                    Err(WorkbenchError::Invalid(
+                        "experience_withdrawal_requires_reset",
+                    ))
+                }
+            } else {
+                Err(WorkbenchError::Source)
+            };
+        }
+    }
     if let Some(r) = replay(tx, request, command).await? {
         return Ok(r);
     }
@@ -257,6 +412,9 @@ async fn save_in(
     let (outcome, revision) = if current.id != expected {
         ("stale", current)
     } else {
+        if !allow_epoch_rotation && doc.experience_epoch != current.document.experience_epoch {
+            return Err(WorkbenchError::Invalid("experience_editor_reset_required"));
+        }
         prepare(tx, work, domain, Some(&current.document), &mut doc).await?;
         if doc == current.document && adoption.is_none() && !force_revision {
             ("unchanged", current)
@@ -268,7 +426,7 @@ async fn save_in(
             ("accepted", revision)
         }
     };
-    receipt(
+    let out = receipt(
         tx,
         work,
         request,
@@ -281,7 +439,12 @@ async fn save_in(
             revision,
         },
     )
-    .await
+    .await?;
+    for experience in submitted_experiences {
+        sqlx::query("INSERT INTO linggan_creation_experience_command_link(request_ref,experience_ref) VALUES($1,$2) ON CONFLICT DO NOTHING")
+            .bind(request).bind(experience).execute(&mut **tx).await?;
+    }
+    Ok(out)
 }
 pub async fn adopt_in(
     tx: &mut Transaction<'_, Postgres>,
@@ -297,7 +460,18 @@ pub async fn adopt_in(
     let command = hash(serde_json::to_vec(&json!([
         "adopt", work, request, expected, &doc, link
     ]))?);
-    let mut receipt = save_in(tx, work, request, expected, doc, &command, Some(link), true).await?;
+    let mut receipt = save_in(
+        tx,
+        work,
+        request,
+        expected,
+        doc,
+        &command,
+        Some(link),
+        true,
+        false,
+    )
+    .await?;
     let (domain, _) = read_revision_in(tx, work, None).await?;
     redact(tx, domain, &mut receipt.revision.document).await?;
     Ok(receipt)
@@ -309,7 +483,16 @@ pub async fn restore(
 ) -> Result<SaveReceipt, WorkbenchError> {
     let mut tx = db.pool().begin().await?;
     let command = hash(serde_json::to_vec(&json!(["restore", work, r]))?);
-    let (_, revision) = read_revision_in(&mut tx, work, Some(r.restore_revision)).await?;
+    ensure_request_owner_in(&mut tx, r.request_id, RequestOwner::Work).await?;
+    lock(&mut tx, work.to_string()).await?;
+    let (_, mut revision) = read_revision_in(&mut tx, work, Some(r.restore_revision)).await?;
+    let (_, current) = read_revision_in(&mut tx, work, None).await?;
+    // Restoring manuscript content must not silently sever or change its current idea box.
+    revision.document.idea_ref = current.document.idea_ref;
+    revision.document.idea_name = current.document.idea_name.clone();
+    if current.document.idea_name.is_some() {
+        revision.document.angle = current.document.angle.clone();
+    }
     let mut out = save_in(
         &mut tx,
         work,
@@ -319,9 +502,72 @@ pub async fn restore(
         &command,
         None,
         true,
+        false,
     )
     .await?;
     let (domain, _) = read_revision_in(&mut tx, work, None).await?;
+    redact(&mut tx, domain, &mut out.revision.document).await?;
+    tx.commit().await?;
+    Ok(out)
+}
+
+/// Resume after withdrawal from the stored server revision, never from the editor's stale body.
+pub async fn reset_withdrawn(
+    db: &Database,
+    work: Uuid,
+    r: &ResetWithdrawnRequest,
+) -> Result<SaveReceipt, WorkbenchError> {
+    let command = hash(serde_json::to_vec(&json!(["reset_withdrawn", work, r]))?);
+    let mut tx = db.pool().begin().await?;
+    ensure_request_owner_in(&mut tx, r.request_id, RequestOwner::Work).await?;
+    lock(&mut tx, work.to_string()).await?;
+    if let Some(mut result) = replay(&mut tx, r.request_id, &command).await? {
+        let (domain, _) = read_revision_in(&mut tx, work, None).await?;
+        redact(&mut tx, domain, &mut result.revision.document).await?;
+        tx.commit().await?;
+        return Ok(result);
+    }
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut *tx)
+        .await?;
+    let (domain, current) = read_revision_in(&mut tx, work, None).await?;
+    let mut doc = current.document.clone();
+    if current.id == r.expected_revision {
+        let withdrawn = super::experience_fragments::withdrawn_history(&mut tx, work).await?;
+        if withdrawn.is_empty() {
+            return Err(WorkbenchError::Invalid("experience_reset_not_required"));
+        }
+        doc.experience_epoch = Some(Uuid::new_v4());
+        let removed: Vec<Uuid> = doc
+            .experience_slots
+            .iter()
+            .filter(|slot| withdrawn.contains(&slot.experience_ref))
+            .map(|slot| slot.paragraph_id)
+            .collect();
+        doc.paragraphs
+            .retain(|paragraph| !removed.contains(&paragraph.id));
+        doc.experience_slots
+            .retain(|slot| !withdrawn.contains(&slot.experience_ref));
+        doc.experience_gaps.retain(|id| !removed.contains(id));
+        doc.uses.retain(|usage| !matches!(usage.target, UseTarget::Paragraph { paragraph_id } if removed.contains(&paragraph_id)));
+        for id in withdrawn {
+            sqlx::query("INSERT INTO linggan_creation_experience_reset(request_ref,work_ref,experience_ref) VALUES($1,$2,$3)")
+                .bind(r.request_id).bind(work).bind(id).execute(&mut *tx).await?;
+        }
+    }
+    let mut out = save_in(
+        &mut tx,
+        work,
+        r.request_id,
+        r.expected_revision,
+        doc,
+        &command,
+        None,
+        true,
+        true,
+    )
+    .await?;
     redact(&mut tx, domain, &mut out.revision.document).await?;
     tx.commit().await?;
     Ok(out)

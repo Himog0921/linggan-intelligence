@@ -8,12 +8,21 @@ use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/ops/api/creation/works", get(list).post(create))
+        .route("/ops/api/creation/idea-boxes", get(ideas))
         .route("/ops/api/creation/storage", get(storage))
         .route("/ops/api/creation/requests/{id}", get(request_receipt))
         .route("/ops/api/creation/works/{id}", get(read))
         .route("/ops/api/creation/works/{id}/save", post(save))
         .route("/ops/api/creation/works/{id}/revisions", get(history))
+        .route(
+            "/ops/api/creation/works/{id}/revisions/{revision}",
+            get(read_revision),
+        )
         .route("/ops/api/creation/works/{id}/restore", post(restore))
+        .route(
+            "/ops/api/creation/works/{id}/experience-reset",
+            post(reset_withdrawn),
+        )
         .route("/ops/api/creation/works/{id}/place", post(place))
         .route("/ops/api/creation/works/{id}/assets", post(upload_asset))
         .route("/ops/api/creation/works/{id}/assets/{asset}", get(asset))
@@ -62,6 +71,15 @@ async fn list(State(state): State<LocalWebState>, Query(q): Query<ListQuery>) ->
         Err(e) => error(e),
     }
 }
+async fn ideas(State(state): State<LocalWebState>, Query(q): Query<ListQuery>) -> Response {
+    let Some(domain) = q.domain_ref else {
+        return error(WorkbenchError::Invalid("domainRef"));
+    };
+    match core::list_idea_boxes(database!(state), domain).await {
+        Ok(items) => Json(json!({"items":items})).into_response(),
+        Err(e) => error(e),
+    }
+}
 async fn create(State(state): State<LocalWebState>, Json(r): Json<CreateRequest>) -> Response {
     receipt(core::create_work(database!(state), &r).await)
 }
@@ -81,12 +99,28 @@ async fn history(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Re
         Err(e) => error(e),
     }
 }
+async fn read_revision(
+    State(state): State<LocalWebState>,
+    Path((work, revision)): Path<(Uuid, Uuid)>,
+) -> Response {
+    match core::revision(database!(state), work, revision).await {
+        Ok(item) => Json(item).into_response(),
+        Err(e) => error(e),
+    }
+}
 async fn restore(
     State(state): State<LocalWebState>,
     Path(id): Path<Uuid>,
     Json(r): Json<RestoreRequest>,
 ) -> Response {
     receipt(core::restore(database!(state), id, &r).await)
+}
+async fn reset_withdrawn(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(r): Json<ResetWithdrawnRequest>,
+) -> Response {
+    receipt(core::reset_withdrawn(database!(state), id, &r).await)
 }
 async fn place(
     State(state): State<LocalWebState>,
@@ -198,6 +232,20 @@ fn receipt(r: Result<SaveReceipt, WorkbenchError>) -> Response {
 }
 pub(super) fn error(e: WorkbenchError) -> Response {
     let (status, code) = match e {
+        WorkbenchError::Invalid("experience_withdrawal_requires_reset") => {
+            (StatusCode::CONFLICT, "creation_experience_reset_required")
+        }
+        WorkbenchError::Invalid("experience_editor_reset_required") => (
+            StatusCode::CONFLICT,
+            "creation_experience_editor_reset_required",
+        ),
+        WorkbenchError::Invalid("idea_account_limit") => {
+            (StatusCode::CONFLICT, "creation_idea_account_limit")
+        }
+        WorkbenchError::Invalid("idea_anchor") => (StatusCode::CONFLICT, "creation_idea_anchor"),
+        WorkbenchError::Invalid("idea_not_found") => {
+            (StatusCode::CONFLICT, "creation_idea_not_found")
+        }
         WorkbenchError::Invalid(_) => (StatusCode::BAD_REQUEST, "creation_parameter_invalid"),
         WorkbenchError::NotFound => (StatusCode::NOT_FOUND, "creation_not_found"),
         WorkbenchError::RequestConflict => (StatusCode::CONFLICT, "creation_request_conflict"),

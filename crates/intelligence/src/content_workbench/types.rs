@@ -53,6 +53,15 @@ pub struct Paragraph {
     pub id: Uuid,
     pub text: String,
 }
+/// Provenance of a whole paragraph containing a personal experience or an edit derived from it.
+/// The paragraph text is projected from erasable storage and is not embedded in revisions.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExperienceSlot {
+    pub paragraph_id: Uuid,
+    pub experience_ref: Uuid,
+    pub experience_revision: i32,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Excerpt {
@@ -213,6 +222,13 @@ pub struct MaterialUse {
     pub state: UseState,
     pub content_origin: ContentOrigin,
 }
+/// An output target derived from a selected source, including paraphrases.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DerivedSource {
+    pub target: UseTarget,
+    pub citation: Citation,
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MaterialSelection {
@@ -268,6 +284,17 @@ pub struct BridgeChoice {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    /// Non-sensitive ordering metadata for erasable experience-bound source uses; never client input.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub experience_use_order: Vec<Uuid>,
+    /// Changes when the server discards stale editor state following a withdrawal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experience_epoch: Option<Uuid>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub experience_slots: Vec<ExperienceSlot>,
+    /// Paragraphs explicitly reserved for a real experience that has not yet been supplied.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub experience_gaps: Vec<Uuid>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bridge: Option<BridgeChoice>,
     /// Whether the cover image is AI-made; absent means not recorded, never "no".
@@ -279,10 +306,21 @@ pub struct WorkDocument {
     pub material_preparation: Option<MaterialPreparation>,
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Manually entered alternatives, kept with the draft revision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cover_title_candidates: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub note_title_candidates: Vec<String>,
     pub contract: String,
     pub title: String,
     pub account_ref: Option<Uuid>,
     pub topic_ref: Option<Uuid>,
+    /// Creation idea identity is distinct from topic_ref, which belongs to the research graph.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idea_ref: Option<Uuid>,
+    /// Only the idea's anchor work owns its name; its angle holds the idea's intent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idea_name: Option<String>,
     pub angle: String,
     pub outline: Vec<String>,
     pub paragraphs: Vec<Paragraph>,
@@ -290,19 +328,29 @@ pub struct WorkDocument {
     pub canvas: Vec<CanvasBlock>,
     pub pages: Vec<ImagePage>,
     pub uses: Vec<MaterialUse>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub derived_sources: Vec<DerivedSource>,
 }
 impl Default for WorkDocument {
     fn default() -> Self {
         Self {
             contract: "content-workbench.v1".into(),
+            experience_epoch: None,
+            experience_use_order: vec![],
+            experience_slots: vec![],
+            experience_gaps: vec![],
             bridge: None,
             cover_ai: None,
             materials: vec![],
             material_preparation: None,
             tags: vec![],
+            cover_title_candidates: vec![],
+            note_title_candidates: vec![],
             title: String::new(),
             account_ref: None,
             topic_ref: None,
+            idea_ref: None,
+            idea_name: None,
             angle: String::new(),
             outline: vec![],
             paragraphs: vec![],
@@ -310,6 +358,7 @@ impl Default for WorkDocument {
             canvas: vec![],
             pages: vec![],
             uses: vec![],
+            derived_sources: vec![],
         }
     }
 }
@@ -344,6 +393,12 @@ pub struct RestoreRequest {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResetWithdrawnRequest {
+    pub request_id: Uuid,
+    pub expected_revision: Uuid,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PlaceRequest {
     pub request_id: Uuid,
     pub expected_revision: Uuid,
@@ -373,6 +428,7 @@ pub struct WorkEnvelope {
     pub domain_ref: Uuid,
     pub saved_by: String,
     pub revision: Revision,
+    pub experience_reset_required: bool,
     pub source_statuses: Vec<SourceStatus>,
     pub exports: Vec<ExportRecord>,
 }
@@ -384,6 +440,22 @@ pub struct WorkSummary {
     pub title: String,
     pub revision_id: Uuid,
     pub saved_at: String,
+    /// The current revision if confirmed copied to the clipboard; this is not a publication.
+    pub copied_revision_id: Option<Uuid>,
+    /// Linked Operations record and the revision it describes, never inferred from clipboard state.
+    pub published_revision_id: Option<Uuid>,
+    pub publication_unavailable: bool,
+    pub idea_ref: Option<Uuid>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IdeaBoxSummary {
+    pub idea_ref: Uuid,
+    pub anchor_work_id: Uuid,
+    pub anchor_revision_id: Uuid,
+    pub saved_at: String,
+    pub name: String,
+    pub intent: String,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

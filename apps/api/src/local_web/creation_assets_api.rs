@@ -12,6 +12,22 @@ pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/ops/api/creation/accounts", get(accounts))
         .route(
+            "/ops/api/creation/structural-templates",
+            get(list_structural_templates).post(create_structural_template),
+        )
+        .route(
+            "/ops/api/creation/structural-templates/{code}/review",
+            post(review_structural_template),
+        )
+        .route(
+            "/ops/api/creation/structural-templates/{code}/revisions",
+            get(structural_template_history).post(revise_structural_template),
+        )
+        .route(
+            "/ops/api/creation/ai-budget",
+            get(read_creative_budget).put(change_creative_budget),
+        )
+        .route(
             "/ops/api/creation/accounts/{id}/identity",
             put(put_identity),
         )
@@ -45,12 +61,72 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(review_sentence),
         )
         .route("/ops/api/creation/checks", post(check_draft))
+        .route(
+            "/ops/api/creation/saved-draft-checks",
+            post(check_saved_drafts),
+        )
+        .route(
+            "/ops/api/creation/persona-facts",
+            get(list_persona_facts).post(put_persona_fact),
+        )
+        .route(
+            "/ops/api/creation/persona-facts/{id}/history",
+            get(persona_fact_history),
+        )
+        .route(
+            "/ops/api/creation/persona-requests/{id}",
+            get(persona_request_status).post(cancel_persona_request),
+        )
+        .route(
+            "/ops/api/creation/persona-facts/{id}/confirm",
+            post(confirm_persona_fact),
+        )
+        .route(
+            "/ops/api/creation/persona-facts/{id}/withdraw",
+            post(withdraw_persona_fact),
+        )
+        .route(
+            "/ops/api/creation/experiences",
+            get(list_experiences).post(create_experience),
+        )
+        .route(
+            "/ops/api/creation/experience-requests/{id}",
+            get(experience_request_status).post(cancel_experience_request),
+        )
+        .route(
+            "/ops/api/creation/experiences/{id}",
+            get(read_experience).put(edit_experience),
+        )
+        .route(
+            "/ops/api/creation/experiences/{id}/confirm",
+            post(confirm_experience),
+        )
+        .route(
+            "/ops/api/creation/experiences/{id}/withdraw",
+            post(withdraw_experience),
+        )
         .route("/ops/api/creation/works/{id}/copy", post(prepare_copy))
         .route(
             "/ops/api/creation/works/{id}/copy/{receipt}/confirm",
             post(confirm_copy),
         )
         .route("/ops/api/creation/works/{id}/copy-status", get(copy_status))
+        .route(
+            "/ops/api/creation/works/{id}/publication-candidates",
+            get(publication_candidates),
+        )
+        .route(
+            "/ops/api/creation/works/{id}/publication-link",
+            post(link_publication),
+        )
+        .route(
+            "/ops/api/creation/works/{id}/publication-links",
+            get(publication_links),
+        )
+        .route(
+            "/ops/api/creation/works/{id}/publication-links/{link}/unlink",
+            post(unlink_publication),
+        )
         .layer(DefaultBodyLimit::max(3 * 1024 * 1024))
         .layer(axum::middleware::from_fn(
             super::comment_study::local_comment_study_guard,
@@ -80,10 +156,20 @@ fn reply<T: serde::Serialize>(result: Result<T, AssetsError>) -> Response {
 
 fn failure(error: AssetsError) -> Response {
     let (status, code) = match error {
+        AssetsError::Invalid("person_change_required") => {
+            (StatusCode::BAD_REQUEST, "creation_person_change_required")
+        }
+        AssetsError::Invalid("persona_conflict_decision") => (
+            StatusCode::BAD_REQUEST,
+            "creation_persona_conflict_decision",
+        ),
         AssetsError::Invalid(_) => (StatusCode::BAD_REQUEST, "creation_assets_parameter_invalid"),
         AssetsError::NotFound => (StatusCode::NOT_FOUND, "creation_assets_not_found"),
         AssetsError::RequestConflict => (StatusCode::CONFLICT, "creation_assets_request_conflict"),
         AssetsError::Stale => (StatusCode::CONFLICT, "creation_assets_stale"),
+        AssetsError::SourceUnavailable => {
+            (StatusCode::CONFLICT, "creation_assets_source_unavailable")
+        }
         AssetsError::Blocked(findings) => {
             return (
                 StatusCode::CONFLICT,
@@ -100,6 +186,55 @@ fn failure(error: AssetsError) -> Response {
         ),
     };
     local_read_json_error(status, code)
+}
+
+async fn read_creative_budget(State(state): State<LocalWebState>) -> Response {
+    reply(assets::read_creative_budget(database!(state)).await)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TemplateQuery {
+    domain_ref: Uuid,
+}
+async fn list_structural_templates(
+    State(state): State<LocalWebState>,
+    Query(query): Query<TemplateQuery>,
+) -> Response {
+    reply(assets::list_structural_templates(database!(state), query.domain_ref).await)
+}
+async fn create_structural_template(
+    State(state): State<LocalWebState>,
+    Json(command): Json<assets::CreateTemplate>,
+) -> Response {
+    reply(assets::create_structural_template(database!(state), &command).await)
+}
+async fn review_structural_template(
+    State(state): State<LocalWebState>,
+    Path(code): Path<String>,
+    Json(command): Json<assets::ReviewTemplate>,
+) -> Response {
+    reply(assets::review_structural_template(database!(state), &code, &command).await)
+}
+async fn structural_template_history(
+    State(state): State<LocalWebState>,
+    Path(code): Path<String>,
+) -> Response {
+    reply(assets::structural_template_history(database!(state), &code).await)
+}
+async fn revise_structural_template(
+    State(state): State<LocalWebState>,
+    Path(code): Path<String>,
+    Json(command): Json<assets::ReviseTemplate>,
+) -> Response {
+    reply(assets::revise_structural_template(database!(state), &code, &command).await)
+}
+
+async fn change_creative_budget(
+    State(state): State<LocalWebState>,
+    Json(command): Json<assets::ChangeCreativeBudget>,
+) -> Response {
+    reply(assets::change_creative_budget(database!(state), &command).await)
 }
 
 #[derive(Deserialize)]
@@ -122,6 +257,129 @@ async fn put_identity(
 }
 async fn candidates(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
     reply(assets::candidates_for_account(database!(state), id).await)
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PersonaFactsQuery {
+    account_ref: Uuid,
+}
+async fn list_persona_facts(
+    State(state): State<LocalWebState>,
+    Query(q): Query<PersonaFactsQuery>,
+) -> Response {
+    match assets::list_persona_facts(database!(state), q.account_ref).await {
+        Ok(items) => Json(json!({"items":items})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn put_persona_fact(
+    State(state): State<LocalWebState>,
+    Json(command): Json<PersonaFactPut>,
+) -> Response {
+    reply(assets::put_persona_fact(database!(state), &command).await)
+}
+async fn persona_fact_history(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    match assets::persona_fact_history(database!(state), id).await {
+        Ok(items) => Json(json!({"items":items})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn persona_request_status(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    match assets::persona_request_status(database!(state), id).await {
+        Ok(result) => Json(json!({"result":result})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn cancel_persona_request(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    reply(assets::cancel_persona_request(database!(state), id).await)
+}
+async fn confirm_persona_fact(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<PersonaFactConfirm>,
+) -> Response {
+    reply(assets::confirm_persona_fact(database!(state), id, &command).await)
+}
+async fn withdraw_persona_fact(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<WithdrawCommand>,
+) -> Response {
+    reply(assets::withdraw_persona_fact(database!(state), id, command.request_id).await)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ExperiencesQuery {
+    account_ref: Uuid,
+}
+async fn list_experiences(
+    State(state): State<LocalWebState>,
+    Query(q): Query<ExperiencesQuery>,
+) -> Response {
+    match assets::list_experiences(database!(state), q.account_ref).await {
+        Ok(items) => Json(json!({"items": items})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn create_experience(
+    State(state): State<LocalWebState>,
+    Json(command): Json<ExperienceCreate>,
+) -> Response {
+    reply(assets::create_experience(database!(state), &command).await)
+}
+async fn experience_request_status(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    match assets::experience_request_status(database!(state), id).await {
+        Ok(value) => Json(json!({"result": value})).into_response(),
+        Err(error) => failure(error),
+    }
+}
+async fn cancel_experience_request(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    reply(assets::cancel_experience_request(database!(state), id).await)
+}
+async fn read_experience(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
+    reply(assets::read_experience(database!(state), id).await)
+}
+async fn edit_experience(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<ExperienceEdit>,
+) -> Response {
+    reply(assets::edit_experience(database!(state), id, &command).await)
+}
+async fn confirm_experience(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<ExperienceConfirm>,
+) -> Response {
+    reply(assets::confirm_experience(database!(state), id, &command).await)
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct WithdrawCommand {
+    request_id: Uuid,
+}
+async fn withdraw_experience(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<WithdrawCommand>,
+) -> Response {
+    reply(assets::withdraw_experience(database!(state), id, command.request_id).await)
 }
 
 async fn list_fact_cards(State(state): State<LocalWebState>) -> Response {
@@ -197,12 +455,58 @@ async fn check_sentence(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct DraftCheck {
     document: WorkDocument,
+    work_ref: Option<Uuid>,
 }
 async fn check_draft(
     State(state): State<LocalWebState>,
     Json(request): Json<DraftCheck>,
 ) -> Response {
-    reply(assets::check_draft(database!(state), &request.document).await)
+    reply(assets::check_draft_for_work(database!(state), &request.document, request.work_ref).await)
+}
+async fn check_saved_drafts(
+    State(state): State<LocalWebState>,
+    Json(request): Json<SavedDraftCheckRequest>,
+) -> Response {
+    reply(
+        assets::check_saved_drafts(database!(state), &request)
+            .await
+            .map(|items| json!({"items": items})),
+    )
+}
+async fn publication_candidates(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+) -> Response {
+    reply(
+        assets::publication_candidates(database!(state), id)
+            .await
+            .map(|items| json!({"items":items})),
+    )
+}
+async fn link_publication(
+    State(state): State<LocalWebState>,
+    Path(id): Path<Uuid>,
+    Json(command): Json<PublicationLinkCommand>,
+) -> Response {
+    reply(assets::link_publication(database!(state), id, &command).await)
+}
+async fn publication_links(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
+    reply(
+        assets::publication_links(database!(state), id)
+            .await
+            .map(|items| json!({"items":items})),
+    )
+}
+async fn unlink_publication(
+    State(state): State<LocalWebState>,
+    Path((id, link)): Path<(Uuid, Uuid)>,
+    Json(command): Json<PublicationUnlinkCommand>,
+) -> Response {
+    reply(
+        assets::unlink_publication(database!(state), id, link, command.request_id)
+            .await
+            .map(|replayed| json!({"linkRef":link,"replayed":replayed})),
+    )
 }
 async fn prepare_copy(
     State(state): State<LocalWebState>,

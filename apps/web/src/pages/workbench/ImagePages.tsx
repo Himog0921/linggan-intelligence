@@ -1,8 +1,8 @@
 import { humanMoment } from '../../shared/formatting';
 import { newImagePage as newPage } from './imagePageFactory';
 import { ActionButton } from '../../shared/ActionButton';
-import { useEffect, useRef, useState } from 'react';
-import type { AssetRecord, ExportRecord, ImagePage, Revision, WorkDocument } from './workbenchModel';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { AssetRecord, Citation, ExportRecord, ImagePage, Revision, WorkDocument } from './workbenchModel';
 import { ExportWorkflow, exportPackageUrl, exportPageUrl } from './exportWorkflow';
 import type { ExportProgress, ExportTransport } from './exportWorkflow';
 import { previewSplit, renderPage } from './renderer';
@@ -17,6 +17,11 @@ interface Props {
   document: WorkDocument;
   workId: string;
   currentRevisionId?: string;
+  sourceRevision?: Revision;
+  onReadRevision?: (revision: string) => Promise<Revision>;
+  onQualifySources?: (citations: Citation[]) => Promise<boolean>;
+  sourceCheckGeneration?: () => number;
+  sourceResetSequence?: number;
   onChange: (document: WorkDocument) => void;
   onUploadAsset: (file: File) => Promise<AssetRecord>;
   disabled?: boolean;
@@ -71,7 +76,7 @@ const progressLabel = (value: ExportProgress) => ({ saving: '正在保存作品'
 export function ImagePages(props: Props) {
   const { document: documentValue, workId, onChange, disabled = false } = props;
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [deleted, setDeleted] = useState<{page: ImagePage; index: number}[]>([]);
+  const [deleted, setDeleted] = useState<{page: ImagePage; index: number; baseline?: Revision; sources: WorkDocument['derivedSources']; excerptIds: string[]; citations: Citation[]}[]>([]);
   const [titleProposal, setTitleProposal] = useState<string | null>(null);
   const [titleUndo, setTitleUndo] = useState<{pageId: string; before: string; after: string} | null>(null);
   const [split, setSplit] = useState<{original: ImagePage; pages: ImagePage[]} | null>(null);
@@ -88,9 +93,21 @@ export function ImagePages(props: Props) {
   const [bodyChanges, setBodyChanges] = useState<BodyChange[]>([]);
   const dismissedChanges = useRef(new Set<string>());
   const latestDocument = useRef(documentValue);
+  const contentGeneration = useRef(0);
+  const lastEpoch = useRef(documentValue.experienceEpoch);
+  const lastSourceReset = useRef(props.sourceResetSequence);
   const [exportRetryAvailable, setExportRetryAvailable] = useState(false);
   const [exportUnconfirmed, setExportUnconfirmed] = useState(false);
-  useEffect(() => { latestDocument.current = documentValue; }, [documentValue]);
+  useLayoutEffect(() => {
+    latestDocument.current = documentValue;
+    if (lastEpoch.current === documentValue.experienceEpoch && lastSourceReset.current === props.sourceResetSequence) return;
+    lastEpoch.current = documentValue.experienceEpoch;
+    lastSourceReset.current = props.sourceResetSequence;
+    contentGeneration.current += 1;
+    setDeleted([]); setTitleProposal(null); setTitleUndo(null); setSplit(null);
+    setValidation(null); setLastGeneratedDocument(null); setBodyChanges([]);
+    dismissedChanges.current.clear();
+  }, [documentValue, props.sourceResetSequence]);
   const workflow = useRef<ExportWorkflow | null>(null);
   const editablePages = documentValue.pages.filter(item => props.step === 'cover' ? item.kind === 'cover' : props.step === 'inner' ? item.kind !== 'cover' : true);
   const page = editablePages.find(item => item.id === selectedId) ?? editablePages[0];
@@ -181,23 +198,62 @@ export function ImagePages(props: Props) {
   };
   const deletePage = () => {
     if (!page || page.kind === 'cover') return;
-    setDeleted(current => [...current, {page, index: documentValue.pages.findIndex(item => item.id === page.id)}]);
+    const sources = documentValue.derivedSources.filter(source => 'pageId' in source.target && source.target.pageId === page.id);
+    const excerptIds = documentValue.uses.flatMap(use => 'pageId' in use.target && use.target.pageId === page.id && use.excerptId ? [use.excerptId] : []);
+    const citations = [...sources.map(source => source.citation), ...excerptIds.flatMap(id => {
+      const excerpt = documentValue.excerpts.find(item => item.id === id);
+      return excerpt ? [excerpt.citation] : [];
+    })];
+    setDeleted(current => [...current, {page, index: documentValue.pages.findIndex(item => item.id === page.id), baseline: props.sourceRevision, sources, excerptIds, citations}]);
     onChange({ ...documentValue, pages: documentValue.pages.filter(item => item.id !== page.id) });
     setSelectedId(null); setSplit(null);
   };
-  const recoverPage = () => {
-    const last = deleted.at(-1); if (!last) return;
-    const pages = [...documentValue.pages]; pages.splice(Math.min(last.index, pages.length), 0, last.page);
-    onChange({ ...documentValue, pages }); setDeleted(current => current.slice(0, -1)); setSelectedId(last.page.id);
+  const recoverPage = async () => {
+    const last = deleted.at(-1); if (!last || busy) return;
+    const generation = props.sourceCheckGeneration?.();
+    setBusy(true); setError('');
+    try {
+      if (last.sources.length || last.excerptIds.length) {
+        const baseline = last.baseline;
+        const oldPage = baseline?.document.pages.find(item => item.id === last.page.id);
+        const knownSources = last.sources.every(item => baseline?.document.derivedSources.some(source => JSON.stringify(source) === JSON.stringify(item)));
+        const knownExcerpts = last.excerptIds.every(id => baseline?.document.excerpts.some(excerpt => excerpt.id === id));
+        if (baseline && oldPage && knownSources && knownExcerpts && props.onReadRevision) {
+          const source = await props.onReadRevision(baseline.id);
+          const original = source.document.pages.find(item => item.id === last.page.id);
+          const unavailable = last.excerptIds.some(id => source.document.excerpts.find(excerpt => excerpt.id === id)?.selectedText === null || !source.document.excerpts.some(excerpt => excerpt.id === id));
+          if (!original || JSON.stringify(original) !== JSON.stringify(oldPage) || unavailable) { setError('来源当前不可用或图页已变化，暂不能恢复此页。'); return; }
+        } else if (last.citations.length < last.sources.length + last.excerptIds.length || !props.onQualifySources || !await props.onQualifySources(last.citations)) {
+          setError('来源当前不可用或无法核验，暂不能恢复此页。'); return;
+        }
+      }
+      if (props.sourceCheckGeneration && generation !== props.sourceCheckGeneration()) {
+        setError('来源状态已变化，请重新核验后再恢复此页。'); return;
+      }
+      const latest = latestDocument.current;
+      const pages = [...latest.pages]; pages.splice(Math.min(last.index, pages.length), 0, last.page);
+      const sources = [...latest.derivedSources];
+      for (const item of last.sources) if (!sources.some(source => JSON.stringify(source) === JSON.stringify(item))) sources.push(item);
+      onChange({ ...latest, pages, derivedSources: sources }); setDeleted(current => current.slice(0, -1)); setSelectedId(last.page.id);
+    } catch { setError('无法核验来源，暂不能恢复此页。'); }
+    finally { setBusy(false); }
   };
   const upload = async (file?: File, retryPageId?: string) => {
-    if (!file || !page) return;
-    const targetId = retryPageId ?? page.id;
+    if (!file) return;
+    const targetId = retryPageId ?? page?.id;
+    if (!targetId || !latestDocument.current.pages.some(item => item.id === targetId)) {
+      setError('原目标页已不存在，待核对的图片仍保留；请先恢复原目标页再重试。');
+      return;
+    }
     setPendingUpload({file,pageId:targetId});
     setBusy(true); setError('');
     try {
       const asset = await props.onUploadAsset(file);
       const latest = latestDocument.current;
+      if (!latest.pages.some(item => item.id === targetId)) {
+        setError('图片已登记，但原目标页已不存在；待核对的图片仍保留，请先恢复原目标页再重试。');
+        return;
+      }
       onChange({ ...latest, pages: latest.pages.map(item => item.id === targetId ? { ...item, assetId: asset.id, crop: {x: 0, y: 0, width: 1, height: 1} } : item) });
       setMessage('自有图片已上传；保存作品后保留图片关联');
       setPendingUpload(null);
@@ -216,7 +272,7 @@ export function ImagePages(props: Props) {
         await workflow.current.start(workId, props.onSave, progress, singlePageId);
       setLocalExports(current => [result, ...current.filter(item => item.id !== result.id)]);
       props.onExportComplete?.(result);
-      if (mode === 'new') setLastGeneratedDocument(documentValue);
+      if (mode === 'new' && latestDocument.current.experienceEpoch === documentValue.experienceEpoch) setLastGeneratedDocument(documentValue);
       if (singlePageId) setMessage('单页 PNG 已生成，可在下方下载；其余图页可继续生成图文包');
     } catch (cause) {
       const prefix = workflow.current.hasUnconfirmed ? '生成结果尚未确认，请先核实原请求' : '生成未完成';
@@ -245,7 +301,7 @@ export function ImagePages(props: Props) {
       <div className={styles.actions}>
         {!showingExport && props.onUndo && <ActionButton variant="soft" disabled={locked || !props.canUndo} onClick={props.onUndo}>撤销图页编辑</ActionButton>}
         {!showingExport && props.onRedo && <ActionButton variant="soft" disabled={locked || !props.canRedo} onClick={props.onRedo}>重做图页编辑</ActionButton>}
-        {!showingExport && deleted.length > 0 && <ActionButton disabled={locked || documentValue.pages.length >= 30} onClick={recoverPage}>恢复删除页</ActionButton>}
+        {!showingExport && deleted.length > 0 && <ActionButton disabled={locked || documentValue.pages.length >= 30} onClick={() => void recoverPage()}>恢复删除页</ActionButton>}
       </div>
       {!props.step && <ActionButton aria-pressed={allPreview} onClick={() => setAllPreview(value => !value)}>{allPreview ? '返回编辑' : '整组预览'}</ActionButton>}
     </div>
@@ -264,7 +320,7 @@ export function ImagePages(props: Props) {
         </div>)}</div>
         <aside className={styles.exportPanel}>
           <section><h3>笔记正文</h3><div className={styles.exportCopy}><strong>{documentValue.title || '尚未填写标题'}</strong><p>{documentValue.paragraphs.map(item => item.text).join('\n\n')}</p>{documentValue.tags.length > 0 && <p>{documentValue.tags.map(tag => `#${tag}`).join(' ')}</p>}</div>
-            <ActionButton onClick={() => { void navigator.clipboard.writeText([documentValue.title,documentValue.paragraphs.map(item => item.text).join('\n\n'),documentValue.tags.map(tag => `#${tag}`).join(' ')].filter(Boolean).join('\n\n')).then(() => setMessage('标题与正文已复制')).catch(() => setError('复制未完成，请手动选取正文复制')); }}>复制标题与正文</ActionButton>
+            <ActionButton disabled={!props.onStepChange} onClick={() => props.onStepChange?.('body')}>前往正文检查与复制</ActionButton>
           </section>
           <section><h3>导出前检查</h3>{currentValidation === null ? <p className={styles.note} role="status">正在检查字体、图片与文字画幅…</p> : currentValidation.length ? currentValidation.map(issue => <p key={issue} className={styles.error}>{issue}</p>) : <>
             <p className={styles.check}>✓ 标题与正文已填写</p><p className={styles.check}>✓ {documentValue.pages.length} 张图片完整，文字未溢出</p></>}
@@ -306,7 +362,7 @@ export function ImagePages(props: Props) {
             <details className={styles.controlSection} open={!!page.assetId}><summary>自有图片与裁切{page.assetId ? ' · 已关联' : ''}</summary><label>自有图片<input aria-label="自有图片" type="file" disabled={pendingUpload !== null} accept="image/png,image/jpeg,image/webp" onChange={event => { void upload(event.target.files?.[0]); event.target.value = ''; }}/></label>
               {page.assetId && <><div className={styles.twoFields}>{(['x','y','width','height'] as const).map(key => <label key={key}>{({x:'横向位置',y:'纵向位置',width:'裁切宽度',height:'裁切高度'})[key]}<input type="number" min={key === 'width' || key === 'height' ? 1 : 0} max={100} value={Math.round(page.crop[key] * 100)} onChange={event => { const raw = Number(event.target.value) / 100; const crop = {...page.crop, [key]: Math.min(1, Math.max(key === 'width' || key === 'height' ? 0.01 : 0, raw))}; crop.x = Math.min(crop.x, 1 - crop.width); crop.y = Math.min(crop.y, 1 - crop.height); patch({crop}); }}/></label>)}</div><ActionButton variant="danger" onClick={() => patch({assetId: null})}>移除图片</ActionButton></>}
             </details>
-            <div className={styles.controlSection}><ActionButton onClick={() => { setBusy(true); setError(''); void previewSplit(page, {assetUrl: page.assetId ? `/ops/api/creation/works/${workId}/assets/${page.assetId}` : undefined}).then(pages => setSplit({original: page, pages})).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '拆页预览失败')).finally(() => setBusy(false)); }}>预览长文拆页</ActionButton>
+            <div className={styles.controlSection}><ActionButton onClick={() => { const generation = contentGeneration.current; setBusy(true); setError(''); void previewSplit(page, {assetUrl: page.assetId ? `/ops/api/creation/works/${workId}/assets/${page.assetId}` : undefined}).then(pages => { if (contentGeneration.current === generation) setSplit({original: page, pages}); }).catch((cause: unknown) => setError(cause instanceof Error ? cause.message : '拆页预览失败')).finally(() => setBusy(false)); }}>预览长文拆页</ActionButton>
               {page.kind !== 'cover' && <div className={styles.pageTools}><div className={styles.actions}><ActionButton onClick={() => movePage(-1)} disabled={locked || documentValue.pages.indexOf(page) <= (documentValue.pages[0]?.kind === 'cover' ? 1 : 0)}>上移</ActionButton><ActionButton onClick={() => movePage(1)} disabled={locked || documentValue.pages.at(-1)?.id === selected}>下移</ActionButton></div><ActionButton variant="quiet" onClick={deletePage}>删除此页</ActionButton></div>}
               {(!props.step || props.step === 'inner') && <div className={styles.actions}>{(['opinion','voice','steps'] as const).map(kind => <ActionButton variant="quiet" key={kind} disabled={documentValue.pages.length >= 30} onClick={() => addPage(kind)}>添加{LABELS[kind]}页</ActionButton>)}</div>}
             </div>

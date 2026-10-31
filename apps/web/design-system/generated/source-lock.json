@@ -1,5 +1,5 @@
 {
-  "fingerprint": "10f2028975693d69b9b74054ac5d7acb196e753bf7a069e0108507061adbeaf2",
+  "fingerprint": "f99d21935311b2225dc530be6b55e0d9c8a0ed1d59f805538cf230fc398bf8e3",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -247,7 +247,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "eb094364b226bfca46c74d2369f95b30a771caf0cfd79edd8cca29dd2facbaff"
+      "sha256": "0e3ed30c096455b597e274684f29b9ee3a553b3771955ff9f03e2e2c5f523a2c"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -287,15 +287,15 @@
     },
     {
       "path": "apps/web/src/pages/workbench/TopicLibrary.tsx",
-      "sha256": "67168d28eb3bfff1cd3e48fe40b2c97ad5ffc8387059df0980c79043604afb48"
+      "sha256": "2e391c0897a05cc5bad6ca865eb5679559032ddfba5b9c768b97f2e8f55b95fa"
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.module.css",
-      "sha256": "d496c6d2b88ba60a9053e60d55fbc405df986557c2261dfb9f148e0590dd1132"
+      "sha256": "8b89798fe019c58cb9022089fd1f7d04f24bb693e935bd7ddf1b01c4e210b60d"
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "5250131b38153f91ca8e34d672782b2a57a29ff38d6d60c1f64792dc4a4ad7e9"
+      "sha256": "3a2c0e1eafddc482c36306c730bffbf77a6d75b2d56a33a97fa4ced295445cc0"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",
@@ -347,7 +347,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "901db23a4ba790ef688aa68554b769f4fbe8d3cf893c7ce9a33bddb6310dfe87"
+      "sha256": "7c299460028edf15040cb9d31ee60012b913b8a7cfc944fac0788b808bb454c0"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

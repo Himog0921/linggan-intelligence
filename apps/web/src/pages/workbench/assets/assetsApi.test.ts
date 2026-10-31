@@ -85,6 +85,14 @@ describe('asset responses', () => {
 });
 
 describe('asset requests', () => {
+  it('sends experience slots and empty gaps to the local manuscript check', async () => {
+    const f = stub(reply(report));
+    const doc = { ...newDocument(), paragraphs: [{ id, text: '' }, { id: other, text: '合成' }],
+      experienceGaps: [id], experienceSlots: [{ paragraphId: other, experienceRef: id, experienceRevision: 1 }] };
+    await checkDraft(doc, undefined, other);
+    expect(call(f).body.document).toMatchObject({ experienceGaps: [id], experienceSlots: doc.experienceSlots });
+    expect(call(f).body.workRef).toBe(other);
+  });
   it('reads accounts, candidates, cards and sentences with the documented paths', async () => {
     const f = stub(
       reply({ items: [{ accountRef: id, accountName: '甲', platform: 'xhs', status: 'active', operatorName: null, identity }] }),
@@ -145,6 +153,17 @@ describe('asset requests', () => {
     expect(call(f).body.document.excerpts).toEqual([]);
   });
 
+  it('preserves a direct comment citation and placement in the check projection', () => {
+    const doc = { ...newDocument(), paragraphs: [{ id, text: '合成评论：今年四年级' }],
+      excerpts: [{ id: other, citation: { sourceKind: 'comment' }, selectedText: '合成评论：今年四年级' }] as never,
+      canvas: [{ id: 'canvas', excerptId: other, note: '无关笔记', expression: '无关表达' }] as never,
+      uses: [{ id: 'use', canvasId: 'canvas', excerptId: other, target: { kind: 'paragraph', paragraphId: id }, contentOrigin: 'excerpt', sourceSpan: { start: 0, end: 11, textHash: 'hash' } }] as never };
+    const projected = checkDocument(doc);
+    expect(projected.excerpts).toEqual(doc.excerpts);
+    expect(projected.uses).toEqual(doc.uses);
+    expect(projected.canvas[0]).toMatchObject({ note: '', expression: '' });
+  });
+
   it('copies in two steps and reads the copied mark', async () => {
     const ready = { receiptRef: other, workId: id, revisionId: id, rulesetVersion: 'creation-checks.v1', title: '标题', body: '正文', tags: ['#ADHD'],
       text: '正文\n#ADHD', warnCount: 1, hintCount: 0, replayed: false };
@@ -163,6 +182,7 @@ describe('asset requests', () => {
   it('turns failures into plain sentences without blaming the user or hiding that the input is kept', () => {
     const http = (code: string | null) => assetsErrorText(new ApiError({ kind: 'http', status: 409, code }));
     expect(http('creation_assets_stale')).toContain('刷新');
+    expect(http('creation_assets_source_unavailable')).toContain('来源当前不可使用');
     expect(http('creation_assets_blocked')).toContain('规则');
     expect(http('something_new')).toContain('当前输入仍保留');
     expect(http(null)).toContain('当前输入仍保留');

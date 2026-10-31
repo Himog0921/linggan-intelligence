@@ -16,6 +16,8 @@ JSON 统一 camelCase、UUID 稳定身份；范围为 Unicode scalar / code-poin
 
 `WorkDocument` contract 为 `content-workbench.v1`，含 title/tags/accountRef/topicRef/angle/outline/paragraphs/excerpts/canvas/pages/uses/materials/materialPreparation，以及两个可选字段 bridge/coverAi（CREATION-ASSETS-001，见下）。具体 Rust 类型唯一放 `content_workbench/types.rs`，对外所有写入 deny_unknown_fields 并验证类型、长度、数量、UUID唯一、引用完整及资产所属作品。文档 JSON 是有闭集类型的不可变修订，不是任意 JSON 兼容层。
 
+2026-10-29 本地候选还增加可选字段 `ideaRef`、`ideaName`、`coverTitleCandidates`、`noteTitleCandidates`。`ideaRef` 指独立的内容选题框，绝不复用主题图谱的 `topicRef`；选题名和意图分别保存在锚点稿件的 `ideaName` 与 `angle` 中，笔记标题和封面大字仍是独立字段。选题框关联最多三个不同账号，账号为空时不计入；恢复历史正文时保留当前选题关联，锚点也保留当前选题名和意图。手动标题候选随稿件修订保存，封面候选最多 10 字；来源资格变化与已知本人经历的撤回检查覆盖这些字段。候选并不表示已生成模型标题。`GET /ops/api/creation/idea-boxes?domainRef=` 返回经过来源投影的选题名、意图与锚点修订；稿件列表的 `copiedRevisionId` 只说明当前保存版本有复制确认，不代表发布。本段描述未合并的候选，不代表运行中服务；迁移、部署与正式验收需另行核对。
+
 - paragraphs：id/text；作者分段保留身份，无法可靠还原定位的关联进入 needs_review。
 - bridge（可选，缺省即未决定）：`{skip, sentence?, afterParagraph?}`。`skip` 是“这篇不植入”；`sentence` 是本稿使用的衔接句 `{sentenceCode, sentenceRevision, group, text, edited}`，`text` 是本稿实际所说，改写过则 `edited` 为真、不再跟库同步；`afterParagraph` 指向某个段落 id，缺失或该段已删除时落在默认位置（最后一段之前）。写入时校验编码 `XJ-` 加数字、修订号为正、文本为一行且不超过 500 字。衔接句库、规则与复制格式见 [CREATION-ASSETS-001](creation-assets-001.md)。
 - coverAi（可选）：封面是否 AI 作图；缺省表示未记录，不等于“否”。

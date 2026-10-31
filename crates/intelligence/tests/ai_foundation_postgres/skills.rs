@@ -168,13 +168,15 @@ async fn ai_foundation_skill_import_uses_pinned_loader_canonical_versions_and_se
         );
         tx.rollback().await.unwrap();
     }
-    assert_eq!(settings["skills"].as_array().unwrap().len(), 1);
+    let imported = settings["skills"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|skill| skill["name"] == "example-skill")
+        .unwrap();
+    assert_eq!(imported["versions"].as_array().unwrap().len(), 2);
     assert_eq!(
-        settings["skills"][0]["versions"].as_array().unwrap().len(),
-        2
-    );
-    assert_eq!(
-        settings["skills"][0]["versions"][0]["versionRef"],
+        imported["versions"][0]["versionRef"],
         json!(two.version_ref)
     );
     assert_eq!(

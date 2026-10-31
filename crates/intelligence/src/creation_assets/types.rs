@@ -3,6 +3,139 @@ use crate::content_workbench::BridgeGroup;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+/// Sensitive content is intentionally not Debug: it must not be written to ordinary logs.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Experience {
+    pub id: Uuid,
+    pub code: String,
+    pub account_ref: Uuid,
+    pub current_person: bool,
+    pub state: String,
+    pub revision: i32,
+    /// Number of current saved drafts that still reference this experience, not publications.
+    pub used_count: i64,
+    pub title: Option<String>,
+    pub body: Option<String>,
+    pub tags: Option<Vec<String>>,
+    pub origin: Option<String>,
+    pub send_to_model: Option<bool>,
+    pub confirmed_at: Option<String>,
+    pub confirmed_subject_account_ref: Option<Uuid>,
+    pub confirmed_subject_role: Option<String>,
+    pub confirmation_method: Option<String>,
+    pub created_at: String,
+    pub withdrawn_at: Option<String>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExperienceCreate {
+    pub request_id: Uuid,
+    pub account_ref: Uuid,
+    pub expected_person_ref: Uuid,
+    pub title: String,
+    pub body: String,
+    pub tags: Vec<String>,
+    pub origin: String,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExperienceEdit {
+    pub request_id: Uuid,
+    pub expected_revision: i32,
+    pub title: String,
+    pub body: String,
+    pub tags: Vec<String>,
+    pub origin: String,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExperienceConfirm {
+    pub request_id: Uuid,
+    pub expected_revision: i32,
+    /// The operator records an actual confirmation by the subject; this is not identity proof.
+    pub subject_confirmed: bool,
+    pub draft_use: bool,
+    pub send_to_model: Option<bool>,
+    /// How the subject's actual confirmation was obtained, never the subject's real name.
+    pub confirmation_method: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExperienceReceipt {
+    pub experience: Experience,
+    pub replayed: bool,
+}
+
+/// Persona fact payloads must never enter ordinary logs or immutable receipts.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaFact {
+    pub id: Uuid,
+    pub account_ref: Uuid,
+    pub key: Option<String>,
+    pub version: i32,
+    pub current_revision: i32,
+    pub current_person: bool,
+    pub state: String,
+    pub text: Option<String>,
+    pub source: Option<String>,
+    pub status: Option<String>,
+    pub confirmation_method: Option<String>,
+}
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PersonaFactPut {
+    pub request_id: Uuid,
+    pub account_ref: Uuid,
+    pub expected_person_ref: Uuid,
+    pub key: String,
+    pub expected_version: i32,
+    pub text: String,
+    pub source: String,
+    pub conflict_decision: Option<String>,
+}
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PersonaFactConfirm {
+    pub request_id: Uuid,
+    pub expected_version: i32,
+    pub subject_confirmed: bool,
+    pub confirmation_method: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaFactReceipt {
+    /// Current visible state; on replay this may be newer than the operation result.
+    pub fact: PersonaFact,
+    /// Version produced by this request, not necessarily the version in `fact`.
+    pub result_version: i32,
+    pub replayed: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonaFactRevision {
+    pub revision: i32,
+    pub text: String,
+    pub source: String,
+    pub status: String,
+    pub applied: bool,
+    pub recorded_at: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsableExperience {
+    pub id: Uuid,
+    pub code: String,
+    pub revision: i32,
+    pub body: String,
+}
+
 /// How an account relates to the organisation, as the operator knows it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -67,6 +200,8 @@ pub struct Identity {
     pub has_real_person: Option<bool>,
     pub backing_person_role: Option<String>,
     pub can_provide_experience: Option<bool>,
+    pub has_known_person: bool,
+    pub person_ref: Option<Uuid>,
     pub saved_at: String,
     pub saved_by: String,
 }
@@ -82,6 +217,16 @@ pub struct IdentityCommand {
     /// A role such as "妈妈" or "老师", never a real name.
     pub backing_person_role: Option<String>,
     pub can_provide_experience: Option<bool>,
+    /// Required for a changed role or for re-enabling an account with a known prior person.
+    #[serde(default)]
+    pub person_change: Option<PersonChange>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PersonChange {
+    Correction,
+    Replacement,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -416,6 +561,71 @@ pub struct CheckReport {
     pub findings: Vec<Finding>,
     pub not_run: Vec<NotRun>,
     pub fact_cards: Vec<CardRevision>,
+}
+
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SavedDraftCheckItem {
+    pub work_id: Uuid,
+    pub revision_id: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SavedDraftCheckRequest {
+    pub domain_ref: Uuid,
+    pub items: Vec<SavedDraftCheckItem>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SavedDraftCheck {
+    pub work_id: Uuid,
+    pub revision_id: Uuid,
+    pub must: usize,
+    pub warn: usize,
+    pub not_run: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationCandidate {
+    pub publication_ref: Uuid,
+    pub title: Option<String>,
+    pub published_on: Option<String>,
+    pub url: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicationLinkCommand {
+    pub request_id: Uuid,
+    pub expected_revision: Uuid,
+    pub publication_ref: Uuid,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationLinkReceipt {
+    pub link_ref: Uuid,
+    pub revision_id: Uuid,
+    pub publication_ref: Uuid,
+    pub replayed: bool,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationLinkView {
+    pub link_ref: Uuid,
+    pub revision_id: Uuid,
+    pub publication_ref: Uuid,
+    pub title: Option<String>,
+    pub published_on: Option<String>,
+    pub available: bool,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PublicationUnlinkCommand {
+    pub request_id: Uuid,
 }
 impl CheckReport {
     pub fn count(&self, level: Level) -> usize {

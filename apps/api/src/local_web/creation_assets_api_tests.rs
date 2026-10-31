@@ -10,6 +10,9 @@ use uuid::Uuid;
 mod dossier;
 #[path = "../../../../crates/intelligence/tests/support/ops_export_fixture.rs"]
 mod ops;
+#[path = "../../../../crates/intelligence/tests/support/content_workbench_fixture.rs"]
+#[allow(dead_code)]
+mod workbench_fixture;
 
 async fn proof(name: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
@@ -74,6 +77,310 @@ async fn call(
 }
 fn rid() -> serde_json::Value {
     json!(Uuid::new_v4())
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn creation_assets_http_comment_projection_and_copy_agree_on_grade() {
+    use linggan_intelligence::content_workbench::{
+        BridgeChoice, PlaceRequest, UseTarget, WorkDocument, place, read_work,
+    };
+    let db = proof("assets_http_comment_grade").await;
+    let (account, _) = seed_accounts(&db).await;
+    let app = app_with_database(db.clone());
+    let (_, identity) = call(&app, Method::PUT, &format!("/ops/api/creation/accounts/{account}/identity"), Some(json!({"requestId":rid(),"expectedRevision":0,"orgRelation":"parent","bioDisclosesRelation":null,"hasRealPerson":true,"backingPersonRole":"合成角色","canProvideExperience":null}))).await;
+    let (_, fact) = call(&app, Method::POST, "/ops/api/creation/persona-facts", Some(json!({"requestId":rid(),"accountRef":account,"expectedPersonRef":identity["identity"]["personRef"],"key":"年级","expectedVersion":0,"text":"三年级","source":"oral","conflictDecision":null}))).await;
+    let fact_id = fact["fact"]["id"].as_str().unwrap();
+    let (status, _) = call(&app, Method::POST, &format!("/ops/api/creation/persona-facts/{fact_id}/confirm"), Some(json!({"requestId":rid(),"expectedVersion":1,"subjectConfirmed":true,"confirmationMethod":"subject_present"}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let mut doc = workbench_fixture::comment_doc_with_text(&db, "合成评论：今年四年级").await;
+    doc.account_ref = Some(account);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    let made = workbench_fixture::create(&db, doc).await;
+    let placed = place(
+        &db,
+        made.work_id,
+        &PlaceRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: made.revision.id,
+            canvas_id: made.revision.document.canvas[0].id,
+            targets: vec![UseTarget::Paragraph {
+                paragraph_id: made.revision.document.paragraphs[0].id,
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    let full = read_work(&db, made.work_id)
+        .await
+        .unwrap()
+        .revision
+        .document;
+    let mut canvas = full.canvas.clone();
+    for block in &mut canvas {
+        block.note.clear();
+        block.expression.clear();
+    }
+    let projected = WorkDocument {
+        title: full.title.clone(),
+        account_ref: full.account_ref,
+        tags: full.tags.clone(),
+        paragraphs: full.paragraphs.clone(),
+        experience_slots: full.experience_slots.clone(),
+        experience_gaps: full.experience_gaps.clone(),
+        pages: full
+            .pages
+            .iter()
+            .filter(|page| page.kind == linggan_intelligence::content_workbench::PageKind::Cover)
+            .take(1)
+            .cloned()
+            .collect(),
+        bridge: full.bridge.clone(),
+        cover_ai: full.cover_ai,
+        excerpts: full.excerpts.clone(),
+        canvas,
+        uses: full.uses.clone(),
+        ..WorkDocument::default()
+    };
+    let (status, checked) = call(
+        &app,
+        Method::POST,
+        "/ops/api/creation/checks",
+        Some(json!({"workRef":made.work_id,"document":projected})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        !checked["findings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|finding| finding["rule"] == "R-W4")
+    );
+    let (status, copied) = call(
+        &app,
+        Method::POST,
+        &format!("/ops/api/creation/works/{}/copy", made.work_id),
+        Some(json!({"requestId":rid(),"expectedRevision":placed.revision.id})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        copied["text"]
+            .as_str()
+            .unwrap()
+            .contains("合成评论：今年四年级")
+    );
+    let receipt: Uuid = serde_json::from_value(copied["receiptRef"].clone()).unwrap();
+    let rules: serde_json::Value = sqlx::query_scalar(
+        "SELECT warn_rules FROM linggan_creation_copy_receipt WHERE receipt_ref=$1",
+    )
+    .bind(receipt)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(rules.get("R-W4").is_none());
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn creation_assets_http_persona_fact_conflict_and_withdrawal() {
+    let db = proof("assets_http_persona").await;
+    let (account, other) = seed_accounts(&db).await;
+    let app = app_with_database(db);
+    let (_, identity) = call(&app, Method::PUT, &format!("/ops/api/creation/accounts/{account}/identity"), Some(json!({"requestId":rid(),"expectedRevision":0,"orgRelation":"parent","bioDisclosesRelation":null,"hasRealPerson":true,"backingPersonRole":"合成角色","canProvideExperience":null}))).await;
+    let request = rid();
+    let input = json!({"requestId":request,"accountRef":account,"expectedPersonRef":identity["identity"]["personRef"],"key":"年级","expectedVersion":0,"text":"三年级","source":"oral","conflictDecision":null});
+    let (status, created) = call(
+        &app,
+        Method::POST,
+        "/ops/api/creation/persona-facts",
+        Some(input.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let id = created["fact"]["id"].as_str().unwrap();
+    let (_, replayed) = call(
+        &app,
+        Method::POST,
+        "/ops/api/creation/persona-facts",
+        Some(input),
+    )
+    .await;
+    assert_eq!(replayed["replayed"], true);
+    let (_, other_list) = call(
+        &app,
+        Method::GET,
+        &format!("/ops/api/creation/persona-facts?accountRef={other}"),
+        None,
+    )
+    .await;
+    assert!(other_list["items"].as_array().unwrap().is_empty());
+    let (status, confirmed) = call(&app, Method::POST, &format!("/ops/api/creation/persona-facts/{id}/confirm"), Some(json!({"requestId":rid(),"expectedVersion":1,"subjectConfirmed":true,"confirmationMethod":"subject_present"}))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(confirmed["fact"]["status"], "confirmed");
+    let (_, history) = call(
+        &app,
+        Method::GET,
+        &format!("/ops/api/creation/persona-facts/{id}/history"),
+        None,
+    )
+    .await;
+    assert_eq!(history["items"].as_array().unwrap().len(), 2);
+    let (status, withdrawn) = call(
+        &app,
+        Method::POST,
+        &format!("/ops/api/creation/persona-facts/{id}/withdraw"),
+        Some(json!({"requestId":rid()})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(withdrawn["fact"]["text"].is_null());
+    let (_, listed) = call(
+        &app,
+        Method::GET,
+        &format!("/ops/api/creation/persona-facts?accountRef={account}"),
+        None,
+    )
+    .await;
+    assert!(!listed.to_string().contains("三年级"));
+    let (_, result) = call(
+        &app,
+        Method::GET,
+        &format!(
+            "/ops/api/creation/persona-requests/{}",
+            request.as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(result["result"]["kind"], "put");
+    assert!(!result.to_string().contains("三年级"));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn creation_assets_http_experience_uses_subject_confirmation_and_withdrawal() {
+    let db = proof("assets_http_experience").await;
+    let (account, other) = seed_accounts(&db).await;
+    let app = app_with_database(db);
+    let identity = json!({"requestId":rid(),"expectedRevision":0,"orgRelation":"parent","bioDisclosesRelation":null,
+        "hasRealPerson":true,"backingPersonRole":"妈妈","canProvideExperience":null});
+    let (status, identity_result) = call(
+        &app,
+        Method::PUT,
+        &format!("/ops/api/creation/accounts/{account}/identity"),
+        Some(identity),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let create_request = rid();
+    let create = json!({"requestId":create_request,"accountRef":account,"expectedPersonRef":identity_result["identity"]["personRef"],"title":"合成经历","body":"合成经历正文","tags":[],"origin":"oral"});
+    let (status, created) = call(
+        &app,
+        Method::POST,
+        "/ops/api/creation/experiences",
+        Some(create),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let id = created["experience"]["id"].as_str().unwrap();
+    assert_eq!(created["experience"]["state"], "awaiting_subject");
+    let (_, other_list) = call(
+        &app,
+        Method::GET,
+        &format!("/ops/api/creation/experiences?accountRef={other}"),
+        None,
+    )
+    .await;
+    assert!(other_list["items"].as_array().unwrap().is_empty());
+    let confirm = json!({"requestId":rid(),"expectedRevision":1,"subjectConfirmed":true,"draftUse":true,"sendToModel":null,"confirmationMethod":"subject_present"});
+    let (status, confirmed) = call(
+        &app,
+        Method::POST,
+        &format!("/ops/api/creation/experiences/{id}/confirm"),
+        Some(confirm),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(confirmed["experience"]["state"], "confirmed");
+    let (status, withdrawn) = call(
+        &app,
+        Method::POST,
+        &format!("/ops/api/creation/experiences/{id}/withdraw"),
+        Some(json!({"requestId":rid()})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(withdrawn["experience"]["body"].is_null());
+    let (status, listed) = call(
+        &app,
+        Method::GET,
+        &format!("/ops/api/creation/experiences?accountRef={account}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(!listed.to_string().contains("合成经历正文"));
+    let (_, status) = call(
+        &app,
+        Method::GET,
+        &format!(
+            "/ops/api/creation/experience-requests/{}",
+            create_request.as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status["result"]["kind"], "create");
+    assert!(!status.to_string().contains("合成经历正文"));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn creation_assets_http_person_correction_and_replacement_require_explicit_choice() {
+    let db = proof("assets_http_person").await;
+    let (account, _) = seed_accounts(&db).await;
+    let app = app_with_database(db);
+    let uri = format!("/ops/api/creation/accounts/{account}/identity");
+    let mut input = json!({"requestId":rid(), "expectedRevision":0, "orgRelation":"parent",
+        "bioDisclosesRelation":true,"hasRealPerson":true,"backingPersonRole":"妈妈","canProvideExperience":null});
+    let (status, first) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(first["identity"]["hasKnownPerson"], true);
+    input["requestId"] = rid();
+    input["expectedRevision"] = json!(1);
+    input["backingPersonRole"] = json!("爸爸");
+    let (status, missing) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
+    assert_eq!(
+        (status, missing["code"].as_str()),
+        (
+            StatusCode::BAD_REQUEST,
+            Some("creation_person_change_required")
+        )
+    );
+    input["personChange"] = json!("correction");
+    let (status, corrected) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(corrected["identity"]["revision"], 2);
+    assert_eq!(corrected["identity"]["orgRelation"], "parent");
+    assert_eq!(corrected["identity"]["bioDisclosesRelation"], true);
+    input["requestId"] = rid();
+    input["expectedRevision"] = json!(2);
+    input["personChange"] = json!("replacement");
+    let (status, replaced) = call(&app, Method::PUT, &uri, Some(input.clone())).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replaced["identity"]["revision"], 3);
+    assert_eq!(replaced["identity"]["orgRelation"], "unknown");
+    assert!(replaced["identity"]["bioDisclosesRelation"].is_null());
+    assert!(replaced["identity"]["bioCheckedAt"].is_null());
+    let (status, replay) = call(&app, Method::PUT, &uri, Some(input)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["replayed"], true);
 }
 
 #[tokio::test]
@@ -277,14 +584,14 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
         &app,
         Method::POST,
         "/ops/api/creation/checks",
-        Some(json!({"document": work["revision"]["document"]})),
+        Some(json!({"document": work["revision"]["document"], "workRef": id})),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{report}");
     assert_eq!(report["bridgeState"], "unconfirmed");
     assert_eq!(report["findings"][0]["rule"], "R-M1");
     assert_eq!(report["findings"][0]["level"], "must");
-    assert_eq!(report["rulesetVersion"], "creation-checks.v1");
+    assert_eq!(report["rulesetVersion"], "creation-checks.v4");
     let mut repeated = work["revision"]["document"].clone();
     repeated["tags"] = json!(["ADHD", "ADHD", "#adhd"]);
     let (status, checked) = call(
@@ -386,4 +693,31 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL budget HTTP proof"]
+async fn creation_assets_http_creative_budget_is_revisioned() {
+    let db = proof("assets_http_ai_budget").await;
+    let app = app_with_database(db);
+    let (status, initial) = call(&app, Method::GET, "/ops/api/creation/ai-budget", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(initial["capCents"], 10000);
+    assert_eq!(initial["unknownCalls"], 0);
+    let body = json!({"requestId":rid(),"expectedRevision":initial["revision"],"capCents":12550});
+    let (status, receipt) = call(
+        &app,
+        Method::PUT,
+        "/ops/api/creation/ai-budget",
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(receipt["replayed"], false);
+    assert_eq!(receipt["capCents"], 12550);
+    let (_, replay) = call(&app, Method::PUT, "/ops/api/creation/ai-budget", Some(body)).await;
+    assert_eq!(replay["replayed"], true);
+    let (_, after) = call(&app, Method::GET, "/ops/api/creation/ai-budget", None).await;
+    assert_eq!(after["capCents"], 12550);
+    assert_eq!(after["revision"], 2);
 }

@@ -396,16 +396,15 @@ export function MaterialBrowser({
             .join(""),
         }
       : null);
-  const selected =
-    requestedSelection &&
-    pieces.some(
-      (piece) =>
-        piece.id === requestedSelection.piece.id &&
-        piece.source.sourceVersion ===
-          requestedSelection.piece.source.sourceVersion,
-    )
-      ? requestedSelection
-      : null;
+  const refreshedPiece = requestedSelection && pieces.find(
+    (piece) => piece.id === requestedSelection.piece.id &&
+      piece.source.sourceVersion === requestedSelection.piece.source.sourceVersion,
+  );
+  const selected = requestedSelection && refreshedPiece ? {
+    ...requestedSelection,
+    piece: refreshedPiece,
+    text: Array.from(refreshedPiece.source.text).slice(requestedSelection.start, requestedSelection.end).join(""),
+  } : null;
   const selectedPaperId = selected?.piece.id ?? null;
   useEffect(() => {
     if (!active || !selectedPaperId) return;

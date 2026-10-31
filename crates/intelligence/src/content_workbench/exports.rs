@@ -161,6 +161,11 @@ pub(crate) async fn qualify(
     revision: Uuid,
 ) -> Result<Revision, WorkbenchError> {
     let (domain, r) = super::store::read_revision_in(tx, work, Some(revision)).await?;
+    // A rendered file would outlive the erasable fragment. Support it only after the
+    // withdrawal operation can invalidate and remove every derived export.
+    if !r.document.experience_slots.is_empty() {
+        return Err(WorkbenchError::Source);
+    }
     if r.document.account_ref.is_none() {
         return Err(WorkbenchError::Invalid("accountRef"));
     }
@@ -177,6 +182,28 @@ pub(crate) async fn qualify(
     )
     .await
     .map_err(|_| WorkbenchError::Source)?;
+    let derived = &r.document.derived_sources;
+    let derived_qualification = crate::content_workbench_sources::qualify_citations_in_domain(
+        tx,
+        &derived
+            .iter()
+            .map(|source| source.citation.clone())
+            .collect::<Vec<_>>(),
+        domain,
+    )
+    .await
+    .map_err(|_| WorkbenchError::Source)?;
+    if derived
+        .iter()
+        .zip(derived_qualification)
+        .any(|(source, state)| {
+            state.state != "readable"
+                && super::validation::target_text(&r.document, &source.target)
+                    .is_some_and(|text| !text.is_empty())
+        })
+    {
+        return Err(WorkbenchError::Source);
+    }
     for (e, q) in r.document.excerpts.iter().zip(qualification) {
         if q.state != "readable" {
             let active = r.document.uses.iter().any(|u| {

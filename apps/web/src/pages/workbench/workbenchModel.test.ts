@@ -2,6 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { newDocument, parseWorkDocument, parseSaveReceipt, parseSourceList, parseAiStatus, scalarRange, WorkbenchContractError } from './workbenchModel';
 const id = '00000000-0000-4000-8000-000000000001';
 describe('closed workbench boundary', () => {
+  it('preserves experience references and gaps and accepts older documents without them', () => {
+    const legacy = Object.fromEntries(Object.entries(newDocument()).filter(([key]) => !['experienceSlots', 'experienceGaps'].includes(key)));
+    expect(parseWorkDocument(legacy)).toMatchObject({ experienceSlots: [], experienceGaps: [] });
+    const slot = { paragraphId: id, experienceRef: id, experienceRevision: 1 };
+    expect(parseWorkDocument({ ...newDocument(), experienceSlots: [slot], experienceGaps: [id] })).toMatchObject({ experienceSlots: [slot], experienceGaps: [id] });
+    expect(() => parseWorkDocument({ ...newDocument(), experienceSlots: [{ ...slot, accidentalText: 'synthetic' }] })).toThrow(WorkbenchContractError);
+  });
   it('keeps queued writing without an invocation distinct from unknown and measured zero usage', () => {
     const queued={requestId:id,workRef:id,invocationRef:null,batchRef:id,taskConfigRef:id,state:'queued',inputRevision:id,action:'draft',
       methodVersion:'content-workbench-writing.v1',suggestion:null,sourceQualification:'readable',failureCode:null,staleBase:false,

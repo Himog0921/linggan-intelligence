@@ -4,37 +4,45 @@ import { FindField } from '../../shared/FindField';
 import { useState, type ReactNode } from "react";
 import { useQueries } from "@tanstack/react-query";
 import * as api from "./workbenchApi";
-import type { WorkSummary } from "./workbenchModel";
+import type { IdeaBoxSummary, WorkSummary } from "./workbenchModel";
+import { topicRows } from "./topicRows";
 import styles from "./WorkbenchPage.module.css";
 
 export function TopicLibrary({
   section,
-  works,
+  works, ideas = [], ideasStatus = 'success', onRetryIdeas,
   onOpen, action, loading = false, failed = false,
 }: {
   section: "today" | "works";
   works: WorkSummary[];
+  ideas?: IdeaBoxSummary[];
+  ideasStatus?: 'pending' | 'error' | 'success'; onRetryIdeas?: () => void;
   onOpen: (id: string) => void;
   action?: ReactNode; loading?: boolean; failed?: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const rowsToRead = section === 'today' ? topicRows(works, ideas) : works;
   const detail = useQueries({
-    queries: works.map((work) => ({
+    queries: rowsToRead.map((work) => ({
       queryKey: ["creation-proposal", work.workId, work.revisionId],
+      enabled: section !== 'today' || !work.ideaRef || ideas.some(idea => idea.ideaRef === work.ideaRef),
       queryFn: ({ signal }: { signal: AbortSignal }) =>
         api.readWork(work.workId, signal),
       gcTime: 0,
     })),
   });
-  const entries = works.map((work, index) => ({
-    work,
-    envelope: detail[index]?.data,
-    loading: detail[index]?.isPending,
-    failed: detail[index]?.isError,
-    legacy: api.isLegacyReferenceUnavailable(detail[index]?.error),
-    retry: () => detail[index]?.refetch(),
-  }));
+  const entries = rowsToRead.map((work, index) => {
+    const unavailable = section === 'today' && !!work.ideaRef && !ideas.some(idea => idea.ideaRef === work.ideaRef);
+    return {
+      work,
+      envelope: unavailable ? undefined : detail[index]?.data,
+      loading: !unavailable && detail[index]?.isPending && detail[index]?.isFetching,
+      failed: !unavailable && detail[index]?.isError,
+      legacy: !unavailable && api.isLegacyReferenceUnavailable(detail[index]?.error),
+      retry: () => detail[index]?.refetch(),
+    };
+  });
   const unresolved = entries.filter((entry) => !entry.envelope);
   const rows = entries.filter(({ work, envelope }) => {
     const d = envelope?.revision.document;
@@ -69,6 +77,9 @@ export function TopicLibrary({
           ))}
         </div>
       </div>
+      {section === 'today' && works.some(work => work.ideaRef) && ideasStatus !== 'success' ? <div className={styles.libraryReadStatus} role="status">
+        {ideasStatus === 'pending' ? '正在读取选题框…' : <>选题框读取失败，关联选题暂不可打开。 <ActionButton variant="outline" onClick={onRetryIdeas}>重新读取选题框</ActionButton></>}
+      </div> : null}
       {unresolved.length ? (
         <div className={styles.libraryReadStatus} role="status">
           {unresolved.some((entry) => entry.loading) ? (
@@ -97,10 +108,12 @@ export function TopicLibrary({
         <div className={styles.topicWall}>
           {rows.map(({ work, envelope, loading, failed, legacy }, index) => {
             const d = envelope?.revision.document;
+            const ideaUnavailable = !!work.ideaRef && !ideas.some(idea => idea.ideaRef === work.ideaRef);
             return (
               <button
                 className={styles.topicCard}
                 key={work.workId}
+                disabled={ideaUnavailable}
                 onClick={() => onOpen(work.workId)}
               >
                 <div className={styles.topicArt}>
@@ -109,10 +122,10 @@ export function TopicLibrary({
                 </div>
                 <div className={styles.topicCopy}>
                   <h2>
-                    {d?.angle || (loading ? "读取方案中…" : "切入角度待确定")}
+                    {ideaUnavailable ? "选题信息暂不可用" : d?.angle || (loading ? "读取方案中…" : "切入角度待确定")}
                   </h2>
                   <p>
-                    {d?.outline.filter(Boolean).slice(0, 2).join(" / ") ||
+                    {ideaUnavailable ? "关联选题尚未读取" : d?.outline.filter(Boolean).slice(0, 2).join(" / ") ||
                       (legacy ? "历史引用无法安全读取，原稿已保留" : failed ? "方案读取失败，打开后重试" : "提纲待整理")}
                   </p>
                   <footer>

@@ -127,7 +127,19 @@ pub async fn comment_doc(db: &Database) -> WorkDocument {
     comment_doc_for_work(db, work).await
 }
 pub async fn comment_doc_for_work(db: &Database, work: Uuid) -> WorkDocument {
-    dossier::fixture::submit_package(db,"comments",serde_json::json!({"contentExternalId":"dossier-note"}),serde_json::json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"commentId":"creation-quote","noteId":"dossier-note","text":"这是一条可精确定位的合成匿名原声🙂\n需要继续核验来源资格。"}})).await;
+    comment_doc_for_work_with_text(
+        db,
+        work,
+        "这是一条可精确定位的合成匿名原声🙂\n需要继续核验来源资格。",
+    )
+    .await
+}
+pub async fn comment_doc_with_text(db: &Database, text: &str) -> WorkDocument {
+    let work = dossier::work(db).await;
+    comment_doc_for_work_with_text(db, work, text).await
+}
+async fn comment_doc_for_work_with_text(db: &Database, work: Uuid, text: &str) -> WorkDocument {
+    dossier::fixture::submit_package(db,"comments",serde_json::json!({"contentExternalId":"dossier-note"}),serde_json::json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"commentId":"creation-quote","noteId":"dossier-note","text":text}})).await;
     let source_ref:Uuid=sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment_current WHERE comment_external_id='creation-quote'").fetch_one(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")

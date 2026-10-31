@@ -1,5 +1,6 @@
 //! Local content authorship, immutable revisions and frozen exports; never publication.
 mod assets;
+mod experience_fragments;
 mod exports;
 mod requests;
 mod source_usage;
@@ -7,19 +8,25 @@ mod store;
 pub mod types;
 mod validation;
 pub use assets::{asset_file, upload_asset};
+pub use experience_fragments::all_available as experience_fragments_available_in;
+pub(crate) use experience_fragments::strip as strip_experience_text;
+pub(crate) use experience_fragments::withdrawn_history as withdrawn_experience_history_in;
 pub use exports::{
     export_file, export_page_file, finalize_export, freeze_export, mark_export_failed, read_export,
     retry_export, upload_export_page,
 };
 pub use requests::read_request;
-pub(crate) use requests::{RequestOwner, ensure_request_owner_in};
-pub(crate) use validation::document as validate_document;
+pub(crate) use requests::{RequestOwner, ensure_request_owner_in, lock as work_lock};
 use sha2::{Digest, Sha256};
-pub use source_usage::{propagate_adopted_sources_in, redact_revision_in};
+pub use source_usage::{
+    propagate_adopted_sources_in, redact_revision_in, redact_revision_with_statuses_in,
+};
 pub use store::{
-    adopt_in, create_work, list_works, place, read_revision_in, read_work, restore, revisions, save,
+    adopt_in, create_work, list_idea_boxes, list_works, place, read_revision_in, read_work,
+    reset_withdrawn, restore, revision, revisions, save,
 };
 pub use types::*;
+pub(crate) use validation::document as validate_document;
 #[derive(Debug, thiserror::Error)]
 pub enum WorkbenchError {
     #[error("creation_invalid:{0}")]
