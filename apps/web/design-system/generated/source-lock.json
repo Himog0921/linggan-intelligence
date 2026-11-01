@@ -1,5 +1,5 @@
 {
-  "fingerprint": "388cc687544c4990f052733e59ca92327c29b471b7010a02b0179996d0dd3de8",
+  "fingerprint": "a0bf17cf9c53ca58ece13e8ee540a450a6aa46fdeeb4a10a98a12dd2849f943c",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -335,7 +335,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "460d3119b7ea20c45f55eedcd28ab7db12a88960da4e79255f9763b493edf1ee"
+      "sha256": "c4004acbbce99994b15026026590ce2c984dabdfd671d0c0fbe86bec40161636"
     },
     {
       "path": "apps/web/src/styles/typography.css",
@@ -347,7 +347,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "52cb09dae236f6012bcfedd9ad9784b94ae75274eb00402dd0de295f507b40c2"
+      "sha256": "ac394ea0cebd2f6118b6a7f6d6fd40530e65d8e79d0a66cfaf1151da00698e9c"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

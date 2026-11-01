@@ -481,3 +481,7 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## EVIDENCE-TOOLBAR-20261101
 
 本轮 codex 独立树的 `artifacts/private/evidence-toolbar-20261101/` 保存固定合成 fixture、仅 GET/HEAD 的 loopback 预览脚本、浏览器截图/尺寸、检查日志及交付报告，忽略、不入 Git。来源为 task #4 的真实 React 构建与隔离测试，不连接正式 API、数据库或模型。codex 负责，保留至用户验收，合并前移交主仓库同名私有目录；仅清理本任务自有进程和路径。dist、node_modules 沿现有登记。
+
+## EVIDENCE-COMBINED-20261101
+
+本轮组合树 `artifacts/private/evidence-combined-20261101/` 保存固定合成接口、GET/HEAD隔离预览、截图/几何、检查日志及报告，忽略、不入Git。来源为8c883f84与be45ac71组合的真实React构建；只用loopback，不读取正式数据、凭据或调用模型。codex负责，保留至用户验收；合并/放弃后按本机安全规则处理自有树与进程。dist/node_modules沿既有登记。
