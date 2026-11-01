@@ -201,7 +201,7 @@ it('附加组件返回 null 不产生空白行内容；排版切换不提交搜�
   const view = render(<EvidenceControls {...props}><NoExtraContent /></EvidenceControls>);
   const deck = screen.getByRole('region', { name: '材料检索与筛选' });
   expect(deck.lastElementChild?.matches(':empty')).toBe(true);
-  await userEvent.click(screen.getByRole('button', { name: '表格', exact: true }));
+  await userEvent.click(screen.getByRole('button', { name: '表格' }));
   expect(onSubmit).not.toHaveBeenCalled();
   expect(applied(onChange).layout).toBe('table');
   view.rerender(<EvidenceControls {...props}><span>实际附加内容</span></EvidenceControls>);

@@ -68,11 +68,11 @@
 .selectGlyph i { display:block;border:var(--lgi-action-border-width) solid currentColor; }
 .selectGlyph i:first-child { background:currentColor; }
 .selectPage { min-width:var(--lgi-space-24);white-space:nowrap; }
-.foot { min-height:var(--lgi-space-12); margin-top:var(--lgi-space-2); }
+.foot { margin-top:var(--lgi-space-2); }
 /* DOM emptiness also handles a supplied component that renders null. */
 .foot:empty { display:none; }
 .layouts { margin-left:auto;flex:none; }
-.selection { flex-wrap:nowrap;min-height:var(--lgi-space-10);gap:var(--lgi-space-3); }
+.selection { flex-wrap:wrap; padding:0; gap:var(--lgi-space-3); }
 .selectedCount { display:inline-flex;align-items:center;gap:var(--lgi-space-1);
   white-space:nowrap;color:var(--lgi-ink); }
 .selectedCount b { color:var(--lgi-signal);font:600 var(--lgi-type-data-size)/1 var(--lgi-font-data); }
