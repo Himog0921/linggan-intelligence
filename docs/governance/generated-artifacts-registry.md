@@ -477,3 +477,7 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## OCR-DOSSIER-SYSTEM-50
 
 私有产物位于本包worktree的 `artifacts/private/ocr-dossier-system-50/`；最终移交到主仓库同名忽略目录。含只读盘点、固定50篇引用/图片manifest、原始模型响应、截图、逐项质量报告与测试日志，不入Git，真实内容不写普通日志。生成来源为正式API/数据库只读盘点、已授权有界OCR执行和原图对照；禁止改写原始响应与像素。清理备份使用同目录加密归档，密钥独立用户私有目录0600保存；只按本包精确清单清理。保留至Mog验收，合并清理worktree前核对私有资料已移交。
+
+## EVIDENCE-TOOLBAR-20261101
+
+本轮 codex 独立树的 `artifacts/private/evidence-toolbar-20261101/` 保存固定合成 fixture、仅 GET/HEAD 的 loopback 预览脚本、浏览器截图/尺寸、检查日志及交付报告，忽略、不入 Git。来源为 task #4 的真实 React 构建与隔离测试，不连接正式 API、数据库或模型。codex 负责，保留至用户验收，合并前移交主仓库同名私有目录；仅清理本任务自有进程和路径。dist、node_modules 沿现有登记。

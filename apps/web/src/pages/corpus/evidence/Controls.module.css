@@ -1,5 +1,5 @@
 /* B: 宽屏工具/集合视图合带；工作区收窄后恢复 T→V。只消费已采用Token。 */
-.deck { padding: var(--lgi-space-4) var(--lgi-space-5) 0; background: var(--lgi-canvas); }
+.deck { padding: var(--lgi-space-4) var(--lgi-space-5); background: var(--lgi-canvas); }
 .band { display: flex; align-items: center; gap: var(--lgi-space-5); }
 .form { display: flex; flex: 1; gap: var(--lgi-space-2); align-items: center; min-width: 0; }
 .find { display: flex; align-items: center; flex: 1; min-width: 0; min-height: var(--lgi-space-10); border: 2px solid var(--lgi-ink); background: var(--lgi-canvas); }
@@ -49,8 +49,8 @@
 }
 
 /* V2.2: unified browsing/selection toolbar; status quick filters live in one popover. */
-.band { display:block; }
-.form { display:flex; width:100%; align-items:center; gap:var(--lgi-space-3); }
+.band { display:flex; gap:var(--lgi-space-3); }
+.form { display:flex; align-items:center; gap:var(--lgi-space-3); }
 .tools { display:flex; flex:none;align-items:center;gap:var(--lgi-space-2); }
 .quickView { display:grid;gap:var(--lgi-space-2); }
 .quickViewChoices { display:flex;flex-wrap:wrap;gap:var(--lgi-space-2); }
@@ -68,7 +68,9 @@
 .selectGlyph i { display:block;border:var(--lgi-action-border-width) solid currentColor; }
 .selectGlyph i:first-child { background:currentColor; }
 .selectPage { min-width:var(--lgi-space-24);white-space:nowrap; }
-.foot { min-height:var(--lgi-space-12); margin-top:0; }
+.foot { min-height:var(--lgi-space-12); margin-top:var(--lgi-space-2); }
+/* DOM emptiness also handles a supplied component that renders null. */
+.foot:empty { display:none; }
 .layouts { margin-left:auto;flex:none; }
 .selection { flex-wrap:nowrap;min-height:var(--lgi-space-10);gap:var(--lgi-space-3); }
 .selectedCount { display:inline-flex;align-items:center;gap:var(--lgi-space-1);
@@ -78,7 +80,7 @@
 .selectionDivider { display:block; flex:none;width:var(--lgi-action-border-width);height:var(--lgi-space-4);background:var(--lgi-border); }
 .selection [data-action-button] { white-space:nowrap; }
 @container evidence-workspace (max-width: 1000px) {
-  .band { display:block; }
+  .band { display:flex; align-items:stretch; }
   .form { flex-wrap:wrap; }
   .find { flex-basis:100%; }
   .tools { width:100%;justify-content:flex-end; }

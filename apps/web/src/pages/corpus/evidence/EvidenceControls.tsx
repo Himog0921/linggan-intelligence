@@ -121,13 +121,11 @@ export function EvidenceControls({ query, hasDomain, scope, busy = false, select
           </button>
         </div>
       </form>
-    </div>
-    <div className={styles.foot}>
-      {children}
       <div className={styles.layouts} role="group" aria-label="结果排版">
         {LAYOUTS.map(([key, label]) => <button key={key} type="button" aria-pressed={query.layout === key}
           onClick={() => onChange(current => ({ ...current, layout: key satisfies LayoutKey }))}>{label}</button>)}
       </div>
     </div>
+    <div className={styles.foot}>{children}</div>
   </section>;
 }
