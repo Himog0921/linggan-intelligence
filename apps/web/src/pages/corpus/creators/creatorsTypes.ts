@@ -78,6 +78,41 @@ export interface Observation {
   hasOtherPrimaryDomain: boolean | null;
 }
 
+/** 观察档案里的一条变化记录；原因代码由页面翻译，认不得就写未记录。 */
+export interface ObservationTransition {
+  at: string;
+  from: string | null;
+  to: string;
+  reasonCode: string;
+  reason: string | null;
+}
+
+export interface ObservationPatrol {
+  automaticEnabled: boolean;
+  lastDispatchedAt: string | null;
+  lastSucceededAt: string | null;
+  nextRunAt: string | null;
+  missedRuns: number;
+  /** 最近一次成功巡查带回的作品数；null 表示没有合格的成功巡查或没读成，不是 0。 */
+  latestHits: number | null;
+  latestNew: number | null;
+  state: string;
+}
+
+/** 本领域的观察记录：加入、档案、巡查与最近变化。 */
+export interface ObservationRecord {
+  state: 'joined' | 'not_joined';
+  targetRef: string | null;
+  joinedAt: string | null;
+  usageRole: string | null;
+  firstStoredAt: string | null;
+  lifecycleState: string | null;
+  lifecycleChangedAt: string | null;
+  monitoringState: string | null;
+  patrol: ObservationPatrol | null;
+  lastTransition: ObservationTransition | null;
+}
+
 export interface CreatorItem {
   creatorKey: string;
   displayName: string | null;

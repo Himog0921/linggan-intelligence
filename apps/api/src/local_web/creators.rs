@@ -32,6 +32,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/api/local/creators/{key}/observation-target",
             post(register),
         )
+        .route(
+            "/api/local/creators/{key}/observation-record",
+            get(observation_record),
+        )
         .route("/api/local/creator-discovery-policy", put(policy))
         .route(
             "/api/local/creator-discovery-overrides",
@@ -360,6 +364,60 @@ async fn register(
     {
         Ok(v) => Json(v).into_response(),
         Err(e) => error(e),
+    }
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ObservationRecordQuery {
+    domain: Uuid,
+}
+/// 创作者在本领域的观察记录：加入时间、用途、档案与巡查的真实时间线。
+/// 没有关系时返回 `not_joined`；读不到库时返回不可用，绝不用空记录冒充「没观察过」。
+async fn observation_record(
+    State(state): State<LocalWebState>,
+    Path(key): Path<String>,
+    Query(params): Query<ObservationRecordQuery>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    match linggan_evidence::read_creator_observation_record(db, params.domain, &key).await {
+        Ok(Some(record)) => Json(json!({
+            "state": "joined",
+            "targetRef": record.target_ref,
+            "joinedAt": record.joined_at,
+            "usageRole": record.usage_role,
+            "firstStoredAt": record.first_stored_at,
+            "lifecycleState": record.lifecycle_state,
+            "lifecycleChangedAt": record.lifecycle_changed_at,
+            "monitoringState": record.monitoring_state,
+            "patrol": {
+                "automaticEnabled": record.automatic_enabled,
+                "lastDispatchedAt": record.last_dispatched_at,
+                "lastSucceededAt": record.last_succeeded_at,
+                "nextRunAt": record.next_run_at,
+                "missedRuns": record.missed_runs,
+                "latestHits": record.latest_hits,
+                "latestNew": record.latest_new,
+                "state": record.patrol_state,
+            },
+            "lastTransition": record.last_transition.map(|value| json!({
+                "at": value.occurred_at,
+                "from": value.from_state,
+                "to": value.to_state,
+                "reasonCode": value.reason_code,
+                "reason": value.reason,
+            })),
+        }))
+        .into_response(),
+        Ok(None) => Json(json!({"state": "not_joined", "targetRef": null})).into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "observation_record_unavailable",
+        ),
     }
 }
 #[derive(Deserialize)]

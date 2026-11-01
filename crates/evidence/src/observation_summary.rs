@@ -44,13 +44,22 @@ pub async fn read_target_observation_summaries(
     database: &Database,
     targets: &[ObservationTarget],
 ) -> Result<HashMap<Uuid, TargetObservationSummary>, sqlx::Error> {
-    if targets.is_empty() {
-        return Ok(HashMap::new());
-    }
     let refs = targets
         .iter()
         .map(|target| target.target_ref)
         .collect::<Vec<_>>();
+    read_patrol_summaries_for_refs(database, &refs).await
+}
+
+/// 只需要目标编号时用这个入口：创作者抽屉按作者键找到目标后，不为了读巡查结果再拼一个
+/// 完整的目标对象。统计口径与上面的列表读取完全相同。
+pub async fn read_patrol_summaries_for_refs(
+    database: &Database,
+    refs: &[Uuid],
+) -> Result<HashMap<Uuid, TargetObservationSummary>, sqlx::Error> {
+    if refs.is_empty() {
+        return Ok(HashMap::new());
+    }
     let rows: Vec<(Uuid, Option<i64>, Option<i64>, bool, bool, bool, bool)> = sqlx::query_as(concat!(
         "WITH selected AS ( \
              SELECT target_ref,target_kind,monitoring_enabled,lifecycle_state \
@@ -145,7 +154,15 @@ pub async fn read_target_observation_summaries(
     Ok(rows
         .into_iter()
         .map(
-            |(target_ref, hits, newly_discovered, monitoring_enabled, running, blocked, interrupted)| {
+            |(
+                target_ref,
+                hits,
+                newly_discovered,
+                monitoring_enabled,
+                running,
+                blocked,
+                interrupted,
+            )| {
                 let patrol_state = if !monitoring_enabled {
                     PatrolReadState::Disabled
                 } else if running {

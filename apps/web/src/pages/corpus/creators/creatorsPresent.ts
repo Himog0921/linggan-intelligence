@@ -72,6 +72,38 @@ export const MONITORING_LABELS: Record<string, string> = {
   not_enabled: '已加入 · 巡查未开启',
 };
 
+/** 观察档案的生命周期：从保存待决定到建档、巡查、暂停。 */
+export const LIFECYCLE_LABELS: Record<string, string> = {
+  pending_decision: '待决定',
+  archiving: '建档中',
+  archived: '已建档',
+  monitoring: '巡查中',
+  paused: '已暂停',
+  dismissed: '已忽略',
+};
+
+/** 观察记录里「最近变化」的原因：服务器给受控代码，这里只翻译，认不得就写未记录。 */
+export const TRANSITION_REASONS: Record<string, string> = {
+  target_stored: '保存观察目标',
+  creator_discovery_registered: '从创作者页加入观察',
+  monitor_paused: '人工暂停巡查',
+  monitor_resumed: '人工恢复巡查',
+  rule_baseline_started: '开始建立基线',
+  baseline_receipts_completed: '基线回执完成',
+  monitor_rule_missing_repaired: '补建缺失的巡查规则',
+};
+
+export function lifecycleLabel(value: string | null): string {
+  if (value === null) return '状态未记录';
+  return LIFECYCLE_LABELS[value] ?? '状态待核对';
+}
+
+export function transitionReasonLabel(code: string | null, reason: string | null): string {
+  if (reason !== null && reason.trim() !== '') return reason.trim();
+  if (code === null) return '原因未记录';
+  return TRANSITION_REASONS[code] ?? '原因未记录';
+}
+
 /** 本领域内的观察关系，一句话。关系没读到是「暂不可用」，不是「未加入」。 */
 export function observedText(observation: Observation): string {
   if (observation.lookup === 'unavailable' || observation.inCurrentDomain === null) return '观察关系暂不可用';
