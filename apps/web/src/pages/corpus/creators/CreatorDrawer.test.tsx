@@ -309,16 +309,16 @@ describe('依据抽屉 · 观察记录分区', () => {
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
     const panel = within(dialog).getByRole('tabpanel', { name: '观察记录' });
-    const record = await within(panel).findByRole('region', { name: '观察记录' });
+    const record = await within(panel).findByRole('region', { name: '观察关系与巡查' });
     expect(record).toHaveTextContent('加入本领域');
     expect(record).toHaveTextContent('2026-09-24 12:23 · 主研究');
     expect(record).toHaveTextContent('首次保存');
     expect(record).toHaveTextContent('2026-09-22 03:12');
-    expect(record).toHaveTextContent('已暂停 · 2026-10-15 16:26');
+    expect(record).toHaveTextContent('已暂停（2026-10-15 16:26 起）');
     expect(record).toHaveTextContent('成功于 2026-10-14 14:12');
     expect(record).toHaveTextContent('12 篇，其中 3 篇新见');
     expect(record).toHaveTextContent('自动巡查未开启');
-    expect(record).toHaveTextContent('2026-10-15 16:26 从 巡查中 到 已暂停：人工暂停巡查');
+    expect(record).toHaveTextContent('2026-10-15 16:26 从「巡查中」到「已暂停」：人工暂停巡查');
   });
 
   it('巡查开着且还没有成功结果：下次时间照实显示，结果不写成 0', async () => {
@@ -347,7 +347,7 @@ describe('依据抽屉 · 观察记录分区', () => {
     );
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
-    const record = await within(dialog).findByRole('region', { name: '观察记录' });
+    const record = await within(dialog).findByRole('region', { name: '观察关系与巡查' });
     expect(record).toHaveTextContent('巡查中 · 自动巡查已开启');
     expect(record).toHaveTextContent('下次巡查2026-11-01 09:00');
     expect(record).toHaveTextContent('没有巡查记录');
@@ -361,7 +361,7 @@ describe('依据抽屉 · 观察记录分区', () => {
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
     const panel = within(dialog).getByRole('tabpanel', { name: '观察记录' });
-    expect(await within(panel).findByRole('region', { name: '观察记录' })).toHaveTextContent(
+    expect(await within(panel).findByRole('region', { name: '观察关系与巡查' })).toHaveTextContent(
       '未加入本领域观察，所以没有巡查记录',
     );
     expect(kit.of('GET', `/api/local/creators/${encodeURIComponent(creatorKeyFor('author-1'))}/observation-record`)).toHaveLength(0);

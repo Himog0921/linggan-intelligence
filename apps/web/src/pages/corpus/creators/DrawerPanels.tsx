@@ -267,8 +267,8 @@ function ObservationRecordSection({ ctx }: { ctx: PanelContext }) {
   const joined = observation.inCurrentDomain === true;
   const record = useObservationRecord(data.domain.domainRef, item.creatorKey, joined);
   return (
-    <section aria-label="观察记录">
-      <h3>观察记录</h3>
+    <section aria-label="观察关系与巡查">
+      <h3>观察关系与巡查</h3>
       {observation.lookup === 'unavailable' || observation.inCurrentDomain === null ? (
         <p className={styles.help}>观察记录暂不可用：现在读不到这位作者与本领域的关系。</p>
       ) : !joined ? (
@@ -290,7 +290,7 @@ function ObservationRecordList({ record }: { record: ObservationRecord }) {
   const patrol = record.patrol;
   const role = record.usageRole === 'reference' ? '参照' : record.usageRole === 'primary' ? '主研究' : '用途未记录';
   const status = [
-    lifecycleLabel(record.lifecycleState),
+    `${lifecycleLabel(record.lifecycleState)}${record.lifecycleChangedAt ? `（${record.lifecycleChangedAt} 起）` : ''}`,
     record.monitoringState === 'monitoring'
       ? '自动巡查已开启'
       : record.monitoringState === 'not_enabled'
@@ -315,8 +315,8 @@ function ObservationRecordList({ record }: { record: ObservationRecord }) {
   const next = patrol?.nextRunAt ?? (patrol?.automaticEnabled ? '尚未排定' : '自动巡查未开启');
   const change = record.lastTransition
     ? record.lastTransition.from
-      ? `${record.lastTransition.at} 从 ${lifecycleLabel(record.lastTransition.from)} 到 ${lifecycleLabel(record.lastTransition.to)}：${transitionReasonLabel(record.lastTransition.reasonCode, record.lastTransition.reason)}`
-      : `${record.lastTransition.at} 建立为 ${lifecycleLabel(record.lastTransition.to)}：${transitionReasonLabel(record.lastTransition.reasonCode, record.lastTransition.reason)}`
+      ? `${record.lastTransition.at} 从「${lifecycleLabel(record.lastTransition.from)}」到「${lifecycleLabel(record.lastTransition.to)}」：${transitionReasonLabel(record.lastTransition.reasonCode, record.lastTransition.reason)}`
+      : `${record.lastTransition.at} 建立为「${lifecycleLabel(record.lastTransition.to)}」：${transitionReasonLabel(record.lastTransition.reasonCode, record.lastTransition.reason)}`
     : '没有变化记录';
   return (
     <dl className={styles.profileList}>
@@ -327,10 +327,7 @@ function ObservationRecordList({ record }: { record: ObservationRecord }) {
       <dt>首次保存</dt>
       <dd>{record.firstStoredAt ?? '未记录'}</dd>
       <dt>当前状态</dt>
-      <dd>
-        {status}
-        {record.lifecycleChangedAt ? ` · ${record.lifecycleChangedAt}` : ''}
-      </dd>
+      <dd>{status}</dd>
       <dt>上次巡查</dt>
       <dd>{lastPatrol}</dd>
       <dt>带回作品</dt>
