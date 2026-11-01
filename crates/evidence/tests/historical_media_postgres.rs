@@ -290,7 +290,7 @@ async fn explicit_empty_asr_receipts_close_audio_coverage_and_keep_revision_guar
         .iter()
         .find(|m| m["kind"] == "audio")
         .unwrap();
-    assert_eq!(material["sourceState"], "known_empty");
+    assert_eq!(material["sourceState"], "present");
     assert_eq!(material["blocks"], json!([]));
     let stored:(Option<Uuid>,Uuid,Value)=sqlx::query_as("SELECT derivative_ref,producer_ref,source_location FROM linggan_material_reading WHERE reading_ref=$1").bind(material["currentRevisionRef"].as_str().unwrap().parse::<Uuid>().unwrap()).fetch_one(db.pool()).await.unwrap();
     assert!(stored.0.is_none());
@@ -304,7 +304,14 @@ async fn explicit_empty_asr_receipts_close_audio_coverage_and_keep_revision_guar
             .iter()
             .all(|i| i["code"] != "not_processed")
     );
-    assert_eq!(empty.coverage["sources"]["audio"]["state"], "known_empty");
+    assert_eq!(empty.coverage["sources"]["audio"]["state"], "available");
+    assert!(
+        material["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "recognition_empty")
+    );
     assert_eq!(receipt.results[0].result["updated"], 1);
     let after = counters(&db).await;
     assert_eq!(
@@ -388,4 +395,120 @@ async fn image_slots_with_abnormal_motion_bytes_are_not_invisible_historical_med
     assert_eq!(result.results[0].result["state"], "source_not_available");
     assert_eq!(result.results[0].result["sourceUnits"], 0);
     assert_eq!(counters(&db).await, before);
+}
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL only"]
+async fn historical_cleanup_preserves_raw_provenance_and_confirmed_empty_human_reading() {
+    let db = fixture::proof_database("historical_cleanup").await;
+    for (name, raw, expected) in [
+        (
+            "mixed-artifacts",
+            "以下是普通话的句子。有效口播0.5 mg……🙂\nMusic\nありがとう\n",
+            "有效口播0.5 mg……🙂\nありがとう\n",
+        ),
+        ("only-artifacts", "以下是普通话的句子。\n【outro】\n.\n", ""),
+    ] {
+        let work = support::scenario(&db, name, None, 0, true, false, true).await;
+        let (_, derivative) = legacy(&db, work, "legacy-asr.v1", Some(raw), None).await;
+        let receipt = input::apply_plan(&db, &plan(&db, work).await)
+            .await
+            .unwrap();
+        assert!(receipt.complete());
+        let audio = current(&db, work, "audio").await;
+        assert_eq!(audio["sourceState"], "present");
+        let text = audio["blocks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(dossier::content::block_text)
+            .collect::<Vec<_>>()
+            .join("");
+        assert_eq!(text, expected);
+        assert!(
+            audio["blocks"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|block| block.get("time").is_none())
+        );
+        let stored: (String, Value) = sqlx::query_as("SELECT t.text_content,r.source_location FROM linggan_material_derived_text t JOIN linggan_material_reading r USING(derivative_ref) WHERE t.derivative_ref=$1")
+            .bind(derivative).fetch_one(db.pool()).await.unwrap();
+        assert_eq!(stored.0, raw);
+        assert_eq!(stored.1["fullTextHash"], hash(raw));
+        if expected.is_empty() {
+            assert!(
+                audio["issues"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|issue| issue["code"] == "recognition_empty")
+            );
+        }
+        let unit: Uuid = serde_json::from_value(audio["ref"].clone()).unwrap();
+        let old: Uuid = serde_json::from_value(audio["currentRevisionRef"].clone()).unwrap();
+        reading::review_reading(
+            &db,
+            unit,
+            &reading::ReviewReadingRequest {
+                command_ref: Uuid::new_v4(),
+                unit_ref: unit.to_string(),
+                source_version: audio["sourceVersion"].as_str().unwrap().into(),
+                expected_current_revision_ref: Some(old),
+                action: "edit".into(),
+                actor: "synthetic-reviewer".into(),
+                reason: "听审确认只有配乐，无口播".into(),
+                edited_blocks: Some(vec![]),
+                verified: true,
+                resolved_issue_keys: audio["issues"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .filter(|issue| issue["resolution"] == "reading_edit")
+                    .filter_map(|issue| issue["key"].as_str().map(str::to_owned))
+                    .collect(),
+            },
+        )
+        .await
+        .unwrap();
+        let confirmed = current(&db, work, "audio").await;
+        assert_eq!(confirmed["blocks"], json!([]));
+        assert_eq!(confirmed["reading"]["adoption"], "human_edited");
+        assert_eq!(confirmed["reading"]["verification"], "verified");
+        assert!(
+            confirmed["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|issue| issue["code"] == "time_unknown"),
+            "human confirmation does not invent missing source time metadata"
+        );
+        assert!(
+            confirmed["issues"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|issue| issue["resolution"] != "reading_edit")
+        );
+        assert_ne!(confirmed["currentRevisionRef"], audio["currentRevisionRef"]);
+        assert!(
+            !dossier::read(&db, work)
+                .await
+                .unwrap()
+                .unwrap()
+                .fragments
+                .iter()
+                .any(|fragment| fragment.field == "transcript")
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM linggan_material_reading WHERE reading_ref=$1"
+            )
+            .bind(old)
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+            1
+        );
+    }
 }

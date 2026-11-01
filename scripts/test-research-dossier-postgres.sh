@@ -239,6 +239,8 @@ if [[ "${1:-}" == "--dossier-input" ]]; then
   cargo_proof -p linggan-evidence --test local_producer_postgres every_declared_capability_admits_one_typed_package --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test dossier_input_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test historical_media_postgres --locked -- --ignored --nocapture
+  cargo_proof -p linggan-evidence --test media_processing_concurrency_postgres --locked -- --ignored --nocapture
+  cargo_proof -p linggan-evidence --test media_processor_requeue_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test material_reading_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture

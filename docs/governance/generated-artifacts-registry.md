@@ -477,3 +477,7 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## OCR-DOSSIER-SYSTEM-50
 
 私有产物位于本包worktree的 `artifacts/private/ocr-dossier-system-50/`；最终移交到主仓库同名忽略目录。含只读盘点、固定50篇引用/图片manifest、原始模型响应、截图、逐项质量报告与测试日志，不入Git，真实内容不写普通日志。生成来源为正式API/数据库只读盘点、已授权有界OCR执行和原图对照；禁止改写原始响应与像素。清理备份使用同目录加密归档，密钥独立用户私有目录0600保存；只按本包精确清单清理。保留至Mog验收，合并清理worktree前核对私有资料已移交。
+
+## RESEARCH-DOSSIER-V2 · 2026-11-01 最终收口
+
+本机真实清单、批次回执、截图和独立审阅日志固定在主仓库 `artifacts/private/dossier-final-closeout-20261101/`，由 root 负责；不入 Git，不含普通日志中的凭据或原文。原材料不修改，旧读本保留，输出源为本次明确授权的本地处理与正式 API。保留至验收，验收或合并满 14 天后按本机规则保留报告和汇总，清理大文件。合成证明使用自有临时 PG 和 `/tmp/dossier-closeout-proof-*`，结束仅回收自有资源。

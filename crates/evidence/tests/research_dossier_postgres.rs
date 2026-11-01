@@ -523,7 +523,7 @@ async fn standard_audio_silence_absence_and_failure_are_distinct_without_fake_te
     let db = fixture::proof_database("standard_audio_states").await;
     for (name, reason, expected) in [
         ("no-audio", "no_audio_stream_observed", "not_applicable"),
-        ("no-speech", "no_speech_observed", "known_empty"),
+        ("no-speech", "no_speech_observed", "present"),
         ("asr-failure", "synthetic_asr_failure", "present"),
     ] {
         let work = standard::scenario(&db, name, None, 1, true, false, false).await;
@@ -554,6 +554,15 @@ async fn standard_audio_silence_absence_and_failure_are_distinct_without_fake_te
             .unwrap();
         assert_eq!(audio["sourceState"], expected);
         assert_eq!(audio["processing"]["reason"], reason);
+        if name == "no-speech" {
+            assert!(
+                audio["issues"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|issue| issue["code"] == "recognition_empty")
+            );
+        }
         if name == "asr-failure" {
             assert_eq!(audio["processing"]["state"], "failed");
             assert!(
@@ -633,4 +642,67 @@ async fn unknown_page_order_preserves_observed_ordinals_beyond_nine() {
             .is_empty()
     );
     assert_eq!(counts(&db).await, before, "reads do not prepare materials");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn recognition_gaps_stay_visible_but_never_become_ai_source_fragments() {
+    let db = fixture::proof_database("dossier_gap_fragments").await;
+    let work = detail(&db, "dossier-note", json!({})).await;
+    let (_, version, sha) = support::acquired_image_source(&db).await;
+    let mut tx = db.pool().begin().await.unwrap();
+    material_reading::publish_in(&mut tx, material_reading::NewReading {
+        content_public_ref: work, unit_key: "image:xhs:dossier-note:image:1".into(), kind: "image".into(),
+        slot_key: Some("xhs:dossier-note:image:1".into()), page: Some(1), source_version: version.to_string(),
+        source_state: "present".into(), derivative_ref: None, producer_ref: Some(Uuid::new_v4()),
+        generated_by: "ordinary_ocr".into(), rule_version: "synthetic-gap.v1".into(),
+        blocks: vec![
+            json!({"kind":"paragraph","text":"实际识读到的完整内容","speaker":"unconfirmed"}),
+            json!({"kind":"gap","text":"这一处无法识读的诊断标签","speaker":"unconfirmed"}),
+        ],
+        issues: vec![json!({"key":"partial","code":"uncertain_reading","message":"局部文字缺失","resolution":"reading_edit"})],
+        source_location: json!({"slotKey":"xhs:dossier-note:image:1","materializationRef":version,"blobSha256":sha}),
+        publication: material_reading::Publication::Automatic { expected_current: None },
+    }).await.unwrap();
+    tx.commit().await.unwrap();
+    let mut read = dossier::read(&db, work).await.unwrap().unwrap();
+    let image = material(&read, "image");
+    let gap_ref = image["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|block| block["kind"] == "gap")
+        .unwrap()["ref"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(image["blocks"].as_array().unwrap().len(), 2);
+    assert_eq!(image["issues"][0]["code"], "uncertain_reading");
+    assert!(dossier::ordered_refs(&read).contains(&gap_ref.as_str()));
+    assert!(dossier::markdown(&read).contains("这一处无法识读的诊断标签"));
+    assert_eq!(read.fragments.len(), 1);
+    let sources = dossier::context_sources(&read);
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0]["kind"], "image_substantive_text");
+    assert_eq!(sources[0]["text"], "实际识读到的完整内容");
+    assert_eq!(sources[0]["structure"]["kind"], "paragraph");
+    let rendered = dossier::render_materials(&read.fragments);
+    assert!(rendered.contains("[S1] 图片文字") && rendered.contains("实际识读到的完整内容"));
+    assert!(!rendered.contains("这一处无法识读的诊断标签") && !rendered.contains("[S2]"));
+    assert!(rendered.contains("待确认：局部文字缺失"));
+    let coverage = read.coverage.clone();
+    dossier::select(
+        &mut read,
+        &dossier::Selection {
+            block_refs: vec![gap_ref.clone()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(read.fragments.is_empty());
+    assert!(dossier::context_sources(&read).is_empty());
+    assert!(dossier::render_materials(&read.fragments).is_empty());
+    assert_eq!(dossier::ordered_refs(&read), [gap_ref.as_str()]);
+    assert!(dossier::markdown(&read).contains("这一处无法识读的诊断标签"));
+    assert_eq!(read.coverage, coverage);
 }

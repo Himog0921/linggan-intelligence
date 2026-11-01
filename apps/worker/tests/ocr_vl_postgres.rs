@@ -392,7 +392,7 @@ async fn latest_frame_completion_and_empty_outcome_publish_current_readings() {
     let db = database("frame_current_completion").await;
     for (name, no_text) in [("frame-text", false), ("frame-empty", true)] {
         let work = admit_with_slot_role(&db, name, 1, name.as_bytes(), "video/mp4", "video").await;
-        let job: Uuid = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE processor_kind='video_frame_ocr' AND blob_sha256=$1 AND processor_version='local-v4'").bind(support::sha256_hex(name.as_bytes())).fetch_one(db.pool()).await.unwrap();
+        let job: Uuid = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE processor_kind='video_frame_ocr' AND blob_sha256=$1 AND processor_version='local-v5'").bind(support::sha256_hex(name.as_bytes())).fetch_one(db.pool()).await.unwrap();
         ensure_media_processing_work(&db).await.unwrap();
         let worker = Uuid::new_v4();
         let MediaProcessingClaimOutcome::Claimed(claim) =

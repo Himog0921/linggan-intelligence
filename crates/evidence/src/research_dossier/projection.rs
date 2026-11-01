@@ -243,6 +243,9 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
             };
             material["originalUrl"] = slot["originalUrl"].clone();
             material["purpose"] = slot["purpose"].clone();
+            if let Some(sources) = slot.get("sameBytesSources") {
+                material["sameBytesSources"] = sources.clone();
+            }
             if let Some(processing) = slot["processing"].get(match *kind {
                 "audio" => "asr",
                 "video_frame" => "video_frame_ocr",
@@ -369,6 +372,10 @@ pub(super) fn fragments(work: &WorkResourceCurrent, materials: &[Value]) -> Vec<
             continue;
         }
         for block in unit["blocks"].as_array().into_iter().flatten() {
+            // Recognition gaps are diagnostics, not source words for AI citation.
+            if !content::has_source_text(block) {
+                continue;
+            }
             let Some(reference) = block["ref"].as_str() else {
                 continue;
             };

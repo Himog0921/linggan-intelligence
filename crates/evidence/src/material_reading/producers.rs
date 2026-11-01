@@ -60,6 +60,11 @@ pub async fn publish_job_in(
             .unwrap_or(&claim.processor_version)
             .to_owned()
     };
+    let observation_rule = if kind == "audio" {
+        format!("{observation_rule}:transcript-cleanup.v1")
+    } else {
+        observation_rule
+    };
     // This completion entry belongs to daily processing. Explicit cloud previews use
     // publish_cloud_in below; historical candidates are never republished by a read.
     let publication = Publication::Automatic {
@@ -101,6 +106,9 @@ async fn publish_source_in(
     conn: &mut PgConnection,
     mut input: MediaPublication<'_>,
 ) -> Result<PublishedReading, sqlx::Error> {
+    if input.kind == "audio" && input.content.source_state != "not_applicable" {
+        normalize_transcript(&mut input.content);
+    }
     let slot = input.source["slotKey"]
         .as_str()
         .ok_or_else(|| invalid("media_reading_slot_missing"))?
@@ -218,9 +226,7 @@ AND NOT EXISTS(SELECT 1 FROM linggan_media_ocr_retirement WHERE retired_job_ref=
             .get::<Option<Value>, _>("source_location")
             .unwrap_or(Value::Null);
         ReadingContent {
-            blocks: vec![
-                json!({"ref":"legacy-text","kind":"paragraph","text":text,"speaker":"unconfirmed"}),
-            ],
+            blocks: vec![json!({"kind":"paragraph","text":text,"speaker":"unconfirmed"})],
             issues: vec![
                 json!({"key":"historical_time_unknown","code":"time_unknown","message":"历史结果无时间定位。","resolution":"source_refresh"}),
                 json!({"key":"historical_machine_unchecked","code":"machine_unchecked","message":"机器识读结果，尚未人工核验。","resolution":"reading_edit"}),
@@ -257,7 +263,7 @@ AND NOT EXISTS(SELECT 1 FROM linggan_media_ocr_retirement WHERE retired_job_ref=
             producer_ref: job,
             derivative,
             rule: format!(
-                "{}:historical-media.v1",
+                "{}:historical-media.v2",
                 crate::research_dossier::content::RULE_VERSION
             ),
             content,
@@ -328,4 +334,110 @@ async fn media_source_in(
         "sourceVersion":row.get::<Uuid,_>("materialization_ref"),"materializationRef":row.get::<Uuid,_>("materialization_ref"),"originalUrl":format!("/api/local/media/{}/{}",row.get::<Uuid,_>("materialization_ref"),row.get::<String,_>("blob_sha256")),
         "page":if row.get::<String,_>("display_order_state")=="KNOWN"{json!(row.get::<Option<i32>,_>("display_ordinal"))}else{Value::Null},"purpose":row.get::<String,_>("purpose")}),
     )
+}
+
+/// Remove only whole, recognizable ASR scaffolding; never guess language or repair words.
+/// Raw derivatives and their hashes remain unchanged in the source location.
+fn normalize_transcript(content: &mut ReadingContent) {
+    let mut removed = 0;
+    for block in &mut content.blocks {
+        let Some(text) = block["text"].as_str() else {
+            continue;
+        };
+        let mut cleaned = String::new();
+        for line in text.split_inclusive('\n') {
+            let trimmed = line.trim();
+            let token = trimmed.trim_end_matches(['。', '.', '!', '！', '?', '？', ':', '：']);
+            let marker = token.trim_matches(['[', ']', '【', '】', '(', ')', '（', '）']);
+            if token == "以下是普通话的句子"
+                || matches!(marker.to_ascii_lowercase().as_str(), "music" | "outro")
+                || (!trimmed.is_empty() && !trimmed.chars().any(char::is_alphanumeric))
+            {
+                removed += 1;
+                continue;
+            }
+            // Inline removal is limited to the exact Whisper prompt sentence.
+            // Other punctuation, emoji, decimals and original line endings survive.
+            for part in line.split_inclusive(['。', '.', '!', '！', '?', '？']) {
+                let sentence = part
+                    .trim()
+                    .trim_end_matches(['。', '.', '!', '！', '?', '？']);
+                if sentence == "以下是普通话的句子" {
+                    removed += 1;
+                } else {
+                    cleaned.push_str(part);
+                }
+            }
+        }
+        block["text"] = json!(cleaned);
+    }
+    content
+        .blocks
+        .retain(crate::research_dossier::content::has_source_text);
+    if removed > 0 {
+        content.issues.push(json!({"key":"transcription_artifacts_removed","code":"transcription_artifacts_removed",
+            "message":"已排除转录中的处理提示或无文字标记，原结果保留。","resolution":"reading_edit"}));
+    }
+    if content.blocks.is_empty() {
+        content.source_state = "present".into();
+        content
+            .issues
+            .push(json!({"key":"recognition_empty","code":"recognition_empty",
+            "message":"未取得可用口播文字，不能据此判断没有说话。","resolution":"reading_edit"}));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn normalized(text: &str) -> ReadingContent {
+        let mut content = ReadingContent {
+            blocks: vec![json!({"kind":"paragraph","text":text,"speaker":"unconfirmed"})],
+            issues: vec![],
+            source_state: "present".into(),
+            source_location: json!({}),
+        };
+        normalize_transcript(&mut content);
+        content
+    }
+    #[test]
+    fn transcript_artifacts_do_not_become_speech_or_confirmed_silence() {
+        for value in [".", "Music", "【outro】", "以下是普通话的句子。", ""] {
+            let content = normalized(value);
+            assert!(content.blocks.is_empty());
+            assert_eq!(content.source_state, "present");
+            assert!(
+                content
+                    .issues
+                    .iter()
+                    .any(|issue| issue["code"] == "recognition_empty")
+            );
+        }
+    }
+    #[test]
+    fn mixed_transcript_keeps_words_languages_repetition_and_source_time() {
+        let content = normalized(
+            "以下是普通话的句子。\n你好。\nMusic\nありがとう\n你好。\nMusic is useful.\n以下是普通话的句子，需要逐字朗读。",
+        );
+        assert_eq!(
+            content.blocks[0]["text"],
+            "你好。\nありがとう\n你好。\nMusic is useful.\n以下是普通话的句子，需要逐字朗读。"
+        );
+        let glued =
+            normalized("以下是普通话的句子。以下是普通话的句子。有效的口播。还有后续内容。");
+        assert_eq!(glued.blocks[0]["text"], "有效的口播。还有后续内容。");
+        let exact = "剂量0.5 mg不能变……🙂\r\n保留末尾换行。\n";
+        assert_eq!(normalized(exact).blocks[0]["text"], exact);
+        let mut timed = ReadingContent {
+            blocks: vec![
+                json!({"kind":"paragraph","text":"口播\n【outro】","time":{"startMs":20,"endMs":40}}),
+            ],
+            issues: vec![],
+            source_state: "present".into(),
+            source_location: json!({"rawTranscriptSha256":"raw"}),
+        };
+        normalize_transcript(&mut timed);
+        assert_eq!(timed.blocks[0]["time"], json!({"startMs":20,"endMs":40}));
+        assert_eq!(timed.source_location["rawTranscriptSha256"], "raw");
+    }
 }

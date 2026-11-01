@@ -182,6 +182,40 @@ pub async fn claim_media_processing_work_for_version(
     enabled_processors: &[String],
     processor_version: Option<&str>,
 ) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
+    claim_media_processing_work_scoped(
+        database,
+        worker_instance_ref,
+        enabled_processors,
+        processor_version,
+        None,
+    )
+    .await
+}
+
+/// Run an explicit batch without claiming or recovering unrelated work.
+pub async fn claim_media_processing_jobs(
+    database: &Database,
+    worker_instance_ref: Uuid,
+    enabled_processors: &[String],
+    jobs: &[Uuid],
+) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
+    claim_media_processing_work_scoped(
+        database,
+        worker_instance_ref,
+        enabled_processors,
+        None,
+        Some(jobs),
+    )
+    .await
+}
+
+async fn claim_media_processing_work_scoped(
+    database: &Database,
+    worker_instance_ref: Uuid,
+    enabled_processors: &[String],
+    processor_version: Option<&str>,
+    jobs: Option<&[Uuid]>,
+) -> Result<MediaProcessingClaimOutcome, sqlx::Error> {
     if enabled_processors.is_empty() {
         return Ok(MediaProcessingClaimOutcome::Idle);
     }
@@ -225,9 +259,11 @@ pub async fn claim_media_processing_work_for_version(
            state=CASE WHEN attempt_count >= $1 THEN 'terminal' ELSE 'retry_wait' END, \
            worker_instance_ref=NULL,lease_expires_at=NULL,next_attempt_at=scope_001_now(), \
            last_error='lease_expired',updated_at=scope_001_now() \
-         WHERE state='leased' AND lease_expires_at <= scope_001_now()",
+         WHERE state='leased' AND lease_expires_at <= scope_001_now() \
+           AND ($2::uuid[] IS NULL OR job_ref=ANY($2))",
     )
     .bind(MAX_PROCESSING_ATTEMPTS)
+    .bind(jobs)
     .execute(&mut *tx)
     .await?;
     let candidate = sqlx::query(AssertSqlSafe(format!(
@@ -245,6 +281,7 @@ pub async fn claim_media_processing_work_for_version(
            ON concurrency.processor_kind = job.processor_kind \
          WHERE work.state IN ('pending','retry_wait') AND work.attempt_count < $1 \
            AND job.processor_kind = ANY($2) \
+           AND ($5::uuid[] IS NULL OR job.job_ref=ANY($5)) \
            AND (($3::text IS NULL AND (job.processor_kind || ':' || job.processor_version)=ANY($4)) OR job.processor_version=$3) \
            {retired_job_filter} \
            AND work.next_attempt_at <= scope_001_now() \
@@ -265,6 +302,7 @@ pub async fn claim_media_processing_work_for_version(
     .bind(enabled_processors)
     .bind(processor_version)
     .bind(&supported_versions)
+    .bind(jobs)
     .fetch_optional(&mut *tx)
     .await?;
     let Some(candidate) = candidate else {
@@ -1095,10 +1133,9 @@ pub const REGISTERED_PROCESSOR_KINDS: [&str; 5] = [
 /// 同一条 Closed World 规矩：没登记的处理器不该悄悄按旧版本跑起来，也不该悄悄什么都不做。
 pub fn processor_version_for_kind(processor_kind: &str) -> Option<&'static str> {
     match processor_kind {
-        // OCR 从 Tesseract 改为 PaddleOCR v4，同时保存逐行框与本地分层结果；旧 OCR 输出必须按
-        // 新作业重跑，不能让同一唯一键悄悄复用。视频抽帧也必须同批切换，避免系统仍有一个隐蔽
-        // 的 Tesseract OCR 入口。
-        "image_ocr" | "video_frame_ocr" => Some("local-v4"),
+        // PP-OCRv4 固定使用 2 倍输入和 0.5 检测阈值；v5 是处理器配方版本，
+        // 不是换用 PP-OCRv5。图片与视频帧共用同一入口，旧结果仍保留原版本。
+        "image_ocr" | "video_frame_ocr" => Some("local-v5"),
         // 2026-09-17：whisper 换 medium 并加简体提示、修掉交给 whisper 子进程的 PATH（缺 ffmpeg）。
         "asr" => Some("local-v3"),
         // 行为没变的两类留在 `local-v1`：它们没有需要重做的存量，存量重排也不该碰它们。

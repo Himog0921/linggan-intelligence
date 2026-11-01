@@ -21,9 +21,9 @@ use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
 
-/// 与生产版本注册表独立核对：当前 OCR local-v4，ASR local-v3。
+/// 与生产版本注册表独立核对：当前 OCR local-v5，ASR local-v3。
 const BASELINE: &str = "local-v1";
-const CURRENT: &str = "local-v4";
+const CURRENT: &str = "local-v5";
 const ASR_CURRENT: &str = "local-v3";
 /// 重排出来的作业在事件流里的理由，与摄取路径的 `queued_for_local_processor` 分开。
 const REQUEUE_REASON: &str = "requeued_after_processor_version_upgrade";

@@ -342,3 +342,66 @@ async fn every_processor_kind_the_schema_allows_is_registered_for_concurrency() 
         );
     }
 }
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn bounded_batch_does_not_claim_or_recover_other_jobs() {
+    let db = proof_database("media_bounded_batch").await;
+    seed_runnable_images(&db, 3).await;
+    let jobs: Vec<Uuid> = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE processor_kind='image_ocr' ORDER BY created_at,job_ref")
+        .fetch_all(db.pool()).await.unwrap();
+    // An unrelated expired lease must remain untouched, even when the batch recovers its own.
+    sqlx::query("UPDATE linggan_media_processing_work SET state='leased',attempt_count=1,claim_generation=1,worker_instance_ref=$2,lease_expires_at=scope_001_now()-interval '1 minute' WHERE job_ref=$1")
+        .bind(jobs[0]).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
+    let before: String = sqlx::query_scalar(
+        "SELECT to_jsonb(w)::text FROM linggan_media_processing_work w WHERE job_ref=$1",
+    )
+    .bind(jobs[0])
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    // The concurrency gate still applies; no unrelated lease is expired to make room.
+    assert!(matches!(
+        linggan_evidence::claim_media_processing_jobs(
+            &db,
+            Uuid::new_v4(),
+            &image_ocr(),
+            &[jobs[2]]
+        )
+        .await
+        .unwrap(),
+        MediaProcessingClaimOutcome::Idle
+    ));
+    let after: String = sqlx::query_scalar(
+        "SELECT to_jsonb(w)::text FROM linggan_media_processing_work w WHERE job_ref=$1",
+    )
+    .bind(jobs[0])
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(before, after);
+    sqlx::query("UPDATE linggan_media_processing_work SET state='pending',worker_instance_ref=NULL,lease_expires_at=NULL WHERE job_ref=$1")
+        .bind(jobs[0]).execute(db.pool()).await.unwrap();
+    let MediaProcessingClaimOutcome::Claimed(claim) =
+        linggan_evidence::claim_media_processing_jobs(
+            &db,
+            Uuid::new_v4(),
+            &image_ocr(),
+            &[jobs[2]],
+        )
+        .await
+        .unwrap()
+    else {
+        panic!("named job should be claimable")
+    };
+    assert_eq!(claim.job_ref, jobs[2]);
+    assert!(matches!(
+        linggan_evidence::claim_media_processing_jobs(&db, Uuid::new_v4(), &image_ocr(), &[])
+            .await
+            .unwrap(),
+        MediaProcessingClaimOutcome::Idle
+    ));
+    let untouched: i64=sqlx::query_scalar("SELECT count(*) FROM linggan_media_processing_work WHERE job_ref=ANY($1) AND state='pending'")
+        .bind(&jobs[..2]).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(untouched, 2);
+}

@@ -82,7 +82,7 @@ export function readingGaps(dossier: Dossier): ReadingGap[] {
       partial: { state: '部分可读', message: '当前范围尚不完整，已取得的文字照常保留。' },
     };
     const note = messages[source.state];
-    if (note) rows.push({ key, label, ...note });
+    if (note) rows.push({ key, label, ...note, ...(source.units === 0 && source.state === 'not_acquired' ? { state: '未知', message: '尚无此类材料的采集记录。' } : {}) });
   }
   const inventory = dossier.coverage.imageInventory;
   const imageNote: string[] = [];

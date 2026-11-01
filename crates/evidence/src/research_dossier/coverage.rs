@@ -35,7 +35,14 @@ fn source(materials: &[Value], kind: &str) -> Value {
     let units: Vec<_> = materials.iter().filter(|m| m["kind"] == kind).collect();
     let readings = units
         .iter()
-        .filter(|m| m["currentRevisionRef"].is_string() && m["sourceState"] != "restricted")
+        .filter(|m| {
+            m["sourceState"] != "restricted"
+                && (m["currentRevisionRef"].is_string()
+                    || (kind == "body"
+                        && m["blocks"].as_array().is_some_and(|blocks| {
+                            blocks.iter().any(super::content::has_source_text)
+                        })))
+        })
         .count();
     let all = |state: &str| !units.is_empty() && units.iter().all(|m| m["sourceState"] == state);
     let state = if all("not_applicable") {
@@ -54,4 +61,23 @@ fn source(materials: &[Value], kind: &str) -> Value {
         "not_processed"
     };
     json!({"state":state,"units":units.len(),"readings":readings})
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn native_body_is_available_without_a_persisted_reading() {
+        let body = json!({"kind":"body","sourceState":"present","currentRevisionRef":null,
+            "blocks":[{"kind":"paragraph","text":"原生正文"}]});
+        assert_eq!(source(&[body.clone()], "body")["state"], "available");
+        let mut gap = body.clone();
+        gap["blocks"][0]["kind"] = json!("gap");
+        assert_eq!(source(&[gap], "body")["state"], "not_processed");
+        let mut restricted = body;
+        restricted["sourceState"] = json!("restricted");
+        assert_eq!(source(&[restricted], "body")["state"], "restricted");
+        // No observed motion is not evidence that the original had no audio.
+        assert_eq!(source(&[], "audio")["state"], "not_acquired");
+    }
 }
