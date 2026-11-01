@@ -2,7 +2,7 @@
 
 > 状态: 权威当前
 > 最后核对: 2026-10-31
-> 适用范围: `/corpus/creators`：在当前领域内浏览作者、查看判断依据、调整单项判断、加入观察名单；以及语料三页共用的 React 外壳（左侧二级导航、面包屑领域选择器、一级导航「采集」状态词）
+> 适用范围: `/corpus/creators`：在当前领域内浏览作者、查看判断依据、调整单项判断、加入观察名单；以及语料三页共用的 React 外壳（左侧二级导航、面包屑领域选择器；一级导航自 2026-11-01 起不再显示采集状态词）
 > 事实来源: 真实代码（`apps/web/src/pages/corpus/creators/`、`apps/web/src/corpus/`、`apps/api/src/local_web/creators.rs`、`apps/api/src/local_web/corpus_shell_api.rs`、`crates/evidence/src/creator_discovery.rs`）；[CREATOR-DISCOVERY-001](../../plans/active/creator-discovery-001.md) 的产品范围；[WEB-REACT-001 阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §3.1 能力清单（逐项记录旧页能力与 React 落点）；PR #384（未合并）的只读调查结论
 > 冲突时以谁为准: Mog 最新确认、真实运行/代码/数据合同、DEC-0010；能力清单与本规格冲突时以代码和能力清单为准，并回改本文
 > 页面层级与模式: L1；`LIDS-PAT-001` 的 Corpus Explorer（读数条、筛选、连续表格、分页），依据抽屉为右侧受限的 Split Evidence Inspector；不新造页面骨架
@@ -75,7 +75,7 @@ Mog 2026-10-20直接派定本页按P05:list/B优化，业务字段与读写合�
 - 三秒答案：这个领域里有多少位作者，哪些还没加入观察，哪些作品被判为相关
 - 五秒主动作：搜索或筛选 → 点开一位作者看依据 → 加入观察
 - 明确非目标：不启动采集、不调用模型、不开启或关闭巡查、不在页面里重新计算资格或判断（这些由 Rust/PostgreSQL 决定）；不展示「全部领域」混合视图
-- 当前可用数据/权限合同：`GET /api/local/creators`（范围、筛选、分页、统计）；`POST /api/local/creators/{creatorKey}/observation-target`；`PUT /api/local/creator-discovery-policy`；`PUT /api/local/creator-discovery-overrides`；`POST /api/local/creator-discovery-analysis/retry`；`GET /api/local/work-resources`（标题与封面）；`GET /api/local/model-settings`（发现设置里的模型选项）；`GET /api/local/corpus/shell`（领域列表与采集状态词，接口合同见阶段 D 分册 §3.3）。全部要求本机来源
+- 当前可用数据/权限合同：`GET /api/local/creators`（范围、筛选、分页、统计）；`POST /api/local/creators/{creatorKey}/observation-target`；`PUT /api/local/creator-discovery-policy`；`PUT /api/local/creator-discovery-overrides`；`POST /api/local/creator-discovery-analysis/retry`；`GET /api/local/work-resources`（标题与封面）；`GET /api/local/model-settings`（发现设置里的模型选项）；`GET /api/local/corpus/shell`（领域列表；接口仍返回采集状态词，但一级导航自 2026-11-01 起不再显示，接口合同见阶段 D 分册 §3.3）。全部要求本机来源
 - 决策 owner：Mog（产品与验收）；实现审查由 Claude Code 协调方负责
 
 ## 2. 页面边界

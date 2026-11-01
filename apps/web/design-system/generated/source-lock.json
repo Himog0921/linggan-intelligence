@@ -1,5 +1,5 @@
 {
-  "fingerprint": "d9c4f3149bb40219ce79a19e4ccd5c252fbb10c71df08e5f5d5890d35ecd21cc",
+  "fingerprint": "072572a3c1b6b9f5f8c279c6771566eb5e2274f64e16ae468ecc8fc56cb73fab",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -247,7 +247,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "0e3ed30c096455b597e274684f29b9ee3a553b3771955ff9f03e2e2c5f523a2c"
+      "sha256": "2750e4804e504aeb85ee34a89862edf28e05e29046c49e56e7054020ca24f84c"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -335,7 +335,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "659fde2209c8d9f64e32cbefbc7ac861b27ad82b7f389fd05c9884b13c8c085b"
+      "sha256": "460d3119b7ea20c45f55eedcd28ab7db12a88960da4e79255f9763b493edf1ee"
     },
     {
       "path": "apps/web/src/styles/typography.css",
@@ -347,7 +347,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "238092327bc7d1aec1e47b009f7cfdb0dffbac8b14b91a290f5e895cfd82302e"
+      "sha256": "52cb09dae236f6012bcfedd9ad9784b94ae75274eb00402dd0de295f507b40c2"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

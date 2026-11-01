@@ -777,10 +777,10 @@ describe('创作者页 · 材料范围与判断标准', () => {
 });
 
 describe('创作者页 · 外壳', () => {
-  it('采集项显示服务器给出的状态词（与证据库一致）；语料是当前入口；页头读数在面包屑一侧', async () => {
+  it('一级导航只显示标题，不再带状态词；语料是当前入口；页头读数在面包屑一侧', async () => {
     defaultRoutes(kit);
     await loaded();
-    expect(screen.getByRole('link', { name: /采集/ }).querySelector('.v7-nav-state')).toHaveTextContent('观察中');
+    expect(screen.getByRole('link', { name: /采集/ }).querySelector('.v7-nav-state')).toBeNull();
     expect(screen.getByRole('link', { name: /语料/ })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByLabelText('切换当前观察领域')).toHaveTextContent('合成领域一');
     expect(screen.getByRole('complementary', { name: '语料导航' })).toHaveTextContent('作者来自当前领域已有作品');

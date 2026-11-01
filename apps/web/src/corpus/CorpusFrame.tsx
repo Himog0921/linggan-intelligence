@@ -27,7 +27,6 @@ interface CorpusFrameProps {
 /**
  * 语料三页共用的页面框架：全局页头 + 语料侧栏 + 可滚动内容区（WEB-REACT-001 阶段 D）。
  * 页头、侧栏、领域选择器的位置和样式与旧页面同源（shell.css）；领域在三页之间切换不丢（F09）。
- * 一级导航「采集」项的状态词与领域列表同源（语料外壳接口），三页一致；外壳没读到时保持「状态未知」。
  */
 export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, evidenceCount = null, children }: CorpusFrameProps) {
   const titleId = useId();
@@ -45,7 +44,6 @@ export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, eviden
     <AppShell
       active="corpus"
       boundaryLabel="本机服务状态"
-      collectionState={shell?.collectionState}
       crumb={crumb}
       meta={meta}
     >

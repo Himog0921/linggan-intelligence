@@ -1,7 +1,7 @@
 {
   "kind": "implementation_fix",
-  "reason": "Read creation history as metadata and qualify document detail lazily using existing history rows and ActionButton",
-  "authorization": "Mog 2026-10-31 explicit legacy recovery implementation and isolated validation request",
+  "reason": "移除一级导航状态说明行并压缩共享页头高度；shell.css 与 OpsFrame.tsx 属于目录登记的页面实现源",
+  "authorization": "lie-cheng 2026-11-01 c09bfbbb 认可按既定顺序推进；Philip 2026-11-01 task #2 交接：证据库母版第一轮，压缩一级导航并验证列表/详情/专注阅读三态",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"
