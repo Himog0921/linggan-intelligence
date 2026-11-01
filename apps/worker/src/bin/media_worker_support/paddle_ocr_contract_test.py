@@ -30,9 +30,9 @@ CAPTURED_PREDICTION = {
 
 
 class PaddleOcrPredictionContractTest(unittest.TestCase):
-    def test_worker_invocation_keeps_existing_defaults(self) -> None:
+    def test_default_matches_fixed_worker_recipe(self) -> None:
         args = BRIDGE.parse_arguments(["local.jpg"])
-        self.assertEqual((args.image_scale, args.text_det_box_thresh), (1, 0.6))
+        self.assertEqual((args.image_scale, args.text_det_box_thresh), (2, 0.5))
 
     def test_enlarged_input_preserves_color_and_source_coordinates(self) -> None:
         from PIL import Image

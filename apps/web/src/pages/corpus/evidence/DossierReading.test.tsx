@@ -1,6 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
-import { processingLabel } from './dossierPresent';
+import { emptyMaterialNote, processingLabel } from './dossierPresent';
+import { DossierDocument } from './DossierDocument';
 import { DossierBlocks } from './DossierBlocks';
 import { DossierReading } from './DossierReading';
 import { DossierPanel } from './DossierPanel';
@@ -128,4 +129,27 @@ it('completed不能证明已有可用结果；明确pending issue才展示待整
   expect(screen.getAllByText('已有识别结果，待整理。')).toHaveLength(1);
   expect(screen.getByText('处理完成，尚无当前读本。')).toBeVisible();
   expect(screen.queryByText('处理完成，暂无可读文字。')).not.toBeInTheDocument();
+});
+
+it('人工核验的空口播与机器未检出语音分开表达', () => {
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, {
+    kind: 'audio', blocks: [], sourceState: 'present',
+    reading: { generatedBy: 'human_edit', adoption: 'human_edited', verification: 'verified', ruleVersion: 'human.v1', review: null },
+    processing: { state: 'completed', reason: null },
+  })] })).dossier;
+  const unit = dossier.materials[0]!;
+  expect(processingLabel(unit)).toBe('已确认无口播。');
+  expect(emptyMaterialNote(unit)).toBe('已确认无口播。');
+  expect(emptyMaterialNote({ ...unit, reading: null, issues: [{ key: 'empty', code: 'recognition_empty', message: '无可用转录', resolution: 'reading_edit' }] })).toBe('未取得可用转录。');
+});
+
+it('多音轨的人工空口播只描述该条材料，不否定其它可读口播', () => {
+  const payload = parseDossierPayload(dossierJson(1, { materials: [
+    dossierMaterialJson(1, { kind: 'audio', blocks: [], sourceState: 'present', reading: { generatedBy: 'human_edit', adoption: 'human_edited', verification: 'verified', ruleVersion: 'human.v1', review: null } }),
+    dossierMaterialJson(2, { kind: 'audio', blocks: [{ ref: 'speech-present', kind: 'paragraph', text: '另一音轨的真实口播' }] }),
+  ], readingView: { mainBlockRefs: ['speech-present'], supplementBlockRefs: [] } }));
+  render(<DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}} />);
+  expect(screen.getByText('音轨 1：已确认无口播。')).toBeVisible();
+  expect(screen.queryByText('视频口播：已确认无口播。')).not.toBeInTheDocument();
+  expect(screen.getByText('另一音轨的真实口播')).toBeVisible();
 });

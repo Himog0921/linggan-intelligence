@@ -497,7 +497,10 @@ async fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> 
         return Err("paddle_ocr_script_missing".to_owned());
     }
     let mut command = Command::new(paddle_ocr_python());
-    command.arg(script).arg(input);
+    command
+        .arg(script)
+        .arg(input)
+        .args(["--image-scale", "2", "--text-det-box-thresh", "0.5"]);
     let output = run_command(&mut command, PROCESS_TIMEOUT).await?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr)

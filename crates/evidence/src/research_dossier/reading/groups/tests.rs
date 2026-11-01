@@ -33,7 +33,8 @@ fn paragraph(reference: &str, value: &str) -> Value {
 
 fn image(page: u64, blocks: Vec<Value>) -> Value {
     json!({"ref":format!("image-{page}"),"kind":"image","page":page,
-        "purpose":"body_image","sourceState":"present","issues":[],"blocks":blocks})
+        "purpose":"body_image","sourceState":"present","issues":[],"blocks":blocks,
+        "reading":{"generatedBy":"ordinary_ocr","adoption":"automatic"}})
 }
 
 fn groups(value: &ResearchDossier) -> Vec<&Value> {
@@ -543,7 +544,7 @@ fn grouping_is_revision_bound_but_a_new_clock_alone_is_not() {
 #[test]
 fn wrapped_lines_on_unknown_page_join_without_crossing_paragraphs_or_selections() {
     let material = json!({"ref":"image","kind":"image","sourceState":"present","page":null,
-        "issues":[{"code":"page_order_unknown"}],"blocks":[
+        "reading":{"generatedBy":"ordinary_ocr","adoption":"automatic"},"issues":[{"code":"page_order_unknown"}],"blocks":[
         {"ref":"p0","kind":"paragraph","speaker":"unconfirmed","text":"这里是一段跨行的完整","bbox":[0.1,0.14,0.8,0.037]},
         {"ref":"p1","kind":"paragraph","speaker":"unconfirmed","text":"文字。","bbox":[0.1,0.20,0.35,0.035]},
         {"ref":"p2","kind":"paragraph","speaker":"unconfirmed","text":"这是下一段内容。","bbox":[0.1,0.32,0.8,0.037]}]});
@@ -640,4 +641,53 @@ fn tilted_same_line_fragments_read_left_to_right_without_rewriting_blocks() {
         2,
         "separate columns cannot be joined across a wide gap"
     );
+}
+
+#[test]
+fn established_readings_keep_their_order_and_heading_structure() {
+    let fragments = vec![
+        json!({"ref":"right","kind":"paragraph","text":"先读右侧","bbox":[0.51,0.1,0.3,0.04]}),
+        json!({"ref":"left","kind":"paragraph","text":"再读左侧","bbox":[0.2,0.1,0.3,0.04]}),
+    ];
+    let headings: Vec<Value> = ["人工标题一", "人工标题二", "人工标题三", "独立正文"]
+        .into_iter()
+        .enumerate()
+        .map(|(i, text)| {
+            json!({"ref":format!("h{i}"),
+            "kind":if i < 3 {"heading"} else {"paragraph"},"text":text,
+            "bbox":[0.1,0.1+i as f64*0.08,if i<3 {0.8} else {0.2},0.06]})
+        })
+        .collect();
+    for reading in [
+        json!({"generatedBy":"human_edit","adoption":"human_edited"}),
+        json!({"generatedBy":"ordinary_ocr","adoption":"human_edited"}),
+        json!({"generatedBy":"ordinary_ocr","adoption":"human_adopted"}),
+        json!({"generatedBy":"cloud_vision","adoption":"automatic"}),
+        json!({"generatedBy":"platform","adoption":"automatic"}),
+        Value::Null,
+    ] {
+        let mut ordered = image(1, fragments.clone());
+        ordered["reading"] = reading.clone();
+        let d = dossier(vec![ordered]);
+        assert_eq!(ordered_refs(&d), ["right", "left"], "{reading}");
+        assert_eq!(groups(&d).len(), 2, "{reading}");
+        assert_eq!(d.materials[0]["blocks"], json!(fragments));
+        let mut structured = image(1, headings.clone());
+        structured["reading"] = reading;
+        let d = dossier(vec![structured]);
+        assert_eq!(ordered_refs(&d), ["h0", "h1", "h2", "h3"]);
+        assert_eq!(groups(&d).len(), 4);
+        assert!(groups(&d).iter().all(|group| group["mode"] == "blocks"));
+        assert_eq!(d.materials[0]["blocks"], json!(headings));
+    }
+}
+
+#[test]
+fn human_page_boundaries_are_not_rejoined_from_geometry() {
+    let mut first = image(1, vec![paragraph("first", "人工保留段落，")]);
+    let mut second = image(2, vec![paragraph("second", "人工另起一段。")]);
+    for material in [&mut first, &mut second] {
+        material["reading"] = json!({"generatedBy":"human_edit","adoption":"human_edited"});
+    }
+    assert_eq!(groups(&dossier(vec![first, second])).len(), 2);
 }

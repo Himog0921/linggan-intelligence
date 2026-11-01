@@ -280,12 +280,23 @@ fn positioned_gaps(
     gaps
 }
 
+fn automatic_ordinary_ocr(material: &Value) -> bool {
+    material["kind"] == "image"
+        && material["reading"]["generatedBy"] == "ordinary_ocr"
+        && material["reading"]["adoption"] == "automatic"
+}
+
 fn continuation(
     group: &Group,
     previous: Located<'_>,
     current: Located<'_>,
     dossier: &ResearchDossier,
 ) -> Option<(Mode, Option<&'static str>)> {
+    if (previous.material["kind"] == "image" || current.material["kind"] == "image")
+        && (!automatic_ordinary_ocr(previous.material) || !automatic_ordinary_ocr(current.material))
+    {
+        return None;
+    }
     let page_order_only = |material: &Value| {
         material["issues"].as_array().is_none_or(|issues| {
             issues
@@ -399,7 +410,7 @@ fn ordered_blocks(material: &Value) -> Vec<&Value> {
         .into_iter()
         .flatten()
         .collect();
-    if material["kind"] != "image" {
+    if !automatic_ordinary_ocr(material) {
         return blocks;
     }
     let mut output = vec![];

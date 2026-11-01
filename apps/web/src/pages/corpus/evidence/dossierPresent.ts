@@ -14,7 +14,12 @@ export function existingResultPending(unit: DossierMaterial): boolean {
   return unit.sourceState === 'present' && unit.blocks.length === 0 && unit.issues.some(issue => issue.code === 'existing_result_pending');
 }
 /** A processing receipt describes execution, never the accuracy of source words. */
+export function confirmedEmptySpeech(unit: DossierMaterial): boolean {
+  return unit.kind === 'audio' && unit.sourceState === 'present' && unit.blocks.length === 0
+    && unit.reading?.adoption === 'human_edited' && unit.reading.verification === 'verified';
+}
 export function processingLabel(unit: DossierMaterial): string | null {
+  if (confirmedEmptySpeech(unit)) return '已确认无口播。';
   const processing = unit.processing;
   if (unit.sourceState === 'restricted') return null;
   if (processing?.state === 'completed') {
@@ -33,6 +38,8 @@ export function processingLabel(unit: DossierMaterial): string | null {
   return `${labels[processing.state]}${unit.blocks.length > 0 ? '，已有读本仍可读。' : '。'}`;
 }
 export function emptyMaterialNote(unit: DossierMaterial): string {
+  if (confirmedEmptySpeech(unit)) return '已确认无口播。';
+  if (unit.kind === 'audio' && unit.issues.some(issue => issue.code === 'recognition_empty')) return '未取得可用转录。';
   if (unit.sourceState === 'restricted') return '当前来源受限，内容已隐藏。';
   if (unit.sourceState === 'known_empty') return '本次来源明确为空。';
   if (unit.sourceState === 'not_applicable') return '此材料类型不适用于当前笔记。';

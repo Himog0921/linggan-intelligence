@@ -90,8 +90,8 @@ def parse_prediction(payload: object, width: int, height: int) -> list[dict[str,
 def parse_arguments(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path)
-    parser.add_argument("--image-scale", type=int, choices=(1, 2), default=1)
-    parser.add_argument("--text-det-box-thresh", type=float, default=0.6)
+    parser.add_argument("--image-scale", type=int, choices=(1, 2), default=2)
+    parser.add_argument("--text-det-box-thresh", type=float, default=0.5)
     args = parser.parse_args(argv)
     if not 0 < args.text_det_box_thresh <= 1:
         parser.error("--text-det-box-thresh must be greater than 0 and at most 1")

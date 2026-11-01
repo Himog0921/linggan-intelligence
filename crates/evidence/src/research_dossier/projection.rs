@@ -372,6 +372,10 @@ pub(super) fn fragments(work: &WorkResourceCurrent, materials: &[Value]) -> Vec<
             continue;
         }
         for block in unit["blocks"].as_array().into_iter().flatten() {
+            // Recognition gaps are diagnostics, not source words for AI citation.
+            if !content::has_source_text(block) {
+                continue;
+            }
             let Some(reference) = block["ref"].as_str() else {
                 continue;
             };

@@ -54,15 +54,11 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
     dossier.reading_view["sections"] = groups::sections(dossier);
     // The shared Works view retains its established main/supplement order.
     // Research reading and machine adapters use the sole new section order below.
-    // Public materials retain diagnostics. Text consumers need at least one
-    // actual source block, including after an explicit selection of only gaps.
-    if !dossier
+    // Public materials and sections retain diagnostics. AI source fragments only
+    // contain actual source text, even when real text and gaps share one material.
+    dossier
         .fragments
-        .iter()
-        .any(|f| content::has_source_text(&f.structure))
-    {
-        dossier.fragments.clear();
-    }
+        .retain(|f| content::has_source_text(&f.structure));
     order_fragments(dossier);
 }
 

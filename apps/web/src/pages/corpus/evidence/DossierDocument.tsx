@@ -5,6 +5,7 @@ import { DossierGroup, ReadingIssues, TranscriptGroups } from './DossierDocument
 import { DossierExportDialog } from './DossierExportDialog';
 import { DossierFocusDialog } from './DossierFocusDialog';
 import { DossierIcon } from './DossierIcon';
+import { confirmedEmptySpeech } from './dossierPresent';
 import { DossierNavigation } from './DossierNavigation';
 import { endingGroupAttribution, groupTime, readingAnchor, readingGaps, remainingReadingIssues, resolveReadingSections, SECTION_LABELS, transcriptStats, type ResolvedReadingGroup } from './dossierDocumentModel';
 import { jumpReading, useDossierReadingPosition, type ReadingPosition } from './useDossierReadingPosition';
@@ -92,7 +93,8 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
         <div className={styles.content}>{gaps.map(gap => <div className={styles.missingRow} key={gap.key}><span className={styles.missingTitle}>{gap.label}</span><span className={styles.missingMessage}>{gap.message}</span><span className={styles.missingState}>{gap.state}</span></div>)}<ReadingIssues issues={issues}/></div>
       </section> : null}
       {!sections.length && !hasMissing ? <p className={styles.empty}>本次范围没有可读文字。</p> : null}
-      <p className={styles.end}>已显示当前底稿全部可读内容{dossier.selection.mode === 'explicit' ? ' · 当前为选定范围' : ''}</p>
+      {dossier.materials.filter(unit => unit.kind === 'audio').map((unit, index, audio) => confirmedEmptySpeech(unit) ? <p key={unit.ref} className={styles.end}>{audio.length === 1 ? '视频口播' : `音轨 ${index + 1}`}：已确认无口播。</p> : null)}
+      {dossier.selection.mode === 'explicit' ? <p className={styles.end}>当前为选定范围</p> : null}
     </article>
     {active && exportSnapshot ? <DossierExportDialog payload={exportSnapshot} domain={domain} onClose={closeModal} onUnavailable={onUnavailable}/> : null}
     {active && focus ? <DossierFocusDialog title={focus.title} groups={focus.groups} memoryKey={`${memoryKey}:focus:${focus.ref}`} onClose={closeModal}/> : null}
