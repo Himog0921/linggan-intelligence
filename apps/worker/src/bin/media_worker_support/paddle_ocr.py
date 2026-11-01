@@ -8,6 +8,7 @@ provider credentials and never contacts a platform.
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -86,10 +87,38 @@ def parse_prediction(payload: object, width: int, height: int) -> list[dict[str,
     return lines
 
 
+def parse_arguments(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("image", type=Path)
+    parser.add_argument("--image-scale", type=int, choices=(1, 2), default=1)
+    parser.add_argument("--text-det-box-thresh", type=float, default=0.6)
+    args = parser.parse_args(argv)
+    if not 0 < args.text_det_box_thresh <= 1:
+        parser.error("--text-det-box-thresh must be greater than 0 and at most 1")
+    return args
+
+
+def prediction_input(image_path: Path, scale: int) -> tuple[object, int, int]:
+    """Scale only the recognition input; normalized coordinates still refer to the whole image."""
+    from PIL import Image
+
+    with Image.open(image_path) as source:
+        width, height = source.size
+        if scale == 1:
+            return str(image_path), width, height
+        import numpy as np
+
+        # Match Paddle's existing 4000px detection ceiling without enlarging beyond it.
+        factor = max(1.0, min(float(scale), 4000 / max(width, height)))
+        size = (round(width * factor), round(height * factor))
+        resized = source.convert("RGB").resize(size, Image.Resampling.LANCZOS)
+        # Paddle's ndarray input, like its file reader, expects BGR.
+        return np.asarray(resized)[:, :, ::-1].copy(), *size
+
+
 def main() -> None:
-    if len(sys.argv) != 2:
-        fail("usage")
-    image_path = Path(sys.argv[1])
+    args = parse_arguments(sys.argv[1:])
+    image_path = args.image
     if not image_path.is_file():
         fail("input_missing")
     try:
@@ -114,21 +143,25 @@ def main() -> None:
         use_doc_unwarping=False,
         use_textline_orientation=False,
     )
-    result = list(engine.predict(str(image_path)))
+    source, recognition_width, recognition_height = prediction_input(image_path, args.image_scale)
+    result = list(engine.predict(source, text_det_box_thresh=args.text_det_box_thresh))
     if len(result) != 1:
         fail("result_count_invalid")
     payload = result[0].json
     if isinstance(payload, str):
         payload = json.loads(payload)
     try:
-        lines = parse_prediction(payload, width, height)
+        lines = parse_prediction(payload, recognition_width, recognition_height)
     except ValueError as error:
         fail(str(error))
+    engine_version = f"paddleocr-{paddleocr.__version__};paddle-{paddle.__version__};PP-OCRv4-mobile"
+    if args.image_scale != 1 or args.text_det_box_thresh != 0.6:
+        engine_version += f";input-{recognition_width}x{recognition_height};box-thresh-{args.text_det_box_thresh:g}"
     print(json.dumps({
         "schemaVersion": 1,
         "ok": True,
         "engine": "paddleocr",
-        "engineVersion": f"paddleocr-{paddleocr.__version__};paddle-{paddle.__version__};PP-OCRv4-mobile",
+        "engineVersion": engine_version,
         "imageWidth": width,
         "imageHeight": height,
         "lines": lines,
