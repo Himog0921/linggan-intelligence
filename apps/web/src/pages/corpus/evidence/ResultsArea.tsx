@@ -1,5 +1,5 @@
 import { ActionButton } from '../../../shared/ActionButton';
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { Tech } from './Primitives';
 import { ResultsStatus } from './ResultsStatus';
 import { WorkList } from './WorkList';
@@ -58,6 +58,7 @@ interface ResultsAreaProps {
   layout: LayoutKey;
   checked: ReadonlySet<string>;
   selectionMode: boolean;
+  selectionControls?: ReactNode;
   listRef: Ref<HTMLDivElement>;
   onSelect: (item: WorkItem, source: 'user' | 'auto') => void;
   onCheck: (ref: string, checked: boolean) => void;
@@ -73,7 +74,7 @@ export function ResultsArea(props: ResultsAreaProps) {
   const { shell, domainSelected, problem, list, items, selectedRef, layout, checked, selectionMode, listRef, onSelect, onCheck, onRetryShell, onClearScope } = props;
   const status = describeStatus({ shell, domainSelected, scopeProblem: problem, list: { pending: list.pending, error: list.error, count: items.length } });
   return (
-    <div className={styles.results}>
+    <div className={styles.results}><div className={styles.resultsContent}>
       {status ? (
         <ResultsStatus
           status={status}
@@ -100,6 +101,7 @@ export function ResultsArea(props: ResultsAreaProps) {
           </ActionButton>
         </div>
       ) : null}
-    </div>
+      {props.selectionControls ? <div className={styles.selectionDock}>{props.selectionControls}</div> : null}
+    </div></div>
   );
 }

@@ -33,7 +33,7 @@ async function opened(url?: string) {
 }
 
 describe('勾选与批量动作', () => {
-  it('只有选择态才显示勾选框；勾选本页再次点击取消，存储仍用稳定引用', async () => {
+  it('只有选择态才显示勾选框；本页补选后禁用，清空保持选择模式，存储仍用稳定引用', async () => {
     pageRoutes(kit);
     const view = await opened();
     expect(screen.queryAllByRole('checkbox', { name: /^勾选作品：/ })).toHaveLength(0);
@@ -42,7 +42,9 @@ describe('勾选与批量动作', () => {
     expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 3 篇');
     expect(JSON.parse(sessionStorage.getItem(selectionKey) ?? 'null')).toEqual([workRef(1), workRef(2), workRef(3)]);
     expect(screen.getAllByRole('checkbox', { name: /^勾选作品：/ }).every(box => (box as HTMLInputElement).checked)).toBe(true);
-    await view.user.click(screen.getByRole('button', { name: '取消本页' }));
+    expect(screen.getByRole('button', { name: '本页已选' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '取消本页' })).toBeNull();
+    await view.user.click(screen.getByRole('button', { name: '清空已选' }));
     expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 0 篇');
     await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
 

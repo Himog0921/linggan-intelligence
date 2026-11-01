@@ -194,17 +194,12 @@ it('切换领域不保留上个领域尚未提交的词，即使两个领域地�
   expect(onSubmit).not.toHaveBeenCalled();
 });
 
-it('附加组件返回 null 不产生空白行内容；排版切换不提交搜索', async () => {
-  function NoExtraContent() { return null; }
+it('三段切换与搜索表单分开，切换不提交搜索', async () => {
   const onSubmit = vi.fn(); const onChange = vi.fn();
-  const props = { ...selectionProps, query: DEFAULT_QUERY, hasDomain: true, onSubmit, onChange, onClearFilters: vi.fn() };
-  const view = render(<EvidenceControls {...props}><NoExtraContent /></EvidenceControls>);
-  const deck = screen.getByRole('region', { name: '材料检索与筛选' });
-  expect(deck.lastElementChild?.matches(':empty')).toBe(true);
-  await userEvent.click(screen.getByRole('button', { name: '表格' }));
+  render(<EvidenceControls {...selectionProps} query={DEFAULT_QUERY} hasDomain onSubmit={onSubmit} onChange={onChange} onClearFilters={vi.fn()} />);
+  const group = screen.getByRole('group', { name: '结果排版' });
+  expect(group.closest('form')).toBeNull();
+  await userEvent.click(within(group).getByRole('button', { name: '表格' }));
   expect(onSubmit).not.toHaveBeenCalled();
   expect(applied(onChange).layout).toBe('table');
-  view.rerender(<EvidenceControls {...props}><span>实际附加内容</span></EvidenceControls>);
-  expect(deck.lastElementChild?.matches(':empty')).toBe(false);
-  expect(deck.lastElementChild).toHaveTextContent('实际附加内容');
 });

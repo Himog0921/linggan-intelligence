@@ -1,9 +1,10 @@
 {
-  "kind": "implementation_fix",
-  "reason": "组合已验收候选：证据库普通浏览工具栏合行与批量行精简（8c883f84），页头品牌缩小与个人菜单材质（be45ac71）；仅重算组合指纹，不改变既定设计。",
-  "authorization": "lie-cheng 2026-11-01 c09bfbbb/49b2acdb；Philip task #6 #intelligence-UI:b6133694 的112d9ec7，组合已验收两项，不合并主线或部署。",
+  "kind": "page_exception",
+  "reason": "证据库局部动作组统一短硬阴影、连体互斥视图切换与结果区非模态选择浮层；复用C09既有参数，不推广全站或改共享组件。",
+  "authorization": "lie-cheng 2026-11-01 c3c68ebf；Philip task #7 a4176a41 整体设计裁定。",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"
-  }
+  },
+  "exceptionScope": "仅证据库EvidenceControls/SelectionBar与ResultsArea停靠容器；不改页头、作品元数据、详情阅读或全局Token。"
 }
