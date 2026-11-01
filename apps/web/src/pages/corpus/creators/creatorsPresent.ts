@@ -98,10 +98,18 @@ export function lifecycleLabel(value: string | null): string {
   return LIFECYCLE_LABELS[value] ?? '状态待核对';
 }
 
+/**
+ * 最近变化的理由：库里的自由文本由系统写入（生产上是「规则版本 <编号>」「工单 <编号> 已创建」这类），
+ * 带机器编号，不是给人看的话；有受控代码时只按代码翻译，代码认不得才退回自由文本，且仍带编号就写未记录。
+ */
+const MACHINE_TEXT_ID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+
 export function transitionReasonLabel(code: string | null, reason: string | null): string {
-  if (reason !== null && reason.trim() !== '') return reason.trim();
-  if (code === null) return '原因未记录';
-  return TRANSITION_REASONS[code] ?? '原因未记录';
+  const translated = code === null ? undefined : TRANSITION_REASONS[code];
+  if (translated) return translated;
+  const text = reason?.trim();
+  if (text && !MACHINE_TEXT_ID.test(text)) return text;
+  return '原因未记录';
 }
 
 /** 本领域内的观察关系，一句话。关系没读到是「暂不可用」，不是「未加入」。 */

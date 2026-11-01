@@ -11,6 +11,7 @@ import {
   provenanceText,
   relevanceLabel,
   sampleText,
+  transitionReasonLabel,
   valueLabel,
   workTitle,
 } from './creatorsPresent';
@@ -153,5 +154,21 @@ describe('作品标题', () => {
     expect(workTitle(work!, resources('资源标题（封面识别补位）'))).toBe('资源标题（封面识别补位）');
     expect(workTitle(work!, resources(null))).toBe('合成作品 11');
     expect(workTitle({ ...work!, title: null }, resources(null))).toBe('标题未取得');
+  });
+});
+
+describe('最近变化的理由', () => {
+  it('有受控代码时按代码翻译，系统写入的规则版本编号不出现在页面上', () => {
+    expect(transitionReasonLabel('monitor_paused', '规则版本 8c69feba-52d0-4624-8084-fa0f7c0e064b')).toBe('人工暂停巡查');
+    expect(transitionReasonLabel('monitor_paused', null)).toBe('人工暂停巡查');
+    expect(transitionReasonLabel('rule_baseline_started', '工单 052ee926-81a1-4f57-9e2e-c91fbb2ad962 已创建')).toBe('开始建立基线');
+    expect(transitionReasonLabel('baseline_receipts_completed', '租约 b74a3506-00c9-46c6-8acc-aec569d838a9 的全部基线步骤已接纳')).toBe('基线回执完成');
+  });
+
+  it('认不得的代码：能读的自由文本照实显示，带机器编号或没有理由就写未记录', () => {
+    expect(transitionReasonLabel('future_code', '人工补记的原因')).toBe('人工补记的原因');
+    expect(transitionReasonLabel('future_code', '租约 b74a3506-00c9-46c6-8acc-aec569d838a9 的全部步骤已接纳')).toBe('原因未记录');
+    expect(transitionReasonLabel('future_code', null)).toBe('原因未记录');
+    expect(transitionReasonLabel(null, null)).toBe('原因未记录');
   });
 });

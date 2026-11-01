@@ -278,7 +278,8 @@ export function observationRecordJson(overrides: Record<string, unknown> = {}) {
       latestNew: 3,
       state: 'disabled',
     },
-    lastTransition: { at: '2026-10-15 16:26', from: 'monitoring', to: 'paused', reasonCode: 'monitor_paused', reason: null },
+    // 生产上的理由长这样：系统写入的规则版本编号，页面上不展示。
+    lastTransition: { at: '2026-10-15 16:26', from: 'monitoring', to: 'paused', reasonCode: 'monitor_paused', reason: '规则版本 8c69feba-52d0-4624-8084-fa0f7c0e064b' },
     ...overrides,
   };
 }
