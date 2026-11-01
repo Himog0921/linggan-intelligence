@@ -219,7 +219,7 @@ test('active workflows have a single PR entrypoint and all proofs depend on pref
     assert.ok(delivery.includes(`uses: ./.github/workflows/${workflow}.yml`));
   }
   for (const [job, output] of Object.entries(jobs)) {
-    const needs = job === 'web-real-chain' ? '[preflight, web]' : 'preflight';
+    const needs = 'preflight';
     assert.ok(delivery.includes(`  ${job}:\n    needs: ${needs}\n    if: needs.preflight.outputs.${output} == 'true'`));
   }
   assert.match(delivery, /ready_for_review/);
@@ -265,13 +265,25 @@ test('preflight and every reusable proof check out the same PR event head', () =
   for (const workflow of workflows) {
     const source = readFileSync(join(root, `.github/workflows/${workflow}.yml`), 'utf8');
     const checkouts = source.match(/uses: actions\/checkout@/g) ?? [];
-    const headRefs = source.match(/ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/g) ?? [];
+    const headRefs = source.match(/ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/g) ?? [];
     assert.ok(checkouts.length, `${workflow} has checkout`);
     assert.equal(checkouts.length, headRefs.length, `${workflow} checks out the event head SHA`);
   }
-  assert.equal((delivery.match(/DELIVERY_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/g) ?? []).length, 2);
+  assert.equal((delivery.match(/DELIVERY_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/g) ?? []).length, 2);
 });
 
+test('main push always runs the full suite without cancelling earlier main commits', () => {
+  assert.ok(delivery.includes('push:\n    branches: [main]'));
+  assert.ok(delivery.includes("github.event_name == 'push' && format('delivery-main-"));
+  assert.ok(delivery.includes("cancel-in-progress: ${{ github.event_name == 'pull_request' }}"));
+  assert.ok(delivery.includes('for suite in ai material_reading ocr_recognition web web_real_chain topic'));
+  for (const workflow of ['ai-gen1-foundation', 'web-real-chain']) {
+    const source = readFileSync(join(root, `.github/workflows/${workflow}.yml`), 'utf8');
+    assert.ok(source.includes('fail-fast: false'));
+    assert.ok(source.includes('matrix:'));
+  }
+  assert.deepEqual(selected(['docs/README.md', 'docs/guide.md', 'README.md']), []);
+});
 test('isolated Rust proofs reject empty selections and preserve listing or execution failures', () => {
   const shell = String.raw`
     source "$1"

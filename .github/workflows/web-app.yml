@@ -11,11 +11,13 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
       - name: Locked install
         run: npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
       - name: Reject legacy production UI and duplicate React roots

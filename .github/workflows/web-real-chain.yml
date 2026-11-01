@@ -6,6 +6,11 @@ permissions:
   contents: read
 jobs:
   real-chain-browser-proof:
+    name: real-chain-${{ matrix.segment }}
+    strategy:
+      fail-fast: false
+      matrix:
+        segment: [core, dossier, content, collection]
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
@@ -15,25 +20,39 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: |
+            apps/web/package-lock.json
+            apps/pi-adapter/package-lock.json
       - name: Matching Rust toolchain
         run: |
           rustup toolchain install 1.95.0 --profile minimal --component rustfmt
           rustup default 1.95.0
-          echo "CARGO_TARGET_DIR=$RUNNER_TEMP/web-app-target" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: linux-test
+          add-job-id-key: 'false'
+          cache-bin: 'false'
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Locked install and browser
         run: |
           npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
           npm ci --prefix apps/pi-adapter --ignore-scripts --no-audit --no-fund
           npx --prefix apps/web playwright install --with-deps chromium
+      - name: Production React assets for isolated content browser proof
+        if: matrix.segment == 'content'
+        run: npm --prefix apps/web run build
       - name: API route regression
+        if: matrix.segment == 'core'
         run: cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api local_web::evidence_ local_web::content_workbench_sources_api::tests
       - name: C0 offline contracts and real React main path (no database or provider)
+        if: matrix.segment == 'core'
         env:
           C0_PREVIEW_PROOF_DIR: ${{ runner.temp }}/web-app-proof/c0-offline
         run: |
@@ -43,21 +62,25 @@ jobs:
           export C0_PREVIEW_NODE="$(command -v node)"
           cargo test -p linggan-api --bins --locked offline_preview_browser_main_path -- --ignored --nocapture
       - name: Isolated PostgreSQL + Axum + React browser proof (synthetic credential only)
+        if: matrix.segment == 'core'
         env:
           WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof
         run: |
           export WEB_APP_PROOF_NODE="$(command -v node)"
           bash scripts/test-web-app-postgres.sh
       - name: Research dossier v2 React main path (owned synthetic PostgreSQL)
+        if: matrix.segment == 'dossier'
         env:
           WEB_APP_PROOF_DIR: ${{ runner.temp }}/web-app-proof/dossier-v2
         run: bash scripts/test-research-dossier-postgres.sh --dossier-ui
       - name: AI-GEN1 material input contracts (synthetic PostgreSQL only)
+        if: matrix.segment == 'dossier'
         run: |
           cargo test -p linggan-evidence --lib material_ --locked
           cargo test -p linggan-worker --bin linggan-research-dossier --locked
           bash scripts/test-research-dossier-postgres.sh --dossier-input
       - name: Web source formatting
+        if: matrix.segment == 'core'
         run: |
           # 只查本模块自己的 Rust 文件：local_web.rs 在主线上已有与本模块无关的格式偏差。
           rustfmt --edition 2024 --config skip_children=true --check \
@@ -73,18 +96,22 @@ jobs:
             crates/intelligence/src/content_workbench_sources/material_collection.rs crates/intelligence/src/content_workbench_sources/material_documents.rs \
             crates/intelligence/src/content_workbench/source_usage.rs crates/intelligence/tests/content_workbench_sources_postgres.rs
       - name: Comment study transaction and lifecycle regression (synthetic PostgreSQL)
+        if: matrix.segment == 'dossier'
         run: bash scripts/test-comment-study-productization-postgres.sh
       - name: Content workbench PostgreSQL contracts
+        if: matrix.segment == 'content'
         run: |
           cargo test -p linggan-intelligence --lib --locked -- content_workbench:: content_workbench_sources:: content_workbench_ai:: exact_spans_keep_overlaps_codepoints_and_long_repeated_patterns
           bash scripts/test-content-workbench-postgres.sh
       - name: Content workbench React browser and actual export proof
+        if: matrix.segment == 'content'
         env:
           CW_BROWSER_PROOF_DIR: ${{ runner.temp }}/workbench-proof
         run: |
           export CW_BROWSER_PROOF_NODE="$(command -v node)"
           bash scripts/test-content-workbench-postgres.sh --browser
       - name: Collection React module on disposable PostgreSQL
+        if: matrix.segment == 'collection'
         env:
           COLLECTION_PROOF_DIR: ${{ runner.temp }}/collection-react-proof
           COLLECTION_RUN_BROWSER_PROOF: '1'
@@ -98,7 +125,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: web-app-real-chain-proof
+          name: web-app-real-chain-proof-${{ matrix.segment }}
           path: |
             ${{ runner.temp }}/web-app-proof
             ${{ runner.temp }}/workbench-proof

@@ -11,7 +11,7 @@ case "${1:-}" in
     if docker image inspect "$image" >/dev/null 2>&1; then
       exit 0
     fi
-    docker build --pull=false --file "$repo_root/docker/postgres-pgvector/Dockerfile" --tag "$image" "$repo_root"
+    docker build --pull=false --file "$repo_root/docker/postgres-pgvector/Dockerfile" --tag "$image" "$repo_root/docker/postgres-pgvector"
     ;;
   --check)
     docker image inspect "$image" >/dev/null
