@@ -284,6 +284,19 @@ test('main push always runs the full suite without cancelling earlier main commi
   }
   assert.deepEqual(selected(['docs/README.md', 'docs/guide.md', 'README.md']), []);
 });
+test('Rust cache actions are commit-pinned and Cargo proof runners use the same cacheable target', () => {
+  for (const wf of ['ai-gen1-foundation', 'ocr-recognition', 'material-reading', 'web-real-chain']) {
+    const source = readFileSync(join(root, `.github/workflows/${wf}.yml`), 'utf8');
+    assert.ok(source.includes('Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0'), wf);
+    assert.ok(!source.includes('Swatinem/rust-cache@v2'));
+  }
+  const real = readFileSync(join(root, '.github/workflows/web-real-chain.yml'), 'utf8');
+  assert.ok(real.includes('CARGO_TARGET_DIR: ${{ github.workspace }}/target'));
+  assert.ok(real.includes('Repeated pinned pgvector image preparation is a no-op'));
+  const web = readFileSync(join(root, '.github/workflows/web-app.yml'), 'utf8');
+  assert.ok(web.includes('Second identical revision build:'));
+});
+
 test('isolated Rust proofs reject empty selections and preserve listing or execution failures', () => {
   const shell = String.raw`
     source "$1"

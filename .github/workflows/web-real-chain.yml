@@ -17,6 +17,8 @@ jobs:
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
+      # Keep each Cargo invocation and legacy proof runner on the same cacheable build tree.
+      CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -34,7 +36,7 @@ jobs:
         run: |
           rustup toolchain install 1.95.0 --profile minimal --component rustfmt
           rustup default 1.95.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           shared-key: linux-test
           add-job-id-key: 'false'
@@ -121,6 +123,14 @@ jobs:
           export COLLECTION_PROOF_NODE="$(command -v node)"
           export NODE_PATH="$GITHUB_WORKSPACE/apps/web/node_modules"
           bash scripts/test-collection-single-run-postgres.sh
+      - name: Repeated pinned pgvector image preparation is a no-op
+        if: matrix.segment == 'collection'
+        run: |
+          started=$SECONDS
+          bash scripts/runtime/build-pgvector-image.sh --ensure
+          elapsed=$((SECONDS - started))
+          echo "Repeated pinned image preparation: ${elapsed}s"
+          ((elapsed <= 5)) || { echo 'Existing Docker image was unexpectedly rebuilt' >&2; exit 1; }
       - name: Retain browser evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

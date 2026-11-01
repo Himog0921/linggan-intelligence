@@ -35,4 +35,9 @@ jobs:
           export LINGGAN_WEB_NODE="$(command -v node)"
           revision="$(git rev-parse --short HEAD)"
           bash scripts/runtime/prepare-web.sh --build "$revision"
+          second_started=$SECONDS
+          bash scripts/runtime/prepare-web.sh --build "$revision"
+          second_elapsed=$((SECONDS - second_started))
+          echo "Second identical revision build: ${second_elapsed}s"
+          ((second_elapsed <= 5)) || { echo 'Matching revision unexpectedly rebuilt' >&2; exit 1; }
           bash scripts/runtime/prepare-web.sh --check "$revision"
