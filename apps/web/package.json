@@ -13,7 +13,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "build": "tsc --noEmit -p tsconfig.json && vite build",
-    "verify": "npm run lint && npm run test && npm run build",
+    "verify": "npm run typecheck && npm run lint && npm run test && npm run build",
     "lids:record": "node ../../scripts/lids.mjs record",
     "lids:sync": "node ../../scripts/lids.mjs sync",
     "lids:check": "node ../../scripts/lids.mjs check",

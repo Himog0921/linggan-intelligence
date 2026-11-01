@@ -23,7 +23,11 @@ jobs:
       - name: Reject legacy production UI and duplicate React roots
         run: node scripts/check-web-react-boundary.mjs && node --test scripts/check-web-react-boundary.test.mjs
       - name: Typecheck, lint, unit and component tests, production build
-        run: npm --prefix apps/web run verify
+        run: |
+          # Build already performs the TypeScript typecheck; do not invoke it twice.
+          npm --prefix apps/web run lint
+          npm --prefix apps/web run test
+          npm --prefix apps/web run build
       - name: LIDS sources and offline examples stay synchronized
         run: npm --prefix apps/web run lids:verify
       - name: Runtime preparation script reuses a matching build
