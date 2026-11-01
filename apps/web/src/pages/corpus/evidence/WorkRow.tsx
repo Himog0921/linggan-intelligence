@@ -1,7 +1,7 @@
 import type { MouseEvent } from 'react';
 import { CoverPreview } from './Media';
 import { StateLine } from './Primitives';
-import { compactMoment, laneSummary, materialSummary, metricReading, publishedCopy, workTitle, ENGAGEMENT_KINDS } from './evidencePresent';
+import { compactMoment, laneSummary, materialSummary, metricReading, publishedCopy, stateMeta, workTitle, ENGAGEMENT_KINDS } from './evidencePresent';
 import type { WorkItem } from './evidenceTypes';
 import { AuthorFact, Engagement, MaterialRail, QuoteBlock } from './WorkParts';
 import styles from './WorkList.module.css';
@@ -18,6 +18,16 @@ export interface RowProps {
 
 function stop(event: MouseEvent) { event.stopPropagation(); }
 
+/** 研读信息列只有 108–126px 宽，少数状态原句较长，关键结论会被省略号截掉。
+ *  这里按状态码给研读列专用的短名；完整原句仍留在 title 与读屏文本里，其他页面的词表不变。 */
+const RESEARCH_STATE_LABELS: Readonly<Record<string, string>> = {
+  DETAIL_READ_BLOCKED: '详情未读成',
+  PAGE_UNAVAILABLE: '平台页不存在',
+  INPUT_BLOCKED: '输入不可执行',
+  EXPIRED_WITHOUT_RECEIPT: '租约结束无回执',
+  COMPLETED_WITHOUT_RECEIPT: '任务结束无回执',
+};
+
 /** The 36px hit area floats over the object; it never participates in the reading-row height. */
 export function CheckBox({ item, checked, onCheck }: { item: WorkItem; checked: boolean; onCheck: (ref: string, checked: boolean) => void }) {
   return <label className={styles.check} data-evidence-check="" onClick={stop}>
@@ -32,10 +42,18 @@ function SelectTitle({ item, selected, tabStop }: Pick<RowProps, 'item' | 'selec
     aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} title={title}>{title}</button>;
 }
 
-/** V2.2: 78×104 cover, 106px row including its edges. Title / quote / author / metrics are four fixed tracks. */
+/** V2.2: 78×104 cover, 106px row including its edges. Title / quote / author / metrics are four fixed tracks.
+ *  右侧是一列安静的事实：材料现在怎样、何时发布、何时观察，不作装饰。 */
 export function ResearchRow({ item, selected, tabStop, canCheck, checked, onSelect, onCheck }: RowProps) {
   const detail = laneSummary(item.lanes, 'detail')?.state ?? 'UNKNOWN';
+  const [stateLabel] = stateMeta(detail);
+  const shortState = RESEARCH_STATE_LABELS[detail] ?? stateLabel;
   const observed = compactMoment(item.lastObservedAt);
+  // <time datetime> 要 ISO 形式；库里的观察时刻是「YYYY-MM-DD HH:MM」，这里只换分隔符，不改显示。
+  const observedIso = item.lastObservedAt ? item.lastObservedAt.replace(' ', 'T') : undefined;
+  const published = publishedCopy(item.display, { compact: true, withFieldName: false });
+  // 来源时间在字段名里已经说过一次，值里只留时间本身。
+  const fromSource = published.startsWith('来源时间：');
   return <li className={styles.row} data-selected={selected} data-checked={canCheck && checked}
     data-selecting={canCheck} data-work-ref={item.ref} onClick={() => onSelect(item)}>
     <article className={styles.article}>
@@ -43,15 +61,36 @@ export function ResearchRow({ item, selected, tabStop, canCheck, checked, onSele
       <div className={styles.identity}>
         <h2 className={styles.title}><SelectTitle item={item} selected={selected} tabStop={tabStop} /></h2>
         <QuoteBlock fragment={item.fragment} />
-        <div className={styles.meta}><AuthorFact item={item} /><span className={styles.time}>{publishedCopy(item.display, { compact: true })}</span></div>
+        <div className={styles.meta}><AuthorFact item={item} />
+          {/* 窄屏整列隐藏时，发布时间回到作者行，不随侧栏一起消失。 */}
+          <span className={styles.metaDate} data-meta-date="">{publishedCopy(item.display, { compact: true })}</span>
+        </div>
         <Engagement engagement={item.display.engagement} />
       </div>
       <div className={styles.side}>
-        <MaterialRail summary={materialSummary(item)} />
-        <StateLine state={detail} />
-        <span className={styles.observed} title={item.lastObservedAt ? `最近观察 ${item.lastObservedAt}` : undefined}>
-          {`最近观察 ${observed ?? '未知'}`}
-        </span>
+        <dl className={styles.info}>
+          <div className={styles.infoRow}>
+            <dt>状态</dt>
+            <dd className={styles.stateCell} title={stateLabel}>
+              <StateLine state={detail} label={shortState} ariaHidden />
+              <span className="v7-sr-only">{stateLabel}</span>
+            </dd>
+          </div>
+          <div className={styles.infoRow}>
+            <dt>材料</dt>
+            <dd><MaterialRail summary={materialSummary(item)} compact /></dd>
+          </div>
+          <div className={styles.infoRow}>
+            <dt>{fromSource ? '来源' : '发布'}</dt>
+            <dd title={published}>{fromSource ? published.slice('来源时间：'.length) : published}</dd>
+          </div>
+          <div className={styles.infoRow}>
+            <dt>观察</dt>
+            <dd><time dateTime={observedIso} title={item.lastObservedAt ? `最近观察 ${item.lastObservedAt}` : undefined}>
+              {observed ?? '未知'}
+            </time></dd>
+          </div>
+        </dl>
       </div>
       {canCheck ? <CheckBox item={item} checked={checked} onCheck={onCheck} /> : null}
     </article>

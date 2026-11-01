@@ -22,20 +22,40 @@ function renderList(overrides: Partial<Parameters<typeof WorkList>[0]> = {}, lis
 const targets = () => [...document.querySelectorAll<HTMLElement>('[data-select-target]')];
 
 describe('研读排版', () => {
-  it('每行是真列表项：标题按钮、作者、原声、互动（图标有中文名）、材料完整度、最近观察', () => {
+  it('每行是真列表项：标题按钮、作者、原声、互动（图标有中文名）、材料完整度、右侧事实列', () => {
     renderList({}, items([1, { media: { images: 1 } }]));
     const list = screen.getByRole('list', { name: '作品材料集合' });
     const row = within(list).getAllByRole('listitem')[0]!;
     expect(within(row).getByRole('heading', { level: 2 })).toHaveTextContent('合成作品 1');
     expect(within(row).getByRole('button', { name: '合成作品 1' })).toHaveAttribute('title', '合成作品 1');
     expect(within(row).getByText('合成作者 1')).toBeInTheDocument();
-    expect(within(row).getByText('2026-10-13')).toBeInTheDocument();
     expect(row.querySelector('q')).toHaveTextContent('合成正文 1：先做两分钟，再决定要不要继续。');
     for (const name of ['点赞', '评论', '收藏', '分享']) expect(within(row).getByRole('img', { name })).toBeInTheDocument();
     expect(within(row).getByText('1,201')).toBeInTheDocument();
     expect(within(row).getByRole('img', { name: /^材料完整度：正文 可检索；评论 .*转录 本作品不适用，不计入分母$/ })).toBeInTheDocument();
-    expect(within(row).getByText('最近观察 2026-10-10 17:00')).toBeInTheDocument();
+    // 右侧事实列：字段名与值分开写，发布时间与观察时间各占一行。
+    const info = row.querySelector('dl') as HTMLElement;
+    const labels = [...info.querySelectorAll('dt')].map(node => node.textContent);
+    expect(labels).toEqual(['状态', '材料', '发布', '观察']);
+    expect(within(info).getByText('2026-10-13')).toBeInTheDocument();
+    expect(within(info).getByText('2026-10-10 17:00')).toBeInTheDocument();
+    // 窄屏整列隐藏时，发布时间回落到作者行。
+    expect(row.querySelector('[data-meta-date]')).toHaveTextContent('2026-10-13');
     expect(row).toHaveAttribute('data-selecting', 'false');
+  });
+
+  it('长异常状态在窄列里显示短名，完整原句交给提示与读屏', () => {
+    renderList({}, items([1, { lanes: { detail: 'DETAIL_READ_BLOCKED' } }], [2, { lanes: { detail: 'PAGE_UNAVAILABLE' } }]));
+    const [blocked, unavailable] = within(screen.getByRole('list', { name: '作品材料集合' })).getAllByRole('listitem');
+    const blockedState = blocked!.querySelector('dd')!;
+    expect(within(blockedState).getByText('详情未读成')).toBeInTheDocument();
+    expect(blockedState).toHaveAttribute('title', '详情页已打开，但没有读成');
+    expect(within(blockedState).getByText('详情页已打开，但没有读成')).toHaveClass('v7-sr-only');
+    expect(blockedState.querySelector('[data-state="DETAIL_READ_BLOCKED"]')).toHaveAttribute('aria-hidden', 'true');
+    const unavailableState = unavailable!.querySelector('dd')!;
+    expect(within(unavailableState).getByText('平台页不存在')).toBeInTheDocument();
+    expect(unavailableState).toHaveAttribute('title', '平台页面已不存在（采集端确认）');
+    expect(within(unavailableState).getByText('平台页面已不存在（采集端确认）')).toHaveClass('v7-sr-only');
   });
 
   it('未知不是 0：没有互动数字写「未知」；没有标题写「标题当前未知」；没有原声写明确空态', () => {

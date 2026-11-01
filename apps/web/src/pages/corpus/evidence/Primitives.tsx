@@ -3,14 +3,17 @@ import type { Feedback } from './evidenceFeedback';
 import { stateMeta, type FactRowData } from './evidencePresent';
 import styles from './Primitives.module.css';
 
-/** 状态线：圆点＋中文状态词。原始状态码只放在 `data-state`，不进普通层的文字（F06）。 */
-export function StateLine({ state, showCode = false }: { state: string | null | undefined; showCode?: boolean }) {
+/** 状态线：圆点＋中文状态词。原始状态码只放在 `data-state`，不进普通层的文字（F06）。
+ *  label / ariaHidden 只给窄列里需要短名、而完整句交给读屏文本的位置（研读信息列）。 */
+export function StateLine({ state, showCode = false, label, ariaHidden = false }: {
+  state: string | null | undefined; showCode?: boolean; label?: string; ariaHidden?: boolean;
+}) {
   const normalized = state || 'UNKNOWN';
-  const [label, tone] = stateMeta(normalized);
+  const [fullLabel, tone] = stateMeta(normalized);
   return (
-    <span className={styles.stateLine} data-state={normalized}>
+    <span className={styles.stateLine} data-state={normalized} aria-hidden={ariaHidden || undefined}>
       <i className={styles.dot} data-tone={tone} aria-hidden="true" />
-      <span>{label}</span>
+      <span>{label ?? fullLabel}</span>
       {showCode ? <code className={styles.tech}>{normalized}</code> : null}
     </span>
   );

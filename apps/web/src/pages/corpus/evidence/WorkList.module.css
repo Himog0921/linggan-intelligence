@@ -116,8 +116,12 @@
   font: var(--lgi-text-data) / var(--lgi-lh-body) var(--lgi-font-sans);
 }
 
-.time {
+/* 发布时间归右侧事实列；这一条只在窄屏整列隐藏时回到作者行。 */
+.metaDate {
+  display: none;
   color: var(--lgi-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .side {
@@ -129,10 +133,66 @@
   padding-left: var(--lgi-space-3);
 }
 
-.observed {
-  color: var(--lgi-ghost);
-  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+/* 右侧事实列：字段名一列、值一列，行与行共用同一条对齐线。没有边框、底色和徽章。 */
+.info {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--lgi-space-2);
+  row-gap: calc(var(--lgi-space-1) + var(--lgi-space-1) / 2);
+  margin: 0;
+}
+
+.infoRow {
+  display: contents;
+}
+
+/* 轻分组：材料现状两行一组，时间两行一组，中间比行距多一格。 */
+.infoRow:nth-of-type(3) > * {
+  padding-top: var(--lgi-space-1);
+}
+
+.info dt {
+  color: var(--lgi-meta);
+  font: var(--lgi-type-aux-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+  white-space: nowrap;
+}
+
+/* 选中与悬停底色会吃掉 meta 的对比余量（选中底实测 4.06:1，低于 4.5:1），
+ * 这两种状态把字段名提到 muted，白底仍保持更轻的 meta。 */
+.row[data-selected='true'] .info dt { color: var(--lgi-muted); }
+
+@media (hover: hover) {
+  .row:hover .info dt { color: var(--lgi-muted); }
+}
+
+.info dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-data);
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 状态词可能很长（例如「平台页面已不存在（采集端确认）」）：整行只排一行，
+ * 超出用省略号收尾，完整句子留在 title 与读屏文本里，失败色点不因此消失。 */
+.stateCell {
+  display: flex;
+  align-items: center;
+}
+
+.stateCell > [data-state] {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.stateCell > [data-state] > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Bulk selectors have one authoritative style in the V2.2 section. */
@@ -334,11 +394,9 @@
   font:600 var(--lgi-type-label-size)/var(--lgi-shell-icon) var(--lgi-font-data);
 }
 .list[data-layout='research'] .side {
-  border:0; padding:var(--lgi-space-3) 0 var(--lgi-space-2); height:calc(var(--lgi-space-24) + var(--lgi-space-2));
-  box-sizing:border-box; min-width:0; display:flex; justify-content:space-between;
-  gap:var(--lgi-space-2);
+  border:0; padding:calc(var(--lgi-space-2) + var(--lgi-space-1) / 2) 0 var(--lgi-space-2); height:calc(var(--lgi-space-24) + var(--lgi-space-2));
+  box-sizing:border-box; min-width:0;
 }
-.list[data-layout='research'] .side .observed { font:var(--lgi-type-aux-size)/1.5 var(--lgi-font-data); color:var(--lgi-meta); white-space:nowrap; }
 .list[data-layout='research'] .article > [data-evidence-check] {
   position:absolute;top:50%;right:var(--lgi-space-2);z-index:4;
   transform:translateY(-50%);
@@ -402,7 +460,7 @@
 .list[data-layout='table'] .materialCell > :first-child { min-width:0; flex:1; }
 .list[data-layout='table'] .materialCell > :last-child { flex:none; }
 @media (max-width:1380px) {
-  .list[data-layout='research'] .article { gap:var(--lgi-space-3);column-gap:var(--lgi-space-1);grid-template-columns:calc(var(--lgi-space-16) + var(--lgi-space-3) + var(--lgi-focus-inset)) minmax(0,1fr) calc(var(--lgi-space-24) + var(--lgi-space-10) + var(--lgi-space-1) + var(--lgi-focus-inset)); }
+  .list[data-layout='research'] .article { gap:var(--lgi-space-3);column-gap:var(--lgi-space-1);grid-template-columns:calc(var(--lgi-space-16) + var(--lgi-space-3) + var(--lgi-focus-inset)) minmax(0,1fr) calc(var(--lgi-space-24) + var(--lgi-space-12) + var(--lgi-space-1) + var(--lgi-focus-inset)); }
   .list[data-layout='research'] .items { padding:var(--lgi-space-3);gap:var(--lgi-space-3); }
 }
 @media (max-width:860px) {
@@ -412,5 +470,6 @@
   .list[data-layout='research'] .article > :first-child { width:calc(var(--lgi-space-16) + var(--lgi-space-2));height:var(--lgi-space-24); }
   .list[data-layout='research'] .identity { height:var(--lgi-space-24);grid-template-rows:var(--lgi-space-5) var(--lgi-space-4) var(--lgi-space-5) var(--lgi-shell-icon);gap:calc(var(--lgi-space-1) - var(--lgi-action-border-width));padding-left:var(--lgi-space-1); }
   .list[data-layout='research'] .side { display:none; }
+  .list[data-layout='research'] .metaDate { display:inline; }
   .list[data-layout='research'] .row[data-selecting='true'] .article { padding-right:calc(var(--lgi-space-8) + var(--lgi-space-1)); }
 }

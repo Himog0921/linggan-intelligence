@@ -489,3 +489,7 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## EVIDENCE-ACTIONS-20261101
 
 本轮独立树artifacts/private/evidence-actions-20261101保存固定合成fixture/GET预览、桌面浏览器状态图、日志、报告和复核回执，忽略不入Git；codex负责，保留至用户验收。预览仅loopback合成接口，不触发深采/退出登录或正式数据写入。依赖和dist沿既有登记，合并/放弃后按本机规则回收自有树与产物。
+
+## EVIDENCE-MASTER-20261102
+
+本组合树artifacts/private/evidence-master-20261102保存真实React构建的固定合成fixture、GET/HEAD loopback预览、桌面截图与几何、异常样本、验证日志和交付报告，忽略不入Git。codex负责，来源0b9ce786与1708df34组合，不改正式服务/数据、不触发深采/退出登录。保留至用户验收，合并/放弃后按本机规则回收自有资源；dist/node_modules沿既有登记。
