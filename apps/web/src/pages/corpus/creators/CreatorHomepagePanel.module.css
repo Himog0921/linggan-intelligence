@@ -253,10 +253,12 @@
   gap: var(--lgi-space-3);
   position: sticky;
   z-index: var(--lgi-z-stage);
-  bottom: 0;
+  /* 抽屉滚动区底部留 var(--lgi-space-6) 内边距，卡片会从工具栏下缘与底栏之间露出来；
+     把这段留白并进工具栏自身，让白色栏面一直贴住抽屉底栏。 */
+  bottom: calc(-1 * var(--lgi-space-6));
   margin-top: var(--lgi-space-5);
   border-top: 1px solid var(--lgi-border-strong);
-  padding: var(--lgi-space-3) 0;
+  padding: var(--lgi-space-3) 0 calc(var(--lgi-space-3) + var(--lgi-space-6));
   background: var(--lgi-canvas);
 }
 .studyDock > div { min-width: 0; }
@@ -302,6 +304,13 @@
   .grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .studyDock { flex-direction: column; align-items: stretch; }
   .studyDock > button { align-self: flex-end; }
+}
+@media (max-width: 640px) {
+  /* 抽屉内容区在该宽度把内边距收窄到 var(--lgi-space-4)。 */
+  .studyDock {
+    bottom: calc(-1 * var(--lgi-space-4));
+    padding-bottom: calc(var(--lgi-space-3) + var(--lgi-space-4));
+  }
 }
 @media (max-width: 440px) {
   .grid { gap: var(--lgi-space-2); }
