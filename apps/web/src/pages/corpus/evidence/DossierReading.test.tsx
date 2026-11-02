@@ -26,7 +26,8 @@ it('视频口播与画面采用规范章节，保持实际时间定位', () => {
   render(<DossierReading dossier={dossier} titleRendered />);
   expect(within(screen.getByRole('region', { name: '视频口播' })).getByText('完整口播')).toBeVisible();
   expect(within(screen.getByRole('region', { name: '画面文字' })).getAllByText('画面文字')).toHaveLength(2);
-  expect(screen.getAllByText('00:01')).toHaveLength(2);
+  expect(screen.getByText('00:01')).toBeVisible();
+  expect(screen.getByText('00:01.250')).toBeVisible();
 });
 it('研究底稿只读打开保留局部失败，不默认加载候选或提交准备', async () => {
   const kit = createFetchMock(); kit.install();

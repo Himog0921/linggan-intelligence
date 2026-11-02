@@ -1,4 +1,4 @@
-import { endingBlockAttribution, endingGroupAttribution, groupTagLabels, groupText, groupTime, formatReadingTime, readingAnchor, showReadingAttribution, type AttributionBoundary, type ResolvedReadingGroup } from './dossierDocumentModel';
+import { endingBlockAttribution, endingGroupAttribution, groupTagLabels, groupText, groupTime, formatReadingTime, formatReadingTimeRange, readingAnchor, showReadingAttribution, type AttributionBoundary, type ResolvedReadingGroup } from './dossierDocumentModel';
 import { confirmedEmptySpeech } from './dossierPresent';
 import { hasReadingSourceText } from './dossierReadingContent';
 import { normalizedTagLabel } from './dossierTagText';
@@ -64,7 +64,7 @@ function GroupContent({ value, previousRole }: { value: ResolvedReadingGroup; pr
   }
   return <>{entries.map(({ block, unit }, index) => <div key={block.ref} data-block-ref={block.ref} data-speaker={block.speaker}>
     {block.kind !== 'dialogue' && showReadingAttribution(block.speaker ?? 'unconfirmed', index ? endingBlockAttribution(entries[index - 1]?.block) : previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[block.speaker ?? 'unconfirmed']}</p> : null}
-    {unit.kind === 'video_frame' && block.time ? <span className={styles.transcriptTime}>{formatReadingTime(block.time.startMs)}</span> : null}
+    {block.time ? <span className={styles.transcriptTime} data-time-start-ms={block.time.startMs} data-time-end-ms={block.time.endMs}>{formatReadingTimeRange(block.time)}</span> : null}
     <ContentBlock block={block} tags={unit.kind === 'tags'}/>
   </div>)}</>;
 }
@@ -72,11 +72,11 @@ function Continuation({ from }: { from: boolean }) { return <p className={styles
 export function DossierGroup({ value, prefix, previousRole }: { value: ResolvedReadingGroup; prefix: string; previousRole?: AttributionBoundary }) {
   const id = readingAnchor(prefix, value.group.ref);
   const role = value.entries[0]?.block.speaker ?? 'unconfirmed';
-  const time = value.group.mode !== 'blocks' && value.entries[0]?.unit.kind === 'video_frame' ? groupTime(value) : null;
+  const time = value.group.mode !== 'blocks' ? groupTime(value) : null;
   return <div className={styles.group} id={id} data-reading-anchor={value.group.ref} tabIndex={-1}>
     {value.group.continuation.fromPrevious ? <Continuation from/> : null}
     {value.group.mode !== 'blocks' && showReadingAttribution(role, previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[role]}</p> : null}
-    {time ? <span className={styles.transcriptTime}>{formatReadingTime(time.startMs)}</span> : null}
+    {time ? <span className={styles.transcriptTime} data-time-start-ms={time.startMs} data-time-end-ms={time.endMs}>{formatReadingTimeRange(time)}</span> : null}
     <GroupContent value={value} previousRole={previousRole}/>
     {value.group.continuation.toNext ? <Continuation from={false}/> : null}
   </div>;
@@ -84,7 +84,7 @@ export function DossierGroup({ value, prefix, previousRole }: { value: ResolvedR
 export function TranscriptParagraph({ value, prefix, showRole }: { value: ResolvedReadingGroup; prefix: string; showRole: boolean }) {
   const time = groupTime(value), role = value.entries[0]?.block.speaker ?? 'unconfirmed';
   return <div className={styles.transcriptRow} id={readingAnchor(prefix, value.group.ref)} data-reading-anchor={value.group.ref} data-transcript-paragraph tabIndex={-1}>
-    <span className={styles.transcriptTime} title={time ? `${formatReadingTime(time.startMs)}–${formatReadingTime(time.endMs)}` : '时间未取得'}>{time ? formatReadingTime(time.startMs) : '—'}</span>
+    <span className={styles.transcriptTime} title={time ? formatReadingTimeRange(time) : '时间未取得'} data-time-start-ms={time?.startMs} data-time-end-ms={time?.endMs}>{time ? formatReadingTime(time.startMs) : '—'}</span>
     <div>
       {showRole ? <span className={styles.attribution}>{ROLE_LABELS[role]}</span> : null}
       {value.group.continuation.fromPrevious ? <Continuation from/> : null}

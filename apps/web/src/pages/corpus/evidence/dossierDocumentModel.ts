@@ -56,6 +56,11 @@ export function formatReadingTime(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1000);
   return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 }
+/** Exact source range, including subsecond positions when provided. */
+export function formatReadingTimeRange(time: { startMs: number; endMs: number }): string {
+  const precise = (milliseconds: number) => `${formatReadingTime(milliseconds)}${milliseconds % 1000 ? `.${String(milliseconds % 1000).padStart(3, '0')}` : ''}`;
+  return time.startMs === time.endMs ? precise(time.startMs) : `${precise(time.startMs)}–${precise(time.endMs)}`;
+}
 export function transcriptStats(groups: readonly ResolvedReadingGroup[]): string {
   const characterCount = groups.reduce((count, group) => count + Array.from(groupText(group).replace(/\s/gu, '')).length, 0);
   const times = groups.map(groupTime).filter((value): value is NonNullable<typeof value> => value !== null);

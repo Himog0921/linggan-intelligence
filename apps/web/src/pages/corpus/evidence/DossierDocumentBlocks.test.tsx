@@ -77,3 +77,18 @@ it('人工确认无口播的空读本不成为待补项', () => {
     processing: { state: 'completed', reason: null } })], coverage: { sources: { body: { state: 'not_applicable', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'available', units: 1, readings: 1 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })).dossier;
   expect(readingGaps(dossier).some(row => row.key === 'audio')).toBe(false);
 });
+
+
+it('结构块的真实时间范围保留毫秒，连续口播保持紧凑起点和精确定位', () => {
+  const dialogue = mount([{ ref: 'timed-dialogue', kind: 'dialogue', turns: [{ speaker: 'other', text: '有来源定位的对话' }], time: { startMs: 100, endMs: 200 } }]);
+  const range = screen.getByText('00:00.100–00:00.200');
+  expect(range).toHaveAttribute('data-time-start-ms', '100');
+  expect(range).toHaveAttribute('data-time-end-ms', '200');
+  dialogue.unmount();
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', blocks: [{ ref: 'precise-speech', kind: 'paragraph', text: '完整的口播', time: { startMs: 173125, endMs: 179250 } }] })] })).dossier;
+  render(<TranscriptGroups groups={resolveReadingSections(dossier)[0]!.groups} prefix="precise"/>);
+  const time = screen.getByText('02:53');
+  expect(time).toHaveAttribute('title', '02:53.125–02:59.250');
+  expect(time).toHaveAttribute('data-time-start-ms', '173125');
+  expect(time).toHaveAttribute('data-time-end-ms', '179250');
+});
