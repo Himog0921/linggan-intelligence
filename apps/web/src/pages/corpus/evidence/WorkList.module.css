@@ -431,7 +431,8 @@
 }
 /* Dense table: true independent metric columns and no title checkbox wrapping. */
 .list[data-layout='table'] { overflow-x:auto; }
-.list[data-layout='table'] .table { min-width:calc(var(--lgi-space-24) * 12 + var(--lgi-space-2)); width:100%; table-layout:fixed; border-collapse:collapse; }
+/* Never narrow the table below the full-date layout; opening the inspector scrolls this table locally instead of truncating date cells. */
+.list[data-layout='table'] .table { min-width:calc(var(--lgi-space-24) * 13 + var(--lgi-space-8)); width:100%; table-layout:fixed; border-collapse:collapse; }
 .selectColumn { width:calc(var(--lgi-space-10) + var(--lgi-space-1) + var(--lgi-focus-inset)); }
 .workColumn { width:25%; } .authorColumn { width:14%; } .materialColumn { width:16%; }
 .metricColumn { width:5%; } .dateColumn { width:9%; } .observedColumn { width:11.5%; }
