@@ -48,16 +48,37 @@ interface WorkOptions {
   manual?: Record<string, unknown>;
 }
 
+function dedupeFragments(fragments: Array<{ fragmentId: string }>) {
+  const seen = new Set<string>();
+  return fragments.filter(fragment => (seen.has(fragment.fragmentId) ? false : (seen.add(fragment.fragmentId), true)));
+}
+
 export function workJson(n: number, options: WorkOptions = {}) {
   const ref = workRef(n);
   const body = fragmentJson(`${ref}.body`, 'body', `合成正文片段 ${n}：先做两分钟，再决定要不要继续。`, ref);
   const title = fragmentJson(`${ref}.title`, 'title', `合成作品 ${n}`, ref);
   const state = options.state === undefined ? 'idle' : options.state;
   const withResult = options.withResult ?? state === 'idle';
+  const relevance = options.relevance ?? 'related';
+  const traits = withResult
+    ? {
+        personal_experience: judgement('yes', '记录本人具体行动与变化', [body.fragmentId]),
+        professional_output: judgement('no', '没有看到概念或方法讲解', []),
+        explicit_promotion: judgement('unknown', '材料不足以判断', []),
+      }
+    : {};
+  const automatic = withResult
+    ? {
+        relevance: judgement(relevance, '与当前领域的研究目标相关', [body.fragmentId]),
+        traits,
+      }
+    : {};
+  const evidence = withResult ? [body] : [];
+  const supportFragments = [title, body];
   return {
     workRef: ref,
     title: `合成作品 ${n}`,
-    relevance: options.relevance ?? 'related',
+    relevance,
     likes: options.likes === undefined ? 1200 + n : options.likes,
     collects: 30,
     comments: 8,
@@ -71,19 +92,20 @@ export function workJson(n: number, options: WorkOptions = {}) {
       lastErrorCode: options.lastErrorCode ?? null,
       resultAt: withResult ? '2026-10-14 10:00:00.123456+08' : null,
       resultAtDisplay: withResult ? '2026-10-14 10:00' : null,
-      automatic: withResult
-        ? {
-            relevance: judgement(options.relevance ?? 'related', '与当前领域的研究目标相关', [body.fragmentId]),
-            traits: {
-              personal_experience: judgement('yes', '记录本人具体行动与变化', [body.fragmentId]),
-              professional_output: judgement('no', '没有看到概念或方法讲解', []),
-              explicit_promotion: judgement('unknown', '材料不足以判断', []),
-            },
-          }
-        : {},
+      relevance: withResult ? judgement(relevance, '与当前领域的研究目标相关', [body.fragmentId]) : null,
+      traits,
+      focus: null,
+      institution: null,
+      sampleWorkCount: null,
+      availableWorkCount: null,
+      sampleBasis: null,
+      sampleLimitations: [],
       manual: options.manual ?? {},
-      evidence: withResult ? [body] : [],
-      supportFragments: [title, body],
+      fragments: dedupeFragments([...evidence, ...supportFragments]),
+      automatic,
+      evidence,
+      supportFragments,
+      identitySupportFragments: [],
     },
   };
 }
@@ -126,6 +148,19 @@ export function itemJson(n: number, options: ItemOptions = {}) {
   const focus = judgement(focusValue, '简介与已有作品呈现相近的内容方向', [bio.fragmentId, `${works[0]?.workRef}.body`]);
   const inDomain = options.inDomain === undefined ? false : options.inDomain;
   const unavailable = inDomain === null;
+  const authorAutomatic = authorResult
+    ? {
+        focus,
+        institution_or_brand: judgement('no', '简介没有机构自述', [bio.fragmentId]),
+        evidence: [bio],
+        sampleBasis: 'profile_discovery_sample',
+        sampleLimitations: ['仅使用当前领域已取得材料，不代表账号全部作品'],
+        ...(options.sampleWorkCount === undefined || options.sampleWorkCount === null ? {} : { sampleWorkCount: options.sampleWorkCount }),
+        ...(options.availableWorkCount === undefined || options.availableWorkCount === null ? {} : { availableWorkCount: options.availableWorkCount }),
+      }
+    : {};
+  const authorSupport = [bio, ...works.map(work => fragmentJson(`${work.workRef}.body`, 'body', '合成正文片段，用于支持作者倾向。', work.workRef))];
+  const identitySupport = [bio];
   return {
     creatorKey: creatorKeyFor(externalId),
     displayName: options.name === undefined ? `合成作者 ${n}` : options.name,
@@ -135,21 +170,19 @@ export function itemJson(n: number, options: ItemOptions = {}) {
     profile: { displayName: `合成作者 ${n}`, biography: '合成公开简介：记录学习方法与日常实践。', followerCount: options.followers === undefined ? 2000 + n : options.followers, observedAt: '2026-09-20 10:00:00+08' },
     focus,
     authorAnalysis: {
-      automatic: authorResult
-        ? {
-            focus,
-            institution_or_brand: judgement('no', '简介没有机构自述', [bio.fragmentId]),
-            evidence: [bio],
-            sampleBasis: 'profile_discovery_sample',
-            sampleLimitations: ['仅使用当前领域已取得材料，不代表账号全部作品'],
-            ...(options.sampleWorkCount === undefined || options.sampleWorkCount === null ? {} : { sampleWorkCount: options.sampleWorkCount }),
-            ...(options.availableWorkCount === undefined || options.availableWorkCount === null ? {} : { availableWorkCount: options.availableWorkCount }),
-          }
-        : {},
+      automatic: authorAutomatic,
       manual: options.authorManual ?? {},
-      institution_or_brand: authorResult ? judgement('no', '简介没有机构自述', [bio.fragmentId]) : { value: 'unknown' },
-      supportFragments: [bio, ...works.map(work => fragmentJson(`${work.workRef}.body`, 'body', '合成正文片段，用于支持作者倾向。', work.workRef))],
-      identitySupportFragments: [bio],
+      focus: authorResult ? focus : null,
+      institution: authorResult ? judgement('no', '简介没有机构自述', [bio.fragmentId]) : null,
+      relevance: null,
+      traits: {},
+      sampleWorkCount: options.sampleWorkCount ?? null,
+      availableWorkCount: options.availableWorkCount ?? null,
+      sampleBasis: authorResult ? 'profile_discovery_sample' : null,
+      sampleLimitations: authorResult ? ['仅使用当前领域已取得材料，不代表账号全部作品'] : [],
+      fragments: dedupeFragments([...(authorResult ? [bio] : []), ...authorSupport, ...identitySupport]),
+      supportFragments: authorSupport,
+      identitySupportFragments: identitySupport,
       state: options.authorState ?? 'idle',
       lastErrorCode: options.authorErrorCode ?? null,
       resultAt: authorResult ? '2026-10-14 10:00:00+08' : null,
@@ -164,7 +197,7 @@ export function itemJson(n: number, options: ItemOptions = {}) {
     firstSeenDisplay: options.firstSeenDate === null ? null : `${options.firstSeenDate ?? '2026-09-25'} 09:00`,
     firstSeenPrecision: options.firstSeenDate === null ? null : (options.firstSeenPrecision ?? 'domain_first'),
     observation: unavailable
-      ? { inCurrentDomain: null, monitoringState: null, existsInOtherDomains: null, hasOtherPrimaryDomain: null, targetRef: null, usageRole: null, lookupState: 'unavailable' }
+      ? { inCurrentDomain: null, monitoringState: null, existsInOtherDomains: null, hasOtherPrimaryDomain: null, targetRef: null, usageRole: null, lifecycleState: null, lookup: 'unavailable', lookupState: 'unavailable' }
       : {
           targetRef: options.targetRef ?? (inDomain ? `30000000-0000-4000-8000-${String(n).padStart(12, '0')}` : null),
           inCurrentDomain: inDomain,
@@ -173,6 +206,7 @@ export function itemJson(n: number, options: ItemOptions = {}) {
           monitoringState: options.monitoringState ?? (inDomain ? 'monitoring' : 'not_enabled'),
           existsInOtherDomains: options.existsInOtherDomains ?? false,
           hasOtherPrimaryDomain: options.hasOtherPrimaryDomain ?? false,
+          lookup: 'available',
           lookupState: 'available',
         },
     collectedWorkCount: 5,

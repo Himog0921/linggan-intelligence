@@ -1,4 +1,4 @@
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { CreatorSelect } from './CreatorSelect';
 import { SearchField, type SearchFieldHandle } from './SearchField';
@@ -28,7 +28,27 @@ interface CreatorControlsProps {
 
 function rangeText(query: CreatorQuery): string {
   if (!query.publishedFrom && !query.publishedTo) return '全部日期';
-  return `${query.publishedFrom || '不限'} 至 ${query.publishedTo || '不限'}（不含）`;
+  return `${query.publishedFrom || '不限'} 至 ${query.publishedTo || '不限'}`;
+}
+
+/** 快捷视图的当前项：一条短手绘线，沿用证据库当前页的标注方式。 */
+function QuickButton({ pressed, disabled, title, onClick, children }: {
+  pressed: boolean;
+  disabled?: boolean;
+  title?: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button type="button" aria-pressed={pressed} disabled={disabled} title={title} onClick={onClick}>
+      <span className={styles.quickLabel}>{children}</span>
+      {pressed ? (
+        <svg className={styles.quickMark} viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+          <path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" />
+        </svg>
+      ) : null}
+    </button>
+  );
 }
 
 /**
@@ -71,33 +91,32 @@ export function CreatorControls(props: CreatorControlsProps) {
             { value: 'high_likes', label: '命中最高点赞' }, { value: 'viral_works', label: '命中相关爆款数', disabled: !hasRule },
           ]} />
         <ActionButton onClick={props.onRefresh} busy={props.refreshing} disabled={data === null}>
-          {props.refreshing ? '读取中…' : '刷新结果'}
+          {props.refreshing ? '读取中…' : '刷新'}
         </ActionButton>
         </div>
       </div>
       <div className={styles.viewBar} data-region="Z04-V">
         <nav className={styles.quick} aria-label="创作者视图">
-          <button type="button" aria-pressed={pressed.all} onClick={() => props.onQuick('all')}>
+          <QuickButton pressed={pressed.all} onClick={() => props.onQuick('all')}>
             全部创作者{stats ? ` ${formatCount(stats.authors)}` : ''}
-          </button>
-          <button type="button" aria-pressed={pressed.recent} onClick={() => props.onQuick('new')}>
+          </QuickButton>
+          <QuickButton pressed={pressed.recent} onClick={() => props.onQuick('new')}>
             最近新见{stats ? ` ${formatCount(stats.recentlyDiscovered)}` : ''}
-          </button>
-          <button type="button" aria-pressed={pressed.outside} disabled={!outsideKnown} onClick={() => props.onQuick('outside')}>
+          </QuickButton>
+          <QuickButton pressed={pressed.outside} disabled={!outsideKnown} onClick={() => props.onQuick('outside')}>
             未加入观察{stats ? ` ${formatCount(stats.outside)}` : ''}
-          </button>
-          <button
-            type="button"
-            aria-pressed={pressed.high}
+          </QuickButton>
+          <QuickButton
+            pressed={pressed.high}
             disabled={!leadsKnown}
             title={lead ? `未加入观察，且同一作者至少 ${lead.minWorks} 篇作品点赞不少于 ${formatCount(lead.minLikes)}` : '高赞线索口径暂不可用'}
             onClick={() => props.onQuick('high')}
           >
             高赞线索{stats && lead ? ` ${formatCount(stats.highLikeLeads)}` : ''}
-          </button>
-          <button type="button" aria-pressed={pressed.inside} disabled={!insideKnown} onClick={() => props.onQuick('inside')}>
+          </QuickButton>
+          <QuickButton pressed={pressed.inside} disabled={!insideKnown} onClick={() => props.onQuick('inside')}>
             已加入观察{stats ? ` ${formatCount(stats.inside)}` : ''}
-          </button>
+          </QuickButton>
         </nav>
 
       </div>

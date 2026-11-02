@@ -35,30 +35,30 @@ async function openDrawer(name = '合成作者 1', url?: string) {
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 describe('依据抽屉 · 结构与结论在先', () => {
-  it('头部：名字、领域 · 用途 · 小红书，三项数字各带来源；四个分区，默认概览', async () => {
+  it('头部：名字、小红书 · 用途；三项数字同排；四个分区，默认概览', async () => {
     defaultRoutes(kit);
     const { dialog } = await openDrawer();
-    expect(dialog).toHaveTextContent('合成领域一 · 主研究材料 · 小红书');
-    expect(dialog).toHaveTextContent('粉丝2,001');
-    expect(dialog).toHaveTextContent('主页资料 · 2026-09-20 10:00');
-    expect(dialog).toHaveTextContent('本领域研究作品5');
-    expect(dialog).toHaveTextContent('当前材料范围内已取得');
-    expect(dialog).toHaveTextContent('领域最高赞1,500');
-    expect(dialog).toHaveTextContent('当前材料范围，含待判断');
+    expect(dialog).toHaveTextContent('小红书 · 主研究材料');
+    const header = dialog.querySelector('header') as HTMLElement;
+    expect(header).toHaveTextContent('粉丝2,001');
+    expect(header).toHaveTextContent('领域作品5');
+    expect(header).toHaveTextContent('领域最高赞1,500');
+    expect(header).toHaveTextContent('主页资料 09-20');
+    expect(header).not.toHaveTextContent('当前材料范围内已取得');
     const tabs = within(dialog).getAllByRole('tab');
     expect(tabs.map(tab => tab.textContent)).toEqual(['概览', '主页作品', '研究线索', '观察记录']);
     expect(tabs.map(tab => tab.getAttribute('aria-selected'))).toEqual(['true', 'false', 'false', 'false']);
     expect(within(dialog).getByRole('tabpanel', { name: '概览' })).toBeVisible();
   });
 
-  it('粉丝没有记录时写「未记录」，不写 0；有作品条件时最高赞改叫「命中最高赞」并说明随筛选变化', async () => {
+  it('粉丝没有记录时写「—」，不写 0；有作品条件时最高赞改叫「命中最高赞」', async () => {
     kit = createFetchMock();
     kit.install();
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { followers: null })] })));
     const first = await openDrawer();
     const firstHead = first.dialog.querySelector('header') as HTMLElement;
     expect(firstHead).toHaveTextContent('粉丝—');
-    expect(firstHead).toHaveTextContent('未记录');
+    expect(firstHead).not.toHaveTextContent('粉丝0');
     first.unmount();
 
     kit = createFetchMock();
@@ -66,20 +66,20 @@ describe('依据抽屉 · 结构与结论在先', () => {
     defaultRoutes(kit);
     const filtered = await openDrawer('合成作者 1', `/corpus/creators?domain=${DOMAIN}&traits=personal_experience`);
     expect(filtered.dialog).toHaveTextContent('命中最高赞');
-    expect(filtered.dialog).toHaveTextContent('当前命中作品，含待判断');
+    expect(filtered.dialog).not.toHaveTextContent('当前命中作品，含待判断');
   });
 
-  it('概览先给结论：作者内容倾向在最前面，其后是发现来源、方向与表达、作品预览', async () => {
+  it('概览先给结论：作者内容倾向在最前面，其后是公开简介、发现来源、领域作品', async () => {
     defaultRoutes(kit);
     const { dialog } = await openDrawer();
     const panel = within(dialog).getByRole('tabpanel', { name: '概览' });
     const headings = within(panel).getAllByRole('heading', { level: 3 }).map(heading => heading.textContent);
-    expect(headings.slice(0, 4)).toEqual(['先浅看作者，再决定读哪篇', '作者内容倾向', '让我们发现他的作品', '内容方向与作品表达']);
+    expect(headings.slice(0, 4)).toEqual(['作者内容倾向', '公开简介', '发现来源', '领域作品']);
     const conclusion = within(panel).getByRole('region', { name: '作者内容倾向' });
     expect(conclusion).toHaveTextContent('本领域持续创作');
     expect(conclusion).toHaveTextContent('简介与已有作品呈现相近的内容方向');
     expect(conclusion).toHaveTextContent('自动依据更新于 2026-10-14 10:00');
-    expect(within(conclusion).getByRole('button', { name: '调整判断' })).toBeEnabled();
+    expect(within(conclusion).getByRole('button', { name: '调整作者倾向' })).toBeEnabled();
   });
 
   it('发现来源：发现词、首次发现时间与当时看到的那篇作品，作品标题可回查', async () => {
@@ -104,7 +104,7 @@ describe('依据抽屉 · 结构与结论在先', () => {
     const link = await within(card).findByRole('link', { name: '最早见到的作品' });
     expect(link.getAttribute('href')).toContain('/corpus/evidence?');
     expect(link.getAttribute('href')).toContain(workRef(11));
-    expect(card).toHaveTextContent('更早的发现不可知');
+    expect(card).not.toHaveTextContent('更早的发现不可知');
   });
 
   it('发现来源没有记录时如实说明，不写 0 也不猜一篇作品', async () => {
@@ -116,42 +116,49 @@ describe('依据抽屉 · 结构与结论在先', () => {
     expect(card).toHaveTextContent('未记录最早收录的作品');
   });
 
-  it('作者倾向与作品表达是两个层次：各有各的门槛，并存关系写明在抽屉里（#384 发现 1）', async () => {
+  it('作者倾向与作品表达是两个层次：判断依据收在概览，作品门槛只在研究线索保留一份', async () => {
     defaultRoutes(kit);
     const { dialog, user } = await openDrawer();
     const conclusion = within(dialog).getByRole('region', { name: '作者内容倾向' });
-    expect(conclusion).toHaveTextContent('作者在本领域的内容倾向：持续创作倾向须至少两篇独立相关作品');
-    const expression = within(dialog).getByRole('region', { name: '内容方向与作品表达' });
-    expect(expression).toHaveTextContent('表达属于作品层面，可以同时出现，也与上面的作者倾向并存、互不推出');
-    expect(expression).toHaveTextContent('亲历自述');
-    await user.click(within(dialog).getByText('判断标准与材料范围'));
-    expect(dialog).toHaveTextContent('「作者」层面的倾向');
-    // 作品层的门槛在「研究线索」里，随每一项判断出现。
+    expect(conclusion).toHaveTextContent('本领域持续创作');
+    const basis = within(dialog).getByText('判断依据与材料范围').closest('details') as HTMLElement;
+    expect(basis).toHaveTextContent('作者在本领域的内容倾向：持续创作倾向须至少两篇独立相关作品');
+    expect(basis).toHaveTextContent('公开身份线索');
+    expect(basis).toHaveTextContent('机构／品牌自述');
+    // 作品层的判定标准只保留一份，放在研究线索底部，不逐项重复。
     await user.click(within(dialog).getByRole('tab', { name: '研究线索' }));
-    expect(within(dialog).getAllByText(/判定门槛：/).length).toBeGreaterThanOrEqual(4);
-    expect(dialog).toHaveTextContent('判定门槛：具体的本人或家庭经历、行动、过程或感受');
+    const criteria = within(dialog).getByText('判断标准').closest('details') as HTMLElement;
+    expect(criteria).toHaveTextContent('具体的本人或家庭经历、行动、过程或感受');
+    expect(criteria).toHaveTextContent('知识与方法讲解');
+    const evidencePanel = within(dialog).getByRole('tabpanel', { name: '研究线索' });
+    expect(within(evidencePanel).queryAllByText(/判定门槛：/)).toHaveLength(0);
   });
 
   it('实际取样篇数：主线 worker 没写这两个字段时如实说「未记录」，不显示成 0', async () => {
     defaultRoutes(kit);
-    const { dialog } = await openDrawer();
-    expect(within(dialog).getByRole('region', { name: '作者内容倾向' })).toHaveTextContent('本次实际取样篇数未记录。');
+    const { dialog, user } = await openDrawer();
+    expect(within(dialog).getByRole('region', { name: '作者内容倾向' })).toHaveTextContent('本次取样 未记录');
+    await user.click(within(dialog).getByText('判断依据与材料范围'));
+    expect(dialog).toHaveTextContent('本次实际取样篇数未记录。');
     expect(dialog).not.toHaveTextContent(/实际使用 0 篇/);
   });
 
-  it('取样篇数字段存在就显示实际数与当时已有数', async () => {
+  it('取样篇数字段存在就显示实际数，分析当时已有数保留在材料范围里', async () => {
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { sampleWorkCount: 12, availableWorkCount: 24 })] })));
-    const { dialog } = await openDrawer();
-    expect(within(dialog).getByRole('region', { name: '作者内容倾向' })).toHaveTextContent('本次实际使用 12 篇作品摘要；分析当时已有 24 篇。');
+    const { dialog, user } = await openDrawer();
+    expect(within(dialog).getByRole('region', { name: '作者内容倾向' })).toHaveTextContent('本次取样 12 篇');
+    await user.click(within(dialog).getByText('判断依据与材料范围'));
+    expect(dialog).toHaveTextContent('本次实际使用 12 篇作品摘要；分析当时已有 24 篇。');
   });
 
-  it('作品预览最多三篇，带相关性与赞藏评；「查看全部命中作品」去证据库', async () => {
+  it('领域作品预览最多三篇，带相关性与赞数；「查看全部」去证据库', async () => {
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { works: [workJson(11), workJson(12), workJson(13)], unknown: 1 })] })));
     const { dialog } = await openDrawer();
-    const preview = within(dialog).getByRole('region', { name: '当前条件的作品预览' });
+    const preview = within(dialog).getByRole('region', { name: '领域作品' });
     expect(within(preview).getAllByRole('link', { name: /合成作品/ })).toHaveLength(3);
-    expect(preview).toHaveTextContent('已判相关 · 赞 1,211 · 藏 30 · 评 8');
-    const all = within(preview).getByRole('link', { name: '查看全部 3 篇命中作品 →' });
+    expect(preview).toHaveTextContent('已判相关 · 赞 1,211');
+    expect(preview).not.toHaveTextContent('藏 30 · 评 8');
+    const all = within(preview).getByRole('link', { name: '查看全部 3 篇 →' });
     expect(all.getAttribute('href')).toContain('/corpus/evidence?');
   });
 
@@ -167,12 +174,13 @@ describe('依据抽屉 · 结构与结论在先', () => {
 });
 
 describe('依据抽屉 · 研究线索（按作品分组）', () => {
-  it('每篇作品一个可折叠的块；展开后是这篇作品的四项判断，各带门槛、理由、来源与引文', async () => {
+  it('每篇作品一个可折叠的块；展开后是这篇作品的四项判断、来源与引文', async () => {
     defaultRoutes(kit);
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '研究线索' }));
     const panel = within(dialog).getByRole('tabpanel', { name: '研究线索' });
-    expect(panel).toHaveTextContent('范围内 5 篇 · 当前条件命中 2 篇');
+    expect(panel).toHaveTextContent('当前命中 2 篇');
+    expect(panel).not.toHaveTextContent('范围内 5 篇');
     const groups = panel.querySelectorAll('details[data-work]');
     expect(groups).toHaveLength(2);
     const first = groups[0] as HTMLDetailsElement;
@@ -183,7 +191,7 @@ describe('依据抽屉 · 研究线索（按作品分组）', () => {
     for (const name of ['与当前领域的关系', '亲历自述', '知识与方法讲解', '推广表达']) {
       expect(first).toHaveTextContent(name);
     }
-    expect(within(first).getAllByText(/判定门槛：/)).toHaveLength(4);
+    expect(within(first).queryAllByText(/判定门槛：/)).toHaveLength(0);
     expect(first).toHaveTextContent('记录本人具体行动与变化');
     expect(within(first).getByRole('link', { name: '打开原作品 →' }).getAttribute('href')).toContain('work=');
     // 引文是来源里的原话，标明取自哪个字段，并能回查原作品。
@@ -215,6 +223,7 @@ describe('依据抽屉 · 研究线索（按作品分组）', () => {
     const [queued, failed, insufficient] = Array.from(dialog.querySelectorAll('details[data-work]')) as HTMLElement[];
     expect(queued).toHaveTextContent('研究已排队，等待执行');
     expect(within(queued!).queryByRole('button', { name: /重试/ })).toBeNull();
+    expect(failed).toHaveTextContent('读取失败 · 模型服务暂不可用');
     expect(failed).toHaveTextContent('研究未完成 · 模型服务暂不可用');
     expect(within(failed!).queryByRole('button', { name: /重试/ })).toBeNull();
     const processing = within(failed!).getByText('处理信息').closest('details') as HTMLElement;
@@ -239,26 +248,28 @@ describe('依据抽屉 · 研究线索（按作品分组）', () => {
     await user.click(within(dialog).getByRole('tab', { name: '研究线索' }));
     const group = dialog.querySelector('details[data-work]') as HTMLElement;
     expect(group).toHaveTextContent('人工调整 · 2026-10-15 12:00');
-    expect(group).toHaveTextContent('当时支持这项判断的材料已变化或不可读，请复核；原人工记录仍保留');
-    expect(within(group).getAllByRole('button', { name: '补充判断' }).length).toBeGreaterThan(0);
+    expect(group).toHaveTextContent('支持材料已变化，请复核');
+    expect(group).toHaveTextContent('原人工记录仍保留');
+    expect(within(group).getAllByRole('button', { name: /补充|调整/ }).length).toBeGreaterThan(0);
   });
 });
 
 describe('依据抽屉 · 观察记录与提交栏', () => {
-  it('观察记录：公开简介、机构／品牌自述（不凭昵称头像推断）、材料与来源；平台账号标识只在折叠的处理信息里', async () => {
+  it('公开简介与身份线索归概览；观察记录只承担观察与巡查，不重复资料', async () => {
     defaultRoutes(kit);
     const { dialog, user } = await openDrawer();
+    const overview = within(dialog).getByRole('tabpanel', { name: '概览' });
+    expect(overview).toHaveTextContent('合成公开简介：记录学习方法与日常实践。');
+    const basis = within(overview).getByText('判断依据与材料范围').closest('details') as HTMLElement;
+    expect(basis).toHaveTextContent('公开身份线索');
+    expect(basis).toHaveTextContent('机构／品牌自述');
+    expect(basis).toHaveTextContent('不凭昵称、头像或粉丝数推断');
+    expect(overview).not.toHaveTextContent('author-1');
     await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
     const panel = within(dialog).getByRole('tabpanel', { name: '观察记录' });
-    expect(panel).toHaveTextContent('合成公开简介：记录学习方法与日常实践。');
-    expect(panel).toHaveTextContent('仅依据公开资料，不根据昵称、头像或粉丝量推断身份');
-    const sources = within(panel).getByRole('region', { name: '材料与来源' });
-    expect(sources).toHaveTextContent('当前领域合成领域一');
-    expect(sources).toHaveTextContent('观察关系未加入观察');
-    expect(sources).not.toHaveTextContent('author-1');
-    const diagnostics = within(panel).getByText('处理信息').closest('details') as HTMLElement;
-    expect(diagnostics).toHaveTextContent('平台账号标识：author-1');
-    expect(diagnostics).toHaveTextContent('来源采样：profile_discovery_sample');
+    expect(panel).not.toHaveTextContent('合成公开简介');
+    expect(panel).not.toHaveTextContent('机构／品牌自述');
+    expect(panel).not.toHaveTextContent('author-1');
   });
 
   it('提交栏在每个分区都在：观察关系 + 动作 + 回执', async () => {
@@ -295,11 +306,11 @@ describe('依据抽屉 · 观察记录与提交栏', () => {
   it('领域已暂停：人工调整与加入不可用，旧分析重试已移除', async () => {
     defaultRoutes(kit, ok(listJson({ domainStatus: 'paused', analysisEnabled: true, items: [itemJson(1, { works: [workJson(11, { state: 'failed', lastErrorCode: 'model_disabled', withResult: false })] })] })));
     const { dialog, user } = await openDrawer();
-    expect(within(dialog).getByRole('button', { name: '调整判断' })).toBeDisabled();
+    expect(within(dialog).getByRole('button', { name: '调整作者倾向' })).toBeDisabled();
     expect(within(dialog).getByRole('button', { name: '加入本领域观察' })).toBeDisabled();
     await user.click(within(dialog).getByRole('tab', { name: '研究线索' }));
     expect(within(dialog).queryByRole('button', { name: /重试/ })).toBeNull();
-    for (const button of within(dialog).getAllByRole('button', { name: /调整判断|补充判断/ })) expect(button).toBeDisabled();
+    for (const button of within(dialog).getAllByRole('button', { name: /调整|补充/ })) expect(button).toBeDisabled();
   });
 });
 
@@ -309,7 +320,7 @@ describe('依据抽屉 · 观察记录分区', () => {
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
     const panel = within(dialog).getByRole('tabpanel', { name: '观察记录' });
-    const record = await within(panel).findByRole('region', { name: '观察关系与巡查' });
+    const record = await within(panel).findByRole('region', { name: '观察记录' });
     expect(record).toHaveTextContent('加入本领域');
     expect(record).toHaveTextContent('2026-09-24 12:23 · 主研究');
     expect(record).toHaveTextContent('首次保存');
@@ -347,7 +358,7 @@ describe('依据抽屉 · 观察记录分区', () => {
     );
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
-    const record = await within(dialog).findByRole('region', { name: '观察关系与巡查' });
+    const record = await within(dialog).findByRole('region', { name: '观察记录' });
     expect(record).toHaveTextContent('巡查中 · 自动巡查已开启');
     expect(record).toHaveTextContent('下次巡查2026-11-01 09:00');
     expect(record).toHaveTextContent('没有巡查记录');
@@ -361,7 +372,7 @@ describe('依据抽屉 · 观察记录分区', () => {
     const { dialog, user } = await openDrawer();
     await user.click(within(dialog).getByRole('tab', { name: '观察记录' }));
     const panel = within(dialog).getByRole('tabpanel', { name: '观察记录' });
-    expect(await within(panel).findByRole('region', { name: '观察关系与巡查' })).toHaveTextContent(
+    expect(await within(panel).findByRole('region', { name: '观察记录' })).toHaveTextContent(
       '未加入本领域观察，所以没有巡查记录',
     );
     expect(kit.of('GET', `/api/local/creators/${encodeURIComponent(creatorKeyFor('author-1'))}/observation-record`)).toHaveLength(0);
@@ -393,11 +404,11 @@ describe('依据抽屉 · 键盘、焦点与头像', () => {
   it('Esc 关闭抽屉，焦点回到表格里这位作者的名字按钮；行高亮随之取消', async () => {
     defaultRoutes(kit);
     const { user } = await openDrawer();
-    expect(screen.getByRole('button', { name: '合成作者 1' }).closest('tr')).toHaveAttribute('data-selected', 'true');
+    expect(screen.getByRole('button', { name: '合成作者 1' }).closest('tr')).toHaveAttribute('data-open', 'true');
     fireEvent(screen.getByRole('dialog'), new Event('cancel', { cancelable: true }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.getByRole('button', { name: '合成作者 1' })).toHaveFocus();
-    expect(screen.getByRole('button', { name: '合成作者 1' }).closest('tr')).toHaveAttribute('data-selected', 'false');
+    expect(screen.getByRole('button', { name: '合成作者 1' }).closest('tr')).toHaveAttribute('data-open', 'false');
     await user.click(screen.getByRole('button', { name: '合成作者 2' }));
     await user.click(await screen.findByRole('button', { name: '关闭作者研究' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

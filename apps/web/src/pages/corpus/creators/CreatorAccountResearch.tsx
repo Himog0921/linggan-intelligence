@@ -67,12 +67,22 @@ export function CreatorAccountResearch({ domain, platform, author, disabled }: {
     } catch (error) { setNotice(message(error)); }
     finally { setBusy(false); }
   }
-  return <section aria-label="账号样本研究"><h4>账号样本研究</h4>
-    <ActionButton onClick={() => void prepare()} disabled={disabled || busy || uncertain}>检查账号样本</ActionButton>
-    {prepared ? <><p className={styles.help}>本次固定 {prepared.workRefs.length} 篇作品及可用公开简介，最多 30 篇，不代表账号全部作品。</p>
-      <p className={styles.help}>开始后会按 AI 设置调用模型，可能产生费用。</p>
-      <ActionButton onClick={() => void start()} disabled={disabled || busy || request !== null}>{uncertain ? '重试同一请求' : '开始账号研究'}</ActionButton></> : null}
-    {request ? <ActionButton onClick={() => void refresh()} disabled={busy}>刷新研究状态</ActionButton> : null}
-    {notice ? <p role="status" className={styles.help}>{notice}</p> : null}
-  </section>;
+  return <div className={styles.accountResearch}>
+    <button type="button" className={styles.textButton} disabled={disabled || busy} onClick={() => void prepare()}>
+      {busy && !prepared && !request ? '检查中…' : '检查账号样本'}
+    </button>
+    {prepared || request || notice || uncertain ? (
+      <div className={styles.accountPanel}>
+        <div className={styles.accountPanelHead}>
+          <strong>账号样本研究</strong>
+          <button type="button" className={styles.textButton} onClick={() => { setPrepared(null); setNotice(''); setUncertain(false); }}>收起</button>
+        </div>
+        {prepared ? <><p className={styles.help}>本次固定 {prepared.workRefs.length} 篇作品及可用公开简介，最多 30 篇，不代表账号全部作品。</p>
+          <p className={styles.help}>开始后会按 AI 设置调用模型，可能产生费用。</p>
+          <ActionButton onClick={() => void start()} disabled={disabled || busy || request !== null}>{uncertain ? '重试同一请求' : '开始账号研究'}</ActionButton></> : null}
+        {request ? <ActionButton onClick={() => void refresh()} disabled={busy}>刷新研究状态</ActionButton> : null}
+        {notice ? <p role="status" className={styles.help}>{notice}</p> : null}
+      </div>
+    ) : null}
+  </div>;
 }

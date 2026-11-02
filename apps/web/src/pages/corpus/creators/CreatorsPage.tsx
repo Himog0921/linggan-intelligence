@@ -386,7 +386,6 @@ export function CreatorsPage() {
           {readout}
         </span>
       }
-      foot="作者来自当前领域已有作品"
     >
       <div className={styles.page} onClickCapture={event => rememberPosition(event.target)}>
         <CreatorControls

@@ -385,7 +385,7 @@ describe('调整判断', () => {
 
   it('作者倾向：说明对象与门槛；支持材料按作品分组，缺 workTitle 时用代表作品标题', async () => {
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(dialog).toHaveTextContent('创作者：合成作者 1 · 合成领域一 · 仅修改本项判断');
     expect(dialog).toHaveTextContent('判定依据：持续创作倾向须至少两篇独立相关作品');
@@ -409,7 +409,7 @@ describe('调整判断', () => {
       },
     };
     const { user, drawer } = await openCorrection(withTitles);
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     const groups = Array.from(dialog.querySelectorAll('details summary')).map(summary => summary.textContent);
     expect(groups).toEqual(['后台给出的作品标题 · 1 个片段', '作品材料 2 · 1 个片段']);
@@ -419,7 +419,7 @@ describe('调整判断', () => {
   it('正向判断必须选当前支持材料，否则不发请求；选了之后保存，请求体带上材料与原因', async () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     await user.click(within(dialog).getByRole('button', { name: '保存判断' }));
     expect(await within(dialog).findByText('请选择至少一项当前材料作为支持依据。')).toBeInTheDocument();
@@ -442,7 +442,7 @@ describe('调整判断', () => {
   it('改成「尚不能判定」不需要支持材料；原因上限 300 字', async () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(within(dialog).getByRole('textbox', { name: /调整原因/ })).toHaveAttribute('maxlength', '300');
     await user.click(within(dialog).getByRole('combobox', { name: '你的判断' }));
@@ -455,7 +455,7 @@ describe('调整判断', () => {
   it('撤销人工调整：无覆盖时不可用；没有历史分析结果时也只移除覆盖，不启动分析', async () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const first = await openCorrection();
-    await first.user.click(within(first.drawer).getByRole('button', { name: '调整判断' }));
+    await first.user.click(within(first.drawer).getByRole('button', { name: '调整作者倾向' }));
     expect(within(await screen.findByRole('dialog', { name: '调整作者倾向' })).getByRole('button', { name: '撤销人工调整' })).toBeDisabled();
     first.unmount();
     kit = createFetchMock();
@@ -463,7 +463,7 @@ describe('调整判断', () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const manual = { focus: { value: { value: 'multi_topic', reason: '我的判断', evidenceFragmentIds: ['author.1.biography'] }, supportFragmentIds: ['author.1.biography'], at: '2026-10-15 12:00:00+08' } };
     const second = await openCorrection(itemJson(1, { authorManual: manual, authorResult: false, authorState: null }));
-    await second.user.click(within(second.drawer).getByRole('button', { name: '调整判断' }));
+    await second.user.click(within(second.drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(within(dialog).getByRole('combobox', { name: '你的判断' })).toHaveTextContent('多主题分享');
     expect(dialog).toHaveTextContent('尚无结果则显示尚不能判定，不会启动新分析');
@@ -482,7 +482,7 @@ describe('调整判断', () => {
     const { user, drawer } = await openCorrection();
     await user.click(within(drawer).getByRole('tab', { name: '研究线索' }));
     const group = drawer.querySelector('details[data-work]') as HTMLElement;
-    await user.click(within(group).getAllByRole('button', { name: '调整判断' })[1] as HTMLElement); // 亲历自述
+    await user.click(within(group).getAllByRole('button', { name: /^(调整|补充)/ })[1] as HTMLElement); // 亲历自述
     const dialog = await screen.findByRole('dialog', { name: '调整亲历自述' });
     expect(dialog).toHaveTextContent('作品：合成作品 11');
     await user.click(within(dialog).getAllByRole('checkbox')[0] as HTMLElement);
@@ -497,7 +497,7 @@ describe('调整判断', () => {
   it('保存没有得到答复：「未确认」，按内容保存所以重试不产生第二条记录', async () => {
     kit.route('PUT', overrides, () => 'network', ok({ saved: true }));
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     await user.click(within(dialog).getByRole('checkbox', { name: /合成公开简介/ }));
     await user.click(within(dialog).getByRole('button', { name: '保存判断' }));
@@ -514,7 +514,7 @@ describe('调整判断', () => {
     const gate = deferred<Reply>();
     kit.route('PUT', overrides, () => gate.promise);
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const first = await screen.findByRole('dialog', { name: '调整作者倾向' });
     await user.click(within(first).getByRole('checkbox', { name: /合成公开简介/ }));
     await user.click(within(first).getByRole('button', { name: '保存判断' }));
@@ -522,9 +522,9 @@ describe('调整判断', () => {
     cancel();
     await user.click(await screen.findByRole('button', { name: '收起并继续跟踪' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整作者倾向' })).toBeNull());
-    // 为同一位作者的另一项（机构／品牌自述，在「观察记录」分区）打开新的对话框，写上还没保存的内容。
-    await user.click(within(drawer).getByRole('tab', { name: '观察记录' }));
-    await user.click(within(drawer.querySelector('[role="tabpanel"]:not([hidden])') as HTMLElement).getByRole('button', { name: /调整判断|补充判断/ }));
+    // 为同一位作者的另一项（机构／品牌自述，在概览的依据区）打开新的对话框，写上还没保存的内容。
+    await user.click(within(drawer).getByRole('tab', { name: '概览' }));
+    await user.click(within(drawer.querySelector('[role="tabpanel"]:not([hidden])') as HTMLElement).getByRole('button', { name: '调整公开身份线索' }));
     const second = await screen.findByRole('dialog', { name: /机构／品牌自述/ });
     await user.type(within(second).getByRole('textbox', { name: /调整原因/ }), '新的尚未保存的说明');
     const listCalls = creators().length;

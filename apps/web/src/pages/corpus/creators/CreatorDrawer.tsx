@@ -1,7 +1,7 @@
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { ModalDialog } from '../../../corpus/ModalDialog';
-import { humanMoment } from '../../../shared/formatting';
 import { findAuthorButton } from './findAuthor';
 import { authorName, observedText, preservedLifecycle, targetHref } from './creatorsPresent';
 import { formatCount, hasWorkFilter, type CreatorQuery, type LinkContext } from './creatorsQuery';
@@ -138,12 +138,14 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
   const role = blocked ? 'reference' : query.usageRole;
   const joinLabel = blocked ? '按参照用途加入' : kept ? `加入并保持${kept}` : role === 'reference' ? '按参照用途加入' : '加入本领域观察';
   const filtered = hasWorkFilter(query);
+  const leadLabel = filtered ? '命中最高赞' : '领域最高赞';
+  const followerDay = item.followerObservedAt?.match(/^\d{4}-(\d{2})-(\d{2})/);
   const followerNote =
     item.followerCount === null
-      ? '未记录'
+      ? null
       : item.followerObservedAt
-        ? `主页资料 · ${humanMoment(item.followerObservedAt)}`
-        : '主页资料 · 时间未记录';
+        ? `主页资料 ${followerDay ? `${followerDay[1]}-${followerDay[2]}` : item.followerObservedAt}`
+        : '主页资料 时间未记录';
 
   return (
     <ModalDialog
@@ -177,34 +179,37 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
         <div className={styles.title}>
           <Avatar name={name} url={avatarUrl} pending={resources.pending} className={`${pageStyles.avatar} ${pageStyles.avatarLarge}`} />
           <div>
-            <small>创作者 · 作者研究</small>
             <h2 id={titleId} title={name}>
               {name}
             </h2>
             <p>
-              {data.domain.name ?? '当前领域'} · {query.usageRole === 'reference' ? '参照材料' : '主研究材料'} · 小红书
+              小红书 · {query.usageRole === 'reference' ? '参照材料' : '主研究材料'}
               {item.displayNameKind === 'observation_target' ? ' · 名称来自观察目标档案' : ''}
             </p>
           </div>
-          <button type="button" className={`${styles.textButton} ${styles.close}`} aria-label="关闭作者研究" onClick={onClose}>
-            关闭
+          <button type="button" className={`${styles.iconButton} ${styles.close}`} aria-label="关闭作者研究" onClick={onClose}>
+            <IntelligenceIcon name="close" />
           </button>
         </div>
         <div className={styles.metrics}>
           <span>
-            <small>粉丝</small>
-            <strong><Metric value={item.followerCount} /></strong>
-            <em>{followerNote}</em>
+            <span className={styles.metricRow}>
+              <small>粉丝</small>
+              <strong><Metric value={item.followerCount} /></strong>
+            </span>
+            {followerNote ? <em>{followerNote}</em> : null}
           </span>
           <span>
-            <small>{query.usageRole === 'reference' ? '本领域参照作品' : '本领域研究作品'}</small>
-            <strong>{formatCount(item.collectedWorkCount)}</strong>
-            <em>当前材料范围内已取得</em>
+            <span className={styles.metricRow}>
+              <small>领域作品</small>
+              <strong>{formatCount(item.collectedWorkCount)}</strong>
+            </span>
           </span>
           <span>
-            <small>{filtered ? '命中最高赞' : '领域最高赞'}</small>
-            <strong><Metric value={item.candidateHighLikeCount} /></strong>
-            <em>{filtered ? '当前命中作品，含待判断' : '当前材料范围，含待判断'}</em>
+            <span className={styles.metricRow}>
+              <small>{leadLabel}</small>
+              <strong><Metric value={item.candidateHighLikeCount} /></strong>
+            </span>
           </span>
         </div>
         <div className={styles.tabs} role="tablist" aria-label="作者详情分区" onKeyDown={onTabKeyDown}>
@@ -223,6 +228,11 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
               onClick={() => switchTab(entry.id)}
             >
               {entry.label}
+              {tab === entry.id ? (
+                <svg className={styles.tabMark} viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                  <path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" />
+                </svg>
+              ) : null}
             </button>
           ))}
         </div>
@@ -265,7 +275,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       <footer className={styles.footer}>
         <div>
           <span>{observedText(observation)}</span>
-          </div>
+        </div>
         <div className={styles.actions}>
           {observation.lookup === 'unavailable' || observation.inCurrentDomain === null ? (
             <ActionButton disabled>观察关系暂不可用</ActionButton>

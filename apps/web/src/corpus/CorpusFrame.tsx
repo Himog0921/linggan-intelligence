@@ -17,8 +17,8 @@ interface CorpusFrameProps {
   shell: CorpusShell | null;
   /** 页头右侧读数，由页面自己提供。 */
   meta: ReactNode;
-  /** 侧栏底部说明本页的数据范围。 */
-  foot: ReactNode;
+  /** 侧栏底部说明本页的数据范围；本页没有常驻说明时不传。 */
+  foot?: ReactNode;
   /** 证据库页的侧栏计数徽标；其他页不传。 */
   evidenceCount?: EvidenceCount | null;
   children: ReactNode;
@@ -31,8 +31,10 @@ interface CorpusFrameProps {
 export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, evidenceCount = null, children }: CorpusFrameProps) {
   const titleId = useId();
   const picker = shell ? <DomainPicker domains={shell.domains} selected={shell.selectedDomain} action={action} /> : null;
-  const currentLabel = <b className={page === 'evidence' ? styles.annotatedCurrent : undefined}>{pageLabel}
-    {page === 'evidence' ? <svg viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" /></svg> : null}
+  // 已认可的紧凑外壳：证据库与创作者共用同一页头高度和当前页手绘短线，其他页面保持原样。
+  const compact = page === 'evidence' || page === 'creators';
+  const currentLabel = <b className={compact ? styles.annotatedCurrent : undefined}>{pageLabel}
+    {compact ? <svg viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" /></svg> : null}
   </b>;
   const crumb = picker ? (
     <>
@@ -46,7 +48,7 @@ export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, eviden
   return (
     <AppShell
       active="corpus"
-      className={page === 'evidence' ? 'v7-evidence-shell' : undefined}
+      className={compact ? 'v7-corpus-compact-shell' : undefined}
       boundaryLabel="本机服务状态"
       crumb={crumb}
       meta={meta}

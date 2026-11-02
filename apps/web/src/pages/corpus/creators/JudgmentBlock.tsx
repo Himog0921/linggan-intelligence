@@ -57,13 +57,15 @@ interface JudgmentBlockProps {
   onCorrect: (field: string, workRef: string | null) => void;
   /** 作者倾向在抽屉概览里是主结论，字号更大。 */
   lead?: boolean;
+  /** 同一页出现多组判断时，用具体的可访问名区分动作；可见文字仍是「调整判断」。 */
+  actionLabel?: string;
 }
 
 /**
  * 一项判断：结论、判定门槛、理由、来源与时间、可回查的引文。
  * 门槛一直可见（#384 发现：依据门槛要能直接看到），人工调整与自动结果的来源分开写明。
  */
-export function JudgmentBlock({ analysis, field, judgement, creatorKey, link, workRef, disabled, onCorrect, lead }: JudgmentBlockProps) {
+export function JudgmentBlock({ analysis, field, judgement, creatorKey, link, workRef, disabled, onCorrect, lead, actionLabel }: JudgmentBlockProps) {
   const evidence = evidenceFor(analysis, field, judgement);
   const manual = analysis.manual[field];
   return (
@@ -72,7 +74,7 @@ export function JudgmentBlock({ analysis, field, judgement, creatorKey, link, wo
         <strong>
           {lead ? valueLabel(judgement.value) : `${FIELD_NAMES[field] ?? field} · ${valueLabel(judgement.value)}`}
         </strong>
-        <button type="button" className={styles.textButton} disabled={disabled} onClick={() => onCorrect(field, workRef)}>
+        <button type="button" className={styles.textButton} disabled={disabled} aria-label={actionLabel} onClick={() => onCorrect(field, workRef)}>
           {judgement.value === 'unknown' ? '补充判断' : '调整判断'}
         </button>
       </div>

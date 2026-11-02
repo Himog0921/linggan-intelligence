@@ -1,29 +1,34 @@
+import { useState } from 'react';
 import { humanMoment } from '../../../shared/formatting';
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { Cover } from './Media';
 import { CreatorWorkResearch } from './CreatorWorkResearch';
 import { CreatorAccountResearch } from './CreatorAccountResearch';
-import { JudgmentBlock } from './JudgmentBlock';
+import { ExpandableText, JudgmentBlock, Quote } from './JudgmentBlock';
 import {
   acquisitionText,
   analysisStatus,
   authorFocus,
-  COEXISTENCE,
   CRITERIA,
   effectiveJudgement,
+  evidenceFor,
   failureReason,
+  FIELD_NAMES,
   FIRST_SEEN_LABELS,
   lifecycleLabel,
   observedText,
-  relevanceLabel,
+  provenanceText,
   sampleBasisText,
   sampleText,
+  targetHref,
   transitionReasonLabel,
+  valueLabel,
   workTitle,
 } from './creatorsPresent';
-import { LABELS, evidenceLink, formatCount, workLink, type LinkContext, type CreatorQuery } from './creatorsQuery';
+import { evidenceLink, formatCount, workLink, type CreatorQuery, type LinkContext } from './creatorsQuery';
 import { Metric, type DrawerTab } from './CreatorTable';
 import { useObservationRecord } from './useObservationRecord';
-import type { Analysis, CreatorItem, CreatorList, ObservationRecord, Work } from './creatorsTypes';
+import type { Analysis, CreatorItem, CreatorList, Judgement, ObservationRecord, Work } from './creatorsTypes';
 import type { WorkResources } from './useWorkResources';
 import pageStyles from './CreatorsPage.module.css';
 import styles from './CreatorDrawer.module.css';
@@ -50,7 +55,6 @@ function AnalysisLine({ analysis, value }: { analysis: Analysis; value: string |
   );
 }
 
-
 function moment(raw: string | null, display: string | null): string {
   return raw ? humanMoment(raw) : (display ?? '未记录');
 }
@@ -70,117 +74,219 @@ function WorkPreview({ ctx, work }: { ctx: PanelContext; work: Work }) {
           {title}
         </a>
         <span className={styles.secondary}>
-          {relevanceLabel(work.relevance)} · 赞 <Metric value={work.likes} /> · 藏 <Metric value={work.collects} /> · 评 <Metric value={work.comments} />
+          {work.relevance === 'related' ? '已判相关' : work.relevance === 'unrelated' ? '已判无关' : '待判断'} · 赞 <Metric value={work.likes} />
         </span>
       </div>
     </div>
   );
 }
 
-/** 概览：先给结论（作者在本领域的倾向），再给发现来源、方向与表达、当前条件下的作品预览。 */
+/** 公开简介是事实：默认两行，长内容在原位展开。 */
+function Biography({ text }: { text: string | null }) {
+  const [open, setOpen] = useState(false);
+  if (!text) return <p className={styles.help}>公开简介尚未取得。</p>;
+  const long = text.length > 60 || text.includes('\n');
+  return (
+    <>
+      <p className={styles.biography} data-open={open || !long}>{text}</p>
+      {long ? (
+        <button type="button" className={styles.textButton} onClick={() => setOpen(value => !value)}>
+          {open ? '收起' : '展开'}
+        </button>
+      ) : null}
+    </>
+  );
+}
+
+/** 作者内容倾向：结论在前，理由、取样与支持片段在后；判定门槛放到统一的依据区。 */
+function LeadJudgment({ ctx }: { ctx: PanelContext }) {
+  const { item } = ctx;
+  const analysis = item.authorAnalysis;
+  const focus = authorFocus(item);
+  const manual = analysis.manual.focus;
+  const evidence = evidenceFor(analysis, 'focus', focus);
+  const status = analysisStatus(analysis, focus.value);
+  const statusVisible = analysis.state !== null && analysis.state !== 'idle';
+  const sample = analysis.sampleWorkCount;
+  return (
+    <>
+      <div className={styles.leadHead}>
+        <strong className={styles.leadValue} data-value={focus.value}>{valueLabel(focus.value)}</strong>
+        <button type="button" className={styles.textButton} disabled={!ctx.writable} aria-label="调整作者倾向" onClick={() => ctx.onCorrect('focus', null)}>
+          {focus.value === 'unknown' ? '补充判断' : '调整判断'}
+        </button>
+      </div>
+      {focus.reason ? (
+        <ExpandableText text={focus.reason} />
+      ) : (
+        <p className={styles.leadReason}>当前材料尚不足以形成作者整体判断。</p>
+      )}
+      {statusVisible ? <p className={`${styles.help} ${styles.analysis}`} data-kind={status.kind}>{status.text}</p> : null}
+      <div className={styles.leadMeta}>
+        <details className={styles.inlineEvidence}>
+          <summary>依据 {formatCount(evidence.length)} 片段</summary>
+          {evidence.length > 0 ? (
+            evidence.map(fragment => <Quote key={fragment.fragmentId} fragment={fragment} link={ctx.link} creatorKey={item.creatorKey} />)
+          ) : (
+            <p className={styles.help}>暂无可回查的支持片段。</p>
+          )}
+        </details>
+        <span className={styles.sampleCount}>
+          本次取样 {sample === null || !Number.isInteger(sample) ? '未记录' : `${formatCount(sample)} 篇`}
+        </span>
+      </div>
+      <p className={styles.provenance}>
+        {provenanceText(analysis, 'focus')}
+        {manual?.supportUnavailable ? ' · 当时支持这项判断的材料已变化或不可读，请复核；原人工记录仍保留' : ''}
+      </p>
+    </>
+  );
+}
+
+/** 概览：结论、公开简介、发现来源、领域作品；依据与身份线索收在统一的展开区。 */
 export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
   const { item, data } = ctx;
   const analysis = item.authorAnalysis;
-  const focus = authorFocus(item);
   const firstSeenLabel = item.firstSeenPrecision ? FIRST_SEEN_LABELS[item.firstSeenPrecision] : undefined;
   const earliestWork = item.firstSeenWorkRef ? ctx.resources.byRef.get(item.firstSeenWorkRef) : undefined;
+  const matched = item.matchedWorkRefs.length;
   return (
     <>
-      <div className={styles.homepagePrompt}>
-        <div>
-          <span className={styles.homepageKicker}>DISCOVER / READ / DECIDE</span>
-          <h3>先浅看作者，再决定读哪篇</h3>
-          <p>当前领域已取得 {formatCount(item.collectedWorkCount)} 篇作品。主页浅看最多 30 篇卡片，先了解这个人最近能提供哪些可读材料，不自动深采或加入观察。</p>
-        </div>
-        <button type="button" className={styles.homepageAction} onClick={() => ctx.onTab('works')}>浅看主页作品 →</button>
-      </div>
-      {item.authorExternalId ? <CreatorAccountResearch domain={data.domain.domainRef} platform={ctx.query.platform} author={item.authorExternalId} disabled={!ctx.writable} /> : null}
       <section aria-label="作者内容倾向">
-        <h3>作者内容倾向</h3>
-        <JudgmentBlock
-          analysis={analysis}
-          field="focus"
-          judgement={focus}
-          creatorKey={item.creatorKey}
-          link={ctx.link}
-          workRef={null}
-          disabled={!ctx.writable}
-          onCorrect={ctx.onCorrect}
-          lead
-        />
-        <AnalysisLine analysis={analysis} value={focus.value} />
-        <p className={styles.help}>
-          {sampleText(analysis)}
-          仅使用本领域已取得材料，不代表账号全部作品。
-        </p>
+        <div className={styles.sectionHead}>
+          <h3>作者内容倾向</h3>
+          {item.authorExternalId ? (
+            <CreatorAccountResearch domain={data.domain.domainRef} platform={ctx.query.platform} author={item.authorExternalId} disabled={!ctx.writable} />
+          ) : null}
+        </div>
+        <LeadJudgment ctx={ctx} />
       </section>
+
+      <section aria-label="公开简介">
+        <div className={styles.sectionHead}>
+          <h3>公开简介</h3>
+        </div>
+        <Biography text={item.biography} />
+      </section>
+
       <section aria-label="发现来源">
-        <h3>让我们发现他的作品</h3>
-        <dl className={styles.profileList}>
-          <dt>发现词</dt>
-          <dd>{item.discoveryKeywords.length > 0 ? item.discoveryKeywords.join('、') : '未记录发现词'}</dd>
-          <dt>首次发现</dt>
-          <dd>
+        <div className={styles.sectionHead}>
+          <h3>发现来源</h3>
+        </div>
+        <p className={styles.factLine}>{item.discoveryKeywords.length > 0 ? item.discoveryKeywords.join('、') : '未记录发现词'}</p>
+        <div className={styles.factRow}>
+          <span className={styles.factMuted}>
             {item.firstSeenDisplay ?? '首次发现时间未记录'}
             {firstSeenLabel ? ` · ${firstSeenLabel}` : ''}
-          </dd>
-          <dt>当时看到的是</dt>
-          <dd>
-            {item.firstSeenWorkRef ? (
-              <a href={workLink(ctx.link, item.creatorKey, {}, item.firstSeenWorkRef)} data-return-key={item.creatorKey}>
-                {earliestWork?.title ?? (ctx.resources.pending ? '作品标题读取中…' : '作品标题未取得')}
-              </a>
-            ) : (
-              '未记录最早收录的作品'
-            )}
-          </dd>
-        </dl>
-        <p className={styles.help}>发现词来自长期关键词目标，按首次命中先后排列；首次发现取「进入本领域」与「关键词命中」中更早的一刻，更早的发现不可知。</p>
-      </section>
-      <section aria-label="内容方向与作品表达">
-        <h3>内容方向与作品表达</h3>
-        <p>{item.topicHints.join(' · ') || '内容方向尚未形成'}</p>
-        <div className={styles.tags}>
-          {item.traits
-            .filter(key => LABELS[key])
-            .map(key => (
-              <span key={key}>{LABELS[key]}</span>
-            ))}
+          </span>
+          {item.firstSeenWorkRef ? (
+            <a href={workLink(ctx.link, item.creatorKey, {}, item.firstSeenWorkRef)} data-return-key={item.creatorKey}>
+              {earliestWork?.title ?? (ctx.resources.pending ? '首篇作品读取中…' : '首篇作品 →')}
+            </a>
+          ) : (
+            <span className={styles.factMuted}>未记录最早收录的作品</span>
+          )}
         </div>
-        <p className={styles.help}>表达属于作品层面，可以同时出现，也与上面的作者倾向并存、互不推出。</p>
       </section>
-      <section aria-label="当前条件的作品预览">
-        <div className={styles.fieldHead}>
-          <h3>当前条件的作品预览</h3>
-          <button type="button" className={styles.textButton} onClick={() => ctx.onTab('evidence')}>
-            查看依据 →
-          </button>
+
+      <section aria-label="领域作品">
+        <div className={styles.sectionHead}>
+          <h3>领域作品</h3>
+          <a href={workLink(ctx.link, item.creatorKey)} data-return-key={item.creatorKey}>
+            查看全部 {formatCount(matched)} 篇 →
+          </a>
         </div>
-        {item.representatives.length === 0 ? <p className={styles.help}>暂无可用作品。</p> : item.representatives.map(work => <WorkPreview key={work.workRef} ctx={ctx} work={work} />)}
-        <p className={styles.help}>预览最多三篇；不是本次作者分析的全部样本。</p>
-        <a href={workLink(ctx.link, item.creatorKey)} data-return-key={item.creatorKey}>
-          查看全部 {formatCount(item.matchedWorkRefs.length)} 篇命中作品 →
-        </a>
+        {item.representatives.length === 0 ? (
+          <p className={styles.help}>暂无可用作品。</p>
+        ) : (
+          item.representatives.map(work => <WorkPreview key={work.workRef} ctx={ctx} work={work} />)
+        )}
       </section>
-      <details>
-        <summary>判断标准与材料范围</summary>
-        <p className={styles.help}>{sampleBasisText(analysis)}。作者倾向基于本领域累计材料；当前列表作品按所选日期和条件。</p>
+
+      <details className={styles.basis}>
+        <summary>判断依据与材料范围</summary>
+        <p className={styles.help}>{sampleBasisText(analysis)}。{sampleText(analysis)}</p>
         <p className={styles.help}>
           已判相关 {formatCount(item.relatedWorkCount)} 篇，待判断 {formatCount(item.unknownRelevanceWorkCount)} 篇，已判无关 {formatCount(item.unrelatedWorkCount)} 篇。
         </p>
         <p className={styles.help}>
           {data.policy.likeThreshold === null
             ? '未设置爆款标准。'
-            : `爆款最低点赞 ${formatCount(data.policy.likeThreshold)}；当前范围相关爆款 ${formatCount(item.viralWorkCount)} 篇。`}
+            : `爆款最低点赞 ${formatCount(data.policy.likeThreshold)}；当前范围相关爆款 ${formatCount(item.viralWorkCount ?? 0)} 篇。`}
         </p>
-        <p className={styles.help}>{CRITERIA.focus}</p>
-        <p className={styles.help}>{COEXISTENCE}</p>
+        <p className={styles.help}><strong>作者在本领域的内容倾向：</strong>{CRITERIA.focus}</p>
+        <div className={styles.identityBlock}>
+          <h4>公开身份线索</h4>
+          <JudgmentBlock
+            analysis={analysis}
+            field="institution_or_brand"
+            judgement={effectiveJudgement(analysis, 'institution_or_brand')}
+            creatorKey={item.creatorKey}
+            link={ctx.link}
+            workRef={null}
+            disabled={!ctx.writable}
+            onCorrect={ctx.onCorrect}
+            actionLabel="调整公开身份线索"
+          />
+        </div>
       </details>
     </>
   );
 }
 
-/** 作品与依据：按作品分组，每篇作品的四项判断与各自的引文放在一起。 */
+function shortValue(field: string, value: string | null | undefined): string {
+  if (field === 'relevance') {
+    if (value === 'related') return '相关';
+    if (value === 'unrelated') return '无关';
+    return '未判断';
+  }
+  if (value === 'yes') return '有依据';
+  if (value === 'no') return '未见';
+  return '未判断';
+}
+
+function summaryLine(work: Work): string {
+  return [
+    `关系 ${shortValue('relevance', work.relevance)}`,
+    `亲历 ${shortValue('personal_experience', effectiveJudgement(work.analysis, 'personal_experience').value)}`,
+    `讲解 ${shortValue('professional_output', effectiveJudgement(work.analysis, 'professional_output').value)}`,
+    `推广 ${shortValue('explicit_promotion', effectiveJudgement(work.analysis, 'explicit_promotion').value)}`,
+  ].join(' · ');
+}
+
+const WORK_FIELDS = ['relevance', 'personal_experience', 'professional_output', 'explicit_promotion'] as const;
+
+function WorkJudgment({ ctx, work, field }: { ctx: PanelContext; work: Work; field: string }) {
+  const judgement: Judgement = effectiveJudgement(work.analysis, field);
+  const manual = work.analysis.manual[field];
+  const evidence = evidenceFor(work.analysis, field, judgement);
+  return (
+    <div className={styles.judgmentRow}>
+      <div className={styles.judgmentLine}>
+        <span className={styles.judgmentLabel}>{FIELD_NAMES[field] ?? field}</span>
+        <strong>{valueLabel(judgement.value)}</strong>
+        <span className={styles.judgmentSource}>
+          {provenanceText(work.analysis, field)}
+          {manual?.supportUnavailable ? ' · 支持材料已变化，请复核' : ''}
+        </span>
+        <button type="button" className={styles.textButton} disabled={!ctx.writable} aria-label={`${judgement.value === 'unknown' ? '补充' : '调整'}${FIELD_NAMES[field] ?? field}`} onClick={() => ctx.onCorrect(field, work.workRef)}>
+          {judgement.value === 'unknown' ? '补充判断' : '调整判断'}
+        </button>
+      </div>
+      {judgement.reason ? <ExpandableText text={judgement.reason} /> : null}
+      {evidence.length > 0 ? (
+        <details className={styles.inlineEvidence}>
+          <summary>依据 {formatCount(evidence.length)} 片段</summary>
+          {evidence.map(fragment => (
+            <Quote key={fragment.fragmentId} fragment={fragment} link={ctx.link} creatorKey={ctx.item.creatorKey} />
+          ))}
+        </details>
+      ) : null}
+    </div>
+  );
+}
+
+/** 研究线索：每篇作品一行摘要；展开后才给判断、来源、引文与动作。 */
 export function EvidencePanel({
   ctx,
   expanded,
@@ -193,86 +299,100 @@ export function EvidencePanel({
   const { item, link } = ctx;
   return (
     <>
-      <p className={styles.help}>
-        范围内 {formatCount(item.collectedWorkCount)} 篇 · 当前条件命中 {formatCount(item.matchedWorkRefs.length)} 篇。下方预览最多三篇。
-      </p>
-      <a href={workLink(link, item.creatorKey)} data-return-key={item.creatorKey}>
-        查看全部命中作品 →
-      </a>
-      {item.representatives.map(work => (
-        <details
-          key={work.workRef}
-          className={styles.workGroup}
-          data-work={work.workRef}
-          open={expanded.has(work.workRef)}
-          onToggle={event => onToggleWork(work.workRef, event.currentTarget.open)}
-        >
-          <summary>
-            <Cover
-              url={ctx.resources.byRef.get(work.workRef)?.coverUrl ?? null}
-              pending={ctx.resources.pending}
-              className={pageStyles.cover}
-            />
-            <div>
-              <span className={styles.clamp} title={workTitle(work, ctx.resources)}>
-                {workTitle(work, ctx.resources)}
-              </span>
-              <span className={styles.secondary}>
-                {relevanceLabel(work.relevance)} · 赞 <Metric value={work.likes} />
-              </span>
+      <div className={styles.panelHead}>
+        <h3>当前命中 {formatCount(item.matchedWorkRefs.length)} 篇</h3>
+        <a href={workLink(link, item.creatorKey)} data-return-key={item.creatorKey}>
+          查看全部 →
+        </a>
+      </div>
+      {item.representatives.length === 0 ? <p className={styles.help}>当前条件没有可展开的作品。</p> : null}
+      {item.representatives.map(work => {
+        const open = expanded.has(work.workRef);
+        const failed = work.analysis.state === 'failed';
+        const status = analysisStatus(work.analysis, work.relevance);
+        const statusVisible =
+          (work.analysis.state !== null && work.analysis.state !== 'idle') ||
+          (work.analysis.resultAt !== null && status.kind === 'insufficient');
+        return (
+          <details
+            key={work.workRef}
+            className={styles.workGroup}
+            data-work={work.workRef}
+            open={open}
+            onToggle={event => onToggleWork(work.workRef, event.currentTarget.open)}
+          >
+            <summary>
+              <IntelligenceIcon name="chevron" expanded={open} className={styles.workChevron} />
+              <div className={styles.workSummaryCopy}>
+                <span className={styles.workSummaryTitle} title={workTitle(work, ctx.resources)}>{workTitle(work, ctx.resources)}</span>
+                <span className={styles.workSummaryMeta} data-failed={failed || undefined}>
+                  {failed ? `读取失败 · ${failureReason(work.analysis.lastErrorCode)}` : summaryLine(work)}
+                </span>
+              </div>
+            </summary>
+            <div className={styles.workBody}>
+              <p className={styles.workSource}>
+                {acquisitionText(work)} · 收录于 {moment(work.firstAdded, work.firstAddedDisplay)} · 指标观察 {moment(work.likesObservedAt, work.likesObservedDisplay)}
+              </p>
+              <div className={styles.workActions}>
+                <a href={evidenceLink(link, item.creatorKey, work.workRef)} data-return-key={item.creatorKey}>
+                  打开原作品 →
+                </a>
+                <CreatorWorkResearch domain={ctx.data.domain.domainRef} work={work.workRef} disabled={!ctx.writable} />
+              </div>
+              {statusVisible ? <AnalysisLine analysis={work.analysis} value={work.relevance} /> : null}
+              {WORK_FIELDS.map(field => (
+                <WorkJudgment key={field} ctx={ctx} work={work} field={field} />
+              ))}
+              {work.analysis.lastErrorCode ? (
+                <details className={styles.processing}>
+                  <summary>处理信息</summary>
+                  <p className={styles.help}>
+                    {failureReason(work.analysis.lastErrorCode)} <code>{work.analysis.lastErrorCode}</code>
+                  </p>
+                </details>
+              ) : null}
             </div>
-          </summary>
-          <div className={styles.workBody}>
-            <p className={styles.help}>
-              {acquisitionText(work)} · 收录于 {moment(work.firstAdded, work.firstAddedDisplay)} · 指标观察 {moment(work.likesObservedAt, work.likesObservedDisplay)}
-            </p>
-            <a href={evidenceLink(link, item.creatorKey, work.workRef)} data-return-key={item.creatorKey}>
-              打开原作品 →
-            </a>
-            <CreatorWorkResearch domain={ctx.data.domain.domainRef} work={work.workRef} disabled={!ctx.writable} />
-            {(['relevance', 'personal_experience', 'professional_output', 'explicit_promotion'] as const).map(field => (
-              <JudgmentBlock
-                key={field}
-                analysis={work.analysis}
-                field={field}
-                judgement={effectiveJudgement(work.analysis, field)}
-                creatorKey={item.creatorKey}
-                link={link}
-                workRef={work.workRef}
-                disabled={!ctx.writable}
-                onCorrect={ctx.onCorrect}
-              />
-            ))}
-            <AnalysisLine analysis={work.analysis} value={work.relevance} />
-            {work.analysis.lastErrorCode ? (
-              <details>
-                <summary>处理信息</summary>
-                <p className={styles.help}>
-                  {failureReason(work.analysis.lastErrorCode)} <code>{work.analysis.lastErrorCode}</code>
-                </p>
-              </details>
-            ) : null}
-          </div>
-        </details>
-      ))}
+          </details>
+        );
+      })}
+      <details className={styles.criteriaBlock}>
+        <summary>判断标准</summary>
+        {WORK_FIELDS.map(field => (
+          <p key={field} className={styles.help}>
+            <strong>{FIELD_NAMES[field] ?? field}：</strong>
+            {CRITERIA[field] ?? ''}
+          </p>
+        ))}
+      </details>
     </>
   );
 }
 
-/** 作者资料：公开简介、公开身份线索、材料与来源；机器标识放在折叠的处理信息里。 */
-/** 本领域的观察记录：加入、档案、巡查与最近变化。未知一律写未记录，不按时间推算。 */
+/** 本领域的观察记录：只展示接口已有事实，最近变化只取最近一次，不补造历史。 */
 function ObservationRecordSection({ ctx }: { ctx: PanelContext }) {
   const { item, data } = ctx;
   const observation = item.observation;
   const joined = observation.inCurrentDomain === true;
   const record = useObservationRecord(data.domain.domainRef, item.creatorKey, joined);
+  const stateText = observedText(observation);
   return (
-    <section aria-label="观察关系与巡查">
-      <h3>观察关系与巡查</h3>
+    <section aria-label="观察记录">
+      <div className={styles.observationHead}>
+        <div>
+          <h3>观察状态</h3>
+          <strong className={styles.observationState}>{stateText}</strong>
+        </div>
+        {observation.targetRef ? <a href={targetHref(data.domain.domainRef, observation.targetRef)}>查看目标 →</a> : null}
+      </div>
       {observation.lookup === 'unavailable' || observation.inCurrentDomain === null ? (
         <p className={styles.help}>观察记录暂不可用：现在读不到这位作者与本领域的关系。</p>
       ) : !joined ? (
-        <p className={styles.help}>未加入本领域观察，所以没有巡查记录。需要时用「加入本领域观察」建立关系。</p>
+        <p className={styles.help}>
+          {observation.lifecycleState === 'paused' || observation.lifecycleState === 'dismissed'
+            ? '这位作者在其他领域或过去的观察已暂停／忽略，但在本领域还没有观察关系，所以没有本领域的巡查记录。'
+            : '未加入本领域观察，所以没有巡查记录。加入后才有巡查与带回结果。'}
+        </p>
       ) : record.pending ? (
         <p className={styles.help}>观察记录读取中…</p>
       ) : record.failed || record.record === null ? (
@@ -280,13 +400,13 @@ function ObservationRecordSection({ ctx }: { ctx: PanelContext }) {
       ) : record.record.state !== 'joined' ? (
         <p className={styles.help}>服务器上已经没有这位作者与本领域的观察关系。</p>
       ) : (
-        <ObservationRecordList record={record.record} />
+        <ObservationRecordFacts record={record.record} />
       )}
     </section>
   );
 }
 
-function ObservationRecordList({ record }: { record: ObservationRecord }) {
+function ObservationRecordFacts({ record }: { record: ObservationRecord }) {
   const patrol = record.patrol;
   const role = record.usageRole === 'reference' ? '参照' : record.usageRole === 'primary' ? '主研究' : '用途未记录';
   const status = [
@@ -299,11 +419,14 @@ function ObservationRecordList({ record }: { record: ObservationRecord }) {
   ]
     .filter(Boolean)
     .join(' · ');
-  const lastPatrol = patrol?.lastSucceededAt
-    ? `成功于 ${patrol.lastSucceededAt}`
-    : patrol?.lastDispatchedAt
-      ? `派出于 ${patrol.lastDispatchedAt}，还没有成功结果`
-      : '没有巡查记录';
+  const lastPatrol =
+    patrol === null || patrol.state === 'unavailable'
+      ? '暂不可用'
+      : patrol.lastSucceededAt
+        ? `成功于 ${patrol.lastSucceededAt}`
+        : patrol.lastDispatchedAt
+          ? `派出于 ${patrol.lastDispatchedAt}，还没有成功结果`
+          : '没有巡查记录';
   const patrolResult =
     patrol === null || patrol.state === 'unavailable'
       ? '暂不可用'
@@ -312,97 +435,63 @@ function ObservationRecordList({ record }: { record: ObservationRecord }) {
         : patrol.lastSucceededAt
           ? '作品数未记录'
           : '还没有成功巡查的结果';
-  const next = patrol?.nextRunAt ?? (patrol?.automaticEnabled ? '尚未排定' : '自动巡查未开启');
+  const next =
+    patrol === null || patrol.state === 'unavailable'
+      ? '暂不可用'
+      : patrol.nextRunAt ?? (patrol.automaticEnabled ? '尚未排定' : '自动巡查未开启');
   const change = record.lastTransition
     ? record.lastTransition.from
       ? `${record.lastTransition.at} 从「${lifecycleLabel(record.lastTransition.from)}」到「${lifecycleLabel(record.lastTransition.to)}」：${transitionReasonLabel(record.lastTransition.reasonCode, record.lastTransition.reason)}`
       : `${record.lastTransition.at} 建立为「${lifecycleLabel(record.lastTransition.to)}」：${transitionReasonLabel(record.lastTransition.reasonCode, record.lastTransition.reason)}`
     : '没有变化记录';
   return (
-    <dl className={styles.profileList}>
-      <dt>加入本领域</dt>
-      <dd>
-        {record.joinedAt ?? '时间未记录'} · {role}
-      </dd>
-      <dt>首次保存</dt>
-      <dd>{record.firstStoredAt ?? '未记录'}</dd>
-      <dt>当前状态</dt>
-      <dd>{status}</dd>
-      <dt>上次巡查</dt>
-      <dd>{lastPatrol}</dd>
-      <dt>带回作品</dt>
-      <dd>{patrolResult}</dd>
-      <dt>下次巡查</dt>
-      <dd>{next}</dd>
-      {patrol !== null && patrol.missedRuns > 0 ? (
-        <>
-          <dt>错过计划</dt>
-          <dd>{formatCount(patrol.missedRuns)} 次</dd>
-        </>
-      ) : null}
-      <dt>最近变化</dt>
-      <dd>{change}</dd>
-    </dl>
-  );
-}
-
-export function ProfilePanel({ ctx }: { ctx: PanelContext }) {
-  const { item, data, query } = ctx;
-  const analysis = item.authorAnalysis;
-  return (
     <>
-      <ObservationRecordSection ctx={ctx} />
-      <section aria-label="公开简介">
-        <h3>公开简介</h3>
-        <p className={styles.biography}>{item.biography ?? '公开简介尚未取得。'}</p>
-      </section>
-      <section aria-label="公开身份线索">
-        <h3>公开身份线索</h3>
-        <JudgmentBlock
-          analysis={analysis}
-          field="institution_or_brand"
-          judgement={effectiveJudgement(analysis, 'institution_or_brand')}
-          creatorKey={item.creatorKey}
-          link={ctx.link}
-          workRef={null}
-          disabled={!ctx.writable}
-          onCorrect={ctx.onCorrect}
-        />
-        <p className={styles.help}>仅依据公开资料，不根据昵称、头像或粉丝量推断身份。</p>
-      </section>
-      <section aria-label="材料与来源">
-        <h3>材料与来源</h3>
-        <dl className={styles.profileList}>
-          <dt>来源平台</dt>
-          <dd>小红书</dd>
-          <dt>当前领域</dt>
-          <dd>{data.domain.name ?? '当前领域'}</dd>
-          <dt>材料用途</dt>
-          <dd>{query.usageRole === 'reference' ? '参照' : '主研究'}</dd>
-          <dt>范围内作品</dt>
-          <dd>{formatCount(item.collectedWorkCount)} 篇</dd>
-          <dt>当前命中</dt>
-          <dd>{formatCount(item.matchedWorkRefs.length)} 篇</dd>
-          <dt>观察关系</dt>
-          <dd>{observedText(item.observation)}</dd>
-          <dt>实际取样</dt>
-          <dd>{sampleText(analysis)}</dd>
+      <dl className={styles.observationFacts}>
+        <div>
+          <dt>加入本领域</dt>
+          <dd>{record.joinedAt ?? '时间未记录'} · {role}</dd>
+        </div>
+        <div>
+          <dt>上次巡查</dt>
+          <dd>{lastPatrol}</dd>
+        </div>
+        <div>
+          <dt>带回作品</dt>
+          <dd>{patrolResult}</dd>
+        </div>
+        <div>
+          <dt>下次巡查</dt>
+          <dd>{next}</dd>
+        </div>
+      </dl>
+      <div className={styles.lastChange}>
+        <h4>最近一次变化</h4>
+        <p>{change}</p>
+      </div>
+      <details className={styles.archiveInfo}>
+        <summary>更多档案信息</summary>
+        <dl className={styles.observationFacts}>
+          <div>
+            <dt>首次保存</dt>
+            <dd>{record.firstStoredAt ?? '未记录'}</dd>
+          </div>
+          <div>
+            <dt>当前状态</dt>
+            <dd>{status}</dd>
+          </div>
+          {patrol !== null && patrol.missedRuns > 0 ? (
+            <div>
+              <dt>错过计划</dt>
+              <dd>{formatCount(patrol.missedRuns)} 次</dd>
+            </div>
+          ) : null}
         </dl>
-      </section>
-      <details>
-        <summary>处理信息</summary>
-        <p className={styles.help}>平台账号标识：{item.authorExternalId ?? '未取得'}</p>
-        <p className={styles.help}>
-          {analysis.resultAt || analysis.resultAtDisplay ? `自动依据更新于 ${moment(analysis.resultAt, analysis.resultAtDisplay)}` : '自动依据更新时间未记录'}
-        </p>
-        <p className={styles.help}>错误代码：{analysis.lastErrorCode ?? '未记录'}</p>
-        <p className={styles.help}>来源采样：{analysis.sampleBasis ?? '未记录'}</p>
-        {analysis.sampleLimitations.map(text => (
-          <p key={text} className={styles.help}>
-            {text}
-          </p>
-        ))}
       </details>
     </>
   );
+}
+
+/** 观察记录只承担观察与巡查；公开简介、身份线索与材料范围都在概览。 */
+export function ProfilePanel({ ctx }: { ctx: PanelContext }) {
+  return <ObservationRecordSection ctx={ctx} />;
 }

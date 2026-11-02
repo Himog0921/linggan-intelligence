@@ -148,13 +148,14 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
   const work = item.representatives[0];
   const matched = filtered ? item.matchedRelatedWorkCount : item.relatedWorkCount;
   const directions = item.topicHints.filter(Boolean).join(' · ');
+  const direction = directions || (item.authorAnalysis.state === 'failed' ? '读取失败' : '—');
   const resource = work ? resources.byRef.get(work.workRef) : undefined;
   const name = authorName(item);
   const nameSource = item.displayNameKind === 'observation_target' ? '观察目标名称 · ' : '';
   const matchedHref = filtered ? workLink(link, item.creatorKey, { relevance: 'related' }) : scopeWorkLink(link, item.creatorKey, 'related');
   const firstSeenLabel = item.firstSeenPrecision ? FIRST_SEEN_LABELS[item.firstSeenPrecision] : undefined;
   return (
-    <tr data-selected={selectedKey === item.creatorKey || selectedKeys.has(item.creatorKey)}>
+    <tr data-open={selectedKey === item.creatorKey} data-batch={selectedKeys.has(item.creatorKey)}>
       <td>
         <div className={`${styles.cell} ${styles.authorCell}`}>
           <input
@@ -168,7 +169,7 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
           <div className={styles.cellCopy}>
             <button
               type="button"
-              className={`${styles.link} ${styles.name} ${styles.ellipsis}`}
+              className={`${styles.link} ${styles.name} ${styles.clamp}`}
               data-author-key={item.creatorKey}
               title={name}
               aria-haspopup="dialog"
@@ -194,8 +195,8 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
       </td>
       <td>
         <div className={styles.cell}>
-          <button type="button" className={styles.link} title={directions || '内容方向尚未形成'} onClick={() => onOpen(item.creatorKey)}>
-            <span className={styles.clamp}>{directions || '内容方向尚未形成'}</span>
+          <button type="button" className={styles.link} title={directions || direction} onClick={() => onOpen(item.creatorKey)}>
+            <span className={styles.clamp}>{direction}</span>
           </button>
         </div>
       </td>
@@ -208,12 +209,12 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
           ) : (
             <span className={styles.metric}>{formatCount(matched)}</span>
           )}
-          {filtered ? (
-            <span className={styles.secondary}>范围内 {formatCount(item.relatedWorkCount)}</span>
-          ) : item.unknownRelevanceWorkCount > 0 ? (
+          {item.unknownRelevanceWorkCount > 0 ? (
             <a className={styles.secondary} href={scopeWorkLink(link, item.creatorKey, 'unknown')} data-return-key={item.creatorKey}>
               待判断 {formatCount(item.unknownRelevanceWorkCount)}
             </a>
+          ) : filtered ? (
+            <span className={styles.secondary}>范围内 {formatCount(item.relatedWorkCount)}</span>
           ) : null}
         </div>
       </td>
@@ -258,7 +259,7 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
               ) : null}
             </>
           ) : (
-            <span className={styles.secondary}>首次发现时间未记录</span>
+            <span className={styles.secondary} title="首次发现时间未记录">—</span>
           )}
         </div>
       </td>

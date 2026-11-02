@@ -97,7 +97,9 @@ describe('创作者页 · 列表', () => {
     expect(rowFor('合成作者 2')).toHaveTextContent('近 7 天新见');
     expect(rowFor('合成作者 3')).toHaveTextContent('09.12');
     expect(rowFor('合成作者 3')).toHaveTextContent('最早已知记录');
-    expect(rowFor('合成作者 4')).toHaveTextContent('首次发现时间未记录');
+    const noDate = rowFor('合成作者 4').querySelectorAll('td')[6] as HTMLElement;
+    expect(noDate).toHaveTextContent('—');
+    expect(within(noDate).getByTitle('首次发现时间未记录')).toBeInTheDocument();
   });
 
   it('未知不显示成 0：粉丝、最高赞、点赞缺失时是「—」；≥1 万缩写并在悬停里保留精确值', async () => {
@@ -308,7 +310,7 @@ describe('创作者页 · 领域与读取失败', () => {
     defaultRoutes(kit, () => ({ status: 200, body: listJson() }));
     const { user } = await loaded();
     kit.route('GET', '/api/local/creators', () => ({ status: 503, body: { code: 'creator_read_unavailable' } }), ok(listJson()));
-    await user.click(screen.getByRole('button', { name: '刷新结果' }));
+    await user.click(screen.getByRole('button', { name: '刷新' }));
     expect(await screen.findByText(/最新读取没有成功，下方仍是上一次读取到的内容/)).toBeInTheDocument();
     expect(screen.getByRole('table')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '重试读取' }));
@@ -653,8 +655,8 @@ describe('创作者页 · 搜索、排序、分页', () => {
     expect(screen.getByRole('columnheader', { name: '首次发现' })).toHaveAttribute('aria-sort', 'descending');
   });
 
-  it('筛选（作品条件生效）时，表头改称「命中相关」「命中最高赞」，行内显示范围内总数', async () => {
-    defaultRoutes(kit);
+  it('筛选（作品条件生效）时，表头改称「命中相关」「命中最高赞」，无待判断时显示范围内总数', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { unknown: 0 })] })));
     await loaded(`/corpus/creators?domain=${DOMAIN}&relevance=related&sort=high_likes`);
     expect(screen.getByRole('button', { name: '命中相关' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '命中最高赞' })).toBeInTheDocument();
@@ -701,10 +703,10 @@ describe('创作者页 · 搜索、排序、分页', () => {
     const { user, location } = await loaded(`/corpus/creators?domain=${DOMAIN}&page=1&pageSize=25`);
     kit.calls.length = 0;
     kit.route('GET', '/api/local/creators', ok(listJson({ total: 60, pageSize: 25 })));
-    await user.click(screen.getByRole('button', { name: '刷新结果' }));
+    await user.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}&pageSize=25`));
     const before = creatorsCalls().length;
-    await user.click(screen.getByRole('button', { name: '刷新结果' }));
+    await user.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(creatorsCalls().length).toBe(before + 1));
   });
 });
@@ -783,12 +785,12 @@ describe('创作者页 · 外壳', () => {
     expect(screen.getByRole('link', { name: /采集/ }).querySelector('.v7-nav-state')).toBeNull();
     expect(screen.getByRole('link', { name: /语料/ })).toHaveAttribute('aria-current', 'page');
     expect(screen.getByLabelText('切换当前观察领域')).toHaveTextContent('合成领域一');
-    expect(screen.getByRole('complementary', { name: '语料导航' })).toHaveTextContent('作者来自当前领域已有作品');
+    expect(screen.getByRole('complementary', { name: '语料导航' })).not.toHaveTextContent('作者来自当前领域已有作品');
   });
 
   it('材料范围摘要：用途与日期', async () => {
     defaultRoutes(kit);
     await loaded(`/corpus/creators?domain=${DOMAIN}&usageRole=reference&publishedFrom=2026-09-16`);
-    expect(screen.getByText('参照 · 2026-09-16 至 不限（不含）')).toBeInTheDocument();
+    expect(screen.getByText('参照 · 2026-09-16 至 不限')).toBeInTheDocument();
   });
 });

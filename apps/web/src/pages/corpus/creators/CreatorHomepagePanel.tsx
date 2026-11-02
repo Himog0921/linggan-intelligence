@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
+import { humanMoment } from '../../../shared/formatting';
 import { Cover } from './Media';
 import { Metric } from './CreatorTable';
 import { formatCount, workLink } from './creatorsQuery';
@@ -34,12 +35,21 @@ function suggested(notes: HomepageNote[]): string[] {
 
 function statusText(state: string, count: number): string {
   switch (state) {
-    case 'running': return `正在浅看 · 本次已取得 ${formatCount(count)} 篇`;
-    case 'complete': return `本次主页样本 ${formatCount(count)} 篇`;
+    case 'running': return `正在读取 · 已取得 ${formatCount(count)} 篇`;
+    case 'complete': return `本次样本 ${formatCount(count)} 篇`;
     case 'partial': return `本次取得 ${formatCount(count)} 篇 · 范围不完整`;
     case 'stopped': return `已停止 · 保留 ${formatCount(count)} 篇`;
-    default: return '尚未展开主页';
+    default: return '尚无主页样本';
   }
+}
+
+/** 范围切换沿用母版的朱红手绘短线；封面/列表只用黑色下划线区分。 */
+function SegmentMark() {
+  return (
+    <svg className={styles.segmentMark} viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" />
+    </svg>
+  );
 }
 
 export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
@@ -57,6 +67,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
   const noteRefs = useMemo(() => notes.map(note => note.workRef), [notes]);
   const media = useWorkResources(domain, noteRefs);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [recommended, setRecommended] = useState<ReadonlySet<string>>(new Set());
   const [view, setView] = useState<View>('grid');
   const [filter, setFilter] = useState<'all' | 'selected'>('all');
   const [preset, setPreset] = useState<Preset>('standard');
@@ -68,20 +79,50 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
   // The identity of an unconfirmed study request is only valid for the run it was made against.
   const studyCommand = useRef<{ run: string; key: string } | null>(null);
   const stopCommand = useRef<string | null>(null);
+  const confirmRef = useRef<HTMLElement>(null);
+  const studyButtonRef = useRef<HTMLButtonElement>(null);
+  const returnFocus = useRef(false);
   const [seededRun, setSeededRun] = useState<string | null>(null);
+  const [edited, setEdited] = useState(false);
+
+  // The confirmation sits below the sticky selection dock in a scrolling panel. Bring it into view
+  // when it opens, move focus into it, and let Escape close it without writing anything.
+  useEffect(() => {
+    if (!showConfirm) return;
+    const node = confirmRef.current;
+    node?.scrollIntoView?.({ block: 'center' });
+    node?.focus?.({ preventScroll: true });
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      returnFocus.current = true;
+      setShowConfirm(false);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [showConfirm]);
+
+  useEffect(() => {
+    if (showConfirm || !returnFocus.current) return;
+    returnFocus.current = false;
+    studyButtonRef.current?.focus();
+  }, [showConfirm]);
 
   // Seed the suggested cards once per run; later polling and the user's own toggles never reseed.
   if (preview?.runRef && preview.works.length > 0 && seededRun !== preview.runRef) {
+    const picks = suggested(preview.works);
     setSeededRun(preview.runRef);
-    setSelected(new Set(suggested(preview.works)));
+    setSelected(new Set(picks));
+    setRecommended(new Set(picks));
+    setEdited(false);
   }
 
   const displayed = filter === 'selected' ? notes.filter(n => selected.has(n.workRef)) : notes;
   const selectedNotes = notes.filter(note => selected.has(note.workRef));
-  const seenLikes = notes.filter(note => note.likes !== null).length;
   const pending = busy !== null;
   const canWrite = data.domain.status === 'active';
   const state = preview?.state ?? 'not_requested';
+  const limit = preview?.requestedLimit ?? 30;
 
   async function start() {
     if (pending || !canWrite) return;
@@ -93,7 +134,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
       setStudyRun(null);
       await query.refetch();
     } catch {
-      setFeedback('浅看请求尚未确认。可再次点击，系统会按同一请求识别重试。');
+      setFeedback('读取请求尚未确认。可再次点击，系统会按同一请求识别重试。');
     } finally { setBusy(null); }
   }
 
@@ -110,11 +151,17 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
     } finally { setBusy(null); }
   }
 
+  function closeConfirm() {
+    returnFocus.current = true;
+    setShowConfirm(false);
+  }
+
   function toggle(ref: string) {
     if (pending) return;
     setShowConfirm(false);
     setStudyRun(null);
     studyCommand.current = null;
+    setEdited(true);
     setSelected(current => {
       const next = new Set(current);
       if (next.has(ref)) next.delete(ref);
@@ -142,13 +189,6 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
 
   return (
     <div className={styles.root}>
-      <div className={styles.sectionHead}>
-        <div>
-          <span className={styles.eyebrow}>AUTHOR / SURFACE</span>
-          <h3>先浅看，再决定读哪篇</h3>
-        </div>
-        <span className={styles.limit}>最多 30 篇</span>
-      </div>
       {query.isPending ? <p className={styles.info}>读取已有主页快照…</p> : null}
       {query.isError ? (
         <div className={styles.alert} role="alert">
@@ -156,61 +196,64 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
           <button type="button" onClick={() => void query.refetch()}>重新读取</button>
         </div>
       ) : null}
+
       {state === 'not_requested' && !query.isPending && !query.isError ? (
-        <div className={styles.intro}>
-          <div className={styles.introGlyph} aria-hidden="true">[ 01 … 30 ]</div>
-          <h4>先展开这位作者的主页</h4>
-          <p>目前在本领域已有 {formatCount(item.collectedWorkCount)} 篇作品。浅看只取得最多 30 篇主页卡片及有限公开资料，帮助挑选值得深入阅读的笔记。</p>
-          <ActionButton variant="primary" disabled={!canWrite} busy={busy === 'preview'} onClick={() => void start()}>
-            浅看主页
+        <div className={styles.emptyState}>
+          <span>尚无主页样本。</span>
+          <ActionButton disabled={!canWrite} busy={busy === 'preview'} onClick={() => void start()}>
+            读取主页（最多 {formatCount(limit)} 篇）
           </ActionButton>
-          <p className={styles.muted}>本次不自动打开全部详情、不采集评论，也不会自动加入长期观察。</p>
         </div>
       ) : null}
 
-      {preview?.runRef ? (
+      {preview?.runRef && state !== 'not_requested' ? (
         <div className={styles.snapshot} data-state={state}>
-          <div className={styles.stateLine}>
-            <span className={styles.stateDot} aria-hidden="true" />
-            <strong>{statusText(state, notes.length)}</strong>
-            <span>目标上限 {formatCount(preview.requestedLimit)}</span>
-            <span className={styles.grow} />
-            {state === 'running' && canWrite ? (
-              <button type="button" className={styles.textButton} disabled={pending} onClick={() => void stop()}>
-                {busy === 'stop' ? '停止中…' : '停止这次浅看'}
-              </button>
-            ) : null}
-            {canWrite && (state === 'stopped' || state === 'partial' || (state === 'complete' && notes.length === 0)) ? (
-              <button type="button" className={styles.textButton} disabled={pending} onClick={() => void start()}>
-                {busy === 'preview' ? '浅看中…' : '重新浅看'}
-              </button>
-            ) : null}
-            <button type="button" className={styles.textButton} disabled={pending} onClick={() => void query.refetch()}>更新</button>
+          <div className={styles.topLine}>
+            <div className={styles.sampleLine}>
+              <strong>{statusText(state, notes.length)}</strong>
+              {preview.scopeFrozenAt ? <span>{humanMoment(preview.scopeFrozenAt)}</span> : null}
+              {state === 'running' && canWrite ? (
+                <button type="button" className={styles.textButton} disabled={pending} onClick={() => void stop()}>
+                  {busy === 'stop' ? '停止中…' : '停止这次读取'}
+                </button>
+              ) : null}
+            </div>
+            <ActionButton onClick={() => void query.refetch()} busy={query.isFetching && !pending} disabled={pending}>
+              刷新读取
+            </ActionButton>
           </div>
-          <p>{state === 'complete'
-            ? notes.length >= preview.requestedLimit
-              ? '达到本次上限，不代表该作者全部历史作品。'
-              : '本次发现执行结束；数量只代表实际取得的主页卡片。'
-            : state === 'running'
-              ? '正在取得主页卡片。可以在已有结果中先阅读，未结束前不发起精选。'
-              : '本次仍有未确定范围，已取得的卡片保留；不把剩余数量推算成缺失篇数。'}</p>
-          {preview.frozenCount !== null && preview.frozenCount > notes.length ? (
-            <p className={styles.muted}>另有 {formatCount(preview.frozenCount - notes.length)} 篇暂时无法读取，仍算在本次样本里；稍后点「更新」重试。</p>
+          {state === 'partial' || state === 'stopped' || (state === 'complete' && notes.length === 0) ? (
+            <p className={styles.rangeNote}>
+              {state === 'partial'
+                ? '本次范围不完整，已取得的卡片保留；未读取的数量不推算。'
+                : state === 'stopped'
+                  ? '本次已停止，已取得的卡片保留。'
+                  : '本次没有取得可读的主页卡片。'}
+              {canWrite ? (
+                <button type="button" className={styles.textButton} disabled={pending} onClick={() => void start()}>
+                  {busy === 'preview' ? '读取中…' : '重新读取'}
+                </button>
+              ) : null}
+            </p>
           ) : null}
-          <div className={styles.snapshotMetrics}>
-            <span>已取得 <strong><Metric value={notes.length} /></strong></span>
-            <span>点赞已知 <strong><Metric value={seenLikes} /></strong></span>
-            <span>已选研究 <strong><Metric value={selectedNotes.length} /></strong></span>
-          </div>
+          {preview.frozenCount !== null && preview.frozenCount > notes.length ? (
+            <p className={styles.rangeNote}>另有 {formatCount(preview.frozenCount - notes.length)} 篇暂时无法读取；稍后刷新读取重试。</p>
+          ) : null}
         </div>
       ) : null}
 
       {notes.length > 0 ? (
         <>
           <div className={styles.tools}>
-            <div className={styles.segment} role="group" aria-label="主页作品范围">
-              <button type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>全部样本 {notes.length}</button>
-              <button type="button" aria-pressed={filter === 'selected'} onClick={() => setFilter('selected')}>已选 {selectedNotes.length}</button>
+            <div className={`${styles.segment} ${styles.rangeSegment}`} role="group" aria-label="主页作品范围">
+              <button type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
+                全部 {formatCount(notes.length)}
+                {filter === 'all' ? <SegmentMark /> : null}
+              </button>
+              <button type="button" aria-pressed={filter === 'selected'} onClick={() => setFilter('selected')}>
+                已选 {formatCount(selectedNotes.length)}
+                {filter === 'selected' ? <SegmentMark /> : null}
+              </button>
             </div>
             <div className={styles.segment} role="group" aria-label="作品排版">
               <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}>封面</button>
@@ -222,33 +265,35 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
               const resource = media.byRef.get(note.workRef) ?? resources.byRef.get(note.workRef);
               const chosen = selected.has(note.workRef);
               const title = resource?.title || note.title || '标题暂未取得';
-              const seenBefore = note.inDomain;
               return (
                 <div key={note.workRef} className={styles.note} data-selected={chosen}>
                   <button className={styles.noteChoice} type="button" onClick={() => toggle(note.workRef)} aria-pressed={chosen} aria-label={chosen ? `移除 ${title}` : `选择 ${title}`}>
+                    {note.inDomain ? <span className={styles.sticker}>本领域已见</span> : null}
                     <span className={styles.check} aria-hidden="true">{chosen ? '✓' : ''}</span>
-                    <Cover url={resource?.coverUrl ?? null} pending={media.pending} className={styles.cover} />
+                    <Cover url={resource?.coverUrl ?? null} pending={media.pending} className={styles.cover} fallback={view === 'grid' ? '封面未取得' : '▧'} />
                   </button>
                   <div className={styles.noteInfo}>
                     <a className={styles.noteTitle} href={workLink(link, item.creatorKey, {}, note.workRef)} data-return-key={item.creatorKey} title={title}>{title}</a>
-                    <div className={styles.noteStats}>赞 <Metric value={note.likes} /> <span>·</span> {seenBefore ? '本领域已见' : '主页新遇见'}</div>
-                    <button className={styles.pick} type="button" aria-pressed={chosen} onClick={() => toggle(note.workRef)}>{chosen ? '已选研究' : '加入精选'}</button>
+                    <div className={styles.noteStats}>
+                      <span>赞 <Metric value={note.likes} /></span>
+                      {!edited && recommended.has(note.workRef) ? <span className={styles.recommend}>系统推荐</span> : null}
+                    </div>
                   </div>
                 </div>
               );
             })}
           </div>
-          {filter === 'selected' && displayed.length === 0 ? <p className={styles.info}>尚未选中任何作品，切到全部样本查看。</p> : null}
+          {filter === 'selected' && displayed.length === 0 ? <p className={styles.info}>尚未选中任何作品。</p> : null}
           <div className={styles.studyDock}>
-            <div><strong>精选研究</strong><p>默认从已知领域作品、已知高赞和另一篇对照卡片中建议最多 3 篇，你可以自由调整。</p></div>
-            <ActionButton disabled={!canWrite || selectedNotes.length === 0 || pending || !preview?.scopeFrozenAt || state === 'running'} variant="primary" onClick={() => { setShowConfirm(true); setFeedback(null); }}>
-              研究已选 {selectedNotes.length} 篇
+            <span className={styles.selectedCount}>已选 {formatCount(selectedNotes.length)} 篇</span>
+            <ActionButton ref={studyButtonRef} aria-expanded={showConfirm} aria-controls="creator-study-confirm" disabled={!canWrite || selectedNotes.length === 0 || pending || !preview?.scopeFrozenAt || state === 'running'} variant="primary" onClick={() => { setShowConfirm(true); setFeedback(null); }}>
+              研究已选 {formatCount(selectedNotes.length)} 篇
             </ActionButton>
           </div>
           {showConfirm ? (
-            <section className={styles.confirm} aria-label="精选研究确认">
-              <div className={styles.sectionHead}><h3>确认本次补充范围</h3><button className={styles.textButton} type="button" onClick={() => setShowConfirm(false)}>收起</button></div>
-              <p>只处理当前快照中精确选定的 <strong>{selectedNotes.length}</strong> 篇，不自动展开其余主页作品，也不自动加入长期观察。</p>
+            <section ref={confirmRef} id="creator-study-confirm" className={styles.confirm} aria-label="精选研究确认" tabIndex={-1}>
+              <div className={styles.confirmHead}><h3>确认本次补充范围</h3><button className={styles.textButton} type="button" onClick={closeConfirm}>收起</button></div>
+              <p>只处理当前快照中精确选定的 <strong>{formatCount(selectedNotes.length)}</strong> 篇，不自动展开其余主页作品，也不自动加入长期观察。</p>
               <div className={styles.presets}>
                 <button type="button" aria-pressed={preset === 'standard'} onClick={() => { setPreset('standard'); studyCommand.current = null; }}>
                   <strong>标准研究资料</strong><span>正文、实际需要的媒体及识别、每篇最多 30 条评论与回复</span>
@@ -258,7 +303,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
                 </button>
               </div>
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.textButton} onClick={() => setShowConfirm(false)}>返回选篇</button>
+                <button type="button" className={styles.textButton} onClick={closeConfirm}>返回选篇</button>
                 <ActionButton variant="primary" busy={busy === 'study'} disabled={pending} onClick={() => void study()}>确认精选范围</ActionButton>
               </div>
             </section>
@@ -267,11 +312,9 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
       ) : null}
       {feedback ? <p className={styles.feedback} role="status">{feedback}</p> : null}
       {studyRun ? (
-        <div className={styles.success}>
-          <strong>精选任务已建立</strong>
-          <p>继续查看任务实际取得的正文、评论和媒体状态；任务结束不等于识别结果全部齐备。</p>
-          <a href={`/collection/tasks?domain=${encodeURIComponent(domain)}`}>前往采集任务</a>
-        </div>
+        <p className={styles.success}>
+          已建立精选任务。<a href={`/collection/tasks?domain=${encodeURIComponent(domain)}`}>前往采集任务 →</a>
+        </p>
       ) : null}
     </div>
   );

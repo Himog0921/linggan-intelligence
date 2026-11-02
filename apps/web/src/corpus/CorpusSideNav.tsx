@@ -12,8 +12,8 @@ interface CorpusSideNavProps {
   active: CorpusPageKey;
   /** 当前已确认的领域。没有选定领域时链接保持裸路径，不传入虚假的读取范围。 */
   domain: string | null;
-  /** 侧栏底部的一句话，由所在页面说明自己的数据范围。 */
-  foot: ReactNode;
+  /** 侧栏底部的一句话，由所在页面说明自己的数据范围；没有常驻说明时不渲染。 */
+  foot?: ReactNode;
   /** 只有证据库页会填；没有或零作品时徽标保持隐藏，沿用已确认的徽标标记。 */
   evidenceCount?: EvidenceCount | null;
 }
@@ -54,7 +54,7 @@ export function CorpusSideNav({ active, domain, foot, evidenceCount = null }: Co
           </a>
         );
       })}
-      <div className="v7-side-foot">{foot}</div>
+      {foot ? <div className="v7-side-foot">{foot}</div> : null}
     </Sidebar>
   );
 }
