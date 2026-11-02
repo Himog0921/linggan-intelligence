@@ -1,12 +1,49 @@
 import { useRef } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { useInspectorTabScroll } from './useInspectorTabScroll';
+
+const resizeCallbacks: Array<() => void> = [];
+
+class FakeResizeObserver {
+  constructor(callback: () => void) {
+    resizeCallbacks.push(callback);
+  }
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+beforeEach(() => {
+  resizeCallbacks.length = 0;
+  vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function fireResize() {
+  for (const callback of [...resizeCallbacks]) callback();
+}
 
 function Harness({ work, tab, ready = true }: { work: string | null; tab: string; ready?: boolean }) {
   const body = useRef<HTMLDivElement>(null);
   useInspectorTabScroll(body, work, tab, ready);
   return <div ref={body} data-testid="body" />;
+}
+
+function clampScroll(body: HTMLElement, getMax: () => number) {
+  let top = 0;
+  Object.defineProperty(body, 'scrollTop', {
+    configurable: true,
+    get: () => top,
+    set: (value: number) => {
+      top = Math.max(0, Math.min(value, getMax()));
+      body.dispatchEvent(new Event('scroll'));
+    },
+  });
+  return () => top;
 }
 
 it('keeps a non-zero position per work and tab and does not leak it to another work', () => {
@@ -42,7 +79,7 @@ it('keeps a non-zero position per work and tab and does not leak it to another w
   expect(body.scrollTop).toBe(0);
 });
 
-it('restores a work position only after its detail is ready, and ignores the loading clamp', () => {
+it('keeps the remembered position while a detail is loading and restores it on return', () => {
   const view = render(<Harness work="work-a" tab="overview" />);
   const body = screen.getByTestId('body');
   body.scrollTop = 600;
@@ -59,6 +96,46 @@ it('restores a work position only after its detail is ready, and ignores the loa
   fireEvent.scroll(body);
   view.rerender(<Harness work="work-a" tab="overview" />);
   expect(body.scrollTop).toBe(600);
+});
+
+it('restores the work position when delayed content finally grows tall enough', () => {
+  const view = render(<Harness work="work-a" tab="overview" />);
+  const body = screen.getByTestId('body');
+  let maxScroll = 1000;
+  const top = clampScroll(body, () => maxScroll);
+
+  body.scrollTop = 580;
+  view.rerender(<Harness work="work-b" tab="overview" />);
+  maxScroll = 0; // B's panel is still loading
+  view.rerender(<Harness work="work-a" tab="overview" />);
+  expect(top()).toBe(0); // A's panel is still loading, so the target is clamped
+
+  maxScroll = 1000; // A's delayed detail arrives and the content grows
+  fireResize();
+  expect(top()).toBe(580);
+
+  view.rerender(<Harness work="work-b" tab="overview" />);
+  expect(top()).toBe(0);
+  view.rerender(<Harness work="work-a" tab="overview" />);
+  expect(top()).toBe(580);
+});
+
+it('does not pull the reader back when they interact while delayed content is loading', () => {
+  const view = render(<Harness work="work-a" tab="overview" />);
+  const body = screen.getByTestId('body');
+  let maxScroll = 1000;
+  const top = clampScroll(body, () => maxScroll);
+
+  body.scrollTop = 580;
+  view.rerender(<Harness work="work-b" tab="overview" />);
+  maxScroll = 0;
+  view.rerender(<Harness work="work-a" tab="overview" />);
+  expect(top()).toBe(0);
+
+  fireEvent.wheel(body);
+  maxScroll = 1000;
+  fireResize();
+  expect(top()).toBe(0);
 });
 
 it('resets to the top when no work is selected', () => {

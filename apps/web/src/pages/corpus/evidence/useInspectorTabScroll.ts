@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from 'react';
 
-const MAX_RETRY_FRAMES = 120;
-
 /**
  * Remembers the shared inspector body's scroll position per work and tab.
  *
@@ -10,9 +8,11 @@ const MAX_RETRY_FRAMES = 120;
  * clamps the shared scrollTop to 0. This hook restores each work/tab's own position when its panel becomes
  * active again; the dossier keeps using useDossierReadingPosition and is intentionally skipped here.
  *
- * A restore can run before the newly selected work's detail has been laid out, when the body is still short
- * enough to clamp the target to 0. In that case it retries for a few frames until the content can hold the
- * position. A wheel, touch, pointer or key interaction cancels the pending restore so it never fights the reader.
+ * The selected work's detail can still be loading when the position is restored, so the body may be too
+ * short to hold the target and the browser clamps it to 0. The target therefore stays pending until the
+ * panel content actually grows enough to hold it: a ResizeObserver on the body and its content retries the
+ * restore on every height change. A wheel, touch, pointer or key interaction cancels the pending restore so
+ * it never pulls the reader back after they have started reading something else.
  */
 export function useInspectorTabScroll(bodyRef: RefObject<HTMLDivElement | null>, workRef: string | null, tab: string, ready: boolean) {
   const positions = useRef(new Map<string, number>());
@@ -22,7 +22,14 @@ export function useInspectorTabScroll(bodyRef: RefObject<HTMLDivElement | null>,
   const tabNow = useRef(tab);
   const pending = useRef<number | null>(null);
   const frame = useRef(0);
-  const attempts = useRef(0);
+
+  const applyPending = useCallback(() => {
+    const target = pending.current;
+    const body = bodyRef.current;
+    if (target === null || !body || tabNow.current === 'dossier') return;
+    body.scrollTop = target;
+    if (Math.abs(body.scrollTop - target) <= 1) pending.current = null;
+  }, [bodyRef]);
 
   const stop = useCallback(() => {
     pending.current = null;
@@ -30,26 +37,17 @@ export function useInspectorTabScroll(bodyRef: RefObject<HTMLDivElement | null>,
     frame.current = 0;
   }, []);
 
-  const apply = useCallback(function applyPending() {
-    frame.current = 0;
-    const target = pending.current;
-    const body = bodyRef.current;
-    if (target === null || !body || tabNow.current === 'dossier') return;
-    body.scrollTop = target;
-    if (Math.abs(body.scrollTop - target) <= 1) {
-      pending.current = null;
-      return;
-    }
-    if (attempts.current++ < MAX_RETRY_FRAMES) frame.current = requestAnimationFrame(applyPending);
-    else pending.current = null;
-  }, [bodyRef]);
-
   const schedule = useCallback((target: number) => {
     pending.current = target;
-    attempts.current = 0;
     if (frame.current) cancelAnimationFrame(frame.current);
-    apply();
-  }, [apply]);
+    applyPending();
+    if (pending.current !== null) {
+      frame.current = requestAnimationFrame(function retryAfterLayout() {
+        frame.current = 0;
+        applyPending();
+      });
+    }
+  }, [applyPending]);
 
   useEffect(() => {
     const body = bodyRef.current;
@@ -73,6 +71,27 @@ export function useInspectorTabScroll(bodyRef: RefObject<HTMLDivElement | null>,
       stop();
     };
   }, [bodyRef, stop]);
+
+  // Re-apply the pending position when the panel content changes height, e.g. when delayed detail data
+  // arrives after the tab switch. Observing the children catches the content growing inside the body.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => applyPending());
+    const observeContent = () => {
+      if (!observer) return;
+      observer.disconnect();
+      observer.observe(body);
+      for (const child of Array.from(body.children)) observer.observe(child);
+    };
+    observeContent();
+    const mutations = typeof MutationObserver === 'undefined' ? null : new MutationObserver(observeContent);
+    mutations?.observe(body, { childList: true });
+    return () => {
+      mutations?.disconnect();
+      observer?.disconnect();
+    };
+  }, [bodyRef, applyPending]);
 
   useLayoutEffect(() => {
     activeKey.current = key;
