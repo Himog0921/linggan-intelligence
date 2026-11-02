@@ -35,3 +35,19 @@ it('outside pointer closes the explanation', async () => {
   await user.click(screen.getByRole('button', { name: '外部' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });
+
+
+it('Tab and Shift+Tab leave the portal in the trigger’s local keyboard order', async () => {
+  const item = parseWorkList(listJson([listItemJson(1)])).items[0]!;
+  const user = userEvent.setup();
+  render(<><button>前一项</button><MaterialTiles summary={materialSummary(item)} /><button>后一项</button></>);
+  const trigger = screen.getByRole('button', { name: /^材料说明：/ });
+  await user.click(trigger);
+  await user.tab();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '后一项' })).toHaveFocus();
+  await user.click(trigger);
+  await user.tab({ shift: true });
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '前一项' })).toHaveFocus();
+});

@@ -88,7 +88,12 @@ export function MaterialTiles({ summary }: { summary: MaterialSummary }) {
     {open ? createPortal(<div ref={panel} id={id} role="dialog" aria-modal="false" aria-labelledby={`${id}-title`}
       className={`${hint.tooltip} ${styles.panel}`} data-material-explanation=""
       style={{ ...position, visibility: position ? 'visible' : 'hidden' }}
-      onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}>
+      onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
+      onKeyDown={event => {
+        // The portal sits after the page controls. Resume native Tab order at its row trigger,
+        // rather than letting Tab leave the document through the portal's last button.
+        if (event.key === 'Tab') close(true);
+      }}>
       <header><h2 id={`${id}-title`}>材料说明</h2><button type="button" className={styles.close} onClick={() => close(true)}>关闭</button></header>
       <dl>{summary.segments.map(segment => <div key={segment.key}><dt>{segment.label}</dt><dd>{reading(segment)}</dd></div>)}</dl>
     </div>, document.body) : null}
