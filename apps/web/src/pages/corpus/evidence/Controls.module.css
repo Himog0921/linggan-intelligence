@@ -118,3 +118,8 @@
 .selection .selectedCount { font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui); }
 .selection .limit { white-space:normal;overflow-wrap:anywhere; }
 @media(prefers-reduced-motion:reduce) { .actionControl.actionControl { transition:none;transform:none!important; } }
+
+/* Execution carries depth; filter and mode controls remain flat. */
+.filterToggle.actionControl,.selectMode.actionControl,.layouts { box-shadow:none; }
+.filterToggle.actionControl:not(:disabled):hover,.selectMode.actionControl:not(:disabled):hover { box-shadow:none;transform:none; }
+.selectMode.actionControl[aria-pressed='true'] { transform:none;box-shadow:none; }

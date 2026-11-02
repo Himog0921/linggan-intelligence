@@ -473,3 +473,7 @@
   .list[data-layout='research'] .metaDate { display:inline; }
   .list[data-layout='research'] .row[data-selecting='true'] .article { padding-right:calc(var(--lgi-space-8) + var(--lgi-space-1)); }
 }
+
+/* Batch membership is not the current reading position. */
+.list[data-layout='research'] .row[data-checked='true'] { box-shadow:var(--lgi-shadow-contact);background:var(--lgi-canvas-low); }
+.list[data-layout='research'] .row[data-selected='true'] { background:var(--lgi-signal-faint); }

@@ -43,6 +43,7 @@ export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, eviden
   return (
     <AppShell
       active="corpus"
+      className={page === 'evidence' ? 'v7-evidence-shell' : undefined}
       boundaryLabel="本机服务状态"
       crumb={crumb}
       meta={meta}

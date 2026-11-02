@@ -1,10 +1,10 @@
 {
   "kind": "page_exception",
-  "reason": "组合已设计验收的0b9ce786动作/三段切换/选择浮层与1708df34研读信息列，保留局部控件例外、不推广全站标准；仅重新计算组合生成指纹。",
-  "authorization": "lie-cheng c3c68ebf/c658d34c，Philip task #9 76ce288e：仅整合双方候选、同源隔离预览，不合并部署。",
+  "reason": "证据库标准栏连续阅读五项整页精修：复用底稿标准13.5/1.8与加宽14/1.75，作品标题及分类层级、共同头部、局部44px上下文、按钮轻重和两种选中状态。",
+  "authorization": "lie-cheng c5b5aac2；Philip task #10 b91b122e 完整交接，替代15/14候选比较与以wide为主的建议。",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"
   },
-  "exceptionScope": "沿0b9ce786的证据库局部动作例外；同时组合1708df34信息列既定表达，不改详情、页头或共享Token。"
+  "exceptionScope": "仅证据库上下文行、检查器/作品正文、工具带及研读选择态；不改底稿正文字号规则、全站Token或其他页面。"
 }
