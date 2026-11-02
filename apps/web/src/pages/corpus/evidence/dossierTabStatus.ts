@@ -1,12 +1,11 @@
-import { readingGaps, remainingReadingIssues, resolveReadingSections } from './dossierDocumentModel';
+import { readingGaps, resolveReadingSections } from './dossierDocumentModel';
 import type { Dossier } from './dossierTypes';
 export interface DossierTabStatus { label: string; tone: 'muted' | 'warning' | 'danger'; description: string }
 /** Describe the existing query snapshot only; never request data to decorate a tab. */
 export function dossierTabStatus(dossier: Dossier | undefined, error: unknown, fetching: boolean): DossierTabStatus | null {
   const sections = dossier ? resolveReadingSections(dossier) : [];
   const gaps = dossier ? readingGaps(dossier) : [];
-  const issues = dossier ? remainingReadingIssues(dossier, sections) : [];
-  const review = issues.length > 0 || sections.some(section => section.groups.some(group => group.issues.length > 0));
+  const review = dossier ? dossier.coverage.issues.length > 0 || dossier.materials.some(material => material.issues.length > 0) : false;
   const facts = [gaps.length ? '有待补内容' : '', review ? '有待核对事项' : ''].filter(Boolean).join('；');
   if (error) return dossier
     ? { label: '刷新失败', tone: 'warning', description: `刷新未完成，保留上次可读版本${facts ? `；${facts}` : ''}。具体原因见正文。` }

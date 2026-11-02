@@ -64,35 +64,6 @@
   color: var(--lgi-on-dark);
 }
 
-.glyph {
-  position: relative;
-  display: block;
-  width: calc(var(--lgi-space-4) + var(--lgi-space-1) / 4);
-  height: calc(var(--lgi-space-3) - var(--lgi-space-1) / 4);
-  border: 1px solid currentColor;
-}
-
-.glyph::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  border-left: 1px solid currentColor;
-}
-
-.glyph[data-width='normal']::after {
-  left: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
-}
-
-.glyph[data-width='wide']::after {
-  left: calc(var(--lgi-space-2) - var(--lgi-space-1) / 2);
-}
-
-.glyph[data-width='focus']::after {
-  left: calc(var(--lgi-space-1) * 0.75);
-}
-
 .close {
   display: grid;
   place-items: center;

@@ -87,6 +87,16 @@ def generated():
         "signal-soft": "color-mix(in srgb,var(--lgi-signal) 10%,transparent)",
         "signal-faint": "color-mix(in srgb,var(--lgi-signal) 5%,transparent)",
     })
+    icons = load("iconography")
+    values.update({
+        "icon-stroke": str(icons["geometry"]["strokeWidth"]),
+        "icon-trace-stroke": str(icons["geometry"]["traceWidth"]),
+        "icon-feedback-duration": f'{icons["motion"]["feedbackMs"]}ms',
+        "icon-toggle-duration": f'{icons["motion"]["toggleMs"]}ms',
+    })
+    values.update({f"icon-{key}-size": f"{value}px" if isinstance(value, (int, float)) else value for key, value in icons["sizes"].items()})
+    values.update({f"icon-{key}-opacity": str(value) for key, value in icons["layers"].items()})
+    values.update({f"icon-{key}-ease": value for key, value in icons["motion"]["easing"].items()})
     return values
 
 

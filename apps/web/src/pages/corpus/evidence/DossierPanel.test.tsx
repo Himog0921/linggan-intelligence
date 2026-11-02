@@ -51,26 +51,29 @@ it('多图沿 owner 编排连续阅读，保留标题来源及相同文字的不
   expect(notes).toHaveAttribute('open');
   expect(within(notes!).getByText('数据截至')).toBeVisible();
 });
-it('同材料问题就近展示一次，不吞掉另一图片同名的局部问题', async () => {
+it('阅读隐藏诊断文案，各材料原始问题仍留在 DTO', async () => {
   const issue = { key: 'ocr_low_confidence_0', code: 'glyph', message: '数字需要对照原图核验', resolution: 'reading_edit' };
   kit.route('GET', path, ok(dossierJson(1, { materials: [1,2].map(n => dossierMaterialJson(n, { blocks: [{ ref: `paragraph-${n}`, kind: 'paragraph', text: `完整原文 ${n}`, issues: [issue] }], issues: [issue] })), coverage: { issues: [] } })));
   mount(); await screen.findByText('完整原文 1');
-  expect(screen.getAllByText(issue.message)).toHaveLength(2);
+  expect(screen.queryByText(issue.message)).not.toBeInTheDocument();
+  expect(screen.getByText('完整原文 2')).toBeVisible();
 });
-it('已确认缺页在 owner 指定断点提示，未知总页数不伪造页码', async () => {
+it('已确认缺页集中提示一次，不在正文重复插入诊断', async () => {
   const raw = dossierJson(1, { materials: [dossierMaterialJson(1, { blocks: [{ ref: 'before', kind: 'paragraph', text: '缺页之前' }] }), dossierMaterialJson(3, { blocks: [{ ref: 'after', kind: 'paragraph', text: '缺页之后' }] })], coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 3, acquiredPages: 2, processedPages: 2, missingPages: [2], unknownOrder: false } } });
   const section = raw.dossier.readingView.sections[0]!;
   section.gaps = [{ beforeGroupRef: section.groups[1]!.ref, missingPages: [2] }];
   kit.route('GET', path, ok(raw)); mount();
-  const gap = await screen.findByText('此处内容不完整（第 2 页文字待补全）');
-  expect(screen.getByText('缺页之前').compareDocumentPosition(gap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(gap.compareDocumentPosition(screen.getByText('缺页之后')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await screen.findByText('第 2 页文字待补全。');
+  expect(screen.getAllByText('第 2 页文字待补全。')).toHaveLength(1);
+  expect(screen.getByText('缺页之前')).toBeVisible();
+  expect(screen.getByText('缺页之后')).toBeVisible();
 });
 it('仅待处理样本保留真实缺失状态，不造口播、目录或原图入口', async () => {
   kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null })], coverage: { ...completeCoverage, imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 1, processedPages: 0, missingPages: [], unknownOrder: true }, sources: { body: source('known_empty'), images: source('not_processed', 1), audio: source('not_applicable'), videoFrames: source('not_applicable') } } })));
   const view = mount();
   await screen.findByText('待识读');
-  expect(screen.getByText(/图片原始顺序未确认；原作总页数未知/)).toBeVisible();
+  expect(screen.queryByText(/图片原始顺序未确认|原作总页数未知/)).not.toBeInTheDocument();
+  expect(screen.getByText('第 1 页文字待补全。')).toBeVisible();
   expect(screen.queryByRole('button', { name: /章节导航/ })).not.toBeInTheDocument();
   expect(view.container.querySelector('[data-transcript-paragraph], img')).toBeNull();
   expect(kit.calls).toHaveLength(1);
@@ -170,5 +173,5 @@ it.each(['focus', 'export'] as const)('HTTP 200 中局部来源撤回也关闭 %
   view.client.setQueryData(dossierKey(DOMAIN, workRef(1)), revoked);
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(screen.queryByText('来源撤回前的旧口播')).not.toBeInTheDocument();
-  expect(screen.getByText('当前来源不可读取。')).toBeVisible();
+  expect(screen.getByText('来源不可读取。')).toBeVisible();
 });

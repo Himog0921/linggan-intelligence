@@ -321,5 +321,30 @@
   --lgi-mesh-major: color-mix(in srgb,var(--lgi-ink) 10%,transparent);
   --lgi-signal-soft: color-mix(in srgb,var(--lgi-signal) 10%,transparent);
   --lgi-signal-faint: color-mix(in srgb,var(--lgi-signal) 5%,transparent);
+  --lgi-icon-stroke: 1.5;
+  --lgi-icon-trace-stroke: 1.2;
+  --lgi-icon-feedback-duration: 640ms;
+  --lgi-icon-toggle-duration: 320ms;
+  --lgi-icon-navigation-size: var(--lgi-shell-icon);
+  --lgi-icon-default-size: 16px;
+  --lgi-icon-action-size: 15px;
+  --lgi-icon-snapshot-size: 14px;
+  --lgi-icon-status-size: 13px;
+  --lgi-icon-chapter-size: 12px;
+  --lgi-icon-inspector-size: 22px;
+  --lgi-icon-tone-opacity: 0.14;
+  --lgi-icon-rear-opacity: 0.72;
+  --lgi-icon-pocket-opacity: 0.12;
+  --lgi-icon-state-opacity: 0.07;
+  --lgi-icon-rule-opacity: 0.45;
+  --lgi-icon-active-tone-opacity: 0.24;
+  --lgi-icon-trace-opacity: 0.65;
+  --lgi-icon-prepare-ease: cubic-bezier(.42,0,.58,1);
+  --lgi-icon-release-ease: cubic-bezier(.45,0,.2,1);
+  --lgi-icon-settle-ease: cubic-bezier(.22,.6,.2,1);
+  --lgi-icon-feedback-ease: cubic-bezier(.42,0,.25,1);
+  --lgi-icon-receive-ease: cubic-bezier(.33,0,.33,1);
+  --lgi-icon-trace-ease: cubic-bezier(.25,.1,.25,1);
+  --lgi-icon-toggle-ease: cubic-bezier(.2,.78,.2,1);
   /* LIDS-UI-001 generated: end */
 }

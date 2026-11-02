@@ -98,7 +98,7 @@ it('完整阅读复用 V2 正式入口和同一截点，保留表格、对话、
   fireEvent.click(screen.getByRole('button',{name:'展开已取得的底稿'}));
   expect(await screen.findByRole('cell',{name:'5mg'})).toBeInTheDocument();
   expect(screen.getByText('不要加量')).toBeInTheDocument();expect(screen.getByText('没有改善')).toBeInTheDocument();
-  expect(screen.getByText('先复核')).toBeInTheDocument();expect(screen.getByText('0.100–0.200 秒')).toBeInTheDocument();expect(screen.getAllByText(/他人/).length).toBeGreaterThan(0);
+  expect(screen.getByText('先复核')).toBeInTheDocument();expect(screen.getByText('00:00.100–00:00.200')).toHaveAttribute('data-time-start-ms','100');expect(screen.getByText('00:00.100–00:00.200')).toHaveAttribute('data-time-end-ms','200');expect(screen.getAllByText(/他人/).length).toBeGreaterThan(0);
   expect(paths).toHaveLength(1);const path=paths[0];if(path===undefined)throw new Error('未调用正式读取');const url=new URL(path,'http://localhost');
   expect(url.pathname).toBe(`/api/local/work-resources/${workRef(2)}/research-dossier`);
   expect(url.searchParams.get('asOf')).toBe(cutoff);expect(url.searchParams.has('domain')).toBe(false);

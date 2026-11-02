@@ -69,7 +69,8 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
 .v7-side{min-width:0;min-height:0;overflow:auto;padding:var(--lgi-space-4) var(--lgi-space-2);border-right:2px solid var(--lgi-ink);background:var(--lgi-canvas);display:flex;flex-direction:column;gap:var(--lgi-space-3)}
 .v7-side-content{display:flex;flex-direction:column;flex:1;min-height:0;gap:var(--lgi-space-1)}
 .v7-side-toggle{display:flex;align-items:center;gap:var(--lgi-space-2);flex:none;min-height:var(--lgi-space-8);padding:var(--lgi-space-1) var(--lgi-space-2);border:0;background:transparent;color:var(--lgi-muted);font-size:var(--lgi-type-aux-size)}
-.v7-side :is(.v7-side-icon,.v7-side-toggle svg){flex:none;width:var(--lgi-shell-icon);height:var(--lgi-shell-icon);fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter}
+.v7-side :is(.v7-side-icon,.v7-side-toggle svg){flex:none;width:var(--lgi-shell-icon);height:var(--lgi-shell-icon)}
+.v7-side :is(.v7-side-icon,.v7-side-toggle svg):not(.lgi-icon){fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:square;stroke-linejoin:miter}
 .v7-nav-label{padding:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-type-aux-size)}.v7-nav-label::after{display:none}
 .v7-side-nav{position:relative;min-height:var(--lgi-ledger-row);padding:var(--lgi-space-3) var(--lgi-space-2);display:flex;align-items:center;gap:var(--lgi-space-2);border:0;background:transparent;color:var(--lgi-muted);text-align:left;font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);text-decoration:none;white-space:nowrap}
 .v7-side-nav:not([aria-disabled="true"]):not([aria-current="page"]):hover{background:var(--lgi-canvas-low);color:var(--lgi-ink)}

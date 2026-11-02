@@ -357,7 +357,9 @@ try {
     const joinedPanel = drawer('合成作者 05');
     await joinedPanel.waitFor();
     await joinedPanel.getByRole('tab', { name: '观察记录' }).click();
-    const joinedRecord = await joinedPanel.getByRole('region', { name: '观察关系与巡查' }).innerText();
+    const joinedRegion = joinedPanel.getByRole('region', { name: '观察关系与巡查' });
+    await joinedRegion.getByText('加入本领域', { exact: true }).waitFor();
+    const joinedRecord = await joinedRegion.innerText();
     assert.match(joinedRecord, /加入本领域[\s\S]*主研究/);
     assert.match(joinedRecord, /自动巡查未开启/);
     assert.match(joinedRecord, /没有巡查记录/);
