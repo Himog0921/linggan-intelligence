@@ -25,9 +25,9 @@ afterEach(() => {
 });
 
 function Harness({ text, truncation = 'width' }: { text: string; truncation?: TitleTruncation }) {
-  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip } = useTitleTooltip<HTMLButtonElement>(text, truncation);
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, onPointerDown, tooltip } = useTitleTooltip<HTMLButtonElement>(text, truncation);
   return <>
-    <button ref={anchorRef} onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onFocus} onBlur={onBlur}>{text}</button>
+    <button ref={anchorRef} onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onFocus} onBlur={onBlur} onPointerDown={onPointerDown}>{text}</button>
     {tooltip}
   </>;
 }
@@ -78,14 +78,14 @@ it('opens immediately on keyboard focus, closes on Escape, and can be opened aga
   const trigger = screen.getByRole('button');
   setMetrics(trigger, 'width', 100, 220);
 
-  fireEvent.focus(trigger);
+  act(() => trigger.focus());
   expect(hint()).toHaveTextContent('键盘可以读到的长标题');
 
   fireEvent.keyDown(document, { key: 'Escape' });
   expect(hint()).toBeNull();
 
-  fireEvent.blur(trigger);
-  fireEvent.focus(trigger);
+  act(() => trigger.blur());
+  act(() => trigger.focus());
   expect(hint()).toHaveTextContent('键盘可以读到的长标题');
 });
 
@@ -104,6 +104,18 @@ it('stays readable while the pointer moves onto the hint, then closes shortly af
 
   fireEvent.mouseLeave(tooltip);
   advance(200);
+  expect(hint()).toBeNull();
+});
+
+it('closes immediately when the title is pressed, so opening a detail does not leave a floating hint', () => {
+  render(<Harness text="点击标题会打开详情的长标题" />);
+  const trigger = screen.getByRole('button');
+  setMetrics(trigger, 'width', 100, 220);
+  fireEvent.mouseEnter(trigger);
+  advance(300);
+  expect(hint()).not.toBeNull();
+
+  fireEvent.pointerDown(trigger);
   expect(hint()).toBeNull();
 });
 

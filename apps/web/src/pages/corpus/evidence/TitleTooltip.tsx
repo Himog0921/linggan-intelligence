@@ -10,6 +10,7 @@ export interface TitleTooltipController<T extends HTMLElement> {
   onLeave: () => void;
   onFocus: () => void;
   onBlur: () => void;
+  onPointerDown: () => void;
   tooltip: ReactNode;
 }
 
@@ -38,6 +39,7 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
   const hovered = useRef(false);
   const focused = useRef(false);
   const tipHovered = useRef(false);
+  const suppressFocus = useRef(false);
   const truncationNow = useRef(truncation);
 
   const clearOpenTimer = useCallback(() => {
@@ -125,6 +127,12 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
   }, [maybeClose]);
 
   const onFocus = useCallback(() => {
+    // A pointer press also focuses the title. That focus must not open the hint, or opening a detail
+    // would leave it floating over the list; keyboard focus (tab/refocus) still opens it immediately.
+    if (suppressFocus.current) {
+      suppressFocus.current = false;
+      return;
+    }
     focused.current = true;
     show(true);
   }, [show]);
@@ -133,6 +141,16 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
     focused.current = false;
     maybeClose();
   }, [maybeClose]);
+
+  const onPointerDown = useCallback(() => {
+    suppressFocus.current = true;
+    close();
+    // Focus normally lands right after pointerdown; clear the flag for later keyboard focus even if
+    // this browser does not focus buttons on press.
+    window.setTimeout(() => {
+      suppressFocus.current = false;
+    }, 0);
+  }, [close]);
 
   useEffect(() => () => {
     clearOpenTimer();
@@ -145,7 +163,8 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
 
   useEffect(() => {
     if (!open) return;
-    const onScroll = () => updatePosition();    window.addEventListener('scroll', onScroll, true);
+    const onScroll = () => updatePosition();
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', onScroll);
     return () => {
       window.removeEventListener('scroll', onScroll, true);
@@ -210,5 +229,5 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
     )
     : null;
 
-  return { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip };
+  return { anchorRef, onEnter, onLeave, onFocus, onBlur, onPointerDown, tooltip };
 }

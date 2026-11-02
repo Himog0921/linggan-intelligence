@@ -39,11 +39,11 @@ export function CheckBox({ item, checked, onCheck }: { item: WorkItem; checked: 
 
 function SelectTitle({ item, selected, tabStop }: Pick<RowProps, 'item' | 'selected' | 'tabStop'>) {
   const title = workTitle(item);
-  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip } = useTitleTooltip<HTMLButtonElement>(title, 'width');
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, onPointerDown, tooltip } = useTitleTooltip<HTMLButtonElement>(title, 'width');
   return <>
     <button ref={anchorRef} type="button" className={styles.titleButton} data-select-target=""
       aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1}
-      onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onFocus} onBlur={onBlur}>{title}</button>
+      onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onFocus} onBlur={onBlur} onPointerDown={onPointerDown}>{title}</button>
     {tooltip}
   </>;
 }

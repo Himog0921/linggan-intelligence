@@ -41,7 +41,7 @@ function Face({ front, item, title, index, titleTip }: { front: boolean; item: W
       <div className={styles.faceInner}>
         <header className={styles.faceHead}>
           {front ? <h2 ref={titleTip?.anchorRef} className={styles.coverTitle}
-            onMouseEnter={titleTip?.onEnter} onMouseLeave={titleTip?.onLeave}>{title}</h2> : <span className={styles.backLabel}>原始封面</span>}
+            onMouseEnter={titleTip?.onEnter} onMouseLeave={titleTip?.onLeave} onPointerDown={titleTip?.onPointerDown}>{title}</h2> : <span className={styles.backLabel}>原始封面</span>}
           <span className={styles.index}>{index}</span>
         </header>
         <div className={styles.stage}>
@@ -94,6 +94,7 @@ function Visual({ item, title, index, titleTip }: { item: WorkItem; title: strin
       onKeyDown={onKeyDown}
       onFocus={titleTip.onFocus}
       onBlur={titleTip.onBlur}
+      onPointerDown={titleTip.onPointerDown}
     >
       <div className={styles.flip}>
         {/* 两个面共用的隐形占位：用满宽 3:4 舞台推出卡片高度，而不是先定一个宽卡高度再让竖版封面悬在空白里。 */}
@@ -137,7 +138,7 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
         <Visual item={item} title={title} index={String(ordinal).padStart(3, '0')} titleTip={titleTip} />
         <div className={styles.plate}>
           <button type="button" className={styles.select} data-select-target="" aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} aria-label={title} aria-describedby={statusId}
-            onFocus={titleTip.onFocus} onBlur={titleTip.onBlur} />
+            onFocus={titleTip.onFocus} onBlur={titleTip.onBlur} onPointerDown={titleTip.onPointerDown} />
           <div className={styles.plateTop}>
             <AuthorFact item={item} />
             <span className={styles.date} title={`发布时间 ${coverPublishedCopy(item.display)}`}>
