@@ -102,6 +102,17 @@ describe('样式契约', () => {
     for (const state of ['wide', 'focus', 'closed']) expect(page).toContain(`data-inspector='${state}'`);
   });
 
+  it('读取行状态用中性墨灰，标题按钮悬停与按下保持透明（不铺信号色底板）', () => {
+    const list = styles.get('WorkList.module.css') ?? '';
+    const stateBodies = [...list.matchAll(/\.(?:row|tableRow)\[[^\]]*(?:selected|checked)[^\]]*\]\s*\{([^}]*)\}/g)]
+      .map(match => match[1] ?? '').join(' ');
+    expect(stateBodies).not.toMatch(/--lgi-signal-(?:soft|faint)/);
+    expect(list).toMatch(/\.titleButton:hover:not\(:disabled\),\s*\.titleButton:active:not\(:disabled\)\s*\{\s*background:\s*transparent/);
+    const cover = styles.get('CoverCard.module.css') ?? '';
+    const checkedPlate = cover.match(/\.item\[data-checked='true'\] \.plate\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(checkedPlate).not.toMatch(/--lgi-signal-(?:soft|faint)/);
+  });
+
   it('底稿首组只取消第一个块的标题前距，段落之后的标题仍保留 17px', () => {
     const dossier = styles.get('DossierDocument.module.css') ?? '';
     expect(dossier).not.toMatch(/\.group:first-child\s+\.heading\s*\{/);

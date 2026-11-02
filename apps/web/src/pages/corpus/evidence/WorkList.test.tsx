@@ -27,7 +27,8 @@ describe('研读排版', () => {
     const list = screen.getByRole('list', { name: '作品材料集合' });
     const row = within(list).getAllByRole('listitem')[0]!;
     expect(within(row).getByRole('heading', { level: 2 })).toHaveTextContent('合成作品 1');
-    expect(within(row).getByRole('button', { name: '合成作品 1' })).toHaveAttribute('title', '合成作品 1');
+    const titleButton = within(row).getByRole('button', { name: '合成作品 1' });
+    expect(titleButton).not.toHaveAttribute('title');
     expect(within(row).getByText('合成作者 1')).toBeInTheDocument();
     expect(row.querySelector('q')).toHaveTextContent('合成正文 1：先做两分钟，再决定要不要继续。');
     for (const name of ['点赞', '评论', '收藏', '分享']) expect(within(row).getByRole('img', { name })).toBeInTheDocument();
@@ -184,6 +185,10 @@ describe('封面排版（翻转卡）', () => {
     expect(within(flip).getByText('查看封面 →')).toBeInTheDocument();
     expect(within(flip).getByText('3:4')).toBeInTheDocument();
     expect(within(flip).queryByText(/COVER/)).toBeNull();
+    expect(within(flip).getByRole('heading', { level: 2 })).not.toHaveAttribute('title');
+    const select = screen.getByRole('button', { name: '合成作品 1' });
+    expect(select).not.toHaveAttribute('title');
+    expect(select).toHaveAccessibleDescription(/正文：可检索/);
     expect(screen.getAllByRole('button', { name: '合成作品 1' })).toHaveLength(1);
     expect(flip.querySelector(`img[src="${mediaHandle(10)}"]`)).not.toBeNull();
   });

@@ -4,6 +4,7 @@ import { StateLine } from './Primitives';
 import { compactMoment, laneSummary, materialSummary, metricReading, publishedCopy, stateMeta, workTitle, ENGAGEMENT_KINDS } from './evidencePresent';
 import type { WorkItem } from './evidenceTypes';
 import { AuthorFact, Engagement, MaterialRail, QuoteBlock } from './WorkParts';
+import { useTitleTooltip } from './TitleTooltip';
 import styles from './WorkList.module.css';
 
 export interface RowProps {
@@ -38,8 +39,13 @@ export function CheckBox({ item, checked, onCheck }: { item: WorkItem; checked: 
 
 function SelectTitle({ item, selected, tabStop }: Pick<RowProps, 'item' | 'selected' | 'tabStop'>) {
   const title = workTitle(item);
-  return <button type="button" className={styles.titleButton} data-select-target=""
-    aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} title={title}>{title}</button>;
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip } = useTitleTooltip<HTMLButtonElement>(title, 'width');
+  return <>
+    <button ref={anchorRef} type="button" className={styles.titleButton} data-select-target=""
+      aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1}
+      onMouseEnter={onEnter} onMouseLeave={onLeave} onFocus={onFocus} onBlur={onBlur}>{title}</button>
+    {tooltip}
+  </>;
 }
 
 /** V2.2: 78×104 cover, 106px row including its edges. Title / quote / author / metrics are four fixed tracks.
