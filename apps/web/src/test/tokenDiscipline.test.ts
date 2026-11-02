@@ -63,8 +63,9 @@ describe('页面样式只用 LIDS Token', () => {
     }
     if (file === path.join(sourceRoot, 'pages', 'corpus', 'evidence', 'DossierDocument.module.css')) {
       // RESEARCH-DOSSIER-READING-20261027: Mog's approved demo is a local reading surface.
-      // See evidence-library-page.md. Freeze this sheet; all other pages keep LIDS token checks.
-      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('8d51b68f332b1202ae4ccaa7b6aa711b98dc64cdbdf215ec1b8464137363369d');
+      // LIDS-ICON-B-001: approved icon dimensions now consume same-value runtime tokens.
+      // Freeze the remaining reading surface; all other pages keep LIDS token checks.
+      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('6b1b03d57de835b7a3a7a8483e8cdecd37d7bcac7e5aae9cea60581c50363f75');
       return;
     }
     expect(violations(file)).toEqual([]);

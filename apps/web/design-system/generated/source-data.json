@@ -1161,6 +1161,157 @@
         "canvas": "#ffffff"
       },
       "userQuote": "按照你的建议来，同时可以按照当前已经决策好的设计，开始动手优化我真实的项目代码以及前端 UI 了"
+    },
+    "iconography": {
+      "id": "LIDS-ICON-B-001",
+      "status": "accepted",
+      "acceptedAt": "2026-11-02",
+      "authorization": "Mog 验收 B 精简版完整17枚，并明确授权纳入 design 标准及部署上线。",
+      "geometry": {
+        "grid": 24,
+        "strokeWidth": 1.5,
+        "traceWidth": 1.2,
+        "maxLayers": 2
+      },
+      "sizes": {
+        "navigation": "var(--lgi-shell-icon)",
+        "default": 16,
+        "action": 15,
+        "snapshot": 14,
+        "status": 13,
+        "chapter": 12,
+        "inspector": 22
+      },
+      "layers": {
+        "tone": 0.14,
+        "rear": 0.72,
+        "pocket": 0.12,
+        "state": 0.07,
+        "rule": 0.45,
+        "active-tone": 0.24,
+        "trace": 0.65
+      },
+      "colorRoles": {
+        "outline": "currentColor",
+        "accent": "--lgi-signal-mark",
+        "state": "inherit owning text semantic color"
+      },
+      "motion": {
+        "feedbackMs": 640,
+        "toggleMs": 320,
+        "iterations": 1,
+        "easing": {
+          "prepare": "cubic-bezier(.42,0,.58,1)",
+          "release": "cubic-bezier(.45,0,.2,1)",
+          "settle": "cubic-bezier(.22,.6,.2,1)",
+          "feedback": "cubic-bezier(.42,0,.25,1)",
+          "receive": "cubic-bezier(.33,0,.33,1)",
+          "trace": "cubic-bezier(.25,.1,.25,1)",
+          "toggle": "cubic-bezier(.2,.78,.2,1)"
+        },
+        "geometrySource": "apps/web/src/shared/IntelligenceIcon.css",
+        "rules": [
+          "仅操作控件 hover/focus-visible 的一次反馈；不代表执行中或成功",
+          "clock/info/check 保持静态，章节朝向绑定真实 expanded",
+          "reduced-motion 关闭动画和过渡，保留状态朝向",
+          "禁用控件不触发图标反馈；无远程图标或动画运行库依赖"
+        ]
+      },
+      "icons": [
+        {
+          "name": "evidence",
+          "label": "证据库",
+          "motion": "feedback"
+        },
+        {
+          "name": "comments",
+          "label": "评论研究",
+          "motion": "feedback"
+        },
+        {
+          "name": "creators",
+          "label": "创作者",
+          "motion": "feedback"
+        },
+        {
+          "name": "sidebar-close",
+          "label": "折叠侧栏",
+          "motion": "feedback"
+        },
+        {
+          "name": "sidebar-open",
+          "label": "展开侧栏",
+          "motion": "feedback"
+        },
+        {
+          "name": "clock",
+          "label": "数据时间",
+          "motion": "static"
+        },
+        {
+          "name": "info",
+          "label": "待补内容",
+          "motion": "static"
+        },
+        {
+          "name": "check",
+          "label": "内容就绪",
+          "motion": "static"
+        },
+        {
+          "name": "chevron",
+          "label": "章节导航",
+          "motion": "state_toggle"
+        },
+        {
+          "name": "refresh",
+          "label": "刷新底稿",
+          "motion": "feedback"
+        },
+        {
+          "name": "download",
+          "label": "导出",
+          "motion": "feedback"
+        },
+        {
+          "name": "copy",
+          "label": "复制",
+          "motion": "feedback"
+        },
+        {
+          "name": "expand",
+          "label": "专注阅读",
+          "motion": "feedback"
+        },
+        {
+          "name": "close",
+          "label": "关闭",
+          "motion": "feedback"
+        },
+        {
+          "name": "normal",
+          "label": "标准宽度",
+          "motion": "feedback"
+        },
+        {
+          "name": "wide",
+          "label": "加宽",
+          "motion": "feedback"
+        },
+        {
+          "name": "focus",
+          "label": "专注宽度",
+          "motion": "feedback"
+        }
+      ],
+      "implementation": "apps/web/src/shared/IntelligenceIcon.tsx",
+      "styles": "apps/web/src/shared/IntelligenceIcon.css",
+      "adoptionScope": [
+        "语料侧栏三入口及共享侧栏开合",
+        "研究底稿工具栏、专注阅读与导出窗口",
+        "证据检查器三档宽度与关闭"
+      ],
+      "systemMaturity": "Approved icon standard; does not certify all LIDS components"
     }
   },
   "licenses": [
@@ -1230,6 +1381,10 @@
     {
       "path": "docs/design/lids/color.json",
       "sha256": "332ed74d58f17f51bf0df3707a15835372cf447e6f4f1d5b901eb66d9935729f"
+    },
+    {
+      "path": "docs/design/lids/iconography.json",
+      "sha256": "3fad3ddcf25b30aefc4399b20d589afdf13ff891ab55738d4628da6c66d3f186"
     }
   ],
   "inventory": {
@@ -1244,7 +1399,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "d9c4f3149bb40219ce79a19e4ccd5c252fbb10c71df08e5f5d5890d35ecd21cc",
+  "fingerprint": "d76bc05eeca00bf77ebeec2a5b05e06ff2905a3b9c1ae3650ced7d8dac026a07",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",
@@ -1351,6 +1506,63 @@
         "keyboard_focus",
         "draft"
       ]
+    },
+    "ICON-B-001": {
+      "name": "B 精简版图标资产",
+      "kind": "design_asset",
+      "implementation": "apps/web/src/shared/IntelligenceIcon.tsx",
+      "styles": "apps/web/src/shared/IntelligenceIcon.css",
+      "tests": [
+        "apps/web/src/shared/IntelligenceIcon.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "evidence",
+        "comments",
+        "creators",
+        "sidebar-close",
+        "sidebar-open",
+        "clock",
+        "info",
+        "check",
+        "chevron",
+        "refresh",
+        "download",
+        "copy",
+        "expand",
+        "close",
+        "normal",
+        "wide",
+        "focus"
+      ],
+      "states": [
+        "idle",
+        "pointer_hover",
+        "keyboard_focus",
+        "expanded",
+        "disabled",
+        "reduced_motion"
+      ],
+      "owns": [
+        "本地SVG几何、统一线宽与两层结构",
+        "有限反馈与减少动态效果",
+        "装饰图形不占读屏名称"
+      ],
+      "excludes": [
+        "按钮资格与点击命令",
+        "业务执行进度、成功回执和权限",
+        "将所有LIDS组件宣布CMP认证"
+      ],
+      "ruleSources": [
+        "iconography",
+        "color"
+      ],
+      "consumers": [
+        "apps/web/src/shared/Sidebar.tsx",
+        "apps/web/src/pages/corpus/evidence/DossierIcon.tsx",
+        "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx"
+      ],
+      "certified": false
     }
   }
 }

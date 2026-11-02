@@ -5,6 +5,7 @@ import { hideCachedReading } from './dossierPresent';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { CommentDeepCollect } from './CommentDeepCollect';
 import { DossierPanel } from './DossierPanel';
+import { InspectorToolIcon } from './InspectorToolIcon';
 import { Lightbox } from './Lightbox';
 import { TechnicalFacts } from './TechnicalFacts';
 import { ReobservationSection } from './ReobservationSection';
@@ -231,13 +232,13 @@ export function Inspector(props: InspectorProps) {
             <div className={styles.widths} role="group" aria-label="检查器宽度">
               {PANELS.map(candidate => (
                 <button key={candidate} type="button" aria-pressed={width === candidate} title={WIDTH_TITLES[candidate]} onClick={() => onWidth(candidate)}>
-                  <i className={styles.glyph} data-width={candidate} aria-hidden="true" />
+                  <InspectorToolIcon name={candidate}/>
                   <span className="v7-sr-only">{WIDTH_LABELS[candidate]}</span>
                 </button>
               ))}
             </div>
             <button type="button" className={styles.close} title="关闭检查器" onClick={onClose}>
-              <span aria-hidden="true">×</span>
+              <InspectorToolIcon name="close"/>
               <span className="v7-sr-only">关闭检查器</span>
             </button>
           </div>

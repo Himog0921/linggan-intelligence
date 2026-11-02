@@ -45,7 +45,7 @@ export function DossierNavigation({ sections, times, current, root, toolbar, onJ
   }
   function jump(ref: string, first = false) { setOpen(false); onJump(ref, first); }
   return <div className={styles.readerNav}>
-    <button ref={trigger} type="button" className={styles.navToggle} aria-expanded={open} aria-controls={id} aria-label={`章节导航${active ? `，当前${active.number} ${active.label}` : ''}`} title={active ? `${active.number} ${active.label}` : '章节导航'} onClick={toggle}><span>{active ? `${active.number} ${active.label}` : '章节'}</span><DossierIcon name="chevron"/></button>
+    <button ref={trigger} type="button" className={styles.navToggle} aria-expanded={open} aria-controls={id} aria-label={`章节导航${active ? `，当前${active.number} ${active.label}` : ''}`} title={active ? `${active.number} ${active.label}` : '章节导航'} onClick={toggle}><span>{active ? `${active.number} ${active.label}` : '章节'}</span><DossierIcon name="chevron" expanded={open}/></button>
     {open ? <div ref={panel} id={id} className={styles.navPanel} style={position} aria-label="底稿章节与时间">
       <div className={styles.navHead}><span>跳转阅读位置</span><button type="button" onClick={() => { const first = sections[0]; if (first) jump(first.ref, true); }}>回到开头</button></div>
       <nav className={styles.navSections} aria-label="底稿章节">{sections.map(section => <button type="button" key={section.ref} className={styles.navSection} aria-current={current.section === section.ref ? 'location' : undefined} onClick={() => jump(section.ref)}><span>{section.number}</span>{section.label}</button>)}</nav>

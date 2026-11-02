@@ -455,6 +455,31 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-mesh-major: color-mix(in srgb,var(--lgi-ink) 10%,transparent);
   --lgi-signal-soft: color-mix(in srgb,var(--lgi-signal) 10%,transparent);
   --lgi-signal-faint: color-mix(in srgb,var(--lgi-signal) 5%,transparent);
+  --lgi-icon-stroke: 1.5;
+  --lgi-icon-trace-stroke: 1.2;
+  --lgi-icon-feedback-duration: 640ms;
+  --lgi-icon-toggle-duration: 320ms;
+  --lgi-icon-navigation-size: var(--lgi-shell-icon);
+  --lgi-icon-default-size: 16px;
+  --lgi-icon-action-size: 15px;
+  --lgi-icon-snapshot-size: 14px;
+  --lgi-icon-status-size: 13px;
+  --lgi-icon-chapter-size: 12px;
+  --lgi-icon-inspector-size: 22px;
+  --lgi-icon-tone-opacity: 0.14;
+  --lgi-icon-rear-opacity: 0.72;
+  --lgi-icon-pocket-opacity: 0.12;
+  --lgi-icon-state-opacity: 0.07;
+  --lgi-icon-rule-opacity: 0.45;
+  --lgi-icon-active-tone-opacity: 0.24;
+  --lgi-icon-trace-opacity: 0.65;
+  --lgi-icon-prepare-ease: cubic-bezier(.42,0,.58,1);
+  --lgi-icon-release-ease: cubic-bezier(.45,0,.2,1);
+  --lgi-icon-settle-ease: cubic-bezier(.22,.6,.2,1);
+  --lgi-icon-feedback-ease: cubic-bezier(.42,0,.25,1);
+  --lgi-icon-receive-ease: cubic-bezier(.33,0,.33,1);
+  --lgi-icon-trace-ease: cubic-bezier(.25,.1,.25,1);
+  --lgi-icon-toggle-ease: cubic-bezier(.2,.78,.2,1);
   /* LIDS-UI-001 generated: end */
 }
 ```
@@ -538,3 +563,8 @@ Mog 本轮明确要求按 V8 动作层级纠正工作台按钮。本条是局部
 完整值由同一运行时源和共享 `ActionButton.module.css` 对照 V8 原附件维护，不另复制第二份可编辑主题。新增属性只在显式使用 ActionButton 的工作台操作生效；设置页和其他旧页面的动作继续原样，后续迁移另行确认。
 
 V3 暖纸增量：`--lgi-reading-paper/edge/ink/selected/cover` 精确复用已认可原型的纸面、纸边、阅读文字、高亮与书脊颜色，仅工作台阅读区消费。记录见 [迁移日志](migration-log.md)。
+
+
+## 2026-11-02 · B 图标参数采用
+
+[iconography.json](iconography.json) 是已采用17枚图标的线宽、角色尺寸、透明度、反馈时长与缓动源。`sync-lids-runtime.py` 将其写入本文件同一运行镜像与唯一 `lids_tokens.css`，组件只消费 `--lgi-icon-*` 和既有语义色；不新增独立主题文件。640ms 仅为本套组合反馈的受控采用档，章节320ms及其他UI时长保持各自职责。
