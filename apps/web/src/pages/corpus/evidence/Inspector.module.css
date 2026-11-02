@@ -523,6 +523,8 @@
   --ev-reading-heading-size:15px;--ev-reading-heading-leading:24px; }
 @container(min-width:601px) { .readingBody { --ev-reading-size:14px;--ev-reading-leading:1.75; } }
 .openOriginal { height:var(--lgi-space-8);min-height:var(--lgi-space-8);font-size:var(--lgi-type-label-size);box-shadow:none; }
+/* Desktop tool row: the same 32px frame as the width group and close button. */
+.openOriginalTool { height:var(--lgi-space-8);min-height:var(--lgi-space-8);padding:0 var(--lgi-space-3);font-size:var(--lgi-type-control-size);box-shadow:none; }
 
 .workByline [role='img'] { width:var(--lgi-space-6);height:var(--lgi-space-6); }
 .workPlatform { font-size:var(--lgi-type-label-size);line-height:var(--lgi-type-label-leading); }
