@@ -1,6 +1,8 @@
-import { endingBlockAttribution, endingGroupAttribution, groupTagLabels, groupText, groupTime, formatReadingTime, readingAnchor, showReadingAttribution, type AttributionBoundary, type ReadingIssue, type ResolvedReadingGroup } from './dossierDocumentModel';
+import { endingBlockAttribution, endingGroupAttribution, groupTagLabels, groupText, groupTime, formatReadingTime, readingAnchor, showReadingAttribution, type AttributionBoundary, type ResolvedReadingGroup } from './dossierDocumentModel';
+import { confirmedEmptySpeech } from './dossierPresent';
+import { hasReadingSourceText } from './dossierReadingContent';
 import { normalizedTagLabel } from './dossierTagText';
-import type { DossierBlock, Speaker } from './dossierTypes';
+import type { DossierBlock, DossierMaterial, Speaker } from './dossierTypes';
 import styles from './DossierDocument.module.css';
 
 const ROLE_LABELS: Record<Speaker, string> = { author: '作品作者表述', other: '他人表述', unconfirmed: '表达归属未确认' };
@@ -8,8 +10,15 @@ export function ReadingText({ text }: { text: string }) {
   const parts = text.split(/((?:周[一二三四五六日天]\s*)?\d{1,2}:\d{2}|\d{1,6}(?:\.\d{1,2})?\s*(?:个工作日|分钟|小时|秒|天|字|条|页|项|次|人|%))/gu);
   return <>{parts.map((part, index) => index % 2 ? <span className={styles.unit} key={index}>{part}</span> : part)}</>;
 }
-export function ReadingIssues({ issues }: { issues: readonly ReadingIssue[] }) {
-  return issues.length ? <ul className={styles.issues}>{issues.map(issue => <li key={issue.displayKey}>{issue.message}</li>)}</ul> : null;
+export function EmptySpeechNotes({ materials }: { materials: readonly DossierMaterial[] }) {
+  return <>{materials.filter(unit => unit.kind === 'audio').map((unit, index, units) => {
+    if (unit.blocks.some(hasReadingSourceText)) return null;
+    const note = confirmedEmptySpeech(unit) ? '已确认无口播。'
+      : unit.processing?.state === 'completed' && unit.processing.reason === 'no_audio_stream_observed' ? '未发现音轨。'
+      : unit.processing?.state === 'completed' && unit.processing.reason === 'no_speech_observed' ? '未检出语音。'
+      : unit.sourceState === 'known_empty' && unit.currentRevisionRef ? '未取得可用口播。' : null;
+    return note ? <p className={styles.end} key={unit.ref}>{units.length > 1 ? `音轨 ${index + 1}` : '视频口播'}：{note}</p> : null;
+  })}</>;
 }
 function Tags({ labels }: { labels: readonly string[] }) { return <div className={styles.tags}>{labels.map((label, index) => <span className={styles.tag} key={index}>{label}</span>)}</div>; }
 function shortDefinitions(block: Extract<DossierBlock, { kind: 'table' }>): boolean {
@@ -25,7 +34,7 @@ function ContentBlock({ block, tags }: { block: DossierBlock; tags?: boolean }) 
     }
     case 'paragraph': return <p className={styles.paragraph}><ReadingText text={block.text}/></p>;
     case 'quote': return <blockquote className={styles.quote}><ReadingText text={block.text}/></blockquote>;
-    case 'gap': return <p className={styles.gap}>{block.text.startsWith('〔') ? block.text : `〔${block.text}〕`}</p>;
+    case 'gap': return null;
     case 'list': return block.ordered
       ? <ol className={styles.list} start={block.start}>{block.items.map((item, index) => <li key={index}><ReadingText text={item}/></li>)}</ol>
       : <ul className={styles.list}>{block.items.map((item, index) => <li key={index}><ReadingText text={item}/></li>)}</ul>;
@@ -37,6 +46,7 @@ function ContentBlock({ block, tags }: { block: DossierBlock; tags?: boolean }) 
 }
 function GroupContent({ value, previousRole }: { value: ResolvedReadingGroup; previousRole: AttributionBoundary }) {
   const { group, entries } = value;
+  if (group.mode === 'heading') return <h3 className={styles.heading}><ReadingText text={groupText(value)}/></h3>;
   if (group.mode === 'paragraph' || group.mode === 'transcript_paragraph') return <p className={styles.paragraph}><ReadingText text={groupText(value)}/></p>;
   if (group.mode === 'list') {
     const first = entries[0]?.block;
@@ -68,7 +78,6 @@ export function DossierGroup({ value, prefix, previousRole }: { value: ResolvedR
     {value.group.mode !== 'blocks' && showReadingAttribution(role, previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[role]}</p> : null}
     {time ? <span className={styles.transcriptTime}>{formatReadingTime(time.startMs)}</span> : null}
     <GroupContent value={value} previousRole={previousRole}/>
-    <ReadingIssues issues={value.issues}/>
     {value.group.continuation.toNext ? <Continuation from={false}/> : null}
   </div>;
 }
@@ -80,7 +89,6 @@ export function TranscriptParagraph({ value, prefix, showRole }: { value: Resolv
       {showRole ? <span className={styles.attribution}>{ROLE_LABELS[role]}</span> : null}
       {value.group.continuation.fromPrevious ? <Continuation from/> : null}
       <p className={styles.transcriptText} data-speaker={role}><ReadingText text={groupText(value)}/></p>
-      <ReadingIssues issues={value.issues}/>
       {value.group.continuation.toNext ? <Continuation from={false}/> : null}
     </div>
   </div>;
