@@ -219,7 +219,7 @@ test('active workflows have a single PR entrypoint and all proofs depend on pref
     assert.ok(delivery.includes(`uses: ./.github/workflows/${workflow}.yml`));
   }
   for (const [job, output] of Object.entries(jobs)) {
-    const needs = job === 'web-real-chain' ? '[preflight, web]' : 'preflight';
+    const needs = 'preflight';
     assert.ok(delivery.includes(`  ${job}:\n    needs: ${needs}\n    if: needs.preflight.outputs.${output} == 'true'`));
   }
   assert.match(delivery, /ready_for_review/);
@@ -265,11 +265,36 @@ test('preflight and every reusable proof check out the same PR event head', () =
   for (const workflow of workflows) {
     const source = readFileSync(join(root, `.github/workflows/${workflow}.yml`), 'utf8');
     const checkouts = source.match(/uses: actions\/checkout@/g) ?? [];
-    const headRefs = source.match(/ref: \$\{\{ github\.event\.pull_request\.head\.sha \}\}/g) ?? [];
+    const headRefs = source.match(/ref: \$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/g) ?? [];
     assert.ok(checkouts.length, `${workflow} has checkout`);
     assert.equal(checkouts.length, headRefs.length, `${workflow} checks out the event head SHA`);
   }
-  assert.equal((delivery.match(/DELIVERY_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \}\}/g) ?? []).length, 2);
+  assert.equal((delivery.match(/DELIVERY_BASE_SHA: \$\{\{ github\.event\.pull_request\.base\.sha \|\| github\.event\.before \}\}/g) ?? []).length, 2);
+});
+
+test('main push always runs the full suite without cancelling earlier main commits', () => {
+  assert.ok(delivery.includes('push:\n    branches: [main]'));
+  assert.ok(delivery.includes("github.event_name == 'push' && format('delivery-main-"));
+  assert.ok(delivery.includes("cancel-in-progress: ${{ github.event_name == 'pull_request' }}"));
+  assert.ok(delivery.includes('for suite in ai material_reading ocr_recognition web web_real_chain topic'));
+  for (const workflow of ['ai-gen1-foundation', 'web-real-chain']) {
+    const source = readFileSync(join(root, `.github/workflows/${workflow}.yml`), 'utf8');
+    assert.ok(source.includes('fail-fast: false'));
+    assert.ok(source.includes('matrix:'));
+  }
+  assert.deepEqual(selected(['docs/README.md', 'docs/guide.md', 'README.md']), []);
+});
+test('Rust cache actions are commit-pinned and Cargo proof runners use the same cacheable target', () => {
+  for (const wf of ['ai-gen1-foundation', 'ocr-recognition', 'material-reading', 'web-real-chain']) {
+    const source = readFileSync(join(root, `.github/workflows/${wf}.yml`), 'utf8');
+    assert.ok(source.includes('Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0'), wf);
+    assert.ok(!source.includes('Swatinem/rust-cache@v2'));
+  }
+  const real = readFileSync(join(root, '.github/workflows/web-real-chain.yml'), 'utf8');
+  assert.ok(real.includes('CARGO_TARGET_DIR: ${{ github.workspace }}/target'));
+  assert.ok(real.includes('Repeated pinned pgvector image preparation is a no-op'));
+  const web = readFileSync(join(root, '.github/workflows/web-app.yml'), 'utf8');
+  assert.ok(web.includes('Second identical revision build:'));
 });
 
 test('isolated Rust proofs reject empty selections and preserve listing or execution failures', () => {
