@@ -257,7 +257,7 @@ describe('读取与设置入口', () => {
 });
 
 describe('操作回执', () => {
-  it('提交成功进轻通知，状态本身不重复长说明', async () => {
+  it('提交成功进轻通知；回读已运行或已完成时不把回执写成等待执行', async () => {
     let accepted = false;
     vi.stubGlobal('fetch', vi.fn(async (_path: string, init?: RequestInit) => {
       if (init?.method === 'POST') { accepted = true; return reply({ runRef: 'run-a' }); }
@@ -267,9 +267,10 @@ describe('操作回执', () => {
     renderWithToast(<OcrRecognition workRef="work-a" workLabel="合成作品 1"/>);
     await user.click(await screen.findByRole('button', { name: 'OCR 识别' }));
     await user.click(screen.getByRole('button', { name: '确认并开始识别' }));
-    const toast = await screen.findByText('图片文字识别已提交，等待执行');
+    const toast = await screen.findByText('图片文字识别已提交');
     expect(toast.closest('[role="status"]')).toBeInTheDocument();
     expect(within(toast.closest('[role="status"]') as HTMLElement).getByText('合成作品 1')).toBeInTheDocument();
+    expect(screen.queryByText(/等待执行/)).toBeNull();
   });
 
   it('发起结果未确认：就地保留核对入口，通知只提醒一次', async () => {

@@ -99,7 +99,7 @@ export function OcrRecognition({ workRef, workLabel, active = true, onApplied, c
       const next = await startOcrRecognition(workRef, pending.commandRef, pending.scope.sha256, pending.slotKeys);
       if (!mounted.current) return;
       write.current = null; setUnconfirmed(false); setRun(next); setConfirm(null); setRefresh(value => value + 1);
-      notify('success', '图片文字识别已提交，等待执行');
+      notify('success', '图片文字识别已提交');
     } catch (error) {
       if (!mounted.current) return;
       if (error instanceof ApiError && error.failure.kind === 'http' && [400, 401, 403, 404, 409, 410, 413, 415, 422].includes(error.failure.status)) { write.current = null; setUnconfirmed(false); setConfirm(null); setMessage('本篇范围或运行条件已变化，请核对最新状态。'); setRefresh(value => value + 1); }
