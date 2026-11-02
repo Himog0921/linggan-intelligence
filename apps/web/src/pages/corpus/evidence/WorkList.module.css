@@ -434,7 +434,7 @@
 .list[data-layout='table'] .table { min-width:calc(var(--lgi-space-24) * 12 + var(--lgi-space-2)); width:100%; table-layout:fixed; border-collapse:collapse; }
 .selectColumn { width:calc(var(--lgi-space-10) + var(--lgi-space-1) + var(--lgi-focus-inset)); }
 .workColumn { width:25%; } .authorColumn { width:14%; } .materialColumn { width:16%; }
-.metricColumn { width:5.5%; } .dateColumn { width:9%; } .observedColumn { width:10%; }
+.metricColumn { width:5%; } .dateColumn { width:9%; } .observedColumn { width:11.5%; }
 .list[data-layout='table'] .table th { padding:var(--lgi-space-2) var(--lgi-space-3);width:auto; }
 .list[data-layout='table'] .table th.metricHeadCell { padding:var(--lgi-space-2) 0;text-align:center; }
 .list[data-layout='table'] .table th.metricHeadCell svg { display:block;margin:auto;color:var(--lgi-meta); }

@@ -64,7 +64,9 @@ describe('页面样式只用 LIDS Token', () => {
     if (file === path.join(sourceRoot, 'pages', 'corpus', 'evidence', 'DossierDocument.module.css')) {
       // RESEARCH-DOSSIER-READING-20261027: Mog's approved demo is a local reading surface.
       // See evidence-library-page.md. Freeze this sheet; all other pages keep LIDS token checks.
-      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('8d51b68f332b1202ae4ccaa7b6aa711b98dc64cdbdf215ec1b8464137363369d');
+      // 2026-11-02 task #15: first-group heading override narrowed to a heading that is the first block;
+      // later headings in the same group keep their 17px top margin.
+      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('fd6bd59bc4873aa9862f27951064f988f39c6672cee4399765106b99a9c59e2a');
       return;
     }
     expect(violations(file)).toEqual([]);

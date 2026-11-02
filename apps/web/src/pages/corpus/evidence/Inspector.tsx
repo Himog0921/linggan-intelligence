@@ -25,6 +25,7 @@ import type { WorkDetail, WorkItem } from './evidenceTypes';
 import { mediaObjects, type ViewerObject } from './mediaObjects';
 import { reobservationAccess } from './reobservationAccess';
 import { useCommentChannel } from './useCommentChannel';
+import { useInspectorTabScroll } from './useInspectorTabScroll';
 import { useReobservation } from './useReobservation';
 import page from './EvidencePage.module.css';
 import styles from './Inspector.module.css';
@@ -156,7 +157,9 @@ export function Inspector(props: InspectorProps) {
   const { domain, selectedRef, listItem, detail, tab, width, drawer, open, onTab, onWidth, onClose, onBack, onRetry, onRefresh } = props;
   const titleId = useId();
   const surface = useRef<HTMLElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const back = useRef<HTMLButtonElement>(null);
+  useInspectorTabScroll(body, selectedRef, tab, detail.status === 'ready' && detail.data !== null);
   const tabs = useRef<Record<string, HTMLButtonElement | null>>({});
   const state = stateText(props);
   const note = unavailableNote(detail);
@@ -290,7 +293,7 @@ export function Inspector(props: InspectorProps) {
           ))}
         </div>
       </header>
-      <div className={`${styles.body}${tab === 'dossier' ? ` ${dossierStyles.dossierHost}` : ''}`} data-current-tab={tab}>
+      <div ref={body} className={`${styles.body}${tab === 'dossier' ? ` ${dossierStyles.dossierHost}` : ''}`} data-current-tab={tab}>
         {detail.status === 'ready' && detail.data && selectedRef ? (
           <WorkBody key={selectedRef} detail={detail.data} listItem={listItem} domain={domain} tab={tab} onRefresh={onRefresh} />
         ) : (

@@ -95,4 +95,11 @@ describe('样式契约', () => {
     expect(page).toMatch(/--ev-inspector-w/);
     for (const state of ['wide', 'focus', 'closed']) expect(page).toContain(`data-inspector='${state}'`);
   });
+
+  it('底稿首组只取消第一个块的标题前距，段落之后的标题仍保留 17px', () => {
+    const dossier = styles.get('DossierDocument.module.css') ?? '';
+    expect(dossier).not.toMatch(/\.group:first-child\s+\.heading\s*\{/);
+    expect(dossier).toMatch(/\.group:first-child>\.heading:first-child/);
+    expect(dossier).toMatch(/\.group:first-child>:first-child>\.heading:first-child/);
+  });
 });
