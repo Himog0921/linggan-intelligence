@@ -20,16 +20,22 @@ function hoverBodies(css: string): { selector: string; body: string }[] {
 }
 
 describe('样式契约', () => {
-  it('悬停不上浮：悬停规则里没有位移、缩放；封面翻转卡的旋转是唯一的悬停形变（EVIDENCE-COVER-FLIP-CARD-001）', () => {
+  it('悬停不上浮：悬停规则里没有位移、缩放；仅读取材料的1px动作和封面旋转例外（EVIDENCE-COVER-FLIP-CARD-001）', () => {
     const offenders: string[] = [];
     for (const [file, css] of styles) {
       for (const { selector, body } of hoverBodies(css)) {
         const moves = /translate|scale|(^|[;\s])(top|bottom|left|right|margin[a-z-]*)\s*:/.test(body);
         const rotation = /rotateY\(/.test(body) && file === 'CoverCard.module.css';
-        if (moves && !rotation) offenders.push(`${file}: ${selector}`);
+        const readAction = file === 'Controls.module.css' && selector === '.actionControl.actionControl:not(:disabled):hover'
+          && /transform:\s*translateY\(var\(--lgi-action-hover-shift\)\)/.test(body)
+          && !/translate|scale|(^|[;\s])(top|bottom|left|right|margin[a-z-]*)\s*:/.test(body.replace(/transform:\s*translateY\(var\(--lgi-action-hover-shift\)\);?/, ''));
+        if (moves && !rotation && !readAction) offenders.push(`${file}: ${selector}`);
       }
     }
     expect(offenders).toEqual([]);
+    // 仅读取材料采用实体动作；筛选与选择保持静止。
+    expect(styles.get('Controls.module.css')).toMatch(/\.filterToggle\.actionControl:not\(:disabled\):hover,\.selectMode\.actionControl:not\(:disabled\):hover\s*\{[^}]*transform:none/);
+    expect(readFileSync(path.resolve(directory, '../../../styles/lids_tokens.css'), 'utf8')).toContain('--lgi-action-hover-shift: -1px;');
   });
 
   it('封面翻转是旋转；减少动态效果时直接切换（不做过渡）', () => {

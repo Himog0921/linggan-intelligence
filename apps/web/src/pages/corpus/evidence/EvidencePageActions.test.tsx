@@ -112,12 +112,15 @@ describe('检查器外壳', () => {
   it('三个标签，默认「作品」；点击研究底稿替换历史并写入地址', async () => {
     pageRoutes(kit);
     const view = await opened();
-    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['作品', '研究底稿', '采集记录']);
+    expect(screen.getAllByRole('tab').map(tab => tab.id)).toEqual(['evidence-tab-overview', 'evidence-tab-dossier', 'evidence-tab-trace']);
+    const dossierTab = screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ });
+    await waitFor(() => expect(dossierTab).toHaveAccessibleName('研究底稿，有待补内容，具体原因见正文。'));
+    expect(within(dossierTab).getByText('待补')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('tab', { name: '作品' })).toHaveAttribute('aria-selected', 'true');
-    await view.user.click(screen.getByRole('tab', { name: '研究底稿' }));
+    await view.user.click(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ }));
     expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}&tab=dossier`);
     expect(view.router.state.historyAction).toBe('REPLACE');
-    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: '作品' })).toHaveAttribute('tabindex', '-1');
   });
 
@@ -126,7 +129,7 @@ describe('检查器外壳', () => {
     const view = await opened();
     screen.getByRole('tab', { name: '作品' }).focus();
     await view.user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ })).toHaveFocus();
     await view.user.keyboard('{End}');
     expect(screen.getByRole('tab', { name: '采集记录' })).toHaveFocus();
     await view.user.keyboard('{ArrowRight}');
@@ -143,7 +146,7 @@ describe('检查器外壳', () => {
     kit.route('GET', `${detailPathOf(1)}/research-dossier`, ok(dossierJson(1)));
     const view = await opened();
     await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
-    await view.user.click(screen.getByRole('tab', { name: '研究底稿' }));
+    await view.user.click(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ }));
     await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
     expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)[0]?.search.get('domain')).toBe(DOMAIN);
     expect(kit.of('GET', `${detailPathOf(1)}/research-dossier/metadata`)).toHaveLength(0);
@@ -154,7 +157,7 @@ describe('检查器外壳', () => {
     kit.route('GET', `${detailPathOf(1)}/research-dossier`, ok(dossierJson(1)));
     renderEvidencePage(pageUrl(`domain=${DOMAIN}&tab=dossier&work=${workRef(1)}`));
     await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
-    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('宽度：选了就记入本机偏好并写入地址（替换历史）；没有 panel 参数时取偏好，地址优先', async () => {

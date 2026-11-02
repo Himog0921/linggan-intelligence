@@ -360,7 +360,7 @@ describe('失败的写入口不存在', () => {
     const view = await opened();
     await view.user.click(rowButton(2));
     await view.user.click(screen.getByRole('button', { name: '表格' }));
-    await view.user.click(screen.getByRole('tab', { name: '研究底稿' }));
+    await view.user.click(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ }));
     expect(kit.calls.filter(call => call.method !== 'GET')).toEqual([]);
   });
 
