@@ -45,7 +45,10 @@ function localMaterials(context: PanelContext): string {
   const receipt = channels.mediaReceipt ?? inspector.mediaSlotsReceipt;
   if (ledger.length === 0) {
     if (receipt === null || receipt.returned === null) return '本次未返回媒体槽位，无法判断本地是否有副本';
-    if (receipt.returned === 0) return '媒体槽位返回 0，没有本地副本';
+    if (receipt.returned === 0) {
+      if (receipt.total === 0 && receipt.truncated === false) return '媒体槽位确认返回 0，没有本地副本';
+      return '本次媒体槽位返回 0，但总数或截断未知，无法判断本地是否有副本';
+    }
     return `媒体槽位回执称 ${receipt.returned} 项，但本次详情未列出对象`;
   }
   return ledger

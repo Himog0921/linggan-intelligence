@@ -80,9 +80,18 @@ describe('采集详情（Mog 2026-11-02）', () => {
 
   it('没有本地媒体只说明事实，不铺故障警示', () => {
     const view = render(<CollectionDetails context={context()} />);
-    expect(view.container).toHaveTextContent('媒体槽位返回 0，没有本地副本');
+    expect(view.container).toHaveTextContent('媒体槽位确认返回 0，没有本地副本');
     expect(view.container).not.toHaveTextContent('当前没有本地媒体对象');
     expect(view.container).not.toHaveTextContent('当前没有可预览的本地媒体对象');
+  });
+
+  it('返回 0 但总数或截断未知时，不推全量没有副本', () => {
+    const view = render(<CollectionDetails context={context({
+      mediaSlotsReceipt: { limit: 64, nextCursor: null, returned: 0, total: null, truncated: null },
+      mediaReceipt: null,
+    })} />);
+    expect(view.container).toHaveTextContent('但总数或截断未知，无法判断本地是否有副本');
+    expect(view.container).not.toHaveTextContent('没有本地副本');
   });
 
   it('材料状态沿通道原词表达：KNOWN_EMPTY 不算可读，未知不推缺口', () => {
