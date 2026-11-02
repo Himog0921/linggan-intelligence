@@ -81,7 +81,7 @@ describe('评论采集记录', () => {
     expect(rows.map(row => [row.scope, row.collected, row.shown, row.complete])).toEqual([
       ['尽量采全', 37, 37, true],
       ['尽量采全', 30, 37, false],
-      ['随详情顺带采（最多 30 条）', 21, 37, null],
+      ['随详情（最多 30 条）', 21, 37, null],
     ]);
   });
 

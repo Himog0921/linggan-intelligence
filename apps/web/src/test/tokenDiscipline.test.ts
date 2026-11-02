@@ -66,7 +66,8 @@ describe('页面样式只用 LIDS Token', () => {
       // See evidence-library-page.md. Freeze this sheet; all other pages keep LIDS token checks.
       // 2026-11-02 task #15: first-group heading override narrowed to a heading that is the first block;
       // later headings in the same group keep their 17px top margin.
-      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('fd6bd59bc4873aa9862f27951064f988f39c6672cee4399765106b99a9c59e2a');
+      // 2026-11-02 task #24: focus-time trigger keeps the approved local menu but fixes its 30px control height.
+      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('5f2a9a5bb350d179e270be21e53530fb9b8c93a513ed711986e9236e2df02bbf');
       return;
     }
     expect(violations(file)).toEqual([]);

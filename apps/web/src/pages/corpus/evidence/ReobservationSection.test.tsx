@@ -1,8 +1,9 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ReobservationSection } from './ReobservationSection';
-import { DOMAIN, operationJson, taskJson, workRef } from './evidenceFixtures';
+import { ObservationRecordSection } from './ObservationRecordSection';
+import { parseWorkDetail } from './evidenceDecode';
+import { DOMAIN, detailJson, operationJson, taskJson, workRef } from './evidenceFixtures';
 import type { Reobservation as Channel } from './evidenceTypes';
 import { createFetchMock, fail, ok, type FetchKit } from './testKit';
 import { useReobservation } from './useReobservation';
@@ -23,7 +24,9 @@ const eligible: Channel = { supported: true, eligible: true, reason: 'OK', url: 
 
 function Harness({ channel = eligible, platform = 'xhs', onRecheck = () => undefined, onTerminal = () => Promise.resolve(true) }: { channel?: Channel; platform?: string; onRecheck?: () => void; onTerminal?: () => Promise<boolean> }) {
   const state = useReobservation({ actionPath: channel.url, onTerminal });
-  return <ReobservationSection item={{ platform }} channel={channel} domain={DOMAIN} state={state} onRecheck={onRecheck} />;
+  const { item, inspector } = parseWorkDetail(detailJson(1));
+  const work = platform === 'xhs' ? item : { ...item, platform };
+  return <ObservationRecordSection item={work} inspector={inspector} channel={channel} domain={DOMAIN} state={state} onRecheck={onRecheck} />;
 }
 
 function setup(props: Parameters<typeof Harness>[0] = {}) {
@@ -34,34 +37,46 @@ describe('可用性（M01）', () => {
   // Mog 2026-10-23：普通层只说人话，原因码不在这里出现（留在「技术信息」的技术事实里）。
   it('没有关联授权：用人话写原因，不显示原因码，不提供按钮', () => {
     setup({ channel: { ...eligible, eligible: false, url: null, reason: 'TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION_REQUIRED' } });
-    expect(screen.getByText(/这篇笔记现在不能复观测：它不在任何仍有效的观察授权里/)).toBeInTheDocument();
+    expect(screen.getByText(/没有有效的观察授权。/)).toBeInTheDocument();
     expect(screen.queryByText('TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION_REQUIRED')).toBeNull();
     expect(screen.queryByRole('button', { name: /复观测/ })).toBeNull();
   });
 
-  it('平台不支持、入口没通过同源校验、非小红书：各写各的原因', () => {
-    const { unmount } = setup({ channel: { ...eligible, supported: false, eligible: false, url: null } });
-    expect(screen.getByText('这个平台的作品暂时不能复观测。')).toBeInTheDocument();
-    unmount();
-    const second = setup({ channel: { ...eligible, url: 'https://evil.example/reobserve' } });
-    expect(screen.getByText('复观测入口地址不对，页面没有提供按钮。')).toBeInTheDocument();
-    second.unmount();
-    setup({ platform: 'douyin' });
-    expect(screen.queryByRole('button', { name: '立即复观测' })).toBeNull();
+  it('资格理由未知：保守写待确认或暂不可用，不推断授权过期或目标停用', () => {
+    const unknown = setup({ channel: { ...eligible, eligible: false, url: null, reason: 'REOBSERVATION_ELIGIBILITY_UNKNOWN' } });
+    expect(screen.getByText(/资格待确认。/)).toBeInTheDocument();
+    expect(screen.queryByText(/过期|停用/)).toBeNull();
+    unknown.unmount();
+    setup({ channel: { ...eligible, eligible: false, url: null, reason: 'SOME_FUTURE_REASON' } });
+    expect(screen.getByText(/暂不可用。/)).toBeInTheDocument();
   });
 
-  it('可用：范围用人话常驻（不放 tooltip），按钮可点；不再单列媒体策略码', () => {
-    setup();
-    expect(screen.getByText('重新打开这篇笔记，更新点赞、评论、收藏、分享，顺带采最多 30 条评论和回复；不重新下载图片视频，也不重新识字。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '立即复观测' })).toBeEnabled();
+  it('平台不支持、入口没通过同源校验、非小红书：各写各的原因', () => {
+    const { unmount } = setup({ channel: { ...eligible, supported: false, eligible: false, url: null } });
+    expect(screen.getByText(/暂不支持这个平台。/)).toBeInTheDocument();
+    unmount();
+    const second = setup({ channel: { ...eligible, url: 'https://evil.example/reobserve' } });
+    expect(screen.getByText(/入口地址异常，页面没有提供按钮。/)).toBeInTheDocument();
+    second.unmount();
+    setup({ platform: 'douyin' });
+    expect(screen.getByText(/暂不支持这个平台。/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '复观测' })).toBeNull();
+  });
+
+  it('可用：标题行给次级按钮；范围留在确认层，不单列媒体策略码', async () => {
+    const { user } = setup();
+    expect(screen.getByRole('button', { name: '复观测' })).toBeEnabled();
     expect(screen.queryByText(/EXISTING_ASSETS_REUSED|媒体策略/)).toBeNull();
+    await user.click(screen.getByRole('button', { name: '复观测' }));
+    const dialog = screen.getByRole('dialog', { name: '确认立即复观测' });
+    expect(within(dialog).getByText(/读取详情、评论（最多 30 条）与回复/)).toBeInTheDocument();
   });
 });
 
 describe('确认步骤（DR-3）', () => {
   it('点击先弹确认，说清会做什么、不会做什么、提交后不能撤销；取消不发请求', async () => {
     const { user } = setup();
-    await user.click(screen.getByRole('button', { name: '立即复观测' }));
+    await user.click(screen.getByRole('button', { name: '复观测' }));
     const dialog = screen.getByRole('dialog', { name: '确认立即复观测' });
     expect(within(dialog).getByText(/让合格的工位真实访问平台/)).toBeInTheDocument();
     expect(within(dialog).getByText(/提交后不能撤销/)).toBeInTheDocument();
@@ -74,7 +89,7 @@ describe('确认步骤（DR-3）', () => {
 
   it('「取消」排在「确认提交」之前，是第一个可聚焦控件：真实世界动作不靠一次 Enter 误触发', async () => {
     const { user } = setup();
-    await user.click(screen.getByRole('button', { name: '立即复观测' }));
+    await user.click(screen.getByRole('button', { name: '复观测' }));
     const buttons = within(screen.getByRole('dialog')).getAllByRole('button');
     expect(buttons.map(button => button.textContent)).toEqual(['取消', '确认提交']);
   });
@@ -82,7 +97,7 @@ describe('确认步骤（DR-3）', () => {
 
 describe('四种结局', () => {
   async function confirm(user: ReturnType<typeof userEvent.setup>) {
-    await user.click(screen.getByRole('button', { name: '立即复观测' }));
+    await user.click(screen.getByRole('button', { name: '复观测' }));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: /^(确认提交|仍然提交)$/ }));
   }
 
@@ -111,7 +126,7 @@ describe('四种结局', () => {
     expect(screen.getByText(/请求已记录，等待可用资源；没有形成工单/)).toBeInTheDocument();
     expect(screen.getAllByText(/当前没有可用资源/).length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('准入已形成记录，但当前没有可读取的执行 lane；这不是平台已读取或执行成功。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '立即复观测' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '复观测' })).toBeEnabled();
     expect(screen.queryByText('已提交')).toBeNull();
   });
 
@@ -135,7 +150,7 @@ describe('四种结局', () => {
     await user.click(screen.getByRole('button', { name: '重新核对' }));
     expect(onRecheck).toHaveBeenCalledTimes(1);
     expect(kit.of('POST', ACTION)).toHaveLength(1);
-    await user.click(screen.getByRole('button', { name: '立即复观测' }));
+    await user.click(screen.getByRole('button', { name: '复观测' }));
     const dialog = screen.getByRole('dialog', { name: '确认立即复观测' });
     expect(within(dialog).getByText(/再提交会新建一张工单，工位会再访问一次平台/)).toBeInTheDocument();
     expect(kit.of('POST', ACTION)).toHaveLength(1);
@@ -159,14 +174,14 @@ describe('终态与任务行', () => {
       }),
     );
     const { user } = setup();
-    await user.click(screen.getByRole('button', { name: '立即复观测' }));
+    await user.click(screen.getByRole('button', { name: '复观测' }));
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
     expect(await screen.findByText('平台页面已不存在（采集端确认）')).toBeInTheDocument();
     expect(screen.getByText('详情页已打开，但没有读成')).toBeInTheDocument();
     expect(screen.getByText('详情')).toBeInTheDocument();
-    expect(screen.getByText('评论')).toBeInTheDocument();
+    expect(screen.getAllByText('评论').length).toBeGreaterThan(0);
     expect(screen.getByText('回复')).toBeInTheDocument();
-    expect(screen.getByText('30')).toBeInTheDocument();
+    expect(screen.getAllByText('30').length).toBeGreaterThan(0);
     expect(screen.getAllByText('本详情 lane 不单独请求评论').length).toBeGreaterThan(0);
   });
 });

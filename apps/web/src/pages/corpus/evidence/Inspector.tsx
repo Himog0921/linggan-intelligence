@@ -8,12 +8,11 @@ import { CommentDeepCollect } from './CommentDeepCollect';
 import { DossierPanel } from './DossierPanel';
 import { Lightbox } from './Lightbox';
 import { TechnicalFacts } from './TechnicalFacts';
-import { ReobservationSection } from './ReobservationSection';
+import { ObservationRecordSection } from './ObservationRecordSection';
 import { AuthorFact, Engagement, MaterialLegend, MaterialRail } from './WorkParts';
 import { Section } from './Primitives';
 import { materialSummary, publishedCopy } from './evidencePresent';
 import { MaterialsPanel } from './MaterialsPanel';
-import { ObservationHistory } from './ObservationHistory';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
 import { TracePanel } from './TracePanel';
@@ -122,8 +121,7 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh }: BodyProps) {
       {/* 采集记录（Mog 2026-10-23）：先答「看过几次、数字怎么变、要不要再看、评论要不要采全」；
           材料完整度、媒体台账、来源编号与技术事实一项不删，统一收进默认折叠的「技术信息」。 */}
       <Panel id="trace" active={tab === 'trace'}>
-        <ObservationHistory item={item} inspector={inspector} />
-        <ReobservationSection item={item} channel={channels.reobservation} domain={domain} state={reobservation} onRecheck={recheck} />
+        <ObservationRecordSection item={item} inspector={inspector} channel={channels.reobservation} domain={domain} state={reobservation} onRecheck={recheck} />
         <CommentDeepCollect item={item} inspector={inspector} domain={domain} />
         <details className={styles.technical}>
           <summary>技术信息（排查用）</summary>

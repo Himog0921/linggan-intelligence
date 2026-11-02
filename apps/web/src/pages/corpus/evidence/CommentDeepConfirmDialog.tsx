@@ -22,8 +22,8 @@ export function CommentDeepConfirmDialog({ target, onConfirm, onCancel }: Commen
       <div className={styles.form}>
         <header className={styles.head}>
           <div>
-            <small>作品 · 评论深采</small>
-            <h2 id={titleId}>确认评论深采</h2>
+            <small>作品 · 评论采集</small>
+            <h2 id={titleId}>确认评论采集</h2>
           </div>
         </header>
         <div className={styles.body}>
@@ -42,7 +42,7 @@ export function CommentDeepConfirmDialog({ target, onConfirm, onCancel }: Commen
           <p>这一步不会：</p>
           <ul className={styles.list}>
             <li>调用模型</li>
-            <li>立即得到结果——要等工位执行；评论多的笔记会分几段采</li>
+            <li>立即得到结果——要等工位执行</li>
           </ul>
         </div>
         <footer className={styles.foot}>

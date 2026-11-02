@@ -68,13 +68,17 @@ export function FactGrid({ rows }: { rows: readonly FactRow[] }) {
   );
 }
 
-export function Section({ title, tech, actions, children }: { title: string; tech?: string; actions?: ReactNode; children: ReactNode }) {
+export function Section({ title, tech, badge, actions, children }: { title: string; tech?: string; badge?: ReactNode; actions?: ReactNode; children: ReactNode }) {
+  const heading = (
+    <span className={styles.headingMain}>
+      <span>{title}</span>
+      {badge}
+      {tech ? <Tech>{tech}</Tech> : null}
+    </span>
+  );
   return (
     <section className={styles.section}>
-      {actions ? <div className={styles.sectionHeader}><h3><span>{title}</span>{tech ? <Tech>{tech}</Tech> : null}</h3><div className={styles.sectionActions}>{actions}</div></div> : <h3>
-        <span>{title}</span>
-        {tech ? <Tech>{tech}</Tech> : null}
-      </h3>}
+      {actions ? <div className={styles.sectionHeader}><h3>{heading}</h3><div className={styles.sectionActions}>{actions}</div></div> : <h3>{heading}</h3>}
       {children}
     </section>
   );
