@@ -1,3 +1,4 @@
+import { EvidenceLabel } from './EvidenceLabel';
 import type { Status } from './evidenceStatus';
 import { Tech } from './Primitives';
 import page from './EvidencePage.module.css';
@@ -8,7 +9,7 @@ const ACTIONS = { 'retry-shell': '重试读取', 'retry-list': '重试读取', '
 export function ResultsStatus({ status, onAction }: { status: Status; onAction: (action: 'retry-shell' | 'retry-list' | 'clear-scope') => void }) {
   return (
     <div className={page.feedback} role="status" aria-live="polite" data-kind={status.kind} aria-busy={status.kind === 'loading'}>
-      <h2>{status.title}</h2>
+      <h2>{status.kind === 'empty' ? <EvidenceLabel>{status.title}</EvidenceLabel> : status.title}</h2>
       <p>{status.detail}</p>
       {status.reason ? <p>{status.reason}</p> : null}
       <div className={page.feedbackActions}>

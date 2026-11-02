@@ -133,7 +133,7 @@
   padding-left: var(--lgi-space-3);
 }
 
-/* 右侧事实列：字段名一列、值一列，行与行共用同一条对齐线。没有边框、底色和徽章。 */
+/* 右侧事实列：字段名一列、值一列，行与行共用同一条对齐线。不铺底色；状态词允许本页已选定的开放圈线。 */
 .info {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -184,12 +184,12 @@
   align-items: center;
 }
 
-.stateCell > [data-state] {
+.annotatedState > [data-state] {
   flex-wrap: nowrap;
   min-width: 0;
 }
 
-.stateCell > [data-state] > span {
+.annotatedState > [data-state] > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -478,3 +478,9 @@
 /* Batch membership is not the current reading position. */
 .list[data-layout='research'] .row[data-checked='true'] { box-shadow:var(--lgi-shadow-contact);background:var(--lgi-canvas-low); }
 .list[data-layout='research'] .row[data-selected='true'] { background:var(--lgi-signal-faint); }
+
+/* Open annotation is local to the reading rows; repeated marks keep the same light stroke. */
+.info .stateCell { overflow:visible; }
+.annotatedState { position:relative;display:inline-flex;max-width:100%;min-width:0; }
+.annotatedState svg { position:absolute;pointer-events:none;left:calc(var(--lgi-space-1) * -1);top:calc(var(--lgi-space-1) * -1);width:calc(100% + var(--lgi-space-2));height:calc(100% + var(--lgi-space-2));overflow:visible;fill:none;stroke:var(--lgi-muted);stroke-width:1;opacity:.6;vector-effect:non-scaling-stroke; }
+.annotatedState svg path { vector-effect:non-scaling-stroke; }

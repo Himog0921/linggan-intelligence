@@ -31,13 +31,16 @@ interface CorpusFrameProps {
 export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, evidenceCount = null, children }: CorpusFrameProps) {
   const titleId = useId();
   const picker = shell ? <DomainPicker domains={shell.domains} selected={shell.selectedDomain} action={action} /> : null;
+  const currentLabel = <b className={page === 'evidence' ? styles.annotatedCurrent : undefined}>{pageLabel}
+    {page === 'evidence' ? <svg viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" /></svg> : null}
+  </b>;
   const crumb = picker ? (
     <>
-      语料 <span className="v7-slash">/</span> {picker} <span className="v7-slash">/</span> <b>{pageLabel}</b>
+      语料 <span className="v7-slash">/</span> {picker} <span className="v7-slash">/</span> {currentLabel}
     </>
   ) : (
     <>
-      语料 <span className="v7-slash">/</span> <b>{pageLabel}</b>
+      语料 <span className="v7-slash">/</span> {currentLabel}
     </>
   );
   return (

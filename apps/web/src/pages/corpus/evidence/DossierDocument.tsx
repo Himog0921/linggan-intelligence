@@ -1,3 +1,4 @@
+import { EvidenceLabel } from './EvidenceLabel';
 import { Fragment, useId, useMemo, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { humanMoment } from '../../../shared/formatting';
@@ -90,9 +91,9 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
         <header className={styles.sectionIndex}><span className={styles.sectionNumber}>{String(sections.length + 1).padStart(2, '0')}</span><h2 id={readingAnchor(prefix, 'reading:missing:title')}>缺失内容</h2></header>
         <div className={styles.content}>{gaps.map(gap => <div className={styles.missingRow} key={gap.key}><span className={styles.missingTitle}>{gap.label}</span><span className={styles.missingMessage}>{gap.message}</span><span className={styles.missingState}>{gap.state}</span></div>)}<ReadingIssues issues={issues}/></div>
       </section> : null}
-      {!sections.length && !hasMissing ? <p className={styles.empty}>本次范围没有可读文字。</p> : null}
+      {!sections.length && !hasMissing ? <p className={styles.empty}><EvidenceLabel>本次范围没有可读文字。</EvidenceLabel></p> : null}
       <details className={tools.materialNotes}>
-        <summary>材料说明</summary>
+        <summary>{sections.length || hasMissing ? <EvidenceLabel>材料说明</EvidenceLabel> : '材料说明'}</summary>
         <dl><div><dt>数据截至</dt><dd><time dateTime={dossier.asOf}>{humanMoment(dossier.asOf)}</time> UTC+8</dd></div>
           <div><dt>阅读范围</dt><dd>{dossier.selection.mode === 'explicit' ? '当前选定材料' : '当前底稿全部可读材料'}</dd></div></dl>
       </details>

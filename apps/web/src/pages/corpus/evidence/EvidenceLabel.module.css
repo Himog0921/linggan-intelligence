@@ -1,0 +1,6 @@
+/* Page exception: a small closing label, never a status or quality seal. */
+.label { position:relative;display:inline-flex;align-items:center;max-width:100%;padding:var(--lgi-space-2) var(--lgi-space-3);isolation:isolate;vertical-align:middle;color:var(--lgi-on-dark); }
+.edge { position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;filter:drop-shadow(var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--lgi-ink)); }
+.edge path:first-child { fill:var(--lgi-ink);stroke:var(--lgi-ink);stroke-width:1; }
+.edge path:last-child { fill:none;stroke:var(--lgi-on-dark);stroke-width:1;vector-effect:non-scaling-stroke; }
+.text { position:relative;white-space:normal; }

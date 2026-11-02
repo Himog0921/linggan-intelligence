@@ -1,10 +1,10 @@
 {
   "kind": "page_exception",
-  "reason": "阅读母版信息减法、状态归属、目录编排及动作层级：正常信息行撤除、异常随底稿tab、时间下沉、目录去逐项矩形、刷新安静与导出实体。",
-  "authorization": "lie-cheng 299fcfe6认可Philip02f4321b提案；Philip task #12 8577deee完整交接。",
+  "reason": "Evidence reading workspace adopts selected annotation underline, open state circle and two bounded label placements; existing semantics and reading geometry retained.",
+  "authorization": "Raft user f02e837e and 52c157a7; Philip task17 00b4dbf1",
+  "exceptionScope": "/corpus/evidence current crumb, research row state, empty result and closing material notes only",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"
-  },
-  "exceptionScope": "仅证据库底稿状态与材料说明、局部目录/刷新/导出工具；不改全站Token、正文尺度、栏宽及已修好的共用头部滚动结构。"
+  }
 }

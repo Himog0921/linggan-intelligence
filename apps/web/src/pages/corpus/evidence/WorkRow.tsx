@@ -43,7 +43,7 @@ function SelectTitle({ item, selected, tabStop }: Pick<RowProps, 'item' | 'selec
 }
 
 /** V2.2: 78×104 cover, 106px row including its edges. Title / quote / author / metrics are four fixed tracks.
- *  右侧是一列安静的事实：材料现在怎样、何时发布、何时观察，不作装饰。 */
+ *  右侧是一列安静的事实：材料现在怎样、何时发布、何时观察；细圈线只强调状态词。 */
 export function ResearchRow({ item, selected, tabStop, canCheck, checked, onSelect, onCheck }: RowProps) {
   const detail = laneSummary(item.lanes, 'detail')?.state ?? 'UNKNOWN';
   const [stateLabel] = stateMeta(detail);
@@ -72,7 +72,10 @@ export function ResearchRow({ item, selected, tabStop, canCheck, checked, onSele
           <div className={styles.infoRow}>
             <dt>状态</dt>
             <dd className={styles.stateCell} title={stateLabel}>
-              <StateLine state={detail} label={shortState} ariaHidden />
+              <span className={styles.annotatedState}>
+                <svg viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M12 3C4 5 1 17 8 22c13 6 70 5 84-1 9-5 5-17-7-18C65 0 30 1 17 4" /></svg>
+                <StateLine state={detail} label={shortState} ariaHidden />
+              </span>
               <span className="v7-sr-only">{stateLabel}</span>
             </dd>
           </div>
