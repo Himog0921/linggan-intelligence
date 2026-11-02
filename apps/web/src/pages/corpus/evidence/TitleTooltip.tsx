@@ -19,6 +19,52 @@ const CLOSE_DELAY = 120;
 const GAP = 6;
 const VIEWPORT_MARGIN = 8;
 
+interface Box {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+const CLIPS = new Set(['auto', 'scroll', 'hidden', 'clip']);
+const SCROLLS = new Set(['auto', 'scroll']);
+
+/**
+ * The table's local horizontal scroll clips the title, so the hint must be placed against the part of
+ * the title that is actually visible inside the list work area, not against the raw anchor rectangle.
+ * Walk the clipping ancestors: their intersection is the visible title, and the first horizontal
+ * scroller is the work area whose left/right edges bound the hint.
+ */
+function visibleAnchor(anchor: HTMLElement): { box: Box; workArea: Box; laidOut: boolean } {
+  const rect = anchor.getBoundingClientRect();
+  const box: Box = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
+  const viewport: Box = { left: 0, right: window.innerWidth, top: 0, bottom: window.innerHeight };
+  if (rect.width <= 0 || rect.height <= 0) return { box, workArea: viewport, laidOut: false };
+
+  let workArea = viewport;
+  let foundWorkArea = false;
+  for (let element = anchor.parentElement; element && element !== document.body; element = element.parentElement) {
+    const overflow = window.getComputedStyle(element);
+    const scrollX = SCROLLS.has(overflow.overflowX);
+    if (CLIPS.has(overflow.overflowX) || CLIPS.has(overflow.overflowY)) {
+      const clip = element.getBoundingClientRect();
+      if (CLIPS.has(overflow.overflowX)) {
+        box.left = Math.max(box.left, clip.left);
+        box.right = Math.min(box.right, clip.right);
+      }
+      if (CLIPS.has(overflow.overflowY)) {
+        box.top = Math.max(box.top, clip.top);
+        box.bottom = Math.min(box.bottom, clip.bottom);
+      }
+      if (!foundWorkArea && scrollX) {
+        workArea = { left: clip.left, right: clip.right, top: clip.top, bottom: clip.bottom };
+        foundWorkArea = true;
+      }
+    }
+  }
+  return { box, workArea, laidOut: true };
+}
+
 /**
  * Shows the full work title only when the visible title is actually clipped.
  *
@@ -73,17 +119,24 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
     const anchor = anchorRef.current;
     const tip = tipRef.current;
     if (!anchor || !tip) return;
-    const rect = anchor.getBoundingClientRect();
-    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+    const { box, workArea, laidOut } = visibleAnchor(anchor);
+    if (laidOut && (box.right - box.left <= 1 || box.bottom - box.top <= 1)) {
+      close();
+      return;
+    }
+    if (box.bottom < 0 || box.top > window.innerHeight) {
       close();
       return;
     }
     const width = tip.offsetWidth;
     const height = tip.offsetHeight;
-    let top = rect.bottom + GAP;
-    if (top + height > window.innerHeight - VIEWPORT_MARGIN) top = rect.top - height - GAP;
+    let top = box.bottom + GAP;
+    if (top + height > window.innerHeight - VIEWPORT_MARGIN) top = box.top - height - GAP;
     top = Math.max(VIEWPORT_MARGIN, Math.min(top, window.innerHeight - height - VIEWPORT_MARGIN));
-    const left = Math.max(VIEWPORT_MARGIN, Math.min(rect.left, window.innerWidth - width - VIEWPORT_MARGIN));
+    const minLeft = Math.max(workArea.left, 0) + VIEWPORT_MARGIN;
+    const maxLeft = Math.min(workArea.right, window.innerWidth) - width - VIEWPORT_MARGIN;
+    let left = Math.max(minLeft, Math.min(box.left, maxLeft));
+    left = Math.max(VIEWPORT_MARGIN, Math.min(left, window.innerWidth - width - VIEWPORT_MARGIN));
     setCoords({ top, left });
   }, [close]);
 

@@ -32,6 +32,19 @@ function Harness({ text, truncation = 'width' }: { text: string; truncation?: Ti
   </>;
 }
 
+function BoundaryHarness({ text }: { text: string }) {
+  return <div data-boundary="" style={{ overflowX: 'auto' }}>
+    <Harness text={text} />
+  </div>;
+}
+
+function setRect(element: Element, box: { left: number; top: number; right: number; bottom: number }) {
+  element.getBoundingClientRect = () => ({
+    ...box, width: box.right - box.left, height: box.bottom - box.top, x: box.left, y: box.top,
+    toJSON: () => box,
+  }) as DOMRect;
+}
+
 function setMetrics(element: HTMLElement, kind: TitleTruncation, visible: number, content: number) {
   Object.defineProperty(element, kind === 'width' ? 'clientWidth' : 'clientHeight', { configurable: true, value: visible });
   Object.defineProperty(element, kind === 'width' ? 'scrollWidth' : 'scrollHeight', { configurable: true, value: content });
@@ -141,4 +154,32 @@ it('closes when a width change makes the full title fit, and follows resize whil
     for (const callback of [...resizeCallbacks]) callback();
   });
   expect(hint()).not.toBeNull();
+});
+
+it('anchors a partially clipped title hint inside the list work area, clear of the title', () => {
+  render(<BoundaryHarness text="被横向滚动裁掉一半的长标题" />);
+  const trigger = screen.getByRole('button');
+  const boundary = document.querySelector<HTMLElement>('[data-boundary]')!;
+  setMetrics(trigger, 'width', 311, 456);
+  setRect(trigger, { left: -8, top: 206.3, right: 303.1, bottom: 250.3 });
+  setRect(boundary, { left: 160, top: 170.5, right: 1047, bottom: 574 });
+
+  fireEvent.mouseEnter(trigger);
+  advance(300);
+  expect(hint()).not.toBeNull();
+  expect(hint()!.style.left).toBe('168px');
+  expect(parseFloat(hint()!.style.top)).toBeGreaterThanOrEqual(250.3 + 6);
+});
+
+it('closes once the title has scrolled completely out of the list work area', () => {
+  render(<BoundaryHarness text="已经完全滚出列表的长标题" />);
+  const trigger = screen.getByRole('button');
+  const boundary = document.querySelector<HTMLElement>('[data-boundary]')!;
+  setMetrics(trigger, 'width', 311, 456);
+  setRect(trigger, { left: -221, top: 206.3, right: 90.1, bottom: 250.3 });
+  setRect(boundary, { left: 160, top: 170.5, right: 1047, bottom: 574 });
+
+  fireEvent.mouseEnter(trigger);
+  advance(300);
+  expect(hint()).toBeNull();
 });
