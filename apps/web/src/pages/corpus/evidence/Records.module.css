@@ -139,6 +139,14 @@
   font-variant-numeric: tabular-nums;
 }
 
+.delta[data-trend='up'] {
+  color: var(--lgi-danger);
+}
+
+.delta[data-trend='down'] {
+  color: var(--lgi-success);
+}
+
 .delta[data-trend='flat'] {
   color: var(--lgi-ghost);
 }
@@ -207,7 +215,32 @@
   }
 }
 
-/* ── 复观测：不可用时只留紧凑原因 ────────────────────────── */
+/* ── 复观测：不可用时只留紧凑原因；执行状态是一条轻行 ────────────────────── */
+.statusLine {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-1) var(--lgi-space-2);
+  margin: 0 0 var(--lgi-space-3);
+  color: var(--lgi-muted);
+  font: var(--lgi-weight-regular) var(--lgi-text-label) / var(--lgi-lh-body) var(--lgi-font-ui);
+}
+
+.statusAction {
+  border: 0;
+  padding: 0;
+  background: none;
+  color: var(--lgi-signal-ink);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: var(--lgi-space-1);
+}
+
+.statusAction:hover:not(:disabled) {
+  color: var(--lgi-ink);
+}
+
 .reobserveReason {
   margin: var(--lgi-space-3) 0 0;
   color: var(--lgi-muted);
@@ -384,26 +417,6 @@
 .targetUnit {
   color: var(--lgi-muted);
   font-size: var(--lgi-type-aux-size);
-}
-
-.runProgress {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--lgi-space-2) var(--lgi-space-3);
-  margin-top: var(--lgi-space-3);
-  border: 1px solid var(--lgi-border-strong);
-  padding: var(--lgi-space-2) var(--lgi-space-3);
-  background: var(--lgi-canvas-low);
-  font-size: var(--lgi-text-label);
-}
-
-.runActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--lgi-space-3);
 }
 
 /* 采集历史：动作与回执之后的轻列表，不堆整句。 */

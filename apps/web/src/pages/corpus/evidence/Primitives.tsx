@@ -112,7 +112,6 @@ export function FeedbackLine({ feedback, children }: { feedback: Feedback | null
     <p role="status" aria-live="polite" className={styles.feedback} data-tone={feedback.tone}>
       <b className={styles.feedbackLabel}>{feedback.label}</b>
       <span>{feedback.text}</span>
-      {feedback.code ? <Tech>{feedback.code}</Tech> : null}
       {children ? <span className={styles.feedbackActions}>{children}</span> : null}
     </p>
   );

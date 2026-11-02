@@ -8,6 +8,7 @@ import { Inspector } from './Inspector';
 import { ReadReceipt, ResultsArea } from './ResultsArea';
 import { ReturnBanners } from './ReturnBanners';
 import { SelectionBar } from './SelectionBar';
+import { ToastProvider } from './Toast';
 import { listKey } from './evidenceKeys';
 import { readoutFacts, readoutTitle } from './evidencePresent';
 import { DEFAULT_QUERY, scopeProblem, toApiParams, type EvidenceQuery, type PanelWidth } from './evidenceQuery';
@@ -106,6 +107,7 @@ export function EvidencePage() {
   const hasDomain = domain !== null;
   const shownQuery: EvidenceQuery = hasDomain ? query : { ...DEFAULT_QUERY, layout: query.layout };
   return (
+    <ToastProvider lifted={selecting}>
     <CorpusFrame
       page="evidence"
       pageLabel="证据库"
@@ -187,5 +189,6 @@ export function EvidencePage() {
         ) : null}
       </div>
     </CorpusFrame>
+    </ToastProvider>
   );
 }

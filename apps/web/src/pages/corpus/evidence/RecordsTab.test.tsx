@@ -74,7 +74,7 @@ describe('观察记录（Mog 2026-10-23、2026-11-02）', () => {
 
   it('标题次数取原 timeline 窗口数，不是合并后的行数；满窗口写 100+ 并说明只列最近 100 次', () => {
     const channel: Channel = { supported: true, eligible: true, reason: 'OK', url: `/api/local/work-resources/${workRef(1)}/reobserve?domain=${DOMAIN}`, mediaPolicy: 'EXISTING_ASSETS_REUSED' };
-    const state: Reobservation = { sending: false, operation: null, feedback: null, readError: null, pollError: null, queued: false, submit: () => undefined };
+    const state: Reobservation = { sending: false, operation: null, feedback: null, readError: null, pollError: null, queued: false, submit: () => undefined, retryStatus: () => undefined };
     const merged = detail({
       timeline: [timelinePoint('2026-10-12T08:36:46Z', 'detail', 293), timelinePoint('2026-10-14T21:59:48Z', 'detail', 293)],
     });
@@ -95,7 +95,7 @@ describe('观察记录（Mog 2026-10-23、2026-11-02）', () => {
 
   it('零记录仍显示最近观察时间；复观测不可用时只留紧凑原因，没有假按钮', () => {
     const channel: Channel = { supported: true, eligible: false, reason: 'REOBSERVATION_ELIGIBILITY_UNKNOWN', url: null, mediaPolicy: 'EXISTING_ASSETS_REUSED' };
-    const state: Reobservation = { sending: false, operation: null, feedback: null, readError: null, pollError: null, queued: false, submit: () => undefined };
+    const state: Reobservation = { sending: false, operation: null, feedback: null, readError: null, pollError: null, queued: false, submit: () => undefined, retryStatus: () => undefined };
     const { item, inspector } = detail({ timeline: [], observedAt: '2026-10-20 09:00' });
     renderWithProviders(<ObservationRecordSection item={item} inspector={inspector} channel={channel} domain={DOMAIN} state={state} onRecheck={() => undefined} now={NOW} />);
     expect(screen.getByText('0')).toBeInTheDocument();
@@ -128,8 +128,8 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     expect(row).toHaveTextContent('页面显示 37');
     await view.user.click(screen.getByRole('button', { name: '采集评论' }));
     const dialog = screen.getByRole('dialog', { name: '确认评论采集' });
-    expect(within(dialog).getByText(/让合格的工位真实访问平台/)).toBeInTheDocument();
-    expect(within(dialog).getAllByRole('button').map(button => button.textContent)).toEqual(['取消', '确认提交']);
+    expect(within(dialog).getByText(/从评论区开头采集当前可见的评论与回复/)).toBeInTheDocument();
+    expect(within(dialog).getAllByRole('button').map(button => button.textContent)).toEqual(['取消', '提交采集']);
     await view.user.click(within(dialog).getByRole('button', { name: '取消' }));
     expect(kit.calls).toHaveLength(0);
   });
@@ -161,14 +161,15 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     kit.route('GET', `${RUNS}/${RUN}`, ok(runJson()));
     const view = setup();
     await view.user.click(screen.getByRole('button', { name: '采集评论' }));
-    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
-    expect(await screen.findByText('已提交')).toBeInTheDocument();
+    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '提交采集' }));
+    expect(await screen.findByText('评论采集已提交', { selector: 'p' })).toBeInTheDocument();
     const [post] = kit.of('POST', RUNS);
     expect(post?.body).toMatchObject({ domainRef: DOMAIN, source: { kind: 'selected_works', workRefs: [workRef(1)] }, ranking: null, workLimit: 1, commentMode: 'all_public' });
     expect(typeof (post?.body as { idempotencyKey?: unknown }).idempotencyKey).toBe('string');
-    expect(await screen.findByText('等待派发 · 本轮采回 0 条 · 首次新增 0 条')).toBeInTheDocument();
+    expect(await screen.findByText('等待派发')).toBeInTheDocument();
+    expect(screen.queryByText(/本轮采回/)).toBeNull();
     expect(kit.of('GET', `${RUNS}/${RUN}`)[0]?.search.get('domainRef')).toBe(DOMAIN);
-    expect(screen.getByRole('link', { name: '在采集任务里查看' })).toHaveAttribute('href', `/collection/tasks?domain=${encodeURIComponent(DOMAIN)}&run=${RUN}`);
+    expect(screen.getByRole('link', { name: '查看采集任务' })).toHaveAttribute('href', `/collection/tasks?domain=${encodeURIComponent(DOMAIN)}&run=${RUN}`);
     expect(screen.getByRole('button', { name: '评论采集已提交' })).toBeDisabled();
   });
 
@@ -179,7 +180,7 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     expect(screen.getByText('平台显示 37')).toBeInTheDocument();
     expect(screen.getByText('累计已采 37')).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: '采集评论' }));
-    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
+    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '提交采集' }));
     expect(await screen.findByText(`本轮已结束 · 本轮采回 ${received === null ? '未知' : received} 条 · 首次新增 0 条`)).toBeInTheDocument();
     expect(kit.of('POST', RUNS)).toHaveLength(1);
     expect(kit.of('GET', `${RUNS}/${RUN}`)).toHaveLength(1);
@@ -239,11 +240,11 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     kit.route('GET', `${RUNS}/${RUN}`, ok(runJson()));
     const view = setup();
     await view.user.click(screen.getByRole('button', { name: '采集评论' }));
-    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
+    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '提交采集' }));
     expect(await screen.findByText(/没有建立：本次领域尚未运行，请先恢复领域/)).toBeInTheDocument();
     await view.user.click(screen.getByRole('button', { name: '采集评论' }));
-    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
-    await screen.findByText('已提交');
+    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '提交采集' }));
+    await screen.findByText('评论采集已提交', { selector: 'p' });
     const [first, second] = kit.of('POST', RUNS).map(call => (call.body as { idempotencyKey: string }).idempotencyKey);
     expect(first).not.toBe(second);
   });
@@ -252,18 +253,18 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     kit.route('POST', RUNS, () => 'network');
     const view = setup();
     await view.user.click(screen.getByRole('button', { name: '采集评论' }));
-    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
-    expect(await screen.findByText(/可能已经建立/)).toBeInTheDocument();
+    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '提交采集' }));
+    expect(await screen.findByText('提交结果未确认，请核对原请求。', { selector: 'p' })).toBeInTheDocument();
     const identity = (kit.of('POST', RUNS)[0]?.body as { idempotencyKey: string }).idempotencyKey;
     expect(screen.queryByRole('button', { name: '仍要重新提交' })).toBeNull();
     expect(screen.queryByRole('button', { name: '采集评论' })).toBeNull();
     kit.route('GET', `${RUNS}/requests/${identity}`, fail(500, 'unavailable'), ok({ runRef: RUN, domainRef: DOMAIN, replayed: true }));
     kit.route('GET', `${RUNS}/${RUN}`, ok(runJson()));
     await view.user.click(screen.getByRole('button', { name: '核对原请求' }));
-    expect(await screen.findByText(/可能已经建立/)).toBeInTheDocument();
+    expect(await screen.findByText('提交结果未确认，请核对原请求。', { selector: 'p' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: '仍要重新提交' })).toBeNull();
     await view.user.click(screen.getByRole('button', { name: '核对原请求' }));
-    expect(await screen.findByText('已提交')).toBeInTheDocument();
+    expect(await screen.findByText('评论采集已提交', { selector: 'p' })).toBeInTheDocument();
     expect(kit.of('POST', RUNS)).toHaveLength(1);
     expect(kit.of('GET', `${RUNS}/requests/${identity}`)).toHaveLength(2);
   });
@@ -273,7 +274,7 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     try {
       const view = setup();
       await view.user.click(screen.getByRole('button', { name: '采集评论' }));
-      await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
+      await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '提交采集' }));
       expect(await screen.findByText(/无法保存请求身份，尚未提交/)).toBeInTheDocument();
       expect(kit.of('POST', RUNS)).toHaveLength(0);
     } finally { storage.mockRestore(); }
@@ -286,8 +287,8 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     await first.user.clear(screen.getByRole('spinbutton', { name: '条数' }));
     await first.user.type(screen.getByRole('spinbutton', { name: '条数' }), '40');
     await first.user.click(screen.getByRole('button', { name: '采集评论' }));
-    await first.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
-    await screen.findByText(/可能已经建立/);
+    await first.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '提交采集' }));
+    await screen.findByText('提交结果未确认，请核对原请求。', { selector: 'p' });
     const identity = (kit.of('POST', RUNS)[0]?.body as { idempotencyKey: string }).idempotencyKey;
     expect(Object.values(sessionStorage).some(value => value.includes(identity))).toBe(true);
     first.unmount();
@@ -299,7 +300,7 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     expect(screen.getByRole('radio', { name: /全部可见/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: '采集评论' })).toBeNull();
     await restored.user.click(screen.getByRole('button', { name: '核对原请求' }));
-    expect(await screen.findByText('已提交')).toBeInTheDocument();
+    expect(await screen.findByText('评论采集已提交', { selector: 'p' })).toBeInTheDocument();
     expect(kit.of('POST', RUNS)).toHaveLength(1);
   });
 
@@ -307,8 +308,8 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     kit.route('POST', RUNS, () => 'network');
     const view = setup();
     await view.user.click(screen.getByRole('button', { name: '采集评论' }));
-    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '确认提交' }));
-    await screen.findByText(/可能已经建立/);
+    await view.user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '提交采集' }));
+    await screen.findByText('提交结果未确认，请核对原请求。', { selector: 'p' });
     const identity = (kit.of('POST', RUNS)[0]?.body as { idempotencyKey: string }).idempotencyKey;
     kit.route('GET', `${RUNS}/requests/${identity}`, fail(404, 'collection_run_not_found'));
     await view.user.click(screen.getByRole('button', { name: '核对原请求' }));
@@ -345,9 +346,9 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     await view.user.type(input, '40');
     await view.user.click(screen.getByRole('button', { name: '采集评论' }));
     const dialog = screen.getByRole('dialog', { name: '确认评论采集' });
-    expect(within(dialog).getByText(/把评论和回复采到 40 条就停（评论区先到底也会停）/)).toBeInTheDocument();
-    await view.user.click(within(dialog).getByRole('button', { name: '确认提交' }));
-    expect(await screen.findByText('已提交')).toBeInTheDocument();
+    expect(within(dialog).getByText(/最多新增 40 条不重复评论（含回复），到底即停/)).toBeInTheDocument();
+    await view.user.click(within(dialog).getByRole('button', { name: '提交采集' }));
+    expect(await screen.findByText('评论采集已提交', { selector: 'p' })).toBeInTheDocument();
     expect(kit.of('POST', RUNS)[0]?.body).toMatchObject({ source: { kind: 'selected_works', workRefs: [workRef(1)] }, workLimit: 1, commentMode: 'up_to', commentTarget: 40 });
     expect(screen.getByRole('radio', { name: /全部可见/ })).toBeDisabled();
   });

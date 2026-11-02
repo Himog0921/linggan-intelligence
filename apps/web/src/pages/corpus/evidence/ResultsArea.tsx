@@ -25,11 +25,9 @@ export function ReadReceipt({ last, failure, count }: { last: WorkListPage | nul
     );
   }
   if (failure && count === 0) {
-    const code = errorCode(failure);
     return (
       <div className={styles.receipt}>
         <span>当前未读取任何材料，不能据此判断库为空或来源不存在。</span>
-        <span className={styles.receiptMeta}>{code ? <Tech>{code}</Tech> : null}</span>
       </div>
     );
   }

@@ -1,8 +1,9 @@
-import { OperationBlock } from './ReobservationOperation';
-import { FeedbackLine, InlineState } from './Primitives';
-import { errorCode } from './evidenceFeedback';
+import type { ReactNode } from 'react';
+import { FeedbackLine, StateLine } from './Primitives';
+import { stateMeta } from './evidencePresent';
+import { isTerminalTask, type ReobservationOperation } from './reobservationApi';
 import type { Reobservation } from './useReobservation';
-import page from './EvidencePage.module.css';
+import styles from './Records.module.css';
 
 interface ReobservationStatusProps {
   domain: string;
@@ -11,36 +12,82 @@ interface ReobservationStatusProps {
   onRecheck: () => void;
 }
 
+const LIVE_TASK_STATES = new Set(['RUNNING', 'ACTIVE', 'CLAIMED', 'LEASED']);
+const QUEUED_TASK_STATES = new Set(['QUEUED', 'NOT_STARTED', 'NOT_REQUESTED']);
+const PROBLEM_TASK_STATES = new Set(['FAILED', 'RISK_CONTROL', 'PAGE_UNAVAILABLE', 'DETAIL_READ_BLOCKED', 'INPUT_BLOCKED']);
+
+/** 把一次复观测的已知事实收成一条短状态；只沿用已有状态短语，不额外推断完成。 */
+function operationReading(operation: ReobservationOperation): { state: string; label: string } | null {
+  if (operation.admission === 'REUSE') return null;
+  const tasks = operation.tasks;
+  if (tasks.length > 0) {
+    if (tasks.some(task => LIVE_TASK_STATES.has(task.state))) return { state: 'RUNNING', label: '正在采集' };
+    if (tasks.some(task => QUEUED_TASK_STATES.has(task.state))) return { state: 'QUEUED', label: '等待执行' };
+    const problem = tasks.find(task => PROBLEM_TASK_STATES.has(task.state));
+    if (problem) return { state: problem.state, label: stateMeta(problem.state)[0] };
+    if (tasks.every(task => task.state === 'ACCEPTED')) return { state: 'ACCEPTED', label: stateMeta('ACCEPTED')[0] };
+    const last = tasks.find(task => !isTerminalTask(task)) ?? tasks[0];
+    return last ? { state: last.state, label: stateMeta(last.state)[0] } : null;
+  }
+  const state = operation.leaseState ?? operation.execution;
+  if (state === null) return null;
+  if (LIVE_TASK_STATES.has(state)) return { state: 'RUNNING', label: '正在采集' };
+  if (QUEUED_TASK_STATES.has(state)) return { state: 'QUEUED', label: '等待执行' };
+  return { state, label: stateMeta(state)[0] };
+}
+
+function LightLine({ state, label, children }: { state: string; label: string; children?: ReactNode }) {
+  return (
+    <div className={styles.statusLine} role="status" aria-live="polite">
+      <StateLine state={state} label={label} />
+      {children ? <>
+        <span aria-hidden="true">·</span>
+        {children}
+      </> : null}
+    </div>
+  );
+}
+
 /**
- * 复观测的回执、读取失败与本次执行状态。放在「观察记录」正文之后，不再另起一节标题：
- * 普通层只说人话，原因码只留在技术信息里；未确认之后不自动重发，只提供「重新核对」和「查看采集任务」。
+ * 复观测的持续状态与就地入口：提交回执进轻通知，成功不在这里重复；错误与未确认留在动作旁，
+ * 保留核对和查看采集任务入口，不渲染默认技术表格。未确认不会因为通知消失而解除。
  */
 export function ReobservationStatus({ domain, state, onRecheck }: ReobservationStatusProps) {
-  const unknown = state.feedback?.tone === 'unknown';
-  if (!state.feedback && !state.readError && !state.pollError && !state.operation) return null;
+  const tasksUrl = `/collection/tasks?domain=${encodeURIComponent(domain)}`;
+  const feedback = state.feedback;
+  const unknown = feedback?.tone === 'unknown';
+  const failed = feedback !== null && (feedback.tone === 'error' || feedback.tone === 'refused');
+  const reading = state.operation && !failed ? operationReading(state.operation) : null;
+  if (!feedback && !state.readError && !state.pollError && !state.operation) return null;
   return (
     <>
-      <FeedbackLine feedback={state.feedback}>
-        {unknown ? (
-          <>
-            <button type="button" className={page.textButton} onClick={onRecheck}>
-              重新核对
-            </button>
-            <a href={`/collection/tasks?domain=${encodeURIComponent(domain)}`}>查看采集任务</a>
-          </>
-        ) : null}
-      </FeedbackLine>
-      {state.readError ? (
-        <InlineState tone="danger" title="复观测状态已更新，但作品当前事实未重新读取" code={errorCode(state.readError) ?? String(state.readError)}>
-          保留已知的任务、尝试、包与回执；没有把检查器的旧快照写成新事实。
-        </InlineState>
+      {unknown ? (
+        <LightLine state="UNKNOWN" label="提交结果未确认">
+          <button type="button" className={styles.statusAction} onClick={onRecheck}>重新核对</button>
+          <a className={styles.statusAction} href={tasksUrl}>查看采集任务</a>
+        </LightLine>
+      ) : null}
+      {failed ? (
+        <FeedbackLine feedback={feedback}>
+          <button type="button" className={styles.statusAction} onClick={onRecheck}>重新核对</button>
+          <a className={styles.statusAction} href={tasksUrl}>查看采集任务</a>
+        </FeedbackLine>
       ) : null}
       {state.pollError ? (
-        <InlineState tone="danger" title="复观测状态读取失败" code={errorCode(state.pollError) ?? 'REOBSERVATION_STATUS_UNAVAILABLE'}>
-          已保留上一次已知状态；页面没有把未知状态写成完成。
-        </InlineState>
+        <LightLine state="UNKNOWN" label="状态读取失败">
+          <button type="button" className={styles.statusAction} onClick={state.retryStatus}>重试</button>
+        </LightLine>
       ) : null}
-      {state.operation ? <OperationBlock operation={state.operation} /> : null}
+      {state.readError ? (
+        <LightLine state="UNKNOWN" label="复观测状态已更新，作品事实未重新读取">
+          <button type="button" className={styles.statusAction} onClick={onRecheck}>重新读取</button>
+        </LightLine>
+      ) : null}
+      {reading ? (
+        <LightLine state={reading.state} label={state.pollError ? `上次状态：${reading.label}` : reading.label}>
+          <a className={styles.statusAction} href={tasksUrl}>查看采集任务</a>
+        </LightLine>
+      ) : null}
     </>
   );
 }

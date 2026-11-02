@@ -14,6 +14,7 @@ import { publishedCopy } from './evidencePresent';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
 import { errorCode } from './evidenceFeedback';
+import { useToast } from './toastContext';
 import { apiPath } from './evidencePaths';
 import { workTitle } from './evidencePresent';
 import { PANELS, TABS, type PanelWidth, type TabKey } from './evidenceQuery';
@@ -91,7 +92,19 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh }: BodyProps) {
   const { item, inspector, channels } = detail;
   const commentsUrl = apiPath(channels.commentsUrl);
   const comments = useCommentChannel(commentsUrl);
-  const reobservation = useReobservation({ actionPath: reobservationAccess(item, channels.reobservation).actionPath, onTerminal: onRefresh });
+  const toast = useToast();
+  const workLabel = workTitle(item);
+  const reobservation = useReobservation({
+    actionPath: reobservationAccess(item, channels.reobservation).actionPath,
+    onTerminal: onRefresh,
+    onReceipt: result => {
+      if (result.tone === 'success') {
+        toast.notify({ key: `${item.ref}:reobserve`, tone: 'success', text: result.text, context: workLabel });
+      } else if (result.tone === 'unknown') {
+        toast.notify({ key: `${item.ref}:reobserve`, tone: 'unknown', text: '提交结果未确认，请核对原请求', context: workLabel });
+      }
+    },
+  });
   const [viewer, setViewer] = useState<{ objects: readonly ViewerObject[]; index: number } | null>(null);
   const fragment = (listItem ?? item).fragment;
   const context: PanelContext = {
@@ -248,7 +261,6 @@ export function Inspector(props: InspectorProps) {
           {state ? (
             <>
               <strong>{state.text}</strong>
-              {state.code ? <code>{state.code}</code> : null}
               {detail.status === 'error' ? (
                 <button type="button" className={page.textButton} onClick={onRetry}>
                   重试读取

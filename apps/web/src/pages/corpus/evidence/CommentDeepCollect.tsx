@@ -15,11 +15,11 @@ import {
   type CommentDeepIntent,
 } from './commentDeepRequests';
 import { feedback, type Feedback } from './evidenceFeedback';
-import { formatNumber, metricReading, momentText } from './evidencePresent';
+import { formatNumber, metricReading, momentText, workTitle } from './evidencePresent';
 import type { Inspector, WorkItem } from './evidenceTypes';
 import { commentCollectionRows, type CommentCollectionRow } from './observationRecords';
 import { FeedbackLine, Section } from './Primitives';
-import page from './EvidencePage.module.css';
+import { useToast } from './toastContext';
 import styles from './Records.module.css';
 
 /** 评论采集历史在这里最多列几次；更早的折起来，展开仍是本地已有记录。 */
@@ -68,6 +68,11 @@ function HistoryList({ rows, label }: { rows: readonly CommentCollectionRow[]; l
 export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem; inspector: Inspector; domain: string }) {
   const key = `${domain}:${item.ref}`;
   const remembered = requests.get(key);
+  const toast = useToast();
+  const workLabel = workTitle(item);
+  const notify = (tone: 'success' | 'unknown', text: string) => {
+    toast.notify({ key: `${item.ref}:comments`, tone, text, context: workLabel });
+  };
   const modeName = useId();
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
@@ -118,7 +123,8 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
       requests.set(key, { request, intent, runRef: receipt.runRef });
       setRunRef(receipt.runRef);
       setUncertain(false);
-      setResult(feedback('success', '评论采集任务已建立，要等工位执行；这还不是已经采到。', null, '已提交'));
+      setResult(null);
+      notify('success', '评论采集已提交');
     } catch (error) {
       if ((!wasSent && definiteRejection(error)) || (wasSent && notFound(error))) {
         requests.delete(key);
@@ -126,7 +132,8 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
         setResult(feedback('error', wasSent ? '原请求没有在服务器留下记录，没有建立。可以重新提交。' : `没有建立：${errorText(error)}。`));
       } else {
         setUncertain(true);
-        setResult(feedback('unknown', '没有得到确认的答复，可能已经建立。点“核对原请求”会拿原请求去核对，不会重复建立。'));
+        setResult(feedback('unknown', '提交结果未确认，请核对原请求。'));
+        notify('unknown', '提交结果未确认，请核对原请求');
       }
     } finally {
       setSending(false);
@@ -134,7 +141,7 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
   }
 
   const status = run.data
-    ? `${runStatus(run.data)} · 本轮采回 ${count(run.data.received_comments)} 条 · 首次新增 ${count(run.data.new_comments)} 条`
+    ? `${runStatus(run.data)}${run.data.ended || (run.data.received_comments ?? 0) > 0 ? ` · 本轮采回 ${count(run.data.received_comments)} 条 · 首次新增 ${count(run.data.new_comments)} 条` : ''}`
     : run.isError ? '进度暂时读不出来' : '正在读取进度…';
   const scopeId = `${modeName}-scope`;
   const hintId = `${modeName}-hint`;
@@ -195,7 +202,20 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
           {`请填 ${MIN_COMMENT_TARGET}–${MAX_COMMENT_TARGET} 之间的整数`}
         </p>
       ) : null}
-      {item.platform === 'xhs' ? <FeedbackLine feedback={result} /> : null}
+      {item.platform === 'xhs' ? (
+        result?.tone === 'unknown'
+          ? <p className={styles.statusLine} role="status" aria-live="polite">提交结果未确认，请核对原请求。</p>
+          : <FeedbackLine feedback={result} />
+      ) : null}
+      {item.platform === 'xhs' && runRef !== null ? (
+        <div className={styles.statusLine} role="status">
+          <span>{status}</span>
+          <button type="button" className={styles.statusAction} disabled={run.isFetching} onClick={() => void run.refetch()}>
+            刷新进度
+          </button>
+          <Link className={styles.statusAction} to={`/collection/tasks?domain=${encodeURIComponent(domain)}&run=${encodeURIComponent(runRef)}`}>查看采集任务</Link>
+        </div>
+      ) : null}
       <p className={styles.lead}>
         <span>平台显示 {metricReading(item.display.engagement.comment)}</span>
         <span className="v7-sr-only"> 条评论</span>
@@ -205,18 +225,6 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
       </p>
       {item.platform !== 'xhs' ? (
         <p className={styles.unsupported}>评论采集目前只支持小红书笔记。</p>
-      ) : runRef !== null ? (
-        <div className={styles.runProgress} role="status">
-          <span>
-            评论采集任务：<b>{status}</b>
-          </span>
-          <span className={styles.runActions}>
-            <button type="button" className={page.textButton} disabled={run.isFetching} onClick={() => void run.refetch()}>
-              刷新进度
-            </button>
-            <Link to={`/collection/tasks?domain=${encodeURIComponent(domain)}&run=${encodeURIComponent(runRef)}`}>在采集任务里查看</Link>
-          </span>
-        </div>
       ) : null}
       {history.length === 0 ? (
         <p className={styles.historyEmpty}>暂无采集记录</p>

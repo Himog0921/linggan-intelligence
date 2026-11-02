@@ -1,0 +1,104 @@
+/* 证据库局部轻通知：白底、细墨边、短硬阴影；成功不铺绿，错误不铺整块红。
+ * 只在页面右下角占一列，最多两条；选择浮层出现时由 data-lifted 整体上移。 */
+
+.host {
+  position: fixed;
+  right: var(--lgi-space-6);
+  bottom: var(--lgi-space-6);
+  z-index: var(--lgi-z-toast);
+  display: flex;
+  flex-direction: column;
+  gap: var(--lgi-space-2);
+  width: min(calc(var(--lgi-space-10) * 9), calc(100vw - var(--lgi-space-12)));
+  pointer-events: none;
+}
+
+.host[data-lifted] {
+  bottom: calc(var(--lgi-space-6) + var(--lgi-space-16) + var(--lgi-space-1));
+}
+
+/* dialog 内通知让开底部操作条，避免盖住复制/下载或提交按钮。 */
+.host[data-in-dialog] {
+  bottom: calc(var(--lgi-space-24) + var(--lgi-space-16));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--lgi-space-2);
+  box-sizing: border-box;
+  border: 1px solid var(--lgi-ink);
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  background: var(--lgi-canvas);
+  box-shadow: var(--lgi-shadow-brutal);
+  color: var(--lgi-ink);
+  pointer-events: auto;
+  font: var(--lgi-weight-regular) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-ui);
+}
+
+.mark {
+  flex: none;
+  width: var(--lgi-space-2);
+  height: var(--lgi-space-2);
+  margin-top: calc(var(--lgi-space-1) + var(--lgi-action-border-width));
+  background: var(--lgi-ink);
+}
+
+.toast[data-tone='success'] .mark {
+  background: var(--lgi-success);
+}
+
+.toast[data-tone='error'] .mark,
+.toast[data-tone='refused'] .mark {
+  background: var(--lgi-danger);
+}
+
+.toast[data-tone='unknown'] .mark {
+  background: var(--lgi-warning);
+}
+
+.body {
+  min-width: 0;
+  flex: 1;
+}
+
+.context {
+  display: block;
+  overflow: hidden;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+  line-height: var(--lgi-lh-data);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+button.close.close {
+  flex: none;
+  width: var(--lgi-space-5);
+  height: var(--lgi-space-5);
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--lgi-muted);
+  font: var(--lgi-weight-regular) var(--lgi-text-label) / 1 var(--lgi-font-ui);
+  cursor: pointer;
+}
+
+button.close.close:hover:not(:disabled) {
+  background: transparent;
+  color: var(--lgi-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .toast {
+    transition: none;
+  }
+}

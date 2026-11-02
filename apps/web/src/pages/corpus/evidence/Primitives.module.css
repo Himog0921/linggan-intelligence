@@ -171,28 +171,25 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--lgi-space-2);
-  margin: var(--lgi-space-2) 0;
+  margin: 0 0 var(--lgi-space-3);
   border-left: 3px solid var(--lgi-border-strong);
-  padding: var(--lgi-space-2) var(--lgi-space-3);
-  background: var(--lgi-canvas-low);
+  padding: var(--lgi-space-1) 0 var(--lgi-space-1) var(--lgi-space-3);
+  background: none;
   font-size: var(--lgi-text-data);
   line-height: var(--lgi-lh-body);
 }
 
 .feedback[data-tone='success'] {
   border-color: var(--lgi-success);
-  background: var(--lgi-success-soft);
 }
 
 .feedback[data-tone='refused'],
 .feedback[data-tone='unknown'] {
   border-color: var(--lgi-warning);
-  background: var(--lgi-warning-soft);
 }
 
 .feedback[data-tone='error'] {
   border-color: var(--lgi-signal);
-  background: var(--lgi-signal-soft);
 }
 
 .feedbackLabel {

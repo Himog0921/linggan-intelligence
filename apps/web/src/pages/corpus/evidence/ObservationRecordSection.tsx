@@ -53,11 +53,11 @@ export function ObservationRecordSection({ item, inspector, channel, domain, sta
       )}
       actions={action}
     >
+      <ReobservationStatus domain={domain} state={state} onRecheck={onRecheck} />
       <ObservationHistory item={item} inspector={inspector} now={now} />
       {access.actionPath === null ? (
         <p className={styles.reobserveReason}><b>复观测</b>：{access.reason}</p>
       ) : null}
-      <ReobservationStatus domain={domain} state={state} onRecheck={onRecheck} />
       {confirming && access.actionPath !== null ? (
         <ReobserveConfirmDialog
           afterUnknown={state.feedback?.tone === 'unknown'}
