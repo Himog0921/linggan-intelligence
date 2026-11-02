@@ -44,7 +44,12 @@ it('多图沿 owner 编排连续阅读，保留标题来源及相同文字的不
   expect(content.querySelectorAll('[data-block-ref]')).toHaveLength(12);
   expect([...content.querySelectorAll('[data-block-ref]')].map(node => node.getAttribute('data-block-ref'))).toEqual(raw.dossier.readingView.sections.flatMap(section => section.groups.flatMap(group => group.blockRefs)));
   expect(screen.queryByRole('heading', { name: /^第 \d+ 页$/ })).not.toBeInTheDocument();
-  expect(view.container.querySelector('img, details')).toBeNull();
+  expect(view.container.querySelector('img')).toBeNull();
+  const notes = screen.getByText('材料说明').closest('details');
+  expect(notes).not.toHaveAttribute('open');
+  await view.user.click(screen.getByText('材料说明'));
+  expect(notes).toHaveAttribute('open');
+  expect(within(notes!).getByText('数据截至')).toBeVisible();
 });
 it('同材料问题就近展示一次，不吞掉另一图片同名的局部问题', async () => {
   const issue = { key: 'ocr_low_confidence_0', code: 'glyph', message: '数字需要对照原图核验', resolution: 'reading_edit' };

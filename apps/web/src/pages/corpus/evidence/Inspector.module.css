@@ -450,3 +450,9 @@
 .inspector { overflow:hidden; }
 .head { flex:none; }
 .body { flex:1;min-height:0;overflow:auto; }
+
+/* Object status is distinct from the tab's selection underline. */
+.tabStatus { display:inline-flex;align-items:center;gap:var(--lgi-space-1);margin-left:var(--lgi-space-1);font:var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui);color:var(--lgi-muted);white-space:nowrap; }
+.tabStatus::before { content:'';width:var(--lgi-space-1);height:var(--lgi-space-1);background:currentColor; }
+.tabStatus[data-tone='warning'] { color:var(--lgi-warning); }
+.tabStatus[data-tone='danger'] { color:var(--lgi-danger); }

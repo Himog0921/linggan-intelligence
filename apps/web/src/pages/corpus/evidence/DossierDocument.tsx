@@ -45,7 +45,6 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
   const sections = useMemo(() => resolveReadingSections(dossier), [dossier]);
   const gaps = useMemo(() => readingGaps(dossier), [dossier]);
   const issues = useMemo(() => remainingReadingIssues(dossier, sections), [dossier, sections]);
-  const hasIssues = issues.length > 0 || sections.some(section => section.groups.some(group => group.issues.length > 0));
   const hasMissing = gaps.length > 0 || issues.length > 0;
   const selection = dossier.selection;
   const memoryKey = `dossier-reading:v3:${domain}:${dossier.workRef}:${JSON.stringify([selection.mode, selection.kinds, selection.unitRefs, selection.blockRefs, selection.imagePages])}`;
@@ -66,15 +65,12 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
   function closeModal() { setExportSnapshot(null); setFocus(null); position.restore(beforeModal.current); }
   return <div ref={root} className={`${styles.surface} ${styles.root} ${tools.reader}`} aria-label="研究底稿正文" aria-busy={busy} data-dossier-document>
     <div ref={toolbar} className={`${styles.toolbar} ${tools.toolbar}`}>
-      <div className={`${styles.toolbarContext} ${tools.context}`}>
-        <div className={styles.snapshot}><DossierIcon name="clock"/><span>数据截至</span><time dateTime={dossier.asOf}>{humanMoment(dossier.asOf)}</time><span className={styles.zone}>UTC+8</span></div>
-        <span className={styles.availability} data-complete={gaps.length === 0 && !hasIssues && sections.length > 0}><DossierIcon name={gaps.length || hasIssues ? 'info' : 'check'}/>{gaps.length ? '含待补内容' : hasIssues ? '含待核对项' : sections.length ? '内容就绪' : '暂无可读文字'}</span>
-      </div>
       <div className={tools.operations}>
         {showNavigation ? <DossierNavigation sections={navSections} times={times} current={position.current} root={root} toolbar={toolbar} onJump={jump}/> : null}
         <div className={`${styles.actions} ${tools.actions}`}><ActionButton className={`${styles.control} ${styles.quiet}`} aria-label="刷新底稿" title="刷新底稿" disabled={busy} onClick={onRefresh}><DossierIcon name="refresh"/><span className={`${styles.refreshLabel} ${tools.refreshLabel}`}>刷新</span></ActionButton><ActionButton className={`${styles.control} ${styles.primary} ${tools.export}`} onClick={openExport}><DossierIcon name="download"/>导出</ActionButton></div>
       </div>
     </div>
+    {dossier.selection.mode === 'explicit' ? <p className={tools.scopeNotice}>当前为选定材料范围</p> : null}
     {refreshFailed ? <p className={styles.notice} role="status">刷新未完成，当前保留上一次读到的版本。<button type="button" onClick={onRefresh}>重试刷新</button></p> : null}
     <article className={styles.document} aria-label="连续阅读文档">
       {sections.map(({ section, groups }, index) => <section key={section.ref} className={styles.section} id={readingAnchor(prefix, section.ref)} data-section-ref={section.ref} data-reading-anchor={section.ref} tabIndex={-1} aria-labelledby={readingAnchor(prefix, `${section.ref}:title`)}>
@@ -95,6 +91,11 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
         <div className={styles.content}>{gaps.map(gap => <div className={styles.missingRow} key={gap.key}><span className={styles.missingTitle}>{gap.label}</span><span className={styles.missingMessage}>{gap.message}</span><span className={styles.missingState}>{gap.state}</span></div>)}<ReadingIssues issues={issues}/></div>
       </section> : null}
       {!sections.length && !hasMissing ? <p className={styles.empty}>本次范围没有可读文字。</p> : null}
+      <details className={tools.materialNotes}>
+        <summary>材料说明</summary>
+        <dl><div><dt>数据截至</dt><dd><time dateTime={dossier.asOf}>{humanMoment(dossier.asOf)}</time> UTC+8</dd></div>
+          <div><dt>阅读范围</dt><dd>{dossier.selection.mode === 'explicit' ? '当前选定材料' : '当前底稿全部可读材料'}</dd></div></dl>
+      </details>
       <p className={styles.end}>已显示当前底稿全部可读内容{dossier.selection.mode === 'explicit' ? ' · 当前为选定范围' : ''}</p>
     </article>
     {active && exportSnapshot ? <DossierExportDialog payload={exportSnapshot} domain={domain} onClose={closeModal} onUnavailable={onUnavailable}/> : null}

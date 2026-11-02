@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchDossier } from './dossierApi';
 import { dossierKey } from './evidenceKeys';
+import { dossierTabStatus } from './dossierTabStatus';
 import { hideCachedReading } from './dossierPresent';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { CommentDeepCollect } from './CommentDeepCollect';
@@ -163,6 +164,7 @@ export function Inspector(props: InspectorProps) {
   // Subscribe to the canonical reading already fetched by the active panel; never prepare on read.
   const canonical = useQuery({ queryKey: dossierKey(domain, selectedRef ?? ''), queryFn: ({ signal }) => fetchDossier(selectedRef ?? '', domain, signal), enabled: false, gcTime: 0 });
   const dossier = hideCachedReading(canonical.error) ? undefined : canonical.data?.dossier;
+  const readingStatus = dossierTabStatus(dossier, canonical.error, canonical.isFetching);
   const title = dossier && work ? dossier.note.displayTitle ?? '无标题' : work ? workTitle(work) : '请选择一个作品材料集合';
   const originalUrl = work?.platform === 'xhs' ? detail.data?.inspector.sourceNoteUrl : null;
   const originalLink = originalUrl ? <a className={`${actionStyles.action} ${actionStyles.outline} ${styles.openOriginal}`} href={originalUrl} target="_blank" rel="noopener noreferrer">打开原文</a> : null;
@@ -278,10 +280,12 @@ export function Inspector(props: InspectorProps) {
               id={`evidence-tab-${key}`}
               aria-controls={`evidence-panel-${key}`}
               aria-selected={tab === key}
+              aria-label={key === 'dossier' && readingStatus ? `研究底稿，${readingStatus.description}` : undefined}
               tabIndex={tab === key ? 0 : -1}
               onClick={() => onTab(key)}
             >
               {label}
+              {key === 'dossier' && readingStatus ? <span className={styles.tabStatus} data-tone={readingStatus.tone} title={readingStatus.description} aria-hidden="true">{readingStatus.label}</span> : null}
             </button>
           ))}
         </div>

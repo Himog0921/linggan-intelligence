@@ -1,10 +1,10 @@
 {
   "kind": "page_exception",
-  "reason": "证据库页签共同头部固定、正文各自滚动，消除滚动条占位导致的标题跳行；底稿局部工具及定位弹层收敛11px级紧凑动作。",
-  "authorization": "lie-cheng 01fe1c34 四张截图反馈；Philip task #11 2033801c 完整交接，明确替代task #10底稿内部工具保留限制。",
+  "reason": "阅读母版信息减法、状态归属、目录编排及动作层级：正常信息行撤除、异常随底稿tab、时间下沉、目录去逐项矩形、刷新安静与导出实体。",
+  "authorization": "lie-cheng 299fcfe6认可Philip02f4321b提案；Philip task #12 8577deee完整交接。",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"
   },
-  "exceptionScope": "仅证据库检查器滚动结构、DossierDocument工具分组及DossierNavigation局部样式；文档正文字号、原冻结阅读CSS、默认392/640栏宽及其他页不改。"
+  "exceptionScope": "仅证据库底稿状态与材料说明、局部目录/刷新/导出工具；不改全站Token、正文尺度、栏宽及已修好的共用头部滚动结构。"
 }
