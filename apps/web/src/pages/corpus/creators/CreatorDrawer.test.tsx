@@ -82,6 +82,23 @@ describe('依据抽屉 · 结构与结论在先', () => {
     expect(within(conclusion).getByRole('button', { name: '调整作者倾向' })).toBeEnabled();
   });
 
+  it('材料范围里的爆款数：未知保持未知，0 篇就是 0', async () => {
+    defaultRoutes(kit, ok(listJson({ threshold: 100, items: [itemJson(1, { viralWorkCount: null })] })));
+    const first = await openDrawer();
+    await first.user.click(within(first.dialog).getByText('判断依据与材料范围'));
+    expect(within(first.dialog).getByText(/当前范围相关爆款 未知/)).toBeInTheDocument();
+    expect(within(first.dialog).queryByText(/当前范围相关爆款 0 篇/)).toBeNull();
+    first.unmount();
+
+    kit = createFetchMock();
+    kit.install();
+    defaultRoutes(kit, ok(listJson({ threshold: 100, items: [itemJson(1, { viralWorkCount: 0 })] })));
+    const second = await openDrawer();
+    await second.user.click(within(second.dialog).getByText('判断依据与材料范围'));
+    expect(within(second.dialog).getByText(/当前范围相关爆款 0 篇/)).toBeInTheDocument();
+    expect(within(second.dialog).queryByText(/当前范围相关爆款 未知/)).toBeNull();
+  });
+
   it('发现来源：发现词、首次发现时间与当时看到的那篇作品，作品标题可回查', async () => {
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { keywords: ['注意力训练', '写作业'] })] })));
     kit.route(
@@ -226,9 +243,8 @@ describe('依据抽屉 · 研究线索（按作品分组）', () => {
     expect(failed).toHaveTextContent('读取失败 · 模型服务暂不可用');
     expect(failed).toHaveTextContent('研究未完成 · 模型服务暂不可用');
     expect(within(failed!).queryByRole('button', { name: /重试/ })).toBeNull();
-    const processing = within(failed!).getByText('处理信息').closest('details') as HTMLElement;
-    expect(processing).toHaveTextContent('model_provider_unavailable');
-    expect(failed!.textContent?.replace(processing.textContent ?? '', '')).not.toContain('model_provider_unavailable');
+    expect(failed!).not.toHaveTextContent('处理信息');
+    expect(failed!).not.toHaveTextContent('model_provider_unavailable');
     expect(insufficient).toHaveTextContent('已研究，依据不足');
   });
 
@@ -250,6 +266,10 @@ describe('依据抽屉 · 研究线索（按作品分组）', () => {
     expect(group).toHaveTextContent('人工调整 · 2026-10-15 12:00');
     expect(group).toHaveTextContent('支持材料已变化，请复核');
     expect(group).toHaveTextContent('原人工记录仍保留');
+    expect(within(group).getAllByText(/自动依据更新于 2026-10-14 10:00/)).toHaveLength(1);
+    expect(within(group).queryByText('单篇作品研究')).toBeNull();
+    expect(within(group).getByRole('link', { name: '打开原作品 →' })).toBeInTheDocument();
+    expect(within(group).getByRole('button', { name: '检查研究底稿' })).toBeInTheDocument();
     expect(within(group).getAllByRole('button', { name: /补充|调整/ }).length).toBeGreaterThan(0);
   });
 });

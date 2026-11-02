@@ -546,7 +546,8 @@ describe('旧分析退役后的历史读取', () => {
     let drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     await user.click(within(drawer).getByRole('tab', { name: '研究线索' }));
-    expect(drawer).toHaveTextContent('model_budget_exhausted');
+    expect(drawer).toHaveTextContent('研究未完成 · 本日额度已用尽');
+    expect(drawer).not.toHaveTextContent('model_budget_exhausted');
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     cancel();
     await user.click(screen.getByRole('button', { name: '合成作者 1' }));

@@ -212,7 +212,7 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
         <p className={styles.help}>
           {data.policy.likeThreshold === null
             ? '未设置爆款标准。'
-            : `爆款最低点赞 ${formatCount(data.policy.likeThreshold)}；当前范围相关爆款 ${formatCount(item.viralWorkCount ?? 0)} 篇。`}
+            : `爆款最低点赞 ${formatCount(data.policy.likeThreshold)}；当前范围相关爆款 ${item.viralWorkCount === null ? '未知' : `${formatCount(item.viralWorkCount)} 篇`}。`}
         </p>
         <p className={styles.help}><strong>作者在本领域的内容倾向：</strong>{CRITERIA.focus}</p>
         <div className={styles.identityBlock}>
@@ -256,19 +256,23 @@ function summaryLine(work: Work): string {
 
 const WORK_FIELDS = ['relevance', 'personal_experience', 'professional_output', 'explicit_promotion'] as const;
 
+/** 一项判断的来源：人工调整各自保留时间；相同的自动更新时间收在作品层，只出现一次。 */
+function workAttention(analysis: Analysis): string {
+  const at = analysis.resultAt ?? analysis.resultAtDisplay;
+  return at ? `自动依据更新于 ${humanMoment(at)}` : '自动依据更新时间未记录';
+}
+
 function WorkJudgment({ ctx, work, field }: { ctx: PanelContext; work: Work; field: string }) {
   const judgement: Judgement = effectiveJudgement(work.analysis, field);
   const manual = work.analysis.manual[field];
   const evidence = evidenceFor(work.analysis, field, judgement);
+  const source = manual ? `${provenanceText(work.analysis, field)}${manual.supportUnavailable ? ' · 支持材料已变化，请复核' : ''}` : null;
   return (
     <div className={styles.judgmentRow}>
       <div className={styles.judgmentLine}>
         <span className={styles.judgmentLabel}>{FIELD_NAMES[field] ?? field}</span>
         <strong>{valueLabel(judgement.value)}</strong>
-        <span className={styles.judgmentSource}>
-          {provenanceText(work.analysis, field)}
-          {manual?.supportUnavailable ? ' · 支持材料已变化，请复核' : ''}
-        </span>
+        {source ? <span className={styles.judgmentSource}>{source}</span> : null}
         <button type="button" className={styles.textButton} disabled={!ctx.writable} aria-label={`${judgement.value === 'unknown' ? '补充' : '调整'}${FIELD_NAMES[field] ?? field}`} onClick={() => ctx.onCorrect(field, work.workRef)}>
           {judgement.value === 'unknown' ? '补充判断' : '调整判断'}
         </button>
@@ -341,17 +345,10 @@ export function EvidencePanel({
                 <CreatorWorkResearch domain={ctx.data.domain.domainRef} work={work.workRef} disabled={!ctx.writable} />
               </div>
               {statusVisible ? <AnalysisLine analysis={work.analysis} value={work.relevance} /> : null}
+              <p className={styles.workProvenance}>{workAttention(work.analysis)}</p>
               {WORK_FIELDS.map(field => (
                 <WorkJudgment key={field} ctx={ctx} work={work} field={field} />
               ))}
-              {work.analysis.lastErrorCode ? (
-                <details className={styles.processing}>
-                  <summary>处理信息</summary>
-                  <p className={styles.help}>
-                    {failureReason(work.analysis.lastErrorCode)} <code>{work.analysis.lastErrorCode}</code>
-                  </p>
-                </details>
-              ) : null}
             </div>
           </details>
         );

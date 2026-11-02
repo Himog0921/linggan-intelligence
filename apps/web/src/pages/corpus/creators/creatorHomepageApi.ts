@@ -4,8 +4,8 @@ export type PreviewState = 'not_requested' | 'running' | 'complete' | 'partial' 
 export interface HomepageNote {
   workRef: string;
   ordinal: number;
-  /** The server says whether this card is already formal research material of the domain. */
-  inDomain: boolean;
+  /** true / false 来自服务端；字段缺失时不推断为「主页新见」。 */
+  inDomain: boolean | null;
   title: string | null;
   likes: number | null;
   comments: number | null;
@@ -58,7 +58,7 @@ export function parseHomepagePreview(value: unknown): HomepagePreview {
     return {
       workRef: item.workRef,
       ordinal: item.ordinal,
-      inDomain: item.inDomain === true,
+      inDomain: item.inDomain === true ? true : item.inDomain === false ? false : null,
       title: optionalString(item.title),
       likes: optionalNumber(item.likes),
       comments: optionalNumber(item.comments),

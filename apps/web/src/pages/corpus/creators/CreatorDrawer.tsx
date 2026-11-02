@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { ModalDialog } from '../../../corpus/ModalDialog';
@@ -80,9 +80,52 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
   const first = item.representatives[0];
   const avatarUrl = first ? (resources.byRef.get(first.workRef)?.avatarUrl ?? null) : null;
 
-  // 切换分区时记住离开的那一区滚到哪里，回来时放回原位；首次打开恢复返回前的位置。
-  useLayoutEffect(() => {
-    if (body.current) body.current.scrollTop = positions.current[tab];
+  // 打开抽屉的是 ModalDialog 的 effect：本组件挂载时 <dialog> 还没 showModal，直接写 scrollTop 会被夹到 0。
+  // 等一帧再恢复；内容随后长高时重试；用户自己滚动、按键或点击后立即放弃，不把位置抢回来。
+  useEffect(() => {
+    const element = body.current;
+    if (!element) return;
+    let target: number | null = positions.current[tab] ?? 0;
+    let observer: ResizeObserver | null = null;
+    let frame = 0;
+    let stopped = false;
+    const stop = () => {
+      target = null;
+      observer?.disconnect();
+      observer = null;
+    };
+    const apply = () => {
+      if (stopped || target === null) return;
+      element.scrollTop = target;
+      if (Math.abs(element.scrollTop - target) <= 1) stop();
+    };
+    const observe = () => {
+      if (typeof ResizeObserver === 'undefined') return;
+      observer = new ResizeObserver(apply);
+      for (const panel of element.children) observer.observe(panel);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (['PageDown', 'PageUp', 'ArrowDown', 'ArrowUp', 'Home', 'End', ' '].includes(event.key)) stop();
+    };
+    element.addEventListener('wheel', stop, { passive: true });
+    element.addEventListener('touchstart', stop, { passive: true });
+    element.addEventListener('pointerdown', stop);
+    element.addEventListener('keydown', onKeyDown);
+    frame = requestAnimationFrame(() => {
+      if (stopped) return;
+      apply();
+      observe();
+      apply();
+    });
+    return () => {
+      stopped = true;
+      cancelAnimationFrame(frame);
+      stop();
+      element.removeEventListener('wheel', stop);
+      element.removeEventListener('touchstart', stop);
+      element.removeEventListener('pointerdown', stop);
+      element.removeEventListener('keydown', onKeyDown);
+    };
   }, [tab]);
 
   function switchTab(next: DrawerTab) {

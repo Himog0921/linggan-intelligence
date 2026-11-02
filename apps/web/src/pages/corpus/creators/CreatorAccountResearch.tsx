@@ -35,11 +35,14 @@ export function CreatorAccountResearch({ domain, platform, author, disabled }: {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
   const [uncertain, setUncertain] = useState(false);
+  const [open, setOpen] = useState(false);
   const command = useRef<string | null>(null);
+  const hasPanel = prepared !== null || request !== null || notice !== '' || uncertain;
   async function prepare() {
+    if (busy || uncertain) return;
     setBusy(true); setNotice('');
-    try { setPrepared(previewValue(await requestJson(`/api/local/creator-account-research/preview?${new URLSearchParams({ domainRef: domain, platform, authorExternalId: author })}`))); setRequest(null); command.current = null; setUncertain(false); }
-    catch (error) { setNotice(message(error)); }
+    try { setPrepared(previewValue(await requestJson(`/api/local/creator-account-research/preview?${new URLSearchParams({ domainRef: domain, platform, authorExternalId: author })}`))); setRequest(null); command.current = null; setUncertain(false); setOpen(true); }
+    catch (error) { setNotice(message(error)); setOpen(true); }
     finally { setBusy(false); }
   }
   async function start() {
@@ -68,18 +71,21 @@ export function CreatorAccountResearch({ domain, platform, author, disabled }: {
     finally { setBusy(false); }
   }
   return <div className={styles.accountResearch}>
-    <button type="button" className={styles.textButton} disabled={disabled || busy} onClick={() => void prepare()}>
-      {busy && !prepared && !request ? '检查中…' : '检查账号样本'}
-    </button>
-    {prepared || request || notice || uncertain ? (
+    {hasPanel && open ? null : (
+      <button type="button" className={styles.textButton} disabled={busy || (!hasPanel && (disabled || uncertain))} onClick={() => { if (hasPanel) setOpen(true); else void prepare(); }}>
+        {hasPanel ? '展开账号样本研究' : busy ? '检查中…' : '检查账号样本'}
+      </button>
+    )}
+    {hasPanel && open ? (
       <div className={styles.accountPanel}>
         <div className={styles.accountPanelHead}>
           <strong>账号样本研究</strong>
-          <button type="button" className={styles.textButton} onClick={() => { setPrepared(null); setNotice(''); setUncertain(false); }}>收起</button>
+          <button type="button" className={styles.textButton} onClick={() => setOpen(false)}>收起</button>
         </div>
         {prepared ? <><p className={styles.help}>本次固定 {prepared.workRefs.length} 篇作品及可用公开简介，最多 30 篇，不代表账号全部作品。</p>
           <p className={styles.help}>开始后会按 AI 设置调用模型，可能产生费用。</p>
           <ActionButton onClick={() => void start()} disabled={disabled || busy || request !== null}>{uncertain ? '重试同一请求' : '开始账号研究'}</ActionButton></> : null}
+        {!prepared && !request && notice ? <button type="button" className={styles.textButton} disabled={disabled || busy || uncertain} onClick={() => void prepare()}>重新检查样本</button> : null}
         {request ? <ActionButton onClick={() => void refresh()} disabled={busy}>刷新研究状态</ActionButton> : null}
         {notice ? <p role="status" className={styles.help}>{notice}</p> : null}
       </div>

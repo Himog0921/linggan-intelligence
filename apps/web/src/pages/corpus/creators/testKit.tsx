@@ -131,6 +131,7 @@ interface ItemOptions {
   unknown?: number;
   maxLikes?: number | null;
   candidateHigh?: number | null;
+  viralWorkCount?: number | null;
   keywords?: string[];
   firstSeenDate?: string | null;
   firstSeenPrecision?: string | null;
@@ -216,7 +217,7 @@ export function itemJson(n: number, options: ItemOptions = {}) {
     unrelatedWorkCount: 0,
     unknownRelevanceWorkCount: options.unknown ?? 2,
     knownLikeWorkCount: 3,
-    viralWorkCount: null,
+    viralWorkCount: options.viralWorkCount === undefined ? null : options.viralWorkCount,
     maxRelatedLikeCount: options.maxLikes === undefined ? 1500 : options.maxLikes,
     candidateHighLikeCount: options.candidateHigh === undefined ? 1500 : options.candidateHigh,
     matchedWorkRefs: works.map(work => work.workRef),

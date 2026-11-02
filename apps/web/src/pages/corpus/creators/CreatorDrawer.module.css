@@ -131,8 +131,8 @@
 .iconButton {
   display: grid;
   place-items: center;
-  width: var(--lgi-space-10);
-  height: var(--lgi-space-10);
+  width: var(--lgi-space-8);
+  height: var(--lgi-space-8);
   border: 1px solid var(--lgi-ink) !important;
   padding: 0 !important;
   background: var(--lgi-canvas) !important;
@@ -572,6 +572,13 @@
   line-height: var(--lgi-type-aux-leading);
 }
 
+.workProvenance {
+  margin: 0 0 var(--lgi-space-2);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+  line-height: var(--lgi-type-aux-leading);
+}
+
 .workActions {
   display: flex;
   flex-wrap: wrap;
@@ -579,6 +586,10 @@
   gap: var(--lgi-space-3);
   margin-bottom: var(--lgi-space-2);
   font-size: var(--lgi-type-label-size);
+}
+
+.researchBlock {
+  flex-basis: 100%;
 }
 
 .judgmentRow {

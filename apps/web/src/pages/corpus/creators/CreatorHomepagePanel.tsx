@@ -268,7 +268,9 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
               return (
                 <div key={note.workRef} className={styles.note} data-selected={chosen}>
                   <button className={styles.noteChoice} type="button" onClick={() => toggle(note.workRef)} aria-pressed={chosen} aria-label={chosen ? `移除 ${title}` : `选择 ${title}`}>
-                    {note.inDomain ? <span className={styles.sticker}>本领域已见</span> : null}
+                    {view === 'grid' && note.inDomain !== null ? (
+                      <span className={styles.sticker}>{note.inDomain ? '本领域已见' : '主页新见'}</span>
+                    ) : null}
                     <span className={styles.check} aria-hidden="true">{chosen ? '✓' : ''}</span>
                     <Cover url={resource?.coverUrl ?? null} pending={media.pending} className={styles.cover} fallback={view === 'grid' ? '封面未取得' : '▧'} />
                   </button>
@@ -276,7 +278,9 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
                     <a className={styles.noteTitle} href={workLink(link, item.creatorKey, {}, note.workRef)} data-return-key={item.creatorKey} title={title}>{title}</a>
                     <div className={styles.noteStats}>
                       <span>赞 <Metric value={note.likes} /></span>
-                      {!edited && recommended.has(note.workRef) ? <span className={styles.recommend}>系统推荐</span> : null}
+                      {view === 'list' && note.inDomain !== null ? (
+                        <span className={styles.ownership}>{note.inDomain ? '本领域已见' : '主页新见'}</span>
+                      ) : null}
                     </div>
                   </div>
                 </div>
@@ -285,7 +289,10 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
           </div>
           {filter === 'selected' && displayed.length === 0 ? <p className={styles.info}>尚未选中任何作品。</p> : null}
           <div className={styles.studyDock}>
-            <span className={styles.selectedCount}>已选 {formatCount(selectedNotes.length)} 篇</span>
+            <span className={styles.selectedCount}>
+              已选 {formatCount(selectedNotes.length)} 篇
+              {!edited && recommended.size > 0 ? <span className={styles.recommend}>系统推荐</span> : null}
+            </span>
             <ActionButton ref={studyButtonRef} aria-expanded={showConfirm} aria-controls="creator-study-confirm" disabled={!canWrite || selectedNotes.length === 0 || pending || !preview?.scopeFrozenAt || state === 'running'} variant="primary" onClick={() => { setShowConfirm(true); setFeedback(null); }}>
               研究已选 {formatCount(selectedNotes.length)} 篇
             </ActionButton>

@@ -143,7 +143,7 @@ describe('主页作品 · 冻结样本与精选研究', () => {
       works: [card(1, { likes: 5 }), card(2, { inDomain: true, likes: 20 }), card(3, { likes: 300 }), card(4, { likes: 50 })],
       sampleCount: 4, frozenCount: 4,
     })));
-    const { panel } = await openHomepage();
+    const { user, panel } = await openHomepage();
     await within(panel).findByText('本次样本 4 篇');
     expect(within(panel).getByRole('button', { name: '研究已选 3 篇' })).toBeEnabled();
     // 已见的（2）、点赞最高的（3）、对照（1 号位）被选；4 号没选。
@@ -153,10 +153,30 @@ describe('主页作品 · 冻结样本与精选研究', () => {
     expect(within(panel).getByRole('button', { name: '选择 主页卡片 4' })).toHaveAttribute('aria-pressed', 'false');
     expect(panel.querySelectorAll('[data-selected="true"]')).toHaveLength(3);
     expect(panel).toHaveTextContent('本领域已见');
-    expect(panel).toHaveTextContent('系统推荐');
+    expect(within(panel).getAllByText('系统推荐')).toHaveLength(1);
     expect(panel).not.toHaveTextContent('主页新遇见');
-    // 页面的作品筛选不影响这个标签：只看服务端给的 inDomain，所以只有 2 号是「已见」。
+    // 页面的作品筛选不影响这个标签：只看服务端给的 inDomain，所以只有 2 号是「已见」，其余是「主页新见」。
     expect(within(panel).getAllByText(/本领域已见/)).toHaveLength(1);
+    expect(within(panel).getAllByText('主页新见')).toHaveLength(3);
+    await user.click(within(panel).getByRole('button', { name: '选择 主页卡片 4' }));
+    expect(within(panel).queryByText('系统推荐')).toBeNull();
+  });
+
+  it('归属有确定值才贴签：列表放在点赞旁，未知不推成「主页新见」', async () => {
+    defaultRoutes(kit);
+    kit.route('GET', PREVIEW, ok(snapshot({ works: [card(1, { inDomain: null }), card(2, { inDomain: true }), card(3)] })));
+    const { user, panel } = await openHomepage();
+    await within(panel).findByText('本次样本 3 篇');
+    expect(within(panel).getAllByText('本领域已见')).toHaveLength(1);
+    expect(within(panel).getAllByText('主页新见')).toHaveLength(1);
+    await user.click(within(panel).getByRole('button', { name: '列表' }));
+    const unknown = within(panel).getByText('主页卡片 1').parentElement!;
+    const seen = within(panel).getByText('主页卡片 2').parentElement!;
+    const fresh = within(panel).getByText('主页卡片 3').parentElement!;
+    expect(unknown).toHaveTextContent(/赞\s*10/);
+    expect(unknown).not.toHaveTextContent('主页新见');
+    expect(seen).toHaveTextContent('本领域已见');
+    expect(fresh).toHaveTextContent('主页新见');
   });
 
   it('文字版精选：确认之前不发请求；请求体只带所选作品与服务端固定的范围', async () => {
