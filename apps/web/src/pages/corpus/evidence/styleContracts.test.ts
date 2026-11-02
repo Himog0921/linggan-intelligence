@@ -109,6 +109,7 @@ describe('样式契约', () => {
     expect(stateBodies).not.toMatch(/--lgi-signal-(?:soft|faint)/);
     expect(list).toMatch(/\.titleButton:hover:not\(:disabled\),\s*\.titleButton:active:not\(:disabled\)\s*\{\s*background:\s*transparent/);
     const cover = styles.get('CoverCard.module.css') ?? '';
+    expect(cover).toMatch(/\.select:hover:not\(:disabled\)\s*\{\s*background:\s*transparent/);
     const checkedPlate = cover.match(/\.item\[data-checked='true'\] \.plate\s*\{([^}]*)\}/)?.[1] ?? '';
     expect(checkedPlate).not.toMatch(/--lgi-signal-(?:soft|faint)/);
   });

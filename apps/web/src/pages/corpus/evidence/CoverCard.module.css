@@ -320,6 +320,10 @@
   cursor: pointer;
 }
 
+.select:hover:not(:disabled) {
+  background: transparent;
+}
+
 .select:focus-visible {
   outline: 3px solid var(--lgi-focus);
   outline-offset: calc(var(--lgi-space-1) * -1);
