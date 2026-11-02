@@ -85,7 +85,7 @@ export function CreatorAccountResearch({ domain, platform, author, disabled }: {
         {prepared ? <><p className={styles.help}>本次固定 {prepared.workRefs.length} 篇作品及可用公开简介，最多 30 篇，不代表账号全部作品。</p>
           <p className={styles.help}>开始后会按 AI 设置调用模型，可能产生费用。</p>
           <ActionButton onClick={() => void start()} disabled={disabled || busy || request !== null}>{uncertain ? '重试同一请求' : '开始账号研究'}</ActionButton></> : null}
-        {!prepared && !request && notice ? <button type="button" className={styles.textButton} disabled={disabled || busy || uncertain} onClick={() => void prepare()}>重新检查样本</button> : null}
+        {!request && notice && !uncertain ? <button type="button" className={styles.textButton} disabled={disabled || busy} onClick={() => void prepare()}>重新检查样本</button> : null}
         {request ? <ActionButton className={styles.inspectorTool} onClick={() => void refresh()} disabled={busy}>刷新研究状态</ActionButton> : null}
         {notice ? <p role="status" className={styles.help}>{notice}</p> : null}
       </div>

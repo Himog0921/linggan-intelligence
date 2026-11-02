@@ -77,6 +77,36 @@ it('提交进行中收起，回执到达后重新展开仍保留已接受的研�
   expect(screen.getByRole('button', { name: '刷新研究状态' })).toBeInTheDocument();
 });
 
+it('明确拒绝后收起再展开，可以重新检查样本并用新指纹提交', async () => {
+  const posts: { expectedFingerprint: string }[] = [];
+  let previews = 0;
+  vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.includes('/preview?')) {
+      previews += 1;
+      return reply(previews === 1 ? preview : { ...preview, workRefs: ['work-1', 'work-2'], inputFingerprint: 'b'.repeat(64) });
+    }
+    posts.push(JSON.parse(String(init?.body)));
+    if (posts.length === 1) return new Response(JSON.stringify({ reasons: ['creator_publication_withheld'] }), { status: 409, headers: { 'content-type': 'application/json' } });
+    return reply({ requestRef: 'request', batchRef: 'batch' });
+  }));
+  mount();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '检查账号样本' }));
+  await user.click(await screen.findByRole('button', { name: '开始账号研究' }));
+  expect(await screen.findByText('暂不能开始：材料、许可或任务状态已变化。请检查 AI 设置。')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: '开始账号研究' })).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '收起' }));
+  await user.click(screen.getByRole('button', { name: '展开账号样本研究' }));
+  await user.click(screen.getByRole('button', { name: '重新检查样本' }));
+  expect(await screen.findByText(/本次固定 2 篇作品/)).toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: '开始账号研究' }));
+  expect(await screen.findByText('已提交研究，结果尚未完成。')).toBeInTheDocument();
+  expect(previews).toBe(2);
+  expect(posts).toHaveLength(2);
+  expect(posts[0]?.expectedFingerprint).toBe('f'.repeat(64));
+  expect(posts[1]?.expectedFingerprint).toBe('b'.repeat(64));
+});
+
 it('样本检查失败后可以重新检查，不需要关闭抽屉', async () => {
   let attempts = 0;
   vi.stubGlobal('fetch', vi.fn(async (path: string) => {
