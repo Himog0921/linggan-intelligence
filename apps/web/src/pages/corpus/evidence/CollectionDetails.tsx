@@ -1,3 +1,4 @@
+import { EvidenceLabel } from './EvidenceLabel';
 import { Tech } from './Primitives';
 import type { PanelContext } from './ReadingPanel';
 import { commentCollectionRows } from './observationRecords';
@@ -82,7 +83,7 @@ export function CollectionDetails({ context }: { context: PanelContext }) {
   const limitations = inspector.limitations;
   return (
     <details className={styles.collectionDetails}>
-      <summary>采集详情</summary>
+      <summary><EvidenceLabel>采集详情</EvidenceLabel></summary>
       <dl className={styles.detailFacts}>
         <dt>原文</dt>
         <dd>

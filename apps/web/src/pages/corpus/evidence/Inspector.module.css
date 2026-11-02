@@ -231,6 +231,9 @@
 }
 
 .collectionDetails > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-2);
   width: fit-content;
   max-width: 100%;
   cursor: pointer;
@@ -244,7 +247,6 @@
 
 .collectionDetails > summary::after {
   content: '+';
-  margin-left: var(--lgi-space-2);
   font-family: var(--lgi-font-data);
 }
 
@@ -252,7 +254,7 @@
   content: '−';
 }
 
-.collectionDetails > summary:hover {
+.collectionDetails > summary:hover::after {
   color: var(--lgi-ink);
 }
 
