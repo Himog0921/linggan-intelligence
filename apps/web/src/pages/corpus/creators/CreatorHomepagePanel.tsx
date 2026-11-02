@@ -218,7 +218,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
                 </button>
               ) : null}
             </div>
-            <ActionButton onClick={() => void query.refetch()} busy={query.isFetching && !pending} disabled={pending}>
+            <ActionButton className={styles.inspectorTool} onClick={() => void query.refetch()} busy={query.isFetching && !pending} disabled={pending}>
               刷新读取
             </ActionButton>
           </div>

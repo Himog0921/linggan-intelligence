@@ -93,6 +93,13 @@
   color: var(--lgi-signal-ink) !important;
 }
 
+/* 检查器内的次级工具收至 32px；底部「研究已选/确认精选范围」等主执行动作仍用 40px。 */
+.inspectorTool[data-action-button] {
+  height: var(--lgi-space-8);
+  min-height: var(--lgi-space-8);
+  padding: 0 var(--lgi-space-3);
+}
+
 .tools {
   display: flex;
   align-items: center;

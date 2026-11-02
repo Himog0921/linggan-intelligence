@@ -86,7 +86,7 @@ export function CreatorAccountResearch({ domain, platform, author, disabled }: {
           <p className={styles.help}>开始后会按 AI 设置调用模型，可能产生费用。</p>
           <ActionButton onClick={() => void start()} disabled={disabled || busy || request !== null}>{uncertain ? '重试同一请求' : '开始账号研究'}</ActionButton></> : null}
         {!prepared && !request && notice ? <button type="button" className={styles.textButton} disabled={disabled || busy || uncertain} onClick={() => void prepare()}>重新检查样本</button> : null}
-        {request ? <ActionButton onClick={() => void refresh()} disabled={busy}>刷新研究状态</ActionButton> : null}
+        {request ? <ActionButton className={styles.inspectorTool} onClick={() => void refresh()} disabled={busy}>刷新研究状态</ActionButton> : null}
         {notice ? <p role="status" className={styles.help}>{notice}</p> : null}
       </div>
     ) : null}

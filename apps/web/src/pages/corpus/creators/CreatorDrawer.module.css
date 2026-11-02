@@ -143,6 +143,13 @@
   background: var(--lgi-canvas-low) !important;
 }
 
+/* 检查器内的次级工具与关闭键同层级：32px；开始/确认等主执行动作仍用 40px。 */
+.inspectorTool[data-action-button] {
+  height: var(--lgi-space-8);
+  min-height: var(--lgi-space-8);
+  padding: 0 var(--lgi-space-3);
+}
+
 .metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
