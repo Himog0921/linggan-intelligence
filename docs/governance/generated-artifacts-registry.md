@@ -481,3 +481,27 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## RESEARCH-DOSSIER-V2 · 2026-11-01 最终收口
 
 本机真实清单、批次回执、截图和独立审阅日志固定在主仓库 `artifacts/private/dossier-final-closeout-20261101/`，由 root 负责；不入 Git，不含普通日志中的凭据或原文。原材料不修改，旧读本保留，输出源为本次明确授权的本地处理与正式 API。保留至验收，验收或合并满 14 天后按本机规则保留报告和汇总，清理大文件。合成证明使用自有临时 PG 和 `/tmp/dossier-closeout-proof-*`，结束仅回收自有资源。
+
+## EVIDENCE-TOOLBAR-20261101
+
+本轮 codex 独立树的 `artifacts/private/evidence-toolbar-20261101/` 保存固定合成 fixture、仅 GET/HEAD 的 loopback 预览脚本、浏览器截图/尺寸、检查日志及交付报告，忽略、不入 Git。来源为 task #4 的真实 React 构建与隔离测试，不连接正式 API、数据库或模型。codex 负责，保留至用户验收，合并前移交主仓库同名私有目录；仅清理本任务自有进程和路径。dist、node_modules 沿现有登记。
+
+## EVIDENCE-COMBINED-20261101
+
+本轮组合树 `artifacts/private/evidence-combined-20261101/` 保存固定合成接口、GET/HEAD隔离预览、截图/几何、检查日志及报告，忽略、不入Git。来源为8c883f84与be45ac71组合的真实React构建；只用loopback，不读取正式数据、凭据或调用模型。codex负责，保留至用户验收；合并/放弃后按本机安全规则处理自有树与进程。dist/node_modules沿既有登记。
+
+## EVIDENCE-ACTIONS-20261101
+
+本轮独立树artifacts/private/evidence-actions-20261101保存固定合成fixture/GET预览、桌面浏览器状态图、日志、报告和复核回执，忽略不入Git；codex负责，保留至用户验收。预览仅loopback合成接口，不触发深采/退出登录或正式数据写入。依赖和dist沿既有登记，合并/放弃后按本机规则回收自有树与产物。
+
+## EVIDENCE-MASTER-20261102
+
+本组合树artifacts/private/evidence-master-20261102保存真实React构建的固定合成fixture、GET/HEAD loopback预览、桌面截图与几何、异常样本、验证日志和交付报告，忽略不入Git。codex负责，来源0b9ce786与1708df34组合，不改正式服务/数据、不触发深采/退出登录。保留至用户验收，合并/放弃后按本机规则回收自有资源；dist/node_modules沿既有登记。
+
+## EVIDENCE-READING-20261102
+
+本独立树artifacts/private/evidence-reading-20261102保存手写固定合成长短标题/分段清单及混合材料fixture、仅GET/HEAD的loopback预览、同文旧/新桌面对照、几何/交互检查和报告，忽略不入Git。codex负责，保留至用户验收；旧7989433c构建在自有端口读取同fixture，不覆盖5404数据或产物。dist/node_modules沿既有登记，不接真实库/模型；合并放弃后按本机规则回收自有资源。
+
+- `artifacts/private/evidence-inspector-tools-20261102/`：task #11 隔离截图、合成fixture、滚动条/级联实测、报告与验证日志；仅本机私有证明，不进入Git。候选待用户验收保留，验收满14天后按本机规则仅留报告/汇总；临时构建随候选收尾。
+
+- `artifacts/private/evidence-reading-standard-20261102/`：task #12固定合成前后对照、状态/材料说明/目录截图、中文行片段与验证日志、报告；本机私有证据不入Git。候选未验收保留，验收14天后按本机规则留报告/JSON汇总；自建构建产物随候选收尾。

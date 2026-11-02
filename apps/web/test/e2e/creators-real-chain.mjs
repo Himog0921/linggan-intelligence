@@ -87,11 +87,11 @@ try {
     await page.getByText('1 / 2 页', { exact: true }).waitFor();
     assert.equal(await rows().count(), 25);
     assert.match(await page.locator('.v7-context-meta').innerText(), /^读取于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
-    // 一级导航六项；语料是当前项；采集项的状态词来自语料外壳接口（库里已有一个观察目标 → 观察中）。
+    // 一级导航六项只显示中文标题；语料是当前项；采集项不再带状态词（状态词仍由语料外壳接口提供，见下个步骤）。
     const nav = page.getByRole('navigation', { name: '一级导航' });
     assert.equal(await nav.locator('a, button').count(), 6);
     assert.equal(await nav.getByRole('link', { name: /语料/ }).getAttribute('aria-current'), 'page');
-    assert.match(await nav.getByRole('link', { name: /采集/ }).innerText(), /观察中/);
+    assert.equal((await nav.getByRole('link', { name: /采集/ }).innerText()).trim(), '采集');
     const headerBorder = await page.locator('.v7-global-row').evaluate(node => getComputedStyle(node).borderBottomWidth);
     assert.equal(headerBorder, '2px');
     // 侧栏三项都带着领域；创作者是当前项。

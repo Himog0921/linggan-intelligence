@@ -277,3 +277,8 @@
 
 /* V2.2 removes the permanent list readout rail; the sidebar's domain count stays intact. */
 .bench { transition:grid-template-columns var(--lgi-duration-panel) var(--lgi-ease-ui); }
+
+/* Selection floats only over its results column; its flow space keeps final rows reachable. */
+.resultsContent { min-height:100%;display:flex;flex-direction:column; }
+.selectionDock { position:sticky;bottom:var(--lgi-space-4);z-index:var(--lgi-z-sticky);align-self:flex-end;
+  margin:var(--lgi-space-4);margin-top:auto;max-width:calc(100% - var(--lgi-space-8)); }

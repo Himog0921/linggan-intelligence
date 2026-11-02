@@ -1,22 +1,20 @@
 import { useQuery } from '@tanstack/react-query';
 import { fetchDossier } from './dossierApi';
 import { dossierKey } from './evidenceKeys';
+import { dossierTabStatus } from './dossierTabStatus';
 import { hideCachedReading } from './dossierPresent';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { CommentDeepCollect } from './CommentDeepCollect';
+import { CollectionDetails } from './CollectionDetails';
 import { DossierPanel } from './DossierPanel';
 import { Lightbox } from './Lightbox';
-import { TechnicalFacts } from './TechnicalFacts';
-import { ReobservationSection } from './ReobservationSection';
-import { AuthorFact, Engagement, MaterialLegend, MaterialRail } from './WorkParts';
-import { Section } from './Primitives';
-import { materialSummary, publishedCopy } from './evidencePresent';
-import { MaterialsPanel } from './MaterialsPanel';
-import { ObservationHistory } from './ObservationHistory';
+import { ObservationRecordSection } from './ObservationRecordSection';
+import { AuthorFact, Engagement } from './WorkParts';
+import { publishedCopy } from './evidencePresent';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
-import { TracePanel } from './TracePanel';
 import { errorCode } from './evidenceFeedback';
+import { useToast } from './toastContext';
 import { apiPath } from './evidencePaths';
 import { workTitle } from './evidencePresent';
 import { PANELS, TABS, type PanelWidth, type TabKey } from './evidenceQuery';
@@ -24,6 +22,7 @@ import type { WorkDetail, WorkItem } from './evidenceTypes';
 import { mediaObjects, type ViewerObject } from './mediaObjects';
 import { reobservationAccess } from './reobservationAccess';
 import { useCommentChannel } from './useCommentChannel';
+import { useInspectorTabScroll } from './useInspectorTabScroll';
 import { useReobservation } from './useReobservation';
 import page from './EvidencePage.module.css';
 import styles from './Inspector.module.css';
@@ -93,7 +92,19 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh }: BodyProps) {
   const { item, inspector, channels } = detail;
   const commentsUrl = apiPath(channels.commentsUrl);
   const comments = useCommentChannel(commentsUrl);
-  const reobservation = useReobservation({ actionPath: reobservationAccess(item, channels.reobservation).actionPath, onTerminal: onRefresh });
+  const toast = useToast();
+  const workLabel = workTitle(item);
+  const reobservation = useReobservation({
+    actionPath: reobservationAccess(item, channels.reobservation).actionPath,
+    onTerminal: onRefresh,
+    onReceipt: result => {
+      if (result.tone === 'success') {
+        toast.notify({ key: `${item.ref}:reobserve`, tone: 'success', text: result.text, context: workLabel });
+      } else if (result.tone === 'unknown') {
+        toast.notify({ key: `${item.ref}:reobserve`, tone: 'unknown', text: '提交结果未确认，请核对原请求', context: workLabel });
+      }
+    },
+  });
   const [viewer, setViewer] = useState<{ objects: readonly ViewerObject[]; index: number } | null>(null);
   const fragment = (listItem ?? item).fragment;
   const context: PanelContext = {
@@ -117,22 +128,12 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh }: BodyProps) {
           active={tab === 'dossier'}
         />
       </Panel>
-      {/* 采集记录（Mog 2026-10-23）：先答「看过几次、数字怎么变、要不要再看、评论要不要采全」；
-          材料完整度、媒体台账、来源编号与技术事实一项不删，统一收进默认折叠的「技术信息」。 */}
+      {/* 采集记录（Mog 2026-10-23、2026-11-02）：先答「看过几次、数字怎么变、要不要再看、评论要不要采全」；
+          来源、采集时间、材料状态、停止原因与必要编号收进文末默认收起的「采集详情」。 */}
       <Panel id="trace" active={tab === 'trace'}>
-        <ObservationHistory item={item} inspector={inspector} />
-        <ReobservationSection item={item} channel={channels.reobservation} domain={domain} state={reobservation} onRecheck={recheck} />
+        <ObservationRecordSection item={item} inspector={inspector} channel={channels.reobservation} domain={domain} state={reobservation} onRecheck={recheck} />
         <CommentDeepCollect item={item} inspector={inspector} domain={domain} />
-        <details className={styles.technical}>
-          <summary>技术信息（排查用）</summary>
-          <Section title="材料完整度">
-            <MaterialRail summary={materialSummary(item)} />
-            <MaterialLegend summary={materialSummary(item)} />
-          </Section>
-          <MaterialsPanel context={context} />
-          <TracePanel context={context} />
-          <TechnicalFacts item={item} inspector={inspector} reobservation={channels.reobservation} />
-        </details>
+        <CollectionDetails context={context} />
       </Panel>
       {viewer ? <Lightbox objects={viewer.objects} index={viewer.index} onIndex={index => setViewer({ ...viewer, index })} onClose={() => setViewer(null)} /> : null}
     </>
@@ -155,7 +156,9 @@ export function Inspector(props: InspectorProps) {
   const { domain, selectedRef, listItem, detail, tab, width, drawer, open, onTab, onWidth, onClose, onBack, onRetry, onRefresh } = props;
   const titleId = useId();
   const surface = useRef<HTMLElement>(null);
+  const body = useRef<HTMLDivElement>(null);
   const back = useRef<HTMLButtonElement>(null);
+  useInspectorTabScroll(body, selectedRef, tab, detail.status === 'ready' && detail.data !== null);
   const tabs = useRef<Record<string, HTMLButtonElement | null>>({});
   const state = stateText(props);
   const note = unavailableNote(detail);
@@ -163,9 +166,12 @@ export function Inspector(props: InspectorProps) {
   // Subscribe to the canonical reading already fetched by the active panel; never prepare on read.
   const canonical = useQuery({ queryKey: dossierKey(domain, selectedRef ?? ''), queryFn: ({ signal }) => fetchDossier(selectedRef ?? '', domain, signal), enabled: false, gcTime: 0 });
   const dossier = hideCachedReading(canonical.error) ? undefined : canonical.data?.dossier;
+  const readingStatus = dossierTabStatus(dossier, canonical.error, canonical.isFetching);
   const title = dossier && work ? dossier.note.displayTitle ?? '无标题' : work ? workTitle(work) : '请选择一个作品材料集合';
   const originalUrl = work?.platform === 'xhs' ? detail.data?.inspector.sourceNoteUrl : null;
-  const originalLink = originalUrl ? <a className={`${actionStyles.action} ${actionStyles.outline} ${styles.openOriginal}`} href={originalUrl} target="_blank" rel="noopener noreferrer">打开原文</a> : null;
+  const originalLink = originalUrl ? (
+    <a className={`${actionStyles.action} ${actionStyles.outline} ${styles.openOriginal}${drawer ? '' : ` ${styles.openOriginalTool}`}`} href={originalUrl} target="_blank" rel="noopener noreferrer">打开原文</a>
+  ) : null;
 
   useEffect(() => {
     if (drawer && open) back.current?.focus({ preventScroll: true });
@@ -257,7 +263,6 @@ export function Inspector(props: InspectorProps) {
           {state ? (
             <>
               <strong>{state.text}</strong>
-              {state.code ? <code>{state.code}</code> : null}
               {detail.status === 'error' ? (
                 <button type="button" className={page.textButton} onClick={onRetry}>
                   重试读取
@@ -278,15 +283,17 @@ export function Inspector(props: InspectorProps) {
               id={`evidence-tab-${key}`}
               aria-controls={`evidence-panel-${key}`}
               aria-selected={tab === key}
+              aria-label={key === 'dossier' && readingStatus ? `研究底稿，${readingStatus.description}` : undefined}
               tabIndex={tab === key ? 0 : -1}
               onClick={() => onTab(key)}
             >
               {label}
+              {key === 'dossier' && readingStatus ? <span className={styles.tabStatus} data-tone={readingStatus.tone} title={readingStatus.description} aria-hidden="true">{readingStatus.label}</span> : null}
             </button>
           ))}
         </div>
       </header>
-      <div className={`${styles.body}${tab === 'dossier' ? ` ${dossierStyles.dossierHost}` : ''}`} data-current-tab={tab}>
+      <div ref={body} className={`${styles.body}${tab === 'dossier' ? ` ${dossierStyles.dossierHost}` : ''}`} data-current-tab={tab}>
         {detail.status === 'ready' && detail.data && selectedRef ? (
           <WorkBody key={selectedRef} detail={detail.data} listItem={listItem} domain={domain} tab={tab} onRefresh={onRefresh} />
         ) : (

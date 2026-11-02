@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SelectionBar } from './SelectionBar';
 
 function setup(overrides: Partial<Parameters<typeof SelectionBar>[0]> = {}) {
-  const handlers = { onClear: vi.fn(), onDeepCollect: vi.fn() };
+  const handlers = { onSelectPage: vi.fn(), onClear: vi.fn(), onDeepCollect: vi.fn() };
   render(<SelectionBar count={3} visibleSelected={2} visibleCount={3} hasDomain
     {...handlers} {...overrides} />);
   return { ...handlers, user: userEvent.setup() };
@@ -19,6 +19,11 @@ describe('explicit selection toolbar', () => {
     await user.click(screen.getByRole('button', { name: '清空已选' }));
     expect(onDeepCollect).toHaveBeenCalledTimes(1);
     expect(onClear).toHaveBeenCalledTimes(1);
+  });
+  it('全页已选后不再提供反选动作', () => {
+    setup({ visibleSelected:3 });
+    expect(screen.getByRole('button', { name:'本页已选' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name:'取消本页' })).toBeNull();
   });
   it('no selection disables batch actions', () => {
     setup({ count:0 });

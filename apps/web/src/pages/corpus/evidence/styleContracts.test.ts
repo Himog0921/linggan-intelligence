@@ -20,16 +20,22 @@ function hoverBodies(css: string): { selector: string; body: string }[] {
 }
 
 describe('样式契约', () => {
-  it('悬停不上浮：悬停规则里没有位移、缩放；封面翻转卡的旋转是唯一的悬停形变（EVIDENCE-COVER-FLIP-CARD-001）', () => {
+  it('悬停不上浮：悬停规则里没有位移、缩放；仅读取材料的1px动作和封面旋转例外（EVIDENCE-COVER-FLIP-CARD-001）', () => {
     const offenders: string[] = [];
     for (const [file, css] of styles) {
       for (const { selector, body } of hoverBodies(css)) {
         const moves = /translate|scale|(^|[;\s])(top|bottom|left|right|margin[a-z-]*)\s*:/.test(body);
         const rotation = /rotateY\(/.test(body) && file === 'CoverCard.module.css';
-        if (moves && !rotation) offenders.push(`${file}: ${selector}`);
+        const readAction = file === 'Controls.module.css' && selector === '.actionControl.actionControl:not(:disabled):hover'
+          && /transform:\s*translateY\(var\(--lgi-action-hover-shift\)\)/.test(body)
+          && !/translate|scale|(^|[;\s])(top|bottom|left|right|margin[a-z-]*)\s*:/.test(body.replace(/transform:\s*translateY\(var\(--lgi-action-hover-shift\)\);?/, ''));
+        if (moves && !rotation && !readAction) offenders.push(`${file}: ${selector}`);
       }
     }
     expect(offenders).toEqual([]);
+    // 仅读取材料采用实体动作；筛选与选择保持静止。
+    expect(styles.get('Controls.module.css')).toMatch(/\.filterToggle\.actionControl:not\(:disabled\):hover,\.selectMode\.actionControl:not\(:disabled\):hover\s*\{[^}]*transform:none/);
+    expect(readFileSync(path.resolve(directory, '../../../styles/lids_tokens.css'), 'utf8')).toContain('--lgi-action-hover-shift: -1px;');
   });
 
   it('封面翻转是旋转；减少动态效果时直接切换（不做过渡）', () => {
@@ -94,5 +100,24 @@ describe('样式契约', () => {
     const page = styles.get('EvidencePage.module.css') ?? '';
     expect(page).toMatch(/--ev-inspector-w/);
     for (const state of ['wide', 'focus', 'closed']) expect(page).toContain(`data-inspector='${state}'`);
+  });
+
+  it('读取行状态用中性墨灰，标题按钮悬停与按下保持透明（不铺信号色底板）', () => {
+    const list = styles.get('WorkList.module.css') ?? '';
+    const stateBodies = [...list.matchAll(/\.(?:row|tableRow)\[[^\]]*(?:selected|checked)[^\]]*\]\s*\{([^}]*)\}/g)]
+      .map(match => match[1] ?? '').join(' ');
+    expect(stateBodies).not.toMatch(/--lgi-signal-(?:soft|faint)/);
+    expect(list).toMatch(/\.titleButton:hover:not\(:disabled\),\s*\.titleButton:active:not\(:disabled\)\s*\{\s*background:\s*transparent/);
+    const cover = styles.get('CoverCard.module.css') ?? '';
+    expect(cover).toMatch(/\.select:hover:not\(:disabled\)\s*\{\s*background:\s*transparent/);
+    const checkedPlate = cover.match(/\.item\[data-checked='true'\] \.plate\s*\{([^}]*)\}/)?.[1] ?? '';
+    expect(checkedPlate).not.toMatch(/--lgi-signal-(?:soft|faint)/);
+  });
+
+  it('底稿首组只取消第一个块的标题前距，段落之后的标题仍保留 17px', () => {
+    const dossier = styles.get('DossierDocument.module.css') ?? '';
+    expect(dossier).not.toMatch(/\.group:first-child\s+\.heading\s*\{/);
+    expect(dossier).toMatch(/\.group:first-child>\.heading:first-child/);
+    expect(dossier).toMatch(/\.group:first-child>:first-child>\.heading:first-child/);
   });
 });

@@ -1,5 +1,5 @@
 {
-  "fingerprint": "d9c4f3149bb40219ce79a19e4ccd5c252fbb10c71df08e5f5d5890d35ecd21cc",
+  "fingerprint": "ce60ae3409e11c7d871ed2795e1fc2d4850082549b1f6a57c9096fb9a574300b",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -231,7 +231,7 @@
     },
     {
       "path": "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
-      "sha256": "6ac7c33df2541f41eaf7ceb1e7609ca5f2074863a6326543d8ff45290ed40a7d"
+      "sha256": "7f98d914fe4b6b0190df445db1e58f51f54071cbe5e2ac1382314b68bc19f35c"
     },
     {
       "path": "apps/web/src/pages/ops/Charts.tsx",
@@ -247,7 +247,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "0e3ed30c096455b597e274684f29b9ee3a553b3771955ff9f03e2e2c5f523a2c"
+      "sha256": "2750e4804e504aeb85ee34a89862edf28e05e29046c49e56e7054020ca24f84c"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -335,7 +335,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "659fde2209c8d9f64e32cbefbc7ac861b27ad82b7f389fd05c9884b13c8c085b"
+      "sha256": "056f3ba765aa2693ead2ba258583a5ba87bbf02691e24cfb10633337a8be1e8a"
     },
     {
       "path": "apps/web/src/styles/typography.css",
@@ -347,7 +347,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "238092327bc7d1aec1e47b009f7cfdb0dffbac8b14b91a290f5e895cfd82302e"
+      "sha256": "9f15b4063960692adb96476dbecdb1b5ffb4f2945034eb033358f016e8d2d63d"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

@@ -98,6 +98,12 @@
   gap: calc(var(--lgi-space-1) * 0.75);
 }
 
+/* 研读列表：五段等宽刻度、固定长度，不再随列宽伸展成进度条。 */
+.rail[data-compact='true'] {
+  grid-template-columns: repeat(5, var(--lgi-space-4));
+  justify-content: start;
+}
+
 .segment {
   height: calc(var(--lgi-space-2) + var(--lgi-space-1) / 4);
   border: 1px solid transparent;

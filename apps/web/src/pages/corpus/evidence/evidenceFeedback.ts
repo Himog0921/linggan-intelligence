@@ -90,19 +90,13 @@ export function classifyAdmission(operation: ReobservationOperation): AdmissionC
 export function reobservationReceipt(operation: ReobservationOperation): Feedback {
   switch (classifyAdmission(operation)) {
     case 'queued':
-      return feedback(
-        'success',
-        operation.admission === 'MERGE'
-          ? '已合并到覆盖当前作品的在途工单，尚未由工位认领。这不是已读取，也不是已刷新。'
-          : '已入队：复观测工单已形成，尚未由工位认领。这不是已读取，也不是已刷新。',
-        operation.admission,
-        '已提交',
-      );
+      return feedback('success', '复观测已提交，等待执行', operation.admission, '已提交');
     case 'reused':
-      return feedback('success', '既有材料已满足请求，没有新建工作。', operation.admission);
+      return feedback('success', '已使用已有材料', operation.admission, '已提交');
     case 'declined': {
-      const reason = operation.admissionReason ? ` 准入说明：${operation.admissionReason}` : '';
-      return feedback('refused', `${admissionCopy(operation.admission)}；没有形成工单，页面不会把它写成已排队。${reason}`, operation.admission);
+      // 原因本身就是「未受理」的说明时不重复准入结论；只保留一次原因与本次没有形成任务。
+      const reason = operation.admissionReason ? `原因：${operation.admissionReason}` : admissionCopy(operation.admission);
+      return feedback('refused', `本次没有形成复观测任务。${reason}`, operation.admission);
     }
   }
 }
@@ -122,13 +116,13 @@ export function reobservationFailure(error: unknown): Feedback {
   if (error instanceof ApiError) {
     const failure = error.failure;
     if (failure.kind === 'network') {
-      return feedback('unknown', '请求没有得到答复，结果未确认，可能已经入队。页面不会自动重发：可以先“重新核对”，或到“采集任务”查看；确需再提交时会再次确认。');
+      return feedback('unknown', '提交结果未确认，请核对原请求。页面不会自动重发。');
     }
     if (failure.kind === 'invalid_response') {
-      return feedback('unknown', '服务返回的内容无法识别，结果未确认，可能已经入队。页面不会自动重发：可以先“重新核对”，或到“采集任务”查看；确需再提交时会再次确认。');
+      return feedback('unknown', '提交结果未确认，请核对原请求。页面不会自动重发。');
     }
     const reason = (failure.code ? REOBSERVE_ERROR_TEXT[failure.code] : undefined) ?? '服务器没有接受这次请求。';
-    return feedback('error', `本次没有形成工单。${reason}`, failure.code);
+    return feedback('error', `本次没有提交。${reason}`, failure.code);
   }
-  return feedback('error', '本次没有形成工单。请求没有完成。');
+  return feedback('error', '本次没有提交。请求没有完成。');
 }

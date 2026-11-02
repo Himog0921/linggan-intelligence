@@ -69,21 +69,6 @@ describe('语料页面框架（三页共用）', () => {
     expect(screen.getAllByRole('link', { name: /证据库/ })[0]).toHaveAttribute('href', '/corpus/evidence');
   });
 
-  it('采集状态词取自语料外壳接口，三页一致；外壳没读到时保持「状态未知」，不当作「无观察目标」', () => {
-    const collection = () => screen.getByRole('link', { name: /采集/ }).querySelector('.v7-nav-state')?.textContent;
-    const states: [CorpusShell | null, string][] = [
-      [shell(A), '观察中'],
-      [{ ...shell(A), collectionState: '无观察目标' }, '无观察目标'],
-      [{ ...shell(A), collectionState: '状态未知' }, '状态未知'],
-      [null, '状态未知'],
-    ];
-    for (const [value, expected] of states) {
-      const { unmount } = renderFrame(value);
-      expect(collection()).toBe(expected);
-      unmount();
-    }
-  });
-
   it('证据库页的侧栏计数经框架传到徽标；其他页不传时隐藏', () => {
     const { container } = render(
       <MemoryRouter>

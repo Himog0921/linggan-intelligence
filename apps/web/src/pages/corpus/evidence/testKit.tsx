@@ -10,6 +10,7 @@ import type { ReactElement } from 'react';
 import { RouterProvider, createMemoryRouter } from 'react-router';
 import { vi } from 'vitest';
 import { shellJson } from './evidenceFixtures';
+import { ToastProvider } from './Toast';
 
 export interface Call {
   method: string;
@@ -80,7 +81,9 @@ export function renderWithProviders(element: ReactElement, url = '/') {
   const router = createMemoryRouter([{ path: '*', element }], { initialEntries: [url] });
   const view = render(
     <QueryClientProvider client={client}>
-      <RouterProvider router={router} />
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>
     </QueryClientProvider>,
   );
   return { ...view, client, user: userEvent.setup(), location: () => router.state.location.pathname + router.state.location.search };

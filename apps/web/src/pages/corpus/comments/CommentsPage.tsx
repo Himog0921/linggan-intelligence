@@ -25,10 +25,10 @@ export function CommentsPage() {
   const picker = shell.data && (shell.data.domains.length >= 2 || !current) ? <DomainPicker domains={shell.data.domains} selected={domain} action="/corpus/comments" /> : null;
   const crumb = picker ? <>语料 <span className="v7-slash">/</span> {picker} <span className="v7-slash">/</span> <b>评论研究</b></> : <>语料 <span className="v7-slash">/</span> <b>评论研究</b></>;
   const status = current?.status === 'active' ? '运行中' : current?.status === 'paused' ? '已暂停' : current?.status || '未知';
-  return <Workspace key={domain ?? 'unselected'} domain={domain} domainName={current?.name || '当前领域'} domainStatus={status} collectionState={shell.data?.collectionState} crumb={crumb} loading={shell.isPending} shellError={shell.isError ? errorText(shell.error) : ''} fatalShellError={shell.isError && !shell.data} retryShell={() => { void shell.refetch(); }} />;
+  return <Workspace key={domain ?? 'unselected'} domain={domain} domainName={current?.name || '当前领域'} domainStatus={status} crumb={crumb} loading={shell.isPending} shellError={shell.isError ? errorText(shell.error) : ''} fatalShellError={shell.isError && !shell.data} retryShell={() => { void shell.refetch(); }} />;
 }
 
-function Workspace({ domain, domainName, domainStatus, collectionState, crumb, loading, shellError, fatalShellError, retryShell }: { domain: string | null; domainName: string; domainStatus: string; collectionState?: string; crumb: ReactNode; loading: boolean; shellError: string; fatalShellError: boolean; retryShell: () => void }) {
+function Workspace({ domain, domainName, domainStatus, crumb, loading, shellError, fatalShellError, retryShell }: { domain: string | null; domainName: string; domainStatus: string; crumb: ReactNode; loading: boolean; shellError: string; fatalShellError: boolean; retryShell: () => void }) {
   const location = useLocation(), navigate = useNavigate(), params = new URLSearchParams(location.search), view = activeView(params.get('view'));
   const [savedViews, setSavedViews] = useState<Partial<Record<View, { search: string; state: unknown }>>>({});
   const [selectedComments, setSelectedComments] = useState<SelectedComment[]>([]);
@@ -72,7 +72,7 @@ function Workspace({ domain, domainName, domainStatus, collectionState, crumb, l
       <small>— 表示当前读数未获确认；不是零。</small>
     </div>
   </details> : `${domainName} · 状态 ${domainStatus}`;
-  return <AppShell active="corpus" collectionState={collectionState} boundaryLabel="本机服务状态" crumb={crumb} contextNav={contextNav} meta={contextMeta}>
+  return <AppShell active="corpus" boundaryLabel="本机服务状态" crumb={crumb} contextNav={contextNav} meta={contextMeta}>
     <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>原声提取 · 问题归并 · 独立核验</>} />
     {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> :
     <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1>
