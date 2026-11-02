@@ -43,4 +43,3 @@ export function visibleAnchor(anchor: HTMLElement): { box: Box; workArea: Box; l
   }
   return { box, workArea, laidOut: true };
 }
-

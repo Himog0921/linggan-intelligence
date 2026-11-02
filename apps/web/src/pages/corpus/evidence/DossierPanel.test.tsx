@@ -120,6 +120,34 @@ it('5 分钟负载自然段全文保留，毫秒时码与专注弹窗不推造�
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(screen.getByRole('button', { name: '专注阅读' })).toHaveFocus();
 });
+it('当前段落没有时间时触发器不冒充第一项，菜单仍可跳到真实时间', async () => {
+  const paragraphs = [
+    { ref: 'speech-0', kind: 'paragraph', text: '第一段有真实时间', time: { startMs: 0, endMs: 25000 } },
+    { ref: 'speech-1', kind: 'paragraph', text: '第二段也有真实时间', time: { startMs: 25000, endMs: 50000 } },
+    { ref: 'speech-2', kind: 'paragraph', text: '这一段没有取得时码' },
+  ];
+  kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', page: null, blocks: paragraphs })], coverage: completeCoverage })));
+  const view = mount();
+  await screen.findByText('这一段没有取得时码');
+  await view.user.click(screen.getByRole('button', { name: '专注阅读' }));
+  const dialog = screen.getByRole('dialog', { name: '视频口播 · 专注阅读' });
+  const timeTrigger = within(dialog).getByRole('button', { name: /定位口播时间/ });
+  await waitFor(() => expect(timeTrigger).toHaveTextContent('本段时间未知'));
+  expect(timeTrigger).toHaveAttribute('aria-label', '定位口播时间，当前段落未取得时间');
+  await view.user.click(timeTrigger);
+  const timeMenu = within(dialog).getByRole('listbox', { name: '口播时间' });
+  const options = within(timeMenu).getAllByRole('option');
+  expect(options).toHaveLength(2);
+  // 键盘初始焦点落在第一项，但第一项没有被标成“当前”。
+  expect(timeMenu).toHaveAttribute('aria-activedescendant', options[0]!.id);
+  for (const option of options) {
+    expect(option).toHaveAttribute('aria-selected', 'false');
+  }
+  expect(within(timeMenu).queryByText('当前')).not.toBeInTheDocument();
+  await view.user.keyboard('{Enter}');
+  await waitFor(() => expect(within(dialog).queryByRole('listbox')).not.toBeInTheDocument());
+  expect(timeTrigger).toHaveTextContent('00:00');
+});
 it('目录关闭消费 Esc，正文定位使用 canonical group 而不是秒数作身份', async () => {
   kit.route('GET', path, ok(dossierJson(1)));
   const view = mount(); const trigger = await screen.findByRole('button', { name: /章节导航/ });

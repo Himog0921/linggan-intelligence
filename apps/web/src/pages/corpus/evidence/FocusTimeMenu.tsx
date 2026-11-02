@@ -49,8 +49,11 @@ export const FocusTimeMenu = forwardRef<FocusTimeMenuHandle, FocusTimeMenuProps>
   const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
-  const selectedIndex = Math.max(0, times.findIndex(entry => entry.ref === selected));
-  const current = times[selectedIndex] ?? times[0];
+  const selectedIndex = times.findIndex(entry => entry.ref === selected);
+  // 当前阅读位置可能落在没有时间的段落上：这时不把第一项已知时间冒充成“当前”。
+  // 菜单仍列出所有真实可跳转时间；键盘初始焦点落到第一项，只作为操作起点，不标成当前。
+  const current = selectedIndex >= 0 ? times[selectedIndex] : null;
+  const initialActive = selectedIndex >= 0 ? selectedIndex : 0;
   const listId = `${id}-list`;
   const optionId = (index: number) => `${id}-option-${index}`;
 
@@ -67,9 +70,10 @@ export const FocusTimeMenu = forwardRef<FocusTimeMenuHandle, FocusTimeMenuProps>
   }, [open, onOpenChange]);
 
   // 菜单打开时，正文手动滚动会更新 selected；让活动行跟着实际位置，避免陈旧选中误导。
+  // 当前位置没有时间时活动行只是键盘起点（第一项），不会写成“当前”。
   useEffect(() => {
-    if (open) setActive(selectedIndex);
-  }, [open, selectedIndex]);
+    if (open) setActive(initialActive);
+  }, [open, initialActive]);
 
   useEffect(() => {
     if (!open) return;
@@ -117,7 +121,7 @@ export const FocusTimeMenu = forwardRef<FocusTimeMenuHandle, FocusTimeMenuProps>
 
   function openMenu() {
     place();
-    setActive(selectedIndex);
+    setActive(initialActive);
     setOpen(true);
   }
 
@@ -170,7 +174,8 @@ export const FocusTimeMenu = forwardRef<FocusTimeMenuHandle, FocusTimeMenuProps>
     }
   }
 
-  if (!current) return null;
+  if (times.length === 0) return null;
+  const triggerText = current ? formatReadingTime(current.time.startMs) : '本段时间未知';
   return (
     <div ref={wrapper} className={styles.timeField}>
       <button
@@ -180,11 +185,13 @@ export const FocusTimeMenu = forwardRef<FocusTimeMenuHandle, FocusTimeMenuProps>
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
-        aria-label={`定位口播时间，当前 ${formatReadingTime(current.time.startMs)}`}
+        aria-label={current
+          ? `定位口播时间，当前 ${formatReadingTime(current.time.startMs)}`
+          : '定位口播时间，当前段落未取得时间'}
         onClick={() => { if (open) setOpen(false); else openMenu(); }}
         onKeyDown={onTriggerKeyDown}
       >
-        <span>{formatReadingTime(current.time.startMs)}</span>
+        <span>{triggerText}</span>
         <DossierIcon name="chevron"/>
       </button>
       {open ? (
