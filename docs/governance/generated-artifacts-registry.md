@@ -497,3 +497,5 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## EVIDENCE-READING-20261102
 
 本独立树artifacts/private/evidence-reading-20261102保存手写固定合成长短标题/分段清单及混合材料fixture、仅GET/HEAD的loopback预览、同文旧/新桌面对照、几何/交互检查和报告，忽略不入Git。codex负责，保留至用户验收；旧7989433c构建在自有端口读取同fixture，不覆盖5404数据或产物。dist/node_modules沿既有登记，不接真实库/模型；合并放弃后按本机规则回收自有资源。
+
+- `artifacts/private/evidence-inspector-tools-20261102/`：task #11 隔离截图、合成fixture、滚动条/级联实测、报告与验证日志；仅本机私有证明，不进入Git。候选待用户验收保留，验收满14天后按本机规则仅留报告/汇总；临时构建随候选收尾。

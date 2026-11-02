@@ -1,0 +1,30 @@
+/* Task #11: local reading tools; the approved document typography stays frozen. */
+.reader .toolbar { display:grid;grid-template-columns:minmax(0,1fr);align-items:center;gap:calc(var(--lgi-space-1) * 1.5);min-height:0;padding:var(--lgi-space-2) var(--lgi-space-4); }
+.reader .context { display:flex;flex-wrap:wrap;gap:var(--lgi-space-2);min-width:0; }
+.reader .context > * { font:var(--lgi-type-aux-size)/1.6 var(--dr-font); }
+.reader .context time { font-size:var(--lgi-type-aux-size); }
+.reader .context svg { width:var(--lgi-space-3);height:var(--lgi-space-3); }
+.operations { display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0; }
+.reader .actions { flex:none;gap:var(--lgi-space-2);margin-left:auto; }
+/* Beat EvidencePage's :is(button:not([data-action-button])) font reset locally. */
+.reader .toolbar button, .reader .toolbar button[data-action-button] { min-height:var(--lgi-space-8);height:var(--lgi-space-8);padding:var(--lgi-space-1) var(--lgi-space-2);font:var(--lgi-type-aux-size)/1.6 var(--dr-font);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);color:var(--lgi-ink);gap:var(--lgi-space-1);box-shadow:none;transform:none; }
+.reader .toolbar button svg { width:var(--lgi-space-3);height:var(--lgi-space-3); }
+.reader .toolbar button:hover:not(:disabled),.reader .toolbar button[data-action-button]:hover:not(:disabled),.reader .toolbar button[aria-expanded='true'] { background:var(--lgi-canvas-low);border-color:var(--lgi-ink); }
+.reader .toolbar button:disabled,.reader .toolbar button[data-action-button]:disabled { color:var(--lgi-ghost);cursor:wait; }
+.reader .toolbar button:focus-visible { outline:2px solid var(--lgi-focus);outline-offset:2px; }
+.reader .toolbar .refreshLabel { display:inline; }
+.reader .toolbar button.export { background:var(--lgi-ink);color:var(--lgi-on-dark);box-shadow:var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--lgi-border); }
+.reader .toolbar button.export:hover:not(:disabled) { background:var(--lgi-body);color:var(--lgi-on-dark);box-shadow:var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--lgi-border); }
+.reader .toolbar button.export:active:not(:disabled) { transform:translate(var(--lgi-action-press-shift),var(--lgi-action-press-shift));box-shadow:none; }
+.reader .navigation { flex:1;min-width:0; }
+.reader .toolbar .trigger { width:100%;max-width:100%;justify-content:space-between; }
+.reader .panel { padding:var(--lgi-space-3);box-shadow:var(--lgi-shadow-contact); }
+.reader .panel button { min-height:calc(var(--lgi-space-8) - var(--lgi-space-1));height:auto;text-align:left; }
+.reader .panel > :first-child { font:var(--lgi-type-aux-size)/1.6 var(--dr-font); }
+.reader .panel button[aria-current] { background:var(--lgi-signal-faint);color:var(--lgi-signal-ink);border-color:var(--lgi-signal-mark); }
+@container (min-width:600px) {
+  .reader .toolbar { grid-template-columns:minmax(0,1fr) auto;gap:var(--lgi-space-3); }
+  .reader .navigation { flex:0 1 auto;max-width:calc(var(--lgi-space-24) * 1.5); }
+}
+
+.reader .panel .times button { font-family:var(--dr-mono);font-variant-numeric:tabular-nums; }
