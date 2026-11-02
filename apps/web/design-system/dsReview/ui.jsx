@@ -1,12 +1,17 @@
 import {ActionButton} from '../../src/shared/ActionButton';
 import {FindField} from '../../src/shared/FindField';
 import {SelectField} from '../../src/shared/SelectField';
+import {IntelligenceIcon} from '../../src/shared/IntelligenceIcon';
 import React,{useEffect,useId,useRef} from 'react';
 import {Select} from './Select.jsx';
 export function Button({children,tone='secondary',className='',...props}){const variant=tone==='secondary'?'outline':tone;return <ActionButton variant={variant} className={className} busy={props['aria-busy']===true} {...props}>{children}</ActionButton>}
 export function Mark({children,tone='ink'}){return <span className={`ds-mark ${tone}`}><i aria-hidden="true"/>{children}</span>}
 export function Facts({items}){return <dl className="ds-facts">{items.map(([k,v])=><div key={k}><dt>{k}</dt><dd>{v}</dd></div>)}</dl>}
 export function Pill({children,onClick,active=false,...p}){return <button type="button" className={'ds-pill '+(active?'active':'')} onClick={onClick} {...p}>{children}</button>}
+export function IconFamily({spec}){
+ const [expanded,setExpanded]=React.useState(false);
+ return <div className="lf-icon-family"><p>{spec.geometry.grid} 单位网格 · {spec.geometry.strokeWidth} 线宽 · 最多 {spec.geometry.maxLayers} 层。单次操作反馈 {spec.motion.feedbackMs}ms，状态标记保持静态。</p><div className="lf-icon-grid">{spec.icons.map(item=><button key={item.name} type="button" aria-label={`检查${item.label}图标`} aria-expanded={item.name==='chevron'?expanded:undefined} onClick={()=>{if(item.name==='chevron')setExpanded(value=>!value)}}><IntelligenceIcon name={item.name} size={32} expanded={item.name==='chevron'&&expanded}/><strong>{item.label}</strong><span><IntelligenceIcon name={item.name} size={18} expanded={item.name==='chevron'&&expanded}/><IntelligenceIcon name={item.name} size={15} expanded={item.name==='chevron'&&expanded}/></span></button>)}</div><p>悬停或键盘定位查看反馈，点击章节图标切换朝向。示例不执行刷新、复制、导出或业务命令。</p></div>;
+}
 export function Modal({title,onClose,children,footer,modal=true,regionLabels=false,onRegion,dirty=false}){
  const [leave,setLeave]=React.useState(false);const requestClose=()=>dirty?setLeave(true):onClose();
  const ref=useRef(null),opener=useRef(document.activeElement),heading=useRef(null),id=useId(),close=useRef(onClose);close.current=requestClose;

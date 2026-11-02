@@ -1,5 +1,5 @@
 {
-  "fingerprint": "d9c4f3149bb40219ce79a19e4ccd5c252fbb10c71df08e5f5d5890d35ecd21cc",
+  "fingerprint": "d76bc05eeca00bf77ebeec2a5b05e06ff2905a3b9c1ae3650ced7d8dac026a07",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -75,15 +75,15 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ui.jsx",
-      "sha256": "dbb6b6f11f98801bb5b30b62c0ce7676fa1782a062bab23960ac753cf3342ece"
+      "sha256": "65cc621de48ff512eabb5f8842eb9feaaa6870ede31c99a7faf31e95e5e817e6"
     },
     {
       "path": "apps/web/design-system/finalEdition/FinalHandbook.jsx",
-      "sha256": "ceb0ed96e24a4b37e3253a824dbf8b6ddecc5b01e70e8875b5ffff80d7c5838f"
+      "sha256": "352e4ea5d8351b91867deda51514d17ced6d6578cc5cf960c7253da76404a7dd"
     },
     {
       "path": "apps/web/design-system/finalEdition/final.css",
-      "sha256": "2df55f2b6b66371a49028b3dd1a9a6bfb4d93e6f802f467c2a330f6cfd4af40e"
+      "sha256": "f3a9554efa664fc67439f530979768164e00f2930069335c262bd31fdd5dba62"
     },
     {
       "path": "apps/web/design-system/finalEdition/main.jsx",
@@ -230,8 +230,16 @@
       "sha256": "a589d3f80c35bcbecd6ae07c77ae95737629260abeef5751b19cd1c5575d0533"
     },
     {
+      "path": "apps/web/src/pages/corpus/evidence/DossierIcon.tsx",
+      "sha256": "4b225139e124ea3bfa55f71e03946ae58b9611f2a96fdeb1f8885f4ff0d7c1bc"
+    },
+    {
       "path": "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
       "sha256": "6ac7c33df2541f41eaf7ceb1e7609ca5f2074863a6326543d8ff45290ed40a7d"
+    },
+    {
+      "path": "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx",
+      "sha256": "fe3339f1b8dab328e412d3ff0159a7a9a5cafa383edc3815badd001500baf4ce"
     },
     {
       "path": "apps/web/src/pages/ops/Charts.tsx",
@@ -322,6 +330,18 @@
       "sha256": "ea017da42fe8c78f9ba591514bb21da007ba2106a59869741d85f757d6dc91bb"
     },
     {
+      "path": "apps/web/src/shared/IntelligenceIcon.css",
+      "sha256": "122c1453c60a3b6cea4875d9832dbe1136cf97b7855befbd1f8b9105a598bda0"
+    },
+    {
+      "path": "apps/web/src/shared/IntelligenceIcon.test.tsx",
+      "sha256": "4ccc5e7915f909f9f53454fc1f65092df7a2a548d2495cd512653ef824cafe2a"
+    },
+    {
+      "path": "apps/web/src/shared/IntelligenceIcon.tsx",
+      "sha256": "834ae5aa92837d4b753f86199aa0326f215c44cc47af3e6304501f6fa0954b70"
+    },
+    {
       "path": "apps/web/src/shared/SelectField.module.css",
       "sha256": "f3b5c6082639cbd517619f81d14a434d3d7ce3466b4e5dc8f09441cb838ed258"
     },
@@ -330,12 +350,16 @@
       "sha256": "b34c09b755db3dc1d1cae2270bf1e2a714b4137d0b2c3f52812b57a06ca2393a"
     },
     {
+      "path": "apps/web/src/shared/Sidebar.tsx",
+      "sha256": "d689e11d8185c46e19865df3549c1df82460b1416ccf6c4a6e61ddafcb39ccc4"
+    },
+    {
       "path": "apps/web/src/shared/inputMethod.ts",
       "sha256": "52309eb615dabbcf241533f8e3dad4ce15dbb7128bc63733dc01db560bef9267"
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "659fde2209c8d9f64e32cbefbc7ac861b27ad82b7f389fd05c9884b13c8c085b"
+      "sha256": "d900b990bd948679eafb743fcef7ec28f1906aaa2d7f158a92611f38687cf0df"
     },
     {
       "path": "apps/web/src/styles/typography.css",
@@ -347,7 +371,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "238092327bc7d1aec1e47b009f7cfdb0dffbac8b14b91a290f5e895cfd82302e"
+      "sha256": "bdf6ba7e82647b2de6c9ce17f0d5b72b1bd720c4b9d4bdd2770a7f45fba6f29c"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
@@ -359,7 +383,7 @@
     },
     {
       "path": "docs/design/lids/component-contracts.json",
-      "sha256": "a8955008f547e8f984a6bbfd46dcad953094ec7d84d40dcd0da499d255cf3565"
+      "sha256": "80e9fbc7ebaa38d032057d1ed671770a7e3f9924843c6745cb1daa6d95ff10f4"
     },
     {
       "path": "docs/design/lids/component-reuse.json",
@@ -380,6 +404,10 @@
     {
       "path": "docs/design/lids/focus.json",
       "sha256": "cfadcc02dd48aef2e092906ee0b20f72c55370891a6cd2617e35f7061cea0e93"
+    },
+    {
+      "path": "docs/design/lids/iconography.json",
+      "sha256": "3fad3ddcf25b30aefc4399b20d589afdf13ff891ab55738d4628da6c66d3f186"
     },
     {
       "path": "docs/design/lids/ledger-layout.json",
@@ -407,15 +435,15 @@
     },
     {
       "path": "scripts/lids.mjs",
-      "sha256": "def50c27eb5ca6f8b7fdebcd27f1ec92be9934134c9f8fb0a87d43c4d7c82ffb"
+      "sha256": "6e28b5273363a5d3f9c2ec5514a2cf61f61882694d5205540b61e2a447c5dd2f"
     },
     {
       "path": "scripts/lids.test.mjs",
-      "sha256": "f3370a451703b5e1da7c1e5cf94f2de06bfec7889f61fdfe28f3917ad0df1a04"
+      "sha256": "8b032640dd8e6e8bfc70dc1df9d12c7c2b9e9b2d234af23ff43271ca09b64b98"
     },
     {
       "path": "scripts/sync-lids-runtime.py",
-      "sha256": "eb73d515d4037d69ee59afb827acf5452253ce0f32045d606513584a440ed0a6"
+      "sha256": "5b8061e4de80d5379a47efa4514329684ea61de4170d9d255cc41daca10a5a0b"
     }
   ]
 }

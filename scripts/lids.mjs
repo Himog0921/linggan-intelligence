@@ -10,7 +10,7 @@ import {createRequire} from 'node:module';
 export const ROOT=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const WEB=path.join(ROOT,'apps/web'), DS=path.join(WEB,'design-system'), GEN=path.join(DS,'generated');
 const LIDS='docs/design/lids', OUT=path.join(WEB,'dist-design-system');
-const names=['typography','focus','control-material','shell-layout','ledger-layout','composition-layout','overlay-policy','component-reuse','media-material','color'];
+const names=['typography','focus','control-material','shell-layout','ledger-layout','composition-layout','overlay-policy','component-reuse','media-material','color','iconography'];
 const mirrors=['typographyApplication','focusApplication','materialApplication','shellApplication','ledgerApplication','compositionApplication','overlayApplication','componentApplication','mediaApplication'];
 const hash=b=>createHash('sha256').update(b).digest('hex');
 const json=v=>JSON.stringify(v,null,2)+'\n';
@@ -50,14 +50,22 @@ async function inputs(c){
  const rows=[];for(const p of [...files].sort())rows.push({path:p,sha256:hash(await fs.readFile(path.join(ROOT,p)))});return rows;
 }
 function componentDoc(c){return '# LIDS 标准件实现目录（生成）\n\n> 状态: 权威当前\n> 最后核对: 2026-10-20\n> 适用范围: 已接通同源展示的标准件；不授予CMP\n> 事实来源: component-contracts.json；lids:sync生成\n> 冲突时以谁为准: 正式规则源和业务合同\n\n'+Object.entries(c.components).map(([id,v])=>`## ${id} · ${v.name}\n\n- 实现：[${v.implementation}](../../../${v.implementation})\n- 样式：[${v.styles}](../../../${v.styles})\n- 变体/触发：${(v.variants||v.triggers).join(' / ')}\n- 状态：${v.states.join(' / ')}\n- 负责：${v.owns.join('；')}\n- 页面负责：${v.excludes.join('；')}\n- 测试：${v.tests.join('、')}\n- 展示：${v.demo}（引用同一真实组件）\n`).join('\n');}
+export function applyContractsToRegistry(registry,c){
+ registry.designAssets=[];
+ for(const [id,contract] of Object.entries(c.components)){
+  if(contract.kind==='design_asset'){registry.designAssets.push({id,...contract});continue;}
+  const row=registry.components.find(row=>row.id===id);
+  if(!row)throw new Error(`${id}: missing component catalog entry`);
+  row.variants=contract.variants||contract.triggers;row.states=contract.states;
+  row.owns=contract.owns.join('；');row.excludes=contract.excludes.join('；');
+ }
+ return registry;
+}
 async function generated(c){
  const rules={},sources=[];for(const name of names){const p=`${LIDS}/${name}.json`,bytes=await read(p);rules[name]=JSON.parse(bytes);sources.push({path:p,sha256:hash(bytes)});}
  const registry=await readJson(`${LIDS}/catalog-source.json`);
  names.slice(0,9).forEach((n,i)=>{registry.visual[mirrors[i]]={...rules[n],generatedFrom:{path:sources[i].path,sha256:sources[i].sha256}};});
- for(const [id,contract] of Object.entries(c.components)){
-  const row=registry.components.find(row=>row.id===id);row.variants=contract.variants||contract.triggers;row.states=contract.states;
-  row.owns=contract.owns.join('；');row.excludes=contract.excludes.join('；');
- }
+ applyContractsToRegistry(registry,c);
  const sourceInputs=await inputs(c),fingerprint=hash(json(sourceInputs));
  const manifest=await readJson('apps/web/public/fonts/lids/manifest.json'),licenses=[];
  for(const f of manifest.files.filter(f=>f.file.endsWith('.txt')))licenses.push({file:f.file,text:await read('apps/web/public/fonts/lids/'+f.file),sha256:f.sha256});
@@ -82,7 +90,7 @@ export async function check({exportFile=true}={}){
  execFileSync('python3',['scripts/sync-lids-runtime.py','--check'],{cwd:ROOT,stdio:'pipe'});
  const expected=await generated(c);for(const [p,value] of expected){let actual;try{actual=await read(p)}catch{throw new Error('Missing generated file: '+p)}if(actual!==value)throw new Error('LIDS drift: '+p+'; run lids:sync');}
  if(exportFile){let m;try{m=JSON.parse(await fs.readFile(path.join(OUT,'source-manifest.json'),'utf8'))}catch(e){if(e.code!=='ENOENT')throw e;}
-  if(m){const lock=JSON.parse(expected.get('apps/web/design-system/generated/source-lock.json'));if(m.fingerprint!==lock.fingerprint||hash(await fs.readFile(path.join(OUT,m.html.file)))!==m.html.sha256)throw new Error('Offline HTML is stale; run lids:sync or lids:build');}}
+  if(m){const lock=JSON.parse(expected.get('apps/web/design-system/generated/source-lock.json'));if(m.fingerprint!==lock.fingerprint||hash(await fs.readFile(path.join(OUT,m.html.file)))!==m.html.sha256||json(m.sharedComponents)!==json(Object.keys(c.components)))throw new Error('Offline HTML is stale; run lids:sync or lids:build');}}
  return expected;
 }
 async function buildExport(){
@@ -98,7 +106,7 @@ async function buildExport(){
  const html=`<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="lids-source" content="${source.fingerprint}"><title>Linggan Intelligence · 当前设计系统</title><style>${faces}\n${css}</style></head><body><div id="root"></div><script>${js.replaceAll('</script','<\\/script')}</script></body></html>`;
  if(/<(?:script|link)[^>]+(?:src|href)=/i.test(html)||(html.match(/@font-face/g)||[]).length!==6)throw new Error('Offline export has external dependencies or missing faces');
  const name='Linggan-Intelligence-Design-System.html';await fs.writeFile(path.join(OUT,name),html);
- const manifest={fingerprint:source.fingerprint,html:{file:name,sha256:hash(html),bytes:Buffer.byteLength(html)},sharedComponents:['C09','C16'],inventory:source.inventory,systemMaturity:'PROPOSED; confirmed rules binding',businessRequests:0};
+ const manifest={fingerprint:source.fingerprint,html:{file:name,sha256:hash(html),bytes:Buffer.byteLength(html)},sharedComponents:Object.keys(source.sharedComponents),inventory:source.inventory,systemMaturity:'PROPOSED; confirmed rules binding',businessRequests:0};
  await fs.writeFile(path.join(OUT,'source-manifest.json'),json(manifest));
  const pkg=path.join(OUT,'package');await fs.rm(pkg,{recursive:true,force:true});await fs.mkdir(pkg,{recursive:true});await fs.copyFile(path.join(OUT,name),path.join(pkg,name));await fs.copyFile(path.join(OUT,'source-manifest.json'),path.join(pkg,'source-manifest.json'));
  await fs.cp(path.join(ROOT,LIDS),path.join(pkg,'docs/design/lids'),{recursive:true});await fs.cp(path.join(WEB,'public/fonts/lids'),path.join(pkg,'fonts'),{recursive:true});
