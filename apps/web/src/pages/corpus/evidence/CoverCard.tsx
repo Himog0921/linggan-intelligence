@@ -137,7 +137,7 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
       <div className={styles.card}>
         <Visual item={item} title={title} index={String(ordinal).padStart(3, '0')} titleTip={titleTip} />
         <div className={styles.plate}>
-          <button type="button" className={styles.select} data-select-target="" aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} aria-label={title} aria-describedby={statusId}
+          <button type="button" className={styles.select} data-select-target="" aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} aria-label={title} aria-describedby={statusId} title={lines.join('；')}
             onFocus={titleTip.onFocus} onBlur={titleTip.onBlur} onPointerDown={titleTip.onPointerDown} />
           <div className={styles.plateTop}>
             <AuthorFact item={item} />

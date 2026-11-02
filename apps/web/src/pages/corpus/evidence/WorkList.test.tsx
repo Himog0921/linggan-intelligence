@@ -187,7 +187,9 @@ describe('封面排版（翻转卡）', () => {
     expect(within(flip).queryByText(/COVER/)).toBeNull();
     expect(within(flip).getByRole('heading', { level: 2 })).not.toHaveAttribute('title');
     const select = screen.getByRole('button', { name: '合成作品 1' });
-    expect(select).not.toHaveAttribute('title');
+    // The full-plate selection control covers the plate, so it owns the mouse-reachable status facts;
+    // the work title itself must still have no native title competing with the custom full-title hint.
+    expect(select.getAttribute('title')).toContain('正文：可检索');
     expect(select).toHaveAccessibleDescription(/正文：可检索/);
     expect(screen.getAllByRole('button', { name: '合成作品 1' })).toHaveLength(1);
     expect(flip.querySelector(`img[src="${mediaHandle(10)}"]`)).not.toBeNull();
