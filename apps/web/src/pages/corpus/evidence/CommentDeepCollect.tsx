@@ -136,8 +136,66 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
   const status = run.data
     ? `${runStatus(run.data)} · 本轮采回 ${count(run.data.received_comments)} 条 · 首次新增 ${count(run.data.new_comments)} 条`
     : run.isError ? '进度暂时读不出来' : '正在读取进度…';
+  const scopeId = `${modeName}-scope`;
+  const hintId = `${modeName}-hint`;
+  const errorId = `${modeName}-error`;
+  const showInvalidTarget = item.platform === 'xhs' && invalidTarget;
+  const toolbar = item.platform === 'xhs' ? (
+    <div className={styles.commentTools}>
+      <fieldset className={styles.segments} disabled={locked} aria-describedby={scopeId}>
+        <legend className="v7-sr-only">评论采集范围</legend>
+        <span id={scopeId} className="v7-sr-only">含回复；到达评论区末尾时结束</span>
+        <label className={styles.segment}>
+          <input type="radio" name={modeName} checked={mode === 'all'} onChange={() => setMode('all')} />
+          <span>全部可见</span>
+        </label>
+        <label className={styles.segment}>
+          <input type="radio" name={modeName} checked={mode === 'count'} onChange={() => setMode('count')} />
+          <span>指定条数</span>
+        </label>
+      </fieldset>
+      {mode === 'count' ? (
+        <div className={styles.target}>
+          <label htmlFor={`${modeName}-target`} className="v7-sr-only">条数</label>
+          <input
+            id={`${modeName}-target`}
+            type="number"
+            inputMode="numeric"
+            min={MIN_COMMENT_TARGET}
+            max={MAX_COMMENT_TARGET}
+            step={1}
+            value={targetText}
+            aria-invalid={invalidTarget}
+            aria-describedby={invalidTarget ? errorId : hintId}
+            aria-errormessage={invalidTarget ? errorId : undefined}
+            disabled={locked}
+            onChange={event => setTargetText(event.target.value)}
+          />
+          <span className={styles.targetUnit} aria-hidden="true">条</span>
+          <span id={hintId} className="v7-sr-only">
+            {`${MIN_COMMENT_TARGET}–${MAX_COMMENT_TARGET} 的整数；含回复，到达评论区末尾时结束`}
+          </span>
+        </div>
+      ) : null}
+      {uncertain ? (
+        <ActionButton variant="ink" busy={sending} className={styles.collectButton} aria-describedby={scopeId} onClick={() => void submit()}>
+          核对原请求
+        </ActionButton>
+      ) : (
+        <ActionButton variant="ink" busy={sending} className={styles.collectButton} aria-describedby={scopeId} disabled={running || invalidTarget} onClick={() => setConfirming(true)}>
+          {running ? '评论采集已提交' : '采集评论'}
+        </ActionButton>
+      )}
+    </div>
+  ) : null;
   return (
-    <Section title="评论采集">
+    <Section title="评论采集" actions={toolbar}>
+      {showInvalidTarget ? (
+        <p id={errorId} className={styles.targetError}>
+          {`请填 ${MIN_COMMENT_TARGET}–${MAX_COMMENT_TARGET} 之间的整数`}
+        </p>
+      ) : null}
+      {item.platform === 'xhs' ? <FeedbackLine feedback={result} /> : null}
       <p className={styles.lead}>
         <span>平台显示 {metricReading(item.display.engagement.comment)}</span>
         <span className="v7-sr-only"> 条评论</span>
@@ -147,69 +205,19 @@ export function CommentDeepCollect({ item, inspector, domain }: { item: WorkItem
       </p>
       {item.platform !== 'xhs' ? (
         <p className={styles.unsupported}>评论采集目前只支持小红书笔记。</p>
-      ) : (
-        <>
-          <fieldset className={styles.segments} disabled={locked}>
-            <legend className="v7-sr-only">评论采集范围</legend>
-            <label className={styles.segment}>
-              <input type="radio" name={modeName} checked={mode === 'all'} onChange={() => setMode('all')} />
-              <span>全部可见</span>
-            </label>
-            <label className={styles.segment}>
-              <input type="radio" name={modeName} checked={mode === 'count'} onChange={() => setMode('count')} />
-              <span>指定条数</span>
-            </label>
-          </fieldset>
-          {mode === 'count' ? (
-            <div className={styles.target}>
-              <label htmlFor={`${modeName}-target`}>条数</label>
-              <input
-                id={`${modeName}-target`}
-                type="number"
-                inputMode="numeric"
-                min={MIN_COMMENT_TARGET}
-                max={MAX_COMMENT_TARGET}
-                step={1}
-                value={targetText}
-                aria-invalid={invalidTarget}
-                aria-describedby={`${modeName}-hint`}
-                disabled={locked}
-                onChange={event => setTargetText(event.target.value)}
-              />
-              <span className={styles.targetUnit}>条</span>
-              <small id={`${modeName}-hint`} className={styles.targetHint}>
-                {invalidTarget ? `请填 ${MIN_COMMENT_TARGET}–${MAX_COMMENT_TARGET} 之间的整数` : `${MIN_COMMENT_TARGET}–${MAX_COMMENT_TARGET} 的整数`}
-              </small>
-            </div>
-          ) : null}
-          <p className={styles.scope}>含回复；到达评论区末尾时结束</p>
-          <div className={styles.actions}>
-            {uncertain ? (
-              <ActionButton variant="ink" busy={sending} onClick={() => void submit()}>
-                核对原请求
-              </ActionButton>
-            ) : (
-              <ActionButton variant="ink" busy={sending} disabled={running || invalidTarget} onClick={() => setConfirming(true)}>
-                {running ? '评论采集已提交' : '采集评论'}
-              </ActionButton>
-            )}
-          </div>
-          <FeedbackLine feedback={result} />
-          {runRef !== null ? (
-            <div className={styles.runProgress} role="status">
-              <span>
-                评论采集任务：<b>{status}</b>
-              </span>
-              <span className={styles.runActions}>
-                <button type="button" className={page.textButton} disabled={run.isFetching} onClick={() => void run.refetch()}>
-                  刷新进度
-                </button>
-                <Link to={`/collection/tasks?domain=${encodeURIComponent(domain)}&run=${encodeURIComponent(runRef)}`}>在采集任务里查看</Link>
-              </span>
-            </div>
-          ) : null}
-        </>
-      )}
+      ) : runRef !== null ? (
+        <div className={styles.runProgress} role="status">
+          <span>
+            评论采集任务：<b>{status}</b>
+          </span>
+          <span className={styles.runActions}>
+            <button type="button" className={page.textButton} disabled={run.isFetching} onClick={() => void run.refetch()}>
+              刷新进度
+            </button>
+            <Link to={`/collection/tasks?domain=${encodeURIComponent(domain)}&run=${encodeURIComponent(runRef)}`}>在采集任务里查看</Link>
+          </span>
+        </div>
+      ) : null}
       {history.length === 0 ? (
         <p className={styles.historyEmpty}>暂无采集记录</p>
       ) : (

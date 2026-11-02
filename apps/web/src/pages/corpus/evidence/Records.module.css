@@ -228,6 +228,73 @@
   line-height: var(--lgi-lh-longform);
 }
 
+/* 操作与标题同行：标准 392 下也完整排下范围、条数和墨色动作；不缩正文、不藏动作名。 */
+.commentTools {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--lgi-space-1);
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.commentTools .segments {
+  box-sizing: border-box;
+  flex: none;
+  height: 30px;
+  min-width: 0;
+  margin: 0;
+}
+
+.commentTools .segment {
+  min-height: calc(30px - 2px);
+  padding: 0 var(--lgi-space-1);
+}
+
+.commentTools .target {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: calc(var(--lgi-space-1) / 2);
+  margin: 0;
+  font-size: var(--lgi-type-aux-size);
+  line-height: 1;
+}
+
+.commentTools .target input {
+  width: 44px;
+  height: 30px;
+  padding: 0 var(--lgi-space-1);
+  font-size: var(--lgi-type-aux-size);
+  appearance: textfield;
+}
+
+.commentTools .target input::-webkit-outer-spin-button,
+.commentTools .target input::-webkit-inner-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
+
+.collectButton.collectButton {
+  --lgi-control-tail: var(--lgi-space-3);
+  height: 30px;
+  min-height: 0;
+  padding: 0 var(--lgi-space-2);
+  font-size: var(--lgi-type-aux-size);
+  line-height: 1;
+}
+
+.collectButton.collectButton[data-loading] {
+  padding-right: calc(var(--lgi-space-6) + var(--lgi-space-4));
+}
+
+.targetError {
+  margin: calc(var(--lgi-space-1) / 2) 0 var(--lgi-space-2);
+  color: var(--lgi-danger);
+  font-size: var(--lgi-type-aux-size);
+  line-height: var(--lgi-lh-longform);
+  text-align: right;
+}
+
 .segments {
   display: inline-flex;
   min-width: 0;
@@ -314,24 +381,9 @@
   border-color: var(--lgi-danger);
 }
 
-.targetUnit,
-.targetHint {
+.targetUnit {
   color: var(--lgi-muted);
   font-size: var(--lgi-type-aux-size);
-}
-
-.scope {
-  margin: 0 0 var(--lgi-space-2);
-  color: var(--lgi-muted);
-  font-size: var(--lgi-text-label);
-  line-height: var(--lgi-lh-longform);
-}
-
-.actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--lgi-space-3);
 }
 
 .runProgress {

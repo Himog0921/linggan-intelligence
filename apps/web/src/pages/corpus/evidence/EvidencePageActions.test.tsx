@@ -314,7 +314,7 @@ describe('敏感面', () => {
   const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
   const activePanel = () => aside().querySelector<HTMLElement>('[role="tabpanel"]:not([hidden])')!;
 
-  /** 普通层的文字：去掉折叠着的「技术事实」；`withoutCode` 再去掉技术旁注（<code>）。 */
+  /** 普通层的文字：去掉折叠着的「采集详情」；`withoutCode` 再去掉技术旁注（<code>）。 */
   function ordinaryText(root: HTMLElement, withoutCode = false): string {
     const copy = root.cloneNode(true) as HTMLElement;
     copy.querySelectorAll(withoutCode ? 'details:not([open]), code' : 'details:not([open])').forEach(node => node.remove());
@@ -329,7 +329,7 @@ describe('敏感面', () => {
     expect(ordinaryText(activePanel(), true)).not.toMatch(/\b[A-Z]{2,}(?:_[A-Z]+)+\b|\b(?:UNKNOWN|SEARCHABLE|NOT_REQUESTED)\b/);
   });
 
-  it('引用与执行血缘只在「来源轨迹」这一技术层里', async () => {
+  it('引用与执行血缘只在「采集详情」这一层里', async () => {
     pageRoutes(kit);
     const view = await opened();
     await view.user.click(screen.getByRole('tab', { name: '采集记录' }));

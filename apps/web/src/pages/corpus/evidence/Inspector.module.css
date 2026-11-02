@@ -221,6 +221,85 @@
   font-size: var(--lgi-text-data);
 }
 
+/* ── 采集详情：文末轻贴纸入口 ───────────────── */
+.collectionDetails {
+  margin: var(--lgi-space-4) 0 0;
+  padding-top: var(--lgi-space-2);
+  border-top: 1px solid var(--lgi-hairline);
+  color: var(--lgi-muted);
+  font: var(--lgi-type-aux-size) / 1.6 var(--lgi-font-ui);
+}
+
+.collectionDetails > summary {
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+  color: var(--lgi-muted);
+  list-style: none;
+}
+
+.collectionDetails > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collectionDetails > summary::after {
+  content: '+';
+  margin-left: var(--lgi-space-2);
+  font-family: var(--lgi-font-data);
+}
+
+.collectionDetails[open] > summary::after {
+  content: '−';
+}
+
+.collectionDetails > summary:hover {
+  color: var(--lgi-ink);
+}
+
+.collectionDetails > summary:focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: var(--lgi-space-1);
+}
+
+.detailFacts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--lgi-space-1) var(--lgi-space-3);
+  margin: var(--lgi-space-2) 0 0;
+  font-size: var(--lgi-type-aux-size);
+  line-height: 1.6;
+}
+
+.detailFacts dt {
+  color: var(--lgi-muted);
+}
+
+.detailFacts dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--lgi-body);
+  overflow-wrap: anywhere;
+}
+
+.detailFacts a {
+  color: var(--lgi-info);
+  text-underline-offset: var(--lgi-space-1);
+}
+
+.detailFacts a:focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: var(--lgi-space-1);
+}
+
+.detailRefs > span + span::before {
+  content: '；';
+  color: var(--lgi-muted);
+}
+
+.detailRefs code {
+  overflow-wrap: anywhere;
+}
+
 /* ── 技术事实折叠区 ─────────────────────────── */
 .technical {
   margin: var(--lgi-space-3) 0;

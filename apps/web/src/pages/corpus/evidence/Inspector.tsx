@@ -5,17 +5,14 @@ import { dossierTabStatus } from './dossierTabStatus';
 import { hideCachedReading } from './dossierPresent';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { CommentDeepCollect } from './CommentDeepCollect';
+import { CollectionDetails } from './CollectionDetails';
 import { DossierPanel } from './DossierPanel';
 import { Lightbox } from './Lightbox';
-import { TechnicalFacts } from './TechnicalFacts';
 import { ObservationRecordSection } from './ObservationRecordSection';
-import { AuthorFact, Engagement, MaterialLegend, MaterialRail } from './WorkParts';
-import { Section } from './Primitives';
-import { materialSummary, publishedCopy } from './evidencePresent';
-import { MaterialsPanel } from './MaterialsPanel';
+import { AuthorFact, Engagement } from './WorkParts';
+import { publishedCopy } from './evidencePresent';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
-import { TracePanel } from './TracePanel';
 import { errorCode } from './evidenceFeedback';
 import { apiPath } from './evidencePaths';
 import { workTitle } from './evidencePresent';
@@ -118,21 +115,12 @@ function WorkBody({ detail, listItem, domain, tab, onRefresh }: BodyProps) {
           active={tab === 'dossier'}
         />
       </Panel>
-      {/* 采集记录（Mog 2026-10-23）：先答「看过几次、数字怎么变、要不要再看、评论要不要采全」；
-          材料完整度、媒体台账、来源编号与技术事实一项不删，统一收进默认折叠的「技术信息」。 */}
+      {/* 采集记录（Mog 2026-10-23、2026-11-02）：先答「看过几次、数字怎么变、要不要再看、评论要不要采全」；
+          来源、采集时间、材料状态、停止原因与必要编号收进文末默认收起的「采集详情」。 */}
       <Panel id="trace" active={tab === 'trace'}>
         <ObservationRecordSection item={item} inspector={inspector} channel={channels.reobservation} domain={domain} state={reobservation} onRecheck={recheck} />
         <CommentDeepCollect item={item} inspector={inspector} domain={domain} />
-        <details className={styles.technical}>
-          <summary>技术信息（排查用）</summary>
-          <Section title="材料完整度">
-            <MaterialRail summary={materialSummary(item)} />
-            <MaterialLegend summary={materialSummary(item)} />
-          </Section>
-          <MaterialsPanel context={context} />
-          <TracePanel context={context} />
-          <TechnicalFacts item={item} inspector={inspector} reobservation={channels.reobservation} />
-        </details>
+        <CollectionDetails context={context} />
       </Panel>
       {viewer ? <Lightbox objects={viewer.objects} index={viewer.index} onIndex={index => setViewer({ ...viewer, index })} onClose={() => setViewer(null)} /> : null}
     </>

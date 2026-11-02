@@ -134,6 +134,28 @@ describe('评论采集（Mog 2026-10-23、2026-11-02）', () => {
     expect(kit.calls).toHaveLength(0);
   });
 
+  it('范围、条数与动作收在标题行；正常范围只作可访问说明，错误才就地出现', async () => {
+    const view = setup();
+    const heading = screen.getByRole('heading', { name: '评论采集' });
+    const header = heading.parentElement!;
+    expect(header).toContainElement(screen.getByRole('group', { name: '评论采集范围' }));
+    expect(header).toContainElement(screen.getByRole('button', { name: '采集评论' }));
+    expect(header).not.toContainElement(screen.getByText('平台显示 37'));
+
+    await view.user.click(screen.getByRole('radio', { name: /指定条数/ }));
+    const input = screen.getByRole('spinbutton', { name: '条数' });
+    const description = document.getElementById(input.getAttribute('aria-describedby')!);
+    expect(description).toHaveTextContent('1–1000 的整数');
+    expect(description).toHaveClass('v7-sr-only');
+
+    await view.user.clear(input);
+    await view.user.type(input, '0');
+    const error = screen.getByText('请填 1–1000 之间的整数');
+    expect(error).toBeInTheDocument();
+    expect(input).toHaveAttribute('aria-describedby', error.id);
+    expect(input).toHaveAttribute('aria-errormessage', error.id);
+  });
+
   it('确认后按采集页同一合同建一次「只含这一篇、尽量采全」的单次采集；进度读同一次采集', async () => {
     kit.route('POST', RUNS, ok({ runRef: RUN, domainRef: DOMAIN, replayed: false }));
     kit.route('GET', `${RUNS}/${RUN}`, ok(runJson()));
