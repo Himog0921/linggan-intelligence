@@ -646,7 +646,7 @@ async fn unknown_page_order_preserves_observed_ordinals_beyond_nine() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn recognition_gaps_stay_visible_but_never_become_ai_source_fragments() {
+async fn recognition_gaps_stay_in_source_but_never_become_reading_or_ai_text() {
     let db = fixture::proof_database("dossier_gap_fragments").await;
     let work = detail(&db, "dossier-note", json!({})).await;
     let (_, version, sha) = support::acquired_image_source(&db).await;
@@ -678,8 +678,8 @@ async fn recognition_gaps_stay_visible_but_never_become_ai_source_fragments() {
         .to_owned();
     assert_eq!(image["blocks"].as_array().unwrap().len(), 2);
     assert_eq!(image["issues"][0]["code"], "uncertain_reading");
-    assert!(dossier::ordered_refs(&read).contains(&gap_ref.as_str()));
-    assert!(dossier::markdown(&read).contains("这一处无法识读的诊断标签"));
+    assert!(!dossier::ordered_refs(&read).contains(&gap_ref.as_str()));
+    assert!(!dossier::markdown(&read).contains("这一处无法识读的诊断标签"));
     assert_eq!(read.fragments.len(), 1);
     let sources = dossier::context_sources(&read);
     assert_eq!(sources.len(), 1);
@@ -689,7 +689,7 @@ async fn recognition_gaps_stay_visible_but_never_become_ai_source_fragments() {
     let rendered = dossier::render_materials(&read.fragments);
     assert!(rendered.contains("[S1] 图片文字") && rendered.contains("实际识读到的完整内容"));
     assert!(!rendered.contains("这一处无法识读的诊断标签") && !rendered.contains("[S2]"));
-    assert!(rendered.contains("待确认：局部文字缺失"));
+    assert!(!rendered.contains("待确认：局部文字缺失"));
     let coverage = read.coverage.clone();
     dossier::select(
         &mut read,
@@ -702,7 +702,7 @@ async fn recognition_gaps_stay_visible_but_never_become_ai_source_fragments() {
     assert!(read.fragments.is_empty());
     assert!(dossier::context_sources(&read).is_empty());
     assert!(dossier::render_materials(&read.fragments).is_empty());
-    assert_eq!(dossier::ordered_refs(&read), [gap_ref.as_str()]);
-    assert!(dossier::markdown(&read).contains("这一处无法识读的诊断标签"));
+    assert!(dossier::ordered_refs(&read).is_empty());
+    assert!(!dossier::markdown(&read).contains("这一处无法识读的诊断标签"));
     assert_eq!(read.coverage, coverage);
 }

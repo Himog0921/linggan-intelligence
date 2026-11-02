@@ -5,7 +5,7 @@ import { missingImageTextPages } from './dossierReadingContent';
 import type { DossierCoverage, DossierMaterial, ReadingGroup, ReadingSection, ReadingSectionKind } from './dossierTypes';
 
 const SECTION_KINDS = ['publication', 'images', 'audio', 'frames'] as const;
-const MODES = ['blocks', 'paragraph', 'transcript_paragraph', 'list', 'table', 'tags'] as const;
+const MODES = ['blocks', 'heading', 'paragraph', 'transcript_paragraph', 'list', 'table', 'tags'] as const;
 const KIND_SECTION: Record<DossierMaterial['kind'], ReadingSectionKind> = {
   body: 'publication', tags: 'publication', image: 'images', audio: 'audio', video_frame: 'frames',
 };
@@ -40,10 +40,11 @@ export function parseReadingSections(reading: Json, materials: readonly DossierM
         fromPrevious: bool(continuation, 'fromPrevious'), toNext: bool(continuation, 'toNext'),
       } };
       if (mode !== 'blocks' && new Set(resolved.map(({ block }) => block.speaker ?? 'unconfirmed')).size > 1) throw new ShapeError('readingView.group.speaker');
-      if (mode === 'paragraph' || mode === 'transcript_paragraph') {
-        const joiners = strings(value.joiners, 'readingView.group.joiners').map(joiner => choice(joiner, ['', ' ', '\n'], 'readingView.group.joiners'));
-        const imageProse = mode === 'paragraph' && kind === 'images' && new Set(resolved.map(entry => entry.unit.ref)).size === 1;
+      if (mode === 'heading' || mode === 'paragraph' || mode === 'transcript_paragraph') {
+        const joiners = strings(value.joiners, 'readingView.group.joiners').map(joiner => choice(joiner, ['', ' ', '\n', '，'], 'readingView.group.joiners'));
+        const imageProse = (mode === 'heading' || mode === 'paragraph') && kind === 'images' && new Set(resolved.map(entry => entry.unit.ref)).size === 1;
         if (joiners.length !== blockRefs.length - 1 || resolved.some(entry => entry.block.kind !== 'paragraph' && !(imageProse && entry.block.kind === 'heading'))) throw new ShapeError('readingView.group.paragraph');
+        if (mode === 'heading' && (!imageProse || resolved.some(entry => entry.block.kind !== 'heading'))) throw new ShapeError('readingView.group.heading');
         if (mode === 'transcript_paragraph' && (kind !== 'audio' || new Set(resolved.map(entry => entry.unit.ref)).size !== 1)) throw new ShapeError('readingView.group.transcript');
         return { ...base, mode, joiners } satisfies ReadingGroup;
       }
@@ -98,6 +99,6 @@ export function parseReadingSections(reading: Json, materials: readonly DossierM
   const orderedRefs = [...mainRefs, ...supplementRefs];
   const membership = new Set(orderedRefs);
   if (groupedRefs.length !== orderedRefs.length || new Set(groupedRefs).size !== groupedRefs.length || groupedRefs.some(ref => !membership.has(ref))) throw new ShapeError('readingView.sections.order');
-  // Legacy arrays retain the Works tab's original order. Only sections define dossier order.
+  // All reading surfaces consume this ordered reference plan.
   return sections;
 }

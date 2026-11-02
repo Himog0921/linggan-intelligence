@@ -28,7 +28,7 @@ impl Attribution {
             return;
         }
         let role = block["speaker"].as_str().unwrap_or("unconfirmed");
-        if self.role.as_deref() != Some(role) {
+        if self.role.as_deref() != Some(role) && role != "unconfirmed" {
             out.push_str(&format!("*{}*\n\n", content::speaker_label(role)));
             self.role = Some(role.to_owned());
         }
@@ -56,7 +56,6 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
                 .filter_map(move |block| block["ref"].as_str().map(|r| (r, (unit, block))))
         })
         .collect();
-    let mut seen_issues = BTreeSet::new();
     for section in dossier.reading_view["sections"]
         .as_array()
         .into_iter()
@@ -68,14 +67,6 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
             section_label(section["kind"].as_str().unwrap_or(""))
         ));
         for group in section["groups"].as_array().into_iter().flatten() {
-            for gap in section["gaps"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter(|gap| gap["beforeGroupRef"] == group["ref"])
-            {
-                render_gap(&mut out, gap);
-            }
             let selected: Vec<_> = group["blockRefs"]
                 .as_array()
                 .into_iter()
@@ -83,51 +74,9 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
                 .filter_map(|r| r.as_str().and_then(|r| entries.get(r).copied()))
                 .collect();
             render_group(&mut out, dossier, group, &selected, &mut attribution);
-            for (unit, block) in &selected {
-                for issue in block["issues"].as_array().into_iter().flatten().chain(
-                    unit["issues"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .filter(|issue| {
-                            issue["blockRef"].is_null()
-                                || group["blockRefs"]
-                                    .as_array()
-                                    .is_some_and(|refs| refs.contains(&issue["blockRef"]))
-                        }),
-                ) {
-                    render_issue(
-                        &mut out,
-                        issue,
-                        unit["ref"].as_str().unwrap_or(""),
-                        &mut seen_issues,
-                    );
-                }
-            }
-        }
-        for gap in section["gaps"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter(|gap| gap["beforeGroupRef"].is_null())
-        {
-            render_gap(&mut out, gap);
         }
     }
     render_gaps(&mut out, dossier);
-    for issue in dossier.coverage["issues"].as_array().into_iter().flatten() {
-        render_issue(&mut out, issue, "coverage", &mut seen_issues);
-    }
-    for unit in &dossier.materials {
-        for issue in unit["issues"].as_array().into_iter().flatten() {
-            render_issue(
-                &mut out,
-                issue,
-                unit["ref"].as_str().unwrap_or(""),
-                &mut seen_issues,
-            );
-        }
-    }
     out
 }
 
@@ -155,7 +104,7 @@ fn render_group(
         out.push_str("*承接上一段内容。*\n\n");
     }
     match group["mode"].as_str() {
-        Some("paragraph" | "transcript_paragraph") => {
+        Some("heading" | "paragraph" | "transcript_paragraph") => {
             let mut text = String::new();
             for (index, (_, block)) in entries.iter().enumerate() {
                 if index > 0 {
@@ -163,7 +112,7 @@ fn render_group(
                 }
                 text.push_str(block["text"].as_str().unwrap_or(""));
             }
-            let mut display = json!({"kind":"paragraph","text":text,"speaker":first["speaker"]});
+            let mut display = json!({"kind":if group["mode"] == "heading" {"heading"} else {"paragraph"},"text":text,"speaker":first["speaker"]});
             if let (Some(start), Some(end)) = (
                 first["time"]["startMs"].as_i64(),
                 entries
@@ -266,138 +215,88 @@ fn timestamp(milliseconds: i64) -> String {
     }
 }
 
-fn render_issue(out: &mut String, issue: &Value, scope: &str, seen: &mut BTreeSet<String>) {
-    let Some(message) = issue["message"].as_str() else {
-        return;
-    };
-    let identity = issue["key"].as_str().unwrap_or(message);
-    if seen.insert(format!("{scope}:{identity}")) {
-        out.push_str(&format!(
-            "> 待确认：{}\n\n",
-            text::escape(message).replace('\n', "\n> ")
-        ));
-    }
-}
-
-fn render_gap(out: &mut String, gap: &Value) {
-    let pages = gap["missingPages"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(Value::to_string)
-        .collect::<Vec<_>>()
-        .join("、");
-    out.push_str(&format!(
-        "> 图片第 {pages} 页文字待补全，此处内容不完整。\n\n"
-    ));
-}
-
 fn render_gaps(out: &mut String, dossier: &ResearchDossier) {
     let mut lines = vec![];
-    for kind in ["body", "images", "audio", "videoFrames"] {
-        let label = match dossier.coverage["sources"][kind]["state"].as_str() {
-            Some("not_acquired") => "来源尚未取得，不能判断原作是否没有内容。",
-            Some("not_processed") => "已有来源，尚无当前可用的识读文字。",
-            Some("restricted") => "当前来源不可读取。",
-            Some("partial") => "当前范围尚不完整，已取得的文字照常保留。",
-            Some("known_empty") => "来源已确认无可读文字。",
-            Some("not_applicable") => "不适用。",
-            _ => continue,
-        };
-        lines.push(format!("{}：{label}", section_label(kind)));
+    for (kind, label) in [
+        ("body", "发布文案"),
+        ("image", "图片文字"),
+        ("audio", "视频口播"),
+    ] {
+        let units: Vec<_> = dossier
+            .materials
+            .iter()
+            .filter(|u| u["kind"] == kind)
+            .collect();
+        if units.is_empty() {
+            continue;
+        }
+        let missing: Vec<_> = units
+            .iter()
+            .filter(|u| {
+                !matches!(
+                    u["sourceState"].as_str(),
+                    Some("known_empty" | "not_applicable")
+                ) && !u["blocks"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .any(content::has_source_text)
+            })
+            .collect();
+        if !missing.is_empty() {
+            let state = if missing.iter().any(|u| u["processing"]["state"] == "failed") {
+                "处理失败"
+            } else if missing
+                .iter()
+                .any(|u| u["processing"]["state"] == "running")
+            {
+                "处理中"
+            } else if missing.iter().any(|u| u["sourceState"] == "restricted") {
+                "来源不可读取"
+            } else if missing.iter().all(|u| u["sourceState"] == "not_acquired") {
+                "来源未取得"
+            } else {
+                "暂无可用文字"
+            };
+            lines.push(format!("{label}：{state}。"));
+        } else if kind == "audio" && units.iter().all(|u| u["sourceState"] == "known_empty") {
+            lines.push("视频口播：无可用口播。".into());
+        }
     }
-    let inventory = &dossier.coverage["imageInventory"];
-    let positioned: BTreeSet<_> = dossier.reading_view["sections"]
-        .as_array()
+    // Known missing pages affect reading continuity; unknown platform metadata
+    // belongs to source inspection, not to the exported content.
+    let missing: BTreeSet<_> = super::super::reading::image_text_gap_pages(dossier)
         .into_iter()
-        .flatten()
-        .flat_map(|s| s["gaps"].as_array().into_iter().flatten())
-        .flat_map(|g| g["missingPages"].as_array().into_iter().flatten())
-        .filter_map(Value::as_u64)
-        .collect();
-    let missing: Vec<_> = super::super::reading::image_text_gap_pages(dossier)
-        .into_iter()
-        .filter(|p| !positioned.contains(p))
+        .chain(
+            dossier.reading_view["sections"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .flat_map(|s| s["gaps"].as_array().into_iter().flatten())
+                .flat_map(|g| g["missingPages"].as_array().into_iter().flatten())
+                .filter_map(Value::as_u64),
+        )
         .collect();
     if !missing.is_empty() {
-        lines.push(format!(
+        let pages = format!(
             "图片第 {} 页文字待补全。",
             missing
                 .iter()
                 .map(u64::to_string)
                 .collect::<Vec<_>>()
                 .join("、")
-        ));
-    }
-    if inventory["unknownOrder"] == true {
-        lines.push("图片原始顺序未确认，当前保留已观察顺序。".into());
-    }
-    if inventory["expectedPages"].is_null()
-        && inventory["acquiredPages"].as_u64().is_some_and(|n| n > 0)
-    {
-        lines.push("原作图片总页数未知。".into());
-    }
-    for unit in &dossier.materials {
-        if let Some(detail) = processing_note(unit) {
-            let label = section_label(unit["kind"].as_str().unwrap_or(""));
-            let page = unit["page"]
-                .as_u64()
-                .map_or(String::new(), |n| format!("第 {n} 页"));
-            lines.push(format!("{label}{page}：{detail}"));
+        );
+        if let Some(line) = lines.iter_mut().find(|line| line.starts_with("图片文字：")) {
+            line.push_str(&pages);
+        } else {
+            lines.push(pages);
         }
     }
     if !lines.is_empty() {
-        out.push_str("## 内容范围与待处理\n\n");
+        out.push_str("## 未包含内容\n\n");
         for line in lines {
             out.push_str(&format!("- {line}\n"));
         }
         out.push('\n');
     }
-}
-
-fn processing_note(unit: &Value) -> Option<String> {
-    if !matches!(
-        unit["sourceState"].as_str(),
-        Some("present" | "known_empty")
-    ) {
-        return None;
-    }
-    let label = match unit["processing"]["state"].as_str() {
-        Some("pending") => "待处理",
-        Some("running") => "处理中",
-        Some("failed") => "处理失败",
-        Some("cancelled") => "处理已取消",
-        Some("invalidated") => "处理结果已失效",
-        _ => return None,
-    };
-    if unit["sourceState"] == "known_empty" && unit["currentRevisionRef"].is_string() {
-        return Some(format!("{label}；既有已确认无文字的结果仍有效。"));
-    }
-    let has_blocks = unit["blocks"]
-        .as_array()
-        .is_some_and(|blocks| !blocks.is_empty());
-    if !has_blocks
-        && unit["issues"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .any(|issue| issue["code"] == "existing_result_pending")
-    {
-        return Some(
-            if unit["kind"] == "image" {
-                "已有识别结果，待整理。"
-            } else {
-                "已有处理结果，待接入。"
-            }
-            .into(),
-        );
-    }
-    Some(format!(
-        "{label}{}",
-        if has_blocks {
-            "，已有读本仍可读。"
-        } else {
-            "。"
-        }
-    ))
 }

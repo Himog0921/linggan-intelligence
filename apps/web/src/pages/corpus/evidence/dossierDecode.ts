@@ -69,7 +69,7 @@ function parseDossierRow(row: Json): Dossier {
   const titleBlockRefs = strings(note.titleBlockRefs, 'note.titleBlockRefs');
   const blockRefs = new Set(blocks.map(block => block.ref));
   const orderedRefs = [...mainBlockRefs, ...supplementBlockRefs];
-  if (new Set(orderedRefs).size !== orderedRefs.length || orderedRefs.some(ref => !blockRefs.has(ref)) || orderedRefs.length !== blocks.length
+  if (new Set(orderedRefs).size !== orderedRefs.length || orderedRefs.some(ref => !blockRefs.has(ref))
     || new Set(titleBlockRefs).size !== titleBlockRefs.length || titleBlockRefs.some(ref => !blockRefs.has(ref))) throw new ShapeError('readingView.blockRefs');
   const coverage = parseCoverage(obj(row, 'coverage'));
   const sections = parseReadingSections(reading, materials, mainBlockRefs, supplementBlockRefs, coverage.imageInventory);

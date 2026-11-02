@@ -11,8 +11,7 @@
 //! only returned from the explicitly authorised comment-research channel.
 
 use crate::material_projection_types::{MaterialEvidenceFragment, MaterialLibraryItem};
-use sqlx::{AssertSqlSafe, Postgres, Row, Transaction};
-use std::collections::HashMap;
+use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 /// Total characters an excerpt may carry. Chosen against the V9 research row, where the quote
@@ -46,77 +45,63 @@ pub(crate) async fn read_batch(
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
     let query = query.map(str::trim).filter(|value| !value.is_empty());
-    if let Some(query) = query {
-        for item in items.iter_mut() {
-            item.evidence_fragment = item
-                .body_text
-                .as_deref()
-                .and_then(|body| match_in(body, query))
-                .map(|hit| fragment_from(hit, "detail_body", "SEARCH_MATCH", None, None));
+    let refs: Vec<_> = items.iter().map(|item| item.identity.public_ref).collect();
+    let dossiers = crate::research_dossier::read_in(tx, &refs, as_of).await?;
+    for item in items.iter_mut() {
+        if let Some(dossier) = dossiers.get(&item.identity.public_ref) {
+            item.evidence_fragment =
+                dossier_excerpt(dossier, query).or_else(|| dossier_excerpt(dossier, None));
         }
     }
-    // Probe once in this transaction, only when a source-text read is actually needed.
-    let ready = if items.iter().any(|item| item.evidence_fragment.is_none()) {
-        ocr_retirement_schema_ready(tx).await?
-    } else {
-        false
-    };
-    if let Some(query) = query {
-        fill_text_candidates(tx, items, Some(query), as_of, ready, true).await?;
-        fill_text_candidates(tx, items, Some(query), as_of, ready, false).await?;
-    }
-    for item in items
-        .iter_mut()
-        .filter(|item| item.evidence_fragment.is_none())
-    {
-        item.evidence_fragment = item
-            .body_text
-            .as_deref()
-            .map(str::trim)
-            .filter(|body| !body.is_empty())
-            .map(|body| {
-                fragment_from(
-                    window(body, None),
-                    "detail_body",
-                    "FIRST_AVAILABLE",
-                    None,
-                    None,
-                )
-            });
-    }
-    fill_text_candidates(tx, items, None, as_of, ready, true).await?;
-    fill_text_candidates(tx, items, None, as_of, ready, false).await?;
     for item in items {
         item.body_text = None;
     }
     Ok(())
 }
 
-async fn fill_text_candidates(
-    tx: &mut Transaction<'_, Postgres>,
-    items: &mut [MaterialLibraryItem],
+fn dossier_excerpt(
+    dossier: &crate::research_dossier::ResearchDossier,
     query: Option<&str>,
-    as_of: &str,
-    retirement_ready: bool,
-    image_layer: bool,
-) -> Result<(), sqlx::Error> {
-    let refs: Vec<Uuid> = items
-        .iter()
-        .filter(|item| item.evidence_fragment.is_none())
-        .map(|item| item.identity.public_ref)
-        .collect();
-    if refs.is_empty() || (image_layer && !retirement_ready) {
-        return Ok(());
+) -> Option<MaterialEvidenceFragment> {
+    // Prefer the author's body, then speech, then image text. All candidates come
+    // from the same current reading references, never a stale derived-text row.
+    for kind in ["body", "audio", "image", "video_frame"] {
+        for unit in dossier
+            .materials
+            .iter()
+            .filter(|unit| unit["kind"] == kind && unit["sourceState"] != "restricted")
+        {
+            let text = crate::research_dossier::unit_text(dossier, unit);
+            if query.is_none() && dossier.note["displayTitle"].as_str() == Some(text.trim()) {
+                continue;
+            }
+            let excerpt = match query {
+                Some(query) => match_in(&text, query),
+                None => (!text.trim().is_empty()).then(|| window(&text, None)),
+            };
+            if let Some(excerpt) = excerpt {
+                return Some(fragment_from(
+                    excerpt,
+                    match kind {
+                        "body" => "detail_body",
+                        "audio" => "asr_text",
+                        "video_frame" => "frame_ocr_text",
+                        _ => "image_substantive_text",
+                    },
+                    if query.is_some() {
+                        "SEARCH_MATCH"
+                    } else {
+                        "FIRST_AVAILABLE"
+                    },
+                    unit["currentRevisionRef"]
+                        .as_str()
+                        .and_then(|s| Uuid::parse_str(s).ok()),
+                    unit["slotKey"].as_str().map(str::to_owned),
+                ));
+            }
+        }
     }
-    let mut fragments =
-        read_text_candidates(tx, &refs, query, as_of, retirement_ready, image_layer).await?;
-    for item in items
-        .iter_mut()
-        .filter(|item| item.evidence_fragment.is_none())
-    {
-        item.evidence_fragment = fragments.remove(&item.identity.public_ref);
-    }
-    Ok(())
+    None
 }
 
 /// The excerpt plus where the query landed inside it, in characters.
@@ -225,132 +210,6 @@ fn collapse_whitespace(text: &str) -> String {
         out.push(character);
     }
     out
-}
-
-/// Same selectors for one or many works: ACCEPTED substantive OCR precedes derived text;
-/// unqueried derived text excludes covers, and no restricted comment becomes a list excerpt.
-async fn read_text_candidates(
-    tx: &mut Transaction<'_, Postgres>,
-    refs: &[Uuid],
-    query: Option<&str>,
-    as_of: &str,
-    retirement_ready: bool,
-    image_layer: bool,
-) -> Result<HashMap<Uuid, MaterialEvidenceFragment>, sqlx::Error> {
-    if image_layer {
-        let readings = crate::material_reading::read_current_in(&mut **tx, refs, as_of).await?;
-        let mut output = HashMap::new();
-        for (work, units) in readings {
-            for unit in units
-                .iter()
-                .filter(|u| u["kind"] == "image" && u["sourceState"] == "present")
-            {
-                let text = unit["blocks"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter(|b| query.is_some() || b["kind"] != "heading")
-                    .map(|b| crate::research_dossier::content::block_text(b))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let excerpt = if let Some(q) = query {
-                    match_in(&text, q)
-                } else {
-                    (!text.trim().is_empty()).then(|| window(&text, None))
-                };
-                if let Some(excerpt) = excerpt {
-                    output.insert(
-                        work,
-                        fragment_from(
-                            excerpt,
-                            "image_substantive_text",
-                            if query.is_some() {
-                                "SEARCH_MATCH"
-                            } else {
-                                "FIRST_AVAILABLE"
-                            },
-                            unit["currentRevisionRef"]
-                                .as_str()
-                                .and_then(|s| Uuid::parse_str(s).ok()),
-                            unit["slotKey"].as_str().map(str::to_owned),
-                        ),
-                    );
-                    break;
-                }
-            }
-        }
-        return Ok(output);
-    }
-    let retirement_filter = if retirement_ready {
-        " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)"
-    } else {
-        ""
-    };
-    // All SQL fragments are private compile-time literals; search and identity stay bound.
-    let sql = {
-        format!(
-            "SELECT DISTINCT ON (derived.content_public_ref) derived.content_public_ref,derived.derivative_ref,derived.kind,derived.display_text,job.slot_key \
-         FROM linggan_material_derived_text derived JOIN linggan_media_derivative derivative USING(derivative_ref) \
-         JOIN linggan_media_processing_job job USING(job_ref) \
-         WHERE derived.kind='asr_text' AND derived.content_public_ref=ANY($1) AND derived.created_at <= $2::timestamptz \
-           AND ($3::text IS NULL OR lower(derived.display_text) LIKE '%' || lower($3) || '%') \
-           AND ($3::text IS NOT NULL OR job.slot_key NOT LIKE '%:cover:%'){retirement_filter} \
-           AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition d WHERE d.state='WITHDRAWN_OR_RESTRICTED' AND (d.derivative_ref=derivative.derivative_ref OR d.blob_sha256=job.blob_sha256 OR d.slot_key=job.slot_key)) \
-         ORDER BY derived.content_public_ref,job.slot_key,derived.created_at DESC"
-        )
-    };
-    let rows = sqlx::query(AssertSqlSafe(sql))
-        .bind(refs)
-        .bind(as_of)
-        .bind(query)
-        .fetch_all(&mut **tx)
-        .await?;
-    Ok(rows
-        .into_iter()
-        .filter_map(|row| {
-            let text: String = row.get("display_text");
-            let excerpt = match query {
-                Some(query) => match_in(&text, query),
-                None => {
-                    let trimmed = text.trim();
-                    (!trimmed.is_empty()).then(|| window(trimmed, None))
-                }
-            }?;
-            let kind: String = row.get("kind");
-            let fragment = fragment_from(
-                excerpt,
-                if image_layer {
-                    "image_substantive_text"
-                } else {
-                    derived_source_kind(&kind)
-                },
-                if query.is_some() {
-                    "SEARCH_MATCH"
-                } else {
-                    "FIRST_AVAILABLE"
-                },
-                row.get("derivative_ref"),
-                row.get("slot_key"),
-            );
-            Some((row.get("content_public_ref"), fragment))
-        })
-        .collect())
-}
-
-async fn ocr_retirement_schema_ready(
-    tx: &mut Transaction<'_, Postgres>,
-) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar("SELECT to_regclass('linggan_media_ocr_retirement') IS NOT NULL")
-        .fetch_one(&mut **tx)
-        .await
-}
-
-fn derived_source_kind(kind: &str) -> &'static str {
-    match kind {
-        "asr_text" => "asr_text",
-        "frame_ocr_text" => "frame_ocr_text",
-        _ => "ocr_text",
-    }
 }
 
 #[cfg(test)]
