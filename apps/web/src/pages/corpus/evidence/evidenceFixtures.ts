@@ -134,7 +134,7 @@ export interface ItemOptions {
   lanes?: Record<string, string | [string, number]>;
   media?: MediaOptions;
   fragment?: Record<string, unknown> | null;
-  observedAt?: string;
+  observedAt?: string | null;
   role?: string;
   detailUrl?: string | null;
   context?: Record<string, unknown>;
@@ -206,7 +206,7 @@ export function listItemJson(n: number, options: ItemOptions = {}) {
     matchedFields: [],
     media: mediaJson(n, options.media),
     preview: { alt: '没有已验证的本地媒体副本', bytesState: 'UNKNOWN', localAssetUrl: null, observedSourceState: 'UNKNOWN', slotPurpose: null },
-    summary: { lastObservedAt: options.observedAt ?? '2026-10-10 17:00', primaryLimitation: 'OTHER_LANES_NOT_EVALUATED', restrictionState: 'UNKNOWN' },
+    summary: { lastObservedAt: options.observedAt === undefined ? '2026-10-10 17:00' : options.observedAt, primaryLimitation: 'OTHER_LANES_NOT_EVALUATED', restrictionState: 'UNKNOWN' },
   };
 }
 
@@ -263,6 +263,8 @@ export interface DetailOptions extends ItemOptions {
   commentsHistory?: unknown[];
   authorContext?: Record<string, unknown> | null;
   provenance?: Record<string, unknown> | null;
+  mediaSlotsReceipt?: Record<string, unknown> | null;
+  mediaReceipt?: Record<string, unknown> | null;
 }
 
 const RECEIPT = { limit: 64, nextCursor: null, returned: 0, total: 0, truncated: false };
@@ -302,7 +304,9 @@ export function detailJson(n: number, options: DetailOptions = {}) {
     ],
     limitations: options.limitations ?? [],
     mediaSlots: options.slots ?? [],
-    mediaSlotsReceipt: { ...RECEIPT, returned: options.slots?.length ?? 0, total: options.slots?.length ?? 0 },
+    mediaSlotsReceipt: options.mediaSlotsReceipt === undefined
+      ? { ...RECEIPT, returned: options.slots?.length ?? 0, total: options.slots?.length ?? 0 }
+      : options.mediaSlotsReceipt,
     overview: { fields: [] },
     permissions: { displayPolicy: 'MINIMUM_NECESSARY', remoteCandidateUris: 'NOT_EXPOSED' },
     provenance:
@@ -330,7 +334,11 @@ export function detailJson(n: number, options: DetailOptions = {}) {
         url: options.commentsUrl === undefined ? `/api/local/work-resources/${ref}/comments?domain=${DOMAIN}` : options.commentsUrl,
       },
       derivatives: { receipt: RECEIPT },
-      media: { receipt: { ...RECEIPT, returned: options.slots?.length ?? 0, total: options.slots?.length ?? 0 } },
+      media: {
+        receipt: options.mediaReceipt === undefined
+          ? { ...RECEIPT, returned: options.slots?.length ?? 0, total: options.slots?.length ?? 0 }
+          : options.mediaReceipt,
+      },
       provenance: { receipt: { limit: 20, nextCursor: null, returned: 1, total: 1, truncated: false } },
       reobservation,
     },

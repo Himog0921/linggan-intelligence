@@ -80,9 +80,37 @@ describe('采集详情（Mog 2026-11-02）', () => {
 
   it('没有本地媒体只说明事实，不铺故障警示', () => {
     const view = render(<CollectionDetails context={context()} />);
-    expect(view.container).toHaveTextContent('暂无本地副本；这不表示作品没有媒体');
+    expect(view.container).toHaveTextContent('媒体槽位返回 0，没有本地副本');
     expect(view.container).not.toHaveTextContent('当前没有本地媒体对象');
     expect(view.container).not.toHaveTextContent('当前没有可预览的本地媒体对象');
+  });
+
+  it('材料状态沿通道原词表达：KNOWN_EMPTY 不算可读，未知不推缺口', () => {
+    const timelinePoint = {
+      collectCount: 30,
+      collectCountState: 'KNOWN',
+      commentCount: 8,
+      commentCountState: 'KNOWN',
+      likeCount: 1201,
+      likeCountState: 'KNOWN',
+      observedAt: null,
+      shareCount: 2,
+      shareCountState: 'KNOWN',
+      sourceLane: 'detail',
+    };
+    const view = render(<CollectionDetails context={context({
+      lanes: { detail: 'KNOWN_EMPTY', comments: 'UNKNOWN' },
+      observedAt: null,
+      timeline: Array.from({ length: 6 }, () => ({ ...timelinePoint })),
+      mediaSlotsReceipt: null,
+      mediaReceipt: null,
+    })} />);
+    expect(view.container).toHaveTextContent('正文：已处理，未识别到内容');
+    expect(view.container).toHaveTextContent('评论：当前未知');
+    expect(view.container).not.toHaveTextContent('可读 1/5');
+    expect(view.container).not.toHaveTextContent('有缺口');
+    expect(view.container).toHaveTextContent('时间未知');
+    expect(view.container).toHaveTextContent('本次未返回媒体槽位，无法判断本地是否有副本');
   });
 
   it('来源或限制未返回时保持未知，不推断为空', () => {

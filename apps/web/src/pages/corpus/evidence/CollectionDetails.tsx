@@ -33,23 +33,21 @@ function receiptReading(receipt: Receipt | null): string {
 }
 
 function materialReading(item: Pick<WorkItem, 'media' | 'lanes'>): string {
-  const summary = materialSummary(item);
-  if (summary.applicable === 0) return '本作品没有适用材料通道';
-  if (summary.ready === null) return `可读情况当前未知（${summary.applicable} 项）`;
-  const failed = summary.segments.filter(segment => segment.applicable && segment.fill === 'failed').map(segment => segment.label);
-  const partial = summary.segments.filter(segment => segment.applicable && segment.fill === 'partial').map(segment => segment.label);
-  const flags = [
-    summary.hasGap ? '有缺口' : null,
-    failed.length > 0 ? `失败：${failed.join('、')}` : null,
-    partial.length > 0 ? `部分：${partial.join('、')}` : null,
-  ].filter((flag): flag is string => flag !== null);
-  return `可读 ${summary.ready}/${summary.applicable}${flags.length > 0 ? ` · ${flags.join(' · ')}` : ''}`;
+  const applicable = materialSummary(item).segments.filter(segment => segment.applicable);
+  if (applicable.length === 0) return '本作品没有适用材料通道';
+  if (applicable.every(segment => segment.state === 'UNKNOWN')) return `本次未返回材料状态（${applicable.length} 项）`;
+  return applicable.map(segment => `${segment.label}：${stateMeta(segment.state)[0]}`).join('；');
 }
 
 function localMaterials(context: PanelContext): string {
-  const { item, inspector, listItem } = context;
+  const { item, inspector, channels, listItem } = context;
   const ledger = mediaSlotLedger(inspector, (listItem ?? item).fragment);
-  if (ledger.length === 0) return '暂无本地副本；这不表示作品没有媒体';
+  const receipt = channels.mediaReceipt ?? inspector.mediaSlotsReceipt;
+  if (ledger.length === 0) {
+    if (receipt === null || receipt.returned === null) return '本次未返回媒体槽位，无法判断本地是否有副本';
+    if (receipt.returned === 0) return '媒体槽位返回 0，没有本地副本';
+    return `媒体槽位回执称 ${receipt.returned} 项，但本次详情未列出对象`;
+  }
   return ledger
     .map(object => {
       const parts = [
@@ -72,6 +70,11 @@ export function CollectionDetails({ context }: { context: PanelContext }) {
   const current = listItem ?? item;
   const history = commentCollectionRows(inspector.commentsHistory);
   const latest = history[0] ?? null;
+  const latestObservedAt = inspector.timeline.at(-1)?.observedAt ?? current.lastObservedAt;
+  const latestObservedReading = latestObservedAt !== null
+    ? momentText(latestObservedAt)
+    : inspector.timeline.length === 0 ? '暂无观察记录' : '时间未知';
+  const latestCommentReading = latest === null ? '暂无采集记录' : momentText(latest.at, '时间未知');
   const comments = inspector.commentsCoverage;
   const stopped = comments?.stoppedReason ?? null;
   const provenance = inspector.provenance;
@@ -94,9 +97,9 @@ export function CollectionDetails({ context }: { context: PanelContext }) {
           ) : '本次详情未提供原文链接'}
         </dd>
         <dt>最近观察</dt>
-        <dd>{momentText(current.lastObservedAt, '暂无观察记录')}</dd>
+        <dd>{latestObservedReading}</dd>
         <dt>最近评论采集</dt>
-        <dd>{momentText(latest?.at, '暂无采集记录')}</dd>
+        <dd>{latestCommentReading}</dd>
         <dt>停止原因</dt>
         <dd>{stopped ? <>{stoppedReasonMeaning(stopped)} <Tech>{stopped}</Tech></> : '本次采集未记录停止原因'}</dd>
         <dt>材料状态</dt>

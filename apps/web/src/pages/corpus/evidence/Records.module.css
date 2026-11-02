@@ -241,13 +241,13 @@
 .commentTools .segments {
   box-sizing: border-box;
   flex: none;
-  height: 30px;
+  height: calc(var(--lgi-space-8) - var(--lgi-space-1) / 2);
   min-width: 0;
   margin: 0;
 }
 
 .commentTools .segment {
-  min-height: calc(30px - 2px);
+  min-height: calc(var(--lgi-space-8) - var(--lgi-space-1));
   padding: 0 var(--lgi-space-1);
 }
 
@@ -261,8 +261,8 @@
 }
 
 .commentTools .target input {
-  width: 44px;
-  height: 30px;
+  width: calc(var(--lgi-space-10) + var(--lgi-space-1));
+  height: calc(var(--lgi-space-8) - var(--lgi-space-1) / 2);
   padding: 0 var(--lgi-space-1);
   font-size: var(--lgi-type-aux-size);
   appearance: textfield;
@@ -276,7 +276,7 @@
 
 .collectButton.collectButton {
   --lgi-control-tail: var(--lgi-space-3);
-  height: 30px;
+  height: calc(var(--lgi-space-8) - var(--lgi-space-1) / 2);
   min-height: 0;
   padding: 0 var(--lgi-space-2);
   font-size: var(--lgi-type-aux-size);
