@@ -4,6 +4,7 @@ import { StateLine } from './Primitives';
 import { compactMoment, laneSummary, materialSummary, metricReading, publishedCopy, stateMeta, workTitle, ENGAGEMENT_KINDS } from './evidencePresent';
 import type { WorkItem } from './evidenceTypes';
 import { AuthorFact, Engagement, MaterialRail, QuoteBlock } from './WorkParts';
+import { MaterialTiles } from './MaterialTiles';
 import { useTitleTooltip } from './TitleTooltip';
 import styles from './WorkList.module.css';
 
@@ -87,7 +88,7 @@ export function ResearchRow({ item, selected, tabStop, canCheck, checked, onSele
           </div>
           <div className={styles.infoRow}>
             <dt>材料</dt>
-            <dd><MaterialRail summary={materialSummary(item)} compact /></dd>
+            <dd className={styles.materialsCell}><MaterialTiles summary={materialSummary(item)} /></dd>
           </div>
           <div className={styles.infoRow}>
             <dt>{fromSource ? '来源' : '发布'}</dt>

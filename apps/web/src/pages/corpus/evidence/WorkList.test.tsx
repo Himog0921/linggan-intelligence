@@ -33,7 +33,7 @@ describe('研读排版', () => {
     expect(row.querySelector('q')).toHaveTextContent('合成正文 1：先做两分钟，再决定要不要继续。');
     for (const name of ['点赞', '评论', '收藏', '分享']) expect(within(row).getByRole('img', { name })).toBeInTheDocument();
     expect(within(row).getByText('1,201')).toBeInTheDocument();
-    expect(within(row).getByRole('img', { name: /^材料完整度：正文 可检索；评论 .*转录 本作品不适用，不计入分母$/ })).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: /^材料说明：正文 可检索；评论 .*转录 本作品不适用$/ })).toBeInTheDocument();
     // 右侧事实列：字段名与值分开写，发布时间与观察时间各占一行。
     const info = row.querySelector('dl') as HTMLElement;
     const labels = [...info.querySelectorAll('dt')].map(node => node.textContent);

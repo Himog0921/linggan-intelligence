@@ -161,7 +161,7 @@
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   column-gap: var(--lgi-space-2);
-  row-gap: calc(var(--lgi-space-1) + var(--lgi-space-1) / 2);
+  row-gap: calc(var(--lgi-space-1) / 2);
   margin: 0;
 }
 
@@ -521,3 +521,7 @@
 .annotatedState { position:relative;display:inline-flex;max-width:100%;min-width:0; }
 .annotatedState svg { position:absolute;pointer-events:none;left:calc(var(--lgi-space-1) * -1);top:calc(var(--lgi-space-1) * -1);width:calc(100% + var(--lgi-space-2));height:calc(100% + var(--lgi-space-2));overflow:visible;fill:none;stroke:var(--lgi-muted);stroke-width:1;opacity:.6;vector-effect:non-scaling-stroke; }
 .annotatedState svg path { vector-effect:non-scaling-stroke; }
+
+/* The material group is one keyboard target; its focus outline stays clear of the value-cell clip. */
+.info .materialsCell { overflow:visible; }
+.row[data-checked='true'] .info dt { color:var(--lgi-muted); }

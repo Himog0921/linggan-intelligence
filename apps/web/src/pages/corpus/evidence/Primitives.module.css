@@ -1,5 +1,5 @@
 /* 证据库内多处共用的小部件：状态线、事实表、行内状态、分节、来源说明、动作回执。
- * 只消费 LIDS --lgi-* Token。色调同时用文字、圆点和颜色表达，不只靠颜色。 */
+ * 只消费 LIDS --lgi-* Token。色调同时用文字、方块和颜色表达，不只靠颜色。 */
 
 .stateLine {
   display: inline-flex;
@@ -10,27 +10,27 @@
   font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
 }
 
-.dot {
+.marker {
   width: calc(var(--lgi-space-1) * 1.5);
   height: calc(var(--lgi-space-1) * 1.5);
   flex: none;
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--lgi-unknown-dot);
 }
 
-.dot[data-tone='success'] {
+.marker[data-tone='success'] {
   background: var(--lgi-success-dot);
 }
 
-.dot[data-tone='warning'] {
+.marker[data-tone='warning'] {
   background: var(--lgi-warning-dot);
 }
 
-.dot[data-tone='info'] {
+.marker[data-tone='info'] {
   background: var(--lgi-info-dot);
 }
 
-.dot[data-tone='danger'] {
+.marker[data-tone='danger'] {
   background: var(--lgi-danger-dot);
 }
 

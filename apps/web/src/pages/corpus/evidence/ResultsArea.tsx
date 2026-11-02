@@ -74,7 +74,7 @@ export function ResultsArea(props: ResultsAreaProps) {
   const { shell, domainSelected, problem, list, items, selectedRef, layout, checked, selectionMode, listRef, onSelect, onCheck, onRetryShell, onClearScope } = props;
   const status = describeStatus({ shell, domainSelected, scopeProblem: problem, list: { pending: list.pending, error: list.error, count: items.length } });
   return (
-    <div className={styles.results}><div className={styles.resultsContent}>
+    <div className={styles.results} data-evidence-results=""><div className={styles.resultsContent}>
       {status ? (
         <ResultsStatus
           status={status}

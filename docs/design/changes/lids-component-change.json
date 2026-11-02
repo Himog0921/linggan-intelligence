@@ -1,8 +1,8 @@
 {
   "kind": "page_exception",
-  "reason": "Evidence reading workspace adopts selected annotation underline, open state circle and two bounded label placements; existing semantics and reading geometry retained.",
-  "authorization": "Raft user f02e837e and 52c157a7; Philip task17 00b4dbf1",
-  "exceptionScope": "/corpus/evidence current crumb, research row state, empty result and closing material notes only",
+  "reason": "研读材料采用20px单字五格与单一说明入口；本页状态标记优先矩形且颜色不替代文字；批量态字段名沿用muted以保证对比度。",
+  "authorization": "Raft task21 19ec8e5b/cf435a65; user4aadf2c7/b04c6cd4",
+  "exceptionScope": "/corpus/evidence research material group and page StateLine markers",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"

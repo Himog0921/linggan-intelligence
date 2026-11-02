@@ -1,5 +1,5 @@
 {
-  "fingerprint": "042db9968cfaa70933c2c7abeafc0c7dbb9f6f12bba62c64cfcfddd5633c62b6",
+  "fingerprint": "ce60ae3409e11c7d871ed2795e1fc2d4850082549b1f6a57c9096fb9a574300b",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -347,7 +347,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "37ab0cf5495319e43bf22c99f3976ad195ec37571423fb2d84bef1662f40cc2e"
+      "sha256": "9f15b4063960692adb96476dbecdb1b5ffb4f2945034eb033358f016e8d2d63d"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
