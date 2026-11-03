@@ -23,6 +23,9 @@ function audioRuns(groups: readonly ResolvedReadingGroup[]) {
   }
   return runs;
 }
+function ImageSource({ unit }: { unit: DossierMaterial }) {
+  return <div className={styles.transcriptSummary}><span>{unit.page === null ? '图片 · 页码未确认' : `第 ${unit.page} 张图片`}</span>{unit.originalUrl ? <a className={styles.focusTrigger} href={unit.originalUrl} target="_blank" rel="noreferrer">查看原图</a> : <span>原图尚未取得</span>}</div>;
+}
 function ImageGap({ pages }: { pages: readonly number[] }) { return <p className={styles.gap}>此处内容不完整（第 {pages.join('、')} 页文字待补全）</p>; }
 function readableSnapshot(previous: readonly DossierMaterial[], latest: readonly DossierMaterial[]): boolean {
   const current = new Map(latest.map(unit => [unit.ref, unit]));
@@ -83,6 +86,7 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
             <TranscriptGroups groups={run.groups} prefix={prefix}/>
           </div>) : groups.map((value, groupIndex) => <Fragment key={value.group.ref}>
             {section.gaps.filter(gap => gap.beforeGroupRef === value.group.ref).map((gap, gapIndex) => <ImageGap key={gapIndex} pages={gap.missingPages}/>)}
+            {value.entries[0]?.unit.kind === 'image' && value.entries[0].unit.ref !== groups[groupIndex - 1]?.entries[0]?.unit.ref ? <ImageSource unit={value.entries[0].unit}/> : null}
             <DossierGroup value={value} prefix={prefix} previousRole={endingGroupAttribution(groups[groupIndex - 1])}/>
           </Fragment>)}
           {section.gaps.filter(gap => gap.beforeGroupRef === null).map((gap, gapIndex) => <ImageGap key={gapIndex} pages={gap.missingPages}/>)}

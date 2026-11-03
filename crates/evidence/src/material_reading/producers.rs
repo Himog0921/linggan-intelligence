@@ -279,16 +279,10 @@ pub async fn publish_cloud_in(
     job: Uuid,
     materialization: Uuid,
     derivative: Uuid,
-    blocks: Vec<Value>,
+    content: ReadingContent,
     expected_current: Option<Uuid>,
 ) -> Result<PublishedReading, sqlx::Error> {
     let source = media_source_in(conn, work, job, Some(&materialization.to_string())).await?;
-    let content = ReadingContent {
-        blocks,
-        issues: vec![],
-        source_state: "present".into(),
-        source_location: json!({}),
-    };
     publish_source_in(
         conn,
         MediaPublication {

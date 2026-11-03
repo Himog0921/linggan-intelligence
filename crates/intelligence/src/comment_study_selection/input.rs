@@ -70,6 +70,7 @@ fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySe
                 | "body"
                 | "tags"
                 | "image_substantive_text"
+                | "image_visual_description"
                 | "asr_text"
                 | "frame_ocr_text"
         ) {
@@ -92,6 +93,11 @@ fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySe
             if !source[key].is_null() {
                 reference(&source[key])?;
             }
+        }
+        if (kind == "image_visual_description")
+            != (source["structure"]["contentType"] == "visual_description")
+        {
+            return Err(StudySelectionError::InvalidSnapshot);
         }
         let content = text(&source["text"])?;
         linggan_evidence::research_dossier::content::validate_blocks(std::slice::from_ref(

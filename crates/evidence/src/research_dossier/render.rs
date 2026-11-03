@@ -7,7 +7,8 @@ pub fn context_sources(dossier: &ResearchDossier) -> Vec<Value> {
         let material=dossier.materials.iter().find(|m|m["blocks"].as_array().is_some_and(|b|b.iter().any(|b|b["ref"]==f.fragment_id)));
         json!({"fragmentId":f.fragment_id,"blockRef":f.fragment_id,"sourceRef":f.source_ref,"sourceVersion":f.source_version,
             "readingRef":f.reading_ref,"unitRef":f.unit_ref,"asOf":dossier.as_of,
-            "kind":match f.field.as_str(){"title"=>"native_title","ocr"=>"image_substantive_text","transcript"=>"asr_text","frame_text"=>"frame_ocr_text",other=>other},
+            "contentType":f.structure.get("contentType"),"regionRef":f.structure.get("regionRef"),"regionLabel":f.structure.get("regionLabel"),
+            "kind":if f.structure["contentType"]=="visual_description" {"image_visual_description"} else {match f.field.as_str(){"title"=>"native_title","ocr"=>"image_substantive_text","transcript"=>"asr_text","frame_text"=>"frame_ocr_text",other=>other}},
             "text":f.text,"characterCount":f.text.chars().count(),"speaker":f.speaker,"structure":f.structure,"issues":f.issues,
             "slotOrdinal":material.map(|m|m["page"].clone()),"sourceLocation":material.map(|m|json!({"unitRef":m["ref"],"readingRef":m["currentRevisionRef"],"slotKey":m["slotKey"],"page":m["page"],"bbox":f.structure.get("bbox"),"time":f.structure.get("time")})),
             "contentHash":hash(&f.text)})
@@ -21,6 +22,14 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
         out.push_str(&format!("[S{}] {}\n", index + 1, field_label(&f.field)));
         if f.speaker != "author" {
             out.push_str(&format!("角色：{}\n", content::speaker_label(&f.speaker)));
+        }
+        if let Some(label) = f.structure["regionLabel"].as_str() {
+            out.push_str(&format!("区域：{label}\n"));
+        }
+        if f.structure["contentType"] == "visual_description" {
+            out.push_str("视觉描述（模型观察，非原文）：\n");
+        } else if f.structure["contentType"] == "extracted_text" {
+            out.push_str("图片文字（识别提取）：\n");
         }
         out.push_str(&f.text);
         out.push_str("\n\n");
@@ -90,6 +99,31 @@ mod tests {
         };
         super::super::reading::rebuild(&mut dossier);
         dossier
+    }
+
+    #[test]
+    fn online_material_keeps_type_region_and_image_source_in_document() {
+        let mut d = fixture(Some("平台标题"), None);
+        d.materials[0]["originalUrl"] = json!("/api/local/media/example");
+        d.materials[0]["blocks"] = json!([
+            {"ref":"text", "kind":"paragraph", "text":"仅在安静时进行。", "speaker":"unconfirmed", "contentType":"extracted_text", "regionRef":"r1", "regionLabel":"左栏"},
+            {"ref":"visual", "kind":"paragraph", "text":"左栏有手势示意。", "speaker":"unconfirmed", "contentType":"visual_description", "regionRef":"r1", "regionLabel":"左栏"}
+        ]);
+        super::super::reading::rebuild(&mut d);
+        let output = markdown(&d);
+        for expected in [
+            "第 1 张图片",
+            "[查看原图](</api/local/media/example>)",
+            "图片文字（识别提取）",
+            "视觉描述（模型观察，非原文）",
+            "区域：左栏",
+            "仅在安静时进行。",
+            "左栏有手势示意。",
+        ] {
+            assert!(output.contains(expected), "{expected}: {output}");
+        }
+        assert_eq!(output.matches("查看原图").count(), 1);
+        assert_eq!(d.note["displayTitle"], "平台标题");
     }
 
     #[test]
@@ -261,7 +295,7 @@ mod tests {
             ];
             d.coverage["sources"] = json!({"images":{"state":"not_processed"}});
             super::super::reading::rebuild(&mut d);
-            assert!(markdown(&d).contains(&format!("图片文字第 1 页：{label}。")));
+            assert!(markdown(&d).contains(&format!("图片资料第 1 页：{label}。")));
             d.materials[0]["sourceState"] = json!("known_empty");
             d.materials[0]["currentRevisionRef"] = json!("valid-empty-reading");
             d.coverage["sources"]["images"]["state"] = json!("known_empty");

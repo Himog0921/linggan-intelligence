@@ -50,11 +50,41 @@ fn validate_block(block: &Value) -> Result<(), String> {
                 | "time"
                 | "issues"
                 | "level"
+                | "contentType"
+                | "regionRef"
+                | "regionLabel"
         )
     }) {
         return Err("unknown_block_field".into());
     }
     let kind = block["kind"].as_str().ok_or("block_kind_required")?;
+    if let Some(content_type) = block.get("contentType") {
+        if !matches!(
+            content_type.as_str(),
+            Some("extracted_text" | "visual_description")
+        ) {
+            return Err("block_content_type_invalid".into());
+        }
+        if content_type == "visual_description"
+            && (!matches!(kind, "paragraph" | "list") || block["speaker"] != "unconfirmed")
+        {
+            return Err("visual_description_attribution_invalid".into());
+        }
+    }
+    for key in ["regionRef", "regionLabel"] {
+        if block
+            .get(key)
+            .is_some_and(|value| value.as_str().is_none_or(|s| s.trim().is_empty()))
+        {
+            return Err("image_region_invalid".into());
+        }
+    }
+    if block.get("regionRef").is_some() != block.get("regionLabel").is_some()
+        || (block.get("regionRef").is_some() && block.get("contentType").is_none())
+    {
+        return Err("image_region_incomplete".into());
+    }
+
     let shapes = ["text", "items", "columns", "turns"]
         .iter()
         .filter(|field| block.get(**field).is_some())
@@ -302,6 +332,27 @@ mod tests {
                     .iter()
                     .any(|i| i["code"] == "structure_unconfirmed")
             );
+        }
+    }
+}
+
+#[cfg(test)]
+mod image_content_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn visual_observation_is_typed_and_never_an_author_quote_or_title() {
+        let visual = json!({"kind":"paragraph","text":"黄色盒子","speaker":"unconfirmed","contentType":"visual_description","regionRef":"r1","regionLabel":"左上角"});
+        validate_blocks(&[visual.clone()]).unwrap();
+        for (field, value) in [
+            ("speaker", "author"),
+            ("kind", "heading"),
+            ("contentType", "verified_fact"),
+            ("regionLabel", ""),
+        ] {
+            let mut invalid = visual.clone();
+            invalid[field] = json!(value);
+            assert!(validate_blocks(&[invalid]).is_err(), "{field}");
         }
     }
 }

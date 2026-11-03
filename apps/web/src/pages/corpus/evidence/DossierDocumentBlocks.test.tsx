@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { expect, it } from 'vitest';
+import { DossierDocument } from './DossierDocument';
 import { DossierGroup, TranscriptGroups } from './DossierDocumentBlocks';
 import { parseDossierPayload } from './dossierDecode';
 import { endingGroupAttribution, readingGaps, resolveReadingSections } from './dossierDocumentModel';
@@ -59,4 +60,19 @@ it('known_empty 的有效空读本在再次处理失败时继续有效，不误�
   const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', sourceState: 'known_empty', blocks: [], processing: { state: 'failed', reason: 'retry_failed' } })], coverage: { sources: { body: { state: 'known_empty', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'known_empty', units: 1, readings: 1 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })).dossier;
   const message = readingGaps(dossier).find(row => row.key === 'processing-audio')?.message;
   expect(message).toContain('既有已确认无文字的结果仍有效'); expect(message).not.toContain('无当前');
+});
+
+it.each(['blocks', 'paragraph'] as const)('在线资料在%s模式保留原文与视觉类型', mode => {
+  mount([{ ref: 'observation', kind: 'paragraph', text: '两栏以不同底色区分。', speaker: 'unconfirmed', contentType: 'visual_description', regionRef: 'r1', regionLabel: '整图' }], mode);
+  expect(screen.getByText('视觉描述 · 模型观察，非原文')).toBeVisible();
+  expect(screen.getByText('整图')).toBeVisible();
+  expect(screen.queryByText('作品作者表述')).toBeNull();
+});
+
+it('图片资料提供所属原图入口并保留未知页码', () => {
+  const originalUrl = '/api/local/media/20000000-0000-4000-8000-000000000001/' + 'a'.repeat(64);
+  const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { page: null, originalUrl })] }));
+  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  expect(screen.getByRole('link', { name: '查看原图' })).toHaveAttribute('href', originalUrl);
+  expect(screen.getByText('图片 · 页码未确认')).toBeVisible();
 });

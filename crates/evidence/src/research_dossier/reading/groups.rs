@@ -292,6 +292,11 @@ fn continuation(
     current: Located<'_>,
     dossier: &ResearchDossier,
 ) -> Option<(Mode, Option<&'static str>)> {
+    if previous.block["contentType"] != current.block["contentType"]
+        || previous.block["regionRef"] != current.block["regionRef"]
+    {
+        return None;
+    }
     if (previous.material["kind"] == "image" || current.material["kind"] == "image")
         && (!automatic_ordinary_ocr(previous.material) || !automatic_ordinary_ocr(current.material))
     {

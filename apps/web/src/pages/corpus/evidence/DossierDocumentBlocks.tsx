@@ -53,19 +53,24 @@ function GroupContent({ value, previousRole }: { value: ResolvedReadingGroup; pr
     return <Tags labels={groupTagLabels(entries)}/>;
   }
   return <>{entries.map(({ block, unit }, index) => <div key={block.ref} data-block-ref={block.ref} data-speaker={block.speaker}>
-    {block.kind !== 'dialogue' && showReadingAttribution(block.speaker ?? 'unconfirmed', index ? endingBlockAttribution(entries[index - 1]?.block) : previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[block.speaker ?? 'unconfirmed']}</p> : null}
+    {!block.contentType && block.kind !== 'dialogue' && showReadingAttribution(block.speaker ?? 'unconfirmed', index ? endingBlockAttribution(entries[index - 1]?.block) : previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[block.speaker ?? 'unconfirmed']}</p> : null}
     {unit.kind === 'video_frame' && block.time ? <span className={styles.transcriptTime}>{formatReadingTime(block.time.startMs)}</span> : null}
+    {block.regionLabel ? <p className={styles.attribution}>{block.regionLabel}</p> : null}
+    {block.contentType ? <p className={styles.attribution}>{block.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</p> : null}
     <ContentBlock block={block} tags={unit.kind === 'tags'}/>
   </div>)}</>;
 }
 function Continuation({ from }: { from: boolean }) { return <p className={styles.continuation}>{from ? '承接上一段内容' : '后续内容不在本次范围内'}</p>; }
 export function DossierGroup({ value, prefix, previousRole }: { value: ResolvedReadingGroup; prefix: string; previousRole?: AttributionBoundary }) {
   const id = readingAnchor(prefix, value.group.ref);
-  const role = value.entries[0]?.block.speaker ?? 'unconfirmed';
+  const first = value.entries[0]?.block;
+  const role = first?.speaker ?? 'unconfirmed';
   const time = value.group.mode !== 'blocks' && value.entries[0]?.unit.kind === 'video_frame' ? groupTime(value) : null;
   return <div className={styles.group} id={id} data-reading-anchor={value.group.ref} tabIndex={-1}>
     {value.group.continuation.fromPrevious ? <Continuation from/> : null}
-    {value.group.mode !== 'blocks' && showReadingAttribution(role, previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[role]}</p> : null}
+    {value.group.mode !== 'blocks' && !first?.contentType && showReadingAttribution(role, previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[role]}</p> : null}
+    {value.group.mode !== 'blocks' && first?.regionLabel ? <p className={styles.attribution}>{first.regionLabel}</p> : null}
+    {value.group.mode !== 'blocks' && first?.contentType ? <p className={styles.attribution}>{first.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</p> : null}
     {time ? <span className={styles.transcriptTime}>{formatReadingTime(time.startMs)}</span> : null}
     <GroupContent value={value} previousRole={previousRole}/>
     <ReadingIssues issues={value.issues}/>

@@ -55,7 +55,7 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
     // The shared Works view retains its established main/supplement order.
     // Research reading and machine adapters use the sole new section order below.
     // Public materials and sections retain diagnostics. AI source fragments only
-    // contain actual source text, even when real text and gaps share one material.
+    // contain reading content with its typed provenance; gaps are not source quotes.
     dossier
         .fragments
         .retain(|f| content::has_source_text(&f.structure));
@@ -125,6 +125,7 @@ fn title(note: &mut Value, materials: &[Value], complete_units: bool) {
         .and_then(|m| m["blocks"].as_array())
         .into_iter()
         .flatten()
+        .filter(|b| b["contentType"] != "visual_description")
         .collect();
     let start = blocks
         .iter()

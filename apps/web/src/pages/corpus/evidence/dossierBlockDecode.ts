@@ -42,9 +42,14 @@ function location(row: Json): Pick<DossierBlock, 'bbox' | 'time'> {
 export function parseBlock(row: Json): DossierBlock {
   const ref = str(row, 'ref'); if (ref === '') throw new ShapeError('ref');
   const kind = choice(row.kind, ['heading', 'paragraph', 'quote', 'gap', 'list', 'table', 'dialogue'], 'kind');
-  if (Object.keys(row).some(key => !['ref', 'kind', 'text', 'items', 'ordered', 'start', 'columns', 'rows', 'turns', 'speaker', 'bbox', 'time', 'issues', 'level'].includes(key))) throw new ShapeError('block.field');
+  if (Object.keys(row).some(key => !['ref', 'kind', 'text', 'items', 'ordered', 'start', 'columns', 'rows', 'turns', 'speaker', 'bbox', 'time', 'issues', 'level', 'contentType', 'regionRef', 'regionLabel'].includes(key))) throw new ShapeError('block.field');
   if ((kind !== 'list' && (row.ordered !== undefined || row.start !== undefined)) || (kind !== 'heading' && row.level !== undefined)) throw new ShapeError('block.content');
-  const base = { ref, ...location(row), ...(row.speaker === undefined ? {} : { speaker: speaker(row.speaker) }), ...(row.issues === undefined ? {} : { issues: list(row, 'issues', parseIssue) }) };
+  const contentType = row.contentType === undefined ? undefined : choice(row.contentType, ['extracted_text', 'visual_description'], 'contentType');
+  const regionRef = row.regionRef === undefined ? undefined : str(row, 'regionRef');
+  const regionLabel = row.regionLabel === undefined ? undefined : str(row, 'regionLabel');
+  if ((regionRef === undefined) !== (regionLabel === undefined) || regionRef?.trim() === '' || regionLabel?.trim() === '' || (regionRef !== undefined && contentType === undefined)) throw new ShapeError('block.region');
+  if (contentType === 'visual_description' && (!['paragraph', 'list'].includes(kind) || row.speaker !== 'unconfirmed')) throw new ShapeError('block.visualAttribution');
+  const base = { ref, ...(contentType === undefined ? {} : { contentType }), ...(regionRef === undefined ? {} : { regionRef, regionLabel }), ...location(row), ...(row.speaker === undefined ? {} : { speaker: speaker(row.speaker) }), ...(row.issues === undefined ? {} : { issues: list(row, 'issues', parseIssue) }) };
   const shapes = ['text', 'items', 'columns', 'rows', 'turns'].filter(key => row[key] !== undefined);
   const allowed = kind === 'table' ? ['columns', 'rows'] : kind === 'list' ? ['items'] : kind === 'dialogue' ? ['turns'] : ['text'];
   if (shapes.length !== allowed.length || shapes.some(key => !allowed.includes(key))) throw new ShapeError('block.content');

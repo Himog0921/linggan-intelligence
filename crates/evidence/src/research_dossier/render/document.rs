@@ -57,6 +57,7 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
         })
         .collect();
     let mut seen_issues = BTreeSet::new();
+    let mut seen_images = BTreeSet::new();
     for section in dossier.reading_view["sections"]
         .as_array()
         .into_iter()
@@ -82,6 +83,26 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
                 .flatten()
                 .filter_map(|r| r.as_str().and_then(|r| entries.get(r).copied()))
                 .collect();
+            for (unit, _) in &selected {
+                if unit["kind"] == "image" && seen_images.insert(unit["ref"].clone().to_string()) {
+                    let label = unit["page"].as_u64().map_or_else(
+                        || "图片 · 页码未确认".to_owned(),
+                        |page| format!("第 {page} 张图片"),
+                    );
+                    out.push_str(&format!("### {label}\n\n"));
+                    if let Some(url) = unit["originalUrl"].as_str() {
+                        out.push_str(&format!(
+                            "[查看原图](<{}>)\n\n",
+                            url.replace('<', "%3C")
+                                .replace('>', "%3E")
+                                .replace('\n', "%0A")
+                                .replace('\r', "%0D")
+                        ));
+                    } else {
+                        out.push_str("原图尚未取得。\n\n");
+                    }
+                }
+            }
             render_group(&mut out, dossier, group, &selected, &mut attribution);
             for (unit, block) in &selected {
                 for issue in block["issues"].as_array().into_iter().flatten().chain(
@@ -134,7 +155,7 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
 fn section_label(kind: &str) -> &str {
     match kind {
         "publication" | "body" => "发布文案",
-        "images" | "image" => "图片文字",
+        "images" | "image" => "图片资料",
         "audio" => "视频口播",
         "frames" | "videoFrames" | "video_frame" => "画面文字",
         _ => "内容",
@@ -164,6 +185,11 @@ fn render_group(
                 text.push_str(block["text"].as_str().unwrap_or(""));
             }
             let mut display = json!({"kind":"paragraph","text":text,"speaker":first["speaker"]});
+            for key in ["contentType", "regionRef", "regionLabel"] {
+                if let Some(value) = first.get(key) {
+                    display[key] = value.clone();
+                }
+            }
             if let (Some(start), Some(end)) = (
                 first["time"]["startMs"].as_i64(),
                 entries
@@ -222,7 +248,14 @@ fn render_tags(out: &mut String, dossier: &ResearchDossier, group: &Value) {
 }
 
 fn render_block(out: &mut String, unit: &Value, block: &Value, attribution: &mut Attribution) {
-    attribution.render(out, unit, block);
+    if let Some(label) = block["regionLabel"].as_str() {
+        out.push_str(&format!("*区域：{}*\n\n", text::escape(label)));
+    }
+    match block["contentType"].as_str() {
+        Some("visual_description") => out.push_str("*视觉描述（模型观察，非原文）*\n\n"),
+        Some("extracted_text") => out.push_str("*图片文字（识别提取）*\n\n"),
+        _ => attribution.render(out, unit, block),
+    }
     if let (Some(start), Some(end)) = (
         block["time"]["startMs"].as_i64(),
         block["time"]["endMs"].as_i64(),

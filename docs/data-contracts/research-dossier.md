@@ -30,13 +30,25 @@ STANDARD-DOSSIER-001 更新：平台非空标题优先，否则从明确封面�
 
 开发期直接切换到唯一 `research-dossier.v2`。删除旧运行接口、旧消费者、兼容解码和字段级兜底；保留历史迁移与原始来源证据的审计价值。旧派生数据无需保活，重新生成必须是显式操作。现有领域权限、来源限制、模型出站授权和调度开关继续生效。
 
+## 在线图片资料（OCR-READABLE-20261103）
+
+Mog 于 2026-11-03 确认 DeepSeek 在线识图为图片信息提取主方案。验收重点是上下文完整、信息归属正确、研究可用，不要求每字完全准确。原文提取与模型视觉观察分开；识别输出仍为未经人工核验的补充材料。此前 `ocr-readable.v2/local-v6` 区域整理候选未发布，真实复杂图片验证未达标，已退出本包生产接线；既有普通 OCR 兼容能力保留，不把它当主方案。
+
+在线执行复用现有显式选择、模型连接、冻结来源、逐图执行、失败停止及人工读本优先流程；GET 不触发模型，不自动批量回填。运行时模型配置、发布及历史批量处理分别需要对应授权。本包代码采用 `ocr-visual-audit.v2`，实际外部验证采用 DeepSeek `deepseek-flash` 图片输入；测试回执不代表运行配置已切换。
+
+每图返回 `titlePresence/titleText/regions/unreadable/limitations`。每个 region 必有 `regionRef/text/role/legibility/bbox/location/visualDescription/uncertainties`，按阅读顺序排列。`text` 保留可见文字及条件、否定、对比两端、单位；只允许机械合并换行，不概括、不按常识补写。`visualDescription` 只描述可见对象、空间或图示关系，不复述正文、不推断诊断/意图。账号与导航属于 ui，不作图片标题；无文字照片 text 为空。bbox 是模型候选定位，不冒充像素核验结果。限制与不确定项独立保留，不以 JSON 有效推断识别正确。标题候选与标题区域不一致时，只撤销 titleText、降级 titlePresence 为 uncertain 并追加明确 limitation；保留区域原文与原始回包，不为标题问题拒绝整图正文，不提升 ui 角色。
+
+canonical 使用现有 `materials[].blocks`，新增可选 `contentType: extracted_text | visual_description`、成对的 `regionRef/regionLabel`。同一区域的原文和视觉描述拥有独立块、共享区域标识；视觉描述只允许 paragraph/list，speaker 必为 unconfirmed，不能参与图片标题回退。图片身份和原图入口归属 material，不由模型生成。转换版本为 `cloud-manual-v4`，规则 `cloud-ocr-observation.v4`；既有 v3 云读本仍按其已持久化 canonical 内容读取。整图 limitations 和区域 uncertainties 同时传入 UI、Markdown、研究 fragments。
+
+UI 与 Markdown 按同一 readingView 显示图片资料，每张图提供已有原图入口，分别标注“图片文字（识别提取）”和“视觉描述（模型观察，非原文）”。AI context 使用 `image_substantive_text` 与 `image_visual_description` 区分两类，并保留原材料/读本/块/区域来源、位置和问题。图片页序未知时保持未知与既有观察顺序，不从语义猜页序，不把局部样本说成整篇图片已完成。
+
 ## 一份内容，按需表示
 
 默认 JSON 包含作品身份 `note`、按来源保存的 `materials[].blocks`、仅含引用和布局指令的 `readingView`、覆盖说明 `coverage`、按需读取入口 `attachments` 和明确选择 `selection`。每份材料正文只出现一次，不同时序列化 fragments、raw OCR、media 文本、Markdown 与多个任务预览。
 
 Markdown 通过 `format=markdown` 单独生成，与同一次读取的区块顺序和内容一致。评论、作者与互动元数据分别按需读取；评论页数不冒充平台评论总量。原图和识别诊断通过来源引用读取，不把原始布局/任务账本塞入每次 Agent 输入。
 
-Markdown 顶层采用同一 displayTitle；为空时仅用界面占位“无标题”。所有正文引用继续由同一 sections 解析，标题来源块的正文、角色、真实时间和局部问题仍保留；不同来源出现同文标题各自保留。人读 Markdown 不输出材料 ID、来源块 ID、原件链接或技术来源清单；精确引用仍完整保留在 canonical JSON 与机器任务 adapter 中。显式选择后重建展示标题，未选图片文字不会带入导出。
+Markdown 顶层采用同一 displayTitle；为空时仅用界面占位“无标题”。所有正文引用继续由同一 sections 解析，标题来源块的正文、角色、真实时间和局部问题仍保留；不同来源出现同文标题各自保留。人读 Markdown 不输出材料 ID、来源块 ID 或技术来源清单；每图保留已有原图核对链接；精确引用仍完整保留在 canonical JSON 与机器任务 adapter 中。显式选择后重建展示标题，未选图片文字不会带入导出。
 
 Markdown 依据 canonical block 的结构生成标题、段落、列表、表格与引用，纯文本中的 Markdown/HTML 符号按字面量转义；不会把 `<product-id>`、星号或反引号误解析为隐藏内容或新结构。表格单元格的真实换行使用序列化器生成的 `<br>`；原文里的同名标签仍转义。预览只允许这一精确换行标记，其他来源 HTML 一律按文字处理，保留清理器。时间展示为可读时码，JSON 的单位始终为毫秒。连续相同来源角色只在开头标注一次，角色切换（包括他人回到作者）、新章节、独立音频材料或对话结束后重新标注；dialogue 各 turn 的归属继续保留，unconfirmed 不推断人物。原生 tags 材料与已证明等价的 tags 组使用相同单行标签表示，保持顺序和重复；普通列表仍按原列表表示。执行状态按真实 pending / running / failed / cancelled / invalidated 表达，不把更新中或失败覆盖成来源无文字，既有有效空读本与文字读本均保留。
 
@@ -204,7 +216,7 @@ interaction 包含 likes、comments、collects、shares。四项分别保留来�
 
 ## 研究底稿阅读与既有原件能力
 
-研究底稿是成品阅读与导出页面，只依 sections 显示连续正文、轻量状态、章节/时码定位与必要缺口；移除右侧来源材料栏、查看来源入口、平台原文另一次展开及导出来源映射开关。原始追溯、精确引用和处理证据仍在唯一 v2 及既有材料能力内；不因阅读页移除入口而删除事实。阅读位置以作品、研究域和显式选择形成稳定空间，仅保存 section/group 锚点、段内比例 within、段外 offset 与回退 scrollTop，不保存正文；revision 变化后在当前编排中按稳定锚点恢复，锚点已不存在时回退保存的滚动位置。
+研究底稿是成品阅读与导出页面，只依 sections 显示连续正文、轻量状态、章节/时码定位与必要缺口；移除右侧来源材料栏、平台原文另一次展开及导出来源映射开关；图片章节保留每图核对入口。原始追溯、精确引用和处理证据仍在唯一 v2 及既有材料能力内；不因阅读页移除入口而删除事实。阅读位置以作品、研究域和显式选择形成稳定空间，仅保存 section/group 锚点、段内比例 within、段外 offset 与回退 scrollTop，不保存正文；revision 变化后在当前编排中按稳定锚点恢复，锚点已不存在时回退保存的滚动位置。
 
 共享作品详情继续使用既有 mainBlockRefs / supplementBlockRefs，原件与按需人工修正能力维持原行为。本次不改证据库其他页面，也不把研究底稿的章节重排传给 Works 组件。人工保存后刷新同一 canonical 底稿。
 
