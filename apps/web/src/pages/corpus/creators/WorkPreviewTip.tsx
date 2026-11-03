@@ -42,6 +42,8 @@ export function WorkPreviewCell({
   const layerHovered = useRef(false);
   const focusWithin = useRef(false);
   const startedFromPointer = useRef(false);
+  // Esc 关闭并把焦点交回触发点：这一次聚焦不再立刻重开，否则会留下「已展开但看不见」的浮层。
+  const suppressFocusOpen = useRef(false);
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
   const [activate, setActivate] = useState(0);
@@ -59,7 +61,10 @@ export function WorkPreviewCell({
     layerHovered.current = false;
     setOpen(false);
     setCoords(null);
-    if (returnFocus) trigger.current?.focus({ preventScroll: true });
+    if (returnFocus) {
+      suppressFocusOpen.current = true;
+      trigger.current?.focus({ preventScroll: true });
+    }
   }, [clearTimers]);
 
   const position = useCallback(() => {
@@ -112,8 +117,8 @@ export function WorkPreviewCell({
 
   useLayoutEffect(() => {
     if (!open) return;
-    position();
-  }, [open, position]);
+    if (!coords) position();
+  }, [open, coords, position]);
 
   useEffect(() => {
     if (!activate || !open) return;
@@ -143,6 +148,10 @@ export function WorkPreviewCell({
   };
   const onCellFocus = () => {
     focusWithin.current = true;
+    if (suppressFocusOpen.current) {
+      suppressFocusOpen.current = false;
+      return;
+    }
     show(0);
   };
   const onCellBlur = (event: FocusEvent<HTMLDivElement>) => {

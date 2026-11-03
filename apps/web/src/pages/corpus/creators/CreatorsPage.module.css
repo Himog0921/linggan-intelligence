@@ -514,6 +514,7 @@
 
 .popoverCover {
   display: flex;
+  position: relative;
   flex: none;
   align-items: center;
   justify-content: center;
@@ -523,6 +524,10 @@
   background: var(--lgi-canvas-sunken);
   color: var(--lgi-ghost);
   font-size: var(--lgi-type-label-size);
+}
+
+.popoverCover .mediaImage {
+  object-fit: contain;
 }
 
 .popoverCopy {
