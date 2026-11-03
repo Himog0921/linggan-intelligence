@@ -1086,3 +1086,90 @@ async fn manual_ocr_freezes_only_explicit_current_work_images_not_context_or_his
     );
     wire.finish().await;
 }
+
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL and loopback Pi only"]
+async fn ocr_readiness_reports_only_latest_current_model_probe_diagnostics() {
+    let db = fixture::db("ocr_readiness_diagnostic").await;
+    let work = ocr::admit(&db, "ocr-readiness-diagnostic", 1, &image(41), "image/png").await;
+    let wire = endpoint::Endpoint::start(false).await;
+    let adapter = adapter();
+    let owner = ExecutorSession::acquire(&db, "synthetic-readiness", 4)
+        .await
+        .unwrap();
+    let model = configure_recognition(&db, &wire.url, &owner, &adapter).await;
+    assert_eq!(read_run(&db, work).await.unwrap()["state"], "ready");
+    // Immutable synthetic receipts exercise the read projection, not provider transport.
+    async fn receipt(
+        db: &linggan_storage_postgres::Database,
+        version: Uuid,
+        model: Uuid,
+        state: &str,
+        result: serde_json::Value,
+    ) {
+        sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at) VALUES($1,$2,$3,'probe','synthetic-readiness-diagnostic',$4,0,0,$5,clock_timestamp())")
+            .bind(Uuid::new_v4()).bind(version).bind(model).bind(state).bind(result).execute(db.pool()).await.unwrap();
+    }
+    let other_model = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) VALUES($1,$2,'unselected-model','manual')")
+        .bind(other_model).bind(model.version).execute(db.pool()).await.unwrap();
+    receipt(
+        &db,
+        model.version,
+        other_model,
+        "failed",
+        serde_json::json!({"ok":false,"diagnostic":{"httpStatus":503}}),
+    )
+    .await;
+    assert_eq!(
+        read_run(&db, work).await.unwrap()["state"],
+        "ready",
+        "another model's 503 is unrelated"
+    );
+    receipt(
+        &db,
+        model.version,
+        model.model,
+        "failed",
+        serde_json::json!({"ok":false,"modelCallable":false,"diagnostic":{"httpStatus":503}}),
+    )
+    .await;
+    let unavailable = read_run(&db, work).await.unwrap();
+    assert_eq!(unavailable["state"], "unavailable");
+    assert_eq!(
+        unavailable["unavailableReason"],
+        "最近一次模型验证遇到识别服务暂时不可用（HTTP 503），请稍后重新验证。"
+    );
+    receipt(
+        &db,
+        model.version,
+        model.model,
+        "failed",
+        serde_json::json!({"ok":false,"modelCallable":false,"failureCode":"provider_timeout"}),
+    )
+    .await;
+    let reason = read_run(&db, work).await.unwrap();
+    assert_eq!(
+        reason["unavailableReason"],
+        "当前模型尚未通过可用性验证，请查看模型验证结果。"
+    );
+    receipt(
+        &db,
+        model.version,
+        model.model,
+        "succeeded",
+        serde_json::json!({"ok":true,"modelCallable":true}),
+    )
+    .await;
+    assert_eq!(
+        read_run(&db, work).await.unwrap()["state"],
+        "ready",
+        "older 503 must not override the latest success"
+    );
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        1,
+        "readiness never sends model requests"
+    );
+    wire.finish().await;
+}

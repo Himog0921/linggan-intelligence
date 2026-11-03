@@ -239,18 +239,16 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
                 tx.commit().await?;
                 Ok(empty(work, "ready", Some(scope), None))
             }
-            Err(error) => Ok(empty(
-                work,
-                "unavailable",
-                None,
-                Some(unavailable_reason(&error)),
-            )),
+            Err(error) => {
+                let reason = unavailable_reason_in(&mut tx, config, &error).await?;
+                Ok(empty(work, "unavailable", None, Some(reason)))
+            }
         };
     };
     let run_ref: Uuid = run.get("run_ref");
     let items = sqlx::query(
         "SELECT i.*,inv.input_tokens,inv.output_tokens,inv.measured_tokens,
-            inv.cost_pico_usd::text cost_pico_usd,
+            inv.cost_pico_usd::text cost_pico_usd,inv.result AS invocation_result,
             NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d
               WHERE d.slot_key=i.slot_key OR d.blob_sha256=i.blob_sha256 OR d.materialization_ref=i.materialization_ref) visible,
             COALESCE((SELECT jsonb_agg(item_slot_key ORDER BY item_slot_key)
@@ -294,11 +292,15 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
         let mut tx = db.pool().begin().await?;
         let config: Uuid = sqlx::query_scalar("SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key='ocr_recognition'").fetch_one(&mut *tx).await?;
         let result = ready_scope_in(&mut tx, work, config).await;
-        tx.commit().await?;
-        match result {
+        let readiness = match result {
             Ok(scope) => (Some(scope), None),
-            Err(error) => (None, Some(unavailable_reason(&error))),
-        }
+            Err(error) => (
+                None,
+                Some(unavailable_reason_in(&mut tx, config, &error).await?),
+            ),
+        };
+        tx.commit().await?;
+        readiness
     } else {
         (None, None)
     };
@@ -384,8 +386,23 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
             })
         })
         .collect::<Vec<_>>();
+    let provider_503 = !cancelled
+        && read_state == "stopped"
+        && items.iter().any(|item| {
+            item.get::<bool, _>("visible")
+                && item.get::<String, _>("state") == "failed"
+                && item
+                    .get::<Option<Value>, _>("invocation_result")
+                    .as_ref()
+                    .is_some_and(observed_503)
+        });
+    let current_stage = if provider_503 {
+        "本次识图遇到识别服务暂时不可用（HTTP 503），已停止后续图片处理。"
+    } else {
+        "按冻结顺序处理当前图组。"
+    };
     Ok(
-        json!({"runRef":run_ref,"workRef":work,"state":read_state,"completedImages":run.get::<i32,_>("completed_images"),"totalImages":run.get::<i32,_>("total_images"),"currentStage":"按冻结顺序处理当前图组。","modelLabel":run.get::<Option<String>,_>("model_label"),"unavailableReason":unavailable,"images":image_json,"pendingCount":pending,"failureCode":read_failure,"batchRef":run.get::<Option<Uuid>,_>("batch_ref"),"batchRevision":run.get::<Option<i64>,_>("revision"),"cancelRequested":run.get::<Option<bool>,_>("cancel_requested").unwrap_or(false),"scope":ready_scope}),
+        json!({"runRef":run_ref,"workRef":work,"state":read_state,"completedImages":run.get::<i32,_>("completed_images"),"totalImages":run.get::<i32,_>("total_images"),"currentStage":current_stage,"modelLabel":run.get::<Option<String>,_>("model_label"),"unavailableReason":unavailable,"images":image_json,"pendingCount":pending,"failureCode":read_failure,"batchRef":run.get::<Option<Uuid>,_>("batch_ref"),"batchRevision":run.get::<Option<i64>,_>("revision"),"cancelRequested":run.get::<Option<bool>,_>("cancel_requested").unwrap_or(false),"scope":ready_scope}),
     )
 }
 fn pico_usd(value: Option<String>) -> Value {
@@ -401,6 +418,51 @@ fn pico_usd(value: Option<String>) -> Value {
         format!("{whole}.{fraction}")
     })
 }
+// Use the same current connection/model identity and latest probe ordering as admission.
+// A failed probe is historical evidence, not a live provider-health assertion.
+async fn unavailable_reason_in(
+    conn: &mut sqlx::PgConnection,
+    config: Uuid,
+    error: &FoundationError,
+) -> Result<&'static str, FoundationError> {
+    let reason = unavailable_reason(error);
+    if reason != MODEL_VALIDATION_REQUIRED {
+        return Ok(reason);
+    }
+    let probe = sqlx::query(
+        "SELECT probe.state,probe.result FROM linggan_ai_task_config c
+         JOIN linggan_model_config m ON m.config_ref=c.model_config_ref
+         JOIN linggan_model_capability cap ON cap.capability_ref=m.capability_ref
+         JOIN linggan_ai_model_identity identity ON identity.identity_ref=cap.identity_ref
+         JOIN LATERAL(SELECT version_ref FROM linggan_model_connection_version
+             WHERE connection_ref=identity.connection_ref ORDER BY revision DESC LIMIT 1)v ON true
+         JOIN linggan_model_entry current_model ON current_model.connection_version_ref=v.version_ref AND current_model.model_id=identity.model_id
+         JOIN LATERAL(SELECT state,result FROM linggan_model_invocation
+             WHERE model_ref=current_model.model_ref AND connection_version_ref=v.version_ref AND operation='probe'
+             ORDER BY created_at DESC,invocation_ref DESC LIMIT 1)probe ON true
+         WHERE c.task_config_ref=$1",
+    ).bind(config).fetch_optional(conn).await?;
+    Ok(match probe {
+        Some(row)
+            if row.get::<String, _>("state") == "failed"
+                && row
+                    .get::<Option<Value>, _>("result")
+                    .as_ref()
+                    .is_some_and(observed_503) =>
+        {
+            "最近一次模型验证遇到识别服务暂时不可用（HTTP 503），请稍后重新验证。"
+        }
+        None => "当前模型尚未完成可用性验证，请先验证模型。",
+        _ => MODEL_VALIDATION_REQUIRED,
+    })
+}
+
+const MODEL_VALIDATION_REQUIRED: &str = "当前模型尚未通过可用性验证，请查看模型验证结果。";
+
+fn observed_503(result: &Value) -> bool {
+    result["ok"] == false && result["diagnostic"]["httpStatus"] == 503
+}
+
 fn unavailable_reason(error: &FoundationError) -> &'static str {
     match error {
         FoundationError::NotFound => "当前作品没有可识别且未撤回的原始图片。",
@@ -422,10 +484,63 @@ fn unavailable_reason(error: &FoundationError) -> &'static str {
         {
             "图片文字识别尚未配置可用额度。"
         }
-        FoundationError::AdmissionDenied(_) => "当前模型或图片外发许可尚未开启。",
+        FoundationError::AdmissionDenied(reasons)
+            if reasons.iter().any(|r| r == "connection_disabled") =>
+        {
+            "当前模型连接已停用。"
+        }
+        FoundationError::AdmissionDenied(reasons)
+            if reasons.iter().any(|r| r == "current_model_not_probed") =>
+        {
+            MODEL_VALIDATION_REQUIRED
+        }
+        FoundationError::AdmissionDenied(_) => "图片文字识别的准备条件尚未满足，请检查任务配置。",
         _ => "当前无法读取图片文字识别的准备条件。",
     }
 }
 fn empty(work: Uuid, state: &str, scope: Option<Value>, unavailable_reason: Option<&str>) -> Value {
     json!({"runRef":Value::Null,"workRef":work,"state":state,"completedImages":0,"totalImages":0,"currentStage":if state=="ready"{"确认当前图组后可开始。"}else{"当前图片或模型配置不可用。"},"modelLabel":scope.as_ref().and_then(|s|s["modelLabel"].as_str()),"unavailableReason":unavailable_reason,"images":[],"pendingCount":0,"failureCode":Value::Null,"batchRef":Value::Null,"batchRevision":Value::Null,"cancelRequested":false,"scope":scope})
+}
+
+#[cfg(test)]
+mod unavailable_tests {
+    use super::*;
+
+    #[test]
+    fn model_validation_failure_does_not_claim_permission_is_disabled() {
+        let reason = unavailable_reason(&FoundationError::AdmissionDenied(vec![
+            "current_model_not_probed".into(),
+        ]));
+        assert!(reason.contains("尚未通过可用性验证"));
+        assert!(!reason.contains("许可"));
+        assert!(!reason.contains("开关"));
+        assert!(
+            !reason.contains("503"),
+            "no provider status is present in this error"
+        );
+    }
+
+    #[test]
+    fn actual_permission_and_configuration_failures_remain_distinct() {
+        for (code, expected) in [
+            ("egress_not_approved", "尚未获准外发"),
+            ("task_ocr_recognition_off", "执行开关尚未开启"),
+            ("connection_disabled", "模型连接已停用"),
+            ("daily_budget_unconfigured", "尚未配置可用额度"),
+            ("skill_not_enabled", "准备条件尚未满足"),
+        ] {
+            assert!(
+                unavailable_reason(&FoundationError::AdmissionDenied(vec![code.into()]))
+                    .contains(expected),
+                "{code}"
+            );
+        }
+        assert!(
+            unavailable_reason(&FoundationError::AdmissionDenied(vec![
+                "current_model_not_probed".into(),
+                "global_off".into(),
+            ]))
+            .contains("执行开关尚未开启")
+        );
+    }
 }
