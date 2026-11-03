@@ -40,7 +40,7 @@ Mog 于 2026-11-03 确认 DeepSeek 在线识图为图片信息提取主方案。
 
 canonical 使用现有 `materials[].blocks`，新增可选 `contentType: extracted_text | visual_description`、成对的 `regionRef/regionLabel`。同一区域的原文和视觉描述拥有独立块、共享区域标识；视觉描述只允许 paragraph/list，speaker 必为 unconfirmed，不能参与图片标题回退。图片身份和原图入口归属 material，不由模型生成。转换版本为 `cloud-manual-v4`，规则 `cloud-ocr-observation.v4`；既有 v3 云读本仍按其已持久化 canonical 内容读取。整图 limitations 和区域 uncertainties 同时传入 UI、Markdown、研究 fragments。
 
-UI 与 Markdown 按同一 readingView 显示图片资料，每张图提供已有原图入口，分别标注“图片文字（识别提取）”和“视觉描述（模型观察，非原文）”。AI context 使用 `image_substantive_text` 与 `image_visual_description` 区分两类，并保留原材料/读本/块/区域来源、位置和问题。图片页序未知时保持未知与既有观察顺序，不从语义猜页序，不把局部样本说成整篇图片已完成。
+UI 与 Markdown 按同一 readingView 显示图片资料，每张图提供已有原图入口，分别标注“图片文字（识别提取）”和“视觉描述（模型观察，非原文）”。 阅读页每张图片的具体疑点合并为一个默认收起的“核对说明”，展开后保留区域位置；无疑点不显示空入口。通用未核对状态由 reading.verification 在图片标题旁简短表达，不再生成 cloud_image_unchecked 问题。Markdown 将具体核对说明置于文末。AI fragments（含 structure.issues）过滤历史 cloud_image_unchecked，具体缺口不删除；文本输入的类型说明只在开头出现一次；context_sources 显式携带 verification（verified/unchecked/null），评论研究保留该可选字段，旧快照不补写字段以保持原指纹。AI context 使用 `image_substantive_text` 与 `image_visual_description` 区分两类，并保留原材料/读本/块/区域来源、位置和问题。图片页序未知时保持未知与既有观察顺序，不从语义猜页序，不把局部样本说成整篇图片已完成。
 
 ## 一份内容，按需表示
 

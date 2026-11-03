@@ -51,10 +51,7 @@ fn bbox(value: &Value) -> Result<Option<[f64; 4]>, sqlx::Error> {
 
 /// Convert whole-image limitations into the same issues consumed by the dossier and AI.
 pub fn issues_from_visual(visual: &Value) -> Result<Vec<Value>, sqlx::Error> {
-    let mut output = vec![
-        json!({"key":"cloud_image_unchecked","code":"cloud_image_unchecked",
-        "message":"在线识图补充材料，提取文字与视觉描述均未经人工核对；可通过原图核对上下文。","resolution":"reading_edit"}),
-    ];
+    let mut output = vec![];
     for (index, message) in string_array(&visual["limitations"])?
         .into_iter()
         .enumerate()
@@ -218,6 +215,17 @@ pub fn blocks_from_visual(visual: &Value) -> Result<Vec<Value>, sqlx::Error> {
 mod tests {
     use super::*;
     #[test]
+    fn clear_image_has_no_generic_review_issue() {
+        assert!(
+            issues_from_visual(&json!({"limitations":[]}))
+                .unwrap()
+                .is_empty()
+        );
+        let issues = issues_from_visual(&json!({"limitations":["右栏末行被裁切"]})).unwrap();
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0]["code"], "image_limitation");
+    }
+    #[test]
     fn unreadable_region_retains_returned_characters_as_unverified_text() {
         let v = json!({"regions":[{"regionRef":"r","location":"中部","visualDescription":"","uncertainties":[],"text":"禁止 … 10 mg","role":"body","legibility":"unreadable","bbox":null}]});
         let blocks = blocks_from_visual(&v).unwrap();
@@ -272,7 +280,7 @@ mod tests {
         assert_eq!(blocks[1]["regionLabel"], "左上卡片");
         assert_eq!(blocks[1]["issues"][0]["message"], "人数标签模糊");
         assert_eq!(
-            issues_from_visual(&visual).unwrap()[1]["message"],
+            issues_from_visual(&visual).unwrap()[0]["message"],
             "右侧被裁切"
         );
     }

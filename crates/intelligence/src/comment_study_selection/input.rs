@@ -130,7 +130,16 @@ fn retained_context(key: &CommentKey, manifest: &Value) -> Result<Value, StudySe
                     .ok_or(StudySelectionError::InvalidSnapshot)?,
             ),
         };
-        retained.push(json!({"kind":kind,"order":order,"slotOrdinal":ordinal,"text":content, "speaker":source["speaker"],"structure":source["structure"],"issues":source["issues"]}));
+        let mut entry = json!({"kind":kind,"order":order,"slotOrdinal":ordinal,"text":content, "speaker":source["speaker"],"structure":source["structure"],"issues":source["issues"]});
+        if let Some(verification) = source.get("verification") {
+            if !verification.is_null()
+                && !matches!(verification.as_str(), Some("unchecked" | "verified"))
+            {
+                return Err(StudySelectionError::InvalidSnapshot);
+            }
+            entry["verification"] = verification.clone();
+        }
+        retained.push(entry);
     }
     if manifest["includedCharacterCount"].as_u64() != Some(used) {
         return Err(StudySelectionError::InvalidSnapshot);
@@ -288,4 +297,34 @@ pub fn json_hash(value: &Value) -> Result<String, StudySelectionError> {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
+}
+
+#[cfg(test)]
+mod verification_tests {
+    use super::*;
+
+    #[test]
+    fn optional_verification_preserves_legacy_shape_and_checks_explicit_values() {
+        let key = CommentKey {
+            work_ref: Uuid::from_u128(10),
+            comment_external_id: "comment".into(),
+        };
+        let mut manifest = json!({"contract":"comment-study.context.v2","workRef":key.work_ref,
+            "cleanerVersion":CLEANER_VERSION,"includedCharacterCount":2,"sources":[{
+            "sourceRef":Uuid::from_u128(20),"sourceVersion":"v1","blockRef":"b1","asOf":"now",
+            "kind":"image_visual_description","text":"容器","characterCount":2,"speaker":"unconfirmed",
+            "structure":{"kind":"paragraph","text":"容器","speaker":"unconfirmed","contentType":"visual_description"},"issues":[]}]});
+        let legacy = retained_context(&key, &manifest).unwrap();
+        assert!(legacy[0].get("verification").is_none());
+        for status in [json!("verified"), json!("unchecked"), Value::Null] {
+            manifest["sources"][0]["verification"] = status.clone();
+            let retained = retained_context(&key, &manifest).unwrap();
+            assert_eq!(retained[0]["verification"], status);
+            assert_eq!(retained[0]["kind"], "image_visual_description");
+        }
+        for invalid in [json!("unknown"), json!(true), json!({}), json!(1)] {
+            manifest["sources"][0]["verification"] = invalid;
+            assert!(retained_context(&key, &manifest).is_err());
+        }
+    }
 }

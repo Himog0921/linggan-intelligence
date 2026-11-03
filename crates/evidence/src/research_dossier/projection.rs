@@ -388,8 +388,12 @@ pub(super) fn fragments(work: &WorkResourceCurrent, materials: &[Value]) -> Vec<
                 _ => continue,
             };
             let text = content::block_text(block);
-            let mut issues = unit["issues"].as_array().cloned().unwrap_or_default();
-            issues.extend(block["issues"].as_array().into_iter().flatten().cloned());
+            let mut issues = specific_issues(&unit["issues"]);
+            issues.extend(specific_issues(&block["issues"]));
+            let mut structure = block.clone();
+            if structure.get("issues").is_some() {
+                structure["issues"] = json!(specific_issues(&block["issues"]));
+            }
             output.push(Fragment {
                 fragment_id: reference.into(),
                 source_ref: source,
@@ -399,7 +403,7 @@ pub(super) fn fragments(work: &WorkResourceCurrent, materials: &[Value]) -> Vec<
                 end: text.chars().count(),
                 text,
                 speaker: block["speaker"].as_str().unwrap_or("unconfirmed").into(),
-                structure: block.clone(),
+                structure,
                 issues,
                 reading_ref: unit["currentRevisionRef"]
                     .as_str()
@@ -423,4 +427,34 @@ fn metadata(work: &WorkResourceCurrent) -> Value {
         "sourceKind":work.published_at_source_kind,"precision":work.published_at_precision,
         "referenceObservedAt":work.published_at_reference_observed_at,"parserVersion":work.published_at_parser_version,
         "sourceRef":work.published_source.material_ref,"sourceObservedAt":work.published_source.observed_at,"observedAt":work.observed_at}})
+}
+
+/// Verification is reading metadata; only concrete problems belong in AI fragments.
+fn specific_issues(value: &Value) -> Vec<Value> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|issue| issue["code"] != "cloud_image_unchecked")
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod ai_issue_tests {
+    use super::*;
+
+    #[test]
+    fn historical_generic_issue_is_filtered_but_specific_uncertainty_survives() {
+        let original = json!([
+            {"code":"cloud_image_unchecked", "message":"通用核对说明"},
+            {"code":"image_limitation", "message":"右栏末行被裁切"},
+            {"code":"region_uncertain", "message":"第二格星级看不清"}
+        ]);
+        let issues = specific_issues(&original);
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0]["message"], "右栏末行被裁切");
+        assert_eq!(issues[1]["message"], "第二格星级看不清");
+        assert_eq!(original.as_array().unwrap().len(), 3);
+    }
 }

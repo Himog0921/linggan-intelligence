@@ -9,7 +9,8 @@ export function ReadingText({ text }: { text: string }) {
   return <>{parts.map((part, index) => index % 2 ? <span className={styles.unit} key={index}>{part}</span> : part)}</>;
 }
 export function ReadingIssues({ issues }: { issues: readonly ReadingIssue[] }) {
-  return issues.length ? <ul className={styles.issues}>{issues.map(issue => <li key={issue.displayKey}>{issue.message}</li>)}</ul> : null;
+  const specific = [...new Map(issues.filter(issue => issue.code !== 'cloud_image_unchecked').map(issue => [issue.message, issue])).values()];
+  return specific.length ? <details className={styles.reviewNotes}><summary>核对说明{specific.length > 1 ? ` · ${specific.length}` : ''}</summary><ul className={styles.issues}>{specific.map(issue => <li key={issue.displayKey}>{issue.message}</li>)}</ul></details> : null;
 }
 function Tags({ labels }: { labels: readonly string[] }) { return <div className={styles.tags}>{labels.map((label, index) => <span className={styles.tag} key={index}>{label}</span>)}</div>; }
 function shortDefinitions(block: Extract<DossierBlock, { kind: 'table' }>): boolean {
@@ -55,13 +56,12 @@ function GroupContent({ value, previousRole }: { value: ResolvedReadingGroup; pr
   return <>{entries.map(({ block, unit }, index) => <div key={block.ref} data-block-ref={block.ref} data-speaker={block.speaker}>
     {!block.contentType && block.kind !== 'dialogue' && showReadingAttribution(block.speaker ?? 'unconfirmed', index ? endingBlockAttribution(entries[index - 1]?.block) : previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[block.speaker ?? 'unconfirmed']}</p> : null}
     {unit.kind === 'video_frame' && block.time ? <span className={styles.transcriptTime}>{formatReadingTime(block.time.startMs)}</span> : null}
-    {block.regionLabel ? <p className={styles.attribution}>{block.regionLabel}</p> : null}
-    {block.contentType ? <p className={styles.attribution}>{block.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</p> : null}
+    {block.contentType ? <p className={styles.attribution}><span>{block.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</span>{block.regionLabel && block.regionLabel !== '整图' ? <span> · {block.regionLabel}</span> : null}</p> : null}
     <ContentBlock block={block} tags={unit.kind === 'tags'}/>
   </div>)}</>;
 }
 function Continuation({ from }: { from: boolean }) { return <p className={styles.continuation}>{from ? '承接上一段内容' : '后续内容不在本次范围内'}</p>; }
-export function DossierGroup({ value, prefix, previousRole }: { value: ResolvedReadingGroup; prefix: string; previousRole?: AttributionBoundary }) {
+export function DossierGroup({ value, prefix, previousRole, hideIssues = false }: { value: ResolvedReadingGroup; prefix: string; previousRole?: AttributionBoundary; hideIssues?: boolean }) {
   const id = readingAnchor(prefix, value.group.ref);
   const first = value.entries[0]?.block;
   const role = first?.speaker ?? 'unconfirmed';
@@ -69,11 +69,10 @@ export function DossierGroup({ value, prefix, previousRole }: { value: ResolvedR
   return <div className={styles.group} id={id} data-reading-anchor={value.group.ref} tabIndex={-1}>
     {value.group.continuation.fromPrevious ? <Continuation from/> : null}
     {value.group.mode !== 'blocks' && !first?.contentType && showReadingAttribution(role, previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[role]}</p> : null}
-    {value.group.mode !== 'blocks' && first?.regionLabel ? <p className={styles.attribution}>{first.regionLabel}</p> : null}
-    {value.group.mode !== 'blocks' && first?.contentType ? <p className={styles.attribution}>{first.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</p> : null}
+    {value.group.mode !== 'blocks' && first?.contentType ? <p className={styles.attribution}><span>{first.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</span>{first.regionLabel && first.regionLabel !== '整图' ? <span> · {first.regionLabel}</span> : null}</p> : null}
     {time ? <span className={styles.transcriptTime}>{formatReadingTime(time.startMs)}</span> : null}
     <GroupContent value={value} previousRole={previousRole}/>
-    <ReadingIssues issues={value.issues}/>
+    {!hideIssues ? <ReadingIssues issues={value.issues}/> : null}
     {value.group.continuation.toNext ? <Continuation from={false}/> : null}
   </div>;
 }

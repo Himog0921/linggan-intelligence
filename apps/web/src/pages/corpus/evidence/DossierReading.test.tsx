@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { emptyMaterialNote, processingLabel } from './dossierPresent';
 import { DossierDocument } from './DossierDocument';
@@ -34,7 +34,9 @@ it('研究底稿只读打开保留局部失败，不默认加载候选或提交�
   kit.route('GET', path, ok(dossierJson(1, { note: { platformTitle: null, displayTitle: null, displayTitleBasis: 'missing' }, materials: [dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null, issues: [{ key: 'ocr', code: 'recognition_failed', message: '此页识别失败', resolution: 'source_refresh' }] })] })));
   try {
     renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active />);
-    expect(await screen.findByText('此页识别失败')).toBeVisible();
+    expect(await screen.findByText('此页识别失败')).not.toBeVisible();
+    fireEvent.click(screen.getByText(/^核对说明/));
+    expect(screen.getByText('此页识别失败')).toBeVisible();
     expect(screen.getByRole('heading', { name: '缺失内容' })).toBeVisible();
     expect(screen.queryByText('对照原图 · 第 1 页')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
@@ -108,6 +110,8 @@ it.each([
   if (empty) expect(screen.getByText('暂无可读文字。')).toBeVisible();
   else expect(screen.queryByText('暂无可读文字。')).not.toBeInTheDocument();
   expect(screen.getByText('〔此页识别失败〕')).toBeVisible();
+  expect(screen.getByText('来源需重新处理')).not.toBeVisible();
+  fireEvent.click(screen.getByText(/^核对说明/));
   expect(screen.getByText('来源需重新处理')).toBeVisible();
   expect(screen.getByRole('button', { name: '查看来源' })).toBeVisible();
   if (hasText) expect(screen.getByText('已经识别的真实文字')).toBeVisible();

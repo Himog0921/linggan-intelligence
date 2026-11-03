@@ -219,3 +219,7 @@
 .sourceLink { padding: 0; border: 0; background: transparent; color: var(--lgi-muted); font: inherit; text-decoration: underline; cursor: pointer; }
 .originals { margin-top: var(--lgi-space-5); }
 .material { scroll-margin-top: var(--lgi-space-4); }
+
+.reviewNotes{margin-top:8px;color:var(--lgi-muted);font-size:12px}
+.reviewNotes>summary{cursor:pointer;width:fit-content}
+.reviewNotes .issues{color:inherit}

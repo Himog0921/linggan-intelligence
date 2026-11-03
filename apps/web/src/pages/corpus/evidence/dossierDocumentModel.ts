@@ -26,7 +26,7 @@ export function resolveReadingSections(dossier: Dossier): ResolvedReadingSection
     });
     const issues = entries.flatMap(({ block, unit }) => [...(block.issues ?? []), ...unit.issues.filter(issue => !issue.blockRef || group.blockRefs.includes(issue.blockRef))]
       .map(issue => ({ ...issue, displayKey: `${unit.ref}:${issue.key}` })))
-      .filter(issue => { if (seenIssues.has(issue.displayKey)) return false; seenIssues.add(issue.displayKey); return true; });
+      .filter(issue => { if (issue.code === 'cloud_image_unchecked') return false; if (seenIssues.has(issue.displayKey)) return false; seenIssues.add(issue.displayKey); return true; });
     return { group, entries, issues };
   }) }));
 }
@@ -119,7 +119,16 @@ export function remainingReadingIssues(dossier: Dossier, sections: readonly Reso
   const shown = new Set(sections.flatMap(section => section.groups.flatMap(group => group.issues.map(issue => issue.displayKey))));
   return [...dossier.coverage.issues.map(issue => ({ ...issue, displayKey: `coverage:${issue.key}` })),
     ...dossier.materials.flatMap(unit => unit.issues.map(issue => ({ ...issue, displayKey: `${unit.ref}:${issue.key}` })))].filter(issue => {
+    if (issue.code === 'cloud_image_unchecked') return false;
     if (shown.has(issue.displayKey)) return false;
     shown.add(issue.displayKey); return true;
   });
+}
+
+/** One disclosure per image; region-specific issues keep their location when collected. */
+export function imageReviewIssues(groups: readonly ResolvedReadingGroup[], unitRef: string): ReadingIssue[] {
+  return groups.filter(group => group.entries.some(entry => entry.unit.ref === unitRef)).flatMap(group => group.issues.map(issue => {
+    const block = group.entries.find(entry => entry.block.ref === issue.blockRef)?.block;
+    return block?.regionLabel ? { ...issue, message: `${block.regionLabel}：${issue.message}` } : issue;
+  }));
 }

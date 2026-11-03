@@ -3,8 +3,8 @@ import styles from './Dossier.module.css';
 
 const SPEAKERS: Record<Speaker, string> = { author: '作品作者', other: '他人表述', unconfirmed: '表达者未确认' };
 export function DossierIssues({ issues }: { issues: readonly DossierIssue[] }) {
-  if (issues.length === 0) return null;
-  return <ul className={styles.issues}>{[...new Map(issues.map(issue => [issue.key, issue])).values()].map(issue => <li key={issue.key}>{issue.message}</li>)}</ul>;
+  const specific = [...new Map(issues.filter(issue => issue.code !== 'cloud_image_unchecked').map(issue => [issue.message, issue])).values()];
+  return specific.length ? <details className={styles.reviewNotes}><summary>核对说明{specific.length > 1 ? ` · ${specific.length}` : ''}</summary><ul className={styles.issues}>{specific.map(issue => <li key={issue.key}>{issue.message}</li>)}</ul></details> : null;
 }
 function Content({ block }: { block: DossierBlock }) {
   switch (block.kind) {

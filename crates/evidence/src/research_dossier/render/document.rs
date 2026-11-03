@@ -56,6 +56,7 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
                 .filter_map(move |block| block["ref"].as_str().map(|r| (r, (unit, block))))
         })
         .collect();
+    let mut review_notes = String::new();
     let mut seen_issues = BTreeSet::new();
     let mut seen_images = BTreeSet::new();
     for section in dossier.reading_view["sections"]
@@ -118,9 +119,10 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
                         }),
                 ) {
                     render_issue(
-                        &mut out,
+                        &mut review_notes,
                         issue,
                         unit["ref"].as_str().unwrap_or(""),
+                        &review_location(unit, issue),
                         &mut seen_issues,
                     );
                 }
@@ -137,17 +139,28 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
     }
     render_gaps(&mut out, dossier);
     for issue in dossier.coverage["issues"].as_array().into_iter().flatten() {
-        render_issue(&mut out, issue, "coverage", &mut seen_issues);
+        render_issue(
+            &mut review_notes,
+            issue,
+            "coverage",
+            "资料范围",
+            &mut seen_issues,
+        );
     }
     for unit in &dossier.materials {
         for issue in unit["issues"].as_array().into_iter().flatten() {
             render_issue(
-                &mut out,
+                &mut review_notes,
                 issue,
                 unit["ref"].as_str().unwrap_or(""),
+                &review_location(unit, issue),
                 &mut seen_issues,
             );
         }
+    }
+    if !review_notes.is_empty() {
+        out.push_str("## 核对说明\n\n");
+        out.push_str(&review_notes);
     }
     out
 }
@@ -299,14 +312,53 @@ fn timestamp(milliseconds: i64) -> String {
     }
 }
 
-fn render_issue(out: &mut String, issue: &Value, scope: &str, seen: &mut BTreeSet<String>) {
+fn review_location(unit: &Value, issue: &Value) -> String {
+    let mut label = if unit["kind"] == "image" {
+        unit["page"].as_u64().map_or_else(
+            || "图片 · 页码未确认".into(),
+            |page| format!("第 {page} 张图片"),
+        )
+    } else {
+        section_label(unit["kind"].as_str().unwrap_or("")).to_owned()
+    };
+    if let Some(region) = unit["blocks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|block| issue["blockRef"].is_string() && block["ref"] == issue["blockRef"])
+        .and_then(|block| block["regionLabel"].as_str())
+    {
+        label.push_str(&format!(" · {}", text::escape(region)));
+    }
+    if let Some(url) = unit["originalUrl"].as_str() {
+        label.push_str(&format!(
+            " · [查看原图](<{}>)",
+            url.replace('<', "%3C")
+                .replace('>', "%3E")
+                .replace('\n', "%0A")
+                .replace('\r', "%0D")
+        ));
+    }
+    label
+}
+
+fn render_issue(
+    out: &mut String,
+    issue: &Value,
+    scope: &str,
+    location: &str,
+    seen: &mut BTreeSet<String>,
+) {
+    if issue["code"] == "cloud_image_unchecked" {
+        return;
+    }
     let Some(message) = issue["message"].as_str() else {
         return;
     };
     let identity = issue["key"].as_str().unwrap_or(message);
     if seen.insert(format!("{scope}:{identity}")) {
         out.push_str(&format!(
-            "> 待确认：{}\n\n",
+            "> {location} · 待确认：{}\n\n",
             text::escape(message).replace('\n', "\n> ")
         ));
     }
@@ -433,4 +485,24 @@ fn processing_note(unit: &Value) -> Option<String> {
             "。"
         }
     ))
+}
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+    #[test]
+    fn detached_notes_keep_image_and_region_attribution() {
+        let issue = json!({"key":"blur", "blockRef":"b", "message":"末行数字看不清"});
+        let unit = json!({"kind":"image", "page":null, "originalUrl":"/api/local/media/first", "blocks":[{"ref":"b", "regionLabel":"右栏"}]});
+        let mut out = String::new();
+        render_issue(
+            &mut out,
+            &issue,
+            "first",
+            &review_location(&unit, &issue),
+            &mut BTreeSet::new(),
+        );
+        assert!(out.contains("图片 · 页码未确认 · 右栏 · [查看原图](</api/local/media/first>)"));
+        assert!(out.contains("末行数字看不清"));
+    }
 }

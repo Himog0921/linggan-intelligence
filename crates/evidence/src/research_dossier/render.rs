@@ -7,6 +7,7 @@ pub fn context_sources(dossier: &ResearchDossier) -> Vec<Value> {
         let material=dossier.materials.iter().find(|m|m["blocks"].as_array().is_some_and(|b|b.iter().any(|b|b["ref"]==f.fragment_id)));
         json!({"fragmentId":f.fragment_id,"blockRef":f.fragment_id,"sourceRef":f.source_ref,"sourceVersion":f.source_version,
             "readingRef":f.reading_ref,"unitRef":f.unit_ref,"asOf":dossier.as_of,
+            "verification":material.map(|m|m["reading"]["verification"].clone()),
             "contentType":f.structure.get("contentType"),"regionRef":f.structure.get("regionRef"),"regionLabel":f.structure.get("regionLabel"),
             "kind":if f.structure["contentType"]=="visual_description" {"image_visual_description"} else {match f.field.as_str(){"title"=>"native_title","ocr"=>"image_substantive_text","transcript"=>"asr_text","frame_text"=>"frame_ocr_text",other=>other}},
             "text":f.text,"characterCount":f.text.chars().count(),"speaker":f.speaker,"structure":f.structure,"issues":f.issues,
@@ -18,6 +19,14 @@ pub fn context_sources(dossier: &ResearchDossier) -> Vec<Value> {
 /// Full block order; callers supply an explicit task selection, never a character allowance.
 pub fn render_materials(fragments: &[Fragment]) -> String {
     let mut out = String::new();
+    if fragments.iter().any(|f| {
+        matches!(
+            f.field.as_str(),
+            "ocr" | "cover_headline" | "transcript" | "frame_text"
+        )
+    }) {
+        out.push_str("图片文字与视觉描述分列；视觉描述是模型观察，不作作者原文引用。核对状态以来源记录为准。\n\n");
+    }
     for (index, f) in fragments.iter().enumerate() {
         out.push_str(&format!("[S{}] {}\n", index + 1, field_label(&f.field)));
         if f.speaker != "author" {
@@ -27,9 +36,9 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
             out.push_str(&format!("区域：{label}\n"));
         }
         if f.structure["contentType"] == "visual_description" {
-            out.push_str("视觉描述（模型观察，非原文）：\n");
+            out.push_str("视觉描述：\n");
         } else if f.structure["contentType"] == "extracted_text" {
-            out.push_str("图片文字（识别提取）：\n");
+            out.push_str("图片文字：\n");
         }
         out.push_str(&f.text);
         out.push_str("\n\n");
@@ -101,6 +110,58 @@ mod tests {
         dossier
     }
 
+    #[test]
+    fn ai_materials_explain_machine_status_once_and_keep_types_and_specific_issues() {
+        let fragments: Vec<_> = ["extracted_text", "visual_description", "visual_description"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, kind)| Fragment {
+                fragment_id: format!("f{i}"),
+                source_ref: Uuid::nil(),
+                field: "ocr".into(),
+                source_version: "v1".into(),
+                start: 0,
+                end: 2,
+                text: format!("内容{i}"),
+                speaker: "unconfirmed".into(),
+                structure: json!({"contentType":kind,"regionLabel":"左栏"}),
+                issues: if i == 0 {
+                    vec![json!({"message":"末行数字看不清"})]
+                } else {
+                    vec![]
+                },
+                reading_ref: None,
+                unit_ref: None,
+            })
+            .collect();
+        let output = render_materials(&fragments);
+        assert_eq!(output.matches("核对状态以来源记录为准").count(), 1);
+        assert_eq!(output.matches("视觉描述：").count(), 2);
+        assert_eq!(output.matches("图片文字：").count(), 1);
+        assert_eq!(output.matches("末行数字看不清").count(), 1);
+        assert!(!output.contains("模型观察，非原文"));
+        assert!(!output.contains("未经人工核实"));
+        assert!(render_materials(&[]).is_empty());
+        let mut dossier = fixture(Some("平台标题"), None);
+        dossier.fragments = fragments;
+        dossier.materials[0]["blocks"] = json!([{"ref":"f0"},{"ref":"f1"},{"ref":"f2"}]);
+        for status in [json!("verified"), json!("unchecked"), Value::Null] {
+            dossier.materials[0]["reading"] = json!({"verification":status});
+            let sources = context_sources(&dossier);
+            assert!(
+                sources
+                    .iter()
+                    .all(|source| source["verification"] == status)
+            );
+            assert_eq!(sources[0]["kind"], "image_substantive_text");
+            assert_eq!(sources[1]["kind"], "image_visual_description");
+        }
+        dossier.materials[0]
+            .as_object_mut()
+            .unwrap()
+            .remove("reading");
+        assert!(context_sources(&dossier)[0]["verification"].is_null());
+    }
     #[test]
     fn online_material_keeps_type_region_and_image_source_in_document() {
         let mut d = fixture(Some("平台标题"), None);
