@@ -5,7 +5,8 @@
 .page {
   --creator-text: var(--lgi-type-body-size);
   --creator-control: var(--lgi-space-10);
-  --creator-row: 80px;
+  /* 单行表格：64px 行高，头像 32、作品缩图 32×42。 */
+  --creator-row: var(--lgi-space-16);
   container-type: inline-size;
   display: flex;
   flex-direction: column;
@@ -303,7 +304,7 @@
 
 .table {
   width: 100%;
-  /* 八列基准宽 1242：检查器打开后左表短横向滚动，不挤压数字或让日期断行。 */
+  /* 九列基准宽 1242：检查器打开后左表短横向滚动，不挤压数字或让日期断行。 */
   min-width: calc(var(--lgi-space-24) * 13 - var(--lgi-space-2) + var(--lgi-action-rail-width));
   border-collapse: separate;
   border-spacing: 0;
@@ -311,14 +312,15 @@
 }
 
 /* 列宽是这一版页面的局部参数，不是全站 Token；长名字、长发现词要用真实内容复核。 */
-.colAuthor { width: calc(var(--lgi-space-24) * 2 + var(--lgi-space-12)); }
+.colAuthor { width: calc(var(--lgi-space-24) * 2 + var(--lgi-space-5)); }
+.colFollowers { width: var(--lgi-space-24); }
 .colKeyword { width: calc(var(--lgi-space-24) + var(--lgi-space-4)); }
-.colDirection { width: calc(var(--lgi-space-24) + var(--lgi-space-12)); }
-.colRelated { width: calc(var(--lgi-space-16) + var(--lgi-space-6)); }
-.colLikes { width: calc(var(--lgi-space-24) + var(--lgi-space-2)); }
-.colWork { min-width: calc(var(--lgi-space-24) * 3 + var(--lgi-space-3)); }
+.colDirection { width: calc(var(--lgi-space-24) + var(--lgi-space-8)); }
+.colRelated { width: calc(var(--lgi-space-16) + var(--lgi-space-4)); }
+.colLikes { width: var(--lgi-space-24); }
+.colWork { min-width: calc(var(--lgi-space-24) * 3 - var(--lgi-space-2)); }
 .colFirstSeen { width: calc(var(--lgi-space-24) + var(--lgi-space-4)); }
-.colObservation { width: calc(var(--lgi-space-24) + var(--lgi-space-12) - var(--lgi-action-rail-width)); }
+.colObservation { width: calc(var(--lgi-space-24) + var(--lgi-space-8) - var(--lgi-action-rail-width)); }
 
 .table th {
   position: sticky;
@@ -447,53 +449,16 @@
   min-width: 0;
 }
 
-.workTitleRow {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--lgi-space-2);
-  min-width: 0;
-}
-
 .workTitle {
-  display: -webkit-box;
+  display: block;
   flex: 1;
-  max-height: calc(var(--lgi-space-8) + var(--lgi-space-1));
   overflow: hidden;
   color: var(--lgi-ink);
   font-size: var(--lgi-type-control-size);
   line-height: calc(var(--lgi-type-label-size) * 1.5);
-  overflow-wrap: anywhere;
   text-decoration: none;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.coverTrigger {
-  flex: none;
-  border: 0 !important;
-  padding: 0 !important;
-  background: transparent !important;
-  cursor: pointer;
-}
-
-.coverTrigger:hover {
-  background: transparent !important;
-}
-
-.page .previewTrigger {
-  flex: none;
-  height: var(--lgi-space-8);
-  padding: 0 var(--lgi-space-2);
-  border: 1px solid var(--lgi-border);
-  background: var(--lgi-canvas);
-  color: var(--lgi-muted);
-  font-size: var(--lgi-type-label-size);
-  line-height: var(--lgi-space-8);
+  text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.page .previewTrigger:hover:not(:disabled) {
-  color: var(--lgi-signal-ink);
 }
 
 /* 作品预览：应用层 portal，避开表格裁切；靠视口边缘换向。 */
@@ -567,15 +532,15 @@
   height: var(--creator-control);
 }
 
-/* 封面按 3:4 完整显示（contain），不裁切；放不下的部分留白而不是切掉。 */
+/* 封面按 3:4 完整显示（contain），不裁切；列表内是 32×42 缩图。 */
 .cover {
   display: flex;
   position: relative;
   flex: none;
   align-items: center;
   justify-content: center;
-  width: var(--lgi-space-10);
-  height: calc(var(--lgi-space-12) + var(--lgi-space-2) - var(--lgi-space-1) / 2);
+  width: var(--lgi-space-8);
+  height: calc(var(--lgi-space-10) + var(--lgi-space-1) / 2);
   aspect-ratio: 3 / 4;
   overflow: hidden;
   background:var(--lgi-canvas);
@@ -621,15 +586,14 @@
 }
 
 .page .name {
-  display: -webkit-box;
-  max-height: calc(var(--lgi-space-8) + var(--lgi-action-rail-width));
+  display: block;
+  max-width: 100%;
   overflow: hidden;
   font-size: var(--lgi-type-control-size);
   font-weight: var(--lgi-weight-semibold);
   line-height: calc(var(--lgi-type-label-size) * 1.5);
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ellipsis {
@@ -731,13 +695,15 @@
 
 .topicTags {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
   gap: var(--lgi-space-1);
-  max-height: calc(var(--lgi-space-10) + var(--lgi-space-1));
   overflow: hidden;
+  white-space: nowrap;
 }
 
 .topicTag {
+  flex: none;
   border: 1px solid var(--lgi-hairline);
   padding: 0 var(--lgi-space-1);
   color: var(--lgi-body);
@@ -746,37 +712,30 @@
   white-space: nowrap;
 }
 
-.page .topicMore {
+.topicMoreText {
+  flex: none;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+  line-height: calc(var(--lgi-type-label-size) * 1.5);
+  white-space: nowrap;
+}
+
+/* 观察格只有一个入口：已观察去目标，未加入打开目标设置。 */
+.rowAction {
+  overflow: hidden;
+  line-height: calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.page .rowAction :is(button, a) {
   border: 0;
-  padding: 0 var(--lgi-space-1);
   background: transparent;
-  color: var(--lgi-muted);
-  font-size: var(--lgi-type-label-size);
-  line-height: calc(var(--lgi-type-label-size) * 1.5);
-  white-space: nowrap;
-}
-
-.stateTag {
-  display: inline-block;
-  border: 1px solid var(--lgi-hairline);
-  padding: 0 var(--lgi-space-2);
-  color: var(--lgi-body);
-  font-size: var(--lgi-type-label-size);
-  line-height: calc(var(--lgi-type-label-size) * 1.5);
-  white-space: nowrap;
-}
-
-.stateTag[data-state='joined'] {
-  border-color: var(--lgi-border-strong);
-  color: var(--lgi-ink);
-}
-
-.stateTag[data-state='paused'] {
-  color: var(--lgi-warning);
-}
-
-.stateTag[data-state='unknown'] {
-  color: var(--lgi-muted);
+  padding: 0;
+  color: var(--lgi-focus);
+  font-size: var(--lgi-text-data);
+  font-weight: var(--lgi-weight-regular);
+  text-decoration: none;
 }
 
 .metric {

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FocusEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
+import { useTitleTooltip } from '../evidence/TitleTooltip';
 import { Cover } from './Media';
 import { Metric } from './Metric';
 import { relevanceLabel } from './creatorsPresent';
@@ -8,15 +9,16 @@ import type { Work } from './creatorsTypes';
 import type { WorkResources } from './useWorkResources';
 import styles from './CreatorsPage.module.css';
 
-const OPEN_DELAY = 250;
+/** 持续悬停这么久才展开；离开单元格时尚未打开的计时立即取消。 */
+const OPEN_DELAY = 500;
 const CLOSE_DELAY = 120;
 const GAP = 8;
 const MARGIN = 8;
 
 /**
- * 表格里的作品预览：标题与缩图是同一个对象。悬停或聚焦先出现完整封面、完整标题、
- * 已知关键数据和原作品入口；Enter 打开后焦点进入浮层，Esc 关闭并回到触发点。
- * 浮层是固定定位的 portal，表格自身的横向滚动不会裁切它。
+ * 表格里的作品预览。单元格只有缩图与单行标题：指针持续停留 500ms 才出现完整封面、
+ * 完整标题、已知指标与原作品入口；快速划过不会延后弹出。
+ * 键盘聚焦标题先给完整标题提示；按 ↓ 展开预览并把焦点移入，Esc 关闭并回到标题。
  */
 export function WorkPreviewCell({
   work,
@@ -33,17 +35,22 @@ export function WorkPreviewCell({
 }) {
   const root = useRef<HTMLDivElement>(null);
   const layer = useRef<HTMLDivElement>(null);
-  const trigger = useRef<HTMLButtonElement>(null);
-  const titleLink = useRef<HTMLAnchorElement>(null);
+  const hintId = useId();
+  const {
+    anchorRef: titleAnchorRef,
+    onFocus: onTitleFocus,
+    onBlur: onTitleBlur,
+    onPointerDown: onTitlePointerDown,
+    close: closeTitleTip,
+    tooltip: titleTooltip,
+  } = useTitleTooltip<HTMLAnchorElement>(title, 'width', { delay: 250, maxWidth: 320 });
+  const trigger = titleAnchorRef;
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openNow = useRef(false);
   const hovered = useRef(false);
   const layerHovered = useRef(false);
   const focusWithin = useRef(false);
-  const startedFromPointer = useRef(false);
-  // Esc 关闭并把焦点交回触发点：这一次聚焦不再立刻重开，否则会留下「已展开但看不见」的浮层。
-  const suppressFocusOpen = useRef(false);
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
   const [activate, setActivate] = useState(0);
@@ -61,11 +68,8 @@ export function WorkPreviewCell({
     layerHovered.current = false;
     setOpen(false);
     setCoords(null);
-    if (returnFocus) {
-      suppressFocusOpen.current = true;
-      trigger.current?.focus({ preventScroll: true });
-    }
-  }, [clearTimers]);
+    if (returnFocus) trigger.current?.focus({ preventScroll: true });
+  }, [clearTimers, trigger]);
 
   const position = useCallback(() => {
     const anchor = root.current;
@@ -92,15 +96,19 @@ export function WorkPreviewCell({
     else reveal();
   }, [clearTimers]);
 
+  // 未打开就离开：取消待打开计时，快速划过不会在之后弹出。
   const maybeClose = useCallback(() => {
-    if (!openNow.current) return;
+    if (!openNow.current) {
+      clearTimers();
+      return;
+    }
     if (hovered.current || layerHovered.current || focusWithin.current) return;
     clearTimers();
     closeTimer.current = setTimeout(() => {
       if (hovered.current || layerHovered.current || focusWithin.current) return;
       close();
     }, CLOSE_DELAY);
-  }, [close, clearTimers]);
+  }, [clearTimers, close]);
 
   useEffect(() => () => clearTimers(), [clearTimers]);
 
@@ -128,10 +136,13 @@ export function WorkPreviewCell({
 
   useEffect(() => {
     if (!open) return;
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.stopPropagation();
-      close(true);
+      const active = document.activeElement;
+      // 只有焦点本来就在作品单元或浮层里时才把焦点交回标题；左表里的 Esc 不抢焦点。
+      const inside = !!active && (root.current?.contains(active) || layer.current?.contains(active));
+      close(inside);
     };
     document.addEventListener('keydown', onKeyDown, true);
     return () => document.removeEventListener('keydown', onKeyDown, true);
@@ -139,7 +150,6 @@ export function WorkPreviewCell({
 
   const onCellEnter = () => {
     hovered.current = true;
-    if (startedFromPointer.current) startedFromPointer.current = false;
     show(OPEN_DELAY);
   };
   const onCellLeave = () => {
@@ -148,11 +158,6 @@ export function WorkPreviewCell({
   };
   const onCellFocus = () => {
     focusWithin.current = true;
-    if (suppressFocusOpen.current) {
-      suppressFocusOpen.current = false;
-      return;
-    }
-    show(0);
   };
   const onCellBlur = (event: FocusEvent<HTMLDivElement>) => {
     const next = event.relatedTarget as Node | null;
@@ -160,19 +165,13 @@ export function WorkPreviewCell({
     focusWithin.current = false;
     maybeClose();
   };
-  const onPointerDown = () => {
-    startedFromPointer.current = true;
-    close();
-  };
-  const activatePreview = () => {
-    focusWithin.current = true;
-    if (!openNow.current) {
-      show(0);
-      // 先让浮层挂载，再移动焦点。
-      requestAnimationFrame(() => setActivate(value => value + 1));
-    } else {
-      setActivate(value => value + 1);
-    }
+  const onTitleKeyDown = (event: KeyboardEvent<HTMLAnchorElement>) => {
+    if (event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    closeTitleTip();
+    show(0);
+    // 先让浮层挂载，再把焦点移进「打开原作品」。
+    requestAnimationFrame(() => setActivate(value => value + 1));
   };
 
   return (
@@ -185,45 +184,24 @@ export function WorkPreviewCell({
       onFocus={onCellFocus}
       onBlur={onCellBlur}
     >
-      <button
-        type="button"
-        className={styles.coverTrigger}
+      <Cover url={resources.byRef.get(work.workRef)?.coverUrl ?? null} pending={resources.pending} className={styles.cover} />
+      <a
+        ref={titleAnchorRef}
+        className={styles.workTitle}
+        href={workLink(link, creatorKey, {}, work.workRef)}
+        data-return-key={creatorKey}
+        onFocus={onTitleFocus}
+        onBlur={onTitleBlur}
+        onPointerDown={onTitlePointerDown}
+        onKeyDown={onTitleKeyDown}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={`预览作品 ${title}`}
-        onPointerDown={onPointerDown}
-        onClick={activatePreview}
+        aria-describedby={hintId}
       >
-        <Cover url={resources.byRef.get(work.workRef)?.coverUrl ?? null} pending={resources.pending} className={styles.cover} />
-      </button>
-      <div className={styles.cellCopy}>
-        <div className={styles.workTitleRow}>
-          <a
-            ref={titleLink}
-            className={styles.workTitle}
-            href={workLink(link, creatorKey, {}, work.workRef)}
-            data-return-key={creatorKey}
-            onPointerDown={onPointerDown}
-          >
-            {title}
-          </a>
-          <button
-            ref={trigger}
-            type="button"
-            className={styles.previewTrigger}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            aria-label={`查看完整预览：${title}`}
-            onPointerDown={onPointerDown}
-            onClick={activatePreview}
-          >
-            预览
-          </button>
-        </div>
-        <span className={styles.secondary}>
-          {relevanceLabel(work.relevance)} · 赞 <Metric value={work.likes} />
-        </span>
-      </div>
+        {title}
+        {titleTooltip}
+      </a>
+      <span id={hintId} className="v7-sr-only">按向下方向键查看作品预览</span>
       {open && typeof document !== 'undefined'
         ? createPortal(
           <div
@@ -248,9 +226,9 @@ export function WorkPreviewCell({
               if (next && layer.current?.contains(next)) return;
               focusWithin.current = false;
               if (next && root.current?.contains(next)) return;
-              close();
+              maybeClose();
             }}
-            onPointerDown={(event: PointerEvent<HTMLDivElement>) => event.stopPropagation()}
+            onPointerDown={event => event.stopPropagation()}
           >
             <Cover url={resources.byRef.get(work.workRef)?.coverUrl ?? null} pending={resources.pending} className={styles.popoverCover} fallback="封面未取得" />
             <div className={styles.popoverCopy}>

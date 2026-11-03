@@ -147,7 +147,7 @@
 
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, calc(var(--lgi-space-24) + var(--lgi-space-3)));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   align-items: start;
   gap: var(--lgi-space-3);
 }
@@ -463,5 +463,12 @@
   .note,
   .noteTitle {
     transition: none;
+  }
+}
+
+/* 632/640 的标准检查器都排 5 列，封面随可用宽度约 106–108px；只有更窄的检查器才降 4 列。 */
+@container creator-body (max-width: 577px) {
+  .grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }

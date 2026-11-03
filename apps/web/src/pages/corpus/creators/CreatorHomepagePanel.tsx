@@ -80,20 +80,26 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
 
   // The confirmation sits below the sticky selection dock in a scrolling panel. Bring it into view
   // when it opens, move focus into it, and let Escape close it without writing anything.
-  // A hidden per-author instance must not keep a document Escape listener alive.
+  // A hidden per-author instance must not keep a document Escape listener alive. The listener is
+  // scoped to the active inspector and runs in capture so focus in the left table keeps its own Esc:
+  // a non-modal panel must not take Escape, or pull focus back, from outside its own region.
   useEffect(() => {
     if (!showConfirm || !ctx.active) return;
     const node = confirmRef.current;
     node?.scrollIntoView?.({ block: 'center' });
     node?.focus?.({ preventScroll: true });
+    const owner = node?.closest('[data-creator-inspector]');
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      const target = event.target as Node | null;
+      if (!owner || !target || !owner.contains(target)) return;
       event.preventDefault();
+      event.stopPropagation();
       returnFocus.current = true;
       setShowConfirm(false);
     };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
   }, [showConfirm, ctx.active]);
 
   useEffect(() => {

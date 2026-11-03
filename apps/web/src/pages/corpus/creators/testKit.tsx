@@ -127,6 +127,7 @@ interface ItemOptions {
   availableWorkCount?: number | null;
   works?: ReturnType<typeof workJson>[];
   traits?: string[];
+  topics?: string[];
   related?: number;
   unknown?: number;
   maxLikes?: number | null;
@@ -190,7 +191,7 @@ export function itemJson(n: number, options: ItemOptions = {}) {
       resultAtDisplay: authorResult ? '2026-10-14 10:00' : null,
     },
     traits: options.traits ?? ['personal_experience'],
-    topicHints: ['任务启动', '晚间练习'],
+    topicHints: options.topics ?? ['任务启动', '晚间练习'],
     discoveryKeywords: options.keywords ?? ['注意力训练'],
     firstSeenWorkRef: options.firstSeenWorkRef === undefined ? (works[0]?.workRef ?? null) : options.firstSeenWorkRef,
     firstSeenMs: options.firstSeenDate === null ? null : 1758751200000 + n,

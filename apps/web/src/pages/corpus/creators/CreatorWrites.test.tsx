@@ -161,9 +161,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
   it('已有暂停 / 忽略的目标：对话框说明加入后保持原状，成功回执同样写明', async () => {
     kit.route('POST', registerPath(1), ok(receipt({ created: false, lifecycleState: 'paused', monitoringEnabled: false })));
     const { user } = await page(listJson({ items: [itemJson(1, { lifecycleState: 'paused', monitoringState: 'paused', targetRef: '30000000-0000-4000-8000-0000000000aa' })] }));
-    await user.click(within(row('合成作者 1')).getByRole('button', { name: '查看加入方式' }));
-    const drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
-    await user.click(within(drawer).getByRole('button', { name: '加入并保持观察已暂停' }));
+    await user.click(within(row('合成作者 1')).getByRole('button', { name: '加入观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(dialog).toHaveTextContent('该作者已有观察目标，当前为「观察已暂停」；加入后保持这个状态，不会自动恢复。');
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
@@ -175,9 +173,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
   it('其他领域已有主研究关系：只能按参照用途加入，主研究选项不可选，请求里的用途是 reference', async () => {
     kit.route('POST', registerPath(1), ok(receipt({ usageRole: 'reference' })));
     const { user } = await page(listJson({ items: [itemJson(1, { hasOtherPrimaryDomain: true, existsInOtherDomains: true })] }));
-    await user.click(within(row('合成作者 1')).getByRole('button', { name: '查看加入方式' }));
-    const drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
-    await user.click(within(drawer).getByRole('button', { name: '按参照用途加入' }));
+    await user.click(within(row('合成作者 1')).getByRole('button', { name: '加入观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(dialog).toHaveTextContent('其他领域已有主研究关系；本领域只能按参照用途加入，不改变原巡查规则。');
     expect(within(dialog).getByRole('radio', { name: /只作参照/ })).toBeChecked();

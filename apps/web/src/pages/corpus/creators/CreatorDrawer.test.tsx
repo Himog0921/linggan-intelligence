@@ -436,12 +436,15 @@ describe('依据抽屉 · 键盘、焦点与头像', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: '合成作者 2' })).toHaveFocus());
   });
 
-  it('点「查看加入方式」直接打开观察记录分区', async () => {
+  it('观察格未加入时只有一个入口：点「加入观察」打开目标设置，不打开检查器', async () => {
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1), itemJson(2, { hasOtherPrimaryDomain: true, existsInOtherDomains: true })] })));
     const { user } = renderCreatorsPage();
     await screen.findByRole('button', { name: '合成作者 1' });
-    await user.click(within((await screen.findByRole('button', { name: '合成作者 2' })).closest('tr') as HTMLElement).getByRole('button', { name: '查看加入方式' }));
-    expect(within(await screen.findByRole('complementary', { name: '合成作者 2' })).getByRole('tab', { name: '观察记录' })).toHaveAttribute('aria-selected', 'true');
+    const row = (await screen.findByRole('button', { name: '合成作者 2' })).closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: '加入观察' }));
+    const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
+    expect(dialog).toHaveTextContent('只能按参照用途加入');
+    expect(screen.queryByRole('complementary', { name: '合成作者 2' })).toBeNull();
   });
 
   it('抽屉里的头像名称随加载状态变化：读取中 → 作者头像；加载失败 → 头像未取得', async () => {

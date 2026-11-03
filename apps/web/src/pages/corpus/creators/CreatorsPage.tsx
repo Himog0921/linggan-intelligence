@@ -167,7 +167,8 @@ export function CreatorsPage() {
     };
     const pending = options.tab ? { tab: options.tab, seq: ++tabSeq.current } : null;
     const known = panels.find(panel => panel.key === key);
-    const initial = options.tab ?? known?.currentTab ?? 'overview';
+    // 未访问过的作者沿用当前页签，连续上一位/下一位时不从概览重新开始。
+    const initial = options.tab ?? known?.currentTab ?? activePanel?.currentTab ?? 'overview';
     setPanels(current => {
       if (current.some(panel => panel.key === key)) {
         return current.map(panel =>
@@ -473,45 +474,45 @@ export function CreatorsPage() {
       }
     >
       <div className={styles.page} onClickCapture={event => rememberPosition(event.target)}>
-        <CreatorControls
-          query={query}
-          data={shown}
-          resultText={resultText}
-          searchHandle={searchHandle}
-          onSearchCommit={text => go(current => ({ ...current, query: text, page: 0 }))}
-          onSearchMode={(mode, text) => go(current => ({ ...current, searchMode: mode, query: text, page: 0 }))}
-          onOpenFilter={openFilter}
-          onSort={(sort: SortKey) => go(current => ({ ...current, sort, page: 0 }))}
-          onRefresh={refresh}
-          refreshing={list.isFetching}
-          onQuick={quick}
-          onOpenPolicy={() => {
-            sequence.current += 1;
-            setDialog({ kind: 'policy', seq: sequence.current });
-          }}
-          onOpenScope={() => setDialog({ kind: 'scope' })}
-          onRemoveChip={(chip: ConditionChip) => go(current => removeCondition(current, chip))}
-          onClearChips={() => go(clearExtras)}
-        />
-        <p className={styles.status} role="status" aria-live="polite" data-error={status.error}>
-          {status.text}
-          {status.link ? (
-            <span className={styles.statusActions}>
-              <a href={status.link.href}>{status.link.label}</a>
-            </span>
-          ) : null}
-          {status.action ? (
-            <span className={styles.statusActions}>
-              <button type="button" className={styles.textButton} onClick={() => status.action && runStatusAction(status.action.kind)}>
-                {status.action.label}
-              </button>
-            </span>
-          ) : null}
-        </p>
-        <FeedbackLine feedback={notice} />
-        <CreatorBulkBar count={selected.size} onExport={exportSelected} onClear={() => setSelected(new Map())} />
         <div className={styles.workspace}>
           <div className={styles.main}>
+            <CreatorControls
+              query={query}
+              data={shown}
+              resultText={resultText}
+              searchHandle={searchHandle}
+              onSearchCommit={text => go(current => ({ ...current, query: text, page: 0 }))}
+              onSearchMode={(mode, text) => go(current => ({ ...current, searchMode: mode, query: text, page: 0 }))}
+              onOpenFilter={openFilter}
+              onSort={(sort: SortKey) => go(current => ({ ...current, sort, page: 0 }))}
+              onRefresh={refresh}
+              refreshing={list.isFetching}
+              onQuick={quick}
+              onOpenPolicy={() => {
+                sequence.current += 1;
+                setDialog({ kind: 'policy', seq: sequence.current });
+              }}
+              onOpenScope={() => setDialog({ kind: 'scope' })}
+              onRemoveChip={(chip: ConditionChip) => go(current => removeCondition(current, chip))}
+              onClearChips={() => go(clearExtras)}
+            />
+            <p className={styles.status} role="status" aria-live="polite" data-error={status.error}>
+              {status.text}
+              {status.link ? (
+                <span className={styles.statusActions}>
+                  <a href={status.link.href}>{status.link.label}</a>
+                </span>
+              ) : null}
+              {status.action ? (
+                <span className={styles.statusActions}>
+                  <button type="button" className={styles.textButton} onClick={() => status.action && runStatusAction(status.action.kind)}>
+                    {status.action.label}
+                  </button>
+                </span>
+              ) : null}
+            </p>
+            <FeedbackLine feedback={notice} />
+            <CreatorBulkBar count={selected.size} onExport={exportSelected} onClear={() => setSelected(new Map())} />
             {shown && link && domain ? (
               <CreatorTable
                 key={apiKey}

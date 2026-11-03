@@ -28,31 +28,16 @@ afterEach(() => {
 });
 
 describe('作品预览浮层', () => {
-  it('聚焦即打开，Enter 把焦点移进浮层，Esc 关闭并把焦点交回触发点；再按 Enter 仍可打开', async () => {
-    const { user } = setup();
-    const trigger = screen.getByRole('button', { name: /^查看完整预览/ });
-    act(() => trigger.focus());
-    const dialog = await screen.findByRole('dialog', { name: /^作品预览：/ });
-    expect(trigger).toHaveAttribute('aria-expanded', 'true');
-    expect(within(dialog).getByText('合成作品 1')).toBeInTheDocument();
-
-    await user.keyboard('{Enter}');
-    await waitFor(() => expect(within(dialog).getByRole('link', { name: /打开原作品/ })).toHaveFocus());
-
-    await user.keyboard('{Escape}');
-    expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull();
-    expect(trigger).toHaveFocus();
-    expect(trigger).toHaveAttribute('aria-expanded', 'false');
-
-    // Esc 交回焦点的那一次聚焦不应把浮层立即重开；用户再按 Enter 时仍可打开。
-    await user.keyboard('{Enter}');
-    expect(await screen.findByRole('dialog', { name: /^作品预览：/ })).toBeInTheDocument();
-  });
-
-  it('悬停约 250ms 才出现；指针移进浮层不会关闭，移出后收起', async () => {
+  it('持续悬停 500ms 才出现；快速划过立即取消，不在离开后补弹', async () => {
     const { cell } = setup();
     fireEvent.mouseEnter(cell);
     expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull();
+    // 约 40ms 就离开：待打开计时必须取消，500ms 后不应弹出。
+    fireEvent.mouseLeave(cell);
+    await new Promise(resolve => setTimeout(resolve, 700));
+    expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull();
+
+    fireEvent.mouseEnter(cell);
     const dialog = await screen.findByRole('dialog', { name: /^作品预览：/ }, { timeout: 2000 });
     fireEvent.mouseLeave(cell);
     fireEvent.mouseEnter(dialog);
@@ -62,10 +47,34 @@ describe('作品预览浮层', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull());
   });
 
-  it('未知点赞保持「—」，不写成 0', async () => {
-    const { user } = setup({ likes: null });
-    await user.click(screen.getByRole('button', { name: /^查看完整预览/ }));
+  it('键盘聚焦标题给完整标题提示；↓ 展开浮层并移入焦点，Esc 关闭回到标题', async () => {
+    const { user } = setup();
+    const title = screen.getByRole('link', { name: '合成作品 1' });
+    Object.defineProperty(title, 'clientWidth', { configurable: true, value: 60 });
+    Object.defineProperty(title, 'scrollWidth', { configurable: true, value: 120 });
+    act(() => title.focus());
+    const hint = await waitFor(() => {
+      const node = document.querySelector('[data-title-tooltip]');
+      expect(node).not.toBeNull();
+      return node as HTMLElement;
+    });
+    expect(hint).toHaveTextContent('合成作品 1');
+    expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull();
+
+    await user.keyboard('{ArrowDown}');
     const dialog = await screen.findByRole('dialog', { name: /^作品预览：/ });
+    await waitFor(() => expect(within(dialog).getByRole('link', { name: /打开原作品/ })).toHaveFocus());
+
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull();
+    expect(title).toHaveFocus();
+    expect(title).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('未知点赞保持「—」，不写成 0', async () => {
+    const { cell } = setup({ likes: null });
+    fireEvent.mouseEnter(cell);
+    const dialog = await screen.findByRole('dialog', { name: /^作品预览：/ }, { timeout: 2000 });
     expect(dialog).toHaveTextContent('已判相关');
     expect(within(dialog).getByText('—')).toBeInTheDocument();
   });

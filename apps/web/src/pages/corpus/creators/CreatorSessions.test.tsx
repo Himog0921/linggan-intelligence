@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DOMAIN,
@@ -249,6 +249,44 @@ describe('页面会话 · 上一位 / 下一位', () => {
     await view.user.click(within(third).getByRole('button', { name: '上一位' }));
     await screen.findByRole('complementary', { name: '合成作者 2' });
     expect(kit.of('GET', '/api/local/creators')).toHaveLength(1);
+  });
+
+  it('进入未访问过的作者时沿用当前页签，连续浏览不回到概览', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1), itemJson(2)] })));
+    for (const n of [1, 2]) kit.route('GET', previewPath(n), ok(NOT_REQUESTED));
+    const view = renderCreatorsPage();
+
+    const { panel } = await open(view, '合成作者 1');
+    await view.user.click(within(panel).getByRole('tab', { name: '研究线索' }));
+    expect(within(panel).getByRole('tab', { name: '研究线索' })).toHaveAttribute('aria-selected', 'true');
+
+    await view.user.click(within(panel).getByRole('button', { name: '下一位' }));
+    const second = await screen.findByRole('complementary', { name: '合成作者 2' });
+    expect(within(second).getByRole('tab', { name: '研究线索' })).toHaveAttribute('aria-selected', 'true');
+    expect(within(second).getByRole('tabpanel', { name: '研究线索' })).toBeVisible();
+  });
+
+  it('切换作者或关闭再打开都保留原来的阅读位置，不回到顶部', async () => {
+    defaultRoutes(kit, ok(listJson({ items: [itemJson(1), itemJson(2)] })));
+    for (const n of [1, 2]) kit.route('GET', previewPath(n), ok(NOT_REQUESTED));
+    const view = renderCreatorsPage();
+
+    const { panel } = await open(view, '合成作者 1');
+    const body = panel.querySelector('[role="tabpanel"]')?.parentElement as HTMLElement;
+    body.scrollTop = 250;
+    fireEvent.scroll(body);
+
+    await view.user.click(within(panel).getByRole('button', { name: '下一位' }));
+    const second = await screen.findByRole('complementary', { name: '合成作者 2' });
+    await view.user.click(within(second).getByRole('button', { name: '上一位' }));
+    await waitFor(() => expect(body.scrollTop).toBe(250));
+
+    body.scrollTop = 200;
+    fireEvent.scroll(body);
+    await view.user.click(within(panel).getByRole('button', { name: '关闭作者检查器' }));
+    await waitFor(() => expect(panel).toHaveAttribute('hidden'));
+    await open(view, '合成作者 1');
+    await waitFor(() => expect(body.scrollTop).toBe(200));
   });
 });
 

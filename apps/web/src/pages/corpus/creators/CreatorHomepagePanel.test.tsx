@@ -214,6 +214,27 @@ describe('主页作品 · 冻结样本与精选研究', () => {
     await waitFor(() => expect(trigger).toHaveFocus());
   });
 
+  it('焦点在左侧列表时 Esc 不关闭右侧确认，也不抢回焦点', async () => {
+    defaultRoutes(kit);
+    kit.route('GET', PREVIEW, ok(WITH_KNOWN()));
+    const { user, panel } = await openHomepage();
+    await within(panel).findByText('本次样本 3 篇');
+    await user.click(within(panel).getByRole('button', { name: '研究已选 3 篇' }));
+    const confirm = within(panel).getByRole('region', { name: '精选研究确认' });
+    expect(confirm).toBeInTheDocument();
+
+    const authorButton = screen.getByRole('button', { name: '合成作者 1' });
+    authorButton.focus();
+    await user.keyboard('{Escape}');
+    expect(within(panel).getByRole('region', { name: '精选研究确认' })).toBeInTheDocument();
+    expect(authorButton).toHaveFocus();
+
+    confirm.focus();
+    await user.keyboard('{Escape}');
+    expect(within(panel).queryByRole('region', { name: '精选研究确认' })).toBeNull();
+    await waitFor(() => expect(within(panel).getByRole('button', { name: '研究已选 3 篇' })).toHaveFocus());
+  });
+
   it('标准版精选带评论样本；没有确定回执时保留选择，重试沿用同一个请求标识且不扩大范围', async () => {
     defaultRoutes(kit);
     kit.route('GET', PREVIEW, ok(WITH_KNOWN()));

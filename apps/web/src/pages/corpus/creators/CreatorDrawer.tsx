@@ -136,9 +136,12 @@ export function CreatorDrawer({
     wasActive.current = true;
   }, [active, focusRequest]);
 
-  // 外部明确指定页签（例如「查看加入方式」）：跟它走，不被通用记忆覆盖。
+  // 外部明确指定页签（例如「查看加入方式」）：跟它走一次，之后普通重开不被旧入口意图重放。
+  const consumedPending = useRef<number | null>(null);
   useEffect(() => {
     if (!active || !pendingTab) return;
+    if (consumedPending.current === pendingTab.seq) return;
+    consumedPending.current = pendingTab.seq;
     switchTab(pendingTab.tab);
     // switchTab 依赖当前 tab 与 body；只在外部请求变化时执行。
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -147,7 +150,7 @@ export function CreatorDrawer({
   // 内容区滚动位置：打开/切页签后下一帧恢复；内容晚到重试；用户自己操作即放弃。
   useEffect(() => {
     const element = body.current;
-    if (!element) return;
+    if (!element || !active) return;
     let target: number | null = positions.current[tab] ?? 0;
     let observer: ResizeObserver | null = null;
     let frame = 0;
@@ -189,6 +192,18 @@ export function CreatorDrawer({
       element.removeEventListener('pointerdown', stop);
       element.removeEventListener('keydown', onKeyDown);
     };
+  }, [tab, active]);
+
+  // 阅读位置随滚动持续记录：切作者、关闭、翻页隐藏前都已有最新值，不依赖隐藏那一刻再读。
+  useEffect(() => {
+    if (!active) return;
+    const element = body.current;
+    if (!element) return;
+    const save = () => {
+      positions.current[tab] = element.scrollTop;
+    };
+    element.addEventListener('scroll', save, { passive: true });
+    return () => element.removeEventListener('scroll', save);
   }, [tab, active]);
 
   function switchTab(next: DrawerTab) {

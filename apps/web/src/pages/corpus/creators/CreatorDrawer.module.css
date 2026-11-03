@@ -261,6 +261,9 @@
 
 /* ── 滚动的内容区 ─────────────────────────────── */
 .body {
+  /* 主页作品列数按检查器内容宽度决定，不按视口：632/640 都排 5 列。 */
+  container-type: inline-size;
+  container-name: creator-body;
   flex: 1;
   min-height: 0;
   padding: var(--lgi-space-6);
