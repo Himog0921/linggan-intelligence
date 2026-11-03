@@ -220,6 +220,7 @@
 .originals { margin-top: var(--lgi-space-5); }
 .material { scroll-margin-top: var(--lgi-space-4); }
 
-.reviewNotes{margin-top:8px;color:var(--lgi-muted);font-size:12px}
+.reviewNotes{margin-top:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-type-label-size)}
 .reviewNotes>summary{cursor:pointer;width:fit-content}
-.reviewNotes .issues{color:inherit}
+.reviewNotes ul{color:inherit;margin-top:var(--lgi-space-2);padding-left:var(--lgi-space-4);list-style:disc;font:inherit}
+.reviewNotes>summary:focus-visible{outline:var(--lgi-action-border-width) solid var(--lgi-focus);outline-offset:var(--lgi-space-1)}

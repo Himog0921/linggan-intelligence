@@ -4,6 +4,7 @@ import { hasReadingSourceText } from './dossierReadingContent';
 import { normalizedTagLabel } from './dossierTagText';
 import type { DossierBlock, DossierMaterial, Speaker } from './dossierTypes';
 import styles from './DossierDocument.module.css';
+import reviewStyles from './Dossier.module.css';
 
 const ROLE_LABELS: Record<Speaker, string> = { author: '作品作者表述', other: '他人表述', unconfirmed: '表达归属未确认' };
 export function ReadingText({ text }: { text: string }) {
@@ -12,7 +13,7 @@ export function ReadingText({ text }: { text: string }) {
 }
 export function ReadingIssues({ issues }: { issues: readonly ReadingIssue[] }) {
   const specific = [...new Map(issues.filter(issue => issue.code !== 'cloud_image_unchecked').map(issue => [issue.message, issue])).values()];
-  return specific.length ? <details className={styles.reviewNotes}><summary>核对说明{specific.length > 1 ? ` · ${specific.length}` : ''}</summary><ul className={styles.issues}>{specific.map(issue => <li key={issue.displayKey}>{issue.message}</li>)}</ul></details> : null;
+  return specific.length ? <details className={reviewStyles.reviewNotes}><summary>核对说明{specific.length > 1 ? ` · ${specific.length}` : ''}</summary><ul className={styles.issues}>{specific.map(issue => <li key={issue.displayKey}>{issue.message}</li>)}</ul></details> : null;
 }
 export function EmptySpeechNotes({ materials }: { materials: readonly DossierMaterial[] }) {
   return <>{materials.filter(unit => unit.kind === 'audio').map((unit, index, units) => {
