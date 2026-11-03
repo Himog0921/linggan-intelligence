@@ -51,11 +51,12 @@ it('多图沿 owner 编排连续阅读，保留标题来源及相同文字的不
   expect(notes).toHaveAttribute('open');
   expect(within(notes!).getByText('数据截至')).toBeVisible();
 });
-it('阅读隐藏诊断文案，各材料原始问题仍留在 DTO', async () => {
+it('核对说明按图片默认收起，各材料原始问题仍留在 DTO', async () => {
   const issue = { key: 'ocr_low_confidence_0', code: 'glyph', message: '数字需要对照原图核验', resolution: 'reading_edit' };
   kit.route('GET', path, ok(dossierJson(1, { materials: [1,2].map(n => dossierMaterialJson(n, { blocks: [{ ref: `paragraph-${n}`, kind: 'paragraph', text: `完整原文 ${n}`, issues: [issue] }], issues: [issue] })), coverage: { issues: [] } })));
   mount(); await screen.findByText('完整原文 1');
-  expect(screen.queryByText(issue.message)).not.toBeInTheDocument();
+  expect(screen.getAllByText(issue.message)).toHaveLength(2);
+  for (const note of screen.getAllByText(issue.message)) expect(note).not.toBeVisible();
   expect(screen.getByText('完整原文 2')).toBeVisible();
 });
 it('已确认缺页集中提示一次，不在正文重复插入诊断', async () => {

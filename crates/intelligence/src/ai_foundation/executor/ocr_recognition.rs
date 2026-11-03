@@ -199,6 +199,8 @@ async fn prepare(
     let req_hash = content_hash(
         &json!([
             "ocr-recognition.v1",
+            visual::CONTRACT,
+            content_hash(visual::EXTRACTION_INSTRUCTION),
             prompt_version_ref,
             item.item_ref,
             item.task_config_ref,
@@ -328,7 +330,12 @@ async fn settle(
             job,
             p.materialization_ref,
             derivative,
-            blocks,
+            linggan_evidence::material_reading::producers::ReadingContent {
+                blocks,
+                issues: linggan_evidence::cloud_ocr_adoption::issues_from_visual(&visual_json)?,
+                source_state: "present".into(),
+                source_location: json!({"visualContract":visual::CONTRACT}),
+            },
             p.expected_reading_ref,
         )
         .await?;
@@ -342,6 +349,8 @@ async fn settle(
         .map(safe_result)
         .unwrap_or_else(|| json!({"ok":false}));
     result["promptVersion"] = json!(p.prompt_version_ref);
+    result["visualContract"] = json!(visual::CONTRACT);
+    result["extractionRulesHash"] = json!(content_hash(visual::EXTRACTION_INSTRUCTION));
     result["executorReceipt"] = json!(item.lease_token);
     finish_invocation_in(&mut tx, p.invocation, response, success, failure, &result).await?;
     if success {

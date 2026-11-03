@@ -122,6 +122,7 @@ fn title(note: &mut Value, materials: &[Value], complete_units: bool) {
         .and_then(|m| m["blocks"].as_array())
         .into_iter()
         .flatten()
+        .filter(|b| b["contentType"] != "visual_description")
         .collect();
     let start = blocks
         .iter()
@@ -229,7 +230,12 @@ pub(crate) fn unit_text(dossier: &ResearchDossier, unit: &Value) -> String {
                     continue;
                 };
                 let value = content::block_text(block);
-                if !content::has_source_text(block) || content::pure_tags(&value).is_some() {
+                // Library excerpts are quoted source text, not model observations.
+                // Visual descriptions remain in the full typed reading and AI sources.
+                if !content::has_source_text(block)
+                    || block["contentType"] == "visual_description"
+                    || content::pure_tags(&value).is_some()
+                {
                     continue;
                 }
                 if !text.is_empty() {
@@ -289,6 +295,23 @@ mod tests {
             candidate_statuses: vec![],
             metadata: json!({}),
         }
+    }
+
+    #[test]
+    fn library_excerpt_does_not_relabel_visual_observation_as_image_text() {
+        let mut d = fixture(true, None, false);
+        d.materials[0]["blocks"] = json!([
+            {"ref":"observed","kind":"paragraph","text":"桌面上有容器。","speaker":"unconfirmed","contentType":"visual_description","regionRef":"r1","regionLabel":"中央"},
+            {"ref":"transcribed","kind":"paragraph","text":"原图实际文字。","speaker":"unconfirmed","contentType":"extracted_text","regionRef":"r2","regionLabel":"下方"}
+        ]);
+        rebuild(&mut d);
+        assert_eq!(unit_text(&d, &d.materials[0]), "原图实际文字。");
+        assert!(ordered_refs(&d).contains(&"observed"));
+        assert!(super::super::render::markdown(&d).contains("桌面上有容器。"));
+        d.materials[0]["blocks"].as_array_mut().unwrap().pop();
+        rebuild(&mut d);
+        assert!(unit_text(&d, &d.materials[0]).is_empty());
+        assert!(ordered_refs(&d).contains(&"observed"));
     }
 
     #[test]

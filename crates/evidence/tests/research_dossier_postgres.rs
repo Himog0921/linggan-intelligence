@@ -689,7 +689,7 @@ async fn recognition_gaps_stay_in_source_but_never_become_reading_or_ai_text() {
     let rendered = dossier::render_materials(&read.fragments);
     assert!(rendered.contains("[S1] 图片文字") && rendered.contains("实际识读到的完整内容"));
     assert!(!rendered.contains("这一处无法识读的诊断标签") && !rendered.contains("[S2]"));
-    assert!(!rendered.contains("待确认：局部文字缺失"));
+    assert_eq!(rendered.matches("待确认：局部文字缺失").count(), 1);
     let coverage = read.coverage.clone();
     dossier::select(
         &mut read,

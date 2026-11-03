@@ -1,6 +1,7 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it } from 'vitest';
-import { DossierGroup, EmptySpeechNotes, TranscriptGroups } from './DossierDocumentBlocks';
+import { DossierDocument } from './DossierDocument';
+import { DossierGroup, EmptySpeechNotes, ReadingIssues, TranscriptGroups } from './DossierDocumentBlocks';
 import { parseDossierPayload } from './dossierDecode';
 import { endingGroupAttribution, readingGaps, resolveReadingSections } from './dossierDocumentModel';
 import { dossierJson, dossierMaterialJson } from './evidenceFixtures';
@@ -91,4 +92,54 @@ it('结构块的真实时间范围保留毫秒，连续口播保持紧凑起点�
   expect(time).toHaveAttribute('title', '02:53.125–02:59.250');
   expect(time).toHaveAttribute('data-time-start-ms', '173125');
   expect(time).toHaveAttribute('data-time-end-ms', '179250');
+});
+
+it.each(['blocks', 'paragraph'] as const)('在线资料在%s模式保留原文与视觉类型', mode => {
+  mount([{ ref: 'observation', kind: 'paragraph', text: '两栏以不同底色区分。', speaker: 'unconfirmed', contentType: 'visual_description', regionRef: 'r1', regionLabel: '整图' }], mode);
+  expect(screen.getByText('视觉描述 · 模型观察，非原文')).toBeVisible();
+  expect(screen.queryByText('整图')).toBeNull();
+  expect(screen.queryByText('作品作者表述')).toBeNull();
+});
+
+it('图片资料提供所属原图入口并保留未知页码', () => {
+  const originalUrl = '/api/local/media/20000000-0000-4000-8000-000000000001/' + 'a'.repeat(64);
+  const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { page: null, originalUrl })] }));
+  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  expect(screen.getByRole('link', { name: '查看原图' })).toHaveAttribute('href', originalUrl);
+  expect(screen.getByText(/图片 · 页码未确认/)).toBeVisible();
+});
+
+it('核对说明默认收起，通用提示不展示，具体问题展开后仍可读', () => {
+  const issue = { code: 'image_limitation', key: 'cut', displayKey: 'cut', message: '右栏末尾被裁切', resolution: 'reading_edit' as const };
+  const { container } = render(<ReadingIssues issues={[issue, { ...issue, key: 'duplicate', displayKey: 'duplicate' }, { ...issue, key: 'general', displayKey: 'general', code: 'cloud_image_unchecked', message: '通用未核对提醒' }]}/>);
+  expect(container.querySelector('details')).not.toHaveAttribute('open');
+  expect(screen.getByText('右栏末尾被裁切')).not.toBeVisible();
+  expect(screen.queryByText('通用未核对提醒')).toBeNull();
+  expect(screen.getAllByText('右栏末尾被裁切')).toHaveLength(1);
+  fireEvent.click(screen.getByText('核对说明'));
+  expect(screen.getByText('右栏末尾被裁切')).toBeVisible();
+});
+
+it('同图多个区域只保留一个核对入口，展开后保留疑点位置', () => {
+  const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { issues: [], blocks: [
+    { ref: 'left', kind: 'paragraph', text: '左栏原文', contentType: 'extracted_text', regionRef: 'r1', regionLabel: '左栏', issues: [{ key: 'left', code: 'region_uncertainty', message: '末字模糊', blockRef: 'left', resolution: 'reading_edit' }] },
+    { ref: 'right', kind: 'paragraph', text: '右栏原文', contentType: 'extracted_text', regionRef: 'r2', regionLabel: '右栏', issues: [{ key: 'right', code: 'region_uncertainty', message: '数值模糊', blockRef: 'right', resolution: 'reading_edit' }] }
+  ] })] }));
+  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  expect(screen.getAllByText(/^核对说明/)).toHaveLength(1);
+  expect(screen.getByText('左栏：末字模糊')).not.toBeVisible();
+  fireEvent.click(screen.getByText(/^核对说明/));
+  expect(screen.getByText('左栏：末字模糊')).toBeVisible();
+  expect(screen.getByText('右栏：数值模糊')).toBeVisible();
+});
+
+it('口播段落的具体疑点默认收起并可展开核对', () => {
+  const issue = { key: 'unclear-number', code: 'glyph', message: '第二句数字需核对', resolution: 'reading_edit' };
+  const raw = dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', blocks: [{ ref: 'speech', kind: 'paragraph', text: '练习持续十五分钟。', issues: [issue] }], issues: [issue] })] });
+  raw.dossier.readingView.sections[0]!.groups[0]!.mode = 'transcript_paragraph';
+  const groups = resolveReadingSections(parseDossierPayload(raw).dossier)[0]!.groups;
+  render(<TranscriptGroups groups={groups} prefix="audio-review"/>);
+  expect(screen.getByText(issue.message)).not.toBeVisible();
+  fireEvent.click(screen.getByText(/^核对说明/));
+  expect(screen.getByText(issue.message)).toBeVisible();
 });

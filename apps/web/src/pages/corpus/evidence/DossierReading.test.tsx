@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { emptyMaterialNote, processingLabel } from './dossierPresent';
 import { DossierDocument } from './DossierDocument';
@@ -36,7 +36,9 @@ it('研究底稿只读打开保留局部失败，不默认加载候选或提交�
   try {
     renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active />);
     expect(await screen.findByText(/第 1、2 页文字待补全/)).toBeVisible();
-    expect(screen.queryByText('此页识别失败')).not.toBeInTheDocument();
+    expect(screen.getByText('此页识别失败')).not.toBeVisible();
+    fireEvent.click(screen.getByText(/^核对说明/));
+    expect(screen.getByText('此页识别失败')).toBeVisible();
     expect(screen.getByRole('heading', { name: '缺失内容' })).toBeVisible();
     expect(screen.queryByText('对照原图 · 第 1 页')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
@@ -181,7 +183,8 @@ it.each(['works', 'dossier'] as const)('%s 只显示规范有效内容，封面�
   const view = render(surface === 'works' ? <DossierReading dossier={payload.dossier} titleRendered/> : <DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.getByRole('heading', { name: '智商 133 但专注力差，除了用药家庭中做好这几点' })).toBeVisible();
   expect(screen.getByText('第一步：清理桌面，只留一科。')).toBeVisible();
-  expect(view.container.textContent).not.toMatch(/万物|识别不可靠|页序尚未确认|总页数未知|角色未确认|画面文字/);
+  expect(view.container.textContent).not.toMatch(/万物|识别不可靠|总页数未知|角色未确认|画面文字/);
+  expect(screen.getByText('平台图片页序尚未确认')).not.toBeVisible();
   expect(screen.getAllByText(/尚无可用转录/)).toHaveLength(1);
   expect(payload.dossier.materials[0]?.blocks).toHaveLength(6);
   expect(payload.dossier.materials[0]?.issues[0]?.code).toBe('page_order_unknown');

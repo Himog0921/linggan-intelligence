@@ -106,7 +106,7 @@ async function exportSnapshot(label) {
   await page.keyboard.press('Escape');
   await dialog.waitFor({ state: 'detached' });
   assert.ok(Math.abs(await root.evaluate(node => node.scrollTop) - before) <= 2, 'closing export preserves reading position');
-  assert.equal(await page.getByRole('tab', { name: '研究底稿', exact: true }).getAttribute('aria-selected'), 'true');
+  assert.equal(await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).getAttribute('aria-selected'), 'true');
   return markdown;
 }
 async function jumpToAudio(dossier) {
@@ -161,7 +161,8 @@ try {
       await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       assert.equal(await focus.locator('[data-transcript-paragraph]').count(), 12);
       assert.ok((await focus.textContent()).includes('出现缺口时下一步怎么办。'));
-      await focus.getByLabel('定位口播时间', { exact: true }).selectOption({ label: '02:53' });
+      await focus.getByRole('button', { name: /^定位口播时间，/ }).click();
+      await focus.getByRole('listbox', { name: '口播时间', exact: true }).getByRole('option', { name: '02:53', exact: true }).click();
       await page.waitForFunction(() => document.querySelector('[aria-label="完整口播正文"]').scrollTop > 0);
       const focusTop = await focus.getByLabel('完整口播正文', { exact: true }).evaluate(node => node.scrollTop);
       await snapshot('approved-demo-focus.png');
@@ -175,7 +176,7 @@ try {
       await focus.waitFor({ state: 'detached' });
       assert.ok(Math.abs(await root.evaluate(node => node.scrollTop) - before) <= 2, 'focus reopening preserves both the focus and main document positions');
       await page.getByRole('tab', { name: '作品', exact: true }).click();
-      await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
+      await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).click();
       await page.waitForFunction(top => Math.abs(document.querySelector('[data-dossier-document]').scrollTop - top) <= 2, before);
       assert.ok(Math.abs(await root.evaluate(node => node.scrollTop) - before) <= 2, 'switching Works returns to the same reading position');
       await exportSnapshot('approved-demo');

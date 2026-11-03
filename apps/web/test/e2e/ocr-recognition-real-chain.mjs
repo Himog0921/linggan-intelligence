@@ -144,10 +144,10 @@ try {
   await viewer.getByRole('button', { name: '关闭查看器', exact: true }).click();
   report.steps.push('The existing Works media rail opens the actual decoded local image used by the current OCR reading.');
 
-  await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
-  const dossier = page.getByRole('tabpanel', { name: '研究底稿', exact: true });
+  await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).click();
+  const dossier = page.getByRole('tabpanel', { name: /^研究底稿(?:，|$)/ });
   const document = dossier.getByRole('article', { name: '连续阅读文档', exact: true });
-  await document.getByRole('heading', { name: '图片文字', exact: true }).waitFor();
+  await document.getByRole('heading', { name: '图片资料', exact: true }).waitFor();
   assert.equal(await dossier.getByRole('button', { name: '查看来源', exact: true }).count(), 0);
   assert.equal(await dossier.getByRole('button', { name: '修正文字', exact: true }).count(), 0);
   assert.equal((await document.innerText()).match(/SYNTHETIC BRAND/g)?.length, 3, 'the continuous document retains all repeated source lines');
@@ -157,7 +157,8 @@ try {
   assert.equal(reviewUrl.origin, origin);
   const manualText = '合成浏览器人工修正文：完整保留数字 42、否定与来源。';
   const editedBlocks = structuredClone(unit.blocks);
-  const paragraph = editedBlocks.find(block => block.kind === 'paragraph'); assert.ok(paragraph);
+  const paragraph = editedBlocks.find(block => block.kind === 'paragraph' && block.contentType === 'extracted_text'); assert.ok(paragraph);
+  assert.equal(paragraph.text, '封面正文', 'manual correction targets extracted source text, not visual observation');
   paragraph.text = manualText;
   const human = {
     commandRef: randomUUID(), unitRef: unit.ref, sourceVersion: unit.sourceVersion,
@@ -204,7 +205,7 @@ try {
   const sameRun = await readJson(statePath); assert.equal(sameRun.runRef, final.runRef);
   assert.equal(sameRun.images[0].isCurrent, false); assert.equal(sameRun.images[0].rawJson, final.images[0].rawJson);
   assert.deepEqual(sameRun.images.map(image => image.readingRef), final.images.map(image => image.readingRef));
-  await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
+  await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).click();
   await page.reload(); await document.getByText(manualText, { exact: false }).waitFor();
   const reloaded = await readJson(statePath); assert.equal(reloaded.runRef, final.runRef);
   await page.setViewportSize({ width: 1280, height: 1000 });

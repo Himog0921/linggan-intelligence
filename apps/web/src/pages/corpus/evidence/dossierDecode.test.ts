@@ -101,3 +101,12 @@ describe('on-demand reads and scoped writes', () => {
     expect(nodes[1]?.orphan).toBe(true);
   });
 });
+
+it('图片资料类型不能丢失或伪装为作者原文和标题', () => {
+  const visual = { ref: 'visual', kind: 'paragraph', text: '黄色盒子', speaker: 'unconfirmed', contentType: 'visual_description', regionRef: 'r1', regionLabel: '左上角' };
+  expect(parseBlock(visual)).toMatchObject({ contentType: 'visual_description', regionRef: 'r1', regionLabel: '左上角' });
+  expect(() => parseBlock({ ...visual, speaker: 'author' })).toThrow();
+  expect(() => parseBlock({ ...visual, kind: 'heading' })).toThrow();
+  expect(() => parseBlock({ ...visual, contentType: 'verified_fact' })).toThrow();
+  expect(() => parseBlock({ ...visual, regionLabel: '' })).toThrow();
+});

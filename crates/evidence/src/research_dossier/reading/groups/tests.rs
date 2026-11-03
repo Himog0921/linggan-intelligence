@@ -452,7 +452,8 @@ fn text_gaps_include_failed_unread_pages_without_changing_source_inventory() {
     super::super::rebuild(&mut readable);
     assert_eq!(image_text_gap_pages(&readable), BTreeSet::from([12]));
     let output = markdown(&readable);
-    assert!(output.contains("已有正文仍需保留。") && !output.contains("局部一字待确认"));
+    assert!(output.contains("已有正文仍需保留。") && output.contains("局部一字待确认"));
+    assert!(output.find("核对说明").unwrap() < output.find("局部一字待确认").unwrap());
 }
 
 #[test]

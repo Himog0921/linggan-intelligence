@@ -1,11 +1,12 @@
-import type { Dossier, DossierBlock, DossierMaterial, ReadingGroup, ReadingSection, ReadingSectionKind, Speaker } from './dossierTypes';
+import type { Dossier, DossierBlock, DossierIssue, DossierMaterial, ReadingGroup, ReadingSection, ReadingSectionKind, Speaker } from './dossierTypes';
 import { normalizedTagLabel, pureTagLabels } from './dossierTagText';
 import { confirmedEmptySpeech } from './dossierPresent';
 import { hasReadingSourceText, missingImageTextPages } from './dossierReadingContent';
 
-export const SECTION_LABELS: Record<ReadingSectionKind, string> = { publication: '发布文案', images: '图片文字', audio: '视频口播', frames: '画面文字' };
+export const SECTION_LABELS: Record<ReadingSectionKind, string> = { publication: '发布文案', images: '图片资料', audio: '视频口播', frames: '画面文字' };
 export interface ReadingEntry { unit: DossierMaterial; block: DossierBlock }
-export interface ResolvedReadingGroup { group: ReadingGroup; entries: ReadingEntry[] }
+export interface ReadingIssue extends DossierIssue { displayKey: string }
+export interface ResolvedReadingGroup { group: ReadingGroup; entries: ReadingEntry[]; issues: ReadingIssue[] }
 export interface ResolvedReadingSection { section: ReadingSection; groups: ResolvedReadingGroup[] }
 export interface ReadingGap { key: string; label: string; message: string; state: string }
 export type AttributionBoundary = Speaker | 'dialogue' | undefined;
@@ -16,13 +17,17 @@ export function showReadingAttribution(role: Speaker, previous: AttributionBound
 /** Resolves references only. Never sorts media, infers page order, or merges blocks on the client. */
 export function resolveReadingSections(dossier: Dossier): ResolvedReadingSection[] {
   const byRef = new Map(dossier.materials.flatMap(unit => unit.blocks.map(block => [block.ref, { unit, block }] as const)));
+  const seenIssues = new Set<string>();
   return dossier.readingView.sections.map(section => ({ section, groups: section.groups.map(group => {
     const entries = group.blockRefs.map(ref => {
       const entry = byRef.get(ref);
       if (!entry) throw new Error('规范阅读引用不存在'); // The runtime decoder prevents this path.
       return entry;
     });
-    return { group, entries };
+    const issues = entries.flatMap(({ block, unit }) => [...(block.issues ?? []), ...unit.issues.filter(issue => !issue.blockRef || group.blockRefs.includes(issue.blockRef))]
+      .map(issue => ({ ...issue, displayKey: `${unit.ref}:${issue.key}` })))
+      .filter(issue => { if (issue.code === 'cloud_image_unchecked') return false; if (seenIssues.has(issue.displayKey)) return false; seenIssues.add(issue.displayKey); return true; });
+    return { group, entries, issues };
   }) }));
 }
 
@@ -112,4 +117,21 @@ export function readingGaps(dossier: Dossier): ReadingGap[] {
     else rows.push({ key: 'images', label: '图片文字', state: '部分可读', message });
   }
   return rows;
+}
+export function remainingReadingIssues(dossier: Dossier, sections: readonly ResolvedReadingSection[]): ReadingIssue[] {
+  const shown = new Set(sections.flatMap(section => section.groups.flatMap(group => group.issues.map(issue => issue.displayKey))));
+  return [...dossier.coverage.issues.map(issue => ({ ...issue, displayKey: `coverage:${issue.key}` })),
+    ...dossier.materials.flatMap(unit => unit.issues.map(issue => ({ ...issue, displayKey: `${unit.ref}:${issue.key}` })))].filter(issue => {
+    if (issue.code === 'cloud_image_unchecked') return false;
+    if (shown.has(issue.displayKey)) return false;
+    shown.add(issue.displayKey); return true;
+  });
+}
+
+/** One disclosure per image; region-specific issues keep their location when collected. */
+export function imageReviewIssues(groups: readonly ResolvedReadingGroup[], unitRef: string): ReadingIssue[] {
+  return groups.filter(group => group.entries.some(entry => entry.unit.ref === unitRef)).flatMap(group => group.issues.map(issue => {
+    const block = group.entries.find(entry => entry.block.ref === issue.blockRef)?.block;
+    return block?.regionLabel ? { ...issue, message: `${block.regionLabel}：${issue.message}` } : issue;
+  }));
 }

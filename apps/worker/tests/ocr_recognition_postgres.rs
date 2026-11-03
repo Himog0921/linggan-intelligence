@@ -214,7 +214,7 @@ async fn ocr_prompt_and_skill_versions_are_frozen_and_independently_switchable()
     let requests = wire.requests.lock().unwrap().clone();
     let visuals: Vec<_> = requests
         .iter()
-        .filter(|request| endpoint::text(request, "user").contains("ocr-visual-audit.v1"))
+        .filter(|request| endpoint::text(request, "user").contains("ocr-visual-audit.v2"))
         .collect();
     assert_eq!(visuals.len(), 2);
     assert!(endpoint::text(visuals[0], "system").contains("SYNTHETIC OCR SKILL"));
@@ -440,6 +440,24 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
             .filter(|u| u["kind"] == "image" && u["currentRevisionRef"].is_string())
             .count(),
         3
+    );
+    let context = linggan_evidence::research_dossier::context_sources(&dossier);
+    let context_json = serde_json::to_string(&context).unwrap();
+    assert!(context_json.contains("image_visual_description"));
+    assert!(context_json.contains("合成图形位于文字右侧"));
+    assert!(context_json.contains("合成图片边缘已裁切，范围未知"));
+    assert!(
+        dossier
+            .materials
+            .iter()
+            .filter(|m| m["kind"] == "image")
+            .all(|m| {
+                m["blocks"].as_array().unwrap().iter().any(|b| {
+                    b["contentType"] == "visual_description"
+                        && b["speaker"] == "unconfirmed"
+                        && b["regionLabel"] == "合成图片中部"
+                })
+            })
     );
     linggan_evidence::ensure_media_processing_work(&db)
         .await

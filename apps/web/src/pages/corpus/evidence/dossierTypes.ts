@@ -19,6 +19,8 @@ export interface BlockLocation {
 }
 interface BlockBase extends BlockLocation {
   ref: string; speaker?: Speaker; issues?: DossierIssue[];
+  contentType?: 'extracted_text' | 'visual_description';
+  regionRef?: string; regionLabel?: string;
 }
 export type DossierBlock = BlockBase & (
   | { kind: 'heading'; text: string; level?: number }
