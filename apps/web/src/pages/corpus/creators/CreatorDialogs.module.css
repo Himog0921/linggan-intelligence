@@ -309,13 +309,6 @@
   font-size:var(--lgi-type-label-size);
 }
 
-.list {
-  margin: var(--lgi-space-2) 0 var(--lgi-space-3);
-  padding-left: var(--lgi-space-5);
-  font-size: var(--lgi-text-body);
-  line-height: var(--lgi-lh-longform);
-}
-
 .notice {
   border-left: 3px solid var(--lgi-warning-dot);
   padding: var(--lgi-space-2) var(--lgi-space-3);

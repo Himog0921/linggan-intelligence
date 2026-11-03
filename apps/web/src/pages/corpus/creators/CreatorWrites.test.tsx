@@ -41,7 +41,15 @@ const receipt = (over: Record<string, unknown> = {}) => ({
 });
 const error = (status: number, code: string): Reply => ({ status, body: { operation: 'local_read', outcome: 'unavailable', code } });
 const creators = () => kit.of('GET', '/api/local/creators');
-const cancel = () => fireEvent(screen.getAllByRole('dialog').at(-1) as HTMLElement, new Event('cancel', { cancelable: true }));
+const cancel = () => {
+  const dialog = screen.queryAllByRole('dialog').at(-1);
+  if (dialog) {
+    fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    return;
+  }
+  const inspector = screen.queryByRole('complementary', { name: '合成作者 1' });
+  if (inspector) fireEvent.keyDown(inspector, { key: 'Escape' });
+};
 const row = (name: string) => screen.getByRole('button', { name }).closest('tr') as HTMLElement;
 
 async function page(list = listJson({ items: [itemJson(1), itemJson(2)] })) {
@@ -59,10 +67,9 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     expect(dialog).toHaveTextContent('把「合成作者 1」加入「合成领域一」的观察名单。');
     expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeChecked();
     expect(within(dialog).getByRole('radio', { name: /只作参照/ })).not.toBeChecked();
-    expect(dialog).toHaveTextContent('这一步会：');
-    expect(dialog).toHaveTextContent('登记这位作者为本机观察目标（已登记过则沿用，不重复建立）');
-    expect(dialog).toHaveTextContent('这一步不会：');
-    for (const text of ['立即采集作品、评论或主页', '开启或关闭巡查，也不改变已有的巡查规则', '调用模型']) expect(dialog).toHaveTextContent(text);
+    expect(dialog).toHaveTextContent('加入名单并建立领域关系；本次不启动采集或巡查。');
+    expect(dialog).not.toHaveTextContent('这一步会：');
+    expect(dialog).not.toHaveTextContent('这一步不会：');
     expect(kit.calls.filter(call => call.method === 'POST')).toHaveLength(0);
     await user.click(within(dialog).getByRole('button', { name: '取消' }));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -87,7 +94,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     expect(dialog).toHaveTextContent('已把「合成作者 1」加入「合成领域一」的观察名单。已新登记这位作者。巡查尚未开启。');
     await waitFor(() => expect(creators()).toHaveLength(2));
     await user.click(within(dialog).getByRole('button', { name: '关闭' }));
-    expect(await within(row('合成作者 1')).findByRole('link', { name: '查看目标' })).toBeInTheDocument();
+    expect(await within(row('合成作者 1')).findByRole('link', { name: '观察中' })).toBeInTheDocument();
   });
 
   it('连点确认只发一次请求', async () => {
@@ -153,9 +160,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
   it('已有暂停 / 忽略的目标：对话框说明加入后保持原状，成功回执同样写明', async () => {
     kit.route('POST', registerPath(1), ok(receipt({ created: false, lifecycleState: 'paused', monitoringEnabled: false })));
     const { user } = await page(listJson({ items: [itemJson(1, { lifecycleState: 'paused', monitoringState: 'paused', targetRef: '30000000-0000-4000-8000-0000000000aa' })] }));
-    await user.click(within(row('合成作者 1')).getByRole('button', { name: '查看加入方式' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
-    await user.click(within(drawer).getByRole('button', { name: '加入并保持观察已暂停' }));
+    await user.click(within(row('合成作者 1')).getByRole('button', { name: '加入观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(dialog).toHaveTextContent('该作者已有观察目标，当前为「观察已暂停」；加入后保持这个状态，不会自动恢复。');
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
@@ -167,14 +172,12 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
   it('其他领域已有主研究关系：只能按参照用途加入，主研究选项不可选，请求里的用途是 reference', async () => {
     kit.route('POST', registerPath(1), ok(receipt({ usageRole: 'reference' })));
     const { user } = await page(listJson({ items: [itemJson(1, { hasOtherPrimaryDomain: true, existsInOtherDomains: true })] }));
-    await user.click(within(row('合成作者 1')).getByRole('button', { name: '查看加入方式' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
-    await user.click(within(drawer).getByRole('button', { name: '按参照用途加入' }));
+    await user.click(within(row('合成作者 1')).getByRole('button', { name: '加入观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(dialog).toHaveTextContent('其他领域已有主研究关系；本领域只能按参照用途加入，不改变原巡查规则。');
     expect(within(dialog).getByRole('radio', { name: /只作参照/ })).toBeChecked();
     expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeDisabled();
-    expect(dialog).toHaveTextContent('建立这位作者与本领域的关系（用途：参照）');
+    expect(dialog).toHaveTextContent('加入名单并建立领域关系；本次不启动采集或巡查。');
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
     await within(dialog).findByText('已完成');
     expect(kit.of('POST', registerPath(1))[0]?.body).toEqual({ domain: DOMAIN, usageRole: 'reference' });
@@ -187,7 +190,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeChecked();
     await user.click(within(dialog).getByRole('radio', { name: /只作参照/ }));
-    expect(dialog).toHaveTextContent('建立这位作者与本领域的关系（用途：参照）');
+    expect(dialog).toHaveTextContent('加入名单并建立领域关系；本次不启动采集或巡查。');
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
     await within(dialog).findByText('已完成');
     expect(kit.of('POST', registerPath(1))[0]?.body).toEqual({ domain: DOMAIN, usageRole: 'reference' });
@@ -198,14 +201,14 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     const { user } = await page();
     kit.route('GET', '/api/local/creators', ok(listJson({ items: [itemJson(1, { inDomain: true }), itemJson(2)] })));
     await user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    const drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     await user.click(within(drawer).getByRole('button', { name: '加入本领域观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
     await within(dialog).findByText('已完成');
     await user.click(within(dialog).getByRole('button', { name: '关闭' }));
     expect(await within(drawer).findByRole('link', { name: '查看观察目标 →' })).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: '合成作者 1' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '合成作者 1' })).toBeInTheDocument();
   });
 });
 
@@ -246,7 +249,7 @@ describe('迟到的回执不改写之后打开的对话框（#384 发现 5）', 
     expect(stillB).not.toHaveTextContent('合成作者 1');
     expect(within(stillB).getByRole('button', { name: '确认加入' })).toBeEnabled();
     // A 那一行随列表刷新变成已加入。
-    expect(await within(row('合成作者 1')).findByRole('link', { name: '查看目标' })).toBeInTheDocument();
+    expect(await within(row('合成作者 1')).findByRole('link', { name: '观察中' })).toBeInTheDocument();
     // B 仍然可以正常完成。
     await user.click(within(stillB).getByRole('button', { name: '确认加入' }));
     await within(stillB).findByText('已完成');
@@ -379,13 +382,13 @@ describe('调整判断', () => {
   async function openCorrection(item = itemJson(1)) {
     const view = await page(listJson({ items: [item, itemJson(2)] }));
     await view.user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    const drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     return { ...view, drawer };
   }
 
   it('作者倾向：说明对象与门槛；支持材料按作品分组，缺 workTitle 时用代表作品标题', async () => {
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(dialog).toHaveTextContent('创作者：合成作者 1 · 合成领域一 · 仅修改本项判断');
     expect(dialog).toHaveTextContent('判定依据：持续创作倾向须至少两篇独立相关作品');
@@ -409,7 +412,7 @@ describe('调整判断', () => {
       },
     };
     const { user, drawer } = await openCorrection(withTitles);
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     const groups = Array.from(dialog.querySelectorAll('details summary')).map(summary => summary.textContent);
     expect(groups).toEqual(['后台给出的作品标题 · 1 个片段', '作品材料 2 · 1 个片段']);
@@ -419,7 +422,7 @@ describe('调整判断', () => {
   it('正向判断必须选当前支持材料，否则不发请求；选了之后保存，请求体带上材料与原因', async () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     await user.click(within(dialog).getByRole('button', { name: '保存判断' }));
     expect(await within(dialog).findByText('请选择至少一项当前材料作为支持依据。')).toBeInTheDocument();
@@ -434,7 +437,7 @@ describe('调整判断', () => {
       domain: DOMAIN, creatorKey: creatorKeyFor('author-1'), workRef: null, field: 'focus', value: 'vertical_tendency', reason: '简介自述了领域定位', supportFragmentIds: ['author.1.biography'],
     });
     // 抽屉保持打开，页面给出回执，列表重读。
-    expect(screen.getByRole('dialog', { name: '合成作者 1' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '合成作者 1' })).toBeInTheDocument();
     expect(await screen.findByText(/判断已保存；这一项使用你的判断/)).toBeInTheDocument();
     await waitFor(() => expect(creators().length).toBeGreaterThanOrEqual(2));
   });
@@ -442,7 +445,7 @@ describe('调整判断', () => {
   it('改成「尚不能判定」不需要支持材料；原因上限 300 字', async () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(within(dialog).getByRole('textbox', { name: /调整原因/ })).toHaveAttribute('maxlength', '300');
     await user.click(within(dialog).getByRole('combobox', { name: '你的判断' }));
@@ -455,7 +458,7 @@ describe('调整判断', () => {
   it('撤销人工调整：无覆盖时不可用；没有历史分析结果时也只移除覆盖，不启动分析', async () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const first = await openCorrection();
-    await first.user.click(within(first.drawer).getByRole('button', { name: '调整判断' }));
+    await first.user.click(within(first.drawer).getByRole('button', { name: '调整作者倾向' }));
     expect(within(await screen.findByRole('dialog', { name: '调整作者倾向' })).getByRole('button', { name: '撤销人工调整' })).toBeDisabled();
     first.unmount();
     kit = createFetchMock();
@@ -463,7 +466,7 @@ describe('调整判断', () => {
     kit.route('PUT', overrides, ok({ saved: true }));
     const manual = { focus: { value: { value: 'multi_topic', reason: '我的判断', evidenceFragmentIds: ['author.1.biography'] }, supportFragmentIds: ['author.1.biography'], at: '2026-10-15 12:00:00+08' } };
     const second = await openCorrection(itemJson(1, { authorManual: manual, authorResult: false, authorState: null }));
-    await second.user.click(within(second.drawer).getByRole('button', { name: '调整判断' }));
+    await second.user.click(within(second.drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     expect(within(dialog).getByRole('combobox', { name: '你的判断' })).toHaveTextContent('多主题分享');
     expect(dialog).toHaveTextContent('尚无结果则显示尚不能判定，不会启动新分析');
@@ -482,7 +485,7 @@ describe('调整判断', () => {
     const { user, drawer } = await openCorrection();
     await user.click(within(drawer).getByRole('tab', { name: '研究线索' }));
     const group = drawer.querySelector('details[data-work]') as HTMLElement;
-    await user.click(within(group).getAllByRole('button', { name: '调整判断' })[1] as HTMLElement); // 亲历自述
+    await user.click(within(group).getAllByRole('button', { name: /^(调整|补充)/ })[1] as HTMLElement); // 亲历自述
     const dialog = await screen.findByRole('dialog', { name: '调整亲历自述' });
     expect(dialog).toHaveTextContent('作品：合成作品 11');
     await user.click(within(dialog).getAllByRole('checkbox')[0] as HTMLElement);
@@ -497,7 +500,7 @@ describe('调整判断', () => {
   it('保存没有得到答复：「未确认」，按内容保存所以重试不产生第二条记录', async () => {
     kit.route('PUT', overrides, () => 'network', ok({ saved: true }));
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     await user.click(within(dialog).getByRole('checkbox', { name: /合成公开简介/ }));
     await user.click(within(dialog).getByRole('button', { name: '保存判断' }));
@@ -514,7 +517,7 @@ describe('调整判断', () => {
     const gate = deferred<Reply>();
     kit.route('PUT', overrides, () => gate.promise);
     const { user, drawer } = await openCorrection();
-    await user.click(within(drawer).getByRole('button', { name: '调整判断' }));
+    await user.click(within(drawer).getByRole('button', { name: '调整作者倾向' }));
     const first = await screen.findByRole('dialog', { name: '调整作者倾向' });
     await user.click(within(first).getByRole('checkbox', { name: /合成公开简介/ }));
     await user.click(within(first).getByRole('button', { name: '保存判断' }));
@@ -522,9 +525,9 @@ describe('调整判断', () => {
     cancel();
     await user.click(await screen.findByRole('button', { name: '收起并继续跟踪' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整作者倾向' })).toBeNull());
-    // 为同一位作者的另一项（机构／品牌自述，在「观察记录」分区）打开新的对话框，写上还没保存的内容。
-    await user.click(within(drawer).getByRole('tab', { name: '观察记录' }));
-    await user.click(within(drawer.querySelector('[role="tabpanel"]:not([hidden])') as HTMLElement).getByRole('button', { name: /调整判断|补充判断/ }));
+    // 为同一位作者的另一项（机构／品牌自述，在概览的依据区）打开新的对话框，写上还没保存的内容。
+    await user.click(within(drawer).getByRole('tab', { name: '概览' }));
+    await user.click(within(drawer.querySelector('[role="tabpanel"]:not([hidden])') as HTMLElement).getByRole('button', { name: '调整公开身份线索' }));
     const second = await screen.findByRole('dialog', { name: /机构／品牌自述/ });
     await user.type(within(second).getByRole('textbox', { name: /调整原因/ }), '新的尚未保存的说明');
     const listCalls = creators().length;
@@ -534,7 +537,7 @@ describe('调整判断', () => {
     expect(within(second).getByRole('textbox', { name: /调整原因/ })).toHaveValue('新的尚未保存的说明');
     expect(within(second).queryByText('已完成')).toBeNull();
     expect(screen.queryByText(/判断已保存/)).toBeNull();
-    expect(screen.getByRole('dialog', { name: '合成作者 1' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '合成作者 1' })).toBeInTheDocument();
   });
 });
 
@@ -543,14 +546,15 @@ describe('旧分析退役后的历史读取', () => {
     const item = itemJson(1, { works: [workJson(11, { state: 'failed', lastErrorCode: 'model_budget_exhausted', withResult: false })], authorState: 'failed', authorErrorCode: 'model_disabled', authorResult: false, focusValue: 'unknown' });
     const { user } = await page(listJson({ analysisEnabled: true, items: [item] }));
     await user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    let drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    let drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     await user.click(within(drawer).getByRole('tab', { name: '研究线索' }));
-    expect(drawer).toHaveTextContent('model_budget_exhausted');
+    expect(drawer).toHaveTextContent('研究未完成 · 本日额度已用尽');
+    expect(drawer).not.toHaveTextContent('model_budget_exhausted');
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     cancel();
     await user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     expect(kit.of('POST', '/api/local/creator-discovery-analysis/retry')).toHaveLength(0);
   });

@@ -99,6 +99,6 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
 .ops-immersive>.v7-global-header,.ops-immersive>.v7-shell>.v7-side{display:none}
 .ops-immersive>.v7-shell{grid-template-columns:minmax(0,1fr)}
 
-/* Evidence reading candidate: compact only this context row; other subnavigation stays unchanged. */
-.v7-evidence-shell { --v7-context-row:calc(var(--lgi-space-10) + var(--lgi-space-1)); }
-.v7-evidence-shell .v7-context-main { padding-top:var(--lgi-space-1);padding-bottom:var(--lgi-space-1); }
+/* Corpus compact shell: evidence and creators share the approved compact context row. */
+.v7-corpus-compact-shell { --v7-context-row:calc(var(--lgi-space-10) + var(--lgi-space-1)); }
+.v7-corpus-compact-shell .v7-context-main { padding-top:var(--lgi-space-1);padding-bottom:var(--lgi-space-1); }

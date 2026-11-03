@@ -73,12 +73,14 @@ export function CreatorWorkResearch({ domain, work, disabled }: { domain: string
     } catch (error) { setNotice(message(error)); }
     finally { setBusy(false); }
   }
-  return <section aria-label="单篇作品研究"><h4>单篇作品研究</h4>
-    <ActionButton onClick={() => void prepare()} disabled={disabled || busy || uncertain}>检查研究底稿</ActionButton>
-    {prepared ? <><p className={styles.help}>图片总数 {prepared.expectedPages ?? '未知'} · 已取得 {prepared.acquiredPages} · 已识读 {prepared.processedPages}。结果仅基于当前可用材料。</p>
+  return <>
+    <ActionButton className={styles.inspectorTool} onClick={() => void prepare()} disabled={disabled || busy || uncertain}>检查研究底稿</ActionButton>
+    {prepared ? <div className={styles.researchBlock}>
+      <p className={styles.help}>图片总数 {prepared.expectedPages ?? '未知'} · 已取得 {prepared.acquiredPages} · 已识读 {prepared.processedPages}。结果仅基于当前可用材料。</p>
       <p className={styles.help}>开始后会按 AI 设置调用模型，可能产生费用。</p>
-      <ActionButton onClick={() => void start()} disabled={disabled || busy || request !== null}>{uncertain ? '重试同一请求' : '开始单篇研究'}</ActionButton></> : null}
-    {request ? <ActionButton onClick={() => void refresh()} disabled={busy}>刷新研究状态</ActionButton> : null}
-    {notice ? <p role="status" className={styles.help}>{notice}</p> : null}
-  </section>;
+      <ActionButton onClick={() => void start()} disabled={disabled || busy || request !== null}>{uncertain ? '重试同一请求' : '开始单篇研究'}</ActionButton>
+    </div> : null}
+    {request ? <div className={styles.researchBlock}><ActionButton className={styles.inspectorTool} onClick={() => void refresh()} disabled={busy}>刷新研究状态</ActionButton></div> : null}
+    {notice ? <p role="status" className={`${styles.help} ${styles.researchBlock}`}>{notice}</p> : null}
+  </>;
 }

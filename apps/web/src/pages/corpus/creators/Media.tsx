@@ -55,6 +55,6 @@ export function Avatar({ name, url, pending, className }: { name: string; url: s
   return <MediaImage kind="avatar" url={url} pending={pending} className={className} fallback={Array.from(name)[0] ?? '作'} />;
 }
 
-export function Cover({ url, pending, className }: { url: string | null; pending: boolean; className: string | undefined }) {
-  return <MediaImage kind="cover" url={url} pending={pending} className={className} fallback="▧" />;
+export function Cover({ url, pending, className, fallback = '▧' }: { url: string | null; pending: boolean; className: string | undefined; fallback?: ReactNode }) {
+  return <MediaImage kind="cover" url={url} pending={pending} className={className} fallback={fallback} />;
 }
