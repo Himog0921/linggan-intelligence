@@ -32,6 +32,7 @@
 | WEB-REACT-001 D3 私有证据 | 当前 D3 工作树 `artifacts/private/web-react-001-d3/`：只读实际基线、GET 回执、候选截图／逐像素差异、盘点辅助及验证日志 | root 的 GET/HEAD 限制浏览器采集、同输入重放、隔离库脚本；无共享库写入、无外发 | 忽略，不提交；真实评论／材料不进入代理或 CI | 不得伪造回执或修改原始像素；分析摘要可更新 | 保留至本包审阅；交付后移交主 checkout 同名私有目录再清理本工作树 |
 | Pi Node 固定依赖 | `apps/pi-adapter/node_modules/`（含 `.linggan-lock-sha256`）、`package-lock.json` | 精确 package.json、npm ci、`prepare-pi-adapter.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖，不处理其它项目 |
 | 网页前端固定依赖（WEB-REACT-001） | `apps/web/node_modules/`（含 `.linggan-lock-sha256`）、`apps/web/package-lock.json` | 精确版本的 `apps/web/package.json`、`npm ci --ignore-scripts`、`scripts/runtime/prepare-web.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖；可随时 `npm ci` 重建 |
+| LIDS 规则、图标资产与同源展示 | `apps/web/design-system/generated/`、`apps/web/src/shared/lidsComponents.generated.ts`、`docs/design/lids/component-library.generated.md`、唯一 `lids_tokens.css`；离线导出 `apps/web/dist-design-system/` | `scripts/lids.mjs` 与 `scripts/sync-lids-runtime.py`；正式 JSON/合同、真实组件/测试/展示与来源指纹 | generated源镜像提交；dist-design-system忽略 | 禁止手改派生文件，修改源后用 lids:record/sync/check/build | 图标资产合同 ICON-B-001 不增加 C 目录或 CMP 认证；离线产物可重新生成 |
 | 网页前端构建产物（WEB-REACT-001） | `apps/web/dist/`（`index.html`、带内容指纹的 JS/CSS、`build-info.json`） | `npm --prefix apps/web run build`；本机运行链由 `prepare-web.sh --build <revision>` 生成，revision 写入 `build-info.json` | 忽略，不提交 | 禁止手工改 | 每个 checkout 一份，按 revision 覆盖重建；可安全删除后重建 |
 | WEB-REACT-001 隔离浏览器证明 | 随机 `linggan-web-app-proof-*` Docker container/volume；证据目录 `${TMPDIR}/linggan-web-app-proof-*`（或 `WEB_APP_PROOF_DIR`；阶段 D1 的创作者页证明放在其 `creators/` 子目录：`fixture.json`、`report.json`、截图；阶段 D2 的证据库证明放在 `evidence/` 子目录；该库内随机 schema `creators_*`、`corpus_shell_*` 随容器一并删除）；随机 `linggan-web-app-support.*` 临时目录（D2 另在其下 `media/` 写合成媒体字节）；D2 插件入口证明的 `linggan-entry-extension-*`、`linggan-entry-profile-*` 临时目录 | `scripts/test-web-app-postgres.sh`：合成模型凭据、隔离 schema、本机 Axum 路由与 Chromium | 不进 Git；截图只含合成数据 | 禁止伪造 | 容器、数据卷与临时目录在脚本退出时删除；证据目录保留供审阅，可手工删除；CI 作为 `web-app-real-chain-proof` 产物保留 7 天 |
 | COMMENT-RESEARCH-RESET-001 V1 隔离证明 | 随机 `linggan-comment-proof-*` Docker container/volume；系统临时目录下的 test log | `scripts/test-comment-research-postgres.sh`、`apps/pi-adapter` 的 Node fixture；历史 migration 后显式应用 0068–0070 | 不进入 Git | 禁止伪造 | 脚本 trap 删除它拥有的 container/volume；日志只含合成资料/失败码，不含评论正文或凭据 |
@@ -489,3 +490,27 @@ AI-GEN1 C0：人工维护离线合同/固定合成fixture/页面与纯合成测�
 ## RESEARCH-DOSSIER-V2 · 2026-11-01 最终收口
 
 本机真实清单、批次回执、截图和独立审阅日志固定在主仓库 `artifacts/private/dossier-final-closeout-20261101/`，由 root 负责；不入 Git，不含普通日志中的凭据或原文。原材料不修改，旧读本保留，输出源为本次明确授权的本地处理与正式 API。保留至验收，验收或合并满 14 天后按本机规则保留报告和汇总，清理大文件。合成证明使用自有临时 PG 和 `/tmp/dossier-closeout-proof-*`，结束仅回收自有资源。
+
+## EVIDENCE-TOOLBAR-20261101
+
+本轮 codex 独立树的 `artifacts/private/evidence-toolbar-20261101/` 保存固定合成 fixture、仅 GET/HEAD 的 loopback 预览脚本、浏览器截图/尺寸、检查日志及交付报告，忽略、不入 Git。来源为 task #4 的真实 React 构建与隔离测试，不连接正式 API、数据库或模型。codex 负责，保留至用户验收，合并前移交主仓库同名私有目录；仅清理本任务自有进程和路径。dist、node_modules 沿现有登记。
+
+## EVIDENCE-COMBINED-20261101
+
+本轮组合树 `artifacts/private/evidence-combined-20261101/` 保存固定合成接口、GET/HEAD隔离预览、截图/几何、检查日志及报告，忽略、不入Git。来源为8c883f84与be45ac71组合的真实React构建；只用loopback，不读取正式数据、凭据或调用模型。codex负责，保留至用户验收；合并/放弃后按本机安全规则处理自有树与进程。dist/node_modules沿既有登记。
+
+## EVIDENCE-ACTIONS-20261101
+
+本轮独立树artifacts/private/evidence-actions-20261101保存固定合成fixture/GET预览、桌面浏览器状态图、日志、报告和复核回执，忽略不入Git；codex负责，保留至用户验收。预览仅loopback合成接口，不触发深采/退出登录或正式数据写入。依赖和dist沿既有登记，合并/放弃后按本机规则回收自有树与产物。
+
+## EVIDENCE-MASTER-20261102
+
+本组合树artifacts/private/evidence-master-20261102保存真实React构建的固定合成fixture、GET/HEAD loopback预览、桌面截图与几何、异常样本、验证日志和交付报告，忽略不入Git。codex负责，来源0b9ce786与1708df34组合，不改正式服务/数据、不触发深采/退出登录。保留至用户验收，合并/放弃后按本机规则回收自有资源；dist/node_modules沿既有登记。
+
+## EVIDENCE-READING-20261102
+
+本独立树artifacts/private/evidence-reading-20261102保存手写固定合成长短标题/分段清单及混合材料fixture、仅GET/HEAD的loopback预览、同文旧/新桌面对照、几何/交互检查和报告，忽略不入Git。codex负责，保留至用户验收；旧7989433c构建在自有端口读取同fixture，不覆盖5404数据或产物。dist/node_modules沿既有登记，不接真实库/模型；合并放弃后按本机规则回收自有资源。
+
+- `artifacts/private/evidence-inspector-tools-20261102/`：task #11 隔离截图、合成fixture、滚动条/级联实测、报告与验证日志；仅本机私有证明，不进入Git。候选待用户验收保留，验收满14天后按本机规则仅留报告/汇总；临时构建随候选收尾。
+
+- `artifacts/private/evidence-reading-standard-20261102/`：task #12固定合成前后对照、状态/材料说明/目录截图、中文行片段与验证日志、报告；本机私有证据不入Git。候选未验收保留，验收14天后按本机规则留报告/JSON汇总；自建构建产物随候选收尾。

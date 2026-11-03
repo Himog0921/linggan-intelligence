@@ -1,5 +1,5 @@
 /* 证据库内多处共用的小部件：状态线、事实表、行内状态、分节、来源说明、动作回执。
- * 只消费 LIDS --lgi-* Token。色调同时用文字、圆点和颜色表达，不只靠颜色。 */
+ * 只消费 LIDS --lgi-* Token。色调同时用文字、方块和颜色表达，不只靠颜色。 */
 
 .stateLine {
   display: inline-flex;
@@ -10,27 +10,27 @@
   font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
 }
 
-.dot {
+.marker {
   width: calc(var(--lgi-space-1) * 1.5);
   height: calc(var(--lgi-space-1) * 1.5);
   flex: none;
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--lgi-unknown-dot);
 }
 
-.dot[data-tone='success'] {
+.marker[data-tone='success'] {
   background: var(--lgi-success-dot);
 }
 
-.dot[data-tone='warning'] {
+.marker[data-tone='warning'] {
   background: var(--lgi-warning-dot);
 }
 
-.dot[data-tone='info'] {
+.marker[data-tone='info'] {
   background: var(--lgi-info-dot);
 }
 
-.dot[data-tone='danger'] {
+.marker[data-tone='danger'] {
   background: var(--lgi-danger-dot);
 }
 
@@ -109,6 +109,7 @@
 }
 .sectionHeader { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--lgi-space-3); margin-bottom: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2); border-bottom: 1px solid var(--lgi-ink); padding-bottom: calc(var(--lgi-space-1) * 1.75); }
 .sectionHeader h3 { margin: 0; font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
+.headingMain { display: inline-flex; align-items: baseline; flex-wrap: wrap; gap: var(--lgi-space-2); min-width: 0; }
 .sectionActions { display: inline-flex; margin-left: auto; }
 
 /* ── 行内状态：失败、警示、访问边界三者分色，不共用一个视觉 ── */
@@ -170,28 +171,25 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--lgi-space-2);
-  margin: var(--lgi-space-2) 0;
+  margin: 0 0 var(--lgi-space-3);
   border-left: 3px solid var(--lgi-border-strong);
-  padding: var(--lgi-space-2) var(--lgi-space-3);
-  background: var(--lgi-canvas-low);
+  padding: var(--lgi-space-1) 0 var(--lgi-space-1) var(--lgi-space-3);
+  background: none;
   font-size: var(--lgi-text-data);
   line-height: var(--lgi-lh-body);
 }
 
 .feedback[data-tone='success'] {
   border-color: var(--lgi-success);
-  background: var(--lgi-success-soft);
 }
 
 .feedback[data-tone='refused'],
 .feedback[data-tone='unknown'] {
   border-color: var(--lgi-warning);
-  background: var(--lgi-warning-soft);
 }
 
 .feedback[data-tone='error'] {
   border-color: var(--lgi-signal);
-  background: var(--lgi-signal-soft);
 }
 
 .feedbackLabel {

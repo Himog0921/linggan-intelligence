@@ -193,3 +193,13 @@ it('切换领域不保留上个领域尚未提交的词，即使两个领域地�
   expect(screen.getByRole('searchbox')).toHaveValue('');
   expect(onSubmit).not.toHaveBeenCalled();
 });
+
+it('三段切换与搜索表单分开，切换不提交搜索', async () => {
+  const onSubmit = vi.fn(); const onChange = vi.fn();
+  render(<EvidenceControls {...selectionProps} query={DEFAULT_QUERY} hasDomain onSubmit={onSubmit} onChange={onChange} onClearFilters={vi.fn()} />);
+  const group = screen.getByRole('group', { name: '结果排版' });
+  expect(group.closest('form')).toBeNull();
+  await userEvent.click(within(group).getByRole('button', { name: '表格' }));
+  expect(onSubmit).not.toHaveBeenCalled();
+  expect(applied(onChange).layout).toBe('table');
+});

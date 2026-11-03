@@ -44,28 +44,37 @@ it('多图沿 owner 编排连续阅读，保留标题来源及相同文字的不
   expect(content.querySelectorAll('[data-block-ref]')).toHaveLength(12);
   expect([...content.querySelectorAll('[data-block-ref]')].map(node => node.getAttribute('data-block-ref'))).toEqual(raw.dossier.readingView.sections.flatMap(section => section.groups.flatMap(group => group.blockRefs)));
   expect(screen.queryByRole('heading', { name: /^第 \d+ 页$/ })).not.toBeInTheDocument();
-  expect(view.container.querySelector('img, details')).toBeNull();
+  expect(view.container.querySelector('img')).toBeNull();
+  const notes = screen.getByText('材料说明').closest('details');
+  expect(notes).not.toHaveAttribute('open');
+  await view.user.click(screen.getByText('材料说明'));
+  expect(notes).toHaveAttribute('open');
+  expect(within(notes!).getByText('数据截至')).toBeVisible();
 });
-it('同材料问题就近展示一次，不吞掉另一图片同名的局部问题', async () => {
+it('核对说明按图片默认收起，各材料原始问题仍留在 DTO', async () => {
   const issue = { key: 'ocr_low_confidence_0', code: 'glyph', message: '数字需要对照原图核验', resolution: 'reading_edit' };
   kit.route('GET', path, ok(dossierJson(1, { materials: [1,2].map(n => dossierMaterialJson(n, { blocks: [{ ref: `paragraph-${n}`, kind: 'paragraph', text: `完整原文 ${n}`, issues: [issue] }], issues: [issue] })), coverage: { issues: [] } })));
   mount(); await screen.findByText('完整原文 1');
   expect(screen.getAllByText(issue.message)).toHaveLength(2);
+  for (const note of screen.getAllByText(issue.message)) expect(note).not.toBeVisible();
+  expect(screen.getByText('完整原文 2')).toBeVisible();
 });
-it('已确认缺页在 owner 指定断点提示，未知总页数不伪造页码', async () => {
+it('已确认缺页集中提示一次，不在正文重复插入诊断', async () => {
   const raw = dossierJson(1, { materials: [dossierMaterialJson(1, { blocks: [{ ref: 'before', kind: 'paragraph', text: '缺页之前' }] }), dossierMaterialJson(3, { blocks: [{ ref: 'after', kind: 'paragraph', text: '缺页之后' }] })], coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 3, acquiredPages: 2, processedPages: 2, missingPages: [2], unknownOrder: false } } });
   const section = raw.dossier.readingView.sections[0]!;
   section.gaps = [{ beforeGroupRef: section.groups[1]!.ref, missingPages: [2] }];
   kit.route('GET', path, ok(raw)); mount();
-  const gap = await screen.findByText('此处内容不完整（第 2 页文字待补全）');
-  expect(screen.getByText('缺页之前').compareDocumentPosition(gap) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-  expect(gap.compareDocumentPosition(screen.getByText('缺页之后')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  await screen.findByText('第 2 页文字待补全。');
+  expect(screen.getAllByText('第 2 页文字待补全。')).toHaveLength(1);
+  expect(screen.getByText('缺页之前')).toBeVisible();
+  expect(screen.getByText('缺页之后')).toBeVisible();
 });
 it('仅待处理样本保留真实缺失状态，不造口播、目录或原图入口', async () => {
   kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null })], coverage: { ...completeCoverage, imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 1, processedPages: 0, missingPages: [], unknownOrder: true }, sources: { body: source('known_empty'), images: source('not_processed', 1), audio: source('not_applicable'), videoFrames: source('not_applicable') } } })));
   const view = mount();
   await screen.findByText('待识读');
-  expect(screen.getByText(/图片原始顺序未确认；原作总页数未知/)).toBeVisible();
+  expect(screen.queryByText(/图片原始顺序未确认|原作总页数未知/)).not.toBeInTheDocument();
+  expect(screen.getByText('第 1 页文字待补全。')).toBeVisible();
   expect(screen.queryByRole('button', { name: /章节导航/ })).not.toBeInTheDocument();
   expect(view.container.querySelector('[data-transcript-paragraph], img')).toBeNull();
   expect(kit.calls).toHaveLength(1);
@@ -83,13 +92,65 @@ it('5 分钟负载自然段全文保留，毫秒时码与专注弹窗不推造�
   await view.user.click(screen.getByRole('button', { name: '专注阅读' }));
   const dialog = screen.getByRole('dialog', { name: '视频口播 · 专注阅读' });
   expect(dialog.querySelectorAll('[data-transcript-paragraph]')).toHaveLength(12);
-  const select = within(dialog).getByRole('combobox', { name: '定位口播时间' });
-  await view.user.selectOptions(select, within(select).getByRole('option', { name: '02:53' }));
+  const timeTrigger = within(dialog).getByRole('button', { name: /定位口播时间/ });
+  await view.user.click(timeTrigger);
+  const timeMenu = within(dialog).getByRole('listbox', { name: '口播时间' });
+  expect(timeMenu).toHaveFocus();
+  expect(within(timeMenu).getAllByRole('option')).toHaveLength(12);
+  await view.user.keyboard('{Tab}');
+  await waitFor(() => expect(within(dialog).queryByRole('listbox')).not.toBeInTheDocument());
+  expect(document.activeElement).not.toBe(document.body);
+  expect(within(dialog).getByLabelText('完整口播正文')).toHaveFocus();
+  await view.user.click(timeTrigger);
+  expect(within(dialog).getByRole('listbox', { name: '口播时间' })).toBeInTheDocument();
+  await view.user.keyboard('{Home}{ArrowDown}{Enter}');
+  await waitFor(() => expect(within(dialog).queryByRole('listbox')).not.toBeInTheDocument());
+  expect(timeTrigger).toHaveTextContent('00:25');
+  expect(document.activeElement?.getAttribute('data-reading-anchor')).toMatch(/speech-1$/);
   fireEvent.scroll(within(dialog).getByLabelText('完整口播正文'));
-  expect(select).toHaveValue(within(select).getByRole('option', { name: '02:53' }).getAttribute('value'));
+  await waitFor(() => expect(timeTrigger).toHaveTextContent('04:35'));
+  await view.user.click(timeTrigger);
+  expect(within(dialog).getByRole('listbox', { name: '口播时间' })).toBeInTheDocument();
+  await view.user.keyboard('{Escape}');
+  expect(within(dialog).queryByRole('listbox')).not.toBeInTheDocument();
+  expect(dialog).toBeInTheDocument();
+  expect(timeTrigger).toHaveFocus();
+  await view.user.click(timeTrigger);
+  expect(within(dialog).getByRole('listbox', { name: '口播时间' })).toBeInTheDocument();
+  fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
+  expect(within(dialog).queryByRole('listbox')).not.toBeInTheDocument();
+  expect(screen.getByRole('dialog', { name: '视频口播 · 专注阅读' })).toBeInTheDocument();
   fireEvent(dialog, new Event('cancel', { bubbles: false, cancelable: true }));
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(screen.getByRole('button', { name: '专注阅读' })).toHaveFocus();
+});
+it('当前段落没有时间时触发器不冒充第一项，菜单仍可跳到真实时间', async () => {
+  const paragraphs = [
+    { ref: 'speech-0', kind: 'paragraph', text: '第一段有真实时间', time: { startMs: 0, endMs: 25000 } },
+    { ref: 'speech-1', kind: 'paragraph', text: '第二段也有真实时间', time: { startMs: 25000, endMs: 50000 } },
+    { ref: 'speech-2', kind: 'paragraph', text: '这一段没有取得时码' },
+  ];
+  kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', page: null, blocks: paragraphs })], coverage: completeCoverage })));
+  const view = mount();
+  await screen.findByText('这一段没有取得时码');
+  await view.user.click(screen.getByRole('button', { name: '专注阅读' }));
+  const dialog = screen.getByRole('dialog', { name: '视频口播 · 专注阅读' });
+  const timeTrigger = within(dialog).getByRole('button', { name: /定位口播时间/ });
+  await waitFor(() => expect(timeTrigger).toHaveTextContent('本段时间未知'));
+  expect(timeTrigger).toHaveAttribute('aria-label', '定位口播时间，当前段落未取得时间');
+  await view.user.click(timeTrigger);
+  const timeMenu = within(dialog).getByRole('listbox', { name: '口播时间' });
+  const options = within(timeMenu).getAllByRole('option');
+  expect(options).toHaveLength(2);
+  // 键盘初始焦点落在第一项，但第一项没有被标成“当前”。
+  expect(timeMenu).toHaveAttribute('aria-activedescendant', options[0]!.id);
+  for (const option of options) {
+    expect(option).toHaveAttribute('aria-selected', 'false');
+  }
+  expect(within(timeMenu).queryByText('当前')).not.toBeInTheDocument();
+  await view.user.keyboard('{Enter}');
+  await waitFor(() => expect(within(dialog).queryByRole('listbox')).not.toBeInTheDocument());
+  expect(timeTrigger).toHaveTextContent('00:00');
 });
 it('目录关闭消费 Esc，正文定位使用 canonical group 而不是秒数作身份', async () => {
   kit.route('GET', path, ok(dossierJson(1)));
@@ -113,5 +174,5 @@ it.each(['focus', 'export'] as const)('HTTP 200 中局部来源撤回也关闭 %
   view.client.setQueryData(dossierKey(DOMAIN, workRef(1)), revoked);
   await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   expect(screen.queryByText('来源撤回前的旧口播')).not.toBeInTheDocument();
-  expect(screen.getByText('当前来源不可读取。')).toBeVisible();
+  expect(screen.getByText('来源不可读取。')).toBeVisible();
 });

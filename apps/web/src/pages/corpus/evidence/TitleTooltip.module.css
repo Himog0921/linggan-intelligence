@@ -1,0 +1,19 @@
+/* Work-title full text: paper with a thin ink edge and the same short hard shadow as the product's marks.
+ * A local portal keeps table overflow and the inspector's own scroll containers from clipping it. */
+.tooltip {
+  position: fixed;
+  z-index: var(--lgi-z-popover);
+  box-sizing: border-box;
+  width: max-content;
+  min-width: calc(var(--lgi-space-24) * 2 + var(--lgi-space-16) + var(--lgi-space-6));
+  max-width: calc(var(--lgi-space-24) * 3 + var(--lgi-space-12));
+  padding: var(--lgi-space-2) var(--lgi-space-3);
+  border: 1px solid var(--lgi-ink);
+  background: var(--lgi-canvas);
+  box-shadow: var(--lgi-shadow-brutal);
+  color: var(--lgi-ink);
+  font: var(--lgi-type-body-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+  overflow-wrap: break-word;
+  white-space: normal;
+  text-align: left;
+}

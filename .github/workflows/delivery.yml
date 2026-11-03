@@ -3,6 +3,8 @@ name: Delivery
 # One PR entrypoint. Drafts retain the same selected proofs in this first rollout;
 # no successful preflight is advertised as a substitute for final verification.
 on:
+  push:
+    branches: [main]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, edited]
 
@@ -12,8 +14,8 @@ permissions:
 concurrency:
   # Body/title edits must neither cancel in-flight proof nor replace its gate.
   # A base retarget is an edited event too, and DOES require fresh verification.
-  group: ${{ github.event.action == 'edited' && !github.event.changes.base && format('delivery-metadata-{0}', github.run_id) || format('delivery-{0}', github.event.pull_request.number) }}
-  cancel-in-progress: true
+  group: ${{ github.event_name == 'push' && format('delivery-main-{0}', github.run_id) || (github.event.action == 'edited' && !github.event.changes.base && format('delivery-metadata-{0}', github.run_id) || format('delivery-{0}', github.event.pull_request.number)) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   preflight:
@@ -31,7 +33,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -39,13 +41,20 @@ jobs:
           node-version-file: .nvmrc
       - name: Governance, whitespace and lightweight checks
         env:
-          DELIVERY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          DELIVERY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: bash scripts/ci-preflight.sh "$DELIVERY_BASE_SHA"
-      - name: Select affected proofs
+      - name: Select affected proofs (main always runs the full suite)
         id: route
         env:
-          DELIVERY_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: node scripts/ci-select.mjs "$DELIVERY_BASE_SHA"
+          DELIVERY_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == push ]]; then
+            for suite in ai material_reading ocr_recognition web web_real_chain topic; do
+              echo "$suite=true" >> "$GITHUB_OUTPUT"
+            done
+          else
+            node scripts/ci-select.mjs "$DELIVERY_BASE_SHA"
+          fi
 
   ai:
     needs: preflight
@@ -64,7 +73,7 @@ jobs:
     if: needs.preflight.outputs.web == 'true'
     uses: ./.github/workflows/web-app.yml
   web-real-chain:
-    needs: [preflight, web]
+    needs: preflight
     if: needs.preflight.outputs.web_real_chain == 'true'
     uses: ./.github/workflows/web-real-chain.yml
   topic:

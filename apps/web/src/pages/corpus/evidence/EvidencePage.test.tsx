@@ -33,7 +33,8 @@ describe('打开页面', () => {
     const sourceUrl = 'https://www.xiaohongshu.com/search_result/0123456789abcdef01234567?xsec_token=synthetic';
     pageRoutes(kit, { detail: n => ({ sourceNoteUrl: n === 1 ? sourceUrl : null }) });
     const view = renderEvidencePage(pageUrl(`domain=${DOMAIN}&work=${workRef(1)}&tab=trace`));
-    const link = await screen.findByRole('link', { name: '打开原文' });
+    const header = aside().querySelector('header')!;
+    const link = await within(header).findByRole('link', { name: '打开原文' });
     expect(link).toHaveAttribute('href', sourceUrl);
     expect(link).toHaveAttribute('target', '_blank');
     expect(link).toHaveAttribute('rel', 'noopener noreferrer');
@@ -156,11 +157,11 @@ describe('没有领域', () => {
 });
 
 describe('读取失败要如实说', () => {
-  it('列表读取失败：说明、错误码、回执条，不显示成空列表；「重试读取」重新读取', async () => {
+  it('列表读取失败：说明、回执条，不显示成空列表，也不直出错误码；「重试读取」重新读取', async () => {
     pageRoutes(kit, { list: fail(503, 'read_model_not_connected') });
     const { user } = renderEvidencePage();
     expect(await screen.findByText('本机材料读取暂时不可用')).toBeInTheDocument();
-    expect(screen.getAllByText('read_model_not_connected').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('read_model_not_connected')).toBeNull();
     expect(screen.getByText('本机数据库没有连接，页面没有回退到其他数据。')).toBeInTheDocument();
     expect(screen.getByText('当前未读取任何材料，不能据此判断库为空或来源不存在。')).toBeInTheDocument();
     expect(screen.queryByText('当前查询没有匹配的作品材料')).not.toBeInTheDocument();
@@ -269,18 +270,18 @@ describe('地址直达一件不在页内的作品', () => {
     kit.route('GET', detailPathOf(9), fail(404, 'material_not_found'));
     renderEvidencePage(pageUrl(`domain=${DOMAIN}&work=${workRef(9)}`));
     expect(await screen.findByText('当前领域无法读取这篇作品')).toBeInTheDocument();
-    expect(screen.getAllByText('material_not_found').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('material_not_found')).toBeNull();
     expect(screen.getByText(/请切换领域或从作品列表重新选择/)).toBeInTheDocument();
   });
 
-  it('详情读取失败：说明、错误码与「重试读取」；列表仍可用', async () => {
+  it('详情读取失败：说明与「重试读取」，不直出错误码；列表仍可用', async () => {
     pageRoutes(kit, { count: 1 });
     kit.route('GET', detailPathOf(1), fail(503, 'material_detail_unavailable'));
     const { user } = renderEvidencePage();
     await screen.findByRole('button', { name: '合成作品 1' });
     await user.click(rowButton(1));
     expect(await screen.findByText('当前作品详情读取失败')).toBeInTheDocument();
-    expect(screen.getAllByText('material_detail_unavailable').length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByText('material_detail_unavailable')).toBeNull();
     expect(rowButton(1)).toBeEnabled();
     kit.route('GET', detailPathOf(1), ok((await import('./evidenceFixtures')).detailJson(1)));
     await user.click(within(aside()).getByRole('button', { name: '重试读取' }));

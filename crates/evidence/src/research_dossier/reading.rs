@@ -3,6 +3,7 @@ use super::{ResearchDossier, content};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
 
+mod effective;
 mod groups;
 pub(super) use groups::{clip_sections, image_text_gap_pages, tags_for_group};
 
@@ -14,10 +15,7 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
             .as_array()
             .is_none_or(Vec::is_empty),
     );
-    let has_body = dossier
-        .materials
-        .iter()
-        .any(|m| m["kind"] == "body" && readable(m));
+    let has_body = dossier.materials.iter().any(effective::substantive_body);
     let video_text = dossier
         .materials
         .iter()
@@ -46,16 +44,15 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
                     .as_array()
                     .into_iter()
                     .flatten()
+                    .filter(|b| content::has_source_text(b))
                     .filter_map(|b| b["ref"].as_str().map(str::to_owned)),
             );
         }
     }
     dossier.reading_view = json!({"mainBlockRefs":main,"supplementBlockRefs":supplement});
     dossier.reading_view["sections"] = groups::sections(dossier);
-    // The shared Works view retains its established main/supplement order.
-    // Research reading and machine adapters use the sole new section order below.
-    // Public materials and sections retain diagnostics. AI source fragments only
-    // contain reading content with its typed provenance; gaps are not source quotes.
+    // Every reading consumer uses these selected references. Raw materials retain
+    // recognition gaps and provenance for source inspection.
     dossier
         .fragments
         .retain(|f| content::has_source_text(&f.structure));
@@ -206,6 +203,59 @@ pub fn ordered_refs(dossier: &ResearchDossier) -> Vec<&str> {
         .collect()
 }
 
+/// A bounded excerpt uses the same groups as the full reading, scoped to its source unit.
+pub(crate) fn unit_text(dossier: &ResearchDossier, unit: &Value) -> String {
+    let index: BTreeMap<_, _> = unit["blocks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|b| b["ref"].as_str().map(|r| (r, b)))
+        .collect();
+    let mut paragraphs = vec![];
+    for section in dossier.reading_view["sections"]
+        .as_array()
+        .into_iter()
+        .flatten()
+    {
+        for group in section["groups"].as_array().into_iter().flatten() {
+            let mut text = String::new();
+            let mut previous = None;
+            for (position, reference) in group["blockRefs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+            {
+                let Some(block) = reference.as_str().and_then(|r| index.get(r)) else {
+                    continue;
+                };
+                let value = content::block_text(block);
+                // Library excerpts are quoted source text, not model observations.
+                // Visual descriptions remain in the full typed reading and AI sources.
+                if !content::has_source_text(block)
+                    || block["contentType"] == "visual_description"
+                    || content::pure_tags(&value).is_some()
+                {
+                    continue;
+                }
+                if !text.is_empty() {
+                    text.push_str(if previous == position.checked_sub(1) {
+                        group["joiners"][position - 1].as_str().unwrap_or("\n")
+                    } else {
+                        "\n"
+                    });
+                }
+                text.push_str(&value);
+                previous = Some(position);
+            }
+            if !text.is_empty() {
+                paragraphs.push(text);
+            }
+        }
+    }
+    paragraphs.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -245,6 +295,23 @@ mod tests {
             candidate_statuses: vec![],
             metadata: json!({}),
         }
+    }
+
+    #[test]
+    fn library_excerpt_does_not_relabel_visual_observation_as_image_text() {
+        let mut d = fixture(true, None, false);
+        d.materials[0]["blocks"] = json!([
+            {"ref":"observed","kind":"paragraph","text":"桌面上有容器。","speaker":"unconfirmed","contentType":"visual_description","regionRef":"r1","regionLabel":"中央"},
+            {"ref":"transcribed","kind":"paragraph","text":"原图实际文字。","speaker":"unconfirmed","contentType":"extracted_text","regionRef":"r2","regionLabel":"下方"}
+        ]);
+        rebuild(&mut d);
+        assert_eq!(unit_text(&d, &d.materials[0]), "原图实际文字。");
+        assert!(ordered_refs(&d).contains(&"observed"));
+        assert!(super::super::render::markdown(&d).contains("桌面上有容器。"));
+        d.materials[0]["blocks"].as_array_mut().unwrap().pop();
+        rebuild(&mut d);
+        assert!(unit_text(&d, &d.materials[0]).is_empty());
+        assert!(ordered_refs(&d).contains(&"observed"));
     }
 
     #[test]

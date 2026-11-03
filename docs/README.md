@@ -260,6 +260,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 | [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；LIDS v2.0 的可继承/不继承边界已登记 |
 | [design/lids/README.md](design/lids/README.md) | 权威当前；Proposed | LIDS v7.0 全项目设计表达标准的入口、来源回执、权威边界和成熟度 |
 | [design/lids/system.md](design/lids/system.md) | 权威当前；Proposed | LIDS-SYS-001：Token→Primitive→Component→Pattern→Page、L1/L2/L3、状态、动效、场景、a11y 与治理 |
+| [design/lids/iconography.md](design/lids/iconography.md) | 权威当前；已采用 | LIDS-ICON-B-001：B 精简版17枚、本地SVG、有限反馈、正式共享组件与同源展示 |
 | [design/lids/tokens.md](design/lids/tokens.md) | 权威当前 | LIDS-TOK-001：v7 三层 Token 架构（目标态）、完整 `--lgi-*` 运行时基线、差异表与分步迁移顺序 |
 | [design/lids/materials.md](design/lids/materials.md) | 权威当前 | LIDS-MAT-001：8px 采样点阵六态、材料预算 70/20/10 与区位限制 |
 | [design/lids/shell-zones.md](design/lids/shell-zones.md) | 权威当前 | LIDS-SHELL-001：页头 3 区、Context Bar 4 区的容量上限、禁止清单与静默区保护 |

@@ -1,6 +1,8 @@
-import { endingBlockAttribution, endingGroupAttribution, groupTagLabels, groupText, groupTime, formatReadingTime, readingAnchor, showReadingAttribution, type AttributionBoundary, type ReadingIssue, type ResolvedReadingGroup } from './dossierDocumentModel';
+import { endingBlockAttribution, endingGroupAttribution, groupTagLabels, groupText, groupTime, formatReadingTime, formatReadingTimeRange, readingAnchor, showReadingAttribution, type ReadingIssue, type AttributionBoundary, type ResolvedReadingGroup } from './dossierDocumentModel';
+import { confirmedEmptySpeech } from './dossierPresent';
+import { hasReadingSourceText } from './dossierReadingContent';
 import { normalizedTagLabel } from './dossierTagText';
-import type { DossierBlock, Speaker } from './dossierTypes';
+import type { DossierBlock, DossierMaterial, Speaker } from './dossierTypes';
 import styles from './DossierDocument.module.css';
 
 const ROLE_LABELS: Record<Speaker, string> = { author: '作品作者表述', other: '他人表述', unconfirmed: '表达归属未确认' };
@@ -11,6 +13,16 @@ export function ReadingText({ text }: { text: string }) {
 export function ReadingIssues({ issues }: { issues: readonly ReadingIssue[] }) {
   const specific = [...new Map(issues.filter(issue => issue.code !== 'cloud_image_unchecked').map(issue => [issue.message, issue])).values()];
   return specific.length ? <details className={styles.reviewNotes}><summary>核对说明{specific.length > 1 ? ` · ${specific.length}` : ''}</summary><ul className={styles.issues}>{specific.map(issue => <li key={issue.displayKey}>{issue.message}</li>)}</ul></details> : null;
+}
+export function EmptySpeechNotes({ materials }: { materials: readonly DossierMaterial[] }) {
+  return <>{materials.filter(unit => unit.kind === 'audio').map((unit, index, units) => {
+    if (unit.blocks.some(hasReadingSourceText)) return null;
+    const note = confirmedEmptySpeech(unit) ? '已确认无口播。'
+      : unit.processing?.state === 'completed' && unit.processing.reason === 'no_audio_stream_observed' ? '未发现音轨。'
+      : unit.processing?.state === 'completed' && unit.processing.reason === 'no_speech_observed' ? '未检出语音。'
+      : unit.sourceState === 'known_empty' && unit.currentRevisionRef ? '未取得可用口播。' : null;
+    return note ? <p className={styles.end} key={unit.ref}>{units.length > 1 ? `音轨 ${index + 1}` : '视频口播'}：{note}</p> : null;
+  })}</>;
 }
 function Tags({ labels }: { labels: readonly string[] }) { return <div className={styles.tags}>{labels.map((label, index) => <span className={styles.tag} key={index}>{label}</span>)}</div>; }
 function shortDefinitions(block: Extract<DossierBlock, { kind: 'table' }>): boolean {
@@ -26,7 +38,7 @@ function ContentBlock({ block, tags }: { block: DossierBlock; tags?: boolean }) 
     }
     case 'paragraph': return <p className={styles.paragraph}><ReadingText text={block.text}/></p>;
     case 'quote': return <blockquote className={styles.quote}><ReadingText text={block.text}/></blockquote>;
-    case 'gap': return <p className={styles.gap}>{block.text.startsWith('〔') ? block.text : `〔${block.text}〕`}</p>;
+    case 'gap': return null;
     case 'list': return block.ordered
       ? <ol className={styles.list} start={block.start}>{block.items.map((item, index) => <li key={index}><ReadingText text={item}/></li>)}</ol>
       : <ul className={styles.list}>{block.items.map((item, index) => <li key={index}><ReadingText text={item}/></li>)}</ul>;
@@ -38,6 +50,7 @@ function ContentBlock({ block, tags }: { block: DossierBlock; tags?: boolean }) 
 }
 function GroupContent({ value, previousRole }: { value: ResolvedReadingGroup; previousRole: AttributionBoundary }) {
   const { group, entries } = value;
+  if (group.mode === 'heading') return <h3 className={styles.heading}><ReadingText text={groupText(value)}/></h3>;
   if (group.mode === 'paragraph' || group.mode === 'transcript_paragraph') return <p className={styles.paragraph}><ReadingText text={groupText(value)}/></p>;
   if (group.mode === 'list') {
     const first = entries[0]?.block;
@@ -55,7 +68,7 @@ function GroupContent({ value, previousRole }: { value: ResolvedReadingGroup; pr
   }
   return <>{entries.map(({ block, unit }, index) => <div key={block.ref} data-block-ref={block.ref} data-speaker={block.speaker}>
     {!block.contentType && block.kind !== 'dialogue' && showReadingAttribution(block.speaker ?? 'unconfirmed', index ? endingBlockAttribution(entries[index - 1]?.block) : previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[block.speaker ?? 'unconfirmed']}</p> : null}
-    {unit.kind === 'video_frame' && block.time ? <span className={styles.transcriptTime}>{formatReadingTime(block.time.startMs)}</span> : null}
+    {block.time ? <span className={styles.transcriptTime} data-time-start-ms={block.time.startMs} data-time-end-ms={block.time.endMs}>{formatReadingTimeRange(block.time)}</span> : null}
     {block.contentType ? <p className={styles.attribution}><span>{block.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</span>{block.regionLabel && block.regionLabel !== '整图' ? <span> · {block.regionLabel}</span> : null}</p> : null}
     <ContentBlock block={block} tags={unit.kind === 'tags'}/>
   </div>)}</>;
@@ -65,12 +78,12 @@ export function DossierGroup({ value, prefix, previousRole, hideIssues = false }
   const id = readingAnchor(prefix, value.group.ref);
   const first = value.entries[0]?.block;
   const role = first?.speaker ?? 'unconfirmed';
-  const time = value.group.mode !== 'blocks' && value.entries[0]?.unit.kind === 'video_frame' ? groupTime(value) : null;
+  const time = value.group.mode !== 'blocks' ? groupTime(value) : null;
   return <div className={styles.group} id={id} data-reading-anchor={value.group.ref} tabIndex={-1}>
     {value.group.continuation.fromPrevious ? <Continuation from/> : null}
     {value.group.mode !== 'blocks' && !first?.contentType && showReadingAttribution(role, previousRole) ? <p className={styles.attribution}>{ROLE_LABELS[role]}</p> : null}
     {value.group.mode !== 'blocks' && first?.contentType ? <p className={styles.attribution}><span>{first.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</span>{first.regionLabel && first.regionLabel !== '整图' ? <span> · {first.regionLabel}</span> : null}</p> : null}
-    {time ? <span className={styles.transcriptTime}>{formatReadingTime(time.startMs)}</span> : null}
+    {time ? <span className={styles.transcriptTime} data-time-start-ms={time.startMs} data-time-end-ms={time.endMs}>{formatReadingTimeRange(time)}</span> : null}
     <GroupContent value={value} previousRole={previousRole}/>
     {!hideIssues ? <ReadingIssues issues={value.issues}/> : null}
     {value.group.continuation.toNext ? <Continuation from={false}/> : null}
@@ -79,12 +92,11 @@ export function DossierGroup({ value, prefix, previousRole, hideIssues = false }
 export function TranscriptParagraph({ value, prefix, showRole }: { value: ResolvedReadingGroup; prefix: string; showRole: boolean }) {
   const time = groupTime(value), role = value.entries[0]?.block.speaker ?? 'unconfirmed';
   return <div className={styles.transcriptRow} id={readingAnchor(prefix, value.group.ref)} data-reading-anchor={value.group.ref} data-transcript-paragraph tabIndex={-1}>
-    <span className={styles.transcriptTime} title={time ? `${formatReadingTime(time.startMs)}–${formatReadingTime(time.endMs)}` : '时间未取得'}>{time ? formatReadingTime(time.startMs) : '—'}</span>
+    <span className={styles.transcriptTime} title={time ? formatReadingTimeRange(time) : '时间未取得'} data-time-start-ms={time?.startMs} data-time-end-ms={time?.endMs}>{time ? formatReadingTime(time.startMs) : '—'}</span>
     <div>
       {showRole ? <span className={styles.attribution}>{ROLE_LABELS[role]}</span> : null}
       {value.group.continuation.fromPrevious ? <Continuation from/> : null}
       <p className={styles.transcriptText} data-speaker={role}><ReadingText text={groupText(value)}/></p>
-      <ReadingIssues issues={value.issues}/>
       {value.group.continuation.toNext ? <Continuation from={false}/> : null}
     </div>
   </div>;

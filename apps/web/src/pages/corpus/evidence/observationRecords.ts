@@ -113,7 +113,7 @@ export function elapsedCopy(value: string | null | undefined, now: number): stri
 // ───────────────────────── 评论采集 ─────────────────────────
 
 const SCOPE_COPY: Readonly<Record<string, string>> = {
-  detail_window: '随详情顺带采（最多 30 条）',
+  detail_window: '随详情（最多 30 条）',
   all_public_comments: '尽量采全',
   incremental_new: '分段续采',
 };
@@ -127,16 +127,23 @@ export interface CommentCollectionRow {
   shown: number | null;
   /** 只对「尽量采全」有意义：已采全／没采全；其余范围本来就有上限，不做这个判断。 */
   complete: boolean | null;
+  /** 采集结果的人话；只有「尽量采全」能判断，未知时也不补成已采全。 */
+  result: string | null;
 }
 
 export function commentCollectionRows(history: readonly CoverageEntry[]): CommentCollectionRow[] {
   return [...history]
     .sort((left, right) => (right.observedAt ?? '').localeCompare(left.observedAt ?? ''))
-    .map(entry => ({
-      at: entry.observedAt,
-      scope: (entry.collectionScope ? SCOPE_COPY[entry.collectionScope] : undefined) ?? '评论采集',
-      collected: entry.uniqueCollectedCount ?? entry.retained ?? entry.producerAcquired,
-      shown: entry.pageCommentCount,
-      complete: entry.collectionScope === 'all_public_comments' && entry.collectionState !== null ? entry.collectionState === 'complete' : null,
-    }));
+    .map(entry => {
+      const judged = entry.collectionScope === 'all_public_comments';
+      const complete = judged && entry.collectionState !== null ? entry.collectionState === 'complete' : null;
+      return {
+        at: entry.observedAt,
+        scope: (entry.collectionScope ? SCOPE_COPY[entry.collectionScope] : undefined) ?? '评论采集',
+        collected: entry.uniqueCollectedCount ?? entry.retained ?? entry.producerAcquired,
+        shown: entry.pageCommentCount,
+        complete,
+        result: judged ? (complete === true ? '能看到的都采了' : complete === false ? '没有采全' : '结果未知') : null,
+      };
+    });
 }

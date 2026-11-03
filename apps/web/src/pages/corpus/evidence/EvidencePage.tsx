@@ -8,6 +8,7 @@ import { Inspector } from './Inspector';
 import { ReadReceipt, ResultsArea } from './ResultsArea';
 import { ReturnBanners } from './ReturnBanners';
 import { SelectionBar } from './SelectionBar';
+import { ToastProvider } from './Toast';
 import { listKey } from './evidenceKeys';
 import { readoutFacts, readoutTitle } from './evidencePresent';
 import { DEFAULT_QUERY, scopeProblem, toApiParams, type EvidenceQuery, type PanelWidth } from './evidenceQuery';
@@ -84,11 +85,10 @@ export function EvidencePage() {
   }
 
   // ── 勾选与批量动作 ──────────────────────────────────────────────────────────────
-  const { selection, toggle, togglePage, clear } = useCollectionSelection(domain);
+  const { selection, toggle, addAll, clear } = useCollectionSelection(domain);
   const [selecting, setSelecting] = useState(false);
   const loadedRefs = items.map(item => item.ref);
   const visibleSelected = loadedRefs.filter(ref => selection.has(ref)).length;
-  const allPageSelected = loadedRefs.length > 0 && visibleSelected === loadedRefs.length;
   function cancelSelection() { clear(); setSelecting(false); }
 
   function deepCollect() {
@@ -107,6 +107,7 @@ export function EvidencePage() {
   const hasDomain = domain !== null;
   const shownQuery: EvidenceQuery = hasDomain ? query : { ...DEFAULT_QUERY, layout: query.layout };
   return (
+    <ToastProvider lifted={selecting}>
     <CorpusFrame
       page="evidence"
       pageLabel="证据库"
@@ -125,23 +126,11 @@ export function EvidencePage() {
             busy={list.isFetching && !list.isFetchingNextPage}
             selecting={selecting}
             onToggleSelecting={() => selecting ? cancelSelection() : setSelecting(true)}
-            onSelectPage={() => togglePage(loadedRefs)}
-            allPageSelected={allPageSelected}
-            pageHasItems={items.length > 0}
             onChange={go}
             onSubmit={text => reread({ ...query, q: text, view: 'all', work: null })}
             onClearFilters={() => reread({ ...query, lane: '', laneState: '', mediaKind: '', view: 'all', work: null })}
             banners={<ReturnBanners query={query} domainParam={domainParam} />}
-          >
-            {selecting ? <SelectionBar
-              count={selection.size}
-              visibleCount={items.length}
-              visibleSelected={visibleSelected}
-              hasDomain={hasDomain}
-              onClear={cancelSelection}
-              onDeepCollect={deepCollect}
-            /> : null}
-          </EvidenceControls>
+          />
         </div>
         <ReadReceipt last={last} failure={list.error} count={items.length} />
         <div className={styles.bench} data-inspector={closed ? 'closed' : width}>
@@ -161,6 +150,10 @@ export function EvidencePage() {
             items={items}
             selectedRef={selected}
             layout={query.layout}
+            selectionControls={selecting ? <SelectionBar
+              count={selection.size} visibleCount={items.length} visibleSelected={visibleSelected}
+              hasDomain={hasDomain} onSelectPage={() => addAll(loadedRefs)} onClear={clear} onDeepCollect={deepCollect}
+            /> : null}
             checked={selection}
             selectionMode={selecting}
             listRef={listRef}
@@ -196,5 +189,6 @@ export function EvidencePage() {
         ) : null}
       </div>
     </CorpusFrame>
+    </ToastProvider>
   );
 }

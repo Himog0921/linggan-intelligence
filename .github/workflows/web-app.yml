@@ -11,17 +11,23 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
       - name: Locked install
         run: npm ci --prefix apps/web --ignore-scripts --no-audit --no-fund
       - name: Reject legacy production UI and duplicate React roots
         run: node scripts/check-web-react-boundary.mjs && node --test scripts/check-web-react-boundary.test.mjs
       - name: Typecheck, lint, unit and component tests, production build
-        run: npm --prefix apps/web run verify
+        run: |
+          # Build already performs the TypeScript typecheck; do not invoke it twice.
+          npm --prefix apps/web run lint
+          npm --prefix apps/web run test
+          npm --prefix apps/web run build
       - name: LIDS sources and offline examples stay synchronized
         run: npm --prefix apps/web run lids:verify
       - name: Runtime preparation script reuses a matching build
@@ -29,4 +35,9 @@ jobs:
           export LINGGAN_WEB_NODE="$(command -v node)"
           revision="$(git rev-parse --short HEAD)"
           bash scripts/runtime/prepare-web.sh --build "$revision"
+          second_started=$SECONDS
+          bash scripts/runtime/prepare-web.sh --build "$revision"
+          second_elapsed=$((SECONDS - second_started))
+          echo "Second identical revision build: ${second_elapsed}s"
+          ((second_elapsed <= 5)) || { echo 'Matching revision unexpectedly rebuilt' >&2; exit 1; }
           bash scripts/runtime/prepare-web.sh --check "$revision"

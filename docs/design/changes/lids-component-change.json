@@ -1,9 +1,11 @@
 {
-  "kind": "implementation_fix",
-  "reason": "Read creation history as metadata and qualify document detail lazily using existing history rows and ActionButton",
-  "authorization": "Mog 2026-10-31 explicit legacy recovery implementation and isolated validation request",
+  "kind": "shared_standard",
+  "reason": "Promote the visually accepted 17-icon B family into a local shared asset, runtime tokens and live design-system showcase; the evidence reading surface retains its bounded material-group and StateLine exception.",
+  "authorization": "Mog 2026-11-02 explicitly accepted all icons and requested design-standard adoption and deployment; Raft task21 19ec8e5b/cf435a65; user4aadf2c7/b04c6cd4",
+  "exceptionScope": "/corpus/evidence research material group and page StateLine markers",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
-    "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"
+    "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
+    "ICON-B-001": "a08ae3ac746535945174c3e1ed1798975168a4ddd88cc5384a0e24730ef78f7d"
   }
 }

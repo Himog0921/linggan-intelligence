@@ -74,24 +74,24 @@ const rowText = name =>
 
 let finished = false;
 try {
-  await step('打开页面：八列表格、命中数、分页、读取时间；外壳与旧页面同源', async () => {
+  await step('打开页面：九列表格、命中数、分页、读取时间；外壳与旧页面同源', async () => {
     const response = await page.goto(listUrl);
     assert.equal(response?.status(), 200);
     await page.getByRole('table').waitFor();
     assert.equal(await page.title(), '创作者 · 语料');
     assert.deepEqual(
       await page.getByRole('columnheader').allTextContents(),
-      ['创作者', '发现词', '内容方向', '相关作品', '领域最高赞', '作品预览', '首次发现', '观察状态'],
+      ['创作者', '粉丝', '发现词', '内容方向', '相关作品', '领域最高赞', '作品预览', '首次发现', '观察状态'],
     );
     await resultCount(`${authorTotal} 位创作者`);
     await page.getByText('1 / 2 页', { exact: true }).waitFor();
     assert.equal(await rows().count(), 25);
     assert.match(await page.locator('.v7-context-meta').innerText(), /^读取于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
-    // 一级导航六项；语料是当前项；采集项的状态词来自语料外壳接口（库里已有一个观察目标 → 观察中）。
+    // 一级导航六项只显示中文标题；语料是当前项；采集项不再带状态词（状态词仍由语料外壳接口提供，见下个步骤）。
     const nav = page.getByRole('navigation', { name: '一级导航' });
     assert.equal(await nav.locator('a, button').count(), 6);
     assert.equal(await nav.getByRole('link', { name: /语料/ }).getAttribute('aria-current'), 'page');
-    assert.match(await nav.getByRole('link', { name: /采集/ }).innerText(), /观察中/);
+    assert.equal((await nav.getByRole('link', { name: /采集/ }).innerText()).trim(), '采集');
     const headerBorder = await page.locator('.v7-global-row').evaluate(node => getComputedStyle(node).borderBottomWidth);
     assert.equal(headerBorder, '2px');
     // 侧栏三项都带着领域；创作者是当前项。
@@ -284,7 +284,7 @@ try {
     // 列表重读后，这位作者的「相关作品」变成 1。
     await page.waitForFunction(() => {
       const button = [...document.querySelectorAll('tbody button')].find(node => node.textContent === '合成作者 03');
-      return button?.closest('tr')?.querySelectorAll('td')[3]?.innerText.startsWith('1');
+      return button?.closest('tr')?.querySelectorAll('td')[4]?.innerText.startsWith('1');
     });
     assert.match(await panel.innerText(), /人工调整 · \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     await page.keyboard.press('Escape');
@@ -357,7 +357,9 @@ try {
     const joinedPanel = drawer('合成作者 05');
     await joinedPanel.waitFor();
     await joinedPanel.getByRole('tab', { name: '观察记录' }).click();
-    const joinedRecord = await joinedPanel.getByRole('region', { name: '观察关系与巡查' }).innerText();
+    const joinedRegion = joinedPanel.getByRole('region', { name: '观察关系与巡查' });
+    await joinedRegion.getByText('加入本领域', { exact: true }).waitFor();
+    const joinedRecord = await joinedRegion.innerText();
     assert.match(joinedRecord, /加入本领域[\s\S]*主研究/);
     assert.match(joinedRecord, /自动巡查未开启/);
     assert.match(joinedRecord, /没有巡查记录/);

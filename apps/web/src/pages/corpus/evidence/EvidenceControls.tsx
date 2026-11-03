@@ -13,15 +13,11 @@ interface EvidenceControlsProps {
   busy?: boolean;
   selecting: boolean;
   onToggleSelecting: () => void;
-  onSelectPage: () => void;
-  allPageSelected: boolean;
-  pageHasItems: boolean;
   onChange: Change;
   /** 手动提交；相同条件也重新读取，不改成自动检索。 */
   onSubmit: (text: string) => void;
   onClearFilters: () => void;
   banners?: ReactNode;
-  children?: ReactNode;
 }
 const NO_DOMAIN = '请先选择研究领域，再读取统一作品材料。';
 type FilterName = 'lane' | 'laneState' | 'mediaKind';
@@ -32,7 +28,7 @@ const FILTERS: readonly { name: FilterName; label: string; allLabel: string; opt
 ];
 
 /** B检索组合。筛选即选即读，没有待应用草稿；对象与地址合同仍由页面持有。 */
-export function EvidenceControls({ query, hasDomain, scope, busy = false, selecting, onToggleSelecting, onSelectPage, allPageSelected, pageHasItems, onChange, onSubmit, onClearFilters, banners, children }: EvidenceControlsProps) {
+export function EvidenceControls({ query, hasDomain, scope, busy = false, selecting, onToggleSelecting, onChange, onSubmit, onClearFilters, banners }: EvidenceControlsProps) {
   const panelId = useId();
   const [text, setText] = useState(query.q);
   const [seen, setSeen] = useState({ q: query.q, scope });
@@ -87,7 +83,7 @@ export function EvidenceControls({ query, hasDomain, scope, busy = false, select
           <div ref={anchor} className={styles.anchor} onKeyDown={event => {
             if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); toggle.current?.focus(); }
           }}>
-            <ActionButton ref={toggle} variant="outline" className={styles.filterToggle} aria-expanded={open} aria-controls={panelId}
+            <ActionButton ref={toggle} variant="outline" className={`${styles.filterToggle} ${styles.actionControl}`} aria-expanded={open} aria-controls={panelId}
               data-active={count > 0} disabled={!hasDomain} title={reason} onClick={() => setOpen(value => !value)}>
               筛选 <b aria-label={`已选 ${count} 项筛选`}>{String(count).padStart(2, '0')}</b>
             </ActionButton>
@@ -112,18 +108,13 @@ export function EvidenceControls({ query, hasDomain, scope, busy = false, select
               </footer>
             </div> : null}
           </div>
-          <ActionButton type="submit" variant="primary" disabled={!hasDomain} busy={busy} title={reason}>读取材料</ActionButton>
-          {selecting ? <ActionButton variant="outline" className={styles.selectPage} disabled={!hasDomain || !pageHasItems}
-            onClick={onSelectPage}>{allPageSelected ? '取消本页' : '勾选本页'}</ActionButton> : null}
-          <button type="button" className={styles.selectMode} aria-pressed={selecting} disabled={!hasDomain}
+          <ActionButton type="submit" variant="primary" className={styles.actionControl} disabled={!hasDomain} busy={busy} title={reason}>读取材料</ActionButton>
+          <button type="button" className={`${styles.selectMode} ${styles.actionControl}`} aria-pressed={selecting} disabled={!hasDomain}
             title={selecting ? '退出并清空本次选择' : '进入批量选择模式'} onClick={onToggleSelecting}>
             <span aria-hidden="true" className={styles.selectGlyph}><i/><i/><i/><i/></span>{selecting ? '取消选择' : '选择'}
           </button>
         </div>
       </form>
-    </div>
-    <div className={styles.foot}>
-      {children}
       <div className={styles.layouts} role="group" aria-label="结果排版">
         {LAYOUTS.map(([key, label]) => <button key={key} type="button" aria-pressed={query.layout === key}
           onClick={() => onChange(current => ({ ...current, layout: key satisfies LayoutKey }))}>{label}</button>)}

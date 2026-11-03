@@ -56,7 +56,6 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
   // 加入用途由用户明确选择；其他领域已有主研究关系时只能按参照加入。
   const [chosen, setChosen] = useState<'primary' | 'reference'>(target.role);
   const role = target.blockedPrimary ? 'reference' : chosen;
-  const roleText = role === 'reference' ? '参照' : '主研究';
   // 首次提交后用途就锁定：失败重试仍发送同一个请求体，不换成另一个用途。
   const locked = target.blockedPrimary || phase !== 'confirm';
 
@@ -134,17 +133,7 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
               <small>这位作者的作品作为参照材料，不计入主研究。</small>
             </label>
           </fieldset>
-          <p>这一步会：</p>
-          <ul className={styles.list}>
-            <li>登记这位作者为本机观察目标（已登记过则沿用，不重复建立）</li>
-            <li>建立这位作者与本领域的关系（用途：{roleText}）</li>
-          </ul>
-          <p>这一步不会：</p>
-          <ul className={styles.list}>
-            <li>立即采集作品、评论或主页</li>
-            <li>开启或关闭巡查，也不改变已有的巡查规则</li>
-            <li>调用模型</li>
-          </ul>
+          <p className={styles.help}>加入名单并建立领域关系；本次不启动采集或巡查。</p>
           <FeedbackLine feedback={feedback} />
           {phase === 'sending' ? (
             <p role="status" className={styles.help}>

@@ -61,7 +61,7 @@ interface ReadingGroupBase {
 /** A reference-only arrangement produced by the canonical backend owner. */
 export type ReadingGroup = ReadingGroupBase & (
   | { mode: 'blocks' | 'list' | 'table' | 'tags' }
-  | { mode: 'paragraph' | 'transcript_paragraph'; joiners: ('' | ' ' | '\n')[] }
+  | { mode: 'heading' | 'paragraph' | 'transcript_paragraph'; joiners: ('' | ' ' | '\n' | '，')[] }
 );
 export interface ReadingSection { ref: string; kind: ReadingSectionKind; groups: ReadingGroup[]; gaps: { beforeGroupRef: string | null; missingPages: number[] }[] }
 export interface DossierReadingView { mainBlockRefs: string[]; supplementBlockRefs: string[]; sections: ReadingSection[] }

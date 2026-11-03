@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 mod ocr;
 mod text;
 pub use ocr::ocr_blocks;
-pub use text::{block_text, blocks_from_text, speaker_label};
+pub use text::{block_text, blocks_from_text, pure_tags, speaker_label};
 
 /// Gap labels describe missing recognition, not words supplied by the source.
 pub fn has_source_text(block: &Value) -> bool {

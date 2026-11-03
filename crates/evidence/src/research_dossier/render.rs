@@ -29,7 +29,7 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
     }
     for (index, f) in fragments.iter().enumerate() {
         out.push_str(&format!("[S{}] {}\n", index + 1, field_label(&f.field)));
-        if f.speaker != "author" {
+        if f.speaker == "other" {
             out.push_str(&format!("角色：{}\n", content::speaker_label(&f.speaker)));
         }
         if let Some(label) = f.structure["regionLabel"].as_str() {
@@ -43,8 +43,10 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
         out.push_str(&f.text);
         out.push_str("\n\n");
         for issue in &f.issues {
-            if let Some(message) = issue["message"].as_str() {
-                out.push_str(&format!("> 待确认：{message}\n"));
+            if issue["code"] != "cloud_image_unchecked" {
+                if let Some(message) = issue["message"].as_str() {
+                    out.push_str(&format!("> 待确认：{message}\n"));
+                }
             }
         }
     }
@@ -193,12 +195,7 @@ mod tests {
         let output = markdown(&d);
         assert!(output.starts_with("# 同名标题\n"));
         assert!(output.find("正文后续").unwrap() < output.find("图片后续").unwrap());
-        for text in [
-            "00:00.010–00:00.020",
-            "00:00.040",
-            "正文标题待确认",
-            "图片标题待确认",
-        ] {
+        for text in ["00:00.010–00:00.020", "00:00.040"] {
             assert_eq!(output.matches(text).count(), 1, "{text}");
         }
         for technical in [
@@ -243,6 +240,11 @@ mod tests {
         let output = markdown(&d);
         assert!(output.starts_with("# 平台标题\n"));
         assert!(output.contains("正文标题") && output.contains("图片标题待确认"));
+        assert!(output.find("核对说明").unwrap() < output.find("图片标题待确认").unwrap());
+        assert_eq!(
+            d.materials[0]["blocks"][0]["issues"][0]["message"],
+            "正文标题待确认"
+        );
     }
 
     #[test]
@@ -259,9 +261,10 @@ mod tests {
         let output = markdown(&d);
         for message in ["第0处独立问题", "第1处独立问题", "独立覆盖问题"] {
             assert_eq!(output.matches(message).count(), 1);
+            assert!(output.find("核对说明").unwrap() < output.find(message).unwrap());
         }
-        assert!(output.contains("来源已确认无可读文字"));
-        assert!(output.contains("既有已确认无文字的结果仍有效"));
+        assert!(output.contains("无可用口播"));
+        assert!(!output.contains("既有已确认无文字的结果仍有效"));
         assert!(!output.contains("已处理，未检出可读文字"));
         assert!(!output.contains("处理失败，尚无当前可用"));
     }
@@ -297,8 +300,8 @@ mod tests {
         let output = markdown(&d);
         assert_eq!(
             output.matches("*角色未确认*").count(),
-            5,
-            "one run in body/images/frames and one in each audio material"
+            0,
+            "unknown role remains source metadata, not reading boilerplate"
         );
         assert_eq!(output.matches("*他人*").count(), 1);
         assert_eq!(
@@ -343,11 +346,11 @@ mod tests {
     #[test]
     fn markdown_preserves_execution_state_and_valid_empty_results() {
         for (state, label) in [
-            ("pending", "待处理"),
+            ("pending", "暂无可用文字"),
             ("running", "处理中"),
             ("failed", "处理失败"),
-            ("cancelled", "处理已取消"),
-            ("invalidated", "处理结果已失效"),
+            ("cancelled", "暂无可用文字"),
+            ("invalidated", "暂无可用文字"),
         ] {
             let mut d = fixture(Some("合成处理状态验证"), None);
             d.materials = vec![
@@ -356,18 +359,18 @@ mod tests {
             ];
             d.coverage["sources"] = json!({"images":{"state":"not_processed"}});
             super::super::reading::rebuild(&mut d);
-            assert!(markdown(&d).contains(&format!("图片资料第 1 页：{label}。")));
+            assert!(markdown(&d).contains(&format!("图片文字：{label}。")));
             d.materials[0]["sourceState"] = json!("known_empty");
             d.materials[0]["currentRevisionRef"] = json!("valid-empty-reading");
             d.coverage["sources"]["images"]["state"] = json!("known_empty");
             let output = markdown(&d);
-            assert!(output.contains(&format!("{label}；既有已确认无文字的结果仍有效。")));
+            assert!(!output.contains("未包含内容"));
             assert!(!output.contains("尚无当前可用的识读文字"));
             d.materials[0]["sourceState"] = json!("present");
             d.materials[0]["blocks"] = json!([{"ref":"readable","kind":"paragraph","text":"既有有效文字。","speaker":"author"}]);
             d.coverage["sources"]["images"]["state"] = json!("available");
             super::super::reading::rebuild(&mut d);
-            assert!(markdown(&d).contains(&format!("{label}，已有读本仍可读。")));
+            assert!(!markdown(&d).contains("未包含内容"));
             assert!(markdown(&d).contains("既有有效文字。"));
         }
     }

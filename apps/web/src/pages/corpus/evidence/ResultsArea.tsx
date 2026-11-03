@@ -1,5 +1,5 @@
 import { ActionButton } from '../../../shared/ActionButton';
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
 import { Tech } from './Primitives';
 import { ResultsStatus } from './ResultsStatus';
 import { WorkList } from './WorkList';
@@ -25,11 +25,9 @@ export function ReadReceipt({ last, failure, count }: { last: WorkListPage | nul
     );
   }
   if (failure && count === 0) {
-    const code = errorCode(failure);
     return (
       <div className={styles.receipt}>
         <span>当前未读取任何材料，不能据此判断库为空或来源不存在。</span>
-        <span className={styles.receiptMeta}>{code ? <Tech>{code}</Tech> : null}</span>
       </div>
     );
   }
@@ -58,6 +56,7 @@ interface ResultsAreaProps {
   layout: LayoutKey;
   checked: ReadonlySet<string>;
   selectionMode: boolean;
+  selectionControls?: ReactNode;
   listRef: Ref<HTMLDivElement>;
   onSelect: (item: WorkItem, source: 'user' | 'auto') => void;
   onCheck: (ref: string, checked: boolean) => void;
@@ -73,7 +72,7 @@ export function ResultsArea(props: ResultsAreaProps) {
   const { shell, domainSelected, problem, list, items, selectedRef, layout, checked, selectionMode, listRef, onSelect, onCheck, onRetryShell, onClearScope } = props;
   const status = describeStatus({ shell, domainSelected, scopeProblem: problem, list: { pending: list.pending, error: list.error, count: items.length } });
   return (
-    <div className={styles.results}>
+    <div className={styles.results} data-evidence-results=""><div className={styles.resultsContent}>
       {status ? (
         <ResultsStatus
           status={status}
@@ -100,6 +99,7 @@ export function ResultsArea(props: ResultsAreaProps) {
           </ActionButton>
         </div>
       ) : null}
-    </div>
+      {props.selectionControls ? <div className={styles.selectionDock}>{props.selectionControls}</div> : null}
+    </div></div>
   );
 }

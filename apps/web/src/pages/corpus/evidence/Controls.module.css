@@ -1,5 +1,5 @@
 /* B: 宽屏工具/集合视图合带；工作区收窄后恢复 T→V。只消费已采用Token。 */
-.deck { padding: var(--lgi-space-4) var(--lgi-space-5) 0; background: var(--lgi-canvas); }
+.deck { padding: var(--lgi-space-4) var(--lgi-space-5); background: var(--lgi-canvas); }
 .band { display: flex; align-items: center; gap: var(--lgi-space-5); }
 .form { display: flex; flex: 1; gap: var(--lgi-space-2); align-items: center; min-width: 0; }
 .find { display: flex; align-items: center; flex: 1; min-width: 0; min-height: var(--lgi-space-10); border: 2px solid var(--lgi-ink); background: var(--lgi-canvas); }
@@ -49,8 +49,8 @@
 }
 
 /* V2.2: unified browsing/selection toolbar; status quick filters live in one popover. */
-.band { display:block; }
-.form { display:flex; width:100%; align-items:center; gap:var(--lgi-space-3); }
+.band { display:flex; gap:var(--lgi-space-3); }
+.form { display:flex; align-items:center; gap:var(--lgi-space-3); }
 .tools { display:flex; flex:none;align-items:center;gap:var(--lgi-space-2); }
 .quickView { display:grid;gap:var(--lgi-space-2); }
 .quickViewChoices { display:flex;flex-wrap:wrap;gap:var(--lgi-space-2); }
@@ -68,9 +68,11 @@
 .selectGlyph i { display:block;border:var(--lgi-action-border-width) solid currentColor; }
 .selectGlyph i:first-child { background:currentColor; }
 .selectPage { min-width:var(--lgi-space-24);white-space:nowrap; }
-.foot { min-height:var(--lgi-space-12); margin-top:0; }
+.foot { margin-top:var(--lgi-space-2); }
+/* DOM emptiness also handles a supplied component that renders null. */
+.foot:empty { display:none; }
 .layouts { margin-left:auto;flex:none; }
-.selection { flex-wrap:nowrap;min-height:var(--lgi-space-10);gap:var(--lgi-space-3); }
+.selection { flex-wrap:wrap; padding:0; gap:var(--lgi-space-3); }
 .selectedCount { display:inline-flex;align-items:center;gap:var(--lgi-space-1);
   white-space:nowrap;color:var(--lgi-ink); }
 .selectedCount b { color:var(--lgi-signal);font:600 var(--lgi-type-data-size)/1 var(--lgi-font-data); }
@@ -78,7 +80,7 @@
 .selectionDivider { display:block; flex:none;width:var(--lgi-action-border-width);height:var(--lgi-space-4);background:var(--lgi-border); }
 .selection [data-action-button] { white-space:nowrap; }
 @container evidence-workspace (max-width: 1000px) {
-  .band { display:block; }
+  .band { display:flex; align-items:stretch; }
   .form { flex-wrap:wrap; }
   .find { flex-basis:100%; }
   .tools { width:100%;justify-content:flex-end; }
@@ -92,3 +94,32 @@
   .selectedCount small { display:none; }
   .layouts { align-self:flex-end; }
 }
+
+/* EVIDENCE-ACTIONS-20261101: one local control family, not a global button change. */
+.find { min-height:var(--lgi-space-10); }
+.find input { min-height:calc(var(--lgi-space-10) - var(--lgi-space-1)); }
+.actionControl.actionControl { height:var(--lgi-space-10); min-height:var(--lgi-space-10);
+  border:var(--lgi-action-border-width) solid var(--lgi-ink); box-shadow:var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--lgi-ink);
+  transition:transform var(--lgi-action-motion-fast),box-shadow var(--lgi-action-motion-fast),background-color var(--lgi-action-motion-fast); }
+.actionControl.actionControl:not(:disabled):hover { transform:translateY(var(--lgi-action-hover-shift)); box-shadow:var(--lgi-action-shadow-hover) var(--lgi-action-shadow-hover) 0 var(--lgi-ink); }
+.actionControl.actionControl:not(:disabled):active { transform:translate(var(--lgi-action-press-shift),var(--lgi-action-press-shift)); box-shadow:none; }
+.actionControl.actionControl:disabled { box-shadow:none;transform:none; }
+.selectMode[aria-pressed='true'] { transform:translate(var(--lgi-action-press-shift),var(--lgi-action-press-shift));box-shadow:none; }
+.layouts { height:var(--lgi-space-10); gap:0; overflow:visible; border:var(--lgi-action-border-width) solid var(--lgi-ink);
+  box-shadow:var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--lgi-ink); background:var(--lgi-canvas); }
+.layouts button { min-height:0; padding:0 var(--lgi-space-3); border:0; border-right:var(--lgi-action-border-width) solid var(--lgi-ink);
+  color:var(--lgi-body);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui); }
+.layouts button:last-child { border-right:0; }
+.layouts button[aria-pressed='true'],.layouts button[aria-pressed='true']:hover { color:var(--lgi-on-dark);background:var(--lgi-ink); }
+.layouts button:hover:not(:disabled):not([aria-pressed='true']) { background:var(--lgi-canvas-low); }
+.selection { display:grid; gap:var(--lgi-space-3); padding:var(--lgi-space-4); border:var(--lgi-action-border-width) solid var(--lgi-ink);
+  background:var(--lgi-canvas);box-shadow:var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--lgi-ink); }
+.selectionActions { display:flex;flex-wrap:wrap;gap:var(--lgi-space-2); }
+.selection .selectedCount { font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui); }
+.selection .limit { white-space:normal;overflow-wrap:anywhere; }
+@media(prefers-reduced-motion:reduce) { .actionControl.actionControl { transition:none;transform:none!important; } }
+
+/* Execution carries depth; filter and mode controls remain flat. */
+.filterToggle.actionControl,.selectMode.actionControl,.layouts { box-shadow:none; }
+.filterToggle.actionControl:not(:disabled):hover,.selectMode.actionControl:not(:disabled):hover { box-shadow:none;transform:none; }
+.selectMode.actionControl[aria-pressed='true'] { transform:none;box-shadow:none; }

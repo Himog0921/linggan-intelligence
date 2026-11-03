@@ -281,7 +281,12 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
                         "source_refresh",
                     ));
             }
-            if *kind == "video_frame" && material["sourceState"] == "present" {
+            if *kind == "video_frame"
+                && material["sourceState"] == "present"
+                && material["blocks"]
+                    .as_array()
+                    .is_some_and(|blocks| !blocks.is_empty())
+            {
                 material["issues"]
                     .as_array_mut()
                     .expect("issues")

@@ -3,14 +3,17 @@ import type { Feedback } from './evidenceFeedback';
 import { stateMeta, type FactRowData } from './evidencePresent';
 import styles from './Primitives.module.css';
 
-/** 状态线：圆点＋中文状态词。原始状态码只放在 `data-state`，不进普通层的文字（F06）。 */
-export function StateLine({ state, showCode = false }: { state: string | null | undefined; showCode?: boolean }) {
+/** 状态线：方块＋中文状态词。原始状态码只放在 `data-state`，不进普通层的文字（F06）。
+ *  label / ariaHidden 只给窄列里需要短名、而完整句交给读屏文本的位置（研读信息列）。 */
+export function StateLine({ state, showCode = false, label, ariaHidden = false }: {
+  state: string | null | undefined; showCode?: boolean; label?: string; ariaHidden?: boolean;
+}) {
   const normalized = state || 'UNKNOWN';
-  const [label, tone] = stateMeta(normalized);
+  const [fullLabel, tone] = stateMeta(normalized);
   return (
-    <span className={styles.stateLine} data-state={normalized}>
-      <i className={styles.dot} data-tone={tone} aria-hidden="true" />
-      <span>{label}</span>
+    <span className={styles.stateLine} data-state={normalized} aria-hidden={ariaHidden || undefined}>
+      <i className={styles.marker} data-state-mark="" data-tone={tone} aria-hidden="true" />
+      <span>{label ?? fullLabel}</span>
       {showCode ? <code className={styles.tech}>{normalized}</code> : null}
     </span>
   );
@@ -65,13 +68,17 @@ export function FactGrid({ rows }: { rows: readonly FactRow[] }) {
   );
 }
 
-export function Section({ title, tech, actions, children }: { title: string; tech?: string; actions?: ReactNode; children: ReactNode }) {
+export function Section({ title, tech, badge, actions, children }: { title: string; tech?: string; badge?: ReactNode; actions?: ReactNode; children: ReactNode }) {
+  const heading = (
+    <span className={styles.headingMain}>
+      <span>{title}</span>
+      {badge}
+      {tech ? <Tech>{tech}</Tech> : null}
+    </span>
+  );
   return (
     <section className={styles.section}>
-      {actions ? <div className={styles.sectionHeader}><h3><span>{title}</span>{tech ? <Tech>{tech}</Tech> : null}</h3><div className={styles.sectionActions}>{actions}</div></div> : <h3>
-        <span>{title}</span>
-        {tech ? <Tech>{tech}</Tech> : null}
-      </h3>}
+      {actions ? <div className={styles.sectionHeader}><h3>{heading}</h3><div className={styles.sectionActions}>{actions}</div></div> : <h3>{heading}</h3>}
       {children}
     </section>
   );
@@ -105,7 +112,6 @@ export function FeedbackLine({ feedback, children }: { feedback: Feedback | null
     <p role="status" aria-live="polite" className={styles.feedback} data-tone={feedback.tone}>
       <b className={styles.feedbackLabel}>{feedback.label}</b>
       <span>{feedback.text}</span>
-      {feedback.code ? <Tech>{feedback.code}</Tech> : null}
       {children ? <span className={styles.feedbackActions}>{children}</span> : null}
     </p>
   );

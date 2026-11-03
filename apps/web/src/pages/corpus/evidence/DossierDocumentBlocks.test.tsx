@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { DossierDocument } from './DossierDocument';
-import { DossierGroup, ReadingIssues, TranscriptGroups } from './DossierDocumentBlocks';
+import { DossierGroup, EmptySpeechNotes, ReadingIssues, TranscriptGroups } from './DossierDocumentBlocks';
 import { parseDossierPayload } from './dossierDecode';
 import { endingGroupAttribution, readingGaps, resolveReadingSections } from './dossierDocumentModel';
 import { dossierJson, dossierMaterialJson } from './evidenceFixtures';
@@ -36,15 +36,16 @@ it('普通三条列表继续是列表，合并段落/列表/表格不丢失 othe
   mount([{ ref: 'table', kind: 'table', columns: ['A'], rows: [['值']], speaker: 'other' }], 'table');
   expect(screen.getByText('他人表述')).toBeVisible();
 });
-it.each(['image', 'audio'] as const)('%s 连续同角色仅首处说明，other→author/unconfirmed 明确重置', kind => {
+it.each(['image', 'audio'] as const)('%s 连续同角色仅首处说明，已知归属重置且未知归属不加解释', kind => {
   const roles = ['other', 'other', 'author', 'author', 'unconfirmed', 'unconfirmed'] as const;
   const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind, blocks: roles.map((speaker, index) => ({ ref: `role-${index}`, kind: 'paragraph', speaker, text: `完整原文 ${index}` })) })] }));
   const groups = resolveReadingSections(payload.dossier)[0]!.groups;
   const view = render(kind === 'audio' ? <TranscriptGroups groups={groups} prefix="roles"/> : <>{groups.map((value, index) => <DossierGroup key={value.group.ref} value={value} prefix="roles" previousRole={endingGroupAttribution(groups[index - 1])}/>)}</>);
-  for (const label of ['他人表述', '作品作者表述', '表达归属未确认']) expect(screen.getAllByText(label)).toHaveLength(1);
+  for (const label of ['他人表述', '作品作者表述']) expect(screen.getAllByText(label)).toHaveLength(1);
   const text = view.container.textContent ?? '';
   expect(text.indexOf('作品作者表述')).toBeLessThan(text.indexOf('完整原文 2'));
-  expect(text.indexOf('表达归属未确认')).toBeLessThan(text.indexOf('完整原文 4'));
+  expect(screen.queryByText('表达归属未确认')).not.toBeInTheDocument();
+  expect(screen.getByText('完整原文 4')).toBeVisible();
   expect(text).not.toMatch(/讲述者|说话人|\d+ 人/);
 });
 it('同一个 blocks 组内及对话之后也重置表达归属', () => {
@@ -58,8 +59,39 @@ it.each([['running', '处理中'], ['failed', '处理失败'], ['cancelled', '�
 });
 it('known_empty 的有效空读本在再次处理失败时继续有效，不误说无读本', () => {
   const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', sourceState: 'known_empty', blocks: [], processing: { state: 'failed', reason: 'retry_failed' } })], coverage: { sources: { body: { state: 'known_empty', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'known_empty', units: 1, readings: 1 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })).dossier;
-  const message = readingGaps(dossier).find(row => row.key === 'processing-audio')?.message;
-  expect(message).toContain('既有已确认无文字的结果仍有效'); expect(message).not.toContain('无当前');
+  expect(readingGaps(dossier).some(row => row.key.includes('audio'))).toBe(false);
+  expect(dossier.materials[0]?.processing?.state).toBe('failed');
+});
+
+
+it('后续空识别状态不否定保留的可用口播', () => {
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', blocks: [{ ref: 'kept-speech', kind: 'paragraph', text: '既有口播' }], processing: { state: 'completed', reason: 'no_speech_observed' } })] })).dossier;
+  const view = render(<EmptySpeechNotes materials={dossier.materials}/>);
+  expect(view.container.textContent).toBe('');
+  expect(dossier.materials[0]?.blocks).toHaveLength(1);
+});
+
+
+it('人工确认无口播的空读本不成为待补项', () => {
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', sourceState: 'present', blocks: [],
+    reading: { generatedBy: 'human_edit', adoption: 'human_edited', verification: 'verified', ruleVersion: 'human.v1', review: null },
+    processing: { state: 'completed', reason: null } })], coverage: { sources: { body: { state: 'not_applicable', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'available', units: 1, readings: 1 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })).dossier;
+  expect(readingGaps(dossier).some(row => row.key === 'audio')).toBe(false);
+});
+
+
+it('结构块的真实时间范围保留毫秒，连续口播保持紧凑起点和精确定位', () => {
+  const dialogue = mount([{ ref: 'timed-dialogue', kind: 'dialogue', turns: [{ speaker: 'other', text: '有来源定位的对话' }], time: { startMs: 100, endMs: 200 } }]);
+  const range = screen.getByText('00:00.100–00:00.200');
+  expect(range).toHaveAttribute('data-time-start-ms', '100');
+  expect(range).toHaveAttribute('data-time-end-ms', '200');
+  dialogue.unmount();
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', blocks: [{ ref: 'precise-speech', kind: 'paragraph', text: '完整的口播', time: { startMs: 173125, endMs: 179250 } }] })] })).dossier;
+  render(<TranscriptGroups groups={resolveReadingSections(dossier)[0]!.groups} prefix="precise"/>);
+  const time = screen.getByText('02:53');
+  expect(time).toHaveAttribute('title', '02:53.125–02:59.250');
+  expect(time).toHaveAttribute('data-time-start-ms', '173125');
+  expect(time).toHaveAttribute('data-time-end-ms', '179250');
 });
 
 it.each(['blocks', 'paragraph'] as const)('在线资料在%s模式保留原文与视觉类型', mode => {

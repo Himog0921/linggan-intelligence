@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { CreatorSelect } from './CreatorSelect';
-import { PAGE_SIZES } from './creatorsQuery';
+import { PAGE_SIZES, formatCount } from './creatorsQuery';
 import styles from './CreatorsPage.module.css';
 
 interface PagerProps {
@@ -14,7 +14,7 @@ interface PagerProps {
   onPageSize: (pageSize: number) => void;
 }
 
-/** 表格下方唯一的一套完整分页：当前页 / 总页数、上一页、下一页、指定页跳转、每页数量。 */
+/** 表格下方唯一的一套完整分页：左侧总数与页序，右侧翻页与每页数量。 */
 export function Pager({ page, pageSize, total, onPage, onPageSize }: PagerProps) {
   const pages = total === null ? 0 : Math.ceil(total / pageSize);
   const [jump, setJump] = useState('');
@@ -42,41 +42,43 @@ export function Pager({ page, pageSize, total, onPage, onPageSize }: PagerProps)
   return (
     <nav className={styles.pagination} aria-label="作者表格分页">
       <span className={styles.pageSummary} aria-live="polite">
-        {total === null ? '' : pages > 0 ? `${page + 1} / ${pages} 页` : '0 页'}
+        {total === null ? '' : pages > 0 ? `共 ${formatCount(total)} 位 · 第 ${page + 1}/${pages} 页` : '共 0 位 · 0 页'}
       </span>
-      <ActionButton className={styles.pageButton} disabled={pages === 0 || page === 0} onClick={() => onPage(page - 1)}>
-        上一页
-      </ActionButton>
-      <ActionButton className={styles.pageButton} disabled={pages === 0 || page + 1 >= pages} onClick={() => onPage(page + 1)}>
-        下一页
-      </ActionButton>
-      <form className={styles.jump} noValidate onSubmit={submit}>
-        <label>
-          第{' '}
-          <input
-            type="number"
-            min={1}
-            max={pages || undefined}
-            step={1}
-            inputMode="numeric"
-            aria-label="跳转页码"
-            aria-invalid={error ? true : undefined}
-            disabled={pages === 0}
-            value={shown}
-            onChange={event => setJump(event.target.value)}
-          />{' '}
-          页
-        </label>
-        <ActionButton type="submit" className={styles.pageButton} disabled={pages === 0}>
-          跳转
+      <div className={styles.pagerControls}>
+        <ActionButton className={styles.pageButton} disabled={pages === 0 || page === 0} onClick={() => onPage(page - 1)}>
+          上一页
         </ActionButton>
-        <span className={styles.jumpError} role="status">
-          {error}
-        </span>
-      </form>
-      <div className={styles.pageSize}>
-        每页 <CreatorSelect label="每页数量" value={String(pageSize)} options={PAGE_SIZES.map(size => ({ value: String(size), label: String(size) }))}
-          onChange={value => onPageSize(Number(value))} />
+        <form className={styles.jump} noValidate onSubmit={submit}>
+          <label>
+            第{' '}
+            <input
+              type="number"
+              min={1}
+              max={pages || undefined}
+              step={1}
+              inputMode="numeric"
+              aria-label="跳转页码"
+              aria-invalid={error ? true : undefined}
+              disabled={pages === 0}
+              value={shown}
+              onChange={event => setJump(event.target.value)}
+            />{' '}
+            页
+          </label>
+          <ActionButton type="submit" className={styles.pageButton} disabled={pages === 0}>
+            跳转
+          </ActionButton>
+          <span className={styles.jumpError} role="status">
+            {error}
+          </span>
+        </form>
+        <ActionButton className={styles.pageButton} disabled={pages === 0 || page + 1 >= pages} onClick={() => onPage(page + 1)}>
+          下一页
+        </ActionButton>
+        <div className={styles.pageSize}>
+          每页 <CreatorSelect label="每页数量" value={String(pageSize)} options={PAGE_SIZES.map(size => ({ value: String(size), label: String(size) }))}
+            onChange={value => onPageSize(Number(value))} />
+        </div>
       </div>
     </nav>
   );

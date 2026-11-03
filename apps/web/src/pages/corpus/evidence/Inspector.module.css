@@ -64,35 +64,6 @@
   color: var(--lgi-on-dark);
 }
 
-.glyph {
-  position: relative;
-  display: block;
-  width: calc(var(--lgi-space-4) + var(--lgi-space-1) / 4);
-  height: calc(var(--lgi-space-3) - var(--lgi-space-1) / 4);
-  border: 1px solid currentColor;
-}
-
-.glyph::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  border-left: 1px solid currentColor;
-}
-
-.glyph[data-width='normal']::after {
-  left: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
-}
-
-.glyph[data-width='wide']::after {
-  left: calc(var(--lgi-space-2) - var(--lgi-space-1) / 2);
-}
-
-.glyph[data-width='focus']::after {
-  left: calc(var(--lgi-space-1) * 0.75);
-}
-
 .close {
   display: grid;
   place-items: center;
@@ -219,6 +190,87 @@
   margin-top: var(--lgi-space-2);
   color: var(--lgi-muted);
   font-size: var(--lgi-text-data);
+}
+
+/* ── 采集详情：文末轻贴纸入口 ───────────────── */
+.collectionDetails {
+  margin: var(--lgi-space-4) 0 0;
+  padding-top: var(--lgi-space-2);
+  border-top: 1px solid var(--lgi-hairline);
+  color: var(--lgi-muted);
+  font: var(--lgi-type-aux-size) / 1.6 var(--lgi-font-ui);
+}
+
+.collectionDetails > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  width: fit-content;
+  max-width: 100%;
+  cursor: pointer;
+  color: var(--lgi-muted);
+  list-style: none;
+}
+
+.collectionDetails > summary::-webkit-details-marker {
+  display: none;
+}
+
+.collectionDetails > summary::after {
+  content: '+';
+  font-family: var(--lgi-font-data);
+}
+
+.collectionDetails[open] > summary::after {
+  content: '−';
+}
+
+.collectionDetails > summary:hover::after {
+  color: var(--lgi-ink);
+}
+
+.collectionDetails > summary:focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: var(--lgi-space-1);
+}
+
+.detailFacts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--lgi-space-1) var(--lgi-space-3);
+  margin: var(--lgi-space-2) 0 0;
+  font-size: var(--lgi-type-aux-size);
+  line-height: 1.6;
+}
+
+.detailFacts dt {
+  color: var(--lgi-muted);
+}
+
+.detailFacts dd {
+  min-width: 0;
+  margin: 0;
+  color: var(--lgi-body);
+  overflow-wrap: anywhere;
+}
+
+.detailFacts a {
+  color: var(--lgi-info);
+  text-underline-offset: var(--lgi-space-1);
+}
+
+.detailFacts a:focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: var(--lgi-space-1);
+}
+
+.detailRefs > span + span::before {
+  content: '；';
+  color: var(--lgi-muted);
+}
+
+.detailRefs code {
+  overflow-wrap: anywhere;
 }
 
 /* ── 技术事实折叠区 ─────────────────────────── */
@@ -425,3 +477,36 @@
   flex-wrap:wrap;color:var(--lgi-muted);
   font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-ui); }
 .commentSummary strong { color:var(--lgi-ink);font-family:var(--lgi-font-data);font-variant-numeric:tabular-nums; }
+
+/* Standard-column continuous reading, local page exception. */
+.inspector { container-type:inline-size; }
+.head { padding:var(--lgi-space-2) var(--lgi-space-5) 0; }
+.tools { min-height:var(--lgi-space-8); }
+.workSummary { margin:var(--lgi-space-2) 0; }
+.workTitle { white-space:normal;overflow:visible;text-overflow:clip;font:600 var(--lgi-type-section-size)/calc(var(--lgi-space-6) + var(--lgi-space-1) / 2) var(--lgi-font-ui);overflow-wrap:anywhere; }
+.workByline { margin-top:var(--lgi-space-1);gap:var(--lgi-space-2);font:var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-ui); }
+.workByline strong { font-size:var(--lgi-type-label-size);line-height:var(--lgi-type-label-leading); }
+.workSummary > :last-child { margin-top:var(--lgi-space-1);font-size:var(--lgi-type-label-size);line-height:var(--lgi-type-label-leading); }
+.tabs { margin:var(--lgi-space-2) calc(-1 * var(--lgi-space-5)) 0; }
+.tabs button { min-height:var(--lgi-space-8); }
+.readingBody { --ev-reading-font:-apple-system,BlinkMacSystemFont,"PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif;
+  --ev-reading-size:13.5px;--ev-reading-leading:1.8;--ev-category-size:13px;--ev-category-leading:20px;
+  --ev-reading-heading-size:15px;--ev-reading-heading-leading:24px; }
+@container(min-width:601px) { .readingBody { --ev-reading-size:14px;--ev-reading-leading:1.75; } }
+.openOriginal { height:var(--lgi-space-8);min-height:var(--lgi-space-8);font-size:var(--lgi-type-label-size);box-shadow:none; }
+/* Desktop tool row: the same 32px frame as the width group and close button. */
+.openOriginalTool { height:var(--lgi-space-8);min-height:var(--lgi-space-8);padding:0 var(--lgi-space-3);font-size:var(--lgi-type-control-size);box-shadow:none; }
+
+.workByline [role='img'] { width:var(--lgi-space-6);height:var(--lgi-space-6); }
+.workPlatform { font-size:var(--lgi-type-label-size);line-height:var(--lgi-type-label-leading); }
+
+/* One stationary shared header; each tab owns only its body scroll. */
+.inspector { overflow:hidden; }
+.head { flex:none; }
+.body { flex:1;min-height:0;overflow:auto; }
+
+/* Object status is distinct from the tab's selection underline. */
+.tabStatus { display:inline-flex;align-items:center;gap:var(--lgi-space-1);margin-left:var(--lgi-space-1);font:var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui);color:var(--lgi-muted);white-space:nowrap; }
+.tabStatus::before { content:'';width:var(--lgi-space-1);height:var(--lgi-space-1);background:currentColor; }
+.tabStatus[data-tone='warning'] { color:var(--lgi-warning); }
+.tabStatus[data-tone='danger'] { color:var(--lgi-danger); }

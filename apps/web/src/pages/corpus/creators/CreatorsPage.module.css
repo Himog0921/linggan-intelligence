@@ -4,8 +4,9 @@
 
 .page {
   --creator-text: var(--lgi-type-body-size);
-  --creator-control: calc(var(--lgi-space-10) + var(--lgi-space-1));
-  --creator-row: calc(var(--lgi-space-10) * 2);
+  --creator-control: var(--lgi-space-10);
+  /* 单行表格：64px 行高，头像 32、作品缩图 32×42。 */
+  --creator-row: var(--lgi-space-16);
   container-type: inline-size;
   display: flex;
   flex-direction: column;
@@ -16,6 +17,22 @@
   padding: var(--lgi-space-5) var(--lgi-space-6) 0;
   color: var(--lgi-ink);
   font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+/* 非模态检查器打开时，列表和检查器并排；左表自己横向滚动，不让右区盖住列或分页。 */
+.workspace {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
 }
 
 .page :where(button:not([data-action-button]), input, select) {
@@ -165,18 +182,19 @@
   font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-sans);
   white-space: nowrap;
 }
-
-.page .quick button[aria-pressed='true'] {
-  color: var(--lgi-ink);
-  font-weight: var(--lgi-weight-semibold);
-}
-
+.quickLabel { position:relative; z-index:1; }
+/* 手绘线只留在面包屑；快捷视图的当前项恢复常规 2px 直短线。 */
 .page .quick button[aria-pressed='true']::after {
   content: '';
   position: absolute;
   inset: auto 0 0;
-  height: calc(var(--lgi-space-1) / 2);
+  height: var(--lgi-action-rail-width);
   background: var(--lgi-signal);
+}
+
+.page .quick button[aria-pressed='true'] {
+  color: var(--lgi-ink);
+  font-weight: var(--lgi-weight-semibold);
 }
 
 .analysisButton {
@@ -286,45 +304,29 @@
 
 .table {
   width: 100%;
-  min-width: calc(var(--lgi-space-24) * 12);
+  /* 九列基准宽 1242：检查器打开后左表短横向滚动，不挤压数字或让日期断行。 */
+  min-width: calc(var(--lgi-space-24) * 13 - var(--lgi-space-2) + var(--lgi-action-rail-width));
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
 }
 
-.colAuthor {
-  width: calc(var(--lgi-space-24) * 2 + var(--lgi-space-4));
-}
-
-.colKeyword {
-  width: calc(var(--lgi-space-24) + var(--lgi-space-6));
-}
-
-.colDirection {
-  width: calc(var(--lgi-space-16) * 2);
-}
-
-.colFirstSeen {
-  width: calc(var(--lgi-space-24) + var(--lgi-space-4));
-}
-
-.colCount {
-  width: calc(var(--lgi-space-16) + var(--lgi-space-6));
-}
-
-.colLikes {
-  width: calc(var(--lgi-space-24) + var(--lgi-space-1));
-}
-
-.colObservation {
-  width: calc(var(--lgi-space-16) * 2 + var(--lgi-space-2));
-}
+/* 列宽是这一版页面的局部参数，不是全站 Token；长名字、长发现词要用真实内容复核。 */
+.colAuthor { width: calc(var(--lgi-space-24) * 2 + var(--lgi-space-5)); }
+.colFollowers { width: var(--lgi-space-24); }
+.colKeyword { width: calc(var(--lgi-space-24) + var(--lgi-space-4)); }
+.colDirection { width: calc(var(--lgi-space-24) + var(--lgi-space-8)); }
+.colRelated { width: calc(var(--lgi-space-16) + var(--lgi-space-4)); }
+.colLikes { width: var(--lgi-space-24); }
+.colWork { min-width: calc(var(--lgi-space-24) * 3 - var(--lgi-space-2)); }
+.colFirstSeen { width: calc(var(--lgi-space-24) + var(--lgi-space-4)); }
+.colObservation { width: calc(var(--lgi-space-24) + var(--lgi-space-8) - var(--lgi-action-rail-width)); }
 
 .table th {
   position: sticky;
   top: 0;
   z-index: var(--lgi-z-stage);
-  height: var(--lgi-space-10);
+  height: calc(var(--lgi-space-8) + var(--lgi-space-1));
   border-bottom: 1px solid var(--lgi-border);
   padding: 0 var(--lgi-space-3);
   background: var(--lgi-canvas);
@@ -343,25 +345,62 @@
   white-space: nowrap;
 }
 
+/* 数值列头右对齐；排序箭头占固定槽，排序前后数字位置不跳。 */
+.table th.number {
+  text-align: right;
+}
+
+.table th.number button::before {
+  content: '↓';
+  display: inline-block;
+  width: calc(var(--lgi-type-label-size) * 1);
+  visibility: hidden;
+}
+
+.table th.number[aria-sort='descending'] button::before {
+  color: var(--lgi-signal-ink);
+  visibility: visible;
+}
+
 .table th[aria-sort='descending'] button::after {
   content: ' ↓';
   color: var(--lgi-signal-ink);
 }
 
+.table th.number[aria-sort='descending'] button::after {
+  content: none;
+}
+
+.headInfoWrap {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lgi-space-1);
+}
+
+.headInfo {
+  display: inline-grid;
+  place-items: center;
+  width: var(--lgi-space-4);
+  height: var(--lgi-space-4);
+  color: var(--lgi-ghost);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size)/1 var(--lgi-font-sans);
+  cursor: help;
+}
+
+/* 视觉问号不进入列头的可读名称；完整说明由提示承载。 */
+.headInfo::before {
+  content: '?';
+}
+
 .table td {
-  box-sizing:border-box;
-  height:var(--creator-row);
+  box-sizing: border-box;
+  height: var(--creator-row);
   overflow: hidden;
   border-bottom: 1px solid var(--lgi-hairline);
-  padding:var(--lgi-space-2) var(--lgi-space-3);
+  padding: 0 var(--lgi-space-3);
   background: var(--lgi-canvas);
   font-size: var(--creator-text);
   vertical-align: middle;
-}
-
-.table th:nth-child(n + 7),
-.table td:nth-child(n + 7) {
-  padding-left: var(--lgi-space-5);
 }
 
 .table :is(th, td):first-child {
@@ -378,11 +417,11 @@
   background: var(--lgi-canvas-low);
 }
 
-.table tr[data-selected='true'] td {
-  background: var(--lgi-signal-faint);
+.table tr[data-open='true'] td {
+  background: var(--lgi-canvas-low);
 }
 
-.table tr[data-selected='true'] td:first-child {
+.table tr[data-open='true'] td:first-child {
   box-shadow: inset 2px 0 var(--lgi-signal);
 }
 
@@ -393,7 +432,7 @@
 
 .cell {
   min-width: 0;
-  max-height: calc(var(--lgi-space-16) - var(--lgi-space-1));
+  max-height: calc(var(--lgi-space-10) + var(--lgi-space-4));
   overflow: hidden;
 }
 
@@ -408,6 +447,70 @@
   align-items: center;
   gap: var(--lgi-space-2);
   min-width: 0;
+}
+
+.workTitle {
+  display: block;
+  flex: 1;
+  overflow: hidden;
+  color: var(--lgi-ink);
+  font-size: var(--lgi-type-control-size);
+  line-height: calc(var(--lgi-type-label-size) * 1.5);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 作品预览：应用层 portal，避开表格裁切；靠视口边缘换向。 */
+.workPopover {
+  position: fixed;
+  z-index: var(--lgi-z-popover);
+  display: flex;
+  gap: var(--lgi-space-3);
+  box-sizing: border-box;
+  width: calc(var(--lgi-space-24) * 3 + var(--lgi-space-8));
+  border: 1px solid var(--lgi-ink);
+  padding: var(--lgi-space-3);
+  background: var(--lgi-canvas);
+  box-shadow: var(--lgi-shadow-brutal);
+  color: var(--lgi-ink);
+  font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+.popoverCover {
+  display: flex;
+  position: relative;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: calc(var(--lgi-space-24) - var(--lgi-space-4));
+  height: calc(var(--lgi-space-24) + var(--lgi-space-3));
+  overflow: hidden;
+  background: var(--lgi-canvas-sunken);
+  color: var(--lgi-ghost);
+  font-size: var(--lgi-type-label-size);
+}
+
+.popoverCover .mediaImage {
+  object-fit: contain;
+}
+
+.popoverCopy {
+  min-width: 0;
+  font-size: var(--lgi-type-label-size);
+}
+
+.popoverTitle {
+  margin: 0 0 var(--lgi-space-2);
+  font-size: var(--lgi-text-body);
+  font-weight: var(--lgi-weight-semibold);
+  line-height: var(--lgi-space-5);
+  overflow-wrap: anywhere;
+}
+
+.popoverMeta {
+  margin: 0 0 var(--lgi-space-2);
+  color: var(--lgi-muted);
 }
 
 .avatar {
@@ -429,15 +532,15 @@
   height: var(--creator-control);
 }
 
-/* 封面按 3:4 完整显示（contain），不裁切；放不下的部分留白而不是切掉。 */
+/* 封面按 3:4 完整显示（contain），不裁切；列表内是 32×42 缩图。 */
 .cover {
   display: flex;
   position: relative;
   flex: none;
   align-items: center;
   justify-content: center;
-  width: calc(var(--creator-control) * 0.75);
-  height: var(--creator-control);
+  width: var(--lgi-space-8);
+  height: calc(var(--lgi-space-10) + var(--lgi-space-1) / 2);
   aspect-ratio: 3 / 4;
   overflow: hidden;
   background:var(--lgi-canvas);
@@ -483,8 +586,14 @@
 }
 
 .page .name {
-  font-size: var(--lgi-text-body);
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  font-size: var(--lgi-type-control-size);
   font-weight: var(--lgi-weight-semibold);
+  line-height: calc(var(--lgi-type-label-size) * 1.5);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .ellipsis {
@@ -555,9 +664,9 @@
 
 .clamp {
   display: -webkit-box;
-  max-height: var(--lgi-space-10);
+  max-height: calc(var(--lgi-space-8) + var(--lgi-space-1));
   overflow: hidden;
-  line-height: var(--lgi-space-5);
+  line-height: calc(var(--lgi-type-label-size) * 1.5);
   overflow-wrap: anywhere;
   word-break: normal;
   -webkit-box-orient: vertical;
@@ -570,9 +679,92 @@
   margin-top: calc(var(--lgi-space-1) / 4);
   overflow: hidden;
   color: var(--lgi-muted);
-  font:var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-sans);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size)/var(--lgi-space-4) var(--lgi-font-sans);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.nowrap {
+  display: block;
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  line-height: calc(var(--lgi-type-label-size) * 1.5);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topicTags {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: var(--lgi-space-1);
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.topicTag {
+  flex: none;
+  border: 1px solid var(--lgi-hairline);
+  padding: 0 var(--lgi-space-1);
+  color: var(--lgi-body);
+  font-size: var(--lgi-type-label-size);
+  line-height: calc(var(--lgi-type-label-size) * 1.5);
+  white-space: nowrap;
+}
+
+.topicMoreText {
+  flex: none;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+  line-height: calc(var(--lgi-type-label-size) * 1.5);
+  white-space: nowrap;
+}
+
+/* 观察格只有一个入口：已观察去目标，未加入打开目标设置。 */
+.rowAction {
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* 状态操作统一为 32px 白底细墨边次级按钮；链接仍保留跳转语义，不用朱红实底。 */
+.page .rowAction :is(button, a) {
+  box-sizing: border-box;
+  display: inline-block;
+  flex: 0 1 auto;
+  max-width: 100%;
+  height: var(--lgi-space-8);
+  overflow: hidden;
+  border: var(--lgi-action-border-width) solid var(--lgi-border-strong);
+  padding: 0 var(--lgi-space-2);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font-family: var(--lgi-font-sans);
+  font-size: var(--lgi-type-control-size);
+  font-weight: var(--lgi-weight-regular);
+  line-height: calc(var(--lgi-space-8) - var(--lgi-action-border-width) - var(--lgi-action-border-width));
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.page .rowAction :is(button, a):not(:disabled):hover {
+  border-color: var(--lgi-ink);
+  background: var(--lgi-canvas-low);
+}
+
+.page .rowAction :is(button, a):focus-visible {
+  outline: var(--lgi-action-rail-width) solid var(--lgi-action-focus);
+  /* 单元格宽度紧，外扩焦点框会被裁切；改为内收，键盘焦点仍清楚可见。 */
+  outline-offset: calc(-1 * var(--lgi-action-rail-width));
+}
+
+.page .rowAction button:disabled {
+  border-color: var(--lgi-border);
+  color: var(--lgi-muted);
+  cursor: not-allowed;
 }
 
 .metric {
@@ -600,23 +792,6 @@
   flex: none;
   color: var(--lgi-muted);
   font-size: var(--lgi-text-label);
-}
-
-.rowAction {
-  margin-top: var(--lgi-space-1);
-  overflow: hidden;
-  line-height: calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.page .rowAction button {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--lgi-focus);
-  font-size: var(--lgi-text-data);
-  font-weight: var(--lgi-weight-regular);
 }
 
 /* 分析状态：文字之外加一个小色点，在路上 / 需要处理 / 依据不足各有各的颜色，但颜色不是唯一的载体。 */
@@ -673,15 +848,21 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: var(--lgi-space-2);
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
   min-height: calc(var(--lgi-space-12) + var(--lgi-space-1));
   border-top: 1px solid var(--lgi-ink);
   background: var(--lgi-canvas);
   font-size: var(--lgi-text-data);
 }
 
+.pagerControls {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-2);
+}
+
 .pageSummary {
-  margin-right: var(--lgi-space-3);
   font-variant-numeric: tabular-nums;
 }
 
@@ -691,11 +872,17 @@
   font-size: var(--lgi-text-data);
 }
 
+/* 边界禁用要能看见，不只靠很淡的颜色。 */
+.pagination button:disabled {
+  border-color: var(--lgi-border);
+  background: var(--lgi-canvas-sunken);
+  color: var(--lgi-body);
+}
+
 .jump {
   display: flex;
   align-items: center;
   gap: var(--lgi-space-1);
-  margin-left: auto;
 }
 
 .jump input {
@@ -726,7 +913,7 @@
   .analysisButton { margin-left:auto; }
 }
 @container (min-width:600px) {
-  .table :is(th,td):last-child { position:sticky; right:0; z-index:var(--lgi-z-stage); border-left:1px solid var(--lgi-hairline); }
+  .table :is(th,td):last-child { position:sticky; right:0; z-index:var(--lgi-z-stage); }
   .table th:last-child { z-index:var(--lgi-z-sticky); }
 }
 @container (max-width:600px) {
@@ -779,11 +966,11 @@
 .scopeTools {gap:var(--lgi-space-1)}
 .table tbody tr {height:var(--creator-row)}
 .table tbody td {height:var(--creator-row);vertical-align:middle}
-.table .cell {min-height:0;max-height:calc(var(--lgi-space-16) - var(--lgi-space-1));align-content:center}
+.table .cell {min-height:0;max-height:calc(var(--lgi-space-10) + var(--lgi-space-4));align-content:center}
 .table .cellCopy {align-self:center}
 .table .number .cell {text-align:right}
 .table .ellipsis {white-space:nowrap;text-overflow:ellipsis}
-.table .clamp {max-height:var(--lgi-space-10);-webkit-line-clamp:2}
+.table .clamp {max-height:calc(var(--lgi-space-8) + var(--lgi-space-1));-webkit-line-clamp:2}
 @container (max-width:1000px) {
   .toolbar {flex-wrap:wrap}
   .toolbar .search {flex:1 1 calc(var(--lgi-space-24)*3);min-width:0}

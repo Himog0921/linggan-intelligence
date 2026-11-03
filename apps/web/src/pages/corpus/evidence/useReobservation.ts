@@ -19,6 +19,8 @@ export interface Reobservation {
   queued: boolean;
   /** 只由用户的明确确认调用；从不自动重试。 */
   submit: () => void;
+  /** 状态读取失败后重新发起读取；不清掉已知任务。 */
+  retryStatus: () => void;
 }
 
 interface Options {
@@ -26,6 +28,8 @@ interface Options {
   actionPath: string | null;
   /** 全部任务进入终态：重读作品当前事实。返回 false 表示重读失败。 */
   onTerminal: () => Promise<boolean>;
+  /** 每次提交得到结论时调用一次；普通层据此发一条轻通知，不随轮询或重绘重复。 */
+  onReceipt?: (result: Feedback) => void;
 }
 
 /**
@@ -35,19 +39,20 @@ interface Options {
  * 同一范围若已有未被认领的工单则合并，一旦被认领再点会新建一张——所以未确认之后不自动重发。
  * 当前后端在创建请求时从不返回租约（statusUrl 恒为 null），轮询分支在真实链路上走不到；这里保留并用合成回执测试。
  */
-export function useReobservation({ actionPath, onTerminal }: Options): Reobservation {
+export function useReobservation({ actionPath, onTerminal, onReceipt }: Options): Reobservation {
   const [sending, setSending] = useState(false);
   const [operation, setOperation] = useState<ReobservationOperation | null>(null);
   const [statusPath, setStatusPath] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [readError, setReadError] = useState<unknown>(null);
   const [pollError, setPollError] = useState<unknown>(null);
+  const [pollTick, setPollTick] = useState(0);
   const inFlight = useRef(false);
   const controller = useRef<AbortController | null>(null);
   const terminalHandled = useRef<ReobservationOperation | null>(null);
-  const latest = useRef({ onTerminal });
+  const latest = useRef({ onTerminal, onReceipt });
   useEffect(() => {
-    latest.current = { onTerminal };
+    latest.current = { onTerminal, onReceipt };
   });
 
   useEffect(() => {
@@ -88,7 +93,7 @@ export function useReobservation({ actionPath, onTerminal }: Options): Reobserva
       window.clearTimeout(timer);
       abort.abort();
     };
-  }, [statusPath, operation, tasks.length, settled]);
+  }, [statusPath, operation, tasks.length, settled, pollTick]);
 
   function submit() {
     if (actionPath === null || queued || inFlight.current) return;
@@ -105,12 +110,16 @@ export function useReobservation({ actionPath, onTerminal }: Options): Reobserva
         if (abort.signal.aborted) return;
         setOperation(receipt.operation);
         setStatusPath(receipt.statusPath);
-        setFeedback(reobservationReceipt(receipt.operation));
+        const result = reobservationReceipt(receipt.operation);
+        setFeedback(result);
+        latest.current.onReceipt?.(result);
       },
       (error: unknown) => {
         // 换作品或卸载时取消：服务器可能已经处理，所以不显示「已取消」。
         if (abort.signal.aborted) return;
-        setFeedback(reobservationFailure(error));
+        const result = reobservationFailure(error);
+        setFeedback(result);
+        latest.current.onReceipt?.(result);
       },
     ).finally(() => {
       inFlight.current = false;
@@ -118,5 +127,10 @@ export function useReobservation({ actionPath, onTerminal }: Options): Reobserva
     });
   }
 
-  return { sending, operation, feedback, readError, pollError, queued, submit };
+  function retryStatus() {
+    setPollError(null);
+    setPollTick(value => value + 1);
+  }
+
+  return { sending, operation, feedback, readError, pollError, queued, submit, retryStatus };
 }

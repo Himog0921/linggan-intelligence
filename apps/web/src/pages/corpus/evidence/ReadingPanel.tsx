@@ -4,10 +4,10 @@ import { dossierKey } from './evidenceKeys';
 import { DossierReading } from './DossierReading';
 import { hideCachedReading } from './dossierPresent';
 import { DossierComments } from './DossierComments';
-import { InlineState, Section, SourceNote, StateLine } from './Primitives';
+import { Section, SourceNote, StateLine } from './Primitives';
 import { MediaRail } from './MediaRail';
 import { OcrRecognition } from './OcrRecognition';
-import { laneSummary, metricReading } from './evidencePresent';
+import { laneSummary, metricReading, workTitle } from './evidencePresent';
 import { mediaObjects } from './mediaObjects';
 import { mediaReadingLabels } from './mediaReadingPresent';
 import type { Channels, Inspector, WorkItem } from './evidenceTypes';
@@ -36,9 +36,9 @@ export function ReadingPanel({ context, domain, active }: { context: PanelContex
       {reading.isPending ? <p role="status">正在读取正文…</p> : reading.isError && !dossier ? <p role="status">正文读本暂不可读。<button type="button" onClick={() => void reading.refetch()}>重试读取</button></p> : dossier ? <DossierReading dossier={dossier} titleRendered /> : <SourceNote>暂无可读文字。</SourceNote>}
       {reading.isError && dossier ? <p role="status">刷新未完成，保留上次读到的正文版本。</p> : null}
     </section>
-    <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} active={active} readingRevision={dossier?.materialRevision} mediaTitle={mediaLabels.mediaTitle} onApplied={() => void reading.refetch()}>
+    <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} workLabel={workTitle(item)} active={active} readingRevision={dossier?.materialRevision} mediaTitle={mediaLabels.mediaTitle} onApplied={() => void reading.refetch()}>
       {objects.length > 0 ? <MediaRail objects={objects} onOpen={onOpenViewer} />
-        : <InlineState tone="warning" title="当前没有可预览的本地媒体对象">没有可内联显示的媒体副本，不代表原作品没有媒体。</InlineState>}
+        : <SourceNote>暂无可内联显示的本地媒体副本，不代表原作品没有媒体。</SourceNote>}
       <div className={styles.gaps}>
         <span>图片文字</span><StateLine state={ocr} />
         {mediaLabels.transcriptLabel ? <><span>{mediaLabels.transcriptLabel}</span><StateLine state={asr} /></> : null}

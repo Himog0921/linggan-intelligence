@@ -15267,5 +15267,65 @@
       "ALIGN-NAV-003"
     ],
     "noBusinessRequests": true
-  }
+  },
+  "designAssets": [
+    {
+      "id": "ICON-B-001",
+      "name": "B 精简版图标资产",
+      "kind": "design_asset",
+      "implementation": "apps/web/src/shared/IntelligenceIcon.tsx",
+      "styles": "apps/web/src/shared/IntelligenceIcon.css",
+      "tests": [
+        "apps/web/src/shared/IntelligenceIcon.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "evidence",
+        "comments",
+        "creators",
+        "sidebar-close",
+        "sidebar-open",
+        "clock",
+        "info",
+        "check",
+        "chevron",
+        "refresh",
+        "download",
+        "copy",
+        "expand",
+        "close",
+        "normal",
+        "wide",
+        "focus"
+      ],
+      "states": [
+        "idle",
+        "pointer_hover",
+        "keyboard_focus",
+        "expanded",
+        "disabled",
+        "reduced_motion"
+      ],
+      "owns": [
+        "本地SVG几何、统一线宽与两层结构",
+        "有限反馈与减少动态效果",
+        "装饰图形不占读屏名称"
+      ],
+      "excludes": [
+        "按钮资格与点击命令",
+        "业务执行进度、成功回执和权限",
+        "将所有LIDS组件宣布CMP认证"
+      ],
+      "ruleSources": [
+        "iconography",
+        "color"
+      ],
+      "consumers": [
+        "apps/web/src/shared/Sidebar.tsx",
+        "apps/web/src/pages/corpus/evidence/DossierIcon.tsx",
+        "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx"
+      ],
+      "certified": false
+    }
+  ]
 }

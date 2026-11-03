@@ -17,6 +17,7 @@ mod reading;
 mod render;
 mod selection;
 pub use reading::ordered_refs;
+pub(crate) use reading::unit_text;
 pub use render::{context_sources, markdown, render_materials};
 pub use selection::{Selection, segment, select};
 

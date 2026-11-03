@@ -7,6 +7,7 @@ import { ApiError } from '../../../shared/api';
 import { dossierExport, dossierMarkdownExport, downloadFile, type DossierFile } from './exportDossier';
 import type { DossierPayload } from './dossierTypes';
 import { DossierIcon } from './DossierIcon';
+import { useToast } from './toastContext';
 import styles from './DossierDocument.module.css';
 
 function escapeMarkup(text: string): string { return text.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character); }
@@ -42,7 +43,9 @@ export function DossierExportDialog({ payload, domain, onClose, onUnavailable }:
   const [previewMode, setPreviewMode] = useState<'rendered' | 'source'>('rendered');
   const [markdown, setMarkdown] = useState<MarkdownState>({ state: 'loading' });
   const [attempt, setAttempt] = useState(0);
-  const [feedback, setFeedback] = useState('');
+  const toast = useToast();
+  const noticeKey = `${snapshot.payload.dossier.workRef}:export`;
+  const workLabel = snapshot.payload.dossier.note.displayTitle ?? undefined;
   useEffect(() => {
     const controller = new AbortController();
     void dossierMarkdownExport(snapshot.payload, snapshot.domain, controller.signal).then(file => {
@@ -62,7 +65,7 @@ export function DossierExportDialog({ payload, domain, onClose, onUnavailable }:
   return <ModalDialog labelledBy={titleId} className={`${styles.surface} ${styles.dialog} ${styles.exportDialog}`} onClose={onClose} closeOnBackdrop>
     <header className={styles.modalHeader}><div><h2 id={titleId}>导出研究底稿</h2><p>与当前阅读版本一致</p></div><button type="button" className={styles.close} aria-label="关闭导出窗口" onClick={onClose}><DossierIcon name="close"/></button></header>
     <div className={styles.exportSettings}>
-      <div className={styles.formatTabs} aria-label="导出格式"><button type="button" aria-pressed={format === 'md'} onClick={() => { setFormat('md'); setFeedback(''); }}>Markdown</button><button type="button" aria-pressed={format === 'json'} onClick={() => { setFormat('json'); setFeedback(''); }}>JSON</button></div>
+      <div className={styles.formatTabs} aria-label="导出格式"><button type="button" aria-pressed={format === 'md'} onClick={() => setFormat('md')}>Markdown</button><button type="button" aria-pressed={format === 'json'} onClick={() => setFormat('json')}>JSON</button></div>
       <div className={styles.displayActions}><span className={styles.formatHint}>{format === 'md' ? '阅读与 AI 对话' : '程序与 Agent 读取'}</span>{format === 'md' ? <div className={styles.previewMode} aria-label="Markdown 预览方式"><button type="button" aria-pressed={previewMode === 'rendered'} onClick={() => setPreviewMode('rendered')}>排版</button><button type="button" aria-pressed={previewMode === 'source'} onClick={() => setPreviewMode('source')}>源码</button></div> : null}</div>
     </div>
     <p className={styles.exportScope}>导出当前快照的全部内容，并保留真实缺口；不受当前阅读位置影响。</p>
@@ -72,9 +75,11 @@ export function DossierExportDialog({ payload, domain, onClose, onUnavailable }:
           : format === 'md' && previewMode === 'rendered' ? <article className={styles.markdown} tabIndex={0} aria-label="Markdown 排版预览" dangerouslySetInnerHTML={{ __html: html }}/>
             : <pre className={styles.source} tabIndex={0} aria-label={format === 'md' ? 'Markdown 源码' : 'JSON 源码'}>{file.data}</pre>}
     </div>
-    <footer className={styles.modalFooter}><div className={styles.fileInfo}>{file ? `${file.name} · ${(bytes / 1024).toFixed(1)} KB` : '当前版本尚未准备完成'}<p className={styles.feedback} role="status">{feedback}</p></div><div className={styles.actions}>
-      <ActionButton className={styles.control} disabled={!file} onClick={() => { if (file) void copyFile(file.data).then(ok => setFeedback(ok ? '已复制完整底稿' : '复制未完成，请使用下载文件。')); }}><DossierIcon name="copy"/>复制内容</ActionButton>
-      <ActionButton className={`${styles.control} ${styles.primary}`} disabled={!file} onClick={() => { if (file) { downloadFile(file); setFeedback('文件已准备，请查看浏览器下载。'); } }}><DossierIcon name="download"/>下载 .{format}</ActionButton>
+    <footer className={styles.modalFooter}><div className={styles.fileInfo}>{file ? `${file.name} · ${(bytes / 1024).toFixed(1)} KB` : '当前版本尚未准备完成'}</div><div className={styles.actions}>
+      <ActionButton className={styles.control} disabled={!file} onClick={() => { if (!file) return; void copyFile(file.data).then(ok => ok
+        ? toast.notify({ key: noticeKey, tone: 'success', text: '已复制完整底稿', context: workLabel })
+        : toast.notify({ key: noticeKey, tone: 'error', text: '复制未完成，请使用下载文件。', context: workLabel })); }}><DossierIcon name="copy"/>复制内容</ActionButton>
+      <ActionButton className={`${styles.control} ${styles.primary}`} disabled={!file} onClick={() => { if (!file) return; downloadFile(file); toast.notify({ key: noticeKey, tone: 'success', text: '文件已准备，请查看浏览器下载', context: workLabel }); }}><DossierIcon name="download"/>下载 .{format}</ActionButton>
     </div></footer>
   </ModalDialog>;
 }
