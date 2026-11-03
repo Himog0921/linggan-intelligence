@@ -132,3 +132,14 @@ it('同图多个区域只保留一个核对入口，展开后保留疑点位置'
   expect(screen.getByText('左栏：末字模糊')).toBeVisible();
   expect(screen.getByText('右栏：数值模糊')).toBeVisible();
 });
+
+it('口播段落的具体疑点默认收起并可展开核对', () => {
+  const issue = { key: 'unclear-number', code: 'glyph', message: '第二句数字需核对', resolution: 'reading_edit' };
+  const raw = dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', blocks: [{ ref: 'speech', kind: 'paragraph', text: '练习持续十五分钟。', issues: [issue] }], issues: [issue] })] });
+  raw.dossier.readingView.sections[0]!.groups[0]!.mode = 'transcript_paragraph';
+  const groups = resolveReadingSections(parseDossierPayload(raw).dossier)[0]!.groups;
+  render(<TranscriptGroups groups={groups} prefix="audio-review"/>);
+  expect(screen.getByText(issue.message)).not.toBeVisible();
+  fireEvent.click(screen.getByText(/^核对说明/));
+  expect(screen.getByText(issue.message)).toBeVisible();
+});

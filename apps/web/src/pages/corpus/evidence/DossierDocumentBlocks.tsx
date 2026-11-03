@@ -97,6 +97,7 @@ export function TranscriptParagraph({ value, prefix, showRole }: { value: Resolv
       {showRole ? <span className={styles.attribution}>{ROLE_LABELS[role]}</span> : null}
       {value.group.continuation.fromPrevious ? <Continuation from/> : null}
       <p className={styles.transcriptText} data-speaker={role}><ReadingText text={groupText(value)}/></p>
+      <ReadingIssues issues={value.issues}/>
       {value.group.continuation.toNext ? <Continuation from={false}/> : null}
     </div>
   </div>;
