@@ -1173,3 +1173,322 @@ async fn ocr_readiness_reports_only_latest_current_model_probe_diagnostics() {
     );
     wire.finish().await;
 }
+
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL, synthetic images and loopback Pi only"]
+async fn identical_image_bytes_share_one_invocation_but_keep_every_slot_reading() {
+    use serde_json::json;
+    use sqlx::Row;
+    let db = fixture::db("ocr_same_bytes_aliases").await;
+    let bytes = image(81);
+    let unknown_key = "ocr-unknown-cover-aliases";
+    let unknown =
+        ocr::admit_with_slot_role(&db, unknown_key, 1, &bytes, "image/png", "cover").await;
+    ocr::admit(&db, unknown_key, 2, &bytes, "image/png").await;
+    ocr::admit(&db, unknown_key, 3, &bytes, "image/png").await;
+    let known_key = "ocr-known-page-aliases";
+    let known = ocr::admit_known_pages(&db, known_key, 3, &bytes, "image/png").await;
+    let wire = endpoint::Endpoint::start(false).await;
+    let adapter = adapter();
+    let owner = ExecutorSession::acquire(&db, "synthetic-alias-readings", 4)
+        .await
+        .unwrap();
+    configure_recognition(&db, &wire.url, &owner, &adapter).await;
+    for (work, known_order) in [(unknown, false), (known, true)] {
+        let ready = read_run(&db, work).await.unwrap();
+        assert_eq!(
+            ready["scope"]["imageCount"], 1,
+            "three occurrences of identical bytes need one request"
+        );
+        assert_eq!(
+            ready["scope"]["images"][0]["ordinal"],
+            if known_order { json!(1) } else { json!(null) }
+        );
+        start_run(
+            &db,
+            work,
+            &StartRun {
+                command_ref: Uuid::new_v4(),
+                expected_scope_sha256: ready["scope"]["sha256"].as_str().unwrap().into(),
+                slot_keys: selected_slots(&ready),
+            },
+        )
+        .await
+        .unwrap();
+        let queued = read_run(&db, work).await.unwrap();
+        assert_eq!(queued["images"][0]["aliases"].as_array().unwrap().len(), 3);
+        let item = queue::claim_next(&db, owner.fence())
+            .await
+            .unwrap()
+            .unwrap();
+        ocr_recognition::execute(&db, &item, &SyntheticModelSecrets, &adapter)
+            .await
+            .unwrap();
+        let done = read_run(&db, work).await.unwrap();
+        assert_eq!(done["state"], "succeeded");
+        assert_eq!(done["completedImages"], 1);
+        assert_eq!(done["images"][0]["aliases"], queued["images"][0]["aliases"]);
+        assert!(
+            queue::claim_next(&db, owner.fence())
+                .await
+                .unwrap()
+                .is_none()
+        );
+        let units = sqlx::query("SELECT u.unit_ref,u.source_version,u.slot_key,u.page_ordinal,u.current_reading_ref,r.producer_kind,r.source_location,r.blocks,d.content_hash,d.storage_key FROM linggan_material_unit u JOIN linggan_material_reading r ON r.reading_ref=u.current_reading_ref JOIN linggan_media_derivative d ON d.derivative_ref=r.derivative_ref WHERE u.content_public_ref=$1 AND u.kind='image' ORDER BY u.page_ordinal NULLS LAST,u.slot_key")
+            .bind(work).fetch_all(db.pool()).await.unwrap();
+        assert_eq!(
+            units.len(),
+            3,
+            "each actual slot retains its own reading provenance"
+        );
+        let hash: String = units[0].get("content_hash");
+        let storage: String = units[0].get("storage_key");
+        for (index, unit) in units.iter().enumerate() {
+            assert_eq!(
+                unit.get::<Option<i32>, _>("page_ordinal"),
+                known_order.then_some(index as i32 + 1)
+            );
+            assert_eq!(unit.get::<String, _>("producer_kind"), "cloud_vision");
+            assert_eq!(unit.get::<String, _>("content_hash"), hash);
+            assert_eq!(
+                unit.get::<String, _>("storage_key"),
+                storage,
+                "one immutable raw response is shared"
+            );
+            let source: serde_json::Value = unit.get("source_location");
+            assert_eq!(source["slotKey"], unit.get::<String, _>("slot_key"));
+            assert!(
+                source["originalUrl"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("/api/local/media/")
+            );
+            assert!(
+                !unit
+                    .get::<serde_json::Value, _>("blocks")
+                    .as_array()
+                    .unwrap()
+                    .is_empty()
+            );
+        }
+        let dossier = linggan_evidence::research_dossier::read(&db, work)
+            .await
+            .unwrap()
+            .unwrap();
+        let displayed: Vec<_> = dossier
+            .materials
+            .iter()
+            .filter(|unit| {
+                unit["kind"] == "image"
+                    && unit["blocks"]
+                        .as_array()
+                        .is_some_and(|blocks| !blocks.is_empty())
+            })
+            .collect();
+        assert_eq!(
+            displayed.len(),
+            if known_order { 3 } else { 1 },
+            "unknown duplicate occurrences collapse; actual known pages retain their positions"
+        );
+        if known_order {
+            assert_eq!(
+                displayed
+                    .iter()
+                    .map(|unit| unit["page"].as_u64().unwrap())
+                    .collect::<Vec<_>>(),
+                vec![1, 2, 3]
+            );
+        } else {
+            assert!(displayed[0]["page"].is_null());
+        }
+        let source_versions: std::collections::HashSet<String> = units
+            .iter()
+            .map(|unit| unit.get("source_version"))
+            .collect();
+        assert_eq!(
+            source_versions.len(),
+            3,
+            "each slot retains its independently materialized source version"
+        );
+        let previous_readings: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT reading_ref FROM linggan_material_reading WHERE content_public_ref=$1",
+        )
+        .bind(work)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        if known_order {
+            // A non-representative alias can be human edited independently. A later
+            // shared recognition must preserve it just like the representative slot.
+            use linggan_evidence::material_reading::{ReviewReadingRequest, review_reading};
+            let alias = &units[2];
+            let unit: Uuid = alias.get("unit_ref");
+            let mut blocks = alias
+                .get::<serde_json::Value, _>("blocks")
+                .as_array()
+                .unwrap()
+                .clone();
+            blocks
+                .iter_mut()
+                .find(|block| block["kind"] == "paragraph")
+                .unwrap()["text"] = json!("第三页独立人工核对原文。");
+            let edited = review_reading(
+                &db,
+                unit,
+                &ReviewReadingRequest {
+                    command_ref: Uuid::new_v4(),
+                    unit_ref: unit.to_string(),
+                    source_version: alias.get("source_version"),
+                    expected_current_revision_ref: alias.get("current_reading_ref"),
+                    action: "edit".into(),
+                    actor: "synthetic-alias-reviewer".into(),
+                    reason: "核对第三页合成图片".into(),
+                    edited_blocks: Some(blocks),
+                    verified: true,
+                    resolved_issue_keys: vec![],
+                },
+            )
+            .await
+            .unwrap();
+            let ready = read_run(&db, work).await.unwrap();
+            start_run(
+                &db,
+                work,
+                &StartRun {
+                    command_ref: Uuid::new_v4(),
+                    expected_scope_sha256: ready["scope"]["sha256"].as_str().unwrap().into(),
+                    slot_keys: selected_slots(&ready),
+                },
+            )
+            .await
+            .unwrap();
+            let item = queue::claim_next(&db, owner.fence())
+                .await
+                .unwrap()
+                .unwrap();
+            ocr_recognition::execute(&db, &item, &SyntheticModelSecrets, &adapter)
+                .await
+                .unwrap();
+            let current: Uuid = sqlx::query_scalar(
+                "SELECT current_reading_ref FROM linggan_material_unit WHERE unit_ref=$1",
+            )
+            .bind(unit)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert_eq!(
+                json!(current),
+                edited["currentRevisionRef"],
+                "shared recognition never replaces a human alias reading"
+            );
+        }
+        let remaining: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_material_reading WHERE reading_ref=ANY($1)",
+        )
+        .bind(&previous_readings)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            remaining as usize,
+            previous_readings.len(),
+            "all prior immutable reading rows remain present"
+        );
+    }
+    let order_key = "ocr-producer-order";
+    let order_work = ocr::admit(&db, order_key, 10, &image(83), "image/png").await;
+    ocr::admit(&db, order_key, 2, &image(84), "image/png").await;
+    let order = read_run(&db, order_work).await.unwrap();
+    assert_eq!(
+        selected_slots(&order),
+        vec![
+            format!("xhs:{order_key}:image:2"),
+            format!("xhs:{order_key}:image:10")
+        ],
+        "use observed producer order, not lexical slot keys"
+    );
+    assert!(
+        order["scope"]["images"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|source| source["ordinal"].is_null()),
+        "producer order never becomes an asserted platform page"
+    );
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        4,
+        "one probe plus three explicit runs; aliases never multiply calls"
+    );
+    wire.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL, synthetic image and loopback Pi only"]
+async fn shared_image_receipt_does_not_adopt_an_alias_withdrawn_during_dispatch() {
+    let db = fixture::db("ocr_withdrawn_alias").await;
+    let key = "ocr-withdrawn-alias";
+    let bytes = image(82);
+    let work = ocr::admit_known_pages(&db, key, 2, &bytes, "image/png").await;
+    let mut wire = endpoint::Endpoint::start(true).await;
+    let adapter = adapter();
+    let owner = ExecutorSession::acquire(&db, "synthetic-withdrawn-alias", 4)
+        .await
+        .unwrap();
+    configure_recognition(&db, &wire.url, &owner, &adapter).await;
+    let ready = read_run(&db, work).await.unwrap();
+    assert_eq!(ready["scope"]["imageCount"], 1);
+    start_run(
+        &db,
+        work,
+        &StartRun {
+            command_ref: Uuid::new_v4(),
+            expected_scope_sha256: ready["scope"]["sha256"].as_str().unwrap().into(),
+            slot_keys: selected_slots(&ready),
+        },
+    )
+    .await
+    .unwrap();
+    let item = queue::claim_next(&db, owner.fence())
+        .await
+        .unwrap()
+        .unwrap();
+    let execute_db = db.clone();
+    let execute_adapter = adapter.clone();
+    let execution = tokio::spawn(async move {
+        ocr_recognition::execute(&execute_db, &item, &SyntheticModelSecrets, &execute_adapter).await
+    });
+    wire.seen.take().unwrap().await.unwrap();
+    let alias_slot = format!("xhs:{key}:image:2");
+    let materialization: Uuid = sqlx::query_scalar("SELECT m.materialization_ref FROM linggan_media_materialization m JOIN linggan_media_download_attempt a USING(download_attempt_ref) JOIN linggan_material_media_origin o ON o.observation_ref=a.media_observation_ref WHERE o.slot_key=$1 ORDER BY m.verified_at DESC LIMIT 1")
+        .bind(&alias_slot).fetch_one(db.pool()).await.unwrap();
+    linggan_evidence::record_materialization_disposition(
+        &db,
+        materialization,
+        linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
+        "synthetic",
+        "restrict alias during shared recognition",
+    )
+    .await
+    .unwrap();
+    wire.release.take().unwrap().send(()).unwrap();
+    execution.await.unwrap().unwrap();
+    let alias_current: Option<Uuid> = sqlx::query_scalar("SELECT current_reading_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND slot_key=$2")
+        .bind(work).bind(&alias_slot).fetch_one(db.pool()).await.unwrap();
+    assert!(
+        alias_current.is_none(),
+        "withdrawn alias result must not become a current reading"
+    );
+    let main_current: Option<Uuid> = sqlx::query_scalar("SELECT current_reading_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND slot_key=$2")
+        .bind(work).bind(format!("xhs:{key}:image:1")).fetch_one(db.pool()).await.unwrap();
+    assert!(
+        main_current.is_some(),
+        "independent permitted occurrence remains usable"
+    );
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        2,
+        "one probe and one shared image call"
+    );
+    wire.finish().await;
+}

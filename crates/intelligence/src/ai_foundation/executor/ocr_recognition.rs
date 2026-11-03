@@ -26,12 +26,17 @@ struct Prepared {
     blob: String,
     content: Uuid,
     slot_key: String,
-    materialization_ref: Uuid,
     width: u32,
     height: u32,
-    expected_reading_ref: Option<Uuid>,
+    targets: Vec<PublicationTarget>,
     prompt_version_ref: Uuid,
 }
+struct PublicationTarget {
+    slot_key: String,
+    materialization_ref: Uuid,
+    expected_reading_ref: Option<Uuid>,
+}
+
 fn image(
     storage: &str,
     mime: &str,
@@ -216,11 +221,43 @@ async fn prepare(
     }
     sqlx::query("UPDATE linggan_ocr_recognition_item SET state='running',invocation_ref=$2 WHERE item_ref=$1").bind(item_ref).bind(invocation).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_ocr_recognition_run SET state='running',updated_at=scope_001_now() WHERE run_ref=$1").bind(r.get::<Uuid,_>("run_ref")).execute(&mut *tx).await?;
-    let expected_reading_ref:Option<Uuid>=sqlx::query_scalar("SELECT current_reading_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND unit_key=$2").bind(r.get::<Uuid,_>("content_public_ref")).bind(format!("image:{}",r.get::<String,_>("slot_key"))).fetch_optional(&mut *tx).await?.flatten();
+    let aliases: Vec<String> = sqlx::query_scalar("SELECT item_slot_key FROM linggan_ocr_recognition_slot_alias WHERE item_ref=$1 ORDER BY item_slot_key")
+        .bind(item_ref).fetch_all(&mut *tx).await?;
+    let primary_slot: String = r.get("slot_key");
+    let primary_materialization: Uuid = r.get("materialization_ref");
+    let mut targets = vec![];
+    let sources = crate::ai_foundation::ocr_recognition::current_sources_in(
+        &mut tx,
+        r.get("content_public_ref"),
+    )
+    .await?;
+    // Freeze current alias source identities and expected readings before dispatch.
+    // Changed/withdrawn aliases cannot inherit this image's result.
+    for source in sources.into_iter().filter(|source| {
+        source.blob_sha256 == r.get::<String, _>("blob_sha256")
+            && (source.slot_key == primary_slot || aliases.contains(&source.slot_key))
+    }) {
+        let materialization = if source.slot_key == primary_slot {
+            primary_materialization
+        } else {
+            source.materialization_ref
+        };
+        let expected_reading_ref = sqlx::query_scalar::<_, Option<Uuid>>("SELECT current_reading_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND unit_key=$2")
+            .bind(r.get::<Uuid, _>("content_public_ref")).bind(format!("image:{}", source.slot_key))
+            .fetch_optional(&mut *tx).await?.flatten();
+        targets.push(PublicationTarget {
+            slot_key: source.slot_key,
+            materialization_ref: materialization,
+            expected_reading_ref,
+        });
+    }
+    if !targets.iter().any(|target| target.slot_key == primary_slot) {
+        return Err(ExecutorError::Invalid);
+    }
     tx.commit().await?;
     Ok(Prepared {
         prompt_version_ref,
-        expected_reading_ref,
+        targets,
         invocation,
         request,
         item: item_ref,
@@ -228,7 +265,6 @@ async fn prepare(
         blob: r.get("blob_sha256"),
         content: r.get("content_public_ref"),
         slot_key: r.get("slot_key"),
-        materialization_ref: r.get("materialization_ref"),
         width: w,
         height: h,
     })
@@ -310,40 +346,46 @@ async fn settle(
             linggan_evidence::cloud_ocr_adoption::PROCESSOR_VERSION,
             p.run
         );
-        let job = Uuid::new_v4();
-        sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr',$4,'full') ON CONFLICT(blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
-            .bind(job).bind(&p.blob).bind(&p.slot_key).bind(&processor_version).execute(&mut *tx).await?;
-        let job:Uuid=sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE blob_sha256=$1 AND slot_key=$2 AND processor_kind='image_ocr' AND processor_version=$3 AND input_scope='full'")
-            .bind(&p.blob).bind(&p.slot_key).bind(&processor_version).fetch_one(&mut *tx).await?;
-        let derivative = Uuid::new_v4();
-        let hash = raw_hash.as_deref().ok_or(ExecutorError::Invalid)?;
-        sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) VALUES($1,$2,'ocr_text',$3,$4,$5)").bind(derivative).bind(job).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
-        let layout = Uuid::new_v4();
-        sqlx::query("INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) VALUES($1,$2,$3,$4,'cloud_manual',$5,$6,$7,$8,$9,$10)")
-            .bind(layout).bind(derivative).bind(p.content).bind(&p.blob).bind(&processor_version).bind(p.width as i32).bind(p.height as i32).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) VALUES($1,$2,'succeeded','cloud_manual_ocr_saved')").bind(Uuid::new_v4()).bind(job).execute(&mut *tx).await?;
         let visual_json = serde_json::to_value(&v).map_err(|_| ExecutorError::Invalid)?;
         let blocks = linggan_evidence::cloud_ocr_adoption::blocks_from_visual(&visual_json)?;
-        let reading = linggan_evidence::material_reading::producers::publish_cloud_in(
-            &mut tx,
-            p.content,
-            job,
-            p.materialization_ref,
-            derivative,
-            linggan_evidence::material_reading::producers::ReadingContent {
-                blocks,
-                issues: linggan_evidence::cloud_ocr_adoption::issues_from_visual(&visual_json)?,
-                source_state: "present".into(),
-                source_location: json!({"visualContract":visual::CONTRACT}),
-            },
-            p.expected_reading_ref,
-        )
-        .await?;
-        sqlx::query("UPDATE linggan_ocr_recognition_item SET reading_ref=$2 WHERE item_ref=$1")
-            .bind(p.item)
-            .bind(reading.reading_ref)
-            .execute(&mut *tx)
+        for target in &p.targets {
+            let job = Uuid::new_v4();
+            sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr',$4,'full') ON CONFLICT(blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
+            .bind(job).bind(&p.blob).bind(&target.slot_key).bind(&processor_version).execute(&mut *tx).await?;
+            let job:Uuid=sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE blob_sha256=$1 AND slot_key=$2 AND processor_kind='image_ocr' AND processor_version=$3 AND input_scope='full'")
+            .bind(&p.blob).bind(&target.slot_key).bind(&processor_version).fetch_one(&mut *tx).await?;
+            let derivative = Uuid::new_v4();
+            let hash = raw_hash.as_deref().ok_or(ExecutorError::Invalid)?;
+            sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) VALUES($1,$2,'ocr_text',$3,$4,$5)").bind(derivative).bind(job).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
+            let layout = Uuid::new_v4();
+            sqlx::query("INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) VALUES($1,$2,$3,$4,'cloud_manual',$5,$6,$7,$8,$9,$10)")
+            .bind(layout).bind(derivative).bind(p.content).bind(&p.blob).bind(&processor_version).bind(p.width as i32).bind(p.height as i32).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) VALUES($1,$2,'succeeded','cloud_manual_ocr_saved')").bind(Uuid::new_v4()).bind(job).execute(&mut *tx).await?;
+            let reading = linggan_evidence::material_reading::producers::publish_cloud_in(
+                &mut tx,
+                p.content,
+                job,
+                target.materialization_ref,
+                derivative,
+                linggan_evidence::material_reading::producers::ReadingContent {
+                    blocks: blocks.clone(),
+                    issues: linggan_evidence::cloud_ocr_adoption::issues_from_visual(&visual_json)?,
+                    source_state: "present".into(),
+                    source_location: json!({"visualContract":visual::CONTRACT}),
+                },
+                target.expected_reading_ref,
+            )
             .await?;
+            if target.slot_key == p.slot_key {
+                sqlx::query(
+                    "UPDATE linggan_ocr_recognition_item SET reading_ref=$2 WHERE item_ref=$1",
+                )
+                .bind(p.item)
+                .bind(reading.reading_ref)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
     }
     let mut result = response
         .map(safe_result)

@@ -20,10 +20,10 @@ pub struct StartRun {
     pub slot_keys: Vec<String>,
 }
 #[derive(Clone)]
-struct Source {
-    slot_key: String,
-    blob_sha256: String,
-    materialization_ref: Uuid,
+pub(super) struct Source {
+    pub(super) slot_key: String,
+    pub(super) blob_sha256: String,
+    pub(super) materialization_ref: Uuid,
     aliases: Vec<String>,
     ordinal: Option<i32>,
     cover: bool,
@@ -33,7 +33,7 @@ struct Source {
     byte_size: i64,
 }
 
-async fn sources_in(
+pub(super) async fn current_sources_in(
     conn: &mut sqlx::PgConnection,
     work: Uuid,
 ) -> Result<Vec<Source>, FoundationError> {
@@ -46,7 +46,7 @@ async fn sources_in(
               AND o.purpose IN ('cover','body_image','live_photo')
             ORDER BY o.slot_key,o.source_generation DESC
         ), candidates AS MATERIALIZED (
-            SELECT o.slot_key,o.purpose,m.materialization_ref,m.blob_sha256,
+            SELECT o.slot_key,o.purpose,o.producer_ordinal,m.materialization_ref,m.blob_sha256,
                    CASE WHEN o.display_order_state='KNOWN' THEN o.display_ordinal END ordinal,
                    m.local_asset_path,b.storage_key,b.mime_type,b.byte_size,m.verified_at
             FROM current_origin o
@@ -57,12 +57,10 @@ async fn sources_in(
             WHERE b.mime_type LIKE 'image/%'
               AND NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d
                 WHERE d.slot_key=o.slot_key OR d.blob_sha256=m.blob_sha256 OR d.materialization_ref=m.materialization_ref)
-        ) SELECT c.*,ARRAY[c.slot_key] || COALESCE((SELECT array_agg(cover.slot_key) FROM candidates cover
-                WHERE c.purpose<>'cover' AND c.ordinal=1 AND cover.purpose='cover' AND cover.blob_sha256=c.blob_sha256),'{}') aliases,
+        ) SELECT c.*,ARRAY[c.slot_key] aliases,
             (c.purpose='cover' OR COALESCE(c.ordinal=1,false)) cover
             FROM candidates c
-            WHERE c.purpose<>'cover' OR NOT EXISTS(SELECT 1 FROM candidates first_page WHERE first_page.purpose<>'cover' AND first_page.ordinal=1 AND first_page.blob_sha256=c.blob_sha256)
-            ORDER BY ordinal NULLS LAST,slot_key",
+            ORDER BY ordinal NULLS LAST,producer_ordinal,(purpose='cover'),slot_key",
     )
     .bind(work)
     .fetch_all(conn)
@@ -87,6 +85,30 @@ async fn sources_in(
         })
         .collect())
 }
+async fn sources_in(
+    conn: &mut sqlx::PgConnection,
+    work: Uuid,
+) -> Result<Vec<Source>, FoundationError> {
+    Ok(unique_image_sources(current_sources_in(conn, work).await?))
+}
+
+// The candidate order chooses an actual known page first, without inventing an
+// ordinal for unknown slots. Every occurrence remains an alias of the same bytes.
+fn unique_image_sources(sources: Vec<Source>) -> Vec<Source> {
+    let mut positions = std::collections::HashMap::<String, usize>::new();
+    let mut unique: Vec<Source> = vec![];
+    for source in sources {
+        if let Some(&index) = positions.get(&source.blob_sha256) {
+            unique[index].aliases.extend(source.aliases);
+            unique[index].cover |= source.cover;
+        } else {
+            positions.insert(source.blob_sha256.clone(), unique.len());
+            unique.push(source);
+        }
+    }
+    unique
+}
+
 async fn scope_in(
     conn: &mut sqlx::PgConnection,
     work: Uuid,

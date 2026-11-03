@@ -143,3 +143,23 @@ it('口播段落的具体疑点默认收起并可展开核对', () => {
   fireEvent.click(screen.getByText(/^核对说明/));
   expect(screen.getByText(issue.message)).toBeVisible();
 });
+
+it('在线读本缺口明确标注待在线识读，不把旧处理完成当作正文可用', () => {
+  const pending = dossierMaterialJson(1, { blocks: [], currentRevisionRef: null, reading: null,
+    issues: [{ key: 'online_image_pending', code: 'online_image_pending', message: '历史 OCR 已保留', resolution: 'source_refresh' }],
+    processing: { state: 'completed', reason: null } });
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [pending] })).dossier;
+  expect(readingGaps(dossier)).toContainEqual({ key: 'images', label: '图片资料', state: '待在线识读', message: '1 张图片尚未在线识读。 第 1、2 页文字待补全。' });
+});
+
+it('在线过渡中的未识读和失败未知页全部计数', () => {
+  const issue = { key: 'online_image_pending', code: 'online_image_pending', message: '历史OCR留存', resolution: 'source_refresh' };
+  const payload = dossierJson(1, { materials: [
+    dossierMaterialJson(1, { page: null, blocks: [], currentRevisionRef: null, reading: null, issues: [issue] }),
+    dossierMaterialJson(2, { page: null, blocks: [], currentRevisionRef: null, reading: null, issues: [], processing: { state: 'failed', reason: 'ocr_failed' } }),
+  ] });
+  const dossier = parseDossierPayload(payload).dossier;
+  dossier.coverage.imageInventory.expectedPages = null;
+  dossier.coverage.imageInventory.missingPages = [];
+  expect(readingGaps(dossier)).toContainEqual({ key: 'images', label: '图片资料', state: '待在线识读', message: '2 张图片尚未在线识读。其中 1 张处理失败。' });
+});

@@ -14,6 +14,7 @@ pub(super) fn assemble(
     if let Some(tags) = tags(work, &inventory) {
         materials.push(tags);
     }
+    let readings = current_image_readings(readings);
     let slots = super::duplicates::collapse(inventory.slots.clone(), &readings);
     let mut media = media_materials(work, &readings, &slots);
     if let Some(expected) = expected_pages(&inventory) {
@@ -67,6 +68,39 @@ pub(super) fn assemble(
     super::refresh_revision(&mut dossier);
     dossier.selection = json!({"mode":"full","kinds":[],"unitRefs":[],"blockRefs":[],"imagePages":[],"omittedUnits":0,"completeRevision":dossier.revision});
     dossier
+}
+
+// Once this note uses online image readings, legacy automatic OCR remains in history
+// but cannot silently fill the unprocessed pages of the current research material.
+fn current_image_readings(mut readings: Vec<Value>) -> Vec<Value> {
+    let online = readings.iter().any(|r| {
+        r["kind"] == "image"
+            && r["sourceState"] != "restricted"
+            && r["reading"]["generatedBy"] == "cloud_vision"
+            && r["currentRevisionRef"].is_string()
+    });
+    if online {
+        for reading in &mut readings {
+            if reading["kind"] == "image"
+                && reading["reading"]["adoption"] == "automatic"
+                && matches!(
+                    reading["reading"]["generatedBy"].as_str(),
+                    Some("ordinary_ocr" | "local_vision")
+                )
+            {
+                reading["blocks"] = json!([]);
+                reading["currentRevisionRef"] = Value::Null;
+                reading["reading"] = Value::Null;
+                reading["issues"] = json!([issue(
+                    "online_image_pending",
+                    "online_image_pending",
+                    "此图尚未在线识读；历史 OCR 已保留，未混入当前正文。",
+                    "source_refresh"
+                )]);
+            }
+        }
+    }
+    readings
 }
 
 pub(super) fn public_material(mut value: Value) -> Value {
@@ -461,5 +495,47 @@ mod ai_issue_tests {
         assert_eq!(issues[0]["message"], "右栏末行被裁切");
         assert_eq!(issues[1]["message"], "第二格星级看不清");
         assert_eq!(original.as_array().unwrap().len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod online_reading_tests {
+    use super::*;
+    fn material(producer: &str, adoption: &str) -> Value {
+        json!({"kind":"image","sourceState":"present","currentRevisionRef":"existing",
+          "reading":{"generatedBy":producer,"adoption":adoption},"blocks":[{"text":"原有内容"}],"issues":[]})
+    }
+    #[test]
+    fn online_note_excludes_legacy_automatic_text_but_preserves_human_and_video() {
+        let legacy = material("ordinary_ocr", "automatic");
+        assert_eq!(
+            current_image_readings(vec![legacy.clone()]),
+            vec![legacy.clone()]
+        );
+        let human = material("ordinary_ocr", "human_edited");
+        let mut audio = material("asr", "automatic");
+        audio["kind"] = json!("audio");
+        let result = current_image_readings(vec![
+            material("cloud_vision", "automatic"),
+            legacy.clone(),
+            human.clone(),
+            audio.clone(),
+        ]);
+        assert_eq!(result[1]["blocks"], json!([]));
+        assert!(result[1]["currentRevisionRef"].is_null());
+        assert_eq!(result[1]["issues"][0]["code"], "online_image_pending");
+        assert_eq!(result[2], human);
+        assert_eq!(result[3], audio);
+        assert_eq!(legacy["blocks"][0]["text"], "原有内容");
+    }
+    #[test]
+    fn withdrawn_online_reading_does_not_change_legacy_note_mode() {
+        let legacy = material("ordinary_ocr", "automatic");
+        let mut cloud = material("cloud_vision", "automatic");
+        cloud["sourceState"] = json!("restricted");
+        assert_eq!(
+            current_image_readings(vec![cloud, legacy.clone()])[1],
+            legacy
+        );
     }
 }
