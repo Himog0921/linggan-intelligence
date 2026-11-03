@@ -5,6 +5,15 @@ import { visibleAnchor } from './evidenceAnchor';
 
 export type TitleTruncation = 'width' | 'lines';
 
+export interface TitleTooltipOptions {
+  /** 内容本身不截断、但需要完整说明时也显示（例如「+N」的其余主题）。 */
+  always?: boolean;
+  /** 悬停出现延迟，默认 280ms。 */
+  delay?: number;
+  /** 最大宽度，默认沿用证据库的宽度。 */
+  maxWidth?: number;
+}
+
 export interface TitleTooltipController<T extends HTMLElement> {
   anchorRef: RefObject<T | null>;
   onEnter: () => void;
@@ -12,6 +21,8 @@ export interface TitleTooltipController<T extends HTMLElement> {
   onFocus: () => void;
   onBlur: () => void;
   onPointerDown: () => void;
+  /** 容器被隐藏或切走时立即收起：提示是 portal，不能留在原处。 */
+  close: () => void;
   tooltip: ReactNode;
 }
 
@@ -29,7 +40,7 @@ const VIEWPORT_MARGIN = 8;
  * scroll/resize so the table's local horizontal scroll cannot clip or strand it. Native `title` attributes
  * are removed from those triggers so the browser tooltip and this hint never appear together.
  */
-export function useTitleTooltip<T extends HTMLElement>(text: string, truncation: TitleTruncation): TitleTooltipController<T> {
+export function useTitleTooltip<T extends HTMLElement>(text: string, truncation: TitleTruncation, options: TitleTooltipOptions = {}): TitleTooltipController<T> {
   const anchorRef = useRef<T>(null);
   const tipRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -42,6 +53,9 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
   const tipHovered = useRef(false);
   const suppressFocus = useRef(false);
   const truncationNow = useRef(truncation);
+  const always = options.always ?? false;
+  const delay = options.delay ?? OPEN_DELAY;
+  const maxWidth = options.maxWidth;
 
   const clearOpenTimer = useCallback(() => {
     if (openTimer.current !== null) clearTimeout(openTimer.current);
@@ -63,12 +77,13 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
   }, [clearCloseTimer, clearOpenTimer]);
 
   const isTruncated = useCallback(() => {
+    if (always) return true;
     const element = anchorRef.current;
     if (!element) return false;
     return truncationNow.current === 'width'
       ? element.scrollWidth > element.clientWidth + 1
       : element.scrollHeight > element.clientHeight + 1;
-  }, []);
+  }, [always]);
 
   const updatePosition = useCallback(() => {
     const anchor = anchorRef.current;
@@ -109,8 +124,8 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
     else openTimer.current = setTimeout(() => {
       openTimer.current = null;
       reveal();
-    }, OPEN_DELAY);
-  }, [clearCloseTimer, clearOpenTimer, isTruncated]);
+    }, delay);
+  }, [clearCloseTimer, clearOpenTimer, delay, isTruncated]);
 
   const maybeClose = useCallback(() => {
     clearOpenTimer();
@@ -218,7 +233,7 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
         className={styles.tooltip}
         data-title-tooltip=""
         aria-hidden="true"
-        style={{ top: coords?.top ?? 0, left: coords?.left ?? 0, visibility: coords ? 'visible' : 'hidden' }}
+        style={{ top: coords?.top ?? 0, left: coords?.left ?? 0, visibility: coords ? 'visible' : 'hidden', ...(maxWidth ? { maxWidth: `${maxWidth}px` } : {}) }}
         onMouseEnter={() => {
           tipHovered.current = true;
           clearCloseTimer();
@@ -237,5 +252,5 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
     )
     : null;
 
-  return { anchorRef, onEnter, onLeave, onFocus, onBlur, onPointerDown, tooltip };
+  return { anchorRef, onEnter, onLeave, onFocus, onBlur, onPointerDown, close, tooltip };
 }

@@ -31,7 +31,7 @@ function rangeText(query: CreatorQuery): string {
   return `${query.publishedFrom || '不限'} 至 ${query.publishedTo || '不限'}`;
 }
 
-/** 快捷视图的当前项：一条短手绘线，沿用证据库当前页的标注方式。 */
+/** 快捷视图的当前项：一条直短线，手绘线只留在面包屑。 */
 function QuickButton({ pressed, disabled, title, onClick, children }: {
   pressed: boolean;
   disabled?: boolean;
@@ -42,11 +42,6 @@ function QuickButton({ pressed, disabled, title, onClick, children }: {
   return (
     <button type="button" aria-pressed={pressed} disabled={disabled} title={title} onClick={onClick}>
       <span className={styles.quickLabel}>{children}</span>
-      {pressed ? (
-        <svg className={styles.quickMark} viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-          <path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" />
-        </svg>
-      ) : null}
     </button>
   );
 }

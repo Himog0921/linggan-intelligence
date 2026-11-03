@@ -59,23 +59,24 @@ describe('创作者页 · 列表', () => {
     expect(cells[0]).toHaveTextContent('合成作者 1');
     expect(cells[0]).toHaveTextContent('粉丝 2,001');
     expect(cells[1]).toHaveTextContent('注意力训练');
-    expect(cells[2]).toHaveTextContent('任务启动 · 晚间练习');
+    expect(cells[2]).toHaveTextContent('任务启动');
+    expect(cells[2]).toHaveTextContent('晚间练习');
     expect(cells[3]).toHaveTextContent('3');
     expect(cells[3]).toHaveTextContent('待判断 2');
     expect(cells[4]).toHaveTextContent('1,500');
     expect(cells[5]).toHaveTextContent('合成作品 11');
     expect(cells[5]).toHaveTextContent('已判相关 · 赞 1,211');
-    expect(cells[6]).toHaveTextContent('09.25');
+    expect(cells[6]).toHaveTextContent('2026-09-25');
     expect(cells[6]).toHaveTextContent('本领域首次');
     expect(cells[7]).toHaveTextContent('未加入观察');
     expect(within(cells[7] as HTMLElement).getByRole('button', { name: '加入观察' })).toBeEnabled();
   });
 
-  it('发现词缺失时写「未记录发现词」，不是空白；多个发现词在悬停里全部列出', async () => {
+  it('发现词缺失时写「未记录发现词」，不是空白；多个发现词完整列在可访问名称里', async () => {
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { keywords: [] }), itemJson(2, { keywords: ['注意力训练', '写作业'] })] })));
     await loaded();
-    expect(within(rowFor('合成作者 1')).getByText('未记录发现词')).toHaveAttribute('title', '未记录发现词');
-    expect(within(rowFor('合成作者 2')).getByText('注意力训练')).toHaveAttribute('title', '注意力训练、写作业');
+    expect(within(rowFor('合成作者 1')).getByText('未记录发现词')).toBeVisible();
+    expect(within(rowFor('合成作者 2')).getByText('注意力训练')).toHaveAttribute('aria-label', '注意力训练、写作业');
   });
 
   it('首次发现的三种说明：本领域首次、近 7 天新见、最早已知记录；没有记录时如实说明', async () => {
@@ -95,22 +96,21 @@ describe('创作者页 · 列表', () => {
     await loaded();
     expect(rowFor('合成作者 1')).toHaveTextContent('本领域首次');
     expect(rowFor('合成作者 2')).toHaveTextContent('近 7 天新见');
-    expect(rowFor('合成作者 3')).toHaveTextContent('09.12');
+    expect(rowFor('合成作者 3')).toHaveTextContent('2026-09-12');
     expect(rowFor('合成作者 3')).toHaveTextContent('最早已知记录');
     const noDate = rowFor('合成作者 4').querySelectorAll('td')[6] as HTMLElement;
     expect(noDate).toHaveTextContent('—');
-    expect(within(noDate).getByTitle('首次发现时间未记录')).toBeInTheDocument();
   });
 
-  it('未知不显示成 0：粉丝、最高赞、点赞缺失时是「—」；≥1 万缩写并在悬停里保留精确值', async () => {
+  it('未知不显示成 0：粉丝、最高赞、点赞缺失时是「—」；大数字完整分组显示', async () => {
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { followers: null, candidateHigh: null, works: [workJson(11, { likes: null })] }), itemJson(2, { followers: 123456, candidateHigh: 20000 })] })));
     await loaded();
     const unknown = rowFor('合成作者 1');
-    expect(within(unknown).getAllByTitle('未知').length).toBeGreaterThanOrEqual(3);
+    expect(unknown.querySelectorAll('[data-unknown]').length).toBeGreaterThanOrEqual(3);
     expect(unknown).not.toHaveTextContent('粉丝 0');
     const big = rowFor('合成作者 2');
-    expect(within(big).getByTitle('123,456')).toHaveTextContent('12.3万');
-    expect(within(big).getByTitle('20,000')).toHaveTextContent('2万');
+    expect(big).toHaveTextContent('123,456');
+    expect(big).toHaveTextContent('20,000');
   });
 
   it('作者名缺失写「作者名称未取得」；名字取自观察目标档案时标明来源', async () => {
@@ -338,7 +338,7 @@ describe('创作者页 · 领域与读取失败', () => {
     const { user } = await loaded(`/corpus/creators?domain=${DOMAIN}&query=没有的词`);
     expect(screen.getByText(/当前条件下没有找到创作者/)).toBeInTheDocument();
     expect(screen.getByText('0 位创作者')).toBeInTheDocument();
-    expect(screen.getByText('0 页')).toBeInTheDocument();
+    expect(screen.getByText('共 0 位 · 0 页')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
     await user.click(within(screen.getByText(/当前条件下没有找到创作者/).parentElement as HTMLElement).getByRole('button', { name: '清除额外条件' }));
     await waitFor(() => expect(lastCreatorsCall()?.search.get('query')).toBeNull());
@@ -667,11 +667,11 @@ describe('创作者页 · 搜索、排序、分页', () => {
   it('分页：翻页写进地址，请求的页码从 0 起；改每页数量回到第一页', async () => {
     defaultRoutes(kit, ok(listJson({ total: 60, pageSize: 25 })));
     const { user, location } = await loaded(`/corpus/creators?domain=${DOMAIN}&pageSize=25`);
-    expect(screen.getByText('1 / 3 页')).toBeInTheDocument();
+    expect(screen.getByText('共 60 位 · 第 1/3 页')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '下一页' }));
     await waitFor(() => expect(lastCreatorsCall()?.search.get('page')).toBe('1'));
     expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}&page=1&pageSize=25`);
-    await screen.findByText('2 / 3 页');
+    await screen.findByText('共 60 位 · 第 2/3 页');
     await user.click(screen.getByRole('combobox', { name: /每页/ }));
     await user.click(screen.getByRole('option', { name: '50' }));
     await waitFor(() => expect(lastCreatorsCall()?.search.get('pageSize')).toBe('50'));
@@ -684,7 +684,7 @@ describe('创作者页 · 搜索、排序、分页', () => {
     kit.route('GET', '/api/local/creators', call => ({ status: 200, body: listJson({ total: 60, pageSize: 25, page: Number(call.search.get('page')) }) }));
     const { location } = renderCreatorsPage(`/corpus/creators?domain=${DOMAIN}&page=9&pageSize=25`);
     await waitFor(() => expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}&page=2&pageSize=25`));
-    await screen.findByText('3 / 3 页');
+    await screen.findByText('共 60 位 · 第 3/3 页');
     expect(creatorsCalls().map(call => call.search.get('page'))).toEqual(['9', '2']);
   });
 
@@ -694,7 +694,7 @@ describe('创作者页 · 搜索、排序、分页', () => {
     kit.route('GET', '/api/local/creators', ok(listJson({ items: [], total: 0 })));
     const { location } = renderCreatorsPage(`/corpus/creators?domain=${DOMAIN}&page=4`);
     await waitFor(() => expect(location()).toBe(`/corpus/creators?domain=${DOMAIN}`));
-    await screen.findByText('0 页');
+    await screen.findByText('共 0 位 · 0 页');
     expect(creatorsCalls()).toHaveLength(2);
   });
 

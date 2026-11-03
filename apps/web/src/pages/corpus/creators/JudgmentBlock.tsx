@@ -24,13 +24,15 @@ export function ExpandableText({ text }: { text: string }) {
   );
 }
 
-/** 一条引文：来源里的原话，标明取自哪个字段，能回查原作品。 */
+/** 一条引文：来源里的原话，带完整作品名，能回查原作品。 */
 export function Quote({ fragment, link, creatorKey }: { fragment: Fragment; link: LinkContext; creatorKey: string }) {
   const workRef = fragment.sourceType === 'work_material' && fragment.workRef && WORK_REF.test(fragment.workRef) ? fragment.workRef : null;
   return (
     <blockquote>
       {fragment.text || '片段暂不可读'}
       <small>
+        {fragment.workTitle ? <span className={styles.quoteWork}>{fragment.workTitle}</span> : null}
+        {fragment.workTitle ? ' · ' : ''}
         {fieldSource(fragment.field)}
         {workRef ? (
           <>

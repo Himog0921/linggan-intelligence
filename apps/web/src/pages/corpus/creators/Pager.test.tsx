@@ -11,19 +11,19 @@ function setup(page: number, total: number | null, pageSize = 25) {
 const jumpInput = () => screen.getByRole('spinbutton', { name: '跳转页码' }) as HTMLInputElement;
 
 describe('分页', () => {
-  it('显示「x / y 页」，首页不能上一页，末页不能下一页', () => {
+  it('显示「共 N 位 · 第 x/y 页」，首页不能上一页，末页不能下一页', () => {
     const { rerender, onPage, onPageSize } = setup(0, 60);
-    expect(screen.getByText('1 / 3 页')).toBeInTheDocument();
+    expect(screen.getByText('共 60 位 · 第 1/3 页')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
     rerender(<Pager page={2} pageSize={25} total={60} onPage={onPage} onPageSize={onPageSize} />);
-    expect(screen.getByText('3 / 3 页')).toBeInTheDocument();
+    expect(screen.getByText('共 60 位 · 第 3/3 页')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
   });
 
   it('零命中是「0 页」，不是「1 页」；所有翻页控件不可用', () => {
     setup(0, 0);
-    expect(screen.getByText('0 页')).toBeInTheDocument();
+    expect(screen.getByText('共 0 位 · 0 页')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '上一页' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '下一页' })).toBeDisabled();
     expect(jumpInput()).toBeDisabled();

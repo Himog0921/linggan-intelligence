@@ -26,7 +26,9 @@ import {
   workTitle,
 } from './creatorsPresent';
 import { evidenceLink, formatCount, workLink, type CreatorQuery, type LinkContext } from './creatorsQuery';
-import { Metric, type DrawerTab } from './CreatorTable';
+import { useTitleTooltip } from '../evidence/TitleTooltip';
+import { Metric } from './Metric';
+import type { DrawerTab } from './CreatorTable';
 import { useObservationRecord } from './useObservationRecord';
 import type { Analysis, CreatorItem, CreatorList, Judgement, ObservationRecord, Work } from './creatorsTypes';
 import type { WorkResources } from './useWorkResources';
@@ -41,6 +43,8 @@ export interface PanelContext {
   resources: WorkResources;
   /** 领域已暂停时历史材料仍可读，写入操作不可用。 */
   writable: boolean;
+  /** 同一页面会话里可能同时存在多个作者实例；只有活动的那个响应全局键盘层。 */
+  active: boolean;
   onCorrect: (field: string, workRef: string | null) => void;
   onTab: (tab: DrawerTab) => void;
 }
@@ -98,7 +102,7 @@ function Biography({ text }: { text: string | null }) {
   );
 }
 
-/** 作者内容倾向：结论在前，理由、取样与支持片段在后；判定门槛放到统一的依据区。 */
+/** 作者内容倾向：结论在前，取样事实与局限紧随其后；结果时间只在块末出现一次。 */
 function LeadJudgment({ ctx }: { ctx: PanelContext }) {
   const { item } = ctx;
   const analysis = item.authorAnalysis;
@@ -108,42 +112,83 @@ function LeadJudgment({ ctx }: { ctx: PanelContext }) {
   const status = analysisStatus(analysis, focus.value);
   const statusVisible = analysis.state !== null && analysis.state !== 'idle';
   const sample = analysis.sampleWorkCount;
+  const available = analysis.availableWorkCount;
+  const topics = item.topicHints.filter(Boolean).slice(0, 2);
+  const firstLimit = analysis.sampleLimitations[0] ?? null;
+  const restLimits = analysis.sampleLimitations.slice(1);
+  const { anchorRef: limitRef, onEnter: limitEnter, onLeave: limitLeave, onFocus: limitFocus, onBlur: limitBlur, tooltip: limitTooltip } = useTitleTooltip<HTMLSpanElement>(firstLimit ?? '', 'width', { always: true, delay: 250, maxWidth: 320 });
+  const at = manual ? manual.at : (analysis.resultAt ?? analysis.resultAtDisplay);
   return (
     <>
       <div className={styles.leadHead}>
-        <strong className={styles.leadValue} data-value={focus.value}>{valueLabel(focus.value)}</strong>
+        <span className={styles.leadTitle}>
+          <strong className={styles.leadValue} data-value={focus.value}>{valueLabel(focus.value)}</strong>
+          {manual ? <span className={styles.manualTag}>人工调整</span> : null}
+        </span>
         <button type="button" className={styles.textButton} disabled={!ctx.writable} aria-label="调整作者倾向" onClick={() => ctx.onCorrect('focus', null)}>
           {focus.value === 'unknown' ? '补充判断' : '调整判断'}
         </button>
       </div>
+      {topics.length > 0 ? (
+        <div className={styles.tags}>
+          {topics.map(topic => <span key={topic}>{topic}</span>)}
+        </div>
+      ) : null}
       {focus.reason ? (
         <ExpandableText text={focus.reason} />
       ) : (
         <p className={styles.leadReason}>当前材料尚不足以形成作者整体判断。</p>
       )}
       {statusVisible ? <p className={`${styles.help} ${styles.analysis}`} data-kind={status.kind}>{status.text}</p> : null}
-      <div className={styles.leadMeta}>
-        <details className={styles.inlineEvidence}>
-          <summary>依据 {formatCount(evidence.length)} 片段</summary>
-          {evidence.length > 0 ? (
-            evidence.map(fragment => <Quote key={fragment.fragmentId} fragment={fragment} link={ctx.link} creatorKey={item.creatorKey} />)
-          ) : (
-            <p className={styles.help}>暂无可回查的支持片段。</p>
-          )}
-        </details>
-        <span className={styles.sampleCount}>
-          本次取样 {sample === null || !Number.isInteger(sample) ? '未记录' : `${formatCount(sample)} 篇`}
-        </span>
-      </div>
+      <p className={styles.sampleFacts}>
+        {sample === null || !Number.isInteger(sample)
+          ? '本次实际取样篇数未记录'
+          : `已分析 ${formatCount(sample)} 篇${available !== null && Number.isInteger(available) ? ` · 分析时可用 ${formatCount(available)} 篇` : ''}`}
+        {' · '}
+        {sampleBasisText(analysis)}
+      </p>
+      <p className={styles.sampleCoverage}>样本覆盖时间：未记录</p>
+      {firstLimit ? (
+        <p className={styles.limitFirst}>
+          <span
+            ref={limitRef}
+            className={styles.limitText}
+            tabIndex={0}
+            onMouseEnter={limitEnter}
+            onMouseLeave={limitLeave}
+            onFocus={limitFocus}
+            onBlur={limitBlur}
+          >
+            {firstLimit}
+            {limitTooltip}
+          </span>
+        </p>
+      ) : null}
+      <details className={styles.inlineEvidence}>
+        <summary>{manual ? '人工调整依据' : '依据'} {formatCount(evidence.length)} 片段</summary>
+        {evidence.length > 0 ? (
+          evidence.map(fragment => <Quote key={fragment.fragmentId} fragment={fragment} link={ctx.link} creatorKey={item.creatorKey} />)
+        ) : (
+          <p className={styles.help}>暂无可回查的支持片段。</p>
+        )}
+      </details>
+      <details className={styles.basisSummary}>
+        <summary>材料范围与局限</summary>
+        <p className={styles.help}>{sampleText(analysis)}</p>
+        {restLimits.map(limit => <p key={limit} className={styles.help}>{limit}</p>)}
+        {restLimits.length === 0 && firstLimit === null ? <p className={styles.help}>已有结果没有记录样本局限。</p> : null}
+      </details>
       <p className={styles.provenance}>
-        {provenanceText(analysis, 'focus')}
+        {manual
+          ? `人工调整${at ? ` · ${humanMoment(at)}` : ' · 时间未记录'}${analysis.resultAt !== null || analysis.resultAtDisplay !== null ? ' · 自动结果仍保留' : ''}`
+          : `结果时间 ${at ? humanMoment(at) : '未记录'}`}
         {manual?.supportUnavailable ? ' · 当时支持这项判断的材料已变化或不可读，请复核；原人工记录仍保留' : ''}
       </p>
     </>
   );
 }
 
-/** 概览：结论、公开简介、发现来源、领域作品；依据与身份线索收在统一的展开区。 */
+/** 概览：结论、公开简介、身份线索、发现来源与代表作品。 */
 export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
   const { item, data } = ctx;
   const analysis = item.authorAnalysis;
@@ -152,9 +197,9 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
   const matched = item.matchedWorkRefs.length;
   return (
     <>
-      <section aria-label="作者内容倾向">
+      <section aria-label="样本内倾向">
         <div className={styles.sectionHead}>
-          <h3>作者内容倾向</h3>
+          <h3>样本内倾向</h3>
           {item.authorExternalId ? (
             <CreatorAccountResearch domain={data.domain.domainRef} platform={ctx.query.platform} author={item.authorExternalId} disabled={!ctx.writable} />
           ) : null}
@@ -167,6 +212,23 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
           <h3>公开简介</h3>
         </div>
         <Biography text={item.biography} />
+      </section>
+
+      <section aria-label="公开身份线索">
+        <div className={styles.sectionHead}>
+          <h3>公开身份线索</h3>
+        </div>
+        <JudgmentBlock
+          analysis={analysis}
+          field="institution_or_brand"
+          judgement={effectiveJudgement(analysis, 'institution_or_brand')}
+          creatorKey={item.creatorKey}
+          link={ctx.link}
+          workRef={null}
+          disabled={!ctx.writable}
+          onCorrect={ctx.onCorrect}
+          actionLabel="调整公开身份线索"
+        />
       </section>
 
       <section aria-label="发现来源">
@@ -189,9 +251,9 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
         </div>
       </section>
 
-      <section aria-label="领域作品">
+      <section aria-label="代表作品">
         <div className={styles.sectionHead}>
-          <h3>领域作品</h3>
+          <h3>代表作品</h3>
           <a href={workLink(ctx.link, item.creatorKey)} data-return-key={item.creatorKey}>
             查看全部 {formatCount(matched)} 篇 →
           </a>
@@ -214,21 +276,6 @@ export function OverviewPanel({ ctx }: { ctx: PanelContext }) {
             ? '未设置爆款标准。'
             : `爆款最低点赞 ${formatCount(data.policy.likeThreshold)}；当前范围相关爆款 ${item.viralWorkCount === null ? '未知' : `${formatCount(item.viralWorkCount)} 篇`}。`}
         </p>
-        <p className={styles.help}><strong>作者在本领域的内容倾向：</strong>{CRITERIA.focus}</p>
-        <div className={styles.identityBlock}>
-          <h4>公开身份线索</h4>
-          <JudgmentBlock
-            analysis={analysis}
-            field="institution_or_brand"
-            judgement={effectiveJudgement(analysis, 'institution_or_brand')}
-            creatorKey={item.creatorKey}
-            link={ctx.link}
-            workRef={null}
-            disabled={!ctx.writable}
-            onCorrect={ctx.onCorrect}
-            actionLabel="调整公开身份线索"
-          />
-        </div>
       </details>
     </>
   );
@@ -327,6 +374,11 @@ export function EvidencePanel({
           >
             <summary>
               <IntelligenceIcon name="chevron" expanded={open} className={styles.workChevron} />
+              <Cover
+                url={ctx.resources.byRef.get(work.workRef)?.coverUrl ?? null}
+                pending={ctx.resources.pending}
+                className={`${pageStyles.cover} ${styles.workSummaryCover}`}
+              />
               <div className={styles.workSummaryCopy}>
                 <span className={styles.workSummaryTitle} title={workTitle(work, ctx.resources)}>{workTitle(work, ctx.resources)}</span>
                 <span className={styles.workSummaryMeta} data-failed={failed || undefined}>

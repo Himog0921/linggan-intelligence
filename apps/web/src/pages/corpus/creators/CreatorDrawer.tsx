@@ -1,40 +1,57 @@
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
-import { ModalDialog } from '../../../corpus/ModalDialog';
-import { findAuthorButton } from './findAuthor';
 import { authorName, observedText, preservedLifecycle, targetHref } from './creatorsPresent';
 import { formatCount, hasWorkFilter, type CreatorQuery, type LinkContext } from './creatorsQuery';
 import type { CreatorItem, CreatorList } from './creatorsTypes';
-import { Metric, type DrawerTab } from './CreatorTable';
+import { Metric } from './Metric';
+import type { DrawerTab } from './CreatorTable';
 import { EvidencePanel, OverviewPanel, ProfilePanel, type PanelContext } from './DrawerPanels';
 import { CreatorHomepagePanel } from './CreatorHomepagePanel';
 import { Avatar } from './Media';
 import { useJoinPending } from './useCreatorWrites';
-import type { WorkResources } from './useWorkResources';
+import { mergeResources, useWorkResources, type WorkResources } from './useWorkResources';
 import pageStyles from './CreatorsPage.module.css';
 import styles from './CreatorDrawer.module.css';
 
-/** 离开本页去看原作品时记下的抽屉位置，回来时原样恢复。 */
+/** 离开本页去看原作品时记下的检查器位置，回来时原样恢复。 */
 export interface DrawerSnapshot {
   tab: DrawerTab;
   drawerScroll: number;
   expanded: string[];
 }
 
-interface CreatorDrawerProps {
+export interface FocusRequest {
+  kind: 'heading' | 'nav';
+  dir?: -1 | 1;
+  seq: number;
+}
+
+export interface CreatorDrawerProps {
+  /** 同一页面会话内每个作者常驻一个实例；非活动实例只隐藏，不卸载。 */
+  active: boolean;
   item: CreatorItem;
   data: CreatorList;
   query: CreatorQuery;
   link: LinkContext;
-  resources: WorkResources;
+  /** 列表已读到的作品资源；检查器自己的作品资源在内部合并。 */
+  listResources: WorkResources;
   initialTab: DrawerTab;
-  /** 从证据库返回后恢复的抽屉状态。 */
+  /** 从证据库返回后恢复的检查器状态。 */
   restore: Partial<DrawerSnapshot> | null;
+  /** 外部要求切换到某个页签（例如列表的「查看加入方式」明确指定观察记录）。 */
+  pendingTab: { tab: DrawerTab; seq: number } | null;
+  focusRequest: FocusRequest | null;
+  /** 当前页顺序中的位置；作者不在本页时为 null。 */
+  position: { index: number; total: number } | null;
+  width: number | null;
+  onTab: (tab: DrawerTab) => void;
+  onNavigate: (delta: -1 | 1) => void;
+  onWidth: (width: number) => void;
   onClose: () => void;
-  onCorrect: (field: string, workRef: string | null) => void;
+  onCorrect: (item: CreatorItem, field: string, workRef: string | null, resources: WorkResources) => void;
   onJoin: (item: CreatorItem, role: 'primary' | 'reference') => void;
-  /** 点了去证据库的链接：把此刻的抽屉状态交给页面保存。 */
+  /** 点了去证据库的链接：把此刻的检查器状态交给页面保存。 */
   onLeave: (creatorKey: string, snapshot: DrawerSnapshot) => void;
 }
 
@@ -45,27 +62,36 @@ const TABS: readonly { id: DrawerTab; label: string }[] = [
   { id: 'profile', label: '观察记录' },
 ];
 
-/** 抽屉自页头下沿起，覆盖右侧；页头高度会随窗口变化（窄屏页头会折行），所以量实际位置。 */
-function positionBelowHeader(dialog: HTMLDialogElement): () => void {
-  const measure = () => {
-    const shell = document.querySelector('.v7-shell');
-    const top = shell ? Math.max(0, Math.min(shell.getBoundingClientRect().top, window.innerHeight)) : 0;
-    dialog.style.setProperty('--creator-shell-top', `${top}px`);
-  };
-  measure();
-  window.addEventListener('resize', measure);
-  const header = document.querySelector('.v7-global-header');
-  const observer = header && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(measure) : null;
-  if (header) observer?.observe(header);
-  return () => {
-    window.removeEventListener('resize', measure);
-    observer?.disconnect();
-  };
-}
+const MIN_WIDTH = 560;
+const LIST_MIN_WIDTH = 600;
 
-export function CreatorDrawer({ item, data, query, link, resources, initialTab, restore, onClose, onCorrect, onJoin, onLeave }: CreatorDrawerProps) {
+export function CreatorDrawer({
+  active,
+  item,
+  data,
+  query,
+  link,
+  listResources,
+  initialTab,
+  restore,
+  pendingTab,
+  focusRequest,
+  position,
+  width,
+  onTab,
+  onNavigate,
+  onWidth,
+  onClose,
+  onCorrect,
+  onJoin,
+  onLeave,
+}: CreatorDrawerProps) {
   const titleId = useId();
   const idBase = useId();
+  const aside = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const prevButton = useRef<HTMLButtonElement>(null);
+  const nextButton = useRef<HTMLButtonElement>(null);
   const body = useRef<HTMLDivElement>(null);
   // 每个分区各记一个滚动位置；从证据库返回时，恢复离开时所在分区的位置。
   const positions = useRef<Record<DrawerTab, number>>({ overview: 0, works: 0, evidence: 0, profile: 0, [restore?.tab ?? initialTab]: restore?.drawerScroll ?? 0 });
@@ -74,14 +100,51 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(restore?.expanded ?? []));
   const joinPending = useJoinPending(item.creatorKey);
   const resizeStart = useRef<{ x: number; width: number } | null>(null);
+  const wasActive = useRef(false);
+
+  const ownRefs = [
+    ...item.representatives.map(work => work.workRef),
+    ...(item.firstSeenWorkRef ? [item.firstSeenWorkRef] : []),
+  ];
+  const ownResources = useWorkResources(data.domain.domainRef, ownRefs);
+  const resources = mergeResources(listResources, ownResources);
 
   const domainActive = data.domain.status === 'active';
   const name = authorName(item);
   const first = item.representatives[0];
   const avatarUrl = first ? (resources.byRef.get(first.workRef)?.avatarUrl ?? null) : null;
 
-  // 打开抽屉的是 ModalDialog 的 effect：本组件挂载时 <dialog> 还没 showModal，直接写 scrollTop 会被夹到 0。
-  // 等一帧再恢复；内容随后长高时重试；用户自己滚动、按键或点击后立即放弃，不把位置抢回来。
+  // 打开/切换作者后按来源放焦点：列表点开落到身份标题，上一位/下一位留在按钮上。
+  useEffect(() => {
+    if (!active) {
+      wasActive.current = false;
+      return;
+    }
+    if (focusRequest) {
+      if (focusRequest.kind === 'heading') {
+        heading.current?.focus({ preventScroll: true });
+      } else {
+        const preferred = focusRequest.dir === -1 ? prevButton.current : nextButton.current;
+        const other = focusRequest.dir === -1 ? nextButton.current : prevButton.current;
+        if (preferred && !preferred.disabled) preferred.focus({ preventScroll: true });
+        else if (other && !other.disabled) other.focus({ preventScroll: true });
+        else heading.current?.focus({ preventScroll: true });
+      }
+    } else if (!wasActive.current) {
+      heading.current?.focus({ preventScroll: true });
+    }
+    wasActive.current = true;
+  }, [active, focusRequest]);
+
+  // 外部明确指定页签（例如「查看加入方式」）：跟它走，不被通用记忆覆盖。
+  useEffect(() => {
+    if (!active || !pendingTab) return;
+    switchTab(pendingTab.tab);
+    // switchTab 依赖当前 tab 与 body；只在外部请求变化时执行。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, pendingTab?.seq]);
+
+  // 内容区滚动位置：打开/切页签后下一帧恢复；内容晚到重试；用户自己操作即放弃。
   useEffect(() => {
     const element = body.current;
     if (!element) return;
@@ -126,12 +189,13 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       element.removeEventListener('pointerdown', stop);
       element.removeEventListener('keydown', onKeyDown);
     };
-  }, [tab]);
+  }, [tab, active]);
 
   function switchTab(next: DrawerTab) {
     if (next === tab) return;
     if (body.current) positions.current[tab] = body.current.scrollTop;
     setTab(next);
+    onTab(next);
   }
 
   function onTabKeyDown(event: KeyboardEvent<HTMLElement>) {
@@ -152,23 +216,27 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
     link,
     resources,
     writable: domainActive,
-    onCorrect,
+    active,
+    onCorrect: (field, workRef) => onCorrect(item, field, workRef, resources),
     onTab: switchTab,
   };
 
+  function maxWidth(): number {
+    const parent = aside.current?.parentElement;
+    const available = parent ? parent.getBoundingClientRect().width : window.innerWidth;
+    return Math.max(320, available - LIST_MIN_WIDTH);
+  }
+
   function onResizePointerDown(event: PointerEvent<HTMLDivElement>) {
     if (window.innerWidth <= 600) return;
-    const dialog = event.currentTarget.closest('dialog');
-    if (!dialog) return;
-    resizeStart.current = { x: event.clientX, width: dialog.getBoundingClientRect().width };
+    resizeStart.current = { x: event.clientX, width: aside.current?.getBoundingClientRect().width ?? 640 };
     event.currentTarget.setPointerCapture(event.pointerId);
   }
   function onResizePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (!resizeStart.current) return;
-    const dialog = event.currentTarget.closest('dialog');
-    if (!dialog) return;
-    const width = resizeStart.current.width + resizeStart.current.x - event.clientX;
-    dialog.style.width = `${Math.min(window.innerWidth, Math.max(600, width))}px`;
+    const limit = maxWidth();
+    const proposed = resizeStart.current.width + resizeStart.current.x - event.clientX;
+    onWidth(Math.min(limit, Math.max(Math.min(MIN_WIDTH, limit), proposed)));
   }
   function onResizePointerUp(event: PointerEvent<HTMLDivElement>) {
     resizeStart.current = null;
@@ -189,21 +257,33 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
       : item.followerObservedAt
         ? `主页资料 ${followerDay ? `${followerDay[1]}-${followerDay[2]}` : item.followerObservedAt}`
         : '主页资料 时间未记录';
+  const canPrev = position !== null && position.index > 1;
+  const canNext = position !== null && position.index < position.total;
+
+  function onAsideKeyDown(event: KeyboardEvent<HTMLElement>) {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    // 内联研究确认先收自己；提示/浮层在 document 捕获阶段已处理。
+    if ((event.target as HTMLElement).closest('[data-inline-confirm]')) return;
+    event.preventDefault();
+    onClose();
+  }
 
   return (
-    <ModalDialog
-      labelledBy={titleId}
+    <aside
+      ref={aside}
       className={styles.drawer}
-      onClose={onClose}
-      restoreFocus={() => findAuthorButton(item.creatorKey)}
-      setup={positionBelowHeader}
-      closeOnBackdrop
+      aria-labelledby={titleId}
+      hidden={!active}
+      data-creator-inspector=""
+      data-creator-key={item.creatorKey}
+      style={width ? { width: `${width}px` } : undefined}
+      onKeyDown={onAsideKeyDown}
     >
       <div
         className={styles.resizeHandle}
         role="separator"
         tabIndex={0}
-        aria-label="调整作者研究抽屉宽度"
+        aria-label="调整作者检查器宽度"
         aria-orientation="vertical"
         onPointerDown={onResizePointerDown}
         onPointerMove={onResizePointerMove}
@@ -212,27 +292,36 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
         onKeyDown={event => {
           if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
           event.preventDefault();
-          const dialog = event.currentTarget.closest('dialog');
-          if (!dialog) return;
-          const width = dialog.getBoundingClientRect().width + (event.key === 'ArrowLeft' ? 24 : -24);
-          dialog.style.width = `${Math.min(window.innerWidth, Math.max(Math.min(window.innerWidth, 600), width))}px`;
+          const limit = maxWidth();
+          const current = aside.current?.getBoundingClientRect().width ?? 640;
+          const proposed = current + (event.key === 'ArrowLeft' ? 24 : -24);
+          onWidth(Math.min(limit, Math.max(Math.min(MIN_WIDTH, limit), proposed)));
         }}
       />
       <header className={styles.head}>
         <div className={styles.title}>
           <Avatar name={name} url={avatarUrl} pending={resources.pending} className={`${pageStyles.avatar} ${pageStyles.avatarLarge}`} />
-          <div>
-            <h2 id={titleId} title={name}>
-              {name}
-            </h2>
+          <div className={styles.identity}>
+            <h2 id={titleId} ref={heading} tabIndex={-1}>{name}</h2>
             <p>
               小红书 · {query.usageRole === 'reference' ? '参照材料' : '主研究材料'}
               {item.displayNameKind === 'observation_target' ? ' · 名称来自观察目标档案' : ''}
             </p>
           </div>
-          <button type="button" className={`${styles.iconButton} ${styles.close}`} aria-label="关闭作者研究" onClick={onClose}>
-            <IntelligenceIcon name="close" />
-          </button>
+          <div className={styles.navCluster}>
+            <div className={styles.navButtons}>
+              <button ref={prevButton} type="button" className={styles.navButton} disabled={!canPrev} onClick={() => onNavigate(-1)}>
+                上一位
+              </button>
+              <button ref={nextButton} type="button" className={styles.navButton} disabled={!canNext} onClick={() => onNavigate(1)}>
+                下一位
+              </button>
+              <button type="button" className={styles.iconButton} aria-label="关闭作者检查器" onClick={onClose}>
+                <IntelligenceIcon name="close" />
+              </button>
+            </div>
+            <span className={styles.position}>{position ? `本页 ${position.index}/${position.total}` : '本页 —'}</span>
+          </div>
         </div>
         <div className={styles.metrics}>
           <span>
@@ -244,8 +333,8 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
           </span>
           <span>
             <span className={styles.metricRow}>
-              <small>领域作品</small>
-              <strong>{formatCount(item.collectedWorkCount)}</strong>
+              <small>相关作品</small>
+              <strong>{formatCount(item.relatedWorkCount)}</strong>
             </span>
           </span>
           <span>
@@ -271,11 +360,6 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
               onClick={() => switchTab(entry.id)}
             >
               {entry.label}
-              {tab === entry.id ? (
-                <svg className={styles.tabMark} viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-                  <path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" />
-                </svg>
-              ) : null}
             </button>
           ))}
         </div>
@@ -315,6 +399,7 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
           <ProfilePanel ctx={context} />
         </div>
       </div>
+      <span className="v7-sr-only" aria-live="polite">{active ? name : ''}</span>
       <footer className={styles.footer}>
         <div>
           <span>{observedText(observation)}</span>
@@ -339,6 +424,6 @@ export function CreatorDrawer({ item, data, query, link, resources, initialTab, 
           )}
         </div>
       </footer>
-    </ModalDialog>
+    </aside>
   );
 }

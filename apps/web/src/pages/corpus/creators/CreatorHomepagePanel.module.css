@@ -137,18 +137,12 @@
   border-bottom-color: transparent !important;
 }
 
-.segmentMark {
+.rangeSegment button[aria-pressed='true']::after {
+  content: '';
   position: absolute;
-  left: 0;
-  bottom: 0;
-  width: 100%;
-  height: var(--lgi-space-2);
-  overflow: visible;
-  fill: none;
-  stroke: var(--lgi-signal-mark);
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  pointer-events: none;
+  inset: auto 0 0;
+  height: var(--lgi-action-rail-width);
+  background: var(--lgi-signal);
 }
 
 .grid {

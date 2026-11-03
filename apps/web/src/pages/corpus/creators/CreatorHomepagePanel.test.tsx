@@ -35,7 +35,7 @@ afterEach(() => {
 async function openHomepage() {
   const view = renderCreatorsPage();
   await view.user.click(await screen.findByRole('button', { name: '合成作者 1' }));
-  const dialog = await screen.findByRole('dialog', { name: '合成作者 1' });
+  const dialog = await screen.findByRole('complementary', { name: '合成作者 1' });
   await view.user.click(within(dialog).getByRole('tab', { name: '主页作品' }));
   return { ...view, dialog, panel: within(dialog).getByRole('tabpanel', { name: '主页作品' }) };
 }

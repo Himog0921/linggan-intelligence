@@ -41,7 +41,15 @@ const receipt = (over: Record<string, unknown> = {}) => ({
 });
 const error = (status: number, code: string): Reply => ({ status, body: { operation: 'local_read', outcome: 'unavailable', code } });
 const creators = () => kit.of('GET', '/api/local/creators');
-const cancel = () => fireEvent(screen.getAllByRole('dialog').at(-1) as HTMLElement, new Event('cancel', { cancelable: true }));
+const cancel = () => {
+  const dialog = screen.queryAllByRole('dialog').at(-1);
+  if (dialog) {
+    fireEvent(dialog, new Event('cancel', { cancelable: true }));
+    return;
+  }
+  const inspector = screen.queryByRole('complementary', { name: '合成作者 1' });
+  if (inspector) fireEvent.keyDown(inspector, { key: 'Escape' });
+};
 const row = (name: string) => screen.getByRole('button', { name }).closest('tr') as HTMLElement;
 
 async function page(list = listJson({ items: [itemJson(1), itemJson(2)] })) {
@@ -154,7 +162,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     kit.route('POST', registerPath(1), ok(receipt({ created: false, lifecycleState: 'paused', monitoringEnabled: false })));
     const { user } = await page(listJson({ items: [itemJson(1, { lifecycleState: 'paused', monitoringState: 'paused', targetRef: '30000000-0000-4000-8000-0000000000aa' })] }));
     await user.click(within(row('合成作者 1')).getByRole('button', { name: '查看加入方式' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    const drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     await user.click(within(drawer).getByRole('button', { name: '加入并保持观察已暂停' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(dialog).toHaveTextContent('该作者已有观察目标，当前为「观察已暂停」；加入后保持这个状态，不会自动恢复。');
@@ -168,7 +176,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     kit.route('POST', registerPath(1), ok(receipt({ usageRole: 'reference' })));
     const { user } = await page(listJson({ items: [itemJson(1, { hasOtherPrimaryDomain: true, existsInOtherDomains: true })] }));
     await user.click(within(row('合成作者 1')).getByRole('button', { name: '查看加入方式' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    const drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     await user.click(within(drawer).getByRole('button', { name: '按参照用途加入' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(dialog).toHaveTextContent('其他领域已有主研究关系；本领域只能按参照用途加入，不改变原巡查规则。');
@@ -198,14 +206,14 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     const { user } = await page();
     kit.route('GET', '/api/local/creators', ok(listJson({ items: [itemJson(1, { inDomain: true }), itemJson(2)] })));
     await user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    const drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     await user.click(within(drawer).getByRole('button', { name: '加入本领域观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
     await within(dialog).findByText('已完成');
     await user.click(within(dialog).getByRole('button', { name: '关闭' }));
     expect(await within(drawer).findByRole('link', { name: '查看观察目标 →' })).toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: '合成作者 1' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '合成作者 1' })).toBeInTheDocument();
   });
 });
 
@@ -379,7 +387,7 @@ describe('调整判断', () => {
   async function openCorrection(item = itemJson(1)) {
     const view = await page(listJson({ items: [item, itemJson(2)] }));
     await view.user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    const drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    const drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     return { ...view, drawer };
   }
 
@@ -434,7 +442,7 @@ describe('调整判断', () => {
       domain: DOMAIN, creatorKey: creatorKeyFor('author-1'), workRef: null, field: 'focus', value: 'vertical_tendency', reason: '简介自述了领域定位', supportFragmentIds: ['author.1.biography'],
     });
     // 抽屉保持打开，页面给出回执，列表重读。
-    expect(screen.getByRole('dialog', { name: '合成作者 1' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '合成作者 1' })).toBeInTheDocument();
     expect(await screen.findByText(/判断已保存；这一项使用你的判断/)).toBeInTheDocument();
     await waitFor(() => expect(creators().length).toBeGreaterThanOrEqual(2));
   });
@@ -534,7 +542,7 @@ describe('调整判断', () => {
     expect(within(second).getByRole('textbox', { name: /调整原因/ })).toHaveValue('新的尚未保存的说明');
     expect(within(second).queryByText('已完成')).toBeNull();
     expect(screen.queryByText(/判断已保存/)).toBeNull();
-    expect(screen.getByRole('dialog', { name: '合成作者 1' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: '合成作者 1' })).toBeInTheDocument();
   });
 });
 
@@ -543,7 +551,7 @@ describe('旧分析退役后的历史读取', () => {
     const item = itemJson(1, { works: [workJson(11, { state: 'failed', lastErrorCode: 'model_budget_exhausted', withResult: false })], authorState: 'failed', authorErrorCode: 'model_disabled', authorResult: false, focusValue: 'unknown' });
     const { user } = await page(listJson({ analysisEnabled: true, items: [item] }));
     await user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    let drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    let drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     await user.click(within(drawer).getByRole('tab', { name: '研究线索' }));
     expect(drawer).toHaveTextContent('研究未完成 · 本日额度已用尽');
@@ -551,7 +559,7 @@ describe('旧分析退役后的历史读取', () => {
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     cancel();
     await user.click(screen.getByRole('button', { name: '合成作者 1' }));
-    drawer = await screen.findByRole('dialog', { name: '合成作者 1' });
+    drawer = await screen.findByRole('complementary', { name: '合成作者 1' });
     expect(within(drawer).queryByRole('button', { name: /重试/ })).toBeNull();
     expect(kit.of('POST', '/api/local/creator-discovery-analysis/retry')).toHaveLength(0);
   });

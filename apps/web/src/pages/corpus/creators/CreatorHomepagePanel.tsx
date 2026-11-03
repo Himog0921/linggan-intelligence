@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { humanMoment } from '../../../shared/formatting';
 import { Cover } from './Media';
-import { Metric } from './CreatorTable';
+import { Metric } from './Metric';
 import { formatCount, workLink } from './creatorsQuery';
 import { getHomepagePreview, newCommandRef, startHomepagePreview, stopHomepagePreview, studyCreatorWorks, type HomepageNote } from './creatorHomepageApi';
 import { useWorkResources } from './useWorkResources';
@@ -43,17 +43,10 @@ function statusText(state: string, count: number): string {
   }
 }
 
-/** 范围切换沿用母版的朱红手绘短线；封面/列表只用黑色下划线区分。 */
-function SegmentMark() {
-  return (
-    <svg className={styles.segmentMark} viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false">
-      <path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" />
-    </svg>
-  );
-}
-
+/** 范围切换恢复直短线；手绘线只留在面包屑。 */
 export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
   const { item, data, link, resources } = ctx;
+  const confirmId = useId();
   const domain = data.domain.domainRef;
   const query = useQuery({
     queryKey: ['creator-homepage-preview', domain, item.creatorKey],
@@ -87,8 +80,9 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
 
   // The confirmation sits below the sticky selection dock in a scrolling panel. Bring it into view
   // when it opens, move focus into it, and let Escape close it without writing anything.
+  // A hidden per-author instance must not keep a document Escape listener alive.
   useEffect(() => {
-    if (!showConfirm) return;
+    if (!showConfirm || !ctx.active) return;
     const node = confirmRef.current;
     node?.scrollIntoView?.({ block: 'center' });
     node?.focus?.({ preventScroll: true });
@@ -100,7 +94,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [showConfirm]);
+  }, [showConfirm, ctx.active]);
 
   useEffect(() => {
     if (showConfirm || !returnFocus.current) return;
@@ -248,11 +242,9 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
             <div className={`${styles.segment} ${styles.rangeSegment}`} role="group" aria-label="主页作品范围">
               <button type="button" aria-pressed={filter === 'all'} onClick={() => setFilter('all')}>
                 全部 {formatCount(notes.length)}
-                {filter === 'all' ? <SegmentMark /> : null}
               </button>
               <button type="button" aria-pressed={filter === 'selected'} onClick={() => setFilter('selected')}>
                 已选 {formatCount(selectedNotes.length)}
-                {filter === 'selected' ? <SegmentMark /> : null}
               </button>
             </div>
             <div className={styles.segment} role="group" aria-label="作品排版">
@@ -293,12 +285,12 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
               已选 {formatCount(selectedNotes.length)} 篇
               {!edited && recommended.size > 0 ? <span className={styles.recommend}>系统推荐</span> : null}
             </span>
-            <ActionButton ref={studyButtonRef} aria-expanded={showConfirm} aria-controls="creator-study-confirm" disabled={!canWrite || selectedNotes.length === 0 || pending || !preview?.scopeFrozenAt || state === 'running'} variant="primary" onClick={() => { setShowConfirm(true); setFeedback(null); }}>
+            <ActionButton ref={studyButtonRef} aria-expanded={showConfirm} aria-controls={confirmId} disabled={!canWrite || selectedNotes.length === 0 || pending || !preview?.scopeFrozenAt || state === 'running'} variant="primary" onClick={() => { setShowConfirm(true); setFeedback(null); }}>
               研究已选 {formatCount(selectedNotes.length)} 篇
             </ActionButton>
           </div>
           {showConfirm ? (
-            <section ref={confirmRef} id="creator-study-confirm" className={styles.confirm} aria-label="精选研究确认" tabIndex={-1}>
+            <section ref={confirmRef} id={confirmId} className={styles.confirm} aria-label="精选研究确认" tabIndex={-1} data-inline-confirm="">
               <div className={styles.confirmHead}><h3>确认本次补充范围</h3><button className={styles.textButton} type="button" onClick={closeConfirm}>收起</button></div>
               <p>只处理当前快照中精确选定的 <strong>{formatCount(selectedNotes.length)}</strong> 篇，不自动展开其余主页作品，也不自动加入长期观察。</p>
               <div className={styles.presets}>
