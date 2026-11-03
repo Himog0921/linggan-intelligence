@@ -190,7 +190,7 @@ async fn prepare(
         ),
         None => None, // Historical image-only queued inputs retain their original scope.
     };
-    let prompt = visual::prompt_for_image_with_note_context(
+    let prompt = visual::dispatch_prompt_for_image(
         &instruction,
         prompt_version_ref,
         Some((image_role, ordinal.map(|n| n as u32))),
@@ -198,7 +198,7 @@ async fn prepare(
     );
     let mut request = model.request(
         secrets.get(workspace, model.secret_ref)?,
-        system,
+        visual::effective_system_prompt(&system),
         prompt,
         Some(visual::response_schema()),
     );

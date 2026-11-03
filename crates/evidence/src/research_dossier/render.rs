@@ -40,7 +40,9 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
         if f.structure["contentType"] == "visual_description" {
             out.push_str("视觉描述：\n");
         } else if f.structure["contentType"] == "extracted_text" {
-            out.push_str("图片文字：\n");
+            out.push_str(match f.structure["sourceRole"].as_str() {
+                Some("background") => "背景文字：\n", Some("brand") => "品牌文字：\n", Some("subtitle") => "字幕文字：\n", _ => "图片文字：\n",
+            });
         }
         out.push_str(&f.text);
         out.push_str("\n\n");
@@ -48,7 +50,7 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
             if super::quality::specific(issue) {
                 if let Some(message) = issue["message"].as_str() {
                     if seen_issues.insert((
-                        if issue["code"] == "cross_image_parameter_conflict" {
+                        if matches!(issue["code"].as_str(), Some("cross_image_parameter_conflict" | "page_order_unknown" | "image_total_unknown")) {
                             Uuid::nil()
                         } else {
                             f.source_ref

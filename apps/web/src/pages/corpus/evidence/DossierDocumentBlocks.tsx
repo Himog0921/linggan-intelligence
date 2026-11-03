@@ -50,8 +50,11 @@ function ContentBlock({ block, tags }: { block: DossierBlock; tags?: boolean }) 
   }
 }
 function ImageAttribution({ block, previous }: { block: DossierBlock; previous?: DossierBlock }) {
-  if (!block.contentType || block.contentType === previous?.contentType) return null;
-  return <p className={styles.attribution} title={block.regionLabel}>{block.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</p>;
+  const label = (value: DossierBlock | undefined) => value?.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文'
+    : value?.contentType === 'extracted_text' ? `${value.sourceRole === 'background' ? '背景文字' : value.sourceRole === 'brand' ? '品牌文字' : value.sourceRole === 'subtitle' ? '字幕文字' : '图片文字'} · 识别提取` : null;
+  const current = label(block);
+  if (!current || current === label(previous)) return null;
+  return <p className={styles.attribution} title={block.regionLabel}>{current}</p>;
 }
 function GroupContent({ value, previousRole, previousBlock }: { value: ResolvedReadingGroup; previousRole: AttributionBoundary; previousBlock?: DossierBlock }) {
   const { group, entries } = value;

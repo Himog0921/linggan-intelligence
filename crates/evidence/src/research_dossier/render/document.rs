@@ -183,7 +183,7 @@ fn render_group(
                 text.push_str(block["text"].as_str().unwrap_or(""));
             }
             let mut display = json!({"kind":if group["mode"] == "heading" {"heading"} else {"paragraph"},"text":text,"speaker":first["speaker"]});
-            for key in ["contentType", "regionRef", "regionLabel"] {
+            for key in ["contentType", "regionRef", "regionLabel", "sourceRole"] {
                 if let Some(value) = first.get(key) {
                     display[key] = value.clone();
                 }
@@ -247,16 +247,12 @@ fn render_tags(out: &mut String, dossier: &ResearchDossier, group: &Value) {
 
 fn render_block(out: &mut String, unit: &Value, block: &Value, attribution: &mut Attribution) {
     if let Some(kind) = block["contentType"].as_str() {
-        let boundary = (
-            unit["ref"].as_str().unwrap_or("").to_owned(),
-            kind.to_owned(),
-        );
+        let label = if kind == "visual_description" { "视觉描述（模型观察，非原文）" } else {
+            match block["sourceRole"].as_str() { Some("background") => "背景文字（识别提取）", Some("brand") => "品牌文字（识别提取）", Some("subtitle") => "字幕文字（识别提取）", _ => "图片文字（识别提取）" }
+        };
+        let boundary = (unit["ref"].as_str().unwrap_or("").to_owned(), label.to_owned());
         if attribution.image_type.as_ref() != Some(&boundary) {
-            out.push_str(if kind == "visual_description" {
-                "*视觉描述（模型观察，非原文）*\n\n"
-            } else {
-                "*图片文字（识别提取）*\n\n"
-            });
+            out.push_str(&format!("*{label}*\n\n"));
             attribution.image_type = Some(boundary);
         }
     } else {
