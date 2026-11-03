@@ -188,3 +188,12 @@ it('前景与背景文字切换保留归属边界，连续背景不重复标注'
   expect(screen.getAllByText('背景文字 · 识别提取')).toHaveLength(1);
   expect(screen.getAllByText('图片文字 · 识别提取')).toHaveLength(1);
 });
+
+it('多张图片的页序说明只在文末保留一次，不逐图制造核对入口', () => {
+  const issue = { key: 'page', code: 'page_order_unknown', message: '平台图片页序尚未确认', resolution: 'source_refresh' };
+  const payload = parseDossierPayload(dossierJson(1, { materials: [1, 2].map(n => dossierMaterialJson(n, { page: null, issues: [issue] })) }));
+  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  expect(screen.getAllByText(/^核对说明/)).toHaveLength(1);
+  fireEvent.click(screen.getByText(/^核对说明/));
+  expect(screen.getAllByText('平台图片页序尚未确认')).toHaveLength(1);
+});

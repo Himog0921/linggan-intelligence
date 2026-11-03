@@ -129,6 +129,7 @@ export function remainingReadingIssues(dossier: Dossier, sections: readonly Reso
   return [...dossier.coverage.issues.map(issue => ({ ...issue, displayKey: `coverage:${issue.key}` })),
     ...dossier.materials.flatMap(unit => unit.issues.map(issue => ({ ...issue, displayKey: `${unit.ref}:${issue.key}` })))].filter(issue => {
     if (issue.code === 'cloud_image_unchecked') return false;
+    if (issue.code === 'page_order_unknown' || issue.code === 'image_total_unknown') return true;
     if (shown.has(issue.displayKey)) return false;
     shown.add(issue.displayKey); return true;
   });
@@ -136,7 +137,7 @@ export function remainingReadingIssues(dossier: Dossier, sections: readonly Reso
 
 /** One disclosure per image; region-specific issues keep their location when collected. */
 export function imageReviewIssues(groups: readonly ResolvedReadingGroup[], unitRef: string): ReadingIssue[] {
-  return groups.filter(group => group.entries.some(entry => entry.unit.ref === unitRef)).flatMap(group => group.issues.map(issue => {
+  return groups.filter(group => group.entries.some(entry => entry.unit.ref === unitRef)).flatMap(group => group.issues.filter(issue => issue.code !== 'page_order_unknown' && issue.code !== 'image_total_unknown').map(issue => {
     const block = group.entries.find(entry => entry.block.ref === issue.blockRef)?.block;
     return block?.regionLabel ? { ...issue, message: `${block.regionLabel}：${issue.message}` } : issue;
   }));
