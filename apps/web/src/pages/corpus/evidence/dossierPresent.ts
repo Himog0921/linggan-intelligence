@@ -19,6 +19,7 @@ export function confirmedEmptySpeech(unit: DossierMaterial): boolean {
     && unit.reading?.adoption === 'human_edited' && unit.reading.verification === 'verified';
 }
 export function processingLabel(unit: DossierMaterial): string | null {
+  if (unit.issues.some(issue => issue.code === 'online_image_pending')) return '尚未在线识读，历史 OCR 已保留。';
   if (confirmedEmptySpeech(unit)) return '已确认无口播。';
   const processing = unit.processing;
   if (unit.sourceState === 'restricted') return null;
@@ -38,6 +39,7 @@ export function processingLabel(unit: DossierMaterial): string | null {
   return `${labels[processing.state]}${unit.blocks.length > 0 ? '，已有读本仍可读。' : '。'}`;
 }
 export function emptyMaterialNote(unit: DossierMaterial): string {
+  if (unit.issues.some(issue => issue.code === 'online_image_pending')) return '尚未在线识读，历史 OCR 已保留。';
   if (confirmedEmptySpeech(unit)) return '已确认无口播。';
   if (unit.kind === 'audio' && unit.issues.some(issue => issue.code === 'recognition_empty')) return '未取得可用转录。';
   if (unit.sourceState === 'restricted') return '当前来源受限，内容已隐藏。';

@@ -32,6 +32,65 @@ pub(crate) async fn admit_with_slot_role(
     mime: &str,
     slot_role: &str,
 ) -> Uuid {
+    admit_image_source(
+        db,
+        work,
+        ordinal,
+        bytes,
+        mime,
+        slot_role,
+        slot_role == "image" && ordinal == 1,
+    )
+    .await
+}
+
+/// One complete platform list must contain all its pages in the same package.
+pub(crate) async fn admit_known_pages(
+    db: &Database,
+    work: &str,
+    count: u32,
+    bytes: &[u8],
+    mime: &str,
+) -> Uuid {
+    fixture::submit_package(db, "content_detail", json!({"contentExternalId":work}), json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":work},"payload":{"title":"Synthetic known page metadata","bodyText":"Native body remains independent."}})).await;
+    let observations: Vec<_> = (1..=count)
+        .map(|ordinal| (ordinal, Uuid::new_v4()))
+        .collect();
+    let records: Vec<_> = observations.iter().map(|(ordinal, observation)| {
+        let uri = format!("https://media.example/{work}/{ordinal}.png");
+        json!({"kind":"media_slot","slotKey":format!("xhs:{work}:image:{ordinal}"),"observationRef":observation,
+            "slot":{"role":"image","ordinal":ordinal,"displayOrdinal":ordinal,"displayOrderBasis":"platform_explicit"},
+            "observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-21T00:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":work}})
+    }).collect();
+    fixture::submit_custom_package(db, "xhs", &["media_slots"], json!({"contentExternalId":work}), "media_slots", "xhs",
+        json!({"target":{"contentExternalId":work,"imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":count}},"layers":[fixture::coverage_layer("media_slots",i64::from(count))]}), records).await;
+    let hash = support::sha256_hex(bytes);
+    let key = format!("blobs/{hash}");
+    std::fs::write(support::prepare_output(&key).unwrap(), bytes).unwrap();
+    for (_, observation) in observations {
+        admit_media_blob(db, observation, &hash, mime, bytes.len() as i64, &key)
+            .await
+            .unwrap();
+    }
+    sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+    )
+    .bind(work)
+    .fetch_one(db.pool())
+    .await
+    .unwrap()
+}
+
+async fn admit_image_source(
+    db: &Database,
+    work: &str,
+    ordinal: u32,
+    bytes: &[u8],
+    mime: &str,
+    slot_role: &str,
+    known_page: bool,
+) -> Uuid {
     let present: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_material_content WHERE content_external_id=$1)",
     )
@@ -69,7 +128,7 @@ pub(crate) async fn admit_with_slot_role(
         record["contextContentExternalId"] = json!(context);
     }
     let mut target = json!({"contentExternalId":work});
-    if slot_role == "image" && ordinal == 1 {
+    if known_page {
         target["imageInventory"] =
             json!({"state":"complete","source":"platform_image_list","expectedPages":ordinal});
         record["slot"]["displayOrdinal"] = json!(ordinal);

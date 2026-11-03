@@ -93,6 +93,12 @@ export function readingGaps(dossier: Dossier): ReadingGap[] {
     if (key === 'videoFrames' && units.every(unit => !unit.currentRevisionRef && !unit.processing)) continue;
     const incomplete = units.filter(unit => !unit.blocks.some(hasReadingSourceText) && !confirmedEmptySpeech(unit)
       && !['not_applicable', 'known_empty', 'restricted', 'not_acquired'].includes(unit.sourceState));
+    if (key === 'images' && units.some(unit => unit.issues.some(issue => issue.code === 'online_image_pending'))) {
+      const failed = incomplete.filter(unit => unit.processing?.state === 'failed').length;
+      const unavailable = units.filter(unit => unit.sourceState === 'not_acquired').length;
+      rows.push({ key, label: '图片资料', state: '待在线识读', message: `${incomplete.length} 张图片尚未在线识读。${failed ? `其中 ${failed} 张处理失败。` : ''}${unavailable ? `另有 ${unavailable} 张原图尚未取得。` : ''}` });
+      continue;
+    }
     const processing = [...new Set(incomplete.flatMap(unit => unit.processing && unit.processing.state !== 'completed' ? [unit.processing.state] : []))];
     const note = messages[source.state];
     if (note) rows.push({ key, label, ...note });
@@ -113,7 +119,7 @@ export function readingGaps(dossier: Dossier): ReadingGap[] {
   if (missingPages.length) {
     const message = `第 ${missingPages.join('、')} 页文字待补全。`;
     const existing = rows.find(row => row.key === 'images');
-    if (existing) existing.message = message;
+    if (existing) existing.message = existing.state === '待在线识读' ? `${existing.message} ${message}` : message;
     else rows.push({ key: 'images', label: '图片文字', state: '部分可读', message });
   }
   return rows;
