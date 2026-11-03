@@ -74,14 +74,14 @@ const rowText = name =>
 
 let finished = false;
 try {
-  await step('打开页面：八列表格、命中数、分页、读取时间；外壳与旧页面同源', async () => {
+  await step('打开页面：九列表格、命中数、分页、读取时间；外壳与旧页面同源', async () => {
     const response = await page.goto(listUrl);
     assert.equal(response?.status(), 200);
     await page.getByRole('table').waitFor();
     assert.equal(await page.title(), '创作者 · 语料');
     assert.deepEqual(
       await page.getByRole('columnheader').allTextContents(),
-      ['创作者', '发现词', '内容方向', '相关作品', '领域最高赞', '作品预览', '首次发现', '观察状态'],
+      ['创作者', '粉丝', '发现词', '内容方向', '相关作品', '领域最高赞', '作品预览', '首次发现', '观察状态'],
     );
     await resultCount(`${authorTotal} 位创作者`);
     await page.getByText('1 / 2 页', { exact: true }).waitFor();
@@ -284,7 +284,7 @@ try {
     // 列表重读后，这位作者的「相关作品」变成 1。
     await page.waitForFunction(() => {
       const button = [...document.querySelectorAll('tbody button')].find(node => node.textContent === '合成作者 03');
-      return button?.closest('tr')?.querySelectorAll('td')[3]?.innerText.startsWith('1');
+      return button?.closest('tr')?.querySelectorAll('td')[4]?.innerText.startsWith('1');
     });
     assert.match(await panel.innerText(), /人工调整 · \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     await page.keyboard.press('Escape');
