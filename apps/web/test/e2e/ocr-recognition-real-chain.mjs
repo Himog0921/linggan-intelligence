@@ -147,7 +147,7 @@ try {
   await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
   const dossier = page.getByRole('tabpanel', { name: '研究底稿', exact: true });
   const document = dossier.getByRole('article', { name: '连续阅读文档', exact: true });
-  await document.getByRole('heading', { name: '图片文字', exact: true }).waitFor();
+  await document.getByRole('heading', { name: '图片资料', exact: true }).waitFor();
   assert.equal(await dossier.getByRole('button', { name: '查看来源', exact: true }).count(), 0);
   assert.equal(await dossier.getByRole('button', { name: '修正文字', exact: true }).count(), 0);
   assert.equal((await document.innerText()).match(/SYNTHETIC BRAND/g)?.length, 3, 'the continuous document retains all repeated source lines');
