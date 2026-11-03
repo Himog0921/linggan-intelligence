@@ -10,7 +10,7 @@ import {
   type LinkContext,
   type SortKey,
 } from './creatorsQuery';
-import type { CreatorItem, CreatorList } from './creatorsTypes';
+import type { CreatorItem, CreatorList, Observation } from './creatorsTypes';
 import { useTitleTooltip } from '../evidence/TitleTooltip';
 import { useJoinPending } from './useCreatorWrites';
 import { Metric } from './Metric';
@@ -43,17 +43,18 @@ function KeywordCell({ item }: { item: CreatorItem }) {
   const list = item.discoveryKeywords;
   const keyword = list[0] ?? '';
   const all = list.join('、');
-  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip } = useTitleTooltip<HTMLSpanElement>(all || '未记录发现词', 'width', {
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip, truncated } = useTitleTooltip<HTMLSpanElement>(all || '未记录发现词', 'width', {
     always: list.length > 1,
     delay: 250,
     maxWidth: 320,
   });
+  const focusable = list.length > 1 || truncated;
   return (
     <span
       ref={anchorRef}
       className={`${styles.ellipsis} ${keyword ? styles.keyword : styles.secondary}`}
-      tabIndex={list.length > 1 ? 0 : undefined}
-      aria-label={list.length > 1 ? all : undefined}
+      tabIndex={focusable ? 0 : undefined}
+      aria-label={focusable ? all : undefined}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onFocus={onFocus}
@@ -91,7 +92,7 @@ function TipWrap({ text, children, focusable = false, className }: { text: strin
 function Topics({ item }: { item: CreatorItem }) {
   const topics = item.topicHints.filter(Boolean);
   const text = topics.join('、');
-  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip } = useTitleTooltip<HTMLSpanElement>(text || '无内容方向', 'width', {
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip, truncated } = useTitleTooltip<HTMLSpanElement>(text || '无内容方向', 'width', {
     always: topics.length > 1,
     delay: 250,
     maxWidth: 320,
@@ -107,12 +108,13 @@ function Topics({ item }: { item: CreatorItem }) {
     return <span className={styles.secondary}>—</span>;
   }
   const [first, ...rest] = topics;
+  const focusable = rest.length > 0 || truncated;
   return (
     <span
       ref={anchorRef}
       className={styles.topicTags}
-      tabIndex={rest.length > 0 ? 0 : undefined}
-      aria-label={rest.length > 0 ? `内容方向：${text}` : undefined}
+      tabIndex={focusable ? 0 : undefined}
+      aria-label={focusable ? `内容方向：${text}` : undefined}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onFocus={onFocus}
@@ -361,6 +363,23 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
   );
 }
 
+/** 观察格的状态文字：保留观察中/已暂停的真实差异，链接不再统一写成「查看目标」。 */
+const TABLE_OBSERVATION_LABELS: Record<string, string> = {
+  monitoring: '观察中',
+  paused: '已暂停',
+  dismissed: '已忽略',
+  not_enabled: '已加入',
+  pending_decision: '已加入',
+  archiving: '建档中',
+  archived: '已建档',
+};
+
+function observationCellText(observation: Observation): string {
+  const state = observation.monitoringState ?? observation.lifecycleState;
+  const label = (state ? TABLE_OBSERVATION_LABELS[state] : undefined) ?? '观察状态待核对';
+  return observation.usageRole === 'reference' ? `${label} · 参照` : label;
+}
+
 /** 观察格只保留一个对应当前关系的入口：已观察去目标，未加入直接打开目标设置。 */
 function RowAction({ item, query, data, domainActive, onJoin }: CreatorTableProps & { item: CreatorItem }) {
   const pending = useJoinPending(item.creatorKey);
@@ -369,7 +388,10 @@ function RowAction({ item, query, data, domainActive, onJoin }: CreatorTableProp
     return <span className={styles.secondary}>关系待读取</span>;
   }
   if (observation.inCurrentDomain) {
-    return observation.targetRef ? <a href={targetHref(data.domain.domainRef, observation.targetRef)}>查看目标</a> : <span className={styles.secondary}>目标待核对</span>;
+    const label = observationCellText(observation);
+    return observation.targetRef
+      ? <a href={targetHref(data.domain.domainRef, observation.targetRef)}>{label}</a>
+      : <span className={styles.secondary}>{label} · 目标待核对</span>;
   }
   return (
     <button type="button" disabled={!domainActive || pending} onClick={() => onJoin(item, query.usageRole)}>

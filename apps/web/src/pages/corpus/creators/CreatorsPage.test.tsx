@@ -90,6 +90,39 @@ describe('创作者页 · 列表', () => {
     expect(await screen.findByText('注意力训练、写作业')).toBeInTheDocument();
   });
 
+  it('单条但溢出的发现词与内容方向可 Tab 取得完整提示；未截断的短文本不加停靠点', async () => {
+    defaultRoutes(
+      kit,
+      ok(listJson({ items: [
+        itemJson(1, { keywords: ['注意力训练与家庭任务启动的长期关键词'], topics: ['任务启动与晚间练习的家庭场景观察方法'] }),
+        itemJson(2, { keywords: ['注意力训练'], topics: ['任务启动'] }),
+      ] })),
+    );
+    const { user } = await loaded();
+    const longKeyword = within(rowFor('合成作者 1')).getByText('注意力训练与家庭任务启动的长期关键词');
+    const longTopic = within(rowFor('合成作者 1')).getByText('任务启动与晚间练习的家庭场景观察方法').closest('[class*="topicTags"]') as HTMLElement;
+    const shortKeyword = within(rowFor('合成作者 2')).getByText('注意力训练');
+    const shortTopic = within(rowFor('合成作者 2')).getByText('任务启动');
+    // jsdom 不做布局：按实际截断的可用宽/内容宽提供测量值，再触发重新测量。
+    Object.defineProperty(longKeyword, 'clientWidth', { configurable: true, value: 88 });
+    Object.defineProperty(longKeyword, 'scrollWidth', { configurable: true, value: 373 });
+    Object.defineProperty(longTopic, 'clientWidth', { configurable: true, value: 104 });
+    Object.defineProperty(longTopic, 'scrollWidth', { configurable: true, value: 341 });
+    act(() => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    await waitFor(() => expect(longKeyword).toHaveAttribute('tabindex', '0'));
+    await waitFor(() => expect(longTopic).toHaveAttribute('tabindex', '0'));
+    expect(shortKeyword).not.toHaveAttribute('tabindex');
+    expect(shortTopic).not.toHaveAttribute('tabindex');
+
+    act(() => longKeyword.focus());
+    await waitFor(() => expect(document.querySelector('[data-title-tooltip]')).toHaveTextContent('注意力训练与家庭任务启动的长期关键词'));
+    act(() => longTopic.focus());
+    await waitFor(() => expect(document.querySelector('[data-title-tooltip]')).toHaveTextContent('任务启动与晚间练习的家庭场景观察方法'));
+    await user.keyboard('{Escape}');
+  });
+
   it('内容方向读取失败时不写成「—」：单行显示研究未完成，完整原因在提示里', async () => {
     defaultRoutes(kit, ok(listJson({ items: [itemJson(1, { authorState: 'failed', authorErrorCode: 'ai_provider_failed', topics: [] })] })));
     const { user } = await loaded();
@@ -176,16 +209,19 @@ describe('创作者页 · 列表', () => {
     expect(screen.getByRole('button', { name: /^已加入观察/ })).toBeDisabled();
   });
 
-  it('观察格只有一个入口：已加入去观察目标，未加入直接打开目标设置，暂停不另叠操作', async () => {
+  it('观察格只有一个入口：已加入的观察中/已暂停都是目标链接，未加入直接打开目标设置', async () => {
     defaultRoutes(
       kit,
-      ok(listJson({ items: [itemJson(1, { inDomain: true }), itemJson(2, { hasOtherPrimaryDomain: true, existsInOtherDomains: true }), itemJson(3, { lifecycleState: 'paused', monitoringState: 'paused' })] })),
+      ok(listJson({ items: [itemJson(1, { inDomain: true }), itemJson(2, { hasOtherPrimaryDomain: true, existsInOtherDomains: true }), itemJson(3, { lifecycleState: 'paused', monitoringState: 'paused' }), itemJson(4, { inDomain: true, lifecycleState: 'paused', monitoringState: 'paused' })] })),
     );
     const { user } = await loaded();
-    const joined = within(rowFor('合成作者 1')).getByRole('link', { name: '查看目标' });
+    const joined = within(rowFor('合成作者 1')).getByRole('link', { name: '观察中' });
     expect(joined).toHaveAttribute('href', expect.stringContaining('/collection/targets?domain='));
     expect(joined.getAttribute('href')).toContain('drawer=30000000');
-    expect(rowFor('合成作者 1').querySelectorAll('td')[8]?.textContent).toBe('查看目标');
+    expect(rowFor('合成作者 1').querySelectorAll('td')[8]?.textContent).toBe('观察中');
+    const pausedJoined = within(rowFor('合成作者 4')).getByRole('link', { name: '已暂停' });
+    expect(pausedJoined.getAttribute('href')).toContain('drawer=30000000-0000-4000-8000-000000000004');
+    expect(rowFor('合成作者 4').querySelectorAll('td')[8]?.textContent).toBe('已暂停');
     const blocked = within(rowFor('合成作者 2')).getByRole('button', { name: '加入观察' });
     expect(rowFor('合成作者 2').querySelectorAll('td')[8]?.textContent).toBe('加入观察');
     await user.click(blocked);

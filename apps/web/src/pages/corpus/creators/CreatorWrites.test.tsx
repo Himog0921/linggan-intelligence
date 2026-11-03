@@ -67,10 +67,9 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     expect(dialog).toHaveTextContent('把「合成作者 1」加入「合成领域一」的观察名单。');
     expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeChecked();
     expect(within(dialog).getByRole('radio', { name: /只作参照/ })).not.toBeChecked();
-    expect(dialog).toHaveTextContent('这一步会：');
-    expect(dialog).toHaveTextContent('登记这位作者为本机观察目标（已登记过则沿用，不重复建立）');
-    expect(dialog).toHaveTextContent('这一步不会：');
-    for (const text of ['立即采集作品、评论或主页', '开启或关闭巡查，也不改变已有的巡查规则', '调用模型']) expect(dialog).toHaveTextContent(text);
+    expect(dialog).toHaveTextContent('加入名单并建立领域关系；本次不启动采集或巡查。');
+    expect(dialog).not.toHaveTextContent('这一步会：');
+    expect(dialog).not.toHaveTextContent('这一步不会：');
     expect(kit.calls.filter(call => call.method === 'POST')).toHaveLength(0);
     await user.click(within(dialog).getByRole('button', { name: '取消' }));
     expect(screen.queryByRole('dialog')).toBeNull();
@@ -95,7 +94,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     expect(dialog).toHaveTextContent('已把「合成作者 1」加入「合成领域一」的观察名单。已新登记这位作者。巡查尚未开启。');
     await waitFor(() => expect(creators()).toHaveLength(2));
     await user.click(within(dialog).getByRole('button', { name: '关闭' }));
-    expect(await within(row('合成作者 1')).findByRole('link', { name: '查看目标' })).toBeInTheDocument();
+    expect(await within(row('合成作者 1')).findByRole('link', { name: '观察中' })).toBeInTheDocument();
   });
 
   it('连点确认只发一次请求', async () => {
@@ -178,7 +177,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     expect(dialog).toHaveTextContent('其他领域已有主研究关系；本领域只能按参照用途加入，不改变原巡查规则。');
     expect(within(dialog).getByRole('radio', { name: /只作参照/ })).toBeChecked();
     expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeDisabled();
-    expect(dialog).toHaveTextContent('建立这位作者与本领域的关系（用途：参照）');
+    expect(dialog).toHaveTextContent('加入名单并建立领域关系；本次不启动采集或巡查。');
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
     await within(dialog).findByText('已完成');
     expect(kit.of('POST', registerPath(1))[0]?.body).toEqual({ domain: DOMAIN, usageRole: 'reference' });
@@ -191,7 +190,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     expect(within(dialog).getByRole('radio', { name: /纳入本领域研究/ })).toBeChecked();
     await user.click(within(dialog).getByRole('radio', { name: /只作参照/ }));
-    expect(dialog).toHaveTextContent('建立这位作者与本领域的关系（用途：参照）');
+    expect(dialog).toHaveTextContent('加入名单并建立领域关系；本次不启动采集或巡查。');
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
     await within(dialog).findByText('已完成');
     expect(kit.of('POST', registerPath(1))[0]?.body).toEqual({ domain: DOMAIN, usageRole: 'reference' });
@@ -250,7 +249,7 @@ describe('迟到的回执不改写之后打开的对话框（#384 发现 5）', 
     expect(stillB).not.toHaveTextContent('合成作者 1');
     expect(within(stillB).getByRole('button', { name: '确认加入' })).toBeEnabled();
     // A 那一行随列表刷新变成已加入。
-    expect(await within(row('合成作者 1')).findByRole('link', { name: '查看目标' })).toBeInTheDocument();
+    expect(await within(row('合成作者 1')).findByRole('link', { name: '观察中' })).toBeInTheDocument();
     // B 仍然可以正常完成。
     await user.click(within(stillB).getByRole('button', { name: '确认加入' }));
     await within(stillB).findByText('已完成');

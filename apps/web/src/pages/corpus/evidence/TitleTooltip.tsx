@@ -23,6 +23,8 @@ export interface TitleTooltipController<T extends HTMLElement> {
   onPointerDown: () => void;
   /** 容器被隐藏或切走时立即收起：提示是 portal，不能留在原处。 */
   close: () => void;
+  /** 可见内容是否被截断；调用方可用它决定是否给这一段文字增加键盘停靠点。 */
+  truncated: boolean;
   tooltip: ReactNode;
 }
 
@@ -45,6 +47,7 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
   const tipRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const [truncated, setTruncated] = useState(false);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const openNow = useRef(false);
@@ -84,6 +87,20 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
       ? element.scrollWidth > element.clientWidth + 1
       : element.scrollHeight > element.clientHeight + 1;
   }, [always]);
+
+  // 单条但溢出的文字也需要键盘取得完整提示；测量只在结果变化时更新，避免布局循环。
+  const measureTruncated = useCallback(() => {
+    const next = isTruncated();
+    setTruncated(current => (current === next ? current : next));
+  }, [isTruncated]);
+
+  // 字体、视口或外层布局变化后重新判断是否截断；元素自身宽度由下方的 ResizeObserver 负责。
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onResize = () => measureTruncated();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, [measureTruncated]);
 
   const updatePosition = useCallback(() => {
     const anchor = anchorRef.current;
@@ -216,6 +233,7 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
     const anchor = anchorRef.current;
     if (!anchor || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
+      measureTruncated();
       if (!isTruncated()) {
         close();
         return;
@@ -224,7 +242,7 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
     });
     observer.observe(anchor);
     return () => observer.disconnect();
-  }, [close, isTruncated, text, updatePosition]);
+  }, [close, isTruncated, measureTruncated, text, updatePosition]);
 
   const tooltip = open && typeof document !== 'undefined'
     ? createPortal(
@@ -252,5 +270,5 @@ export function useTitleTooltip<T extends HTMLElement>(text: string, truncation:
     )
     : null;
 
-  return { anchorRef, onEnter, onLeave, onFocus, onBlur, onPointerDown, close, tooltip };
+  return { anchorRef, onEnter, onLeave, onFocus, onBlur, onPointerDown, close, truncated, tooltip };
 }
