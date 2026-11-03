@@ -42,14 +42,23 @@ function location(row: Json): Pick<DossierBlock, 'bbox' | 'time'> {
 export function parseBlock(row: Json): DossierBlock {
   const ref = str(row, 'ref'); if (ref === '') throw new ShapeError('ref');
   const kind = choice(row.kind, ['heading', 'paragraph', 'quote', 'gap', 'list', 'table', 'dialogue'], 'kind');
-  if (Object.keys(row).some(key => !['ref', 'kind', 'text', 'items', 'ordered', 'start', 'columns', 'rows', 'turns', 'speaker', 'bbox', 'time', 'issues', 'level', 'contentType', 'regionRef', 'regionLabel'].includes(key))) throw new ShapeError('block.field');
+  if (Object.keys(row).some(key => !['ref', 'kind', 'text', 'items', 'ordered', 'start', 'columns', 'rows', 'turns', 'speaker', 'bbox', 'time', 'issues', 'level', 'contentType', 'regionRef', 'regionLabel', 'sourceRole', 'parameters'].includes(key))) throw new ShapeError('block.field');
   if ((kind !== 'list' && (row.ordered !== undefined || row.start !== undefined)) || (kind !== 'heading' && row.level !== undefined)) throw new ShapeError('block.content');
   const contentType = row.contentType === undefined ? undefined : choice(row.contentType, ['extracted_text', 'visual_description'], 'contentType');
   const regionRef = row.regionRef === undefined ? undefined : str(row, 'regionRef');
   const regionLabel = row.regionLabel === undefined ? undefined : str(row, 'regionLabel');
   if ((regionRef === undefined) !== (regionLabel === undefined) || regionRef?.trim() === '' || regionLabel?.trim() === '' || (regionRef !== undefined && contentType === undefined)) throw new ShapeError('block.region');
   if (contentType === 'visual_description' && (!['paragraph', 'list'].includes(kind) || row.speaker !== 'unconfirmed')) throw new ShapeError('block.visualAttribution');
-  const base = { ref, ...(contentType === undefined ? {} : { contentType }), ...(regionRef === undefined ? {} : { regionRef, regionLabel }), ...location(row), ...(row.speaker === undefined ? {} : { speaker: speaker(row.speaker) }), ...(row.issues === undefined ? {} : { issues: list(row, 'issues', parseIssue) }) };
+  const sourceRole = row.sourceRole === undefined ? undefined : choice(row.sourceRole, ['main_title', 'body', 'chapter_heading', 'subtitle', 'background', 'ui', 'brand', 'call_to_action', 'other', 'uncertain'], 'sourceRole');
+  if (sourceRole !== undefined && contentType === undefined) throw new ShapeError('sourceRole');
+  const parameters = row.parameters === undefined ? undefined : list(row, 'parameters', parameter => {
+    if (Object.keys(parameter).length !== 4 || Object.keys(parameter).some(key => !['subject', 'attribute', 'value', 'basis'].includes(key))) throw new ShapeError('parameter');
+    const subject = str(parameter, 'subject'), value = str(parameter, 'value');
+    if (!subject.trim() || !value.trim() || Array.from(subject).length > 300 || Array.from(value).length > 300) throw new ShapeError('parameter.text');
+    return { subject, value, attribute: choice(parameter.attribute, ['rating', 'age', 'players', 'duration'], 'parameter.attribute'), basis: choice(parameter.basis, ['package', 'author_experience', 'rule'], 'parameter.basis') };
+  });
+  if (parameters !== undefined && (parameters.length > 50 || contentType !== 'extracted_text')) throw new ShapeError('parameters');
+  const base = { ref, ...(sourceRole === undefined ? {} : { sourceRole }), ...(parameters === undefined ? {} : { parameters }), ...(contentType === undefined ? {} : { contentType }), ...(regionRef === undefined ? {} : { regionRef, regionLabel }), ...location(row), ...(row.speaker === undefined ? {} : { speaker: speaker(row.speaker) }), ...(row.issues === undefined ? {} : { issues: list(row, 'issues', parseIssue) }) };
   const shapes = ['text', 'items', 'columns', 'rows', 'turns'].filter(key => row[key] !== undefined);
   const allowed = kind === 'table' ? ['columns', 'rows'] : kind === 'list' ? ['items'] : kind === 'dialogue' ? ['turns'] : ['text'];
   if (shapes.length !== allowed.length || shapes.some(key => !allowed.includes(key))) throw new ShapeError('block.content');

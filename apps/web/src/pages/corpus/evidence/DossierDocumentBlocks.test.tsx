@@ -163,3 +163,17 @@ it('在线过渡中的未识读和失败未知页全部计数', () => {
   dossier.coverage.imageInventory.missingPages = [];
   expect(readingGaps(dossier)).toContainEqual({ key: 'images', label: '图片资料', state: '待在线识读', message: '2 张图片尚未在线识读。其中 1 张处理失败。' });
 });
+
+it('同图连续文字只标一次类型，切换视觉观察时保留边界和原表列', () => {
+  const common = { speaker: 'unconfirmed' as const, contentType: 'extracted_text' as const, regionRef: 'r', regionLabel: '左栏', sourceRole: 'body' as const };
+  mount([
+    { ...common, ref: 'a', kind: 'paragraph', text: '可以做' },
+    { ...common, ref: 'b', kind: 'table', columns: ['阶段', '时间'], rows: [['过渡', '5–10 分钟']], parameters: [{ subject: '过渡', attribute: 'duration', value: '5–10 分钟', basis: 'rule' }] },
+    { ...common, ref: 'c', kind: 'paragraph', contentType: 'visual_description', text: '蓝色阅读卡覆盖页面中部。' },
+    { ...common, ref: 'd', kind: 'paragraph', text: '不要做' },
+  ]);
+  expect(screen.getAllByText('图片文字 · 识别提取')).toHaveLength(2);
+  expect(screen.getAllByText('视觉描述 · 模型观察，非原文')).toHaveLength(1);
+  expect(screen.getByRole('columnheader', { name: '时间' })).toBeVisible();
+  expect(screen.getByText('蓝色阅读卡覆盖页面中部。')).toBeVisible();
+});

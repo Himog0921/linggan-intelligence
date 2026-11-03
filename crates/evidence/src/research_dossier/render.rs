@@ -1,6 +1,7 @@
 use super::{ResearchDossier, content};
 use crate::creator_discovery::{Fragment, hash};
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 pub fn context_sources(dossier: &ResearchDossier) -> Vec<Value> {
     dossier.fragments.iter().map(|f|{
@@ -27,6 +28,7 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
     }) {
         out.push_str("图片文字与视觉描述分列；视觉描述是模型观察，不作作者原文引用。核对状态以来源记录为准。\n\n");
     }
+    let mut seen_issues = std::collections::BTreeSet::new();
     for (index, f) in fragments.iter().enumerate() {
         out.push_str(&format!("[S{}] {}\n", index + 1, field_label(&f.field)));
         if f.speaker == "other" {
@@ -43,9 +45,18 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
         out.push_str(&f.text);
         out.push_str("\n\n");
         for issue in &f.issues {
-            if issue["code"] != "cloud_image_unchecked" {
+            if super::quality::specific(issue) {
                 if let Some(message) = issue["message"].as_str() {
-                    out.push_str(&format!("> 待确认：{message}\n"));
+                    if seen_issues.insert((
+                        if issue["code"] == "cross_image_parameter_conflict" {
+                            Uuid::nil()
+                        } else {
+                            f.source_ref
+                        },
+                        message.to_owned(),
+                    )) {
+                        out.push_str(&format!("> 待确认：{message}\n"));
+                    }
                 }
             }
         }
@@ -179,7 +190,6 @@ mod tests {
             "[查看原图](</api/local/media/example>)",
             "图片文字（识别提取）",
             "视觉描述（模型观察，非原文）",
-            "区域：左栏",
             "仅在安静时进行。",
             "左栏有手势示意。",
         ] {

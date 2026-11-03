@@ -84,6 +84,8 @@ impl Endpoint {
                                     region["location"] = json!("合成图片中部");
                                     region["visualDescription"] = json!("合成图形位于文字右侧");
                                     region["uncertainties"] = json!([]);
+                                    region["table"] = json!(null);
+                                    region["parameters"] = json!([]);
                                 }
                                 output["limitations"] = json!(["合成图片边缘已裁切，范围未知"]);
                             }

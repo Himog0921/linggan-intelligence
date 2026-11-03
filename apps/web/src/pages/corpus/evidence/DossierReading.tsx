@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { DossierGroup, EmptySpeechNotes, TranscriptGroups } from './DossierDocumentBlocks';
+import { DossierGroup, EmptySpeechNotes, TranscriptGroups, ParameterConflicts } from './DossierDocumentBlocks';
 import { endingGroupAttribution, readingGaps, resolveReadingSections, SECTION_LABELS } from './dossierDocumentModel';
 import { materialLabel } from './dossierPresent';
 import type { Dossier, DossierMaterial } from './dossierTypes';
@@ -19,7 +19,8 @@ export function DossierReading({ dossier, titleRendered = false, onSource }: { d
     {!dossier.note.displayTitle?.trim() && sections.length === 0 ? <p className={styles.note}>暂无可读文字。</p> : null}
     {sections.map(({ section, groups }) => <section key={section.ref} aria-label={SECTION_LABELS[section.kind]} className={styles.readingGroup}>
       <h3 className={styles.readingHeading}>{SECTION_LABELS[section.kind]}</h3>
-      {section.kind === 'audio' ? <TranscriptGroups groups={groups} prefix={prefix}/> : groups.map((value, index) => <DossierGroup key={value.group.ref} value={value} prefix={prefix} previousRole={endingGroupAttribution(groups[index - 1])}/>)}
+      {section.kind === 'images' ? <ParameterConflicts materials={dossier.materials}/> : null}
+      {section.kind === 'audio' ? <TranscriptGroups groups={groups} prefix={prefix}/> : groups.map((value, index) => <DossierGroup key={value.group.ref} value={value} prefix={prefix} previousRole={endingGroupAttribution(groups[index - 1])} previousBlock={value.entries[0]?.unit.ref === groups[index - 1]?.entries.at(-1)?.unit.ref ? groups[index - 1]?.entries.at(-1)?.block : undefined}/>)}
     </section>)}
     {gaps.length ? <section aria-label="待补内容">{gaps.map(gap => <p key={gap.key} className={styles.note}>{gap.label}：{gap.state}。{gap.message}</p>)}</section> : null}
     <EmptySpeechNotes materials={dossier.materials}/>

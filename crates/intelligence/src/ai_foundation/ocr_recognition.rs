@@ -109,16 +109,88 @@ fn unique_image_sources(sources: Vec<Source>) -> Vec<Source> {
     unique
 }
 
+pub(super) async fn native_note_context_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work: Uuid,
+    as_of: &str,
+) -> Result<crate::ocr_recognition_schema::NativeNoteContext, FoundationError> {
+    use crate::ocr_recognition_schema::{NativeNoteContext, NoteContextField};
+    let mut dossiers = linggan_evidence::research_dossier::read_in(tx, &[work], as_of).await?;
+    let dossier = dossiers.remove(&work).ok_or(FoundationError::NotFound)?;
+    let title = dossier.note["platformTitle"]
+        .as_str()
+        .zip(dossier.note["titleSource"]["sourceRef"].as_str())
+        .and_then(|(text, source)| {
+            source.parse().ok().map(|source_ref| NoteContextField {
+                source_ref,
+                text: text.into(),
+            })
+        });
+    let body = dossier
+        .materials
+        .iter()
+        .find(|unit| {
+            unit["kind"] == "body"
+                && unit["sourceState"] == "present"
+                && unit["reading"]["generatedBy"] == "platform"
+        })
+        .and_then(|unit| {
+            unit["sourceRef"]
+                .as_str()
+                .and_then(|source| source.parse().ok())
+                .map(|source_ref| NoteContextField {
+                    source_ref,
+                    text: unit["blocks"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(linggan_evidence::research_dossier::content::block_text)
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                })
+        });
+    Ok(NativeNoteContext { title, body })
+}
+
+pub(super) async fn frozen_note_context_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work: Uuid,
+    frozen: &crate::ocr_recognition_schema::FrozenNoteContext,
+) -> Result<crate::ocr_recognition_schema::NativeNoteContext, FoundationError> {
+    let context = native_note_context_in(tx, work, &frozen.as_of).await?;
+    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **tx)
+        .await?;
+    let current = native_note_context_in(tx, work, &now).await?;
+    if context.sha256() != frozen.sha256
+        || context.source_refs() != frozen.source_refs
+        || current.sha256() != frozen.sha256
+        || current.source_refs() != frozen.source_refs
+    {
+        return Err(FoundationError::AdmissionDenied(vec![
+            "ocr_context_changed".into(),
+        ]));
+    }
+    Ok(context)
+}
+
 async fn scope_in(
-    conn: &mut sqlx::PgConnection,
+    conn: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work: Uuid,
     config: Uuid,
-) -> Result<(Value, Vec<Source>), FoundationError> {
+) -> Result<
+    (
+        Value,
+        Vec<Source>,
+        crate::ocr_recognition_schema::FrozenNoteContext,
+    ),
+    FoundationError,
+> {
     let cfg: Option<Uuid> = sqlx::query_scalar(
         "SELECT model_config_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
     )
     .bind(config)
-    .fetch_one(&mut *conn)
+    .fetch_one(&mut **conn)
     .await?;
     let cfg = cfg.ok_or(FoundationError::ConfigurationIncomplete)?;
     let model = transport_store::load_frozen_in(conn, cfg).await?;
@@ -126,11 +198,21 @@ async fn scope_in(
     if sources.is_empty() {
         return Err(FoundationError::NotFound);
     }
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **conn)
+        .await?;
+    let note_context = native_note_context_in(conn, work, &as_of).await?;
+    let frozen_context = crate::ocr_recognition_schema::FrozenNoteContext {
+        as_of,
+        source_refs: note_context.source_refs(),
+        sha256: note_context.sha256(),
+    };
     let images:Vec<Value>=sources.iter().map(|s|json!({"blobSha256":s.blob_sha256,"materializationRef":s.materialization_ref,"slotKey":s.slot_key,"aliases":s.aliases,"ordinal":s.ordinal,"cover":s.cover})).collect();
-    let sha=crate::research_text::content_hash(&json!({"workRef":work,"taskConfigRef":config,"connectionVersionRef":model.connection_version_ref,"modelId":model.model_id,"endpointUrl":model.base_url,"images":images}).to_string());
+    let sha=crate::research_text::content_hash(&json!({"workRef":work,"taskConfigRef":config,"connectionVersionRef":model.connection_version_ref,"modelId":model.model_id,"endpointUrl":model.base_url,"images":images,"noteContextSha256":frozen_context.sha256}).to_string());
     Ok((
         json!({"sha256":sha,"imageCount":sources.len(),"modelLabel":model.model_id,"endpointUrl":model.base_url,"images":sources.iter().map(|s|json!({"slotKey":s.slot_key,"ordinal":s.ordinal,"role":if s.cover{"cover"}else if s.ordinal.is_some(){"page"}else{"unknown"},"originalUrl":s.original_url})).collect::<Vec<_>>()}),
         sources,
+        frozen_context,
     ))
 }
 async fn ready_scope_in(
@@ -138,7 +220,7 @@ async fn ready_scope_in(
     work: Uuid,
     config: Uuid,
 ) -> Result<Value, FoundationError> {
-    let (scope, _) = scope_in(&mut *tx, work, config).await?;
+    let (scope, _, _) = scope_in(tx, work, config).await?;
     admission::check_queue_configuration(tx, TaskKey::OcrRecognition, config, false).await?;
     let allowed: bool = sqlx::query_scalar(
         "SELECT COALESCE((SELECT e.allowed FROM linggan_ai_task_config c
@@ -174,7 +256,7 @@ pub async fn start_run(
         return Ok(r);
     }
     let config:Uuid=sqlx::query_scalar("SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key='ocr_recognition' FOR UPDATE").fetch_one(&mut *c.tx).await?;
-    let (scope, sources) = scope_in(&mut c.tx, work, config).await?;
+    let (scope, sources, note_context) = scope_in(&mut c.tx, work, config).await?;
     if scope["sha256"].as_str() != Some(request.expected_scope_sha256.as_str()) {
         return Err(FoundationError::Conflict);
     }
@@ -224,7 +306,10 @@ pub async fn start_run(
         }
         inputs.push(BatchInput {
             item_key: item.to_string(),
-            input: InputRef::OcrRecognitionItem { item_ref: item },
+            input: InputRef::OcrRecognitionItem {
+                item_ref: item,
+                note_context: Some(note_context.clone()),
+            },
         })
     }
     let h = batch_store::input_hash(TaskKey::OcrRecognition, &inputs, false)?;

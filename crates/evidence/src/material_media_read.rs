@@ -78,20 +78,23 @@ async fn read_media_batch(
             let slots = slots
                 .remove(content_ref)
                 .expect("requested slot projection exists");
-            let derivatives = derivatives
+            let mut derivatives = derivatives
                 .remove(content_ref)
                 .unwrap_or_else(|| project_derivative_rows(Vec::new()));
-            let ocr = canonical_ocr_projection(
-                dossiers
-                    .remove(content_ref)
-                    .as_ref()
-                    .map(|dossier| dossier.materials.as_slice())
-                    .unwrap_or_default(),
-            );
-            (
-                *content_ref,
-                project_media_for_read(slots, derivatives, ocr, overview),
-            )
+            let dossier = dossiers.remove(content_ref);
+            let materials = dossier
+                .as_ref()
+                .map(|d| d.materials.as_slice())
+                .unwrap_or_default();
+            let ocr = canonical_ocr_projection(materials);
+            let audio = canonical_reading_projection(materials, &["audio"]);
+            // Historical jobs are retained, but cannot determine current transcript status.
+            derivatives.2 = audio.state;
+            let mut projection = project_media_for_read(slots, derivatives, ocr, overview);
+            if !overview {
+                projection.resource["transcript"]["resources"] = Value::Array(audio.resources);
+            }
+            (*content_ref, projection)
         })
         .collect())
 }
@@ -395,7 +398,11 @@ struct OcrReadProjection {
 /// OCR status follows the exact same current/source/empty/page owner as dossier reading.
 /// Only references and status leave this adapter; OCR text is never copied into media resources.
 fn canonical_ocr_projection(materials: &[Value]) -> OcrReadProjection {
-    let resources: Vec<Value> = materials.iter().filter(|unit| matches!(unit["kind"].as_str(), Some("image" | "video_frame"))).map(|unit| {
+    canonical_reading_projection(materials, &["image", "video_frame"])
+}
+
+fn canonical_reading_projection(materials: &[Value], kinds: &[&str]) -> OcrReadProjection {
+    let resources: Vec<Value> = materials.iter().filter(|unit| unit["kind"].as_str().is_some_and(|kind| kinds.contains(&kind))).map(|unit| {
         let blocks = unit["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
         let has_gaps = blocks.iter().any(|block| block["kind"] == "gap");
         let current = unit["currentRevisionRef"].is_string();

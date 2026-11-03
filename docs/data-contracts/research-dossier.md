@@ -34,13 +34,19 @@ STANDARD-DOSSIER-001 更新：平台非空标题优先，否则从明确封面�
 
 Mog 于 2026-11-03 确认 DeepSeek 在线识图为图片信息提取主方案。验收重点是上下文完整、信息归属正确、研究可用，不要求每字完全准确。原文提取与模型视觉观察分开；识别输出仍为未经人工核验的补充材料。此前 `ocr-readable.v2/local-v6` 区域整理候选未发布，真实复杂图片验证未达标，已退出本包生产接线；既有普通 OCR 兼容能力保留，不把它当主方案。
 
-在线执行复用现有显式选择、模型连接、冻结来源、逐图执行、失败停止及人工读本优先流程；GET 不触发模型，不自动批量回填。运行时模型配置、发布及历史批量处理分别需要对应授权。本包代码采用 `ocr-visual-audit.v2`，实际外部验证采用 DeepSeek `deepseek-flash` 图片输入；测试回执不代表运行配置已切换。
+在线执行复用现有显式选择、模型连接、冻结来源、逐图执行、失败停止及人工读本优先流程；GET 不触发模型，不自动批量回填。运行时模型配置、发布及历史批量处理分别需要对应授权。本包当前质量候选采用 `ocr-visual-audit.v3`，实际外部验证采用 DeepSeek `deepseek-flash` 图片输入；测试回执不代表运行配置已切换。
 
-每图返回 `titlePresence/titleText/regions/unreadable/limitations`。每个 region 必有 `regionRef/text/role/legibility/bbox/location/visualDescription/uncertainties`，按阅读顺序排列。`text` 保留可见文字及条件、否定、对比两端、单位；只允许机械合并换行，不概括、不按常识补写。`visualDescription` 只描述可见对象、空间或图示关系，不复述正文、不推断诊断/意图。账号与导航属于 ui，不作图片标题；无文字照片 text 为空。bbox 是模型候选定位，不冒充像素核验结果。限制与不确定项独立保留，不以 JSON 有效推断识别正确。标题候选与标题区域不一致时，只撤销 titleText、降级 titlePresence 为 uncertain 并追加明确 limitation；保留区域原文与原始回包，不为标题问题拒绝整图正文，不提升 ui 角色。
+每图返回 `titlePresence/titleText/regions/unreadable/limitations`。每个 region 必有 `regionRef/text/role/legibility/bbox/location/visualDescription/uncertainties/table/parameters`，按阅读顺序排列。`text` 保留可见文字及条件、否定、对比两端、单位；只允许机械合并换行，不概括、不按常识补写。`visualDescription` 只描述可见对象、空间或图示关系，不复述正文、不推断诊断/意图。账号与导航属于 ui，不作图片标题；无文字照片 text 为空。bbox 是模型候选定位，不冒充像素核验结果。限制与不确定项独立保留，不以 JSON 有效推断识别正确。标题候选与标题区域不一致时，只撤销 titleText、降级 titlePresence 为 uncertain 并追加明确 limitation；保留区域原文与原始回包，不为标题问题拒绝整图正文，不提升 ui 角色。
 
-canonical 使用现有 `materials[].blocks`，新增可选 `contentType: extracted_text | visual_description`、成对的 `regionRef/regionLabel`。同一区域的原文和视觉描述拥有独立块、共享区域标识；视觉描述只允许 paragraph/list，speaker 必为 unconfirmed，不能参与图片标题回退。图片身份和原图入口归属 material，不由模型生成。转换版本为 `cloud-manual-v4`，规则 `cloud-ocr-observation.v4`；既有 v3 云读本仍按其已持久化 canonical 内容读取。整图 limitations 和区域 uncertainties 同时传入 UI、Markdown、研究 fragments。
+canonical 使用现有 `materials[].blocks`，新增可选 `contentType: extracted_text | visual_description`、成对的 `regionRef/regionLabel`。同一区域的原文和视觉描述拥有独立块、共享区域标识；视觉描述只允许 paragraph/list，speaker 必为 unconfirmed，不能参与图片标题回退。图片身份和原图入口归属 material，不由模型生成。转换候选版本为 `cloud-manual-v5`，规则 `cloud-ocr-observation.v5`；既有 v3/v4 云读本仍按其已持久化 canonical 内容读取。整图 limitations 和区域 uncertainties 同时传入 UI、Markdown、研究 fragments。
 
 UI 与 Markdown 按同一 readingView 显示图片资料，每张图提供已有原图入口，分别标注“图片文字（识别提取）”和“视觉描述（模型观察，非原文）”。 阅读页每张图片的具体疑点合并为一个默认收起的“核对说明”，展开后保留区域位置；无疑点不显示空入口。通用未核对状态由 reading.verification 在图片标题旁简短表达，不再生成 cloud_image_unchecked 问题。Markdown 将具体核对说明置于文末。AI fragments（含 structure.issues）过滤历史 cloud_image_unchecked，具体缺口不删除；文本输入的类型说明只在开头出现一次；context_sources 显式携带 verification（verified/unchecked/null），评论研究保留该可选字段，旧快照不补写字段以保持原指纹。AI context 使用 `image_substantive_text` 与 `image_visual_description` 区分两类，并保留原材料/读本/块/区域来源、位置和问题。图片页序未知时保持未知与既有观察顺序，不从语义猜页序，不把局部样本说成整篇图片已完成。
+
+质量候选补充：noteContext 仅使用冻结 asOf 的平台原生标题和正文，批次存来源 refs/hash/asOf；派发时重核当前资格与内容一致。它只帮助判断主题，不是图内原文，不得用于补写图片字符。阅读色卡的颜色/透明覆盖关系属于主题视觉信息，不能按排版装饰丢弃。上下文变化或撤回会停止当前 run，不自动重发。
+
+表格保留供应商 raw text，canonical 只显示一份 `table`（columns/rows）；每个表格单元格必须锚定原 text。`sourceRole` 保留图内角色，ui 导航存原块但不进入阅读正文；`parameters` 只索引当前图内明确对象的 rating/age/players/duration 和 package/author_experience/rule 依据，不生成事实。跨图仅比较同对象/同参数/同依据，输出两侧原值和原图入口，不自动裁定；显式选择后从所选块重新计算，不能泄漏未选择内容。人工修改正文会移除不再有原文依据的机器位置/参数/角色元数据。
+
+页面按同图连续类型显示标签，具体区域保留于核对位置/定位信息；跨图参数冲突显示一次可核对提示，普通具体疑点默认收起。AI 不重复携带通用角色提醒，同一来源的具体疑点仅一次。实况图的动态附件没有已取得读本时不成为必需音轨/视频帧缺口；独立视频、已取得实况读本和原媒体库存继续保留。转录状态读取当前底稿，历史 ASR 队列不决定现态。
 
 ## 一份内容，按需表示
 

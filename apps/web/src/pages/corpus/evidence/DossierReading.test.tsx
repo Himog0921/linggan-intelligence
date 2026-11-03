@@ -210,3 +210,16 @@ it.each([false, true])('未知页码的全 gap 不冒充完成；含有效文字
     expect(screen.queryByText('内容就绪')).not.toBeInTheDocument();
   }
 });
+
+it.each(['works', 'document'])('%s 保留跨图冲突和两张原图入口，正文不重复疑点', surface => {
+  const issue = { key: 'conflict', code: 'cross_image_parameter_conflict', message: '山河之旅时长：30min；15分钟。', resolution: 'reading_edit' };
+  const payload = parseDossierPayload(dossierJson(1, { materials: [
+    dossierMaterialJson(1, { issues: [issue], originalUrl: '/api/local/media/a' }),
+    dossierMaterialJson(2, { issues: [issue], originalUrl: '/api/local/media/b' }),
+  ] }));
+  render(surface === 'works' ? <DossierReading dossier={payload.dossier}/> : <DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  expect(screen.getByLabelText('跨图参数待核对')).toBeVisible();
+  expect(screen.getAllByText('山河之旅时长：30min；15分钟。', { exact: false })).toHaveLength(1);
+  expect(screen.getByRole('link', { name: '核对图片资料 1' })).toHaveAttribute('href', '/api/local/media/a');
+  expect(screen.getByRole('link', { name: '核对图片资料 2' })).toHaveAttribute('href', '/api/local/media/b');
+});

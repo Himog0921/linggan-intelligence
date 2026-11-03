@@ -13,6 +13,7 @@ pub mod historical;
 mod inventory;
 pub mod native;
 mod projection;
+pub(crate) mod quality;
 mod reading;
 mod render;
 mod selection;

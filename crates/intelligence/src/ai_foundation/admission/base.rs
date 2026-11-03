@@ -146,7 +146,7 @@ pub(crate) async fn check_queue_input_scope(
             .bind(config).fetch_one(&mut **tx).await?;
         let material = match task {
             TaskKey::OcrRecognition => {
-                let InputRef::OcrRecognitionItem { item_ref } = input else {
+                let InputRef::OcrRecognitionItem { item_ref, .. } = input else {
                     return Err(FoundationError::Invalid);
                 };
                 let available: bool = sqlx::query_scalar(

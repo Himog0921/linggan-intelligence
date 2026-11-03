@@ -11,6 +11,7 @@ type Entry<'a> = (&'a Value, &'a Value);
 struct Attribution {
     role: Option<String>,
     audio_unit: Option<String>,
+    image_type: Option<(String, String)>,
 }
 
 impl Attribution {
@@ -245,13 +246,22 @@ fn render_tags(out: &mut String, dossier: &ResearchDossier, group: &Value) {
 }
 
 fn render_block(out: &mut String, unit: &Value, block: &Value, attribution: &mut Attribution) {
-    if let Some(label) = block["regionLabel"].as_str() {
-        out.push_str(&format!("*区域：{}*\n\n", text::escape(label)));
-    }
-    match block["contentType"].as_str() {
-        Some("visual_description") => out.push_str("*视觉描述（模型观察，非原文）*\n\n"),
-        Some("extracted_text") => out.push_str("*图片文字（识别提取）*\n\n"),
-        _ => attribution.render(out, unit, block),
+    if let Some(kind) = block["contentType"].as_str() {
+        let boundary = (
+            unit["ref"].as_str().unwrap_or("").to_owned(),
+            kind.to_owned(),
+        );
+        if attribution.image_type.as_ref() != Some(&boundary) {
+            out.push_str(if kind == "visual_description" {
+                "*视觉描述（模型观察，非原文）*\n\n"
+            } else {
+                "*图片文字（识别提取）*\n\n"
+            });
+            attribution.image_type = Some(boundary);
+        }
+    } else {
+        attribution.image_type = None;
+        attribution.render(out, unit, block);
     }
     if let (Some(start), Some(end)) = (
         block["time"]["startMs"].as_i64(),
@@ -333,13 +343,20 @@ fn render_issue(
     location: &str,
     seen: &mut BTreeSet<String>,
 ) {
-    if issue["code"] == "cloud_image_unchecked" {
+    if !super::super::quality::specific(issue) {
         return;
     }
     let Some(message) = issue["message"].as_str() else {
         return;
     };
-    let identity = issue["key"].as_str().unwrap_or(message);
+    let identity = message;
+    let scope = if issue["code"] == "page_order_unknown"
+        || issue["code"] == "cross_image_parameter_conflict"
+    {
+        "note"
+    } else {
+        scope
+    };
     if seen.insert(format!("{scope}:{identity}")) {
         out.push_str(&format!(
             "> {location} · 待确认：{}\n\n",

@@ -2,7 +2,7 @@ import { EvidenceLabel } from './EvidenceLabel';
 import { Fragment, useId, useMemo, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { humanMoment } from '../../../shared/formatting';
-import { DossierGroup, ReadingIssues, EmptySpeechNotes, TranscriptGroups } from './DossierDocumentBlocks';
+import { DossierGroup, ReadingIssues, EmptySpeechNotes, TranscriptGroups, ParameterConflicts } from './DossierDocumentBlocks';
 import { DossierExportDialog } from './DossierExportDialog';
 import { DossierFocusDialog } from './DossierFocusDialog';
 import { DossierIcon } from './DossierIcon';
@@ -80,13 +80,14 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
       {sections.map(({ section, groups }, index) => <section key={section.ref} className={styles.section} id={readingAnchor(prefix, section.ref)} data-section-ref={section.ref} data-reading-anchor={section.ref} tabIndex={-1} aria-labelledby={readingAnchor(prefix, `${section.ref}:title`)}>
         <header className={styles.sectionIndex}><span className={styles.sectionNumber}>{String(index + 1).padStart(2, '0')}</span><h2 id={readingAnchor(prefix, `${section.ref}:title`)}>{SECTION_LABELS[section.kind]}</h2></header>
         <div className={`${styles.content} ${section.kind === 'publication' && groups.every(group => group.group.mode === 'tags' || group.entries.every(entry => entry.unit.kind === 'tags')) ? styles.onlyTags : ''}`}>
+          {section.kind === 'images' ? <ParameterConflicts materials={dossier.materials}/> : null}
           {section.kind === 'audio' ? audioRuns(groups).map((run, runIndex, runs) => <div key={run.groups[0]?.group.ref} className={styles.audioRun}>
             <div className={styles.transcriptSummary}><span>{runs.length > 1 ? `口播 ${runIndex + 1} · ` : ''}{transcriptStats(run.groups)}</span>{run.groups.some(group => group.group.mode === 'transcript_paragraph') ? <button type="button" className={styles.focusTrigger} onClick={() => openFocus(run)}><DossierIcon name="expand"/>专注阅读</button> : null}</div>
             <TranscriptGroups groups={run.groups} prefix={prefix}/>
           </div>) : groups.map((value, groupIndex) => <Fragment key={value.group.ref}>
             {section.gaps.filter(gap => gap.beforeGroupRef === value.group.ref).map((gap, gapIndex) => <ImageGap key={gapIndex} pages={gap.missingPages}/>)}
             {value.entries[0]?.unit.kind === 'image' && value.entries[0].unit.ref !== groups[groupIndex - 1]?.entries[0]?.unit.ref ? <ImageSource unit={value.entries[0].unit}/> : null}
-            <DossierGroup value={value} prefix={prefix} previousRole={endingGroupAttribution(groups[groupIndex - 1])} hideIssues={value.entries[0]?.unit.kind === 'image'}/>
+            <DossierGroup value={value} prefix={prefix} previousRole={endingGroupAttribution(groups[groupIndex - 1])} previousBlock={value.entries[0]?.unit.ref === groups[groupIndex - 1]?.entries.at(-1)?.unit.ref ? groups[groupIndex - 1]?.entries.at(-1)?.block : undefined} hideIssues={value.entries[0]?.unit.kind === 'image'}/>
             {value.entries[0]?.unit.kind === 'image' && value.entries[0].unit.ref !== groups[groupIndex + 1]?.entries[0]?.unit.ref ? <ReadingIssues issues={imageReviewIssues(groups, value.entries[0].unit.ref)}/> : null}
           </Fragment>)}
           {section.gaps.filter(gap => gap.beforeGroupRef === null).map((gap, gapIndex) => <ImageGap key={gapIndex} pages={gap.missingPages}/>)}
