@@ -139,8 +139,23 @@ fn comparable(attribute: &str, value: &str) -> String {
         .replace(['–', '—', '～', '~'], "-");
     match attribute {
         "duration" => value.replace("分钟", "min").replace("mins", "min"),
-        "players" => value.replace("players", "人").replace("player", "人"),
-        "age" => value.replace("years", "岁").replace("year", "岁"),
+        "players" | "age" => {
+            let numeric = if attribute == "players" {
+                value.replace("players", "").replace("player", "").replace('人', "")
+            } else {
+                value.replace("years", "").replace("year", "").replace('岁', "")
+            };
+            if numeric.chars().any(|c| c.is_ascii_digit())
+                && numeric.chars().all(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.')) {
+                numeric
+            } else { value }
+        },
+        "rating" => {
+            let stars: String = value.chars().filter(|c| *c != '\u{fe0f}').collect();
+            if !stars.is_empty() && stars.chars().all(|c| matches!(c, '★' | '⭐' | '🌟')) {
+                format!("filled-stars:{}", stars.chars().count())
+            } else { value }
+        },
         _ => value,
     }
 }
@@ -186,6 +201,15 @@ mod tests {
         d.materials[0]["blocks"][0]["text"] = json!("30min");
         rebuild(&mut d);
         assert!(d.materials.iter().all(|m| m["issues"] == json!([])));
+    }
+    #[test]
+    fn equivalent_star_glyphs_and_explicit_age_player_units_are_not_conflicts() {
+        for (attribute, left, right) in [("rating", "★★★★★", "🌟🌟🌟🌟🌟"), ("rating", "⭐⭐⭐⭐⭐", "★★★★★"), ("age", "5+", "5岁+"), ("players", "2-4", "2–4人")] {
+            assert_eq!(comparable(attribute, left), comparable(attribute, right));
+        }
+        for (attribute, left, right) in [("rating", "★★★", "★★★★"), ("rating", "★★★☆☆", "★★★"), ("age", "5+", "5"), ("age", "不到5岁", "5"), ("duration", "30", "15-30分钟")] {
+            assert_ne!(comparable(attribute, left), comparable(attribute, right));
+        }
     }
     #[test]
     fn equivalent_units_and_restricted_sources_do_not_create_conflicts() {
