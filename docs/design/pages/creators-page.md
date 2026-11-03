@@ -6,7 +6,7 @@
 > 事实来源: 真实代码（`apps/web/src/pages/corpus/creators/`、`apps/web/src/corpus/`、`apps/api/src/local_web/creators.rs`、`apps/api/src/local_web/corpus_shell_api.rs`、`crates/evidence/src/creator_discovery.rs`）；[CREATOR-DISCOVERY-001](../../plans/active/creator-discovery-001.md) 的产品范围；[WEB-REACT-001 阶段 D 分册](../../plans/active/web-react-001-d-corpus.md) §3.1 能力清单（逐项记录旧页能力与 React 落点）；PR #384（未合并）的只读调查结论
 > 冲突时以谁为准: Mog 最新确认、真实运行/代码/数据合同、DEC-0010；能力清单与本规格冲突时以代码和能力清单为准，并回改本文
 > 页面层级与模式: L1；`LIDS-PAT-001` 的 Corpus Explorer（读数条、筛选、连续表格、分页），依据抽屉为右侧受限的 Split Evidence Inspector；不新造页面骨架
-> 当前实现证据: D1历史实现见[原验收](../acceptance/web-react-001-d1-acceptance.md)；LIDS-UI-001/B 续修随 PR #457 上线，见[本轮验收](../acceptance/lids-ui-implementation-001-acceptance.md)；第 1 步随 PR #521、第 2 步随 PR #523、第 3 步随 PR #525 合并部署；2026-11-02 起的整页改版已在 2026-11-03 合并到 main（`b06e5ab0`），尚未部署
+> 当前实现证据: D1历史实现见[原验收](../acceptance/web-react-001-d1-acceptance.md)；LIDS-UI-001/B 续修随 PR #457 上线，见[本轮验收](../acceptance/lids-ui-implementation-001-acceptance.md)；第 1 步随 PR #521、第 2 步随 PR #523、第 3 步随 PR #525 合并部署；2026-11-02 起的整页改版已在 2026-11-03 合并到 main（`b06e5ab0`），并以 `9d4c5cb2` 部署到本机 3001 运行
 > 合并状态: 2026-11-03 整页改版候选 `5999714c` 以合并提交 `b06e5ab0` 进入 main；下列 2026-11-02/03 各节保留写作时的候选状态，不再表示当前未合并
 
 ## 2026-11-02 · 创作者整页改版（隔离候选，未合并）
@@ -67,7 +67,7 @@ Lydia 与 Philip 按 `ce5f4bd3` 复看后指出三处增量，在同一 worktree
 - **加入确认收紧**：保留作者与领域、两种用途及其差异、暂停/其他领域主研究等必要提示；删除「这一步会／不会」两组列表，改为一句「加入名单并建立领域关系；本次不启动采集或巡查。」，弹窗高度从约 748px 降到约 549px。业务行为、请求体与确认边界不变。
 - **验收**：浏览器实测单条长发现词（可用 88px、内容 248px）与单条长方向（可用 104px、内容 223px）均可聚焦并显示完整提示；观察格逐行为「已暂停」「观察中」「加入观察」，已加入行只有一个目标链接；紧凑弹窗 549px。全量测试、typecheck、ESLint、build、`lids:verify`、治理与 React 边界检查通过。
 
-## 2026-11-03 · 第三轮局部状态操作调整（已合并 `b06e5ab0`，未部署）
+## 2026-11-03 · 第三轮局部状态操作调整（已合并 `b06e5ab0`，已部署 `9d4c5cb2`）
 
 lie-cheng 体验后提出、Lydia 定规则的三处局部调整，其余已通过范围不变：
 
