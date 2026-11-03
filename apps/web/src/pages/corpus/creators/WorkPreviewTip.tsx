@@ -10,13 +10,13 @@ import type { WorkResources } from './useWorkResources';
 import styles from './CreatorsPage.module.css';
 
 /** 持续悬停这么久才展开；离开单元格时尚未打开的计时立即取消。 */
-const OPEN_DELAY = 500;
+const OPEN_DELAY = 800;
 const CLOSE_DELAY = 120;
 const GAP = 8;
 const MARGIN = 8;
 
 /**
- * 表格里的作品预览。单元格只有缩图与单行标题：指针持续停留 500ms 才出现完整封面、
+ * 表格里的作品预览。单元格只有缩图与单行标题：指针持续停留 800ms 才出现完整封面、
  * 完整标题、已知指标与原作品入口；快速划过不会延后弹出。
  * 键盘聚焦标题先给完整标题提示；按 ↓ 展开预览并把焦点移入，Esc 关闭并回到标题。
  */

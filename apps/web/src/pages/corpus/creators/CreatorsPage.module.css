@@ -722,20 +722,49 @@
 
 /* 观察格只有一个入口：已观察去目标，未加入打开目标设置。 */
 .rowAction {
+  display: flex;
+  align-items: center;
   overflow: hidden;
-  line-height: calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 状态操作统一为 32px 白底细墨边次级按钮；链接仍保留跳转语义，不用朱红实底。 */
 .page .rowAction :is(button, a) {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--lgi-focus);
-  font-size: var(--lgi-text-data);
+  box-sizing: border-box;
+  display: inline-block;
+  flex: 0 1 auto;
+  max-width: 100%;
+  height: var(--lgi-space-8);
+  overflow: hidden;
+  border: var(--lgi-action-border-width) solid var(--lgi-border-strong);
+  padding: 0 var(--lgi-space-2);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font-family: var(--lgi-font-sans);
+  font-size: var(--lgi-type-control-size);
   font-weight: var(--lgi-weight-regular);
+  line-height: calc(var(--lgi-space-8) - var(--lgi-action-border-width) - var(--lgi-action-border-width));
   text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.page .rowAction :is(button, a):not(:disabled):hover {
+  border-color: var(--lgi-ink);
+  background: var(--lgi-canvas-low);
+}
+
+.page .rowAction :is(button, a):focus-visible {
+  outline: var(--lgi-action-rail-width) solid var(--lgi-action-focus);
+  /* 单元格宽度紧，外扩焦点框会被裁切；改为内收，键盘焦点仍清楚可见。 */
+  outline-offset: calc(-1 * var(--lgi-action-rail-width));
+}
+
+.page .rowAction button:disabled {
+  border-color: var(--lgi-border);
+  color: var(--lgi-muted);
+  cursor: not-allowed;
 }
 
 .metric {
@@ -763,23 +792,6 @@
   flex: none;
   color: var(--lgi-muted);
   font-size: var(--lgi-text-label);
-}
-
-.rowAction {
-  margin-top: var(--lgi-space-1);
-  overflow: hidden;
-  line-height: calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.page .rowAction button {
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--lgi-focus);
-  font-size: var(--lgi-text-data);
-  font-weight: var(--lgi-weight-regular);
 }
 
 /* 分析状态：文字之外加一个小色点，在路上 / 需要处理 / 依据不足各有各的颜色，但颜色不是唯一的载体。 */
@@ -901,7 +913,7 @@
   .analysisButton { margin-left:auto; }
 }
 @container (min-width:600px) {
-  .table :is(th,td):last-child { position:sticky; right:0; z-index:var(--lgi-z-stage); border-left:1px solid var(--lgi-hairline); }
+  .table :is(th,td):last-child { position:sticky; right:0; z-index:var(--lgi-z-stage); }
   .table th:last-child { z-index:var(--lgi-z-sticky); }
 }
 @container (max-width:600px) {

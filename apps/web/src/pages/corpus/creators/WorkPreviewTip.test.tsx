@@ -28,16 +28,19 @@ afterEach(() => {
 });
 
 describe('作品预览浮层', () => {
-  it('持续悬停 500ms 才出现；快速划过立即取消，不在离开后补弹', async () => {
+  it('持续悬停 800ms 才出现；快速划过立即取消，不在离开后补弹', async () => {
     const { cell } = setup();
     fireEvent.mouseEnter(cell);
     expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull();
-    // 约 40ms 就离开：待打开计时必须取消，500ms 后不应弹出。
+    // 约 40ms 就离开：待打开计时必须取消，800ms 后不应弹出。
     fireEvent.mouseLeave(cell);
-    await new Promise(resolve => setTimeout(resolve, 700));
+    await new Promise(resolve => setTimeout(resolve, 1000));
     expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull();
 
     fireEvent.mouseEnter(cell);
+    // 800ms 之前不出现，避免退回旧的 500ms 计时。
+    await new Promise(resolve => setTimeout(resolve, 600));
+    expect(screen.queryByRole('dialog', { name: /^作品预览：/ })).toBeNull();
     const dialog = await screen.findByRole('dialog', { name: /^作品预览：/ }, { timeout: 2000 });
     fireEvent.mouseLeave(cell);
     fireEvent.mouseEnter(dialog);
