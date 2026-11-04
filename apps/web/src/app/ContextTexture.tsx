@@ -5,7 +5,7 @@ import styles from './ContextTexture.module.css';
 // The "pond" preset is the recorded origin; explicit single-field values win.
 const PatternWaves = lazy(() => import('../shared/patternWaves/PatternWaves'));
 
-export const CONTEXT_PATTERN_SETTINGS = {
+const CONTEXT_PATTERN_SETTINGS = {
   preset: 'pond',
   pattern: 'square',
   wave: 'silk',
