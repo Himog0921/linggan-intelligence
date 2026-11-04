@@ -10,6 +10,13 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-11-04 · 研究底稿 V1.0 已冻结
+
+- [11 月变更记录](progress/2026-11.md)：本次冻结与交付边界。
+
+- [产品冻结基线](product/research-dossier-v1.md)：当前能力、30+9 篇验收汇总、已知缺口与后续变更准入。产品 V1.0，机器接口仍为 `research-dossier.v2`。
+- [唯一底稿合同](data-contracts/research-dossier.md)：字段与读取行为；不另建平行材料合同。
+
 ## 2026-10-28 · 评论目录与概览回归
 
 - [评论目录与概览回归修复](audits/comment-overview-recovery-2026-10-28.md)：索引入口、既有布局恢复、当前新流程统计与合成证明边界。
