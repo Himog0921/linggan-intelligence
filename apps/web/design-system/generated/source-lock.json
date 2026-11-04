@@ -1,5 +1,5 @@
 {
-  "fingerprint": "91b153563c081537f5fc52c36231f1d79726131680f4d107fa304af0825fa44d",
+  "fingerprint": "0e98ef6bb71ad5d273826d06cb7e9a2670610cc05cb517845af68e8308bd79ef",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -303,7 +303,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "7fcc92384578d9626cb8cc22cf5a9654c2b7ac21442030a8e2d7106e8d445ba3"
+      "sha256": "0bbeba4acf9214fcdf230baa9e8c6ec765fb08810f3a412895114d4360fcf3ea"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -311,7 +311,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsScopePicker.tsx",
-      "sha256": "37be8210d9e8edb21db53487fc74ab871385f6f2ffa1fee44afd744afa16c5af"
+      "sha256": "b3ce30b8d6715c0f64beccb3aae2959d6f5860a44c62ee3decb87a533d133bab"
     },
     {
       "path": "apps/web/src/pages/ops/OverviewBlocks.tsx",
@@ -351,11 +351,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/WorkspacePage.tsx",
-      "sha256": "cf4591e1e6932df852ef313db5d88da21ff9eb02582b1cd42a82cbb1087cbeeb"
+      "sha256": "4e4d4bc5964b25c42514c47bb7ed09e4c7b0971500f7bb886c5a8ddf3916fc86"
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
-      "sha256": "a15612783d7a6fd61f41837339bb59722514cbca052a312a681c6a2b3a40bc2f"
+      "sha256": "5571c6be141e2a73300be3f27562f218b1c41ff079a2ddbe71445989be6c50f2"
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.module.css",
@@ -387,15 +387,15 @@
     },
     {
       "path": "apps/web/src/shared/ContextBar.tsx",
-      "sha256": "a39e2fdb28b4cd68b475b2fe2bed72dd499c4b2d16aafe4cc71e50c3439f6d3f"
+      "sha256": "08cc13b0b512615ab3be8647b3dba18da92fd99e4559dd6d88f256539f3c3f10"
     },
     {
       "path": "apps/web/src/shared/ContextTabs.tsx",
-      "sha256": "719d5df189675d548b67ef8e51ddecf19a17e307c4b359d09ef787f6d04aea64"
+      "sha256": "2ec4d548db9febfe4576b5d8d761bc667e14210e80132fd2700820d8af335f53"
     },
     {
       "path": "apps/web/src/shared/DomainScopePicker.tsx",
-      "sha256": "6d8ed217e662814ae7454289d7c3a88b4363e519647f5926d1f437c87f930277"
+      "sha256": "3e726340c15d988c0035fb190933c7e3d55a14c16f62d78ea665d9aa84b296ab"
     },
     {
       "path": "apps/web/src/shared/FindField.module.css",
@@ -439,7 +439,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "a2c7156d58db58ae25d9ccc4a4aaee08b9bef17f1d2a93070ba746f99c98da68"
+      "sha256": "6803d72b92b5d7d0af09c8a11392b0b85fb95e7e00d9b0248ae86fd244a402c0"
     },
     {
       "path": "apps/web/src/styles/typography.css",
@@ -451,11 +451,11 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "b4129125cd98af4a7140280fdef0c1686bc72e2ad11661dd0fc9facb8713dbdf"
+      "sha256": "af65b5f91784768fe700efad742909c1e8340a523591c6d0e519e60cc2c4c427"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
-      "sha256": "45433f8528381f6e6aeaa27a1f39e5d99bad7e57a6b0292077d9599bd0905766"
+      "sha256": "7679e2eeafa7c30661a871982ce86d6e721f96e352f20f24482fb94e83820d75"
     },
     {
       "path": "docs/design/lids/color.json",
