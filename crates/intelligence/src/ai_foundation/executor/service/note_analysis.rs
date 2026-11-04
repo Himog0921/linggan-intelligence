@@ -60,7 +60,9 @@ async fn prepare(
             contract: owner::CONTRACT,
             reference: request_ref,
             fingerprint: &packet.fingerprint(),
-            payload: json!({"material":packet.model_material()}),
+            // JSON-object and prompt-only transports do not transmit a native schema.
+            // Supply the frozen result contract as model-visible data in every mode.
+            payload: json!({"material":packet.model_material(),"resultSchema":crate::note_analysis::response_schema()}),
             response_schema: ResponseSchema {
                 name: "note_analysis".into(),
                 schema: crate::note_analysis::response_schema(),

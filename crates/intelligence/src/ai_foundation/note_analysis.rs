@@ -80,9 +80,8 @@ async fn reasons(
             system.push_str("\n\n");
             system.push_str(&skill);
         }
-        let prompt = json!({"material":p.model_material(),"instruction":instruction}).to_string();
-        let schema = crate::note_analysis::response_schema().to_string();
-        if super::transport::estimate_input_tokens(&system, &format!("{prompt}{schema}"))
+        let prompt = json!({"material":p.model_material(),"instruction":instruction,"resultSchema":crate::note_analysis::response_schema()}).to_string();
+        if super::transport::estimate_input_tokens(&system, &prompt)
             > limit as u64
         {
             reasons.push("input_too_large".into());
