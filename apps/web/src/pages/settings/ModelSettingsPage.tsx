@@ -46,7 +46,7 @@ export function ModelSettingsPage() {
   const legacySurface = data ? legacy === 'models' ? <AiModelSection data={data} action={action}/> : legacy === 'automation' ? <><CreativeBudget/><AiTaskSection data={data} action={action}/></> : legacy === 'skills' ? <AiSkillSection data={data} action={action}/> : <AiHealthSection data={data} action={action}/> : null;
   const viewSurface = data ? view === 'capabilities' ? <><CreativeBudget/><AiCapabilities data={data} action={action}/></> : view === 'models' ? <AiConnections data={data} action={action}/> : view === 'runs' ? <AiRuns data={data}/> : <AiAdvanced data={data} action={action}/> : null;
 
-  return <AppShell active={null} boundaryLabel={data?.synthetic ? '合成隔离环境' : '本机设置'} crumb={crumb} meta={meta}>
+  return <AppShell active={null} boundaryLabel={data?.synthetic ? '合成隔离环境' : '本机设置'} contextBar={{ breadcrumb: crumb, meta }}>
     {legacy ? <main className={[legacyStyles.page, styles.root].join(' ')} data-ai-settings-page aria-labelledby="ai-settings-page-title">
       <h1 id="ai-settings-page-title" className="v7-sr-only">AI 设置</h1>
       <div className={styles.inner}>{notice}{data ? <div className={legacyStyles.workspace}>
