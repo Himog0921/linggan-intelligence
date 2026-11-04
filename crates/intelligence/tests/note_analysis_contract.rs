@@ -160,3 +160,14 @@ fn tags_use_base_judgments_while_methods_can_use_explanations() {
     let accepted = accept(value, &p).unwrap();
     assert_eq!(accepted.method_candidates[0].basis_ids, vec!["x1"]);
 }
+
+#[test]
+fn source_provenance_changes_content_identity_but_platform_counts_do_not() {
+    let mut p = packet();
+    p.coverage = json!({"sourceOrigins":[{"citationIds":["body"],"materialKind":"body"}],"platformCommentCount":2});
+    let mut q = p.clone();
+    q.coverage["platformCommentCount"] = json!(99);
+    assert_eq!(p.fingerprint(), q.fingerprint());
+    q.coverage["sourceOrigins"][0]["materialKind"] = json!("image");
+    assert_ne!(p.fingerprint(), q.fingerprint());
+}

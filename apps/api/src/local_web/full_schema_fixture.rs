@@ -443,5 +443,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0188_creation_structural_templates','48d5252927ca8dca8406bc95a061ecbf66ef0363dd9451c325d6942c39787953');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0189_creation_title_dispatch','cf8fe7273fedb4593b92f198ce38fb2ab5b5d9963ef78b35650420d08eedbdc0');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0190_creation_ai_experience_material','804dfc5d00d429e28d48a4a166cdb0870b9144060b6f91e3d5cffb837e646ecb');\n",
-    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0191_note_analysis','e7de3e04df9f98f3a0bbba3221faad45e2a1bc0f1ebe200408399a06efc07e29');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0191_note_analysis','a8054ad0918e6700f2edcec63e12b496d471154860d01729afe6580c2a8e7cb8');\n",
 );

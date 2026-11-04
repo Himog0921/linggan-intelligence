@@ -55,8 +55,14 @@ impl Packet {
     }
     pub fn fingerprint(&self) -> String {
         crate::research_text::content_hash(
-            &serde_json::json!([self.domain_ref, self.work_ref, self.scope, self.sources])
-                .to_string(),
+            &serde_json::json!([
+                self.domain_ref,
+                self.work_ref,
+                self.scope,
+                self.sources,
+                self.coverage.get("sourceOrigins")
+            ])
+            .to_string(),
         )
     }
     pub fn hash(&self) -> String {

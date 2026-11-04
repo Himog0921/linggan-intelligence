@@ -303,6 +303,22 @@ async fn four_notes_complete_and_preserve_boundaries() {
         })
         .await
         .unwrap();
+        let frozen: Value = sqlx::query_scalar(
+            "SELECT input_manifest FROM linggan_note_analysis_request WHERE request_ref=$1",
+        )
+        .bind(id)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        let origins = frozen["coverage"]["sourceOrigins"].as_array().unwrap();
+        let material_count = frozen["sources"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|s| s["kind"] == "material")
+            .count();
+        assert_eq!(origins.len(), material_count);
+        assert!(origins.iter().any(|o| o["materialKind"] == "body"));
         let latest = owner::latest(&db, dossier::DOMAIN, *work, Scope::NoteWithComments)
             .await
             .unwrap();
