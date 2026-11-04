@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import styles from './BreadcrumbTexture.module.css';
 
 // Keep OGL/GLSL out of unrelated routes, and out of the initial lightweight page shell.
@@ -17,22 +17,21 @@ function queryPattern(): GrainPattern {
 
 export function BreadcrumbTexture() {
   const pattern = queryPattern();
-  const [canRender, setCanRender] = useState(false);
-
-  useEffect(() => {
-    // Static dark fallback is intentional: no fake Canvas 2D imitation.
-    if (typeof WebGL2RenderingContext === 'undefined') return;
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    if (window.matchMedia?.('(max-width: 820px)').matches) return;
+  // GPU capability is an initial environment property, not a React effect.
+  // A static dark strip is preferable to a low-fidelity 2D imitation.
+  const [canRender] = useState(() => {
+    if (typeof WebGL2RenderingContext === 'undefined') return false;
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return false;
+    if (window.matchMedia?.('(max-width: 820px)').matches) return false;
     try {
       const probe = document.createElement('canvas').getContext('webgl2');
-      if (!probe) return;
+      if (!probe) return false;
       probe.getExtension('WEBGL_lose_context')?.loseContext();
-      setCanRender(true);
+      return true;
     } catch {
-      // No GPU context available; the native CSS dark strip remains readable.
+      return false;
     }
-  }, []);
+  });
 
   return (
     <div className={styles.backdrop} data-pattern={pattern} aria-hidden="true">
