@@ -67,7 +67,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("Topic React interaction and lifetime", () => {
-  it("puts the overview/journey switch in the breadcrumb, starts navigation with topics, and keeps the evidence histogram above material", async () => {
+  it("uses shared ContextTabs for overview/journey and keeps the evidence histogram above material", async () => {
     vi.stubGlobal("fetch", vi.fn(async (path: string) => jsonResponse(defaultRead(path))));
     page();
     await screen.findByRole("button", { name: "合成材料 0" });
