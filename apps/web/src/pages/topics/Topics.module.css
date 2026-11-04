@@ -1891,33 +1891,10 @@ body.topic-map-page {
   font-size: var(--lgi-text-data);
 }
 
-/* Approved /topics geometry; shared global header and token values remain unchanged. */
+/* This page is a flex column: the global header must keep its full height. */
 .topic-map-page :global(.v7-global-header) {
   flex: 0 0 auto;
   height: auto;
-}
-.topic-map-page :global(.v7-context-row) {
-  grid-template-columns: minmax(0, 1fr);
-  min-height: var(--lgi-space-12);
-  height: auto;
-}
-.topic-map-page :global(.v7-context-row) > [aria-hidden="true"] {
-  display: none;
-}
-.topic-map-page :global(.v7-context-main) {
-  padding: var(--lgi-space-1) var(--lgi-space-4);
-  gap: var(--lgi-space-4);
-}
-.topic-map-page :global(.v7-context-crumb) {
-  display: flex;
-  align-items: center;
-  gap: var(--lgi-space-2);
-  min-width: 0;
-}
-.topic-map-page :global(.v7-context-meta) {
-  display: flex;
-  min-width: 0;
-  align-items: center;
 }
 :global(#topic-map-view-tabs),
 :global(#topic-map-context-actions) {
@@ -1955,9 +1932,6 @@ body.topic-map-page {
   :focus-visible {
   outline: calc(var(--lgi-space-1) / 2) solid var(--lgi-focus);
   outline-offset: var(--lgi-space-1);
-}
-:global(#topic-map-crumb-current) {
-  display: none;
 }
 :global(#topic-map-root) .lgi-tm-content {
   height: 100%;
@@ -2707,10 +2681,6 @@ body.topic-map-page {
       calc(var(--lgi-space-24) * 2 + var(--lgi-space-4))
       minmax(0, 1fr);
   }
-  .topic-map-page :global(.v7-context-main) {
-    flex-wrap: wrap;
-    gap: var(--lgi-space-1);
-  }
   :global(#topic-map-root) .lgi-tm-journey-toolbar {
     flex-wrap: wrap;
   }
@@ -2719,18 +2689,6 @@ body.topic-map-page {
   }
 }
 @media (max-width: 760px) {
-  .topic-map-page :global(.v7-context-main) {
-    padding: var(--lgi-space-2) var(--lgi-space-3);
-  }
-  .topic-map-page :global(.v7-context-crumb) {
-    flex-wrap: wrap;
-    width: 100%;
-    gap: var(--lgi-space-1);
-  }
-  .topic-map-page :global(.v7-context-meta) {
-    display: flex;
-    width: 100%;
-  }
   :global(#topic-map-view-tabs) {
     flex-shrink: 1;
     margin-left: auto;

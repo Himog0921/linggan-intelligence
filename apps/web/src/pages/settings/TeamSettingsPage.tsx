@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent } from 'react';
 import { AppShell } from '../../app/AppShell';
+import { ContextBreadcrumb } from '../../shared/ContextBar';
 import { ActionButton } from '../../shared/ActionButton';
 import { ApiError } from '../../shared/api';
 import * as api from './teamSettingsApi';
@@ -112,7 +113,7 @@ export function TeamSettingsPage() {
   const [deactivating, setDeactivating] = useState<api.TeamMember | null>(null);
   const members = roster.data ?? [];
   const current = members.filter(member => member.state === 'active').length;
-  const crumb = <span className={styles.crumb}><span>设置</span><span className="v7-slash">/</span><b>团队成员</b></span>;
+  const crumb = <ContextBreadcrumb items={['设置', '团队成员']} />;
   async function refresh() { await client.invalidateQueries({ queryKey: ROSTER_KEY }); }
   return <AppShell active={null} boundaryLabel="本机团队控制" contextBar={{ breadcrumb: crumb, meta: <small>成员状态和账号责任以当前服务端读数为准</small> }}>
     <main className={styles.page} aria-labelledby="team-settings-title">

@@ -11,7 +11,7 @@
  --v7-unknown:var(--lgi-unknown);--v7-unknown-fill:var(--lgi-unknown-dot);--v7-unknown-soft:var(--lgi-unknown-soft);
  --v7-brutal:var(--lgi-shadow-brutal);--v7-brutal-lg:var(--lgi-shadow-brutal-lg);
  --v7-t-press:var(--lgi-duration-press);--v7-t-state:var(--lgi-duration-state);--v7-ease:var(--lgi-ease-ui);
- --v7-global-row:calc(var(--lgi-space-12) + var(--lgi-space-1));--v7-context-row:calc(var(--lgi-space-12) + var(--lgi-space-2));--v7-header-height:calc(var(--v7-global-row) + var(--v7-context-row));
+ --v7-global-row:calc(var(--lgi-space-12) + var(--lgi-space-1));--v7-context-row:calc(var(--lgi-space-10) + var(--lgi-space-1));--v7-header-height:calc(var(--v7-global-row) + var(--v7-context-row));
  --v7-side-width:var(--lgi-shell-side);--v7-inspector-width:440px;
 }
 *{box-sizing:border-box}html,body{height:100%;overflow:hidden}body{margin:0;min-width:320px;background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-type-body-weight) var(--lgi-type-body-size)/var(--lgi-type-body-leading) var(--lgi-font-ui)}
@@ -48,7 +48,7 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
 .v7-personal-menu nav{position:absolute;right:0;top:calc(100% + var(--lgi-space-2));z-index:var(--lgi-z-popover);min-width:var(--lgi-shell-side);padding:var(--lgi-space-1);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal)}
 .v7-personal-menu nav a,.v7-personal-menu nav button{display:block;width:100%;padding:var(--lgi-space-3);border:0;background:transparent;color:var(--lgi-ink);font:inherit;font-size:var(--lgi-type-control-size);text-align:left;text-decoration:none;cursor:pointer}.v7-personal-menu nav a:hover,.v7-personal-menu nav button:hover:not(:disabled){background:var(--lgi-canvas-low)}.v7-personal-menu nav button:disabled{cursor:wait;color:var(--lgi-muted)}.v7-personal-menu nav p{margin:var(--lgi-space-2) var(--lgi-space-3);color:var(--lgi-danger,#a92d18);font-size:var(--lgi-type-caption-size);line-height:var(--lgi-type-caption-leading)}
 .v7-context-row{min-height:var(--v7-context-row);display:grid;grid-template-columns:var(--v7-side-width) minmax(0,1fr);border-bottom:1px solid var(--lgi-border);background-color:var(--lgi-canvas-low);background-image:radial-gradient(circle at center,var(--lgi-mesh-major) 1.1px,transparent 1.1px),radial-gradient(circle at center,var(--lgi-mesh-fine) 1px,transparent 1px);background-size:var(--lgi-context-major) var(--lgi-context-major),var(--lgi-context-fine) var(--lgi-context-fine)}
-.v7-context-main{min-width:0;display:flex;align-items:center;gap:var(--lgi-space-5);padding:var(--lgi-space-2) var(--lgi-space-6)}
+.v7-context-main{min-width:0;display:flex;align-items:center;gap:var(--lgi-space-5);padding:var(--lgi-space-1) var(--lgi-space-6)}
 .v7-context-crumb{display:flex;align-items:center;flex:none;gap:var(--lgi-space-2);font:var(--lgi-type-control-weight) var(--lgi-type-control-size)/var(--lgi-type-control-leading) var(--lgi-font-ui);color:var(--lgi-muted);white-space:nowrap}
 .v7-context-crumb b,.v7-context-current{color:var(--lgi-ink);font-weight:var(--lgi-weight-medium)}.v7-slash{color:var(--lgi-ghost)}
 .v7-context-meta{min-width:0;margin-left:auto;display:flex;align-items:center;gap:var(--lgi-space-3);font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui);color:var(--lgi-muted)}
@@ -103,6 +103,8 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
 .ops-immersive>.v7-global-header,.ops-immersive>.v7-shell>.v7-side{display:none}
 .ops-immersive>.v7-shell{grid-template-columns:minmax(0,1fr)}
 
-/* Corpus compact shell: evidence and creators share the approved compact context row. */
-.v7-corpus-compact-shell { --v7-context-row:calc(var(--lgi-space-10) + var(--lgi-space-1)); }
-.v7-corpus-compact-shell .v7-context-main { padding-top:var(--lgi-space-1);padding-bottom:var(--lgi-space-1); }
+/* Current page: one quiet hand-drawn annotation under the last breadcrumb item. */
+.v7-annotated-current{position:relative;isolation:isolate}
+.v7-annotated-current svg{position:absolute;pointer-events:none;left:0;bottom:calc(var(--lgi-space-1) * -1);width:100%;height:var(--lgi-space-2);overflow:visible;fill:none;stroke:var(--lgi-signal-mark);stroke-width:1.7;stroke-linecap:round;transform-origin:left;transition:transform var(--lgi-duration-state) var(--lgi-ease-ui)}
+.v7-annotated-current:hover svg{transform:scaleX(1.06)}
+@media(prefers-reduced-motion:reduce){.v7-annotated-current svg,.v7-annotated-current:hover svg{transition:none;transform:none}}

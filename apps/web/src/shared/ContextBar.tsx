@@ -22,15 +22,24 @@ export function ContextBar({ breadcrumb, navigation, meta }: ContextBarContent) 
   );
 }
 
+/**
+ * The single breadcrumb renderer: items are separated by `/`, and the last item is the current
+ * page — bold, marked with the hand-drawn line and exposed as `aria-current`. Pages pass content only.
+ */
 export function ContextBreadcrumb({ items }: { items: readonly ReactNode[] }) {
   return (
     <>
       {items.map((item, index) => (
         <Fragment key={index}>
           {index > 0 ? <span className="v7-slash" aria-hidden="true">/</span> : null}
-          <span className="v7-context-crumb-item" aria-current={index === items.length - 1 ? 'page' : undefined}>
-            {item}
-          </span>
+          {index === items.length - 1 ? (
+            <b className="v7-annotated-current" aria-current="page">
+              {item}
+              <svg viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+                <path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" />
+              </svg>
+            </b>
+          ) : item}
         </Fragment>
       ))}
     </>

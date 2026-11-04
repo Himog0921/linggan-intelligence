@@ -39,9 +39,3 @@
   :global(.v7-app):has(.main){height:100dvh;min-height:0;grid-template-rows:auto minmax(0,1fr);overflow:hidden}
   .frame{min-height:0;grid-template-rows:auto minmax(0,1fr)}
 }
-
-/* Evidence current item: one quiet annotation; the context row keeps its existing geometry. */
-.annotatedCurrent { position:relative;isolation:isolate; }
-.annotatedCurrent svg { position:absolute;pointer-events:none;left:0;bottom:calc(var(--lgi-space-1) * -1);width:100%;height:var(--lgi-space-2);overflow:visible;fill:none;stroke:var(--lgi-signal-mark);stroke-width:1.7;stroke-linecap:round;transform-origin:left;transition:transform var(--lgi-duration-state) var(--lgi-ease-ui); }
-.annotatedCurrent:hover svg { transform:scaleX(1.06); }
-@media(prefers-reduced-motion:reduce) { .annotatedCurrent svg,.annotatedCurrent:hover svg { transition:none;transform:none; } }

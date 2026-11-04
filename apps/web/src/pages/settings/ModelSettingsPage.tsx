@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { Link, useSearchParams } from 'react-router';
 import { AppShell } from '../../app/AppShell';
+import { ContextBreadcrumb } from '../../shared/ContextBar';
 import { NavIcon, Sidebar } from '../../shared/Sidebar';
 import { AI_SETTINGS_KEY, fetchAiSettings } from './aiSettingsApi';
 import { AiModelSection } from './AiModelSection';
@@ -31,7 +32,7 @@ export function ModelSettingsPage() {
   const settings = useQuery({ queryKey: AI_SETTINGS_KEY, queryFn: ({ signal }) => fetchAiSettings(signal), retry: false, refetchOnWindowFocus: false });
   const action = useAiAction();
   const data = settings.data;
-  const crumb = <span className={styles.crumb}><span>设置</span><span className="v7-slash">/</span><b>AI 设置</b></span>;
+  const crumb = <ContextBreadcrumb items={['设置', 'AI 设置']} />;
   const navigation = Object.entries(VIEWS).map(([key, label]) => (
     <Link className="v7-side-nav" to={'?view=' + key} key={key} aria-current={view === key ? 'page' : undefined} aria-label={label} title={label}>
       <NavIcon name={VIEW_ICONS[key as keyof typeof VIEW_ICONS]}/><span>{label}</span>

@@ -1,5 +1,5 @@
 {
-  "fingerprint": "c80c31167470287640469dd91ac2bd7ce6baf617fd8832db33dfe36cc2ade7ef",
+  "fingerprint": "88d94ca000171d47766797a4d14d077d514d9a8d0788cd212cd69007469793e2",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -235,7 +235,7 @@
     },
     {
       "path": "apps/web/src/corpus/CorpusFrame.tsx",
-      "sha256": "e44b28b04f2a41fe634e81a68490a18bd277c7de6ca68a1e3ee65e82f5d0ea8f"
+      "sha256": "efa89f0092e0207d30f640a51141ab636bd46a0c6f29ead46e074e8693301c57"
     },
     {
       "path": "apps/web/src/corpus/DomainPicker.tsx",
@@ -243,7 +243,7 @@
     },
     {
       "path": "apps/web/src/pages/collection/CollectionFrame.tsx",
-      "sha256": "0cf71f4dfc06b6361defd4f9ee51630421aa316a09f996089e76757c7888de9e"
+      "sha256": "22f4fab91ca2fded9649240dc1271165c1cc641bdd327fa2f55ddaee3a20dc7d"
     },
     {
       "path": "apps/web/src/pages/collection/management/DomainsPage.tsx",
@@ -263,7 +263,7 @@
     },
     {
       "path": "apps/web/src/pages/corpus/comments/CommentsPage.tsx",
-      "sha256": "acc1bd89d90a51be027b5ae2ee356aac6e6fc953c0ab88321ad46f93095f22d2"
+      "sha256": "83751c82d0c63e62c4eb87b19518a5bca5d54319e25c6369e8e817f984a76e94"
     },
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
@@ -303,7 +303,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "87c3307cc7b9dcb67e9bb91cf035b4a754c64a32f22915c5028cdaed5bcd9c7a"
+      "sha256": "21826e2e7fe9e5474d224d9633a320857d55a2d224e29ea465aec25c6aae4d53"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -339,19 +339,19 @@
     },
     {
       "path": "apps/web/src/pages/settings/ModelSettingsPage.tsx",
-      "sha256": "48906b4363530c5c1676f791ecb55a74f1617b6bf9718f7086fc9257e6b8a0f9"
+      "sha256": "c251ce05338ef44764d1ff36e4ed895932a9c377dfc605f3767e8a73f0caa8c4"
     },
     {
       "path": "apps/web/src/pages/topics/Topics.module.css",
-      "sha256": "b1f147d0e8d7cfacb5656264ec0d49b02b3a6d5c67c1f77feb47cccbcb24e011"
+      "sha256": "38f7566813f8fd6efa7931ca83886dae28ec930e8e18c8e7456361433499a881"
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
-      "sha256": "7df6c8c8147af79afe5738be453b04d79d371188b95b07ca7cdb078837734ed7"
+      "sha256": "9d3d33d499d3b07b17c10095a1f5518f6d1a1c89ca71a2425233162cb2c3cf06"
     },
     {
       "path": "apps/web/src/pages/topics/WorkspacePage.tsx",
-      "sha256": "4e4d4bc5964b25c42514c47bb7ed09e4c7b0971500f7bb886c5a8ddf3916fc86"
+      "sha256": "8996c5277f27f0486a626236616d15f3a8dda96362d82c6adf76d5452fcff191"
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
@@ -387,7 +387,7 @@
     },
     {
       "path": "apps/web/src/shared/ContextBar.tsx",
-      "sha256": "177d91b8e310c124bfe76bdcb3e0c8f762bd449008d97d522974db8852dec662"
+      "sha256": "bdbc47dbe494978680a3ecc1efecdf0fab6abfa7b904789c7ef28e41903d21f0"
     },
     {
       "path": "apps/web/src/shared/ContextTabs.tsx",
@@ -439,7 +439,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "6803d72b92b5d7d0af09c8a11392b0b85fb95e7e00d9b0248ae86fd244a402c0"
+      "sha256": "5b3293995a136951d83c0e354d33f09bacf194fc998a2061642a5de24da51fa0"
     },
     {
       "path": "apps/web/src/styles/typography.css",
@@ -451,7 +451,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "af65b5f91784768fe700efad742909c1e8340a523591c6d0e519e60cc2c4c427"
+      "sha256": "cb5d6a92aca43d1f5182b0f2a5f69333086aee551a5c9af9109854f1512d1618"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

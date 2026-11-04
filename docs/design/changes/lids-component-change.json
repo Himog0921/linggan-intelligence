@@ -1,7 +1,7 @@
 {
   "kind": "shared_standard",
-  "reason": "Standardize the shared AppShell Context Bar, ContextTabs and DomainScopePicker across topic map, operations, corpus, collection and settings. Preserve module-specific option eligibility, URLs, actions, and page layouts; no business API or data behavior changes.",
-  "authorization": "User instruction on 2026-11-04: begin phase one of the approved Intelligence full-site shared UI standardization; user explicitly deferred the React Bits licensing workstream and limited current scope to the existing shared-shell task.",
+  "reason": "Z02 共享页头统一：面包屑只由 ContextBreadcrumb 渲染，当前页统一加粗+手绘线+aria-current；全站页头高度 44px（带页签 48px），左侧保留 160px 导航轨缩进，Pattern Waves 纹理不再被页面关闭；清理主题图谱页对共享页头的覆盖，其余页面迁到共享渲染",
+  "authorization": "Mog 2026-11-05 全站页头对齐语料证据库/创作者",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",

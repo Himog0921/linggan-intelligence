@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { AppShell } from "../../app/AppShell";
+import { ContextBreadcrumb } from "../../shared/ContextBar";
 import { ApiError } from "../../shared/api";
 import styles from "./Workspace.module.css";
 import {
@@ -334,11 +335,7 @@ export function WorkspacePage() {
       boundaryLabel="本机服务状态"
       contextBar={{
         breadcrumb: (
-          <>
-            主题图谱 <span className="v7-slash">/</span> <b>领域探索</b>{" "}
-            <span className="v7-slash">/</span>{" "}
-            <span className="v7-context-current">Topic 工作区</span>
-          </>
+          <ContextBreadcrumb items={["主题图谱", "领域探索", "Topic 工作区"]} />
         ),
         meta: (
           <>

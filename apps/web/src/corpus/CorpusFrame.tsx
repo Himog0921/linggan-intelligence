@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react';
 import { AppShell } from '../app/AppShell';
+import { ContextBreadcrumb } from '../shared/ContextBar';
 import { CorpusSideNav, type EvidenceCount } from './CorpusSideNav';
 import type { CorpusPageKey } from './corpusPages';
 import type { CorpusShell } from './corpusShellApi';
@@ -31,24 +32,10 @@ interface CorpusFrameProps {
 export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, evidenceCount = null, children }: CorpusFrameProps) {
   const titleId = useId();
   const picker = shell ? <DomainPicker domains={shell.domains} selected={shell.selectedDomain} action={action} /> : null;
-  // 已认可的紧凑外壳：证据库与创作者共用同一页头高度和当前页手绘短线，其他页面保持原样。
-  const compact = page === 'evidence' || page === 'creators';
-  const currentLabel = <b className={compact ? styles.annotatedCurrent : undefined}>{pageLabel}
-    {compact ? <svg viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" /></svg> : null}
-  </b>;
-  const crumb = picker ? (
-    <>
-      语料 <span className="v7-slash">/</span> {picker} <span className="v7-slash">/</span> {currentLabel}
-    </>
-  ) : (
-    <>
-      语料 <span className="v7-slash">/</span> {currentLabel}
-    </>
-  );
+  const crumb = <ContextBreadcrumb items={picker ? ['语料', picker, pageLabel] : ['语料', pageLabel]} />;
   return (
     <AppShell
       active="corpus"
-      className={compact ? 'v7-corpus-compact-shell' : undefined}
       boundaryLabel="本机服务状态"
       contextBar={{ breadcrumb: crumb, meta }}
     >

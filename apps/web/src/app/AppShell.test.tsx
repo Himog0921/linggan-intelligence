@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
+import { ContextBreadcrumb } from '../shared/ContextBar';
 import { ContextTabs } from '../shared/ContextTabs';
 
 function navItems(): HTMLElement[] {
@@ -15,7 +16,7 @@ describe('全站统一深色 Pattern Waves 上下文栏', () => {
         active="corpus"
         boundaryLabel="本机服务状态"
         contextBar={{
-          breadcrumb: <><b>评论研究</b> <span className="v7-slash">/</span> ADHD</>,
+          breadcrumb: <ContextBreadcrumb items={['评论研究', 'ADHD']} />,
           navigation: <ContextTabs label="评论研究视图"><button aria-current="page">概览</button><button>用户评论</button></ContextTabs>,
           meta: <span>运行中</span>,
         }}
@@ -24,7 +25,8 @@ describe('全站统一深色 Pattern Waves 上下文栏', () => {
     const bar = container.querySelector('.v7-context-row') as HTMLElement;
     expect(bar).toHaveAttribute('data-context-texture', 'dark');
     expect(bar.querySelector('[data-context-pattern]')).toHaveAttribute('data-context-pattern', 'square');
-    expect(bar.querySelector('.v7-context-crumb')).toHaveTextContent('评论研究 / ADHD');
+    expect(bar.querySelector('.v7-context-crumb')).toHaveTextContent('评论研究/ADHD');
+    expect(bar.querySelector('.v7-context-crumb b')).toHaveAttribute('aria-current', 'page');
     expect(within(bar).getByRole('navigation', { name: '评论研究视图' })).toBeInTheDocument();
     expect(within(bar).getByText('运行中')).toBeInTheDocument();
   });
