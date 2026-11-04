@@ -5,8 +5,9 @@ import page from './EvidencePage.module.css';
 import styles from './NoteAnalysis.module.css';
 function Evidence({ evidence, dossier }: { evidence: AnalysisEvidence; dossier: Dossier | undefined }) {
   const unit = evidence.kind === 'material' ? dossier?.materials.find(material => material.sourceRef === evidence.sourceRef && material.sourceVersion === evidence.sourceVersion) : undefined;
+  const block = unit?.blocks.find(candidate => candidate.ref === evidence.citationId);
   function locate() {
-    const element = [...document.querySelectorAll<HTMLElement>('[data-unit-ref]')].find(candidate => candidate.dataset.unitRef === unit?.ref);
+    const element = [...document.querySelectorAll<HTMLElement>('[data-block-ref]')].find(candidate => candidate.dataset.blockRef === block?.ref);
     element?.scrollIntoView({ block: 'center' });
     if (element) { element.tabIndex = -1; element.focus({ preventScroll: true }); }
   }
@@ -15,7 +16,7 @@ function Evidence({ evidence, dossier }: { evidence: AnalysisEvidence; dossier: 
     element?.scrollIntoView({ block: 'start' }); element?.focus({ preventScroll: true });
   }
   return <div><blockquote>{evidence.quote}</blockquote><p className={styles.meta}>{evidence.kind === 'comment' ? '评论原声' : '笔记材料'} · 位置 {evidence.start}–{evidence.end}</p>
-    {unit ? <button type="button" className={page.textButton} onClick={locate}>回到原文</button> : <p className={styles.meta}>冻结引句；尚未核对到当前阅读中的同版本原文。</p>}
+    {block ? <button type="button" className={page.textButton} onClick={locate}>回到原文</button> : <p className={styles.meta}>冻结引句；尚未核对到当前阅读中的同版本原文。</p>}
     {evidence.kind === 'comment' ? <button type="button" className={page.textButton} onClick={locateComments}>查看当前评论区</button> : null}
     <details><summary>来源位置</summary><p className={styles.meta}>{evidence.sourceRef} · 版本 {evidence.sourceVersion} · {evidence.citationId}</p></details></div>;
 }
