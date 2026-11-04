@@ -75,14 +75,14 @@ describe('分节、行内状态与来源说明', () => {
 });
 
 describe('动作回执', () => {
-  it('没有回执时是空的 status 区；有回执时：结论词＋说明＋技术码，色调随结论', () => {
+  it('没有回执时是空的 status 区；有回执时：结论词＋说明，色调随结论，不直出技术码', () => {
     const { rerender } = render(<FeedbackLine feedback={null} />);
     expect(screen.getByRole('status')).toBeEmptyDOMElement();
     rerender(<FeedbackLine feedback={feedback('refused', '请求已记录，没有形成工单。', 'REFUSED')}><button type="button">重新核对</button></FeedbackLine>);
     const status = screen.getByRole('status');
     expect(status).toHaveAttribute('data-tone', 'refused');
     expect(within(status).getByText('未受理')).toBeInTheDocument();
-    expect(within(status).getByText('REFUSED')).toBeInTheDocument();
+    expect(within(status).queryByText('REFUSED')).toBeNull();
     expect(within(status).getByRole('button', { name: '重新核对' })).toBeInTheDocument();
   });
 });

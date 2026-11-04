@@ -600,3 +600,123 @@ fn media_record_with_observation(
         "sourceObject":{"platform":"xhs","type":"content","externalId":content_id}
     })
 }
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn live_photo_retains_only_still_without_blocking_independent_video() {
+    let database = proof_database("live_photo_still_only").await;
+    let record = live_photo_record_with_components("still-policy");
+    let live = uuid::Uuid::parse_str(record["observationRef"].as_str().unwrap()).unwrap();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"still-policy"}),
+        record,
+    )
+    .await;
+    let components: Vec<String> = sqlx::query_scalar("SELECT component_kind FROM linggan_media_acquisition_work WHERE observation_ref=$1 ORDER BY component_kind").bind(live).fetch_all(database.pool()).await.unwrap();
+    assert_eq!(components, vec!["still"]);
+    let sha = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    assert!(
+        admit_media_blob(&database, live, sha, "video/mp4", 12, "blobs/motion.mp4")
+            .await
+            .is_err()
+    );
+    assert!(
+        linggan_evidence::begin_media_upload(
+            &database,
+            live,
+            sha,
+            "video/mp4",
+            12,
+            "upload/motion"
+        )
+        .await
+        .is_err()
+    );
+    admit_media_blob(&database, live, sha, "image/webp", 12, "blobs/still.webp")
+        .await
+        .unwrap();
+    let video = media_record("independent-video", "video", 1, "video");
+    let video_ref = uuid::Uuid::parse_str(video["observationRef"].as_str().unwrap()).unwrap();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"independent-video"}),
+        video,
+    )
+    .await;
+    let video_sha = "bbcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+    let result = admit_media_blob(
+        &database,
+        video_ref,
+        video_sha,
+        "video/mp4",
+        12,
+        "blobs/independent.mp4",
+    )
+    .await
+    .unwrap();
+    assert!(!result.processing_jobs.is_empty());
+    // A historical live-motion job may share its physical blob with an independent
+    // video. Eligibility is scoped to the slot, never to the blob globally.
+    let historical_job = uuid::Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,'xhs:still-policy:live_photo:1','thumbnail','historic','whole_asset')")
+        .bind(historical_job).bind(video_sha).execute(database.pool()).await.unwrap();
+    linggan_evidence::ensure_media_processing_work(&database)
+        .await
+        .unwrap();
+    let historical_work: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_media_processing_work WHERE job_ref=$1")
+            .bind(historical_job)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        historical_work, 0,
+        "historical live motion cannot enter the processing queue"
+    );
+    let independent_work: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_media_processing_work WHERE job_ref=ANY($1)",
+    )
+    .bind(&result.processing_jobs)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        independent_work > 0,
+        "shared blob does not suppress independent video"
+    );
+    // Even a previously queued live-motion job is not claimable after the policy change.
+    sqlx::query(
+        "INSERT INTO linggan_media_processing_work(work_ref,job_ref) VALUES(gen_random_uuid(),$1)",
+    )
+    .bind(historical_job)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE linggan_media_processing_work SET state='terminal',attempt_count=3 WHERE job_ref<>$1")
+        .bind(historical_job)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let claim = linggan_evidence::claim_media_processing_work(
+        &database,
+        uuid::Uuid::new_v4(),
+        &["thumbnail".to_owned()],
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        claim,
+        linggan_evidence::MediaProcessingClaimOutcome::Idle
+    ));
+    let rejected: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_media_upload_session WHERE media_observation_ref=$1",
+    )
+    .bind(live)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(rejected, 0);
+}

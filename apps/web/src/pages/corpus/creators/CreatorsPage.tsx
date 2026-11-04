@@ -9,7 +9,7 @@ import { humanMoment } from '../../../shared/formatting';
 import { CreatorBulkBar } from './CreatorBulkBar';
 import { CreatorControls } from './CreatorControls';
 import { CreatorCorrectionDialog, type CorrectionTarget } from './CreatorCorrectionDialog';
-import { CreatorDrawer, type DrawerSnapshot } from './CreatorDrawer';
+import { CreatorDrawer, type DrawerSnapshot, type FocusRequest } from './CreatorDrawer';
 import { CreatorFilterDialog } from './CreatorFilterDialog';
 import { CreatorJoinDialog, type JoinTarget } from './CreatorJoinDialog';
 import { CreatorPolicyDialog } from './CreatorPolicyDialog';
@@ -42,7 +42,7 @@ import { findAuthorButton } from './findAuthor';
 import { Pager } from './Pager';
 import { clearReturn, peekReturn, saveReturn } from './returnState';
 import type { SearchFieldHandle } from './SearchField';
-import { mergeResources, useWorkResources } from './useWorkResources';
+import { useWorkResources, type WorkResources } from './useWorkResources';
 import styles from './CreatorsPage.module.css';
 
 type Dialog =
@@ -52,14 +52,22 @@ type Dialog =
   | { kind: 'correction'; seq: number; target: CorrectionTarget }
   | { kind: 'join'; seq: number; target: JoinTarget };
 
-interface DrawerState {
+interface PanelState {
+  /** 领域 + 作者：同一创作者在不同领域是两份独立会话。 */
+  key: string;
+  domainRef: string;
   creatorKey: string;
-  tab: DrawerTab;
-  /** 每次打开都是新的实例：上一位作者的状态、进行中的请求都不会带过来。 */
-  seq: number;
-  /** 打开那一刻的列表项。列表之后刷新、而这位作者暂时不在结果里时，抽屉仍显示这一份。 */
-  snapshot: CreatorItem;
+  item: CreatorItem;
+  /** 打开时的列表读数；之后刷新只更新仍在当前结果里的项。 */
+  data: CreatorList;
+  query: CreatorQuery;
+  link: LinkContext;
+  initialTab: DrawerTab;
   restore: Partial<DrawerSnapshot> | null;
+  /** 明确入口要求切换页签时使用；普通打开不覆盖上次页签。 */
+  pendingTab: { tab: DrawerTab; seq: number } | null;
+  currentTab: DrawerTab;
+  focusRequest: FocusRequest | null;
 }
 
 /** 状态行上可点的补救动作。这里只描述要做什么，点击时才执行（渲染期间不碰地址与请求）。 */
@@ -119,8 +127,17 @@ export function CreatorsPage() {
   const listRefs = useMemo(() => (shown ? shown.items.flatMap(item => (item.representatives[0] ? [item.representatives[0].workRef] : [])) : []), [shown]);
   const listResources = useWorkResources(domain, listRefs);
 
-  // ── 抽屉与对话框：同一时间一个抽屉 + 一个对话框；范围一变就全部收起 ────────────
-  const [drawer, setDrawer] = useState<DrawerState | null>(null);
+  const link: LinkContext | null = domain ? { domain, query, returnTo: pageUrl } : null;
+
+  // ── 检查器：每个作者在当前页面会话里常驻一个实例；切换/关闭/翻页只隐藏，不卸载 ─────────
+  // 这样进行中的主页读取、未确认的精选请求与同一 commandRef 的迟到回执都留在原作者名下。
+  const [panels, setPanels] = useState<PanelState[]>([]);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [panelWidth, setPanelWidth] = useState<number | null>(null);
+  const tabSeq = useRef(0);
+  const focusSeq = useRef(0);
+  // 明确关闭后要回到哪位作者；翻页/改查询的自动关闭不设置它，也不抢走控件的焦点。
+  const closingKey = useRef<string | null>(null);
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const [notice, setNotice] = useState<Feedback | null>(null);
   const sequence = useRef(0);
@@ -128,21 +145,71 @@ export function CreatorsPage() {
   const [seenScope, setSeenScope] = useState(scopeKey);
   if (seenScope !== scopeKey) {
     setSeenScope(scopeKey);
-    setDrawer(null);
+    // 翻页/改查询只关闭当前检查器；仍在页面会话里的作者请求上下文必须保留。
+    setActiveKey(null);
     setDialog(current => current?.kind === 'filter' && current.scope === scopeKey ? current : null);
     setNotice(null);
   }
 
-  const drawerItem = drawer ? (shown?.items.find(item => item.creatorKey === drawer.creatorKey) ?? drawer.snapshot) : null;
-  const drawerRefs = useMemo(
-    () =>
-      drawerItem
-        ? [...drawerItem.representatives.map(work => work.workRef), ...(drawerItem.firstSeenWorkRef ? [drawerItem.firstSeenWorkRef] : [])]
-        : [],
-    [drawerItem],
-  );
-  const drawerOnly = useWorkResources(drawerItem ? domain : null, drawerRefs);
-  const drawerResources = useMemo(() => mergeResources(listResources, drawerOnly), [listResources, drawerOnly]);
+  // 不在本页的实例保留打开时的快照；仍在当前结果里的读数在渲染时直接取最新值，
+  // 这样刷新列表不会碰实例内部的主页选择、研究请求与未确认回执。
+  const activePanel = panels.find(panel => panel.key === activeKey) ?? null;
+  const activeIndex = shown && activePanel ? shown.items.findIndex(item => item.creatorKey === activePanel.creatorKey) : -1;
+  const position = shown && activeIndex >= 0 ? { index: activeIndex + 1, total: shown.items.length } : null;
+
+  function openItem(item: CreatorItem, options: { tab?: DrawerTab; focus?: 'heading' | 'nav'; dir?: -1 | 1 } = {}) {
+    if (!domain || !shown || !link) return;
+    const key = `${domain}|${item.creatorKey}`;
+    const request: FocusRequest = {
+      kind: options.focus ?? 'heading',
+      ...(options.dir === undefined ? {} : { dir: options.dir }),
+      seq: ++focusSeq.current,
+    };
+    const pending = options.tab ? { tab: options.tab, seq: ++tabSeq.current } : null;
+    const known = panels.find(panel => panel.key === key);
+    // 未访问过的作者沿用当前页签，连续上一位/下一位时不从概览重新开始。
+    const initial = options.tab ?? known?.currentTab ?? activePanel?.currentTab ?? 'overview';
+    setPanels(current => {
+      if (current.some(panel => panel.key === key)) {
+        return current.map(panel =>
+          panel.key === key
+            ? { ...panel, item, data: shown, query, link, focusRequest: request, ...(pending ? { pendingTab: pending } : {}) }
+            : panel,
+        );
+      }
+      return [
+        ...current,
+        {
+          key,
+          domainRef: domain,
+          creatorKey: item.creatorKey,
+          item,
+          data: shown,
+          query,
+          link,
+          initialTab: initial,
+          restore: null,
+          pendingTab: pending,
+          currentTab: initial,
+          focusRequest: request,
+        },
+      ];
+    });
+    setActiveKey(key);
+  }
+
+  function navigate(delta: -1 | 1) {
+    if (!shown || activeIndex < 0) return;
+    const next = shown.items[activeIndex + delta];
+    if (!next) return;
+    openItem(next, { focus: 'nav', dir: delta });
+  }
+
+  function closePanel() {
+    const closing = panels.find(panel => panel.key === activeKey);
+    closingKey.current = closing?.creatorKey ?? null;
+    setActiveKey(null);
+  }
 
   // ── 批量选择：同一批条件下翻页、换排序都保留；条件一变就清空，不导出范围外的作者 ──────────
   const selectionKey = domain ? selectionScope(domain, query) : '';
@@ -157,21 +224,44 @@ export function CreatorsPage() {
   const searchHandle = useRef<SearchFieldHandle>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // ── 从证据库返回：恢复表格位置、作者焦点和打开的抽屉 ──────────────────────
+  // 检查器隐藏后把焦点放回触发它的作者按钮；作者已不在本页时落到表格区域，绝不掉到 body。
+  useEffect(() => {
+    if (activeKey !== null) return;
+    const creatorKey = closingKey.current;
+    if (!creatorKey) return;
+    closingKey.current = null;
+    const button = findAuthorButton(creatorKey);
+    (button ?? scrollRef.current)?.focus({ preventScroll: true });
+  }, [activeKey]);
+
+  // ── 从证据库返回：恢复表格位置、作者焦点和打开的检查器 ──────────────────────
   const [pendingReturn] = useState(() => peekReturn(pageUrl));
   const [restored, setRestored] = useState(pendingReturn === null);
-  if (!restored && shown) {
+  if (!restored && shown && domain && link) {
     setRestored(true);
     const item = pendingReturn?.drawer ? shown.items.find(candidate => candidate.creatorKey === pendingReturn.creatorKey) : undefined;
     if (pendingReturn && item) {
-      // 序号 0 留给恢复出来的这一个抽屉；之后每次用户打开的序号都从 1 起，不会撞上。
-      setDrawer({
-        creatorKey: item.creatorKey,
-        tab: pendingReturn.tab ?? 'overview',
-        seq: 0,
-        snapshot: item,
-        restore: { tab: pendingReturn.tab ?? 'overview', drawerScroll: pendingReturn.drawerScroll ?? 0, expanded: pendingReturn.expanded ?? [] },
-      });
+      const key = `${domain}|${item.creatorKey}`;
+      const tab = pendingReturn.tab ?? 'overview';
+      const request: FocusRequest = { kind: 'heading', seq: 0 };
+      setPanels(current => [
+        ...current.filter(panel => panel.key !== key),
+        {
+          key,
+          domainRef: domain,
+          creatorKey: item.creatorKey,
+          item,
+          data: shown,
+          query,
+          link,
+          initialTab: tab,
+          restore: { tab, drawerScroll: pendingReturn.drawerScroll ?? 0, expanded: pendingReturn.expanded ?? [] },
+          pendingTab: null,
+          currentTab: tab,
+          focusRequest: request,
+        },
+      ]);
+      setActiveKey(key);
     }
   }
   useEffect(() => {
@@ -185,12 +275,14 @@ export function CreatorsPage() {
     clearReturn();
   }, [restored, pendingReturn]);
 
-  // 「/」把焦点放进搜索框（没有打开的对话框、也不在输入框里时）。
+  // 「/」把焦点放进搜索框（没有打开的对话框、不在输入框里、也不在检查器里时）。
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) return;
       if (document.querySelector('dialog[open]')) return;
-      if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [role="combobox"], [role="listbox"], [contenteditable="true"]')) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('[data-creator-inspector]')) return;
+      if (target?.closest('input, textarea, select, [role="combobox"], [role="listbox"], [contenteditable="true"]')) return;
       event.preventDefault();
       searchHandle.current?.focus();
     }
@@ -198,16 +290,10 @@ export function CreatorsPage() {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  const link: LinkContext | null = domain ? { domain, query, returnTo: pageUrl } : null;
   const domainActive = data?.domain.status === 'active';
   const hasThreshold = data !== null && data.policy.likeThreshold !== null;
 
   // ── 动作 ───────────────────────────────────────────────────────────────
-  const open = useCallback((item: CreatorItem, tab: DrawerTab = 'overview') => {
-    sequence.current += 1;
-    setDrawer({ creatorKey: item.creatorKey, tab, seq: sequence.current, snapshot: item, restore: null });
-  }, []);
-
   function openJoin(item: CreatorItem, role: 'primary' | 'reference') {
     if (!shown || !domain) return;
     sequence.current += 1;
@@ -226,7 +312,7 @@ export function CreatorsPage() {
     });
   }
 
-  function openCorrection(item: CreatorItem, field: string, workRef: string | null) {
+  function openCorrection(item: CreatorItem, field: string, workRef: string | null, resources: WorkResources) {
     if (!shown || !domain) return;
     const work = workRef === null ? null : item.representatives.find(candidate => candidate.workRef === workRef);
     if (workRef !== null && !work) return;
@@ -244,11 +330,11 @@ export function CreatorsPage() {
         creatorKey: item.creatorKey,
         workRef,
         field,
-        subjectTitle: work ? workTitle(work, drawerResources) : authorName(item),
+        subjectTitle: work ? workTitle(work, resources) : authorName(item),
         currentValue: current,
         manual: manual ? { reason: manual.judgement.reason, supportFragmentIds: manual.supportFragmentIds } : null,
         supports,
-        workTitles: new Map(item.representatives.map(candidate => [candidate.workRef, workTitle(candidate, drawerResources)] as const)),
+        workTitles: new Map(item.representatives.map(candidate => [candidate.workRef, workTitle(candidate, resources)] as const)),
       },
     });
   }
@@ -307,7 +393,7 @@ export function CreatorsPage() {
   // 去证据库看原作品之前，记下位置。抽屉里的链接由抽屉自己记（它还知道分区与展开项）。
   function rememberPosition(target: EventTarget) {
     const anchor = (target as HTMLElement).closest<HTMLAnchorElement>('a[href^="/corpus/evidence?"]');
-    if (!anchor || anchor.closest('dialog')) return;
+    if (!anchor || anchor.closest('[data-creator-inspector], dialog')) return;
     saveReturn({
       url: pageUrl,
       scrollY: scrollRef.current?.scrollTop ?? 0,
@@ -386,103 +472,121 @@ export function CreatorsPage() {
           {readout}
         </span>
       }
-      foot="作者来自当前领域已有作品"
     >
       <div className={styles.page} onClickCapture={event => rememberPosition(event.target)}>
-        <CreatorControls
-          query={query}
-          data={shown}
-          resultText={resultText}
-          searchHandle={searchHandle}
-          onSearchCommit={text => go(current => ({ ...current, query: text, page: 0 }))}
-          onSearchMode={(mode, text) => go(current => ({ ...current, searchMode: mode, query: text, page: 0 }))}
-          onOpenFilter={openFilter}
-          onSort={(sort: SortKey) => go(current => ({ ...current, sort, page: 0 }))}
-          onRefresh={refresh}
-          refreshing={list.isFetching}
-          onQuick={quick}
-          onOpenPolicy={() => {
-            sequence.current += 1;
-            setDialog({ kind: 'policy', seq: sequence.current });
-          }}
-          onOpenScope={() => setDialog({ kind: 'scope' })}
-          onRemoveChip={(chip: ConditionChip) => go(current => removeCondition(current, chip))}
-          onClearChips={() => go(clearExtras)}
-        />
-        <p className={styles.status} role="status" aria-live="polite" data-error={status.error}>
-          {status.text}
-          {status.link ? (
-            <span className={styles.statusActions}>
-              <a href={status.link.href}>{status.link.label}</a>
-            </span>
-          ) : null}
-          {status.action ? (
-            <span className={styles.statusActions}>
-              <button type="button" className={styles.textButton} onClick={() => status.action && runStatusAction(status.action.kind)}>
-                {status.action.label}
-              </button>
-            </span>
-          ) : null}
-        </p>
-        <FeedbackLine feedback={notice} />
-        <CreatorBulkBar count={selected.size} onExport={exportSelected} onClear={() => setSelected(new Map())} />
-        {shown && link && domain ? (
-          <CreatorTable
-            key={apiKey}
-            data={shown}
-            query={query}
-            link={link}
-            resources={listResources}
-            selectedKey={drawer?.creatorKey ?? null}
-            selectedKeys={selectedKeys}
-            domainActive={domainActive}
-            scrollRef={scrollRef}
-            busy={list.isFetching}
-            onOpen={(creatorKey, tab) => {
-              const item = shown.items.find(candidate => candidate.creatorKey === creatorKey);
-              if (item) open(item, tab);
-            }}
-            onJoin={openJoin}
-            onSort={(sort: SortKey) => go(current => ({ ...current, sort, page: 0 }))}
-            onClearExtras={() => go(clearExtras)}
-            onToggleSelect={toggleSelected}
-            onSelectPage={selectPage}
-          />
-        ) : (
-          <div className={styles.tableWrap} aria-busy={shellQuery.isPending || (list.isPending && list.fetchStatus !== 'idle')} />
-        )}
-        <Pager
-          page={query.page}
-          pageSize={query.pageSize}
-          total={shown ? shown.total : null}
-          onPage={page => go(current => ({ ...current, page }))}
-          onPageSize={pageSize => go(current => ({ ...current, pageSize, page: 0 }))}
-        />
-        {drawer && drawerItem && shown && link ? (
-          <CreatorDrawer
-            key={drawer.seq}
-            item={drawerItem}
-            data={shown}
-            query={query}
-            link={link}
-            resources={drawerResources}
-            initialTab={drawer.tab}
-            restore={drawer.restore}
-            onClose={() => setDrawer(null)}
-            onCorrect={(field, workRef) => openCorrection(drawerItem, field, workRef)}
-            onJoin={openJoin}
-            onLeave={(creatorKey, snapshot) =>
-              saveReturn({
-                url: pageUrl,
-                scrollY: scrollRef.current?.scrollTop ?? 0,
-                scrollX: scrollRef.current?.scrollLeft ?? 0,
-                creatorKey,
-                drawer: true,
-                ...snapshot,
-              })
-            }
-          />
-        ) : null}
+        <div className={styles.workspace}>
+          <div className={styles.main}>
+            <CreatorControls
+              query={query}
+              data={shown}
+              resultText={resultText}
+              searchHandle={searchHandle}
+              onSearchCommit={text => go(current => ({ ...current, query: text, page: 0 }))}
+              onSearchMode={(mode, text) => go(current => ({ ...current, searchMode: mode, query: text, page: 0 }))}
+              onOpenFilter={openFilter}
+              onSort={(sort: SortKey) => go(current => ({ ...current, sort, page: 0 }))}
+              onRefresh={refresh}
+              refreshing={list.isFetching}
+              onQuick={quick}
+              onOpenPolicy={() => {
+                sequence.current += 1;
+                setDialog({ kind: 'policy', seq: sequence.current });
+              }}
+              onOpenScope={() => setDialog({ kind: 'scope' })}
+              onRemoveChip={(chip: ConditionChip) => go(current => removeCondition(current, chip))}
+              onClearChips={() => go(clearExtras)}
+            />
+            <p className={styles.status} role="status" aria-live="polite" data-error={status.error}>
+              {status.text}
+              {status.link ? (
+                <span className={styles.statusActions}>
+                  <a href={status.link.href}>{status.link.label}</a>
+                </span>
+              ) : null}
+              {status.action ? (
+                <span className={styles.statusActions}>
+                  <button type="button" className={styles.textButton} onClick={() => status.action && runStatusAction(status.action.kind)}>
+                    {status.action.label}
+                  </button>
+                </span>
+              ) : null}
+            </p>
+            <FeedbackLine feedback={notice} />
+            <CreatorBulkBar count={selected.size} onExport={exportSelected} onClear={() => setSelected(new Map())} />
+            {shown && link && domain ? (
+              <CreatorTable
+                key={apiKey}
+                data={shown}
+                query={query}
+                link={link}
+                resources={listResources}
+                selectedKey={activePanel?.creatorKey ?? null}
+                selectedKeys={selectedKeys}
+                domainActive={domainActive}
+                scrollRef={scrollRef}
+                busy={list.isFetching}
+                onOpen={(creatorKey, tab) => {
+                  const item = shown.items.find(candidate => candidate.creatorKey === creatorKey);
+                  if (item) openItem(item, tab ? { tab } : {});
+                }}
+                onJoin={openJoin}
+                onSort={(sort: SortKey) => go(current => ({ ...current, sort, page: 0 }))}
+                onClearExtras={() => go(clearExtras)}
+                onToggleSelect={toggleSelected}
+                onSelectPage={selectPage}
+              />
+            ) : (
+              <div className={styles.tableWrap} aria-busy={shellQuery.isPending || (list.isPending && list.fetchStatus !== 'idle')} />
+            )}
+            <Pager
+              page={query.page}
+              pageSize={query.pageSize}
+              total={shown ? shown.total : null}
+              onPage={page => go(current => ({ ...current, page }))}
+              onPageSize={pageSize => go(current => ({ ...current, pageSize, page: 0 }))}
+            />
+          </div>
+          {panels.map(panel => {
+            const liveItem = shown && domain === panel.domainRef
+              ? shown.items.find(candidate => candidate.creatorKey === panel.creatorKey)
+              : undefined;
+            return (
+              <CreatorDrawer
+                key={panel.key}
+                active={panel.key === activeKey}
+                item={liveItem ?? panel.item}
+                data={liveItem && shown ? shown : panel.data}
+                query={liveItem ? query : panel.query}
+                link={liveItem && link ? link : panel.link}
+                listResources={listResources}
+                initialTab={panel.initialTab}
+                restore={panel.restore}
+                pendingTab={panel.pendingTab}
+                focusRequest={panel.focusRequest}
+                position={panel.key === activeKey ? position : null}
+                width={panelWidth}
+                onTab={tab => {
+                  setPanels(current => current.map(entry => (entry.key === panel.key ? { ...entry, currentTab: tab } : entry)));
+                }}
+                onNavigate={navigate}
+                onWidth={setPanelWidth}
+                onClose={closePanel}
+                onCorrect={(item, field, workRef, resources) => openCorrection(item, field, workRef, resources)}
+                onJoin={openJoin}
+                onLeave={(creatorKey, snapshot) =>
+                  saveReturn({
+                    url: pageUrl,
+                    scrollY: scrollRef.current?.scrollTop ?? 0,
+                    scrollX: scrollRef.current?.scrollLeft ?? 0,
+                    creatorKey,
+                    drawer: true,
+                    ...snapshot,
+                  })
+                }
+              />
+            );
+          })}
+        </div>
         {dialog?.kind === 'filter' && shown ? (
           <CreatorFilterDialog
             query={dialog.query}

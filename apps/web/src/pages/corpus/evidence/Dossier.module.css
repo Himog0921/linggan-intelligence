@@ -51,7 +51,7 @@
 }
 
 .text {
-  font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence);
+  font: var(--lgi-type-reading-weight) var(--ev-reading-size, var(--lgi-type-reading-size)) / var(--ev-reading-leading, var(--lgi-type-reading-leading)) var(--ev-reading-font, var(--lgi-font-evidence));
 }
 
 
@@ -145,18 +145,23 @@
   min-width: 0;
 }
 
-.commentMeta {
+.commentLikes {
+  display: inline;
+  white-space: nowrap;
+  margin-left: var(--lgi-space-2);
   margin: 0;
   color: var(--lgi-muted);
   font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-data);
   font-variant-numeric: tabular-nums;
 }
 
+.commentLikes span { color: var(--lgi-signal-ink); }
+
 .commentText {
   margin: var(--lgi-space-1) 0 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence);
+  font: var(--lgi-type-reading-weight) var(--ev-reading-size, var(--lgi-type-reading-size)) / var(--ev-reading-leading, var(--lgi-type-reading-leading)) var(--ev-reading-font, var(--lgi-font-evidence));
 }
 
 .replies {
@@ -186,9 +191,9 @@
 .materials, .blocks, .reviewContent { display: grid; gap: var(--lgi-space-3); min-width: 0; }
 .material { min-width: 0; padding-block: var(--lgi-space-4); border-top: 1px solid var(--lgi-hairline); }
 .materialHead { margin-bottom: var(--lgi-space-3); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--lgi-space-3); }
-.materialHead h3, .blockHeading { margin: 0; font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
+.materialHead h3, .blockHeading { margin: 0; font: var(--lgi-type-section-weight) var(--ev-reading-heading-size, var(--lgi-type-section-size)) / var(--ev-reading-heading-leading, var(--lgi-type-section-leading)) var(--ev-reading-font, var(--lgi-font-ui)); }
 .materialHead span, .attribution { margin: 0; color: var(--lgi-muted); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); }
-.block, .blockList, .blockTable, .dialogue { min-width: 0; font: var(--lgi-type-reading-weight) var(--lgi-type-reading-size) / var(--lgi-type-reading-leading) var(--lgi-font-evidence); overflow-wrap: anywhere; }
+.block, .blockList, .blockTable, .dialogue { min-width: 0; font: var(--lgi-type-reading-weight) var(--ev-reading-size, var(--lgi-type-reading-size)) / var(--ev-reading-leading, var(--lgi-type-reading-leading)) var(--ev-reading-font, var(--lgi-font-evidence)); overflow-wrap: anywhere; }
 .blockList { margin: var(--lgi-space-2) 0; padding-left: var(--lgi-space-6); }
 .blockList li, .blockTable :is(th, td), .dialogue dd { white-space: pre-wrap; }
 .tableScroll { max-width: 100%; overflow: auto; }
@@ -213,9 +218,14 @@
 /* STANDARD-DOSSIER-001 reuses the inspector reading hierarchy and LIDS tokens. */
 .readingTitle { margin-block: var(--lgi-space-4); min-width: 0; }
 .readingTitle h2 { margin: 0; overflow-wrap: anywhere; font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
-.readingHeading { margin: var(--lgi-space-4) 0 var(--lgi-space-3); font: var(--lgi-type-section-weight) var(--lgi-type-section-size) / var(--lgi-type-section-leading) var(--lgi-font-ui); }
+.readingHeading { margin: var(--lgi-space-2) 0 var(--lgi-space-2); font: var(--lgi-type-control-weight) var(--ev-category-size, var(--lgi-type-section-size)) / var(--ev-category-leading, var(--lgi-type-section-leading)) var(--ev-reading-font, var(--lgi-font-ui)); }
 .readingGroup { min-width: 0; margin-block: var(--lgi-space-3); }
 .materialHead h4 { margin: 0; font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); }
 .sourceLink { padding: 0; border: 0; background: transparent; color: var(--lgi-muted); font: inherit; text-decoration: underline; cursor: pointer; }
 .originals { margin-top: var(--lgi-space-5); }
 .material { scroll-margin-top: var(--lgi-space-4); }
+
+.reviewNotes{margin-top:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-type-label-size)}
+.reviewNotes>summary{cursor:pointer;width:fit-content}
+.reviewNotes ul{color:inherit;margin-top:var(--lgi-space-2);padding-left:var(--lgi-space-4);list-style:disc;font:inherit}
+.reviewNotes>summary:focus-visible{outline:var(--lgi-action-border-width) solid var(--lgi-focus);outline-offset:var(--lgi-space-1)}

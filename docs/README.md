@@ -10,6 +10,13 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-11-04 · 研究底稿 V1.0 已冻结
+
+- [11 月变更记录](progress/2026-11.md)：本次冻结与交付边界。
+
+- [产品冻结基线](product/research-dossier-v1.md)：当前能力、30+9 篇验收汇总、已知缺口与后续变更准入。产品 V1.0，机器接口仍为 `research-dossier.v2`。
+- [唯一底稿合同](data-contracts/research-dossier.md)：字段与读取行为；不另建平行材料合同。
+
 ## 2026-11-03 · AI 中期质量离线候选
 
 - [切片 A 结果规范与接口设计](data-contracts/ai-midterm-quality-002/slice-a-result-and-api.md)：N02保存/展示/下游投影，四接口与两表；切片A本地候选已实现，未部署。
@@ -273,6 +280,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 | [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；LIDS v2.0 的可继承/不继承边界已登记 |
 | [design/lids/README.md](design/lids/README.md) | 权威当前；Proposed | LIDS v7.0 全项目设计表达标准的入口、来源回执、权威边界和成熟度 |
 | [design/lids/system.md](design/lids/system.md) | 权威当前；Proposed | LIDS-SYS-001：Token→Primitive→Component→Pattern→Page、L1/L2/L3、状态、动效、场景、a11y 与治理 |
+| [design/lids/iconography.md](design/lids/iconography.md) | 权威当前；已采用 | LIDS-ICON-B-001：B 精简版17枚、本地SVG、有限反馈、正式共享组件与同源展示 |
 | [design/lids/tokens.md](design/lids/tokens.md) | 权威当前 | LIDS-TOK-001：v7 三层 Token 架构（目标态）、完整 `--lgi-*` 运行时基线、差异表与分步迁移顺序 |
 | [design/lids/materials.md](design/lids/materials.md) | 权威当前 | LIDS-MAT-001：8px 采样点阵六态、材料预算 70/20/10 与区位限制 |
 | [design/lids/shell-zones.md](design/lids/shell-zones.md) | 权威当前 | LIDS-SHELL-001：页头 3 区、Context Bar 4 区的容量上限、禁止清单与静默区保护 |

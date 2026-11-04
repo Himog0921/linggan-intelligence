@@ -61,14 +61,14 @@ try {
  await step('creator work and explicit account sample use their own configured tasks',async()=>{
   await page.goto(`${origin}/corpus/creators?domain=${domain}`);
   await page.locator('[data-author-key]').first().click();
-  let account=page.getByRole('region',{name:'账号样本研究',exact:true});
+  const account=page.getByRole('complementary').getByRole('tabpanel',{name:'概览',exact:true});
   await account.getByRole('button',{name:'检查账号样本',exact:true}).click();
   const receipt=await post(account.getByRole('button',{name:'开始账号研究',exact:true}),'/api/local/creator-account-research');
   await until(`/api/local/creator-account-research/${receipt.requestRef}`,r=>r.state==='succeeded');
   await account.getByRole('button',{name:'刷新研究状态',exact:true}).click();
   await page.getByRole('tab',{name:'研究线索',exact:true}).click();
-  await page.locator('details').filter({hasText:'合成底稿验收'}).first().locator('summary').click();
-  const single=page.getByRole('region',{name:'单篇作品研究',exact:true});
+  const single=page.getByRole('tabpanel',{name:'研究线索',exact:true}).locator('details').filter({hasText:'合成底稿验收'}).first();
+  await single.locator('summary').click();
   await single.getByRole('button',{name:'检查研究底稿',exact:true}).click();
   const result=await post(single.getByRole('button',{name:'开始单篇研究',exact:true}),'/api/local/creator-research');
   await until(`/api/local/creator-research/${result.requestRef}`,r=>r.state==='succeeded');

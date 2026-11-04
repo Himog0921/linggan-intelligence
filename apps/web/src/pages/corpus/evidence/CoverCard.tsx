@@ -15,6 +15,7 @@ import type { WorkItem } from './evidenceTypes';
 import { NO_HOVER_QUERY, matches } from './useMediaQuery';
 import { CheckBox, type RowProps } from './WorkRow';
 import { AuthorFact, Engagement } from './WorkParts';
+import { useTitleTooltip, type TitleTooltipController } from './TitleTooltip';
 import styles from './CoverCard.module.css';
 
 /** 线稿只是目录标记：不推断内容含义、证据状态或质量。 */
@@ -32,14 +33,15 @@ function Geometry({ kind }: { kind: GeometryKind }) {
   );
 }
 
-function Face({ front, item, title, index }: { front: boolean; item: WorkItem; title: string; index: string }) {
+function Face({ front, item, title, index, titleTip }: { front: boolean; item: WorkItem; title: string; index: string; titleTip?: TitleTooltipController<HTMLHeadingElement> }) {
   const kind = coverGeometryKind(item);
   const cover = item.media.coverUrl;
   return (
     <section className={`${styles.face} ${front ? styles.front : styles.back}`} aria-hidden={front ? undefined : 'true'}>
       <div className={styles.faceInner}>
         <header className={styles.faceHead}>
-          {front ? <h2 className={styles.coverTitle} title={title}>{title}</h2> : <span className={styles.backLabel}>原始封面</span>}
+          {front ? <h2 ref={titleTip?.anchorRef} className={styles.coverTitle}
+            onMouseEnter={titleTip?.onEnter} onMouseLeave={titleTip?.onLeave} onPointerDown={titleTip?.onPointerDown}>{title}</h2> : <span className={styles.backLabel}>原始封面</span>}
           <span className={styles.index}>{index}</span>
         </header>
         <div className={styles.stage}>
@@ -67,7 +69,7 @@ function Face({ front, item, title, index }: { front: boolean; item: WorkItem; t
  * 翻转卡的正面（线稿）与背面（原始封面）。支持悬停的设备上鼠标悬停即翻（纯 CSS）；触屏点击卡面翻转且不触发
  * 行选择；键盘 Enter／Space 翻转。翻转是旋转，不是上浮；减少动态效果时直接切换。
  */
-function Visual({ item, title, index }: { item: WorkItem; title: string; index: string }) {
+function Visual({ item, title, index, titleTip }: { item: WorkItem; title: string; index: string; titleTip: TitleTooltipController<HTMLHeadingElement> }) {
   const [flipped, setFlipped] = useState(false);
   const toggle = (event: { preventDefault: () => void; stopPropagation: () => void }) => {
     event.preventDefault();
@@ -90,6 +92,9 @@ function Visual({ item, title, index }: { item: WorkItem; title: string; index: 
       data-flipped={flipped}
       onClick={onClick}
       onKeyDown={onKeyDown}
+      onFocus={titleTip.onFocus}
+      onBlur={titleTip.onBlur}
+      onPointerDown={titleTip.onPointerDown}
     >
       <div className={styles.flip}>
         {/* 两个面共用的隐形占位：用满宽 3:4 舞台推出卡片高度，而不是先定一个宽卡高度再让竖版封面悬在空白里。 */}
@@ -100,7 +105,7 @@ function Visual({ item, title, index }: { item: WorkItem; title: string; index: 
           </span>
           <span className={styles.sizerFoot} />
         </div>
-        <Face front item={item} title={title} index={index} />
+        <Face front item={item} title={title} index={index} titleTip={titleTip} />
         <Face front={false} item={item} title={title} index={index} />
       </div>
     </div>
@@ -124,14 +129,16 @@ function statusLines(item: WorkItem): string[] {
 export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked, onSelect, onCheck }: RowProps & { ordinal: number }) {
   const statusId = useId();
   const title = workTitle(item);
+  const titleTip = useTitleTooltip<HTMLHeadingElement>(title, 'lines');
   const detail = laneSummary(item.lanes, 'detail')?.state ?? 'UNKNOWN';
   const lines = statusLines(item);
   return (
     <li className={styles.item} data-selected={selected} data-checked={canCheck && checked} data-selection-active={canCheck} data-platform={item.platform.toLowerCase()} data-work-ref={item.ref} onClick={() => onSelect(item)}>
       <div className={styles.card}>
-        <Visual item={item} title={title} index={String(ordinal).padStart(3, '0')} />
+        <Visual item={item} title={title} index={String(ordinal).padStart(3, '0')} titleTip={titleTip} />
         <div className={styles.plate}>
-          <button type="button" className={styles.select} data-select-target="" aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} aria-label={title} aria-describedby={statusId} title={`${title} · ${lines.join('；')}`} />
+          <button type="button" className={styles.select} data-select-target="" aria-current={selected ? 'true' : undefined} tabIndex={tabStop ? 0 : -1} aria-label={title} aria-describedby={statusId} title={lines.join('；')}
+            onFocus={titleTip.onFocus} onBlur={titleTip.onBlur} onPointerDown={titleTip.onPointerDown} />
           <div className={styles.plateTop}>
             <AuthorFact item={item} />
             <span className={styles.date} title={`发布时间 ${coverPublishedCopy(item.display)}`}>
@@ -158,6 +165,7 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
         </div>
         {canCheck ? <div className={styles.pickCorner}><CheckBox item={item} checked={checked} onCheck={onCheck} /></div> : null}
       </div>
+      {titleTip.tooltip}
     </li>
   );
 }

@@ -1,9 +1,10 @@
 {
-  "kind": "implementation_fix",
-  "reason": "Read creation history as metadata and qualify document detail lazily using existing history rows and ActionButton",
-  "authorization": "Mog 2026-10-31 explicit legacy recovery implementation and isolated validation request",
+  "kind": "shared_standard",
+  "reason": "Standardize the shared AppShell Context Bar, ContextTabs and DomainScopePicker across topic map, operations, corpus, collection and settings. Preserve module-specific option eligibility, URLs, actions, and page layouts; no business API or data behavior changes.",
+  "authorization": "User instruction on 2026-11-04: begin phase one of the approved Intelligence full-site shared UI standardization; user explicitly deferred the React Bits licensing workstream and limited current scope to the existing shared-shell task.",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
-    "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e"
+    "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
+    "ICON-B-001": "a08ae3ac746535945174c3e1ed1798975168a4ddd88cc5384a0e24730ef78f7d"
   }
 }

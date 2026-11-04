@@ -11,3 +11,5 @@
 }
 
 @layer lids-review {.ds-component-sample>[data-lids-component="C09"]{align-self:flex-start}.lf-live-contract{padding:16px 0;border-bottom:1px solid var(--ds-line)}.lf-live-contract code{overflow-wrap:anywhere;font-size:var(--ty-label-size)}}
+
+.lf-icon-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin:24px 0}.lf-icon-grid>button{display:flex;flex-direction:column;align-items:center;gap:12px;padding:18px 8px;background:var(--lgi-canvas);color:var(--lgi-ink);border:1px solid var(--lgi-border);font:12px/1.5 var(--lgi-font-ui);cursor:pointer}.lf-icon-grid strong{font-weight:500}.lf-icon-grid>button>span{display:flex;align-items:center;gap:18px}.lf-icon-family>p{color:var(--lgi-muted);line-height:1.8}

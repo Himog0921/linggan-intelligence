@@ -43,7 +43,7 @@ export function AccountSecurityPage() {
     finally { setBusy(false); }
   }
   const crumb = <span className={styles.crumb}><span>设置</span><span className="v7-slash">/</span><b>账户安全</b></span>;
-  return <AppShell active={null} restrictedOps={!admin} boundaryLabel="会话安全" crumb={crumb} meta={<small>密码不会保存在浏览器本地存储</small>}>
+  return <AppShell active={null} restrictedOps={!admin} boundaryLabel="会话安全" contextBar={{ breadcrumb: crumb, meta: <small>密码不会保存在浏览器本地存储</small> }}>
     <main className={styles.page} aria-labelledby="account-security-title"><section className={styles.card}><p className={styles.eyebrow}>ACCOUNT / SECURITY</p><h1 id="account-security-title">修改密码</h1><p>提交前会校验当前密码。成功后服务器撤销此前的其他会话，并为当前浏览器更新会话。</p>
       <form onSubmit={submit} className={styles.form} noValidate><label>当前密码<input type="password" autoComplete="current-password" value={currentPassword} disabled={busy} onChange={event => setCurrentPassword(event.target.value)} /></label><label>新密码<input type="password" autoComplete="new-password" value={newPassword} disabled={busy} onChange={event => setNewPassword(event.target.value)} /></label><label>确认新密码<input type="password" autoComplete="new-password" value={confirm} disabled={busy} onChange={event => setConfirm(event.target.value)} /></label>{notice ? <p role="status" className={styles.notice}>{notice}</p> : null}<ActionButton type="submit" variant="primary" busy={busy}>修改密码</ActionButton></form>
       <p className={styles.boundary}>忘记密码的重设邮件与真实投递尚未配置；请联系管理员，不要把本页当作邮件找回功能。</p>

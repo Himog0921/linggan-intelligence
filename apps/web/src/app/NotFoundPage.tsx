@@ -7,8 +7,7 @@ export function NotFoundPage() {
     <AppShell
       active={null}
       boundaryLabel="本机服务状态"
-      crumb={<b>页面不存在</b>}
-      meta={<span>本机工作空间</span>}
+      contextBar={{ breadcrumb: <b>页面不存在</b>, meta: <span>本机工作空间</span> }}
     >
       <div className={`v7-shell ${styles.shell}`}>
         <main className={styles.main} aria-labelledby="not-found-title">

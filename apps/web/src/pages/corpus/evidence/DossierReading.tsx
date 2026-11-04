@@ -1,46 +1,28 @@
-import { DossierBlocks, DossierIssues } from './DossierBlocks';
-import { emptyMaterialNote, materialLabel, processingLabel } from './dossierPresent';
-import type { Dossier, DossierBlock, DossierMaterial } from './dossierTypes';
+import { useId } from 'react';
+import { DossierGroup, EmptySpeechNotes, TranscriptGroups } from './DossierDocumentBlocks';
+import { endingGroupAttribution, readingGaps, resolveReadingSections, SECTION_LABELS } from './dossierDocumentModel';
+import { materialLabel } from './dossierPresent';
+import type { Dossier, DossierMaterial } from './dossierTypes';
 import styles from './Dossier.module.css';
+import readingStyles from './DossierDocument.module.css';
 
-interface ReadingGroup { unit: DossierMaterial; blocks: DossierBlock[] }
-/** Resolve the canonical reference order without copying text or reassembling source rules. */
-function groups(dossier: Dossier, refs: readonly string[], hideTitle: boolean): ReadingGroup[] {
-  const byRef = new Map(dossier.materials.flatMap(unit => unit.blocks.map(block => [block.ref, { unit, block }] as const)));
-  const titleRefs = new Set(hideTitle ? dossier.note.titleBlockRefs : []);
-  const result: ReadingGroup[] = [];
-  for (const ref of refs) {
-    if (titleRefs.has(ref)) continue;
-    const value = byRef.get(ref);
-    if (!value) continue; // The runtime decoder rejects dangling references.
-    const previous = result.at(-1);
-    if (previous?.unit.ref === value.unit.ref) previous.blocks.push(value.block);
-    else result.push({ unit: value.unit, blocks: [value.block] });
-  }
-  return result;
-}
+/** Works and the research dossier share the same server-owned reading groups. */
 export function DossierReading({ dossier, titleRendered = false, onSource }: { dossier: Dossier; titleRendered?: boolean; onSource?: (unit: DossierMaterial) => void }) {
-  const main = groups(dossier, dossier.readingView.mainBlockRefs, titleRendered);
-  const supplements = groups(dossier, dossier.readingView.supplementBlockRefs, titleRendered);
-  const emptyUnits = dossier.materials.filter(unit => unit.blocks.length === 0 && (unit.sourceState !== 'not_applicable' || (unit.kind === 'audio' && unit.processing?.state === 'completed' && unit.processing.reason === 'no_audio_stream_observed')) && !(unit.kind === 'body' && unit.sourceState !== 'present'));
+  const prefix = `works-reading-${useId()}`;
+  const titleRefs = new Set(titleRendered ? dossier.note.titleBlockRefs : []);
+  const sections = resolveReadingSections(dossier).map(section => ({ ...section,
+    groups: section.groups.filter(group => group.entries.some(entry => entry.block.kind !== 'gap') && !group.entries.every(entry => titleRefs.has(entry.block.ref))),
+  })).filter(section => section.groups.length > 0);
+  const gaps = readingGaps(dossier);
   const imageNumbers = new Map(dossier.materials.filter(unit => unit.kind === 'image').map((unit, index) => [unit.ref, index + 1]));
-  const seenUnits = new Set<string>();
-  const render = (items: ReadingGroup[]) => items.map(({ unit, blocks }, index) => {
-    const first = !seenUnits.has(unit.ref); seenUnits.add(unit.ref);
-    return <section className={styles.readingGroup} data-unit-ref={unit.ref} key={`${unit.ref}:${index}`}>
-    {unit.kind !== 'body' ? <header className={styles.materialHead}><h4>{materialLabel(unit, imageNumbers.get(unit.ref))}</h4>{onSource ? <button type="button" className={styles.sourceLink} onClick={() => onSource(unit)}>查看来源</button> : null}</header> : null}
-    {first && processingLabel(unit) ? <p className={styles.note}>{processingLabel(unit)}</p> : null}
-    <DossierBlocks blocks={blocks} issues={unit.issues.filter(issue => (first || Boolean(issue.blockRef)) && !(issue.code === 'page_order_unknown' && unit.page === null))} />
-  </section>; });
-  const noReadableText = !dossier.note.displayTitle?.trim() && [...main, ...supplements].every(group => group.blocks.every(block => block.kind === 'gap'));
-  return <div className={styles.materials}>
-    {noReadableText ? <p className={styles.note}>暂无可读文字。</p> : null}
-    {main.length > 0 ? <section aria-label="主文"><h3 className={styles.readingHeading}>主文</h3>{render(main)}</section> : null}
-    {supplements.length > 0 ? <section aria-label="补充材料"><h3 className={styles.readingHeading}>补充材料</h3>{render(supplements)}</section> : null}
-    {emptyUnits.length > 0 ? <details className={styles.disclosure} open={main.length + supplements.length === 0}><summary>材料状态 · {emptyUnits.length} 项</summary>{emptyUnits.map(unit => <section key={unit.ref} className={styles.readingGroup} aria-label={`${materialLabel(unit, imageNumbers.get(unit.ref))}材料状态`}>
-      <header className={styles.materialHead}><h4>{materialLabel(unit, imageNumbers.get(unit.ref))}</h4>{onSource ? <button type="button" className={styles.sourceLink} onClick={() => onSource(unit)}>查看来源</button> : null}</header>
-      {processingLabel(unit) || !unit.issues.some(issue => issue.code === 'not_processed') ? <p className={styles.note}>{processingLabel(unit) ?? emptyMaterialNote(unit)}</p> : null}
-      <DossierIssues issues={unit.issues.filter(issue => !(issue.code === 'page_order_unknown' && unit.page === null) && !(processingLabel(unit) && ['not_processed', 'existing_result_pending'].includes(issue.code)))} />
-    </section>)}</details> : null}
+  return <div className={`${styles.materials} ${readingStyles.surface}`}>
+    {!dossier.note.displayTitle?.trim() && sections.length === 0 ? <p className={styles.note}>暂无可读文字。</p> : null}
+    {sections.map(({ section, groups }) => <section key={section.ref} aria-label={SECTION_LABELS[section.kind]} className={styles.readingGroup}>
+      <h3 className={styles.readingHeading}>{SECTION_LABELS[section.kind]}</h3>
+      {section.kind === 'audio' ? <TranscriptGroups groups={groups} prefix={prefix}/> : groups.map((value, index) => <DossierGroup key={value.group.ref} value={value} prefix={prefix} previousRole={endingGroupAttribution(groups[index - 1])} previousBlock={value.entries[0]?.unit.ref === groups[index - 1]?.entries.at(-1)?.unit.ref ? groups[index - 1]?.entries.at(-1)?.block : undefined}/>)}
+    </section>)}
+    {gaps.length ? <section aria-label="待补内容">{gaps.map(gap => <p key={gap.key} className={styles.note}>{gap.label}：{gap.state}。{gap.message}</p>)}</section> : null}
+    <EmptySpeechNotes materials={dossier.materials}/>
+    {onSource ? <details className={styles.disclosure}><summary>来源</summary>{dossier.materials.map(unit => <button key={unit.ref} type="button" className={styles.sourceLink} onClick={() => onSource(unit)}>{materialLabel(unit, imageNumbers.get(unit.ref))}</button>)}</details> : null}
   </div>;
 }

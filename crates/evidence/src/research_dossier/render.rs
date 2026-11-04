@@ -7,11 +7,39 @@ pub fn context_sources(dossier: &ResearchDossier) -> Vec<Value> {
         let material=dossier.materials.iter().find(|m|m["blocks"].as_array().is_some_and(|b|b.iter().any(|b|b["ref"]==f.fragment_id)));
         json!({"fragmentId":f.fragment_id,"blockRef":f.fragment_id,"sourceRef":f.source_ref,"sourceVersion":f.source_version,
             "readingRef":f.reading_ref,"unitRef":f.unit_ref,"asOf":dossier.as_of,
-            "kind":match f.field.as_str(){"title"=>"native_title","ocr"=>"image_substantive_text","transcript"=>"asr_text","frame_text"=>"frame_ocr_text",other=>other},
+            "verification":material.map(|m|m["reading"]["verification"].clone()),
+            "contentType":f.structure.get("contentType"),"regionRef":f.structure.get("regionRef"),"regionLabel":f.structure.get("regionLabel"),
+            "kind":if f.structure["contentType"]=="visual_description" {"image_visual_description"} else {match f.field.as_str(){"title"=>"native_title","ocr"=>"image_substantive_text","transcript"=>"asr_text","frame_text"=>"frame_ocr_text",other=>other}},
             "text":f.text,"characterCount":f.text.chars().count(),"speaker":f.speaker,"structure":f.structure,"issues":f.issues,
             "slotOrdinal":material.map(|m|m["page"].clone()),"sourceLocation":material.map(|m|json!({"unitRef":m["ref"],"readingRef":m["currentRevisionRef"],"slotKey":m["slotKey"],"page":m["page"],"bbox":f.structure.get("bbox"),"time":f.structure.get("time")})),
             "contentHash":hash(&f.text)})
     }).collect()
+}
+
+/// Model-facing projection of the frozen context; audit metadata stays in the manifest.
+pub fn model_context(manifest: &Value) -> Value {
+    let sources: Vec<Value> = manifest["sources"].as_array().into_iter().flatten().map(|source| {
+        let mut value = json!({"source":source["blockRef"], "kind":source["kind"], "text":source["text"]});
+        for key in ["unitRef", "speaker", "regionLabel"] {
+            if let Some(v) = source.get(key).filter(|v| !v.is_null()) { value[key] = v.clone(); }
+        }
+        for key in ["sourceRole", "time"] {
+            if let Some(v) = source["structure"].get(key).filter(|v| !v.is_null()) { value[key] = v.clone(); }
+        }
+        if let Some(parameters) = source["structure"]["parameters"].as_array().filter(|p| !p.is_empty()) {
+            value["parameterCandidates"] = Value::Array(parameters.iter().map(|parameter| {
+                let mut candidate = parameter.clone();
+                for key in ["bindingStatus", "basisStatus"] {
+                    if candidate.get(key).is_none_or(Value::is_null) { candidate[key] = json!("unconfirmed"); }
+                }
+                candidate
+            }).collect());
+        }
+        value
+    }).collect();
+    let states: serde_json::Map<String, Value> = manifest["coverage"]["sources"].as_object().into_iter().flatten()
+        .map(|(key,value)| (key.clone(), value["state"].clone())).collect();
+    json!({"title":manifest["readingTitle"]["text"], "materials":sources,"availability":states})
 }
 
 /// Full block order; callers supply an explicit task selection, never a character allowance.
@@ -19,14 +47,28 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
     let mut out = String::new();
     for (index, f) in fragments.iter().enumerate() {
         out.push_str(&format!("[S{}] {}\n", index + 1, field_label(&f.field)));
-        if f.speaker != "author" {
+        if f.speaker == "other" {
             out.push_str(&format!("角色：{}\n", content::speaker_label(&f.speaker)));
+        }
+        if let Some(label) = f.structure["regionLabel"].as_str() {
+            out.push_str(&format!("区域：{label}\n"));
+        }
+        if f.structure["contentType"] == "visual_description" {
+            out.push_str("视觉描述：\n");
+        } else if f.structure["contentType"] == "extracted_text" {
+            out.push_str(match f.structure["sourceRole"].as_str() {
+                Some("background") => "背景文字：\n",
+                Some("brand") => "品牌文字：\n",
+                Some("subtitle") => "字幕文字：\n",
+                _ => "图片文字：\n",
+            });
         }
         out.push_str(&f.text);
         out.push_str("\n\n");
-        for issue in &f.issues {
-            if let Some(message) = issue["message"].as_str() {
-                out.push_str(&format!("> 待确认：{message}\n"));
+        for candidate in f.structure["parameters"].as_array().into_iter().flatten() {
+            let value = candidate["value"].as_str().unwrap_or("");
+            if !value.is_empty() && !f.text.contains(value) {
+                out.push_str(&format!("参数候选（归属未确认）：{}\n\n", candidate));
             }
         }
     }
@@ -54,6 +96,35 @@ mod tests {
     use super::*;
     use crate::research_dossier::{Selection, VERSION, select};
     use uuid::Uuid;
+
+    #[test]
+    fn model_input_keeps_content_and_attribution_without_audit_duplicates() {
+        let manifest = json!({
+            "readingTitle":{"text":"桌游"},
+            "coverage":{"sources":{"images":{"state":"partial","issues":["页码未确认"]}}},
+            "sources":[{
+                "blockRef":"block-1", "unitRef":"image-2", "kind":"image_substantive_text",
+                "text":"名称 | 年龄\n游戏甲 | 5岁", "speaker":"unconfirmed", "regionLabel":"左栏",
+                "issues":[{"message":"核对说明"}], "verification":"unchecked",
+                "structure":{"text":"重复正文", "sourceRole":"main",
+                    "parameters":[{"subject":"游戏甲","attribute":"age","value":"5岁","basis":"左栏"}]}
+            },{
+                "blockRef":"block-2", "unitRef":"image-2", "kind":"image_visual_description",
+                "text":"左侧是圆形卡片。", "structure":{}
+            }]
+        });
+        let result = model_context(&manifest);
+        assert_eq!(result["materials"][0]["text"], manifest["sources"][0]["text"]);
+        assert_eq!(result["materials"][0]["unitRef"], "image-2");
+        assert_eq!(result["materials"][0]["parameterCandidates"][0]["bindingStatus"], "unconfirmed");
+        assert_eq!(result["materials"][0]["parameterCandidates"][0]["basisStatus"], "unconfirmed");
+        assert_eq!(result["materials"][1]["kind"], "image_visual_description");
+        assert_eq!(result["availability"]["images"], "partial");
+        let output = result.to_string();
+        for omitted in ["核对说明", "页码未确认", "重复正文", "verification", "structure"] {
+            assert!(!output.contains(omitted));
+        }
+    }
 
     fn fixture(platform_title: Option<&str>, body_heading: Option<&str>) -> ResearchDossier {
         let mut materials = vec![];
@@ -93,17 +164,88 @@ mod tests {
     }
 
     #[test]
+    fn ai_materials_explain_machine_status_once_and_keep_types_and_specific_issues() {
+        let fragments: Vec<_> = ["extracted_text", "visual_description", "visual_description"]
+            .into_iter()
+            .enumerate()
+            .map(|(i, kind)| Fragment {
+                fragment_id: format!("f{i}"),
+                source_ref: Uuid::nil(),
+                field: "ocr".into(),
+                source_version: "v1".into(),
+                start: 0,
+                end: 2,
+                text: format!("内容{i}"),
+                speaker: "unconfirmed".into(),
+                structure: json!({"contentType":kind,"regionLabel":"左栏"}),
+                issues: if i == 0 {
+                    vec![json!({"message":"末行数字看不清"})]
+                } else {
+                    vec![]
+                },
+                reading_ref: None,
+                unit_ref: None,
+            })
+            .collect();
+        let output = render_materials(&fragments);
+        assert!(!output.contains("核对状态以来源记录为准"));
+        assert_eq!(output.matches("视觉描述：").count(), 2);
+        assert_eq!(output.matches("图片文字：").count(), 1);
+        assert!(!output.contains("末行数字看不清"));
+        assert!(!output.contains("模型观察，非原文"));
+        assert!(!output.contains("未经人工核实"));
+        assert!(render_materials(&[]).is_empty());
+        let mut dossier = fixture(Some("平台标题"), None);
+        dossier.fragments = fragments;
+        dossier.materials[0]["blocks"] = json!([{"ref":"f0"},{"ref":"f1"},{"ref":"f2"}]);
+        for status in [json!("verified"), json!("unchecked"), Value::Null] {
+            dossier.materials[0]["reading"] = json!({"verification":status});
+            let sources = context_sources(&dossier);
+            assert!(
+                sources
+                    .iter()
+                    .all(|source| source["verification"] == status)
+            );
+            assert_eq!(sources[0]["kind"], "image_substantive_text");
+            assert_eq!(sources[1]["kind"], "image_visual_description");
+        }
+        dossier.materials[0]
+            .as_object_mut()
+            .unwrap()
+            .remove("reading");
+        assert!(context_sources(&dossier)[0]["verification"].is_null());
+    }
+    #[test]
+    fn online_material_keeps_type_region_and_image_source_in_document() {
+        let mut d = fixture(Some("平台标题"), None);
+        d.materials[0]["originalUrl"] = json!("/api/local/media/example");
+        d.materials[0]["blocks"] = json!([
+            {"ref":"text", "kind":"paragraph", "text":"仅在安静时进行。", "speaker":"unconfirmed", "contentType":"extracted_text", "regionRef":"r1", "regionLabel":"左栏"},
+            {"ref":"visual", "kind":"paragraph", "text":"左栏有手势示意。", "speaker":"unconfirmed", "contentType":"visual_description", "regionRef":"r1", "regionLabel":"左栏"}
+        ]);
+        super::super::reading::rebuild(&mut d);
+        let output = markdown(&d);
+        for expected in [
+            "图片 1",
+            "[查看原图](</api/local/media/example>)",
+            "图片文字（识别提取）",
+            "视觉描述（模型观察，非原文）",
+            "仅在安静时进行。",
+            "左栏有手势示意。",
+        ] {
+            assert!(output.contains(expected), "{expected}: {output}");
+        }
+        assert_eq!(output.matches("查看原图").count(), 1);
+        assert_eq!(d.note["displayTitle"], "平台标题");
+    }
+
+    #[test]
     fn markdown_uses_the_same_ordered_blocks_and_human_readable_positions() {
         let d = fixture(None, Some("同名标题"));
         let output = markdown(&d);
         assert!(output.starts_with("# 同名标题\n"));
         assert!(output.find("正文后续").unwrap() < output.find("图片后续").unwrap());
-        for text in [
-            "00:00.010–00:00.020",
-            "00:00.040",
-            "正文标题待确认",
-            "图片标题待确认",
-        ] {
+        for text in ["00:00.010–00:00.020", "00:00.040"] {
             assert_eq!(output.matches(text).count(), 1, "{text}");
         }
         for technical in [
@@ -147,7 +289,12 @@ mod tests {
         let d = fixture(Some("平台标题"), Some("正文标题"));
         let output = markdown(&d);
         assert!(output.starts_with("# 平台标题\n"));
-        assert!(output.contains("正文标题") && output.contains("图片标题待确认"));
+        assert!(output.contains("正文标题"));
+        assert!(!output.contains("核对说明") && !output.contains("图片标题待确认"));
+        assert_eq!(
+            d.materials[0]["blocks"][0]["issues"][0]["message"],
+            "正文标题待确认"
+        );
     }
 
     #[test]
@@ -163,10 +310,10 @@ mod tests {
         d.coverage["sources"] = json!({"audio":{"state":"known_empty"}});
         let output = markdown(&d);
         for message in ["第0处独立问题", "第1处独立问题", "独立覆盖问题"] {
-            assert_eq!(output.matches(message).count(), 1);
+            assert!(!output.contains(message));
         }
-        assert!(output.contains("来源已确认无可读文字"));
-        assert!(output.contains("既有已确认无文字的结果仍有效"));
+        assert!(output.contains("无可用口播"));
+        assert!(!output.contains("既有已确认无文字的结果仍有效"));
         assert!(!output.contains("已处理，未检出可读文字"));
         assert!(!output.contains("处理失败，尚无当前可用"));
     }
@@ -202,8 +349,8 @@ mod tests {
         let output = markdown(&d);
         assert_eq!(
             output.matches("*角色未确认*").count(),
-            5,
-            "one run in body/images/frames and one in each audio material"
+            0,
+            "unknown role remains source metadata, not reading boilerplate"
         );
         assert_eq!(output.matches("*他人*").count(), 1);
         assert_eq!(
@@ -246,13 +393,56 @@ mod tests {
     }
 
     #[test]
+    fn ai_keeps_unanchored_parameter_candidates_with_explicit_binding_state() {
+        let mut d = fixture(Some("参数核对"), None);
+        d.materials = vec![
+            json!({"ref":"image-unit","kind":"image","sourceState":"present","blocks":[
+            {"ref":"image-param","kind":"paragraph","text":"原图标题","speaker":"unconfirmed",
+             "contentType":"extracted_text","regionRef":"r1","parameters":[
+                {"subject":"候选商品","attribute":"age","value":"8+","basis":"package"}]}]}),
+        ];
+        d.fragments = vec![Fragment {
+            fragment_id: "image-param".into(),
+            source_ref: Uuid::nil(),
+            field: "ocr".into(),
+            source_version: "v1".into(),
+            start: 0,
+            end: 4,
+            text: "原图标题".into(),
+            speaker: "unconfirmed".into(),
+            structure: d.materials[0]["blocks"][0].clone(),
+            issues: vec![],
+            reading_ref: None,
+            unit_ref: None,
+        }];
+        super::super::reading::rebuild(&mut d);
+        let text = render_materials(&d.fragments);
+        assert!(text.contains("原图标题"));
+        assert_eq!(text.matches("参数候选（归属未确认）").count(), 1);
+        assert!(text.contains("8+") && text.contains("package"));
+        let sources = context_sources(&d);
+        let candidate = sources
+            .iter()
+            .find(|s| s["blockRef"] == "image-param")
+            .unwrap();
+        assert_eq!(
+            candidate["structure"]["parameters"][0]["bindingStatus"],
+            "unconfirmed"
+        );
+        assert_eq!(
+            candidate["structure"]["parameters"][0]["sourceRegionRef"],
+            "r1"
+        );
+    }
+
+    #[test]
     fn markdown_preserves_execution_state_and_valid_empty_results() {
         for (state, label) in [
-            ("pending", "待处理"),
+            ("pending", "暂无可用文字"),
             ("running", "处理中"),
             ("failed", "处理失败"),
-            ("cancelled", "处理已取消"),
-            ("invalidated", "处理结果已失效"),
+            ("cancelled", "暂无可用文字"),
+            ("invalidated", "暂无可用文字"),
         ] {
             let mut d = fixture(Some("合成处理状态验证"), None);
             d.materials = vec![
@@ -261,18 +451,18 @@ mod tests {
             ];
             d.coverage["sources"] = json!({"images":{"state":"not_processed"}});
             super::super::reading::rebuild(&mut d);
-            assert!(markdown(&d).contains(&format!("图片文字第 1 页：{label}。")));
+            assert!(markdown(&d).contains(&format!("图片文字：{label}。")));
             d.materials[0]["sourceState"] = json!("known_empty");
             d.materials[0]["currentRevisionRef"] = json!("valid-empty-reading");
             d.coverage["sources"]["images"]["state"] = json!("known_empty");
             let output = markdown(&d);
-            assert!(output.contains(&format!("{label}；既有已确认无文字的结果仍有效。")));
+            assert!(!output.contains("未包含内容"));
             assert!(!output.contains("尚无当前可用的识读文字"));
             d.materials[0]["sourceState"] = json!("present");
             d.materials[0]["blocks"] = json!([{"ref":"readable","kind":"paragraph","text":"既有有效文字。","speaker":"author"}]);
             d.coverage["sources"]["images"]["state"] = json!("available");
             super::super::reading::rebuild(&mut d);
-            assert!(markdown(&d).contains(&format!("{label}，已有读本仍可读。")));
+            assert!(!markdown(&d).contains("未包含内容"));
             assert!(markdown(&d).contains("既有有效文字。"));
         }
     }

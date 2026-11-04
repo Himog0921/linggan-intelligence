@@ -170,12 +170,39 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
     let dossier = inspection::read_dossier(&db, &scope, a).await.unwrap();
     assert!(
         dossier.partial,
-        "a known image without a processing job cannot be complete"
+        "an observed image without acquired bytes cannot be complete"
     );
     assert!(
         dossier
             .limitations
-            .contains(&"some_media_not_readable".to_owned())
+            .contains(&"some_media_not_available".to_owned()),
+        "an observed URL is unavailable material until its bytes are acquired: {:?}",
+        dossier.limitations
+    );
+    assert!(
+        !dossier
+            .limitations
+            .contains(&"some_media_not_readable".to_owned()),
+        "page inventory must not invent an extra unreadable-material reason"
+    );
+    let observed = linggan_evidence::research_dossier::read(&db, a)
+        .await
+        .unwrap()
+        .unwrap();
+    let observed_images: Vec<_> = observed
+        .materials
+        .iter()
+        .filter(|unit| unit["kind"] == "image")
+        .collect();
+    assert_eq!(
+        observed_images.len(),
+        1,
+        "only the observed image, without page placeholders"
+    );
+    assert_eq!(observed_images[0]["sourceState"], "not_acquired");
+    assert_eq!(
+        observed.coverage["sources"]["images"]["state"],
+        "not_acquired"
     );
     assert!(dossier.fragments.iter().any(|f| f.field == "body"));
     assert_eq!(counts(&db).await, before);
@@ -190,6 +217,25 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
     .await
     .unwrap()
     .materialization_ref;
+    let acquired = inspection::read_dossier(&db, &scope, a).await.unwrap();
+    assert!(acquired.partial);
+    assert!(
+        acquired
+            .limitations
+            .contains(&"some_media_not_readable".to_owned()),
+        "acquired bytes without a reading must remain unreadable: {:?}",
+        acquired.limitations
+    );
+    assert!(
+        !acquired
+            .limitations
+            .contains(&"some_media_not_available".to_owned())
+    );
+    assert_eq!(
+        counts(&db).await,
+        before,
+        "reading either stage must not start collection or model work"
+    );
     let mut tx = db.pool().begin().await.unwrap();
     linggan_evidence::material_reading::publish_in(&mut tx,linggan_evidence::material_reading::NewReading {
         content_public_ref:a,unit_key:"image:xhs:inspector-a:image:1".into(),kind:"image".into(),slot_key:Some("xhs:inspector-a:image:1".into()),page:Some(1),source_version:materialization.to_string(),source_state:"present".into(),derivative_ref:None,producer_ref:Some(Uuid::new_v4()),generated_by:"cloud_vision".into(),rule_version:"dossier-content.v2:synthetic-empty".into(),blocks:vec![],issues:vec![json!({"key":"recognition_empty","code":"no_text_observed","message":"未检出文字","resolution":"reading_edit"})],source_location:json!({"blobSha256":"a".repeat(64),"materializationRef":materialization}),publication:linggan_evidence::material_reading::Publication::Automatic{expected_current:None}

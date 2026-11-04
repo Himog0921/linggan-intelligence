@@ -1,33 +1,40 @@
-/* 作者依据抽屉：先结论，再按作品分组的作品与引文；标题、分区和提交栏固定，中间内容自己滚动。
- * 只消费 LIDS --lgi-* Token。抽屉自顶部（页头下沿）起，覆盖右侧而不是把列表压成窄条。 */
+/* 作者检查器：当前创作者页右侧的非模态分区，和列表并排；标题、数字、分区与提交栏固定，
+ * 中间内容自己滚动。共享页头与左侧列表保持可操作，没有灰色遮罩，也不把背景设为 inert。
+ * 只消费 LIDS --lgi-* Token。 */
 
 .drawer {
-  --creator-control: calc(var(--lgi-space-10) + var(--lgi-space-1));
-  position: fixed;
-  inset: var(--creator-shell-top, var(--v7-header-height)) 0 0 auto;
+  --creator-control: var(--lgi-space-10);
+  position: relative;
+  display: flex;
   box-sizing: border-box;
-  width: min(100vw, calc(var(--lgi-space-24) * 7 + var(--lgi-space-16) + var(--lgi-space-2)));
-  max-width: 100vw;
-  height: calc(100dvh - var(--creator-shell-top, var(--v7-header-height)));
-  max-height: calc(100dvh - var(--creator-shell-top, var(--v7-header-height)));
+  flex: none;
+  flex-direction: column;
+  align-self: stretch;
+  width: min(
+    calc(var(--lgi-space-24) * 6 + var(--lgi-space-16)),
+    max(
+      calc(var(--lgi-space-24) * 3 + var(--lgi-space-8)),
+      calc(100% - (var(--lgi-space-24) * 6 + var(--lgi-space-6)))
+    )
+  );
+  max-width: max(
+    calc(var(--lgi-space-24) * 3 + var(--lgi-space-8)),
+    calc(100% - (var(--lgi-space-24) * 6 + var(--lgi-space-6)))
+  );
+  min-width: 0;
+  height: 100%;
   margin: 0;
   border: 0;
+  border-left: 1px solid var(--lgi-ink);
   padding: 0;
   overflow: hidden;
   background: var(--lgi-canvas);
-  box-shadow:calc(-1 * var(--lgi-action-shadow-idle)) 0 0 var(--lgi-ink);
   color: var(--lgi-ink);
   font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
 }
 
-.drawer[open] {
-  display: flex;
-  flex-direction: column;
-}
-
-.drawer::backdrop {
-  inset: var(--creator-shell-top, var(--v7-header-height)) 0 0;
-  background: color-mix(in srgb, var(--lgi-ink) 22%, transparent);
+.drawer[hidden] {
+  display: none;
 }
 
 .drawer :where(button:not([data-action-button]), input, select) {
@@ -86,35 +93,61 @@
 /* ── 固定的抽屉头：身份、数字、分区 ─────────────── */
 .head {
   flex: none;
-  padding: var(--lgi-space-6) var(--lgi-space-6) 0;
+  padding: var(--lgi-space-4) var(--lgi-space-6) 0;
 }
 
 .title {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--lgi-space-3);
   min-width: 0;
 }
 
-.title > div {
+.identity {
   flex: 1;
   min-width: 0;
 }
 
-.title small {
-  display: block;
+/* 上一位/下一位/关闭固定 32px；页序是本页顺序，不混用全局序号。 */
+.navCluster {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--lgi-space-1);
+}
+
+.navButtons {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-1);
+}
+
+.navButton {
+  height: var(--lgi-space-8);
+  padding: 0 var(--lgi-space-2) !important;
+  white-space: nowrap;
+}
+
+.position {
   color: var(--lgi-muted);
-  font-size:var(--lgi-type-label-size);
+  font: var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-data);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .title h2 {
-  margin: var(--lgi-space-1) 0 0;
+  display: -webkit-box;
+  margin: 0;
   overflow: hidden;
+  overflow-wrap: anywhere;
   font-size:var(--lgi-type-object-size);
   font-weight: var(--lgi-weight-semibold);
   line-height:var(--lgi-type-object-leading);
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .title p {
@@ -127,54 +160,85 @@
 }
 
 .close {
-  align-self: flex-start;
   flex: none;
+}
+
+.iconButton {
+  display: grid;
+  place-items: center;
+  width: var(--lgi-space-8);
+  height: var(--lgi-space-8);
+  border: 1px solid var(--lgi-ink) !important;
+  padding: 0 !important;
+  background: var(--lgi-canvas) !important;
+  color: var(--lgi-ink);
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--lgi-canvas-low) !important;
+}
+
+/* 检查器内的次级工具与关闭键同层级：32px；开始/确认等主执行动作仍用 40px。 */
+.inspectorTool[data-action-button] {
+  height: var(--lgi-space-8);
+  min-height: var(--lgi-space-8);
+  padding: 0 var(--lgi-space-3);
 }
 
 .metrics {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--lgi-space-4);
-  margin-top: var(--lgi-space-5);
-  padding:var(--lgi-space-3) 0;
-  background:var(--lgi-canvas);
-  border-bottom:1px solid var(--lgi-hairline);
+  margin-top: var(--lgi-space-3);
+  padding: 0 0 var(--lgi-space-3);
+  border-bottom: 1px solid var(--lgi-hairline);
   color: var(--lgi-muted);
   font-size:var(--lgi-type-label-size);
 }
 
-.metrics span {
+.metrics > span {
   display: flex;
   flex-direction: column;
   gap: var(--lgi-space-1);
   min-width: 0;
 }
 
+.metricRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lgi-space-2);
+  min-width: 0;
+}
+
 .metrics em {
-  font-style: normal;
-  font-size: var(--lgi-type-aux-size);
-  line-height: var(--lgi-type-aux-leading);
+  overflow: hidden;
   color: var(--lgi-muted);
-  overflow-wrap: anywhere;
+  font-size: var(--lgi-type-aux-size);
+  font-style: normal;
+  line-height: var(--lgi-type-aux-leading);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metrics strong {
   color: var(--lgi-ink);
   font:var(--lgi-type-data-weight) var(--lgi-type-data-size)/var(--lgi-type-data-leading) var(--lgi-font-data);
   font-variant-numeric:tabular-nums;
+  white-space: nowrap;
 }
 
 .tabs {
   display: flex;
   gap: var(--lgi-space-6);
-  height: var(--lgi-space-12);
-  margin-top: var(--lgi-space-2);
+  height: var(--lgi-space-10);
+  margin-top: var(--lgi-space-1);
   border-bottom: 1px solid var(--lgi-border);
 }
 
 .drawer .tabs button {
+  position: relative;
   border: 0;
-  border-bottom: 2px solid transparent;
   padding: 0;
   background: transparent;
   color: var(--lgi-muted);
@@ -182,13 +246,24 @@
 }
 
 .drawer .tabs button[aria-selected='true'] {
-  border-bottom-color: var(--lgi-signal);
   color: var(--lgi-ink);
   font-weight: var(--lgi-weight-semibold);
 }
 
+/* 手绘线只留面包屑；这里恢复一条 2px 直短线。 */
+.drawer .tabs button[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: var(--lgi-action-rail-width);
+  background: var(--lgi-signal);
+}
+
 /* ── 滚动的内容区 ─────────────────────────────── */
 .body {
+  /* 主页作品列数按检查器内容宽度决定，不按视口：632/640 都排 5 列。 */
+  container-type: inline-size;
+  container-name: creator-body;
   flex: 1;
   min-height: 0;
   padding: var(--lgi-space-6);
@@ -203,9 +278,9 @@
 
 .body h3 {
   margin: 0 0 var(--lgi-space-3);
-  font-size:var(--lgi-type-section-size);
-  font-weight:var(--lgi-type-section-weight);
-  line-height:var(--lgi-type-section-leading);
+  font-size: var(--lgi-text-body);
+  font-weight: var(--lgi-weight-semibold);
+  line-height: var(--lgi-lh-body);
 }
 
 .body p {
@@ -300,45 +375,415 @@
   font-size:var(--lgi-type-label-size);
 }
 
-/* 按作品分组：每篇作品一个可折叠的块，块里是这篇作品的四项判断与它们的引文。 */
-.workGroup {
+/* ── 概览 ─────────────────────────────────────── */
+.body section + section {
+  border-top: 1px solid var(--lgi-hairline);
+  padding-top: var(--lgi-space-5);
+}
+
+.sectionHead,
+.panelHead,
+.observationHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+  margin-bottom: var(--lgi-space-3);
+}
+
+.sectionHead h3,
+.panelHead h3,
+.observationHead h3 {
+  margin: 0;
+}
+
+.panelHead a,
+.sectionHead a {
+  font-size: var(--lgi-type-label-size);
+  white-space: nowrap;
+}
+
+.leadHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+  margin-bottom: var(--lgi-space-2);
+}
+
+.leadTitle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--lgi-space-2);
+  min-width: 0;
+}
+
+.leadValue {
+  font-size: var(--lgi-type-section-size);
+  font-weight: var(--lgi-weight-semibold);
+  line-height: var(--lgi-type-section-leading);
+}
+
+.leadValue[data-value='unknown'] {
+  color: var(--lgi-body);
+}
+
+.manualTag {
+  border: 1px solid var(--lgi-border);
+  padding: 0 var(--lgi-space-1);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+  line-height: var(--lgi-type-aux-leading);
+  white-space: nowrap;
+}
+
+.sampleFacts {
+  margin: var(--lgi-space-2) 0 0;
+  overflow-wrap: anywhere;
+  font-size: var(--lgi-type-label-size);
+}
+
+.sampleCoverage {
+  margin: var(--lgi-space-1) 0 0;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+  line-height: var(--lgi-type-aux-leading);
+}
+
+.limitFirst {
+  margin: var(--lgi-space-2) 0 0;
+  font-size: var(--lgi-type-label-size);
+}
+
+.limitText {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.basisSummary {
+  margin-top: var(--lgi-space-3);
+}
+
+.basisSummary > summary {
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+}
+
+.leadReason {
+  margin: var(--lgi-space-1) 0;
+}
+
+.leadMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-4);
+  margin-top: var(--lgi-space-3);
+}
+
+.sampleCount {
+  flex: none;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+}
+
+.inlineEvidence {
+  margin: 0;
+}
+
+.inlineEvidence > summary {
+  color: var(--lgi-focus);
+  font-size: var(--lgi-type-label-size);
+}
+
+.provenance {
+  margin: var(--lgi-space-1) 0 0;
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+}
+
+.biography {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.biography[data-open='true'] {
+  display: block;
+  overflow: visible;
+}
+
+.factLine {
+  margin: 0 0 var(--lgi-space-2);
+  overflow-wrap: anywhere;
+}
+
+.factRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+}
+
+.factMuted {
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+}
+
+.basis {
+  border-top: 1px solid var(--lgi-hairline);
+  padding-top: var(--lgi-space-4);
+}
+
+.basis > summary,
+.criteriaBlock > summary,
+.processing > summary,
+.archiveInfo > summary {
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+}
+
+.identityBlock {
+  margin-top: var(--lgi-space-4);
+  border-top: 1px solid var(--lgi-hairline);
+  padding-top: var(--lgi-space-3);
+}
+
+.identityBlock h4 {
+  margin: 0 0 var(--lgi-space-2);
+  font-size: var(--lgi-type-label-size);
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.accountResearch {
+  position: relative;
+  flex: none;
+  min-width: 0;
+  text-align: right;
+}
+
+.accountPanel {
+  position: absolute;
+  top: calc(100% + var(--lgi-space-2));
+  right: 0;
+  z-index: var(--lgi-z-popover);
+  box-sizing: border-box;
+  width: calc(var(--lgi-space-24) * 3 + var(--lgi-space-16));
+  max-width: calc(100vw - var(--lgi-space-8));
+  margin-top: 0;
+  border: 1px solid var(--lgi-ink);
+  padding: var(--lgi-space-3);
+  background: var(--lgi-canvas);
+  box-shadow: var(--lgi-action-shadow-idle) var(--lgi-action-shadow-idle) 0 var(--lgi-ink);
+  text-align: left;
+}
+
+.accountPanelHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--lgi-space-3);
+  margin-bottom: var(--lgi-space-2);
+}
+
+.accountPanelHead strong {
+  font-size: var(--lgi-type-label-size);
+}
+
+/* ── 研究线索 ─────────────────────────────────── */
+.body .workGroup {
+  margin-top: var(--lgi-space-1);
   border-bottom: 1px solid var(--lgi-border);
-  padding: var(--lgi-space-4) 0;
+  padding: var(--lgi-space-2) 0;
 }
 
 .body .workGroup > summary {
   display: flex;
-  align-items: center;
-  gap: var(--lgi-space-3);
+  align-items: flex-start;
+  gap: var(--lgi-space-2);
   color: var(--lgi-ink);
   font-size: var(--lgi-text-body);
   list-style: none;
-}
-
-.workGroup > summary::after {
-  content: '+';
-  flex: none;
-  margin-left: auto;
-  color: var(--lgi-muted);
-}
-
-.workGroup[open] > summary::after {
-  content: '−';
 }
 
 .workGroup > summary::-webkit-details-marker {
   display: none;
 }
 
-.workGroup > summary > div {
+.workChevron {
+  flex: none;
+  width: var(--lgi-space-4);
+  height: var(--lgi-space-4);
+  margin-top: var(--lgi-space-1);
+  transition: transform var(--lgi-duration-state) var(--lgi-ease-ui);
+}
+
+.workChevron[data-expanded='true'] {
+  transform: rotate(90deg);
+}
+
+.workSummaryCover {
+  margin-top: var(--lgi-space-1);
+}
+
+.workSummaryCopy {
   flex: 1;
   min-width: 0;
 }
 
-.workBody {
-  padding-top: var(--lgi-space-4);
+.workSummaryTitle {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: var(--lgi-space-5);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
+.workSummaryMeta {
+  display: block;
+  margin-top: calc(var(--lgi-space-1) / 2);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+  line-height: var(--lgi-type-aux-leading);
+}
+
+.workSummaryMeta[data-failed='true'] {
+  color: var(--lgi-danger);
+}
+
+.workBody {
+  padding: var(--lgi-space-3) 0 0 var(--lgi-space-6);
+}
+
+.workSource {
+  margin: 0 0 var(--lgi-space-2);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+  line-height: var(--lgi-type-aux-leading);
+}
+
+.workProvenance {
+  margin: 0 0 var(--lgi-space-2);
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+  line-height: var(--lgi-type-aux-leading);
+}
+
+.workActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--lgi-space-3);
+  margin-bottom: var(--lgi-space-2);
+  font-size: var(--lgi-type-label-size);
+}
+
+.researchBlock {
+  flex-basis: 100%;
+}
+
+.judgmentRow {
+  border-top: 1px solid var(--lgi-hairline);
+  padding: var(--lgi-space-3) 0;
+}
+
+.judgmentLine {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lgi-space-2);
+  flex-wrap: wrap;
+}
+
+.judgmentLabel {
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-label-size);
+}
+
+.judgmentLine strong {
+  font-size: var(--lgi-type-label-size);
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.judgmentSource {
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+}
+
+.judgmentLine .textButton {
+  margin-left: auto;
+  font-size: var(--lgi-type-label-size);
+}
+
+.criteriaBlock {
+  margin-top: var(--lgi-space-4);
+}
+
+.processing {
+  margin-top: var(--lgi-space-2);
+}
+
+/* ── 观察记录 ─────────────────────────────────── */
+.observationState {
+  display: block;
+  margin-top: var(--lgi-space-1);
+  font-size: var(--lgi-type-object-size);
+  font-weight: var(--lgi-weight-semibold);
+  line-height: var(--lgi-type-object-leading);
+}
+
+.observationFacts {
+  display: grid;
+  gap: 0;
+  margin: var(--lgi-space-4) 0 0;
+  border-top: 1px solid var(--lgi-border);
+}
+
+.observationFacts > div {
+  display: grid;
+  grid-template-columns: calc(var(--lgi-space-24) + var(--lgi-space-2)) minmax(0, 1fr);
+  gap: var(--lgi-space-4);
+  border-bottom: 1px solid var(--lgi-hairline);
+  padding: var(--lgi-space-2) 0;
+  font-size: var(--lgi-type-label-size);
+}
+
+.observationFacts dt {
+  color: var(--lgi-muted);
+}
+
+.observationFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.lastChange {
+  margin-top: var(--lgi-space-5);
+}
+
+.lastChange h4 {
+  margin: 0 0 var(--lgi-space-2);
+  font-size: var(--lgi-type-section-size);
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.lastChange p {
+  margin: 0;
+  border-top: 1px solid var(--lgi-hairline);
+  padding-top: var(--lgi-space-2);
+  color: var(--lgi-body);
+  font-size: var(--lgi-type-label-size);
+}
+
+.archiveInfo {
+  margin-top: var(--lgi-space-4);
+}
+
+/* 按作品分组的基础块由上方研究线索样式定义；这里保留判断块共用的内边距。 */
 .field {
   padding: var(--lgi-space-4) 0;
 }
@@ -363,15 +808,25 @@
   flex: none;
 }
 
-/* 引文是来源里的原话，用原声字体；系统的说明留在无衬线。 */
+/* 引文是来源里的原话，用原声字体；红色短批注线只提示依据，不画满边框。 */
 .drawer blockquote {
-  margin: var(--lgi-space-3) 0;
-  border-left: 2px solid var(--lgi-border-strong);
-  padding: var(--lgi-space-3) var(--lgi-space-4);
-  background: var(--lgi-canvas-low);
+  position: relative;
+  margin: var(--lgi-space-2) 0;
+  padding: var(--lgi-space-1) 0 var(--lgi-space-1) var(--lgi-space-4);
+  background: transparent;
   font:var(--lgi-type-reading-weight) var(--lgi-type-reading-size)/var(--lgi-type-reading-leading) var(--lgi-font-evidence);
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.drawer blockquote::before {
+  content: '';
+  position: absolute;
+  top: var(--lgi-space-1);
+  bottom: var(--lgi-space-5);
+  left: 0;
+  width: var(--lgi-action-rail-width);
+  background: var(--lgi-signal-mark);
 }
 
 .drawer blockquote small {
@@ -379,6 +834,10 @@
   margin-top: var(--lgi-space-2);
   color: var(--lgi-muted);
   font: var(--lgi-text-data) / var(--lgi-lh-body) var(--lgi-font-sans);
+}
+
+.quoteWork {
+  overflow-wrap: anywhere;
 }
 
 .profileList {
@@ -465,12 +924,6 @@
 
 .actions button {
   min-height: var(--lgi-space-10);
-}
-
-@media (max-width: 1280px) {
-  .drawer {
-    width: min(100vw, calc(var(--lgi-space-16) * 11));
-  }
 }
 
 @media (max-width: 900px) {

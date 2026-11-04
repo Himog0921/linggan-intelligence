@@ -123,6 +123,31 @@
   color: var(--lgi-muted);
 }
 
+/* 二次确认：约 440px，紧凑标题与两三行说明，不设硬高度、不截断文案。 */
+.confirmDialog {
+  width: min(calc(var(--lgi-space-10) * 11), calc(100vw - var(--lgi-space-12)));
+}
+
+.confirmDialog .head {
+  padding: var(--lgi-space-4) var(--lgi-space-5);
+}
+
+.confirmDialog .body {
+  padding: var(--lgi-space-4) var(--lgi-space-5);
+}
+
+.confirmDialog .body p:last-child {
+  margin-bottom: 0;
+}
+
+.confirmDialog .foot {
+  padding: var(--lgi-space-4) var(--lgi-space-5);
+}
+
+.muted {
+  color: var(--lgi-muted);
+}
+
 .list {
   margin: 0 0 var(--lgi-space-3);
   padding-left: var(--lgi-space-5);

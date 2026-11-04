@@ -35,12 +35,7 @@ pub(super) fn collapse(slots: Vec<Value>, readings: &[Value]) -> Vec<Value> {
             .iter()
             .filter_map(|s| reading(s, readings).map(|r| (s, r)))
             .collect();
-        let human: Vec<_> = available
-            .iter()
-            .copied()
-            .filter(|(_, r)| r["reading"]["adoption"] != "automatic")
-            .collect();
-        let choices = if human.is_empty() { &available } else { &human };
+        let choices = preferred_readings(&available);
         if choices
             .first()
             .is_some_and(|(_, first)| choices.iter().any(|(_, other)| !equivalent(first, other)))
@@ -126,12 +121,7 @@ fn collapse_cover(mut slots: Vec<Value>, readings: &[Value]) -> Vec<Value> {
         .iter()
         .filter_map(|slot| reading(slot, readings).map(|r| (*slot, r)))
         .collect();
-    let human: Vec<_> = available
-        .iter()
-        .copied()
-        .filter(|(_, r)| r["reading"]["adoption"] != "automatic")
-        .collect();
-    let choices = if human.is_empty() { &available } else { &human };
+    let choices = preferred_readings(&available);
     let compatible = choices
         .first()
         .is_none_or(|(_, first)| choices.iter().all(|(_, other)| equivalent(first, other)));
@@ -182,6 +172,37 @@ fn collapse_cover(mut slots: Vec<Value>, readings: &[Value]) -> Vec<Value> {
         }
     }
     slots
+}
+
+// Machine revisions are alternatives over identical bytes, not competing human decisions.
+// Prefer the online reading, then the latest immutable reading within that producer.
+fn preferred_readings<'a>(available: &[(&'a Value, &'a Value)]) -> Vec<(&'a Value, &'a Value)> {
+    let human: Vec<_> = available
+        .iter()
+        .copied()
+        .filter(|(_, r)| r["reading"]["adoption"] != "automatic")
+        .collect();
+    if !human.is_empty() {
+        return human;
+    }
+    if available
+        .first()
+        .is_some_and(|(_, first)| available.iter().all(|(_, other)| equivalent(first, other)))
+    {
+        return available.to_vec();
+    }
+    available
+        .iter()
+        .copied()
+        .max_by_key(|(_, r)| {
+            (
+                r["reading"]["generatedBy"] == "cloud_vision",
+                r["createdAt"].as_str().unwrap_or(""),
+                r["currentRevisionRef"].as_str().unwrap_or(""),
+            )
+        })
+        .into_iter()
+        .collect()
 }
 
 fn reading<'a>(slot: &Value, readings: &'a [Value]) -> Option<&'a Value> {
@@ -263,6 +284,23 @@ mod tests {
         let result = collapse(slots, &readings);
         assert_eq!(result.len(), 2);
         assert!(result.iter().all(|s| s["duplicateReadingConflict"] == true));
+    }
+    #[test]
+    fn differing_machine_versions_choose_online_without_duplicate_text() {
+        let slots = vec![
+            slot("cover", "cover", Value::Null),
+            slot("body", "body_image", Value::Null),
+        ];
+        let mut old = read("cover", "旧OCR噪声66", "automatic");
+        old["reading"]["generatedBy"] = json!("ordinary_ocr");
+        let mut online = read("body", "完整在线文字", "automatic");
+        online["reading"]["generatedBy"] = json!("cloud_vision");
+        let result = collapse(slots, &[old, online]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0]["slotKey"], "body");
+        assert_eq!(result[0]["sameBytesSources"][0]["slotKey"], "cover");
+        assert!(result[0]["page"].is_null());
+        assert_ne!(result[0]["duplicateReadingConflict"], true);
     }
     fn first_slot() -> Value {
         let mut value = slot("first", "body_image", Value::Null);

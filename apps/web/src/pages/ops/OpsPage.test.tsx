@@ -52,7 +52,7 @@ beforeEach(() => {
   }));
 });
 afterEach(() => vi.unstubAllGlobals());
-function Location() { const location = useLocation(); return <output aria-label="当前位置">{location.pathname}{location.search}</output>; }
+function Location() { const location = useLocation(); return <output aria-label="路由位置">{location.pathname}{location.search}</output>; }
 function show(path = '/ops/publications?domain=d1') {
   return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
     <MemoryRouter initialEntries={[path]}><Routes><Route path="/ops/:page" element={<OpsPage/>}/></Routes><Location/></MemoryRouter>
@@ -82,7 +82,7 @@ it('limits the operator navigation and keeps prior sync state noninteractive on 
 it('retires the IO screen and redirects its old deep link without executing export/import', async () => {
   show('/ops/io?domain=d1');
   await screen.findByText('概览内容');
-  expect(screen.getByLabelText('当前位置')).toHaveTextContent('/ops/overview?domain=d1');
+  expect(screen.getByLabelText('路由位置')).toHaveTextContent('/ops/overview?domain=d1');
   expect(requests.every(url => !/export|import/.test(url.pathname))).toBe(true);
 });
 it('commits FIND manually, protects IME and keeps filters while resetting pagination', async () => {
@@ -90,14 +90,14 @@ it('commits FIND manually, protects IME and keeps filters while resetting pagina
   const input = await screen.findByRole('searchbox', { name: '搜索账号' });
   fireEvent.compositionStart(input); fireEvent.change(input, { target: { value: '中文账号' } });
   fireEvent.submit(screen.getByRole('search', { name: '搜索账号' }));
-  expect(screen.getByLabelText('当前位置')).not.toHaveTextContent('account=');
+  expect(screen.getByLabelText('路由位置')).not.toHaveTextContent('account=');
   fireEvent.compositionEnd(input);
   fireEvent.submit(screen.getByRole('search', { name: '搜索账号' }));
-  await waitFor(() => expect(new URLSearchParams(screen.getByLabelText('当前位置').textContent?.split('?')[1]).get('account')).toBe('中文账号'));
-  expect(screen.getByLabelText('当前位置')).not.toHaveTextContent('page=');
-  expect(screen.getByLabelText('当前位置')).toHaveTextContent('platform=xhs');
+  await waitFor(() => expect(new URLSearchParams(screen.getByLabelText('路由位置').textContent?.split('?')[1]).get('account')).toBe('中文账号'));
+  expect(screen.getByLabelText('路由位置')).not.toHaveTextContent('page=');
+  expect(screen.getByLabelText('路由位置')).toHaveTextContent('platform=xhs');
   fireEvent.click(screen.getByRole('button', { name: '清空搜索' }));
-  expect(screen.getByLabelText('当前位置')).not.toHaveTextContent('account=');
+  expect(screen.getByLabelText('路由位置')).not.toHaveTextContent('account=');
 });
 it('opens full publication content, preserves unknown vs zero, and restores focus after nested media failure', async () => {
   show();
@@ -128,8 +128,8 @@ it('keeps scope picker in the breadcrumb and clears filters when switching busin
   await waitFor(() => expect(picker).not.toHaveAttribute('aria-disabled'));
   expect(picker.closest('.v7-context-crumb')).not.toBeNull();
   fireEvent.click(picker); fireEvent.click(screen.getByRole('button', { name: '全部业务' }));
-  expect(screen.getByLabelText('当前位置')).toHaveTextContent('/ops/publications?domain=all');
-  expect(screen.getByLabelText('当前位置')).not.toHaveTextContent('platform=');
+  expect(screen.getByLabelText('路由位置')).toHaveTextContent('/ops/publications?domain=all');
+  expect(screen.getByLabelText('路由位置')).not.toHaveTextContent('platform=');
 });
 it('does not turn an unavailable publication query into an empty successful list', async () => {
   failPublications = true; show();
@@ -186,5 +186,5 @@ it('protects unapplied dates and restores the draft after cancelling a close', a
   fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
   fireEvent.click(within(screen.getByRole('dialog', { name: '放弃未应用的修改？' })).getByRole('button', { name: '放弃修改' }));
   expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  expect(screen.getByLabelText('当前位置')).not.toHaveTextContent('from=');
+  expect(screen.getByLabelText('路由位置')).not.toHaveTextContent('from=');
 });

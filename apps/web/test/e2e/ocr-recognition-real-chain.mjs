@@ -76,8 +76,8 @@ try {
   const selection = page.getByRole('group', { name: '确认本篇图片识别范围', exact: true });
   await selection.waitFor();
   const checkboxes = selection.getByRole('checkbox'); assert.equal(await checkboxes.count(), 3);
-  assert.equal(await selection.getByRole('checkbox', { name: '第 1 页', exact: true }).count(), 1);
-  assert.equal(await selection.getByRole('checkbox', { name: '页码未知的图片', exact: true }).count(), 2, 'unknown page numbers remain unknown');
+  for (const name of ['封面', '图片 2', '图片 3']) assert.equal(await selection.getByRole('checkbox', { name, exact: true }).count(), 1);
+  assert.doesNotMatch(await selection.innerText(), /页码|第.*页/);
   for (const checkbox of await checkboxes.all()) assert.equal(await checkbox.isChecked(), true);
   await checkboxes.nth(2).uncheck();
   await selection.getByText('重新识读 2 张原图', { exact: true }).waitFor();
@@ -144,10 +144,10 @@ try {
   await viewer.getByRole('button', { name: '关闭查看器', exact: true }).click();
   report.steps.push('The existing Works media rail opens the actual decoded local image used by the current OCR reading.');
 
-  await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
-  const dossier = page.getByRole('tabpanel', { name: '研究底稿', exact: true });
+  await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).click();
+  const dossier = page.getByRole('tabpanel', { name: /^研究底稿(?:，|$)/ });
   const document = dossier.getByRole('article', { name: '连续阅读文档', exact: true });
-  await document.getByRole('heading', { name: '图片文字', exact: true }).waitFor();
+  await document.getByRole('heading', { name: '图片资料', exact: true }).waitFor();
   assert.equal(await dossier.getByRole('button', { name: '查看来源', exact: true }).count(), 0);
   assert.equal(await dossier.getByRole('button', { name: '修正文字', exact: true }).count(), 0);
   assert.equal((await document.innerText()).match(/SYNTHETIC BRAND/g)?.length, 3, 'the continuous document retains all repeated source lines');
@@ -157,7 +157,8 @@ try {
   assert.equal(reviewUrl.origin, origin);
   const manualText = '合成浏览器人工修正文：完整保留数字 42、否定与来源。';
   const editedBlocks = structuredClone(unit.blocks);
-  const paragraph = editedBlocks.find(block => block.kind === 'paragraph'); assert.ok(paragraph);
+  const paragraph = editedBlocks.find(block => block.kind === 'paragraph' && block.contentType === 'extracted_text'); assert.ok(paragraph);
+  assert.equal(paragraph.text, '封面正文', 'manual correction targets extracted source text, not visual observation');
   paragraph.text = manualText;
   const human = {
     commandRef: randomUUID(), unitRef: unit.ref, sourceVersion: unit.sourceVersion,
@@ -200,11 +201,12 @@ try {
   await page.screenshot({ path: path.join(directory, 'recognition-api-correction-1440.png'), fullPage: true });
   await page.getByRole('tab', { name: '作品', exact: true }).click();
   await workReading.getByText(manualText, { exact: false }).waitFor();
-  await page.getByRole('tabpanel', { name: '作品', exact: true }).getByText(/2 张图片已进入当前底稿/).waitFor();
+  await page.getByRole('button', { name: '识别完成 100%', exact: true }).waitFor();
+  assert.equal(await page.getByText(/张图片已进入当前底稿|当前底稿未替换/).count(), 0);
   const sameRun = await readJson(statePath); assert.equal(sameRun.runRef, final.runRef);
   assert.equal(sameRun.images[0].isCurrent, false); assert.equal(sameRun.images[0].rawJson, final.images[0].rawJson);
   assert.deepEqual(sameRun.images.map(image => image.readingRef), final.images.map(image => image.readingRef));
-  await page.getByRole('tab', { name: '研究底稿', exact: true }).click();
+  await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).click();
   await page.reload(); await document.getByText(manualText, { exact: false }).waitFor();
   const reloaded = await readJson(statePath); assert.equal(reloaded.runRef, final.runRef);
   await page.setViewportSize({ width: 1280, height: 1000 });

@@ -1,5 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { FontNotice } from '../shared/FontNotice';
+import { ContextBar, type ContextBarContent } from '../shared/ContextBar';
+
 import { SidebarState } from '../shared/sidebarState';
 import { PERSONAL_MENU_LINKS, PRIMARY_ENTRIES, type PrimaryEntry, type PrimarySurface } from './navigation';
 import styles from './AppShell.module.css';
@@ -10,46 +12,17 @@ interface AppShellProps {
   /** 系统区服务状态胶囊的中文文字。 */
   boundaryLabel: ReactNode;
   className?: string;
-  /** 当前页可明确提供的状态；省略时沿用迁移期导航基线。 */
-  activeState?: string;
-  /**
-   * 一级导航「采集」项的真实状态词（与 shell.rs 的 `collection_state` 等价）。读得到时用真的，
-   * 省略时保持「状态未知」——读不到就是未知，绝不因此宣布已接通或为空。
-   */
-  collectionState?: string | undefined;
-  crumb: ReactNode;
-  /** 可选三级业务页导航，固定在 Context Bar 路径之后；展示模式开关仍留内容区。 */
-  contextNav?: ReactNode;
-  meta: ReactNode;
+  /** Shared context rail; business values are supplied by the page, layout by AppShell. */
+  contextBar: ContextBarContent;
   children: ReactNode;
   /** V3 创作专用空间；其他页面继续使用迁移期标准页头。 */
   workbenchMode?: 'compact' | 'immersive';
   restrictedOps?: boolean;
 }
 
-interface EntryStates {
-  activeState: string | undefined;
-  collectionState: string | undefined;
-}
-
-/** 采集项的真实状态词只作用于采集项（不论当前在哪一页）；当前页状态只作用于当前项。 */
-function stateOf(entry: PrimaryEntry, current: boolean, { activeState, collectionState }: EntryStates): string {
-  if (entry.surface === 'collection' && collectionState !== undefined) return collectionState;
-  if (current && activeState !== undefined) return activeState;
-  return entry.state;
-}
-
-function PrimaryEntryLink({ entry, active, states }: { entry: PrimaryEntry; active: PrimarySurface | null; states: EntryStates }) {
+function PrimaryEntryLink({ entry, active }: { entry: PrimaryEntry; active: PrimarySurface | null }) {
   const current = entry.surface !== null && entry.surface === active ? 'page' : undefined;
-  const label = (
-    <>
-      <b className="v7-nav-zh">{entry.zh}</b>
-      <span className="v7-nav-readout">
-        {entry.technicalKey ? <small className="v7-tech-key">{entry.technicalKey}</small> : null}
-        <span className="v7-nav-state">{stateOf(entry, current !== undefined, states)}</span>
-      </span>
-    </>
-  );
+  const label = <b className="v7-nav-zh">{entry.zh}</b>;
   if (entry.href === null) {
     return (
       <button type="button" disabled aria-disabled="true" aria-current={current}>
@@ -68,8 +41,7 @@ function PrimaryEntryLink({ entry, active, states }: { entry: PrimaryEntry; acti
 /**
  * 全站唯一 React 页头；样式由 apps/web/src/styles/shell.css 提供。
  */
-export function AppShell({ className, active, activeState, collectionState, boundaryLabel, crumb, contextNav, meta, children, workbenchMode, restrictedOps = false }: AppShellProps) {
-  const states: EntryStates = { activeState, collectionState };
+export function AppShell({ className, active, boundaryLabel, contextBar, children, workbenchMode, restrictedOps = false }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState('');
@@ -133,7 +105,7 @@ export function AppShell({ className, active, activeState, collectionState, boun
   if (workbenchMode) {
     return <div className={`${styles.workbench} ${workbenchMode === 'immersive' ? styles.immersive : ''}`}>
       {workbenchMode === 'compact' ? <header className={styles.header}>
-        <div className={styles.crumb}>{crumb}</div>
+        <div className={styles.crumb}>{contextBar.breadcrumb}</div>
         <div className={styles.menus}>
           <details className={styles.menu} onKeyDown={event => {
             if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); }
@@ -167,7 +139,7 @@ export function AppShell({ className, active, activeState, collectionState, boun
           </div>
           <nav className="v7-primary-nav" aria-label="一级导航">
             {PRIMARY_ENTRIES.filter(entry => !restrictedOps || entry.surface === 'ops').map(entry => (
-              <PrimaryEntryLink key={entry.zh} entry={entry} active={active} states={states} />
+              <PrimaryEntryLink key={entry.zh} entry={entry} active={active} />
             ))}
           </nav>
           <div className="v7-global-flex" aria-hidden="true" />
@@ -188,14 +160,7 @@ export function AppShell({ className, active, activeState, collectionState, boun
             </details>
           </div>
         </div>
-        <div className="v7-context-row">
-          <div aria-hidden="true" />
-          <div className="v7-context-main">
-            <div className="v7-context-crumb">{crumb}</div>
-            {contextNav ? <div className="v7-context-section-nav">{contextNav}</div> : null}
-            <div className="v7-context-meta">{meta}</div>
-          </div>
-        </div>
+        <ContextBar {...contextBar} />
       </header>
       {children}
     </div>

@@ -7,7 +7,7 @@ export function materialLabel(unit: DossierMaterial, imageNumber?: number): stri
   if (unit.kind === 'tags') return '独立标签';
   if (unit.kind === 'audio') return '音轨转写';
   if (unit.kind === 'video_frame') return '视频画面文字';
-  return unit.page === null ? `图片${imageNumber === undefined ? '' : ` ${imageNumber}`} · 页码未知` : `第 ${unit.page} 页`;
+  return `图片${imageNumber === undefined ? '' : ` ${imageNumber}`}`;
 }
 /** The canonical issue identifies an eligible saved result; execution completion alone does not. */
 export function existingResultPending(unit: DossierMaterial): boolean {
@@ -19,6 +19,7 @@ export function confirmedEmptySpeech(unit: DossierMaterial): boolean {
     && unit.reading?.adoption === 'human_edited' && unit.reading.verification === 'verified';
 }
 export function processingLabel(unit: DossierMaterial): string | null {
+  if (unit.issues.some(issue => issue.code === 'online_image_pending')) return '尚未在线识读，历史 OCR 已保留。';
   if (confirmedEmptySpeech(unit)) return '已确认无口播。';
   const processing = unit.processing;
   if (unit.sourceState === 'restricted') return null;
@@ -38,6 +39,7 @@ export function processingLabel(unit: DossierMaterial): string | null {
   return `${labels[processing.state]}${unit.blocks.length > 0 ? '，已有读本仍可读。' : '。'}`;
 }
 export function emptyMaterialNote(unit: DossierMaterial): string {
+  if (unit.issues.some(issue => issue.code === 'online_image_pending')) return '尚未在线识读，历史 OCR 已保留。';
   if (confirmedEmptySpeech(unit)) return '已确认无口播。';
   if (unit.kind === 'audio' && unit.issues.some(issue => issue.code === 'recognition_empty')) return '未取得可用转录。';
   if (unit.sourceState === 'restricted') return '当前来源受限，内容已隐藏。';

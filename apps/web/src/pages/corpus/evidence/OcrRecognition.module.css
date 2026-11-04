@@ -1,4 +1,10 @@
 .module { display: grid; gap: var(--lgi-space-3); min-width: 0; }
+.actionGroup { display: inline-flex; align-items: center; gap: var(--lgi-space-2); min-width: 0; }
+.settings { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; flex: none; width: var(--lgi-space-8); height: var(--lgi-space-8); border: 1px solid var(--lgi-border-strong); background: var(--lgi-canvas); color: var(--lgi-muted); }
+.settings:hover { background: var(--lgi-canvas-low); color: var(--lgi-ink); }
+.settings:focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: var(--lgi-space-1); }
+.settingsIcon { width: var(--lgi-space-4); height: var(--lgi-space-4); fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.statusActions { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--lgi-space-1) var(--lgi-space-3); }
 .action[data-ocr-action] { min-width: calc(var(--lgi-space-8) * 5); color: var(--lgi-action-ink); background: var(--lgi-action-paper); }
 .action .fill { position: absolute; inset: 0 auto 0 0; width: var(--ocr-progress,0%); background: var(--lgi-signal-soft); z-index: -1; transition: width var(--lgi-action-motion-fast) var(--lgi-action-ease); }
 .action[data-state='running'] .fill::after { content: ''; position: absolute; inset: 0 0 0 auto; width: var(--lgi-secondary-tail); background: var(--lgi-action-lattice-ink) 0 0 / var(--lgi-secondary-pitch) var(--lgi-secondary-pitch); mask-image: var(--lgi-action-mask); animation: ocrActivity var(--lgi-action-motion-cycle) steps(4) infinite; }
@@ -36,3 +42,5 @@
 
 .confirm fieldset { min-width: 0; border: 0; margin: 0; padding: 0; display: grid; gap: var(--lgi-space-2); }
 .confirm fieldset label { display: flex; align-items: baseline; gap: var(--lgi-space-2); }
+
+.mediaCount { color: var(--lgi-muted); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-data); }

@@ -26,12 +26,17 @@ struct Prepared {
     blob: String,
     content: Uuid,
     slot_key: String,
-    materialization_ref: Uuid,
     width: u32,
     height: u32,
-    expected_reading_ref: Option<Uuid>,
+    targets: Vec<PublicationTarget>,
     prompt_version_ref: Uuid,
 }
+struct PublicationTarget {
+    slot_key: String,
+    materialization_ref: Uuid,
+    expected_reading_ref: Option<Uuid>,
+}
+
 fn image(
     storage: &str,
     mime: &str,
@@ -105,7 +110,11 @@ async fn prepare(
     item: &ClaimedItem,
     secrets: &dyn ModelSecretStore,
 ) -> Result<Prepared, ExecutorError> {
-    let InputRef::OcrRecognitionItem { item_ref } = item.input else {
+    let InputRef::OcrRecognitionItem {
+        item_ref,
+        ref note_context,
+    } = item.input
+    else {
         return Err(ExecutorError::Invalid);
     };
     let mut tx = item.owner.begin(db, true).await?;
@@ -170,14 +179,26 @@ async fn prepare(
         system.push_str("\n\n");
         system.push_str(&skill);
     }
-    let prompt = visual::prompt_for_image(
+    let native_context = match note_context {
+        Some(frozen) => Some(
+            crate::ai_foundation::ocr_recognition::frozen_note_context_in(
+                &mut tx,
+                r.get("content_public_ref"),
+                frozen,
+            )
+            .await?,
+        ),
+        None => None, // Historical image-only queued inputs retain their original scope.
+    };
+    let prompt = visual::dispatch_prompt_for_image(
         &instruction,
         prompt_version_ref,
         Some((image_role, ordinal.map(|n| n as u32))),
+        native_context.as_ref(),
     );
     let mut request = model.request(
         secrets.get(workspace, model.secret_ref)?,
-        system,
+        visual::effective_system_prompt(&system),
         prompt,
         Some(visual::response_schema()),
     );
@@ -199,7 +220,10 @@ async fn prepare(
     let req_hash = content_hash(
         &json!([
             "ocr-recognition.v1",
+            visual::CONTRACT,
+            content_hash(visual::EXTRACTION_INSTRUCTION),
             prompt_version_ref,
+            note_context,
             item.item_ref,
             item.task_config_ref,
             model.connection_version_ref,
@@ -207,18 +231,50 @@ async fn prepare(
         ])
         .to_string(),
     );
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,task_config_ref,batch_ref,round_no,quota_bucket,classification_source,dispatch_admitted_at,deadline_at,egress_event_ref,result,created_at,price_ref) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,'ocr_recognition',$7,$8,$9,'task_day','producer_v1',$10::text::timestamptz,$10::text::timestamptz+make_interval(secs=>$11),$12,$13,$10::text::timestamptz,$14)").bind(invocation).bind(model.connection_version_ref).bind(model.current_model_ref).bind(cfg).bind(req_hash).bind(reserved as i64).bind(item.task_config_ref).bind(item.batch_ref).bind((item.position/linggan_contracts::ai_limits::AI_LIMITS.round_size+1)as i32).bind(admitted).bind(request.timeout_ms as f64/1000.0+10.0).bind(egress).bind(json!({"producer":"ai-gen1-executor.v1","purpose":"ocr_recognition","promptVersion":prompt_version_ref})).bind(price).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,task_key,task_config_ref,batch_ref,round_no,quota_bucket,classification_source,dispatch_admitted_at,deadline_at,egress_event_ref,result,created_at,price_ref) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,'ocr_recognition',$7,$8,$9,'task_day','producer_v1',$10::text::timestamptz,$10::text::timestamptz+make_interval(secs=>$11),$12,$13,$10::text::timestamptz,$14)").bind(invocation).bind(model.connection_version_ref).bind(model.current_model_ref).bind(cfg).bind(req_hash).bind(reserved as i64).bind(item.task_config_ref).bind(item.batch_ref).bind((item.position/linggan_contracts::ai_limits::AI_LIMITS.round_size+1)as i32).bind(admitted).bind(request.timeout_ms as f64/1000.0+10.0).bind(egress).bind(json!({"producer":"ai-gen1-executor.v1","purpose":"ocr_recognition","promptVersion":prompt_version_ref,"noteContext":note_context})).bind(price).execute(&mut *tx).await?;
     let changed=sqlx::query("UPDATE linggan_ai_batch_item_control SET invocation_ref=$2,attempt_count=attempt_count+1,executed_config_ref=$3,executed_skill_version_ref=(SELECT skill_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$3),execution_contract='ocr-recognition.v1' WHERE item_ref=$1 AND attempt_count=0").bind(item.item_ref).bind(invocation).bind(item.task_config_ref).execute(&mut *tx).await?;
     if changed.rows_affected() != 1 {
         return Err(ExecutorError::FenceLost);
     }
     sqlx::query("UPDATE linggan_ocr_recognition_item SET state='running',invocation_ref=$2 WHERE item_ref=$1").bind(item_ref).bind(invocation).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_ocr_recognition_run SET state='running',updated_at=scope_001_now() WHERE run_ref=$1").bind(r.get::<Uuid,_>("run_ref")).execute(&mut *tx).await?;
-    let expected_reading_ref:Option<Uuid>=sqlx::query_scalar("SELECT current_reading_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND unit_key=$2").bind(r.get::<Uuid,_>("content_public_ref")).bind(format!("image:{}",r.get::<String,_>("slot_key"))).fetch_optional(&mut *tx).await?.flatten();
+    let aliases: Vec<String> = sqlx::query_scalar("SELECT item_slot_key FROM linggan_ocr_recognition_slot_alias WHERE item_ref=$1 ORDER BY item_slot_key")
+        .bind(item_ref).fetch_all(&mut *tx).await?;
+    let primary_slot: String = r.get("slot_key");
+    let primary_materialization: Uuid = r.get("materialization_ref");
+    let mut targets = vec![];
+    let sources = crate::ai_foundation::ocr_recognition::current_sources_in(
+        &mut tx,
+        r.get("content_public_ref"),
+    )
+    .await?;
+    // Freeze current alias source identities and expected readings before dispatch.
+    // Changed/withdrawn aliases cannot inherit this image's result.
+    for source in sources.into_iter().filter(|source| {
+        source.blob_sha256 == r.get::<String, _>("blob_sha256")
+            && (source.slot_key == primary_slot || aliases.contains(&source.slot_key))
+    }) {
+        let materialization = if source.slot_key == primary_slot {
+            primary_materialization
+        } else {
+            source.materialization_ref
+        };
+        let expected_reading_ref = sqlx::query_scalar::<_, Option<Uuid>>("SELECT current_reading_ref FROM linggan_material_unit WHERE content_public_ref=$1 AND unit_key=$2")
+            .bind(r.get::<Uuid, _>("content_public_ref")).bind(format!("image:{}", source.slot_key))
+            .fetch_optional(&mut *tx).await?.flatten();
+        targets.push(PublicationTarget {
+            slot_key: source.slot_key,
+            materialization_ref: materialization,
+            expected_reading_ref,
+        });
+    }
+    if !targets.iter().any(|target| target.slot_key == primary_slot) {
+        return Err(ExecutorError::Invalid);
+    }
     tx.commit().await?;
     Ok(Prepared {
         prompt_version_ref,
-        expected_reading_ref,
+        targets,
         invocation,
         request,
         item: item_ref,
@@ -226,7 +282,6 @@ async fn prepare(
         blob: r.get("blob_sha256"),
         content: r.get("content_public_ref"),
         slot_key: r.get("slot_key"),
-        materialization_ref: r.get("materialization_ref"),
         width: w,
         height: h,
     })
@@ -240,9 +295,14 @@ pub async fn execute(
     let p = match prepare(db, item, secrets).await {
         Ok(v) => v,
         Err(ExecutorError::Configuration(
-            crate::ai_foundation::store::FoundationError::AdmissionDenied(_),
+            crate::ai_foundation::store::FoundationError::AdmissionDenied(reasons),
         )) => {
-            item.skip_unattempted(db, "ocr_admission_denied").await?;
+            let code = if reasons.iter().any(|reason| reason == "ocr_context_changed") {
+                "ocr_context_changed"
+            } else {
+                "ocr_admission_denied"
+            };
+            stop_unattempted(db, item, code).await?;
             return Ok(());
         }
         Err(e) => return super::preparation::handle(db, item, e).await,
@@ -252,6 +312,35 @@ pub async fn execute(
         settle(db, item, &p, response.as_ref())
     })
     .await
+}
+// Keep the OCR product state and queue outcome in the same fenced transaction.
+async fn stop_unattempted(
+    db: &Database,
+    item: &ClaimedItem,
+    code: &str,
+) -> Result<(), ExecutorError> {
+    let InputRef::OcrRecognitionItem { item_ref, .. } = item.input else {
+        return Err(ExecutorError::Invalid);
+    };
+    let mut tx = item.owner.begin(db, false).await?;
+    let cancelled = item.lock_in(&mut tx).await?;
+    let changed = sqlx::query("UPDATE linggan_ai_batch_item_control SET state=$2,usable=false,failure_code=$3,lease_token=NULL,lease_expires_at=NULL,lease_instance_ref=NULL,lease_instance_generation=NULL,finished_at=scope_001_now() WHERE item_ref=$1 AND attempt_count=0 AND invocation_ref IS NULL")
+        .bind(item.item_ref).bind(if cancelled { "cancelled" } else { "skipped" }).bind(code).execute(&mut *tx).await?;
+    if changed.rows_affected() != 1 {
+        return Err(ExecutorError::FenceLost);
+    }
+    let run: Uuid =
+        sqlx::query_scalar("SELECT run_ref FROM linggan_ocr_recognition_item WHERE item_ref=$1")
+            .bind(item_ref)
+            .fetch_one(&mut *tx)
+            .await?;
+    sqlx::query("UPDATE linggan_ocr_recognition_run SET state=$2,failure_code=$3,updated_at=scope_001_now() WHERE run_ref=$1 AND state IN ('queued','running')")
+        .bind(run).bind("stopped").bind(code).execute(&mut *tx).await?;
+    sqlx::query("UPDATE linggan_ocr_recognition_item SET state='unattempted' WHERE run_ref=$1 AND state='pending'").bind(run).execute(&mut *tx).await?;
+    sqlx::query("UPDATE linggan_ai_batch_item_control c SET state='skipped',usable=false,failure_code='ocr_prior_item_failed',finished_at=scope_001_now() FROM linggan_ai_batch_item i WHERE i.item_ref=c.item_ref AND i.batch_ref=$1 AND c.state='pending'").bind(item.batch_ref).execute(&mut *tx).await?;
+    crate::ai_foundation::rounds::evaluate_in(&mut tx, item.batch_ref).await?;
+    tx.commit().await?;
+    Ok(())
 }
 async fn settle(
     db: &Database,
@@ -308,40 +397,60 @@ async fn settle(
             linggan_evidence::cloud_ocr_adoption::PROCESSOR_VERSION,
             p.run
         );
-        let job = Uuid::new_v4();
-        sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr',$4,'full') ON CONFLICT(blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
-            .bind(job).bind(&p.blob).bind(&p.slot_key).bind(&processor_version).execute(&mut *tx).await?;
-        let job:Uuid=sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE blob_sha256=$1 AND slot_key=$2 AND processor_kind='image_ocr' AND processor_version=$3 AND input_scope='full'")
-            .bind(&p.blob).bind(&p.slot_key).bind(&processor_version).fetch_one(&mut *tx).await?;
-        let derivative = Uuid::new_v4();
-        let hash = raw_hash.as_deref().ok_or(ExecutorError::Invalid)?;
-        sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) VALUES($1,$2,'ocr_text',$3,$4,$5)").bind(derivative).bind(job).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
-        let layout = Uuid::new_v4();
-        sqlx::query("INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) VALUES($1,$2,$3,$4,'cloud_manual',$5,$6,$7,$8,$9,$10)")
-            .bind(layout).bind(derivative).bind(p.content).bind(&p.blob).bind(&processor_version).bind(p.width as i32).bind(p.height as i32).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
-        sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) VALUES($1,$2,'succeeded','cloud_manual_ocr_saved')").bind(Uuid::new_v4()).bind(job).execute(&mut *tx).await?;
         let visual_json = serde_json::to_value(&v).map_err(|_| ExecutorError::Invalid)?;
         let blocks = linggan_evidence::cloud_ocr_adoption::blocks_from_visual(&visual_json)?;
-        let reading = linggan_evidence::material_reading::producers::publish_cloud_in(
-            &mut tx,
-            p.content,
-            job,
-            p.materialization_ref,
-            derivative,
-            blocks,
-            p.expected_reading_ref,
-        )
-        .await?;
-        sqlx::query("UPDATE linggan_ocr_recognition_item SET reading_ref=$2 WHERE item_ref=$1")
-            .bind(p.item)
-            .bind(reading.reading_ref)
-            .execute(&mut *tx)
+        for target in &p.targets {
+            let job = Uuid::new_v4();
+            sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr',$4,'full') ON CONFLICT(blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
+            .bind(job).bind(&p.blob).bind(&target.slot_key).bind(&processor_version).execute(&mut *tx).await?;
+            let job:Uuid=sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE blob_sha256=$1 AND slot_key=$2 AND processor_kind='image_ocr' AND processor_version=$3 AND input_scope='full'")
+            .bind(&p.blob).bind(&target.slot_key).bind(&processor_version).fetch_one(&mut *tx).await?;
+            let derivative = Uuid::new_v4();
+            let hash = raw_hash.as_deref().ok_or(ExecutorError::Invalid)?;
+            sqlx::query("INSERT INTO linggan_media_derivative(derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) VALUES($1,$2,'ocr_text',$3,$4,$5)").bind(derivative).bind(job).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
+            let layout = Uuid::new_v4();
+            sqlx::query("INSERT INTO linggan_media_ocr_layout(layout_ref,ocr_derivative_ref,content_public_ref,blob_sha256,engine,engine_version,image_width,image_height,layout_content_hash,layout_byte_size,layout_storage_key) VALUES($1,$2,$3,$4,'cloud_manual',$5,$6,$7,$8,$9,$10)")
+            .bind(layout).bind(derivative).bind(p.content).bind(&p.blob).bind(&processor_version).bind(p.width as i32).bind(p.height as i32).bind(hash).bind(raw_size).bind(&raw_storage_key).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) VALUES($1,$2,'succeeded','cloud_manual_ocr_saved')").bind(Uuid::new_v4()).bind(job).execute(&mut *tx).await?;
+            let reading = linggan_evidence::material_reading::producers::publish_cloud_in(
+                &mut tx,
+                p.content,
+                job,
+                target.materialization_ref,
+                derivative,
+                linggan_evidence::material_reading::producers::ReadingContent {
+                    blocks: blocks.clone(),
+                    issues: linggan_evidence::cloud_ocr_adoption::issues_from_visual(&visual_json)?,
+                    source_state: "present".into(),
+                    source_location: json!({"visualContract":visual::CONTRACT}),
+                },
+                target.expected_reading_ref,
+            )
             .await?;
+            if target.slot_key == p.slot_key {
+                sqlx::query(
+                    "UPDATE linggan_ocr_recognition_item SET reading_ref=$2 WHERE item_ref=$1",
+                )
+                .bind(p.item)
+                .bind(reading.reading_ref)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
     }
     let mut result = response
         .map(safe_result)
         .unwrap_or_else(|| json!({"ok":false}));
     result["promptVersion"] = json!(p.prompt_version_ref);
+    if let InputRef::OcrRecognitionItem {
+        note_context: Some(context),
+        ..
+    } = &item.input
+    {
+        result["noteContext"] = json!(context);
+    }
+    result["visualContract"] = json!(visual::CONTRACT);
+    result["extractionRulesHash"] = json!(content_hash(visual::EXTRACTION_INSTRUCTION));
     result["executorReceipt"] = json!(item.lease_token);
     finish_invocation_in(&mut tx, p.invocation, response, success, failure, &result).await?;
     if success {

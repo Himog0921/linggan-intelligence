@@ -19,6 +19,10 @@ export interface BlockLocation {
 }
 interface BlockBase extends BlockLocation {
   ref: string; speaker?: Speaker; issues?: DossierIssue[];
+  contentType?: 'extracted_text' | 'visual_description';
+  regionRef?: string; regionLabel?: string;
+  sourceRole?: 'main_title' | 'body' | 'chapter_heading' | 'subtitle' | 'background' | 'ui' | 'brand' | 'call_to_action' | 'other' | 'uncertain';
+  parameters?: { subject: string; attribute: 'rating' | 'age' | 'players' | 'duration'; value: string; basis: 'package' | 'author_experience' | 'rule'; sourceRegionRef?: string; bindingStatus?: 'unconfirmed'; basisStatus?: 'unconfirmed' }[];
 }
 export type DossierBlock = BlockBase & (
   | { kind: 'heading'; text: string; level?: number }
@@ -59,7 +63,7 @@ interface ReadingGroupBase {
 /** A reference-only arrangement produced by the canonical backend owner. */
 export type ReadingGroup = ReadingGroupBase & (
   | { mode: 'blocks' | 'list' | 'table' | 'tags' }
-  | { mode: 'paragraph' | 'transcript_paragraph'; joiners: ('' | ' ' | '\n')[] }
+  | { mode: 'heading' | 'paragraph' | 'transcript_paragraph'; joiners: ('' | ' ' | '\n' | '，')[] }
 );
 export interface ReadingSection { ref: string; kind: ReadingSectionKind; groups: ReadingGroup[]; gaps: { beforeGroupRef: string | null; missingPages: number[] }[] }
 export interface DossierReadingView { mainBlockRefs: string[]; supplementBlockRefs: string[]; sections: ReadingSection[] }

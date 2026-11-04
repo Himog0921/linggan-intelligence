@@ -74,11 +74,12 @@ export function Engagement({ engagement, numbersOnly = false }: { engagement: En
   );
 }
 
-/** 材料完整度导轨。颜色是状态唯一编码，所以读屏拿到的是逐维度的文字说明。 */
-export function MaterialRail({ summary }: { summary: MaterialSummary }) {
+/** 材料完整度导轨。颜色是状态唯一编码，所以读屏拿到的是逐维度的文字说明。
+ *  compact：研读列表的右侧事实列用固定宽度的刻度，不随列宽拉长成进度条。 */
+export function MaterialRail({ summary, compact = false }: { summary: MaterialSummary; compact?: boolean }) {
   const label = `材料完整度：${summary.segments.map(segment => `${segment.label} ${segmentReading(segment)}`).join('；')}`;
   return (
-    <div className={styles.rail} role="img" aria-label={label}>
+    <div className={styles.rail} role="img" aria-label={label} data-compact={compact}>
       {summary.segments.map(segment => (
         <i key={segment.key} className={styles.segment} data-fill={segment.fill} title={segmentTitle(segment)} />
       ))}

@@ -1,47 +1,46 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
+import { ContextTabs } from '../shared/ContextTabs';
 
-function states(): Record<string, string> {
+function navItems(): HTMLElement[] {
   const nav = screen.getByRole('navigation', { name: '一级导航' });
-  const result: Record<string, string> = {};
-  for (const entry of within(nav).getAllByRole('link', { hidden: true }).concat(within(nav).queryAllByRole('button', { hidden: true }))) {
-    result[entry.querySelector('.v7-nav-zh')?.textContent ?? ''] = entry.querySelector('.v7-nav-state')?.textContent ?? '';
-  }
-  return result;
+  return [...nav.querySelectorAll<HTMLElement>(':scope > :is(a,button)')];
 }
 
-describe('AppShell 一级导航状态词', () => {
-  it('默认沿用迁移期基线；采集项在读不到事实时保持「状态未知」，不宣布已接通或为空', () => {
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>x</AppShell>);
-    expect(states()).toMatchObject({ 语料: '未知', 采集: '状态未知', 运营: '只读' });
-  });
-
-  it('collectionState 只改采集项，不论当前在哪一页（与 shell.rs 的 collection_state 等价）', () => {
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" collectionState="观察中" crumb="语料" meta={null}>x</AppShell>);
-    expect(states()).toMatchObject({ 语料: '未知', 采集: '观察中', 主题图谱: '暂定研究' });
-  });
-
-  it('无观察目标与状态未知是两个不同的事实，原样显示', () => {
-    const { unmount } = render(<AppShell active={null} boundaryLabel="本机服务状态" collectionState="无观察目标" crumb="设置" meta={null}>x</AppShell>);
-    expect(states().采集).toBe('无观察目标');
-    unmount();
-    render(<AppShell active={null} boundaryLabel="本机服务状态" collectionState="状态未知" crumb="设置" meta={null}>x</AppShell>);
-    expect(states().采集).toBe('状态未知');
-  });
-
-  it('activeState 仍然只作用于当前项（设置页与内容工作台的既有行为不变）', () => {
-    render(<AppShell active="ops" activeState="创作" boundaryLabel="本机创作" crumb="运营" meta={null}>x</AppShell>);
-    expect(states()).toMatchObject({ 运营: '创作', 采集: '状态未知', 语料: '未知' });
-  });
-
-  it('采集页自己给了当前状态时，采集的真实状态词优先（同一项只显示一个词）', () => {
-    render(<AppShell active="collection" activeState="巡检中" collectionState="观察中" boundaryLabel="本机服务状态" crumb="采集" meta={null}>x</AppShell>);
-    expect(states().采集).toBe('观察中');
+describe('全站统一深色 Pattern Waves 上下文栏', () => {
+  it('普通 AppShell 使用方格材质；保留路径、三级导航和右侧状态的语义节点', () => {
+    const { container } = render(
+      <AppShell
+        active="corpus"
+        boundaryLabel="本机服务状态"
+        contextBar={{
+          breadcrumb: <><b>评论研究</b> <span className="v7-slash">/</span> ADHD</>,
+          navigation: <ContextTabs label="评论研究视图"><button aria-current="page">概览</button><button>用户评论</button></ContextTabs>,
+          meta: <span>运行中</span>,
+        }}
+      >内容</AppShell>,
+    );
+    const bar = container.querySelector('.v7-context-row') as HTMLElement;
+    expect(bar).toHaveAttribute('data-context-texture', 'dark');
+    expect(bar.querySelector('[data-context-pattern]')).toHaveAttribute('data-context-pattern', 'square');
+    expect(bar.querySelector('.v7-context-crumb')).toHaveTextContent('评论研究 / ADHD');
+    expect(within(bar).getByRole('navigation', { name: '评论研究视图' })).toBeInTheDocument();
+    expect(within(bar).getByText('运行中')).toBeInTheDocument();
   });
 });
 
-const props = { active: 'ops' as const, boundaryLabel: '本机创作', crumb: '运营 / 研读取材', meta: '个人空间' };
+describe('AppShell 一级导航结构', () => {
+  it('只显示中文标题，不再渲染标题下的状态说明行', () => {
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: "语料", meta: null }}>x</AppShell>);
+    const nav = screen.getByRole('navigation', { name: '一级导航' });
+    expect(nav.querySelector('.v7-nav-readout')).toBeNull();
+    expect(nav.querySelector('.v7-nav-state')).toBeNull();
+    expect(navItems().map(item => item.textContent)).toEqual(['雷达', '主题图谱', '语料', '洞察', '采集', '运营']);
+  });
+});
+
+const props = { active: 'ops' as const, boundaryLabel: '本机创作', contextBar: { breadcrumb: '运营 / 研读取材', meta: '个人空间' } };
 
 describe('V3 局部创作空间', () => {
   it('紧凑页头保留导航且 Esc 返回入口，不堆叠全局上下文栏', () => {
@@ -68,7 +67,7 @@ describe('V3 局部创作空间', () => {
 
 describe('全站唯一React导航', () => {
   it('入口只指向职责根路由；未开放职责保持禁用，个人菜单保留设置入口', () => {
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>页面</AppShell>);
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: "语料", meta: null }}>页面</AppShell>);
     const navigation = screen.getByRole('navigation', {name:'一级导航'});
     const links = within(navigation).getAllByRole('link');
     expect(links.map(link => link.getAttribute('href'))).toEqual(['/topics','/corpus','/collection','/ops']);
@@ -78,7 +77,7 @@ describe('全站唯一React导航', () => {
   });
   it('只在服务器确认退出后才离开当前工作区；未确认时保留可重试提示', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('offline')));
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>页面</AppShell>);
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: "语料", meta: null }}>页面</AppShell>);
     fireEvent.click(screen.getByText('个人菜单'));
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('退出未完成'));

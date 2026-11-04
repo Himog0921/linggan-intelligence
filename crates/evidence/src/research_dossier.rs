@@ -13,11 +13,13 @@ pub mod historical;
 mod inventory;
 pub mod native;
 mod projection;
+pub(crate) mod quality;
 mod reading;
 mod render;
 mod selection;
 pub use reading::ordered_refs;
-pub use render::{context_sources, markdown, render_materials};
+pub(crate) use reading::unit_text;
+pub use render::{context_sources, markdown, model_context, render_materials};
 pub use selection::{Selection, segment, select};
 
 pub const VERSION: &str = "research-dossier.v2";

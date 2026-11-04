@@ -50,7 +50,7 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
     action();
   }
 
-  const subtitle = `${object.objectRef ? `MED-${object.objectRef.slice(0, 8).toUpperCase()} · ` : '本地对象编号未表达 · '}采集序号 ${object.ordinal} · 平台排列顺序未经验证`;
+  const subtitle = object.label;
   return (
     <div className={styles.viewer} onKeyDown={onKeyDown}>
       <header className={styles.head}>

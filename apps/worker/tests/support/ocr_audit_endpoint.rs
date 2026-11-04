@@ -68,7 +68,7 @@ impl Endpoint {
                                     while !path.exists() { tokio::time::sleep(std::time::Duration::from_millis(20)).await; }
                                 }
                             }
-                            let output=if schema_failure_at.is_some() && image_number==schema_failure_at {json!({"malformed":"synthetic second-image schema failure"})}else if probe {json!({"lingganProbe":"ok"})}else if prompt.contains("\"imageRole\":\"explicit_cover\"") {
+                            let mut output=if schema_failure_at.is_some() && image_number==schema_failure_at {json!({"malformed":"synthetic second-image schema failure"})}else if probe {json!({"lingganProbe":"ok"})}else if prompt.contains("\"imageRole\":\"explicit_cover\"") {
                                 json!({"titlePresence":"present","titleText":"合成封面标题","regions":[
                                     {"regionRef":"cover-title","text":"合成封面标题","role":"main_title","legibility":"clear","bbox":[0.1,0.1,0.9,0.25]},
                                     {"regionRef":"cover-body","text":"封面正文","role":"body","legibility":"clear","bbox":[0.1,0.3,0.9,0.5]},
@@ -79,6 +79,16 @@ impl Endpoint {
                                     {"regionRef":"interior-body","text":"内页正文","role":"body","legibility":"clear","bbox":[0.1,0.3,0.9,0.5]},
                                     {"regionRef":"interior-partial","text":"模糊字","role":"body","legibility":"partial","bbox":null}],"unreadable":false})
                             } else {json!({"titlePresence":"absent","titleText":null,"regions":[{"regionRef":"r1","text":"42","role":"body","legibility":"clear","bbox":null},{ "regionRef":"r2","text":"SYNTHETIC BRAND","role":"brand","legibility":"clear","bbox":null},{"regionRef":"r3","text":"SYNTHETIC ACTION","role":"call_to_action","legibility":"clear","bbox":null}],"unreadable":false})};
+                            if let Some(regions) = output.get_mut("regions").and_then(Value::as_array_mut) {
+                                for region in regions {
+                                    region["location"] = json!("合成图片中部");
+                                    region["visualDescription"] = json!("合成图形位于文字右侧");
+                                    region["uncertainties"] = json!([]);
+                                    region["table"] = json!(null);
+                                    region["parameters"] = json!([]);
+                                }
+                                output["limitations"] = json!(["合成图片边缘已裁切，范围未知"]);
+                            }
                             respond(&mut socket,&output.to_string()).await;
                         });
                     }

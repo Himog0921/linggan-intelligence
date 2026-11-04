@@ -14,25 +14,9 @@ pub(super) fn assemble(
     if let Some(tags) = tags(work, &inventory) {
         materials.push(tags);
     }
+    let readings = current_image_readings(readings);
     let slots = super::duplicates::collapse(inventory.slots.clone(), &readings);
-    let mut media = media_materials(work, &readings, &slots);
-    if let Some(expected) = expected_pages(&inventory) {
-        for page in 1..=expected {
-            if !media
-                .iter()
-                .any(|m| m["kind"] == "image" && m["page"] == page)
-            {
-                let mut missing = empty(work.public_ref, "image", None, Some(page), "not_acquired");
-                missing["issues"] = json!([issue(
-                    &format!("missing_page_{page}"),
-                    "missing_page",
-                    "平台图片序列中的这一页尚未取得",
-                    "source_refresh"
-                )]);
-                media.push(missing);
-            }
-        }
-    }
+    let mut media = media_materials(work.public_ref, &readings, &slots);
     // Stable observed media order; known pages retain platform sequence.
     media.sort_by_key(|m| m["page"].as_u64().unwrap_or(u64::MAX));
     materials.extend(media);
@@ -67,6 +51,39 @@ pub(super) fn assemble(
     super::refresh_revision(&mut dossier);
     dossier.selection = json!({"mode":"full","kinds":[],"unitRefs":[],"blockRefs":[],"imagePages":[],"omittedUnits":0,"completeRevision":dossier.revision});
     dossier
+}
+
+// Once this note uses online image readings, legacy automatic OCR remains in history
+// but cannot silently fill the unprocessed pages of the current research material.
+fn current_image_readings(mut readings: Vec<Value>) -> Vec<Value> {
+    let online = readings.iter().any(|r| {
+        r["kind"] == "image"
+            && r["sourceState"] != "restricted"
+            && r["reading"]["generatedBy"] == "cloud_vision"
+            && r["currentRevisionRef"].is_string()
+    });
+    if online {
+        for reading in &mut readings {
+            if reading["kind"] == "image"
+                && reading["reading"]["adoption"] == "automatic"
+                && matches!(
+                    reading["reading"]["generatedBy"].as_str(),
+                    Some("ordinary_ocr" | "local_vision")
+                )
+            {
+                reading["blocks"] = json!([]);
+                reading["currentRevisionRef"] = Value::Null;
+                reading["reading"] = Value::Null;
+                reading["issues"] = json!([issue(
+                    "online_image_pending",
+                    "online_image_pending",
+                    "此图尚未在线识读；历史 OCR 已保留，未混入当前正文。",
+                    "source_refresh"
+                )]);
+            }
+        }
+    }
+    readings
 }
 
 pub(super) fn public_material(mut value: Value) -> Value {
@@ -191,7 +208,7 @@ fn expected_pages(inventory: &Inventory) -> Option<u64> {
         .flatten()
 }
 
-fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Value]) -> Vec<Value> {
+fn media_materials(work: Uuid, readings: &[Value], slots: &[Value]) -> Vec<Value> {
     let mut materials = vec![];
     for slot in slots {
         let kinds: &[&str] = if slot["component"] == "motion" {
@@ -217,11 +234,17 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
                             && r["sourceLocation"]["blobSha256"] == slot["blobSha256"]
                     })
                 });
+            // Live-photo motion is optional context, not an unprocessed video speech obligation.
+            // Existing readings and raw motion remain accessible; independent videos keep their gaps.
+            if slot["purpose"] == "live_photo" && slot["component"] == "motion"
+            {
+                continue;
+            }
             let mut material = if let Some(r) = reading {
                 public_material(r.clone())
             } else {
                 empty(
-                    work.public_ref,
+                    work,
                     kind,
                     slot["slotKey"].as_str(),
                     slot["page"].as_u64(),
@@ -270,18 +293,12 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
                     "source_refresh"
                 )]);
             }
-            if *kind == "image" && slot["displayOrderState"] != "KNOWN" {
-                material["issues"]
-                    .as_array_mut()
-                    .expect("issues")
-                    .push(issue(
-                        "page_order_unknown",
-                        "page_order_unknown",
-                        "平台图片页序尚未确认",
-                        "source_refresh",
-                    ));
-            }
-            if *kind == "video_frame" && material["sourceState"] == "present" {
+            if *kind == "video_frame"
+                && material["sourceState"] == "present"
+                && material["blocks"]
+                    .as_array()
+                    .is_some_and(|blocks| !blocks.is_empty())
+            {
                 material["issues"]
                     .as_array_mut()
                     .expect("issues")
@@ -388,8 +405,12 @@ pub(super) fn fragments(work: &WorkResourceCurrent, materials: &[Value]) -> Vec<
                 _ => continue,
             };
             let text = content::block_text(block);
-            let mut issues = unit["issues"].as_array().cloned().unwrap_or_default();
-            issues.extend(block["issues"].as_array().into_iter().flatten().cloned());
+            let mut issues = specific_issues(&unit["issues"]);
+            issues.extend(specific_issues(&block["issues"]));
+            let mut structure = block.clone();
+            if structure.get("issues").is_some() {
+                structure["issues"] = json!(specific_issues(&block["issues"]));
+            }
             output.push(Fragment {
                 fragment_id: reference.into(),
                 source_ref: source,
@@ -399,7 +420,7 @@ pub(super) fn fragments(work: &WorkResourceCurrent, materials: &[Value]) -> Vec<
                 end: text.chars().count(),
                 text,
                 speaker: block["speaker"].as_str().unwrap_or("unconfirmed").into(),
-                structure: block.clone(),
+                structure,
                 issues,
                 reading_ref: unit["currentRevisionRef"]
                     .as_str()
@@ -423,4 +444,104 @@ fn metadata(work: &WorkResourceCurrent) -> Value {
         "sourceKind":work.published_at_source_kind,"precision":work.published_at_precision,
         "referenceObservedAt":work.published_at_reference_observed_at,"parserVersion":work.published_at_parser_version,
         "sourceRef":work.published_source.material_ref,"sourceObservedAt":work.published_source.observed_at,"observedAt":work.observed_at}})
+}
+
+/// Verification is reading metadata; only concrete problems belong in AI fragments.
+fn specific_issues(value: &Value) -> Vec<Value> {
+    value
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|issue| super::quality::specific(issue))
+        .cloned()
+        .collect()
+}
+
+#[cfg(test)]
+mod ai_issue_tests {
+    use super::*;
+
+    #[test]
+    fn historical_generic_issue_is_filtered_but_specific_uncertainty_survives() {
+        let original = json!([
+            {"code":"cloud_image_unchecked", "message":"通用核对说明"},
+            {"code":"image_limitation", "message":"右栏末行被裁切"},
+            {"code":"region_uncertain", "message":"第二格星级看不清"}
+        ]);
+        let issues = specific_issues(&original);
+        assert_eq!(issues.len(), 2);
+        assert_eq!(issues[0]["message"], "右栏末行被裁切");
+        assert_eq!(issues[1]["message"], "第二格星级看不清");
+        assert_eq!(original.as_array().unwrap().len(), 3);
+    }
+}
+
+#[cfg(test)]
+mod online_reading_tests {
+    use super::*;
+    fn material(producer: &str, adoption: &str) -> Value {
+        json!({"kind":"image","sourceState":"present","currentRevisionRef":"existing",
+          "reading":{"generatedBy":producer,"adoption":adoption},"blocks":[{"text":"原有内容"}],"issues":[]})
+    }
+    #[test]
+    fn online_note_excludes_legacy_automatic_text_but_preserves_human_and_video() {
+        let legacy = material("ordinary_ocr", "automatic");
+        assert_eq!(
+            current_image_readings(vec![legacy.clone()]),
+            vec![legacy.clone()]
+        );
+        let human = material("ordinary_ocr", "human_edited");
+        let mut audio = material("asr", "automatic");
+        audio["kind"] = json!("audio");
+        let result = current_image_readings(vec![
+            material("cloud_vision", "automatic"),
+            legacy.clone(),
+            human.clone(),
+            audio.clone(),
+        ]);
+        assert_eq!(result[1]["blocks"], json!([]));
+        assert!(result[1]["currentRevisionRef"].is_null());
+        assert_eq!(result[1]["issues"][0]["code"], "online_image_pending");
+        assert_eq!(result[2], human);
+        assert_eq!(result[3], audio);
+        assert_eq!(legacy["blocks"][0]["text"], "原有内容");
+    }
+    #[test]
+    fn withdrawn_online_reading_does_not_change_legacy_note_mode() {
+        let legacy = material("ordinary_ocr", "automatic");
+        let mut cloud = material("cloud_vision", "automatic");
+        cloud["sourceState"] = json!("restricted");
+        assert_eq!(
+            current_image_readings(vec![cloud, legacy.clone()])[1],
+            legacy
+        );
+    }
+}
+
+#[cfg(test)]
+mod live_photo_tests {
+    use super::*;
+    #[test]
+    fn live_motion_never_enters_dossier_but_independent_video_remains() {
+        let live = json!({"slotKey":"live", "purpose":"live_photo", "component":"motion", "sourceVersion":"v1", "blobSha256":"a", "sourceState":"present", "processing":{"asr":{"state":"pending"}}});
+        let mut video = live.clone();
+        video["slotKey"] = json!("video");
+        video["purpose"] = json!("video");
+        let units = media_materials(Uuid::nil(), &[], &[live.clone(), video]);
+        assert_eq!(units.len(), 2);
+        assert!(units.iter().all(|u| u["slotKey"] == "video"));
+        let reading = json!({"ref":"speech", "slotKey":"live", "kind":"audio", "sourceVersion":"v1", "sourceState":"present", "blocks":[{"ref":"b","kind":"paragraph","text":"现场声音"}],"issues":[]});
+        let units = media_materials(Uuid::nil(), &[reading.clone()], std::slice::from_ref(&live));
+        assert!(units.is_empty());
+        let mut changed = live.clone();
+        changed["sourceVersion"] = json!("v2");
+        changed["blobSha256"] = json!("b");
+        assert!(
+            media_materials(Uuid::nil(), std::slice::from_ref(&reading), &[changed]).is_empty()
+        );
+        let mut restricted = live;
+        restricted["sourceState"] = json!("restricted");
+        let units = media_materials(Uuid::nil(), &[reading], &[restricted]);
+        assert!(units.is_empty());
+    }
 }

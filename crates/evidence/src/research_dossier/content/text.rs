@@ -225,3 +225,23 @@ fn table_text(block: &Value) -> String {
     }
     lines.join("\n")
 }
+
+pub fn pure_tags(mut value: &str) -> Option<Vec<String>> {
+    let mut tags = vec![];
+    value = value.trim();
+    while !value.is_empty() {
+        value = value.strip_prefix('#')?;
+        let end = value.find('#')?;
+        let label = value[..end]
+            .trim()
+            .strip_suffix("[话题]")
+            .unwrap_or(value[..end].trim())
+            .trim();
+        if label.is_empty() {
+            return None;
+        }
+        tags.push(label.to_owned());
+        value = value[end + 1..].trim_start();
+    }
+    (!tags.is_empty()).then_some(tags)
+}

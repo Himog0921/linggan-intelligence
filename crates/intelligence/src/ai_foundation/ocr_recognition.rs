@@ -20,10 +20,10 @@ pub struct StartRun {
     pub slot_keys: Vec<String>,
 }
 #[derive(Clone)]
-struct Source {
-    slot_key: String,
-    blob_sha256: String,
-    materialization_ref: Uuid,
+pub(super) struct Source {
+    pub(super) slot_key: String,
+    pub(super) blob_sha256: String,
+    pub(super) materialization_ref: Uuid,
     aliases: Vec<String>,
     ordinal: Option<i32>,
     cover: bool,
@@ -33,7 +33,7 @@ struct Source {
     byte_size: i64,
 }
 
-async fn sources_in(
+pub(super) async fn current_sources_in(
     conn: &mut sqlx::PgConnection,
     work: Uuid,
 ) -> Result<Vec<Source>, FoundationError> {
@@ -46,7 +46,7 @@ async fn sources_in(
               AND o.purpose IN ('cover','body_image','live_photo')
             ORDER BY o.slot_key,o.source_generation DESC
         ), candidates AS MATERIALIZED (
-            SELECT o.slot_key,o.purpose,m.materialization_ref,m.blob_sha256,
+            SELECT o.slot_key,o.purpose,o.producer_ordinal,m.materialization_ref,m.blob_sha256,
                    CASE WHEN o.display_order_state='KNOWN' THEN o.display_ordinal END ordinal,
                    m.local_asset_path,b.storage_key,b.mime_type,b.byte_size,m.verified_at
             FROM current_origin o
@@ -57,12 +57,10 @@ async fn sources_in(
             WHERE b.mime_type LIKE 'image/%'
               AND NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d
                 WHERE d.slot_key=o.slot_key OR d.blob_sha256=m.blob_sha256 OR d.materialization_ref=m.materialization_ref)
-        ) SELECT c.*,ARRAY[c.slot_key] || COALESCE((SELECT array_agg(cover.slot_key) FROM candidates cover
-                WHERE c.purpose<>'cover' AND c.ordinal=1 AND cover.purpose='cover' AND cover.blob_sha256=c.blob_sha256),'{}') aliases,
+        ) SELECT c.*,ARRAY[c.slot_key] aliases,
             (c.purpose='cover' OR COALESCE(c.ordinal=1,false)) cover
             FROM candidates c
-            WHERE c.purpose<>'cover' OR NOT EXISTS(SELECT 1 FROM candidates first_page WHERE first_page.purpose<>'cover' AND first_page.ordinal=1 AND first_page.blob_sha256=c.blob_sha256)
-            ORDER BY ordinal NULLS LAST,slot_key",
+            ORDER BY ordinal NULLS LAST,producer_ordinal,(purpose='cover'),slot_key",
     )
     .bind(work)
     .fetch_all(conn)
@@ -87,16 +85,112 @@ async fn sources_in(
         })
         .collect())
 }
-async fn scope_in(
+async fn sources_in(
     conn: &mut sqlx::PgConnection,
     work: Uuid,
+) -> Result<Vec<Source>, FoundationError> {
+    Ok(unique_image_sources(current_sources_in(conn, work).await?))
+}
+
+// The candidate order chooses an actual known page first, without inventing an
+// ordinal for unknown slots. Every occurrence remains an alias of the same bytes.
+fn unique_image_sources(sources: Vec<Source>) -> Vec<Source> {
+    let mut positions = std::collections::HashMap::<String, usize>::new();
+    let mut unique: Vec<Source> = vec![];
+    for source in sources {
+        if let Some(&index) = positions.get(&source.blob_sha256) {
+            unique[index].aliases.extend(source.aliases);
+            unique[index].cover |= source.cover;
+        } else {
+            positions.insert(source.blob_sha256.clone(), unique.len());
+            unique.push(source);
+        }
+    }
+    unique
+}
+
+pub(super) async fn native_note_context_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work: Uuid,
+    as_of: &str,
+) -> Result<crate::ocr_recognition_schema::NativeNoteContext, FoundationError> {
+    use crate::ocr_recognition_schema::{NativeNoteContext, NoteContextField};
+    let mut dossiers = linggan_evidence::research_dossier::read_in(tx, &[work], as_of).await?;
+    let dossier = dossiers.remove(&work).ok_or(FoundationError::NotFound)?;
+    let title = dossier.note["platformTitle"]
+        .as_str()
+        .zip(dossier.note["titleSource"]["sourceRef"].as_str())
+        .and_then(|(text, source)| {
+            source.parse().ok().map(|source_ref| NoteContextField {
+                source_ref,
+                text: text.into(),
+            })
+        });
+    let body = dossier
+        .materials
+        .iter()
+        .find(|unit| {
+            unit["kind"] == "body"
+                && unit["sourceState"] == "present"
+                && unit["reading"]["generatedBy"] == "platform"
+        })
+        .and_then(|unit| {
+            unit["sourceRef"]
+                .as_str()
+                .and_then(|source| source.parse().ok())
+                .map(|source_ref| NoteContextField {
+                    source_ref,
+                    text: unit["blocks"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .map(linggan_evidence::research_dossier::content::block_text)
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                })
+        });
+    Ok(NativeNoteContext { title, body })
+}
+
+pub(super) async fn frozen_note_context_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work: Uuid,
+    frozen: &crate::ocr_recognition_schema::FrozenNoteContext,
+) -> Result<crate::ocr_recognition_schema::NativeNoteContext, FoundationError> {
+    let context = native_note_context_in(tx, work, &frozen.as_of).await?;
+    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **tx)
+        .await?;
+    let current = native_note_context_in(tx, work, &now).await?;
+    if context.sha256() != frozen.sha256
+        || context.source_refs() != frozen.source_refs
+        || current.sha256() != frozen.sha256
+        || current.source_refs() != frozen.source_refs
+    {
+        return Err(FoundationError::AdmissionDenied(vec![
+            "ocr_context_changed".into(),
+        ]));
+    }
+    Ok(context)
+}
+
+async fn scope_in(
+    conn: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work: Uuid,
     config: Uuid,
-) -> Result<(Value, Vec<Source>), FoundationError> {
+) -> Result<
+    (
+        Value,
+        Vec<Source>,
+        crate::ocr_recognition_schema::FrozenNoteContext,
+    ),
+    FoundationError,
+> {
     let cfg: Option<Uuid> = sqlx::query_scalar(
         "SELECT model_config_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
     )
     .bind(config)
-    .fetch_one(&mut *conn)
+    .fetch_one(&mut **conn)
     .await?;
     let cfg = cfg.ok_or(FoundationError::ConfigurationIncomplete)?;
     let model = transport_store::load_frozen_in(conn, cfg).await?;
@@ -104,11 +198,21 @@ async fn scope_in(
     if sources.is_empty() {
         return Err(FoundationError::NotFound);
     }
+    let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut **conn)
+        .await?;
+    let note_context = native_note_context_in(conn, work, &as_of).await?;
+    let frozen_context = crate::ocr_recognition_schema::FrozenNoteContext {
+        as_of,
+        source_refs: note_context.source_refs(),
+        sha256: note_context.sha256(),
+    };
     let images:Vec<Value>=sources.iter().map(|s|json!({"blobSha256":s.blob_sha256,"materializationRef":s.materialization_ref,"slotKey":s.slot_key,"aliases":s.aliases,"ordinal":s.ordinal,"cover":s.cover})).collect();
-    let sha=crate::research_text::content_hash(&json!({"workRef":work,"taskConfigRef":config,"connectionVersionRef":model.connection_version_ref,"modelId":model.model_id,"endpointUrl":model.base_url,"images":images}).to_string());
+    let sha=crate::research_text::content_hash(&json!({"workRef":work,"taskConfigRef":config,"connectionVersionRef":model.connection_version_ref,"modelId":model.model_id,"endpointUrl":model.base_url,"images":images,"noteContextSha256":frozen_context.sha256}).to_string());
     Ok((
         json!({"sha256":sha,"imageCount":sources.len(),"modelLabel":model.model_id,"endpointUrl":model.base_url,"images":sources.iter().map(|s|json!({"slotKey":s.slot_key,"ordinal":s.ordinal,"role":if s.cover{"cover"}else if s.ordinal.is_some(){"page"}else{"unknown"},"originalUrl":s.original_url})).collect::<Vec<_>>()}),
         sources,
+        frozen_context,
     ))
 }
 async fn ready_scope_in(
@@ -116,7 +220,7 @@ async fn ready_scope_in(
     work: Uuid,
     config: Uuid,
 ) -> Result<Value, FoundationError> {
-    let (scope, _) = scope_in(&mut *tx, work, config).await?;
+    let (scope, _, _) = scope_in(tx, work, config).await?;
     admission::check_queue_configuration(tx, TaskKey::OcrRecognition, config, false).await?;
     let allowed: bool = sqlx::query_scalar(
         "SELECT COALESCE((SELECT e.allowed FROM linggan_ai_task_config c
@@ -152,7 +256,7 @@ pub async fn start_run(
         return Ok(r);
     }
     let config:Uuid=sqlx::query_scalar("SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key='ocr_recognition' FOR UPDATE").fetch_one(&mut *c.tx).await?;
-    let (scope, sources) = scope_in(&mut c.tx, work, config).await?;
+    let (scope, sources, note_context) = scope_in(&mut c.tx, work, config).await?;
     if scope["sha256"].as_str() != Some(request.expected_scope_sha256.as_str()) {
         return Err(FoundationError::Conflict);
     }
@@ -202,7 +306,10 @@ pub async fn start_run(
         }
         inputs.push(BatchInput {
             item_key: item.to_string(),
-            input: InputRef::OcrRecognitionItem { item_ref: item },
+            input: InputRef::OcrRecognitionItem {
+                item_ref: item,
+                note_context: Some(note_context.clone()),
+            },
         })
     }
     let h = batch_store::input_hash(TaskKey::OcrRecognition, &inputs, false)?;
@@ -239,18 +346,16 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
                 tx.commit().await?;
                 Ok(empty(work, "ready", Some(scope), None))
             }
-            Err(error) => Ok(empty(
-                work,
-                "unavailable",
-                None,
-                Some(unavailable_reason(&error)),
-            )),
+            Err(error) => {
+                let reason = unavailable_reason_in(&mut tx, config, &error).await?;
+                Ok(empty(work, "unavailable", None, Some(reason)))
+            }
         };
     };
     let run_ref: Uuid = run.get("run_ref");
     let items = sqlx::query(
         "SELECT i.*,inv.input_tokens,inv.output_tokens,inv.measured_tokens,
-            inv.cost_pico_usd::text cost_pico_usd,
+            inv.cost_pico_usd::text cost_pico_usd,inv.result AS invocation_result,
             NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d
               WHERE d.slot_key=i.slot_key OR d.blob_sha256=i.blob_sha256 OR d.materialization_ref=i.materialization_ref) visible,
             COALESCE((SELECT jsonb_agg(item_slot_key ORDER BY item_slot_key)
@@ -294,11 +399,15 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
         let mut tx = db.pool().begin().await?;
         let config: Uuid = sqlx::query_scalar("SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key='ocr_recognition'").fetch_one(&mut *tx).await?;
         let result = ready_scope_in(&mut tx, work, config).await;
-        tx.commit().await?;
-        match result {
+        let readiness = match result {
             Ok(scope) => (Some(scope), None),
-            Err(error) => (None, Some(unavailable_reason(&error))),
-        }
+            Err(error) => (
+                None,
+                Some(unavailable_reason_in(&mut tx, config, &error).await?),
+            ),
+        };
+        tx.commit().await?;
+        readiness
     } else {
         (None, None)
     };
@@ -384,8 +493,23 @@ pub async fn read_run(db: &Database, work: Uuid) -> Result<Value, FoundationErro
             })
         })
         .collect::<Vec<_>>();
+    let provider_503 = !cancelled
+        && read_state == "stopped"
+        && items.iter().any(|item| {
+            item.get::<bool, _>("visible")
+                && item.get::<String, _>("state") == "failed"
+                && item
+                    .get::<Option<Value>, _>("invocation_result")
+                    .as_ref()
+                    .is_some_and(observed_503)
+        });
+    let current_stage = if provider_503 {
+        "本次识图遇到识别服务暂时不可用（HTTP 503），已停止后续图片处理。"
+    } else {
+        "按冻结顺序处理当前图组。"
+    };
     Ok(
-        json!({"runRef":run_ref,"workRef":work,"state":read_state,"completedImages":run.get::<i32,_>("completed_images"),"totalImages":run.get::<i32,_>("total_images"),"currentStage":"按冻结顺序处理当前图组。","modelLabel":run.get::<Option<String>,_>("model_label"),"unavailableReason":unavailable,"images":image_json,"pendingCount":pending,"failureCode":read_failure,"batchRef":run.get::<Option<Uuid>,_>("batch_ref"),"batchRevision":run.get::<Option<i64>,_>("revision"),"cancelRequested":run.get::<Option<bool>,_>("cancel_requested").unwrap_or(false),"scope":ready_scope}),
+        json!({"runRef":run_ref,"workRef":work,"state":read_state,"completedImages":run.get::<i32,_>("completed_images"),"totalImages":run.get::<i32,_>("total_images"),"currentStage":current_stage,"modelLabel":run.get::<Option<String>,_>("model_label"),"unavailableReason":unavailable,"images":image_json,"pendingCount":pending,"failureCode":read_failure,"batchRef":run.get::<Option<Uuid>,_>("batch_ref"),"batchRevision":run.get::<Option<i64>,_>("revision"),"cancelRequested":run.get::<Option<bool>,_>("cancel_requested").unwrap_or(false),"scope":ready_scope}),
     )
 }
 fn pico_usd(value: Option<String>) -> Value {
@@ -401,6 +525,51 @@ fn pico_usd(value: Option<String>) -> Value {
         format!("{whole}.{fraction}")
     })
 }
+// Use the same current connection/model identity and latest probe ordering as admission.
+// A failed probe is historical evidence, not a live provider-health assertion.
+async fn unavailable_reason_in(
+    conn: &mut sqlx::PgConnection,
+    config: Uuid,
+    error: &FoundationError,
+) -> Result<&'static str, FoundationError> {
+    let reason = unavailable_reason(error);
+    if reason != MODEL_VALIDATION_REQUIRED {
+        return Ok(reason);
+    }
+    let probe = sqlx::query(
+        "SELECT probe.state,probe.result FROM linggan_ai_task_config c
+         JOIN linggan_model_config m ON m.config_ref=c.model_config_ref
+         JOIN linggan_model_capability cap ON cap.capability_ref=m.capability_ref
+         JOIN linggan_ai_model_identity identity ON identity.identity_ref=cap.identity_ref
+         JOIN LATERAL(SELECT version_ref FROM linggan_model_connection_version
+             WHERE connection_ref=identity.connection_ref ORDER BY revision DESC LIMIT 1)v ON true
+         JOIN linggan_model_entry current_model ON current_model.connection_version_ref=v.version_ref AND current_model.model_id=identity.model_id
+         JOIN LATERAL(SELECT state,result FROM linggan_model_invocation
+             WHERE model_ref=current_model.model_ref AND connection_version_ref=v.version_ref AND operation='probe'
+             ORDER BY created_at DESC,invocation_ref DESC LIMIT 1)probe ON true
+         WHERE c.task_config_ref=$1",
+    ).bind(config).fetch_optional(conn).await?;
+    Ok(match probe {
+        Some(row)
+            if row.get::<String, _>("state") == "failed"
+                && row
+                    .get::<Option<Value>, _>("result")
+                    .as_ref()
+                    .is_some_and(observed_503) =>
+        {
+            "最近一次模型验证遇到识别服务暂时不可用（HTTP 503），请稍后重新验证。"
+        }
+        None => "当前模型尚未完成可用性验证，请先验证模型。",
+        _ => MODEL_VALIDATION_REQUIRED,
+    })
+}
+
+const MODEL_VALIDATION_REQUIRED: &str = "当前模型尚未通过可用性验证，请查看模型验证结果。";
+
+fn observed_503(result: &Value) -> bool {
+    result["ok"] == false && result["diagnostic"]["httpStatus"] == 503
+}
+
 fn unavailable_reason(error: &FoundationError) -> &'static str {
     match error {
         FoundationError::NotFound => "当前作品没有可识别且未撤回的原始图片。",
@@ -422,10 +591,63 @@ fn unavailable_reason(error: &FoundationError) -> &'static str {
         {
             "图片文字识别尚未配置可用额度。"
         }
-        FoundationError::AdmissionDenied(_) => "当前模型或图片外发许可尚未开启。",
+        FoundationError::AdmissionDenied(reasons)
+            if reasons.iter().any(|r| r == "connection_disabled") =>
+        {
+            "当前模型连接已停用。"
+        }
+        FoundationError::AdmissionDenied(reasons)
+            if reasons.iter().any(|r| r == "current_model_not_probed") =>
+        {
+            MODEL_VALIDATION_REQUIRED
+        }
+        FoundationError::AdmissionDenied(_) => "图片文字识别的准备条件尚未满足，请检查任务配置。",
         _ => "当前无法读取图片文字识别的准备条件。",
     }
 }
 fn empty(work: Uuid, state: &str, scope: Option<Value>, unavailable_reason: Option<&str>) -> Value {
     json!({"runRef":Value::Null,"workRef":work,"state":state,"completedImages":0,"totalImages":0,"currentStage":if state=="ready"{"确认当前图组后可开始。"}else{"当前图片或模型配置不可用。"},"modelLabel":scope.as_ref().and_then(|s|s["modelLabel"].as_str()),"unavailableReason":unavailable_reason,"images":[],"pendingCount":0,"failureCode":Value::Null,"batchRef":Value::Null,"batchRevision":Value::Null,"cancelRequested":false,"scope":scope})
+}
+
+#[cfg(test)]
+mod unavailable_tests {
+    use super::*;
+
+    #[test]
+    fn model_validation_failure_does_not_claim_permission_is_disabled() {
+        let reason = unavailable_reason(&FoundationError::AdmissionDenied(vec![
+            "current_model_not_probed".into(),
+        ]));
+        assert!(reason.contains("尚未通过可用性验证"));
+        assert!(!reason.contains("许可"));
+        assert!(!reason.contains("开关"));
+        assert!(
+            !reason.contains("503"),
+            "no provider status is present in this error"
+        );
+    }
+
+    #[test]
+    fn actual_permission_and_configuration_failures_remain_distinct() {
+        for (code, expected) in [
+            ("egress_not_approved", "尚未获准外发"),
+            ("task_ocr_recognition_off", "执行开关尚未开启"),
+            ("connection_disabled", "模型连接已停用"),
+            ("daily_budget_unconfigured", "尚未配置可用额度"),
+            ("skill_not_enabled", "准备条件尚未满足"),
+        ] {
+            assert!(
+                unavailable_reason(&FoundationError::AdmissionDenied(vec![code.into()]))
+                    .contains(expected),
+                "{code}"
+            );
+        }
+        assert!(
+            unavailable_reason(&FoundationError::AdmissionDenied(vec![
+                "current_model_not_probed".into(),
+                "global_off".into(),
+            ]))
+            .contains("执行开关尚未开启")
+        );
+    }
 }

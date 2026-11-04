@@ -3,6 +3,11 @@
  * 行里的一切都回答「值不值得打开」——完整的材料矩阵与来源轨迹留在检查器里。 */
 
 .list {
+  /* Reading, batch and hover states are neutral ink washes on paper; the signal colour stays on the
+   * current-reading edge only. Page-local roles keep the three states ordered and distinguishable. */
+  --ev-row-hover: color-mix(in srgb, var(--lgi-ink) 4%, var(--lgi-canvas));
+  --ev-row-batch: color-mix(in srgb, var(--lgi-ink) 5%, var(--lgi-canvas));
+  --ev-row-current: color-mix(in srgb, var(--lgi-ink) 8%, var(--lgi-canvas));
   min-width: 0;
 }
 
@@ -29,7 +34,7 @@
 }
 
 .row[data-selected='true'] {
-  background: var(--lgi-signal-soft);
+  background: var(--ev-row-current);
 }
 
 .row[data-selected='true']::before,
@@ -50,12 +55,24 @@
 
 @media (hover: hover) {
   .row:hover {
-    background: var(--lgi-canvas-low);
+    background: var(--ev-row-hover);
+  }
+
+  .row[data-checked='true']:hover {
+    background: var(--ev-row-batch);
   }
 
   .row[data-selected='true']:hover {
-    background: var(--lgi-signal-soft);
+    background: var(--ev-row-current);
   }
+}
+
+.row[data-checked='true'] {
+  background: var(--ev-row-batch);
+}
+
+.row[data-selected='true'][data-checked='true'] {
+  background: var(--ev-row-current);
 }
 
 /* 版面的宽屏护栏：宽屏得到的是外侧留白，不是更宽的行文；材料导轨固定在右侧，扫读时各行对齐。 */
@@ -103,6 +120,11 @@
   cursor: pointer;
 }
 
+.titleButton:hover:not(:disabled),
+.titleButton:active:not(:disabled) {
+  background: transparent;
+}
+
 .titleButton:focus-visible {
   outline: 2px solid var(--lgi-signal);
   outline-offset: calc(var(--lgi-space-1) / 2);
@@ -116,8 +138,12 @@
   font: var(--lgi-text-data) / var(--lgi-lh-body) var(--lgi-font-sans);
 }
 
-.time {
+/* 发布时间归右侧事实列；这一条只在窄屏整列隐藏时回到作者行。 */
+.metaDate {
+  display: none;
   color: var(--lgi-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .side {
@@ -129,10 +155,66 @@
   padding-left: var(--lgi-space-3);
 }
 
-.observed {
-  color: var(--lgi-ghost);
-  font: var(--lgi-weight-semibold) var(--lgi-text-label) / var(--lgi-lh-data) var(--lgi-font-mono);
+/* 右侧事实列：字段名一列、值一列，行与行共用同一条对齐线。不铺底色；状态词允许本页已选定的开放圈线。 */
+.info {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: var(--lgi-space-2);
+  row-gap: calc(var(--lgi-space-1) / 2);
+  margin: 0;
+}
+
+.infoRow {
+  display: contents;
+}
+
+/* 轻分组：材料现状两行一组，时间两行一组，中间比行距多一格。 */
+.infoRow:nth-of-type(3) > * {
+  padding-top: var(--lgi-space-1);
+}
+
+.info dt {
+  color: var(--lgi-meta);
+  font: var(--lgi-type-aux-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+  white-space: nowrap;
+}
+
+/* 选中与悬停底色会吃掉 meta 的对比余量（选中底实测 4.06:1，低于 4.5:1），
+ * 这两种状态把字段名提到 muted，白底仍保持更轻的 meta。 */
+.row[data-selected='true'] .info dt { color: var(--lgi-muted); }
+
+@media (hover: hover) {
+  .row:hover .info dt { color: var(--lgi-muted); }
+}
+
+.info dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-data);
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 状态词可能很长（例如「平台页面已不存在（采集端确认）」）：整行只排一行，
+ * 超出用省略号收尾，完整句子留在 title 与读屏文本里，失败色点不因此消失。 */
+.stateCell {
+  display: flex;
+  align-items: center;
+}
+
+.annotatedState > [data-state] {
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.annotatedState > [data-state] > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Bulk selectors have one authoritative style in the V2.2 section. */
@@ -185,16 +267,28 @@
 }
 
 .tableRow[data-selected='true'] {
-  background: var(--lgi-signal-soft);
+  background: var(--ev-row-current);
+}
+
+.tableRow[data-checked='true'] {
+  background: var(--ev-row-batch);
+}
+
+.tableRow[data-selected='true'][data-checked='true'] {
+  background: var(--ev-row-current);
 }
 
 @media (hover: hover) {
   .tableRow:hover {
-    background: var(--lgi-canvas-low);
+    background: var(--ev-row-hover);
+  }
+
+  .tableRow[data-checked='true']:hover {
+    background: var(--ev-row-batch);
   }
 
   .tableRow[data-selected='true']:hover {
-    background: var(--lgi-signal-soft);
+    background: var(--ev-row-current);
   }
 }
 
@@ -288,9 +382,11 @@
   border: 0; background: var(--lgi-canvas);
   box-shadow: var(--lgi-shadow-contact); overflow: hidden;
 }
-.list[data-layout='research'] .row:hover { background: var(--lgi-focus-warm); }
-.list[data-layout='research'] .row[data-selected='true'] { background: var(--lgi-signal-faint); }
-.list[data-layout='research'] .row[data-checked='true'] { box-shadow: inset 0 0 0 var(--lgi-action-border-width) var(--lgi-signal), var(--lgi-shadow-contact); }
+.list[data-layout='research'] .row:hover { background: var(--ev-row-hover); }
+.list[data-layout='research'] .row[data-checked='true']:hover { background: var(--ev-row-batch); }
+.list[data-layout='research'] .row[data-selected='true']:hover { background: var(--ev-row-current); }
+.list[data-layout='research'] .row[data-checked='true'] { box-shadow: var(--lgi-shadow-contact); background: var(--ev-row-batch); }
+.list[data-layout='research'] .row[data-selected='true'] { background: var(--ev-row-current); }
 .list[data-layout='research'] .article {
   display: grid; height: calc(var(--lgi-space-24) + var(--lgi-space-2) + var(--lgi-focus-inset)); min-height: 0; max-height:calc(var(--lgi-space-24) + var(--lgi-space-2) + var(--lgi-focus-inset)); box-sizing:border-box;
   padding: var(--lgi-action-border-width) var(--lgi-space-6) var(--lgi-action-border-width) var(--lgi-focus-inset);
@@ -334,11 +430,9 @@
   font:600 var(--lgi-type-label-size)/var(--lgi-shell-icon) var(--lgi-font-data);
 }
 .list[data-layout='research'] .side {
-  border:0; padding:var(--lgi-space-3) 0 var(--lgi-space-2); height:calc(var(--lgi-space-24) + var(--lgi-space-2));
-  box-sizing:border-box; min-width:0; display:flex; justify-content:space-between;
-  gap:var(--lgi-space-2);
+  border:0; padding:calc(var(--lgi-space-2) + var(--lgi-space-1) / 2) 0 var(--lgi-space-2); height:calc(var(--lgi-space-24) + var(--lgi-space-2));
+  box-sizing:border-box; min-width:0;
 }
-.list[data-layout='research'] .side .observed { font:var(--lgi-type-aux-size)/1.5 var(--lgi-font-data); color:var(--lgi-meta); white-space:nowrap; }
 .list[data-layout='research'] .article > [data-evidence-check] {
   position:absolute;top:50%;right:var(--lgi-space-2);z-index:4;
   transform:translateY(-50%);
@@ -373,10 +467,11 @@
 }
 /* Dense table: true independent metric columns and no title checkbox wrapping. */
 .list[data-layout='table'] { overflow-x:auto; }
-.list[data-layout='table'] .table { min-width:calc(var(--lgi-space-24) * 12 + var(--lgi-space-2)); width:100%; table-layout:fixed; border-collapse:collapse; }
+/* Never narrow the table below the full-date layout; opening the inspector scrolls this table locally instead of truncating date cells. */
+.list[data-layout='table'] .table { min-width:calc(var(--lgi-space-24) * 13 + var(--lgi-space-8)); width:100%; table-layout:fixed; border-collapse:collapse; }
 .selectColumn { width:calc(var(--lgi-space-10) + var(--lgi-space-1) + var(--lgi-focus-inset)); }
 .workColumn { width:25%; } .authorColumn { width:14%; } .materialColumn { width:16%; }
-.metricColumn { width:5.5%; } .dateColumn { width:9%; } .observedColumn { width:10%; }
+.metricColumn { width:5%; } .dateColumn { width:9%; } .observedColumn { width:11.5%; }
 .list[data-layout='table'] .table th { padding:var(--lgi-space-2) var(--lgi-space-3);width:auto; }
 .list[data-layout='table'] .table th.metricHeadCell { padding:var(--lgi-space-2) 0;text-align:center; }
 .list[data-layout='table'] .table th.metricHeadCell svg { display:block;margin:auto;color:var(--lgi-meta); }
@@ -395,14 +490,15 @@
 .list[data-layout='table'] .tableRow td.checkCell .check {
   margin:0 auto;top:auto;right:auto;transform:none;
 }
-.list[data-layout='table'] .tableRow[data-checked='true'] { box-shadow:inset calc(var(--lgi-space-1) - var(--lgi-action-border-width)) 0 var(--lgi-signal);background:var(--lgi-signal-faint); }
+.list[data-layout='table'] .tableRow[data-checked='true'] { background:var(--ev-row-batch); }
+.list[data-layout='table'] .tableRow[data-selected='true'][data-checked='true'] { background:var(--ev-row-current); }
 .list[data-layout='table'] .materialCell {
   display:flex;align-items:center;flex-wrap:nowrap;min-width:0;gap:var(--lgi-space-2);
 }
 .list[data-layout='table'] .materialCell > :first-child { min-width:0; flex:1; }
 .list[data-layout='table'] .materialCell > :last-child { flex:none; }
 @media (max-width:1380px) {
-  .list[data-layout='research'] .article { gap:var(--lgi-space-3);column-gap:var(--lgi-space-1);grid-template-columns:calc(var(--lgi-space-16) + var(--lgi-space-3) + var(--lgi-focus-inset)) minmax(0,1fr) calc(var(--lgi-space-24) + var(--lgi-space-10) + var(--lgi-space-1) + var(--lgi-focus-inset)); }
+  .list[data-layout='research'] .article { gap:var(--lgi-space-3);column-gap:var(--lgi-space-1);grid-template-columns:calc(var(--lgi-space-16) + var(--lgi-space-3) + var(--lgi-focus-inset)) minmax(0,1fr) calc(var(--lgi-space-24) + var(--lgi-space-12) + var(--lgi-space-1) + var(--lgi-focus-inset)); }
   .list[data-layout='research'] .items { padding:var(--lgi-space-3);gap:var(--lgi-space-3); }
 }
 @media (max-width:860px) {
@@ -412,5 +508,20 @@
   .list[data-layout='research'] .article > :first-child { width:calc(var(--lgi-space-16) + var(--lgi-space-2));height:var(--lgi-space-24); }
   .list[data-layout='research'] .identity { height:var(--lgi-space-24);grid-template-rows:var(--lgi-space-5) var(--lgi-space-4) var(--lgi-space-5) var(--lgi-shell-icon);gap:calc(var(--lgi-space-1) - var(--lgi-action-border-width));padding-left:var(--lgi-space-1); }
   .list[data-layout='research'] .side { display:none; }
+  .list[data-layout='research'] .metaDate { display:inline; }
   .list[data-layout='research'] .row[data-selecting='true'] .article { padding-right:calc(var(--lgi-space-8) + var(--lgi-space-1)); }
 }
+
+/* Batch membership is not the current reading position. */
+.list[data-layout='research'] .row[data-checked='true'] { box-shadow:var(--lgi-shadow-contact);background:var(--ev-row-batch); }
+.list[data-layout='research'] .row[data-selected='true'] { background:var(--ev-row-current); }
+
+/* Open annotation is local to the reading rows; repeated marks keep the same light stroke. */
+.info .stateCell { overflow:visible; }
+.annotatedState { position:relative;display:inline-flex;max-width:100%;min-width:0; }
+.annotatedState svg { position:absolute;pointer-events:none;left:calc(var(--lgi-space-1) * -1);top:calc(var(--lgi-space-1) * -1);width:calc(100% + var(--lgi-space-2));height:calc(100% + var(--lgi-space-2));overflow:visible;fill:none;stroke:var(--lgi-muted);stroke-width:1;opacity:.6;vector-effect:non-scaling-stroke; }
+.annotatedState svg path { vector-effect:non-scaling-stroke; }
+
+/* The material group is one keyboard target; its focus outline stays clear of the value-cell clip. */
+.info .materialsCell { overflow:visible; }
+.row[data-checked='true'] .info dt { color:var(--lgi-muted); }

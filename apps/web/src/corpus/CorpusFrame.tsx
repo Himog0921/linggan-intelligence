@@ -17,8 +17,8 @@ interface CorpusFrameProps {
   shell: CorpusShell | null;
   /** 页头右侧读数，由页面自己提供。 */
   meta: ReactNode;
-  /** 侧栏底部说明本页的数据范围。 */
-  foot: ReactNode;
+  /** 侧栏底部说明本页的数据范围；本页没有常驻说明时不传。 */
+  foot?: ReactNode;
   /** 证据库页的侧栏计数徽标；其他页不传。 */
   evidenceCount?: EvidenceCount | null;
   children: ReactNode;
@@ -27,27 +27,30 @@ interface CorpusFrameProps {
 /**
  * 语料三页共用的页面框架：全局页头 + 语料侧栏 + 可滚动内容区（WEB-REACT-001 阶段 D）。
  * 页头、侧栏、领域选择器的位置和样式与旧页面同源（shell.css）；领域在三页之间切换不丢（F09）。
- * 一级导航「采集」项的状态词与领域列表同源（语料外壳接口），三页一致；外壳没读到时保持「状态未知」。
  */
 export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, evidenceCount = null, children }: CorpusFrameProps) {
   const titleId = useId();
   const picker = shell ? <DomainPicker domains={shell.domains} selected={shell.selectedDomain} action={action} /> : null;
+  // 已认可的紧凑外壳：证据库与创作者共用同一页头高度和当前页手绘短线，其他页面保持原样。
+  const compact = page === 'evidence' || page === 'creators';
+  const currentLabel = <b className={compact ? styles.annotatedCurrent : undefined}>{pageLabel}
+    {compact ? <svg viewBox="0 0 54 8" preserveAspectRatio="none" aria-hidden="true" focusable="false"><path d="M2 4.5C13 2 29 6 52 3.5M7 6c15-1 26-.8 39-1.4" /></svg> : null}
+  </b>;
   const crumb = picker ? (
     <>
-      语料 <span className="v7-slash">/</span> {picker} <span className="v7-slash">/</span> <b>{pageLabel}</b>
+      语料 <span className="v7-slash">/</span> {picker} <span className="v7-slash">/</span> {currentLabel}
     </>
   ) : (
     <>
-      语料 <span className="v7-slash">/</span> <b>{pageLabel}</b>
+      语料 <span className="v7-slash">/</span> {currentLabel}
     </>
   );
   return (
     <AppShell
       active="corpus"
+      className={compact ? 'v7-corpus-compact-shell' : undefined}
       boundaryLabel="本机服务状态"
-      collectionState={shell?.collectionState}
-      crumb={crumb}
-      meta={meta}
+      contextBar={{ breadcrumb: crumb, meta }}
     >
       <title>{`${pageLabel} · 语料`}</title>
       <div className={`v7-shell ${styles.frame}`}>

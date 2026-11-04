@@ -348,7 +348,7 @@ fn protect_observed_metadata(
         let original = before
             .iter()
             .find(|b| block.get("ref").is_some() && b["ref"] == block["ref"]);
-        for field in ["bbox", "time"] {
+        for field in ["bbox", "time", "parameters", "sourceRole"] {
             if block
                 .get(field)
                 .is_some_and(|v| original.and_then(|b| b.get(field)) != Some(v))

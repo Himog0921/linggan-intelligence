@@ -332,30 +332,32 @@ export function WorkspacePage() {
       className={c("topic-app")}
       active="topic"
       boundaryLabel="本机服务状态"
-      crumb={
-        <>
-          主题图谱 <span className="v7-slash">/</span> <b>领域探索</b>{" "}
-          <span className="v7-slash">/</span>{" "}
-          <span className="v7-context-current">Topic 工作区</span>
-        </>
-      }
-      meta={
-        <>
-          <span className="v7-kpi">
-            <em>生命周期</em>
-            <b>{topic ? topic.definition.lifecycleState === "candidate" ? "候选" : "暂定" : "未读取"}</b>
-          </span>
-          <span className="v7-kpi">
-            <em>裁定方式</em>
-            <b>{topic ? topic.runKind === "machine_proposed" ? "机器候选" : "人工" : "未读取"}</b>
-          </span>
-          <i className="v7-vr" aria-hidden="true" />
-          <span>
-            来源与覆盖不得外推{" "}
-            <span className="v7-tech-key">NO GENERALIZATION</span>
-          </span>
-        </>
-      }
+      contextBar={{
+        breadcrumb: (
+          <>
+            主题图谱 <span className="v7-slash">/</span> <b>领域探索</b>{" "}
+            <span className="v7-slash">/</span>{" "}
+            <span className="v7-context-current">Topic 工作区</span>
+          </>
+        ),
+        meta: (
+          <>
+            <span className="v7-kpi">
+              <em>生命周期</em>
+              <b>{topic ? topic.definition.lifecycleState === "candidate" ? "候选" : "暂定" : "未读取"}</b>
+            </span>
+            <span className="v7-kpi">
+              <em>裁定方式</em>
+              <b>{topic ? topic.runKind === "machine_proposed" ? "机器候选" : "人工" : "未读取"}</b>
+            </span>
+            <i className="v7-vr" aria-hidden="true" />
+            <span>
+              来源与覆盖不得外推{" "}
+              <span className="v7-tech-key">NO GENERALIZATION</span>
+            </span>
+          </>
+        ),
+      }}
     >
       <WorkspaceContents key={canonical_key} canonicalKey={canonical_key} query={query} />
     </AppShell>

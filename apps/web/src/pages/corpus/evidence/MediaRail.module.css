@@ -2,14 +2,14 @@
  * 只消费 LIDS --lgi-* Token。 */
 
 .module {
+  min-width: 0;
   margin-bottom: calc(var(--lgi-space-4) + var(--lgi-space-1) / 2);
-  border-top: 2px solid var(--lgi-ink);
 }
 
 .toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--lgi-space-3);
   min-height: calc(var(--lgi-space-10) + var(--lgi-space-1));
   padding: calc(var(--lgi-space-1) * 1.75) 0;
@@ -75,7 +75,7 @@
   overflow-y: hidden;
   padding: calc(var(--lgi-space-1) / 4) 0 var(--lgi-space-1);
   overscroll-behavior-x: contain;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   scroll-snap-type: x mandatory;
   scrollbar-width: none;
   cursor: grab;
@@ -93,9 +93,10 @@
 }
 
 .strip {
+  position: relative;
   display: flex;
   gap: calc(var(--lgi-space-2) + var(--lgi-space-1) / 2);
-  min-width: max-content;
+  min-width: 0;
   padding: calc(var(--lgi-space-1) / 2) calc(var(--lgi-space-1) / 4) calc(var(--lgi-space-1) * 1.5);
 }
 

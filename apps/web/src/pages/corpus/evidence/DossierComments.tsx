@@ -6,15 +6,10 @@ import { formatNumber } from './evidencePresent';
 import { dossierCommentsKey } from './evidenceKeys';
 import styles from './Dossier.module.css';
 
-function likes(item: DossierComment): string {
-  return item.likeCount === null ? '赞 —' : `赞 ${formatNumber(item.likeCount)}`;
-}
-
 function CommentItem({ item, replies, orphan }: { item: DossierComment; replies: DossierComment[]; orphan: boolean }) {
   return (
     <article className={styles.comment} data-relation={item.relation}>
-      <p className={styles.commentMeta}>{item.relation === 'REPLY' ? `回复 · ${likes(item)}` : likes(item)}</p>
-      <p className={styles.commentText}>{item.body || '这条评论没有取得文字'}</p>
+      <p className={styles.commentText}>{item.body || '这条评论没有取得文字'}{' '}<span className={styles.commentLikes}>赞 <span>{item.likeCount === null ? '—' : formatNumber(item.likeCount)}</span></span></p>
       {orphan ? <p className={styles.note}>它回复的那条评论还没读到。</p> : null}
       {replies.length > 0 ? (
         <div className={styles.replies}>

@@ -33,7 +33,7 @@ async function opened(url?: string) {
 }
 
 describe('勾选与批量动作', () => {
-  it('只有选择态才显示勾选框；勾选本页再次点击取消，存储仍用稳定引用', async () => {
+  it('只有选择态才显示勾选框；本页补选后禁用，清空保持选择模式，存储仍用稳定引用', async () => {
     pageRoutes(kit);
     const view = await opened();
     expect(screen.queryAllByRole('checkbox', { name: /^勾选作品：/ })).toHaveLength(0);
@@ -42,7 +42,9 @@ describe('勾选与批量动作', () => {
     expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 3 篇');
     expect(JSON.parse(sessionStorage.getItem(selectionKey) ?? 'null')).toEqual([workRef(1), workRef(2), workRef(3)]);
     expect(screen.getAllByRole('checkbox', { name: /^勾选作品：/ }).every(box => (box as HTMLInputElement).checked)).toBe(true);
-    await view.user.click(screen.getByRole('button', { name: '取消本页' }));
+    expect(screen.getByRole('button', { name: '本页已选' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '取消本页' })).toBeNull();
+    await view.user.click(screen.getByRole('button', { name: '清空已选' }));
     expect(screen.getByRole('group', { name: '批量操作' })).toHaveTextContent('已选 0 篇');
     await view.user.click(screen.getByRole('button', { name: '勾选本页' }));
 
@@ -110,12 +112,15 @@ describe('检查器外壳', () => {
   it('三个标签，默认「作品」；点击研究底稿替换历史并写入地址', async () => {
     pageRoutes(kit);
     const view = await opened();
-    expect(screen.getAllByRole('tab').map(tab => tab.textContent)).toEqual(['作品', '研究底稿', '采集记录']);
+    expect(screen.getAllByRole('tab').map(tab => tab.id)).toEqual(['evidence-tab-overview', 'evidence-tab-dossier', 'evidence-tab-trace']);
+    const dossierTab = screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ });
+    await waitFor(() => expect(dossierTab).toHaveAccessibleName('研究底稿，有待补内容，具体原因见正文。'));
+    expect(within(dossierTab).getByText('待补')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByRole('tab', { name: '作品' })).toHaveAttribute('aria-selected', 'true');
-    await view.user.click(screen.getByRole('tab', { name: '研究底稿' }));
+    await view.user.click(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ }));
     expect(view.location()).toBe(`/corpus/evidence?domain=${DOMAIN}&work=${workRef(1)}&tab=dossier`);
     expect(view.router.state.historyAction).toBe('REPLACE');
-    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: '作品' })).toHaveAttribute('tabindex', '-1');
   });
 
@@ -124,7 +129,7 @@ describe('检查器外壳', () => {
     const view = await opened();
     screen.getByRole('tab', { name: '作品' }).focus();
     await view.user.keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ })).toHaveFocus();
     await view.user.keyboard('{End}');
     expect(screen.getByRole('tab', { name: '采集记录' })).toHaveFocus();
     await view.user.keyboard('{ArrowRight}');
@@ -141,7 +146,7 @@ describe('检查器外壳', () => {
     kit.route('GET', `${detailPathOf(1)}/research-dossier`, ok(dossierJson(1)));
     const view = await opened();
     await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
-    await view.user.click(screen.getByRole('tab', { name: '研究底稿' }));
+    await view.user.click(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ }));
     await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
     expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)[0]?.search.get('domain')).toBe(DOMAIN);
     expect(kit.of('GET', `${detailPathOf(1)}/research-dossier/metadata`)).toHaveLength(0);
@@ -152,7 +157,7 @@ describe('检查器外壳', () => {
     kit.route('GET', `${detailPathOf(1)}/research-dossier`, ok(dossierJson(1)));
     renderEvidencePage(pageUrl(`domain=${DOMAIN}&tab=dossier&work=${workRef(1)}`));
     await waitFor(() => expect(kit.of('GET', `${detailPathOf(1)}/research-dossier`)).toHaveLength(1));
-    expect(screen.getByRole('tab', { name: '研究底稿' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: /^研究底稿(?:，|$)/ })).toHaveAttribute('aria-selected', 'true');
   });
 
   it('宽度：选了就记入本机偏好并写入地址（替换历史）；没有 panel 参数时取偏好，地址优先', async () => {
@@ -309,7 +314,7 @@ describe('敏感面', () => {
   const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
   const activePanel = () => aside().querySelector<HTMLElement>('[role="tabpanel"]:not([hidden])')!;
 
-  /** 普通层的文字：去掉折叠着的「技术事实」；`withoutCode` 再去掉技术旁注（<code>）。 */
+  /** 普通层的文字：去掉折叠着的「采集详情」；`withoutCode` 再去掉技术旁注（<code>）。 */
   function ordinaryText(root: HTMLElement, withoutCode = false): string {
     const copy = root.cloneNode(true) as HTMLElement;
     copy.querySelectorAll(withoutCode ? 'details:not([open]), code' : 'details:not([open])').forEach(node => node.remove());
@@ -324,7 +329,7 @@ describe('敏感面', () => {
     expect(ordinaryText(activePanel(), true)).not.toMatch(/\b[A-Z]{2,}(?:_[A-Z]+)+\b|\b(?:UNKNOWN|SEARCHABLE|NOT_REQUESTED)\b/);
   });
 
-  it('引用与执行血缘只在「来源轨迹」这一技术层里', async () => {
+  it('引用与执行血缘只在「采集详情」这一层里', async () => {
     pageRoutes(kit);
     const view = await opened();
     await view.user.click(screen.getByRole('tab', { name: '采集记录' }));

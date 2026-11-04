@@ -64,8 +64,8 @@ const openList = async (url = listUrl) => {
   await page.getByRole('table').waitFor();
 };
 const resultCount = text => page.getByText(text, { exact: true }).first().waitFor();
-const drawer = name => page.getByRole('dialog', { name, exact: true });
-// 抽屉与对话框是模态的：表格被置为惰性，读表格内容时直接读 DOM，不走无障碍树。
+const drawer = name => page.getByRole('complementary', { name, exact: true });
+// 检查器是非模态的；读表格内容时直接读 DOM，避免受可访问树或滚动位置影响。
 const rowText = name =>
   page.evaluate(label => {
     const button = [...document.querySelectorAll('tbody button')].find(node => node.textContent === label);
@@ -74,24 +74,24 @@ const rowText = name =>
 
 let finished = false;
 try {
-  await step('打开页面：八列表格、命中数、分页、读取时间；外壳与旧页面同源', async () => {
+  await step('打开页面：九列表格、命中数、分页、读取时间；外壳与旧页面同源', async () => {
     const response = await page.goto(listUrl);
     assert.equal(response?.status(), 200);
     await page.getByRole('table').waitFor();
     assert.equal(await page.title(), '创作者 · 语料');
     assert.deepEqual(
       await page.getByRole('columnheader').allTextContents(),
-      ['创作者', '发现词', '内容方向', '相关作品', '领域最高赞', '作品预览', '首次发现', '观察状态'],
+      ['创作者', '粉丝', '发现词', '内容方向', '相关作品', '领域最高赞', '作品预览', '首次发现', '观察状态'],
     );
     await resultCount(`${authorTotal} 位创作者`);
-    await page.getByText('1 / 2 页', { exact: true }).waitFor();
+    await page.getByText('第 1/2 页').waitFor();
     assert.equal(await rows().count(), 25);
     assert.match(await page.locator('.v7-context-meta').innerText(), /^读取于 \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
-    // 一级导航六项；语料是当前项；采集项的状态词来自语料外壳接口（库里已有一个观察目标 → 观察中）。
+    // 一级导航六项只显示中文标题；语料是当前项；采集项不再带状态词（状态词仍由语料外壳接口提供，见下个步骤）。
     const nav = page.getByRole('navigation', { name: '一级导航' });
     assert.equal(await nav.locator('a, button').count(), 6);
     assert.equal(await nav.getByRole('link', { name: /语料/ }).getAttribute('aria-current'), 'page');
-    assert.match(await nav.getByRole('link', { name: /采集/ }).innerText(), /观察中/);
+    assert.equal((await nav.getByRole('link', { name: /采集/ }).innerText()).trim(), '采集');
     const headerBorder = await page.locator('.v7-global-row').evaluate(node => getComputedStyle(node).borderBottomWidth);
     assert.equal(headerBorder, '2px');
     // 侧栏三项都带着领域；创作者是当前项。
@@ -137,7 +137,7 @@ try {
   await step('翻页与每页数量：地址里的页码从 0 起，翻到第二页只有 2 位', async () => {
     await page.getByRole('button', { name: '下一页' }).click();
     await page.waitForURL(url => url.searchParams.get('page') === '1');
-    await page.getByText('2 / 2 页', { exact: true }).waitFor();
+    await page.getByText('第 2/2 页').waitFor();
     await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 2);
     await page.getByRole('button', { name: '上一页' }).click();
     await page.waitForFunction(() => document.querySelectorAll('tbody tr').length === 25);
@@ -148,7 +148,7 @@ try {
     // 地址里手写一个越界页码：回到最后一页并替换历史。
     await page.goto(`${origin}/corpus/creators?domain=${domainOne}&pageSize=25&page=9`);
     await page.waitForURL(url => url.searchParams.get('page') === '1');
-    await page.getByText('2 / 2 页', { exact: true }).waitFor();
+    await page.getByText('第 2/2 页').waitFor();
   });
 
   await step('搜索（防抖）、筛选草稿、条件芯片、重置、快捷视图', async () => {
@@ -175,7 +175,7 @@ try {
     await dialog.getByRole('button', { name: '应用筛选' }).click();
     await page.getByText('当前条件下没有找到创作者。').waitFor();
     await resultCount('0 位创作者');
-    await page.getByText('0 页', { exact: true }).waitFor();
+    await page.getByText('共 0 位 · 0 页', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: '下一页' }).isDisabled(), true);
     assert.equal(await page.getByRole('button', { name: '移除条件：亲历自述' }).count(), 1);
     // 「清除筛选」只清列表条件，领域与每页数量保持。
@@ -208,27 +208,30 @@ try {
     const panel = drawer('合成作者 03');
     await panel.waitFor();
     const overview = await panel.getByRole('tabpanel', { name: '概览' }).innerText();
-    assert.ok(overview.indexOf('作者内容倾向') < overview.indexOf('内容方向与作品表达'));
+    assert.ok(overview.indexOf('样本内倾向') < overview.indexOf('公开简介'));
     assert.match(overview, /尚不能判定/);
-    assert.match(overview, /尚无研究结果 · 可在作品与作者详情发起研究/);
-    assert.match(overview, /本次实际取样篇数未记录。/);
-    assert.match(overview, /持续创作倾向须至少两篇独立相关作品/);
+    assert.match(overview, /当前材料尚不足以形成作者整体判断/);
+    assert.match(overview, /本次实际取样篇数未记录/);
+    assert.match(overview, /材料范围尚未记录/);
     // 发现来源：发现词、首次发现与当时看到的那篇作品，缺记录时如实说明。
     const discovery = panel.getByRole('region', { name: '发现来源' });
-    assert.match(await discovery.innerText(), /发现词[\s\S]*首次发现[\s\S]*当时看到的是/);
+    const discoveryText = await discovery.innerText();
+    assert.match(discoveryText, /未记录发现词|、/);
+    assert.match(discoveryText, /首次发现时间未记录|\d{4}-\d{2}-\d{2}/);
+    assert.equal(await discovery.getByRole('link').count(), 1);
     await discovery.scrollIntoViewIfNeeded();
     await shot('creators-1440-drawer-discovery');
     assert.doesNotMatch(await panel.innerText(), UUID);
     await panel.getByRole('tab', { name: '研究线索' }).click();
     const group = panel.locator('details[data-work]').first();
-    await group.locator('summary').click();
-    assert.equal(await group.getByText('判定门槛：').count(), 4);
-    // 还没有任何分析结果：没有被引用的片段，如实说明，而不是显示一个空的依据。
-    assert.match(await group.innerText(), /暂无可回查的支持片段。/);
+    if (!(await group.evaluate(node => node.open))) await group.locator('summary').first().click();
+    for (const name of ['与当前领域的关系', '亲历自述', '知识与方法讲解', '推广表达']) {
+      assert.match(await group.innerText(), new RegExp(name));
+    }
     await panel.getByRole('tab', { name: '观察记录' }).click();
-    assert.match(await panel.getByRole('tabpanel', { name: '观察记录' }).innerText(), /合成公开简介|公开简介尚未取得/);
+    assert.match(await panel.getByRole('tabpanel', { name: '观察记录' }).innerText(), /观察状态/);
     // 未加入观察的作者：观察记录如实说明没有巡查记录，不显示空表或推算的时间。
-    assert.match(await panel.getByRole('region', { name: '观察关系与巡查' }).innerText(), /未加入本领域观察，所以没有巡查记录/);
+    assert.match(await panel.getByRole('region', { name: '观察记录' }).innerText(), /未加入本领域观察，所以没有巡查记录/);
     await panel.getByRole('tab', { name: '概览' }).click();
     await shot('creators-1440-drawer');
     await page.keyboard.press('Escape');
@@ -243,9 +246,9 @@ try {
     await panel.waitFor();
     await panel.getByRole('tab', { name: '研究线索' }).click();
     const group = panel.locator('details[data-work]').first();
-    await group.locator('summary').click();
-    await group.getByRole('button', { name: '补充判断' }).first().click();
-    const dialog = page.getByRole('dialog', { name: '补充与当前领域的关系' });
+    if (!(await group.evaluate(node => node.open))) await group.locator('summary').first().click();
+    await group.getByRole('button', { name: /^(补充|调整)与当前领域的关系$/ }).click();
+    const dialog = page.getByRole('dialog', { name: /^(补充|调整)与当前领域的关系$/ });
     await dialog.waitFor();
     // 正向判断必须选当前支持材料。
     const judgment = dialog.getByRole('combobox', { name: '你的判断' });
@@ -276,7 +279,7 @@ try {
     assert.ok(body.supportFragmentIds.length >= 1);
     // 抽屉仍然打开；这项判断现在是人工调整，引用了刚才选的那段材料，并能回查原作品。
     await panel.waitFor();
-    await group.getByText(/^支持依据 · \d+ 个片段$/).click();
+    await group.getByText(/^依据 \d+ 片段$/).first().click();
     const quote = group.locator('blockquote').first();
     await quote.waitFor();
     assert.match(await quote.innerText(), /合成/);
@@ -284,7 +287,7 @@ try {
     // 列表重读后，这位作者的「相关作品」变成 1。
     await page.waitForFunction(() => {
       const button = [...document.querySelectorAll('tbody button')].find(node => node.textContent === '合成作者 03');
-      return button?.closest('tr')?.querySelectorAll('td')[3]?.innerText.startsWith('1');
+      return button?.closest('tr')?.querySelectorAll('td')[4]?.innerText.startsWith('1');
     });
     assert.match(await panel.innerText(), /人工调整 · \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
     await page.keyboard.press('Escape');
@@ -336,7 +339,7 @@ try {
     await referenceRole.check();
     assert.equal(await referenceRole.isChecked(), true);
     await primaryRole.check();
-    assert.match(await dialog.innerText(), /这一步不会：[\s\S]*立即采集作品、评论或主页[\s\S]*开启或关闭巡查[\s\S]*调用模型/);
+    assert.match(await dialog.innerText(), /加入名单并建立领域关系；本次不启动采集或巡查/);
     await shot('creators-1440-join-confirm');
     assert.equal(report.writes.length, before, '确认之前不发请求');
     await dialog.getByRole('button', { name: '确认加入' }).click();
@@ -349,15 +352,17 @@ try {
     assert.deepEqual(JSON.parse(post.body), { domain: domainOne, usageRole: 'primary' });
     await dialog.getByRole('button', { name: '关闭', exact: true }).click();
     await dialog.waitFor({ state: 'detached' });
-    await rowOf('合成作者 05').getByRole('link', { name: '查看目标' }).waitFor();
-    assert.match(await rowText('合成作者 05'), /已加入 · 巡查未开启/);
+    await rowOf('合成作者 05').getByRole('link', { name: '已加入' }).waitFor();
+    assert.match(await rowText('合成作者 05'), /已加入/);
 
     // 刚加入的作者：观察记录立即能读到关系、用途与创建经过；巡查还没开，不编下次时间。
     await page.getByRole('button', { name: '合成作者 05', exact: true }).click();
     const joinedPanel = drawer('合成作者 05');
     await joinedPanel.waitFor();
     await joinedPanel.getByRole('tab', { name: '观察记录' }).click();
-    const joinedRecord = await joinedPanel.getByRole('region', { name: '观察关系与巡查' }).innerText();
+    const joinedRegion = joinedPanel.getByRole('region', { name: '观察记录' });
+    await joinedRegion.getByText('加入本领域', { exact: true }).waitFor();
+    const joinedRecord = await joinedRegion.innerText();
     assert.match(joinedRecord, /加入本领域[\s\S]*主研究/);
     assert.match(joinedRecord, /自动巡查未开启/);
     assert.match(joinedRecord, /没有巡查记录/);
@@ -393,7 +398,7 @@ try {
     assert.equal(attempts[0].body, attempts[1].body);
     await dialog.getByRole('button', { name: '关闭', exact: true }).click();
     await dialog.waitFor({ state: 'detached' });
-    await rowOf('合成作者 06').getByRole('link', { name: '查看目标' }).waitFor();
+    await rowOf('合成作者 06').getByRole('link', { name: '已加入' }).waitFor();
   });
 
   await step('切换领域仍停在创作者页并只带 domain；后退回到上一个领域', async () => {
@@ -437,7 +442,7 @@ try {
     await shot('creators-1440-after-evidence-return');
   });
 
-  await step('主页作品：未展开的作者读到「尚未展开」，已冻结样本读到卡片与默认建议；读取不产生写请求', async () => {
+  await step('主页作品：尚无样本的作者读到空态，已冻结样本读到卡片与默认建议；读取不产生写请求', async () => {
     const before = report.writes.length;
     await openList();
     await page.getByRole('button', { name: '合成作者 27', exact: true }).click();
@@ -445,9 +450,8 @@ try {
     await empty.waitFor();
     await empty.getByRole('tab', { name: '主页作品' }).click();
     const intro = empty.getByRole('tabpanel', { name: '主页作品' });
-    await intro.getByText('先展开这位作者的主页').waitFor();
-    assert.match(await intro.innerText(), /本次不自动打开全部详情、不采集评论，也不会自动加入长期观察。/);
-    assert.ok(await intro.getByRole('button', { name: '浅看主页' }).isEnabled());
+    await intro.getByText('尚无主页样本。').waitFor();
+    assert.ok(await intro.getByRole('button', { name: '读取主页（最多 30 篇）' }).isEnabled());
     await page.keyboard.press('Escape');
     await empty.waitFor({ state: 'detached' });
 
@@ -456,18 +460,17 @@ try {
     await panel.waitFor();
     await panel.getByRole('tab', { name: '主页作品' }).click();
     const homepage = panel.getByRole('tabpanel', { name: '主页作品' });
-    await homepage.getByText(`本次主页样本 ${previewTitles.length} 篇`).waitFor();
+    await homepage.getByText(`本次样本 ${previewTitles.length} 篇`).waitFor();
     for (const title of previewTitles) await homepage.getByRole('link', { name: title, exact: true }).waitFor();
     const text = await homepage.innerText();
-    assert.match(text, /目标上限\s*30/);
     // 默认建议：本领域已见的那篇、点赞最高的一篇、另一篇对照，共 3 篇；用户可以再改。
-    assert.match(text, /已选研究\s*3/);
+    assert.match(text, /已选 3 篇/);
     assert.doesNotMatch(await panel.innerText(), UUID);
     await shot('creators-1440-homepage-snapshot');
     assert.equal(report.writes.length, before, '读取主页样本不产生写请求');
   });
 
-  await step('精选研究：确认之前不发请求；文字版只带所选两篇；回执后才显示「精选任务已建立」', async () => {
+  await step('精选研究：确认之前不发请求；文字版只带所选两篇；回执后才显示「已建立精选任务」', async () => {
     const before = report.writes.length;
     const panel = drawer(previewAuthor);
     const homepage = panel.getByRole('tabpanel', { name: '主页作品' });
@@ -480,7 +483,7 @@ try {
     assert.equal(report.writes.length, before, '确认之前不发请求');
     await confirm.getByRole('button', { name: /^仅补文字资料/ }).click();
     await confirm.getByRole('button', { name: '确认精选范围' }).click();
-    await homepage.getByText('精选任务已建立').waitFor();
+    await homepage.getByText('已建立精选任务').waitFor();
     assert.equal(report.writes.length, before + 1);
     const post = report.writes.at(-1);
     assert.equal(post.method, 'POST');
@@ -493,7 +496,7 @@ try {
     assert.deepEqual(rest, { domainRef: domainOne, ranking: null, workLimit: 2, commentMode: 'none', commentTarget: null });
     assert.match(await homepage.innerText(), /已按所选作品建立有界任务/);
     await shot('creators-1440-homepage-study');
-    await page.keyboard.press('Escape');
+    await panel.getByRole('button', { name: '关闭作者检查器' }).click();
     await panel.waitFor({ state: 'detached' });
   });
 
@@ -527,7 +530,7 @@ try {
       assert.ok(await panel.getByRole('button', { name: '加入本领域观察' }).isVisible(), '提交栏的动作始终可见');
       const opened = await shot(`creators-${width}-drawer`);
       assert.ok(opened.documentWidth <= opened.viewport, `${width} 宽度打开抽屉后不应横向溢出`);
-      await page.keyboard.press('Escape');
+      await panel.getByRole('button', { name: '关闭作者检查器' }).click();
       await panel.waitFor({ state: 'detached' });
     });
   }
@@ -541,7 +544,7 @@ try {
     await panel.waitFor();
     await panel.getByRole('tab', { name: '主页作品' }).click();
     const homepage = panel.getByRole('tabpanel', { name: '主页作品' });
-    await homepage.getByText(`本次主页样本 ${previewTitles.length} 篇`).waitFor();
+    await homepage.getByText(`本次样本 ${previewTitles.length} 篇`).waitFor();
     const box = await panel.boundingBox();
     assert.ok(box && box.x >= -1 && box.x + box.width <= 1280 + 1, '抽屉应在视口内');
     const dock = homepage.getByRole('button', { name: /^研究已选 \d+ 篇$/ });
@@ -549,7 +552,7 @@ try {
     assert.ok(await dock.isVisible(), '精选研究的动作在视口内可见');
     const layout = await shot('creators-1280-homepage');
     assert.ok(layout.documentWidth <= layout.viewport, '1280 宽度的主页作品不应横向溢出');
-    await page.keyboard.press('Escape');
+    await panel.getByRole('button', { name: '关闭作者检查器' }).click();
     await panel.waitFor({ state: 'detached' });
   });
 

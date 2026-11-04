@@ -311,3 +311,118 @@ async fn changed_bytes_can_be_transcribed_without_new_machine_reading_and_confli
         saved
     );
 }
+
+#[path = "support/standard_dossier_fixture.rs"]
+mod online_note_fixture;
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL only"]
+async fn online_note_keeps_legacy_history_without_mixing_automatic_text() {
+    let db = support::fixture::proof_database("online_note_legacy_history").await;
+    let work = online_note_fixture::scenario(
+        &db,
+        "online-note-history",
+        Some("发布正文"),
+        2,
+        false,
+        false,
+        true,
+    )
+    .await;
+    let sources: Vec<(String,Uuid)> = sqlx::query_as("SELECT o.slot_key,m.materialization_ref FROM linggan_material_media_origin o JOIN linggan_media_download_attempt a ON a.media_observation_ref=o.observation_ref JOIN linggan_media_materialization m USING(download_attempt_ref) WHERE o.content_public_ref=$1 ORDER BY o.producer_ordinal")
+        .bind(work).fetch_all(db.pool()).await.unwrap();
+    let mut old = vec![];
+    for (index, (slot, version)) in sources.iter().enumerate() {
+        let mut tx = db.pool().begin().await.unwrap();
+        let result = publish_in(
+            &mut tx,
+            NewReading {
+                content_public_ref: work,
+                unit_key: format!("image:{slot}"),
+                kind: "image".into(),
+                slot_key: Some(slot.clone()),
+                page: Some(index as i32 + 1),
+                source_version: version.to_string(),
+                source_state: "present".into(),
+                derivative_ref: None,
+                producer_ref: Some(Uuid::new_v4()),
+                generated_by: "ordinary_ocr".into(),
+                rule_version: "synthetic-legacy.v1".into(),
+                blocks: paragraph(&format!("历史机器页{index}")),
+                issues: vec![],
+                source_location: json!({"slotKey":slot,"materializationRef":version}),
+                publication: Publication::Automatic {
+                    expected_current: None,
+                },
+            },
+        )
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
+        old.push(result.reading_ref);
+    }
+    let before = research_dossier::read(&db, work).await.unwrap().unwrap();
+    assert!(research_dossier::markdown(&before).contains("历史机器页1"));
+    let first = before
+        .materials
+        .iter()
+        .find(|m| m["slotKey"] == sources[0].0)
+        .unwrap();
+    publish(&db, work, first, Some(old[0]), "在线第一页完整内容").await;
+    let after = research_dossier::read(&db, work).await.unwrap().unwrap();
+    let text = research_dossier::markdown(&after);
+    assert!(text.contains("在线第一页完整内容"));
+    assert!(!text.contains("历史机器页"));
+    assert_eq!(after.coverage["sources"]["images"]["state"], "partial");
+    assert_eq!(after.coverage["imageInventory"]["processedPages"], 1);
+    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let mut conn = db.pool().acquire().await.unwrap();
+    let historical = read_versions_in(&mut conn, &[work], &now, &old)
+        .await
+        .unwrap();
+    assert_eq!(historical[&work].len(), 2);
+    assert!(
+        historical[&work]
+            .iter()
+            .any(|m| m["blocks"].to_string().contains("历史机器页1"))
+    );
+}
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL only"]
+async fn requested_online_reading_replaces_frozen_human_reading_and_preserves_history() {
+    let db = support::fixture::proof_database("dossier_requested_replace").await;
+    let work = support::work(&db).await;
+    support::current_image_reading(&db).await;
+    let original = current(&db, work).await;
+    let request = edit(&original, "人工旧读本");
+    review_reading(&db, id(&original["ref"]), &request).await.unwrap();
+    let human = current(&db, work).await;
+    let human_ref = id(&human["currentRevisionRef"]);
+    let make = |expected| NewReading {
+        content_public_ref:work, unit_key:format!("image:{}", human["slotKey"].as_str().unwrap()),
+        kind:"image".into(), slot_key:Some(human["slotKey"].as_str().unwrap().into()), page:Some(1),
+        source_version:human["sourceVersion"].as_str().unwrap().into(), source_state:"present".into(),
+        derivative_ref:None, producer_ref:Some(Uuid::new_v4()), generated_by:"cloud_vision".into(),
+        rule_version:"synthetic-requested.v1".into(), blocks:paragraph("在线新读本"), issues:vec![],
+        source_location:json!({"slotKey":human["slotKey"]}), publication:Publication::Requested{expected_current:Some(expected)}
+    };
+    let mut tx = db.pool().begin().await.unwrap();
+    let published = publish_in(&mut tx, make(human_ref)).await.unwrap();
+    tx.commit().await.unwrap();
+    assert!(published.current);
+    let replaced = current(&db, work).await;
+    assert_eq!(replaced["currentRevisionRef"], json!(published.reading_ref));
+    assert_eq!(replaced["reading"]["adoption"], "automatic");
+    let historical: Value = sqlx::query_scalar("SELECT blocks FROM linggan_material_reading WHERE reading_ref=$1").bind(human_ref).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(historical[0]["text"], "人工旧读本");
+    let newer = edit(&replaced, "识别期间的人工修改");
+    review_reading(&db, id(&replaced["ref"]), &newer).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    assert!(!publish_in(&mut tx, make(published.reading_ref)).await.unwrap().current);
+    tx.commit().await.unwrap();
+    assert_eq!(current(&db, work).await["blocks"][0]["text"], "识别期间的人工修改");
+}

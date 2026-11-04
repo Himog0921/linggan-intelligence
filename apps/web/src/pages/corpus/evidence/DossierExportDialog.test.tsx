@@ -6,6 +6,7 @@ import { parseDossierPayload } from './dossierDecode';
 import { DOMAIN, dossierJson, REVISION, workRef } from './evidenceFixtures';
 import * as exportFiles from './exportDossier';
 import { createFetchMock, fail, ok, type FetchKit } from './testKit';
+import { ToastProvider } from './Toast';
 const path = `/api/local/work-resources/${workRef(1)}/research-dossier`;
 let kit: FetchKit;
 beforeEach(() => {
@@ -22,7 +23,7 @@ function mount(text: string) {
   const user = userEvent.setup();
   const payload = parseDossierPayload(dossierJson(1));
   const onClose = vi.fn(), onUnavailable = vi.fn();
-  const view = render(<DossierExportDialog payload={payload} domain={DOMAIN} onClose={onClose} onUnavailable={onUnavailable}/>);
+  const view = render(<ToastProvider><DossierExportDialog payload={payload} domain={DOMAIN} onClose={onClose} onUnavailable={onUnavailable}/></ToastProvider>);
   return { ...view, user, payload, onClose, onUnavailable };
 }
 it('默认解析实际 MD 文件，保留表格换行和全文；源码、复制、下载使用同一字符串', async () => {
@@ -57,7 +58,7 @@ it('弹窗冻结 revision 与 JSON，后台新 payload 不替换已打开会话�
   const view = mount('# 冻结版本');
   await screen.findByRole('article', { name: 'Markdown 排版预览' });
   const changed = parseDossierPayload(dossierJson(1, { bodyText: '后台新正文' })); changed.dossier.revision = 'new-revision';
-  view.rerender(<DossierExportDialog payload={changed} domain="changed" onClose={view.onClose} onUnavailable={view.onUnavailable}/>);
+  view.rerender(<ToastProvider><DossierExportDialog payload={changed} domain="changed" onClose={view.onClose} onUnavailable={view.onUnavailable}/></ToastProvider>);
   await view.user.click(screen.getByRole('button', { name: 'JSON' }));
   expect(screen.queryByRole('button', { name: '源码' })).not.toBeInTheDocument();
   const json = screen.getByLabelText('JSON 源码').textContent;
@@ -70,7 +71,7 @@ it('弹窗冻结 revision 与 JSON，后台新 payload 不替换已打开会话�
 it('409 阻止混合版本导出，不把旧 JSON 和新 MD 拼在一起', async () => {
   kit.route('GET', path, fail(409, 'dossier_revision_changed'));
   const user = userEvent.setup();
-  render(<DossierExportDialog payload={parseDossierPayload(dossierJson(1))} domain={DOMAIN} onClose={vi.fn()} onUnavailable={vi.fn()}/>);
+  render(<ToastProvider><DossierExportDialog payload={parseDossierPayload(dossierJson(1))} domain={DOMAIN} onClose={vi.fn()} onUnavailable={vi.fn()}/></ToastProvider>);
   await screen.findByText(/底稿版本已变化/);
   expect(screen.getByRole('button', { name: '下载 .md' })).toBeDisabled();
   await user.click(screen.getByRole('button', { name: 'JSON' }));
@@ -87,7 +88,7 @@ it('失去来源权限通知面板撤回，复制失败不会给成功提示', a
   expect(view.onClose).toHaveBeenCalledOnce();
   view.unmount();
   const unavailable = vi.fn(); kit.route('GET', path, fail(403, 'source_restricted'));
-  render(<DossierExportDialog payload={view.payload} domain={DOMAIN} onClose={vi.fn()} onUnavailable={unavailable}/>);
+  render(<ToastProvider><DossierExportDialog payload={view.payload} domain={DOMAIN} onClose={vi.fn()} onUnavailable={unavailable}/></ToastProvider>);
   await waitFor(() => expect(unavailable).toHaveBeenCalledOnce());
   expect(screen.getByRole('button', { name: '下载 .md' })).toBeDisabled();
 });

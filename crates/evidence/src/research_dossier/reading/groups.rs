@@ -1,4 +1,5 @@
 //! Reference-only presentation groups over one frozen canonical block order.
+use super::super::content::pure_tags;
 use super::super::{ResearchDossier, content};
 use crate::creator_discovery::hash;
 use serde::Serialize;
@@ -16,6 +17,7 @@ struct Located<'a> {
 #[serde(rename_all = "snake_case")]
 enum Mode {
     Blocks,
+    Heading,
     Paragraph,
     TranscriptParagraph,
     List,
@@ -179,107 +181,12 @@ pub(super) fn sections(dossier: &ResearchDossier) -> Value {
         });
     }
     for section in &mut sections {
-        section.gaps = positioned_gaps(section, dossier, &located);
+        section.gaps.clear();
     }
     serde_json::to_value(sections).expect("reference groups are serializable")
 }
 
 /// Text coverage differs from source acquisition: a present image can still lack a reading.
-pub(in crate::research_dossier) fn image_text_gap_pages(
-    dossier: &ResearchDossier,
-) -> BTreeSet<u64> {
-    let whole_images = dossier.selection["mode"] != "explicit"
-        || dossier.selection["kinds"]
-            .as_array()
-            .is_some_and(|kinds| kinds.contains(&json!("image")));
-    let selected_pages: BTreeSet<_> = dossier.selection["imagePages"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_u64)
-        .chain(
-            dossier
-                .materials
-                .iter()
-                .filter(|unit| {
-                    unit["kind"] == "image"
-                        && dossier.selection["unitRefs"]
-                            .as_array()
-                            .is_some_and(|refs| refs.contains(&unit["ref"]))
-                })
-                .filter_map(|unit| unit["page"].as_u64()),
-        )
-        .collect();
-    dossier.coverage["imageInventory"]["missingPages"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_u64)
-        .chain(
-            dossier
-                .materials
-                .iter()
-                .filter(|unit| {
-                    unit["kind"] == "image"
-                        && !matches!(
-                            unit["sourceState"].as_str(),
-                            Some("known_empty" | "not_applicable")
-                        )
-                        && !unit["blocks"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .any(content::has_source_text)
-                })
-                .filter_map(|unit| unit["page"].as_u64().filter(|page| *page > 0)),
-        )
-        .filter(|page| whole_images || selected_pages.contains(page))
-        .collect()
-}
-
-fn positioned_gaps(
-    section: &Section,
-    dossier: &ResearchDossier,
-    located: &BTreeMap<&str, Located<'_>>,
-) -> Vec<SectionGap> {
-    if section.kind != "images" || dossier.coverage["imageInventory"]["unknownOrder"] == true {
-        return vec![];
-    }
-    let mut gaps: Vec<SectionGap> = vec![];
-    for page in image_text_gap_pages(dossier) {
-        let next = section
-            .groups
-            .iter()
-            .find(|group| {
-                group.block_refs.iter().any(|reference| {
-                    located.get(reference.as_str()).is_some_and(|entry| {
-                        entry.material["page"].as_u64().is_some_and(|p| p > page)
-                    })
-                })
-            })
-            .map(|group| group.reference.clone());
-        if next.is_none()
-            && section
-                .groups
-                .last()
-                .and_then(|group| group.block_refs.last())
-                .and_then(|r| located.get(r.as_str()))
-                .is_none_or(|entry| entry.material["page"].as_u64().is_none())
-        {
-            continue;
-        }
-        if let Some(gap) = gaps.iter_mut().find(|gap| gap.before_group_ref == next) {
-            gap.missing_pages.push(page);
-        } else {
-            gaps.push(SectionGap {
-                before_group_ref: next,
-                missing_pages: vec![page],
-            });
-        }
-    }
-    gaps
-}
-
 fn automatic_ordinary_ocr(material: &Value) -> bool {
     material["kind"] == "image"
         && material["reading"]["generatedBy"] == "ordinary_ocr"
@@ -292,34 +199,18 @@ fn continuation(
     current: Located<'_>,
     dossier: &ResearchDossier,
 ) -> Option<(Mode, Option<&'static str>)> {
+    if previous.block["contentType"] != current.block["contentType"]
+        || previous.block["regionRef"] != current.block["regionRef"]
+    {
+        return None;
+    }
     if (previous.material["kind"] == "image" || current.material["kind"] == "image")
         && (!automatic_ordinary_ocr(previous.material) || !automatic_ordinary_ocr(current.material))
     {
         return None;
     }
-    let page_order_only = |material: &Value| {
-        material["issues"].as_array().is_none_or(|issues| {
-            issues
-                .iter()
-                .all(|issue| issue["code"] == "page_order_unknown")
-        })
-    };
-    if previous.material["kind"] == "image"
-        && previous.material["ref"] == current.material["ref"]
-        && role(previous.block) == role(current.block)
-        && clean(previous.block)
-        && clean(current.block)
-        && page_order_only(current.material)
-        && ((previous.block["kind"] == "paragraph" && current.block["kind"] == "paragraph")
-            || wrapped_heading_prose(previous, current, group.mode))
-        && dossier.selection["blockRefs"]
-            .as_array()
-            .is_none_or(Vec::is_empty)
-        && matches!(group.mode, Mode::Blocks | Mode::Paragraph)
-        && (adjacent_lines(previous.block, current.block)
-            || same_line(previous.block, current.block))
-    {
-        return Some((Mode::Paragraph, Some(joiner(previous.block, current.block))));
+    if let Some(joined) = same_image_continuation(group, previous, current, dossier) {
+        return Some(joined);
     }
     if role(previous.block) != role(current.block)
         || !clean(previous.block)
@@ -402,6 +293,79 @@ fn continuation(
     }
 }
 
+fn same_image_continuation(
+    group: &Group,
+    previous: Located<'_>,
+    current: Located<'_>,
+    dossier: &ResearchDossier,
+) -> Option<(Mode, Option<&'static str>)> {
+    if previous.material["ref"] == current.material["ref"] {
+        let (start, end) = (
+            previous.index.min(current.index),
+            previous.index.max(current.index),
+        );
+        if previous.material["blocks"]
+            .as_array()
+            .is_some_and(|blocks| {
+                blocks[start + 1..end]
+                    .iter()
+                    .any(|block| !content::has_source_text(block))
+            })
+        {
+            return None;
+        }
+    }
+    if super::effective::automatic_cover(current.material)
+        && previous.material["ref"] == current.material["ref"]
+        && previous.block["kind"] == "heading"
+        && current.block["kind"] == "heading"
+        && matches!(group.mode, Mode::Blocks | Mode::Heading)
+        && !starts_step(text(previous.block))
+        && !starts_step(text(current.block))
+        && role(previous.block) == role(current.block)
+        && clean(previous.block)
+        && clean(current.block)
+        && adjacent_lines(previous.block, current.block)
+        && dossier.selection["blockRefs"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+    {
+        let separator = if text(previous.block)
+            .ends_with(['，', '。', '！', '？', '：', ',', '.', '!', '?', ':'])
+        {
+            ""
+        } else {
+            "，"
+        };
+        return Some((Mode::Heading, Some(separator)));
+    }
+    let page_order_only = |material: &Value| {
+        material["issues"].as_array().is_none_or(|issues| {
+            issues
+                .iter()
+                .all(|issue| issue["code"] == "page_order_unknown")
+        })
+    };
+    if previous.material["kind"] == "image"
+        && previous.material["ref"] == current.material["ref"]
+        && role(previous.block) == role(current.block)
+        && clean(previous.block)
+        && clean(current.block)
+        && page_order_only(current.material)
+        && ((previous.block["kind"] == "paragraph" && current.block["kind"] == "paragraph")
+            || wrapped_heading_prose(previous, current, group.mode))
+        && dossier.selection["blockRefs"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
+        && matches!(group.mode, Mode::Blocks | Mode::Paragraph)
+        && (adjacent_lines(previous.block, current.block)
+            || same_line(previous.block, current.block))
+    {
+        return Some((Mode::Paragraph, Some(joiner(previous.block, current.block))));
+    }
+    None
+}
+
 // A tilted printed line may arrive as right/middle/left fragments. Correct only
 // touching fragments on that one baseline, keeping all source blocks unchanged.
 fn ordered_blocks(material: &Value) -> Vec<&Value> {
@@ -474,7 +438,14 @@ fn wrapped_heading_prose(previous: Located<'_>, current: Located<'_>, mode: Mode
     {
         return false;
     }
-    if mode == Mode::Paragraph {
+    if starts_step(text(current.block)) {
+        return false;
+    }
+    if mode == Mode::Paragraph || unfinished_clause(text(previous.block)) {
+        return true;
+    }
+    // An instructional heading may wrap before its final object ("只留今晚").
+    if starts_step(text(previous.block)) && text(previous.block).contains(['：', ':']) {
         return true;
     }
     let Some(blocks) = previous.material["blocks"].as_array() else {
@@ -494,6 +465,17 @@ fn wrapped_heading_prose(previous: Located<'_>, current: Located<'_>, mode: Mode
         last = next;
     }
     false
+}
+
+fn starts_step(value: &str) -> bool {
+    let start = value.trim_start();
+    let label = start.split(['：', ':']).next().unwrap_or(start);
+    (label.chars().count() <= 12 && label.contains('第') && label.ends_with(['步', '点', '条']))
+        || (start.chars().next().is_some_and(|c| c.is_ascii_digit())
+            && start
+                .chars()
+                .take(4)
+                .any(|c| matches!(c, '.' | '、' | '．')))
 }
 
 /// Join wrapped lines on one image, stopping at paragraph space or a column boundary.
@@ -516,7 +498,7 @@ pub(super) fn adjacent_lines(left: &Value, right: &Value) -> bool {
         && (a[0] - b[0]).abs() <= 0.04
         && b[3] >= a[3] * 0.6
         && b[3] <= a[3] * 1.6
-        && gap >= -0.005
+        && gap >= -a[3].min(b[3]) * 0.25
         && gap <= a[3].max(b[3]) * 1.2
 }
 
@@ -627,22 +609,6 @@ fn tag_label(value: &str) -> &str {
         .strip_suffix("[话题]")
         .unwrap_or(value.trim())
         .trim()
-}
-
-fn pure_tags(mut value: &str) -> Option<Vec<String>> {
-    let mut tags = vec![];
-    value = value.trim();
-    while !value.is_empty() {
-        value = value.strip_prefix('#')?;
-        let end = value.find('#')?;
-        let label = tag_label(&value[..end]);
-        if label.is_empty() {
-            return None;
-        }
-        tags.push(label.to_owned());
-        value = value[end + 1..].trim_start();
-    }
-    (!tags.is_empty()).then_some(tags)
 }
 
 fn equivalent_tags(body: Located<'_>, tags: Located<'_>) -> bool {

@@ -98,7 +98,7 @@ const listReads = () => requestsTo('GET', /^\/api\/local\/work-resources$/).leng
 const rows = () => page.locator('li[data-work-ref], tbody tr[data-work-ref]');
 const rowOf = title => page.locator('[data-work-ref]').filter({ has: page.getByRole('button', { name: title, exact: true }) });
 const inspector = () => page.locator('aside[data-width]');
-const panel = name => page.getByRole('tabpanel', { name });
+const panel = name => page.getByRole('tabpanel', { name: name === '研究底稿' ? /^研究底稿(?:，|$)/ : name });
 const search = () => page.getByRole('searchbox', { name: '检索作品与证据' });
 const open = async (extra = '', url = base) => {
   await page.goto(`${url}${extra}`);
@@ -339,25 +339,24 @@ try {
     // Research Dossier v2 的正文是连续完整读本，不能由展示层折叠而隐藏尾段。
     assert.equal(await reading.getByRole('button', { name: '展开全文' }).count(), 0);
     await reading.getByText('合成长文结尾标记。').waitFor();
-    // 采集记录（Mog 2026-10-23）：先给观察记录、复观测、评论深采；技术事实等收进最下方默认折叠的「技术信息」，
-    // 展开后技术事实仍各自折叠，再展开才有稳定引用与技术码。
+    // 观察记录内提供复观测，评论采集独立成区；来源编号仅在默认折叠的采集详情中显示。
     await page.getByRole('tab', { name: '采集记录' }).click();
     const trace = panel('采集记录');
-    for (const heading of ['观察记录', '复观测', '评论深采']) await trace.getByRole('heading', { name: heading }).waitFor();
-    assert.match(await trace.innerText(), /这篇笔记被观察过 \d+ 次，最近一次 \d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
-    const technical = trace.locator('xpath=.//details[summary[normalize-space()="技术信息（排查用）"]]');
+    for (const heading of ['观察记录', '评论采集']) await trace.getByRole('heading', { name: heading }).waitFor();
+    assert.match(await trace.getByRole('heading', { name: /^观察记录/ }).textContent(), /\d+ 次观察记录/);
+    const observations = trace.locator('[data-observation-records]');
+    assert.match(await observations.locator('time').first().innerText(), /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+    await observations.getByRole('table', { name: '每次观察读到的数字，最近一次在最上面' }).waitFor();
+    const technical = trace.locator('xpath=.//details[summary[normalize-space()="采集详情"]]');
     assert.equal(await technical.evaluate(node => node.open), false);
     assert.doesNotMatch(await trace.innerText(), UUID);
     await technical.locator('xpath=./summary').click();
-    const facts = trace.locator('xpath=.//details[summary[normalize-space()="技术事实"]]');
-    assert.equal(await facts.evaluate(node => node.open), false);
-    await facts.locator('xpath=./summary').click();
-    assert.ok((await facts.innerText()).includes(rich));
+    assert.ok((await technical.innerText()).includes(rich));
     await shot('evidence-1440-rich-overview');
     // 旧深链映射到最接近的三个标签，不显示已拆除的旧标签名。
     await open(`&work=${rich}&tab=evidence`);
-    await page.getByRole('tab', { name: '研究底稿' }).waitFor();
-    assert.equal(await page.getByRole('tab', { name: '研究底稿' }).getAttribute('aria-selected'), 'true');
+    await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).waitFor();
+    assert.equal(await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).getAttribute('aria-selected'), 'true');
     await panel('研究底稿').getByRole('article', { name: '连续阅读文档' }).waitFor();
     await open(`&work=${rich}&tab=materials`);
     assert.equal(await page.getByRole('tab', { name: '采集记录' }).getAttribute('aria-selected'), 'true');
@@ -365,7 +364,7 @@ try {
     await open(`&work=${rich}&tab=trace`);
     assert.equal(await page.getByRole('tab', { name: '采集记录' }).getAttribute('aria-selected'), 'true');
     // 每个标签点击都写入规范地址，并替换历史（不让标签切换堆满后退栈）。
-    await page.getByRole('tab', { name: '研究底稿' }).click();
+    await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).click();
     await page.waitForURL(url => url.searchParams.get('tab') === 'dossier');
   });
 
@@ -478,7 +477,7 @@ try {
     const snapshot = (await response.json()).dossier;
     assert.equal(snapshot.contract, 'research-dossier.v2');
     assert.equal(requestsTo('GET', /research-dossier$/).length, before + 1, '作品正文读取 canonical 读本一次');
-    await page.getByRole('tab', { name: '研究底稿' }).click();
+    await page.getByRole('tab', { name: /^研究底稿(?:，|$)/ }).click();
     const dossier = panel('研究底稿');
     const document = dossier.getByRole('article', { name: '连续阅读文档' });
     await document.waitFor();
@@ -531,10 +530,17 @@ try {
     const [json] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: '下载 .json', exact: true }).click()]);
     assert.match(json.suggestedFilename(), /\.json$/);
     const exported = JSON.parse(await readFile(await json.path(), 'utf8'));
-    assert.deepEqual(exported, frozen, 'JSON原样导出同一canonical快照，没有第二份正文');
+    assert.equal(exported.title, frozen.note.displayTitle);
+    assert.equal(exported.sourceUrl, frozen.note.sourceUrl);
+    const included = new Set(frozen.readingView.sections.flatMap(section => section.groups.flatMap(group => group.blockRefs)));
+    const expectedText = frozen.materials.flatMap(unit => unit.blocks.filter(block => included.has(block.ref)).map(block => block.text).filter(Boolean));
+    const exportedText = exported.materials.flatMap(unit => unit.content.map(block => block.text).filter(Boolean));
+    assert.deepEqual(exportedText, expectedText, '精简JSON完整保留同一冻结快照的正文和顺序');
+    assert.equal(exported.revision, undefined);
+    assert.equal(exported.readingView, undefined);
     assert.equal(report.writes.length, writesBefore, '阅读与导出没有写请求');
     report.dossier = { workRef: rich, asOf: frozen.asOf, snapshotRevision: frozen.revision,
-      jsonRevision: exported.revision, markdownRevision: pinnedUrl.searchParams.get('expectedRevision'),
+      jsonSourceRevision: frozen.revision, markdownRevision: pinnedUrl.searchParams.get('expectedRevision'),
       groupRefs: renderedGroups, markdownBodyParagraphs: paragraphs.length, writes: report.writes.length - writesBefore };
     await dialog.getByRole('button', { name: '关闭导出窗口' }).click();
     await dialog.waitFor({ state: 'hidden' });
@@ -547,17 +553,18 @@ try {
     await page.getByRole('tab', { name: '采集记录' }).click();
     const section = panel('采集记录');
     const writes = report.writes.length;
-    await section.getByRole('button', { name: '立即复观测' }).click();
-    const dialog = page.getByRole('dialog', { name: '确认立即复观测' });
+    await section.getByRole('button', { name: '复观测', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '确认复观测' });
     await dialog.waitFor();
     assert.match(await dialog.innerText(), /提交后不能撤销/);
     assert.equal(await page.evaluate(() => document.activeElement?.textContent), '取消', '焦点默认在「取消」');
     await shot('evidence-1440-reobserve-confirm');
     await dialog.getByRole('button', { name: '取消' }).click();
     assert.equal(report.writes.length, writes, '取消不发请求');
-    await section.getByRole('button', { name: '立即复观测' }).click();
-    await dialog.getByRole('button', { name: '确认提交' }).click();
-    await section.getByText(/已入队：复观测工单已形成，尚未由工位认领/).waitFor();
+    await section.getByRole('button', { name: '复观测', exact: true }).click();
+    await dialog.getByRole('button', { name: '提交复观测' }).click();
+    await page.getByRole('status').getByText('复观测已提交，等待执行', { exact: true }).waitFor();
+    await section.getByText('等待执行', { exact: true }).waitFor();
     assert.equal(await section.getByRole('button', { name: '复观测已入队' }).isDisabled(), true);
     await writesTotal(writes + 1);
     assert.equal(report.writes.at(-1).status, 200);
@@ -566,17 +573,19 @@ try {
     await open(`&work=${reobserve}`);
     await waitInspector(TITLE.reobserve);
     await page.getByRole('tab', { name: '采集记录' }).click();
-    await section.getByRole('button', { name: '立即复观测' }).click();
-    await dialog.getByRole('button', { name: '确认提交' }).click();
-    await section.getByText(/已合并到覆盖当前作品的在途工单/).waitFor();
+    await section.getByRole('button', { name: '复观测', exact: true }).click();
+    const mergedResponse = page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === `/api/local/work-resources/${reobserve}/reobserve`);
+    await dialog.getByRole('button', { name: '提交复观测' }).click();
+    assert.equal((await (await mergedResponse).json()).operation.admission, 'MERGE');
+    await page.getByRole('status').getByText('复观测已提交，等待执行', { exact: true }).waitFor();
     await writesTotal(writes + 2);
     assert.equal(requestsTo('GET', /reobserve\/[^/]+$/).length, 0, '请求时没有租约，所以没有状态读取');
     // 不可用：没有关联授权的作品只说原因，不提供按钮。
     await open(`&work=${plain}`);
     await waitInspector(TITLE.plain);
     await page.getByRole('tab', { name: '采集记录' }).click();
-    await panel('采集记录').getByText(/这篇笔记现在不能复观测：它不在任何仍有效的观察授权里/).first().waitFor();
-    assert.equal(await panel('采集记录').getByRole('button', { name: '立即复观测' }).count(), 0);
+    await panel('采集记录').getByText(/没有有效的观察授权/).first().waitFor();
+    assert.equal(await panel('采集记录').getByRole('button', { name: '复观测', exact: true }).count(), 0);
   });
 
   // ⑨b 评论深采（Mog 2026-10-23）
@@ -586,43 +595,43 @@ try {
     await page.getByRole('tab', { name: '采集记录' }).click();
     const section = panel('采集记录');
     const writes = report.writes.length;
-    await section.getByRole('button', { name: '采全部评论' }).click();
-    const dialog = page.getByRole('dialog', { name: '确认评论深采' });
+    await section.getByRole('button', { name: '采集评论', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '确认评论采集' });
     await dialog.waitFor();
-    assert.match(await dialog.innerText(), /让合格的工位真实访问平台/);
+    assert.match(await dialog.innerText(), /从评论区开头采集当前可见的评论与回复，重复内容不重复计数/);
     assert.equal(await page.evaluate(() => document.activeElement?.textContent), '取消', '焦点默认在「取消」');
     await shot('evidence-1440-deep-comments-confirm');
     await dialog.getByRole('button', { name: '取消' }).click();
     assert.equal(report.writes.length, writes, '取消不发请求');
-    await section.getByRole('button', { name: '采全部评论' }).click();
-    await dialog.getByRole('button', { name: '确认提交' }).click();
-    await section.getByText('已提交', { exact: true }).waitFor();
-    await section.getByText('等待派发 · 本轮采回 0 条 · 首次新增 0 条', { exact: true }).waitFor();
+    await section.getByRole('button', { name: '采集评论', exact: true }).click();
+    await dialog.getByRole('button', { name: '提交采集' }).click();
+    await section.getByRole('button', { name: '评论采集已提交', exact: true }).waitFor();
+    await section.getByText('等待派发', { exact: true }).waitFor();
     await writesTotal(writes + 1);
     assert.equal(report.writes.at(-1).path, '/api/collection/runs');
     assert.equal(report.writes.at(-1).status, 200);
-    assert.equal(await section.getByRole('button', { name: '评论深采已提交' }).isDisabled(), true);
-    assert.match(await section.getByRole('link', { name: '在采集任务里查看' }).getAttribute('href'), /^\/collection\/tasks\?domain=[0-9a-f-]{36}&run=[0-9a-f-]{36}$/);
+    assert.equal(await section.getByRole('button', { name: '评论采集已提交' }).isDisabled(), true);
+    assert.match(await section.getByRole('link', { name: '查看采集任务' }).getAttribute('href'), /^\/collection\/tasks\?domain=[0-9a-f-]{36}&run=[0-9a-f-]{36}$/);
     assert.doesNotMatch(await section.innerText(), UUID);
     await shot('evidence-1440-deep-comments-submitted');
     await page.reload();
     await waitInspector(TITLE.rich);
     await page.getByRole('tab', { name: '采集记录' }).click();
-    await panel('采集记录').getByRole('button', { name: '评论深采已提交' }).waitFor();
-    assert.equal(await panel('采集记录').getByRole('button', { name: '评论深采已提交' }).isDisabled(), true);
+    await panel('采集记录').getByRole('button', { name: '评论采集已提交' }).waitFor();
+    assert.equal(await panel('采集记录').getByRole('button', { name: '评论采集已提交' }).isDisabled(), true);
     assert.equal(report.writes.length, writes + 1, '刷新恢复原回执，不重新 POST');
     // 采指定条数：另一篇作品选 40 条，请求带 up_to 与条数（库内另核）。
     await open(`&work=${video}`);
     await waitInspector(TITLE.video);
     await page.getByRole('tab', { name: '采集记录' }).click();
-    await section.getByRole('radio', { name: /采指定条数/ }).check();
+    await section.getByRole('radio', { name: '指定条数', exact: true }).check();
     const count = section.getByRole('spinbutton', { name: '条数' });
     await count.fill('40');
-    await section.getByRole('button', { name: '采 40 条评论' }).click();
+    await section.getByRole('button', { name: '采集评论', exact: true }).click();
     await dialog.waitFor();
-    assert.match(await dialog.innerText(), /把评论和回复采到 40 条就停/);
-    await dialog.getByRole('button', { name: '确认提交' }).click();
-    await section.getByText('已提交', { exact: true }).waitFor();
+    assert.match(await dialog.innerText(), /最多新增 40 条不重复评论（含回复），到底即停/);
+    await dialog.getByRole('button', { name: '提交采集' }).click();
+    await section.getByRole('button', { name: '评论采集已提交', exact: true }).waitFor();
     await writesTotal(writes + 2);
     assert.equal(report.writes.at(-1).path, '/api/collection/runs');
     assert.equal(report.writes.at(-1).status, 200);

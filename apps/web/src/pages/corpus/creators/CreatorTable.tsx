@@ -1,6 +1,6 @@
-import { useEffect, useRef, type RefObject } from 'react';
-import { Avatar, Cover } from './Media';
-import { authorName, FIRST_SEEN_LABELS, observedText, preservedLifecycle, relevanceLabel, targetHref, workTitle } from './creatorsPresent';
+import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
+import { Avatar } from './Media';
+import { analysisStatus, authorName, FIRST_SEEN_LABELS, targetHref, workTitle } from './creatorsPresent';
 import {
   formatCount,
   hasWorkFilter,
@@ -10,29 +10,15 @@ import {
   type LinkContext,
   type SortKey,
 } from './creatorsQuery';
-import type { CreatorItem, CreatorList } from './creatorsTypes';
+import type { CreatorItem, CreatorList, Observation } from './creatorsTypes';
+import { useTitleTooltip } from '../evidence/TitleTooltip';
 import { useJoinPending } from './useCreatorWrites';
+import { Metric } from './Metric';
 import type { WorkResources } from './useWorkResources';
+import { WorkPreviewCell } from './WorkPreviewTip';
 import styles from './CreatorsPage.module.css';
 
 export type DrawerTab = 'overview' | 'works' | 'evidence' | 'profile';
-
-/** 数字单元：≥1 万缩写成「x.x万」，精确值始终在悬停里；未知是「—」，不是 0。 */
-export function Metric({ value, className }: { value: number | null; className?: string }) {
-  if (value === null) return <span className={className} title="未知">—</span>;
-  const abbreviated = value >= 10_000 ? `${(value / 10_000).toFixed(1).replace(/\.0$/, '')}万` : formatCount(value);
-  return (
-    <span className={className} title={formatCount(value)}>
-      {abbreviated}
-    </span>
-  );
-}
-
-/** `2026-09-12` → `09.12`；格式不对时原样显示，不改写。 */
-function shortDay(date: string): string {
-  const [, month, day] = date.split('-');
-  return month && day ? `${month}.${day}` : date;
-}
 
 interface CreatorTableProps {
   data: CreatorList;
@@ -52,6 +38,114 @@ interface CreatorTableProps {
   onSelectPage: (checked: boolean) => void;
 }
 
+/** 发现词只显示第一个；多个时完整列表悬停可见、键盘可聚焦取得。 */
+function KeywordCell({ item }: { item: CreatorItem }) {
+  const list = item.discoveryKeywords;
+  const keyword = list[0] ?? '';
+  const all = list.join('、');
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip, truncated } = useTitleTooltip<HTMLSpanElement>(all || '未记录发现词', 'width', {
+    always: list.length > 1,
+    delay: 250,
+    maxWidth: 320,
+  });
+  const focusable = list.length > 1 || truncated;
+  return (
+    <span
+      ref={anchorRef}
+      className={`${styles.ellipsis} ${keyword ? styles.keyword : styles.secondary}`}
+      tabIndex={focusable ? 0 : undefined}
+      aria-label={focusable ? all : undefined}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={onFocus}
+      onBlur={onBlur}
+    >
+      {keyword || '未记录发现词'}
+      {tooltip}
+    </span>
+  );
+}
+
+/**
+ * 单行单元格里的按需说明：可见内容只有一行，完整说明放在悬停/键盘提示里。
+ * 内部有链接时由链接的聚焦带出提示，不额外增加 Tab 停靠点。
+ */
+function TipWrap({ text, children, focusable = false, className }: { text: string; children: ReactNode; focusable?: boolean; className?: string }) {
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip } = useTitleTooltip<HTMLSpanElement>(text, 'width', { always: true, delay: 250, maxWidth: 320 });
+  return (
+    <span
+      ref={anchorRef}
+      className={className}
+      tabIndex={focusable ? 0 : undefined}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={onFocus}
+      onBlur={onBlur}
+    >
+      {children}
+      {tooltip}
+    </span>
+  );
+}
+
+/** 内容方向只占一行：显示第一个主题，其余数量与完整列表按需提示；读取失败不写成「—」。 */
+function Topics({ item }: { item: CreatorItem }) {
+  const topics = item.topicHints.filter(Boolean);
+  const text = topics.join('、');
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip, truncated } = useTitleTooltip<HTMLSpanElement>(text || '无内容方向', 'width', {
+    always: topics.length > 1,
+    delay: 250,
+    maxWidth: 320,
+  });
+  if (topics.length === 0) {
+    if (item.authorAnalysis.state === 'failed') {
+      return (
+        <TipWrap text={analysisStatus(item.authorAnalysis, item.focus.value).text} focusable>
+          <span className={styles.secondary}>研究未完成</span>
+        </TipWrap>
+      );
+    }
+    return <span className={styles.secondary}>—</span>;
+  }
+  const [first, ...rest] = topics;
+  const focusable = rest.length > 0 || truncated;
+  return (
+    <span
+      ref={anchorRef}
+      className={styles.topicTags}
+      tabIndex={focusable ? 0 : undefined}
+      aria-label={focusable ? `内容方向：${text}` : undefined}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={onFocus}
+      onBlur={onBlur}
+    >
+      <span className={styles.topicTag}>{first}</span>
+      {rest.length > 0 ? <span className={styles.topicMoreText}>+{formatCount(rest.length)}</span> : null}
+      {tooltip}
+    </span>
+  );
+}
+
+function HeaderInfo({ text }: { text: string }) {
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, tooltip } = useTitleTooltip<HTMLSpanElement>(text, 'width', { always: true, delay: 250, maxWidth: 320 });
+  return (
+    <span
+      ref={anchorRef}
+      className={styles.headInfo}
+      tabIndex={0}
+      role="note"
+      aria-label={text}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={onFocus}
+      onBlur={onBlur}
+    >
+      {tooltip}
+    </span>
+  );
+}
+
 export function CreatorTable(props: CreatorTableProps) {
   const { data, query, scrollRef, busy, onSort, selectedKeys, onSelectPage } = props;
   const filtered = hasWorkFilter(query);
@@ -63,11 +157,12 @@ export function CreatorTable(props: CreatorTableProps) {
         <caption className="v7-sr-only">当前领域的创作者、发现来源、作品判断与观察关系</caption>
         <colgroup>
           <col className={styles.colAuthor} />
+          <col className={styles.colFollowers} />
           <col className={styles.colKeyword} />
           <col className={styles.colDirection} />
-          <col className={styles.colCount} />
+          <col className={styles.colRelated} />
           <col className={styles.colLikes} />
-          <col />
+          <col className={styles.colWork} />
           <col className={styles.colFirstSeen} />
           <col className={styles.colObservation} />
         </colgroup>
@@ -79,6 +174,7 @@ export function CreatorTable(props: CreatorTableProps) {
                 创作者
               </span>
             </th>
+            <th scope="col" className={styles.number}>粉丝</th>
             <th scope="col">发现词</th>
             <th scope="col">内容方向</th>
             <th scope="col" className={styles.number} aria-sort={query.sort === 'related_works' ? 'descending' : undefined}>
@@ -86,15 +182,13 @@ export function CreatorTable(props: CreatorTableProps) {
                 {filtered ? '命中相关' : '相关作品'}
               </button>
             </th>
-            <th
-              scope="col"
-              className={styles.number}
-              aria-sort={query.sort === 'high_likes' ? 'descending' : undefined}
-              title={filtered ? '当前命中作品中点赞最高的一篇（含待判定）' : '本领域已取得作品中点赞最高的一篇（含待判定，不含已判无关）'}
-            >
-              <button type="button" onClick={() => onSort('high_likes')}>
-                {filtered ? '命中最高赞' : '领域最高赞'}
-              </button>
+            <th scope="col" className={styles.number} aria-label={filtered ? '命中最高赞' : '领域最高赞'} aria-sort={query.sort === 'high_likes' ? 'descending' : undefined}>
+              <span className={styles.headInfoWrap}>
+                <button type="button" onClick={() => onSort('high_likes')}>
+                  {filtered ? '命中最高赞' : '领域最高赞'}
+                </button>
+                <HeaderInfo text={filtered ? '当前命中作品中点赞最高的一篇（含待判定）' : '本领域已取得作品中点赞最高的一篇（含待判定，不含已判无关）'} />
+              </span>
             </th>
             <th scope="col">作品预览</th>
             <th scope="col" aria-sort={query.sort === 'first_seen' ? 'descending' : undefined}>
@@ -106,9 +200,7 @@ export function CreatorTable(props: CreatorTableProps) {
           </tr>
         </thead>
         <tbody>
-          {data.items.map(item => (
-            <CreatorRow key={item.creatorKey} item={item} {...props} filtered={filtered} />
-          ))}
+          {data.items.map(item => <CreatorRow key={item.creatorKey} item={item} {...props} filtered={filtered} />)}
         </tbody>
       </table>
       {data.total === 0 ? (
@@ -143,18 +235,69 @@ function PageSelect({ all, some, onChange }: { all: boolean; some: boolean; onCh
   );
 }
 
+function CreatorName({ item, onOpen, sourceName }: { item: CreatorItem; onOpen: (creatorKey: string) => void; sourceName: boolean }) {
+  const name = authorName(item);
+  const hint = sourceName ? `${name}（名称来自观察目标档案）` : name;
+  const { anchorRef, onEnter, onLeave, onFocus, onBlur, onPointerDown, tooltip } = useTitleTooltip<HTMLButtonElement>(hint, 'width', { always: sourceName, delay: 250, maxWidth: 320 });
+  return (
+    <button
+      ref={anchorRef}
+      type="button"
+      className={`${styles.link} ${styles.name}`}
+      data-author-key={item.creatorKey}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onFocus={onFocus}
+      onBlur={onBlur}
+      onPointerDown={onPointerDown}
+      onClick={() => onOpen(item.creatorKey)}
+    >
+      {name}
+      {tooltip}
+    </button>
+  );
+}
+
+/** 相关作品只显示一个数；待判断与范围说明按需提示，不再是第二行。 */
+function RelatedCell({ item, filtered, matched, href }: { item: CreatorItem; filtered: boolean; matched: number; href: string }) {
+  const note = filtered
+    ? item.unknownRelevanceWorkCount > 0
+      ? `范围内共 ${formatCount(item.relatedWorkCount)} 篇；另有 ${formatCount(item.unknownRelevanceWorkCount)} 篇待判断`
+      : `范围内共 ${formatCount(item.relatedWorkCount)} 篇`
+    : item.unknownRelevanceWorkCount > 0
+      ? `另有 ${formatCount(item.unknownRelevanceWorkCount)} 篇待判断`
+      : '';
+  const body = matched > 0
+    ? <a className={styles.metric} href={href} data-return-key={item.creatorKey}>{formatCount(matched)}</a>
+    : <span className={styles.metric}>{formatCount(matched)}</span>;
+  return note ? <TipWrap text={note} focusable={matched === 0}>{body}</TipWrap> : body;
+}
+
+/** 首次发现只显示日期；时间精度与完整时间在提示里。 */
+function FirstSeenCell({ item }: { item: CreatorItem }) {
+  const date = item.firstSeenDate ?? item.firstSeenDisplay;
+  const label = item.firstSeenPrecision ? FIRST_SEEN_LABELS[item.firstSeenPrecision] : undefined;
+  const full = item.firstSeenDisplay ?? item.firstSeenDate;
+  const text = full ? `${full}${label ? ` · ${label}` : ''}` : '首次发现时间未记录';
+  return (
+    <div className={styles.cell}>
+      {date ? (
+        <TipWrap text={text} focusable className={styles.nowrap}>{date}</TipWrap>
+      ) : (
+        <TipWrap text={text} focusable className={styles.secondary}>—</TipWrap>
+      )}
+    </div>
+  );
+}
+
 function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: boolean }) {
   const { item, link, resources, selectedKey, selectedKeys, onOpen, onToggleSelect, filtered } = props;
   const work = item.representatives[0];
   const matched = filtered ? item.matchedRelatedWorkCount : item.relatedWorkCount;
-  const directions = item.topicHints.filter(Boolean).join(' · ');
-  const resource = work ? resources.byRef.get(work.workRef) : undefined;
   const name = authorName(item);
-  const nameSource = item.displayNameKind === 'observation_target' ? '观察目标名称 · ' : '';
   const matchedHref = filtered ? workLink(link, item.creatorKey, { relevance: 'related' }) : scopeWorkLink(link, item.creatorKey, 'related');
-  const firstSeenLabel = item.firstSeenPrecision ? FIRST_SEEN_LABELS[item.firstSeenPrecision] : undefined;
   return (
-    <tr data-selected={selectedKey === item.creatorKey || selectedKeys.has(item.creatorKey)}>
+    <tr data-open={selectedKey === item.creatorKey} data-batch={selectedKeys.has(item.creatorKey)}>
       <td>
         <div className={`${styles.cell} ${styles.authorCell}`}>
           <input
@@ -164,57 +307,28 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
             onChange={event => onToggleSelect(item, event.target.checked)}
             aria-label={`选择 ${name}`}
           />
-          <Avatar name={name} url={resource?.avatarUrl ?? null} pending={resources.pending} className={styles.avatar} />
-          <div className={styles.cellCopy}>
-            <button
-              type="button"
-              className={`${styles.link} ${styles.name} ${styles.ellipsis}`}
-              data-author-key={item.creatorKey}
-              title={name}
-              aria-haspopup="dialog"
-              onClick={() => onOpen(item.creatorKey)}
-            >
-              {name}
-            </button>
-            <span className={styles.secondary}>
-              {nameSource}粉丝 <Metric value={item.followerCount} />
-            </span>
-          </div>
-        </div>
-      </td>
-      <td>
-        <div className={styles.cell}>
-          <span
-            className={`${styles.ellipsis} ${item.discoveryKeywords.length > 0 ? styles.keyword : styles.secondary}`}
-            title={item.discoveryKeywords.length > 0 ? item.discoveryKeywords.join('、') : '未记录发现词'}
-          >
-            {item.discoveryKeywords[0] ?? '未记录发现词'}
-          </span>
-        </div>
-      </td>
-      <td>
-        <div className={styles.cell}>
-          <button type="button" className={styles.link} title={directions || '内容方向尚未形成'} onClick={() => onOpen(item.creatorKey)}>
-            <span className={styles.clamp}>{directions || '内容方向尚未形成'}</span>
-          </button>
+          <Avatar name={name} url={resources.byRef.get(work?.workRef ?? '')?.avatarUrl ?? null} pending={resources.pending} className={styles.avatar} />
+          <CreatorName item={item} onOpen={onOpen} sourceName={item.displayNameKind === 'observation_target'} />
         </div>
       </td>
       <td className={styles.number}>
         <div className={styles.cell}>
-          {matched > 0 ? (
-            <a className={styles.metric} href={matchedHref} data-return-key={item.creatorKey}>
-              {formatCount(matched)}
-            </a>
-          ) : (
-            <span className={styles.metric}>{formatCount(matched)}</span>
-          )}
-          {filtered ? (
-            <span className={styles.secondary}>范围内 {formatCount(item.relatedWorkCount)}</span>
-          ) : item.unknownRelevanceWorkCount > 0 ? (
-            <a className={styles.secondary} href={scopeWorkLink(link, item.creatorKey, 'unknown')} data-return-key={item.creatorKey}>
-              待判断 {formatCount(item.unknownRelevanceWorkCount)}
-            </a>
-          ) : null}
+          <Metric value={item.followerCount} className={styles.metric} />
+        </div>
+      </td>
+      <td>
+        <div className={styles.cell}>
+          <KeywordCell item={item} />
+        </div>
+      </td>
+      <td>
+        <div className={styles.cell}>
+          <Topics item={item} />
+        </div>
+      </td>
+      <td className={styles.number}>
+        <div className={styles.cell}>
+          <RelatedCell item={item} filtered={filtered} matched={matched} href={matchedHref} />
         </div>
       </td>
       <td className={styles.number}>
@@ -225,73 +339,59 @@ function CreatorRow(props: CreatorTableProps & { item: CreatorItem; filtered: bo
       <td>
         <div className={styles.cell}>
           {work ? (
-            <div className={styles.workCell}>
-              <Cover url={resource?.coverUrl ?? null} pending={resources.pending} className={styles.cover} />
-              <div className={styles.cellCopy}>
-                <a
-                  className={styles.clamp}
-                  href={workLink(link, item.creatorKey, {}, work.workRef)}
-                  data-return-key={item.creatorKey}
-                  title={workTitle(work, resources)}
-                >
-                  {workTitle(work, resources)}
-                </a>
-                <span className={styles.secondary}>
-                  {relevanceLabel(work.relevance)} · 赞 <Metric value={work.likes} />
-                </span>
-              </div>
-            </div>
+            <WorkPreviewCell
+              work={work}
+              title={workTitle(work, resources)}
+              creatorKey={item.creatorKey}
+              link={link}
+              resources={resources}
+            />
           ) : (
             <span className={styles.secondary}>暂无可用作品</span>
           )}
         </div>
       </td>
       <td>
-        <div className={styles.cell}>
-          {item.firstSeenDate ? (
-            <>
-              <span className={styles.ellipsis} title={item.firstSeenDisplay ?? item.firstSeenDate}>
-                {shortDay(item.firstSeenDate)}
-              </span>
-              {firstSeenLabel ? (
-                <span className={item.firstSeenPrecision === 'recent' ? styles.recentMark : styles.secondary}>{firstSeenLabel}</span>
-              ) : null}
-            </>
-          ) : (
-            <span className={styles.secondary}>首次发现时间未记录</span>
-          )}
-        </div>
+        <FirstSeenCell item={item} />
       </td>
       <td>
-        <div className={styles.cell}>
-          <span className={styles.ellipsis} title={observedText(item.observation)}>
-            {observedText(item.observation)}
-          </span>
-          <div className={styles.rowAction}>
-            <RowAction {...props} />
-          </div>
+        <div className={`${styles.cell} ${styles.rowAction}`}>
+          <RowAction {...props} />
         </div>
       </td>
     </tr>
   );
 }
 
-function RowAction({ item, query, data, domainActive, onOpen, onJoin }: CreatorTableProps & { item: CreatorItem }) {
+/** 观察格的状态文字：保留观察中/已暂停的真实差异，链接不再统一写成「查看目标」。 */
+const TABLE_OBSERVATION_LABELS: Record<string, string> = {
+  monitoring: '观察中',
+  paused: '已暂停',
+  dismissed: '已忽略',
+  not_enabled: '已加入',
+  pending_decision: '已加入',
+  archiving: '建档中',
+  archived: '已建档',
+};
+
+function observationCellText(observation: Observation): string {
+  const state = observation.monitoringState ?? observation.lifecycleState;
+  const label = (state ? TABLE_OBSERVATION_LABELS[state] : undefined) ?? '观察状态待核对';
+  return observation.usageRole === 'reference' ? `${label} · 参照` : label;
+}
+
+/** 观察格只保留一个对应当前关系的入口：已观察去目标，未加入直接打开目标设置。 */
+function RowAction({ item, query, data, domainActive, onJoin }: CreatorTableProps & { item: CreatorItem }) {
   const pending = useJoinPending(item.creatorKey);
   const observation = item.observation;
   if (observation.lookup === 'unavailable' || observation.inCurrentDomain === null) {
     return <span className={styles.secondary}>关系待读取</span>;
   }
   if (observation.inCurrentDomain) {
-    return observation.targetRef ? <a href={targetHref(data.domain.domainRef, observation.targetRef)}>查看目标</a> : <span className={styles.secondary}>目标待核对</span>;
-  }
-  const blocked = query.usageRole === 'primary' && observation.hasOtherPrimaryDomain === true;
-  if (blocked || preservedLifecycle(observation) !== null) {
-    return (
-      <button type="button" onClick={() => onOpen(item.creatorKey, 'profile')}>
-        查看加入方式
-      </button>
-    );
+    const label = observationCellText(observation);
+    return observation.targetRef
+      ? <a href={targetHref(data.domain.domainRef, observation.targetRef)}>{label}</a>
+      : <span className={styles.secondary}>{label} · 目标待核对</span>;
   }
   return (
     <button type="button" disabled={!domainActive || pending} onClick={() => onJoin(item, query.usageRole)}>

@@ -3,8 +3,8 @@ import styles from './Dossier.module.css';
 
 const SPEAKERS: Record<Speaker, string> = { author: '作品作者', other: '他人表述', unconfirmed: '表达者未确认' };
 export function DossierIssues({ issues }: { issues: readonly DossierIssue[] }) {
-  if (issues.length === 0) return null;
-  return <ul className={styles.issues}>{[...new Map(issues.map(issue => [issue.key, issue])).values()].map(issue => <li key={issue.key}>{issue.message}</li>)}</ul>;
+  const specific = [...new Map(issues.filter(issue => issue.code !== 'cloud_image_unchecked').map(issue => [issue.message, issue])).values()];
+  return specific.length ? <details className={styles.reviewNotes}><summary>核对说明{specific.length > 1 ? ` · ${specific.length}` : ''}</summary><ul className={styles.issues}>{specific.map(issue => <li key={issue.key}>{issue.message}</li>)}</ul></details> : null;
 }
 function Content({ block }: { block: DossierBlock }) {
   switch (block.kind) {
@@ -28,6 +28,8 @@ export function DossierBlocks({ blocks, issues = [] }: { blocks: readonly Dossie
   return <div className={styles.blocks}>{blocks.map((block, index) => <div key={block.ref} className={styles.block} data-block-ref={block.ref} data-speaker={block.speaker}>
     {block.speaker === 'other' && block.kind !== 'dialogue' && (index === 0 || blocks[index - 1]?.speaker !== block.speaker || blocks[index - 1]?.kind === 'dialogue') ? <p className={styles.attribution}>{SPEAKERS[block.speaker]}</p> : null}
     {block.time ? <p className={styles.attribution}>{block.time.startMs === block.time.endMs ? `${(block.time.startMs / 1000).toFixed(3)} 秒` : `${(block.time.startMs / 1000).toFixed(3)}–${(block.time.endMs / 1000).toFixed(3)} 秒`}</p> : null}
+    {block.regionLabel ? <p className={styles.attribution}>{block.regionLabel}</p> : null}
+    {block.contentType ? <p className={styles.attribution}>{block.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文' : '图片文字 · 识别提取'}</p> : null}
     <Content block={block} />
     <DossierIssues issues={[...(block.issues ?? []), ...issues.filter(issue => issue.blockRef === block.ref && !localKeys.has(issue.key))]} />
   </div>)}<DossierIssues issues={issues.filter(issue => !issue.blockRef && !localKeys.has(issue.key))} /></div>;

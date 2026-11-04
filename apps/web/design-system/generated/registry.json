@@ -1015,6 +1015,9 @@
         "apps/api/src/local_web/topic_map.rs",
         "apps/api/src/local_web/topic_workspace.js",
         "apps/api/src/local_web/topic_workspace.rs",
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
         "apps/web/src/pages/collection/CollectionFrame.tsx",
         "apps/web/src/pages/collection/management/CommandForm.tsx",
         "apps/web/src/pages/collection/management/DomainManagementContent.tsx",
@@ -1044,7 +1047,9 @@
         "apps/web/src/pages/workbench/MaterialBrowser.tsx",
         "apps/web/src/pages/workbench/WorkbenchPage.tsx",
         "apps/web/src/pages/workbench/exportWorkflow.ts",
-        "apps/web/src/pages/workbench/workbenchModel.ts"
+        "apps/web/src/pages/workbench/workbenchModel.ts",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/styles/shell.css"
       ],
       "layer": "shell_component",
       "historicalSourceRefs": [
@@ -1301,16 +1306,20 @@
         "apps/web/src/pages/collection/tasks/TasksPage.tsx",
         "apps/web/src/pages/collection/tasks/runRequests.ts",
         "apps/web/src/pages/collection/tasks/tasksApi.ts",
+        "apps/web/src/pages/corpus/comments/CommentsPage.tsx",
         "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
         "apps/web/src/pages/corpus/creators/CreatorDrawer.tsx",
         "apps/web/src/pages/corpus/creators/CreatorsPage.tsx",
         "apps/web/src/pages/corpus/creators/SearchField.tsx",
         "apps/web/src/pages/corpus/creators/creatorsQuery.ts",
+        "apps/web/src/pages/ops/OpsFrame.tsx",
+        "apps/web/src/pages/topics/TopicsPage.tsx",
         "apps/web/src/pages/workbench/ImagePages.tsx",
         "apps/web/src/pages/workbench/MaterialBrowser.tsx",
         "apps/web/src/pages/workbench/WorkbenchPage.tsx",
         "apps/web/src/pages/workbench/exportWorkflow.ts",
-        "apps/web/src/pages/workbench/workbenchModel.ts"
+        "apps/web/src/pages/workbench/workbenchModel.ts",
+        "apps/web/src/shared/ContextTabs.tsx"
       ],
       "layer": "shell_component",
       "historicalSourceRefs": [
@@ -1416,6 +1425,10 @@
         "apps/api/src/local_web/topic_map.rs",
         "apps/api/src/local_web/topic_workspace.js",
         "apps/api/src/local_web/topic_workspace.rs",
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/corpus/CorpusFrame.tsx",
         "apps/web/src/pages/collection/CollectionFrame.tsx",
         "apps/web/src/pages/collection/management/CommandForm.tsx",
         "apps/web/src/pages/collection/management/DomainManagementContent.tsx",
@@ -1433,19 +1446,25 @@
         "apps/web/src/pages/collection/tasks/TasksPage.tsx",
         "apps/web/src/pages/collection/tasks/runRequests.ts",
         "apps/web/src/pages/collection/tasks/tasksApi.ts",
+        "apps/web/src/pages/corpus/comments/CommentsPage.tsx",
         "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
         "apps/web/src/pages/corpus/creators/CreatorDrawer.tsx",
         "apps/web/src/pages/corpus/creators/CreatorsPage.tsx",
         "apps/web/src/pages/corpus/creators/SearchField.tsx",
         "apps/web/src/pages/corpus/creators/creatorsQuery.ts",
+        "apps/web/src/pages/ops/OpsFrame.tsx",
         "apps/web/src/pages/settings/ConnectionDialog.tsx",
         "apps/web/src/pages/settings/ModelSettingsPage.tsx",
         "apps/web/src/pages/settings/modelSettingsModel.ts",
+        "apps/web/src/pages/topics/TopicsPage.tsx",
+        "apps/web/src/pages/topics/WorkspacePage.tsx",
         "apps/web/src/pages/workbench/ImagePages.tsx",
         "apps/web/src/pages/workbench/MaterialBrowser.tsx",
         "apps/web/src/pages/workbench/WorkbenchPage.tsx",
         "apps/web/src/pages/workbench/exportWorkflow.ts",
-        "apps/web/src/pages/workbench/workbenchModel.ts"
+        "apps/web/src/pages/workbench/workbenchModel.ts",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/styles/shell.css"
       ],
       "layer": "shell_component",
       "historicalSourceRefs": [
@@ -1545,6 +1564,7 @@
         "apps/api/src/local_web/research_dossier.rs",
         "apps/api/src/local_web/topic_map.js",
         "apps/api/src/local_web/topic_map.rs",
+        "apps/web/src/corpus/DomainPicker.tsx",
         "apps/web/src/pages/collection/CollectionFrame.tsx",
         "apps/web/src/pages/collection/management/CommandForm.tsx",
         "apps/web/src/pages/collection/management/DomainManagementContent.tsx",
@@ -1559,11 +1579,14 @@
         "apps/web/src/pages/corpus/creators/CreatorsPage.tsx",
         "apps/web/src/pages/corpus/creators/SearchField.tsx",
         "apps/web/src/pages/corpus/creators/creatorsQuery.ts",
+        "apps/web/src/pages/ops/OpsScopePicker.tsx",
+        "apps/web/src/pages/topics/TopicsPage.tsx",
         "apps/web/src/pages/workbench/ImagePages.tsx",
         "apps/web/src/pages/workbench/MaterialBrowser.tsx",
         "apps/web/src/pages/workbench/WorkbenchPage.tsx",
         "apps/web/src/pages/workbench/exportWorkflow.ts",
-        "apps/web/src/pages/workbench/workbenchModel.ts"
+        "apps/web/src/pages/workbench/workbenchModel.ts",
+        "apps/web/src/shared/DomainScopePicker.tsx"
       ],
       "layer": "shell_component",
       "historicalSourceRefs": [
@@ -9789,7 +9812,15 @@
         "apps/web/src/pages/settings/modelSettingsModel.ts"
       ],
       "sourceStatus": "原需求盘点基于baaf5a51；本轮核对引用路径存在，未重审该页全部实现或浏览器/写路径",
-      "specStatus": "proposed"
+      "specStatus": "proposed",
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/settings/ModelSettingsPage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/styles/shell.css"
+      ]
     },
     {
       "id": "P03",
@@ -9957,7 +9988,18 @@
         "apps/api/src/local_web/research_dossier.rs"
       ],
       "sourceStatus": "原需求盘点基于baaf5a51；本轮核对引用路径存在，未重审该页全部实现或浏览器/写路径",
-      "specStatus": "proposed"
+      "specStatus": "proposed",
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/corpus/CorpusFrame.tsx",
+        "apps/web/src/corpus/DomainPicker.tsx",
+        "apps/web/src/pages/corpus/evidence/EvidencePage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
+      ]
     },
     {
       "id": "P04",
@@ -10519,7 +10561,16 @@
         "apps/api/src/local_web/comment_study_results.js"
       ],
       "sourceStatus": "原需求盘点基于baaf5a51；本轮核对引用路径存在，未重审该页全部实现或浏览器/写路径",
-      "specStatus": "proposed"
+      "specStatus": "proposed",
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/corpus/comments/CommentsPage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/ContextTabs.tsx",
+        "apps/web/src/styles/shell.css"
+      ]
     },
     {
       "id": "P05",
@@ -10708,6 +10759,17 @@
         "apps/web/src/pages/corpus/creators/CreatorDrawer.tsx",
         "apps/web/src/pages/corpus/creators/creatorsQuery.ts",
         "apps/web/src/pages/corpus/creators/CreatorControls.tsx"
+      ],
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/corpus/CorpusFrame.tsx",
+        "apps/web/src/corpus/DomainPicker.tsx",
+        "apps/web/src/pages/corpus/creators/CreatorsPage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -10998,7 +11060,19 @@
         "apps/api/src/local_web/topic_map.js"
       ],
       "sourceStatus": "原需求盘点基于baaf5a51；本轮核对引用路径存在，未重审该页全部实现或浏览器/写路径",
-      "specStatus": "proposed"
+      "specStatus": "proposed",
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/topics/Topics.module.css",
+        "apps/web/src/pages/topics/TopicsPage.tsx",
+        "apps/web/src/pages/topics/engine.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/ContextTabs.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
+      ]
     },
     {
       "id": "P07",
@@ -11143,7 +11217,15 @@
         "apps/api/src/local_web/topic_workspace.js"
       ],
       "sourceStatus": "原需求盘点基于baaf5a51；本轮核对引用路径存在，未重审该页全部实现或浏览器/写路径",
-      "specStatus": "proposed"
+      "specStatus": "proposed",
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/topics/WorkspacePage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/styles/shell.css"
+      ]
     },
     {
       "id": "P08",
@@ -11343,6 +11425,16 @@
         "apps/api/src/local_web/collection_targets_view.rs",
         "apps/api/src/local_web/target_drawer.rs",
         "apps/api/src/local_web/collection_workspace.js"
+      ],
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/collection/CollectionFrame.tsx",
+        "apps/web/src/pages/collection/targets/TargetsPage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -11525,6 +11617,16 @@
         "apps/api/src/local_web/collection_workspace.js",
         "apps/api/src/local_web/collection_run_workspace.rs",
         "apps/api/src/local_web/collection_run_workspace.js"
+      ],
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/collection/CollectionFrame.tsx",
+        "apps/web/src/pages/collection/tasks/TasksPage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -11665,6 +11767,16 @@
       "specStatus": "proposed",
       "historicalSourceRefs": [
         "apps/api/src/local_web.rs"
+      ],
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/collection/CollectionFrame.tsx",
+        "apps/web/src/pages/collection/management/DomainsPage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -11818,6 +11930,16 @@
       "historicalSourceRefs": [
         "apps/api/src/local_web/station_view.rs",
         "apps/api/src/local_web/collection_workspace.js"
+      ],
+      "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/collection/CollectionFrame.tsx",
+        "apps/web/src/pages/collection/management/RuntimePage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -12680,13 +12802,19 @@
         "objectSteps": "保留编辑对象内局部导航"
       },
       "implementationSources": [
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
         "apps/web/src/pages/ops/OpsFrame.tsx",
         "apps/web/src/pages/ops/OpsScopePicker.tsx",
-        "apps/web/src/styles/shell.css",
-        "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-        "apps/web/src/pages/workbench/WorkbenchPage.module.css",
+        "apps/web/src/pages/workbench/ImagePages.module.css",
         "apps/web/src/pages/workbench/TopicLibrary.tsx",
-        "apps/web/src/pages/workbench/ImagePages.module.css"
+        "apps/web/src/pages/workbench/WorkbenchPage.module.css",
+        "apps/web/src/pages/workbench/WorkbenchPage.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/ContextTabs.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -12866,19 +12994,25 @@
         "objectSteps": "保留编辑对象内局部导航"
       },
       "implementationSources": [
-        "apps/web/src/pages/ops/OpsFrame.tsx",
-        "apps/web/src/pages/ops/OpsScopePicker.tsx",
-        "apps/web/src/styles/shell.css",
-        "apps/web/src/pages/ops/OpsPage.tsx",
-        "apps/web/src/pages/ops/Ops.module.css",
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
+        "apps/web/src/pages/ops/Charts.tsx",
         "apps/web/src/pages/ops/LedgerPage.tsx",
-        "apps/web/src/pages/ops/OverviewPage.tsx",
+        "apps/web/src/pages/ops/Ops.module.css",
+        "apps/web/src/pages/ops/OpsFrame.tsx",
+        "apps/web/src/pages/ops/OpsPage.tsx",
+        "apps/web/src/pages/ops/OpsScopePicker.tsx",
         "apps/web/src/pages/ops/OverviewBlocks.tsx",
+        "apps/web/src/pages/ops/OverviewPage.tsx",
         "apps/web/src/pages/ops/TargetDialog.tsx",
+        "apps/web/src/pages/ops/curve.ts",
         "apps/web/src/pages/ops/ui.tsx",
         "apps/web/src/pages/ops/useOpsLeave.tsx",
-        "apps/web/src/pages/ops/Charts.tsx",
-        "apps/web/src/pages/ops/curve.ts"
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/ContextTabs.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ],
       "trendAreaStyle": {
         "followersTopOpacity": 0.16,
@@ -13053,17 +13187,23 @@
         "objectSteps": "保留编辑对象内局部导航"
       },
       "implementationSources": [
-        "apps/web/src/pages/ops/OpsFrame.tsx",
-        "apps/web/src/pages/ops/OpsScopePicker.tsx",
-        "apps/web/src/styles/shell.css",
-        "apps/web/src/pages/ops/OpsPage.tsx",
-        "apps/web/src/pages/ops/Ops.module.css",
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
         "apps/web/src/pages/ops/LedgerPage.tsx",
-        "apps/web/src/pages/ops/OverviewPage.tsx",
+        "apps/web/src/pages/ops/Ops.module.css",
+        "apps/web/src/pages/ops/OpsFrame.tsx",
+        "apps/web/src/pages/ops/OpsPage.tsx",
+        "apps/web/src/pages/ops/OpsScopePicker.tsx",
         "apps/web/src/pages/ops/OverviewBlocks.tsx",
+        "apps/web/src/pages/ops/OverviewPage.tsx",
         "apps/web/src/pages/ops/TargetDialog.tsx",
         "apps/web/src/pages/ops/ui.tsx",
-        "apps/web/src/pages/ops/useOpsLeave.tsx"
+        "apps/web/src/pages/ops/useOpsLeave.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/ContextTabs.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -13204,17 +13344,23 @@
         "objectSteps": "保留编辑对象内局部导航"
       },
       "implementationSources": [
-        "apps/web/src/pages/ops/OpsFrame.tsx",
-        "apps/web/src/pages/ops/OpsScopePicker.tsx",
-        "apps/web/src/styles/shell.css",
-        "apps/web/src/pages/ops/OpsPage.tsx",
-        "apps/web/src/pages/ops/Ops.module.css",
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
         "apps/web/src/pages/ops/LedgerPage.tsx",
-        "apps/web/src/pages/ops/OverviewPage.tsx",
+        "apps/web/src/pages/ops/Ops.module.css",
+        "apps/web/src/pages/ops/OpsFrame.tsx",
+        "apps/web/src/pages/ops/OpsPage.tsx",
+        "apps/web/src/pages/ops/OpsScopePicker.tsx",
         "apps/web/src/pages/ops/OverviewBlocks.tsx",
+        "apps/web/src/pages/ops/OverviewPage.tsx",
         "apps/web/src/pages/ops/TargetDialog.tsx",
         "apps/web/src/pages/ops/ui.tsx",
-        "apps/web/src/pages/ops/useOpsLeave.tsx"
+        "apps/web/src/pages/ops/useOpsLeave.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/ContextTabs.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -13357,17 +13503,23 @@
         "objectSteps": "保留编辑对象内局部导航"
       },
       "implementationSources": [
-        "apps/web/src/pages/ops/OpsFrame.tsx",
-        "apps/web/src/pages/ops/OpsScopePicker.tsx",
-        "apps/web/src/styles/shell.css",
-        "apps/web/src/pages/ops/OpsPage.tsx",
-        "apps/web/src/pages/ops/Ops.module.css",
+        "apps/web/src/app/AppShell.tsx",
+        "apps/web/src/app/ContextTexture.module.css",
+        "apps/web/src/app/ContextTexture.tsx",
         "apps/web/src/pages/ops/LedgerPage.tsx",
-        "apps/web/src/pages/ops/OverviewPage.tsx",
+        "apps/web/src/pages/ops/Ops.module.css",
+        "apps/web/src/pages/ops/OpsFrame.tsx",
+        "apps/web/src/pages/ops/OpsPage.tsx",
+        "apps/web/src/pages/ops/OpsScopePicker.tsx",
         "apps/web/src/pages/ops/OverviewBlocks.tsx",
+        "apps/web/src/pages/ops/OverviewPage.tsx",
         "apps/web/src/pages/ops/TargetDialog.tsx",
         "apps/web/src/pages/ops/ui.tsx",
-        "apps/web/src/pages/ops/useOpsLeave.tsx"
+        "apps/web/src/pages/ops/useOpsLeave.tsx",
+        "apps/web/src/shared/ContextBar.tsx",
+        "apps/web/src/shared/ContextTabs.tsx",
+        "apps/web/src/shared/DomainScopePicker.tsx",
+        "apps/web/src/styles/shell.css"
       ]
     },
     {
@@ -15267,5 +15419,65 @@
       "ALIGN-NAV-003"
     ],
     "noBusinessRequests": true
-  }
+  },
+  "designAssets": [
+    {
+      "id": "ICON-B-001",
+      "name": "B 精简版图标资产",
+      "kind": "design_asset",
+      "implementation": "apps/web/src/shared/IntelligenceIcon.tsx",
+      "styles": "apps/web/src/shared/IntelligenceIcon.css",
+      "tests": [
+        "apps/web/src/shared/IntelligenceIcon.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "evidence",
+        "comments",
+        "creators",
+        "sidebar-close",
+        "sidebar-open",
+        "clock",
+        "info",
+        "check",
+        "chevron",
+        "refresh",
+        "download",
+        "copy",
+        "expand",
+        "close",
+        "normal",
+        "wide",
+        "focus"
+      ],
+      "states": [
+        "idle",
+        "pointer_hover",
+        "keyboard_focus",
+        "expanded",
+        "disabled",
+        "reduced_motion"
+      ],
+      "owns": [
+        "本地SVG几何、统一线宽与两层结构",
+        "有限反馈与减少动态效果",
+        "装饰图形不占读屏名称"
+      ],
+      "excludes": [
+        "按钮资格与点击命令",
+        "业务执行进度、成功回执和权限",
+        "将所有LIDS组件宣布CMP认证"
+      ],
+      "ruleSources": [
+        "iconography",
+        "color"
+      ],
+      "consumers": [
+        "apps/web/src/shared/Sidebar.tsx",
+        "apps/web/src/pages/corpus/evidence/DossierIcon.tsx",
+        "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx"
+      ],
+      "certified": false
+    }
+  ]
 }

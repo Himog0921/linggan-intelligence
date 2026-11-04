@@ -8,23 +8,25 @@ const operation = (overrides: Partial<Record<string, unknown>> = {}) => parseOpe
 const http = (status: number, code: string | null) => new ApiError({ kind: 'http', status, code });
 
 describe('立即复观测的回执（W3 / DR-3）：四种结局分开', () => {
-  it('已提交：ADMITTED 带工单引用——不是已读取，也不是已刷新', () => {
+  it('已提交：ADMITTED 带工单引用——只说已提交等待执行，不写成已读取或已刷新', () => {
     const feedback = reobservationReceipt(operation());
     expect(feedback).toMatchObject({ tone: 'success', label: '已提交', code: 'ADMITTED' });
-    expect(feedback.text).toContain('复观测工单已形成，尚未由工位认领');
-    expect(feedback.text).toContain('不是已读取，也不是已刷新');
+    expect(feedback.text).toBe('复观测已提交，等待执行');
+    expect(feedback.text).not.toContain('已读取');
+    expect(feedback.text).not.toContain('已刷新');
   });
 
-  it('已提交：MERGE 合并到在途工单', () => {
+  it('已提交：MERGE 合并到在途工作，同样只说等待执行', () => {
     const feedback = reobservationReceipt(operation({ admission: 'MERGE' }));
     expect(feedback).toMatchObject({ tone: 'success', label: '已提交' });
-    expect(feedback.text).toContain('合并到覆盖当前作品的在途工单');
+    expect(feedback.text).toBe('复观测已提交，等待执行');
   });
 
-  it('REUSE：既有材料已满足，没有新建工作——不写成已入队', () => {
+  it('REUSE：既有材料已满足，没有新建工作——写「已使用已有材料」，不写成已入队', () => {
     const feedback = reobservationReceipt(operation({ admission: 'REUSE', workOrderRef: null, execution: 'NOT_STARTED' }));
-    expect(feedback).toMatchObject({ tone: 'success', label: '已完成' });
-    expect(feedback.text).toBe('既有材料已满足请求，没有新建工作。');
+    expect(feedback).toMatchObject({ tone: 'success', label: '已提交' });
+    expect(feedback.text).toBe('已使用已有材料');
+    expect(feedback.text).not.toContain('已入队');
   });
 
   it('未受理：200 却被拒（REFUSED／DEFERRED／DECISION_REQUIRED／UNKNOWN）——显示原因，绝不是成功', () => {
@@ -33,8 +35,10 @@ describe('立即复观测的回执（W3 / DR-3）：四种结局分开', () => {
       expect(classifyAdmission(result), admission).toBe('declined');
       const feedback = reobservationReceipt(result);
       expect(feedback, admission).toMatchObject({ tone: 'refused', label: '未受理', code: admission });
-      expect(feedback.text, admission).toContain('没有形成工单');
+      expect(feedback.text, admission).toContain('本次没有形成复观测任务');
       expect(feedback.text, admission).toContain('不在当前可执行范围的原因');
+      expect(feedback.text, admission).not.toContain('请求已记录，但不在当前可执行范围');
+      expect(feedback.text.match(/不在当前可执行范围的原因/g), admission).toHaveLength(1);
       expect(feedback.text, admission).not.toContain('已入队');
     }
   });
@@ -56,7 +60,7 @@ describe('立即复观测的回执（W3 / DR-3）：四种结局分开', () => {
     expect(admissionCopy(null)).toBe('准入结论当前未知');
   });
 
-  it('未完成：明确的非 2xx 答复，本次没有形成工单，按码给原因', () => {
+  it('未完成：明确的非 2xx 答复，本次没有提交，按码给原因', () => {
     const cases: Record<string, string> = {
       reobservation_authorization_not_linked: '尚未具备监控目标关联的有效深度归档授权',
       reobservation_platform_not_supported: '平台当前不支持复观测',
@@ -67,20 +71,17 @@ describe('立即复观测的回执（W3 / DR-3）：四种结局分开', () => {
     for (const [code, text] of Object.entries(cases)) {
       const feedback = reobservationFailure(http(409, code));
       expect(feedback, code).toMatchObject({ tone: 'error', label: '未完成', code });
-      expect(feedback.text, code).toContain('本次没有形成工单');
+      expect(feedback.text, code).toContain('本次没有提交');
       expect(feedback.text, code).toContain(text);
     }
     expect(reobservationFailure(http(500, null)).text).toContain('服务器没有接受这次请求');
   });
 
-  it('未确认：没有得到答复，或 2xx 却看不懂——可能已入队；页面不自动重发，给出核对与查看采集任务的路', () => {
+  it('未确认：没有得到答复，或 2xx 却看不懂——不自动重发，核对入口留在就地状态', () => {
     for (const failure of [new ApiError({ kind: 'network' }), new ApiError({ kind: 'invalid_response', status: 200 })]) {
       const feedback = reobservationFailure(failure);
       expect(feedback).toMatchObject({ tone: 'unknown', label: '未确认' });
-      expect(feedback.text).toContain('可能已经入队');
-      expect(feedback.text).toContain('不会自动重发');
-      expect(feedback.text).toContain('重新核对');
-      expect(feedback.text).toContain('采集任务');
+      expect(feedback.text).toBe('提交结果未确认，请核对原请求。页面不会自动重发。');
     }
   });
 });

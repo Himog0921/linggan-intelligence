@@ -12,7 +12,7 @@ import styles from './OfflineReview.module.css';
 const fields = { title: '标题', body: '正文', tags: '话题标签', ocr: '图片文字', transcript: '音频转录', frame_text: '视频画面文字' };
 export function OfflineReviewPage() {
   const query = useQuery({ queryKey: ['ai-offline-preview'], queryFn: ({ signal }) => fetchPreview(signal), retry: false, refetchOnWindowFocus: false });
-  return <AppShell active="topic" activeState="离线预演" boundaryLabel="合成数据 · 非实时" crumb={<>主题图谱 / 离线预演</>} meta="">
+  return <AppShell active="topic" boundaryLabel="合成数据 · 非实时" contextBar={{ breadcrumb: <>主题图谱 <span className="v7-slash">/</span> 离线预演</>, meta: <a className="v7-context-action" href="/topics">返回主题图谱</a> }}>
     <main className={styles.page}><header className={styles.header}><div><h1>方向与解读 · 离线预演</h1><p>合成样本 · 未调用模型 · 未写正式业务结果</p></div><a href="/topics">返回主题图谱</a></header>
       {query.isPending ? <p role="status">正在读取合成样本…</p> : query.isError ? <div role="alert"><p>合成样本读取失败，未采用无法核对的内容。</p><ActionButton onClick={() => void query.refetch()}>重新读取</ActionButton></div> : <LoadedReview initial={query.data} />}
     </main>

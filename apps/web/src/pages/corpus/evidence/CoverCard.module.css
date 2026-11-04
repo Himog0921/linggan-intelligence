@@ -320,6 +320,10 @@
   cursor: pointer;
 }
 
+.select:hover:not(:disabled) {
+  background: transparent;
+}
+
 .select:focus-visible {
   outline: 3px solid var(--lgi-focus);
   outline-offset: calc(var(--lgi-space-1) * -1);
@@ -444,7 +448,7 @@
 .item[data-selected='true'] .visual { outline:2px solid var(--lgi-signal-mark);outline-offset:-2px; }
 .item[data-selected='true'] .face::after { opacity:.55; }
 .item[data-checked='true'] .visual { outline:2px solid var(--lgi-signal);outline-offset:-2px; }
-.item[data-checked='true'] .plate { background:var(--lgi-signal-faint);border-bottom:2px solid var(--lgi-signal); }
+.item[data-checked='true'] .plate { background:var(--lgi-canvas-sunken);border-bottom:2px solid var(--lgi-signal); }
 .pickCorner {
   position:absolute;z-index:6;top:var(--lgi-space-3);right:var(--lgi-space-3);
   display:grid;place-items:center;box-sizing:border-box;

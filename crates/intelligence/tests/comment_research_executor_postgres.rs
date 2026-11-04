@@ -367,10 +367,27 @@ async fn comment_uses_target_dossier_and_both_permissions() {
     assert!(!system.contains("COMMENT SYSTEM V2"));
     let packet: serde_json::Value =
         serde_json::from_str(&wire::text(&requests[1], "user")).unwrap();
-    assert_eq!(
-        packet["workContext"]["dossierContract"],
-        "research-dossier.v2"
-    );
+    let context = &packet["workContext"];
+    assert_eq!(context["title"], "合成底稿验收");
+    assert!(context.get("dossierContract").is_none());
+    assert!(context.get("sources").is_none());
+    let materials = context["materials"].as_array().unwrap();
+    assert!(materials.iter().any(|material| material["kind"] == "body"
+        && material["text"] == format!("{}结尾不能丢失🙂", "完整正文。".repeat(900))));
+    for index in 0..4 {
+        let image = materials.iter().find(|material| material["text"]
+            == format!("第{index}行连续的图片正文，完整可用。")).unwrap();
+        assert_eq!(image["kind"], "image_substantive_text");
+        assert_eq!(image["speaker"], "unconfirmed");
+        assert!(image["source"].as_str().is_some_and(|value| !value.is_empty()));
+        assert!(image["unitRef"].as_str().is_some_and(|value| !value.is_empty()));
+    }
+    assert!(context["availability"].is_object());
+    for material in materials {
+        assert!(material.get("issues").is_none());
+        assert!(material.get("verification").is_none());
+        assert!(material.get("sourceVersion").is_none());
+    }
     assert_eq!(
         packet["target"]["researchText"],
         "我的孩子需要每天有人提醒。"
