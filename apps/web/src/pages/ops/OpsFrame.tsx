@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { AppShell } from '../../app/AppShell';
+import { ContextBreadcrumb } from '../../shared/ContextBar';
 import { ContextTabs } from '../../shared/ContextTabs';
 import { NavIcon, Sidebar } from '../../shared/Sidebar';
 
@@ -12,7 +13,7 @@ export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, 
   return <AppShell active="ops" restrictedOps={restricted}
     boundaryLabel="本机服务状态" className={immersive ? 'ops-immersive' : undefined}
     contextBar={{
-      breadcrumb: <>运营 <span aria-hidden="true">/</span> {scope} <span aria-hidden="true">/</span> <b>{section === 'creation' ? '创作' : '数据'}</b></>,
+      breadcrumb: <ContextBreadcrumb items={[<>运营</>, scope, <b>{section === 'creation' ? '创作' : '数据'}</b>]} />, 
       navigation: <ContextTabs label={section === 'data' ? '数据页面' : '创作页面'}>{tabs}</ContextTabs>,
       meta,
     }}>
