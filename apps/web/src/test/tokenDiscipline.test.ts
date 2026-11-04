@@ -61,6 +61,14 @@ describe('页面样式只用 LIDS Token', () => {
       expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('b6503ee8595bb62a766cd3033ad1ef8350d9e32924ddf1161d508d67722a7ebe');
       return;
     }
+    if (path.basename(file) === 'ContextTexture.module.css') {
+      // 2026-11-04: Mog approved the final dark Pattern Waves context bar. Its palette and geometry
+      // reproduce the recorded React Bits studio export consumed by the GPU material
+      // (see ContextTexture.README.md). Promoting the dark values into --lgi-* tokens needs its own
+      // approved dark-material family first, so freeze the sheet until that decision is made.
+      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('738992b99c785b9cbe9eb88404d45021281caeb0333b270c771b2d2e167c9985');
+      return;
+    }
     if (file === path.join(sourceRoot, 'pages', 'corpus', 'evidence', 'DossierDocument.module.css')) {
       // RESEARCH-DOSSIER-READING-20261027: Mog's approved demo is a local reading surface.
       // See evidence-library-page.md. Freeze this sheet; all other pages keep LIDS token checks.
