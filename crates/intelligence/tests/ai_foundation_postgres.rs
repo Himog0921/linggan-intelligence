@@ -303,7 +303,7 @@ async fn ai_foundation_control_commands_are_cas_idempotent_and_system_never_resu
     ));
     let pending = ChangeControl {
         command_ref: Uuid::new_v4(),
-        scope: ControlScope::Task(TaskKey::NoteInterpretation),
+        scope: ControlScope::Task(TaskKey::DirectionProposal),
         expected_revision: 0,
         enabled: true,
         reason: "must not invent handler availability".into(),
