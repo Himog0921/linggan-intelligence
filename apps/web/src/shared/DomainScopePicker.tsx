@@ -29,10 +29,6 @@ export function DomainScopePicker({
     return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
   }, [open, disabled]);
 
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
-
   return (
     <details
       ref={root}
