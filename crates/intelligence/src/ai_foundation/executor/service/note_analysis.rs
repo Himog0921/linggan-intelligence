@@ -115,15 +115,20 @@ async fn settle(
 ) -> Result<(), ExecutorError> {
     let (mut tx, cancelled) = receipt::lock_in(db, item, prepared.invocation, response).await?;
     let sources = owner::frozen_in(&mut tx, prepared.request_ref).await;
+    let mut validation_code = None;
     let parsed = response
         .filter(|r| r.ok)
         .and_then(|r| r.text.as_deref())
         .and_then(|s| serde_json::from_str::<Value>(s).ok())
         .and_then(|v| {
             sources.as_ref().ok().and_then(|packet| {
-                crate::note_analysis::accept(v, packet)
-                    .ok()
-                    .and_then(|o| serde_json::to_value(o).ok())
+                match crate::note_analysis::accept(v, packet) {
+                    Ok(output) => serde_json::to_value(output).ok(),
+                    Err(code) => {
+                        validation_code = Some(code);
+                        None
+                    }
+                }
             })
         });
     let allowed = !cancelled
@@ -149,6 +154,9 @@ async fn settle(
     let mut result = response
         .map(safe_result)
         .unwrap_or_else(|| json!({"ok":false}));
+    if let Some(code) = validation_code {
+        result["validationCode"] = json!(code);
+    }
     result["executorReceipt"] = json!(item.lease_token);
     result["requestRef"] = json!(prepared.request_ref);
     result["promptVersion"] = json!(prepared.prompt_version_ref);
