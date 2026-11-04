@@ -1,6 +1,5 @@
 import { useId, type ReactNode } from 'react';
 import { AppShell } from '../app/AppShell';
-import { BreadcrumbTexture } from './BreadcrumbTexture';
 import { CorpusSideNav, type EvidenceCount } from './CorpusSideNav';
 import type { CorpusPageKey } from './corpusPages';
 import type { CorpusShell } from './corpusShellApi';
@@ -52,7 +51,6 @@ export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, eviden
       className={compact ? 'v7-corpus-compact-shell' : undefined}
       boundaryLabel="本机服务状态"
       crumb={crumb}
-      contextBackdrop={page === 'creators' ? <BreadcrumbTexture /> : undefined}
       meta={meta}
     >
       <title>{`${pageLabel} · 语料`}</title>

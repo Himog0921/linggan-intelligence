@@ -86,21 +86,13 @@ describe('语料页面框架（三页共用）', () => {
     renderFrame(shell(A));
     expect(screen.getByRole('link', { name: /语料/ })).toHaveAttribute('aria-current', 'page');
   });
-  it('创作者启用黑底材质；方格预览由 URL 选择，其他语料页面不改变', () => {
-    const first = renderFrame(shell(A));
-    const row = first.container.querySelector('.v7-context-row');
-    expect(row).toHaveAttribute('data-context-texture', 'dark');
-    expect(row?.querySelector('[data-pattern]')).toHaveAttribute('data-pattern', 'dot');
-    first.unmount();
-
-    window.history.replaceState({}, '', '/?breadcrumbPattern=square');
-    try {
-      const square = renderFrame(shell(A));
-      expect(square.container.querySelector('[data-pattern]')).toHaveAttribute('data-pattern', 'square');
-      square.unmount();
-    } finally {
-      window.history.replaceState({}, '', '/');
-    }
+  it('证据库与创作者共用锁定的 Square Silk 黑色面包屑，不改变字段与领域切换', () => {
+    const creators = renderFrame(shell(A));
+    const creatorRow = creators.container.querySelector('.v7-context-row');
+    expect(creatorRow).toHaveAttribute('data-context-texture', 'dark');
+    expect(creatorRow?.querySelector('[data-context-pattern]')).toHaveAttribute('data-context-pattern', 'square');
+    expect(within(creatorRow as HTMLElement).getByLabelText('切换当前观察领域')).toHaveTextContent('领域甲');
+    creators.unmount();
 
     const evidence = render(
       <MemoryRouter>
@@ -109,8 +101,11 @@ describe('语料页面框架（三页共用）', () => {
         </CorpusFrame>
       </MemoryRouter>,
     );
-    expect(evidence.container.querySelector('.v7-context-row')).not.toHaveAttribute('data-context-texture');
-    expect(evidence.container.querySelector('[data-pattern]')).toBeNull();
+    const evidenceRow = evidence.container.querySelector('.v7-context-row');
+    expect(evidenceRow).toHaveAttribute('data-context-texture', 'dark');
+    expect(evidenceRow?.querySelector('[data-context-pattern]')).toHaveAttribute('data-context-pattern', 'square');
+    expect(within(evidenceRow as HTMLElement).getByLabelText('切换当前观察领域')).toHaveTextContent('领域甲');
+    evidence.unmount();
   });
 
 });
