@@ -40,11 +40,8 @@ export function DomainPicker({ domains, selected, action }: DomainPickerProps) {
               to={`${action}?domain=${encodeURIComponent(domain.domainRef)}`}
               aria-current={domain.domainRef === selected ? 'page' : undefined}
               aria-label={`${domain.name}，${meta}`}
-              onClick={() => {
-                const details = document.activeElement instanceof HTMLElement
-                  ? document.activeElement.closest('details')
-                  : null;
-                details?.removeAttribute('open');
+              onClick={event => {
+                event.currentTarget.closest('details')?.removeAttribute('open');
               }}
             >
               <span>{domain.name}</span>
