@@ -9,6 +9,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { AppShell } from "../../app/AppShell";
+import { ContextBreadcrumb } from "../../shared/ContextBar";
 import { ContextTabs } from "../../shared/ContextTabs";
 import { DomainScopePicker } from "../../shared/DomainScopePicker";
 import { requestJson } from "../../shared/api";
@@ -115,11 +116,10 @@ export function TopicsPage() {
         boundaryLabel="本机不访问平台"
         contextBar={{
         breadcrumb: (
-          <>
-            主题图谱
-            {shell.data ? (
-              <>
-                <span className="v7-slash">/</span>
+          <ContextBreadcrumb
+            items={[
+              <>主题图谱</>,
+              ...(shell.data ? [
                 <DomainScopePicker
                   label="切换当前观察领域"
                   summary={
@@ -152,13 +152,13 @@ export function TopicsPage() {
                       </a>
                     ))}
                   </nav>
-                </DomainScopePicker>
-              </>
-            ) : null}
-            <b id="topic-map-crumb-current" className="v7-sr-only">
-              {state.view === "journey" ? "用户生命旅程" : "主题概览"}
-            </b>
-          </>
+                </DomainScopePicker>,
+              ] : []),
+              <b id="topic-map-crumb-current" className="v7-sr-only">
+                {state.view === "journey" ? "用户生命旅程" : "主题概览"}
+              </b>,
+            ]}
+          />
         ),
         navigation: (
           <ContextTabs id="topic-map-view-tabs" label="主题图谱视图" onClick={engine.onClick}>
