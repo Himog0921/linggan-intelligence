@@ -41,7 +41,12 @@ async fn four_notes_complete_and_preserve_boundaries() {
     )
     .await
     .unwrap();
-    let model = setup::prepare_with_actual_probe(&db, &endpoint.url, &session, &adapter).await;
+    let mut model = setup::prepare_with_actual_probe(&db, &endpoint.url, &session, &adapter).await;
+    // Exercise the production fallback mode: JSON object alone carries no schema.
+    let json_capability = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_capability(capability_ref,identity_ref,endpoint_ref,source_kind,source_version,context_tokens,max_output_tokens,max_timeout_seconds,thinking_levels,compat,thinking_level_map,output_mode) SELECT $1,identity_ref,endpoint_ref,'manual','synthetic-note-json-object',context_tokens,max_output_tokens,max_timeout_seconds,thinking_levels,compat,thinking_level_map,'json_object' FROM linggan_model_capability WHERE capability_ref=$2")
+        .bind(json_capability).bind(model.capability).execute(db.pool()).await.unwrap();
+    model.capability = json_capability;
     session.request_drain().await.unwrap();
     session.complete_drain().await.unwrap();
     drop(session);
@@ -422,6 +427,16 @@ async fn four_notes_complete_and_preserve_boundaries() {
 
     drain.request();
     task.await.unwrap().unwrap();
+    let requests = endpoint.requests.lock().unwrap().clone();
+    let analyses: Vec<_> = requests.iter().filter_map(|request| {
+        let input: Value = serde_json::from_str(&wire::text(request, "user")).ok()?;
+        input["material"]["sources"].is_array().then_some((request, input))
+    }).collect();
+    assert_eq!(analyses.len(), 5, "four notes and the explicit source-change regression");
+    for (request, input) in analyses {
+        assert_eq!(request["response_format"]["type"], "json_object");
+        assert_eq!(input["resultSchema"], linggan_intelligence::note_analysis::response_schema(), "the actual provider-visible input must carry the complete frozen result contract");
+    }
     endpoint.finish().await;
     if let Ok(dir) = std::env::var("NOTE_ANALYSIS_PROOF_OUTPUT") {
         std::fs::write(
