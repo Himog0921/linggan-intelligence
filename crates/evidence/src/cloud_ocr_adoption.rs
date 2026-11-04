@@ -4,18 +4,24 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-pub const PROCESSOR_VERSION: &str = "cloud-manual-v5";
-pub const RULE_VERSION: &str = "cloud-ocr-observation.v5";
+pub const VISUAL_INFORMATION_MISSING: &str = "未返回视觉描述字段，非文字信息尚未提供";
+pub const PROCESSOR_VERSION: &str = "cloud-manual-v6";
+pub const RULE_VERSION: &str = "cloud-ocr-observation.v6";
 pub fn is_processor_version(version: &str) -> bool {
-    [PROCESSOR_VERSION, "cloud-manual-v4", "cloud-manual-v3"]
-        .iter()
-        .any(|prefix| {
-            version == *prefix
-                || version
-                    .strip_prefix(prefix)
-                    .and_then(|v| v.strip_prefix(':'))
-                    .is_some_and(|run| Uuid::parse_str(run).is_ok())
-        })
+    [
+        PROCESSOR_VERSION,
+        "cloud-manual-v5",
+        "cloud-manual-v4",
+        "cloud-manual-v3",
+    ]
+    .iter()
+    .any(|prefix| {
+        version == *prefix
+            || version
+                .strip_prefix(prefix)
+                .and_then(|v| v.strip_prefix(':'))
+                .is_some_and(|run| Uuid::parse_str(run).is_ok())
+    })
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,34 +33,53 @@ pub struct CloudSource {
 fn compact(value: &str) -> String {
     value.chars().filter(|c| !c.is_whitespace()).collect()
 }
-fn table_covers_text(table: &Value, original: &str) -> bool {
-    if !table.is_object() {
-        return false;
-    }
-    let mut remaining = compact(original);
-    for cell in table["columns"].as_array().into_iter().flatten().chain(
-        table["rows"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .flat_map(|row| row.as_array().into_iter().flatten()),
-    ) {
-        let Some(cell) = cell.as_str() else {
-            return false;
-        };
-        let cell = compact(cell);
-        if cell.is_empty() {
-            continue;
+// Tables are independent provider observations. Do not require a second text copy.
+// Only omit text lines that are mechanically represented by the table; retain all
+// other lines verbatim, including signs, conditions and footnotes.
+fn supplemental_table_text(table: &Value, original: &str) -> String {
+    let rows: Vec<Vec<String>> = std::iter::once(&table["columns"])
+        .chain(table["rows"].as_array().into_iter().flatten())
+        .filter_map(Value::as_array)
+        .map(|row| {
+            row.iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        })
+        .collect();
+    let lines: Vec<_> = original.lines().collect();
+    let mut retained = Vec::new();
+    let mut offset = 0;
+    while offset < lines.len() {
+        let matched = rows.iter().find_map(|row| {
+            let max_lines = 1 + row
+                .iter()
+                .map(|cell| cell.matches('\n').count())
+                .sum::<usize>();
+            (1..=max_lines.min(lines.len() - offset)).find(|length| {
+                let candidate = lines[offset..offset + length].join("\n");
+                let parts: Vec<_> = candidate.split(['\t', '|', '｜']).map(compact).collect();
+                parts.len() == row.len()
+                    && parts.iter().zip(row).all(|(part, cell)| {
+                        part == &compact(cell)
+                            || (*length == 1 && matches!(part.as_str(), "-" | "—"))
+                    })
+                    && parts
+                        .iter()
+                        .zip(row)
+                        .any(|(part, cell)| !part.is_empty() && part == &compact(cell))
+            })
+        });
+        if let Some(length) = matched {
+            offset += length;
+        } else {
+            retained.push(lines[offset]);
+            offset += 1;
         }
-        let Some(index) = remaining.find(&cell) else {
-            return false;
-        };
-        remaining.replace_range(index..index + cell.len(), "");
     }
-    remaining
-        .chars()
-        .all(|c| c == '|')
+    retained.join("\n")
 }
+
 fn invalid(message: &str) -> sqlx::Error {
     sqlx::Error::Protocol(message.into())
 }
@@ -157,10 +182,18 @@ pub fn blocks_from_visual(visual: &Value) -> Result<Vec<Value>, sqlx::Error> {
             return Err(invalid("cloud_region_invalid"));
         }
         let coordinates = bbox(&region["bbox"])?;
-        let mut blocks = if table_covers_text(&region["table"], original) {
-            vec![
+        let mut blocks = if region["table"].is_object() {
+            let mut blocks = vec![
                 json!({"kind":"table","speaker":"unconfirmed","columns":region["table"]["columns"],"rows":region["table"]["rows"]}),
-            ]
+            ];
+            let supplement = supplemental_table_text(&region["table"], original);
+            if !supplement.trim().is_empty() {
+                blocks.extend(crate::research_dossier::content::blocks_from_text(
+                    &supplement,
+                    "unconfirmed",
+                ));
+            }
+            blocks
         } else if original.trim().is_empty() {
             if description.trim().is_empty() {
                 vec![
@@ -186,28 +219,45 @@ pub fn blocks_from_visual(visual: &Value) -> Result<Vec<Value>, sqlx::Error> {
                 "contentType":"visual_description"}),
             );
         }
+        let parameter_targets: Vec<_> = region["parameters"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|p| {
+                blocks
+                    .iter()
+                    .position(|b| {
+                        b["contentType"] == "extracted_text"
+                            && p["value"].as_str().is_some_and(|value| {
+                                compact(&crate::research_dossier::content::block_text(b))
+                                    .contains(&compact(value))
+                            })
+                    })
+                    .unwrap_or(0)
+            })
+            .collect();
         for (index, block) in blocks.iter_mut().enumerate() {
             let block_ref = format!("{reference}.{index}");
             block["ref"] = json!(block_ref);
             block["regionRef"] = json!(reference);
             block["regionLabel"] = json!(location);
             block["sourceRole"] = json!(role);
-            if block["contentType"] == "extracted_text" {
-                let text = compact(&crate::research_dossier::content::block_text(block));
-                let parameters: Vec<_> = region["parameters"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter(|p| {
-                        p["value"]
-                            .as_str()
-                            .is_some_and(|value| text.contains(&compact(value)))
-                    })
-                    .cloned()
-                    .collect();
-                if !parameters.is_empty() {
-                    block["parameters"] = json!(parameters);
-                }
+            let parameters: Vec<_> = region["parameters"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .enumerate()
+                .filter(|(parameter_index, _)| parameter_targets[*parameter_index] == index)
+                .map(|(_, parameter)| {
+                    let mut parameter = parameter.clone();
+                    parameter["sourceRegionRef"] = json!(reference);
+                    parameter["bindingStatus"] = json!("unconfirmed");
+                    parameter["basisStatus"] = json!("unconfirmed");
+                    parameter
+                })
+                .collect();
+            if !parameters.is_empty() {
+                block["parameters"] = json!(parameters);
             }
             if let Some(b) = coordinates {
                 block["bbox"] = json!(b);
@@ -228,7 +278,7 @@ pub fn blocks_from_visual(visual: &Value) -> Result<Vec<Value>, sqlx::Error> {
             }
             for (i, message) in uncertainties.iter().enumerate().filter(|_| index == 0) {
                 issues.push(
-                    json!({"key":format!("{block_ref}:uncertainty:{i}"),"code":"region_uncertainty",
+                    json!({"key":format!("{block_ref}:uncertainty:{i}"),"code":if *message==VISUAL_INFORMATION_MISSING{"visual_information_missing"}else{"region_uncertainty"},
                     "message":message,"resolution":"reading_edit","blockRef":block_ref}),
                 );
             }
@@ -277,7 +327,10 @@ mod tests {
     }
     #[test]
     fn table_never_discards_unrepresented_conditions_and_parameters_stay_on_their_block() {
-        assert!(!table_covers_text(&json!({"columns":["温度"],"rows":[["5℃"]]}), "温度\n-5℃"));
+        assert_eq!(
+            supplemental_table_text(&json!({"columns":["温度"],"rows":[["5℃"]]}), "温度\n-5℃"),
+            "-5℃"
+        );
         let mut region = json!({"regionRef":"r","location":"中部","visualDescription":"","uncertainties":[],"text":"阶段 时间\n过渡 5分钟","role":"body","legibility":"clear","bbox":null,"table":{"columns":["阶段","时间"],"rows":[["过渡","5分钟"]]},"parameters":[]});
         assert_eq!(
             blocks_from_visual(&json!({"regions":[region.clone()]})).unwrap()[0]["kind"],
@@ -291,6 +344,37 @@ mod tests {
         let blocks=blocks_from_visual(&json!({"regions":[{"regionRef":"r","location":"中部","text":"山河之旅\n\n30分钟","visualDescription":"","uncertainties":[],"role":"body","legibility":"clear","bbox":null,"parameters":[{"subject":"山河之旅","attribute":"duration","value":"30分钟","basis":"package"}]}]})).unwrap();
         assert!(blocks[0].get("parameters").is_none());
         assert_eq!(blocks[1]["parameters"][0]["value"], "30分钟");
+    }
+    #[test]
+    fn table_dedup_never_erases_cross_row_or_column_conflicts() {
+        let table = json!({"columns":["对象","结果"],"rows":[["甲","是"],["乙","否"]]});
+        assert_eq!(
+            supplemental_table_text(&table, "甲\t否\n是\t甲\n甲\t是\n乙\t否"),
+            "甲\t否\n是\t甲"
+        );
+    }
+    #[test]
+    fn missing_visual_message_becomes_a_machine_readable_gap() {
+        let blocks = blocks_from_visual(&json!({"regions":[{"regionRef":"r","location":"顶部","text":"保留文字","visualDescription":"","uncertainties":[VISUAL_INFORMATION_MISSING],"role":"body","legibility":"clear","bbox":null}]})).unwrap();
+        assert_eq!(blocks[0]["issues"][0]["code"], "visual_information_missing");
+    }
+    #[test]
+    fn table_dedup_preserves_sentences_and_removes_exact_multiline_cell_copies() {
+        let table =
+            json!({"columns":["对象", "说明"],"rows":[["甲", "第一行\n第二行"],["乙", "否"]]});
+        assert_eq!(
+            supplemental_table_text(&table, "对象\t说明\n甲\t第一行\n第二行\n甲否乙"),
+            "甲否乙"
+        );
+    }
+    #[test]
+    fn independent_table_survives_placeholder_text_and_keeps_unbound_parameters() {
+        let visual = json!({"regions":[{"regionRef":"r","location":"中部表格","visualDescription":"","uncertainties":[],"text":"年龄\t行为\n2-5岁\t-","role":"body","legibility":"clear","bbox":null,"table":{"columns":["年龄","行为"],"rows":[["2-5岁","抽噎，停一下又继续哭"]]},"parameters":[{"subject":"未证明对象","attribute":"age","value":"8+","basis":"package"}]}]});
+        let blocks = blocks_from_visual(&visual).unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["rows"][0][1], "抽噎，停一下又继续哭");
+        assert_eq!(blocks[0]["parameters"][0]["bindingStatus"], "unconfirmed");
+        assert_eq!(blocks[0]["parameters"][0]["value"], "8+");
     }
     #[test]
     fn role_messages_always_preserve_nonclear_legibility() {

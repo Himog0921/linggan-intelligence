@@ -109,27 +109,43 @@ fn validate_block(block: &Value) -> Result<(), String> {
     }
     if let Some(parameters) = block.get("parameters") {
         let values = parameters.as_array().ok_or("parameters_invalid")?;
-        if values.len() > 50 || block["contentType"] != "extracted_text" {
+        if values.len() > 50 || block.get("contentType").is_none() {
             return Err("parameters_invalid".into());
         }
         for value in values {
             let object = value.as_object().ok_or("parameter_invalid")?;
-            if object.len() != 4
-                || !["subject", "value"].iter().all(|key| {
-                    value[*key]
-                        .as_str()
-                        .is_some_and(|s| !s.trim().is_empty() && s.chars().count() <= 300)
-                })
-                || !matches!(
-                    value["attribute"].as_str(),
-                    Some("rating" | "age" | "players" | "duration")
-                )
-                || !matches!(
-                    value["basis"].as_str(),
-                    Some("package" | "author_experience" | "rule")
-                )
-            {
+            if object.keys().any(|key| {
+                ![
+                    "subject",
+                    "attribute",
+                    "value",
+                    "basis",
+                    "sourceRegionRef",
+                    "bindingStatus",
+                    "basisStatus",
+                ]
+                .contains(&key.as_str())
+            }) || !["subject", "value"].iter().all(|key| {
+                value[*key]
+                    .as_str()
+                    .is_some_and(|s| !s.trim().is_empty() && s.chars().count() <= 300)
+            }) || !matches!(
+                value["attribute"].as_str(),
+                Some("rating" | "age" | "players" | "duration")
+            ) || !matches!(
+                value["basis"].as_str(),
+                Some("package" | "author_experience" | "rule")
+            ) {
                 return Err("parameter_invalid".into());
+            }
+            let binding_fields = ["sourceRegionRef", "bindingStatus", "basisStatus"];
+            if binding_fields.iter().any(|key| value.get(*key).is_some())
+                && (value["bindingStatus"] != "unconfirmed"
+                    || value["basisStatus"] != "unconfirmed"
+                    || value["sourceRegionRef"] != block["regionRef"]
+                    || !value["sourceRegionRef"].is_string())
+            {
+                return Err("parameter_binding_invalid".into());
             }
         }
     }

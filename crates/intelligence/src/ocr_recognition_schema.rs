@@ -1,5 +1,8 @@
 //! Current image OCR provider response contract.
 pub const CONTRACT: &str = "ocr-visual-audit.v3";
+pub use linggan_evidence::cloud_ocr_adoption::VISUAL_INFORMATION_MISSING;
+pub const TEXT_DERIVED_FROM_TABLE: &str = "未返回正文文字，当前文字由原始表格单元格按行排列";
+pub const PARAMETER_VALUE_UNANCHORED: &str = "参数候选值未在本区域原文或表格中找到，保留候选待核对";
 use crate::ai_foundation::store::FoundationError;
 use linggan_evidence::ocr_source::ImageRole;
 use serde::{Deserialize, Serialize};
@@ -129,6 +132,40 @@ pub fn parse_visual_diagnostic(
             .expect("object with type key")
             .remove("type");
     }
+    let mut missing_visual = Vec::new();
+    let mut text_from_table = Vec::new();
+    if let Some(regions) = raw
+        .get_mut("regions")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        for (index, region) in regions.iter_mut().enumerate() {
+            let Some(object) = region.as_object_mut() else {
+                continue;
+            };
+            if !object.contains_key("visualDescription") {
+                object.insert("visualDescription".into(), serde_json::json!(""));
+                missing_visual.push(index);
+            }
+            if !object.contains_key("text")
+                || object.get("text").and_then(serde_json::Value::as_str) == Some("")
+            {
+                if let Some(table) = object
+                    .get("table")
+                    .cloned()
+                    .and_then(|value| serde_json::from_value::<VisualTable>(value).ok())
+                    .filter(valid_table_shape)
+                {
+                    let rendered = std::iter::once(&table.columns)
+                        .chain(table.rows.iter())
+                        .map(|row| row.join("\t"))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    object.insert("text".into(), serde_json::json!(rendered));
+                    text_from_table.push(index);
+                }
+            }
+        }
+    }
     // Optional indexes must never discard usable original transcription. Keep the
     // wire response untouched; withdraw invalid auxiliary structures only here.
     let auxiliary: Vec<_> = raw
@@ -155,11 +192,11 @@ pub fn parse_visual_diagnostic(
             && v.title_text.as_ref().is_none_or(|s| s.trim().is_empty()))
         || (v.title_presence == TitlePresence::Absent && v.title_text.is_some())
         || (v.regions.is_empty() && !v.unreadable && v.title_presence != TitlePresence::Absent)
-        || v.regions.iter().any(|r| {
+        || v.regions.iter().enumerate().any(|(index, r)| {
             r.region_ref.is_empty()
                 || r.region_ref.len() > 80
                 || !refs.insert(&r.region_ref)
-                || r.text.chars().count() > 20_000
+                || (r.text.chars().count() > 20_000 && !text_from_table.contains(&index))
                 || r.visual_description.chars().count() > 20_000
                 || r.location.trim().is_empty()
                 || r.location.chars().count() > 300
@@ -195,7 +232,7 @@ pub fn parse_visual_diagnostic(
             if !valid_table(region) {
                 region.table = None;
                 v.limitations.push(format!(
-                    "区域 {}：表格行列或单元格与原文不一致，未采用表格，保留原文",
+                    "区域 {}：表格行列或单元格长度无效，未采用表格，保留原文",
                     region.region_ref
                 ));
             }
@@ -210,19 +247,30 @@ pub fn parse_visual_diagnostic(
             }
         }
     }
-    let invalid_parameters: Vec<_> = v
-        .regions
-        .iter()
-        .map(|region| !valid_parameters(region, &v.regions))
-        .collect();
-    for (region, invalid) in v.regions.iter_mut().zip(invalid_parameters) {
-        if invalid {
+    for region in &mut v.regions {
+        if !valid_parameters(region) {
             region.parameters.clear();
             v.limitations.push(format!(
-                "区域 {}：参数值或对象名称缺少图片原文依据，未采用参数索引，保留原文",
+                "区域 {}：参数字段长度或数量无效，未采用参数索引，保留原文",
                 region.region_ref
             ));
+        } else if region
+            .parameters
+            .iter()
+            .any(|parameter| !parameter_value_in_region(parameter, region))
+        {
+            region.uncertainties.push(PARAMETER_VALUE_UNANCHORED.into());
         }
+    }
+    for index in missing_visual {
+        v.regions[index]
+            .uncertainties
+            .push(VISUAL_INFORMATION_MISSING.into());
+    }
+    for index in text_from_table {
+        v.regions[index]
+            .uncertainties
+            .push(TEXT_DERIVED_FROM_TABLE.into());
     }
     // Empty interface placeholders carry no reading information. Validate their
     // shape above, then omit only these; an empty body is still a contract error.
@@ -282,35 +330,39 @@ fn empty_ui(region: &VisualRegion) -> bool {
         && region.parameters.is_empty()
 }
 fn valid_table(region: &VisualRegion) -> bool {
-    region.table.as_ref().is_none_or(|table| {
-        let text = compact(&region.text);
-        (1..=32).contains(&table.columns.len())
-            && (1..=200).contains(&table.rows.len())
-            && table
-                .rows
-                .iter()
-                .all(|row| row.len() == table.columns.len())
-            && table
-                .columns
-                .iter()
-                .chain(table.rows.iter().flatten())
-                .all(|cell| {
-                    cell.chars().count() <= 2000
-                        && (cell.is_empty() || text.contains(&compact(cell)))
-                })
-    })
+    region.table.as_ref().is_none_or(valid_table_shape)
 }
-fn valid_parameters(region: &VisualRegion, regions: &[VisualRegion]) -> bool {
+fn valid_table_shape(table: &VisualTable) -> bool {
+    (1..=32).contains(&table.columns.len())
+        && (1..=200).contains(&table.rows.len())
+        && table
+            .rows
+            .iter()
+            .all(|row| row.len() == table.columns.len())
+        && table
+            .columns
+            .iter()
+            .chain(table.rows.iter().flatten())
+            .all(|cell| cell.chars().count() <= 2000)
+}
+fn valid_parameters(region: &VisualRegion) -> bool {
     region.parameters.len() <= 50
         && region.parameters.iter().all(|parameter| {
             !parameter.subject.trim().is_empty()
                 && parameter.subject.chars().count() <= 300
                 && !parameter.value.trim().is_empty()
                 && parameter.value.chars().count() <= 300
-                && compact(&region.text).contains(&compact(&parameter.value))
-                && regions
-                    .iter()
-                    .any(|source| compact(&source.text).contains(&compact(&parameter.subject)))
+        })
+}
+fn parameter_value_in_region(parameter: &VisualParameter, region: &VisualRegion) -> bool {
+    let value = compact(&parameter.value);
+    compact(&region.text).contains(&value)
+        || region.table.as_ref().is_some_and(|table| {
+            table
+                .columns
+                .iter()
+                .chain(table.rows.iter().flatten())
+                .any(|cell| compact(cell).contains(&value))
         })
 }
 
@@ -485,7 +537,7 @@ mod tests {
         assert!(parse_visual_diagnostic(&value.to_string(), Some("stop")).is_err());
     }
     #[test]
-    fn table_preserves_rectangular_original_cells_and_rejects_invented_values() {
+    fn table_preserves_independent_observation_and_rejects_malformed_rows() {
         let mut value = scene();
         value["regions"][0]["text"] = json!("游戏 年龄 桌游A 3-6岁");
         value["regions"][0]["table"] =
@@ -509,11 +561,11 @@ mod tests {
                 .unwrap()
                 .regions[0]
                 .table
-                .is_none()
+                .is_some()
         );
     }
     #[test]
-    fn parameter_index_requires_image_subject_and_exact_region_value() {
+    fn parameter_candidates_survive_missing_subject_and_value_anchors() {
         let mut value = scene();
         value["regions"][0]["text"] = json!("桌游A 3-6岁 ★★★★");
         value["regions"][0]["parameters"] = json!([
@@ -522,12 +574,22 @@ mod tests {
         ]);
         assert!(parse_visual_diagnostic(&value.to_string(), Some("stop")).is_ok());
         value["regions"][0]["parameters"][0]["value"] = json!("6-9岁");
+        let unanchored = parse_visual_diagnostic(&value.to_string(), Some("stop")).unwrap();
+        assert_eq!(unanchored.regions[0].parameters.len(), 2);
         assert!(
-            parse_visual_diagnostic(&value.to_string(), Some("stop"))
-                .unwrap()
-                .regions[0]
-                .parameters
-                .is_empty()
+            unanchored.regions[0]
+                .uncertainties
+                .iter()
+                .any(|value| value == PARAMETER_VALUE_UNANCHORED)
+        );
+        value["regions"][0]["table"] = json!({"columns":["年龄"],"rows":[["6-9岁"]]});
+        let table_anchored = parse_visual_diagnostic(&value.to_string(), Some("stop")).unwrap();
+        assert_eq!(table_anchored.regions[0].parameters.len(), 2);
+        assert!(
+            !table_anchored.regions[0]
+                .uncertainties
+                .iter()
+                .any(|value| value == PARAMETER_VALUE_UNANCHORED)
         );
         value["regions"][0]["parameters"][0]["value"] = json!("3-6岁");
         value["regions"][0]["parameters"][0]["subject"] = json!("只在笔记上下文的商品名");
@@ -536,7 +598,8 @@ mod tests {
                 .unwrap()
                 .regions[0]
                 .parameters
-                .is_empty()
+                .len()
+                == 2
         );
     }
     #[test]
@@ -550,9 +613,9 @@ mod tests {
         let parsed = parse_visual_diagnostic(&value.to_string(), Some("stop")).unwrap();
         assert_eq!(parsed.regions[0].text, "温度 -5℃ 不要加热");
         assert_eq!(parsed.regions[0].role, VisualRole::ChapterHeading);
-        assert!(parsed.regions[0].table.is_none());
+        assert!(parsed.regions[0].table.is_some());
         assert!(parsed.regions[0].parameters.is_empty());
-        assert_eq!(parsed.limitations.len(), 2);
+        assert_eq!(parsed.limitations.len(), 1);
         value["regions"][0]["table"] = json!({"columns":[""],"rows":[["-5℃"]]});
         assert_eq!(
             parse_visual_diagnostic(&value.to_string(), Some("stop"))
@@ -640,6 +703,91 @@ mod tests {
         value["type"] = json!("json_object");
         value["schema"] = json!({});
         assert!(parse_visual_diagnostic(&value.to_string(), Some("stop")).is_err());
+    }
+    #[test]
+    fn missing_visual_is_distinct_from_explicit_empty_and_table_only_survives() {
+        let mut value = scene();
+        value["regions"][0]["text"] = json!("仍可用的正文");
+        value["regions"][0]["uncertainties"] = json!([]);
+        value["regions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("visualDescription");
+        let missing = parse_visual_diagnostic(&value.to_string(), Some("stop")).unwrap();
+        assert_eq!(missing.regions[0].text, "仍可用的正文");
+        assert!(
+            missing.regions[0]
+                .uncertainties
+                .iter()
+                .any(|s| s.contains("非文字信息尚未提供"))
+        );
+        value["regions"][0]["visualDescription"] = json!("");
+        assert!(
+            parse_visual_diagnostic(&value.to_string(), Some("stop"))
+                .unwrap()
+                .regions[0]
+                .uncertainties
+                .is_empty()
+        );
+        value["regions"][0].as_object_mut().unwrap().remove("text");
+        value["regions"][0]["table"] =
+            json!({"columns":["年龄","信号"],"rows":[["2-5","肩膀仍紧"],["4-7","肩膀下降"]]});
+        let table = parse_visual_diagnostic(&value.to_string(), Some("stop")).unwrap();
+        assert_eq!(
+            table.regions[0].table.as_ref().unwrap().rows[1][1],
+            "肩膀下降"
+        );
+        assert_eq!(
+            table.regions[0].text,
+            "年龄\t信号\n2-5\t肩膀仍紧\n4-7\t肩膀下降"
+        );
+        assert!(
+            table.regions[0]
+                .uncertainties
+                .iter()
+                .any(|s| s.contains("按行排列"))
+        );
+        value["regions"][0]["table"]["rows"][0] = json!(["invalid"]);
+        assert!(parse_visual_diagnostic(&value.to_string(), Some("stop")).is_err());
+    }
+    #[test]
+    fn missing_visual_does_not_merge_into_explicit_empty_on_same_image() {
+        let mut value = scene();
+        value["regions"][0]["text"] = json!("第一段");
+        value["regions"][0]["visualDescription"] = json!("");
+        value["regions"][0]["uncertainties"] = json!([]);
+        let mut missing = value["regions"][0].clone();
+        missing["regionRef"] = json!("second");
+        missing["text"] = json!("第二段");
+        missing.as_object_mut().unwrap().remove("visualDescription");
+        value["regions"].as_array_mut().unwrap().push(missing);
+        let parsed = parse_visual_diagnostic(&value.to_string(), Some("stop")).unwrap();
+        assert!(parsed.regions[0].uncertainties.is_empty());
+        assert_eq!(
+            parsed.regions[1].uncertainties,
+            vec![VISUAL_INFORMATION_MISSING]
+        );
+        assert_eq!(parsed.regions.len(), 2);
+        let blocks = linggan_evidence::cloud_ocr_adoption::blocks_from_visual(
+            &serde_json::to_value(parsed).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            !blocks
+                .iter()
+                .filter(|b| b["regionRef"] != "second")
+                .any(|b| b["issues"].as_array().is_some_and(|issues| issues
+                    .iter()
+                    .any(|i| i["code"] == "visual_information_missing")))
+        );
+        assert!(
+            blocks
+                .iter()
+                .filter(|b| b["regionRef"] == "second")
+                .any(|b| b["issues"].as_array().is_some_and(|issues| issues
+                    .iter()
+                    .any(|i| i["code"] == "visual_information_missing")))
+        );
     }
     #[test]
     fn native_context_is_separate_from_image_fields_and_legacy_input_still_reads() {

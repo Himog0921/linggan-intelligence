@@ -197,3 +197,12 @@ it('多张图片的页序说明只在文末保留一次，不逐图制造核对�
   fireEvent.click(screen.getByText(/^核对说明/));
   expect(screen.getAllByText('平台图片页序尚未确认')).toHaveLength(1);
 });
+
+it('已取得文字但缺少视觉信息仍显示含待补内容，而不是内容就绪', () => {
+  const issue = { key: 'missing-visual', code: 'visual_information_missing', message: '非文字信息尚未提供', resolution: 'reading_edit' };
+  const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { issues: [], blocks: [{ ref: 'r1', kind: 'paragraph', text: '仍可阅读的原文', issues: [issue] }] })] }));
+  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  expect(screen.getByText('含待补内容')).toBeVisible();
+  expect(screen.queryByText('内容就绪')).not.toBeInTheDocument();
+  expect(screen.getByText('仍可阅读的原文')).toBeVisible();
+});

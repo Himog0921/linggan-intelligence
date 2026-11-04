@@ -1,6 +1,5 @@
 //! Rebuildable, source-bound cross-image diagnostics; never resolves or rewrites a value.
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) fn specific(issue: &Value) -> bool {
     if issue["code"] == "cloud_image_unchecked" {
@@ -18,208 +17,168 @@ pub(crate) fn specific(issue: &Value) -> bool {
     )
 }
 
+fn parameter_attribute_label(value: Option<&str>) -> &'static str {
+    match value {
+        Some("rating") => "推荐指数",
+        Some("age") => "年龄",
+        Some("players") => "人数",
+        Some("duration") => "时长",
+        _ => "未知",
+    }
+}
+fn parameter_basis_label(value: Option<&str>) -> &'static str {
+    match value {
+        Some("package") => "包装标注",
+        Some("author_experience") => "作者体验",
+        Some("rule") => "规则",
+        _ => "未知",
+    }
+}
+
+/// A provider's subject/basis strings are candidates, not evidence of object binding.
+/// Rebuild from the selected blocks, including historical candidates, without name joins.
 pub(super) fn rebuild(dossier: &mut super::ResearchDossier) {
-    type Key = (String, String, String);
-    let mut parameters: BTreeMap<Key, Vec<(usize, String, String)>> = BTreeMap::new();
-    for (index, material) in dossier.materials.iter_mut().enumerate() {
+    for material in &mut dossier.materials {
         if let Some(issues) = material.get_mut("issues").and_then(Value::as_array_mut) {
-            issues.retain(|i| i["code"] != "cross_image_parameter_conflict");
+            issues.retain(|i| {
+                !matches!(
+                    i["code"].as_str(),
+                    Some(
+                        "cross_image_parameter_conflict"
+                            | "parameter_binding_unconfirmed"
+                            | "parameter_candidate_unanchored"
+                    )
+                )
+            });
         }
         if material["kind"] != "image" || material["sourceState"] == "restricted" {
             continue;
         }
-        for block in material["blocks"].as_array().into_iter().flatten() {
-            for p in block["parameters"].as_array().into_iter().flatten() {
-                let Some(subject) = p["subject"].as_str() else {
+        if let Some(blocks) = material["blocks"].as_array_mut() {
+            for block in blocks {
+                if !block
+                    .get("parameters")
+                    .is_some_and(|p| p.as_array().is_some_and(|p| !p.is_empty()))
+                {
                     continue;
+                }
+                let region = block["regionRef"].clone();
+                let reference = block["ref"].clone();
+                let count = if let Some(parameters) =
+                    block.get_mut("parameters").and_then(Value::as_array_mut)
+                {
+                    for parameter in parameters.iter_mut() {
+                        if region.is_string() {
+                            parameter["sourceRegionRef"] = region.clone();
+                            parameter["bindingStatus"] = json!("unconfirmed");
+                            parameter["basisStatus"] = json!("unconfirmed");
+                        }
+                    }
+                    parameters.len()
+                } else {
+                    0
                 };
-                let Some(attribute) = p["attribute"].as_str() else {
-                    continue;
-                };
-                let Some(basis) = p["basis"].as_str() else {
-                    continue;
-                };
-                let Some(value) = p["value"].as_str() else {
-                    continue;
-                };
-                // A block-only selection must include both the quoted value and its named object.
-                if !material["blocks"]
+                let text: String = super::content::block_text(block)
+                    .chars()
+                    .filter(|c| !c.is_whitespace())
+                    .collect();
+                let candidate_issues: Vec<Value> = block["parameters"].as_array().into_iter().flatten().enumerate().filter_map(|(index, p)| {
+                    let value = p["value"].as_str()?;
+                    let compact: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+                    (!text.contains(&compact)).then(|| json!({"key":format!("parameter_candidate_{index}"),"code":"parameter_candidate_unanchored",
+                        "message":format!("未绑定参数候选：{}；模型标注对象：{}，字段：{}，依据：{}；对象及依据未确认。",value,p["subject"].as_str().unwrap_or("未知"),parameter_attribute_label(p["attribute"].as_str()),parameter_basis_label(p["basis"].as_str())),
+                        "resolution":"reading_edit","blockRef":reference}))
+                }).collect();
+                if block.get("issues").is_none() {
+                    block["issues"] = json!([]);
+                }
+                if let Some(issues) = block["issues"].as_array_mut() {
+                    issues.retain(|i| {
+                        !matches!(
+                            i["code"].as_str(),
+                            Some(
+                                "cross_image_parameter_conflict"
+                                    | "parameter_binding_unconfirmed"
+                                    | "parameter_candidate_unanchored"
+                            )
+                        )
+                    });
+                    issues.extend(candidate_issues);
+                    if count > 0 {
+                        issues.push(json!({"key":"parameter_binding_unconfirmed","code":"parameter_binding_unconfirmed","message":"参数候选的对象与依据尚未确认，未据此合并跨图商品参数。","resolution":"reading_edit","blockRef":reference}));
+                    }
+                }
+            }
+        }
+    }
+    // Selection must not preserve old, wider-scope parameter relations in AI sources.
+    for fragment in &mut dossier.fragments {
+        if let Some(block) = dossier
+            .materials
+            .iter()
+            .flat_map(|m| m["blocks"].as_array().into_iter().flatten())
+            .find(|b| b["ref"] == fragment.fragment_id)
+        {
+            if block.get("parameters").is_none() {
+                continue;
+            }
+            fragment.structure = block.clone();
+            fragment.issues.retain(|i| {
+                !matches!(
+                    i["code"].as_str(),
+                    Some(
+                        "cross_image_parameter_conflict"
+                            | "parameter_binding_unconfirmed"
+                            | "parameter_candidate_unanchored"
+                    )
+                )
+            });
+            fragment.issues.extend(
+                block["issues"]
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .any(|b| {
-                        b["sourceRole"] != "ui"
-                            && compact(&super::content::block_text(b)).contains(&compact(subject))
+                    .filter(|i| {
+                        matches!(
+                            i["code"].as_str(),
+                            Some(
+                                "parameter_binding_unconfirmed" | "parameter_candidate_unanchored"
+                            )
+                        )
                     })
-                {
-                    continue;
-                }
-                parameters
-                    .entry((compact(subject), attribute.into(), basis.into()))
-                    .or_default()
-                    .push((
-                        index,
-                        value.into(),
-                        block["ref"].as_str().unwrap_or("").into(),
-                    ));
-            }
+                    .cloned(),
+            );
         }
-    }
-    for ((subject, attribute, basis), entries) in parameters {
-        let units: BTreeSet<_> = entries.iter().map(|e| e.0).collect();
-        let values: BTreeSet<_> = entries
-            .iter()
-            .map(|e| comparable(&attribute, &e.1))
-            .collect();
-        if units.len() < 2 || values.len() < 2 {
-            continue;
-        }
-        let label = match attribute.as_str() {
-            "rating" => "推荐星级",
-            "age" => "年龄",
-            "players" => "人数",
-            "duration" => "时长",
-            _ => continue,
-        };
-        let basis_label = match basis.as_str() {
-            "package" => "包装标注",
-            "author_experience" => "作者体验",
-            _ => "规则",
-        };
-        // Stable image numbers are local reading positions, explicitly not platform page numbers.
-        let observations: Vec<_> = entries
-            .iter()
-            .map(|(index, value, _)| {
-                let number = dossier.materials[..=*index]
-                    .iter()
-                    .filter(|m| m["kind"] == "image")
-                    .count();
-                format!("图片资料{number}：{value}")
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
-        let message = format!(
-            "{subject} · {label}（{basis_label}）跨图不一致：{}。请核对原图，未自动选值。",
-            observations.join("；")
-        );
-        for (index, _, block_ref) in entries {
-            let issue = json!({"key":format!("parameter_conflict:{subject}:{attribute}:{basis}"),"code":"cross_image_parameter_conflict","message":message,"resolution":"reading_edit","blockRef":block_ref});
-            if let Some(issues) = dossier.materials[index]["issues"].as_array_mut() {
-                if !issues.iter().any(|i| i["key"] == issue["key"]) {
-                    issues.push(issue);
-                }
-            }
-        }
-    }
-    // Selection rebuilds diagnostics from only the selected blocks; no unselected value leaks.
-    for fragment in &mut dossier.fragments {
-        fragment
-            .issues
-            .retain(|i| i["code"] != "cross_image_parameter_conflict");
-        for material in &dossier.materials {
-            for issue in material["issues"].as_array().into_iter().flatten() {
-                if issue["code"] == "cross_image_parameter_conflict"
-                    && issue["blockRef"] == fragment.fragment_id
-                {
-                    fragment.issues.push(issue.clone());
-                }
-            }
-        }
-    }
-}
-fn compact(text: &str) -> String {
-    text.chars().filter(|c| !c.is_whitespace()).collect()
-}
-
-// Normalize only equivalent written units; never rewrite the cited source value.
-fn comparable(attribute: &str, value: &str) -> String {
-    let value = compact(value)
-        .to_lowercase()
-        .replace(['–', '—', '～', '~'], "-");
-    match attribute {
-        "duration" => value.replace("分钟", "min").replace("mins", "min"),
-        "players" | "age" => {
-            let numeric = if attribute == "players" {
-                value.replace("players", "").replace("player", "").replace('人', "")
-            } else {
-                value.replace("years", "").replace("year", "").replace('岁', "")
-            };
-            if numeric.chars().any(|c| c.is_ascii_digit())
-                && numeric.chars().all(|c| c.is_ascii_digit() || matches!(c, '+' | '-' | '.')) {
-                numeric
-            } else { value }
-        },
-        "rating" => {
-            let stars: String = value.chars().filter(|c| *c != '\u{fe0f}').collect();
-            if !stars.is_empty() && stars.chars().all(|c| matches!(c, '★' | '⭐' | '🌟')) {
-                format!("filled-stars:{}", stars.chars().count())
-            } else { value }
-        },
-        _ => value,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn dossier(values: &[(&str, &str, &str)]) -> super::super::ResearchDossier {
-        super::super::ResearchDossier {
-            contract: super::super::VERSION, work_ref: uuid::Uuid::nil(), revision: String::new(), material_revision: String::new(), as_of: String::new(), note:json!({}),
-            materials: values.iter().enumerate().map(|(i,(subject,basis,value))|json!({"ref":format!("i{i}"), "kind":"image", "sourceState":"present", "issues":[], "blocks":[{"ref":format!("b{i}"),"kind":"paragraph","text":format!("{subject} {value}"),"parameters":[{"subject":subject,"attribute":"duration","basis":basis,"value":value}]}]})).collect(),
+    #[test]
+    fn repeated_names_do_not_bind_parameters_or_drop_candidates() {
+        let mut d = super::super::ResearchDossier {
+            contract: super::super::VERSION, work_ref: uuid::Uuid::nil(), revision: String::new(), material_revision:String::new(),as_of:String::new(),note:json!({}),
+            materials:["30min","15分钟"].iter().enumerate().map(|(i,value)| json!({"kind":"image","sourceState":"present","issues":[{"code":"cross_image_parameter_conflict"}],"blocks":[{"ref":format!("b{i}"),"kind":"paragraph","regionRef":format!("r{i}"),"text":format!("游戏 {value}"),"parameters":[{"subject":"游戏","attribute":"duration","value":value,"basis":"package"}]}]})).collect(),
             reading_view:json!({}),coverage:json!({}),attachments:json!({}),selection:json!({}),fragments:vec![],media:vec![],media_inventory:vec![],candidate_statuses:vec![],metadata:json!({}),
-        }
-    }
-    #[test]
-    fn conflicts_preserve_both_sources_and_do_not_compare_unlike_claims() {
-        let mut d = dossier(&[
-            ("山河之旅", "package", "30min"),
-            ("山河之旅", "package", "15分钟"),
-            ("山河之旅", "author_experience", "10分钟"),
-            ("其他游戏", "package", "20分钟"),
-        ]);
-        let original = d.materials[0]["blocks"].clone();
+        };
         rebuild(&mut d);
-        assert_eq!(d.materials[0]["blocks"], original);
-        assert!(
-            d.materials[0]["issues"][0]["message"]
-                .as_str()
-                .unwrap()
-                .contains("图片资料2：15分钟")
+        assert!(d.materials.iter().all(|m| m["issues"] == json!([])));
+        assert_eq!(
+            d.materials[0]["blocks"][0]["parameters"][0]["value"],
+            "30min"
         );
-        assert_eq!(d.materials[2]["issues"], json!([]));
-        assert_eq!(d.materials[3]["issues"], json!([]));
+        assert_eq!(
+            d.materials[0]["blocks"][0]["parameters"][0]["bindingStatus"],
+            "unconfirmed"
+        );
         rebuild(&mut d);
-        assert_eq!(d.materials[0]["issues"].as_array().unwrap().len(), 1);
-        d.materials.remove(1);
-        rebuild(&mut d);
-        assert_eq!(d.materials[0]["issues"], json!([]));
-    }
-    #[test]
-    fn selected_parameter_without_its_object_name_does_not_leak_a_cross_block_claim() {
-        let mut d = dossier(&[("游戏", "package", "30min"), ("游戏", "package", "15分钟")]);
-        d.materials[0]["blocks"][0]["text"] = json!("30min");
-        rebuild(&mut d);
-        assert!(d.materials.iter().all(|m| m["issues"] == json!([])));
-    }
-    #[test]
-    fn equivalent_star_glyphs_and_explicit_age_player_units_are_not_conflicts() {
-        for (attribute, left, right) in [("rating", "★★★★★", "🌟🌟🌟🌟🌟"), ("rating", "⭐⭐⭐⭐⭐", "★★★★★"), ("age", "5+", "5岁+"), ("players", "2-4", "2–4人")] {
-            assert_eq!(comparable(attribute, left), comparable(attribute, right));
-        }
-        for (attribute, left, right) in [("rating", "★★★", "★★★★"), ("rating", "★★★☆☆", "★★★"), ("age", "5+", "5"), ("age", "不到5岁", "5"), ("duration", "30", "15-30分钟")] {
-            assert_ne!(comparable(attribute, left), comparable(attribute, right));
-        }
-    }
-    #[test]
-    fn equivalent_units_and_restricted_sources_do_not_create_conflicts() {
-        let mut d = dossier(&[
-            ("游戏", "package", "30min"),
-            ("游戏", "package", "30 分钟"),
-            ("游戏", "package", "15分钟"),
-        ]);
-        d.materials[2]["sourceState"] = json!("restricted");
-        rebuild(&mut d);
-        assert!(d.materials.iter().all(|m| m["issues"] == json!([])));
+        assert_eq!(
+            d.materials[0]["blocks"][0]["issues"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
     }
 }

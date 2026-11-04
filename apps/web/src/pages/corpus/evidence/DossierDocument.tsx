@@ -49,6 +49,7 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
   const sections = useMemo(() => resolveReadingSections(dossier), [dossier]);
   const gaps = useMemo(() => readingGaps(dossier), [dossier]);
   const hasMissing = gaps.length > 0;
+  const hasMissingInformation = dossier.materials.some(unit => [...unit.issues, ...unit.blocks.flatMap(block => block.issues ?? [])].some(issue => issue.code === 'visual_information_missing'));
   const selection = dossier.selection;
   const memoryKey = `dossier-reading:v3:${domain}:${dossier.workRef}:${JSON.stringify([selection.mode, selection.kinds, selection.unitRefs, selection.blockRefs, selection.imagePages])}`;
   const position = useDossierReadingPosition(root, toolbar, memoryKey, active, dossier.revision);
@@ -70,7 +71,7 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
     <div ref={toolbar} className={`${styles.toolbar} ${tools.toolbar}`}>
       <div className={styles.toolbarContext}>
           <div className={styles.snapshot}><DossierIcon name="clock"/><span>数据截至</span><time dateTime={dossier.asOf}>{humanMoment(dossier.asOf)}</time><span className={styles.zone}>UTC+8</span></div>
-          <span className={styles.availability} data-complete={gaps.length === 0 && sections.length > 0}><DossierIcon name={gaps.length ? 'info' : 'check'}/>{gaps.length ? '含待补内容' : sections.length ? '内容就绪' : '暂无可读文字'}</span>
+          <span className={styles.availability} data-complete={gaps.length === 0 && !hasMissingInformation && sections.length > 0}><DossierIcon name={gaps.length || hasMissingInformation ? 'info' : 'check'}/>{gaps.length || hasMissingInformation ? '含待补内容' : sections.length ? '内容就绪' : '暂无可读文字'}</span>
         {showNavigation ? <DossierNavigation sections={navSections} times={times} current={position.current} root={root} toolbar={toolbar} onJump={jump}/> : null}
         <div className={`${styles.actions} ${tools.actions}`}><ActionButton className={`${styles.control} ${styles.quiet}`} aria-label="刷新底稿" title="刷新底稿" disabled={busy} onClick={onRefresh}><DossierIcon name="refresh"/><span className={`${styles.refreshLabel} ${tools.refreshLabel}`}>刷新</span></ActionButton><ActionButton className={`${styles.control} ${styles.primary} ${tools.export}`} onClick={openExport}><DossierIcon name="download"/>导出</ActionButton></div>
       </div>

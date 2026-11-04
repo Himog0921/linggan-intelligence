@@ -41,7 +41,10 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
             out.push_str("视觉描述：\n");
         } else if f.structure["contentType"] == "extracted_text" {
             out.push_str(match f.structure["sourceRole"].as_str() {
-                Some("background") => "背景文字：\n", Some("brand") => "品牌文字：\n", Some("subtitle") => "字幕文字：\n", _ => "图片文字：\n",
+                Some("background") => "背景文字：\n",
+                Some("brand") => "品牌文字：\n",
+                Some("subtitle") => "字幕文字：\n",
+                _ => "图片文字：\n",
             });
         }
         out.push_str(&f.text);
@@ -50,7 +53,15 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
             if super::quality::specific(issue) {
                 if let Some(message) = issue["message"].as_str() {
                     if seen_issues.insert((
-                        if matches!(issue["code"].as_str(), Some("cross_image_parameter_conflict" | "page_order_unknown" | "image_total_unknown")) {
+                        if matches!(
+                            issue["code"].as_str(),
+                            Some(
+                                "cross_image_parameter_conflict"
+                                    | "parameter_binding_unconfirmed"
+                                    | "page_order_unknown"
+                                    | "image_total_unknown"
+                            )
+                        ) {
                             Uuid::nil()
                         } else {
                             f.source_ref
@@ -353,6 +364,49 @@ mod tests {
         assert!(!output.contains("- 任务"));
         assert!(output.contains("保留实际发布文案。"));
         assert_eq!(serde_json::to_value(&d).unwrap(), before);
+    }
+
+    #[test]
+    fn ai_keeps_unanchored_parameter_candidates_with_explicit_binding_state() {
+        let mut d = fixture(Some("参数核对"), None);
+        d.materials = vec![
+            json!({"ref":"image-unit","kind":"image","sourceState":"present","blocks":[
+            {"ref":"image-param","kind":"paragraph","text":"原图标题","speaker":"unconfirmed",
+             "contentType":"extracted_text","regionRef":"r1","parameters":[
+                {"subject":"候选商品","attribute":"age","value":"8+","basis":"package"}]}]}),
+        ];
+        d.fragments = vec![Fragment {
+            fragment_id: "image-param".into(),
+            source_ref: Uuid::nil(),
+            field: "ocr".into(),
+            source_version: "v1".into(),
+            start: 0,
+            end: 4,
+            text: "原图标题".into(),
+            speaker: "unconfirmed".into(),
+            structure: d.materials[0]["blocks"][0].clone(),
+            issues: vec![],
+            reading_ref: None,
+            unit_ref: None,
+        }];
+        super::super::reading::rebuild(&mut d);
+        let text = render_materials(&d.fragments);
+        assert!(text.contains("原图标题"));
+        assert_eq!(text.matches("未绑定参数候选：8+").count(), 1);
+        assert!(text.contains("字段：年龄，依据：包装标注"));
+        let sources = context_sources(&d);
+        let candidate = sources
+            .iter()
+            .find(|s| s["blockRef"] == "image-param")
+            .unwrap();
+        assert_eq!(
+            candidate["structure"]["parameters"][0]["bindingStatus"],
+            "unconfirmed"
+        );
+        assert_eq!(
+            candidate["structure"]["parameters"][0]["sourceRegionRef"],
+            "r1"
+        );
     }
 
     #[test]

@@ -54,7 +54,24 @@ fn source(materials: &[Value], kind: &str) -> Value {
     } else if units.is_empty() || all("not_acquired") {
         "not_acquired"
     } else if readings == units.len() {
-        "available"
+        let missing_information = units.iter().any(|unit| {
+            unit["blocks"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|block| {
+                    block["issues"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .any(|issue| issue["code"] == "visual_information_missing")
+                })
+        });
+        if missing_information {
+            "partial"
+        } else {
+            "available"
+        }
     } else if readings > 0 {
         "partial"
     } else {
@@ -66,6 +83,17 @@ fn source(materials: &[Value], kind: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn missing_visual_information_is_partial_without_discarding_the_reading() {
+        let mut image = json!({"kind":"image","sourceState":"present","currentRevisionRef":"reading",
+            "blocks":[{"kind":"paragraph","text":"已有文字","issues":[{"code":"visual_information_missing"}]}]});
+        assert_eq!(
+            source(&[image.clone()], "image"),
+            json!({"state":"partial","units":1,"readings":1})
+        );
+        image["blocks"][0]["issues"] = json!([]);
+        assert_eq!(source(&[image], "image")["state"], "available");
+    }
     #[test]
     fn native_body_is_available_without_a_persisted_reading() {
         let body = json!({"kind":"body","sourceState":"present","currentRevisionRef":null,

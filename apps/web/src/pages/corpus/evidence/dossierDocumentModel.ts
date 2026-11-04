@@ -139,6 +139,6 @@ export function remainingReadingIssues(dossier: Dossier, sections: readonly Reso
 export function imageReviewIssues(groups: readonly ResolvedReadingGroup[], unitRef: string): ReadingIssue[] {
   return groups.filter(group => group.entries.some(entry => entry.unit.ref === unitRef)).flatMap(group => group.issues.filter(issue => issue.code !== 'page_order_unknown' && issue.code !== 'image_total_unknown').map(issue => {
     const block = group.entries.find(entry => entry.block.ref === issue.blockRef)?.block;
-    return block?.regionLabel ? { ...issue, message: `${block.regionLabel}：${issue.message}` } : issue;
+    return block?.regionLabel && issue.code !== 'parameter_binding_unconfirmed' ? { ...issue, message: `${block.regionLabel}：${issue.message}` } : issue;
   }));
 }
