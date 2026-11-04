@@ -67,7 +67,7 @@ describe('V3 局部创作空间', () => {
 
 describe('全站唯一React导航', () => {
   it('入口只指向职责根路由；未开放职责保持禁用，个人菜单保留设置入口', () => {
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>页面</AppShell>);
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: "语料", meta: null }}>页面</AppShell>);
     const navigation = screen.getByRole('navigation', {name:'一级导航'});
     const links = within(navigation).getAllByRole('link');
     expect(links.map(link => link.getAttribute('href'))).toEqual(['/topics','/corpus','/collection','/ops']);
@@ -77,7 +77,7 @@ describe('全站唯一React导航', () => {
   });
   it('只在服务器确认退出后才离开当前工作区；未确认时保留可重试提示', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('offline')));
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>页面</AppShell>);
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: "语料", meta: null }}>页面</AppShell>);
     fireEvent.click(screen.getByText('个人菜单'));
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('退出未完成'));
