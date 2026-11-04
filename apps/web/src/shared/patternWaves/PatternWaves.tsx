@@ -162,7 +162,7 @@ const INTRO_SECONDS = 2;
 
 const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max);
 
-const luminance = (rgba: number[]) => 0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2];
+const luminance = (rgba: Rgba) => 0.2126 * rgba[0] + 0.7152 * rgba[1] + 0.0722 * rgba[2];
 
 const parseColor = (value: string, fallback: Rgba): Rgba => {
   try {
@@ -917,6 +917,7 @@ const PatternWaves = ({
     const resizeObserver = new ResizeObserver(resize);
     resizeObserver.observe(container);
     const intersectionObserver = new IntersectionObserver(([entry]) => {
+      if (!entry) return;
       visible = entry.isIntersecting;
       start();
     });
