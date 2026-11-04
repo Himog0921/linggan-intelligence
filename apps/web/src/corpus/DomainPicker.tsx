@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { DomainScopePicker } from '../shared/DomainScopePicker';
 import { Link } from 'react-router';
 import { domainMeta, type ShellDomain } from './corpusShellApi';
 
@@ -18,27 +18,19 @@ interface DomainPickerProps {
  * 或一个领域也没有时，整个控件不渲染——一个永远只有一项的下拉是噪音。
  */
 export function DomainPicker({ domains, selected, action }: DomainPickerProps) {
-  const [open, setOpen] = useState(false);
-  const summary = useRef<HTMLElement>(null);
   const current = domains.find(domain => domain.domainRef === selected) ?? null;
   if (domains.length === 0 || (domains.length < 2 && current !== null)) return null;
   return (
-    <details
-      className="v7-domain-picker"
-      open={open}
-      onToggle={event => setOpen(event.currentTarget.open)}
-      onKeyDown={event => {
-        if (event.key === 'Escape' && open) {
-          setOpen(false);
-          summary.current?.focus();
-        }
-      }}
+    <DomainScopePicker
+      label="切换当前观察领域"
+      summary={
+        <>
+          <span>{current ? current.name : '选择领域'}</span>
+          <small>{current ? domainMeta(current) : '请选择一个领域'}</small>
+          <i aria-hidden="true" />
+        </>
+      }
     >
-      <summary ref={summary} aria-label="切换当前观察领域">
-        <span>{current ? current.name : '选择领域'}</span>
-        <small>{current ? domainMeta(current) : '请选择一个领域'}</small>
-        <i aria-hidden="true" />
-      </summary>
       <nav aria-label="可选观察领域">
         {domains.map(domain => {
           const meta = domainMeta(domain);
@@ -48,7 +40,12 @@ export function DomainPicker({ domains, selected, action }: DomainPickerProps) {
               to={`${action}?domain=${encodeURIComponent(domain.domainRef)}`}
               aria-current={domain.domainRef === selected ? 'page' : undefined}
               aria-label={`${domain.name}，${meta}`}
-              onClick={() => setOpen(false)}
+              onClick={() => {
+                const details = document.activeElement instanceof HTMLElement
+                  ? document.activeElement.closest('details')
+                  : null;
+                details?.removeAttribute('open');
+              }}
             >
               <span>{domain.name}</span>
               <small>{meta}</small>
@@ -56,6 +53,6 @@ export function DomainPicker({ domains, selected, action }: DomainPickerProps) {
           );
         })}
       </nav>
-    </details>
+    </DomainScopePicker>
   );
 }
