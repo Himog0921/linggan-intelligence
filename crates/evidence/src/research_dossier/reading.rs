@@ -5,9 +5,10 @@ use std::collections::BTreeMap;
 
 mod effective;
 mod groups;
-pub(super) use groups::{clip_sections, image_text_gap_pages, tags_for_group};
+pub(super) use groups::{clip_sections, tags_for_group};
 
 pub(super) fn rebuild(dossier: &mut ResearchDossier) {
+    super::quality::rebuild(dossier);
     title(
         &mut dossier.note,
         &dossier.materials,
@@ -44,7 +45,7 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .filter(|b| content::has_source_text(b))
+                    .filter(|b| content::has_source_text(b) && b["sourceRole"] != "ui")
                     .filter_map(|b| b["ref"].as_str().map(str::to_owned)),
             );
         }

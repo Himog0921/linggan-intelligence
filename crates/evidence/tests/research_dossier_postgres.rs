@@ -230,7 +230,7 @@ async fn images(db: &Database, id: &str, total: u32, slots: &[(&str, u32, char)]
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn page_holes_repeated_images_and_cover_dedup_require_explicit_first_page_proof() {
+async fn observed_images_keep_slot_identity_without_synthetic_page_holes() {
     let db = fixture::proof_database("dossier_v2_pages").await;
     let work = detail(&db, "pages", json!({"bodyText":"有缺页的笔记"})).await;
     images(
@@ -253,13 +253,15 @@ async fn page_holes_repeated_images_and_cover_dedup_require_explicit_first_page_
         .collect();
     assert_eq!(
         pages.len(),
-        4,
-        "cover duplicates proven page one; repeated real page three remains"
+        3,
+        "cover duplicates proven page one; repeated observed image remains"
     );
-    assert_eq!(read.coverage["imageInventory"]["missingPages"], json!([2]));
+    assert_eq!(read.coverage["imageInventory"]["missingPages"], json!([]));
     assert_eq!(read.coverage["imageInventory"]["acquiredPages"], 3);
-    assert_eq!(pages[1]["sourceState"], "not_acquired");
-    assert_eq!(pages[2]["page"], 3);
+    assert_eq!(pages[0]["slotKey"], "xhs:pages:image:1");
+    assert_eq!(pages[1]["slotKey"], "xhs:pages:image:3");
+    assert_eq!(pages[2]["slotKey"], "xhs:pages:image:4");
+    assert!(pages.iter().all(|image| image["sourceState"] == "present"));
     let sparse = detail(&db, "sparse", json!({"bodyText":"首页未取得"})).await;
     images(&db, "sparse", 3, &[("cover", 1, 'c'), ("image", 3, 'c')]).await;
     let read = dossier::read(&db, sparse).await.unwrap().unwrap();
@@ -268,18 +270,16 @@ async fn page_holes_repeated_images_and_cover_dedup_require_explicit_first_page_
             .iter()
             .filter(|m| m["kind"] == "image")
             .count(),
-        4,
-        "a matching later page cannot prove cover equals first page"
+        2,
+        "a matching later image cannot prove cover equals first image"
     );
     assert!(
         read.materials
             .iter()
             .any(|m| m["slotKey"] == "xhs:sparse:cover:1")
     );
-    assert_eq!(
-        read.coverage["imageInventory"]["missingPages"],
-        json!([1, 2])
-    );
+    assert_eq!(read.coverage["imageInventory"]["missingPages"], json!([]));
+    assert!(read.materials.iter().any(|image| image["slotKey"] == "xhs:sparse:image:3"));
 }
 
 #[tokio::test]
@@ -689,7 +689,8 @@ async fn recognition_gaps_stay_in_source_but_never_become_reading_or_ai_text() {
     let rendered = dossier::render_materials(&read.fragments);
     assert!(rendered.contains("[S1] 图片文字") && rendered.contains("实际识读到的完整内容"));
     assert!(!rendered.contains("这一处无法识读的诊断标签") && !rendered.contains("[S2]"));
-    assert_eq!(rendered.matches("待确认：局部文字缺失").count(), 1);
+    assert!(!rendered.contains("待确认：局部文字缺失"));
+    assert!(!dossier::markdown(&read).contains("核对说明"));
     let coverage = read.coverage.clone();
     dossier::select(
         &mut read,

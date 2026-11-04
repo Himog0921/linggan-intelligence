@@ -145,12 +145,17 @@
   min-width: 0;
 }
 
-.commentMeta {
+.commentLikes {
+  display: inline;
+  white-space: nowrap;
+  margin-left: var(--lgi-space-2);
   margin: 0;
   color: var(--lgi-muted);
   font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-data);
   font-variant-numeric: tabular-nums;
 }
+
+.commentLikes span { color: var(--lgi-signal-ink); }
 
 .commentText {
   margin: var(--lgi-space-1) 0 0;

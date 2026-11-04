@@ -76,7 +76,8 @@ describe('页面样式只用 LIDS Token', () => {
       // 2026-11-02 task #15: first-group heading override narrowed to a heading that is the first block;
       // later headings in the same group keep their 17px top margin.
       // 2026-11-02 task #24: focus-time trigger keeps the approved local menu but fixes its 30px control height.
-      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('c3bd755dfeae84f3ca9a18a0a468282dd457fba26e4c03be4b8ecb5efa0654b5');
+      // 2026-11-04: Mog requested stable Markdown/JSON export dialog dimensions.
+      expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe('3cfb8c64aa8d995a721c2929f92e54a98fff812116bce65fe7a0bb83fa01946f');
       return;
     }
     expect(violations(file)).toEqual([]);

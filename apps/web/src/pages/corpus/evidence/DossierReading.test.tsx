@@ -35,10 +35,9 @@ it('研究底稿只读打开保留局部失败，不默认加载候选或提交�
   kit.route('GET', path, ok(dossierJson(1, { note: { platformTitle: null, displayTitle: null, displayTitleBasis: 'missing' }, materials: [dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null, issues: [{ key: 'ocr', code: 'recognition_failed', message: '此页识别失败', resolution: 'source_refresh' }] })] })));
   try {
     renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active />);
-    expect(await screen.findByText(/第 1、2 页文字待补全/)).toBeVisible();
-    expect(screen.getByText('此页识别失败')).not.toBeVisible();
-    fireEvent.click(screen.getByText(/^核对说明/));
-    expect(screen.getByText('此页识别失败')).toBeVisible();
+    expect(await screen.findByRole('heading', { name: '缺失内容' })).toBeVisible();
+    expect(screen.queryByText('此页识别失败')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^核对说明/)).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: '缺失内容' })).toBeVisible();
     expect(screen.queryByText('对照原图 · 第 1 页')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('审核人')).not.toBeInTheDocument();
@@ -126,7 +125,7 @@ it.each(['image', 'video_frame'] as const)('%s 的机器处理说明保留在来
   expect(screen.queryByText('处理完成，未检出文字。')).not.toBeInTheDocument();
   expect(screen.queryByText('处理完成，尚无当前读本。')).not.toBeInTheDocument();
 });
-it('完成但无文字仍合并提示真实缺页，内部待整理诊断不重复展示', () => {
+it('完成但无文字保留待补状态，不展示页码或内部待整理诊断', () => {
   const first = dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null, processing: { state: 'completed', reason: null } });
   const second = dossierMaterialJson(2, { blocks: [], reading: null, currentRevisionRef: null, processing: { state: 'completed', reason: null },
     issues: [{ key: 'pending-layout', code: 'existing_result_pending', message: '已有识别结果，待整理。', resolution: 'source_refresh' }] });
@@ -134,7 +133,8 @@ it('完成但无文字仍合并提示真实缺页，内部待整理诊断不重�
   render(<DossierReading dossier={dossier} titleRendered />);
   expect(screen.queryByText('已有识别结果，待整理。')).not.toBeInTheDocument();
   expect(screen.queryByText('处理完成，尚无当前读本。')).not.toBeInTheDocument();
-  expect(screen.getAllByText(/第 1、2 页文字待补全/)).toHaveLength(1);
+  expect(screen.getByRole('region', { name: '待补内容' })).toBeVisible();
+  expect(screen.queryByText(/第 1、2 页文字待补全/)).not.toBeInTheDocument();
   expect(screen.queryByText('处理完成，暂无可读文字。')).not.toBeInTheDocument();
 });
 
@@ -184,7 +184,7 @@ it.each(['works', 'dossier'] as const)('%s 只显示规范有效内容，封面�
   expect(screen.getByRole('heading', { name: '智商 133 但专注力差，除了用药家庭中做好这几点' })).toBeVisible();
   expect(screen.getByText('第一步：清理桌面，只留一科。')).toBeVisible();
   expect(view.container.textContent).not.toMatch(/万物|识别不可靠|总页数未知|角色未确认|画面文字/);
-  expect(screen.getByText('平台图片页序尚未确认')).not.toBeVisible();
+  expect(screen.queryByText('平台图片页序尚未确认')).not.toBeInTheDocument();
   expect(screen.getAllByText(/尚无可用转录/)).toHaveLength(1);
   expect(payload.dossier.materials[0]?.blocks).toHaveLength(6);
   expect(payload.dossier.materials[0]?.issues[0]?.code).toBe('page_order_unknown');
@@ -208,5 +208,27 @@ it.each([false, true])('未知页码的全 gap 不冒充完成；含有效文字
     expect(screen.getAllByText('暂无可用文字。')).toHaveLength(1);
     expect(screen.getByText('含待补内容')).toBeVisible();
     expect(screen.queryByText('内容就绪')).not.toBeInTheDocument();
+  }
+});
+
+it.each(['works', 'document'])('%s 保留两张原图来源与后台冲突数据，正文不显示核对提示', surface => {
+  const issue = { key: 'conflict', code: 'cross_image_parameter_conflict', message: '山河之旅时长：30min；15分钟。', resolution: 'reading_edit' };
+  const payload = parseDossierPayload(dossierJson(1, { materials: [
+    dossierMaterialJson(1, { issues: [issue], originalUrl: '/api/local/media/a' }),
+    dossierMaterialJson(2, { issues: [issue], originalUrl: '/api/local/media/b' }),
+  ] }));
+  const onSource = vi.fn();
+  render(surface === 'works' ? <DossierReading dossier={payload.dossier} onSource={onSource}/> : <DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  expect(screen.queryByLabelText('跨图参数待核对')).not.toBeInTheDocument();
+  expect(screen.queryByText('山河之旅时长：30min；15分钟。', { exact: false })).not.toBeInTheDocument();
+  expect(payload.dossier.materials.map(unit => unit.issues[0]?.code)).toEqual(['cross_image_parameter_conflict', 'cross_image_parameter_conflict']);
+  if (surface === 'works') {
+    fireEvent.click(screen.getByText('来源'));
+    const sourceButtons = screen.getAllByRole('button');
+    expect(sourceButtons).toHaveLength(2);
+    sourceButtons.forEach(button => fireEvent.click(button));
+    expect(onSource.mock.calls.map(([unit]) => unit.originalUrl)).toEqual(['/api/local/media/a', '/api/local/media/b']);
+  } else {
+    expect(screen.getAllByRole('link', { name: '查看原图' }).map(link => link.getAttribute('href'))).toEqual(['/api/local/media/a', '/api/local/media/b']);
   }
 });

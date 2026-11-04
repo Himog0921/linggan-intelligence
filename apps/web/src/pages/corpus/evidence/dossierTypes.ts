@@ -21,6 +21,8 @@ interface BlockBase extends BlockLocation {
   ref: string; speaker?: Speaker; issues?: DossierIssue[];
   contentType?: 'extracted_text' | 'visual_description';
   regionRef?: string; regionLabel?: string;
+  sourceRole?: 'main_title' | 'body' | 'chapter_heading' | 'subtitle' | 'background' | 'ui' | 'brand' | 'call_to_action' | 'other' | 'uncertain';
+  parameters?: { subject: string; attribute: 'rating' | 'age' | 'players' | 'duration'; value: string; basis: 'package' | 'author_experience' | 'rule'; sourceRegionRef?: string; bindingStatus?: 'unconfirmed'; basisStatus?: 'unconfirmed' }[];
 }
 export type DossierBlock = BlockBase & (
   | { kind: 'heading'; text: string; level?: number }

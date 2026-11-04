@@ -1,12 +1,25 @@
 # 研究底稿 v2：统一阅读与唯一读取合同
 
 > 状态: 权威当前
-> 最后核对: 2026-11-02（统一有效内容读取修复候选）
+> 最后核对: 2026-11-04（在线图片离线恢复候选，未发布）
 > 适用范围: RESEARCH-DOSSIER-V2 / STANDARD-DOSSIER-001；字段与行为合同，发布状态单独核对
 > 事实来源: Mog 本轮确认的研究底稿标准、开发期直接替换要求与本合同验收矩阵
 > 冲突时以谁为准: 用户最新确认、真实来源与验证；本稿替代 v1 及 note-material-input 的并行对外合同
 
 本合同沿用唯一 v2 底稿与当前读本发布能力。本轮只修复有效内容选择和阅读编排，复用定版本地 OCR/ASR；不调参、不更换引擎、不新增模型外发。2026-11-02 的阅读修正仍是交付候选；主线、运行和本地视频批次完成情况分别以实际回执为准。
+
+## 2026-11-04 收口决定
+
+Mog 本次明确授权以下规则，替代下文历史条款中的页码核对、核对说明展示、实况动态附件及手动识别人工优先例外：
+
+- 图文笔记的实况位置只保留静态图片。配套 motion 不进入作品图组、底稿、音轨或帧处理；独立视频不受影响。旧 OCR、原始观察及历史读本保留。
+- 不再推导缺页占位或生成页序核对问题；已取得图片按已有来源顺序阅读。历史页序字段仅兼容旧接口，不参与核对、提示或导出。真实材料未取得、识读失败仍表达实际状态。
+- 手动在线识别以启动时的当前读本作为替换目标，成功结果直接成为底稿；启动后新的人工修改或来源失效仍受现有 CAS/来源约束保护。历史版本不删除。界面只保留识别进度，不另加“未替换底稿”说明。
+- 页面、Markdown 和模型请求删除核对说明。原文与视觉描述、背景与主体、独立图片的归属仍保留；不会将未绑定参数宣称为商品事实。
+- 导出 JSON 是研究内容投影，保留标题、原作地址、逐材料原图入口、内容结构、说话者、视觉/提取类型、必要区域和参数候选状态；不输出内部版本、诊断、重复索引或页码核对。API 的内部规范读本和冻结审计来源仍保留。
+- 评论研究送模时另作内容投影，正文仅一次；冻结 manifest 仍留在内部用于精确来源回查。Markdown/JSON 弹窗保持固定桌面尺寸；图组数量归标题，评论点赞归评论句尾。
+
+验证使用已保存回包及本地完整笔记，不新增模型调用。部署和生产动态文件清理回执独立记录。
 
 ## 用户结果与范围
 
@@ -34,13 +47,25 @@ STANDARD-DOSSIER-001 更新：平台非空标题优先，否则从明确封面�
 
 Mog 于 2026-11-03 确认 DeepSeek 在线识图为图片信息提取主方案。验收重点是上下文完整、信息归属正确、研究可用，不要求每字完全准确。原文提取与模型视觉观察分开；识别输出仍为未经人工核验的补充材料。此前 `ocr-readable.v2/local-v6` 区域整理候选未发布，真实复杂图片验证未达标，已退出本包生产接线；既有普通 OCR 兼容能力保留，不把它当主方案。
 
-在线执行复用现有显式选择、模型连接、冻结来源、逐图执行、失败停止及人工读本优先流程；GET 不触发模型，不自动批量回填。运行时模型配置、发布及历史批量处理分别需要对应授权。本包代码采用 `ocr-visual-audit.v2`，实际外部验证采用 DeepSeek `deepseek-flash` 图片输入；测试回执不代表运行配置已切换。
+在线执行复用现有显式选择、模型连接、冻结来源、逐图执行、失败停止及人工读本优先流程；GET 不触发模型，不自动批量回填。运行时模型配置、发布及历史批量处理分别需要对应授权。本包当前质量候选采用 `ocr-visual-audit.v3`，实际外部验证采用 DeepSeek `deepseek-flash` 图片输入；测试回执不代表运行配置已切换。
 
-每图返回 `titlePresence/titleText/regions/unreadable/limitations`。每个 region 必有 `regionRef/text/role/legibility/bbox/location/visualDescription/uncertainties`，按阅读顺序排列。`text` 保留可见文字及条件、否定、对比两端、单位；只允许机械合并换行，不概括、不按常识补写。`visualDescription` 只描述可见对象、空间或图示关系，不复述正文、不推断诊断/意图。账号与导航属于 ui，不作图片标题；无文字照片 text 为空。bbox 是模型候选定位，不冒充像素核验结果。限制与不确定项独立保留，不以 JSON 有效推断识别正确。标题候选与标题区域不一致时，只撤销 titleText、降级 titlePresence 为 uncertain 并追加明确 limitation；保留区域原文与原始回包，不为标题问题拒绝整图正文，不提升 ui 角色。
+每图返回 `titlePresence/titleText/regions/unreadable/limitations`。供应商合同要求 region 返回 `regionRef/text/role/legibility/bbox/location/visualDescription/uncertainties/table/parameters`，按阅读顺序排列。离线解析允许缺失 visualDescription，但必须追加 visual_information_missing，不把缺字段当作确认没有视觉信息；已有文字照常保留。text 缺失或空白时，仅有效表格可按行机械生成其文字表示并记录依据，不能凭视觉描述补写原文。`text` 保留可见文字及条件、否定、对比两端、单位；只允许机械合并换行，不概括、不按常识补写。`visualDescription` 只描述可见对象、空间或图示关系，不复述正文、不推断诊断/意图。账号与导航属于 ui，不作图片标题；无文字照片 text 为空。bbox 是模型候选定位，不冒充像素核验结果。限制与不确定项独立保留，不以 JSON 有效推断识别正确。标题候选与标题区域不一致时，只撤销 titleText、降级 titlePresence 为 uncertain 并追加明确 limitation；保留区域原文与原始回包，不为标题问题拒绝整图正文，不提升 ui 角色。
 
-canonical 使用现有 `materials[].blocks`，新增可选 `contentType: extracted_text | visual_description`、成对的 `regionRef/regionLabel`。同一区域的原文和视觉描述拥有独立块、共享区域标识；视觉描述只允许 paragraph/list，speaker 必为 unconfirmed，不能参与图片标题回退。图片身份和原图入口归属 material，不由模型生成。转换版本为 `cloud-manual-v4`，规则 `cloud-ocr-observation.v4`；既有 v3 云读本仍按其已持久化 canonical 内容读取。整图 limitations 和区域 uncertainties 同时传入 UI、Markdown、研究 fragments。
+canonical 使用现有 `materials[].blocks`，新增可选 `contentType: extracted_text | visual_description`、成对的 `regionRef/regionLabel`。同一区域的原文和视觉描述拥有独立块、共享区域标识；视觉描述只允许 paragraph/list，speaker 必为 unconfirmed，不能参与图片标题回退。图片身份和原图入口归属 material，不由模型生成。转换候选版本为 `cloud-manual-v6`，规则 `cloud-ocr-observation.v6`；既有 v3/v4/v5 云读本仍按其已持久化 canonical 内容读取。整图 limitations 和区域 uncertainties 同时传入 UI、Markdown、研究 fragments。
 
 UI 与 Markdown 按同一 readingView 显示图片资料，每张图提供已有原图入口，分别标注“图片文字（识别提取）”和“视觉描述（模型观察，非原文）”。 阅读页每张图片的具体疑点合并为一个默认收起的“核对说明”，展开后保留区域位置；无疑点不显示空入口。通用未核对状态由 reading.verification 在图片标题旁简短表达，不再生成 cloud_image_unchecked 问题。Markdown 将具体核对说明置于文末。AI fragments（含 structure.issues）过滤历史 cloud_image_unchecked，具体缺口不删除；文本输入的类型说明只在开头出现一次；context_sources 显式携带 verification（verified/unchecked/null），评论研究保留该可选字段，旧快照不补写字段以保持原指纹。AI context 使用 `image_substantive_text` 与 `image_visual_description` 区分两类，并保留原材料/读本/块/区域来源、位置和问题。图片页序未知时保持未知与既有观察顺序，不从语义猜页序，不把局部样本说成整篇图片已完成。
+
+质量候选补充：noteContext 仅使用冻结 asOf 的平台原生标题和正文，批次存来源 refs/hash/asOf；派发时重核当前资格与内容一致。它只帮助判断主题，不是图内原文，不得用于补写图片字符。阅读色卡的颜色/透明覆盖关系属于主题视觉信息，不能按排版装饰丢弃。上下文变化或撤回会停止当前 run，不自动重发。
+
+第一阶段离线恢复保留供应商 raw text、table 与原调用记录。有效矩形 table 是独立识别结果，不再要求单元格重复出现在 text 中；canonical 保留全部 columns/rows。仅按完整行、原列顺序（包含单元格内换行）确认重复的文字可省略；单行占位允许 -/—，但必须至少一列实际吻合，其他条件、符号和脚注原样作为补充正文保留。结构合法不代表数字、行列关系已经核实。无效附加结构记录具体问题，不丢已有原文。
+
+`sourceRole` 保留图内角色，ui 导航留在原块但不进入阅读正文。参数的 subject/attribute/value/basis 是供应商候选；第一阶段不建立商品实体，不再凭同名进行跨图比较或合并。canonical 为每个候选保留 sourceRegionRef，并标记 bindingStatus、basisStatus 为 unconfirmed。数值找不到原文锚点时仍保留候选，具体内容进入默认收起的核对说明及 AI 输入，不能伪装成图内原文。正常已在正文出现的参数不重复抄写；AI 中统一的绑定提醒只出现一次，结构化来源逐项保留状态。显式选择仅带入所选块及其候选。人工修改正文继续移除失去原文依据的机器位置/参数/角色元数据。
+
+缺失视觉字段的区域保留已有文字、具体缺失状态及原图入口，来源覆盖为 partial，页面显示“含待补内容”。显式空字符串与字段缺失保持区别；不得据此宣称图中客观没有视觉信息。旧 OCR 数据保留，不混入当前在线读本；保存回包的重放生成新的版本读本，不覆盖历史原始记录。本阶段不改提示词、不新增模型调用；复杂图识别错误与遗漏仍待后续小范围验证。
+
+JSON 对象模式也在实际提示中携带 table/parameters 的嵌套字段合同；冻结的旧转录要求明确标记为历史记录，当前任务同时要求原文与有用视觉信息。仅兼容供应商额外回显的精确 `type:"json_object"` 格式标记，原始回包保留；其他未知核心字段继续拒绝。
+
+页面按同图连续类型显示标签，具体区域保留于核对位置/定位信息；参数绑定未确认与具体疑点默认收起，未取得绑定证据时不生成跨图冲突结论。页序和总图数未知说明集中于文末，不逐图重复核对入口。AI 不重复携带通用角色提醒，同一来源的具体疑点仅一次。实况图的动态附件没有已取得读本时不成为必需音轨/视频帧缺口；独立视频、已取得实况读本和原媒体库存继续保留。转录状态读取当前底稿，历史 ASR 队列不决定现态。
 
 ## 一份内容，按需表示
 

@@ -68,7 +68,7 @@ export function DossierExportDialog({ payload, domain, onClose, onUnavailable }:
       <div className={styles.formatTabs} aria-label="导出格式"><button type="button" aria-pressed={format === 'md'} onClick={() => setFormat('md')}>Markdown</button><button type="button" aria-pressed={format === 'json'} onClick={() => setFormat('json')}>JSON</button></div>
       <div className={styles.displayActions}><span className={styles.formatHint}>{format === 'md' ? '阅读与 AI 对话' : '程序与 Agent 读取'}</span>{format === 'md' ? <div className={styles.previewMode} aria-label="Markdown 预览方式"><button type="button" aria-pressed={previewMode === 'rendered'} onClick={() => setPreviewMode('rendered')}>排版</button><button type="button" aria-pressed={previewMode === 'source'} onClick={() => setPreviewMode('source')}>源码</button></div> : null}</div>
     </div>
-    <p className={styles.exportScope}>导出当前快照的全部内容，并保留真实缺口；不受当前阅读位置影响。</p>
+    <p className={styles.exportScope}>导出完整正文、图片资料与原图入口。</p>
     <div className={styles.exportContent}>
       {markdown.state === 'error' && (format === 'md' || blocked) ? <div className={styles.empty} role="status"><p>{failureMessage(markdown.error)}</p>{!blocked ? <ActionButton className={styles.control} onClick={retry}>重试读取</ActionButton> : null}</div>
         : !file ? <p className={styles.empty} role="status" aria-busy="true">正在读取当前版本的 Markdown…</p>

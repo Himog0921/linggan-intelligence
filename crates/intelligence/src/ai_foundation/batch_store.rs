@@ -52,6 +52,8 @@ pub enum InputRef {
     },
     OcrRecognitionItem {
         item_ref: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note_context: Option<crate::ocr_recognition_schema::FrozenNoteContext>,
     },
     WorkComparison {
         request_ref: Uuid,

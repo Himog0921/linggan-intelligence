@@ -214,7 +214,10 @@ async fn ocr_prompt_and_skill_versions_are_frozen_and_independently_switchable()
     let requests = wire.requests.lock().unwrap().clone();
     let visuals: Vec<_> = requests
         .iter()
-        .filter(|request| endpoint::text(request, "user").contains("ocr-visual-audit.v2"))
+        .filter(|request| {
+            endpoint::text(request, "user")
+                .contains(linggan_intelligence::ocr_recognition_schema::CONTRACT)
+        })
         .collect();
     assert_eq!(visuals.len(), 2);
     assert!(endpoint::text(visuals[0], "system").contains("SYNTHETIC OCR SKILL"));
@@ -417,7 +420,8 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
             .as_array()
             .unwrap()
             .iter()
-            .any(|b| b["issues"].as_array().is_some_and(|i| !i.is_empty()))
+            .all(|b| b["issues"].as_array().is_none_or(|i| i.is_empty())),
+        "clear body/brand/action regions do not manufacture uncertainty"
     );
     let current_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_material_unit WHERE content_public_ref=$1 AND kind='image' AND current_reading_ref IS NOT NULL").bind(work).fetch_one(db.pool()).await.unwrap();
     assert_eq!(
@@ -1318,8 +1322,8 @@ async fn identical_image_bytes_share_one_invocation_but_keep_every_slot_reading(
         .await
         .unwrap();
         if known_order {
-            // A non-representative alias can be human edited independently. A later
-            // shared recognition must preserve it just like the representative slot.
+            // A non-representative alias can be human edited independently. An explicit
+            // rerun replaces its frozen current revision while retaining human history.
             use linggan_evidence::material_reading::{ReviewReadingRequest, review_reading};
             let alias = &units[2];
             let unit: Uuid = alias.get("unit_ref");
@@ -1376,11 +1380,34 @@ async fn identical_image_bytes_share_one_invocation_but_keep_every_slot_reading(
             .fetch_one(db.pool())
             .await
             .unwrap();
-            assert_eq!(
+            assert_ne!(
                 json!(current),
                 edited["currentRevisionRef"],
-                "shared recognition never replaces a human alias reading"
+                "explicit recognition replaces the selected alias revision frozen at dispatch"
             );
+            let human_history: serde_json::Value = sqlx::query_scalar(
+                "SELECT blocks FROM linggan_material_reading WHERE reading_ref=$1",
+            )
+            .bind(Uuid::parse_str(edited["currentRevisionRef"].as_str().unwrap()).unwrap())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert!(
+                human_history
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|block| block["text"] == "第三页独立人工核对原文。"),
+                "the superseded human alias remains immutable history"
+            );
+            let producer: String = sqlx::query_scalar(
+                "SELECT producer_kind FROM linggan_material_reading WHERE reading_ref=$1",
+            )
+            .bind(current)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert_eq!(producer, "cloud_vision");
         }
         let remaining: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM linggan_material_reading WHERE reading_ref=ANY($1)",
@@ -1490,5 +1517,112 @@ async fn shared_image_receipt_does_not_adopt_an_alias_withdrawn_during_dispatch(
         2,
         "one probe and one shared image call"
     );
+    wire.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL, synthetic note context and loopback Pi only"]
+async fn ocr_context_is_native_frozen_and_not_silently_replaced_between_images() {
+    use serde_json::{Value, json};
+    let db = fixture::db("ocr_native_context").await;
+    let key = "ocr-frozen-native-context";
+    let work = ocr::admit(&db, key, 1, &image(91), "image/png").await;
+    ocr::admit(&db, key, 2, &image(92), "image/png").await;
+    let wire = endpoint::Endpoint::start(false).await;
+    let adapter = adapter();
+    let owner = ExecutorSession::acquire(&db, "synthetic-frozen-context", 4)
+        .await
+        .unwrap();
+    configure_recognition(&db, &wire.url, &owner, &adapter).await;
+    let ready = read_run(&db, work).await.unwrap();
+    let started = start_run(
+        &db,
+        work,
+        &StartRun {
+            command_ref: Uuid::new_v4(),
+            expected_scope_sha256: ready["scope"]["sha256"].as_str().unwrap().into(),
+            slot_keys: selected_slots(&ready),
+        },
+    )
+    .await
+    .unwrap();
+    let batch: Uuid = serde_json::from_value(started["batchRef"].clone()).unwrap();
+    let inputs: Vec<Value> = sqlx::query_scalar(
+        "SELECT input_ref FROM linggan_ai_batch_item WHERE batch_ref=$1 ORDER BY position",
+    )
+    .bind(batch)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(inputs.len(), 2);
+    assert_eq!(inputs[0]["noteContext"], inputs[1]["noteContext"]);
+    assert!(
+        !inputs[0]["noteContext"]["sourceRefs"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        inputs[0]["noteContext"]["sha256"].as_str().unwrap().len(),
+        64
+    );
+    assert!(
+        !inputs[0].to_string().contains("Native body"),
+        "batch freezes references, not duplicate native body text"
+    );
+    let first = queue::claim_next(&db, owner.fence())
+        .await
+        .unwrap()
+        .unwrap();
+    ocr_recognition::execute(&db, &first, &SyntheticModelSecrets, &adapter)
+        .await
+        .unwrap();
+    let request = wire.requests.lock().unwrap().last().unwrap().clone();
+    let prompt: Value = serde_json::from_str(&endpoint::text(&request, "user")).unwrap();
+    assert_eq!(
+        prompt["noteContext"]["title"]["text"],
+        "Synthetic replay metadata"
+    );
+    assert_eq!(
+        prompt["noteContext"]["body"]["text"],
+        "Native body must remain independent."
+    );
+    let run = read_run(&db, work).await.unwrap();
+    assert!(
+        !run["images"][0]["blocks"]
+            .to_string()
+            .contains("Native body")
+    );
+    fixture::dossier::fixture::submit_package(&db,"content_detail",json!({"contentExternalId":key}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":key},"payload":{"title":"New native title","bodyText":"Changed native body must not silently replace the frozen context."}})).await;
+    let second = queue::claim_next(&db, owner.fence())
+        .await
+        .unwrap()
+        .unwrap();
+    ocr_recognition::execute(&db, &second, &SyntheticModelSecrets, &adapter)
+        .await
+        .unwrap();
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        2,
+        "only probe and first image were sent; changed context blocks second image"
+    );
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM linggan_ai_batch_item_control WHERE item_ref=$1")
+            .bind(second.item_ref)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(state, "skipped");
+    let stopped = read_run(&db, work).await.unwrap();
+    assert_eq!(stopped["state"], "stopped");
+    assert_eq!(stopped["failureCode"], "ocr_context_changed");
+    assert_eq!(stopped["completedImages"], 1);
+    assert!(
+        queue::claim_next(&db, owner.fence())
+            .await
+            .unwrap()
+            .is_none()
+    );
+
     wire.finish().await;
 }

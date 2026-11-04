@@ -78,20 +78,23 @@ async fn read_media_batch(
             let slots = slots
                 .remove(content_ref)
                 .expect("requested slot projection exists");
-            let derivatives = derivatives
+            let mut derivatives = derivatives
                 .remove(content_ref)
                 .unwrap_or_else(|| project_derivative_rows(Vec::new()));
-            let ocr = canonical_ocr_projection(
-                dossiers
-                    .remove(content_ref)
-                    .as_ref()
-                    .map(|dossier| dossier.materials.as_slice())
-                    .unwrap_or_default(),
-            );
-            (
-                *content_ref,
-                project_media_for_read(slots, derivatives, ocr, overview),
-            )
+            let dossier = dossiers.remove(content_ref);
+            let materials = dossier
+                .as_ref()
+                .map(|d| d.materials.as_slice())
+                .unwrap_or_default();
+            let ocr = canonical_ocr_projection(materials);
+            let audio = canonical_reading_projection(materials, &["audio"]);
+            // Historical jobs are retained, but cannot determine current transcript status.
+            derivatives.2 = audio.state;
+            let mut projection = project_media_for_read(slots, derivatives, ocr, overview);
+            if !overview {
+                projection.resource["transcript"]["resources"] = Value::Array(audio.resources);
+            }
+            (*content_ref, projection)
         })
         .collect())
 }
@@ -395,7 +398,11 @@ struct OcrReadProjection {
 /// OCR status follows the exact same current/source/empty/page owner as dossier reading.
 /// Only references and status leave this adapter; OCR text is never copied into media resources.
 fn canonical_ocr_projection(materials: &[Value]) -> OcrReadProjection {
-    let resources: Vec<Value> = materials.iter().filter(|unit| matches!(unit["kind"].as_str(), Some("image" | "video_frame"))).map(|unit| {
+    canonical_reading_projection(materials, &["image", "video_frame"])
+}
+
+fn canonical_reading_projection(materials: &[Value], kinds: &[&str]) -> OcrReadProjection {
+    let resources: Vec<Value> = materials.iter().filter(|unit| unit["kind"].as_str().is_some_and(|kind| kinds.contains(&kind))).map(|unit| {
         let blocks = unit["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
         let has_gaps = blocks.iter().any(|block| block["kind"] == "gap");
         let current = unit["currentRevisionRef"].is_string();
@@ -471,7 +478,9 @@ async fn read_slots_batch(
            JOIN linggan_runtime_capture_package historical_package USING(package_ref) \
            JOIN linggan_media_download_attempt attempt ON attempt.media_observation_ref=historical_origin.observation_ref \
            JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+           JOIN linggan_media_blob retained_blob ON retained_blob.sha256=materialization.blob_sha256 \
            WHERE historical_origin.slot_key IN (SELECT slot_key FROM current_origin) \
+             AND (historical_origin.purpose<>'live_photo' OR retained_blob.mime_type LIKE 'image/%') \
          ), current_disposition AS MATERIALIZED ( \
            SELECT * FROM linggan_current_material_media_disposition \
          ), current_download AS ( \
@@ -660,24 +669,19 @@ impl SlotAccumulator {
         let purpose: String = row.get("purpose");
         let components = if purpose == "live_photo" {
             let observation_ref = row.get::<Uuid, _>("observation_ref");
-            let still_state =
-                if acquired_components.contains(&(observation_ref, "still".to_owned())) {
-                    "ACQUIRED".to_owned()
-                } else {
-                    row.get::<Option<String>, _>("live_photo_still_state")
-                        .unwrap_or_else(|| "UNKNOWN".to_owned())
-                };
-            let motion_state =
-                if acquired_components.contains(&(observation_ref, "motion".to_owned())) {
-                    "ACQUIRED".to_owned()
-                } else {
-                    row.get::<Option<String>, _>("live_photo_motion_state")
-                        .unwrap_or_else(|| "UNKNOWN".to_owned())
-                };
-            let bundle_state = if still_state == "ACQUIRED" && motion_state == "ACQUIRED" {
-                "COMPLETE".to_owned()
+            let still_state = if materialization_ref.is_some()
+                || acquired_components.contains(&(observation_ref, "still".to_owned()))
+            {
+                "ACQUIRED".to_owned()
             } else {
-                row.get::<String, _>("composite_state")
+                row.get::<Option<String>, _>("live_photo_still_state")
+                    .unwrap_or_else(|| "UNKNOWN".to_owned())
+            };
+            let motion_state = "NOT_APPLICABLE";
+            let bundle_state = if still_state == "ACQUIRED" {
+                "COMPLETE"
+            } else {
+                "PARTIAL"
             };
             serde_json::json!({"bundleState":bundle_state,"stillState":still_state,"motionState":motion_state})
         } else {

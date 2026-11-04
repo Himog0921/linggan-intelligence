@@ -109,6 +109,7 @@ pub async fn ensure_media_processing_work(database: &Database) -> Result<u64, sq
          SELECT gen_random_uuid(),job.job_ref FROM linggan_media_processing_job job \
          LEFT JOIN linggan_media_processing_work work USING(job_ref) \
          WHERE work.job_ref IS NULL{retired_job_filter} \
+           AND NOT EXISTS(SELECT 1 FROM linggan_material_media_origin live JOIN linggan_media_blob motion ON motion.sha256=job.blob_sha256 WHERE live.slot_key=job.slot_key AND live.purpose='live_photo' AND motion.mime_type NOT LIKE 'image/%') \
            AND NOT EXISTS(SELECT 1 FROM linggan_media_derivative result WHERE result.job_ref=job.job_ref) \
            AND NOT EXISTS(SELECT 1 FROM linggan_media_processing_job_event event WHERE event.job_ref=job.job_ref AND event.state IN ('succeeded','invalidated')) \
          ON CONFLICT(job_ref) DO NOTHING"
@@ -281,6 +282,7 @@ async fn claim_media_processing_work_scoped(
            ON concurrency.processor_kind = job.processor_kind \
          WHERE work.state IN ('pending','retry_wait') AND work.attempt_count < $1 \
            AND job.processor_kind = ANY($2) \
+           AND NOT EXISTS(SELECT 1 FROM linggan_material_media_origin live JOIN linggan_media_blob motion ON motion.sha256=job.blob_sha256 WHERE live.slot_key=job.slot_key AND live.purpose='live_photo' AND motion.mime_type NOT LIKE 'image/%') \
            AND ($5::uuid[] IS NULL OR job.job_ref=ANY($5)) \
            AND (($3::text IS NULL AND (job.processor_kind || ':' || job.processor_version)=ANY($4)) OR job.processor_version=$3) \
            {retired_job_filter} \
@@ -1193,6 +1195,7 @@ pub async fn requeue_outdated_processor_jobs(
                       job.blob_sha256,job.slot_key,job.processor_kind,job.input_scope \
                FROM linggan_media_processing_job job \
                WHERE job.processor_kind=$1 \
+                 AND NOT EXISTS(SELECT 1 FROM linggan_material_media_origin live JOIN linggan_media_blob motion ON motion.sha256=job.blob_sha256 WHERE live.slot_key=job.slot_key AND live.purpose='live_photo' AND motion.mime_type NOT LIKE 'image/%') \
                  AND NOT EXISTS (SELECT 1 FROM linggan_media_processing_job current \
                                  WHERE current.blob_sha256=job.blob_sha256 \
                                    AND current.slot_key IS NOT DISTINCT FROM job.slot_key \

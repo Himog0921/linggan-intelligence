@@ -530,10 +530,17 @@ try {
     const [json] = await Promise.all([page.waitForEvent('download'), dialog.getByRole('button', { name: '下载 .json', exact: true }).click()]);
     assert.match(json.suggestedFilename(), /\.json$/);
     const exported = JSON.parse(await readFile(await json.path(), 'utf8'));
-    assert.deepEqual(exported, frozen, 'JSON原样导出同一canonical快照，没有第二份正文');
+    assert.equal(exported.title, frozen.note.displayTitle);
+    assert.equal(exported.sourceUrl, frozen.note.sourceUrl);
+    const included = new Set(frozen.readingView.sections.flatMap(section => section.groups.flatMap(group => group.blockRefs)));
+    const expectedText = frozen.materials.flatMap(unit => unit.blocks.filter(block => included.has(block.ref)).map(block => block.text).filter(Boolean));
+    const exportedText = exported.materials.flatMap(unit => unit.content.map(block => block.text).filter(Boolean));
+    assert.deepEqual(exportedText, expectedText, '精简JSON完整保留同一冻结快照的正文和顺序');
+    assert.equal(exported.revision, undefined);
+    assert.equal(exported.readingView, undefined);
     assert.equal(report.writes.length, writesBefore, '阅读与导出没有写请求');
     report.dossier = { workRef: rich, asOf: frozen.asOf, snapshotRevision: frozen.revision,
-      jsonRevision: exported.revision, markdownRevision: pinnedUrl.searchParams.get('expectedRevision'),
+      jsonSourceRevision: frozen.revision, markdownRevision: pinnedUrl.searchParams.get('expectedRevision'),
       groupRefs: renderedGroups, markdownBodyParagraphs: paragraphs.length, writes: report.writes.length - writesBefore };
     await dialog.getByRole('button', { name: '关闭导出窗口' }).click();
     await dialog.waitFor({ state: 'hidden' });

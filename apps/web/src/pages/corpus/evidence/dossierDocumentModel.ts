@@ -1,7 +1,7 @@
 import type { Dossier, DossierBlock, DossierIssue, DossierMaterial, ReadingGroup, ReadingSection, ReadingSectionKind, Speaker } from './dossierTypes';
 import { normalizedTagLabel, pureTagLabels } from './dossierTagText';
 import { confirmedEmptySpeech } from './dossierPresent';
-import { hasReadingSourceText, missingImageTextPages } from './dossierReadingContent';
+import { hasReadingSourceText } from './dossierReadingContent';
 
 export const SECTION_LABELS: Record<ReadingSectionKind, string> = { publication: '发布文案', images: '图片资料', audio: '视频口播', frames: '画面文字' };
 export interface ReadingEntry { unit: DossierMaterial; block: DossierBlock }
@@ -115,29 +115,5 @@ export function readingGaps(dossier: Dossier): ReadingGap[] {
         message: `${partial ? '部分内容' : ''}暂无可用${key === 'audio' ? '转录' : '文字'}。` });
     }
   }
-  const missingPages = missingImageTextPages(dossier.materials, dossier.coverage.imageInventory);
-  if (missingPages.length) {
-    const message = `第 ${missingPages.join('、')} 页文字待补全。`;
-    const existing = rows.find(row => row.key === 'images');
-    if (existing) existing.message = existing.state === '待在线识读' ? `${existing.message} ${message}` : message;
-    else rows.push({ key: 'images', label: '图片文字', state: '部分可读', message });
-  }
   return rows;
-}
-export function remainingReadingIssues(dossier: Dossier, sections: readonly ResolvedReadingSection[]): ReadingIssue[] {
-  const shown = new Set(sections.flatMap(section => section.groups.flatMap(group => group.issues.map(issue => issue.displayKey))));
-  return [...dossier.coverage.issues.map(issue => ({ ...issue, displayKey: `coverage:${issue.key}` })),
-    ...dossier.materials.flatMap(unit => unit.issues.map(issue => ({ ...issue, displayKey: `${unit.ref}:${issue.key}` })))].filter(issue => {
-    if (issue.code === 'cloud_image_unchecked') return false;
-    if (shown.has(issue.displayKey)) return false;
-    shown.add(issue.displayKey); return true;
-  });
-}
-
-/** One disclosure per image; region-specific issues keep their location when collected. */
-export function imageReviewIssues(groups: readonly ResolvedReadingGroup[], unitRef: string): ReadingIssue[] {
-  return groups.filter(group => group.entries.some(entry => entry.unit.ref === unitRef)).flatMap(group => group.issues.map(issue => {
-    const block = group.entries.find(entry => entry.block.ref === issue.blockRef)?.block;
-    return block?.regionLabel ? { ...issue, message: `${block.regionLabel}：${issue.message}` } : issue;
-  }));
 }

@@ -1,8 +1,7 @@
 import { bool, list, obj, ShapeError, str, type Json } from '../../../shared/decode';
 import { choice, strings } from './dossierBlockDecode';
 import { normalizedTagLabel, pureTagLabels } from './dossierTagText';
-import { missingImageTextPages } from './dossierReadingContent';
-import type { DossierCoverage, DossierMaterial, ReadingGroup, ReadingSection, ReadingSectionKind } from './dossierTypes';
+import type { DossierMaterial, ReadingGroup, ReadingSection, ReadingSectionKind } from './dossierTypes';
 
 const SECTION_KINDS = ['publication', 'images', 'audio', 'frames'] as const;
 const MODES = ['blocks', 'heading', 'paragraph', 'transcript_paragraph', 'list', 'table', 'tags'] as const;
@@ -10,11 +9,10 @@ const KIND_SECTION: Record<DossierMaterial['kind'], ReadingSectionKind> = {
   body: 'publication', tags: 'publication', image: 'images', audio: 'audio', video_frame: 'frames',
 };
 /** No client-side fallback or regrouping: the server's complete ordered reference plan is required. */
-export function parseReadingSections(reading: Json, materials: readonly DossierMaterial[], mainRefs: readonly string[], supplementRefs: readonly string[], inventory: DossierCoverage['imageInventory']): ReadingSection[] {
+export function parseReadingSections(reading: Json, materials: readonly DossierMaterial[], mainRefs: readonly string[], supplementRefs: readonly string[]): ReadingSection[] {
   const byRef = new Map(materials.flatMap(unit => unit.blocks.map(block => [block.ref, { unit, block }] as const)));
   const seenSections = new Set<string>();
   const seenGroups = new Set<string>();
-  const missingTextPages = new Set(missingImageTextPages(materials, inventory));
   let previousKindIndex = -1;
   const sections = list(reading, 'sections', row => {
     const ref = str(row, 'ref');
@@ -82,17 +80,7 @@ export function parseReadingSections(reading: Json, materials: readonly DossierM
       return { ...base, mode } satisfies ReadingGroup;
     });
     if (groups.length === 0) throw new ShapeError('readingView.sections.groups');
-    if (!Array.isArray(row.gaps)) throw new ShapeError('readingView.sections.gaps');
-    const gapAnchors = new Set<string | null>(), gapPages = new Set<number>();
-    const gaps = list(row, 'gaps', gap => {
-      if (gap.beforeGroupRef !== null && (typeof gap.beforeGroupRef !== 'string' || !groups.some(group => group.ref === gap.beforeGroupRef))) throw new ShapeError('readingView.sections.gaps.beforeGroupRef');
-      if (!Array.isArray(gap.missingPages) || gap.missingPages.length === 0 || gap.missingPages.some(page => typeof page !== 'number' || !Number.isSafeInteger(page) || page < 1)) throw new ShapeError('readingView.sections.gaps.missingPages');
-      const beforeGroupRef = gap.beforeGroupRef as string | null, missingPages = gap.missingPages as number[];
-      if (gapAnchors.has(beforeGroupRef) || missingPages.some((page, index) => gapPages.has(page) || !missingTextPages.has(page) || (index > 0 && page <= missingPages[index - 1]!))) throw new ShapeError('readingView.sections.gaps.order');
-      gapAnchors.add(beforeGroupRef); missingPages.forEach(page => gapPages.add(page));
-      return { beforeGroupRef, missingPages };
-    });
-    if (gaps.length && (kind !== 'images' || inventory.unknownOrder)) throw new ShapeError('readingView.sections.gaps.kind');
+    const gaps: ReadingSection['gaps'] = [];
     return { ref, kind, groups, gaps };
   });
   const groupedRefs = sections.flatMap(section => section.groups.flatMap(group => group.blockRefs));

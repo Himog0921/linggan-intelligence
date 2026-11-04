@@ -76,8 +76,8 @@ try {
   const selection = page.getByRole('group', { name: '确认本篇图片识别范围', exact: true });
   await selection.waitFor();
   const checkboxes = selection.getByRole('checkbox'); assert.equal(await checkboxes.count(), 3);
-  assert.equal(await selection.getByRole('checkbox', { name: '第 1 页', exact: true }).count(), 1);
-  assert.equal(await selection.getByRole('checkbox', { name: '页码未知的图片', exact: true }).count(), 2, 'unknown page numbers remain unknown');
+  for (const name of ['封面', '图片 2', '图片 3']) assert.equal(await selection.getByRole('checkbox', { name, exact: true }).count(), 1);
+  assert.doesNotMatch(await selection.innerText(), /页码|第.*页/);
   for (const checkbox of await checkboxes.all()) assert.equal(await checkbox.isChecked(), true);
   await checkboxes.nth(2).uncheck();
   await selection.getByText('重新识读 2 张原图', { exact: true }).waitFor();
@@ -201,7 +201,8 @@ try {
   await page.screenshot({ path: path.join(directory, 'recognition-api-correction-1440.png'), fullPage: true });
   await page.getByRole('tab', { name: '作品', exact: true }).click();
   await workReading.getByText(manualText, { exact: false }).waitFor();
-  await page.getByRole('tabpanel', { name: '作品', exact: true }).getByText(/2 张图片已进入当前底稿/).waitFor();
+  await page.getByRole('button', { name: '识别完成 100%', exact: true }).waitFor();
+  assert.equal(await page.getByText(/张图片已进入当前底稿|当前底稿未替换/).count(), 0);
   const sameRun = await readJson(statePath); assert.equal(sameRun.runRef, final.runRef);
   assert.equal(sameRun.images[0].isCurrent, false); assert.equal(sameRun.images[0].rawJson, final.images[0].rawJson);
   assert.deepEqual(sameRun.images.map(image => image.readingRef), final.images.map(image => image.readingRef));

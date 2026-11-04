@@ -301,200 +301,11 @@ fn segment_clips_frozen_groups_joiners_and_single_side_tags() {
     }
 }
 
-#[test]
-fn actual_missing_pages_are_positioned_once_across_transport_segments() {
-    let mut full = dossier(vec![
-        image(1, vec![paragraph("p1", "前文完整。")]),
-        image(3, vec![paragraph("p3", "这一项继续，")]),
-        image(4, vec![paragraph("p4", "保留中间条件，")]),
-        image(5, vec![paragraph("p5", "然后结束。")]),
-    ]);
-    full.coverage["imageInventory"]["missingPages"] = json!([2, 6]);
-    super::super::rebuild(&mut full);
-    let section = &full.reading_view["sections"][0];
-    assert_eq!(section["groups"].as_array().unwrap().len(), 2);
-    assert_eq!(
-        section["gaps"],
-        json!([
-            {"beforeGroupRef":section["groups"][1]["ref"],"missingPages":[2]},
-            {"beforeGroupRef":null,"missingPages":[6]}
-        ])
-    );
-    let output = markdown(&full);
-    assert!(output.find("然后结束").unwrap() < output.find("第 2、6 页文字待补全").unwrap());
-    assert_eq!(output.matches("第 2、6 页文字待补全").count(), 1);
-    let mut recovered = vec![];
-    for offset in 0..4 {
-        let mut part = full.clone();
-        segment(&mut part, offset, 1).unwrap();
-        let pages: Vec<_> = part.reading_view["sections"][0]["gaps"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .flat_map(|g| g["missingPages"].as_array().unwrap())
-            .cloned()
-            .collect();
-        assert_eq!(
-            pages,
-            match offset {
-                1 => vec![json!(2)],
-                3 => vec![json!(6)],
-                _ => vec![],
-            }
-        );
-        recovered.extend(pages);
-    }
-    assert_eq!(recovered, vec![json!(2), json!(6)]);
-    let mut selected = full.clone();
-    crate::research_dossier::select(
-        &mut selected,
-        &crate::research_dossier::Selection {
-            image_pages: vec![3, 4, 5],
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        selected.reading_view["sections"][0]["gaps"],
-        json!([]),
-        "no missing pages outside explicit selection"
-    );
-    full.coverage["imageInventory"]["unknownOrder"] = json!(true);
-    super::super::rebuild(&mut full);
-    assert_eq!(
-        full.reading_view["sections"][0]["gaps"],
-        json!([]),
-        "unknown order is not guessed"
-    );
-}
 
-#[test]
-fn text_gaps_include_failed_unread_pages_without_changing_source_inventory() {
-    let mut materials: Vec<_> = (1..=10)
-        .map(|page| {
-            image(
-                page,
-                vec![paragraph(
-                    &format!("p{page}"),
-                    &format!("第{page}页完整原文。"),
-                )],
-            )
-        })
-        .collect();
-    let mut failed = image(11, vec![]);
-    failed["processing"] = json!({"state":"failed","reason":"synthetic_failure"});
-    let mut missing = image(12, vec![]);
-    missing["sourceState"] = json!("not_acquired");
-    materials.extend([failed, missing]);
-    let original = materials.clone();
-    let mut full = dossier(materials);
-    full.coverage["imageInventory"]["missingPages"] = json!([12]);
-    let coverage = full.coverage.clone();
-    super::super::rebuild(&mut full);
-    assert_eq!(image_text_gap_pages(&full), BTreeSet::from([11, 12]));
-    assert_eq!(
-        full.reading_view["sections"][0]["gaps"],
-        json!([{"beforeGroupRef":null,"missingPages":[11,12]}])
-    );
-    assert_eq!(full.materials, original);
-    assert_eq!(
-        full.coverage, coverage,
-        "source acquisition missingPages remains [12]"
-    );
-    let output = markdown(&full);
-    assert_eq!(output.matches("第 11、12 页文字待补全").count(), 1);
-    assert!(output.contains("图片文字：处理失败。"));
-    let mut recovered = vec![];
-    for offset in 0..10 {
-        let mut part = full.clone();
-        segment(&mut part, offset, 1).unwrap();
-        assert_eq!(ordered_refs(&part), [format!("p{}", offset + 1)]);
-        let gaps = part.reading_view["sections"][0]["gaps"].as_array().unwrap();
-        recovered.extend(
-            gaps.iter()
-                .flat_map(|gap| gap["missingPages"].as_array().unwrap())
-                .cloned(),
-        );
-        if offset == 9 {
-            let failed = part
-                .materials
-                .iter()
-                .find(|unit| unit["page"] == 11)
-                .unwrap();
-            assert_eq!(failed["sourceState"], "present");
-            assert_eq!(failed["processing"]["state"], "failed");
-            assert_eq!(failed["blocks"], json!([]));
-            assert_eq!(
-                part.materials.len(),
-                3,
-                "selected block plus actual gap metadata only"
-            );
-            assert_eq!(part.selection["omittedUnits"], 9);
-            assert_eq!(markdown(&part).matches("第 11、12 页文字待补全").count(), 1);
-        } else {
-            assert_eq!(part.materials.len(), 1);
-        }
-    }
-    assert_eq!(recovered, [json!(11), json!(12)]);
-    for state in ["known_empty", "not_applicable"] {
-        let mut value = full.clone();
-        value.materials[10]["sourceState"] = json!(state);
-        super::super::rebuild(&mut value);
-        assert_eq!(image_text_gap_pages(&value), BTreeSet::from([12]));
-        assert_eq!(
-            value.reading_view["sections"][0]["gaps"],
-            json!([{"beforeGroupRef":null,"missingPages":[12]}])
-        );
-    }
-    let mut readable = full.clone();
-    readable.materials[10]["blocks"] = json!([paragraph("p11", "已有正文仍需保留。")]);
-    readable.materials[10]["issues"] = json!([{"key":"unclear_word","message":"局部一字待确认"}]);
-    super::super::rebuild(&mut readable);
-    assert_eq!(image_text_gap_pages(&readable), BTreeSet::from([12]));
-    let output = markdown(&readable);
-    assert!(output.contains("已有正文仍需保留。") && output.contains("局部一字待确认"));
-    assert!(output.find("核对说明").unwrap() < output.find("局部一字待确认").unwrap());
-}
 
-#[test]
-fn text_gap_scope_and_unknown_order_do_not_invent_page_positions() {
-    let mut missing = image(2, vec![]);
-    missing["processing"] = json!({"state":"running"});
-    let mut full = dossier(vec![
-        image(1, vec![paragraph("p1", "第一段完整。")]),
-        missing,
-        image(3, vec![paragraph("p3", "第三段完整。")]),
-    ]);
-    assert_eq!(
-        full.reading_view["sections"][0]["gaps"][0]["beforeGroupRef"],
-        full.reading_view["sections"][0]["groups"][1]["ref"]
-    );
-    assert_eq!(
-        full.reading_view["sections"][0]["gaps"][0]["missingPages"],
-        json!([2])
-    );
-    full.coverage["imageInventory"]["unknownOrder"] = json!(true);
-    super::super::rebuild(&mut full);
-    assert_eq!(full.reading_view["sections"][0]["gaps"], json!([]));
-    assert!(markdown(&full).contains("第 2 页文字待补全。"));
-    let mut selected = full.clone();
-    crate::research_dossier::select(
-        &mut selected,
-        &crate::research_dossier::Selection {
-            image_pages: vec![2],
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert_eq!(selected.reading_view["sections"], json!([]));
-    assert!(markdown(&selected).contains("第 2 页文字待补全。"));
-    full.materials[1]["page"] = Value::Null;
-    super::super::rebuild(&mut full);
-    assert!(
-        image_text_gap_pages(&full).is_empty(),
-        "no page number is invented for an observed image"
-    );
-}
+
+
+
 
 #[test]
 fn all_gap_page_remains_in_source_but_not_reading_segments() {
@@ -505,21 +316,16 @@ fn all_gap_page_remains_in_source_but_not_reading_segments() {
         image(2, vec![diagnostic.clone()]),
         image(3, vec![paragraph("p3", "第三段完整。")]),
     ]);
-    assert_eq!(image_text_gap_pages(&full), BTreeSet::from([2]));
+    assert_eq!(full.reading_view["sections"][0]["gaps"], json!([]));
     assert_eq!(ordered_refs(&full), ["p1", "p3"]);
     assert_eq!(full.materials[1]["blocks"], json!([diagnostic]));
     let mut following = full.clone();
     segment(&mut following, 1, 1).unwrap();
     assert_eq!(ordered_refs(&following), ["p3"]);
-    let context = following
-        .materials
-        .iter()
-        .find(|unit| unit["page"] == 2)
-        .unwrap();
-    assert_eq!(context["blocks"], json!([]));
+    assert!(following.materials.iter().all(|unit| unit["page"] != 2));
     assert_eq!(
-        following.reading_view["sections"][0]["gaps"][0]["missingPages"],
-        json!([2])
+        following.reading_view["sections"][0]["gaps"],
+        json!([])
     );
     assert!(!markdown(&following).contains("这一处无法辨认"));
     assert_eq!(full.materials[1]["blocks"][0], diagnostic);

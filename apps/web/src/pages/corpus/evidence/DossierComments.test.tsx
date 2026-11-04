@@ -35,7 +35,7 @@ describe('评论与回复：直接展示（Mog 2026-10-23）', () => {
     expect(screen.queryByRole('button', { name: /读取前/ })).toBeNull();
     expect(screen.queryByText(/可读取评论|数量相同|不代表平台展示顺序/)).toBeNull();
     expect(screen.queryByRole('button', { name: '加载更多评论' })).toBeNull();
-    expect(screen.getAllByText('赞 5')).toHaveLength(3);
+    expect(screen.getAllByText('5')).toHaveLength(3);
   });
 
   it('回复缩进在它回复的主评论下；点赞未知写「—」，不写 0', async () => {
@@ -44,7 +44,8 @@ describe('评论与回复：直接展示（Mog 2026-10-23）', () => {
     const replyItem = reply.closest('article')!;
     expect(replyItem).toHaveAttribute('data-relation', 'REPLY');
     expect(replyItem.parentElement?.closest('article')).toHaveTextContent('合成评论 0');
-    expect(screen.getByText('回复 · 赞 —')).toBeInTheDocument();
+    expect(replyItem.querySelector('p')).toHaveTextContent('合成回复 赞 —');
+    expect(replyItem.querySelectorAll('p')).toHaveLength(1);
   });
 
   it('还有更多时「加载更多评论」带游标续读，跨页去重', async () => {

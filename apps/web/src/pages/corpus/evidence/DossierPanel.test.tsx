@@ -51,21 +51,22 @@ it('多图沿 owner 编排连续阅读，保留标题来源及相同文字的不
   expect(notes).toHaveAttribute('open');
   expect(within(notes!).getByText('数据截至')).toBeVisible();
 });
-it('核对说明按图片默认收起，各材料原始问题仍留在 DTO', async () => {
+it('页面不展示核对说明，实际图片文字保留', async () => {
   const issue = { key: 'ocr_low_confidence_0', code: 'glyph', message: '数字需要对照原图核验', resolution: 'reading_edit' };
   kit.route('GET', path, ok(dossierJson(1, { materials: [1,2].map(n => dossierMaterialJson(n, { blocks: [{ ref: `paragraph-${n}`, kind: 'paragraph', text: `完整原文 ${n}`, issues: [issue] }], issues: [issue] })), coverage: { issues: [] } })));
   mount(); await screen.findByText('完整原文 1');
-  expect(screen.getAllByText(issue.message)).toHaveLength(2);
-  for (const note of screen.getAllByText(issue.message)) expect(note).not.toBeVisible();
+  expect(screen.queryByText(issue.message)).not.toBeInTheDocument();
+  expect(screen.queryByText(/^核对说明/)).not.toBeInTheDocument();
   expect(screen.getByText('完整原文 2')).toBeVisible();
 });
-it('已确认缺页集中提示一次，不在正文重复插入诊断', async () => {
+it('已确认缺页保留在数据，正文连续展示已有文字且不插入页码警示', async () => {
   const raw = dossierJson(1, { materials: [dossierMaterialJson(1, { blocks: [{ ref: 'before', kind: 'paragraph', text: '缺页之前' }] }), dossierMaterialJson(3, { blocks: [{ ref: 'after', kind: 'paragraph', text: '缺页之后' }] })], coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 3, acquiredPages: 2, processedPages: 2, missingPages: [2], unknownOrder: false } } });
   const section = raw.dossier.readingView.sections[0]!;
   section.gaps = [{ beforeGroupRef: section.groups[1]!.ref, missingPages: [2] }];
   kit.route('GET', path, ok(raw)); mount();
-  await screen.findByText('第 2 页文字待补全。');
-  expect(screen.getAllByText('第 2 页文字待补全。')).toHaveLength(1);
+  await screen.findByText('缺页之前');
+  expect(screen.queryByText(/第 2 页文字待补全/)).not.toBeInTheDocument();
+  expect(raw.dossier.coverage.imageInventory.missingPages).toEqual([2]);
   expect(screen.getByText('缺页之前')).toBeVisible();
   expect(screen.getByText('缺页之后')).toBeVisible();
 });
@@ -74,7 +75,8 @@ it('仅待处理样本保留真实缺失状态，不造口播、目录或原图�
   const view = mount();
   await screen.findByText('待识读');
   expect(screen.queryByText(/图片原始顺序未确认|原作总页数未知/)).not.toBeInTheDocument();
-  expect(screen.getByText('第 1 页文字待补全。')).toBeVisible();
+  expect(screen.getByText('尚无可用文字。')).toBeVisible();
+  expect(screen.queryByText(/第 1 页文字待补全/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /章节导航/ })).not.toBeInTheDocument();
   expect(view.container.querySelector('[data-transcript-paragraph], img')).toBeNull();
   expect(kit.calls).toHaveLength(1);

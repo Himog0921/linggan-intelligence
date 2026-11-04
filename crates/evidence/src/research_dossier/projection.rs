@@ -16,24 +16,7 @@ pub(super) fn assemble(
     }
     let readings = current_image_readings(readings);
     let slots = super::duplicates::collapse(inventory.slots.clone(), &readings);
-    let mut media = media_materials(work, &readings, &slots);
-    if let Some(expected) = expected_pages(&inventory) {
-        for page in 1..=expected {
-            if !media
-                .iter()
-                .any(|m| m["kind"] == "image" && m["page"] == page)
-            {
-                let mut missing = empty(work.public_ref, "image", None, Some(page), "not_acquired");
-                missing["issues"] = json!([issue(
-                    &format!("missing_page_{page}"),
-                    "missing_page",
-                    "平台图片序列中的这一页尚未取得",
-                    "source_refresh"
-                )]);
-                media.push(missing);
-            }
-        }
-    }
+    let mut media = media_materials(work.public_ref, &readings, &slots);
     // Stable observed media order; known pages retain platform sequence.
     media.sort_by_key(|m| m["page"].as_u64().unwrap_or(u64::MAX));
     materials.extend(media);
@@ -225,7 +208,7 @@ fn expected_pages(inventory: &Inventory) -> Option<u64> {
         .flatten()
 }
 
-fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Value]) -> Vec<Value> {
+fn media_materials(work: Uuid, readings: &[Value], slots: &[Value]) -> Vec<Value> {
     let mut materials = vec![];
     for slot in slots {
         let kinds: &[&str] = if slot["component"] == "motion" {
@@ -251,11 +234,17 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
                             && r["sourceLocation"]["blobSha256"] == slot["blobSha256"]
                     })
                 });
+            // Live-photo motion is optional context, not an unprocessed video speech obligation.
+            // Existing readings and raw motion remain accessible; independent videos keep their gaps.
+            if slot["purpose"] == "live_photo" && slot["component"] == "motion"
+            {
+                continue;
+            }
             let mut material = if let Some(r) = reading {
                 public_material(r.clone())
             } else {
                 empty(
-                    work.public_ref,
+                    work,
                     kind,
                     slot["slotKey"].as_str(),
                     slot["page"].as_u64(),
@@ -303,17 +292,6 @@ fn media_materials(work: &WorkResourceCurrent, readings: &[Value], slots: &[Valu
                     "来源已取得，尚无当前可用的规范化识读",
                     "source_refresh"
                 )]);
-            }
-            if *kind == "image" && slot["displayOrderState"] != "KNOWN" {
-                material["issues"]
-                    .as_array_mut()
-                    .expect("issues")
-                    .push(issue(
-                        "page_order_unknown",
-                        "page_order_unknown",
-                        "平台图片页序尚未确认",
-                        "source_refresh",
-                    ));
             }
             if *kind == "video_frame"
                 && material["sourceState"] == "present"
@@ -474,7 +452,7 @@ fn specific_issues(value: &Value) -> Vec<Value> {
         .as_array()
         .into_iter()
         .flatten()
-        .filter(|issue| issue["code"] != "cloud_image_unchecked")
+        .filter(|issue| super::quality::specific(issue))
         .cloned()
         .collect()
 }
@@ -537,5 +515,33 @@ mod online_reading_tests {
             current_image_readings(vec![cloud, legacy.clone()])[1],
             legacy
         );
+    }
+}
+
+#[cfg(test)]
+mod live_photo_tests {
+    use super::*;
+    #[test]
+    fn live_motion_never_enters_dossier_but_independent_video_remains() {
+        let live = json!({"slotKey":"live", "purpose":"live_photo", "component":"motion", "sourceVersion":"v1", "blobSha256":"a", "sourceState":"present", "processing":{"asr":{"state":"pending"}}});
+        let mut video = live.clone();
+        video["slotKey"] = json!("video");
+        video["purpose"] = json!("video");
+        let units = media_materials(Uuid::nil(), &[], &[live.clone(), video]);
+        assert_eq!(units.len(), 2);
+        assert!(units.iter().all(|u| u["slotKey"] == "video"));
+        let reading = json!({"ref":"speech", "slotKey":"live", "kind":"audio", "sourceVersion":"v1", "sourceState":"present", "blocks":[{"ref":"b","kind":"paragraph","text":"现场声音"}],"issues":[]});
+        let units = media_materials(Uuid::nil(), &[reading.clone()], std::slice::from_ref(&live));
+        assert!(units.is_empty());
+        let mut changed = live.clone();
+        changed["sourceVersion"] = json!("v2");
+        changed["blobSha256"] = json!("b");
+        assert!(
+            media_materials(Uuid::nil(), std::slice::from_ref(&reading), &[changed]).is_empty()
+        );
+        let mut restricted = live;
+        restricted["sourceState"] = json!("restricted");
+        let units = media_materials(Uuid::nil(), &[reading], &[restricted]);
+        assert!(units.is_empty());
     }
 }

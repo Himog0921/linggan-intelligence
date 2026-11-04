@@ -390,3 +390,39 @@ async fn online_note_keeps_legacy_history_without_mixing_automatic_text() {
             .any(|m| m["blocks"].to_string().contains("历史机器页1"))
     );
 }
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL only"]
+async fn requested_online_reading_replaces_frozen_human_reading_and_preserves_history() {
+    let db = support::fixture::proof_database("dossier_requested_replace").await;
+    let work = support::work(&db).await;
+    support::current_image_reading(&db).await;
+    let original = current(&db, work).await;
+    let request = edit(&original, "人工旧读本");
+    review_reading(&db, id(&original["ref"]), &request).await.unwrap();
+    let human = current(&db, work).await;
+    let human_ref = id(&human["currentRevisionRef"]);
+    let make = |expected| NewReading {
+        content_public_ref:work, unit_key:format!("image:{}", human["slotKey"].as_str().unwrap()),
+        kind:"image".into(), slot_key:Some(human["slotKey"].as_str().unwrap().into()), page:Some(1),
+        source_version:human["sourceVersion"].as_str().unwrap().into(), source_state:"present".into(),
+        derivative_ref:None, producer_ref:Some(Uuid::new_v4()), generated_by:"cloud_vision".into(),
+        rule_version:"synthetic-requested.v1".into(), blocks:paragraph("在线新读本"), issues:vec![],
+        source_location:json!({"slotKey":human["slotKey"]}), publication:Publication::Requested{expected_current:Some(expected)}
+    };
+    let mut tx = db.pool().begin().await.unwrap();
+    let published = publish_in(&mut tx, make(human_ref)).await.unwrap();
+    tx.commit().await.unwrap();
+    assert!(published.current);
+    let replaced = current(&db, work).await;
+    assert_eq!(replaced["currentRevisionRef"], json!(published.reading_ref));
+    assert_eq!(replaced["reading"]["adoption"], "automatic");
+    let historical: Value = sqlx::query_scalar("SELECT blocks FROM linggan_material_reading WHERE reading_ref=$1").bind(human_ref).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(historical[0]["text"], "人工旧读本");
+    let newer = edit(&replaced, "识别期间的人工修改");
+    review_reading(&db, id(&replaced["ref"]), &newer).await.unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    assert!(!publish_in(&mut tx, make(published.reading_ref)).await.unwrap().current);
+    tx.commit().await.unwrap();
+    assert_eq!(current(&db, work).await["blocks"][0]["text"], "识别期间的人工修改");
+}

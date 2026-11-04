@@ -97,10 +97,37 @@ async function exportSnapshot(label) {
   await dialog.getByRole('button', { name: '复制内容', exact: true }).click();
   await dialog.getByText('已复制完整底稿', { exact: true }).waitFor();
   assert.equal(await page.evaluate(() => navigator.clipboard.readText()), markdown, 'clipboard contains the same complete file');
+  const markdownBounds = await dialog.boundingBox();
   await dialog.getByRole('button', { name: 'JSON', exact: true }).click();
+  const jsonBounds = await dialog.boundingBox();
+  assert.equal(jsonBounds.width, markdownBounds.width);
+  assert.equal(jsonBounds.height, markdownBounds.height);
   const json = await download('下载 .json', `${label}.json`);
   assert.equal(await dialog.getByLabel('JSON 源码', { exact: true }).textContent(), json);
-  assert.deepEqual(JSON.parse(json), pinned, 'JSON is the canonical snapshot frozen by this export session');
+  const exported = JSON.parse(json);
+  assert.equal(exported.title, pinned.note.displayTitle);
+  assert.equal(exported.sourceUrl, pinned.note.sourceUrl);
+  assert.equal(exported.materials.length, pinned.materials.length);
+  const included = new Set(pinned.readingView.sections.flatMap(section => section.groups.flatMap(group => group.blockRefs)));
+  for (const [index, unit] of pinned.materials.entries()) {
+    const material = exported.materials[index];
+    assert.equal(material.kind, unit.kind);
+    assert.equal(material.originalUrl, unit.originalUrl ?? undefined);
+    const blocks = unit.blocks.filter(block => included.has(block.ref));
+    assert.equal(material.content.length, blocks.length, 'all selected reading blocks survive export');
+    for (const [blockIndex, block] of blocks.entries()) {
+      const output = material.content[blockIndex];
+      for (const key of ['text', 'items', 'columns', 'rows', 'kind', 'speaker', 'contentType', 'sourceRole', 'regionLabel', 'turns', 'ordered', 'start']) {
+        if (block[key] !== undefined && block[key] !== null) assert.deepEqual(output[key], block[key], `preserve ${key}`);
+      }
+      assert.equal(output.issues, undefined);
+      assert.equal(output.ref, undefined);
+      if (block.parameters?.length) assert.deepEqual(output.parameterCandidates, block.parameters.map(parameter => Object.fromEntries(Object.entries(parameter).filter(([key]) => key !== 'sourceRegionRef'))));
+    }
+  }
+  assert.equal(exported.readingView, undefined);
+  assert.equal(exported.revision, undefined);
+  assert.ok(!markdown.includes('## 核对说明') && !markdown.includes('页码未确认'));
   assert.ok(!markdown.includes('## 来源材料') && !markdown.includes('## 映射来源'));
   report.markdownSnapshots.push({ work: active.work, asOf: pinned.asOf, revision: pinned.revision, bytes: Buffer.byteLength(markdown) });
   await page.keyboard.press('Escape');
@@ -197,7 +224,9 @@ try {
     }
     if (scenario.name === 'partial-images') {
       assert.ok(dossier.materials.some(unit => unit.processing?.state === 'failed'));
-      assert.ok((await page.locator('[data-dossier-document]').textContent()).includes('待补全'));
+      const content = await page.locator('[data-dossier-document]').textContent();
+      assert.ok(content.includes('含待补内容') && content.includes('缺失内容'));
+      assert.doesNotMatch(content, /页码未确认|第.*页文字待补全/);
       await snapshot('partial-images-reading.png');
     }
     if (scenario.name === 'originals-only') {

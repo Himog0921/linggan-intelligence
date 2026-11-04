@@ -38,7 +38,7 @@ function Card({ object, total, onOpen }: { object: MediaObject; total: number; o
           <span className={styles.absent}><span>▶ 视频</span><span>点击播放</span></span>
         ) : object.assetUrl && !failed ? (
           // 单张图读取失败只在原位提示：一个坏对象不能让整个作品看起来没有媒体。
-          <img src={object.assetUrl} alt={label} loading="lazy" decoding="async" onLoad={() => setPhase('loaded')} onError={() => setPhase('failed')} />
+          <img draggable={false} src={object.assetUrl} alt={label} loading="lazy" decoding="async" onLoad={() => setPhase('loaded')} onError={() => setPhase('failed')} />
         ) : object.assetUrl ? (
           <span className={styles.absent}>这个对象的本地副本读取失败；其余对象不受影响。</span>
         ) : object.inlineBlocked ? (
@@ -180,10 +180,6 @@ export function MediaRail({ objects, onOpen }: MediaRailProps) {
   return (
     <section className={styles.module} aria-label="本机媒体材料轨道">
       <div className={styles.toolbar}>
-        <div className={styles.summary}>
-          <b>{`${String(total).padStart(2, '0')} 个本地媒体对象`}</b>
-          <span>采集顺序 · 平台排列顺序未经验证</span>
-        </div>
         <div className={styles.nav}>
           {matchIndex >= 0 ? (
             <button type="button" className={styles.jump} onClick={jumpToMatch}>
@@ -212,6 +208,7 @@ export function MediaRail({ objects, onOpen }: MediaRailProps) {
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
+        onDragStart={event => event.preventDefault()}
         onClickCapture={swallowClick}
       >
         <div ref={strip} className={styles.strip}>

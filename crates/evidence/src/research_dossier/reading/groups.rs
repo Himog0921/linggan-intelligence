@@ -181,107 +181,12 @@ pub(super) fn sections(dossier: &ResearchDossier) -> Value {
         });
     }
     for section in &mut sections {
-        section.gaps = positioned_gaps(section, dossier, &located);
+        section.gaps.clear();
     }
     serde_json::to_value(sections).expect("reference groups are serializable")
 }
 
 /// Text coverage differs from source acquisition: a present image can still lack a reading.
-pub(in crate::research_dossier) fn image_text_gap_pages(
-    dossier: &ResearchDossier,
-) -> BTreeSet<u64> {
-    let whole_images = dossier.selection["mode"] != "explicit"
-        || dossier.selection["kinds"]
-            .as_array()
-            .is_some_and(|kinds| kinds.contains(&json!("image")));
-    let selected_pages: BTreeSet<_> = dossier.selection["imagePages"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_u64)
-        .chain(
-            dossier
-                .materials
-                .iter()
-                .filter(|unit| {
-                    unit["kind"] == "image"
-                        && dossier.selection["unitRefs"]
-                            .as_array()
-                            .is_some_and(|refs| refs.contains(&unit["ref"]))
-                })
-                .filter_map(|unit| unit["page"].as_u64()),
-        )
-        .collect();
-    dossier.coverage["imageInventory"]["missingPages"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_u64)
-        .chain(
-            dossier
-                .materials
-                .iter()
-                .filter(|unit| {
-                    unit["kind"] == "image"
-                        && !matches!(
-                            unit["sourceState"].as_str(),
-                            Some("known_empty" | "not_applicable")
-                        )
-                        && !unit["blocks"]
-                            .as_array()
-                            .into_iter()
-                            .flatten()
-                            .any(content::has_source_text)
-                })
-                .filter_map(|unit| unit["page"].as_u64().filter(|page| *page > 0)),
-        )
-        .filter(|page| whole_images || selected_pages.contains(page))
-        .collect()
-}
-
-fn positioned_gaps(
-    section: &Section,
-    dossier: &ResearchDossier,
-    located: &BTreeMap<&str, Located<'_>>,
-) -> Vec<SectionGap> {
-    if section.kind != "images" || dossier.coverage["imageInventory"]["unknownOrder"] == true {
-        return vec![];
-    }
-    let mut gaps: Vec<SectionGap> = vec![];
-    for page in image_text_gap_pages(dossier) {
-        let next = section
-            .groups
-            .iter()
-            .find(|group| {
-                group.block_refs.iter().any(|reference| {
-                    located.get(reference.as_str()).is_some_and(|entry| {
-                        entry.material["page"].as_u64().is_some_and(|p| p > page)
-                    })
-                })
-            })
-            .map(|group| group.reference.clone());
-        if next.is_none()
-            && section
-                .groups
-                .last()
-                .and_then(|group| group.block_refs.last())
-                .and_then(|r| located.get(r.as_str()))
-                .is_none_or(|entry| entry.material["page"].as_u64().is_none())
-        {
-            continue;
-        }
-        if let Some(gap) = gaps.iter_mut().find(|gap| gap.before_group_ref == next) {
-            gap.missing_pages.push(page);
-        } else {
-            gaps.push(SectionGap {
-                before_group_ref: next,
-                missing_pages: vec![page],
-            });
-        }
-    }
-    gaps
-}
-
 fn automatic_ordinary_ocr(material: &Value) -> bool {
     material["kind"] == "image"
         && material["reading"]["generatedBy"] == "ordinary_ocr"
