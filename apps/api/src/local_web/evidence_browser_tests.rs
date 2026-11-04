@@ -257,7 +257,7 @@ async fn assert_dossier_reading_proof(db: &Database, work: Uuid, proof: &Value) 
         .await
         .unwrap()
         .expect("the same canonical snapshot remains readable");
-    for key in ["snapshotRevision", "jsonRevision", "markdownRevision"] {
+    for key in ["snapshotRevision", "jsonSourceRevision", "markdownRevision"] {
         assert_eq!(proof[key], canonical.revision, "{key}");
     }
     let group_refs: Vec<_> = canonical.reading_view["sections"]

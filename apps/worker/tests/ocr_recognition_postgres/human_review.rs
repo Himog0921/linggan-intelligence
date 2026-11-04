@@ -1,4 +1,4 @@
-//! Current cloud output is readable immediately; a later run cannot replace a human correction.
+//! Explicit recognition replaces its frozen current reading while retaining human history.
 use super::*;
 use linggan_evidence::{material_reading::*, research_dossier, *};
 use serde_json::{Value, json};
@@ -38,7 +38,7 @@ async fn recognize(
 }
 #[tokio::test]
 #[ignore = "owned disposable PostgreSQL, synthetic image and loopback Pi only"]
-async fn cloud_current_human_edit_replay_and_later_machine_run_preserve_human_priority() {
+async fn cloud_current_human_edit_replay_and_explicit_rerun_preserve_history() {
     let db = fixture::db("ocr_manual_current_edit").await;
     let work = ocr::admit(
         &db,
@@ -116,10 +116,25 @@ async fn cloud_current_human_edit_replay_and_later_machine_run_preserve_human_pr
     recognize(&db, work, &owner, &adapter).await;
     let later = read_run(&db, work).await.unwrap();
     assert_eq!(later["state"], "succeeded");
-    assert_eq!(later["images"][0]["isCurrent"], false);
+    assert_eq!(later["images"][0]["isCurrent"], true);
     let kept = current_image(&db, work).await;
-    assert_eq!(kept["currentRevisionRef"], saved["currentRevisionRef"]);
-    assert_eq!(kept["blocks"], human["blocks"]);
+    assert_ne!(kept["currentRevisionRef"], saved["currentRevisionRef"]);
+    assert_eq!(kept["currentRevisionRef"], later["images"][0]["readingRef"]);
+    assert_eq!(kept["reading"]["generatedBy"], "cloud_vision");
+    let human_history: Value =
+        sqlx::query_scalar("SELECT blocks FROM linggan_material_reading WHERE reading_ref=$1")
+            .bind(Uuid::parse_str(saved["currentRevisionRef"].as_str().unwrap()).unwrap())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert!(
+        human_history
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|block| block["text"] == manual),
+        "explicit rerun changes current selection without losing the full human correction"
+    );
     let commands: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_material_reading_command")
         .fetch_one(db.pool())
         .await
@@ -145,7 +160,7 @@ async fn cloud_current_human_edit_replay_and_later_machine_run_preserve_human_pr
     let mut blocked = request.clone();
     blocked.command_ref = Uuid::new_v4();
     blocked.expected_current_revision_ref =
-        serde_json::from_value(saved["currentRevisionRef"].clone()).unwrap();
+        serde_json::from_value(kept["currentRevisionRef"].clone()).unwrap();
     assert!(matches!(
         review_reading(&db, unit, &blocked).await,
         Err(ReadingError::OriginalUnavailable)

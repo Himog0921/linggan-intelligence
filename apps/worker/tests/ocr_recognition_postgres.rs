@@ -1322,8 +1322,8 @@ async fn identical_image_bytes_share_one_invocation_but_keep_every_slot_reading(
         .await
         .unwrap();
         if known_order {
-            // A non-representative alias can be human edited independently. A later
-            // shared recognition must preserve it just like the representative slot.
+            // A non-representative alias can be human edited independently. An explicit
+            // rerun replaces its frozen current revision while retaining human history.
             use linggan_evidence::material_reading::{ReviewReadingRequest, review_reading};
             let alias = &units[2];
             let unit: Uuid = alias.get("unit_ref");
@@ -1380,11 +1380,34 @@ async fn identical_image_bytes_share_one_invocation_but_keep_every_slot_reading(
             .fetch_one(db.pool())
             .await
             .unwrap();
-            assert_eq!(
+            assert_ne!(
                 json!(current),
                 edited["currentRevisionRef"],
-                "shared recognition never replaces a human alias reading"
+                "explicit recognition replaces the selected alias revision frozen at dispatch"
             );
+            let human_history: serde_json::Value = sqlx::query_scalar(
+                "SELECT blocks FROM linggan_material_reading WHERE reading_ref=$1",
+            )
+            .bind(Uuid::parse_str(edited["currentRevisionRef"].as_str().unwrap()).unwrap())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert!(
+                human_history
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|block| block["text"] == "第三页独立人工核对原文。"),
+                "the superseded human alias remains immutable history"
+            );
+            let producer: String = sqlx::query_scalar(
+                "SELECT producer_kind FROM linggan_material_reading WHERE reading_ref=$1",
+            )
+            .bind(current)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert_eq!(producer, "cloud_vision");
         }
         let remaining: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM linggan_material_reading WHERE reading_ref=ANY($1)",

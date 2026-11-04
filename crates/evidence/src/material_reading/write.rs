@@ -23,7 +23,8 @@ pub async fn publish_in(
     .await?;
     let original_current = unit.current;
     let expected_matches = match input.publication {
-        Publication::Automatic { expected_current } | Publication::Requested { expected_current } => expected_current == original_current,
+        Publication::Automatic { expected_current }
+        | Publication::Requested { expected_current } => expected_current == original_current,
     };
     let requested = matches!(input.publication, Publication::Requested { .. }) && expected_matches;
     let preserve_human = if !requested && unit.current.is_some() && unit.adoption != "automatic" {
