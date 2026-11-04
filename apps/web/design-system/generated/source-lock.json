@@ -1,5 +1,5 @@
 {
-  "fingerprint": "0e98ef6bb71ad5d273826d06cb7e9a2670610cc05cb517845af68e8308bd79ef",
+  "fingerprint": "1f4bf5d46553af98264112a16d09780f904956ecf985e4205c76b4b863ad1e3e",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -311,7 +311,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsScopePicker.tsx",
-      "sha256": "b3ce30b8d6715c0f64beccb3aae2959d6f5860a44c62ee3decb87a533d133bab"
+      "sha256": "e5c94b2d96977252cd27d5265dd1a2b79a5d1b845de16d22f721716132561bb5"
     },
     {
       "path": "apps/web/src/pages/ops/OverviewBlocks.tsx",
@@ -347,7 +347,7 @@
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
-      "sha256": "ca7a9689dbf1a2a26b9a6da44a07fca80abc5a1cd9af79a74368697d8859bf7a"
+      "sha256": "4388391a755961c18d1461a6525be0c15e3f29a9c6d4f6a8a32330fc27050344"
     },
     {
       "path": "apps/web/src/pages/topics/WorkspacePage.tsx",
@@ -395,7 +395,7 @@
     },
     {
       "path": "apps/web/src/shared/DomainScopePicker.tsx",
-      "sha256": "3e726340c15d988c0035fb190933c7e3d55a14c16f62d78ea665d9aa84b296ab"
+      "sha256": "0ebe44c80934ca0e4151e1ee83b0903252b929c564a152e01bbd4ce4346a3a5c"
     },
     {
       "path": "apps/web/src/shared/FindField.module.css",
