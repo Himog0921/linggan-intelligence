@@ -57,7 +57,8 @@ impl MaterialClass {
             ),
             Self::CommentMaterial => matches!(
                 task,
-                TaskKey::CommentStudy
+                TaskKey::NoteInterpretation
+                    | TaskKey::CommentStudy
                     | TaskKey::CommentProblemResolution
                     | TaskKey::CommentProblemPairReview
                     | TaskKey::TopicResearch

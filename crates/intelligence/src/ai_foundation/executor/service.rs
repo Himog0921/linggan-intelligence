@@ -17,6 +17,7 @@ mod comment_problem;
 mod comment_research;
 mod creator_account_research;
 mod creator_research;
+mod note_analysis;
 mod research_call;
 mod topic_research;
 mod work_comparison;
@@ -138,6 +139,9 @@ async fn fill_slots(
         let (db, secrets, adapter) = (db.clone(), secrets.clone(), adapter.clone());
         tasks.spawn(async move {
             match item.task_key {
+                TaskKey::NoteInterpretation => {
+                    note_analysis::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
                 TaskKey::ModelProbe => {
                     probe::execute_probe(&db, &item, secrets.as_ref(), &adapter).await
                 }

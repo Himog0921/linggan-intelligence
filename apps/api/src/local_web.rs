@@ -68,6 +68,11 @@ mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
 mod model_settings;
+mod note_analysis_api;
+#[cfg(test)]
+mod note_analysis_api_tests;
+#[cfg(test)]
+mod note_analysis_browser_proof;
 mod ocr_recognition;
 #[cfg(test)]
 mod ocr_recognition_browser_tests;
@@ -406,6 +411,7 @@ fn router_with_public_access(
         .merge(comment_study::routes())
         .merge(model_settings::routes())
         .merge(ai_settings::routes())
+        .merge(note_analysis_api::routes())
         .merge(offline_preview::routes())
         .merge(ops_auth::routes())
         .merge(web_app::routes())

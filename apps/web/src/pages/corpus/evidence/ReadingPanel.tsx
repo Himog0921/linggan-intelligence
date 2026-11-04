@@ -6,6 +6,7 @@ import { hideCachedReading } from './dossierPresent';
 import { DossierComments } from './DossierComments';
 import { InlineState, Section, SourceNote, StateLine } from './Primitives';
 import { MediaRail } from './MediaRail';
+import { NoteAnalysisPanel } from './NoteAnalysisPanel';
 import { OcrRecognition } from './OcrRecognition';
 import { laneSummary, metricReading } from './evidencePresent';
 import { mediaObjects } from './mediaObjects';
@@ -34,6 +35,7 @@ export function ReadingPanel({ context, domain, active }: { context: PanelContex
       {reading.isPending ? <p role="status">正在读取正文…</p> : reading.isError && !dossier ? <p role="status">正文读本暂不可读。<button type="button" onClick={() => void reading.refetch()}>重试读取</button></p> : dossier ? <DossierReading dossier={dossier} titleRendered /> : <SourceNote>暂无可读文字。</SourceNote>}
       {reading.isError && dossier ? <p role="status">刷新未完成，保留上次读到的正文版本。</p> : null}
     </section>
+    <NoteAnalysisPanel key={`analysis:${domain}:${item.ref}`} domain={domain} work={item.ref} active={active} {...(dossier ? { dossier } : {})} />
     <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} active={active} readingRevision={dossier?.materialRevision} mediaTitle={item.media.videoCount > 0 ? '视频与图片' : '图组'} onApplied={() => void reading.refetch()}>
       {objects.length > 0 ? <MediaRail objects={objects} onOpen={onOpenViewer} />
         : <InlineState tone="warning" title="当前没有可预览的本地媒体对象">没有可内联显示的媒体副本，不代表原作品没有媒体。</InlineState>}
@@ -42,13 +44,13 @@ export function ReadingPanel({ context, domain, active }: { context: PanelContex
         {item.media.videoCount > 0 ? <><span>转录</span><StateLine state={asr} /></> : null}
       </div>
     </OcrRecognition>
-    <Section title="评论与回复">
+    <div data-note-analysis-comments tabIndex={-1}><Section title="评论与回复">
       <div className={styles.commentSummary}>
         <span>平台显示 <strong>{metricReading(item.display.engagement.comment)}</strong> 条</span>
         <span>本地评论 <strong>{inspector.commentsCoverage?.retained ?? '未知'}</strong> 条</span>
         <span>已采回复 <strong>{inspector.repliesCoverage?.retained ?? '未知'}</strong> 条</span>
       </div>
       <DossierComments work={item.ref} domain={domain} active={active} />
-    </Section>
+    </Section></div>
   </div>;
 }

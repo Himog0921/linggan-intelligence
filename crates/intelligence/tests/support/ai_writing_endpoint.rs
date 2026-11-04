@@ -1,4 +1,6 @@
-//! Owned loopback SSE endpoint. It never forwards traffic or reads credentials/files.
+#[path = "note_analysis_response.rs"]
+mod note_analysis_response;
+// Owned loopback SSE endpoint. It never forwards traffic or reads credentials/files.
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 use tokio::{
@@ -57,6 +59,8 @@ impl Endpoint {
                                 json!({"relevance":field("related"),"traits":{"personal_experience":field("unknown"),"professional_output":field("unknown"),"explicit_promotion":field("unknown")},"topicHints":[]})
                             } else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["target"]["researchText"].is_string()) {
                                 json!({"contract":"comment-study.semantic.v1","outcome":"signals","reason":null,"signals":[{"kind":"need","proposition":"合成测试需要提醒","evidence":"我的孩子需要每天有人提醒","problemFrame":{"actor":{"value":"孩子","basis":"我的孩子"},"goalOrExpectedState":{"value":"获得每日提醒","basis":"每天有人提醒"},"barrierOrUnmetNeed":{"value":"依赖外部提醒","basis":"需要每天有人提醒"},"context":{"value":null,"basis":null}}}]})
+                            } else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["material"]["sources"].is_array()) {
+                                note_analysis_response::response(&serde_json::from_str(&prompt).unwrap())
                             } else if let Some(output)=topic_response(&prompt) { output
                             } else if instruction=="invalid-output" {json!({"outcome":"no_signal"})} else {
                                 json!({"title":null,"paragraphs":[{"paragraphId":null,"text":if system.contains("candidate-v2") {"合成候选建议"} else if system.contains("baseline-v1") {"合成基线建议"} else {"合成写作建议"}}],"pages":[]})

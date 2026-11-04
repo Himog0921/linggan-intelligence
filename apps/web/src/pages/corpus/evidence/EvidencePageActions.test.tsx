@@ -352,7 +352,7 @@ describe('敏感面', () => {
     await screen.findByRole('tab', { name: '作品' });
     await waitFor(() => expect(kit.of('GET', commentsPathOf(1))).toHaveLength(1));
     const paths = [...new Set(kit.calls.map(call => call.path))].sort();
-    expect(paths).toEqual(['/api/local/corpus/shell', LIST_PATH, detailPathOf(1), ocrPathOf(1), `${detailPathOf(1)}/research-dossier`, commentsPathOf(1)].sort());
+    expect(paths).toEqual(['/api/local/corpus/shell', '/api/local/note-analysis/latest', LIST_PATH, detailPathOf(1), ocrPathOf(1), `${detailPathOf(1)}/research-dossier`, commentsPathOf(1)].sort());
     expect(kit.calls.every(call => call.method === 'GET')).toBe(true);
   });
 });

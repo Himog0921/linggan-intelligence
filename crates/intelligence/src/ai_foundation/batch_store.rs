@@ -79,6 +79,10 @@ pub enum InputRef {
     WritingPreview {
         preview_ref: Uuid,
     },
+    NoteAnalysis {
+        request_ref: Uuid,
+        include_comments: bool,
+    },
     Note {
         snapshot_ref: Uuid,
     },
@@ -124,6 +128,7 @@ impl InputRef {
             Self::WritingPreview { .. } => {
                 matches!(task, TaskKey::WritingLegacy | TaskKey::CreationTitle) && trial
             }
+            Self::NoteAnalysis { .. } => task == TaskKey::NoteInterpretation && !trial,
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
             Self::DirectionSample { .. } => matches!(
                 task,

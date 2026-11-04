@@ -132,3 +132,5 @@ impl TaskKey {
 }
 pub mod invocation_read;
 pub mod ocr_recognition;
+
+pub mod note_analysis;
