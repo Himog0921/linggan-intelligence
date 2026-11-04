@@ -2879,32 +2879,7 @@ body.topic-map-page {
 
 
 /* TOPIC-ATLAS-V3-001: approved compact material-first atlas. No demo data enters React. */
-.lgi-tm-context-views {
-  display: inline-flex;
-  align-items: stretch;
-  flex-shrink: 0;
-  gap: var(--lgi-space-4);
-  margin-left: var(--lgi-space-4);
-  border-left: 1px solid var(--lgi-hairline);
-  padding-left: var(--lgi-space-4);
-}
-.lgi-tm-context-views .lgi-tm-tab {
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  box-shadow: var(--lgi-shadow-none);
-  border-radius: 0;
-  padding: var(--lgi-space-2) var(--lgi-space-1);
-  white-space: nowrap;
-  color: var(--lgi-muted);
-  font-size: var(--lgi-text-data);
-  cursor: pointer;
-}
-.lgi-tm-context-views .lgi-tm-tab.is-active {
-  color: var(--lgi-ink);
-  font-weight: var(--lgi-weight-bold);
-  border-bottom-color: var(--lgi-signal);
-}
+/* Topic overview/journey now use the shared ContextTabs component. */
 :global(#topic-map-root) .lgi-tm-workbench {
   grid-template-columns: calc(var(--lgi-space-24) * 2 + var(--lgi-space-12) + var(--lgi-space-1)) minmax(0, 1fr);
 }
@@ -3159,8 +3134,6 @@ body.topic-map-page {
   :global(#topic-map-root) .lgi-tm-main { padding-inline: var(--lgi-space-5); }
 }
 @media (max-width: 760px) {
-  .lgi-tm-context-views { margin-left: 0; padding-left: var(--lgi-space-2); gap: var(--lgi-space-2); }
-  .lgi-tm-context-views .lgi-tm-tab { font-size: var(--lgi-text-label); }
   :global(#topic-map-root) .lgi-tm-workbench {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
