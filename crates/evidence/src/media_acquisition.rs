@@ -357,6 +357,7 @@ pub async fn claim_media_acquisition(
          FROM linggan_media_acquisition_work \
          WHERE state='leased' AND claimed_by_installation_ref=$1 \
            AND lease_expires_at > scope_001_now() \
+           AND NOT EXISTS(SELECT 1 FROM linggan_material_media_origin live WHERE live.observation_ref=linggan_media_acquisition_work.observation_ref AND live.purpose='live_photo' AND linggan_media_acquisition_work.component_kind<>'still') \
          ORDER BY updated_at LIMIT 1 FOR UPDATE",
     )
     .bind(installation_ref)
@@ -369,6 +370,7 @@ pub async fn claim_media_acquisition(
             "SELECT work_ref FROM linggan_media_acquisition_work \
              WHERE state IN ('pending','retry_wait') AND attempt_count < $1 \
                AND next_attempt_at <= scope_001_now() \
+               AND NOT EXISTS(SELECT 1 FROM linggan_material_media_origin live WHERE live.observation_ref=linggan_media_acquisition_work.observation_ref AND live.purpose='live_photo' AND linggan_media_acquisition_work.component_kind<>'still') \
              ORDER BY next_attempt_at,created_at LIMIT 1 FOR UPDATE SKIP LOCKED",
         )
         .bind(MAX_ATTEMPTS)
@@ -531,5 +533,23 @@ pub(crate) async fn complete_media_acquisition_for_observation(
     .bind(component_kind)
     .execute(&mut **tx)
     .await?;
+    Ok(())
+}
+
+/// Live-photo observations may materialize static images only. Independent videos keep their
+/// existing contract. This also fences uploads that were started before the policy changed.
+pub(crate) async fn require_retained_component_in(
+    conn: &mut sqlx::PgConnection,
+    observation: Uuid,
+    mime: &str,
+) -> Result<(), ProducerRuntimeError> {
+    if mime.starts_with("image/") {
+        return Ok(());
+    }
+    let live: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_media_origin WHERE observation_ref=$1 AND purpose='live_photo')")
+        .bind(observation).fetch_one(conn).await.map_err(ProducerRuntimeError::Internal)?;
+    if live {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
     Ok(())
 }

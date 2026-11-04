@@ -44,11 +44,11 @@ describe('原尺寸查看器', () => {
     expect(screen.getByRole('status')).toHaveTextContent('本地副本读取失败');
   });
 
-  it('模态对话框：标题「用途 · 第 NN / MM 个」，副标题给出对象编号与采集序号，图注写字节与文字状态', () => {
+  it('模态对话框：标题「用途 · 第 NN / MM 个」，不显示内部对象编号和页序警示，图注写字节与文字状态', () => {
     setup();
     const dialog = screen.getByRole('dialog', { name: /正文图片 · 第 01 \/ 03 个/ });
     expect(dialog).toBeInTheDocument();
-    expect(screen.getByText(/^MED-[0-9A-F]{8} · 采集序号 1 · 平台排列顺序未经验证$/)).toBeInTheDocument();
+    expect(screen.queryByText(/MED-[0-9A-F]{8}|采集序号|平台排列顺序未经验证/)).not.toBeInTheDocument();
     expect(screen.getByRole('img', { name: '正文图片 原尺寸本地副本' })).toHaveAttribute('src', mediaHandle(1));
     expect(screen.getByText('字节 已取得 · 文字 未处理')).toBeInTheDocument();
   });

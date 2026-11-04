@@ -123,7 +123,7 @@ async fn prepare(
         return Err(ExecutorError::Invalid);
     }
     let (source, input) = owner::frozen_in(&mut tx, request_ref).await?;
-    let super::research_call::Call{invocation,request,prompt_version_ref}=super::research_call::prepare_in(&mut tx,item,secrets,super::research_call::Input{contract:owner::CONTRACT,reference:request_ref,fingerprint:&input.input_fingerprint,payload:json!({"workContext":source.source.context_manifest,"target":{"researchText":input.research_text},"parentContext":input.input_manifest["parentContext"]}),response_schema:crate::ai_foundation::transport::ResponseSchema{name:"comment_research_semantic".into(),schema:schema()},material_class:"comment_material"}).await?;
+    let super::research_call::Call{invocation,request,prompt_version_ref}=super::research_call::prepare_in(&mut tx,item,secrets,super::research_call::Input{contract:owner::CONTRACT,reference:request_ref,fingerprint:&input.input_fingerprint,payload:json!({"workContext":linggan_evidence::research_dossier::model_context(&source.source.context_manifest),"target":{"researchText":input.research_text},"parentContext":input.input_manifest["parentContext"]}),response_schema:crate::ai_foundation::transport::ResponseSchema{name:"comment_research_semantic".into(),schema:schema()},material_class:"comment_material"}).await?;
     tx.commit().await?;
     Ok(Prepared {
         invocation,

@@ -72,7 +72,7 @@ function parseDossierRow(row: Json): Dossier {
   if (new Set(orderedRefs).size !== orderedRefs.length || orderedRefs.some(ref => !blockRefs.has(ref))
     || new Set(titleBlockRefs).size !== titleBlockRefs.length || titleBlockRefs.some(ref => !blockRefs.has(ref))) throw new ShapeError('readingView.blockRefs');
   const coverage = parseCoverage(obj(row, 'coverage'));
-  const sections = parseReadingSections(reading, materials, mainBlockRefs, supplementBlockRefs, coverage.imageInventory);
+  const sections = parseReadingSections(reading, materials, mainBlockRefs, supplementBlockRefs);
   return {
     contract: 'research-dossier.v2', workRef: str(row, 'workRef'), revision: str(row, 'revision'), materialRevision: str(row, 'materialRevision'), asOf: str(row, 'asOf'),
     note: { platform: str(note, 'platform'), sourceUrl: optStr(note, 'sourceUrl'), platformTitle: optStr(note, 'platformTitle'),

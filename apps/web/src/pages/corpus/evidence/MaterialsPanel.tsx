@@ -36,7 +36,7 @@ export function MaterialsPanel({ context }: { context: PanelContext }) {
                 ['本地对象', object.objectRef ?? '当前未表达'],
                 ['字节状态', stateMeta(object.bytesState)[0], object.bytesState],
                 ['文字处理', object.derivedState ? stateMeta(object.derivedState)[0] : '未处理', object.derivedState],
-                ['采集序号', object.slot.displayOrderState === 'KNOWN' ? String(object.ordinal) : `${object.ordinal}（平台排列顺序未经验证）`],
+                ['采集序号', String(object.ordinal)],
                 ['副本状态', object.slot.replicaState ?? '当前未知', object.slot.replicaState ?? 'UNKNOWN'],
               ]}
             />

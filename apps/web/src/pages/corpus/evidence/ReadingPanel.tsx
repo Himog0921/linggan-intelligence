@@ -30,13 +30,13 @@ export function ReadingPanel({ context, domain, active }: { context: PanelContex
   const dossier = hideCachedReading(reading.error) ? undefined : reading.data?.dossier;
   const ocr = laneSummary(item.lanes, 'ocr')?.state;
   const asr = laneSummary(item.lanes, 'asr')?.state;
-  const mediaLabels = mediaReadingLabels(inspector.mediaSlots, item.media, asr);
+  const mediaLabels = mediaReadingLabels(inspector.mediaSlots, item.media);
   return <div className={styles.readingBody}>
     <section aria-label="作品文字">
       {reading.isPending ? <p role="status">正在读取正文…</p> : reading.isError && !dossier ? <p role="status">正文读本暂不可读。<button type="button" onClick={() => void reading.refetch()}>重试读取</button></p> : dossier ? <DossierReading dossier={dossier} titleRendered /> : <SourceNote>暂无可读文字。</SourceNote>}
       {reading.isError && dossier ? <p role="status">刷新未完成，保留上次读到的正文版本。</p> : null}
     </section>
-    <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} workLabel={workTitle(item)} active={active} readingRevision={dossier?.materialRevision} mediaTitle={mediaLabels.mediaTitle} onApplied={() => void reading.refetch()}>
+    <OcrRecognition key={`${domain}:${item.ref}`} workRef={item.ref} workLabel={workTitle(item)} active={active} readingRevision={dossier?.materialRevision} mediaTitle={mediaLabels.mediaTitle} mediaCount={objects.length} onApplied={() => void reading.refetch()}>
       {objects.length > 0 ? <MediaRail objects={objects} onOpen={onOpenViewer} />
         : <SourceNote>暂无可内联显示的本地媒体副本，不代表原作品没有媒体。</SourceNote>}
       <div className={styles.gaps}>

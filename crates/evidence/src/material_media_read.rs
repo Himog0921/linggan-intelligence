@@ -478,7 +478,9 @@ async fn read_slots_batch(
            JOIN linggan_runtime_capture_package historical_package USING(package_ref) \
            JOIN linggan_media_download_attempt attempt ON attempt.media_observation_ref=historical_origin.observation_ref \
            JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+           JOIN linggan_media_blob retained_blob ON retained_blob.sha256=materialization.blob_sha256 \
            WHERE historical_origin.slot_key IN (SELECT slot_key FROM current_origin) \
+             AND (historical_origin.purpose<>'live_photo' OR retained_blob.mime_type LIKE 'image/%') \
          ), current_disposition AS MATERIALIZED ( \
            SELECT * FROM linggan_current_material_media_disposition \
          ), current_download AS ( \
@@ -667,24 +669,19 @@ impl SlotAccumulator {
         let purpose: String = row.get("purpose");
         let components = if purpose == "live_photo" {
             let observation_ref = row.get::<Uuid, _>("observation_ref");
-            let still_state =
-                if acquired_components.contains(&(observation_ref, "still".to_owned())) {
-                    "ACQUIRED".to_owned()
-                } else {
-                    row.get::<Option<String>, _>("live_photo_still_state")
-                        .unwrap_or_else(|| "UNKNOWN".to_owned())
-                };
-            let motion_state =
-                if acquired_components.contains(&(observation_ref, "motion".to_owned())) {
-                    "ACQUIRED".to_owned()
-                } else {
-                    row.get::<Option<String>, _>("live_photo_motion_state")
-                        .unwrap_or_else(|| "UNKNOWN".to_owned())
-                };
-            let bundle_state = if still_state == "ACQUIRED" && motion_state == "ACQUIRED" {
-                "COMPLETE".to_owned()
+            let still_state = if materialization_ref.is_some()
+                || acquired_components.contains(&(observation_ref, "still".to_owned()))
+            {
+                "ACQUIRED".to_owned()
             } else {
-                row.get::<String, _>("composite_state")
+                row.get::<Option<String>, _>("live_photo_still_state")
+                    .unwrap_or_else(|| "UNKNOWN".to_owned())
+            };
+            let motion_state = "NOT_APPLICABLE";
+            let bundle_state = if still_state == "ACQUIRED" {
+                "COMPLETE"
+            } else {
+                "PARTIAL"
             };
             serde_json::json!({"bundleState":bundle_state,"stillState":still_state,"motionState":motion_state})
         } else {

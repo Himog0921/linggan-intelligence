@@ -219,7 +219,7 @@ async fn insert_slot_and_origin(
         .iter()
         .map(|(component, _)| *component)
         .collect::<HashSet<_>>();
-    enqueue_media_acquisition(tx, media.observation_ref, &components).await?;
+    enqueue_media_acquisition(tx, media.observation_ref, &components, live).await?;
     Ok(())
 }
 
@@ -286,8 +286,13 @@ async fn enqueue_media_acquisition(
     tx: &mut Transaction<'_, Postgres>,
     observation_ref: Uuid,
     components: &HashSet<&str>,
+    live_photo: bool,
 ) -> Result<(), ProducerRuntimeError> {
-    for component in components {
+    // Keep observed component candidates as evidence; only still bytes are retained.
+    for component in components
+        .iter()
+        .filter(|component| !live_photo || **component == "still")
+    {
         sqlx::query(
             "INSERT INTO linggan_media_acquisition_work \
                  (work_ref,observation_ref,component_kind) VALUES ($1,$2,$3) \

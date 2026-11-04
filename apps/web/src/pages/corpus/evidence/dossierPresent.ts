@@ -7,7 +7,7 @@ export function materialLabel(unit: DossierMaterial, imageNumber?: number): stri
   if (unit.kind === 'tags') return '独立标签';
   if (unit.kind === 'audio') return '音轨转写';
   if (unit.kind === 'video_frame') return '视频画面文字';
-  return unit.page === null ? `图片${imageNumber === undefined ? '' : ` ${imageNumber}`} · 页码未知` : `第 ${unit.page} 页`;
+  return `图片${imageNumber === undefined ? '' : ` ${imageNumber}`}`;
 }
 /** The canonical issue identifies an eligible saved result; execution completion alone does not. */
 export function existingResultPending(unit: DossierMaterial): boolean {

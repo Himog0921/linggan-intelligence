@@ -21,7 +21,12 @@ pub async fn publish_in(
         &now,
     )
     .await?;
-    let preserve_human = if unit.current.is_some() && unit.adoption != "automatic" {
+    let original_current = unit.current;
+    let expected_matches = match input.publication {
+        Publication::Automatic { expected_current } | Publication::Requested { expected_current } => expected_current == original_current,
+    };
+    let requested = matches!(input.publication, Publication::Requested { .. }) && expected_matches;
+    let preserve_human = if !requested && unit.current.is_some() && unit.adoption != "automatic" {
         let derivative: Option<Uuid> = sqlx::query_scalar(
             "SELECT derivative_ref FROM linggan_material_reading WHERE reading_ref=$1",
         )
@@ -42,7 +47,6 @@ pub async fn publish_in(
     } else {
         false
     };
-    let original_current = unit.current;
     if current_source && unit.source != input.source_version && !preserve_human {
         unit.source.clone_from(&input.source_version);
         unit.state.clone_from(&input.source_state);
@@ -53,15 +57,13 @@ pub async fn publish_in(
         update_unit(conn, &mut unit).await?;
         record_selection(conn, &unit, "source_changed", None).await?;
     }
-    let expected_matches = match input.publication {
-        Publication::Automatic { expected_current } => expected_current == original_current,
-    };
     if current_source
         && expected_matches
-        && unit.adoption == "automatic"
+        && (unit.adoption == "automatic" || requested)
         && unit.current != Some(reading)
     {
         unit.current = Some(reading);
+        unit.adoption = "automatic".into();
         unit.state = input.source_state;
         unit.page = input.page;
         unit.verification = "unchecked".into();
@@ -145,7 +147,7 @@ async fn existing_or_new(
     normalize_refs(unit.work, id, &mut input.blocks, &mut input.issues);
     validate_content(&input.blocks, &input.issues)?;
     let publication = match input.publication {
-        Publication::Automatic { .. } => "automatic",
+        Publication::Automatic { .. } | Publication::Requested { .. } => "automatic",
     };
     if let Some(r) = previous {
         if r.get::<Value, _>("blocks") != json!(input.blocks)

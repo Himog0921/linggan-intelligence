@@ -42,3 +42,5 @@
 
 .confirm fieldset { min-width: 0; border: 0; margin: 0; padding: 0; display: grid; gap: var(--lgi-space-2); }
 .confirm fieldset label { display: flex; align-items: baseline; gap: var(--lgi-space-2); }
+
+.mediaCount { color: var(--lgi-muted); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-data); }

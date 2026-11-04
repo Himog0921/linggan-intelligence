@@ -1,7 +1,6 @@
 use super::{ResearchDossier, content};
 use crate::creator_discovery::{Fragment, hash};
 use serde_json::{Value, json};
-use uuid::Uuid;
 
 pub fn context_sources(dossier: &ResearchDossier) -> Vec<Value> {
     dossier.fragments.iter().map(|f|{
@@ -17,18 +16,35 @@ pub fn context_sources(dossier: &ResearchDossier) -> Vec<Value> {
     }).collect()
 }
 
+/// Model-facing projection of the frozen context; audit metadata stays in the manifest.
+pub fn model_context(manifest: &Value) -> Value {
+    let sources: Vec<Value> = manifest["sources"].as_array().into_iter().flatten().map(|source| {
+        let mut value = json!({"source":source["blockRef"], "kind":source["kind"], "text":source["text"]});
+        for key in ["unitRef", "speaker", "regionLabel"] {
+            if let Some(v) = source.get(key).filter(|v| !v.is_null()) { value[key] = v.clone(); }
+        }
+        for key in ["sourceRole", "time"] {
+            if let Some(v) = source["structure"].get(key).filter(|v| !v.is_null()) { value[key] = v.clone(); }
+        }
+        if let Some(parameters) = source["structure"]["parameters"].as_array().filter(|p| !p.is_empty()) {
+            value["parameterCandidates"] = Value::Array(parameters.iter().map(|parameter| {
+                let mut candidate = parameter.clone();
+                for key in ["bindingStatus", "basisStatus"] {
+                    if candidate.get(key).is_none_or(Value::is_null) { candidate[key] = json!("unconfirmed"); }
+                }
+                candidate
+            }).collect());
+        }
+        value
+    }).collect();
+    let states: serde_json::Map<String, Value> = manifest["coverage"]["sources"].as_object().into_iter().flatten()
+        .map(|(key,value)| (key.clone(), value["state"].clone())).collect();
+    json!({"title":manifest["readingTitle"]["text"], "materials":sources,"availability":states})
+}
+
 /// Full block order; callers supply an explicit task selection, never a character allowance.
 pub fn render_materials(fragments: &[Fragment]) -> String {
     let mut out = String::new();
-    if fragments.iter().any(|f| {
-        matches!(
-            f.field.as_str(),
-            "ocr" | "cover_headline" | "transcript" | "frame_text"
-        )
-    }) {
-        out.push_str("图片文字与视觉描述分列；视觉描述是模型观察，不作作者原文引用。核对状态以来源记录为准。\n\n");
-    }
-    let mut seen_issues = std::collections::BTreeSet::new();
     for (index, f) in fragments.iter().enumerate() {
         out.push_str(&format!("[S{}] {}\n", index + 1, field_label(&f.field)));
         if f.speaker == "other" {
@@ -49,28 +65,10 @@ pub fn render_materials(fragments: &[Fragment]) -> String {
         }
         out.push_str(&f.text);
         out.push_str("\n\n");
-        for issue in &f.issues {
-            if super::quality::specific(issue) {
-                if let Some(message) = issue["message"].as_str() {
-                    if seen_issues.insert((
-                        if matches!(
-                            issue["code"].as_str(),
-                            Some(
-                                "cross_image_parameter_conflict"
-                                    | "parameter_binding_unconfirmed"
-                                    | "page_order_unknown"
-                                    | "image_total_unknown"
-                            )
-                        ) {
-                            Uuid::nil()
-                        } else {
-                            f.source_ref
-                        },
-                        message.to_owned(),
-                    )) {
-                        out.push_str(&format!("> 待确认：{message}\n"));
-                    }
-                }
+        for candidate in f.structure["parameters"].as_array().into_iter().flatten() {
+            let value = candidate["value"].as_str().unwrap_or("");
+            if !value.is_empty() && !f.text.contains(value) {
+                out.push_str(&format!("参数候选（归属未确认）：{}\n\n", candidate));
             }
         }
     }
@@ -98,6 +96,35 @@ mod tests {
     use super::*;
     use crate::research_dossier::{Selection, VERSION, select};
     use uuid::Uuid;
+
+    #[test]
+    fn model_input_keeps_content_and_attribution_without_audit_duplicates() {
+        let manifest = json!({
+            "readingTitle":{"text":"桌游"},
+            "coverage":{"sources":{"images":{"state":"partial","issues":["页码未确认"]}}},
+            "sources":[{
+                "blockRef":"block-1", "unitRef":"image-2", "kind":"image_substantive_text",
+                "text":"名称 | 年龄\n游戏甲 | 5岁", "speaker":"unconfirmed", "regionLabel":"左栏",
+                "issues":[{"message":"核对说明"}], "verification":"unchecked",
+                "structure":{"text":"重复正文", "sourceRole":"main",
+                    "parameters":[{"subject":"游戏甲","attribute":"age","value":"5岁","basis":"左栏"}]}
+            },{
+                "blockRef":"block-2", "unitRef":"image-2", "kind":"image_visual_description",
+                "text":"左侧是圆形卡片。", "structure":{}
+            }]
+        });
+        let result = model_context(&manifest);
+        assert_eq!(result["materials"][0]["text"], manifest["sources"][0]["text"]);
+        assert_eq!(result["materials"][0]["unitRef"], "image-2");
+        assert_eq!(result["materials"][0]["parameterCandidates"][0]["bindingStatus"], "unconfirmed");
+        assert_eq!(result["materials"][0]["parameterCandidates"][0]["basisStatus"], "unconfirmed");
+        assert_eq!(result["materials"][1]["kind"], "image_visual_description");
+        assert_eq!(result["availability"]["images"], "partial");
+        let output = result.to_string();
+        for omitted in ["核对说明", "页码未确认", "重复正文", "verification", "structure"] {
+            assert!(!output.contains(omitted));
+        }
+    }
 
     fn fixture(platform_title: Option<&str>, body_heading: Option<&str>) -> ResearchDossier {
         let mut materials = vec![];
@@ -161,10 +188,10 @@ mod tests {
             })
             .collect();
         let output = render_materials(&fragments);
-        assert_eq!(output.matches("核对状态以来源记录为准").count(), 1);
+        assert!(!output.contains("核对状态以来源记录为准"));
         assert_eq!(output.matches("视觉描述：").count(), 2);
         assert_eq!(output.matches("图片文字：").count(), 1);
-        assert_eq!(output.matches("末行数字看不清").count(), 1);
+        assert!(!output.contains("末行数字看不清"));
         assert!(!output.contains("模型观察，非原文"));
         assert!(!output.contains("未经人工核实"));
         assert!(render_materials(&[]).is_empty());
@@ -199,7 +226,7 @@ mod tests {
         super::super::reading::rebuild(&mut d);
         let output = markdown(&d);
         for expected in [
-            "第 1 张图片",
+            "图片 1",
             "[查看原图](</api/local/media/example>)",
             "图片文字（识别提取）",
             "视觉描述（模型观察，非原文）",
@@ -262,8 +289,8 @@ mod tests {
         let d = fixture(Some("平台标题"), Some("正文标题"));
         let output = markdown(&d);
         assert!(output.starts_with("# 平台标题\n"));
-        assert!(output.contains("正文标题") && output.contains("图片标题待确认"));
-        assert!(output.find("核对说明").unwrap() < output.find("图片标题待确认").unwrap());
+        assert!(output.contains("正文标题"));
+        assert!(!output.contains("核对说明") && !output.contains("图片标题待确认"));
         assert_eq!(
             d.materials[0]["blocks"][0]["issues"][0]["message"],
             "正文标题待确认"
@@ -283,8 +310,7 @@ mod tests {
         d.coverage["sources"] = json!({"audio":{"state":"known_empty"}});
         let output = markdown(&d);
         for message in ["第0处独立问题", "第1处独立问题", "独立覆盖问题"] {
-            assert_eq!(output.matches(message).count(), 1);
-            assert!(output.find("核对说明").unwrap() < output.find(message).unwrap());
+            assert!(!output.contains(message));
         }
         assert!(output.contains("无可用口播"));
         assert!(!output.contains("既有已确认无文字的结果仍有效"));
@@ -392,8 +418,8 @@ mod tests {
         super::super::reading::rebuild(&mut d);
         let text = render_materials(&d.fragments);
         assert!(text.contains("原图标题"));
-        assert_eq!(text.matches("未绑定参数候选：8+").count(), 1);
-        assert!(text.contains("字段：年龄，依据：包装标注"));
+        assert_eq!(text.matches("参数候选（归属未确认）").count(), 1);
+        assert!(text.contains("8+") && text.contains("package"));
         let sources = context_sources(&d);
         let candidate = sources
             .iter()

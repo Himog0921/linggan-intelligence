@@ -3,10 +3,11 @@ import { dossierExport, dossierMarkdownExport, downloadFile } from './exportDoss
 import { parseDossierPayload } from './dossierDecode';
 import { DOMAIN, dossierJson, workRef } from './evidenceFixtures';
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
-it('JSON 导出是收到的完整底稿原样，不含类型投影或第二份正文', () => {
+it('JSON 导出保留全文，去掉内部诊断、页码与重复索引', () => {
   const raw = dossierJson(1, { bodyText: '全文'.repeat(60000) });
   const file = dossierExport(parseDossierPayload(raw));
-  expect(JSON.parse(file.data)).toEqual(raw.dossier); expect(file.name).toBe(`研究底稿-${workRef(1)}.json`); expect(file.type).toContain('application/json');
+  expect(JSON.parse(file.data).materials[0].content[0].text).toBe('全文'.repeat(60000));
+  expect(file.data).not.toMatch(/readingView|sourceVersion|currentRevisionRef|issues|verification|materialRevision/); expect(file.name).toBe(`研究底稿-${workRef(1)}.json`); expect(file.type).toContain('application/json');
   expect(JSON.parse(file.data)).not.toHaveProperty('raw');
 });
 it('现用 downloadFile 使用文件原字符串与 MIME，点击后回收本地对象 URL', () => {

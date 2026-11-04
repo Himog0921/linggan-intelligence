@@ -1,7 +1,7 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { DossierDocument } from './DossierDocument';
-import { DossierGroup, EmptySpeechNotes, ReadingIssues, TranscriptGroups } from './DossierDocumentBlocks';
+import { DossierGroup, EmptySpeechNotes, TranscriptGroups } from './DossierDocumentBlocks';
 import { parseDossierPayload } from './dossierDecode';
 import { endingGroupAttribution, readingGaps, resolveReadingSections } from './dossierDocumentModel';
 import { dossierJson, dossierMaterialJson } from './evidenceFixtures';
@@ -106,18 +106,7 @@ it('图片资料提供所属原图入口并保留未知页码', () => {
   const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { page: null, originalUrl })] }));
   render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.getByRole('link', { name: '查看原图' })).toHaveAttribute('href', originalUrl);
-  expect(screen.getByText(/图片 · 页码未确认/)).toBeVisible();
-});
-
-it('核对说明默认收起，通用提示不展示，具体问题展开后仍可读', () => {
-  const issue = { code: 'image_limitation', key: 'cut', displayKey: 'cut', message: '右栏末尾被裁切', resolution: 'reading_edit' as const };
-  const { container } = render(<ReadingIssues issues={[issue, { ...issue, key: 'duplicate', displayKey: 'duplicate' }, { ...issue, key: 'general', displayKey: 'general', code: 'cloud_image_unchecked', message: '通用未核对提醒' }]}/>);
-  expect(container.querySelector('details')).not.toHaveAttribute('open');
-  expect(screen.getByText('右栏末尾被裁切')).not.toBeVisible();
-  expect(screen.queryByText('通用未核对提醒')).toBeNull();
-  expect(screen.getAllByText('右栏末尾被裁切')).toHaveLength(1);
-  fireEvent.click(screen.getByText('核对说明'));
-  expect(screen.getByText('右栏末尾被裁切')).toBeVisible();
+  expect(screen.queryByText(/页码/)).toBeNull();
 });
 
 it('同图多个区域只保留一个核对入口，展开后保留疑点位置', () => {
@@ -126,11 +115,7 @@ it('同图多个区域只保留一个核对入口，展开后保留疑点位置'
     { ref: 'right', kind: 'paragraph', text: '右栏原文', contentType: 'extracted_text', regionRef: 'r2', regionLabel: '右栏', issues: [{ key: 'right', code: 'region_uncertainty', message: '数值模糊', blockRef: 'right', resolution: 'reading_edit' }] }
   ] })] }));
   render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
-  expect(screen.getAllByText(/^核对说明/)).toHaveLength(1);
-  expect(screen.getByText('左栏：末字模糊')).not.toBeVisible();
-  fireEvent.click(screen.getByText(/^核对说明/));
-  expect(screen.getByText('左栏：末字模糊')).toBeVisible();
-  expect(screen.getByText('右栏：数值模糊')).toBeVisible();
+  expect(screen.queryByText(/^核对说明/)).toBeNull();
 });
 
 it('口播段落的具体疑点默认收起并可展开核对', () => {
@@ -139,9 +124,7 @@ it('口播段落的具体疑点默认收起并可展开核对', () => {
   raw.dossier.readingView.sections[0]!.groups[0]!.mode = 'transcript_paragraph';
   const groups = resolveReadingSections(parseDossierPayload(raw).dossier)[0]!.groups;
   render(<TranscriptGroups groups={groups} prefix="audio-review"/>);
-  expect(screen.getByText(issue.message)).not.toBeVisible();
-  fireEvent.click(screen.getByText(/^核对说明/));
-  expect(screen.getByText(issue.message)).toBeVisible();
+  expect(screen.queryByText(issue.message)).toBeNull();
 });
 
 it('在线读本缺口明确标注待在线识读，不把旧处理完成当作正文可用', () => {
@@ -149,7 +132,7 @@ it('在线读本缺口明确标注待在线识读，不把旧处理完成当作�
     issues: [{ key: 'online_image_pending', code: 'online_image_pending', message: '历史 OCR 已保留', resolution: 'source_refresh' }],
     processing: { state: 'completed', reason: null } });
   const dossier = parseDossierPayload(dossierJson(1, { materials: [pending] })).dossier;
-  expect(readingGaps(dossier)).toContainEqual({ key: 'images', label: '图片资料', state: '待在线识读', message: '1 张图片尚未在线识读。 第 1、2 页文字待补全。' });
+  expect(readingGaps(dossier)).toContainEqual({ key: 'images', label: '图片资料', state: '待在线识读', message: '1 张图片尚未在线识读。' });
 });
 
 it('在线过渡中的未识读和失败未知页全部计数', () => {
@@ -193,9 +176,7 @@ it('多张图片的页序说明只在文末保留一次，不逐图制造核对�
   const issue = { key: 'page', code: 'page_order_unknown', message: '平台图片页序尚未确认', resolution: 'source_refresh' };
   const payload = parseDossierPayload(dossierJson(1, { materials: [1, 2].map(n => dossierMaterialJson(n, { page: null, issues: [issue] })) }));
   render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
-  expect(screen.getAllByText(/^核对说明/)).toHaveLength(1);
-  fireEvent.click(screen.getByText(/^核对说明/));
-  expect(screen.getAllByText('平台图片页序尚未确认')).toHaveLength(1);
+  expect(screen.queryByText(/^核对说明/)).toBeNull();
 });
 
 it('已取得文字但缺少视觉信息仍显示含待补内容，而不是内容就绪', () => {

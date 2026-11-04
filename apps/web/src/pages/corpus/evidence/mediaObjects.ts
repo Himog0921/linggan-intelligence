@@ -103,7 +103,7 @@ function inlineUrl(slot: MediaSlot): string | null {
 
 export function mediaObjects(inspector: Inspector, fragment: Pick<Fragment, 'slotKey'> | null): MediaObject[] {
   const derived = derivedBySlot(inspector);
-  return groupByContent(sortedSlots(inspector, false)).map((group, index) => {
+  return groupByContent(sortedSlots(inspector, false).filter(slot => !(slot.purpose === 'live_photo' && slot.mime.startsWith('video/')))).map((group, index) => {
     // 封面优先作为代表：与图片识别选图一致（任一别名是封面即算封面）。
     const slot = group.find(member => member.purpose === 'cover') ?? group[0]!;
     const members = [slot, ...group.filter(member => member !== slot)];

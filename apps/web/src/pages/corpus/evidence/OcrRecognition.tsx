@@ -25,10 +25,7 @@ function actionCopy(run: OcrRecognitionRun | null) {
 }
 function stageCopy(run: OcrRecognitionRun) {
   if (run.state === 'unavailable') return run.unavailableReason ?? '当前不可执行识别，原因未返回。';
-  if (run.state === 'succeeded') {
-    const published = run.images.filter(image => image.state === 'succeeded' && image.readingRef !== null && image.isCurrent).length;
-    return published > 0 ? `识别已完成，${published} 张图片已进入当前底稿。${published < run.completedImages ? '其余识别结果未替换当前底稿。' : ''}` : '识别已完成，当前底稿未替换。';
-  }
+  if (run.state === 'succeeded') return '';
   if (run.state === 'unknown') return '结果暂未确认；只核对原任务，不重复发送图片。';
   if (run.state === 'stopped') {
     const reasons: Record<string, string> = {
@@ -49,7 +46,7 @@ function stageCopy(run: OcrRecognitionRun) {
   return run.unavailableReason ?? '保存模型不会自动发图。';
 }
 /** Parent keys this work-scoped session, so late A responses cannot appear in B. */
-export function OcrRecognition({ workRef, workLabel, active = true, onApplied, children, readingRevision, mediaTitle = '图组' }: { workRef: string; workLabel?: string; active?: boolean; readingRevision?: string; onApplied?: () => void; children?: ReactNode; mediaTitle?: string }) {
+export function OcrRecognition({ workRef, workLabel, active = true, onApplied, children, readingRevision, mediaTitle = '图组', mediaCount }: { workRef: string; workLabel?: string; active?: boolean; readingRevision?: string; onApplied?: () => void; children?: ReactNode; mediaTitle?: string; mediaCount?: number }) {
   const [run, setRun] = useState<OcrRecognitionRun | null>(null);
   const [loading, setLoading] = useState(true); const [readFailed, setReadFailed] = useState(false);
   const [sending, setSending] = useState(false); const [message, setMessage] = useState('');
@@ -128,7 +125,7 @@ export function OcrRecognition({ workRef, workLabel, active = true, onApplied, c
     } finally { stopInFlight.current = false; if (mounted.current) setSending(false); }
   }
   function act() {
-    if (live || run?.state === 'succeeded' || run?.state === 'stopped') {
+    if (live || run?.state === 'stopped') {
       const target = result.current; const inspector = target?.closest('aside');
       const head = inspector?.querySelector(':scope > header');
       if (target && inspector && head) inspector.scrollTo({ top: inspector.scrollTop + target.getBoundingClientRect().top - inspector.getBoundingClientRect().top - head.getBoundingClientRect().height, behavior: 'auto' });
@@ -147,18 +144,18 @@ export function OcrRecognition({ workRef, workLabel, active = true, onApplied, c
     disabled={loading || sending || (!live && run?.state !== 'succeeded' && run?.state !== 'stopped' && !canStart)} aria-busy={live || sending} onClick={act}>
     <i className={styles.fill} aria-hidden="true"/><span>{loading ? '读取状态中' : actionCopy(run)}</span>
   </ActionButton>{run?.runRef ? <span className={styles.progressSemantics} role="progressbar" aria-label="图片文字识别进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-valuetext={value + '%'}/> : null}{settings}</span>;
-  return <Section title={children ? mediaTitle : "图片文字"} actions={action}>
+  return <Section title={children ? mediaTitle : "图片文字"} badge={mediaCount !== undefined ? <span className={styles.mediaCount}>{String(mediaCount).padStart(2, '0')} 个本地媒体对象</span> : null} actions={action}>
     <div className={styles.module} data-ocr-recognition data-state={run?.state ?? 'loading'}>
-      <div ref={result} className={styles.feedbackRow}><p className={styles.status} role="status" aria-live="polite">{statusText}</p>
+      {run?.state !== 'succeeded' || loading || readFailed ? <div ref={result} className={styles.feedbackRow}><p className={styles.status} role="status" aria-live="polite">{statusText}</p>
         <span className={styles.statusActions}>
           {readFailed ? <button type="button" className={styles.source} onClick={() => { setReadFailed(false); setLoading(true); setRefresh(value => value + 1); }}>重新读取状态</button> : null}
           {run && ['succeeded', 'stopped'].includes(run.state) ? <button type="button" className={styles.source} disabled={!canStart} onClick={chooseScope}>选择图片重新识读</button> : null}
           {stopRequest ? <button type="button" className={styles.source} disabled={sending} onClick={() => void stop()}>核对本次停止请求</button> : live && run?.batchRef ? <button type="button" className={styles.source} disabled={loading || readFailed || sending || run.cancelRequested} onClick={() => void stop()}>停止本次识别</button> : null}
-        </span></div>
+        </span></div> : null}
       {run && ['succeeded', 'stopped'].includes(run.state) && run.scope === null && run.unavailableReason ? <p className={styles.status}>当前无法发起新识读：{run.unavailableReason}</p> : null}
       {message ? <p className={styles.status} role="status">{message}</p> : null}
       {unconfirmed && !sending ? <button className={styles.source} type="button" onClick={() => { if (write.current) void submit(write.current.scope); }}>核对本次请求</button> : null}
-      {confirm ? <div className={styles.confirm} role="group" aria-label="确认本篇图片识别范围"><b>重新识读 {selectedSlots.length} 张原图</b><p>将按既有源顺序发送到 {confirm.modelLabel}。每张一次，首个失败后停止；可能产生模型费用。</p><small>{confirm.endpointUrl}</small><fieldset disabled={sending}><legend>选择重新识读的图片</legend>{confirm.images.map(image => <label key={image.slotKey}><input type="checkbox" checked={selectedSlots.includes(image.slotKey)} onChange={event => setSelectedSlots(current => event.target.checked ? [...current, image.slotKey] : current.filter(key => key !== image.slotKey))} />{image.ordinal === null ? image.role === 'cover' ? '封面 · 页码未知' : '页码未知的图片' : `第 ${image.ordinal} 页`}</label>)}</fieldset>
+      {confirm ? <div className={styles.confirm} role="group" aria-label="确认本篇图片识别范围"><b>重新识读 {selectedSlots.length} 张原图</b><p>将按既有源顺序发送到 {confirm.modelLabel}。每张一次，首个失败后停止；可能产生模型费用。</p><small>{confirm.endpointUrl}</small><fieldset disabled={sending}><legend>选择重新识读的图片</legend>{confirm.images.map((image, index) => <label key={image.slotKey}><input type="checkbox" checked={selectedSlots.includes(image.slotKey)} onChange={event => setSelectedSlots(current => event.target.checked ? [...current, image.slotKey] : current.filter(key => key !== image.slotKey))} />{image.role === 'cover' ? '封面' : `图片 ${index + 1}`} </label>)}</fieldset>
         <div className={styles.confirmActions}><ActionButton variant="primary" disabled={sending || selectedSlots.length === 0} onClick={() => void submit(confirm)}>确认并开始识别</ActionButton><ActionButton disabled={sending} onClick={() => setConfirm(null)}>取消</ActionButton></div></div> : null}
       {children}
     </div>

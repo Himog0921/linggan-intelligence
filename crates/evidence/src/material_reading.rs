@@ -21,6 +21,8 @@ pub use write::publish_in;
 #[derive(Clone, Copy, Debug)]
 pub enum Publication {
     Automatic { expected_current: Option<Uuid> },
+    /// A user requested online recognition replaces the reading selected when it started.
+    Requested { expected_current: Option<Uuid> },
 }
 
 #[derive(Debug)]

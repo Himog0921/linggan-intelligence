@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 
 mod effective;
 mod groups;
-pub(super) use groups::{clip_sections, image_text_gap_pages, tags_for_group};
+pub(super) use groups::{clip_sections, tags_for_group};
 
 pub(super) fn rebuild(dossier: &mut ResearchDossier) {
     super::quality::rebuild(dossier);

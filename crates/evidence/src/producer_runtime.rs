@@ -140,6 +140,12 @@ pub async fn admit_media_blob(
         .begin()
         .await
         .map_err(ProducerRuntimeError::Internal)?;
+    crate::media_acquisition::require_retained_component_in(
+        &mut tx,
+        media_observation_ref,
+        mime_type,
+    )
+    .await?;
     let source_uri = sqlx::query_scalar::<_, String>(
         "SELECT observed_external_uri FROM linggan_media_observation WHERE observation_ref = $1 FOR UPDATE",
     )
@@ -309,6 +315,12 @@ pub async fn begin_media_upload(
         .begin()
         .await
         .map_err(ProducerRuntimeError::Internal)?;
+    crate::media_acquisition::require_retained_component_in(
+        &mut tx,
+        media_observation_ref,
+        mime_type,
+    )
+    .await?;
     let observation_exists = sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM linggan_media_observation WHERE observation_ref = $1)",
     )
@@ -387,6 +399,12 @@ pub async fn record_media_upload_chunk(
     .map_err(ProducerRuntimeError::Internal)?
     .ok_or(ProducerRuntimeError::MediaObservationNotFound)?;
     let mut session = media_upload_session_from_row(&row);
+    crate::media_acquisition::require_retained_component_in(
+        &mut tx,
+        session.media_observation_ref,
+        &session.mime_type,
+    )
+    .await?;
     if session.state == "materialized" {
         tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
         return Ok(session);
@@ -417,15 +435,30 @@ pub async fn read_media_upload_session(
     database: &Database,
     session_ref: Uuid,
 ) -> Result<Option<MediaUploadSession>, ProducerRuntimeError> {
-    sqlx::query(
+    let mut conn = database
+        .pool()
+        .acquire()
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    let row = sqlx::query(
         "SELECT session_ref,media_observation_ref,expected_sha256,mime_type,expected_byte_size,temporary_storage_key,received_byte_size,state \
          FROM linggan_media_upload_session WHERE session_ref = $1",
     )
     .bind(session_ref)
-    .fetch_optional(database.pool())
+    .fetch_optional(&mut *conn)
     .await
-    .map(|row| row.map(|row| media_upload_session_from_row(&row)))
-    .map_err(ProducerRuntimeError::Internal)
+    .map_err(ProducerRuntimeError::Internal)?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let session = media_upload_session_from_row(&row);
+    crate::media_acquisition::require_retained_component_in(
+        &mut conn,
+        session.media_observation_ref,
+        &session.mime_type,
+    )
+    .await?;
+    Ok(Some(session))
 }
 
 pub async fn claim_media_upload_finalize(
@@ -447,6 +480,12 @@ pub async fn claim_media_upload_finalize(
     .map_err(ProducerRuntimeError::Internal)?
     .ok_or(ProducerRuntimeError::MediaObservationNotFound)?;
     let session = media_upload_session_from_row(&row);
+    crate::media_acquisition::require_retained_component_in(
+        &mut tx,
+        session.media_observation_ref,
+        &session.mime_type,
+    )
+    .await?;
     let claim = match session.state.as_str() {
         "materialized" => {
             let download_attempt_ref = row

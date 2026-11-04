@@ -17,23 +17,6 @@ pub(super) fn assemble(
     let readings = current_image_readings(readings);
     let slots = super::duplicates::collapse(inventory.slots.clone(), &readings);
     let mut media = media_materials(work.public_ref, &readings, &slots);
-    if let Some(expected) = expected_pages(&inventory) {
-        for page in 1..=expected {
-            if !media
-                .iter()
-                .any(|m| m["kind"] == "image" && m["page"] == page)
-            {
-                let mut missing = empty(work.public_ref, "image", None, Some(page), "not_acquired");
-                missing["issues"] = json!([issue(
-                    &format!("missing_page_{page}"),
-                    "missing_page",
-                    "平台图片序列中的这一页尚未取得",
-                    "source_refresh"
-                )]);
-                media.push(missing);
-            }
-        }
-    }
     // Stable observed media order; known pages retain platform sequence.
     media.sort_by_key(|m| m["page"].as_u64().unwrap_or(u64::MAX));
     materials.extend(media);
@@ -253,7 +236,7 @@ fn media_materials(work: Uuid, readings: &[Value], slots: &[Value]) -> Vec<Value
                 });
             // Live-photo motion is optional context, not an unprocessed video speech obligation.
             // Existing readings and raw motion remain accessible; independent videos keep their gaps.
-            if slot["purpose"] == "live_photo" && slot["component"] == "motion" && reading.is_none()
+            if slot["purpose"] == "live_photo" && slot["component"] == "motion"
             {
                 continue;
             }
@@ -309,17 +292,6 @@ fn media_materials(work: Uuid, readings: &[Value], slots: &[Value]) -> Vec<Value
                     "来源已取得，尚无当前可用的规范化识读",
                     "source_refresh"
                 )]);
-            }
-            if *kind == "image" && slot["displayOrderState"] != "KNOWN" {
-                material["issues"]
-                    .as_array_mut()
-                    .expect("issues")
-                    .push(issue(
-                        "page_order_unknown",
-                        "page_order_unknown",
-                        "平台图片页序尚未确认",
-                        "source_refresh",
-                    ));
             }
             if *kind == "video_frame"
                 && material["sourceState"] == "present"
@@ -550,7 +522,7 @@ mod online_reading_tests {
 mod live_photo_tests {
     use super::*;
     #[test]
-    fn live_motion_is_optional_but_existing_speech_and_independent_video_remain() {
+    fn live_motion_never_enters_dossier_but_independent_video_remains() {
         let live = json!({"slotKey":"live", "purpose":"live_photo", "component":"motion", "sourceVersion":"v1", "blobSha256":"a", "sourceState":"present", "processing":{"asr":{"state":"pending"}}});
         let mut video = live.clone();
         video["slotKey"] = json!("video");
@@ -560,8 +532,7 @@ mod live_photo_tests {
         assert!(units.iter().all(|u| u["slotKey"] == "video"));
         let reading = json!({"ref":"speech", "slotKey":"live", "kind":"audio", "sourceVersion":"v1", "sourceState":"present", "blocks":[{"ref":"b","kind":"paragraph","text":"现场声音"}],"issues":[]});
         let units = media_materials(Uuid::nil(), &[reading.clone()], std::slice::from_ref(&live));
-        assert_eq!(units.len(), 1);
-        assert_eq!(units[0]["blocks"][0]["text"], "现场声音");
+        assert!(units.is_empty());
         let mut changed = live.clone();
         changed["sourceVersion"] = json!("v2");
         changed["blobSha256"] = json!("b");
@@ -571,6 +542,6 @@ mod live_photo_tests {
         let mut restricted = live;
         restricted["sourceState"] = json!("restricted");
         let units = media_materials(Uuid::nil(), &[reading], &[restricted]);
-        assert_eq!(units[0]["blocks"], json!([]));
+        assert!(units.is_empty());
     }
 }

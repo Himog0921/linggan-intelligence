@@ -27,8 +27,8 @@ describe('媒体轨道', () => {
   it('说明采集顺序；每张卡是按钮：图片、序号、文字处理状态；机器编号只放 title', () => {
     const onOpen = vi.fn();
     render(<MediaRail objects={objects({ derivatives: [{ kind: 'ocr_text', state: 'ACQUIRED', slotKey: `xhs:${ref}:image:2`, displayText: '字' }] })} onOpen={onOpen} />);
-    expect(screen.getByText('03 个本地媒体对象')).toBeInTheDocument();
-    expect(screen.getByText('采集顺序 · 平台排列顺序未经验证')).toBeInTheDocument();
+    expect(screen.queryByText('03 个本地媒体对象')).toBeNull();
+    expect(screen.queryByText(/平台排列顺序/)).toBeNull();
     const group = screen.getByRole('group', { name: '本地媒体对象，左右方向键切换' });
     const cards = within(group).getAllByRole('button');
     expect(cards).toHaveLength(3);

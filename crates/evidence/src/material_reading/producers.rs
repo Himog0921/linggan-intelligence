@@ -298,7 +298,7 @@ pub async fn publish_cloud_in(
                 crate::cloud_ocr_adoption::RULE_VERSION
             ),
             content,
-            publication: Publication::Automatic { expected_current },
+            publication: Publication::Requested { expected_current },
         },
     )
     .await

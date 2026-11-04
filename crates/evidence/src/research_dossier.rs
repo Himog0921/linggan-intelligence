@@ -19,7 +19,7 @@ mod render;
 mod selection;
 pub use reading::ordered_refs;
 pub(crate) use reading::unit_text;
-pub use render::{context_sources, markdown, render_materials};
+pub use render::{context_sources, markdown, model_context, render_materials};
 pub use selection::{Selection, segment, select};
 
 pub const VERSION: &str = "research-dossier.v2";

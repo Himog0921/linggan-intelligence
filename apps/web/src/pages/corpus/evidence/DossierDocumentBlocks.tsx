@@ -1,19 +1,14 @@
-import { endingBlockAttribution, endingGroupAttribution, groupTagLabels, groupText, groupTime, formatReadingTime, formatReadingTimeRange, readingAnchor, showReadingAttribution, type ReadingIssue, type AttributionBoundary, type ResolvedReadingGroup } from './dossierDocumentModel';
+import { endingBlockAttribution, endingGroupAttribution, groupTagLabels, groupText, groupTime, formatReadingTime, formatReadingTimeRange, readingAnchor, showReadingAttribution, type AttributionBoundary, type ResolvedReadingGroup } from './dossierDocumentModel';
 import { confirmedEmptySpeech } from './dossierPresent';
 import { hasReadingSourceText } from './dossierReadingContent';
 import { normalizedTagLabel } from './dossierTagText';
 import type { DossierBlock, DossierMaterial, Speaker } from './dossierTypes';
 import styles from './DossierDocument.module.css';
-import reviewStyles from './Dossier.module.css';
 
 const ROLE_LABELS: Record<Speaker, string> = { author: '作品作者表述', other: '他人表述', unconfirmed: '表达归属未确认' };
 export function ReadingText({ text }: { text: string }) {
   const parts = text.split(/((?:周[一二三四五六日天]\s*)?\d{1,2}:\d{2}|\d{1,6}(?:\.\d{1,2})?\s*(?:个工作日|分钟|小时|秒|天|字|条|页|项|次|人|%))/gu);
   return <>{parts.map((part, index) => index % 2 ? <span className={styles.unit} key={index}>{part}</span> : part)}</>;
-}
-export function ReadingIssues({ issues }: { issues: readonly ReadingIssue[] }) {
-  const specific = [...new Map(issues.filter(issue => issue.code !== 'cloud_image_unchecked' && issue.code !== 'cross_image_parameter_conflict' && !['界面文字，归属待核验', '背景文字，归属待核验', '字幕，归属待核验', '品牌文字，归属待核验', '原文可读性或表达归属需要核验'].includes(issue.message)).map(issue => [issue.message, issue])).values()];
-  return specific.length ? <details className={reviewStyles.reviewNotes}><summary>核对说明{specific.length > 1 ? ` · ${specific.length}` : ''}</summary><ul className={styles.issues}>{specific.map(issue => <li key={issue.displayKey}>{issue.message}</li>)}</ul></details> : null;
 }
 export function EmptySpeechNotes({ materials }: { materials: readonly DossierMaterial[] }) {
   return <>{materials.filter(unit => unit.kind === 'audio').map((unit, index, units) => {
@@ -82,7 +77,7 @@ function GroupContent({ value, previousRole, previousBlock }: { value: ResolvedR
   </div>)}</>;
 }
 function Continuation({ from }: { from: boolean }) { return <p className={styles.continuation}>{from ? '承接上一段内容' : '后续内容不在本次范围内'}</p>; }
-export function DossierGroup({ value, prefix, previousRole, previousBlock, hideIssues = false }: { value: ResolvedReadingGroup; prefix: string; previousRole?: AttributionBoundary; previousBlock?: DossierBlock; hideIssues?: boolean }) {
+export function DossierGroup({ value, prefix, previousRole, previousBlock }: { value: ResolvedReadingGroup; prefix: string; previousRole?: AttributionBoundary; previousBlock?: DossierBlock }) {
   const id = readingAnchor(prefix, value.group.ref);
   const first = value.entries[0]?.block;
   const role = first?.speaker ?? 'unconfirmed';
@@ -93,7 +88,6 @@ export function DossierGroup({ value, prefix, previousRole, previousBlock, hideI
     {value.group.mode !== 'blocks' && first ? <ImageAttribution block={first} previous={previousBlock}/> : null}
     {time ? <span className={styles.transcriptTime} data-time-start-ms={time.startMs} data-time-end-ms={time.endMs}>{formatReadingTimeRange(time)}</span> : null}
     <GroupContent value={value} previousRole={previousRole} previousBlock={previousBlock}/>
-    {!hideIssues ? <ReadingIssues issues={value.issues}/> : null}
     {value.group.continuation.toNext ? <Continuation from={false}/> : null}
   </div>;
 }
@@ -105,7 +99,6 @@ export function TranscriptParagraph({ value, prefix, showRole }: { value: Resolv
       {showRole ? <span className={styles.attribution}>{ROLE_LABELS[role]}</span> : null}
       {value.group.continuation.fromPrevious ? <Continuation from/> : null}
       <p className={styles.transcriptText} data-speaker={role}><ReadingText text={groupText(value)}/></p>
-      <ReadingIssues issues={value.issues}/>
       {value.group.continuation.toNext ? <Continuation from={false}/> : null}
     </div>
   </div>;
@@ -119,15 +112,4 @@ export function TranscriptGroups({ groups, prefix }: { groups: readonly Resolved
       ? <TranscriptParagraph key={value.group.ref} value={value} prefix={prefix} showRole={showRole}/>
       : <DossierGroup key={value.group.ref} value={value} prefix={prefix} previousRole={previousRole}/>;
   })}</>;
-}
-
-export function ParameterConflicts({ materials }: { materials: readonly DossierMaterial[] }) {
-  const conflicts = new Map<string, DossierMaterial[]>();
-  for (const unit of materials) for (const issue of unit.issues) {
-    if (issue.code !== 'cross_image_parameter_conflict') continue;
-    const units = conflicts.get(issue.message) ?? [];
-    if (!units.includes(unit)) units.push(unit);
-    conflicts.set(issue.message, units);
-  }
-  return conflicts.size ? <aside className={styles.notice} aria-label="跨图参数待核对"><strong>跨图参数待核对</strong><ul>{[...conflicts].map(([message, units]) => <li key={message}>{message} {units.map(unit => unit.originalUrl ? <a key={unit.ref} href={unit.originalUrl} target="_blank" rel="noreferrer">核对图片资料 {materials.filter(item => item.kind === 'image').indexOf(unit) + 1} </a> : null)}</li>)}</ul></aside> : null;
 }

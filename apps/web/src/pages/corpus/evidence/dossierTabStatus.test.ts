@@ -16,10 +16,10 @@ it('keeps missing and review facts together, including during failed refresh of 
   const d = normal();
   d.coverage.sources.images = { state: 'partial', units: 2, readings: 1 };
   d.coverage.issues.push({ key: 'review', code: 'source', message: '出处待核对', resolution: 'source_refresh' });
-  expect(dossierTabStatus(d, null, false)?.label).toBe('待补·核对');
+  expect(dossierTabStatus(d, null, false)?.label).toBe('待补');
   const failed = dossierTabStatus(d, new Error('refresh failed'), false);
   expect(failed?.label).toBe('刷新失败');
-  expect(failed?.description).toContain('有待补内容；有待核对事项');
+  expect(failed?.description).toContain('有待补内容');
   expect(failed?.description).toContain('保留上次可读版本');
   expect(dossierTabStatus(undefined, new Error('read failed'), false)?.label).toBe('不可读');
 });
