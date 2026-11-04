@@ -60,6 +60,11 @@ describe('页面源码的敏感面', () => {
     const keys = sources.flatMap(({ file, code }) => [...code.matchAll(/(?:localStorage|sessionStorage)\.(?:setItem|getItem|removeItem)\(\s*([^,)]+)/g)].map(match => `${file}:${match[1]?.trim()}`));
     expect(keys.sort()).toEqual(
       [
+        'NoteAnalysisPanel.tsx:preferenceKey',
+        'NoteAnalysisPanel.tsx:preferenceKey',
+        'noteAnalysisApi.ts:PREFIX + key',
+        'noteAnalysisApi.ts:PREFIX + key',
+        'noteAnalysisApi.ts:PREFIX + key',
         'commentDeepRequests.ts:PREFIX + key',
         'commentDeepRequests.ts:PREFIX + key',
         'commentDeepRequests.ts:PREFIX + key',
