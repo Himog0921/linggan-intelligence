@@ -1,4 +1,3 @@
-import type { ReactNode } from 'react';
 import { DomainScopePicker } from '../../shared/DomainScopePicker';
 
 interface Scope { domainRef: string; name: string; accountCount?: number }
