@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { FontNotice } from '../shared/FontNotice';
+import { ContextTexture } from './ContextTexture';
 import { SidebarState } from '../shared/sidebarState';
 import { PERSONAL_MENU_LINKS, PRIMARY_ENTRIES, type PrimaryEntry, type PrimarySurface } from './navigation';
 import styles from './AppShell.module.css';
@@ -160,7 +161,8 @@ export function AppShell({ className, active, boundaryLabel, crumb, contextNav, 
             </details>
           </div>
         </div>
-        <div className="v7-context-row">
+        <div className="v7-context-row" data-context-texture="dark">
+          <ContextTexture />
           <div aria-hidden="true" />
           <div className="v7-context-main">
             <div className="v7-context-crumb">{crumb}</div>

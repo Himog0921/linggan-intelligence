@@ -7,6 +7,26 @@ function navItems(): HTMLElement[] {
   return [...nav.querySelectorAll<HTMLElement>(':scope > :is(a,button)')];
 }
 
+describe('全站统一深色 Pattern Waves 上下文栏', () => {
+  it('普通 AppShell 使用方格材质；保留路径、三级导航和右侧状态的语义节点', () => {
+    const { container } = render(
+      <AppShell
+        active="corpus"
+        boundaryLabel="本机服务状态"
+        crumb={<><b>评论研究</b> <span className="v7-slash">/</span> ADHD</>}
+        contextNav={<nav aria-label="评论研究视图" className="v7-tertiary-nav"><button aria-current="page">概览</button><button>用户评论</button></nav>}
+        meta={<span>运行中</span>}
+      >内容</AppShell>,
+    );
+    const bar = container.querySelector('.v7-context-row') as HTMLElement;
+    expect(bar).toHaveAttribute('data-context-texture', 'dark');
+    expect(bar.querySelector('[data-context-pattern]')).toHaveAttribute('data-context-pattern', 'square');
+    expect(bar.querySelector('.v7-context-crumb')).toHaveTextContent('评论研究 / ADHD');
+    expect(within(bar).getByRole('navigation', { name: '评论研究视图' })).toBeInTheDocument();
+    expect(within(bar).getByText('运行中')).toBeInTheDocument();
+  });
+});
+
 describe('AppShell 一级导航结构', () => {
   it('只显示中文标题，不再渲染标题下的状态说明行', () => {
     render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>x</AppShell>);
