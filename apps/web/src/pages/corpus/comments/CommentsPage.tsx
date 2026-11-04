@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { AppShell } from '../../../app/AppShell';
+import { ContextTabs } from '../../../shared/ContextTabs';
 import { CorpusSideNav } from '../../../corpus/CorpusSideNav';
 import { DomainPicker } from '../../../corpus/DomainPicker';
 import { useCorpusShell } from '../../../corpus/useCorpusShell';
@@ -61,7 +62,7 @@ function Workspace({ domain, domainName, domainStatus, crumb, loading, shellErro
     const next = new URLSearchParams(location.search); for (const key of ['commentWorkRef', 'commentExternalId', 'detail', 'researchRequestRef']) next.delete(key);
     void navigate(`/corpus/comments?${next}`, { replace: true, state: location.state as unknown });
   }
-  const contextNav = <nav className="v7-tertiary-nav" data-comment-study-context aria-label="评论研究视图">{views.map(([key, label]) => <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => nav.view(key)}>{label}</button>)}<select aria-label="切换评论研究视图" className="v7-tertiary-select" value={view} onChange={event => nav.view(event.target.value as View)}>{views.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></nav>;
+  const contextNav = <ContextTabs label="评论研究视图" data-comment-study-context>{views.map(([key, label]) => <button key={key} type="button" aria-current={view === key ? 'page' : undefined} onClick={() => nav.view(key)}>{label}</button>)}<select aria-label="切换评论研究视图" className="v7-tertiary-select" value={view} onChange={event => nav.view(event.target.value as View)}>{views.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></ContextTabs>;
   const contextMeta = view === 'comments' && domain ? <details className="v7-context-count">
     <summary aria-label="查看当前筛选评论统计">当前筛选可研究 <b>{num(commentCounts?.eligibleCommentCount)}</b> 条 <span aria-hidden="true">⌄</span></summary>
     <div className="v7-context-count-detail" role="group" aria-label="当前筛选评论统计">
@@ -72,7 +73,7 @@ function Workspace({ domain, domainName, domainStatus, crumb, loading, shellErro
       <small>— 表示当前读数未获确认；不是零。</small>
     </div>
   </details> : `${domainName} · 状态 ${domainStatus}`;
-  return <AppShell active="corpus" boundaryLabel="本机服务状态" crumb={crumb} contextNav={contextNav} meta={contextMeta}>
+  return <AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: crumb, navigation: contextNav, meta: contextMeta }}>
     <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} foot={<>原声提取 · 问题归并 · 独立核验</>} />
     {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> :
     <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1>

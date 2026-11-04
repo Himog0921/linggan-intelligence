@@ -50,8 +50,7 @@ export function CorpusFrame({ page, pageLabel, action, shell, meta, foot, eviden
       active="corpus"
       className={compact ? 'v7-corpus-compact-shell' : undefined}
       boundaryLabel="本机服务状态"
-      crumb={crumb}
-      meta={meta}
+      contextBar={{ breadcrumb: crumb, meta }}
     >
       <title>{`${pageLabel} · 语料`}</title>
       <div className={`v7-shell ${styles.frame}`}>

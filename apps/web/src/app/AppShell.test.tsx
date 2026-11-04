@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppShell } from './AppShell';
+import { ContextTabs } from '../shared/ContextTabs';
 
 function navItems(): HTMLElement[] {
   const nav = screen.getByRole('navigation', { name: '一级导航' });
@@ -13,9 +14,11 @@ describe('全站统一深色 Pattern Waves 上下文栏', () => {
       <AppShell
         active="corpus"
         boundaryLabel="本机服务状态"
-        crumb={<><b>评论研究</b> <span className="v7-slash">/</span> ADHD</>}
-        contextNav={<nav aria-label="评论研究视图" className="v7-tertiary-nav"><button aria-current="page">概览</button><button>用户评论</button></nav>}
-        meta={<span>运行中</span>}
+        contextBar={{
+          breadcrumb: <><b>评论研究</b> <span className="v7-slash">/</span> ADHD</>,
+          navigation: <ContextTabs label="评论研究视图"><button aria-current="page">概览</button><button>用户评论</button></ContextTabs>,
+          meta: <span>运行中</span>,
+        }}
       >内容</AppShell>,
     );
     const bar = container.querySelector('.v7-context-row') as HTMLElement;
@@ -29,7 +32,7 @@ describe('全站统一深色 Pattern Waves 上下文栏', () => {
 
 describe('AppShell 一级导航结构', () => {
   it('只显示中文标题，不再渲染标题下的状态说明行', () => {
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>x</AppShell>);
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: "语料", meta: null }}>x</AppShell>);
     const nav = screen.getByRole('navigation', { name: '一级导航' });
     expect(nav.querySelector('.v7-nav-readout')).toBeNull();
     expect(nav.querySelector('.v7-nav-state')).toBeNull();
@@ -37,7 +40,7 @@ describe('AppShell 一级导航结构', () => {
   });
 });
 
-const props = { active: 'ops' as const, boundaryLabel: '本机创作', crumb: '运营 / 研读取材', meta: '个人空间' };
+const props = { active: 'ops' as const, boundaryLabel: '本机创作', contextBar: { breadcrumb: '运营 / 研读取材', meta: '个人空间' } };
 
 describe('V3 局部创作空间', () => {
   it('紧凑页头保留导航且 Esc 返回入口，不堆叠全局上下文栏', () => {
@@ -64,7 +67,7 @@ describe('V3 局部创作空间', () => {
 
 describe('全站唯一React导航', () => {
   it('入口只指向职责根路由；未开放职责保持禁用，个人菜单保留设置入口', () => {
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>页面</AppShell>);
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: "语料", meta: null }}>页面</AppShell>);
     const navigation = screen.getByRole('navigation', {name:'一级导航'});
     const links = within(navigation).getAllByRole('link');
     expect(links.map(link => link.getAttribute('href'))).toEqual(['/topics','/corpus','/collection','/ops']);
@@ -74,7 +77,7 @@ describe('全站唯一React导航', () => {
   });
   it('只在服务器确认退出后才离开当前工作区；未确认时保留可重试提示', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('offline')));
-    render(<AppShell active="corpus" boundaryLabel="本机服务状态" crumb="语料" meta={null}>页面</AppShell>);
+    render(<AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: "语料", meta: null }}>页面</AppShell>);
     fireEvent.click(screen.getByText('个人菜单'));
     fireEvent.click(screen.getByRole('button', { name: '退出登录' }));
     await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('退出未完成'));

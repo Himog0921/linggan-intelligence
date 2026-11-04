@@ -114,7 +114,7 @@ export function TeamSettingsPage() {
   const current = members.filter(member => member.state === 'active').length;
   const crumb = <span className={styles.crumb}><span>设置</span><span className="v7-slash">/</span><b>团队成员</b></span>;
   async function refresh() { await client.invalidateQueries({ queryKey: ROSTER_KEY }); }
-  return <AppShell active={null} boundaryLabel="本机团队控制" crumb={crumb} meta={<small>成员状态和账号责任以当前服务端读数为准</small>}>
+  return <AppShell active={null} boundaryLabel="本机团队控制" contextBar={{ breadcrumb: crumb, meta: <small>成员状态和账号责任以当前服务端读数为准</small> }}>
     <main className={styles.page} aria-labelledby="team-settings-title">
       <header className={styles.header}><div><p className={styles.eyebrow}>TEAM / ACCESS</p><h1 id="team-settings-title">团队成员</h1><p>只有管理员可以读取、邀请或停用成员。此页面不显示密码、会话令牌或邀请令牌的存储值。</p></div><ActionButton variant="primary" onClick={() => { setShowInvite(value => !value); setReceipt(null); }}>{showInvite ? '收起邀请表单' : '邀请成员'}</ActionButton></header>
       <section className={styles.metrics} aria-label="团队概况"><div><b>{members.length}</b><span>全部成员</span></div><div><b>{current}</b><span>当前可登录</span></div><div><b>{members.filter(member => member.state === 'invited').length}</b><span>待设密码</span></div></section>

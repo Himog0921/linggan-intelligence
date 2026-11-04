@@ -9,6 +9,9 @@ import {
   useSyncExternalStore,
 } from "react";
 import { AppShell } from "../../app/AppShell";
+import { ContextBreadcrumb } from "../../shared/ContextBar";
+import { ContextTabs } from "../../shared/ContextTabs";
+import { DomainScopePicker } from "../../shared/DomainScopePicker";
 import { requestJson } from "../../shared/api";
 import * as d from "../../shared/decode";
 import { createTopicEngine } from "./engine";
@@ -111,71 +114,64 @@ export function TopicsPage() {
         className={c("topic-map-app")}
         active="topic"
         boundaryLabel="本机不访问平台"
-        crumb={
-          <>
-            主题图谱
-            {shell.data ? (
-              <>
-                <span className="v7-slash">/</span>
-                <details className="v7-domain-picker">
-                  <summary aria-label="切换当前观察领域">
-                    <span>{domain?.name || "选择领域"}</span>
-                    <small>
-                      {domain
-                        ? domain.status === "paused"
-                          ? "已暂停"
-                          : `${domain.targetCount} 个目标 · ${domain.sampleCount ?? "未知"} 篇作品`
-                        : "请选择一个领域"}
-                    </small>
-                    <i aria-hidden="true" />
-                  </summary>
+        contextBar={{
+        breadcrumb: (
+          <ContextBreadcrumb
+            items={[
+              <>主题图谱</>,
+              ...(shell.data ? [
+                <DomainScopePicker
+                  label="切换当前观察领域"
+                  summary={
+                    <>
+                      <span>{domain?.name || "选择领域"}</span>
+                      <small>
+                        {domain
+                          ? domain.status === "paused"
+                            ? "已暂停"
+                            : domain.targetCount + " 个目标 · " + (domain.sampleCount ?? "未知") + " 篇作品"
+                          : "请选择一个领域"}
+                      </small>
+                      <i aria-hidden="true" />
+                    </>
+                  }
+                >
                   <nav aria-label="可选观察领域">
                     {shell.data.domains.map((item) => (
                       <a
                         key={item.domainRef}
-                        href={`/topics?domain=${item.domainRef}`}
-                        aria-current={
-                          state.domainRef === item.domainRef
-                            ? "page"
-                            : undefined
-                        }
+                        href={"/topics?domain=" + item.domainRef}
+                        aria-current={state.domainRef === item.domainRef ? "page" : undefined}
                       >
                         <span>{item.name}</span>
                         <small>
                           {item.status === "paused"
                             ? "已暂停"
-                            : `${item.targetCount} 个目标 · ${item.sampleCount ?? "未知"} 篇作品`}
+                            : item.targetCount + " 个目标 · " + (item.sampleCount ?? "未知") + " 篇作品"}
                         </small>
                       </a>
                     ))}
                   </nav>
-                </details>
-              </>
-            ) : null}
-            <nav
-              id="topic-map-view-tabs"
-              className={c("lgi-tm-context-views")}
-              aria-label="主题图谱视图"
-              onClick={engine.onClick}
-            >
-              {engine.getViewTabs()}
-            </nav>
-            <b id="topic-map-crumb-current" className="v7-sr-only">
-              {state.view === "journey" ? "用户生命旅程" : "主题概览"}
-            </b>
-          </>
-        }
-        meta={
-          <div
-            id="topic-map-context-actions"
-            aria-label="图谱操作"
-            onClick={engine.onClick}
-          >
+                </DomainScopePicker>,
+              ] : []),
+              <b id="topic-map-crumb-current" className="v7-sr-only">
+                {state.view === "journey" ? "用户生命旅程" : "主题概览"}
+              </b>,
+            ]}
+          />
+        ),
+        navigation: (
+          <ContextTabs id="topic-map-view-tabs" label="主题图谱视图" onClick={engine.onClick}>
+            {engine.getViewTabs()}
+          </ContextTabs>
+        ),
+        meta: (
+          <div id="topic-map-context-actions" className="v7-context-actions" aria-label="图谱操作" onClick={engine.onClick}>
+            <a className="v7-context-action" href="/topics/offline-review">离线预演</a>
             {engine.getContextActions()}
           </div>
-        }
-      >
-        <p><a href="/topics/offline-review">离线预演</a></p>
+        ),
+      }}>
         <div
           id="topic-map-root"
           data-view={state.view}

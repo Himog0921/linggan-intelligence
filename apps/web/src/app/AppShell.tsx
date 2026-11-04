@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { FontNotice } from '../shared/FontNotice';
-import { ContextTexture } from './ContextTexture';
+import { ContextBar, type ContextBarContent } from '../shared/ContextBar';
+
 import { SidebarState } from '../shared/sidebarState';
 import { PERSONAL_MENU_LINKS, PRIMARY_ENTRIES, type PrimaryEntry, type PrimarySurface } from './navigation';
 import styles from './AppShell.module.css';
@@ -11,10 +12,8 @@ interface AppShellProps {
   /** 系统区服务状态胶囊的中文文字。 */
   boundaryLabel: ReactNode;
   className?: string;
-  crumb: ReactNode;
-  /** 可选三级业务页导航，固定在 Context Bar 路径之后；展示模式开关仍留内容区。 */
-  contextNav?: ReactNode;
-  meta: ReactNode;
+  /** Shared context rail; business values are supplied by the page, layout by AppShell. */
+  contextBar: ContextBarContent;
   children: ReactNode;
   /** V3 创作专用空间；其他页面继续使用迁移期标准页头。 */
   workbenchMode?: 'compact' | 'immersive';
@@ -42,7 +41,7 @@ function PrimaryEntryLink({ entry, active }: { entry: PrimaryEntry; active: Prim
 /**
  * 全站唯一 React 页头；样式由 apps/web/src/styles/shell.css 提供。
  */
-export function AppShell({ className, active, boundaryLabel, crumb, contextNav, meta, children, workbenchMode, restrictedOps = false }: AppShellProps) {
+export function AppShell({ className, active, boundaryLabel, contextBar, children, workbenchMode, restrictedOps = false }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState('');
@@ -106,7 +105,7 @@ export function AppShell({ className, active, boundaryLabel, crumb, contextNav, 
   if (workbenchMode) {
     return <div className={`${styles.workbench} ${workbenchMode === 'immersive' ? styles.immersive : ''}`}>
       {workbenchMode === 'compact' ? <header className={styles.header}>
-        <div className={styles.crumb}>{crumb}</div>
+        <div className={styles.crumb}>{contextBar.breadcrumb}</div>
         <div className={styles.menus}>
           <details className={styles.menu} onKeyDown={event => {
             if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); }
@@ -161,15 +160,7 @@ export function AppShell({ className, active, boundaryLabel, crumb, contextNav, 
             </details>
           </div>
         </div>
-        <div className="v7-context-row" data-context-texture="dark">
-          <ContextTexture />
-          <div aria-hidden="true" />
-          <div className="v7-context-main">
-            <div className="v7-context-crumb">{crumb}</div>
-            {contextNav ? <div className="v7-context-section-nav">{contextNav}</div> : null}
-            <div className="v7-context-meta">{meta}</div>
-          </div>
-        </div>
+        <ContextBar {...contextBar} />
       </header>
       {children}
     </div>

@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import { AppShell } from '../../app/AppShell';
+import { ContextBreadcrumb } from '../../shared/ContextBar';
+import { ContextTabs } from '../../shared/ContextTabs';
 import { NavIcon, Sidebar } from '../../shared/Sidebar';
 
 /** Ops owns two secondary destinations; page sections and scope belong to Z02. */
@@ -10,9 +12,11 @@ export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, 
   const selectedDomain = domain && domain !== 'all' ? `?domain=${encodeURIComponent(domain)}` : '';
   return <AppShell active="ops" restrictedOps={restricted}
     boundaryLabel="本机服务状态" className={immersive ? 'ops-immersive' : undefined}
-    crumb={<>运营 <span aria-hidden="true">/</span> {scope} <span aria-hidden="true">/</span> <b>{section === 'creation' ? '创作' : '数据'}</b></>}
-    contextNav={<nav className="v7-tertiary-nav" aria-label={section === 'data' ? '数据页面' : '创作页面'}>{tabs}</nav>}
-    meta={meta}>
+    contextBar={{
+      breadcrumb: <ContextBreadcrumb items={[<>运营</>, scope, <b>{section === 'creation' ? '创作' : '数据'}</b>]} />,
+      navigation: <ContextTabs label={section === 'data' ? '数据页面' : '创作页面'}>{tabs}</ContextTabs>,
+      meta,
+    }}>
     <div className="v7-shell" data-ops-section={section}>
       <Sidebar aria-label="运营导航">
         {/* Full navigation preserves the editor's existing beforeunload protection. */}
