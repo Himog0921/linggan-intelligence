@@ -17,6 +17,19 @@
 - [产品冻结基线](product/research-dossier-v1.md)：当前能力、30+9 篇验收汇总、已知缺口与后续变更准入。产品 V1.0，机器接口仍为 `research-dossier.v2`。
 - [唯一底稿合同](data-contracts/research-dossier.md)：字段与读取行为；不另建平行材料合同。
 
+## 2026-11-03 · AI 中期质量离线候选
+
+- [切片 A 结果规范与接口设计](data-contracts/ai-midterm-quality-002/slice-a-result-and-api.md)：N02保存/展示/下游投影，四接口与两表；切片A本地候选已实现，未部署。
+
+- [单篇分析流程与最小实施方案](plans/active/single-note-analysis-minimal-implementation.md)：两层结果规范、代码衔接、首版切片和验收；当前本地实施与冻结回执。
+
+- [单篇分析 Skill 与离线试验](data-contracts/ai-midterm-quality-002/README.md)：当前 v0.3 方法、输出及标签规则已冻结；旧候选与B0/B1为历史实验，未部署。
+- [切片 A 完整链路核对与下一步验收](audits/slice-a-frozen-chain-readiness-2026-11-04.md)：本地提交保存、输入来源与配置绑定差距、真实产品闭环的实施顺序。
+- [单篇分析冻结基线](data-contracts/ai-midterm-quality-002/frozen-baseline.md)：note-analysis-baseline-20261104，停止继续调优，保留已知缺口；未部署。
+- [单篇分析 Skill 方法](data-contracts/ai-midterm-quality-002/skill/linggan-note-analysis/SKILL.md)：阅读、分析、打标和使用判断。
+- [单篇输出与标签规则](data-contracts/ai-midterm-quality-002/skill/linggan-note-analysis/references/output-guide.md)：输出内容、证据类型与下游边界。
+- [主题容量与评论配对离线复现](audits/ai-midterm-offline-validation-2026-11-03.md)：原函数执行结果、合成替身范围及未证明部分。
+
 ## 2026-10-28 · 评论目录与概览回归
 
 - [评论目录与概览回归修复](audits/comment-overview-recovery-2026-10-28.md)：索引入口、既有布局恢复、当前新流程统计与合成证明边界。

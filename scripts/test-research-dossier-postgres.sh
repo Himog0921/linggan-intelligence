@@ -12,7 +12,7 @@ source scripts/cargo-proof.sh
 export RUST_TEST_THREADS=1
 
 case "${1:-}" in
-  ""|--creator-read|--dossier-ui|--dossier-input|--comment-context|--creator-input|--creator-executor|--comment-executor|--topic-executor|--http|--target-inspection|--ai-foundation|--ai-ledger|--ai-writing|--ai-service|--ai-install|--ai-readonly|--ai-retirement|--research-methods|--ai-compatibility) ;;
+  ""|--creator-read|--dossier-ui|--dossier-input|--comment-context|--creator-input|--creator-executor|--comment-executor|--topic-executor|--http|--target-inspection|--ai-foundation|--ai-ledger|--ai-writing|--ai-service|--ai-install|--ai-readonly|--ai-retirement|--research-methods|--ai-compatibility|--note-analysis) ;;
   *) echo "Unsupported proof selection: ${1:-}" >&2; exit 2 ;;
 esac
 
@@ -122,7 +122,7 @@ if [[ "${1:-}" == "--target-inspection" ]]; then
   echo "TARGET-INSPECTOR-V4 isolated PostgreSQL proof passed"
   exit 0
 fi
-if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-writing" || "${1:-}" == "--ai-service" || "${1:-}" == "--ai-install" || "${1:-}" == "--ai-readonly" || "${1:-}" == "--ai-retirement" || "${1:-}" == "--research-methods" || "${1:-}" == "--creator-executor" || "${1:-}" == "--comment-executor" || "${1:-}" == "--topic-executor" || "${1:-}" == "--ai-compatibility" ]]; then
+if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == "--ai-writing" || "${1:-}" == "--ai-service" || "${1:-}" == "--ai-install" || "${1:-}" == "--ai-readonly" || "${1:-}" == "--ai-retirement" || "${1:-}" == "--research-methods" || "${1:-}" == "--creator-executor" || "${1:-}" == "--comment-executor" || "${1:-}" == "--topic-executor" || "${1:-}" == "--ai-compatibility" ]]; then
   mkdir -p "$project_root/artifacts/private/ai-gen1-pr1b"
   ledger_asset_root="$(mktemp -d "$project_root/artifacts/private/ai-gen1-pr1b/ledger-assets.XXXXXX")"
   export LINGGAN_CREATION_ASSET_ROOT="$ledger_asset_root"
@@ -170,6 +170,15 @@ if [[ "${1:-}" == "--ai-foundation" || "${1:-}" == "--ai-ledger" || "${1:-}" == 
     cargo_proof -p linggan-worker --test startup_contract --locked -- --include-ignored --nocapture
     echo "AI-GEN1 release handshake and patrol ownership proof passed"
     exit 0
+  fi
+  if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-service" ]]; then
+    cargo_proof -p linggan-intelligence --test note_analysis_contract --locked -- --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test note_analysis_executor_postgres --locked -- --ignored --nocapture
+    cargo_proof -p linggan-api --bin linggan-api local_web::note_analysis_api_tests:: --locked -- --ignored --nocapture
+    if [[ "${1:-}" == "--note-analysis" ]]; then
+      echo "Single-note analysis contracts, queue persistence and HTTP proof passed"
+      exit 0
+    fi
   fi
   if [[ "${1:-}" == "--ai-service" ]]; then
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_foundation_postgres executor_probe:: --locked -- --ignored --nocapture

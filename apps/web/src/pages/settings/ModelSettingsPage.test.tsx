@@ -29,27 +29,27 @@ function renderPage(entry = '/settings/models?section=models', client = new Quer
 }
 const posts = () => calls.filter(call => call.method === 'POST');
 describe('AI 设置四区', () => {
-  it('图片识别提示词可编辑、保存、启用和回退，保存不运行模型', async () => {
+  it.each(['ocr_recognition', 'note_interpretation'])('%s 提示词可编辑、保存、启用和回退，保存不运行模型', async taskKey => {
     const seed = settingsFixture();
-    const config = { ...seed.configurations[0]!, taskKey: 'ocr_recognition', taskConfigRef: 'ocr-config' };
-    const settings = { ...seed, tasks: [{ ...seed.tasks[0]!, taskKey: 'ocr_recognition', label: '图片文字识别', skillAllowed: true, configuration: config }], configurations: [config] };
+    const config = { ...seed.configurations[0]!, taskKey, taskConfigRef: 'ocr-config' };
+    const settings = { ...seed, tasks: [{ ...seed.tasks[0]!, taskKey, label: taskKey === 'note_interpretation' ? '笔记解读' : '图片文字识别', skillAllowed: true, configuration: config }], configurations: [config] };
     const first = { versionRef: 'prompt-v1', versionNo: 1, systemText: '原系统提示词', instructionText: '原识别指令', createdAt: '2026-10-27T00:00:00Z' };
     const second = { ...first, versionRef: 'prompt-v2', versionNo: 2, systemText: '更新后的系统提示词' };
     let versions = [first], active = 'prompt-v1', revision = 0;
     handler = call => {
-      if (call.path.endsWith('/prompts/ocr_recognition')) return ok({ taskKey: 'ocr_recognition', revision, activeVersionRef: active, versions });
+      if (call.path.endsWith(`/prompts/${taskKey}`)) return ok({ taskKey, revision, activeVersionRef: active, versions });
       if (call.path.endsWith('/prompts/save')) { versions = [second, first]; return ok({ versionRef: second.versionRef, versionNo: 2 }); }
       if (call.path.endsWith('/prompts/activate')) { active = String(call.body.versionRef); revision += 1; return ok({ versionRef: active, taskConfigRef: `config-${revision}`, taskRevision: revision }); }
       if (call.path.includes('/writing-samples')) return ok({ state: 'connected', samples: [], examined: 0, limit: 50 });
       return ok(settings);
     };
-    renderPage('/settings/models?section=skills&task=ocr_recognition');
+    renderPage(`/settings/models?view=advanced&area=skills&task=${taskKey}`);
     const system = await screen.findByLabelText('系统提示词');
     fireEvent.change(system, { target: { value: '更新后的系统提示词' } });
     await userEvent.click(screen.getByRole('button', { name: '保存提示词新版本' }));
     expect(await screen.findByText('提示词 v2 已保存，尚未启用。')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByLabelText('提示词版本')).toHaveValue('prompt-v2'));
-    expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/prompts/save', body: { taskKey: 'ocr_recognition', expectedTaskRevision: 0, systemText: '更新后的系统提示词', instructionText: '原识别指令' } });
+    expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/prompts/save', body: { taskKey, expectedTaskRevision: 0, systemText: '更新后的系统提示词', instructionText: '原识别指令' } });
     await userEvent.click(screen.getByRole('button', { name: '启用此提示词版本' }));
     await waitFor(() => expect(active).toBe('prompt-v2'));
     await waitFor(() => expect(screen.getByRole('button', { name: '启用此提示词版本' })).toBeDisabled());
@@ -153,7 +153,7 @@ describe('AI 设置四区', () => {
     expect(posts()).toHaveLength(1);
     expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/skills/switch', body: { taskKey: 'writing_legacy', versionRef: 'version-2', expectedTaskRevision: 0, expectedBindingRevision: 0 } });
   });
-  it.each(['comment_study','comment_problem_resolution','comment_problem_pair_review','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research'])('研究阶段 %s 可编辑提示词与切换做法', async taskKey => {
+  it.each(['note_interpretation','comment_study','comment_problem_resolution','comment_problem_pair_review','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research'])('研究阶段 %s 可编辑提示词与切换做法', async taskKey => {
     const seed = settingsFixture();
     const config = { ...seed.configurations[0]!, taskKey, skillVersionRef: null, executionContract: null };
     const version = { versionRef: 'version-1', versionNo: 1, description: 'Synthetic', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, createdAt: config.createdAt, fileCount: 1 };

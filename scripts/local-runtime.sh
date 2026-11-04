@@ -502,6 +502,7 @@ migrate() {
   apply_migration_once "0188_creation_structural_templates" "$project_root/database/migrations/0188_creation_structural_templates.sql"
   apply_migration_once "0189_creation_title_dispatch" "$project_root/database/migrations/0189_creation_title_dispatch.sql"
   apply_migration_once "0190_creation_ai_experience_material" "$project_root/database/migrations/0190_creation_ai_experience_material.sql"
+  apply_migration_once "0191_note_analysis" "$project_root/database/migrations/0191_note_analysis.sql"
 }
 
 case "$command_name" in

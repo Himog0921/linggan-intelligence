@@ -205,7 +205,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
  {
     let db = fixture::proof_database("ai_skill_activation").await;
     let base_revision: i64 = sqlx::query_scalar(
-        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='note_interpretation'",
+        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='direction_list_draft'",
     )
     .fetch_one(db.pool())
     .await
@@ -213,8 +213,8 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
 
     let connection = new_connection(&db).await;
     let version = version(&db, connection, 1, "https://trials.example/api").await;
-    // Synthetic storage fixture: the production note handler remains unconnected in PR-1B.
-    sqlx::query("UPDATE linggan_ai_task SET lifecycle='active',handler_contract='synthetic.note-storage.v1' WHERE task_key='note_interpretation'").execute(db.pool()).await.unwrap();
+    // Synthetic storage fixture on a pending task; the real note handler has separate queue proof.
+    sqlx::query("UPDATE linggan_ai_task SET lifecycle='active',handler_contract='synthetic.note-storage.v1' WHERE task_key='direction_list_draft'").execute(db.pool()).await.unwrap();
     let selected_model = model(&db, version).await;
     let capability = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_capability(capability_ref,identity_ref,endpoint_ref,source_kind,source_version,context_tokens,max_output_tokens,max_timeout_seconds,thinking_levels,compat,thinking_level_map,output_mode) VALUES($1,$2,$3,'manual','synthetic-storage-fixture',32768,8192,60,'[\"off\"]','{}','{}','prompt_only')")
@@ -236,7 +236,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
         &db,
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
-            task_key: TaskKey::NoteInterpretation,
+            task_key: TaskKey::DirectionListDraft,
             expected_revision: base_revision,
             model: Some(selection.clone()),
             skill_version_ref: None,
@@ -246,11 +246,11 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
     )
     .await
     .unwrap();
-    on(&db, TaskKey::NoteInterpretation).await;
+    on(&db, TaskKey::DirectionListDraft).await;
     grant(
         &db,
         endpoint(&db, version).await,
-        TaskKey::NoteInterpretation,
+        TaskKey::DirectionListDraft,
         MaterialClass::NoteMaterial,
     )
     .await;
@@ -270,7 +270,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
         &db,
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
-            task_key: TaskKey::NoteInterpretation,
+            task_key: TaskKey::DirectionListDraft,
             expected_revision: base_revision + 1,
             model: Some(selection.clone()),
             skill_version_ref: Some(first.version_ref),
@@ -284,7 +284,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
     assert_eq!(candidate.revision, base_revision + 1);
     let initial = ActivateSkill {
         command_ref: Uuid::new_v4(),
-        task_key: TaskKey::NoteInterpretation,
+        task_key: TaskKey::DirectionListDraft,
         expected_task_revision: base_revision + 1,
         expected_binding_revision: 0,
         candidate_config_ref: candidate.task_config_ref,
@@ -310,7 +310,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
     .unwrap();
     let saved = SaveTaskConfig {
         command_ref: Uuid::new_v4(),
-        task_key: TaskKey::NoteInterpretation,
+        task_key: TaskKey::DirectionListDraft,
         expected_revision: base_revision + 2,
         model: Some(selection.clone()),
         skill_version_ref: Some(second.version_ref),
@@ -321,7 +321,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
     assert!(!candidate.applied);
     let activate = ActivateSkill {
         command_ref: Uuid::new_v4(),
-        task_key: TaskKey::NoteInterpretation,
+        task_key: TaskKey::DirectionListDraft,
         expected_task_revision: base_revision + 2,
         expected_binding_revision: 1,
         candidate_config_ref: candidate.task_config_ref,
@@ -332,14 +332,14 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
         &db,
         &CreateTrial {
             command_ref: Uuid::new_v4(),
-            task_key: TaskKey::NoteInterpretation,
+            task_key: TaskKey::DirectionListDraft,
             expected_task_revision: base_revision + 2,
             baseline_config_ref: Some(approved.task_config_ref),
             candidate_config_ref: candidate.task_config_ref,
             items: vec![BatchInput {
                 item_key: "skill-case-1".into(),
-                input: InputRef::Note {
-                    snapshot_ref: Uuid::new_v4(),
+                input: InputRef::DirectionSample {
+                    sample_ref: Uuid::new_v4(),
                 },
             }],
         },
@@ -415,7 +415,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
         &db,
         &ActivateSkill {
             command_ref: Uuid::new_v4(),
-            task_key: TaskKey::NoteInterpretation,
+            task_key: TaskKey::DirectionListDraft,
             expected_task_revision: base_revision + 3,
             expected_binding_revision: 2,
             candidate_config_ref: approved.task_config_ref,
@@ -429,7 +429,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
     assert_eq!(activate_skill(&db, &activate).await.unwrap(), enabled);
     assert_eq!(
         sqlx::query_scalar::<_, Uuid>(
-            "SELECT current_version_ref FROM linggan_skill_binding WHERE task_key='note_interpretation'"
+            "SELECT current_version_ref FROM linggan_skill_binding WHERE task_key='direction_list_draft'"
         )
         .fetch_one(db.pool())
         .await
@@ -460,7 +460,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
         &db,
         &ActivateSkill {
             command_ref: Uuid::new_v4(),
-            task_key: TaskKey::NoteInterpretation,
+            task_key: TaskKey::DirectionListDraft,
             expected_task_revision: base_revision + 4,
             expected_binding_revision: 3,
             candidate_config_ref: candidate.task_config_ref,
@@ -473,7 +473,7 @@ async fn ai_foundation_skill_activation_allows_direct_switch_and_replay_cannot_r
     assert_eq!(direct.approval_source, "manual");
     assert_eq!(direct.version_ref, second.version_ref);
     assert_eq!(activate_skill(&db, &activate).await.unwrap(), enabled);
-    assert_eq!(sqlx::query_scalar::<_, Uuid>("SELECT current_version_ref FROM linggan_skill_binding WHERE task_key='note_interpretation'").fetch_one(db.pool()).await.unwrap(), second.version_ref);
+    assert_eq!(sqlx::query_scalar::<_, Uuid>("SELECT current_version_ref FROM linggan_skill_binding WHERE task_key='direction_list_draft'").fetch_one(db.pool()).await.unwrap(), second.version_ref);
     assert_eq!(
         serde_json::to_value(BudgetPolicy::Capped(i64::MAX as u64)).unwrap(),
         json!({"mode":"capped","tokens":i64::MAX.to_string()})

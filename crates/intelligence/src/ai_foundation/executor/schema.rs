@@ -36,6 +36,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     migration!("0177_comment_problem_workflow"),
     migration!("0178_creator_manual_annotations"),
     migration!("0179_retire_research_relations"),
+    migration!("0191_note_analysis"),
 ];
 
 pub(super) async fn require_ready(db: &Database) -> Result<(), ExecutorError> {

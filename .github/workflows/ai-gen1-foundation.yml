@@ -51,6 +51,7 @@ jobs:
         run: |
           cargo test -p linggan-contracts --lib --locked
           cargo test -p linggan-intelligence --lib --locked
+          cargo test -p linggan-intelligence --test note_analysis_contract --locked
           npm --prefix apps/pi-adapter test
       - name: Fresh and repeat runtime schema migration
         if: matrix.segment == 'contracts'
