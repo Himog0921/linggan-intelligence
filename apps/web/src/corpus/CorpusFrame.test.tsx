@@ -86,4 +86,31 @@ describe('语料页面框架（三页共用）', () => {
     renderFrame(shell(A));
     expect(screen.getByRole('link', { name: /语料/ })).toHaveAttribute('aria-current', 'page');
   });
+  it('创作者启用黑底材质；方格预览由 URL 选择，其他语料页面不改变', () => {
+    const first = renderFrame(shell(A));
+    const row = first.container.querySelector('.v7-context-row');
+    expect(row).toHaveAttribute('data-context-texture', 'dark');
+    expect(row?.querySelector('[data-pattern]')).toHaveAttribute('data-pattern', 'dot');
+    first.unmount();
+
+    window.history.replaceState({}, '', '/?breadcrumbPattern=square');
+    try {
+      const square = renderFrame(shell(A));
+      expect(square.container.querySelector('[data-pattern]')).toHaveAttribute('data-pattern', 'square');
+      square.unmount();
+    } finally {
+      window.history.replaceState({}, '', '/');
+    }
+
+    const evidence = render(
+      <MemoryRouter>
+        <CorpusFrame page="evidence" pageLabel="证据库" action="/corpus/evidence" shell={shell(A)} meta={null}>
+          <p>页面内容</p>
+        </CorpusFrame>
+      </MemoryRouter>,
+    );
+    expect(evidence.container.querySelector('.v7-context-row')).not.toHaveAttribute('data-context-texture');
+    expect(evidence.container.querySelector('[data-pattern]')).toBeNull();
+  });
+
 });
