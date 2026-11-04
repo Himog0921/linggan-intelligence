@@ -171,7 +171,7 @@ export function TopicsPage() {
             {engine.getContextActions()}
           </div>
         ),
-      }}
+      }}>
         <div
           id="topic-map-root"
           data-view={state.view}
