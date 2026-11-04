@@ -122,7 +122,7 @@ async function exportSnapshot(label) {
       }
       assert.equal(output.issues, undefined);
       assert.equal(output.ref, undefined);
-      if (block.parameters?.length) assert.deepEqual(output.parameterCandidates, block.parameters.map(({ sourceRegionRef, ...parameter }) => parameter));
+      if (block.parameters?.length) assert.deepEqual(output.parameterCandidates, block.parameters.map(parameter => Object.fromEntries(Object.entries(parameter).filter(([key]) => key !== 'sourceRegionRef'))));
     }
   }
   assert.equal(exported.readingView, undefined);
