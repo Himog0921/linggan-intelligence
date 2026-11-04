@@ -1,5 +1,5 @@
 {
-  "fingerprint": "1f4bf5d46553af98264112a16d09780f904956ecf985e4205c76b4b863ad1e3e",
+  "fingerprint": "c80c31167470287640469dd91ac2bd7ce6baf617fd8832db33dfe36cc2ade7ef",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -303,7 +303,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "0bbeba4acf9214fcdf230baa9e8c6ec765fb08810f3a412895114d4360fcf3ea"
+      "sha256": "87c3307cc7b9dcb67e9bb91cf035b4a754c64a32f22915c5028cdaed5bcd9c7a"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -347,7 +347,7 @@
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
-      "sha256": "4388391a755961c18d1461a6525be0c15e3f29a9c6d4f6a8a32330fc27050344"
+      "sha256": "7df6c8c8147af79afe5738be453b04d79d371188b95b07ca7cdb078837734ed7"
     },
     {
       "path": "apps/web/src/pages/topics/WorkspacePage.tsx",
@@ -387,7 +387,7 @@
     },
     {
       "path": "apps/web/src/shared/ContextBar.tsx",
-      "sha256": "08cc13b0b512615ab3be8647b3dba18da92fd99e4559dd6d88f256539f3c3f10"
+      "sha256": "177d91b8e310c124bfe76bdcb3e0c8f762bd449008d97d522974db8852dec662"
     },
     {
       "path": "apps/web/src/shared/ContextTabs.tsx",
