@@ -186,8 +186,8 @@ try {
   );
   await step("material-first overview retains full statistics, local search, distribution drill-down and left navigation", async () => {
     await go();
-    const navigation = page.getByRole("navigation", { name: "主题图谱视图" });
-    assert.equal(await navigation.count(), 1);
+    const viewSwitch = page.getByRole("group", { name: "主题图谱视图" });
+    assert.equal(await viewSwitch.count(), 1, "view switch lives in the content header");
     const sidebar = page.locator('aside[aria-label="主题图谱导航"]');
     const tree = sidebar.getByLabel("稳定主题结构");
     assert.equal(await tree.getByRole("button", { name: "调整归属" }).count(), 0,
@@ -203,7 +203,7 @@ try {
     assert.ok(await scopeFilter.locator("select").first().isVisible(), "scope selector must remain usable");
     await scopeFilter.locator("summary").click();
     assert.equal(await scopeFilter.evaluate((el) => el.open), false);
-    assert.equal(await page.locator('aside[aria-label="主题图谱导航"]').getByRole("navigation", { name: "主题图谱视图" }).count(), 0);
+    assert.equal(await page.locator('aside[aria-label="主题图谱导航"]').getByRole("group", { name: "主题图谱视图" }).count(), 0);
     const totals = await page.getByLabel("基础概览指标").innerText();
     const distribution = await page.getByLabel("已观察内容点赞分布").innerText();
     await page.getByRole("textbox", { name: "查找材料与方向" }).fill("no-such-material-b-overview");
@@ -211,9 +211,9 @@ try {
     await page.getByText("当前条件没有关键词命中", { exact: true }).waitFor();
     assert.equal(await page.getByLabel("基础概览指标").innerText(), totals);
     assert.equal(await page.getByLabel("已观察内容点赞分布").innerText(), distribution);
-    await navigation.getByRole("button", { name: "用户生命旅程", exact: true }).click();
+    await viewSwitch.getByRole("button", { name: "用户生命旅程", exact: true }).click();
     assert.equal(new URL(page.url()).searchParams.get("query"), "no-such-material-b-overview");
-    await navigation.getByRole("button", { name: "主题概览", exact: true }).click();
+    await viewSwitch.getByRole("button", { name: "主题概览", exact: true }).click();
     await action("clear-filter", "query");
     const chart = page.getByLabel("已观察内容点赞分布");
     assert.equal(await page.getByLabel("基础概览指标").getByRole("button",

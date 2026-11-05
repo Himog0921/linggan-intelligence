@@ -1,7 +1,8 @@
 {
-  "kind": "shared_standard",
-  "reason": "Z02 共享页头统一：面包屑只由 ContextBreadcrumb 渲染，当前页统一加粗+手绘线+aria-current；全站页头高度 44px（带页签 48px），左侧保留 160px 导航轨缩进，Pattern Waves 纹理不再被页面关闭；清理主题图谱页对共享页头的覆盖，其余页面迁到共享渲染",
-  "authorization": "Mog 2026-11-05 全站页头对齐语料证据库/创作者",
+  "kind": "page_exception",
+  "reason": "主题图谱页头收口：视图切换（主题概览/用户生命旅程）从共享页头页签区移入正文标题行右端并与筛选并排；删除「统计口径」按钮与「指标截至…」时间字样；筛选改为 40px 描边按钮加下拉箭头；页头动作区在深色底纹上改用 on-dark 文字色并允许换行。共享 ContextBar、DomainScopePicker 与全站页头标准不变。",
+  "authorization": "Mog 2026-11-05 主题图谱面包屑 UI 整理",
+  "exceptionScope": "/topics 主题图谱：页头页签区移除视图页签，正文标题行新增视图分段控件、重绘筛选、删除统计口径与指标截止；其它页面页头与视图切换不变",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",

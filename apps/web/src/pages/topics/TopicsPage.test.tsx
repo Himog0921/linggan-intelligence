@@ -67,12 +67,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 describe("Topic React interaction and lifetime", () => {
-  it("uses shared ContextTabs for overview/journey and keeps the evidence histogram above material", async () => {
+  it("keeps overview/journey switching in the content header and the evidence histogram above material", async () => {
     vi.stubGlobal("fetch", vi.fn(async (path: string) => jsonResponse(defaultRead(path))));
     page();
     await screen.findByRole("button", { name: "合成材料 0" });
-    const views = screen.getByRole("navigation", { name: "主题图谱视图" });
-    expect(views.closest("#topic-map-root")).toBeNull();
+    const views = screen.getByRole("group", { name: "主题图谱视图" });
+    expect(views.closest("#topic-map-root")).not.toBeNull();
     expect(within(views).getByRole("button", { name: "主题概览" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByText("领域结构")).not.toBeInTheDocument();
     const band = screen.getByLabelText("主题概览与样本表现");
@@ -82,9 +82,11 @@ describe("Topic React interaction and lifetime", () => {
     expect(region?.querySelector(".lgi-tm-material-insights")).toBeNull();
     await userEvent.click(within(views).getByRole("button", { name: "用户生命旅程" }));
     await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "journey"));
-    expect(within(views).getByRole("button", { name: "用户生命旅程" })).toHaveAttribute("aria-pressed", "true");
+    // 视图切换会重挂内容树，旧节点已分离，按当前树重新取一次。
+    const journeyViews = screen.getByRole("group", { name: "主题图谱视图" });
+    expect(within(journeyViews).getByRole("button", { name: "用户生命旅程" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("主题概览与样本表现")).toBeInTheDocument();
-    await userEvent.click(within(views).getByRole("button", { name: "主题概览" }));
+    await userEvent.click(within(journeyViews).getByRole("button", { name: "主题概览" }));
     await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "overview"));
   });
   it("keeps complete statistics during staged material loading and edits search text", async () => {
