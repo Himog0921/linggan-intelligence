@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { useQueryClient } from '@tanstack/react-query';
 import { AppShell } from '../../../app/AppShell';
+import { ContextBreadcrumb } from '../../../shared/ContextBar';
 import { ContextTabs } from '../../../shared/ContextTabs';
 import { CorpusSideNav } from '../../../corpus/CorpusSideNav';
 import { DomainPicker } from '../../../corpus/DomainPicker';
@@ -24,7 +25,7 @@ export function CommentsPage() {
   const shell = useCorpusShell(domainParam), domain = shell.data?.selectedDomain ?? null;
   const current = shell.data?.domains.find(row => row.domainRef === domain);
   const picker = shell.data && (shell.data.domains.length >= 2 || !current) ? <DomainPicker domains={shell.data.domains} selected={domain} action="/corpus/comments" /> : null;
-  const crumb = picker ? <>语料 <span className="v7-slash">/</span> {picker} <span className="v7-slash">/</span> <b>评论研究</b></> : <>语料 <span className="v7-slash">/</span> <b>评论研究</b></>;
+  const crumb = <ContextBreadcrumb items={picker ? ['语料', picker, '评论研究'] : ['语料', '评论研究']} />;
   const status = current?.status === 'active' ? '运行中' : current?.status === 'paused' ? '已暂停' : current?.status || '未知';
   return <Workspace key={domain ?? 'unselected'} domain={domain} domainName={current?.name || '当前领域'} domainStatus={status} crumb={crumb} loading={shell.isPending} shellError={shell.isError ? errorText(shell.error) : ''} fatalShellError={shell.isError && !shell.data} retryShell={() => { void shell.refetch(); }} />;
 }

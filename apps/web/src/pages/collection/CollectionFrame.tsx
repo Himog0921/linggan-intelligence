@@ -4,6 +4,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ActionButton } from '../../shared/ActionButton';
 import { Sidebar, NavIcon } from '../../shared/Sidebar';
 import { AppShell } from '../../app/AppShell';
+import { ContextBreadcrumb } from '../../shared/ContextBar';
 import { DomainScopePicker } from '../../shared/DomainScopePicker';
 import { requestJson } from '../../shared/api';
 import collectionSurface from './CollectionSurface.module.css';
@@ -69,7 +70,7 @@ export function CollectionFrame({ section, toolbar, meta, children }: { section:
       </nav>
     </DomainScopePicker>
   );
-  const crumb = <>采集 <span className="v7-slash">/</span> {section === 'targets' ? <>{picker} <span className="v7-slash">/</span> </> : null}<b>{titles[section]}</b></>;
+  const crumb = <ContextBreadcrumb items={section === 'targets' ? ['采集', picker, titles[section]] : ['采集', titles[section]]} />;
   return <AppShell active="collection" boundaryLabel={shell ? '本机不访问平台' : '采集状态未知'} contextBar={{ breadcrumb: crumb, meta: <>{meta}{section !== 'runtime' ? <ActionButton variant="quiet" className="c-management-entry" data-collection-management aria-label="工位管理，全局执行资源" aria-haspopup="dialog" aria-expanded={runtimeOpen} onClick={()=>toggleRuntime(true)}>工位管理</ActionButton> : null}</> }}>
     <div className="v7-shell"><Sidebar aria-label="采集导航">{(['targets', 'tasks'] as const).map((entry) => <a key={entry} className="v7-side-nav" href={`/collection/${entry}${suffix}`} aria-current={section === entry ? 'page' : undefined}><NavIcon name={entry} /><span>{titles[entry]}</span></a>)}<div className="v7-side-foot"><span className="v7-side-dot" />{!shell || shell.totalTargets === null ? <>采集状态未知<br /><span className="v7-mono">目标与调度状态当前读不到</span></> : shell.totalTargets === 0 ? <>暂无观察目标<br /><span className="v7-mono">没有可巡检的对象 · {scheduler}</span></> : <>观察目标 {shell.totalTargets}<br /><span className="v7-mono">巡检开着 {shell.monitoringTargets ?? '未知'} · {scheduler}</span></>}</div></Sidebar><main className={`${collectionSurface['c-page'] ?? 'c-page'} ${section === 'domains' ? '' : styles.frame}`} data-collection-page={section} aria-labelledby="page-title"><h1 className="v7-sr-only" id="page-title">{titles[section]}</h1>{toolbar}<div className={`c-body ${section === 'domains' ? '' : styles.body}`}>{children}</div>{domainManager && <Suspense fallback={<p role="status">正在读取领域管理…</p>}><DomainManagementDialog onClose={() => setDomainManager(false)} /></Suspense>}{runtimeOpen && <Suspense fallback={<p role="status">正在打开工位管理…</p>}><RuntimeManagementDialog onClose={()=>toggleRuntime(false)}/></Suspense>}</main></div>
   </AppShell>;

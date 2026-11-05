@@ -1,7 +1,7 @@
 # LIDS-SHELL-001 · 壳层、位置与范围
 
 > 状态: 权威当前
-> 最后核对: 2026-10-19
+> 最后核对: 2026-11-05
 > 适用范围: 全局页头、面包屑带、领域与侧栏；A容量及图标折叠按ALIGN-SHELL-007
 > 事实来源: Mog 本次 LIDS-ALIGN-001 交付授权、已确认对话决定、现行 LIDS 与 main@9ff50b81；逐项来源见 review-alignment.json；LIDS-ALIGN-001 本次授权与对齐记录
 > 冲突时以谁为准: 用户最新明确确认、产品/数据/权限合同与当前 SCOPE；已采纳设计按本文及明确替代关系执行，候选不自动生效
@@ -37,6 +37,18 @@ Mog明确要求“后续的三级导航tab，全部固定放到面包屑模块�
 - 两项以上真实分区才显示Tab；活动项与键盘焦点分开表达。使用方向键／Home／End移动焦点，Enter／Space激活；窄屏标签可横向滚动且保持完整可访问名称。路由、返回上下文、dirty／pending后果继续沿真实合同，不能以挪动Tab重设业务状态。
 
 确认的是所属模块和职责，具体容量与断点按ALIGN-SHELL-007的A执行，M2材质数值已按Q05确认；本次仅规范及独立原型应用，未改业务壳层。
+
+## ALIGN-SHELL-008 · 共享页头一致性（2026-11-05）
+
+Mog要求全站页头与面包屑跟语料「证据库」「创作者」两页一致。本页记录已实施标准，替代各页面先前自写的页头高度与面包屑拼接：
+
+- **高度**：Z02 默认 44px（`--lgi-space-10 + --lgi-space-1`，上下内边距各 4px）。带三级 Tab 的页面由 Tab 自身的 40px 内容高度自然撑到 48px，不另写页面高度。
+- **缩进**：`.v7-context-main` 始终从左侧导航轨宽度处开始（展开 160px / 折叠 64px）；没有模块侧栏的页面（主题图谱）保留同一 160px 缩进，使全站面包屑左缘对齐。820px 及以下按 A 收起为整宽。
+- **面包屑**：只由 `ContextBreadcrumb` 渲染。页面只提供按顺序的内容项；分隔符与末项标记由共享层生成。末项统一为 `<b class="v7-annotated-current" aria-current="page">`，带手绘线，不再有页面自写的隐藏当前页或另一种加粗写法。
+- **纹理**：任何页面都不得关闭 Pattern Waves 底纹层或隐藏 `.v7-context-row` 的材质节点。
+- **所有权**：`.v7-context-row / -main / -crumb / -meta / -section-nav、.v7-tertiary-nav、.v7-context-action、.v7-domain-picker、.v7-annotated-current` 的样式只在 `styles/shell.css` 与 `app/ContextTexture.module.css`（深色材质适配）里；`shellOwnership` 测试阻止页面 CSS 覆盖这些选择器。页面要调整就改共享表，不回到页面 CSS。
+
+本标准的运行时实现为 `apps/web/src/shared/ContextBar.tsx`、`apps/web/src/styles/shell.css`，变更记录见 `docs/design/changes/lids-component-change.json`。
 
 ## 容量与留白
 

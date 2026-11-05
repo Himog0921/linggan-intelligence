@@ -57,8 +57,9 @@ describe('语料页面框架（三页共用）', () => {
   it('外壳还没读到（读取中或读取失败）：没有选择器，也不出现空的面包屑段，侧栏是裸路径', () => {
     const { container } = renderFrame(null);
     const crumb = container.querySelector('.v7-context-crumb') as HTMLElement;
-    expect(crumb.textContent?.replace(/\s+/g, ' ').trim()).toBe('语料 / 创作者');
+    expect(crumb.textContent?.replace(/\s+/g, ' ').trim()).toBe('语料/创作者');
     expect(crumb.querySelectorAll('.v7-slash')).toHaveLength(1);
+    expect(crumb.querySelector('b')).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByLabelText('切换当前观察领域')).toBeNull();
     expect(screen.getAllByRole('link', { name: /证据库/ })[0]).toHaveAttribute('href', '/corpus/evidence');
   });

@@ -118,7 +118,7 @@ export function TopicsPage() {
         breadcrumb: (
           <ContextBreadcrumb
             items={[
-              <>主题图谱</>,
+              "主题图谱",
               ...(shell.data ? [
                 <DomainScopePicker
                   label="切换当前观察领域"
@@ -154,9 +154,7 @@ export function TopicsPage() {
                   </nav>
                 </DomainScopePicker>,
               ] : []),
-              <b id="topic-map-crumb-current" className="v7-sr-only">
-                {state.view === "journey" ? "用户生命旅程" : "主题概览"}
-              </b>,
+              state.view === "journey" ? "用户生命旅程" : "主题概览",
             ]}
           />
         ),

@@ -1,4 +1,5 @@
 import { AppShell } from './AppShell';
+import { ContextBreadcrumb } from '../shared/ContextBar';
 import styles from './NotFoundPage.module.css';
 
 /** 服务器把本应用交给了一个前端没有登记的路径。这是登记表不一致，不是用户操作错误。 */
@@ -7,7 +8,7 @@ export function NotFoundPage() {
     <AppShell
       active={null}
       boundaryLabel="本机服务状态"
-      contextBar={{ breadcrumb: <b>页面不存在</b>, meta: <span>本机工作空间</span> }}
+      contextBar={{ breadcrumb: <ContextBreadcrumb items={['页面不存在']} />, meta: <span>本机工作空间</span> }}
     >
       <div className={`v7-shell ${styles.shell}`}>
         <main className={styles.main} aria-labelledby="not-found-title">
