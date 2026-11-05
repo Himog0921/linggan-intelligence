@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { SelectField } from '../../../shared/SelectField';
-import { LANES, LANE_STATES, LAYOUTS, MEDIA_KINDS, VIEWS, activeFilterCount, type EvidenceQuery, type LayoutKey, type ViewKey } from './evidenceQuery';
+import { ViewSwitch } from '../../../shared/ViewSwitch';
+import { LANES, LANE_STATES, LAYOUTS, MEDIA_KINDS, VIEWS, activeFilterCount, type EvidenceQuery, type ViewKey } from './evidenceQuery';
 import styles from './Controls.module.css';
 
 /** 来自页面的改动入口：replace 为真时替换当前历史，否则新增一条。 */
@@ -115,10 +116,8 @@ export function EvidenceControls({ query, hasDomain, scope, busy = false, select
           </button>
         </div>
       </form>
-      <div className={styles.layouts} role="group" aria-label="结果排版">
-        {LAYOUTS.map(([key, label]) => <button key={key} type="button" aria-pressed={query.layout === key}
-          onClick={() => onChange(current => ({ ...current, layout: key satisfies LayoutKey }))}>{label}</button>)}
-      </div>
+      <ViewSwitch label="结果排版" value={query.layout} options={LAYOUTS.map(([key, label]) => ({ key, label }))}
+        onChange={layout => onChange(current => ({ ...current, layout }))} />
     </div>
   </section>;
 }

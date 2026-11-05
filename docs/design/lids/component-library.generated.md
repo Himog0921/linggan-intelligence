@@ -38,3 +38,14 @@
 - 页面负责：按钮资格与点击命令；业务执行进度、成功回执和权限；将所有LIDS组件宣布CMP认证
 - 测试：apps/web/src/shared/IntelligenceIcon.test.tsx
 - 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）
+
+## C26 · 展示方式切换
+
+- 实现：[apps/web/src/shared/ViewSwitch.tsx](../../../apps/web/src/shared/ViewSwitch.tsx)
+- 样式：[apps/web/src/shared/ViewSwitch.module.css](../../../apps/web/src/shared/ViewSwitch.module.css)
+- 变体/触发：text_switch
+- 状态：selected / unavailable
+- 负责：同集合视图切换的文字页签外观与选中/不可用态；aria-pressed 与分组命名；可选读数的位置
+- 页面负责：业务命令与执行；范围、查询与数据资格；筛选命中数
+- 测试：apps/web/src/shared/ViewSwitch.test.tsx
+- 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）

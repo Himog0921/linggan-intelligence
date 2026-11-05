@@ -1399,7 +1399,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "131f9dc28426b383046a384ce3d84d37810f5d4843d68b26cfc93bc0e926d14c",
+  "fingerprint": "9c8137183750919455ec8fae01630cd6f3300792af996dccf61b479e1db3c47a",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",
@@ -1563,6 +1563,49 @@
         "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx"
       ],
       "certified": false
+    },
+    "C26": {
+      "name": "展示方式切换",
+      "implementation": "apps/web/src/shared/ViewSwitch.tsx",
+      "styles": "apps/web/src/shared/ViewSwitch.module.css",
+      "tests": [
+        "apps/web/src/shared/ViewSwitch.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "text_switch"
+      ],
+      "states": [
+        "selected",
+        "unavailable"
+      ],
+      "owns": [
+        "同集合视图切换的文字页签外观与选中/不可用态",
+        "aria-pressed 与分组命名",
+        "可选读数的位置"
+      ],
+      "excludes": [
+        "业务命令与执行",
+        "范围、查询与数据资格",
+        "筛选命中数"
+      ],
+      "ruleSources": [
+        "focus",
+        "typography",
+        "color",
+        "composition-layout"
+      ],
+      "consumers": [
+        "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
+        "apps/web/src/pages/corpus/creators/CreatorHomepagePanel.tsx",
+        "apps/web/src/pages/corpus/comments/ObservationSeries.tsx"
+      ],
+      "certified": false,
+      "nativeStates": [
+        "pointer_hover",
+        "keyboard_focus",
+        "pressed"
+      ]
     }
   }
 }

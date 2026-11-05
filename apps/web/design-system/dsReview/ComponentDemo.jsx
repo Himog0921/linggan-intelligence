@@ -1,7 +1,7 @@
 import {SectionNavigationDemo} from '../shellReview/ShellFrame.jsx';
 import {TertiaryTabs} from './TertiaryTabs.jsx';
 import React,{useState} from 'react';
-import {Button,Find,Mark,Facts,Modal} from './ui.jsx';
+import {Button,Find,Mark,Facts,Modal,ViewDemo} from './ui.jsx';
 import {Select} from './Select.jsx';
 import {ProductShell,ContextRail} from './ProductShell.jsx';
 import {show,stateLabel} from './data.js';
@@ -34,7 +34,7 @@ export function ComponentDemo({c,state,variant}){
  case 'C22':preview=<label className="ds-field">选择本地资源<input type="file" disabled={disabled} onChange={e=>say(e.target.files?.[0]?`仅选择 ${e.target.files[0].name}，没有上传。`:'取消选择')}/><small>文件只停留在浏览器，没有上传。</small></label>;break;
  case 'C24':preview=<form onSubmit={e=>{e.preventDefault();say('完成表单演示，没有真实写入。')}}><label className="ds-field">配置名称<input required {...fieldProps} defaultValue="默认连接"/></label><div className="ds-demo-actions"><Button onClick={()=>say('保留当前输入。')}>取消</Button><Button type="submit" tone="primary" disabled={disabled||pending}>{pending?'保存中…':'保存当前表单'}</Button></div></form>;break;
  case 'C25':if(variant!=='steps'){preview=<><ContextRail page="评论研究"><TertiaryTabs items={[{id:'0',name:'评论概览'},{id:'1',name:'用户评论'},{id:'2',name:'研究批次'}]} value={String(tab)} onChange={id=>setTab(Number(id))} disabled={disabled}/></ContextRail><p className="ds-muted">三级页面分区统一在面包屑模块；详情内部Tab另按对象职责就近。</p></>;break;}
- case 'C26':preview=<div className="ds-tab-demo"><div className="ds-segment" role="group" aria-label="演示分区">{(c.id==='C25'?['概览','作品与依据','作者资料']:['全部创作者','未加入观察']).map((x,i)=><button className={tab===i?'active':''} disabled={disabled} key={x} aria-pressed={tab===i} onClick={()=>setTab(i)}>{x}</button>)}</div><p className="ds-muted">当前{c.id==='C25'?'分区':'视图'}：0{tab+1} · 保留同一对象与范围</p></div>;break;
+ case 'C26':preview=c.id==='C26'?<div className="ds-tab-demo"><ViewDemo value={['table','covers','list'][tab]??'list'} onChange={key=>setTab(['table','covers','list'].indexOf(key))} disabled={disabled} count={state==='filled'?128:undefined}/><p className="ds-muted">当前视图：{['表格','封面','列表'][tab]??'列表'} · 保留同一对象与范围</p></div>:<div className="ds-tab-demo"><div className="ds-segment" role="group" aria-label="演示分区">{['概览','作品与依据','作者资料'].map((x,i)=><button className={tab===i?'active':''} disabled={disabled} key={x} aria-pressed={tab===i} onClick={()=>setTab(i)}>{x}</button>)}</div><p className="ds-muted">当前分区：0{tab+1} · 保留同一对象与范围</p></div>;break;
  case 'C27':preview=<div className="ds-demo-actions"><Button disabled={tab===0||pending} onClick={()=>setTab(Math.max(0,tab-1))}>上一页</Button><span className="ds-mono">0{tab+1} / 04</span><Button disabled={tab===3||pending} onClick={()=>setTab(Math.min(3,tab+1))}>{variant==='load_more'?'继续读取':'下一页'}</Button></div>;break;
  case 'C28':preview=<details open={state==='open'}><summary>来源范围与版本</summary><p>仅展开当前对象的补充说明；折叠后不丢失主任务内容。</p></details>;break;
  case 'C29':preview=<nav className="ds-demo-tree" aria-label="演示对象树">{['主题 / 家庭协作','　任务启动','　时间安排','主题 / 情绪调节'].map((n,i)=><button className={tab===i?'active':''} key={n} onClick={()=>setTab(i)}>{n}</button>)}</nav>;break;

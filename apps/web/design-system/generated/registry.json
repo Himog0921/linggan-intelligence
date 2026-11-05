@@ -3594,8 +3594,8 @@
       "specStatus": "proposed",
       "implementationStatus": "not_certified_by_this_spec",
       "sourceRequirement": "C26",
-      "owns": "同一输入集合与范围保持；不会暗示执行命令",
-      "excludes": "不是业务命令；总范围计数不冒充筛选命中",
+      "owns": "同集合视图切换的文字页签外观与选中/不可用态；aria-pressed 与分组命名；可选读数的位置",
+      "excludes": "业务命令与执行；范围、查询与数据资格；筛选命中数",
       "allowedZones": [
         "Z04-V",
         "Z04-B"

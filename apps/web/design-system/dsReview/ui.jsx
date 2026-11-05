@@ -1,6 +1,7 @@
 import {ActionButton} from '../../src/shared/ActionButton';
 import {FindField} from '../../src/shared/FindField';
 import {SelectField} from '../../src/shared/SelectField';
+import {ViewSwitch} from '../../src/shared/ViewSwitch';
 import {IntelligenceIcon} from '../../src/shared/IntelligenceIcon';
 import React,{useEffect,useId,useRef} from 'react';
 import {Select} from './Select.jsx';
@@ -25,4 +26,8 @@ export function Find({value,onChange,trigger='debounce_250',placeholder='昵称�
  return <FindField className="ds-find" disabled={disabled} busy={busy} handle={handle} value={value||''} onCommit={v=>{if(!holdCommit)onChange?.(v)}} trigger={trigger==='debounce_250'?'debounce_250':'submit'}
  label={label} placeholder={scope==='work'?'标题、正文或内容方向':placeholder} shortcut submitLabel={submitLabel} clearLabel="清空演示搜索"
  contextKey={scope} scope={withScope?<SelectField compact label="演示搜索范围" value={scope} options={[{value:'author',label:'创作者资料'},{value:'work',label:'作品内容'}]} onChange={next=>{handle.current?.cancel();setScope(next);onScopeChange?.(next,handle.current?.read())}}/>:undefined}/>;
+}
+export function ViewDemo({value='table',onChange,disabled=false,count}){
+ const options=[{key:'table',label:'表格',count},{key:'covers',label:'封面'},{key:'list',label:'列表',disabled,reason:disabled?'当前范围没有列表视图':undefined}];
+ return <ViewSwitch label="演示视图" value={value} options={options} onChange={next=>onChange?.(next)}/>;
 }

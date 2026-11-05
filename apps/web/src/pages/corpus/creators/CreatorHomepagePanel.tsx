@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
+import { ViewSwitch } from '../../../shared/ViewSwitch';
 import { humanMoment } from '../../../shared/formatting';
 import { Cover } from './Media';
 import { Metric } from './Metric';
@@ -12,6 +13,7 @@ import styles from './CreatorHomepagePanel.module.css';
 
 type View = 'grid' | 'list';
 type Preset = 'standard' | 'text_only';
+const WORK_VIEWS = [{ key: 'grid', label: '封面' }, { key: 'list', label: '列表' }] as const;
 
 // A stable empty list keeps the memoised ref list from changing on every render before data arrives.
 const NO_NOTES: HomepageNote[] = [];
@@ -253,10 +255,7 @@ export function CreatorHomepagePanel({ ctx }: { ctx: PanelContext }) {
                 已选 {formatCount(selectedNotes.length)}
               </button>
             </div>
-            <div className={styles.segment} role="group" aria-label="作品排版">
-              <button type="button" aria-pressed={view === 'grid'} onClick={() => setView('grid')}>封面</button>
-              <button type="button" aria-pressed={view === 'list'} onClick={() => setView('list')}>列表</button>
-            </div>
+            <ViewSwitch label="作品排版" value={view} options={WORK_VIEWS} onChange={setView} />
           </div>
           <div className={view === 'grid' ? styles.grid : styles.list}>
             {displayed.map(note => {
