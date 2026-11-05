@@ -649,24 +649,18 @@ export function createTopicOverview(context: TopicOverviewContext) {
               ) : (
                 ""
               )}
-              <span
-                className={cls("lgi-tm-asof")}
-                title={esc(context.snapshot?.scope?.asOf || "未知")}
-              >
-                {[
-                  "指标截至 ",
-                  esc(
-                    String(context.snapshot?.scope?.asOf || "未知")
-                      .replace("T", " ")
-                      .slice(0, 16),
-                  ),
-                ].join("")}
-              </span>
               <details className={cls("lgi-tm-scope-filter")}>
                 <summary aria-label="选择统计平台与发布时间" title="调整统计平台与发布时间">筛选</summary>
                 <div className={cls("lgi-tm-scope-filter-panel")}>{controls()}</div>
               </details>
-              {btn("统计口径", "method", "", "lgi-tm-quiet")}
+              <div
+                className={cls("lgi-tm-view-segment")}
+                role={"group"}
+                aria-label={"主题图谱视图"}
+              >
+                {tab("主题概览", "view", "overview", context.state.view === "overview")}
+                {tab("用户生命旅程", "view", "journey", context.state.view === "journey")}
+              </div>
             </div>
           </div>
           <div className={cls("lgi-tm-overview-band")} aria-label="主题概览与样本表现">

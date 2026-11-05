@@ -10,7 +10,6 @@ import {
 } from "react";
 import { AppShell } from "../../app/AppShell";
 import { ContextBreadcrumb } from "../../shared/ContextBar";
-import { ContextTabs } from "../../shared/ContextTabs";
 import { DomainScopePicker } from "../../shared/DomainScopePicker";
 import { requestJson } from "../../shared/api";
 import * as d from "../../shared/decode";
@@ -116,52 +115,44 @@ export function TopicsPage() {
         boundaryLabel="本机不访问平台"
         contextBar={{
         breadcrumb: (
-          <ContextBreadcrumb
-            items={[
-              "主题图谱",
-              ...(shell.data ? [
-                <DomainScopePicker
-                  label="切换当前观察领域"
-                  summary={
-                    <>
-                      <span>{domain?.name || "选择领域"}</span>
+          <>
+            <ContextBreadcrumb items={["主题图谱"]} />
+            {shell.data ? (
+              <DomainScopePicker
+                label="切换当前观察领域"
+                summary={
+                  <>
+                    <span>{domain?.name || "选择领域"}</span>
+                    <small>
+                      {domain
+                        ? domain.status === "paused"
+                          ? "已暂停"
+                          : domain.targetCount + " 个目标 · " + (domain.sampleCount ?? "未知") + " 篇作品"
+                        : "请选择一个领域"}
+                    </small>
+                    <i aria-hidden="true" />
+                  </>
+                }
+              >
+                <nav aria-label="可选观察领域">
+                  {shell.data.domains.map((item) => (
+                    <a
+                      key={item.domainRef}
+                      href={"/topics?domain=" + item.domainRef}
+                      aria-current={state.domainRef === item.domainRef ? "page" : undefined}
+                    >
+                      <span>{item.name}</span>
                       <small>
-                        {domain
-                          ? domain.status === "paused"
-                            ? "已暂停"
-                            : domain.targetCount + " 个目标 · " + (domain.sampleCount ?? "未知") + " 篇作品"
-                          : "请选择一个领域"}
+                        {item.status === "paused"
+                          ? "已暂停"
+                          : item.targetCount + " 个目标 · " + (item.sampleCount ?? "未知") + " 篇作品"}
                       </small>
-                      <i aria-hidden="true" />
-                    </>
-                  }
-                >
-                  <nav aria-label="可选观察领域">
-                    {shell.data.domains.map((item) => (
-                      <a
-                        key={item.domainRef}
-                        href={"/topics?domain=" + item.domainRef}
-                        aria-current={state.domainRef === item.domainRef ? "page" : undefined}
-                      >
-                        <span>{item.name}</span>
-                        <small>
-                          {item.status === "paused"
-                            ? "已暂停"
-                            : item.targetCount + " 个目标 · " + (item.sampleCount ?? "未知") + " 篇作品"}
-                        </small>
-                      </a>
-                    ))}
-                  </nav>
-                </DomainScopePicker>,
-              ] : []),
-              state.view === "journey" ? "用户生命旅程" : "主题概览",
-            ]}
-          />
-        ),
-        navigation: (
-          <ContextTabs id="topic-map-view-tabs" label="主题图谱视图" onClick={engine.onClick}>
-            {engine.getViewTabs()}
-          </ContextTabs>
+                    </a>
+                  ))}
+                </nav>
+              </DomainScopePicker>
+            ) : null}
+          </>
         ),
         meta: (
           <div id="topic-map-context-actions" className="v7-context-actions" aria-label="图谱操作" onClick={engine.onClick}>

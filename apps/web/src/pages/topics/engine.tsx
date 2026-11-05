@@ -20,7 +20,7 @@ import {
   decodeSnapshot,
   decodeStructure,
 } from "./topicDtos";
-import { badge, btn, empty, tab } from "./topicElements";
+import { badge, btn, empty } from "./topicElements";
 import {
   analysisOutputs,
   applyQualifiedReader,
@@ -60,7 +60,6 @@ export function createTopicEngine() {
   const surfaces = () =>
     [
       root,
-      document.getElementById("topic-map-view-tabs"),
       document.getElementById("topic-map-context-actions"),
     ].filter((node): node is HTMLElement => node !== null);
   const inWorkspace = (node: Node) =>
@@ -2443,12 +2442,6 @@ export function createTopicEngine() {
     },
     getContent,
     getDialogContent,
-    getViewTabs: () => (
-      <>
-        {tab("主题概览", "view", "overview", state.view === "overview")}
-        {tab("用户生命旅程", "view", "journey", state.view === "journey")}
-      </>
-    ),
     getContextActions: () => (
       <>
         {mutationRetry()}
