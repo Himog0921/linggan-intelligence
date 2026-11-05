@@ -49,3 +49,14 @@
 - 页面负责：业务命令与执行；范围、查询与数据资格；筛选命中数
 - 测试：apps/web/src/shared/ViewSwitch.test.tsx
 - 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）
+
+## C17 · 选项选择
+
+- 实现：[apps/web/src/shared/SelectField.tsx](../../../apps/web/src/shared/SelectField.tsx)
+- 样式：[apps/web/src/shared/SelectField.module.css](../../../apps/web/src/shared/SelectField.module.css)
+- 变体/触发：select
+- 状态：ready / disabled / unknown_value
+- 负责：单值选择器的触发器外观、弹出层定位与翻转；compact 只收紧尺寸，不改语义；键盘开合、方向键、首字母检索与 Escape；选中标记与焦点回到触发器；未知原选值原样显示，不替换成第一项
+- 页面负责：查询时机与读取资格；加载中、读取失败与无可选项的解释；选项内容与业务排序；提交、写入与回执
+- 测试：apps/web/src/shared/SelectField.test.tsx
+- 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）

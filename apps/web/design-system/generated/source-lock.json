@@ -1,5 +1,5 @@
 {
-  "fingerprint": "9c8137183750919455ec8fae01630cd6f3300792af996dccf61b479e1db3c47a",
+  "fingerprint": "25d7ff133fc568594f313f4e5aeb1c53f1361ca504107e6d228294c1306d7823",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -23,7 +23,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ComponentDemo.jsx",
-      "sha256": "ea16d82a05935c64b1545bd586a76d732e86e3cc104dbf75995717c2db56939b"
+      "sha256": "863bc0a15e9ffb25db69015589284d0d060900069a85f29c5bda2395c9a4cbe4"
     },
     {
       "path": "apps/web/design-system/dsReview/InteractionDemo.jsx",
@@ -75,7 +75,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ui.jsx",
-      "sha256": "dd5d72681d0f33b42a2809a3e96373ed03884972f1b9608237c224fe07be5783"
+      "sha256": "8a994dd1ebcdb4d1f115368173250429a65f08da599c924016de3e3f778abb89"
     },
     {
       "path": "apps/web/design-system/finalEdition/FinalHandbook.jsx",
@@ -254,8 +254,16 @@
       "sha256": "995ca6c749d5836e6f4d8c178f59e099bf1085623e9999915d2d28c2c38f66d7"
     },
     {
+      "path": "apps/web/src/pages/collection/targets/TargetModals.tsx",
+      "sha256": "3113ed3fb03f7f801f3b65e58efe0f84f07a254c66708a424078a88c85023db2"
+    },
+    {
       "path": "apps/web/src/pages/collection/targets/TargetsPage.tsx",
       "sha256": "d8417f2ebb7e9d0e4b5f0e26e277b359ba57be0a3b39250b1c8bba09f7c8b8ec"
+    },
+    {
+      "path": "apps/web/src/pages/collection/targets/inspection/InspectorSelect.tsx",
+      "sha256": "a58110e4dfe87b412a19c75df1f7e97617d59c24e7ea66f734a997e06ba3e051"
     },
     {
       "path": "apps/web/src/pages/collection/tasks/TasksPage.tsx",
@@ -264,6 +272,10 @@
     {
       "path": "apps/web/src/pages/corpus/comments/CommentsPage.tsx",
       "sha256": "83751c82d0c63e62c4eb87b19518a5bca5d54319e25c6369e8e817f984a76e94"
+    },
+    {
+      "path": "apps/web/src/pages/corpus/comments/CommentsView.tsx",
+      "sha256": "d6d7915070b3825a25c1670d91d724bb60dd5a9751430813fbf691843a4bca97"
     },
     {
       "path": "apps/web/src/pages/corpus/comments/ObservationSeries.tsx",
@@ -276,6 +288,10 @@
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorHomepagePanel.tsx",
       "sha256": "65af6811f1d4d862a96cd69ad8f30ec3a879b7f34889df17bc11fc9b7681e253"
+    },
+    {
+      "path": "apps/web/src/pages/corpus/creators/CreatorSelect.tsx",
+      "sha256": "3f686703e1599ff2f0fef96f3390537bddd004bd1f076b4b5ec5b971090b316a"
     },
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorsPage.tsx",
@@ -434,8 +450,12 @@
       "sha256": "f3b5c6082639cbd517619f81d14a434d3d7ce3466b4e5dc8f09441cb838ed258"
     },
     {
+      "path": "apps/web/src/shared/SelectField.test.tsx",
+      "sha256": "6b218d75edc10efb8ab92863fbbdedd4e0449a2f48a070e8af6ebb8d24c82189"
+    },
+    {
       "path": "apps/web/src/shared/SelectField.tsx",
-      "sha256": "b34c09b755db3dc1d1cae2270bf1e2a714b4137d0b2c3f52812b57a06ca2393a"
+      "sha256": "3e172bca8ccb9c081aa3289ca612ab379da647aaade20a9940772d0676e32a33"
     },
     {
       "path": "apps/web/src/shared/Sidebar.tsx",
@@ -471,7 +491,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "d4da49f718d2bb4806f12aeef31fa3d9d66765a8f40c609815ba02cc4e6bd0db"
+      "sha256": "d62ec893b3d83a7ed3d48e6d140654155698f156e848b5fd7ecb1899629f573d"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
@@ -483,7 +503,7 @@
     },
     {
       "path": "docs/design/lids/component-contracts.json",
-      "sha256": "6e6681340875bd5f275a046bc4c9bfa9b3fc2912644bc512a94607fed7175a11"
+      "sha256": "95473a0757960f7199809a720e6d7160033a435d3a574af2649aceaf24ae10d1"
     },
     {
       "path": "docs/design/lids/component-reuse.json",

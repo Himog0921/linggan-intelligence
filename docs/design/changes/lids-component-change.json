@@ -1,11 +1,12 @@
 {
   "kind": "shared_standard",
-  "reason": "新增 C26 展示方式切换标准件：文字页签+3px 信号线，替换证据库排版、创作者作品排版、评论观察视图三处各写一遍的切换控件",
+  "reason": "把既有 SelectField 收为 C17 标准件：合同、真实组件演示与键鼠/禁用状态测试，锁定单值选择语义，阻止各页再写一遍下拉外观",
   "authorization": "Mog 2026-11-05 阶段 2（回复 2）",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
     "ICON-B-001": "a08ae3ac746535945174c3e1ed1798975168a4ddd88cc5384a0e24730ef78f7d",
-    "C26": "33084d86d2da082f5bc3b99d3148d1ca601e0867aef707c4d8d0b9954e8e065a"
+    "C26": "33084d86d2da082f5bc3b99d3148d1ca601e0867aef707c4d8d0b9954e8e065a",
+    "C17": "05ca31ec53fdc2af0a7ff2e115ccfb290f47d5f4abb00688386ce84c5da01e00"
   }
 }

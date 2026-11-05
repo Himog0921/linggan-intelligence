@@ -1,8 +1,7 @@
 import {SectionNavigationDemo} from '../shellReview/ShellFrame.jsx';
 import {TertiaryTabs} from './TertiaryTabs.jsx';
 import React,{useState} from 'react';
-import {Button,Find,Mark,Facts,Modal,ViewDemo} from './ui.jsx';
-import {Select} from './Select.jsx';
+import {Button,Find,Mark,Facts,Modal,ViewDemo,SelectDemo} from './ui.jsx';
 import {ProductShell,ContextRail} from './ProductShell.jsx';
 import {show,stateLabel} from './data.js';
 export function ComponentDemo({c,state,variant}){
@@ -27,7 +26,7 @@ export function ComponentDemo({c,state,variant}){
  case 'C13':case 'C14':case 'C20':case 'C23':preview=<label className="ds-field"><span>{c.id==='C20'?'每次样本上限':c.id==='C23'?'连接密钥':'显示名称'}</span><input aria-describedby="demo-field-help" aria-label={c.id==='C20'?'每次样本上限':c.id==='C23'?'连接密钥':'显示名称'} {...fieldProps} type={c.id==='C20'?'number':c.id==='C23'?'password':'text'} min={c.id==='C20'?1:undefined} value={value} placeholder={c.id==='C23'?'输入后保持遮蔽':state==='unknown'?'未知，未补成0':'输入一个名称'} onChange={e=>setValue(e.target.value)}/><small id="demo-field-help" className={error?'ds-error':''}>{error?'请保留输入并修正此字段。':'标签、帮助与错误和字段关联。'}</small></label>;break;
  case 'C15':preview=<label className="ds-field">当前说明<textarea {...fieldProps} value={value} placeholder="写下需要保留的说明" onChange={e=>setValue(e.target.value)}/><small>多行输入不等于富文本编辑器。</small></label>;break;
  case 'C16':preview=<div className="ds-find-demo"><Find value={value} onChange={setValue} label="组件演示FIND" trigger={variant} disabled={disabled} busy={state==='pending'} submitLabel={variant==='submit'?'搜索':undefined} holdCommit={state==='composing'}/>{state==='composing'&&<div className="ds-notice">组词状态示例：输入保留为草稿，暂不提交。</div>}{state==='querying'&&<div className="ds-notice"><Mark tone="orange">正在检索；保留同范围旧内容</Mark></div>}{state==='results'&&<div className="ds-object-row"><strong>林间笔记</strong><span>1位匹配作者</span></div>}{state==='empty'&&<div className="ds-empty"><h3>当前条件没有匹配作者</h3><Button onClick={()=>setValue('')}>清除条件</Button></div>}{state==='error'&&<div className="ds-notice error">查询读取失败；不能据此认定没有作者。</div>}<p className="ds-muted">已提交查询：<span className="ds-mono">{value||'空'}</span> · {variant==='submit'?'手动提交':'250ms防抖'}，中文组词期间不提交</p></div>;break;
- case 'C17':preview=<label className="ds-field">当前排序<Select label="演示当前排序" value={value||"recent"} onChange={setValue} disabled={disabled} options={[{value:"recent",label:"最近收录"},{value:"relevant",label:"相关作品数"}]}/></label>;break;
+ case 'C17':preview=<div className="ds-field"><span>当前排序</span><SelectDemo value={value||'recent'} onChange={setValue} disabled={disabled}/><small>{disabled?'字段不可用时不打开选项。':'选择只换条件；读取时机与资格由页面决定。'}</small></div>;break;
  case 'C18':preview=<label className="ds-check"><input type="checkbox" role={variant==='switch'?'switch':undefined} checked={checked} disabled={disabled} onChange={e=>setChecked(e.target.checked)}/>{variant==='switch'?'自动分析（仅状态演示）':'仅查看判断待形成的作者'}</label>;break;
  case 'C19':preview=<fieldset className="ds-radio-demo"><legend>评论范围</legend>{['每篇样本','公开可见范围'].map((x,i)=><label key={x}><input type="radio" name="demo-choice" disabled={disabled} checked={tab===i} onChange={()=>setTab(i)}/>{x}</label>)}</fieldset>;break;
  case 'C21':preview=<div className="ds-fields-inline"><label>开始日期<input type="date" defaultValue="2026-10-01" {...fieldProps}/></label><label>结束日期<input type="date" defaultValue="2026-10-16" {...fieldProps}/></label></div>;break;

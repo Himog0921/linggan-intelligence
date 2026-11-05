@@ -2856,8 +2856,8 @@
       "specStatus": "proposed",
       "implementationStatus": "not_certified_by_this_spec",
       "sourceRequirement": "C17",
-      "owns": "未知原选值保留、无可选项、加载与错误",
-      "excludes": "无法识别的旧值不丢失，不偷偷替换选项",
+      "owns": "单值选择器的触发器外观、弹出层定位与翻转；compact 只收紧尺寸，不改语义；键盘开合、方向键、首字母检索与 Escape；选中标记与焦点回到触发器；未知原选值原样显示，不替换成第一项",
+      "excludes": "查询时机与读取资格；加载中、读取失败与无可选项的解释；选项内容与业务排序；提交、写入与回执",
       "allowedZones": [
         "Z04-T",
         "Z04-B",
@@ -2868,12 +2868,9 @@
       ],
       "anatomy": "标签/原值/选项/原因",
       "states": [
-        "loading",
         "ready",
-        "no_options",
-        "unknown_original",
         "disabled",
-        "invalid"
+        "unknown_value"
       ],
       "interactionIds": [
         "I01",

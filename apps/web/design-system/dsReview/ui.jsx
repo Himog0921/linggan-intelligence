@@ -31,3 +31,7 @@ export function ViewDemo({value='table',onChange,disabled=false,count}){
  const options=[{key:'table',label:'表格',count},{key:'covers',label:'封面'},{key:'list',label:'列表',disabled,reason:disabled?'当前范围没有列表视图':undefined}];
  return <ViewSwitch label="演示视图" value={value} options={options} onChange={next=>onChange?.(next)}/>;
 }
+export function SelectDemo({value='recent',onChange,disabled=false,compact=false}){
+ const options=[{value:'recent',label:'最近收录'},{value:'relevant',label:'相关作品数'},{value:'blocked',label:'暂不可选',disabled:true}];
+ return <SelectField label="演示当前排序" compact={compact} disabled={disabled} value={value} options={options} onChange={next=>onChange?.(next)}/>;
+}
