@@ -60,3 +60,14 @@
 - 页面负责：查询时机与读取资格；加载中、读取失败与无可选项的解释；选项内容与业务排序；提交、写入与回执
 - 测试：apps/web/src/shared/SelectField.test.tsx
 - 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）
+
+## C42 · 空态
+
+- 实现：[apps/web/src/shared/EmptyState.tsx](../../../apps/web/src/shared/EmptyState.tsx)
+- 样式：[apps/web/src/shared/EmptyState.module.css](../../../apps/web/src/shared/EmptyState.module.css)
+- 变体/触发：first_use / no_match / no_material / unavailable_feature
+- 状态：empty_ready
+- 负责：空态的层级：标题说缺什么，正文说原因与边界，动作区只放已经可用的下一步；四种空的原因用 data-empty-kind 标注，版式一致
+- 页面负责：读取失败、加载中与在途刷新；业务文案与下一步是否真的可执行；表格行内与嵌入卡片内的紧凑空态
+- 测试：apps/web/src/shared/EmptyState.test.tsx
+- 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）

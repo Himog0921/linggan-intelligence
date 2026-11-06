@@ -10,6 +10,7 @@ import {
   observationRows,
   type MetricCell,
 } from './observationRecords';
+import { EmptyState } from '../../../shared/EmptyState';
 import styles from './Records.module.css';
 
 function Cell({ cell, label }: { cell: MetricCell; label: string }) {
@@ -83,7 +84,7 @@ export function ObservationHistory({ item, inspector, now: fixedNow }: { item: W
           </table>
         </div>
       ) : (
-        <p className={styles.observationEmpty}>暂无互动观察记录</p>
+        <EmptyState kind="first_use" title="暂无互动观察记录" />
       )}
       {total >= TIMELINE_WINDOW ? <p className={styles.windowNote}>{`至少 ${TIMELINE_WINDOW} 次，仅列最近 ${TIMELINE_WINDOW} 次。`}</p> : null}
     </div>

@@ -172,8 +172,8 @@
 .study-coverage-state[data-state="recorded"]{color:var(--lgi-success)}
 .study-coverage-state[data-state="partial"]{color:var(--lgi-warning)}
 .study-coverage-state[data-state="none"]{color:var(--lgi-unknown)}
-.study-series-note,.study-observation-empty{margin:var(--lgi-space-3) 0 0;color:var(--lgi-muted);font-size:var(--lgi-text-label)}
-.study-observation-empty{padding:var(--lgi-space-8) 0;border-top:var(--study-hair) solid var(--lgi-hairline);border-bottom:var(--study-hair) solid var(--lgi-hairline)}
+.study-series-note{margin:var(--lgi-space-3) 0 0;color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+
 @media(max-width:900px){.study-observation-head{align-items:stretch;flex-direction:column;gap:var(--lgi-space-4)}.study-observation-controls{justify-content:flex-start}.study-series-svg-wrap{height:calc(var(--lgi-space-1) * 62)}}
 @media(max-width:620px){.study-observation-controls{gap:var(--lgi-space-4)}.study-text-switcher{gap:var(--lgi-space-4)}.study-series-table-wrap{margin-right:calc(var(--lgi-space-4) * -1);padding-right:var(--lgi-space-4)}}
 
@@ -301,7 +301,6 @@
 .study-series-day-hit:hover{fill:var(--lgi-signal-faint)}
 .study-series-day-hit:focus-visible{outline:2px solid var(--lgi-focus);fill:var(--lgi-signal-faint)}
 .study-overview-hero .study-series-table-wrap{border-top:1px solid var(--lgi-hairline);border-bottom:1px solid var(--lgi-hairline)}
-.study-overview-hero .study-observation-empty{border:0}
 @media(max-width:1360px){.study-overview-hero{grid-template-columns:minmax(248px,274px) minmax(0,1fr);gap:var(--lgi-space-8)}.study-observation-toolbar{flex-wrap:wrap}.study-overview-hero .study-observation-controls{margin-left:auto}}
 @media(max-width:1120px){.study-overview-hero{grid-template-columns:1fr;gap:var(--lgi-space-6)}.study-overview-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--lgi-space-3) var(--lgi-space-6)}.study-metrics-asof,.study-metric-pair,.study-metric-pending{grid-column:1/-1}.study-metric-hero{padding-top:0}.study-metric-separator{display:none}.study-metric-pair{grid-template-columns:repeat(2,minmax(0,1fr))}.study-metric-small{min-height:calc(var(--lgi-space-1) * 21)}.study-metric-pending{margin-top:0}.study-metric-progress .study-metric-value{margin-top:var(--lgi-space-3)}}
 @media(max-width:640px){.study-overview-metrics{display:flex;flex-direction:column;align-items:stretch;gap:0}.study-metric-hero{padding-top:var(--lgi-space-4)}.study-metric-progress{border-top:1px solid var(--lgi-hairline);padding-top:var(--lgi-space-4);margin-top:var(--lgi-space-4)}.study-metric-pair{border-top:1px solid var(--lgi-hairline);padding-top:var(--lgi-space-4);margin-top:var(--lgi-space-4)}.study-observation-toolbar{align-items:stretch;gap:var(--lgi-space-3)}.study-overview-hero .study-series-legend{row-gap:var(--lgi-space-2)}.study-overview-hero .study-observation-controls{justify-content:space-between;width:100%;margin-left:0}.study-overview-hero .study-text-switcher{gap:var(--lgi-space-3)}.study-overview-hero .study-series-svg-wrap{min-height:0}.study-metric-pending{margin-top:var(--lgi-space-3)}}

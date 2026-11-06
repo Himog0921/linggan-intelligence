@@ -1,7 +1,7 @@
 import {SectionNavigationDemo} from '../shellReview/ShellFrame.jsx';
 import {TertiaryTabs} from './TertiaryTabs.jsx';
 import React,{useState} from 'react';
-import {Button,Find,Mark,Facts,Modal,ViewDemo,SelectDemo} from './ui.jsx';
+import {Button,Find,Mark,Facts,Modal,ViewDemo,SelectDemo,EmptyDemo} from './ui.jsx';
 import {ProductShell,ContextRail} from './ProductShell.jsx';
 import {show,stateLabel} from './data.js';
 export function ComponentDemo({c,state,variant}){
@@ -49,7 +49,7 @@ export function ComponentDemo({c,state,variant}){
  case 'C39':preview=<div className="ds-media-demo"><div className="ds-media-placeholder">{unknown?'媒体尚未取得':'合成图文 / '+(tab+1)}</div><div className="ds-demo-actions"><Button disabled={tab===0} onClick={()=>setTab(tab-1)}>上一张</Button><span className="ds-mono">0{tab+1} / 03</span><Button disabled={tab===2} onClick={()=>setTab(tab+1)}>下一张</Button></div></div>;break;
  case 'C40':preview=<div><p className="ds-source-quote">{unknown?'当前来源不可读，历史引用仍须保留资格说明。':state==='restricted'?'当前原文受限；历史引用与现有判断分别处理。':state==='changed'?'来源版本已变化，当前片段需要复核。':'我们试着把早晨的安排拆成孩子能看见的步骤。'}</p><div className="ds-source-anchor">合成作品 · 段落01 · 版本A<Button tone="quiet" onClick={()=>setOpen(true)}>回查来源</Button></div></div>;break;
  case 'C41':preview=variant==='refresh'?<div><Mark tone="orange">正在更新同一范围</Mark><p>仍可阅读的旧内容保留在原位置。</p><div className="ds-skeleton short"/></div>:<div aria-busy="true" aria-label="正在读取"><div className="ds-skeleton"/><div className="ds-skeleton short"/><div className="ds-skeleton"/></div>;break;
- case 'C42':preview=<div className="ds-empty"><span className="ds-mono">00</span><h3>{variant==='no_match'?'当前条件没有结果':variant==='no_material'?'尚无可阅读材料':variant==='unavailable_feature'?'当前能力未开放':'从已有入口开始'}</h3><p>空、未接通和读取失败分别说明。</p><Button onClick={()=>say('回到当前集合，不创建新能力。')}>返回当前范围</Button></div>;break;
+ case 'C42':preview=<EmptyDemo kind={['first_use','no_match','no_material','unavailable_feature'].includes(variant)?variant:'no_match'}/>;break;
  case 'C43':preview=state==='dismissed'?<p className="ds-muted">提示已收起；核心约束仍在所属内容中可查。</p>:<div className={'ds-notice '+(variant==='error'?'error':'')} role="status"><div><strong>{variant==='error'?'读取失败，不能据此认定没有材料':variant==='warning'?'当前结果仅覆盖部分来源':'范围约束'}</strong><p>保留仍可读的旧内容；按原范围核对。</p></div><Button onClick={()=>say('重新核对同一读取范围。')}>重新核对</Button></div>;break;
  case 'C44':preview=<div className="ds-notice"><div><Mark tone={error?'orange':'ink'}>{pending?'等待回执':state==='unconfirmed'?'结果未确认':state==='applied'?'已应用（回执语义样例）':state==='partial'?'部分项目已应用':state==='rejected'?'请求被拒绝':'请求已接纳'}</Mark><p>请求已接纳仍不等于材料入库或业务完成。</p></div><Button onClick={()=>say('沿原请求身份核对；不重复提交新请求。')}>核对原回执</Button></div>;break;
  case 'C45':case 'C46':case 'C47':preview=<div><Button onClick={()=>setOpen(true)}>打开{c.id==='C46'?'只读确认结构':c.id==='C47'?'只读对象检视':'只读容器样张'}</Button><p className="ds-muted">{c.id==='C47'&&variant==='nonmodal'?'非模态：页面仍可操作，不圈住焦点。':'模态：焦点留在当前对话框，Escape关闭顶层。'}关闭回到触发按钮。这里不模拟未保存或在途请求；完整S1流程请进入<a href={"?page=system&section=review&review=overlays&scenario="+(c.id==='C45'?'create':c.id==='C46'?'task':'read')}>Q09交互演练</a>。</p></div>;break;

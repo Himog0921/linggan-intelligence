@@ -257,6 +257,43 @@
         "expanded",
         "selected"
       ]
+    },
+    "C42": {
+      "name": "空态",
+      "implementation": "apps/web/src/shared/EmptyState.tsx",
+      "styles": "apps/web/src/shared/EmptyState.module.css",
+      "tests": [
+        "apps/web/src/shared/EmptyState.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "first_use",
+        "no_match",
+        "no_material",
+        "unavailable_feature"
+      ],
+      "states": [
+        "empty_ready"
+      ],
+      "owns": [
+        "空态的层级：标题说缺什么，正文说原因与边界，动作区只放已经可用的下一步",
+        "四种空的原因用 data-empty-kind 标注，版式一致"
+      ],
+      "excludes": [
+        "读取失败、加载中与在途刷新",
+        "业务文案与下一步是否真的可执行",
+        "表格行内与嵌入卡片内的紧凑空态"
+      ],
+      "ruleSources": [
+        "typography",
+        "color",
+        "composition-layout"
+      ],
+      "consumers": [
+        "apps/web/src/pages/corpus/comments/ObservationSeries.tsx",
+        "apps/web/src/pages/corpus/evidence/ObservationHistory.tsx"
+      ],
+      "certified": false
     }
   }
 }

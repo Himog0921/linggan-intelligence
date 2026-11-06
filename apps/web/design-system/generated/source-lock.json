@@ -1,5 +1,5 @@
 {
-  "fingerprint": "67ed25a04d99885cfaa306c228f9b64ab5315a3e563ed79d26162359b831ab98",
+  "fingerprint": "0c8fc5ac1d2ba41be6865e642deb16dcdaae530a8a5185fa174b1b22b9861778",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -23,7 +23,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ComponentDemo.jsx",
-      "sha256": "863bc0a15e9ffb25db69015589284d0d060900069a85f29c5bda2395c9a4cbe4"
+      "sha256": "802a58f25d3d290783c1ca1c1741c50424ef338842025899d5ef413b80be5583"
     },
     {
       "path": "apps/web/design-system/dsReview/InteractionDemo.jsx",
@@ -75,7 +75,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ui.jsx",
-      "sha256": "8a994dd1ebcdb4d1f115368173250429a65f08da599c924016de3e3f778abb89"
+      "sha256": "59089e6cd972b2417fd07ad98c2c83f61ff648fd4f0a94964d701ddd74545a9d"
     },
     {
       "path": "apps/web/design-system/finalEdition/FinalHandbook.jsx",
@@ -279,7 +279,7 @@
     },
     {
       "path": "apps/web/src/pages/corpus/comments/ObservationSeries.tsx",
-      "sha256": "399a284c0394cf84c3d04af133a4f08a062d31952bcd671107769964c0f2320d"
+      "sha256": "6e4fe15d3f7c145bd32a6c4550026ed704fc271cbe2e81c3cda602502fc7afc6"
     },
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
@@ -312,6 +312,10 @@
     {
       "path": "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx",
       "sha256": "fe3339f1b8dab328e412d3ff0159a7a9a5cafa383edc3815badd001500baf4ce"
+    },
+    {
+      "path": "apps/web/src/pages/corpus/evidence/ObservationHistory.tsx",
+      "sha256": "a5aa0ef2858de78526943c451fcca6502186427a08fc7efce934a5d787d8ce08"
     },
     {
       "path": "apps/web/src/pages/ops/Charts.tsx",
@@ -426,6 +430,18 @@
       "sha256": "0ebe44c80934ca0e4151e1ee83b0903252b929c564a152e01bbd4ce4346a3a5c"
     },
     {
+      "path": "apps/web/src/shared/EmptyState.module.css",
+      "sha256": "bfa2f824716e7ea82ad7d94244db4a3d9b484fe70f7693fdb565cabca20b8ad4"
+    },
+    {
+      "path": "apps/web/src/shared/EmptyState.test.tsx",
+      "sha256": "5c8713062deb9ab3f641170108b460deac9ac10908ec70fe7499af420d558b2b"
+    },
+    {
+      "path": "apps/web/src/shared/EmptyState.tsx",
+      "sha256": "d8c3dcec4c87df9fea90d3ce58bf585edec60b3a98b30489a12c0e9f6756204d"
+    },
+    {
       "path": "apps/web/src/shared/FindField.module.css",
       "sha256": "97fa8bfec5f69cfd5dfa09310b817e964df10a5c2b8beb81a6da9dd3c7fc2714"
     },
@@ -495,7 +511,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "b7ecd8b4e065a6ac41e7c74d9e2236e75e7367bc94cd4f235069199a7b35e8c1"
+      "sha256": "9b8a1e810c8373aab8ab6764af2e66042df3a544fbeeaa5bac4e2a490a8cc338"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
@@ -507,7 +523,7 @@
     },
     {
       "path": "docs/design/lids/component-contracts.json",
-      "sha256": "d104575d973376846620f8868fd867ce21357e3989f6558b1d87bd29a0df7920"
+      "sha256": "f9d5635568d7042fd26c1e59b5f872e24510d1ad9e18a4a6e484230bb028aab8"
     },
     {
       "path": "docs/design/lids/component-reuse.json",

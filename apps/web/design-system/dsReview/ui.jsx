@@ -1,4 +1,5 @@
 import {ActionButton} from '../../src/shared/ActionButton';
+import {EmptyState} from '../../src/shared/EmptyState';
 import {FindField} from '../../src/shared/FindField';
 import {SelectField} from '../../src/shared/SelectField';
 import {ViewSwitch} from '../../src/shared/ViewSwitch';
@@ -34,4 +35,8 @@ export function ViewDemo({value='table',onChange,disabled=false,count}){
 export function SelectDemo({value='recent',onChange,disabled=false,compact=false}){
  const options=[{value:'recent',label:'最近收录'},{value:'relevant',label:'相关作品数'},{value:'blocked',label:'暂不可选',disabled:true}];
  return <SelectField label="演示当前排序" compact={compact} disabled={disabled} value={value} options={options} onChange={next=>onChange?.(next)}/>;
+}
+export function EmptyDemo({kind='no_match',onChange}){
+ const title={first_use:'从已有入口开始',no_match:'当前条件没有结果',no_material:'尚无可阅读材料',unavailable_feature:'当前能力未开放'}[kind]||'当前条件没有结果';
+ return <EmptyState kind={kind} title={title} action={<Button onClick={()=>onChange?.('当前范围')}>返回当前范围</Button>}>空、未接通和读取失败分别说明；读取失败不显示成没有材料。</EmptyState>;
 }

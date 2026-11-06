@@ -61,13 +61,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.observationEmpty {
-  margin: var(--lgi-space-2) 0 0;
-  color: var(--lgi-muted);
-  font-size: var(--lgi-text-label);
-  line-height: var(--lgi-lh-longform);
-}
-
 .windowNote {
   margin: var(--lgi-space-2) 0 0;
   color: var(--lgi-ghost);
