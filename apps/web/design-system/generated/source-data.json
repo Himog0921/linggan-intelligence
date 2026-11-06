@@ -1399,7 +1399,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "0c8fc5ac1d2ba41be6865e642deb16dcdaae530a8a5185fa174b1b22b9861778",
+  "fingerprint": "56a956030726d845fecd2ddb3c8f75a930f7146586ac70ce3bfbc7b04805ca50",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",
@@ -1691,6 +1691,46 @@
       "consumers": [
         "apps/web/src/pages/corpus/comments/ObservationSeries.tsx",
         "apps/web/src/pages/corpus/evidence/ObservationHistory.tsx"
+      ],
+      "certified": false
+    },
+    "C41": {
+      "name": "读取与刷新状态",
+      "implementation": "apps/web/src/shared/LoadingState.tsx",
+      "styles": "apps/web/src/shared/LoadingState.module.css",
+      "tests": [
+        "apps/web/src/shared/LoadingState.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "initial",
+        "refresh"
+      ],
+      "states": [
+        "initial",
+        "refreshing",
+        "stale_error",
+        "ready"
+      ],
+      "owns": [
+        "首次读取只报读取中：不渲染旧内容，也不把未知填成零",
+        "刷新与读取失败时不遮住仍在页面上的上次结果，并说明保留的是旧值",
+        "读取失败带原因与重新读取入口，不和空数据合并"
+      ],
+      "excludes": [
+        "读取时机、查询键与重试策略",
+        "业务文案与所读对象是什么",
+        "动作回执与提交结果"
+      ],
+      "ruleSources": [
+        "typography",
+        "color",
+        "composition-layout"
+      ],
+      "consumers": [
+        "apps/web/src/pages/collection/targets/inspection/ResearchParts.tsx",
+        "apps/web/src/pages/collection/management/DomainsPage.tsx",
+        "apps/web/src/pages/collection/management/RuntimeManagementDialog.tsx"
       ],
       "certified": false
     }

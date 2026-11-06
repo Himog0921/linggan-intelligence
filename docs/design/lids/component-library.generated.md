@@ -71,3 +71,14 @@
 - 页面负责：读取失败、加载中与在途刷新；业务文案与下一步是否真的可执行；表格行内与嵌入卡片内的紧凑空态
 - 测试：apps/web/src/shared/EmptyState.test.tsx
 - 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）
+
+## C41 · 读取与刷新状态
+
+- 实现：[apps/web/src/shared/LoadingState.tsx](../../../apps/web/src/shared/LoadingState.tsx)
+- 样式：[apps/web/src/shared/LoadingState.module.css](../../../apps/web/src/shared/LoadingState.module.css)
+- 变体/触发：initial / refresh
+- 状态：initial / refreshing / stale_error / ready
+- 负责：首次读取只报读取中：不渲染旧内容，也不把未知填成零；刷新与读取失败时不遮住仍在页面上的上次结果，并说明保留的是旧值；读取失败带原因与重新读取入口，不和空数据合并
+- 页面负责：读取时机、查询键与重试策略；业务文案与所读对象是什么；动作回执与提交结果
+- 测试：apps/web/src/shared/LoadingState.test.tsx
+- 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）

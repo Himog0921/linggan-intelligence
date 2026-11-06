@@ -1,5 +1,5 @@
 {
-  "fingerprint": "0c8fc5ac1d2ba41be6865e642deb16dcdaae530a8a5185fa174b1b22b9861778",
+  "fingerprint": "56a956030726d845fecd2ddb3c8f75a930f7146586ac70ce3bfbc7b04805ca50",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -23,7 +23,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ComponentDemo.jsx",
-      "sha256": "802a58f25d3d290783c1ca1c1741c50424ef338842025899d5ef413b80be5583"
+      "sha256": "dabf133fc838e30793db198468e07aacdb72d230f552063095c829000c53de93"
     },
     {
       "path": "apps/web/design-system/dsReview/InteractionDemo.jsx",
@@ -75,7 +75,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ui.jsx",
-      "sha256": "59089e6cd972b2417fd07ad98c2c83f61ff648fd4f0a94964d701ddd74545a9d"
+      "sha256": "98560dbd2aa1471a92ee955c1c9d6f966c89eba35f959bd8857fe3e90e5253e5"
     },
     {
       "path": "apps/web/design-system/finalEdition/FinalHandbook.jsx",
@@ -247,7 +247,11 @@
     },
     {
       "path": "apps/web/src/pages/collection/management/DomainsPage.tsx",
-      "sha256": "20c0901f9dea41ab61143615376a14ae33b0a6b6f9ae596e36f41ac39dcf7457"
+      "sha256": "c10f61fe9f34c2566b40d8e1974cfd86f8c72b71cb014c05f07e401023d8fc21"
+    },
+    {
+      "path": "apps/web/src/pages/collection/management/RuntimeManagementDialog.tsx",
+      "sha256": "fa47d42327c34f0996a24d2189be93d18f96d04f946ca962e3d9cee02e04becb"
     },
     {
       "path": "apps/web/src/pages/collection/management/RuntimePage.tsx",
@@ -264,6 +268,10 @@
     {
       "path": "apps/web/src/pages/collection/targets/inspection/InspectorSelect.tsx",
       "sha256": "a58110e4dfe87b412a19c75df1f7e97617d59c24e7ea66f734a997e06ba3e051"
+    },
+    {
+      "path": "apps/web/src/pages/collection/targets/inspection/ResearchParts.tsx",
+      "sha256": "7c1cbb1257ee8d531d043cbc9f8a831647f98c8dee96c5da392b405863417d4f"
     },
     {
       "path": "apps/web/src/pages/collection/tasks/TasksPage.tsx",
@@ -466,6 +474,18 @@
       "sha256": "834ae5aa92837d4b753f86199aa0326f215c44cc47af3e6304501f6fa0954b70"
     },
     {
+      "path": "apps/web/src/shared/LoadingState.module.css",
+      "sha256": "ab5ce8a5e25a4ed459a7ed980619da656137f8b77055bc2a6258bfd6f074612a"
+    },
+    {
+      "path": "apps/web/src/shared/LoadingState.test.tsx",
+      "sha256": "7bd96c96fdf5aa8342c19c9af45f95f5b90397297b677b848f730ebe783f2d6f"
+    },
+    {
+      "path": "apps/web/src/shared/LoadingState.tsx",
+      "sha256": "eeb4d6c37ba01378a0bed8538d6b801c98ddc79f3de35cf3bdd05b778e932b3a"
+    },
+    {
       "path": "apps/web/src/shared/SelectField.module.css",
       "sha256": "f3b5c6082639cbd517619f81d14a434d3d7ce3466b4e5dc8f09441cb838ed258"
     },
@@ -511,7 +531,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "9b8a1e810c8373aab8ab6764af2e66042df3a544fbeeaa5bac4e2a490a8cc338"
+      "sha256": "45889c883732bd4a4aec9510f94348648a212e53847cf25dbce4b657c8549c5f"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
@@ -523,7 +543,7 @@
     },
     {
       "path": "docs/design/lids/component-contracts.json",
-      "sha256": "f9d5635568d7042fd26c1e59b5f872e24510d1ad9e18a4a6e484230bb028aab8"
+      "sha256": "a70d5666ddd304f7a7c87f4c4541b624518803f4c158014c8cca0785fded06d2"
     },
     {
       "path": "docs/design/lids/component-reuse.json",

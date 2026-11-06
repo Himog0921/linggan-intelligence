@@ -1,7 +1,7 @@
 import {SectionNavigationDemo} from '../shellReview/ShellFrame.jsx';
 import {TertiaryTabs} from './TertiaryTabs.jsx';
 import React,{useState} from 'react';
-import {Button,Find,Mark,Facts,Modal,ViewDemo,SelectDemo,EmptyDemo} from './ui.jsx';
+import {Button,Find,Mark,Facts,Modal,ViewDemo,SelectDemo,EmptyDemo,LoadingDemo} from './ui.jsx';
 import {ProductShell,ContextRail} from './ProductShell.jsx';
 import {show,stateLabel} from './data.js';
 export function ComponentDemo({c,state,variant}){
@@ -48,7 +48,7 @@ export function ComponentDemo({c,state,variant}){
  case 'C38':preview=<div className="ds-progress-demo"><Mark tone={pending?'orange':'ink'}>{variant==='stage'?'获取来源材料':variant==='count'?'已取得18篇':'已知分母下 28%'}</Mark>{variant==='percentage'?<><div className="ds-progress"><i style={{width:'28%'}}/></div><span className="ds-mono">28 / 100 · 同一范围</span></>:<p>阶段、已得数量和完整范围分别表达。</p>}</div>;break;
  case 'C39':preview=<div className="ds-media-demo"><div className="ds-media-placeholder">{unknown?'媒体尚未取得':'合成图文 / '+(tab+1)}</div><div className="ds-demo-actions"><Button disabled={tab===0} onClick={()=>setTab(tab-1)}>上一张</Button><span className="ds-mono">0{tab+1} / 03</span><Button disabled={tab===2} onClick={()=>setTab(tab+1)}>下一张</Button></div></div>;break;
  case 'C40':preview=<div><p className="ds-source-quote">{unknown?'当前来源不可读，历史引用仍须保留资格说明。':state==='restricted'?'当前原文受限；历史引用与现有判断分别处理。':state==='changed'?'来源版本已变化，当前片段需要复核。':'我们试着把早晨的安排拆成孩子能看见的步骤。'}</p><div className="ds-source-anchor">合成作品 · 段落01 · 版本A<Button tone="quiet" onClick={()=>setOpen(true)}>回查来源</Button></div></div>;break;
- case 'C41':preview=variant==='refresh'?<div><Mark tone="orange">正在更新同一范围</Mark><p>仍可阅读的旧内容保留在原位置。</p><div className="ds-skeleton short"/></div>:<div aria-busy="true" aria-label="正在读取"><div className="ds-skeleton"/><div className="ds-skeleton short"/><div className="ds-skeleton"/></div>;break;
+ case 'C41':preview=<LoadingDemo phase={variant==='refresh'?'refreshing':state==='stale_error'||state==='error'||state==='stale'?'stale_error':'initial'}/>;break;
  case 'C42':preview=<EmptyDemo kind={['first_use','no_match','no_material','unavailable_feature'].includes(variant)?variant:'no_match'}/>;break;
  case 'C43':preview=state==='dismissed'?<p className="ds-muted">提示已收起；核心约束仍在所属内容中可查。</p>:<div className={'ds-notice '+(variant==='error'?'error':'')} role="status"><div><strong>{variant==='error'?'读取失败，不能据此认定没有材料':variant==='warning'?'当前结果仅覆盖部分来源':'范围约束'}</strong><p>保留仍可读的旧内容；按原范围核对。</p></div><Button onClick={()=>say('重新核对同一读取范围。')}>重新核对</Button></div>;break;
  case 'C44':preview=<div className="ds-notice"><div><Mark tone={error?'orange':'ink'}>{pending?'等待回执':state==='unconfirmed'?'结果未确认':state==='applied'?'已应用（回执语义样例）':state==='partial'?'部分项目已应用':state==='rejected'?'请求被拒绝':'请求已接纳'}</Mark><p>请求已接纳仍不等于材料入库或业务完成。</p></div><Button onClick={()=>say('沿原请求身份核对；不重复提交新请求。')}>核对原回执</Button></div>;break;

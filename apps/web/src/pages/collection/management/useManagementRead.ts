@@ -9,5 +9,5 @@ export function useManagementRead<T>(load: (signal: AbortSignal, search: string)
     gcTime: 0,
     retry: false,
   });
-  return { data: query.data ?? null, error: query.isError, loading: query.isPending, reload: query.refetch };
+  return { data: query.data ?? null, error: query.isError, loading: query.isPending, refreshing: query.isFetching && !query.isPending, reload: query.refetch };
 }

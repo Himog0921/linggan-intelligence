@@ -1,6 +1,7 @@
 import { useEffect,useRef,type ReactNode } from 'react';
 import { Link } from 'react-router';
 import { ActionButton } from '../../../../shared/ActionButton';
+import { LoadingState } from '../../../../shared/LoadingState';
 import { InspectorSelect as TargetSelect } from './InspectorSelect';
 import type { InspectionRead } from './useInspectionRead';
 import { METRICS,type MetricKey,type Difference } from './inspectionApi';
@@ -17,9 +18,9 @@ export function ResearchPanel({title,actions,children}:{title:string;actions?:Re
   </section>;
 }
 export function ReadFeedback<T>({read}:{read:InspectionRead<T>}){
-  if(read.error)return <div className={styles.notice} data-tone="error" role="alert"><p>{read.error}{read.stale?' 以下保留上次读取结果。':''}</p><ActionButton variant="quiet" onClick={read.reload}>重新读取</ActionButton></div>;
-  if(read.pending)return <p className={styles.meta} role="status">{read.data?'正在刷新，以下为上次结果…':'正在读取真实记录…'}</p>;
-  return null;
+  if(read.error)return <LoadingState phase="stale_error" subject="巡检记录" error={read.error} retainsOld={read.stale} action={<ActionButton variant="quiet" onClick={read.reload}>重新读取</ActionButton>}/>;
+  if(!read.pending)return null;
+  return <LoadingState phase={read.data?'refreshing':'initial'} subject="巡检记录"/>;
 }
 export function MetricPicker({value,onChange}:{value:MetricKey;onChange:(value:MetricKey)=>void}){
   return <TargetSelect name="inspection-metric" label="比较指标" value={value} onChange={next=>{if(METRICS.includes(next as MetricKey))onChange(next as MetricKey);}} options={METRICS.map(key=>({value:key,label:metricLabels[key]}))}/>;

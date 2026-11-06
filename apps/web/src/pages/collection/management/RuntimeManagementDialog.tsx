@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useBlocker } from 'react-router';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { ActionButton } from '../../../shared/ActionButton';
+import { LoadingState } from '../../../shared/LoadingState';
 import { loadRuntime } from './managementApi';
 import { RuntimeContent } from './RuntimeContent';
 import { useManagementRead } from './useManagementRead';
@@ -31,8 +32,15 @@ export function RuntimeManagementDialog({onClose}:{onClose:()=>void}) {
   return <ModalDialog className={`c-run-dialog ${styles.dialog}`} labelledBy="runtime-manager-title" closeOnBackdrop onClose={requestClose} setup={dialog=>{document.documentElement.classList.add('c-run-dialog-open');return()=>{if(![...document.querySelectorAll('dialog[open]')].some(open=>open!==dialog))document.documentElement.classList.remove('c-run-dialog-open');};}}>
     <header className={styles.heading}><h2 id="runtime-manager-title">工位管理</h2><ActionButton variant="quiet" data-initial-focus aria-label="关闭工位管理" onClick={requestClose}>关闭</ActionButton></header>
     <div ref={content} className={styles.body}>
-      {read.error && <p role="alert">工位信息读取失败。{read.data ? `以下保留上次读取结果（${read.data.asOf ?? '时间未知'}）。` : '请重新读取。'}<ActionButton onClick={()=>void read.reload()}>重新读取</ActionButton></p>}
-      {read.data?.projection ? <RuntimeContent data={read.data.projection} reload={()=>void read.reload()}/> : read.loading ? <p role="status">正在读取工位…</p> : <p>工位配置当前读不到，未知状态没有显示为零。</p>}
+      <LoadingState
+        phase={read.error ? 'stale_error' : !read.data?.projection ? (read.loading ? 'initial' : 'stale_error') : read.refreshing ? 'refreshing' : 'ready'}
+        subject="工位"
+        error={read.error ? '工位信息读取失败。' : '工位配置当前读不到，未知状态没有显示为零。'}
+        retained={read.data ? `以下保留上次读取结果（${read.data.asOf ?? '时间未知'}）。` : undefined}
+        action={<ActionButton onClick={() => void read.reload()}>重新读取</ActionButton>}
+      >
+        {read.data?.projection ? <RuntimeContent data={read.data.projection} reload={()=>void read.reload()}/> : undefined}
+      </LoadingState>
     </div>
     {leaving && <section className={styles.leave} role="alert"><p>{leaving==='pending' ? '操作结果尚未确认。收起后会保留原请求，再次打开时先核实同一请求。' : '有尚未保存的输入，关闭将放弃这些修改。'}</p><div><ActionButton autoFocus onClick={keepEditing}>继续处理</ActionButton><ActionButton variant={leaving==='pending'?'outline':'danger'} onClick={completeLeave}>{leaving==='pending'?'收起并保留请求':'放弃修改并关闭'}</ActionButton></div></section>}
   </ModalDialog>;

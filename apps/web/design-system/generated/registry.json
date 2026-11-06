@@ -4933,8 +4933,8 @@
       "specStatus": "proposed",
       "implementationStatus": "not_certified_by_this_spec",
       "sourceRequirement": "C41",
-      "owns": "首次读取与保留旧内容的刷新分开；不显示虚假零",
-      "excludes": "加载不显示伪零；骨架不掩盖可读旧值",
+      "owns": "首次读取只报读取中：不渲染旧内容，也不把未知填成零；刷新与读取失败时不遮住仍在页面上的上次结果，并说明保留的是旧值；读取失败带原因与重新读取入口，不和空数据合并",
+      "excludes": "读取时机、查询键与重试策略；业务文案与所读对象是什么；动作回执与提交结果",
       "allowedZones": [
         "Z04-B",
         "Z04-F",
@@ -4948,7 +4948,8 @@
       "states": [
         "initial",
         "refreshing",
-        "stale_error"
+        "stale_error",
+        "ready"
       ],
       "interactionIds": [
         "I13",

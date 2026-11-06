@@ -1,5 +1,6 @@
 import {ActionButton} from '../../src/shared/ActionButton';
 import {EmptyState} from '../../src/shared/EmptyState';
+import {LoadingState} from '../../src/shared/LoadingState';
 import {FindField} from '../../src/shared/FindField';
 import {SelectField} from '../../src/shared/SelectField';
 import {ViewSwitch} from '../../src/shared/ViewSwitch';
@@ -39,4 +40,11 @@ export function SelectDemo({value='recent',onChange,disabled=false,compact=false
 export function EmptyDemo({kind='no_match',onChange}){
  const title={first_use:'从已有入口开始',no_match:'当前条件没有结果',no_material:'尚无可阅读材料',unavailable_feature:'当前能力未开放'}[kind]||'当前条件没有结果';
  return <EmptyState kind={kind} title={title} action={<Button onClick={()=>onChange?.('当前范围')}>返回当前范围</Button>}>空、未接通和读取失败分别说明；读取失败不显示成没有材料。</EmptyState>;
+}
+export function LoadingDemo({phase='initial',onChange}){
+ return <LoadingState phase={phase} subject="领域配置"
+  error={phase==='stale_error'?'领域配置和关联关系当前读不到；':undefined}
+  action={phase==='stale_error'?<Button onClick={()=>onChange?.('重新读取')}>重新读取</Button>:undefined}>
+  {phase==='initial'?undefined:<p className="ds-muted">上次读取结果：3 个领域 · 2 个运行中。</p>}
+ </LoadingState>;
 }
