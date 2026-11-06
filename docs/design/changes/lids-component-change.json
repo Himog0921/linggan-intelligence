@@ -1,6 +1,6 @@
 {
   "kind": "shared_standard",
-  "reason": "C41 读取与刷新状态收为共享标准件：首次读取不渲染旧内容，刷新与读取失败保留可读旧值",
+  "reason": "C43 局部提示与限制收为共享标准件：原因/影响/下一步写在一处，语气分说明、注意、失败",
   "authorization": "Mog 2026-11-05 阶段 2：五态反馈标准件",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
@@ -9,6 +9,7 @@
     "C26": "e0e3d1f3088b7cc0e309b92ad77e110e0bf89fbca12830655cfa437f0f721dcd",
     "C17": "05ca31ec53fdc2af0a7ff2e115ccfb290f47d5f4abb00688386ce84c5da01e00",
     "C42": "59267d41aaf2b6adabfe34d78251e68ed269d956c822e080f17003e2449bedb1",
-    "C41": "3aab10760cecf2dd3a799157fa012036245fade807a234d2f130b5575e6c5724"
+    "C41": "3aab10760cecf2dd3a799157fa012036245fade807a234d2f130b5575e6c5724",
+    "C43": "ad3ce8b80e4ad810db0bef898bf9e1387cd4d30ecf6ffcf729b960a81264e962"
   }
 }

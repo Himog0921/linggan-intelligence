@@ -1,5 +1,6 @@
 import { useEffect,useState } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
+import { InlineNotice } from '../../../../shared/InlineNotice';
 import { array,flag,inspectionUrl,nullable,num,record,ref,str } from './inspectionApi';
 import { DossierReadout } from './DossierReadout';
 import { Cutoff,EvidenceLink,ReadFeedback,ResearchPanel } from './ResearchParts';
@@ -18,10 +19,10 @@ export function RelatedWorksPanel({work}:{work:string}){
   const open=()=>{if(refs.length===0)return;context.patch({inspect_works:[work,...refs].join(','),inspect_panel:'compare',inspect_work:null});};
   return <ResearchPanel title="新作与相近旧作" actions={<EvidenceLink work={work}/> }>
     <h3>{title}</h3><DossierReadout work={work}/>
-    <ReadFeedback read={read}/>{message&&<p role="status" className={styles.notice}>{message}</p>}
+    <ReadFeedback read={read}/>{message&&<InlineNotice>{message}</InlineNotice>}
     {read.data&&<>
       <div className={styles.inlineSummary}><span>当前作者检索范围 <b>{read.data.scannedCount}</b> 篇</span><span>文字检索候选，内容关系尚待核验</span><Cutoff value={read.data.knowledgeCutoff}/></div>
-      {read.data.truncated&&<p className={styles.notice}>当前只检索了有界范围，未找到候选不能解释为作者从未讲过。</p>}
+      {read.data.truncated&&<InlineNotice tone="warning">当前只检索了有界范围，未找到候选不能解释为作者从未讲过。</InlineNotice>}
       <div className={styles.tableScroll} tabIndex={0} aria-label="相近旧作候选"><table className={styles.table}><thead><tr><th style={{width:'8%'}}>选择</th><th style={{width:'49%'}}>参照作品</th><th>发布时间</th><th>材料</th></tr></thead><tbody>
         {read.data.candidates.map(item=><tr key={item.workRef} data-selected={refs.includes(item.workRef)}><td><input className={styles.check} type="checkbox" checked={refs.includes(item.workRef)} onChange={()=>select(item.workRef)} aria-label={`选择参照 ${item.title??'标题未取得'}`}/></td><td><span className={styles.title}>{item.title??'标题未取得'}</span><div className={styles.subline}>{item.temporalRelation==='older'?'发布时间早于当前作品':'发布时间待确认，不直接称为旧作'}<EvidenceLink work={item.workRef}/></div></td><td className={styles.moment}>{moment(item.publishedAt)}</td><td>{item.materialAvailable?'有可读材料':'尚无可读材料'}</td></tr>)}
       </tbody></table></div>

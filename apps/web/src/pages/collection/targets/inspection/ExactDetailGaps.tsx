@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
+import { InlineNotice } from '../../../../shared/InlineNotice';
 import type { Drawer } from '../api';
 import type { Commands } from '../useWorkspace';
 import { inspectionUrl,record,ref,flag,array,str } from './inspectionApi';
@@ -37,7 +38,7 @@ export function ExactDetailGaps({data,params,commands}:{data:Drawer;params:URLSe
           <span>已有任务在途 <b>{result.works.filter(w=>w.status==='in_flight').length}</b></span>
           <span>缺有效访问地址 <b>{result.works.filter(w=>w.status==='locator_unavailable').length}</b></span>
         </div>
-        {result.truncated&&<p className={styles.notice}>当前仅展示前 200 篇待补详情，其余待后续核查；不会静默扩大此次提交范围。</p>}
+        {result.truncated&&<InlineNotice tone="warning">当前仅展示前 200 篇待补详情，其余待后续核查；不会静默扩大此次提交范围。</InlineNotice>}
         <p className={styles.meta}>本次只针对服务端明确仍缺详情且可排入的作品；补取详情时沿用获准的媒体和最多 30 条评论窗口。评论单独缺口不会混入。</p>
         <div className={styles.previewList}><ul>{result.works.map(row=>{
           const work=data.catalog?.find(item=>item.publicRef===row.workRef);

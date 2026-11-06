@@ -5144,24 +5144,21 @@
       "specStatus": "proposed",
       "implementationStatus": "not_certified_by_this_spec",
       "sourceRequirement": "C43",
-      "owns": "原因、影响、下一步；不靠颜色传递关键限制",
-      "excludes": "设计教学/系统策略不长期占业务主区",
+      "owns": "原因、影响与下一步写在同一处；关键限制必须落在文案里，颜色只做加强；error 用 alert 播报，说明与限制用 status 播报；下一步只在已经可用时出现；三种语气的版式一致：左侧竖线加底色，文字区与动作区分开",
+      "excludes": "整组读取失败与保留旧值（归 C41）；动作受理、应用与未确认（归 C44）；可以长期收起的设计教学与系统策略；业务文案是否准确、下一步是否真的可执行",
       "allowedZones": [
         "Z04-F",
         "Z04-B",
         "Z05-B"
       ],
       "variants": [
-        "constraint",
+        "info",
         "warning",
         "error"
       ],
       "anatomy": "原因/影响/下一步/详情",
       "states": [
-        "info",
-        "warning",
-        "error",
-        "dismissed"
+        "visible"
       ],
       "interactionIds": [
         "I08",

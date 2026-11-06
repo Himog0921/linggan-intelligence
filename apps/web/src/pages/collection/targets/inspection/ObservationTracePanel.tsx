@@ -1,5 +1,6 @@
 import { useEffect,useRef,useState } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
+import { InlineNotice } from '../../../../shared/InlineNotice';
 import { decodeObservationComparison,decodeTrace,inspectionUrl,METRICS,type MetricKey } from './inspectionApi';
 import { metricLabels,metricValue,moment,ruleLabels,sourceName } from './inspectionPresent';
 import { Cutoff,Delta,EvidenceLink,MetricPicker,ReadFeedback,ResearchPanel } from './ResearchParts';
@@ -32,7 +33,7 @@ export function ObservationTracePanel({work}:{work:string}){
     <h3>{context.data.catalog?.find(item=>item.publicRef===work)?.title??'作品标题未取得'}</h3>
     <div className={styles.toolbar}><MetricPicker value={metric} onChange={value=>context.patch({inspect_metric:value})}/>{read.data&&<Cutoff value={read.data.knowledgeCutoff}/>}</div>
     <p className={styles.meta}>勾选两次观察进行对照。</p>
-    <ReadFeedback read={read}/>{message&&<p role="status" className={styles.notice}>{message}</p>}
+    <ReadFeedback read={read}/>{message&&<InlineNotice>{message}</InlineNotice>}
     {read.data&&<div className={styles.tableScroll} tabIndex={0} aria-label="作品观察记录，可横向滚动"><table className={styles.table}>
       <colgroup><col style={{width:'6%'}}/><col style={{width:'22%'}}/><col style={{width:'28%'}}/><col style={{width:'16%'}}/><col style={{width:'14%'}}/><col style={{width:'14%'}}/></colgroup>
       <thead><tr><th>选择</th><th>观察时间</th><th>入口与来源</th><th>{metricLabels[metric]}</th><th>采样位置</th><th>记录情况</th></tr></thead>

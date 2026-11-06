@@ -1,5 +1,6 @@
 import { useEffect,useState,type CSSProperties } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
+import { InlineNotice } from '../../../../shared/InlineNotice';
 import { MediaImage } from '../../../corpus/evidence/Media';
 import { limitationCopy } from '../../../corpus/evidence/evidencePresent';
 import { InspectorSelect as TargetSelect } from './InspectorSelect';
@@ -31,7 +32,7 @@ export function WorkComparisonPanel(){
   </div>}>
     <div className={styles.toolbar}>{context.selected.length>1&&<TargetSelect label="主作品" value={context.selected[0]??''} options={context.selected.map((id,index)=>({value:id,label:context.data.catalog?.find(work=>work.publicRef===id)?.title??`作品 ${index+1}`}))} onChange={id=>context.patch({inspect_works:[id,...context.selected.filter(work=>work!==id)].join(','),inspect_comparison_request:null})}/>}<MetricPicker value={metric} onChange={next=>context.patch({inspect_metric:next})}/>{data&&<Cutoff value={data.knowledgeCutoff}/>}</div>
     <p className={styles.meta}>{mode==='current'?'各作品标注时点的累计值。':'发布后 24 小时附近的真实观察；缺失不推算。'}</p>
-    {message&&<div role="status" className={styles.notice}>{message}</div>}
+    {message&&<InlineNotice>{message}</InlineNotice>}
     <ReadFeedback read={read}/>
     {context.selected.length<2?<div className={styles.empty}><strong>还需选择一篇参照作品</strong><p>返回列表或分布图继续选择，已选作品会保留。</p><ActionButton onClick={context.back}>返回选择</ActionButton></div>:data&&<>
       <div className={styles.compareScroll} tabIndex={0} aria-label="作品并排对照，可横向滚动">

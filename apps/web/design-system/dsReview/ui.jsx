@@ -1,5 +1,6 @@
 import {ActionButton} from '../../src/shared/ActionButton';
 import {EmptyState} from '../../src/shared/EmptyState';
+import {InlineNotice} from '../../src/shared/InlineNotice';
 import {LoadingState} from '../../src/shared/LoadingState';
 import {FindField} from '../../src/shared/FindField';
 import {SelectField} from '../../src/shared/SelectField';
@@ -47,4 +48,8 @@ export function LoadingDemo({phase='initial',onChange}){
   action={phase==='stale_error'?<Button onClick={()=>onChange?.('重新读取')}>重新读取</Button>:undefined}>
   {phase==='initial'?undefined:<p className="ds-muted">上次读取结果：3 个领域 · 2 个运行中。</p>}
  </LoadingState>;
+}
+export function NoticeDemo({tone='info',onChange}){
+ const text={info:'当前只检索了有界范围；未找到候选不能解释为作者从未讲过。',warning:'当前结果仅覆盖部分来源；未覆盖的部分仍按未知处理。',error:'读取失败，不能据此认定没有材料。'}[tone];
+ return <InlineNotice tone={tone} action={<Button onClick={()=>onChange?.('重新核对')}>重新核对</Button>}>{text}</InlineNotice>;
 }

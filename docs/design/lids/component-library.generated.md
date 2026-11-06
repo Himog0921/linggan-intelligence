@@ -82,3 +82,14 @@
 - 页面负责：读取时机、查询键与重试策略；业务文案与所读对象是什么；动作回执与提交结果
 - 测试：apps/web/src/shared/LoadingState.test.tsx
 - 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）
+
+## C43 · 局部提示与限制
+
+- 实现：[apps/web/src/shared/InlineNotice.tsx](../../../apps/web/src/shared/InlineNotice.tsx)
+- 样式：[apps/web/src/shared/InlineNotice.module.css](../../../apps/web/src/shared/InlineNotice.module.css)
+- 变体/触发：info / warning / error
+- 状态：visible
+- 负责：原因、影响与下一步写在同一处；关键限制必须落在文案里，颜色只做加强；error 用 alert 播报，说明与限制用 status 播报；下一步只在已经可用时出现；三种语气的版式一致：左侧竖线加底色，文字区与动作区分开
+- 页面负责：整组读取失败与保留旧值（归 C41）；动作受理、应用与未确认（归 C44）；可以长期收起的设计教学与系统策略；业务文案是否准确、下一步是否真的可执行
+- 测试：apps/web/src/shared/InlineNotice.test.tsx
+- 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）

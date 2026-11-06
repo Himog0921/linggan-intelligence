@@ -1,6 +1,7 @@
 import { previousRound } from './useObservationRounds';
 import { useEffect } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
+import { InlineNotice } from '../../../../shared/InlineNotice';
 import { InspectorSelect as TargetSelect } from './InspectorSelect';
 import { decodeRoundComparison,decodeRoundResult,decodeRounds,inspectionUrl,METRICS,type MetricKey,type Round,type RoundWork } from './inspectionApi';
 import { discoveryLabels,metricLabels,metricValue,moment,number,reason,ruleLabels } from './inspectionPresent';
@@ -48,10 +49,10 @@ export function KeywordRounds(){
       <MetricPicker value={metric} onChange={value=>context.patch({inspect_metric:value})}/>
     </div>}
     {page.data?.rounds.length===0&&<p className={styles.empty}>尚无可还原轮次，可查看作品目录。</p>}
-    {comparing&&!left&&right&&<p className={styles.notice}>当前可选轮次中，未找到本轮之前的同规则观察。可更换本轮或查看“本轮结果”。</p>}
+    {comparing&&!left&&right&&<InlineNotice>当前可选轮次中，未找到本轮之前的同规则观察。可更换本轮或查看“本轮结果”。</InlineNotice>}
     {comparing?<><ReadFeedback read={compared}/>{compared.data&&<>
       <div className={styles.inlineSummary}><span>共同命中 <b>{number(compared.data.commonCount)}</b></span><span>本轮新出现 <b>{number(compared.data.enteredCount)}</b></span><span>本轮未命中 <b>{number(compared.data.absentCount)}</b></span><Cutoff value={compared.data.knowledgeCutoff}/></div>
-      {compared.data.reasons.length>0&&<div className={styles.notice}><p>{compared.data.reasons.map(reason).join('；')}。保留两侧原值。</p></div>}
+      {compared.data.reasons.length>0&&<InlineNotice tone="warning">{compared.data.reasons.map(reason).join('；')}。保留两侧原值。</InlineNotice>}
       <RoundConditions left={compared.data.left} right={compared.data.right}/>
       <div className={styles.tableScroll} tabIndex={0} aria-label="关键词两轮作品对照，可横向滚动"><table className={styles.table}>
         <colgroup><col style={{width:'36%'}}/><col style={{width:'22%'}}/><col style={{width:'13%'}}/><col style={{width:'13%'}}/><col style={{width:'16%'}}/></colgroup>
@@ -65,7 +66,7 @@ export function KeywordRounds(){
     </>}</>:<><ReadFeedback read={result}/>{result.data&&<>
       <div className={styles.inlineSummary}><span>本轮命中 <b>{result.data.round.hits}</b></span><span>{result.data.round.coverage==='complete'?'本轮范围已结束':'本轮覆盖不完整'}</span><Cutoff value={result.data.knowledgeCutoff}/></div>
       <RoundConditions right={result.data.round}/>
-      {result.data.truncated&&<p className={styles.notice}>当前仅展示有界部分作品，不将此名单当成完整结果。</p>}
+      {result.data.truncated&&<InlineNotice tone="warning">当前仅展示有界部分作品，不将此名单当成完整结果。</InlineNotice>}
       <SingleRound rows={result.data.works} metric={metric}/>
     </>}</>}
     {page.data&&<div className={styles.footer}><span className={styles.meta}>未命中不表示删除。</span><div className={styles.rowActions}>

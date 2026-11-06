@@ -16,6 +16,7 @@ import { ResearchPanel } from './inspection/ResearchParts';
 import { RelatedWorksPanel } from './inspection/RelatedWorksPanel';
 import { KeywordRounds } from './inspection/KeywordRounds';
 import { ActionButton } from '../../../shared/ActionButton';
+import { InlineNotice } from '../../../shared/InlineNotice';
 import styles from './inspection/TargetResearch.module.css';
 import actionStyles from '../../../shared/ActionButton.module.css';
 
@@ -70,7 +71,7 @@ function DrawerContent({data,params,commands,tab,worksView}:{data:Drawer;params:
   if(research.panel==='compare')return <WorkComparisonPanel/>;
   if(research.panel==='trace'&&research.focusedWork)return <ObservationTracePanel key={research.focusedWork} work={research.focusedWork}/>;
   if(research.panel==='similar'&&research.focusedWork&&data.target.kind==='creator')return <RelatedWorksPanel key={research.focusedWork} work={research.focusedWork}/>;
-  if(research.panel)return <div className={styles.notice}><p>当前展开条件已失效；已有作品和分析仍可查看。</p><ActionButton onClick={()=>research.patch({inspect_panel:null,inspect_work:null})}>返回作品</ActionButton></div>;
+  if(research.panel)return <InlineNotice tone="warning" action={<ActionButton onClick={()=>research.patch({inspect_panel:null,inspect_work:null})}>返回作品</ActionButton>}>当前展开条件已失效；已有作品和分析仍可查看。</InlineNotice>;
   if(tab==='patrol')return <Patrol data={data} params={params} commands={commands}/>;
   if(tab!=='works')return <><RecentObservation/><ResearchSelectionBar/></>;
   const creator=data.target.kind==='creator';

@@ -309,13 +309,6 @@
   font-size:var(--lgi-type-label-size);
 }
 
-.notice {
-  border-left: 3px solid var(--lgi-warning-dot);
-  padding: var(--lgi-space-2) var(--lgi-space-3);
-  background: var(--lgi-warning-soft);
-  font-size:var(--lgi-type-label-size);
-}
-
 /* 加入用途：两个选项各自说明后果，不用一个笼统的单选框。 */
 .roles {
   display: grid;
