@@ -68,7 +68,8 @@ body.topic-map-page {
   font-size: var(--lgi-text-data);
   color: var(--lgi-muted);
 }
-:global(#topic-map-root) button,
+/* 页面自身的控件继承页面字体；嵌入的共享组件（如 C26 页签）要能声明自己的字重。 */
+:where(#topic-map-root) button,
 :global(#topic-map-root) input,
 :global(#topic-map-root) select,
 :global(#topic-map-root) textarea {
@@ -2582,36 +2583,8 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-workspace-content .lgi-tm-search {
   margin-left: 0;
 }
-:global(#topic-map-root) .lgi-tm-journey-toolbar .lgi-tm-view-segment {
-  gap: var(--lgi-space-1);
-  background: var(--lgi-canvas-low);
-  padding: var(--lgi-space-1);
-  border-radius: var(--lgi-radius-sm);
-}
-:global(#topic-map-root) .lgi-tm-summary-heading .lgi-tm-view-segment {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  gap: var(--lgi-space-1);
-  background: var(--lgi-canvas-low);
-  padding: var(--lgi-space-1);
-  border-radius: var(--lgi-radius-sm);
-}
-:global(#topic-map-root) .lgi-tm-view-segment .lgi-tm-tab {
-  min-height: var(--lgi-space-8);
-  padding: var(--lgi-space-1) var(--lgi-space-3);
-  border: 0;
-  border-radius: var(--lgi-radius-xs);
-}
-/* The heading's generic button rule strips height; the view switch keeps a 32px target. */
-:global(#topic-map-root) .lgi-tm-main > .lgi-tm-summary .lgi-tm-summary-heading .lgi-tm-view-segment .lgi-tm-tab {
-  min-height: var(--lgi-space-8);
-  padding: var(--lgi-space-1) var(--lgi-space-3);
-}
-:global(#topic-map-root) .lgi-tm-view-segment .lgi-tm-tab.is-active {
-  background: var(--lgi-canvas);
-  color: var(--lgi-ink);
-  box-shadow: var(--lgi-shadow-contact);
+:global(#topic-map-root) .lgi-tm-view-switch {
+  flex: none;
 }
 @media (max-width: 1180px) {
   :global(#topic-map-root) .lgi-tm-summary .lgi-tm-metrics {

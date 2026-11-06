@@ -1,5 +1,5 @@
 {
-  "fingerprint": "25d7ff133fc568594f313f4e5aeb1c53f1361ca504107e6d228294c1306d7823",
+  "fingerprint": "67ed25a04d99885cfaa306c228f9b64ab5315a3e563ed79d26162359b831ab98",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -367,7 +367,7 @@
     },
     {
       "path": "apps/web/src/pages/topics/Topics.module.css",
-      "sha256": "e1e2c0fbaa933af72b33020e88dbf05871c150496e2a28396d731a5b17040d8f"
+      "sha256": "fbcf04199fc47f84e6afeec38fd1917f038619ad893054b922fe10fea080253e"
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
@@ -379,7 +379,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
-      "sha256": "d35dcf13f1828855958b4fe89de6c1b65532328cd1a70ddba230395ef8d1ec00"
+      "sha256": "47dbb709134528e8cedc01c64354476a7c0ba51c9e49258f82f9803d4e61433c"
+    },
+    {
+      "path": "apps/web/src/pages/topics/topicOverview.tsx",
+      "sha256": "44e9732b8cd4ddc01c121e42fe755fc7d7de406e76eed5db00ccd60370524ae0"
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.module.css",
@@ -491,7 +495,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "d62ec893b3d83a7ed3d48e6d140654155698f156e848b5fd7ecb1899629f573d"
+      "sha256": "b7ecd8b4e065a6ac41e7c74d9e2236e75e7367bc94cd4f235069199a7b35e8c1"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
@@ -503,7 +507,7 @@
     },
     {
       "path": "docs/design/lids/component-contracts.json",
-      "sha256": "95473a0757960f7199809a720e6d7160033a435d3a574af2649aceaf24ae10d1"
+      "sha256": "d104575d973376846620f8868fd867ce21357e3989f6558b1d87bd29a0df7920"
     },
     {
       "path": "docs/design/lids/component-reuse.json",
