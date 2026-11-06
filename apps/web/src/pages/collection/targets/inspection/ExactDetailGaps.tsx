@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ActionButton } from '../../../../shared/ActionButton';
+import { ActionFeedback } from '../../../../shared/ActionFeedback';
 import { InlineNotice } from '../../../../shared/InlineNotice';
 import type { Drawer } from '../api';
 import type { Commands } from '../useWorkspace';
@@ -44,9 +45,11 @@ export function ExactDetailGaps({data,params,commands}:{data:Drawer;params:URLSe
           const work=data.catalog?.find(item=>item.publicRef===row.workRef);
           return <li key={row.workRef}><span>{work?.title??'标题未取得'}</span><span>{row.status==='requestable'?'可提交':row.status==='in_flight'?'已有任务在途':'暂无可执行地址'}</span></li>;
         })}</ul></div>
-        {commands.feedback?.action==='detail-gaps-exact'&&<p role="status" className={styles.notice}>
+        {commands.feedback?.action==='detail-gaps-exact'&&<ActionFeedback
+          state={commands.feedback.unknown?'unconfirmed':commands.feedback.applied?'accepted':'rejected'}
+          requestRef={commands.feedback.unknown?commands.feedback.requestRef:undefined}>
           {commands.feedback.unknown?'提交结果尚未确认，请使用原请求核对，不重复派单。':commands.feedback.applied?'请求已由服务器接纳；详情取得数在实际回执入库后更新。':commands.feedback.text}
-        </p>}
+        </ActionFeedback>}
         <ActionButton variant="primary" disabled={!result.eligibleRefs.length||commands.busy} onClick={()=>{
           void commands.run('detail-gaps-exact',{
             row_target_ref:target,domain_ref:result.domainRef,

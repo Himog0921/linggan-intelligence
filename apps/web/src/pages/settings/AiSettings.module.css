@@ -29,9 +29,6 @@
 .save > span { font-size: var(--lgi-text-data); color: var(--lgi-muted); }
 .impact { display: grid; gap: var(--lgi-space-3); border-left: 3px solid var(--lgi-border-strong); padding: var(--lgi-space-4); background: var(--lgi-canvas-low); justify-items: start; }
 .notice { min-height: var(--lgi-space-8); overflow-wrap: anywhere; }
-.notice p { padding: var(--lgi-space-3); background: var(--lgi-canvas-low); }
-.notice [data-tone=success] { color: var(--lgi-success); }
-.notice [data-tone=error] { color: var(--lgi-danger); }
 .reference { font: var(--lgi-text-data) / var(--lgi-lh-data) var(--lgi-font-mono); overflow-wrap: anywhere; }
 .facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--lgi-space-2) var(--lgi-space-4); margin: 0; }
 .facts dt { color: var(--lgi-muted); }

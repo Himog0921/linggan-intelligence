@@ -1,7 +1,7 @@
 import {SectionNavigationDemo} from '../shellReview/ShellFrame.jsx';
 import {TertiaryTabs} from './TertiaryTabs.jsx';
 import React,{useState} from 'react';
-import {Button,Find,Mark,Facts,Modal,ViewDemo,SelectDemo,EmptyDemo,LoadingDemo,NoticeDemo} from './ui.jsx';
+import {Button,Find,Mark,Facts,Modal,ViewDemo,SelectDemo,EmptyDemo,LoadingDemo,NoticeDemo,ReceiptDemo} from './ui.jsx';
 import {ProductShell,ContextRail} from './ProductShell.jsx';
 import {show,stateLabel} from './data.js';
 export function ComponentDemo({c,state,variant}){
@@ -51,7 +51,7 @@ export function ComponentDemo({c,state,variant}){
  case 'C41':preview=<LoadingDemo phase={variant==='refresh'?'refreshing':state==='stale_error'||state==='error'||state==='stale'?'stale_error':'initial'}/>;break;
  case 'C42':preview=<EmptyDemo kind={['first_use','no_match','no_material','unavailable_feature'].includes(variant)?variant:'no_match'}/>;break;
  case 'C43':preview=<NoticeDemo tone={variant==='error'||state==='error'?'error':variant==='warning'||state==='warning'?'warning':'info'}/>;break;
- case 'C44':preview=<div className="ds-notice"><div><Mark tone={error?'orange':'ink'}>{pending?'等待回执':state==='unconfirmed'?'结果未确认':state==='applied'?'已应用（回执语义样例）':state==='partial'?'部分项目已应用':state==='rejected'?'请求被拒绝':'请求已接纳'}</Mark><p>请求已接纳仍不等于材料入库或业务完成。</p></div><Button onClick={()=>say('沿原请求身份核对；不重复提交新请求。')}>核对原回执</Button></div>;break;
+ case 'C44':preview=<ReceiptDemo state={['pending','accepted','applied','rejected','unconfirmed','partial'].includes(state)?state:pending?'pending':'accepted'}/>;break;
  case 'C45':case 'C46':case 'C47':preview=<div><Button onClick={()=>setOpen(true)}>打开{c.id==='C46'?'只读确认结构':c.id==='C47'?'只读对象检视':'只读容器样张'}</Button><p className="ds-muted">{c.id==='C47'&&variant==='nonmodal'?'非模态：页面仍可操作，不圈住焦点。':'模态：焦点留在当前对话框，Escape关闭顶层。'}关闭回到触发按钮。这里不模拟未保存或在途请求；完整S1流程请进入<a href={"?page=system&section=review&review=overlays&scenario="+(c.id==='C45'?'create':c.id==='C46'?'task':'read')}>Q09交互演练</a>。</p></div>;break;
  case 'C48':preview=<div className="ds-tooltip-demo"><span>数据截至 10:45</span><button aria-describedby="tooltip-copy" type="button">ⓘ</button><span id="tooltip-copy" role="tooltip">当前读取快照；关键范围说明仍常驻展示。</span><p className="ds-muted">悬停或聚焦查看补充说明。</p></div>;break;
  default:preview=<p>请选择一个组件。</p>

@@ -358,59 +358,6 @@
   font-size:var(--lgi-type-label-size);
 }
 
-/* 回执：左侧色条 + 文字标签共同表达结果，不只靠颜色。 */
-.feedback {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--lgi-space-2);
-  margin: var(--lgi-space-3) 0 0;
-  border-left: 3px solid var(--lgi-border-strong);
-  padding: var(--lgi-space-3);
-  background: var(--lgi-canvas-low);
-  font-size:var(--lgi-type-label-size);
-}
-
-.feedbackEmpty {
-  display: none;
-}
-
-.feedbackTone {
-  color: var(--lgi-ink);
-  font-weight: var(--lgi-weight-bold);
-}
-
-.success {
-  border-left-color: var(--lgi-success-dot);
-}
-
-.success .feedbackTone {
-  color: var(--lgi-success);
-}
-
-.error {
-  border-left-color: var(--lgi-danger-dot);
-}
-
-.error .feedbackTone {
-  color: var(--lgi-danger);
-}
-
-.unknown {
-  border-left-color: var(--lgi-warning-dot);
-}
-
-.unknown .feedbackTone {
-  color: var(--lgi-warning);
-}
-
-.code {
-  margin-left: var(--lgi-space-2);
-  color: var(--lgi-muted);
-  font-family: var(--lgi-font-mono);
-  font-size: var(--lgi-text-label);
-}
-
 @media (max-width: 640px) {
   .dialog {
     width: calc(100vw - var(--lgi-space-6));

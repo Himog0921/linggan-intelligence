@@ -1,7 +1,7 @@
 {
   "kind": "shared_standard",
-  "reason": "C43 局部提示与限制收为共享标准件：原因/影响/下一步写在一处，语气分说明、注意、失败",
-  "authorization": "Mog 2026-11-05 阶段 2：五态反馈标准件",
+  "reason": "新增 C44 动作回执标准件：阶段文字与颜色分离、接纳不等于完成、未确认带原请求编号；采集详情缺口补采、AI 设置回执、创作者回执统一接入",
+  "authorization": "Mog 2026-11-06 完成最后的动作回执后提交合并推送部署上线",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
@@ -10,6 +10,7 @@
     "C17": "05ca31ec53fdc2af0a7ff2e115ccfb290f47d5f4abb00688386ce84c5da01e00",
     "C42": "59267d41aaf2b6adabfe34d78251e68ed269d956c822e080f17003e2449bedb1",
     "C41": "3aab10760cecf2dd3a799157fa012036245fade807a234d2f130b5575e6c5724",
-    "C43": "ad3ce8b80e4ad810db0bef898bf9e1387cd4d30ecf6ffcf729b960a81264e962"
+    "C43": "ad3ce8b80e4ad810db0bef898bf9e1387cd4d30ecf6ffcf729b960a81264e962",
+    "C44": "5937d865a42052e2356bb4b2bb7566c89803e3b67d13fa3abeb0d51dfae0ec03"
   }
 }

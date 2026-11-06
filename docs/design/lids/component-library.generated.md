@@ -93,3 +93,14 @@
 - 页面负责：整组读取失败与保留旧值（归 C41）；动作受理、应用与未确认（归 C44）；可以长期收起的设计教学与系统策略；业务文案是否准确、下一步是否真的可执行
 - 测试：apps/web/src/shared/InlineNotice.test.tsx
 - 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）
+
+## C44 · 动作回执
+
+- 实现：[apps/web/src/shared/ActionFeedback.tsx](../../../apps/web/src/shared/ActionFeedback.tsx)
+- 样式：[apps/web/src/shared/ActionFeedback.module.css](../../../apps/web/src/shared/ActionFeedback.module.css)
+- 变体/触发：receipt
+- 状态：pending / accepted / applied / rejected / unconfirmed / partial
+- 负责：阶段先用文字说清：进行中、已接纳、已完成、未完成、未确认、部分完成；左侧色条只做加强；接纳与完成分开：服务器收下请求不等于结果已经生效；结果未确认时带原请求编号，按原请求核对而不是重复提交；技术错误码作为旁注；还没有回执时保留空的播报区，结果出现后再播
+- 页面负责：本地乐观提示或 toast 冒充真实成功；晚到回执导航到新对象；请求编号的生成、重试与去重策略；业务文案是否准确、下一步是否真的可执行
+- 测试：apps/web/src/shared/ActionFeedback.test.tsx
+- 展示：apps/web/design-system/dsReview/ui.jsx（引用同一真实组件）

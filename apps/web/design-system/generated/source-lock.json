@@ -1,5 +1,5 @@
 {
-  "fingerprint": "c89186640a53e7b617eee7d1956e5649b85f57d991ee13c6de1a0e4e62d832c0",
+  "fingerprint": "1495f7d2a77ebdad5ff88362207d7bf6095698e1e4fa0b7629c3e0793d3f7ef4",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -23,7 +23,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ComponentDemo.jsx",
-      "sha256": "81d6322a6ad60b4eaba87b23dd7d3c5294abbe9c066489bb6ea36681079a928f"
+      "sha256": "bae3f6152c4c4b66cf4c92d501fb0ea916b265374d600bcb4979f83b3ba4d61d"
     },
     {
       "path": "apps/web/design-system/dsReview/InteractionDemo.jsx",
@@ -75,7 +75,7 @@
     },
     {
       "path": "apps/web/design-system/dsReview/ui.jsx",
-      "sha256": "ad877d0ec31257b2bc9a9772c71748e240ac805861f9a7417aa11befa543e38f"
+      "sha256": "28ec3c256e9f5c465e6a497d01cd74d25d81868dd48692e0c6c5375abf8de9a8"
     },
     {
       "path": "apps/web/design-system/finalEdition/FinalHandbook.jsx",
@@ -275,7 +275,7 @@
     },
     {
       "path": "apps/web/src/pages/collection/targets/inspection/ExactDetailGaps.tsx",
-      "sha256": "dbe2d9d58fb3152ed516910996fb220f72cb238f1f8fa84a544655803a866bfb"
+      "sha256": "31dcd0bf2bb6b5e765fc4210818f6a69f7e3ad623b806072f63b97a82731fd3c"
     },
     {
       "path": "apps/web/src/pages/collection/targets/inspection/InspectorSelect.tsx",
@@ -336,6 +336,10 @@
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorsPage.tsx",
       "sha256": "2724057f563762ff246e87790e43e93795d5db8fd0f0139db8a9f60a318fef4a"
+    },
+    {
+      "path": "apps/web/src/pages/corpus/creators/FeedbackLine.tsx",
+      "sha256": "6e8d59482f777449e349243e12bd576ab664b90a7ede76850516cc4bd1bfe6e3"
     },
     {
       "path": "apps/web/src/pages/corpus/evidence/DossierIcon.tsx",
@@ -406,6 +410,10 @@
       "sha256": "19286238a6c026ad025a323bb3d59635ffe6010b79324851803d4fc624c6c4a5"
     },
     {
+      "path": "apps/web/src/pages/settings/AiSettingsFields.tsx",
+      "sha256": "6b93cdcc8cb7c75c89ef7de46de1285320e12144950078b592d6a6bce19d0abf"
+    },
+    {
       "path": "apps/web/src/pages/settings/ModelSettingsPage.tsx",
       "sha256": "c251ce05338ef44764d1ff36e4ed895932a9c377dfc605f3767e8a73f0caa8c4"
     },
@@ -456,6 +464,18 @@
     {
       "path": "apps/web/src/shared/ActionButton.tsx",
       "sha256": "99bfcb384e19d64cff94daa930e43d55da50ded1ca5f374816771614b3314566"
+    },
+    {
+      "path": "apps/web/src/shared/ActionFeedback.module.css",
+      "sha256": "5a2a5909c1dbca3aae6e731700283ceae13217bc6b6346fbad79c70e875bbf9f"
+    },
+    {
+      "path": "apps/web/src/shared/ActionFeedback.test.tsx",
+      "sha256": "9ae3eb3507f9ba96c307de0bb1bb94afb41d9b0095605c64dc7ff427a1f9da89"
+    },
+    {
+      "path": "apps/web/src/shared/ActionFeedback.tsx",
+      "sha256": "ead2d343cc89bd6fbab185bb32c6760b40d37d367679f1cfd112bd800fcf9f71"
     },
     {
       "path": "apps/web/src/shared/ContextBar.tsx",
@@ -575,7 +595,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "23f7d2799fcc45e96c3183dd28ac9ce473a7556580aa6cc05c21ca7ff88c0eef"
+      "sha256": "166ec6b2f0e0f0877011db426c9971785361cadd65a3e31f007484934818aaf4"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
@@ -587,7 +607,7 @@
     },
     {
       "path": "docs/design/lids/component-contracts.json",
-      "sha256": "1088fb14942f6243df702b1f596d6af8c1107915d34af757b91eb17e05939725"
+      "sha256": "d03337bee9cef66d8e00dc31b3e43f4ae2c056b5dae20b63df8990d0d7266500"
     },
     {
       "path": "docs/design/lids/component-reuse.json",

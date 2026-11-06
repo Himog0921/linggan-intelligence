@@ -1399,7 +1399,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "c89186640a53e7b617eee7d1956e5649b85f57d991ee13c6de1a0e4e62d832c0",
+  "fingerprint": "1495f7d2a77ebdad5ff88362207d7bf6095698e1e4fa0b7629c3e0793d3f7ef4",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",
@@ -1775,6 +1775,49 @@
         "apps/web/src/pages/collection/targets/inspection/ContentComparisonPanel.tsx",
         "apps/web/src/pages/collection/targets/inspection/ExactDetailGaps.tsx",
         "apps/web/src/pages/corpus/creators/CreatorJoinDialog.tsx"
+      ],
+      "certified": false
+    },
+    "C44": {
+      "name": "动作回执",
+      "implementation": "apps/web/src/shared/ActionFeedback.tsx",
+      "styles": "apps/web/src/shared/ActionFeedback.module.css",
+      "tests": [
+        "apps/web/src/shared/ActionFeedback.test.tsx"
+      ],
+      "demo": "apps/web/design-system/dsReview/ui.jsx",
+      "variants": [
+        "receipt"
+      ],
+      "states": [
+        "pending",
+        "accepted",
+        "applied",
+        "rejected",
+        "unconfirmed",
+        "partial"
+      ],
+      "owns": [
+        "阶段先用文字说清：进行中、已接纳、已完成、未完成、未确认、部分完成；左侧色条只做加强",
+        "接纳与完成分开：服务器收下请求不等于结果已经生效",
+        "结果未确认时带原请求编号，按原请求核对而不是重复提交",
+        "技术错误码作为旁注；还没有回执时保留空的播报区，结果出现后再播"
+      ],
+      "excludes": [
+        "本地乐观提示或 toast 冒充真实成功",
+        "晚到回执导航到新对象",
+        "请求编号的生成、重试与去重策略",
+        "业务文案是否准确、下一步是否真的可执行"
+      ],
+      "ruleSources": [
+        "typography",
+        "color",
+        "composition-layout"
+      ],
+      "consumers": [
+        "apps/web/src/pages/collection/targets/inspection/ExactDetailGaps.tsx",
+        "apps/web/src/pages/settings/AiSettingsFields.tsx",
+        "apps/web/src/pages/corpus/creators/FeedbackLine.tsx"
       ],
       "certified": false
     }
