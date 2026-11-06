@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { expect, it } from 'vitest';
 import { LoadingState } from './LoadingState';
 
@@ -47,6 +47,16 @@ it('没有旧结果时不声称保留', () => {
   const alert = screen.getByRole('alert');
   expect(alert).toHaveTextContent('领域配置当前读不到。');
   expect(alert).not.toHaveTextContent('保留上次读取结果');
+});
+
+it('刷新与读取失败不重建旧内容：未提交的草稿和展开状态留在原地', () => {
+  const content = <input aria-label="领域名称" defaultValue="" />;
+  const { rerender } = render(<LoadingState phase="ready" subject="领域配置">{content}</LoadingState>);
+  fireEvent.change(screen.getByRole('textbox', { name: '领域名称' }), { target: { value: '草稿领域' } });
+  rerender(<LoadingState phase="refreshing" subject="领域配置">{content}</LoadingState>);
+  rerender(<LoadingState phase="ready" subject="领域配置">{content}</LoadingState>);
+  rerender(<LoadingState phase="stale_error" subject="领域配置">{content}</LoadingState>);
+  expect(screen.getByRole('textbox', { name: '领域名称' })).toHaveValue('草稿领域');
 });
 
 it('旧结果由页面自己渲染时，仍可声明保留', () => {

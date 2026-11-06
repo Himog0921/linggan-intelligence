@@ -322,6 +322,13 @@ async function action(action, id) {
   await locator.first().click();
   await page.waitForLoadState("networkidle");
 }
+async function switchView(group, label) {
+  await page
+    .getByRole("group", { name: group })
+    .getByRole("button", { name: label, exact: true })
+    .click();
+  await page.waitForLoadState("networkidle");
+}
 try {
   const widths = (process.env.TOPICS_VISUAL_WIDTHS || "1440,1280,1024,390")
     .split(",")
@@ -395,7 +402,7 @@ try {
       `${width}-journey-map`,
       ".lgi-tm-main, [data-topic-main]",
     );
-    await action("map-mode", "list");
+    await switchView("旅程呈现方式", "列表");
     await shot(`${width}-journey-list`);
     await action("metric", "involved");
     await shot(`${width}-journey-involved`);

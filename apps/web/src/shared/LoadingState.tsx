@@ -22,7 +22,6 @@ interface Props {
 
 /** LIDS C41 候选：读取与刷新状态。首次读取不渲染旧内容，刷新不遮住可读旧值。 */
 export function LoadingState({ phase, subject, error, retained, action, retainsOld, children }: Props) {
-  if (phase === 'ready') return <>{children}</>;
   if (phase === 'initial') {
     return (
       <p className={styles.status} role="status" aria-busy="true" data-lids-component="C41" data-load-phase="initial">
@@ -30,19 +29,16 @@ export function LoadingState({ phase, subject, error, retained, action, retainsO
       </p>
     );
   }
-  if (phase === 'refreshing') {
-    return (
-      <>
-        <p className={styles.status} role="status" aria-busy="true" data-lids-component="C41" data-load-phase="refreshing">
-          {`正在刷新${subject}，以下是上次读取结果。`}
-        </p>
-        {children}
-      </>
-    );
-  }
+  // 三个阶段用同一个兄弟槽位放提示，children 始终在第二位：
+  // 刷新途中提示出现/消失若改变 children 的位置，React 会卸载重建整块内容，
+  // 页面里未提交的输入和展开的面板会一起丢。
   const keepsOld = retainsOld ?? children !== undefined;
-  return (
-    <>
+  const notice =
+    phase === 'refreshing' ? (
+      <p className={styles.status} role="status" aria-busy="true" data-lids-component="C41" data-load-phase="refreshing">
+        {`正在刷新${subject}，以下是上次读取结果。`}
+      </p>
+    ) : phase === 'stale_error' ? (
       <div className={styles.notice} role="alert" data-lids-component="C41" data-load-phase="stale_error">
         <p>
           {error ?? `${subject}当前读不到。`}
@@ -50,6 +46,10 @@ export function LoadingState({ phase, subject, error, retained, action, retainsO
         </p>
         {action === undefined ? null : action}
       </div>
+    ) : null;
+  return (
+    <>
+      {notice}
       {children}
     </>
   );

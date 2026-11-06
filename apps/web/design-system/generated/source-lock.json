@@ -1,5 +1,5 @@
 {
-  "fingerprint": "1495f7d2a77ebdad5ff88362207d7bf6095698e1e4fa0b7629c3e0793d3f7ef4",
+  "fingerprint": "9b5a3829c9068de8092da16b6be1597322b3ba7312550339731f5ae242279e2b",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -543,11 +543,11 @@
     },
     {
       "path": "apps/web/src/shared/LoadingState.test.tsx",
-      "sha256": "7bd96c96fdf5aa8342c19c9af45f95f5b90397297b677b848f730ebe783f2d6f"
+      "sha256": "738a3b0bba2d9c67c46ffc6ff5ebd6a4be982b7f7e54f604b7bcbc68b8280ef9"
     },
     {
       "path": "apps/web/src/shared/LoadingState.tsx",
-      "sha256": "eeb4d6c37ba01378a0bed8538d6b801c98ddc79f3de35cf3bdd05b778e932b3a"
+      "sha256": "6ba6ba79c78632e010bcfbd9af2fd683b3e0371483ab83886149ecce99f42157"
     },
     {
       "path": "apps/web/src/shared/SelectField.module.css",
@@ -595,7 +595,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "166ec6b2f0e0f0877011db426c9971785361cadd65a3e31f007484934818aaf4"
+      "sha256": "a65968479fd7fc28f613ca587a395b645a71c1942b0da145cabba5789fc8306b"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

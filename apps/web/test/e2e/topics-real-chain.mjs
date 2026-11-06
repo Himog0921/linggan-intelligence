@@ -110,6 +110,14 @@ async function action(name, id) {
   await page.waitForLoadState("networkidle");
   await settled();
 }
+async function switchView(group, label) {
+  await page
+    .getByRole("group", { name: group })
+    .getByRole("button", { name: label, exact: true })
+    .click();
+  await page.waitForLoadState("networkidle");
+  await settled();
+}
 async function close() {
   while (await page.locator("dialog[open]").count())
     await page.keyboard.press("Escape");
@@ -177,7 +185,7 @@ try {
         });
       }
       await go("&view=journey");
-      await action("map-mode", "list");
+      await switchView("旅程呈现方式", "列表");
       await action("metric", "involved");
       await action("stage", "pending");
       await page.reload({ waitUntil: "networkidle" });
