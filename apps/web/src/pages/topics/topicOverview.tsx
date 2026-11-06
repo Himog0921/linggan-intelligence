@@ -1,6 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import { OverviewReadouts } from "./OverviewReadouts";
 import { OverviewDistribution } from "./OverviewDistribution";
+import { ViewSwitch } from "../../shared/ViewSwitch";
 import { attributes, inlineStyle } from "./elementProps";
 import {
   comparisonScopeNote,
@@ -60,6 +61,8 @@ export interface TopicOverviewContext {
   readonly anglesFrom: (ns: T.Work[]) => T.AnnotatedResearchItem[];
   readonly work: (ref: string | undefined | null) => T.Work | undefined;
   readonly topicName: (ref: string) => string;
+  readonly changeView: (view: string) => void;
+  readonly setMapMode: (mode: string) => void;
 }
 export function createTopicOverview(context: TopicOverviewContext) {
   const select = (
@@ -653,14 +656,16 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 <summary aria-label="选择统计平台与发布时间" title="调整统计平台与发布时间">筛选</summary>
                 <div className={cls("lgi-tm-scope-filter-panel")}>{controls()}</div>
               </details>
-              <div
-                className={cls("lgi-tm-view-segment")}
-                role={"group"}
-                aria-label={"主题图谱视图"}
-              >
-                {tab("主题概览", "view", "overview", context.state.view === "overview")}
-                {tab("用户生命旅程", "view", "journey", context.state.view === "journey")}
-              </div>
+              <ViewSwitch
+                className={cls("lgi-tm-view-switch")}
+                label={"主题图谱视图"}
+                value={context.state.view}
+                options={[
+                  { key: "overview", label: "主题概览" },
+                  { key: "journey", label: "用户生命旅程" },
+                ]}
+                onChange={context.changeView}
+              />
             </div>
           </div>
           <div className={cls("lgi-tm-overview-band")} aria-label="主题概览与样本表现">
@@ -3136,19 +3141,16 @@ export function createTopicOverview(context: TopicOverviewContext) {
           <div className={cls("lgi-tm-row")}>
             {btn("主题 × 旅程", "matrix", "", "lgi-tm-quiet")}
             {btn("统计口径", "method", "", "lgi-tm-quiet")}
-            <div
-              className={cls("lgi-tm-row lgi-tm-view-segment")}
-              role={"group"}
-              aria-label={"旅程呈现方式"}
-            >
-              {tab("地图", "map-mode", "map", context.state.mapMode === "map")}
-              {tab(
-                "列表",
-                "map-mode",
-                "list",
-                context.state.mapMode === "list",
-              )}
-            </div>
+            <ViewSwitch
+              className={cls("lgi-tm-view-switch")}
+              label={"旅程呈现方式"}
+              value={context.state.mapMode}
+              options={[
+                { key: "map", label: "地图" },
+                { key: "list", label: "列表" },
+              ]}
+              onChange={context.setMapMode}
+            />
           </div>
         </div>
         <div className={cls("lgi-tm-journey-basis")}>

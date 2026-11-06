@@ -64,3 +64,60 @@ it('首次打开时在菜单高度收紧后仍能看见当前末项', async () =
   expect(popup.scrollTop).toBeGreaterThan(0);
   expect(selected.getBoundingClientRect().bottom).toBeLessThanOrEqual(popup.getBoundingClientRect().bottom);
 });
+
+it('键盘可开合与选择，跳过不可用选项，Escape 收起但保留当前值', async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  const options = [
+    { value: 'recent', label: '最近收录' },
+    { value: 'blocked', label: '暂不可选', disabled: true },
+    { value: 'relevant', label: '相关作品数' },
+  ];
+  render(<SelectField label="当前排序" value="recent" options={options} onChange={change} />);
+  const trigger = screen.getByRole('combobox');
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  await user.tab();
+  expect(trigger).toHaveFocus();
+  await user.keyboard('{ArrowDown}');
+  expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+  await user.keyboard('{ArrowDown}');
+  const active = trigger.getAttribute('aria-activedescendant');
+  expect(screen.getByRole('option', { name: '相关作品数' })).toHaveAttribute('id', active ?? '');
+  await user.keyboard('{Enter}');
+  expect(change).toHaveBeenCalledExactlyOnceWith('relevant');
+  expect(trigger).toHaveAttribute('aria-expanded', 'false');
+  expect(trigger).toHaveFocus();
+});
+
+it('Escape 收起菜单且不提交，焦点回到触发器', async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  render(<SelectField label="当前排序" value="recent" options={[{ value: 'recent', label: '最近收录' }, { value: 'relevant', label: '相关作品数' }]} onChange={change} />);
+  const trigger = screen.getByRole('combobox');
+  await user.click(trigger);
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(change).not.toHaveBeenCalled();
+  expect(trigger).toHaveFocus();
+});
+
+it('不可用字段不打开菜单', async () => {
+  const user = userEvent.setup();
+  const change = vi.fn();
+  render(<SelectField disabled label="当前排序" value="recent" options={[{ value: 'recent', label: '最近收录' }]} onChange={change} />);
+  const trigger = screen.getByRole('combobox');
+  expect(trigger).toBeDisabled();
+  await user.click(trigger);
+  await user.keyboard('{ArrowDown}');
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(change).not.toHaveBeenCalled();
+});
+
+it('紧凑形态只改尺寸，仍以 combobox 暴露当前值', () => {
+  render(<SelectField compact label="演示范围" value="author" options={[{ value: 'author', label: '创作者资料' }, { value: 'work', label: '作品内容' }]} onChange={() => undefined} />);
+  const trigger = screen.getByRole('combobox', { name: '演示范围' });
+  expect(trigger).toHaveTextContent('创作者资料');
+  expect(trigger.parentElement).toHaveAttribute('data-compact');
+});

@@ -1,7 +1,11 @@
 import { Fragment, useEffect, useId, useRef, useState } from 'react';
+import { EmptyState } from '../../../shared/EmptyState';
+import { ViewSwitch } from '../../../shared/ViewSwitch';
 import type { ObservationPoint, ObservationSeries as Series } from './overviewDtos';
 import { num } from './format';
 import { c } from './styles';
+
+const SERIES_VIEWS = [{ key: 'chart', label: '图表' }, { key: 'table', label: '表格' }] as const;
 
 const coverageLabel = (value: string | null) =>
   ({ recorded: '完整观察', partial: '部分观察', none: '无观察记录' }[value ?? ''] ?? '观察状态未知');
@@ -38,7 +42,7 @@ export function ObservationChart({ points }: { points: ObservationPoint[] }) {
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
-  if (!points.length) return <p className={c('study-observation-empty')}>当前没有可读取的评论观察序列。</p>;
+  if (!points.length) return <EmptyState kind="no_material" title="当前没有可读取的评论观察序列" />;
 
   const h = 162, left = 48, right = 46, top = 20, base = 122, coverageY = 132, coverageH = 6, dateY = 157;
   const plotWidth = Math.max(1, width - left - right), band = plotWidth / points.length;
@@ -118,13 +122,10 @@ export function ObservationSeries({ series, days, view, onDays, onView }: {
         <div className={c('study-text-switcher')} role="group" aria-label="观察时间范围">
           {[7,28,56].map(n => <button type="button" key={n} data-series-days={n} aria-pressed={days===n} onClick={() => onDays(n)}>近 {n} 天</button>)}
         </div>
-        <div className={c('study-text-switcher')} role="group" aria-label="观察数据视图">
-          <button type="button" data-series-view="chart" aria-pressed={view==='chart'} onClick={() => onView('chart')}>图表</button>
-          <button type="button" data-series-view="table" aria-pressed={view==='table'} onClick={() => onView('table')}>表格</button>
-        </div>
+        <ViewSwitch label="观察数据视图" value={view} options={SERIES_VIEWS} onChange={onView} />
       </div>
     </div>
-    {!series || !points.length ? <p className={c('study-observation-empty')}>当前没有可读取的评论观察序列。</p>
+    {!series || !points.length ? <EmptyState kind="no_material" title="当前没有可读取的评论观察序列" />
       : view === 'chart' ? <ObservationChart points={points}/> : <div className={c('study-series-table-wrap')}>
         <table className={c('study-series-table')}><thead><tr>
           {['日期','首次观察评论','进入研究评论','接纳信号','覆盖作品','观察覆盖'].map(name=><th scope="col" key={name}>{name}</th>)}

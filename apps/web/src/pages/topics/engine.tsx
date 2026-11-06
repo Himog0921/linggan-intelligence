@@ -370,6 +370,20 @@ export function createTopicEngine() {
     get topicName() {
       return topicName;
     },
+    get changeView() {
+      return (view: string) => {
+        if (!switchView(view)) return;
+        persist();
+        void load();
+      };
+    },
+    get setMapMode() {
+      return (mode: string) => {
+        state.mapMode = mode;
+        persist();
+        render();
+      };
+    },
   });
   const topicDialogs = createTopicDialogs({
     get requireDialog() {

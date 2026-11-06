@@ -1,0 +1,76 @@
+/* 动作回执：左侧色条 + 文字标签共同表达阶段，不只靠颜色。只消费 LIDS --lgi-* Token。 */
+
+.feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--lgi-space-2);
+  margin-block: var(--lgi-space-3);
+  border-left: var(--lgi-action-rail-width) solid var(--lgi-border-strong);
+  padding: var(--lgi-space-3);
+  background: var(--lgi-canvas-low);
+  font-size: var(--lgi-type-label-size);
+  overflow-wrap: anywhere;
+}
+
+.empty {
+  display: none;
+}
+
+.label {
+  flex: none;
+  color: var(--lgi-ink);
+  font-weight: var(--lgi-weight-bold);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--lgi-space-2);
+  min-width: 0;
+}
+
+.ref,
+.code {
+  color: var(--lgi-muted);
+  font-family: var(--lgi-font-mono);
+}
+
+.action {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--lgi-space-2);
+}
+
+.feedback[data-receipt-state='pending'] .label {
+  color: var(--lgi-muted);
+}
+
+.feedback[data-receipt-state='applied'] {
+  border-left-color: var(--lgi-success-dot);
+}
+
+.feedback[data-receipt-state='applied'] .label {
+  color: var(--lgi-success);
+}
+
+.feedback[data-receipt-state='rejected'] {
+  border-left-color: var(--lgi-danger-dot);
+}
+
+.feedback[data-receipt-state='rejected'] .label {
+  color: var(--lgi-danger);
+}
+
+.feedback[data-receipt-state='unconfirmed'],
+.feedback[data-receipt-state='partial'] {
+  border-left-color: var(--lgi-warning-dot);
+}
+
+.feedback[data-receipt-state='unconfirmed'] .label,
+.feedback[data-receipt-state='partial'] .label {
+  color: var(--lgi-warning);
+}

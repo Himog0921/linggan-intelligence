@@ -1,6 +1,11 @@
 import {ActionButton} from '../../src/shared/ActionButton';
+import {ActionFeedback} from '../../src/shared/ActionFeedback';
+import {EmptyState} from '../../src/shared/EmptyState';
+import {InlineNotice} from '../../src/shared/InlineNotice';
+import {LoadingState} from '../../src/shared/LoadingState';
 import {FindField} from '../../src/shared/FindField';
 import {SelectField} from '../../src/shared/SelectField';
+import {ViewSwitch} from '../../src/shared/ViewSwitch';
 import {IntelligenceIcon} from '../../src/shared/IntelligenceIcon';
 import React,{useEffect,useId,useRef} from 'react';
 import {Select} from './Select.jsx';
@@ -25,4 +30,32 @@ export function Find({value,onChange,trigger='debounce_250',placeholder='昵称�
  return <FindField className="ds-find" disabled={disabled} busy={busy} handle={handle} value={value||''} onCommit={v=>{if(!holdCommit)onChange?.(v)}} trigger={trigger==='debounce_250'?'debounce_250':'submit'}
  label={label} placeholder={scope==='work'?'标题、正文或内容方向':placeholder} shortcut submitLabel={submitLabel} clearLabel="清空演示搜索"
  contextKey={scope} scope={withScope?<SelectField compact label="演示搜索范围" value={scope} options={[{value:'author',label:'创作者资料'},{value:'work',label:'作品内容'}]} onChange={next=>{handle.current?.cancel();setScope(next);onScopeChange?.(next,handle.current?.read())}}/>:undefined}/>;
+}
+export function ViewDemo({value='table',onChange,disabled=false,count}){
+ const options=[{key:'table',label:'表格',count},{key:'covers',label:'封面'},{key:'list',label:'列表',disabled,reason:disabled?'当前范围没有列表视图':undefined}];
+ return <ViewSwitch label="演示视图" value={value} options={options} onChange={next=>onChange?.(next)}/>;
+}
+export function SelectDemo({value='recent',onChange,disabled=false,compact=false}){
+ const options=[{value:'recent',label:'最近收录'},{value:'relevant',label:'相关作品数'},{value:'blocked',label:'暂不可选',disabled:true}];
+ return <SelectField label="演示当前排序" compact={compact} disabled={disabled} value={value} options={options} onChange={next=>onChange?.(next)}/>;
+}
+export function EmptyDemo({kind='no_match',onChange}){
+ const title={first_use:'从已有入口开始',no_match:'当前条件没有结果',no_material:'尚无可阅读材料',unavailable_feature:'当前能力未开放'}[kind]||'当前条件没有结果';
+ return <EmptyState kind={kind} title={title} action={<Button onClick={()=>onChange?.('当前范围')}>返回当前范围</Button>}>空、未接通和读取失败分别说明；读取失败不显示成没有材料。</EmptyState>;
+}
+export function LoadingDemo({phase='initial',onChange}){
+ return <LoadingState phase={phase} subject="领域配置"
+  error={phase==='stale_error'?'领域配置和关联关系当前读不到；':undefined}
+  action={phase==='stale_error'?<Button onClick={()=>onChange?.('重新读取')}>重新读取</Button>:undefined}>
+  {phase==='initial'?undefined:<p className="ds-muted">上次读取结果：3 个领域 · 2 个运行中。</p>}
+ </LoadingState>;
+}
+export function NoticeDemo({tone='info',onChange}){
+ const text={info:'当前只检索了有界范围；未找到候选不能解释为作者从未讲过。',warning:'当前结果仅覆盖部分来源；未覆盖的部分仍按未知处理。',error:'读取失败，不能据此认定没有材料。'}[tone];
+ return <InlineNotice tone={tone} action={<Button onClick={()=>onChange?.('重新核对')}>重新核对</Button>}>{text}</InlineNotice>;
+}
+export function ReceiptDemo({state='accepted',onChange}){
+ const text={pending:'正在提交详情缺口补采，结果以服务器回执为准。',accepted:'请求已由服务器接纳；详情取得数在实际回执入库后更新。',applied:'观察关系已保存；以服务器记录为准。',rejected:'没有完成：服务器拒绝本次写入，输入已保留。',unconfirmed:'提交结果尚未确认，请使用原请求核对，不重复派单。',partial:'部分作品已排入；其余因暂无可执行地址没有提交。'}[state]||'请求已由服务器接纳；详情取得数在实际回执入库后更新。';
+ return <ActionFeedback state={state} requestRef={state==='unconfirmed'?'req-7f21':undefined} code={state==='rejected'?'revision_conflict':undefined}
+  action={state==='unconfirmed'||state==='rejected'?<Button onClick={()=>onChange?.('核对原回执')}>核对原回执</Button>:undefined}>{text}</ActionFeedback>;
 }

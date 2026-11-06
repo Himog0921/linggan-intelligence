@@ -32,7 +32,13 @@ export function SelectField<T extends string>({ label, value, options, onChange,
       if (!rect || !popup) return;
       const gap = parseFloat(getComputedStyle(popup).getPropertyValue('--lgi-space-1')) || 0;
       const edge = parseFloat(getComputedStyle(popup).getPropertyValue('--lgi-space-3')) || 0;
-      const width = Math.min(Math.max(rect.width, popup.scrollWidth + popup.offsetWidth - popup.clientWidth), window.innerWidth - edge * 2);
+      // scrollWidth rounds down to whole pixels; a label can need a fraction more
+      // and ellipsize even though the menu is meant to fit its content.
+      const previous = popup.style.width;
+      popup.style.width = 'max-content';
+      const content = popup.getBoundingClientRect().width;
+      popup.style.width = previous;
+      const width = Math.min(Math.max(rect.width, content), window.innerWidth - edge * 2);
       const below = window.innerHeight - rect.bottom - edge - gap;
       const above = rect.top - edge - gap;
       const flip = below < popup.scrollHeight && above > below;

@@ -1,23 +1,17 @@
+import { ActionFeedback, type ReceiptState } from '../../../shared/ActionFeedback';
 import type { Feedback } from './creatorsFeedback';
-import styles from './CreatorDialogs.module.css';
 
-const TONE_LABEL: Record<Feedback['tone'], string> = {
-  success: '已完成',
-  error: '未完成',
-  unknown: '未确认',
+const STATE: Record<Feedback['tone'], ReceiptState> = {
+  success: 'applied',
+  error: 'rejected',
+  unknown: 'unconfirmed',
 };
 
-/** 动作回执。状态同时用文字、位置和颜色表达，不只靠颜色（LIDS）。 */
+/** 动作回执走 LIDS C44：阶段先用文字说清，颜色只做加强。 */
 export function FeedbackLine({ feedback, id }: { feedback: Feedback | null; id?: string }) {
   return (
-    <p id={id} role="status" aria-live="polite" className={feedback ? `${styles.feedback} ${styles[feedback.tone]}` : styles.feedbackEmpty}>
-      {feedback ? (
-        <>
-          <b className={styles.feedbackTone}>{TONE_LABEL[feedback.tone]}</b>
-          <span>{feedback.text}</span>
-          {feedback.code ? <code className={styles.code}>{feedback.code}</code> : null}
-        </>
-      ) : null}
-    </p>
+    <ActionFeedback id={id} state={feedback ? STATE[feedback.tone] : undefined} code={feedback?.code}>
+      {feedback?.text}
+    </ActionFeedback>
   );
 }

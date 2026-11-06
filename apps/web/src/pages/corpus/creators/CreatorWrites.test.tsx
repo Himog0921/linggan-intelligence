@@ -119,7 +119,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     await user.click(within(row('合成作者 1')).getByRole('button', { name: '加入观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
-    const status = (await within(dialog).findByText('未完成')).closest('p') as HTMLElement;
+    const status = (await within(dialog).findByText('未完成')).closest('[data-lids-component="C44"]') as HTMLElement;
     expect(status).toHaveTextContent('其他领域已有主研究关系，本领域只能按参照用途加入');
     expect(within(status).getByText('active_primary_domain_conflict')).toBeInTheDocument();
     expect(dialog).not.toHaveTextContent('已完成');
@@ -134,7 +134,7 @@ describe('加入观察 · 先确认，回执后才显示结果', () => {
     await user.click(within(row('合成作者 1')).getByRole('button', { name: '加入观察' }));
     const dialog = await screen.findByRole('dialog', { name: '加入观察目标' });
     await user.click(within(dialog).getByRole('button', { name: '确认加入' }));
-    const status = (await within(dialog).findByText('未确认')).closest('p') as HTMLElement;
+    const status = (await within(dialog).findByText('未确认')).closest('[data-lids-component="C44"]') as HTMLElement;
     expect(status).toHaveTextContent('结果未确认，可能已经生效');
     expect(status).toHaveTextContent('同一位作者在同一个领域只会有一个观察目标');
     expect(within(dialog).queryByText('已完成')).toBeNull();
@@ -313,7 +313,7 @@ describe('发现设置', () => {
     kit.route('PUT', '/api/local/creator-discovery-policy', () => error(409, 'policy_revision_conflict'));
     const { user, dialog } = await openPolicy();
     await user.click(within(dialog).getByRole('button', { name: '保存设置' }));
-    const status = (await within(dialog).findByText('未完成')).closest('p') as HTMLElement;
+    const status = (await within(dialog).findByText('未完成')).closest('[data-lids-component="C44"]') as HTMLElement;
     expect(status).toHaveTextContent('设置已被更新');
     expect(within(status).getByText('policy_revision_conflict')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: '发现设置' })).toBe(dialog);
@@ -490,7 +490,7 @@ describe('调整判断', () => {
     expect(dialog).toHaveTextContent('作品：合成作品 11');
     await user.click(within(dialog).getAllByRole('checkbox')[0] as HTMLElement);
     await user.click(within(dialog).getByRole('button', { name: '保存判断' }));
-    const status = (await within(dialog).findByText('未完成')).closest('p') as HTMLElement;
+    const status = (await within(dialog).findByText('未完成')).closest('[data-lids-component="C44"]') as HTMLElement;
     expect(status).toHaveTextContent('请选择当前仍可读的支持材料');
     expect(within(status).getByText('invalid_support_fragment')).toBeInTheDocument();
     expect(kit.of('PUT', overrides)[0]?.body).toMatchObject({ workRef: workRef(11), field: 'personal_experience', creatorKey: creatorKeyFor('author-1') });
@@ -504,7 +504,7 @@ describe('调整判断', () => {
     const dialog = await screen.findByRole('dialog', { name: '调整作者倾向' });
     await user.click(within(dialog).getByRole('checkbox', { name: /合成公开简介/ }));
     await user.click(within(dialog).getByRole('button', { name: '保存判断' }));
-    const status = (await within(dialog).findByText('未确认')).closest('p') as HTMLElement;
+    const status = (await within(dialog).findByText('未确认')).closest('[data-lids-component="C44"]') as HTMLElement;
     expect(status).toHaveTextContent('重新保存同样的内容不会产生第二条记录');
     await user.click(within(dialog).getByRole('button', { name: '保存判断' }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: '调整作者倾向' })).toBeNull());

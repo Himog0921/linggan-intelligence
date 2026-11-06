@@ -1,5 +1,6 @@
 import { useId, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
+import { InlineNotice } from '../../../shared/InlineNotice';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import type { RegisterReceipt } from './creatorsTypes';
 import { feedbackForError, type Feedback } from './creatorsFeedback';
@@ -101,10 +102,10 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
             把「{target.authorName}」加入「{target.domainName}」的观察名单。
           </p>
           {target.blockedPrimary ? (
-            <p className={styles.notice}>其他领域已有主研究关系；本领域只能按参照用途加入，不改变原巡查规则。</p>
+            <InlineNotice tone="warning">其他领域已有主研究关系；本领域只能按参照用途加入，不改变原巡查规则。</InlineNotice>
           ) : null}
           {target.keptState ? (
-            <p className={styles.notice}>该作者已有观察目标，当前为「{target.keptState}」；加入后保持这个状态，不会自动恢复。</p>
+            <InlineNotice tone="warning">该作者已有观察目标，当前为「{target.keptState}」；加入后保持这个状态，不会自动恢复。</InlineNotice>
           ) : null}
           <fieldset className={styles.roles}>
             <legend>加入用途</legend>

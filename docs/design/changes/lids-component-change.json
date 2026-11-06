@@ -1,11 +1,16 @@
 {
-  "kind": "page_exception",
-  "reason": "主题图谱页头收口：视图切换（主题概览/用户生命旅程）从共享页头页签区移入正文标题行右端并与筛选并排；删除「统计口径」按钮与「指标截至…」时间字样；筛选改为 40px 描边按钮加下拉箭头；页头动作区在深色底纹上改用 on-dark 文字色并允许换行。共享 ContextBar、DomainScopePicker 与全站页头标准不变。",
-  "authorization": "Mog 2026-11-05 主题图谱面包屑 UI 整理",
-  "exceptionScope": "/topics 主题图谱：页头页签区移除视图页签，正文标题行新增视图分段控件、重绘筛选、删除统计口径与指标截止；其它页面页头与视图切换不变",
+  "kind": "shared_standard",
+  "reason": "修 C41 刷新时重建内容：提示槽位固定，页面草稿与展开态不丢",
+  "authorization": "Mog 2026-11-06 完成最后的动作回执后提交合并推送部署上线",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
-    "ICON-B-001": "a08ae3ac746535945174c3e1ed1798975168a4ddd88cc5384a0e24730ef78f7d"
+    "ICON-B-001": "a08ae3ac746535945174c3e1ed1798975168a4ddd88cc5384a0e24730ef78f7d",
+    "C26": "e0e3d1f3088b7cc0e309b92ad77e110e0bf89fbca12830655cfa437f0f721dcd",
+    "C17": "05ca31ec53fdc2af0a7ff2e115ccfb290f47d5f4abb00688386ce84c5da01e00",
+    "C42": "59267d41aaf2b6adabfe34d78251e68ed269d956c822e080f17003e2449bedb1",
+    "C41": "4aa129123e26f9436eb99d13c8b86ae52822d2a6be5df31b77e4aba469c9a778",
+    "C43": "ad3ce8b80e4ad810db0bef898bf9e1387cd4d30ecf6ffcf729b960a81264e962",
+    "C44": "5937d865a42052e2356bb4b2bb7566c89803e3b67d13fa3abeb0d51dfae0ec03"
   }
 }

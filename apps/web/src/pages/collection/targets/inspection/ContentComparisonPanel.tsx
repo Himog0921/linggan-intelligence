@@ -9,6 +9,7 @@ import { inspectionUrl, array, flag, nullable, num, record, ref, str } from './i
 import { EvidenceLink, ReadFeedback } from './ResearchParts';
 import { useTargetResearch } from './researchContext';
 import { useInspectionRead } from './useInspectionRead';
+import { InlineNotice } from '../../../../shared/InlineNotice';
 import styles from './TargetResearch.module.css';
 
 type Citation = {workRef:string;citationId:string};
@@ -141,10 +142,10 @@ function Comparison(){
     {!requestRef&&preview.data&&!preview.data.canStart&&<p className={styles.meta}>
       {[...new Set(preview.data.reasons.map(explanation))].join('；')||'当前没有可用的模型研究设置。'} 手动并排对照不受影响。
     </p>}
-    {error&&<p className={styles.notice} role={unknown?'status':'alert'}>{error}</p>}
+    {error&&<InlineNotice tone={unknown?'warning':'error'}>{error}</InlineNotice>}
     {requestRef&&<><ReadFeedback read={read}/>
       {matched&&read.data&&<>
-        {read.data.outdated&&<p className={styles.notice}>研究基于当时的材料版本；已有材料更新，可重新选择作品并发起新的比较。</p>}
+        {read.data.outdated&&<InlineNotice tone="warning">研究基于当时的材料版本；已有材料更新，可重新选择作品并发起新的比较。</InlineNotice>}
         <p className={styles.meta}>{read.data.state==='succeeded'?'研究完成':read.data.state==='failed'?'研究失败':read.data.state==='cancelled'?'研究已取消':'研究已提交，等待任务执行'}
           {read.data.waitReason?' · 等待原因已记录':''}
           {read.data.failureCode?' · 当前未得到可发布的对照结果':''}</p>
@@ -162,12 +163,12 @@ function Comparison(){
         </>}
         {read.data.materials.map(material=><DossierReadout key={material.workRef} work={material.workRef} cutoff={read.data!.knowledgeCutoff}/>)}
       </>}
-      {read.data&&!matched&&<p className={styles.notice}>本次研究所属作品已发生变化；旧请求结果不用于当前选择。</p>}
+      {read.data&&!matched&&<InlineNotice tone="warning">本次研究所属作品已发生变化；旧请求结果不用于当前选择。</InlineNotice>}
     </>}
   </section>;
 }
 function CitationExcerpt({citation,materials}:{citation:Citation;materials:DossierView[]}){
   const source=materials.find(m=>m.workRef===citation.workRef)?.fragments.find(f=>f.citationId===citation.citationId);
-  if(!source)return <p className={styles.notice}>此来源引用当前不可解析，请重新核对材料资格。</p>;
+  if(!source)return <InlineNotice tone="error">此来源引用当前不可解析，请重新核对材料资格。</InlineNotice>;
   return <div className={styles.claimExcerpt}><DossierBlocks blocks={[source.structure]} issues={source.issues}/><details><summary>来源版本与截点</summary><p className={styles.meta}>{source.sourceRef} · {source.sourceVersion} · {source.unitRef??'原生材料'} · {source.readingRef??'原生版本'} · {source.sourceLocation?.page!==null&&source.sourceLocation?.page!==undefined?`第 ${source.sourceLocation.page} 页 · `:''}{source.knowledgeCutoff}</p></details><EvidenceLink work={citation.workRef}>核对来源</EvidenceLink></div>;
 }

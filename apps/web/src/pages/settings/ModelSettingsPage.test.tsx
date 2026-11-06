@@ -197,7 +197,7 @@ describe('AI 设置四区', () => {
     renderPage(); const name = await screen.findByLabelText('连接名称'); await user.clear(name); await user.type(name, '保留我的草稿');
     await user.click(screen.getByRole('button', { name: '保存连接' }));
     expect(await screen.findByText(/草稿已保留/)).toBeInTheDocument(); expect(name).toHaveValue('保留我的草稿');
-    expect(screen.queryByText('已收到回执')).not.toBeInTheDocument(); expect(posts()).toHaveLength(1);
+    expect(screen.queryByText('已接纳')).not.toBeInTheDocument(); expect(posts()).toHaveLength(1);
   });
   it('保存能力并刷新版本时，另一张价格表单的草稿仍保留', async () => {
     const user = userEvent.setup(); const fixture = settingsFixture(); let capabilityRef = 'cap-1';
@@ -215,9 +215,9 @@ describe('AI 设置四区', () => {
     handler = call => call.method === 'GET' ? ok(settingsFixture()) : ++attempt === 1 ? kind === 'network' ? 'network' : ok({ unexpected: true }) : ok({ connectionRef: 'connection-1', versionRef: call.body.versionRef, revision: 4, state: 'SAVED_UNTESTED' });
     renderPage(); await screen.findByLabelText('连接名称');
     await user.click(screen.getByRole('button', { name: '保存连接' }));
-    expect(await screen.findByText('结果未确认', { exact: true })).toBeInTheDocument();
+    expect(await screen.findByText('未确认', { exact: true })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '保存连接' }));
-    expect(await screen.findByText('已收到回执')).toBeInTheDocument();
+    expect(await screen.findByText('已接纳')).toBeInTheDocument();
     expect(posts()).toHaveLength(2); expect(posts()[1]?.body.versionRef).toBe(posts()[0]?.body.versionRef);
   });
   it('测试任务只保存额度，不开启开关、入队或调用；大整数额度按字符串发送', async () => {

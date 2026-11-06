@@ -1,0 +1,70 @@
+.switch {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: var(--lgi-space-3);
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  border-bottom: var(--lgi-action-rail-width) solid var(--lgi-hairline);
+}
+
+.switch>button {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  min-height: var(--lgi-space-10);
+  padding: 0 var(--lgi-space-1);
+  border: 0;
+  background: transparent;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-control-weight) var(--lgi-text-data) / var(--lgi-type-control-leading) var(--lgi-font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* hover 只邀请未选中项；选中态的事实不被改写。 */
+.switch>button:hover:not(:disabled):not([aria-pressed='true']) {
+  color: var(--lgi-ink);
+}
+
+.switch>button[aria-pressed='true'] {
+  color: var(--lgi-ink);
+  font-weight: var(--lgi-weight-semibold);
+}
+
+.switch>button[aria-pressed='true']::after {
+  content: '';
+  position: absolute;
+  inset: auto 0 0;
+  height: calc(var(--lgi-space-1) * 0.75);
+  background: var(--lgi-signal);
+}
+
+.switch>button:focus-visible {
+  outline: var(--lgi-action-rail-width) solid var(--lgi-action-focus);
+  outline-offset: var(--lgi-action-focus-offset);
+}
+
+.switch>button:disabled {
+  color: var(--lgi-ghost);
+  cursor: not-allowed;
+}
+
+.switch>button:disabled[aria-pressed='true']::after {
+  background: var(--lgi-unknown-soft);
+}
+
+.count {
+  color: var(--lgi-muted);
+  font-size: var(--lgi-text-label);
+  font-weight: var(--lgi-weight-regular);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch>button {
+    transition: none;
+  }
+}
