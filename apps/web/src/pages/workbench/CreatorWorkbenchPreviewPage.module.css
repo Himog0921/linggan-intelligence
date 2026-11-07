@@ -4,6 +4,8 @@
   min-height: 0;
   color: var(--lgi-ink);
   font-family: var(--lgi-font-ui);
+  --v7-global-row: 68px;
+  --v7-context-row: 53.69px;
   --cw-queue: 240px;
   --cw-inspector: 336px;
   --cw-line: var(--lgi-border);
