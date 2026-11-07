@@ -263,7 +263,7 @@ export function CreatorWorkbenchPreviewPage() {
                 </div>
               </div>
               <footer className={styles.editorFoot}>
-                <span><i data-level="must" /> 必改 {currentDraft.must}　<i data-level="warn" /> 提醒 {currentDraft.warn}　<small>演示数据，不代表正式检查结果</small></span>
+                <span><i data-level="must" /> 必改 {currentDraft.must} · <i data-level="warn" /> 提醒 {currentDraft.warn}　<small>演示数据，不代表正式检查结果</small></span>
                 <ActionButton variant="outline" onClick={() => previewOnly('存为样板')}>存为样板</ActionButton>
                 <ActionButton variant="primary" onClick={() => previewOnly('复制到小红书')}>复制到小红书</ActionButton>
               </footer>
