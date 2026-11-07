@@ -68,7 +68,7 @@ export function ProbeForm({ data, connection, model, action }: { data: AiSetting
     } catch (error) { action.setNotice({ tone: 'error', text: error instanceof Error ? error.message : '测试未接纳。' }); }
   }
   return <form className={styles.form} onSubmit={event => void enqueue(event)}><h3>独立测试</h3><Field label="测试类型"><select value={operation} onChange={e => { if (e.target.value === 'connect' || e.target.value === 'discover' || e.target.value === 'probe') setOperation(e.target.value); }}><option value="connect">连接测试</option><option value="discover">读取模型列表</option>{model ? <option value="probe">所选模型能力测试</option> : null}</select></Field>
-    {operation === 'probe' && model?.capability ? <LimitsFields key={model.identityRef} limits={null} max={{ ...model.capability, maxAttempts: data.resources.maxAttempts }} levels={model.capability.thinkingLevels} /> : null}
+    {operation === 'probe' && model?.capability ? <LimitsFields key={`${model.identityRef}:${model.capability.capabilityRef}`} limits={null} max={{ ...model.capability, maxAttempts: data.resources.maxAttempts }} levels={model.capability.thinkingLevels} /> : null}
     <div className={styles.impact}><p>只使用合成输入或模型列表请求，可能产生供应商费用；需开启测试任务并批准当前地址的对应许可。此动作提交队列，完成结果另行回执。</p><ActionButton type="submit" variant="primary" disabled={action.busy !== null || !task}>提交本次测试</ActionButton></div>
   </form>;
 }

@@ -206,18 +206,23 @@ function ConnectionWizard({ data, action, onClose, onSaved }: { data: AiSettings
 }
 export function AiConnections({ data, action }: { data: AiSettings; action: AiAction }) {
   const [query, setQuery] = useSearchParams();
-  const [tab, setTab] = useState<'overview' | 'technical' | 'permission'>('overview');
+  const requestedTab = query.get('tab');
+  const tab = requestedTab === 'technical' || requestedTab === 'permission' ? requestedTab : 'overview';
   const [wizard, setWizard] = useState(false);
-  const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const connection = data.connections.find(c => c.connectionRef === query.get('connection')) ?? data.connections.find(c => c.api !== 'local-wemm-runtime') ?? data.connections[0] ?? null;
   const local = connection?.api === 'local-wemm-runtime';
   const models = data.models.filter(m => m.connectionRef === connection?.connectionRef);
-  const model = models.find(m => m.identityRef === selectedModel) ?? models[0] ?? null;
+  const model = models.find(m => m.identityRef === query.get('model')) ?? models[0] ?? null;
   const [confirm, setConfirm] = useState(false);
   const sorted = [...data.connections].sort((a, b) => Number(a.api === 'local-wemm-runtime') - Number(b.api === 'local-wemm-runtime'));
   const capability = model?.capability;
   const testOk = model?.probe?.state === 'succeeded' && model.probe.modelCallable === true;
-  function chooseConnection(ref: string) { setQuery({ view: 'models', connection: ref }); setTab('overview'); setSelectedModel(null); }
+  function chooseConnection(ref: string, nextTab = 'overview') { setQuery({ view: 'models', connection: ref, tab: nextTab }); }
+  function setSelection(key: 'tab' | 'model', value: string) {
+    const next = new URLSearchParams(query);
+    next.set(key, value);
+    setQuery(next);
+  }
   async function enableConnection() {
     if (!connection || local) return;
     const payload = { connectionRef: connection.connectionRef, expectedRevision: connection.revision, enabled: !connection.enabled };
@@ -237,11 +242,11 @@ export function AiConnections({ data, action }: { data: AiSettings; action: AiAc
       <small className={styles.sourceLabel}>本机运行时</small>
       {sorted.filter(c => c.api === 'local-wemm-runtime').map(c => <button type="button" className={styles.modelItem} data-current={connection?.connectionRef === c.connectionRef} onClick={() => chooseConnection(c.connectionRef)} key={c.connectionRef}><span className={styles.avatar} data-local>WM</span><span><b>{c.name}</b><small>内置 WeMM 向量模型</small></span><Glyph name="arrow"/></button>)}
       <p className={styles.sidebarNote}>本机 WeMM 不使用通用 API 密钥，也不参与语言模型能力声明。</p>
-    </aside><section className={styles.modelMain}>{connection ? <><div className={styles.modelHeader}><div className={styles.modelTitle}><span className={styles.avatar} data-local={local || undefined}>{local ? 'WM' : connection.name.slice(0, 2).toUpperCase()}</span><div><h2>{connection.name}</h2><small>{model?.modelId ?? '尚未登记模型'}</small></div></div><div className={styles.modelActions}>{!local ? <><ActionButton onClick={() => setTab('technical')}>编辑配置</ActionButton><ActionButton onClick={() => setConfirm(true)}>{connection.enabled ? '停用连接' : '启用连接'}</ActionButton></> : null}</div></div>
+    </aside><section className={styles.modelMain}>{connection ? <><div className={styles.modelHeader}><div className={styles.modelTitle}><span className={styles.avatar} data-local={local || undefined}>{local ? 'WM' : connection.name.slice(0, 2).toUpperCase()}</span><div><h2>{connection.name}</h2><small>{model?.modelId ?? '尚未登记模型'}</small></div></div><div className={styles.modelActions}>{!local ? <><ActionButton onClick={() => setSelection('tab', 'technical')}>编辑配置</ActionButton><ActionButton onClick={() => setConfirm(true)}>{connection.enabled ? '停用连接' : '启用连接'}</ActionButton></> : null}</div></div>
       <div className={styles.modelBadges}><span>{local ? '本机向量运行时' : '模型 API'}</span><span>{connection.enabled ? '连接已启用' : '连接已停用'}</span><span>{local ? '运行资格未由本页确认' : testOk ? '当前模型已响应' : '当前资格待核对'}</span></div>
-      <nav className={styles.modelTabs} aria-label="连接详情导航">{[['overview','连接概览'],['technical','技术配置'],['permission','数据权限']].map(([key, label]) => <button type="button" key={key} aria-current={tab === key ? 'page' : undefined} onClick={() => setTab(key as typeof tab)}>{label}</button>)}</nav>
+      <nav className={styles.modelTabs} aria-label="连接详情导航">{([['overview','连接概览'],['technical','技术配置'],['permission','数据权限']] as const).map(([key, label]) => <button type="button" key={key} aria-current={tab === key ? 'page' : undefined} onClick={() => setSelection('tab', key)}>{label}</button>)}</nav>
       <div className={styles.modelBody}>{tab === 'overview' ? <><div className={styles.kvGrid}><div><small>模型来源</small><b>{local ? '内置 / 本机 Runtime' : '外部或本机 HTTP 端点'}</b></div><div><small>当前协议</small><b>{connection.api}</b></div><div><small>服务地址</small><b className={styles.breakable}>{connection.baseUrl}</b></div><div><small>运行状态</small><b>{local ? '尚无专用运行时状态回执' : testOk ? '当前密钥能力测试通过' : '需要验证'}</b></div></div>
-        {models.length > 1 ? <div className={styles.picker}><small>选择模型</small>{models.map(entry => <button type="button" aria-pressed={model?.identityRef === entry.identityRef} onClick={() => setSelectedModel(entry.identityRef)} key={entry.identityRef}>{entry.modelId}</button>)}</div> : null}
+        {models.length > 1 ? <div className={styles.picker}><small>选择模型</small>{models.map(entry => <button type="button" aria-pressed={model?.identityRef === entry.identityRef} onClick={() => setSelection('model', entry.identityRef)} key={entry.identityRef}>{entry.modelId}</button>)}</div> : null}
         <h3 className={styles.blockTitle}>可用性检查</h3><div className={styles.checkList}>{[
           ['连接开关', connection.enabled, connection.enabled ? '已启用，不代表自动授权数据外发' : '连接已停用'],
           ['已登记模型', Boolean(model), model?.modelId ?? '请先登记模型标识'],
@@ -252,7 +257,7 @@ export function AiConnections({ data, action }: { data: AiSettings; action: AiAc
       </> : tab === 'technical' ? local ? <p className={styles.callout}>内置 WeMM 连接由本机运行时和数据库迁移登记，使用 local:// 地址。这里只读展示，不允许通过普通 HTTP 模型表单修改其协议、地址或密钥。</p> : <div className={styles.legacyForm}><ConnectionForm key={connection.versionRef} connection={connection} data={data} action={action}/><form className={styles.form} onSubmit={event => void addModel(event)}><label>登记模型标识<input name="modelId" required maxLength={200} placeholder="服务商实际模型 ID"/></label><ActionButton type="submit" busy={action.busy !== null}>登记模型</ActionButton></form>{model ? <AiCapabilityForm key={model.identityRef + ':' + model.endpointRef} data={data} model={model} connection={connection} action={action}/> : null}</div> : local ? <p className={styles.callout}>本机 WeMM 不需要授权向外部地址发送材料。评论向量工作是否接入，仍由独立工作状态决定。</p> : <div className={styles.legacyForm}><EgressForm data={data} connection={connection} action={action}/></div>}</div></> : <div className={styles.empty}>当前还没有连接，使用“接入模型”添加第一个。</div>}</section></div>
     <p className={styles.footnote}>连接已保存 ≠ 模型测试通过 ≠ 材料许可批准 ≠ 可发起业务执行。所有按钮使用真实保存和执行回执。</p>
     {confirm && connection ? <Modal title={connection.enabled ? '停用模型连接' : '启用模型连接'} onClose={() => setConfirm(false)}><p>此操作只修改连接开关，不会恢复或批准原有的外发许可，也不会发起模型调用。</p><div className={styles.formFooter}><ActionButton onClick={() => setConfirm(false)}>取消</ActionButton><ActionButton variant="primary" busy={action.busy !== null} onClick={() => void enableConnection()}>确认{connection.enabled ? '停用' : '启用'}</ActionButton></div></Modal> : null}
-    {wizard ? <ConnectionWizard data={data} action={action} onClose={() => setWizard(false)} onSaved={ref => { setWizard(false); chooseConnection(ref); setTab('technical'); }}/> : null}
+    {wizard ? <ConnectionWizard data={data} action={action} onClose={() => setWizard(false)} onSaved={ref => { setWizard(false); chooseConnection(ref, 'technical'); }}/> : null}
   </div>;
 }
 type HistoryPage = Awaited<ReturnType<typeof fetchHistory>>;

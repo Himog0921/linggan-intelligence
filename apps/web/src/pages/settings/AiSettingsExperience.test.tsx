@@ -2,7 +2,7 @@ import { EgressForm } from './AiModelSection';
 import { parseAiSettings } from './aiSettingsModel';
 import { useAiAction } from './useAiAction';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,7 +17,7 @@ const ok = (body: unknown): Reply => ({ status: 200, body });
 function mount(url = '/settings/models') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createMemoryRouter([{ path: '*', element: <ModelSettingsPage /> }], { initialEntries: [url] });
-  return render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>);
+  return { ...render(<QueryClientProvider client={client}><RouterProvider router={router} /></QueryClientProvider>), router };
 }
 beforeEach(() => {
   calls = [];
@@ -169,12 +169,13 @@ describe('AI 设置正式四视图', () => {
     for (const [label, value] of [['输入 token 上限', '2048'], ['输出 token 上限', '512'], ['单次等待秒数', '30']]) {
       await user.clear(screen.getByRole('spinbutton', { name: label })); await user.type(screen.getByRole('spinbutton', { name: label }), value!);
     }
-    await user.selectOptions(screen.getByRole('combobox', { name: '思考等级' }), 'off');
+    expect(screen.getByRole('combobox', { name: '思考开关' })).toHaveValue('off');
+    expect(screen.getByRole('combobox', { name: '思考等级' })).toBeDisabled();
     await user.selectOptions(screen.getByRole('combobox', { name: '每日额度' }), 'unlimited');
     expect(screen.getByRole('spinbutton', { name: '最多尝试次数' })).toHaveValue(1);
     await user.click(screen.getByRole('button', { name: '保存配置' }));
     await waitFor(() => expect(calls.filter(call => call.method === 'POST')).toHaveLength(1));
-    expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'ocr_recognition', budget: { mode: 'unlimited' }, model: { modelRef: 'second-model', limits: { attempts: 1 } } } });
+    expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'ocr_recognition', budget: { mode: 'unlimited' }, model: { modelRef: 'second-model', limits: { attempts: 1, thinkingLevel: 'off' } } } });
   });
 
   it('材料范围沿用底稿六类字段，视频画面可显式选入后保存', async () => {
@@ -201,6 +202,82 @@ describe('AI 设置正式四视图', () => {
     const writes = calls.filter(call => call.method === 'POST');
     expect(writes).toHaveLength(1);
     expect(writes[0]).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'note_interpretation', expectedRevision: 0, materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text'] } });
+  });
+
+  it('单篇分析可补齐 DeepSeek 思考能力，再开启思考、选择高并读回', async () => {
+    const base = settingsFixture();
+    base.connections[0]!.name = 'DeepSeek';
+    const modelId = 'deepseek-v4-flash';
+    const preset = { provider: 'deepseek', modelId, name: 'DeepSeek V4 Flash', api: 'openai-completions',
+      sourceVersion: 'synthetic-catalog', supported: true, reasons: [],
+      limits: { contextTokens: 8192, maxOutputTokens: 2048, maxTimeoutSeconds: null, thinkingLevels: ['off', 'high', 'max'] },
+      compat: { thinkingFormat: 'deepseek' }, thinkingLevelMap: { minimal: null, high: 'high', max: 'max' },
+      outputMode: 'prompt_only', strictSchema: false, prices: { input: null, output: null, cachedRead: null, cachedWrite: null },
+      operatorFields: ['maxTimeoutSeconds'], unknownFields: [] };
+    let capability = { ...preset.limits, capabilityRef: 'cap-off', source: 'manual', sourceVersion: 'existing',
+      probeInvocationRef: null, maxTimeoutSeconds: 60, thinkingLevels: ['off'], compat: preset.compat,
+      thinkingLevelMap: preset.thinkingLevelMap, outputMode: preset.outputMode, strictSchema: false };
+    const model = { ...base.models[0]!, identityRef: 'deepseek-flash', modelId };
+    let configuration = { ...base.tasks[0]!.configuration, taskKey: 'note_interpretation',
+      model: { modelConfigRef: 'model-config', modelRef: 'old-model-ref', identityRef: model.identityRef, modelId,
+        connectionRef: model.connectionRef, connectionVersionRef: 'version-1', capabilityRef: 'cap-off',
+        limits: { inputTokens: 2048, outputTokens: 512, timeoutSeconds: 30, attempts: 1, thinkingLevel: 'off' } } };
+    let revision = 0;
+    respond = call => {
+      if (call.path.startsWith('/api/local/ai-settings/catalog?')) {
+        return ok({ contract: 'ai-pi-catalog.v1', sdkVersion: 'synthetic', providers: ['deepseek'], total: 1, offset: 0, limit: 100, hasMore: false, presets: [preset] });
+      }
+      if (call.path === '/api/local/ai-settings/capabilities') {
+        capability = { ...capability, capabilityRef: 'cap-reasoning', thinkingLevels: preset.limits.thinkingLevels };
+        return ok({ revisionRef: capability.capabilityRef });
+      }
+      if (call.path === '/api/local/ai-settings/task-configs') {
+        const thinkingLevel = (call.body.model as { limits: { thinkingLevel: string } }).limits.thinkingLevel;
+        configuration = { ...configuration, taskConfigRef: 'next-config',
+          model: { ...configuration.model, capabilityRef: capability.capabilityRef, limits: { ...configuration.model.limits, thinkingLevel } } };
+        return ok({ taskKey: 'note_interpretation', taskConfigRef: 'next-config', modelConfigRef: 'model-config', revision: ++revision, applied: true });
+      }
+      return call.path === '/api/local/ai-settings' ? ok({ ...base, models: [...base.models, { ...model, capability }],
+        tasks: [{ ...base.tasks[0]!, taskKey: 'note_interpretation', label: '单篇分析', configuration, revision, skillAllowed: true, requiresSkill: true }] }) : { status: 503, body: {} };
+    };
+    const user = userEvent.setup();
+    const page = mount('/settings/models?view=advanced&area=work&task=note_interpretation');
+    expect(await screen.findByRole('combobox', { name: '思考开关' })).toHaveValue('off');
+    expect(screen.queryByRole('option', { name: '开启' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '编辑模型能力声明' }));
+    expect(screen.getByRole('button', { name: '技术配置' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('button', { name: '连接概览' }));
+    await act(() => page.router.navigate(-1));
+    expect(screen.getByRole('button', { name: '技术配置' })).toHaveAttribute('aria-current', 'page');
+    await user.click(screen.getByRole('button', { name: '读取本机离线模型目录' }));
+    await screen.findByRole('option', { name: 'deepseek · DeepSeek V4 Flash' });
+    expect(calls.some(call => new URLSearchParams(call.path.split('?')[1]).get('modelId') === modelId)).toBe(true);
+    await user.selectOptions(screen.getByRole('combobox', { name: '目录参考' }), '0');
+    await user.clear(screen.getByLabelText('最长等待秒数'));
+    await user.type(screen.getByLabelText('最长等待秒数'), '90');
+    await user.click(screen.getByRole('button', { name: '保存能力声明' }));
+    await screen.findByText(/能力声明已保存/);
+    expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/capabilities', body: {
+      identityRef: model.identityRef, expectedCapabilityRef: 'cap-off', source: 'pi_catalog',
+      limits: { maxTimeoutSeconds: 90, thinkingLevels: preset.limits.thinkingLevels }, thinkingLevelMap: preset.thinkingLevelMap,
+    } });
+
+    page.unmount();
+    const reopened = mount('/settings/models?view=advanced&area=work&task=note_interpretation');
+    const toggle = await screen.findByRole('combobox', { name: '思考开关' });
+    expect(toggle).toHaveValue('off');
+    await user.selectOptions(toggle, 'on');
+    expect(screen.getByRole('combobox', { name: '思考等级' })).toBeEnabled();
+    await user.selectOptions(screen.getByRole('combobox', { name: '思考等级' }), screen.getByRole('option', { name: '高' }));
+    await user.click(screen.getByRole('button', { name: '保存配置' }));
+    await screen.findByText(/配置已保存，用于后续批次/);
+    const writes = calls.filter(call => call.method === 'POST');
+    expect(writes.map(call => call.path)).toEqual(['/api/local/ai-settings/capabilities', '/api/local/ai-settings/task-configs']);
+    expect(writes[1]?.body).toMatchObject({ taskKey: 'note_interpretation', skillVersionRef: null, model: { capabilityRef: 'cap-reasoning', limits: { thinkingLevel: 'high' } } });
+    reopened.unmount();
+    mount('/settings/models?view=advanced&area=work&task=note_interpretation');
+    expect(await screen.findByRole('combobox', { name: '思考开关' })).toHaveValue('on');
+    expect(screen.getByRole('combobox', { name: '思考等级' })).toHaveValue('high');
   });
 
 });
