@@ -128,6 +128,7 @@
 .deskInspector textarea { min-height: 130px; resize: vertical; }
 .inspectorActions { display: grid; gap: var(--lgi-space-2); }
 .assetDialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(1392px, calc(100vw - 48px)); height: min(920px, calc(100dvh - 80px)); max-width: none; max-height: none; padding: 0; border: 2px solid var(--lgi-ink); background: var(--lgi-canvas); color: var(--lgi-ink); box-shadow: var(--lgi-shadow-brutal-lg); }
+.assetDialog:not([open]) { display: none; }
 .assetDialog::backdrop { background: rgba(11,15,18,.28); }
 .assetHead { display: flex; align-items: center; justify-content: space-between; min-height: 72px; padding: var(--lgi-space-3) var(--lgi-space-5); border-bottom: 1px solid var(--cw-line); }
 .assetHead small { color: var(--lgi-muted); font-family: var(--lgi-font-data); font-size: var(--lgi-type-aux-size); }
