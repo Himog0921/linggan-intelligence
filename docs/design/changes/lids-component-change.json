@@ -1,8 +1,8 @@
 {
   "kind": "page_exception",
-  "reason": "创作工作台 G4 预览需在 1440×1000 Gold Master 基准下，将共享 AppShell 的页头轨高度临时配置为 68px + 53.69px；仅使用现有 --v7-global-row/--v7-context-row 变量，不重写 Shell DOM 或 CSS 选择器。",
+  "reason": "G4/G5 已批准 Gold Master 的受控共享 Shell 预览变体：仅 DEV 创作预览保留 68px + 53.69px 页头几何、浅色点阵上下文栏和预览左侧导航；未创建第二套 Shell，正式路由仍沿用原来的深色 ContextBar。",
   "authorization": "Mog 2026-11-07 明确批准 SPEC 推荐方案并授权进入 IMPLEMENT；仅授权隔离预览，不代表生产 Shell 标准变更。",
-  "exceptionScope": "仅限 Vite DEV 路由 /__preview/creator-workbench 的 CreatorWorkbenchPreviewPage.module.css 根作用域；不适用于正式 /ops/creation 或其他页面。",
+  "exceptionScope": "仅适用于 Vite DEV /__preview/creator-workbench 和 /ui-assets/__preview/creator-workbench：OpsFrame.preview、ContextBar.tone=light、creation-preview-crumb-brand，以及 CreatorWorkbenchPreviewPage.module.css 的已有两项页头变量；正式 /ops/creation 和其他页面不适用。",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
