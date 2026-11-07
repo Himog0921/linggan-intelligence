@@ -47,7 +47,9 @@ async function waitForVite() {
     try {
       const response = await fetch(origin + '/ui-assets/', { signal: AbortSignal.timeout(750) });
       if (response.ok) return;
-    } catch {}
+    } catch {
+      // The loopback Vite server can reject connections while starting; retry.
+    }
     await new Promise(resolve => setTimeout(resolve, 350));
   }
   throw new Error('Vite dev server did not serve /ui-assets/ on loopback');
