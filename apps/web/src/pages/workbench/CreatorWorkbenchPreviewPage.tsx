@@ -99,8 +99,7 @@ const ASSET_ROWS: Record<AssetKind, { title: string; meta: string; body: string 
 
 const FILTER_OPTIONS = [
   { value: 'all', label: '全部材料' },
-  { value: 'note', label: '笔记摘录' },
-  { value: 'comment', label: '评论摘录' },
+  { value: 'material', label: '材料摘录' },
   { value: 'idea', label: '自己的想法' },
 ] as const;
 
