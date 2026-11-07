@@ -61,7 +61,7 @@ describe('CreatorWorkbenchPreviewPage', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     render(<CreatorWorkbenchPreviewPage />);
     fireEvent.click(screen.getByRole('button', { name: '材料桌' }));
-    const canvas = screen.getByRole('region', { name: '材料画布' });
+    const canvas = screen.getByTestId('canvas-viewport');
     fireEvent.doubleClick(canvas);
     expect(screen.getByText('新便签')).toBeTruthy();
     expect(fetchSpy).not.toHaveBeenCalled();
