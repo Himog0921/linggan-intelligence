@@ -215,6 +215,114 @@ try {
     }
     await context.close();
   }
+
+  // G3 visual matrix: 28 canonical states. Six default viewports were captured
+  // above. Capture every reproducible additional state with synthetic fixtures;
+  // report unimplemented UI explicitly instead of silently counting it passed.
+  const openAsset = async (page, label) => {
+    await page.getByRole('button', { name: '资产库' }).click();
+    await page.getByRole('dialog', { name: '创作资产库' }).waitFor({ state: 'visible' });
+    if (label) await page.getByRole('navigation', { name: '资产类型' })
+      .getByRole('button', { name: new RegExp(label) }).click();
+  };
+  const openDeskState = async page => {
+    if (page.viewportSize()?.width <= 820) {
+      await page.getByRole('button', { name: '稿件', exact: true }).click();
+    }
+    await page.getByRole('button', { name: /选题与材料/ }).click();
+    await page.getByRole('region', { name: '沉浸材料桌' }).waitFor({ state: 'visible' });
+  };
+  const visualStates = [
+    ['asset-persona', 1440, 1000, page => openAsset(page, null)],
+    ['asset-experience', 1440, 1000, page => openAsset(page, '经历库')],
+    ['asset-product', 1440, 1000, page => openAsset(page, '产品事实卡')],
+    ['asset-bridge', 1440, 1000, page => openAsset(page, '衔接句')],
+    ['asset-sample', 1440, 1000, page => openAsset(page, '样板库')],
+    ['asset-style', 1440, 1000, page => openAsset(page, '风格')],
+    ['inspector-material', 1440, 1000, page => page.getByRole('tab', { name: '素材' }).click()],
+    ['inspector-title', 1440, 1000, page => page.getByRole('tab', { name: '标题' }).click()],
+    ['inspector-preview', 1440, 1000, page => page.getByRole('tab', { name: '预览' }).click()],
+    ['side-collapsed', 1440, 1000, page => page.getByRole('button', { name: '折叠侧栏' }).click()],
+    ['draft-d2', 1440, 1000, page => page.getByRole('button', { name: /我后来不再急着给答案/ }).click()],
+    ['desk-default', 1440, 1000, openDeskState],
+    ['desk-search', 1440, 1000, async page => {
+      await openDeskState(page);
+      await page.getByRole('textbox', { name: '搜索材料' }).fill('调整');
+      await page.waitForTimeout(350);
+    }],
+    ['desk-card-editor', 1440, 1000, async page => {
+      await openDeskState(page);
+      await page.locator('[data-canvas-item="m1"]').click();
+    }],
+    ['desk-focus', 1440, 1000, async page => {
+      await openDeskState(page);
+      await page.locator('[data-canvas-item="f1"]').click();
+    }],
+    ['mobile-asset-persona', 390, 844, page => openAsset(page, null)],
+    ['mobile-desk', 390, 844, openDeskState],
+  ];
+  report.visualStates = [
+    ...viewports.map(([width, height]) => ({
+      id: 'V-BASE-' + width + 'x' + height,
+      result: 'CAPTURED_NOT_VISUALLY_ACCEPTED',
+      screenshot: 'default-' + width + 'x' + height + '.png',
+    })),
+  ];
+  for (const [id, width, height, action] of visualStates) {
+    const context = await browser.newContext({
+      viewport: { width, height }, deviceScaleFactor: 1,
+      locale: 'zh-CN', timezoneId: 'Asia/Shanghai',
+      colorScheme: 'light', reducedMotion: 'reduce', serviceWorkers: 'block',
+    });
+    let captureStatus = 'CAPTURED_NOT_VISUALLY_ACCEPTED';
+    let error = null;
+    const fileName = 'state-' + id + '-' + width + 'x' + height + '.png';
+    try {
+      await context.route('**/*', route => {
+        const req = route.request(), uri = new URL(req.url());
+        if (uri.origin !== origin || !['GET', 'HEAD'].includes(req.method()) || uri.pathname.includes('/api/')) {
+          report.networkViolations.push({ state: id, method: req.method(), url: req.url() });
+          return route.abort();
+        }
+        return route.continue();
+      });
+      const page = await context.newPage();
+      page.on('pageerror', err => report.pageErrors.push({ state: id, message: err.message }));
+      page.setDefaultTimeout(8000);
+      await page.goto(origin + '/ui-assets/__preview/creator-workbench', { waitUntil: 'networkidle', timeout: 20000 });
+      await page.getByRole('main', { name: '创作工作台' }).waitFor({ state: 'visible' });
+      await page.evaluate(async () => { await document.fonts.ready; });
+      await action(page);
+      await page.screenshot({ path: path.join(output, fileName), animations: 'disabled' });
+    } catch (caught) {
+      captureStatus = 'CANDIDATE_CAPTURE_FAILED';
+      error = String(caught?.message || caught).slice(0, 420);
+    } finally {
+      report.visualStates.push({ id: 'V-STATE-' + id, result: captureStatus,
+        screenshot: captureStatus.startsWith('CAPTURED') ? fileName : null, error });
+      await context.close();
+    }
+  }
+  // These approved Gold Master screens do not yet exist in the synthetic React
+  // preview. An informational toast is NOT an equivalent modal/editor state.
+  for (const id of [
+    'asset-product-edit', 'experience-picker', 'save-as-template',
+    'path-guide', 'tour-popover',
+  ]) {
+    report.visualStates.push({
+      id: 'V-STATE-' + id, result: 'NOT_IMPLEMENTED_IN_G4_PREVIEW', screenshot: null,
+      error: 'Only synthetic preview/toast is present; Gold Master state is not faithfully implemented',
+    });
+  }
+  report.visualStateCoverage = {
+    required: 28, accounted: report.visualStates.length,
+    captured: report.visualStates.filter(item => item.result.startsWith('CAPTURED')).length,
+    notImplemented: report.visualStates.filter(item => item.result === 'NOT_IMPLEMENTED_IN_G4_PREVIEW').length,
+    failedCapture: report.visualStates.filter(item => item.result === 'CANDIDATE_CAPTURE_FAILED').length,
+    visuallyAccepted: 0,
+  };
+  assert.equal(report.visualStateCoverage.accounted, 28, 'Every approved visual state must be accounted for');
+  console.log('G5_VISUAL_STATE_MATRIX ' + JSON.stringify(report.visualStateCoverage));
 } catch (error) {
   report.failures.push({ name: 'harness', message: String(error?.stack || error) });
 } finally {
