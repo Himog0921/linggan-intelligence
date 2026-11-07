@@ -37,7 +37,7 @@ describe('CreatorWorkbenchPreviewPage', () => {
     const dialog = screen.getByRole('dialog', { name: '创作资产库' });
     expect(dialog).toBeTruthy();
     await user.click(screen.getByRole('button', { name: /经历库/ }));
-    expect(screen.getByText('一次临时调整计划的经历')).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '一次临时调整计划的经历' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '关闭资产库' }));
     expect(screen.queryByRole('dialog', { name: '创作资产库' })).toBeNull();
     expect(document.activeElement).toBe(trigger);
