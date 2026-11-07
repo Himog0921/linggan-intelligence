@@ -195,7 +195,7 @@ export function CreatorWorkbenchPreviewPage() {
 
   return (
     <div className={styles.root} data-preview-only="true">
-      <OpsFrame section="creation" domain="preview" scope={<span>创作演示</span>} immersive={mode === 'desk'} className="creator-workbench-preview-shell"
+      <OpsFrame section="creation" domain="preview" scope={<span>创作演示</span>} immersive={mode === 'desk'}
         tabs={<>
           <button type="button" aria-current={mode === 'writing' ? 'page' : undefined} onClick={() => setMode('writing')}>写稿</button>
           <button type="button" aria-current={mode === 'desk' ? 'page' : undefined} onClick={openDesk}>材料桌</button>
