@@ -1,6 +1,6 @@
 # CREATOR-WORKBENCH-G4 · React 隔离预览实现
 
-> 状态: G4 候选实现，等待目标工程 CI 与浏览器回执
+> 状态: 草案
 > 最后核对: 2026-11-07
 > 适用范围: Gold Master 创作工作台的开发态隔离预览；不代表正式创作页面重构、数据接入或生产发布
 > 事实来源: 用户批准的 Prototype-to-Product-Migration Skill；Gold Master SHA-256 `c1e564b38811bee179154ac3b2af1847abceab1fa5f44fb67a81d5b958f6350e`；SPEC G3 已批准；Intelligence main 基线 `a18a439ee69763e6dcfa8b7b3047aaaa489a61aa`
