@@ -100,7 +100,7 @@ try {
     page.on('pageerror', error => report.pageErrors.push({ width, message: error.message }));
     page.setDefaultTimeout(10_000);
     let located = false;
-    for (const pathname of ['/__preview/creator-workbench', '/ui-assets/__preview/creator-workbench']) {
+    for (const pathname of ['/ui-assets/__preview/creator-workbench', '/__preview/creator-workbench']) {
       try {
         await page.goto(origin + pathname, { waitUntil: 'networkidle', timeout: 20_000 });
         await page.getByRole('main', { name: '创作工作台' }).waitFor({ state: 'visible', timeout: 2500 });
@@ -196,11 +196,14 @@ try {
         await queue.click();
         assert.equal(await queue.getAttribute('aria-expanded'), 'true');
         assert.equal(await page.getByRole('complementary', { name: '稿件队列' }).isVisible(), true);
-        await queue.click();
+        await page.getByRole('button', { name: '关闭稿件队列' }).click();
+        assert.equal(await queue.getAttribute('aria-expanded'), 'false');
         await inspector.click();
         assert.equal(await inspector.getAttribute('aria-expanded'), 'true');
         assert.equal(await page.getByRole('complementary', { name: '稿件检查器' }).isVisible(), true);
         await screenshot(page, 'mobile-inspector-' + width + '.png');
+        await page.getByRole('button', { name: '关闭稿件检查器' }).click();
+        assert.equal(await inspector.getAttribute('aria-expanded'), 'false');
       });
     }
     await context.close();

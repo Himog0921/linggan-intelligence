@@ -231,6 +231,7 @@ export function CreatorWorkbenchPreviewPage() {
               <div className={styles.queueHead}>
                 <div><small>今日 · 10月27日 周一</small><strong>稿件队列</strong></div>
                 <ActionButton variant="outline" onClick={() => { const id = 'new-' + (drafts.length + 1); setDrafts(items => [...items, { ...INITIAL_DRAFTS[0]!, id, title: '新建稿件', paragraphs: makeParagraphs(id) }]); setDraftId(id); previewOnly('已建立本地演示稿件'); }}>新选题</ActionButton>
+                <button type="button" className={styles.mobileRail} aria-label="关闭稿件队列" onClick={() => setQueueDrawer(false)}>关闭</button>
               </div>
               <ActionButton className={styles.queueDeskButton} variant="quiet" onClick={openDesk}>选题与材料 <span>4 个选题</span></ActionButton>
               <div className={styles.queueScroll}>
@@ -289,6 +290,7 @@ export function CreatorWorkbenchPreviewPage() {
                 tabs[next]?.focus();
               }}>
                 {([['checks','检查'],['materials','素材'],['titles','标题'],['preview','预览']] as [InspectorTab,string][]).map(([id,label]) => <button key={id} id={'cw-inspector-tab-' + id} type="button" role="tab" tabIndex={inspectorTab === id ? 0 : -1} aria-controls="cw-inspector-panel" aria-selected={inspectorTab === id} onClick={() => setInspectorTab(id)}>{label}{id === 'checks' ? <b>{currentDraft.must + currentDraft.warn}</b> : null}</button>)}
+                <button type="button" className={styles.mobileRail} aria-label="关闭稿件检查器" onClick={() => setInspectorDrawer(false)}>关闭</button>
               </nav>
               <div id="cw-inspector-panel" className={styles.inspectorScroll} role="tabpanel" aria-labelledby={'cw-inspector-tab-' + inspectorTab} tabIndex={0}>
                 {inspectorTab === 'checks' ? <><div className={styles.checkGroup}><strong>必须先改 <b>{currentDraft.must}</b></strong><article><h3>账号身份信息待确认</h3><p>正式检查需要账号身份、机构关系和简介确认回执。</p><button type="button" onClick={() => { setAssetOpen(true); setAssetKind('persona'); }}>查看账号身份</button></article></div><div className={styles.checkGroup}><strong>提醒 <b>{currentDraft.warn}</b></strong><p>提醒项目仅为合成展示，正式规则以服务端检查结果为准。</p></div></> : null}

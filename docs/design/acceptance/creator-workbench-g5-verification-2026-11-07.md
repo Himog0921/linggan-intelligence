@@ -17,6 +17,8 @@
 
 ## G5 browser proof
 
+The G5 proof is routed through the existing `Delivery → web` reusable workflow. There is no independent PR-triggered G5 workflow. Mobile drawer close actions stay inside their respective overlay and must be keyboard-reachable.
+
 `node apps/web/test/e2e/creator-workbench-g5.mjs` starts the *real* Vite development route on localhost, blocks all API calls and third-party requests, and records:
 - six reference viewport sizes: 1440×1000, 1280×720, 1024×768, 820×900, 390×844, 375×812;
 - shared-shell/sidebar/queue/editor/inspector geometry versus frozen 1440 contract (±2px);

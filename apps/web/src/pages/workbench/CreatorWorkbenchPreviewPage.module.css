@@ -71,6 +71,7 @@
 .editorFoot small { color: var(--lgi-muted); }
 .inspector { display: grid; grid-template-rows: 48px minmax(0, 1fr); min-width: 0; min-height: 0; border-left: 1px solid var(--cw-line); background: var(--lgi-canvas); }
 .inspectorTabs { display: flex; align-items: stretch; gap: var(--lgi-space-3); padding: 0 var(--lgi-space-3); border-bottom: 1px solid var(--cw-line); }
+.inspectorTabs > .mobileRail { display: none; }
 .inspectorTabs button { position: relative; display: flex; align-items: center; gap: calc(var(--lgi-space-1) * 1.25); border: 0; background: transparent; color: var(--lgi-muted); font-size: var(--lgi-type-control-size); white-space: nowrap; }
 .inspectorTabs button[aria-selected="true"] { color: var(--lgi-ink); font-weight: var(--lgi-weight-semibold); }
 .inspectorTabs button[aria-selected="true"]::after { position: absolute; right: 0; bottom: 0; left: 0; height: calc(var(--lgi-space-1) * 0.5); background: var(--lgi-signal-mark); content: ""; }
@@ -167,6 +168,9 @@
   .inspector { position: absolute; inset: 0 0 0 auto; z-index: 8; display: none; width: min(calc(var(--lgi-space-1) * 85), 90vw); box-shadow: var(--lgi-shadow-overlay); }
   .write.inspectorOpen .inspector { display: grid; }
   .mobileRail { display: inline-flex; align-items: center; justify-content: center; }
+  .inspectorTabs > .mobileRail { display: inline-flex; }
+  .queueHead { flex-wrap: wrap; }
+  .queueHead > .mobileRail { margin-left: auto; }
   .editorHead { gap: calc(var(--lgi-space-1) * 1.5); padding-inline: var(--lgi-space-2); }
   .editorMeta { display: none; }
   .coverRow { grid-template-columns: 96px minmax(0,1fr); gap: var(--lgi-space-2); }
