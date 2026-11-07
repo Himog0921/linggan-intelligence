@@ -144,6 +144,11 @@ try {
     });
     if (width === 1440) {
       report.fonts = geometry.fonts;
+      await verify('approved-light-rail-and-preview-navigation', async () => {
+        assert.equal(await page.locator('.v7-context-row').getAttribute('data-context-texture'), 'light');
+        assert.equal(await page.getByText('A娃家长矩阵', { exact: true }).isVisible(), true);
+        assert.equal(await page.getByRole('button', { name: '发布记录' }).isVisible(), true);
+      });
       await verify('gold-master-1440-primary-geometry', async () => {
         near(geometry.header?.h, 121.69, 'header height');
         near(geometry.sidebar?.w, 160, 'shared sidebar width');
@@ -169,7 +174,7 @@ try {
         const text = 'G5 验证本地编辑状态保留';
         const paragraph = page.getByRole('textbox', { name: '正文第 1 段' });
         await paragraph.fill(text);
-        await page.getByRole('button', { name: '材料桌', exact: true }).click();
+        await page.getByRole('button', { name: /选题与材料/ }).click();
         await page.getByRole('region', { name: '沉浸材料桌' }).waitFor({ state: 'visible' });
         const canvas = page.getByTestId('canvas-viewport');
         const original = await canvas.locator('[data-canvas-item]').count();
