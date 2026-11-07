@@ -103,12 +103,12 @@ describe('CreatorWorkbenchPreviewPage', () => {
 
   it('mobile drawers provide reachable in-panel close buttons', () => {
     render(<CreatorWorkbenchPreviewPage />);
-    const queueToggle = screen.getByRole('button', { name: '稿件', exact: true });
+    const queueToggle = screen.getByRole('button', { name: /^稿件$/ });
     fireEvent.click(queueToggle);
     expect(queueToggle).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(screen.getByRole('button', { name: '关闭稿件队列' }));
     expect(queueToggle).toHaveAttribute('aria-expanded', 'false');
-    const inspectorToggle = screen.getByRole('button', { name: '检查', exact: true });
+    const inspectorToggle = screen.getByRole('button', { name: /^检查$/ });
     fireEvent.click(inspectorToggle);
     expect(inspectorToggle).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(screen.getByRole('button', { name: '关闭稿件检查器' }));
