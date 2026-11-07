@@ -125,6 +125,8 @@ export function CreatorWorkbenchPreviewPage() {
   const [queueDrawer, setQueueDrawer] = useState(false);
   const [inspectorDrawer, setInspectorDrawer] = useState(false);
   const assetTrigger = useRef<HTMLButtonElement>(null);
+  const assetWasOpened = useRef(false);
+  const nextLocalDeskId = useRef(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const pointerRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const currentDraft = drafts.find(item => item.id === draftId) ?? drafts[0]!;
@@ -137,7 +139,12 @@ export function CreatorWorkbenchPreviewPage() {
   }, [assetOpen]);
 
   useEffect(() => {
-    if (!assetOpen) assetTrigger.current?.focus({ preventScroll: true });
+    if (assetOpen) {
+      assetWasOpened.current = true;
+    } else if (assetWasOpened.current) {
+      assetWasOpened.current = false;
+      assetTrigger.current?.focus({ preventScroll: true });
+    }
   }, [assetOpen]);
 
   useEffect(() => {
@@ -168,7 +175,7 @@ export function CreatorWorkbenchPreviewPage() {
   const previewOnly = (action: string) => setNotice(action + '：当前为隔离预览，未调用正式 API、模型、采集或发布服务。');
   const openDesk = () => { setMode('desk'); setFocusedFrame(null); setZoom(1); setPan({ x: 30, y: 24 }); setDeskSearchOpen(true); setDeskInspectorOpen(true); };
   const addDeskItem = (kind: DeskItem['kind']) => {
-    const id = 'local-' + (deskItems.length + 1);
+    const id = 'local-' + (++nextLocalDeskId.current);
     const item: DeskItem = { id, kind, title: kind === 'frame' ? '新选题框' : '新便签', body: '', x: 180 + deskItems.length * 24, y: 180 + deskItems.length * 18, width: kind === 'frame' ? 300 : 230, height: kind === 'frame' ? 188 : 132 };
     setDeskItems(items => [...items, item]);
     setSelectedDeskId(id);
@@ -176,7 +183,7 @@ export function CreatorWorkbenchPreviewPage() {
   };
 
   const onCanvasPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0 || (event.target as HTMLElement).closest('button,input,textarea,.deskCard')) return;
+    if (event.button !== 0 || (event.target as HTMLElement).closest('button,input,textarea,[data-canvas-item]')) return;
     pointerRef.current = { x: event.clientX, y: event.clientY, panX: pan.x, panY: pan.y };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
@@ -192,7 +199,7 @@ export function CreatorWorkbenchPreviewPage() {
     setZoom(value => Math.max(0.45, Math.min(2.4, value * (event.deltaY < 0 ? 1.08 : 0.92))));
   };
   const onCanvasDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest('button,.deskCard')) return;
+    if ((event.target as HTMLElement).closest('button,[data-canvas-item]')) return;
     addDeskItem('note');
   };
   const deskVisibleItems = deskItems.filter(item => {
@@ -270,10 +277,20 @@ export function CreatorWorkbenchPreviewPage() {
             </section>
 
             <aside className={styles.inspector} aria-label="稿件检查器">
-              <nav className={styles.inspectorTabs} role="tablist" aria-label="检查器视图">
-                {([['checks','检查'],['materials','素材'],['titles','标题'],['preview','预览']] as [InspectorTab,string][]).map(([id,label]) => <button key={id} type="button" role="tab" aria-selected={inspectorTab === id} onClick={() => setInspectorTab(id)}>{label}{id === 'checks' ? <b>{currentDraft.must + currentDraft.warn}</b> : null}</button>)}
+              <nav className={styles.inspectorTabs} role="tablist" aria-label="检查器视图" onKeyDown={event => {
+                if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+                const index = tabs.indexOf(document.activeElement as HTMLButtonElement);
+                if (index < 0) return;
+                event.preventDefault();
+                const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                const nextTab = (['checks', 'materials', 'titles', 'preview'] as InspectorTab[])[next];
+                if (nextTab) setInspectorTab(nextTab);
+                tabs[next]?.focus();
+              }}>
+                {([['checks','检查'],['materials','素材'],['titles','标题'],['preview','预览']] as [InspectorTab,string][]).map(([id,label]) => <button key={id} id={'cw-inspector-tab-' + id} type="button" role="tab" tabIndex={inspectorTab === id ? 0 : -1} aria-controls="cw-inspector-panel" aria-selected={inspectorTab === id} onClick={() => setInspectorTab(id)}>{label}{id === 'checks' ? <b>{currentDraft.must + currentDraft.warn}</b> : null}</button>)}
               </nav>
-              <div className={styles.inspectorScroll}>
+              <div id="cw-inspector-panel" className={styles.inspectorScroll} role="tabpanel" aria-labelledby={'cw-inspector-tab-' + inspectorTab} tabIndex={0}>
                 {inspectorTab === 'checks' ? <><div className={styles.checkGroup}><strong>必须先改 <b>{currentDraft.must}</b></strong><article><h3>账号身份信息待确认</h3><p>正式检查需要账号身份、机构关系和简介确认回执。</p><button type="button" onClick={() => { setAssetOpen(true); setAssetKind('persona'); }}>查看账号身份</button></article></div><div className={styles.checkGroup}><strong>提醒 <b>{currentDraft.warn}</b></strong><p>提醒项目仅为合成展示，正式规则以服务端检查结果为准。</p></div></> : null}
                 {inspectorTab === 'materials' ? <><h3>本稿使用的材料</h3><p>材料来源和使用资格以正式服务端回执为准。</p><ActionButton variant="outline" onClick={openDesk}>打开材料桌</ActionButton></> : null}
                 {inspectorTab === 'titles' ? <><h3>标题候选</h3>{['先把眼前这一件事做好','计划之外也没关系','变化其实很具体'].map(text => <button className={styles.titleCandidate} type="button" key={text} onClick={() => updateDraft({ noteTitle: text })}>{text}</button>)}</> : null}
@@ -298,7 +315,7 @@ export function CreatorWorkbenchPreviewPage() {
               <div className={styles.canvasViewport} data-testid="canvas-viewport" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onWheel={onCanvasWheel} onDoubleClick={onCanvasDoubleClick} tabIndex={0} onKeyDown={event => { if (event.key === 'Escape') setFocusedFrame(null); }}>
                 <div className={styles.canvasGrid} />
                 <div className={styles.canvasWorld} style={{ transform: 'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')' }}>
-                  {deskItems.map(item => <article key={item.id} className={[styles.deskCard, item.kind === 'frame' ? styles.frameCard : item.kind === 'note' ? styles.noteCard : styles.materialCard, selectedDeskId === item.id ? styles.selectedCard : '', focusedFrame === item.id ? styles.focusedCard : ''].join(' ')} style={{ left: item.x, top: item.y, width: item.width, minHeight: item.height } as CSSProperties} onClick={() => { setSelectedDeskId(item.id); if (item.kind === 'frame') setFocusedFrame(item.id); }} tabIndex={0} aria-label={item.title}>
+                  {deskItems.map(item => <article key={item.id} data-canvas-item={item.id} className={[styles.deskCard, item.kind === 'frame' ? styles.frameCard : item.kind === 'note' ? styles.noteCard : styles.materialCard, selectedDeskId === item.id ? styles.selectedCard : '', focusedFrame === item.id ? styles.focusedCard : ''].join(' ')} style={{ left: item.x, top: item.y, width: item.width, minHeight: item.height } as CSSProperties} onClick={() => { setSelectedDeskId(item.id); if (item.kind === 'frame') setFocusedFrame(item.id); }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setSelectedDeskId(item.id); if (item.kind === 'frame') setFocusedFrame(item.id); } }} tabIndex={0} aria-label={item.title}>
                     <header><strong>{item.title}</strong><small>{item.kind === 'frame' ? '选题框' : item.kind === 'note' ? '便签' : '材料卡'}</small></header>
                     <p>{item.body || '点击检查器补充内容。'}</p>
                     {item.kind === 'frame' ? <small>材料 {deskItems.filter(card => card.kind === 'material').length} 张 · 演示账号</small> : null}

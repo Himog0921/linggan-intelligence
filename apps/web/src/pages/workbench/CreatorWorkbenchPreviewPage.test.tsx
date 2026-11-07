@@ -62,9 +62,43 @@ describe('CreatorWorkbenchPreviewPage', () => {
     render(<CreatorWorkbenchPreviewPage />);
     fireEvent.click(screen.getByRole('button', { name: '材料桌' }));
     const canvas = screen.getByTestId('canvas-viewport');
+    const before = canvas.querySelectorAll('[data-canvas-item]').length;
+    const existingCard = canvas.querySelector<HTMLElement>('[data-canvas-item]');
+    expect(existingCard).not.toBeNull();
+    fireEvent.doubleClick(existingCard!);
+    expect(canvas.querySelectorAll('[data-canvas-item]')).toHaveLength(before);
     fireEvent.doubleClick(canvas);
-    expect(screen.getByText('新便签')).toBeTruthy();
+    expect(canvas.querySelectorAll('[data-canvas-item]')).toHaveLength(before + 1);
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
+  it('does not steal initial focus and supports keyboard tab navigation', async () => {
+    const user = userEvent.setup();
+    render(<CreatorWorkbenchPreviewPage />);
+    expect(document.activeElement).not.toBe(screen.getByRole('button', { name: '资产库' }));
+    const first = screen.getByRole('tab', { name: /检查/ });
+    first.focus();
+    await user.keyboard('{ArrowRight}');
+    const materials = screen.getByRole('tab', { name: '素材' });
+    expect(materials).toHaveAttribute('aria-selected', 'true');
+    expect(document.activeElement).toBe(materials);
+    await user.keyboard('{End}');
+    expect(screen.getByRole('tab', { name: '预览' })).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{Home}');
+    expect(first).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('keeps locally added canvas item IDs unique after delete and re-add', async () => {
+    const user = userEvent.setup();
+    render(<CreatorWorkbenchPreviewPage />);
+    await user.click(screen.getByRole('button', { name: '材料桌' }));
+    const canvas = screen.getByTestId('canvas-viewport');
+    fireEvent.doubleClick(canvas);
+    await user.click(screen.getByRole('button', { name: '移出画布' }));
+    fireEvent.doubleClick(canvas);
+    fireEvent.doubleClick(canvas);
+    const ids = [...canvas.querySelectorAll<HTMLElement>('[data-canvas-item]')].map(item => item.dataset.canvasItem);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
 });
