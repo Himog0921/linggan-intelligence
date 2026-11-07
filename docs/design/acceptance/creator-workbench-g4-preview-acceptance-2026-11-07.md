@@ -1,6 +1,6 @@
 # ACC-CREATOR-WORKBENCH-G4 · 隔离 React 预览验收
 
-> 状态: 待目标工程 CI 与浏览器验证
+> 状态: 草案
 > 最后核对: 2026-11-07
 > 适用范围: `preview/creator-workbench-g4-integration` 开发态预览路由
 > 事实来源: SPEC G3 用户批准；Gold Master SHA-256 `c1e564b38811bee179154ac3b2af1847abceab1fa5f44fb67a81d5b958f6350e`；本分支源码
