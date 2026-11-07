@@ -1,6 +1,10 @@
 # Creator Workbench G4/G5 continuation — verification ledger
 
-> Status: G4 code candidate committed; G5 automatic browser smoke is not full Gold Master acceptance.
+> 状态: 草案
+> 最后核对: 2026-11-07
+> 适用范围: 创作工作台 G4 隔离预览及 G5 浏览器验收，PR #549
+> 事实来源: Gold Master SHA-256 c1e564b38811bee179154ac3b2af1847abceab1fa5f44fb67a81d5b958f6350e；批准的 G3 SPEC；真实仓库代码及 CI
+> 冲突时以谁为准: 真实代码、CI 和同条件浏览器证据；文档声明不可替代通过
 > Authority: G3 SPEC, original HTML SHA-256 `c1e564b38811bee179154ac3b2af1847abceab1fa5f44fb67a81d5b958f6350e`.
 > Branch: `preview/creator-workbench-g4-g5-verify-20261107`; PR #549; production `/ops/creation` untouched.
 
