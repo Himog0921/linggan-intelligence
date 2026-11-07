@@ -22,14 +22,42 @@ export function ControlAction({ control, action, label }: { control: Control; ac
   </Impact>;
 }
 export function LimitsFields({ limits, max, levels, singleAttempt = false }: { limits: ModelLimits | null; max: { contextTokens: number; maxOutputTokens: number; maxTimeoutSeconds: number; maxAttempts: number }; levels: string[]; singleAttempt?: boolean }) {
-  return <div className={styles.grid}>
-    <Field label="输入 token 上限"><input type="number" name="inputTokens" min={1024} max={max.contextTokens} required defaultValue={limits?.inputTokens} /></Field>
-    <Field label="输出 token 上限"><input type="number" name="outputTokens" min={16} max={max.maxOutputTokens} required defaultValue={limits?.outputTokens} /></Field>
-    <Field label="单次等待秒数"><input type="number" name="timeoutSeconds" min={1} max={max.maxTimeoutSeconds} required defaultValue={limits?.timeoutSeconds} /></Field>
-    <Field label="最多尝试次数" hint={singleAttempt ? '每个任务项仅发送一次，失败不自动重试。' : undefined}><input type="number" name="attempts" min={1} max={singleAttempt ? 1 : max.maxAttempts} readOnly={singleAttempt} required defaultValue={singleAttempt ? 1 : limits?.attempts ?? 1} /></Field>
-    <Field label="思考等级"><select name="thinkingLevel" defaultValue={limits?.thinkingLevel ?? ''} required><option value="">请选择</option>{levels.map(level => <option key={level} value={level}>{THINKING[level] ?? level}</option>)}</select></Field>
+  const canTurnOff = levels.includes('off');
+  const enabledLevels = levels.filter(level => level !== 'off');
+  const canTurnOn = enabledLevels.length > 0;
+  const [mode, setMode] = useState(() => {
+    if (limits?.thinkingLevel === 'off') return canTurnOff ? 'off' : '';
+    if (limits?.thinkingLevel) return canTurnOn ? 'on' : '';
+    if (canTurnOn && !canTurnOff) return 'on';
+    if (canTurnOff && !canTurnOn) return 'off';
+    return '';
+  });
+  const [level, setLevel] = useState(limits?.thinkingLevel ?? '');
+  return <>
+    <div className={styles.grid}>
+      <Field label="输入 token 上限"><input type="number" name="inputTokens" min={1024} max={max.contextTokens} required defaultValue={limits?.inputTokens} /></Field>
+      <Field label="输出 token 上限"><input type="number" name="outputTokens" min={16} max={max.maxOutputTokens} required defaultValue={limits?.outputTokens} /></Field>
+      <Field label="单次等待秒数"><input type="number" name="timeoutSeconds" min={1} max={max.maxTimeoutSeconds} required defaultValue={limits?.timeoutSeconds} /></Field>
+      <Field label="最多尝试次数" hint={singleAttempt ? '每个任务项仅发送一次，失败不自动重试。' : undefined}><input type="number" name="attempts" min={1} max={singleAttempt ? 1 : max.maxAttempts} readOnly={singleAttempt} required defaultValue={singleAttempt ? 1 : limits?.attempts ?? 1} /></Field>
+    </div>
+    <div className={styles.grid}>
+      <Field label="思考开关" hint={!canTurnOn ? '此模型的能力声明仅支持关闭思考。' : !canTurnOff ? '此模型的能力声明仅支持开启思考。' : undefined}>
+        <select value={mode} onChange={event => setMode(event.target.value)} required>
+          <option value="" disabled>请选择</option>
+          {canTurnOff ? <option value="off">关闭</option> : null}
+          {canTurnOn ? <option value="on">开启</option> : null}
+        </select>
+      </Field>
+      <Field label="思考等级">
+        <select name="thinkingLevel" value={mode === 'on' && enabledLevels.includes(level) ? level : ''} onChange={event => setLevel(event.target.value)} disabled={mode !== 'on'} required>
+          <option value="" disabled>{canTurnOn ? '请选择' : '无可选等级'}</option>
+          {enabledLevels.map(level => <option key={level} value={level}>{THINKING[level] ?? level}</option>)}
+        </select>
+      </Field>
+    </div>
+    {mode === 'off' ? <input type="hidden" name="thinkingLevel" value="off" /> : null}
     <p><small>输入与输出之和必须在已声明的上下文容量内；保存时由服务端核对。</small></p>
-  </div>;
+  </>;
 }
 const COLUMNS: Record<string, string> = { title: '标题', body: '正文', tags: '标签', ocr: '图片文字', transcript: '音频转录', frame_text: '视频画面文字' };
 export function AiTaskForm({ data, task, action }: { data: AiSettings; task: Task; action: AiAction }) {
@@ -37,8 +65,10 @@ export function AiTaskForm({ data, task, action }: { data: AiSettings; task: Tas
   const [identity, setIdentity] = useState(current.model?.identityRef ?? '');
   const [budgetMode, setBudgetMode] = useState(current.budget.mode);
   const selected = data.models.find(m => m.identityRef === identity);
+  const connection = data.connections.find(c => c.connectionRef === selected?.connectionRef);
   const modelRequired = task.taskKey !== 'model_probe';
   const isOcr = task.taskKey === 'ocr_recognition';
+  const canConfigureBeforeBinding = task.taskKey === 'note_interpretation' && task.requiresSkill && !current.skillVersionRef;
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -54,8 +84,9 @@ export function AiTaskForm({ data, task, action }: { data: AiSettings; task: Tas
     <h3>{isOcr ? 'OCR 模型' : task.label + '配置'}</h3><p>{TASK_STATE[task.lifecycle] ?? '接入状态未知'} · {budgetText(current.budget)}</p>
     {isOcr ? <p>手动选择图片，识别结果按来源顺序写入研究底稿，可逐张对照原图修正。保存模型配置不会开始识读。</p> : null}
     {modelRequired ? <><Field label={isOcr ? '选择 OCR 模型' : '选择模型'} hint={isOcr ? '复用已有连接和能力；可更换统一运输层支持的模型。文本测试成功不代表图片效果已验证。' : undefined}><select value={identity} onChange={event => setIdentity(event.target.value)} required><option value="">请选择</option>{data.models.map(model => <option key={model.identityRef} value={model.identityRef} disabled={isOcr && (!model.capability || !model.selectionModelRef)}>{data.connections.find(c => c.connectionRef === model.connectionRef)?.name} · {model.modelId}{model.capability ? '' : '（能力待配置）'}</option>)}</select></Field>
-      {selected?.capability ? <LimitsFields key={identity} singleAttempt={isOcr || task.taskKey.startsWith('topic_research') || task.taskKey === 'work_comparison' || task.taskKey === 'creator_research' || task.taskKey === 'creator_account_research' || task.taskKey === 'comment_study' || task.taskKey.startsWith('comment_problem_')} limits={current.model?.identityRef === identity ? current.model.limits : null} max={{ ...selected.capability, maxAttempts: data.resources.maxAttempts }} levels={selected.capability.thinkingLevels} /> : <p>当前地址没有已声明能力，请先到模型区补齐。</p>}</> : <p>模型测试在模型区逐次选择连接与模型；此处仅配置测试任务的额度。</p>}
-    {task.skillAllowed ? <Field label="固定做法版本" hint="选择新版本并启用后替换当前版本；旧版本仍可切换回退。"><select name="skillVersionRef" defaultValue={current.skillVersionRef ?? ''} required={task.requiresSkill}><option value="">暂不绑定</option>{data.skills.flatMap(skill => skill.versions.map(version => <option key={version.versionRef} value={version.versionRef}>{skill.name} · v{version.versionNo}{version.disableModelInvocation ? '（不供模型自动发现，可人工绑定）' : ''}</option>))}</select></Field> : null}
+      {selected?.capability ? <LimitsFields key={`${identity}:${selected.capability.capabilityRef}`} singleAttempt={isOcr || task.taskKey.startsWith('topic_research') || task.taskKey === 'work_comparison' || task.taskKey === 'creator_research' || task.taskKey === 'creator_account_research' || task.taskKey === 'comment_study' || task.taskKey.startsWith('comment_problem_')} limits={current.model?.identityRef === identity ? current.model.limits : null} max={{ ...selected.capability, maxAttempts: data.resources.maxAttempts }} levels={selected.capability.thinkingLevels} /> : <p>当前地址没有已声明能力，请先到模型区补齐。</p>}
+      {selected && connection && data.protocol.apis[connection.api] ? <small>思考等级来自模型的能力声明。 <Link to={`?view=models&tab=technical&connection=${encodeURIComponent(connection.connectionRef)}&model=${encodeURIComponent(selected.identityRef)}`}>编辑模型能力声明</Link></small> : null}</> : <p>模型测试在模型区逐次选择连接与模型；此处仅配置测试任务的额度。</p>}
+    {task.skillAllowed ? <Field label="固定做法版本" hint={canConfigureBeforeBinding ? '可先保存模型配置，发起单篇分析前需启用做法。' : '选择新版本并启用后替换当前版本；旧版本仍可切换回退。'}><select name="skillVersionRef" defaultValue={current.skillVersionRef ?? ''} required={task.requiresSkill && !canConfigureBeforeBinding}><option value="">暂不绑定</option>{data.skills.flatMap(skill => skill.versions.map(version => <option key={version.versionRef} value={version.versionRef}>{skill.name} · v{version.versionNo}{version.disableModelInvocation ? '（不供模型自动发现，可人工绑定）' : ''}</option>))}</select></Field> : null}
     {['note_interpretation', 'direction_list_draft', 'direction_proposal'].includes(task.taskKey) ? <fieldset><legend>允许输入的材料列</legend><div className={styles.checklist}>{Object.entries(COLUMNS).map(([key, label]) => <label key={key}><input type="checkbox" name="materialColumns" value={key} defaultChecked={current.materialColumns.includes(key)} />{label}</label>)}</div></fieldset> : null}
     <div className={styles.grid}><Field label="每日额度"><select value={budgetMode} onChange={event => { const value = event.target.value; if (value === 'unconfigured' || value === 'unlimited' || value === 'capped') setBudgetMode(value); }}><option value="unconfigured">待配置</option><option value="unlimited">当前不设每日上限</option><option value="capped">指定每日 token 上限</option></select></Field>
       {budgetMode === 'capped' ? <Field label="每日 token 上限" hint="预留额度包含每次输入与输出；未知用量仍占预留。"><input name="budgetTokens" inputMode="numeric" pattern="[1-9][0-9]*" required defaultValue={current.budget.mode === 'capped' ? current.budget.tokens : ''} /></Field> : null}</div>

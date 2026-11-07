@@ -25,10 +25,13 @@ export function AiCapabilityForm({ data, model, connection, action }: { data: Ai
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); const form = new FormData(event.currentTarget);
     try {
-      const protocol = readProtocolFields(form, spec!);
+      const catalogPreset = preset && !editedPreset ? preset : null;
+      const protocol = catalogPreset
+        ? { compat: catalogPreset.compat, thinkingLevelMap: catalogPreset.thinkingLevelMap }
+        : readProtocolFields(form, spec!);
       const payload = { identityRef: model.identityRef, endpointRef: model.endpointRef, expectedCapabilityRef: cap?.capabilityRef ?? null,
-        source: preset && !editedPreset ? 'pi_catalog' : 'manual', sourceVersion: String(form.get('sourceVersion')), probeInvocationRef: null,
-        limits: { contextTokens: numeric(form, 'contextTokens'), maxOutputTokens: numeric(form, 'maxOutputTokens'), maxTimeoutSeconds: numeric(form, 'maxTimeoutSeconds'), thinkingLevels: form.getAll('thinkingLevels') },
+        source: catalogPreset ? 'pi_catalog' : 'manual', sourceVersion: String(form.get('sourceVersion')), probeInvocationRef: null,
+        limits: { contextTokens: numeric(form, 'contextTokens'), maxOutputTokens: numeric(form, 'maxOutputTokens'), maxTimeoutSeconds: numeric(form, 'maxTimeoutSeconds'), thinkingLevels: catalogPreset?.limits.thinkingLevels ?? form.getAll('thinkingLevels') },
         ...protocol, outputMode: String(form.get('outputMode')), strictSchema: form.get('strictSchema') === 'on' };
       await action.run(`capability:${model.identityRef}`, payload, commandRef => command('capabilities', { ...payload, commandRef }), '能力声明已保存。这是声明来源，当前密钥的实际调用能力仍需单独测试。');
     } catch (error) { action.setNotice({ tone: 'error', text: error instanceof Error ? error.message : '请核对能力声明。' }); }
@@ -36,7 +39,9 @@ export function AiCapabilityForm({ data, model, connection, action }: { data: Ai
   return <div className={styles.group}><div className={styles.row}><h3>能力声明</h3><ActionButton onClick={() => setCatalogOpen(true)}>读取本机离线模型目录</ActionButton></div>
     <p>当前来源：{cap ? `${cap.source} · ${cap.sourceVersion}` : '尚未声明'}。目录只提供参考，不证明当前地址可用。</p>
     {catalogOpen ? <><Field label="目录参考"><select value={presetIndex} onChange={event => { setPresetIndex(event.target.value); setEditedPreset(false); }}><option value="">手动声明</option>{catalog.data?.presets.map((p, i) => <option key={`${p.provider}:${p.modelId}`} value={i} disabled={!p.supported}>{p.provider} · {p.name}{p.supported ? '' : '（当前不支持）'}</option>)}</select></Field>{catalog.isPending ? <p>正在读取离线目录…</p> : catalog.isError ? <p role="alert">离线目录读取失败，可以继续手动填写。</p> : !catalog.data?.presets.length ? <p>未找到匹配的目录项，请手动声明。</p> : null}</> : null}
-    <form key={`${model.identityRef}:${cap?.capabilityRef ?? ''}:${presetIndex}`} className={styles.form} onChange={() => setEditedPreset(true)} onSubmit={event => void save(event)}>
+    <form key={`${model.identityRef}:${cap?.capabilityRef ?? ''}:${presetIndex}`} className={styles.form} onChange={event => {
+      if (event.target !== event.currentTarget.elements.namedItem('maxTimeoutSeconds')) setEditedPreset(true);
+    }} onSubmit={event => void save(event)}>
       <div className={styles.grid}><Field label="上下文容量"><input type="number" name="contextTokens" min={1024} max={data.resources.maxContextTokens} required defaultValue={preset?.limits.contextTokens ?? cap?.contextTokens} /></Field>
         <Field label="最大输出容量"><input type="number" name="maxOutputTokens" min={16} max={data.resources.maxOutputTokens} required defaultValue={preset?.limits.maxOutputTokens ?? cap?.maxOutputTokens} /></Field>
         <Field label="最长等待秒数" hint="目录不提供此值，请按测试情况填写。"><input type="number" name="maxTimeoutSeconds" min={1} max={data.resources.maxTimeoutSeconds} required defaultValue={cap?.maxTimeoutSeconds} /></Field>
