@@ -108,7 +108,14 @@ try {
         located = true;
         break;
       } catch (error) {
-        console.log('Preview path not ready: ' + pathname + ' (' + String(error?.message || error).slice(0, 140) + ')');
+        const diagnostic = await page.evaluate(() => ({
+          path: location.pathname, documentTitle: document.title,
+          bodyText: (document.body?.innerText || '').slice(0, 400),
+          scripts: [...document.querySelectorAll('script')].map(script => script.getAttribute('src')),
+          mainCount: document.querySelectorAll('main').length,
+        })).catch(() => null);
+        console.log('Preview path not ready: ' + pathname + ' (' + String(error?.message || error).slice(0, 140) + ') ' + JSON.stringify(diagnostic));
+        await screenshot(page, 'route-probe-' + width + '-' + pathname.replace(/[^a-z0-9]/gi, '_')).catch(() => {});
       }
     }
     if (!located) {
