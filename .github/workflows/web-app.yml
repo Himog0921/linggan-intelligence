@@ -41,3 +41,20 @@ jobs:
           echo "Second identical revision build: ${second_elapsed}s"
           ((second_elapsed <= 5)) || { echo 'Matching revision unexpectedly rebuilt' >&2; exit 1; }
           bash scripts/runtime/prepare-web.sh --check "$revision"
+      # A preview-only page uses the existing Delivery/Web gate; no competing PR workflow.
+      - name: Chromium for creator workbench G5
+        if: startsWith(github.head_ref, 'preview/creator-workbench-')
+        run: npx --prefix apps/web playwright install --with-deps chromium
+      - name: Real React G5 six-viewport browser proof
+        if: startsWith(github.head_ref, 'preview/creator-workbench-')
+        env:
+          CW_G5_DIR: ${{ runner.temp }}/creator-workbench-g5
+        run: node apps/web/test/e2e/creator-workbench-g5.mjs
+      - name: Preserve G5 screenshots and geometry
+        if: always() && startsWith(github.head_ref, 'preview/creator-workbench-')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: creator-workbench-g5-browser-evidence
+          path: ${{ runner.temp }}/creator-workbench-g5
+          retention-days: 7
+          if-no-files-found: warn

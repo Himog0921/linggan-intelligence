@@ -11,6 +11,10 @@ import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PAT
 
 const LoginPage = lazy(() => import('../pages/login/LoginPage').then(module => ({ default: module.LoginPage })));
 const WorkbenchPage = lazy(() => import('../pages/workbench/WorkbenchPage').then(module => ({ default: module.WorkbenchPage })));
+// G4 only: isolated preview route exists in Vite development, never in the production route table.
+const CreatorWorkbenchPreviewPage = import.meta.env.DEV
+  ? lazy(() => import('../pages/workbench/CreatorWorkbenchPreviewPage').then(module => ({ default: module.CreatorWorkbenchPreviewPage })))
+  : null;
 // 语料页按需加载：打开设置页或工作台时不下载创作者页的代码。
 const CreatorsPage = lazy(() => import('../pages/corpus/creators/CreatorsPage').then(module => ({ default: module.CreatorsPage })));
 const EvidencePage = lazy(() => import('../pages/corpus/evidence/EvidencePage').then(module => ({ default: module.EvidencePage })));
@@ -39,6 +43,12 @@ const router = createBrowserRouter([
   { path: ACCOUNT_SETTINGS_PATH, element: <AccountSecurityPage /> },
   { path: TEAM_SETTINGS_PATH, element: <TeamSettingsPage /> },
   { path: WORKBENCH_PATH, element: <Suspense fallback={<p role="status">正在打开工作台…</p>}><WorkbenchPage /></Suspense> },
+  // Vite is served under /ui-assets/ while React Router has no basename. Register the
+  // prefixed URL only in DEV so the real Vite preview can be opened and verified.
+  ...(CreatorWorkbenchPreviewPage
+    ? ['/__preview/creator-workbench', '/ui-assets/__preview/creator-workbench']
+        .map(path => ({ path, element: <Suspense fallback={<p role="status">正在打开隔离创作预览…</p>}><CreatorWorkbenchPreviewPage /></Suspense> }))
+    : []),
   { path: CREATORS_PATH, element: <Suspense fallback={<p role="status">正在打开创作者…</p>}><CreatorsPage /></Suspense> },
   { path: EVIDENCE_PATH, element: <Suspense fallback={<p role="status">正在打开证据库…</p>}><EvidencePage /></Suspense> },
   { path: COMMENTS_PATH, HydrateFallback: () => <p role="status">正在打开评论研究…</p>, lazy: async () => ({ Component: (await import('../pages/corpus/comments/CommentsPage')).CommentsPage }) },

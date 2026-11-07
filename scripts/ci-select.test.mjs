@@ -117,17 +117,25 @@ test('every current browser script has an explicit proof or manual-only classifi
     'unified-research-real-chain.mjs',
   ];
   const ocrAudit = ['ocr-recognition-real-chain.mjs'];
+  // Creator workbench G5 is a dedicated browser step within the reusable Web workflow.
+  const dedicatedWeb = ['creator-workbench-g5.mjs'];
   const manualOnly = [
     'ops-visual.mjs', 'team-member-scroll.mjs',
     'topics-performance.mjs', 'topics-pixels.py', 'topics-visual.mjs',
   ];
   assert.deepEqual(readdirSync(join(root, 'apps/web/test/e2e')).sort(),
-    [...realChain, ...ocrAudit, ...manualOnly].sort(), 'new scripts need a deliberate CI route');
+    [...realChain, ...ocrAudit, ...manualOnly, ...dedicatedWeb].sort(), 'new scripts need a deliberate CI route');
   for (const name of realChain) {
     assert.ok(selected([`apps/web/test/e2e/${name}`]).includes('web_real_chain'), name);
   }
   for (const name of ocrAudit) {
     assert.ok(selected([`apps/web/test/e2e/${name}`]).includes('ocr_recognition'), name);
+  }
+  const webWorkflow = readFileSync(join(root, '.github/workflows/web-app.yml'), 'utf8');
+  for (const name of dedicatedWeb) {
+    assert.ok(selected([`apps/web/test/e2e/${name}`]).includes('web'), name);
+    assert.ok(webWorkflow.includes(`node apps/web/test/e2e/${name}`),
+      name + ': dedicated Chromium proof must run through Delivery web checks');
   }
 });
 
