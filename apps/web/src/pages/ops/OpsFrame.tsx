@@ -5,13 +5,13 @@ import { ContextTabs } from '../../shared/ContextTabs';
 import { NavIcon, Sidebar } from '../../shared/Sidebar';
 
 /** Ops owns two secondary destinations; page sections and scope belong to Z02. */
-export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, restricted = false, children }: {
+export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, className, restricted = false, children }: {
   section: 'data' | 'creation'; domain: string; scope: ReactNode; tabs: ReactNode;
-  meta?: ReactNode; foot?: ReactNode; immersive?: boolean; restricted?: boolean; children: ReactNode;
+  meta?: ReactNode; foot?: ReactNode; immersive?: boolean; className?: string; restricted?: boolean; children: ReactNode;
 }) {
   const selectedDomain = domain && domain !== 'all' ? `?domain=${encodeURIComponent(domain)}` : '';
   return <AppShell active="ops" restrictedOps={restricted}
-    boundaryLabel="本机服务状态" className={immersive ? 'ops-immersive' : undefined}
+    boundaryLabel="本机服务状态" className={[immersive ? 'ops-immersive' : '', className ?? ''].filter(Boolean).join(' ') || undefined}
     contextBar={{
       breadcrumb: <ContextBreadcrumb items={['运营', scope, section === 'creation' ? '创作' : '数据']} />,
       navigation: <ContextTabs label={section === 'data' ? '数据页面' : '创作页面'}>{tabs}</ContextTabs>,
