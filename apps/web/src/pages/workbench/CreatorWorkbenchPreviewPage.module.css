@@ -17,6 +17,8 @@
 .demoMarker { color: var(--lgi-muted); font-size: var(--lgi-type-aux-size); white-space: nowrap; }
 .metaCount { color: var(--lgi-muted); font-size: var(--lgi-type-aux-size); white-space: nowrap; }
 .metaCount b { color: var(--lgi-ink); font-family: var(--lgi-font-data); font-weight: var(--lgi-weight-semibold); }
+.write[hidden],.desk[hidden] { display: none !important; }
+.fullWidth { width: 100%; }
 .main { position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; background: var(--lgi-canvas); }
 .write { position: relative; display: grid; grid-template-columns: var(--cw-queue) minmax(0, 1fr) var(--cw-inspector); width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; }
 .queue { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--cw-line); background: var(--lgi-canvas-low); }
@@ -127,12 +129,12 @@
 .deskInspectorHead small { color: var(--lgi-muted); font-size: var(--lgi-type-aux-size); }
 .deskInspector textarea { min-height: 130px; resize: vertical; }
 .inspectorActions { display: grid; gap: var(--lgi-space-2); }
-.assetDialog { width: min(1392px, calc(100vw - 48px)); height: min(920px, calc(100dvh - 80px)); max-width: none; max-height: none; padding: 0; border: 2px solid var(--lgi-ink); background: var(--lgi-canvas); color: var(--lgi-ink); box-shadow: var(--lgi-shadow-brutal-lg); }
+.assetDialog { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(1392px, calc(100vw - 48px)); height: min(920px, calc(100dvh - 80px)); max-width: none; max-height: none; padding: 0; border: 2px solid var(--lgi-ink); background: var(--lgi-canvas); color: var(--lgi-ink); box-shadow: var(--lgi-shadow-brutal-lg); }
 .assetDialog::backdrop { background: rgba(11,15,18,.28); }
 .assetHead { display: flex; align-items: center; justify-content: space-between; min-height: 72px; padding: var(--lgi-space-3) var(--lgi-space-5); border-bottom: 1px solid var(--cw-line); }
 .assetHead small { color: var(--lgi-muted); font-family: var(--lgi-font-data); font-size: var(--lgi-type-aux-size); }
 .assetHead h2 { margin: 2px 0 0; font-size: var(--lgi-type-section-size); }
-.assetBody { display: grid; grid-template-columns: 220px minmax(300px, 1fr) minmax(320px, 1.1fr); min-height: 0; height: calc(100% - 126px); }
+.assetBody { display: grid; grid-template-columns: 220px minmax(300px, 1fr) minmax(320px, 1.1fr); min-height: 0; overflow: hidden; }
 .assetIndex { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow: auto; padding: var(--lgi-space-3); border-right: 1px solid var(--cw-line); background: var(--lgi-canvas-low); }
 .assetIndex button { display: grid; gap: 4px; padding: var(--lgi-space-3); border: 0; border-left: 2px solid transparent; background: transparent; color: var(--lgi-body); text-align: left; }
 .assetIndex button[aria-current="page"] { border-left-color: var(--lgi-signal-mark); background: var(--lgi-canvas); color: var(--lgi-ink); }
