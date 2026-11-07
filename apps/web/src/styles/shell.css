@@ -108,3 +108,12 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
 .v7-annotated-current svg{position:absolute;pointer-events:none;left:0;bottom:calc(var(--lgi-space-1) * -1);width:100%;height:var(--lgi-space-2);overflow:visible;fill:none;stroke:var(--lgi-signal-mark);stroke-width:1.7;stroke-linecap:round;transform-origin:left;transition:transform var(--lgi-duration-state) var(--lgi-ease-ui)}
 .v7-annotated-current:hover svg{transform:scaleX(1.06)}
 @media(prefers-reduced-motion:reduce){.v7-annotated-current svg,.v7-annotated-current:hover svg{transition:none;transform:none}}
+
+/* Gold Master: bounded light-rail exception owned by the shared Shell.
+ * Normal operations routes retain the existing dark ContextTexture. */
+.v7-app.creation-preview .creation-preview-crumb-brand{
+ display:inline-flex;align-items:center;min-height:var(--lgi-space-8);
+ padding:0 var(--lgi-space-3);border:1px solid var(--lgi-ink);
+ background:var(--lgi-ink);color:var(--lgi-on-dark);
+ font-weight:var(--lgi-weight-semibold);box-shadow:var(--lgi-shadow-hard);
+}
