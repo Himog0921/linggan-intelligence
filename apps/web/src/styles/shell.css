@@ -99,12 +99,6 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
 .v7-domain-picker nav>button[aria-current="page"]{color:var(--lgi-signal-ink);font-weight:var(--lgi-weight-semibold)}
 .v7-domain-picker summary[aria-disabled="true"]{cursor:default;color:var(--lgi-muted)}
 
-/* Page-scoped G4 reference viewport: retain the one shared AppShell and tune only its header rails. */
-.creator-workbench-preview-shell .v7-global-row{height:68px;min-height:68px}
-.creator-workbench-preview-shell .v7-context-row{height:53.69px;min-height:53.69px}
-.creator-workbench-preview-shell .v7-context-main{gap:var(--lgi-space-4);padding-inline:var(--lgi-space-5)}
-.creator-workbench-preview-shell .v7-context-meta{gap:var(--lgi-space-2)}
-
 .ops-immersive{grid-template-rows:minmax(0,1fr)}
 .ops-immersive>.v7-global-header,.ops-immersive>.v7-shell>.v7-side{display:none}
 .ops-immersive>.v7-shell{grid-template-columns:minmax(0,1fr)}
