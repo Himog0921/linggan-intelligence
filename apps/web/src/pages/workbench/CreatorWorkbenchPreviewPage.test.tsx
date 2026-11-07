@@ -1,10 +1,11 @@
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { CreatorWorkbenchPreviewPage } from './CreatorWorkbenchPreviewPage';
 
 vi.mock('../ops/OpsFrame', () => ({
-  OpsFrame: ({ children, tabs, meta, immersive }: { children: React.ReactNode; tabs: React.ReactNode; meta: React.ReactNode; immersive?: boolean }) => (
+  OpsFrame: ({ children, tabs, meta, immersive }: { children: ReactNode; tabs: ReactNode; meta: ReactNode; immersive?: boolean }) => (
     <div data-testid="ops-frame" data-immersive={immersive ? 'true' : 'false'}>
       <nav aria-label="预览上下文导航">{tabs}</nav>
       <div>{meta}</div>
