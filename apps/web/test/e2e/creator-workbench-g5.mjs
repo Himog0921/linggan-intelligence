@@ -247,7 +247,7 @@ try {
     ['desk-default', 1440, 1000, openDeskState],
     ['desk-search', 1440, 1000, async page => {
       await openDeskState(page);
-      await page.getByRole('textbox', { name: '搜索材料' }).fill('调整');
+      await page.getByRole('searchbox', { name: '搜索材料' }).fill('调整');
       await page.waitForTimeout(350);
     }],
     ['desk-card-editor', 1440, 1000, async page => {
