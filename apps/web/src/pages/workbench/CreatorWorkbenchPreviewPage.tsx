@@ -257,7 +257,7 @@ export function CreatorWorkbenchPreviewPage() {
                   <div className={styles.bodyHeading}><strong>正文</strong><small>{currentDraft.paragraphs.reduce((sum, item) => sum + Array.from(item.text).length, 0)} 字 · {currentDraft.paragraphs.length} 段</small></div>
                   {currentDraft.paragraphs.map((paragraph, index) => <div className={styles.paragraph} key={paragraph.id}>
                     <span>{paragraph.role}</span>
-                    <textarea aria-label={'正文第 ' + (index + 1) + ' 段'} value={paragraph.text} onChange={event => updateParagraph(paragraph.id, event.target.value)} onCompositionStart={() => {}} onCompositionEnd={() => {}} />
+                    <textarea aria-label={'正文第 ' + (index + 1) + ' 段'} value={paragraph.text} onChange={event => updateParagraph(paragraph.id, event.target.value)} />
                   </div>)}
                   <ActionButton variant="outline" onClick={() => updateDraft({ paragraphs: [...currentDraft.paragraphs, { id: currentDraft.id + '-p' + (currentDraft.paragraphs.length + 1), role: '新段落', text: '' }] })}>继续写一段</ActionButton>
                 </div>
