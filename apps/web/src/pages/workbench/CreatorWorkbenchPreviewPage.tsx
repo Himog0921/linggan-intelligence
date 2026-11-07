@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent, type WheelEvent } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { OpsFrame } from '../ops/OpsFrame';
 import { ActionButton } from '../../shared/ActionButton';
 import { EmptyState } from '../../shared/EmptyState';
@@ -103,6 +103,8 @@ export function CreatorWorkbenchPreviewPage() {
   const [assetSearch, setAssetSearch] = useState('');
   const [notice, setNotice] = useState('');
   const [deskSearch, setDeskSearch] = useState('');
+  const [deskSearchOpen, setDeskSearchOpen] = useState(true);
+  const [deskInspectorOpen, setDeskInspectorOpen] = useState(true);
   const [deskFilter, setDeskFilter] = useState<(typeof FILTER_OPTIONS)[number]['value']>('all');
   const [deskItems, setDeskItems] = useState(INITIAL_DESK_ITEMS);
   const [selectedDeskId, setSelectedDeskId] = useState<string | null>('f1');
@@ -111,10 +113,8 @@ export function CreatorWorkbenchPreviewPage() {
   const [pan, setPan] = useState({ x: 30, y: 24 });
   const [queueDrawer, setQueueDrawer] = useState(false);
   const [inspectorDrawer, setInspectorDrawer] = useState(false);
-  const [assetTab, setAssetTab] = useState<AssetKind>('persona');
   const assetTrigger = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
-  const canvasRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const currentDraft = drafts.find(item => item.id === draftId) ?? drafts[0]!;
 
@@ -155,7 +155,7 @@ export function CreatorWorkbenchPreviewPage() {
   const updateDraft = (patch: Partial<Draft>) => setDrafts(items => items.map(item => item.id === draftId ? { ...item, ...patch } : item));
   const updateParagraph = (id: string, text: string) => updateDraft({ paragraphs: currentDraft.paragraphs.map(item => item.id === id ? { ...item, text } : item) });
   const previewOnly = (action: string) => setNotice(action + '：当前为隔离预览，未调用正式 API、模型、采集或发布服务。');
-  const openDesk = () => { setMode('desk'); setFocusedFrame(null); setZoom(1); setPan({ x: 30, y: 24 }); };
+  const openDesk = () => { setMode('desk'); setFocusedFrame(null); setZoom(1); setPan({ x: 30, y: 24 }); setDeskSearchOpen(true); setDeskInspectorOpen(true); };
   const addDeskItem = (kind: DeskItem['kind']) => {
     const id = 'local-' + (deskItems.length + 1);
     const item: DeskItem = { id, kind, title: kind === 'frame' ? '新选题框' : '新便签', body: '', x: 180 + deskItems.length * 24, y: 180 + deskItems.length * 18, width: kind === 'frame' ? 300 : 230, height: kind === 'frame' ? 188 : 132 };
@@ -180,7 +180,7 @@ export function CreatorWorkbenchPreviewPage() {
     event.preventDefault();
     setZoom(value => Math.max(0.45, Math.min(2.4, value * (event.deltaY < 0 ? 1.08 : 0.92))));
   };
-  const onCanvasDoubleClick = (event: React.MouseEvent<HTMLDivElement>) => {
+  const onCanvasDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest('button,.deskCard')) return;
     addDeskItem('note');
   };
@@ -191,6 +191,7 @@ export function CreatorWorkbenchPreviewPage() {
   });
   const selectedDeskItem = deskItems.find(item => item.id === selectedDeskId) ?? null;
   const assetItems = ASSET_ROWS[assetKind].filter(item => !assetSearch || (item.title + item.body).includes(assetSearch));
+  const selectedAssetItem = assetItems[Math.min(assetSelection, assetItems.length - 1)] ?? null;
 
   return (
     <div className={styles.root} data-preview-only="true">
@@ -207,7 +208,7 @@ export function CreatorWorkbenchPreviewPage() {
           <ActionButton variant="quiet" onClick={() => previewOnly('使用路径')}>使用路径</ActionButton>
         </>}>
         <main className={styles.main} aria-label="创作工作台">
-          <section className={styles.write} hidden={mode !== 'writing'}>
+          <section className={[styles.write, queueDrawer ? styles.queueOpen : '', inspectorDrawer ? styles.inspectorOpen : ''].filter(Boolean).join(' ')} hidden={mode !== 'writing'}>
             <aside className={styles.queue} aria-label="稿件队列">
               <div className={styles.queueHead}>
                 <div><small>今日 · 10月27日 周一</small><strong>稿件队列</strong></div>
@@ -226,6 +227,7 @@ export function CreatorWorkbenchPreviewPage() {
             <section className={styles.editor} aria-label="稿件编辑区">
               <header className={styles.editorHead}>
                 <button type="button" className={styles.mobileRail} onClick={() => setQueueDrawer(value => !value)} aria-expanded={queueDrawer}>稿件</button>
+                <button type="button" className={styles.mobileRail} onClick={() => setInspectorDrawer(value => !value)} aria-expanded={inspectorDrawer}>检查</button>
                 <strong>{currentDraft.title}</strong>
                 <span className={styles.statusChip}>{currentDraft.account}</span>
                 <span className={styles.editorMeta}>试新 · 样板 YB-0001 · 风格：合成示例</span>
@@ -257,7 +259,7 @@ export function CreatorWorkbenchPreviewPage() {
             </section>
 
             <aside className={styles.inspector} aria-label="稿件检查器">
-              <nav className={styles.inspectorTabs} aria-label="检查器视图">
+              <nav className={styles.inspectorTabs} role="tablist" aria-label="检查器视图">
                 {([['checks','检查'],['materials','素材'],['titles','标题'],['preview','预览']] as [InspectorTab,string][]).map(([id,label]) => <button key={id} type="button" role="tab" aria-selected={inspectorTab === id} onClick={() => setInspectorTab(id)}>{label}{id === 'checks' ? <b>{currentDraft.must + currentDraft.warn}</b> : null}</button>)}
               </nav>
               <div className={styles.inspectorScroll}>
@@ -266,11 +268,11 @@ export function CreatorWorkbenchPreviewPage() {
                 {inspectorTab === 'titles' ? <><h3>标题候选</h3>{['先把眼前这一件事做好','计划之外也没关系','变化其实很具体'].map(text => <button className={styles.titleCandidate} type="button" key={text} onClick={() => updateDraft({ noteTitle: text })}>{text}</button>)}</> : null}
                 {inspectorTab === 'preview' ? <><h3>发布预览</h3><div className={styles.phonePreview}><strong>{currentDraft.noteTitle}</strong><p>{currentDraft.paragraphs[0]?.text}</p><small>预览内容 · 合成数据</small></div></> : null}
               </div>
-              <button type="button" className={styles.mobileRail} onClick={() => setInspectorDrawer(value => !value)} aria-expanded={inspectorDrawer}>收起检查器</button>
+              <button type="button" className={styles.mobileRail} onClick={() => setInspectorDrawer(false)}>收起检查器</button>
             </aside>
           </section>
 
-          <section className={styles.desk} hidden={mode !== 'desk'} aria-label="沉浸材料桌">
+          <section className={[styles.desk, deskSearchOpen ? styles.searchOpen : '', deskInspectorOpen ? styles.inspectorOpen : ''].filter(Boolean).join(' ')} hidden={mode !== 'desk'} aria-label="沉浸材料桌">
             <aside className={styles.deskSearch}>
               <div className={styles.deskSearchHead}><strong>找材料</strong><ActionButton variant="quiet" onClick={() => setMode('writing')}>返回写稿</ActionButton></div>
               <FindField label="搜索材料" value={deskSearch} onCommit={setDeskSearch} placeholder="搜索材料内容" trigger="debounce_250" />
@@ -280,9 +282,9 @@ export function CreatorWorkbenchPreviewPage() {
             <section className={styles.canvasRegion} aria-label="材料画布">
               <div className={styles.canvasToolbar}>
                 <span>材料桌 <small>{deskItems.length} 个对象</small></span>
-                <div><ActionButton variant="outline" onClick={() => addDeskItem('frame')}>新选题框</ActionButton><ActionButton variant="outline" onClick={() => addDeskItem('note')}>新便签</ActionButton><ActionButton variant="quiet" onClick={() => { setZoom(1); setPan({ x: 30, y: 24 }); }}>看全部</ActionButton><ActionButton variant="quiet" onClick={() => setZoom(value => Math.max(.45, value / 1.15))}>−</ActionButton><span>{Math.round(zoom * 100)}%</span><ActionButton variant="quiet" onClick={() => setZoom(value => Math.min(2.4, value * 1.15))}>＋</ActionButton></div>
+                <div><ActionButton className={styles.mobileRail} variant="quiet" onClick={() => setDeskSearchOpen(value => !value)}>找材料</ActionButton><ActionButton className={styles.mobileRail} variant="quiet" onClick={() => setDeskInspectorOpen(value => !value)}>检查器</ActionButton><ActionButton variant="outline" onClick={() => addDeskItem('frame')}>新选题框</ActionButton><ActionButton variant="outline" onClick={() => addDeskItem('note')}>新便签</ActionButton><ActionButton variant="quiet" onClick={() => { setZoom(1); setPan({ x: 30, y: 24 }); }}>看全部</ActionButton><ActionButton variant="quiet" onClick={() => setZoom(value => Math.max(.45, value / 1.15))}>−</ActionButton><span>{Math.round(zoom * 100)}%</span><ActionButton variant="quiet" onClick={() => setZoom(value => Math.min(2.4, value * 1.15))}>＋</ActionButton></div>
               </div>
-              <div className={styles.canvasViewport} ref={canvasRef} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onWheel={onCanvasWheel} onDoubleClick={onCanvasDoubleClick} tabIndex={0} onKeyDown={event => { if (event.key === 'Escape') setFocusedFrame(null); }}>
+              <div className={styles.canvasViewport} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onWheel={onCanvasWheel} onDoubleClick={onCanvasDoubleClick} tabIndex={0} onKeyDown={event => { if (event.key === 'Escape') setFocusedFrame(null); }}>
                 <div className={styles.canvasGrid} />
                 <div className={styles.canvasWorld} style={{ transform: 'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')' }}>
                   {deskItems.map(item => <article key={item.id} className={[styles.deskCard, item.kind === 'frame' ? styles.frameCard : item.kind === 'note' ? styles.noteCard : styles.materialCard, selectedDeskId === item.id ? styles.selectedCard : '', focusedFrame === item.id ? styles.focusedCard : ''].join(' ')} style={{ left: item.x, top: item.y, width: item.width, minHeight: item.height } as CSSProperties} onClick={() => { setSelectedDeskId(item.id); if (item.kind === 'frame') setFocusedFrame(item.id); }} tabIndex={0} aria-label={item.title}>
@@ -297,7 +299,7 @@ export function CreatorWorkbenchPreviewPage() {
             <aside className={styles.deskInspector}>
               <div className={styles.deskInspectorHead}><strong>检查器</strong><small>本地演示</small></div>
               {selectedDeskItem ? <><label>名称<input value={selectedDeskItem.title} onChange={event => setDeskItems(items => items.map(item => item.id === selectedDeskItem.id ? { ...item, title: event.target.value } : item))} /></label><label>内容<textarea value={selectedDeskItem.body} onChange={event => setDeskItems(items => items.map(item => item.id === selectedDeskItem.id ? { ...item, body: event.target.value } : item))} /></label><div className={styles.inspectorActions}><ActionButton variant="outline" onClick={() => previewOnly('放入当前稿件')}>放入当前稿件</ActionButton><ActionButton variant="danger" onClick={() => { setDeskItems(items => items.filter(item => item.id !== selectedDeskItem.id)); setSelectedDeskId(null); }}>移出画布</ActionButton></div></> : <EmptyState kind="first_use" title="选择一个材料或选题框">选择对象后，在这里查看和编辑内容。</EmptyState>}
-              <ActionButton variant="primary" block onClick={() => previewOnly('用这组材料开稿')}>用这组材料开稿</ActionButton>
+              <ActionButton className={styles.fullWidth} variant="primary" onClick={() => previewOnly('用这组材料开稿')}>用这组材料开稿</ActionButton>
             </aside>
           </section>
         </main>
@@ -313,7 +315,7 @@ export function CreatorWorkbenchPreviewPage() {
             {!assetItems.length ? <EmptyState title="当前类型没有匹配内容">调整搜索词，或切换其他资产类型。</EmptyState> : null}
           </section>
           <section className={styles.assetDetail} aria-label="资产详情">
-            {assetItems[assetSelection] ? <><small>{ASSETS.find(item => item.id === assetKind)?.label}</small><h3>{assetItems[assetSelection]!.title}</h3><p>{assetItems[assetSelection]!.body}</p><InlineNotice tone="info">这里展示的是合成预览数据，不会保存到正式资产库。</InlineNotice><ActionButton variant="outline" onClick={() => previewOnly('编辑资产')}>编辑资产</ActionButton></> : <EmptyState title="选择一个资产">从列表选择一条资产，查看详情。</EmptyState>}
+            {selectedAssetItem ? <><small>{ASSETS.find(item => item.id === assetKind)?.label}</small><h3>{selectedAssetItem.title}</h3><p>{selectedAssetItem.body}</p><InlineNotice tone="info">这里展示的是合成预览数据，不会保存到正式资产库。</InlineNotice><ActionButton variant="outline" onClick={() => previewOnly('编辑资产')}>编辑资产</ActionButton></> : <EmptyState title="选择一个资产">从列表选择一条资产，查看详情。</EmptyState>}
           </section>
         </div>
         <footer className={styles.assetFoot}><span>合成数据 · 不连接正式资产 API</span><ActionButton variant="quiet" onClick={() => setAssetOpen(false)}>返回工作台</ActionButton></footer>
