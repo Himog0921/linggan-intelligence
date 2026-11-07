@@ -29,13 +29,25 @@ const ASSETS: { id: AssetKind; label: string; description: string }[] = [
 ];
 
 function makeParagraphs(prefix: string): Paragraph[] {
-  const rows: Paragraph[] = [
+  const rows: [string, string][] = [
     ['钩子', '前几天整理旧照片时，我突然发现，很多当时觉得过不去的事情，现在回头看已经有了新的答案。'],
     ['自问', '我以前总想一次把所有问题都解决，结果越着急，越容易忽略眼前真正需要处理的那一件事。'],
     ['过去的我', '那段时间，我习惯把每一次不顺利都归结为自己做得不够好，也很少停下来看看具体发生了什么。'],
     ['场景', '有一次周末，我们原本安排了很多事情，最后只完成了其中两件，反而比预想中更轻松。'],
     ['转折', '后来我开始把目标拆小，先把最重要的一步做好，再决定下一步要不要继续。'],
     ['观点', '真正有效的改变，往往不是突然变得很厉害，而是慢慢找到一种能够长期坚持的办法。'],
+    ['细节', '我把原来写在一张纸上的十几项安排，改成了今天必须完成的两件小事。'],
+    ['对照', '以前我会盯着没有完成的部分，现在会先确认已经完成的部分，再调整剩下的计划。'],
+    ['发现', '当事情变得具体以后，我才知道自己究竟卡在哪一步，而不是笼统地觉得哪里都不对。'],
+    ['尝试', '这次我没有急着增加新的方法，只把每天开始前的准备动作固定下来。'],
+    ['反馈', '一周以后，最明显的变化不是速度变快，而是开始做事时少了很多犹豫。'],
+    ['复盘', '回头看，真正起作用的不是那张清单，而是我终于愿意根据实际情况调整它。'],
+    ['边界', '当然，这种方式不一定适合所有人，关键还是要看当时的目标和手里的时间。'],
+    ['补充', '如果当天临时有变化，我会先保留最重要的一件事，其余的重新安排。'],
+    ['行动', '所以现在遇到复杂任务，我会先写下可以在十分钟内开始的第一步。'],
+    ['提醒', '先开始并不代表不做计划，而是让计划能够跟真实发生的事情接上。'],
+    ['收束', '慢慢地，我不再要求每一天都按原计划完成，而是更在意能不能持续往前走。'],
+    ['结尾', '有时候，把眼前这一件事做好，就已经是一个很好的开始。'],
   ];
   return rows.map((row, index) => ({ id: prefix + '-' + index, role: row[0], text: row[1] }));
 }
@@ -284,7 +296,7 @@ export function CreatorWorkbenchPreviewPage() {
                 <span>材料桌 <small>{deskItems.length} 个对象</small></span>
                 <div><ActionButton className={styles.mobileRail} variant="quiet" onClick={() => setDeskSearchOpen(value => !value)}>找材料</ActionButton><ActionButton className={styles.mobileRail} variant="quiet" onClick={() => setDeskInspectorOpen(value => !value)}>检查器</ActionButton><ActionButton variant="outline" onClick={() => addDeskItem('frame')}>新选题框</ActionButton><ActionButton variant="outline" onClick={() => addDeskItem('note')}>新便签</ActionButton><ActionButton variant="quiet" onClick={() => { setZoom(1); setPan({ x: 30, y: 24 }); }}>看全部</ActionButton><ActionButton variant="quiet" onClick={() => setZoom(value => Math.max(.45, value / 1.15))}>−</ActionButton><span>{Math.round(zoom * 100)}%</span><ActionButton variant="quiet" onClick={() => setZoom(value => Math.min(2.4, value * 1.15))}>＋</ActionButton></div>
               </div>
-              <div className={styles.canvasViewport} onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onWheel={onCanvasWheel} onDoubleClick={onCanvasDoubleClick} tabIndex={0} onKeyDown={event => { if (event.key === 'Escape') setFocusedFrame(null); }}>
+              <div className={styles.canvasViewport} data-testid="canvas-viewport" onPointerDown={onCanvasPointerDown} onPointerMove={onCanvasPointerMove} onPointerUp={onCanvasPointerUp} onPointerCancel={onCanvasPointerUp} onWheel={onCanvasWheel} onDoubleClick={onCanvasDoubleClick} tabIndex={0} onKeyDown={event => { if (event.key === 'Escape') setFocusedFrame(null); }}>
                 <div className={styles.canvasGrid} />
                 <div className={styles.canvasWorld} style={{ transform: 'translate(' + pan.x + 'px,' + pan.y + 'px) scale(' + zoom + ')' }}>
                   {deskItems.map(item => <article key={item.id} className={[styles.deskCard, item.kind === 'frame' ? styles.frameCard : item.kind === 'note' ? styles.noteCard : styles.materialCard, selectedDeskId === item.id ? styles.selectedCard : '', focusedFrame === item.id ? styles.focusedCard : ''].join(' ')} style={{ left: item.x, top: item.y, width: item.width, minHeight: item.height } as CSSProperties} onClick={() => { setSelectedDeskId(item.id); if (item.kind === 'frame') setFocusedFrame(item.id); }} tabIndex={0} aria-label={item.title}>
