@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type PointerEvent, type WheelEvent } from 'react';
 import { OpsFrame } from '../ops/OpsFrame';
+import { NavIcon } from '../../shared/Sidebar';
 import { ActionButton } from '../../shared/ActionButton';
 import { EmptyState } from '../../shared/EmptyState';
 import { FindField } from '../../shared/FindField';
@@ -213,7 +214,20 @@ export function CreatorWorkbenchPreviewPage() {
 
   return (
     <div className={styles.root} data-preview-only="true">
-      <OpsFrame section="creation" domain="preview" scope={<span>创作演示</span>} immersive={mode === 'desk'}
+      <OpsFrame section="creation" domain="preview" scope={<span>创作演示</span>} immersive={mode === 'desk'} preview
+        previewSidebar={<>
+          <div className="v7-nav-label">欢迎导航</div>
+          <div className="v7-nav-label">运营</div>
+          <button className="v7-side-nav" type="button" aria-current="page" onClick={() => previewOnly('创作工作台')}>
+            <NavIcon name="publications"/><span>创作</span><small>5</small>
+          </button>
+          {([['publications','发布记录','1'],['daily','每日数据',''],['accounts','账号管理','']] as const).map(([icon,label,count]) => (
+            <button key={label} className="v7-side-nav" type="button" onClick={() => previewOnly(label)}>
+              <NavIcon name={icon}/><span>{label}</span>{count ? <small>{count}</small> : null}
+            </button>
+          ))}
+          <div className="v7-side-foot">运营工作区 · 合成预览，不调用正式服务</div>
+        </>}
         tabs={<>
           <button type="button" aria-current={mode === 'writing' ? 'page' : undefined} onClick={() => setMode('writing')}>写稿</button>
           <button type="button" aria-current={mode === 'desk' ? 'page' : undefined} onClick={openDesk}>材料桌</button>
@@ -221,9 +235,10 @@ export function CreatorWorkbenchPreviewPage() {
         meta={<>
           <span className={styles.demoMarker}>DEMO · 合成数据</span>
           <span className="v7-vr" aria-hidden="true" />
-          <span className={styles.metaCount}>今日 <b>6</b> 篇 · 待完成 <b>5</b></span>
+          <span className={styles.metaCount}>今日 <b>6</b> 篇 · 待完成 <b>5</b> · 已发布 <b>1</b></span>
           <ActionButton ref={assetTrigger} variant="outline" onClick={() => { setAssetOpen(true); setAssetKind('persona'); setAssetSelection(0); }}>资产库</ActionButton>
           <ActionButton variant="quiet" onClick={() => previewOnly('使用路径')}>使用路径</ActionButton>
+          <ActionButton variant="quiet" onClick={() => previewOnly('体验清单')}>体验清单 0/8</ActionButton>
         </>}>
         <main className={styles.main} aria-label="创作工作台">
           <section className={[styles.write, queueDrawer ? styles.queueOpen : '', inspectorDrawer ? styles.inspectorOpen : ''].filter(Boolean).join(' ')} hidden={mode !== 'writing'}>
