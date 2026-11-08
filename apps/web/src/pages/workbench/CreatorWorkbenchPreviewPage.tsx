@@ -306,20 +306,20 @@ export function CreatorWorkbenchPreviewPage() {
                         <svg viewBox="0 0 132 176" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
                           <defs>
                             <linearGradient id="cw-sky" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0" stopColor="#8799a7"/><stop offset=".48" stopColor="#d6c5ad"/><stop offset=".68" stopColor="#f4b66d"/><stop offset="1" stopColor="#657987"/>
+                              <stop offset="0" stopColor="var(--lgi-muted)"/><stop offset=".48" stopColor="var(--lgi-reading-edge)"/><stop offset=".68" stopColor="var(--lgi-warning-soft)"/><stop offset="1" stopColor="var(--lgi-info)"/>
                             </linearGradient>
                             <linearGradient id="cw-water" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0" stopColor="#879da3"/><stop offset="1" stopColor="#34464e"/>
+                              <stop offset="0" stopColor="var(--lgi-info-soft)"/><stop offset="1" stopColor="var(--lgi-info)"/>
                             </linearGradient>
                           </defs>
                           <rect width="132" height="176" fill="url(#cw-sky)"/>
-                          <path d="M0 30 Q18 20 35 28 T70 25 T105 31 T145 24" fill="none" stroke="#e7e6df" strokeWidth="8" opacity=".24"/>
-                          <path d="M0 55 Q15 48 29 54 T58 50 T88 56 T120 51 T150 55" fill="none" stroke="#f4eee2" strokeWidth="5" opacity=".28"/>
-                          <path d="M0 84 L18 72 35 78 54 65 73 77 93 66 112 78 132 70 132 104 0 104Z" fill="#53646b" opacity=".8"/>
+                          <path d="M0 30 Q18 20 35 28 T70 25 T105 31 T145 24" fill="none" stroke="var(--lgi-reading-paper)" strokeWidth="8" opacity=".24"/>
+                          <path d="M0 55 Q15 48 29 54 T58 50 T88 56 T120 51 T150 55" fill="none" stroke="var(--lgi-reading-paper)" strokeWidth="5" opacity=".28"/>
+                          <path d="M0 84 L18 72 35 78 54 65 73 77 93 66 112 78 132 70 132 104 0 104Z" fill="var(--lgi-muted)" opacity=".8"/>
                           <path d="M0 96 Q22 91 44 96 T88 95 T132 92 L132 176 0 176Z" fill="url(#cw-water)"/>
-                          <path d="M0 110 Q28 106 54 111 T104 110 T145 109 M0 127 Q20 124 42 128 T92 127 T145 126" fill="none" stroke="#d5c7a9" strokeWidth="1" opacity=".38"/>
-                          <path d="M0 106 L132 106" stroke="#e6c08e" strokeWidth="2" opacity=".55"/>
-                          <g fill="#172126" opacity=".96">
+                          <path d="M0 110 Q28 106 54 111 T104 110 T145 109 M0 127 Q20 124 42 128 T92 127 T145 126" fill="none" stroke="var(--lgi-reading-edge)" strokeWidth="1" opacity=".38"/>
+                          <path d="M0 106 L132 106" stroke="var(--lgi-warning)" strokeWidth="2" opacity=".55"/>
+                          <g fill="var(--lgi-ink)" opacity=".96">
                             <rect x="0" y="121" width="132" height="4"/><rect x="0" y="151" width="132" height="4"/>
                             <rect x="4" y="111" width="5" height="65"/><rect x="28" y="111" width="5" height="65"/>
                             <rect x="52" y="111" width="5" height="65"/><rect x="76" y="111" width="5" height="65"/>
@@ -387,7 +387,7 @@ export function CreatorWorkbenchPreviewPage() {
                         </div>
                       </div>
                     ) : (
-                      <div className={styles.para} data-paragraph-id={paragraph.id} key={paragraph.id}>
+                      <div className={styles.para} data-testid={paragraph.id === "p1" ? "first-paragraph" : undefined} data-paragraph-id={paragraph.id} key={paragraph.id}>
                         <div className={styles.paraLabel}>{paragraph.role}</div>
                         <div className={styles.paraMain}>
                           <p className={styles.paraText} contentEditable suppressContentEditableWarning role="textbox"
