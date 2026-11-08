@@ -117,3 +117,23 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
  background:var(--lgi-ink);color:var(--lgi-on-dark);
  font-weight:var(--lgi-weight-semibold);box-shadow:var(--lgi-shadow-hard);
 }
+
+
+/* Gold Master primary navigation is a two-line label/status pair; scope it to the isolated creator preview. */
+.v7-app.creation-preview .v7-primary-nav .v7-nav-copy {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  line-height: 1.2;
+}
+.v7-app.creation-preview .v7-primary-nav .v7-nav-meta {
+  color: var(--lgi-muted);
+  font-size: var(--lgi-type-aux-size);
+  font-weight: var(--lgi-weight-regular);
+}
+.v7-app.creation-preview .v7-primary-nav button:disabled .v7-nav-meta {
+  color: var(--lgi-ghost);
+}
+@media (max-width: 820px) {
+  .v7-app.creation-preview .v7-side-toggle { display: none; }
+}
