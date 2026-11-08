@@ -307,7 +307,7 @@
 .frameChip { flex: none; padding: var(--lgi-space-1) var(--lgi-space-2); border: 0; background: var(--lgi-canvas-low); color: var(--lgi-body); font-size: var(--lgi-type-aux-size); white-space: nowrap; }
 .editorMeta { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: calc(var(--lgi-space-1) * 1.5) var(--lgi-space-2); margin-left: auto; color: var(--lgi-muted); font-size: var(--lgi-type-aux-size); line-height: var(--lgi-type-aux-leading); text-align: right; }
 .editorMeta b { color: var(--lgi-body); font-family: var(--lgi-font-data); font-weight: var(--lgi-weight-medium); }
-.editorScroll { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--lgi-space-3) var(--lgi-space-5) 0; }
+.editorScroll { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: var(--lgi-space-3) calc(var(--lgi-space-5) + var(--lgi-space-2) + var(--lgi-space-1) * .5) 0 var(--lgi-space-5); }
 .editorInner { width: 100%; max-width: none; margin: 0; padding: 0 0 var(--lgi-space-12); }
 .intentRow { display: flex; align-items: baseline; flex-wrap: wrap; gap: calc(var(--lgi-space-1) * 1.5) var(--lgi-space-2); margin: 0 0 var(--lgi-space-2); color: var(--lgi-body); font-size: var(--lgi-type-label-size); line-height: var(--lgi-type-label-leading); }
 .intentRow > span { flex: none; color: var(--lgi-muted); }
