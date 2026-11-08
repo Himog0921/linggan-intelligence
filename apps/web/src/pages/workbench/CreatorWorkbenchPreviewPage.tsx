@@ -262,7 +262,7 @@ export function CreatorWorkbenchPreviewPage() {
                     aria-current={item.id === draftId ? 'true' : undefined}
                     onClick={() => { setDraftId(item.id); setInspectorTab('checks'); setQueueDrawer(false); }}>
                     <strong>{item.title}</strong>
-                    <small>{item.account}　{item.kind}　{item.origin}</small>
+                    <small>{item.account} · {item.kind} · {item.origin}</small>
                     <span><i data-level={item.must ? 'must' : item.warn ? 'warn' : 'ok'} />
                       {item.must ? '必改 ' + item.must : item.state}{item.warn ? ' · 提醒 ' + item.warn : ''}
                     </span>
