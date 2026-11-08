@@ -25,7 +25,7 @@ describe('CreatorWorkbenchPreviewPage', () => {
     expect(screen.getByRole('main', { name: '创作工作台' })).toBeTruthy();
     expect(screen.getByRole('complementary', { name: '稿件队列' })).toBeTruthy();
     expect(screen.getByRole('complementary', { name: '稿件检查器' })).toBeTruthy();
-    expect(screen.getByRole('textbox', { name: '正文第 1 段' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: '钩子段落' })).toBeTruthy();
     expect(screen.getByText('DEMO · 合成数据')).toBeTruthy();
   });
 
@@ -53,7 +53,7 @@ describe('CreatorWorkbenchPreviewPage', () => {
     expect(screen.getByRole('region', { name: '沉浸材料桌' })).toBeTruthy();
     expect(screen.getByTestId('ops-frame').getAttribute('data-immersive')).toBe('true');
     await user.click(screen.getByRole('button', { name: '返回写稿' }));
-    expect(screen.getByRole('textbox', { name: '正文第 1 段' })).toHaveValue('本地编辑内容保留');
+    expect(screen.getByRole('textbox', { name: '钩子段落' })).toHaveTextContent('本地编辑内容保留');
     expect(screen.getByTestId('ops-frame').getAttribute('data-immersive')).toBe('false');
   });
 
@@ -103,12 +103,12 @@ describe('CreatorWorkbenchPreviewPage', () => {
 
   it('mobile drawers provide reachable in-panel close buttons', () => {
     render(<CreatorWorkbenchPreviewPage />);
-    const queueToggle = screen.getByRole('button', { name: /^稿件$/ });
+    const queueToggle = screen.getByRole('button', { name: '打开今日稿件队列' });
     fireEvent.click(queueToggle);
     expect(queueToggle).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(screen.getByRole('button', { name: '关闭稿件队列' }));
     expect(queueToggle).toHaveAttribute('aria-expanded', 'false');
-    const inspectorToggle = screen.getByRole('button', { name: /^检查$/ });
+    const inspectorToggle = screen.getByRole('button', { name: '打开稿件检查器' });
     fireEvent.click(inspectorToggle);
     expect(inspectorToggle).toHaveAttribute('aria-expanded', 'true');
     fireEvent.click(screen.getByRole('button', { name: '关闭稿件检查器' }));
