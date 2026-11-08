@@ -10,8 +10,8 @@ export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, 
   meta?: ReactNode; foot?: ReactNode; immersive?: boolean; preview?: boolean; previewSidebar?: ReactNode; restricted?: boolean; children: ReactNode;
 }) {
   const selectedDomain = domain && domain !== 'all' ? `?domain=${encodeURIComponent(domain)}` : '';
-  return <AppShell active="ops" restrictedOps={restricted}
-    boundaryLabel="本机服务状态" className={[immersive ? 'ops-immersive' : '', preview ? 'creation-preview' : ''].filter(Boolean).join(' ') || undefined}
+  return <AppShell active="ops" restrictedOps={restricted} previewNavigation={preview}
+    boundaryLabel={preview ? "Demo · 示例数据" : "本机服务状态"} className={[immersive ? 'ops-immersive' : '', preview ? 'creation-preview' : ''].filter(Boolean).join(' ') || undefined}
     contextBar={{
       tone: preview ? 'light' : undefined,
       breadcrumb: <ContextBreadcrumb items={preview
@@ -21,7 +21,7 @@ export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, 
       meta,
     }}>
     <div className="v7-shell" data-ops-section={section}>
-      <Sidebar aria-label="运营导航">
+      <Sidebar aria-label="运营导航" toggleLabels={preview ? { expanded: "收起导航", collapsed: "展开导航" } : undefined}>
         {previewSidebar ?? <>
         {/* Full navigation preserves the editor's existing beforeunload protection. */}
         <a className="v7-side-nav" aria-label="数据" title="数据" href={`/ops/${restricted ? 'publications' : 'overview'}${selectedDomain}`} aria-current={section === 'data' ? 'page' : undefined}>
