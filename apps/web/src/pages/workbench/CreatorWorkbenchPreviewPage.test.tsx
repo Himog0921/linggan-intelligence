@@ -5,10 +5,10 @@ import userEvent from '@testing-library/user-event';
 import { CreatorWorkbenchPreviewPage } from './CreatorWorkbenchPreviewPage';
 
 vi.mock('../ops/OpsFrame', () => ({
-  OpsFrame: ({ children, tabs, meta, immersive }: { children: ReactNode; tabs: ReactNode; meta: ReactNode; immersive?: boolean }) => (
+  OpsFrame: ({ children, tabs, meta, boundaryLabel, immersive }: { children: ReactNode; tabs: ReactNode; meta: ReactNode; boundaryLabel?: ReactNode; immersive?: boolean }) => (
     <div data-testid="ops-frame" data-immersive={immersive ? 'true' : 'false'}>
       <nav aria-label="预览上下文导航">{tabs}</nav>
-      <div>{meta}</div>
+      <div>{boundaryLabel}</div><div>{meta}</div>
       {children}
     </div>
   ),
@@ -26,7 +26,7 @@ describe('CreatorWorkbenchPreviewPage', () => {
     expect(screen.getByRole('complementary', { name: '稿件队列' })).toBeTruthy();
     expect(screen.getByRole('complementary', { name: '稿件检查器' })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: '钩子段落' })).toBeTruthy();
-    expect(screen.getByText('DEMO · 合成数据')).toBeTruthy();
+    expect(screen.getByText('Demo · 示例数据')).toBeTruthy();
   });
 
   it('opens the six-type asset dialog and returns focus to its trigger', async () => {
@@ -46,7 +46,7 @@ describe('CreatorWorkbenchPreviewPage', () => {
   it('switches to the immersive material desk and returns without replacing the draft', async () => {
     const user = userEvent.setup();
     render(<CreatorWorkbenchPreviewPage />);
-    const paragraph = screen.getByRole('textbox', { name: '正文第 1 段' }) as HTMLTextAreaElement;
+    const paragraph = screen.getByRole('textbox', { name: '钩子段落' });
     await user.clear(paragraph);
     await user.type(paragraph, '本地编辑内容保留');
     await user.click(screen.getByRole('button', { name: '材料桌' }));
