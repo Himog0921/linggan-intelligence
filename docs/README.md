@@ -1,7 +1,7 @@
 # 文档总索引
 
-- [创作工作台 G5 React 验收追踪](design/acceptance/creator-workbench-g5-verification-2026-11-07.md)：实际六视口、视觉合同及交互验证门禁记录。
-- [创作工作台 G4 React 隔离预览](design/changes/creator-workbench-g4-preview-2026-11-07.md)：开发态预览路由、共享 Shell/控件复用、合成数据边界与未完成门禁；验收见 [ACC-CREATOR-WORKBENCH-G4](design/acceptance/creator-workbench-g4-preview-acceptance-2026-11-07.md)。
+- [创作工作台 G5 浏览器冒烟追踪](design/acceptance/creator-workbench-g5-verification-2026-11-07.md)：预览地址指纹、六视口渲染与弹层交互的验证记录。
+- [创作工作台 G4 冻结 Demo 预览](design/changes/creator-workbench-g4-preview-2026-11-07.md)：开发态原样提供参考稿、不进入正式构建、不改动正式页面；验收见 [ACC-CREATOR-WORKBENCH-G4](design/acceptance/creator-workbench-g4-preview-acceptance-2026-11-07.md)。
 
 - [OCR 封面标题与异常内容旧计划](plans/active/ocr-title-quality-454.md)：#454/#464 交付记录；现行阅读与修正以[唯一底稿合同](data-contracts/research-dossier.md)为准，最新版本地能力见[Paddle 运行手册](runbooks/paddle-ocr-runtime.md)。
 - [OCR 手动图片文字识别：实施与验收](plans/active/ocr-manual-recognition-454.md)：#454 当前候选；保留 local-v4/local-vl-v1/DeepSeek，统一当前读本、按需编辑与历次结果清理，未合并、未部署。
