@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::{Value, json};
 
 pub(super) fn validate_raw(b: &mut Bridge) -> Result<(), InputError> {
     let anchor: Value =
@@ -194,6 +195,7 @@ fn validate_response(r: &Value) -> Result<(), InputError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+use serde_json::{Value, json};
     fn empty() -> Value {
         json!({"rawText":"","rawOutputSha256":rule::content_hash(b""),"timeoutSeconds":45,"maxTokens":4096,
         "finishReason":"stop","requestRef":"synthetic-empty","rawResponse":{"id":"synthetic-empty","choices":[{"finish_reason":"stop","message":{"content":null}}]}})

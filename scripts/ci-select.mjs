@@ -20,7 +20,7 @@ const paths = {
   ],
   material_reading: [
     'crates/evidence/src/ocr_adoption*', 'crates/evidence/src/ocr_adoption/**',
-    'crates/evidence/src/ocr_adoption_persistence/**', 'crates/evidence/src/ocr_layering.rs',
+    'crates/evidence/src/ocr_adoption_persistence/**',
     'crates/evidence/tests/ocr_adoption*', 'crates/evidence/tests/ocr_adoption/**',
     'apps/worker/tests/video_frame_ocr_postgres.rs', 'apps/worker/tests/ocr_cleanup_postgres.rs',
     'crates/evidence/src/material_reading.rs', 'crates/evidence/src/material_reading/**',
