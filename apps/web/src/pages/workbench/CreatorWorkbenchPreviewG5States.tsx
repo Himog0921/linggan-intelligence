@@ -13,8 +13,13 @@ const GUIDED_STEPS = [
   ['回收', '发布记录与后续数据需要正式业务接入'],
 ] as const;
 const EXPERIENCE_OPTIONS = [
-  { id: 'synthetic-exp-1', title: '一次改变安排的经历', body: '原来计划很满，后来只保留了当天最重要的两件事。', confirmed: true },
-  { id: 'synthetic-exp-2', title: '一次尝试新方法的经历', body: '把一段很复杂的任务拆成了几步，先从第一步开始。', confirmed: false },
+  { id: 'JL-0001', title: '放学后一起整理书包', body: '刚上小学那会，他总忘记整理东西。我一放学就陪他一起检查书本，逐项确认。', confirmed: true, used: true },
+  { id: 'JL-0002', title: '上学前列好物品清单', body: '上学前我发现他总丢三落四，立刻列好每天要带的清单，生怕第二天忘记。', confirmed: true, used: true },
+  { id: 'JL-0003', title: '每周固定整理一次', body: '后来我试过不少办法，提醒、检查、再提醒，基本每件事都要我跟着做。', confirmed: true, used: true },
+  { id: 'JL-0004', title: '我去做自己的事，他反倒写了一段', body: '他写作业时我总站在旁边，一走神我马上喊。我去做自己的事，过一会回来看，他反倒写完一段。', confirmed: true, used: true },
+  { id: 'JL-0005', title: '把周末安排换成公园散步', body: '周末我们把原来的安排换成去公园走走，不聊任务以后，家里的气氛轻松了很多。', confirmed: true, used: true },
+  { id: 'JL-0006', title: '开始主动准备出行物品', body: '他开始主动整理出行物品，也愿意和家人讨论第二天要带什么。', confirmed: true, used: true },
+  { id: 'JL-0007', title: '第一次自己定闹钟起床（示例）', body: '上周他第一次自己定好闹钟，早上按时起床。', confirmed: false, used: false },
 ] as const;
 
 export function CreatorWorkbenchPreviewG5States({
@@ -47,24 +52,34 @@ export function CreatorWorkbenchPreviewG5States({
     >
       <header className={styles.header}>
         <div>
-          <small>CREATOR WORKBENCH · ISOLATED PREVIEW</small>
-          <h2>{kind === 'experience-picker' ? '选一段经历' : kind === 'save-as-template' ? '存为样板' : '创作使用路径'}</h2>
+          {kind !== 'experience-picker' ? <small>CREATOR WORKBENCH · ISOLATED PREVIEW</small> : null}
+          <h2>{kind === 'experience-picker' ? '从经历库选 · 示例妈妈' : kind === 'save-as-template' ? '存为样板' : '创作使用路径'}</h2>
         </div>
-        <ActionButton aria-label="关闭预览对话框" variant="outline" onClick={onClose}>关闭</ActionButton>
+        <ActionButton aria-label="关闭预览对话框" variant="outline" onClick={onClose}>{kind === 'experience-picker' ? '×' : '关闭'}</ActionButton>
       </header>
       {kind === 'experience-picker' ? (
-        <div className={styles.content}>
-          <p className={styles.subtle}>从本人已确认的经历中选择。未确认记录不可采用；这里是合成数据，只写入本地演示稿件。</p>
-          <div className={styles.cards}>
+        <div className={styles.experienceContent}>
+          <p className={styles.subtle}>只列出示例妈妈自己的经历；待本人确认的还不能用。以下均为合成演示内容。</p>
+          <div className={styles.experienceRows}>
             {EXPERIENCE_OPTIONS.map(item => (
-              <article key={item.id} className={styles.card}>
-                <div className={styles.cardHead}><strong>{item.title}</strong><small>{item.confirmed ? '已确认' : '待本人确认'}</small></div>
+              <article key={item.id} className={styles.experienceRow}>
+                <div className={styles.experienceRowHead}>
+                  <strong><small>{item.id}</small> {item.title}</strong>
+                  <span>{item.confirmed ? '已确认' : '待本人确认'}</span>
+                </div>
                 <p>{item.body}</p>
-                <ActionButton variant="outline" disabled={!item.confirmed} onClick={() => { onUseExperience(item.body); onClose(); }}>
-                  {item.confirmed ? '用这段' : '尚不可用'}
-                </ActionButton>
+                <div className={styles.experienceRowFoot}>
+                  <span className={item.confirmed ? styles.confirmed : styles.pending}>{item.confirmed ? '已确认' : '待本人确认'}</span>
+                  {item.used ? <small>本篇已用</small> : null}
+                  <ActionButton variant="outline" disabled={!item.confirmed} onClick={() => { onUseExperience(item.body); onClose(); }}>
+                    {item.confirmed ? '用这段' : '尚不可用'}
+                  </ActionButton>
+                </div>
               </article>
             ))}
+          </div>
+          <div className={styles.experienceFooter}>
+            <ActionButton variant="outline" onClick={() => onPreviewOnly('没有合适的，去采集')}>没有合适的，去采集</ActionButton>
           </div>
         </div>
       ) : null}
