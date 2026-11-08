@@ -168,6 +168,23 @@ try {
         near(geometry.inspector?.x, 1104, 'inspector x');
         near(geometry.inspector?.w, 336, 'inspector width');
       });
+      await verify('gold-master-1440-editor-composition', async () => {
+        near(geometry.editorHead?.h, 48, 'editor head height');
+        near(geometry.editorScroll?.y, 169.69, 'editor scroll top');
+        near(geometry.editorInner?.x, 420, 'editor inner x');
+        near(geometry.editorInner?.w, 654, 'editor inner width');
+        near(geometry.intent?.y, 181.69, 'intent row y');
+        near(geometry.related?.y, 207.69, 'related card y');
+        near(geometry.related?.h, 68, 'related card height');
+        near(geometry.cover?.x, 420, 'cover x');
+        near(geometry.cover?.y, 287.69, 'cover y');
+        near(geometry.cover?.w, 132, 'cover width');
+        near(geometry.cover?.h, 176, 'cover height');
+        near(geometry.coverFields?.x, 568, 'cover fields x');
+        near(geometry.coverFields?.w, 506, 'cover fields width');
+        near(geometry.bodyHeading?.y, 516.19, 'body heading y');
+        near(geometry.firstParagraph?.y, 563.19, 'first paragraph y');
+      });
       await verify('asset-dialog-six-types-and-focus-return', async () => {
         const trigger = page.getByRole('button', { name: '资产库' });
         await trigger.click();
