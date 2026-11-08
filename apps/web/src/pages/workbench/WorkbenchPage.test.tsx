@@ -89,6 +89,8 @@ beforeEach(() => {
     name: '合成领域'
   }]);
   vi.mocked(api.listWorks).mockResolvedValue([]);
+  vi.mocked(api.deskPositions).mockResolvedValue([]);
+  vi.mocked(api.saveDeskPosition).mockResolvedValue({ workId: work, x: 0, y: 0 });
   vi.mocked(api.listIdeaBoxes).mockResolvedValue([]);
   vi.mocked(api.accounts).mockResolvedValue([]);
   vi.mocked(api.readWork).mockResolvedValue(envelope());
@@ -1086,6 +1088,30 @@ it('keeps every editor step reachable from the writing workflow menu', async () 
   await waitFor(() => expect(within(materialNav).getByRole('button', { name: '材料浏览' })).toHaveAttribute('aria-current', 'step'));
   fireEvent.click(within(materialNav).getByRole('button', { name: '正文' }));
   await screen.findByLabelText('正文第 1 段');
+});
+
+it('moves a desk frame and saves where it was put', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  show('desk');
+  const frame = await screen.findByLabelText('选题框：真实选题');
+  const head = frame.querySelector('.frame-head') as HTMLElement;
+  fireEvent.pointerDown(head, { button: 0, clientX: 300, clientY: 200, pointerId: 1 });
+  fireEvent.pointerMove(head, { clientX: 340, clientY: 260, pointerId: 1 });
+  const moved = frame.style.left;
+  expect(moved).not.toBe('0px');
+  fireEvent.pointerUp(head, { clientX: 340, clientY: 260, pointerId: 1 });
+  await waitFor(() => expect(api.saveDeskPosition).toHaveBeenCalledTimes(1));
+  const request = vi.mocked(api.saveDeskPosition).mock.calls[0]?.[0];
+  expect(request).toEqual({ domainRef: domain, workId: work, x: parseInt(moved, 10), y: parseInt(frame.style.top, 10) });
+});
+
+it('puts each desk frame back where it was last saved', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.deskPositions).mockResolvedValue([{ workId: work, x: 40, y: 80 }]);
+  show('desk');
+  const frame = await screen.findByLabelText('选题框：真实选题');
+  await waitFor(() => expect(frame.style.left).toBe('40px'));
+  expect(frame.style.top).toBe('80px');
 });
 
 it('keeps unfinished candidate and idea inputs across editor steps and warns before leaving', async () => {

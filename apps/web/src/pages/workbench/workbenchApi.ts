@@ -1,5 +1,5 @@
 import { ApiError, requestJson, requestBinaryJson } from '../../shared/api';
-import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, parseDeskPosition, parseDeskPositions, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
 import { listAccounts as listCreationAccounts } from './assets/assetsApi';
 const base = '/ops/api/creation';
 const post = (path: string, body: unknown) => requestJson(path, {
@@ -13,6 +13,12 @@ export async function listWorks(domain: string, signal?: AbortSignal) {
 }
 export async function listIdeaBoxes(domain: string, signal?: AbortSignal) {
   return parseIdeaBoxList(await requestJson(`${base}/idea-boxes?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
+}
+export async function deskPositions(domain: string, signal?: AbortSignal) {
+  return parseDeskPositions(await requestJson(`${base}/desk/positions?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
+}
+export async function saveDeskPosition(body: { domainRef: string; workId: string; x: number; y: number }) {
+  return parseDeskPosition(await post(`${base}/desk/positions`, body));
 }
 export async function readWork(id: string, signal?: AbortSignal) {
   const value = parseEnvelope(await requestJson(`${base}/works/${uuid(id)}`, {

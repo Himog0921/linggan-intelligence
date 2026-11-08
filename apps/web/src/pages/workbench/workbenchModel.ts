@@ -681,6 +681,9 @@ export const parseWorkList = shape<{
 export const parseIdeaBoxList = shape<{ items: IdeaBoxSummary[] }>({ items: array(shape<IdeaBoxSummary>({
   ideaRef: uuid, anchorWorkId: uuid, anchorRevisionId: uuid, savedAt: str, name: str, intent: str,
 })) });
+export interface DeskPosition { workId: string; x: number; y: number }
+export const parseDeskPosition = shape<DeskPosition>({ workId: uuid, x: num, y: num });
+export const parseDeskPositions = shape<{ items: DeskPosition[] }>({ items: array(parseDeskPosition) });
 export const parseHistory = shape<{
   items: RevisionSummary[];
 }>({

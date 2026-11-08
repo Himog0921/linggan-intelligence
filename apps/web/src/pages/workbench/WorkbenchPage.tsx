@@ -24,11 +24,12 @@ import { SaveStructuralTemplate } from './assets/SaveStructuralTemplate';
 import type { CreateCommand as TemplateCreateCommand } from './assets/structuralTemplatesApi';
 import { AssetsLibrary } from './assets/AssetsLibrary';
 import { MaterialBrowser } from './MaterialBrowser';
+import { MaterialDesk } from './MaterialDesk';
 import { newImagePage } from './imagePageFactory';
 import { ImagePages } from './ImagePages';
 import styles from './WorkbenchPage.module.css';
-type View = 'topic' | 'materials' | 'canvas' | 'body' | 'cover' | 'inner' | 'export';
-const VIEWS: readonly { id: View; label: string }[] = [{id:'topic',label:'选题方案'},{id:'materials',label:'材料浏览'},{id:'canvas',label:'创作画布'},{id:'body',label:'正文'},{id:'cover',label:'封面'},{id:'inner',label:'内页'},{id:'export',label:'预览与导出'}];
+type View = 'topic' | 'desk' | 'materials' | 'canvas' | 'body' | 'cover' | 'inner' | 'export';
+const VIEWS: readonly { id: View; label: string }[] = [{id:'topic',label:'选题方案'},{id:'desk',label:'选题与材料'},{id:'materials',label:'材料浏览'},{id:'canvas',label:'创作画布'},{id:'body',label:'正文'},{id:'cover',label:'封面'},{id:'inner',label:'内页'},{id:'export',label:'预览与导出'}];
 function targetLocation(target: UseTarget, document: WorkDocument): {
   view: View;
   label: string;
@@ -237,11 +238,11 @@ export function WorkbenchPage() {
     scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
       disabled={creating || createUnknown || assetPending} onChange={next => { if (createPending.current || assetPending) return; setError(''); setParams({ domain: next, section }); }} />}
     tabs={<>
-      <button type="button" disabled={assetPending} aria-current={section !== 'assets' && (!work || !['materials', 'canvas'].includes(viewValue(params.get('view')))) ? 'page' : undefined} onClick={() => {
+      <button type="button" disabled={assetPending} aria-current={section !== 'assets' && (!work || !['desk', 'materials', 'canvas'].includes(viewValue(params.get('view')))) ? 'page' : undefined} onClick={() => {
         setParams(lastWork ? { domain, work: lastWork, view: 'body' } : { domain, section: 'works' });
       }}>写稿</button>
-      <button type="button" disabled={!lastWork || assetPending} aria-current={work && ['materials', 'canvas'].includes(viewValue(params.get('view'))) ? 'page' : undefined} onClick={() => {
-        if (lastWork) setParams({ domain, work: lastWork, view: 'materials' });
+      <button type="button" disabled={!lastWork || assetPending} aria-current={work && ['desk', 'materials', 'canvas'].includes(viewValue(params.get('view'))) ? 'page' : undefined} onClick={() => {
+        if (lastWork) setParams({ domain, work: lastWork, view: 'desk' });
       }}>材料桌</button>
       <button type="button" disabled={assetPending} aria-current={!work && section === 'assets' ? 'page' : undefined} onClick={() => {
         if (work || section !== 'assets') setParams({ domain, section: 'assets' });
@@ -265,7 +266,7 @@ export function WorkbenchPage() {
 <input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={creating || createUnknown} onChange={e => setTitle(e.target.value)} />
 <ActionButton type="submit" variant="primary" busy={creating} disabled={!title.trim() || creating}>{creating ? '建立中…' : createUnknown ? '核实原请求并重试' : '建立选题'}</ActionButton>
 </form>} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
-<WorkEditor onOpenLibrary={() => setParams({ domain: w.domainRef, section: 'works' })} onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} immersive={immersive} onImmersive={setImmersive} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenTopic={id => setParams({ domain: w.domainRef, work: id, view: 'topic' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
+<WorkEditor onOpenLibrary={() => setParams({ domain: w.domainRef, section: 'works' })} onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} immersive={immersive} onImmersive={setImmersive} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenTopic={id => setParams({ domain: w.domainRef, work: id, view: 'topic' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} onOpenDraftWriting={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
           domain: w.domainRef,
           work: w.workId,
           view
@@ -290,6 +291,7 @@ function WorkEditor({
   drafts,
   draftsStatus,
   onOpenDraft,
+  onOpenDraftWriting,
   active,
   view,
   onView,
@@ -305,6 +307,7 @@ function WorkEditor({
   drafts: WorkSummary[];
   draftsStatus: 'loading' | 'error' | 'ready';
   onOpenDraft: (id: string) => void;
+  onOpenDraftWriting: (id: string) => void;
   active: boolean;
   view: View;
   onView: (v: View) => void;
@@ -1170,7 +1173,7 @@ function WorkEditor({
 <p>未确认编辑仅保留在本页内存；关闭页面前请完成保存。</p>
 </details>
 <ActionButton variant="outline" busy={busy&&saveState==='saving'} disabled={busy || composing || !!conflict} onClick={() => void saveCurrent().catch(() => undefined)}>{hasPending && saveState === 'unknown' ? '核实并重试' : saveState === 'saving' ? '保存中…' : '保存'}</ActionButton>
-<ActionButton variant="quiet" onClick={onOpenLibrary}>全部稿件</ActionButton><ActionButton variant="quiet" disabled={resetRequired || recheckStatus !== 'ready'} onClick={() => void showHistory()}>历史</ActionButton><ActionButton variant="quiet" onClick={() => onImmersive(!immersive)}>{immersive ? '退出沉浸' : '收起导航'}</ActionButton>{view === 'materials' || view === 'canvas' ? <ActionButton variant="primary" onClick={() => onView('body')}>进入正文 →</ActionButton> : null}
+<ActionButton variant="quiet" onClick={onOpenLibrary}>全部稿件</ActionButton><ActionButton variant="quiet" disabled={resetRequired || recheckStatus !== 'ready'} onClick={() => void showHistory()}>历史</ActionButton><ActionButton variant="quiet" onClick={() => onImmersive(!immersive)}>{immersive ? '退出沉浸' : '收起导航'}</ActionButton>{view === 'materials' || view === 'canvas' || view === 'desk' ? <ActionButton variant="primary" onClick={() => onView('body')}>进入正文 →</ActionButton> : null}
 </div>
   </>;
   const studioColumns = view === 'body' && !(aiComparison && ai?.suggestion) && !(compareVisible && compareBase && document.experienceGaps.length === 0);
@@ -1200,6 +1203,7 @@ function WorkEditor({
     <div hidden={view !== 'materials'}>
 <MaterialBrowser key={`${initial.domainRef}:${focusSequence}:${sourceResetSequence}`} contextKey={`${initial.workId}:${sourceResetSequence}:${sourceRefreshSequence}`} active={active && view === 'materials'} domain={initial.domainRef} document={document} onChange={next=>edit({...live.current,materials:next.materials,materialPreparation:next.materialPreparation})} onCollect={collect} focusCitation={sourceFocus} onCanvas={() => onView('canvas')} />
 </div>
+    {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} onOpenWork={onOpenDraftWriting} onBrowse={() => onView('materials')} /></div> : null}
     {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);setFocusSequence(n=>n+1);onView('materials');}} onMaterials={()=>onView('materials')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={card=>{setPlacement(card);setBodyTarget(document.uses.flatMap(use=>use.canvasId===card.id&&use.target.kind==='paragraph'?[use.target.paragraphId]:[])[0]??'new');setWantBody(true);setWantPage(false);setPageTarget(document.pages.find(page=>page.kind!=='cover')?.id??'');}} /> : null}
     {view === 'body' ? <div className={styles.bodyWorkspace}>
 {compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}

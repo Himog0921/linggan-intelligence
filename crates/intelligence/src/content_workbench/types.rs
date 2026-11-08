@@ -468,6 +468,21 @@ pub struct IdeaBoxSummary {
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DeskPosition {
+    pub work_id: Uuid,
+    pub x: f64,
+    pub y: f64,
+}
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeskPositionRequest {
+    pub domain_ref: Uuid,
+    pub work_id: Uuid,
+    pub x: f64,
+    pub y: f64,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AssetRecord {
     pub id: Uuid,
     pub work_id: Uuid,

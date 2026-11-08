@@ -94,3 +94,8 @@
 .gm-studio .experience .ex-title > button {padding:0;border:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
 .gm-studio .experience .ex-title > button:hover {text-decoration:underline;text-underline-offset:4px}
 .gm-studio .lib-empty {margin:0;padding:var(--s8) 0;color:var(--lgi-body);font:400 var(--t-control)/1.7 var(--lgi-font-ui)}
+
+.gm-studio .immersive-desk .mcard .q.paper,
+.gm-studio .immersive-desk .mcard.note .txt {display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;overflow:hidden}
+.gm-studio .immersive-desk .frame-head .ttl {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gm-studio .immersive-desk .frame-head:active {cursor:grabbing}

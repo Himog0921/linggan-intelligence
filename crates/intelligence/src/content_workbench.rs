@@ -23,8 +23,9 @@ pub use source_usage::{
     propagate_adopted_sources_in, redact_revision_in, redact_revision_with_statuses_in,
 };
 pub use store::{
-    adopt_in, create_work, list_idea_boxes, list_works, place, read_revision_in, read_work,
-    reset_withdrawn, restore, revision, revision_index, revisions, save,
+    adopt_in, create_work, desk_positions, list_idea_boxes, list_works, place, read_revision_in,
+    read_work, reset_withdrawn, restore, revision, revision_index, revisions, save,
+    save_desk_position,
 };
 pub use types::*;
 pub(crate) use validation::document as validate_document;

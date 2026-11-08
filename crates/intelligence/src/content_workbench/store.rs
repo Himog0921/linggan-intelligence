@@ -129,6 +129,53 @@ pub async fn list_idea_boxes(
     Ok(result)
 }
 
+pub async fn desk_positions(
+    db: &Database,
+    domain: Uuid,
+) -> Result<Vec<DeskPosition>, WorkbenchError> {
+    let rows = sqlx::query(
+        "SELECT p.work_ref,p.x,p.y FROM linggan_creation_desk_position p JOIN linggan_creation_work w ON w.work_ref=p.work_ref AND w.domain_ref=p.domain_ref WHERE p.domain_ref=$1",
+    )
+    .bind(domain)
+    .fetch_all(db.pool())
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(DeskPosition {
+                work_id: row.try_get("work_ref")?,
+                x: row.try_get("x")?,
+                y: row.try_get("y")?,
+            })
+        })
+        .collect()
+}
+
+pub async fn save_desk_position(
+    db: &Database,
+    request: &DeskPositionRequest,
+) -> Result<DeskPosition, WorkbenchError> {
+    if !request.x.is_finite() || !request.y.is_finite() {
+        return Err(WorkbenchError::Invalid("desk_position"));
+    }
+    let x = request.x.clamp(-1_000_000.0, 1_000_000.0);
+    let y = request.y.clamp(-1_000_000.0, 1_000_000.0);
+    let saved = sqlx::query(
+        "INSERT INTO linggan_creation_desk_position(domain_ref,work_ref,x,y) SELECT w.domain_ref,w.work_ref,$2,$3 FROM linggan_creation_work w WHERE w.work_ref=$1 AND w.domain_ref=$4 ON CONFLICT (domain_ref,work_ref) DO UPDATE SET x=EXCLUDED.x,y=EXCLUDED.y,updated_at=scope_001_now() RETURNING work_ref",
+    )
+    .bind(request.work_id)
+    .bind(x)
+    .bind(y)
+    .bind(request.domain_ref)
+    .fetch_optional(db.pool())
+    .await?;
+    saved.ok_or(WorkbenchError::NotFound)?;
+    Ok(DeskPosition {
+        work_id: request.work_id,
+        x,
+        y,
+    })
+}
+
 async fn ensure_idea_box(
     tx: &mut Transaction<'_, Postgres>,
     work: Uuid,
