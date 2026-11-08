@@ -237,12 +237,12 @@ export function CreatorWorkbenchPreviewPage() {
               <div className={styles.queueHead}>
                 <div className={styles.queueHeadTop}>
                   <h2>今日 · 10月27日 周一</h2>
-                  <ActionButton variant="outline" onClick={() => {
+                  <button type="button" className={styles.smallAction} onClick={() => {
                     const id = 'new-' + (drafts.length + 1);
                     setDrafts(items => [...items, { ...INITIAL_DRAFTS[0]!, id, title: '新建稿件' }]);
                     setDraftId(id);
                     previewOnly('已建立本地演示稿件');
-                  }}>＋ 新选题</ActionButton>
+                  }}>＋ 新选题</button>
                 </div>
                 <ActionButton className={styles.queueDeskButton} variant="quiet" onClick={openDesk}>
                   <span className={styles.deskEntryIcon} aria-hidden="true">▣</span>选题与材料<span className={styles.dataCount}>4 个选题</span>
@@ -295,11 +295,9 @@ export function CreatorWorkbenchPreviewPage() {
                   <div className={styles.intentRow} data-testid="intent-row"><span>选题意图</span><b>{currentDraft.angle}</b></div>
                   {currentDraft.related ? (
                     <div className={styles.related} data-testid="related-card">
-                      <span>和我方爆款《{currentDraft.related.title}》（<b>{currentDraft.related.reads.toLocaleString('zh-CN')}</b> 阅读）意思接近，要算成同一个选题吗？</span>
-                      <div className={styles.relatedActions}>
-                        <button type="button" onClick={() => previewOnly('已在本地预览中关联为同一选题')}>关联成同一选题</button>
-                        <button type="button" onClick={() => updateDraft({ related: undefined })}>不关联，按试新算</button>
-                      </div>
+                      和我方爆款《{currentDraft.related.title}》（<b>{currentDraft.related.reads.toLocaleString('zh-CN')}</b> 阅读）意思接近，要算成同一个选题吗？
+                      <button type="button" onClick={() => previewOnly('已在本地预览中关联为同一选题')}>关联成同一选题</button>
+                      <button type="button" onClick={() => updateDraft({ related: undefined })}>不关联，按试新算</button>
                     </div>
                   ) : null}
                   <div className={styles.coverRow}>
