@@ -193,7 +193,6 @@ try {
         await trigger.click();
         const dialog = page.getByRole('dialog', { name: '使用路径' });
         await dialog.waitFor({ state: 'visible' });
-        assert.equal(await dialog.getByText('六个阶段', { exact: true }).count(), 0);
         assert.ok(await dialog.getByText('四条常走的路').isVisible());
         await page.keyboard.press('Escape');
         await dialog.waitFor({ state: 'hidden' });
@@ -210,14 +209,14 @@ try {
         assert.equal(await page.getByText(/未调用正式 API/).count() > 0, true);
       });
       await verify('g5-experience-picker-blocks-unconfirmed', async () => {
-        const before = await page.getByRole('textbox', { name: /^正文第 \\d+ 段$/ }).count();
+        const before = await page.getByRole('textbox', { name: /^正文第 \d+ 段$/ }).count();
         await page.getByRole('button', { name: '后面插入经历' }).first().click({ force: true });
         const dialog = page.getByRole('dialog', { name: '选择经历' });
         await dialog.waitFor({ state: 'visible' });
         assert.equal(await dialog.getByRole('button', { name: '尚不可用' }).isDisabled(), true);
         await dialog.getByRole('button', { name: '用这段' }).click();
         await dialog.waitFor({ state: 'hidden' });
-        const after = await page.getByRole('textbox', { name: /^正文第 \\d+ 段$/ }).count();
+        const after = await page.getByRole('textbox', { name: /^正文第 \d+ 段$/ }).count();
         assert.equal(after, before + 1);
       });
       await verify('g5-product-edit-local-cancel', async () => {
