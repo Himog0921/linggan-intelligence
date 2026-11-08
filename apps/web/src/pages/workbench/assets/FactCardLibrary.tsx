@@ -96,26 +96,35 @@ export function FactCardLibrary() {
       await queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
     })();
   };
-  return <section className={styles.assetBody} aria-label="产品事实卡">
-    <div>
-      <div className={styles.toolbar}>
-        <h2>产品事实卡</h2>
-        <ActionButton variant="outline" onClick={() => setSelected('new')}>＋ 新建</ActionButton>
+  return <section aria-label="产品事实卡">
+    <header className="as-head">
+      <div className="grow">
+        <h1 className="h-obj">产品事实卡</h1>
+        <p>写明产品的正式叫法、能讲和不能讲的话。稿子的检查读取“已确认”的那一版。</p>
       </div>
-      <p className={styles.hint}>写明产品的正式叫法、能讲和不能讲的话。稿子的检查读取“已确认”的那一版。</p>
-      {cards.isPending ? <p role="status">正在读取…</p> : null}
-      {cards.isError ? <p role="alert" className={styles.problem}>读取失败，可以<ActionButton variant="quiet" onClick={() => void cards.refetch()}>重试</ActionButton></p> : null}
-      {cards.isSuccess && items.length === 0 ? <p>还没有产品事实卡。没有已确认的卡时，叫法检查不会运行。</p> : null}
-      <ul className={styles.list}>{items.map(item => <li key={item.code}>
-        <button type="button" aria-current={item.code === selected ? 'true' : undefined} onClick={() => setSelected(item.code)}>
-          <b>{item.latest.name}</b><small>{item.code} · {cardState(item)}</small>
-        </button>
-      </li>)}</ul>
-    </div>
-    <div className={styles.detail}>
-      {selected === 'new' ? <CardForm key="new" card={null} onChanged={changed} />
-        : current ? <CardForm key={`${current.code}:${current.latest.revision}`} card={current.latest} onChanged={changed} />
-          : <p className={styles.hint}>在左边选一张卡，或新建一张。</p>}
-    </div>
+      <ActionButton variant="outline" onClick={() => setSelected('new')}>＋ 新建</ActionButton>
+    </header>
+    {cards.isPending ? <p role="status">正在读取…</p> : null}
+    {cards.isError ? <p role="alert" className={styles.problem}>读取失败，可以<ActionButton variant="quiet" onClick={() => void cards.refetch()}>重试</ActionButton></p> : null}
+    {cards.isSuccess && items.length === 0 ? <p className="lib-empty">还没有产品事实卡。没有已确认的卡时，叫法检查不会运行。</p> : null}
+    {items.length || selected === 'new' ? <div className="lib">
+      <div className="lib-table">
+        <table className="ledger">
+          <thead><tr><th scope="col">卡片</th><th scope="col">版本与状态</th></tr></thead>
+          <tbody>{items.map(item => {
+            const on = item.code === selected;
+            return <tr key={item.code} className={on ? 'lib-row on' : 'lib-row'}>
+              <td><button type="button" aria-current={on ? 'true' : undefined} onClick={() => setSelected(item.code)}><b>{item.latest.name}</b></button></td>
+              <td><span>{item.code} · {cardState(item)}</span></td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <aside className="lib-insp" aria-label="产品事实卡详情">
+        {selected === 'new' ? <CardForm key="new" card={null} onChanged={changed} />
+          : current ? <CardForm key={`${current.code}:${current.latest.revision}`} card={current.latest} onChanged={changed} />
+            : <p className={styles.hint}>在左边选一张卡，或新建一张。</p>}
+      </aside>
+    </div> : null}
   </section>;
 }

@@ -26,7 +26,7 @@ export function AssetsLibrary({ domainRef, onPendingChange = () => {}, onDirtyCh
     </header>
     <nav className="asset-tabs" aria-label="资产类型">{KINDS.map(([value, label]) => <button type="button" key={value}
       disabled={pending} aria-current={kind === value ? 'page' : undefined} onClick={() => { if (kind === value) return; if (dirty && !window.confirm('当前内容尚未保存，切换会丢弃本页编辑。确定切换吗？')) return; setDirty(false); onDirtyChange(false); setKind(value); }}>{label}</button>)}</nav>
-    <div className="assets"><div className="as-inner">
+    <div className={kind === 'experience' ? 'assets experience' : 'assets'}><div className="as-inner">
       {kind === 'identity' ? <IdentityLibrary domainRef={domainRef} /> : kind === 'factCard' ? <FactCardLibrary /> : kind === 'sentence' ? <SentenceLibrary /> : kind === 'persona' ? <PersonaFactsLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} /> : kind === 'template' ? <StructuralTemplateLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} /> : <ExperienceLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} />}
     </div></div>
   </div>;
