@@ -154,7 +154,10 @@
 .assetDetail p { margin: 0; color: var(--lgi-body); line-height: 1.75; }
 .assetFoot { display: flex; align-items: center; justify-content: space-between; min-height: calc(var(--lgi-space-1) * 13.5); padding: 0 var(--lgi-space-5); border-top: 1px solid var(--cw-line); color: var(--lgi-muted); font-size: var(--lgi-type-aux-size); }
 .noticeToast { position: fixed; right: var(--lgi-space-4); bottom: var(--lgi-space-4); z-index: var(--lgi-z-toast); display: flex; align-items: flex-start; gap: var(--lgi-space-2); max-width: min(calc(var(--lgi-space-1) * 130), calc(100vw - var(--lgi-space-8))); padding: var(--lgi-space-2); border: 1px solid var(--cw-line); background: var(--lgi-canvas); box-shadow: var(--lgi-shadow-overlay); }
-.noticeToast button { flex: none; border: 0; background: transparent; color: var(--lgi-muted); font-size: var(--lgi-type-aux-size); }
+/* A persistent preview notice must not block editor/footer actions underneath it.
+   Keep only its explicit close button interactive. */
+.noticeToast { pointer-events: none; }
+.noticeToast button { flex: none; border: 0; background: transparent; color: var(--lgi-muted); font-size: var(--lgi-type-aux-size); pointer-events: auto; }
 @media (max-width: 1200px) {
   .write { --cw-queue: 220px; --cw-inspector: 304px; }
   .desk { grid-template-columns: 220px minmax(0, 1fr) 304px; }
