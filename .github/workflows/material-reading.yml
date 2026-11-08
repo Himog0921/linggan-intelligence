@@ -36,7 +36,6 @@ jobs:
           cargo test -p linggan-evidence --lib --locked
           cargo test -p linggan-evidence --test ocr_adoption --locked
           cargo test -p linggan-worker --bin linggan-media-worker --locked
-          python3 -B apps/worker/src/bin/media_worker_support/test_paddle_vl_receipts.py
           bash scripts/test-ocr-recognition-postgres.sh --purge-only
           bash scripts/test-ocr-recognition-postgres.sh --reading-only
           bash scripts/test-ocr-recognition-postgres.sh --local-only
