@@ -136,6 +136,7 @@ export function CreatorWorkbenchPreviewPage() {
   const g5WasOpened = useRef(false);
   const assetWasOpened = useRef(false);
   const nextLocalDeskId = useRef(0);
+  const nextLocalExperienceId = useRef(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const pointerRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
   const currentDraft = drafts.find(item => item.id === draftId) ?? drafts[0]!;
@@ -197,7 +198,7 @@ export function CreatorWorkbenchPreviewPage() {
   const useSyntheticExperience = (body: string) => {
     const index = currentDraft.paragraphs.findIndex(item => item.id === experienceTargetId);
     const insertAt = index < 0 ? currentDraft.paragraphs.length : index + 1;
-    const newParagraph: Paragraph = { id: currentDraft.id + '-synthetic-experience-' + Date.now().toString(36), role: '经历', text: body };
+    const newParagraph: Paragraph = { id: currentDraft.id + '-synthetic-experience-' + (++nextLocalExperienceId.current), role: '经历', text: body };
     updateDraft({ paragraphs: [
       ...currentDraft.paragraphs.slice(0, insertAt), newParagraph, ...currentDraft.paragraphs.slice(insertAt),
     ] });
