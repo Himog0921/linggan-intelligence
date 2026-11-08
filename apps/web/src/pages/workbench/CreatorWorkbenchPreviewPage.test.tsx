@@ -5,10 +5,10 @@ import userEvent from '@testing-library/user-event';
 import { CreatorWorkbenchPreviewPage } from './CreatorWorkbenchPreviewPage';
 
 vi.mock('../ops/OpsFrame', () => ({
-  OpsFrame: ({ children, tabs, meta, boundaryLabel, immersive }: { children: ReactNode; tabs: ReactNode; meta: ReactNode; boundaryLabel?: ReactNode; immersive?: boolean }) => (
+  OpsFrame: ({ children, tabs, meta, immersive }: { children: ReactNode; tabs: ReactNode; meta: ReactNode; immersive?: boolean }) => (
     <div data-testid="ops-frame" data-immersive={immersive ? 'true' : 'false'}>
       <nav aria-label="预览上下文导航">{tabs}</nav>
-      <div>{boundaryLabel}</div><div>{meta}</div>
+      <div>Demo · 示例数据</div><div>{meta}</div>
       {children}
     </div>
   ),
