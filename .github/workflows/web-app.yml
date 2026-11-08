@@ -45,12 +45,12 @@ jobs:
       - name: Chromium for creator workbench G5
         if: startsWith(github.head_ref, 'preview/creator-workbench-')
         run: npx --prefix apps/web playwright install --with-deps chromium
-      - name: Real React G5 six-viewport browser proof
+      - name: Real reference-preview six-viewport browser proof
         if: startsWith(github.head_ref, 'preview/creator-workbench-')
         env:
           CW_G5_DIR: ${{ runner.temp }}/creator-workbench-g5
         run: node apps/web/test/e2e/creator-workbench-g5.mjs
-      - name: Preserve G5 screenshots and geometry
+      - name: Preserve G5 screenshots and browser report
         if: always() && startsWith(github.head_ref, 'preview/creator-workbench-')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
