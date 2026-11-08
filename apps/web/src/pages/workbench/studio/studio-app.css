@@ -1,0 +1,71 @@
+/* Adaptations for running the design-reference stylesheet inside the app shell. */
+.gm-studio {height:100%;min-height:0;overflow:hidden}
+.gm-studio > .workbench {height:100%;min-height:0;display:flex}
+.gm-studio > .workbench > .write {flex:1;min-width:0;min-height:0;height:auto}
+.gm-studio .write > .queue {grid-column:1;grid-row:1}
+.gm-studio .write > .editor {grid-column:2;grid-row:1}
+.gm-studio .write > .right {grid-column:3;grid-row:1}
+.gm-studio .editor > .ed-scroll {min-height:0}
+.gm-studio .ed-head .grow {flex:1}
+.gm-studio .ed-head .acc-btn,.gm-studio .ed-head .frame-chip {flex:none}
+.gm-studio .ed-head .ed-meta {flex:1 1 auto;min-width:0;max-width:44ch}
+.gm-studio .ed-head .meta-basic {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--t-aux);color:var(--lgi-muted)}
+.gm-studio .ed-head > button {flex:none}
+.gm-studio .editor > .ed-foot {flex-wrap:nowrap}
+.gm-studio .editor > .ed-foot > * {flex:none}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] {display:contents}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"][hidden] {display:none}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section {display:contents}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > p {order:0;margin:0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > [class*="actions"] {order:2;display:flex;gap:var(--s3);margin-left:auto;flex:none}
+.gm-studio .chk-list {list-style:none;margin:0;padding:0}
+.gm-studio .chk-item {margin-left:0;margin-right:0}
+
+
+.gm-studio .q-item[aria-current="page"] {background:var(--lgi-canvas)}
+.gm-studio .q-item[aria-current="page"] .q-title {font-weight:600}
+.gm-studio .q-item[aria-current="page"]::before {content:"";position:absolute;left:0;top:var(--s3);bottom:var(--s3);width:2px;background:var(--lgi-signal)}
+.gm-studio .q-title,.gm-studio .q-meta,.gm-studio .q-state {display:block}
+.gm-studio .q-meta {display:flex;flex-wrap:wrap;gap:0 var(--s2)}
+
+.gm-studio .para-text {display:block;width:100%;field-sizing:content;min-height:0;resize:none;background:transparent;border-top:0;border-right:0;border-bottom:0;border-radius:0}
+.gm-studio .para-text[readonly] {color:var(--lgi-muted)}
+.gm-studio .para-tools {opacity:1}
+.gm-studio .para-tools details {display:inline-block;font-size:var(--t-aux);color:var(--lgi-body)}
+.gm-studio .para-tools details > summary {list-style:none;cursor:pointer;min-height:24px;border-bottom:1px solid var(--lgi-border-strong);color:var(--lgi-body)}
+.gm-studio .para-tools details > summary::-webkit-details-marker {display:none}
+.gm-studio .para-tools details[open] > summary {margin-bottom:var(--s1)}
+.gm-studio .para-tools details p {margin:var(--s1) 0 0;font-size:var(--t-aux)}
+
+.gm-studio .add-para {margin:var(--s3) 0 var(--s6) calc(var(--writing-gutter) + var(--s3));border:0;border-bottom:1px solid var(--lgi-border-strong);background:transparent;padding:0;font-size:var(--t-aux);color:var(--lgi-body);cursor:pointer}
+.gm-studio .add-para:hover {color:var(--lgi-signal);border-bottom-color:var(--lgi-signal-mark)}
+.gm-studio .cover.empty {display:grid;place-items:center;background:var(--lgi-canvas-low);background-image:none}
+.gm-studio .cover.empty .cover-title {position:static;transform:none;color:var(--lgi-muted);font:500 var(--t-aux)/1.4 var(--lgi-font-ui);-webkit-text-stroke:0}
+.gm-studio .cands > span {display:inline-flex;align-items:center}
+.gm-studio .cands > span > button:last-child {border:0;background:transparent;color:var(--lgi-muted);font-size:var(--t-aux);cursor:pointer;padding:0 var(--s1)}
+
+.gm-studio .intent {display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s4)}
+.gm-studio .intent small {color:var(--lgi-muted);font-size:var(--t-aux)}
+.gm-studio .intent strong {font:600 var(--t-body)/1.5 var(--lgi-font-ui)}
+.gm-studio .intent details {font-size:var(--t-aux);color:var(--lgi-muted)}
+.gm-studio .intent label {display:grid;gap:var(--s1);margin-top:var(--s2)}
+.gm-studio .intent textarea {min-height:64px}
+
+.gm-studio .right > .r-tabs ~ * {min-height:0}
+.gm-studio .r-body > section {padding:0}
+.gm-studio .r-body h3 {margin:0 0 var(--s2);font:600 var(--t-control)/1.5 var(--lgi-font-ui)}
+.gm-studio .r-body h4 {margin:var(--s3) 0 var(--s1);font:600 var(--t-aux)/1.5 var(--lgi-font-ui);color:var(--lgi-muted);letter-spacing:.04em}
+.gm-studio .r-body p {margin:0 0 var(--s2);font-size:var(--t-aux)}
+.gm-studio .r-tabs button[aria-current="page"] {color:var(--lgi-ink)}
+.gm-studio .r-tabs button[aria-current="page"]::after {content:"";position:absolute;inset:auto 0 0;height:2px;background:var(--lgi-signal-mark)}
+
+.gm-studio.studio-foot-scope {height:auto;min-height:0;overflow:visible;display:block;position:sticky;bottom:0;z-index:var(--lgi-z-sticky)}
+.gm-studio.studio-foot-scope > .ed-foot {flex-wrap:nowrap}
+.gm-studio.studio-foot-scope > .ed-foot > *:first-child {flex:1;min-width:0}
+.gm-studio.studio-foot-scope .footerCopyMount:empty {display:none}
+
+.gm-studio.assets-page {height:100%;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr)}
+.gm-studio.assets-page > .assets {min-height:0}
+.gm-studio .asset-kicker {display:block;font:500 var(--t-label)/1.4 var(--lgi-font-ui);letter-spacing:.12em;color:var(--lgi-muted)}
+.gm-studio .asset-tabs button[aria-current="page"] {position:relative;color:var(--lgi-ink);font-weight:600}
+.gm-studio .asset-tabs button[aria-current="page"]::after {content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--lgi-signal-mark)}

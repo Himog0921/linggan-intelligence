@@ -307,19 +307,19 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
   const grouped = LEVELS.map(level => ({ level, items: findings.filter(finding => finding.level === level) })).filter(group => group.items.length > 0);
   const copyPanel = <section aria-label="复制" className={`${styles.copy} ${copyContainer ? styles.footerCopy : ''}`}>
     <p>{copyContainer && reportOk ? `必改 ${counts.must} · 提醒 ${counts.warn}${wasCopied ? ' · 已复制（还没有发布）' : ''}` : wasCopied ? '已复制（还没有发布）' : '草稿中'}</p>
-    {!canCopy && copyWhy ? <p className={styles.hint}>{copyWhy}</p> : null}
+    {!copyContainer && !canCopy && copyWhy ? <p className={styles.hint}>{copyWhy}</p> : null}
     <div className={styles.actions}>
-      <ActionButton variant="primary" busy={copying} disabled={!canCopy} onClick={() => void copy()}>{copying ? '复制中…' : '复制到小红书'}</ActionButton>
+      <ActionButton variant="primary" busy={copying} disabled={!canCopy} title={!canCopy && copyWhy ? copyWhy : undefined} onClick={() => void copy()}>{copying ? '复制中…' : '复制到小红书'}</ActionButton>
       {!copyContainer ? <ActionButton variant="outline" disabled={!document.title.trim() || !canCopy} onClick={() => void copyTitle()}>复制标题</ActionButton> : null}
     </div>
     {pendingConfirmation ? <p role="status">复制记录结果未确认。<ActionButton variant="outline" disabled={copying} onClick={() => void recordClipboard(pendingConfirmation)}>重新确认记录</ActionButton></p> : null}
     {notice ? <p role="status">{notice}</p> : null}
   </section>;
-  return <aside className={styles.panel} aria-label="检查与复制">
-    <nav className={styles.panelTabs} aria-label="写稿侧栏">
-      {([['checks','检查'],['materials','素材'],['titles','标题'],['preview','预览']] as const).map(([value,label]) => <button type="button" key={value} aria-current={panelView === value ? 'page' : undefined} onClick={() => setPanelView(value)}>{label}{value === 'checks' && reportOk && findings.length > 0 ? <span aria-label={`${findings.length} 条检查结果`}>{findings.length}</span> : null}</button>)}
+  return <aside className="right" aria-label="检查与复制">
+    <nav className="r-tabs" aria-label="写稿侧栏">
+      {([['checks','检查'],['materials','素材'],['titles','标题'],['preview','预览']] as const).map(([value,label]) => <button type="button" key={value} aria-current={panelView === value ? 'page' : undefined} onClick={() => setPanelView(value)}>{label}{value === 'checks' && reportOk && findings.length > 0 ? <span className={counts.must ? 'n bad' : 'n'} aria-label={`${findings.length} 条检查结果`}>{findings.length}</span> : null}</button>)}
     </nav>
-    <div hidden={panelView !== 'checks'}>
+    <div className="r-body" hidden={panelView !== 'checks'}>
     <section aria-label="检查结果" aria-live="polite">
       <h3>检查结果</h3>
       {report.isPending ? <p>正在检查…</p> : report.isError ? <p role="alert" className={styles.problem}>检查读取失败。{api.assetsErrorText(report.error)}<ActionButton variant="quiet" onClick={() => void report.refetch()}>重试</ActionButton></p> : <>
@@ -327,7 +327,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
         {grouped.length === 0 && reportOk ? <p>没有发现问题。</p> : null}
         {grouped.map(group => <section key={group.level} aria-label={levelHeading[group.level]}>
           <h4>{levelHeading[group.level]}</h4>
-          <ul className={styles.findings}>{group.items.map((finding, index) => <li key={`${finding.rule}-${index}`} data-level={finding.level}>
+          <ul className="chk-list">{group.items.map((finding, index) => <li key={`${finding.rule}-${index}`} className={`chk-item ${finding.level === 'must' ? 'bad' : finding.level === 'hint' ? 'info' : ''}`} data-level={finding.level}>
             <span className={styles.chip}>{levelLabel[finding.level]}</span>
             <span>{finding.message}</span>
             <div className={styles.fixes}>
@@ -356,11 +356,11 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     {state === 'ready' && usable.isError ? <p role="alert" className={styles.problem}>衔接句读取失败。<ActionButton variant="quiet" onClick={() => void usable.refetch()}>重试</ActionButton></p> : null}
     </details>
     </div>
-    <section hidden={panelView !== 'materials'} aria-label="稿件素材">
+    <section className="r-body" hidden={panelView !== 'materials'} aria-label="稿件素材">
       <h3>这篇的材料与出处</h3>
       {document.excerpts.length ? document.excerpts.map(item => <div className={styles.sourceItem} key={item.id}><p>{item.selectedText ?? '来源已受限或不可用'}</p>{onOpenSource ? <ActionButton variant="quiet" onClick={() => onOpenSource(item.citation)}>回到原文 ↗</ActionButton> : null}</div>) : <p className={styles.hint}>还没有加入材料。可以从材料桌选择。</p>}
     </section>
-    <section hidden={panelView !== 'titles'} aria-label="稿件标题">
+    <section className="r-body" hidden={panelView !== 'titles'} aria-label="稿件标题">
       <h3>笔记标题</h3><p>{document.title || '还没有填写标题'}</p>
       {copyContainer ? <ActionButton variant="outline" disabled={!document.title.trim() || !canCopy} onClick={() => void copyTitle()}>复制标题</ActionButton> : null}
       <h3>封面大字</h3><p>{document.pages.find(page => page.kind === 'cover')?.title || '还没有填写封面大字'}</p>
@@ -368,7 +368,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
       <h3>标题 skill</h3><p className={styles.hint}>可在设置中编辑和切换标题做法。</p>
       <a href="/settings/models?section=skills&amp;task=creation_title">管理标题 skill ↗</a>
     </section>
-    <section hidden={panelView !== 'preview'} aria-label="稿件预览">
+    <section className="r-body" hidden={panelView !== 'preview'} aria-label="稿件预览">
       <h3>{document.title || '未命名稿件'}</h3>
       {document.paragraphs.filter(item => item.text.trim()).map(item => <p key={item.id} className={styles.previewParagraph}>{item.text}</p>)}
       {document.bridge?.sentence && !document.bridge.skip ? <p className={styles.hint}>衔接句：{document.bridge.sentence.text}</p> : null}

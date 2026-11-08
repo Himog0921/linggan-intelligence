@@ -441,3 +441,8 @@
 .ideaBar input,.ideaBar textarea,.ideaBar select {width:100%;padding:var(--lgi-space-2);border:1px solid var(--lgi-border);}
 
 .candidateList button[aria-pressed='true'] {background:var(--lgi-ink);color:var(--lgi-canvas);}
+
+.bodyWorkspace {display:flex;flex-direction:column;min-height:0;height:100%;}
+.bodyWorkspace>div:not([hidden]) {flex:1;min-height:0;}
+.editorWorkspace[data-view='body'] .compactCommand {position:relative;top:auto;right:auto;display:flex;justify-content:flex-end;padding:var(--lgi-space-1) var(--lgi-space-4) 0;}
+.editorWorkspace[data-view='body'] .compactCommandPanel {right:0;}
