@@ -155,7 +155,7 @@ try {
       report.fonts = geometry.fonts;
       await verify('approved-light-rail-and-preview-navigation', async () => {
         assert.equal(await page.locator('.v7-context-row').getAttribute('data-context-texture'), 'light');
-        assert.equal(await page.getByText('A娃家长矩阵', { exact: true }).isVisible(), true);
+        assert.equal(await page.getByText('示例家长矩阵', { exact: true }).isVisible(), true);
         assert.equal(await page.getByRole('button', { name: '发布记录' }).isVisible(), true);
       });
       await verify('gold-master-1440-primary-geometry', async () => {
