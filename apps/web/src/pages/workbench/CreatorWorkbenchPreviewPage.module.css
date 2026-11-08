@@ -243,6 +243,7 @@
 }
 .queueHeadTop { display: flex; align-items: center; justify-content: space-between; gap: var(--lgi-space-2); }
 .queueHeadTop h2 { margin: 0; color: var(--lgi-ink); font-size: var(--lgi-type-control-size); font-weight: var(--lgi-weight-semibold); line-height: var(--lgi-type-control-leading); white-space: nowrap; }
+.smallAction { display: inline-flex; align-items: center; justify-content: center; min-height: calc(var(--lgi-space-6) + var(--lgi-space-1) * 1.5); padding: 0 var(--lgi-space-2); border: 1px solid var(--lgi-border-strong); background: var(--lgi-canvas); color: var(--lgi-ink); font-size: var(--lgi-type-label-size); white-space: nowrap; }
 .queueDeskButton {
   display: flex;
   align-items: center;
@@ -325,10 +326,8 @@
   font-size: var(--lgi-type-label-size);
   line-height: var(--lgi-type-label-leading);
 }
-.related > span { flex: 1 1 100%; }
 .related b { color: var(--lgi-ink); font-family: var(--lgi-font-data); }
-.relatedActions { display: flex; flex-wrap: wrap; gap: var(--lgi-space-2); }
-.relatedActions button { border: 0; background: transparent; color: var(--lgi-ink); font: inherit; font-weight: var(--lgi-weight-semibold); padding: 0; }
+.related button { flex: 0 0 auto; min-height: var(--lgi-space-6); padding: 0 var(--lgi-space-1); border: 0; background: transparent; color: var(--lgi-ink); font: inherit; font-weight: var(--lgi-weight-semibold); white-space: nowrap; }
 .coverRow { display: grid; grid-template-columns: calc(var(--lgi-space-1) * 33) minmax(0,1fr); gap: var(--lgi-space-4); margin: 0 0 var(--lgi-space-4); }
 .coverColumn { display: grid; align-content: start; gap: var(--lgi-space-3); min-width: 0; }
 .cover { position: relative; width: calc(var(--lgi-space-1) * 33); height: calc(var(--lgi-space-1) * 44); overflow: hidden; border: 1px solid var(--cw-line); background: var(--lgi-canvas-low); }
@@ -405,7 +404,6 @@
   .editorInner { padding-bottom: var(--lgi-space-12); }
   .intentRow { align-items: flex-start; }
   .related { display: block; }
-  .relatedActions { margin-top: var(--lgi-space-2); }
   .coverRow { grid-template-columns: calc(var(--lgi-space-1) * 33) minmax(0,1fr); gap: var(--lgi-space-3); }
   .coverFields { gap: var(--lgi-space-2); }
   .coverEntry { grid-template-columns: minmax(0,1fr); }
