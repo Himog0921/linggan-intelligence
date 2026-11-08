@@ -1248,7 +1248,8 @@
 .gm-studio #overlay.assets-overlay :focus-visible{outline-color:var(--lgi-ink);}
 .gm-studio .asset-back{z-index:var(--z-overlay);padding:24px;background:rgba(11,15,18,.46);}
 .gm-studio .back:not(.asset-back){z-index:calc(var(--z-overlay) + 1);}
-.gm-studio .assets-modal{width:min(1440px,calc(100vw - 48px));height:min(920px,calc(100dvh - 48px));max-height:calc(100dvh - 48px);min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr);border:2px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal-lg);}
+.gm-studio .assets-modal{width:min(1440px,calc(100vw - 48px));height:min(920px,calc(100dvh - 48px));max-height:calc(100dvh - 48px);min-height:0;display:grid;grid-template-rows:minmax(0,1fr);border:2px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal-lg);}
+.gm-studio .assets-modal > .assets-page{height:100%;min-height:0}
 .gm-studio .asset-modal-head{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:18px 24px 15px;border-bottom:1px solid var(--lgi-border);}
 .gm-studio .asset-modal-heading{min-width:0;}
 .gm-studio .asset-modal-heading h2{margin:0;font:600 20px/1.35 var(--lgi-font-ui);}

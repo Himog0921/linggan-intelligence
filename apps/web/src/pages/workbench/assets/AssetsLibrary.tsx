@@ -10,7 +10,7 @@ const KINDS = [['identity', '账号身份'], ['persona', '人设事实'], ['fact
 type Kind = typeof KINDS[number][0];
 
 /** The asset library of the creation module: type tabs across the top, the chosen type below. */
-export function AssetsLibrary({ domainRef, onPendingChange = () => {}, onDirtyChange = () => {} }: { domainRef: string; onPendingChange?: (pending: boolean) => void; onDirtyChange?: (dirty: boolean) => void }) {
+export function AssetsLibrary({ domainRef, onPendingChange = () => {}, onDirtyChange = () => {}, onClose }: { domainRef: string; onPendingChange?: (pending: boolean) => void; onDirtyChange?: (dirty: boolean) => void; onClose?: () => void }) {
   const [kind, setKind] = useState<Kind>('identity');
   const [pending, setPending] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -19,10 +19,10 @@ export function AssetsLibrary({ domainRef, onPendingChange = () => {}, onDirtyCh
     <header className="asset-modal-head">
       <div className="asset-modal-heading">
         <span className="asset-kicker">CREATION RESOURCES</span>
-        <h2>资产库</h2>
+        <h2 id="asset-modal-title">资产库</h2>
         <p>维护账号、经历、产品知识与可复用写法；这些资产会在创作时被调用。</p>
       </div>
-      <div className="asset-modal-head-actions"><span className="asset-count">{KINDS.length} 类长期资产</span></div>
+      <div className="asset-modal-head-actions"><span className="asset-count">{KINDS.length} 类长期资产</span>{onClose ? <button type="button" className="modal-x" aria-label="关闭资产库" onClick={onClose}>×</button> : null}</div>
     </header>
     <nav className="asset-tabs" aria-label="资产类型">{KINDS.map(([value, label]) => <button type="button" key={value}
       disabled={pending} aria-current={kind === value ? 'page' : undefined} onClick={() => { if (kind === value) return; if (dirty && !window.confirm('当前内容尚未保存，切换会丢弃本页编辑。确定切换吗？')) return; setDirty(false); onDirtyChange(false); setKind(value); }}>{label}</button>)}</nav>

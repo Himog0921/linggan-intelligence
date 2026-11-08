@@ -16,7 +16,7 @@ export function ManuscriptEditor({
   workId,
   onCover,
   accountName,
-  ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleGenerator, footer,
+  ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleGenerator, footer, tools,
 }: {
   document: WorkDocument;
   edit: (document: WorkDocument) => void;
@@ -33,6 +33,7 @@ export function ManuscriptEditor({
   onDraftInputs: (inputs: { cover: string; note: string; idea: string }) => void;
   titleGenerator?: ReactNode;
   footer?: ReactNode;
+  tools?: ReactNode;
 }) {
   const cover = document.pages.find(page => page.kind === 'cover');
   const coverCandidate = draftInputs.cover;
@@ -55,6 +56,7 @@ export function ManuscriptEditor({
       <span className="acc-btn"><span className="avatar">{Array.from(accountName ?? '未')[0]}</span>{accountName ?? (document.accountRef ? '账号读取中' : '未选择账号')}</span>
       {document.ideaName || document.ideaRef ? null : <span className="frame-chip ghost">没有选题框</span>}
       <span className="grow" />
+      {tools}
       <div className="ed-meta" aria-label="稿件信息">
         <span className="meta-basic">{document.angle ? `意图 · ${document.angle}` : '还没有选题意图'}</span>
       </div>

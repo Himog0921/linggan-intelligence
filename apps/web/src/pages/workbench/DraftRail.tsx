@@ -26,8 +26,9 @@ function stateText(work: WorkSummary, check: DraftCheckSummary | undefined, grou
 }
 
 /** Checks and copy receipts describe saved revisions; neither proves platform publication. */
-export function DraftRail({ drafts, ideas = [], status, currentId, onOpen }: {
-  drafts: WorkSummary[]; ideas?: IdeaBoxSummary[]; status: 'loading' | 'error' | 'ready'; currentId: string; onOpen: (id: string) => void;
+export function DraftRail({ drafts, ideas = [], status, currentId, onOpen, onOpenDesk }: {
+  drafts: WorkSummary[]; ideas?: IdeaBoxSummary[]; status: 'loading' | 'error' | 'ready'; currentId: string;
+  onOpen: (id: string) => void; onOpenDesk?: () => void;
 }) {
   const queryClient = useQueryClient();
   const ordered = [...drafts].sort((a, b) => a.workId.localeCompare(b.workId));
@@ -73,6 +74,9 @@ export function DraftRail({ drafts, ideas = [], status, currentId, onOpen }: {
         <small className="aux">{status === 'loading' ? '正在读取稿件…' : status === 'error' ? '稿件读取失败' : `${drafts.length} 篇已保存`}</small>
       </div>
       {checks.some(check => check.isError) ? <button type="button" className="btn sm" onClick={recheck}>重新检查</button> : null}
+      {onOpenDesk ? <button type="button" className="btn desk-entry" onClick={onOpenDesk}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16"/><path d="M8 4v16M12 9h5M12 13h5"/></svg>选题与材料<span className="data">{drafts.length} 个选题</span>
+      </button> : null}
     </div>
     <div className="q-list">
       {groups.map(group => {

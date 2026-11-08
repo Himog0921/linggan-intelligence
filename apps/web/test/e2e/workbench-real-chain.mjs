@@ -264,22 +264,6 @@ try {
     assert.ok(resources.every(url=>!url.includes('WorkbenchPage')&&!url.includes('noto-sans-sc')));
     report.settingsResources=resources.map(url=>new URL(url).pathname);
   });
-  await step('恢复后历史列表兼容旧引用，正文仅展开时核验读取',async()=>{
-    await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${fixture.legacyWorkId}&view=body`);
-    await page.locator('[data-view]').waitFor();await openWritingTools();
-    await page.getByRole('button',{name:'历史',exact:true}).click();
-    const dialog=page.getByRole('dialog',{name:'历史与恢复'});await dialog.waitFor();
-    const old=dialog.locator('section').filter({hasText:'版本 1 · 旧版引用'});
-    assert.equal(await old.count(),1);assert.equal(await old.getByRole('button',{name:'恢复为新版本'}).count(),0);
-    assert.equal(await old.getByText('查看正文',{exact:true}).count(),0);
-    const current=dialog.locator('section').filter({hasText:'版本 2 · 已保存'});
-    const detailPath=`/ops/api/creation/works/${fixture.legacyWorkId}/revisions/${fixture.legacyCurrentRevision}`;
-    assert.equal(report.requests.filter(r=>r.path===detailPath).length,0);
-    await current.getByText('查看正文',{exact:true}).click();
-    await current.getByText('手写正文，标点。',{exact:true}).waitFor();
-    assert.equal(report.requests.filter(r=>r.path===detailPath).length,1);
-    await screenshot('workbench-legacy-history');await page.keyboard.press('Escape');
-  });
   await step('创作入口建立真实服务器作品并保存角度提纲账号',async()=>{
     await page.goto(`${origin}/ops/creation`);assert.equal(new URL(page.url()).pathname,'/ops/creation');
     await page.getByLabel('创作领域',{exact:true}).click();await page.getByRole('navigation',{name:'可选创作领域'}).getByRole('button').first().click();await until(async()=>new URL(page.url()).searchParams.get('domain')===domainRef,'chosen fixture domain');await page.getByLabel('新选题标题').fill('作业启动');
@@ -298,9 +282,9 @@ try {
     const sidebar=page.getByRole('complementary',{name:'运营导航'});
     assert.equal(await sidebar.getByRole('link',{name:'创作',exact:true}).getAttribute('aria-current'),'page');
     assert.equal(await sidebar.getByRole('link',{name:'数据',exact:true}).count(),1);
-    const sections=page.getByRole('navigation',{name:'创作页面'});
-    assert.deepEqual(await sections.getByRole('button').allTextContents(),['写稿','材料桌','资产库']);
-    assert.equal(await sections.getByRole('button',{name:'写稿',exact:true}).getAttribute('aria-current'),'page');
+    assert.equal(await page.getByRole('navigation',{name:'创作页面'}).count(),0);
+    assert.match(await page.getByRole('navigation',{name:'当前位置'}).innerText(),/创作/);
+    assert.equal(await page.getByRole('button',{name:'资产库',exact:true}).count(),1);
     assert.equal(await page.getByRole('navigation',{name:'创作步骤'}).isVisible(),false);
     await screenshot('creation-navigation-hierarchy');
   });
@@ -461,10 +445,6 @@ try {
     await page.reload();await page.getByLabel('正文第 2 段').waitFor();assert.equal(await page.getByLabel('正文第 2 段').inputValue(),'本页版本：保留自己的新表达。');
     const response=await context.request.get(`${origin}/ops/api/creation/exports/${exportedRecord.id}/download`);assert.equal(response.status(),200);assert.ok((await response.body()).equals(packageBytes));
   });
-  await step('键盘 Esc 关闭历史并还原焦点，减少动态效果生效',async()=>{
-    await openWritingTools();const history=page.getByRole('button',{name:'历史',exact:true});await history.focus();await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'历史与恢复'}).waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
-    assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'历史');assert.ok(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches));
-  });
   await step('资产库：账号身份、产品事实卡、衔接句经页面写入，接口回读与填写一致',async()=>{
     await page.setViewportSize({width:1440,height:900});
     const mineNow=async()=>(await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item=>item.accountRef===accountRef);
@@ -549,28 +529,6 @@ try {
       layout=await screenshot(`workbench-${width}x${height}-materials`);assert.ok(layout.documentWidth<=layout.viewport);
     });
   }
-  await step('恢复未准备材料的历史稿后无需刷新即可再次登记、摘录与保存',async()=>{
-    await stage('材料');await save();report.restoredPreparation=[];report.restoredPreparationResponses=[];
-    const documentReads=report.requests.filter(request=>request.method==='GET'&&request.path==='/ops/creation').length;
-    for(const attempt of [1,2]){
-      const preparedResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/sources/prepare'&&response.request().method()==='POST'&&response.status()===200);
-      await openWritingTools();await page.getByRole('button',{name:'历史',exact:true}).click();const history=page.getByRole('dialog',{name:'历史与恢复'});await history.waitFor();
-      const first=history.locator('section').filter({hasText:/版本 1 ·/});assert.equal(await first.count(),1);
-      await first.getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});
-      const restored=await envelope();assert.equal(restored.revision.document.materialPreparation??null,null);assert.deepEqual(restored.revision.document.materials??[],[]);
-      const prepared=await(await preparedResponse).json();report.restoredPreparationResponses.push({attempt,documentCount:prepared.documents.length,state:prepared.state});assert.ok(prepared.documents.length>0,'synthetic fixture must provide readable matching materials before asserting registration');
-      await until(async()=>await page.getByRole('navigation',{name:'材料范围'}).getByRole('button').filter({hasText:/本篇材料\s*[1-9]/}).count()===1,'restored collection is registered without a page reload');
-      await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').first().click();const collect=page.getByRole('button',{name:'摘入画布',exact:true});assert.ok(await collect.isEnabled());
-      const anchor=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/sources/validate'&&response.request().method()==='POST');await collect.click();assert.equal((await anchor).status(),200);await until(async()=>await collect.isEnabled(),'restored source selection validated');await save();
-      const saved=await envelope();assert.ok(saved.revision.document.materialPreparation);assert.ok(saved.revision.document.materials.length>0);assert.equal(saved.revision.document.excerpts.length,1);report.restoredPreparation.push({attempt,historicalRevision:1,restoredRevision:restored.revision.id,savedRevision:saved.revision.id,materialCount:saved.revision.document.materials.length,excerptCount:1});await screenshot(`workbench-restored-preparation-${attempt}-without-reload`);
-    }
-    assert.equal(report.requests.filter(request=>request.method==='GET'&&request.path==='/ops/creation').length,documentReads,'history recovery must not reload the page');
-  });
-  await step('恢复保留副本时一并保存未提交标签，不用历史标签覆盖',async()=>{
-    await stage('正文');const tags=page.getByLabel('确认发布标签',{exact:true});await tags.fill('本页标签 合成标签');await save();const retained=await envelope();
-    await tags.fill('未保存标签 合成标签 未保存标签');await openWritingTools();await page.getByRole('button',{name:'历史',exact:true}).click();let history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/版本 1 ·/}).getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'');
-    await page.getByRole('button',{name:'历史',exact:true}).click();history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/本页保留副本/}).last().getByRole('button',{name:'恢复到编辑区',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'未保存标签 合成标签');await save();const recovered=await envelope();assert.deepEqual(recovered.revision.document,{...retained.revision.document,tags:['未保存标签','合成标签']});report.retainedTagRecovery={beforeRevision:retained.revision.id,afterRevision:recovered.revision.id,tags:recovered.revision.document.tags};await screenshot('workbench-retained-copy-tags-recovered');
-  });
   await step('双页面：合成经历撤回后遮盖旧稿并重新编辑',async()=>{
     const mine=(await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item=>item.accountRef===accountRef);
     await page.goto(`${origin}/ops/creation?domain=${domainRef}&section=assets`);
