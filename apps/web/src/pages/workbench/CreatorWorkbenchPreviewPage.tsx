@@ -273,7 +273,7 @@ export function CreatorWorkbenchPreviewPage() {
             </aside>
 
             <section className={styles.editor} aria-label="稿件编辑区">
-              <header className={styles.editorHead}>
+              <header className={styles.editorHead} data-testid="editor-head">
                 <button type="button" className={styles.mobileRail} aria-label="打开今日稿件队列"
                   aria-expanded={queueDrawer} onClick={() => setQueueDrawer(value => !value)}>今日 {drafts.length} 篇</button>
                 <div className={styles.editorIdentity}>
@@ -290,11 +290,11 @@ export function CreatorWorkbenchPreviewPage() {
                 <button type="button" className={styles.mobileRail} aria-label="打开稿件检查器"
                   aria-expanded={inspectorDrawer} onClick={() => setInspectorDrawer(value => !value)}>检查 · 必改 {currentDraft.must}</button>
               </header>
-              <div className={styles.editorScroll}>
-                <div className={styles.editorInner}>
-                  <div className={styles.intentRow}><span>选题意图</span><b>{currentDraft.angle}</b></div>
+              <div className={styles.editorScroll} data-testid="editor-scroll">
+                <div className={styles.editorInner} data-testid="editor-inner">
+                  <div className={styles.intentRow} data-testid="intent-row"><span>选题意图</span><b>{currentDraft.angle}</b></div>
                   {currentDraft.related ? (
-                    <div className={styles.related}>
+                    <div className={styles.related} data-testid="related-card">
                       <span>和我方爆款《{currentDraft.related.title}》（<b>{currentDraft.related.reads.toLocaleString('zh-CN')}</b> 阅读）意思接近，要算成同一个选题吗？</span>
                       <div className={styles.relatedActions}>
                         <button type="button" onClick={() => previewOnly('已在本地预览中关联为同一选题')}>关联成同一选题</button>
@@ -304,7 +304,7 @@ export function CreatorWorkbenchPreviewPage() {
                   ) : null}
                   <div className={styles.coverRow}>
                     <div className={styles.coverColumn}>
-                      <div className={styles.cover} role="img" aria-label="示例封面图">
+                      <div className={styles.cover} data-testid="cover-card" role="img" aria-label="示例封面图">
                         <svg viewBox="0 0 132 176" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
                           <defs>
                             <linearGradient id="cw-sky" x1="0" y1="0" x2="0" y2="1">
@@ -335,7 +335,7 @@ export function CreatorWorkbenchPreviewPage() {
                         {coverCompare ? '回到可编辑封面' : '对照原封面'}
                       </button>
                     </div>
-                    <div className={styles.coverFields}>
+                    <div className={styles.coverFields} data-testid="cover-fields">
                       <div>
                         <label className={styles.fieldLabel} htmlFor="cw-cover">封面大字 <span className={styles.count}>{Array.from(currentDraft.cover).length}/10</span></label>
                         <div className={styles.coverEntry}>
@@ -361,13 +361,13 @@ export function CreatorWorkbenchPreviewPage() {
                       </div>
                     </div>
                   </div>
-                  <div className={styles.bodyHeading}>
+                  <div className={styles.bodyHeading} data-testid="body-heading">
                     <h3>正文</h3>
                     <span>约 <b>{currentDraft.charCount}</b> 字 · <b>{currentDraft.paragraphCount}</b> 段 · 来自经历库 <b>{currentDraft.experienceCount}</b> 段</span>
                   </div>
                   <div className={styles.paragraphs} data-testid="draft-paragraphs">
                     {currentDraft.paragraphs.map(paragraph => paragraph.bridge ? (
-                      <div className={styles.para} data-paragraph-id={paragraph.id} key={paragraph.id}>
+                      <div className={styles.para} data-testid={paragraph.id === "p1" ? "first-paragraph" : undefined} data-paragraph-id={paragraph.id} key={paragraph.id}>
                         <div className={styles.paraLabel}>衔接</div>
                         <div className={styles.paraMain}>
                           <div className={styles.bridge}>
