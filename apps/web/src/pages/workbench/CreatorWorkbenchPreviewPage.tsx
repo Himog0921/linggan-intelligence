@@ -7,15 +7,11 @@ import { FindField } from '../../shared/FindField';
 import { InlineNotice } from '../../shared/InlineNotice';
 import { SelectField } from '../../shared/SelectField';
 import styles from './CreatorWorkbenchPreviewPage.module.css';
+import { INITIAL_DRAFTS, type PreviewDraft as Draft, type PreviewParagraph as Paragraph } from './CreatorWorkbenchPreviewFixtures';
 import { CreatorWorkbenchPreviewG5States, CreatorWorkbenchPreviewTour, type PreviewDialogKind } from './CreatorWorkbenchPreviewG5States';
 
 type InspectorTab = 'checks' | 'materials' | 'titles' | 'preview';
 type AssetKind = 'persona' | 'experience' | 'product' | 'bridge' | 'sample' | 'style';
-type Paragraph = { id: string; role: string; text: string };
-type Draft = {
-  id: string; title: string; account: string; state: string; must: number; warn: number;
-  angle: string; cover: string; noteTitle: string; paragraphs: Paragraph[];
-};
 type DeskItem = {
   id: string; kind: 'frame' | 'material' | 'note'; title: string; body: string;
   x: number; y: number; width: number; height: number;
@@ -28,39 +24,6 @@ const ASSETS: { id: AssetKind; label: string; description: string }[] = [
   { id: 'bridge', label: '衔接句', description: '按账号关系管理的衔接表达' },
   { id: 'sample', label: '样板库', description: '结构步骤、审核状态与版本' },
   { id: 'style', label: '风格', description: '结构、节奏、用词与不采用的表达' },
-];
-
-function makeParagraphs(prefix: string): Paragraph[] {
-  const rows: [string, string][] = [
-    ['钩子', '前几天整理旧照片时，我突然发现，很多当时觉得过不去的事情，现在回头看已经有了新的答案。'],
-    ['自问', '我以前总想一次把所有问题都解决，结果越着急，越容易忽略眼前真正需要处理的那一件事。'],
-    ['过去的我', '那段时间，我习惯把每一次不顺利都归结为自己做得不够好，也很少停下来看看具体发生了什么。'],
-    ['场景', '有一次周末，我们原本安排了很多事情，最后只完成了其中两件，反而比预想中更轻松。'],
-    ['转折', '后来我开始把目标拆小，先把最重要的一步做好，再决定下一步要不要继续。'],
-    ['观点', '真正有效的改变，往往不是突然变得很厉害，而是慢慢找到一种能够长期坚持的办法。'],
-    ['细节', '我把原来写在一张纸上的十几项安排，改成了今天必须完成的两件小事。'],
-    ['对照', '以前我会盯着没有完成的部分，现在会先确认已经完成的部分，再调整剩下的计划。'],
-    ['发现', '当事情变得具体以后，我才知道自己究竟卡在哪一步，而不是笼统地觉得哪里都不对。'],
-    ['尝试', '这次我没有急着增加新的方法，只把每天开始前的准备动作固定下来。'],
-    ['反馈', '一周以后，最明显的变化不是速度变快，而是开始做事时少了很多犹豫。'],
-    ['复盘', '回头看，真正起作用的不是那张清单，而是我终于愿意根据实际情况调整它。'],
-    ['边界', '当然，这种方式不一定适合所有人，关键还是要看当时的目标和手里的时间。'],
-    ['补充', '如果当天临时有变化，我会先保留最重要的一件事，其余的重新安排。'],
-    ['行动', '所以现在遇到复杂任务，我会先写下可以在十分钟内开始的第一步。'],
-    ['提醒', '先开始并不代表不做计划，而是让计划能够跟真实发生的事情接上。'],
-    ['收束', '慢慢地，我不再要求每一天都按原计划完成，而是更在意能不能持续往前走。'],
-    ['结尾', '有时候，把眼前这一件事做好，就已经是一个很好的开始。'],
-  ];
-  return rows.map((row, index) => ({ id: prefix + '-' + index, role: row[0], text: row[1] }));
-}
-
-const INITIAL_DRAFTS: Draft[] = [
-  { id: 'd1', title: '先把眼前这一件事做好', account: '示例账号 · 试新', state: '必须先改', must: 1, warn: 5, angle: '从一个具体场景讲清楚自己的变化', cover: '先把眼前这一件事做好', noteTitle: '先把眼前这一件事做好', paragraphs: makeParagraphs('d1') },
-  { id: 'd2', title: '我后来不再急着给答案', account: '示例账号 · 复用', state: '有提醒', must: 0, warn: 2, angle: '复盘一次沟通中的误区', cover: '先听完，再给答案', noteTitle: '我后来不再急着给答案', paragraphs: makeParagraphs('d2') },
-  { id: 'd3', title: '一次普通周末的安排', account: '示例账号 · 试新', state: '已检查', must: 0, warn: 0, angle: '把复杂安排拆成小步骤', cover: '周末只做两件事', noteTitle: '一次普通周末的安排', paragraphs: makeParagraphs('d3') },
-  { id: 'd4', title: '有些变化是慢慢发生的', account: '示例账号 · 复用', state: '有提醒', must: 0, warn: 3, angle: '从持续的小变化展开', cover: '变化其实很具体', noteTitle: '有些变化是慢慢发生的', paragraphs: makeParagraphs('d4') },
-  { id: 'd5', title: '给自己留一点调整空间', account: '示例账号 · 试新', state: '已复制', must: 0, warn: 0, angle: '记录一次临时调整', cover: '计划之外也没关系', noteTitle: '给自己留一点调整空间', paragraphs: makeParagraphs('d5') },
-  { id: 'd6', title: '一件小事带来的提醒', account: '示例账号 · 复用', state: '已登记发布', must: 0, warn: 0, angle: '用一个具体细节收尾', cover: '从一件小事开始', noteTitle: '一件小事带来的提醒', paragraphs: makeParagraphs('d6') },
 ];
 
 const INITIAL_DESK_ITEMS: DeskItem[] = [
@@ -119,6 +82,7 @@ export function CreatorWorkbenchPreviewPage() {
   const [tourOpen, setTourOpen] = useState(false);
   const [productEditing, setProductEditing] = useState(false);
   const [productDraft, setProductDraft] = useState('演示产品事实卡');
+  const [coverCompare, setCoverCompare] = useState(false);
   const [experienceTargetId, setExperienceTargetId] = useState<string | null>(null);
   const [deskSearch, setDeskSearch] = useState('');
   const [deskSearchOpen, setDeskSearchOpen] = useState(true);
@@ -246,7 +210,6 @@ export function CreatorWorkbenchPreviewPage() {
     <div className={styles.root} data-preview-only="true">
       <OpsFrame section="creation" domain="preview" scope={<span>创作演示</span>} immersive={mode === 'desk'} preview
         previewSidebar={<>
-          <div className="v7-nav-label">欢迎导航</div>
           <div className="v7-nav-label">运营</div>
           <button className="v7-side-nav" type="button" aria-current="page" onClick={() => previewOnly('创作工作台')}>
             <NavIcon name="publications"/><span>创作</span><small>5</small>
@@ -256,15 +219,13 @@ export function CreatorWorkbenchPreviewPage() {
               <NavIcon name={icon}/><span>{label}</span>{count ? <small>{count}</small> : null}
             </button>
           ))}
-          <div className="v7-side-foot">运营工作区 · 合成预览，不调用正式服务</div>
+          <div className="v7-side-foot">运营工作区：创作、发布记录、每日数据与账号管理在同一业务入口内完成。</div>
         </>}
         tabs={<>
           <button type="button" aria-current={mode === 'writing' ? 'page' : undefined} onClick={() => setMode('writing')}>写稿</button>
           <button type="button" aria-current={mode === 'desk' ? 'page' : undefined} onClick={openDesk}>材料桌</button>
         </>}
         meta={<>
-          <span className={styles.demoMarker}>DEMO · 合成数据</span>
-          <span className="v7-vr" aria-hidden="true" />
           <span className={styles.metaCount}>今日 <b>6</b> 篇 · 待完成 <b>5</b> · 已发布 <b>1</b></span>
           <ActionButton ref={assetTrigger} variant="outline" onClick={() => { setAssetOpen(true); setAssetKind('persona'); setAssetSelection(0); }}>资产库</ActionButton>
           <ActionButton variant="quiet" onClick={event => openG5('path-guide', event.currentTarget)}>使用路径</ActionButton>
