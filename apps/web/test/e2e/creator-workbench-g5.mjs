@@ -257,7 +257,7 @@ try {
         const dialog = page.getByRole('dialog', { name: '选择经历' });
         await dialog.waitFor({ state: 'visible' });
         assert.equal(await dialog.getByRole('button', { name: '尚不可用' }).isDisabled(), true);
-        await dialog.getByRole('button', { name: '用这段' }).click();
+        await dialog.getByRole('button', { name: '用这段' }).first().click();
         await dialog.waitFor({ state: 'hidden' });
         const after = await page.locator('[contenteditable="true"][role="textbox"]').count();
         assert.equal(after, before + 1);
