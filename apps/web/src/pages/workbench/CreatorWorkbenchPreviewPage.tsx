@@ -235,51 +235,201 @@ export function CreatorWorkbenchPreviewPage() {
           <section className={[styles.write, queueDrawer ? styles.queueOpen : '', inspectorDrawer ? styles.inspectorOpen : ''].filter(Boolean).join(' ')} hidden={mode !== 'writing'}>
             <aside className={styles.queue} aria-label="稿件队列">
               <div className={styles.queueHead}>
-                <div><small>今日 · 10月27日 周一</small><strong>稿件队列</strong></div>
-                <ActionButton variant="outline" onClick={() => { const id = 'new-' + (drafts.length + 1); setDrafts(items => [...items, { ...INITIAL_DRAFTS[0]!, id, title: '新建稿件', paragraphs: makeParagraphs(id) }]); setDraftId(id); previewOnly('已建立本地演示稿件'); }}>新选题</ActionButton>
+                <div className={styles.queueHeadTop}>
+                  <h2>今日 · 10月27日 周一</h2>
+                  <ActionButton variant="outline" onClick={() => {
+                    const id = 'new-' + (drafts.length + 1);
+                    setDrafts(items => [...items, { ...INITIAL_DRAFTS[0]!, id, title: '新建稿件' }]);
+                    setDraftId(id);
+                    previewOnly('已建立本地演示稿件');
+                  }}>＋ 新选题</ActionButton>
+                </div>
+                <ActionButton className={styles.queueDeskButton} variant="quiet" onClick={openDesk}>
+                  <span className={styles.deskEntryIcon} aria-hidden="true">▣</span>选题与材料<span className={styles.dataCount}>4 个选题</span>
+                </ActionButton>
                 <button type="button" className={styles.mobileRail} aria-label="关闭稿件队列" onClick={() => setQueueDrawer(false)}>关闭</button>
               </div>
-              <ActionButton className={styles.queueDeskButton} variant="quiet" onClick={openDesk}>选题与材料 <span>4 个选题</span></ActionButton>
               <div className={styles.queueScroll}>
                 <div className={styles.groupTitle}>选题中 · 还没开稿 <b>1</b></div>
+                <button type="button" className={styles.frameItem} onClick={openDesk}>
+                  <strong>让孩子自己整理书包</strong>
+                  <small>XT-1027-01 · 示例妈妈 · 6 张材料</small>
+                  <span><i />在选题与材料整理</span>
+                </button>
                 <div className={styles.groupTitle}>稿件 <b>{drafts.length}</b></div>
-                {drafts.map(item => <button key={item.id} type="button" className={styles.draftItem} aria-current={item.id === draftId ? 'true' : undefined} onClick={() => { setDraftId(item.id); setInspectorTab('checks'); setQueueDrawer(false); }}>
-                  <strong>{item.title}</strong><small>{item.account}</small><span><i data-level={item.must ? 'must' : item.warn ? 'warn' : 'ok'} />{item.must ? '必改 ' + item.must : item.state} · 提醒 {item.warn}</span>
-                </button>)}
+                {drafts.map(item => (
+                  <button key={item.id} type="button" className={styles.draftItem}
+                    aria-current={item.id === draftId ? 'true' : undefined}
+                    onClick={() => { setDraftId(item.id); setInspectorTab('checks'); setQueueDrawer(false); }}>
+                    <strong>{item.title}</strong>
+                    <small>{item.account}　{item.kind}　{item.origin}</small>
+                    <span><i data-level={item.must ? 'must' : item.warn ? 'warn' : 'ok'} />
+                      {item.must ? '必改 ' + item.must : item.state}{item.warn ? ' · 提醒 ' + item.warn : ''}
+                    </span>
+                  </button>
+                ))}
               </div>
+              <div className={styles.queueFoot}><i />运营工作区：创作、发布记录、每日数据与账号管理在同一业务入口内完成。</div>
             </aside>
 
             <section className={styles.editor} aria-label="稿件编辑区">
               <header className={styles.editorHead}>
-                <button type="button" className={styles.mobileRail} onClick={() => setQueueDrawer(value => !value)} aria-expanded={queueDrawer}>稿件</button>
-                <button type="button" className={styles.mobileRail} onClick={() => setInspectorDrawer(value => !value)} aria-expanded={inspectorDrawer}>检查</button>
-                <strong>{currentDraft.title}</strong>
-                <span className={styles.statusChip}>{currentDraft.account}</span>
-                <span className={styles.editorMeta}>试新 · 样板 YB-0001 · 风格：合成示例</span>
+                <button type="button" className={styles.mobileRail} aria-label="打开今日稿件队列"
+                  aria-expanded={queueDrawer} onClick={() => setQueueDrawer(value => !value)}>今日 {drafts.length} 篇</button>
+                <div className={styles.editorIdentity}>
+                  <span className={styles.avatar}>{currentDraft.accountMark}</span>
+                  <strong>{currentDraft.account}</strong>
+                  <span className={styles.identityChip}>身份待确认</span>
+                </div>
+                <button type="button" className={styles.frameChip} onClick={() => previewOnly('补充选题框')}>＋ 补一个选题框</button>
+                <div className={styles.editorMeta}>
+                  <span>{currentDraft.kind} · {currentDraft.origin}</span>
+                  <span>样板 <b>{currentDraft.sampleCode}</b> · {currentDraft.sampleName}</span>
+                  <span>风格 · {currentDraft.styleName}</span>
+                </div>
+                <button type="button" className={styles.mobileRail} aria-label="打开稿件检查器"
+                  aria-expanded={inspectorDrawer} onClick={() => setInspectorDrawer(value => !value)}>检查 · 必改 {currentDraft.must}</button>
               </header>
               <div className={styles.editorScroll}>
                 <div className={styles.editorInner}>
-                  <div className={styles.intentRow}><b>选题意图</b><span>{currentDraft.angle}</span><button type="button" onClick={() => previewOnly('关联为同一选题')}>关联选题</button></div>
+                  <div className={styles.intentRow}><span>选题意图</span><b>{currentDraft.angle}</b></div>
+                  {currentDraft.related ? (
+                    <div className={styles.related}>
+                      <span>和我方爆款《{currentDraft.related.title}》（<b>{currentDraft.related.reads.toLocaleString('zh-CN')}</b> 阅读）意思接近，要算成同一个选题吗？</span>
+                      <div className={styles.relatedActions}>
+                        <button type="button" onClick={() => previewOnly('已在本地预览中关联为同一选题')}>关联成同一选题</button>
+                        <button type="button" onClick={() => updateDraft({ related: undefined })}>不关联，按试新算</button>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className={styles.coverRow}>
-                    <div className={styles.coverPlaceholder} role="img" aria-label="演示封面图"><span>封面</span><small>合成素材</small></div>
+                    <div className={styles.coverColumn}>
+                      <div className={styles.cover} role="img" aria-label="示例封面图">
+                        <svg viewBox="0 0 132 176" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+                          <defs>
+                            <linearGradient id="cw-sky" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0" stopColor="#8799a7"/><stop offset=".48" stopColor="#d6c5ad"/><stop offset=".68" stopColor="#f4b66d"/><stop offset="1" stopColor="#657987"/>
+                            </linearGradient>
+                            <linearGradient id="cw-water" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0" stopColor="#879da3"/><stop offset="1" stopColor="#34464e"/>
+                            </linearGradient>
+                          </defs>
+                          <rect width="132" height="176" fill="url(#cw-sky)"/>
+                          <path d="M0 30 Q18 20 35 28 T70 25 T105 31 T145 24" fill="none" stroke="#e7e6df" strokeWidth="8" opacity=".24"/>
+                          <path d="M0 55 Q15 48 29 54 T58 50 T88 56 T120 51 T150 55" fill="none" stroke="#f4eee2" strokeWidth="5" opacity=".28"/>
+                          <path d="M0 84 L18 72 35 78 54 65 73 77 93 66 112 78 132 70 132 104 0 104Z" fill="#53646b" opacity=".8"/>
+                          <path d="M0 96 Q22 91 44 96 T88 95 T132 92 L132 176 0 176Z" fill="url(#cw-water)"/>
+                          <path d="M0 110 Q28 106 54 111 T104 110 T145 109 M0 127 Q20 124 42 128 T92 127 T145 126" fill="none" stroke="#d5c7a9" strokeWidth="1" opacity=".38"/>
+                          <path d="M0 106 L132 106" stroke="#e6c08e" strokeWidth="2" opacity=".55"/>
+                          <g fill="#172126" opacity=".96">
+                            <rect x="0" y="121" width="132" height="4"/><rect x="0" y="151" width="132" height="4"/>
+                            <rect x="4" y="111" width="5" height="65"/><rect x="28" y="111" width="5" height="65"/>
+                            <rect x="52" y="111" width="5" height="65"/><rect x="76" y="111" width="5" height="65"/>
+                            <rect x="100" y="111" width="5" height="65"/><rect x="124" y="111" width="5" height="65"/>
+                          </g>
+                        </svg>
+                        {!coverCompare ? <div className={styles.coverTitle}>{currentDraft.cover}</div> : null}
+                        <span className={styles.coverTag}>示例图</span>
+                      </div>
+                      <button type="button" className={styles.coverCompare} onClick={() => setCoverCompare(value => !value)}>
+                        {coverCompare ? '回到可编辑封面' : '对照原封面'}
+                      </button>
+                    </div>
                     <div className={styles.coverFields}>
-                      <label>封面大字<input value={currentDraft.cover} maxLength={10} onChange={event => updateDraft({ cover: event.target.value })} /></label>
-                      <div className={styles.candidateRow}><button type="button" aria-pressed={currentDraft.cover === '先把眼前这一件事做好'} onClick={() => updateDraft({ cover: '先把眼前这一件事做好' })}>先把眼前这一件事做好</button><button type="button" onClick={() => previewOnly('换一批封面候选')}>换一批</button><button type="button" onClick={() => setInspectorTab('titles')}>找标题</button></div>
-                      <label>笔记标题<input value={currentDraft.noteTitle} maxLength={20} onChange={event => updateDraft({ noteTitle: event.target.value })} /></label>
+                      <div>
+                        <label className={styles.fieldLabel} htmlFor="cw-cover">封面大字 <span className={styles.count}>{Array.from(currentDraft.cover).length}/10</span></label>
+                        <div className={styles.coverEntry}>
+                          <input id="cw-cover" value={currentDraft.cover} maxLength={10} onChange={event => updateDraft({ cover: event.target.value })}/>
+                          <div className={styles.candTools}>
+                            <button type="button" onClick={() => previewOnly('换一批封面候选')}>换一批</button>
+                            <button type="button" onClick={() => setInspectorTab('titles')}>找标题</button>
+                          </div>
+                        </div>
+                        <div className={styles.coverCandidates}>
+                          {currentDraft.coverCandidates.map(candidate => (
+                            <button key={candidate} type="button" aria-pressed={currentDraft.cover === candidate}
+                              onClick={() => updateDraft({ cover: candidate })}>{candidate} <small>{Array.from(candidate).length}</small></button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <label className={styles.fieldLabel} htmlFor="cw-title">笔记标题 <span className={styles.count}>{Array.from(currentDraft.noteTitle).length}/20</span></label>
+                        <div className={styles.fieldRow}>
+                          <input id="cw-title" value={currentDraft.noteTitle} maxLength={20} onChange={event => updateDraft({ noteTitle: event.target.value })}/>
+                          <ActionButton variant="outline" onClick={() => previewOnly('复制标题')}>复制标题</ActionButton>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                  <div className={styles.bodyHeading}><strong>正文</strong><small>{currentDraft.paragraphs.reduce((sum, item) => sum + Array.from(item.text).length, 0)} 字 · {currentDraft.paragraphs.length} 段</small></div>
-                  {currentDraft.paragraphs.map((paragraph, index) => <div className={styles.paragraph} key={paragraph.id}>
-                    <span>{paragraph.role}</span>
-                    <div className={styles.paragraphEditor}><textarea aria-label={'正文第 ' + (index + 1) + ' 段'} value={paragraph.text} onChange={event => updateParagraph(paragraph.id, event.target.value)} /><button type="button" className={styles.insertExperience} onClick={event => { setExperienceTargetId(paragraph.id); openG5('experience-picker', event.currentTarget); }}>后面插入经历</button></div>
-                  </div>)}
-                  <ActionButton variant="outline" onClick={() => updateDraft({ paragraphs: [...currentDraft.paragraphs, { id: currentDraft.id + '-p' + (currentDraft.paragraphs.length + 1), role: '新段落', text: '' }] })}>继续写一段</ActionButton>
+                  <div className={styles.bodyHeading}>
+                    <h3>正文</h3>
+                    <span>约 <b>{currentDraft.charCount}</b> 字 · <b>{currentDraft.paragraphCount}</b> 段 · 来自经历库 <b>{currentDraft.experienceCount}</b> 段</span>
+                  </div>
+                  <div className={styles.paragraphs} data-testid="draft-paragraphs">
+                    {currentDraft.paragraphs.map(paragraph => paragraph.bridge ? (
+                      <div className={styles.para} data-paragraph-id={paragraph.id} key={paragraph.id}>
+                        <div className={styles.paraLabel}>衔接</div>
+                        <div className={styles.paraMain}>
+                          <div className={styles.bridge}>
+                            <div className={styles.bridgeHead}>
+                              <span>一句话衔接产品</span><span className={styles.identityChip}>身份待确认</span>
+                              <button type="button" onClick={() => previewOnly('这篇不植入')}>这篇不植入</button>
+                            </div>
+                            <div className={styles.bridgeBody}>
+                              <p className={styles.bridgeQuestion}>示例妈妈和机构是什么关系？</p>
+                              <div className={styles.bridgeOptions}>
+                                <button type="button" onClick={() => previewOnly('选择：参加过课程的家长')}>参加过课程的家长</button>
+                                <button type="button" onClick={() => previewOnly('选择：机构老师')}>机构老师</button>
+                                <button type="button" onClick={() => previewOnly('选择：都不是，不提产品')}>都不是，不提产品</button>
+                              </div>
+                              <p className={styles.bridgeNote}>定了身份，简介里要写明这层关系。真实情况需要本人确认，预览中不写入正式资料。</p>
+                              <div className={styles.bridgeOriginal}><span>原句</span>如果要在正文里提到服务，先确认真实关系与可以公开的信息。</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className={styles.para} data-paragraph-id={paragraph.id} key={paragraph.id}>
+                        <div className={styles.paraLabel}>{paragraph.role}</div>
+                        <div className={styles.paraMain}>
+                          <p className={styles.paraText} contentEditable suppressContentEditableWarning role="textbox"
+                            aria-label={paragraph.role + '段落'} spellCheck={false}
+                            onBlur={event => updateParagraph(paragraph.id, event.currentTarget.textContent ?? '')}>{paragraph.text}</p>
+                          <div className={styles.paraMeta}>
+                            {paragraph.source ? <span className={styles.source}>{paragraph.source}</span> : <span/>}
+                            <span className={styles.paraTools}>
+                              {paragraph.alternatives?.length ? <button type="button" onClick={() => previewOnly('查看这一段的其他说法')}>换个说法</button> : null}
+                              {paragraph.source ? <button type="button" onClick={event => { setExperienceTargetId(paragraph.id); openG5('experience-picker', event.currentTarget); }}>换一段经历</button> : null}
+                              <button type="button" onClick={event => { setExperienceTargetId(paragraph.id); openG5('experience-picker', event.currentTarget); }}>后面插入经历</button>
+                              <button type="button" onClick={() => updateDraft({ paragraphs: currentDraft.paragraphs.filter(item => item.id !== paragraph.id) })}>删除</button>
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className={styles.tagsRow}>
+                    {currentDraft.tags.map((tag, index) => (
+                      <span className={styles.tag} key={tag + '-' + index}>{tag}<button type="button" aria-label={'删除话题 ' + tag} onClick={() => updateDraft({ tags: currentDraft.tags.filter((_, i) => i !== index) })}>×</button></span>
+                    ))}
+                    <input aria-label="添加话题" placeholder="＋ 话题，回车" onKeyDown={event => {
+                      if (event.key === 'Enter' && event.currentTarget.value.trim()) {
+                        const value = event.currentTarget.value.trim();
+                        updateDraft({ tags: [...currentDraft.tags, value.startsWith('#') ? value : '#' + value] });
+                        event.currentTarget.value = '';
+                      }
+                    }}/>
+                  </div>
                 </div>
               </div>
               <footer className={styles.editorFoot}>
-                <span><i data-level="must" /> 必改 {currentDraft.must} · <i data-level="warn" /> 提醒 {currentDraft.warn} <small>演示数据，不代表正式检查结果</small></span>
+                <button type="button" className={styles.checkSummary} onClick={() => setInspectorTab('checks')}>
+                  <i data-level="must"/>必改 <b>{currentDraft.must}</b><i data-level="warn"/>提醒 <b>{currentDraft.warn}</b>
+                </button>
+                <span className={styles.footerHint}>必改清零后才能复制</span>
+                <span className={styles.grow}/>
                 <ActionButton variant="outline" onClick={event => openG5('save-as-template', event.currentTarget)}>存为样板</ActionButton>
-                <ActionButton variant="primary" onClick={() => previewOnly('复制到小红书')}>复制到小红书</ActionButton>
+                <ActionButton variant="outline" disabled title="先把必改项目处理掉">复制到小红书</ActionButton>
               </footer>
             </section>
 
@@ -295,16 +445,44 @@ export function CreatorWorkbenchPreviewPage() {
                 if (nextTab) setInspectorTab(nextTab);
                 tabs[next]?.focus();
               }}>
-                {([['checks','检查'],['materials','素材'],['titles','标题'],['preview','预览']] as [InspectorTab,string][]).map(([id,label]) => <button key={id} id={'cw-inspector-tab-' + id} type="button" role="tab" tabIndex={inspectorTab === id ? 0 : -1} aria-controls="cw-inspector-panel" aria-selected={inspectorTab === id} onClick={() => setInspectorTab(id)}>{label}{id === 'checks' ? <b>{currentDraft.must + currentDraft.warn}</b> : null}</button>)}
+                {([['checks','检查'],['materials','素材'],['titles','标题'],['preview','预览']] as [InspectorTab,string][]).map(([id,label]) => (
+                  <button key={id} id={'cw-inspector-tab-' + id} type="button" role="tab" tabIndex={inspectorTab === id ? 0 : -1}
+                    aria-controls="cw-inspector-panel" aria-selected={inspectorTab === id} onClick={() => setInspectorTab(id)}>
+                    {label}{id === 'checks' ? <b>{currentDraft.must + currentDraft.warn}</b> : null}
+                  </button>
+                ))}
                 <button type="button" className={styles.mobileRail} aria-label="关闭稿件检查器" onClick={() => setInspectorDrawer(false)}>关闭</button>
               </nav>
               <div id="cw-inspector-panel" className={styles.inspectorScroll} role="tabpanel" aria-labelledby={'cw-inspector-tab-' + inspectorTab} tabIndex={0}>
-                {inspectorTab === 'checks' ? <><div className={styles.checkGroup}><strong>必须先改 <b>{currentDraft.must}</b></strong><article><h3>账号身份信息待确认</h3><p>正式检查需要账号身份、机构关系和简介确认回执。</p><button type="button" onClick={() => { setAssetOpen(true); setAssetKind('persona'); }}>查看账号身份</button></article></div><div className={styles.checkGroup}><strong>提醒 <b>{currentDraft.warn}</b></strong><p>提醒项目仅为合成展示，正式规则以服务端检查结果为准。</p></div></> : null}
-                {inspectorTab === 'materials' ? <><h3>本稿使用的材料</h3><p>材料来源和使用资格以正式服务端回执为准。</p><ActionButton variant="outline" onClick={openDesk}>打开材料桌</ActionButton></> : null}
-                {inspectorTab === 'titles' ? <><h3>标题候选</h3>{['先把眼前这一件事做好','计划之外也没关系','变化其实很具体'].map(text => <button className={styles.titleCandidate} type="button" key={text} onClick={() => updateDraft({ noteTitle: text })}>{text}</button>)}</> : null}
-                {inspectorTab === 'preview' ? <><h3>发布预览</h3><div className={styles.phonePreview}><strong>{currentDraft.noteTitle}</strong><p>{currentDraft.paragraphs[0]?.text}</p><small>预览内容 · 合成数据</small></div></> : null}
+                {inspectorTab === 'checks' ? (
+                  <>
+                    <div className={styles.checkGroup}>
+                      <strong>必须先改 <b>{currentDraft.must}</b></strong>
+                      <article>
+                        <h3>账号身份还没确认</h3>
+                        <p>衔接句要先确认示例妈妈和机构的关系，并在简介里写明。</p>
+                        <div className={styles.checkActions}>
+                          <button type="button" onClick={() => { setAssetOpen(true); setAssetKind('persona'); }}>去确认</button>
+                          <button type="button" onClick={() => previewOnly('这篇不植入')}>这篇不植入</button>
+                        </div>
+                      </article>
+                    </div>
+                    <button type="button" className={styles.reminderToggle} onClick={() => previewOnly('展开提醒清单')}>
+                      <span><i/>提醒 <b>{currentDraft.warn}</b></span><span aria-hidden="true">›</span>
+                    </button>
+                    <div className={styles.noticePanel}>复制到小红书时自动处理：段落之间补上空行（ㅤ），重复的话题只留一个。</div>
+                  </>
+                ) : null}
+                {inspectorTab === 'materials' ? (
+                  <><h3>本稿使用的材料</h3><p>经历和材料来源会在段落下方标注；这里展示的是隔离预览数据。</p><ActionButton variant="outline" onClick={openDesk}>打开材料桌</ActionButton></>
+                ) : null}
+                {inspectorTab === 'titles' ? (
+                  <><h3>标题候选</h3>{currentDraft.coverCandidates.map(text => <button className={styles.titleCandidate} type="button" key={text} onClick={() => updateDraft({ noteTitle: text })}>{text}</button>)}</>
+                ) : null}
+                {inspectorTab === 'preview' ? (
+                  <><h3>发布预览</h3><div className={styles.phonePreview}><strong>{currentDraft.noteTitle}</strong><p>{currentDraft.paragraphs.find(item => !item.bridge)?.text}</p><small>预览内容 · 合成数据</small></div></>
+                ) : null}
               </div>
-              <button type="button" className={styles.mobileRail} onClick={() => setInspectorDrawer(false)}>收起检查器</button>
             </aside>
           </section>
 
