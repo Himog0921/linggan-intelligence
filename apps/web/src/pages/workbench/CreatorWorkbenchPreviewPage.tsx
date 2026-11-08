@@ -269,7 +269,6 @@ export function CreatorWorkbenchPreviewPage() {
                   </button>
                 ))}
               </div>
-              <div className={styles.queueFoot}><i />运营工作区：创作、发布记录、每日数据与账号管理在同一业务入口内完成。</div>
             </aside>
 
             <section className={styles.editor} aria-label="稿件编辑区">
