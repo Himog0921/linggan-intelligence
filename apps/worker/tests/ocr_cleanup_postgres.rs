@@ -36,7 +36,7 @@ async fn native_human(db: &Database, work: Uuid) -> Uuid {
     human
 }
 async fn old_rows(db: &Database, work: Uuid) -> (Uuid, Uuid) {
-    let row=sqlx::query("SELECT j.slot_key,j.blob_sha256 FROM linggan_media_processing_job j WHERE j.processor_kind='image_ocr' LIMIT 1").fetch_one(db.pool()).await.unwrap();
+    let row=sqlx::query("SELECT j.slot_key,j.blob_sha256 FROM linggan_media_processing_job j WHERE j.processor_kind='thumbnail' LIMIT 1").fetch_one(db.pool()).await.unwrap();
     let job = Uuid::new_v4();
     let derivative = Uuid::new_v4();
     let layout = Uuid::new_v4();
@@ -245,4 +245,34 @@ async fn comment_bootstrap_batch_only_ocr_dependency_is_purged_and_unrelated_com
             "expected restored guard {expected}, got {error}"
         );
     }
+}
+
+#[tokio::test]
+#[ignore = "owned disposable PostgreSQL only; no provider calls"]
+async fn image_reset_removes_all_image_versions_and_keeps_video_ocr() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let db = isolated_proof_schema(
+        &url,
+        &format!("image_reset_{}", Uuid::new_v4().simple()),
+        schema::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let work = support::work(&db).await;
+    let cloud = support::current_image_reading(&db).await;
+    sqlx::query("INSERT INTO linggan_material_reading(reading_ref,unit_ref,content_public_ref,source_version,source_state,producer_kind,rule_version,blocks,issues,source_location,based_on_reading_ref,publication) SELECT gen_random_uuid(),unit_ref,content_public_ref,source_version,source_state,'human_edit',rule_version,blocks,issues,source_location,reading_ref,'human_edit' FROM linggan_material_reading WHERE reading_ref=$1")
+        .bind(cloud).execute(db.pool()).await.unwrap();
+    let (_, asr) = old_rows(&db, work).await;
+    let video = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) SELECT $1,blob_sha256,slot_key,'video_frame_ocr','local-v5','synthetic-video' FROM linggan_media_processing_job WHERE processor_kind='image_ocr' LIMIT 1")
+        .bind(video).execute(db.pool()).await.unwrap();
+    let before = counts(&db).await;
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::raw_sql(include_str!("../../../database/migrations/0192_reset_image_recognition.sql"))
+        .execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(counts(&db).await, before);
+    let retained: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_media_processing_job WHERE job_ref=$1) AND EXISTS(SELECT 1 FROM linggan_material_derived_text WHERE derivative_ref=$2) AND EXISTS(SELECT 1 FROM linggan_material_unit WHERE kind='body') AND NOT EXISTS(SELECT 1 FROM linggan_material_unit WHERE kind='image') AND NOT EXISTS(SELECT 1 FROM linggan_media_processing_job WHERE processor_kind='image_ocr')")
+        .bind(video).bind(asr).fetch_one(db.pool()).await.unwrap();
+    assert!(retained);
 }

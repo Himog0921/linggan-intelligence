@@ -389,10 +389,9 @@ async fn admission_uses_the_registered_version_per_kind() {
     assert_eq!(
         versions,
         vec![
-            // 一张图 + 一段视频：两个 `thumbnail`、一个 `image_ocr`，视频那三条各一个。
+            // 一张图 + 一段视频：两个 thumbnail，视频额外生成三条作业。
             ("asr".to_owned(), ASR_CURRENT.to_owned()),
             ("audio_extract".to_owned(), BASELINE.to_owned()),
-            ("image_ocr".to_owned(), CURRENT.to_owned()),
             ("thumbnail".to_owned(), BASELINE.to_owned()),
             ("thumbnail".to_owned(), BASELINE.to_owned()),
             ("video_frame_ocr".to_owned(), CURRENT.to_owned()),
@@ -431,15 +430,11 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
     )
     .await;
 
-    // 点名的这一类：旧的那条补出一条同键的新版本作业，旧的一条不动。
-    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+    let error = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
         .await
-        .expect("the named kind is registered");
-    assert_eq!(summary.len(), 1);
-    assert_eq!(summary[0].processor_kind, "image_ocr");
-    assert_eq!(summary[0].target_version, CURRENT);
-    assert_eq!(summary[0].enqueued_jobs, 1);
-    assert_eq!(jobs_of(&database, "image_ocr", CURRENT).await.len(), 1);
+        .expect_err("local still-image recognition has been retired");
+    assert!(error.to_string().contains("image_ocr"));
+    assert_eq!(jobs_of(&database, "image_ocr", CURRENT).await.len(), 0);
     assert_eq!(jobs_of(&database, "image_ocr", BASELINE).await.len(), 1);
 
     // 没点名的三类：一条不动。
@@ -490,14 +485,14 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn requeue_preserves_the_job_keys_and_writes_one_pending_event() {
     let database = proof_database("media_requeue_event").await;
-    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "image").await;
-    let outdated = insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
+    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
+    let outdated = insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
 
-    let before = jobs_of(&database, "image_ocr", CURRENT).await;
-    requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+    let before = jobs_of(&database, "video_frame_ocr", CURRENT).await;
+    requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
         .await
         .expect("the named kind is registered");
-    let enqueued = enqueued_by(&database, "image_ocr", CURRENT, &before).await;
+    let enqueued = enqueued_by(&database, "video_frame_ocr", CURRENT, &before).await;
 
     let (blob, slot, version, scope) = job_row(&database, enqueued).await;
     assert_eq!(blob, sha256);
@@ -518,19 +513,19 @@ async fn requeue_preserves_the_job_keys_and_writes_one_pending_event() {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn requeue_is_idempotent() {
     let database = proof_database("media_requeue_idempotent").await;
-    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "image").await;
-    insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
+    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
+    insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
 
-    let first = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+    let first = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
         .await
         .expect("the named kind is registered");
-    let second = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+    let second = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
         .await
         .expect("a second run is not an error");
     assert_eq!(first[0].enqueued_jobs, 1);
     assert_eq!(second[0].enqueued_jobs, 0);
-    assert_eq!(jobs_of(&database, "image_ocr", CURRENT).await.len(), 1);
-    assert_eq!(jobs_of(&database, "image_ocr", BASELINE).await.len(), 1);
+    assert_eq!(jobs_of(&database, "video_frame_ocr", CURRENT).await.len(), 1);
+    assert_eq!(jobs_of(&database, "video_frame_ocr", BASELINE).await.len(), 1);
 }
 
 /// 同一个键上躺着两个旧版本（抬过不止一次版本时会出现）：只补一条。
@@ -539,18 +534,18 @@ async fn requeue_is_idempotent() {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn requeue_adds_one_job_when_one_key_holds_several_older_versions() {
     let database = proof_database("media_requeue_two_older_versions").await;
-    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "image").await;
-    insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", "local-v0").await;
-    insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
+    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
+    insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", "local-v0").await;
+    insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
 
-    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
         .await
         .expect("two older versions on one key do not break the statement");
     assert_eq!(summary[0].enqueued_jobs, 1);
-    assert_eq!(jobs_of(&database, "image_ocr", CURRENT).await.len(), 1);
+    assert_eq!(jobs_of(&database, "video_frame_ocr", CURRENT).await.len(), 1);
     // 两个旧版本都原样留着。
-    assert_eq!(jobs_of(&database, "image_ocr", BASELINE).await.len(), 1);
-    assert_eq!(jobs_of(&database, "image_ocr", "local-v0").await.len(), 1);
+    assert_eq!(jobs_of(&database, "video_frame_ocr", BASELINE).await.len(), 1);
+    assert_eq!(jobs_of(&database, "video_frame_ocr", "local-v0").await.len(), 1);
 }
 
 /// 排出来只是「插了作业」；它真的会被 worker 领走才算数。可认领的 work 行由 worker 每 tick 的
@@ -559,28 +554,28 @@ async fn requeue_adds_one_job_when_one_key_holds_several_older_versions() {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn requeued_jobs_become_claimable_work() {
     let database = proof_database("media_requeue_claimable").await;
-    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "image").await;
-    let outdated = insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
+    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
+    let outdated = insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
     ensure_media_processing_work(&database)
         .await
         .expect("every job becomes runnable work");
     // 存量在库里的样子：那两条都已经做过了，可领的活只该是重排出来的那条。
-    for job_ref in jobs_of(&database, "image_ocr", CURRENT).await {
+    for job_ref in jobs_of(&database, "video_frame_ocr", CURRENT).await {
         mark_work_completed(&database, job_ref).await;
     }
     mark_work_completed(&database, outdated).await;
-    let before = jobs_of(&database, "image_ocr", CURRENT).await;
+    let before = jobs_of(&database, "video_frame_ocr", CURRENT).await;
 
-    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
         .await
         .expect("the named kind is registered");
     assert_eq!(summary[0].enqueued_jobs, 1);
-    let enqueued = enqueued_by(&database, "image_ocr", CURRENT, &before).await;
+    let enqueued = enqueued_by(&database, "video_frame_ocr", CURRENT, &before).await;
     ensure_media_processing_work(&database)
         .await
         .expect("the requeued job becomes runnable work");
 
-    let claim = match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+    let claim = match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["video_frame_ocr"]))
         .await
         .expect("the claim is readable")
     {
@@ -588,7 +583,7 @@ async fn requeued_jobs_become_claimable_work() {
         other => panic!("the requeued job is claimable: {other:?}"),
     };
     assert_eq!(claim.job_ref, enqueued);
-    assert_eq!(claim.processor_kind, "image_ocr");
+    assert_eq!(claim.processor_kind, "video_frame_ocr");
     assert_eq!(claim.processor_version, CURRENT);
     assert_eq!(claim.blob_sha256, sha256);
 }
@@ -609,13 +604,13 @@ async fn requeued_jobs_become_claimable_work() {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_queue() {
     let database = proof_database("media_requeue_missing_material").await;
-    let (healthy_sha, healthy_slot) = seed_media_without_jobs(&database, 2, "image").await;
+    let (healthy_sha, healthy_slot) = seed_media_without_jobs(&database, 2, "video").await;
     let (missing_sha, missing_slot) = seed_media_key_without_its_material(&database, 1).await;
     let missing_v1 = insert_outdated_job(
         &database,
         &missing_sha,
         &missing_slot,
-        "image_ocr",
+        "video_frame_ocr",
         BASELINE,
     )
     .await;
@@ -623,12 +618,12 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
         &database,
         &healthy_sha,
         &healthy_slot,
-        "image_ocr",
+        "video_frame_ocr",
         BASELINE,
     )
     .await;
-    let before = jobs_of(&database, "image_ocr", CURRENT).await;
-    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+    let before = jobs_of(&database, "video_frame_ocr", CURRENT).await;
+    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
         .await
         .expect("the named kind is registered");
     assert_eq!(
@@ -645,7 +640,7 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
     // 认出新排出来的两条，按槽位分开——一条的素材不在库里，一条正常。
     let mut missing_job = None;
     let mut healthy_job = None;
-    for job_ref in jobs_of(&database, "image_ocr", CURRENT).await {
+    for job_ref in jobs_of(&database, "video_frame_ocr", CURRENT).await {
         if before.contains(&job_ref) {
             continue;
         }
@@ -689,7 +684,7 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
     .await
     .expect("排队时间是可变控制状态");
 
-    let outcome = claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+    let outcome = claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["video_frame_ocr"]))
         .await
         .expect("读不出输入的作业不是错误，是一次正常结局");
     match outcome {
@@ -699,7 +694,7 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
             reason,
         } => {
             assert_eq!(job_ref, missing_job, "退休的必须是队首那条");
-            assert_eq!(processor_kind, "image_ocr");
+            assert_eq!(processor_kind, "video_frame_ocr");
             assert_eq!(reason, "source_material_missing");
         }
         other => panic!("素材不在的作业应当当场退休，而不是 {other:?}"),
@@ -743,7 +738,7 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
             .expect("the healthy work row is readable");
     assert_eq!(healthy_state, "pending", "退休只退它自己那条");
 
-    let claim = match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
+    let claim = match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["video_frame_ocr"]))
         .await
         .expect("the claim is readable")
     {
@@ -759,20 +754,20 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn dry_run_reports_what_a_real_run_would_do_and_leaves_nothing_behind() {
     let database = proof_database("media_requeue_dry_run").await;
-    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "image").await;
-    insert_outdated_job(&database, &sha256, &slot_key, "image_ocr", BASELINE).await;
+    let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
+    insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
 
-    let preview = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), true)
+    let preview = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), true)
         .await
         .expect("a dry run is readable");
     assert_eq!(preview[0].enqueued_jobs, 1);
-    assert_eq!(jobs_of(&database, "image_ocr", CURRENT).await.len(), 0);
+    assert_eq!(jobs_of(&database, "video_frame_ocr", CURRENT).await.len(), 0);
 
-    let real = requeue_outdated_processor_jobs(&database, &kinds(&["image_ocr"]), false)
+    let real = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
         .await
         .expect("the named kind is registered");
     assert_eq!(real[0].enqueued_jobs, preview[0].enqueued_jobs);
-    assert_eq!(jobs_of(&database, "image_ocr", CURRENT).await.len(), 1);
+    assert_eq!(jobs_of(&database, "video_frame_ocr", CURRENT).await.len(), 1);
 }
 
 /// 名字打错必须当场报错。安静地排 0 条会被读成「这一类没有旧作业」——正是本次重排要消灭的
@@ -800,10 +795,12 @@ async fn requeue_refuses_a_kind_that_has_no_registered_version() {
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn normal_claim_skips_stale_versions_but_keeps_current_and_local_visual() {
+async fn normal_claim_skips_all_legacy_image_ocr_versions() {
     let database = proof_database("ocr_supported_versions").await;
     let (sha, slot) = seed_media_without_jobs(&database, 82, "image").await;
-    let stale = insert_outdated_job(&database, &sha, &slot, "image_ocr", "local-v3").await;
+    for version in ["local-v3", CURRENT, linggan_evidence::ocr_adoption_persistence::PROCESSOR_VERSION] {
+        insert_outdated_job(&database, &sha, &slot, "image_ocr", version).await;
+    }
     ensure_media_processing_work(&database).await.unwrap();
     assert!(matches!(
         claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
@@ -811,41 +808,4 @@ async fn normal_claim_skips_stale_versions_but_keeps_current_and_local_visual() 
             .unwrap(),
         MediaProcessingClaimOutcome::Idle
     ));
-    let state: String =
-        sqlx::query_scalar("SELECT state FROM linggan_media_processing_work WHERE job_ref=$1")
-            .bind(stale)
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
-    assert_eq!(
-        state, "pending",
-        "skipping must not invent an attempt or retirement"
-    );
-    for version in [
-        CURRENT,
-        linggan_evidence::ocr_adoption_persistence::PROCESSOR_VERSION,
-    ] {
-        let job = insert_outdated_job(&database, &sha, &slot, "image_ocr", version).await;
-        ensure_media_processing_work(&database).await.unwrap();
-        let claimed =
-            claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["image_ocr"]))
-                .await
-                .unwrap();
-        assert!(
-            matches!(claimed, MediaProcessingClaimOutcome::Claimed(ref claim) if claim.job_ref == job && claim.processor_version == version),
-            "{claimed:?}"
-        );
-        sqlx::query("UPDATE linggan_media_processing_work SET state='not_applicable',worker_instance_ref=NULL,lease_expires_at=NULL,completed_at=scope_001_now() WHERE job_ref=$1").bind(job).execute(database.pool()).await.unwrap();
-    }
-    let explicit = linggan_evidence::claim_media_processing_work_for_version(
-        &database,
-        Uuid::new_v4(),
-        &kinds(&["image_ocr"]),
-        Some("local-v3"),
-    )
-    .await
-    .unwrap();
-    assert!(
-        matches!(explicit, MediaProcessingClaimOutcome::Claimed(ref claim) if claim.job_ref == stale)
-    );
 }

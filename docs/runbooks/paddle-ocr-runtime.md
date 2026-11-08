@@ -8,6 +8,8 @@
 
 ## 目的与边界
 
+> 2026-11-08 图片识图切换候选将本机 PaddleOCR 限定在视频抽帧链路。下文涉及静态图片及本地 OCR-VL 的执行说明记录切换前行为。当前切换范围见[研究底稿合同](../data-contracts/research-dossier.md#开发期图片识图切换2026-11-08)。
+
 当前保留本机 PaddleOCR v4 日常路径、已有本地 OCR-VL 路径，以及单独受控的 DeepSeek-v4-flash 图片 OCR 接口。安装步骤不会执行数据库 migration、重排历史作业、重启 worker、访问平台或调用视觉模型。
 
 运行 `scripts/runtime/prepare-paddle-ocr.sh --install` 会在 `LINGGAN_SUPPORT_DIR/paddle-ocr/venv`（默认 Application Support）安装并校验固定版本：Paddle 3.3.1、PaddleOCR 3.7.0、Pillow 10.x–11.x。脚本只接受 Python 3.9–3.13，优先使用 Homebrew 的 3.13/3.12；可用 `LINGGAN_PADDLE_PYTHON_COMMAND` 指定兼容解释器。首次安装会下载 Python wheels 与两份 PP-OCRv4 mobile 模型到同一 Application Support runtime；`--check` 只验证已安装解释器、版本和模型文件，不联网。这是本机依赖安装，不是平台采集。

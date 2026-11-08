@@ -223,7 +223,7 @@ pub async fn admit_media_blob(
         processors_for_mime(mime_type)
     };
     for processor_kind in processors.iter().copied().filter(|kind| match *kind {
-        "image_ocr" | "video_frame_ocr" => allow_ocr,
+        "video_frame_ocr" => allow_ocr,
         "asr" => allow_asr,
         _ => true,
     }) {
@@ -1302,7 +1302,7 @@ fn sha256_hex(value: &str) -> String {
 
 fn processors_for_mime(mime_type: &str) -> &'static [&'static str] {
     if mime_type.starts_with("image/") {
-        &["thumbnail", "image_ocr"]
+        &["thumbnail"]
     } else if mime_type.starts_with("video/") {
         &["thumbnail", "audio_extract", "asr", "video_frame_ocr"]
     } else {

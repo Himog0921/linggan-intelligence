@@ -91,6 +91,7 @@ pub async fn scenario(
         .materialization_ref;
         let slot = format!("xhs:{name}:{role}:{page}");
         if partial && *page == images - 1 {
+            sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES(gen_random_uuid(),$1,$2,'image_ocr','local-v5','full_blob')").bind(&sha).bind(&slot).execute(db.pool()).await.unwrap();
             let job:Uuid=sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE slot_key=$1 AND processor_kind='image_ocr' ORDER BY created_at DESC LIMIT 1").bind(&slot).fetch_one(db.pool()).await.unwrap();
             sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) VALUES($1,$2,'failed','synthetic_decode_failure')").bind(Uuid::new_v4()).bind(job).execute(db.pool()).await.unwrap();
             continue;

@@ -43,21 +43,21 @@ use uuid::Uuid;
 /// 这里刻意重写一遍而不是从生产代码导出常量：用例要能独立发现「那把锁换了名字」。
 const GATE_LOCK_NAME: &str = "linggan_media_processing_claim_gate";
 
-/// 造 `count` 张图。每张经既有媒体链产生一条 `image_ocr` 与一条 `thumbnail` 作业。
-async fn seed_images(database: &Database, count: usize) {
+/// 造 `count` 段视频。每张经既有媒体链产生一条 `video_frame_ocr` 与一条 `thumbnail` 作业。
+async fn seed_videos(database: &Database, count: usize) {
     for index in 0..count {
         let content_id = format!("note-concurrency-{index}");
         let observation_ref = Uuid::new_v4();
-        let uri = format!("https://media.example/concurrency-{index}.jpg");
+        let uri = format!("https://media.example/concurrency-{index}.mp4");
         submit_package(
             database,
             "media_slots",
             serde_json::json!({"contentExternalId":content_id}),
             serde_json::json!({
                 "kind":"media_slot",
-                "slotKey":format!("xhs:{content_id}:image:1"),
+                "slotKey":format!("xhs:{content_id}:video:1"),
                 "observationRef":observation_ref,
-                "slot":{"role":"image","ordinal":1},
+                "slot":{"role":"video","ordinal":1},
                 "observation":{
                     "externalUri":uri,"candidateUris":[uri],"observedAt":"2026-08-28T10:00:00Z"
                 },
@@ -70,24 +70,24 @@ async fn seed_images(database: &Database, count: usize) {
             database,
             observation_ref,
             &sha256,
-            "image/jpeg",
+            "video/mp4",
             4,
             &format!("blobs/{}/{}", &sha256[..2], sha256),
         )
         .await
-        .expect("an image materializes through the existing media chain");
+        .expect("a video materializes through the existing media chain");
     }
 }
 
-async fn seed_runnable_images(database: &Database, count: usize) {
-    seed_images(database, count).await;
+async fn seed_runnable_videos(database: &Database, count: usize) {
+    seed_videos(database, count).await;
     ensure_media_processing_work(database)
         .await
         .expect("every job becomes runnable work");
 }
 
-fn image_ocr() -> Vec<String> {
-    vec!["image_ocr".to_owned()]
+fn video_frame_ocr() -> Vec<String> {
+    vec!["video_frame_ocr".to_owned()]
 }
 
 async fn leased_count(database: &Database, processor_kind: &str) -> i64 {
@@ -111,7 +111,7 @@ async fn leased_count(database: &Database, processor_kind: &str) -> i64 {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn claiming_waits_on_the_shared_gate_lock() {
     let database = proof_database("media_concurrency_gate_lock").await;
-    seed_runnable_images(&database, 3).await;
+    seed_runnable_videos(&database, 3).await;
 
     // 占住闸锁，直到本用例主动放掉。另开一条连接，不能占用池里剩下的认领与轮询位置。
     let mut blocker = database
@@ -127,7 +127,7 @@ async fn claiming_waits_on_the_shared_gate_lock() {
 
     let claimer = tokio::spawn({
         let database = database.clone();
-        async move { claim_media_processing_work(&database, Uuid::new_v4(), &image_ocr()).await }
+        async move { claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr()).await }
     });
 
     // 等「有人正等在这把锁上」出现。等的是条件，不是固定时长：认领不走锁时它永远不出现，
@@ -168,39 +168,39 @@ async fn claiming_waits_on_the_shared_gate_lock() {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn a_full_processor_kind_issues_no_second_lease() {
     let database = proof_database("media_concurrency_ceiling").await;
-    seed_runnable_images(&database, 8).await;
+    seed_runnable_videos(&database, 8).await;
 
-    let first = claim_media_processing_work(&database, Uuid::new_v4(), &image_ocr())
+    let first = claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr())
         .await
         .expect("a claim attempt answers");
     assert!(
         matches!(first, MediaProcessingClaimOutcome::Claimed(_)),
         "空的时候应当领得到：{first:?}"
     );
-    assert_eq!(leased_count(&database, "image_ocr").await, 1);
+    assert_eq!(leased_count(&database, "video_frame_ocr").await, 1);
 
     // 名额被别人占着时，后来者拿不到——不是排队，是这一次就没有。
-    let second = claim_media_processing_work(&database, Uuid::new_v4(), &image_ocr())
+    let second = claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr())
         .await
         .expect("a claim attempt answers");
     assert!(
         matches!(second, MediaProcessingClaimOutcome::Idle),
-        "上限已满时不该发出第二条 image_ocr 租约：{second:?}"
+        "上限已满时不该发出第二条 video_frame_ocr 租约：{second:?}"
     );
     assert_eq!(
-        leased_count(&database, "image_ocr").await,
+        leased_count(&database, "video_frame_ocr").await,
         1,
-        "库里实际处于 leased 的 image_ocr 只能有一条"
+        "库里实际处于 leased 的 video_frame_ocr 只能有一条"
     );
 
-    // 别的 processor_kind 名额独立，不受 image_ocr 占满的影响。
+    // 别的 processor_kind 名额独立，不受 video_frame_ocr 占满的影响。
     let thumbnail =
         claim_media_processing_work(&database, Uuid::new_v4(), &["thumbnail".to_owned()])
             .await
             .expect("a claim attempt answers");
     assert!(
         matches!(thumbnail, MediaProcessingClaimOutcome::Claimed(_)),
-        "thumbnail 自己的名额是空的，不该被 image_ocr 挡住：{thumbnail:?}"
+        "thumbnail 自己的名额是空的，不该被 video_frame_ocr 挡住：{thumbnail:?}"
     );
 }
 
@@ -217,7 +217,7 @@ async fn the_claim_gate_reports_what_it_cannot_claim() {
 
     // 登记齐了就不吭声。
     assert_eq!(
-        read_claim_gate_readiness(&database, &image_ocr())
+        read_claim_gate_readiness(&database, &video_frame_ocr())
             .await
             .expect("the readiness is readable"),
         ClaimGateReadiness::Ready
@@ -228,7 +228,7 @@ async fn the_claim_gate_reports_what_it_cannot_claim() {
     assert_eq!(
         read_claim_gate_readiness(
             &database,
-            &["image_ocr".to_owned(), "future_kind".to_owned()]
+            &["video_frame_ocr".to_owned(), "future_kind".to_owned()]
         )
         .await
         .expect("the readiness is readable"),
@@ -242,7 +242,7 @@ async fn the_claim_gate_reports_what_it_cannot_claim() {
         .await
         .expect("the policy table can be withdrawn in this isolated schema");
     assert_eq!(
-        read_claim_gate_readiness(&database, &image_ocr())
+        read_claim_gate_readiness(&database, &video_frame_ocr())
             .await
             .expect("the readiness is readable"),
         ClaimGateReadiness::NotMigrated
@@ -258,10 +258,10 @@ async fn the_claim_gate_reports_what_it_cannot_claim() {
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn an_unregistered_processor_kind_is_never_claimable() {
     let database = proof_database("media_concurrency_closed_world").await;
-    seed_runnable_images(&database, 3).await;
+    seed_runnable_videos(&database, 3).await;
 
     // 前提：登记着的时候领得到。否则下面那条断言会因为别的原因变绿。
-    let before = claim_media_processing_work(&database, Uuid::new_v4(), &image_ocr())
+    let before = claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr())
         .await
         .expect("a claim attempt answers");
     assert!(
@@ -270,7 +270,7 @@ async fn an_unregistered_processor_kind_is_never_claimable() {
     );
 
     sqlx::query(
-        "DELETE FROM linggan_media_processing_concurrency WHERE processor_kind='image_ocr'",
+        "DELETE FROM linggan_media_processing_concurrency WHERE processor_kind='video_frame_ocr'",
     )
     .execute(database.pool())
     .await
@@ -284,7 +284,7 @@ async fn an_unregistered_processor_kind_is_never_claimable() {
     .await
     .expect("the lease is returned");
 
-    let after = claim_media_processing_work(&database, Uuid::new_v4(), &image_ocr())
+    let after = claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr())
         .await
         .expect("a claim attempt answers");
     assert!(
@@ -318,7 +318,7 @@ async fn every_processor_kind_the_schema_allows_is_registered_for_concurrency() 
         .map(str::to_owned)
         .collect::<Vec<_>>();
     assert!(
-        allowed.contains(&"image_ocr".to_owned()),
+        allowed.contains(&"video_frame_ocr".to_owned()),
         "约束解析失败，取不到已知取值：{definition}"
     );
 
@@ -347,8 +347,8 @@ async fn every_processor_kind_the_schema_allows_is_registered_for_concurrency() 
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn bounded_batch_does_not_claim_or_recover_other_jobs() {
     let db = proof_database("media_bounded_batch").await;
-    seed_runnable_images(&db, 3).await;
-    let jobs: Vec<Uuid> = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE processor_kind='image_ocr' ORDER BY created_at,job_ref")
+    seed_runnable_videos(&db, 3).await;
+    let jobs: Vec<Uuid> = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE processor_kind='video_frame_ocr' ORDER BY created_at,job_ref")
         .fetch_all(db.pool()).await.unwrap();
     // An unrelated expired lease must remain untouched, even when the batch recovers its own.
     sqlx::query("UPDATE linggan_media_processing_work SET state='leased',attempt_count=1,claim_generation=1,worker_instance_ref=$2,lease_expires_at=scope_001_now()-interval '1 minute' WHERE job_ref=$1")
@@ -365,7 +365,7 @@ async fn bounded_batch_does_not_claim_or_recover_other_jobs() {
         linggan_evidence::claim_media_processing_jobs(
             &db,
             Uuid::new_v4(),
-            &image_ocr(),
+            &video_frame_ocr(),
             &[jobs[2]]
         )
         .await
@@ -386,7 +386,7 @@ async fn bounded_batch_does_not_claim_or_recover_other_jobs() {
         linggan_evidence::claim_media_processing_jobs(
             &db,
             Uuid::new_v4(),
-            &image_ocr(),
+            &video_frame_ocr(),
             &[jobs[2]],
         )
         .await
@@ -396,7 +396,7 @@ async fn bounded_batch_does_not_claim_or_recover_other_jobs() {
     };
     assert_eq!(claim.job_ref, jobs[2]);
     assert!(matches!(
-        linggan_evidence::claim_media_processing_jobs(&db, Uuid::new_v4(), &image_ocr(), &[])
+        linggan_evidence::claim_media_processing_jobs(&db, Uuid::new_v4(), &video_frame_ocr(), &[])
             .await
             .unwrap(),
         MediaProcessingClaimOutcome::Idle

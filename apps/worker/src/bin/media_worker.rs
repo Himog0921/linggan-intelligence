@@ -4,9 +4,8 @@
 //! already admitted and materialized under `LINGGAN_LOCAL_MEDIA_ROOT`.
 
 use linggan_evidence::{
-    ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, OcrCompletionInput,
-    OcrLayeringInput, OcrLineInput, READINESS_RETRY_START, claim_media_processing_work,
-    complete_media_processing_derivative, complete_media_processing_ocr,
+    ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, READINESS_RETRY_START,
+    claim_media_processing_work, complete_media_processing_derivative,
     complete_media_processing_text, complete_media_processing_without_output,
     ensure_media_processing_work, fail_media_processing_work, next_readiness_retry,
     read_claim_gate_readiness,
@@ -56,9 +55,6 @@ const ASR_PROCESS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 ///
 /// 提示本身不进入结果，只是解码的起点。
 const ASR_INITIAL_PROMPT: &str = "以下是普通话的句子。";
-
-const OCR_RAW_DIRECTORY: &str = "ocr-raw";
-const OCR_LAYOUT_DIRECTORY: &str = "ocr-layout";
 
 /// Wire contract of the local Python bridge.  `bbox_norm` means the worker never has to infer
 /// image resolution from a line or recover coordinates from unstructured OCR text.
@@ -308,9 +304,6 @@ fn enabled_processors() -> Vec<String> {
     let paddle_ocr = command_available(&paddle_ocr_python()) && paddle_ocr_script().is_file();
     let ffmpeg = command_available(&ffmpeg_command());
     let whisper = command_available(&whisper_command());
-    if paddle_ocr {
-        processors.push("image_ocr".to_owned());
-    }
     if ffmpeg {
         processors.push("thumbnail".to_owned());
         processors.push("audio_extract".to_owned());
@@ -330,114 +323,12 @@ async fn execute_claim(
     claim: &MediaProcessingClaim,
 ) -> Result<(), String> {
     match claim.processor_kind.as_str() {
-        "image_ocr" => execute_image_ocr(database, worker_instance_ref, claim).await,
         "thumbnail" => execute_thumbnail(database, worker_instance_ref, claim).await,
         "audio_extract" => execute_audio_extract(database, worker_instance_ref, claim).await,
         "asr" => execute_asr(database, worker_instance_ref, claim).await,
         "video_frame_ocr" => execute_video_frame_ocr(database, worker_instance_ref, claim).await,
         other => Err(format!("processor_not_enabled:{other}")),
     }
-}
-
-async fn execute_image_ocr(
-    database: &linggan_storage_postgres::Database,
-    worker_instance_ref: Uuid,
-    claim: &MediaProcessingClaim,
-) -> Result<(), String> {
-    if claim.processor_version == linggan_evidence::ocr_adoption_persistence::PROCESSOR_VERSION {
-        return media_worker_support::ocr_vl::execute(database, worker_instance_ref, claim).await;
-    }
-    if !claim.mime_type.starts_with("image/") {
-        return Err("image_ocr_mime_mismatch".to_owned());
-    }
-    let input = local_media_root().join(&claim.storage_key);
-    ensure_local_input(&input)?;
-    let output = run_paddle_ocr(&input, &claim.mime_type).await?;
-    let Some(lines) = output.lines.as_ref() else {
-        return Err("paddle_ocr_result_lines_missing".to_owned());
-    };
-    if lines.is_empty() {
-        complete_media_processing_without_output(
-            database,
-            claim,
-            worker_instance_ref,
-            "no_text_observed",
-        )
-        .await
-        .map_err(|error| error.to_string())?;
-        println!(
-            "linggan media worker: OCR observed no text {}",
-            claim.job_ref
-        );
-        return Ok(());
-    }
-    let raw_text = lines
-        .iter()
-        .map(|line| line.text.trim())
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if raw_text.is_empty() {
-        return Err("paddle_ocr_result_text_empty".to_owned());
-    }
-    let raw_bytes = raw_text.as_bytes();
-    let raw_content_hash = sha256_hex(raw_bytes);
-    let raw_storage_key = format!(
-        "derivatives/{OCR_RAW_DIRECTORY}/{}/{raw_content_hash}.txt",
-        claim.job_ref
-    );
-    let raw_output_path = prepare_output(&raw_storage_key)?;
-    std::fs::write(&raw_output_path, raw_bytes)
-        .map_err(|error| format!("ocr_raw_output_write_failed:{error}"))?;
-    let layout_bytes = serde_json::to_vec(&output)
-        .map_err(|error| format!("paddle_ocr_layout_serialize_failed:{error}"))?;
-    let layout_content_hash = sha256_hex(&layout_bytes);
-    let layout_storage_key = format!(
-        "derivatives/{OCR_LAYOUT_DIRECTORY}/{}/{layout_content_hash}.json",
-        claim.job_ref
-    );
-    let layout_output_path = prepare_output(&layout_storage_key)?;
-    std::fs::write(&layout_output_path, &layout_bytes)
-        .map_err(|error| format!("ocr_layout_output_write_failed:{error}"))?;
-    let engine_version = output
-        .engine_version
-        .as_deref()
-        .ok_or_else(|| "paddle_ocr_engine_version_missing".to_owned())?;
-    let image_width = output
-        .image_width
-        .ok_or_else(|| "paddle_ocr_image_width_missing".to_owned())?;
-    let image_height = output
-        .image_height
-        .ok_or_else(|| "paddle_ocr_image_height_missing".to_owned())?;
-    let layering = layer_paddle_lines(lines);
-    let completion = OcrCompletionInput {
-        engine_version: engine_version.to_owned(),
-        image_width,
-        image_height,
-        raw_text,
-        raw_content_hash: raw_content_hash.clone(),
-        raw_storage_key,
-        layout_content_hash,
-        layout_byte_size: i64::try_from(layout_bytes.len()).map_err(|error| error.to_string())?,
-        layout_storage_key,
-        lines: lines
-            .iter()
-            .map(|line| OcrLineInput {
-                text: line.text.clone(),
-                confidence: line.confidence,
-                bbox_norm: line.bbox_norm,
-            })
-            .collect(),
-        layering,
-    };
-    complete_media_processing_ocr(database, claim, worker_instance_ref, &completion)
-        .await
-        .map_err(|error| error.to_string())?;
-    println!(
-        "linggan media worker: Paddle OCR completed {} -> {}",
-        claim.job_ref, raw_content_hash
-    );
-    Ok(())
 }
 
 /// PaddleOCR uses the filename suffix to decide whether an input is an image.  Linggan stores
@@ -523,19 +414,6 @@ async fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> 
         ));
     }
     Ok(parsed)
-}
-
-fn layer_paddle_lines(lines: &[PaddleOcrLine]) -> OcrLayeringInput {
-    linggan_evidence::ocr_layering::layer_lines(
-        &lines
-            .iter()
-            .map(|line| OcrLineInput {
-                text: line.text.clone(),
-                confidence: line.confidence,
-                bbox_norm: line.bbox_norm,
-            })
-            .collect::<Vec<_>>(),
-    )
 }
 
 async fn execute_thumbnail(
@@ -849,82 +727,8 @@ async fn complete_text_derivative(
 
 #[cfg(test)]
 mod tests {
-    use super::{PaddleOcrLine, layer_paddle_lines, paddle_image_extension, stage_paddle_input_at};
+    use super::{paddle_image_extension, stage_paddle_input_at};
     use uuid::Uuid;
-
-    fn line(text: &str, confidence: f64, bbox_norm: [f64; 4]) -> PaddleOcrLine {
-        PaddleOcrLine {
-            text: text.to_owned(),
-            confidence,
-            bbox_norm,
-        }
-    }
-
-    #[test]
-    fn cover_headline_keeps_author_text_and_excludes_an_edge_watermark() {
-        let output = layer_paddle_lines(&[
-            line("不要带 A 娃", 0.99, [0.12, 0.68, 0.81, 0.75]),
-            line("吊在一棵树上！", 0.98, [0.14, 0.76, 0.84, 0.84]),
-            line("小红书", 0.99, [0.84, 0.92, 0.98, 0.98]),
-        ]);
-        assert_eq!(
-            output.cover_headline.as_deref(),
-            Some("不要带 A 娃 吊在一棵树上！")
-        );
-        assert_eq!(output.state, "ACCEPTED");
-        assert_eq!(output.excluded_lines.len(), 1);
-        assert_eq!(
-            output.excluded_lines[0].classification,
-            "platform_watermark"
-        );
-    }
-
-    #[test]
-    fn platform_comment_chrome_is_excluded_without_erasing_the_comment_text() {
-        let output = layer_paddle_lines(&[
-            line(
-                "大猫给乐乐输血，说大猫很勇敢",
-                0.96,
-                [0.10, 0.28, 0.88, 0.31],
-            ),
-            line("但是猫没有选择的权利", 0.97, [0.10, 0.37, 0.82, 0.40]),
-            line("2天前", 0.99, [0.08, 0.84, 0.20, 0.86]),
-            line("作者赞过", 0.99, [0.73, 0.84, 0.94, 0.86]),
-        ]);
-        assert_eq!(output.cover_headline, None);
-        assert_eq!(output.image_substantive_text, None);
-        assert_eq!(output.state, "PARTIAL");
-        assert_eq!(output.retained_ordinals, vec![0, 1]);
-        assert_eq!(output.excluded_lines.len(), 2);
-        assert!(
-            output
-                .excluded_lines
-                .iter()
-                .all(|line| line.classification == "platform_ui")
-        );
-    }
-
-    #[test]
-    fn dense_competing_text_is_marked_partial_instead_of_being_silently_deleted() {
-        let output = layer_paddle_lines(&[
-            line("不要带 A 娃", 0.99, [0.12, 0.68, 0.81, 0.75]),
-            line("吊在一棵树上！", 0.98, [0.14, 0.76, 0.84, 0.84]),
-            line("Read the text and answer", 0.93, [0.08, 0.16, 0.78, 0.20]),
-            line(
-                "You must stop at a red light",
-                0.94,
-                [0.08, 0.24, 0.80, 0.28],
-            ),
-            line("On foot", 0.96, [0.08, 0.32, 0.28, 0.36]),
-            line("小红书", 0.99, [0.84, 0.92, 0.98, 0.98]),
-        ]);
-        assert_eq!(output.state, "PARTIAL");
-        assert_eq!(
-            output.cover_headline.as_deref(),
-            Some("不要带 A 娃 吊在一棵树上！")
-        );
-        assert!(output.image_substantive_text.is_none());
-    }
 
     #[test]
     fn paddle_input_suffix_is_derived_only_from_supported_admitted_image_mime() {

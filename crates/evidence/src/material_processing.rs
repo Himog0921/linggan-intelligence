@@ -220,17 +220,13 @@ async fn claim_media_processing_work_scoped(
     if enabled_processors.is_empty() {
         return Ok(MediaProcessingClaimOutcome::Idle);
     }
-    let mut supported_versions: Vec<String> = enabled_processors
+    let supported_versions: Vec<String> = enabled_processors
         .iter()
+        .filter(|kind| kind.as_str() != "image_ocr")
         .filter_map(|kind| {
             processor_version_for_kind(kind).map(|version| format!("{kind}:{version}"))
         })
         .collect();
-    // Local visual recognition has a separate, still supported image processor.
-    supported_versions.push(format!(
-        "image_ocr:{}",
-        crate::ocr_adoption_persistence::PROCESSOR_VERSION
-    ));
     let retired_job_filter = " AND NOT EXISTS (SELECT 1 FROM linggan_media_ocr_retirement retired WHERE retired.retired_job_ref=job.job_ref)";
     let mut tx = database.pool().begin().await?;
     // **认领闸。** 先取锁，再数在途，最后才认领——三步必须在同一把锁下，否则这道闸拦不住任何东西。
@@ -1112,13 +1108,8 @@ pub async fn record_media_derivative_completion(
 ///
 /// 单独列出来是给两个调用方校验名字用的：摄取路径不该生出一个没有版本的处理器，
 /// 重排工具的命令行也不该把名字打错读成「这一类没有旧作业」。
-pub const REGISTERED_PROCESSOR_KINDS: [&str; 5] = [
-    "thumbnail",
-    "image_ocr",
-    "audio_extract",
-    "asr",
-    "video_frame_ocr",
-];
+pub const REGISTERED_PROCESSOR_KINDS: [&str; 4] =
+    ["thumbnail", "audio_extract", "asr", "video_frame_ocr"];
 
 /// 这个处理器当前的版本号。**改了处理器的行为，就必须同时抬它的版本号。**
 ///
@@ -1176,6 +1167,14 @@ pub async fn requeue_outdated_processor_jobs(
     processor_kinds: &[String],
     dry_run: bool,
 ) -> Result<Vec<ProcessorRequeueSummary>, ProducerRuntimeError> {
+    if let Some(kind) = processor_kinds
+        .iter()
+        .find(|kind| !REGISTERED_PROCESSOR_KINDS.contains(&kind.as_str()))
+    {
+        return Err(ProducerRuntimeError::ProcessorKindNotRegistered(
+            kind.clone(),
+        ));
+    }
     let mut summaries = Vec::new();
     for processor_kind in processor_kinds {
         let target_version = processor_version_for_kind(processor_kind).ok_or_else(|| {
