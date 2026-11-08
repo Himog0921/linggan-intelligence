@@ -40,6 +40,7 @@ export function CreatorWorkbenchPreviewG5States({
     <dialog
       ref={ref}
       className={styles.dialog}
+      data-preview-dialog={kind ?? undefined}
       aria-label={kind === 'experience-picker' ? '选择经历' : kind === 'save-as-template' ? '存为样板' : '使用路径'}
       onCancel={event => { event.preventDefault(); onClose(); }}
       onClick={event => { if (event.target === event.currentTarget) onClose(); }}
