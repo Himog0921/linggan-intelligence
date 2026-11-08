@@ -17,7 +17,6 @@ import { CanvasBoard } from './CanvasBoard';
 import { RevisionHistory } from './RevisionHistory';
 import { RevisionCompare } from './RevisionCompare';
 import { TopicLibrary } from './TopicLibrary';
-import { TopicDetail } from './TopicDetail';
 import { CheckPanel } from './assets/CheckPanel';
 import { PublicationLinker, type PublicationPending } from './assets/PublicationLinker';
 import { SaveStructuralTemplate } from './assets/SaveStructuralTemplate';
@@ -27,8 +26,8 @@ import { MaterialDesk } from './MaterialDesk';
 import { newImagePage } from './imagePageFactory';
 import { ImagePages } from './ImagePages';
 import styles from './WorkbenchPage.module.css';
-type View = 'topic' | 'desk' | 'canvas' | 'body' | 'cover' | 'inner' | 'export';
-const VIEWS: readonly { id: View; label: string }[] = [{id:'topic',label:'选题方案'},{id:'desk',label:'选题与材料'},{id:'canvas',label:'创作画布'},{id:'body',label:'正文'},{id:'cover',label:'封面'},{id:'inner',label:'内页'},{id:'export',label:'预览与导出'}];
+type View = 'desk' | 'canvas' | 'body' | 'cover' | 'inner' | 'export';
+const VIEWS: readonly { id: View; label: string }[] = [{id:'desk',label:'选题与材料'},{id:'canvas',label:'创作画布'},{id:'body',label:'正文'},{id:'cover',label:'封面'},{id:'inner',label:'内页'},{id:'export',label:'预览与导出'}];
 function targetLocation(target: UseTarget, document: WorkDocument): {
   view: View;
   label: string;
@@ -41,12 +40,12 @@ function targetLocation(target: UseTarget, document: WorkDocument): {
       };
     case 'angle':
       return {
-        view: 'topic',
+        view: 'body',
         label: '切入角度'
       };
     case 'outline':
       return {
-        view: 'topic',
+        view: 'body',
         label: target.index < document.outline.length ? `提纲第 ${target.index + 1} 项` : '提纲目标已删除'
       };
     case 'tag':
@@ -84,7 +83,7 @@ function targetLocation(target: UseTarget, document: WorkDocument): {
 }
 const SECTION_TITLE = { today: '今日选题', works: '我的创作', assets: '资产库' } as const;
 function viewValue(value: string | null): View {
-  return VIEWS.find(v => v.id === value)?.id ?? 'topic';
+  return VIEWS.find(v => v.id === value)?.id ?? 'body';
 }
 function Modal({
   title,
@@ -184,7 +183,7 @@ export function WorkbenchPage() {
     setParams({
       domain,
       work: id,
-      view: section === 'works' ? 'body' : 'topic'
+      view: 'body'
     });
   }
   useEffect(() => {
@@ -220,7 +219,7 @@ export function WorkbenchPage() {
       setParams({
         domain: frozen.domainRef,
         work: r.workId,
-        view: 'topic'
+        view: 'body'
       });
     } catch (e) {
       if (e instanceof ApiError && e.answered) {
@@ -265,7 +264,7 @@ export function WorkbenchPage() {
 <input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={creating || createUnknown} onChange={e => setTitle(e.target.value)} />
 <ActionButton type="submit" variant="primary" busy={creating} disabled={!title.trim() || creating}>{creating ? '建立中…' : createUnknown ? '核实原请求并重试' : '建立选题'}</ActionButton>
 </form>} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
-<WorkEditor onOpenLibrary={() => setParams({ domain: w.domainRef, section: 'works' })} onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} immersive={immersive} onImmersive={setImmersive} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenTopic={id => setParams({ domain: w.domainRef, work: id, view: 'topic' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} onOpenDraftWriting={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} onSwitchWork={id => setParams({ domain: w.domainRef, work: id, view: 'desk' })} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
+<WorkEditor onOpenLibrary={() => setParams({ domain: w.domainRef, section: 'works' })} onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} immersive={immersive} onImmersive={setImmersive} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenAnchor={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} onOpenDraftWriting={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} onSwitchWork={id => setParams({ domain: w.domainRef, work: id, view: 'desk' })} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
           domain: w.domainRef,
           work: w.workId,
           view
@@ -286,7 +285,7 @@ function WorkEditor({
   initial,
   onOpenLibrary,
   templateBlocked, onResetTemplateBlock, onTemplatePending, onPublicationPending, onTitlePending, onWritingPending,
-  ideas, ideaState, onOpenTopic,
+  ideas, ideaState, onOpenAnchor,
   drafts,
   draftsStatus,
   onOpenDraft,
@@ -303,7 +302,7 @@ function WorkEditor({
   onTitlePending: (workId: string, pending: boolean) => void;
   onWritingPending: (workId: string, pending: boolean) => void;
   templateBlocked: boolean; onResetTemplateBlock: () => void; onTemplatePending: (workId: string, pending: boolean) => void; onPublicationPending: (workId: string, pending: boolean) => void;
-  ideas: IdeaBoxSummary[]; ideaState: 'pending' | 'error' | 'success'; onOpenTopic: (id: string) => void;
+  ideas: IdeaBoxSummary[]; ideaState: 'pending' | 'error' | 'success'; onOpenAnchor: (id: string) => void;
   drafts: WorkSummary[];
   draftsStatus: 'loading' | 'error' | 'ready';
   onOpenDraft: (id: string) => void;
@@ -1178,14 +1177,8 @@ function WorkEditor({
     composition.current = value;
     setComposing(value);
   }
-  const linkedIdea = document.ideaRef && document.ideaName === null ? ideas.find(idea => idea.ideaRef === document.ideaRef) : undefined;
-  const topicUnavailable = !!document.ideaRef && document.ideaName === null && !linkedIdea;
-  function goView(next: View) {
-    if (next === 'topic' && linkedIdea) onOpenTopic(linkedIdea.anchorWorkId);
-    else if (next !== 'topic' || !topicUnavailable) onView(next);
-  }
   const commandContents = <>
-<details className={styles.workflowMenu}><summary>创作步骤 · {VIEWS.find(item => item.id === view)?.label}</summary><nav aria-label="创作步骤" className={styles.workflowOptions}>{VIEWS.map(item => <button type="button" key={item.id} disabled={item.id === 'topic' && topicUnavailable} aria-current={view === item.id ? 'step' : undefined} onClick={event => { goView(item.id); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{item.label}</button>)}</nav></details>
+<details className={styles.workflowMenu}><summary>创作步骤 · {VIEWS.find(item => item.id === view)?.label}</summary><nav aria-label="创作步骤" className={styles.workflowOptions}>{VIEWS.map(item => <button type="button" key={item.id} aria-current={view === item.id ? 'step' : undefined} onClick={event => { onView(item.id); event.currentTarget.closest('details')?.removeAttribute('open'); }}>{item.label}</button>)}</nav></details>
 {view === 'body' ? <fieldset disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} className={styles.toolbarFieldset}><div className={styles.writeControls}><div className={styles.steps}><button aria-pressed={!compareVisible} onClick={() => setCompareVisible(false)}>沉浸编辑</button><button disabled={document.experienceGaps.length > 0} title={document.experienceGaps.length ? '请先填好或删除经历位' : undefined} aria-pressed={compareVisible} onClick={() => {setCompareVisible(true);if(!compareBase){setCompareBase(live.current);setComparisonDrafts(null);}}}>改稿对照</button></div>
 <div className={styles.row}>
 <ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={undoHistory}>撤销</ActionButton>
@@ -1232,7 +1225,7 @@ function WorkEditor({
       setSaveState('saved'); setSourceResetSequence(value => value + 1); setSourceInvalidated(null); setResetRequired(latest.experienceResetRequired === true);
     }}>丢弃本页编辑并重新读取</ActionButton></div> : null}
     {recheckStatus === 'checking' ? <p role="status">正在核验稿件来源…</p> : recheckStatus === 'failed' ? <p role="alert">暂时无法核验稿件来源。未保存的编辑仍在本页。<ActionButton variant="quiet" onClick={() => setRecheckAttempt(value => value + 1)}>重新核验</ActionButton></p> : null}
-    <fieldset hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>{view === 'topic' ? <TopicDetail drafts={drafts} draftsStatus={draftsStatus} onOpenDraft={onOpenDraft} accountsState={accounts.status} onRetryAccounts={()=>void accounts.refetch()} document={document} accounts={accounts.data ?? []} accountError={accounts.error ? api.errorText(accounts.error) : undefined} onChange={edit} onCompose={compose} onRead={() => onView('desk')} onWrite={() => onView('body')} /> : null}
+    <fieldset hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>
     {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} currentDocument={document} accounts={accounts.data ?? []} sourceFocus={sourceFocus} onClearSourceFocus={() => setSourceFocus(null)} onOpenWork={onOpenDraftWriting} onSwitchWork={onSwitchWork} onCreateFrame={createFrame} onCreateFramePending={creatingFrame} onAddNote={addDeskNote} onPlaceMaterial={placeMaterial} onUpdateCard={updateCanvas} onRemoveCard={id => edit({ ...live.current, canvas: live.current.canvas.filter(block => block.id !== id) })} onRenameTitle={next => edit({ ...live.current, title: next })} onPickAccount={ref => edit({ ...live.current, accountRef: ref })} /></div> : null}
     {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);onView('desk');}} onMaterials={()=>onView('desk')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={card=>{setPlacement(card);setBodyTarget(document.uses.flatMap(use=>use.canvasId===card.id&&use.target.kind==='paragraph'?[use.target.paragraphId]:[])[0]??'new');setWantBody(true);setWantPage(false);setPageTarget(document.pages.find(page=>page.kind!=='cover')?.id??'');}} /> : null}
     {view === 'body' ? <div className={styles.bodyWorkspace}>
@@ -1251,7 +1244,7 @@ function WorkEditor({
     {dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id ? <p>稿件已变化，请重新生成。</p> : null}
   </> : null}
   {titleAdoptIndex && hasPending ? <p>标题采用结果尚未确认，请沿用原请求核对。</p> : null}
-</section>} draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenTopic={onOpenTopic} workId={initial.workId} onCover={() => onView('cover')} onTopic={() => goView('topic')} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); onView('desk'); }} copyContainer={copyContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div></div></div>}
+</section>} draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenAnchor={onOpenAnchor} workId={initial.workId} onCover={() => onView('cover')} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); onView('desk'); }} copyContainer={copyContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div></div></div>}
 </div> : null}
     <div hidden={!['cover','inner','export'].includes(view)}>
 <ImagePages step={view === 'inner' ? 'inner' : view === 'export' ? 'export' : 'cover'} onStepChange={onView} onOpenSource={excerptId => { const excerpt=document.excerpts.find(item=>item.id===excerptId);if(excerpt){setSourceFocus(excerpt.citation);onView('desk');} }} document={document} workId={initial.workId} currentRevisionId={dirty ? undefined : revision.id} sourceRevision={revision} onReadRevision={id => api.readRevision(initial.workId, id)} sourceCheckGeneration={() => recheckGeneration.current} sourceResetSequence={sourceResetSequence} onQualifySources={async citations => { const checked = await Promise.all(citations.map(async citation => { return api.qualifyCitation(initial.domainRef, citation); })); return checked.every(Boolean); }} onChange={edit} onUploadAsset={async file => {

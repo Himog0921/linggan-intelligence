@@ -2,9 +2,9 @@ import { ActionButton } from '../../shared/ActionButton';
 import type { IdeaBoxSummary, WorkDocument } from './workbenchModel';
 
 /** An idea has its own identity. Its name and intent are edited on the anchor work. */
-export function IdeaBoxLink({ document, ideas, state, edit, openTopic, name, onNameChange, compose }: {
+export function IdeaBoxLink({ document, ideas, state, edit, openAnchor, name, onNameChange, compose }: {
   document: WorkDocument; ideas: IdeaBoxSummary[]; state: 'pending' | 'error' | 'success';
-  edit: (document: WorkDocument) => void; openTopic: (anchor: string) => void;
+  edit: (document: WorkDocument) => void; openAnchor: (anchor: string) => void;
   name: string; onNameChange: (name: string) => void; compose: (composing: boolean) => void;
 }) {
   const linked = ideas.find(idea => idea.ideaRef === document.ideaRef);
@@ -12,7 +12,7 @@ export function IdeaBoxLink({ document, ideas, state, edit, openTopic, name, onN
   if (document.ideaRef) return <div className="intent">
     <small>选题框</small>
     <strong>{ownName ?? linked?.name ?? (state === 'error' ? '读取失败' : '读取中…')}</strong>
-    {ownName === null && linked ? <button type="button" className="btn quiet sub" onClick={() => openTopic(linked.anchorWorkId)}>打开选题框</button> : null}
+    {ownName === null && linked ? <button type="button" className="btn quiet sub" onClick={() => openAnchor(linked.anchorWorkId)}>打开选题框</button> : null}
     {ownName === null && state === 'success' ? <details><summary>更换关联</summary>
       <label>关联已有选题框<select aria-label="更换选题框" value={document.ideaRef} onChange={event => edit({ ...document, ideaRef: event.target.value || null })}>
         <option value="">暂不关联</option>{ideas.map(idea => <option key={idea.ideaRef} value={idea.ideaRef}>{idea.name}</option>)}

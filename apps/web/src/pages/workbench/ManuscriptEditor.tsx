@@ -15,9 +15,8 @@ export function ManuscriptEditor({
   onTagsChange,
   workId,
   onCover,
-  onTopic,
   accountName,
-  ideas = [], ideaState = 'success', onOpenTopic = () => {}, draftInputs, onDraftInputs, titleGenerator, footer,
+  ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleGenerator, footer,
 }: {
   document: WorkDocument;
   edit: (document: WorkDocument) => void;
@@ -28,9 +27,8 @@ export function ManuscriptEditor({
   onTagsChange: (value: string) => void;
   workId?: string;
   onCover?: () => void;
-  onTopic?: () => void;
   accountName?: string;
-  ideas?: IdeaBoxSummary[]; ideaState?: 'pending' | 'error' | 'success'; onOpenTopic?: (anchor: string) => void;
+  ideas?: IdeaBoxSummary[]; ideaState?: 'pending' | 'error' | 'success'; onOpenAnchor?: (anchor: string) => void;
   draftInputs: { cover: string; note: string; idea: string };
   onDraftInputs: (inputs: { cover: string; note: string; idea: string }) => void;
   titleGenerator?: ReactNode;
@@ -60,11 +58,10 @@ export function ManuscriptEditor({
       <div className="ed-meta" aria-label="稿件信息">
         <span className="meta-basic">{document.angle ? `意图 · ${document.angle}` : '还没有选题意图'}</span>
       </div>
-      <ActionButton variant="quiet" disabled={!!document.ideaRef && document.ideaName === null && !ideas.some(idea => idea.ideaRef === document.ideaRef)} onClick={onTopic}>{document.ideaRef && document.ideaName === null ? '查看选题方案' : '选题方案'}</ActionButton>
     </div>
     <div className="ed-scroll">
       <div className="ed-inner">
-        <IdeaBoxLink document={document} ideas={ideas} state={ideaState} edit={edit} openTopic={onOpenTopic} compose={compose} name={draftInputs.idea} onNameChange={idea => onDraftInputs({ ...draftInputs, idea })} />
+        <IdeaBoxLink document={document} ideas={ideas} state={ideaState} edit={edit} openAnchor={onOpenAnchor} compose={compose} name={draftInputs.idea} onNameChange={idea => onDraftInputs({ ...draftInputs, idea })} />
         <div className="cover-row">
           <div>
             {cover?.assetId && workId ? <button type="button" className="cover" onClick={onCover} aria-label="查看封面">

@@ -1082,7 +1082,7 @@ it('keeps every editor step reachable from the writing workflow menu', async () 
   show(); await screen.findByLabelText('正文第 1 段');
   fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   const nav = screen.getByRole('navigation', { name: '创作步骤' });
-  for (const name of ['选题方案','选题与材料','创作画布','正文','封面','内页','预览与导出']) {
+  for (const name of ['选题与材料','创作画布','正文','封面','内页','预览与导出']) {
     expect(within(nav).getByRole('button', { name })).toBeInTheDocument();
   }
   fireEvent.click(within(nav).getByRole('button', { name: '选题与材料' }));
@@ -1160,7 +1160,7 @@ it('keeps unfinished candidate and idea inputs across editor steps and warns bef
   window.dispatchEvent(leaving);
   expect(leaving.defaultPrevented).toBe(true);
   fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
-  fireEvent.click(within(screen.getByRole('navigation', { name: '创作步骤' })).getByRole('button', { name: '选题方案' }));
+  fireEvent.click(within(screen.getByRole('navigation', { name: '创作步骤' })).getByRole('button', { name: '创作画布' }));
   fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   fireEvent.click(within(await screen.findByRole('navigation', { name: '创作步骤' })).getByRole('button', { name: '正文' }));
   fireEvent.click(await screen.findByText('添加笔记标题候选'));
