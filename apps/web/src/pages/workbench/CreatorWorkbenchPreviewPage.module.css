@@ -197,3 +197,32 @@
 @media (prefers-reduced-motion: reduce) {
   .root * { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
 }
+
+/* G5: reference-only controls reveal on hover/focus, without changing the idle text grid. */
+.paragraphEditor { position: relative; min-width: 0; }
+.paragraphEditor > textarea { display: block; }
+.insertExperience {
+  position: absolute;
+  right: var(--lgi-space-2);
+  bottom: var(--lgi-space-1);
+  padding: var(--lgi-space-1) var(--lgi-space-2);
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-body);
+  border: 1px solid var(--lgi-border);
+  font: var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--lgi-font-ui);
+  opacity: 0;
+}
+.paragraphEditor:hover .insertExperience,
+.paragraphEditor:focus-within .insertExperience { opacity: 1; }
+.insertExperience:focus-visible { outline: 2px solid var(--lgi-focus); }
+.productEditing { display: grid; width: 100%; gap: var(--lgi-space-3); }
+.productEditing label { display: grid; gap: var(--lgi-space-2); width: 100%; }
+.productEditing input, .productEditing textarea {
+  width: 100%; min-width: 0;
+  padding: var(--lgi-space-2);
+  border: 1px solid var(--lgi-border-strong);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: var(--lgi-type-input-weight) var(--lgi-type-input-size)/var(--lgi-type-input-leading) var(--lgi-font-ui);
+}
+.productEditing > div { display: flex; flex-wrap: wrap; gap: var(--lgi-space-2); }
