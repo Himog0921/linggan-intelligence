@@ -78,10 +78,7 @@ if [[ "$purge_only" == 1 ]]; then
  exit 0
 fi
 if [[ "$local_only" == 1 ]]; then
- export LINGGAN_PADDLE_OCR_PYTHON="$(command -v python3)"
- export LINGGAN_PADDLE_VL_SCRIPT="$proof_assets/synthetic-bridge.py"
- cargo_proof -p linggan-worker --test ocr_vl_postgres synthetic_daily_worker_publishes_reading_before_optional_review --locked -- --ignored --exact --nocapture
- cargo_proof -p linggan-worker --test ocr_vl_postgres latest_frame_completion_and_empty_outcome_publish_current_readings --locked -- --ignored --exact --nocapture
+ cargo_proof -p linggan-worker --test video_frame_ocr_postgres latest_frame_completion_and_empty_outcome_publish_current_readings --locked -- --ignored --exact --nocapture
  exit 0
 fi
 if [[ "$reading_only" == 1 ]]; then

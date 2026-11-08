@@ -52,7 +52,7 @@ test('existing domain proof coverage is retained and unions across files', () =>
     ['crates/evidence/src/ocr_adoption_persistence.rs', ['material_reading', 'ocr_recognition']],
     ['crates/evidence/src/material_media_read.rs', ['material_reading', 'web', 'web_real_chain']],
     ['crates/evidence/src/research_dossier.rs', suites],
-    ['apps/worker/tests/ocr_vl_postgres.rs', ['ai', 'material_reading', 'ocr_recognition']],
+    ['apps/worker/tests/video_frame_ocr_postgres.rs', ['ai', 'material_reading', 'ocr_recognition']],
     ['database/migrations/0142_ocr_adoption.sql', ['ai', 'material_reading']],
     ['database/migrations/0168_dossier_ocr_cleanup.sql', suites],
     ['crates/evidence/src/ocr_source.rs', ['material_reading', 'ocr_recognition']],
