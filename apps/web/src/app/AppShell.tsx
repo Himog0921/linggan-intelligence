@@ -18,11 +18,18 @@ interface AppShellProps {
   /** V3 创作专用空间；其他页面继续使用迁移期标准页头。 */
   workbenchMode?: 'compact' | 'immersive';
   restrictedOps?: boolean;
+  /** Approved prototype's two-line primary navigation; isolated preview only. */
+  previewNavigation?: boolean;
 }
 
-function PrimaryEntryLink({ entry, active }: { entry: PrimaryEntry; active: PrimarySurface | null }) {
+function PrimaryEntryLink({ entry, active, preview = false }: { entry: PrimaryEntry; active: PrimarySurface | null; preview?: boolean }) {
   const current = entry.surface !== null && entry.surface === active ? 'page' : undefined;
-  const label = <b className="v7-nav-zh">{entry.zh}</b>;
+  const previewStatus: Record<string, string> = {
+    雷达: '尚未接通', 主题图谱: '暂定研究', 语料: '未知', 洞察: '尚未接通', 采集: '状态未知', 运营: '工作台',
+  };
+  const label = preview
+    ? <span className="v7-nav-copy"><b className="v7-nav-zh">{entry.zh}</b><small className="v7-nav-meta">{previewStatus[entry.zh] ?? ''}</small></span>
+    : <b className="v7-nav-zh">{entry.zh}</b>;
   if (entry.href === null) {
     return (
       <button type="button" disabled aria-disabled="true" aria-current={current}>
@@ -41,7 +48,7 @@ function PrimaryEntryLink({ entry, active }: { entry: PrimaryEntry; active: Prim
 /**
  * 全站唯一 React 页头；样式由 apps/web/src/styles/shell.css 提供。
  */
-export function AppShell({ className, active, boundaryLabel, contextBar, children, workbenchMode, restrictedOps = false }: AppShellProps) {
+export function AppShell({ className, active, boundaryLabel, contextBar, children, workbenchMode, restrictedOps = false, previewNavigation = false }: AppShellProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState('');
@@ -139,7 +146,7 @@ export function AppShell({ className, active, boundaryLabel, contextBar, childre
           </div>
           <nav className="v7-primary-nav" aria-label="一级导航">
             {PRIMARY_ENTRIES.filter(entry => !restrictedOps || entry.surface === 'ops').map(entry => (
-              <PrimaryEntryLink key={entry.zh} entry={entry} active={active} />
+              <PrimaryEntryLink key={entry.zh} entry={entry} active={active} preview={previewNavigation} />
             ))}
           </nav>
           <div className="v7-global-flex" aria-hidden="true" />
