@@ -3,13 +3,15 @@ import { SidebarState } from './sidebarState';
 import { IntelligenceIcon } from './IntelligenceIcon';
 
 /** Shared shell slot. Collapsing changes presentation only, never route/query or business scope. */
-export function Sidebar({ children, className = '', ...props }: ComponentPropsWithoutRef<'aside'>) {
+export function Sidebar({ children, className = '', toggleLabels, ...props }: ComponentPropsWithoutRef<'aside'> & { toggleLabels?: { expanded: string; collapsed: string } }) {
   const { collapsed, toggle } = useContext(SidebarState);
   const id = useId();
+  const expandedLabel = toggleLabels?.expanded ?? '折叠侧栏';
+  const collapsedLabel = toggleLabels?.collapsed ?? '展开侧栏';
   return <aside {...props} className={`v7-side ${className}`}>
-    <button type="button" className="v7-side-toggle" aria-label={collapsed ? '展开侧栏' : '折叠侧栏'} aria-expanded={!collapsed} aria-controls={id} onClick={toggle} title={collapsed ? '展开侧栏' : '折叠侧栏'}>
+    <button type="button" className="v7-side-toggle" aria-label={collapsed ? collapsedLabel : expandedLabel} aria-expanded={!collapsed} aria-controls={id} onClick={toggle} title={collapsed ? collapsedLabel : expandedLabel}>
       <IntelligenceIcon name={collapsed ? 'sidebar-open' : 'sidebar-close'}/>
-      <span>{collapsed ? '展开侧栏' : '折叠侧栏'}</span>
+      <span>{collapsed ? collapsedLabel : expandedLabel}</span>
     </button>
     <div id={id} className="v7-side-content">{children}</div>
   </aside>;
