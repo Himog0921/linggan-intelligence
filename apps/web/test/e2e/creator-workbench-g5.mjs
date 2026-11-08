@@ -187,6 +187,58 @@ try {
         await page.getByRole('button', { name: '返回写稿' }).click();
         assert.equal(await page.getByRole('textbox', { name: '正文第 1 段' }).inputValue(), text);
       });
+
+      await verify('g5-path-dialog-escape-and-focus-restore', async () => {
+        const trigger = page.getByRole('button', { name: '使用路径' });
+        await trigger.click();
+        const dialog = page.getByRole('dialog', { name: '使用路径' });
+        await dialog.waitFor({ state: 'visible' });
+        assert.equal(await dialog.getByText('六个阶段', { exact: true }).count(), 0);
+        assert.ok(await dialog.getByText('四条常走的路').isVisible());
+        await page.keyboard.press('Escape');
+        await dialog.waitFor({ state: 'hidden' });
+        assert.equal(await trigger.evaluate(node => document.activeElement === node), true);
+      });
+      await verify('g5-sample-template-preview-no-persist', async () => {
+        const trigger = page.getByRole('button', { name: '存为样板' });
+        await trigger.click();
+        const dialog = page.getByRole('dialog', { name: '存为样板' });
+        await dialog.waitFor({ state: 'visible' });
+        await dialog.getByRole('textbox', { name: '样板名称' }).fill('仅供验证的样板');
+        await dialog.getByRole('button', { name: /存进样板库/ }).click();
+        await dialog.waitFor({ state: 'hidden' });
+        assert.equal(await page.getByText(/未调用正式 API/).count() > 0, true);
+      });
+      await verify('g5-experience-picker-blocks-unconfirmed', async () => {
+        const before = await page.getByRole('textbox', { name: /^正文第 \\d+ 段$/ }).count();
+        await page.getByRole('button', { name: '后面插入经历' }).first().click({ force: true });
+        const dialog = page.getByRole('dialog', { name: '选择经历' });
+        await dialog.waitFor({ state: 'visible' });
+        assert.equal(await dialog.getByRole('button', { name: '尚不可用' }).isDisabled(), true);
+        await dialog.getByRole('button', { name: '用这段' }).click();
+        await dialog.waitFor({ state: 'hidden' });
+        const after = await page.getByRole('textbox', { name: /^正文第 \\d+ 段$/ }).count();
+        assert.equal(after, before + 1);
+      });
+      await verify('g5-product-edit-local-cancel', async () => {
+        await page.getByRole('button', { name: '资产库' }).click();
+        const dialog = page.getByRole('dialog', { name: '创作资产库' });
+        await dialog.getByRole('navigation', { name: '资产类型' }).getByRole('button', { name: /产品事实卡/ }).click();
+        await dialog.getByRole('button', { name: '编辑', exact: true }).click();
+        assert.equal(await dialog.getByRole('textbox', { name: '规范名称' }).isVisible(), true);
+        await dialog.getByRole('button', { name: '取消', exact: true }).click();
+        assert.equal(await dialog.getByRole('textbox', { name: '规范名称' }).count(), 0);
+        await page.keyboard.press('Escape');
+      });
+      await verify('g5-tour-popover-dismissable', async () => {
+        const trigger = page.getByRole('button', { name: /体验清单/ });
+        await trigger.click();
+        const tour = page.getByRole('region', { name: '体验清单' });
+        await tour.waitFor({ state: 'visible' });
+        assert.equal(await tour.locator('li').count(), 8);
+        await tour.getByRole('button', { name: '收起' }).click();
+        await tour.waitFor({ state: 'hidden' });
+      });
       await verify('inspector-keyboard-tabs', async () => {
         const checks = page.getByRole('tab', { name: /检查/ });
         await checks.focus();
@@ -236,6 +288,10 @@ try {
     ['asset-persona', 1440, 1000, page => openAsset(page, null)],
     ['asset-experience', 1440, 1000, page => openAsset(page, '经历库')],
     ['asset-product', 1440, 1000, page => openAsset(page, '产品事实卡')],
+    ['asset-product-edit', 1440, 1000, async page => {
+      await openAsset(page, '产品事实卡');
+      await page.getByRole('dialog', { name: '创作资产库' }).getByRole('button', { name: '编辑', exact: true }).click();
+    }],
     ['asset-bridge', 1440, 1000, page => openAsset(page, '衔接句')],
     ['asset-sample', 1440, 1000, page => openAsset(page, '样板库')],
     ['asset-style', 1440, 1000, page => openAsset(page, '风格')],
@@ -244,6 +300,10 @@ try {
     ['inspector-preview', 1440, 1000, page => page.getByRole('tab', { name: '预览' }).click()],
     ['side-collapsed', 1440, 1000, page => page.getByRole('button', { name: '折叠侧栏' }).click()],
     ['draft-d2', 1440, 1000, page => page.getByRole('button', { name: /我后来不再急着给答案/ }).click()],
+    ['experience-picker', 1440, 1000, page => page.getByRole('button', { name: '后面插入经历' }).first().click({ force: true })],
+    ['save-as-template', 1440, 1000, page => page.getByRole('button', { name: '存为样板' }).click()],
+    ['path-guide', 1440, 1000, page => page.getByRole('button', { name: '使用路径' }).click()],
+    ['tour-popover', 1440, 1000, page => page.getByRole('button', { name: /体验清单/ }).click()],
     ['desk-default', 1440, 1000, openDeskState],
     ['desk-search', 1440, 1000, async page => {
       await openDeskState(page);
@@ -302,17 +362,6 @@ try {
         screenshot: captureStatus.startsWith('CAPTURED') ? fileName : null, error });
       await context.close();
     }
-  }
-  // These approved Gold Master screens do not yet exist in the synthetic React
-  // preview. An informational toast is NOT an equivalent modal/editor state.
-  for (const id of [
-    'asset-product-edit', 'experience-picker', 'save-as-template',
-    'path-guide', 'tour-popover',
-  ]) {
-    report.visualStates.push({
-      id: 'V-STATE-' + id, result: 'NOT_IMPLEMENTED_IN_G4_PREVIEW', screenshot: null,
-      error: 'Only synthetic preview/toast is present; Gold Master state is not faithfully implemented',
-    });
   }
   report.visualStateCoverage = {
     required: 28, accounted: report.visualStates.length,
