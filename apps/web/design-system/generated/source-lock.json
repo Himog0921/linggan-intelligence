@@ -1,5 +1,5 @@
 {
-  "fingerprint": "ab65a8b2de8d5b675e3ac35747ffd89f5a578ede63bd1ae01a9c7d860824f14b",
+  "fingerprint": "016a79b314bed0b3d1d1f36a5da7bea8c5febfd9fe429109c05d5a8238b7b495",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -223,7 +223,7 @@
     },
     {
       "path": "apps/web/src/app/AppShell.tsx",
-      "sha256": "45d747a672a0345707649f37b94cec3e9498197d77520729c0f37256d3d8bfe2"
+      "sha256": "9ec60cbd329a02c8a1644169cd9971527ed5d689b646d72dbdc1d7a9162cdf29"
     },
     {
       "path": "apps/web/src/app/ContextTexture.module.css",
@@ -375,7 +375,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "eab6cc478f28d2540ee7b504c5beaa2708101e26b7edc707e065d9a8d5a65f9a"
+      "sha256": "7d32fbc417f909dfabb4d1b72f4d5477d968ed06af4fa5e9ad65ecd2a2c1d050"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -563,7 +563,7 @@
     },
     {
       "path": "apps/web/src/shared/Sidebar.tsx",
-      "sha256": "d689e11d8185c46e19865df3549c1df82460b1416ccf6c4a6e61ddafcb39ccc4"
+      "sha256": "680057a4aa4f3f2698fe87fc456216c6febc945c399b7fa547d94d530210b247"
     },
     {
       "path": "apps/web/src/shared/ViewSwitch.module.css",
@@ -583,7 +583,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "990cddc0afda5fefe8b79760892ffdeb5209dc6d4a5ce876be23381ce3587c17"
+      "sha256": "fd2e09561fa072b52fcceaf77638cd7911b49499711d87c17901de08d06225fe"
     },
     {
       "path": "apps/web/src/styles/typography.css",
