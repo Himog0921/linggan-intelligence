@@ -217,7 +217,7 @@ try {
         const text = 'G5 验证本地编辑状态保留';
         const paragraph = page.getByRole('textbox', { name: '钩子段落' });
         await paragraph.fill(text);
-        await page.getByRole('button', { name: /选题与材料/ }).click();
+        await page.getByRole('button', { name: /^选题与材料/ }).click();
         await page.getByRole('region', { name: '沉浸材料桌' }).waitFor({ state: 'visible' });
         const canvas = page.getByTestId('canvas-viewport');
         const original = await canvas.locator('[data-canvas-item]').count();
@@ -323,7 +323,7 @@ try {
     if (page.viewportSize()?.width <= 820) {
       await page.getByRole('button', { name: '打开今日稿件队列' }).click();
     }
-    await page.getByRole('button', { name: /选题与材料/ }).click();
+    await page.getByRole('button', { name: /^选题与材料/ }).click();
     await page.getByRole('region', { name: '沉浸材料桌' }).waitFor({ state: 'visible' });
   };
   const visualStates = [
@@ -340,7 +340,7 @@ try {
     ['inspector-material', 1440, 1000, page => page.getByRole('tab', { name: '素材' }).click()],
     ['inspector-title', 1440, 1000, page => page.getByRole('tab', { name: '标题' }).click()],
     ['inspector-preview', 1440, 1000, page => page.getByRole('tab', { name: '预览' }).click()],
-    ['side-collapsed', 1440, 1000, page => page.getByRole('button', { name: '折叠侧栏' }).click()],
+    ['side-collapsed', 1440, 1000, page => page.getByRole('button', { name: '收起导航' }).click()],
     ['draft-d2', 1440, 1000, page => page.getByRole('button', { name: /我不再替他收书包了/ }).click()],
     ['experience-picker', 1440, 1000, page => page.getByRole('button', { name: '后面插入经历' }).first().click({ force: true })],
     ['save-as-template', 1440, 1000, page => page.getByRole('button', { name: '存为样板' }).click()],
