@@ -137,3 +137,20 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
 @media (max-width: 820px) {
   .v7-app.creation-preview .v7-side-toggle { display: none; }
 }
+
+
+/* The Gold Master keeps the shared global header at tablet width; the original
+   1024px layout is one row, with the editor inspector moved into a drawer. */
+@media (min-width:821px) and (max-width:1100px) {
+  .v7-app.creation-preview .v7-global-row { grid-template-columns: max-content minmax(0,1fr) max-content; }
+  .v7-app.creation-preview .v7-primary-nav { grid-row: auto; grid-column: auto; min-height: 0; border-top: 0; }
+  .v7-app.creation-preview .v7-global-system { grid-row: auto; grid-column: auto; }
+  .v7-app.creation-preview .v7-global-brand-sub { display: block; }
+  .v7-app.creation-preview .v7-system-boundary { display: flex; }
+  .v7-app.creation-preview .v7-context-main { flex-wrap: nowrap; gap: var(--lgi-space-3); }
+}
+/* Gold Master material desk: preserve the shared global header and breadcrumb,
+   hide only the Operations sidebar while the canvas owns the full work area. */
+.ops-desk-mode { grid-template-rows: auto minmax(0,1fr); }
+.ops-desk-mode > .v7-shell { grid-template-columns: minmax(0,1fr); }
+.ops-desk-mode > .v7-shell > .v7-side { display: none; }
