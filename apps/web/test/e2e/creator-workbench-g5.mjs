@@ -70,6 +70,15 @@ function sample() {
     sidebar: box('.v7-side'),
     queue: box('[aria-label="稿件队列"]'),
     editor: box('[aria-label="稿件编辑区"]'),
+    editorHead: box('[data-testid="editor-head"]'),
+    editorScroll: box('[data-testid="editor-scroll"]'),
+    editorInner: box('[data-testid="editor-inner"]'),
+    intent: box('[data-testid="intent-row"]'),
+    related: box('[data-testid="related-card"]'),
+    cover: box('[data-testid="cover-card"]'),
+    coverFields: box('[data-testid="cover-fields"]'),
+    bodyHeading: box('[data-testid="body-heading"]'),
+    firstParagraph: box('[data-testid="first-paragraph"]'),
     inspector: box('[aria-label="稿件检查器"]'),
     main: box('main[aria-label="创作工作台"]'),
     fonts: [...document.fonts].map(f => ({ family: f.family, status: f.status })),
@@ -172,7 +181,7 @@ try {
       });
       await verify('editor-desk-return-preserves-draft-and-canvas-boundary', async () => {
         const text = 'G5 验证本地编辑状态保留';
-        const paragraph = page.getByRole('textbox', { name: '正文第 1 段' });
+        const paragraph = page.getByRole('textbox', { name: '钩子段落' });
         await paragraph.fill(text);
         await page.getByRole('button', { name: /选题与材料/ }).click();
         await page.getByRole('region', { name: '沉浸材料桌' }).waitFor({ state: 'visible' });
@@ -185,7 +194,7 @@ try {
         assert.equal(await canvas.locator('[data-canvas-item]').count(), original + 1, 'empty canvas double-click did not create note');
         await screenshot(page, 'desk-1440.png');
         await page.getByRole('button', { name: '返回写稿' }).click();
-        assert.equal(await page.getByRole('textbox', { name: '正文第 1 段' }).inputValue(), text);
+        assert.equal(await page.getByRole('textbox', { name: '钩子段落' }).textContent(), text);
       });
 
       await verify('g5-path-dialog-escape-and-focus-restore', async () => {
@@ -209,14 +218,14 @@ try {
         assert.equal(await page.getByText(/未调用正式 API/).count() > 0, true);
       });
       await verify('g5-experience-picker-blocks-unconfirmed', async () => {
-        const before = await page.getByRole('textbox', { name: /^正文第 \d+ 段$/ }).count();
+        const before = await page.locator('[contenteditable="true"][role="textbox"]').count();
         await page.getByRole('button', { name: '后面插入经历' }).first().click({ force: true });
         const dialog = page.getByRole('dialog', { name: '选择经历' });
         await dialog.waitFor({ state: 'visible' });
         assert.equal(await dialog.getByRole('button', { name: '尚不可用' }).isDisabled(), true);
         await dialog.getByRole('button', { name: '用这段' }).click();
         await dialog.waitFor({ state: 'hidden' });
-        const after = await page.getByRole('textbox', { name: /^正文第 \d+ 段$/ }).count();
+        const after = await page.locator('[contenteditable="true"][role="textbox"]').count();
         assert.equal(after, before + 1);
       });
       await verify('g5-product-edit-local-cancel', async () => {
@@ -249,8 +258,8 @@ try {
     }
     if (width <= 820) {
       await verify('mobile-' + width + '-queue-and-inspector-reachable', async () => {
-        const queue = page.getByRole('button', { name: '稿件', exact: true });
-        const inspector = page.getByRole('button', { name: '检查', exact: true });
+        const queue = page.getByRole('button', { name: '打开今日稿件队列' });
+        const inspector = page.getByRole('button', { name: '打开稿件检查器' });
         await queue.click();
         assert.equal(await queue.getAttribute('aria-expanded'), 'true');
         assert.equal(await page.getByRole('complementary', { name: '稿件队列' }).isVisible(), true);
@@ -278,7 +287,7 @@ try {
   };
   const openDeskState = async page => {
     if (page.viewportSize()?.width <= 820) {
-      await page.getByRole('button', { name: '稿件', exact: true }).click();
+      await page.getByRole('button', { name: '打开今日稿件队列' }).click();
     }
     await page.getByRole('button', { name: /选题与材料/ }).click();
     await page.getByRole('region', { name: '沉浸材料桌' }).waitFor({ state: 'visible' });
@@ -298,7 +307,7 @@ try {
     ['inspector-title', 1440, 1000, page => page.getByRole('tab', { name: '标题' }).click()],
     ['inspector-preview', 1440, 1000, page => page.getByRole('tab', { name: '预览' }).click()],
     ['side-collapsed', 1440, 1000, page => page.getByRole('button', { name: '折叠侧栏' }).click()],
-    ['draft-d2', 1440, 1000, page => page.getByRole('button', { name: /我后来不再急着给答案/ }).click()],
+    ['draft-d2', 1440, 1000, page => page.getByRole('button', { name: /我不再替他收书包了/ }).click()],
     ['experience-picker', 1440, 1000, page => page.getByRole('button', { name: '后面插入经历' }).first().click({ force: true })],
     ['save-as-template', 1440, 1000, page => page.getByRole('button', { name: '存为样板' }).click()],
     ['path-guide', 1440, 1000, page => page.getByRole('button', { name: '使用路径' }).click()],
