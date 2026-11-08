@@ -5,14 +5,13 @@ export interface ContextBarContent {
   breadcrumb: ReactNode;
   navigation?: ReactNode;
   meta?: ReactNode;
-  tone?: 'dark' | 'light';
 }
 
 /** The single shared Z02 context-rail structure. */
-export function ContextBar({ breadcrumb, navigation, meta, tone = 'dark' }: ContextBarContent) {
+export function ContextBar({ breadcrumb, navigation, meta }: ContextBarContent) {
   return (
-    <div className="v7-context-row" data-context-texture={tone}>
-      {tone === 'dark' ? <ContextTexture /> : null}
+    <div className="v7-context-row" data-context-texture="dark">
+      <ContextTexture />
       <div aria-hidden="true" />
       <div className="v7-context-main">
         <nav className="v7-context-crumb" aria-label="当前位置">{breadcrumb}</nav>

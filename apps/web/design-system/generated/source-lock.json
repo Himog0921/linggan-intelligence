@@ -1,5 +1,5 @@
 {
-  "fingerprint": "ba3da783b80b77ebe8506f122736c809ee1887b5db0a23634ce27ce7f051736d",
+  "fingerprint": "9b5a3829c9068de8092da16b6be1597322b3ba7312550339731f5ae242279e2b",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -223,7 +223,7 @@
     },
     {
       "path": "apps/web/src/app/AppShell.tsx",
-      "sha256": "9ec60cbd329a02c8a1644169cd9971527ed5d689b646d72dbdc1d7a9162cdf29"
+      "sha256": "45d747a672a0345707649f37b94cec3e9498197d77520729c0f37256d3d8bfe2"
     },
     {
       "path": "apps/web/src/app/ContextTexture.module.css",
@@ -375,7 +375,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "0df8d2c76ef8304020dbcd10245b7f89d388b2ca76d6df5d6962ea193b23072b"
+      "sha256": "21826e2e7fe9e5474d224d9633a320857d55a2d224e29ea465aec25c6aae4d53"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -479,7 +479,7 @@
     },
     {
       "path": "apps/web/src/shared/ContextBar.tsx",
-      "sha256": "664337f953ba1446170d0529f22ac9c13bfe101e97908a170a91abbad537f79f"
+      "sha256": "bdbc47dbe494978680a3ecc1efecdf0fab6abfa7b904789c7ef28e41903d21f0"
     },
     {
       "path": "apps/web/src/shared/ContextTabs.tsx",
@@ -563,7 +563,7 @@
     },
     {
       "path": "apps/web/src/shared/Sidebar.tsx",
-      "sha256": "680057a4aa4f3f2698fe87fc456216c6febc945c399b7fa547d94d530210b247"
+      "sha256": "d689e11d8185c46e19865df3549c1df82460b1416ccf6c4a6e61ddafcb39ccc4"
     },
     {
       "path": "apps/web/src/shared/ViewSwitch.module.css",
@@ -583,7 +583,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "459768ba9d48acb2382725946e37e5d2f9c04350df9b3ae16b1c3788502ba6f1"
+      "sha256": "5b3293995a136951d83c0e354d33f09bacf194fc998a2061642a5de24da51fa0"
     },
     {
       "path": "apps/web/src/styles/typography.css",
@@ -595,7 +595,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "ced6542a5ed7f97ab38b3ee51ee9a3fb57ae55dcd3a09288c20854f87a6b19a3"
+      "sha256": "a65968479fd7fc28f613ca587a395b645a71c1942b0da145cabba5789fc8306b"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

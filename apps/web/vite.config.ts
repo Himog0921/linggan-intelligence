@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import react from '@vitejs/plugin-react';
@@ -40,8 +41,26 @@ function buildInfo(): Plugin {
 // 需要时显式设置 LINGGAN_WEB_DEV_API_ORIGIN（例如隔离测试库上起的候选服务）。
 const devApiOrigin = process.env.LINGGAN_WEB_DEV_API_ORIGIN?.trim();
 
+/** 冻结的 Gold Master Demo（2026-11-06 V2，sha256 c1e564b3…）在开发服务器上原样提供，不进入正式构建。 */
+function goldMasterPreview(): Plugin {
+  const file = path.join(webRoot, 'design-reference/creator-workbench-goldmaster-2026-11-06-v2.html');
+  const route = /\/(?:ui-assets\/)?__preview\/creator-workbench\/?$/;
+  return {
+    name: 'linggan-goldmaster-preview',
+    apply: 'serve',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        const [pathname = ''] = (req.url ?? '').split('?');
+        if (!route.test(pathname)) return next();
+        res.setHeader('Content-Type', 'text/html; charset=utf-8');
+        createReadStream(file).on('error', next).pipe(res);
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), buildInfo()],
+  plugins: [react(), buildInfo(), goldMasterPreview()],
   base: '/ui-assets/',
   // Frozen legacy Collection geometry keeps the existing DOM classes during the React port.
   css: { modules: { globalModulePaths: [/CollectionSurface\.module\.css$/] } },

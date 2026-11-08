@@ -37,12 +37,4 @@ describe('共享面包屑渲染', () => {
     expect(container.querySelector('.v7-slash')).toBeNull();
     expect(container.querySelector('b')).toHaveAttribute('aria-current', 'page');
   });
-  it('supports a scoped light creator preview while keeping default dark texture', () => {
-    const { container } = render(<ContextBar breadcrumb={<span>预览</span>} tone="light" />);
-    expect(container.querySelector('[data-context-texture="light"]')).not.toBeNull();
-    expect(container.querySelector('[data-context-pattern]')).toBeNull();
-    const defaultView = render(<ContextBar breadcrumb={<span>正式页面</span>} />);
-    expect(defaultView.container.querySelector('[data-context-texture="dark"]')).not.toBeNull();
-  });
-
 });
