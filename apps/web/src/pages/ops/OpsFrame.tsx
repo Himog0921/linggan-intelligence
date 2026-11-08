@@ -5,17 +5,17 @@ import { ContextTabs } from '../../shared/ContextTabs';
 import { NavIcon, Sidebar } from '../../shared/Sidebar';
 
 /** Ops owns two secondary destinations; page sections and scope belong to Z02. */
-export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, preview = false, previewSidebar, restricted = false, children }: {
+export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, preview = false, previewSidebar, previewScope, previewDeskMode = false, restricted = false, children }: {
   section: 'data' | 'creation'; domain: string; scope: ReactNode; tabs: ReactNode;
-  meta?: ReactNode; foot?: ReactNode; immersive?: boolean; preview?: boolean; previewSidebar?: ReactNode; restricted?: boolean; children: ReactNode;
+  meta?: ReactNode; foot?: ReactNode; immersive?: boolean; preview?: boolean; previewSidebar?: ReactNode; previewScope?: ReactNode; previewDeskMode?: boolean; restricted?: boolean; children: ReactNode;
 }) {
   const selectedDomain = domain && domain !== 'all' ? `?domain=${encodeURIComponent(domain)}` : '';
   return <AppShell active="ops" restrictedOps={restricted} previewNavigation={preview}
-    boundaryLabel={preview ? "Demo · 示例数据" : "本机服务状态"} className={[immersive ? 'ops-immersive' : '', preview ? 'creation-preview' : ''].filter(Boolean).join(' ') || undefined}
+    boundaryLabel={preview ? "Demo · 示例数据" : "本机服务状态"} className={[immersive ? 'ops-immersive' : '', previewDeskMode ? 'ops-desk-mode' : '', preview ? 'creation-preview' : ''].filter(Boolean).join(' ') || undefined}
     contextBar={{
       tone: preview ? 'light' : undefined,
       breadcrumb: <ContextBreadcrumb items={preview
-        ? [<span key="creator-preview" className="creation-preview-crumb-brand">A娃家长矩阵</span>, '运营', section === 'creation' ? '创作' : '数据']
+        ? [<span key="creator-preview" className="creation-preview-crumb-brand">示例家长矩阵</span>, '运营', previewScope ?? (section === 'creation' ? '创作' : '数据')]
         : ['运营', scope, section === 'creation' ? '创作' : '数据']} />,
       navigation: preview ? undefined : <ContextTabs label={section === 'data' ? '数据页面' : '创作页面'}>{tabs}</ContextTabs>,
       meta,
