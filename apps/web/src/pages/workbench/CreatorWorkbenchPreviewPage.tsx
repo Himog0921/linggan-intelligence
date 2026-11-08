@@ -7,6 +7,7 @@ import { FindField } from '../../shared/FindField';
 import { InlineNotice } from '../../shared/InlineNotice';
 import { SelectField } from '../../shared/SelectField';
 import styles from './CreatorWorkbenchPreviewPage.module.css';
+import { CreatorWorkbenchPreviewG5States, CreatorWorkbenchPreviewTour, type PreviewDialogKind } from './CreatorWorkbenchPreviewG5States';
 
 type InspectorTab = 'checks' | 'materials' | 'titles' | 'preview';
 type AssetKind = 'persona' | 'experience' | 'product' | 'bridge' | 'sample' | 'style';
@@ -114,6 +115,11 @@ export function CreatorWorkbenchPreviewPage() {
   const [assetSelection, setAssetSelection] = useState(0);
   const [assetSearch, setAssetSearch] = useState('');
   const [notice, setNotice] = useState('');
+  const [g5Dialog, setG5Dialog] = useState<PreviewDialogKind>(null);
+  const [tourOpen, setTourOpen] = useState(false);
+  const [productEditing, setProductEditing] = useState(false);
+  const [productDraft, setProductDraft] = useState('演示产品事实卡');
+  const [experienceTargetId, setExperienceTargetId] = useState<string | null>(null);
   const [deskSearch, setDeskSearch] = useState('');
   const [deskSearchOpen, setDeskSearchOpen] = useState(true);
   const [deskInspectorOpen, setDeskInspectorOpen] = useState(true);
@@ -126,6 +132,8 @@ export function CreatorWorkbenchPreviewPage() {
   const [queueDrawer, setQueueDrawer] = useState(false);
   const [inspectorDrawer, setInspectorDrawer] = useState(false);
   const assetTrigger = useRef<HTMLButtonElement>(null);
+  const g5Trigger = useRef<HTMLButtonElement | null>(null);
+  const g5WasOpened = useRef(false);
   const assetWasOpened = useRef(false);
   const nextLocalDeskId = useRef(0);
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -147,6 +155,14 @@ export function CreatorWorkbenchPreviewPage() {
       assetTrigger.current?.focus({ preventScroll: true });
     }
   }, [assetOpen]);
+
+  useEffect(() => {
+    if (g5Dialog) g5WasOpened.current = true;
+    else if (g5WasOpened.current) {
+      g5WasOpened.current = false;
+      g5Trigger.current?.focus({ preventScroll: true });
+    }
+  }, [g5Dialog]);
 
   useEffect(() => {
     if (mode !== 'desk') return;
@@ -174,6 +190,19 @@ export function CreatorWorkbenchPreviewPage() {
   const updateDraft = (patch: Partial<Draft>) => setDrafts(items => items.map(item => item.id === draftId ? { ...item, ...patch } : item));
   const updateParagraph = (id: string, text: string) => updateDraft({ paragraphs: currentDraft.paragraphs.map(item => item.id === id ? { ...item, text } : item) });
   const previewOnly = (action: string) => setNotice(action + '：当前为隔离预览，未调用正式 API、模型、采集或发布服务。');
+  const openG5 = (kind: Exclude<PreviewDialogKind, null>, trigger: HTMLButtonElement) => {
+    g5Trigger.current = trigger;
+    setG5Dialog(kind);
+  };
+  const useSyntheticExperience = (body: string) => {
+    const index = currentDraft.paragraphs.findIndex(item => item.id === experienceTargetId);
+    const insertAt = index < 0 ? currentDraft.paragraphs.length : index + 1;
+    const newParagraph: Paragraph = { id: currentDraft.id + '-synthetic-experience-' + Date.now().toString(36), role: '经历', text: body };
+    updateDraft({ paragraphs: [
+      ...currentDraft.paragraphs.slice(0, insertAt), newParagraph, ...currentDraft.paragraphs.slice(insertAt),
+    ] });
+    previewOnly('本地插入已确认的合成经历');
+  };
   const openDesk = () => { setMode('desk'); setFocusedFrame(null); setZoom(1); setPan({ x: 30, y: 24 }); setDeskSearchOpen(true); setDeskInspectorOpen(true); };
   const addDeskItem = (kind: DeskItem['kind']) => {
     const id = 'local-' + (++nextLocalDeskId.current);
@@ -237,8 +266,8 @@ export function CreatorWorkbenchPreviewPage() {
           <span className="v7-vr" aria-hidden="true" />
           <span className={styles.metaCount}>今日 <b>6</b> 篇 · 待完成 <b>5</b> · 已发布 <b>1</b></span>
           <ActionButton ref={assetTrigger} variant="outline" onClick={() => { setAssetOpen(true); setAssetKind('persona'); setAssetSelection(0); }}>资产库</ActionButton>
-          <ActionButton variant="quiet" onClick={() => previewOnly('使用路径')}>使用路径</ActionButton>
-          <ActionButton variant="quiet" onClick={() => previewOnly('体验清单')}>体验清单 0/8</ActionButton>
+          <ActionButton variant="quiet" onClick={event => openG5('path-guide', event.currentTarget)}>使用路径</ActionButton>
+          <ActionButton variant="quiet" onClick={() => setTourOpen(open => !open)} aria-expanded={tourOpen}>体验清单 0/8</ActionButton>
         </>}>
         <main className={styles.main} aria-label="创作工作台">
           <section className={[styles.write, queueDrawer ? styles.queueOpen : '', inspectorDrawer ? styles.inspectorOpen : ''].filter(Boolean).join(' ')} hidden={mode !== 'writing'}>
@@ -280,14 +309,14 @@ export function CreatorWorkbenchPreviewPage() {
                   <div className={styles.bodyHeading}><strong>正文</strong><small>{currentDraft.paragraphs.reduce((sum, item) => sum + Array.from(item.text).length, 0)} 字 · {currentDraft.paragraphs.length} 段</small></div>
                   {currentDraft.paragraphs.map((paragraph, index) => <div className={styles.paragraph} key={paragraph.id}>
                     <span>{paragraph.role}</span>
-                    <textarea aria-label={'正文第 ' + (index + 1) + ' 段'} value={paragraph.text} onChange={event => updateParagraph(paragraph.id, event.target.value)} />
+                    <div className={styles.paragraphEditor}><textarea aria-label={'正文第 ' + (index + 1) + ' 段'} value={paragraph.text} onChange={event => updateParagraph(paragraph.id, event.target.value)} /><button type="button" className={styles.insertExperience} onClick={event => { setExperienceTargetId(paragraph.id); openG5('experience-picker', event.currentTarget); }}>后面插入经历</button></div>
                   </div>)}
                   <ActionButton variant="outline" onClick={() => updateDraft({ paragraphs: [...currentDraft.paragraphs, { id: currentDraft.id + '-p' + (currentDraft.paragraphs.length + 1), role: '新段落', text: '' }] })}>继续写一段</ActionButton>
                 </div>
               </div>
               <footer className={styles.editorFoot}>
                 <span><i data-level="must" /> 必改 {currentDraft.must} · <i data-level="warn" /> 提醒 {currentDraft.warn} <small>演示数据，不代表正式检查结果</small></span>
-                <ActionButton variant="outline" onClick={() => previewOnly('存为样板')}>存为样板</ActionButton>
+                <ActionButton variant="outline" onClick={event => openG5('save-as-template', event.currentTarget)}>存为样板</ActionButton>
                 <ActionButton variant="primary" onClick={() => previewOnly('复制到小红书')}>复制到小红书</ActionButton>
               </footer>
             </section>
@@ -353,19 +382,21 @@ export function CreatorWorkbenchPreviewPage() {
       <dialog ref={dialogRef} className={styles.assetDialog} aria-label="创作资产库" onCancel={event => { event.preventDefault(); setAssetOpen(false); }} onClose={() => setAssetOpen(false)} onClick={event => { if (event.target === event.currentTarget) setAssetOpen(false); }}>
         <header className={styles.assetHead}><div><small>CREATION ASSETS · PREVIEW</small><h2>资产库</h2></div><ActionButton variant="outline" aria-label="关闭资产库" onClick={() => setAssetOpen(false)}>关闭</ActionButton></header>
         <div className={styles.assetBody}>
-          <nav className={styles.assetIndex} aria-label="资产类型">{ASSETS.map(asset => <button key={asset.id} type="button" aria-current={assetKind === asset.id ? 'page' : undefined} onClick={() => { setAssetKind(asset.id); setAssetSelection(0); }}><strong>{asset.label}</strong><small>{asset.description}</small></button>)}</nav>
+          <nav className={styles.assetIndex} aria-label="资产类型">{ASSETS.map(asset => <button key={asset.id} type="button" aria-current={assetKind === asset.id ? 'page' : undefined} onClick={() => { setAssetKind(asset.id); setAssetSelection(0); setProductEditing(false); }}><strong>{asset.label}</strong><small>{asset.description}</small></button>)}</nav>
           <section className={styles.assetList} aria-label="资产列表">
             <FindField label="搜索资产" value={assetSearch} onCommit={setAssetSearch} placeholder="搜索名称或内容" trigger="debounce_250" />
             <div className={styles.assetRows}>{assetItems.map((item,index) => <button key={item.title} type="button" aria-current={assetSelection === index ? 'true' : undefined} onClick={() => setAssetSelection(index)}><strong>{item.title}</strong><small>{item.meta}</small><p>{item.body}</p></button>)}</div>
             {!assetItems.length ? <EmptyState title="当前类型没有匹配内容">调整搜索词，或切换其他资产类型。</EmptyState> : null}
           </section>
           <section className={styles.assetDetail} aria-label="资产详情">
-            {selectedAssetItem ? <><small>{ASSETS.find(item => item.id === assetKind)?.label}</small><h3>{selectedAssetItem.title}</h3><p>{selectedAssetItem.body}</p><InlineNotice tone="info">这里展示的是合成预览数据，不会保存到正式资产库。</InlineNotice><ActionButton variant="outline" onClick={() => previewOnly('编辑资产')}>编辑资产</ActionButton></> : <EmptyState title="选择一个资产">从列表选择一条资产，查看详情。</EmptyState>}
+            {selectedAssetItem ? <><small>{ASSETS.find(item => item.id === assetKind)?.label}</small><h3>{selectedAssetItem.title}</h3><p>{selectedAssetItem.body}</p><InlineNotice tone="info">这里展示的是合成预览数据，不会保存到正式资产库。</InlineNotice>{assetKind === 'product' ? (productEditing ? <div className={styles.productEditing}><label>规范名称<input value={productDraft} onChange={event => setProductDraft(event.target.value)} /></label><label>适用边界<textarea defaultValue="仅供演示；实际信息须由机构确认。" /></label><div><ActionButton variant="quiet" onClick={() => setProductEditing(false)}>取消</ActionButton><ActionButton variant="outline" onClick={() => { setProductEditing(false); previewOnly('保存产品事实卡'); }}>保存（仅预览）</ActionButton></div></div> : <ActionButton variant="outline" onClick={() => setProductEditing(true)}>编辑</ActionButton>) : <ActionButton variant="outline" onClick={() => previewOnly('编辑资产')}>编辑资产</ActionButton>}</> : <EmptyState title="选择一个资产">从列表选择一条资产，查看详情。</EmptyState>}
           </section>
         </div>
         <footer className={styles.assetFoot}><span>合成数据 · 不连接正式资产 API</span><ActionButton variant="quiet" onClick={() => setAssetOpen(false)}>返回工作台</ActionButton></footer>
       </dialog>
 
+      {tourOpen ? <CreatorWorkbenchPreviewTour onClose={() => setTourOpen(false)} /> : null}
+      <CreatorWorkbenchPreviewG5States kind={g5Dialog} onClose={() => setG5Dialog(null)} draftTitle={currentDraft.title} paragraphRoles={currentDraft.paragraphs.map(item => item.role)} onUseExperience={useSyntheticExperience} onPreviewOnly={previewOnly} />
       {notice ? <div className={styles.noticeToast}><InlineNotice tone="info">{notice}</InlineNotice><button type="button" aria-label="关闭提示" onClick={() => setNotice('')}>关闭</button></div> : null}
     </div>
   );
