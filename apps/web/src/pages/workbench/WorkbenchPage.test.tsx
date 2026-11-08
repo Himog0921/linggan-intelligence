@@ -92,7 +92,8 @@ beforeEach(() => {
   }]);
   vi.mocked(api.listWorks).mockResolvedValue([]);
   vi.mocked(api.deskPositions).mockResolvedValue([]);
-  vi.mocked(api.saveDeskPosition).mockResolvedValue({ workId: work, x: 0, y: 0 });
+  vi.mocked(api.deskCardPositions).mockResolvedValue([]);
+  vi.mocked(api.saveDeskPosition).mockResolvedValue({ workId: work, x: 0, y: 0, width: null, height: null });
   vi.mocked(api.listIdeaBoxes).mockResolvedValue([]);
   vi.mocked(api.accounts).mockResolvedValue([]);
   vi.mocked(api.readWork).mockResolvedValue(envelope());
@@ -1076,6 +1077,7 @@ it('keeps the current editor and unsaved text mounted while entering and leaving
 
 
 it('keeps every editor step reachable from the writing workflow menu', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
   vi.mocked(api.prepareMaterials).mockResolvedValue({ contract: 'content-workbench-materials.v1', asOf: 'now', methodVersion: 'test', query: '', terms: [], state: 'insufficient', gaps: [], documents: [], nextCursor: null, searchScope: 'test' });
   show(); await screen.findByLabelText('正文第 1 段');
   fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
@@ -1084,11 +1086,9 @@ it('keeps every editor step reachable from the writing workflow menu', async () 
     expect(within(nav).getByRole('button', { name })).toBeInTheDocument();
   }
   fireEvent.click(within(nav).getByRole('button', { name: '选题与材料' }));
-  await screen.findByText('创作步骤 · 选题与材料', { selector: 'summary' });
-  fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
-  const materialNav = await screen.findByRole('navigation', { name: '创作步骤' });
-  await waitFor(() => expect(within(materialNav).getByRole('button', { name: '选题与材料' })).toHaveAttribute('aria-current', 'step'));
-  fireEvent.click(within(materialNav).getByRole('button', { name: '正文' }));
+  const frame = await screen.findByLabelText('选题框：真实选题');
+  expect(screen.queryByText(/^创作步骤/, { selector: 'summary' })).not.toBeInTheDocument();
+  fireEvent.click(within(frame).getByRole('button', { name: '去稿件' }));
   await screen.findByLabelText('正文第 1 段');
 });
 
@@ -1104,12 +1104,46 @@ it('moves a desk frame and saves where it was put', async () => {
   fireEvent.pointerUp(head, { clientX: 340, clientY: 260, pointerId: 1 });
   await waitFor(() => expect(api.saveDeskPosition).toHaveBeenCalledTimes(1));
   const request = vi.mocked(api.saveDeskPosition).mock.calls[0]?.[0];
-  expect(request).toEqual({ domainRef: domain, workId: work, x: parseInt(moved, 10), y: parseInt(frame.style.top, 10) });
+  expect(request).toEqual({ domainRef: domain, workId: work, x: parseInt(moved, 10), y: parseInt(frame.style.top, 10), width: null, height: null });
+});
+
+it('lets a material card be dragged freely and saves where it landed', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.readWork).mockResolvedValue(deskEnvelope());
+  show('desk');
+  const card = await screen.findByRole('group', { name: /^原笔记/ });
+  const before = card.style.left;
+  fireEvent.pointerDown(card, { button: 0, clientX: 100, clientY: 100, pointerId: 2 });
+  fireEvent.pointerMove(card, { clientX: 260, clientY: 180, pointerId: 2 });
+  expect(card.style.left).not.toBe(before);
+  expect(card.style.top).not.toBe('96px');
+  fireEvent.pointerUp(card, { clientX: 260, clientY: 180, pointerId: 2 });
+  await waitFor(() => expect(api.saveDeskCardPosition).toHaveBeenCalledTimes(1));
+  expect(vi.mocked(api.saveDeskCardPosition).mock.calls[0]?.[0]).toEqual({
+    domainRef: domain, workId: work, blockId: 'block-1',
+    x: parseInt(card.style.left, 10), y: parseInt(card.style.top, 10),
+  });
+});
+
+it('grows a frame when its corner is dragged and saves the size', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  show('desk');
+  const frame = await screen.findByLabelText('选题框：真实选题');
+  const grip = frame.querySelector('.frame-resize') as HTMLElement;
+  fireEvent.pointerDown(grip, { button: 0, clientX: 0, clientY: 0, pointerId: 3 });
+  fireEvent.pointerMove(grip, { clientX: 160, clientY: 120, pointerId: 3 });
+  fireEvent.pointerUp(grip, { clientX: 160, clientY: 120, pointerId: 3 });
+  await waitFor(() => expect(api.saveDeskPosition).toHaveBeenCalledTimes(1));
+  const request = vi.mocked(api.saveDeskPosition).mock.calls[0]?.[0];
+  expect(request?.width).toBe(parseInt(frame.style.width, 10));
+  expect(request?.height).toBe(parseInt(frame.style.height, 10));
+  expect(request?.width ?? 0).toBeGreaterThan(720);
+  expect(request?.height ?? 0).toBeGreaterThan(300);
 });
 
 it('puts each desk frame back where it was last saved', async () => {
   vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
-  vi.mocked(api.deskPositions).mockResolvedValue([{ workId: work, x: 40, y: 80 }]);
+  vi.mocked(api.deskPositions).mockResolvedValue([{ workId: work, x: 40, y: 80, width: null, height: null }]);
   show('desk');
   const frame = await screen.findByLabelText('选题框：真实选题');
   await waitFor(() => expect(frame.style.left).toBe('40px'));
@@ -1285,6 +1319,20 @@ it('writes material memo from the desk and shows every material in frame setting
   expect(await screen.findByLabelText('材料 1 思路')).toHaveValue('用来当开头');
   fireEvent.click(screen.getByRole('button', { name: '添加便签' }));
   expect(await screen.findByRole('group', { name: /^便签：/ })).toBeInTheDocument();
+});
+
+it('renames a frame title and writes a sticky note directly on the desk', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  show('desk');
+  const title = await screen.findByRole('textbox', { name: '选题框标题' });
+  title.textContent = '改过的选题名';
+  fireEvent.blur(title);
+  expect(await screen.findByRole('textbox', { name: '选题框标题' })).toHaveTextContent('改过的选题名');
+  fireEvent.click(screen.getByRole('button', { name: '添加便签' }));
+  const note = await screen.findByRole('textbox', { name: '便签内容' });
+  note.textContent = '现场改的一句话';
+  fireEvent.blur(note);
+  expect(await screen.findByRole('group', { name: /^便签：现场改的一句话/ })).toBeInTheDocument();
 });
 
 it('rechecks newly collected unsaved source text before revealing the editor again', async () => {

@@ -6,11 +6,13 @@ import styles from './WorkbenchPage.module.css';
 
 const CARD_W = 208;
 const CARD_COL = 232;
-const CARD_ROW = 226;
-const CARD_COLS = 3;
+const CARD_GAP = 16;
+const CARD_ESTIMATE = 170;
 const FRAME_INSET = 24;
 const FRAME_HEAD = 96;
-const FRAME_W = FRAME_INSET * 2 + (CARD_COLS - 1) * CARD_COL + CARD_W;
+const FRAME_COLS = 3;
+const FRAME_W = FRAME_INSET * 2 + (FRAME_COLS - 1) * CARD_COL + CARD_W;
+const FRAME_MIN_H = 300;
 const FRAME_GAP = 48;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2;
@@ -50,6 +52,8 @@ interface Card {
   memo: string;
   excerptId: string | null;
   meta: string;
+  x: number;
+  y: number;
 }
 interface Frame {
   work: WorkSummary;
@@ -62,7 +66,11 @@ interface Frame {
   accountName: string | null;
   title: string;
 }
-interface Spot { left: number; right: number; top: number }
+interface Spot {
+  x: number;
+  y: number;
+}
+interface SpotBox { left: number; right: number; top: number }
 interface Props {
   domain: string;
   works: WorkSummary[];
@@ -100,6 +108,8 @@ function cardsOf(document: WorkDocument | undefined): Card[] {
       memo: block.note.trim(),
       excerptId: excerpt.id,
       meta: `${kindLabel[excerpt.citation.sourceKind] ?? '来源'} · 采集于 ${new Date(excerpt.citation.asOf).toLocaleDateString('zh-CN')}`,
+      x: 0,
+      y: 0,
     };
     return {
       id: block.id,
@@ -113,35 +123,103 @@ function cardsOf(document: WorkDocument | undefined): Card[] {
       memo: block.note.trim(),
       excerptId: null,
       meta: '便签',
+      x: 0,
+      y: 0,
     };
   });
 }
 
-function layout(works: WorkSummary[], documents: (WorkDocument | undefined)[], accountOf: (ref: string | null | undefined) => string | null): Frame[] {
+function layout(
+  works: WorkSummary[],
+  documents: (WorkDocument | undefined)[],
+  accountOf: (ref: string | null | undefined) => string | null,
+  heights: Record<string, number>,
+  spots: Record<string, Spot>,
+  sizes: Record<string, { w: number; h: number }>,
+  positions: Record<string, Spot>,
+): Frame[] {
   const bottoms: [number, number] = [0, 0];
   return works.map((work, index) => {
-    const cards = cardsOf(documents[index]);
-    const rows = Math.max(1, Math.ceil(cards.length / CARD_COLS));
-    const height = FRAME_HEAD + rows * CARD_ROW + FRAME_INSET;
+    const manual = sizes[work.workId];
+    const cards = cardsOf(documents[index]).map(card => ({ ...card, ...(spots[card.id] ?? {}) }));
+    const cols = Math.max(FRAME_COLS, Math.floor((Math.max(manual?.w ?? 0, FRAME_W) - FRAME_INSET) / CARD_COL));
+    let col = 0;
+    let rowY = FRAME_HEAD;
+    let rowHeight = 0;
+    let right = FRAME_W;
+    let bottom = FRAME_HEAD;
+    for (const card of cards) {
+      if (!spots[card.id]) {
+        if (col >= cols) {
+          col = 0;
+          rowY += rowHeight + CARD_GAP;
+          rowHeight = 0;
+        }
+        card.x = FRAME_INSET + col * CARD_COL;
+        card.y = rowY;
+        rowHeight = Math.max(rowHeight, heights[card.id] ?? CARD_ESTIMATE);
+        col += 1;
+      }
+      right = Math.max(right, card.x + CARD_W + FRAME_INSET);
+      bottom = Math.max(bottom, card.y + (heights[card.id] ?? CARD_ESTIMATE));
+    }
+    const w = Math.max(right, manual?.w ?? 0);
+    const h = Math.max(FRAME_MIN_H, bottom + FRAME_INSET, manual?.h ?? 0);
     const column = bottoms[0] <= bottoms[1] ? 0 : 1;
-    const frame = {
-      work, x: column * (FRAME_W + FRAME_GAP), y: bottoms[column], w: FRAME_W, h: height, cards,
+    const frame: Frame = {
+      work,
+      x: positions[work.workId]?.x ?? column * (FRAME_W + FRAME_GAP),
+      y: positions[work.workId]?.y ?? bottoms[column],
+      w,
+      h,
+      cards,
       prepared: (documents[index]?.materials ?? []).some(item => item.addedBy === 'prepared'),
       accountName: accountOf(documents[index]?.accountRef),
       title: documents[index]?.title ?? work.title,
     };
-    bottoms[column] += height + FRAME_GAP;
+    bottoms[column] += h + FRAME_GAP;
     return frame;
   });
 }
 
+function Editable({ value, editable, className, label, onCommit }: {
+  value: string;
+  editable: boolean;
+  className?: string;
+  label?: string;
+  onCommit: (next: string) => void;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    const node = ref.current;
+    if (node && document.activeElement !== node && node.textContent !== value) node.textContent = value;
+  }, [value]);
+  return <div
+    ref={ref}
+    className={className}
+    contentEditable={editable}
+    suppressContentEditableWarning
+    role={editable ? 'textbox' : undefined}
+    aria-label={editable ? label : undefined}
+    spellCheck={false}
+    onPointerDown={event => { if (editable) event.stopPropagation(); }}
+    onClick={event => { if (editable) event.stopPropagation(); }}
+    onKeyDown={event => { if (editable && event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur(); } }}
+    onBlur={event => {
+      const text = (event.currentTarget.textContent ?? '').replace(/\s+/g, ' ').trim();
+      if (editable && text && text !== value) onCommit(text);
+      else event.currentTarget.textContent = value;
+    }}
+  />;
+}
+
 const shortDate = (value: string) => new Date(value).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' });
 
-function spotOf(element: Element | null): Spot | null {
+function spotOf(element: Element | null): SpotBox | null {
   const rect = element?.getBoundingClientRect();
   return rect ? { left: rect.left, right: rect.right, top: rect.top } : null;
 }
-function inspectorStyle(spot: Spot | null, height: number, width = 320) {
+function inspectorStyle(spot: SpotBox | null, height: number, width = 320) {
   if (!spot) return undefined;
   let left = spot.right + 12;
   if (left + width > window.innerWidth - 16) left = spot.left - width - 12;
@@ -167,6 +245,12 @@ export function MaterialDesk({
     retry: false,
     gcTime: 0,
   });
+  const savedCards = useQuery({
+    queryKey: ['creation-desk-card-positions', domain],
+    queryFn: ({ signal }) => api.deskCardPositions(domain, signal),
+    retry: false,
+    gcTime: 0,
+  });
   const [shelfOpen, setShelfOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string>('');
@@ -180,11 +264,15 @@ export function MaterialDesk({
     gcTime: 0,
   });
   const ready = documents.every(item => item.isSuccess);
-  const [moved, setMoved] = useState<Record<string, { x: number; y: number }>>({});
+  const [moved, setMoved] = useState<Record<string, Spot>>({});
+  const [sized, setSized] = useState<Record<string, { w: number; h: number }>>({});
+  const [cardMoved, setCardMoved] = useState<Record<string, Spot>>({});
+  const [heights, setHeights] = useState<Record<string, number>>({});
+  const [draggingId, setDraggingId] = useState<string | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
-  const [editor, setEditor] = useState<{ kind: 'memo' | 'role' | 'source'; blockId: string; anchor: Spot | null } | null>(null);
+  const [editor, setEditor] = useState<{ kind: 'memo' | 'role' | 'source'; blockId: string; anchor: SpotBox | null } | null>(null);
   const [settingsFor, setSettingsFor] = useState<string | null>(null);
-  const [settingsAnchor, setSettingsAnchor] = useState<Spot | null>(null);
+  const [settingsAnchor, setSettingsAnchor] = useState<SpotBox | null>(null);
   const inspector = useRef<HTMLElement | null>(null);
   const [inspectorHeight, setInspectorHeight] = useState(0);
   useLayoutEffect(() => {
@@ -192,17 +280,50 @@ export function MaterialDesk({
   }, [editor, settingsFor]);
   const accountOf = useCallback((ref: string | null | undefined) => ref ? accounts.find(item => item.ref === ref)?.name ?? '账号未知' : null, [accounts]);
   const docOf = (work: WorkSummary, index: number) => work.workId === currentWorkId ? currentDocument : documents[index]?.data?.revision.document;
-  const frames = layout(works, works.map(docOf), accountOf).map(frame => {
-    const spot = moved[frame.work.workId] ?? saved.data?.find(item => item.workId === frame.work.workId);
-    return spot ? { ...frame, x: spot.x, y: spot.y } : frame;
-  });
+  const savedSpots: Record<string, Spot> = {};
+  for (const item of savedCards.data ?? []) savedSpots[`${item.workId}:${item.blockId}`] = { x: item.x, y: item.y };
+  const savedSizes: Record<string, { w: number; h: number }> = {};
+  const framePositions: Record<string, Spot> = {};
+  for (const item of saved.data ?? []) {
+    framePositions[item.workId] = { x: item.x, y: item.y };
+    if (item.width && item.height) savedSizes[item.workId] = { w: item.width, h: item.height };
+  }
+  const spots: Record<string, Spot> = { ...savedSpots, ...cardMoved };
+  const sizes: Record<string, { w: number; h: number }> = { ...savedSizes, ...sized };
+  const positions: Record<string, Spot> = { ...framePositions, ...moved };
+  const frames = layout(works, works.map(docOf), accountOf, heights, spots, sizes, positions);
   const [view, setView] = useState({ x: 64, y: 64, zoom: 1 });
   const [focus, setFocus] = useState<string | null>(null);
   const autoFitted = useRef(false);
   const viewport = useRef<HTMLDivElement | null>(null);
   const drag = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null);
-  const frameDrag = useRef<{ id: string; x: number; y: number; x0: number; y0: number; spot?: { x: number; y: number } } | null>(null);
+  const frameDrag = useRef<{ id: string; x: number; y: number; x0: number; y0: number; moved: boolean; spot?: Spot } | null>(null);
+  const frameDragged = useRef(false);
+  const cardDrag = useRef<{ id: string; workId: string; ox: number; oy: number; px: number; py: number; moved: boolean; spot?: Spot } | null>(null);
+  const cardDragged = useRef(false);
+  const resizeDrag = useRef<{ id: string; px: number; py: number; w: number; h: number; spot?: { w: number; h: number } } | null>(null);
   const current = frames.find(frame => frame.work.workId === currentWorkId);
+
+  const cardKey = frames.map(frame => frame.cards.map(card => card.id).join(',')).join('|');
+  useLayoutEffect(() => {
+    const box = viewport.current;
+    if (!box || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(entries => {
+      setHeights(previous => {
+        let changed = false;
+        const next = { ...previous };
+        for (const entry of entries) {
+          const node = entry.target as HTMLElement;
+          const id = node.dataset.card;
+          const height = Math.round(node.offsetHeight);
+          if (id && next[id] !== height) { next[id] = height; changed = true; }
+        }
+        return changed ? next : previous;
+      });
+    });
+    box.querySelectorAll<HTMLElement>('.mcard[data-card]').forEach(node => observer.observe(node));
+    return () => observer.disconnect();
+  }, [cardKey]);
 
   function fit() {
     const box = viewport.current;
@@ -266,14 +387,34 @@ export function MaterialDesk({
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
+  const worldOf = (clientX: number, clientY: number) => {
+    const rect = viewport.current?.getBoundingClientRect();
+    return rect ? { x: (clientX - rect.left - view.x) / view.zoom, y: (clientY - rect.top - view.y) / view.zoom } : null;
+  };
+
+  const saveFrame = async (frame: Frame) => {
+    const size = sizes[frame.work.workId] ?? null;
+    try {
+      await api.saveDeskPosition({
+        domainRef: domain, workId: frame.work.workId, x: frame.x, y: frame.y,
+        width: size?.w ?? null, height: size?.h ?? null,
+      });
+      setSaveFailed(false);
+    } catch {
+      setSaveFailed(true);
+    }
+  };
+
   const beginFrameDrag = (event: React.PointerEvent<HTMLElement>, frame: Frame) => {
-    if (event.button !== 0 || (event.target as HTMLElement).closest('button')) return;
-    frameDrag.current = { id: frame.work.workId, x: event.clientX, y: event.clientY, x0: frame.x, y0: frame.y };
+    if (event.button !== 0 || (event.target as HTMLElement).closest('button, input, select, textarea, [contenteditable="true"]')) return;
+    frameDrag.current = { id: frame.work.workId, x: event.clientX, y: event.clientY, x0: frame.x, y0: frame.y, moved: false };
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
   const moveFrame = (event: React.PointerEvent<HTMLElement>) => {
     const start = frameDrag.current;
     if (!start) return;
+    if (!start.moved && Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) < 3) return;
+    start.moved = true;
     const spot = {
       x: Math.round(start.x0 + (event.clientX - start.x) / view.zoom),
       y: Math.round(start.y0 + (event.clientY - start.y) / view.zoom),
@@ -285,14 +426,84 @@ export function MaterialDesk({
     const start = frameDrag.current;
     if (!start) return;
     frameDrag.current = null;
+    frameDragged.current = start.moved;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
     if (!start.spot) return;
+    const frame = frames.find(item => item.work.workId === start.id);
+    if (frame) await saveFrame(frame);
+  };
+
+  const beginCardDrag = (event: React.PointerEvent<HTMLElement>, frame: Frame, card: Card) => {
+    if (event.button !== 0) return;
+    if ((event.target as HTMLElement).closest('button, input, select, textarea, [contenteditable="true"]')) return;
+    const world = worldOf(event.clientX, event.clientY);
+    if (!world) return;
+    cardDragged.current = false;
+    cardDrag.current = {
+      id: card.id, workId: frame.work.workId,
+      ox: world.x - frame.x - card.x, oy: world.y - frame.y - card.y,
+      px: event.clientX, py: event.clientY, moved: false,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.stopPropagation();
+    setEditor(null);
+    setSettingsFor(null);
+  };
+  const moveCard = (event: React.PointerEvent<HTMLElement>) => {
+    const start = cardDrag.current;
+    if (!start) return;
+    if (!start.moved && Math.abs(event.clientX - start.px) + Math.abs(event.clientY - start.py) < 4) return;
+    const world = worldOf(event.clientX, event.clientY);
+    const frame = frames.find(item => item.work.workId === start.workId);
+    if (!world || !frame) return;
+    start.moved = true;
+    cardDragged.current = true;
+    setDraggingId(start.id);
+    const spot = { x: Math.round(world.x - frame.x - start.ox), y: Math.round(world.y - frame.y - start.oy) };
+    start.spot = spot;
+    setCardMoved(previous => ({ ...previous, [start.id]: spot }));
+  };
+  const endCard = async (event: React.PointerEvent<HTMLElement>) => {
+    const start = cardDrag.current;
+    if (!start) return;
+    cardDrag.current = null;
+    setDraggingId(null);
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!start.moved || !start.spot) return;
     try {
-      await api.saveDeskPosition({ domainRef: domain, workId: start.id, x: start.spot.x, y: start.spot.y });
+      await api.saveDeskCardPosition({ domainRef: domain, workId: start.workId, blockId: start.id, x: start.spot.x, y: start.spot.y });
       setSaveFailed(false);
     } catch {
       setSaveFailed(true);
     }
+  };
+
+  const beginResize = (event: React.PointerEvent<HTMLElement>, frame: Frame) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    setEditor(null);
+    setSettingsFor(null);
+    resizeDrag.current = { id: frame.work.workId, px: event.clientX, py: event.clientY, w: frame.w, h: frame.h };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const moveResize = (event: React.PointerEvent<HTMLElement>) => {
+    const start = resizeDrag.current;
+    if (!start) return;
+    const next = {
+      w: Math.max(320, Math.round(start.w + (event.clientX - start.px) / view.zoom)),
+      h: Math.max(220, Math.round(start.h + (event.clientY - start.py) / view.zoom)),
+    };
+    start.spot = next;
+    setSized(previous => ({ ...previous, [start.id]: next }));
+  };
+  const endResize = async (event: React.PointerEvent<HTMLElement>) => {
+    const start = resizeDrag.current;
+    if (!start) return;
+    resizeDrag.current = null;
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    if (!start.spot) return;
+    const frame = frames.find(item => item.work.workId === start.id);
+    if (frame) await saveFrame(frame);
   };
 
   const place = async (item: SourceItem) => {
@@ -377,49 +588,67 @@ export function MaterialDesk({
         backgroundPosition: `${view.x}px ${view.y}px, ${view.x}px ${view.y}px`,
       }} />
       <div className="world" style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})` }}>
-        {frames.map(frame => <article key={frame.work.workId}
-          className={`frame${frame.work.workId === currentWorkId ? ' hot' : ''}${frame.work.workId === focus ? ' focused-frame' : ''}`}
-          style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }} aria-label={`选题框：${frame.title}`}>
-          <header className="frame-head" onPointerDown={event => beginFrameDrag(event, frame)}
-            onPointerMove={moveFrame} onPointerUp={event => void endFrame(event)} onPointerCancel={event => void endFrame(event)}>
-            <div className="fh-row">
-              <span className="fh-k data">{shortDate(frame.work.savedAt)}</span>
-              <span className="ttl">{frame.title}</span>
-              {frame.prepared ? <span className="fh-tag">系统备料</span> : null}
-              <span className="grow" />
-              <span className="cnt">{frame.cards.length} 张材料</span>
-            </div>
-            <div className="fh-row">
-              <span className="fh-k">{frame.accountName ?? '还没选账号'}</span>
-              <span className="grow" />
-              <button type="button" className="frame-command" onClick={() => {
-                setEditor(null); setSettingsFor(null);
-                if (focus === frame.work.workId) { setFocus(null); fit(); } else focusFrame(frame);
-              }}>{focus === frame.work.workId ? '退出专注' : '专注'}</button>
-              <button type="button" className="frame-command" onClick={event => openSettings(frame, event)}>
-                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14M7 3v6M13 11v6" /></svg>设置
-              </button>
-              <button type="button" className="btn sm" onClick={() => onOpenWork(frame.work.workId)}>去稿件</button>
-            </div>
-          </header>
-          {frame.cards.map((card, index) => <div key={card.id} role="group" tabIndex={0}
-            className={`mcard${card.note ? ' note' : ''}${editor?.blockId === card.id ? ' sel' : ''}`}
-            style={{ left: FRAME_INSET + (index % CARD_COLS) * CARD_COL, top: FRAME_HEAD + Math.floor(index / CARD_COLS) * CARD_ROW }}
-            aria-label={`${card.kind}：${card.text.slice(0, 40)}，按回车写思路`}
-            onClick={event => openCard(card, 'memo', event)}
-            onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); openCard(card, 'memo', event); } }}>
-            <button type="button" className="card-expand" onClick={event => { event.stopPropagation(); openCard(card, 'source', event); }}>展开原文</button>
-            <div className="mcard-type">
-              <span className={`dot ${card.dot}`} />{card.kind}<span className="grow" />
-              <button type="button" className="mcard-x" aria-label={`移出桌面：${card.text.slice(0, 30)}`} onClick={event => { event.stopPropagation(); setEditor(null); onRemoveCard(card.id); }}>×</button>
-            </div>
-            {card.note ? <div className="txt">{card.text}</div> : <p className="q paper">{card.text}</p>}
-            <div className="mcard-foot">
-              <button type="button" className={`role-chip${card.role === '待分' ? ' soft' : ''}`} aria-label="修改材料用途" onClick={event => { event.stopPropagation(); openCard(card, 'role', event); }}>{card.role}</button>
-              <button type="button" className="mnote" aria-label="编辑材料思路" title={card.memo || '点一下，写思路'} onClick={event => { event.stopPropagation(); openCard(card, 'memo', event); }}>{card.memo || <span className="muted">点一下，写思路</span>}</button>
-            </div>
-          </div>)}
-        </article>)}
+        {frames.map(frame => {
+          const editable = frame.work.workId === currentWorkId;
+          return <article key={frame.work.workId}
+            className={`frame${frame.work.workId === currentWorkId ? ' hot' : ''}${frame.work.workId === focus ? ' focused-frame' : ''}`}
+            style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }} aria-label={`选题框：${frame.title}`}>
+            <header className="frame-head" onPointerDown={event => beginFrameDrag(event, frame)}
+              onPointerMove={moveFrame} onPointerUp={event => void endFrame(event)} onPointerCancel={event => void endFrame(event)}
+              onClick={event => {
+                if (frameDragged.current) { frameDragged.current = false; return; }
+                if ((event.target as HTMLElement).closest('button, input, select, textarea, [contenteditable="true"]')) return;
+                openSettings(frame, event);
+              }}>
+              <div className="fh-row">
+                <span className="fh-k data">{shortDate(frame.work.savedAt)}</span>
+                <Editable className="ttl" value={frame.title} editable={editable} label="选题框标题" onCommit={onRenameTitle} />
+                {frame.prepared ? <span className="fh-tag">系统备料</span> : null}
+                <span className="grow" />
+                <span className="cnt">{frame.cards.length} 张材料</span>
+              </div>
+              <div className="fh-row">
+                <span className="fh-k">{frame.accountName ?? '还没选账号'}</span>
+                <span className="grow" />
+                <button type="button" className="frame-command" onClick={() => {
+                  setEditor(null); setSettingsFor(null);
+                  if (focus === frame.work.workId) { setFocus(null); fit(); } else focusFrame(frame);
+                }}>{focus === frame.work.workId ? '退出专注' : '专注'}</button>
+                <button type="button" className="frame-command" onClick={event => openSettings(frame, event)}>
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14M7 3v6M13 11v6" /></svg>设置
+                </button>
+                <button type="button" className="btn sm" onClick={() => onOpenWork(frame.work.workId)}>去稿件</button>
+              </div>
+            </header>
+            {frame.cards.map(card => <div key={card.id} role="group" tabIndex={0} data-card={card.id}
+              className={`mcard${card.note ? ' note' : ''}${editor?.blockId === card.id ? ' sel' : ''}${draggingId === card.id ? ' dragging' : ''}`}
+              style={{ left: card.x, top: card.y }}
+              aria-label={`${card.kind}：${card.text.slice(0, 40)}，按回车写思路`}
+              onPointerDown={event => beginCardDrag(event, frame, card)}
+              onPointerMove={moveCard} onPointerUp={event => void endCard(event)} onPointerCancel={event => void endCard(event)}
+              onClick={event => {
+                if (cardDragged.current) { cardDragged.current = false; return; }
+                openCard(card, 'memo', event);
+              }}
+              onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); openCard(card, 'memo', event); } }}>
+              <button type="button" className="card-expand" onClick={event => { event.stopPropagation(); openCard(card, 'source', event); }}>展开原文</button>
+              <div className="mcard-type">
+                <span className={`dot ${card.dot}`} />{card.kind}<span className="grow" />
+                <button type="button" className="mcard-x" aria-label={`移出桌面：${card.text.slice(0, 30)}`} onClick={event => { event.stopPropagation(); setEditor(null); onRemoveCard(card.id); }}>×</button>
+              </div>
+              {card.note
+                ? <Editable className="txt" value={card.text} editable={editable} label="便签内容" onCommit={next => onUpdateCard(card.id, { expression: next })} />
+                : <p className="q paper">{card.text}</p>}
+              <div className="mcard-foot">
+                <button type="button" className={`role-chip${card.role === '待分' ? ' soft' : ''}`} aria-label="修改材料用途" onClick={event => { event.stopPropagation(); openCard(card, 'role', event); }}>{card.role}</button>
+                <button type="button" className="mnote" aria-label="编辑材料思路" title={card.memo || '点一下，写思路'} onClick={event => { event.stopPropagation(); openCard(card, 'memo', event); }}>{card.memo || <span className="muted">点一下，写思路</span>}</button>
+              </div>
+            </div>)}
+            <div className="frame-resize" aria-hidden="true"
+              onPointerDown={event => beginResize(event, frame)}
+              onPointerMove={moveResize} onPointerUp={event => void endResize(event)} onPointerCancel={event => void endResize(event)} />
+          </article>;
+        })}
       </div>
       {focused ? <div className="focus-bar">
         <button type="button" className="focus-back" onClick={() => { setEditor(null); setFocus(null); fit(); }}>

@@ -407,12 +407,32 @@ async fn content_workbench_http_desk_positions_round_trip() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+    let (status, sizes) = call(
+        app.clone(),
+        "/ops/api/creation/desk/positions",
+        Some(json!({"domainRef":dossier::DOMAIN,"workId":work,"x":300.0,"y":12.0,"width":864.0,"height":1200.0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{sizes}");
+    assert_eq!(sizes["width"], 864.0);
+    assert_eq!(sizes["height"], 1200.0);
     let (status, positions) = call(app.clone(), &list, None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(positions["items"].as_array().unwrap().len(), 1);
     assert_eq!(positions["items"][0]["workId"], work.as_str());
     assert_eq!(positions["items"][0]["x"], 300.0);
     assert_eq!(positions["items"][0]["y"], 12.0);
+    assert_eq!(positions["items"][0]["width"], 864.0);
+    assert_eq!(positions["items"][0]["height"], 1200.0);
+    let (status, cleared) = call(
+        app.clone(),
+        "/ops/api/creation/desk/positions",
+        Some(json!({"domainRef":dossier::DOMAIN,"workId":work,"x":300.0,"y":12.0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(cleared["width"].is_null());
+    assert!(cleared["height"].is_null());
     let (status, _) = call(
         app.clone(),
         "/ops/api/creation/desk/positions",
@@ -424,6 +444,70 @@ async fn content_workbench_http_desk_positions_round_trip() {
         app,
         "/ops/api/creation/desk/positions",
         Some(json!({"domainRef":dossier::DOMAIN,"workId":Uuid::new_v4(),"x":1.0,"y":1.0})),
+    )
+    .await;
+    assert!(status.is_client_error());
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn content_workbench_http_desk_card_positions_round_trip() {
+    let db = proof("creation_http_desk_card_positions").await;
+    let app = app_with_database(db);
+    let mut document = WorkDocument::default();
+    document.title = "桌面上的稿件".into();
+    let (status, created) = call(
+        app.clone(),
+        "/ops/api/creation/works",
+        Some(json!({"requestId":Uuid::new_v4(),"domainRef":dossier::DOMAIN,"document":document})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let work = created["workId"].as_str().unwrap().to_string();
+    let block = Uuid::new_v4();
+    let list = format!(
+        "/ops/api/creation/desk/card-positions?domainRef={}",
+        dossier::DOMAIN
+    );
+    let (status, empty) = call(app.clone(), &list, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(empty["items"].as_array().unwrap().len(), 0);
+    let (status, saved) = call(
+        app.clone(),
+        "/ops/api/creation/desk/card-positions",
+        Some(json!({"domainRef":dossier::DOMAIN,"workId":work,"blockId":block,"x":488.0,"y":96.0})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(saved["workId"], work.as_str());
+    assert_eq!(saved["blockId"], block.to_string().as_str());
+    assert_eq!(saved["x"], 488.0);
+    assert_eq!(saved["y"], 96.0);
+    let (status, _) = call(
+        app.clone(),
+        "/ops/api/creation/desk/card-positions",
+        Some(
+            json!({"domainRef":dossier::DOMAIN,"workId":work,"blockId":block,"x":-40.0,"y":300.0}),
+        ),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, positions) = call(app.clone(), &list, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(positions["items"].as_array().unwrap().len(), 1);
+    assert_eq!(positions["items"][0]["x"], -40.0);
+    assert_eq!(positions["items"][0]["y"], 300.0);
+    let (status, _) = call(
+        app.clone(),
+        "/ops/api/creation/desk/card-positions",
+        Some(json!({"domainRef":dossier::DOMAIN,"workId":Uuid::new_v4(),"blockId":block,"x":1.0,"y":1.0})),
+    )
+    .await;
+    assert!(status.is_client_error());
+    let (status, _) = call(
+        app,
+        "/ops/api/creation/desk/card-positions",
+        Some(json!({"domainRef":dossier::DOMAIN,"workId":work,"blockId":block,"x":1.0,"y":1.0,"extra":true})),
     )
     .await;
     assert!(status.is_client_error());

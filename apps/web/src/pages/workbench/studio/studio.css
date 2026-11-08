@@ -309,7 +309,8 @@
 .gm-studio .frame-foot{position:absolute;left:var(--s3);right:var(--s3);bottom:var(--s3);display:flex;align-items:center;gap:var(--s3);pointer-events:none}
 .gm-studio .frame-foot>*{pointer-events:auto}
 .gm-studio .frame-foot .aux{flex:1}
-.gm-studio .frame-resize{position:absolute;right:-2px;bottom:-2px;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--lgi-ink) 50%)}
+.gm-studio .frame-resize{position:absolute;right:-2px;bottom:-2px;width:16px;height:16px;cursor:nwse-resize;background:linear-gradient(135deg,transparent 50%,var(--lgi-ink) 50%);touch-action:none}
+.gm-studio .mcard [contenteditable="true"]{user-select:text;cursor:text}
 .gm-studio .mcard{position:absolute;width:208px;padding:var(--s3);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);font-size:var(--t-label);line-height:1.65;cursor:grab;user-select:none;box-shadow:var(--lgi-shadow-brutal);touch-action:none}
 .gm-studio .mcard.dragging{cursor:grabbing;box-shadow:var(--lgi-shadow-brutal-lg);transform:translate(-1px,-1px);z-index:5}
 .gm-studio .mcard.sel{outline:2px solid var(--lgi-signal-mark);outline-offset:2px}

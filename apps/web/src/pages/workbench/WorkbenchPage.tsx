@@ -1220,7 +1220,7 @@ function WorkEditor({
     {view === 'body' ? <details className={styles.compactCommand}>
       <summary>写稿工具 · {saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中' : saveState === 'dirty' ? '未保存' : saveState === 'unknown' ? '结果未确认' : saveState === 'conflict' ? '版本冲突' : '保存失败'}</summary>
       <div className={styles.compactCommandPanel}>{commandContents}</div>
-    </details> : <div className={styles.commandRow}>{commandContents}</div>}
+    </details> : view === 'desk' ? null : <div className={styles.commandRow}>{commandContents}</div>}
     {(feedback && ['failed', 'unknown', 'conflict'].includes(saveState)) || conflict ? <div className={styles.error} role="alert">
 <p>{feedback}</p>{conflict ? <ActionButton variant="outline" onClick={() => setConflictVisible(true)}>比较版本并解决</ActionButton> : null}{resetRequired ? <ActionButton variant="outline" disabled={busy || recheckStatus !== 'ready'} onClick={() => setResetPrompt(true)}>撤回后重新开始编辑</ActionButton> : null}{hasPending ? <ActionButton variant="outline" disabled={busy} onClick={() => void run(pending.current!).catch(() => undefined)}>沿用原请求重试</ActionButton> : null}</div> : null}<span role="status" className={styles.srOnly}>{feedback}</span>
     {(hasWithdrawnParagraph || resetRequired) && saveState !== 'failed' ? <div className={styles.warning}><p>稿件历史中有已撤回的经历，请先重新开始编辑。</p><ActionButton variant="outline" disabled={busy || recheckStatus !== 'ready'} onClick={() => setResetPrompt(true)}>撤回后重新开始编辑</ActionButton></div> : null}

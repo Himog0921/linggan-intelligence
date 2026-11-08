@@ -13,6 +13,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/ops/api/creation/desk/positions",
             get(desk_positions).post(place_desk_frame),
         )
+        .route(
+            "/ops/api/creation/desk/card-positions",
+            get(desk_card_positions).post(place_desk_card),
+        )
         .route("/ops/api/creation/storage", get(storage))
         .route("/ops/api/creation/requests/{id}", get(request_receipt))
         .route("/ops/api/creation/works/{id}", get(read))
@@ -101,6 +105,27 @@ async fn place_desk_frame(
     Json(r): Json<DeskPositionRequest>,
 ) -> Response {
     match core::save_desk_position(database!(state), &r).await {
+        Ok(item) => Json(item).into_response(),
+        Err(e) => error(e),
+    }
+}
+async fn desk_card_positions(
+    State(state): State<LocalWebState>,
+    Query(q): Query<ListQuery>,
+) -> Response {
+    let Some(domain) = q.domain_ref else {
+        return error(WorkbenchError::Invalid("domainRef"));
+    };
+    match core::desk_card_positions(database!(state), domain).await {
+        Ok(items) => Json(json!({"items":items})).into_response(),
+        Err(e) => error(e),
+    }
+}
+async fn place_desk_card(
+    State(state): State<LocalWebState>,
+    Json(r): Json<DeskCardPositionRequest>,
+) -> Response {
+    match core::save_desk_card_position(database!(state), &r).await {
         Ok(item) => Json(item).into_response(),
         Err(e) => error(e),
     }

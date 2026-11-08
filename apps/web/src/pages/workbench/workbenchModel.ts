@@ -681,9 +681,12 @@ export const parseWorkList = shape<{
 export const parseIdeaBoxList = shape<{ items: IdeaBoxSummary[] }>({ items: array(shape<IdeaBoxSummary>({
   ideaRef: uuid, anchorWorkId: uuid, anchorRevisionId: uuid, savedAt: str, name: str, intent: str,
 })) });
-export interface DeskPosition { workId: string; x: number; y: number }
-export const parseDeskPosition = shape<DeskPosition>({ workId: uuid, x: num, y: num });
+export interface DeskPosition { workId: string; x: number; y: number; width: number | null; height: number | null }
+export const parseDeskPosition = shape<DeskPosition>({ workId: uuid, x: num, y: num, width: nullable(num), height: nullable(num) });
 export const parseDeskPositions = shape<{ items: DeskPosition[] }>({ items: array(parseDeskPosition) });
+export interface DeskCardPosition { workId: string; blockId: string; x: number; y: number }
+export const parseDeskCardPosition = shape<DeskCardPosition>({ workId: uuid, blockId: uuid, x: num, y: num });
+export const parseDeskCardPositions = shape<{ items: DeskCardPosition[] }>({ items: array(parseDeskCardPosition) });
 export const parseHistory = shape<{
   items: RevisionSummary[];
 }>({
