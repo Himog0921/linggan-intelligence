@@ -14,13 +14,6 @@ import * as api from './workbenchApi';
 import { newDocument, type AiStatus, type SaveReceipt, type WorkEnvelope } from './workbenchModel';
 Object.defineProperty(globalThis.crypto, 'subtle', { value: webcrypto.subtle, configurable: true });
 vi.mock('./workbenchApi');
-vi.mock('./MaterialBrowser', async () => {
-  const actual = await vi.importActual<typeof import('./MaterialBrowser')>('./MaterialBrowser');
-  return { MaterialBrowser: (props: Parameters<typeof actual.MaterialBrowser>[0]) => <>
-    <actual.MaterialBrowser {...props}/>
-    <button onClick={() => props.onCollect({citation: {asOf:'2026-10-29',blockRef:'body',sourceKind:'comment',sourceRef:'00000000-0000-4000-8000-000000000002',workRef:'00000000-0000-4000-8000-000000000002',field:'comment_body',sourceVersion:'v1',start:0,end:2,textHash:'a'.repeat(64),location:null},selectedText:'合成',textHash:'a'.repeat(64)}, 'inbox')}>测试收集未保存来源</button>
-  </> };
-});
 vi.mock('./ImagePages', () => ({
   ImagePages: () => <div>图页组件</div>
 }));
@@ -64,6 +57,15 @@ const envelope = (): WorkEnvelope => ({
   sourceStatuses: [],
   exports: []
 });
+const deskEnvelope = (): WorkEnvelope => {
+  const result = envelope();
+  result.revision.document = {
+    ...result.revision.document,
+    excerpts: [{ id: 'excerpt-1', citation: { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'note', sourceRef: work, workRef: work, field: 'body', sourceVersion: 'v1', start: 0, end: 6, textHash: 'a'.repeat(64), location: null }, selectedText: '一段原笔记', textHash: 'a'.repeat(64) }],
+    canvas: [{ id: 'block-1', excerptId: 'excerpt-1', group: 'inbox', note: '', expression: '', expressionRevision: 0 }],
+  };
+  return result;
+};
 function show(view = 'body') {
   const client = new QueryClient({
     defaultOptions: {
@@ -1078,14 +1080,14 @@ it('keeps every editor step reachable from the writing workflow menu', async () 
   show(); await screen.findByLabelText('正文第 1 段');
   fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   const nav = screen.getByRole('navigation', { name: '创作步骤' });
-  for (const name of ['选题方案','材料浏览','创作画布','正文','封面','内页','预览与导出']) {
+  for (const name of ['选题方案','选题与材料','创作画布','正文','封面','内页','预览与导出']) {
     expect(within(nav).getByRole('button', { name })).toBeInTheDocument();
   }
-  fireEvent.click(within(nav).getByRole('button', { name: '材料浏览' }));
-  await screen.findByText('创作步骤 · 材料浏览', { selector: 'summary' });
+  fireEvent.click(within(nav).getByRole('button', { name: '选题与材料' }));
+  await screen.findByText('创作步骤 · 选题与材料', { selector: 'summary' });
   fireEvent.click(screen.getByText(/^创作步骤/, { selector: 'summary' }));
   const materialNav = await screen.findByRole('navigation', { name: '创作步骤' });
-  await waitFor(() => expect(within(materialNav).getByRole('button', { name: '材料浏览' })).toHaveAttribute('aria-current', 'step'));
+  await waitFor(() => expect(within(materialNav).getByRole('button', { name: '选题与材料' })).toHaveAttribute('aria-current', 'step'));
   fireEvent.click(within(materialNav).getByRole('button', { name: '正文' }));
   await screen.findByLabelText('正文第 1 段');
 });
@@ -1259,17 +1261,54 @@ it('covers stale AI-derived text when its source becomes unavailable and allows 
   const resumed = await screen.findByRole('textbox',{name:'正文第 1 段'}); expect(resumed).toBeVisible(); expect(resumed).toHaveValue('[来源当前不可使用]');
 });
 
+it('changes a material role from the desk and removes the card', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.readWork).mockResolvedValue(deskEnvelope());
+  show('desk');
+  const card = await screen.findByRole('group', { name: /^原笔记：一段原笔记/ });
+  fireEvent.click(within(card).getByRole('button', { name: '修改材料用途' }));
+  const picks = await screen.findByRole('group', { name: '材料用途' });
+  fireEvent.click(within(picks).getByRole('button', { name: '例子' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '修改材料用途' })).toHaveTextContent('例子'));
+  fireEvent.click(screen.getByRole('button', { name: /^移出桌面：一段原笔记/ }));
+  await waitFor(() => expect(screen.queryByRole('group', { name: /^原笔记：一段原笔记/ })).not.toBeInTheDocument());
+});
+
+it('writes material memo from the desk and shows every material in frame settings', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.readWork).mockResolvedValue(deskEnvelope());
+  show('desk');
+  fireEvent.click(await screen.findByRole('group', { name: /^原笔记：一段原笔记/ }));
+  fireEvent.change(await screen.findByPlaceholderText('这张材料准备怎么用？'), { target: { value: '用来当开头' } });
+  expect(await screen.findByRole('button', { name: '编辑材料思路' })).toHaveTextContent('用来当开头');
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
+  expect(await screen.findByLabelText('材料 1 思路')).toHaveValue('用来当开头');
+  fireEvent.click(screen.getByRole('button', { name: '添加便签' }));
+  expect(await screen.findByRole('group', { name: /^便签：/ })).toBeInTheDocument();
+});
+
 it('rechecks newly collected unsaved source text before revealing the editor again', async () => {
   vi.mocked(api.qualifyCitation).mockResolvedValue(false);
-  show('materials');
-  const collect = await screen.findByRole('button', {name:'测试收集未保存来源'});
-  fireEvent.click(collect);
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '合成选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.sources).mockResolvedValue({
+    contract: 'content-workbench-sources.v1', asOf: '2026-10-29', distribution: [], total: 1, totalBasis: 'source_directory',
+    returnedSourceCount: 1, returnedFragmentCount: 1, nextCursor: null, searchScope: 'admitted_native_title_body_history_directory', scope: 'collected_material_only',
+    items: [{ asOf: '2026-10-29', fragmentId: 'fragment-1', blockRef: 'body', speaker: 'other', structure: null, issues: [], sourceKind: 'comment', sourceRef: work, workRef: work, field: 'comment_body', sourceVersion: 'v1', title: '合成评论', text: '合成', bodyState: 'ok', authorLabel: '合成', qualification: 'readable', location: null }],
+  });
+  vi.mocked(api.anchor).mockResolvedValue({
+    citation: { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'comment', sourceRef: work, workRef: work, field: 'comment_body', sourceVersion: 'v1', start: 0, end: 2, textHash: 'a'.repeat(64), location: null },
+    selectedText: '合成',
+    textHash: 'a'.repeat(64),
+  });
+  show('desk');
+  fireEvent.click(await screen.findByRole('button', { name: '找材料' }));
+  fireEvent.click(await screen.findByRole('button', { name: '放进框' }));
   fireEvent.focus(window);
   expect(await screen.findByText(/参考来源的状态已变化/)).toBeVisible();
-  expect(api.qualifyCitation).toHaveBeenCalledWith(domain, expect.objectContaining({sourceKind:'comment',textHash:'a'.repeat(64)}));
-  expect(screen.queryByRole('button', {name:'测试收集未保存来源'})).not.toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', {name:'丢弃本页编辑并重新读取'}));
-  expect(await screen.findByRole('button', {name:'测试收集未保存来源'})).toBeVisible();
+  expect(api.qualifyCitation).toHaveBeenCalledWith(domain, expect.objectContaining({ sourceKind: 'comment', textHash: 'a'.repeat(64) }));
+  fireEvent.click(screen.getByRole('button', { name: '丢弃本页编辑并重新读取' }));
+  await waitFor(() => expect(screen.queryByText(/参考来源的状态已变化/)).not.toBeInTheDocument());
+  expect(screen.getByRole('button', { name: '放进框' })).toBeVisible();
 });
 
 it('hides and clears a stale version conflict when its source becomes unavailable', async () => {

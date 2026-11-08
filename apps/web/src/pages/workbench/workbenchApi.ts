@@ -108,15 +108,15 @@ export async function resolveMaterials(body: {domainRef: string; selections: Mat
 }
 export async function sources(query: {
   domainRef: string;
-  kind: string;
+  kind?: string;
   query: string;
   cursor?: number;
 }, signal?: AbortSignal) {
   const params = new URLSearchParams({
     domainRef: query.domainRef,
-    kind: query.kind,
     query: query.query
   });
+  if (query.kind) params.set('kind', query.kind);
   if (query.cursor !== undefined) params.set('cursor', String(query.cursor));
   return parseSourceList(await requestJson(`${base}/sources?${params}`, {
     signal

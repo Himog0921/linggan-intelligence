@@ -101,7 +101,7 @@ function ExperienceForm({ accountRef, personRef, current: initialCurrent, checki
   return <form className={styles.form} onSubmit={event => { event.preventDefault(); void perform('save'); }}>
     <h3>{current ? `${current.code} · 编辑经历` : '采集一段经历'}</h3>
     {current && initialCurrent?.usedCount !== undefined ? <p className={styles.hint}>{initialCurrent.usedCount} 篇已保存稿件引用 · 不代表已发布</p> : null}
-    <p className={styles.hint}>这里记录账号真人提供的经历，请去标识，不写真实姓名、学校和就诊细节。本人确认后才能以本人经历库记录插入；评论区经历可在材料浏览中作为参考。</p>
+    <p className={styles.hint}>这里记录账号真人提供的经历，请去标识，不写真实姓名、学校和就诊细节。本人确认后才能以本人经历库记录插入；评论区经历可以在选题与材料里作为参考。</p>
     <label>标题<input value={title} disabled={!canEdit || locked} maxLength={200} onChange={e => setTitle(e.target.value)} /></label>
     <label>经历正文<textarea value={body} disabled={!canEdit || locked} maxLength={10000} rows={8} onChange={e => setBody(e.target.value)} /></label>
     <label>标签<input value={tags} disabled={!canEdit || locked} onChange={e => setTags(e.target.value)} placeholder="以空格分隔" /></label>
