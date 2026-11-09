@@ -129,6 +129,119 @@ pub async fn list_idea_boxes(
     Ok(result)
 }
 
+pub async fn desk_positions(
+    db: &Database,
+    domain: Uuid,
+) -> Result<Vec<DeskPosition>, WorkbenchError> {
+    let rows = sqlx::query(
+        "SELECT p.work_ref,p.x,p.y,p.width,p.height FROM linggan_creation_desk_position p JOIN linggan_creation_work w ON w.work_ref=p.work_ref AND w.domain_ref=p.domain_ref WHERE p.domain_ref=$1",
+    )
+    .bind(domain)
+    .fetch_all(db.pool())
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(DeskPosition {
+                work_id: row.try_get("work_ref")?,
+                x: row.try_get("x")?,
+                y: row.try_get("y")?,
+                width: row.try_get("width")?,
+                height: row.try_get("height")?,
+            })
+        })
+        .collect()
+}
+
+fn desk_size(value: Option<f64>) -> Result<Option<f64>, WorkbenchError> {
+    match value {
+        Some(size) if !size.is_finite() => Err(WorkbenchError::Invalid("desk_size")),
+        Some(size) => Ok(Some(size.clamp(160.0, 100_000.0))),
+        None => Ok(None),
+    }
+}
+
+pub async fn save_desk_position(
+    db: &Database,
+    request: &DeskPositionRequest,
+) -> Result<DeskPosition, WorkbenchError> {
+    if !request.x.is_finite() || !request.y.is_finite() {
+        return Err(WorkbenchError::Invalid("desk_position"));
+    }
+    let x = request.x.clamp(-1_000_000.0, 1_000_000.0);
+    let y = request.y.clamp(-1_000_000.0, 1_000_000.0);
+    let width = desk_size(request.width)?;
+    let height = desk_size(request.height)?;
+    let saved = sqlx::query(
+        "INSERT INTO linggan_creation_desk_position(domain_ref,work_ref,x,y,width,height) SELECT w.domain_ref,w.work_ref,$2,$3,$4,$5 FROM linggan_creation_work w WHERE w.work_ref=$1 AND w.domain_ref=$6 ON CONFLICT (domain_ref,work_ref) DO UPDATE SET x=EXCLUDED.x,y=EXCLUDED.y,width=EXCLUDED.width,height=EXCLUDED.height,updated_at=scope_001_now() RETURNING work_ref",
+    )
+    .bind(request.work_id)
+    .bind(x)
+    .bind(y)
+    .bind(width)
+    .bind(height)
+    .bind(request.domain_ref)
+    .fetch_optional(db.pool())
+    .await?;
+    saved.ok_or(WorkbenchError::NotFound)?;
+    Ok(DeskPosition {
+        work_id: request.work_id,
+        x,
+        y,
+        width,
+        height,
+    })
+}
+
+pub async fn desk_card_positions(
+    db: &Database,
+    domain: Uuid,
+) -> Result<Vec<DeskCardPosition>, WorkbenchError> {
+    let rows = sqlx::query(
+        "SELECT p.work_ref,p.block_ref,p.x,p.y FROM linggan_creation_desk_card_position p JOIN linggan_creation_work w ON w.work_ref=p.work_ref AND w.domain_ref=p.domain_ref WHERE p.domain_ref=$1",
+    )
+    .bind(domain)
+    .fetch_all(db.pool())
+    .await?;
+    rows.into_iter()
+        .map(|row| {
+            Ok(DeskCardPosition {
+                work_id: row.try_get("work_ref")?,
+                block_id: row.try_get("block_ref")?,
+                x: row.try_get("x")?,
+                y: row.try_get("y")?,
+            })
+        })
+        .collect()
+}
+
+pub async fn save_desk_card_position(
+    db: &Database,
+    request: &DeskCardPositionRequest,
+) -> Result<DeskCardPosition, WorkbenchError> {
+    if !request.x.is_finite() || !request.y.is_finite() {
+        return Err(WorkbenchError::Invalid("desk_card_position"));
+    }
+    let x = request.x.clamp(-1_000_000.0, 1_000_000.0);
+    let y = request.y.clamp(-1_000_000.0, 1_000_000.0);
+    let saved = sqlx::query(
+        "INSERT INTO linggan_creation_desk_card_position(domain_ref,work_ref,block_ref,x,y) SELECT w.domain_ref,w.work_ref,$2,$3,$4 FROM linggan_creation_work w WHERE w.work_ref=$1 AND w.domain_ref=$5 ON CONFLICT (domain_ref,work_ref,block_ref) DO UPDATE SET x=EXCLUDED.x,y=EXCLUDED.y,updated_at=scope_001_now() RETURNING work_ref",
+    )
+    .bind(request.work_id)
+    .bind(request.block_id)
+    .bind(x)
+    .bind(y)
+    .bind(request.domain_ref)
+    .fetch_optional(db.pool())
+    .await?;
+    saved.ok_or(WorkbenchError::NotFound)?;
+    Ok(DeskCardPosition {
+        work_id: request.work_id,
+        block_id: request.block_id,
+        x,
+        y,
+    })
+}
+
 async fn ensure_idea_box(
     tx: &mut Transaction<'_, Postgres>,
     work: Uuid,

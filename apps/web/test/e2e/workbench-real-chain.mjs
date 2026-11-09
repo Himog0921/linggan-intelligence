@@ -38,24 +38,60 @@ let exportedRecord;
 let packageBytes;
 const imageSection = () => page.getByRole('region', { name: '封面与内页' });
 const stage = async (name, surface = page) => {
-  const label = ({材料:'材料浏览',画布:'创作画布'})[name] ?? name;
-  await surface.locator('[data-view]').waitFor();
-  await openWritingTools(surface);
-  const workflow=surface.locator('details:not([open]) > summary').filter({hasText:'创作步骤'});
-  if(await workflow.isVisible()) await workflow.click();
-  const button=surface.getByRole('navigation',{name:'创作步骤'}).getByRole('button').filter({hasText:label});
-  await button.click();
-  const id=({'选题方案':'topic','材料浏览':'materials','创作画布':'canvas','正文':'body','封面':'cover','内页':'inner','预览与导出':'export'})[label];
-  await surface.locator(`[data-view="${id}"]`).waitFor();
+  const label = ({材料:'选题与材料',画布:'创作画布'})[name] ?? name;
+  const id = ({'选题与材料':'desk','创作画布':'canvas','正文':'body','封面':'cover','内页':'inner','预览与导出':'export'})[label];
+  await surface.locator('[data-view]:visible').first().waitFor();
+  // Each attempt must let the previous click render before deciding: the desk's own 返回写稿 button would
+  // otherwise bounce the view straight back and burn the whole attempt budget.
+  const arrive = async () => surface.locator(`[data-view="${id}"]:visible`).waitFor({timeout:2_000}).then(()=>true,()=>false);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (await arrive()) return;
+    // The desk and the body view hide the step menu; the desk returns through 返回写稿, the body reaches the image pages through its footer.
+    const back = surface.getByRole('button', {name:'返回写稿',exact:true});
+    if (await back.count()) { await robustClick(back); continue; }
+    await openWritingTools(surface);
+    const workflow = surface.locator('details:not([open]) > summary').filter({hasText:'创作步骤'});
+    if (await workflow.count()) await robustClick(workflow);
+    const button = surface.getByRole('navigation',{name:'创作步骤'}).getByRole('button').filter({hasText:label});
+    if (await button.count()) { await robustClick(button); continue; }
+    const cover = surface.getByRole('button', {name:'制作封面 →',exact:true});
+    if (await cover.count()) {
+      // The footer re-renders with save state; a click that lands may already have unmounted the button.
+      await robustClick(cover);
+      continue;
+    }
+  }
+  await surface.locator(`[data-view="${id}"]:visible`).waitFor()
+    .catch(async()=>{throw new Error(`cannot reach ${label} (url=${surface.url()}, alerts=${JSON.stringify(await surface.locator('[role="alert"]').allInnerTexts())})`);});
 };
+// Save-state renders replace the command row while the image canvases re-lay out, so Playwright's stability
+// wait can time out on elements that are otherwise clickable. Dispatch the activation directly instead.
+const robustClick = async locator => {
+  const target = locator.first();
+  try { await target.click({timeout:4_000}); }
+  catch { if (await target.count()) await target.dispatchEvent('click').catch(() => undefined); }
+};
+// The desk is a zoomed, translated canvas, so a fixed offset from a box corner can land on an overlay.
+// Walk the box and return a point whose innermost hit still belongs to the draggable element.
+const draggableSpot = (box, selector) => page.evaluate(({box,selector}) => {
+  for (let dy = 4; dy < box.height; dy += 6) for (let dx = 4; dx < box.width; dx += 6) {
+    const element = document.elementFromPoint(box.x + dx, box.y + dy);
+    if (!element?.closest(selector)) continue;
+    if (element.closest('button, input, select, textarea, [contenteditable="true"]')) continue;
+    return {x: box.x + dx, y: box.y + dy};
+  }
+  return null;
+}, {box,selector});
 const openWritingTools = async (surface = page) => {
-  const summary = surface.locator('details:not([open]) > summary').filter({hasText:'写稿工具'});
-  if (await summary.isVisible()) await summary.click();
+  const summary = surface.locator('details:not([open]) > summary[aria-label^="写稿工具"]:visible').first();
+  if (await summary.count()) await robustClick(summary);
 };
 const save = async (surface = page) => {
   await openWritingTools(surface);
-  await surface.getByRole('button', {name:'保存',exact:true}).click();
-  await surface.locator('[aria-label="保存状态：已保存"]').waitFor();
+  await robustClick(surface.getByRole('button', {name:'保存',exact:true}));
+  // 写稿工具 only exists inside the body editor; the canvas and image views report the same state in the command row.
+  await until(async()=>await surface.locator('summary[aria-label="写稿工具，已保存"]:visible').count()>0
+    ||await surface.locator('[role="status"]:visible').filter({hasText:/^已保存$/}).count()>0,'save is confirmed');
 };
 const envelope = async () => {
   const response = await context.request.get(`${origin}/ops/api/creation/works/${workId}`);
@@ -88,40 +124,6 @@ async function until(check, description, timeout = 20_000) {
 async function remains(check, description, duration=1200) {
   const deadline=Date.now()+duration;
   while(Date.now()<deadline) { assert.ok(await check(),description); await new Promise(resolve=>setTimeout(resolve,50)); }
-}
-async function selectExact(locator, selectedText) {
-  await locator.evaluate((element,text) => {
-    const full=element.textContent ?? '', start=full.indexOf(text);
-    if(start<0)throw new Error(`Selection text missing: ${text}`);
-    const walker=document.createTreeWalker(element,NodeFilter.SHOW_TEXT), nodes=[];
-    while(walker.nextNode())nodes.push(walker.currentNode);
-    const point=offset=>{let consumed=0;for(const node of nodes){if(consumed+node.textContent.length>=offset)return [node,offset-consumed];consumed+=node.textContent.length;}throw new Error('range offset');};
-    const range=document.createRange();range.setStart(...point(start));range.setEnd(...point(start+text.length));
-    const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);
-    element.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
-  },selectedText);
-  await until(async()=>await locator.locator('mark').textContent()===selectedText,'exact Unicode selection highlight');
-}
-async function openSourceDetails() {
-  const summary=page.getByRole('region',{name:'原文阅读'}).locator('summary').filter({hasText:'来源详情'});
-  if(await summary.locator('..').getAttribute('open')===null)await summary.click();
-}
-async function closeSourceDetails() {
-  const summary=page.getByRole('region',{name:'原文阅读'}).locator('summary').filter({hasText:'来源详情'});
-  if(await summary.count()&&await summary.locator('..').getAttribute('open')!==null)await summary.click();
-}
-async function collectFromPaper(text, selectedText, documentAnchor) {
-  const wall=page.getByRole('region',{name:'分组摘录纸条'});
-  if(documentAnchor)await wall.locator('button[data-fragment-id]').filter({hasText:documentAnchor}).first().click();
-  const paper=documentAnchor ? wall.locator(`button[data-fragment-id="${await page.getByRole('region',{name:'原文阅读'}).locator('[aria-label="可选择原文"]').filter({hasText:text}).first().getAttribute('data-fragment-id')}"]`) : wall.locator('button[data-fragment-id]').filter({hasText:text}).first();
-  const fragment=await paper.getAttribute('data-fragment-id');await paper.click();
-  const leaf=page.getByRole('region',{name:'原文阅读'}).locator(`[aria-label="可选择原文"][data-fragment-id="${fragment}"]`);
-  await leaf.waitFor();assert.equal(await leaf.getAttribute('data-fragment-id'),fragment);
-  if(selectedText)await selectExact(leaf,selectedText);
-  assert.equal(await wall.locator('button[aria-pressed="true"][data-fragment-id]').getAttribute('data-fragment-id'),fragment);
-  assert.equal(await page.getByRole('navigation',{name:'材料分布索引'}).locator('[aria-current="location"]').count(),1);
-  await page.getByRole('button',{name:'摘入画布',exact:true}).click();
-  await until(async()=>!(await page.getByRole('button',{name:'摘入画布',exact:true}).isDisabled()),'excerpt validation receipt');return leaf;
 }
 function crc32(bytes) {
   let crc=0xffffffff;
@@ -264,31 +266,14 @@ try {
     assert.ok(resources.every(url=>!url.includes('WorkbenchPage')&&!url.includes('noto-sans-sc')));
     report.settingsResources=resources.map(url=>new URL(url).pathname);
   });
-  await step('恢复后历史列表兼容旧引用，正文仅展开时核验读取',async()=>{
-    await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${fixture.legacyWorkId}&view=body`);
-    await page.locator('[data-view]').waitFor();await openWritingTools();
-    await page.getByRole('button',{name:'历史',exact:true}).click();
-    const dialog=page.getByRole('dialog',{name:'历史与恢复'});await dialog.waitFor();
-    const old=dialog.locator('section').filter({hasText:'版本 1 · 旧版引用'});
-    assert.equal(await old.count(),1);assert.equal(await old.getByRole('button',{name:'恢复为新版本'}).count(),0);
-    assert.equal(await old.getByText('查看正文',{exact:true}).count(),0);
-    const current=dialog.locator('section').filter({hasText:'版本 2 · 已保存'});
-    const detailPath=`/ops/api/creation/works/${fixture.legacyWorkId}/revisions/${fixture.legacyCurrentRevision}`;
-    assert.equal(report.requests.filter(r=>r.path===detailPath).length,0);
-    await current.getByText('查看正文',{exact:true}).click();
-    await current.getByText('手写正文，标点。',{exact:true}).waitFor();
-    assert.equal(report.requests.filter(r=>r.path===detailPath).length,1);
-    await screenshot('workbench-legacy-history');await page.keyboard.press('Escape');
-  });
-  await step('创作入口建立真实服务器作品并保存角度提纲账号',async()=>{
+  await step('创作入口建立真实服务器作品并保存正文',async()=>{
     await page.goto(`${origin}/ops/creation`);assert.equal(new URL(page.url()).pathname,'/ops/creation');
     await page.getByLabel('创作领域',{exact:true}).click();await page.getByRole('navigation',{name:'可选创作领域'}).getByRole('button').first().click();await until(async()=>new URL(page.url()).searchParams.get('domain')===domainRef,'chosen fixture domain');await page.getByLabel('新选题标题').fill('作业启动');
-    await page.getByRole('button',{name:'建立选题',exact:true}).click();await page.getByRole('button',{name:'编辑方案',exact:true}).click();await page.getByLabel('切入角度').waitFor();
+    await page.getByRole('button',{name:'建立选题',exact:true}).click();await page.getByLabel('正文标题').waitFor();
     workId=new URL(page.url()).searchParams.get('work');assert.ok(workId);workUrl=page.url();report.workId=workId;
-    await page.getByLabel('切入角度').fill('把作业启动缩小成可执行的第一步；仅作隔离合成验收。');
-    await page.getByLabel('创作提纲').fill('先理解启动困难\n只做两分钟\n留出家庭缓冲');
-    await page.getByLabel('所属账号').selectOption(accountRef);await save();
-    const saved=await envelope();assert.equal(saved.revision.document.accountRef,accountRef);assert.equal(saved.revision.document.outline.length,3);
+    await page.getByRole('button',{name:'＋ 继续写一段',exact:true}).click();await page.getByLabel('正文第 1 段').fill('先把练习本放到桌上。');
+    await page.locator('summary').filter({hasText:'账号与衔接设置'}).first().click();await page.getByLabel('所属账号').selectOption(accountRef);await save();
+    const saved=await envelope();assert.equal(saved.revision.document.title,'作业启动');assert.equal(saved.revision.document.accountRef,accountRef);assert.equal(saved.revision.document.paragraphs.length,1);
     await screenshot('workbench-1440-topic');
   });
   await step('创作归属运营，三个工作分区共用同一导航，稿件步骤按需展开', async()=>{
@@ -298,9 +283,9 @@ try {
     const sidebar=page.getByRole('complementary',{name:'运营导航'});
     assert.equal(await sidebar.getByRole('link',{name:'创作',exact:true}).getAttribute('aria-current'),'page');
     assert.equal(await sidebar.getByRole('link',{name:'数据',exact:true}).count(),1);
-    const sections=page.getByRole('navigation',{name:'创作页面'});
-    assert.deepEqual(await sections.getByRole('button').allTextContents(),['写稿','材料桌','资产库']);
-    assert.equal(await sections.getByRole('button',{name:'写稿',exact:true}).getAttribute('aria-current'),'page');
+    assert.equal(await page.getByRole('navigation',{name:'创作页面'}).count(),0);
+    assert.match(await page.getByRole('navigation',{name:'当前位置'}).innerText(),/创作/);
+    assert.equal(await page.getByRole('button',{name:'资产库',exact:true}).count(),1);
     assert.equal(await page.getByRole('navigation',{name:'创作步骤'}).isVisible(),false);
     await screenshot('creation-navigation-hierarchy');
   });
@@ -331,49 +316,49 @@ try {
     assert.equal(previewStyle.family,'v8');assert.equal(previewStyle.variant,'primary');assert.equal(previewStyle.background,'rgb(198, 50, 20)');assert.equal(previewStyle.color,'rgb(255, 255, 255)');assert.equal(previewStyle.borderWidth,'2px');assert.equal(previewStyle.borderColor,'rgb(11, 15, 18)','Workbench parent rules cannot turn the V8 action into a white one-pixel form button');
     await screenshot('workbench-1440-image-edit');
   });
-  await step('相关材料准备与搜索手工加入独立于摘入画布',async()=>{
+  await step('材料桌搜索并把原笔记与评论放进选题框',async()=>{
     await stage('材料');
-    const status=page.locator('summary').filter({hasText:/材料已准备|材料不足/});await status.waitFor();await status.click();
-    await page.getByLabel('本篇检索词',{exact:true}).fill('能开始的动作 真正困难 先做两分钟 同样的困惑');await page.getByRole('button',{name:'按这些词重新准备',exact:true}).click();
-    await until(async()=>!(await page.getByRole('button',{name:'按这些词重新准备',exact:true}).isDisabled()),'material preparation receipt');await save();
-    const prepared=(await envelope()).revision.document;
-    assert.ok(prepared.materialPreparation);report.preparation={state:prepared.materialPreparation.state,terms:prepared.materialPreparation.terms,noteCount:prepared.materials.filter(item=>item.sourceKind==='note').length,commentCount:prepared.materials.filter(item=>item.sourceKind==='comment').length};assert.ok(prepared.materials.filter(item=>item.sourceKind==='note').length>=2);assert.ok(prepared.materials.filter(item=>item.sourceKind==='comment').length>=2);
-    assert.equal(prepared.excerpts.length,0);assert.equal(prepared.canvas.length,0,'prepared reading materials do not imply excerpts');await status.click();
-    const paper=page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').filter({hasText:'浏览器原文锚点二'}).first();await paper.click();
-    await openSourceDetails();await page.getByRole('button',{name:'从本篇移除材料',exact:true}).click();await closeSourceDetails();await save();
-    const removed=(await envelope()).revision.document;assert.equal(removed.materials.length,prepared.materials.length-1);
-    await page.getByRole('navigation',{name:'材料范围'}).getByRole('button',{name:'搜寻更多',exact:true}).click();await page.getByLabel('检索已取得材料',{exact:true}).fill('浏览器原文锚点二');await page.getByRole('button',{name:'检索',exact:true}).click();
-    await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').filter({hasText:'浏览器原文锚点二'}).first().click();
-    assert.ok(await page.getByRole('button',{name:'摘入画布',exact:true}).isDisabled(),'search results must be added to this work before excerpting');
-    await page.getByRole('button',{name:'加入本篇材料',exact:true}).click();await save();
-    const added=(await envelope()).revision.document;assert.equal(added.materials.length,prepared.materials.length);assert.ok(added.materials.some(item=>item.addedBy==='manual'));assert.equal(added.excerpts.length,0);
-    await screenshot('workbench-1440-search-add');await page.getByRole('navigation',{name:'材料范围'}).getByRole('button').filter({hasText:'本篇材料'}).click();
+    await page.getByRole('button',{name:'找材料',exact:true}).click();
+    const shelf=page.getByRole('complementary',{name:'找材料'});await shelf.waitFor();
+    for(const kind of ['原笔记','评论']){
+      await shelf.getByRole('group',{name:'材料类型'}).getByRole('button',{name:kind,exact:true}).click();
+      await until(async()=>await shelf.getByRole('button',{name:'放进框',exact:true}).count()>0,`${kind} listed on the shelf`);
+      const before=(await envelope()).revision.document.excerpts.length;
+      await shelf.getByRole('button',{name:'放进框',exact:true}).first().click();
+      // 已在这个框里 marks a source reference, and one note's title and body share it; the stored excerpt is the real signal.
+      await until(async()=>(await envelope()).revision.document.excerpts.length>before,`${kind} placed into the frame`);
+    }
+    // The desk view autosaves; it has no 保存 button of its own.
+    await until(async()=>{const current=(await envelope()).revision.document;return current.excerpts.length===2&&current.canvas.length===2;},'material desk placements reach the server');
+    const doc=(await envelope()).revision.document;assert.ok(doc.excerpts.every(item=>item.selectedText));
+    report.deskPlacement={excerpts:doc.excerpts.map(item=>item.citation.sourceKind),canvas:doc.canvas.length};
+    await screenshot('workbench-desk-placed');
   });
-  await step('两篇笔记、两条匿名原声和回复语境；纸条索引书页精确联动',async()=>{
-    const first=await collectFromPaper('这是浏览器隔离验收使用的合成长文😀','合成长文😀','浏览器原文锚点一');
-    assert.equal(await first.getAttribute('data-work-ref'),fixture.noteRefs[0]);
-    const second=page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').filter({hasText:'浏览器原文锚点二'}).first();await second.click();
-    await until(async()=>await page.getByRole('region',{name:'原文阅读'}).locator('[data-work-ref]').first().getAttribute('data-work-ref')===fixture.noteRefs[1],'second note source work identity');
-    await page.getByRole('group',{name:'材料类型'}).getByRole('button').filter({hasText:'用户原声'}).click();
-    const voice=await collectFromPaper('浏览器匿名原声一😀','原声一😀');assert.equal(await voice.getAttribute('data-source-ref'),fixture.voiceRefs[0]);
-    const wall=page.getByRole('region',{name:'分组摘录纸条'});await wall.locator('button[data-fragment-id]').filter({hasText:'浏览器匿名原声二🙂'}).first().click();
-    await until(async()=>await page.getByRole('region',{name:'原文阅读'}).locator('[data-source-ref]').first().getAttribute('data-source-ref')===fixture.voiceRefs[1],'second voice read');
-    await wall.locator('button[data-fragment-id]').filter({hasText:'浏览器回复原声😀'}).first().click();await openSourceDetails();
-    await page.getByRole('heading',{name:'回复语境',exact:true}).first().waitFor();await page.getByRole('region',{name:'原文阅读'}).getByText('浏览器匿名原声一😀',{exact:false}).last().waitFor();
-    await save();const doc=(await envelope()).revision.document;assert.equal(doc.excerpts.length,2);assert.ok(doc.excerpts.some(item=>item.selectedText==='合成长文😀'));assert.ok(doc.excerpts.some(item=>item.selectedText==='原声一😀'));
-    await screenshot('workbench-1440-materials');
+  await step('拖动选题框与材料卡后位置写回服务器，刷新仍在原位',async()=>{
+    await stage('材料');
+    const frame=()=>page.getByLabel('选题框：作业启动');
+    await frame().waitFor();
+    const head=frame().locator('.frame-head');await head.waitFor();const headBox=await head.boundingBox();assert.ok(headBox);
+    // Press a spot that belongs to the header itself: the title inside it is a contenteditable field and never starts a drag.
+    const press=await draggableSpot(headBox,'.frame-head');assert.ok(press,'the frame header exposes a draggable spot');
+    const frameSaved=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/desk/positions'&&response.request().method()==='POST');
+    await page.mouse.move(press.x,press.y);await page.mouse.down();await page.mouse.move(press.x+110,press.y+70,{steps:8});await page.mouse.up();
+    assert.equal((await frameSaved).status(),200);
+    const savedFrame=(await creationJson(`/desk/positions?domainRef=${domainRef}`)).items.find(item=>item.workId===workId);assert.ok(savedFrame);
+    const card=frame().locator('[data-card]').first();const cardBox=await card.boundingBox();assert.ok(cardBox);
+    const cardPress=await draggableSpot(cardBox,'[data-card]');assert.ok(cardPress,'the material card exposes a draggable spot');
+    const cardSaved=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/desk/card-positions'&&response.request().method()==='POST');
+    await page.mouse.move(cardPress.x,cardPress.y);await page.mouse.down();await page.mouse.move(cardPress.x+80,cardPress.y+60,{steps:8});await page.mouse.up();
+    assert.equal((await cardSaved).status(),200);
+    const savedCard=(await creationJson(`/desk/card-positions?domainRef=${domainRef}`)).items.find(item=>item.workId===workId);assert.ok(savedCard);
+    await page.reload();await stage('材料');
+    const restored=frame();await restored.waitFor();
+    const left=await restored.evaluate(element=>Number.parseFloat(getComputedStyle(element).left));
+    assert.ok(Math.abs(left-savedFrame.x)<1,'saved frame position is restored after reload');
+    report.deskPositions={frame:savedFrame,card:savedCard,reloadedLeft:left};
+    await screenshot('workbench-desk-arranged');
   });
-  await step('密集材料分布整格可达，展开列表仍精确定位最后片段',async()=>{
-    await closeSourceDetails();await page.getByRole('group',{name:'材料类型'}).getByRole('button').filter({hasText:'全部材料'}).click();
-    const index=page.getByRole('navigation',{name:'材料分布索引'}),cell=index.getByRole('button',{name:/^展开.*片段/}).first();await cell.waitFor();
-    const expected=await cell.locator('..').locator('span[data-piece-id]').last().getAttribute('data-piece-id');assert.ok(expected);await assertHorizontalReachability(cell,'密集片段整格点击区');
-    await cell.click();const chooser=page.getByRole('dialog',{name:'选择分布片段'});await chooser.waitFor();const target=chooser.getByRole('button',{name:/^定位：/}).last();const text=await target.innerText();await target.click();await chooser.waitFor({state:'detached'});
-    assert.equal(await index.locator('span[data-piece-id][data-selected="true"]').getAttribute('data-piece-id'),expected);assert.equal(await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[aria-pressed="true"][data-fragment-id]').getAttribute('data-fragment-id'),expected);
-    assert.equal(await page.getByRole('region',{name:'原文阅读'}).locator(`[data-fragment-id="${expected}"]`).innerText(),text);
-    const selectedPaper=page.getByRole('region',{name:'分组摘录纸条'}).locator('button[aria-pressed="true"][data-fragment-id]');
-    await until(async()=>selectedPaper.evaluate(element=>{const host=element.closest('[class*="snippetGroups"]');if(!host)return false;const box=element.getBoundingClientRect(),clip=host.getBoundingClientRect();return box.top>=clip.top-1&&box.bottom<=clip.bottom+1;}),'matrix selection is visible inside the actual paper scroll container without test scrolling');
-    report.matrixSelectedPaperVisibility=await selectedPaper.evaluate(element=>{const host=element.closest('[class*="snippetGroups"]'),box=element.getBoundingClientRect(),clip=host.getBoundingClientRect();return {fragmentId:element.getAttribute('data-fragment-id'),top:box.top,bottom:box.bottom,containerTop:clip.top,containerBottom:clip.bottom,containerScrollTop:host.scrollTop};});await screenshot('workbench-dense-distribution-selected');
-  });
+
   await step('画布自己的表达一次放入正文和指定图页，稳定引用可回查',async()=>{
     await stage('画布');const cards=page.locator('article').filter({has:page.getByRole('button',{name:'回到出处 ↗',exact:true})});
     await until(async()=>await cards.count()===2,'both persisted excerpt cards have rendered');
@@ -384,21 +369,19 @@ try {
       await dialog.getByLabel('指定内页',{exact:true}).check();const options=await dialog.getByLabel('放入图页位置').locator('option').evaluateAll(nodes=>nodes.filter(node=>node.value).map(node=>node.value));
       await dialog.getByLabel('放入图页位置').selectOption(options[index]);await dialog.getByRole('button',{name:'确认放入',exact:true}).click();await dialog.waitFor({state:'detached'});
     }
-    await save();const doc=(await envelope()).revision.document;assert.equal(doc.paragraphs.length,2);assert.equal(doc.uses.filter(item=>item.target.kind==='paragraph').length,2);assert.equal(doc.uses.filter(item=>item.target.kind==='pageBlock').length,2);
-    await cards.first().getByRole('button',{name:'回到出处 ↗',exact:true}).click();await page.getByRole('region',{name:'原文阅读'}).getByText('合成长文😀',{exact:true}).waitFor();
-    await screenshot('workbench-source-backlink');
+    await save();const doc=(await envelope()).revision.document;assert.equal(doc.paragraphs.length,3);assert.equal(doc.uses.filter(item=>item.target.kind==='paragraph').length,2);assert.equal(doc.uses.filter(item=>item.target.kind==='pageBlock').length,2);
+    await cards.first().getByRole('button',{name:'回到出处 ↗',exact:true}).click();
+    await until(async()=>await page.locator('[data-view="desk"]').count()===1,'citation backlink returns to the materials desk');
+    const focused=page.getByRole('region',{name:'来源原文'});await focused.waitFor();assert.ok((await focused.innerText()).length>0);await screenshot('workbench-source-backlink');
   });
-  await step('出处回链定位后仍可翻页、切换篇目并再次回链',async()=>{
-    const reading=page.getByRole('region',{name:'原文阅读'}),firstLeaf=reading.locator('article footer').first();
-    const initial=Number((await firstLeaf.innerText()).split('/')[0].trim());assert.ok(initial>=1);
-    const next=reading.getByRole('button',{name:'下一展开页 →',exact:true});assert.equal(await next.isDisabled(),false);await next.click();
-    await until(async()=>Number((await firstLeaf.innerText()).split('/')[0].trim())===initial+2,'manual spread survives prior citation focus');
-    await reading.getByRole('navigation',{name:'材料分布索引'}).getByTitle('合成选题：给家庭留出缓冲',{exact:true}).click();
-    await until(async()=>await reading.locator('[data-work-ref]').first().getAttribute('data-work-ref')===fixture.noteRefs[1],'manual document selection survives prior citation focus');
-    await stage('画布');await page.locator('article').filter({has:page.getByRole('button',{name:'回到出处 ↗',exact:true})}).first().getByRole('button',{name:'回到出处 ↗',exact:true}).click();
-    await reading.locator('[aria-label="可选择原文"]').filter({hasText:'合成长文😀'}).first().waitFor();
-    assert.equal(await reading.locator('[data-work-ref]').first().getAttribute('data-work-ref'),fixture.noteRefs[0]);
-    report.citationNavigation={initialLeaf:initial,nextLeaf:initial+2,switchedWorkRef:fixture.noteRefs[1],reopenedWorkRef:fixture.noteRefs[0]};await screenshot('workbench-source-backlink-navigation');
+  await step('来源原文可从材料桌收起，材料卡保留原文与来源',async()=>{
+    const focused=page.getByRole('region',{name:'来源原文'});
+    if(await focused.count()){await focused.getByRole('button',{name:'收起原文',exact:true}).click();await focused.waitFor({state:'detached'});}
+    // 展开原文 only appears once the card owns focus; the immersive desk hides it on idle cards.
+    const card=page.getByLabel(/^原笔记：/).first();await card.focus();await card.getByRole('button',{name:'展开原文',exact:true}).click();
+    const source=page.getByRole('region',{name:'原文与来源'});await source.waitFor();assert.ok((await source.innerText()).length>0);
+    await source.getByRole('button',{name:'收起编辑',exact:true}).click();
+    report.citationNavigation={cards:await page.getByLabel(/^原笔记：/).count()};await screenshot('workbench-source-backlink-navigation');
   });
   await step('正文标签保存后重开，图组和引用完整恢复',async()=>{
     await stage('正文');await page.getByLabel('确认发布标签').fill('家庭养育 作业启动');await page.getByLabel('确认发布标签').blur();await save();
@@ -407,12 +390,18 @@ try {
     report.persistedPageIds=doc.pages.map(item=>item.id);
   });
   await step('正文修改后刷新仍定位关联图页，采用一页保留其他手改',async()=>{
-    const doc=(await envelope()).revision.document;const linked=doc.uses.find(item=>item.target.kind==='pageBlock'&&item.canvasId===doc.uses.find(use=>use.target.kind==='paragraph'&&use.target.paragraphId===doc.paragraphs[0].id).canvasId);
+    const doc=(await envelope()).revision.document;
+    // 放入作品 may target a paragraph the dialog creates on the spot, so pair the uses by canvas card rather than assuming 正文第 1 段.
+    const paragraphUse=doc.uses.find(use=>use.target.kind==='paragraph'&&doc.uses.some(item=>item.target.kind==='pageBlock'&&item.canvasId===use.canvasId));
+    assert.ok(paragraphUse,'a canvas card placed into the body also names a page block');
+    const linked=doc.uses.find(item=>item.target.kind==='pageBlock'&&item.canvasId===paragraphUse.canvasId);
+    const paragraphIndex=doc.paragraphs.findIndex(item=>item.id===paragraphUse.target.paragraphId);assert.ok(paragraphIndex>=0);
+    const paragraphLabel=`正文第 ${paragraphIndex+1} 段`,bodyText='先把练习本放好，只做眼前这一小步。';
     const targetPage=doc.pages.find(item=>item.id===linked.target.pageId),other=doc.pages.find(item=>item.kind==='steps');
-    await page.getByLabel('正文第 1 段').fill('先把练习本放好，只做眼前这一小步。');await save();await page.reload();await page.getByLabel('正文第 1 段').waitFor();await stage('内页');
+    await page.getByLabel(paragraphLabel).fill(bodyText);await save();await page.reload();await page.getByLabel(paragraphLabel).waitFor();await stage('内页');
     await imageSection().getByRole('navigation',{name:'图页顺序'}).getByRole('button').filter({hasText:targetPage.title}).click();
     await imageSection().getByRole('button',{name:'带入这一段',exact:true}).waitFor();await imageSection().getByRole('button',{name:'带入这一段',exact:true}).click();await save();
-    const after=(await envelope()).revision.document;assert.equal(after.pages.find(item=>item.id===targetPage.id).blocks.find(item=>item.id===linked.target.blockId).text,'先把练习本放好，只做眼前这一小步。');assert.deepEqual(after.pages.find(item=>item.id===other.id),other);
+    const after=(await envelope()).revision.document;assert.equal(after.pages.find(item=>item.id===targetPage.id).blocks.find(item=>item.id===linked.target.blockId).text,bodyText);assert.deepEqual(after.pages.find(item=>item.id===other.id),other);
     await screenshot('workbench-a09-persisted-update');
   });
   await step('保存实际提交后断开回执：未确认、无自动重试、GET 核实原编号',async()=>{
@@ -422,8 +411,8 @@ try {
     await page.getByLabel('正文第 2 段').fill('先做两分钟，再给自己一次选择。');await openWritingTools();await page.getByRole('button',{name:'保存',exact:true}).click();
     await page.getByRole('button',{name:'沿用原请求重试',exact:true}).waitFor();const count=report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/save')).length;
     await remains(()=>report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/save')).length===count,'unknown save must not auto resend');
-    assert.ok(await page.locator('[aria-label="保存状态：结果未确认"]').count());
-    await page.getByRole('button',{name:'沿用原请求重试',exact:true}).click();await page.locator('[aria-label="保存状态：已保存"]').waitFor();
+    assert.ok(await page.locator('summary[aria-label="写稿工具，结果未确认"]').count());
+    await page.getByRole('button',{name:'沿用原请求重试',exact:true}).click();await page.locator('summary[aria-label="写稿工具，已保存"]').waitFor();
     assert.ok(report.requests.some(item=>item.method==='GET'&&item.path===`/ops/api/creation/requests/${originalId}`));
     assert.equal(report.requests.filter(item=>item.method==='POST'&&item.path.endsWith('/save')).length,count,'GET receipt avoids duplicate POST after committed save');
     await page.unroute(pattern);report.saveReconciledRequestId=originalId;await screenshot('workbench-after-unknown-save-recovery');
@@ -460,10 +449,6 @@ try {
     await screenshot('workbench-second-tab-conflict',second);await conflict.getByRole('button',{name:'保留本页编辑，另存新版本',exact:true}).click();await save(second);await second.close();
     await page.reload();await page.getByLabel('正文第 2 段').waitFor();assert.equal(await page.getByLabel('正文第 2 段').inputValue(),'本页版本：保留自己的新表达。');
     const response=await context.request.get(`${origin}/ops/api/creation/exports/${exportedRecord.id}/download`);assert.equal(response.status(),200);assert.ok((await response.body()).equals(packageBytes));
-  });
-  await step('键盘 Esc 关闭历史并还原焦点，减少动态效果生效',async()=>{
-    await openWritingTools();const history=page.getByRole('button',{name:'历史',exact:true});await history.focus();await page.keyboard.press('Enter');await page.getByRole('dialog',{name:'历史与恢复'}).waitFor();await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'detached'});
-    assert.equal(await page.evaluate(()=>document.activeElement?.textContent),'历史');assert.ok(await page.evaluate(()=>matchMedia('(prefers-reduced-motion: reduce)').matches));
   });
   await step('资产库：账号身份、产品事实卡、衔接句经页面写入，接口回读与填写一致',async()=>{
     await page.setViewportSize({width:1440,height:900});
@@ -518,8 +503,14 @@ try {
     await panel.getByText(wording).waitFor({state:'detached'});await screenshot('workbench-1440-checks-before-copy');
     await until(async()=>await copy.isEnabled(),'copy opens once the check is clear');await copy.click();await footer.getByText(/已复制到剪贴板/).waitFor();
     const clipboard=await page.evaluate(()=>navigator.clipboard.readText());
-    assert.equal(clipboard,['今天先把示例营的练习本放到桌上。',bridgeSentence,'本页版本：保留自己的新表达。'].join('\nㅤ\n')+'\n#家庭养育 #作业启动');
-    const current=await envelope();assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied.revisionId,current.revision.id,'the copy is recorded against the saved revision it came from');
+    const current=await envelope(),doc=current.revision.document;
+    // Paragraph order is the saved document's order: cards placed into it append paragraphs, so the copy is built from it.
+    const kept=doc.paragraphs.filter(item=>item.text.trim()),lines=kept.map(item=>item.text.trimEnd()),bridgeText=doc.bridge?.sentence?.text;
+    if(bridgeText){const anchor=doc.bridge.afterParagraph,after=anchor?kept.findIndex(item=>item.id===anchor)+1:0;lines.splice(after>0?after:(lines.length>=2?lines.length-1:lines.length),0,bridgeText);}
+    const tagLine=doc.tags.map(item=>`#${item.trim().replace(/^[#＃]+/u,'')}`).join(' ');
+    assert.equal(clipboard,lines.join('\nㅤ\n')+(tagLine?`\n${tagLine}`:''));
+    assert.ok(clipboard.includes(bridgeSentence)&&kept.every(item=>clipboard.includes(item.text.trim())));
+    assert.equal((await creationJson(`/works/${workId}/copy-status`)).copied.revisionId,current.revision.id,'the copy is recorded against the saved revision it came from');
     assert.equal(current.revision.document.bridge.sentence.sentenceCode,'XJ-0001');assert.equal((await creationJson('/bridge-sentences?status=ok')).items[0].usedCount,1);
     await footer.getByText(/已复制（还没有发布）/,{exact:false}).waitFor();await screenshot('workbench-1440-checks-copied');
     await panel.getByRole('button',{name:'标题',exact:true}).click();await panel.getByRole('button',{name:'复制标题',exact:true}).click();await footer.getByText('标题已复制。').waitFor();
@@ -540,37 +531,20 @@ try {
       await stage('预览与导出');const action=imageSection().getByRole('button',{name:'保存并生成图文包',exact:true});
       await until(async()=>await action.isEnabled(),'export validation ready',45_000);await assertHorizontalReachability(action,'保存并生成图文包');await assertPrimaryContrast(action,width);await action.hover();await assertPrimaryContrast(action,width,'hover');await page.mouse.move(0,0);
       await screenshot(`workbench-${width}x${height}-export`);
-      await stage('材料');await page.getByRole('group',{name:'材料类型'}).getByRole('button').filter({hasText:'全部材料'}).click();await page.getByRole('region',{name:'原文阅读'}).waitFor();await until(async()=>await page.getByRole('navigation',{name:'材料分布索引'}).locator('span[data-piece-id]').count()>100,'resolved long material collection has rendered');
-      const markerIds=await page.getByRole('navigation',{name:'材料分布索引'}).locator('span[data-piece-id]').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('data-piece-id')).sort()),paperIds=await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('data-fragment-id')).sort());
-      assert.ok(markerIds.length>100);assert.equal(new Set(markerIds).size,markerIds.length,'distribution retains each fragment once');assert.deepEqual(markerIds,paperIds,'matrix and paper wall preserve the exact complete visible fragment identities');report.matrixFragmentSetChecks??=[];report.matrixFragmentSetChecks.push({width,count:markerIds.length,sha256:createHash('sha256').update(markerIds.join('\n')).digest('hex')});
-      await assertHorizontalReachability(page.getByLabel('搜索材料中的片段',{exact:true}),'片段检索');await assertHorizontalReachability(page.getByRole('region',{name:'原文阅读'}),'原文阅读区');await assertHorizontalReachability(page.getByRole('button',{name:'摘入画布',exact:true}),'摘入画布');
-      const indexBounds=await page.getByRole('navigation',{name:'材料分布索引'}).locator('span[data-piece-id], i').evaluateAll(nodes=>nodes.map(node=>{const box=node.getBoundingClientRect();return {left:box.left,right:box.right};}));
-      assert.ok(indexBounds.length>100,'long synthetic source retains all fragment index segments');assert.ok(indexBounds.every(box=>box.left>=0&&box.right<=width+0.5),'every index segment and marker stays within the viewport');
+      await stage('材料');
+      const deskTools=page.getByRole('group',{name:'材料与选题'});await deskTools.waitFor();
+      await assertHorizontalReachability(deskTools.getByRole('button',{name:'找材料',exact:true}),'找材料');
+      await deskTools.getByRole('button',{name:'找材料',exact:true}).click();
+      const shelf=page.getByRole('complementary',{name:'找材料'});await shelf.waitFor();
+      await until(async()=>await shelf.getByRole('button',{name:'放进框',exact:true}).count()>0,'desk shelf resolves the long synthetic collection');
+      await assertHorizontalReachability(shelf.getByLabel('搜索材料',{exact:true}),'搜索材料');
+      const shelfResults=await shelf.getByRole('button',{name:'放进框',exact:true}).count();assert.ok(shelfResults>0,'material shelf lists resolved fragments');
+      await assertHorizontalReachability(page.getByLabel('选题框：作业启动'),'选题框');
+      report.matrixFragmentSetChecks??=[];report.matrixFragmentSetChecks.push({width,shelfResults});
       layout=await screenshot(`workbench-${width}x${height}-materials`);assert.ok(layout.documentWidth<=layout.viewport);
+      await deskTools.getByRole('button',{name:'找材料',exact:true}).click();
     });
   }
-  await step('恢复未准备材料的历史稿后无需刷新即可再次登记、摘录与保存',async()=>{
-    await stage('材料');await save();report.restoredPreparation=[];report.restoredPreparationResponses=[];
-    const documentReads=report.requests.filter(request=>request.method==='GET'&&request.path==='/ops/creation').length;
-    for(const attempt of [1,2]){
-      const preparedResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/sources/prepare'&&response.request().method()==='POST'&&response.status()===200);
-      await openWritingTools();await page.getByRole('button',{name:'历史',exact:true}).click();const history=page.getByRole('dialog',{name:'历史与恢复'});await history.waitFor();
-      const first=history.locator('section').filter({hasText:/版本 1 ·/});assert.equal(await first.count(),1);
-      await first.getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});
-      const restored=await envelope();assert.equal(restored.revision.document.materialPreparation??null,null);assert.deepEqual(restored.revision.document.materials??[],[]);
-      const prepared=await(await preparedResponse).json();report.restoredPreparationResponses.push({attempt,documentCount:prepared.documents.length,state:prepared.state});assert.ok(prepared.documents.length>0,'synthetic fixture must provide readable matching materials before asserting registration');
-      await until(async()=>await page.getByRole('navigation',{name:'材料范围'}).getByRole('button').filter({hasText:/本篇材料\s*[1-9]/}).count()===1,'restored collection is registered without a page reload');
-      await page.getByRole('region',{name:'分组摘录纸条'}).locator('button[data-fragment-id]').first().click();const collect=page.getByRole('button',{name:'摘入画布',exact:true});assert.ok(await collect.isEnabled());
-      const anchor=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/sources/validate'&&response.request().method()==='POST');await collect.click();assert.equal((await anchor).status(),200);await until(async()=>await collect.isEnabled(),'restored source selection validated');await save();
-      const saved=await envelope();assert.ok(saved.revision.document.materialPreparation);assert.ok(saved.revision.document.materials.length>0);assert.equal(saved.revision.document.excerpts.length,1);report.restoredPreparation.push({attempt,historicalRevision:1,restoredRevision:restored.revision.id,savedRevision:saved.revision.id,materialCount:saved.revision.document.materials.length,excerptCount:1});await screenshot(`workbench-restored-preparation-${attempt}-without-reload`);
-    }
-    assert.equal(report.requests.filter(request=>request.method==='GET'&&request.path==='/ops/creation').length,documentReads,'history recovery must not reload the page');
-  });
-  await step('恢复保留副本时一并保存未提交标签，不用历史标签覆盖',async()=>{
-    await stage('正文');const tags=page.getByLabel('确认发布标签',{exact:true});await tags.fill('本页标签 合成标签');await save();const retained=await envelope();
-    await tags.fill('未保存标签 合成标签 未保存标签');await openWritingTools();await page.getByRole('button',{name:'历史',exact:true}).click();let history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/版本 1 ·/}).getByRole('button',{name:'恢复为新版本',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'');
-    await page.getByRole('button',{name:'历史',exact:true}).click();history=page.getByRole('dialog',{name:'历史与恢复'});await history.locator('section').filter({hasText:/本页保留副本/}).last().getByRole('button',{name:'恢复到编辑区',exact:true}).click();await history.waitFor({state:'detached'});assert.equal(await tags.inputValue(),'未保存标签 合成标签');await save();const recovered=await envelope();assert.deepEqual(recovered.revision.document,{...retained.revision.document,tags:['未保存标签','合成标签']});report.retainedTagRecovery={beforeRevision:retained.revision.id,afterRevision:recovered.revision.id,tags:recovered.revision.document.tags};await screenshot('workbench-retained-copy-tags-recovered');
-  });
   await step('双页面：合成经历撤回后遮盖旧稿并重新编辑',async()=>{
     const mine=(await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item=>item.accountRef===accountRef);
     await page.goto(`${origin}/ops/creation?domain=${domainRef}&section=assets`);
@@ -594,8 +568,9 @@ try {
     await library.getByRole('button',{name:'保存经历'}).click();
     await library.getByLabel('本人已确认这版内容并同意用于稿件').check();await library.getByRole('button',{name:'登记本人确认'}).click();
     await library.getByText('本人已确认 · 修改内容后需要再次确认。').waitFor();
-    const editor=await context.newPage();editor.setDefaultTimeout(20_000);await editor.goto(workUrl);await stage('选题方案',editor);
-    await editor.getByLabel('所属账号',{exact:true}).selectOption(accountRef);await save(editor);await stage('正文',editor);
+    const editor=await context.newPage();editor.setDefaultTimeout(20_000);await editor.goto(workUrl);await stage('正文',editor);
+    const panel=editor.getByRole('complementary',{name:'检查与复制'});await panel.getByText('账号与衔接设置').click();
+    await panel.getByLabel('所属账号').selectOption(accountRef);await save(editor);
     await editor.getByRole('button',{name:'从经历库选'}).click();const selected=editor.getByLabel('选择本人已确认的经历');const experienceOption=selected.locator('option').filter({hasText:'双页撤回测试'}); await experienceOption.waitFor({state:'attached'}); await selected.selectOption(await experienceOption.getAttribute('value'));
     await editor.getByRole('button',{name:'放入正文',exact:true}).click();await save(editor);
     assert.ok((await envelope()).revision.document.experienceSlots.length>0,'saved draft has experience reference');

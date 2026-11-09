@@ -146,43 +146,53 @@ export function SentenceLibrary() {
     await queryClient.cancelQueries({ queryKey: ['creation-assets', 'draft-checks'] });
     await queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
   })(); };
-  return <section className={styles.assetBody} aria-label="衔接句">
-    <div>
-      <div className={styles.toolbar}>
-        <h2>衔接句</h2>
-        <ActionButton variant="outline" onClick={() => setSelected('new')}>＋ 新增一句</ActionButton>
+  return <section aria-label="衔接句">
+    <header className="as-head">
+      <div className="grow">
+        <h1 className="h-obj">衔接句</h1>
+        <p>只有“可用”的句子会在写稿时被选用；新增和改写的句子都先待审。按账号和机构的真实关系分组。</p>
       </div>
-      <p className={styles.hint}>只有“可用”的句子会在写稿时被选用；新增和改写的句子都先待审。</p>
-      <div className={styles.actions}>
-        <label>身份
-          <select aria-label="按身份筛选" value={group} onChange={event => setGroup(event.target.value as BridgeGroup | '')}>
-            <option value="">全部</option>{GROUPS.map(value => <option key={value} value={value}>{groupLabel[value]}</option>)}
-          </select>
-        </label>
-        <label>状态
-          <select aria-label="按状态筛选" value={status} onChange={event => setStatus(event.target.value as SentenceStatus | '')}>
-            <option value="">全部</option>{STATUSES.map(value => <option key={value} value={value}>{sentenceStatusLabel[value]}</option>)}
-          </select>
-        </label>
+      <ActionButton variant="outline" onClick={() => setSelected('new')}>＋ 新增一句</ActionButton>
+    </header>
+    <div className="lib-tools">
+      <label className="lbl">身份
+        <select aria-label="按身份筛选" value={group} onChange={event => setGroup(event.target.value as BridgeGroup | '')}>
+          <option value="">全部</option>{GROUPS.map(value => <option key={value} value={value}>{groupLabel[value]}</option>)}
+        </select>
+      </label>
+      <label className="lbl">状态
+        <select aria-label="按状态筛选" value={status} onChange={event => setStatus(event.target.value as SentenceStatus | '')}>
+          <option value="">全部</option>{STATUSES.map(value => <option key={value} value={value}>{sentenceStatusLabel[value]}</option>)}
+        </select>
+      </label>
+    </div>
+    {sentences.isPending ? <p role="status">正在读取…</p> : null}
+    {sentences.isError ? <p role="alert" className={styles.problem}>读取失败，可以<ActionButton variant="quiet" onClick={() => void sentences.refetch()}>重试</ActionButton></p> : null}
+    {sentences.isSuccess && items.length === 0 ? <p className="lib-empty">{group || status ? '没有符合筛选的句子。' : '句库还是空的，先新增一句。'}</p> : null}
+    {items.length || selected === 'new' ? <div className="lib">
+      <div className="lib-table">
+        <table className="ledger">
+          <thead><tr><th scope="col">句子</th><th scope="col">身份</th><th scope="col">状态</th><th scope="col">选用</th></tr></thead>
+          <tbody>{items.map(item => {
+            const on = item.code === selected;
+            return <tr key={item.code} className={on ? 'lib-row on' : 'lib-row'}>
+              <td><button type="button" aria-current={on ? 'true' : undefined} onClick={() => setSelected(item.code)}>
+                <span>{item.text}</span><small>{item.code}</small></button></td>
+              <td>{groupLabel[item.group]}</td>
+              <td><span className={styles.statusChip}>{sentenceStatusLabel[item.status]}</span></td>
+              <td><span>稿件选用 {item.usedCount} 篇</span></td>
+            </tr>;
+          })}</tbody>
+        </table>
       </div>
-      {sentences.isPending ? <p role="status">正在读取…</p> : null}
-      {sentences.isError ? <p role="alert" className={styles.problem}>读取失败，可以<ActionButton variant="quiet" onClick={() => void sentences.refetch()}>重试</ActionButton></p> : null}
-      {sentences.isSuccess && items.length === 0 ? <p>{group || status ? '没有符合筛选的句子。' : '句库还是空的，先新增一句。'}</p> : null}
-      <ul className={styles.list}>{items.map(item => <li key={item.code}>
-        <button type="button" aria-current={item.code === selected ? 'true' : undefined} onClick={() => setSelected(item.code)}>
-          <span>{item.text}</span>
-          <small className={styles.meta}><span>{item.code}</span><span>{groupLabel[item.group]}</span>
-            <span className={styles.statusChip}>{sentenceStatusLabel[item.status]}</span><span>稿件选用 {item.usedCount} 篇</span></small>
-        </button>
-      </li>)}</ul>
-    </div>
-    <div className={styles.detail}>
-      {selected === 'new' ? <SentenceEditor key="new" sentence={null} onSaved={code => { setSelected(code); reload(); }} />
-        : current ? <>
-          <SentenceEditor key={`${current.code}:${current.revision}`} sentence={current} onSaved={reload} />
-          <FindingList findings={current.entryFindings} />
-          <ReviewBar key={`${current.code}:${current.revision}:${current.status}`} sentence={current} onDone={reload} />
-        </> : <p className={styles.hint}>在左边选一句，或新增一句。</p>}
-    </div>
+      <aside className="lib-insp" aria-label="衔接句详情">
+        {selected === 'new' ? <SentenceEditor key="new" sentence={null} onSaved={code => { setSelected(code); reload(); }} />
+          : current ? <>
+            <SentenceEditor key={`${current.code}:${current.revision}`} sentence={current} onSaved={reload} />
+            <FindingList findings={current.entryFindings} />
+            <ReviewBar key={`${current.code}:${current.revision}:${current.status}`} sentence={current} onDone={reload} />
+          </> : <p className={styles.hint}>在左边选一句，或新增一句。</p>}
+      </aside>
+    </div> : null}
   </section>;
 }

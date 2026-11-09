@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TopicLibrary } from "./TopicLibrary";
-import { TopicDetail } from "./TopicDetail";
 import * as api from "./workbenchApi";
 import { newDocument } from "./workbenchModel";
 import { ApiError } from "../../shared/api";
@@ -81,38 +80,5 @@ describe("unknown values remain unknown on topic surfaces", () => {
     expect(screen.getAllByText(/原稿已保留/).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: "重试读取方案" })).not.toBeInTheDocument();
     expect(screen.queryByText(/读取失败，进度未知/)).not.toBeInTheDocument();
-  });
-  it("only reports no accounts after a successful empty read and labels known platforms in Chinese", () => {
-    const props = {
-      document: newDocument("标题"),
-      accounts: [],
-      onRetryAccounts: vi.fn(),
-      onChange: vi.fn(),
-      onCompose: vi.fn(),
-      onRead: vi.fn(),
-      onWrite: vi.fn(),
-    };
-    const view = render(<TopicDetail {...props} accountsState="pending" />);
-    expect(screen.getByText("正在读取所属账号…")).toBeInTheDocument();
-    expect(screen.queryByText(/还没有运营账号/)).not.toBeInTheDocument();
-    view.rerender(
-      <TopicDetail {...props} accountsState="error" accountError="读取失败" />,
-    );
-    expect(
-      screen.getByRole("button", { name: "重新读取账号" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/还没有运营账号/)).not.toBeInTheDocument();
-    view.rerender(<TopicDetail {...props} accountsState="success" />);
-    expect(screen.getByText(/还没有运营账号/)).toBeInTheDocument();
-    view.rerender(
-      <TopicDetail
-        {...props}
-        accountsState="success"
-        accounts={[{ ref: id, name: "驭A低手裴妈", platform: "xhs" }]}
-      />,
-    );
-    expect(
-      screen.getByRole("option", { name: "驭A低手裴妈 · 小红书" }),
-    ).toBeInTheDocument();
   });
 });

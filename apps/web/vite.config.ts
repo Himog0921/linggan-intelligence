@@ -53,7 +53,7 @@ export default defineConfig({
   },
   server: {
     fs: { allow: [webRoot, sharedStyleRoot] },
-    ...(devApiOrigin ? { proxy: { '/api': { target: devApiOrigin } } } : {}),
+    ...(devApiOrigin ? { proxy: { '/api': { target: devApiOrigin }, '/ops/api': { target: devApiOrigin } } } : {}),
   },
   test: {
     environment: 'jsdom',

@@ -504,6 +504,7 @@ migrate() {
   apply_migration_once "0190_creation_ai_experience_material" "$project_root/database/migrations/0190_creation_ai_experience_material.sql"
   apply_migration_once "0191_note_analysis" "$project_root/database/migrations/0191_note_analysis.sql"
   apply_migration_once "0192_reset_image_recognition" "$project_root/database/migrations/0192_reset_image_recognition.sql"
+  apply_migration_once "0193_creation_desk_positions" "$project_root/database/migrations/0193_creation_desk_positions.sql"
 }
 
 case "$command_name" in

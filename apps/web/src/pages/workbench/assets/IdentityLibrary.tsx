@@ -14,27 +14,35 @@ export function IdentityLibrary({ domainRef }: { domainRef: string }) {
   const items = accounts.data ?? [];
   const current = items.find(item => item.accountRef === selected) ?? null;
   const reload = () => void queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
-  return <section className={styles.assetBody} aria-label="账号身份">
-    <div>
-      <div className={styles.toolbar}>
-        <h2>账号身份</h2>
-        <small>{accounts.isSuccess ? `${items.length} 个小红书账号` : ''}</small>
+  return <section aria-label="账号身份">
+    <header className="as-head">
+      <div className="grow">
+        <h1 className="h-obj">账号身份</h1>
+        <p>衔接句只会出现在“关系已确认且简介已写明”的账号上。没有填写的账号不会被当成“无关系”。</p>
       </div>
-      <p className={styles.hint}>衔接句只会出现在“关系已确认且简介已写明”的账号上。没有填写的账号不会被当成“无关系”。</p>
-      {accounts.isPending ? <p role="status">正在读取账号…</p> : null}
-      {accounts.isError ? <p role="alert" className={styles.problem}>账号读取失败，可以<ActionButton variant="quiet" onClick={() => void accounts.refetch()}>重试</ActionButton></p> : null}
-      {accounts.isSuccess && items.length === 0 ? <p>这个领域下没有可写稿的小红书账号（在用或养号中）。</p> : null}
-      <ul className={styles.list}>{items.map(item => <li key={item.accountRef}>
-        <button type="button" aria-current={item.accountRef === selected ? 'true' : undefined} onClick={() => setSelected(item.accountRef)}>
-          <b>{item.accountName}</b>
-          <small>{identitySummary(item.identity)}{item.operatorName ? ` · 负责：${item.operatorName}` : ''}</small>
-        </button>
-      </li>)}</ul>
-    </div>
-    <div className={styles.detail}>
-      {current ? <IdentityForm key={`${current.accountRef}:${current.identity?.revision ?? 0}`} accountRef={current.accountRef}
-        accountName={current.accountName} identity={current.identity} onSaved={reload} onStale={reload} />
-        : <p className={styles.hint}>在左边选一个账号，查看或填写它的身份。</p>}
-    </div>
+      <span className="asset-count">{accounts.isSuccess ? `${items.length} 个小红书账号` : ''}</span>
+    </header>
+    {accounts.isPending ? <p role="status">正在读取账号…</p> : null}
+    {accounts.isError ? <p role="alert" className={styles.problem}>账号读取失败，可以<ActionButton variant="quiet" onClick={() => void accounts.refetch()}>重试</ActionButton></p> : null}
+    {accounts.isSuccess && items.length === 0 ? <p className="lib-empty">这个领域下没有可写稿的小红书账号（在用或养号中）。</p> : null}
+    {items.length ? <div className="lib">
+      <div className="lib-table">
+        <table className="ledger">
+          <thead><tr><th scope="col">账号</th><th scope="col">已知</th></tr></thead>
+          <tbody>{items.map(item => {
+            const on = item.accountRef === selected;
+            return <tr key={item.accountRef} className={on ? 'lib-row on' : 'lib-row'}>
+              <td><button type="button" aria-current={on ? 'true' : undefined} onClick={() => setSelected(item.accountRef)}><b>{item.accountName}</b></button></td>
+              <td>{identitySummary(item.identity)}{item.operatorName ? ` · 负责：${item.operatorName}` : ''}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <aside className="lib-insp" aria-label="账号身份详情">
+        {current ? <IdentityForm key={`${current.accountRef}:${current.identity?.revision ?? 0}`} accountRef={current.accountRef}
+          accountName={current.accountName} identity={current.identity} onSaved={reload} onStale={reload} />
+          : <p className={styles.hint}>在左边选一个账号，查看或填写它的身份。</p>}
+      </aside>
+    </div> : null}
   </section>;
 }

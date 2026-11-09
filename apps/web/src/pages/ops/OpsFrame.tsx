@@ -6,15 +6,15 @@ import { NavIcon, Sidebar } from '../../shared/Sidebar';
 
 /** Ops owns two secondary destinations; page sections and scope belong to Z02. */
 export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, restricted = false, children }: {
-  section: 'data' | 'creation'; domain: string; scope: ReactNode; tabs: ReactNode;
+  section: 'data' | 'creation'; domain: string; scope: ReactNode; tabs?: ReactNode;
   meta?: ReactNode; foot?: ReactNode; immersive?: boolean; restricted?: boolean; children: ReactNode;
 }) {
   const selectedDomain = domain && domain !== 'all' ? `?domain=${encodeURIComponent(domain)}` : '';
   return <AppShell active="ops" restrictedOps={restricted}
     boundaryLabel="本机服务状态" className={immersive ? 'ops-immersive' : undefined}
     contextBar={{
-      breadcrumb: <ContextBreadcrumb items={['运营', scope, section === 'creation' ? '创作' : '数据']} />,
-      navigation: <ContextTabs label={section === 'data' ? '数据页面' : '创作页面'}>{tabs}</ContextTabs>,
+      breadcrumb: <ContextBreadcrumb items={section === 'creation' ? [scope, '运营', '创作'] : ['运营', scope, '数据']} />,
+      navigation: tabs ? <ContextTabs label={section === 'data' ? '数据页面' : '创作页面'}>{tabs}</ContextTabs> : undefined,
       meta,
     }}>
     <div className="v7-shell" data-ops-section={section}>

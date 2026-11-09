@@ -1,5 +1,5 @@
 import { ApiError, requestJson, requestBinaryJson } from '../../shared/api';
-import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, parseDeskCardPosition, parseDeskCardPositions, parseDeskPosition, parseDeskPositions, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
 import { listAccounts as listCreationAccounts } from './assets/assetsApi';
 const base = '/ops/api/creation';
 const post = (path: string, body: unknown) => requestJson(path, {
@@ -13,6 +13,18 @@ export async function listWorks(domain: string, signal?: AbortSignal) {
 }
 export async function listIdeaBoxes(domain: string, signal?: AbortSignal) {
   return parseIdeaBoxList(await requestJson(`${base}/idea-boxes?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
+}
+export async function deskPositions(domain: string, signal?: AbortSignal) {
+  return parseDeskPositions(await requestJson(`${base}/desk/positions?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
+}
+export async function saveDeskPosition(body: { domainRef: string; workId: string; x: number; y: number; width: number | null; height: number | null }) {
+  return parseDeskPosition(await post(`${base}/desk/positions`, body));
+}
+export async function deskCardPositions(domain: string, signal?: AbortSignal) {
+  return parseDeskCardPositions(await requestJson(`${base}/desk/card-positions?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
+}
+export async function saveDeskCardPosition(body: { domainRef: string; workId: string; blockId: string; x: number; y: number }) {
+  return parseDeskCardPosition(await post(`${base}/desk/card-positions`, body));
 }
 export async function readWork(id: string, signal?: AbortSignal) {
   const value = parseEnvelope(await requestJson(`${base}/works/${uuid(id)}`, {
@@ -102,15 +114,15 @@ export async function resolveMaterials(body: {domainRef: string; selections: Mat
 }
 export async function sources(query: {
   domainRef: string;
-  kind: string;
+  kind?: string;
   query: string;
   cursor?: number;
 }, signal?: AbortSignal) {
   const params = new URLSearchParams({
     domainRef: query.domainRef,
-    kind: query.kind,
     query: query.query
   });
+  if (query.kind) params.set('kind', query.kind);
   if (query.cursor !== undefined) params.set('cursor', String(query.cursor));
   return parseSourceList(await requestJson(`${base}/sources?${params}`, {
     signal

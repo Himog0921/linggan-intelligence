@@ -8,7 +8,7 @@ const idea: IdeaBoxSummary = { ideaRef: '00000000-0000-4000-8000-000000000001', 
 function Harness({ initial, open }: { initial: WorkDocument; open: (id: string) => void }) {
   const [document, edit] = useState(initial);
   const [name, setName] = useState('');
-  return <><IdeaBoxLink name={name} onNameChange={setName} compose={() => {}} document={document} ideas={[idea]} state="success" edit={edit} openTopic={open} /><output aria-label="文档快照">{JSON.stringify(document)}</output></>;
+  return <><IdeaBoxLink name={name} onNameChange={setName} compose={() => {}} document={document} ideas={[idea]} state="success" edit={edit} openAnchor={open} /><output aria-label="文档快照">{JSON.stringify(document)}</output></>;
 }
 describe('选题框关联', () => {
   it('associates a manual draft to a real existing idea and opens the anchor', () => {

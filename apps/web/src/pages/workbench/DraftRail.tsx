@@ -3,7 +3,6 @@ import { useEffect } from 'react';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { checkSavedDrafts, type DraftCheckSummary } from './draftChecks';
 import type { IdeaBoxSummary, WorkSummary } from './workbenchModel';
-import styles from './WorkbenchPage.module.css';
 
 type DraftGroup = 'must' | 'warn' | 'checked' | 'copied' | 'published' | 'unknown';
 function draftGroup(work: WorkSummary, check: DraftCheckSummary | undefined): DraftGroup {
@@ -15,10 +14,21 @@ function draftGroup(work: WorkSummary, check: DraftCheckSummary | undefined): Dr
   if (check.warn) return 'warn';
   return 'checked';
 }
+const GROUP_DOT: Record<DraftGroup, string> = { must: 'bad', warn: 'warn', checked: 'ok', copied: 'ok', published: 'ok', unknown: 'unk' };
+function stateText(work: WorkSummary, check: DraftCheckSummary | undefined, group: DraftGroup) {
+  if (work.publicationUnavailable) return '关联的发布记录当前不可用';
+  if (group === 'published') return `已登记发布${work.publishedRevisionId && work.publishedRevisionId !== work.revisionId ? ' · 当前稿件已修改' : ''}`;
+  if (!check || check.revisionId !== work.revisionId) return '状态未核实';
+  if (check.must) return `必改 ${check.must} · 提醒 ${check.warn}${check.notRun ? ' · 部分未检查' : ''}`;
+  if (group === 'copied') return `已复制不代表已发布${check.warn ? ` · 提醒 ${check.warn}` : ''}`;
+  if (check.warn) return `提醒 ${check.warn} · 可以复制`;
+  return '可以复制了';
+}
 
 /** Checks and copy receipts describe saved revisions; neither proves platform publication. */
-export function DraftRail({ drafts, ideas = [], status, currentId, onOpen }: {
-  drafts: WorkSummary[]; ideas?: IdeaBoxSummary[]; status: 'loading' | 'error' | 'ready'; currentId: string; onOpen: (id: string) => void;
+export function DraftRail({ drafts, ideas = [], status, currentId, onOpen, onOpenDesk }: {
+  drafts: WorkSummary[]; ideas?: IdeaBoxSummary[]; status: 'loading' | 'error' | 'ready'; currentId: string;
+  onOpen: (id: string) => void; onOpenDesk?: () => void;
 }) {
   const queryClient = useQueryClient();
   const ordered = [...drafts].sort((a, b) => a.workId.localeCompare(b.workId));
@@ -48,28 +58,42 @@ export function DraftRail({ drafts, ideas = [], status, currentId, onOpen }: {
     const check = checks[index];
     if (check && !check.isFetching && !check.isError && !check.isStale) Object.assign(results, check.data);
   });
-  const groups: { key: DraftGroup; label: string; note: string }[] = [
-    { key: 'must', label: '必须先改', note: '保存版本仍有必改' },
-    { key: 'warn', label: '有提醒', note: '保存版本有提醒' },
-    { key: 'checked', label: '已检查', note: '保存版本没有必改' },
-    { key: 'copied', label: '已复制', note: '已复制不代表已发布' },
-    { key: 'published', label: '已登记发布', note: '已关联运营发布记录' },
-    { key: 'unknown', label: '状态未核实', note: '保存版本需要重新核验' },
+  const groups: { key: DraftGroup; label: string }[] = [
+    { key: 'must', label: '必须先改' },
+    { key: 'warn', label: '有提醒' },
+    { key: 'checked', label: '已检查' },
+    { key: 'copied', label: '已复制' },
+    { key: 'published', label: '已登记发布' },
+    { key: 'unknown', label: '状态未核实' },
   ];
-  return <aside className={styles.draftRail} aria-label="稿件列表">
-    <div className={styles.draftRailHeading}><strong>我的稿件</strong><small>{status === 'loading' ? '正在读取稿件…' : status === 'error' ? '稿件读取失败' : `${drafts.length} 篇已保存`}</small>{checks.some(check => check.isError) ? <button type="button" onClick={recheck}>重新检查</button> : null}</div>
-    {groups.map(group => {
-      const items = drafts.filter(item => draftGroup(item, results[item.workId]) === group.key);
-      return items.length ? <section key={group.key} aria-label={group.label}>
-        <div className={styles.draftGroupHeading}><strong>{group.label}</strong><small>{items.length}</small></div>
-        <ul>{items.map(item => {
-          const check = results[item.workId];
-          return <li key={item.workId}><button type="button" aria-current={item.workId === currentId ? 'page' : undefined} onClick={() => onOpen(item.workId)}>
-            <b>{item.title || '未命名稿件'}</b>{item.ideaRef ? <small>选题：{ideas.find(idea => idea.ideaRef === item.ideaRef)?.name ?? '读取中'}</small> : null}<small>{item.publicationUnavailable ? '关联的发布记录当前不可用' : group.note}{item.publishedRevisionId && item.publishedRevisionId !== item.revisionId ? ' · 当前稿件已修改' : ''}{check?.revisionId === item.revisionId ? ` · 必改 ${check.must} · 提醒 ${check.warn}${check.notRun ? ' · 部分未检查' : ''}` : ''}</small><small>更新于 {humanMoment(item.savedAt)}</small>
-          </button></li>;
-        })}</ul>
-      </section> : null;
-    })}
-    {!drafts.length && status === 'ready' ? <p>还没有其他已保存稿件。</p> : null}
+  const today = new Date();
+  return <aside className="queue" aria-label="稿件列表">
+    <div className="q-head">
+      <div className="q-head-top">
+        <h2>今日 · {today.getMonth() + 1}月{today.getDate()}日 周{'日一二三四五六'[today.getDay()]}</h2>
+        <small className="aux">{status === 'loading' ? '正在读取稿件…' : status === 'error' ? '稿件读取失败' : `${drafts.length} 篇已保存`}</small>
+      </div>
+      {checks.some(check => check.isError) ? <button type="button" className="btn sm" onClick={recheck}>重新检查</button> : null}
+      {onOpenDesk ? <button type="button" className="btn desk-entry" onClick={onOpenDesk}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16"/><path d="M8 4v16M12 9h5M12 13h5"/></svg>选题与材料<span className="data">{drafts.length} 个选题</span>
+      </button> : null}
+    </div>
+    <div className="q-list">
+      {groups.map(group => {
+        const items = drafts.filter(item => draftGroup(item, results[item.workId]) === group.key);
+        return items.length ? <section key={group.key} aria-label={group.label}>
+          <div className="q-sec">{group.label} <span className="data">{items.length}</span></div>
+          {items.map(item => {
+            const check = results[item.workId];
+            return <button type="button" key={item.workId} className="q-item" aria-current={item.workId === currentId ? 'page' : undefined} onClick={() => onOpen(item.workId)}>
+              <span className="q-title">{item.title || '未命名稿件'}</span>
+              <span className="q-meta"><span>{item.ideaRef ? ideas.find(idea => idea.ideaRef === item.ideaRef)?.name ?? '选题读取中' : '无选题框'}</span><span>{humanMoment(item.savedAt)}</span></span>
+              <span className="q-state"><span className={`dot ${GROUP_DOT[group.key]}`} />{stateText(item, check, group.key)}</span>
+            </button>;
+          })}
+        </section> : null;
+      })}
+      {!drafts.length && status === 'ready' ? <p className="q-foot">还没有其他已保存稿件。</p> : null}
+    </div>
   </aside>;
 }
