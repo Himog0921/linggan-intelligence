@@ -51,6 +51,28 @@ describe('经历来源', () => {
   });
 });
 
+describe('段落步骤', () => {
+  it('names a labelled paragraph by its step and hides a repeated one', () => {
+    const second = '00000000-0000-4000-8000-000000000003';
+    const initial = { ...newDocument(), paragraphs: [{ id: first, text: '开场' }, { id: second, text: '继续' }],
+      paragraphSteps: [{ paragraphId: first, step: 'opening' as const }, { paragraphId: second, step: 'opening' as const }] };
+    render(<Editor initial={initial} />);
+    const label = screen.getByLabelText('正文第 1 段').parentElement!.parentElement!.querySelector('.para-label')!;
+    expect(label.textContent).toBe('开头');
+    const repeated = screen.getByLabelText('正文第 2 段').parentElement!.parentElement!.querySelector('.para-label')!;
+    expect(repeated.className).toContain('cont');
+  });
+
+  it('labels a paragraph from the picker and drops the label with the paragraph', () => {
+    render(<Editor initial={{ ...newDocument(), paragraphs: [{ id: first, text: '一段' }] }} />);
+    fireEvent.change(screen.getByLabelText('第 1 段的步骤'), { target: { value: 'ending' } });
+    const label = screen.getByLabelText('正文第 1 段').parentElement!.parentElement!.querySelector('.para-label')!;
+    expect(label.textContent).toBe('收尾');
+    fireEvent.click(within(screen.getByLabelText('正文第 1 段').parentElement!).getByRole('button', { name: '删除这一段' }));
+    expect(screen.queryByText('收尾')).toBeNull();
+  });
+});
+
 describe('标题候选', () => {
   it('writes the cover headline directly and creates a cover only when the user types', () => {
     render(<Editor initial={newDocument('笔记标题')} />);

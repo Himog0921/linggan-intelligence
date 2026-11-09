@@ -53,6 +53,13 @@ pub struct Paragraph {
     pub id: Uuid,
     pub text: String,
 }
+/// The writing step a paragraph plays, named with the structural template vocabulary.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ParagraphStep {
+    pub paragraph_id: Uuid,
+    pub step: crate::creation_assets::StructuralStep,
+}
 /// Provenance of a whole paragraph containing a personal experience or an edit derived from it.
 /// The paragraph text is projected from erasable storage and is not embedded in revisions.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -324,6 +331,9 @@ pub struct WorkDocument {
     pub angle: String,
     pub outline: Vec<String>,
     pub paragraphs: Vec<Paragraph>,
+    /// The writing step each paragraph plays; an unlabelled paragraph is absent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paragraph_steps: Vec<ParagraphStep>,
     pub excerpts: Vec<Excerpt>,
     pub canvas: Vec<CanvasBlock>,
     pub pages: Vec<ImagePage>,
@@ -354,6 +364,7 @@ impl Default for WorkDocument {
             angle: String::new(),
             outline: vec![],
             paragraphs: vec![],
+            paragraph_steps: vec![],
             excerpts: vec![],
             canvas: vec![],
             pages: vec![],

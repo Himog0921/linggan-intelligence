@@ -8,7 +8,8 @@
 .gm-studio .editor > .ed-scroll {min-height:0}
 .gm-studio .ed-head .grow {flex:1}
 .gm-studio .ed-head .acc-btn,.gm-studio .ed-head .frame-chip {flex:none}
-.gm-studio .ed-head .ed-meta {flex:1 1 auto;min-width:0;max-width:44ch}
+.gm-studio .ed-head .chip {flex:none}
+.gm-studio .ed-head .ed-meta {flex:1 1 auto;min-width:0;max-width:44ch;margin-left:0;justify-content:flex-start}
 .gm-studio .ed-head .meta-basic {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--t-aux);color:var(--lgi-muted)}
 .gm-studio .ed-head > button {flex:none}
 .gm-studio .editor > .ed-foot {flex-wrap:nowrap}
@@ -43,6 +44,8 @@
 
 .gm-studio .para-text {display:block;width:100%;field-sizing:content;min-height:0;resize:none;background:transparent;border-top:0;border-right:0;border-bottom:0;border-radius:0}
 .gm-studio .para-text[readonly] {color:var(--lgi-muted)}
+.gm-studio .para-step {height:24px;padding:0 var(--s2);border:1px solid var(--lgi-border);border-radius:0;background:var(--lgi-canvas);font:500 var(--t-label)/1 var(--lgi-font-ui);color:var(--lgi-body)}
+.gm-studio .para-step:focus {outline:2px solid var(--lgi-focus);outline-offset:2px}
 
 .gm-studio .add-para {margin:var(--s3) 0 var(--s6) calc(var(--writing-gutter) + var(--s3));border:0;border-bottom:1px solid var(--lgi-border-strong);background:transparent;padding:0;font-size:var(--t-aux);color:var(--lgi-body);cursor:pointer}
 .gm-studio .add-para:hover {color:var(--lgi-signal);border-bottom-color:var(--lgi-signal-mark)}

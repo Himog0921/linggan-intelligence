@@ -18,7 +18,7 @@ import { TopicLibrary } from './TopicLibrary';
 import { CheckPanel } from './assets/CheckPanel';
 import { PublicationLinker, type PublicationPending } from './assets/PublicationLinker';
 import { SaveStructuralTemplate } from './assets/SaveStructuralTemplate';
-import type { CreateCommand as TemplateCreateCommand } from './assets/structuralTemplatesApi';
+import { listTemplates, type CreateCommand as TemplateCreateCommand } from './assets/structuralTemplatesApi';
 import { AssetsLibrary } from './assets/AssetsLibrary';
 import { MaterialDesk } from './MaterialDesk';
 import { newImagePage } from './imagePageFactory';
@@ -432,6 +432,11 @@ function WorkEditor({
     queryFn: ({
       signal
     }) => api.accounts(initial.domainRef, signal),
+    gcTime: 0
+  });
+  const templates = useQuery({
+    queryKey: ['creation-assets', 'templates', initial.domainRef],
+    queryFn: ({ signal }: { signal: AbortSignal }) => listTemplates(initial.domainRef, signal),
     gcTime: 0
   });
   const dirty = JSON.stringify(document) !== JSON.stringify(revision.document) || tagsDraft !== document.tags.join(' ');
@@ -1153,6 +1158,19 @@ function WorkEditor({
   }
   const saveStateText = saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中' : saveState === 'dirty' ? '未保存' : saveState === 'unknown' ? '结果未确认' : saveState === 'conflict' ? '版本冲突' : '保存失败';
   const saveAction = <ActionButton variant="outline" busy={busy&&saveState==='saving'} disabled={busy || composing || !!conflict} onClick={() => void saveCurrent().catch(() => undefined)}>{hasPending && saveState === 'unknown' ? '核实并重试' : saveState === 'saving' ? '保存中…' : '保存'}</ActionButton>;
+  const accountRecord = document.accountRef ? accounts.data?.find(item => item.ref === document.accountRef) : undefined;
+  const identity = accountRecord?.identity ?? null;
+  const accountChip = accountRecord === undefined ? null : <>
+    {!identity ? <span className="chip warn">身份待确认</span>
+      : identity.orgRelation === 'none' ? <span className="chip unk">无关系 · 不植入</span>
+      : identity.orgRelation === 'unknown' ? <span className="chip warn">身份待确认</span>
+      : <span className={`chip ${identity.bioDisclosesRelation === true ? 'ok' : 'warn'}`}>{identity.orgRelation === 'parent' ? '家长' : '督学'} · {identity.bioDisclosesRelation === true ? '简介已写明' : identity.bioDisclosesRelation === false ? '简介没写明' : '简介没核对'}</span>}
+    {identity?.hasRealPerson === false ? <span className="chip unk">背后无真人</span> : null}
+  </>;
+  const savedTemplate = templates.data?.filter(item => item.sourceWorkId === initial.workId).sort((a, b) => b.revision - a.revision)[0];
+  const edMeta = savedTemplate ? <div className="ed-meta" aria-label="稿件信息">
+    <span className="meta-sample" title={`本篇已存为样板 ${savedTemplate.code}`}>样板 <span className="data">{savedTemplate.code}</span> · {savedTemplate.status === 'review' ? '待审核' : savedTemplate.status === 'ok' ? '已通过' : '已停用'}</span>
+  </div> : null;
   const bodyTools = <details className={styles.writeTools} data-state={saveState}>
 <summary aria-label={`写稿工具，${saveStateText}`}><span aria-hidden="true">⋯</span></summary>
 <div className={styles.writeToolsPanel}>
@@ -1213,7 +1231,7 @@ function WorkEditor({
   {titleMessage ? <p role="alert">{titleMessage}{titleResult ? <button type="button" onClick={() => { setTitleCheckedSequence(-1); setTitleStatusRetry(value => value + 1); }}>重新核验</button> : null}</p> : null}
   {titleResult?.suggestion && (dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id) ? <p>稿件已变化，请重新生成。</p> : null}
   {titleAdoptIndex && hasPending ? <p>标题采用结果尚未确认，请沿用原请求核对。</p> : null}
-</section>} draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenAnchor={onOpenAnchor} workId={initial.workId} onCover={() => onView('cover')} tools={bodyTools} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); onView('desk'); }} copyContainer={copyContainer} titleContainer={titleContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div></div></div>}
+</section>} draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenAnchor={onOpenAnchor} workId={initial.workId} onCover={() => onView('cover')} tools={bodyTools} accountChip={accountChip} edMeta={edMeta} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); onView('desk'); }} copyContainer={copyContainer} titleContainer={titleContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div></div></div>}
 </div> : null}
     <div hidden={!['cover','inner','export'].includes(view)}>
 <ImagePages step={view === 'inner' ? 'inner' : view === 'export' ? 'export' : 'cover'} onStepChange={onView} onOpenSource={excerptId => { const excerpt=document.excerpts.find(item=>item.id===excerptId);if(excerpt){setSourceFocus(excerpt.citation);onView('desk');} }} document={document} workId={initial.workId} currentRevisionId={dirty ? undefined : revision.id} sourceRevision={revision} onReadRevision={id => api.readRevision(initial.workId, id)} sourceCheckGeneration={() => recheckGeneration.current} sourceResetSequence={sourceResetSequence} onQualifySources={async citations => { const checked = await Promise.all(citations.map(async citation => { return api.qualifyCitation(initial.domainRef, citation); })); return checked.every(Boolean); }} onChange={edit} onUploadAsset={async file => {

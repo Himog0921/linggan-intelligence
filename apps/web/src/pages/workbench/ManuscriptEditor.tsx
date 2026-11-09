@@ -3,7 +3,7 @@ import { IdeaBoxLink } from './IdeaBoxLink';
 import { newImagePage } from './imagePageFactory';
 import type { ReactNode } from 'react';
 import type { IdeaBoxSummary } from './workbenchModel';
-import type { WorkDocument } from "./workbenchModel";
+import { stepNames, type Step, type WorkDocument } from "./workbenchModel";
 import { ExperiencePicker } from './assets/ExperiencePicker';
 export function ManuscriptEditor({
   document,
@@ -16,6 +16,8 @@ export function ManuscriptEditor({
   workId,
   onCover,
   accountName,
+  accountChip,
+  edMeta,
   ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleNotes, coverActions, coverCandidates, noteCandidates, noteTitleActions, footer, tools,
 }: {
   document: WorkDocument;
@@ -38,12 +40,19 @@ export function ManuscriptEditor({
   noteTitleActions?: ReactNode;
   footer?: ReactNode;
   tools?: ReactNode;
+  accountChip?: ReactNode;
+  edMeta?: ReactNode;
 }) {
   const cover = document.pages.find(page => page.kind === 'cover');
   const coverCandidate = draftInputs.cover;
   const noteCandidate = draftInputs.note;
   const tags = tagsDraft.split(/\s+/u).filter(Boolean);
   const charCount = Array.from(document.paragraphs.map(p => p.text).join('')).length;
+  const stepOf = (id: string) => document.paragraphSteps.find(tag => tag.paragraphId === id)?.step;
+  function setStep(id: string, step: Step | '') {
+    const rest = document.paragraphSteps.filter(tag => tag.paragraphId !== id);
+    edit({ ...document, paragraphSteps: step ? [...rest, { paragraphId: id, step }] : rest });
+  }
   function setCoverTitle(title: string) {
     if (cover) edit({ ...document, pages: document.pages.map(page => page.id === cover.id ? { ...page, title } : page) });
     else if (document.pages.length < 30) edit({ ...document, pages: [{ ...newImagePage('cover'), title }, ...document.pages] });
@@ -58,6 +67,8 @@ export function ManuscriptEditor({
   return <section className="editor" aria-label="正文编辑">
     <div className="ed-head">
       <span className="acc-btn"><span className="avatar">{Array.from(accountName ?? '未')[0]}</span>{accountName ?? (document.accountRef ? '账号读取中' : '未选择账号')}</span>
+      {accountChip}
+      {edMeta}
       <span className="grow" />
       {tools}
     </div>
@@ -104,9 +115,12 @@ export function ManuscriptEditor({
         {titleNotes}
         <div className="body-head"><h3 className="h-sec">正文</h3><span className="aux">约 <b>{charCount}</b> 字 · <b>{document.paragraphs.length}</b> 段{document.experienceSlots.length ? <> · 来自经历库 <b>{document.experienceSlots.length}</b> 段</> : null}</span></div>
         <div className="paras">
-          {document.paragraphs.map((p, i) => (
+          {document.paragraphs.map((p, i) => {
+            const step = stepOf(p.id);
+            const continued = !!step && (i > 0 ? stepOf(document.paragraphs[i - 1]!.id) === step : false);
+            return (
             <div key={p.id} className="para">
-              <div className="para-label" title={`第 ${i + 1} 段`}>{i + 1}</div>
+              <div className={`para-label${continued ? ' cont' : ''}`} title={`第 ${i + 1} 段${step ? ` · ${stepNames[step]}` : ''}`}>{step ? stepNames[step] : i + 1}</div>
               <div className="para-main">
                 <textarea
                   className="para-text"
@@ -132,6 +146,7 @@ export function ManuscriptEditor({
                           .filter(source => source.target.kind === 'paragraph' && source.target.paragraphId === p.id)
                           .map(source => ({ ...source, target: { kind: 'paragraph' as const, paragraphId: next.id } }))],
                         paragraphs: document.paragraphs.flatMap((x) => x.id === p.id ? [{ ...x, text: before }, next] : [x]),
+                        paragraphSteps: step ? [...document.paragraphSteps, { paragraphId: next.id, step }] : document.paragraphSteps,
                       });
                       window.setTimeout(() => window.document.querySelector<HTMLTextAreaElement>(`[data-paragraph="${next.id}"]`)?.focus(), 0);
                     }
@@ -143,6 +158,10 @@ export function ManuscriptEditor({
                   {document.derivedSources.some(source => source.target.kind === 'paragraph' && source.target.paragraphId === p.id) ? <span className="src"><span className="dot info" />已记录参考来源 · 来源不可用时本段会暂时隐藏</span> : null}
                   <span className="para-tools">
                     {document.uses.filter((u) => u.target.kind === "paragraph" && u.target.paragraphId === p.id).map((u) => <span key={u.id} className="aux">{u.contentOrigin === "expression" ? "我的表达" : "原文摘录"} · {u.state === "current" ? "当前使用" : u.state === "modified" ? "已手动修改" : "需要核验"}</span>)}
+                    <select className="para-step" aria-label={`第 ${i + 1} 段的步骤`} value={step ?? ''} onChange={(e) => setStep(p.id, e.target.value as Step | '')}>
+                      <option value="">标步骤</option>
+                      {Object.entries(stepNames).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+                    </select>
                     <button type="button" onClick={() => edit({
                       ...document,
                       paragraphs: document.paragraphs.filter((x) => x.id !== p.id),
@@ -150,12 +169,14 @@ export function ManuscriptEditor({
                       experienceGaps: document.experienceGaps.filter(id => id !== p.id),
                       derivedSources: document.derivedSources.filter(source => source.target.kind !== 'paragraph' || source.target.paragraphId !== p.id),
                       uses: document.uses.filter((u) => u.target.kind !== "paragraph" || u.target.paragraphId !== p.id),
+                      paragraphSteps: document.paragraphSteps.filter(tag => tag.paragraphId !== p.id),
                     })}>删除这一段</button>
                   </span>
                 </div>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
         <button type="button" className="add-para" onClick={() => edit({ ...document, paragraphs: [...document.paragraphs, { id: crypto.randomUUID(), text: "" }] })}>＋ 继续写一段</button>
         <ExperiencePicker document={document} edit={edit} />
