@@ -151,9 +151,10 @@
 .paragraph:hover details,.paragraph:focus-within details,.paragraph details[open] {opacity:1;}
 .addParagraph {color:var(--lgi-muted)!important;border:0!important;}
 .tags {margin-top:var(--lgi-space-8);border-top:1px solid var(--lgi-border);padding-top:var(--lgi-space-4);font-size:var(--lgi-text-data);}
-.dialog {--cw-dialog-width:60rem;--cw-control-width:21rem;width:min(94vw,var(--cw-dialog-width));max-height:90vh;border:1px solid var(--lgi-border-strong);border-radius:var(--lgi-radius-md);background:var(--lgi-canvas);color:var(--lgi-ink);padding:var(--lgi-space-6);box-shadow:var(--lgi-shadow-overlay);font:var(--lgi-text-body)/var(--lgi-lh-body) var(--lgi-font-sans);}
+.dialog {--cw-dialog-width:60rem;--cw-control-width:21rem;width:min(94vw,var(--cw-dialog-width));max-height:90vh;border:2px solid var(--lgi-ink);border-radius:var(--lgi-radius-none);background:var(--lgi-canvas);color:var(--lgi-ink);padding:var(--lgi-space-5);box-shadow:var(--lgi-shadow-brutal-lg);font:var(--lgi-text-body)/var(--lgi-lh-body) var(--lgi-font-sans);}
 .dialog::backdrop {background:var(--lgi-border-strong);}
-.dialogHead {justify-content:space-between;border-bottom:1px solid var(--lgi-border);padding-bottom:var(--lgi-space-4);margin-bottom:var(--lgi-space-5);}
+/* demo 的 modalShell：头是一条通栏墨线，正文单独留白，动作行贴底右对齐。 */
+.dialogHead {justify-content:space-between;gap:var(--lgi-space-3);margin:calc(-1 * var(--lgi-space-5)) calc(-1 * var(--lgi-space-5)) var(--lgi-space-5);padding:var(--lgi-space-4) var(--lgi-space-5);border-bottom:1px solid var(--lgi-ink);}
 .dialogHead button:not([data-action-button]) {border:0;}
 .compare {display:grid;grid-template-columns:1fr 1fr;gap:var(--lgi-space-5);margin-bottom:var(--lgi-space-6);}
 .compare section {background:var(--lgi-canvas-low);padding:var(--lgi-space-4);min-width:0;}
