@@ -12,7 +12,7 @@
 //! linggan-media-requeue --kinds asr
 //! ```
 
-use linggan_evidence::{REGISTERED_PROCESSOR_KINDS, processor_version_for_kind};
+use linggan_evidence::REGISTERED_PROCESSOR_KINDS;
 use std::process::ExitCode;
 
 const USAGE: &str = "用法: linggan-media-requeue --kinds <处理器名,逗号分隔> [--dry-run]";
@@ -45,7 +45,7 @@ async fn main() -> ExitCode {
     // 名字打错必须当场报错。安静地排 0 条会被读成「这一类没有旧作业」——那是本次重排要
     // 消灭的失败形态（196 条 asr 里 195 条静默失败就是这么藏了三天）。
     for kind in &kinds {
-        if processor_version_for_kind(kind).is_none() {
+        if !REGISTERED_PROCESSOR_KINDS.contains(&kind.as_str()) {
             eprintln!(
                 "没有登记的处理器：{kind}。登记的处理器：{}",
                 REGISTERED_PROCESSOR_KINDS.join(",")

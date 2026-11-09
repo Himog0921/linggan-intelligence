@@ -51,6 +51,7 @@ async fn batched_media_read_keeps_accepted_ocr_and_current_withdrawal() {
         .await
         .unwrap();
         image_versions.push(admitted.materialization_ref);
+        sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES(gen_random_uuid(),$1,$2,'image_ocr','local-v5','full_blob')").bind(&blob).bind(&slot_key).execute(db.pool()).await.unwrap();
         let job_ref: Uuid = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE slot_key=$1 AND processor_kind='image_ocr'")
             .bind(&slot_key).fetch_one(db.pool()).await.unwrap();
         let derivative_ref = Uuid::new_v4();

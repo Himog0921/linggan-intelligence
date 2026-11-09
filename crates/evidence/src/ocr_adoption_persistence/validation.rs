@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::{Value, json};
 
 pub(super) fn validate_raw(b: &mut Bridge) -> Result<(), InputError> {
     let anchor: Value =

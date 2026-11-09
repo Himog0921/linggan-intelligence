@@ -1670,7 +1670,9 @@ async fn shared_ocr_state_uses_canonical_reading_gap_empty_and_task_receipts_at_
             label
         );
     }
-    let job:Uuid=sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE slot_key=$1 AND processor_kind='image_ocr' ORDER BY created_at DESC LIMIT 1").bind(slot).fetch_one(db.pool()).await.unwrap();
+    let job = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr','local-v5','full_blob')")
+        .bind(job).bind("a".repeat(64)).bind(slot).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason)VALUES($1,$2,'failed','synthetic_latest_failure')").bind(Uuid::new_v4()).bind(job).execute(db.pool()).await.unwrap();
     assert_eq!(
         read_work_resource(&db, work).await.unwrap().unwrap().media["ocr"]["state"],

@@ -109,7 +109,7 @@ async fn full_runtime_accepts_each_capability_without_collapsing_partial_media_o
     );
     assert_count(&database, "linggan_media_blob", 1).await;
     assert_count(&database, "linggan_media_materialization", 2).await;
-    assert_count(&database, "linggan_media_processing_job_event", 4).await;
+    assert_count(&database, "linggan_media_processing_job_event", 2).await;
     let failed_attempt = record_media_download_failure(
         &database,
         "ffffffff-ffff-4fff-8fff-ffffffffffff"

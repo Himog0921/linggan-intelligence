@@ -1,4 +1,3 @@
-pub(crate) mod ocr_vl;
 pub(crate) mod timed_text;
 
 use sha2::{Digest, Sha256};
