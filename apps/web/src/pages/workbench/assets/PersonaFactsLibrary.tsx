@@ -16,7 +16,10 @@ function PersonaForm({ accountRef, personRef, current: observed, checking, onSav
   onReload: () => void;
 }) {
   const [initial] = useState(observed);
-  const [capturePerson] = useState(personRef);
+  const [mountedPerson] = useState(personRef);
+  // A form mounted before any person was confirmed adopts the one confirmed while it stays open;
+  // a person already known at mount stays frozen so a later replacement keeps hiding the draft.
+  const capturePerson = mountedPerson ?? personRef;
   const [key, setKey] = useState(initial?.key ?? '');
   const [text, setText] = useState(initial?.text ?? '');
   const [missing, setMissing] = useState(initial?.status === 'missing');

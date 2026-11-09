@@ -122,6 +122,19 @@ describe('人设事实', () => {
     fireEvent.click(screen.getByRole('button', { name: '补充事实' }));
     expect(screen.getByLabelText('事实内容')).toHaveValue('');
   });
+  it('accepts a person confirmed while a fresh form is already open', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const withPerson = (await api.listAccounts(account))[0]!;
+    vi.mocked(api.listAccounts).mockResolvedValueOnce([{ ...withPerson, identity: { ...withPerson.identity!, hasRealPerson: null, personRef: null } }]);
+    show(client); await ready();
+    expect(screen.getByText('请先确认账号背后的真人。')).toBeVisible();
+    expect(screen.getByRole('button', { name: '保存事实' })).toBeDisabled();
+    act(() => client.setQueryData(['creation-assets','accounts',account], [withPerson]));
+    await waitFor(() => expect(screen.queryByText('请先确认账号背后的真人。')).not.toBeInTheDocument());
+    fireEvent.change(screen.getByLabelText('事实名称'), { target: { value: '合成待补充' } });
+    fireEvent.click(screen.getByLabelText('缺，待补充'));
+    expect(screen.getByRole('button', { name: '保存事实' })).toBeEnabled();
+  });
   it('temporarily hides and preserves a draft when the person is unknown and then restored', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     show(client); await ready();
