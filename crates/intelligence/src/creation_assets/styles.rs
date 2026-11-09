@@ -165,7 +165,11 @@ pub async fn put_style(
             &cmd.skip,
         ),
     )?;
-    let kind = if code.is_none() { "style_create" } else { "style_revise" };
+    let kind = if code.is_none() {
+        "style_create"
+    } else {
+        "style_revise"
+    };
     let mut tx = db.pool().begin().await?;
     if let Claim::Replay = claim(&mut tx, cmd.request_id, kind, &sha).await? {
         let style = by_request(&mut tx, cmd.request_id).await?;
