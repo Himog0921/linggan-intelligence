@@ -8,7 +8,7 @@ import * as api from './assetsApi';
 import type { FactCard, FactCardView } from './assetsModel';
 import styles from './Assets.module.css';
 
-const lines = (text: string) => text.split(/\n/u).map(line => line.trim()).filter(Boolean);
+const splitNames = (text: string) => text.split(/[、,，\n]/u).map(part => part.trim()).filter(Boolean);
 
 function cardState(view: FactCardView): string {
   const { latest, confirmed } = view;
@@ -16,115 +16,130 @@ function cardState(view: FactCardView): string {
   return confirmed.revision === latest.revision ? `已确认 第 ${latest.revision} 版` : `生效第 ${confirmed.revision} 版 · 第 ${latest.revision} 版待确认`;
 }
 
+type FieldKey = 'name' | 'allowed' | 'banned' | 'what' | 'who' | 'canSay' | 'cannotSay' | 'mustNote';
+const FIELD_LABEL: Record<FieldKey, string> = {
+  name: '规范名称', allowed: '可用叫法', banned: '不用的叫法', what: '是什么', who: '适合谁',
+  canSay: '能讲的', cannotSay: '不能讲的', mustNote: '必带提示',
+};
+const GROUPS: readonly { label: string; fields: readonly FieldKey[] }[] = [
+  { label: '产品叫法', fields: ['name', 'allowed', 'banned'] },
+  { label: '产品与对象', fields: ['what', 'who'] },
+  { label: '表达边界', fields: ['canSay', 'cannotSay', 'mustNote'] },
+];
+type Draft = Record<FieldKey, string>;
+const draftOf = (card: FactCard | null): Draft => ({
+  name: card?.name ?? '', allowed: (card?.allowedNames ?? []).join('、'), banned: (card?.bannedNames ?? []).join('、'),
+  what: card?.what ?? '', who: card?.who ?? '', canSay: card?.canSay ?? '', cannotSay: card?.cannotSay ?? '', mustNote: card?.mustNote ?? '',
+});
+
 /**
  * One product fact card: the organisation's own wording. Saving never changes what is in force;
  * only confirming a revision does, and the older confirmed one stays in force until then.
  */
-function CardForm({ card, onChanged }: { card: FactCard | null; onChanged: (code: string) => void }) {
-  const [identities] = useState(() => new RequestIdentities());
-  const [name, setName] = useState(card?.name ?? '');
-  const [allowed, setAllowed] = useState((card?.allowedNames ?? []).join('\n'));
-  const [banned, setBanned] = useState((card?.bannedNames ?? []).join('\n'));
-  const [what, setWhat] = useState(card?.what ?? '');
-  const [who, setWho] = useState(card?.who ?? '');
-  const [canSay, setCanSay] = useState(card?.canSay ?? '');
-  const [cannotSay, setCannotSay] = useState(card?.cannotSay ?? '');
-  const [mustNote, setMustNote] = useState(card?.mustNote ?? '');
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState('');
-  const confirmed = card?.confirmedAt != null;
-
-  async function run(action: 'save' | 'confirm') {
-    if (busy) return;
-    setBusy(true);
-    setMessage('');
-    try {
-      if (action === 'save') {
-        const body = { expectedRevision: card?.revision ?? 0, name: name.trim(), allowedNames: lines(allowed), bannedNames: lines(banned),
-          what, who, canSay, cannotSay, mustNote };
-        const requestId = identities.keyFor('save', JSON.stringify(body));
-        const receipt = await api.saveFactCard(card?.code ?? null, { ...body, requestId });
-        identities.settle('save');
-        onChanged(receipt.card.code);
-      } else if (card) {
-        const body = { expectedRevision: card.revision };
-        const requestId = identities.keyFor('confirm', JSON.stringify(body));
-        const receipt = await api.confirmFactCard(card.code, { ...body, requestId });
-        identities.settle('confirm');
-        onChanged(receipt.card.code);
-      }
-    } catch (error) {
-      if (error instanceof ApiError && error.answered) identities.settle(action);
-      setMessage(api.assetsErrorText(error));
-    } finally {
-      setBusy(false);
-    }
-  }
-  const field = (label: string, value: string, set: (value: string) => void, rows = 3, hint?: string) => <label>{label}
-    <textarea rows={rows} value={value} disabled={busy} maxLength={2000} onChange={event => set(event.target.value)} />{hint ? <small>{hint}</small> : null}</label>;
-  return <form className={styles.form} aria-label={card ? `产品事实卡 ${card.code}` : '新建产品事实卡'} onSubmit={event => { event.preventDefault(); void run('save'); }}>
-    <h3>{card ? `${card.code} · 第 ${card.revision} 版` : '新建产品事实卡'}</h3>
-    <label>规范名称
-      <input value={name} maxLength={80} disabled={busy} onChange={event => setName(event.target.value)} />
-    </label>
-    {field('可用叫法（一行一个）', allowed, setAllowed, 3, '规范名称本身不用再写一遍。')}
-    {field('不要用的叫法（一行一个）', banned, setBanned, 3, '稿子里出现这些叫法会提醒；不能和可用叫法重复。')}
-    {field('是什么', what, setWhat)}
-    {field('适合谁', who, setWho)}
-    {field('能讲的', canSay, setCanSay)}
-    {field('不能讲的', cannotSay, setCannotSay)}
-    {field('必带的提示', mustNote, setMustNote)}
-    {message ? <p role="alert" className={styles.problem}>{message}</p> : null}
-    <div className={styles.actions}>
-      <ActionButton type="submit" variant="primary" busy={busy} disabled={!name.trim()}>{card ? '保存为新的一版' : '保存'}</ActionButton>
-      {card && !confirmed ? <ActionButton variant="outline" disabled={busy} onClick={() => void run('confirm')}>确认这一版</ActionButton> : null}
-    </div>
-    {card ? <p className={styles.hint}>{confirmed ? `这一版已确认（${humanMoment(card.confirmedAt)}），检查按它执行。` : '这一版还没有确认：检查仍按上一个已确认的版本执行，没有已确认的版本时叫法检查不运行。'}</p> : null}
-  </form>;
-}
-
 export function FactCardLibrary() {
   const queryClient = useQueryClient();
-  const [selected, setSelected] = useState<string | 'new' | null>(null);
+  const [identities] = useState(() => new RequestIdentities());
+  const [selected, setSelected] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
   const cards = useQuery({ queryKey: ['creation-assets', 'fact-cards'], queryFn: ({ signal }) => api.listFactCards(signal), gcTime: 0 });
   const items = cards.data ?? [];
-  const current = items.find(item => item.code === selected) ?? null;
+  const current = items.find(item => item.code === (selected ?? items[0]?.code)) ?? null;
+  const card = current?.latest ?? null;
+  const dirty = editing && draft !== null && JSON.stringify(draft) !== JSON.stringify(draftOf(card));
   const changed = (code: string) => {
-    setSelected(code);
+    setSelected(code); setEditing(false); setDraft(null); setMessage('');
     void (async () => {
       await queryClient.cancelQueries({ queryKey: ['creation-assets', 'draft-checks'] });
       await queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
     })();
   };
+  function startEdit() { setEditing(true); setDraft(draftOf(card)); setMessage(''); }
+  async function save() {
+    if (!draft || busy) return;
+    setBusy(true); setMessage('');
+    const body = { expectedRevision: card?.revision ?? 0, name: draft.name.trim(), allowedNames: splitNames(draft.allowed), bannedNames: splitNames(draft.banned),
+      what: draft.what, who: draft.who, canSay: draft.canSay, cannotSay: draft.cannotSay, mustNote: draft.mustNote };
+    const requestId = identities.keyFor('save', JSON.stringify(body));
+    try {
+      const receipt = await api.saveFactCard(card?.code ?? null, { ...body, requestId });
+      identities.settle('save');
+      changed(receipt.card.code);
+    } catch (error) {
+      if (error instanceof ApiError && error.answered) identities.settle('save');
+      setMessage(api.assetsErrorText(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function confirm() {
+    if (!card || busy) return;
+    setBusy(true); setMessage('');
+    const body = { expectedRevision: card.revision };
+    const requestId = identities.keyFor('confirm', JSON.stringify(body));
+    try {
+      const receipt = await api.confirmFactCard(card.code, { ...body, requestId });
+      identities.settle('confirm');
+      changed(receipt.card.code);
+    } catch (error) {
+      if (error instanceof ApiError && error.answered) identities.settle('confirm');
+      setMessage(api.assetsErrorText(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const set = (key: FieldKey, value: string) => setDraft(current => current ? { ...current, [key]: value } : current);
+  const viewValue = (key: FieldKey) => key === 'allowed' ? (card?.allowedNames ?? []).join('、')
+    : key === 'banned' ? (card?.bannedNames ?? []).join('、') : card?.[key] ?? '';
+  const head = <div className={`product-head${editing ? ' editing' : ''}`}>
+    <div className="product-heading">
+      <h1 className="product-title">{editing && draft ? draft.name.trim() || '未填写产品名称' : card?.name ?? '未填写产品名称'}</h1>
+      <span className="chip warn">{!card ? '新建' : current ? cardState(current) : '未填写'}</span>
+    </div>
+    <div className="product-actions">
+      {editing ? <>
+        <span className="product-edit-state" role="status">{dirty ? '未保存' : '编辑中'}</span>
+        <ActionButton variant="quiet" disabled={busy} onClick={() => { setEditing(false); setDraft(null); setMessage(''); }}>取消</ActionButton>
+        <ActionButton type="submit" variant="primary" busy={busy} disabled={!draft?.name.trim()}>保存</ActionButton>
+      </> : <>
+        {card && !card.confirmedAt ? <ActionButton variant="outline" disabled={busy} onClick={() => void confirm()}>确认这一版</ActionButton> : null}
+        <ActionButton variant="outline" disabled={busy} onClick={startEdit}>{card ? '编辑' : '新建'}</ActionButton>
+      </>}
+    </div>
+  </div>;
+  const body = <>
+    {head}
+    {GROUPS.map(group => <section key={group.label} className="product-group" aria-label={group.label}>
+      <dl>{group.fields.filter(key => editing || key !== 'name').map(key => {
+        const id = `prod-${key}`;
+        const value = editing ? draft?.[key] ?? '' : viewValue(key);
+        const lined = key === 'name' || key === 'allowed' || key === 'banned';
+        return <div key={key} className="product-field">
+          <dt className="product-label">{editing ? <label htmlFor={id}>{FIELD_LABEL[key]}</label> : FIELD_LABEL[key]}</dt>
+          <dd className="product-value">{editing
+            ? lined
+              ? <input id={id} className="input" value={value} required={key === 'name'} disabled={busy} maxLength={2000}
+                placeholder={key === 'name' ? '例如：3V1 家庭干预陪跑' : '多个叫法用顿号分隔'} onChange={event => set(key, event.target.value)} />
+              : <textarea id={id} className="input" rows={2} value={value} disabled={busy} maxLength={2000} onChange={event => set(key, event.target.value)} />
+            : <p className={`product-text${value.trim() ? '' : ' empty'}`}>{value.trim() || '未填写'}</p>}</dd>
+        </div>;
+      })}</dl>
+    </section>)}
+  </>;
   return <section aria-label="产品事实卡">
-    <header className="as-head">
-      <div className="grow">
-        <h1 className="h-obj">产品事实卡</h1>
-        <p>写明产品的正式叫法、能讲和不能讲的话。稿子的检查读取“已确认”的那一版。</p>
-      </div>
-      <ActionButton variant="outline" onClick={() => setSelected('new')}>＋ 新建</ActionButton>
-    </header>
-    {cards.isPending ? <p role="status">正在读取…</p> : null}
-    {cards.isError ? <p role="alert" className={styles.problem}>读取失败，可以<ActionButton variant="quiet" onClick={() => void cards.refetch()}>重试</ActionButton></p> : null}
-    {cards.isSuccess && items.length === 0 ? <p className="lib-empty">还没有产品事实卡。没有已确认的卡时，叫法检查不会运行。</p> : null}
-    {items.length || selected === 'new' ? <div className="lib">
-      <div className="lib-table">
-        <table className="ledger">
-          <thead><tr><th scope="col">卡片</th><th scope="col">版本与状态</th></tr></thead>
-          <tbody>{items.map(item => {
-            const on = item.code === selected;
-            return <tr key={item.code} className={on ? 'lib-row on' : 'lib-row'}>
-              <td><button type="button" aria-current={on ? 'true' : undefined} onClick={() => setSelected(item.code)}><b>{item.latest.name}</b></button></td>
-              <td><span>{item.code} · {cardState(item)}</span></td>
-            </tr>;
-          })}</tbody>
-        </table>
-      </div>
-      <aside className="lib-insp" aria-label="产品事实卡详情">
-        {selected === 'new' ? <CardForm key="new" card={null} onChanged={changed} />
-          : current ? <CardForm key={`${current.code}:${current.latest.revision}`} card={current.latest} onChanged={changed} />
-            : <p className={styles.hint}>在左边选一张卡，或新建一张。</p>}
-      </aside>
+    {items.length > 1 ? <div className="lib-tools" role="group" aria-label="产品卡">
+      <div className="seg">{items.map(item => <button type="button" key={item.code} aria-pressed={item.code === current?.code} disabled={busy || editing}
+        onClick={() => changed(item.code)}>{item.latest.name}</button>)}</div>
     </div> : null}
+    {cards.isPending && !items.length ? <p role="status">正在读取…</p> : null}
+    {cards.isError ? <p role="alert" className={styles.problem}>读取失败，可以<ActionButton variant="quiet" onClick={() => void cards.refetch()}>重试</ActionButton></p> : null}
+    {!items.length && !editing ? <p className="lib-empty">还没有产品事实卡。没有已确认的卡时，叫法检查不会运行。</p> : null}
+    {editing
+      ? <form className="product" aria-label={card ? `产品事实卡 ${card.code}` : '新建产品事实卡'} onSubmit={event => { event.preventDefault(); void save(); }}>{body}</form>
+      : <div className="product">{body}</div>}
+    {message ? <p role="alert" className={styles.problem}>{message}</p> : null}
+    {card ? <p className={styles.hint}>{card.confirmedAt ? `这一版已确认（${humanMoment(card.confirmedAt)}），检查按它执行。` : '这一版还没有确认：检查仍按上一个已确认的版本执行，没有已确认的版本时叫法检查不运行。'}</p> : null}
   </section>;
 }

@@ -60,10 +60,26 @@ export function StyleLibrary({ domainRef, onPendingChange, onDirtyChange = () =>
       setNotice(assetsErrorText(error));
     } finally { setBusy(false); onPendingChange(false); }
   }
-  return <section aria-label="风格库">
+  const itemCards = items.length ? <div className="grid-cards">{items.map(item => {
+    const traits = ([['结构', item.structure, false], ['节奏', item.rhythm, false], ['用词', item.wording, false], ['不学', item.skip, true]] as const);
+    return <article className="card" key={item.code}>
+      <div className="card-head"><b className="grow">{item.name}</b><span className="aux data">{item.code}</span></div>
+      <div className="card-body">
+        <div className="aux">来源：{item.sourceNote || '—'}</div>
+        {traits.filter(([, values]) => values.length).map(([label, values, skip]) => <div key={label}>
+          <div className="t-label">{label}</div>
+          <ul className={skip ? 'trait skip' : 'trait'}>{values.map(value => <li key={value}>{value}</li>)}</ul>
+        </div>)}
+      </div>
+      <div className="card-foot">用在：<span className="chip">{name(item.accountRef)}</span><span className="grow" />
+        <button type="button" className="btn quiet sub" disabled={busy} onClick={() => { setSelected(item.code); setStale(false); setNotice(''); setForm(filled(item)); onDirtyChange(false); }}>改成新版本</button>
+      </div>
+    </article>;
+  })}</div> : null;
+  return <section aria-label="风格">
     <header className="as-head">
       <div className="grow">
-        <h1 className="h-obj">风格库</h1>
+        <h1 className="h-obj">风格</h1>
         <p>一个账号怎么写：结构、节奏、用词和明确不用的写法。写稿页按账号显示正在用的风格。</p>
       </div>
       <div className={styles.actions}><ActionButton variant="outline" disabled={busy || !accounts.data?.length} onClick={() => { setSelected(null); setStale(false); setNotice(''); setForm({ ...blank }); onDirtyChange(false); }}>新增风格</ActionButton></div>
@@ -90,31 +106,6 @@ export function StyleLibrary({ domainRef, onPendingChange, onDirtyChange = () =>
       </div>
       {notice ? <p role="status">{notice}</p> : null}
       {stale && current ? <p>风格已有新版本，当前填写仍保留。<ActionButton variant="quiet" busy={busy} onClick={() => { setBusy(true); void query.refetch().then(result => { if (result.isSuccess) { setStale(false); setNotice('已读取最新版本，请核对后保存。'); } else setNotice('读取失败，请重试。'); }).finally(() => setBusy(false)); }}>读取最新版本</ActionButton></p> : null}
-    </section> : items.length ? <div className="lib">
-      <div className="lib-table">
-        <table className="ledger">
-          <thead><tr><th scope="col">编码</th><th scope="col">账号</th><th scope="col">名称</th><th scope="col">版本</th></tr></thead>
-          <tbody>{items.map(item => {
-            const on = item.code === selected;
-            return <tr key={item.code} className={on ? 'lib-row on' : 'lib-row'}>
-              <td><button type="button" disabled={busy} aria-current={on ? 'true' : undefined} onClick={() => { setSelected(item.code); setStale(false); setNotice(''); setForm(null); onDirtyChange(false); }}><b>{item.code}</b></button></td>
-              <td>{name(item.accountRef)}</td>
-              <td>{item.name}</td>
-              <td>第 {item.revision} 版</td>
-            </tr>;
-          })}</tbody>
-        </table>
-      </div>
-      <aside className="lib-insp" aria-label="风格详情">{current ? <>
-        <h3>{current.code} · {current.name}</h3>
-        <p>账号：{name(current.accountRef)} · 第 {current.revision} 版</p>
-        {current.sourceNote ? <p>依据：{current.sourceNote}</p> : null}
-        {([['结构', current.structure], ['节奏', current.rhythm], ['用词', current.wording], ['不用', current.skip]] as const)
-          .filter(([, values]) => values.length)
-          .map(([label, values]) => <div key={label}><b>{label}</b><ul>{values.map(value => <li key={value}>{value}</li>)}</ul></div>)}
-        <div className={styles.actions}><ActionButton variant="outline" disabled={busy} onClick={() => { setForm(filled(current)); setStale(false); setNotice(''); onDirtyChange(false); }}>改成新版本</ActionButton></div>
-        {notice ? <p role="status">{notice}</p> : null}
-      </> : <p className={styles.hint}>选择左侧风格查看内容。</p>}</aside>
-    </div> : null}
+    </section> : itemCards}
   </section>;
 }

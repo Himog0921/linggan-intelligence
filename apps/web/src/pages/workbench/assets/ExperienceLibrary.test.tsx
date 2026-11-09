@@ -20,9 +20,12 @@ beforeEach(() => {
       hasRealPerson: true, personRef: id, backingPersonRole: '妈妈', canProvideExperience: null, savedAt: 't', savedBy: 'local_machine' } }]);
   vi.mocked(api.listExperiences).mockResolvedValue([item]);
 });
+async function ready() {
+  await screen.findByRole('button', { name: '合成账号' });
+  await screen.findByLabelText('经历正文');
+}
 async function selectItem() {
-  await screen.findByRole('option', { name: '合成账号' });
-  fireEvent.change(await screen.findByLabelText('账号'), { target: { value: account } });
+  await ready();
   fireEvent.click(await screen.findByRole('button', { name: /合成经历/ }));
 }
 describe('经历库', () => {
@@ -95,7 +98,7 @@ describe('经历库', () => {
     fireEvent.click(await screen.findByRole('button', { name: '核对并重试原请求' }));
     await waitFor(() => expect(api.experienceRequestStatus).toHaveBeenCalledTimes(1));
     await screen.findByText('原请求已登记；确认真人后，请继续核对原请求以读取最新结果。');
-    expect(screen.getByLabelText('账号')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '合成账号' })).toBeDisabled();
     vi.mocked(api.listExperiences).mockResolvedValue([{ ...item, state: 'confirmed', revision: 2 }]);
     act(() => { client.setQueryData(['creation-assets','accounts',account], rows); client.setQueryData(['creation-assets','experiences',account], [{ ...item, state: 'confirmed', revision: 2 }]); });
     await screen.findByDisplayValue('合成经历正文');
@@ -137,14 +140,14 @@ describe('经历库', () => {
   });
   it('freezes an unanswered request and retries with the same request ID', async () => {
     vi.mocked(api.createExperience).mockRejectedValueOnce(new ApiError({ kind: 'network' })).mockResolvedValue({ experience: item, replayed: true });
-    show(); await screen.findByRole('option', { name: '合成账号' }); fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    show(); await ready();
     const form = screen.getByRole('heading', { name: '采集一段经历' }).closest('form')!;
     fireEvent.change(within(form).getByLabelText('标题'), { target: { value: '合成经历' } });
     fireEvent.change(within(form).getByLabelText('经历正文'), { target: { value: '合成经历正文' } });
     fireEvent.click(within(form).getByRole('button', { name: '保存经历' }));
     const retry = await within(form).findByRole('button', { name: '核对并重试原请求' });
     expect(within(form).getByLabelText('经历正文')).toBeDisabled();
-    expect(screen.getByLabelText('账号')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '合成账号' })).toBeDisabled();
     fireEvent.click(retry);
     await waitFor(() => expect(api.createExperience).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.createExperience).mock.calls[0]?.[0].requestId).toBe(vi.mocked(api.createExperience).mock.calls[1]?.[0].requestId);
@@ -153,14 +156,13 @@ describe('经历库', () => {
     vi.mocked(api.createExperience).mockRejectedValueOnce(new ApiError({ kind: 'network' })).mockResolvedValue({ experience: item, replayed: true });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<QueryClientProvider client={client}><AssetsLibrary domainRef={account}/></QueryClientProvider>);
-    fireEvent.click(screen.getByRole('button', { name: '经历库' }));
-    await screen.findByRole('option', { name: '合成账号' });
-    fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    fireEvent.click(screen.getByRole('button', { name: '经历' }));
+    await ready();
     fireEvent.change(screen.getByLabelText('标题'), { target: { value: '合成经历' } });
     fireEvent.change(screen.getByLabelText('经历正文'), { target: { value: '合成经历正文' } });
     fireEvent.click(screen.getByRole('button', { name: '保存经历' }));
     const retry = await screen.findByRole('button', { name: '核对并重试原请求' });
-    expect(screen.getByRole('button', { name: '账号身份' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '产品事实卡' })).toBeDisabled();
     client.setQueryData(['creation-assets', 'experiences', account], [{ ...item, revision: 2 }]);
     expect(retry).toBeInTheDocument();
     fireEvent.click(retry);
@@ -208,7 +210,7 @@ describe('经历库', () => {
     fireEvent.click(screen.getByRole('button', { name: '核对并重试原请求' }));
     fireEvent.click(await screen.findByRole('button', { name: '放弃并停止原请求' }));
     await waitFor(() => expect(api.cancelExperienceRequest).toHaveBeenCalledWith(requestId));
-    await waitFor(() => expect(screen.getByLabelText('账号')).toBeEnabled());
+    await waitFor(() => expect(screen.getByRole('button', { name: '合成账号' })).toBeEnabled());
   });
   it('does not let a late edit response reveal a withdrawn experience again', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -228,11 +230,10 @@ describe('经历库', () => {
   it('asks before discarding unsaved collection when changing asset type', async () => {
     vi.spyOn(window, 'confirm').mockReturnValue(false);
     render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><AssetsLibrary domainRef={account}/></QueryClientProvider>);
-    fireEvent.click(screen.getByRole('button', { name: '经历库' }));
-    await screen.findByRole('option', { name: '合成账号' });
-    fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    fireEvent.click(screen.getByRole('button', { name: '经历' }));
+    await ready();
     fireEvent.change(screen.getByLabelText('经历正文'), { target: { value: '未保存的合成内容' } });
-    fireEvent.click(screen.getByRole('button', { name: '账号身份' }));
+    fireEvent.click(screen.getByRole('button', { name: /^人设事实/ }));
     expect(window.confirm).toHaveBeenCalled();
     expect(screen.getByLabelText('经历正文')).toHaveValue('未保存的合成内容');
     vi.restoreAllMocks();

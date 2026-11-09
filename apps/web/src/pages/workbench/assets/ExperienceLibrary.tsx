@@ -130,18 +130,23 @@ function ExperienceForm({ accountRef, personRef, current: initialCurrent, checki
 
 export function ExperienceLibrary({ domainRef, onPendingChange = () => {}, onDirtyChange = () => {} }: { domainRef: string; onPendingChange?: (pending: boolean) => void; onDirtyChange?: (dirty: boolean) => void }) {
   const client = useQueryClient();
-  const [account, setAccount] = useState('');
+  const [picked, setPicked] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [onlyPending, setOnlyPending] = useState(false);
   const [formVersion, setFormVersion] = useState(0);
   const [rechecking, setRechecking] = useState(false);
   const [recheckFailed, setRecheckFailed] = useState(false);
   const retryRecheck = useRef<(() => void) | null>(null);
   const accounts = useQuery({ queryKey: ['creation-assets', 'accounts', domainRef], queryFn: ({ signal }) => api.listAccounts(domainRef, signal), gcTime: 0, refetchOnWindowFocus: false });
+  // Until the operator picks one, the first account in the domain is the one shown.
+  const account = picked ?? accounts.data?.[0]?.accountRef ?? '';
   const experiences = useQuery({ queryKey: ['creation-assets', 'experiences', account], queryFn: ({ signal }) => api.listExperiences(account, signal), enabled: !!account, gcTime: 0, refetchOnWindowFocus: false });
   const refetchAccounts = accounts.refetch; const refetchExperiences = experiences.refetch;
   const current = experiences.data?.find(item => item.id === selected) ?? null;
+  const accountView = accounts.data?.find(row => row.accountRef === account) ?? null;
+  const personRef = accountView?.identity?.hasRealPerson ? accountView.identity.personRef ?? null : null;
   useEffect(() => {
     if (!account) return;
     let generation = 0; let disposed = false;
@@ -162,40 +167,42 @@ export function ExperienceLibrary({ domainRef, onPendingChange = () => {}, onDir
     return () => { disposed = true; retryRecheck.current = null; channel?.close(); window.removeEventListener('focus', onFocus); };
   }, [account, refetchAccounts, refetchExperiences]);
   function leaveForm() { if (dirty && !window.confirm('这段经历有未保存内容，切换会丢弃本页编辑。确定切换吗？')) return false; setDirty(false); onDirtyChange(false); return true; }
-  const stateLabel = (item: Experience) => item.state === 'withdrawn' ? '已撤回' : !item.currentPerson ? (accounts.data?.find(row => row.accountRef === account)?.identity?.hasRealPerson === true ? '原真人经历' : '真人待确认') : item.state === 'confirmed' ? '已确认' : '待本人确认';
-  return <><div role="status" hidden={!rechecking}>{recheckFailed ? <>重新核对失败，已暂时隐藏经历。<ActionButton onClick={() => retryRecheck.current?.()}>重新核对</ActionButton></> : '正在重新核对经历，请稍候。'}</div><section style={rechecking ? { display: 'none' } : undefined} aria-label="经历库">
-    <header className="as-head">
-      <div className="grow">
-        <h1 className="h-obj">经历库</h1>
-        <p>只收账号真人自己的经历，本人确认后才能引用到稿件里。别的账号的经历不放进来。</p>
+  const stateLabel = (item: Experience) => item.state === 'withdrawn' ? '已撤回' : !item.currentPerson ? accountView?.identity?.hasRealPerson === true ? '原真人经历' : '真人待确认' : item.state === 'confirmed' ? '已确认' : '待本人确认';
+  const items = experiences.data ?? [];
+  const pendingCount = items.filter(item => item.state === 'awaiting_subject').length;
+  const shown = onlyPending ? items.filter(item => item.state === 'awaiting_subject') : items;
+  return <><div role="status" hidden={!rechecking}>{recheckFailed ? <>重新核对失败，已暂时隐藏经历。<ActionButton onClick={() => retryRecheck.current?.()}>重新核对</ActionButton></> : '正在重新核对经历，请稍候。'}</div><section style={rechecking ? { display: 'none' } : undefined} aria-label="经历">
+    <div className="experience-tools">
+      <div className="experience-accounts" role="group" aria-label="筛选经历账号">
+        {(accounts.data ?? []).map(item => <button type="button" key={item.accountRef} aria-pressed={item.accountRef === account} disabled={pending}
+          onClick={() => { if (item.accountRef === account || !leaveForm()) return; setPicked(item.accountRef); setSelected(null); }}>{item.accountName}</button>)}
       </div>
-      {account ? <ActionButton variant="outline" disabled={pending} onClick={() => { if (leaveForm()) { setSelected(null); setFormVersion(value => value + 1); } }}>采集经历</ActionButton> : null}
-    </header>
-    <div className="lib-tools">
-      <label className="lbl">账号<select value={account} disabled={pending} onChange={e => { if (!leaveForm()) return; setAccount(e.target.value); setSelected(null); }}><option value="">选择账号</option>
-        {(accounts.data ?? []).map(item => <option key={item.accountRef} value={item.accountRef}>{item.accountName}</option>)}</select></label>
+      <div className="experience-collect">
+        <button type="button" className="ex-pending" aria-pressed={onlyPending} disabled={!pendingCount && !onlyPending} onClick={() => setOnlyPending(value => !value)}>待确认 <span className="data">{pendingCount}</span></button>
+        <ActionButton variant="primary" disabled={pending || !personRef} busy={pending}
+          onClick={() => { if (leaveForm()) { setSelected(null); setFormVersion(value => value + 1); } }}>采集经历</ActionButton>
+      </div>
     </div>
     {accounts.isError || experiences.isError ? <p role="alert" className={styles.problem}>读取失败，请重试。</p> : null}
     {account && experiences.isPending ? <p role="status">正在读取…</p> : null}
-    {!account ? <p className="lib-empty">先选一个账号，再采集和确认经历。</p> : <div className="lib">
-      {experiences.isSuccess && !experiences.data?.length ? <p className="lib-empty">这个账号还没有经历，在右侧采集或补记一条。</p> : null}
-      {experiences.data?.length ? <ul className="experience-list" aria-label="经历列表">{experiences.data?.map(item => {
-        const on = item.id === selected;
-        return <li key={item.id} aria-current={on ? 'true' : undefined}><article className="ex-row">
-          <div className="ex-main">
-            <h2 className="ex-title"><button type="button" disabled={pending} onClick={() => { if (item.id !== selected && leaveForm()) setSelected(item.id); }}>{item.title ?? item.code}</button></h2>
-            {item.body ? <p className="ex-preview clamped">{item.body}</p> : null}
-            <div className="ex-meta"><span className="data">{item.code}</span>{item.tags?.length ? <span className="ex-tags">{item.tags.join(' · ')}</span> : null}</div>
-          </div>
-          <div className="ex-side">
-            <span className={item.state === 'awaiting_subject' ? 'ex-status pending' : 'ex-status'}>{stateLabel(item)}</span>
-            {item.usedCount === undefined ? null : <span className="ex-uses">用于 <span className="data">{item.usedCount}</span> 篇稿</span>}
-          </div>
-        </article></li>;
-      })}</ul> : null}
-      <aside className="lib-insp" aria-label="经历详情">{account && (!selected || current) ? <ExperienceForm key={`${account}:${selected ?? 'new'}:${formVersion}`} accountRef={account} personRef={accounts.data?.find(row => row.accountRef === account)?.identity?.hasRealPerson ? accounts.data?.find(row => row.accountRef === account)?.identity?.personRef ?? null : null} current={current} checking={rechecking} onReload={() => setFormVersion(value => value + 1)}
-        onDirty={value => { setDirty(value); onDirtyChange(value); }} onPending={value => { setPending(value); onPendingChange(value); }} onSaved={item => { if (item.state === 'withdrawn' && typeof BroadcastChannel !== 'undefined') { const channel = new BroadcastChannel('linggan-creation-experience-events'); channel.postMessage('withdrawn'); channel.close(); } setDirty(false); onDirtyChange(false); client.setQueryData<Experience[]>(['creation-assets', 'experiences', account], old => { const observed = old?.find(row => row.id === item.id); const safe = observed && (observed.state === 'withdrawn' || !observed.currentPerson) ? observed : item; return [safe, ...(old ?? []).filter(row => row.id !== item.id)]; }); setSelected(item.id); setFormVersion(value => value + 1); void client.invalidateQueries({ queryKey: ['creation-assets', 'experiences', account] }); }} />
-        : <p className={styles.hint}>选择账号后采集和确认经历。</p>}</aside>
-    </div>}
+    {!account ? <p className="lib-empty">先选一个账号，再采集和确认经历。</p> : null}
+    {account && experiences.isSuccess && !items.length ? <p className="ex-empty">这个账号还没有经历，在下面采集或补记一条。</p> : null}
+    {shown.length ? <ul className="experience-list" aria-label="经历列表">{shown.map(item => {
+      const on = item.id === selected;
+      return <li key={item.id} aria-current={on ? 'true' : undefined}><article className="ex-row">
+        <div className="ex-main">
+          <h2 className="ex-title"><button type="button" disabled={pending} onClick={() => { if (item.id !== selected && leaveForm()) setSelected(item.id); }}>{item.title ?? item.code}</button></h2>
+          {item.body ? <p className="ex-preview clamped">{item.body}</p> : null}
+          <div className="ex-meta"><span className="data">{item.code}</span>{item.tags?.length ? <span className="ex-tags">{item.tags.join(' · ')}</span> : null}</div>
+        </div>
+        <div className="ex-side">
+          <span className={item.state === 'awaiting_subject' ? 'ex-status pending' : 'ex-status'}>{stateLabel(item)}</span>
+          {item.usedCount === undefined ? null : <span className="ex-uses">用于 <span className="data">{item.usedCount}</span> 篇稿</span>}
+        </div>
+      </article></li>;
+    })}</ul> : null}
+    {account && (!selected || current) ? <div className="lib-insp"><ExperienceForm key={`${account}:${selected ?? 'new'}:${formVersion}`} accountRef={account} personRef={personRef} current={current} checking={rechecking} onReload={() => setFormVersion(value => value + 1)}
+      onDirty={value => { setDirty(value); onDirtyChange(value); }} onPending={value => { setPending(value); onPendingChange(value); }} onSaved={item => { if (item.state === 'withdrawn' && typeof BroadcastChannel !== 'undefined') { const channel = new BroadcastChannel('linggan-creation-experience-events'); channel.postMessage('withdrawn'); channel.close(); } setDirty(false); onDirtyChange(false); client.setQueryData<Experience[]>(['creation-assets', 'experiences', account], old => { const observed = old?.find(row => row.id === item.id); const safe = observed && (observed.state === 'withdrawn' || !observed.currentPerson) ? observed : item; return [safe, ...(old ?? []).filter(row => row.id !== item.id)]; }); setSelected(item.id); setFormVersion(value => value + 1); void client.invalidateQueries({ queryKey: ['creation-assets', 'experiences', account] }); }} /></div>
+      : null}
   </section></>;
 }
