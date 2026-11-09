@@ -46,14 +46,16 @@
   --assets-dialog-width: 40rem;
   width: min(94vw, var(--assets-dialog-width));
   max-height: 90vh;
-  border: 1px solid var(--lgi-border-strong);
-  border-radius: var(--lgi-radius-md);
+  border: 2px solid var(--lgi-ink);
+  border-radius: var(--lgi-radius-none);
   background: var(--lgi-canvas);
   color: var(--lgi-ink);
   padding: var(--lgi-space-6);
-  box-shadow: var(--lgi-shadow-overlay);
+  box-shadow: var(--lgi-shadow-brutal-lg);
   font: var(--lgi-text-body) / var(--lgi-lh-body) var(--lgi-font-sans);
 }
+.dialog h2 { margin: 0 0 var(--lgi-space-4); font-size: var(--lgi-text-section); }
+.dialog .actions + .actions { margin-top: var(--lgi-space-3); }
 .dialog::backdrop { background: var(--lgi-border-strong); }
 .dialog textarea, .dialog input:not([type='radio']), .dialog select { width: 100%; border: 1px solid var(--lgi-border); border-radius: var(--lgi-radius-none); background: var(--lgi-canvas); padding: var(--lgi-space-2) var(--lgi-space-3); font: inherit; color: inherit; }
 .dialog label { display: grid; gap: var(--lgi-space-2); color: var(--lgi-body); }
