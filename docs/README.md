@@ -374,6 +374,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 | [`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 代码事实优先 | Linggan 采集控制层与受控 Browser Producer 的当前责任边界；`0.8.28` 单工位标准详情真实链已通过，未实现的长期候选仍以草案待决策 |
 | [`architecture/capture-control-contract.md`](architecture/capture-control-contract.md) | 草案 | ARC-001 首批真实 Canary 前的采集控制合同：Need/授权/准入、有限资源、lane、Coverage、部分结果、回执与恢复边界；不授权真实执行 |
 | [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md) | 权威当前 | 统一 Slot/Origin/Download/Blob/Materialization/Derivative/Relation 合同；`0.8.28` 真实封面、正文图、Live Photo 与作者头像链已验收，ASR 失败与 `comment.image NOT_OBSERVED` 继续如实保留 |
+| [`architecture/state-machines.md`](architecture/state-machines.md) | 权威当前 | 第一批 5 台状态机（采集任务/工单/AI 批次/观察目标/研究底稿）的状态全集、写入点与合法转移；`scripts/check-state-machines.mjs` 校验其与数据库 CHECK 一致 |
 | [`architecture/runtime-operations-architecture.md`](architecture/runtime-operations-architecture.md) | 代码事实优先 | 当前 loopback API / 巡检 worker / 媒体 worker / PostgreSQL / scheduler 运行拓扑，以及未实现的长期运维候选边界 |
 | [`architecture/data-architecture.md`](architecture/data-architecture.md) | 草案 | Gate 5 数据分类、身份、版本、Current、隐私、统计资格与 PostgreSQL 概念模型；不是 DDL |
 | [`architecture/data-relations.md`](architecture/data-relations.md) | 草案 | `data-architecture.md` 的渐进披露子文档；收敛候选基数、外键责任、类型化关系与并发约束，不是最终表清单 |
