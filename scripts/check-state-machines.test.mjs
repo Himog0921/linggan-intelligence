@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { databaseStates, enumVariants, literalUsage, parseDoc, runCheck } from './check-state-machines.mjs';
+import { compareEntries, databaseStates, enumVariants, literalUsage, parseDoc, runCheck } from './check-state-machines.mjs';
 
 const doc = `
 | 表 | 列 | 允许状态 |
@@ -72,6 +72,54 @@ test('enum variants are compared in snake_case', () => {
   const path = join(dir, 'x.rs');
   writeFileSync(path, 'pub enum ColumnState {\n    Available,\n    NotProvided,\n}\n');
   assert.deepEqual(enumVariants(path).get('ColumnState'), ['available', 'not_provided']);
+});
+
+test('a state-machine constraint replaces the earlier IN list', () => {
+  const files = [
+    { name: '0019.sql', text: "CREATE TABLE t (state text NOT NULL DEFAULT 'pending' CHECK (state IN ('pending','in_progress','completed')));" },
+    {
+      name: '0097.sql',
+      text: `ALTER TABLE t DROP CONSTRAINT IF EXISTS t_state_check;
+        ALTER TABLE t ADD CONSTRAINT t_state_check CHECK (
+          (state = 'pending' AND claimed_at IS NULL)
+          OR (state = 'in_progress' AND claimed_at IS NOT NULL)
+          OR (state = 'completed' AND completed_at IS NOT NULL)
+          OR (state = 'input_blocked' AND claimed_at IS NULL)
+        );`,
+    },
+  ];
+  const found = databaseStates(files, new Map([['t', new Set(['state'])]]));
+  const last = found.get('t.state').filter(e => e.kind === 'definition').pop();
+  assert.deepEqual(last.values, ['completed', 'in_progress', 'input_blocked', 'pending']);
+});
+
+test('a constraint dropped with no readable replacement cannot be verified', () => {
+  const key = 't.state';
+  const entries = [
+    { kind: 'definition', values: ['a', 'b'], source: { name: '0001.sql', index: 0 }, order: 0 },
+    { kind: 'drop', source: { name: '0002.sql', index: 1 }, order: 1 },
+  ];
+  assert.match(compareEntries(key, ['a', 'b'], entries), /no readable replacement/);
+});
+
+test('a drop followed by a readable replacement keeps the documented set', () => {
+  const entries = [
+    { kind: 'definition', values: ['a', 'b'], source: { name: '0001.sql', index: 0 }, order: 0 },
+    { kind: 'drop', source: { name: '0002.sql', index: 1 }, order: 1 },
+    { kind: 'definition', values: ['a', 'b'], source: { name: '0002.sql', index: 1 }, order: 2 },
+  ];
+  assert.equal(compareEntries('t.state', ['a', 'b'], entries), null);
+});
+
+test('quotes in comments and char literals do not hide later statements', () => {
+  const files = [{
+    path: '/repo/crates/a.rs',
+    text: "// a stray \" in a comment\nconst Q: char = '\"';\n" +
+      'sqlx::query("UPDATE collection_run SET phase=\'ghost\' WHERE run_ref=$1");',
+  }];
+  const errors = literalUsage(files, new Map([['collection_run', new Map([['phase', new Set(['discovery'])]])]]));
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /collection_run\.phase='ghost'/);
 });
 
 test('the repository matches docs/architecture/state-machines.md', () => {

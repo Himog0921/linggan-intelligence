@@ -87,12 +87,37 @@ function tableBodies(text) {
   return bodies;
 }
 
+// A replacement constraint often states the domain as OR'd equalities instead of
+// an IN list, e.g. CHECK ((col = 'a' AND x IS NULL) OR (col = 'b' AND x IS NULL)).
+// A single equality is not accepted as a domain: it may be one branch of a wider
+// condition, and treating it as the whole set would narrow the check silently.
+function equalityDomain(text, column) {
+  const values = new Set();
+  for (const m of text.matchAll(/\bCHECK\s*\(/gi)) {
+    const open = m.index + m[0].length - 1;
+    const body = text.slice(open + 1, matchingParen(text, open));
+    const found = [...body.matchAll(new RegExp(`\\b${column}\\s*=\\s*'([A-Za-z0-9_-]+)'`, 'g'))].map(x => x[1]);
+    if (found.length >= 2) found.forEach(v => values.add(v));
+  }
+  return [...values];
+}
+
+function droppedConstraint(statement, table, column) {
+  const m = statement.match(/DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?([a-z0-9_]+)/i);
+  if (!m) return null;
+  const name = m[1].toLowerCase();
+  return name === `${table}_${column}_check` || name === `${table}_check` ? name : null;
+}
+
 export function databaseStates(files, wanted) {
   const found = new Map();
-  const remember = (key, values, source) => {
-    if (!values.length) return;
+  let order = 0;
+  const push = (key, entry) => {
     if (!found.has(key)) found.set(key, []);
-    found.get(key).push({ values: [...values].sort(), source });
+    found.get(key).push({ ...entry, order: order++ });
+  };
+  const remember = (key, values, source) => {
+    if (values.length) push(key, { kind: 'definition', values: [...values].sort(), source });
   };
   for (const [index, { name, text }] of files.entries()) {
     const bodies = tableBodies(text);
@@ -103,7 +128,9 @@ export function databaseStates(files, wanted) {
         const direct = columnInLists(body, column);
         if (direct.length) { remember(`${table}.${column}`, direct, { name, index }); continue; }
         const slice = columnSlice(body, column);
-        if (slice) remember(`${table}.${column}`, inLists(slice), { name, index });
+        if (slice && inLists(slice).length) { remember(`${table}.${column}`, inLists(slice), { name, index }); continue; }
+        const equalities = equalityDomain(body, column);
+        if (equalities.length) remember(`${table}.${column}`, equalities, { name, index });
       }
     }
     for (const m of text.matchAll(/ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?([a-z0-9_]+)\b[\s\S]*?;/gi)) {
@@ -112,8 +139,12 @@ export function databaseStates(files, wanted) {
       const columns = wanted.get(table);
       if (!columns) continue;
       for (const column of columns) {
+        const dropped = droppedConstraint(statement, table, column);
+        if (dropped) { push(`${table}.${column}`, { kind: 'drop', source: { name, index } }); continue; }
         const direct = columnInLists(statement, column);
         if (direct.length) { remember(`${table}.${column}`, direct, { name, index }); continue; }
+        const equalities = equalityDomain(statement, column);
+        if (equalities.length) { remember(`${table}.${column}`, equalities, { name, index }); continue; }
         if (!new RegExp(`\\b${column}\\b`).test(statement)) continue;
         const finder = new RegExp(`\\b${column}\\b`, 'g');
         for (const hit of statement.matchAll(finder)) {
@@ -141,10 +172,47 @@ export function rustFiles(dir) {
   });
 }
 
-function stringLiterals(text) {
+// Lexed rather than regex-matched: a quote inside a comment or a char literal
+// such as '"' desynchronises naive pairing and silently hides later statements.
+export function stringLiterals(text) {
   const out = [];
-  for (const m of text.matchAll(/r(#*)"([\s\S]*?)"\1/g)) out.push(m[2]);
-  for (const m of text.matchAll(/"((?:[^"\\]|\\.)*)"/g)) out.push(m[1]);
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '/' && text[i + 1] === '/') {
+      const end = text.indexOf('\n', i);
+      i = end < 0 ? text.length : end + 1;
+    } else if (c === '/' && text[i + 1] === '*') {
+      let depth = 1;
+      i += 2;
+      while (i < text.length && depth > 0) {
+        if (text[i] === '/' && text[i + 1] === '*') { depth += 1; i += 2; }
+        else if (text[i] === '*' && text[i + 1] === '/') { depth -= 1; i += 2; }
+        else i += 1;
+      }
+    } else if (c === 'r' && /^r#*"/.test(text.slice(i, i + 8))) {
+      const hashes = /^#*/.exec(text.slice(i + 1))[0];
+      const close = `"${hashes}`;
+      const start = i + 2 + hashes.length;
+      const end = text.indexOf(close, start);
+      out.push(text.slice(start, end < 0 ? text.length : end));
+      i = end < 0 ? text.length : end + close.length;
+    } else if (c === '"') {
+      let j = i + 1;
+      let value = '';
+      while (j < text.length && text[j] !== '"') {
+        if (text[j] === '\\') { value += text[j + 1] ?? ''; j += 2; } else { value += text[j]; j += 1; }
+      }
+      out.push(value);
+      i = j + 1;
+    } else if (c === "'") {
+      if (text[i + 1] === '\\') { const end = text.indexOf("'", i + 2); i = end < 0 ? text.length : end + 1; }
+      else if (text[i + 2] === "'") i += 3;
+      else i += 1;
+    } else {
+      i += 1;
+    }
+  }
   return out;
 }
 
@@ -184,6 +252,34 @@ export function enumVariants(path) {
   return out;
 }
 
+export function compareEntries(key, states, entries) {
+  if (!entries) return `${key}: documented, but no CHECK constraint found in database/migrations`;
+  // A later migration drops the old constraint and adds a full new one, so the
+  // last event wins. A drop with no readable replacement leaves the domain
+  // unknown, which must fail loudly instead of falling back to the old set.
+  const lastDrop = entries.filter(e => e.kind === 'drop').pop();
+  const definitions = entries.filter(e => e.kind === 'definition');
+  if (lastDrop && (!definitions.length || lastDrop.order > definitions[definitions.length - 1].order)) {
+    return `${key}: constraint dropped in ${lastDrop.source.name} with no readable replacement; the documented set cannot be verified`;
+  }
+  // Within one file a second, narrower CHECK on the same column is an extra
+  // condition, not a new domain: keep the widest of that file. Incomparable
+  // sets mean a real conflict.
+  const latestIndex = definitions[definitions.length - 1].source.index;
+  const latest = definitions.filter(d => d.source.index === latestIndex);
+  const widest = latest.reduce((a, b) => (a.values.every(v => b.values.includes(v)) ? b : a));
+  const incomparable = latest.filter(s => !s.values.every(v => widest.values.includes(v)));
+  if (incomparable.length) {
+    const detail = latest.map(d => `${show(d.values)} (${d.source.name})`).join(' vs ');
+    return `${key}: database defines incompatible sets: ${detail}`;
+  }
+  if (eq(widest.values, states)) return null;
+  const extra = widest.values.filter(v => !states.includes(v));
+  const missing = states.filter(v => !widest.values.includes(v));
+  return `${key}: doc ${show(states)} != database ${show(widest.values)} (${widest.source.name})` +
+    `${extra.length ? ` | database-only: ${show(extra)}` : ''}${missing.length ? ` | doc-only: ${show(missing)}` : ''}`;
+}
+
 export function runCheck(repoRoot = root) {
   const doc = readFileSync(join(repoRoot, DOC), 'utf8');
   const { tables, code } = parseDoc(doc);
@@ -202,31 +298,8 @@ export function runCheck(repoRoot = root) {
 
   for (const entry of tables) {
     const key = `${entry.table}.${entry.column}`;
-    const definitions = db.get(key);
-    if (!definitions) { errors.push(`${key}: documented, but no CHECK constraint found in database/migrations`); continue; }
-    // Migrations apply in filename order, and a narrowing migration drops the old
-    // constraint and adds a full new one, so the last file wins. Within one file a
-    // second, narrower CHECK on the same column is an extra condition, not a new
-    // domain: keep the widest of that file. Incomparable sets mean a real conflict.
-    const byFile = new Map();
-    for (const definition of definitions) {
-      if (!byFile.has(definition.source.index)) byFile.set(definition.source.index, []);
-      byFile.get(definition.source.index).push(definition);
-    }
-    const latest = [...byFile.keys()].sort((a, b) => a - b).map(index => byFile.get(index)).pop();
-    const widest = latest.reduce((a, b) => (a.values.every(v => b.values.includes(v)) ? b : a));
-    const incomparable = latest.filter(s => !s.values.every(v => widest.values.includes(v)));
-    if (incomparable.length) {
-      const detail = latest.map(d => `${show(d.values)} (${d.source.name})`).join(' vs ');
-      errors.push(`${key}: database defines incompatible sets: ${detail}`);
-      continue;
-    }
-    if (!eq(widest.values, entry.states)) {
-      const extra = widest.values.filter(v => !entry.states.includes(v));
-      const missing = entry.states.filter(v => !widest.values.includes(v));
-      errors.push(`${key}: doc ${show(entry.states)} != database ${show(widest.values)} (${widest.source.name})` +
-        `${extra.length ? ` | database-only: ${show(extra)}` : ''}${missing.length ? ` | doc-only: ${show(missing)}` : ''}`);
-    }
+    const problem = compareEntries(key, entry.states, db.get(key));
+    if (problem) errors.push(problem);
   }
 
   for (const entry of code) {

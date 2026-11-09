@@ -15,7 +15,10 @@ bash scripts/verify-ui-design-handbook.sh
 # Source fingerprints include the agent entrypoints. This check needs no npm
 # install and must fail here, not after the full frontend test suite.
 node scripts/lids.mjs check
-node --test scripts/check-document-governance.test.mjs scripts/ci-select.test.mjs
+node --test scripts/check-document-governance.test.mjs scripts/ci-select.test.mjs scripts/check-state-machines.test.mjs
+# The first state-machine batch is documented in docs/architecture/state-machines.md.
+# Doc, migration CHECKs and code literals must agree; reads files only.
+node scripts/check-state-machines.mjs
 
 # Include staged, unstaged and untracked files for local use. CI uses the same
 # entry point against the PR base. NUL delimiters preserve spaces/newlines.

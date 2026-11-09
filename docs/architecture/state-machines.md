@@ -74,7 +74,7 @@
 | --- | --- | --- |
 | collection_work_order | queue_state | `legacy`, `queued`, `leased`, `completed`, `cancelled` |
 | collection_work_order_lease | release_reason | `completed`, `partial`, `expired`, `revoked`, `station_unavailable`, `dispatch_start_failed`, `execution_locator_unavailable`, `input_blocked` |
-| collection_work_order_lease_task | execution_state | `pending`, `in_progress`, `completed` |
+| collection_work_order_lease_task | execution_state | `pending`, `in_progress`, `completed`, `unavailable`, `blocked`, `input_blocked` |
 | collection_detail_page_session | state | `authorized`, `navigation_started`, `navigation_committed`, `delivery_pending`, `finished`, `stopped` |
 | collection_detail_page_session | stop_reason | `navigation_state_unknown`, `owner_unavailable`, `page_unavailable`, `risk_stop`, `delivery_terminal`, `detail_page_url_invalid` |
 
@@ -93,7 +93,7 @@
 | `completed` | `cancelled` | **唯一反直觉的一条**：发现"没有任何执行任务真的完成"时，把已完成降级为取消 | `dispatch.rs:1425-1428` |
 | `legacy` | 任何 | 不新增，只是 0036 迁移之前历史行的默认值 | `0036_monitor_scheduling_clarity.sql:123` |
 
-`lease_task.execution_state` 只有三个值，没有失败态；失败记在另一张 `collection_work_order_lease_task_dispatch_failure`（`0033`）。它也不是严格单向——派发失败但租约仍有效时，`in_progress` 会退回 `pending`（`dispatch.rs:1202`），前提是这条任务还没被包回执结束。
+`lease_task.execution_state` 是 6 个值，不是"只有进行中和完成"：`0019` 最初写成 `IN ('pending','in_progress','completed')`，`0045` 换成 OR 等式形式并加入 `unavailable`（页面被确认不存在），`0047` 加入 `blocked`（有界重试后仍读不到页面），`0097` 加入 `input_blocked`（缺必需执行输入，从未打开过页面）。后三次都是"先 DROP 同名约束再 ADD"，所以约束名一直是 `collection_work_order_lease_task_execution_state_check`，值集在增长——只看第一次定义会得到过时的三值域。失败明细另记在 `collection_work_order_lease_task_dispatch_failure`（`0033`）。它也不是严格单向——派发失败但租约仍有效时，`in_progress` 会退回 `pending`（`dispatch.rs:1202`），前提是这条任务还没被包回执结束。
 
 `detail_page_session.state` 是"授权→导航→交付"五步链，只有 `dispatch.rs` 一个写入点。
 
@@ -238,15 +238,17 @@
 
 **做**：
 
-1. 本文每张"状态集合"表 ↔ 数据库 `CHECK` 的实际值集，逐项比对（多一个、少一个都报错）。
-2. "代码"表 ↔ Rust 枚举的实际变体，逐项比对。
-3. 扫描生产 Rust 代码里"更新本文所列数据表"的 SQL，凡写出或比较了不属于本文该列状态集合的字面量，报错。按表归属，不会把别的表的同名列混进来。
+1. 本文每张"状态集合"表 ↔ 数据库 `CHECK` 的实际值集，逐项比对（多一个、少一个都报错）。两种写法都认：`col IN (...)`，以及"状态机式"的 `(col = 'a' AND …) OR (col = 'b' AND …)`——后者是 `0045`/`0047`/`0097` 改 `execution_state` 时用的写法，只认 `IN` 会得到过时的三值域。
+2. 同一列后一次迁移"先 DROP 约束"但没给出可读的新定义时，判为"无法验证"并报错，而不是沿用旧值集。
+3. "代码"表 ↔ Rust 枚举的实际变体，逐项比对。
+4. 扫描生产 Rust 代码里"更新本文所列数据表"的 SQL，凡写出或比较了不属于本文该列状态集合的字面量，报错。按表归属，不会把别的表的同名列混进来；字符串按词法切分（跳过注释、字符字面量、裸字符串），不会因为某行里的一个引号而漏掉后面的语句。
 
 **不做**（刻意不做，因为静态看不出来，硬做只会产生误报）：
 
 - 不检查"合法转移"表：某个文件是否只在允许的时机改状态，需要运行期信息，静态扫描给不出可信结论。
-- 不覆盖第一批之外的 9 类状态机（媒体作业、评论研究、主题图谱、运维发布等）。
+- 不覆盖本文五节之外的其它状态机（媒体作业、评论研究、主题图谱、运维发布等）。
 - 不检查 coverage 的 7 值口径（第 5 节已标注人工核对）。
 - 不检查绑定参数（`$2` 之类）里的状态值——这类值最终仍会被数据库 `CHECK` 拒绝，风险由数据库兜底。
+- 只用一个等式表达的值域（`CHECK (col = 'x')`）不当成完整值集：它可能是更宽条件的一支。这种列若被登记进本文，脚本会以"找不到 CHECK"报错，而不是猜。
 
-**验证方法**：在任意一处写一个假状态（例如把 `control_intent` 的候选值改出一个 `pausedX`），运行脚本必须变红。该验证已执行并留证。
+**验证方法**：在任意一处写一个假状态，运行脚本必须变红。已实测四类漂移各自变红、还原后变绿：迁移新增值（`9999` 临时迁移加 `'stuck'`）、代码字面量写错（`queue_state='complet'`）、文档多写值（`'ghost'`）、枚举新增变体（`GhostState`）。
