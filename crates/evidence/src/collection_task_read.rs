@@ -252,6 +252,8 @@ ORDER BY session.last_progress_at DESC
 LIMIT $1
 "#;
 
+// 这里的 `queue_state` 取的是租约任务的 `execution_state`（六个值），不是工单的
+// `queue_state`（五个值）；同名不同域，见 docs/architecture/state-machines.md 7.2。
 const TASK_TIMELINE_SQL: &str = r#"
 WITH latest_attempt AS MATERIALIZED (
     SELECT DISTINCT ON (task_id) task_id, attempt_id, started_at

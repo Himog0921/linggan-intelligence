@@ -2,7 +2,7 @@
 
 > 状态: 权威当前
 > 最后核对: 2026-11-09
-> 适用范围: 采集任务、工单、AI 批次、观察目标、研究底稿这 5 个对象的"状态全集、谁能改、合法转移、写入点"；不覆盖第一批之外的其它状态机，不定义新规则
+> 适用范围: 采集任务、工单、AI 批次、观察目标、研究底稿这 5 个对象的"状态全集、谁能改、合法转移、写入点"；第 7 节另记三个容易读错的名字（同样只描述现状）；不覆盖第一批之外的其它状态机，不定义新规则
 > 事实来源: `database/migrations/` 0005–0193 的 CHECK 约束与触发器（含被后续迁移 DROP 替换的旧定义）、`crates/evidence` 与 `crates/intelligence` 当前代码、`apps/web` 当前展示逻辑；逐条证据标在每节末尾
 > 冲突时以谁为准: 数据库约束与当前代码（二者本身冲突时，数据库为准，因为它是最后一道闸）；本文只描述现状，不改变现状
 
@@ -19,6 +19,8 @@
 5. 写入点在哪几个文件
 
 本文**不是**数据库设计文档（DDL 在 `database/migrations/`），**不是**新规则（不改变任何行为），**不是**一次性报告。
+
+第 7 节单独收集三个"名字看似一个意思、实际是另一个意思"的地方。它们不是新的状态机，而是读状态时最容易踩的坑。
 
 自动检查：`node scripts/check-state-machines.mjs` 把本文"状态集合"表与数据库约束、代码枚举逐项比对，任何一边多出或缺少一个值都会报错。检查范围与盲区见第 6 节。
 
@@ -105,7 +107,7 @@
 
 ### 写入点
 
-`queue_state` 有 9 个文件可写：`dispatch.rs`、`work_order_lease.rs`、`acquisition_chain.rs`、`collection_run.rs`、`collection_control.rs`、`keyword_archive_detail.rs`、`patrol_scheduler.rs`、`topic_map_collection_search.rs`、`topic_map_research_collection.rs`。`detail_page_session.state` 只有 `dispatch.rs` 1 个。
+`queue_state` 有 7 个文件可写：`dispatch.rs`、`work_order_lease.rs`、`acquisition_chain.rs`、`collection_run.rs`、`topic_map_collection_search.rs`、`topic_map_research_collection.rs`、`apps/api/src/local_web/collection_control_surface_view.rs`（建单时直接插入状态）。另有 `collection_control.rs`、`keyword_archive_detail.rs`、`patrol_scheduler.rs` 三个文件会 `UPDATE collection_work_order` 的其它列，并把 `queue_state=...` 当条件用，但不写这一列。`detail_page_session.state` 只有 `dispatch.rs` 1 个。
 
 ### 已知缺口
 
@@ -192,12 +194,12 @@
 
 ### 写入点
 
-7 个文件：`collection_target.rs`、`acquisition_chain.rs`、`work_order_lease.rs`、`patrol_scheduler.rs`、`collection_control.rs`、`target_enrichment.rs`、`keyword_archive_detail.rs`。
+5 个文件：`collection_target.rs`、`acquisition_chain.rs`、`work_order_lease.rs`、`patrol_scheduler.rs`、`collection_control.rs`。
 
 ### 已知缺口
 
 - **没有一层校验 `from → to`**：数据库只约束了"值合法"（严格说，转移表自己的 `from_state` / `to_state` 连值域约束都没有），没有约束"这一步转移合法"。上表是从代码里反推的，不是被强制的。
-- **转移日志不是真的不可改**：`0005_collection_observation_target.sql` 的注释说"每一步变化只追加、不可改写"，但全库没有任何触发器或权限阻止对该表做 `UPDATE` / `DELETE`（0005 只有建表和索引）。"只追加"目前是约定，不是约束。
+- **转移日志可追加、可整目标删除，但不能改写**：`0195_observation_transition_immutable.sql` 起，对该表的 `UPDATE` 会被数据库拒绝。`DELETE` 仍然允许，因为产品删除整条观察目标时会连带删除它的历史（`collection_target.rs:1147`，从叶子往根删）。`0005` 注释里"只追加"的措辞也因此不再准确：准确说法是"只能追加，或随目标整体删除"。
 
 ## 5. 研究底稿 linggan_material_unit / reading
 
@@ -267,4 +269,30 @@
 - 不检查 `INSERT … VALUES ('x')` 与 `CASE … THEN 'x'` 里的状态值：前者要按列位置对表，后者无法判断是不是在写状态列，硬做只会产生误报。
 - 只用一个等式表达的值域（`CHECK (col = 'x')`）不当成完整值集：它可能是更宽条件的一支。这种列若被登记进本文，脚本会以"找不到 CHECK"报错，而不是猜。
 
-**验证方法**：在任意一处写一个假状态，运行脚本必须变红。已实测五类漂移各自变红、还原后变绿：迁移新增值（`9999` 临时迁移加 `'stuck'`）、代码字面量写错（`queue_state='complet'`）、文档多写值（`'ghost'`）、枚举新增变体（`GhostState`）、代码写了一条未登记的转移（`leased→legacy`）。`scripts/check-state-machines.test.mjs` 里另有针对解析边界的用例（单值收窄、`ANY(ARRAY)`、动态 DROP、无 DROP 的放宽、同一条语句里 DROP+ADD、带载荷的枚举变体、注释里的引号、`IN` 列表的原状态、参数目标的登记与条数）。
+**验证方法**：在任意一处写一个假状态，运行脚本必须变红。已实测五类漂移各自变红、还原后变绿：迁移新增值（`9999` 临时迁移加 `'stuck'`）、代码字面量写错（`queue_state='complet'`）、文档多写值（`'ghost'`）、枚举新增变体（`GhostState`）、代码写了一条未登记的转移（`leased→legacy`）。`scripts/check-state-machines.test.mjs` 里另有 27 条针对解析边界的用例（单值收窄、`ANY(ARRAY)`、动态 DROP、无 DROP 的放宽、同一条语句里 DROP+ADD、带载荷的枚举变体、注释里的引号、`IN` 列表的原状态、参数目标的登记与条数）。
+
+## 7. 三个容易读错的名字
+
+这一节不是新的状态机，而是三处"名字像一件事、实际是另一件事"的地方。读代码、看接口返回、数统计时先对照这里，可以省掉一次误判。
+
+### 7.1 AI 执行器的 `state = 'lost'` 不是"它挂了"
+
+- 写入只有一处：新执行器接管时，把上一任从 `running`/`draining` 改成 `lost`（`crates/intelligence/src/ai_foundation/executor.rs:167`）。
+- "谁算当前的主人"不看 `state`：`0139_ai_gen1_executor.sql` 的 `linggan_ai_executor_is_owner` 同时要求 `state='running'`、心跳在 30 秒内、持有会话锁。心跳停了的 `running` 行同样不是主人。
+- 所以：`lost` 只说明"它被接管过"，是历史标记；反过来，看到 `running` 也不能当成活着。判断存活只看心跳和锁。
+
+### 7.2 任务接口里的 `queue_state` 不是工单的 `queue_state`
+
+- 读取模型写的是 `lease_task.execution_state AS queue_state`（`crates/evidence/src/collection_task_read.rs:275`），同一文件的 `:107` 与 `:119` 用这个别名算"进行中 / 租约过期"。
+- 这个字段的值域是租约任务的六个值（`pending`、`in_progress`、`completed`、`unavailable`、`blocked`、`input_blocked`），**不是**工单的五个值（`legacy`、`queued`、`leased`、`completed`、`cancelled`）。
+- 两个字段同名、值域不同，不能互相比较，也不能拿一处的取值去套另一处的转移规则。
+
+### 7.3 三层各有一个 `completed`，只有最里层代表"这件活干完了"
+
+| 层 | 字段 | 写 `completed` 的实际含义 |
+| --- | --- | --- |
+| 工单 | `collection_work_order.queue_state` | "这一轮派发结束了"，**不一定全成**。三个写入点都写它：全部任务完成时（`crates/evidence/src/work_order_lease.rs:459`）、租约记为 `partial` 时（`crates/evidence/src/dispatch.rs:1497`）、租约记为 `input_blocked` 但有任务完成过时（`dispatch.rs:1565`）。此外在"没有任何任务被接收"的收尾里，它还可以被从 `completed` 降级为 `cancelled`（`dispatch.rs:1425-1428`）。 |
+| 租约 | `collection_work_order_lease.release_reason` | "所有任务都是完成态"，区别于 `partial`（有任务缺输入/不可用）、`input_blocked`、`expired`（`work_order_lease.rs:445-457`、`dispatch.rs:1489-1495`、`dispatch.rs:1555-1562`）。 |
+| 租约任务 | `collection_work_order_lease_task.execution_state` | 这一件活真的做完了（`work_order_lease.rs:409`）。 |
+
+三层同名不同义，统计"完成了多少"时选错一层，得到的数字就不同：按工单数会混入 `partial`/`input_blocked` 收尾的轮次，按租约数只算整轮全成，按租约任务数才是逐件的口径。写任何"完成率"之前先明确用的是哪一层。
