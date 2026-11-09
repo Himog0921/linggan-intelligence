@@ -1,8 +1,7 @@
 import { ApiError, requestJson } from '../../../shared/api';
 import { ShapeError, bool, decode, field, num, obj, str, type Json } from '../../../shared/decode';
+import { stepNames, type Step } from '../workbenchModel';
 
-export const stepNames = { opening: '开头', scene: '场景', experience: '经历', feeling: '感受', reflection: '观点', action: '行动', ending: '收尾' } as const;
-export type Step = keyof typeof stepNames;
 export type Template = { code: string; revision: number; sourceWorkId: string; sourceRevisionId: string; sourceAvailable: boolean; status: 'review' | 'ok' | 'off'; steps: Step[]; createdAt: string };
 export type CreateCommand = { requestId: string; workId: string; expectedRevision: string; steps: Step[] };
 export function rejectedTemplateCommand(error: unknown): error is ApiError {

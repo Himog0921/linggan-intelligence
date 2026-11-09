@@ -8,21 +8,35 @@
 .gm-studio .editor > .ed-scroll {min-height:0}
 .gm-studio .ed-head .grow {flex:1}
 .gm-studio .ed-head .acc-btn,.gm-studio .ed-head .frame-chip {flex:none}
-.gm-studio .ed-head .ed-meta {flex:1 1 auto;min-width:0;max-width:44ch}
+.gm-studio .ed-head .chip {flex:none}
+.gm-studio .ed-head .ed-meta {flex:1 1 auto;min-width:0;max-width:44ch;margin-left:0;justify-content:flex-start}
 .gm-studio .ed-head .meta-basic {display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--t-aux);color:var(--lgi-muted)}
 .gm-studio .ed-head > button {flex:none}
 .gm-studio .editor > .ed-foot {flex-wrap:nowrap}
 .gm-studio .editor > .ed-foot > * {flex:none}
+.gm-studio .editor > .ed-foot > :not([class*="footerCopyMount"]) {order:3}
 .gm-studio .editor > .ed-foot > [class*="footerCopyMount"] {display:contents}
 .gm-studio .editor > .ed-foot > [class*="footerCopyMount"][hidden] {display:none}
 .gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section {display:contents}
-.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > p {order:0;margin:0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > [class*="actions"] {order:2;display:flex;gap:var(--s3);margin-left:auto;flex:none}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > :is(p,.chk-sum) {order:0;margin:0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > .aux {order:1;margin:0 0 0 var(--s3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > [class*="actions"] {order:4;display:flex;gap:var(--s3);margin-left:auto;flex:none}
+.gm-studio .write .field-row [class*="titleCopyMount"][hidden] {display:none}
+.gm-studio .write .field-row [class*="titleCopy_"] {height:32px;padding:0 var(--s3);font-size:var(--t-label)}
 .gm-studio .chk-list {list-style:none;margin:0;padding:0}
 .gm-studio .chk-item {margin-left:0;margin-right:0}
 
+/* Demo 的 .btn.quiet.sub 档位（24px / 12px / 1px 下划线）由 LIDS C09 承担，这里把 C09 映射回该档位。 */
+.gm-studio [data-action-button="v8"][data-variant="quiet"] {height:24px;padding:0 2px;font-size:var(--t-label);font-weight:500;border:0;border-bottom:1px solid var(--lgi-ink);overflow:visible}
+.gm-studio [data-action-button="v8"][data-variant="quiet"]:focus-visible {outline-offset:2px}
+.gm-studio .write [data-action-button="v8"][data-variant="quiet"]:not(:disabled) {border-bottom-color:transparent;background:transparent}
+.gm-studio .write [data-action-button="v8"][data-variant="quiet"]:not(:disabled):hover {background:var(--lgi-canvas-low);color:var(--lgi-signal)}
+
 
 .gm-studio .q-item[aria-current="page"] {background:var(--lgi-canvas)}
+.gm-studio .q-head-top .btn {margin-left:auto}
+.gm-studio .q-head-top h2 {white-space:nowrap}
+.gm-studio .q-head-top .aux {flex:none;white-space:nowrap}
 .gm-studio .q-item[aria-current="page"] .q-title {font-weight:600}
 .gm-studio .q-item[aria-current="page"]::before {content:"";position:absolute;left:0;top:var(--s3);bottom:var(--s3);width:2px;background:var(--lgi-signal)}
 .gm-studio .q-title,.gm-studio .q-meta,.gm-studio .q-state {display:block}
@@ -30,12 +44,8 @@
 
 .gm-studio .para-text {display:block;width:100%;field-sizing:content;min-height:0;resize:none;background:transparent;border-top:0;border-right:0;border-bottom:0;border-radius:0}
 .gm-studio .para-text[readonly] {color:var(--lgi-muted)}
-.gm-studio .para-tools {opacity:1}
-.gm-studio .para-tools details {display:inline-block;font-size:var(--t-aux);color:var(--lgi-body)}
-.gm-studio .para-tools details > summary {list-style:none;cursor:pointer;min-height:24px;border-bottom:1px solid var(--lgi-border-strong);color:var(--lgi-body)}
-.gm-studio .para-tools details > summary::-webkit-details-marker {display:none}
-.gm-studio .para-tools details[open] > summary {margin-bottom:var(--s1)}
-.gm-studio .para-tools details p {margin:var(--s1) 0 0;font-size:var(--t-aux)}
+.gm-studio .para-step {height:24px;padding:0 var(--s2);border:1px solid var(--lgi-border);border-radius:0;background:var(--lgi-canvas);font:500 var(--t-label)/1 var(--lgi-font-ui);color:var(--lgi-body)}
+.gm-studio .para-step:focus {outline:2px solid var(--lgi-focus);outline-offset:2px}
 
 .gm-studio .add-para {margin:var(--s3) 0 var(--s6) calc(var(--writing-gutter) + var(--s3));border:0;border-bottom:1px solid var(--lgi-border-strong);background:transparent;padding:0;font-size:var(--t-aux);color:var(--lgi-body);cursor:pointer}
 .gm-studio .add-para:hover {color:var(--lgi-signal);border-bottom-color:var(--lgi-signal-mark)}
@@ -45,11 +55,11 @@
 .gm-studio .cands > span > button:last-child {border:0;background:transparent;color:var(--lgi-muted);font-size:var(--t-aux);cursor:pointer;padding:0 var(--s1)}
 
 .gm-studio .intent {display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s4)}
-.gm-studio .intent small {color:var(--lgi-muted);font-size:var(--t-aux)}
-.gm-studio .intent strong {font:600 var(--t-body)/1.5 var(--lgi-font-ui)}
-.gm-studio .intent details {font-size:var(--t-aux);color:var(--lgi-muted)}
-.gm-studio .intent label {display:grid;gap:var(--s1);margin-top:var(--s2)}
-.gm-studio .intent textarea {min-height:64px}
+.gm-studio .idea-link {display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s3);font-size:var(--t-label);color:var(--lgi-muted)}
+.gm-studio .idea-link strong {font:600 var(--t-body)/1.5 var(--lgi-font-ui);color:var(--lgi-body)}
+.gm-studio .idea-link details {font-size:var(--t-label);color:var(--lgi-muted)}
+.gm-studio .idea-link label {display:grid;gap:var(--s1);margin-top:var(--s2)}
+.gm-studio .idea-link textarea {min-height:64px}
 
 .gm-studio .right > .r-tabs ~ * {min-height:0}
 .gm-studio .r-body > section {padding:0}

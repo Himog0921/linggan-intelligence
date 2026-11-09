@@ -30,6 +30,14 @@ export interface Paragraph {
   id: string;
   text: string;
 }
+/** The closed step vocabulary shared by structural templates and paragraph labels. */
+export const stepNames = { opening: '开头', scene: '场景', experience: '经历', feeling: '感受', reflection: '观点', action: '行动', ending: '收尾' } as const;
+export type Step = keyof typeof stepNames;
+/** The writing step a paragraph plays; an unlabelled paragraph is absent from the list. */
+export interface ParagraphStep {
+  paragraphId: string;
+  step: Step;
+}
 export interface Excerpt {
   id: string;
   citation: Citation;
@@ -187,6 +195,7 @@ export interface WorkDocument {
   coverTitleCandidates: string[];
   noteTitleCandidates: string[];
   paragraphs: Paragraph[];
+  paragraphSteps: ParagraphStep[];
   excerpts: Excerpt[];
   canvas: CanvasBlock[];
   pages: ImagePage[];
@@ -463,6 +472,10 @@ const paragraph = shape<Paragraph>({
   id: uuid,
   text: str
 });
+const paragraphStep = shape<ParagraphStep>({
+  paragraphId: uuid,
+  step: choice('opening', 'scene', 'experience', 'feeling', 'reflection', 'action', 'ending')
+});
 const excerpt = shape<Excerpt>({
   id: uuid,
   citation: parseCitation,
@@ -613,6 +626,7 @@ export const parseWorkDocument = shape<WorkDocument>({
   coverTitleCandidates: v => v === undefined ? [] : array(str)(v),
   noteTitleCandidates: v => v === undefined ? [] : array(str)(v),
   paragraphs: array(paragraph),
+  paragraphSteps: v => v === undefined ? [] : array(paragraphStep)(v),
   excerpts: array(excerpt),
   canvas: array(canvas),
   pages: array(parseImagePage),
@@ -887,6 +901,7 @@ export function newDocument(title = ''): WorkDocument {
     coverTitleCandidates: [],
     noteTitleCandidates: [],
     paragraphs: [],
+    paragraphSteps: [],
     excerpts: [],
     canvas: [],
     pages: [],

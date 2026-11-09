@@ -84,6 +84,14 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
         add(p.id)?;
         text(&p.text)?;
     }
+    let mut stepped = HashSet::new();
+    for tag in &doc.paragraph_steps {
+        if !stepped.insert(tag.paragraph_id)
+            || !doc.paragraphs.iter().any(|p| p.id == tag.paragraph_id)
+        {
+            return Err(WorkbenchError::Invalid("paragraph_step"));
+        }
+    }
     let mut experience_paragraphs = HashSet::new();
     for slot in &doc.experience_slots {
         if slot.experience_ref.is_nil()
@@ -306,5 +314,41 @@ pub(crate) fn refresh_uses(doc: &mut WorkDocument) {
             (Some(_), Some(_)) => UseState::Modified,
             _ => UseState::NeedsReview,
         };
+    }
+}
+
+#[cfg(test)]
+mod paragraph_step_tests {
+    use super::*;
+    use crate::creation_assets::StructuralStep;
+
+    fn draft(step: Option<uuid::Uuid>) -> WorkDocument {
+        let id = uuid::Uuid::new_v4();
+        WorkDocument {
+            paragraphs: vec![Paragraph {
+                id,
+                text: "一段正文".into(),
+            }],
+            paragraph_steps: step
+                .map(|paragraph_id| ParagraphStep {
+                    paragraph_id,
+                    step: StructuralStep::Opening,
+                })
+                .into_iter()
+                .collect(),
+            ..WorkDocument::default()
+        }
+    }
+
+    #[test]
+    fn a_step_must_point_at_its_own_paragraph() {
+        assert!(document(&draft(None)).is_ok());
+        let mut own = draft(None);
+        own.paragraph_steps = vec![ParagraphStep {
+            paragraph_id: own.paragraphs[0].id,
+            step: StructuralStep::Ending,
+        }];
+        assert!(document(&own).is_ok());
+        assert!(document(&draft(Some(uuid::Uuid::new_v4()))).is_err());
     }
 }

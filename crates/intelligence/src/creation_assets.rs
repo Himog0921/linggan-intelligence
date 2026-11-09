@@ -12,6 +12,7 @@ mod identity;
 mod persona_facts;
 mod publications;
 mod requests;
+mod styles;
 mod subject;
 mod templates;
 mod text;
@@ -45,6 +46,7 @@ pub use persona_facts::{
 pub use publications::{
     link_publication, publication_candidates, publication_links, unlink_publication,
 };
+pub use styles::{CreationStyle, StyleCommand, StyleReceipt, list_styles, put_style};
 pub use subject::{CardTerms, Context, Subject};
 pub use templates::{
     CreateTemplate, ReviewTemplate, ReviseTemplate, StructuralStep, StructuralTemplate,

@@ -27,7 +27,7 @@ const receipt = {
 beforeEach(() => vi.clearAllMocks());
 it('reads writable accounts from the creation endpoint without requiring the Ops login', async () => {
   vi.mocked(requestJson).mockResolvedValue({ items: [{ accountRef: id, accountName: '合成账号', platform: 'xhs', status: 'active', operatorName: null, identity: null }] });
-  expect(await accounts(other)).toEqual([{ ref: id, name: '合成账号', platform: 'xhs' }]);
+  expect(await accounts(other)).toEqual([{ ref: id, name: '合成账号', platform: 'xhs', identity: null }]);
   expect(requestJson).toHaveBeenCalledWith(`/ops/api/creation/accounts?domainRef=${other}`, { signal: undefined });
 });
 describe('workbench command receipt identity', () => {

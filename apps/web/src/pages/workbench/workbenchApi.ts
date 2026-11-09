@@ -1,6 +1,7 @@
 import { ApiError, requestJson, requestBinaryJson } from '../../shared/api';
 import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, parseDeskCardPosition, parseDeskCardPositions, parseDeskPosition, parseDeskPositions, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
 import { listAccounts as listCreationAccounts } from './assets/assetsApi';
+import type { Identity } from './assets/assetsModel';
 const base = '/ops/api/creation';
 const post = (path: string, body: unknown) => requestJson(path, {
   method: 'POST',
@@ -302,6 +303,7 @@ export interface AccountOption {
   ref: string;
   name: string;
   platform: string;
+  identity: Identity | null;
 }
 export async function domains(signal?: AbortSignal): Promise<DomainOption[]> {
   const r = object(await requestJson('/api/collection/management/domains', {
@@ -319,7 +321,7 @@ export async function domains(signal?: AbortSignal): Promise<DomainOption[]> {
 }
 export async function accounts(domain: string, signal?: AbortSignal): Promise<AccountOption[]> {
   const accounts = await listCreationAccounts(domain, signal);
-  return accounts.map(item => ({ ref: item.accountRef, name: item.accountName, platform: item.platform }));
+  return accounts.map(item => ({ ref: item.accountRef, name: item.accountName, platform: item.platform, identity: item.identity }));
 }
 export function conflictReceipt(error: unknown) {
   if (error instanceof ApiError && error.failure.kind === 'http' && error.failure.status === 409) {

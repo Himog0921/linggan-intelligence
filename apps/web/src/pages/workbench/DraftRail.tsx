@@ -26,9 +26,9 @@ function stateText(work: WorkSummary, check: DraftCheckSummary | undefined, grou
 }
 
 /** Checks and copy receipts describe saved revisions; neither proves platform publication. */
-export function DraftRail({ drafts, ideas = [], status, currentId, onOpen, onOpenDesk }: {
+export function DraftRail({ drafts, ideas = [], status, currentId, onOpen, onOpenDesk, onNewDraft }: {
   drafts: WorkSummary[]; ideas?: IdeaBoxSummary[]; status: 'loading' | 'error' | 'ready'; currentId: string;
-  onOpen: (id: string) => void; onOpenDesk?: () => void;
+  onOpen: (id: string) => void; onOpenDesk?: () => void; onNewDraft?: () => void;
 }) {
   const queryClient = useQueryClient();
   const ordered = [...drafts].sort((a, b) => a.workId.localeCompare(b.workId));
@@ -71,7 +71,8 @@ export function DraftRail({ drafts, ideas = [], status, currentId, onOpen, onOpe
     <div className="q-head">
       <div className="q-head-top">
         <h2>今日 · {today.getMonth() + 1}月{today.getDate()}日 周{'日一二三四五六'[today.getDay()]}</h2>
-        <small className="aux">{status === 'loading' ? '正在读取稿件…' : status === 'error' ? '稿件读取失败' : `${drafts.length} 篇已保存`}</small>
+        {status === 'ready' && onNewDraft ? null : <small className="aux">{status === 'loading' ? '正在读取稿件…' : status === 'error' ? '稿件读取失败' : `${drafts.length} 篇已保存`}</small>}
+        {onNewDraft ? <button type="button" className="btn sm" onClick={onNewDraft}>＋ 新选题</button> : null}
       </div>
       {checks.some(check => check.isError) ? <button type="button" className="btn sm" onClick={recheck}>重新检查</button> : null}
       {onOpenDesk ? <button type="button" className="btn desk-entry" onClick={onOpenDesk}>

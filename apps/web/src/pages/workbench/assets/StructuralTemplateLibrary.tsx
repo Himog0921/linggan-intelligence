@@ -4,12 +4,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
 import { RequestIdentities } from '../../../shared/requestIdentity';
 import * as api from './structuralTemplatesApi';
+import { stepNames, type Step } from '../workbenchModel';
 import { assetsErrorText } from './assetsApi';
 import styles from './Assets.module.css';
 
 type ReviewAction = 'approve' | 'disable' | 'enable';
 type Pending = { kind: 'review'; code: string; requestId: string; expectedRevision: number; action: ReviewAction }
-  | { kind: 'revise'; code: string; requestId: string; expectedRevision: number; steps: api.Step[] };
+  | { kind: 'revise'; code: string; requestId: string; expectedRevision: number; steps: Step[] };
 
 export function StructuralTemplateLibrary({ domainRef, onPendingChange, onDirtyChange = () => {} }: { domainRef: string; onPendingChange: (pending: boolean) => void; onDirtyChange?: (dirty: boolean) => void }) {
   const client = useQueryClient();
@@ -17,7 +18,7 @@ export function StructuralTemplateLibrary({ domainRef, onPendingChange, onDirtyC
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all');
-  const [editing, setEditing] = useState<api.Step[] | null>(null);
+  const [editing, setEditing] = useState<Step[] | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
@@ -77,11 +78,11 @@ export function StructuralTemplateLibrary({ domainRef, onPendingChange, onDirtyC
           })}</tbody>
         </table>
       </div>
-      <aside className="lib-insp" aria-label="样板详情">{current ? <><h3>{current.code} · 第 {current.revision} 版</h3><p>{state(current)}</p><p>结构：{current.steps.map(step => api.stepNames[step]).join(' → ')}</p><p className={styles.hint}>来源：创建样板时保存的稿件版本。 <Link to={`/ops/creation?domain=${encodeURIComponent(domainRef)}&work=${encodeURIComponent(current.sourceWorkId)}&view=body`}>查看来源稿件当前版本 ↗</Link></p><p className={styles.hint}>目前保存结构和审核状态，尚不能用样板开稿。</p>
-        {editing ? <section aria-label="编辑样板结构"><p>新版本：{editing.map(step => api.stepNames[step]).join(' → ') || '尚未选择'}</p><div className={styles.actions}>{Object.entries(api.stepNames).map(([key, name]) => <ActionButton key={key} variant="quiet" disabled={busy || !!pending || editing.length >= 12} onClick={() => setEditing(value => [...(value ?? []), key as api.Step])}>＋ {name}</ActionButton>)}</div><div className={styles.actions}><ActionButton variant="quiet" disabled={busy || !!pending || !editing.length} onClick={() => setEditing(value => value?.slice(0, -1) ?? null)}>撤销上一步</ActionButton><ActionButton variant="quiet" disabled={busy || !!pending} onClick={() => { setEditing(null); onDirtyChange(false); }}>取消编辑</ActionButton><ActionButton variant="primary" disabled={busy || !!pending || stale || !editing.length || !current.sourceAvailable || current.status === 'off'} onClick={revise}>保存新版本</ActionButton></div></section> : null}
+      <aside className="lib-insp" aria-label="样板详情">{current ? <><h3>{current.code} · 第 {current.revision} 版</h3><p>{state(current)}</p><p>结构：{current.steps.map(step => stepNames[step]).join(' → ')}</p><p className={styles.hint}>来源：创建样板时保存的稿件版本。 <Link to={`/ops/creation?domain=${encodeURIComponent(domainRef)}&work=${encodeURIComponent(current.sourceWorkId)}&view=body`}>查看来源稿件当前版本 ↗</Link></p><p className={styles.hint}>目前保存结构和审核状态，尚不能用样板开稿。</p>
+        {editing ? <section aria-label="编辑样板结构"><p>新版本：{editing.map(step => stepNames[step]).join(' → ') || '尚未选择'}</p><div className={styles.actions}>{Object.entries(stepNames).map(([key, name]) => <ActionButton key={key} variant="quiet" disabled={busy || !!pending || editing.length >= 12} onClick={() => setEditing(value => [...(value ?? []), key as Step])}>＋ {name}</ActionButton>)}</div><div className={styles.actions}><ActionButton variant="quiet" disabled={busy || !!pending || !editing.length} onClick={() => setEditing(value => value?.slice(0, -1) ?? null)}>撤销上一步</ActionButton><ActionButton variant="quiet" disabled={busy || !!pending} onClick={() => { setEditing(null); onDirtyChange(false); }}>取消编辑</ActionButton><ActionButton variant="primary" disabled={busy || !!pending || stale || !editing.length || !current.sourceAvailable || current.status === 'off'} onClick={revise}>保存新版本</ActionButton></div></section> : null}
         <div className={styles.actions}>{pending ? <ActionButton variant="outline" busy={busy} onClick={() => void run(pending)}>重试上次操作</ActionButton> : <>{current.status === 'review' ? <ActionButton variant="outline" disabled={!current.sourceAvailable || busy || !!editing} onClick={() => review('approve')}>审核通过</ActionButton> : null}{current.status !== 'off' ? <><ActionButton variant="quiet" disabled={busy || !!editing} onClick={() => review('disable')}>停用</ActionButton><ActionButton variant="quiet" disabled={busy || !current.sourceAvailable || !!editing} onClick={() => { setEditing([...current.steps]); onDirtyChange(true); }}>编辑结构</ActionButton></> : <ActionButton variant="quiet" disabled={busy || !!editing} onClick={() => review('enable')}>恢复待审核</ActionButton>}</>}</div>{notice ? <p role="status">{notice}</p> : null}
         {stale ? <p>样板已有新版本，当前编辑仍保留。<ActionButton variant="outline" busy={busy} onClick={() => { setBusy(true); void query.refetch().then(result => { if (result.isSuccess) { setStale(false); setNotice('已读取最新版本，请核对后保存。'); } else setNotice('读取失败，请重试。'); }).finally(() => setBusy(false)); }}>读取最新版本</ActionButton></p> : null}
-        <details><summary>版本历史</summary>{history.isPending ? <p>正在读取…</p> : history.isError ? <p>读取失败。<ActionButton variant="quiet" onClick={() => void history.refetch()}>重试</ActionButton></p> : <ol>{history.data?.map(item => <li key={item.revision}>第 {item.revision} 版 · {state(item)} · {item.steps.map(step => api.stepNames[step]).join(' → ')}</li>)}</ol>}</details>
+        <details><summary>版本历史</summary>{history.isPending ? <p>正在读取…</p> : history.isError ? <p>读取失败。<ActionButton variant="quiet" onClick={() => void history.refetch()}>重试</ActionButton></p> : <ol>{history.data?.map(item => <li key={item.revision}>第 {item.revision} 版 · {state(item)} · {item.steps.map(step => stepNames[step]).join(' → ')}</li>)}</ol>}</details>
         </> : <p className={styles.hint}>选择左侧样板查看结构和来源。</p>}</aside>
     </div> : null}
   </section>;

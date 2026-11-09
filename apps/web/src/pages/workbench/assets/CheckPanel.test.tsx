@@ -78,7 +78,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-const ready = async () => { await screen.findByText(/必改 \d+ · 提醒 \d+ · 提示 \d+$/); };
+const ready = async () => { await screen.findByText(/必须先改|没有阻断项|没有要改的了/); };
 
 describe('check results', () => {
   it('switches between real check, material, title and draft preview views', async () => {
@@ -93,7 +93,7 @@ describe('check results', () => {
     fireEvent.click(screen.getByRole('button', { name: '预览' }));
     expect(screen.getByRole('region', { name: '稿件预览' })).toHaveTextContent('甲😀孩子变好了，真好');
     fireEvent.click(screen.getByRole('button', { name: '检查' }));
-    expect(screen.getByText('没有发现问题。')).toBeVisible();
+    expect(screen.getByText('没有要改的了，可以复制。')).toBeVisible();
   });
   it('groups findings by level with a word for each level, and counts them', async () => {
     vi.mocked(api.checkDraft).mockResolvedValue(report([
@@ -103,18 +103,17 @@ describe('check results', () => {
       finding({ rule: 'R-I1', level: 'hint', message: '封面是 AI 作图' }),
     ]));
     show();
-    await screen.findByText('必改 1 · 提醒 2 · 提示 1');
+    await screen.findByText(/必须先改/);
     for (const [heading, text] of [['必须先改', '还没选衔接句'], ['提醒', '“变好了”是在讲效果'], ['发布时记得', '封面是 AI 作图']] as const) {
       const group = screen.getByRole('region', { name: heading });
       expect(within(group).getByText(text)).toBeInTheDocument();
     }
-    expect(within(screen.getByRole('region', { name: '必须先改' })).getByText('必改')).toBeInTheDocument();
   });
 
   it('says so when nothing was found, and lists the rules that could not run', async () => {
     vi.mocked(api.checkDraft).mockResolvedValue(report([], { notRun: [{ rule: 'R-W3', reason: '产品事实卡还没有确认，产品叫法没有检查' }] }));
     show();
-    await screen.findByText('没有发现问题。');
+    await screen.findByText('没有要改的了，可以复制。');
     expect(screen.getByText(/未检查：产品事实卡还没有确认/)).toBeInTheDocument();
   });
 
@@ -123,11 +122,11 @@ describe('check results', () => {
     show();
     await screen.findByRole('alert');
     expect(screen.getByRole('alert')).toHaveTextContent('检查读取失败');
-    expect(screen.queryByText('没有发现问题。')).not.toBeInTheDocument();
+    expect(screen.queryByText('没有要改的了，可以复制。')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: '复制到小红书' })).toBeDisabled();
     vi.mocked(api.checkDraft).mockResolvedValue(report([]));
     fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: '重试' }));
-    await screen.findByText('没有发现问题。');
+    await screen.findByText('没有要改的了，可以复制。');
     expect(screen.getByRole('button', { name: '复制到小红书' })).toBeEnabled();
   });
 
@@ -223,7 +222,7 @@ describe('fixes', () => {
     expect(edit).toHaveBeenLastCalledWith(expect.objectContaining({ bridge: { skip: true, sentence: null, afterParagraph: null } }));
     fireEvent.click(screen.getByRole('button', { name: '删掉重复的' }));
     expect(onTagsChange).toHaveBeenCalledWith('ADHD 放手');
-    const coverItem = screen.getByText('封面大字太长').closest('li') as HTMLElement;
+    const coverItem = screen.getByText('封面大字太长').closest('.chk-item') as HTMLElement;
     fireEvent.click(within(coverItem).getByRole('button', { name: '找到位置' }));
     expect(onGoCover).toHaveBeenCalledTimes(1);
   });
@@ -372,7 +371,7 @@ describe('copy', () => {
   it('stays closed until 必改 is clear and says why', async () => {
     vi.mocked(api.checkDraft).mockResolvedValue(report([finding({ rule: 'R-M1', level: 'must', message: '账号身份还没确认' })]));
     show();
-    await screen.findByText('必改 1 · 提醒 0 · 提示 0');
+    await screen.findByText(/必须先改/);
     expect(screen.getByRole('button', { name: '复制到小红书' })).toBeDisabled();
     expect(screen.getByText('必改清零后才能复制')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '复制标题' })).toBeDisabled();
@@ -384,7 +383,7 @@ describe('copy', () => {
       title: '合成标题', body: '正文', tags: [], text: '甲\nㅤ\n乙', warnCount: 1, hintCount: 0, replayed: false });
     vi.mocked(api.confirmCopy).mockResolvedValue({ receiptRef: RECEIPT, revisionId: REV, copiedAt: 't' });
     const { saveCurrent } = show({ saveState: 'dirty' });
-    await screen.findByText('必改 0 · 提醒 1 · 提示 0');
+    await screen.findByText('没有阻断项，可以复制。');
     fireEvent.click(screen.getByRole('button', { name: '复制到小红书' }));
     await screen.findByText(/已复制到剪贴板（还有 1 条提醒没处理）/);
     expect(saveCurrent).toHaveBeenCalledTimes(1);

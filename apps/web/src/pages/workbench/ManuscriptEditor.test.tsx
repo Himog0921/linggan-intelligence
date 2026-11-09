@@ -46,9 +46,42 @@ describe('经历来源', () => {
     expect(references[0]).toMatchObject({ paragraphId: first, experienceRef: experience, experienceRevision: 1 });
     expect(screen.getAllByText('来源：经历库 · 使用前重新核验')).toHaveLength(1);
     const firstParagraph = screen.getByLabelText('正文第 1 段').parentElement!;
-    fireEvent.click(within(firstParagraph).getByText('段落与来源'));
     fireEvent.click(within(firstParagraph).getByRole('button', { name: '删除这一段' }));
     expect(JSON.parse(output.textContent ?? '[]')).toEqual([]);
+  });
+});
+
+describe('段落步骤', () => {  it('names a labelled paragraph by its step and hides a repeated one', () => {
+    const second = '00000000-0000-4000-8000-000000000003';
+    const initial = { ...newDocument(), paragraphs: [{ id: first, text: '开场' }, { id: second, text: '继续' }],
+      paragraphSteps: [{ paragraphId: first, step: 'opening' as const }, { paragraphId: second, step: 'opening' as const }] };
+    render(<Editor initial={initial} />);
+    const label = screen.getByLabelText('正文第 1 段').parentElement!.parentElement!.querySelector('.para-label')!;
+    expect(label.textContent).toBe('开头');
+    const repeated = screen.getByLabelText('正文第 2 段').parentElement!.parentElement!.querySelector('.para-label')!;
+    expect(repeated.className).toContain('cont');
+  });
+
+  it('labels a paragraph from the picker and drops the label with the paragraph', () => {
+    render(<Editor initial={{ ...newDocument(), paragraphs: [{ id: first, text: '一段' }] }} />);
+    fireEvent.change(screen.getByLabelText('第 1 段的步骤'), { target: { value: 'ending' } });
+    const label = screen.getByLabelText('正文第 1 段').parentElement!.parentElement!.querySelector('.para-label')!;
+    expect(label.textContent).toBe('收尾');
+    fireEvent.click(within(screen.getByLabelText('正文第 1 段').parentElement!).getByRole('button', { name: '删除这一段' }));
+    expect(screen.queryByText('收尾')).toBeNull();
+  });
+});
+
+describe('关联爆款提示', () => {
+  it('shows the notice between the intent and the cover row', () => {
+    const initial = { ...newDocument(), angle: '合成选题意图' };
+    const { container } = render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <ManuscriptEditor draftInputs={{ cover: '', note: '', idea: '' }} onDraftInputs={() => {}} document={initial} edit={() => {}} compose={() => {}} isComposing={() => false}
+        textSelection={() => {}} tagsDraft="" onTagsChange={() => {}} related={<div className="related">这个选题框里《合成旧稿》已经发布过。</div>} />
+    </QueryClientProvider>);
+    const inner = container.querySelector('.ed-inner')!;
+    const children = Array.from(inner.children);
+    expect(children.findIndex(item => item.classList.contains('related'))).toBe(children.findIndex(item => item.classList.contains('cover-row')) - 1);
   });
 });
 

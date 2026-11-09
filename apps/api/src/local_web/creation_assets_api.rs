@@ -45,6 +45,11 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(confirm_fact_card),
         )
         .route(
+            "/ops/api/creation/styles",
+            get(list_styles).post(create_style),
+        )
+        .route("/ops/api/creation/styles/{code}", put(edit_style))
+        .route(
             "/ops/api/creation/bridge-sentences",
             get(list_sentences).post(create_sentence),
         )
@@ -407,6 +412,32 @@ async fn confirm_fact_card(
     Json(command): Json<ConfirmCommand>,
 ) -> Response {
     reply(assets::confirm_fact_card(database!(state), &code, &command).await)
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StylesQuery {
+    domain_ref: Option<Uuid>,
+}
+async fn list_styles(State(state): State<LocalWebState>, Query(q): Query<StylesQuery>) -> Response {
+    reply(
+        assets::list_styles(database!(state), q.domain_ref)
+            .await
+            .map(|items| json!({"items": items})),
+    )
+}
+async fn create_style(
+    State(state): State<LocalWebState>,
+    Json(command): Json<assets::StyleCommand>,
+) -> Response {
+    reply(assets::put_style(database!(state), None, &command).await)
+}
+async fn edit_style(
+    State(state): State<LocalWebState>,
+    Path(code): Path<String>,
+    Json(command): Json<assets::StyleCommand>,
+) -> Response {
+    reply(assets::put_style(database!(state), Some(&code), &command).await)
 }
 
 #[derive(Deserialize)]

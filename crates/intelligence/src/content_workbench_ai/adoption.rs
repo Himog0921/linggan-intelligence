@@ -126,6 +126,7 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
     }
     if action == "draft" && r.paragraph_indices.is_none() {
         document.paragraphs.clear();
+        document.paragraph_steps.clear();
     }
     for i in indices {
         let p = &output.paragraphs[i];

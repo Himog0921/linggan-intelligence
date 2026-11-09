@@ -686,6 +686,8 @@ pub async fn reset_withdrawn(
         doc.experience_slots
             .retain(|slot| !withdrawn.contains(&slot.experience_ref));
         doc.experience_gaps.retain(|id| !removed.contains(id));
+        doc.paragraph_steps
+            .retain(|tag| !removed.contains(&tag.paragraph_id));
         doc.uses.retain(|usage| !matches!(usage.target, UseTarget::Paragraph { paragraph_id } if removed.contains(&paragraph_id)));
         for id in withdrawn {
             sqlx::query("INSERT INTO linggan_creation_experience_reset(request_ref,work_ref,experience_ref) VALUES($1,$2,$3)")

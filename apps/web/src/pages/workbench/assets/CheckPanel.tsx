@@ -8,14 +8,13 @@ import { ModalDialog } from '../../../corpus/ModalDialog';
 import type { Citation, Revision, WorkDocument } from '../workbenchModel';
 import { readWork } from '../workbenchApi';
 import * as api from './assetsApi';
-import { blockedFindings, type Finding, type Fix, type Location } from './assetsModel';
-import { applyRange, bridgeFromSentence, countByLevel, identityCommand, levelHeading, levelLabel, nextSentence, withBridge, withoutTag } from './assetsText';
+import { blockedFindings, type Finding, type Fix, type Level, type Location } from './assetsModel';
+import { applyRange, bridgeFromSentence, countByLevel, identityCommand, nextSentence, withBridge, withoutTag } from './assetsText';
 import { BridgeSlot } from './BridgeSlot';
 import { IdentityForm } from './IdentityForm';
 import styles from './Assets.module.css';
 
 type SaveState = 'saved' | 'dirty' | 'saving' | 'failed' | 'unknown' | 'conflict';
-const LEVELS = ['must', 'warn', 'hint'] as const;
 const CHECK_DELAY_MS = 450;
 
 async function writeClipboard(text: string): Promise<boolean> {
@@ -44,11 +43,12 @@ function useSettled(document: WorkDocument, hold: boolean) {
  * shows what they found, applies the fixes the server offered through the normal save, and only
  * copies the saved revision once nothing is left in 必改.
  */
-export function CheckPanel({ workId, domainRef, document, revision, saveState, composing, locked, active, pendingConfirmation, setPendingConfirmation, confirmationIdentities, tagsDraft, onTagsChange, edit, saveCurrent, onGoCover, onOpenSource, copyContainer, sensitiveVisible = true, withdrawalInvalidated = false }: {
+export function CheckPanel({ workId, domainRef, document, revision, saveState, composing, locked, active, pendingConfirmation, setPendingConfirmation, confirmationIdentities, tagsDraft, onTagsChange, edit, saveCurrent, onGoCover, onOpenSource, copyContainer, titleContainer, sensitiveVisible = true, withdrawalInvalidated = false }: {
   workId: string; domainRef: string; document: WorkDocument; revision: Revision; saveState: SaveState; composing: boolean; locked: boolean; active: boolean;
   pendingConfirmation: string | null; setPendingConfirmation: (receipt: string | null) => void; confirmationIdentities: RequestIdentities;
   tagsDraft: string; onTagsChange: (value: string) => void; edit: (next: WorkDocument) => void; saveCurrent: () => Promise<Revision>; onGoCover: () => void;
   copyContainer?: HTMLElement | null;
+  titleContainer?: HTMLElement | null;
   onOpenSource?: (source: Citation) => void;
   sensitiveVisible?: boolean; withdrawalInvalidated?: boolean;
 }) {
@@ -304,13 +304,30 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     }
   }
 
-  const grouped = LEVELS.map(level => ({ level, items: findings.filter(finding => finding.level === level) })).filter(group => group.items.length > 0);
+  const mustItems = findings.filter(finding => finding.level === 'must');
+  const warnItems = findings.filter(finding => finding.level === 'warn');
+  const hintItems = findings.filter(finding => finding.level === 'hint');
+  const checkItem = (finding: Finding, index: number, lvl: Level) => <div key={`${finding.rule}-${index}`} className={`chk-item ${lvl === 'must' ? 'bad' : lvl === 'hint' ? 'info' : ''}`} data-level={lvl}>
+    <p>{finding.message}</p>
+    <div className="row">
+      {finding.location.kind !== 'slot' && finding.location.kind !== 'text' && !finding.fixes.some(f => f.action === 'editByHand') ? <ActionButton variant="quiet" disabled={!fixable} onClick={() => locate(finding.location)}>找到位置</ActionButton> : null}
+      {finding.fixes.map(item => <ActionButton key={item.action + item.label} variant="quiet" disabled={!fixable} onClick={() => void fix(finding, item)}>{item.label}</ActionButton>)}
+    </div>
+  </div>;
+  const checkFold = (key: string, label: string, dot: string, items: Finding[], lvl: Level) => items.length ? <details className="r-sec check-fold" key={key}>
+    <summary><h3><span className={`dot ${dot}`} />{label} <span className="data check-count">{items.length}</span></h3>
+      <svg className="check-chevron" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m6 3 5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg></summary>
+    <div className="check-items" role="region" aria-label={label}>{items.map((finding, index) => checkItem(finding, index, lvl))}</div>
+  </details> : null;
   const copyPanel = <section aria-label="复制" className={`${styles.copy} ${copyContainer ? styles.footerCopy : ''}`}>
-    <p>{copyContainer && reportOk ? `必改 ${counts.must} · 提醒 ${counts.warn}${wasCopied ? ' · 已复制（还没有发布）' : ''}` : wasCopied ? '已复制（还没有发布）' : '草稿中'}</p>
+    {copyContainer && reportOk ? <>
+      <button type="button" className="chk-sum" onClick={() => setPanelView('checks')}><span className={`dot ${counts.must ? 'bad' : 'ok'}`} />必改 <b>{counts.must}</b><span className={`dot ${counts.warn ? 'warn' : 'unk'}`} />提醒 <b>{counts.warn}</b></button>
+      <span className="aux">{counts.must ? '必改清零后才能复制' : '复制时自动补空行、去重复话题'}{wasCopied ? ' · 已复制（还没有发布）' : ''}</span>
+    </> : <p>{wasCopied ? '已复制（还没有发布）' : '草稿中'}</p>}
     {!copyContainer && !canCopy && copyWhy ? <p className={styles.hint}>{copyWhy}</p> : null}
     <div className={styles.actions}>
       <ActionButton variant="primary" busy={copying} disabled={!canCopy} title={!canCopy && copyWhy ? copyWhy : undefined} onClick={() => void copy()}>{copying ? '复制中…' : '复制到小红书'}</ActionButton>
-      {!copyContainer ? <ActionButton variant="outline" disabled={!document.title.trim() || !canCopy} onClick={() => void copyTitle()}>复制标题</ActionButton> : null}
+      {!copyContainer && !titleContainer ? <ActionButton variant="outline" disabled={!document.title.trim() || !canCopy} onClick={() => void copyTitle()}>复制标题</ActionButton> : null}
     </div>
     {pendingConfirmation ? <p role="status">复制记录结果未确认。<ActionButton variant="outline" disabled={copying} onClick={() => void recordClipboard(pendingConfirmation)}>重新确认记录</ActionButton></p> : null}
     {notice ? <p role="status">{notice}</p> : null}
@@ -321,21 +338,12 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     </nav>
     <div className="r-body" hidden={panelView !== 'checks'}>
     <section aria-label="检查结果" aria-live="polite">
-      <h3>检查结果</h3>
       {report.isPending ? <p>正在检查…</p> : report.isError ? <p role="alert" className={styles.problem}>检查读取失败。{api.assetsErrorText(report.error)}<ActionButton variant="quiet" onClick={() => void report.refetch()}>重试</ActionButton></p> : <>
-        <p className={styles.counts}>必改 {counts.must} · 提醒 {counts.warn} · 提示 {counts.hint}{!reportOk ? '（更新中）' : ''}</p>
-        {grouped.length === 0 && reportOk ? <p>没有发现问题。</p> : null}
-        {grouped.map(group => <section key={group.level} aria-label={levelHeading[group.level]}>
-          <h4>{levelHeading[group.level]}</h4>
-          <ul className="chk-list">{group.items.map((finding, index) => <li key={`${finding.rule}-${index}`} className={`chk-item ${finding.level === 'must' ? 'bad' : finding.level === 'hint' ? 'info' : ''}`} data-level={finding.level}>
-            <span className={styles.chip}>{levelLabel[finding.level]}</span>
-            <span>{finding.message}</span>
-            <div className={styles.fixes}>
-              {finding.location.kind !== 'slot' && finding.location.kind !== 'text' && !finding.fixes.some(f => f.action === 'editByHand') ? <ActionButton variant="quiet" disabled={!fixable} onClick={() => locate(finding.location)}>找到位置</ActionButton> : null}
-              {finding.fixes.map(item => <ActionButton key={item.action + item.label} variant="outline" disabled={!fixable} onClick={() => void fix(finding, item)}>{item.label}</ActionButton>)}
-            </div>
-          </li>)}</ul>
-        </section>)}
+        {mustItems.length ? <div className="r-sec"><h3><span className="dot bad" />必须先改 <span className="data muted">{mustItems.length}</span></h3><div className="check-items" role="region" aria-label="必须先改">{mustItems.map((finding, index) => checkItem(finding, index, 'must'))}</div></div>
+          : <p className="check-clear"><span className="dot ok" />{warnItems.length ? '没有阻断项，可以复制。' : '没有要改的了，可以复制。'}{!reportOk ? '（更新中）' : ''}</p>}
+        {checkFold('warn', '提醒', 'warn', warnItems, 'warn')}
+        {checkFold('hint', '发布时记得', 'info', hintItems, 'hint')}
+        <div className="auto-note">复制到小红书时自动处理：段落之间补上空行（ㅤ），重复的话题只留一个。</div>
         {report.data?.notRun.map(item => <p key={item.rule} className={styles.hint}>未检查：{item.reason}。</p>)}
       </>}
     </section>
@@ -376,6 +384,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
       <p className={styles.hint}>这是编辑中的预览，复制时会使用保存并检查后的稿件。</p>
     </section>
     {copyContainer ? createPortal(copyPanel, copyContainer) : copyPanel}
+    {titleContainer ? createPortal(<ActionButton variant="outline" className={styles.titleCopy} disabled={!document.title.trim() || !canCopy} onClick={() => void copyTitle()}>复制标题</ActionButton>, titleContainer) : null}
     {identityOpen && document.accountRef && account ? <ModalDialog labelledBy={`${uid}-identity`} className={styles.dialog} onClose={() => setIdentityOpen(false)}>
       <IdentityForm accountRef={account.accountRef} accountName={account.accountName} identity={account.identity}
         onSaved={() => { setIdentityOpen(false); reload(); }} onStale={reload} onCancel={() => setIdentityOpen(false)} />

@@ -18,7 +18,8 @@ import { TopicLibrary } from './TopicLibrary';
 import { CheckPanel } from './assets/CheckPanel';
 import { PublicationLinker, type PublicationPending } from './assets/PublicationLinker';
 import { SaveStructuralTemplate } from './assets/SaveStructuralTemplate';
-import type { CreateCommand as TemplateCreateCommand } from './assets/structuralTemplatesApi';
+import { listTemplates, type CreateCommand as TemplateCreateCommand } from './assets/structuralTemplatesApi';
+import { listStyles } from './assets/stylesApi';
 import { AssetsLibrary } from './assets/AssetsLibrary';
 import { MaterialDesk } from './MaterialDesk';
 import { newImagePage } from './imagePageFactory';
@@ -195,11 +196,11 @@ export function WorkbenchPage() {
     window.addEventListener('beforeunload', protectCreate);
     return () => window.removeEventListener('beforeunload', protectCreate);
   }, [creating, createUnknown, assetPending, anyTemplatePending, anyPublicationPending, anyTitlePending, anyWritingPending, assetDirty, title]);
-  async function createWork() {
+  async function createWork(workTitle?: string) {
     if (!domain || creating) return;
     setCreating(true);
     setError('');
-    const document = newDocument(title.trim());
+    const document = newDocument((workTitle ?? title).trim());
     const frozen = createPending.current ?? {
       domainRef: domain,
       document,
@@ -244,11 +245,15 @@ export function WorkbenchPage() {
     scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
       disabled={creating || createUnknown || assetPending} onChange={next => { if (createPending.current || assetPending) return; setError(''); setParams({ domain: next, section }); }} />}
     tabs={undefined}
+    page={view === 'desk' && work ? '选题与材料' : undefined}
     meta={view === 'desk' && work ? <>
       <span>选题组织 · 材料编排 · 多账号开稿</span>
-      <ActionButton variant="outline" onClick={() => setParams({ domain, work, view: 'body' })}>返回写稿</ActionButton>
-    </> : <ActionButton variant="outline" disabled={!domain || !validDomain} onClick={() => { setAssetsAnchor(assetsRoute); setAssetsOpen(true); }}>资产库</ActionButton>}>
-<main className={styles.workspace} aria-label="运营创作">
+      <ActionButton variant="primary" onClick={() => setParams({ domain, work, view: 'body' })}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="m10 4-6 6 6 6M4 10h13" /></svg>返回写稿</ActionButton>
+    </> : <>
+      {works.data ? <span>待完成 <b>{works.data.filter(item => !item.publishedRevisionId).length}</b> · 已发布 <b>{works.data.filter(item => item.publishedRevisionId).length}</b></span> : null}
+      <ActionButton variant="outline" disabled={!domain || !validDomain} onClick={() => { setAssetsAnchor(assetsRoute); setAssetsOpen(true); }}>资产库</ActionButton>
+    </>}>
+<main className={`${styles.workspace}${work && view !== 'cover' && view !== 'inner' && view !== 'export' ? ` ${styles.studioBleed}` : ''}`} aria-label="运营创作">
     {blocker.state === 'blocked' ? assetDirty && !assetPending && !anyTemplatePending && !anyPublicationPending && !anyTitlePending && !anyWritingPending ? <p role="alert" className={styles.error}>当前内容有未保存编辑。 <button type="button" onClick={() => blocker.reset()}>继续编辑</button> <button type="button" onClick={() => { setAssetDirty(false); setAssetReset(value => value + 1); blocker.proceed(); }}>丢弃编辑并离开</button></p> : <p role="alert" className={styles.error}>操作结果尚未确认，请先留在当前页面并沿用原请求重试。 <button type="button" onClick={() => blocker.reset()}>返回当前页面</button></p> : null}
     {domainQuery.error ? <p className={styles.error} role="alert">{api.errorText(domainQuery.error)}</p> : null}
     {domainQuery.isPending ? <div className={styles.empty} role="status">正在读取创作领域…</div> : !domain || !validDomain ? <div className={styles.entryEmpty}><span className={styles.entryIndex} aria-hidden="true">01 / CREATE</span><h1>{domain ? '当前领域不可用于创作' : '从一个领域开始创作'}</h1><p>{domain ? '请在上方面包屑中切换可用领域，再查看选题和稿件。' : '在上方面包屑选择创作领域，随后可以建立选题，或继续已保存的稿件。'}</p>{domainQuery.isError ? <ActionButton onClick={() => void domainQuery.refetch()}>重新读取领域</ActionButton> : <p>今日选题 · 方案与材料 / 我的创作 · 正文与图页</p>}</div> : work ? <>{current.isPending ? <p>恢复服务器草稿中…</p> : current.error ? <p role="alert" className={styles.error}>{api.errorText(current.error)} <ActionButton variant="outline" onClick={() => void current.refetch()}>重新读取</ActionButton>
@@ -265,7 +270,7 @@ export function WorkbenchPage() {
 <input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={creating || createUnknown} onChange={e => setTitle(e.target.value)} />
 <ActionButton type="submit" variant="primary" busy={creating} disabled={!title.trim() || creating}>{creating ? '建立中…' : createUnknown ? '核实原请求并重试' : '建立选题'}</ActionButton>
 </form>} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
-<WorkEditor onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenAnchor={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} onOpenDraftWriting={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} onSwitchWork={id => setParams({ domain: w.domainRef, work: id, view: 'desk' })} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
+<WorkEditor onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenAnchor={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} onNewDraft={() => void createWork('新选题')} onOpenDraftWriting={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} onSwitchWork={id => setParams({ domain: w.domainRef, work: id, view: 'desk' })} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
           domain: w.domainRef,
           work: w.workId,
           view
@@ -300,6 +305,7 @@ function WorkEditor({
   draftsStatus,
   onOpenDraft,
   onOpenDraftWriting,
+  onNewDraft,
   onSwitchWork,
   active,
   view,
@@ -314,6 +320,7 @@ function WorkEditor({
   draftsStatus: 'loading' | 'error' | 'ready';
   onOpenDraft: (id: string) => void;
   onOpenDraftWriting: (id: string) => void;
+  onNewDraft: () => void;
   onSwitchWork: (id: string) => void;
   active: boolean;
   view: View;
@@ -385,6 +392,7 @@ function WorkEditor({
   const [compareVisible,setCompareVisible]=useState(false);
   const [compareBase, setCompareBase] = useState<WorkDocument | null>(null);
   const [copyContainer, setCopyContainer] = useState<HTMLDivElement | null>(null);
+  const [titleContainer, setTitleContainer] = useState<HTMLDivElement | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [aiAction, setAiAction] = useState<WritingAction>('draft');
   const [instruction, setInstruction] = useState('');
@@ -425,6 +433,16 @@ function WorkEditor({
     queryFn: ({
       signal
     }) => api.accounts(initial.domainRef, signal),
+    gcTime: 0
+  });
+  const templates = useQuery({
+    queryKey: ['creation-assets', 'templates', initial.domainRef],
+    queryFn: ({ signal }: { signal: AbortSignal }) => listTemplates(initial.domainRef, signal),
+    gcTime: 0
+  });
+  const styleList = useQuery({
+    queryKey: ['creation-assets', 'styles', initial.domainRef],
+    queryFn: ({ signal }: { signal: AbortSignal }) => listStyles(initial.domainRef, signal),
     gcTime: 0
   });
   const dirty = JSON.stringify(document) !== JSON.stringify(revision.document) || tagsDraft !== document.tags.join(' ');
@@ -1146,6 +1164,27 @@ function WorkEditor({
   }
   const saveStateText = saveState === 'saved' ? '已保存' : saveState === 'saving' ? '保存中' : saveState === 'dirty' ? '未保存' : saveState === 'unknown' ? '结果未确认' : saveState === 'conflict' ? '版本冲突' : '保存失败';
   const saveAction = <ActionButton variant="outline" busy={busy&&saveState==='saving'} disabled={busy || composing || !!conflict} onClick={() => void saveCurrent().catch(() => undefined)}>{hasPending && saveState === 'unknown' ? '核实并重试' : saveState === 'saving' ? '保存中…' : '保存'}</ActionButton>;
+  const accountRecord = document.accountRef ? accounts.data?.find(item => item.ref === document.accountRef) : undefined;
+  const identity = accountRecord?.identity ?? null;
+  const accountChip = accountRecord === undefined ? null : <>
+    {!identity ? <span className="chip warn">身份待确认</span>
+      : identity.orgRelation === 'none' ? <span className="chip unk">无关系 · 不植入</span>
+      : identity.orgRelation === 'unknown' ? <span className="chip warn">身份待确认</span>
+      : <span className={`chip ${identity.bioDisclosesRelation === true ? 'ok' : 'warn'}`}>{identity.orgRelation === 'parent' ? '家长' : '督学'} · {identity.bioDisclosesRelation === true ? '简介已写明' : identity.bioDisclosesRelation === false ? '简介没写明' : '简介没核对'}</span>}
+    {identity?.hasRealPerson === false ? <span className="chip unk">背后无真人</span> : null}
+  </>;
+  const savedTemplate = templates.data?.filter(item => item.sourceWorkId === initial.workId).sort((a, b) => b.revision - a.revision)[0];
+  const accountStyle = accountRecord ? styleList.data?.find(item => item.accountRef === accountRecord.ref) : undefined;
+  const edMeta = savedTemplate || accountStyle ? <div className="ed-meta" aria-label="稿件信息">
+    {savedTemplate ? <span className="meta-sample" title={`本篇已存为样板 ${savedTemplate.code}`}>样板 <span className="data">{savedTemplate.code}</span> · {savedTemplate.status === 'review' ? '待审核' : savedTemplate.status === 'ok' ? '已通过' : '已停用'}</span> : null}
+    {accountStyle ? <span className="meta-style" title={`风格 · ${accountStyle.name}`}>风格 · {accountStyle.name.split(' · ')[0]}</span> : null}
+  </div> : null;
+  const publishedInFrame = document.ideaRef
+    ? drafts.find(item => item.workId !== initial.workId && item.ideaRef === document.ideaRef && item.publishedRevisionId)
+    : undefined;
+  const relatedNotice = publishedInFrame ? <div className="related">这个选题框里《{publishedInFrame.title}》已经发布过。{' '}
+    <button type="button" className="btn quiet sub" onClick={() => onOpenDraftWriting(publishedInFrame.workId)}>打开这一篇</button>
+  </div> : null;
   const bodyTools = <details className={styles.writeTools} data-state={saveState}>
 <summary aria-label={`写稿工具，${saveStateText}`}><span aria-hidden="true">⋯</span></summary>
 <div className={styles.writeToolsPanel}>
@@ -1193,20 +1232,20 @@ function WorkEditor({
     {view === 'body' ? <div className={styles.bodyWorkspace}>
 {compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}
 {aiComparison&&ai?.suggestion&&ai.staleBase?<div className={styles.warning}><p>本次采用已改变原底稿，其余改稿仍保留在右侧，不能继续直接采用。</p><ActionButton variant="outline" onClick={()=>void copyUnadoptedAi()}>复制未采用改稿</ActionButton>{aiCopyFallback?<label>未采用改稿，可手动复制<textarea readOnly value={unadoptedAiText()}/></label>:null}</div>:null}
-{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase && document.experienceGaps.length === 0 ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className="gm-studio"><div className="workbench"><div className="write"><DraftRail drafts={drafts} ideas={ideas} status={draftsStatus} currentId={initial.workId} onOpen={onOpenDraft} onOpenDesk={() => onView('desk')} /><ManuscriptEditor footer={footerInColumns} titleGenerator={<section aria-label="自动标题候选">
-  <div className={styles.row}><ActionButton variant="quiet" disabled={titleBusy || editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || !!titleRequest} onClick={() => void generateTitles()}>换一批</ActionButton><a href="/settings/models?section=skills&amp;task=creation_title">标题 skill ↗</a></div>
+{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase && document.experienceGaps.length === 0 ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className="gm-studio"><div className="workbench"><div className="write"><DraftRail drafts={drafts} ideas={ideas} status={draftsStatus} currentId={initial.workId} onOpen={onOpenDraft} onNewDraft={onNewDraft} onOpenDesk={() => onView('desk')} /><ManuscriptEditor footer={footerInColumns} noteTitleActions={<div ref={setTitleContainer} className={styles.titleCopyMount} hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || editingLocked} />} coverActions={<>
+  <ActionButton variant="quiet" disabled={titleBusy || editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || !!titleRequest} onClick={() => void generateTitles()}>换一批</ActionButton>
+  <a href="/settings/models?section=skills&amp;task=creation_title">标题 skill ↗</a></>}
+  coverCandidates={active && recheckStatus === 'ready' && !sourceInvalidated && !resetRequired && titleCheckedSequence === sourceRefreshSequence && titleResult?.sourceQualification === 'readable' && titleResult.suggestion ? titleResult.suggestion.coverTitles.map((value,index)=><button type="button" key={`${index}:${value}`} className={`cand${titleResult.titleWarnings?.cover[index] ? ` ${styles.titleRisk}` : ''}`} aria-pressed={value === (document.pages.find(page => page.kind === 'cover')?.title ?? '')} disabled={titleBusy || busy || dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id} onClick={() => void chooseTitle('cover',index)}>{value} <span className="count" aria-hidden="true">{Array.from(value).length}</span></button>) : null}
+  noteCandidates={active && recheckStatus === 'ready' && !sourceInvalidated && !resetRequired && titleCheckedSequence === sourceRefreshSequence && titleResult?.sourceQualification === 'readable' && titleResult.suggestion ? titleResult.suggestion.noteTitles.map((value,index)=><button type="button" key={`${index}:${value}`} className={`cand${titleResult.titleWarnings?.note[index] ? ` ${styles.titleRisk}` : ''}`} aria-pressed={value === document.title} disabled={titleBusy || busy || dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id} onClick={() => void chooseTitle('note',index)}>{value}{titleResult.titleWarnings?.note[index] ? ' · 疗效承诺提醒' : ''}</button>) : null}
+  titleNotes={<section aria-label="自动标题候选">
   {templateBlocked && (titleRequest || titleBusy || (titleAdoptIndex && hasPending)) ? <p role="alert">标题请求尚未完成，请先留在本页。 <button type="button" onClick={onResetTemplateBlock}>返回标题</button></p> : null}
   {titleRequest && !titleResult ? <ActionButton variant="outline" disabled={titleBusy} onClick={() => void sendTitle(titleRequest)}>沿用原请求重试</ActionButton> : null}
   {titleResult && ['queued','running','cancel_requested'].includes(titleResult.state) ? <div><p role="status">正在生成标题…</p><ActionButton variant="quiet" disabled={titleBusy || titleResult.state === 'cancel_requested'} onClick={() => void cancelTitleGeneration()}>取消生成</ActionButton></div> : null}
   {titleResult?.state === 'failed' ? <p role="alert">{api.aiFailureText(titleResult.failureCode)}</p> : null}
   {titleMessage ? <p role="alert">{titleMessage}{titleResult ? <button type="button" onClick={() => { setTitleCheckedSequence(-1); setTitleStatusRetry(value => value + 1); }}>重新核验</button> : null}</p> : null}
-  {active && recheckStatus === 'ready' && !sourceInvalidated && !resetRequired && titleCheckedSequence === sourceRefreshSequence && titleResult?.sourceQualification === 'readable' && titleResult.suggestion ? <>
-    <div className={styles.candidateList} aria-label="自动封面候选">{titleResult.suggestion.coverTitles.map((value,index)=><button key={`${index}:${value}`} className={titleResult.titleWarnings?.cover[index] ? styles.titleRisk : undefined} disabled={titleBusy || busy || dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id} onClick={() => void chooseTitle('cover',index)}>{value}{titleResult.titleWarnings?.cover[index] ? ' · 疗效承诺提醒' : ''}</button>)}</div>
-    <div className={styles.candidateList} aria-label="自动笔记标题候选">{titleResult.suggestion.noteTitles.map((value,index)=><button key={`${index}:${value}`} className={titleResult.titleWarnings?.note[index] ? styles.titleRisk : undefined} disabled={titleBusy || busy || dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id} onClick={() => void chooseTitle('note',index)}>{value}{titleResult.titleWarnings?.note[index] ? ' · 疗效承诺提醒' : ''}</button>)}</div>
-    {dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id ? <p>稿件已变化，请重新生成。</p> : null}
-  </> : null}
+  {titleResult?.suggestion && (dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id) ? <p>稿件已变化，请重新生成。</p> : null}
   {titleAdoptIndex && hasPending ? <p>标题采用结果尚未确认，请沿用原请求核对。</p> : null}
-</section>} draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenAnchor={onOpenAnchor} workId={initial.workId} onCover={() => onView('cover')} tools={bodyTools} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); onView('desk'); }} copyContainer={copyContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div></div></div>}
+</section>} draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenAnchor={onOpenAnchor} workId={initial.workId} onCover={() => onView('cover')} tools={bodyTools} accountChip={accountChip} edMeta={edMeta} related={relatedNotice} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); onView('desk'); }} copyContainer={copyContainer} titleContainer={titleContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div></div></div>}
 </div> : null}
     <div hidden={!['cover','inner','export'].includes(view)}>
 <ImagePages step={view === 'inner' ? 'inner' : view === 'export' ? 'export' : 'cover'} onStepChange={onView} onOpenSource={excerptId => { const excerpt=document.excerpts.find(item=>item.id===excerptId);if(excerpt){setSourceFocus(excerpt.citation);onView('desk');} }} document={document} workId={initial.workId} currentRevisionId={dirty ? undefined : revision.id} sourceRevision={revision} onReadRevision={id => api.readRevision(initial.workId, id)} sourceCheckGeneration={() => recheckGeneration.current} sourceResetSequence={sourceResetSequence} onQualifySources={async citations => { const checked = await Promise.all(citations.map(async citation => { return api.qualifyCitation(initial.domainRef, citation); })); return checked.every(Boolean); }} onChange={edit} onUploadAsset={async file => {
