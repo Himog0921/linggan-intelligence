@@ -494,9 +494,10 @@ try {
     await panel.getByText('账号与衔接设置').click();
     await until(async()=>await panel.getByLabel('本篇的衔接句').inputValue()===bridgeSentence,'the approved sentence is placed in the draft');
     const account=panel.getByLabel('所属账号');await account.selectOption('');
-    await panel.getByText('这篇还没选账号，不知道能不能放衔接句').waitFor();await panel.getByText(/^必改 1 · /).waitFor();assert.equal(await copy.isDisabled(),true,'a 必改 left keeps the copy button disabled');
-    await account.selectOption(accountRef);await panel.getByText(/^必改 0 · /).waitFor();
+    await panel.getByText('这篇还没选账号，不知道能不能放衔接句').waitFor();await panel.getByText(/^必须先改 1$/).waitFor();assert.equal(await copy.isDisabled(),true,'a 必改 left keeps the copy button disabled');
+    await account.selectOption(accountRef);await panel.getByText(/^必须先改 \d+$/).waitFor({state:'detached'});
     const first=page.getByLabel('正文第 1 段');await first.fill('今天先把示例课的练习本放到桌上。');
+    await panel.getByText(/^提醒 \d+$/).click();
     const wording='“示例课”不是产品的可用叫法，建议统一为“示例营”';await panel.getByText(wording).waitFor();
     await panel.getByRole('button',{name:'统一叫法',exact:true}).click();
     await until(async()=>await first.inputValue()==='今天先把示例营的练习本放到桌上。','the one-click wording fix rewrote the located text');
