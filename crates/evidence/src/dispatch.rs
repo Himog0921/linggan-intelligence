@@ -1493,6 +1493,9 @@ async fn record_terminal_dispatch_failure_in_transaction(
         .bind(lease_ref)
         .execute(&mut **transaction)
         .await?;
+        // 工单的 `completed` 是"这一轮派发结束"，不是"活干完了"：这里租约记的是 partial。
+        // 逐件是否完成看 collection_work_order_lease_task.execution_state
+        // （docs/architecture/state-machines.md 7.3）。
         sqlx::query(
             "UPDATE collection_work_order SET queue_state='completed' \
              WHERE work_order_ref=$1 AND queue_state='leased'",

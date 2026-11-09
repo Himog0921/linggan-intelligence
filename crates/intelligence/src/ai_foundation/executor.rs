@@ -164,6 +164,8 @@ impl ExecutorSession {
             .checked_add(1)
             .ok_or(ExecutorError::Invalid)?;
         if let Some(old) = row.get::<Option<Uuid>, _>("instance_ref") {
+            // `lost` 是接管时贴给上一任的历史标记，不表示"它现在挂了"；存活只看心跳与锁
+            // （见 docs/architecture/state-machines.md 7.1）。
             sqlx::query("UPDATE linggan_ai_executor_instance SET state='lost' WHERE instance_ref=$1 AND state IN ('running','draining')")
                 .bind(old).execute(&mut *tx).await?;
         }
