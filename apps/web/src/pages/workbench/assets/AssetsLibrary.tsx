@@ -4,9 +4,10 @@ import { IdentityLibrary } from './IdentityLibrary';
 import { SentenceLibrary } from './SentenceLibrary';
 import { ExperienceLibrary } from './ExperienceLibrary';
 import { StructuralTemplateLibrary } from './StructuralTemplateLibrary';
+import { StyleLibrary } from './StyleLibrary';
 import { PersonaFactsLibrary } from './PersonaFactsLibrary';
 
-const KINDS = [['identity', '账号身份'], ['persona', '人设事实'], ['factCard', '产品事实卡'], ['sentence', '衔接句'], ['experience', '经历库'], ['template', '样板库']] as const;
+const KINDS = [['identity', '账号身份'], ['persona', '人设事实'], ['factCard', '产品事实卡'], ['sentence', '衔接句'], ['experience', '经历库'], ['template', '样板库'], ['style', '风格库']] as const;
 type Kind = typeof KINDS[number][0];
 
 /** The asset library of the creation module: type tabs across the top, the chosen type below. */
@@ -27,7 +28,7 @@ export function AssetsLibrary({ domainRef, onPendingChange = () => {}, onDirtyCh
     <nav className="asset-tabs" aria-label="资产类型">{KINDS.map(([value, label]) => <button type="button" key={value}
       disabled={pending} aria-current={kind === value ? 'page' : undefined} onClick={() => { if (kind === value) return; if (dirty && !window.confirm('当前内容尚未保存，切换会丢弃本页编辑。确定切换吗？')) return; setDirty(false); onDirtyChange(false); setKind(value); }}>{label}</button>)}</nav>
     <div className={kind === 'experience' ? 'assets experience' : 'assets'}><div className="as-inner">
-      {kind === 'identity' ? <IdentityLibrary domainRef={domainRef} /> : kind === 'factCard' ? <FactCardLibrary /> : kind === 'sentence' ? <SentenceLibrary /> : kind === 'persona' ? <PersonaFactsLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} /> : kind === 'template' ? <StructuralTemplateLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} /> : <ExperienceLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} />}
+      {kind === 'identity' ? <IdentityLibrary domainRef={domainRef} /> : kind === 'factCard' ? <FactCardLibrary /> : kind === 'sentence' ? <SentenceLibrary /> : kind === 'persona' ? <PersonaFactsLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} />  : kind === 'template' ? <StructuralTemplateLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} /> : kind === 'style' ? <StyleLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} /> : <ExperienceLibrary domainRef={domainRef} onDirtyChange={value => { setDirty(value); onDirtyChange(value); }} onPendingChange={value => { setPending(value); onPendingChange(value); }} />}
     </div></div>
   </div>;
 }

@@ -315,6 +315,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0191_note_analysis.sql"),
     include_str!("../../../../database/migrations/0192_reset_image_recognition.sql"),
     include_str!("../../../../database/migrations/0193_creation_desk_positions.sql"),
+    include_str!("../../../../database/migrations/0194_creation_styles.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -448,4 +449,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0191_note_analysis','a8054ad0918e6700f2edcec63e12b496d471154860d01729afe6580c2a8e7cb8');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0192_reset_image_recognition','b8be6e60616c155af93c4f3ccbefdb691c067e6455c08842ae713accb7b60882');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0193_creation_desk_positions','0b3db4c8c60ea294fae84ff1bf8fabbecd531014dafbee16e9e6d5f338dc3a92');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0194_creation_styles','6aedda7baae5912dc41cf9a69d87829bb2fb2966204ae148c1a25552b2583657');\n",
 );

@@ -18,7 +18,7 @@ export function ManuscriptEditor({
   accountName,
   accountChip,
   edMeta,
-  ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleNotes, coverActions, coverCandidates, noteCandidates, noteTitleActions, footer, tools,
+  ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleNotes, coverActions, coverCandidates, noteCandidates, noteTitleActions, footer, tools, related,
 }: {
   document: WorkDocument;
   edit: (document: WorkDocument) => void;
@@ -42,6 +42,7 @@ export function ManuscriptEditor({
   tools?: ReactNode;
   accountChip?: ReactNode;
   edMeta?: ReactNode;
+  related?: ReactNode;
 }) {
   const cover = document.pages.find(page => page.kind === 'cover');
   const coverCandidate = draftInputs.cover;
@@ -76,6 +77,7 @@ export function ManuscriptEditor({
       <div className="ed-inner">
         <IdeaBoxLink document={document} ideas={ideas} state={ideaState} edit={edit} openAnchor={onOpenAnchor} compose={compose} name={draftInputs.idea} onNameChange={idea => onDraftInputs({ ...draftInputs, idea })} />
         {document.angle ? <div className="intent"><span>选题意图</span><b>{document.angle}</b></div> : null}
+        {related}
         <div className="cover-row">
           <div>
             {cover?.assetId && workId ? <button type="button" className="cover" onClick={onCover} aria-label="查看封面">
