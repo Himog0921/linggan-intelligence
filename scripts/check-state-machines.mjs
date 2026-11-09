@@ -17,20 +17,49 @@ const show = list => list.map(v => `'${v}'`).join(', ') || '(none)';
 export function parseDoc(text) {
   const tables = [];
   const code = [];
+  // Each `## ` section describes one object; its transitions and its bind-parameter
+  // writes belong to that object only. Merging them globally would let a pair from
+  // another machine satisfy a check meant for this one.
+  const sections = [];
+  let section = null;
+  const current = () => {
+    if (!section) { section = { tables: [], pairs: new Set(), wildcards: new Set(), dynamic: [] }; sections.push(section); }
+    return section;
+  };
   let header = null;
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
+    if (raw.startsWith('## ')) { section = null; header = null; continue; }
     if (!line.startsWith('|')) { header = null; continue; }
     const cells = line.slice(1, line.endsWith('|') ? -1 : undefined).split('|').map(c => c.trim());
     if (cells.every(c => /^-+$/.test(c))) continue;
     const stripped = cells.map(c => c.replace(/`/g, '').trim());
-    if (stripped[0] === '表' && stripped[1] === '列') { header = 'table'; continue; }
+    if (stripped[0] === '表' && stripped[1] === '列') { header = 'table'; current(); continue; }
     if (stripped[0] === '代码' && stripped[1] === '枚举') { header = 'code'; continue; }
+    if (stripped[0] === '从' && stripped[1] === '到') { header = 'transition'; continue; }
+    if (stripped[0] === '文件' && stripped[1] === '目标') { header = 'dynamic'; continue; }
     if (!header || stripped.length < 3) continue;
-    if (header === 'table') tables.push({ table: stripped[0], column: stripped[1], states: toArray(stripped[2]) });
-    else code.push({ file: stripped[0], name: stripped[1], states: toArray(stripped[2]) });
+    if (header === 'table') {
+      const entry = { table: stripped[0], column: stripped[1], states: toArray(stripped[2]) };
+      tables.push(entry);
+      current().tables.push(entry);
+    } else if (header === 'code') code.push({ file: stripped[0], name: stripped[1], states: toArray(stripped[2]) });
+    else if (header === 'dynamic') current().dynamic.push({ file: stripped[0], target: stripped[1], count: Number(stripped[2]) });
+    else {
+      // `新建` is a creation, not a transition from an existing state; `任何` leaves
+      // the other end open, which only the pre-0036 legacy row needs.
+      const target = current();
+      const froms = toArray(stripped[0]);
+      for (const to of toArray(stripped[1])) {
+        for (const from of froms) {
+          if (from === '新建' || from === '任何') continue;
+          if (to === '任何') target.wildcards.add(from);
+          else target.pairs.add(`${from}->${to}`);
+        }
+      }
+    }
   }
-  return { tables, code };
+  return { tables, code, sections };
 }
 
 function matchingParen(text, open) {
@@ -268,6 +297,79 @@ export function literalUsage(files, wanted) {
   return errors;
 }
 
+// A work order's queue_state used to have no gate at all: any statement that wrote
+// the right WHERE clause worked. This compares the transitions the code spells out
+// (`SET queue_state='x' … WHERE queue_state='y'`) with the doc's legal pairs, so a
+// new path has to be documented before it can ship. A target supplied as a bind
+// parameter cannot be read statically; those statements are counted and must be
+// registered in the doc instead, so neither a new one nor a stale row passes.
+export function workOrderTransitions(files, { pairs, wildcards }, registry = [], domain = []) {
+  const errors = [];
+  const seen = new Map();
+  for (const { path, text } of files) {
+    const relative = path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
+    for (const literal of stringLiterals(text)) {
+      for (const statement of literal.split(';')) {
+        if (!/^\s*UPDATE\s+(?:public\.)?collection_work_order\b/i.test(statement)) continue;
+        const where = statement.search(/\bWHERE\b/i);
+        const set = where < 0 ? statement : statement.slice(0, where);
+        if (!/\bqueue_state\s*=/i.test(set)) continue;
+        const guards = where < 0 ? '' : statement.slice(where);
+        const bound = set.match(/\bqueue_state\s*=\s*(\$[0-9]+)/i);
+        const literalTarget = set.match(/\bqueue_state\s*=\s*'([A-Za-z0-9_-]+)'/i);
+        if (!literalTarget) {
+          if (bound) {
+            const key = `${relative}\u0000${bound[1]}`;
+            seen.set(key, (seen.get(key) ?? 0) + 1);
+          } else {
+            errors.push(`${relative}: sets queue_state in a form this check cannot read`);
+          }
+          continue;
+        }
+        const target = literalTarget[1];
+        const froms = new Set();
+        const listed = source => source.split(',').map(v => v.trim().replace(/^'|'$/g, '')).filter(v => /^[A-Za-z0-9_-]+$/.test(v));
+        for (const m of guards.matchAll(/\bqueue_state\s*=\s*'([A-Za-z0-9_-]+)'/gi)) froms.add(m[1]);
+        for (const m of guards.matchAll(/\bqueue_state\s+IN\s*\(([^()]*)\)/gi)) for (const v of listed(m[1])) froms.add(v);
+        // `NOT IN ('completed','cancelled')` names the states it cannot come from; the
+        // rest of the column's domain are the sources.
+        for (const m of guards.matchAll(/\bqueue_state\s+NOT\s+IN\s*\(([^()]*)\)/gi)) {
+          const excluded = new Set(listed(m[1]));
+          for (const v of domain) if (!excluded.has(v)) froms.add(v);
+        }
+        if (!froms.size) {
+          errors.push(`${relative}: moves a work order to '${target}' without stating the previous state; ` +
+            `add it to the WHERE clause or register the write in ${DOC}`);
+          continue;
+        }
+        for (const from of froms) {
+          if (!pairs.has(`${from}->${target}`) && !wildcards.has(from)) {
+            errors.push(`${relative}: work order transition ${from} -> ${target} is not in the legal transitions table in ${DOC}`);
+          }
+        }
+      }
+    }
+  }
+  const registered = new Map(registry.map(row => [`${row.file}\u0000${row.target}`, row]));
+  for (const [key, count] of seen) {
+    const row = registered.get(key);
+    if (!row) {
+      const [file, target] = key.split('\u0000');
+      errors.push(`${file}: queue_state=${target} is a bind parameter, so this check cannot read it; ` +
+        `register the write in ${DOC}`);
+      continue;
+    }
+    if (row.count !== count) {
+      errors.push(`${row.file}: ${DOC} registers ${row.count} write(s) of queue_state=${row.target}, the code has ${count}`);
+    }
+    registered.delete(key);
+  }
+  for (const row of registered.values()) {
+    errors.push(`${row.file}: ${DOC} registers a queue_state=${row.target} write that the code does not contain`);
+  }
+  return errors;
+}
+
 // Enum bodies are brace-delimited; counting parentheses truncates the list at the
 // first tuple variant such as `Blocked(Reason)`.
 function matchingBrace(text, open) {
@@ -335,7 +437,7 @@ export function compareEntries(key, states, entries) {
 
 export function runCheck(repoRoot = root) {
   const doc = readFileSync(join(repoRoot, DOC), 'utf8');
-  const { tables, code } = parseDoc(doc);
+  const { tables, code, sections } = parseDoc(doc);
   const errors = [];
 
   const wanted = new Map();
@@ -379,6 +481,11 @@ export function runCheck(repoRoot = root) {
   const sources = rustFiles(join(repoRoot, 'crates')).concat(rustFiles(join(repoRoot, 'apps')))
     .map(path => ({ path, text: readFileSync(path, 'utf8') }));
   errors.push(...literalUsage(sources, allowedByTable));
+  const workOrder = sections.find(s => s.tables.some(t => t.table === 'collection_work_order' && t.column === 'queue_state'));
+  if (workOrder) {
+    const queueStates = workOrder.tables.find(t => t.table === 'collection_work_order' && t.column === 'queue_state').states;
+    errors.push(...workOrderTransitions(sources, workOrder, workOrder.dynamic, queueStates));
+  } else errors.push(`${DOC}: collection_work_order.queue_state has no section of its own; the transition gate cannot run`);
 
   return { errors, tables, code };
 }
