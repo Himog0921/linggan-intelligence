@@ -57,6 +57,7 @@ const paths = {
     'scripts/runtime/prepare-web.sh', 'scripts/test-web-app-postgres.sh',
     'scripts/test-content-workbench-postgres.sh', 'scripts/test-collection-*.cjs',
     'scripts/test-collection-single-run-postgres.sh',
+    'database/migrations/0195_observation_transition_immutable.sql',
     'crates/evidence/src/material_social_read.rs', 'crates/evidence/src/research_dossier.rs',
     'crates/evidence/src/research_dossier/**', 'crates/evidence/src/work_resource_*.rs',
     'crates/evidence/src/material_*.rs', 'crates/evidence/src/content_reobservation.rs',
