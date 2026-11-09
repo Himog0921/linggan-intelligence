@@ -105,7 +105,7 @@
 
 ### 写入点
 
-`queue_state` 有 9 个文件可写：`dispatch.rs`、`work_order_lease.rs`、`acquisition_chain.rs`、`collection_run.rs`、`collection_control.rs`、`keyword_archive_detail.rs`、`patrol_scheduler.rs`、`topic_map_collection_search.rs`、`topic_map_research_collection.rs`。`detail_page_session.state` 只有 `dispatch.rs` 1 个。
+`queue_state` 有 7 个文件可写：`dispatch.rs`、`work_order_lease.rs`、`acquisition_chain.rs`、`collection_run.rs`、`topic_map_collection_search.rs`、`topic_map_research_collection.rs`、`apps/api/src/local_web/collection_control_surface_view.rs`（建单时直接插入状态）。另有 `collection_control.rs`、`keyword_archive_detail.rs`、`patrol_scheduler.rs` 三个文件会 `UPDATE collection_work_order` 的其它列，并把 `queue_state=...` 当条件用，但不写这一列。`detail_page_session.state` 只有 `dispatch.rs` 1 个。
 
 ### 已知缺口
 
@@ -178,12 +178,12 @@
 
 ### 写入点
 
-7 个文件：`collection_target.rs`、`acquisition_chain.rs`、`work_order_lease.rs`、`patrol_scheduler.rs`、`collection_control.rs`、`target_enrichment.rs`、`keyword_archive_detail.rs`。
+5 个文件：`collection_target.rs`、`acquisition_chain.rs`、`work_order_lease.rs`、`patrol_scheduler.rs`、`collection_control.rs`。
 
 ### 已知缺口
 
 - **没有一层校验 `from → to`**：数据库只约束了"值合法"（严格说，转移表自己的 `from_state` / `to_state` 连值域约束都没有），没有约束"这一步转移合法"。上表是从代码里反推的，不是被强制的。
-- **转移日志不是真的不可改**：`0005_collection_observation_target.sql` 的注释说"每一步变化只追加、不可改写"，但全库没有任何触发器或权限阻止对该表做 `UPDATE` / `DELETE`（0005 只有建表和索引）。"只追加"目前是约定，不是约束。
+- **转移日志可追加、可整目标删除，但不能改写**：`0195_observation_transition_immutable.sql` 起，对该表的 `UPDATE` 会被数据库拒绝。`DELETE` 仍然允许，因为产品删除整条观察目标时会连带删除它的历史（`collection_target.rs:1147`，从叶子往根删）。`0005` 注释里"只追加"的措辞也因此不再准确：准确说法是"只能追加，或随目标整体删除"。
 
 ## 5. 研究底稿 linggan_material_unit / reading
 
