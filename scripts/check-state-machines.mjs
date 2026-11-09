@@ -45,26 +45,31 @@ function matchingParen(text, open) {
 // A column definition ends at the next column, or at a table-level clause.
 const CLAUSE_OR_COLUMN = /\n\s{1,8}(?:[A-Z]{3,}\b|[a-z_][a-z0-9_]*\s+(?:text|uuid|timestamptz|timestamp|integer|int|bigint|boolean|jsonb|numeric|varchar|character|date)\b)/g;
 
+// Both spellings of a value domain occur in this schema: IN ('a','b') and
+// = ANY (ARRAY['a'::text,'b'::text]). A one-element list counts: a migration may
+// narrow a column to a single value, and ignoring that would keep the older set.
+function literals(slice) {
+  return [...slice.matchAll(/'([A-Za-z0-9_-]+)'/g)].map(x => x[1]);
+}
+
+const DOMAIN_LIST = /(?<!NOT\s)(?:IN\s*\(([^()]*)\)|=\s*ANY\s*\(\s*ARRAY\s*\[([^\]]*)\])/gi;
+
 function inLists(slice) {
   const values = new Set();
-  for (const m of slice.matchAll(/(?<!NOT\s)IN\s*\(([^()]*)\)/gi)) {
-    const literals = [...m[1].matchAll(/'([a-z0-9_-]+)'/g)].map(x => x[1]);
-    if (literals.length >= 2) literals.forEach(v => values.add(v));
-  }
+  for (const m of slice.matchAll(DOMAIN_LIST)) literals(m[1] ?? m[2]).forEach(v => values.add(v));
   return [...values];
 }
 
-// Most constraints repeat the column before or inside the list: CHECK (col IN (...)).
-// Requiring that avoids reading a different column's list as this column's domain.
-// NOT IN is always a restriction, never a domain, so it is skipped outright.
+// Most constraints name the column immediately before the list: CHECK (col IN (...)).
+// Requiring that avoids reading a neighbouring column's list as this column's domain,
+// which happens whenever both appear in one constraint.
 function columnInLists(text, column) {
   const values = new Set();
-  const marker = new RegExp(`\\b${column}\\b`);
-  for (const m of text.matchAll(/(?<!NOT\s)IN\s*\(([^()]*)\)/gi)) {
-    const before = text.slice(Math.max(0, m.index - 80), m.index);
-    if (!marker.test(before) && !marker.test(m[1])) continue;
-    const literals = [...m[1].matchAll(/'([a-z0-9_-]+)'/g)].map(x => x[1]);
-    if (literals.length >= 2) literals.forEach(v => values.add(v));
+  const anchored = new RegExp(`\\b${column}$`);
+  for (const m of text.matchAll(DOMAIN_LIST)) {
+    const before = text.slice(Math.max(0, m.index - 80), m.index).replace(/[\s(]+$/, '');
+    if (!anchored.test(before)) continue;
+    literals(m[1] ?? m[2]).forEach(v => values.add(v));
   }
   return [...values];
 }
@@ -102,11 +107,24 @@ function equalityDomain(text, column) {
   return [...values];
 }
 
+// Constraint names are not uniform: some end in _check, others are semantic
+// (reading_current_publication). A drop counts when the name ends with the
+// column or contains it as a whole segment.
 function droppedConstraint(statement, table, column) {
   const m = statement.match(/DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?([a-z0-9_]+)/i);
   if (!m) return null;
   const name = m[1].toLowerCase();
-  return name === `${table}_${column}_check` || name === `${table}_check` ? name : null;
+  const mentionsColumn = name.includes(`_${column}_`) || name.endsWith(`_${column}`);
+  return name === `${table}_check` || mentionsColumn ? name : null;
+}
+
+// Some migrations drop every CHECK on a column through a PL/pgSQL loop instead of
+// naming the constraint: it selects constraints whose definition LIKE '%<column>%'
+// and EXECUTEs a DROP on that table. Recognising the idiom keeps a replacement
+// from looking like a widening.
+function dynamicDrop(text, table, column) {
+  return new RegExp(`LIKE\\s*'%${column}%'`, 'i').test(text)
+    && new RegExp(`ALTER\\s+TABLE\\s+${table}\\s+DROP\\s+CONSTRAINT`, 'i').test(text);
 }
 
 export function databaseStates(files, wanted) {
@@ -123,14 +141,20 @@ export function databaseStates(files, wanted) {
     const bodies = tableBodies(text);
     for (const [table, columns] of wanted) {
       const body = bodies.get(table);
-      if (!body) continue;
+      if (body) {
+        for (const column of columns) {
+          const direct = columnInLists(body, column);
+          if (direct.length) { remember(`${table}.${column}`, direct, { name, index }); continue; }
+          const slice = columnSlice(body, column);
+          const inSlice = slice ? columnInLists(slice, column) : [];
+          if (inSlice.length) { remember(`${table}.${column}`, inSlice, { name, index }); continue; }
+          const equalities = equalityDomain(body, column);
+          if (equalities.length) remember(`${table}.${column}`, equalities, { name, index });
+        }
+      }
+      // The loop form runs before the ADD that follows it in the same file.
       for (const column of columns) {
-        const direct = columnInLists(body, column);
-        if (direct.length) { remember(`${table}.${column}`, direct, { name, index }); continue; }
-        const slice = columnSlice(body, column);
-        if (slice && inLists(slice).length) { remember(`${table}.${column}`, inLists(slice), { name, index }); continue; }
-        const equalities = equalityDomain(body, column);
-        if (equalities.length) remember(`${table}.${column}`, equalities, { name, index });
+        if (dynamicDrop(text, table, column)) push(`${table}.${column}`, { kind: 'drop', source: { name, index } });
       }
     }
     for (const m of text.matchAll(/ALTER\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?([a-z0-9_]+)\b[\s\S]*?;/gi)) {
@@ -139,13 +163,15 @@ export function databaseStates(files, wanted) {
       const columns = wanted.get(table);
       if (!columns) continue;
       for (const column of columns) {
+        // DROP and ADD can share one statement, so the drop is recorded and the
+        // scan continues: the replacement in the same statement is what counts.
         const dropped = droppedConstraint(statement, table, column);
-        if (dropped) { push(`${table}.${column}`, { kind: 'drop', source: { name, index } }); continue; }
+        if (dropped) push(`${table}.${column}`, { kind: 'drop', source: { name, index } });
         const direct = columnInLists(statement, column);
         if (direct.length) { remember(`${table}.${column}`, direct, { name, index }); continue; }
         const equalities = equalityDomain(statement, column);
         if (equalities.length) { remember(`${table}.${column}`, equalities, { name, index }); continue; }
-        if (!new RegExp(`\\b${column}\\b`).test(statement)) continue;
+        if (dropped || !new RegExp(`\\b${column}\\b`).test(statement)) continue;
         const finder = new RegExp(`\\b${column}\\b`, 'g');
         for (const hit of statement.matchAll(finder)) {
           const rest = statement.slice(hit.index);
@@ -158,12 +184,16 @@ export function databaseStates(files, wanted) {
   return found;
 }
 
+// Build output and dependencies hold no production sources; walking them only
+// slows the gate down (apps/web keeps node_modules and .next inside the tree).
+const SKIP_DIRS = new Set(['tests', 'fixtures', 'target', 'node_modules', '.next', 'dist', 'build', 'vendor']);
+
 export function rustFiles(dir) {
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
-      if (entry.name === 'tests' || entry.name === 'fixtures' || entry.name === 'target') return [];
+      if (SKIP_DIRS.has(entry.name)) return [];
       return rustFiles(path);
     }
     if (!entry.name.endsWith('.rs')) return [];
@@ -238,14 +268,25 @@ export function literalUsage(files, wanted) {
   return errors;
 }
 
+// Enum bodies are brace-delimited; counting parentheses truncates the list at the
+// first tuple variant such as `Blocked(Reason)`.
+function matchingBrace(text, open) {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '{') depth += 1;
+    else if (text[i] === '}') { depth -= 1; if (depth === 0) return i; }
+  }
+  return text.length;
+}
+
 export function enumVariants(path) {
   if (!existsSync(path)) return null;
   const text = readFileSync(path, 'utf8');
   const out = new Map();
   for (const m of text.matchAll(/pub\s+enum\s+([A-Za-z0-9_]+)\s*\{/g)) {
     const open = m.index + m[0].length - 1;
-    const body = text.slice(open + 1, matchingParen(text, open));
-    out.set(m[1], [...body.matchAll(/^\s*([A-Z][A-Za-z0-9_]*)\s*[,{(]?\s*$/gm)]
+    const body = text.slice(open + 1, matchingBrace(text, open));
+    out.set(m[1], [...body.matchAll(/(?:^|,)\s*([A-Z][A-Za-z0-9_]*)\s*(?=[,({]|$)/gm)]
       .map(x => x[1].replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase())
       .sort());
   }
@@ -261,6 +302,18 @@ export function compareEntries(key, states, entries) {
   const definitions = entries.filter(e => e.kind === 'definition');
   if (lastDrop && (!definitions.length || lastDrop.order > definitions[definitions.length - 1].order)) {
     return `${key}: constraint dropped in ${lastDrop.source.name} with no readable replacement; the documented set cannot be verified`;
+  }
+  // Adding a wider CHECK without dropping the old one does not widen the column:
+  // PostgreSQL enforces both constraints, so the effective domain is the intersection.
+  let previous = null;
+  let droppedSince = false;
+  for (const entry of entries) {
+    if (entry.kind === 'drop') { droppedSince = true; continue; }
+    if (previous && !droppedSince && entry.values.some(v => !previous.values.includes(v))) {
+      return `${key}: ${entry.source.name} adds values without dropping the earlier constraint; PostgreSQL keeps their intersection`;
+    }
+    previous = entry;
+    droppedSince = false;
   }
   // Within one file a second, narrower CHECK on the same column is an extra
   // condition, not a new domain: keep the widest of that file. Incomparable

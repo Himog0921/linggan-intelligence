@@ -122,6 +122,73 @@ test('quotes in comments and char literals do not hide later statements', () => 
   assert.match(errors[0], /collection_run\.phase='ghost'/);
 });
 
+test('= ANY (ARRAY[...]) counts as a domain and as a replacement', () => {
+  const files = [
+    { name: '0001.sql', text: "CREATE TABLE t (state text CHECK (state IN ('a','b')));" },
+    { name: '0002.sql', text: "ALTER TABLE t DROP CONSTRAINT t_state_check; ALTER TABLE t ADD CONSTRAINT t_state_check CHECK (state = ANY (ARRAY['b'::text,'c'::text]));" },
+  ];
+  const found = databaseStates(files, new Map([['t', new Set(['state'])]]));
+  assert.deepEqual(compareEntries('t.state', ['b', 'c'], found.get('t.state')), null);
+});
+
+test('a single-value narrowing migration wins', () => {
+  const files = [
+    { name: '0001.sql', text: "CREATE TABLE t (state text CHECK (state IN ('a','b')));" },
+    { name: '0002.sql', text: "ALTER TABLE t DROP CONSTRAINT t_state_check; ALTER TABLE t ADD CONSTRAINT t_state_check CHECK (state IN ('a'));" },
+  ];
+  const found = databaseStates(files, new Map([['t', new Set(['state'])]]));
+  const last = found.get('t.state').filter(e => e.kind === 'definition').pop();
+  assert.deepEqual(last.values, ['a']);
+});
+
+test('a neighbouring column list is not attributed to this column', () => {
+  const files = [{ name: '0001.sql', text: "CREATE TABLE t (state text CHECK (state = 'b' AND mode IN ('x','y')), mode text);" }];
+  const found = databaseStates(files, new Map([['t', new Set(['state'])]]));
+  assert.equal(found.get('t.state'), undefined);
+});
+
+test('a semantic constraint name is recognised when dropped', () => {
+  const files = [{ name: '0001.sql', text: "ALTER TABLE t DROP CONSTRAINT reading_current_publication;" }];
+  const found = databaseStates(files, new Map([['t', new Set(['publication'])]]));
+  assert.equal(found.get('t.publication')[0].kind, 'drop');
+});
+
+test('a drop performed by a PL/pgSQL loop counts as a drop', () => {
+  const files = [{
+    name: '0001.sql',
+    text: `DO $$ BEGIN
+      FOR c IN SELECT oid FROM pg_constraint WHERE pg_get_constraintdef(oid) LIKE '%stop_reason%' LOOP
+        EXECUTE format('ALTER TABLE t DROP CONSTRAINT %I', c);
+      END LOOP; END $$;`,
+  }];
+  const found = databaseStates(files, new Map([['t', new Set(['stop_reason'])]]));
+  assert.equal(found.get('t.stop_reason')[0].kind, 'drop');
+});
+
+test('adding values without dropping the old constraint is rejected', () => {
+  const entries = [
+    { kind: 'definition', values: ['a', 'b'], source: { name: '0001.sql', index: 0 }, order: 0 },
+    { kind: 'definition', values: ['a', 'b', 'c'], source: { name: '0002.sql', index: 1 }, order: 1 },
+  ];
+  assert.match(compareEntries('t.state', ['a', 'b', 'c'], entries), /without dropping the earlier constraint/);
+});
+
+test('DROP and ADD in one statement is a replacement, not a bare drop', () => {
+  const files = [{
+    name: '0001.sql',
+    text: "ALTER TABLE t DROP CONSTRAINT t_state_check, ADD CONSTRAINT t_state_check CHECK (state IN ('a','b'));",
+  }];
+  const found = databaseStates(files, new Map([['t', new Set(['state'])]]));
+  assert.equal(compareEntries('t.state', ['a', 'b'], found.get('t.state')), null);
+});
+
+test('tuple and struct enum variants are all read', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'state-machines-'));
+  const path = join(dir, 'x.rs');
+  writeFileSync(path, 'pub enum E {\n    Alpha,\n    Blocked(i32),\n    Custom { reason: String },\n}\n');
+  assert.deepEqual(enumVariants(path).get('E'), ['alpha', 'blocked', 'custom']);
+});
+
 test('the repository matches docs/architecture/state-machines.md', () => {
   const { errors } = runCheck();
   assert.deepEqual(errors, []);
