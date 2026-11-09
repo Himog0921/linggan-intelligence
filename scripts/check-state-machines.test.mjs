@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { compareEntries, databaseStates, enumVariants, literalUsage, parseDoc, runCheck } from './check-state-machines.mjs';
+import { compareEntries, databaseStates, enumVariants, literalUsage, parseDoc, runCheck, workOrderTransitions } from './check-state-machines.mjs';
 
 const doc = `
 | 表 | 列 | 允许状态 |
@@ -19,10 +19,91 @@ const doc = `
 | crates/x.rs | ColumnState | \`available\`, \`waiting\` |
 `;
 
-test('parseDoc reads state tables and ignores the transitions table', () => {
+test('parseDoc reads state tables and keeps the transitions table out of them', () => {
   const parsed = parseDoc(doc);
   assert.deepEqual(parsed.tables, [{ table: 'collection_run', column: 'control_intent', states: ['paused', 'running', 'stopped'] }]);
   assert.deepEqual(parsed.code, [{ file: 'crates/x.rs', name: 'ColumnState', states: ['available', 'waiting'] }]);
+  assert.deepEqual([...parsed.sections[0].pairs], ['running->paused']);
+});
+
+const workOrderDoc = `
+## 2. 工单 collection_work_order
+
+| 表 | 列 | 允许状态 |
+| --- | --- | --- |
+| collection_work_order | queue_state | \`legacy\`, \`queued\`, \`leased\`, \`completed\`, \`cancelled\` |
+
+### 合法转移
+
+| 从 | 到 | 条件 | 写入点 |
+| --- | --- | --- | --- |
+| \`queued\` | \`leased\` | 领到租约 | a.rs |
+| \`leased\` | \`completed\` | 全部完成 | b.rs |
+| \`leased\` | \`cancelled\` | 止损 | c.rs |
+| \`queued\` | \`cancelled\` | 停止整轮 | e.rs |
+| \`legacy\` | 任何 | 历史行 | d.rs |
+
+| 文件 | 目标 | 条数 | 说明 |
+| --- | --- | --- | --- |
+| crates/evidence/src/c.rs | \`$2\` | 1 | 参数目标 |
+`;
+
+const workOrderSection = () => parseDoc(workOrderDoc).sections.find(s => s.tables.some(t => t.column === 'queue_state'));
+const sourcesOf = text => [{ path: '/repo/crates/a.rs', text }];
+const sql = statement => `sqlx::query("${statement}");`;
+const domain = ['legacy', 'queued', 'leased', 'completed', 'cancelled'];
+
+test('a documented work order transition passes', () => {
+  const text = sql("UPDATE collection_work_order SET queue_state='completed' WHERE work_order_ref=$1 AND queue_state='leased'");
+  assert.deepEqual(workOrderTransitions(sourcesOf(text), workOrderSection(), [], domain), []);
+});
+
+test('an undocumented work order transition is rejected', () => {
+  const text = sql("UPDATE collection_work_order SET queue_state='completed' WHERE work_order_ref=$1 AND queue_state='queued'");
+  const errors = workOrderTransitions(sourcesOf(text), workOrderSection(), [], domain);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /queued -> completed is not in the legal transitions table/);
+});
+
+test('every value in an IN list is checked', () => {
+  const text = sql("UPDATE collection_work_order SET queue_state='leased' WHERE work_order_ref=$1 AND queue_state IN ('legacy','cancelled')");
+  const errors = workOrderTransitions(sourcesOf(text), workOrderSection(), [], domain);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /cancelled -> leased/);
+});
+
+test('NOT IN excludes the listed states and checks the rest of the domain', () => {
+  const text = sql("UPDATE collection_work_order SET queue_state='cancelled' WHERE work_order_ref IN (SELECT 1) AND queue_state NOT IN ('completed','cancelled')");
+  assert.deepEqual(workOrderTransitions(sourcesOf(text), workOrderSection(), [], domain), []);
+});
+
+test('a write that never states the previous state is rejected', () => {
+  const text = sql("UPDATE collection_work_order SET queue_state='cancelled' WHERE work_order_ref=$1");
+  const errors = workOrderTransitions(sourcesOf(text), workOrderSection(), [], domain);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /without stating the previous state/);
+});
+
+test('a bind-parameter target must be registered, and its count must match', () => {
+  const text = sql("UPDATE collection_work_order SET queue_state=$2 WHERE work_order_ref=$1 AND queue_state='leased'");
+  const registry = [{ file: '/repo/crates/a.rs', target: '$2', count: 1 }];
+  assert.deepEqual(workOrderTransitions(sourcesOf(text), workOrderSection(), registry, domain), []);
+  const wrongCount = workOrderTransitions(sourcesOf(text), workOrderSection(), [{ ...registry[0], count: 2 }], domain);
+  assert.match(wrongCount[0], /registers 2 write\(s\) of queue_state=\$2/);
+  const missing = workOrderTransitions(sourcesOf(text), workOrderSection(), [], domain);
+  assert.match(missing[0], /is a bind parameter/);
+});
+
+test('a registration whose write disappeared is rejected', () => {
+  const registry = [{ file: '/repo/crates/gone.rs', target: '$2', count: 1 }];
+  const errors = workOrderTransitions(sourcesOf(''), workOrderSection(), registry, domain);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /does not contain/);
+});
+
+test('creating a work order is not a transition and is left alone', () => {
+  const text = sql("INSERT INTO collection_work_order (work_order_ref,queue_state) VALUES ($1,'queued')");
+  assert.deepEqual(workOrderTransitions(sourcesOf(text), workOrderSection(), [], domain), []);
 });
 
 test('a narrower CHECK in the same migration is a condition, not a second domain', () => {
