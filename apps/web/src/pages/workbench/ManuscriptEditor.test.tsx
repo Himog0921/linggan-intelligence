@@ -46,7 +46,6 @@ describe('经历来源', () => {
     expect(references[0]).toMatchObject({ paragraphId: first, experienceRef: experience, experienceRevision: 1 });
     expect(screen.getAllByText('来源：经历库 · 使用前重新核验')).toHaveLength(1);
     const firstParagraph = screen.getByLabelText('正文第 1 段').parentElement!;
-    fireEvent.click(within(firstParagraph).getByText('段落与来源'));
     fireEvent.click(within(firstParagraph).getByRole('button', { name: '删除这一段' }));
     expect(JSON.parse(output.textContent ?? '[]')).toEqual([]);
   });

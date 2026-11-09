@@ -158,6 +158,7 @@
 .gm-studio .related{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s3);padding:var(--s3);margin-bottom:var(--s6);border-left:1px solid var(--lgi-info);background:var(--lgi-info-soft);font-size:var(--t-label);color:var(--lgi-body)}
 .gm-studio .cover-row{display:grid;grid-template-columns:132px minmax(0,1fr);gap:var(--s6);margin-bottom:var(--s6)}
 .gm-studio .cover-row .cover{width:132px}
+.gm-studio .cover-actions{margin-top:12px}
 .gm-studio .cover-fields .lbl{display:flex;align-items:baseline;gap:var(--s2);font-size:12px}
 .gm-studio .cover-fields .count{margin-left:auto}
 .gm-studio .cover-fields .input{background:var(--lgi-canvas);border-color:var(--lgi-border-strong)}
@@ -727,6 +728,8 @@
 .gm-studio .write .cand .count{font-weight:400}
 .gm-studio .write .cover-fields .aux{font-size:12px;font-weight:400;line-height:18px;color:var(--lgi-muted)}
 .gm-studio .write .para-text,.gm-studio .write .bridge-text{font-weight:400;line-height:1.9;letter-spacing:0}
+/* Demo 的正文段落是 <p contenteditable>；React 换成 <textarea> 后被全局表单字号规则钉成 13px，这里还原为原稿字号。 */
+[data-theme="linggan-intelligence"] .gm-studio .write textarea.para-text{font-size:var(--t-reading);line-height:1.9;font-weight:400}
 .gm-studio .write .body-head h3{text-wrap:balance}
 .gm-studio .write .body-head .aux b{color:var(--lgi-body)}
 .gm-studio .write .src .data{font-weight:400}

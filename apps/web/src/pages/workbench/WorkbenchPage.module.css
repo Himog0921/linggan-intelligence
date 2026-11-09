@@ -18,6 +18,7 @@
   color:var(--lgi-ink);
   font:var(--lgi-text-body)/var(--lgi-lh-body) var(--lgi-font-sans);
 }
+.studioBleed {max-width:none;overflow:hidden;padding:0;}
 .workspace * {box-sizing:border-box;}
 .workspace :where(button:not([data-action-button]):not([data-find] button)),.workspace input:not([data-find] input),.workspace textarea,.workspace select,.dialog button:not([data-action-button]),.dialog input,.dialog textarea,.dialog select {font:inherit;color:inherit;}
 .workspace :where(button:not([data-action-button]):not([data-find] button)),.dialog button:not([data-action-button]) {cursor:pointer;border:1px solid var(--lgi-border);border-radius:var(--lgi-radius-none);background:var(--lgi-canvas);padding:var(--lgi-space-2) var(--lgi-space-3);min-height:var(--lgi-space-10);}
@@ -264,6 +265,7 @@
 .editorWorkspace[data-view='body'] .manuscript {margin-top:var(--lgi-space-3);}
 .studioFooter {position:sticky;bottom:0;z-index:var(--lgi-z-sticky);display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);border-top:1px solid var(--lgi-border);background:var(--lgi-canvas);padding:var(--lgi-space-3) 0 var(--lgi-space-3) min(calc(var(--lgi-space-24) + var(--lgi-space-24) + var(--lgi-space-12)), 20%);}
 .footerCopyMount {flex:1;min-width:0;}
+.titleCopyMount {display:contents;}
 .revisionToolbar,.revisionActions {display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);padding:var(--lgi-space-3) 0;}
 .revisionToolbar label {display:flex;gap:var(--lgi-space-2);align-items:center;font-size:var(--lgi-text-data);}
 .revisionPair {display:grid;grid-template-columns:1fr 1fr;gap:var(--lgi-space-6);}
