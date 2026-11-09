@@ -10,7 +10,10 @@ import { groupLabel, levelLabel, sentenceStatusLabel } from './assetsText';
 import styles from './Assets.module.css';
 
 const GROUPS: readonly BridgeGroup[] = ['parent', 'coach'];
-const STATUSES: readonly SentenceStatus[] = ['review', 'ok', 'fix', 'off'];
+const STATUS_TONE: Record<SentenceStatus, string> = { review: 'info', ok: 'ok', fix: 'warn', off: 'unk' };
+const GROUP_HINT: Record<BridgeGroup, string> = { parent: '简介写明“陪跑营学员”后可用', coach: '简介写明“陪跑老师”后可用' };
+/** Column headings follow the reference layout, which names the reader rather than the group key. */
+const COLUMN_TITLE: Record<BridgeGroup, string> = { parent: '参加过陪跑营的家长', coach: '机构陪跑老师' };
 
 function FindingList({ findings }: { findings: readonly Finding[] }) {
   if (findings.length === 0) return null;
@@ -20,9 +23,11 @@ function FindingList({ findings }: { findings: readonly Finding[] }) {
 }
 
 /** A sentence being added or rewritten, checked as it is typed; a cure promise cannot be added. */
-function SentenceEditor({ sentence, onSaved }: { sentence: Sentence | null; onSaved: (code: string) => void }) {
+function SentenceEditor({ sentence, initialGroup = 'parent', onSaved, onClose }: {
+  sentence: Sentence | null; initialGroup?: BridgeGroup; onSaved: (code: string) => void; onClose?: () => void;
+}) {
   const [identities] = useState(() => new RequestIdentities());
-  const [group, setGroup] = useState<BridgeGroup>(sentence?.group ?? 'parent');
+  const [group, setGroup] = useState<BridgeGroup>(sentence?.group ?? initialGroup);
   const [text, setText] = useState(sentence?.text ?? '');
   const [settled, setSettled] = useState(text);
   const [busy, setBusy] = useState(false);
@@ -87,6 +92,7 @@ function SentenceEditor({ sentence, onSaved }: { sentence: Sentence | null; onSa
       <ActionButton type="submit" variant="primary" busy={busy} disabled={!text.trim() || blocked || !fresh || unchanged}>
         {sentence ? '保存为新的一版（回到待审）' : '加入句库（待审）'}
       </ActionButton>
+      {onClose ? <ActionButton variant="quiet" disabled={busy} onClick={onClose}>收起</ActionButton> : null}
     </div>
   </form>;
 }
@@ -133,12 +139,14 @@ function ReviewBar({ sentence, onDone }: { sentence: Sentence; onDone: () => voi
 
 export function SentenceLibrary() {
   const queryClient = useQueryClient();
-  const [group, setGroup] = useState<BridgeGroup | ''>('');
-  const [status, setStatus] = useState<SentenceStatus | ''>('');
+  const [identities] = useState(() => new RequestIdentities());
   const [selected, setSelected] = useState<string | 'new' | null>(null);
+  const [newGroup, setNewGroup] = useState<BridgeGroup>('parent');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
   const sentences = useQuery({
-    queryKey: ['creation-assets', 'sentences', group, status],
-    queryFn: ({ signal }) => api.listSentences({ ...(group ? { group } : {}), ...(status ? { status } : {}) }, signal), gcTime: 0,
+    queryKey: ['creation-assets', 'sentences', '', ''],
+    queryFn: ({ signal }) => api.listSentences({}, signal), gcTime: 0,
   });
   const items = sentences.data ?? [];
   const current = items.find(item => item.code === selected) ?? null;
@@ -146,53 +154,71 @@ export function SentenceLibrary() {
     await queryClient.cancelQueries({ queryKey: ['creation-assets', 'draft-checks'] });
     await queryClient.invalidateQueries({ queryKey: ['creation-assets'] });
   })(); };
+  async function quick(sentence: Sentence, action: ReviewAction) {
+    if (busy) return;
+    setBusy(true); setMessage('');
+    try {
+      const body = { expectedRevision: sentence.revision, action, note: null };
+      const requestId = identities.keyFor(`quick:${action}`, JSON.stringify([sentence.code, body]));
+      await api.reviewSentence(sentence.code, { ...body, requestId });
+      identities.settle(`quick:${action}`);
+      reload();
+    } catch (error) {
+      if (error instanceof ApiError && error.answered) identities.settle(`quick:${action}`);
+      setMessage(api.assetsErrorText(error));
+    } finally {
+      setBusy(false);
+    }
+  }
   return <section aria-label="衔接句">
     <header className="as-head">
       <div className="grow">
         <h1 className="h-obj">衔接句</h1>
-        <p>只有“可用”的句子会在写稿时被选用；新增和改写的句子都先待审。按账号和机构的真实关系分组。</p>
+        <p>按账号和机构的真实关系分组。账号简介写明这层关系后，写稿时只出现对应那一组；新增的句子先过自动检查，再等审核。</p>
       </div>
-      <ActionButton variant="outline" onClick={() => setSelected('new')}>＋ 新增一句</ActionButton>
     </header>
-    <div className="lib-tools">
-      <label className="lbl">身份
-        <select aria-label="按身份筛选" value={group} onChange={event => setGroup(event.target.value as BridgeGroup | '')}>
-          <option value="">全部</option>{GROUPS.map(value => <option key={value} value={value}>{groupLabel[value]}</option>)}
-        </select>
-      </label>
-      <label className="lbl">状态
-        <select aria-label="按状态筛选" value={status} onChange={event => setStatus(event.target.value as SentenceStatus | '')}>
-          <option value="">全部</option>{STATUSES.map(value => <option key={value} value={value}>{sentenceStatusLabel[value]}</option>)}
-        </select>
-      </label>
-    </div>
     {sentences.isPending ? <p role="status">正在读取…</p> : null}
     {sentences.isError ? <p role="alert" className={styles.problem}>读取失败，可以<ActionButton variant="quiet" onClick={() => void sentences.refetch()}>重试</ActionButton></p> : null}
-    {sentences.isSuccess && items.length === 0 ? <p className="lib-empty">{group || status ? '没有符合筛选的句子。' : '句库还是空的，先新增一句。'}</p> : null}
-    {items.length || selected === 'new' ? <div className="lib">
-      <div className="lib-table">
-        <table className="ledger">
-          <thead><tr><th scope="col">句子</th><th scope="col">身份</th><th scope="col">状态</th><th scope="col">选用</th></tr></thead>
-          <tbody>{items.map(item => {
-            const on = item.code === selected;
-            return <tr key={item.code} className={on ? 'lib-row on' : 'lib-row'}>
-              <td><button type="button" aria-current={on ? 'true' : undefined} onClick={() => setSelected(item.code)}>
-                <span>{item.text}</span><small>{item.code}</small></button></td>
-              <td>{groupLabel[item.group]}</td>
-              <td><span className={styles.statusChip}>{sentenceStatusLabel[item.status]}</span></td>
-              <td><span>稿件选用 {item.usedCount} 篇</span></td>
-            </tr>;
-          })}</tbody>
-        </table>
-      </div>
-      <aside className="lib-insp" aria-label="衔接句详情">
-        {selected === 'new' ? <SentenceEditor key="new" sentence={null} onSaved={code => { setSelected(code); reload(); }} />
-          : current ? <>
-            <SentenceEditor key={`${current.code}:${current.revision}`} sentence={current} onSaved={reload} />
-            <FindingList findings={current.entryFindings} />
-            <ReviewBar key={`${current.code}:${current.revision}:${current.status}`} sentence={current} onDone={reload} />
-          </> : <p className={styles.hint}>在左边选一句，或新增一句。</p>}
-      </aside>
+    {message ? <p role="alert" className={styles.problem}>{message}</p> : null}
+    {sentences.isSuccess ? <div className="bcols">
+      {GROUPS.map(group => {
+        const groupItems = (sentences.data ?? []).filter(item => item.group === group);
+        return <section className="bcol" key={group}>
+          <div className="bcol-head"><h3>{COLUMN_TITLE[group]}</h3><p>{GROUP_HINT[group]} · {groupItems.length} 句</p></div>
+          {groupItems.map(item => <div key={item.code} className={`bitem${item.status === 'fix' ? ' fix' : item.status === 'off' ? ' off' : ''}`}>
+            <div className="aux data">{item.code}</div>
+            <p>{item.text}</p>
+            {item.entryFindings.length ? <div className="live-checks">{item.entryFindings.map((finding, index) => <div key={`${finding.rule}-${index}`}><span className={`dot ${finding.level === 'must' ? 'bad' : 'warn'}`} />{finding.message}</div>)}</div> : null}
+            <div className="row">
+              <span className={`chip ${STATUS_TONE[item.status]}`}>{sentenceStatusLabel[item.status]}</span>
+              {item.origin === 'saved_back' ? <span className="chip demo">原稿</span> : null}
+              <span className="aux">用过 <span className="data">{item.usedCount}</span> 次</span>
+              <span style={{ flex: 1 }} />
+              {item.status === 'review' || item.status === 'fix' ? <button type="button" className="btn quiet sub" disabled={busy} onClick={() => void quick(item, 'approve')}>审核通过</button> : null}
+              <button type="button" className="btn quiet sub" disabled={busy} onClick={() => setSelected(item.code)}>改写</button>
+              {item.status !== 'off' ? <button type="button" className="btn quiet sub" disabled={busy} onClick={() => void quick(item, 'disable')}>停用</button>
+                : <button type="button" className="btn quiet sub" disabled={busy} onClick={() => void quick(item, 'enable')}>启用</button>}
+            </div>
+          </div>)}
+          <div className="badd">
+            <label className="lbl">新增一句</label>
+            <button type="button" className="btn sm" disabled={busy} onClick={() => { setNewGroup(group); setSelected('new'); }}>加入（待审）</button>
+          </div>
+        </section>;
+      })}
+      <section className="bcol">
+        <div className="bcol-head"><h3>和机构无关</h3><p>不放衔接句</p></div>
+        <div className="bitem">
+          <p>账号和机构没有关系时，正文不提产品。想让读者找到我们，走公开身份的账号，或者请博主合作并标明合作。</p>
+          <div className="row"><span className="chip unk">不植入</span></div>
+        </div>
+      </section>
     </div> : null}
+    {selected === 'new' ? <div className="lib-insp"><SentenceEditor key={`new:${newGroup}`} sentence={null} initialGroup={newGroup} onSaved={code => { setSelected(code); reload(); }} onClose={() => setSelected(null)} /></div> : null}
+    {current ? <>
+      <div className="lib-insp"><SentenceEditor key={`${current.code}:${current.revision}`} sentence={current} onSaved={() => reload()} onClose={() => setSelected(null)} /></div>
+      <FindingList findings={current.entryFindings} />
+      <div className="lib-insp"><ReviewBar key={`${current.code}:${current.revision}:${current.status}`} sentence={current} onDone={reload} /></div>
+    </> : null}
   </section>;
 }

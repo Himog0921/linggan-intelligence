@@ -5,6 +5,8 @@ import { ApiError } from '../../../shared/api';
 import { RequestIdentities } from '../../../shared/requestIdentity';
 import * as api from './assetsApi';
 import type { PersonaFact } from './assetsModel';
+import { identitySummary } from './assetsText';
+import { IdentityForm } from './IdentityForm';
 import styles from './Assets.module.css';
 
 type Operation = 'save' | 'confirm' | 'withdraw';
@@ -138,15 +140,19 @@ export function PersonaFactsLibrary({ domainRef, onDirtyChange = () => {}, onPen
   domainRef: string; onDirtyChange?: (dirty: boolean) => void; onPendingChange?: (pending: boolean) => void;
 }) {
   const client = useQueryClient();
-  const [account, setAccount] = useState(''); const [selected, setSelected] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(null); const [selected, setSelected] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false); const [pending, setPending] = useState(false); const [formVersion, setFormVersion] = useState(0);
   const [rechecking, setRechecking] = useState(false);
   const [recheckFailed, setRecheckFailed] = useState(false);
   const retryRecheck = useRef<(() => void) | null>(null);
   const accounts = useQuery({ queryKey: ['creation-assets','accounts',domainRef], queryFn: ({ signal }) => api.listAccounts(domainRef,signal), gcTime: 0, refetchOnWindowFocus: false });
+  // Until the operator picks one, the first account in the domain is the one shown.
+  const account = picked ?? accounts.data?.[0]?.accountRef ?? '';
   const facts = useQuery({ queryKey: ['creation-assets','persona-facts',account], queryFn: ({ signal }) => api.listPersonaFacts(account,signal), enabled: !!account, gcTime: 0, refetchOnWindowFocus: false });
   const refetchAccounts = accounts.refetch; const refetchFacts = facts.refetch;
   const current = facts.data?.find(item => item.id === selected) ?? null;
+  const accountView = accounts.data?.find(row => row.accountRef === account) ?? null;
+  const personRef = accountView?.identity?.hasRealPerson ? accountView.identity.personRef ?? null : null;
   useEffect(() => {
     if (!account) return;
     let generation = 0; let disposed = false;
@@ -172,38 +178,45 @@ export function PersonaFactsLibrary({ domainRef, onDirtyChange = () => {}, onPen
   }, [facts.data, client]);
   function leave() { if (dirty && !window.confirm('这条事实有未保存内容，切换会丢弃本页编辑。确定切换吗？')) return false; setDirty(false); onDirtyChange(false); return true; }
   return <><div role="status" hidden={!rechecking}>{recheckFailed ? <>重新核对失败，已暂时隐藏事实。<ActionButton onClick={() => retryRecheck.current?.()}>重新核对</ActionButton></> : '正在重新核对事实，请稍候。'}</div><section style={rechecking ? { display: 'none' } : undefined} aria-label="人设事实">
-    <header className="as-head">
-      <div className="grow">
-        <h1 className="h-obj">人设事实</h1>
-        <p>只记录写稿需要的事实；录入不等于本人确认。选择账号后补充和确认事实。</p>
+    <div className="persona-top">
+      <div className="persona-accounts" role="group" aria-label="账号">
+        {(accounts.data ?? []).map(item => <button type="button" key={item.accountRef} aria-pressed={item.accountRef === account} disabled={pending}
+          onClick={() => { if (item.accountRef === account || !leave()) return; setPicked(item.accountRef); setSelected(null); }}>{item.accountName}</button>)}
       </div>
-      {account ? <ActionButton variant="outline" disabled={pending} onClick={() => { if (leave()) { setSelected(null); setFormVersion(value => value + 1); } }}>补充事实</ActionButton> : null}
-    </header>
-    <div className="lib-tools">
-      <label className="lbl">账号<select value={account} disabled={pending} onChange={event => { if (leave()) { setAccount(event.target.value); setSelected(null); } }}><option value="">选择账号</option>
-        {(accounts.data ?? []).map(item => <option key={item.accountRef} value={item.accountRef}>{item.accountName}</option>)}</select></label>
+      <span className="persona-state">{accountView ? `${identitySummary(accountView.identity)}${accountView.operatorName ? ` · 负责：${accountView.operatorName}` : ''}` : ''}</span>
     </div>
-    {accounts.isError ? <p role="alert">账号读取失败。</p> : null}{account && facts.isPending ? <p role="status">正在读取事实…</p> : facts.isError ? <p role="alert">事实读取失败。</p> : null}
-    {!account ? <p className="lib-empty">先选一个账号，再补充和确认事实。</p> : <div className="lib">
-      {facts.isSuccess && !facts.data?.length ? <p className="lib-empty">这个账号还没有人设事实，在右侧补充第一条。</p> : null}
-      {facts.data?.length ? <div className="lib-table">
-        <table className="ledger">
-          <thead><tr><th scope="col">事实</th><th scope="col">状态</th></tr></thead>
+    {accounts.isError ? <p role="alert">账号读取失败，可以<ActionButton variant="quiet" onClick={() => void accounts.refetch()}>重试</ActionButton>。</p> : null}
+    {accounts.isSuccess && !accounts.data?.length ? <p className="lib-empty">这个领域下没有可写稿的小红书账号（在用或养号中）。</p> : null}
+    {accountView ? <IdentityForm key={`identity:${accountView.accountRef}:${accountView.identity?.revision ?? 0}`} accountRef={accountView.accountRef}
+      accountName={accountView.accountName} identity={accountView.identity}
+      onSaved={() => { void client.invalidateQueries({ queryKey: ['creation-assets', 'accounts', domainRef] }); }}
+      onStale={() => { void client.invalidateQueries({ queryKey: ['creation-assets', 'accounts', domainRef] }); }} /> : null}
+    {account ? <div className="persona-facts">
+      <div className="persona-facts-head">
+        <div className="persona-facts-title"><h2>事实</h2><span className="data">{facts.isSuccess ? facts.data?.length ?? 0 : ''}</span></div>
+        <div className="persona-add"><ActionButton variant="ink" disabled={pending} onClick={() => { if (leave()) { setSelected(null); setFormVersion(value => value + 1); } }}>补充事实</ActionButton></div>
+      </div>
+      {facts.isPending ? <p role="status">正在读取事实…</p> : facts.isError ? <p role="alert">事实读取失败。</p> : null}
+      {facts.isSuccess && !facts.data?.length ? <p className="lib-empty">这个账号还没有人设事实，点“补充事实”写下第一条。</p> : null}
+      {facts.data?.length ? <div className="persona-table-wrap">
+        <table className="ledger persona-table">
+          <thead><tr><th scope="col">事实</th><th scope="col">来源</th><th scope="col">状态</th></tr></thead>
           <tbody>{facts.data?.map(item => {
             const on = item.id === selected;
             return <tr key={item.id} className={on ? 'lib-row on' : 'lib-row'}>
-              <td><button type="button" disabled={pending} aria-current={on ? 'true' : undefined} onClick={() => { if (item.id !== selected && leave()) setSelected(item.id); }}><b>{item.key ?? '历史事实'}</b></button></td>
-              <td>{item.state === 'withdrawn' ? '已撤回' : !item.currentPerson ? accounts.data?.find(row => row.accountRef === account)?.identity?.hasRealPerson === true ? '原真人事实' : '真人待确认' : item.status === 'confirmed' ? '本人已确认' : item.status === 'inferred' ? '推断待确认' : item.status === 'missing' ? '缺，待补充' : '待确认'}</td>
+              <td><button type="button" disabled={pending} aria-current={on ? 'true' : undefined} onClick={() => { if (item.id !== selected && leave()) setSelected(item.id); }}><b>{item.key ?? '历史事实'}</b>{item.text ? <span className="aux"> · {item.text}</span> : null}</button></td>
+              <td className="persona-source">{item.source ?? '—'}</td>
+              <td>{item.state === 'withdrawn' ? '已撤回' : !item.currentPerson ? accountView?.identity?.hasRealPerson === true ? '原真人事实' : '真人待确认' : item.status === 'confirmed' ? '本人已确认' : item.status === 'inferred' ? '推断待确认' : item.status === 'missing' ? '缺，待补充' : '待确认'}</td>
             </tr>;
           })}</tbody>
         </table>
       </div> : null}
-      <aside className="lib-insp" aria-label="人设事实详情">{account && (!selected || current) ? <PersonaForm key={`${account}:${selected ?? 'new'}:${formVersion}`} accountRef={account}
-        personRef={accounts.data?.find(row => row.accountRef === account)?.identity?.hasRealPerson ? accounts.data?.find(row => row.accountRef === account)?.identity?.personRef ?? null : null}
+      {!selected || current ? <div className="lib-insp"><PersonaForm key={`${account}:${selected ?? 'new'}:${formVersion}`} accountRef={account}
+        personRef={personRef}
         current={current} checking={rechecking} onDirty={value => { setDirty(value); onDirtyChange(value); }} onPending={value => { setPending(value); onPendingChange(value); }} onReload={() => setFormVersion(value => value + 1)}
         onSaved={item => { if (typeof BroadcastChannel !== 'undefined') { const channel = new BroadcastChannel('linggan-creation-experience-events'); channel.postMessage('persona-changed'); channel.close(); } setDirty(false); onDirtyChange(false); client.setQueryData<PersonaFact[]>(['creation-assets','persona-facts',account], old => { const observed = old?.find(row => row.id === item.id); const safe = observed && (observed.state === 'withdrawn' || !observed.currentPerson) ? observed : item; return [safe,...(old ?? []).filter(row => row.id !== item.id)]; });
           if (item.state === 'withdrawn') client.removeQueries({ queryKey: ['creation-assets','persona-history',item.id] });
-          setSelected(item.id); setFormVersion(value => value + 1); void client.invalidateQueries({ queryKey: ['creation-assets','persona-facts',account] }); }} /> : <p className={styles.hint}>选择账号后补充和确认事实。</p>}</aside>
-    </div>}
+          setSelected(item.id); setFormVersion(value => value + 1); void client.invalidateQueries({ queryKey: ['creation-assets','persona-facts',account] }); }} /></div> : null}
+    </div> : null}
   </section></>;
 }

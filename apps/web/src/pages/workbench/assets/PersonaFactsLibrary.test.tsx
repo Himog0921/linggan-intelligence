@@ -23,9 +23,12 @@ beforeEach(() => {
   vi.mocked(api.listPersonaFacts).mockResolvedValue([fact]);
   vi.mocked(api.personaHistory).mockResolvedValue([]);
 });
+async function ready() {
+  await screen.findByRole('button', { name: '合成账号' });
+  await screen.findByLabelText('事实名称');
+}
 async function selectFact() {
-  await screen.findByRole('option', { name: '合成账号' });
-  fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+  await ready();
   fireEvent.click(await screen.findByRole('button', { name: /年级/ }));
 }
 describe('人设事实', () => {
@@ -33,8 +36,7 @@ describe('人设事实', () => {
     const missing = { ...fact, key: '作息', text: '', source: 'manual', status: 'missing' };
     vi.mocked(api.listPersonaFacts).mockResolvedValue([]);
     vi.mocked(api.putPersonaFact).mockResolvedValue({ fact: missing, resultVersion: 1, replayed: false });
-    show(); await screen.findByRole('option', { name: '合成账号' });
-    fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    show(); await ready();
     fireEvent.change(screen.getByLabelText('事实名称'), { target: { value: '作息' } });
     fireEvent.click(screen.getByLabelText('缺，待补充'));
     expect(screen.getByLabelText('事实内容')).toBeDisabled();
@@ -111,8 +113,7 @@ describe('人设事实', () => {
   });
   it('clears an unsaved new fact when the account changes to a different person', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    show(client); await screen.findByRole('option', { name: '合成账号' });
-    fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    show(client); await ready();
     fireEvent.change(screen.getByLabelText('事实内容'), { target: { value: '前真人的合成草稿' } });
     const rows = await api.listAccounts(account);
     act(() => client.setQueryData(['creation-assets','accounts',account], rows.map(row => ({ ...row, identity: { ...row.identity!, personRef: id } }))));
@@ -123,8 +124,7 @@ describe('人设事实', () => {
   });
   it('temporarily hides and preserves a draft when the person is unknown and then restored', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    show(client); await screen.findByRole('option', { name: '合成账号' });
-    fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    show(client); await ready();
     fireEvent.change(screen.getByLabelText('事实内容'), { target: { value: '待确认的合成草稿' } });
     const rows = await api.listAccounts(account);
     act(() => client.setQueryData(['creation-assets','accounts',account], rows.map(row => ({ ...row, identity: { ...row.identity!, hasRealPerson: null, personRef: null } }))));
@@ -158,8 +158,7 @@ describe('人设事实', () => {
     vi.mocked(api.listAccounts).mockImplementationOnce(async () => [{ accountRef: account, accountName: '合成账号', platform: 'xhs', status: 'active', operatorName: null,
       identity: { accountRef: account, revision: 2, orgRelation: 'unknown', bioDisclosesRelation: null, bioCheckedAt: null, bioCheckedBy: null, hasRealPerson: null, personRef: null, backingPersonRole: null, canProvideExperience: null, savedAt: 't', savedBy: 'local_machine' } }]);
     vi.mocked(api.listPersonaFacts).mockResolvedValue([{ ...fact, currentPerson: false, key: null, text: null, source: null, status: null }]);
-    show(); await screen.findByRole('option', { name: '合成账号' });
-    fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    show(); await ready();
     fireEvent.click(await screen.findByRole('button', { name: /历史事实/ }));
     expect(await screen.findByText('账号真人暂未确认，草稿暂时隐藏；确认仍是同一位真人后可继续编辑。')).toBeVisible();
     expect(screen.queryByLabelText('事实内容')).not.toBeInTheDocument();
@@ -202,19 +201,18 @@ describe('人设事实', () => {
     fireEvent.click(await screen.findByRole('button', { name: '核对原请求' }));
     fireEvent.click(await screen.findByRole('button', { name: '放弃并停止原请求' }));
     await screen.findByText('原请求已登记；确认真人后，请继续核对原请求以读取最新结果。');
-    expect(screen.getByLabelText('账号')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '合成账号' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '核对原请求' })).toBeVisible();
     expect(screen.queryByRole('button', { name: '放弃并停止原请求' })).not.toBeInTheDocument();
   });
   it('keeps an uncertain save locked and retries its original request identity', async () => {
     vi.mocked(api.putPersonaFact).mockRejectedValueOnce(new ApiError({ kind: 'network' })).mockResolvedValueOnce({ fact, resultVersion: 1, replayed: true });
-    show(); await screen.findByRole('option', { name: '合成账号' });
-    fireEvent.change(screen.getByLabelText('账号'), { target: { value: account } });
+    show(); await ready();
     fireEvent.change(screen.getByLabelText('事实名称'), { target: { value: '年级' } });
     fireEvent.change(screen.getByLabelText('事实内容'), { target: { value: '三年级' } });
     fireEvent.click(screen.getByRole('button', { name: '保存事实' }));
     const retry = await screen.findByRole('button', { name: '核对并重试原请求' });
-    expect(screen.getByLabelText('账号')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '合成账号' })).toBeDisabled();
     fireEvent.click(retry);
     await waitFor(() => expect(api.putPersonaFact).toHaveBeenCalledTimes(2));
     expect(vi.mocked(api.putPersonaFact).mock.calls[0]![0].requestId).toBe(vi.mocked(api.putPersonaFact).mock.calls[1]![0].requestId);

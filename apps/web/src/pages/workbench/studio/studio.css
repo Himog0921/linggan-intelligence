@@ -1,5 +1,5 @@
 .gm-studio{--lgi-lattice-light:repeating-conic-gradient(rgb(255 255 255 / .28) 0% 25%,transparent 0% 50%);--lgi-lattice-ink:repeating-conic-gradient(color-mix(in srgb,#0b0f12 13%,transparent) 0% 25%,transparent 0% 50%);--lgi-lattice-dim:repeating-conic-gradient(rgba(11,15,18,.07) 0% 25%,transparent 0% 50%);--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:20px;--s6:24px;--s8:32px;--s10:40px;--s12:48px;--s16:64px;--t-aux:11px;--t-label:12px;--t-control:13px;--t-body:14px;--t-reading:16px;--t-section:18px;--t-object:22px;--t-page:24px;--side:160px;--side-collapsed:64px;--row:44px;--action:40px;--quiet:28px;--ease:cubic-bezier(.2,.75,.2,1);--ease-act:cubic-bezier(.2,.78,.2,1);--z-sticky:30;--z-header:40;--z-drawer:80;--z-overlay:100;--z-popover:140;--z-toast:180;}.gm-studio *{box-sizing:border-box}.gm-studio{height:100%;margin:0}.gm-studio{background:var(--lgi-canvas);color:var(--lgi-ink);font:400 var(--t-body)/1.75 var(--lgi-font-ui);font-synthesis:none;font-variant-numeric:tabular-nums lining-nums;overflow:hidden;-webkit-font-smoothing:antialiased}
-.gm-studio button,.gm-studio input,.gm-studio select,.gm-studio textarea{font:inherit;color:inherit}
+.gm-studio button:not([data-action-button]),.gm-studio input,.gm-studio select,.gm-studio textarea{font:inherit;color:inherit}
 .gm-studio button{cursor:pointer}
 .gm-studio [hidden]{display:none!important}
 .gm-studio :focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}
@@ -1099,6 +1099,8 @@
 .gm-studio .persona .persona-radio::before{content:"";width:14px;height:14px;flex:none;border:1px solid var(--lgi-ink);background:var(--lgi-canvas)}
 .gm-studio .persona .persona-radio[aria-checked="true"]::before{background:var(--lgi-ink);box-shadow:inset 0 0 0 3px var(--lgi-canvas)}
 .gm-studio .persona .persona-radio:focus-visible{outline:none;box-shadow:inset 0 -2px 0 var(--lgi-ink)}
+.gm-studio .persona .persona-radio{position:relative}
+.gm-studio .persona .persona-radio:focus-within{outline:none;box-shadow:inset 0 -2px 0 var(--lgi-ink)}
 .gm-studio .persona .persona-bio{margin:0;flex:1;min-width:0;font-size:13px;line-height:1.75;overflow-wrap:anywhere}
 .gm-studio .persona .persona-copy{height:32px;padding:0 0 0 var(--s2);border:0;background:transparent;font-size:12px;color:var(--lgi-ink);text-decoration:underline;text-underline-offset:4px;white-space:nowrap}
 .gm-studio .persona .persona-state{font-size:13px;line-height:1.75;color:var(--lgi-body);white-space:nowrap}

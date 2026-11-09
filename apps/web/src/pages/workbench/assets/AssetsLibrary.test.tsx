@@ -5,14 +5,19 @@ import { ApiError } from '../../../shared/api';
 import * as api from './assetsApi';
 import type { AccountView, FactCard, FactCardView, Identity, Sentence } from './assetsModel';
 import { AssetsLibrary } from './AssetsLibrary';
+import * as stylesApi from './stylesApi';
+import * as templatesApi from './structuralTemplatesApi';
 
 vi.mock('./assetsApi', async importOriginal => {
   const original = await importOriginal<typeof import('./assetsApi')>();
   return {
     ...original, listAccounts: vi.fn(), putIdentity: vi.fn(), listFactCards: vi.fn(), saveFactCard: vi.fn(), confirmFactCard: vi.fn(),
     listSentences: vi.fn(), createSentence: vi.fn(), editSentence: vi.fn(), reviewSentence: vi.fn(), checkSentence: vi.fn(),
+    listPersonaFacts: vi.fn(), personaHistory: vi.fn(),
   };
 });
+vi.mock('./stylesApi', async importOriginal => ({ ...await importOriginal<typeof import('./stylesApi')>(), listStyles: vi.fn() }));
+vi.mock('./structuralTemplatesApi', async importOriginal => ({ ...await importOriginal<typeof import('./structuralTemplatesApi')>(), listTemplates: vi.fn() }));
 
 const DOMAIN = '00000000-0000-4000-8000-000000000011';
 const A1 = '00000000-0000-4000-8000-0000000000a1';
@@ -38,13 +43,17 @@ function show() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(<QueryClientProvider client={client}><AssetsLibrary domainRef={DOMAIN} /></QueryClientProvider>);
 }
-const open = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
+const open = (name: string) => fireEvent.click(screen.getByRole('button', { name: new RegExp(name) }));
 
 beforeEach(() => {
   vi.resetAllMocks();
   vi.mocked(api.listAccounts).mockResolvedValue([]);
   vi.mocked(api.listFactCards).mockResolvedValue([]);
   vi.mocked(api.listSentences).mockResolvedValue([]);
+  vi.mocked(api.listPersonaFacts).mockResolvedValue([]);
+  vi.mocked(api.personaHistory).mockResolvedValue([]);
+  vi.mocked(stylesApi.listStyles).mockResolvedValue([]);
+  vi.mocked(templatesApi.listTemplates).mockResolvedValue([]);
   vi.mocked(api.checkSentence).mockResolvedValue({ rulesetVersion: 'v', blocked: false, findings: [], notRun: [] });
 });
 
@@ -88,8 +97,8 @@ describe('账号身份', () => {
     ]);
     show();
     expect(await screen.findByText('陪跑营学员家长 · 简介已写明 · 负责：小王')).toBeInTheDocument();
-    expect(screen.getByText('还没填写')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /乙号/ }));
+    expect(await screen.findByText('还没填写')).toBeInTheDocument();
     const form = await screen.findByRole('form', { name: '乙号 · 账号身份' });
     expect(within(form).getByLabelText('还没确认')).toBeChecked();
     expect(within(form).queryByText('账号简介里写明这层关系了吗')).not.toBeInTheDocument();
@@ -166,7 +175,7 @@ describe('产品事实卡', () => {
     vi.mocked(api.listFactCards).mockResolvedValue(views(card({ revision: 2 }), card({ revision: 1, confirmedAt: 't' })));
     show();
     open('产品事实卡');
-    expect(await screen.findByText('CP-0001 · 生效第 1 版 · 第 2 版待确认')).toBeInTheDocument();
+    expect(await screen.findByText('生效第 1 版 · 第 2 版待确认')).toBeInTheDocument();
   });
 
   it('creates a card from one-per-line names and confirms the latest revision only on request', async () => {
@@ -174,22 +183,21 @@ describe('产品事实卡', () => {
     vi.mocked(api.confirmFactCard).mockResolvedValue({ card: card({ confirmedAt: 't', confirmedBy: 'local_machine' }), replayed: false });
     show();
     open('产品事实卡');
-    fireEvent.click(await screen.findByRole('button', { name: '＋ 新建' }));
+    fireEvent.click(await screen.findByRole('button', { name: '新建' }));
     const form = await screen.findByRole('form', { name: '新建产品事实卡' });
     expect(within(form).getByRole('button', { name: '保存' })).toBeDisabled();
     fireEvent.change(within(form).getByLabelText('规范名称'), { target: { value: ' 示例营 ' } });
-    fireEvent.change(within(form).getByLabelText(/^可用叫法/), { target: { value: '示例陪跑营\n  \n示例营学员' } });
-    fireEvent.change(within(form).getByLabelText(/不要用的叫法/), { target: { value: '示例课' } });
+    fireEvent.change(within(form).getByLabelText(/^可用叫法/), { target: { value: '示例陪跑营、示例营学员' } });
+    fireEvent.change(within(form).getByLabelText(/不用的叫法/), { target: { value: '示例课' } });
     vi.mocked(api.listFactCards).mockResolvedValue(views(card(), null));
     fireEvent.click(within(form).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(api.saveFactCard).toHaveBeenCalledTimes(1));
     const [code, command] = vi.mocked(api.saveFactCard).mock.calls[0]!;
     expect(code).toBeNull();
     expect(command).toMatchObject({ expectedRevision: 0, name: '示例营', allowedNames: ['示例陪跑营', '示例营学员'], bannedNames: ['示例课'] });
-    const saved = await screen.findByRole('form', { name: '产品事实卡 CP-0001' });
-    expect(within(saved).getByText(/这一版还没有确认/)).toBeInTheDocument();
+    expect(await screen.findByText(/这一版还没有确认/)).toBeInTheDocument();
     expect(api.confirmFactCard).not.toHaveBeenCalled();
-    fireEvent.click(within(saved).getByRole('button', { name: '确认这一版' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认这一版' }));
     await waitFor(() => expect(api.confirmFactCard).toHaveBeenCalledWith('CP-0001', expect.objectContaining({ expectedRevision: 1 })));
   });
 
@@ -198,7 +206,6 @@ describe('产品事实卡', () => {
     vi.mocked(api.listFactCards).mockResolvedValue(views(confirmed, confirmed));
     show();
     open('产品事实卡');
-    fireEvent.click(await screen.findByRole('button', { name: /示例营/ }));
     expect(await screen.findByText('这一版已确认（2026-10-28 15:23），检查按它执行。')).toBeInTheDocument();
   });
 
@@ -207,11 +214,11 @@ describe('产品事实卡', () => {
     vi.mocked(api.saveFactCard).mockResolvedValue({ card: card({ revision: 4 }), replayed: false });
     show();
     open('产品事实卡');
-    fireEvent.click(await screen.findByRole('button', { name: /示例营/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '编辑' }));
     const form = await screen.findByRole('form', { name: '产品事实卡 CP-0001' });
     expect(within(form).queryByRole('button', { name: '确认这一版' })).not.toBeInTheDocument();
     fireEvent.change(within(form).getByLabelText('规范名称'), { target: { value: '示例营（新）' } });
-    fireEvent.click(within(form).getByRole('button', { name: '保存为新的一版' }));
+    fireEvent.click(within(form).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(api.saveFactCard).toHaveBeenCalledWith('CP-0001', expect.objectContaining({ expectedRevision: 3, name: '示例营（新）' })));
   });
 });
@@ -224,7 +231,7 @@ describe('衔接句', () => {
     });
     show();
     open('衔接句');
-    fireEvent.click(await screen.findByRole('button', { name: '＋ 新增一句' }));
+    fireEvent.click((await screen.findAllByRole('button', { name: '加入（待审）' }))[0]!);
     const form = await screen.findByRole('form', { name: '新增衔接句' });
     fireEvent.change(within(form).getByLabelText(/这句话/), { target: { value: '我家孩子保证能好' } });
     expect(await within(form).findByText(/疗效承诺，衔接句里不能写/)).toBeInTheDocument();
@@ -240,7 +247,7 @@ describe('衔接句', () => {
     vi.mocked(api.createSentence).mockResolvedValue({ sentence: sentence(), replayed: false });
     show();
     open('衔接句');
-    fireEvent.click(await screen.findByRole('button', { name: '＋ 新增一句' }));
+    fireEvent.click((await screen.findAllByRole('button', { name: '加入（待审）' }))[0]!);
     const form = await screen.findByRole('form', { name: '新增衔接句' });
     fireEvent.change(within(form).getByLabelText('适合哪种身份'), { target: { value: 'coach' } });
     fireEvent.change(within(form).getByLabelText(/这句话/), { target: { value: ' 我是陪跑老师 ' } });
@@ -257,7 +264,7 @@ describe('衔接句', () => {
       { code: 'creation_assets_blocked', findings: [{ rule: 'R-L1', level: 'must', message: '“治愈”是疗效承诺', location: { kind: 'text', start: 0, end: 2 }, fixes: [] }] }));
     show();
     open('衔接句');
-    fireEvent.click(await screen.findByRole('button', { name: '＋ 新增一句' }));
+    fireEvent.click((await screen.findAllByRole('button', { name: '加入（待审）' }))[0]!);
     const form = await screen.findByRole('form', { name: '新增衔接句' });
     fireEvent.change(within(form).getByLabelText(/这句话/), { target: { value: '孩子治愈了' } });
     await waitFor(() => expect(within(form).getByRole('button', { name: '加入句库（待审）' })).toBeEnabled());
@@ -265,15 +272,14 @@ describe('衔接句', () => {
     expect(await within(form).findByText('“治愈”是疗效承诺')).toBeInTheDocument();
   });
 
-  it('lists each sentence with its code, voice, status and how many drafts use it, and filters on the server', async () => {
+  it('lists each sentence in its relationship column with status and how many drafts use it', async () => {
     vi.mocked(api.listSentences).mockResolvedValue([sentence({ status: 'ok' }), sentence({ code: 'XJ-0002', group: 'coach', text: '陪跑老师的一句', usedCount: 0 })]);
     show();
     open('衔接句');
-    expect(await screen.findByText('稿件选用 3 篇')).toBeInTheDocument();
+    expect(await screen.findByText((_, node) => node?.textContent === '用过 3 次')).toBeInTheDocument();
     expect(screen.getByText('陪跑老师的一句')).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('按身份筛选'), { target: { value: 'coach' } });
-    fireEvent.change(screen.getByLabelText('按状态筛选'), { target: { value: 'ok' } });
-    await waitFor(() => expect(api.listSentences).toHaveBeenLastCalledWith({ group: 'coach', status: 'ok' }, expect.anything()));
+    expect(screen.getByText('XJ-0001')).toBeInTheDocument();
+    expect(api.listSentences).toHaveBeenCalledWith({}, expect.anything());
   });
 
   it('reviews with the actions that fit the status, and sending back needs a reason', async () => {
@@ -281,7 +287,7 @@ describe('衔接句', () => {
     vi.mocked(api.reviewSentence).mockResolvedValue({ sentence: sentence({ status: 'ok' }), replayed: false });
     show();
     open('衔接句');
-    fireEvent.click(await screen.findByRole('button', { name: /我也是学员家长/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '改写' }));
     const review = await screen.findByRole('region', { name: '审核' });
     expect(within(review).getByText(/现在是“待审”/)).toBeInTheDocument();
     expect(within(review).queryByRole('button', { name: /重新启用/ })).not.toBeInTheDocument();
@@ -297,7 +303,7 @@ describe('衔接句', () => {
     vi.mocked(api.editSentence).mockResolvedValue({ sentence: sentence({ revision: 2 }), replayed: false });
     show();
     open('衔接句');
-    fireEvent.click(await screen.findByRole('button', { name: /我也是学员家长/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '改写' }));
     const review = await screen.findByRole('region', { name: '审核' });
     expect(within(review).getByRole('button', { name: '重新启用（回到待审）' })).toBeInTheDocument();
     expect(within(review).queryByRole('button', { name: '审核通过' })).not.toBeInTheDocument();
