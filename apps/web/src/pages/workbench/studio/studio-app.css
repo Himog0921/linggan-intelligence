@@ -33,6 +33,9 @@
 
 
 .gm-studio .q-item[aria-current="page"] {background:var(--lgi-canvas)}
+.gm-studio .q-head-top .btn {margin-left:auto}
+.gm-studio .q-head-top h2 {white-space:nowrap}
+.gm-studio .q-head-top .aux {flex:none;white-space:nowrap}
 .gm-studio .q-item[aria-current="page"] .q-title {font-weight:600}
 .gm-studio .q-item[aria-current="page"]::before {content:"";position:absolute;left:0;top:var(--s3);bottom:var(--s3);width:2px;background:var(--lgi-signal)}
 .gm-studio .q-title,.gm-studio .q-meta,.gm-studio .q-state {display:block}
