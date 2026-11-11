@@ -1,7 +1,7 @@
 # LIDS-ALIGN-001 · 审阅稿逐项对齐表
 
 > 状态: 权威当前
-> 最后核对: 2026-10-20
+> 最后核对: 2026-11-11
 > 适用范围: 设计采用追踪与候选导航；不是另一个设计规则源
 > 事实来源: review-alignment.json及其中记录的用户确认、审阅源SHA和代码基线
 > 冲突时以谁为准: 用户最新确认及引用的正式LIDS分册；候选要求不自动生效
@@ -18,7 +18,7 @@
 - 候选待审：只用于讨论与盘点，不代表批准、组件交付或业务能力。
 
 字体角色与完整B字号、字重、行高已确认，Q01/Q02已关闭，Q03原声已统一OPPO Sans；唯一参数源为[typography.json](typography.json)。Q04已按ALIGN-FOCUS-005采用C；Q05已按ALIGN-MATERIAL-006采用M2，唯一参数源[control-material.json](control-material.json)；Q06已按ALIGN-SHELL-007采用A及手动图标折叠；Q07已按ALIGN-LEDGER-008采用L1/44px/名称144px；Q08按ALIGN-COMPOSITION-009采用含搜索的列表B/其他功能C并保留用户问题卡片；Q09已采用S1，Q10四类/七门槛已采用，Q11已采用自动/F2/数值对齐；Q12按ALIGN-MEDIA-013采用E1与白场舞台。
-业务代码、字体资产和运行时Token未改；分支文档入库不等于主线或常驻runtime同步。
+Signal Console二三级导航已在功能分支实施；字体资产未改，分支实现不等于主线合并、部署或生产验证。
 
 原审阅注册表 SHA256：`88747e1f374318130056ac051edb5ae35d9a7b0c50302b027da27045acdd0bf5`。
 本次代码基线：`9ff50b8135c0617672a426a97d58ec7448a7cbe7`。完整确认摘要见清单userEvidence。
@@ -30,7 +30,7 @@
 | 无边框V2，连续白场、黑结构、橙重音；v8仍为粗稿 | [system](system.md) | Q05控件材质已采用M2；E1/白场舞台已采用 |
 | OPPO / Albert / Alumni / Manrope及B字级整体采用 | [typography](typography.md) | 原声OPPO已确认／生产接入Q11 |
 | 领域保留面包屑位置，位置与范围分责 | [shell-zones](shell-zones.md) | A容量及图标折叠已采用；组件认证Q10 |
-| 三级页面Tab统一归Z02面包屑模块，主区不重复 | [shell-zones](shell-zones.md) | A容量／收纳已采用；对象内部Tab与筛选各自就近 |
+| 二级与三级页面统一归Z03左侧导航树；Z02保留领域选择与当前位置 | [shell-zones](shell-zones.md) | A容量／收纳已采用；对象内部Tab与筛选各自就近 |
 | 区域可定位、标题去重、列表紧凑计数 | [regions](regions.md) | Q08组合及动作位置已采用；组件认证Q10 |
 | A连续账本，一任务一行 | [regions](regions.md) | 44px/名称144px已采用；B外部组合已采用；组件认证Q10 |
 | FIND保留装饰结构，输入/FIND聚焦不加外圈 | [primitives](primitives.md) | C焦点、M2材质已确认；组件认证Q10 |
@@ -45,7 +45,7 @@
 | R02 | 区域按职责出现 | 已确认原则 | [regions](../../design/lids/regions.md) | U03, U08 | — |
 | R03 | 页面身份去重 | 已确认原则 | [regions](../../design/lids/regions.md) | U03, U08 | — |
 | R04 | 读数服从页型 | 已确认原则 | [regions](../../design/lids/regions.md) | U03, U08 | — |
-| R05 | 位置与范围分责 | 已确认原则 | [shell-zones](../../design/lids/shell-zones.md) | U05, U08, U10 | — |
+| R05 | 位置与范围分责 | 已确认原则 | [shell-zones](../../design/lids/shell-zones.md) | U05, U08, U10, U24 | — |
 | R06 | 动作按对象归位 | 已确认原则 | [regions](../../design/lids/regions.md) | U08, U17, U18, U20 | — |
 | R07 | 有限的主操作 | 沿用既有规则 | [primitives](../../design/lids/primitives.md) | existing_lids, U08 | — |
 | R08 | FIND保留结构 | 已确认原则 | [primitives](../../design/lids/primitives.md) | U03, U05, U08, U12, U13 | — |
@@ -71,12 +71,12 @@
 | ID | 名称 | 状态 | 正式规则落点 | 依据 | 待审 |
 | --- | --- | --- | --- | --- | --- |
 | Z01 | 全局页头 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U15, U17, U18, U21 | — |
-| Z02 | 位置与范围栏 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U10, U15, U17, U18, U21 | — |
-| Z02-P | 面包屑 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U10, U15, U17, U18, U21 | — |
+| Z02 | 位置与范围栏 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U10, U15, U17, U18, U21, U24 | — |
+| Z02-P | 面包屑 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U10, U15, U17, U18, U21, U24 | — |
 | Z02-S | 业务范围 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U15, U17, U18, U21 | — |
 | Z03 | 侧边导航 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U15, U17, U18, U21 | — |
 | Z04 | 主工作区 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U15, U17, U18, U21 | — |
-| Z04-N | 页内分区 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U10, U15, U17, U18, U21 | — |
+| Z04-N | 页内分区 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U10, U15, U17, U18, U21, U24 | — |
 | Z04-T | 工作工具栏 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U15, U17, U18, U21 | — |
 | Z04-V | 视图与设置 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U15, U17, U18, U21 | — |
 | Z04-R | 结果与范围 | 原则采用／细节待审 | [regions](../../design/lids/regions.md) | U03, U05, U08, U15, U17, U18, U21 | — |
@@ -133,7 +133,7 @@
 | C22 | 文件选择与上传 / FileField | 候选待审 | [primitives](../../design/lids/primitives.md) | U08, U21 | — |
 | C23 | 敏感值输入 / SecretField | 候选待审 | [primitives](../../design/lids/primitives.md) | U08, U21 | — |
 | C24 | 表单提交与校验摘要 / FormActions | 候选待审 | [primitives](../../design/lids/primitives.md) | U08, U21 | — |
-| C25 | 对象分区标签 / Tabs | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U08, U10, U21 | — |
+| C25 | 对象分区标签 / Tabs | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U08, U10, U21, U24 | — |
 | C26 | 展示方式切换 / ViewSwitch | 候选待审 | [patterns](../../design/lids/patterns.md) | U08, U21 | — |
 | C27 | 分页与继续加载 / Pagination | 候选待审 | [patterns](../../design/lids/patterns.md) | U08, U21 | — |
 | C28 | 折叠详情 / Disclosure | 候选待审 | [patterns](../../design/lids/patterns.md) | U08, U21 | — |
@@ -250,7 +250,7 @@
 | P03 | 证据库 | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U08, U17, U18, U21 | — |
 | P04 | 评论研究 | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U02, U03, U04, U08, U17, U18, U21 | — |
 | P05 | 创作者 | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U02, U03, U04, U08, U17, U18, U21 | — |
-| P06 | 主题图谱 | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U08, U10, U17, U18, U21 | — |
+| P06 | 主题图谱 | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U08, U10, U17, U18, U21, U24 | — |
 | P07 | Topic 动态工作区 | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U08, U17, U18, U21 | — |
 | P08 | 观察目标 | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U08, U17, U18, U21 | — |
 | P09 | 采集任务 | 原则采用／细节待审 | [patterns](../../design/lids/patterns.md) | U02, U03, U04, U08, U16, U17, U18, U20, U21 | — |
