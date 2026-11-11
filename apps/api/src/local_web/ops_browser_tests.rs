@@ -130,6 +130,16 @@ async fn operations_five_pages_real_chain_browser_proof() {
     .unwrap();
     sqlx::query("INSERT INTO linggan_ops_publication_cover(publication_ref,source_path,content_sha256,byte_size,mime_type,storage_key,import_ref) VALUES($1,'synthetic/cover.png',$2,$3,'image/png',$4,$5)")
         .bind(cover).bind(&hash).bind(png.len() as i64).bind(storage_key).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_ops_historical_owner_resolution
+            (resolution_ref,request_ref,publication_ref,source_display_name,
+             resolved_member_ref,state,import_batch_ref,rule_version,decided_by_member_ref)
+         SELECT $1,$2,publication_ref,publisher_name,$3,'matched',first_batch_ref,
+                'ops-historical-owner-manual.v1',$3
+           FROM linggan_ops_publication WHERE publication_ref=$4",
+    )
+    .bind(Uuid::new_v4()).bind(Uuid::new_v4()).bind(browser_member).bind(cover)
+    .execute(db.pool()).await.unwrap();
     // Freeze the exact core exporter bytes as an oracle before any browser interaction.
     let accounts = read_ops_accounts(&db, OpsBusiness::All, None)
         .await

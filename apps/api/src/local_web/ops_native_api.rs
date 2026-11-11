@@ -202,6 +202,7 @@ struct CommandReceipt {
 }
 
 enum WriteError {
+    SessionChanged,
     Invalid(&'static str),
     Unavailable,
 }
@@ -338,7 +339,7 @@ async fn create_publications_batch(
                         replayed: false,
                     },
                 ),
-                WriteError::Unavailable => return write_error(WriteError::Unavailable),
+                WriteError::Unavailable | WriteError::SessionChanged => return write_error(error),
             },
         };
         items.push(BatchPublicationReceipt {
@@ -428,7 +429,7 @@ async fn record_view_reports_batch(
                         replayed: false,
                     },
                 ),
-                Err(WriteError::Unavailable) => return write_error(WriteError::Unavailable),
+                Err(error @ (WriteError::Unavailable | WriteError::SessionChanged)) => return write_error(error),
             };
         items.push(BatchPublicationReceipt {
             ordinal: index + 1,
@@ -519,6 +520,7 @@ async fn write_account(
         .begin()
         .await
         .map_err(|_| WriteError::Unavailable)?;
+    require_current_writer(&mut transaction, &member).await?;
     if let Some(receipt) = replay(
         &mut transaction,
         account.request_id,
@@ -657,6 +659,7 @@ async fn write_account_update(
         .begin()
         .await
         .map_err(|_| WriteError::Unavailable)?;
+    require_current_writer(&mut transaction, &member).await?;
     if let Some(receipt) = replay(
         &mut transaction,
         account.request_id,
@@ -863,6 +866,7 @@ async fn write_account_lifecycle(
         .begin()
         .await
         .map_err(|_| WriteError::Unavailable)?;
+    require_current_writer(&mut transaction, &member).await?;
     if let Some(receipt) = replay(
         &mut transaction,
         request_id,
@@ -1012,6 +1016,7 @@ async fn write_publication(
         .begin()
         .await
         .map_err(|_| WriteError::Unavailable)?;
+    require_current_writer(&mut transaction, &member).await?;
     if let Some(receipt) = replay(
         &mut transaction,
         publication.request_id,
@@ -1186,6 +1191,15 @@ async fn write_account_responsibility(
         .begin()
         .await
         .map_err(|_| WriteError::Unavailable)?;
+    if let Some(next) = body.next_member_ref.filter(|next| *next != member.member_ref) {
+        // Offboarding locks all affected members in UUID order before touching accounts.
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT member_ref FROM linggan_ops_member WHERE member_ref=ANY($1)
+              ORDER BY member_ref FOR SHARE",
+        ).bind(vec![member.member_ref, next]).fetch_all(&mut *transaction)
+        .await.map_err(|_| WriteError::Unavailable)?;
+    }
+    require_current_writer(&mut transaction, &member).await?;
     if let Some(receipt) = replay(
         &mut transaction,
         request_id,
@@ -1201,6 +1215,14 @@ async fn write_account_responsibility(
             .map_err(|_| WriteError::Unavailable)?;
         return Ok((status_for(&receipt), receipt));
     }
+    let target_state: Option<String> = if let Some(next_member_ref) = body.next_member_ref { sqlx::query_scalar(
+            "SELECT state FROM linggan_ops_member WHERE member_ref=$1 FOR SHARE",
+        )
+        .bind(next_member_ref)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(|_| WriteError::Unavailable)?
+    } else { None };
     let account: Option<(Option<Uuid>, i64)> = sqlx::query_as(
         "SELECT current_responsible_member_ref,responsibility_version \
          FROM linggan_ops_account \
@@ -1239,14 +1261,7 @@ async fn write_account_responsibility(
         )
         .await;
     }
-    if let Some(next_member_ref) = body.next_member_ref {
-        let target_state: Option<String> = sqlx::query_scalar(
-            "SELECT state FROM linggan_ops_member WHERE member_ref=$1 FOR SHARE",
-        )
-        .bind(next_member_ref)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(|_| WriteError::Unavailable)?;
+    if body.next_member_ref.is_some() {
         match target_state.as_deref() {
             Some("active") => {}
             Some(_) => {
@@ -1324,33 +1339,17 @@ async fn write_account_responsibility(
             .map_err(|_| WriteError::Unavailable)?;
         return Ok((StatusCode::OK, receipt.receipt));
     }
-    let resulting_version = current_version + 1;
-    sqlx::query(
-        "UPDATE linggan_ops_account \
-         SET current_responsible_member_ref=$2,responsibility_version=$3 WHERE account_ref=$1",
-    )
-    .bind(account_ref)
-    .bind(body.next_member_ref)
-    .bind(resulting_version)
-    .execute(&mut *transaction)
-    .await
-    .map_err(|_| WriteError::Unavailable)?;
-    sqlx::query(
-        "INSERT INTO linggan_ops_account_responsibility_change \
-         (change_ref,account_ref,previous_member_ref,next_member_ref,changed_by_member_ref,reason,request_ref,resulting_version) \
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(account_ref)
-    .bind(previous_member_ref)
-    .bind(body.next_member_ref)
-    .bind(member.member_ref)
-    .bind(&reason)
-    .bind(request_id)
-    .bind(resulting_version)
-    .execute(&mut *transaction)
-    .await
-    .map_err(|_| WriteError::Unavailable)?;
+    let resulting_version = persist_responsibility(
+        &mut transaction,
+        account_ref,
+        previous_member_ref,
+        body.next_member_ref,
+        current_version,
+        ResponsibilityAudit {
+            actor_ref: member.member_ref, request_ref: request_id,
+            reason: &reason, deactivation_request_ref: None,
+        },
+    ).await.map_err(|_| WriteError::Unavailable)?;
     let receipt = accepted(
         request_id,
         "account_responsibility_transfer",
@@ -1365,6 +1364,48 @@ async fn write_account_responsibility(
         .await
         .map_err(|_| WriteError::Unavailable)?;
     Ok((StatusCode::OK, receipt.receipt))
+}
+
+pub(super) struct ResponsibilityAudit<'a> {
+    pub(super) actor_ref: Uuid,
+    pub(super) request_ref: Uuid,
+    pub(super) reason: &'a str,
+    pub(super) deactivation_request_ref: Option<Uuid>,
+}
+
+/// Callers lock the account and validate the expected version and recipient before this write.
+pub(super) async fn persist_responsibility(
+    tx: &mut Transaction<'_, Postgres>,
+    account_ref: Uuid,
+    previous: Option<Uuid>,
+    next: Option<Uuid>,
+    current_version: i64,
+    audit: ResponsibilityAudit<'_>,
+) -> Result<i64, sqlx::Error> {
+    let version = current_version + 1;
+    sqlx::query(
+        "UPDATE linggan_ops_account SET current_responsible_member_ref=$2,responsibility_version=$3
+          WHERE account_ref=$1",
+    ).bind(account_ref).bind(next).bind(version).execute(&mut **tx).await?;
+    sqlx::query(
+        "INSERT INTO linggan_ops_account_responsibility_change
+            (change_ref,account_ref,previous_member_ref,next_member_ref,changed_by_member_ref,
+             reason,request_ref,resulting_version,deactivation_request_ref)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+    ).bind(Uuid::new_v4()).bind(account_ref).bind(previous).bind(next).bind(audit.actor_ref)
+    .bind(audit.reason).bind(audit.request_ref).bind(version).bind(audit.deactivation_request_ref)
+    .execute(&mut **tx).await?;
+    Ok(version)
+}
+
+async fn require_current_writer(
+    tx: &mut Transaction<'_, Postgres>,
+    member: &super::ops_auth::AuthenticatedMember,
+) -> Result<(), WriteError> {
+    if !super::ops_auth::lock_active_member(tx, member).await.map_err(|_| WriteError::Unavailable)? {
+        return Err(WriteError::SessionChanged);
+    }
+    Ok(())
 }
 
 async fn write_execution_locator(
@@ -1402,6 +1443,7 @@ async fn write_execution_locator(
         .begin()
         .await
         .map_err(|_| WriteError::Unavailable)?;
+    require_current_writer(&mut transaction, &member).await?;
     if let Some(receipt) = replay(
         &mut transaction,
         request_id,
@@ -1629,6 +1671,7 @@ async fn write_view_report(
         .begin()
         .await
         .map_err(|_| WriteError::Unavailable)?;
+    require_current_writer(&mut transaction, &member).await?;
     if let Some(receipt) = replay(
         &mut transaction,
         report.request_id,
@@ -1681,7 +1724,17 @@ async fn write_view_report(
         )
         .await;
     };
-    if !can_write_account(&mut transaction, &member, account_ref).await? {
+    // Hold the current account row while applying D02's publication predicate.
+    let can_report = can_write_account(&mut transaction, &member, account_ref).await?;
+    let scope = super::ops_api::member_scope(&mut *transaction, &member)
+        .await.map_err(|_| WriteError::Unavailable)?;
+    let visible: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_ops_publication p
+             JOIN linggan_ops_account a ON a.account_ref=p.account_ref
+            WHERE p.publication_ref=$1 AND linggan_ops_publication_visible(p,a,$2::uuid[],$3::uuid))",
+    ).bind(publication_ref).bind(scope.as_deref()).bind(member.member_ref)
+    .fetch_one(&mut *transaction).await.map_err(|_| WriteError::Unavailable)?;
+    if !can_report || !visible {
         return rejected(
             transaction,
             report.request_id,
@@ -1761,6 +1814,7 @@ async fn write_daily_report(
         .begin()
         .await
         .map_err(|_| WriteError::Unavailable)?;
+    require_current_writer(&mut transaction, &member).await?;
     if let Some(receipt) = replay(
         &mut transaction,
         report.request_id,
@@ -2277,6 +2331,7 @@ async fn same_active_group(
                          ORDER BY member_ref,occurred_at DESC,event_ref DESC) \
          SELECT EXISTS (SELECT 1 FROM latest a JOIN latest o ON a.group_ref=o.group_ref \
                         JOIN linggan_ops_group g ON g.group_ref=a.group_ref \
+                        JOIN linggan_ops_member current_owner ON current_owner.member_ref=o.member_ref AND current_owner.state='active' \
                         WHERE a.member_ref=$1 AND o.member_ref=$2 AND a.action='joined' \
                           AND o.action='joined' AND g.state='active')",
     )
@@ -2324,6 +2379,7 @@ fn receipt_response(status: StatusCode, receipt: CommandReceipt) -> Response {
 
 fn write_error(error: WriteError) -> Response {
     match error {
+        WriteError::SessionChanged => native_error(StatusCode::UNAUTHORIZED, "ops_auth_session_required"),
         WriteError::Invalid(code) => native_error(
             if code == "ops_native_request_conflict" {
                 StatusCode::CONFLICT

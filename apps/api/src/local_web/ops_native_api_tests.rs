@@ -203,6 +203,40 @@ async fn operator_reads_own_records_and_lead_reads_only_current_group() {
             "{kind} export scope"
         );
     }
+    let historical_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT publication_ref FROM linggan_ops_publication
+           WHERE account_ref=$1 ORDER BY source_record_id",
+    ).bind(imported_account).fetch_all(database.pool()).await.unwrap();
+    sqlx::query("UPDATE linggan_ops_account SET current_responsible_member_ref=$2 WHERE account_ref=$1")
+        .bind(imported_account).bind(second).execute(database.pool()).await.unwrap();
+    let pending_url = format!("/api/local/ops/publications?account_ref={imported_account}&views=pending");
+    let (status, pending) = get(app.clone(), &pending_url, Some(&cookies[1])).await;
+    assert_eq!(status, StatusCode::OK, "{pending}");
+    assert_eq!(pending["total"], 1);
+    assert_eq!(pending["items"][0]["ref"], historical_refs[0].to_string());
+    for (idx, publication) in historical_refs.iter().enumerate() {
+        let (status, response) = post(app.clone(),
+            &format!("/api/local/ops/native/publications/{publication}/view-reports"),
+            Some(&cookies[1]), json!({"requestId":Uuid::new_v4(),"reportKind":"value",
+                "viewCount":1200,"asOf":"2026-10-21T00:00:00Z"}),
+        ).await;
+        assert_eq!(status, if idx == 0 { StatusCode::CREATED } else { StatusCode::FORBIDDEN }, "{response}");
+    }
+    let (status, pending) = get(app.clone(), &pending_url, Some(&cookies[1])).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(pending["total"], 0);
+    let recorded: (Uuid, String) = sqlx::query_as(
+        "SELECT report.reported_by_member_ref, publication.publisher_name
+           FROM linggan_ops_view_report report JOIN linggan_ops_publication publication USING(publication_ref)
+          WHERE report.publication_ref=$1",
+    ).bind(historical_refs[0]).fetch_one(database.pool()).await.unwrap();
+    assert_eq!(recorded, (second, "合成甲".to_owned()));
+    sqlx::query("UPDATE linggan_ops_account SET current_responsible_member_ref=$2 WHERE account_ref=$1")
+        .bind(imported_account).bind(first).execute(database.pool()).await.unwrap();
+    let (status, after) = get(app.clone(),
+        &format!("/api/local/ops/publications?account_ref={imported_account}"), Some(&cookies[1])).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(after["total"], 0);
     let first_account = first_account.unwrap();
     let first_publication = first_publication.unwrap();
     sqlx::query(
@@ -352,28 +386,43 @@ async fn member_deactivation_revokes_sessions_and_leaves_current_accounts_pendin
         .unwrap()
         .parse()
         .unwrap();
+    // A password/identity refresh does not make an emergency stop wait on a new preview.
+    sqlx::query("UPDATE linggan_ops_member SET version=version+1 WHERE member_ref=$1")
+        .bind(departing).execute(database.pool()).await.unwrap();
     let request_id = Uuid::new_v4();
     let body = json!({"requestId":request_id,"expectedVersion":1,"reason":"合成离职停用"});
-    let (status, stopped) = post(
+    let mut account_lock = database.pool().begin().await.unwrap();
+    sqlx::query("SELECT account_ref FROM linggan_ops_account WHERE account_ref=$1 FOR UPDATE")
+        .bind(account_ref).execute(&mut *account_lock).await.unwrap();
+    sqlx::query("SELECT session_ref FROM linggan_ops_session WHERE member_ref=$1 FOR SHARE")
+        .bind(admin).execute(&mut *account_lock).await.unwrap();
+    let (status, stopped) = tokio::time::timeout(std::time::Duration::from_secs(3), post(
         app.clone(),
         &format!("/api/local/auth/members/{departing}/deactivate"),
         Some(&admin_cookie),
         body.clone(),
-    )
-    .await;
+    )).await.expect("emergency stop must not wait for account processing or a shared admin session lock");
+    account_lock.rollback().await.unwrap();
     assert_eq!(status, StatusCode::OK);
     assert_eq!(stopped["outcome"], "accepted");
-    assert_eq!(stopped["unassignedAccountCount"], 1);
+    assert!(stopped["unassignedAccountCount"].is_null());
     let state: (String, Option<Uuid>, i64, i64) = sqlx::query_as(
-        "SELECT member.state,account.current_responsible_member_ref,account.responsibility_version, \
-                (SELECT count(*) FROM linggan_ops_session WHERE member_ref=$1 AND revoked_at IS NOT NULL) \
-         FROM linggan_ops_member member CROSS JOIN linggan_ops_account account \
+        "SELECT member.state,account.current_responsible_member_ref,account.responsibility_version,
+                (SELECT count(*) FROM linggan_ops_session WHERE member_ref=$1 AND revoked_at IS NOT NULL)
+         FROM linggan_ops_member member CROSS JOIN linggan_ops_account account
          WHERE member.member_ref=$1 AND account.account_ref=$2",
     ).bind(departing).bind(account_ref).fetch_one(database.pool()).await.unwrap();
-    assert_eq!(state, ("disabled".to_owned(), None, 2, 1));
-    let changes: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ops_account_responsibility_change WHERE account_ref=$1 AND previous_member_ref=$2 AND next_member_ref IS NULL")
-        .bind(account_ref).bind(departing).fetch_one(database.pool()).await.unwrap();
-    assert_eq!(changes, 1);
+    assert_eq!(state, ("disabled".to_owned(), Some(departing), 1, 1));
+    let (status, pending) = get(app.clone(),
+        &format!("/api/local/ops/accounts?pending_from={departing}"), Some(&admin_cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(pending["total"], 1);
+    assert_eq!(pending["items"][0]["pendingFromMemberRef"], departing.to_string());
+    assert!(pending["items"][0]["currentResponsibleMemberRef"].is_null());
+    let (status, lookup) = get(app.clone(),
+        &format!("/api/local/auth/deactivations/{request_id}"), Some(&admin_cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(lookup["requestId"], request_id.to_string());
     let (status, _) = get(
         app.clone(),
         "/api/local/ops/members",
@@ -390,6 +439,80 @@ async fn member_deactivation_revokes_sessions_and_leaves_current_accounts_pendin
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(replay["replayed"], true);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn planned_offboarding_requires_all_recipients_and_commits_once() {
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_plan_stop_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url, &schema, full_schema_fixture::FULL_MIGRATIONS,
+    ).await.unwrap();
+    let admin = member(database.pool(), "planner@example.test", "管理员", "admin").await;
+    let departing = member(database.pool(), "outgoing@example.test", "离职组长", "lead").await;
+    let first = member(database.pool(), "first@example.test", "接任甲", "operator").await;
+    let second = member(database.pool(), "second@example.test", "接任乙", "operator").await;
+    let domain = Uuid::new_v4();
+    let group = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES($1,'交接合成业务')")
+        .bind(domain).execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_ops_group(group_ref,display_name,state) VALUES($1,'交接合成组','active')")
+        .bind(group).execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_ops_group_membership_event
+          (event_ref,group_ref,member_ref,action,acted_by_member_ref,reason,request_ref)
+        VALUES($1,$2,$3,'joined',$4,'synthetic',$5)")
+        .bind(Uuid::new_v4()).bind(group).bind(departing).bind(admin).bind(Uuid::new_v4())
+        .execute(database.pool()).await.unwrap();
+
+    let app = app_with_database(database.clone());
+    let admin_cookie = session(database.pool(), admin).await;
+    let departing_cookie = session(database.pool(), departing).await;
+    let mut accounts = Vec::new();
+    for index in 0..2 {
+        let (status, body) = post(app.clone(), "/api/local/ops/native/accounts", Some(&departing_cookie), json!({
+            "requestId":Uuid::new_v4(), "domainRef":domain, "platform":"xhs", "accountName":format!("合成账号 {index}"),
+            "profileUrl":null, "platformUserId":null, "deviceCode":null, "followerCount":null, "ipLocation":null, "notes":null
+        })).await;
+        assert_eq!(status, StatusCode::CREATED, "{body}");
+        accounts.push(uuid(&body["receipt"]["recordRef"]));
+    }
+    let (status, preview) = get(app.clone(),
+        &format!("/api/local/auth/members/{departing}/offboarding-preview"), Some(&admin_cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(preview["accounts"].as_array().unwrap().len(), 2);
+    assert_eq!(preview["groupVacancyRef"], group.to_string());
+    let path = format!("/api/local/auth/members/{departing}/deactivate");
+    let assignment = |index: usize, recipient: Uuid| json!({
+        "accountRef": accounts[index], "responsibilityVersion": 1, "nextMemberRef": recipient, "groupRef": null,
+    });
+    let (status, rejected) = post(app.clone(), &path, Some(&admin_cookie), json!({
+        "requestId":Uuid::new_v4(), "expectedVersion":1, "reason":"合成交接",
+        "assignments":[assignment(0,first),assignment(1,Uuid::new_v4())],
+    })).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{rejected}");
+    let (status, still_active) = get(app.clone(), "/api/local/ops/accounts", Some(&departing_cookie)).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(still_active["total"], 2);
+    let request_id = Uuid::new_v4();
+    let plan = json!({"requestId":request_id, "expectedVersion":1, "reason":"合成交接",
+        "assignments":[assignment(0,first),assignment(1,second)]});
+    let (status, receipt) = post(app.clone(), &path, Some(&admin_cookie), plan.clone()).await;
+    assert_eq!(status, StatusCode::OK, "{receipt}");
+    assert_eq!(receipt["transfers"].as_array().unwrap().len(), 2);
+    assert_eq!(receipt["groupVacancyRef"], group.to_string());
+    let (status, replay) = post(app.clone(), &path, Some(&admin_cookie), plan).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(replay["replayed"], true);
+    let (status, _) = get(app.clone(), "/api/local/ops/accounts", Some(&departing_cookie)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    for (recipient, account) in [(first, accounts[0]), (second, accounts[1])] {
+        let cookie = session(database.pool(), recipient).await;
+        let (status, list) = get(app.clone(), "/api/local/ops/accounts", Some(&cookie)).await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(list["total"], 1);
+        assert_eq!(list["items"][0]["ref"], account.to_string());
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1730,6 +1853,21 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     assert_eq!(status, StatusCode::CONFLICT);
     assert_eq!(conflict["code"], "ops_sync_request_conflict");
 
+    let admin = member(database.pool(), "sync-admin@example.test", "同步管理员", "admin").await;
+    let admin_cookie = session(database.pool(), admin).await;
+    let (status, stopped) = post(app.clone(),
+        &format!("/api/local/auth/members/{owner}/deactivate"), Some(&admin_cookie),
+        json!({"requestId":Uuid::new_v4(),"expectedVersion":1,"reason":"合成同步发起人离职"}),
+    ).await;
+    assert_eq!(status, StatusCode::OK, "{stopped}");
+    let (status, _) = post(app.clone(), "/api/local/ops/publication-syncs", Some(&owner_cookie),
+        json!({"idempotencyKey":Uuid::new_v4(),"publicationRefs":[publication_ref]}),
+    ).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let stored_actor: Uuid = sqlx::query_scalar(
+        "SELECT actor_member_ref FROM linggan_ops_publication_sync_request WHERE request_ref=$1",
+    ).bind(accepted_request_ref).fetch_one(database.pool()).await.unwrap();
+    assert_eq!(stored_actor, owner);
     // This stays entirely inside the isolated proof database, but exercises the actual shared
     // queue → live claim → Attempt → Package → Receipt path rather than inserting a package.
     let installation_ref = Uuid::new_v4();
@@ -2067,7 +2205,7 @@ async fn publication_sync_requires_explicit_scope_and_then_uses_exact_collection
     let (status, receipt) = get(
         app,
         &format!("/api/local/ops/publication-syncs/{accepted_request_ref}"),
-        Some(&owner_cookie),
+        Some(&admin_cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK);

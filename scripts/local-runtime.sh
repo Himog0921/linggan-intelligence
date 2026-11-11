@@ -508,6 +508,7 @@ migrate() {
   apply_migration_once "0194_creation_styles" "$project_root/database/migrations/0194_creation_styles.sql"
   apply_migration_once "0195_observation_transition_immutable" "$project_root/database/migrations/0195_observation_transition_immutable.sql"
   apply_migration_once "0196_content_understanding" "$project_root/database/migrations/0196_content_understanding.sql"
+  apply_migration_once "0197_ops_team_offboarding" "$project_root/database/migrations/0197_ops_team_offboarding.sql"
 }
 
 case "$command_name" in

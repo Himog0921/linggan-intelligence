@@ -972,6 +972,17 @@ async fn admin_invites_once_reinvite_revokes_old_link_and_acceptance_activates_m
         1,
         "the raw invitation token never becomes a stored credential"
     );
+    let revoke_path = format!("/api/local/auth/invitations/{}/revoke", first["invitation"]["ref"].as_str().unwrap());
+    let forbidden = session_request(&revoke_path, &operator_cookie, "POST");
+    assert_eq!(app.clone().oneshot(forbidden).await.unwrap().status(), StatusCode::FORBIDDEN);
+    let revoke = session_request(&revoke_path, &admin_cookie, "POST");
+    assert_eq!(app.clone().oneshot(revoke).await.unwrap().status(), StatusCode::OK);
+    let (status, roster) = json_response(app.clone().oneshot(session_request(
+        "/api/local/auth/members", &admin_cookie, "GET",
+    )).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(roster["members"].as_array().unwrap().iter().any(|row|
+        row["email"] == "new@example.test" && row["invitationState"] == "revoked"));
     let second = authenticated_json_request(
         "/api/local/auth/invitations",
         r#"{"email":"new@example.test","displayName":"新成员（更新）","role":"lead"}"#,

@@ -31,6 +31,7 @@ pub struct OpsAccountItem {
     /// workbench operator name below, which stays immutable provenance on imported rows.
     pub current_responsible_member_ref: Option<Uuid>,
     pub current_responsible_name: Option<String>,
+    pub pending_from_member_ref: Option<Uuid>,
     pub responsibility_version: i64,
     /// Native writes use this compare-and-swap version; imported rows intentionally have none.
     pub native_version: Option<i64>,
@@ -68,24 +69,40 @@ pub async fn read_ops_accounts_scoped(
     operator: Option<&str>,
     member_refs: Option<&[Uuid]>,
 ) -> Result<OpsAccountPage, OpsReadError> {
+    read_ops_accounts_filtered(database, business, operator, member_refs, None).await
+}
+
+pub async fn read_ops_accounts_filtered(
+    database: &Database,
+    business: OpsBusiness,
+    operator: Option<&str>,
+    member_refs: Option<&[Uuid]>,
+    pending_from: Option<Uuid>,
+) -> Result<OpsAccountPage, OpsReadError> {
     ensure_business(database, business).await?;
     let operator = operator.map(str::trim).filter(|text| !text.is_empty());
     let scope = sqlx::query(
-        "SELECT count(*) AS total, count(*) FILTER (WHERE status IN ('active', 'warming') \
-             AND (source_system='content_workbench' OR native_record_state='active')) AS active \
-           FROM linggan_ops_account WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
-             OR source_system='linggan_native') \
-             AND ($1::uuid IS NULL OR domain_ref = $1) \
-             AND ($2::uuid[] IS NULL OR current_responsible_member_ref=ANY($2))",
+        "SELECT count(*) AS total, count(*) FILTER (WHERE a.status IN ('active', 'warming')
+               AND (a.source_system='content_workbench' OR a.native_record_state='active')) AS active
+           FROM linggan_ops_account a
+           LEFT JOIN linggan_ops_member responsible ON responsible.member_ref=a.current_responsible_member_ref
+          WHERE ((a.source_system='content_workbench' AND a.ledger_state='in_ledger') OR a.source_system='linggan_native')
+            AND ($1::uuid IS NULL OR a.domain_ref=$1)
+            AND ($2::uuid[] IS NULL OR (responsible.state='active' AND responsible.member_ref=ANY($2)))
+            AND ($3::uuid IS NULL OR (responsible.state='disabled' AND responsible.member_ref=$3
+              AND (a.source_system='content_workbench' OR a.native_record_state='active')))",
     )
     .bind(business.domain_ref())
     .bind(member_refs)
+    .bind(pending_from)
     .fetch_one(database.pool())
     .await?;
     let rows = sqlx::query(
         "SELECT account.account_ref, account.source_record_id, account.source_system, account.platform, account.account_name, \
                 account.profile_url, account.device_code, account.follower_count, account.ip_location, \
-                account.current_responsible_member_ref, responsible.display_name AS current_responsible_name, \
+                CASE WHEN responsible.state='active' THEN responsible.member_ref END AS current_responsible_member_ref, \
+                CASE WHEN responsible.state='active' THEN responsible.display_name END AS current_responsible_name, \
+                CASE WHEN responsible.state='disabled' THEN responsible.member_ref END AS pending_from_member_ref, \
                 account.responsibility_version, account.native_version, account.native_record_state, account.handle, \
                 account.operator_name, account.status, account.is_retained, account.notes \
            FROM linggan_ops_account account \
@@ -95,12 +112,15 @@ pub async fn read_ops_accounts_scoped(
              OR account.source_system='linggan_native') \
             AND ($1::uuid IS NULL OR account.domain_ref = $1) \
             AND ($2::text IS NULL OR account.operator_name = $2) \
-            AND ($3::uuid[] IS NULL OR account.current_responsible_member_ref=ANY($3)) \
+            AND ($3::uuid[] IS NULL OR (responsible.state='active' AND responsible.member_ref=ANY($3))) \
+            AND ($4::uuid IS NULL OR (responsible.state='disabled' AND responsible.member_ref=$4 \
+              AND (account.source_system='content_workbench' OR account.native_record_state='active'))) \
           ORDER BY account.operator_name NULLS LAST, account.platform, account.account_name, account.account_ref",
     )
     .bind(business.domain_ref())
     .bind(operator)
     .bind(member_refs)
+    .bind(pending_from)
     .fetch_all(database.pool())
     .await?;
     let items = rows
@@ -118,6 +138,7 @@ pub async fn read_ops_accounts_scoped(
                 ip_location: row.try_get("ip_location")?,
                 current_responsible_member_ref: row.try_get("current_responsible_member_ref")?,
                 current_responsible_name: row.try_get("current_responsible_name")?,
+                pending_from_member_ref: row.try_get("pending_from_member_ref")?,
                 responsibility_version: row.try_get("responsibility_version")?,
                 native_version: row.try_get("native_version")?,
                 native_state: row.try_get("native_record_state")?,
@@ -134,15 +155,19 @@ pub async fn read_ops_accounts_scoped(
         .collect::<Result<Vec<_>, OpsReadError>>()?;
     let operators = names(
         sqlx::query(
-            "SELECT DISTINCT operator_name FROM linggan_ops_account \
-              WHERE ((source_system='content_workbench' AND ledger_state='in_ledger') \
-                 OR source_system='linggan_native') \
-                AND operator_name IS NOT NULL \
-                AND ($1::uuid IS NULL OR domain_ref = $1) \
-                AND ($2::uuid[] IS NULL OR current_responsible_member_ref=ANY($2)) ORDER BY 1",
+            "SELECT DISTINCT a.operator_name FROM linggan_ops_account a \
+                LEFT JOIN linggan_ops_member responsible ON responsible.member_ref=a.current_responsible_member_ref \
+              WHERE ((a.source_system='content_workbench' AND a.ledger_state='in_ledger') \
+                 OR a.source_system='linggan_native') \
+                AND a.operator_name IS NOT NULL \
+                AND ($1::uuid IS NULL OR a.domain_ref = $1) \
+                AND ($2::uuid[] IS NULL OR (responsible.state='active' AND responsible.member_ref=ANY($2))) \
+                AND ($3::uuid IS NULL OR (responsible.state='disabled' AND responsible.member_ref=$3 \
+                  AND (a.source_system='content_workbench' OR a.native_record_state='active'))) ORDER BY 1",
         )
         .bind(business.domain_ref())
         .bind(member_refs)
+        .bind(pending_from)
         .fetch_all(database.pool())
         .await?,
     )?;
