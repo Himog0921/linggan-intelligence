@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useId, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ModalDialog } from '../../../corpus/ModalDialog';
@@ -74,9 +75,9 @@ export function PublicationLinker({ workId, domainRef, saveCurrent, disabled, pe
       else setNotice('撤销结果尚未确认，请沿用原请求重试。');
     } finally { setBusy(false); }
   }
-  return <><ActionButton variant="quiet" disabled={disabled && !pending} onClick={() => void start()}>关联发布记录</ActionButton>
+  return <><ActionButton variant="quiet" disabled={disabled && !pending} onClick={() => void start()}><IntelligenceIcon name="link" size={16}/>关联发布记录</ActionButton>
     {open ? <ModalDialog labelledBy={`${uid}-title`} className={styles.dialog} onClose={() => { if (!busy) setOpen(false); }}>
-      <h2 id={`${uid}-title`}>关联运营发布记录</h2>{blocked ? <p role="alert">关联操作结果未确认，请先留在此稿并重试。 <button type="button" onClick={onResetBlock}>返回稿件</button></p> : null}
+      <h2 id={`${uid}-title`}><IntelligenceIcon name="link" size={18}/> 关联运营发布记录</h2>{blocked ? <p role="alert">关联操作结果未确认，请先留在此稿并重试。 <button type="button" onClick={onResetBlock}>返回稿件</button></p> : null}
       <p>选择此账号已经登记的发布记录，并关联到当前保存版本。这个操作不会发布笔记。</p>
       {links.isError ? <p role="alert">已关联的发布记录读取失败。<ActionButton variant="quiet" onClick={() => void links.refetch()}>重试</ActionButton></p> : null}
       {links.data?.length ? <section aria-label="已关联发布记录"><h3>已关联</h3>{links.data.map(item => <div key={item.linkRef}><p>{item.publishedOn ?? '日期未填'} · {item.title ?? '标题未填'}{!item.available ? ' · 记录当前不可用' : ''}{item.revisionId !== revision ? ' · 对应其他保存版本' : ''}</p><ActionButton variant="quiet" disabled={busy || !!pendingLink || !!pendingUnlink} onClick={() => void unlink(item.linkRef)}>撤销关联</ActionButton></div>)}</section> : null}
@@ -86,6 +87,6 @@ export function PublicationLinker({ workId, domainRef, saveCurrent, disabled, pe
       {revision && !pendingLink && candidates.isSuccess ? <><label>发布记录<select value={selected} onChange={event => setSelected(event.target.value)}><option value="">请选择</option>{candidates.data.map(item => <option key={item.publicationRef} value={item.publicationRef}>{item.publishedOn ?? '日期未填'} · {item.title ?? '标题未填'} · {item.url ?? '链接未填'}</option>)}</select></label>{!candidates.data.length ? <p>该账号没有可关联的发布记录。</p> : null}</> : null}
       {pendingLink ? <p>上一请求结果未确认，重试会沿用原来的记录和请求编号。</p> : null}
       {notice ? <p role="status">{notice}</p> : null}
-      <div className={styles.actions}><ActionButton variant="outline" disabled={busy} onClick={() => setOpen(false)}>关闭</ActionButton><ActionButton variant="primary" disabled={busy || !!pendingUnlink || !revision || !selected} onClick={() => void link()}>{pendingLink ? '重试关联' : '确认关联'}</ActionButton></div>
+      <div className={styles.actions}><ActionButton variant="outline" disabled={busy} onClick={() => setOpen(false)}><IntelligenceIcon name="close" size={16}/>关闭</ActionButton><ActionButton variant="primary" disabled={busy || !!pendingUnlink || !revision || !selected} onClick={() => void link()}>{pendingLink ? '重试关联' : '确认关联'}</ActionButton></div>
     </ModalDialog> : null}</>;
 }

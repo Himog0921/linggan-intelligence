@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { RunDialog } from './RunDialog';
@@ -68,7 +69,7 @@ export function RunCreationDialog({ params, onClose, onCreated }: { params: URLS
       persist();
     } finally { sending.current = false; setBusy(false); }
   }
-  return <RunDialog id="collection-run-form" labelledBy="collection-run-form-title" onClose={onClose}><form data-create-run onSubmit={submit}><header><div><h2 id="collection-run-form-title">新建单次采集</h2><p>为当前问题取得一批材料，结束后不自动重复。</p></div><button className="c-btn-quiet" type="button" onClick={onClose} aria-label="关闭单次采集">×</button></header><div className="c-run-dialog-body">
+  return <RunDialog id="collection-run-form" labelledBy="collection-run-form-title" onClose={onClose}><form data-create-run onSubmit={submit}><header><div><h2 id="collection-run-form-title">新建单次采集</h2><p>为当前问题取得一批材料，结束后不自动重复。</p></div><button className="c-btn-quiet" type="button" onClick={onClose} aria-label="关闭单次采集"><IntelligenceIcon name="close" size={16}/></button></header><div className="c-run-dialog-body">
     {exactWorks !== null && <p>已选择 {exactWorks.length} 篇作品；沿用精确 ID，不重新搜索。</p>}
     <fieldset hidden={exactWorks !== null} disabled={busy || uncertain}><legend>采集来源</legend><div className="c-run-source">{([['temporary_keyword', '临时关键词'], ['observation_target', '已有观察目标']] as const).map(([value, label]) => <label key={value}><input type="radio" name="source" value={value} checked={draft.source === value} onChange={() => update('source', value)} />{label}</label>)}</div></fieldset>
     <label>本次归属领域 *<select name="domain" required value={draft.domain} disabled={busy || uncertain} onChange={e => update('domain', e.target.value)}><option value="">请选择本次领域</option>{domains.data?.filter(d => d.status === 'active').map(d => <option key={d.domainRef} value={d.domainRef}>{d.name}</option>)}</select></label>

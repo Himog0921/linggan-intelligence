@@ -67,6 +67,7 @@ it('uses two secondary destinations and data tabs in Z02, preserving selected bu
   const nav = screen.getByRole('navigation', { name: '数据页面' });
   expect(nav.closest('.v7-context-main')).not.toBeNull();
   expect(within(nav).getAllByRole('link').map(link => link.textContent)).toEqual(['概览','发布记录','账号管理','每日数据']);
+  expect(within(nav).getByRole('link', { name: '每日数据' }).querySelector('svg')).toHaveAttribute('data-icon', 'daily');
   expect(screen.queryByText('导入导出')).not.toBeInTheDocument();
   expect(within(nav).getByRole('link', { name: '账号管理' })).toHaveAttribute('href', '/ops/accounts?domain=d1');
 });

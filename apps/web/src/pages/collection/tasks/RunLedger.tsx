@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useEffect, useId, useRef, useState, type ReactNode, type CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { commentModeLabel, discoveryLabel, moment, runStatus, sourceLabel, type Run } from './tasksApi';
@@ -93,7 +94,7 @@ export function RunLedger({ runs, message, onOpen, summary, refresh }: { runs: r
           const originalTime = field === 'created' ? run.created_at : field === 'updated' ? run.latest_delivery_at ?? run.updated_at : null;
           const title = originalTime ?? (field === 'rank' ? '当前读取合同未提供搜索排序，请核对原执行记录' : text === '—' ? '尚未取得，不能据此记为0' : text);
           return <td key={field} data-field={field} className={numeric.has(field) ? styles.number : undefined} title={title}>
-            {field === 'name' || field === 'action' ? <button type="button" className={field === 'name' ? styles.name : styles.open} data-open-run={run.run_ref} data-run-domain={run.domain_ref} onClick={() => onOpen(run)}>{text}</button> : field === 'stage' ? <span className={styles.stage} data-attention={run.needs_attention ? '' : undefined}>{text}</span> : originalTime !== null ? <time className={styles.data} dateTime={originalTime}>{text}</time> : <span className={field === 'id' ? styles.identifier : undefined}>{text}</span>}
+            {field === 'name' || field === 'action' ? <button type="button" className={field === 'name' ? styles.name : styles.open} data-open-run={run.run_ref} data-run-domain={run.domain_ref} onClick={() => onOpen(run)}>{field === 'action' && <><IntelligenceIcon name="forward" size={16}/>{' '}</>}{text}</button> : field === 'stage' ? <span className={styles.stage} data-attention={run.needs_attention ? '' : undefined}>{text}</span> : originalTime !== null ? <time className={styles.data} dateTime={originalTime}>{text}</time> : <span className={field === 'id' ? styles.identifier : undefined}>{text}</span>}
           </td>;
         })}</tr>)}{runs.length === 0 && <tr><td colSpan={columns.length} className={styles.empty} role="status">{message}</td></tr>}</tbody>
       </table>

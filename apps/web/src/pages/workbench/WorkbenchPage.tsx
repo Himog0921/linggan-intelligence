@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import './studio/studio.css';
 import './studio/studio-app.css';
 import { DraftRail } from './DraftRail';
@@ -109,7 +110,7 @@ function Modal({
   }}>
 <div className={styles.dialogHead}>
 <h2>{title}</h2>
-<ActionButton variant="outline" aria-label="关闭" onClick={onClose}>×</ActionButton>
+<ActionButton variant="outline" aria-label="关闭" onClick={onClose}><IntelligenceIcon name="close" size={16}/></ActionButton>
 </div>{children}</dialog>;
 }
 export function WorkbenchPage() {

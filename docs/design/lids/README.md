@@ -24,7 +24,7 @@ LIDS-UI-001 已由 Mog 授权真实代码实施；唯一色值源 [color.json](c
 | --- | --- |
 | [system](system.md) | 视觉气质、强度、五层与Data Truth |
 | [typography](typography.md) | 已采纳字体与B唯一字级；[参数源](typography.json)和生产接入边界 |
-| [iconography](iconography.md) | 已采用 B 精简版17枚；[参数](iconography.json)、共享SVG、有限反馈与真实展示 |
+| [iconography](iconography.md) | 已采用 B 精简版 53 枚；[参数](iconography.json)、共享SVG、有限反馈与真实展示 |
 | [tokens](tokens.md) | 语义值、目标阶梯与未改动的运行时镜像 |
 | [primitives](primitives.md) | 控件、按钮、输入/FIND的C焦点与基础反馈；参数[focus.json](focus.json) |
 | [materials](materials.md) | M2控件材质与既有家族；参数[control-material.json](control-material.json) |

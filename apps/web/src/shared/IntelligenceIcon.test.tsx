@@ -6,7 +6,8 @@ import { IntelligenceIcon, type IntelligenceIconName } from './IntelligenceIcon'
 
 it('renders every approved icon as a local decorative SVG', () => {
   const { container } = render(<>{spec.icons.map(icon => <IntelligenceIcon key={icon.name} name={icon.name as IntelligenceIconName}/>)}</>);
-  expect(container.querySelectorAll('svg')).toHaveLength(17);
+  expect([...container.querySelectorAll('svg')].map(svg => svg.getAttribute('data-icon')))
+    .toEqual(spec.icons.map(icon => icon.name));
   for (const svg of container.querySelectorAll('svg')) {
     expect(svg).toHaveAttribute('viewBox', '0 0 24 24');
     expect(svg).toHaveAttribute('aria-hidden', 'true');

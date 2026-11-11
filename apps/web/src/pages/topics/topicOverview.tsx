@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import type { JSX, ReactNode } from "react";
 import { OverviewReadouts } from "./OverviewReadouts";
 import { OverviewDistribution } from "./OverviewDistribution";
@@ -653,7 +654,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 ""
               )}
               <details className={cls("lgi-tm-scope-filter")}>
-                <summary aria-label="选择统计平台与发布时间" title="调整统计平台与发布时间">筛选</summary>
+                <summary aria-label="选择统计平台与发布时间" title="调整统计平台与发布时间"><IntelligenceIcon name="filter" size={16}/>筛选</summary>
                 <div className={cls("lgi-tm-scope-filter-panel")}>{controls()}</div>
               </details>
               <ViewSwitch

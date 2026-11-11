@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { useOpsLeave } from './useOpsLeave';
 import { ActionButton } from '../../shared/ActionButton';
 import { FindField } from '../../shared/FindField';
@@ -284,7 +285,7 @@ export function LedgerPage({
                 id="ops-date-open"
                 onClick={() => setDates(true)}
               >
-                {params.get("from") || params.get("to")
+                <IntelligenceIcon name="filter" size={16}/>{params.get("from") || params.get("to")
                   ? `${params.get("from") || "开始"} ~ ${params.get("to") || "结束"}`
                   : "日期范围"}
               </ActionButton>
@@ -320,10 +321,10 @@ export function LedgerPage({
           {kind === "publications" ? (
             <>
               <ActionButton type="button" disabled={!accounts.data?.items.length} title={!accounts.data?.items.length ? "当前业务没有可用账号" : undefined} onClick={() => setNewPublication(true)}>
-                新增发布
+                <IntelligenceIcon name="add" size={16}/>新增发布
               </ActionButton>
               {!restricted ? <ActionButton type="button" disabled={!pubs.data?.items.length} title={!pubs.data?.items.length ? "当前筛选下没有可选择的发布记录" : undefined} onClick={() => setSyncPublications(true)}>
-                同步数据
+                <IntelligenceIcon name="refresh" size={16}/>同步数据
               </ActionButton> : null}
               <ActionButton type="button" disabled={!pubs.data?.items.length} title={!pubs.data?.items.length ? "当前筛选下没有可选择的发布记录" : undefined} onClick={() => setBatchViews(true)}>
                 批量补阅读量
@@ -331,11 +332,11 @@ export function LedgerPage({
             </>
           ) : kind === "accounts" ? (
             <ActionButton type="button" disabled={business === "all"} title={business === "all" ? "请先选择一个业务" : undefined} onClick={() => setNewAccount(true)}>
-              新增账号
+              <IntelligenceIcon name="add" size={16}/>新增账号
             </ActionButton>
           ) : kind === "daily" ? (
             <ActionButton type="button" onClick={() => setNewDaily(true)}>
-              填写日报
+              <IntelligenceIcon name="add" size={16}/>填写日报
             </ActionButton>
           ) : null}
         </div>
@@ -474,7 +475,7 @@ export function LedgerPage({
               update({ page: String((pubs.data?.page || 1) - 1) }, true)
             }
           >
-            上一页
+            <IntelligenceIcon name="prev" size={16}/>上一页
           </ActionButton>
           <ActionButton
             type="button"
@@ -488,7 +489,7 @@ export function LedgerPage({
               update({ page: String((pubs.data?.page || 1) + 1) }, true)
             }
           >
-            下一页
+            <IntelligenceIcon name="next" size={16}/>下一页
           </ActionButton>
         </nav>
       ) : (
@@ -510,14 +511,14 @@ export function LedgerPage({
         />
       ) : null}
       {detail ? <Dialog label="发布记录详情" outsideClose onClose={() => setDetail(null)}>
-        <header className={c('ops-detail-head')}><h2>{detail.title || '无标题发布记录'}</h2><ActionButton onClick={() => setDetail(null)}>关闭详情</ActionButton></header>
+        <header className={c('ops-detail-head')}><h2>{detail.title || '无标题发布记录'}</h2><ActionButton onClick={() => setDetail(null)}><IntelligenceIcon name="close" size={16}/>关闭详情</ActionButton></header>
         <div className={c('ops-dialog-body')}>
           <p>{detail.businessDate} · {f.platformLabel[detail.platform]} · {detail.account?.name || '账号未知'}</p>
           <p className={c('ops-note')}>
             {detail.source === "native" ? "运营台账原生登记" : "工作台历史迁入"}
             {' · '}系统尚未核对平台发布状态
           </p>
-          <External href={detail.url} title="原发布链接">查看原发布链接 ↗</External>
+          <External href={detail.url} title="原发布链接"><IntelligenceIcon name="external" size={16}/> 查看原发布链接</External>
           <dl className={c('ops-detail-facts')}>
             <div><dt>阅读量</dt><dd>{detail.views.state === 'value' ? f.count(detail.views.value).text : detail.views.state === 'pending' ? '待补' : '选填，未知'}</dd></div>
             <div><dt>点赞</dt><dd>{f.count(detail.likes).text}</dd></div><div><dt>收藏</dt><dd>{f.count(detail.collects).text}</dd></div><div><dt>评论</dt><dd>{f.count(detail.comments).text}</dd></div>
@@ -826,8 +827,8 @@ function AccountRow({ item, index, transfer, edit, lifecycle, ready, canTransfer
       </td>
       <TextCell value={item.notes} />
       <td><div className={c("ops-stack")}>
-        {item.source === "native" && item.nativeVersion !== null && item.nativeState !== "archived" ? <><ActionButton type="button" onClick={() => edit(item)}>编辑</ActionButton><ActionButton type="button" onClick={() => lifecycle(item, false)}>归档</ActionButton></> : null}
-        {item.source === "native" && item.nativeVersion !== null && item.nativeState === "archived" ? <ActionButton type="button" onClick={() => lifecycle(item, true)}>恢复</ActionButton> : null}
+        {item.source === "native" && item.nativeVersion !== null && item.nativeState !== "archived" ? <><ActionButton type="button" onClick={() => edit(item)}><IntelligenceIcon name="edit" size={16}/>编辑</ActionButton><ActionButton type="button" onClick={() => lifecycle(item, false)}><IntelligenceIcon name="archive" size={16}/>归档</ActionButton></> : null}
+        {item.source === "native" && item.nativeVersion !== null && item.nativeState === "archived" ? <ActionButton type="button" onClick={() => lifecycle(item, true)}><IntelligenceIcon name="restore" size={16}/>恢复</ActionButton> : null}
         {canTransfer && item.nativeState !== "archived" ? <ActionButton type="button" disabled={!ready} title={ready ? "按当前权限与同组关系校验" : "正在读取可选成员"} onClick={() => transfer(item)}>交接</ActionButton> : null}
       </div></td>
     </tr>
@@ -872,7 +873,7 @@ function DailyRow({ item, edit, canEdit }: { item: api.Daily; edit: (item: api.D
       <td>
         {item.source === "native" && item.nativeVersion !== null && canEdit ? (
           <ActionButton type="button" onClick={() => edit(item)} title="仅当前会话具备权限时可保存修正；并发更新不会被覆盖">
-            编辑
+            <IntelligenceIcon name="edit" size={16}/>编辑
           </ActionButton>
         ) : <ActionButton type="button" disabled title={item.source === "native" ? "仅本人可以修正日报" : "历史迁入日报保持来源只读"}>
           {item.source === "native" ? "仅本人可编辑" : "历史只读"}

@@ -1,11 +1,11 @@
 {
   "kind": "shared_standard",
-  "reason": "修 C41 刷新时重建内容：提示槽位固定，页面草稿与展开态不丢",
-  "authorization": "Mog 2026-11-06 完成最后的动作回执后提交合并推送部署上线",
+  "reason": "采用经桌面实页验收的 36 枚 B 精简版扩展图标及其导航与控件接线",
+  "authorization": "Mog 2026-11-10 确认旗标与台账 01，验收实际页面预览并授权合并部署",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
-    "ICON-B-001": "a08ae3ac746535945174c3e1ed1798975168a4ddd88cc5384a0e24730ef78f7d",
+    "ICON-B-001": "06cfd3a6378454eeafac9af7a442fdfec7c027ef078a983eb222153362dc8d00",
     "C26": "e0e3d1f3088b7cc0e309b92ad77e110e0bf89fbca12830655cfa437f0f721dcd",
     "C17": "05ca31ec53fdc2af0a7ff2e115ccfb290f47d5f4abb00688386ce84c5da01e00",
     "C42": "59267d41aaf2b6adabfe34d78251e68ed269d956c822e080f17003e2449bedb1",

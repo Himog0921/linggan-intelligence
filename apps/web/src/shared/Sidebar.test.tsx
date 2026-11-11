@@ -9,7 +9,7 @@ describe('A壳手动折叠',()=>{
   render(<AppShell active="collection" boundaryLabel="只读" contextBar={{ breadcrumb: "采集", meta: null }}><div className="v7-shell"><Sidebar aria-label="测试导航"><a className="v7-side-nav" href="/collection/tasks?domain=same" aria-current="page" aria-label="采集任务" title="采集任务"><NavIcon name="tasks"/><span>采集任务</span></a></Sidebar><main>现有工作区</main></div></AppShell>);
   const user=userEvent.setup();await user.click(screen.getByRole('button',{name:'折叠侧栏'}));
   const toggle=screen.getByRole('button',{name:'展开侧栏'});expect(toggle).toHaveFocus();expect(toggle).toHaveAttribute('aria-expanded','false');
-  const link=screen.getByRole('link',{name:'采集任务'});expect(link).toHaveAttribute('href','/collection/tasks?domain=same');expect(link).toHaveAttribute('aria-current','page');
+  const link=screen.getByRole('link',{name:'采集任务'});expect(link).toHaveAttribute('href','/collection/tasks?domain=same');expect(link).toHaveAttribute('aria-current','page');expect(link.querySelector('svg')).toHaveAttribute('data-icon','tasks');
   await user.keyboard('{Enter}');expect(screen.getByRole('button',{name:'折叠侧栏'})).toHaveAttribute('aria-expanded','true');
  });
 });
