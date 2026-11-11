@@ -1,4 +1,5 @@
-import { OperationsWorkBadge } from './OperationsCoverage';
+import { TopicProgress } from './TopicProgress';
+import { OperationsCoverage, OperationsWorkBadge } from './OperationsCoverage';
 import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import type { JSX, ReactNode } from "react";
 import { TopicPatterns } from "./TopicPatterns";
@@ -685,6 +686,10 @@ export function createTopicOverview(context: TopicOverviewContext) {
               scope={activeSnapshot.scope}
               headControls={observedPlatforms(selected?.statistics || activeSnapshot.statistics).length > 1 ? plotSelect(selected?.statistics || activeSnapshot.statistics) : null}
             />
+          </div>
+          <div aria-label="主题处理与运营状态">
+            <TopicProgress progress={activeSnapshot.scope.progress} />
+            <OperationsCoverage coverage={(selected?.statistics || activeSnapshot.statistics).operations} />
           </div>
           {known(context.snapshot?.scope?.totalWorkCount) &&
           activeSnapshot.scope.totalWorkCount >

@@ -1,5 +1,3 @@
-import { OperationsCoverage } from './OperationsCoverage';
-import { TopicProgress } from './TopicProgress';
 import { Fragment, type ReactNode } from "react";
 import { btn } from "./topicElements";
 import { number, pct, platformName, readoutNumber } from "./topicModel";
@@ -108,8 +106,6 @@ export function OverviewReadouts({
           </Fragment>
         ))}
       </div>
-      <TopicProgress progress={scope.progress} />
-      <OperationsCoverage coverage={stats.operations} />
       {platforms.length === 0 ? (
         <div className={s.noPlatform}>当前范围暂无可判定的平台表现，已有材料仍可阅读。</div>
       ) : null}

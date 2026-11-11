@@ -23,11 +23,14 @@ cleanup() {
   cleanup_failed=0
   [[ "${proof_container_created:-0}" -eq 0 ]] || docker rm -f "$proof_container" >/dev/null || cleanup_failed=1
   [[ "${proof_volume_created:-0}" -eq 0 ]] || docker volume rm "$proof_volume" >/dev/null || cleanup_failed=1
+  [[ -z "${proof_media_root:-}" ]] || rm -rf -- "$proof_media_root" || cleanup_failed=1
   [[ "$cleanup_failed" -eq 0 ]] || { echo "Topic Map proof cleanup failed" >&2; exit 1; }
   echo "Topic Map isolated container and volume cleanup verified"
   exit "$task_exit"
 }
 trap cleanup EXIT
+proof_media_root="$(mktemp -d "${TMPDIR:-/tmp}/topic-map-media.XXXXXX")"
+export LINGGAN_LOCAL_MEDIA_ROOT="$proof_media_root"
 docker volume create "$proof_volume" >/dev/null
 proof_volume_created=1
 docker run -d --name "$proof_container" --mount "type=volume,source=$proof_volume,target=/var/lib/postgresql/data" --env POSTGRES_DB="$proof_database" --env POSTGRES_USER="$proof_user" --env POSTGRES_PASSWORD="$proof_password" --publish 127.0.0.1::5432 "$postgres_image" >/dev/null

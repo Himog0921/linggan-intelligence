@@ -277,6 +277,12 @@ try {
       .evaluate((node) => node.getBoundingClientRect().height);
     assert.ok(bandHeight < 165,
       "the chart and metrics must fit the approved compact V3 band without a spare explanation row");
+    const statusBounds = await page.getByLabel("主题处理与运营状态")
+      .evaluate((node) => ({ top: node.getBoundingClientRect().top, width: node.getBoundingClientRect().width }));
+    const bandBounds = await page.getByLabel("主题概览与样本表现")
+      .evaluate((node) => ({ bottom: node.getBoundingClientRect().bottom, width: node.getBoundingClientRect().width }));
+    assert.ok(statusBounds.top >= bandBounds.bottom, "processing and operations belong below the compact metrics/chart band");
+    assert.ok(Math.abs(statusBounds.width - bandBounds.width) <= 2, "status spans both metrics and chart columns");
     await page.setViewportSize({ width: 1440, height: 900 });
     await ruleLink.click();
     await page.locator("dialog[open]").waitFor();

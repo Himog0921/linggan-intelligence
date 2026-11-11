@@ -13,6 +13,10 @@ use linggan_intelligence::ai_foundation::{
     topic_research as research,
 };
 use uuid::Uuid;
+#[path = "support/topic_core_fixture.rs"]
+mod core_fixture;
+#[path = "support/content_understanding_fixture.rs"]
+mod l1_setup;
 #[path = "support/research_method_fixture.rs"]
 mod method;
 
@@ -39,7 +43,7 @@ async fn topic_no_signal_completes_without_dispatching_assignment_stages() {
 async fn exercise(variant: &'static str) {
     let db = dossier::fixture::proof_database("topic_execution").await;
     let work = dossier::work(&db).await;
-    dossier::current_image_reading(&db).await;
+    dossier::current_image_reading_with_bytes(&db, Some(core_fixture::bytes())).await;
     let endpoint = wire::Endpoint::variant(false, variant).await;
     let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
         std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap().into(),
@@ -53,7 +57,24 @@ async fn exercise(variant: &'static str) {
     )
     .await
     .unwrap();
-    let configured = setup::prepare_with_actual_probe(&db, &endpoint.url, &owner, &adapter).await;
+    let mut configured =
+        setup::prepare_with_actual_probe(&db, &endpoint.url, &owner, &adapter).await;
+    let l1_config = l1_setup::configure_high(&db, &configured).await;
+    configured.capability = sqlx::query_scalar("SELECT m.capability_ref FROM linggan_ai_task_config t JOIN linggan_model_config m ON m.config_ref=t.model_config_ref WHERE t.task_config_ref=$1").bind(l1_config).fetch_one(db.pool()).await.unwrap();
+    for control in [ControlScope::Global, ControlScope::Executor] {
+        setup::enable(&db, control).await;
+    }
+    core_fixture::prepare(&db, work, &owner).await;
+    let second = if variant == "normal" {
+        let package=dossier::fixture::submit_package(&db,"content_detail",serde_json::json!({"contentExternalId":"second-topic-note"}),serde_json::json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"second-topic-note"},"payload":{"title":"另一合格作品","bodyText":"另一作者的正文。结尾不能丢失🙂","authorId":"another-author"}})).await;
+        let second:Uuid=sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='second-topic-note'").fetch_one(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(second).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+        core_fixture::image(&db, "second-topic-note").await;
+        core_fixture::prepare(&db, second, &owner).await;
+        Some(second)
+    } else {
+        None
+    };
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();
     drop(owner);
@@ -197,9 +218,7 @@ async fn exercise(variant: &'static str) {
     assert_eq!(!graph.topics.is_empty(), variant == "normal");
     if variant == "normal" {
         // Freeze a valid candidate, then withdraw its source between resolution and review.
-        let package=dossier::fixture::submit_package(&db,"content_detail",serde_json::json!({"contentExternalId":"second-topic-note"}),serde_json::json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"second-topic-note"},"payload":{"title":"另一合格作品","bodyText":"另一作者的正文。结尾不能丢失🙂","authorId":"another-author"}})).await;
-        let second:Uuid=sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='second-topic-note'").fetch_one(db.pool()).await.unwrap();
-        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(second).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+        let second = second.unwrap();
         let second_run = research::start(
             &db,
             &research::Start {

@@ -101,7 +101,7 @@ try {
   assert.equal(patterns.items.find(item=>item.kind==='content_type')?.label,'practical_guide');
   assert.deepEqual(patterns.items[0].unitIds,['u1']);assert.ok(patterns.items[0].evidence.length>0);
   await page.keyboard.press('Escape');
-  await page.getByLabel('基础概览指标').getByText(/待归主题\s*0/, {exact:true}).waitFor();
+  await page.getByRole('region',{name:'当前范围处理进度',exact:true}).getByText(/待归主题\s*0/, {exact:true}).waitFor();
   const progress=page.getByRole('region',{name:'当前范围处理进度',exact:true});
   await progress.getByText(/可用\s*1/,{exact:true}).waitFor();
   const operations=page.getByRole('region',{name:'运营发布覆盖',exact:true});
