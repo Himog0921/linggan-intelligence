@@ -3116,7 +3116,7 @@ body.topic-map-page {
 }
 
 :global(#topic-map-root) fieldset.lgi-tm-research-works {
-  max-height: min(45vh, 400px);
+  max-height: 45vh;
   overflow-y: auto;
   gap: var(--lgi-space-2);
 }
