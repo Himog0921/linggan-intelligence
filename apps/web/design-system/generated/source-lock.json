@@ -1,5 +1,5 @@
 {
-  "fingerprint": "ccada1d8088a132fda5dd351de58f0e23834fcc8954fbc51997e5fbd9e0ec193",
+  "fingerprint": "2ca0fbdb32925e2ac6f5eb7c634c849f5eec45fd7661ab48ddbe207e96348fae",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -447,7 +447,7 @@
     },
     {
       "path": "apps/web/src/pages/settings/ModelSettingsPage.tsx",
-      "sha256": "f05dcffffb022e2561b50ccbdc88d9a86111dd0c19eef50650194fa64a1f60cc"
+      "sha256": "6f633f8d3bc1792688a8da46770809162c70f5285fb72a36774b7dbadeb80230"
     },
     {
       "path": "apps/web/src/pages/settings/OffboardingPanel.tsx",

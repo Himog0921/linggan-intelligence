@@ -12,7 +12,7 @@ import { CreativeBudget } from './CreativeBudget';
 import { AiAdvanced, AiCapabilities, AiConnections, AiRuns } from './AiSettingsExperience';
 import { NoticeLine } from './AiSettingsFields';
 import { useAiAction } from './useAiAction';
-import { ApiError, requestJson } from '../../shared/api';
+import { ApiError } from '../../shared/api';
 import { humanMoment } from '../../shared/formatting';
 import legacyStyles from './AiSettings.module.css';
 import styles from './AiSettingsExperience.module.css';
@@ -29,7 +29,6 @@ export function ModelSettingsPage() {
   const requested = query.get('view');
   const view = requested && Object.hasOwn(VIEWS, requested) ? requested as keyof typeof VIEWS : 'capabilities';
   const settings = useQuery({ queryKey: AI_SETTINGS_KEY, queryFn: ({ signal }) => fetchAiSettings(signal), retry: false, refetchOnWindowFocus: false });
-  const session = useQuery({ queryKey: ['auth', 'session'], queryFn: ({ signal }) => requestJson('/api/local/auth/session', { signal }), retry: false });
   const action = useAiAction();
   const data = settings.data;
   const crumb = <ContextBreadcrumb items={legacy
@@ -60,7 +59,7 @@ export function ModelSettingsPage() {
     <div className="v7-shell">
       <SettingsSideNav
         activeId={legacy ? 'ai-settings' : 'ai-' + view}
-        showTeam={(session.data as { member?: { role?: string } } | undefined)?.member?.role === 'admin'}
+        showTeam={false}
         onViewSelect={(next: SettingsViewKey) => setQuery({ view: next })}
       />
       {settingsContent}
