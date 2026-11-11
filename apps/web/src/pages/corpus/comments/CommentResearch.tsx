@@ -3,6 +3,7 @@ import { ApiError, isRecord, requestJson } from '../../../shared/api';
 import { bool, decode, list, num, obj, optObj, optStr, str } from '../../../shared/decode';
 import { c } from './styles';
 import { PHASES, STATES, REASONS } from './researchModel';
+import { CommentAssignments } from '../../topics/CommentAssignments';
 import { preview, type Preview } from './commentResearchApi';
 
 
@@ -15,6 +16,7 @@ export function CommentResearch({ domain, work, source, role, initialRequest }: 
   const [prepared, setPrepared] = useState<Preview | null>(null), [request, setRequest] = useState<string | null>(initialRequest ?? null);
   const [notice, setNotice] = useState(''), [signals, setSignals] = useState<{ proposition: string; evidence: string }[]>([]), [busy, setBusy] = useState(false), [uncertain, setUncertain] = useState(false);
   const [stages, setStages] = useState<{ phase: number; state: string; failure: string | null }[]>([]);
+  const [assignmentRevision, setAssignmentRevision] = useState(0);
   const command = useRef<string | null>(null);
   async function prepare() {
     setBusy(true); setNotice('');
@@ -29,7 +31,7 @@ export function CommentResearch({ domain, work, source, role, initialRequest }: 
   const applyResult = useCallback((response: unknown) => {
       if (response === null) { setNotice('这条评论尚无新研究记录。'); setSignals([]); return; }
       const value = decode(response, row => { const result = optObj(row, 'result'), target = optObj(row, 'target'); return { requestRef: str(row, 'requestRef'), state: str(row, 'state'), semanticState: str(row, 'semanticState'), stages: list(row, 'stages', s => ({ phase: num(s, 'stageNumber'), state: str(s, 'state'), failure: optStr(s, 'failureCode') })), available: bool(row, 'sourceAvailable'), failure: optStr(row, 'failureCode'), outcome: result ? str(result, 'outcome') : null, reason: result ? optStr(result, 'reason') : null, signals: result ? list(result, 'signals', item => { const span = obj(item, 'evidenceSpan'); const start = num(span, 'start'), end = num(span, 'end'); const chars = Array.from(target ? str(target, 'rawText') : ''); if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start || end > chars.length) throw new Error('评论依据范围无效'); return { proposition: str(item, 'proposition'), evidence: chars.slice(start, end).join('') }; }) : [] }; });
-      setRequest(value.requestRef); setStages(value.stages);
+      setRequest(value.requestRef); setStages(value.stages); setAssignmentRevision(old => old + 1);
       if (!value.available) { setSignals([]); setNotice('来源当前不可读取，结果不展示。'); }
       else if (value.semanticState === 'succeeded') { setSignals(value.signals); setNotice(value.outcome === 'needs_context' ? `需要补充语境：${value.reason}` : value.outcome === 'no_signal' ? `未发现可研究信号：${value.reason}` : value.state === 'needs_support' ? '已提取原声，问题候选等待另一独立作者的支持。' : value.state === 'succeeded' ? '研究流程已完成，以下判断均须对应本条评论。' : '原声提取已完成，后续归并仍以阶段回执为准。'); }
       else if (['failed', 'skipped', 'cancelled'].includes(value.state)) setNotice(`研究未完成：${value.failure ? REASONS[value.failure] ?? '请检查运行记录' : '任务已停止'}。`);
@@ -42,5 +44,6 @@ export function CommentResearch({ domain, work, source, role, initialRequest }: 
     {prepared ? <><p>将使用当前作品研究底稿和这条评论；父评论只提供语境。{prepared.parentState === 'parent_required_missing' ? '父评论暂不可用。' : ''}</p><p>图片总数 {prepared.expectedPages ?? '未知'} · 已取得 {prepared.acquiredPages} · 已识读 {prepared.processedPages}；研究仅基于当前可用材料。</p><p>开始后按 AI 设置调用模型，可能产生费用。</p><button type="button" disabled={busy || request !== null} onClick={() => void start()}>{uncertain ? '重试同一请求' : '开始研究'}</button></> : null}
     {request ? <button type="button" disabled={busy} onClick={() => void readResult(`/api/local/comment-research/${encodeURIComponent(request)}`)}>刷新研究状态</button> : <button type="button" disabled={busy || uncertain} onClick={() => void readResult(`/api/local/comment-research/latest?${new URLSearchParams({ domainRef: domain, workRef: work, sourceRef: source })}`)}>查看最近研究</button>}
     {notice ? <p role="status">{notice}</p> : null}<ol>{stages.map(stage => <li key={stage.phase}>{PHASES[stage.phase]}：{STATES[stage.state] ?? stage.state}{stage.failure ? ` · ${REASONS[stage.failure] ?? '请查看 AI 调用记录'}` : ''}</li>)}</ol>{signals.length ? <ul>{signals.map((signal, index) => <li key={index}><p>{signal.proposition}</p><blockquote>{signal.evidence}</blockquote></li>)}</ul> : null}
+    {request && signals.length ? <CommentAssignments domain={domain} work={work} request={request} revision={assignmentRevision} compact /> : null}
   </section>;
 }

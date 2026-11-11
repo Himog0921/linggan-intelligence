@@ -143,13 +143,18 @@ fn valid_fragments(fragments: &[Fragment]) -> bool {
 }
 pub(crate) fn fragment_role(fragment: &Fragment) -> &'static str {
     match fragment.field.as_str() {
-        "title" | "body" | "tags" | "ocr" | "transcript" | "frame_text" => {
-            match fragment.speaker.as_str() {
-                "author" => "author",
-                "other" => "quoted",
-                _ => "unknown",
-            }
-        }
+        "title"
+        | "body"
+        | "tags"
+        | "ocr"
+        | "transcript"
+        | "frame_text"
+        | "core_image_evidence"
+        | "core_text_evidence" => match fragment.speaker.as_str() {
+            "author" => "author",
+            "other" => "quoted",
+            _ => "unknown",
+        },
         "studied_comment" | "unresearched_comment" => "commenter",
         "parent_comment_context" => "context",
         field if field.starts_with("work_context:") => "context",

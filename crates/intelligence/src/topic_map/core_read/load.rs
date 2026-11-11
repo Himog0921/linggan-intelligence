@@ -9,6 +9,7 @@ const RESULTS: &str = r#"
   w.input_refs,w.window_ref AS task_ref,(run.configurations->>0)::uuid AS config_ref
  FROM linggan_topic_research_result r JOIN linggan_topic_research_window w USING(window_ref) JOIN linggan_topic_research_run run USING(run_ref)
  WHERE ($1::uuid IS NULL OR run.domain_ref=$1)
+ AND w.input_refs->>'inputContract' IS DISTINCT FROM 'topic-map.comment-semantic-source.v1'
  ORDER BY run.domain_ref,w.work_ref,w.input_hash,r.created_at DESC,r.result_ref DESC
 "#;
 
@@ -117,9 +118,19 @@ fn restore_row(
     window_counts: &mut HashMap<(Uuid, Uuid, Uuid, usize), usize>,
 ) -> Option<Window> {
     let work: Uuid = row.get("work_public_ref");
-    let source = current_inventory.iter().find(|i| i.work.work_ref == work);
+    let inventory = current_inventory.iter().find(|i| i.work.work_ref == work);
     let wrapper: Value = row.get("input_refs");
     let manifest = wrapper.get("source").unwrap_or(&wrapper).clone();
+    let core_source = if manifest["inputContract"] == topic_map_research::CORE_INPUT_CONTRACT {
+        inventory.and_then(|input| topic_map_research::from_core(input, None))
+    } else {
+        None
+    };
+    let source = if manifest["inputContract"] == topic_map_research::CORE_INPUT_CONTRACT {
+        core_source.as_ref()
+    } else {
+        inventory
+    };
     if !comparison_definitions_current(&manifest, unavailable) {
         return None;
     }

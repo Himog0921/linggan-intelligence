@@ -1,3 +1,5 @@
+mod coverage;
+pub(crate) use coverage::scope_coverage;
 mod deep;
 mod deep_grounding;
 pub(crate) mod generate_deep;
@@ -258,3 +260,50 @@ pub async fn latest(
         json!({"contract":"content-understanding.read.v1","workRef":work,"analysis":result,"materialReadiness":p.coverage["materialReadiness"]}),
     )
 }
+
+/// Qualified saved Core cards, newest first. This does not schedule understanding or L2.
+/// A consumer freezes analysisRef and subsequently selects that same saved Core.
+pub(crate) async fn core_cards_at(
+    db: &Database,
+    domain: Uuid,
+    work: Uuid,
+    cutoff: &str,
+) -> Result<Vec<Value>, FoundationError> {
+    let mut tx = db.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let cards = core_cards_in(&mut tx, domain, work, cutoff).await?;
+    tx.commit().await?;
+    Ok(cards)
+}
+
+pub(crate) async fn core_cards_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    work: Uuid,
+    cutoff: &str,
+) -> Result<Vec<Value>, FoundationError> {
+    let rows = sqlx::query("SELECT result->'card' AS card,material_snapshot_identity FROM linggan_content_understanding_result WHERE work_ref=$1 AND method_version=$2 AND result IS NOT NULL AND created_at<=$3::timestamptz ORDER BY created_at DESC,request_ref DESC")
+        .bind(work).bind(METHOD).bind(cutoff).fetch_all(&mut **tx).await?;
+    if rows.is_empty() {
+        return Ok(vec![]);
+    }
+    let packet = match source::load(tx, domain, work, cutoff).await {
+        Ok(packet) => packet,
+        Err(FoundationError::NotFound) => return Ok(vec![]),
+        Err(error) => return Err(error),
+    };
+    Ok(rows
+        .into_iter()
+        .filter(|row| {
+            row.get::<String, _>("material_snapshot_identity")
+                == packet.snapshot.material_snapshot_identity
+        })
+        .map(|row| row.get("card"))
+        .collect())
+}
+
+#[cfg(test)]
+#[path = "content_understanding/topic_tests.rs"]
+mod topic_tests;

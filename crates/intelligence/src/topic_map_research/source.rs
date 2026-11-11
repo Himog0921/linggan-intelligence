@@ -14,7 +14,7 @@ pub(crate) async fn load_inputs_for_works(
     config: Uuid,
     works: &[Uuid],
 ) -> Result<Vec<ResearchInput>, ResearchError> {
-    load_scoped_inputs(db, domain, config, Some(works), None).await
+    load_scoped_inputs(db, domain, config, Some(works), None, false).await
 }
 
 pub(crate) async fn load_inputs_for_works_at(
@@ -24,13 +24,15 @@ pub(crate) async fn load_inputs_for_works_at(
     works: &[Uuid],
     as_of: &str,
 ) -> Result<Vec<ResearchInput>, ResearchError> {
-    load_scoped_inputs(db, domain, config, Some(works), Some(as_of)).await
+    load_scoped_inputs(db, domain, config, Some(works), Some(as_of), false).await
 }
 
 /// Every frozen block must bind the same explicit observation cutoff.
 pub(crate) fn manifest_as_of(manifest: &Value) -> Option<&str> {
     let manifest = manifest.get("source").unwrap_or(manifest);
-    if manifest["inputContract"] != INPUT_CONTRACT {
+    if manifest["inputContract"] != INPUT_CONTRACT
+        && manifest["inputContract"] != super::CORE_INPUT_CONTRACT
+    {
         return None;
     }
     let as_of = manifest["coverage"]["asOf"]
@@ -74,11 +76,46 @@ async fn load_scoped_inputs(
     config: Uuid,
     work_refs: Option<&[Uuid]>,
     as_of: Option<&str>,
+    core_mode: bool,
 ) -> Result<Vec<ResearchInput>, ResearchError> {
-    let data = load_material_scope(db, domain, work_refs, as_of).await?;
-    let rows=sqlx::query("SELECT t.topic_ref,d.definition_ref,d.version,d.display_name,d.definition_text FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_map_binding WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true WHERE b.domain_ref=$1 ORDER BY t.topic_ref").bind(domain).fetch_all(db.pool()).await?;
+    let mut tx = db.pool().begin().await?;
+    let result =
+        load_scoped_inputs_in(&mut tx, domain, config, work_refs, as_of, core_mode).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub(crate) async fn load_inputs_for_works_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Uuid,
+    config: Uuid,
+    works: &[Uuid],
+) -> Result<Vec<ResearchInput>, ResearchError> {
+    load_scoped_inputs_in(tx, domain, config, Some(works), None, false).await
+}
+
+pub(crate) async fn load_inputs_for_works_at_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Uuid,
+    config: Uuid,
+    works: &[Uuid],
+    as_of: &str,
+) -> Result<Vec<ResearchInput>, ResearchError> {
+    load_scoped_inputs_in(tx, domain, config, Some(works), Some(as_of), false).await
+}
+
+async fn load_scoped_inputs_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Uuid,
+    config: Uuid,
+    work_refs: Option<&[Uuid]>,
+    as_of: Option<&str>,
+    core_mode: bool,
+) -> Result<Vec<ResearchInput>, ResearchError> {
+    let data = load_material_scope_in(tx, domain, work_refs, as_of).await?;
+    let rows=sqlx::query("SELECT t.topic_ref,d.definition_ref,d.version,d.display_name,d.definition_text FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_map_binding WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true WHERE b.domain_ref=$1 ORDER BY t.topic_ref").bind(domain).fetch_all(&mut **tx).await?;
     let topics=Value::Array(rows.iter().map(|r|json!({"topicRef":r.get::<Uuid,_>("topic_ref"),"definitionRef":r.get::<Uuid,_>("definition_ref"),"version":r.get::<i32,_>("version"),"label":r.get::<String,_>("display_name"),"definition":r.get::<String,_>("definition_text")})).collect());
-    let own_rows=sqlx::query("SELECT platform,author_external_id FROM(SELECT DISTINCT ON(platform,author_external_id)*FROM linggan_topic_map_own_creator WHERE domain_ref=$1 AND created_at<=$2::timestamptz ORDER BY platform,author_external_id,created_at DESC,membership_ref DESC)current WHERE active").bind(domain).bind(&data.as_of).fetch_all(db.pool()).await?;
+    let own_rows=sqlx::query("SELECT platform,author_external_id FROM(SELECT DISTINCT ON(platform,author_external_id)*FROM linggan_topic_map_own_creator WHERE domain_ref=$1 AND created_at<=$2::timestamptz ORDER BY platform,author_external_id,created_at DESC,membership_ref DESC)current WHERE active").bind(domain).bind(&data.as_of).fetch_all(&mut **tx).await?;
     let own: BTreeSet<(String, String)> = own_rows
         .iter()
         .map(|r| (r.get("platform"), r.get("author_external_id")))
@@ -97,8 +134,8 @@ async fn load_scoped_inputs(
             }
         })
         .collect();
-    let sources = crate::comment_study_source::eligible_sources_for_topic_research(
-        db,
+    let sources = crate::comment_study_source::eligible_sources_for_topic_research_in_transaction(
+        tx,
         domain,
         &data.as_of,
         &selections,
@@ -108,7 +145,7 @@ async fn load_scoped_inputs(
         crate::comment_study_source::StudySourceError::Database(e) => ResearchError::Database(e),
         _ => ResearchError::Invalid("comment_source_unavailable"),
     })?;
-    let (comment_ids, signals) = comment_lineage(db, domain, &sources, &data.as_of).await?;
+    let (comment_ids, signals) = comment_lineage_in(tx, domain, &sources, &data.as_of).await?;
     let mut comments_by_work =
         BTreeMap::<Uuid, Vec<crate::comment_study_source::StudySource>>::new();
     for source in sources {
@@ -118,8 +155,13 @@ async fn load_scoped_inputs(
             .push(source);
     }
     let breakouts: BTreeMap<Uuid, bool> = sqlx::query("SELECT DISTINCT ON(work_public_ref) work_public_ref,marked FROM linggan_topic_map_breakout WHERE domain_ref=$1 AND created_at<=$2::timestamptz ORDER BY work_public_ref,created_at DESC,marking_ref DESC")
-        .bind(domain).bind(&data.as_of).fetch_all(db.pool()).await?.into_iter()
+        .bind(domain).bind(&data.as_of).fetch_all(&mut **tx).await?.into_iter()
         .map(|r| (r.get("work_public_ref"), r.get("marked"))).collect();
+    // Old requests do not need L1 source reconstruction. Load Core only for works
+    // that already have a frozen Core-backed topic window in this bounded scope.
+    let refs: Vec<Uuid> = data.works.iter().map(|work| work.work_ref).collect();
+    let core_works: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT w.work_ref FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) WHERE r.domain_ref=$1 AND w.work_ref=ANY($2) AND w.input_refs->>'inputContract'=$3")
+        .bind(domain).bind(&refs).bind(super::CORE_INPUT_CONTRACT).fetch_all(&mut **tx).await?;
     let mut inputs = Vec::new();
     for mut work in data.works {
         work.usage_roles.sort();
@@ -132,7 +174,10 @@ async fn load_scoped_inputs(
         )?;
         let mut fragments = work.fragments.clone();
         fragments.extend(comment_fragments);
-        if !fragments.iter().any(is_research_evidence) {
+        if !core_mode
+            && !core_works.contains(&work.work_ref)
+            && !fragments.iter().any(is_research_evidence)
+        {
             continue;
         }
         let role_metadata = json!({
@@ -169,29 +214,84 @@ async fn load_scoped_inputs(
         input.hash = input_identity(&input);
         inputs.push(input);
     }
+    attach_cores_in(tx, domain, &mut inputs, &core_works, &data.as_of).await?;
     Ok(inputs)
 }
 
-async fn load_material_scope(
+async fn attach_cores(
     db: &Database,
+    domain: Uuid,
+    inputs: &mut [ResearchInput],
+    works: &[Uuid],
+    cutoff: &str,
+) -> Result<(), ResearchError> {
+    let mut tx = db.pool().begin().await?;
+    attach_cores_in(&mut tx, domain, inputs, works, cutoff).await?;
+    tx.commit().await?;
+    Ok(())
+}
+async fn attach_cores_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Uuid,
+    inputs: &mut [ResearchInput],
+    works: &[Uuid],
+    cutoff: &str,
+) -> Result<(), ResearchError> {
+    for input in inputs
+        .iter_mut()
+        .filter(|i| works.contains(&i.work.work_ref))
+    {
+        let cards = crate::ai_foundation::content_understanding::core_cards_in(
+            tx,
+            domain,
+            input.work.work_ref,
+            cutoff,
+        )
+        .await
+        .map_err(|e| match e {
+            crate::ai_foundation::store::FoundationError::Database(e) => ResearchError::Database(e),
+            _ => ResearchError::Invalid("core_source_unavailable"),
+        })?;
+        input.coverage["availableCores"] = json!(cards);
+    }
+    Ok(())
+}
+
+pub(crate) async fn load_core_inputs_for_works_at(
+    db: &Database,
+    domain: Uuid,
+    config: Uuid,
+    works: &[Uuid],
+    cutoff: &str,
+    expected_core: Option<Uuid>,
+) -> Result<Vec<ResearchInput>, ResearchError> {
+    let mut inputs =
+        load_scoped_inputs(db, domain, config, Some(works), Some(cutoff), true).await?;
+    let missing: Vec<_> = inputs
+        .iter()
+        .filter(|i| i.coverage.get("availableCores").is_none())
+        .map(|i| i.work.work_ref)
+        .collect();
+    attach_cores(db, domain, &mut inputs, &missing, cutoff).await?;
+    Ok(inputs
+        .into_iter()
+        .filter_map(|input| super::from_core(&input, expected_core))
+        .collect())
+}
+
+async fn load_material_scope_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     domain: Uuid,
     work_refs: Option<&[Uuid]>,
     as_of: Option<&str>,
 ) -> Result<creator_discovery::DiscoveryData, ResearchError> {
-    match (work_refs, as_of) {
-        (Some(works), Some(as_of)) => {
-            creator_discovery::load_topic_materials_for_works_at(db, domain, works, as_of).await
-        }
-        (Some(works), None) => {
-            creator_discovery::load_topic_materials_for_works(db, domain, works).await
-        }
-        (None, None) => creator_discovery::load_topic_materials(db, domain).await,
-        (None, Some(_)) => return Err(ResearchError::Invalid("frozen_scope_required")),
-    }
-    .map_err(|error| match error {
-        creator_discovery::DiscoveryError::Database(error) => ResearchError::Database(error),
-        _ => ResearchError::Invalid("source_unavailable"),
-    })
+    let works = work_refs.ok_or(ResearchError::Invalid("frozen_scope_required"))?;
+    creator_discovery::load_topic_materials_for_works_at_in(tx, domain, works, as_of)
+        .await
+        .map_err(|error| match error {
+            creator_discovery::DiscoveryError::Database(error) => ResearchError::Database(error),
+            _ => ResearchError::Invalid("source_unavailable"),
+        })
 }
 
 #[derive(Clone)]
@@ -203,8 +303,8 @@ struct CommentIdentity {
 type CommentIds = BTreeMap<Uuid, CommentIdentity>;
 type StudySignals = BTreeMap<(Uuid, String), Vec<Value>>;
 
-async fn comment_lineage(
-    db: &Database,
+async fn comment_lineage_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     domain: Uuid,
     sources: &[crate::comment_study_source::StudySource],
     as_of: &str,
@@ -219,7 +319,7 @@ async fn comment_lineage(
     let mut ids = BTreeMap::new();
     for refs in refs.chunks(500) {
         let rows = sqlx::query("SELECT material_ref,content_public_ref,comment_external_id,author_external_id FROM linggan_material_comment WHERE material_ref=ANY($1)")
-            .bind(refs).fetch_all(db.pool()).await?;
+            .bind(refs).fetch_all(&mut **tx).await?;
         for row in rows {
             ids.insert(
                 row.get("material_ref"),
@@ -238,12 +338,11 @@ async fn comment_lineage(
             .bind(domain)
             .bind(sources)
             .bind(as_of)
-            .fetch_all(db.pool())
+            .fetch_all(&mut **tx)
             .await?;
-        let mut tx = db.pool().begin().await?;
         for row in rows {
             let request: Uuid = row.get("request_ref");
-            match crate::ai_foundation::comment_research::frozen_in(&mut tx, request).await {
+            match crate::ai_foundation::comment_research::frozen_in(tx, request).await {
                 Ok(_) => {}
                 Err(crate::ai_foundation::store::FoundationError::AdmissionDenied(_)) => continue,
                 Err(crate::ai_foundation::store::FoundationError::Database(e)) => {
@@ -261,7 +360,6 @@ async fn comment_lineage(
                 signals.entry((row.get("content_public_ref"),row.get("comment_external_id"))).or_default().push(json!({"signalRef":format!("{request}:{ordinal}"),"requestRef":request,"signalOrdinal":ordinal,"kind":signal["kind"],"proposition":signal["proposition"]}));
             }
         }
-        tx.commit().await?;
     }
     Ok((ids, signals))
 }

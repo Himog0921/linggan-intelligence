@@ -306,3 +306,5 @@
   .figure { align-items: flex-start; flex-wrap: wrap; gap: var(--lgi-space-1); }
   .compactPanel { margin-top: var(--lgi-space-3); }
 }
+
+.progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--lgi-space-4); padding-block: var(--lgi-space-4); border-top: 1px solid var(--lgi-hairline); margin-top: var(--lgi-space-4); }

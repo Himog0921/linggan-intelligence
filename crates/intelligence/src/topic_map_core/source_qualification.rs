@@ -35,8 +35,26 @@ pub(crate) async fn qualify_definitions_and_inputs(
     domain: Option<Uuid>,
     additional_scopes: &FrozenScopes,
 ) -> Result<(HashSet<Uuid>, QualifiedInputs), ModelError> {
+    let mut tx = db.pool().begin().await?;
+    let result = qualify_definitions_and_inputs_in(&mut tx, domain, additional_scopes).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn unavailable_definitions_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Option<Uuid>,
+) -> Result<HashSet<Uuid>, ModelError> {
+    qualify_definitions_and_inputs_in(tx, domain, &HashMap::new())
+        .await
+        .map(|(u, _)| u)
+}
+async fn qualify_definitions_and_inputs_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Option<Uuid>,
+    additional_scopes: &FrozenScopes,
+) -> Result<(HashSet<Uuid>, QualifiedInputs), ModelError> {
     let rows = sqlx::query("SELECT rule.definition_ref,rule.domain_ref,task.work_ref AS work_public_ref,(run.configurations->>0)::uuid AS config_ref,task.input_refs AS request_manifest,jsonb_build_object('core',result.core_json,'dispatch',dispatch.context) AS definition_context FROM linggan_topic_map_concept_rule rule LEFT JOIN linggan_topic_research_result result ON result.invocation_ref=rule.invocation_ref LEFT JOIN linggan_topic_research_dispatch dispatch ON dispatch.invocation_ref=result.invocation_ref LEFT JOIN linggan_topic_research_window task USING(window_ref) LEFT JOIN linggan_topic_research_run run USING(run_ref) WHERE ($1::uuid IS NULL OR rule.domain_ref=$1)")
-        .bind(domain).fetch_all(db.pool()).await?;
+        .bind(domain).fetch_all(&mut **tx).await?;
     let mut scopes = additional_scopes.clone();
     for row in &rows {
         let (Some(config), Some(work), Some(manifest)) = (
@@ -60,7 +78,7 @@ pub(crate) async fn qualify_definitions_and_inputs(
     for ((domain, config, as_of), scope) in scopes {
         let scope: Vec<_> = scope.into_iter().collect();
         let loaded =
-            topic_map_research::load_inputs_for_works_at(db, domain, config, &scope, &as_of)
+            topic_map_research::load_inputs_for_works_at_in(tx, domain, config, &scope, &as_of)
                 .await
                 .map_err(source_error)?;
         frozen.insert((domain, config, as_of), loaded);
@@ -77,12 +95,12 @@ pub(crate) async fn qualify_definitions_and_inputs(
     let mut current = HashMap::new();
     for ((domain, config), scope) in current_scopes {
         let scope: Vec<_> = scope.into_iter().collect();
-        let loaded = topic_map_research::load_inputs_for_works(db, domain, config, &scope)
+        let loaded = topic_map_research::load_inputs_for_works_in(tx, domain, config, &scope)
             .await
             .map_err(source_error)?;
         current.insert((domain, config), loaded);
     }
-    let mut unavailable = legacy_unverifiable_definitions(db, domain).await?;
+    let mut unavailable = legacy_unverifiable_definitions_in(tx, domain).await?;
     let mut dependencies = HashMap::new();
     for row in rows {
         let domain: Uuid = row.get("domain_ref");
@@ -116,8 +134,8 @@ fn source_error(error: topic_map_research::ResearchError) -> ModelError {
     }
 }
 
-async fn legacy_unverifiable_definitions(
-    db: &Database,
+async fn legacy_unverifiable_definitions_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     domain: Option<Uuid>,
 ) -> Result<HashSet<Uuid>, ModelError> {
     // Before concept rules, machine proposals had no creation-invocation link.
@@ -126,7 +144,7 @@ async fn legacy_unverifiable_definitions(
         "SELECT definition.definition_ref FROM linggan_topic_definition definition JOIN linggan_topic_classification_run classification USING(definition_ref) LEFT JOIN LATERAL(SELECT domain_ref FROM linggan_topic_map_binding WHERE topic_ref=definition.topic_ref ORDER BY version DESC LIMIT 1)binding ON true WHERE classification.run_kind='machine_proposed' AND ($1::uuid IS NULL OR binding.domain_ref=$1) AND NOT EXISTS(SELECT 1 FROM linggan_topic_map_concept_rule rule WHERE rule.definition_ref=definition.definition_ref)",
     )
     .bind(domain)
-    .fetch_all(db.pool())
+    .fetch_all(&mut **tx)
     .await?;
     Ok(rows.into_iter().collect())
 }

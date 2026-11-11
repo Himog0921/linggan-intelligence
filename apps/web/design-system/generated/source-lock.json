@@ -1,5 +1,5 @@
 {
-  "fingerprint": "be06916b18bddba812e9deee2d3edb683fa3d2c4cd7e55bb9a9912da57c0cc53",
+  "fingerprint": "2de02f54581708013736aa41bb17e398cf6ab9350debfee2d53bdf3ac9271828",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -435,11 +435,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/Topics.module.css",
-      "sha256": "fbcf04199fc47f84e6afeec38fd1917f038619ad893054b922fe10fea080253e"
+      "sha256": "da55979c8ae623a790190cc20bf78c3ab0f0feb7a7f66a0d1f27030d69d5cd51"
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
-      "sha256": "a7b942985ea2371acd2fc84a0eb86838da989c4e8f41c33e58481e38f49386df"
+      "sha256": "f01d4e90d705417456cb628a431a2bcc393b5c49158d12ae035edbcaf719ee25"
     },
     {
       "path": "apps/web/src/pages/topics/WorkspacePage.tsx",
@@ -447,11 +447,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
-      "sha256": "58cd86542a513be277cdd4910a689520632ac6961b6e5ad1db40317b56beaa3f"
+      "sha256": "87a12ece82909cd18f15161151fadffa47d79cb4a8495e6e6de00696f5ec5ed1"
     },
     {
       "path": "apps/web/src/pages/topics/topicOverview.tsx",
-      "sha256": "89aca1454526165f0206fb7fa8ecf9bc8e9ba0e314df96ca5f82d94bf2312f6f"
+      "sha256": "0e38a673d2dfdf53f11b0de75b8d5d9f5020e40a929312140da71a11157d6e69"
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.module.css",
@@ -463,7 +463,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/MaterialDesk.tsx",
-      "sha256": "cffc22c54d5fc01c253a00c61a4f3a7fc5193610c85916565b9badacf8ccda6c"
+      "sha256": "badaf03efa72b6a939878a20806678e44b088ffab1e1a197a1df0692a9e07452"
     },
     {
       "path": "apps/web/src/pages/workbench/TopicLibrary.tsx",
@@ -475,7 +475,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "bc69dca526278abaa8b7ec6407898b45b5318865741c105fcf56d1e29e3088a9"
+      "sha256": "c2638d21bb2862b590b6da464b667f76338a1986b4b53eaaa7d5c160e7aae0b4"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",

@@ -56,35 +56,42 @@ pub async fn read_saved_alternative(
     domain: Uuid,
     alternative: Uuid,
 ) -> Result<TopicMapSavedAlternative, TopicMapError> {
-    // The shared definition-source reader acquires pooled canonical inputs; run
-    // it before this transaction so a one-connection pool remains supported.
-    let unavailable = crate::topic_map_core::unavailable_definitions(db, Some(domain))
-        .await
-        .map_err(|e| TopicMapError::Source(e.to_string()))?;
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
+    let result = read_saved_alternative_in(&mut tx, domain, alternative).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(crate) async fn read_saved_alternative_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Uuid,
+    alternative: Uuid,
+) -> Result<TopicMapSavedAlternative, TopicMapError> {
+    let unavailable = crate::topic_map_core::unavailable_definitions_in(tx, Some(domain))
+        .await
+        .map_err(|e| TopicMapError::Source(e.to_string()))?;
     let row = sqlx::query(
         "SELECT * FROM linggan_topic_map_alternative WHERE alternative_ref=$1 AND domain_ref=$2",
     )
     .bind(alternative)
     .bind(domain)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?
     .ok_or(TopicMapError::NotFound)?;
     let research_manifest: Value = row.get("research_manifest");
-    let source_manifests:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('workRef',work_public_ref,'sourceManifest',source_manifest) FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=$1 ORDER BY work_public_ref").bind(alternative).fetch_all(&mut *tx).await?;
+    let source_manifests:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('workRef',work_public_ref,'sourceManifest',source_manifest) FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=$1 ORDER BY work_public_ref").bind(alternative).fetch_all(&mut **tx).await?;
     let (manifests, refs) = source_manifests_for_read(&research_manifest, &source_manifests);
     let domain_active: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1 AND status='active')",
     )
     .bind(domain)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     let mut available = domain_active && !manifests.is_empty() && refs.len() <= 10;
     available &= definitions::available(
-        &mut tx,
+        tx,
         domain,
         row.get("definition_ref"),
         &research_manifest,
@@ -93,12 +100,12 @@ pub async fn read_saved_alternative(
     .await?;
     let mut version_changed = false;
     for work in &refs {
-        let (qualified, changed) = qualify_work(&mut tx, domain, *work, &source_manifests).await?;
+        let (qualified, changed) = qualify_work(tx, domain, *work, &source_manifests).await?;
         available &= qualified;
         version_changed |= changed;
     }
     let fragments = if available {
-        sources::restore_saved_fragments(&mut tx, domain, &manifests, &research_manifest).await?
+        sources::restore_saved_fragments(tx, domain, &manifests, &research_manifest).await?
     } else {
         None
     };
@@ -106,7 +113,7 @@ pub async fn read_saved_alternative(
     let fragments = fragments.unwrap_or_default();
     let definition_ref: Option<Uuid> = row.get("definition_ref");
     let original_definition: Option<Value> = if available && definition_ref.is_some() {
-        sqlx::query_scalar("SELECT jsonb_build_object('definitionRef',definition_ref,'version',version,'displayName',display_name,'definitionText',definition_text) FROM linggan_topic_definition WHERE definition_ref=$1").bind(definition_ref).fetch_optional(&mut *tx).await?
+        sqlx::query_scalar("SELECT jsonb_build_object('definitionRef',definition_ref,'version',version,'displayName',display_name,'definitionText',definition_text) FROM linggan_topic_definition WHERE definition_ref=$1").bind(definition_ref).fetch_optional(&mut **tx).await?
     } else {
         None
     };
@@ -133,7 +140,6 @@ pub async fn read_saved_alternative(
         source_manifests,
         fragments,
     };
-    tx.commit().await?;
     Ok(result)
 }
 

@@ -46,7 +46,7 @@ impl<'a> EvidenceTable<'a> {
         let id = format!("e{}", self.entries.len());
         self.entries
             .push(json!({"evidenceId":id,"fragmentId":f.fragment_id,"blockRef":f.fragment_id.strip_suffix(".context").unwrap_or(&f.fragment_id),
-            "field":f.field,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,"unitRef":f.unit_ref,"speaker":f.speaker,"issues":f.issues,"start":citation.start,"end":citation.end,"text":text,
+            "field":f.field,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,"unitRef":f.unit_ref,"speaker":f.speaker,"issues":f.issues,"start":citation.start,"end":citation.end,"text":text,"sourceContent":source_identity(f),
             "contextOnly":f.field=="parent_comment_context" || f.field.starts_with("work_context:")}));
         self.ids.insert(key, id.clone());
         Ok(id)
@@ -63,4 +63,26 @@ pub(super) fn outcome_context(fragments: &[Fragment]) -> Value {
         "field":f.field,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"readingRef":f.reading_ref,"unitRef":f.unit_ref,"content":f.model_content(),"speaker":f.speaker,"issues":f.issues,"contextOnly":true}))
             .collect::<Vec<_>>()
     )
+}
+
+// Identity and reading provenance only: adjacent source text must not complete a quoted claim.
+fn source_identity(fragment: &Fragment) -> Value {
+    let mut anchor = serde_json::Map::new();
+    for field in [
+        "id",
+        "inputCitationId",
+        "sourceRef",
+        "sourceVersion",
+        "sourceKind",
+        "anchorKind",
+        "blobSha256",
+        "speakerRole",
+        "verification",
+    ] {
+        if let Some(value) = fragment.structure["anchor"].get(field) {
+            anchor.insert(field.to_owned(), value.clone());
+        }
+    }
+    json!({"kind":fragment.structure.get("kind"),"coreRef":fragment.structure.get("coreRef"),
+        "evidenceRef":fragment.structure.get("evidenceRef"),"anchor":anchor})
 }

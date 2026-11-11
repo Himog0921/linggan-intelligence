@@ -106,9 +106,6 @@ pub const RELATIONS: [&str; 6] = [
 
 fn candidate_versions(topics: &Value) -> Result<HashMap<Uuid, Uuid>, &'static str> {
     let values = topics.as_array().ok_or("resolution_candidates_not_array")?;
-    if values.len() > 64 {
-        return Err("resolution_candidate_count_exceeded");
-    }
     let mut candidates = HashMap::new();
     for candidate in values {
         let topic = candidate["topicRef"]
@@ -162,9 +159,6 @@ pub fn validate_resolution(
         }
         if decision.matches.len() > 4 {
             return Err("resolution_match_count_exceeded");
-        }
-        if decision.relations.len() > 64 {
-            return Err("resolution_relation_count_exceeded");
         }
         let matches = validate_matches(decision, &candidates)?;
         let relations = validate_relations(decision, &candidates, &matches)?;
@@ -261,9 +255,6 @@ fn validate_status(
                 .proposed_topic
                 .as_ref()
                 .ok_or("missing_proposed_topic")?;
-            if relations.len() != candidates.len() {
-                return Err("new_topic_candidate_coverage_missing");
-            }
             if relations.values().any(|r| *r == "equivalent") {
                 return Err("new_topic_equivalent_requires_match");
             }

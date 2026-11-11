@@ -31,6 +31,15 @@ pub(crate) async fn load(
         .await?
         .remove(&work)
         .ok_or(FoundationError::NotFound)?;
+    from_dossier(d, cutoff)
+}
+
+/// The same material identity for single-work starts and bounded scope qualification.
+pub(super) fn from_dossier(
+    d: linggan_evidence::research_dossier::ResearchDossier,
+    cutoff: &str,
+) -> Result<Packet, FoundationError> {
+    let work = d.work_ref;
     let texts: Vec<_> = d
         .fragments
         .iter()

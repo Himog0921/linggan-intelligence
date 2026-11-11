@@ -386,3 +386,15 @@ test('current OCR runner selects every declared current execution test without l
  assert.doesNotMatch(runner,/--test ocr_quality_audit|manual-adoption/);
  assert.match(readFileSync(join(root,'.github/workflows/ocr-recognition.yml'),'utf8'),/test-ocr-recognition-postgres\.sh --browser/);
 });
+
+test('topic automation and Core consumption run topic and AI checks', () => {
+  for (const path of [
+    'database/migrations/0200_topic_research_automation.sql',
+    'crates/intelligence/src/topic_map_research/core_source.rs',
+    'crates/intelligence/src/ai_foundation/topic_research_automation/producer.rs',
+    'crates/intelligence/src/ai_foundation/executor/topic_resolution_order.sql',
+  ]) {
+    const result = selected([path]);
+    for (const suite of ['ai', 'topic']) assert.ok(result.includes(suite), `${path}: ${suite}`);
+  }
+});

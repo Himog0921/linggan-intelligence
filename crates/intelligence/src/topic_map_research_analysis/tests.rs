@@ -320,12 +320,12 @@ fn low_frequency_and_multiple_memberships_are_preserved_without_count_gate() {
 }
 
 #[test]
-fn new_topic_needs_explicit_boundaries_and_comparison_to_every_candidate() {
+fn new_topic_needs_explicit_boundaries_without_unrelated_relation_rows() {
     let (units, topics, mut o) = resolution_case();
     let matched = o.decisions[0].matches.pop().unwrap();
     o.decisions[0].status = "new".into();
     o.decisions[0].proposed_topic = Some(new_proposal());
-    assert!(validate_resolution(&o, &units, &topics).is_err());
+    assert!(validate_resolution(&o, &units, &topics).is_ok());
     o.decisions[0].relations.push(TopicRelation {
         topic_ref: matched.topic_ref,
         definition_ref: matched.definition_ref,
@@ -520,3 +520,34 @@ fn journey_missing_basis_is_distinct_from_an_invalid_source_and_unknown_remains_
 }
 
 mod output_validation;
+
+#[test]
+fn complete_catalog_over_sixty_four_keeps_identity_checks_without_output_expansion() {
+    let (units, mut topics, mut output) = resolution_case();
+    let template = topics[0].clone();
+    for _ in 0..70 {
+        let mut candidate = template.clone();
+        candidate["topicRef"] = json!(Uuid::new_v4());
+        candidate["definitionRef"] = json!(Uuid::new_v4());
+        topics.as_array_mut().unwrap().push(candidate);
+    }
+    assert!(validate_resolution(&output, &units, &topics).is_ok());
+    output.decisions[0].matches.clear();
+    output.decisions[0].status = "new".into();
+    output.decisions[0].proposed_topic = Some(new_proposal());
+    assert!(validate_resolution(&output, &units, &topics).is_ok());
+    for candidate in topics.as_array().unwrap() {
+        output.decisions[0].relations.push(TopicRelation {
+            topic_ref: serde_json::from_value(candidate["topicRef"].clone()).unwrap(),
+            definition_ref: serde_json::from_value(candidate["definitionRef"].clone()).unwrap(),
+            relation: "distinct".into(),
+            reason: "不同概念边界".into(),
+        });
+    }
+    assert!(validate_resolution(&output, &units, &topics).is_ok());
+    assert!(
+        resolution_schema()["properties"]["decisions"]["items"]["properties"]["relations"]
+            .get("maxItems")
+            .is_none()
+    );
+}

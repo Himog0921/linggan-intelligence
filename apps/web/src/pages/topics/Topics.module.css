@@ -3114,3 +3114,13 @@ body.topic-map-page {
     gap: var(--lgi-space-3);
   }
 }
+
+:global(#topic-map-root) fieldset.lgi-tm-research-works {
+  max-height: 45vh;
+  overflow-y: auto;
+  gap: var(--lgi-space-2);
+}
+:global(#topic-map-root) .lgi-tm-research-works .lgi-tm-check-label {
+  margin: 0;
+  min-height: var(--lgi-space-8);
+}

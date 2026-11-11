@@ -1,4 +1,5 @@
-import { TopicResearchFlow } from './TopicResearchFlow';
+import { CommentAssignments } from './CommentAssignments';
+import { TopicResearchFlow, type ResearchRequestState } from './TopicResearchFlow';
 import { TopicButton } from "./TopicButton";
 import type { JSX } from "react";
 import { attributes } from "./elementProps";
@@ -43,6 +44,9 @@ import type * as T from "./types";
 
 /** Read-only dialog projection inputs; commands stay in the controller. */
 export interface TopicDialogsContext {
+  readonly researchProgress: T.TopicProgress | undefined;
+  readonly researchRequest: (domain: string) => ResearchRequestState;
+  readonly onResearchCompleted: () => void;
   readonly requireDialog: () => T.DialogState;
   readonly requireSnapshot: () => T.Snapshot;
   readonly matchesWork: (w: T.Work, queryText?: string) => boolean;
@@ -452,11 +456,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
                   <article className={cls("lgi-tm-comment")}>
                     <blockquote>{esc(c.body || "正文未知")}</blockquote>
                     <p>
-                      {[
-                        esc("评论作者身份已隐去"),
-                        " · ",
-                        esc(c.sourceRef || ""),
-                      ].join("")}
+                      评论作者身份已隐去
                     </p>
                     {c.parentText ? (
                       <>
@@ -479,6 +479,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
             ? btn("读取下一页已有评论", "comments-more")
             : ""}
         </section>
+        <CommentAssignments domain={reader.domainRef || context.state.domainRef} work={w.workRef} />
       </>
     );
   }
@@ -1502,11 +1503,6 @@ export function createTopicDialogs(context: TopicDialogsContext) {
     );
     return (
       <>
-        <p>
-          {
-            "人工备选与历史研究说明保留引用版本，默认不跟踪。运营选题池尚未接通；可复核来源并导出交接，保存不代表已采纳或发布。"
-          }
-        </p>
         <form data-form={"saved-search"} className={cls("lgi-tm-row")}>
           <input
             name={"query"}
@@ -1611,7 +1607,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
           <>
             <p className={cls("lgi-tm-analysis-note")}>
               {
-                "人工提出 · 待归方向。保存不改变作品归属，不依赖模型研究；这里保留交接材料，尚未进入运营选题池。"
+                "人工提出 · 待归方向。保存不改变作品归属，不依赖模型研究。"
               }
             </p>
           </>
@@ -1847,6 +1843,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
             <h3>{esc(a.title)}</h3>
             <p>{esc(a.methodVersion)}</p>
           </div>
+          {a.kind === "angle" ? btn("加入选题池", "handoff-alternative", a.alternativeRef) : null}
           {btn(
             "复核来源并导出Markdown",
             "export-alternative",
@@ -2043,7 +2040,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
     );
   }
   function researchDialog() {
-    return <TopicResearchFlow domain={context.state.domainRef} works={context.selectedWorks().map(work => ({ workRef: work.workRef, title: work.title }))} />;
+    return <TopicResearchFlow progress={context.researchProgress} requestState={context.researchRequest(context.state.domainRef)} onCompleted={context.onResearchCompleted} domain={context.state.domainRef} works={context.selectedWorks().map(work => ({ workRef: work.workRef, title: work.title }))} />;
   }
   function moveDialog() {
     const activeDialog = context.requireDialog();

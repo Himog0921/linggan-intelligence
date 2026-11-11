@@ -253,13 +253,21 @@ export function MaterialDesk({
     gcTime: 0,
   });
   const [shelfOpen, setShelfOpen] = useState(false);
+  const [shelfScope, setShelfScope] = useState<'selected' | 'all'>(() => currentDocument.materials.length ? 'selected' : 'all');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string>('');
   const [placing, setPlacing] = useState<string | null>(null);
   const [placeError, setPlaceError] = useState('');
   const shelf = useQuery({
-    queryKey: ['creation-desk-shelf', domain, query, filter],
-    queryFn: ({ signal }) => api.sources({ domainRef: domain, query, ...(filter ? { kind: filter } : {}) }, signal),
+    queryKey: ['creation-desk-shelf', domain, currentWorkId, shelfScope, currentDocument.materials, query, filter],
+    queryFn: async ({ signal }) => {
+      if (shelfScope === 'all') return api.sources({ domainRef: domain, query, ...(filter ? { kind: filter } : {}) }, signal);
+      const collection = await api.resolveMaterials({ domainRef: domain, selections: currentDocument.materials }, signal);
+      const items = collection.documents.flatMap(document => document.fragments.map(item => ({
+        ...item, qualification: document.qualification === 'readable' ? item.qualification : document.qualification,
+      }))).filter(item => (!filter || item.sourceKind === filter) && `${item.title} ${item.text}`.includes(query.trim()));
+      return { items, total: items.length };
+    },
     enabled: shelfOpen,
     retry: false,
     gcTime: 0,
@@ -547,6 +555,10 @@ export function MaterialDesk({
       <div className="material-shelf-head"><b>找材料</b>
         <button type="button" className="modal-x" aria-label="收起找材料" onClick={() => setShelfOpen(false)}><IntelligenceIcon name="close" size={16}/></button>
       </div>
+      <div className="d-filters" role="group" aria-label="材料范围">
+        <button type="button" aria-pressed={shelfScope === 'selected'} onClick={() => setShelfScope('selected')}>本篇材料</button>
+        <button type="button" aria-pressed={shelfScope === 'all'} onClick={() => setShelfScope('all')}>全部材料</button>
+      </div>
       <div className="find">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>
         <input aria-label="搜索材料" placeholder="搜爆款、评论、经历、跨行业标题" value={query} onChange={event => setQuery(event.target.value)} autoComplete="off" />
@@ -563,9 +575,9 @@ export function MaterialDesk({
         {shelf.isError ? <div className="search-empty">暂时读不到材料<button type="button" className="btn sm" onClick={() => void shelf.refetch()}>重试</button></div> : null}
         {shelf.data && !sources.length ? <div className="search-empty">没有匹配的材料</div> : null}
         <div className="d-res">
-          {sources.slice(0, SHELF_LIMIT).map(item => {
+          {(shelfScope === 'selected' ? sources : sources.slice(0, SHELF_LIMIT)).map(item => {
             const readable = item.qualification === 'readable';
-            const already = placed.has(`${item.sourceRef}:${item.sourceVersion}:0`);
+            const already = placed.has(JSON.stringify([item.sourceKind, item.sourceRef, item.sourceVersion, item.blockRef, item.field, 0]));
             return <div key={item.fragmentId} className={`d-res-item${already ? ' on' : ''}`} draggable={false}>
               <div className="aux"><span className={`dot ${kindDot[item.sourceKind] ?? 'info'}`} />{kindLabel[item.sourceKind] ?? '材料'}{item.authorLabel ? ` · ${item.authorLabel}` : ''}</div>
               {item.sourceKind === 'comment'
@@ -753,5 +765,5 @@ export function MaterialDesk({
 
 function document_excerpt_key(document: WorkDocument, block: CanvasBlock): string {
   const excerpt = block.excerptId ? document.excerpts.find(item => item.id === block.excerptId) : undefined;
-  return excerpt ? `${excerpt.citation.sourceRef}:${excerpt.citation.sourceVersion}:${excerpt.citation.start}` : '';
+  return excerpt ? JSON.stringify([excerpt.citation.sourceKind, excerpt.citation.sourceRef, excerpt.citation.sourceVersion, excerpt.citation.blockRef, excerpt.citation.field, excerpt.citation.start]) : '';
 }

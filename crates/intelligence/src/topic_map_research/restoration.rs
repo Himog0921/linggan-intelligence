@@ -69,7 +69,7 @@ pub(crate) fn restore_window(input: &ResearchInput, manifest: &Value) -> Option<
 fn current_identity(input: &ResearchInput, manifest: &Value) -> Option<()> {
     let contract = manifest["inputContract"].as_str()?;
     let method = manifest["methodVersion"].as_str()?;
-    if contract != INPUT_CONTRACT
+    if ![INPUT_CONTRACT, super::CORE_INPUT_CONTRACT].contains(&contract)
         || method != crate::topic_map_research_analysis::METHOD_VERSION
         || manifest["workRef"] != json!(input.work.work_ref)
         || manifest["configRef"] != input.coverage["configRef"]
@@ -245,6 +245,14 @@ pub(crate) fn restore_scoped_window(
 ) -> Option<ResearchInput> {
     let manifest = manifest.get("source").unwrap_or(manifest);
     let input = all.iter().find(|input| input.work.work_ref == work)?;
+    let core_input;
+    let input = if manifest["inputContract"] == super::CORE_INPUT_CONTRACT {
+        let core = manifest["coverage"]["coreRef"].as_str()?.parse().ok()?;
+        core_input = super::from_core(input, Some(core))?;
+        &core_input
+    } else {
+        input
+    };
     if manifest["coverage"]["kind"] != "comparison" {
         return restore_window(input, manifest);
     }

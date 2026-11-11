@@ -1,5 +1,5 @@
 //! Stage-specific topic packets and validators; transport does not decide topic semantics.
-use super::{store::FoundationError, topic_research as owner};
+use super::{store::FoundationError, topic_comment_source as comments, topic_research as owner};
 use crate::{
     topic_map_research::ResearchInput,
     topic_map_research_analysis::{
@@ -24,6 +24,35 @@ pub(crate) async fn draft_in(
     window: Uuid,
 ) -> Result<ResearchOutput, FoundationError> {
     serde_json::from_value(owner::previous_in(tx, window, 0).await?).map_err(|_| invalid())
+}
+async fn assignment_units(
+    tx: &mut Transaction<'_, Postgres>,
+    window: Uuid,
+    input: &ResearchInput,
+) -> Result<Vec<(String, analysis::Discussion)>, FoundationError> {
+    if comments::is_comment(input) {
+        Ok(crate::topic_map_core::units_for_discussions(
+            input,
+            &comments::discussions(input),
+        ))
+    } else {
+        Ok(crate::topic_map_core::units(
+            input,
+            &draft_in(tx, window).await?,
+        ))
+    }
+}
+fn resolution_schema(input: &ResearchInput) -> Value {
+    let mut schema = analysis::resolution_schema();
+    if comments::is_comment(input) {
+        schema["properties"]["decisions"]["items"]["properties"]["status"]["enum"] =
+            json!(["matched", "uncertain", "out_of_scope"]);
+        schema["properties"]["decisions"]["items"]["properties"]["proposedTopic"] =
+            json!({"type":"null"});
+        schema["properties"]["decisions"]["items"]["properties"]["relations"]["maxItems"] =
+            json!(0);
+    }
+    schema
 }
 /// Frozen IDs remain unchanged; withdrawn or superseded candidate text cannot be sent or admitted.
 pub(crate) async fn candidate_sources_current(
@@ -69,7 +98,7 @@ pub(crate) async fn prepare(
     };
     match stage {
         0 => Ok(Packet {
-            payload: json!({"contract":analysis::COMPACT_EXTRACT_CONTRACT,"input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":fragments(),"commentStudy":input.comment_study,"roleMetadata":input.role_metadata,"coverage":input.coverage},"outputFieldNames":analysis::compact_field_names(),"outputSchema":analysis::compact_output_schema()}),
+            payload: json!({"contract":analysis::COMPACT_EXTRACT_CONTRACT,"input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":fragments(),"commentStudy":input.comment_study,"contentCore":input.coverage["core"],"understandingInstruction":if input.coverage["inputContract"] == crate::topic_map_research::CORE_INPUT_CONTRACT { "Consume the saved L1 Core and its evidence. Project author topics, scenes and journey; do not repeat raw-material understanding. Image evidence is a saved model observation, not verified OCR or a verbatim source quote. Comments cannot propose directions." } else { "" },"roleMetadata":input.role_metadata,"coverage":input.coverage},"outputFieldNames":analysis::compact_field_names(),"outputSchema":analysis::compact_output_schema()}),
             schema: analysis::compact_output_schema(),
             context: json!({}),
         }),
@@ -84,14 +113,15 @@ pub(crate) async fn prepare(
             })
         }
         2 => {
-            owner::previous_in(tx, window, 1).await?;
-            let draft = draft_in(tx, window).await?;
-            if draft.discussions.is_empty() {
+            if !comments::is_comment(input) {
+                owner::previous_in(tx, window, 1).await?;
+            }
+            let units = assignment_units(tx, window, input).await?;
+            if units.is_empty() {
                 return Err(FoundationError::AdmissionDenied(vec![
                     "topic_assignment_not_required".into(),
                 ]));
             }
-            let units = crate::topic_map_core::units(input, &draft);
             let domain: Uuid =
                 serde_json::from_value(input.domain["domainRef"].clone()).map_err(|_| invalid())?;
             let catalog =
@@ -108,8 +138,8 @@ pub(crate) async fn prepare(
             })?;
             let context = json!({"candidates":candidates,"recall":{"method":"complete_catalog","catalogTopics":candidates.len(),"similarityIsMembership":false}});
             Ok(Packet {
-                payload: json!({"contract":analysis::RESOLVE_CONTRACT,"input":{"domain":input.domain,"units":units.iter().map(|(id,d)|json!({"unitId":id,"discussion":d})).collect::<Vec<_>>(),"fragments":fragments(),"definitions":candidates,"coverage":input.coverage},"outputSchema":analysis::resolution_schema()}),
-                schema: analysis::resolution_schema(),
+                payload: json!({"contract":analysis::RESOLVE_CONTRACT,"input":{"domain":input.domain,"units":units.iter().map(|(id,d)|json!({"unitId":id,"discussion":d})).collect::<Vec<_>>(),"fragments":fragments(),"definitions":candidates,"coverage":input.coverage,"assignmentInstruction":if comments::is_comment(input) { "These are saved comment semantic signals. Match their meaning only to existing supplied topics. Do not re-understand comments, create a topic, infer author membership or force a match. Keep uncertain/out_of_scope with reasons when no existing topic fits; proposedTopic must be null and relations must be empty." } else { "" }},"outputSchema":resolution_schema(input)}),
+                schema: resolution_schema(input),
                 context,
             })
         }
@@ -117,8 +147,7 @@ pub(crate) async fn prepare(
             let resolution: ResolutionOutput =
                 serde_json::from_value(owner::previous_in(tx, window, 2).await?)
                     .map_err(|_| invalid())?;
-            let draft = draft_in(tx, window).await?;
-            let units = crate::topic_map_core::units(input, &draft);
+            let units = assignment_units(tx, window, input).await?;
             let context:Value=sqlx::query_scalar("SELECT d.context FROM linggan_topic_research_dispatch d JOIN linggan_topic_research_stage s USING(item_ref) WHERE s.window_ref=$1 AND s.stage_number=2").bind(window).fetch_one(&mut **tx).await?;
             candidate_sources_current(db, input, &context).await?;
             let packet = verification::resolution_review(
@@ -162,8 +191,12 @@ pub(crate) fn validate(
         2 => {
             let value: ResolutionOutput =
                 serde_json::from_str(text).map_err(|_| "output_schema_invalid")?;
-            let units =
-                crate::topic_map_core::units(input, draft.ok_or("topic_dependency_failed")?);
+            let units = if comments::is_comment(input) {
+                comments::validate_matched_only(&value)?;
+                crate::topic_map_core::units_for_discussions(input, &comments::discussions(input))
+            } else {
+                crate::topic_map_core::units(input, draft.ok_or("topic_dependency_failed")?)
+            };
             analysis::validate_resolution(&value, &units, &context["candidates"])?;
             serde_json::to_value(value).map_err(|_| "output_serialization_invalid")
         }
@@ -178,11 +211,15 @@ pub(crate) async fn publish_in(
     input: &ResearchInput,
     context: &Value,
 ) -> Result<(), crate::model_settings::ModelError> {
-    let draft = draft_in(tx, window).await.map_err(|e| match e {
-        FoundationError::Database(e) => crate::model_settings::ModelError::Database(e),
-        _ => crate::model_settings::ModelError::InvalidOutput,
-    })?;
-    let core = if stage == 1 && draft.discussions.is_empty() {
+    let draft = if comments::is_comment(input) {
+        None
+    } else {
+        Some(draft_in(tx, window).await.map_err(|e| match e {
+            FoundationError::Database(e) => crate::model_settings::ModelError::Database(e),
+            _ => crate::model_settings::ModelError::InvalidOutput,
+        })?)
+    };
+    let core = if stage == 1 && draft.as_ref().is_some_and(|d| d.discussions.is_empty()) {
         json!({"units":[]})
     } else if stage == 3 {
         let resolution: ResolutionOutput = serde_json::from_value(
@@ -191,7 +228,9 @@ pub(crate) async fn publish_in(
                 .map_err(|_| crate::model_settings::ModelError::InvalidOutput)?,
         )
         .map_err(|_| crate::model_settings::ModelError::InvalidOutput)?;
-        let units = crate::topic_map_core::units(input, &draft);
+        let units = assignment_units(tx, window, input)
+            .await
+            .map_err(|_| crate::model_settings::ModelError::InvalidOutput)?;
         let eligible = context["candidates"]
             .as_array()
             .into_iter()
@@ -204,6 +243,6 @@ pub(crate) async fn publish_in(
         return Ok(());
     };
     sqlx::query("INSERT INTO linggan_topic_research_result(result_ref,window_ref,invocation_ref,output_json,core_json,method_version) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(Uuid::new_v4()).bind(window).bind(invocation).bind(serde_json::to_value(draft).map_err(|_|crate::model_settings::ModelError::InvalidOutput)?).bind(core).bind(analysis::METHOD_VERSION).execute(&mut **tx).await?;
+        .bind(Uuid::new_v4()).bind(window).bind(invocation).bind(if comments::is_comment(input) { json!({"contract":comments::CONTRACT,"semanticRequestRef":input.coverage["semanticRequestRef"]}) } else { serde_json::to_value(draft).map_err(|_|crate::model_settings::ModelError::InvalidOutput)? }).bind(core).bind(analysis::METHOD_VERSION).execute(&mut **tx).await?;
     Ok(())
 }
