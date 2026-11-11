@@ -13,6 +13,7 @@ export interface SidebarNavigationItem {
   disabled?: boolean;
   disabledReason?: string;
   badge?: string | number;
+  badgeId?: string;
   badgeTitle?: string;
   children?: readonly SidebarNavigationItem[];
 }
@@ -67,13 +68,14 @@ export function Sidebar({
     const classes = level === 'secondary'
       ? `v7-side-nav v7-side-nav-secondary${parent ? ' v7-side-nav-parent' : ''}`
       : 'v7-side-subnav-item';
+    const hasBadge = item.badge !== undefined && item.badge !== null && item.badge !== '';
     const content = level === 'secondary' ? (
       <>
         <span className="v7-nav-index">{index ?? item.index ?? '00'}</span>
         {icon}
         <span className="v7-nav-label">{item.label}</span>
-        {item.badge !== undefined && item.badge !== null && item.badge !== '' ? (
-          <b className="v7-nav-badge" title={item.badgeTitle}>{item.badge}</b>
+        {hasBadge || item.badgeId ? (
+          <b className="v7-nav-badge" id={item.badgeId} hidden={!hasBadge} title={hasBadge ? item.badgeTitle : undefined}>{item.badge}</b>
         ) : null}
       </>
     ) : item.label;
@@ -92,7 +94,7 @@ export function Sidebar({
           key={item.id}
           className={classes}
           href={item.href}
-          aria-label={level === 'secondary' ? item.label : undefined}
+          aria-label={item.label}
           title={item.label}
           aria-current={current ? 'page' : undefined}
           data-code={level === 'tertiary' ? item.code : undefined}
@@ -108,6 +110,7 @@ export function Sidebar({
           key={item.id}
           type="button"
           className={classes}
+          aria-label={item.label}
           aria-current={current ? 'page' : undefined}
           data-code={level === 'tertiary' ? item.code : undefined}
           onClick={item.onSelect}

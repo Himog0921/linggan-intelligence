@@ -252,7 +252,7 @@ try {
       .count()
       .catch(() => {});
     await page
-      .getByRole("navigation", { name: "数据页面" })
+      .getByRole("complementary", { name: "运营导航" })
       .getByRole("link", { name: /每日数据/ })
       .click();
     await wait(

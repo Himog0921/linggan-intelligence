@@ -1,5 +1,5 @@
 {
-  "fingerprint": "845bcabd008efd6e11a5bcacbb797f1b71b4a88986b977b14bfcad5c120501b6",
+  "fingerprint": "04c61dd77519b7a48fff6fe2ae4c3fab66f7431f93c7ee4e44d9546d90c8c74c",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -239,7 +239,7 @@
     },
     {
       "path": "apps/web/src/corpus/CorpusSideNav.tsx",
-      "sha256": "5d5d46054d3b04a0c186b731187c1f785d936a318f511e27ec4240a7cd071e48"
+      "sha256": "a0c1e8480fe62afa0f821c818569d7a476d49b7a36f3df7fe2101ebc5eb85584"
     },
     {
       "path": "apps/web/src/corpus/DomainPicker.tsx",
@@ -395,7 +395,7 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "d9d9ece5a2e1867e8fc3e388ee604f6da5612862c1bc8c04e20c05412921fbe7"
+      "sha256": "b02cb50359144c20d200422f748d68d565e8e66657deacb7b7cc57aa1f543fdf"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
@@ -435,7 +435,7 @@
     },
     {
       "path": "apps/web/src/pages/settings/AccountSecurityPage.tsx",
-      "sha256": "2e6d7bce43663e87a531d3dfc436ba357bc2a5325290560daf2edd42a5a6cd73"
+      "sha256": "881fc39e739e955c51a81d86a24de74042ca4046b032879caabed785215301d2"
     },
     {
       "path": "apps/web/src/pages/settings/AiSettingsExperience.tsx",
@@ -455,7 +455,7 @@
     },
     {
       "path": "apps/web/src/pages/settings/SettingsSideNav.tsx",
-      "sha256": "0927871e456f438264288c144bd1a13501ea0f791f3cec7cb8f0c37c7f71c990"
+      "sha256": "df85febdcb70549395f90adbe6ef55cdce932e446028238b587d28f841e12af9"
     },
     {
       "path": "apps/web/src/pages/settings/TeamSettingsPage.module.css",
@@ -515,7 +515,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "3caa121ab2033f75f750dec881aebab5b4dcd2c0c8eb9eedb693ee6825ff76a1"
+      "sha256": "a4ac35c5fc6c9f90be518857f5d239df06c07cf3908c2faf82ce16f9d1e4d6f5"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",
@@ -627,7 +627,7 @@
     },
     {
       "path": "apps/web/src/shared/Sidebar.tsx",
-      "sha256": "eb1a376a3bebc0ec3f68fe5add2092f1305d471cdf761f5198ebe15233d4fb04"
+      "sha256": "0928055e22b438174e20fe6ab8508c411664ed126ca7f924cce2ccfa4c55025b"
     },
     {
       "path": "apps/web/src/shared/ViewSwitch.module.css",

@@ -137,7 +137,8 @@ export function WorkbenchPage() {
   const anyTitlePending = Object.values(titlePendingWorks).some(Boolean);
   const [writingPendingWorks, setWritingPendingWorks] = useState<Record<string, boolean>>({});
   const anyWritingPending = Object.values(writingPendingWorks).some(Boolean);
-  const blocker = useBlocker(assetPending || assetDirty || anyTemplatePending || anyPublicationPending || anyTitlePending || anyWritingPending);
+  const hasNavigationBlocker = assetPending || assetDirty || anyTemplatePending || anyPublicationPending || anyTitlePending || anyWritingPending;
+  const blocker = useBlocker(hasNavigationBlocker);
   const markWritingPending = (workId: string, value: boolean) => setWritingPendingWorks(previous => ({ ...previous, [workId]: value }));
   const markTitlePending = (workId: string, value: boolean) => setTitlePendingWorks(previous => ({ ...previous, [workId]: value }));
   const markPublicationPending = (workId: string, value: boolean) => setPublicationPendingWorks(previous => ({ ...previous, [workId]: value }));
@@ -246,6 +247,10 @@ export function WorkbenchPage() {
     scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
       disabled={creating || createUnknown || assetPending} onChange={next => { if (createPending.current || assetPending) return; setError(''); setParams({ domain: next, section }); }} />}
     creationPageKey={section}
+    // Route pending operations through the app blocker. Open drafts otherwise retain their beforeunload guard.
+    onCreationPageSelect={hasNavigationBlocker || (!work && !creating && !createUnknown)
+      ? next => setParams({ domain, section: next })
+      : undefined}
     page={view === 'desk' && work ? '选题与材料' : undefined}
     meta={view === 'desk' && work ? <>
       <span>选题组织 · 材料编排 · 多账号开稿</span>
@@ -261,7 +266,6 @@ export function WorkbenchPage() {
 </p> : current.data && current.data.domainRef === domain ? null : <p className={styles.error}>作品不属于当前领域。</p>}</> : <section className={styles.library}>
 <div className={styles.libraryTools}>
 <h1 className={styles.srOnly}>{section === 'today' ? '今日选题' : '我的创作'}</h1>
-<div role="group" aria-label="写稿内容" className={styles.steps}>{(['today', 'works'] as const).map(value => <button type="button" key={value} aria-pressed={section === value} onClick={() => setParams({ domain, section: value })}>{value === 'today' ? '今日选题' : '我的稿件'}</button>)}</div>
 <small>{works.isError ? '作品读取失败' : works.data ? `${works.data.length} 篇已保存作品` : '读取中'}</small>
 </div>
 {error ? <p role="alert" className={styles.error}>{error}</p> : null}{works.error ? <p role="alert" className={styles.error}>{api.errorText(works.error)}</p> : null}<TopicLibrary key={domain} section={section} works={works.isError ? [] : works.data ?? []} ideas={ideas.data ?? []} ideasStatus={ideas.status} onRetryIdeas={() => void ideas.refetch()} loading={works.isPending} failed={works.isError} onOpen={open} action={<form className={styles.createForm} onSubmit={e => {

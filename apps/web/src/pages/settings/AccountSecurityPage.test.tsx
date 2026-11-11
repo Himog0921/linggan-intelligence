@@ -14,6 +14,7 @@ describe('账户安全页', () => {
     expect(screen.getByText(/重设邮件与真实投递尚未配置/)).toBeVisible();
     const side = screen.getByRole('complementary', { name: '设置导航' });
     expect(within(side).getByRole('link', { name: '账户安全' })).toHaveAttribute('aria-current', 'page');
+    expect(within(side).queryByRole('link', { name: 'AI 设置' })).not.toBeInTheDocument();
     expect(within(side).queryByRole('link', { name: '团队成员' })).not.toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent('设置/账户安全');
     expect(fetch).toHaveBeenCalledWith('/api/local/auth/password/change', expect.objectContaining({ method: 'POST', body: JSON.stringify({ currentPassword: 'old', newPassword: 'new' }) }));

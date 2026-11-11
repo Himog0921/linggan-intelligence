@@ -9,7 +9,7 @@ describe('D3 actual four-view React boundary', () => {
   installFetch();renderPage(`domain=${DOMAIN}&view=comments`);
   await screen.findByRole('table');
   const side = screen.getByRole('complementary', { name: '语料导航' });
-  expect(within(side).getByRole('link', { name: '评论研究' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}&view=overview`);
+  expect(within(side).getByRole('link', { name: '评论研究' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}`);
   expect(within(side).getByRole('link', { name: '用户评论' })).toHaveAttribute('aria-current', 'page');
   expect(within(side).getByRole('link', { name: '研究记录' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}&view=runs`);
   expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent(/评论研究.*用户评论/);

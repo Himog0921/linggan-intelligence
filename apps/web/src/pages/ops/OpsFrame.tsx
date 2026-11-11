@@ -22,6 +22,7 @@ export function OpsFrame({
   page,
   dataPageKey = 'overview',
   creationPageKey = 'today',
+  onCreationPageSelect,
   children,
 }: {
   section: 'data' | 'creation';
@@ -34,6 +35,7 @@ export function OpsFrame({
   page?: string;
   dataPageKey?: string;
   creationPageKey?: 'today' | 'works';
+  onCreationPageSelect?: (page: 'today' | 'works') => void;
   children: ReactNode;
 }) {
   const selectedDomain = domain && domain !== 'all' ? '?domain=' + encodeURIComponent(domain) : '';
@@ -59,18 +61,21 @@ export function OpsFrame({
       index: '02',
       icon: 'creation',
       href: '/ops/creation' + selectedDomain,
+      onSelect: onCreationPageSelect ? () => onCreationPageSelect('today') : undefined,
       children: [
         {
           id: 'creation-today',
           label: '今日选题',
           code: 'TODAY',
           href: '/ops/creation' + selectedDomain + (selectedDomain ? '&' : '?') + 'section=today',
+          onSelect: onCreationPageSelect ? () => onCreationPageSelect('today') : undefined,
         },
         {
           id: 'creation-works',
           label: '我的创作',
           code: 'WORKS',
           href: '/ops/creation' + selectedDomain + (selectedDomain ? '&' : '?') + 'section=works',
+          onSelect: onCreationPageSelect ? () => onCreationPageSelect('works') : undefined,
         },
       ],
     }] : []),

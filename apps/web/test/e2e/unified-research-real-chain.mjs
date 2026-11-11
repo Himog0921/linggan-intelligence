@@ -27,7 +27,7 @@ try {
   const a=await metrics.boundingBox(),b=await chart.boundingBox();assert.ok(a&&b&&a.x+a.width<=b.x+1,'approved left metrics/right observation layout');
   await page.getByRole('button',{name:'近 7 天',exact:true}).click();await page.getByRole('button',{name:'表格',exact:true}).click();
   assert.equal(await hero.getByRole('row').count(),8);
-  await page.getByRole('button',{name:'用户评论',exact:true}).click();await page.getByRole('searchbox',{name:'字面搜索',exact:true}).waitFor();
+  await page.getByRole('link',{name:'用户评论',exact:true}).click();await page.getByRole('searchbox',{name:'字面搜索',exact:true}).waitFor();
   await page.getByRole('button',{name:'概览',exact:true}).click();
   assert.equal(await page.getByRole('button',{name:'表格',exact:true}).getAttribute('aria-pressed'),'true');
   await page.getByRole('button',{name:'近 56 天',exact:true}).click();await page.getByRole('button',{name:'图表',exact:true}).click();
@@ -42,11 +42,11 @@ try {
   await page.getByRole('button',{name:'开始所选评论研究',exact:true}).click();
   await page.getByText('已提交 2 条研究，结果尚未完成。',{exact:true}).waitFor();
   const data=await until(`/api/local/comment-research/problems?domainRef=${domain}`,r=>r.problems.length===1);assert.equal(data.problems[0].evidence.length,2);const receipts=await until(`/api/local/comment-research/runs?domainRef=${domain}`,r=>r.runs.every(run=>run.state!=='running'));assert.ok(receipts.runs.every(run=>run.state==='succeeded'),JSON.stringify(receipts));
-  await page.getByRole('button',{name:'用户问题',exact:true}).click();
+  await page.getByRole('link',{name:'用户问题',exact:true}).click();
   await page.getByRole('heading',{name:'每日提醒需求',exact:true}).waitFor();assert.equal(await page.getByRole('blockquote').count(),2);
  });
  await step('reopen an immutable research receipt and restore the exact raw quote',async()=>{
-  await page.getByRole('button',{name:'研究记录',exact:true}).click();
+  await page.getByRole('link',{name:'研究记录',exact:true}).click();
   await page.getByRole('button',{name:'查看评论与研究依据',exact:true}).first().click();
   const detail=page.getByRole('region',{name:'研究这条评论',exact:true});await detail.getByText('合成测试需要提醒',{exact:true}).waitFor();
   await detail.getByText('我的孩子需要每天有人提醒',{exact:true}).waitFor();

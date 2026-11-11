@@ -1150,11 +1150,10 @@ it('protects an uncertain template save from navigation when multiple draft edit
 });
 
 it('protects an uncertain publication link from leaving the workbench', async () => {
-  function Navigation() { const navigate = useNavigate(); return <button onClick={() => navigate('/elsewhere')}>离开创作</button>; }
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><TestRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><Navigation/><WorkbenchPage/></TestRouter></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><TestRouter initialEntries={[`/ops/creation?domain=${domain}&work=${work}&view=body`]}><WorkbenchPage/></TestRouter></QueryClientProvider>);
   fireEvent.click(await screen.findByRole('button', { name: '测试待确认发布关联' }));
-  fireEvent.click(screen.getByRole('button', { name: '离开创作' }));
+  fireEvent.click(within(screen.getByRole('complementary', { name: '运营导航' })).getByRole('link', { name: '今日选题' }));
   expect(await screen.findByText(/操作结果尚未确认/)).toBeInTheDocument();
   expect(screen.getByTestId('pending-publication')).toHaveTextContent('synthetic-request');
 });
@@ -1433,11 +1432,13 @@ it('keeps creation under operations with one breadcrumb and the desk entry in th
   expect(within(primary).getAllByRole('link').map(link => link.getAttribute('href'))).toEqual(['/topics', '/corpus', '/collection', '/ops']);
   expect(within(primary).getByRole('link', { name: /运营/ })).toHaveAttribute('aria-current', 'page');
   const sidebar = screen.getByRole('complementary', { name: '运营导航' });
-  expect(within(sidebar).getByRole('link', { name: '创作' })).toHaveAttribute('aria-current', 'page');
+  expect(within(sidebar).getByRole('link', { name: '我的创作' })).toHaveAttribute('aria-current', 'page');
+  expect(within(sidebar).getByRole('button', { name: '收起创作子页面' })).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.queryByRole('group', { name: '写稿内容' })).not.toBeInTheDocument();
   expect(within(sidebar).getByRole('link', { name: '数据' })).toHaveAttribute('href', `/ops/overview?domain=${domain}`);
   expect(screen.queryByRole('navigation', { name: '创作页面' })).not.toBeInTheDocument();
   const crumbs = screen.getByRole('navigation', { name: '当前位置' });
-  expect(within(crumbs).getByText('创作')).toBeInTheDocument();
+  expect(crumbs).toHaveTextContent(/运营.*创作\/我的创作/);
   const rail = screen.getByRole('complementary', { name: '稿件列表' });
   expect(within(rail).getByRole('button', { name: /选题与材料/ })).toBeInTheDocument();
 });

@@ -18,10 +18,12 @@ const codes: Record<SettingsViewKey, string> = {
 
 export function SettingsSideNav({
   activeId,
+  showAi = true,
   showTeam = true,
   onViewSelect,
 }: {
   activeId: string;
+  showAi?: boolean;
   showTeam?: boolean;
   onViewSelect?: (view: SettingsViewKey) => void;
 }) {
@@ -33,14 +35,14 @@ export function SettingsSideNav({
     onSelect: onViewSelect ? () => onViewSelect(view) : undefined,
   }));
   const items: SidebarNavigationItem[] = [
-    {
+    ...(showAi ? [{
       id: 'ai-settings',
       label: 'AI 设置',
       index: '01',
       icon: 'diagnostics',
       href: '/settings/models',
       children,
-    },
+    }] : []),
     {
       id: 'account-security',
       label: '账户安全',
