@@ -52,6 +52,7 @@ pub enum RuleError {
 #[serde(rename_all = "snake_case")]
 pub enum TaskKey {
     ContentUnderstanding,
+    ContentUnderstandingDeep,
     NoteInterpretation,
     DirectionListDraft,
     DirectionProposal,
@@ -80,6 +81,7 @@ impl TaskKey {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ContentUnderstanding => "content_understanding",
+            Self::ContentUnderstandingDeep => "content_understanding_deep",
             Self::NoteInterpretation => "note_interpretation",
             Self::DirectionListDraft => "direction_list_draft",
             Self::DirectionProposal => "direction_proposal",

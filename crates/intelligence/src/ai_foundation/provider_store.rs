@@ -43,6 +43,7 @@ impl MaterialClass {
                 task,
                 TaskKey::ContentUnderstanding
                     | TaskKey::NoteInterpretation
+                    | TaskKey::ContentUnderstandingDeep
                     | TaskKey::WorkComparison
                     | TaskKey::CreatorResearch
                     | TaskKey::CreatorAccountResearch

@@ -56,7 +56,24 @@ impl Endpoint {
                                 json!({"lingganProbe":"ok"})
                             } else {
                                 let packet: Value = serde_json::from_str(&prompt).unwrap();
-                                if packet["material"]["texts"].is_array() {
+                                if let Some(question) = packet["question"].as_str() {
+                                    assert!(!request.to_string().contains("image_url"));
+                                    let evidence = packet["evidence"].as_array().unwrap();
+                                    let quote = evidence.iter().find(|e| e["kind"] == "material_quote").unwrap();
+                                    assert!(quote["quote"].as_str().unwrap().contains("先摆出材料"));
+                                    assert!(quote.get("sourceRef").is_none());
+                                    let observed = evidence.iter().find(|e| e["kind"] == "model_read").unwrap();
+                                    assert!(observed["observation"].is_string());
+                                    assert!(observed.get("blobSha256").is_none());
+                                    assert_eq!(packet["core"]["knowledgeUnits"][2]["assertionKind"], "author_claim");
+                                    let reference = if question == "合成无效引用" { json!("missing") } else { quote["id"].clone() };
+                                    json!({"findings":[{
+                                        "id":"f1","findingType":"structure","statement":"作者用材料示范核对步骤。",
+                                        "basisUnitIds":["u3"],"questionFocus":question,
+                                        "support":[{"evidenceRef":reference,"quote":"先摆出材料，再按步骤核对"}],
+                                        "presentationOrder":[]
+                                    }]})
+                                } else if packet["material"]["texts"].is_array() {
                                     let images = packet["material"]["images"].as_array().unwrap();
                                     if !images.is_empty() {
                                         let content = &request["messages"].as_array().unwrap().iter()

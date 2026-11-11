@@ -1528,19 +1528,13 @@ export function parseCommentTextTail(rawText = '', author = '') {
   };
 }
 
-function readDomCommentText(el, author = '') {
+function readDomCommentBody(el) {
   const innerContainer = el.querySelector('.comment-inner-container') || el;
-  const spans = [...(innerContainer.querySelectorAll?.('span') || [])];
-  const authorText = normalizeInlineText(author);
-  const candidates = spans
-    .map((span) => normalizeInlineText(span.textContent))
-    .filter((text) => {
-      if (!text || text === authorText) return false;
-      if (isTimeText(text) || isLikeText(text) || isLikelyLocationText(text)) return false;
-      if (/^(回复|赞|展开|收起)$/.test(text)) return false;
-      return text.length > 1;
-    });
-  return candidates[0] || '';
+  const body = [...innerContainer.querySelectorAll('.note-text')]
+    .find((node) => node.closest('.comment-item') === el && !node.closest('.author-wrapper'));
+  // An unrecognized body stays unknown. The full row includes the author badge
+  // and remains available as raw evidence for diagnosing selector changes.
+  return readElementText(body);
 }
 
 function extractCommentImageUrls(el) {
@@ -1574,16 +1568,13 @@ export function parseCommentNode(el) {
     || el.id
     || '';
   const authorEl = el.querySelector('.author-wrapper a.name')
-    || el.querySelector('a.name')
-    || el.querySelector('a[href*="/user/profile/"]');
-  const avatarLinkEl = el.querySelector('.avatar a') || el.querySelector('a.name');
+    || el.querySelector('.author-wrapper a[href*="/user/profile/"]');
+  const avatarLinkEl = el.querySelector('.avatar a') || authorEl;
   const author = normalizeInlineText(authorEl?.textContent || authorEl?.innerText || '');
   const rawText = readElementText(el);
   const parsedTail = parseCommentTextTail(rawText, author);
-  const domText = readDomCommentText(el, author);
-  const replyParts = extractReplyTarget(parsedTail.contentText || domText, author);
-  const text = replyParts.text || parsedTail.contentText || domText;
-  if (!text && !author) return null;
+  const text = readDomCommentBody(el);
+  if (!rawId && !text) return null;
 
   const commentId = rawId || `${author}_${text.slice(0, 50)}`;
 
@@ -1607,12 +1598,13 @@ export function parseCommentNode(el) {
     || '';
   const commentImageUrls = extractCommentImageUrls(el);
   const mentionLinks = extractMentionLinks(el, profileUrl);
-  const replyToNickname = replyParts.replyToNickname || parsedTail.replyToNickname || '';
+  const replyToNickname = parsedTail.replyToNickname;
 
   return {
     commentId,
     text,
     author,
+    authorName: author,
     profileUrl,
     location: ipLocation,
     ipLocation,
@@ -1662,7 +1654,7 @@ export function parseCommentNode(el) {
         ipLocation,
       ]),
       rawUrl: window.location.href,
-      rawSource: 'xhs.comments.dom',
+      rawSource: 'xhs.comments.dom.structured-body',
     }),
   };
 }

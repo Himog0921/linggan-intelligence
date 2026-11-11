@@ -1,3 +1,6 @@
+mod deep;
+mod deep_grounding;
+pub(crate) mod generate_deep;
 mod source;
 use super::{
     TaskKey, admission,
@@ -6,6 +9,8 @@ use super::{
     task_config::lock_setting,
 };
 use crate::content_understanding::{self as contract, METHOD};
+pub use deep::{DeepReceipt, PublishDeep, publish_deep};
+pub use generate_deep::{GenerateDeep, generate_deep};
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -216,11 +221,35 @@ pub async fn latest(
         .await?;
     let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut tx, as_of).await?;
     let p = source::load(&mut tx, domain, work, &cutoff).await?;
-    let row = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,c.state,c.failure_code,result.result FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref) LEFT JOIN linggan_content_understanding_result result USING(request_ref) WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3 ORDER BY (result.result IS NOT NULL) DESC,r.created_at DESC,r.request_ref DESC LIMIT 1")
-        .bind(work).bind(&p.snapshot.material_snapshot_identity).bind(METHOD).fetch_optional(&mut *tx).await?;
+    let row = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,c.state,c.failure_code,result.result,
+        d.analysis_ref AS deep_ref,d.method_version AS deep_method,d.findings,d.question
+        FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
+        LEFT JOIN linggan_content_understanding_result result USING(request_ref)
+        LEFT JOIN LATERAL (
+          SELECT analysis_ref,method_version,findings,question FROM linggan_content_understanding_deep
+          WHERE core_ref=result.request_ref AND domain_ref=$4 AND created_at<=$5::timestamptz
+          ORDER BY revision DESC LIMIT 1
+        ) d ON true
+        WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3
+        ORDER BY (result.result IS NOT NULL) DESC,r.created_at DESC,r.request_ref DESC LIMIT 1")
+        .bind(work).bind(&p.snapshot.material_snapshot_identity).bind(METHOD).bind(domain).bind(&cutoff)
+        .fetch_optional(&mut *tx).await?;
     let result = match row {
         Some(r) => {
-            json!({"requestRef":r.get::<Uuid,_>("request_ref"),"batchRef":r.get::<Uuid,_>("batch_ref"),"itemRef":r.get::<Uuid,_>("item_ref"),"state":r.get::<String,_>("state"),"failureCode":r.get::<Option<String>,_>("failure_code"),"result":r.get::<Option<Value>,_>("result")})
+            let result = r.get::<Option<Value>, _>("result");
+            let mut analysis = json!({
+                "requestRef":r.get::<Uuid,_>("request_ref"),"batchRef":r.get::<Uuid,_>("batch_ref"),
+                "itemRef":r.get::<Uuid,_>("item_ref"),"state":r.get::<String,_>("state"),
+                "failureCode":r.get::<Option<String>,_>("failure_code"),"result":result
+            });
+            if let Some(deep_ref) = r.get::<Option<Uuid>, _>("deep_ref") {
+                analysis["result"]["card"]["deep"] = json!({
+                    "analysisRef":deep_ref,"methodVersion":r.get::<String,_>("deep_method"),
+                    "findings":r.get::<Value,_>("findings")
+                });
+                analysis["deepQuestion"] = json!(r.get::<String, _>("question"));
+            }
+            analysis
         }
         None => Value::Null,
     };

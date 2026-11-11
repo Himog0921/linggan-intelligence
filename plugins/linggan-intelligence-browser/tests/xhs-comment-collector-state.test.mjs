@@ -5,6 +5,7 @@ import {
   collectComments,
   collectCommentImages,
   initializeCollectedComments,
+  parseCommentNode,
   parseCommentTextTail,
   resolveCommentContinuationHint,
   resolveXhsCommentTargetIdentity,
@@ -13,6 +14,8 @@ import {
   shouldFallbackToDomAfterFreshApiFailure,
   shouldNudgeCommentSurfaceFromBottom,
 } from '../src/platforms/xhs/commentCollector.js';
+import { mapXhsCommentRecord } from '../src/platforms/xhs/commentApi.js';
+import { packageComments, packageReplies } from '../src/linggan/producerRuntime.js';
 import { COMMENT_DEPTH_MODE } from '../src/shared/constants.js';
 
 test('initializeCollectedComments seeds API comments for later DOM continuation without duplicates', () => {
@@ -214,6 +217,67 @@ test('parseCommentTextTail splits visible XHS comment text without mixing metric
     replyCount: 0,
     replyCountText: '',
   });
+});
+
+test('XHS DOM replies package the body separately from the author header and retain the raw row', (t) => {
+  const previousWindow = globalThis.window;
+  globalThis.window = { location: { href: 'https://www.xiaohongshu.com/explore/note-1' } };
+  t.after(() => { globalThis.window = previousWindow; });
+  const author = {
+    textContent: '合成昵称',
+    getAttribute: (name) => name === 'href' ? '/user/profile/note-owner' : null,
+  };
+  const row = {
+    dataset: { commentId: 'reply-1' },
+    innerText: '合成昵称\n作者\n收到，会继续优化。\n08-23\n赞\n回复',
+    querySelector: (selector) => selector === '.author-wrapper a.name' ? author : null,
+    querySelectorAll: (selector) => selector.includes('.note-text') ? bodyNodes : [],
+  };
+  const bodyNode = (text, owner, inHeader = false) => ({
+    innerText: text,
+    closest: (selector) => selector === '.comment-item' ? owner : inHeader ? author : null,
+  });
+  const bodyNodes = [
+    bodyNode('作者', row, true),
+    bodyNode('其他回复正文', {}),
+    bodyNode('收到，会继续优化。', row),
+  ];
+  const result = parseCommentNode(row);
+  const record = { ...result, noteId: 'note-1', rootCommentId: 'root-1', parentCommentId: 'root-1' };
+  const { payload } = packageReplies({ platform: 'xhs', noteId: 'note-1', result: [record] }).records[0];
+  assert.equal(payload.text, '收到，会继续优化。');
+  assert.equal(payload.authorId, 'note-owner');
+  assert.equal(payload.authorName, '合成昵称');
+  assert.equal(payload.rawSource, 'xhs.comments.dom.structured-body');
+  assert.equal(JSON.parse(payload.rawPayload).rawText, row.innerText);
+
+  bodyNodes.at(-1).innerText = '作者';
+  assert.equal(parseCommentNode(row).text, '作者', 'a literal author word in the body is preserved');
+  bodyNodes.at(-1).innerText = '回复 某人：这几个字是正文';
+  assert.equal(parseCommentNode(row).text, '回复 某人：这几个字是正文');
+  bodyNodes.pop();
+  const withoutBody = parseCommentNode(row);
+  assert.equal(withoutBody.text, '', 'a row without a recognized body must not use the raw author badge');
+  assert.equal(withoutBody.authorId, 'note-owner');
+  assert.equal(withoutBody.authorName, '合成昵称');
+  assert.equal(JSON.parse(withoutBody.rawPayload).rawText, row.innerText);
+  row.querySelector = () => null;
+  assert.equal(parseCommentNode(row).commentId, 'reply-1', 'a stable row remains available without readable fields');
+  row.querySelector = (selector) => selector === '.author-wrapper a.name' ? author : null;
+  row.dataset = {};
+  assert.equal(parseCommentNode(row), null, 'a nickname alone cannot identify a comment');
+});
+
+test('XHS API comments package the platform content, author ID and author name separately', () => {
+  const record = mapXhsCommentRecord({
+    id: 'comment-1',
+    content: '作者，你好',
+    user_info: { user_id: 'reader-1', nickname: '合成读者' },
+  }, { noteId: 'note-1' });
+  const { payload } = packageComments({ platform: 'xhs', noteId: 'note-1', result: [record] }).records[0];
+  assert.equal(payload.text, '作者，你好');
+  assert.equal(payload.authorId, 'reader-1');
+  assert.equal(payload.authorName, '合成读者');
 });
 
 test('collectComments can use API snapshot before comments container renders', async (t) => {

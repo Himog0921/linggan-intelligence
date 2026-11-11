@@ -197,7 +197,7 @@ fn nullable_text<'de, D: Deserializer<'de>>(d: D) -> Result<Option<String>, D::E
 fn sized(value: &str, min: usize, max: usize) -> bool {
     (min..=max).contains(&value.chars().count())
 }
-fn local_id(value: &str) -> bool {
+pub(crate) fn local_id(value: &str) -> bool {
     (1..=32).contains(&value.len())
         && value.as_bytes()[0].is_ascii_alphabetic()
         && value

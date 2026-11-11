@@ -3,7 +3,7 @@ import { normalizedTagLabel, pureTagLabels } from './dossierTagText';
 import { confirmedEmptySpeech } from './dossierPresent';
 import { hasReadingSourceText } from './dossierReadingContent';
 
-export const SECTION_LABELS: Record<ReadingSectionKind, string> = { publication: '发布文案', images: '图片资料', audio: '视频口播', frames: '画面文字' };
+export const SECTION_LABELS: Record<ReadingSectionKind, string> = { publication: '发布文案', images: '图片资料', audio: '视频口播', frames: '画面文字节选' };
 export interface ReadingEntry { unit: DossierMaterial; block: DossierBlock }
 export interface ReadingIssue extends DossierIssue { displayKey: string }
 export interface ResolvedReadingGroup { group: ReadingGroup; entries: ReadingEntry[]; issues: ReadingIssue[] }

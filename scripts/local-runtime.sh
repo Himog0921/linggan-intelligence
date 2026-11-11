@@ -509,6 +509,8 @@ migrate() {
   apply_migration_once "0195_observation_transition_immutable" "$project_root/database/migrations/0195_observation_transition_immutable.sql"
   apply_migration_once "0196_content_understanding" "$project_root/database/migrations/0196_content_understanding.sql"
   apply_migration_once "0197_ops_team_offboarding" "$project_root/database/migrations/0197_ops_team_offboarding.sql"
+  apply_migration_once "0198_content_understanding_deep" "$project_root/database/migrations/0198_content_understanding_deep.sql"
+  apply_migration_once "0199_content_understanding_model_deep" "$project_root/database/migrations/0199_content_understanding_model_deep.sql"
 }
 
 case "$command_name" in

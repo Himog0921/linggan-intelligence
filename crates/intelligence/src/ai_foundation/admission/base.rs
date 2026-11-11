@@ -163,6 +163,7 @@ pub(crate) async fn check_queue_input_scope(
             }
             TaskKey::ContentUnderstanding
             | TaskKey::NoteInterpretation
+            | TaskKey::ContentUnderstandingDeep
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => "note_material",
             TaskKey::AuthorOrgIdentity => "public_author_bio",
