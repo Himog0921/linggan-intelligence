@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from "../../shared/IntelligenceIcon";
 import { parseTopicProgress, type TopicProgress } from "./topicResearchModel";
 import type { ChangeEvent, FormEvent, KeyboardEvent, ToggleEvent } from "react";
 import { Fragment } from "react";
@@ -884,7 +885,7 @@ export function createTopicEngine() {
           <div className={cls("lgi-tm-row")}>
             {dialogStack.length ? btn("返回上一层", "dialog-back") : ""}
             {btn(
-              "关闭",
+              <><IntelligenceIcon name="close" size={16}/>关闭</>,
               "dialog-close",
               "",
               "",

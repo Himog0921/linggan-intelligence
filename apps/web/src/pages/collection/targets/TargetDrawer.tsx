@@ -53,7 +53,7 @@ export function TargetDrawer({targetRef,params,commands,revision}:{targetRef:str
         {t&&<div className="c-dw-meta"><span>{t.platform==='xhs'?'小红书':t.platform}</span>{t.kind==='creator'?` · ${t.handle}`:''}<i className="c-dw-meta-dot" aria-hidden="true"/><span>{t.group}</span></div>}
       </div></div>
       <div className={`c-dw-actions ${styles.inspectorActions}`}>
-        {t&&<ActionButton variant="primary" onClick={()=>navigate(listHref(params,{rule:targetRef}))}>管理巡查</ActionButton>}
+        {t&&<ActionButton variant="primary" onClick={()=>navigate(listHref(params,{rule:targetRef}))}><IntelligenceIcon name="adjust" size={16}/>管理巡查</ActionButton>}
         {t&&t.lifecycle!=='dismissed'&&<ActionButton onClick={()=>navigate(`/collection/tasks?once=1&target=${targetRef}&domain=${encodeURIComponent(params.get('domain')??'all')}&returnTo=${encodeURIComponent(listHref(params))}`)}>立即采一次</ActionButton>}
         {source&&<a className={`${actionStyles.action} ${actionStyles.outline} ${styles.sourceAction}`} data-action-button="v8" data-lids-component="C09" data-variant="outline" href={source} target="_blank" rel="noreferrer"><span className={actionStyles.label}>打开小红书<IntelligenceIcon name="external" size={16}/></span></a>}
         <ActionButton id="target-drawer-close" onClick={()=>navigate(close)}><IntelligenceIcon name="close" size={16}/>关闭</ActionButton>

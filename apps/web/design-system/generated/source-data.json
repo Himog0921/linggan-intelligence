@@ -1583,7 +1583,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "7b3a21b2f2e74a7a11187a25913236b937f8126f88f1b2c1d5cfe3ec74733c28",
+  "fingerprint": "7bb1ca40c65c9fe905142859bcbb8ad5ff5959cffc28fa191eadafd6b5574715",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",

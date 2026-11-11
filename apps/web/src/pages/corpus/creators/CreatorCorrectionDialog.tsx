@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { CreatorSelect } from './CreatorSelect';
@@ -139,6 +140,7 @@ export function CreatorCorrectionDialog({ target, onSaved, onClose }: Correction
             </h2>
           </div>
           <button type="button" className={styles.textButton} onClick={requestClose}>
+            <IntelligenceIcon name="close" size={16}/>
             关闭
           </button>
         </header>
