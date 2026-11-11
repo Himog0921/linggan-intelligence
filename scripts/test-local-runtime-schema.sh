@@ -2,6 +2,12 @@
 # Real ordered migration body and repeat-run proof; transport is bound to an owned container.
 # Does not exercise launchd/Compose credentials and never repairs the shared database role.
 set -euo pipefail
+populated_upgrade=0
+case "${1:-}" in
+  '') [[ $# == 0 ]] || exit 2 ;;
+  --content-understanding-upgrade) [[ $# == 1 ]] || exit 2; populated_upgrade=1 ;;
+  *) printf 'Usage: %s [--content-understanding-upgrade]\n' "$0" >&2; exit 2 ;;
+esac
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 suffix="$(openssl rand -hex 8)"
@@ -42,6 +48,13 @@ for name in ['prepare_historical_comment_schema','apply_migration_once','migrate
   start=body.index('  ensure_migration_ledger\n')
   body='migrate() {\n'+body[start:]
  print(body)
+ if name=='migrate':
+  boundary='  apply_migration_once "0196_content_understanding" '
+  if boundary not in body:raise SystemExit('missing content understanding migration boundary')
+  prefix=body[:body.index(boundary)]
+  if '  apply_migration_once "0195_observation_transition_immutable" ' not in prefix:
+   raise SystemExit('missing pre-upgrade migration')
+  print(prefix.replace('migrate() {','migrate_before_content_understanding() {',1)+'}')
 PY
 ensure_migration_ledger(){ psql_in_container >/dev/null <<'SQL'
 CREATE TABLE IF NOT EXISTS linggan_local_schema_migration(migration_id text PRIMARY KEY,migration_sha256 text NOT NULL CHECK(migration_sha256 ~ '^[0-9a-f]{64}$'),applied_at timestamptz NOT NULL DEFAULT clock_timestamp());
@@ -59,3 +72,114 @@ expected_head="$(sed -n 's/^  apply_migration_once "\([^"]*\)" .*/\1/p' "$projec
 [[ -n "$expected_head" && "$head" == "$expected_head" ]] || { echo "Migration head $head is not the last registered migration $expected_head" >&2; exit 1; }
 printf '{"head":"%s","retiredTables":%s,"freshAndRepeatPassed":true,"scope":"ordered schema migration only"}\n' "$head" "$legacy" > "$proof_dir/result.json"
 echo 'Fresh and repeat runtime schema migration passed; retired tables absent.'
+if [[ "$populated_upgrade" == 1 ]]; then
+  upgrade_database="${proof_database}_upgrade"
+  psql_in_container -c "CREATE DATABASE $upgrade_database" >/dev/null
+  proof_database="$upgrade_database"
+  migrate_before_content_understanding > "$proof_dir/upgrade-baseline.log" 2>&1
+  [[ "$(psql_in_container -Atc 'SELECT max(migration_id) FROM linggan_local_schema_migration')" == 0195_observation_transition_immutable ]] || exit 1
+  psql_in_container > "$proof_dir/upgrade-seed.log" 2>&1 <<'SQL'
+BEGIN;
+DO $$
+DECLARE connection uuid := gen_random_uuid(); version uuid := gen_random_uuid();
+ command uuid; batch uuid; config uuid; target record;
+BEGIN
+ INSERT INTO linggan_model_connection(connection_ref) VALUES(connection);
+ INSERT INTO linggan_model_connection_version(version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref)
+ VALUES(version,connection,1,'Synthetic upgrade only','openai-responses','http://127.0.0.1:9',true,gen_random_uuid());
+ FOR target IN SELECT * FROM (VALUES
+  ('note_interpretation','note_material'),('note_interpretation','comment_material'),
+  ('creation_title','selected_writing_material'),('model_probe','synthetic_probe')
+ ) AS pairs(task,material) LOOP
+  INSERT INTO linggan_model_egress_event(event_ref,endpoint_ref,task_key,material_class,allowed,actor_kind,reason)
+  VALUES(gen_random_uuid(),version,target.task,target.material,true,'human','Synthetic pre-upgrade permission');
+ END LOOP;
+ FOR target IN SELECT * FROM (VALUES
+  ('note_interpretation','interactive'),('creation_title','interactive'),('model_probe','probe')
+ ) AS pairs(task,kind) LOOP
+  command := gen_random_uuid(); batch := gen_random_uuid();
+  SELECT current_config_ref INTO STRICT config FROM linggan_ai_task_setting WHERE task_key=target.task;
+  INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt)
+  VALUES(command,'synthetic_upgrade_seed','{}','{}');
+  INSERT INTO linggan_ai_batch(batch_ref,task_key,task_config_ref,kind,inputs_sha256,item_count,command_ref)
+  VALUES(batch,target.task,config,target.kind,repeat('a',64),1,command);
+  INSERT INTO linggan_ai_batch_item(item_ref,batch_ref,position,item_key,input_ref)
+  VALUES(gen_random_uuid(),batch,0,'synthetic-upgrade','{"kind":"synthetic_upgrade"}');
+ END LOOP;
+ command := gen_random_uuid();
+ INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt)
+ VALUES(command,'synthetic_upgrade_controls','{}','{}');
+ UPDATE linggan_ai_control SET enabled=true,revision=revision+1,actor_kind='human',
+  reason='Synthetic pre-upgrade control',command_ref=command WHERE scope_key='global';
+ command := gen_random_uuid();
+ INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt)
+ VALUES(command,'synthetic_upgrade_controls','{}','{}');
+ UPDATE linggan_ai_control SET enabled=true,revision=revision+1,actor_kind='human',
+  reason='Synthetic pre-upgrade control',command_ref=command WHERE task_key='note_interpretation';
+END $$;
+COMMIT;
+CREATE SCHEMA upgrade_proof;
+CREATE TABLE upgrade_proof.baseline_table AS
+ SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'linggan_local_schema_migration';
+CREATE FUNCTION upgrade_proof.snapshot() RETURNS TABLE(table_name text,row_count bigint,row_hash text)
+ LANGUAGE plpgsql AS $$
+DECLARE entry record; predicate text;
+BEGIN
+ FOR entry IN SELECT tablename FROM upgrade_proof.baseline_table ORDER BY tablename LOOP
+  predicate := CASE
+   WHEN entry.tablename IN ('linggan_ai_task','linggan_ai_control','linggan_ai_task_round_state',
+    'linggan_ai_prompt_version','linggan_ai_task_config','linggan_ai_task_setting','linggan_skill_binding')
+    THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'''
+   WHEN entry.tablename='linggan_ai_failure_code'
+    THEN 'WHERE code<>''content_understanding_publication_withheld'''
+   ELSE '' END;
+  RETURN QUERY EXECUTE format(
+   'SELECT %L::text,count(*),md5(COALESCE(string_agg(to_jsonb(row)::text,E''\n'' ORDER BY to_jsonb(row)::text),'''')) FROM public.%I row %s',
+   entry.tablename,entry.tablename,predicate);
+ END LOOP;
+END $$;
+DO $$ BEGIN
+ IF (SELECT count(*) FROM linggan_ai_batch)<>3
+  OR (SELECT count(*) FROM linggan_ai_batch_item)<>3
+  OR (SELECT count(*) FROM linggan_model_egress_event)<>4
+  OR to_regclass('public.linggan_content_understanding_request') IS NOT NULL
+ THEN RAISE EXCEPTION 'populated_upgrade_baseline_invalid'; END IF;
+END $$;
+SQL
+  psql_in_container -Atc 'SELECT row_to_json(snapshot) FROM upgrade_proof.snapshot()' > "$proof_dir/upgrade-before.jsonl"
+  migrate > "$proof_dir/upgrade-apply.log" 2>&1
+  psql_in_container -Atc 'SELECT row_to_json(snapshot) FROM upgrade_proof.snapshot()' > "$proof_dir/upgrade-after.jsonl"
+  cmp "$proof_dir/upgrade-before.jsonl" "$proof_dir/upgrade-after.jsonl"
+  psql_in_container > "$proof_dir/upgrade-assertions.log" 2>&1 <<'SQL'
+DO $$ BEGIN
+ IF NOT EXISTS(
+  SELECT 1 FROM linggan_ai_task_setting setting
+  JOIN linggan_ai_task_config config ON config.task_config_ref=setting.current_config_ref
+  JOIN linggan_ai_control control ON control.task_key=setting.task_key
+  WHERE setting.task_key='content_understanding' AND NOT control.enabled
+   AND config.model_config_ref IS NULL AND config.skill_version_ref IS NULL
+   AND config.budget_mode='unconfigured'
+ ) THEN RAISE EXCEPTION 'new_task_was_enabled_or_configured'; END IF;
+ IF EXISTS(SELECT 1 FROM linggan_model_egress_event WHERE task_key='content_understanding')
+  OR EXISTS(SELECT 1 FROM linggan_ai_batch WHERE task_key='content_understanding')
+  OR EXISTS(SELECT 1 FROM linggan_content_understanding_request)
+  OR EXISTS(SELECT 1 FROM linggan_content_understanding_result)
+  OR EXISTS(SELECT 1 FROM linggan_model_invocation)
+ THEN RAISE EXCEPTION 'upgrade_created_work_or_egress'; END IF;
+END $$;
+SQL
+  migrate > "$proof_dir/upgrade-repeat.log" 2>&1
+  psql_in_container -Atc 'SELECT row_to_json(snapshot) FROM upgrade_proof.snapshot()' > "$proof_dir/upgrade-repeat.jsonl"
+  cmp "$proof_dir/upgrade-before.jsonl" "$proof_dir/upgrade-repeat.jsonl"
+  [[ "$(psql_in_container -Atc 'SELECT max(migration_id) FROM linggan_local_schema_migration')" == "$expected_head" ]] || exit 1
+  python3 - "$proof_dir/result.json" <<'PY'
+import json,sys
+path=sys.argv[1]
+with open(path) as f:result=json.load(f)
+result.update(populatedUpgradePassed=True,baselineHead='0195_observation_transition_immutable',
+    syntheticBatches=3,syntheticItems=3,syntheticEgressPermissions=4,
+    scope='fresh, repeat and populated synthetic upgrade; no production data or external calls')
+with open(path,'w') as f:json.dump(result,f,ensure_ascii=False,indent=2);f.write('\n')
+PY
+  echo 'Populated content-understanding upgrade and repeat passed; prior rows unchanged, new task disabled and no work dispatched.'
+fi
