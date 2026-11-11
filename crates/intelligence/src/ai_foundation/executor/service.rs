@@ -16,6 +16,7 @@ use uuid::Uuid;
 mod comment_problem;
 mod comment_research;
 mod content_understanding;
+mod content_understanding_deep;
 mod creator_account_research;
 mod creator_research;
 mod note_analysis;
@@ -142,6 +143,10 @@ async fn fill_slots(
             match item.task_key {
                 TaskKey::ContentUnderstanding => {
                     content_understanding::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                TaskKey::ContentUnderstandingDeep => {
+                    content_understanding_deep::execute(&db, &item, secrets.as_ref(), &adapter)
+                        .await
                 }
                 TaskKey::NoteInterpretation => {
                     note_analysis::execute(&db, &item, secrets.as_ref(), &adapter).await

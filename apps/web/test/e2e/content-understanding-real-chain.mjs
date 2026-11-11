@@ -207,15 +207,122 @@ try {
     }));
     await page.reload();
     await checkResult();
-    await understanding.getByText(scopeNote, { exact: true }).waitFor();
+    assert.equal(await understanding.getByText(scopeNote, { exact: true }).count(), 0);
     assert.equal(await understanding.getByText('本次按已取得的材料理解，材料缺口见下方原始材料。', { exact: true }).count(), 0);
     await page.screenshot({ path: path.join(directory, 'materials-video-scope.png') });
     await page.unroute('**/api/local/content-understanding/latest?**');
-    report.steps.push('仅展示层模拟：准备、缺原件与视频有限覆盖提示正确，390宽度可读且不新增生成请求。');
+    report.steps.push('仅展示层模拟：准备和缺原件提示正确，已保存结果不插入处理范围说明，390宽度可读且不新增生成请求。');
+
+    const card = report.result.card;
+    const question = '开头怎样说明练习的用途？';
+    const statement = '先交代材料，再说明练习步骤。';
+    const evidence = card.evidence.find(item => typeof item.quote === 'string');
+    assert.ok(evidence);
+    const deepPath = '/api/local/content-understanding/deep';
+    const deep = { commandRef: crypto.randomUUID(), domainRef: domain, workRef: work,
+      coreRef: card.analysisRef, question, findings: [{ id: 'f1', findingType: 'structure',
+        statement, basisUnitIds: [card.core.mainTopicUnitId], evidenceRefs: [evidence.id] }] };
+    assert.equal((await call(deepPath, 'POST', { ...deep, workRef: unprocessed })).status, 409);
+    assert.equal((await call(deepPath, 'POST', { ...deep,
+      findings: [{ ...deep.findings[0], evidenceRefs: ['missing'] }] })).status, 400);
+    const historicalAsOf = (await call(`/api/local/work-resources/${work}/research-dossier?domain=${domain}`)).body.dossier.asOf;
+    const published = await call(deepPath, 'POST', deep);
+    assert.equal(published.status, 200, JSON.stringify(published.body));
+    assert.deepEqual((await call(deepPath, 'POST', deep)).body, published.body);
+    assert.equal((await call(latest + '&asOf=' + encodeURIComponent(historicalAsOf))).body.analysis.result.card.deep, null);
+
+    const checkDeep = async () => {
+      await checkResult();
+      await understanding.getByText(question, { exact: true }).waitFor();
+      await understanding.getByText(statement, { exact: false }).waitFor();
+      await understanding.getByText('引用依据', { exact: true }).click();
+      await understanding.getByText(evidence.quote, { exact: true }).waitFor();
+    };
+    await page.getByRole('button', { name: '刷新底稿', exact: true }).click();
+    await checkDeep();
+    await page.reload();
+    await checkDeep();
+    const refreshed = (await call(latest)).body.analysis;
+    assert.deepEqual(refreshed.result.card.core, card.core);
+    assert.deepEqual(refreshed.result.card.evidence, card.evidence);
+    assert.equal(refreshed.deepQuestion, question);
+    assert.equal(refreshed.result.card.deep.analysisRef, published.body.analysisRef);
+    assert.deepEqual(refreshed.result.card.deep.findings, deep.findings);
+    report.steps.push('人工深化真实写入、幂等、错误作品和无效引用拒绝、历史时间读取及底稿刷新通过。');
+    const generatePath = deepPath + '/generate';
+    const generatedQuestion = '作者怎样安排材料和核对顺序？';
+    const generatedStatement = '作者用材料示范核对步骤。';
+    const generate = { commandRef: crypto.randomUUID(), domainRef: domain, workRef: work,
+      coreRef: card.analysisRef, question: generatedQuestion,
+      taskConfigRef: fixture.deepConfigRef, taskRevision: fixture.deepRevision };
+    const denied = await call(generatePath, 'POST', generate);
+    assert.equal(denied.status, 409);
+    assert.deepEqual(denied.body.reasons, ['egress_not_approved']);
+    const egress = await call('/api/local/ai-settings/egress', 'POST', {
+      commandRef: crypto.randomUUID(), endpointRef: fixture.endpointRef, taskKey: 'content_understanding_deep',
+      materialClass: 'note_material', expectedEventRef: null, allowed: true, reason: '隔离合成端点测试',
+    });
+    assert.equal(egress.status, 200, JSON.stringify(egress.body));
+    assert.equal((await call(generatePath, 'POST', { ...generate, workRef: unprocessed })).status, 409);
+    assert.equal((await call(generatePath, 'POST', { ...generate, taskConfigRef: payload.taskConfigRef })).status, 409);
+    const waitForDeep = async batchRef => {
+      const batchPath = '/api/local/ai-settings/batches/' + batchRef;
+      for (let i = 0; i < 300; i += 1) {
+        const batch = await call(batchPath);
+        assert.equal(batch.status, 200);
+        assert.equal(batch.body.batch.taskKey, 'content_understanding_deep');
+        const [item] = batch.body.items;
+        if (!['pending', 'running'].includes(item.state)) return item;
+        await new Promise(resolve => setTimeout(resolve, 200));
+      }
+      throw new Error('单篇深化未在等待时间内结束');
+    };
+    const bad = await call(generatePath, 'POST', { ...generate, commandRef: crypto.randomUUID(), question: '合成无效引用' });
+    assert.equal(bad.status, 202, JSON.stringify(bad.body));
+    const badItem = await waitForDeep(bad.body.batchRef);
+    assert.equal(badItem.state, 'failed');
+    assert.equal(badItem.failureCode, 'ai_output_invalid');
+    assert.deepEqual((await call(latest)).body.analysis.result.card.deep, refreshed.result.card.deep);
+
+    const queued = await call(generatePath, 'POST', generate);
+    assert.equal(queued.status, 202, JSON.stringify(queued.body));
+    const replayed = await call(generatePath, 'POST', generate);
+    assert.deepEqual(replayed.body, queued.body);
+    const completed = await waitForDeep(queued.body.batchRef);
+    assert.equal(completed.state, 'succeeded', JSON.stringify(completed));
+    assert.equal(completed.attemptCount, 1);
+    const readGenerated = async () => {
+      await checkResult();
+      await understanding.getByText(generatedQuestion, { exact: true }).waitFor();
+      await understanding.getByText(generatedStatement, { exact: false }).waitFor();
+      await understanding.getByText('引用依据', { exact: true }).click();
+      await understanding.getByText(evidence.quote, { exact: true }).waitFor();
+    };
+    await page.getByRole('button', { name: '刷新底稿', exact: true }).click();
+    await readGenerated();
+    await page.reload();
+    await readGenerated();
+    const generated = (await call(latest)).body.analysis;
+    assert.equal(generated.deepQuestion, generatedQuestion);
+    assert.equal(generated.result.card.deep.analysisRef, queued.body.requestRef);
+    assert.equal(generated.result.card.deep.methodVersion, 'content-understanding.l2.model.v1');
+    assert.deepEqual(generated.result.card.deep.findings, [{ id: 'f1', findingType: 'structure',
+      statement: generatedStatement, basisUnitIds: ['u3'], evidenceRefs: [evidence.id] }]);
+    assert.deepEqual(generated.result.card.core, card.core);
+    assert.deepEqual(generated.result.card.evidence, card.evidence);
+    report.generated = generated.result.card.deep;
+    await understanding.screenshot({ path: path.join(directory, 'understanding-deep-generated.png') });
+    report.steps.push('人工问题经 L2 独立许可、真实队列和合成端点完成深化；无效引用保留原 Deep，底稿与 Card 刷新一致。');
   }
-  assert.deepEqual(report.writes, ['/api/local/content-understanding', '/api/local/content-understanding']);
+  assert.deepEqual(report.writes, ['/api/local/content-understanding', '/api/local/content-understanding',
+    ...(!fixture.live ? [
+      ...Array(4).fill('/api/local/content-understanding/deep'),
+      '/api/local/content-understanding/deep/generate', '/api/local/ai-settings/egress',
+      ...Array(5).fill('/api/local/content-understanding/deep/generate'),
+    ] : [])]);
   assert.deepEqual(report.pageErrors, []);
-  assert.ok(report.consoleErrors.every(message => message.includes('503')));
+  assert.ok(report.consoleErrors.every(message => message.includes('503')
+    || (!fixture.live && /\b(400|409)\b/u.test(message))));
   report.finished = true;
 } catch (error) {
   report.error = error.stack;

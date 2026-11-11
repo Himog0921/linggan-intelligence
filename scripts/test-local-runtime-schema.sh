@@ -129,9 +129,9 @@ BEGIN
   predicate := CASE
    WHEN entry.tablename IN ('linggan_ai_task','linggan_ai_control','linggan_ai_task_round_state',
     'linggan_ai_prompt_version','linggan_ai_task_config','linggan_ai_task_setting','linggan_skill_binding')
-    THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'''
+    THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'' AND task_key IS DISTINCT FROM ''content_understanding_deep'''
    WHEN entry.tablename='linggan_ai_failure_code'
-    THEN 'WHERE code<>''content_understanding_publication_withheld'''
+    THEN 'WHERE code NOT IN (''content_understanding_publication_withheld'',''content_understanding_deep_insufficient_evidence'')'
    ELSE '' END;
   RETURN QUERY EXECUTE format(
    'SELECT %L::text,count(*),md5(COALESCE(string_agg(to_jsonb(row)::text,E''\n'' ORDER BY to_jsonb(row)::text),'''')) FROM public.%I row %s',
@@ -152,18 +152,20 @@ SQL
   cmp "$proof_dir/upgrade-before.jsonl" "$proof_dir/upgrade-after.jsonl"
   psql_in_container > "$proof_dir/upgrade-assertions.log" 2>&1 <<'SQL'
 DO $$ BEGIN
- IF NOT EXISTS(
-  SELECT 1 FROM linggan_ai_task_setting setting
+ IF (
+  SELECT count(*) FROM linggan_ai_task_setting setting
   JOIN linggan_ai_task_config config ON config.task_config_ref=setting.current_config_ref
   JOIN linggan_ai_control control ON control.task_key=setting.task_key
-  WHERE setting.task_key='content_understanding' AND NOT control.enabled
+  WHERE setting.task_key IN ('content_understanding','content_understanding_deep') AND NOT control.enabled
    AND config.model_config_ref IS NULL AND config.skill_version_ref IS NULL
    AND config.budget_mode='unconfigured'
- ) THEN RAISE EXCEPTION 'new_task_was_enabled_or_configured'; END IF;
- IF EXISTS(SELECT 1 FROM linggan_model_egress_event WHERE task_key='content_understanding')
-  OR EXISTS(SELECT 1 FROM linggan_ai_batch WHERE task_key='content_understanding')
+ ) <> 2 THEN RAISE EXCEPTION 'new_task_was_enabled_or_configured'; END IF;
+ IF EXISTS(SELECT 1 FROM linggan_model_egress_event WHERE task_key IN ('content_understanding','content_understanding_deep'))
+  OR EXISTS(SELECT 1 FROM linggan_ai_batch WHERE task_key IN ('content_understanding','content_understanding_deep'))
   OR EXISTS(SELECT 1 FROM linggan_content_understanding_request)
   OR EXISTS(SELECT 1 FROM linggan_content_understanding_result)
+  OR EXISTS(SELECT 1 FROM linggan_content_understanding_deep_request)
+  OR EXISTS(SELECT 1 FROM linggan_content_understanding_deep)
   OR EXISTS(SELECT 1 FROM linggan_model_invocation)
  THEN RAISE EXCEPTION 'upgrade_created_work_or_egress'; END IF;
 END $$;
@@ -181,5 +183,5 @@ result.update(populatedUpgradePassed=True,baselineHead='0195_observation_transit
     scope='fresh, repeat and populated synthetic upgrade; no production data or external calls')
 with open(path,'w') as f:json.dump(result,f,ensure_ascii=False,indent=2);f.write('\n')
 PY
-  echo 'Populated content-understanding upgrade and repeat passed; prior rows unchanged, new task disabled and no work dispatched.'
+  echo 'Populated content-understanding upgrade and repeat passed; prior rows unchanged, new tasks disabled and no work dispatched.'
 fi

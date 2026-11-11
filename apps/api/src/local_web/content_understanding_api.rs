@@ -15,9 +15,24 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/content-understanding/preview", get(preview))
         .route("/api/local/content-understanding/latest", get(latest))
         .route("/api/local/content-understanding", post(start))
+        .route("/api/local/content-understanding/deep", post(publish_deep))
+        .route(
+            "/api/local/content-understanding/deep/generate",
+            post(generate_deep),
+        )
         .layer(axum::middleware::from_fn(
             super::comment_study::local_comment_study_guard,
         ))
+}
+
+async fn publish_deep(
+    State(s): State<LocalWebState>,
+    Json(request): Json<owner::PublishDeep>,
+) -> Response {
+    let LocalDatabaseState::Ready(db) = &s.database else {
+        return unavailable();
+    };
+    super::ai_settings::respond(owner::publish_deep(db, &request).await)
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -54,6 +69,19 @@ async fn start(State(s): State<LocalWebState>, Json(q): Json<owner::Start>) -> R
         return unavailable();
     };
     match owner::start(db, &q).await {
+        Ok(value) => (StatusCode::ACCEPTED, Json(value)).into_response(),
+        Err(error) => super::ai_settings::respond::<serde_json::Value>(Err(error)),
+    }
+}
+
+async fn generate_deep(
+    State(s): State<LocalWebState>,
+    Json(request): Json<owner::GenerateDeep>,
+) -> Response {
+    let LocalDatabaseState::Ready(db) = &s.database else {
+        return unavailable();
+    };
+    match owner::generate_deep(db, &request).await {
         Ok(value) => (StatusCode::ACCEPTED, Json(value)).into_response(),
         Err(error) => super::ai_settings::respond::<serde_json::Value>(Err(error)),
     }

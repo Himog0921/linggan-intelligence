@@ -88,6 +88,9 @@ pub enum InputRef {
     ContentUnderstanding {
         request_ref: Uuid,
     },
+    ContentUnderstandingDeep {
+        request_ref: Uuid,
+    },
     Note {
         snapshot_ref: Uuid,
     },
@@ -135,6 +138,9 @@ impl InputRef {
             }
             Self::NoteAnalysis { .. } => task == TaskKey::NoteInterpretation && !trial,
             Self::ContentUnderstanding { .. } => task == TaskKey::ContentUnderstanding && !trial,
+            Self::ContentUnderstandingDeep { .. } => {
+                task == TaskKey::ContentUnderstandingDeep && !trial
+            }
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
             Self::DirectionSample { .. } => matches!(
                 task,
@@ -177,6 +183,7 @@ impl BatchKind {
         match task {
             TaskKey::ModelProbe => self == Self::Probe,
             TaskKey::ContentUnderstanding
+            | TaskKey::ContentUnderstandingDeep
             | TaskKey::WorkComparison
             | TaskKey::CreatorResearch
             | TaskKey::CreatorAccountResearch
@@ -311,12 +318,13 @@ pub async fn create_batch(
     {
         return Err(FoundationError::Invalid);
     }
-    // Work comparison must freeze its exact material scope through its owning command.
+    // These tasks freeze their material scope through their owning commands.
     if request.task_key.comment_stage().is_some()
         || request.task_key.topic_stage().is_some()
         || matches!(
             request.task_key,
-            TaskKey::WorkComparison
+            TaskKey::ContentUnderstandingDeep
+                | TaskKey::WorkComparison
                 | TaskKey::CreatorResearch
                 | TaskKey::CreatorAccountResearch
                 | TaskKey::CommentStudy
