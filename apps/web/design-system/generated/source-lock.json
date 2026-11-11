@@ -1,5 +1,5 @@
 {
-  "fingerprint": "7b3a21b2f2e74a7a11187a25913236b937f8126f88f1b2c1d5cfe3ec74733c28",
+  "fingerprint": "7bb1ca40c65c9fe905142859bcbb8ad5ff5959cffc28fa191eadafd6b5574715",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -259,11 +259,11 @@
     },
     {
       "path": "apps/web/src/pages/collection/targets/TargetDrawer.tsx",
-      "sha256": "cecf4c6130977639b2f19123c893d1d2ebf4c1da5ddb79db857344372ed50375"
+      "sha256": "eee214b806aa675fce0c82f5e5d0eb1863835b8d1e2dd81410f0f19eafc01595"
     },
     {
       "path": "apps/web/src/pages/collection/targets/TargetModals.tsx",
-      "sha256": "3113ed3fb03f7f801f3b65e58efe0f84f07a254c66708a424078a88c85023db2"
+      "sha256": "a8d58cbea3277819082522f531b30a32ec9339f6f6b3a41c350ad8a0fa2da0ed"
     },
     {
       "path": "apps/web/src/pages/collection/targets/TargetsPage.tsx",
@@ -331,7 +331,7 @@
     },
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorJoinDialog.tsx",
-      "sha256": "10db7be87b02efad808e473a43401bc86ca3710aeafc31ea024e9474104f3893"
+      "sha256": "986247e73cc7688ddfdda44e31086173dbcb72902d4726ef5a12b8886bcbfed8"
     },
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorSelect.tsx",
@@ -447,11 +447,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
-      "sha256": "47dbb709134528e8cedc01c64354476a7c0ba51c9e49258f82f9803d4e61433c"
+      "sha256": "58cd86542a513be277cdd4910a689520632ac6961b6e5ad1db40317b56beaa3f"
     },
     {
       "path": "apps/web/src/pages/topics/topicOverview.tsx",
-      "sha256": "fad2ce9bff9d64e17ed526d19a1f5596347872334a104a92c03b770697292cfb"
+      "sha256": "89aca1454526165f0206fb7fa8ecf9bc8e9ba0e314df96ca5f82d94bf2312f6f"
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.module.css",

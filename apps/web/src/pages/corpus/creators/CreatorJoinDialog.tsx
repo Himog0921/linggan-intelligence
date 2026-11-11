@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useId, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { InlineNotice } from '../../../shared/InlineNotice';
@@ -94,6 +95,7 @@ export function CreatorJoinDialog({ target, onClose }: CreatorJoinDialogProps) {
             <h2 id={titleId}>加入观察目标</h2>
           </div>
           <button type="button" className={styles.textButton} aria-label="关闭加入观察对话框" onClick={requestClose}>
+            <IntelligenceIcon name="close" size={16}/>
             关闭
           </button>
         </header>

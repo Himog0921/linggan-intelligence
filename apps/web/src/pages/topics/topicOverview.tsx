@@ -479,21 +479,21 @@ export function createTopicOverview(context: TopicOverviewContext) {
           )}
 
             {btn(
-              "我方矩阵",
+              <><IntelligenceIcon name="grid" size={16}/>我方矩阵</>,
               "identity",
               "",
               "lgi-tm-quiet",
               busy ? "disabled" : "",
             )}
             {btn(
-              "计数与统计口径",
+              <><IntelligenceIcon name="info" size={16}/>计数与统计口径</>,
               "method",
               "",
               "lgi-tm-quiet",
               busy ? "disabled" : "",
             )}
             {btn(
-              "调整归属",
+              <><IntelligenceIcon name="edit" size={16}/>调整归属</>,
               "move-topic",
               "",
               "lgi-tm-quiet",

@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { createPortal } from 'react-dom';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link,useNavigate } from 'react-router';
@@ -424,7 +425,7 @@ export function RuleModal({
 
   if (error) {
     return <Modal key={`unavailable:${errorCode}`} commands={commands} rule id="c-rule-title" className={`c-rule-modal c-rule-modal-compact ${ruleStyles.modal}`} closeHref={close}>
-      <RuleUnavailable code={errorCode} close={<ActionButton data-modal-close onClick={()=>navigate(close)} aria-label="关闭监控规则">关闭</ActionButton>} />
+      <RuleUnavailable code={errorCode} close={<ActionButton data-modal-close onClick={()=>navigate(close)} aria-label="关闭监控规则"><IntelligenceIcon name="close" size={16}/>关闭</ActionButton>} />
     </Modal>;
   }
   return (
@@ -433,7 +434,7 @@ export function RuleModal({
         <div>
           <h2 id="c-rule-title">巡查设置 · {data?.name ?? '读取中'}</h2>
         </div>
-        <ActionButton data-modal-close onClick={()=>navigate(close)} aria-label="关闭监控规则">关闭</ActionButton>
+        <ActionButton data-modal-close onClick={()=>navigate(close)} aria-label="关闭监控规则"><IntelligenceIcon name="close" size={16}/>关闭</ActionButton>
       </header>
       <RuleReceipt receipt={latest.data?.receipt ?? data?.receipt ?? null} />
       {data?.lifecycle === 'dismissed' && <p className="c-rule-disabled" data-control-reason="target_not_requestable"><b>目标已停止</b>历史与规则仍可查看，但不能保存、恢复或发起新的观察。</p>}
