@@ -34,28 +34,27 @@ impl PiRequest {
         if !self.images.is_empty() {
             use base64::Engine;
             if self.execution.is_none()
-                || self.images.len() != 1
-                || self.operation != "analyze_image"
+                || !["analyze", "analyze_image"].contains(&self.operation.as_str())
             {
                 return Err(ModelError::Invalid);
             }
-            let image = &self.images[0];
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(&image.data)
-                .map_err(|_| ModelError::Invalid)?;
-            let magic = match image.mime_type.as_str() {
-                "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
-                "image/jpeg" => bytes.starts_with(&[255, 216, 255]),
-                "image/webp" => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
-                _ => false,
-            };
-            if !magic
-                || bytes.len() > 8_000_000
-                || super::ai_foundation::transport::estimate_input_tokens(
-                    &self.system,
-                    &self.prompt,
-                ) + 1024
-                    > self.execution.as_ref().unwrap().input_token_limit
+            for image in &self.images {
+                let bytes = base64::engine::general_purpose::STANDARD
+                    .decode(&image.data)
+                    .map_err(|_| ModelError::Invalid)?;
+                let magic = match image.mime_type.as_str() {
+                    "image/png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
+                    "image/jpeg" => bytes.starts_with(&[255, 216, 255]),
+                    "image/webp" => bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"),
+                    _ => false,
+                };
+                if !magic || bytes.len() > 8_000_000 {
+                    return Err(ModelError::Invalid);
+                }
+            }
+            if super::ai_foundation::transport::estimate_input_tokens(&self.system, &self.prompt)
+                + self.images.len() as u64 * 1024
+                > self.execution.as_ref().unwrap().input_token_limit
             {
                 return Err(ModelError::InputLimit);
             }
@@ -82,5 +81,99 @@ impl PiRequest {
             return Err(ModelError::InputLimit);
         }
         Ok(input)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        ai_foundation::{
+            capability::Capability, provider_store::OutputMode, transport::PiExecution,
+        },
+        pi_adapter::PiImage,
+    };
+    use base64::Engine;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+    use uuid::Uuid;
+
+    fn request(count: usize) -> PiRequest {
+        PiRequest {
+            version: PI_PROTOCOL,
+            operation: "analyze".into(),
+            api: "openai-responses".into(),
+            base_url: "http://127.0.0.1:1".into(),
+            local_endpoint: true,
+            api_key: "synthetic".into(),
+            model_id: "synthetic".into(),
+            timeout_ms: 1000,
+            max_output_tokens: 2000,
+            system: String::new(),
+            prompt: String::new(),
+            images: (0..count)
+                .map(|i| PiImage {
+                    mime_type: "image/png".into(),
+                    data: base64::engine::general_purpose::STANDARD
+                        .encode([b"\x89PNG\r\n\x1a\n".as_slice(), &[i as u8]].concat()),
+                })
+                .collect(),
+            execution: Some(PiExecution {
+                capability_ref: Uuid::new_v4(),
+                limits: Capability {
+                    context_tokens: 32768,
+                    max_output_tokens: 8192,
+                    max_timeout_seconds: 60,
+                    thinking_levels: ["high".into()].into(),
+                },
+                input_token_limit: 24576,
+                thinking_level: "high".into(),
+                compat: json!({}),
+                thinking_level_map: BTreeMap::new(),
+                output_mode: OutputMode::PromptOnly,
+                strict_schema: false,
+                response_schema: None,
+            }),
+        }
+    }
+    #[test]
+    fn qualified_multimage_wire_keeps_all_bytes_and_order() {
+        let r = request(11);
+        let wire: Value = serde_json::from_slice(&r.wire_bytes().unwrap()).unwrap();
+        assert_eq!(wire["images"].as_array().unwrap().len(), 11);
+        for (i, image) in r.images.iter().enumerate() {
+            assert_eq!(wire["images"][i]["data"], image.data);
+        }
+        let mut r = request(11);
+        r.images[10].data = "not-base64".into();
+        assert!(matches!(r.wire_bytes(), Err(ModelError::Invalid)));
+    }
+    #[test]
+    fn images_require_qualified_operation_and_single_image_mode_is_unchanged() {
+        let mut r = request(2);
+        r.operation = "analyze_image".into();
+        assert!(matches!(r.wire_bytes(), Err(ModelError::Invalid)));
+        r.images.pop();
+        assert!(r.wire_bytes().is_ok());
+        r.images.clear();
+        assert!(matches!(r.wire_bytes(), Err(ModelError::Invalid)));
+        let mut r = request(1);
+        r.execution = None;
+        assert!(matches!(r.wire_bytes(), Err(ModelError::Invalid)));
+        let mut r = request(1);
+        r.operation = "probe".into();
+        assert!(matches!(r.wire_bytes(), Err(ModelError::Invalid)));
+    }
+    #[test]
+    fn image_input_reserve_counts_every_image_at_exact_boundary() {
+        let mut r = request(11);
+        r.execution.as_mut().unwrap().input_token_limit =
+            super::super::ai_foundation::transport::estimate_input_tokens(&r.system, &r.prompt)
+                + 11 * 1024;
+        assert!(r.wire_bytes().is_ok());
+        r.execution.as_mut().unwrap().input_token_limit -= 1;
+        assert!(matches!(r.wire_bytes(), Err(ModelError::InputLimit)));
+        r.images.pop();
+        assert!(r.wire_bytes().is_ok());
     }
 }

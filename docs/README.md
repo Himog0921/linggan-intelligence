@@ -10,6 +10,12 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-11-10 · 统一内容理解 L1 开发
+
+- [当前执行表](plans/active/unified-content-understanding-v1.2-execution.md)：先跑通一篇保存、读取和底稿展示，再做二十篇验收；独立开发已授权，未上线。
+- [产品规格](product/unified-content-understanding-v1.2.md)：中立整篇理解、默认 high，L2 与定向图片补充后置。
+- [Content Card 合同](data-contracts/content-card.md)及[Schema](data-contracts/content-card.v0.2.schema.json)：底稿与卡片共用一份 Core。
+
 ## 2026-11-04 · 研究底稿 V1.0 已冻结
 
 - [11 月变更记录](progress/2026-11.md)：本次冻结与交付边界。

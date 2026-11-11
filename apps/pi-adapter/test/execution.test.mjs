@@ -126,6 +126,19 @@ test('Anthropic thinking stays inside the output ceiling and native schema prese
     assert.equal(bodies.length,2);
   },anthropic);
 });
+test('returned model is a provider wire fact, not the requested model', async () => {
+  for (const model of [undefined, 'provider-actual-synthetic', 'x'.repeat(161), 'invalid' + String.fromCharCode(10) + 'model']) {
+    await fixture(async r => {
+      const result = await execute(r);
+      assert.equal(result.ok, true);
+      assert.equal(result.diagnostic.providerReturnedModel, model === 'provider-actual-synthetic' ? model : undefined);
+    }, res => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write(`data: ${JSON.stringify({ model, choices: [{ index: 0, delta: { role: 'assistant', content: '{"ok":true}' }, finish_reason: 'stop' }] })}\n\n`);
+      res.end('data: [DONE]\n\n');
+    });
+  }
+});
 test('pinned SDK metadata vocabulary excludes route and header injection',()=>{
   assert.equal(PROTOCOL.sdkVersion,'0.85.1');
   assert.ok(validCompatibility('openai-completions',{thinkingFormat:'chat-template',chatTemplateKwargs:{enable_thinking:{$var:'thinking.enabled'}}}));

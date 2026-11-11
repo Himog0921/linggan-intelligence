@@ -15,6 +15,7 @@ use tokio::{
 use uuid::Uuid;
 mod comment_problem;
 mod comment_research;
+mod content_understanding;
 mod creator_account_research;
 mod creator_research;
 mod note_analysis;
@@ -139,6 +140,9 @@ async fn fill_slots(
         let (db, secrets, adapter) = (db.clone(), secrets.clone(), adapter.clone());
         tasks.spawn(async move {
             match item.task_key {
+                TaskKey::ContentUnderstanding => {
+                    content_understanding::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
                 TaskKey::NoteInterpretation => {
                     note_analysis::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }

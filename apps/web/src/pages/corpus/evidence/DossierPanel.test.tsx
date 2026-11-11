@@ -7,8 +7,13 @@ import * as dossierApi from './dossierApi';
 import { DOMAIN, dossierJson, dossierMaterialJson, workRef } from './evidenceFixtures';
 import { createFetchMock, fail, ok, renderWithProviders, type FetchKit } from './testKit';
 const path = `/api/local/work-resources/${workRef(1)}/research-dossier`;
+const understandingPath = '/api/local/content-understanding/latest';
 let kit: FetchKit;
-beforeEach(() => { kit = createFetchMock(); kit.install(); HTMLElement.prototype.scrollTo = vi.fn(); localStorage.clear(); });
+beforeEach(() => {
+  kit = createFetchMock();
+  kit.route('GET', understandingPath, ok({ contract: 'content-understanding.read.v1', workRef: workRef(1), analysis: null }));
+  kit.install(); HTMLElement.prototype.scrollTo = vi.fn(); localStorage.clear();
+});
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function mount(active = true) { return renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active={active} />); }
 const source = (state: string, units = 0, readings = 0) => ({ state, units, readings });
@@ -31,7 +36,8 @@ it('未打开底稿不发请求，打开后不自动准备识读或读取来源�
   const inactive = mount(false); expect(kit.calls).toHaveLength(0); inactive.unmount();
   kit.route('GET', path, ok(dossierJson(1)));
   mount(); await screen.findByRole('button', { name: '导出' });
-  expect(kit.calls.map(call => `${call.method} ${call.path}`)).toEqual([`GET ${path}`]);
+  await screen.findByText('这篇尚无当前材料的理解结果，以下保留原始材料。');
+  expect(kit.calls.map(call => `${call.method} ${call.path}`)).toEqual([`GET ${path}`, `GET ${understandingPath}`]);
   for (const label of ['查看来源', '修正文字', '导出来源映射', '原文展开', '作者、时间与互动', '材料详情']) expect(screen.queryByText(label)).not.toBeInTheDocument();
 });
 it('多图沿 owner 编排连续阅读，保留标题来源及相同文字的不同来源', async () => {
@@ -79,7 +85,8 @@ it('仅待处理样本保留真实缺失状态，不造口播、目录或原图�
   expect(screen.queryByText(/第 1 页文字待补全/)).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /章节导航/ })).not.toBeInTheDocument();
   expect(view.container.querySelector('[data-transcript-paragraph], img')).toBeNull();
-  expect(kit.calls).toHaveLength(1);
+  await screen.findByText('这篇尚无当前材料的理解结果，以下保留原始材料。');
+  expect(kit.calls.map(call => `${call.method} ${call.path}`)).toEqual([`GET ${path}`, `GET ${understandingPath}`]);
 });
 it('5 分钟负载自然段全文保留，毫秒时码与专注弹窗不推造讲述人数', async () => {
   const paragraphs = Array.from({ length: 12 }, (_, index) => ({ ref: `speech-${index}`, kind: 'paragraph', speaker: index > 5 ? 'other' : 'author', text: `段落${index + 1}：${'需要完整阅读的真实长口播。'.repeat(12)}`, time: { startMs: index === 7 ? 173000 : index * 25000, endMs: (index + 1) * 25000 } }));

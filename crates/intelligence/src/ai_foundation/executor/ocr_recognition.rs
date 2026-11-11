@@ -37,7 +37,7 @@ struct PublicationTarget {
     expected_reading_ref: Option<Uuid>,
 }
 
-fn image(
+pub(crate) fn image(
     storage: &str,
     mime: &str,
     size: i64,

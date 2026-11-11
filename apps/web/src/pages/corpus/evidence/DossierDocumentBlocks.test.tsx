@@ -6,6 +6,7 @@ import { parseDossierPayload } from './dossierDecode';
 import { endingGroupAttribution, readingGaps, resolveReadingSections } from './dossierDocumentModel';
 import { dossierJson, dossierMaterialJson } from './evidenceFixtures';
 import type { DossierBlock, ReadingGroup } from './dossierTypes';
+import { renderWithProviders } from './testKit';
 function mount(blocks: DossierBlock[], mode: ReadingGroup['mode'] = 'blocks') {
   const fixture = dossierJson(1, { materials: [dossierMaterialJson(1, { blocks })] });
   fixture.dossier.readingView.sections[0]!.groups = [{ ref: 'group', mode, blockRefs: blocks.map(block => block.ref), continuation: { fromPrevious: false, toNext: false }, ...(mode === 'paragraph' || mode === 'transcript_paragraph' ? { joiners: blocks.slice(1).map(() => '') } : {}) }] as ReadingGroup[];
@@ -104,7 +105,7 @@ it.each(['blocks', 'paragraph'] as const)('在线资料在%s模式保留原文�
 it('图片资料提供所属原图入口并保留未知页码', () => {
   const originalUrl = '/api/local/media/20000000-0000-4000-8000-000000000001/' + 'a'.repeat(64);
   const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { page: null, originalUrl })] }));
-  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  renderWithProviders(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.getByRole('link', { name: '查看原图' })).toHaveAttribute('href', originalUrl);
   expect(screen.queryByText(/页码/)).toBeNull();
 });
@@ -114,7 +115,7 @@ it('同图多个区域只保留一个核对入口，展开后保留疑点位置'
     { ref: 'left', kind: 'paragraph', text: '左栏原文', contentType: 'extracted_text', regionRef: 'r1', regionLabel: '左栏', issues: [{ key: 'left', code: 'region_uncertainty', message: '末字模糊', blockRef: 'left', resolution: 'reading_edit' }] },
     { ref: 'right', kind: 'paragraph', text: '右栏原文', contentType: 'extracted_text', regionRef: 'r2', regionLabel: '右栏', issues: [{ key: 'right', code: 'region_uncertainty', message: '数值模糊', blockRef: 'right', resolution: 'reading_edit' }] }
   ] })] }));
-  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  renderWithProviders(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.queryByText(/^核对说明/)).toBeNull();
 });
 
@@ -175,14 +176,14 @@ it('前景与背景文字切换保留归属边界，连续背景不重复标注'
 it('多张图片的页序说明只在文末保留一次，不逐图制造核对入口', () => {
   const issue = { key: 'page', code: 'page_order_unknown', message: '平台图片页序尚未确认', resolution: 'source_refresh' };
   const payload = parseDossierPayload(dossierJson(1, { materials: [1, 2].map(n => dossierMaterialJson(n, { page: null, issues: [issue] })) }));
-  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  renderWithProviders(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.queryByText(/^核对说明/)).toBeNull();
 });
 
 it('已取得文字但缺少视觉信息仍显示含待补内容，而不是内容就绪', () => {
   const issue = { key: 'missing-visual', code: 'visual_information_missing', message: '非文字信息尚未提供', resolution: 'reading_edit' };
   const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { issues: [], blocks: [{ ref: 'r1', kind: 'paragraph', text: '仍可阅读的原文', issues: [issue] }] })] }));
-  render(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  renderWithProviders(<DossierDocument payload={payload} domain="test" active={true} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.getByText('含待补内容')).toBeVisible();
   expect(screen.queryByText('内容就绪')).not.toBeInTheDocument();
   expect(screen.getByText('仍可阅读的原文')).toBeVisible();

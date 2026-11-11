@@ -58,6 +58,13 @@ const paths = {
     'scripts/test-content-workbench-postgres.sh', 'scripts/test-collection-*.cjs',
     'scripts/test-collection-single-run-postgres.sh',
     'database/migrations/0195_observation_transition_immutable.sql',
+    'database/migrations/0196_content_understanding.sql',
+    'crates/intelligence/src/content_understanding*', 'crates/intelligence/src/content_understanding/**',
+    'crates/intelligence/src/ai_foundation/content_understanding*',
+    'crates/intelligence/src/ai_foundation/content_understanding/**',
+    'crates/intelligence/src/ai_foundation/executor/service/content_understanding.rs',
+    'crates/intelligence/tests/content_understanding*',
+    'crates/intelligence/tests/support/content_understanding*',
     'crates/evidence/src/material_social_read.rs', 'crates/evidence/src/research_dossier.rs',
     'crates/evidence/src/research_dossier/**', 'crates/evidence/src/work_resource_*.rs',
     'crates/evidence/src/material_*.rs', 'crates/evidence/src/content_reobservation.rs',
@@ -123,6 +130,7 @@ paths.web_real_chain = [
   'apps/web/src/pages/collection/targets/useWorkspace.ts',
   'apps/web/src/pages/collection/tasks/runRequests.ts',
   'apps/web/src/pages/corpus/evidence/DossierSections.tsx',
+  'apps/web/src/pages/corpus/evidence/DossierUnderstanding.tsx',
   'apps/web/src/pages/login/sceneRuntime.ts',
   'apps/web/src/pages/login/AcceptInvitationPage.tsx',
   'apps/web/src/pages/login/LoginPage.tsx',
@@ -150,6 +158,7 @@ paths.web_real_chain = [
   'apps/web/test/e2e/topics-real-chain.mjs',
   'apps/web/test/e2e/workbench-real-chain.mjs',
   'apps/web/test/e2e/unified-research-real-chain.mjs',
+  'apps/web/test/e2e/content-understanding-real-chain.mjs',
 ];
 
 function globRegex(pattern) {

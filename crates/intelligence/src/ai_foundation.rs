@@ -51,6 +51,7 @@ pub enum RuleError {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskKey {
+    ContentUnderstanding,
     NoteInterpretation,
     DirectionListDraft,
     DirectionProposal,
@@ -78,6 +79,7 @@ pub enum TaskKey {
 impl TaskKey {
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::ContentUnderstanding => "content_understanding",
             Self::NoteInterpretation => "note_interpretation",
             Self::DirectionListDraft => "direction_list_draft",
             Self::DirectionProposal => "direction_proposal",
@@ -133,4 +135,5 @@ impl TaskKey {
 pub mod invocation_read;
 pub mod ocr_recognition;
 
+pub mod content_understanding;
 pub mod note_analysis;

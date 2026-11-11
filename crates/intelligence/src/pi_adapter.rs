@@ -93,6 +93,8 @@ pub struct PiDiagnostic {
     pub received_bytes: Option<u64>,
     pub limit_kind: Option<String>,
     pub finish_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_returned_model: Option<String>,
     pub elapsed_ms: u64,
     pub usage_known: bool,
     pub sdk_error_type: Option<String>,
@@ -139,6 +141,10 @@ impl PiDiagnostic {
                         | "output_tokens"
                 )
             })
+            && self
+                .provider_returned_model
+                .as_deref()
+                .is_none_or(|v| !v.is_empty() && v.len() <= 160 && !v.chars().any(char::is_control))
             && self.elapsed_ms <= 86_400_000
             && self.finish_reason.as_deref().is_none_or(|v| {
                 matches!(
@@ -174,6 +180,7 @@ impl PiDiagnostic {
             received_bytes: None,
             limit_kind: None,
             finish_reason: None,
+            provider_returned_model: None,
             elapsed_ms,
             usage_known: false,
             sdk_error_type: Some("timeout".into()),
@@ -647,6 +654,23 @@ mod diagnostic_tests {
         }
         d.limit_kind = Some("provider said: private source content".into());
         assert!(!d.valid());
+    }
+
+    #[test]
+    fn provider_model_is_optional_bounded_wire_metadata() {
+        let mut d = PiDiagnostic::process_timeout(1);
+        assert!(
+            serde_json::to_value(&d)
+                .unwrap()
+                .get("providerReturnedModel")
+                .is_none()
+        );
+        d.provider_returned_model = Some("actual-synthetic-model".into());
+        assert!(d.valid());
+        for invalid in [String::new(), "x".repeat(161), "model\nprivate".into()] {
+            d.provider_returned_model = Some(invalid);
+            assert!(!d.valid());
+        }
     }
 
     #[test]

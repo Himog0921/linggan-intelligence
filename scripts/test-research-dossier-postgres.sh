@@ -181,6 +181,7 @@ if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-foundation" || "${1:-}"
     fi
   fi
   if [[ "${1:-}" == "--ai-service" ]]; then
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test content_understanding_executor_postgres --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_foundation_postgres executor_probe:: --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_executor_service_postgres --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-worker --test ai_worker_contract --locked -- --include-ignored --nocapture
@@ -239,6 +240,7 @@ if [[ "${1:-}" == "--dossier-ui" ]]; then
   export LINGGAN_LOCAL_MEDIA_ROOT="$WEB_APP_PROOF_DIR/media"
   export LINGGAN_PI_NODE="$project_root/artifacts/private/research-dossier-v2/no-model-process"
   cargo_proof -p linggan-api --bin linggan-api dossier_v2_browser_proof --locked -- --ignored --nocapture
+  WEB_APP_PROOF_DIR="$WEB_APP_PROOF_DIR/content-understanding" AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-api --bin linggan-api local_web::content_understanding_browser_tests::content_understanding_real_browser_chain --locked -- --ignored --exact --nocapture
   exit 0
 fi
 if [[ "${1:-}" == "--dossier-input" ]]; then

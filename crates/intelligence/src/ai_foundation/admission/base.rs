@@ -161,7 +161,8 @@ pub(crate) async fn check_queue_input_scope(
                 }
                 "manual_ocr_image"
             }
-            TaskKey::NoteInterpretation
+            TaskKey::ContentUnderstanding
+            | TaskKey::NoteInterpretation
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => "note_material",
             TaskKey::AuthorOrgIdentity => "public_author_bio",

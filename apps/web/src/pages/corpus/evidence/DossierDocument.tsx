@@ -7,6 +7,7 @@ import { DossierExportDialog } from './DossierExportDialog';
 import { DossierFocusDialog } from './DossierFocusDialog';
 import { DossierIcon } from './DossierIcon';
 import { DossierNavigation } from './DossierNavigation';
+import { DossierUnderstanding } from './DossierUnderstanding';
 import { endingGroupAttribution, groupTime, readingAnchor, readingGaps, resolveReadingSections, SECTION_LABELS, transcriptStats, type ResolvedReadingGroup } from './dossierDocumentModel';
 import { jumpReading, useDossierReadingPosition, type ReadingPosition } from './useDossierReadingPosition';
 import type { DossierMaterial, DossierPayload } from './dossierTypes';
@@ -77,6 +78,7 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
     </div>
     {refreshFailed ? <p className={styles.notice} role="status">刷新未完成，当前保留上一次读到的版本。<button type="button" onClick={onRefresh}>重试刷新</button></p> : null}
     <article className={styles.document} aria-label="连续阅读文档">
+      <DossierUnderstanding domain={domain} work={dossier.workRef} revision={dossier.revision} asOf={dossier.asOf} active={active}/>
       {sections.map(({ section, groups }, index) => <section key={section.ref} className={styles.section} id={readingAnchor(prefix, section.ref)} data-section-ref={section.ref} data-reading-anchor={section.ref} tabIndex={-1} aria-labelledby={readingAnchor(prefix, `${section.ref}:title`)}>
         <header className={styles.sectionIndex}><span className={styles.sectionNumber}>{String(index + 1).padStart(2, '0')}</span><h2 id={readingAnchor(prefix, `${section.ref}:title`)}>{SECTION_LABELS[section.kind]}</h2></header>
         <div className={`${styles.content} ${section.kind === 'publication' && groups.every(group => group.group.mode === 'tags' || group.entries.every(entry => entry.unit.kind === 'tags')) ? styles.onlyTags : ''}`}>

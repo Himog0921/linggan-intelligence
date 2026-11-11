@@ -84,6 +84,8 @@ test('page-local UI changes avoid OCR and PostgreSQL proofs; shared and API chan
     ['apps/web/src/corpus/corpusShellApi.ts', ['web', 'web_real_chain']],
     ['apps/web/src/shared/api.ts', ['ocr_recognition', 'web', 'web_real_chain']],
     ['apps/web/src/pages/corpus/evidence/DossierSections.tsx', ['web', 'web_real_chain']],
+    ['apps/web/src/pages/corpus/evidence/DossierUnderstanding.tsx', ['web', 'web_real_chain']],
+    ['apps/web/test/e2e/content-understanding-real-chain.mjs', ['web', 'web_real_chain']],
     ['apps/web/test/e2e/workbench-real-chain.mjs', ['web', 'web_real_chain']],
     ['apps/web/test/e2e/settings-real-chain.mjs', ['web', 'web_real_chain']],
     ['apps/web/test/e2e/ocr-recognition-real-chain.mjs', ['ocr_recognition', 'web']],
@@ -92,6 +94,22 @@ test('page-local UI changes avoid OCR and PostgreSQL proofs; shared and API chan
   ];
   for (const [path, expected] of cases) assert.deepEqual(selected([path]), expected, path);
   assert.deepEqual(selected(['apps/web/src/pages/settings/TeamSettingsPage.tsx', 'apps/api/src/main.rs']), ['web', 'web_real_chain']);
+});
+
+test('content understanding source, persistence and fixtures retain AI and browser coverage', () => {
+  for (const path of [
+    'crates/intelligence/src/content_understanding.rs',
+    'crates/intelligence/src/content_understanding/schema.rs',
+    'crates/intelligence/src/ai_foundation/content_understanding.rs',
+    'crates/intelligence/src/ai_foundation/content_understanding/source.rs',
+    'crates/intelligence/src/ai_foundation/executor/service/content_understanding.rs',
+    'crates/intelligence/tests/content_understanding_executor_postgres.rs',
+    'crates/intelligence/tests/support/content_understanding_endpoint.rs',
+    'database/migrations/0196_content_understanding.sql',
+  ]) {
+    const result = selected([path]);
+    for (const suite of ['ai', 'web', 'web_real_chain']) assert.ok(result.includes(suite), `${path}: ${suite}`);
+  }
 });
 
 test('page files with direct HTTP calls cannot silently enter the UI-only route', () => {
@@ -114,7 +132,7 @@ test('every current browser script has an explicit proof or manual-only classifi
     'ops-real-chain.mjs', 'research-dossier-v2.mjs', 'settings-real-chain.mjs',
     'settings-trials-real-chain.mjs', 'topics-real-chain.mjs', 'workbench-real-chain.mjs',
     'login-lifecycle.mjs', 'shell-layout.mjs', 'topic-workspace-real-chain.mjs',
-    'unified-research-real-chain.mjs',
+    'unified-research-real-chain.mjs', 'content-understanding-real-chain.mjs',
   ];
   const ocrAudit = ['ocr-recognition-real-chain.mjs'];
   const manualOnly = [
@@ -346,6 +364,17 @@ test('Delivery executes current creator, saved-source and OCR proof targets with
   const workflowReading=readFileSync(join(root,'.github/workflows/material-reading.yml'),'utf8');
   assert.match(workflowReading,/test-ocr-recognition-postgres\.sh --reading-only/);
 
+});
+
+test('content understanding Delivery runs synthetic persistence and the exact browser target', () => {
+  const runner = readFileSync(join(root, 'scripts/test-research-dossier-postgres.sh'), 'utf8');
+  const service = runner.split('if [[ "${1:-}" == "--ai-service" ]]; then')[1]?.split('\n  fi')[0];
+  assert.match(service, /cargo_proof -p linggan-intelligence --test content_understanding_executor_postgres --locked -- --ignored --nocapture/);
+  const browser = runner.split('if [[ "${1:-}" == "--dossier-ui" ]]; then')[1]?.split('\nfi')[0];
+  assert.match(browser, /AI_FOUNDATION_PROOF_NODE=.*cargo_proof -p linggan-api --bin linggan-api local_web::content_understanding_browser_tests::content_understanding_real_browser_chain --locked -- --ignored --exact --nocapture/);
+  assert.doesNotMatch(runner, /content_understanding_authorized_single_live_chain/);
+  assert.match(readFileSync(join(root, '.github/workflows/ai-gen1-foundation.yml'), 'utf8'), /test-research-dossier-postgres\.sh --ai-service/);
+  assert.match(readFileSync(join(root, '.github/workflows/web-real-chain.yml'), 'utf8'), /test-research-dossier-postgres\.sh --dossier-ui/);
 });
 
 test('current OCR runner selects every declared current execution test without legacy audit', () => {

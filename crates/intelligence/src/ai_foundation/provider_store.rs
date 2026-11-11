@@ -41,7 +41,8 @@ impl MaterialClass {
             Self::ManualOcrImage => task == TaskKey::OcrRecognition,
             Self::NoteMaterial => matches!(
                 task,
-                TaskKey::NoteInterpretation
+                TaskKey::ContentUnderstanding
+                    | TaskKey::NoteInterpretation
                     | TaskKey::WorkComparison
                     | TaskKey::CreatorResearch
                     | TaskKey::CreatorAccountResearch

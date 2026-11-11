@@ -155,7 +155,7 @@ it('多音轨的人工空口播只描述该条材料，不否定其它可读口�
     dossierMaterialJson(1, { kind: 'audio', blocks: [], sourceState: 'present', reading: { generatedBy: 'human_edit', adoption: 'human_edited', verification: 'verified', ruleVersion: 'human.v1', review: null } }),
     dossierMaterialJson(2, { kind: 'audio', blocks: [{ ref: 'speech-present', kind: 'paragraph', text: '另一音轨的真实口播' }] }),
   ], readingView: { mainBlockRefs: ['speech-present'], supplementBlockRefs: [] } }));
-  render(<DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}} />);
+  renderWithProviders(<DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}} />);
   expect(screen.getByText('音轨 1：已确认无口播。')).toBeVisible();
   expect(screen.queryByText('视频口播：已确认无口播。')).not.toBeInTheDocument();
   expect(screen.getByText('另一音轨的真实口播')).toBeVisible();
@@ -180,7 +180,7 @@ it.each(['works', 'dossier'] as const)('%s 只显示规范有效内容，封面�
     imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 1, processedPages: 1, missingPages: [], unknownOrder: true },
     sources: { body: { state: 'not_acquired', units: 0, readings: 0 }, images: { state: 'available', units: 1, readings: 1 }, audio: { state: 'not_processed', units: 1, readings: 0 }, videoFrames: { state: 'not_processed', units: 1, readings: 0 } },
   } }));
-  const view = render(surface === 'works' ? <DossierReading dossier={payload.dossier} titleRendered/> : <DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  const view = renderWithProviders(surface === 'works' ? <DossierReading dossier={payload.dossier} titleRendered/> : <DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.getByRole('heading', { name: '智商 133 但专注力差，除了用药家庭中做好这几点' })).toBeVisible();
   expect(screen.getByText('第一步：清理桌面，只留一科。')).toBeVisible();
   expect(view.container.textContent).not.toMatch(/万物|识别不可靠|总页数未知|角色未确认|画面文字/);
@@ -199,7 +199,7 @@ it.each([false, true])('未知页码的全 gap 不冒充完成；含有效文字
       imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 1, processedPages: 1, missingPages: [], unknownOrder: true },
       sources: { body: { state: 'not_applicable', units: 0, readings: 0 }, images: { state: 'available', units: 1, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } },
     } }));
-  render(<DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  renderWithProviders(<DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.queryByText(/此处文字识别不可靠/)).not.toBeInTheDocument();
   if (hasText) {
     expect(screen.queryByText('暂无可用文字。')).not.toBeInTheDocument();
@@ -218,7 +218,7 @@ it.each(['works', 'document'])('%s 保留两张原图来源与后台冲突数据
     dossierMaterialJson(2, { issues: [issue], originalUrl: '/api/local/media/b' }),
   ] }));
   const onSource = vi.fn();
-  render(surface === 'works' ? <DossierReading dossier={payload.dossier} onSource={onSource}/> : <DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  renderWithProviders(surface === 'works' ? <DossierReading dossier={payload.dossier} onSource={onSource}/> : <DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.queryByLabelText('跨图参数待核对')).not.toBeInTheDocument();
   expect(screen.queryByText('山河之旅时长：30min；15分钟。', { exact: false })).not.toBeInTheDocument();
   expect(payload.dossier.materials.map(unit => unit.issues[0]?.code)).toEqual(['cross_image_parameter_conflict', 'cross_image_parameter_conflict']);

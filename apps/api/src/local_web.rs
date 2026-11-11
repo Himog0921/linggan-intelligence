@@ -21,6 +21,9 @@ mod collection_targets_view;
 mod collection_task_actions;
 mod collection_task_diagnostics_api;
 mod comment_study;
+mod content_understanding_api;
+#[cfg(test)]
+mod content_understanding_browser_tests;
 mod content_workbench_ai_api;
 mod content_workbench_api;
 #[cfg(test)]
@@ -412,6 +415,7 @@ fn router_with_public_access(
         .merge(model_settings::routes())
         .merge(ai_settings::routes())
         .merge(note_analysis_api::routes())
+        .merge(content_understanding_api::routes())
         .merge(offline_preview::routes())
         .merge(ops_auth::routes())
         .merge(web_app::routes())
