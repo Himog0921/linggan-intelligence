@@ -225,7 +225,8 @@ button,input,select,textarea{font:inherit}button{cursor:pointer}button:disabled,
   box-shadow: var(--lgi-shadow-brutal);
 }
 .v7-side-nav[aria-current="page"] .v7-nav-index { color: var(--lgi-signal-mark); }
-.v7-nav-group[data-active-parent="true"] .v7-side-nav-parent {
+.v7-nav-group[data-active-parent="true"] .v7-side-nav-parent,
+.v7-nav-group[data-active-parent="true"] .v7-side-nav-parent:hover {
   background: var(--lgi-ink);
   color: var(--lgi-on-dark);
   box-shadow: var(--lgi-shadow-brutal);
