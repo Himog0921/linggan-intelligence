@@ -1597,7 +1597,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "ba77c9557f01fe2b932f0603008c78a2da53ade274171c16aeaaa1f07ff68a06",
+  "fingerprint": "ccada1d8088a132fda5dd351de58f0e23834fcc8954fbc51997e5fbd9e0ec193",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",
@@ -1797,7 +1797,6 @@
         "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx",
         "apps/web/src/pages/collection/CollectionFrame.tsx",
         "apps/web/src/pages/collection/tasks/RunDrawer.tsx",
-        "apps/web/src/pages/ops/OpsPage.tsx",
         "apps/web/src/pages/ops/LedgerPage.tsx",
         "apps/web/src/pages/corpus/evidence/Lightbox.tsx",
         "apps/web/src/pages/settings/AiSettingsExperience.tsx",

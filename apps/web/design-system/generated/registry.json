@@ -15622,7 +15622,6 @@
         "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx",
         "apps/web/src/pages/collection/CollectionFrame.tsx",
         "apps/web/src/pages/collection/tasks/RunDrawer.tsx",
-        "apps/web/src/pages/ops/OpsPage.tsx",
         "apps/web/src/pages/ops/LedgerPage.tsx",
         "apps/web/src/pages/corpus/evidence/Lightbox.tsx",
         "apps/web/src/pages/settings/AiSettingsExperience.tsx",

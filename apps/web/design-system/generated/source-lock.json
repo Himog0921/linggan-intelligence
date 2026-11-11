@@ -1,5 +1,5 @@
 {
-  "fingerprint": "ba77c9557f01fe2b932f0603008c78a2da53ade274171c16aeaaa1f07ff68a06",
+  "fingerprint": "ccada1d8088a132fda5dd351de58f0e23834fcc8954fbc51997e5fbd9e0ec193",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -659,7 +659,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "6840ada3929425e51f5e3a1db83fb407488669bbf243202070f156c139af2ef7"
+      "sha256": "e644f52ef3620a7d4cde34b07b169b3be4926cc9b5865e4cefaa3318f5b0ac06"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
@@ -671,7 +671,7 @@
     },
     {
       "path": "docs/design/lids/component-contracts.json",
-      "sha256": "85522e908636cbbc3b6b2adfbdff02adfcdbd8ddf73619b7275e843e8d9e0672"
+      "sha256": "7370b3fcfad2e1b06fa0a42e04f2b824e3cd32a304bb11c62033b12cdea1286d"
     },
     {
       "path": "docs/design/lids/component-reuse.json",
