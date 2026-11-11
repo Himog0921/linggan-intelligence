@@ -236,15 +236,20 @@ pub async fn latest(
         .fetch_optional(&mut *tx).await?;
     let result = match row {
         Some(r) => {
-            let mut result = r.get::<Option<Value>, _>("result");
-            let question = r.get::<Option<String>, _>("question");
-            if let (Some(result), Some(deep_ref)) =
-                (&mut result, r.get::<Option<Uuid>, _>("deep_ref"))
-            {
-                result["card"]["deep"] = json!({"analysisRef":deep_ref,"methodVersion":r.get::<String,_>("deep_method"),
-                    "findings":r.get::<Value,_>("findings")});
+            let result = r.get::<Option<Value>, _>("result");
+            let mut analysis = json!({
+                "requestRef":r.get::<Uuid,_>("request_ref"),"batchRef":r.get::<Uuid,_>("batch_ref"),
+                "itemRef":r.get::<Uuid,_>("item_ref"),"state":r.get::<String,_>("state"),
+                "failureCode":r.get::<Option<String>,_>("failure_code"),"result":result
+            });
+            if let Some(deep_ref) = r.get::<Option<Uuid>, _>("deep_ref") {
+                analysis["result"]["card"]["deep"] = json!({
+                    "analysisRef":deep_ref,"methodVersion":r.get::<String,_>("deep_method"),
+                    "findings":r.get::<Value,_>("findings")
+                });
+                analysis["deepQuestion"] = json!(r.get::<String, _>("question"));
             }
-            json!({"requestRef":r.get::<Uuid,_>("request_ref"),"batchRef":r.get::<Uuid,_>("batch_ref"),"itemRef":r.get::<Uuid,_>("item_ref"),"state":r.get::<String,_>("state"),"failureCode":r.get::<Option<String>,_>("failure_code"),"result":result,"deepQuestion":question})
+            analysis
         }
         None => Value::Null,
     };
