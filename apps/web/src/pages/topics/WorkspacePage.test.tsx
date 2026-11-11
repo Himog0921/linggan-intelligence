@@ -56,7 +56,7 @@ describe("independent Topic workspace", () => {
     expect(screen.queryByText('人工裁定说明')).not.toBeInTheDocument();
     expect(screen.queryByText('人工',{exact:true})).not.toBeInTheDocument();
     expect(screen.getByText('候选主题')).toBeVisible();
-    expect(screen.getByRole('complementary', { name: 'Topic 研究导航' })).toHaveTextContent('候选主题');
+    expect(screen.getByRole('navigation', { name: 'Topic 工作区分区' })).toHaveTextContent('候选主题');
     expect(screen.getAllByText('CANDIDATE TOPIC')).toHaveLength(2);
     expect(screen.getByText('已读取当前候选版本')).toBeVisible();
     expect(screen.getByRole('button', { name: '全部分类 3' })).toBeVisible();

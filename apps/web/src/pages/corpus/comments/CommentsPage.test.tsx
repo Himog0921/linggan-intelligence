@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { calls, comment, DOMAIN, installFetch, json, renderPage, WORK } from './testKit';
@@ -8,6 +8,12 @@ describe('D3 actual four-view React boundary', () => {
  it('renders literal source text, unknown likes and server-owned eligibility without executing markup',async()=>{
   installFetch();renderPage(`domain=${DOMAIN}&view=comments`);
   await screen.findByRole('table');
+  const side = screen.getByRole('complementary', { name: '语料导航' });
+  expect(within(side).getByRole('link', { name: '评论研究' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}&view=overview`);
+  expect(within(side).getByRole('link', { name: '用户评论' })).toHaveAttribute('aria-current', 'page');
+  expect(within(side).getByRole('link', { name: '研究记录' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}&view=runs`);
+  expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent('语料/评论研究/用户评论');
+  expect(screen.queryByRole('navigation', { name: '评论研究视图' })).not.toBeInTheDocument();
   expect(screen.getAllByRole('button',{name:'SYNTHETIC 原声 <script>不执行</script>'})).toHaveLength(2);
   expect(document.querySelector('script')).toBeNull();
   expect(document.querySelector('select[aria-label="搜索范围"]')).toBeNull();

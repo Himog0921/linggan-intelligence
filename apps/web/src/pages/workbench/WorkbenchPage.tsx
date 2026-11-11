@@ -245,7 +245,7 @@ export function WorkbenchPage() {
   return <OpsFrame section="creation" domain={domain}
     scope={<OpsScopePicker creation options={domainQuery.data ?? []} value={domain} loading={domainQuery.isPending} failed={domainQuery.isError}
       disabled={creating || createUnknown || assetPending} onChange={next => { if (createPending.current || assetPending) return; setError(''); setParams({ domain: next, section }); }} />}
-    tabs={undefined}
+    creationPageKey={section}
     page={view === 'desk' && work ? '选题与材料' : undefined}
     meta={view === 'desk' && work ? <>
       <span>选题组织 · 材料编排 · 多账号开稿</span>

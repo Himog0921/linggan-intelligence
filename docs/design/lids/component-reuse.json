@@ -171,7 +171,7 @@
     {
       "id": "C25",
       "route": "shared",
-      "boundary": "三级页面Tab由Z02承载；对象内部Tab按对象，不混进集合筛选。",
+      "boundary": "页面三级导航由Z03左侧导航树承载；对象内部Tab按对象，不混进集合筛选。",
       "certified": false
     },
     {
@@ -194,8 +194,8 @@
     },
     {
       "id": "C29",
-      "route": "gap",
-      "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+      "route": "adapter",
+      "boundary": "Sidebar提供二级父项/三级子项的共享呈现、展开/折叠、活动项与键盘语义；页面适配器提供路由、领域参数、权限、当前项与子页面列表。尚未完成七项CMP认证。",
       "certified": false
     },
     {
@@ -328,5 +328,5 @@
   "businessRequests": false,
   "problemCardsChanged": false,
   "domainHost": "Z02",
-  "tertiaryHost": "Z02"
+  "tertiaryHost": "Z03"
 }

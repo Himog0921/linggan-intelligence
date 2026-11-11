@@ -58,16 +58,19 @@ function show(path = '/ops/publications?domain=d1') {
     <MemoryRouter initialEntries={[path]}><Routes><Route path="/ops/:page" element={<OpsPage/>}/></Routes><Location/></MemoryRouter>
   </QueryClientProvider>);
 }
-it('uses two secondary destinations and data tabs in Z02, preserving selected business', async () => {
+it('places secondary and tertiary destinations in the Signal Console sidebar, preserving selected business', async () => {
   show();
   await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
   const side = screen.getByLabelText('运营导航');
-  expect(within(side).getAllByRole('link').map(link => link.textContent)).toEqual(['数据', '创作']);
+  expect(within(side).getByRole('link', { name: '数据' })).toHaveAttribute('href', '/ops/overview?domain=d1');
   expect(within(side).getByRole('link', { name: '创作' })).toHaveAttribute('href', '/ops/creation?domain=d1');
-  const nav = screen.getByRole('navigation', { name: '数据页面' });
-  expect(nav.closest('.v7-context-main')).not.toBeNull();
-  expect(within(nav).getAllByRole('link').map(link => link.textContent)).toEqual(['概览','发布记录','账号管理','每日数据']);
-  expect(within(nav).getByRole('link', { name: '每日数据' }).querySelector('svg')).toHaveAttribute('data-icon', 'daily');
+  fireEvent.click(within(side).getByRole('button', { name: '展开创作子页面' }));
+  expect(within(side).getByRole('link', { name: '今日选题' })).toHaveAttribute('href', '/ops/creation?domain=d1&section=today');
+  expect(within(side).getByRole('link', { name: '我的创作' })).toHaveAttribute('href', '/ops/creation?domain=d1&section=works');
+  const nav = screen.getByRole('navigation', { name: '页面导航' });
+  expect(nav.closest('.v7-side')).not.toBeNull();
+  expect(within(nav).getByRole('link', { name: '发布记录' })).toHaveAttribute('aria-current', 'page');
+  expect(within(nav).getByRole('link', { name: '每日数据' })).toHaveAttribute('data-code', 'DAY');
   expect(screen.queryByText('导入导出')).not.toBeInTheDocument();
   expect(within(nav).getByRole('link', { name: '账号管理' })).toHaveAttribute('href', '/ops/accounts?domain=d1');
 });
@@ -75,7 +78,7 @@ it('limits the operator navigation and keeps prior sync state noninteractive on 
   sessionRole = 'operator'; persistedSync = true; show();
   await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
   expect(within(screen.getByLabelText('运营导航')).queryByRole('link', { name: '创作' })).not.toBeInTheDocument();
-  expect(within(screen.getByRole('navigation', { name: '数据页面' })).getAllByRole('link').map(link => link.textContent)).toEqual(['发布记录', '账号管理', '每日数据']);
+  expect(within(screen.getByRole('navigation', { name: '页面导航' })).getAllByRole('link').map(link => link.getAttribute('aria-label') ?? link.textContent)).toEqual(['数据', '发布记录', '账号管理', '每日数据']);
   expect(screen.queryByRole('button', { name: '同步数据' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '等待分派' })).not.toBeInTheDocument();
   expect(screen.getByText('等待分派')).toBeInTheDocument();

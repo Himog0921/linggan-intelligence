@@ -366,7 +366,7 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-type-input-leading: 1.5;
   --lgi-focus-warm: #fffaf7;
   --lgi-focus-inset: 2px;
-  --lgi-shell-side: 160px;
+  --lgi-shell-side: 224px;
   --lgi-shell-collapsed: 64px;
   --lgi-shell-icon: 18px;
   --lgi-ledger-row: 44px;

@@ -4,22 +4,25 @@
   "decision": {
     "selected": "A",
     "evidence": "U15",
-    "quote": "Q06 就按 A来收口，但是左侧导航栏可以支持点击折叠，只露出图标"
+    "quote": "Q06 就按 A来收口，但是左侧导航栏可以支持点击折叠，只露出图标",
+    "navigationEvidence": "U22",
+    "navigationQuote": "左侧导航栏只放 2 级页面跟3级页面"
   },
   "domainHost": "Z02",
-  "tertiaryHost": "Z02",
+  "tertiaryHost": "Z03",
   "layout": {
     "name": "连续导航轨",
-    "description": "所有入口保持展开，窄屏用局部横向滚动。",
+    "description": "一级职责导航在顶部；二级与三级页面在左侧导航树；窄屏沿用局部横向导航轨。",
     "header": "一级导航独立横轨",
-    "context": "宽屏同带；窄屏在Z02内换行",
-    "secondary": "宽屏左侧手动折叠为图标；窄屏同一Z03横轨可切换图标模式",
+    "context": "面包屑只表达真实路径、领域范围和当前位置；领域选择器保留原位。",
+    "secondary": "宽屏224px左侧手动折叠为图标；二级父项可展开三级子页面；窄屏沿用横向导航轨。",
     "collapseBelow": 820,
-    "sideWidth": 160,
+    "sideWidth": 224,
     "tabsBelow": 820,
     "collapsedWidth": 64,
     "iconSize": 18,
-    "defaultCollapsed": false
+    "defaultCollapsed": false,
+    "tertiary": "三级页面缩进显示在所属二级页面下；当前组自动展开；对象内部视图不进入全局导航。"
   },
   "sidebar": {
     "manualToggle": true,
@@ -32,15 +35,26 @@
   },
   "clock": "optional_when_page_contract_requires; no_mandatory_empty_slot",
   "supersedes": [
-    "ADR-10 fixed brand326/system400/3+4slots/silent120/mandatory-clock in shared shell"
+    "ADR-10 fixed brand326/system400/3+4slots/silent120/mandatory-clock in shared shell",
+    "ALIGN-NAV-003"
   ],
   "fixed": [
     "LIDS-TYPE-001-B",
     "ALIGN-VOICE-004",
     "ALIGN-FOCUS-005",
     "ALIGN-MATERIAL-006",
-    "ALIGN-NAV-003"
+    "ALIGN-NAV-004"
   ],
   "runtimeMigrated": false,
-  "componentCertificationChanged": false
+  "componentCertificationChanged": false,
+  "navigation": {
+    "secondaryHost": "Z03",
+    "tertiaryHost": "Z03",
+    "scopeHost": "Z02",
+    "structure": "nested_navigation_tree",
+    "desktop": "secondary parent rows with indexed icons; tertiary pages indent under their parent",
+    "activeGroup": "expand the active secondary parent; only the active group is auto-expanded after route changes",
+    "collapse": "retain secondary icons and accessible labels; hide tertiary labels until expanded",
+    "narrow": "keep the existing horizontal rail; secondary and tertiary links remain in the same local rail"
+  }
 }

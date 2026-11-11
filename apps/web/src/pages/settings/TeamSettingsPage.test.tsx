@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TeamSettingsPage } from './TeamSettingsPage';
 
@@ -22,6 +22,10 @@ describe('团队成员设置页', () => {
     vi.mocked(fetch).mockResolvedValueOnce(response(roster));
     mount();
     await screen.findByText('admin@example.com');
+    const side = screen.getByRole('complementary', { name: '设置导航' });
+    expect(within(side).getByRole('link', { name: '团队成员' })).toHaveAttribute('aria-current', 'page');
+    expect(within(side).getByRole('link', { name: '账户安全' })).toHaveAttribute('href', '/settings/account');
+    expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent('设置/团队成员');
     expect(screen.getByText('可登录')).toBeVisible();
     expect(screen.getByText('待签收')).toBeVisible();
     expect(screen.getByText('1 个当前负责账号')).toBeVisible();

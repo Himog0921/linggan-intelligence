@@ -3,6 +3,7 @@ import { useMemo, useState, type FormEvent } from 'react';
 import { AppShell } from '../../app/AppShell';
 import { ContextBreadcrumb } from '../../shared/ContextBar';
 import { ActionButton } from '../../shared/ActionButton';
+import { SettingsSideNav } from './SettingsSideNav';
 import { ApiError } from '../../shared/api';
 import * as api from './teamSettingsApi';
 import styles from './TeamSettingsPage.module.css';
@@ -110,7 +111,9 @@ export function TeamSettingsPage() {
     }
   }
   return <AppShell active={null} boundaryLabel="本机团队控制" contextBar={{ breadcrumb: crumb, meta: <small>成员状态和账号责任以当前服务端读数为准</small> }}>
-    <main className={styles.page} aria-labelledby="team-settings-title">
+    <div className="v7-shell">
+      <SettingsSideNav activeId="team-members" />
+      <main className={styles.page} aria-labelledby="team-settings-title">
       <header className={styles.header}><div><h1 id="team-settings-title">团队成员</h1><p>只有管理员可以读取、邀请或停用成员。此页面不显示密码、会话令牌或邀请令牌的存储值。</p></div><ActionButton variant="primary" onClick={() => { setShowInvite(value => !value); setReceipt(null); }}>{showInvite ? '收起邀请表单' : '邀请成员'}</ActionButton></header>
       {roster.data ? <section className={styles.metrics} aria-label="团队概况">
         <div><b>{members.length}</b><span>全部成员</span></div>
@@ -154,6 +157,7 @@ export function TeamSettingsPage() {
           </div>
         </li>)}</ul> : null}
       </section>
-    </main>
+      </main>
+    </div>
   </AppShell>;
 }

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,6 +29,14 @@ function renderPage(entry = '/settings/models?section=models', client = new Quer
 }
 const posts = () => calls.filter(call => call.method === 'POST');
 describe('AI 设置四区', () => {
+  it('将 AI 设置四个视图放在设置父项下，面包屑显示当前视图', () => {
+    renderPage('/settings/models?view=models');
+    const side = screen.getByRole('complementary', { name: '设置导航' });
+    expect(within(side).getByRole('link', { name: 'AI 设置' })).toHaveAttribute('href', '/settings/models');
+    expect(within(side).getByRole('link', { name: '模型连接' })).toHaveAttribute('aria-current', 'page');
+    expect(within(side).getByRole('link', { name: '账户安全' })).toHaveAttribute('href', '/settings/account');
+    expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent('设置/AI 设置/模型连接');
+  });
   it.each(['ocr_recognition', 'note_interpretation'])('%s 提示词可编辑、保存、启用和回退，保存不运行模型', async taskKey => {
     const seed = settingsFixture();
     const config = { ...seed.configurations[0]!, taskKey, taskConfigRef: 'ocr-config' };

@@ -1,7 +1,7 @@
 {
   "kind": "shared_standard",
-  "reason": "采用经桌面实页验收的 36 枚 B 精简版扩展图标及其导航与控件接线",
-  "authorization": "Mog 2026-11-10 确认旗标与台账 01，验收实际页面预览并授权合并部署",
+  "reason": "ALIGN-NAV-004：二级/三级页面统一由Z03左侧导航树承载；共享Sidebar增加父子导航、当前组展开、图标折叠和窄屏横轨；Z02继续承载真实路径、领域选择与当前位置。",
+  "authorization": "Mog 2026-11-11确认左侧只放二级/三级页面并选择方案C（Signal Console），授权在linggan-intelligence真实项目收口导航布局；不改变路由、权限与业务合同。",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",

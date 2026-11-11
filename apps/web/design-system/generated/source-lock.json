@@ -1,5 +1,5 @@
 {
-  "fingerprint": "be06916b18bddba812e9deee2d3edb683fa3d2c4cd7e55bb9a9912da57c0cc53",
+  "fingerprint": "1bc9a2c154cab7e6081e75d86954165fb7653570e05880170d6cf4bfbfa9c676",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -238,12 +238,20 @@
       "sha256": "efa89f0092e0207d30f640a51141ab636bd46a0c6f29ead46e074e8693301c57"
     },
     {
+      "path": "apps/web/src/corpus/CorpusSideNav.tsx",
+      "sha256": "5d5d46054d3b04a0c186b731187c1f785d936a318f511e27ec4240a7cd071e48"
+    },
+    {
       "path": "apps/web/src/corpus/DomainPicker.tsx",
       "sha256": "10384a93a8908bc89fe4c323556401ecaf8c184180d5f6f62855ecc4da3b5c03"
     },
     {
+      "path": "apps/web/src/corpus/corpusPages.ts",
+      "sha256": "63eb9b56b9f8b840a3dac9c863e90695496ac11e5f6d6b140f26fbcc914254e7"
+    },
+    {
       "path": "apps/web/src/pages/collection/CollectionFrame.tsx",
-      "sha256": "88050ae985fdf9b5926bbea88b6475738dd06bda05fa0178e31324f1ad9ea0dc"
+      "sha256": "03a20d09c719f856f891810b514f786308a4b0d0b7baad1d9d89f84af8f4cd6d"
     },
     {
       "path": "apps/web/src/pages/collection/management/DomainsPage.tsx",
@@ -311,7 +319,7 @@
     },
     {
       "path": "apps/web/src/pages/corpus/comments/CommentsPage.tsx",
-      "sha256": "83751c82d0c63e62c4eb87b19518a5bca5d54319e25c6369e8e817f984a76e94"
+      "sha256": "d6092659a94bf78f52f14a5360a96bdcf6a1c2cd7b07003bf66410480f221104"
     },
     {
       "path": "apps/web/src/pages/corpus/comments/CommentsView.tsx",
@@ -387,11 +395,11 @@
     },
     {
       "path": "apps/web/src/pages/ops/OpsFrame.tsx",
-      "sha256": "39c9c4fc59ee219ed92412fa56c4a914837409004d5c1b5b79cfad9ad4233b75"
+      "sha256": "d9d9ece5a2e1867e8fc3e388ee604f6da5612862c1bc8c04e20c05412921fbe7"
     },
     {
       "path": "apps/web/src/pages/ops/OpsPage.tsx",
-      "sha256": "5575d290890691dfdb922cfd9eb2c38a314decd38e6791374ade6d5049ab81a1"
+      "sha256": "baf9db79f0d077c635e448fc2d7672833f703a7ae164bb9ba5ea8ae4b652dfab"
     },
     {
       "path": "apps/web/src/pages/ops/OpsScopePicker.tsx",
@@ -422,6 +430,14 @@
       "sha256": "19286238a6c026ad025a323bb3d59635ffe6010b79324851803d4fc624c6c4a5"
     },
     {
+      "path": "apps/web/src/pages/settings/AccountSecurityPage.module.css",
+      "sha256": "f40bfbf6bcbe429c98e04edffc7cfd1dec4b5bed3226707553f6e4aa0b7dc667"
+    },
+    {
+      "path": "apps/web/src/pages/settings/AccountSecurityPage.tsx",
+      "sha256": "2e6d7bce43663e87a531d3dfc436ba357bc2a5325290560daf2edd42a5a6cd73"
+    },
+    {
       "path": "apps/web/src/pages/settings/AiSettingsExperience.tsx",
       "sha256": "c68fcd464f8e503a5117b9c9eac1552757e6922323baa72fc02ddde4795aac3c"
     },
@@ -431,7 +447,27 @@
     },
     {
       "path": "apps/web/src/pages/settings/ModelSettingsPage.tsx",
-      "sha256": "c251ce05338ef44764d1ff36e4ed895932a9c377dfc605f3767e8a73f0caa8c4"
+      "sha256": "f05dcffffb022e2561b50ccbdc88d9a86111dd0c19eef50650194fa64a1f60cc"
+    },
+    {
+      "path": "apps/web/src/pages/settings/OffboardingPanel.tsx",
+      "sha256": "94ca255d5d384ef999373ff3b5eccc1393048827d86b0c5177c8cb86b82b5b8b"
+    },
+    {
+      "path": "apps/web/src/pages/settings/SettingsSideNav.tsx",
+      "sha256": "0927871e456f438264288c144bd1a13501ea0f791f3cec7cb8f0c37c7f71c990"
+    },
+    {
+      "path": "apps/web/src/pages/settings/TeamSettingsPage.module.css",
+      "sha256": "694336b932af1023530e4c336e71f65c466f2af817efc1a6b8b7297883462537"
+    },
+    {
+      "path": "apps/web/src/pages/settings/TeamSettingsPage.tsx",
+      "sha256": "a3041c8569c2764506e5149bac53d00dceee15c0d3454ca39796263a23edeb80"
+    },
+    {
+      "path": "apps/web/src/pages/settings/teamSettingsApi.ts",
+      "sha256": "c0b8c70c8b675521ce75be786748ecce5ae6f9a4410f5c74db56cc4393e910c2"
     },
     {
       "path": "apps/web/src/pages/topics/Topics.module.css",
@@ -442,8 +478,12 @@
       "sha256": "a7b942985ea2371acd2fc84a0eb86838da989c4e8f41c33e58481e38f49386df"
     },
     {
+      "path": "apps/web/src/pages/topics/Workspace.module.css",
+      "sha256": "71a428b22df8b12a2146de3a50eba011235da3920e34c766ecf72eb5b8d6a9f1"
+    },
+    {
       "path": "apps/web/src/pages/topics/WorkspacePage.tsx",
-      "sha256": "8996c5277f27f0486a626236616d15f3a8dda96362d82c6adf76d5452fcff191"
+      "sha256": "5bf87230832d252a977cb43a38cbf27b204071ea86f8a2295895c48b26f77d83"
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
@@ -475,7 +515,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "bc69dca526278abaa8b7ec6407898b45b5318865741c105fcf56d1e29e3088a9"
+      "sha256": "3caa121ab2033f75f750dec881aebab5b4dcd2c0c8eb9eedb693ee6825ff76a1"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",
@@ -587,7 +627,7 @@
     },
     {
       "path": "apps/web/src/shared/Sidebar.tsx",
-      "sha256": "d944705fe7a33fb7d937db0908f550cff5a493fb8dd6e7f44ebc26d638f263e4"
+      "sha256": "303d2934ddece3345e6f34da43f56bbc7e5e13ff79e9854a864607d25f44091d"
     },
     {
       "path": "apps/web/src/shared/ViewSwitch.module.css",
@@ -607,7 +647,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "5b3293995a136951d83c0e354d33f09bacf194fc998a2061642a5de24da51fa0"
+      "sha256": "57426d5b3f9d9bc93550f6b1cc261a78edba1d4a4795f108c631211838fcc17f"
     },
     {
       "path": "apps/web/src/styles/typography.css",
@@ -619,11 +659,11 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "5e643bf19a98b751ff1073b20b522657781d5edadebebec8a30bbc26958ad59a"
+      "sha256": "6840ada3929425e51f5e3a1db83fb407488669bbf243202070f156c139af2ef7"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
-      "sha256": "7679e2eeafa7c30661a871982ce86d6e721f96e352f20f24482fb94e83820d75"
+      "sha256": "7e168ca493c2480717623c5e3547467bb54ddf50fc36726c9835901fe6eabb8a"
     },
     {
       "path": "docs/design/lids/color.json",
@@ -635,7 +675,7 @@
     },
     {
       "path": "docs/design/lids/component-reuse.json",
-      "sha256": "1af8299c2f779e48921a34bc8193d94cfca2ede72dd885ef9b5314d47c20ceba"
+      "sha256": "1cec37240e0b68a4834232ba47d2d46ede3692056bd77e5a4740b280eac6c40f"
     },
     {
       "path": "docs/design/lids/component-sync.md",
@@ -671,7 +711,7 @@
     },
     {
       "path": "docs/design/lids/shell-layout.json",
-      "sha256": "5fcab4ad570e18e4c5099df9b239d0097d4d4148313a08a5057f07f73f427dfc"
+      "sha256": "666a034cb6198efbbf610ba92c9fd0e29f0967bbaee0efbf88ebb7b9b56a8b96"
     },
     {
       "path": "docs/design/lids/typography.json",

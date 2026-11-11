@@ -1,10 +1,10 @@
-/** 语料三页的唯一 React 导航登记表。共享样式仍直接消费 shell.css（WEB-REACT-001 R4）。 */
+/** 语料模块的二级页面及评论研究的三级视图。 */
 export type CorpusPageKey = 'evidence' | 'comments' | 'creators';
+export type CorpusCommentsView = 'overview' | 'comments' | 'runs' | 'problems';
 
 export interface CorpusEntry {
   ordinal: string;
   label: string;
-  /** 没有已提供路由的项保持禁用，不变成死链。 */
   href: string | null;
   page: CorpusPageKey | null;
 }

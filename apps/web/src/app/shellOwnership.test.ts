@@ -2,8 +2,15 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-/** 共享页头（AppShell / ContextBar）的样式只能住在 shell.css 与它的材质表里。 */
+/** 共享外壳（AppShell / ContextBar / Sidebar）的样式只能住在 shell.css 与它的材质表里。 */
 const OWNED_SELECTORS = [
+  '.v7-side',
+  '.v7-side-head',
+  '.v7-side-navigation',
+  '.v7-side-nav',
+  '.v7-nav-group',
+  '.v7-nav-subnav',
+  '.v7-side-subnav-item',
   '.v7-context-row',
   '.v7-context-main',
   '.v7-context-crumb',
@@ -32,7 +39,7 @@ function cssFiles(directory: string): string[] {
   });
 }
 
-describe('共享页头样式越权检查', () => {
+describe('共享外壳样式越权检查', () => {
   it('页面样式不覆盖共享页头选择器；要改就改 shell.css', () => {
     const root = join(webRoot(), 'src');
     const sources = cssFiles(root).map(file => ({ file: relative(root, file), text: readFileSync(file, 'utf8') }));
