@@ -453,6 +453,7 @@ export function mapXhsCommentRecord(comment = {}, note = {}, {
 } = {}) {
   const commentId = normalizeText(comment?.id || comment?.comment_id || comment?.commentId);
   const user = resolveUser(comment);
+  const author = resolveUserName(user);
   const authorId = resolveUserId(user);
   const publishedAt = parsePublishedAt(comment?.create_time || comment?.createTime || comment?.time);
   const replyTarget = resolveReplyTarget(comment);
@@ -471,7 +472,8 @@ export function mapXhsCommentRecord(comment = {}, note = {}, {
     platformCommentId: commentId,
     commentEntityId: noteId && commentId ? `xhs_${noteId}_${commentId}` : '',
     text: normalizeText(comment?.content || comment?.text || comment?.desc),
-    author: resolveUserName(user),
+    author,
+    authorName: author,
     authorId,
     authorEntityId: authorId ? `xhs_${authorId}` : '',
     profileUrl: resolveProfileUrl(user),
@@ -501,7 +503,7 @@ export function mapXhsCommentRecord(comment = {}, note = {}, {
     ...createCollectorEvidence({
       rawPayload: comment,
       rawDomText: joinRawDomText([
-        resolveUserName(user),
+        author,
         normalizeText(comment?.content || comment?.text || comment?.desc),
         formatPublishedAtText(comment?.time || comment?.create_time || comment?.createTime, publishedAt),
         normalizeText(comment?.ip_location || comment?.ipLocation || comment?.location),
