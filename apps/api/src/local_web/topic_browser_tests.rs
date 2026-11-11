@@ -225,10 +225,16 @@ async fn topics_and_workspace_real_chain_browser_proof() {
     .await
     .unwrap();
     assert_eq!(alternatives, 1);
-    let handoffs: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_angle_handoff WHERE domain_ref=$1")
-        .bind(domain).fetch_one(db.pool()).await.unwrap();
+    let handoffs: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_topic_angle_handoff WHERE domain_ref=$1")
+            .bind(domain)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(handoffs, 1, "repeat UI handoff creates only one target");
     let runs: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_research_run")
-        .fetch_one(db.pool()).await.unwrap();
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
     assert_eq!(runs, 0, "switch-only proof must never start research");
 }
