@@ -557,12 +557,24 @@ pub async fn read_dossier_comments(
     let rows = sqlx::query(
         "SELECT comment.material_ref, engagement.like_count, engagement.like_count_state,
                 parent.material_ref AS parent_ref,
-                NULLIF(btrim(comment.author_external_id),'') =
-                    NULLIF(btrim(work_author.author_external_id),'')
-                    AS is_note_author
+                attribution.is_note_author,
+                CASE WHEN captured.payload->>'sourceTier'='dom'
+                      AND captured.payload->>'rawSource'='xhs.comments.dom'
+                     THEN captured.payload->>'rawPayload' END AS archived_dom
          FROM linggan_material_comment comment
          LEFT JOIN linggan_material_content_author work_author
               ON work_author.content_public_ref=comment.content_public_ref
+         CROSS JOIN LATERAL (
+             SELECT NULLIF(btrim(comment.author_external_id),'') =
+                    NULLIF(btrim(work_author.author_external_id),'') AS is_note_author
+         ) attribution
+         LEFT JOIN linggan_runtime_capture_package package
+              ON package.package_ref=comment.package_ref AND package.platform='xhs'
+             AND attribution.is_note_author
+             AND (comment.body_text='作者' OR comment.body_text LIKE '作者 %')
+         CROSS JOIN LATERAL (
+             SELECT package.payload->'records'->comment.record_ordinal->'payload' AS payload
+         ) captured
          LEFT JOIN linggan_material_comment_engagement engagement USING(material_ref)
          LEFT JOIN linggan_material_comment_current parent
               ON parent.content_public_ref=comment.content_public_ref
@@ -587,9 +599,54 @@ pub async fn read_dossier_comments(
             item["parentSourceRef"] = serde_json::json!(row.get::<Option<Uuid>, _>("parent_ref"));
             item["isNoteAuthor"] =
                 serde_json::json!(row.try_get::<Option<bool>, _>("is_note_author")?);
+            let archived_dom: Option<&str> = row.try_get("archived_dom")?;
+            if let Some(body) = item["body"]
+                .as_str()
+                .and_then(|body| xhs_comment_reading_body(body, archived_dom?))
+            {
+                item["readingBody"] = serde_json::json!(body);
+            }
         }
     }
     Ok(page)
+}
+
+// Legacy XHS DOM captures can flatten the standalone badge into the body.
+// Use the archived nickname, badge, body and time boundaries for display only.
+fn xhs_comment_reading_body<'a>(body: &'a str, archived_dom: &str) -> Option<&'a str> {
+    let reading_body = if body == "作者" {
+        ""
+    } else {
+        body.strip_prefix("作者 ")?
+    };
+    let archived: Value = serde_json::from_str(archived_dom).ok()?;
+    let author = archived["author"].as_str()?.trim();
+    let time = archived["time"].as_str()?.trim();
+    let location = archived["ipLocation"].as_str().unwrap_or_default().trim();
+    if author.is_empty() || time.is_empty() || archived["text"].as_str()? != body {
+        return None;
+    }
+    let lines: Vec<_> = archived["rawText"]
+        .as_str()?
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let [source_author, "作者", rest @ ..] = lines.as_slice() else {
+        return None;
+    };
+    let time_index = rest.iter().position(|line| {
+        line.strip_prefix(time)
+            .is_some_and(|suffix| suffix.trim().is_empty() || suffix.trim() == location)
+    })?;
+    (source_author
+        .split_whitespace()
+        .eq(author.split_whitespace())
+        && rest[..time_index]
+            .iter()
+            .flat_map(|line| line.split_whitespace())
+            .eq(reading_body.split_whitespace()))
+    .then_some(reading_body)
 }
 
 async fn read_comment_page(

@@ -182,9 +182,11 @@ try {
   assert.equal((await reader.textContent()).trim(), '作者 你好，请问怎么用？ 赞 7');
   assert.equal(await reader.getByText('作者', { exact: true }).count(), 0);
   const historicalReply = replies.filter({ hasText: '作者 收到，会继续优化。' });
-  assert.equal((await historicalReply.textContent()).trim(), '作者 作者 收到，会继续优化。 赞 7');
-  await reply.screenshot({ path: path.join(directory, 'comment-author.png') });
-  report.steps.push('The Works inspector distinguishes a verified author reply from literal comment text and uses the like count color for the badge.');
+  assert.equal((await historicalReply.textContent()).trim(), '作者 收到，会继续优化。 赞 7');
+  const missingText = replies.filter({ hasText: '这条评论没有取得文字' });
+  assert.equal((await missingText.textContent()).trim(), '作者 这条评论没有取得文字 赞 7');
+  await historicalReply.screenshot({ path: path.join(directory, 'comment-author.png') });
+  report.steps.push('The Works inspector shows one red badge for historical author replies, preserves literal comment text and identifies missing text.');
   for (const scenario of fixture.scenarios) {
     const dossier = await openReading(scenario);
     await assertReading(dossier);

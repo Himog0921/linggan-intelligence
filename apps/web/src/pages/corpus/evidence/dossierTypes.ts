@@ -88,6 +88,7 @@ export interface DossierComment {
   parentSourceRef: string | null;
   relation: 'ROOT' | 'REPLY';
   body: string | null;
+  readingBody: string | null;
   isNoteAuthor: boolean | null;
   likeCount: number | null;
 }

@@ -101,6 +101,7 @@ export function parseDossierComments(value: unknown): DossierCommentPage {
       parentSourceRef: optStr(row, 'parentSourceRef'),
       relation: choice(row.relation, ['ROOT', 'REPLY'], 'relation'),
       body: optStr(row, 'body'),
+      readingBody: optStr(row, 'readingBody'),
       isNoteAuthor: optBool(row, 'isNoteAuthor'),
       likeCount: optionalCount(row, 'likeCount'),
     })),
