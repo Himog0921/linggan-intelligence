@@ -44,9 +44,11 @@ export function Sidebar({
 }: SidebarProps) {
   const { collapsed, toggle } = useContext(SidebarState);
   const id = useId();
-  const [expansion, setExpansion] = useState<{ parent: string | undefined; groups: string[] } | null>(null);
+  const [expansion, setExpansion] = useState<{ parent: string | undefined; groups: string[] }>(
+    () => ({ parent: activeParentId, groups: activeParentId ? [activeParentId] : [] }),
+  );
   // Derive navigation state from the current parent; changing routes needs no effect or extra render.
-  const expandedGroups = expansion?.parent === activeParentId
+  const expandedGroups = expansion.parent === activeParentId
     ? expansion.groups
     : activeParentId ? [activeParentId] : [];
 
