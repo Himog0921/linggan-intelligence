@@ -238,7 +238,20 @@ const platformStats = (row: Json): T.PlatformStatistics => ({
     numeric,
   ),
 });
+const operations = (row: Json): T.OperationsCoverage | undefined => {
+  const value = d.optObj(row, "operations");
+  if (!value) return undefined;
+  const rule = d.obj(value, "hitRule");
+  return {
+    publishedWorkCount: d.num(value, "publishedWorkCount"), publicationCount: d.num(value, "publicationCount"), hitWorkCount: d.num(value, "hitWorkCount"), unknownViewsWorkCount: d.num(value, "unknownViewsWorkCount"),
+    hitRule: { platform: d.str(rule, "platform"), metric: d.str(rule, "metric"), threshold: d.num(rule, "threshold") },
+    works: d.list(value, "works", work => ({ workRef: d.str(work, "workRef"), publications: d.list(work, "publications", publication => ({
+      publicationRef: d.str(publication, "publicationRef"), accountRef: nullable(publication, "accountRef", text), accountName: nullable(publication, "accountName", text), platform: d.str(publication, "platform"), publishedOn: nullable(publication, "publishedOn", text), views: nullable(publication, "views", numeric), hit: d.bool(publication, "hit"),
+    })) })),
+  };
+};
 const stats = (row: Json): T.Statistics => ({
+  operations: operations(row),
   workCount: d.num(row, "workCount"),
   authorCount: d.num(row, "authorCount"),
   unknownAuthorCount: d.num(row, "unknownAuthorCount"),
@@ -378,6 +391,18 @@ export const decodeSnapshot = (value: unknown): T.Snapshot =>
       topicRef: nullable(r, "topicRef", text),
       totalWorkCount: d.num(r, "totalWorkCount"),
       readableWorkCount: d.num(r, "readableWorkCount"),
+      operations: operations(r),
+      progress: (() => {
+        const p = d.optObj(r, "progress");
+        if (!p) return undefined;
+        const material = d.obj(p, "material"), understanding = d.obj(p, "understanding"), graph = d.obj(p, "graph");
+        return {
+          totalWorkCount: d.num(p, "totalWorkCount"),
+          material: { ready: d.num(material, "ready"), preparing: d.num(material, "preparing"), blocked: d.num(material, "blocked"), unknown: d.num(material, "unknown") },
+          understanding: { available: d.num(understanding, "available"), missing: d.num(understanding, "missing"), stale: d.num(understanding, "stale"), unknown: d.num(understanding, "unknown") },
+          graph: { assigned: d.num(graph, "assigned"), unassigned: d.num(graph, "unassigned") },
+        };
+      })(),
       unclassifiedWorkCount: d.num(r, "unclassifiedWorkCount"),
       asOf: d.str(r, "asOf"),
       ownIdentityState: d.str(r, "ownIdentityState"),

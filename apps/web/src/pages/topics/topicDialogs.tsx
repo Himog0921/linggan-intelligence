@@ -1,3 +1,4 @@
+import { CommentAssignments } from './CommentAssignments';
 import { TopicResearchFlow, type ResearchRequestState } from './TopicResearchFlow';
 import { TopicButton } from "./TopicButton";
 import type { JSX } from "react";
@@ -43,6 +44,7 @@ import type * as T from "./types";
 
 /** Read-only dialog projection inputs; commands stay in the controller. */
 export interface TopicDialogsContext {
+  readonly researchProgress: T.TopicProgress | undefined;
   readonly researchRequest: (domain: string) => ResearchRequestState;
   readonly onResearchCompleted: () => void;
   readonly requireDialog: () => T.DialogState;
@@ -454,11 +456,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
                   <article className={cls("lgi-tm-comment")}>
                     <blockquote>{esc(c.body || "正文未知")}</blockquote>
                     <p>
-                      {[
-                        esc("评论作者身份已隐去"),
-                        " · ",
-                        esc(c.sourceRef || ""),
-                      ].join("")}
+                      评论作者身份已隐去
                     </p>
                     {c.parentText ? (
                       <>
@@ -481,6 +479,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
             ? btn("读取下一页已有评论", "comments-more")
             : ""}
         </section>
+        <CommentAssignments domain={reader.domainRef || context.state.domainRef} work={w.workRef} />
       </>
     );
   }
@@ -2041,7 +2040,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
     );
   }
   function researchDialog() {
-    return <TopicResearchFlow requestState={context.researchRequest(context.state.domainRef)} onCompleted={context.onResearchCompleted} domain={context.state.domainRef} works={context.selectedWorks().map(work => ({ workRef: work.workRef, title: work.title }))} />;
+    return <TopicResearchFlow progress={context.researchProgress} requestState={context.researchRequest(context.state.domainRef)} onCompleted={context.onResearchCompleted} domain={context.state.domainRef} works={context.selectedWorks().map(work => ({ workRef: work.workRef, title: work.title }))} />;
   }
   function moveDialog() {
     const activeDialog = context.requireDialog();

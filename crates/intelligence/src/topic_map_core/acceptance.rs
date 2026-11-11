@@ -27,6 +27,10 @@ pub(crate) async fn accept_in(
     {
         return Err(ModelError::InvalidOutput);
     }
+    if crate::ai_foundation::topic_comment_source::is_comment(batch.input) {
+        crate::ai_foundation::topic_comment_source::validate_matched_only(batch.resolution)
+            .map_err(|_| ModelError::InvalidOutput)?;
+    }
     let domain = batch.input.domain["domainRef"]
         .as_str()
         .and_then(|s| s.parse::<Uuid>().ok())

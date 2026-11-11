@@ -9,6 +9,7 @@ afterEach(() => vi.unstubAllGlobals());
 it('研究选中评论，呈现缺失语境，并在来源受限时隐藏结果', async () => {
   let restricted = false;
   vi.stubGlobal('fetch', vi.fn(async (path: string, init?: RequestInit) => {
+    if (path.includes('/comment-assignments?')) return reply({ domainRef: 'domain', items: [] });
     if (path.includes('/preview?')) return reply(selected);
     if (init?.method === 'POST') return reply({ requestRef: 'request', batchRef: 'batch' });
     return reply({ requestRef: 'request', state: 'succeeded', semanticState: 'succeeded', stages: [0, 1, 2].map(stageNumber => ({ stageNumber, state: 'succeeded', failureCode: null })), target: { sourceRef: 'source', rawText: '需要提醒。' }, sourceAvailable: !restricted, failureCode: null, result: { outcome: 'signals', reason: null, signals: [{ proposition: '需要提醒', evidenceSpan: { start: 0, end: 4 } }] } });
@@ -26,7 +27,7 @@ it('研究选中评论，呈现缺失语境，并在来源受限时隐藏结果'
   expect(screen.queryAllByText('需要提醒')).toHaveLength(0);
 });
 it('重新打开详情时能读取最近结果和对应原声', async () => {
-  vi.stubGlobal('fetch', vi.fn(async () => reply({ requestRef: 'request', state: 'succeeded', semanticState: 'succeeded', stages: [0, 1, 2].map(stageNumber => ({ stageNumber, state: 'succeeded', failureCode: null })), target: { sourceRef: 'source', rawText: '需要提醒。' }, sourceAvailable: true, failureCode: null, result: { outcome: 'signals', reason: null, signals: [{ proposition: '需要外部提醒', evidenceSpan: { start: 0, end: 4 } }] } })));
+  vi.stubGlobal('fetch', vi.fn(async (path: string) => path.includes('/comment-assignments?') ? reply({ domainRef: 'domain', items: [] }) : reply({ requestRef: 'request', state: 'succeeded', semanticState: 'succeeded', stages: [0, 1, 2].map(stageNumber => ({ stageNumber, state: 'succeeded', failureCode: null })), target: { sourceRef: 'source', rawText: '需要提醒。' }, sourceAvailable: true, failureCode: null, result: { outcome: 'signals', reason: null, signals: [{ proposition: '需要外部提醒', evidenceSpan: { start: 0, end: 4 } }] } })));
   render(<CommentResearch domain="domain" work="work" source="source" role="primary" />);
   const user = userEvent.setup(); await user.click(screen.getByRole('button', { name: '查看最近研究' }));
   expect(await screen.findByText('需要外部提醒')).toBeInTheDocument();

@@ -198,6 +198,20 @@ pub(crate) async fn frozen(db: &Database, window: Uuid) -> Result<ResearchInput,
     let configs: Vec<Uuid> =
         serde_json::from_value(row.get("configurations")).map_err(|_| FoundationError::Invalid)?;
     let manifest: Value = row.get("input_refs");
+    if manifest["inputContract"] == super::topic_comment_source::CONTRACT {
+        let request = serde_json::from_value(manifest["semanticRequestRef"].clone())
+            .map_err(|_| FoundationError::Invalid)?;
+        let mut tx = db.pool().begin().await?;
+        let input = super::topic_comment_source::load_in(&mut tx, request).await?;
+        if input.hash != manifest["inputHash"].as_str().unwrap_or("")
+            || input.domain["domainRef"] != serde_json::json!(row.get::<Uuid, _>("domain_ref"))
+        {
+            return Err(FoundationError::AdmissionDenied(vec![
+                "ai_source_unavailable".into(),
+            ]));
+        }
+        return Ok(input);
+    }
     let work: Uuid = row.get("work_ref");
     let refs = source::manifest_source_work_refs(work, &manifest);
     let loaded = source::load_inputs_for_works_at(

@@ -64,6 +64,10 @@ pub(super) fn routes(
             "/api/local/topic-map/collection",
             get(current_collection_progress),
         )
+        .route(
+            "/api/local/topic-map/comment-assignments",
+            get(comment_assignments),
+        )
         .route("/api/local/topic-map", get(snapshot))
         .route("/api/local/topic-map/context", get(page_context))
         .route("/api/local/topic-map/overview", get(overview))
@@ -724,4 +728,16 @@ async fn handoff_angle(
         Ok(receipt) => Json(receipt).into_response(),
         Err(error) => crate::local_web::content_workbench_api::error(error),
     }
+}
+
+async fn comment_assignments(
+    State(state): State<LocalWebState>,
+    Query(query): Query<linggan_intelligence::ai_foundation::topic_comment_source::Query>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_comment_source::read(db, &query).await,
+    )
 }

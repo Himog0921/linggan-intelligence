@@ -1,3 +1,4 @@
+import { OperationsWorkBadge } from './OperationsCoverage';
 import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import type { JSX, ReactNode } from "react";
 import { TopicPatterns } from "./TopicPatterns";
@@ -258,6 +259,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                             w.ownBreakout,
                           )
                         : ""}
+                      <OperationsWorkBadge coverage={context.snapshot?.scope.operations} workRef={w.workRef} />
                       {badge(
                         list(w.topicRefs).length ? "已有方向依据" : "待归方向",
                       )}
@@ -2735,6 +2737,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
           </button>
           <div className={cls("lgi-tm-row lgi-tm-card-meta")}>
             <span>{esc(platformName(w.platform))}</span>
+            <OperationsWorkBadge coverage={context.snapshot?.scope.operations} workRef={w.workRef} />
             {w.own
               ? badge(
                   w.ownBreakout ? "我方手动爆款" : "我方作品",

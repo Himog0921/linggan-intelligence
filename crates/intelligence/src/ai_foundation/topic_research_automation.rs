@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
 mod definition_repair;
+mod comments;
 mod producer;
 pub use producer::tick;
 

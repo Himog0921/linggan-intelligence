@@ -9,6 +9,7 @@ const RESULTS: &str = r#"
   w.input_refs,w.window_ref AS task_ref,(run.configurations->>0)::uuid AS config_ref
  FROM linggan_topic_research_result r JOIN linggan_topic_research_window w USING(window_ref) JOIN linggan_topic_research_run run USING(run_ref)
  WHERE ($1::uuid IS NULL OR run.domain_ref=$1)
+ AND w.input_refs->>'inputContract' IS DISTINCT FROM 'topic-map.comment-semantic-source.v1'
  ORDER BY run.domain_ref,w.work_ref,w.input_hash,r.created_at DESC,r.result_ref DESC
 "#;
 

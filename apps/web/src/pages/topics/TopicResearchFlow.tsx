@@ -1,3 +1,5 @@
+import { TopicProgress } from './TopicProgress';
+import type { TopicProgress as Progress } from './types';
 import { Link } from 'react-router';
 import { TopicAutomation } from './TopicAutomation';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -20,11 +22,11 @@ const REASONS: Record<string,string> = {
 };
 export type ResearchSubmission = { commandRef: string; workRefs: string[]; inFlight: Promise<string> | null };
 export type ResearchRequestState = { get: () => ResearchSubmission | null; set: (value: ResearchSubmission | null) => void };
-type Props = { requestState?: ResearchRequestState; onCompleted?: () => void; domain: string; works: { workRef: string; title?: string | null }[] };
+type Props = { progress?: Progress; requestState?: ResearchRequestState; onCompleted?: () => void; domain: string; works: { workRef: string; title?: string | null }[] };
 export function TopicResearchFlow(props: Props) {
   return <DomainResearchFlow key={props.domain} {...props} />;
 }
-function DomainResearchFlow({ domain, works, onCompleted, requestState }: Props) {
+function DomainResearchFlow({ domain, works, onCompleted, requestState, progress }: Props) {
   const [localRequest] = useState<ResearchRequestState>(() => {
     let current: ResearchSubmission | null = null;
     return { get: () => current, set: value => { current = value; } };
@@ -113,7 +115,7 @@ function DomainResearchFlow({ domain, works, onCompleted, requestState }: Props)
     await followSubmission(submission.inFlight);
   }
   async function cancel(runRef: string) { setBusy(true); try { await requestJson('/api/local/topic-research/cancel', { method: 'POST', body: { commandRef: crypto.randomUUID(), domainRef: domain, runRef } }); setNotice('已请求取消'); await read(); } catch { setNotice('取消回执未知，请刷新进度核对。'); } finally { setBusy(false); } }
-  return <section className={c('lgi-tm-section')} aria-label="主题研究流程"><h3>主题研究</h3><TopicAutomation domain={domain} onEnabledChange={setAutomaticEnabled} /><Link to="/settings/models?view=advanced&area=work&task=topic_research">去 AI 设置</Link>
+  return <section className={c('lgi-tm-section')} aria-label="主题研究流程"><h3>主题研究</h3><TopicProgress progress={progress} /><TopicAutomation domain={domain} onEnabledChange={setAutomaticEnabled} /><Link to="/settings/models?view=advanced&area=work&task=topic_research">去 AI 设置</Link>
     <div className={c('lgi-tm-row')}><input type="search" aria-label="搜索研究作品" placeholder="搜索作品" value={search} onChange={event => { setSearch(event.target.value); setPage(0); }} /><span>已选 {selected.length} / 10</span></div>
     <div className={c('lgi-tm-row')}><button className={c('lgi-tm-button')} type="button" disabled={busy || selected.length === 0} onClick={() => void start()}>{uncertain ? '重试同一请求' : '开始研究'}</button><button className={c('lgi-tm-button')} type="button" disabled={busy} onClick={() => void refresh()}>刷新进度</button></div>
     <fieldset className={c('lgi-tm-research-works')} disabled={busy || uncertain}><legend>本次作品</legend>{visibleWorks.map(work => <label className={c('lgi-tm-check-label')} key={work.workRef}><input type="checkbox" checked={selected.includes(work.workRef)} disabled={selected.length >= 10 && !selected.includes(work.workRef)} onChange={event => setSelected(old => event.target.checked ? [...old, work.workRef] : old.filter(ref => ref !== work.workRef))} /><span>{work.title || '未命名作品'}</span></label>)}{filtered.length === 0 ? <span>没有匹配作品</span> : null}</fieldset>

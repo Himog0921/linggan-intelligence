@@ -107,7 +107,13 @@ test('SSE budget is finite and token-specific while non-stream bodies keep their
   assert.ok(sseByteLimit(16)<sseByteLimit(2000));
   assert.equal(sseByteLimit(8192),Math.min(LIMITS.maxStreamBytes,LIMITS.baseStreamBytes+8192*LIMITS.streamBytesPerOutputToken));
   assert.equal(sseByteLimit(LIMITS.maxOutputTokens),LIMITS.maxStreamBytes);
-  const s=await server((req,res)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[],padding:'x'.repeat(LIMITS.maxResponseBytes+1)}));});
+  // Prebuild valid JSON with bounded lines. This tests aggregate response bytes,
+  // not repeated scanning of one growing line or fixture construction within the deadline.
+  const paddingLine=`${' '.repeat(1000)}\n`;
+  const body=`{\n"data": []\n${paddingLine.repeat(Math.ceil((LIMITS.maxResponseBytes+1)/Buffer.byteLength(paddingLine)))}}`;
+  assert.ok(Buffer.byteLength(body)>LIMITS.maxResponseBytes);
+  assert.deepEqual(JSON.parse(body),{data:[]});
+  const s=await server((req,res)=>{res.writeHead(200,{'Content-Type':'application/json'});res.end(body);});
   try{const result=await execute(request(s.url,{operation:'discover',maxOutputTokens:2000}));assert.equal(result.failureCode,'response_too_large');assertDiagnostic(result,{limitKind:'response_bytes'});}finally{await s.close();}
 });
 test('known provider usage above the authorized token limit is rejected despite stop',async()=>{

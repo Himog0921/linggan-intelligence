@@ -3,6 +3,7 @@
 mod core_read;
 #[path = "topic_map/read.rs"]
 mod read;
+mod operations;
 #[path = "topic_map/saved.rs"]
 mod saved;
 #[path = "topic_map/store.rs"]

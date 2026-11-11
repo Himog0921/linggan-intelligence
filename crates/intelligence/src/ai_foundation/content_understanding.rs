@@ -1,3 +1,5 @@
+mod coverage;
+pub(crate) use coverage::scope_coverage;
 mod deep;
 mod deep_grounding;
 pub(crate) mod generate_deep;

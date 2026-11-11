@@ -225,9 +225,11 @@ pub async fn save_topic_map_command(
         } => {
             work(&mut tx, domain_ref, *work_ref).await?;
             let own:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_content c JOIN linggan_material_content_author a ON a.content_public_ref=c.public_ref JOIN (SELECT DISTINCT ON(platform,author_external_id) * FROM linggan_topic_map_own_creator WHERE domain_ref=$1 ORDER BY platform,author_external_id,created_at DESC,membership_ref DESC) own ON own.platform=c.platform AND own.author_external_id=a.author_external_id AND own.active WHERE c.public_ref=$2)").bind(domain_ref).bind(work_ref).fetch_one(&mut *tx).await?;
-            if !own {
+            let mapped =
+                super::operations::read_in(&mut tx, &[*work_ref], Some(domain_ref)).await?;
+            if !own && !mapped.contains_key(work_ref) {
                 return Err(TopicMapError::Invalid(
-                    "breakout requires explicit own creator identity",
+                    "breakout requires own creator or current Operations publication identity",
                 ));
             }
             let r = receipt(

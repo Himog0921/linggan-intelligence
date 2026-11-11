@@ -17,6 +17,9 @@ use uuid::Uuid;
 mod core_setup;
 #[path = "../../../../crates/evidence/tests/support/research_dossier_fixture.rs"]
 mod dossier;
+#[allow(dead_code)]
+#[path = "../../../../crates/evidence/tests/support/domain_fixture.rs"]
+mod domain_fixture;
 #[path = "../../../../crates/intelligence/tests/support/ai_writing_endpoint.rs"]
 mod endpoint;
 #[path = "../../../../crates/intelligence/tests/support/ai_writing_fixture.rs"]
@@ -76,6 +79,11 @@ async fn unified_research_real_chain_browser_proof() {
         Ok("SYNTHETIC-NOT-EVIDENCE")
     );
     let db = dossier::fixture::proof_database("unified_research_browser").await;
+    domain_fixture::submit_package_for_domain(&db, &dossier::DOMAIN.to_string(), "synthetic-ops", "deep_archive",
+        json!({"query":"synthetic-ops"}), 1, "discovery_search",
+        domain_fixture::search_coverage("synthetic-ops", 1),
+        json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        vec![domain_fixture::discovery_card("dossier-note", "合成底稿验收", "0", "https://www.xiaohongshu.com/explore/dossier-note")]).await;
     let work = dossier::work(&db).await;
     // A complete one-page inventory and admitted original bytes satisfy Core's real
     // material readiness contract; the old text-only fixture left media unknown.
@@ -202,6 +210,21 @@ async fn unified_research_real_chain_browser_proof() {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }).await.expect("synthetic Core must be accepted before opening topic research");
+    // Synthetic Operations publication mapped through the real acquired detail receipt.
+    let member = Uuid::new_v4();
+    let publication = Uuid::new_v4();
+    let report_request = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_ops_member(member_ref,email_normalized,display_name,role,state) VALUES($1,$2,'SYNTHETIC','admin','invited')")
+        .bind(member).bind(format!("{member}@example.test")).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_ops_publication(publication_ref,source_system,source_record_id,platform,publication_url,canonical_url,content_id_state,platform_content_id,published_date_state,entry_source,review_status,native_record_state,native_version,native_publisher_member_ref,native_registered_by_member_ref,native_business_domain_ref,native_published_on,native_published_precision) VALUES($1,'linggan_native',$1::text,'xhs','https://www.xiaohongshu.com/explore/000000000000000000000001','https://www.xiaohongshu.com/explore/000000000000000000000001','parsed_publication_url','000000000000000000000001','as_recorded','linggan_ops_manual','confirmed','active',1,$2,$2,$3,'2026-11-11','day')")
+        .bind(publication).bind(member).bind(dossier::DOMAIN).execute(db.pool()).await.unwrap();
+    let mapped = sqlx::query("INSERT INTO linggan_ops_publication_material_projection(projection_ref,publication_ref,publication_version,request_ref,work_order_ref,task_id,attempt_id,package_ref,receipt_ref,record_ordinal,content_public_ref,observed_at) SELECT gen_random_uuid(),$1,1,(SELECT request_ref FROM collection_acquisition_request LIMIT 1),(SELECT work_order_ref FROM collection_work_order LIMIT 1),receipt.task_id,receipt.attempt_id,detail.package_ref,receipt.receipt_ref,detail.record_ordinal,$2,detail.observed_at FROM linggan_material_content_detail detail JOIN linggan_runtime_submission_receipt receipt USING(package_ref) WHERE detail.content_public_ref=$2 ORDER BY detail.created_at DESC LIMIT 1")
+        .bind(publication).bind(work).execute(db.pool()).await.unwrap();
+    assert_eq!(mapped.rows_affected(), 1);
+    sqlx::query("INSERT INTO linggan_ops_native_write_request(request_ref,command_kind,actor_member_ref,payload_sha256,outcome,record_ref,outcome_code) VALUES($1,'view_report_record',$2,decode(repeat('a',64),'hex'),'accepted',$3,'synthetic')")
+        .bind(report_request).bind(member).bind(publication).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_ops_view_report(report_ref,publication_ref,report_kind,view_count,source_kind,reported_by_member_ref,request_ref,as_of) VALUES(gen_random_uuid(),$1,'value',6000,'linggan_ops_manual',$2,$3,scope_001_now())")
+        .bind(publication).bind(member).bind(report_request).execute(db.pool()).await.unwrap();
     let application = app_with_database(db.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());

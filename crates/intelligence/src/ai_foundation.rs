@@ -27,6 +27,7 @@ pub mod skill_store;
 pub mod store;
 pub mod task_config;
 pub mod topic_research;
+pub mod topic_comment_source;
 pub mod topic_research_automation;
 mod topic_research_packet;
 pub mod transport;

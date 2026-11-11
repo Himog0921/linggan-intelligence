@@ -1,3 +1,5 @@
+import { OperationsCoverage } from './OperationsCoverage';
+import { TopicProgress } from './TopicProgress';
 import { Fragment, type ReactNode } from "react";
 import { btn } from "./topicElements";
 import { number, pct, platformName, readoutNumber } from "./topicModel";
@@ -79,7 +81,7 @@ export function OverviewReadouts({
         <Readout
           glyph="papers" label="观察到的内容" drill
           value={readoutNumber(stats.workCount)} valueText={number(stats.workCount)} unit="篇" deltaLabel="昨日新增"
-          detail={<><span>可读 <b>{number(scope.readableWorkCount)}</b></span><span>待归主题 <b>{number(scope.unclassifiedWorkCount)}</b></span></>}
+          detail={<><span>可读 <b>{number(scope.readableWorkCount)}</b></span></>}
         />
         <Readout
           glyph="people" label="已观察创作者"
@@ -106,6 +108,8 @@ export function OverviewReadouts({
           </Fragment>
         ))}
       </div>
+      <TopicProgress progress={scope.progress} />
+      <OperationsCoverage coverage={stats.operations} />
       {platforms.length === 0 ? (
         <div className={s.noPlatform}>当前范围暂无可判定的平台表现，已有材料仍可阅读。</div>
       ) : null}

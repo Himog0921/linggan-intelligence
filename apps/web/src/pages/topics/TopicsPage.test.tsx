@@ -31,6 +31,7 @@ function page() {
   );
 }
 function defaultRead(path: string) {
+  if (path.includes("/comment-assignments?")) return { domainRef: topicDomain, items: [] };
   if (path === "/api/local/ai-settings") return businessSettingsFixture();
   if (path.includes("/context")) return topicContext;
   if (path.includes("topic-research")) return topicProgress();

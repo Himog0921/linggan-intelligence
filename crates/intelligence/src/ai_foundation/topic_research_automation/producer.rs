@@ -9,12 +9,14 @@ use uuid::Uuid;
 pub struct CursorState {
     cores: Option<(Uuid, Uuid)>,
     definitions: Option<(Uuid, Uuid)>,
+    comments: Option<(Uuid, Uuid)>,
 }
 pub type Cursor = Option<CursorState>;
 /// Queue a bounded page of existing Core versions; no model or collection call happens here.
 pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, FoundationError> {
     let position = cursor.get_or_insert_with(CursorState::default);
-    let repaired = super::definition_repair::tick(db, &mut position.definitions).await?;
+    let repaired = super::definition_repair::tick(db, &mut position.definitions).await?
+        + super::comments::tick(db, &mut position.comments).await?;
     let rows = sqlx::query(include_str!("candidates.sql"))
         .bind(position.cores.map(|v| v.0))
         .bind(position.cores.map(|v| v.1))

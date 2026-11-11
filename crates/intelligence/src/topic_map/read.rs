@@ -72,6 +72,7 @@ pub async fn read_topic_map(
         })
         .collect();
     let mut works = Vec::new();
+    let mut material_states = HashMap::new();
     let mut seen = HashSet::new();
     for (domain_ref, references) in domain_batches {
         // At most two canonical 500-work reads overlap. Each retains its read-only
@@ -90,6 +91,10 @@ pub async fn read_topic_map(
                 if !seen.insert(reference) {
                     continue;
                 }
+                material_states.insert(
+                    reference,
+                    resource.material_readiness.as_ref().map(|r| r.state),
+                );
                 let (author, follower) = authors.get(&reference).cloned().unwrap_or_default();
                 let own = author.as_ref().is_some_and(|author| {
                     own_creators.iter().any(|v| {
@@ -167,6 +172,16 @@ pub async fn read_topic_map(
                 });
             }
         }
+    }
+    let operation_refs: Vec<_> = works
+        .iter()
+        .filter(|w| w.readable)
+        .map(|w| w.work_ref)
+        .collect();
+    let operation_facts = super::operations::read(database, &operation_refs, q.domain_ref).await?;
+    for work in &mut works {
+        work.own |= operation_facts.contains_key(&work.work_ref);
+        work.own_breakout = work.own && breakouts.contains(&work.work_ref);
     }
     let rules:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'likeThreshold',like_threshold,'version',version,'ruleRef',rule_ref) FROM (SELECT DISTINCT ON(domain_ref,platform) * FROM linggan_topic_map_performance_rule WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,version DESC) current").bind(q.domain_ref).fetch_all(database.pool()).await?;
     let rows=sqlx::query("SELECT t.topic_ref,t.canonical_key,d.definition_ref,d.version,d.display_name,d.definition_text,d.lifecycle_state,b.domain_ref,b.parent_topic_ref,b.version AS binding_version,array(SELECT m.work_public_ref FROM linggan_topic_classification_run r JOIN linggan_topic_material_member m USING(classification_run_ref) WHERE r.definition_ref=d.definition_ref AND r.run_kind='human_adjudicated' ORDER BY m.ordinal) AS members FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition d WHERE d.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_binding b WHERE b.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE ($1::uuid IS NULL OR b.domain_ref=$1) ORDER BY d.display_name").bind(q.domain_ref).fetch_all(database.pool()).await?;
@@ -302,6 +317,7 @@ pub async fn read_topic_map(
             .filter(included)
             .collect();
         t.statistics = statistics(&tw, &rules);
+        t.statistics["operations"] = super::operations::summarize(&operation_facts, &tw);
         let history: Vec<_> = works
             .iter()
             .filter(|w| t.work_refs.contains(&w.work_ref) && w.own)
@@ -344,15 +360,37 @@ pub async fn read_topic_map(
                 .is_none_or(|s| s.contains(&w.work_ref))
         })
         .collect();
-    let stats = statistics(&selected, &rules);
+    let mut stats = statistics(&selected, &rules);
+    let operations = super::operations::summarize(&operation_facts, &selected);
+    stats["operations"] = operations.clone();
     let journeys = journey(&selected);
     let sources = sources(&selected, &rules);
     let work_count = selected.len();
     let readable = selected.iter().filter(|w| w.readable).count();
-    let pending = selected
-        .iter()
-        .filter(|w| w.main_stage == "pending")
-        .count();
+    // Topic membership and the author's journey stage are independent: an
+    // automatically assigned work may legitimately have no identified stage.
+    let pending = selected.iter().filter(|w| w.topic_refs.is_empty()).count();
+    let selected_work_refs: Vec<_> = selected.iter().map(|w| w.work_ref).collect();
+    let understanding = crate::ai_foundation::content_understanding::scope_coverage(
+        database,
+        &selected_work_refs,
+        &as_of,
+    )
+    .await
+    .map_err(|e| TopicMapError::Source(e.to_string()))?;
+    let mut material = json!({"ready":0,"preparing":0,"blocked":0,"unknown":0});
+    for work in &selected {
+        use linggan_evidence::research_dossier::MaterialState;
+        let state = match material_states.get(&work.work_ref).copied().flatten() {
+            Some(MaterialState::Ready) => "ready",
+            Some(MaterialState::Preparing) => "preparing",
+            Some(MaterialState::Blocked) => "blocked",
+            None => "unknown",
+        };
+        material[state] = json!(material[state].as_u64().unwrap_or(0) + 1);
+    }
+    let progress = json!({"totalWorkCount":work_count,"material":material,
+        "understanding":understanding,"graph":{"assigned":work_count-pending,"unassigned":pending}});
     let alternatives = read_alternatives(database, q, &works).await?;
     let mut changes:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('topicRef',t.topic_ref,'definitionRef',d.definition_ref,'definitionVersion',d.version,'lastViewedDefinitionRef',v.definition_ref,'lastViewedAt',v.created_at::text,'structureChanged',v.definition_ref IS NOT NULL AND v.definition_ref<>d.definition_ref,'notViewed',v.definition_ref IS NULL,'lastViewedWorkRefs',v.observed_work_refs) FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_viewed WHERE topic_ref=t.topic_ref AND ($1::uuid IS NULL OR domain_ref=$1) ORDER BY created_at DESC LIMIT 1)v ON true WHERE t.topic_ref=ANY($2)").bind(q.domain_ref).bind(topics.iter().map(|t|t.topic_ref).collect::<Vec<_>>()).fetch_all(database.pool()).await?;
     for change in &mut changes {
@@ -409,7 +447,7 @@ pub async fn read_topic_map(
         .collect();
     Ok(TopicMapSnapshot {
         domains,
-        scope: json!({"domainRef":q.domain_ref,"topicRef":q.topic_ref,"platform":q.platform,"windowDays":q.window_days,"referenceWindowDays":reference_days,"asOf":as_of,"totalWorkCount":work_count,"loadedWorkCount":scoped_works.len(),"canonicalWorkCount":refs.len(),"readableWorkCount":readable,"unclassifiedWorkCount":pending,"readLimit":null,"ownIdentityState":if own_creators.iter().any(|v|v["active"]==true){"partial_observed"}else{"unknown"},"includeReference":q.include_reference,"ownHistoricalWorkRefs":history_own_refs,"ownHistoryPublishedCount":history_own_published,"ownHistoryPublicationUnknownCount":history_own_unknown,"recentReferenceWorkRefs":recent}),
+        scope: json!({"operations":operations,"progress":progress,"domainRef":q.domain_ref,"topicRef":q.topic_ref,"platform":q.platform,"windowDays":q.window_days,"referenceWindowDays":reference_days,"asOf":as_of,"totalWorkCount":work_count,"loadedWorkCount":scoped_works.len(),"canonicalWorkCount":refs.len(),"readableWorkCount":readable,"unclassifiedWorkCount":pending,"readLimit":null,"ownIdentityState":if !operation_facts.is_empty() || own_creators.iter().any(|v|v["active"]==true){"partial_observed"}else{"unknown"},"includeReference":q.include_reference,"ownHistoricalWorkRefs":history_own_refs,"ownHistoryPublishedCount":history_own_published,"ownHistoryPublicationUnknownCount":history_own_unknown,"recentReferenceWorkRefs":recent}),
         topics,
         works: scoped_works,
         statistics: stats,

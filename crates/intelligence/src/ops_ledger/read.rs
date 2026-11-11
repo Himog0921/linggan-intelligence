@@ -31,7 +31,7 @@ pub use publications::{
 pub use summary::{OpsSummary, read_ops_summary, read_ops_summary_scoped};
 
 /// Shared CTE: the latest view-count report per publication (`value` or `cleared`).
-pub(super) const LATEST_VIEWS_CTE: &str = "latest_views AS ( \
+pub(crate) const LATEST_VIEWS_CTE: &str = "latest_views AS ( \
     SELECT DISTINCT ON (publication_ref) publication_ref, view_count, \
            to_char(as_of AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"') AS views_as_of \
       FROM linggan_ops_view_report \

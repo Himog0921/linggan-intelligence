@@ -391,6 +391,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     },
   });
   const topicDialogs = createTopicDialogs({
+    get researchProgress() { return snapshot?.scope.progress; },
     onResearchCompleted: () => { void load(); },
     researchRequest: (domain: string) => {
       let request = researchRequests.get(domain);

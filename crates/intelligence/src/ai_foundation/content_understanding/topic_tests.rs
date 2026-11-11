@@ -79,7 +79,30 @@ async fn roundtrip(image_only: bool) {
     assert!(
         matches!(missing, Err(FoundationError::AdmissionDenied(ref reasons)) if reasons.contains(&"content_understanding_required".into()))
     );
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        scope_coverage(&db, &[work], &cutoff).await.unwrap(),
+        json!({"available":0,"missing":1,"stale":0,"unknown":0})
+    );
     let reference = seed_core(&db, work, model_config, image_only).await;
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    let packet = source::load(&mut tx, support::D, work, &cutoff)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let ready = packet.coverage["materialReadiness"]["state"] == "ready";
+    let coverage = scope_coverage(&db, &[work], &cutoff).await.unwrap();
+    assert_eq!(coverage["available"], json!(usize::from(ready)));
+    assert_eq!(coverage["stale"], json!(usize::from(!ready)));
+    assert_eq!(coverage["missing"], 0);
+
     use crate::ai_foundation::topic_research_automation as automation;
     let run = if image_only {
         automation::tests::assert_first_queue(&db, support::D, work, reference).await
@@ -189,6 +212,14 @@ async fn roundtrip(image_only: bool) {
             "2026-11-11T00:00:00Z",
         )
         .await;
+        let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+        assert_eq!(
+            scope_coverage(&db, &[work], &cutoff).await.unwrap()["stale"],
+            1
+        );
         let next = seed_core(&db, work, model_config, image_only).await;
         let mut cursor = None;
         assert_eq!(automation::tick(&db, &mut cursor).await.unwrap(), 0);
