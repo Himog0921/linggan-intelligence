@@ -44,6 +44,9 @@ pub fn response_schema() -> Value {
     core_fields["summary"]["properties"]["text"]["description"] = json!(
         "用中立语气概括整篇用途。只由发布者声称的产品范围、效果、期限、售后条款等，在摘要中保留归因，例如「作者称资料可长期访问」。画面样例只支持其中能看到的内容，不能证明全套材料都符合作者描述。"
     );
+    core_fields["mainTopicUnitId"]["description"] = json!(
+        "必填。先为整篇的主要话题或发布目的写一条有依据的知识单元，其 unitType 必须是 discussion。mainTopicUnitId 填这条单元的 id。输出前按 id 找回该单元，确认 unitType 是 discussion。"
+    );
     core_fields["knowledgeUnits"]["description"] = json!(format!(
         "按内容作用提炼单元：audience_context最多{}条、author_position最多{}条、provision最多{}条、reader_value最多{}条。相关内容可合并表述，保留关键方法、数字、否定和条件，不为分类凑单元。仅由作者声称的内容使用 author_claim，并在 statement 中注明归因。",
         core["audienceUnitIds"]["maxItems"],
@@ -52,7 +55,7 @@ pub fn response_schema() -> Value {
         core["readerValueUnitIds"]["maxItems"],
     ));
     core_fields["knowledgeUnits"]["items"]["properties"]["unitType"]["description"] = json!(
-        "仅使用本字段的 enum。作者主张不等于作者立场：方法、解释、信息和案例属于 provision，明确立场用 author_position；受众与处境用 audience_context。author_claim、observation、interpretation 属于 assertionKind，不是 unitType。"
+        "仅使用本字段的 enum。整篇在讲什么或作者发布的目的用 discussion，例如作者推介一套学习资料。具体提供的方法、解释、信息和案例用 provision，例如资料附练习答案。作者主张不等于作者立场。明确立场用 author_position，受众与处境用 audience_context。assertionKind 独立填写。整篇主议题由作者主张时，unitType 填 discussion，assertionKind 填 author_claim，在陈述中注明归因。"
     );
     core_fields["knowledgeUnits"]["items"]["properties"]["evidenceRefs"]["description"] = json!(
         "引用直接支撑本单元细节的依据。由画面文字支持的关键细节，使用该文字所在 frame_text 的 citationId 建立文字依据；细节来自不同画面时，各引对应片段。同一细节重复出现时选一个能支撑它的片段。口播细节引用 transcript；整体标题或画面标题不能单独支撑更具体的内容。"
