@@ -172,7 +172,7 @@ async function main() {
     await domainDialog.getByText('材料统计与通道', { exact: true }).click();
     await capture('domain-editor-statistics', '.c-domain-manager[open]');
     await domainDialog.getByRole('button', { name: '← 返回领域列表', exact: true }).click();
-    await domainDialog.getByRole('button', { name: '＋ 新建领域', exact: true }).click();
+    await domainDialog.getByRole('button', { name: '新建领域', exact: true }).click();
     await domainDialog.locator('.domain-create').waitFor();
     await capture('domain-new', '.c-domain-manager[open]');
     assert.deepEqual(writes, [], 'no capture may attempt a write');
