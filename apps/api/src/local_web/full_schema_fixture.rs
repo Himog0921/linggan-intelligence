@@ -321,6 +321,9 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0197_ops_team_offboarding.sql"),
     include_str!("../../../../database/migrations/0198_content_understanding_deep.sql"),
     include_str!("../../../../database/migrations/0199_content_understanding_model_deep.sql"),
+    include_str!("../../../../database/migrations/0200_topic_research_automation.sql"),
+    include_str!("../../../../database/migrations/0201_topic_angle_handoff.sql"),
+    include_str!("../../../../database/migrations/0202_topic_core_merge_prompts.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -460,4 +463,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0197_ops_team_offboarding','f3f5c81a4f23552fec3b0704731c0d5ddc9518db6d23f9204f18205a96a19e35');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0198_content_understanding_deep','fe6ffaa904caa4c5d25e30dfb256208102c27bd3718495810f49389ecd9b90ad');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0199_content_understanding_model_deep','ebb9f2c7d819a6ad1fa859b997de3a4a4f4cdc44950193d24941eb120956e0d6');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0200_topic_research_automation','26f7b1809c87d33765ee189960631e702a5b19663c9fd0b031c17023f8db378c');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0201_topic_angle_handoff','4e58d739792709899b18826f3d96c94a25444931b933641243f168422afa2b8e');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0202_topic_core_merge_prompts','12567f03e26e252e80bdf111b103ac0a453393e637a3d63c2d2da091e8ba4731');\n",
 );

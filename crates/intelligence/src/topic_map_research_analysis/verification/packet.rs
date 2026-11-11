@@ -149,6 +149,7 @@ fn candidate_table(candidates: &Value) -> Result<Value, &'static str> {
             "inductionMethod",
             "conceptRole",
             "parentTopicRef",
+            "supportExamples",
         ] {
             if let Some(value) = candidate.get(field) {
                 row.insert(field.into(), value.clone());

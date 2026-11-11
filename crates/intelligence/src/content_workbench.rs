@@ -6,6 +6,7 @@ pub mod recovery;
 mod requests;
 mod source_usage;
 mod store;
+pub mod topic_handoff;
 pub mod types;
 mod validation;
 pub use assets::{asset_file, upload_asset};
@@ -60,3 +61,7 @@ pub(crate) fn hash(bytes: impl AsRef<[u8]>) -> String {
         .map(|b| format!("{b:02x}"))
         .collect()
 }
+
+#[cfg(test)]
+#[path = "content_workbench/topic_handoff_tests.rs"]
+mod topic_handoff_tests;

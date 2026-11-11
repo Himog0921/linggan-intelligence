@@ -1,0 +1,40 @@
+use super::FoundationError;
+use crate::ai_foundation::{batch_store::BatchKind, topic_research};
+use linggan_storage_postgres::Database;
+use sqlx::Row;
+use uuid::Uuid;
+
+/// A scan position only, not a second task ledger. Restarting safely rescans existing command IDs.
+pub type Cursor = Option<(Uuid, Uuid)>;
+/// Queue a bounded page of existing Core versions; no model or collection call happens here.
+pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, FoundationError> {
+    let rows = sqlx::query(include_str!("candidates.sql"))
+        .bind(cursor.map(|v| v.0))
+        .bind(cursor.map(|v| v.1))
+        .bind(crate::topic_map_research_analysis::METHOD_VERSION)
+        .fetch_all(db.pool())
+        .await?;
+    if rows.is_empty() {
+        *cursor = None;
+        return Ok(0);
+    }
+    let mut queued = 0;
+    for row in rows {
+        let domain: Uuid = row.get("domain_ref");
+        let core: Uuid = row.get("request_ref");
+        *cursor = Some((domain, core));
+        let request = topic_research::Start {
+            command_ref: row.get("command_ref"),
+            domain_ref: domain,
+            work_refs: vec![row.get("work_ref")],
+        };
+        match topic_research::start_with_kind(db, &request, BatchKind::Automatic, Some(core)).await
+        {
+            Ok(_) => queued += 1,
+            // One unavailable source/configuration must not drain the shared AI executor.
+            Err(FoundationError::Database(error)) => return Err(error.into()),
+            Err(_) => continue,
+        }
+    }
+    Ok(queued)
+}

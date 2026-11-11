@@ -6,6 +6,15 @@ use uuid::Uuid;
 #[path = "source_metadata.rs"]
 mod metadata;
 
+pub(super) fn redact_source_metadata(doc: &mut WorkDocument, quotes: &[String]) {
+    if quotes
+        .iter()
+        .any(|quote| metadata::contains_quote(doc, quote))
+    {
+        metadata::redact(doc, quotes);
+    }
+}
+
 pub(super) fn target_mut<'a>(
     doc: &'a mut WorkDocument,
     target: &UseTarget,
@@ -154,6 +163,14 @@ pub(crate) async fn prepare(
     old: Option<&WorkDocument>,
     doc: &mut WorkDocument,
 ) -> Result<(), WorkbenchError> {
+    if let Some(previous) = old {
+        for reference in &previous.topic_angle_refs {
+            if !doc.topic_angle_refs.contains(reference) {
+                doc.topic_angle_refs.push(*reference);
+            }
+        }
+    }
+    super::topic_handoff::qualify_document_in(tx, domain, doc).await?;
     // Preserve server-observed AI provenance through ordinary edits, even when a client
     // omits the metadata. Clearing/deleting the target is an explicit removal of its text.
     if let Some(previous) = old {
@@ -475,6 +492,8 @@ pub(crate) async fn redact(
     domain: Uuid,
     doc: &mut WorkDocument,
 ) -> Result<Vec<SourceStatus>, WorkbenchError> {
+    let unavailable = super::topic_handoff::unavailable_texts_in(tx, domain, doc).await?;
+    super::topic_handoff::redact_origin_texts(doc, &unavailable);
     let qualifications = crate::content_workbench_sources::qualify_citations_in_domain(
         tx,
         &doc.excerpts
@@ -806,6 +825,8 @@ pub(crate) async fn redact_title_in(
         .collect();
     let mut projection = WorkDocument {
         title: doc.title.clone(),
+        idea_ref: doc.idea_ref,
+        topic_angle_refs: doc.topic_angle_refs.clone(),
         uses,
         excerpts,
         derived_sources: doc

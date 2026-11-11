@@ -200,16 +200,14 @@ pub fn resolution_schema() -> Value {
                     ),
                     (
                         "relations",
-                        array(
-                            object(&[
-                                ("topicRef", uuid()),
-                                ("definitionRef", uuid()),
-                                ("relation", enumeration(&RELATIONS)),
-                                ("reason", string(500)),
-                            ]),
-                            0,
-                            64,
-                        ),
+                        json!({"type":"array","minItems":0,
+                        "description":"Compare the full supplied catalog. Emit only meaningful equivalent, containment, related or contrast relations; unrelated candidates need no relation row. An equivalent concept must be matched, never proposed as new.",
+                        "items":object(&[
+                            ("topicRef", uuid()),
+                            ("definitionRef", uuid()),
+                            ("relation", enumeration(&RELATIONS)),
+                            ("reason", string(500)),
+                        ])}),
                     ),
                     ("reason", string(500)),
                 ]),

@@ -117,9 +117,19 @@ fn restore_row(
     window_counts: &mut HashMap<(Uuid, Uuid, Uuid, usize), usize>,
 ) -> Option<Window> {
     let work: Uuid = row.get("work_public_ref");
-    let source = current_inventory.iter().find(|i| i.work.work_ref == work);
+    let inventory = current_inventory.iter().find(|i| i.work.work_ref == work);
     let wrapper: Value = row.get("input_refs");
     let manifest = wrapper.get("source").unwrap_or(&wrapper).clone();
+    let core_source = if manifest["inputContract"] == topic_map_research::CORE_INPUT_CONTRACT {
+        inventory.and_then(|input| topic_map_research::from_core(input, None))
+    } else {
+        None
+    };
+    let source = if manifest["inputContract"] == topic_map_research::CORE_INPUT_CONTRACT {
+        core_source.as_ref()
+    } else {
+        inventory
+    };
     if !comparison_definitions_current(&manifest, unavailable) {
         return None;
     }

@@ -30,6 +30,8 @@ pub(crate) fn document(doc: &WorkDocument) -> Result<(), WorkbenchError> {
         || doc.canvas.len() > 500
         || doc.pages.len() > 30
         || doc.uses.len() > 1000
+        || doc.topic_angle_refs.len() > 1000
+        || doc.topic_angle_refs.iter().any(|id| id.is_nil())
         || doc.derived_sources.len() > 1000
         || doc.materials.len() > 60
     {

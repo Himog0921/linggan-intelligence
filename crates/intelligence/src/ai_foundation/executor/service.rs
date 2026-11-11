@@ -93,6 +93,8 @@ async fn work_loop(
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut recovery = Instant::now();
+    let mut automation_scan = Instant::now();
+    let mut automation_cursor = None;
     loop {
         if drain.is_requested() && tasks.is_empty() {
             return failure.map_or(Ok(()), Err);
@@ -104,6 +106,13 @@ async fn work_loop(
             },
             _=poll.tick()=>{
                 if drain.is_requested(){continue;}
+                if Instant::now() >= automation_scan {
+                    // Queue production is isolated from execution: one bad source is not a drain request.
+                    if let Err(error) = crate::ai_foundation::topic_research_automation::tick(db, &mut automation_cursor).await {
+                        eprintln!("topic automation scan deferred: {error}");
+                    }
+                    automation_scan = Instant::now() + Duration::from_secs(5);
+                }
                 if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery).await{
                     failure.get_or_insert(error);drain.request();
                 }

@@ -9,6 +9,7 @@ pub(crate) use recall::catalog;
 mod source_qualification;
 pub(crate) use source_qualification::{
     definition_dependencies, qualify_definitions_and_inputs, unavailable_definitions,
+    unavailable_definitions_in,
 };
 
 use crate::{

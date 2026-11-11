@@ -794,7 +794,7 @@ function WorkEditor({
     finally { titleOperation.current.adopting=false; protectTitle(); setTitleBusy(false); }
   }
   function collect(a: ValidatedAnchor, group: CanvasGroup) {
-    const existing = live.current.excerpts.find(e => e.citation.sourceRef === a.citation.sourceRef && e.citation.sourceVersion === a.citation.sourceVersion && e.citation.start === a.citation.start && e.citation.end === a.citation.end);
+    const existing = live.current.excerpts.find(e => e.citation.sourceRef === a.citation.sourceRef && e.citation.sourceVersion === a.citation.sourceVersion && e.citation.sourceKind === a.citation.sourceKind && e.citation.blockRef === a.citation.blockRef && e.citation.field === a.citation.field && e.citation.start === a.citation.start && e.citation.end === a.citation.end);
     if (existing && live.current.canvas.some(c => c.excerptId === existing.id)) {
       setFeedback('这段原文已在画布中');
       return;

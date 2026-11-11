@@ -40,6 +40,22 @@ fn source_error(error: source::ResearchError) -> FoundationError {
     }
 }
 pub async fn start(db: &Database, request: &Start) -> Result<Receipt, FoundationError> {
+    start_with_kind(db, request, BatchKind::Interactive, None).await
+}
+
+pub(crate) async fn start_with_kind(
+    db: &Database,
+    request: &Start,
+    kind: BatchKind,
+    expected_core: Option<Uuid>,
+) -> Result<Receipt, FoundationError> {
+    if !matches!(kind, BatchKind::Interactive | BatchKind::Automatic)
+        || (kind == BatchKind::Automatic
+            && (expected_core.is_none() || request.work_refs.len() != 1))
+    {
+        return Err(FoundationError::Invalid);
+    }
+
     if request.work_refs.is_empty()
         || request.work_refs.len() > 10
         || request.work_refs.iter().any(Uuid::is_nil)
@@ -56,6 +72,19 @@ pub async fn start(db: &Database, request: &Start) -> Result<Receipt, Foundation
     if let Some(receipt) = command.replay()? {
         return Ok(receipt);
     }
+    if kind == BatchKind::Automatic {
+        let enabled: Option<bool> = sqlx::query_scalar(
+            "SELECT enabled FROM linggan_topic_research_automation WHERE domain_ref=$1 FOR SHARE",
+        )
+        .bind(request.domain_ref)
+        .fetch_optional(&mut *command.tx)
+        .await?;
+        if enabled != Some(true) {
+            return Err(FoundationError::AdmissionDenied(vec![
+                "topic_automation_disabled".into(),
+            ]));
+        }
+    }
     let mut configurations = Vec::new();
     for task in TASKS {
         let revision: i64 =
@@ -66,19 +95,42 @@ pub async fn start(db: &Database, request: &Start) -> Result<Receipt, Foundation
         configurations.push(lock_setting(&mut command.tx, task, revision).await?);
     }
     let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut command.tx, None).await?;
-    let input = source::load_inputs_for_works_at(
+    let input = source::load_core_inputs_for_works_at(
         db,
         request.domain_ref,
         configurations[0],
         &request.work_refs,
         &cutoff,
+        expected_core,
     )
     .await
     .map_err(source_error)?;
     if input.len() != request.work_refs.len() {
         return Err(FoundationError::AdmissionDenied(vec![
-            "ai_source_unavailable".into(),
+            "content_understanding_required".into(),
         ]));
+    }
+    if kind == BatchKind::Automatic {
+        let existing = sqlx::query("SELECT r.run_ref,count(DISTINCT w.window_ref) AS windows,count(s.item_ref) AS stages FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) WHERE r.domain_ref=$1 AND EXISTS(SELECT 1 FROM linggan_topic_research_window frozen WHERE frozen.run_ref=r.run_ref AND frozen.input_refs#>>'{coverage,coreRef}'=$2 AND frozen.input_refs->>'methodVersion'=$3) GROUP BY r.run_ref,r.created_at ORDER BY r.created_at DESC LIMIT 1")
+            .bind(request.domain_ref).bind(expected_core.map(|reference| reference.to_string())).bind(crate::topic_map_research_analysis::METHOD_VERSION).fetch_optional(&mut *command.tx).await?;
+        if let Some(row) = existing {
+            return command
+                .finish(Receipt {
+                    run_ref: row.get("run_ref"),
+                    window_count: row.get::<i64, _>("windows") as usize,
+                    stage_count: row.get::<i64, _>("stages") as usize,
+                })
+                .await;
+        }
+    }
+    if kind == BatchKind::Automatic {
+        let pending: i64 = sqlx::query_scalar("SELECT count(DISTINCT w.window_ref) FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1 AND b.kind='automatic' AND c.state IN('pending','running')")
+            .bind(request.domain_ref).fetch_one(&mut *command.tx).await?;
+        if pending >= 8 {
+            return Err(FoundationError::AdmissionDenied(vec![
+                "topic_automatic_queue_full".into(),
+            ]));
+        }
     }
     let windows: Vec<_> = input.iter().flat_map(source::research_windows).collect();
     if windows.is_empty() || windows.len() > 50 {
@@ -124,7 +176,7 @@ pub async fn start(db: &Database, request: &Start) -> Result<Receipt, Foundation
                 request.command_ref,
                 task,
                 configurations[index],
-                BatchKind::Interactive,
+                kind,
                 &inputs,
                 &hash,
             )

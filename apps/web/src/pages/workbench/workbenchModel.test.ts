@@ -2,6 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { newDocument, parseWorkDocument, parseSaveReceipt, parseSourceList, parseAiStatus, scalarRange, WorkbenchContractError } from './workbenchModel';
 const id = '00000000-0000-4000-8000-000000000001';
 describe('closed workbench boundary', () => {
+  it('preserves topic angle provenance through serialization and accepts legacy documents', () => {
+    const legacy = Object.fromEntries(Object.entries(newDocument()).filter(([key]) => key !== 'topicAngleRefs'));
+    expect(parseWorkDocument(legacy).topicAngleRefs).toEqual([]);
+    const document = parseWorkDocument({ ...newDocument(), topicAngleRefs: [id] });
+    expect(parseWorkDocument(JSON.parse(JSON.stringify(document))).topicAngleRefs).toEqual([id]);
+  });
   it('preserves experience references and gaps and accepts older documents without them', () => {
     const legacy = Object.fromEntries(Object.entries(newDocument()).filter(([key]) => !['experienceSlots', 'experienceGaps'].includes(key)));
     expect(parseWorkDocument(legacy)).toMatchObject({ experienceSlots: [], experienceGaps: [] });

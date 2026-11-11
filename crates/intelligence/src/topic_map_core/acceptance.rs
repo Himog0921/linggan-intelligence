@@ -74,7 +74,7 @@ async fn accept_unit(
     let unit_ref =
         Uuid::parse_str(&decision.unit_id[..32]).map_err(|_| ModelError::InvalidOutput)?;
     let refs:Vec<_>=discussion.evidence.iter().filter_map(|c|input.fragments.iter().find(|f|f.fragment_id==c.fragment_id)
-            .map(|f|json!({"fragmentId":f.fragment_id,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"field":f.field,"start":c.start,"end":c.end}))).collect();
+            .map(|f|json!({"fragmentId":f.fragment_id,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"field":f.field,"anchor":f.structure,"start":c.start,"end":c.end}))).collect();
     sqlx::query("INSERT INTO linggan_topic_map_discussion_unit(unit_ref,domain_ref,work_public_ref,unit_key,statement,speaker_role,evidence_role,evidence_refs,method_version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)ON CONFLICT(domain_ref,work_public_ref,unit_key)DO NOTHING")
             .bind(unit_ref).bind(domain).bind(input.work.work_ref).bind(&decision.unit_id).bind(&discussion.statement)
             .bind(&discussion.speaker_role).bind(&discussion.evidence_role).bind(json!(refs)).bind(METHOD_VERSION).execute(&mut **tx).await?;

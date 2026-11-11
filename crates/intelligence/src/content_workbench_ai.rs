@@ -263,6 +263,14 @@ async fn inputs_in(
     let (domain, revision) = content_workbench::read_revision_in(tx, r.work_ref, None)
         .await
         .map_err(|_| AiError::NotFound)?;
+    content_workbench::topic_handoff::qualify_outbound_in(
+        tx,
+        domain,
+        &revision.document,
+        &r.instruction,
+    )
+    .await
+    .map_err(|_| AiError::Source)?;
     let protected = protected_experience(&revision.document, r)?;
     if protected.is_some()
         && !content_workbench::experience_fragments_available_in(
@@ -389,6 +397,20 @@ async fn qualify_frozen_inputs(
         content_workbench::read_revision_in(tx, input.work_ref, Some(input.expected_revision))
             .await
             .map_err(|_| AiError::NotFound)?;
+    match content_workbench::topic_handoff::qualify_outbound_in(
+        tx,
+        domain,
+        &revision.document,
+        &input.instruction,
+    )
+    .await
+    {
+        Ok(()) => {}
+        Err(content_workbench::WorkbenchError::Database(error)) => {
+            return Err(AiError::Database(error));
+        }
+        Err(_) => return Ok(false),
+    }
     let protected = match protected_experience(&revision.document, input) {
         Ok(value) => value,
         Err(_) => return Ok(false),
@@ -580,4 +602,58 @@ mod tests {
             .is_err()
         );
     }
+}
+
+#[cfg(test)]
+pub(crate) async fn assert_handoff_outbound_unavailable(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    current: Uuid,
+    frozen: Uuid,
+) {
+    let mut request = PreviewRequest {
+        selection: None,
+        preview_ref: Uuid::new_v4(),
+        work_ref: work,
+        expected_revision: current,
+        action: WritingAction::Draft,
+        config_ref: Uuid::new_v4(),
+        citations: vec![],
+        paragraph_ids: vec![],
+        instruction: "生成合成草稿".into(),
+    };
+    assert!(matches!(
+        inputs_in(tx, &request).await,
+        Err(AiError::Source)
+    ));
+    request.expected_revision = frozen;
+    assert!(!qualify_frozen_inputs(tx, &request).await.unwrap());
+}
+
+#[cfg(test)]
+pub(crate) async fn assert_handoff_instruction_recheck(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    current: Uuid,
+    quote: &str,
+) {
+    let mut request = PreviewRequest {
+        selection: None,
+        preview_ref: Uuid::new_v4(),
+        work_ref: work,
+        expected_revision: current,
+        action: WritingAction::Draft,
+        config_ref: Uuid::new_v4(),
+        citations: vec![],
+        paragraph_ids: vec![],
+        instruction: "生成合成草稿".into(),
+    };
+    assert!(inputs_in(tx, &request).await.is_ok());
+    assert!(qualify_frozen_inputs(tx, &request).await.unwrap());
+    request.instruction = format!("请沿用这个角度：{quote}");
+    assert!(matches!(
+        inputs_in(tx, &request).await,
+        Err(AiError::Source)
+    ));
+    assert!(!qualify_frozen_inputs(tx, &request).await.unwrap());
 }

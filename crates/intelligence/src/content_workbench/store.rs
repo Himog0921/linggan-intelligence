@@ -392,28 +392,36 @@ pub(super) async fn append(
     })
 }
 pub async fn create_work(db: &Database, r: &CreateRequest) -> Result<SaveReceipt, WorkbenchError> {
-    let command = hash(serde_json::to_vec(&json!(["create", r]))?);
     let mut tx = db.pool().begin().await?;
-    ensure_request_owner_in(&mut tx, r.request_id, RequestOwner::Work).await?;
-    let mut result = if let Some(r) = replay(&mut tx, r.request_id, &command).await? {
+    let result = create_work_in(&mut tx, r).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+pub(super) async fn create_work_in(
+    tx: &mut Transaction<'_, Postgres>,
+    r: &CreateRequest,
+) -> Result<SaveReceipt, WorkbenchError> {
+    let command = hash(serde_json::to_vec(&json!(["create", r]))?);
+    ensure_request_owner_in(tx, r.request_id, RequestOwner::Work).await?;
+    let mut result = if let Some(r) = replay(tx, r.request_id, &command).await? {
         r
     } else {
         let domain_exists: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)",
         )
         .bind(r.domain_ref)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
         if !domain_exists {
             return Err(WorkbenchError::Invalid("domainRef"));
         }
         let work = Uuid::new_v4();
-        sqlx::query("INSERT INTO linggan_creation_work(work_ref,domain_ref,saved_by) VALUES($1,$2,'local_machine')").bind(work).bind(r.domain_ref).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO linggan_creation_work(work_ref,domain_ref,saved_by) VALUES($1,$2,'local_machine')").bind(work).bind(r.domain_ref).execute(&mut **tx).await?;
         let mut doc = r.document.clone();
-        prepare(&mut tx, work, r.domain_ref, None, &mut doc).await?;
-        let revision = append(&mut tx, work, None, doc).await?;
+        prepare(tx, work, r.domain_ref, None, &mut doc).await?;
+        let revision = append(tx, work, None, doc).await?;
         receipt(
-            &mut tx,
+            tx,
             work,
             r.request_id,
             &command,
@@ -427,8 +435,7 @@ pub async fn create_work(db: &Database, r: &CreateRequest) -> Result<SaveReceipt
         )
         .await?
     };
-    redact(&mut tx, r.domain_ref, &mut result.revision.document).await?;
-    tx.commit().await?;
+    redact(tx, r.domain_ref, &mut result.revision.document).await?;
     Ok(result)
 }
 pub async fn save(

@@ -69,7 +69,7 @@ pub(crate) async fn prepare(
     };
     match stage {
         0 => Ok(Packet {
-            payload: json!({"contract":analysis::COMPACT_EXTRACT_CONTRACT,"input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":fragments(),"commentStudy":input.comment_study,"roleMetadata":input.role_metadata,"coverage":input.coverage},"outputFieldNames":analysis::compact_field_names(),"outputSchema":analysis::compact_output_schema()}),
+            payload: json!({"contract":analysis::COMPACT_EXTRACT_CONTRACT,"input":{"domain":input.domain,"workRef":input.work.work_ref,"fragments":fragments(),"commentStudy":input.comment_study,"contentCore":input.coverage["core"],"understandingInstruction":if input.coverage["inputContract"] == crate::topic_map_research::CORE_INPUT_CONTRACT { "Consume the saved L1 Core and its evidence. Project author topics, scenes and journey; do not repeat raw-material understanding. Image evidence is a saved model observation, not verified OCR or a verbatim source quote. Comments cannot propose directions." } else { "" },"roleMetadata":input.role_metadata,"coverage":input.coverage},"outputFieldNames":analysis::compact_field_names(),"outputSchema":analysis::compact_output_schema()}),
             schema: analysis::compact_output_schema(),
             context: json!({}),
         }),

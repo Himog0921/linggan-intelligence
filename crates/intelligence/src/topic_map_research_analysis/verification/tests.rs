@@ -287,7 +287,8 @@ fn resolution_case() -> (
 
 #[test]
 fn matching_checks_keep_exact_inclusion_and_exclusion_and_all_candidates() {
-    let (units, resolution, candidates, fragments) = resolution_case();
+    let (units, resolution, mut candidates, fragments) = resolution_case();
+    candidates[0]["supportExamples"] = json!([{"coreRef":"fixed-core","statement":"既有边界样例"}]);
     let packet = resolution_review(&units, &resolution, &candidates, &fragments).unwrap();
     assert_eq!(
         packet["candidates"][0]["inclusionCriteria"],
@@ -298,6 +299,10 @@ fn matching_checks_keep_exact_inclusion_and_exclusion_and_all_candidates() {
         candidates[0]["exclusionCriteria"]
     );
     assert!(packet["candidates"][0].get("embedding").is_none());
+    assert_eq!(
+        packet["candidates"][0]["supportExamples"],
+        candidates[0]["supportExamples"]
+    );
     let failed = reject(&packet, "semantic_assignment_boundary", "fail");
     assert_eq!(
         validate_verification(&failed, &packet["checks"]),
@@ -455,4 +460,24 @@ fn malformed_expected_checks_sources_and_units_never_create_an_empty_green_revie
         resolution_review(&units, &resolution, &candidates, &fragments).unwrap_err(),
         "semantic_review_proposal_invalid"
     );
+}
+
+#[test]
+fn core_image_review_preserves_model_read_identity_without_unquoted_observation() {
+    let (units, resolution, candidates, mut fragments) = resolution_case();
+    fragments[0].field = "core_image_evidence".into();
+    fragments[0].structure = json!({"kind":"core_image_evidence","coreRef":"frozen-core",
+        "evidenceRef":"v1","text":"未引用全文不能补充事实",
+        "anchor":{"anchorKind":"image","verification":"model_read","sourceRef":"image-source",
+        "modelQuote":"未引用模型文字","observation":"未引用模型观察"}});
+    let packet = resolution_review(&units, &resolution, &candidates, &fragments).unwrap();
+    assert_eq!(
+        packet["evidence"][0]["sourceContent"]["anchor"]["verification"],
+        "model_read"
+    );
+    assert_eq!(
+        packet["evidence"][0]["sourceContent"]["coreRef"],
+        "frozen-core"
+    );
+    assert!(!packet.to_string().contains("未引用"));
 }

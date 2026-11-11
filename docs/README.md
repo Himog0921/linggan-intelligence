@@ -493,6 +493,10 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 
 ## TOPIC-MAP-V41-001
 
+- [接入统一内容理解的主题图谱实施手册](plans/active/topic-map-implementation-handbook.md)：PR #572 后的能力分工、接入合同、交付顺序与验收；D01=B 已确认，作者内容建立方向，用户评论研究归语料库。
+- [主题图谱 × 统一理解 HTML 决策页](design/changes/topic-map-content-understanding-decision.html)：默认展示已确认的 B 方案，保留虚构示例 A/B 对比；切换不改变正式决定。
+- [主题图谱产品与上线准备度审查](audits/topic-map-product-readiness-2026-11-11.md)：本机页面、配置、读取性能和业务断点；历史审查，下一步以接入实施手册为准。
+
 | 文档 | 状态 | 用途 |
 |---|---|---|
 | [product/topic-map-handbook.md](product/topic-map-handbook.md) | 权威当前 | 手册 D01–D39 来源与本包运行边界 |

@@ -2,7 +2,7 @@ import { businessSettingsFixture } from '../settings/aiSettingsFixture.test-supp
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router";
+import { MemoryRouter, useLocation } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TopicsPage } from "./TopicsPage";
 import {
@@ -14,6 +14,7 @@ import {
   topicSnapshot,
   topicWork,
 } from "./topicTestFixture";
+function RouteLocation() { const location = useLocation(); return <output aria-label="测试当前路径">{location.pathname + location.search}</output>; }
 function page() {
   return render(
     <MemoryRouter>
@@ -24,7 +25,7 @@ function page() {
           })
         }
       >
-        <TopicsPage />
+        <TopicsPage /><RouteLocation />
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -433,13 +434,13 @@ describe("Topic React interaction and lifetime", () => {
       expect(await screen.findByRole("dialog", {
         name: "主题研究",
       })).toBeInTheDocument();
-      await screen.findByRole("button", { name: "刷新阶段回执" });
+      await screen.findByRole("button", { name: "刷新进度" });
       expect(writes).toEqual([]);
       const researchReads = () => fetcher.mock.calls.filter(
         ([path]) => path.includes("/topic-research/runs?"),
       ).length;
       const readsBefore = researchReads();
-      await userEvent.click(screen.getByRole("button", { name: "刷新阶段回执" }));
+      await userEvent.click(screen.getByRole("button", { name: "刷新进度" }));
       await waitFor(() => expect(researchReads()).toBeGreaterThan(readsBefore));
       expect(screen.getByRole("link", { name: "去 AI 设置" })).toHaveAttribute("href", "/settings/models?view=advanced&area=work&task=topic_research");
       expect(screen.queryByLabelText("已有模型配置")).not.toBeInTheDocument();
@@ -549,4 +550,33 @@ describe("Topic React interaction and lifetime", () => {
       screen.queryByRole("button", { name: "导出引用与说明" }),
     ).not.toBeInTheDocument();
   });
+});
+
+it.each(['angle', 'product_research'])('hands off saved %s only when it is a content angle', async kind => {
+  const alternativeRef = '60000000-0000-4000-8000-000000000001';
+  const workId = '70000000-0000-4000-8000-000000000001';
+  const ideaRef = '80000000-0000-4000-8000-000000000001';
+  const alternative = { alternativeRef, domainRef: topicDomain, topicRef: null, definitionRef: null, kind,
+    sourceState: 'available', title: '合成保存角度', angle: '合成切入', rationale: '合成理由', fragments: [], originalDefinition: null, methodVersion: 'topic-map.manual.v1' };
+  const posts: unknown[] = [];
+  vi.stubGlobal('fetch', vi.fn(async (path: string, options?: RequestInit) => {
+    if (path.endsWith('/alternatives/handoff')) { posts.push(JSON.parse(String(options?.body))); return jsonResponse({ alternativeRef, workId, ideaRef }); }
+    if (path.includes('/alternative?')) return jsonResponse(alternative);
+    if (path.includes('/context')) return jsonResponse(topicContext);
+    if (path.includes('topic-research')) return jsonResponse(topicProgress());
+    return jsonResponse({ ...topicSnapshot(), alternatives: [alternative] });
+  }));
+  page();
+  await screen.findByRole('button', { name: '合成材料 0' });
+  await userEvent.click(screen.getByRole('button', { name: '我的备选' }));
+  await userEvent.click(await screen.findByRole('button', { name: '取回保存的原版本' }));
+  await screen.findByRole('button', { name: '复核来源并导出Markdown' });
+  if (kind === 'product_research') {
+    expect(screen.queryByRole('button', { name: '加入选题池' })).not.toBeInTheDocument();
+    expect(posts).toHaveLength(0);
+  } else {
+    await userEvent.click(screen.getByRole('button', { name: '加入选题池' }));
+    await waitFor(() => expect(screen.getByLabelText('测试当前路径')).toHaveTextContent(`/ops/creation?domain=${topicDomain}&work=${workId}&view=body`));
+    expect(posts).toEqual([expect.objectContaining({ domainRef: topicDomain, alternativeRef, commandRef: expect.any(String) })]);
+  }
 });

@@ -3,6 +3,10 @@ use linggan_evidence::creator_discovery::{DiscoveryWork, Fragment};
 use serde_json::Value;
 use uuid::Uuid;
 
+#[path = "topic_map_research/core_source.rs"]
+mod core_source;
+pub(crate) use core_source::{CORE_INPUT_CONTRACT, card_fragments, from_core};
+
 #[path = "topic_map_research/identity.rs"]
 mod identity;
 pub(crate) use identity::semantic_source_identity;
@@ -19,7 +23,9 @@ pub(crate) use restoration::{research_result_sources_current, restore_scoped_win
 #[cfg(test)]
 use restoration::{restore_window, sources_current};
 pub(crate) use source::{
-    load_inputs_for_works, load_inputs_for_works_at, manifest_as_of, manifest_source_work_refs,
+    load_core_inputs_for_works_at, load_inputs_for_works, load_inputs_for_works_at,
+    load_inputs_for_works_at_in, load_inputs_for_works_in, manifest_as_of,
+    manifest_source_work_refs,
 };
 #[cfg(test)]
 pub(crate) use windows::{input_identity, with_comparison_context};

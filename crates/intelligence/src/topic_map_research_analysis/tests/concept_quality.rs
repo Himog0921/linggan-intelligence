@@ -396,15 +396,12 @@ fn concept_rejections_identify_the_failed_boundary_without_relaxing_it() {
 }
 
 #[test]
-fn every_new_candidate_requires_comparison_and_equivalence_requires_a_real_match() {
+fn unrelated_candidates_need_no_output_and_equivalence_requires_a_real_match() {
     let (units, candidates, mut output) = resolution_case();
     let existing = output.decisions[0].matches.pop().unwrap();
     output.decisions[0].status = "new".into();
     output.decisions[0].proposed_topic = Some(new_proposal());
-    assert_eq!(
-        validate_resolution(&output, &units, &candidates),
-        Err("new_topic_candidate_coverage_missing")
-    );
+    assert!(validate_resolution(&output, &units, &candidates).is_ok());
     output.decisions[0].relations.push(TopicRelation {
         topic_ref: existing.topic_ref,
         definition_ref: existing.definition_ref,

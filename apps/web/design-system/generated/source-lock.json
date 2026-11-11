@@ -1,5 +1,5 @@
 {
-  "fingerprint": "be06916b18bddba812e9deee2d3edb683fa3d2c4cd7e55bb9a9912da57c0cc53",
+  "fingerprint": "12986b9eaed237e1216e8280b26f9c1c856c618d632e20fbef1d4775d3d48b84",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -435,11 +435,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/Topics.module.css",
-      "sha256": "fbcf04199fc47f84e6afeec38fd1917f038619ad893054b922fe10fea080253e"
+      "sha256": "138637793f9ae0954c9416a4dcd5bddf9651eebb31dac7dcd610bf339014afbf"
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
-      "sha256": "a7b942985ea2371acd2fc84a0eb86838da989c4e8f41c33e58481e38f49386df"
+      "sha256": "f01d4e90d705417456cb628a431a2bcc393b5c49158d12ae035edbcaf719ee25"
     },
     {
       "path": "apps/web/src/pages/topics/WorkspacePage.tsx",
@@ -447,7 +447,7 @@
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
-      "sha256": "58cd86542a513be277cdd4910a689520632ac6961b6e5ad1db40317b56beaa3f"
+      "sha256": "cef835b3f667d20cfa749357b80b6523dace8ea3591ee70a29ad71d2c5fefe09"
     },
     {
       "path": "apps/web/src/pages/topics/topicOverview.tsx",
@@ -463,7 +463,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/MaterialDesk.tsx",
-      "sha256": "cffc22c54d5fc01c253a00c61a4f3a7fc5193610c85916565b9badacf8ccda6c"
+      "sha256": "badaf03efa72b6a939878a20806678e44b088ffab1e1a197a1df0692a9e07452"
     },
     {
       "path": "apps/web/src/pages/workbench/TopicLibrary.tsx",
@@ -475,7 +475,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "bc69dca526278abaa8b7ec6407898b45b5318865741c105fcf56d1e29e3088a9"
+      "sha256": "c2638d21bb2862b590b6da464b667f76338a1986b4b53eaaa7d5c160e7aae0b4"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",

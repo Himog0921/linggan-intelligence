@@ -46,7 +46,15 @@ pub(super) fn routes(
         });
     }
     Router::new()
+        .route(
+            "/api/local/topic-map/alternatives/handoff",
+            post(handoff_angle),
+        )
         .route("/api/local/topic-research", post(current_research_start))
+        .route(
+            "/api/local/topic-research/automation",
+            get(research_automation_read).post(research_automation_change),
+        )
         .route("/api/local/topic-research/runs", get(current_research_runs))
         .route(
             "/api/local/topic-research/cancel",
@@ -679,4 +687,41 @@ async fn current_research_cancel(
     crate::local_web::ai_settings::respond(
         linggan_intelligence::ai_foundation::topic_research::cancel(db, &body).await,
     )
+}
+
+async fn research_automation_read(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CurrentResearchRuns>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research_automation::read(db, query.domain_ref)
+            .await,
+    )
+}
+async fn research_automation_change(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::ai_foundation::topic_research_automation::Change>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research_automation::change(db, &body).await,
+    )
+}
+
+async fn handoff_angle(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::content_workbench::topic_handoff::HandoffRequest>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    match linggan_intelligence::content_workbench::topic_handoff::handoff_angle(db, &body).await {
+        Ok(receipt) => Json(receipt).into_response(),
+        Err(error) => crate::local_web::content_workbench_api::error(error),
+    }
 }

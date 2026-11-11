@@ -330,7 +330,7 @@ pub(crate) fn reference_manifest(input: &ResearchInput) -> Value {
         .collect::<BTreeSet<_>>()
         .into_iter()
         .collect();
-    json!({"inputContract":INPUT_CONTRACT,"inputHash":input.hash,"workRef":input.work.work_ref,
+    json!({"inputContract":input.coverage["inputContract"].as_str().unwrap_or(INPUT_CONTRACT),"inputHash":input.hash,"workRef":input.work.work_ref,
         "contextWorkRefs":input.context_work_refs,"scopeWorkRefs":scope,"methodVersion":METHOD_VERSION,
         "configRef":input.coverage["configRef"],"domain":input.domain["domainRef"],
         "domainDefinitionHash":creator_discovery::hash(&domain_identity(&input.domain).to_string()),

@@ -23,6 +23,11 @@ const equal = (actual: unknown, expected: unknown) => {
 };
 function validateReceipt(path: string, body: Body, value: unknown) {
   if (!isRecord(value)) throw new ShapeError("command receipt");
+  if (path === "/api/local/topic-map/alternatives/handoff") {
+    equal(value.alternativeRef, body.alternativeRef);
+    if (!uuid(value.workId) || !uuid(value.ideaRef)) throw new ShapeError("handoff receipt");
+    return;
+  }
   if (path.endsWith("/structure/preview")) {
     if (
       typeof value.previewHash !== "string" ||

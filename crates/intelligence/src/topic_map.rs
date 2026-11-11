@@ -8,6 +8,7 @@ mod saved;
 #[path = "topic_map/store.rs"]
 mod store;
 pub use read::read_topic_map;
+pub(crate) use saved::read_saved_alternative_in;
 pub mod read_model;
 pub use saved::{
     TopicMapSavedAlternative, TopicMapSavedFragment, TopicMapSavedRange, read_saved_alternative,

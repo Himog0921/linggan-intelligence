@@ -305,3 +305,6 @@ async fn exercise(variant: &'static str) {
     running.await.unwrap().unwrap();
     endpoint.finish().await;
 }
+
+#[path = "support/topic_resolution_order.rs"]
+mod resolution_order;
