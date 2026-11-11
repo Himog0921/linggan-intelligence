@@ -32,16 +32,7 @@ pub(crate) async fn admit_with_slot_role(
     mime: &str,
     slot_role: &str,
 ) -> Uuid {
-    admit_image_source(
-        db,
-        work,
-        ordinal,
-        bytes,
-        mime,
-        slot_role,
-        slot_role == "image" && ordinal == 1,
-    )
-    .await
+    admit_image_source(db, work, ordinal, bytes, mime, slot_role).await
 }
 
 /// One complete platform list must contain all its pages in the same package.
@@ -89,7 +80,6 @@ async fn admit_image_source(
     bytes: &[u8],
     mime: &str,
     slot_role: &str,
-    known_page: bool,
 ) -> Uuid {
     let present: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_material_content WHERE content_external_id=$1)",
@@ -127,13 +117,8 @@ async fn admit_image_source(
     if let Some(context) = context {
         record["contextContentExternalId"] = json!(context);
     }
-    let mut target = json!({"contentExternalId":work});
-    if known_page {
-        target["imageInventory"] =
-            json!({"state":"complete","source":"platform_image_list","expectedPages":ordinal});
-        record["slot"]["displayOrdinal"] = json!(ordinal);
-        record["slot"]["displayOrderBasis"] = json!("platform_explicit");
-    }
+    let target = json!({"contentExternalId":work,
+        "imageInventory":{"state":"observed_set","source":"dom_observed_set","expectedPages":null}});
     fixture::submit_custom_package(
         db,
         "xhs",

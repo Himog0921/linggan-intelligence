@@ -22,7 +22,7 @@ pub(super) fn assemble(
     materials.extend(media);
     let note = note(work, &materials, &slots);
     let fragments = fragments(work, &materials);
-    let coverage = coverage::project(&materials, &slots, expected_pages(&inventory));
+    let coverage = coverage::project(&materials, expected_pages(&inventory));
     let base = format!(
         "/api/local/work-resources/{}/research-dossier",
         work.public_ref

@@ -64,8 +64,8 @@ try {
   assert.equal(ready.runRef, null, 'saving settings sends no image and creates no run');
   assert.equal(ready.state, 'ready'); assert.equal(ready.scope.imageCount, 3);
   const slotKeys = ready.scope.images.map(image => image.slotKey);
-  assert.deepEqual(slotKeys, [1, 2, 3].map(number => `xhs:ocr-recognition-browser-synthetic:image:${number}`));
-  assert.deepEqual(ready.scope.images.map(image => ({ ordinal: image.ordinal, role: image.role })), [{ ordinal: 1, role: 'cover' }, { ordinal: null, role: 'unknown' }, { ordinal: null, role: 'unknown' }]);
+  assert.deepEqual(slotKeys, ['cover:1', 'image:2', 'image:3'].map(slot => `xhs:ocr-recognition-browser-synthetic:${slot}`));
+  assert.deepEqual(ready.scope.images.map(image => ({ ordinal: image.ordinal, role: image.role })), [{ ordinal: null, role: 'cover' }, { ordinal: null, role: 'unknown' }, { ordinal: null, role: 'unknown' }]);
   report.steps.push('OCR model configuration saved without creating a run or changing runtime switches.');
 
   await page.goto(`${origin}/corpus/evidence?domain=${domain}&work=${workRef}&tab=overview&panel=focus`);
@@ -118,6 +118,11 @@ try {
     assert.ok(!('candidateRevisionRef' in image));
   }
   const canonical=await readJson(`${dossierPath}?domain=${domain}`);
+  const inventory = canonical.dossier.coverage.imageInventory;
+  assert.equal(inventory.basis, 'observed_set');
+  assert.equal(inventory.expectedPages, null, 'three observed images do not prove the platform total');
+  assert.equal(inventory.acquiredPages, 3);
+  assert.equal(inventory.processedPages, 3);
   const imageUnits=canonical.dossier.materials.filter(unit=>unit.kind==='image');
   assert.equal(imageUnits.length,3);
   assert.deepEqual(imageUnits.map(unit=>unit.currentRevisionRef).sort(),final.images.map(image=>image.readingRef).sort());

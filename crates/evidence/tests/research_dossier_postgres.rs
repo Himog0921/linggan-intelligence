@@ -247,8 +247,23 @@ async fn partial_media_observations_do_not_erase_the_latest_complete_inventory()
             vec![json!({"kind":"media_slot","slotKey":format!("xhs:{id}:cover:1"),"observationRef":observation,
                 "slot":{"role":"cover","ordinal":1},"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},
                 "sourceObject":{"platform":"xhs","type":"content","externalId":id}})]).await;
+        let hash = "f".repeat(64);
+        admit_media_blob(
+            &db,
+            observation,
+            &hash,
+            "image/jpeg",
+            12,
+            &format!("blobs/{hash}.jpg"),
+        )
+        .await
+        .unwrap();
         let after = dossier::read(&db, work).await.unwrap().unwrap();
         assert_eq!(after.coverage["imageInventory"]["expectedPages"], 2);
+        assert_eq!(after.coverage["imageInventory"]["acquiredPages"], 2);
+        assert!(after.materials.iter().any(|material| {
+            material["purpose"] == "cover" && material["sourceState"] == "present"
+        }));
         assert_eq!(
             after
                 .materials
