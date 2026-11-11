@@ -615,13 +615,13 @@ D3 本包 task-id `WEB-REACT-001-D3-20261018`，exact base `acdfbb876bf3fcb5cb4a
 | API05 | `GET /api/local/work-resources/{publicRef}/research-dossier` | `domain` | `dossier.{contract,workRef,revision,asOf,fragments,media,coverage,metadata,sections}`、`relayerPlan`、`markdown`、`inputs.{creator,comments,topics}` | 404 `material_not_found`；503 `dossier_read_unavailable`／`read_model_not_connected` → L02 | 有 |
 | API06 | `GET …/research-dossier/relayer-plan` | `domain` | `relayerPlan.{workCount,imageSlots,imageJobs,layoutCount,pendingLayouts,alreadyCurrent,needsOcr,maximumLayoutsPerWork,expectedRevision}`（只在批量整理弹窗里用） | 同 API05 | 有 |
 | API07 | `GET …/research-dossier/creator-preview` | `domain` | `available`、`reason`、`stage`、`inputTokenLimit`、`estimatedInputTokensUpperBound`、`system`、`input`、`fragments`、`citationMap`、`markdown`、`sourceFingerprint`（只读，不调用模型、不预留额度） | 503 `creator_preview_unavailable` → L09 | 有 |
-| API08 | `GET …/research-dossier/comments` | `domain`（必需）、`cursor`；每页 30 条 | `items[].{sourceRef,parentSourceRef,relation,body,likeCount,isNoteAuthor}`、`total`、`nextCursor` | 400 `domain_required`；503 `material_comment_channel_unavailable` → L12 | 有 |
+| API08 | `GET …/research-dossier/comments` | `domain`（必需）、`cursor`；每页 30 条 | `items[].{sourceRef,parentSourceRef,relation,body,readingBody?,likeCount,isNoteAuthor}`、`total`、`nextCursor` | 400 `domain_required`；503 `material_comment_channel_unavailable` → L12 | 有 |
 | API09 | `POST …/research-dossier/relayer`（**写**） | 体 `{"expectedRevision","domain"}`，不允许多余字段 | `workRef`、`layerVersion`、`needsOcr`、`scopeCount`、`updated`、`alreadyCurrent`、`skipped`、`results[]` | 404／409／503／403 → §4.3 W1 | 有 |
 | API10 | `POST /api/local/work-resources/{publicRef}/reobserve`（**写**） | 查询串 `domain`；无请求体 | `operation.{publicRef,targetRef,requestRef,decisionRef,admission,admissionReason,workOrderRef,leaseRef,expiresAt,execution,media,tasks[]}`、`statusUrl` | 400／404／409／422／503 → §4.3 W3 | **无**（DR-4） |
 | API11 | `GET /api/local/work-resources/{publicRef}/reobserve/{leaseRef}`（`statusUrl`；当前不可达，见 M07） | `domain` | `operation.{leaseState,expiresAt,media,tasks[]}` | 404 `reobservation_not_found`；503 `reobservation_status_unavailable` → M04 | **无**（DR-4） |
 | API12 | `GET /api/local/media/{materializationRef}/{sha256}`、`GET /api/local/derivative/{derivativeRef}` | — | 图片字节（只作 `<img src>`；前端只接受这两个同源前缀） | 404 `local_media_not_found`／503 → 就地写读取失败（J01） | 无（句柄本身是资格凭证） |
 
-API08 的 `isNoteAuthor` 由发言者与作品作者的账号 ID 比对得出，任一缺失时为 `null`。检查器仅在值为 `true` 时显示独立的「作者」标签，颜色与点赞数字相同。旧页面采集只留存整段文字时，无法区分「作者」来自页面标签还是正文，检查器按采集正文 `body` 展示。
+API08 的 `isNoteAuthor` 由发言者与作品作者的账号 ID 比对得出，任一缺失时为 `null`。检查器仅在值为 `true` 时显示独立的「作者」标签，颜色与点赞数字相同。已确认的作者评论来自小红书页面采集，且留存文字符合「昵称、独立作者行、正文、时间」的格式时，`readingBody` 省略拼入的标签。空字符串表示去掉标签后未取得文字。接口的采集正文 `body` 保留原值。
 
 **页面不使用**：`GET /api/local/work-resources?publicRefs=`（创作者页批量读取）、`GET /api/local/model-settings`（创作者预览已在 API07 里带回模型配置结果）。
 
