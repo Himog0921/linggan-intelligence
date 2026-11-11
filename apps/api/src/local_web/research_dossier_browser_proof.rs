@@ -13,6 +13,7 @@ async fn dossier_v2_browser_proof() {
     std::fs::create_dir_all(&directory).unwrap();
     let db = super::super::evidence_fixture::isolated("dossier_ui").await;
     let work = dossier_fixture::work(&db).await;
+    super::seed_comments(&db, 5).await;
     let long_tail = "完整正文末尾🙂";
     let body = format!(
         "# 合成完整底稿\n\n{}{}\n\n- 条件一不可遗漏\n- 条件二有边界\n\n| 条件 | 读数 |\n| --- | --- |\n| 不成立 | 0.5 mg |\n\n> 他人的引述，归属未确认",

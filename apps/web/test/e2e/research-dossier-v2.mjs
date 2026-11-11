@@ -170,6 +170,21 @@ try {
   await assertReading(initial);
   assert.ok((await exportSnapshot('full-reading')).includes(longTail));
   report.steps.push('Full 100k+ character canonical body and all structures survive reading, Markdown, JSON, copy and download.');
+  await page.getByRole('tab', { name: '作品', exact: true }).click();
+  const replies = page.locator('article[data-relation="REPLY"] > p');
+  const reply = replies.filter({ hasText: '已收到，会继续优化。' });
+  await reply.getByText('作者', { exact: true }).waitFor();
+  assert.equal((await reply.textContent()).trim(), '作者 已收到，会继续优化。 赞 7');
+  const authorColor = await reply.getByText('作者', { exact: true }).evaluate(node => getComputedStyle(node).color);
+  assert.equal(authorColor, await reply.getByText('7', { exact: true }).evaluate(node => getComputedStyle(node).color));
+  assert.notEqual(authorColor, await reply.evaluate(node => getComputedStyle(node).color));
+  const reader = page.locator('article[data-relation="ROOT"] > p').filter({ hasText: '作者 你好，请问怎么用？' });
+  assert.equal((await reader.textContent()).trim(), '作者 你好，请问怎么用？ 赞 7');
+  assert.equal(await reader.getByText('作者', { exact: true }).count(), 0);
+  const historicalReply = replies.filter({ hasText: '作者 收到，会继续优化。' });
+  assert.equal((await historicalReply.textContent()).trim(), '作者 作者 收到，会继续优化。 赞 7');
+  await reply.screenshot({ path: path.join(directory, 'comment-author.png') });
+  report.steps.push('The Works inspector distinguishes a verified author reply from literal comment text and uses the like count color for the badge.');
   for (const scenario of fixture.scenarios) {
     const dossier = await openReading(scenario);
     await assertReading(dossier);
