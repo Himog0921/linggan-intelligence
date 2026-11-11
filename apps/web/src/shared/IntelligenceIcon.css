@@ -1,5 +1,5 @@
 /* LIDS-ICON-B-001. Geometry is local; colors and shared values come from LIDS tokens. */
-.lgi-icon[data-icon]{flex:none;overflow:visible;fill:none;stroke:currentColor;stroke-width:var(--lgi-icon-stroke);stroke-linecap:round;stroke-linejoin:round}
+.lgi-icon[data-icon]{flex:none;vertical-align:middle;overflow:visible;fill:none;stroke:currentColor;stroke-width:var(--lgi-icon-stroke);stroke-linecap:round;stroke-linejoin:round}
 .lgi-icon .rear-contour{opacity:var(--lgi-icon-rear-opacity)}
 .lgi-icon .paper-rule{opacity:var(--lgi-icon-rule-opacity)}
 .lgi-icon .tone-face{fill:var(--lgi-signal-mark);fill-opacity:var(--lgi-icon-tone-opacity);stroke:none}
@@ -66,6 +66,36 @@
 :where(button,a):not(:disabled,[aria-disabled="true"]):is(:hover,:focus-visible) .lgi-icon[data-icon="download"] .export-stem{stroke-dasharray:none;animation:lgi-icon-download-shaft var(--lgi-icon-feedback-duration) var(--lgi-icon-feedback-ease) both}
 :where(button,a):not(:disabled,[aria-disabled="true"]):is(:hover,:focus-visible) .lgi-icon[data-icon="download"] .export-tray{animation:lgi-icon-download-receive var(--lgi-icon-feedback-duration) var(--lgi-icon-receive-ease) both}
 :where(button,a):not(:disabled,[aria-disabled="true"]):is(:hover,:focus-visible) .lgi-icon[data-icon="download"] .export-trace{animation:lgi-icon-download-trace var(--lgi-icon-feedback-duration) var(--lgi-icon-trace-ease) both}
+
+
+.lgi-icon :is(.feedback-move,.feedback-counter,.feedback-trace){transform-box:view-box;transform-origin:center}
+.lgi-icon .feedback-plate{fill:var(--lgi-canvas)}
+.lgi-icon .feedback-trace{opacity:0;stroke-width:var(--lgi-icon-trace-stroke);stroke-dasharray:1;stroke-dashoffset:1}
+@keyframes lgi-icon-feedback-move{
+  0%,100%{transform:translate(0,0)}
+  18%{transform:translate(calc(var(--icon-x)*-.22),calc(var(--icon-y)*-.22))}
+  46%,54%{transform:translate(var(--icon-x),var(--icon-y))}
+}
+@keyframes lgi-icon-feedback-counter{
+  0%,100%{transform:translate(0,0)}
+  18%{transform:translate(calc(var(--icon-x)*.22),calc(var(--icon-y)*.22))}
+  46%,54%{transform:translate(calc(var(--icon-x)*-1),calc(var(--icon-y)*-1))}
+}
+@keyframes lgi-icon-feedback-trace{
+  0%,36%{opacity:0;stroke-dashoffset:1}
+  48%{opacity:var(--lgi-icon-trace-opacity)}
+  70%{opacity:var(--lgi-icon-trace-opacity);stroke-dashoffset:0}
+  100%{opacity:0;stroke-dashoffset:0}
+}
+@keyframes lgi-icon-feedback-fit{
+  0%,100%{transform:scale(1)}
+  18%{transform:scale(1.06)}
+  46%,54%{transform:scale(.75)}
+}
+:where(button,a,summary,label):not(:disabled,[aria-disabled="true"],label:has(> input:disabled)):is(:hover,:focus-visible,:has(> input:focus-visible)) .lgi-icon .feedback-move{animation:lgi-icon-feedback-move var(--lgi-icon-feedback-duration) var(--lgi-icon-feedback-ease) both}
+:where(button,a,summary,label):not(:disabled,[aria-disabled="true"],label:has(> input:disabled)):is(:hover,:focus-visible,:has(> input:focus-visible)) .lgi-icon .feedback-counter{animation:lgi-icon-feedback-counter var(--lgi-icon-feedback-duration) var(--lgi-icon-feedback-ease) both}
+:where(button,a,summary,label):not(:disabled,[aria-disabled="true"],label:has(> input:disabled)):is(:hover,:focus-visible,:has(> input:focus-visible)) .lgi-icon .feedback-trace{animation:lgi-icon-feedback-trace var(--lgi-icon-feedback-duration) var(--lgi-icon-feedback-ease) both}
+:where(button,a,summary,label):not(:disabled,[aria-disabled="true"],label:has(> input:disabled)):is(:hover,:focus-visible,:has(> input:focus-visible)) .lgi-icon[data-icon="fit"] .feedback-move{animation:lgi-icon-feedback-fit var(--lgi-icon-feedback-duration) var(--lgi-icon-feedback-ease) both}
 
 @media(prefers-reduced-motion:reduce){
   .lgi-icon *{animation:none!important;transition:none!important}

@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ActionButton } from "../../shared/ActionButton";
@@ -53,7 +54,7 @@ export function NativeAccountEditDialog({ account, close }: { account: api.Accou
     void command.submit(requestId => api.updateNativeAccount(account.ref, { requestId, expectedVersion: account.nativeVersion!, accountName: name, profileUrl: nullable(profileUrl), handle: nullable(handle), status, isRetained: retained, followerCount, deviceCode: nullable(deviceCode), ipLocation: nullable(ipLocation), notes: nullable(notes) }));
   }
   return <Dialog label="编辑原生账号" onClose={close}><form className={c("ops-dialog-body")} onSubmit={onSubmit}>
-    <h2>编辑账号资料</h2><p className={c("ops-note")}>平台和平台账号身份不能在普通编辑中变更；这会避免把历史归属或外部身份一起改掉。</p>
+    <h2><IntelligenceIcon name="edit" size={18}/> 编辑账号资料</h2><p className={c("ops-note")}>平台和平台账号身份不能在普通编辑中变更；这会避免把历史归属或外部身份一起改掉。</p>
     <label>账号名称<input required maxLength={512} value={name} onChange={e => setName(e.target.value)} disabled={command.locked} /></label>
     <label>主页链接<input type="url" value={profileUrl} onChange={e => setProfileUrl(e.target.value)} disabled={command.locked} /></label><label>账号号 / Handle<input maxLength={512} value={handle} onChange={e => setHandle(e.target.value)} disabled={command.locked} /></label>
     <label>账号状态<select value={status} onChange={e => setStatus(e.target.value as typeof status)} disabled={command.locked}><option value="active">运营中</option><option value="warming">养号中</option><option value="paused">暂停</option></select></label>
@@ -68,7 +69,7 @@ export function NativeAccountArchiveDialog({ account, restore, close }: { accoun
   function onSubmit(event: React.FormEvent) { event.preventDefault(); void command.submit(requestId => (restore ? api.restoreNativeAccount : api.archiveNativeAccount)(account.ref, { requestId, expectedVersion: account.nativeVersion!, reason })); }
   const verb = restore ? "恢复" : "归档";
   return <Dialog label={`${verb}原生账号`} onClose={close}><form className={c("ops-dialog-body")} onSubmit={onSubmit}>
-    <h2>{verb}账号</h2><p className={c("ops-note")}>{restore ? "恢复后可再次登记发布；不会补造历史发布或责任记录。" : "归档后不再可登记发布或编辑；历史记录和原生回执保留。"}</p>
+    <h2><IntelligenceIcon name={restore ? "restore" : "archive"} size={18}/> {verb}账号</h2><p className={c("ops-note")}>{restore ? "恢复后可再次登记发布；不会补造历史发布或责任记录。" : "归档后不再可登记发布或编辑；历史记录和原生回执保留。"}</p>
     <label>{verb}原因<input required maxLength={1000} value={reason} onChange={e => setReason(e.target.value)} disabled={command.locked} /></label>{command.message ? <p role="status">{command.message}</p> : null}
     <footer><ActionButton type="button" onClick={close} disabled={command.submitting}>取消</ActionButton><ActionButton type="submit" disabled={command.submitting}>{command.submitting ? "正在提交…" : command.retry ? "重试同一请求" : `确认${verb}`}</ActionButton></footer>
   </form></Dialog>;

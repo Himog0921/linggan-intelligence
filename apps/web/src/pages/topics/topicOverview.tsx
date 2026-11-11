@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import type { JSX, ReactNode } from "react";
 import { OverviewReadouts } from "./OverviewReadouts";
 import { OverviewDistribution } from "./OverviewDistribution";
@@ -478,21 +479,21 @@ export function createTopicOverview(context: TopicOverviewContext) {
           )}
 
             {btn(
-              "我方矩阵",
+              <><IntelligenceIcon name="grid" size={16}/>我方矩阵</>,
               "identity",
               "",
               "lgi-tm-quiet",
               busy ? "disabled" : "",
             )}
             {btn(
-              "计数与统计口径",
+              <><IntelligenceIcon name="info" size={16}/>计数与统计口径</>,
               "method",
               "",
               "lgi-tm-quiet",
               busy ? "disabled" : "",
             )}
             {btn(
-              "调整归属",
+              <><IntelligenceIcon name="edit" size={16}/>调整归属</>,
               "move-topic",
               "",
               "lgi-tm-quiet",
@@ -653,7 +654,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 ""
               )}
               <details className={cls("lgi-tm-scope-filter")}>
-                <summary aria-label="选择统计平台与发布时间" title="调整统计平台与发布时间">筛选</summary>
+                <summary aria-label="选择统计平台与发布时间" title="调整统计平台与发布时间"><IntelligenceIcon name="filter" size={16}/>筛选</summary>
                 <div className={cls("lgi-tm-scope-filter-panel")}>{controls()}</div>
               </details>
               <ViewSwitch

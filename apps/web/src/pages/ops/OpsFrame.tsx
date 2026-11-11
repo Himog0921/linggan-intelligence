@@ -25,7 +25,7 @@ export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, 
           <NavIcon name="overview"/><span>数据</span>
         </a>
         {!restricted ? <a className="v7-side-nav" aria-label="创作" title="创作" href={`/ops/creation${selectedDomain}`} aria-current={section === 'creation' ? 'page' : undefined}>
-          <NavIcon name="publications"/><span>创作</span>
+          <NavIcon name="creation"/><span>创作</span>
         </a> : null}
         {foot ? <div className="v7-side-foot">{foot}</div> : null}
       </Sidebar>

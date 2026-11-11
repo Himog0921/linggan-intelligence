@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { stateMeta } from './evidencePresent';
@@ -61,17 +62,17 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
         <div className={styles.tools}>
           {!isVideo ? <div className={styles.zoom} role="group" aria-label="缩放">
             <button type="button" aria-label="缩小" disabled={!zoom.canZoomOut} onClick={zoom.zoomOut}>
-              <span aria-hidden="true">−</span>
+              <IntelligenceIcon name="zoom-out" size={18}/>
             </button>
             <button type="button" className={styles.zoomValue} onClick={zoom.reset}>
               {`${Math.round(zoom.zoom * 100)}%`}
             </button>
             <button type="button" aria-label="放大" disabled={!zoom.canZoomIn} onClick={zoom.zoomIn}>
-              <span aria-hidden="true">+</span>
+              <IntelligenceIcon name="zoom-in" size={18}/>
             </button>
           </div> : null}
           <button type="button" className={styles.close} aria-label="关闭查看器" onClick={onClose}>
-            <span aria-hidden="true">×</span>
+            <IntelligenceIcon name="close" size={18}/>
           </button>
         </div>
       </header>
@@ -80,7 +81,7 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
         onPointerCancel={() => { stagePress.current = false; }}
         onPointerUp={event => { if (stagePress.current && event.target === event.currentTarget) onClose(); stagePress.current = false; }}>
         <button type="button" className={styles.step} aria-label="上一张" disabled={!previous} onClick={() => onIndex(object.index - 1)}>
-          <span aria-hidden="true">←</span>
+          <IntelligenceIcon name="prev" size={18}/>
         </button>
         <figure className={styles.figure}>
           <div
@@ -106,7 +107,7 @@ function Viewer({ object, total, titleId, onIndex, onClose }: { object: ViewerOb
           <figcaption>{caption(object)}</figcaption>
         </figure>
         <button type="button" className={styles.step} aria-label="下一张" disabled={!next} onClick={() => onIndex(object.index + 1)}>
-          <span aria-hidden="true">→</span>
+          <IntelligenceIcon name="next" size={18}/>
         </button>
       </div>
     </div>

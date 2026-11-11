@@ -839,7 +839,8 @@
 .gm-studio .desk .desk-tool-group{display:flex;align-items:center;gap:4px;background:#fff}
 .gm-studio .desk .desk-tools .btn{font-size:12px;padding:0 8px;height:32px}
 .gm-studio .desk .desk-tools [aria-expanded="true"]{background:#0b0f12;color:#fff;border-color:#0b0f12}
-.gm-studio .desk .desk-tools svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6}
+.gm-studio .desk .desk-tools svg{width:14px;height:14px}
+.gm-studio .desk .desk-tools svg:not(.lgi-icon){fill:none;stroke:currentColor;stroke-width:1.6}
 .gm-studio .desk .zoom-box{height:32px;border-color:var(--lgi-border-strong)}
 .gm-studio .desk .zoom-box button{width:28px;font-size:14px}
 .gm-studio .desk .zoom-box span{min-width:40px;line-height:30px}
@@ -927,7 +928,8 @@
 .gm-studio .immersive-desk .focus-bar>*{pointer-events:auto}
 .gm-studio .immersive-desk .focus-back{display:inline-flex;align-items:center;gap:8px;height:36px;padding:0 12px;border:0;background:#fff;color:var(--lgi-ink);font-size:12px}
 .gm-studio .immersive-desk .focus-back:hover{background:#e9ecec}
-.gm-studio .immersive-desk .focus-back svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.6}
+.gm-studio .immersive-desk .focus-back svg{width:16px;height:16px}
+.gm-studio .immersive-desk .focus-back svg:not(.lgi-icon){fill:none;stroke:currentColor;stroke-width:1.6}
 .gm-studio .immersive-desk .focus-bar [data-fbtn2]>.btn{height:36px}
 .gm-studio .immersive-desk .desk-tools,.gm-studio .immersive-desk.is-focused .desk-tools{top:auto;bottom:20px;align-items:flex-end}
 .gm-studio .immersive-desk .desk-tool-group.material-tools{position:relative;gap:2px;padding:5px;border:1px solid var(--lgi-ink);box-shadow:var(--lgi-shadow-brutal);background:#fff}

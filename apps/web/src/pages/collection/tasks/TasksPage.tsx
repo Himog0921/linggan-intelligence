@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useQuery } from '@tanstack/react-query';
 import { useRef, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router';
@@ -39,11 +40,11 @@ export function TasksPage() {
           </div><ActionButton type="submit" busy={query.isFetching}>搜索</ActionButton>
         </form>
         <nav className={styles.filters} aria-label="采集任务状态">{filters.map(([key, label]) => <button key={key} type="button" aria-current={filter === key ? 'page' : undefined} onClick={() => update({ filter: key, page: null, run: null })}>{label}</button>)}</nav>
-        <ActionButton variant="primary" data-new-run id="new-collection-run" onClick={() => setCreating(true)}>＋ 新建单次采集</ActionButton>
+        <ActionButton variant="primary" data-new-run id="new-collection-run" onClick={() => setCreating(true)}><IntelligenceIcon name="add" size={16}/>新建单次采集</ActionButton>
       </div>
       {query.error && query.data && <p role="alert">刷新失败，以下保留上次读取结果。{errorText(query.error)}</p>}
-      <RunLedger summary={`当前范围 ${query.data?.total ?? '—'} 次采集 · 第 ${page} 页 · 本页 ${query.data?.items.length ?? '—'} 条`} refresh={<ActionButton variant="quiet" busy={query.isFetching} onClick={() => void query.refetch()}>刷新</ActionButton>} runs={query.data?.items ?? []} message={query.error ? `任务读取失败；不能据此认定没有任务。${errorText(query.error)}` : query.isPending ? '正在读取采集记录…' : '当前筛选没有采集记录。'} onOpen={run => update({ run: run.run_ref, runDomain: run.domain_ref })} />
-      <div className={styles.pagination}><span>本页 {query.data?.items.length ?? '—'} 条 · 共 {query.data?.total ?? '—'} 次</span><ActionButton disabled={page <= 1 || query.isFetching} onClick={() => update({ page: String(page - 1) })}>上一页</ActionButton><ActionButton disabled={!query.data || query.data.total <= page * query.data.pageSize || query.isFetching} onClick={() => update({ page: String(page + 1) })}>下一页</ActionButton></div>
+      <RunLedger summary={`当前范围 ${query.data?.total ?? '—'} 次采集 · 第 ${page} 页 · 本页 ${query.data?.items.length ?? '—'} 条`} refresh={<ActionButton variant="quiet" busy={query.isFetching} onClick={() => void query.refetch()}><IntelligenceIcon name="refresh" size={16}/>刷新</ActionButton>} runs={query.data?.items ?? []} message={query.error ? `任务读取失败；不能据此认定没有任务。${errorText(query.error)}` : query.isPending ? '正在读取采集记录…' : '当前筛选没有采集记录。'} onOpen={run => update({ run: run.run_ref, runDomain: run.domain_ref })} />
+      <div className={styles.pagination}><span>本页 {query.data?.items.length ?? '—'} 条 · 共 {query.data?.total ?? '—'} 次</span><ActionButton disabled={page <= 1 || query.isFetching} onClick={() => update({ page: String(page - 1) })}><IntelligenceIcon name="prev" size={16}/>上一页</ActionButton><ActionButton disabled={!query.data || query.data.total <= page * query.data.pageSize || query.isFetching} onClick={() => update({ page: String(page + 1) })}><IntelligenceIcon name="next" size={16}/>下一页</ActionButton></div>
     </section>
     {creating && <RunCreationDialog params={params} onClose={closeCreation} onCreated={receipt => { setCreating(false); setParams({ domain: receipt.domainRef, run: receipt.runRef }); void query.refetch(); }} />}
     {id && drawerDomain && drawerDomain !== 'all' && <RunDrawer key={`${drawerDomain}:${id}`} id={id} domain={drawerDomain} onClose={() => update({ run: null, runDomain: null })} />}

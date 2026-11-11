@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { CREATOR_RESEARCH_GUIDANCE } from '../../settings/aiSettingsModel';
 import { useId } from 'react';
 import { ModalDialog } from '../../../corpus/ModalDialog';
@@ -55,6 +56,7 @@ export function CreatorScopeDialog({ data, usageRole, hasDateRange, link, onQuic
             <h2 id={titleId}>材料范围与判断标准</h2>
           </div>
           <button type="button" className={styles.textButton} onClick={onClose}>
+            <IntelligenceIcon name="close" size={16}/>
             关闭
           </button>
         </header>

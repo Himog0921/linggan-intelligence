@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { FactCardLibrary } from './FactCardLibrary';
@@ -36,7 +37,7 @@ export function AssetsLibrary({ domainRef, onPendingChange = () => {}, onDirtyCh
         <h2 id="asset-modal-title">资产库</h2>
         <p>维护账号、经历、产品知识与可复用写法；这些资产会在创作时被调用。</p>
       </div>
-      <div className="asset-modal-head-actions"><span className="asset-count">{KINDS.length} 类长期资产</span>{onClose ? <button type="button" className="modal-x" aria-label="关闭资产库" onClick={onClose}>×</button> : null}</div>
+      <div className="asset-modal-head-actions"><span className="asset-count">{KINDS.length} 类长期资产</span>{onClose ? <button type="button" className="modal-x" aria-label="关闭资产库" onClick={onClose}><IntelligenceIcon name="close" size={16}/></button> : null}</div>
     </header>
     <nav className="asset-tabs" aria-label="资产类型">{KINDS.map(([value, label]) => <button type="button" key={value}
       disabled={pending} aria-current={kind === value ? 'page' : undefined} onClick={() => { if (kind === value) return; if (dirty && !window.confirm('当前内容尚未保存，切换会丢弃本页编辑。确定切换吗？')) return; setDirty(false); onDirtyChange(false); setKind(value); }}>{label}{counts[value] === undefined ? null : <i>{counts[value]}</i>}</button>)}</nav>

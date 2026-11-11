@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import type { ReactNode, Ref } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { CreatorSelect } from './CreatorSelect';
@@ -77,7 +78,7 @@ export function CreatorControls(props: CreatorControlsProps) {
         />
         <div className={styles.queryActions}>
         <ActionButton onClick={props.onOpenFilter} disabled={data === null}>
-          筛选 <span className={styles.count}>{chips.length}</span>
+          <IntelligenceIcon name="filter" size={16}/>筛选 <span className={styles.count}>{chips.length}</span>
         </ActionButton>
         <CreatorSelect label="排序" value={query.sort} onChange={props.onSort}
           options={[

@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useId } from 'react';
 import { Link } from 'react-router';
 import { ModalDialog } from '../../../corpus/ModalDialog';
@@ -43,7 +44,7 @@ export function DomainChoiceDialog({ domains, pendingWork, onClose }: DomainChoi
             <h2 id={titleId}>选择研究领域</h2>
           </div>
           <button type="button" className={styles.textButton} aria-label="关闭领域选择" onClick={close}>
-            关闭
+            <IntelligenceIcon name="close" size={16}/>关闭
           </button>
         </header>
         <div className={styles.body}>

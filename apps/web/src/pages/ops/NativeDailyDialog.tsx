@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "../../shared/api";
@@ -94,7 +95,7 @@ export function NativeDailyDialog({ close, item }: { close: () => void; item?: a
   }
 
   return <Dialog label={editing ? "修正原生日报" : "填写原生日报"} onClose={requestClose}><form className={c("ops-dialog-body")} onSubmit={submit}>
-    <h2>{editing ? "修正日报" : "填写日报"}</h2>
+    <h2><IntelligenceIcon name={editing ? "edit" : "add"} size={18}/> {editing ? "修正日报" : "填写日报"}</h2>
     <p className={c("ops-note")}>留空是“未填写”，填 0 才是“当天为零”。{editing ? "本次按读到的版本保存；若他人已更新，服务端会拒绝覆盖。" : "日报归属当前会话的运营人，服务端会拒绝覆盖已有版本。"}</p>
     <label>日期<input type="date" required value={businessDate} onChange={event => setBusinessDate(event.target.value)} disabled={locked || editing} /></label>
     <label>打开（可选）<input type="number" min="0" max={MAX_I32} step="1" inputMode="numeric" value={linksOpened} onChange={event => setLinksOpened(event.target.value)} disabled={locked} /></label>

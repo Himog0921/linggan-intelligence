@@ -66,7 +66,7 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
   try {
     await goto();
     await page.locator('[name=identity]').fill('ad0000000000000000000991');
-    await page.getByRole('button', { name: '＋ 新建目标', exact: true }).click();
+    await page.getByRole('button', { name: '新建目标', exact: true }).click();
     await capture('target-create-domain', '.c-tg-batch-dialog');
     await page.locator('.c-tg-batch-dialog .c-tg-drawn-toggle').last().click();
     await capture('target-create-domain-select', '.c-tg-batch-dialog');

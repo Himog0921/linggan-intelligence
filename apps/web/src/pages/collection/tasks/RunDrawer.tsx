@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useQuery } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { RunDialog } from './RunDialog';
@@ -15,7 +16,7 @@ function reason(r: Run) {
 function Progress({ r, control, locked, feedback }: { r: Run; control: (action: RunAction) => void; locked: boolean; feedback: string }) {
   const [confirming, setConfirming] = useState(false);
   const frozen = !!r.scope_frozen_at || r.legacy;
-  if (confirming) return <section className={styles.confirm} aria-labelledby="run-stop-confirm-title"><h3 id="run-stop-confirm-title">停止本次采集？</h3><p>停止后不能继续这次任务。已经取得的材料会保留，在途执行仍须核对实际回执。</p><div className={styles.actions}><ActionButton autoFocus onClick={() => setConfirming(false)}>返回进展</ActionButton><ActionButton variant="danger" disabled={locked} onClick={() => { setConfirming(false); control('stop'); }}>确认停止本次采集</ActionButton></div></section>;
+  if (confirming) return <section className={styles.confirm} aria-labelledby="run-stop-confirm-title"><h3 id="run-stop-confirm-title">停止本次采集？</h3><p>停止后不能继续这次任务。已经取得的材料会保留，在途执行仍须核对实际回执。</p><div className={styles.actions}><ActionButton autoFocus onClick={() => setConfirming(false)}><IntelligenceIcon name="back" size={16}/>返回进展</ActionButton><ActionButton variant="danger" disabled={locked} onClick={() => { setConfirming(false); control('stop'); }}><IntelligenceIcon name="stop" size={16}/>确认停止本次采集</ActionButton></div></section>;
   return <section data-run-progress className={styles.progress}>
     <div className={styles.status}><strong>{status(r)}</strong><span>{reason(r)}</span></div>
     <dl className={styles.summary} aria-label="本轮已取得成果">
@@ -39,7 +40,7 @@ function Progress({ r, control, locked, feedback }: { r: Run; control: (action: 
       <li><span>评论采集</span><span>{r.comment_mode === 'none' ? '本次不采评论' : r.completed_discussions === null ? '完成范围尚未确认' : `${count(r.completed_discussions)} 篇已结束本轮采集`}</span></li>
     </ol></section>
     {r.stations.length > 0 && <div className={styles.stations}><span>执行工位</span>{r.stations.map(s => <a key={s.stationRef} href={`/collection/runtime?${new URLSearchParams({station:s.stationRef,return_to:`/collection/tasks?domain=${r.domain_ref}&run=${r.run_ref}`})}`}>{s.name}</a>)}</div>}
-    {!r.legacy && !r.ended && r.control_intent !== 'stopped' && <div className={styles.actions}><ActionButton disabled={locked} onClick={() => control(r.control_intent === 'paused' ? 'continue' : 'pause')}>{r.control_intent === 'paused' ? '继续' : '暂停'}</ActionButton><ActionButton variant="quiet" disabled={locked} onClick={() => setConfirming(true)}>停止本次</ActionButton></div>}
+    {!r.legacy && !r.ended && r.control_intent !== 'stopped' && <div className={styles.actions}><ActionButton disabled={locked} onClick={() => control(r.control_intent === 'paused' ? 'continue' : 'pause')}><IntelligenceIcon name={r.control_intent === 'paused' ? 'resume' : 'pause'} size={16}/>{r.control_intent === 'paused' ? '继续' : '暂停'}</ActionButton><ActionButton variant="quiet" disabled={locked} onClick={() => setConfirming(true)}><IntelligenceIcon name="stop" size={16}/>停止本次</ActionButton></div>}
     {feedback && <p role="alert" className={styles.feedback}>{feedback}</p>}
   </section>;
 }
@@ -54,7 +55,7 @@ function Results({ r }: { r: Run }) {
       return <article key={w.publicRef} className={styles.work}><a href={`/corpus/evidence?${link}`}>{w.title||'标题未知'}</a><p><span>{w.creator||'作者未知'}</span><span>{gap}</span></p></article>;
     })}
     {!query.data.items.length && <p>作品集合尚未形成。</p>}
-    <div className={styles.pagination}><ActionButton disabled={page<=1||query.isFetching} onClick={()=>setPage(page-1)}>上一页作品</ActionButton><span>第 {page} 页 · 共 {query.data.total} 篇</span><ActionButton disabled={query.data.total<=page*20||query.isFetching} onClick={()=>setPage(page+1)}>下一页作品</ActionButton></div>
+    <div className={styles.pagination}><ActionButton disabled={page<=1||query.isFetching} onClick={()=>setPage(page-1)}><IntelligenceIcon name="prev" size={16}/>上一页作品</ActionButton><span>第 {page} 页 · 共 {query.data.total} 篇</span><ActionButton disabled={query.data.total<=page*20||query.isFetching} onClick={()=>setPage(page+1)}><IntelligenceIcon name="next" size={16}/>下一页作品</ActionButton></div>
   </>}</div></section>;
 }
 interface SavedControl { request: RunRequest; intent: ControlIntent }
@@ -88,9 +89,9 @@ export function RunDrawer({ id, domain, onClose }: { id: string; domain: string;
     } finally { sending.current = false; setBusy(false); }
   }
   return <RunDialog dismissOnBackdrop id="collection-run-drawer" className={`c-run-drawer ${styles.drawer}`} labelledBy="collection-run-title" onClose={onClose}>
-    <header className={styles.heading}><h2 id="collection-run-title" title={query.data?.name}>{query.data?.name ?? '采集进展'}</h2><ActionButton variant="quiet" data-close-run-dialog onClick={onClose}>关闭</ActionButton></header>
+    <header className={styles.heading}><h2 id="collection-run-title" title={query.data?.name}>{query.data?.name ?? '采集进展'}</h2><ActionButton variant="quiet" data-close-run-dialog onClick={onClose}><IntelligenceIcon name="close" size={16}/>关闭</ActionButton></header>
     <nav className={styles.tabs} aria-label="任务详情">{([['progress','进展'],['results','成果']] as const).map(([value,label])=><button key={value} type="button" data-run-view={value} aria-current={view===value?'page':undefined} onClick={()=>selectView(value)}>{label}</button>)}</nav>
     <div className={`c-run-dialog-body ${styles.body}`} data-run-detail>{query.data ? <><div hidden={view!=='progress'}><Progress r={query.data} control={action=>void command(action)} locked={busy||uncertain} feedback={feedback}/>{uncertain && <ActionButton disabled={busy} onClick={()=>void command(attempt.current?.intent.action??'pause')}>核实原操作结果</ActionButton>}</div>{resultsVisited && <div hidden={view!=='results'}><Results r={query.data}/></div>}</> : <p role={query.error?'alert':'status'}>{query.error?`进展读取失败：${errorText(query.error)}`:'正在读取采集进展…'}</p>}</div>
-    <footer className={styles.footer}><span>{query.data?status(query.data):''}</span><ActionButton variant="primary" onClick={()=>selectView('results')}>查看成果</ActionButton></footer>
+    <footer className={styles.footer}><span>{query.data?status(query.data):''}</span><ActionButton variant="primary" onClick={()=>selectView('results')}><IntelligenceIcon name="forward" size={16}/>查看成果</ActionButton></footer>
   </RunDialog>;
 }

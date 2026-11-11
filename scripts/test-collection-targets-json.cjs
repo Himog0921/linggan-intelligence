@@ -46,7 +46,7 @@ const { chromium } = createRequire(path.resolve('apps/web/package.json'))('playw
   }
   async function create(kind, identity, domain) {
     await goto({ domain });
-    await page.getByRole('button', { name: '＋ 新建目标', exact: true }).click();
+    await page.getByRole('button', { name: '新建目标', exact: true }).click();
     const modal = page.getByRole('dialog', { name: '新建观察目标' }); await modal.waitFor();
     await modal.locator('[name=target_kind]').selectOption(kind);
     await modal.locator('[name=identity]').fill(identity);

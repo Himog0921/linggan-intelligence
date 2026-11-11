@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { useBlocker } from 'react-router';
 import { ActionButton } from '../../../shared/ActionButton';
@@ -127,6 +128,7 @@ export function CreatorFilterDialog({ query, hasThreshold, observationAvailable,
             <h2 id={titleId}>筛选材料与作者</h2>
           </div>
           <button type="button" className={styles.textButton} aria-label="关闭筛选" onClick={requestClose}>
+            <IntelligenceIcon name="close" size={16}/>
             关闭
           </button>
         </header>

@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useId, useRef, useState, type FormEvent } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ModalDialog } from '../../../corpus/ModalDialog';
@@ -66,6 +67,7 @@ export function CreatorPolicyDialog({ domain, policy, domainActive, onSaved, onC
             <h2 id={titleId}>发现设置</h2>
           </div>
           <button type="button" className={styles.textButton} onClick={requestClose}>
+            <IntelligenceIcon name="close" size={16}/>
             关闭
           </button>
         </header>

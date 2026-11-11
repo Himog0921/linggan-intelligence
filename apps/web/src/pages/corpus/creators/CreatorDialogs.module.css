@@ -103,6 +103,12 @@
   padding: var(--lgi-space-6);
 }
 
+.head .textButton {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lgi-space-1);
+}
+
 .head small {
   color: var(--lgi-muted);
   font-size:var(--lgi-type-label-size);
