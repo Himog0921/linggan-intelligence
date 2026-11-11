@@ -187,6 +187,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 | [plans/active/ops-launch-001.md](plans/active/ops-launch-001.md) | 活跃计划；Issue #483；受保护工作树实施中 | 内部团队邀请制登录、原生运营写入、已登记发布的精确同步、交接停用及 React 页面收口；尚未推送、合并或部署 |
 | [data-contracts/ops-auth-001.md](data-contracts/ops-auth-001.md) | 权威当前；认证切片实现中 | 内部邀请成员、Argon2id 密码哈希、会话 cookie、同源写入边界与机器身份分离 |
 | [data-contracts/ops-team-responsibility-001.md](data-contracts/ops-team-responsibility-001.md) | 权威当前；原生写权限结构基础 | 团队组、追加式成员归属、账号当前负责人和责任变更回执；不替代后续服务端授权 |
+| [运营成员管理与离职交接开发手册](proposals/ops-team-admin-development-handbook.md) | D01–D03 已确认；实施中 | 邀请、账号分配、停用、接管及待补阅读量；含回执恢复、权限边界与验收用例 |
 | [runbooks/ops-first-admin-bootstrap-001.md](runbooks/ops-first-admin-bootstrap-001.md) | 权威当前；受控环境操作 | 首位 Ops 管理员的一次性本地控制台初始化；没有名单/环境授权不得执行 |
 
 > **运营文档状态提示（2026-10-23）：** 下列 OPS-MIGRATION、PAGE-OPS、OPS-LEDGER 与 OPS-HTTP 条目保留 D1–D3 的历史迁入、读取和上线证据；其中声称“权威当前”或规定 D4–D6 后续路线的部分，均受 OPS-LAUNCH-001 的优先规则限制。新认证、原生写入、同步及交接合同会以独立的当前文档加入本索引，不能由旧条目的本机守卫或只读约束推导。

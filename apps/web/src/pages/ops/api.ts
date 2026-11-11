@@ -202,6 +202,7 @@ function account(r: R) {
     ipLocation: sn(r, "ipLocation"),
     currentResponsibleMemberRef: sn(r, "currentResponsibleMemberRef"),
     currentResponsibleName: sn(r, "currentResponsibleName"),
+    pendingFromMemberRef: d.optStr(r, "pendingFromMemberRef"),
     responsibilityVersion: n(r, "responsibilityVersion"),
     nativeVersion: nn(r, "nativeVersion"),
     nativeState: (() => {

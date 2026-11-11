@@ -65,6 +65,7 @@ struct SyncExecutionStatus {
 }
 
 enum SyncError {
+    SessionChanged,
     Invalid(&'static str),
     Conflict,
     Unavailable,
@@ -128,6 +129,9 @@ async fn create_in_database(
         .begin()
         .await
         .map_err(|_| SyncError::Unavailable)?;
+    if !super::ops_auth::lock_active_member(&mut transaction, member).await.map_err(|_| SyncError::Unavailable)? {
+        return Err(SyncError::SessionChanged);
+    }
     lock_request(&mut transaction, body.idempotency_key).await?;
     if let Some((actor, stored_payload)) = sqlx::query_as::<_, (Uuid, Vec<u8>)>(
         "SELECT actor_member_ref,payload_sha256 FROM linggan_ops_publication_sync_request WHERE request_ref=$1",
@@ -493,6 +497,7 @@ async fn can_write_account(
                          ORDER BY member_ref,occurred_at DESC,event_ref DESC) \
          SELECT EXISTS (SELECT 1 FROM latest actor JOIN latest owner ON actor.group_ref=owner.group_ref \
                         JOIN linggan_ops_group group_row ON group_row.group_ref=actor.group_ref \
+                        JOIN linggan_ops_member current_owner ON current_owner.member_ref=owner.member_ref AND current_owner.state='active' \
                         WHERE actor.member_ref=$1 AND owner.member_ref=$2 AND actor.action='joined' \
                           AND owner.action='joined' AND group_row.state='active')",
     )
@@ -686,6 +691,7 @@ fn secure(mut response: Response) -> Response {
 
 fn sync_error(error: SyncError) -> Response {
     let (status, code) = match error {
+        SyncError::SessionChanged => (StatusCode::UNAUTHORIZED, "ops_auth_session_required"),
         SyncError::Invalid(code) => (StatusCode::UNPROCESSABLE_ENTITY, code),
         SyncError::Conflict => (StatusCode::CONFLICT, "ops_sync_request_conflict"),
         SyncError::Unavailable => (StatusCode::SERVICE_UNAVAILABLE, "ops_sync_unavailable"),

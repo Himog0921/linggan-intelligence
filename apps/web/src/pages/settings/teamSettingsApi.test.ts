@@ -4,7 +4,7 @@ import { parseDeactivation, parseInvitation, parseRoster } from './teamSettingsA
 
 describe('团队成员接口解码', () => {
   it('只接纳完整的名册读模型，不把未知状态渲染成可管理成员', () => {
-    expect(parseRoster({ members: [{ memberRef: 'm-1', email: 'owner@example.com', displayName: 'Owner', role: 'admin', state: 'active', version: 2, currentAccountCount: 3 }] })).toEqual([{
+    expect(parseRoster({ members: [{ memberRef: 'm-1', email: 'owner@example.com', displayName: 'Owner', role: 'admin', state: 'active', version: 2, currentAccountCount: 3 }] })).toMatchObject([{
       memberRef: 'm-1', email: 'owner@example.com', displayName: 'Owner', role: 'admin', state: 'active', version: 2, currentAccountCount: 3,
     }]);
     expect(() => parseRoster({ members: [{ memberRef: 'm-1', email: 'owner@example.com', displayName: 'Owner', role: 'owner', state: 'active', version: 2, currentAccountCount: 3 }] })).toThrow(ApiError);

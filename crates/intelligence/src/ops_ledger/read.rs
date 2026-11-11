@@ -14,7 +14,7 @@ use serde::Serialize;
 use sqlx::Row;
 use uuid::Uuid;
 
-pub use accounts::{OpsAccountItem, OpsAccountPage, read_ops_accounts, read_ops_accounts_scoped};
+pub use accounts::{OpsAccountItem, OpsAccountPage, read_ops_accounts, read_ops_accounts_filtered, read_ops_accounts_scoped};
 pub use creation_read::{
     CreationPublication, creation_publication_directory_in, read_creation_publications,
 };

@@ -154,6 +154,9 @@ export function LedgerPage({
 }) {
   const [params, setParams] = useSearchParams();
   const operator = params.get("operator") || "";
+  const pendingFrom = kind === "accounts" ? params.get("pending_from") || "" : "";
+  const assignedTo = kind === "accounts" && role === "admin" ? params.get("assign_to") || "" : "";
+  const accountRef = kind === "publications" ? params.get("account_ref") : null;
   const [dates, setDates] = useState(false);
   const [cover, setCover] = useState<string | null>(null);
   const [coverFailed, setCoverFailed] = useState(false);
@@ -183,10 +186,10 @@ export function LedgerPage({
     enabled: kind === "publications",
   });
   const accounts = useQuery({
-    queryKey: ["ops", "accounts", business, operator],
+    queryKey: ["ops", "accounts", business, operator, pendingFrom],
     queryFn: ({ signal }) =>
       api.get(
-        api.url("accounts", { domain: business, operator }),
+        api.url("accounts", { domain: business, operator, pending_from: pendingFrom }),
         api.accounts,
         signal,
       ),
@@ -214,6 +217,7 @@ export function LedgerPage({
     "operator",
     "platform",
     "account",
+    "account_ref",
     "from",
     "to",
     "views",
@@ -317,6 +321,9 @@ export function LedgerPage({
               迁入自内容工作台 · 发布数按发布记录自动统计
             </span>
           )}
+          {pendingFrom ? <span>该成员留下的待接管账号 <a href="/ops/accounts">查看全部账号</a></span> : null}
+          {assignedTo ? <span>选择账号交接给{members.data?.find(member => member.memberRef === assignedTo)?.displayName ?? "所选成员"}</span> : null}
+          {accountRef ? <span>当前账号的发布</span> : null}
           <small className={c("ops-note")}>原生录入和责任交接会保留来源与回执；历史迁入事实仍只读</small>
           {kind === "publications" ? (
             <>
@@ -429,11 +436,13 @@ export function LedgerPage({
                   !data.asOf
                     ? "还没有迁入数据。"
                     : kind === "publications"
-                      ? filtered
+                      ? accountRef && params.get("views") === "pending"
+                        ? "当前没有可补录的发布。"
+                        : filtered
                         ? "没有符合条件的发布记录。"
                         : "没有发布记录。"
                       : kind === "accounts"
-                        ? "当前筛选下没有账号。"
+                        ? pendingFrom ? "没有待接管的账号。" : "当前筛选下没有账号。"
                         : "当前筛选下没有每日数据。"
                 }
                 action={
@@ -445,6 +454,7 @@ export function LedgerPage({
                           operator: "",
                           platform: "",
                           account: "",
+                          account_ref: "",
                           from: "",
                           to: "",
                           views: "",
@@ -539,7 +549,7 @@ export function LedgerPage({
       {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
       {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
       {batchViews && pubs.data ? <NativeViewBatchDialog publications={pubs.data.items} close={() => setBatchViews(false)} /> : null}
-      {responsibilityAccount && members.data ? <AccountResponsibilityDialog account={responsibilityAccount} members={members.data} close={() => setResponsibilityAccount(null)} /> : null}
+      {responsibilityAccount && members.data ? <AccountResponsibilityDialog account={responsibilityAccount} members={members.data} suggestedRecipient={assignedTo} close={() => setResponsibilityAccount(null)} /> : null}
       {editingAccount ? <NativeAccountEditDialog account={editingAccount} close={() => setEditingAccount(null)} /> : null}
       {lifecycleAccount ? <NativeAccountArchiveDialog account={lifecycleAccount.account} restore={lifecycleAccount.restore} close={() => setLifecycleAccount(null)} /> : null}
       {cover ? (
@@ -804,7 +814,7 @@ function AccountRow({ item, index, transfer, edit, lifecycle, ready, canTransfer
       <TextCell value={item.ipLocation} />
       <td>
         <div className={c("ops-stack")}>
-          {item.currentResponsibleName ? <span>{item.currentResponsibleName}</span> : <Missing title="尚未分配 Linggan 当前负责人">待接管</Missing>}
+          {item.currentResponsibleName ? <span>{item.currentResponsibleName}</span> : <Missing title="当前没有有效负责人">{item.pendingFromMemberRef ? "原负责人已停用 · 待接管" : "未分配"}</Missing>}
           {item.operator ? <small className={c("ops-secondary")}>历史：{item.operator}</small> : null}
         </div>
       </td>
@@ -829,6 +839,8 @@ function AccountRow({ item, index, transfer, edit, lifecycle, ready, canTransfer
       <td><div className={c("ops-stack")}>
         {item.source === "native" && item.nativeVersion !== null && item.nativeState !== "archived" ? <><ActionButton type="button" onClick={() => edit(item)}><IntelligenceIcon name="edit" size={16}/>编辑</ActionButton><ActionButton type="button" onClick={() => lifecycle(item, false)}><IntelligenceIcon name="archive" size={16}/>归档</ActionButton></> : null}
         {item.source === "native" && item.nativeVersion !== null && item.nativeState === "archived" ? <ActionButton type="button" onClick={() => lifecycle(item, true)}><IntelligenceIcon name="restore" size={16}/>恢复</ActionButton> : null}
+        {item.platform === "xhs" && item.currentResponsibleMemberRef && item.nativeState !== "archived"
+          ? <a href={`/ops/publications?${new URLSearchParams({ account_ref: item.ref, views: "pending" })}`}>待补阅读量</a> : null}
         {canTransfer && item.nativeState !== "archived" ? <ActionButton type="button" disabled={!ready} title={ready ? "按当前权限与同组关系校验" : "正在读取可选成员"} onClick={() => transfer(item)}>交接</ActionButton> : null}
       </div></td>
     </tr>
