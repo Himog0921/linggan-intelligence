@@ -495,21 +495,7 @@ function collectMediaCandidates(note = {}, commentRecords = []) {
   const push = (role, value, subject = null, page = null) => {
     const candidateUris = normalizeUris(candidateValues(value));
     if (!candidateUris.length) return;
-    if (role !== 'live_photo') {
-      output.push({ role, url: candidateUris[0], candidateUris, ...(subject ? { subject } : {}), ...(page ? { page } : {}) });
-      return;
-    }
-    const stillCandidates = normalizeUris(candidateValues(value?.coverUrl || value?.still));
-    const motionCandidates = candidateUris;
-    output.push({
-      role,
-      url: motionCandidates[0],
-      candidateUris: [...new Set([...motionCandidates, ...stillCandidates])],
-      components: {
-        ...(stillCandidates.length ? { still: { candidateUris: stillCandidates } } : {}),
-        motion: { candidateUris: motionCandidates },
-      },
-    });
+    output.push({ role, url: candidateUris[0], candidateUris, ...(subject ? { subject } : {}), ...(page ? { page } : {}) });
   };
   if (Array.isArray(note.imagePositions)) {
     const explicit = note.imageInventory?.state === 'complete'
@@ -522,8 +508,10 @@ function collectMediaCandidates(note = {}, commentRecords = []) {
     asArray(note.images).forEach((value) => push('image', value));
   }
   if (note.cover || note.coverUrl) push('cover', note.cover || note.coverUrl);
-  if (note.video) push('video', note.video);
-  asArray(note.livePhotoStreams).forEach((value) => push('live_photo', value));
+  push('video', { candidateUris: [
+    ...mediaCandidateUris(note.video),
+    ...asArray(note.videoStreams).map((stream) => stream?.url),
+  ] });
   const authorExternalId = String(note.authorId || note.authorPlatformId || '').trim();
   if (authorExternalId && note.authorAvatar) {
     push('avatar', note.authorAvatar, {

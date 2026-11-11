@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Own disposable PostgreSQL, synthetic images and loopback SDK only. No runtime DSN.
+# Owned disposable PostgreSQL and synthetic media; optional local recognizers or loopback SDK. No runtime DSN.
 set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
@@ -9,12 +9,21 @@ audit_tmp_root="${audit_tmp_root%/}"
 export AI_FOUNDATION_PROOF_NODE="$(command -v node)"
 reading_only=0
 local_only=0
+video_local_chain=0
 purge_only=0
 browser_proof=0
 case "${1:-}" in
  '') ;;
  --reading-only) reading_only=1 ;;
  --local-only) local_only=1 ;;
+ --video-local-chain)
+  video_local_chain=1
+  [[ "$(uname -s)" == Darwin ]] || { echo 'Actual local video proof requires macOS say and cached local recognizers' >&2; exit 2; }
+  [[ -x /usr/bin/say && -f "$HOME/.cache/whisper/medium.pt" ]] || exit 2
+  [[ -x "${LINGGAN_WHISPER_COMMAND:-$HOME/Library/Python/3.9/bin/whisper}" ]] || exit 2
+  [[ -x "${LINGGAN_FFMPEG_COMMAND:-/opt/homebrew/bin/ffmpeg}" && -x /opt/homebrew/bin/ffprobe ]] || exit 2
+  PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True bash scripts/runtime/prepare-paddle-ocr.sh --check
+  ;;
  --purge-only) purge_only=1 ;;
  --browser)
   browser_proof=1
@@ -34,7 +43,7 @@ PYCODE
   export OCR_AUDIT_BROWSER_PROOF_BINARY
   [[ -x "$OCR_AUDIT_BROWSER_PROOF_BINARY" ]] || exit 2
   ;;
- *) echo 'usage: test-ocr-recognition-postgres.sh [--browser|--reading-only|--local-only|--purge-only]' >&2;exit 2;;
+ *) echo 'usage: test-ocr-recognition-postgres.sh [--browser|--reading-only|--local-only|--video-local-chain|--purge-only]' >&2;exit 2;;
 esac
 export LINGGAN_COLLECTION_UPGRADE_PHASE=governance RUST_TEST_THREADS=1
 suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
@@ -79,6 +88,10 @@ if [[ "$purge_only" == 1 ]]; then
 fi
 if [[ "$local_only" == 1 ]]; then
  cargo_proof -p linggan-worker --test video_frame_ocr_postgres latest_frame_completion_and_empty_outcome_publish_current_readings --locked -- --ignored --exact --nocapture
+ exit 0
+fi
+if [[ "$video_local_chain" == 1 ]]; then
+ cargo_proof -p linggan-worker --test video_frame_ocr_postgres local_video_recognition_preserves_text_times_and_empty_sources --locked -- --ignored --exact --nocapture
  exit 0
 fi
 if [[ "$reading_only" == 1 ]]; then

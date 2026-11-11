@@ -177,6 +177,10 @@ export function observeSseLine(observation, line, usage, recordUsage) {
     return;
   }
   recordUsage(value, usage);
+  const model = value?.response?.model ?? value?.message?.model ?? value?.model;
+  if (typeof model === 'string' && model.length > 0 && Buffer.byteLength(model) <= 160 && !/[\u0000-\u001f\u007f]/u.test(model)) {
+    observation.diagnostic.providerReturnedModel = model;
+  }
   const choice = Array.isArray(value?.choices)
     ? value.choices.find((candidate) => candidate?.finish_reason != null)
     : null;

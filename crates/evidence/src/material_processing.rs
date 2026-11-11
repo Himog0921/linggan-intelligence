@@ -876,3 +876,103 @@ pub async fn requeue_outdated_processor_jobs(
     }
     Ok(summaries)
 }
+
+pub async fn enqueue_missing_video_frame_jobs(
+    database: &Database,
+    work_refs: &[Uuid],
+    dry_run: bool,
+) -> Result<ProcessorRequeueSummary, sqlx::Error> {
+    if work_refs.is_empty() {
+        return Err(sqlx::Error::Protocol("work_scope_required".into()));
+    }
+    let mut works = work_refs.to_vec();
+    works.sort_unstable();
+    works.dedup();
+    let mut tx = database.pool().begin().await?;
+    for work in &works {
+        sqlx::query("SELECT pg_advisory_xact_lock(420,hashtext($1::uuid::text))")
+            .bind(work)
+            .execute(&mut *tx)
+            .await?;
+    }
+    let cutoff = crate::research_dossier::cutoff_in(&mut tx, None).await?;
+    let dossiers = crate::research_dossier::read_in(&mut tx, &works, &cutoff).await?;
+    if dossiers.len() != works.len() {
+        return Err(sqlx::Error::RowNotFound);
+    }
+    let version = processor_version_for_kind("video_frame_ocr")
+        .expect("video_frame_ocr is a registered processor");
+    let mut enqueued_jobs = 0;
+    for dossier in dossiers.values() {
+        for slot in &dossier.media_inventory {
+            if slot["purpose"] != "video"
+                || slot["component"] != "motion"
+                || slot["sourceState"] != "present"
+                || slot["localReadable"] != true
+            {
+                continue;
+            }
+            if dossier.materials.iter().any(|m| {
+                m["kind"] == "video_frame"
+                    && m["slotKey"] == slot["slotKey"]
+                    && m["currentRevisionRef"].is_string()
+                    && matches!(
+                        m["sourceState"].as_str(),
+                        Some("present" | "known_empty" | "not_applicable")
+                    )
+            }) {
+                continue;
+            }
+            let field = |name| {
+                slot[name]
+                    .as_str()
+                    .ok_or_else(|| sqlx::Error::Protocol("video_source_invalid".into()))
+            };
+            let slot_key = field("slotKey")?;
+            let sha = field("blobSha256")?;
+            let observation: Uuid = field("observationRef")?
+                .parse()
+                .map_err(|_| sqlx::Error::Protocol("video_source_invalid".into()))?;
+            let source: Uuid = field("sourceRef")?
+                .parse()
+                .map_err(|_| sqlx::Error::Protocol("video_source_invalid".into()))?;
+            let allowed: bool = sqlx::query_scalar(
+                "SELECT COALESCE((SELECT target.allow_ocr \
+                 FROM linggan_material_media_origin origin \
+                 JOIN linggan_runtime_capture_package package USING(package_ref) \
+                 JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+                 JOIN collection_work_order_lease lease USING(lease_ref) \
+                 JOIN collection_work_order_material_target target ON target.work_order_ref=lease.work_order_ref \
+                   AND target.content_public_ref=origin.content_public_ref \
+                 WHERE origin.observation_ref=$1 ORDER BY target.created_at DESC LIMIT 1),true) \
+                 AND NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                 WHERE disposition.slot_key=$2 OR disposition.blob_sha256=$3 OR disposition.materialization_ref=$4)",
+            ).bind(observation).bind(slot_key).bind(sha).bind(source).fetch_one(&mut *tx).await?;
+            if !allowed {
+                continue;
+            }
+            enqueued_jobs += sqlx::query(
+                "WITH enqueued AS (INSERT INTO linggan_media_processing_job \
+                 (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) \
+                 SELECT gen_random_uuid(),$1,$2,'video_frame_ocr',$3,'full_blob' \
+                 WHERE NOT EXISTS(SELECT 1 FROM linggan_media_processing_job job \
+                   WHERE job.blob_sha256=$1 AND job.slot_key=$2 \
+                     AND job.processor_kind='video_frame_ocr' AND job.input_scope='full_blob') \
+                 ON CONFLICT(blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING \
+                 RETURNING job_ref) \
+                 INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) \
+                 SELECT gen_random_uuid(),job_ref,'pending','queued_for_missing_video_frames' FROM enqueued",
+            ).bind(sha).bind(slot_key).bind(version).execute(&mut *tx).await?.rows_affected() as i64;
+        }
+    }
+    if dry_run {
+        tx.rollback().await?;
+    } else {
+        tx.commit().await?;
+    }
+    Ok(ProcessorRequeueSummary {
+        processor_kind: "video_frame_ocr".into(),
+        target_version: version.into(),
+        enqueued_jobs,
+    })
+}

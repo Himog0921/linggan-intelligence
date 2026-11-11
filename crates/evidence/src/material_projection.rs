@@ -1065,6 +1065,7 @@ pub(crate) fn material_item(
         }),
         matched_fields,
         evidence_fragment: None,
+        material_readiness: None,
         author_external_id: current.author_external_id.clone(),
         body_text: body,
     }

@@ -35,6 +35,7 @@ pub struct MaterialLibraryItem {
     /// `None` is a real answer, not a missing value: the work has no readable text yet. Callers
     /// must render that as an explicit state rather than substituting a title or a summary.
     pub evidence_fragment: Option<MaterialEvidenceFragment>,
+    pub material_readiness: Option<crate::research_dossier::MaterialReadiness>,
     #[serde(skip)]
     pub(crate) author_external_id: Option<String>,
     /// Raw detail body, kept out of the response by `skip`. It stays on the item only so the

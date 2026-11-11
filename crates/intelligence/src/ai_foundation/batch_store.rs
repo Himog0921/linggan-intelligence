@@ -85,6 +85,9 @@ pub enum InputRef {
         request_ref: Uuid,
         include_comments: bool,
     },
+    ContentUnderstanding {
+        request_ref: Uuid,
+    },
     Note {
         snapshot_ref: Uuid,
     },
@@ -131,6 +134,7 @@ impl InputRef {
                 matches!(task, TaskKey::WritingLegacy | TaskKey::CreationTitle) && trial
             }
             Self::NoteAnalysis { .. } => task == TaskKey::NoteInterpretation && !trial,
+            Self::ContentUnderstanding { .. } => task == TaskKey::ContentUnderstanding && !trial,
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
             Self::DirectionSample { .. } => matches!(
                 task,
@@ -172,7 +176,8 @@ impl BatchKind {
         }
         match task {
             TaskKey::ModelProbe => self == Self::Probe,
-            TaskKey::WorkComparison
+            TaskKey::ContentUnderstanding
+            | TaskKey::WorkComparison
             | TaskKey::CreatorResearch
             | TaskKey::CreatorAccountResearch
             | TaskKey::CommentStudy => self == Self::Interactive,

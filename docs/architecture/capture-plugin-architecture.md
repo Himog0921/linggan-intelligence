@@ -29,6 +29,14 @@
 
 当前未完全验收的组合不得被这条真实链扩大：搜索连续滚动/不同筛选端到端、作者页结构化统计、真实非空评论图片仍按能力登记册的 `PARTIAL / SOURCE_INCOMPLETE / NOT_OBSERVED` 管理。
 
+## 2026-11-10 媒体出包修复候选（未发布、未重载正式插件）
+
+普通视频继续以 `note.video` 为主候选，并将现有 `pickBestVideoStream` 已收集的 `videoStreams[].url` 按顺序追加、去重后送入同一视频槽位的 `candidateUris`。主地址失败时沿既有传输链尝试备用地址，不另建下载器。
+
+实况图不再提取或出包 `livePhotoStreams`，静态图片、封面、图片位置与完整清单保留。历史 `live_photo` 传输只排明确的 still 候选，无 still 时不回退动态地址；旧 outbox 的 `componentKind=motion` 在下载、网络请求或重试前进入 `live_photo_motion_disabled` 终态。独立视频仍使用 `single` 单位，不受此规则影响；候选未对真实插件存储执行清理。
+
+本次未修改第三方选择器或发明平台字段，只修正既有采集结果的内部传播。验证分层为：既有流解析与合成详情采集 → 出包／备用地址失败切换／旧动态 outbox 的网络前停止回归 → 插件类型检查、源码构建与隔离检查 → 另行获准后的发布包及真实浏览器验收。源码测试不代表平台当前行为已复验；发布包、安装状态与实际结果见[执行表](../plans/active/unified-content-understanding-v1.2-execution.md)，本候选不改变上方历史运行版本记录。
+
 ## 先区分四种责任面
 
 ```text

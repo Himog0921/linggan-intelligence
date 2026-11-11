@@ -1,0 +1,421 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:linggan:content-card:v0.2",
+  "title": "Linggan Content Card v0.2 — design storage contract (not the LLM wire schema)",
+  "description": "Approved design-only schema; not connected to production. Program owns identity, source, provenance and evidence resolution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "workRef", "analysisRef", "sourceSnapshot",
+    "core", "deep", "evidence", "generation"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "content-card.v0.2"
+    },
+    "workRef": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "analysisRef": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "sourceSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "materialSnapshotIdentity", "materialAsOf", "includedKinds", "coverageMode"
+      ],
+      "properties": {
+        "materialSnapshotIdentity": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "materialAsOf": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "includedKinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["title", "body", "tags", "ocr", "transcript", "frame_text", "image"]
+          },
+          "minItems": 1,
+          "maxItems": 7
+        },
+        "coverageMode": {
+          "type": "string",
+          "enum": ["complete", "partial"]
+        }
+      }
+    },
+    "core": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "summary", "contentType", "mainTopicUnitId", "audienceUnitIds",
+        "authorPositionUnitIds", "provisionUnitIds", "readerValueUnitIds",
+        "knowledgeUnits", "candidateLabels"
+      ],
+      "properties": {
+        "summary": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["text", "unitIds"],
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            },
+            "unitIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+              },
+              "minItems": 1,
+              "maxItems": 8
+            }
+          }
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "practical_guide", "checklist", "explanation", "personal_story", "opinion",
+            "case_analysis", "interactive_challenge", "question", "product_intro", "mixed", "other"
+          ]
+        },
+        "mainTopicUnitId": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+        },
+        "audienceUnitIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+          },
+          "minItems": 0,
+          "maxItems": 4
+        },
+        "authorPositionUnitIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+          },
+          "minItems": 0,
+          "maxItems": 4
+        },
+        "provisionUnitIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+          },
+          "minItems": 0,
+          "maxItems": 8
+        },
+        "readerValueUnitIds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+          },
+          "minItems": 0,
+          "maxItems": 4
+        },
+        "knowledgeUnits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "unitType", "statement", "assertionKind", "speakerRole", "evidenceRefs"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+              },
+              "unitType": {
+                "type": "string",
+                "enum": [
+                  "discussion", "audience_context", "author_position", "provision",
+                  "reader_value", "answer_form", "expression", "participation"
+                ]
+              },
+              "statement": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 280
+              },
+              "assertionKind": {
+                "type": "string",
+                "enum": ["observation", "author_claim", "interpretation"]
+              },
+              "speakerRole": {
+                "type": "string",
+                "enum": ["author", "quoted", "unknown"]
+              },
+              "evidenceRefs": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+                },
+                "minItems": 1,
+                "maxItems": 8
+              }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 12
+        },
+        "candidateLabels": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["dimension", "label", "retrievalUse", "unitIds"],
+            "properties": {
+              "dimension": {
+                "type": "string",
+                "enum": ["discussion", "audience", "situation", "offered_value", "answer_form", "expression", "participation"]
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 80
+              },
+              "retrievalUse": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 180
+              },
+              "unitIds": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+                },
+                "minItems": 1,
+                "maxItems": 8
+              }
+            }
+          },
+          "minItems": 0,
+          "maxItems": 12
+        }
+      }
+    },
+    "deep": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["analysisRef", "methodVersion", "findings"],
+          "properties": {
+            "analysisRef": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "methodVersion": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["id", "findingType", "statement", "basisUnitIds", "evidenceRefs"],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+                  },
+                  "findingType": {
+                    "type": "string",
+                    "enum": ["hook", "structure", "value_delivery", "expression_mechanism", "engagement_hypothesis", "transferable_method"]
+                  },
+                  "statement": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 600
+                  },
+                  "basisUnitIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+                    },
+                    "minItems": 0,
+                    "maxItems": 10
+                  },
+                  "evidenceRefs": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+                    },
+                    "minItems": 1,
+                    "maxItems": 10
+                  }
+                }
+              },
+              "minItems": 0,
+              "maxItems": 20
+            }
+          }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "inputCitationId", "sourceRef", "sourceVersion", "sourceKind", "start", "end", "quote"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+              },
+              "inputCitationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "sourceRef": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "sourceVersion": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "sourceKind": {
+                "type": "string",
+                "enum": ["material"]
+              },
+              "start": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "end": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "quote": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id", "inputCitationId", "sourceRef", "sourceVersion", "sourceKind",
+              "anchorKind", "blobSha256", "modelQuote", "observation", "speakerRole", "verification"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,31}$"
+              },
+              "inputCitationId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "sourceRef": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "sourceVersion": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 160
+              },
+              "sourceKind": {
+                "type": "string",
+                "enum": ["material"]
+              },
+              "anchorKind": {"const": "image"},
+              "blobSha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "modelQuote": {
+                "anyOf": [
+                  {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"},
+                  {"type": "null"}
+                ]
+              },
+              "observation": {
+                "anyOf": [
+                  {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"},
+                  {"type": "null"}
+                ]
+              },
+              "speakerRole": {"enum": ["author", "quoted", "unknown"]},
+              "verification": {"const": "model_read"}
+            },
+            "anyOf": [
+              {"properties": {"modelQuote": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"}}},
+              {"properties": {"observation": {"type": "string", "minLength": 1, "maxLength": 500, "pattern": "\\S"}}}
+            ]
+          }
+        ]
+      },
+      "minItems": 1,
+      "maxItems": 64
+    },
+    "generation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["methodVersion", "skillVersionRef", "promptVersionRef", "modelConfigRef", "providerReturnedModel", "createdAt"],
+      "properties": {
+        "methodVersion": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "skillVersionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "promptVersionRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "modelConfigRef": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "providerReturnedModel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

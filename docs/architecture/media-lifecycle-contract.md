@@ -200,6 +200,14 @@ OCR/ASR 文本不是原始 Evidence 的替代物。它属于有血缘的 Materia
 - 本地模型默认离线；`BUSY` 只表示背压，不消耗执行重试次数；
 - 当前 Rust 只创建 `provider_not_enabled` 的 pending 事件，不能显示为处理运行或成功。
 
+### 4.4 显式补齐缺失视频帧任务（2026-11-10 候选，未执行真实补排）
+
+既有 `linggan-media-requeue --kinds` 仅升级已有旧任务；完全没有帧任务的原视频使用同一工具的 `--missing-video-frames <作品UUID,逗号分隔> [--dry-run]` 模式。两种模式互斥，必须明确作品范围；空范围、非法 UUID 在连接数据库前拒绝。
+
+`enqueue_missing_video_frame_jobs` 读取唯一底稿的当前原件资格：仅对范围内普通视频的可读 motion 来源补排；尊重来源工单 `allow_ocr`，排除受限或已清理素材。已有同源有效画面读本（包括明确空结果／不适用）或同 blob/slot 任意版本 full_blob 帧任务时跳过；不升级已有任务，不重复 ASR，不处理实况动态或静态图片，不下载原件、不调用模型。
+
+同一作品的并发调用串行，任务与 pending 事件同事务写入；`--dry-run` 实际执行后回滚，不是只读查询。可认领 work 仍由 `ensure_media_processing_work` 生成，沿既有 worker 领取和执行，不新增常驻补排器。隔离测试分别验证预演、范围、重复／并发、当前读本、处理许可、实际 CLI 与正常领取；实际结果见[执行表](../plans/active/unified-content-understanding-v1.2-execution.md)。历史数据执行、处理器运行及上线仍各自需要相应授权。
+
 ## 5. 保留、清理、撤回与失效传播
 
 ### 5.1 已确认保留规则

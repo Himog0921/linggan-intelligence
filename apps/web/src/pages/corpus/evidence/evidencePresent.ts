@@ -3,7 +3,13 @@
  * 与旧页 `evidence_library.js` 同一套判断（有意改动在行内标明），页面不重算任何业务结论。
  */
 import { humanMoment } from '../../../shared/formatting';
-import type { CurrentMetric, DetailField, Engagement, Fragment, LaneSummary, ListMedia, Metric, Receipt, TimelinePoint, WorkDisplay, WorkItem } from './evidenceTypes';
+import type { CurrentMetric, DetailField, Engagement, Fragment, LaneSummary, ListMedia, MaterialReadiness, Metric, Receipt, TimelinePoint, WorkDisplay, WorkItem } from './evidenceTypes';
+
+export function materialReadinessCopy(readiness: MaterialReadiness | null | undefined) {
+  if (!readiness) return null;
+  const label = { ready: '材料已准备', preparing: '材料准备中', blocked: '材料待补齐' }[readiness.state];
+  return { label, title: [label, ...readiness.gaps.map(gap => gap.message)].join('；') };
+}
 
 export type Tone = 'info' | 'success' | 'warning' | 'danger' | 'unknown';
 

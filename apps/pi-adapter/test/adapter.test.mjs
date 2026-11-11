@@ -14,7 +14,8 @@ const request=(baseUrl,extra={})=>({version:VERSION,operation:'probe',api:'opena
 const DIAGNOSTIC_KEYS=['elapsedMs','finishReason','httpStatus','limitKind','receivedBytes','requestSent','responseStarted','retryClass','schemaVersion','sdkErrorType','stage','terminalReceived','usageKnown'];
 function assertDiagnostic(result,expected={}) {
   const d=result.diagnostic;
-  assert.deepEqual(Object.keys(d).sort(),DIAGNOSTIC_KEYS);
+  assert.deepEqual(Object.keys(d).sort(), [...DIAGNOSTIC_KEYS, ...(d.providerReturnedModel === undefined ? [] : ['providerReturnedModel'])].sort());
+  if (d.providerReturnedModel !== undefined) assert.equal(d.providerReturnedModel, 'synthetic-model');
   assert.equal(d.schemaVersion,1);
   assert.equal(typeof d.requestSent,'boolean');
   if(d.httpStatus!==null)assert.equal(d.requestSent,true);
@@ -149,10 +150,10 @@ test('real OpenAI Responses SDK protocol records response completion usage',asyn
     assert.equal(req.url,'/v1/responses');const chunks=[];for await(const c of req)chunks.push(c);const body=JSON.parse(Buffer.concat(chunks));assert.ok(!body.tools?.length);
     res.writeHead(200,{'Content-Type':'text/event-stream'});
     const item={id:'msg_synthetic',type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'{"ok":true}',annotations:[]}]};
-    const events=[{type:'response.created',response:{id:'resp_synthetic'}},{type:'response.output_item.added',output_index:0,item:{...item,content:[]}},{type:'response.output_text.delta',output_index:0,delta:'{"ok":true}'},{type:'response.output_item.done',output_index:0,item},{type:'response.completed',response:{id:'resp_synthetic',status:'completed',output:[item],usage:{input_tokens:12,output_tokens:4,total_tokens:16,input_tokens_details:{cached_tokens:0},output_tokens_details:{reasoning_tokens:0}}}}];
+    const events=[{type:'response.created',response:{id:'resp_synthetic'}},{type:'response.output_item.added',output_index:0,item:{...item,content:[]}},{type:'response.output_text.delta',output_index:0,delta:'{"ok":true}'},{type:'response.output_item.done',output_index:0,item},{type:'response.completed',response:{id:'resp_synthetic',model:'actual-responses-model',status:'completed',output:[item],usage:{input_tokens:12,output_tokens:4,total_tokens:16,input_tokens_details:{cached_tokens:0},output_tokens_details:{reasoning_tokens:0}}}}];
     for(const e of events)res.write(`event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`);res.end();
   });
-  try{const r=await execute(request(s.url,{api:'openai-responses'}));assert.equal(r.ok,true);assert.equal(r.text,'{"ok":true}');assert.deepEqual(r.usage,{inputTokens:12,outputTokens:4,cachedInputTokens:0,cachedWriteTokens:null,reasoningTokens:0,costUsd:null});}finally{await s.close();}
+  try{const r=await execute(request(s.url,{api:'openai-responses'}));assert.equal(r.ok,true);assert.equal(r.text,'{"ok":true}');assert.equal(r.diagnostic.providerReturnedModel,'actual-responses-model');assert.deepEqual(r.usage,{inputTokens:12,outputTokens:4,cachedInputTokens:0,cachedWriteTokens:null,reasoningTokens:0,costUsd:null});}finally{await s.close();}
 });
 test('invalid request and unsafe endpoint are rejected before any provider call',async()=>{
   assert.equal((await execute(null)).failureCode,'invalid_request');

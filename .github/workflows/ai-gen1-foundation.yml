@@ -46,6 +46,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends zsh
+      - name: Synthetic video fixtures
+        if: matrix.segment == 'service'
+        run: sudo apt-get install -y --no-install-recommends ffmpeg
       - name: Contracts, library and pinned SDK tests
         if: matrix.segment == 'contracts'
         run: |

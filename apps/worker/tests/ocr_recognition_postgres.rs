@@ -513,7 +513,9 @@ async fn manual_ocr_three_synthetic_images_are_frozen_sequential_and_readable() 
         let _ = std::fs::remove_file(&release);
         let browser_wire = endpoint::Endpoint::start_browser_second_gate(release).await;
         let browser_work_key = "ocr-recognition-browser-synthetic";
-        let browser_work = ocr::admit(&db, browser_work_key, 1, &image(11), "image/png").await;
+        let browser_work =
+            ocr::admit_with_slot_role(&db, browser_work_key, 1, &image(11), "image/png", "cover")
+                .await;
         ocr::admit(&db, browser_work_key, 2, &image(12), "image/png").await;
         ocr::admit(&db, browser_work_key, 3, &image(13), "image/png").await;
         let browser_package: Uuid = sqlx::query_scalar(

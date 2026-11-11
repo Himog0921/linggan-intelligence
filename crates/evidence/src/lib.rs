@@ -198,9 +198,9 @@ pub use material_processing::{
     ClaimGateReadiness, MediaProcessingClaim, MediaProcessingClaimOutcome, ProcessorRequeueSummary,
     REGISTERED_PROCESSOR_KINDS, claim_media_processing_jobs, claim_media_processing_work,
     complete_media_processing_derivative, complete_media_processing_text,
-    complete_media_processing_without_output, ensure_media_processing_work,
-    fail_media_processing_work, processor_version_for_kind, read_claim_gate_readiness,
-    record_media_derivative_completion, requeue_outdated_processor_jobs,
+    complete_media_processing_without_output, enqueue_missing_video_frame_jobs,
+    ensure_media_processing_work, fail_media_processing_work, processor_version_for_kind,
+    read_claim_gate_readiness, record_media_derivative_completion, requeue_outdated_processor_jobs,
 };
 pub use material_social_read::{
     creation_comment_directory_in, read_authorized_research_comments, read_creation_comment_at_in,

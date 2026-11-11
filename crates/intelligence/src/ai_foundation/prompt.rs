@@ -44,6 +44,7 @@ fn connected(task: TaskKey) -> bool {
     matches!(
         task,
         TaskKey::NoteInterpretation
+            | TaskKey::ContentUnderstanding
             | TaskKey::OcrRecognition
             | TaskKey::WritingLegacy
             | TaskKey::CreationTitle

@@ -6,6 +6,7 @@ import {
   coverObservationMoment,
   coverPublishedCopy,
   laneSummary,
+  materialReadinessCopy,
   materialSummary,
   segmentTitle,
   stateMeta,
@@ -131,7 +132,8 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
   const title = workTitle(item);
   const titleTip = useTitleTooltip<HTMLHeadingElement>(title, 'lines');
   const detail = laneSummary(item.lanes, 'detail')?.state ?? 'UNKNOWN';
-  const lines = statusLines(item);
+  const readiness = materialReadinessCopy(item.materialReadiness);
+  const lines = [...(readiness ? [readiness.title] : []), ...statusLines(item)];
   return (
     <li className={styles.item} data-selected={selected} data-checked={canCheck && checked} data-selection-active={canCheck} data-platform={item.platform.toLowerCase()} data-work-ref={item.ref} onClick={() => onSelect(item)}>
       <div className={styles.card}>
@@ -149,6 +151,7 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
           <div className={styles.facts}>
             <span className={styles.status}>
               <StateLine state={detail} />
+              {readiness ? <> · <span className={styles.readiness} title={readiness.title}>{readiness.label}</span></> : null}
               <span className={styles.tooltip} aria-hidden="true">
                 {lines.map(line => (
                   <span key={line}>{line}</span>

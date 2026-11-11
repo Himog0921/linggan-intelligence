@@ -288,6 +288,7 @@ fn not_sent() -> PiResponse {
             received_bytes: Some(0),
             limit_kind: None,
             finish_reason: None,
+            provider_returned_model: None,
             elapsed_ms: 0,
             usage_known: false,
             sdk_error_type: None,

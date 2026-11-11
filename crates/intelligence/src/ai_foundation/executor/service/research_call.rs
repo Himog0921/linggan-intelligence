@@ -26,7 +26,16 @@ pub(super) async fn prepare_in(
     tx: &mut Transaction<'_, Postgres>,
     item: &ClaimedItem,
     secrets: &dyn ModelSecretStore,
+    input: Input<'_>,
+) -> Result<Call, ExecutorError> {
+    prepare_with_images_in(tx, item, secrets, input, Vec::new()).await
+}
+pub(super) async fn prepare_with_images_in(
+    tx: &mut Transaction<'_, Postgres>,
+    item: &ClaimedItem,
+    secrets: &dyn ModelSecretStore,
     mut input: Input<'_>,
+    images: Vec<crate::pi_adapter::PiImage>,
 ) -> Result<Call, ExecutorError> {
     let cfg: Uuid = sqlx::query_scalar(
         "SELECT model_config_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
@@ -63,12 +72,21 @@ pub(super) async fn prepare_in(
         .as_object_mut()
         .ok_or(ExecutorError::Invalid)?
         .insert("instruction".into(), json!(instruction));
-    let request = model.request(
+    if item.task_key == crate::ai_foundation::TaskKey::ContentUnderstanding
+        && model.limits.thinking_level != "high"
+    {
+        return Err(FoundationError::AdmissionDenied(vec![
+            "content_understanding_requires_high".into(),
+        ])
+        .into());
+    }
+    let mut request = model.request(
         secrets.get(workspace, model.secret_ref)?,
         system,
         input.payload.to_string(),
         Some(input.response_schema),
     );
+    request.images = images;
     request.wire_bytes()?;
     let reservation = model
         .limits

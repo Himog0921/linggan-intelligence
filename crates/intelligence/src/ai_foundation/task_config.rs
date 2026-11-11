@@ -150,6 +150,7 @@ pub async fn save_task_config(
                 | TaskKey::CreatorResearch
                 | TaskKey::CreatorAccountResearch
                 | TaskKey::CommentStudy
+                | TaskKey::ContentUnderstanding
         ) && request
             .model
             .as_ref()

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { waitForStableTab } from '../src/linggan/tabReadiness.js';
+import { pickBestVideoStream } from '../src/shared/utils.js';
 
 import {
   PRODUCER_CAPABILITY,
@@ -228,27 +229,52 @@ test('media slot ordinals are scoped to each relationship purpose', () => {
   ]);
 });
 
-test('a Live Photo remains one logical slot with independently addressable still and motion candidates', () => {
-  const packageValue = packageMediaSlots({
-    platform: 'xhs',
-    note: {
-      noteId: 'note-live-1',
-      livePhotoStreams: [{
-        url: 'https://sns-video.example/live.mp4',
-        candidates: ['https://sns-video.example/live.mp4', 'https://sns-video.example/live-backup.mp4'],
-        coverUrl: 'https://sns-img.example/live-still.webp',
-      }],
+test('one video slot retains the primary URL and deduplicated collected stream candidates', () => {
+  const primary = 'https://sns-video-qc.xhscdn.com/primary.mp4';
+  const backup = 'https://sns-video-qc.xhscdn.com/backup.mp4';
+  const alternate = 'https://sns-video-qc.xhscdn.com/alternate.mp4';
+  const selection = pickBestVideoStream({ EF4: [
+    { masterUrl: alternate, backupUrls: [backup, primary], avgBitrate: 2000 },
+    { masterUrl: backup, avgBitrate: 1000 },
+  ] });
+  for (const video of [primary, { url: primary, candidateUris: [primary, backup] }]) {
+    const note = { noteId: 'note-video-candidates', video, videoStreams: selection.streams };
+    const original = structuredClone(note);
+    const packageValue = packageMediaSlots({ platform: 'xhs', note });
+    assert.equal(packageValue.records.length, 1);
+    assert.equal(packageValue.records[0].slotKey, 'xhs:note-video-candidates:video:1');
+    assert.equal(packageValue.records[0].observation.externalUri, primary);
+    assert.deepEqual(packageValue.records[0].observation.candidateUris,
+      typeof video === 'string' ? [primary, alternate, backup] : [primary, backup, alternate]);
+    assert.deepEqual(note, original);
+  }
+});
+
+test('Live Photo observations emit only ordinary static images and cover, never a motion slot', () => {
+  for (const images of [
+    { images: ['https://sns-img.example/live-still.webp'] },
+    {
+      imageInventory: { state: 'complete', source: 'platform_image_list', expectedPages: 1 },
+      imagePositions: [{ page: 1, candidateUris: ['https://sns-img.example/live-still.webp'] }],
     },
-  });
-  assert.equal(packageValue.records.length, 1);
-  assert.equal(packageValue.records[0].slot.role, 'live_photo');
-  assert.deepEqual(packageValue.records[0].observation.components.still.candidateUris, [
-    'https://sns-img.example/live-still.webp',
-  ]);
-  assert.deepEqual(packageValue.records[0].observation.components.motion.candidateUris, [
-    'https://sns-video.example/live.mp4',
-    'https://sns-video.example/live-backup.mp4',
-  ]);
+  ]) {
+    const packageValue = packageMediaSlots({
+      platform: 'xhs',
+      note: {
+        noteId: 'note-live-1',
+        ...images,
+        cover: 'https://sns-img.example/live-still.webp',
+        livePhotoStreams: [{
+          url: 'https://sns-video.example/live.mp4',
+          candidates: ['https://sns-video.example/live.mp4', 'https://sns-video.example/live-backup.mp4'],
+          coverUrl: 'https://sns-img.example/live-still.webp',
+        }],
+      },
+    });
+    assert.deepEqual(packageValue.records.map((record) => record.slot.role), ['image', 'cover']);
+    assert.ok(packageValue.records.every((record) =>
+      record.observation.externalUri === 'https://sns-img.example/live-still.webp'));
+  }
 });
 
 test('current-surface discovery packages exclude temporary DOM ordering references', () => {

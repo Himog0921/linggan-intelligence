@@ -75,7 +75,8 @@ function validate(r) {
   if(!['connect','discover'].includes(r.operation)&&(!r.modelId||typeof r.modelId!=='string'||r.modelId.length>200||typeof r.prompt!=='string'||typeof r.system!=='string'))throw new Rejected('invalid_request');
   if(r.operation==='analyze_image'&&r.images===undefined)throw new Rejected('invalid_request');
   if(r.images!==undefined){
-    if(!Array.isArray(r.images)||r.images.length!==1||!r.execution||r.operation!=='analyze_image')throw new Rejected('invalid_request');
+    if(!Array.isArray(r.images)||r.images.length===0||!r.execution||!['analyze','analyze_image'].includes(r.operation)
+      ||(r.operation==='analyze_image'&&r.images.length!==1))throw new Rejected('invalid_request');
     for(const image of r.images){
       if(!image||typeof image.data!=='string'||image.data.length>10666668||!/^[A-Za-z0-9+/]*={0,2}$/.test(image.data))throw new Rejected('invalid_request');
       const bytes=Buffer.from(image.data,'base64');
@@ -166,7 +167,8 @@ export async function execute(r) {
       return response({version:VERSION,ok:true,modelIds:ids,modelListOrigin:'ACCOUNT_ENDPOINT',usage,elapsedMs:Date.now()-started});
     }
     if(policy.qualified){
-      if(estimateTopicInputTokens(r.system,r.prompt)+(r.images?.length?1024:0)>policy.inputTokenLimit)throw new Rejected('model_input_limit');
+      // Conservative reserve per image, not measured provider token usage.
+      if(estimateTopicInputTokens(r.system,r.prompt)+(r.images?.length??0)*1024>policy.inputTokenLimit)throw new Rejected('model_input_limit');
     }else if(topic){
       if(!integer(topic.inputTokenLimit,1024,LIMITS.legacyInputTokens))throw new Rejected('invalid_request');
       if(estimateTopicInputTokens(r.system,r.prompt)>topic.inputTokenLimit)throw new Rejected('model_input_limit');
@@ -187,7 +189,17 @@ export async function execute(r) {
       streamFn:(m,c,o)=>models.streamSimple(m,c,{...o,signal:AbortSignal.any([abort.signal,...(o?.signal?[o.signal]:[])]),
         apiKey:r.apiKey,fetch:transport,onPayload,timeoutMs:r.timeoutMs,maxRetries:0,maxTokens:r.maxOutputTokens,reasoning:policy.reasoning,cacheRetention:'none'}),
       shouldStopAfterTurn:()=>true,beforeToolCall:()=>({block:true,reason:'No tools granted',terminate:true})});
-    await agent.prompt(r.prompt,r.images?.map(image=>({type:'image',data:image.data,mimeType:image.mimeType})));
+    if(r.operation==='analyze'&&r.images?.length){
+      await agent.prompt({role:'user',timestamp:Date.now(),content:[
+        {type:'text',text:r.prompt},
+        ...r.images.flatMap((image,index)=>[
+          {type:'text',text:`inputCitationId=image_${index+1}; applies only to the next image. This is a fixed input identity, not a page number. Do not renumber by narrative order.`},
+          {type:'image',data:image.data,mimeType:image.mimeType},
+        ]),
+      ]});
+    }else{
+      await agent.prompt(r.prompt,r.images?.map(image=>({type:'image',data:image.data,mimeType:image.mimeType})));
+    }
     if(abort.signal.aborted||Date.now()-started>=r.timeoutMs)throw new Rejected('provider_timeout');
     const message=agent.state.messages.filter(m=>m.role==='assistant').at(-1);
     if(!message)throw new Rejected(failure.code||classifyUnterminated(observation));

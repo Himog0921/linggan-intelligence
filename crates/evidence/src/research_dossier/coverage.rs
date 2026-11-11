@@ -1,21 +1,39 @@
 use serde_json::{Value, json};
 
-pub(super) fn project(materials: &[Value], _slots: &[Value], expected: Option<u64>) -> Value {
-    let images: Vec<_> = materials.iter().filter(|m| m["kind"] == "image").collect();
-    let pages = &images;
-    let acquired = pages
-        .iter()
-        .filter(|m| m["sourceState"] == "present" || m["sourceState"] == "known_empty")
-        .count();
-    let processed = pages
-        .iter()
-        .filter(|m| m["currentRevisionRef"].is_string() && m["sourceState"] != "restricted")
-        .count();
+pub(super) fn project(materials: &[Value], expected: Option<u64>) -> Value {
+    let acquired_images = materials.iter().filter(|material| {
+        material["kind"] == "image"
+            && matches!(
+                material["sourceState"].as_str(),
+                Some("present" | "known_empty")
+            )
+    });
+    let acquired = page_count(acquired_images.clone(), expected);
+    let processed = page_count(
+        acquired_images.filter(|material| material["currentRevisionRef"].is_string()),
+        expected,
+    );
     json!({"imageInventory":{"basis":if expected.is_some(){"platform_image_list"}else{"observed_set"},"expectedPages":expected,
         "acquiredPages":acquired,"processedPages":processed,"missingPages":[],
         "unknownOrder":false},
         "sources":{"body":source(materials,"body"),"images":source(materials,"image"),"audio":source(materials,"audio"),"videoFrames":source(materials,"video_frame")},
         "issues":[]})
+}
+
+// Supplemental images stay readable without counting as confirmed platform pages.
+fn page_count<'a>(images: impl Iterator<Item = &'a Value>, expected: Option<u64>) -> usize {
+    match expected {
+        Some(total) => images
+            .filter(|image| {
+                matches!(image["purpose"].as_str(), Some("body_image" | "live_photo"))
+                    || image["pageSource"]["basis"] == "same_verified_bytes"
+            })
+            .filter_map(|image| image["page"].as_u64())
+            .filter(|page| (1..=total).contains(page))
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        None => images.count(),
+    }
 }
 
 fn source(materials: &[Value], kind: &str) -> Value {
@@ -70,6 +88,32 @@ fn source(materials: &[Value], kind: &str) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_standalone_cover_cannot_fill_a_missing_platform_page() {
+        let cover = json!({
+            "kind":"image","purpose":"cover","page":1,"sourceState":"present",
+            "currentRevisionRef":"cover-reading"
+        });
+        let page = json!({
+            "kind":"image","purpose":"body_image","page":2,"sourceState":"present",
+            "currentRevisionRef":null
+        });
+        let inventory =
+            |materials: &[Value], expected| project(materials, expected)["imageInventory"].clone();
+        let standalone = inventory(&[cover.clone(), page.clone()], Some(2));
+        assert_eq!(standalone["acquiredPages"], 1);
+        assert_eq!(standalone["processedPages"], 0);
+        let observed = inventory(&[cover.clone(), page.clone()], None);
+        assert_eq!(observed["acquiredPages"], 2);
+        assert_eq!(observed["processedPages"], 1);
+
+        let mut verified = cover;
+        verified["pageSource"] = json!({"basis":"same_verified_bytes"});
+        let matched = inventory(&[verified, page.clone(), page], Some(2));
+        assert_eq!(matched["acquiredPages"], 2);
+        assert_eq!(matched["processedPages"], 1);
+    }
+
     #[test]
     fn missing_visual_information_is_partial_without_discarding_the_reading() {
         let mut image = json!({"kind":"image","sourceState":"present","currentRevisionRef":"reading",
