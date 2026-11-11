@@ -43,7 +43,7 @@ try {
         const navigation = page.getByRole('complementary', { name: '设置导航' });
         assert.equal(await navigation.count(), 1, 'left navigation must exist');
         assert.equal(await navigation.locator('xpath=self::aside').count(), 1, 'view navigation must use the shared left rail');
-        const disclosure = navigation.getByRole('button', { name: '收起AI 设置子页面', exact: true });
+        const disclosure = navigation.getByRole('button', { name: '收起AI 设置子页面', exact: true, includeHidden: true });
         assert.equal(await disclosure.getAttribute('aria-expanded'), 'true');
         const group = navigation.locator('[id=' + JSON.stringify(await disclosure.getAttribute('aria-controls')) + ']');
         assert.equal(await group.getByRole('link').count(), 4, 'AI Settings owns all four child links');
