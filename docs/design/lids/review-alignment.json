@@ -110,7 +110,7 @@
       "statement": "Q12按E1保留，媒体舞台白场；整体收口核查组件、代表页面、正式LIDS和项目Agent文件，冲突与遗漏单列审阅，业务代码不动。"
     },
     {
-      "id": "U22",
+      "id": "U24",
       "statement": "左侧导航栏只放 2 级页面跟3级页面；方案 C 更合适，按真实项目收口导航布局。",
       "scope": "二级与三级页面统一进入左侧导航树；Z02 保留面包屑、领域选择和当前位置；对象内部视图与页面筛选不提升为全局导航。"
     }
@@ -180,7 +180,7 @@
           "U05",
           "U08",
           "U10",
-          "U22"
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": "面包屑保留真实导航层级，领域选择保留在同一面包屑位置；Z02-P与Z02-S分责而不强制分行。范围控制不是虚构的父页面。筛选与读取时间仍归工具、结果或对象。",
@@ -483,7 +483,7 @@
           "U17",
           "U18",
           "U21",
-          "U22"
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -516,7 +516,7 @@
           "U17",
           "U18",
           "U21",
-          "U22"
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -642,7 +642,7 @@
           "U17",
           "U18",
           "U21",
-          "U22"
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -2837,7 +2837,7 @@
           "U08",
           "U10",
           "U21",
-          "U22"
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -8077,7 +8077,7 @@
           "U17",
           "U18",
           "U21",
-          "U22"
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -11266,7 +11266,7 @@
     "acceptedMaterialsChanged": false,
     "selected": "A",
     "normativeSource": "docs/design/lids/shell-layout.json",
-    "sha256": "5fcab4ad570e18e4c5099df9b239d0097d4d4148313a08a5057f07f73f427dfc",
+    "sha256": "4dd0d942a0ca677d8ce5151027db554f8799774379ae5b9a18ebb01801310fe7",
     "currentEntryMode": "A_only_with_manual_icon_collapse",
     "manualSidebarCollapse": true,
     "componentCertificationChanged": false,
@@ -11434,7 +11434,7 @@
     "tertiaryHost": "Z02",
     "domainHost": "Z02",
     "normativeSource": "docs/design/lids/component-reuse.json",
-    "sha256": "1af8299c2f779e48921a34bc8193d94cfca2ede72dd885ef9b5314d47c20ceba",
+    "sha256": "1cec37240e0b68a4834232ba47d2d46ede3692056bd77e5a4740b280eac6c40f",
     "gateCount": 7,
     "selectedClasses": [
       "shared",

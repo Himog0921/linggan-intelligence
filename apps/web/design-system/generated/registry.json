@@ -14515,7 +14515,7 @@
         "selected": "A",
         "evidence": "U15",
         "quote": "Q06 就按 A来收口，但是左侧导航栏可以支持点击折叠，只露出图标",
-        "navigationEvidence": "U22",
+        "navigationEvidence": "U24",
         "navigationQuote": "左侧导航栏只放 2 级页面跟3级页面"
       },
       "domainHost": "Z02",
@@ -14569,7 +14569,7 @@
       },
       "generatedFrom": {
         "path": "docs/design/lids/shell-layout.json",
-        "sha256": "666a034cb6198efbbf610ba92c9fd0e29f0967bbaee0efbf88ebb7b9b56a8b96"
+        "sha256": "4dd0d942a0ca677d8ce5151027db554f8799774379ae5b9a18ebb01801310fe7"
       }
     },
     "ledgerApplication": {

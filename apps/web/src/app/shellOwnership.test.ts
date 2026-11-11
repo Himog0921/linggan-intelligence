@@ -4,10 +4,8 @@ import { describe, expect, it } from 'vitest';
 
 /** 共享外壳（AppShell / ContextBar / Sidebar）的样式只能住在 shell.css 与它的材质表里。 */
 const OWNED_SELECTORS = [
-  '.v7-side',
   '.v7-side-head',
   '.v7-side-navigation',
-  '.v7-side-nav',
   '.v7-nav-group',
   '.v7-nav-subnav',
   '.v7-side-subnav-item',

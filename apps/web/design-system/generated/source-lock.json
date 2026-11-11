@@ -1,5 +1,5 @@
 {
-  "fingerprint": "1bc9a2c154cab7e6081e75d86954165fb7653570e05880170d6cf4bfbfa9c676",
+  "fingerprint": "ba77c9557f01fe2b932f0603008c78a2da53ade274171c16aeaaa1f07ff68a06",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -711,7 +711,7 @@
     },
     {
       "path": "docs/design/lids/shell-layout.json",
-      "sha256": "666a034cb6198efbbf610ba92c9fd0e29f0967bbaee0efbf88ebb7b9b56a8b96"
+      "sha256": "4dd0d942a0ca677d8ce5151027db554f8799774379ae5b9a18ebb01801310fe7"
     },
     {
       "path": "docs/design/lids/typography.json",
