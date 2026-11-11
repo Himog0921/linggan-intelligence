@@ -28,7 +28,7 @@ try {
   await page.getByRole('button',{name:'近 7 天',exact:true}).click();await page.getByRole('button',{name:'表格',exact:true}).click();
   assert.equal(await hero.getByRole('row').count(),8);
   await page.getByRole('link',{name:'用户评论',exact:true}).click();await page.getByRole('searchbox',{name:'字面搜索',exact:true}).waitFor();
-  await page.getByRole('button',{name:'概览',exact:true}).click();
+  await page.getByRole('link',{name:'概览',exact:true}).click();
   assert.equal(await page.getByRole('button',{name:'表格',exact:true}).getAttribute('aria-pressed'),'true');
   await page.getByRole('button',{name:'近 56 天',exact:true}).click();await page.getByRole('button',{name:'图表',exact:true}).click();
   await hero.getByRole('img',{name:'评论柱状与研究信号渐变曲线，共同横轴及采集覆盖',exact:true}).waitFor();
