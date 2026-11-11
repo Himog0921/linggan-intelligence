@@ -1,4 +1,4 @@
-import { useContext, useEffect, useId, useState, type ComponentPropsWithoutRef, type MouseEvent, type ReactNode } from 'react';
+import { useContext, useId, useState, type ComponentPropsWithoutRef, type MouseEvent, type ReactNode } from 'react';
 import { SidebarState } from './sidebarState';
 import { IntelligenceIcon, type IntelligenceIconName } from './IntelligenceIcon';
 
@@ -44,16 +44,19 @@ export function Sidebar({
 }: SidebarProps) {
   const { collapsed, toggle } = useContext(SidebarState);
   const id = useId();
-  const [expandedGroups, setExpandedGroups] = useState<string[]>(() => activeParentId ? [activeParentId] : []);
-
-  useEffect(() => {
-    setExpandedGroups(activeParentId ? [activeParentId] : []);
-  }, [activeParentId]);
+  const [expansion, setExpansion] = useState<{ parent: string | undefined; groups: string[] } | null>(null);
+  // Derive navigation state from the current parent; changing routes needs no effect or extra render.
+  const expandedGroups = expansion?.parent === activeParentId
+    ? expansion.groups
+    : activeParentId ? [activeParentId] : [];
 
   function toggleGroup(groupId: string) {
-    setExpandedGroups(current => current.includes(groupId)
-      ? current.filter(value => value !== groupId)
-      : [...current, groupId]);
+    setExpansion({
+      parent: activeParentId,
+      groups: expandedGroups.includes(groupId)
+        ? expandedGroups.filter(value => value !== groupId)
+        : [...expandedGroups, groupId],
+    });
   }
 
   const renderLink = (item: SidebarNavigationItem, level: 'secondary' | 'tertiary', index?: string, parent = false) => {

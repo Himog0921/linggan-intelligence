@@ -1,5 +1,5 @@
 {
-  "fingerprint": "2ca0fbdb32925e2ac6f5eb7c634c849f5eec45fd7661ab48ddbe207e96348fae",
+  "fingerprint": "a0fcee2884389c916a8b6499eaf9ed6d5a7988e8727a9cf5c5597243d3d0e360",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -627,7 +627,7 @@
     },
     {
       "path": "apps/web/src/shared/Sidebar.tsx",
-      "sha256": "303d2934ddece3345e6f34da43f56bbc7e5e13ff79e9854a864607d25f44091d"
+      "sha256": "a48984f4c027d568609336f3af549babafe01b5f63669c9e01862c0403d24681"
     },
     {
       "path": "apps/web/src/shared/ViewSwitch.module.css",
@@ -647,7 +647,7 @@
     },
     {
       "path": "apps/web/src/styles/shell.css",
-      "sha256": "57426d5b3f9d9bc93550f6b1cc261a78edba1d4a4795f108c631211838fcc17f"
+      "sha256": "54e7d063ad5c3161d88bc7cb5ca30e5b6600c812311f10feed1a2f350b48dd70"
     },
     {
       "path": "apps/web/src/styles/typography.css",

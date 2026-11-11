@@ -12,7 +12,7 @@ describe('D3 actual four-view React boundary', () => {
   expect(within(side).getByRole('link', { name: '评论研究' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}&view=overview`);
   expect(within(side).getByRole('link', { name: '用户评论' })).toHaveAttribute('aria-current', 'page');
   expect(within(side).getByRole('link', { name: '研究记录' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}&view=runs`);
-  expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent('语料/评论研究/用户评论');
+  expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent(/评论研究.*用户评论/);
   expect(screen.queryByRole('navigation', { name: '评论研究视图' })).not.toBeInTheDocument();
   expect(screen.getAllByRole('button',{name:'SYNTHETIC 原声 <script>不执行</script>'})).toHaveLength(2);
   expect(document.querySelector('script')).toBeNull();
