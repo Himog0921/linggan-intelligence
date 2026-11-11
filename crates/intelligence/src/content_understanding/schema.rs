@@ -41,8 +41,11 @@ pub fn response_schema() -> Value {
             "candidateLabels",
         ],
     );
+    core_fields["summary"]["properties"]["text"]["description"] = json!(
+        "用中立语气概括整篇用途。只由发布者声称的产品范围、效果、期限、售后条款等，在摘要中保留归因，例如「作者称资料可长期访问」。画面样例只支持其中能看到的内容，不能证明全套材料都符合作者描述。"
+    );
     core_fields["knowledgeUnits"]["description"] = json!(format!(
-        "按内容作用提炼单元：audience_context最多{}条、author_position最多{}条、provision最多{}条、reader_value最多{}条。相关内容可合并表述，保留关键方法、数字、否定和条件，不为分类凑单元。",
+        "按内容作用提炼单元：audience_context最多{}条、author_position最多{}条、provision最多{}条、reader_value最多{}条。相关内容可合并表述，保留关键方法、数字、否定和条件，不为分类凑单元。仅由作者声称的内容使用 author_claim，并在 statement 中注明归因。",
         core["audienceUnitIds"]["maxItems"],
         core["authorPositionUnitIds"]["maxItems"],
         core["provisionUnitIds"]["maxItems"],
@@ -51,8 +54,11 @@ pub fn response_schema() -> Value {
     core_fields["knowledgeUnits"]["items"]["properties"]["unitType"]["description"] = json!(
         "仅使用本字段的 enum。作者主张不等于作者立场：方法、解释、信息和案例属于 provision，明确立场用 author_position；受众与处境用 audience_context。author_claim、observation、interpretation 属于 assertionKind，不是 unitType。"
     );
+    core_fields["knowledgeUnits"]["items"]["properties"]["evidenceRefs"]["description"] = json!(
+        "引用直接支撑本单元细节的依据。由画面文字支持的关键细节，使用该文字所在 frame_text 的 citationId 建立文字依据；细节来自不同画面时，各引对应片段。同一细节重复出现时选一个能支撑它的片段。口播细节引用 transcript；整体标题或画面标题不能单独支撑更具体的内容。"
+    );
     core_fields["candidateLabels"]["description"] = json!(
-        "每条候选标签必须同时填写 dimension、label、retrievalUse、unitIds；unitIds 关联 knowledgeUnits 中实际存在的单元 ID，不能遗漏或为空。示例仅演示完整结构，使用本篇实际标签与 ID，不照抄示例内容。"
+        "每条候选标签必须同时填写 dimension、label、retrievalUse、unitIds。dimension 只能从本字段的 enum 选择；author_position 是知识单元类型，不能作为标签维度。没有合适维度时省略该候选标签，知识单元仍保留。unitIds 关联 knowledgeUnits 中实际存在的单元 ID，不能遗漏或为空。示例仅演示完整结构，使用本篇实际标签与 ID。"
     );
     core_fields["candidateLabels"]["items"]["properties"]["unitIds"]["description"] = json!(
         "必填，列出支持本标签的已有知识单元 ID；retrievalUse 说明用途，不能代替 unitIds。输出前逐条检查所有标签的关联。"
@@ -63,7 +69,7 @@ pub fn response_schema() -> Value {
     let text = &card["evidence"]["items"]["oneOf"][0]["properties"];
     let mut text_fields = fields(text, &["id", "inputCitationId", "quote"]);
     text_fields["quote"]["description"] = json!(
-        "从对应 inputCitationId 的 text 中逐字复制一段连续且唯一出现的原文；保留原字词和标点，不改写、拼接或补全缺失标点。若原文截断或引号不成对，可选内部连续短语，不必引用整个标题。例如合成来源 text 为「合成标题：“分步练习」，可引用「分步练习」，不能引用「合成标题：“分步练习”」，因为后者多了原文没有的右引号。输出前核对 quote 确实是该 text 的原样子串。概括写在 statement，不写进 quote；图片文字使用 vision。"
+        "从对应 inputCitationId 的 text 中逐字复制一段连续且唯一出现的原文。保留大小写、空格、换行和标点，不改写、拼接或补字。口播转写中人名分写也按原文复制，例如「Li Lei」不能合写为「LiLei」。原文截断或引号不成对时，可选足以支持结论的内部连续短语。输出前核对 quote 在该 text 中逐字匹配且只出现一次。概括写在 statement，图片文字使用 vision。"
     );
     text_fields["quote"]["examples"] = json!(["分步练习"]);
     let vision = &card["evidence"]["items"]["oneOf"][1]["properties"];
