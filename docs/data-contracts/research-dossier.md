@@ -222,7 +222,7 @@ Live Photo 的静态图片与动态视频按实际已验证媒体类型分别选
 
 合并优先保留实际可用读本与明确人工决定。若保留的读本来自封面，保留其真实 unit、reading、source 与区块引用，并以 `pageSource:{basis:"same_verified_bytes",sourceRef,sourceVersion,slotKey}` 标明页序证据；不能把文字改挂到另一条来源。不同已采用版本无法等价时同时保留并标明 `duplicate_image_readings`，直到来源核对完成。
 
-最新完整平台图片清单使已移除的旧槽位失去当前资格；后续局部观察只增加自身取得的槽位，不能复活被移除的旧页。读取、任务领取、当前发布、修正、显式准备与检索共享同一成员判定。当前观察未提供完整清单时，平台总数继续标为未知。
+最新完整平台图片清单使已移除的旧槽位失去当前资格；后续局部观察只增加自身取得的槽位，不能复活被移除的旧页。读取、任务领取、当前发布、修正、显式准备与检索共享同一成员判定。2026-11-10 上游修复候选将总图数读取与该规则统一：在读取截点内选择最近 `state=complete`、`source=platform_image_list` 且 `expectedPages` 为数值的清单，后续封面包或 `observed_set` 不抹掉该总数。没有合格完整清单时仍为未知，不用本地图数推断原帖总数；新完整清单可以改变总数，历史 `asOf` 保留当时结果。该修复不回填历史清单，也不代表已经部署。
 
 coverage.imageInventory 分别给出 basis、expectedPages（未知为 null）、acquiredPages、processedPages、missingPages、unknownOrder。这里 missingPages 继续只表示尚未取得的来源页；已取得但无可读文字的页只扩入 readingView.sections.gaps 的文字覆盖提示，不改写来源取得事实。已知总页数时统计只覆盖对应真实页，不能把额外封面算成第 N+1 页；处理数 ≤ 取得数 ≤ 已知总数。
 

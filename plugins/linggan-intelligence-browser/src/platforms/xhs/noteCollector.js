@@ -72,34 +72,6 @@ function getXhsImageUrl(image = {}) {
   return image?.urlDefault || image?.url_default || image?.url || '';
 }
 
-export function extractXhsLivePhotoStreams(imageList = []) {
-  if (!Array.isArray(imageList)) return [];
-  return imageList.map((image, index) => {
-    const stream = image?.stream || image?.livePhoto?.stream || image?.live_photo?.stream || {};
-    const hasLiveFlag = Boolean(
-      image?.livePhoto
-      || image?.live_photo
-      || image?.isLivePhoto
-      || image?.is_live_photo
-      || (stream && Object.keys(stream).length > 0)
-    );
-    if (!hasLiveFlag || !stream || Object.keys(stream).length === 0) return null;
-
-    const selection = pickBestVideoStream(stream);
-    const candidates = (selection.streams || []).map((item) => item?.url).filter(Boolean);
-    if (!selection.url && candidates.length === 0) return null;
-
-    const coverUrl = toHighQualityImageUrl(getXhsImageUrl(image));
-    return {
-      imageIndex: index + 1,
-      url: selection.url || candidates[0] || '',
-      candidates,
-      streams: selection.streams || [],
-      coverUrl,
-    };
-  }).filter(Boolean);
-}
-
 export function selectNoteKey(noteMap = {}, preferredNoteId = '', currentUrl = '') {
   const expectedId = String(preferredNoteId || '').trim();
   if (expectedId && noteMap && noteMap[expectedId]) {
@@ -667,7 +639,6 @@ export async function collectNote(wd = window, options = {}) {
 
   // 3. 映射字段
   const imageInventory = readXhsImageInventory(note);
-  const livePhotoStreams = extractXhsLivePhotoStreams(note.imageList || []);
   const videoSelection = pickBestVideoStream(note.video?.media?.stream || {});
   const existing = await noteStore.getById(note.noteId || note.id || noteKey);
 
@@ -689,7 +660,6 @@ export async function collectNote(wd = window, options = {}) {
     type: note.type === 'video' ? 'video' : 'normal',
     cover: toHighQualityImageUrl(getXhsImageUrl(note.imageList?.[0] || {})),
     ...imageInventory,
-    livePhotoStreams,
     video: videoSelection.url,
     videoStreams: videoSelection.streams || [],
     likes: parseXhsInteractCount(note.interactInfo, ['likedCount', 'likeCount', 'likes']),

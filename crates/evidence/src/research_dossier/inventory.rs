@@ -26,7 +26,10 @@ WITH origins AS (
  ORDER BY o.slot_key,o.source_generation DESC
 )
 SELECT o.content_public_ref,o.slot_key,o.purpose,o.display_ordinal,o.producer_ordinal,o.display_order_state,component.kind AS component_kind,
- o.package_ref,o.observation_ref,o.source_generation,m.materialization_ref,m.blob_sha256,
+ o.package_ref,o.observation_ref,o.source_generation,m.materialization_ref,m.blob_sha256,m.storage_key,m.byte_size,
+ (SELECT jsonb_build_object('state',CASE WHEN a.ended_at IS NULL OR a.ended_at>$2::timestamptz THEN 'running' ELSE a.terminal_reason END)
+  FROM linggan_media_download_attempt a WHERE a.media_observation_ref=o.observation_ref AND a.started_at<=$2::timestamptz
+  ORDER BY a.started_at DESC,a.download_attempt_ref DESC LIMIT 1) AS download,
  (SELECT jsonb_object_agg(latest.processor_kind,jsonb_build_object('state',latest.state,'reason',latest.reason)) FROM (
    SELECT DISTINCT ON(j.processor_kind) j.processor_kind,e.state,e.reason
    FROM linggan_media_processing_job j
@@ -43,7 +46,7 @@ FROM origins o CROSS JOIN LATERAL (
  SELECT kind FROM (VALUES ('image'),('motion')) component(kind)
  WHERE (kind='image' AND o.purpose<>'video') OR (kind='motion' AND o.purpose IN ('video','live_photo'))
 ) component LEFT JOIN LATERAL (
- SELECT m.* FROM linggan_media_materialization m JOIN linggan_media_download_attempt a USING(download_attempt_ref)
+ SELECT m.*,b.storage_key,b.byte_size FROM linggan_media_materialization m JOIN linggan_media_download_attempt a USING(download_attempt_ref)
  JOIN linggan_media_blob b ON b.sha256=m.blob_sha256
  WHERE a.media_observation_ref=o.observation_ref AND m.verified_at<=$2::timestamptz
  AND ((component.kind='image' AND b.mime_type LIKE 'image/%') OR
@@ -65,6 +68,11 @@ ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NU
                 .zip(sha.as_deref())
                 .map(|(reference, hash)| format!("/api/local/media/{reference}/{hash}"))
         };
+        let readable = original.is_some()
+            && local_readable(
+                row.get::<Option<String>, _>("storage_key").as_deref(),
+                row.get::<Option<i64>, _>("byte_size"),
+            );
         result.entry(work).or_default().slots.push(json!({
             "slotKey":row.get::<String,_>("slot_key"),"purpose":row.get::<String,_>("purpose"),
             "component":row.get::<String,_>("component_kind"),"processing":row.get::<Option<Value>,_>("processing"),
@@ -74,12 +82,42 @@ ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NU
             "packageRef":row.get::<Uuid,_>("package_ref"),"observationRef":row.get::<Uuid,_>("observation_ref"),
             "sourceGeneration":row.get::<i32,_>("source_generation"),"sourceRef":source,
             "sourceVersion":source.map(|r|r.to_string()),"blobSha256":sha,"originalUrl":original,
+            "localReadable":readable,"download":row.get::<Option<Value>,_>("download"),
             "sourceState":if restricted {"restricted"} else if source.is_some() {"present"} else {"not_acquired"}
         }));
     }
     read_manifests(tx, works, as_of, &mut result).await?;
     read_tags(tx, works, as_of, &mut result).await?;
     Ok(result)
+}
+
+fn local_readable(storage: Option<&str>, size: Option<i64>) -> bool {
+    use std::path::{Component, Path};
+    let Some(storage) = storage.map(Path::new) else {
+        return false;
+    };
+    if storage
+        .components()
+        .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return false;
+    }
+    let Some(root) = std::env::var_os("LINGGAN_LOCAL_MEDIA_ROOT")
+        .and_then(|root| std::fs::canonicalize(root).ok())
+    else {
+        return false;
+    };
+    let Ok(path) = std::fs::canonicalize(root.join(storage)) else {
+        return false;
+    };
+    if !path.starts_with(&root) {
+        return false;
+    }
+    std::fs::File::open(path)
+        .and_then(|file| file.metadata())
+        .is_ok_and(|metadata| {
+            metadata.is_file() && size.is_some_and(|size| size > 0 && metadata.len() == size as u64)
+        })
 }
 
 async fn read_manifests(
@@ -94,6 +132,9 @@ SELECT DISTINCT ON (lane.content_public_ref) lane.content_public_ref,package.pac
 FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref)
 WHERE lane.content_public_ref=ANY($1) AND lane.lane='media_slots'
  AND lane.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz
+ AND package.payload #>> '{coverage,target,imageInventory,state}'='complete'
+ AND package.payload #>> '{coverage,target,imageInventory,source}'='platform_image_list'
+ AND jsonb_typeof(package.payload #> '{coverage,target,imageInventory,expectedPages}')='number'
 ORDER BY lane.content_public_ref,package.accepted_at DESC,lane.created_at DESC,package.package_ref DESC
 "#).bind(works).bind(as_of).fetch_all(&mut **tx).await?;
     for row in rows {

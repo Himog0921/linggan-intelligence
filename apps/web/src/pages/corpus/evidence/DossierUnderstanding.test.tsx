@@ -21,8 +21,10 @@ function saved() {
     imageContributions: [{ inputCitationId: 'image_1', status: 'unclear', summary: '图片底部小字不清楚。' }],
   } };
 }
-function response(analysis: unknown, selected = work) {
-  return new Response(JSON.stringify({ contract: 'content-understanding.read.v1', workRef: selected, analysis }), { headers: { 'Content-Type': 'application/json' } });
+const ready = { state: 'ready', kind: 'image_text', gaps: [], scopeNote: null };
+const videoScope = '本次依据口播与已提取的画面文字，未覆盖整段视频的全部画面。';
+function response(analysis: unknown, selected = work, materialReadiness: unknown = ready) {
+  return new Response(JSON.stringify({ contract: 'content-understanding.read.v1', workRef: selected, analysis, materialReadiness }), { headers: { 'Content-Type': 'application/json' } });
 }
 function mount(active = true) {
   const client = newClient();
@@ -107,6 +109,73 @@ it('别篇作品或成功状态缺失Card均不展示', async () => {
   vi.stubGlobal('fetch', fetch); mount();
   fireEvent.click(await screen.findByRole('button', { name: '重试读取' }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  expect(await screen.findByRole('button', { name: '重试读取' })).toBeVisible();
+  expect(screen.queryByText('来自同一张卡片的整篇摘要。')).not.toBeInTheDocument();
+});
+it('材料待补齐时逐项显示原因，原始材料仍可阅读，打开不生成', async () => {
+  const fetch = vi.fn(async () => response(null, work, {
+    ...ready, state: 'blocked', gaps: [
+      { code: 'image_missing', state: 'blocked', message: '第 2 张正文原图尚未取得。', slotKey: 'image_2' },
+      { code: 'image_count_unknown', state: 'blocked', message: '正文图片总数尚未确认。', slotKey: null },
+    ],
+  }));
+  vi.stubGlobal('fetch', fetch);
+  render(<QueryClientProvider client={newClient()}><DossierDocument payload={payload} domain="domain" active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/></QueryClientProvider>);
+  expect(await screen.findByText('材料待补齐')).toBeVisible();
+  expect(screen.getByText('第 2 张正文原图尚未取得。')).toBeVisible();
+  expect(screen.getByText('正文图片总数尚未确认。')).toBeVisible();
+  expect(screen.getByText('合成原始材料保持完整。')).toBeVisible();
+  expect(screen.queryByRole('button', { name: /分析|生成/ })).not.toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect((fetch.mock.calls[0] as unknown as [string, RequestInit])[1].method ?? 'GET').toBe('GET');
+});
+it('视频材料准备中显示口播与画面处理原因，不假装缺失或理解完成', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response(null, work, {
+    state: 'preparing', kind: 'video', scopeNote: videoScope, gaps: [
+      { code: 'asr_pending', state: 'preparing', message: '口播转写正在处理。', slotKey: 'video' },
+      { code: 'frames_pending', state: 'preparing', message: '画面文字正在提取。', slotKey: 'video' },
+    ],
+  })));
+  mount();
+  expect(await screen.findByText('材料准备中')).toBeVisible();
+  expect(screen.getByText('口播转写正在处理。')).toBeVisible();
+  expect(screen.getByText('画面文字正在提取。')).toBeVisible();
+  expect(screen.queryByText(videoScope)).not.toBeInTheDocument();
+  expect(screen.queryByText('来自同一张卡片的整篇摘要。')).not.toBeInTheDocument();
+});
+it('材料已准备仍明确尚无理解结果，空缺口不加不适用或无字警告', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response(null)));
+  mount();
+  expect(await screen.findByText('材料已准备')).toBeVisible();
+  expect(screen.getByText(/这篇尚无当前材料的理解结果/)).toBeVisible();
+  expect(screen.queryByRole('list')).not.toBeInTheDocument();
+  expect(screen.queryByText(/不适用|没有文字|OCR/)).not.toBeInTheDocument();
+});
+it('已保存视频只说明一次实际理解范围，不重复泛化缺口提示', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => response(saved(), work, { ...ready, kind: 'video', scopeNote: videoScope })));
+  mount();
+  expect(await screen.findByText(videoScope)).toBeVisible();
+  expect(screen.getAllByText(videoScope)).toHaveLength(1);
+  expect(screen.queryByText(/本次按已取得的材料理解/)).not.toBeInTheDocument();
+  expect(screen.getByText(/图片底部小字不清楚/)).toBeVisible();
+});
+it.each([
+  null, {}, { ...ready, state: 'complete' }, { ...ready, kind: 'movie' },
+  { ...ready, gaps: null }, { ...ready, scopeNote: 3 },
+  { ...ready, scopeNote: undefined },
+  { ...ready, gaps: [{ code: 'missing', state: 'ready', message: '缺图', slotKey: null }] },
+  { ...ready, gaps: [{ code: 'missing', state: 'blocked', message: 3, slotKey: null }] },
+  { ...ready, gaps: [{ code: 'missing', state: 'blocked', message: '缺图', slotKey: 2 }] },
+])('材料合同异常不展示已准备或成功结果：%j', async readiness => {
+  vi.stubGlobal('fetch', vi.fn(async () => response(saved(), work, readiness)));
+  mount();
+  expect(await screen.findByRole('button', { name: '重试读取' })).toBeVisible();
+  expect(screen.queryByText('材料已准备')).not.toBeInTheDocument();
+  expect(screen.queryByText('来自同一张卡片的整篇摘要。')).not.toBeInTheDocument();
+});
+it('理解读取合同缺少材料就绪字段时拒绝展示成功结果', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ contract: 'content-understanding.read.v1', workRef: work, analysis: saved() }), { headers: { 'Content-Type': 'application/json' } })));
+  mount();
   expect(await screen.findByRole('button', { name: '重试读取' })).toBeVisible();
   expect(screen.queryByText('来自同一张卡片的整篇摘要。')).not.toBeInTheDocument();
 });

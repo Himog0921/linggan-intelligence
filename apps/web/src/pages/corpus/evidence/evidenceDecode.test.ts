@@ -79,6 +79,28 @@ describe('列表解码（白名单＋运行时校验）', () => {
     expect(failure(() => parseWorkList(null)).failure.kind).toBe('invalid_response');
   });
 
+  it('材料就绪只采用后端合同，不用已有媒体数量推测；缺失保持未知', () => {
+    const materialReadiness = { state: 'blocked', kind: 'image_text', gaps: [
+      { code: 'image_count_unknown', state: 'blocked', message: '正文图片总数尚未确认。', slotKey: null },
+    ], scopeNote: null };
+    const item = { ...listItemJson(1, { media: { images: 5 } }), materialReadiness };
+    expect(parseWorkList(listJson([item])).items[0]).toMatchObject({ materialReadiness });
+    const absent = parseWorkList(listJson([listItemJson(2, { media: { images: 5 } })])).items[0];
+    expect(absent).toHaveProperty('materialReadiness', null);
+  });
+
+  it.each([
+    { state: 'complete', kind: 'image_text', gaps: [], scopeNote: null },
+    { state: 'ready', kind: 'movie', gaps: [], scopeNote: null },
+    { state: 'ready', kind: 'video', gaps: 'none', scopeNote: null },
+    { state: 'ready', kind: 'video', gaps: [], scopeNote: false },
+    { state: 'blocked', kind: 'image_text', gaps: [{ code: 'image_missing', state: 'ready', message: '缺图', slotKey: null }], scopeNote: null },
+    { state: 'blocked', kind: 'image_text', gaps: [{ code: 3, state: 'blocked', message: '缺图', slotKey: null }], scopeNote: null },
+    { state: 'blocked', kind: 'image_text', gaps: [{ code: 'image_missing', state: 'blocked', message: '缺图' }], scopeNote: null },
+  ])('材料合同非法时拒绝列表：%j', materialReadiness => {
+    expect(failure(() => parseWorkList(listJson([{ ...listItemJson(1), materialReadiness }]))).failure.kind).toBe('invalid_response');
+  });
+
   it('不渲染的字段被丢弃：平台用户标识、账号镜头不会出现在解码结果里', () => {
     const item = listItemJson(1) as Record<string, unknown>;
     item.authorExternalId = 'platform-user-9';

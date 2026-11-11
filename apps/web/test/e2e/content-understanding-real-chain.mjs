@@ -46,11 +46,53 @@ try {
       assert.ok(rendered.includes(text.replace(/\s/gu, '')), '原始文字不可遗漏');
     }
   };
+  if (!fixture.live) {
+    for (const layout of ['research', 'table', 'cover']) {
+      await page.goto(`${origin}/corpus/evidence?domain=${domain}&panel=closed&layout=${layout}`);
+      const readyRow = page.locator(`[data-layout="${layout}"] [data-work-ref="${work}"]`);
+      const blockedRow = page.locator(`[data-layout="${layout}"] [data-work-ref="${unprocessed}"]`);
+      await readyRow.getByText('材料已准备', { exact: true }).first().waitFor();
+      await blockedRow.getByText('材料待补齐', { exact: true }).first().waitFor();
+      await page.evaluate(() => document.fonts.ready);
+      await page.screenshot({ path: path.join(directory, `materials-list-${layout}.png`) });
+      if (layout === 'cover') {
+        for (const width of [1363, 640, 390]) {
+          await page.setViewportSize({ width, height: 844 });
+          for (const [row, label] of [[readyRow, '材料已准备'], [blockedRow, '材料待补齐']]) {
+            const status = row.getByText(label, { exact: true }).first();
+            await status.scrollIntoViewIfNeeded();
+            const readable = await status.evaluate(node => {
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              const rects = [...range.getClientRects()];
+              for (let parent = node.parentElement; parent; parent = parent.parentElement) {
+                const style = getComputedStyle(parent);
+                if (style.clipPath !== 'none' || /hidden|clip|auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)) {
+                  const bounds = parent.getBoundingClientRect();
+                  if (rects.some(rect => rect.left < bounds.left - 1 || rect.right > bounds.right + 1
+                    || rect.top < bounds.top - 1 || rect.bottom > bounds.bottom + 1)) return false;
+                }
+              }
+              const observed = node.parentElement.parentElement.querySelector('[title^="最近观察"]')?.getBoundingClientRect();
+              return rects.length > 0 && (!observed || rects.every(rect => rect.right <= observed.left + 1
+                || rect.left >= observed.right - 1 || rect.bottom <= observed.top + 1 || rect.top >= observed.bottom - 1));
+            });
+            assert.ok(readable, `${width}宽度下${label}不可裁切或与观察时间重叠`);
+            if (width === 390) await row.screenshot({ path: path.join(directory, `materials-list-cover-narrow-${label === '材料已准备' ? 'ready' : 'blocked'}.png`) });
+          }
+          assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+        }
+        await page.setViewportSize({ width: 1363, height: 936 });
+      }
+    }
+    report.steps.push('真实列表接口：研读、表格和封面均区分材料已准备与待补齐，封面窄屏可读。');
+  }
   await open(work);
   await understanding.getByText('这篇尚无当前材料的理解结果，以下保留原始材料。', { exact: true }).waitFor();
   await checkOriginal();
   assert.equal(report.writes.length, 0);
-  report.steps.push('未分析时原文完整，打开页面不自动生成。');
+  if (!fixture.live) await understanding.getByText('材料已准备', { exact: true }).waitFor();
+  report.steps.push('材料已准备但未分析时不写理解完成，原文完整，打开页面不自动生成。');
   const preview = await call(`/api/local/content-understanding/preview?${selection(work)}`);
   assert.equal(preview.status, 200);
   assert.equal(preview.body.canStart, true, JSON.stringify(preview.body.reasons));
@@ -109,7 +151,11 @@ try {
   await understanding.getByText('这篇尚无当前材料的理解结果，以下保留原始材料。', { exact: true }).waitFor();
   assert.ok((await original.textContent()).includes('这篇合成原文尚未经过理解，仍可完整阅读。'));
   assert.ok(!(await understanding.textContent()).includes(summary));
-  report.steps.push('切换未分析笔记不会串入上篇理解。');
+  if (!fixture.live) {
+    await understanding.getByText('材料待补齐', { exact: true }).waitFor();
+    await understanding.getByText('原始媒体清单尚未确认，暂不能判断图文或视频材料是否齐全。', { exact: true }).waitFor();
+  }
+  report.steps.push('切换未分析笔记不会串入上篇理解，未知媒体清单显示具体缺项。');
   await open(work);
   await checkResult();
   assert.deepEqual((await call(latest)).body.analysis.result, report.result);
@@ -133,6 +179,40 @@ try {
   assert.equal(new URL((await retried).url()).searchParams.get('asOf'), failedAsOf);
   await checkResult();
   report.steps.push('人为模拟读取失败时原文可读、不展示旧理解；重试只读取、不重新生成。');
+  if (!fixture.live) {
+    const scopeNote = '本次依据口播与已提取的画面文字，未覆盖整段视频的全部画面。';
+    for (const [state, label, message] of [
+      ['preparing', '材料准备中', '正在处理画面文字。'],
+      ['blocked', '材料待补齐', '原视频本地副本暂不可读取。'],
+    ]) {
+      await page.route('**/api/local/content-understanding/latest?**', route => route.fulfill({
+        status: 200, contentType: 'application/json', body: JSON.stringify({
+          ...saved.body, analysis: null, materialReadiness: { state, kind: 'video',
+            gaps: [{ code: 'synthetic_presentation', state, message, slotKey: 'video:1' }], scopeNote },
+        }),
+      }));
+      await page.reload();
+      await understanding.getByText(label, { exact: true }).waitFor();
+      await understanding.getByText(message, { exact: true }).waitFor();
+      await checkOriginal();
+      await page.setViewportSize({ width: 390, height: 844 });
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+      await page.screenshot({ path: path.join(directory, `materials-${state}-narrow.png`) });
+      await page.setViewportSize({ width: 1363, height: 936 });
+      await page.unroute('**/api/local/content-understanding/latest?**');
+    }
+    await page.route('**/api/local/content-understanding/latest?**', route => route.fulfill({
+      status: 200, contentType: 'application/json', body: JSON.stringify({ ...saved.body,
+        materialReadiness: { state: 'ready', kind: 'video', gaps: [], scopeNote } }),
+    }));
+    await page.reload();
+    await checkResult();
+    await understanding.getByText(scopeNote, { exact: true }).waitFor();
+    assert.equal(await understanding.getByText('本次按已取得的材料理解，材料缺口见下方原始材料。', { exact: true }).count(), 0);
+    await page.screenshot({ path: path.join(directory, 'materials-video-scope.png') });
+    await page.unroute('**/api/local/content-understanding/latest?**');
+    report.steps.push('仅展示层模拟：准备、缺原件与视频有限覆盖提示正确，390宽度可读且不新增生成请求。');
+  }
   assert.deepEqual(report.writes, ['/api/local/content-understanding', '/api/local/content-understanding']);
   assert.deepEqual(report.pageErrors, []);
   assert.ok(report.consoleErrors.every(message => message.includes('503')));

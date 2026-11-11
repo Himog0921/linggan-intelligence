@@ -88,6 +88,15 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     .unwrap();
     sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
         .bind(Uuid::new_v4()).bind(work).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+    let missing_inventory = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(
+        missing_inventory["canStart"], false,
+        "a title and body cannot stand in for an unconfirmed media inventory"
+    );
+    assert!(matches!(
+        owner::start(&db, &start_from(&missing_inventory, work)).await,
+        Err(FoundationError::AdmissionDenied(_))
+    ));
     // Acquire through media-slot submission and admit_media_blob, not a forged material projection
     // or OCR result. No image reading is preseeded: the production path must send these bytes.
     let image_bytes = base64::engine::general_purpose::STANDARD
@@ -96,6 +105,28 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     let (image_work, image_source, image_sha) =
         dossier::acquired_image_source_with_bytes(&db, Some(image_bytes.clone())).await;
     assert_eq!(image_work, work);
+    let image_ready = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(image_ready["materialReadiness"]["kind"], "image_text");
+    assert_eq!(image_ready["materialReadiness"]["state"], "ready");
+    assert_eq!(image_ready["canStart"], true, "static OCR is not required");
+    let image_path = media_root.join(format!("blobs/{image_sha}.png"));
+    let held_path = image_path.with_extension("held");
+    std::fs::rename(&image_path, &held_path).unwrap();
+    let unreadable = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(unreadable["canStart"], false);
+    assert_eq!(
+        unreadable["materialReadiness"]["gaps"][0]["code"],
+        "original_unavailable"
+    );
+    assert!(matches!(
+        owner::start(&db, &start_from(&image_ready, work)).await,
+        Err(FoundationError::Conflict | FoundationError::AdmissionDenied(_))
+    ));
+    assert!(matches!(
+        owner::start(&db, &start_from(&unreadable, work)).await,
+        Err(FoundationError::AdmissionDenied(_))
+    ));
+    std::fs::rename(held_path, &image_path).unwrap();
     saved_video_and_cover(&db, work, &image_bytes, &image_sha).await;
     let canonical = linggan_evidence::research_dossier::read(&db, work)
         .await
@@ -124,6 +155,67 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
             .iter()
             .any(|s| s["slotKey"] == "xhs:dossier-note:cover:1")
     );
+
+    let video_ready = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(video_ready["materialReadiness"]["kind"], "video");
+    assert_eq!(video_ready["materialReadiness"]["state"], "ready");
+    assert!(
+        video_ready["materialReadiness"]["scopeNote"]
+            .as_str()
+            .unwrap()
+            .contains("未覆盖")
+    );
+    let stopped = owner::start(&db, &start_from(&video_ready, work))
+        .await
+        .unwrap();
+    let video_sha = canonical
+        .media_inventory
+        .iter()
+        .find(|s| s["purpose"] == "video")
+        .unwrap()["blobSha256"]
+        .as_str()
+        .unwrap();
+    let video_path = media_root.join(format!("blobs/{video_sha}.mp4"));
+    let held_video = video_path.with_extension("held");
+    std::fs::rename(&video_path, &held_video).unwrap();
+    let stop_drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
+    let stop_worker = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
+        db.clone(),
+        "content-l1-missing-video-proof",
+        4,
+        Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
+        adapter.clone(),
+        stop_drain.clone(),
+    ));
+    tokio::time::timeout(Duration::from_secs(30), async {
+        loop {
+            let current = owner::latest(&db, dossier::DOMAIN, work, None)
+                .await
+                .unwrap();
+            if current["analysis"]["state"] == "skipped" {
+                assert_eq!(
+                    current["analysis"]["requestRef"],
+                    json!(stopped.request_ref)
+                );
+                assert_eq!(current["analysis"]["failureCode"], "ai_source_unavailable");
+                break;
+            }
+            assert!(!stop_worker.is_finished());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("missing video must stop before dispatch, not defer forever");
+    stop_drain.request();
+    stop_worker.await.unwrap().unwrap();
+    let dispatched: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_model_invocation WHERE task_key='content_understanding'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(dispatched, 0);
+    std::fs::rename(held_video, &video_path).unwrap();
 
     let old_preview = legacy::preview(&db, dossier::DOMAIN, work, Scope::Note)
         .await
@@ -355,7 +447,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     let counts: (i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM linggan_content_understanding_request),(SELECT count(*) FROM linggan_model_invocation WHERE task_key='content_understanding')",
     ).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(counts, (1, 1));
+    assert_eq!(counts, (2, 1), "one pre-dispatch stop and one saved Core");
     let legacy_config_after: Value = sqlx::query_scalar(
         "SELECT to_jsonb(s) FROM linggan_ai_task_setting s WHERE task_key='note_interpretation'",
     )
@@ -541,11 +633,41 @@ async fn saved_video_and_cover(db: &Database, work: Uuid, image: &[u8], image_sh
     )
     .await
     .unwrap();
-    let video = b"synthetic saved-video-text fixture; no decoder or recognizer is exercised";
-    let sha: String = Sha256::digest(video)
+    let output = std::process::Command::new("ffmpeg")
+        .args([
+            "-v",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "color=c=blue:s=16x16:r=1",
+            "-t",
+            "1",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            "-movflags",
+            "frag_keyframe+empty_moov",
+            "-f",
+            "mp4",
+            "pipe:1",
+        ])
+        .output()
+        .expect("synthetic video requires local ffmpeg");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let video = output.stdout;
+    let sha: String = Sha256::digest(&video)
         .iter()
         .map(|b| format!("{b:02x}"))
         .collect();
+    let root = PathBuf::from(std::env::var_os("LINGGAN_LOCAL_MEDIA_ROOT").unwrap());
+    std::fs::write(root.join(format!("blobs/{sha}.mp4")), &video).unwrap();
     let source = admit_media_blob(
         db,
         observations[1],
@@ -568,6 +690,30 @@ async fn saved_video_and_cover(db: &Database, work: Uuid, image: &[u8], image_sh
         issues:vec![], source_location:json!({"synthetic":true}),
         publication:material_reading::Publication::Automatic { expected_current:None },
     }).await.unwrap();
+    material_reading::publish_in(
+        &mut tx,
+        material_reading::NewReading {
+            content_public_ref: work,
+            unit_key: "video_frame:xhs:dossier-note:video:1".into(),
+            kind: "video_frame".into(),
+            slot_key: Some("xhs:dossier-note:video:1".into()),
+            page: None,
+            source_version: source.to_string(),
+            source_state: "known_empty".into(),
+            derivative_ref: None,
+            producer_ref: Some(Uuid::new_v4()),
+            generated_by: "frame_ocr".into(),
+            rule_version: "synthetic-saved-video-replay.v1".into(),
+            blocks: vec![json!({"kind":"gap","text":"合成视频未检出画面文字"})],
+            issues: vec![],
+            source_location: json!({"synthetic":true}),
+            publication: material_reading::Publication::Automatic {
+                expected_current: None,
+            },
+        },
+    )
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
 }
 

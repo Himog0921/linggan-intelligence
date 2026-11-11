@@ -49,6 +49,7 @@ pub(crate) async fn read_batch(
     let dossiers = crate::research_dossier::read_in(tx, &refs, as_of).await?;
     for item in items.iter_mut() {
         if let Some(dossier) = dossiers.get(&item.identity.public_ref) {
+            item.material_readiness = Some(crate::research_dossier::material_readiness(dossier));
             item.evidence_fragment =
                 dossier_excerpt(dossier, query).or_else(|| dossier_excerpt(dossier, None));
         }

@@ -43,11 +43,6 @@ function normalizedCandidates(values) {
     .slice(0, 6);
 }
 
-/**
- * A Live Photo is one logical slot but two byte resources. Direct detail collection must enqueue
- * the same independently addressable still/motion units that the server scheduler would claim;
- * otherwise one task's media completion depends on unrelated global backlog.
- */
 export function mediaUploadUnitsForRecord(record = {}) {
   const observation = record?.observation && typeof record.observation === 'object'
     ? record.observation
@@ -55,11 +50,10 @@ export function mediaUploadUnitsForRecord(record = {}) {
   const components = observation?.components && typeof observation.components === 'object'
     ? observation.components
     : {};
-  const componentUnits = ['still', 'motion'].map((componentKind) => ({
-    componentKind,
-    candidateUris: normalizedCandidates(components?.[componentKind]?.candidateUris),
-  })).filter((unit) => unit.candidateUris.length > 0);
-  if (componentUnits.length > 0) return componentUnits;
+  if (record?.slot?.role === 'live_photo') {
+    const candidateUris = normalizedCandidates(components?.still?.candidateUris);
+    return candidateUris.length > 0 ? [{ componentKind: 'still', candidateUris }] : [];
+  }
   const candidateUris = normalizedCandidates(
     Array.isArray(observation.candidateUris)
       ? observation.candidateUris
@@ -177,6 +171,12 @@ export async function flushMediaOutboxInExecutionContext({
   const uploads = prioritizeMediaUploads(preferred, due, limit);
   const results = [];
   for (const upload of uploads) {
+    // Only Live Photo byte units use motion; ordinary videos use single.
+    if (upload.componentKind === 'motion') {
+      await outbox.terminal(upload.uploadId, 'live_photo_motion_disabled');
+      results.push({ uploadId: upload.uploadId, status: 'terminal' });
+      continue;
+    }
     if (upload.slotSubmissionId) {
       const dependency = await outbox.producerDependency(upload.slotSubmissionId);
       if (!dependency || dependency.status === 'terminal') {

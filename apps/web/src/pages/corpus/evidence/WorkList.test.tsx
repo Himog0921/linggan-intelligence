@@ -21,6 +21,29 @@ function renderList(overrides: Partial<Parameters<typeof WorkList>[0]> = {}, lis
 
 const targets = () => [...document.querySelectorAll<HTMLElement>('[data-select-target]')];
 
+describe.each(['research', 'table', 'cover'] as const)('材料就绪提示（%s）', layout => {
+  it.each([
+    ['ready', '材料已准备', []],
+    ['preparing', '材料准备中', [{ code: 'asr_pending', state: 'preparing', message: '口播转写正在处理。', slotKey: 'video' }]],
+    ['blocked', '材料待补齐', [{ code: 'image_missing', state: 'blocked', message: '第 2 张正文原图尚未取得。', slotKey: 'image_2' }]],
+  ])('%s 采用后端状态，详情采集状态保留，原因可查看', (state, label, gaps) => {
+    const list = parseWorkList(listJson([{ ...listItemJson(1), materialReadiness: { state, kind: 'image_text', gaps, scopeNote: null } }])).items;
+    renderList({ layout }, list);
+    expect(screen.getByText(label, { selector: 'span[title]' })).toBeVisible();
+    expect(screen.getAllByText('可检索').length).toBeGreaterThan(0);
+    if (gaps.length) {
+      expect(screen.getAllByTitle(new RegExp(gaps[0]!.message)).length).toBeGreaterThan(0);
+    }
+    expect(screen.queryByText(/理解已完成/)).not.toBeInTheDocument();
+  });
+
+  it('缺少就绪合同不从媒体计数补成已准备', () => {
+    renderList({ layout }, items([1, { media: { images: 5, videos: 1 } }]));
+    expect(screen.queryByText('材料已准备')).not.toBeInTheDocument();
+    expect(screen.queryByText('材料待补齐')).not.toBeInTheDocument();
+  });
+});
+
 describe('研读排版', () => {
   it('每行是真列表项：标题按钮、作者、原声、互动（图标有中文名）、材料完整度、右侧事实列', () => {
     renderList({}, items([1, { media: { images: 1 } }]));

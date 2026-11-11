@@ -11,7 +11,7 @@ const understandingPath = '/api/local/content-understanding/latest';
 let kit: FetchKit;
 beforeEach(() => {
   kit = createFetchMock();
-  kit.route('GET', understandingPath, ok({ contract: 'content-understanding.read.v1', workRef: workRef(1), analysis: null }));
+  kit.route('GET', understandingPath, ok({ contract: 'content-understanding.read.v1', workRef: workRef(1), analysis: null, materialReadiness: { state: 'ready', kind: 'image_text', gaps: [], scopeNote: null } }));
   kit.install(); HTMLElement.prototype.scrollTo = vi.fn(); localStorage.clear();
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });

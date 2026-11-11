@@ -111,7 +111,9 @@ pub(crate) async fn load(
         .iter()
         .filter(|s| s["component"] == "image")
         .count() as u64;
-    let complete = d.coverage["imageInventory"]["expectedPages"].as_u64() == Some(image_slots)
+    let readiness = linggan_evidence::research_dossier::material_readiness(&d);
+    let complete = readiness.kind != linggan_evidence::research_dossier::NoteKind::Video
+        && d.coverage["imageInventory"]["expectedPages"].as_u64() == Some(image_slots)
         && inventory
             .iter()
             .all(|s| s["available"] == true && s["displayOrderState"] != "unknown")
@@ -141,6 +143,8 @@ pub(crate) async fn load(
         ])
         .to_string(),
     );
+    let mut coverage = d.coverage;
+    coverage["materialReadiness"] = json!(readiness);
     Ok(Packet {
         snapshot: Snapshot {
             work_ref: work,
@@ -152,7 +156,7 @@ pub(crate) async fn load(
             images,
         },
         inventory: json!(inventory),
-        coverage: d.coverage,
+        coverage,
     })
 }
 pub(crate) async fn frozen_in(
@@ -167,6 +171,7 @@ pub(crate) async fn frozen_in(
     let current = load(tx, row.get("domain_ref"), saved.snapshot.work_ref, &now).await?;
     if current.snapshot.material_snapshot_identity != saved.snapshot.material_snapshot_identity
         || saved.hash() != row.get::<String, _>("input_hash")
+        || current.coverage["materialReadiness"]["state"] != "ready"
     {
         return Err(FoundationError::AdmissionDenied(vec![
             "ai_source_unavailable".into(),

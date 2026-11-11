@@ -230,6 +230,100 @@ async fn images(db: &Database, id: &str, total: u32, slots: &[(&str, u32, char)]
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn partial_media_observations_do_not_erase_the_latest_complete_inventory() {
+    let db = fixture::proof_database("dossier_manifest_partial").await;
+    let id = "manifest-partial";
+    let work = detail(&db, id, json!({"bodyText":""})).await;
+    images(&db, id, 2, &[("image", 1, 'a'), ("image", 2, 'b')]).await;
+    let complete = dossier::read(&db, work).await.unwrap().unwrap();
+    for manifest in [
+        Value::Null,
+        json!({"state":"observed_set","source":"dom_observed_set","expectedPages":null}),
+    ] {
+        let observation = Uuid::new_v4();
+        let uri = "https://media.example/partial-cover.jpg";
+        fixture::submit_custom_package(&db, "xhs", &["media_slots"], json!({"contentExternalId":id}), "media_slots", "xhs",
+            json!({"target":{"contentExternalId":id,"imageInventory":manifest},"layers":[fixture::coverage_layer("media_slots",1)]}),
+            vec![json!({"kind":"media_slot","slotKey":format!("xhs:{id}:cover:1"),"observationRef":observation,
+                "slot":{"role":"cover","ordinal":1},"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},
+                "sourceObject":{"platform":"xhs","type":"content","externalId":id}})]).await;
+        let after = dossier::read(&db, work).await.unwrap().unwrap();
+        assert_eq!(after.coverage["imageInventory"]["expectedPages"], 2);
+        assert_eq!(
+            after
+                .materials
+                .iter()
+                .filter(|m| m["purpose"] == "body_image")
+                .count(),
+            2
+        );
+        assert!(
+            !dossier::material_readiness(&after)
+                .gaps
+                .iter()
+                .any(|g| g.code == "image_inventory_unknown")
+        );
+    }
+    images(&db, id, 1, &[("image", 1, 'c')]).await;
+    let reduced = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(reduced.coverage["imageInventory"]["expectedPages"], 1);
+    assert!(
+        !reduced
+            .materials
+            .iter()
+            .any(|m| m["slotKey"] == format!("xhs:{id}:image:2"))
+    );
+    let old = dossier::read_at(&db, work, Some(&complete.as_of))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(old.coverage["imageInventory"]["expectedPages"], 2);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn later_missing_body_preserves_known_empty_but_never_invents_one() {
+    let db = fixture::proof_database("dossier_empty_body_followup").await;
+    for body in ["", " \n\t"] {
+        let id = if body.is_empty() {
+            "empty-followup"
+        } else {
+            "whitespace-followup"
+        };
+        let work = detail(&db, id, json!({"title":"只有标题也正常","bodyText":body})).await;
+        let first = dossier::read(&db, work).await.unwrap().unwrap();
+        let reference = material(&first, "body")["sourceRef"].clone();
+        detail(&db, id, json!({"title":"后续仅取得标题"})).await;
+        let after = dossier::read(&db, work).await.unwrap().unwrap();
+        assert_eq!(material(&after, "body")["sourceState"], "known_empty");
+        assert_eq!(material(&after, "body")["sourceRef"], reference);
+        assert!(
+            !dossier::material_readiness(&after)
+                .gaps
+                .iter()
+                .any(|g| g.code == "native_text_unavailable")
+        );
+    }
+    for body in [Value::Null, json!(false), json!(0)] {
+        let work = detail(
+            &db,
+            &Uuid::new_v4().to_string(),
+            json!({"title":"未确认正文","bodyText":body}),
+        )
+        .await;
+        let read = dossier::read(&db, work).await.unwrap().unwrap();
+        assert_eq!(material(&read, "body")["sourceState"], "not_acquired");
+        assert!(
+            dossier::material_readiness(&read)
+                .gaps
+                .iter()
+                .any(|g| g.code == "native_text_unavailable")
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn observed_images_keep_slot_identity_without_synthetic_page_holes() {
     let db = fixture::proof_database("dossier_v2_pages").await;
     let work = detail(&db, "pages", json!({"bodyText":"有缺页的笔记"})).await;
@@ -279,7 +373,11 @@ async fn observed_images_keep_slot_identity_without_synthetic_page_holes() {
             .any(|m| m["slotKey"] == "xhs:sparse:cover:1")
     );
     assert_eq!(read.coverage["imageInventory"]["missingPages"], json!([]));
-    assert!(read.materials.iter().any(|image| image["slotKey"] == "xhs:sparse:image:3"));
+    assert!(
+        read.materials
+            .iter()
+            .any(|image| image["slotKey"] == "xhs:sparse:image:3")
+    );
 }
 
 #[tokio::test]

@@ -15,22 +15,50 @@
 use linggan_evidence::REGISTERED_PROCESSOR_KINDS;
 use std::process::ExitCode;
 
-const USAGE: &str = "用法: linggan-media-requeue --kinds <处理器名,逗号分隔> [--dry-run]";
+const USAGE: &str = "用法: linggan-media-requeue --kinds <处理器名,逗号分隔> [--dry-run]\n或: linggan-media-requeue --missing-video-frames <作品UUID,逗号分隔> [--dry-run]";
 
 #[tokio::main]
 async fn main() -> ExitCode {
     let mut kinds: Vec<String> = Vec::new();
+    let mut missing_video_frames: Option<Vec<uuid::Uuid>> = None;
+    let mut kinds_requested = false;
     let mut dry_run = false;
     let mut arguments = std::env::args().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.as_str() {
             "--dry-run" => dry_run = true,
+            "--missing-video-frames" => {
+                let Some(value) = arguments.next() else {
+                    eprintln!("必须明确指定要补齐的作品。{USAGE}");
+                    return ExitCode::from(2);
+                };
+                let works = match value
+                    .split(',')
+                    .map(str::parse::<uuid::Uuid>)
+                    .collect::<Result<Vec<_>, _>>()
+                {
+                    Ok(works) => works,
+                    Err(_) => {
+                        eprintln!("作品范围必须是非空 UUID 列表。{USAGE}");
+                        return ExitCode::from(2);
+                    }
+                };
+                missing_video_frames
+                    .get_or_insert_with(Vec::new)
+                    .extend(works);
+            }
             "--kinds" => {
+                kinds_requested = true;
                 let Some(value) = arguments.next() else {
                     eprintln!("--kinds 后面没给处理器名。{USAGE}");
                     return ExitCode::from(2);
                 };
-                kinds.extend(value.split(',').filter(|kind| !kind.is_empty()).map(str::to_owned));
+                kinds.extend(
+                    value
+                        .split(',')
+                        .filter(|kind| !kind.is_empty())
+                        .map(str::to_owned),
+                );
             }
             other => {
                 eprintln!("未知参数：{other}\n{USAGE}");
@@ -38,8 +66,15 @@ async fn main() -> ExitCode {
             }
         }
     }
-    if kinds.is_empty() {
-        eprintln!("{USAGE}\n登记的处理器：{}", REGISTERED_PROCESSOR_KINDS.join(","));
+    if missing_video_frames.is_some() && kinds_requested {
+        eprintln!("补齐缺失视频帧与处理器升级重排不能混用。{USAGE}");
+        return ExitCode::from(2);
+    }
+    if kinds.is_empty() && missing_video_frames.is_none() {
+        eprintln!(
+            "{USAGE}\n登记的处理器：{}",
+            REGISTERED_PROCESSOR_KINDS.join(",")
+        );
         return ExitCode::from(2);
     }
     // 名字打错必须当场报错。安静地排 0 条会被读成「这一类没有旧作业」——那是本次重排要
@@ -64,9 +99,36 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if let Some(works) = missing_video_frames {
+        return match linggan_evidence::enqueue_missing_video_frame_jobs(&database, &works, dry_run)
+            .await
+        {
+            Ok(summary) => {
+                println!(
+                    "linggan media requeue: {}；指定作品的视频画面文字任务{} {} 条",
+                    if dry_run {
+                        "预演（做完即撤回）"
+                    } else {
+                        "写入"
+                    },
+                    if dry_run { "会排" } else { "已排" },
+                    summary.enqueued_jobs
+                );
+                ExitCode::SUCCESS
+            }
+            Err(error) => {
+                eprintln!("linggan media requeue: 补齐失败：{error:?}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     println!(
         "linggan media requeue: {} [{}]",
-        if dry_run { "预演（做完即撤回）" } else { "写入" },
+        if dry_run {
+            "预演（做完即撤回）"
+        } else {
+            "写入"
+        },
         kinds.join(",")
     );
     // **逐类调用、逐类打印。** 函数内部本来就是「一类一个事务」，一次传多个名字并不会让它们变成一个

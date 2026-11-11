@@ -1,7 +1,7 @@
 import type { MouseEvent } from 'react';
 import { CoverPreview } from './Media';
 import { StateLine } from './Primitives';
-import { compactMoment, laneSummary, materialSummary, metricReading, publishedCopy, stateMeta, workTitle, ENGAGEMENT_KINDS } from './evidencePresent';
+import { compactMoment, laneSummary, materialReadinessCopy, materialSummary, metricReading, publishedCopy, stateMeta, workTitle, ENGAGEMENT_KINDS } from './evidencePresent';
 import type { WorkItem } from './evidenceTypes';
 import { AuthorFact, Engagement, MaterialRail, QuoteBlock } from './WorkParts';
 import { MaterialTiles } from './MaterialTiles';
@@ -56,6 +56,7 @@ export function ResearchRow({ item, selected, tabStop, canCheck, checked, onSele
   const [stateLabel] = stateMeta(detail);
   const shortState = RESEARCH_STATE_LABELS[detail] ?? stateLabel;
   const observed = compactMoment(item.lastObservedAt);
+  const readiness = materialReadinessCopy(item.materialReadiness);
   // <time datetime> 要 ISO 形式；库里的观察时刻是「YYYY-MM-DD HH:MM」，这里只换分隔符，不改显示。
   const observedIso = item.lastObservedAt ? item.lastObservedAt.replace(' ', 'T') : undefined;
   const published = publishedCopy(item.display, { compact: true, withFieldName: false });
@@ -88,7 +89,7 @@ export function ResearchRow({ item, selected, tabStop, canCheck, checked, onSele
           </div>
           <div className={styles.infoRow}>
             <dt>材料</dt>
-            <dd className={styles.materialsCell}><MaterialTiles summary={materialSummary(item)} /></dd>
+            <dd className={styles.materialsCell}>{readiness ? <span title={readiness.title}>{readiness.label}</span> : <MaterialTiles summary={materialSummary(item)} />}</dd>
           </div>
           <div className={styles.infoRow}>
             <dt>{fromSource ? '来源' : '发布'}</dt>
@@ -111,12 +112,13 @@ export function ResearchRow({ item, selected, tabStop, canCheck, checked, onSele
 export function TableRow({ item, selected, tabStop, canCheck, checked, onSelect, onCheck }: RowProps) {
   const detail = laneSummary(item.lanes, 'detail')?.state ?? 'UNKNOWN';
   const observed = compactMoment(item.lastObservedAt);
+  const readiness = materialReadinessCopy(item.materialReadiness);
   return <tr className={styles.tableRow} data-selected={selected} data-checked={canCheck && checked}
     data-work-ref={item.ref} onClick={() => onSelect(item)}>
     {canCheck ? <td className={styles.checkCell}><CheckBox item={item} checked={checked} onCheck={onCheck} /></td> : null}
     <td className={styles.workCell}><SelectTitle item={item} selected={selected} tabStop={tabStop} /></td>
     <td><AuthorFact item={item} /></td>
-    <td><div className={styles.materialCell}><MaterialRail summary={materialSummary(item)} /><StateLine state={detail} /></div></td>
+    <td><div className={styles.materialCell}>{readiness ? <span title={readiness.title}>{readiness.label}</span> : <MaterialRail summary={materialSummary(item)} />}<StateLine state={detail} /></div></td>
     {ENGAGEMENT_KINDS.map(([kind,label]) =>
       <td key={kind} className={styles.metricCell} title={`${label}：${metricReading(item.display.engagement[kind])}`}>
         <span className="v7-sr-only">{label}：</span><span>{metricReading(item.display.engagement[kind])}</span>

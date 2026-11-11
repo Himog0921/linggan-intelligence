@@ -63,6 +63,9 @@ async fn reasons(
             Err(e) => return Err(e),
         }
     }
+    if p.coverage["materialReadiness"]["state"] != "ready" {
+        reasons.push("materials_not_ready".into());
+    }
     if p.snapshot.images.is_empty()
         && !p
             .snapshot
@@ -112,7 +115,7 @@ pub async fn preview(db: &Database, domain: Uuid, work: Uuid) -> Result<Value, F
     let result = json!({"contract":"content-understanding.preview.v1","workRef":work,"domainRef":domain,
         "knowledgeCutoff":cutoff,"inputHash":p.hash(),"taskConfigRef":config,"taskRevision":revision,
         "methodVersion":METHOD,"canStart":reasons.is_empty(),"reasons":reasons,
-        "imageCount":p.snapshot.images.len(),"coverage":p.coverage});
+        "imageCount":p.snapshot.images.len(),"coverage":p.coverage,"materialReadiness":p.coverage["materialReadiness"]});
     tx.commit().await?;
     Ok(result)
 }
@@ -139,6 +142,11 @@ pub async fn start(db: &Database, r: &Start) -> Result<Receipt, FoundationError>
     let current = source::load(&mut c.tx, r.domain_ref, r.work_ref, &now).await?;
     if current.snapshot.material_snapshot_identity != p.snapshot.material_snapshot_identity {
         return Err(FoundationError::Conflict);
+    }
+    if current.coverage["materialReadiness"]["state"] != "ready" {
+        return Err(FoundationError::AdmissionDenied(vec![
+            "materials_not_ready".into(),
+        ]));
     }
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,196))")
         .bind(format!(
@@ -217,5 +225,7 @@ pub async fn latest(
         None => Value::Null,
     };
     tx.commit().await?;
-    Ok(json!({"contract":"content-understanding.read.v1","workRef":work,"analysis":result}))
+    Ok(
+        json!({"contract":"content-understanding.read.v1","workRef":work,"analysis":result,"materialReadiness":p.coverage["materialReadiness"]}),
+    )
 }

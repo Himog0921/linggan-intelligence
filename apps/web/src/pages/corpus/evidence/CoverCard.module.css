@@ -381,8 +381,23 @@
   border-top: 1px solid var(--lgi-hairline);
 }
 
+.plate:has(.readiness) {
+  grid-template-rows: var(--lgi-space-6) var(--lgi-space-6) auto;
+  aspect-ratio: auto;
+}
+
+.facts:has(.readiness) {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.readiness {
+  white-space: nowrap;
+}
+
 .observed {
   min-width: 0;
+  margin-inline-start: auto;
   text-align: right;
 }
 

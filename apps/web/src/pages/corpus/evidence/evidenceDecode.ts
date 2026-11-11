@@ -13,6 +13,7 @@ import {
   optStr,
   str,
   strList,
+  ShapeError,
   type Json,
 } from '../../../shared/decode';
 import { imagePath, mediaPath, xhsNoteUrl } from './evidencePaths';
@@ -30,6 +31,7 @@ import type {
   Inspector,
   LaneSummary,
   ListMedia,
+  MaterialReadiness,
   MediaSlot,
   Metric,
   OcrLayering,
@@ -131,6 +133,25 @@ function parseLane(record: Json): LaneSummary {
   return { lane: str(record, 'lane'), state: stateOf(record, 'state'), valueState: stateOf(record, 'valueState'), retained: optNum(record, 'retained') };
 }
 
+export function parseMaterialReadiness(value: unknown): MaterialReadiness {
+  return decode(value, record => {
+    const state = str(record, 'state');
+    const kind = str(record, 'kind');
+    if (state !== 'ready' && state !== 'preparing' && state !== 'blocked') throw new ShapeError('materialReadiness.state');
+    if (kind !== 'image_text' && kind !== 'video' && kind !== 'unknown') throw new ShapeError('materialReadiness.kind');
+    const scopeNote = record.scopeNote;
+    if (scopeNote !== null && typeof scopeNote !== 'string') throw new ShapeError('materialReadiness.scopeNote');
+    const gaps = list<MaterialReadiness['gaps'][number]>(record, 'gaps', gap => {
+      const gapState = str(gap, 'state');
+      if (gapState !== 'preparing' && gapState !== 'blocked') throw new ShapeError('materialReadiness.gaps.state');
+      const slotKey = gap.slotKey;
+      if (slotKey !== null && typeof slotKey !== 'string') throw new ShapeError('materialReadiness.gaps.slotKey');
+      return { code: str(gap, 'code'), state: gapState, message: str(gap, 'message'), slotKey };
+    });
+    return { state, kind, gaps, scopeNote };
+  });
+}
+
 export function parseWorkItem(item: Json): WorkItem {
   const identity = obj(item, 'identity');
   const context = optObj(item, 'collectionContext') ?? {};
@@ -153,6 +174,7 @@ export function parseWorkItem(item: Json): WorkItem {
     fragment: parseFragment(optObj(item, 'evidenceFragment')),
     lastObservedAt: optStr(summary, 'lastObservedAt'),
     primaryLimitation: optStr(summary, 'primaryLimitation'),
+    materialReadiness: item.materialReadiness === undefined || item.materialReadiness === null ? null : parseMaterialReadiness(item.materialReadiness),
   };
 }
 

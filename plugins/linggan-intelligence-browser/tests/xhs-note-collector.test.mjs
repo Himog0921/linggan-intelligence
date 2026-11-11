@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import {
   discoverNotesFromDOM,
   enrichXhsNoteDetailFromDom,
-  extractXhsLivePhotoStreams,
+  collectNote,
   classifyXhsNoteDetail,
   isCollectedNoteUsable,
   parseXhsInteractCount,
@@ -16,6 +16,7 @@ import {
   resolveExpectedNoteFromMap,
   selectNoteKey,
 } from '../src/platforms/xhs/noteCollector.js';
+import { noteStore } from '../src/db/noteStore.js';
 
 test('selectNoteKey prefers expected note id over current url and fallback keys', () => {
   const noteMap = {
@@ -272,9 +273,11 @@ test('readXhsPublishedAtEvidence keeps relative detail text reference-qualified,
   assert.equal(result.publishedAtReferenceObservedAt, new Date(now).toISOString());
 });
 
-test('extractXhsLivePhotoStreams keeps xhs live photo stream candidates', () => {
-  const streams = extractXhsLivePhotoStreams([
-    {
+test('collectNote retains Live Photo stills and explicit empty text without extracting motion streams', async (t) => {
+  const noteId = '69b1081c000000003402c1c4';
+  const note = {
+    noteId, title: '实况图文', desc: '', type: 'normal',
+    imageList: [{
       url_default: 'https://sns-img-qc.xhscdn.com/live-cover.jpg',
       live_photo: true,
       stream: {
@@ -284,19 +287,35 @@ test('extractXhsLivePhotoStreams keeps xhs live photo stream candidates', () => 
           avg_bitrate: 2000,
         }],
       },
+    }],
+    interactInfo: { likedCount: '1', collectedCount: '0', commentCount: '0' },
+  };
+  const wd = {
+    location: { href: `https://www.xiaohongshu.com/explore/${noteId}` },
+    document: {
+      scripts: [{ textContent: `window.__INITIAL_STATE__=${JSON.stringify({ note: { noteDetailMap: { [noteId]: { note } } } })}` }],
+      querySelector() { return null; },
     },
-  ]);
-
-  assert.equal(streams.length, 1);
-  assert.equal(streams[0].imageIndex, 1);
-  assert.equal(streams[0].url, 'https://sns-video-hw.xhscdn.com/live-master.mp4');
-  assert.deepEqual(
-    streams[0].candidates,
-    [
-      'https://sns-video-hw.xhscdn.com/live-master.mp4',
-      'https://sns-video-hw.xhscdn.com/live-backup.mp4',
-    ],
-  );
+  };
+  const stored = [];
+  t.mock.method(noteStore, 'getById', async () => null);
+  t.mock.method(noteStore, 'upsert', async (value) => { stored.push(value); });
+  const originalChrome = globalThis.chrome;
+  globalThis.chrome = { runtime: { id: 'synthetic-extension' } };
+  try {
+    const collected = await collectNote(wd, { expectedNoteId: noteId, deferLingganDelivery: true });
+    assert.equal(Object.hasOwn(collected, 'livePhotoStreams'), false);
+    assert.equal(collected.bodyText, '');
+    assert.deepEqual(collected.imageInventory, { state: 'complete', source: 'platform_image_list', expectedPages: 1 });
+    assert.equal(collected.imagePositions.length, 1);
+    assert.equal(collected.imagePositions[0].page, 1);
+    assert.ok(collected.imagePositions[0].candidateUris.includes(collected.cover));
+    assert.equal(collected.video, '');
+    assert.deepEqual(collected.videoStreams, []);
+    assert.deepEqual(stored, [collected]);
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
 });
 
 test('readXhsNoteDetailFromDom keeps a current detail page usable when the injected map is absent', () => {

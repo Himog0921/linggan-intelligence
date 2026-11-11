@@ -251,6 +251,8 @@ if [[ "${1:-}" == "--dossier-input" ]]; then
   cargo_proof -p linggan-evidence --test dossier_input_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test historical_media_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test media_processing_concurrency_postgres --locked -- --ignored --nocapture
+  cargo build -p linggan-worker --bin linggan-media-requeue --locked
+  export LINGGAN_MEDIA_REQUEUE_PROOF_BIN="${CARGO_TARGET_DIR:-$project_root/target}/debug/linggan-media-requeue"
   cargo_proof -p linggan-evidence --test media_processor_requeue_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test material_reading_postgres --locked -- --ignored --nocapture

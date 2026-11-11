@@ -75,6 +75,13 @@ export interface ListMedia {
   localObjectCount: number;
 }
 
+export interface MaterialReadiness {
+  state: 'ready' | 'preparing' | 'blocked';
+  kind: 'image_text' | 'video' | 'unknown';
+  gaps: { code: string; state: 'preparing' | 'blocked'; message: string; slotKey: string | null }[];
+  scopeNote: string | null;
+}
+
 export interface WorkItem {
   ref: string;
   platform: string;
@@ -89,6 +96,7 @@ export interface WorkItem {
   fragment: Fragment | null;
   lastObservedAt: string | null;
   primaryLimitation: string | null;
+  materialReadiness?: MaterialReadiness | null;
 }
 
 export interface WorkList {

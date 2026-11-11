@@ -81,8 +81,9 @@ test('media transfer normalizes only approved platform HTTP candidates to HTTPS'
   assert.equal(normalizeMediaCandidateUri('http://sns-webpic-qc.xhscdn.com:8080/one.webp'), '');
 });
 
-test('one Live Photo slot becomes independently queued still and motion byte units', () => {
+test('a historical Live Photo slot queues only its still component', () => {
   assert.deepEqual(mediaUploadUnitsForRecord({
+    slot: { role: 'live_photo' },
     observation: {
       components: {
         still: { candidateUris: ['http://sns-webpic-qc.xhscdn.com/still.webp'] },
@@ -94,8 +95,63 @@ test('one Live Photo slot becomes independently queued still and motion byte uni
     },
   }), [
     { componentKind: 'still', candidateUris: ['https://sns-webpic-qc.xhscdn.com/still.webp'] },
-    { componentKind: 'motion', candidateUris: ['https://sns-video-qc.xhscdn.com/motion.mp4'] },
   ]);
+});
+
+test('a historical Live Photo without an allowed still never falls back to mixed or motion URLs', () => {
+  for (const components of [
+    {},
+    { motion: { candidateUris: ['https://sns-video-qc.xhscdn.com/motion.mp4'] } },
+    { still: { candidateUris: ['https://attacker.example/still.webp'] } },
+  ]) {
+    assert.deepEqual(mediaUploadUnitsForRecord({
+      slot: { role: 'live_photo' },
+      observation: {
+        externalUri: 'https://sns-video-qc.xhscdn.com/motion.mp4',
+        candidateUris: ['https://sns-video-qc.xhscdn.com/motion.mp4'],
+        components,
+      },
+    }), []);
+  }
+});
+
+test('ordinary video remains one normalized single byte unit', () => {
+  assert.deepEqual(mediaUploadUnitsForRecord({
+    slot: { role: 'video' },
+    observation: { candidateUris: ['https://sns-video-qc.xhscdn.com/video.mp4'] },
+  }), [{
+    componentKind: 'single',
+    candidateUris: ['https://sns-video-qc.xhscdn.com/video.mp4'],
+  }]);
+});
+
+test('old motion uploads terminate before dependency checks, downloads or retries', async () => {
+  const uploads = [
+    { uploadId: 'direct-motion', slotSubmissionId: 'slot-1' },
+    { uploadId: 'claimed-motion:2', serverWorkRef: 'claimed-motion', claimGeneration: 2 },
+  ].map((upload) => ({
+    ...upload,
+    componentKind: 'motion',
+    mediaObservationRef: 'observation-live',
+    candidateUris: ['https://sns-video-qc.xhscdn.com/motion.mp4'],
+    status: 'retryable',
+  }));
+  const events = [];
+  const outbox = {
+    async dueById() { return null; },
+    async due() { return uploads; },
+    async producerDependency() { throw new Error('dependency_not_expected'); },
+    async markInFlight() { throw new Error('in_flight_not_expected'); },
+    async acknowledge() { throw new Error('ack_not_expected'); },
+    async retry() { throw new Error('retry_not_expected'); },
+    async terminal(id, reason) { events.push([id, reason]); },
+  };
+  const result = await flushMediaOutboxInExecutionContext({
+    outbox,
+    fetchImpl: async () => { throw new Error('network_not_expected'); },
+  });
+  assert.deepEqual(result.results, uploads.map(({ uploadId }) => ({ uploadId, status: 'terminal' })));
+  assert.deepEqual(events, uploads.map(({ uploadId }) => [uploadId, 'live_photo_motion_disabled']));
 });
 
 test('ordinary media remains one normalized single byte unit', () => {
@@ -191,6 +247,7 @@ test('one offscreen wake drains a bounded detail media set larger than two items
 test('offscreen execution upgrades an approved raw HTTP candidate before fetching bytes', async () => {
   const upload = {
     uploadId: 'http-upgrade',
+    componentKind: 'single',
     mediaObservationRef: 'observation-http',
     candidateUris: ['http://sns-webpic-qc.xhscdn.com/one.webp'],
     status: 'pending',
@@ -230,14 +287,18 @@ test('offscreen execution upgrades an approved raw HTTP candidate before fetchin
   assert.equal(requested[0], 'https://sns-webpic-qc.xhscdn.com/one.webp');
 });
 
-test('offscreen execution completes one claimed generation through resumable upload', async () => {
+test('ordinary video single tries its backup and completes the claimed generation through resumable upload', async () => {
   const upload = {
     uploadId: 'work-1:1',
     serverWorkRef: 'work-1',
     claimGeneration: 1,
     installKey: 'installation-1',
+    componentKind: 'single',
     mediaObservationRef: 'observation-1',
-    candidateUris: ['https://sns-webpic-qc.xhscdn.com/one.webp'],
+    candidateUris: [
+      'https://sns-video-qc.xhscdn.com/primary.mp4',
+      'https://sns-video-qc.xhscdn.com/backup.mp4',
+    ],
     status: 'pending',
   };
   const events = [];
@@ -253,10 +314,11 @@ test('offscreen execution completes one claimed generation through resumable upl
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url: String(url), method: options.method || 'GET' });
-    if (String(url).includes('xhscdn.com')) {
+    if (String(url) === upload.candidateUris[0]) return new Response('', { status: 404 });
+    if (String(url) === upload.candidateUris[1]) {
       return new Response(new Blob(['real-media']), {
         status: 200,
-        headers: { 'content-type': 'image/webp', 'content-length': '10' },
+        headers: { 'content-type': 'video/mp4', 'content-length': '10' },
       });
     }
     if (String(url).endsWith('/uploads')) {
@@ -284,7 +346,8 @@ test('offscreen execution completes one claimed generation through resumable upl
     `in-flight:${upload.uploadId}`,
     `ack:${upload.uploadId}:materialization-1`,
   ]);
-  assert.deepEqual(calls.map((call) => call.method), ['GET', 'POST', 'PATCH', 'POST']);
+  assert.deepEqual(calls.slice(0, 2).map((call) => call.url), upload.candidateUris);
+  assert.deepEqual(calls.map((call) => call.method), ['GET', 'GET', 'POST', 'PATCH', 'POST']);
 });
 
 test('offscreen execution reports failure against the exact server generation', async () => {
