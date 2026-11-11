@@ -25,7 +25,8 @@ test('approved icon assets remain separate from the C component catalog',async()
  const count=registry.components.length;
  applyContractsToRegistry(registry,c);
  assert.equal(registry.components.length,count);
- assert.equal(registry.designAssets.find(row=>row.id==='ICON-B-001').variants.length,17);
+ const icons=JSON.parse(await fs.readFile(ROOT+'/docs/design/lids/iconography.json','utf8')).icons;
+ assert.deepEqual(registry.designAssets.find(row=>row.id==='ICON-B-001').variants,icons.map(icon=>icon.name));
  assert.equal(registry.components.some(row=>row.id==='ICON-B-001'),false);
  const missing=structuredClone(registry);missing.components=missing.components.filter(row=>row.id!=='C09');
  assert.throws(()=>applyContractsToRegistry(missing,c),/missing component catalog entry/);

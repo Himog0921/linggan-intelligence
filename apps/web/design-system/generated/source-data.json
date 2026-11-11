@@ -1165,8 +1165,8 @@
     "iconography": {
       "id": "LIDS-ICON-B-001",
       "status": "accepted",
-      "acceptedAt": "2026-11-02",
-      "authorization": "Mog 验收 B 精简版完整17枚，并明确授权纳入 design 标准及部署上线。",
+      "acceptedAt": "2026-11-10",
+      "authorization": "Mog 于 2026-11-02 验收首批17枚，于 2026-11-10 验收追加36枚的实际页面预览，并授权合并部署。",
       "geometry": {
         "grid": 24,
         "strokeWidth": 1.5,
@@ -1211,8 +1211,8 @@
         },
         "geometrySource": "apps/web/src/shared/IntelligenceIcon.css",
         "rules": [
-          "仅操作控件 hover/focus-visible 的一次反馈；不代表执行中或成功",
-          "clock/info/check 保持静态，章节朝向绑定真实 expanded",
+          "仅可用操作控件的悬停或键盘焦点触发一次反馈。反馈本身不表达业务执行状态。",
+          "时间、信息、就绪、权限、任务控制和密码显隐图形保持静态。章节朝向与 expanded 同步。",
           "reduced-motion 关闭动画和过渡，保留状态朝向",
           "禁用控件不触发图标反馈；无远程图标或动画运行库依赖"
         ]
@@ -1302,6 +1302,186 @@
           "name": "focus",
           "label": "专注宽度",
           "motion": "feedback"
+        },
+        {
+          "name": "external",
+          "label": "打开原文",
+          "motion": "feedback"
+        },
+        {
+          "name": "back",
+          "label": "返回上级",
+          "motion": "feedback"
+        },
+        {
+          "name": "forward",
+          "label": "进入详情",
+          "motion": "feedback"
+        },
+        {
+          "name": "search",
+          "label": "查找",
+          "motion": "feedback"
+        },
+        {
+          "name": "filter",
+          "label": "筛选",
+          "motion": "feedback"
+        },
+        {
+          "name": "add",
+          "label": "新建",
+          "motion": "feedback"
+        },
+        {
+          "name": "edit",
+          "label": "编辑",
+          "motion": "feedback"
+        },
+        {
+          "name": "grid",
+          "label": "卡片视图",
+          "motion": "feedback"
+        },
+        {
+          "name": "list",
+          "label": "列表视图",
+          "motion": "feedback"
+        },
+        {
+          "name": "zoom-in",
+          "label": "放大",
+          "motion": "feedback"
+        },
+        {
+          "name": "zoom-out",
+          "label": "缩小",
+          "motion": "feedback"
+        },
+        {
+          "name": "prev",
+          "label": "上一项",
+          "motion": "feedback"
+        },
+        {
+          "name": "next",
+          "label": "下一项",
+          "motion": "feedback"
+        },
+        {
+          "name": "fit",
+          "label": "看全部",
+          "motion": "feedback"
+        },
+        {
+          "name": "targets",
+          "label": "采集目标",
+          "motion": "feedback"
+        },
+        {
+          "name": "tasks",
+          "label": "采集任务",
+          "motion": "feedback"
+        },
+        {
+          "name": "overview",
+          "label": "运营概览",
+          "motion": "feedback"
+        },
+        {
+          "name": "publications",
+          "label": "发布记录",
+          "motion": "feedback"
+        },
+        {
+          "name": "accounts",
+          "label": "账号管理",
+          "motion": "feedback"
+        },
+        {
+          "name": "daily",
+          "label": "每日数据",
+          "motion": "feedback"
+        },
+        {
+          "name": "diagnostics",
+          "label": "运行诊断",
+          "motion": "feedback"
+        },
+        {
+          "name": "security",
+          "label": "安全与权限",
+          "motion": "static"
+        },
+        {
+          "name": "link",
+          "label": "关联",
+          "motion": "feedback"
+        },
+        {
+          "name": "archive",
+          "label": "归档",
+          "motion": "feedback"
+        },
+        {
+          "name": "restore",
+          "label": "恢复归档",
+          "motion": "feedback"
+        },
+        {
+          "name": "pause",
+          "label": "暂停",
+          "motion": "static"
+        },
+        {
+          "name": "resume",
+          "label": "继续",
+          "motion": "static"
+        },
+        {
+          "name": "stop",
+          "label": "停止",
+          "motion": "static"
+        },
+        {
+          "name": "sticky",
+          "label": "便签",
+          "motion": "feedback"
+        },
+        {
+          "name": "frame-add",
+          "label": "新建选题框",
+          "motion": "feedback"
+        },
+        {
+          "name": "adjust",
+          "label": "调整设置",
+          "motion": "feedback"
+        },
+        {
+          "name": "upload",
+          "label": "上传",
+          "motion": "feedback"
+        },
+        {
+          "name": "move-up",
+          "label": "上移顺序",
+          "motion": "feedback"
+        },
+        {
+          "name": "move-down",
+          "label": "下移顺序",
+          "motion": "feedback"
+        },
+        {
+          "name": "password-show",
+          "label": "显示密码",
+          "motion": "static"
+        },
+        {
+          "name": "password-hide",
+          "label": "隐藏密码",
+          "motion": "static"
         }
       ],
       "implementation": "apps/web/src/shared/IntelligenceIcon.tsx",
@@ -1309,7 +1489,11 @@
       "adoptionScope": [
         "语料侧栏三入口及共享侧栏开合",
         "研究底稿工具栏、专注阅读与导出窗口",
-        "证据检查器三档宽度与关闭"
+        "证据检查器三档宽度与关闭",
+        "观察目标旗标与采集任务、运营数据页标签和两态侧栏",
+        "目标与任务详情、领域与工位管理、运营台账与确认窗",
+        "证据与创作者筛选、主题筛选、原图查看器、模型设置与密码显隐",
+        "材料桌、稿件关联和图页工具"
       ],
       "systemMaturity": "Approved icon standard; does not certify all LIDS components"
     }
@@ -1384,7 +1568,7 @@
     },
     {
       "path": "docs/design/lids/iconography.json",
-      "sha256": "3fad3ddcf25b30aefc4399b20d589afdf13ff891ab55738d4628da6c66d3f186"
+      "sha256": "073c2a53ee316bc2a74a3b32f361274568166c809ae54267ff5167c6373c2e08"
     }
   ],
   "inventory": {
@@ -1399,7 +1583,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "e0066daf0e744455998804ab89daef04c1240229a2cc170771ad1b0fb80f350e",
+  "fingerprint": "7b3a21b2f2e74a7a11187a25913236b937f8126f88f1b2c1d5cfe3ec74733c28",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",
@@ -1533,7 +1717,43 @@
         "close",
         "normal",
         "wide",
-        "focus"
+        "focus",
+        "external",
+        "back",
+        "forward",
+        "search",
+        "filter",
+        "add",
+        "edit",
+        "grid",
+        "list",
+        "zoom-in",
+        "zoom-out",
+        "prev",
+        "next",
+        "fit",
+        "targets",
+        "tasks",
+        "overview",
+        "publications",
+        "accounts",
+        "daily",
+        "diagnostics",
+        "security",
+        "link",
+        "archive",
+        "restore",
+        "pause",
+        "resume",
+        "stop",
+        "sticky",
+        "frame-add",
+        "adjust",
+        "upload",
+        "move-up",
+        "move-down",
+        "password-show",
+        "password-hide"
       ],
       "states": [
         "idle",
@@ -1560,7 +1780,16 @@
       "consumers": [
         "apps/web/src/shared/Sidebar.tsx",
         "apps/web/src/pages/corpus/evidence/DossierIcon.tsx",
-        "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx"
+        "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx",
+        "apps/web/src/pages/collection/CollectionFrame.tsx",
+        "apps/web/src/pages/collection/tasks/RunDrawer.tsx",
+        "apps/web/src/pages/ops/OpsPage.tsx",
+        "apps/web/src/pages/ops/LedgerPage.tsx",
+        "apps/web/src/pages/corpus/evidence/Lightbox.tsx",
+        "apps/web/src/pages/settings/AiSettingsExperience.tsx",
+        "apps/web/src/pages/workbench/MaterialDesk.tsx",
+        "apps/web/src/pages/workbench/ImagePages.tsx",
+        "apps/web/src/pages/login/LoginPage.tsx"
       ],
       "certified": false
     },

@@ -32,7 +32,7 @@
 
 - 实现：[apps/web/src/shared/IntelligenceIcon.tsx](../../../apps/web/src/shared/IntelligenceIcon.tsx)
 - 样式：[apps/web/src/shared/IntelligenceIcon.css](../../../apps/web/src/shared/IntelligenceIcon.css)
-- 变体/触发：evidence / comments / creators / sidebar-close / sidebar-open / clock / info / check / chevron / refresh / download / copy / expand / close / normal / wide / focus
+- 变体/触发：evidence / comments / creators / sidebar-close / sidebar-open / clock / info / check / chevron / refresh / download / copy / expand / close / normal / wide / focus / external / back / forward / search / filter / add / edit / grid / list / zoom-in / zoom-out / prev / next / fit / targets / tasks / overview / publications / accounts / daily / diagnostics / security / link / archive / restore / pause / resume / stop / sticky / frame-add / adjust / upload / move-up / move-down / password-show / password-hide
 - 状态：idle / pointer_hover / keyboard_focus / expanded / disabled / reduced_motion
 - 负责：本地SVG几何、统一线宽与两层结构；有限反馈与减少动态效果；装饰图形不占读屏名称
 - 页面负责：按钮资格与点击命令；业务执行进度、成功回执和权限；将所有LIDS组件宣布CMP认证

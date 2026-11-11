@@ -1651,3 +1651,5 @@
   .ops-main>.ops-table-wrap {flex:none;min-height:calc(var(--lgi-space-24) * 2 + var(--lgi-space-16));max-height:65dvh;}
   .ops-overview {flex:none;overflow:visible;}
 }
+
+.ops-icon-tab { gap: var(--lgi-space-2); }

@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { SelectField } from '../../../shared/SelectField';
@@ -86,7 +87,7 @@ export function EvidenceControls({ query, hasDomain, scope, busy = false, select
           }}>
             <ActionButton ref={toggle} variant="outline" className={`${styles.filterToggle} ${styles.actionControl}`} aria-expanded={open} aria-controls={panelId}
               data-active={count > 0} disabled={!hasDomain} title={reason} onClick={() => setOpen(value => !value)}>
-              筛选 <b aria-label={`已选 ${count} 项筛选`}>{String(count).padStart(2, '0')}</b>
+              <IntelligenceIcon name="filter" size={16}/>筛选 <b aria-label={`已选 ${count} 项筛选`}>{String(count).padStart(2, '0')}</b>
             </ActionButton>
             {open ? <div id={panelId} role="group" aria-label="筛选条件" className={styles.panel}>
               <header><strong>筛选材料</strong><span>选择后立即读取</span></header>

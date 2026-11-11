@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { createPortal } from 'react-dom';
 import { useEffect,useRef } from 'react';
 import { Link,useNavigate } from 'react-router';
@@ -54,8 +55,8 @@ export function TargetDrawer({targetRef,params,commands,revision}:{targetRef:str
       <div className={`c-dw-actions ${styles.inspectorActions}`}>
         {t&&<ActionButton variant="primary" onClick={()=>navigate(listHref(params,{rule:targetRef}))}>管理巡查</ActionButton>}
         {t&&t.lifecycle!=='dismissed'&&<ActionButton onClick={()=>navigate(`/collection/tasks?once=1&target=${targetRef}&domain=${encodeURIComponent(params.get('domain')??'all')}&returnTo=${encodeURIComponent(listHref(params))}`)}>立即采一次</ActionButton>}
-        {source&&<a className={`${actionStyles.action} ${actionStyles.outline} ${styles.sourceAction}`} data-action-button="v8" data-lids-component="C09" data-variant="outline" href={source} target="_blank" rel="noreferrer"><span className={actionStyles.label}>打开小红书<svg className="c-dw-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-9 9M19 14v5H5V5h5"/></svg></span></a>}
-        <ActionButton id="target-drawer-close" onClick={()=>navigate(close)}>关闭</ActionButton>
+        {source&&<a className={`${actionStyles.action} ${actionStyles.outline} ${styles.sourceAction}`} data-action-button="v8" data-lids-component="C09" data-variant="outline" href={source} target="_blank" rel="noreferrer"><span className={actionStyles.label}>打开小红书<IntelligenceIcon name="external" size={16}/></span></a>}
+        <ActionButton id="target-drawer-close" onClick={()=>navigate(close)}><IntelligenceIcon name="close" size={16}/>关闭</ActionButton>
       </div>
     </div></div>
     {t&&<nav className="c-dw-tabs" aria-label="目标检查器页签">{[['overview','最近观察'],['works','作品'],['patrol','巡查']].map(([key,label])=><Link key={key} className={`c-dw-tab${tab===key?' c-dw-tab-on':''}`} aria-current={tab===key?'page':undefined} to={listHref(params,{dtab:key??'overview',inspect_panel:null,inspect_work:null})}>{label}</Link>)}</nav>}

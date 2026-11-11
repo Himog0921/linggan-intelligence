@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { ActionButton } from '../../../shared/ActionButton';
 import styles from './TargetToolbar.module.css';
 import { TargetSelect } from './TargetSelect';
@@ -52,7 +53,7 @@ export function Toolbar({
       <div className={styles.actions}>
         <Link className={styles.sort} to={listHref(params, { sort: 'last' })} aria-label="按最近观察排序">最近观察 ↓</Link>
         <ActionButton disabled={!selected.length || commands.busy} onClick={openBatch}>批量编辑{selected.length > 0 && <strong>{selected.length}</strong>}</ActionButton>
-        <ActionButton variant="primary" disabled={commands.busy} onClick={() => setOpen(true)}>＋ 新建目标</ActionButton>
+        <ActionButton variant="primary" disabled={commands.busy} onClick={() => setOpen(true)}><IntelligenceIcon name="add" size={16}/>新建目标</ActionButton>
       </div>
       {open && <Modal commands={commands} sectionId="target-domain-modal" initialFocus='input[name="identity"]' id="target-domain-title" className={`c-tg-batch-dialog ${styles.dialog}`} onClose={requestClose}>
         <header><h2 id="target-domain-title">新建观察目标</h2><p>选择观察对象与所属领域。</p></header>

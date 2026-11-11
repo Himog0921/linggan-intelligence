@@ -146,7 +146,7 @@ describe('原目标弹窗的几何与初始选择', () => {
       const { rerender } = render(<MemoryRouter><Toolbar list={null} params={new URLSearchParams({ domain: current })} selected={[]} commands={commands()} openBatch={vi.fn()} /></MemoryRouter>);
       rerender(<MemoryRouter><Toolbar list={read} params={new URLSearchParams({ domain: current })} selected={[]} commands={commands()} openBatch={vi.fn()} /></MemoryRouter>);
       expect(screen.queryByRole('textbox', { name: '创作者主页链接、ID 或关键词' })).not.toBeInTheDocument();
-      fireEvent.click(screen.getByRole('button', { name: '＋ 新建目标' }));
+      fireEvent.click(screen.getByRole('button', { name: '新建目标' }));
       const dialog = screen.getByRole('dialog', { name: '新建观察目标' });
       expect(screen.getByRole('textbox', { name: '创作者主页链接、ID 或关键词' })).toHaveFocus();
       fireEvent.change(screen.getByRole('textbox', { name: '创作者主页链接、ID 或关键词' }), { target: { value: 'ad0000000000000000000992' } });
@@ -159,13 +159,13 @@ describe('原目标弹窗的几何与初始选择', () => {
   it('收起新建目标必须明确保留输入，重新打开保留草稿且没有发送命令', () => {
     const actions=commands();
     render(<MemoryRouter><Toolbar list={list} params={new URLSearchParams()} selected={[]} commands={actions} openBatch={vi.fn()}/></MemoryRouter>);
-    fireEvent.click(screen.getByRole('button',{name:'＋ 新建目标'}));
+    fireEvent.click(screen.getByRole('button',{name:'新建目标'}));
     fireEvent.change(screen.getByRole('textbox',{name:'创作者主页链接、ID 或关键词'}),{target:{value:'合成未提交目标'}});
     fireEvent.click(screen.getByRole('button',{name:'取消'}));
     expect(screen.getByRole('region',{name:'保留目标输入'})).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button',{name:'收起并保留输入'}));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button',{name:'＋ 新建目标'}));
+    fireEvent.click(screen.getByRole('button',{name:'新建目标'}));
     expect(screen.getByRole('textbox',{name:'创作者主页链接、ID 或关键词'})).toHaveValue('合成未提交目标');
     expect(actions.run).not.toHaveBeenCalled();
   });

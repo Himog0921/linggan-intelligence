@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import * as api from './workbenchApi';
@@ -544,7 +545,7 @@ export function MaterialDesk({
   return <div className={`desk immersive-desk${focus ? ' is-focused' : ''}${shelfOpen ? '' : ' no-search'}`}>
     {shelfOpen ? <aside className="d-search" id="deskSearch" aria-label="找材料">
       <div className="material-shelf-head"><b>找材料</b>
-        <button type="button" className="modal-x" aria-label="收起找材料" onClick={() => setShelfOpen(false)}>×</button>
+        <button type="button" className="modal-x" aria-label="收起找材料" onClick={() => setShelfOpen(false)}><IntelligenceIcon name="close" size={16}/></button>
       </div>
       <div className="find">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>
@@ -615,7 +616,7 @@ export function MaterialDesk({
                   if (focus === frame.work.workId) { setFocus(null); fit(); } else focusFrame(frame);
                 }}>{focus === frame.work.workId ? '退出专注' : '专注'}</button>
                 <button type="button" className="frame-command" onClick={event => openSettings(frame, event)}>
-                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14M7 3v6M13 11v6" /></svg>设置
+                  <IntelligenceIcon name="adjust" size={18}/>设置
                 </button>
                 <button type="button" className="btn sm" onClick={() => onOpenWork(frame.work.workId)}>去稿件</button>
               </div>
@@ -652,19 +653,19 @@ export function MaterialDesk({
       </div>
       {focused ? <div className="focus-bar">
         <button type="button" className="focus-back" onClick={() => { setEditor(null); setFocus(null); fit(); }}>
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 4-6 6 6 6M4 10h13" /></svg>返回全桌
+          <IntelligenceIcon name="back" size={18}/>返回全桌
         </button>
         <span><button type="button" className="btn sm primary" onClick={() => onOpenWork(focused.work.workId)}>去稿件</button></span>
       </div> : null}
       {sourceFocus ? <section className="desk-editor d-insp" role="region" aria-label="来源原文">
-        <div className="insp-head"><b>来源原文</b><span className="grow" /><button type="button" className="modal-x" aria-label="收起原文" onClick={onClearSourceFocus}>×</button></div>
+        <div className="insp-head"><b>来源原文</b><span className="grow" /><button type="button" className="modal-x" aria-label="收起原文" onClick={onClearSourceFocus}><IntelligenceIcon name="close" size={16}/></button></div>
         <div className="insp-body">
           <p className="insp-source">{currentDocument.excerpts.find(item => item.citation.sourceRef === sourceFocus.sourceRef && item.citation.sourceVersion === sourceFocus.sourceVersion && item.citation.start === sourceFocus.start && item.citation.end === sourceFocus.end)?.selectedText ?? '这段原文暂时读不到。'}</p>
           <p className="insp-source-meta">{kindLabel[sourceFocus.sourceKind] ?? '来源'} · 采集于 {new Date(sourceFocus.asOf).toLocaleDateString('zh-CN')}</p>
         </div>
       </section> : null}
       {editorCard && editor?.kind === 'memo' && !sourceFocus ? <section className="desk-editor d-insp" role="region" aria-label="材料思路" ref={inspector} style={inspectorStyle(editor.anchor, inspectorHeight)}>
-        <div className="insp-head"><b>材料思路</b><span className="grow" /><button type="button" className="modal-x" aria-label="收起编辑" onClick={() => setEditor(null)}>×</button></div>
+        <div className="insp-head"><b>材料思路</b><span className="grow" /><button type="button" className="modal-x" aria-label="收起编辑" onClick={() => setEditor(null)}><IntelligenceIcon name="close" size={16}/></button></div>
         <div className="insp-body">
           <p className="editor-caption">{editorCard.text}</p>
           {editorCard.note ? <>
@@ -677,7 +678,7 @@ export function MaterialDesk({
         <div className="insp-foot"><button type="button" className="btn sm" onClick={() => setEditor(null)}>完成</button></div>
       </section> : null}
       {editorCard && editor?.kind === 'role' && !sourceFocus ? <section className="desk-editor d-insp" role="region" aria-label="材料用途" ref={inspector} style={inspectorStyle(editor.anchor, inspectorHeight)}>
-        <div className="insp-head"><b>材料用途</b><span className="grow" /><button type="button" className="modal-x" aria-label="收起编辑" onClick={() => setEditor(null)}>×</button></div>
+        <div className="insp-head"><b>材料用途</b><span className="grow" /><button type="button" className="modal-x" aria-label="收起编辑" onClick={() => setEditor(null)}><IntelligenceIcon name="close" size={16}/></button></div>
         <div className="insp-body">
           <p className="editor-caption">{editorCard.text}</p>
           <div className="role-picks" role="group" aria-label="材料用途">
@@ -686,14 +687,14 @@ export function MaterialDesk({
         </div>
       </section> : null}
       {editorCard && editor?.kind === 'source' && !sourceFocus ? <section className="desk-editor d-insp" role="region" aria-label="原文与来源" ref={inspector} style={inspectorStyle(editor.anchor, inspectorHeight, 440)}>
-        <div className="insp-head"><b>{editorCard.kind} · 原文与来源</b><span className="grow" /><button type="button" className="modal-x" aria-label="收起编辑" onClick={() => setEditor(null)}>×</button></div>
+        <div className="insp-head"><b>{editorCard.kind} · 原文与来源</b><span className="grow" /><button type="button" className="modal-x" aria-label="收起编辑" onClick={() => setEditor(null)}><IntelligenceIcon name="close" size={16}/></button></div>
         <div className="insp-body">
           <div className="insp-source">{editorCard.text}</div>
           <div className="insp-source-meta">{editorCard.meta}</div>
         </div>
       </section> : null}
       {settingsFrame && !sourceFocus && !editorCard ? <section className="desk-editor d-insp" role="region" aria-label="选题框设置" ref={inspector} style={inspectorStyle(settingsAnchor, inspectorHeight, 340)}>
-        <div className="insp-head"><b>选题框设置</b><span className="grow" /><button type="button" className="modal-x" aria-label="关闭设置" onClick={() => setSettingsFor(null)}>×</button></div>
+        <div className="insp-head"><b>选题框设置</b><span className="grow" /><button type="button" className="modal-x" aria-label="关闭设置" onClick={() => setSettingsFor(null)}><IntelligenceIcon name="close" size={16}/></button></div>
         <div className="insp-body">
           {settingsFrame.work.workId === currentWorkId ? <>
             <p className="editor-caption">改完自动保存到这篇稿件。</p>
@@ -726,23 +727,23 @@ export function MaterialDesk({
         <div className="desk-tool-group material-tools" role="group" aria-label="材料与选题">
           <span className="desk-current">{current ? <>取材到 <b>{current.title}</b></> : '选一个选题框，开始组料'}</span>
           <button type="button" className="desk-tool" aria-expanded={shelfOpen} aria-controls="deskSearch" onClick={() => { setEditor(null); setSettingsFor(null); setShelfOpen(open => !open); }}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg>找材料
+            <IntelligenceIcon name="search" size={18}/>找材料
           </button>
           <span className="tool-divider" aria-hidden="true" />
           <button type="button" className="desk-tool" aria-label="添加便签" title="添加便签" onClick={onAddNote}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h16v11l-5 5H4ZM15 20v-5h5M8 9h8M8 12h5" /></svg>便签
+            <IntelligenceIcon name="sticky" size={18}/>便签
           </button>
           <button type="button" className="desk-tool" aria-label="新建选题框" title="新建选题框" disabled={onCreateFramePending} onClick={() => void onCreateFrame()}>
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v5M15 4h5v5M20 15v5h-5M9 20H4v-5M8 12h8M12 8v8" /></svg>{onCreateFramePending ? '正在建…' : '选题框'}
+            <IntelligenceIcon name="frame-add" size={18}/>{onCreateFramePending ? '正在建…' : '选题框'}
           </button>
         </div>
         <div className="desk-tool-group view-tools" role="group" aria-label="画布视图">
           <div className="zoom-box">
-            <button type="button" aria-label="缩小" disabled={view.zoom <= MIN_ZOOM} onClick={() => zoomBy(0.8)}>−</button>
+            <button type="button" aria-label="缩小" disabled={view.zoom <= MIN_ZOOM} onClick={() => zoomBy(0.8)}><IntelligenceIcon name="zoom-out" size={16}/></button>
             <span role="status" aria-label="画布缩放">{Math.round(view.zoom * 100)}%</span>
-            <button type="button" aria-label="放大" disabled={view.zoom >= MAX_ZOOM} onClick={() => zoomBy(1.25)}>＋</button>
+            <button type="button" aria-label="放大" disabled={view.zoom >= MAX_ZOOM} onClick={() => zoomBy(1.25)}><IntelligenceIcon name="zoom-in" size={16}/></button>
           </div>
-          <button type="button" className="btn sm" onClick={() => { setFocus(null); fit(); }}>看全部</button>
+          <button type="button" className="btn sm" onClick={() => { setFocus(null); fit(); }}><IntelligenceIcon name="fit" size={16}/>看全部</button>
         </div>
       </div>
       {saveFailed ? <span role="status" className="desk-hint">位置没有保存成功，刷新后会回到原位</span> : null}

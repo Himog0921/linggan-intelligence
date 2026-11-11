@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useQuery } from '@tanstack/react-query';
 import { fetchDossier } from './dossierApi';
 import { dossierKey } from './evidenceKeys';
@@ -171,7 +172,7 @@ export function Inspector(props: InspectorProps) {
   const title = dossier && work ? dossier.note.displayTitle ?? '无标题' : work ? workTitle(work) : '请选择一个作品材料集合';
   const originalUrl = work?.platform === 'xhs' ? detail.data?.inspector.sourceNoteUrl : null;
   const originalLink = originalUrl ? (
-    <a className={`${actionStyles.action} ${actionStyles.outline} ${styles.openOriginal}${drawer ? '' : ` ${styles.openOriginalTool}`}`} href={originalUrl} target="_blank" rel="noopener noreferrer">打开原文</a>
+    <a className={`${actionStyles.action} ${actionStyles.outline} ${styles.openOriginal}${drawer ? '' : ` ${styles.openOriginalTool}`}`} href={originalUrl} target="_blank" rel="noopener noreferrer"><IntelligenceIcon name="external" size={16}/>打开原文</a>
   ) : null;
 
   useEffect(() => {

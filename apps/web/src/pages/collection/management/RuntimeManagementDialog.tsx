@@ -1,3 +1,4 @@
+import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useEffect, useRef, useState } from 'react';
 import { useBlocker } from 'react-router';
 import { ModalDialog } from '../../../corpus/ModalDialog';
@@ -30,7 +31,7 @@ export function RuntimeManagementDialog({onClose}:{onClose:()=>void}) {
   function keepEditing(){setLeaving(null);if(blocker.state==='blocked')blocker.reset();}
   function completeLeave(){allowingExit.current=true;if(blocker.state==='blocked')blocker.proceed();else onClose();}
   return <ModalDialog className={`c-run-dialog ${styles.dialog}`} labelledBy="runtime-manager-title" closeOnBackdrop onClose={requestClose} setup={dialog=>{document.documentElement.classList.add('c-run-dialog-open');return()=>{if(![...document.querySelectorAll('dialog[open]')].some(open=>open!==dialog))document.documentElement.classList.remove('c-run-dialog-open');};}}>
-    <header className={styles.heading}><h2 id="runtime-manager-title">工位管理</h2><ActionButton variant="quiet" data-initial-focus aria-label="关闭工位管理" onClick={requestClose}>关闭</ActionButton></header>
+    <header className={styles.heading}><h2 id="runtime-manager-title">工位管理</h2><ActionButton variant="quiet" data-initial-focus aria-label="关闭工位管理" onClick={requestClose}><IntelligenceIcon name="close" size={16}/>关闭</ActionButton></header>
     <div ref={content} className={styles.body}>
       <LoadingState
         phase={read.error ? 'stale_error' : !read.data?.projection ? (read.loading ? 'initial' : 'stale_error') : read.refreshing ? 'refreshing' : 'ready'}
