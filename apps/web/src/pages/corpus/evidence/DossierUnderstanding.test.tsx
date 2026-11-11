@@ -39,8 +39,8 @@ it('展示同一Card的摘要与知识单元，图片方法保留，打开与刷
   mount();
   expect(await screen.findByText('来自同一张卡片的整篇摘要。')).toBeVisible();
   expect(screen.getByText('图片提供的具体步骤。')).toBeVisible();
-  expect(screen.getByText(/本次按已取得的材料理解/)).toBeVisible();
-  expect(screen.getByText(/图片底部小字不清楚/)).toBeVisible();
+  expect(screen.queryByText(/本次按已取得的材料理解/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/图片底部小字不清楚/)).not.toBeInTheDocument();
   expect(fetch).toHaveBeenCalledTimes(1);
   const [path, init] = fetch.mock.calls[0]! as unknown as [string, RequestInit];
   expect(path).toContain('/content-understanding/latest?');
@@ -151,13 +151,13 @@ it('材料已准备仍明确尚无理解结果，空缺口不加不适用或无�
   expect(screen.queryByRole('list')).not.toBeInTheDocument();
   expect(screen.queryByText(/不适用|没有文字|OCR/)).not.toBeInTheDocument();
 });
-it('已保存视频只说明一次实际理解范围，不重复泛化缺口提示', async () => {
+it('已保存视频展示内容，阅读正文不插入处理范围和模型诊断', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => response(saved(), work, { ...ready, kind: 'video', scopeNote: videoScope })));
   mount();
-  expect(await screen.findByText(videoScope)).toBeVisible();
-  expect(screen.getAllByText(videoScope)).toHaveLength(1);
+  expect(await screen.findByText('来自同一张卡片的整篇摘要。')).toBeVisible();
+  expect(screen.queryByText(videoScope)).not.toBeInTheDocument();
   expect(screen.queryByText(/本次按已取得的材料理解/)).not.toBeInTheDocument();
-  expect(screen.getByText(/图片底部小字不清楚/)).toBeVisible();
+  expect(screen.queryByText(/图片底部小字不清楚/)).not.toBeInTheDocument();
 });
 it.each([
   null, {}, { ...ready, state: 'complete' }, { ...ready, kind: 'movie' },

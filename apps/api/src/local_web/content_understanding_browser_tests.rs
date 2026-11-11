@@ -33,6 +33,7 @@ async fn content_understanding_real_browser_chain() {
     .unwrap();
     let model = setup::prepare_with_actual_probe(&db, &endpoint.url, &session, &adapter).await;
     l1_setup::configure_high(&db, &model).await;
+    let deep_config = configure_deep(&db, &model).await;
     session.request_drain().await.unwrap();
     session.complete_drain().await.unwrap();
     drop(session);
@@ -81,7 +82,9 @@ async fn content_understanding_real_browser_chain() {
     let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
     fs::write(output.join("fixture.json"), serde_json::to_vec_pretty(&json!({
         "origin":origin,"domain":dossier::DOMAIN,"work":works[0],"unprocessed":works[1],"body":body,
-        "provider":"owned loopback synthetic response", "realModelQualityVerified":false
+        "provider":"owned loopback synthetic response", "realModelQualityVerified":false,
+        "deepConfigRef":deep_config.task_config_ref, "deepRevision":deep_config.revision,
+        "endpointRef":model.endpoint
     })).unwrap()).unwrap();
     let status = std::process::Command::new(std::env::var_os("WEB_APP_PROOF_NODE").unwrap())
         .arg(
@@ -94,6 +97,16 @@ async fn content_understanding_real_browser_chain() {
     let _ = server.await;
     drain.request();
     worker.await.unwrap().unwrap();
+    let deep_calls = endpoint
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|request| {
+            serde_json::from_str::<Value>(&wire::text(request, "user"))
+                .is_ok_and(|packet| packet["question"].is_string())
+        })
+        .count();
     endpoint.finish().await;
     assert!(status.success(), "browser report: {}", output.display());
     let report: Value =
@@ -108,7 +121,63 @@ async fn content_understanding_real_browser_chain() {
     let counts: (i64, i64) = sqlx::query_as("SELECT (SELECT count(*) FROM linggan_content_understanding_request),(SELECT count(*) FROM linggan_model_invocation WHERE task_key='content_understanding')")
         .fetch_one(db.pool()).await.unwrap();
     assert_eq!(counts, (1, 1), "refreshing and rereading do not regenerate");
+    let deep_counts: (i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT
+          (SELECT count(*) FROM linggan_content_understanding_deep WHERE invocation_ref IS NULL),
+          (SELECT count(*) FROM linggan_content_understanding_deep d
+             JOIN linggan_model_invocation i USING(invocation_ref)
+             WHERE i.task_key='content_understanding_deep' AND i.state='succeeded'),
+          (SELECT count(*) FROM linggan_content_understanding_deep_request),
+          (SELECT count(*) FROM linggan_model_invocation WHERE task_key='content_understanding_deep'),
+          (SELECT count(*) FROM linggan_content_understanding_deep_request
+             JOIN linggan_ai_batch_item_control USING(item_ref)
+             WHERE failure_code='ai_output_invalid' AND attempt_count=1)"
+    ).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(deep_counts, (1, 1, 2, 2, 1));
+    assert_eq!(deep_calls, 2);
     db.pool().close().await;
+}
+
+async fn configure_deep(
+    db: &linggan_storage_postgres::Database,
+    model: &setup::Configured,
+) -> linggan_intelligence::ai_foundation::task_config::TaskConfigReceipt {
+    use linggan_intelligence::ai_foundation::{
+        TaskKey,
+        capability::ModelLimits,
+        control::BudgetPolicy,
+        control_store::ControlScope,
+        task_config::{ModelSelection, SaveTaskConfig, save_task_config},
+    };
+    let capability_ref = sqlx::query_scalar("SELECT capability_ref FROM linggan_model_capability WHERE identity_ref=(SELECT identity_ref FROM linggan_model_capability WHERE capability_ref=$1) AND endpoint_ref=$2 ORDER BY revision_sequence DESC LIMIT 1")
+        .bind(model.capability).bind(model.endpoint).fetch_one(db.pool()).await.unwrap();
+    let config = save_task_config(
+        db,
+        &SaveTaskConfig {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::ContentUnderstandingDeep,
+            expected_revision: 0,
+            model: Some(ModelSelection {
+                model_ref: model.model,
+                capability_ref,
+                limits: ModelLimits {
+                    input_tokens: 8192,
+                    output_tokens: 1024,
+                    timeout_seconds: 30,
+                    attempts: 1,
+                    thinking_level: "off".into(),
+                },
+            }),
+            skill_version_ref: None,
+            material_columns: Default::default(),
+            budget: BudgetPolicy::Capped(30_000),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(config.applied);
+    setup::enable(db, ControlScope::Task(TaskKey::ContentUnderstandingDeep)).await;
+    config
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
