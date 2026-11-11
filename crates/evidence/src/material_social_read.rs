@@ -554,7 +554,29 @@ pub async fn read_dossier_comments(
         .flatten()
         .filter_map(|i| i["sourceRef"].as_str()?.parse().ok())
         .collect();
-    let rows=sqlx::query("SELECT comment.material_ref,engagement.like_count,engagement.like_count_state,parent.material_ref AS parent_ref FROM linggan_material_comment comment LEFT JOIN linggan_material_comment_engagement engagement USING(material_ref) LEFT JOIN linggan_material_comment_current parent ON parent.content_public_ref=comment.content_public_ref AND parent.comment_external_id=comment.parent_comment_external_id AND NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction restricted WHERE restricted.content_public_ref=parent.content_public_ref AND restricted.comment_external_id=parent.comment_external_id) WHERE comment.material_ref=ANY($1)").bind(&refs).fetch_all(database.pool()).await?;
+    let rows = sqlx::query(
+        "SELECT comment.material_ref, engagement.like_count, engagement.like_count_state,
+                parent.material_ref AS parent_ref,
+                NULLIF(btrim(comment.author_external_id),'') =
+                    NULLIF(btrim(work_author.author_external_id),'')
+                    AS is_note_author
+         FROM linggan_material_comment comment
+         LEFT JOIN linggan_material_content_author work_author
+              ON work_author.content_public_ref=comment.content_public_ref
+         LEFT JOIN linggan_material_comment_engagement engagement USING(material_ref)
+         LEFT JOIN linggan_material_comment_current parent
+              ON parent.content_public_ref=comment.content_public_ref
+             AND parent.comment_external_id=comment.parent_comment_external_id
+             AND NOT EXISTS (
+                 SELECT 1 FROM linggan_material_comment_restriction restricted
+                 WHERE restricted.content_public_ref=parent.content_public_ref
+                   AND restricted.comment_external_id=parent.comment_external_id
+             )
+         WHERE comment.material_ref=ANY($1)",
+    )
+    .bind(&refs)
+    .fetch_all(database.pool())
+    .await?;
     for item in page["items"].as_array_mut().into_iter().flatten() {
         if let Some(row) = rows
             .iter()
@@ -563,6 +585,8 @@ pub async fn read_dossier_comments(
             item["likeCount"] = serde_json::json!(row.get::<Option<i64>, _>("like_count"));
             item["likeState"] = serde_json::json!(row.get::<Option<String>, _>("like_count_state"));
             item["parentSourceRef"] = serde_json::json!(row.get::<Option<Uuid>, _>("parent_ref"));
+            item["isNoteAuthor"] =
+                serde_json::json!(row.try_get::<Option<bool>, _>("is_note_author")?);
         }
     }
     Ok(page)

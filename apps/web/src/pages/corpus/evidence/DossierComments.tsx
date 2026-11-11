@@ -9,7 +9,11 @@ import styles from './Dossier.module.css';
 function CommentItem({ item, replies, orphan }: { item: DossierComment; replies: DossierComment[]; orphan: boolean }) {
   return (
     <article className={styles.comment} data-relation={item.relation}>
-      <p className={styles.commentText}>{item.body || '这条评论没有取得文字'}{' '}<span className={styles.commentLikes}>赞 <span>{item.likeCount === null ? '—' : formatNumber(item.likeCount)}</span></span></p>
+      <p className={styles.commentText}>
+        {item.isNoteAuthor === true ? <><span className={styles.commentAuthor}>作者</span>{' '}</> : null}
+        {item.body || '这条评论没有取得文字'}{' '}
+        <span className={styles.commentLikes}>赞 <span>{item.likeCount === null ? '—' : formatNumber(item.likeCount)}</span></span>
+      </p>
       {orphan ? <p className={styles.note}>它回复的那条评论还没读到。</p> : null}
       {replies.length > 0 ? (
         <div className={styles.replies}>

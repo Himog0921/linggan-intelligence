@@ -300,16 +300,35 @@ async fn dossier_http_batch_preserves_order_common_cutoff_and_individual_not_fou
 
 async fn seed_comments(db: &Database, count: usize) {
     for index in 0..count {
-        let reply = index == 1;
-        let body = if index == 0 {
-            format!("{}末尾原文", "合成评论。".repeat(900))
-        } else {
-            format!("合成评论 {index}，用于检查回复关系和分页。")
+        let reply = matches!(index, 1 | 4);
+        let body = match index {
+            0 => format!("{}末尾原文", "合成评论。".repeat(900)),
+            1 => "作者 收到，会继续优化。".to_owned(),
+            2 => "作者 你好，请问怎么用？".to_owned(),
+            4 => "已收到，会继续优化。".to_owned(),
+            _ => format!("合成评论 {index}，用于检查回复关系和分页。"),
         };
         let mut payload = json!({"commentId":format!("c{index}"),"noteId":"dossier-note","text":body,"authorId":"synthetic-reader","likes":7});
+        if index == 3 {
+            payload.as_object_mut().unwrap().remove("authorId");
+        }
         if reply {
+            payload["authorId"] = json!("synthetic-author");
             payload["parentCommentId"] = json!("c0");
             payload["rootCommentId"] = json!("c0");
+        }
+        if index == 1 {
+            // The flattened DOM is compatible with either a badge or literal text on its own line.
+            payload["sourceTier"] = json!("dom");
+            payload["rawPayload"] = json!(
+                json!({
+                    "author": "合成作者",
+                    "text": body,
+                    "rawText": "合成作者\n作者\n收到，会继续优化。\n08-23\n赞\n回复",
+                    "time": "08-23"
+                })
+                .to_string()
+            );
         }
         dossier_fixture::fixture::submit_package(db,if reply{"replies"}else{"comments"},json!({"contentExternalId":"dossier-note"}),json!({"kind":if reply{"reply"}else{"comment"},"sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":payload})).await;
     }
@@ -349,9 +368,25 @@ async fn dossier_http_comments_keep_full_text_likes_parent_and_page_boundaries()
         .unwrap();
     assert!(root["body"].as_str().unwrap().chars().count() > 4000);
     assert_eq!(root["bodyTruncated"], false);
-    let reply = items.iter().find(|v| v["relation"] == "REPLY").unwrap();
+    let comment_with_body = |body: &str| items.iter().find(|v| v["body"] == body).unwrap();
+    let reply = comment_with_body("已收到，会继续优化。");
+    assert_eq!(reply["relation"], "REPLY");
     assert_eq!(reply["parentSourceRef"], root["sourceRef"]);
     assert_eq!(reply["likeCount"], 7);
+    assert_eq!(reply["isNoteAuthor"], true);
+    assert_eq!(
+        reply["anonymousAuthorContext"]["platformUserIdReturned"],
+        false
+    );
+    assert!(reply.get("authorId").is_none());
+    assert!(reply.get("rawDomPayload").is_none());
+    let reader = comment_with_body("作者 你好，请问怎么用？");
+    assert_eq!(reader["isNoteAuthor"], false);
+    let unknown = comment_with_body("合成评论 3，用于检查回复关系和分页。");
+    assert!(unknown.get("isNoteAuthor").unwrap().is_null());
+    let historical_reply = comment_with_body("作者 收到，会继续优化。");
+    assert_eq!(historical_reply["isNoteAuthor"], true);
+    assert!(historical_reply.get("rawPayload").is_none());
 }
 
 #[tokio::test]

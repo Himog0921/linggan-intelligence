@@ -155,7 +155,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+.commentAuthor,
 .commentLikes span { color: var(--lgi-signal-ink); }
+
+.commentAuthor {
+  margin-inline-end: var(--lgi-space-1);
+  font-weight: var(--lgi-type-label-weight);
+}
 
 .commentText {
   margin: var(--lgi-space-1) 0 0;

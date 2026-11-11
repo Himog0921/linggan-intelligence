@@ -83,5 +83,12 @@ export interface ReadingReviewReceipt {
   commandRef: string; unitRef: string; action: ReadingReviewAction;
   currentRevisionRef: string | null; adoption: Adoption | null; verification: Verification | null; reviewRef: string | null;
 }
-export interface DossierComment { sourceRef: string; parentSourceRef: string | null; relation: 'ROOT' | 'REPLY'; body: string | null; likeCount: number | null }
+export interface DossierComment {
+  sourceRef: string;
+  parentSourceRef: string | null;
+  relation: 'ROOT' | 'REPLY';
+  body: string | null;
+  isNoteAuthor: boolean | null;
+  likeCount: number | null;
+}
 export interface DossierCommentPage { items: DossierComment[]; total: number | null; nextCursor: string | null }

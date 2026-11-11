@@ -1,4 +1,4 @@
-import { bool, decode, list, obj, optNum, optObj, optStr, ShapeError, str, type Json } from '../../../shared/decode';
+import { bool, decode, list, obj, optBool, optNum, optObj, optStr, ShapeError, str, type Json } from '../../../shared/decode';
 import { apiPath, mediaPath } from './evidencePaths';
 import { choice, count, parseBlocks, parseIssue, strings } from './dossierBlockDecode';
 import { parseReadingSections } from './dossierReadingDecode';
@@ -95,5 +95,16 @@ export function parseReadingReceipt(value: unknown): ReadingReviewReceipt {
   });
 }
 export function parseDossierComments(value: unknown): DossierCommentPage {
-  return decode(value, root => ({ items: list(root, 'items', row => ({ sourceRef: str(row, 'sourceRef'), parentSourceRef: optStr(row, 'parentSourceRef'), relation: choice(row.relation, ['ROOT', 'REPLY'], 'relation'), body: optStr(row, 'body'), likeCount: optionalCount(row, 'likeCount') })), total: optionalCount(root, 'total'), nextCursor: optStr(root, 'nextCursor') }));
+  return decode(value, root => ({
+    items: list(root, 'items', row => ({
+      sourceRef: str(row, 'sourceRef'),
+      parentSourceRef: optStr(row, 'parentSourceRef'),
+      relation: choice(row.relation, ['ROOT', 'REPLY'], 'relation'),
+      body: optStr(row, 'body'),
+      isNoteAuthor: optBool(row, 'isNoteAuthor'),
+      likeCount: optionalCount(row, 'likeCount'),
+    })),
+    total: optionalCount(root, 'total'),
+    nextCursor: optStr(root, 'nextCursor'),
+  }));
 }
