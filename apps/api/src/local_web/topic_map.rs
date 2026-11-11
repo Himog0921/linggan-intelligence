@@ -68,6 +68,10 @@ pub(super) fn routes(
             "/api/local/topic-map/comment-assignments",
             get(comment_assignments),
         )
+        .route(
+            "/api/local/topic-map/comment-assignments/retry",
+            post(retry_comment_assignment),
+        )
         .route("/api/local/topic-map", get(snapshot))
         .route("/api/local/topic-map/context", get(page_context))
         .route("/api/local/topic-map/overview", get(overview))
@@ -739,5 +743,22 @@ async fn comment_assignments(
     };
     crate::local_web::ai_settings::respond(
         linggan_intelligence::ai_foundation::topic_comment_source::read(db, &query).await,
+    )
+}
+
+async fn retry_comment_assignment(
+    State(state): State<LocalWebState>,
+    Json(body): Json<
+        linggan_intelligence::ai_foundation::topic_research_automation::RetryCommentAssignment,
+    >,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research_automation::retry_comment_assignment(
+            db, &body,
+        )
+        .await,
     )
 }

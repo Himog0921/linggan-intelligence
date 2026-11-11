@@ -69,7 +69,7 @@ pub async fn read(db: &Database, query: &Query) -> Result<Value, FoundationError
         if query.topic_ref.is_some() && signals.is_empty() {
             continue;
         }
-        items.push(json!({"requestRef":request,"windowRef":row.get::<Option<Uuid>,_>("window_ref"),"workRef":row.get::<Uuid,_>("work_ref"),"sourceRef":row.get::<Uuid,_>("source_ref"),"commentExternalId":row.get::<String,_>("comment_external_id"),"sourceAvailable":input.is_some(),"assignmentState":if input.is_none() || signals.iter().any(|s|s["assignmentState"]=="unavailable"){"unavailable"}else{state.as_str()},"signals":signals}));
+        items.push(json!({"requestRef":request,"windowRef":row.get::<Option<Uuid>,_>("window_ref"),"workRef":row.get::<Uuid,_>("work_ref"),"sourceRef":row.get::<Uuid,_>("source_ref"),"commentExternalId":row.get::<String,_>("comment_external_id"),"sourceAvailable":input.is_some(),"retryable":input.is_some() && row.get::<bool,_>("retryable"),"assignmentState":if input.is_none() || signals.iter().any(|s|s["assignmentState"]=="unavailable"){"unavailable"}else{state.as_str()},"signals":signals}));
     }
     Ok(json!({"domainRef":query.domain_ref,"items":items}))
 }

@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { ApiError } from '../../shared/api';
+import { useEffect, useRef, useState } from 'react';
 import { ActionButton } from '../../shared/ActionButton';
-import { readCommentAssignments, type CommentAssignment, type CommentAssignmentScope } from './commentAssignmentsApi';
+import { readCommentAssignments, retryCommentAssignment, type CommentAssignment, type CommentAssignmentScope } from './commentAssignmentsApi';
 import { c } from './styles';
 type Props = CommentAssignmentScope & { compact?: boolean; revision?: number };
 const stateLabels = { not_analyzed: '尚未分析', pending: '挂靠中', failed: '挂靠失败', unavailable: '归属待更新' };
@@ -38,7 +39,36 @@ function AssignmentList({ domain, work, request, compact = false, revision = 0 }
             {signal.assignmentState === 'complete' && signal.assignment?.status === 'matched' ? signal.assignment.matches.map(match => <a key={match.definitionRef} href={`/topics?${new URLSearchParams({ tm: '1', domainRef: domain, topicRef: match.topicRef })}`}>{match.label}</a>) : null}
           </div>
         </div>)}
+        {item.sourceAvailable && item.retryable && item.windowRef ? <RetryAssignment key={item.windowRef} domain={domain} windowRef={item.windowRef} onRetried={() => setRetry(value => value + 1)} /> : null}
         {!compact ? <div className={c('lgi-tm-row')}><a href={`/corpus/comments?${new URLSearchParams({ domain, view: 'comments', commentWorkRef: item.workRef, commentExternalId: item.commentExternalId, detail: 'comment', researchRequestRef: item.requestRef })}`}>查看原评论</a><a href={`/corpus/comments?${new URLSearchParams({ domain, view: 'comments', workRef: item.workRef })}`}>查看所属作品评论</a></div> : null}
       </article>)}
   </section>;
+}
+
+function RetryAssignment({ domain, windowRef, onRetried }: { domain: string; windowRef: string; onRetried: () => void }) {
+  const command = useRef<string | null>(null);
+  const inFlight = useRef(false);
+  const mounted = useRef(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  async function retry() {
+    if (inFlight.current) return;
+    inFlight.current = true; setBusy(true); setError('');
+    command.current ??= crypto.randomUUID();
+    try {
+      await retryCommentAssignment({ commandRef: command.current, domainRef: domain, windowRef });
+      if (mounted.current) onRetried();
+    } catch (failure) {
+      if (failure instanceof ApiError && failure.answered) command.current = null;
+      if (mounted.current) {
+        setError(failure instanceof ApiError && !failure.answered ? '回执未知' : '重试未完成');
+        onRetried();
+      }
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setBusy(false);
+    }
+  }
+  return <div className={c('lgi-tm-row')}><ActionButton busy={busy} onClick={() => void retry()}>重试挂靠</ActionButton>{error ? <span role="alert">{error}</span> : null}</div>;
 }

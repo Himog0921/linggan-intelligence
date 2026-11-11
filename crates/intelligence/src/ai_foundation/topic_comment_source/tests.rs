@@ -107,9 +107,86 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     .await
     .unwrap();
     assert_eq!(stages, vec![2, 3]);
+    let retry = automation::RetryCommentAssignment {
+        command_ref: Uuid::new_v4(),
+        domain_ref: support::D,
+        window_ref: window,
+    };
+    assert!(
+        automation::retry_comment_assignment(&db, &retry)
+            .await
+            .is_err()
+    );
+    let failed_items: Vec<Uuid> =
+        sqlx::query_scalar("SELECT item_ref FROM linggan_topic_research_stage WHERE window_ref=$1")
+            .bind(window)
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    for item in failed_items {
+        fail_item(&db, item, model_config, &executor, "ai_provider_failed").await;
+    }
+    assert_eq!(
+        read(&db, &query).await.unwrap()["items"][0]["retryable"],
+        true
+    );
+    automation::change(
+        &db,
+        &automation::Change {
+            command_ref: Uuid::new_v4(),
+            domain_ref: support::D,
+            expected_revision: 1,
+            enabled: false,
+        },
+    )
+    .await
+    .unwrap();
+    let retried = automation::retry_comment_assignment(&db, &retry)
+        .await
+        .unwrap();
+    assert_eq!(retried.stage_count, 2);
+    assert_eq!(
+        automation::retry_comment_assignment(&db, &retry)
+            .await
+            .unwrap()
+            .run_ref,
+        retried.run_ref
+    );
+    assert!(
+        automation::retry_comment_assignment(
+            &db,
+            &automation::RetryCommentAssignment {
+                command_ref: Uuid::new_v4(),
+                ..retry
+            }
+        )
+        .await
+        .is_err()
+    );
+    let window: Uuid =
+        sqlx::query_scalar("SELECT window_ref FROM linggan_topic_research_window WHERE run_ref=$1")
+            .bind(retried.run_ref)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        read(&db, &query).await.unwrap()["items"][0]["retryable"],
+        false
+    );
     let frozen = owner::frozen(&db, window).await.unwrap();
     assert_eq!(frozen.fragments.len(), 2);
     assert!(frozen.fragments.iter().all(|f| f.speaker == "commenter"));
+    automation::change(
+        &db,
+        &automation::Change {
+            command_ref: Uuid::new_v4(),
+            domain_ref: support::D,
+            expected_revision: 2,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
     let (topic, definition) = seed_topic(&db).await;
     let mut tx = db.pool().begin().await.unwrap();
     let proposed = packet::prepare(&db, &mut tx, window, 2, &frozen)
@@ -216,6 +293,32 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     .await
     .unwrap();
     assert_eq!(count, 0);
+    let latest:Uuid=sqlx::query_scalar("SELECT w.window_ref FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 1").fetch_one(db.pool()).await.unwrap();
+    let items: Vec<Uuid> =
+        sqlx::query_scalar("SELECT item_ref FROM linggan_topic_research_stage WHERE window_ref=$1")
+            .bind(latest)
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    for item in items {
+        fail_item(&db, item, model_config, &executor, "ai_dispatch_unknown").await;
+    }
+    assert_eq!(
+        read(&db, &query).await.unwrap()["items"][0]["retryable"],
+        false
+    );
+    assert!(
+        automation::retry_comment_assignment(
+            &db,
+            &automation::RetryCommentAssignment {
+                command_ref: Uuid::new_v4(),
+                domain_ref: support::D,
+                window_ref: latest
+            }
+        )
+        .await
+        .is_err()
+    );
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'comment-one','synthetic withdrawal')").bind(work).execute(db.pool()).await.unwrap();
     assert!(owner::frozen(&db, window).await.is_err());
     let withdrawn = read(&db, &query).await.unwrap();
@@ -243,6 +346,23 @@ async fn settle_item(
     sqlx::query("UPDATE linggan_ai_batch_item_control ctl SET invocation_ref=$2,attempt_count=1,executed_config_ref=cfg.task_config_ref,executed_skill_version_ref=cfg.skill_version_ref,execution_contract=cfg.execution_contract FROM linggan_ai_batch_item i JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=b.task_config_ref WHERE ctl.item_ref=i.item_ref AND i.item_ref=$1")
    .bind(item).bind(inv).execute(&mut *tx).await.unwrap();
     sqlx::query("UPDATE linggan_ai_batch_item_control SET state='succeeded',usable=true,output='{\"synthetic\":true}',finished_at=scope_001_now(),lease_token=NULL,lease_expires_at=NULL,lease_instance_ref=NULL,lease_instance_generation=NULL WHERE item_ref=$1").bind(item).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+}
+
+async fn fail_item(
+    db: &Database,
+    item: Uuid,
+    model: Uuid,
+    owner: &crate::ai_foundation::executor::ExecutorSession,
+    reason: &str,
+) {
+    let inv = invocation(db, model).await;
+    let mut tx = owner.fence().begin(db, true).await.unwrap();
+    sqlx::query("UPDATE linggan_ai_batch_item_control SET state='running',lease_generation=1,lease_token=$2,lease_instance_ref=$3,lease_instance_generation=$4,lease_expires_at=clock_timestamp()+interval '1 minute' WHERE item_ref=$1")
+   .bind(item).bind(Uuid::new_v4()).bind(owner.fence().instance_ref()).bind(owner.fence().generation()).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE linggan_ai_batch_item_control ctl SET invocation_ref=$2,attempt_count=1,executed_config_ref=cfg.task_config_ref,executed_skill_version_ref=cfg.skill_version_ref,execution_contract=cfg.execution_contract FROM linggan_ai_batch_item i JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=b.task_config_ref WHERE ctl.item_ref=i.item_ref AND i.item_ref=$1")
+   .bind(item).bind(inv).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE linggan_ai_batch_item_control SET state='failed',usable=false,output=NULL,failure_code=$2,finished_at=scope_001_now(),lease_token=NULL,lease_expires_at=NULL,lease_instance_ref=NULL,lease_instance_generation=NULL WHERE item_ref=$1").bind(item).bind(reason).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
 }
 

@@ -35,10 +35,37 @@ pub(super) async fn tick(
     }
     Ok(queued)
 }
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Retry {
+    pub command_ref: Uuid,
+    pub domain_ref: Uuid,
+    pub window_ref: Uuid,
+}
+
+pub async fn retry(db: &Database, request: &Retry) -> Result<Receipt, FoundationError> {
+    let source: Option<String> = sqlx::query_scalar("SELECT w.input_refs->>'semanticRequestRef' FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) WHERE w.window_ref=$1 AND r.domain_ref=$2 AND w.input_refs->>'inputContract'=$3")
+        .bind(request.window_ref).bind(request.domain_ref).bind(super::super::topic_comment_source::CONTRACT).fetch_optional(db.pool()).await?.flatten();
+    let source = source
+        .and_then(|s| s.parse().ok())
+        .ok_or(FoundationError::NotFound)?;
+    enqueue_with_retry(db, request.domain_ref, source, Some(request))
+        .await?
+        .ok_or(FoundationError::Invalid)
+}
+
 pub(crate) async fn enqueue(
     db: &Database,
     domain: Uuid,
     source: Uuid,
+) -> Result<Option<Receipt>, FoundationError> {
+    enqueue_with_retry(db, domain, source, None).await
+}
+async fn enqueue_with_retry(
+    db: &Database,
+    domain: Uuid,
+    source: Uuid,
+    retry: Option<&Retry>,
 ) -> Result<Option<Receipt>, FoundationError> {
     let catalog = crate::topic_map_core::catalog(db, domain)
         .await
@@ -48,7 +75,7 @@ pub(crate) async fn enqueue(
         })?;
     let versions = super::super::topic_comment_source::catalog_versions(&catalog);
     let previous=sqlx::query("SELECT w.input_refs,result.core_json,dispatch.context FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) LEFT JOIN linggan_topic_research_result result USING(window_ref) LEFT JOIN linggan_topic_research_stage s ON s.window_ref=w.window_ref AND s.stage_number=2 LEFT JOIN linggan_topic_research_dispatch dispatch USING(item_ref) WHERE r.domain_ref=$1 AND w.input_refs->>'semanticRequestRef'=$2 ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 1").bind(domain).bind(source.to_string()).fetch_optional(db.pool()).await?;
-    if let Some(previous) = previous {
+    if let Some(previous) = previous.filter(|_| retry.is_none()) {
         let core: Option<serde_json::Value> = previous.get("core_json");
         let context: Option<serde_json::Value> = previous.get("context");
         let manifest: serde_json::Value = previous.get("input_refs");
@@ -71,16 +98,18 @@ pub(crate) async fn enqueue(
         }
     }
     let key=linggan_evidence::creator_discovery::hash(&json!({"contract":super::super::topic_comment_source::CONTRACT,"domain":domain,"semanticRequestRef":source,"versions":versions,"method":crate::topic_map_research_analysis::METHOD_VERSION}).to_string());
-    let command_ref = Uuid::parse_str(&key[..32]).map_err(|_| FoundationError::Invalid)?;
+    let command_ref = retry
+        .map(|r| r.command_ref)
+        .unwrap_or(Uuid::parse_str(&key[..32]).map_err(|_| FoundationError::Invalid)?);
     let mut command = Command::begin(
         db,
         command_ref,
         "topic_comment_assignment",
-        &json!({"domainRef":domain,"semanticRequestRef":source,"catalogVersions":versions}),
+        &match retry { Some(r) => json!({"domainRef":domain,"semanticRequestRef":source,"retryWindowRef":r.window_ref}), None => json!({"domainRef":domain,"semanticRequestRef":source,"catalogVersions":versions}) },
     )
     .await?;
-    if command.replay::<Receipt>()?.is_some() {
-        return Ok(None);
+    if let Some(receipt) = command.replay::<Receipt>()? {
+        return Ok(retry.map(|_| receipt));
     }
     let enabled: Option<bool> = sqlx::query_scalar(
         "SELECT enabled FROM linggan_topic_research_automation WHERE domain_ref=$1 FOR SHARE",
@@ -88,7 +117,7 @@ pub(crate) async fn enqueue(
     .bind(domain)
     .fetch_optional(&mut *command.tx)
     .await?;
-    if enabled != Some(true) {
+    if retry.is_none() && enabled != Some(true) {
         return Err(FoundationError::AdmissionDenied(vec![
             "topic_automation_disabled".into(),
         ]));
@@ -103,6 +132,19 @@ pub(crate) async fn enqueue(
                 .await?;
         active.push(lock_setting(&mut command.tx, task, revision).await?);
     }
+    if let Some(retry) = retry {
+        let allowed: bool = sqlx::query_scalar(include_str!("comment_retry_eligible.sql"))
+            .bind(retry.window_ref)
+            .bind(domain)
+            .bind(source.to_string())
+            .fetch_one(&mut *command.tx)
+            .await?;
+        if !allowed {
+            return Err(FoundationError::AdmissionDenied(vec![
+                "topic_comment_retry_not_available".into(),
+            ]));
+        }
+    }
     let controls=sqlx::query("SELECT enabled FROM linggan_ai_control WHERE scope_key IN('global','executor','task:topic_research_resolve','task:topic_research_resolve_review') ORDER BY scope_key FOR SHARE")
         .fetch_all(&mut *command.tx).await?;
     if controls.len() != 4 || controls.iter().any(|row| !row.get::<bool, _>("enabled")) {
@@ -111,7 +153,7 @@ pub(crate) async fn enqueue(
         ]));
     }
     let pending:i64=sqlx::query_scalar("SELECT count(DISTINCT w.window_ref) FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1 AND b.kind='automatic' AND c.state IN('pending','running')").bind(domain).fetch_one(&mut *command.tx).await?;
-    if pending >= 8 {
+    if retry.is_none() && pending >= 8 {
         return Err(FoundationError::AdmissionDenied(vec![
             "topic_automatic_queue_full".into(),
         ]));
@@ -151,7 +193,11 @@ pub(crate) async fn enqueue(
             command_ref,
             task,
             configs[index],
-            BatchKind::Automatic,
+            if retry.is_some() {
+                BatchKind::Interactive
+            } else {
+                BatchKind::Automatic
+            },
             &inputs,
             &hash,
         )

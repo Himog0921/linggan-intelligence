@@ -19,7 +19,7 @@ export function parseCommentAssignments(value: unknown, scope: CommentAssignment
       const requestRef = d.str(row, 'requestRef'), workRef = d.str(row, 'workRef');
       if (workRef !== scope.work || (scope.request && requestRef !== scope.request)) throw new d.ShapeError('assignmentScope');
       const sourceAvailable = d.bool(row, 'sourceAvailable');
-      return { requestRef, workRef, windowRef: d.optStr(row, 'windowRef'), sourceRef: d.str(row, 'sourceRef'), commentExternalId: d.str(row, 'commentExternalId'), sourceAvailable, assignmentState: state(row),
+      return { requestRef, workRef, windowRef: d.optStr(row, 'windowRef'), sourceRef: d.str(row, 'sourceRef'), commentExternalId: d.str(row, 'commentExternalId'), sourceAvailable, retryable: d.optBool(row, 'retryable') ?? false, assignmentState: state(row),
         signals: sourceAvailable ? d.list(row, 'signals', signal => {
           const evidence = d.obj(signal, 'evidence'), linked = d.optObj(signal, 'assignment');
           return { ordinal: d.num(signal, 'signalOrdinal'), kind: d.str(signal, 'kind'), proposition: d.str(signal, 'proposition'), assignmentState: state(signal),
@@ -35,4 +35,11 @@ export async function readCommentAssignments(scope: CommentAssignmentScope, sign
   const params = new URLSearchParams({ domainRef: scope.domain, workRef: scope.work });
   if (scope.request) params.set('requestRef', scope.request);
   return parseCommentAssignments(await requestJson(`/api/local/topic-map/comment-assignments?${params}`, { signal }), scope);
+}
+
+export async function retryCommentAssignment(body: { commandRef: string; domainRef: string; windowRef: string }) {
+  return d.decode(await requestJson('/api/local/topic-map/comment-assignments/retry', { method: 'POST', body }), row => {
+    if (d.num(row, 'windowCount') !== 1 || d.num(row, 'stageCount') !== 2) throw new d.ShapeError('retryReceipt');
+    return d.str(row, 'runRef');
+  });
 }

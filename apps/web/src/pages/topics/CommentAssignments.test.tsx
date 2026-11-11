@@ -83,3 +83,45 @@ it('refreshes automatic results while mounted and stops after closing', async ()
   await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
   expect(fetch).toHaveBeenCalledTimes(4);
 });
+it('retries only an explicitly eligible window once and reads the new pending result', async () => {
+  let state = 'failed';
+  let release!: (response: Response) => void;
+  const fetch = vi.fn(async (_path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') return new Promise<Response>(resolve => { release = resolve; });
+    return response({ domainRef: 'domain', items: [{ ...item(state, null), retryable: state === 'failed', signals: [signal(state), { ...signal(state), signalOrdinal: 1 }] }] });
+  });
+  vi.stubGlobal('fetch', fetch);
+  render(<CommentAssignments domain="domain" work="work" />);
+  const retry = await screen.findByRole('button', { name: '重试挂靠' });
+  expect(screen.getAllByRole('button', { name: '重试挂靠' })).toHaveLength(1);
+  await userEvent.click(retry);
+  expect(retry).toBeDisabled();
+  const posted = fetch.mock.calls.find(([, init]) => init?.method === 'POST')!;
+  expect(JSON.parse(String(posted[1]?.body))).toMatchObject({ domainRef: 'domain', windowRef: 'window' });
+  state = 'pending';
+  release(response({ runRef: 'retry-run', windowCount: 1, stageCount: 2 }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '重试挂靠' })).not.toBeInTheDocument());
+  expect(screen.getAllByText('挂靠中')).toHaveLength(2);
+});
+it('retains the same command after an unknown receipt and does not offer dispatch-unknown or withdrawn retries', async () => {
+  const bodies: unknown[] = [];
+  let eligible = true;
+  let sourceAvailable = true;
+  vi.stubGlobal('fetch', vi.fn(async (_path: string, init?: RequestInit) => {
+    if (init?.method === 'POST') { bodies.push(JSON.parse(String(init.body))); throw new TypeError('connection closed'); }
+    return response({ domainRef: 'domain', items: [{ ...item('failed', null), retryable: eligible, sourceAvailable }] });
+  }));
+  render(<CommentAssignments domain="domain" work="work" />);
+  await userEvent.click(await screen.findByRole('button', { name: '重试挂靠' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('回执未知');
+  await userEvent.click(screen.getByRole('button', { name: '重试挂靠' }));
+  await waitFor(() => expect(bodies).toHaveLength(2));
+  expect(bodies[0]).toEqual(bodies[1]);
+  eligible = false;
+  await userEvent.click(screen.getByRole('button', { name: '刷新挂靠' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '重试挂靠' })).not.toBeInTheDocument());
+  eligible = true; sourceAvailable = false;
+  await userEvent.click(screen.getByRole('button', { name: '刷新挂靠' }));
+  expect(await screen.findByText('来源不可读')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '重试挂靠' })).not.toBeInTheDocument();
+});

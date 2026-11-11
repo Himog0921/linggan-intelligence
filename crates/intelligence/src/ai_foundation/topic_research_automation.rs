@@ -4,8 +4,9 @@ use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
-mod definition_repair;
 mod comments;
+mod definition_repair;
+pub use comments::{Retry as RetryCommentAssignment, retry as retry_comment_assignment};
 mod producer;
 pub use producer::tick;
 
