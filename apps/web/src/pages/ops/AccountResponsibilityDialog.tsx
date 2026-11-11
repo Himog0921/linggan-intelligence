@@ -13,13 +13,19 @@ export function AccountResponsibilityDialog({
   account,
   members,
   close,
+  suggestedRecipient,
 }: {
   account: api.Account;
   members: api.ActiveMember[];
   close: () => void;
+  suggestedRecipient?: string;
 }) {
   const client = useQueryClient();
-  const [nextMemberRef, setNextMemberRef] = useState(account.currentResponsibleMemberRef || "");
+  const [nextMemberRef, setNextMemberRef] = useState(
+    members.some(member => member.memberRef === suggestedRecipient)
+      ? suggestedRecipient ?? ""
+      : account.currentResponsibleMemberRef || "",
+  );
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
@@ -38,7 +44,11 @@ export function AccountResponsibilityDialog({
       if (receipt.outcome !== "accepted" && receipt.outcome !== "unchanged") {
         setMessage(`未完成交接：${receipt.code}`); return;
       }
-      await client.invalidateQueries({ queryKey: ["ops", "accounts"] });
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ["ops", "accounts"] }),
+        client.invalidateQueries({ queryKey: ["ops", "publications"] }),
+        client.invalidateQueries({ queryKey: ["ops-auth", "members"] }),
+      ]);
       close();
     } catch (error) {
       setMessage(`交接未确认：${api.reason(error)}`);

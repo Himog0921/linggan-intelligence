@@ -3,7 +3,7 @@
 use super::*;
 use axum::http::HeaderMap;
 use linggan_intelligence::ops_ledger::read::{
-    OpsBusiness, OpsPublicationFilter, OpsReadError, read_ops_accounts_scoped, read_ops_as_of,
+    OpsBusiness, OpsPublicationFilter, OpsReadError, read_ops_accounts_filtered, read_ops_accounts_scoped, read_ops_as_of,
     read_ops_businesses_scoped, read_ops_daily_scoped, read_ops_publication_export_scoped,
     read_ops_publications_scoped, read_ops_summary_scoped,
 };
@@ -28,6 +28,8 @@ struct ListQuery {
     operator: Option<String>,
     platform: Option<String>,
     account: Option<String>,
+    account_ref: Option<Uuid>,
+    pending_from: Option<Uuid>,
     from: Option<String>,
     to: Option<String>,
     views: Option<String>,
@@ -91,15 +93,20 @@ async fn read_scope(
     headers: &HeaderMap,
 ) -> Result<Option<Vec<Uuid>>, Response> {
     let member = super::ops_auth::current_member(state, headers).await?;
+    let Some(database) = state.database.database() else { return Err(not_connected()) };
+    member_scope(database.pool(), &member).await.map_err(|error| read_error(OpsReadError::Database(error)))
+}
+
+pub(super) async fn member_scope<'e>(
+    executor: impl sqlx::Executor<'e, Database = sqlx::Postgres>,
+    member: &super::ops_auth::AuthenticatedMember,
+) -> Result<Option<Vec<Uuid>>, sqlx::Error> {
     if member.role == "admin" {
         return Ok(None);
     }
     if member.role != "lead" {
         return Ok(Some(vec![member.member_ref]));
     }
-    let Some(database) = state.database.database() else {
-        return Err(not_connected());
-    };
     let members: Vec<Uuid> = sqlx::query_scalar(
         "WITH latest AS (SELECT DISTINCT ON (member_ref) member_ref,group_ref,action \
                            FROM linggan_ops_group_membership_event \
@@ -111,14 +118,23 @@ async fn read_scope(
          WHERE lead_group.member_ref=$1 AND lead_group.action='joined' ORDER BY member.member_ref",
     )
     .bind(member.member_ref)
-    .fetch_all(database.pool())
-    .await
-    .map_err(|error| read_error(OpsReadError::Database(error)))?;
+    .fetch_all(executor)
+    .await?;
     Ok(Some(if members.is_empty() {
         vec![member.member_ref]
     } else {
         members
     }))
+}
+
+async fn publication_scope(
+    state: &LocalWebState,
+    headers: &HeaderMap,
+) -> Result<(Option<Vec<Uuid>>, Uuid), Response> {
+    let member = super::ops_auth::current_member(state, headers).await?;
+    let Some(database) = state.database.database() else { return Err(not_connected()) };
+    let members = member_scope(database.pool(), &member).await.map_err(|error| read_error(OpsReadError::Database(error)))?;
+    Ok((members, member.member_ref))
 }
 
 async fn businesses(State(state): State<LocalWebState>, headers: HeaderMap) -> Response {
@@ -155,7 +171,7 @@ async fn publications(
     headers: HeaderMap,
     Query(query): Query<ListQuery>,
 ) -> Response {
-    let scope = match read_scope(&state, &headers).await {
+    let (scope, viewer) = match publication_scope(&state, &headers).await {
         Ok(scope) => scope,
         Err(response) => return response,
     };
@@ -175,12 +191,13 @@ async fn publications(
         operator: query.operator,
         platform: query.platform,
         account: query.account,
+        account_ref: query.account_ref,
         from: query.from,
         to: query.to,
         pending_views,
         page: query.page.unwrap_or(1),
     };
-    json(read_ops_publications_scoped(database, business, filter, scope.as_deref()).await)
+    json(read_ops_publications_scoped(database, business, filter, scope.as_deref(), Some(viewer)).await)
 }
 
 async fn accounts(
@@ -195,13 +212,17 @@ async fn accounts(
     let Some(database) = state.database.database() else {
         return not_connected();
     };
+    if query.pending_from.is_some() && scope.is_some() {
+        return local_read_json_error(axum::http::StatusCode::FORBIDDEN, "ops_auth_forbidden");
+    }
     match OpsBusiness::parse(query.domain.as_deref()) {
         Ok(business) => json(
-            read_ops_accounts_scoped(
+            read_ops_accounts_filtered(
                 database,
                 business,
                 query.operator.as_deref(),
                 scope.as_deref(),
+                query.pending_from,
             )
             .await,
         ),
@@ -276,7 +297,7 @@ async fn export(
     headers: HeaderMap,
     Query(query): Query<ExportQuery>,
 ) -> Response {
-    let scope = match read_scope(&state, &headers).await {
+    let (scope, viewer) = match publication_scope(&state, &headers).await {
         Ok(scope) => scope,
         Err(response) => return response,
     };
@@ -301,7 +322,7 @@ async fn export(
         "accounts" => read_ops_accounts_scoped(database, business, None, scope.as_deref())
             .await
             .map(|page| super::ops_export::accounts(&page.items)),
-        "publications" => read_ops_publication_export_scoped(database, business, scope.as_deref())
+        "publications" => read_ops_publication_export_scoped(database, business, scope.as_deref(), Some(viewer))
             .await
             .map(|items| super::ops_export::publications(&items)),
         "daily" => read_ops_daily_scoped(
@@ -327,25 +348,20 @@ async fn cover(
     headers: HeaderMap,
     Path(publication_ref): Path<String>,
 ) -> Response {
-    let scope = match read_scope(&state, &headers).await {
+    let (scope, viewer) = match publication_scope(&state, &headers).await {
         Ok(scope) => scope,
         Err(response) => return response,
     };
     let Ok(publication_ref) = uuid::Uuid::parse_str(&publication_ref) else {
         return local_read_json_error(axum::http::StatusCode::NOT_FOUND, "local_media_not_found");
     };
-    if let Some(member_refs) = scope {
-        let Some(database) = state.database.database() else {
-            return not_connected();
-        };
+    {
+        let Some(database) = state.database.database() else { return not_connected() };
         let visible: Result<bool, sqlx::Error> = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM linggan_ops_publication p \
-             LEFT JOIN linggan_ops_account account ON account.account_ref=p.account_ref \
-             WHERE p.publication_ref=$1 AND ((p.source_system='linggan_native' AND (p.native_publisher_member_ref=ANY($2) OR account.current_responsible_member_ref=ANY($2))) \
-               OR (p.source_system='content_workbench' AND (SELECT resolution.resolved_member_ref \
-                    FROM linggan_ops_historical_owner_resolution resolution WHERE resolution.publication_ref=p.publication_ref \
-                    ORDER BY resolution.decided_at DESC,resolution.resolution_ref DESC LIMIT 1)=ANY($2))))",
-        ).bind(publication_ref).bind(&member_refs).fetch_one(database.pool()).await;
+            "SELECT EXISTS (SELECT 1 FROM linggan_ops_publication p
+                LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref
+               WHERE p.publication_ref=$1 AND linggan_ops_publication_visible(p,a,$2::uuid[],$3::uuid))",
+        ).bind(publication_ref).bind(scope.as_deref()).bind(viewer).fetch_one(database.pool()).await;
         match visible {
             Ok(true) => {}
             Ok(false) => {

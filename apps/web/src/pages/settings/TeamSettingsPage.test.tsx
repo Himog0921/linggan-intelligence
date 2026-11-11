@@ -3,9 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TeamSettingsPage } from './TeamSettingsPage';
 
-const roster = { members: [
+const roster = { actorMemberRef: 'admin-2', members: [
   { memberRef: 'admin-1', email: 'admin@example.com', displayName: 'Admin', role: 'admin', state: 'active', version: 2, currentAccountCount: 1 },
-  { memberRef: 'member-1', email: 'member@example.com', displayName: 'Member', role: 'operator', state: 'invited', version: 1, currentAccountCount: 0 },
+  { memberRef: 'member-1', email: 'member@example.com', displayName: 'Member', role: 'operator', state: 'invited', invitationState: 'pending', version: 1, currentAccountCount: 0 },
 ] };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -14,7 +14,7 @@ function mount() {
   return render(<QueryClientProvider client={client}><TeamSettingsPage /></QueryClientProvider>);
 }
 
-beforeEach(() => { vi.stubGlobal('fetch', vi.fn()); });
+beforeEach(() => { sessionStorage.clear(); vi.stubGlobal('fetch', vi.fn()); });
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('团队成员设置页', () => {
@@ -23,7 +23,7 @@ describe('团队成员设置页', () => {
     mount();
     await screen.findByText('admin@example.com');
     expect(screen.getByText('可登录')).toBeVisible();
-    expect(screen.getAllByText('待设密码')).toHaveLength(2);
+    expect(screen.getByText('待签收')).toBeVisible();
     expect(screen.getByText('1 个当前负责账号')).toBeVisible();
     expect(screen.getByText(/只有管理员可以读取、邀请或停用成员/)).toBeVisible();
   });
@@ -44,20 +44,28 @@ describe('团队成员设置页', () => {
     expect(fetch).toHaveBeenNthCalledWith(2, '/api/local/auth/invitations', expect.objectContaining({ method: 'POST', body: JSON.stringify({ email: 'new@example.com', displayName: 'New member', role: 'operator' }) }));
   });
 
-  it('停用前显示账号责任影响，并由服务端回执决定完成', async () => {
-    vi.mocked(fetch)
-      .mockResolvedValueOnce(response(roster))
-      .mockResolvedValueOnce(response({ requestId: 'request-1', outcome: 'accepted', code: 'ops_member_deactivated', unassignedAccountCount: 1, resultingVersion: 3, replayed: false }))
-      .mockResolvedValueOnce(response({ members: [{ ...roster.members[0], state: 'disabled', version: 3, currentAccountCount: 0 }, roster.members[1]] }));
-    mount(); await screen.findByText('Admin');
-    fireEvent.click(screen.getAllByRole('button', { name: '停用' })[0]!);
-    expect(screen.getByText(/会撤销其当前浏览器会话/)).toBeVisible();
-    fireEvent.input(screen.getByLabelText('停用原因'), { target: { value: '交接完成' } });
-    fireEvent.click(screen.getByRole('button', { name: '确认停用成员' }));
-    await screen.findByText('已停用；1 个当前负责账号已改为未分配。');
-    const call = vi.mocked(fetch).mock.calls[1];
-    expect(call?.[0]).toBe('/api/local/auth/members/admin-1/deactivate');
-    expect(JSON.parse(String((call?.[1] as RequestInit).body))).toMatchObject({ expectedVersion: 2, reason: '交接完成' });
-    await waitFor(() => expect(screen.getByText('已停用')).toBeVisible());
+  it('停用提交失去响应后，刷新按原请求 ID 找回回执', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(response(roster)).mockRejectedValueOnce(new Error('timeout'));
+    const first = mount();
+    await screen.findByText('Admin');
+    fireEvent.click(screen.getByRole('button', { name: '停用' }));
+    fireEvent.input(screen.getByLabelText('停用原因'), { target: { value: '运营交接' } });
+    fireEvent.click(screen.getByRole('button', { name: '立即停用' }));
+    await screen.findByRole('button', { name: '重试同一停用请求' });
+    const [url, request] = vi.mocked(fetch).mock.calls[1]!;
+    expect(url).toBe('/api/local/auth/members/admin-1/deactivate');
+    const body = JSON.parse(String((request as RequestInit).body));
+    expect(body).toMatchObject({ expectedVersion: 2, reason: '运营交接' });
+    first.unmount();
+
+    vi.mocked(fetch).mockResolvedValueOnce(response(roster)).mockResolvedValueOnce(response({
+      requestId: body.requestId, memberRef: 'admin-1', outcome: 'accepted', code: 'ops_member_deactivated',
+      unassignedAccountCount: null, resultingVersion: 3, replayed: false,
+    }));
+    mount();
+    await screen.findByText('Admin已停用');
+    expect(screen.getByRole('link', { name: '去接管' })).toHaveAttribute('href', '/ops/accounts?pending_from=admin-1');
+    expect(fetch).toHaveBeenNthCalledWith(4, `/api/local/auth/deactivations/${body.requestId}`, expect.objectContaining({ method: 'GET' }));
+    await waitFor(() => expect(sessionStorage.length).toBe(0));
   });
 });

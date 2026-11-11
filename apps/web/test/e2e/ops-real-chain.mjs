@@ -26,21 +26,25 @@ await context.addCookies([
     sameSite: "Strict",
   },
 ]);
-await context.route("**/*", (route) => {
+const writesAllowed = [
+  /^\/api\/local\/ops\/targets$/,
+  /^\/api\/local\/auth\/invitations(?:\/accept)?$/,
+  /^\/api\/local\/auth\/members\/[0-9a-f-]+\/deactivate$/,
+  /^\/api\/local\/ops\/native\/accounts\/[0-9a-f-]+\/responsibility$/,
+  /^\/api\/local\/ops\/native\/publications\/[0-9a-f-]+\/view-reports$/,
+];
+function guard(route) {
   const request = route.request();
-  if (
-    new URL(request.url()).origin !== origin ||
-    (!["GET", "HEAD"].includes(request.method()) &&
-      !(
-        request.method() === "POST" &&
-        new URL(request.url()).pathname === "/api/local/ops/targets"
-      ))
-  ) {
-    report.blocked.push({ method: request.method(), url: request.url() });
+  const url = new URL(request.url());
+  const method = request.method();
+  if (url.origin !== origin || (!["GET", "HEAD"].includes(method) &&
+    !(method === "POST" && writesAllowed.some(pattern => pattern.test(url.pathname))))) {
+    report.blocked.push({ method, url: request.url() });
     return route.abort();
   }
   return route.continue();
-});
+}
+await context.route("**/*", guard);
 const page = await context.newPage();
 page.on("pageerror", (e) => report.errors.push(e.message));
 page.on("request", (r) => {
@@ -603,6 +607,68 @@ try {
       await page.getByRole("dialog").waitFor({ state: "hidden" });
     },
   );
+  await step("invite, assign, fill inherited views, stop and recover exact receipt", async () => {
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.goto(`${origin}/settings/team`);
+    await page.getByRole("button", { name: "邀请成员", exact: true }).click();
+    await page.getByLabel("姓名", { exact: true }).fill("合成接任运营");
+    await page.getByLabel("工作邮箱").fill("synthetic-handover@example.test");
+    await page.getByRole("button", { name: "生成邀请链接" }).click();
+    const link = page.getByLabel("一次性设密链接");
+    await link.waitFor();
+    const recipient = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    try {
+      await recipient.route("**/*", guard);
+      const memberPage = await recipient.newPage();
+      await memberPage.goto(await link.inputValue());
+      await memberPage.getByLabel("密码", { exact: true }).fill("synthetic-handover-password");
+      await memberPage.getByLabel("确认密码").fill("synthetic-handover-password");
+      await memberPage.getByRole("button", { name: "启用团队账号" }).click();
+      await memberPage.waitForURL("**/ops/**");
+      await page.reload();
+      const memberRow = page.getByRole("listitem").filter({ hasText: "合成接任运营" });
+      await memberRow.getByRole("link", { name: "分配账号" }).click();
+      const accountRow = page.getByRole("row").filter({ hasText: "SYNTHETIC 账号甲" });
+      await accountRow.getByRole("button", { name: "交接", exact: true }).click();
+      const transfer = page.getByRole("dialog", { name: "交接账号当前负责人" });
+      const option = transfer.getByLabel("接任成员").locator("option:checked");
+      assert.match(await option.innerText(), /合成接任运营/);
+      await transfer.getByLabel("交接原因").fill("合成浏览器验证");
+      await transfer.getByRole("button", { name: "确认交接" }).click();
+      await transfer.waitFor({ state: "hidden" });
+
+      await memberPage.goto(`${origin}/ops/accounts`);
+      await memberPage.getByRole("row").filter({ hasText: "SYNTHETIC 账号甲" })
+        .getByRole("link", { name: "待补阅读量" }).click();
+      const oldPublication = memberPage.getByRole("row").filter({ hasText: "合成发布 00" });
+      await oldPublication.getByRole("button", { name: "补阅读量", exact: true }).click();
+      const manualViews = memberPage.getByRole("dialog", { name: "补充手工阅读量" });
+      await manualViews.getByLabel("阅读量", { exact: true }).fill("1200");
+      await manualViews.getByRole("button", { name: "保存阅读量" }).click();
+      await manualViews.waitFor({ state: "hidden" });
+      await oldPublication.waitFor({ state: "hidden" });
+
+      await page.goto(`${origin}/settings/team`);
+      await page.getByRole("listitem").filter({ hasText: "合成接任运营" })
+        .getByRole("button", { name: "停用", exact: true }).click();
+      await page.getByLabel("停用原因").fill("合成紧急停用");
+      await page.route("**/api/local/auth/members/*/deactivate", async route => {
+        const accepted = await route.fetch();
+        assert.equal(accepted.status(), 200);
+        await route.abort();
+      }, { times: 1 });
+      await page.getByRole("button", { name: "立即停用", exact: true }).click();
+      await page.getByRole("button", { name: "重试同一停用请求" }).waitFor();
+      await page.reload();
+      await page.getByRole("heading", { name: "合成接任运营已停用" }).waitFor();
+      await page.getByRole("link", { name: "去接管", exact: true }).first().click();
+      await page.getByRole("row").filter({ hasText: "SYNTHETIC 账号甲" })
+        .getByText("原负责人已停用 · 待接管").waitFor();
+      assert.equal((await recipient.request.get(`${origin}/api/local/auth/session`)).status(), 401);
+    } finally {
+      await recipient.close();
+    }
+  });
   assert.deepEqual(report.errors, []);
   assert.deepEqual(report.blocked, []);
 } finally {

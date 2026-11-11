@@ -318,6 +318,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0194_creation_styles.sql"),
     include_str!("../../../../database/migrations/0195_observation_transition_immutable.sql"),
     include_str!("../../../../database/migrations/0196_content_understanding.sql"),
+    include_str!("../../../../database/migrations/0197_ops_team_offboarding.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -454,4 +455,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0194_creation_styles','6aedda7baae5912dc41cf9a69d87829bb2fb2966204ae148c1a25552b2583657');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0195_observation_transition_immutable','de099353cd383c8c38d3d0f7e09f759c896d3c6fa417d916428d10202a5a22a9');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0196_content_understanding','0516bc60bdddb3fcd1d1c1491f0ffa8c67edf2da32b584a916685e209a672fff');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0197_ops_team_offboarding','f3f5c81a4f23552fec3b0704731c0d5ddc9518db6d23f9204f18205a96a19e35');\n",
 );
