@@ -1,5 +1,6 @@
 import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import type { JSX, ReactNode } from "react";
+import { TopicPatterns } from "./TopicPatterns";
 import { OverviewReadouts } from "./OverviewReadouts";
 import { OverviewDistribution } from "./OverviewDistribution";
 import { ViewSwitch } from "../../shared/ViewSwitch";
@@ -2135,7 +2136,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
   }
   function patterns() {
     const ns = context.selectedWorks(),
-      groups = discussionGroups(ns),
       tasks = context
         .anglesFrom(ns)
         .filter((angle) => angle.answerTask)
@@ -2148,51 +2148,10 @@ export function createTopicOverview(context: TopicOverviewContext) {
         <div className={cls("lgi-tm-section-head")}>
           <div>
             <h3>{"这些内容，实际在怎样讲？"}</h3>
-            <p>
-              {
-                "当前研究保留具体讨论、场景与回答任务；经验自述、方法说明等讲法分类尚未形成，不用视频或图文形态替代。"
-              }
-            </p>
             {researchCoverageSummary(ns)}
           </div>
         </div>
-        <div className={cls("lgi-tm-pattern-grid")}>
-          {withEmpty(
-            groups.map((g) => (
-              <>
-                <article className={cls("lgi-tm-panel")}>
-                  <span className={cls("lgi-tm-eyebrow")}>
-                    {g.canonical
-                      ? "按已保存主题身份归组"
-                      : "归属待核对的独立讨论"}
-                  </span>
-                  <h4>{esc(g.label)}</h4>
-                  <p>
-                    {[
-                      g.rows.length,
-                      " 条独立讨论 · ",
-                      g.works.length,
-                      " 篇当前读取作品 · ",
-                      g.evidenceCount,
-                      " 条去重定位依据",
-                    ].join("")}
-                  </p>
-                  {discussionGroupDetails(g)}
-                  {btn(
-                    "查看这些作品",
-                    "subset",
-                    g.works.map((w) => w.workRef).join(","),
-                    "lgi-tm-quiet",
-                  )}
-                </article>
-              </>
-            )),
-            empty(
-              "讲法分类与具体讨论尚未形成",
-              "原文仍然可读；不推断未研究作品的表达方式。",
-            ),
-          )}
-        </div>
+        <TopicPatterns works={ns} />
         <section className={cls("lgi-tm-section")}>
           <h3>{"哪些具体问题已形成回答任务？"}</h3>
           <div className={cls("lgi-tm-pattern-grid")}>

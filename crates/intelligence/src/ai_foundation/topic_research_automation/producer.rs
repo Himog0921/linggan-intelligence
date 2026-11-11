@@ -5,24 +5,31 @@ use sqlx::Row;
 use uuid::Uuid;
 
 /// A scan position only, not a second task ledger. Restarting safely rescans existing command IDs.
-pub type Cursor = Option<(Uuid, Uuid)>;
+#[derive(Default)]
+pub struct CursorState {
+    cores: Option<(Uuid, Uuid)>,
+    definitions: Option<(Uuid, Uuid)>,
+}
+pub type Cursor = Option<CursorState>;
 /// Queue a bounded page of existing Core versions; no model or collection call happens here.
 pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, FoundationError> {
+    let position = cursor.get_or_insert_with(CursorState::default);
+    let repaired = super::definition_repair::tick(db, &mut position.definitions).await?;
     let rows = sqlx::query(include_str!("candidates.sql"))
-        .bind(cursor.map(|v| v.0))
-        .bind(cursor.map(|v| v.1))
+        .bind(position.cores.map(|v| v.0))
+        .bind(position.cores.map(|v| v.1))
         .bind(crate::topic_map_research_analysis::METHOD_VERSION)
         .fetch_all(db.pool())
         .await?;
     if rows.is_empty() {
-        *cursor = None;
-        return Ok(0);
+        position.cores = None;
+        return Ok(repaired);
     }
-    let mut queued = 0;
+    let mut queued = repaired;
     for row in rows {
         let domain: Uuid = row.get("domain_ref");
         let core: Uuid = row.get("request_ref");
-        *cursor = Some((domain, core));
+        position.cores = Some((domain, core));
         let request = topic_research::Start {
             command_ref: row.get("command_ref"),
             domain_ref: domain,

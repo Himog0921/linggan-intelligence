@@ -141,7 +141,19 @@ const output = (row: Json): T.ResearchOutput => ({
     overlays: strings(j, "overlays"),
   })),
 });
+const patternKind = (row: Json): T.ContentPattern['kind'] => {
+  const kind = d.str(row, "kind");
+  if (kind !== "content_type" && kind !== "expression" && kind !== "answer_form") throw new d.ShapeError("contentPatterns.kind");
+  return kind;
+};
 const research = (row: Json): T.WorkResearch => ({
+  contentPatterns: optionalObject(row, "contentPatterns", (patterns) => ({
+    coreRef: d.str(patterns, "coreRef"),
+    items: d.list(patterns, "items", (pattern) => ({
+      kind: patternKind(pattern),
+      label: d.str(pattern, "label"), unitIds: strings(pattern, "unitIds"), evidence: d.list(pattern, "evidence", citation),
+    })),
+  })),
   readable: d.bool(row, "readable"),
   authorSourceState: d.str(row, "authorSourceState"),
   commentSourceState: d.str(row, "commentSourceState"),

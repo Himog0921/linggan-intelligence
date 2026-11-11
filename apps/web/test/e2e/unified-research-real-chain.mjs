@@ -4,14 +4,14 @@ import { chromium } from 'playwright';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 const directory=process.env.WEB_APP_PROOF_DIR;
-const {origin,domain}=JSON.parse(await readFile(path.join(directory,'fixture.json'),'utf8'));
+const {origin,domain,work,coreRef}=JSON.parse(await readFile(path.join(directory,'fixture.json'),'utf8'));
 assert.equal(new URL(origin).hostname,'127.0.0.1');assert.notEqual(new URL(origin).port,'3000');
 const report={scope:'desktop synthetic materials and owned loopback provider; not model-quality evidence',steps:[],errors:[],blocked:[]};
 const browser=await chromium.launch({headless:true,...(process.env.DOSSIER_BROWSER_EXECUTABLE?{executablePath:process.env.DOSSIER_BROWSER_EXECUTABLE}:{})});
 const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
 await context.route('**/*',route=>{if(new URL(route.request().url()).origin!==origin){report.blocked.push(route.request().url());return route.abort();}return route.continue();});
 const page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',e=>report.errors.push(e.message));
-async function post(button,url){const received=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===url);await button.click();const r=await received;assert.equal(r.status(),200,await r.text());return r.json();}
+async function post(button,url){await button.waitFor({state:'visible'});const [r]=await Promise.all([page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname===url),button.click()]);assert.equal(r.status(),200,await r.text());return r.json();}
 async function get(url){const r=await page.request.get(origin+url);assert.equal(r.status(),200);return r.json();}
 async function until(url,ready){const deadline=Date.now()+25000;let r;do {r=await get(url);if(ready(r))return r;await page.waitForTimeout(100);}while(Date.now()<deadline);assert.fail('workflow did not settle: '+JSON.stringify(r));}
 async function step(name,action){await action();await page.screenshot({path:path.join(directory,`research-${report.steps.length+1}.png`),fullPage:true});report.steps.push({name,result:'PASS'});console.log('Research UI PASS: '+name);}
@@ -80,12 +80,26 @@ try {
   await page.locator('[data-action="research"]').first().click();
   const flow=page.getByRole('region',{name:'主题研究流程',exact:true});
   await flow.getByRole('checkbox',{name:'合成底稿验收',exact:true}).check();
-  const receipt=await post(flow.getByRole('button',{name:'开始四阶段研究',exact:true}),'/api/local/topic-research');
+  const receipt=await post(flow.getByRole('button',{name:'开始研究',exact:true}),'/api/local/topic-research');
   const data=await until(`/api/local/topic-research/runs?domainRef=${domain}`,r=>r.runs.find(run=>run.runRef===receipt.runRef)?.pendingStageCount===0);
   const run=data.runs.find(run=>run.runRef===receipt.runRef);assert.equal(run.failedStageCount,0);assert.ok(run.succeededStageCount>=4);
-  await flow.getByRole('button',{name:'刷新阶段回执',exact:true}).click();
+  await flow.getByRole('button',{name:'刷新进度',exact:true}).click();
   await flow.getByText(/阶段处理完成/).waitFor();
   const graph=await get(`/api/local/topic-map?domainRef=${domain}`);assert.ok(graph.topics.length>0);
+  const patterns=graph.works.find(item=>item.workRef===work)?.research?.contentPatterns;
+  assert.equal(patterns?.coreRef,coreRef);
+  assert.equal(patterns.items.find(item=>item.kind==='content_type')?.label,'practical_guide');
+  assert.deepEqual(patterns.items[0].unitIds,['u1']);assert.ok(patterns.items[0].evidence.length>0);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-action="tab"][data-id="patterns"]').click();
+  const types=page.getByRole('region',{name:'内容类型',exact:true});
+  await types.getByRole('heading',{name:'方法指南',exact:true}).waitFor();
+  await types.locator('summary').filter({hasText:'查看依据'}).click();
+  await types.getByRole('blockquote').filter({hasText:'结尾不能丢失🙂'}).waitFor();
+  assert.equal(await types.locator('[data-core-ref]').getAttribute('data-core-ref'),coreRef);
+  await page.screenshot({path:path.join(directory,'topic-core-patterns.png'),fullPage:true});
+  await types.getByRole('button',{name:'核对原文',exact:true}).click();
+  await page.getByRole('dialog').getByText(/结尾不能丢失/).first().waitFor();
  });
  assert.deepEqual(report.errors,[]);
 } catch(error){report.failure=String(error.stack??error);report.runs=await get(`/api/local/comment-research/runs?domainRef=${domain}`);report.topic=await get(`/api/local/topic-research/runs?domainRef=${domain}`);await page.screenshot({path:path.join(directory,'research-failed.png'),fullPage:true});process.exitCode=1;console.error(error);}

@@ -1,5 +1,5 @@
 {
-  "fingerprint": "ee55c93d58875915f14e0dd81878886a1cdaef44223fc5c2b320fe7f1630a2f9",
+  "fingerprint": "8ef507f1765fd838908dda8dce4943a22fb3df193c55114f0edfb6733b23d297",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -451,7 +451,7 @@
     },
     {
       "path": "apps/web/src/pages/topics/topicOverview.tsx",
-      "sha256": "89aca1454526165f0206fb7fa8ecf9bc8e9ba0e314df96ca5f82d94bf2312f6f"
+      "sha256": "74e9db2e8a833ffedc4607b4908a6c351975bc26fb95ab797065fe442232134d"
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.module.css",

@@ -123,7 +123,14 @@ export interface ResearchOutput {
     overlays?: string[];
   };
 }
+export interface ContentPattern {
+  kind: 'content_type' | 'expression' | 'answer_form';
+  label: string;
+  unitIds: string[];
+  evidence: Citation[];
+}
 export interface WorkResearch {
+  contentPatterns?: { coreRef: string; items: ContentPattern[] };
   readable: boolean;
   authorSourceState: string;
   commentSourceState: string;

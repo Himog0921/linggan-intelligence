@@ -217,6 +217,13 @@ pub(crate) async fn previous_in(
     window: Uuid,
     stage: u8,
 ) -> Result<Value, FoundationError> {
+    let window = if stage < 2 {
+        let root: Option<Uuid> = sqlx::query_scalar("SELECT (input_refs->>'reusedExtractionWindow')::uuid FROM linggan_topic_research_window WHERE window_ref=$1")
+            .bind(window).fetch_optional(&mut **tx).await?.flatten();
+        root.unwrap_or(window)
+    } else {
+        window
+    };
     let row = sqlx::query("SELECT result.output,COALESCE(result.failure_code,control.failure_code) AS failure_code FROM linggan_topic_research_stage s JOIN linggan_ai_batch_item_control control USING(item_ref) LEFT JOIN linggan_topic_research_stage_result result USING(item_ref) WHERE s.window_ref=$1 AND s.stage_number=$2").bind(window).bind(stage as i32).fetch_optional(&mut **tx).await?;
     match row {
         Some(row) => {

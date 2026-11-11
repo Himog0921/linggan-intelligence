@@ -167,6 +167,16 @@ async fn roundtrip(image_only: bool) {
     .unwrap();
     assert_eq!(egress, 0);
 
+    if !image_only {
+        automation::definition_tests::assert_definition_repair(
+            &db,
+            support::D,
+            window,
+            model_config,
+            false,
+        )
+        .await;
+    }
     if image_only {
         // The first automation helper left this domain disabled. A new saved Core
         // stays idle until explicit enable, then queues exactly once.
@@ -203,6 +213,16 @@ async fn roundtrip(image_only: bool) {
             .await
             .unwrap();
         assert_ne!(old.source_state, "source_unavailable");
+        let latest_window:Uuid=sqlx::query_scalar("SELECT window_ref FROM linggan_topic_research_window WHERE input_refs#>>'{coverage,coreRef}'=$1").bind(next.to_string()).fetch_one(db.pool()).await.unwrap();
+        support::seed_accepted_source_task(&db, latest_window).await;
+        automation::definition_tests::assert_definition_repair(
+            &db,
+            support::D,
+            latest_window,
+            model_config,
+            true,
+        )
+        .await;
     }
 }
 

@@ -4,6 +4,7 @@ use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use uuid::Uuid;
+mod definition_repair;
 mod producer;
 pub use producer::tick;
 
@@ -30,10 +31,14 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Setting, FoundationErro
     let mut tx = db.pool().begin().await?;
     let mut ready = true;
     for task in super::topic_research::TASKS {
-        let config: Uuid = sqlx::query_scalar("SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key=$1")
-            .bind(task.as_str()).fetch_one(&mut *tx).await?;
+        let config: Uuid = sqlx::query_scalar(
+            "SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key=$1",
+        )
+        .bind(task.as_str())
+        .fetch_one(&mut *tx)
+        .await?;
         match super::admission::check_queue_configuration(&mut tx, task, config, false).await {
-            Ok(()) => {},
+            Ok(()) => {}
             Err(FoundationError::AdmissionDenied(_)) => ready = false,
             Err(error) => return Err(error),
         }
@@ -93,3 +98,6 @@ pub async fn change(db: &Database, request: &Change) -> Result<Setting, Foundati
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+pub(crate) mod definition_tests;

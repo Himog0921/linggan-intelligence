@@ -13,12 +13,60 @@ use std::{
     time::Duration,
 };
 use uuid::Uuid;
+#[path = "../../../../crates/intelligence/tests/support/content_understanding_fixture.rs"]
+mod core_setup;
 #[path = "../../../../crates/evidence/tests/support/research_dossier_fixture.rs"]
 mod dossier;
 #[path = "../../../../crates/intelligence/tests/support/ai_writing_endpoint.rs"]
 mod endpoint;
 #[path = "../../../../crates/intelligence/tests/support/ai_writing_fixture.rs"]
 mod setup;
+
+// Core is a real prerequisite now. Use the existing SDK wire helper and an owned
+// loopback response, not a fabricated persisted Core or a browser route stub.
+async fn core_endpoint() -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let task = tokio::spawn(async move {
+        loop {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let request = endpoint::read(&mut socket).await;
+            let message = request["messages"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|message| message["role"] == "user")
+                .unwrap();
+            // The SDK sends the JSON packet as the first part, followed by each
+            // image's identity label and bytes. Do not concatenate the labels.
+            let prompt = message["content"]
+                .as_str()
+                .or_else(|| message["content"][0]["text"].as_str())
+                .unwrap();
+            let output = if prompt.contains("ai-probe.synthetic.v1") {
+                json!({"lingganProbe":"ok"})
+            } else {
+                let packet: serde_json::Value = serde_json::from_str(prompt).unwrap();
+                let source = packet["material"]["texts"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|source| source["kind"] == "body")
+                    .unwrap();
+                assert!(source["text"].as_str().unwrap().contains("结尾不能丢失🙂"));
+                let image = &packet["material"]["images"][0];
+                json!({
+                    "core":{"summary":{"text":"合成正文末尾保留","unitIds":["u1"]},"contentType":"practical_guide","mainTopicUnitId":"u1",
+                        "knowledgeUnits":[{"id":"u1","unitType":"discussion","statement":"正文末尾不能丢失。","assertionKind":"author_claim","speakerRole":"author","evidenceRefs":["e1"]}],"candidateLabels":[]},
+                    "imageContributions":[{"inputCitationId":image["citationId"],"status":"no_new_information","summary":"合成单像素图片没有新增信息。","unitIds":[],"evidenceRefs":["v1"]}],
+                    "evidenceCandidates":{"text":[{"id":"e1","inputCitationId":source["citationId"],"quote":"结尾不能丢失🙂"}],"vision":[{"id":"v1","inputCitationId":image["citationId"],"modelQuote":null,"observation":"合成单像素图片。","speakerRole":"unknown"}]}
+                })
+            };
+            endpoint::respond(&mut socket, &output.to_string()).await;
+        }
+    });
+    (url, task)
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "owned PostgreSQL, built desktop React and synthetic loopback model only"]
 async fn unified_research_real_chain_browser_proof() {
@@ -29,13 +77,23 @@ async fn unified_research_real_chain_browser_proof() {
     );
     let db = dossier::fixture::proof_database("unified_research_browser").await;
     let work = dossier::work(&db).await;
+    // A complete one-page inventory and admitted original bytes satisfy Core's real
+    // material readiness contract; the old text-only fixture left media unknown.
+    let png = vec![
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ];
+    let (image_work, _, _) = dossier::acquired_image_source_with_bytes(&db, Some(png)).await;
+    assert_eq!(image_work, work);
     for (id, author) in [("reader-a", "independent-a"), ("reader-b", "independent-b")] {
         dossier::fixture::submit_package(&db,"comments",json!({"contentExternalId":"dossier-note"}),json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"commentId":id,"noteId":"dossier-note","text":"我的孩子需要每天有人提醒。","authorId":author}})).await;
     }
     linggan_intelligence::comment_study_catalog::refresh_clean_cache(&db, dossier::DOMAIN, 200)
         .await
         .unwrap();
-    let endpoint = endpoint::Endpoint::variant(false, "research_ui").await;
+    let endpoint = endpoint::Endpoint::start(false).await;
+    let (core_url, core_server) = core_endpoint().await;
     let node = std::env::var("WEB_APP_PROOF_NODE").unwrap();
     let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
         PathBuf::from(&node),
@@ -45,6 +103,8 @@ async fn unified_research_real_chain_browser_proof() {
         .await
         .unwrap();
     let configured = setup::prepare_with_actual_probe(&db, &endpoint.url, &owner, &adapter).await;
+    let core_model = setup::prepare_with_actual_probe(&db, &core_url, &owner, &adapter).await;
+    core_setup::configure_high(&db, &core_model).await;
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();
     drop(owner);
@@ -116,6 +176,32 @@ async fn unified_research_real_chain_browser_proof() {
         adapter,
         drain.clone(),
     ));
+    let preview = ai::content_understanding::preview(&db, dossier::DOMAIN, work)
+        .await
+        .unwrap();
+    assert_eq!(preview["canStart"], true, "{preview}");
+    let core = ai::content_understanding::start(
+        &db,
+        &ai::content_understanding::Start {
+            command_ref: Uuid::new_v4(),
+            domain_ref: dossier::DOMAIN,
+            work_ref: work,
+            knowledge_cutoff: preview["knowledgeCutoff"].as_str().unwrap().into(),
+            input_hash: preview["inputHash"].as_str().unwrap().into(),
+            task_config_ref: serde_json::from_value(preview["taskConfigRef"].clone()).unwrap(),
+            task_revision: preview["taskRevision"].as_i64().unwrap(),
+        },
+    )
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(25), async {
+        loop {
+            let ready: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_content_understanding_result WHERE request_ref=$1 AND result IS NOT NULL)")
+                .bind(core.request_ref).fetch_one(db.pool()).await.unwrap();
+            if ready { break; }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }).await.expect("synthetic Core must be accepted before opening topic research");
     let application = app_with_database(db.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
@@ -124,7 +210,7 @@ async fn unified_research_real_chain_browser_proof() {
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(
         directory.join("fixture.json"),
-        json!({"origin":origin,"domain":dossier::DOMAIN,"work":work}).to_string(),
+        json!({"origin":origin,"domain":dossier::DOMAIN,"work":work,"coreRef":core.request_ref}).to_string(),
     )
     .unwrap();
     let status = tokio::task::spawn_blocking(move || {
@@ -154,6 +240,8 @@ async fn unified_research_real_chain_browser_proof() {
     server.abort();
     let _ = server.await;
     endpoint.finish().await;
+    core_server.abort();
+    let _ = core_server.await;
     assert!(drained.unwrap().unwrap().is_ok());
     assert!(status.success(), "inspect unified research browser report");
     let overview = ai::comment_research_overview::read(&db, dossier::DOMAIN)
