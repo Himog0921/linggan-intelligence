@@ -190,7 +190,7 @@ fn topic_response(prompt: &str) -> Option<Value> {
             let fragments = packet["input"]["fragments"].as_array()?;
             let index = fragments
                 .iter()
-                .position(|f| f["field"] == "body")
+                .position(|f| matches!(f["field"].as_str(), Some("body" | "core_text_evidence")))
                 .unwrap_or(0);
             Some(
                 json!({"contract":"topic-map.extract.quotes.v1","o":"analyzed","d":[{"l":"保留正文末尾","t":null,"e":[{"f":index,"q":"结尾不能丢失🙂"}],"s":"结尾不能丢失。","d":"完整保留正文末尾。","i":["正文末尾保留"],"x":["新增来源材料"],"sp":"author","er":"support","r":"合成原句支持"}],"s":[],"j":{"m":"unclear","s":[],"o":[],"p":"unknown","r":"无阶段依据","e":[]},"rm":[],"a":[],"p":[],"l":["SYNTHETIC ONLY"]}),

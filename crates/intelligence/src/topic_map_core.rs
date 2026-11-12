@@ -9,6 +9,7 @@ pub(crate) use recall::catalog;
 mod source_qualification;
 pub(crate) use source_qualification::{
     definition_dependencies, qualify_definitions_and_inputs, unavailable_definitions,
+    unavailable_definitions_in,
 };
 
 use crate::{
@@ -23,10 +24,14 @@ pub const METHOD_VERSION: &str = "topic-map.core.v2";
 
 /// Source coordinates, roles and statement identify a discussion, not its batch or display name.
 pub(crate) fn units(input: &ResearchInput, output: &ResearchOutput) -> Vec<(String, Discussion)> {
+    units_for_discussions(input, &output.discussions)
+}
+pub(crate) fn units_for_discussions(
+    input: &ResearchInput,
+    discussions: &[Discussion],
+) -> Vec<(String, Discussion)> {
     let mut seen = std::collections::HashSet::new();
-    output
-        .discussions
-        .iter()
+    discussions.iter()
         .filter_map(|d| {
             let mut evidence: Vec<String> = d
                 .evidence

@@ -478,3 +478,6 @@ fn overview_window_denominator_matches_lossless_partition_with_parent_context() 
     }
     assert_eq!(research_window_count(&input(vec![])), 0);
 }
+
+#[path = "tests/core_source.rs"]
+mod core_source;

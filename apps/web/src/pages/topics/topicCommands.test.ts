@@ -156,3 +156,21 @@ describe("Topic commands preserve whole requests until a qualified answer", () =
     expect(commands.unconfirmed).toBe(false);
   });
 });
+it('retries an unknown handoff with the frozen alternative and only accepts its target receipt', async () => {
+  const alternativeRef = '60000000-0000-4000-8000-000000000001';
+  const path = '/api/local/topic-map/alternatives/handoff';
+  const calls: string[] = [];
+  let reject = true;
+  let navigations = 0;
+  const commands = createTopicCommands(async (_path, body, parse) => {
+    calls.push(body);
+    if (reject) throw new ApiError({ kind: 'network' });
+    return parse({ alternativeRef, workId: id, ideaRef: id });
+  }, () => {});
+  await expect(commands.submit(path, { commandRef: id, domainRef: topicDomain, alternativeRef }, value => value, async () => { navigations++; })).rejects.toBeInstanceOf(ApiError);
+  reject = false;
+  await commands.retry();
+  expect(calls).toEqual([calls[0], calls[0]]);
+  expect(navigations).toBe(1);
+  expect(commands.unconfirmed).toBe(false);
+});

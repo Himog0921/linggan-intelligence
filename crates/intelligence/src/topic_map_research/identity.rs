@@ -116,7 +116,13 @@ fn semantic_discussions(input: &ResearchInput) -> Value {
 }
 
 pub(crate) fn input_identity(input: &ResearchInput) -> String {
-    input_identity_for(input, INPUT_CONTRACT, METHOD_VERSION)
+    input_identity_for(
+        input,
+        input.coverage["inputContract"]
+            .as_str()
+            .unwrap_or(INPUT_CONTRACT),
+        METHOD_VERSION,
+    )
 }
 
 /// A historical frozen request is verified under its original contract/method;
@@ -141,7 +147,7 @@ pub(super) fn input_identity_for(input: &ResearchInput, contract: &str, method: 
         .flat_map(|dossiers| dossiers.iter())
         .map(|(work, dossier)| (work.clone(), dossier["coverage"].clone()))
         .collect();
-    creator_discovery::hash(&json!({
+    let mut identity = json!({
         "contract":contract,"kind":input.coverage["kind"].as_str().unwrap_or("source"),
         "domain":domain_identity(&input.domain),"workRef":input.work.work_ref,
         "fragments":input.fragments.iter().map(|f|semantic_fragment(input,f)).collect::<Vec<_>>(),
@@ -150,5 +156,11 @@ pub(super) fn input_identity_for(input: &ResearchInput, contract: &str, method: 
         "dossierCoverage":dossier_coverage,
         "comparisonScope":if input.coverage["kind"] == "comparison" { json!(comparison_scope) } else { Value::Null },
         "method":method,"config":input.coverage["configRef"],
-    }).to_string())
+    });
+    if contract == super::CORE_INPUT_CONTRACT {
+        identity["contentCore"] = input.coverage["core"].clone();
+        identity["coreRef"] = input.coverage["coreRef"].clone();
+        identity["coreSnapshot"] = input.coverage["coreSnapshot"].clone();
+    }
+    creator_discovery::hash(&identity.to_string())
 }

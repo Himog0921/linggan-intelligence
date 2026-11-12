@@ -1,3 +1,4 @@
+import { useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   Fragment,
@@ -59,7 +60,8 @@ const TopicContents = memo(function TopicContents({
   );
 });
 export function TopicsPage() {
-  const [engine] = useState(createTopicEngine);
+  const navigate = useNavigate();
+  const [engine] = useState(() => createTopicEngine(path => { void navigate(path); }));
   const version = useSyncExternalStore(engine.subscribe, engine.getVersion);
   const root = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);

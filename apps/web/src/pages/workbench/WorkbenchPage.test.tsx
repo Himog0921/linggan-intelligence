@@ -1442,3 +1442,26 @@ it('keeps creation under operations with one breadcrumb and the desk entry in th
   const rail = screen.getByRole('complementary', { name: '稿件列表' });
   expect(within(rail).getByRole('button', { name: /选题与材料/ })).toBeInTheDocument();
 });
+
+it('resolves handed-off materials into the existing shelf and validates before adding to the canvas', async () => {
+  const initial = envelope();
+  const selection = { documentId: `note:${work}`, sourceKind: 'note' as const, sourceRef: work, workRef: work, sourceVersion: 'v1', addedBy: 'manual' as const, matchReasons: [] };
+  initial.revision.document.materials = [selection];
+  vi.mocked(api.readWork).mockResolvedValue(initial);
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.resolveMaterials).mockResolvedValue({
+    contract: 'content-workbench-materials.v1', asOf: '2026-10-29', methodVersion: 'test', query: '', terms: [], state: 'ready', gaps: [], nextCursor: null, searchScope: 'test',
+    documents: [{ ...selection, title: '交接来源', authorLabel: '合成', qualification: 'readable', context: null, fragments: [{ asOf: '2026-10-29', fragmentId: 'fragment-1', blockRef: 'body', speaker: 'other', structure: null, issues: [], sourceKind: 'note', sourceRef: work, workRef: work, field: 'body', sourceVersion: 'v1', title: '交接来源', text: '合成原文', bodyState: 'ok', authorLabel: '合成', qualification: 'readable', location: null }] }],
+  });
+  vi.mocked(api.anchor).mockResolvedValue({ citation: { asOf: '2026-10-29', blockRef: 'body', sourceKind: 'note', sourceRef: work, workRef: work, field: 'body', sourceVersion: 'v1', start: 0, end: 4, textHash: 'a'.repeat(64), location: null }, selectedText: '合成原文', textHash: 'a'.repeat(64) });
+  show('desk');
+  fireEvent.click(await screen.findByRole('button', { name: '找材料' }));
+  expect(await screen.findByText('交接来源')).toBeVisible();
+  expect(api.resolveMaterials).toHaveBeenCalledWith({ domainRef: domain, selections: [selection] }, expect.any(AbortSignal));
+  expect(api.sources).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '放进框' }));
+  expect(await screen.findByRole('group', { name: /^原笔记：合成原文/ })).toBeVisible();
+  expect(api.anchor).toHaveBeenCalledWith(expect.objectContaining({ sourceRef: work, blockRef: 'body', start: 0, end: 4 }));
+  fireEvent.click(screen.getByRole('button', { name: '全部材料' }));
+  await waitFor(() => expect(api.sources).toHaveBeenCalled());
+});

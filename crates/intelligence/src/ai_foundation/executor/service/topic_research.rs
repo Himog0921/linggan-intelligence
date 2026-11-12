@@ -25,6 +25,7 @@ struct Prepared {
     window: Uuid,
     stage: u8,
     context: Value,
+    comment_mode: bool,
 }
 async fn prepare(
     db: &Database,
@@ -52,7 +53,9 @@ async fn prepare(
     if !linked || item.task_key.topic_stage() != Some(stage_number) {
         return Err(ExecutorError::Invalid);
     }
-    if stage_number > 0 {
+    if stage_number > 0
+        && !(stage_number == 2 && crate::ai_foundation::topic_comment_source::is_comment(&data))
+    {
         owner::previous_in(&mut tx, request_ref, stage_number - 1).await?;
     }
     let packet = packet::prepare(db, &mut tx, request_ref, stage_number, &data).await?;
@@ -73,7 +76,11 @@ async fn prepare(
                 name: "topic_research_stage".into(),
                 schema: packet.schema,
             },
-            material_class: "note_material",
+            material_class: if crate::ai_foundation::topic_comment_source::is_comment(&data) {
+                "comment_material"
+            } else {
+                "note_material"
+            },
         },
     )
     .await?;
@@ -87,6 +94,7 @@ async fn prepare(
         window: request_ref,
         stage: stage_number,
         context: packet.context,
+        comment_mode: crate::ai_foundation::topic_comment_source::is_comment(&data),
     })
 }
 pub(super) async fn execute(
@@ -142,7 +150,7 @@ async fn settle(
     if let Err(crate::ai_foundation::store::FoundationError::Database(_)) = &sources {
         return Err(sources.err().unwrap().into());
     }
-    let draft = if prepared.stage >= 2 {
+    let draft = if prepared.stage >= 2 && !prepared.comment_mode {
         Some(packet::draft_in(&mut tx, prepared.window).await?)
     } else {
         None

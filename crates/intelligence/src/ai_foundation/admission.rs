@@ -54,8 +54,15 @@ pub(crate) async fn check_queue_input_scope(
             "egress_not_approved".into(),
         ]));
     }
+    let topic_uses_comments = if let InputRef::TopicResearch { window_ref, .. } = input {
+        let contract: Option<String> = sqlx::query_scalar("SELECT input_refs->>'inputContract' FROM linggan_topic_research_window WHERE window_ref=$1")
+            .bind(window_ref).fetch_optional(&mut **tx).await?.flatten();
+        contract.as_deref() != Some(crate::topic_map_research::CORE_INPUT_CONTRACT)
+    } else {
+        false
+    };
     if task.comment_stage().is_some()
-        || task.topic_stage().is_some()
+        || topic_uses_comments
         || matches!(
             input,
             InputRef::NoteAnalysis {

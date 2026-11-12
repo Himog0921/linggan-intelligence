@@ -1,3 +1,6 @@
+import type { ResearchRequestState, ResearchSubmission } from "./TopicResearchFlow";
+import { WORKBENCH_PATH } from "../../app/pages";
+import { decode, str } from "../../shared/decode";
 import { IntelligenceIcon } from "../../shared/IntelligenceIcon";
 import { parseTopicProgress, type TopicProgress } from "./topicResearchModel";
 import type { ChangeEvent, FormEvent, KeyboardEvent, ToggleEvent } from "react";
@@ -48,10 +51,11 @@ import {
 import { createTopicOverview } from "./topicOverview";
 import { topicRequest } from "./topicRequest";
 import type * as T from "./types";
-export function createTopicEngine() {
+export function createTopicEngine(navigate: (path: string) => void = path => window.location.assign(path)) {
   let disposed = false,
     revision = 0,
     dialogFeedbackText = "";
+  const researchRequests = new Map<string, ResearchRequestState>();
   const readControllers = new Set<AbortController>();
   let bootstrapDomain = "";
   const listeners = new Set<() => void>(),
@@ -387,6 +391,17 @@ export function createTopicEngine() {
     },
   });
   const topicDialogs = createTopicDialogs({
+    get researchProgress() { return snapshot?.scope.progress; },
+    onResearchCompleted: () => { void load(); },
+    researchRequest: (domain: string) => {
+      let request = researchRequests.get(domain);
+      if (!request) {
+        let current: ResearchSubmission | null = null;
+        request = { get: () => current, set: value => { current = value; } };
+        researchRequests.set(domain, request);
+      }
+      return request;
+    },
     get requireDialog() {
       return requireDialog;
     },
@@ -2167,6 +2182,23 @@ export function createTopicEngine() {
     }
     if (action === "saved-materials") {
       await openAlternative(id);
+      return;
+    }
+    if (action === "handoff-alternative") {
+      const alternative = dialogState?.alternative;
+      if (!alternativeAvailable(alternative) || alternative.kind !== "angle" || pending) return;
+      const domain = state.domainRef;
+      try {
+        await mutations.submit(
+          "/api/local/topic-map/alternatives/handoff",
+          { commandRef: uuid(), domainRef: domain, alternativeRef: alternative.alternativeRef },
+          value => decode(value, row => ({ workId: str(row, "workId") })),
+          async result => {
+            if (!disposed && state.domainRef === domain)
+              navigate(`${WORKBENCH_PATH}?${new URLSearchParams({ domain, work: result.workId, view: "body" })}`);
+          },
+        );
+      } catch (error) { dialogFeedback(`加入选题池未完成：${caught(error).message}`); }
       return;
     }
     if (action === "export-alternative") {

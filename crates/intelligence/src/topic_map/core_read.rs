@@ -10,6 +10,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 mod load;
 #[path = "core_read/partial.rs"]
 mod partial;
+#[path = "core_read/patterns.rs"]
+mod patterns;
 #[path = "core_read/projection.rs"]
 mod projection;
 #[path = "core_read/units.rs"]

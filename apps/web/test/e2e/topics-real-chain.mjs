@@ -26,6 +26,12 @@ const context = await browser.newContext({
 });
 const commandPaths = new Set([
   "/api/local/topic-map/commands",
+  "/api/local/topic-map/alternatives/handoff",
+  "/api/local/topic-research/automation",
+  "/ops/api/creation/sources/resolve",
+  "/ops/api/creation/sources/validate",
+  "/ops/api/creation/checks",
+  "/ops/api/creation/saved-draft-checks",
   "/api/local/topic-map/structure/preview",
   "/api/local/topic-map/structure/apply",
   "/api/local/topic-map/research/commands",
@@ -271,6 +277,12 @@ try {
       .evaluate((node) => node.getBoundingClientRect().height);
     assert.ok(bandHeight < 165,
       "the chart and metrics must fit the approved compact V3 band without a spare explanation row");
+    const statusBounds = await page.getByLabel("主题处理与运营状态")
+      .evaluate((node) => ({ top: node.getBoundingClientRect().top, width: node.getBoundingClientRect().width }));
+    const bandBounds = await page.getByLabel("主题概览与样本表现")
+      .evaluate((node) => ({ bottom: node.getBoundingClientRect().bottom, width: node.getBoundingClientRect().width }));
+    assert.ok(statusBounds.top >= bandBounds.bottom, "processing and operations belong below the compact metrics/chart band");
+    assert.ok(Math.abs(statusBounds.width - bandBounds.width) <= 2, "status spans both metrics and chart columns");
     await page.setViewportSize({ width: 1440, height: 900 });
     await ruleLink.click();
     await page.locator("dialog[open]").waitFor();
@@ -410,18 +422,118 @@ try {
       assert.match(text, /合成浏览器备选/);
       assert.ok(text.includes(selectedRef));
       await close();
+      await action("saved");
+      await action("saved-materials", saved.body.subjectRef);
+      const handoffResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/local/topic-map/alternatives/handoff");
+      await page.getByRole("button", { name: "加入选题池", exact: true }).click();
+      const handed = await handoffResponse;
+      assert.equal(handed.status(), 200);
+      const target = await handed.json();
+      assert.equal(target.alternativeRef, saved.body.subjectRef);
+      await page.waitForURL(url => url.pathname === "/ops/creation" && url.searchParams.get("work") === target.workId && url.searchParams.get("view") === "body");
+      await settled();
+      assert.equal(new URL(page.url()).searchParams.get("domain"), domain);
+      const workRead = await page.request.get(`${origin}/ops/api/creation/works/${target.workId}`);
+      assert.equal(workRead.status(), 200);
+      const work = await workRead.json();
+      assert.equal(work.domainRef, domain);
+      assert.equal(work.revision.document.title, "合成浏览器备选");
+      assert.equal(work.revision.document.angle, "切入角度：只保留这条明确材料\n\n复用意图：未指定");
+      assert.equal(work.revision.document.ideaRef, target.ideaRef);
+      assert.deepEqual(work.revision.document.materials.map(material => material.workRef), [selectedRef], "handoff retains the frozen source work");
+      await page.getByRole("region", { name: "正文编辑" }).getByText("选题意图", { exact: true }).waitFor();
+      await page.getByRole("region", { name: "正文编辑" }).locator(".intent b").filter({ hasText: "切入角度：只保留这条明确材料" }).waitFor();
+      await page.screenshot({ path: path.join(dir, "topic-handoff-creation.png"), fullPage: true });
+      await page.goto(`${origin}/ops/creation?${new URLSearchParams({domain, work: target.workId, view: "desk"})}`, { waitUntil: "networkidle" });
+      await page.getByRole("button", { name: "找材料", exact: true }).click();
+      const shelf = page.getByRole("complementary", { name: "找材料", exact: true });
+      await shelf.getByRole("button", { name: "本篇材料", exact: true }).waitFor();
+      assert.equal(await shelf.getByRole("button", { name: "本篇材料", exact: true }).getAttribute("aria-pressed"), "true");
+      const savePath = `/ops/api/creation/works/${target.workId}/save`;
+      commandPaths.add(savePath);
+      const savedCanvas = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === savePath);
+      const source = shelf.locator(".d-res-item").filter({ hasText: "SYNTHETIC ONLY" }).first();
+      await source.waitFor();
+      const anchored = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/ops/api/creation/sources/validate");
+      await source.getByRole("button", { name: "放进框", exact: true }).click();
+      const anchorResponse = await anchored;
+      assert.equal(anchorResponse.status(), 200);
+      const anchor = await anchorResponse.json();
+      assert.equal(anchor.citation.workRef, selectedRef);
+      const card = page.locator(".mcard").filter({ hasText: "SYNTHETIC ONLY" });
+      await card.waitFor();
+      assert.equal((await savedCanvas).status(), 200);
+      assert.equal(await shelf.getByRole("button", { name: "放进框", exact: true }).count(), 1, "adding body must not mark the separate title fragment as placed");
+      await shelf.getByRole("button", { name: "收起找材料", exact: true }).click();
+      await card.click();
+      await card.getByRole("button", { name: "展开原文", exact: true }).click();
+      await page.getByRole("region", { name: "原文与来源", exact: true }).getByText(anchor.selectedText, { exact: true }).waitFor();
+      await page.screenshot({ path: path.join(dir, "topic-handoff-source-consumed.png"), fullPage: true });
+      const consumed = await (await page.request.get(`${origin}/ops/api/creation/works/${target.workId}`)).json();
+      assert.equal(consumed.revision.document.canvas.length, 1);
+      assert.equal(consumed.revision.document.excerpts[0].citation.workRef, selectedRef);
+      assert.equal(consumed.revision.document.excerpts[0].selectedText, anchor.selectedText);
+      await go();
+      await action("saved");
+      await action("saved-materials", saved.body.subjectRef);
+      const repeatedResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/local/topic-map/alternatives/handoff");
+      await page.getByRole("button", { name: "加入选题池", exact: true }).click();
+      const repeated = await repeatedResponse;
+      assert.equal(repeated.status(), 200);
+      assert.deepEqual(await repeated.json(), target, "a second UI handoff reuses the same creation target");
+      await page.waitForURL(url => url.pathname === "/ops/creation" && url.searchParams.get("work") === target.workId && url.searchParams.get("view") === "body");
     },
   );
   await step(
-    "current staged research links central settings without implicit dispatch",
+    "research search and pagination retain selection; automation persists visibly without dispatch",
     async () => {
       await go();
       await action("research");
       const dialog=page.getByRole("dialog",{name:"主题研究"});await dialog.waitFor();
       assert.equal(await dialog.getByRole("link",{name:"去 AI 设置"}).getAttribute("href"),"/settings/models?view=advanced&area=work&task=topic_research");
       assert.equal(await dialog.locator('form[data-form="research-config"]').count(),0);
+      const flow = dialog.getByRole("region", { name: "主题研究流程" });
+      const toggle = flow.getByRole("switch");
+      await toggle.waitFor();
+      assert.equal(await toggle.getAttribute("aria-checked"), "false");
+      assert.equal(await toggle.innerText(), "自动归并：关");
+      for (const name of ["开始研究", "刷新进度"]) {
+        const box = await flow.getByRole("button", { name, exact: true }).boundingBox();
+        assert.ok(box && box.y >= 0 && box.y + box.height <= 900, `${name} must be visible in the desktop viewport`);
+      }
+      assert.equal(await flow.getByRole("checkbox").count(), 20);
+      await flow.getByRole("checkbox").first().check();
+      const firstTitle = await flow.locator("fieldset label").first().innerText();
+      const rowDirection = await flow.locator("fieldset label").first().evaluate(el => getComputedStyle(el).flexDirection);
+      assert.equal(rowDirection, "row", "checkbox and title must share a horizontal row");
+      await flow.getByRole("button", { name: "下一页", exact: true }).click();
+      assert.equal(await flow.getByRole("checkbox").count(), 6);
+      await flow.getByRole("checkbox").first().check();
+      await flow.getByRole("searchbox", { name: "搜索研究作品" }).fill(firstTitle);
+      assert.equal(await flow.getByRole("checkbox").count(), 1);
+      assert.equal(await flow.getByRole("checkbox").first().isChecked(), true);
+      await flow.getByRole("searchbox", { name: "搜索研究作品" }).fill("");
+      await flow.getByText("已选 2 / 10", { exact: true }).waitFor();
+      const enabledResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/local/topic-research/automation");
+      await toggle.click();
+      assert.equal((await enabledResponse).status(), 200);
+      await flow.getByRole("switch", { name: "自动归并：开" }).waitFor();
+      assert.equal(await toggle.getAttribute("aria-checked"), "true");
+      await page.screenshot({ path: path.join(dir, "topic-research-automation-on.png"), fullPage: true });
+      await close();
+      await action("research");
+      await dialog.getByRole("switch", { name: "自动归并：开" }).waitFor();
+      const disabledResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/local/topic-research/automation");
+      await dialog.getByRole("switch").click();
+      assert.equal((await disabledResponse).status(), 200);
+      await dialog.getByRole("switch", { name: "自动归并：关" }).waitFor();
+      const persisted = await page.request.get(`${origin}/api/local/topic-research/automation?domainRef=${domain}`);
+      assert.equal(persisted.status(), 200);
+      assert.equal((await persisted.json()).enabled, false);
+      const secondDomain = await page.request.get(`${origin}/api/local/topic-research/automation?domainRef=${domainTwo}`);
+      assert.equal((await secondDomain.json()).enabled, false);
       const refreshed=page.waitForResponse(r=>r.request().method()==="GET"&&r.url().includes("/topic-research/runs?"));
-      await dialog.getByRole("button",{name:"刷新阶段回执"}).click();assert.equal((await refreshed).status(),200);
+      await dialog.getByRole("button",{name:"刷新进度"}).click();assert.equal((await refreshed).status(),200);
       const response=await page.request.post(origin+"/api/local/topic-map/research/commands",{data:{
         action:"configure",requestRef:crypto.randomUUID(),domainRef:domain,modelConfigRef:fixture.modelConfigRef,
         dailyTokenLimit:50000,runTokenLimit:10000,automaticEnabled:true,collectionEnabled:false,

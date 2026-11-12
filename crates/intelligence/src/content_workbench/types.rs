@@ -291,6 +291,9 @@ pub struct BridgeChoice {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    /// Original saved topic angles; preserved by the server through editor round trips.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topic_angle_refs: Vec<Uuid>,
     /// Non-sensitive ordering metadata for erasable experience-bound source uses; never client input.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub experience_use_order: Vec<Uuid>,
@@ -357,6 +360,7 @@ impl Default for WorkDocument {
             cover_title_candidates: vec![],
             note_title_candidates: vec![],
             title: String::new(),
+            topic_angle_refs: vec![],
             account_ref: None,
             topic_ref: None,
             idea_ref: None,

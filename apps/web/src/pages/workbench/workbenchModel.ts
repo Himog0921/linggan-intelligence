@@ -201,6 +201,7 @@ export interface WorkDocument {
   pages: ImagePage[];
   uses: MaterialUse[];
   derivedSources: { target: UseTarget; citation: Citation }[];
+  topicAngleRefs?: string[];
 }
 export interface Revision {
   id: string;
@@ -631,7 +632,8 @@ export const parseWorkDocument = shape<WorkDocument>({
   canvas: array(canvas),
   pages: array(parseImagePage),
   uses: array(materialUse),
-  derivedSources: v => v === undefined ? [] : array(shape({ target: parseUseTarget, citation: parseCitation }))(v)
+  derivedSources: v => v === undefined ? [] : array(shape({ target: parseUseTarget, citation: parseCitation }))(v),
+  topicAngleRefs: v => v === undefined ? [] : array(uuid)(v)
 });
 export const parseRevision = shape<Revision>({
   id: uuid,
@@ -906,7 +908,8 @@ export function newDocument(title = ''): WorkDocument {
     canvas: [],
     pages: [],
     uses: [],
-    derivedSources: []
+    derivedSources: [],
+    topicAngleRefs: []
   };
 }
 export function scalarRange(text: string, start: number, end: number): {

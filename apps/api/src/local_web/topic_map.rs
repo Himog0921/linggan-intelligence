@@ -46,7 +46,15 @@ pub(super) fn routes(
         });
     }
     Router::new()
+        .route(
+            "/api/local/topic-map/alternatives/handoff",
+            post(handoff_angle),
+        )
         .route("/api/local/topic-research", post(current_research_start))
+        .route(
+            "/api/local/topic-research/automation",
+            get(research_automation_read).post(research_automation_change),
+        )
         .route("/api/local/topic-research/runs", get(current_research_runs))
         .route(
             "/api/local/topic-research/cancel",
@@ -55,6 +63,14 @@ pub(super) fn routes(
         .route(
             "/api/local/topic-map/collection",
             get(current_collection_progress),
+        )
+        .route(
+            "/api/local/topic-map/comment-assignments",
+            get(comment_assignments),
+        )
+        .route(
+            "/api/local/topic-map/comment-assignments/retry",
+            post(retry_comment_assignment),
         )
         .route("/api/local/topic-map", get(snapshot))
         .route("/api/local/topic-map/context", get(page_context))
@@ -678,5 +694,71 @@ async fn current_research_cancel(
     };
     crate::local_web::ai_settings::respond(
         linggan_intelligence::ai_foundation::topic_research::cancel(db, &body).await,
+    )
+}
+
+async fn research_automation_read(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CurrentResearchRuns>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research_automation::read(db, query.domain_ref)
+            .await,
+    )
+}
+async fn research_automation_change(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::ai_foundation::topic_research_automation::Change>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research_automation::change(db, &body).await,
+    )
+}
+
+async fn handoff_angle(
+    State(state): State<LocalWebState>,
+    Json(body): Json<linggan_intelligence::content_workbench::topic_handoff::HandoffRequest>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    match linggan_intelligence::content_workbench::topic_handoff::handoff_angle(db, &body).await {
+        Ok(receipt) => Json(receipt).into_response(),
+        Err(error) => crate::local_web::content_workbench_api::error(error),
+    }
+}
+
+async fn comment_assignments(
+    State(state): State<LocalWebState>,
+    Query(query): Query<linggan_intelligence::ai_foundation::topic_comment_source::Query>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_comment_source::read(db, &query).await,
+    )
+}
+
+async fn retry_comment_assignment(
+    State(state): State<LocalWebState>,
+    Json(body): Json<
+        linggan_intelligence::ai_foundation::topic_research_automation::RetryCommentAssignment,
+    >,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    crate::local_web::ai_settings::respond(
+        linggan_intelligence::ai_foundation::topic_research_automation::retry_comment_assignment(
+            db, &body,
+        )
+        .await,
     )
 }

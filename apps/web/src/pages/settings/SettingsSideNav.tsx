@@ -19,12 +19,10 @@ const codes: Record<SettingsViewKey, string> = {
 export function SettingsSideNav({
   activeId,
   showAi = true,
-  showTeam = true,
   onViewSelect,
 }: {
   activeId: string;
   showAi?: boolean;
-  showTeam?: boolean;
   onViewSelect?: (view: SettingsViewKey) => void;
 }) {
   const children: SidebarNavigationItem[] = (Object.keys(labels) as SettingsViewKey[]).map(view => ({
@@ -50,13 +48,6 @@ export function SettingsSideNav({
       icon: 'security',
       href: '/settings/account',
     },
-    ...(showTeam ? [{
-      id: 'team-members',
-      label: '团队成员',
-      index: '03',
-      icon: 'creators',
-      href: '/settings/team',
-    }] : []),
   ];
 
   return (

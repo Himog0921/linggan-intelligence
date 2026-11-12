@@ -9816,18 +9816,13 @@
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/styles/shell.css",
         "apps/web/src/pages/settings/AccountSecurityPage.tsx",
-        "apps/web/src/pages/settings/TeamSettingsPage.tsx",
         "apps/web/src/pages/settings/SettingsSideNav.tsx",
-        "apps/web/src/pages/settings/AccountSecurityPage.module.css",
-        "apps/web/src/pages/settings/TeamSettingsPage.module.css",
-        "apps/web/src/pages/settings/OffboardingPanel.tsx",
-        "apps/web/src/pages/settings/teamSettingsApi.ts"
+        "apps/web/src/pages/settings/AccountSecurityPage.module.css"
       ],
       "navigationContract": {
         "secondary": [
           "AI 设置",
-          "账户安全",
-          "团队成员"
+          "账户安全"
         ],
         "tertiary": [
           "AI 能力",
@@ -13085,7 +13080,10 @@
           "我的创作"
         ],
         "host": "Z03",
-        "objectSteps": "保留编辑对象内局部导航"
+        "objectSteps": "保留编辑对象内局部导航",
+        "adminSecondary": [
+          "团队与权限"
+        ]
       },
       "implementationSources": [
         "apps/web/src/app/AppShell.tsx",
@@ -13278,7 +13276,10 @@
           "我的创作"
         ],
         "host": "Z03",
-        "objectSteps": "保留编辑对象内局部导航"
+        "objectSteps": "保留编辑对象内局部导航",
+        "adminSecondary": [
+          "团队与权限"
+        ]
       },
       "implementationSources": [
         "apps/web/src/app/AppShell.tsx",
@@ -13435,7 +13436,10 @@
           "我的创作"
         ],
         "host": "Z03",
-        "objectSteps": "保留编辑对象内局部导航"
+        "objectSteps": "保留编辑对象内局部导航",
+        "adminSecondary": [
+          "团队与权限"
+        ]
       },
       "implementationSources": [
         "apps/web/src/app/AppShell.tsx",
@@ -13454,7 +13458,11 @@
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/ContextTabs.tsx",
         "apps/web/src/shared/DomainScopePicker.tsx",
-        "apps/web/src/styles/shell.css"
+        "apps/web/src/styles/shell.css",
+        "apps/web/src/pages/settings/TeamSettingsPage.tsx",
+        "apps/web/src/pages/settings/TeamSettingsPage.module.css",
+        "apps/web/src/pages/settings/OffboardingPanel.tsx",
+        "apps/web/src/pages/settings/teamSettingsApi.ts"
       ]
     },
     {
@@ -13594,7 +13602,10 @@
           "我的创作"
         ],
         "host": "Z03",
-        "objectSteps": "保留编辑对象内局部导航"
+        "objectSteps": "保留编辑对象内局部导航",
+        "adminSecondary": [
+          "团队与权限"
+        ]
       },
       "implementationSources": [
         "apps/web/src/app/AppShell.tsx",

@@ -54,6 +54,8 @@ pub(super) async fn restore_saved_fragments(
     research: &Value,
 ) -> Result<Option<Vec<TopicMapSavedFragment>>, TopicMapError> {
     let comments = qualified_comment_texts(tx, domain, manifests).await?;
+    let mut core_fragments = HashMap::new();
+    let mut core_scopes = HashSet::new();
     let mut native = HashMap::<Uuid, Vec<FrozenWorkSource>>::new();
     for manifest in manifests {
         let Some(work) = reference(manifest, "workRef") else {
@@ -65,7 +67,29 @@ pub(super) async fn restore_saved_fragments(
         let Some(field) = manifest["field"].as_str() else {
             return Ok(None);
         };
-        if !is_comment_field(field) {
+        if matches!(field, "core_text_evidence" | "core_image_evidence") {
+            let Some(cutoff) = manifest["asOf"].as_str() else {
+                return Ok(None);
+            };
+            if core_scopes.insert((work, cutoff.to_owned())) {
+                let cards = crate::ai_foundation::content_understanding::core_cards_in(
+                    tx, domain, work, cutoff,
+                )
+                .await
+                .map_err(|e| TopicMapError::Source(e.to_string()))?;
+                for card in cards {
+                    for fragment in crate::topic_map_research::card_fragments(work, &card)
+                        .into_iter()
+                        .flatten()
+                    {
+                        core_fragments.insert(
+                            (work, cutoff.to_owned(), fragment.fragment_id.clone()),
+                            fragment,
+                        );
+                    }
+                }
+            }
+        } else if !is_comment_field(field) {
             let Some(frozen) = frozen_source(manifest) else {
                 return Ok(None);
             };
@@ -93,7 +117,26 @@ pub(super) async fn restore_saved_fragments(
             return Ok(None);
         };
         let context_only = field == "parent_comment_context" || field.starts_with("work_context:");
-        let text = if is_comment_field(field) {
+        let text = if matches!(field, "core_text_evidence" | "core_image_evidence") {
+            core_fragments
+                .get(&(
+                    work,
+                    manifest["asOf"].as_str().unwrap_or("").to_owned(),
+                    id.to_owned(),
+                ))
+                .filter(|f| {
+                    f.source_ref == source
+                        && manifest["sourceVersion"] == f.source_version
+                        && f.start == start
+                        && f.end == end
+                        && f.field == field
+                        && manifest["textHash"]
+                            == linggan_evidence::creator_discovery::hash(&f.text)
+                        && manifest["structureHash"]
+                            == linggan_evidence::creator_discovery::hash(&f.structure.to_string())
+                })
+                .map(|f| f.text.clone())
+        } else if is_comment_field(field) {
             let Some(cutoff) = manifest["asOf"].as_str() else {
                 return Ok(None);
             };

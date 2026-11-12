@@ -177,7 +177,10 @@ impl BatchKind {
         }
     }
     fn permits(self, task: TaskKey) -> bool {
-        if task.topic_stage().is_some() || task.comment_stage().is_some() {
+        if task.topic_stage().is_some() {
+            return matches!(self, Self::Interactive | Self::Automatic);
+        }
+        if task.comment_stage().is_some() {
             return self == Self::Interactive;
         }
         match task {

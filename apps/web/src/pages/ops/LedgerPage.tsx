@@ -156,6 +156,7 @@ export function LedgerPage({
   const operator = params.get("operator") || "";
   const pendingFrom = kind === "accounts" ? params.get("pending_from") || "" : "";
   const assignedTo = kind === "accounts" && role === "admin" ? params.get("assign_to") || "" : "";
+  const accountTask = Boolean(assignedTo || pendingFrom);
   const accountRef = kind === "publications" ? params.get("account_ref") : null;
   const [dates, setDates] = useState(false);
   const [cover, setCover] = useState<string | null>(null);
@@ -170,6 +171,9 @@ export function LedgerPage({
   const [viewPublication, setViewPublication] = useState<api.Publication | null>(null);
   const [batchViews, setBatchViews] = useState(false);
   const [responsibilityAccount, setResponsibilityAccount] = useState<api.Account | null>(null);
+  const [assignmentAll, setAssignmentAll] = useState(false);
+  const [responsibilityNotice, setResponsibilityNotice] = useState<{ scope: string; message: string } | null>(null);
+  const responsibilityScope = `${business}:${assignedTo}:${pendingFrom}`;
   const [editingAccount, setEditingAccount] = useState<api.Account | null>(null);
   const [lifecycleAccount, setLifecycleAccount] = useState<{ account: api.Account; restore: boolean } | null>(null);
   function openCover(src: string) { setCoverFailed(false); setCover(src); }
@@ -252,8 +256,38 @@ export function LedgerPage({
       : "",
   ].filter(Boolean);
   const operators = data?.operators || (operator ? [operator] : []);
+  const assignedMember = members.data?.find(member => member.memberRef === assignedTo);
+  const accountItems = accounts.data?.items.filter(item =>
+    !assignedTo || item.nativeState !== "archived" && (assignmentAll || !item.currentResponsibleMemberRef),
+  ) ?? [];
+  const scopedAccount = accountRef ? accounts.data?.items.find(item => item.ref === accountRef) : null;
+  const awaitingAssignment = role === "operator" && business === "all" && !operator && accounts.isSuccess && accounts.data.items.length === 0;
+  const columnTitles = accountTask ? ["平台", "账号名称", "当前负责人", "操作"] : columns[kind];
+  const columnNames = accountTask ? ["platform", "account", "operator", "actions"] : colNames[kind];
+  if (awaitingAssignment && (kind === "accounts" || kind === "publications" && !filtered && pubs.isSuccess && pubs.data.total === 0)) {
+    return <section className={c("ops-task-context")} aria-labelledby="ops-assignment-wait">
+      <div><h2 id="ops-assignment-wait">等待分配运营账号</h2><p>账号已启用，等待管理员分配运营账号。分配后即可开始登记发布。</p></div>
+    </section>;
+  }
+
   return (
     <>
+      {accountTask ? <section className={c("ops-task-context")} aria-label="账号任务">
+        <div>
+          <strong>{pendingFrom ? "接管离职成员的账号" : assignedMember ? `为${assignedMember.displayName}分配账号` : "分配账号"}</strong>
+          <p>{pendingFrom ? "选择一个待接管账号，指定新的负责人。" : assignedMember ? "选择待分配账号，也可以查看已有负责人的账号。" : members.isSuccess ? "该成员当前不可分配账号，请返回团队名册核对。" : "正在核对接任成员…"}</p>
+        </div>
+        <div className={c("ops-task-actions")}>
+          {assignedMember ? <ActionButton aria-pressed={assignmentAll} onClick={() => setAssignmentAll(value => !value)}>{assignmentAll ? "只看待分配" : "显示全部可分配账号"}</ActionButton> : null}
+          <a href="/settings/team">返回团队名册</a>
+          <a href="/ops/accounts">查看全部账号</a>
+        </div>
+      </section> : null}
+      {kind === "accounts" && responsibilityNotice?.scope === responsibilityScope ? <p className={c("ops-task-result")} role="status">{responsibilityNotice.message}</p> : null}
+      {scopedAccount ? <section className={c("ops-task-context")} aria-label="当前账号">
+        <div><strong>{scopedAccount.name}</strong><p>当前负责 · {scopedAccount.currentResponsibleName ?? "待分配"}</p></div>
+        <a href="/ops/accounts">返回账号管理</a>
+      </section> : null}
       <div
         className={c(
           "ops-toolbar",
@@ -313,7 +347,7 @@ export function LedgerPage({
               aria-live="polite"
             >
               {accounts.data
-                ? `总账号 ${accounts.data.total} · 运营中 ${accounts.data.active}`
+                ? pendingFrom ? `待接管 ${accountItems.length} 个账号` : assignedTo ? `可选账号 ${accountItems.length} 个` : `总账号 ${accounts.data.total} · 运营中 ${accounts.data.active}`
                 : ""}
             </span>
           ) : (
@@ -321,10 +355,7 @@ export function LedgerPage({
               迁入自内容工作台 · 发布数按发布记录自动统计
             </span>
           )}
-          {pendingFrom ? <span>该成员留下的待接管账号 <a href="/ops/accounts">查看全部账号</a></span> : null}
-          {assignedTo ? <span>选择账号交接给{members.data?.find(member => member.memberRef === assignedTo)?.displayName ?? "所选成员"}</span> : null}
-          {accountRef ? <span>当前账号的发布</span> : null}
-          <small className={c("ops-note")}>原生录入和责任交接会保留来源与回执；历史迁入事实仍只读</small>
+          {accountRef && !scopedAccount ? <span>当前账号的发布</span> : null}
           {kind === "publications" ? (
             <>
               <ActionButton type="button" disabled={!accounts.data?.items.length} title={!accounts.data?.items.length ? "当前业务没有可用账号" : undefined} onClick={() => setNewPublication(true)}>
@@ -337,7 +368,7 @@ export function LedgerPage({
                 批量补阅读量
               </ActionButton>
             </>
-          ) : kind === "accounts" ? (
+          ) : kind === "accounts" && !accountTask ? (
             <ActionButton type="button" disabled={business === "all"} title={business === "all" ? "请先选择一个业务" : undefined} onClick={() => setNewAccount(true)}>
               <IntelligenceIcon name="add" size={16}/>新增账号
             </ActionButton>
@@ -347,13 +378,13 @@ export function LedgerPage({
             </ActionButton>
           ) : null}
         </div>
-        <Tabs
+        {!accountTask ? <Tabs
           id="ops-operators"
           label="运营人"
           values={peopleTabs(operators)}
           current={operator}
           onSelect={(name) => update({ operator: name })}
-        />
+        /> : null}
       </div>
       {kind === "daily" ? (
         <p
@@ -386,20 +417,20 @@ export function LedgerPage({
         aria-label={`${kind === "publications" ? "发布记录" : kind === "accounts" ? "账号" : "每日数据"}表格，可横向滚动`}
         aria-busy={result.isFetching}
       >
-        <table className={c("ops-table", `ops-${kind}`)}>
+        <table className={c("ops-table", accountTask ? "ops-accounts-task" : `ops-${kind}`)}>
           <colgroup>
-            {colNames[kind].map((name, i) => (
+            {columnNames.map((name, i) => (
               <col key={i} className={c(`ops-col-${name}`)} />
             ))}
           </colgroup>
           <thead>
             <tr>
-              {columns[kind].map((title, i) => (
+              {columnTitles.map((title, i) => (
                 <th
                   key={title}
                   scope="col"
                   className={
-                    numeric[kind].includes(i) ? c("ops-number") : undefined
+                    !accountTask && numeric[kind].includes(i) ? c("ops-number") : undefined
                   }
                   title={titles[title]}
                 >
@@ -418,12 +449,14 @@ export function LedgerPage({
                   openCover={openCover}
                   openDetail={setDetail}
                   recordView={setViewPublication}
+                  showHistoricalOwner={role === "admin"}
                   openSync={restricted ? undefined : requestRef => { setSyncRequestRef(requestRef); setSyncPublications(true); }}
                 />
               ))
-            ) : kind === "accounts" && accounts.data?.items.length ? (
-              accounts.data.items.map((item, i) => (
-                <AccountRow key={item.ref} item={item} index={i} transfer={setResponsibilityAccount} edit={setEditingAccount} lifecycle={(account, restore) => setLifecycleAccount({ account, restore })} ready={members.isSuccess} canTransfer={role === 'admin' || role === 'lead'} />
+            ) : kind === "accounts" && accountItems.length ? (
+              accountItems.map((item, i) => (
+                <AccountRow key={item.ref} item={item} index={i} transfer={setResponsibilityAccount} edit={setEditingAccount} lifecycle={(account, restore) => setLifecycleAccount({ account, restore })} task={accountTask} ready={members.isSuccess && (!assignedTo || !!assignedMember)}
+                  canTransfer={role === 'admin' || role === 'lead' && (members.data ?? []).some(member => member.memberRef !== item.currentResponsibleMemberRef)} />
               ))
             ) : kind === "daily" && daily.data?.items.length ? (
               daily.data.items.map((item) => (
@@ -431,9 +464,11 @@ export function LedgerPage({
               ))
             ) : data && !result.isFetching ? (
               <Empty
-                columns={columns[kind].length}
+                columns={columnTitles.length}
                 text={
-                  !data.asOf
+                  awaitingAssignment
+                    ? "账号已启用，等待管理员分配运营账号。分配后即可开始登记发布。"
+                    : !data.asOf && !assignedTo && !pendingFrom
                     ? "还没有迁入数据。"
                     : kind === "publications"
                       ? accountRef && params.get("views") === "pending"
@@ -442,7 +477,7 @@ export function LedgerPage({
                         ? "没有符合条件的发布记录。"
                         : "没有发布记录。"
                       : kind === "accounts"
-                        ? pendingFrom ? "没有待接管的账号。" : "当前筛选下没有账号。"
+                        ? pendingFrom ? business === "all" ? "待接管清单已清空。" : "当前业务没有待接管账号。" : assignedTo && !assignmentAll ? "当前没有待分配账号，可查看已有负责人的账号。" : "当前筛选下没有账号。"
                         : "当前筛选下没有每日数据。"
                 }
                 action={
@@ -528,6 +563,8 @@ export function LedgerPage({
             {detail.source === "native" ? "运营台账原生登记" : "工作台历史迁入"}
             {' · '}系统尚未核对平台发布状态
           </p>
+          {detail.publisher ? <p className={c("ops-note")}>原发布人 · {detail.publisher}</p> : null}
+          {role === "admin" ? <HistoricalOwnerTag publication={detail} /> : null}
           <External href={detail.url} title="原发布链接"><IntelligenceIcon name="external" size={16}/> 查看原发布链接</External>
           <dl className={c('ops-detail-facts')}>
             <div><dt>阅读量</dt><dd>{detail.views.state === 'value' ? f.count(detail.views.value).text : detail.views.state === 'pending' ? '待补' : '选填，未知'}</dd></div>
@@ -549,7 +586,9 @@ export function LedgerPage({
       {editDaily ? <NativeDailyDialog item={editDaily} close={() => setEditDaily(null)} /> : null}
       {viewPublication ? <NativeViewDialog publication={viewPublication} close={() => setViewPublication(null)} /> : null}
       {batchViews && pubs.data ? <NativeViewBatchDialog publications={pubs.data.items} close={() => setBatchViews(false)} /> : null}
-      {responsibilityAccount && members.data ? <AccountResponsibilityDialog account={responsibilityAccount} members={members.data} suggestedRecipient={assignedTo} close={() => setResponsibilityAccount(null)} /> : null}
+      {responsibilityAccount && members.data ? <AccountResponsibilityDialog account={responsibilityAccount} members={members.data} suggestedRecipient={assignedTo} canUnassign={role === "admin"}
+        onSaved={message => setResponsibilityNotice({ scope: responsibilityScope, message })}
+        close={() => setResponsibilityAccount(null)} /> : null}
       {editingAccount ? <NativeAccountEditDialog account={editingAccount} close={() => setEditingAccount(null)} /> : null}
       {lifecycleAccount ? <NativeAccountArchiveDialog account={lifecycleAccount.account} restore={lifecycleAccount.restore} close={() => setLifecycleAccount(null)} /> : null}
       {cover ? (
@@ -573,13 +612,22 @@ export function LedgerPage({
     </>
   );
 }
+function HistoricalOwnerTag({ publication }: { publication: api.Publication }) {
+  if (publication.source !== "imported") return null;
+  const state = publication.historicalOwnerState;
+  if (state === "matched") return <Tag tone="success">归属已核实</Tag>;
+  return <Tag tone="warning">{state === "conflict_pending" ? "归属有冲突" : "归属待核实"}</Tag>;
+}
+
 function PublicationRow({
   item,
   openCover, openDetail,
   recordView,
   openSync,
+  showHistoricalOwner,
 }: {
   item: api.Publication;
+  showHistoricalOwner: boolean;
   openCover: (src: string) => void;
   openDetail: (item: api.Publication) => void;
   recordView: (item: api.Publication) => void;
@@ -610,6 +658,7 @@ function PublicationRow({
           <SyncTag item={item} openSync={openSync} />
           <MediaTag media={item.media} />
           <FieldAdoptionTag adoption={item.fieldAdoption} />
+          {showHistoricalOwner ? <HistoricalOwnerTag publication={item} /> : null}
           <span className={c("ops-secondary")}>
             {item.views.state === "value"
               ? "阅读量已填"
@@ -791,10 +840,10 @@ function SyncTag({ item, openSync }: { item: api.Publication; openSync?: (reques
     <Tag tone={tone}>{syncLabels[sync.state]}</Tag>
   </button>;
 }
-function AccountRow({ item, index, transfer, edit, lifecycle, ready, canTransfer }: { item: api.Account; index: number; transfer: (item: api.Account) => void; edit: (item: api.Account) => void; lifecycle: (item: api.Account, restore: boolean) => void; ready: boolean; canTransfer: boolean }) {
+function AccountRow({ item, index, transfer, edit, lifecycle, ready, canTransfer, task }: { item: api.Account; index: number; transfer: (item: api.Account) => void; edit: (item: api.Account) => void; lifecycle: (item: api.Account, restore: boolean) => void; ready: boolean; canTransfer: boolean; task: boolean }) {
   return (
     <tr>
-      <td className={c("ops-number")}>{index + 1}</td>
+      {!task ? <td className={c("ops-number")}>{index + 1}</td> : null}
       <td>{f.platformLabel[item.platform]}</td>
       <td>
         {item.profileUrl ? (
@@ -806,18 +855,22 @@ function AccountRow({ item, index, transfer, edit, lifecycle, ready, canTransfer
             {item.name}
           </span>
         )}
+        {task && (item.handle || item.deviceCode) ? <small className={c("ops-account-identifier")}>{item.handle || `设备 ${item.deviceCode}`}</small> : null}
         {item.source === "native" ? <Tag title="由运营台账原生创建">原生</Tag> : null}
         {item.nativeState === "archived" ? <Tag tone="warning" title="归档账号保留以便恢复，不可继续登记发布">已归档</Tag> : null}
       </td>
-      <TextCell value={item.deviceCode} />
-      <NumberCell value={item.followerCount} />
-      <TextCell value={item.ipLocation} />
+      {!task ? <>
+        <TextCell value={item.deviceCode} />
+        <NumberCell value={item.followerCount} />
+        <TextCell value={item.ipLocation} />
+      </> : null}
       <td>
         <div className={c("ops-stack")}>
           {item.currentResponsibleName ? <span>{item.currentResponsibleName}</span> : <Missing title="当前没有有效负责人">{item.pendingFromMemberRef ? "原负责人已停用 · 待接管" : "未分配"}</Missing>}
           {item.operator ? <small className={c("ops-secondary")}>历史：{item.operator}</small> : null}
         </div>
       </td>
+      {!task ? <>
       <td>
         {item.status ? (
           <span>{f.accountStatus[item.status] || item.status}</span>
@@ -836,12 +889,15 @@ function AccountRow({ item, index, transfer, edit, lifecycle, ready, canTransfer
         )}
       </td>
       <TextCell value={item.notes} />
+      </> : null}
       <td><div className={c("ops-stack")}>
+        {!task ? <>
         {item.source === "native" && item.nativeVersion !== null && item.nativeState !== "archived" ? <><ActionButton type="button" onClick={() => edit(item)}><IntelligenceIcon name="edit" size={16}/>编辑</ActionButton><ActionButton type="button" onClick={() => lifecycle(item, false)}><IntelligenceIcon name="archive" size={16}/>归档</ActionButton></> : null}
         {item.source === "native" && item.nativeVersion !== null && item.nativeState === "archived" ? <ActionButton type="button" onClick={() => lifecycle(item, true)}><IntelligenceIcon name="restore" size={16}/>恢复</ActionButton> : null}
         {item.platform === "xhs" && item.currentResponsibleMemberRef && item.nativeState !== "archived"
           ? <a href={`/ops/publications?${new URLSearchParams({ account_ref: item.ref, views: "pending" })}`}>待补阅读量</a> : null}
-        {canTransfer && item.nativeState !== "archived" ? <ActionButton type="button" disabled={!ready} title={ready ? "按当前权限与同组关系校验" : "正在读取可选成员"} onClick={() => transfer(item)}>交接</ActionButton> : null}
+        </> : null}
+        {canTransfer && item.nativeState !== "archived" ? <ActionButton type="button" disabled={!ready} title={ready ? "按当前权限与同组关系校验" : "正在读取可选成员"} onClick={() => transfer(item)}>{item.currentResponsibleMemberRef ? "交接" : item.pendingFromMemberRef ? "接管" : "分配账号"}</ActionButton> : null}
       </div></td>
     </tr>
   );

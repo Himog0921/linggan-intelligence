@@ -1,9 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type FormEvent } from 'react';
+import { ModalDialog } from '../../corpus/ModalDialog';
 import { AppShell } from '../../app/AppShell';
 import { ContextBreadcrumb } from '../../shared/ContextBar';
 import { ActionButton } from '../../shared/ActionButton';
-import { SettingsSideNav } from './SettingsSideNav';
 import { ApiError } from '../../shared/api';
 import * as api from './teamSettingsApi';
 import styles from './TeamSettingsPage.module.css';
@@ -31,26 +31,29 @@ function errorText(error: unknown, action: 'invite' | 'deactivate') {
   return '服务器暂时无法完成此操作，请稍后重试。';
 }
 
-function InviteForm({ onCreated }: { onCreated: (receipt: api.InvitationReceipt) => void }) {
+function InviteForm({ onCreated, busy, onBusy }: {
+  onCreated: (receipt: api.InvitationReceipt, name: string) => void;
+  busy: boolean;
+  onBusy: (busy: boolean) => void;
+}) {
   const [email, setEmail] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   async function submit(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
-    setBusy(true); setNotice('');
+    onBusy(true); setNotice('');
     try {
       const receipt = await api.createInvitation({ email, displayName, role: 'operator' });
-      setEmail(''); setDisplayName(''); onCreated(receipt);
+      setEmail(''); setDisplayName(''); onCreated(receipt, displayName.trim());
     } catch (error) { setNotice(errorText(error, 'invite')); }
-    finally { setBusy(false); }
+    finally { onBusy(false); }
   }
-  return <form className={styles.form} onSubmit={submit} noValidate>
-    <label>姓名<input required value={displayName} disabled={busy} onChange={event => setDisplayName(event.target.value)} /></label>
+  return <form className={styles.form} onSubmit={submit}>
+    <label>姓名<input data-initial-focus required value={displayName} disabled={busy} onChange={event => setDisplayName(event.target.value)} /></label>
     <label>工作邮箱<input type="email" required autoComplete="email" value={email} disabled={busy} onChange={event => setEmail(event.target.value)} /></label>
     {notice ? <p className={styles.error} role="status">{notice}</p> : null}
-    <ActionButton type="submit" variant="primary" busy={busy}>生成邀请链接</ActionButton>
+    <footer className={styles.formActions}><ActionButton type="submit" variant="primary" busy={busy}>生成邀请链接</ActionButton></footer>
   </form>;
 }
 
@@ -65,6 +68,9 @@ export function TeamSettingsPage() {
   const client = useQueryClient();
   const roster = useQuery({ queryKey: ROSTER_KEY, queryFn: ({ signal }) => api.fetchRoster(signal), retry: false, refetchOnWindowFocus: false });
   const [showInvite, setShowInvite] = useState(false);
+  const [copyNotice, setCopyNotice] = useState('');
+  const [invitedName, setInvitedName] = useState('');
+  const [filter, setFilter] = useState<api.TeamMember['state'] | 'all'>('all');
   const [receipt, setReceipt] = useState<api.InvitationReceipt | null>(null);
   const [deactivating, setDeactivating] = useState<api.TeamMember | null>(null);
   const [resumeOverride, setResumeOverride] = useState<{ actor: string; stop: ReturnType<typeof readPendingStop> } | null>(null);
@@ -90,7 +96,26 @@ export function TeamSettingsPage() {
     enabled: viewingReceipt !== null, retry: false,
   });
   const current = members.filter(member => member.state === 'active').length;
-  const crumb = <ContextBreadcrumb items={['设置', '团队成员']} />;
+  const crumb = <ContextBreadcrumb items={['运营', '团队与权限']} />;
+  const waiting = members.filter(member => member.state === 'invited').length;
+  const visibleMembers = members.filter(member => filter === 'all' || member.state === filter);
+  function closeInvite() {
+    if (inviteBusy) return;
+    setShowInvite(false);
+    setReceipt(null);
+    setCopyNotice('');
+  }
+  async function copyInvitation(link: string) {
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopyNotice('已复制链接');
+    } catch {
+      const input = document.querySelector<HTMLInputElement>('#invite-link');
+      input?.focus();
+      input?.select();
+      setCopyNotice('链接已选中，请手动复制。');
+    }
+  }
   async function refresh() { await client.invalidateQueries({ queryKey: ROSTER_KEY }); }
   async function updateInvitation(member: api.TeamMember, revoke: boolean) {
     if (inviteBusy) return;
@@ -101,7 +126,10 @@ export function TeamSettingsPage() {
         setReceipt(current => current?.ref === member.invitationRef ? null : current);
         setInviteNotice('邀请已撤销。');
       } else {
-        setReceipt(await api.createInvitation({ email: member.email, displayName: member.displayName, role: member.role }));
+        setCopyNotice('');
+        const updated = await api.createInvitation({ email: member.email, displayName: member.displayName, role: member.role });
+        setInvitedName(member.displayName);
+        setReceipt(updated);
       }
     } catch (error) {
       setInviteNotice(errorText(error, 'invite'));
@@ -110,54 +138,87 @@ export function TeamSettingsPage() {
       void refresh();
     }
   }
-  return <AppShell active={null} boundaryLabel="本机团队控制" contextBar={{ breadcrumb: crumb, meta: <small>成员状态和账号责任以当前服务端读数为准</small> }}>
-    <div className="v7-shell">
-      <SettingsSideNav activeId="team-members" />
-      <main className={styles.page} aria-labelledby="team-settings-title">
-      <header className={styles.header}><div><h1 id="team-settings-title">团队成员</h1><p>只有管理员可以读取、邀请或停用成员。此页面不显示密码、会话令牌或邀请令牌的存储值。</p></div><ActionButton variant="primary" onClick={() => { setShowInvite(value => !value); setReceipt(null); }}>{showInvite ? '收起邀请表单' : '邀请成员'}</ActionButton></header>
-      {roster.data ? <section className={styles.metrics} aria-label="团队概况">
-        <div><b>{members.length}</b><span>全部成员</span></div>
-        <div><b>{current}</b><span>当前可登录</span></div>
-        <div><b>{members.filter(member => member.state === 'invited' && member.invitationState === 'pending').length}</b><span>待签收邀请</span></div>
-      </section> : null}
-      {showInvite ? <section className={styles.panel} aria-labelledby="invite-title"><h2 id="invite-title">生成成员邀请</h2><p>系统只生成一次性设密链接，当前没有邮件投递配置。请通过受控渠道交付链接，并在交付后关闭此处。</p><InviteForm onCreated={created => { setReceipt(created); void refresh(); }}/></section> : null}
-      {receipt ? <section className={styles.receipt} aria-labelledby="invite-receipt-title"><div><h2 id="invite-receipt-title">邀请链接已生成</h2><p>尚未发送邮件。链接在本页内存中仅显示一次；请使用受控渠道交给受邀人，完成后关闭或刷新页面。</p></div><label>一次性设密链接<input readOnly value={invitationUrl(receipt)} aria-label="一次性设密链接" onFocus={event => event.currentTarget.select()} /></label><small>有效期：{Math.floor(receipt.expiresInSeconds / 3600)} 小时。邀请记录：{receipt.ref}</small></section> : null}
-      {inviteNotice ? <p role="status">{inviteNotice}</p> : null}
-      {deactivating || resume ? <section className={styles.panel} aria-labelledby="deactivate-title">
-        <div className={styles.panelHeading}><h2 id="deactivate-title">停用成员</h2>
-          <ActionButton onClick={() => { setDeactivating(null); if (actor) setResumeOverride({ actor, stop: null }); }}>关闭</ActionButton>
-        </div>
-        <OffboardingPanel key={deactivating?.memberRef ?? resume?.memberRef} actor={actor}
-          member={deactivating ?? members.find(item => item.memberRef === resume?.memberRef) ?? null}
-          members={members} resume={deactivating ? null : resume} onDone={() => void refresh()} />
-      </section> : null}
-      {viewingReceipt ? <section className={styles.panel}>
-        <ActionButton onClick={() => setViewingReceipt(null)}>关闭回执</ActionButton>
-        {pastReceipt.data ? <StopReceipt receipt={pastReceipt.data} members={members} /> : null}
-        {pastReceipt.isPending ? <p role="status">正在读取停用回执…</p> : null}
-        {pastReceipt.isError ? <p role="alert">停用回执暂不可读取。</p> : null}
-      </section> : null}
-      <section className={styles.roster} aria-labelledby="roster-title"><div className={styles.rosterHead}><div><h2 id="roster-title">成员名册</h2><p>读取失败时不以空列表替代；账号接管后仍可查询原成员的历史记录。</p></div><ActionButton onClick={() => void roster.refetch()} busy={roster.isFetching}>刷新</ActionButton></div>
-        {roster.isPending ? <p role="status">正在读取成员名册…</p> : null}
-        {roster.isError ? <p className={styles.error} role="alert">成员名册无法读取。{errorText(roster.error, 'invite')}</p> : null}
-        {roster.data ? <ul className={styles.members}><li className={styles.memberHead}><span>成员</span><span>角色</span><span>状态</span><span>当前账号责任</span><span>操作</span></li>{members.map(member => <li key={member.memberRef} className={styles.member} data-state={member.state}>
-          <div className={styles.memberIdentity}><b>{member.displayName}</b><small>{member.email}</small>
-            {member.groupName ? <small>{member.groupName}{member.groupHasActiveLead === false ? ' · 组长空缺，管理员代管' : ''}</small> : null}
+  return <AppShell active="ops" boundaryLabel="团队管理" contextBar={{ breadcrumb: crumb }}>
+    <main className={styles.page} aria-labelledby="team-settings-title">
+      <div className={styles.workspace}>
+        <header className={styles.header}>
+          <div><h1 id="team-settings-title" tabIndex={-1}>团队与权限</h1><p>邀请成员、分配运营账号，或办理离职交接。</p></div>
+          <ActionButton variant="primary" disabled={inviteBusy} onClick={() => { setReceipt(null); setCopyNotice(''); setShowInvite(true); }}>邀请成员</ActionButton>
+        </header>
+        {inviteNotice ? <p className={styles.notice} role="status">{inviteNotice}</p> : null}
+        <section className={styles.roster} aria-labelledby="roster-title">
+          <div className={styles.rosterHead}>
+            <h2 id="roster-title">成员名册</h2>
+            <ActionButton onClick={() => void roster.refetch()} busy={roster.isFetching}>刷新</ActionButton>
           </div>
-          <span>{roleLabel[member.role]}</span><span>{memberStatus(member)}</span>
-          <span>{member.currentAccountCount} 个{member.state === 'disabled' ? '待接管' : '当前负责'}账号</span>
-          <div className={styles.actions}>
-            {member.state === 'active' ? <a href={`/ops/accounts?assign_to=${encodeURIComponent(member.memberRef)}`}>分配账号</a> : null}
-            {member.state === 'active' && member.memberRef !== actor ? <ActionButton disabled={!!deactivating || !!resume} onClick={() => openStop(member)} variant="danger">停用</ActionButton> : null}
-            {member.state === 'invited' ? <ActionButton busy={inviteBusy} onClick={() => void updateInvitation(member, false)}>重新生成邀请</ActionButton> : null}
-            {member.state === 'invited' && member.invitationState === 'pending' && member.invitationRef
-              ? <ActionButton disabled={inviteBusy} onClick={() => void updateInvitation(member, true)}>撤销邀请</ActionButton> : null}
-            {member.state === 'disabled' && member.currentAccountCount > 0 ? <a href={pendingAccountsUrl(member.memberRef)}>去接管</a> : null}
-            {member.latestDeactivationRef ? <ActionButton onClick={() => setViewingReceipt(member.latestDeactivationRef)}>查看停用回执</ActionButton> : null}
-          </div>
-        </li>)}</ul> : null}
-      </section>
-      </main>
-    </div>
+          {roster.data ? <nav className={styles.filters} aria-label="成员状态筛选">
+            {([
+              ['all', '全部', members.length],
+              ['active', '可登录', current],
+              ['invited', '待激活', waiting],
+              ['disabled', '已停用', members.length - current - waiting],
+            ] as const).map(([key, label, count]) => <button key={key} type="button" aria-pressed={filter === key} onClick={() => setFilter(key)}>
+              {label}<span>{count}</span>
+            </button>)}
+          </nav> : null}
+          {roster.isPending ? <p className={styles.empty} role="status">正在读取成员名册…</p> : null}
+          {roster.isError ? <p className={styles.empty} role="alert">成员名册无法读取。{errorText(roster.error, 'invite')}</p> : null}
+          {roster.data && !visibleMembers.length ? <p className={styles.empty}>此状态下暂无成员。</p> : null}
+          {visibleMembers.length ? <table className={styles.members}>
+            <thead><tr><th scope="col">成员</th><th scope="col">角色</th><th scope="col">状态</th><th scope="col">运营账号</th><th scope="col">操作</th></tr></thead>
+            <tbody>{visibleMembers.map(member => <tr key={member.memberRef}>
+              <th scope="row">
+                <div className={styles.memberIdentity}>
+                  <b>{member.displayName}</b><small>{member.email}</small>
+                  {member.groupName ? <small>{member.groupName}{member.groupHasActiveLead === false ? ' · 管理员代管' : ''}</small> : null}
+                </div>
+              </th>
+              <td>{roleLabel[member.role]}</td>
+              <td><span className={styles.memberStatus} data-state={member.state}>{memberStatus(member)}</span></td>
+              <td><span className={styles.accountCount}>{member.currentAccountCount}</span> 个{member.state === 'disabled' ? '待接管' : '当前负责'}账号</td>
+              <td><div className={styles.actions}>
+                {member.state === 'active' ? <a href={`/ops/accounts?assign_to=${encodeURIComponent(member.memberRef)}`}>分配账号</a> : null}
+                {member.state === 'active' && member.memberRef !== actor ? <ActionButton onClick={() => openStop(member)}>办理离职</ActionButton> : null}
+                {member.state === 'invited' ? <ActionButton busy={inviteBusy} onClick={() => void updateInvitation(member, false)}>重新生成邀请</ActionButton> : null}
+                {member.state === 'invited' && member.invitationState === 'pending' && member.invitationRef
+                  ? <ActionButton disabled={inviteBusy} onClick={() => void updateInvitation(member, true)}>撤销邀请</ActionButton> : null}
+                {member.state === 'disabled' && member.currentAccountCount > 0 ? <a href={pendingAccountsUrl(member.memberRef)}>去接管</a> : null}
+                {member.latestDeactivationRef ? <ActionButton onClick={() => setViewingReceipt(member.latestDeactivationRef)}>查看停用回执</ActionButton> : null}
+              </div></td>
+            </tr>)}</tbody>
+          </table> : null}
+        </section>
+      </div>
+    </main>
+    {showInvite || receipt ? <ModalDialog labelledBy="invite-title" className={styles.modal} onClose={closeInvite}>
+      <header className={styles.modalHeader}>
+        <div><h2 id="invite-title">{receipt ? '邀请链接已生成' : '邀请运营成员'}</h2>
+          <p>{receipt ? `尚未发送邮件。复制链接并通过团队渠道交给${invitedName}。` : '受邀人设密后将成为运营成员，随后可为其分配运营账号。'}</p></div>
+        <ActionButton onClick={closeInvite} disabled={inviteBusy} aria-label="关闭邀请">关闭</ActionButton>
+      </header>
+      {receipt ? <div className={styles.form}>
+        <label>一次性设密链接<input id="invite-link" readOnly value={invitationUrl(receipt)} onFocus={event => event.currentTarget.select()} /></label>
+        <p>链接有效期为 {Math.floor(receipt.expiresInSeconds / 3600)} 小时。成员激活后，从名册点「分配账号」。</p>
+        <footer className={styles.formActions}><span role="status">{copyNotice}</span><ActionButton variant="primary" onClick={() => void copyInvitation(invitationUrl(receipt))}>复制邀请链接</ActionButton></footer>
+      </div> : <InviteForm busy={inviteBusy} onBusy={setInviteBusy} onCreated={(created, name) => { setInvitedName(name); setReceipt(created); void refresh(); }} />}
+    </ModalDialog> : null}
+    {deactivating || resume ? <ModalDialog labelledBy="deactivate-title" className={styles.modal} restoreFocus={() => document.getElementById('team-settings-title')} onClose={() => {
+      setDeactivating(null);
+      if (actor) setResumeOverride({ actor, stop: null });
+    }}>
+      <header className={styles.modalHeader}>
+        <div><h2 id="deactivate-title">{deactivating ? `办理离职 · ${deactivating.displayName}` : '继续办理离职'}</h2></div>
+        <ActionButton onClick={() => { setDeactivating(null); if (actor) setResumeOverride({ actor, stop: null }); }} aria-label="关闭离职">关闭</ActionButton>
+      </header>
+      <OffboardingPanel key={deactivating?.memberRef ?? resume?.memberRef} actor={actor}
+        member={deactivating ?? members.find(item => item.memberRef === resume?.memberRef) ?? null}
+        members={members} resume={deactivating ? null : resume} onDone={() => void refresh()} />
+    </ModalDialog> : null}
+    {viewingReceipt ? <ModalDialog labelledBy="stop-receipt-title" className={styles.modal} onClose={() => setViewingReceipt(null)}>
+      <header className={styles.modalHeader}><h2 id="stop-receipt-title">离职回执</h2><ActionButton onClick={() => setViewingReceipt(null)} data-initial-focus>关闭回执</ActionButton></header>
+      {pastReceipt.data ? <StopReceipt receipt={pastReceipt.data} members={members} /> : null}
+      {pastReceipt.isPending ? <p className={styles.empty} role="status">正在读取停用回执…</p> : null}
+      {pastReceipt.isError ? <p className={styles.empty} role="alert">停用回执暂不可读取。</p> : null}
+    </ModalDialog> : null}
   </AppShell>;
 }

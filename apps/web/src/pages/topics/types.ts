@@ -123,7 +123,14 @@ export interface ResearchOutput {
     overlays?: string[];
   };
 }
+export interface ContentPattern {
+  kind: 'content_type' | 'expression' | 'answer_form';
+  label: string;
+  unitIds: string[];
+  evidence: Citation[];
+}
 export interface WorkResearch {
+  contentPatterns?: { coreRef: string; items: ContentPattern[] };
   readable: boolean;
   authorSourceState: string;
   commentSourceState: string;
@@ -189,7 +196,16 @@ export interface PlatformStatistics {
   p90Likes: number | null;
   highPerformanceRuleVersion?: number | null;
 }
+export interface OperationsCoverage {
+  publishedWorkCount: number;
+  publicationCount: number;
+  hitWorkCount: number;
+  unknownViewsWorkCount: number;
+  hitRule: { platform: string; metric: string; threshold: number };
+  works: { workRef: string; publications: { publicationRef: string; accountRef: string | null; accountName: string | null; platform: string; publishedOn: string | null; views: number | null; hit: boolean }[] }[];
+}
 export interface Statistics {
+  operations?: OperationsCoverage;
   workCount: number;
   authorCount: number;
   unknownAuthorCount: number;
@@ -327,6 +343,8 @@ export interface Snapshot {
     topicRef: string | null;
     totalWorkCount: number;
     readableWorkCount: number;
+    progress?: TopicProgress;
+    operations?: OperationsCoverage;
     unclassifiedWorkCount: number;
     asOf: string;
     ownIdentityState: string;
@@ -338,6 +356,12 @@ export interface Snapshot {
     loadedWorkCount?: number;
     canonicalWorkCount?: number;
   };
+}
+export interface TopicProgress {
+  totalWorkCount: number;
+  material: { ready: number; preparing: number; blocked: number; unknown: number };
+  understanding: { available: number; missing: number; stale: number; unknown: number };
+  graph: { assigned: number; unassigned: number };
 }
 export interface DiscussionRow {
   work: Work;

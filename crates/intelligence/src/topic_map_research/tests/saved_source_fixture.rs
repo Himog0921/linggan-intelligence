@@ -206,7 +206,7 @@ pub(super) async fn seed_all_accepted(db: &Database) {
 /// Test-only construction of an already accepted decision. Production scheduling
 /// remains retired; this fixture proves input identity, persistence, and readers.
 pub(super) async fn seed_accepted_source_task(db: &Database, task: Uuid) {
-    let row=sqlx::query("SELECT task.work_ref AS work_public_ref,task.input_refs,run.run_ref,(run.configurations->>0)::uuid AS config_ref,model.model_id FROM linggan_topic_research_window task JOIN linggan_topic_research_run run USING(run_ref) JOIN linggan_model_config config ON config.config_ref=(run.configurations->>0)::uuid JOIN linggan_model_entry model USING(model_ref) WHERE task.window_ref=$1")
+    let row=sqlx::query("SELECT task.work_ref AS work_public_ref,task.input_refs,run.run_ref,(run.configurations->>0)::uuid AS config_ref,config.config_ref AS model_config_ref,model.model_id FROM linggan_topic_research_window task JOIN linggan_topic_research_run run USING(run_ref) LEFT JOIN linggan_ai_task_config ai_config ON ai_config.task_config_ref=(run.configurations->>0)::uuid JOIN linggan_model_config config ON config.config_ref=COALESCE(ai_config.model_config_ref,(run.configurations->>0)::uuid) JOIN linggan_model_entry model ON model.model_ref=config.model_ref WHERE task.window_ref=$1")
         .bind(task).fetch_one(db.pool()).await.unwrap();
     let work: Uuid = row.get("work_public_ref");
     let config: Uuid = row.get("config_ref");
@@ -309,7 +309,7 @@ pub(super) async fn seed_accepted_source_task(db: &Database, task: Uuid) {
     let verification = json!({"contract":analysis::verification::VERIFY_CONTRACT,"passed":true,"fixture":"SYNTHETIC acceptance seed, not semantic review"});
     let mut tx = db.pool().begin().await.unwrap();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at) SELECT $1,model.connection_version_ref,model.model_ref,$2,'analyze',$3,'succeeded',0,0,$4,scope_001_now() FROM linggan_model_config config JOIN linggan_model_entry model USING(model_ref) WHERE config.config_ref=$2")
-        .bind(invocation).bind(config).bind(&request_hash).bind(json!({"synthetic":true,"fixture":"SYNTHETIC / NOT EVIDENCE; no provider call"})).execute(&mut *tx).await.unwrap();
+        .bind(invocation).bind(row.get::<Uuid,_>("model_config_ref")).bind(&request_hash).bind(json!({"synthetic":true,"fixture":"SYNTHETIC / NOT EVIDENCE; no provider call"})).execute(&mut *tx).await.unwrap();
     let eligible: Vec<Uuid> = candidates
         .as_array()
         .unwrap()

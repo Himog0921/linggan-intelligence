@@ -1613,6 +1613,14 @@ async fn shared_ocr_state_uses_canonical_reading_gap_empty_and_task_receipts_at_
         "media status must not transport another OCR full text"
     );
     assert_topic_overview_matches_detail(&db, work).await;
+    // Still-image admission now queues only thumbnails. This status projection test
+    // supplies its own historical OCR task receipt instead of assuming admission
+    // schedules OCR. Commit pending before the cutoff; fail the same task below.
+    let job = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr','local-v5','full_blob')")
+        .bind(job).bind("a".repeat(64)).bind(slot).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) VALUES($1,$2,'pending','synthetic_queued_receipt')")
+        .bind(Uuid::new_v4()).bind(job).execute(db.pool()).await.unwrap();
     let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(db.pool())
         .await
@@ -1670,9 +1678,6 @@ async fn shared_ocr_state_uses_canonical_reading_gap_empty_and_task_receipts_at_
             label
         );
     }
-    let job = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_media_processing_job(job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES($1,$2,$3,'image_ocr','local-v5','full_blob')")
-        .bind(job).bind("a".repeat(64)).bind(slot).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason)VALUES($1,$2,'failed','synthetic_latest_failure')").bind(Uuid::new_v4()).bind(job).execute(db.pool()).await.unwrap();
     assert_eq!(
         read_work_resource(&db, work).await.unwrap().unwrap().media["ocr"]["state"],

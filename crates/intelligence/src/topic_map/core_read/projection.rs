@@ -172,7 +172,7 @@ pub(super) fn project_work(
         "partialTaskRefs":partial_tasks,"state":if partial_tasks.is_empty(){"available"}else{"partial"},
         "readable":true,"authorSourceState":if work.readable || projection.author{"available"}else{"source_unavailable"},
         "commentSourceState":if projection.comments{"available"}else{"source_unavailable"},
-        "methodVersion":latest.method,"createdAt":latest.time,"output":output,"fragments":projection.fragments,
+        "methodVersion":latest.method,"createdAt":latest.time,"contentPatterns":patterns::project(&parts),"output":output,"fragments":projection.fragments,
         "core":{"methodVersion":crate::topic_map_core::METHOD_VERSION,"coverage":projection.coverage.value(),"units":projection.units}}));
     projection.journey.apply(work);
     candidates

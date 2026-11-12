@@ -71,7 +71,7 @@ fn work(id: u128, readable: bool) -> TopicMapWork {
     }
 }
 
-fn input(field: &str) -> ResearchInput {
+pub(super) fn input(field: &str) -> ResearchInput {
     let work_ref = Uuid::from_u128(1);
     let text = "我一直难以开始任务。🙂开始以后又容易分心。";
     let fragment = Fragment {
@@ -190,7 +190,7 @@ fn assignment(topic: u128) -> Value {
     json!({"topicRef":Uuid::from_u128(topic),"definitionRef":Uuid::from_u128(topic+1),"label":"同名主题","reason":"逐项符合概念边界。"})
 }
 
-fn window(
+pub(super) fn window(
     input: ResearchInput,
     output: Value,
     core: Value,

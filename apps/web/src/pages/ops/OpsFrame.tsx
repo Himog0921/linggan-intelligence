@@ -19,6 +19,7 @@ export function OpsFrame({
   foot,
   immersive,
   restricted = false,
+  manageTeam = false,
   page,
   dataPageKey = 'overview',
   creationPageKey = 'today',
@@ -32,6 +33,7 @@ export function OpsFrame({
   foot?: ReactNode;
   immersive?: boolean;
   restricted?: boolean;
+  manageTeam?: boolean;
   page?: string;
   dataPageKey?: string;
   creationPageKey?: 'today' | 'works';
@@ -78,6 +80,12 @@ export function OpsFrame({
           onSelect: onCreationPageSelect ? () => onCreationPageSelect('works') : undefined,
         },
       ],
+    }] : []),
+    ...(!restricted && manageTeam ? [{
+      id: 'team-permissions',
+      label: '团队与权限',
+      icon: 'security',
+      href: '/settings/team',
     }] : []),
   ];
   const activeId = section === 'data' ? 'data-' + dataPageKey : 'creation-' + creationPageKey;

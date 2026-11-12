@@ -59,7 +59,6 @@ export function ModelSettingsPage() {
     <div className="v7-shell">
       <SettingsSideNav
         activeId={legacy ? 'ai-settings' : 'ai-' + view}
-        showTeam={false}
         onViewSelect={(next: SettingsViewKey) => setQuery({ view: next })}
       />
       {settingsContent}

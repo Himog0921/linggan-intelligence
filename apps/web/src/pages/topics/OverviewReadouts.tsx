@@ -79,7 +79,7 @@ export function OverviewReadouts({
         <Readout
           glyph="papers" label="观察到的内容" drill
           value={readoutNumber(stats.workCount)} valueText={number(stats.workCount)} unit="篇" deltaLabel="昨日新增"
-          detail={<><span>可读 <b>{number(scope.readableWorkCount)}</b></span><span>待归主题 <b>{number(scope.unclassifiedWorkCount)}</b></span></>}
+          detail={<><span>可读 <b>{number(scope.readableWorkCount)}</b></span></>}
         />
         <Readout
           glyph="people" label="已观察创作者"

@@ -95,6 +95,7 @@ pub struct OpsPublicationItem {
     pub url: String,
     pub account: Option<OpsAccountRef>,
     pub publisher: Option<String>,
+    pub historical_owner_state: Option<String>,
     pub views: OpsViews,
     pub likes: Option<i64>,
     pub collects: Option<i64>,
@@ -383,6 +384,11 @@ async fn read_page(
                 kept.adopted_body AS body, kept.publication_url, \
                 kept.account_name, kept.ledger_state, \
                 coalesce(kept.publisher_name,kept.native_publisher_name) AS publisher_name, \
+                CASE WHEN kept.source_system = 'content_workbench' THEN ( \
+                    SELECT resolution.state FROM linggan_ops_historical_owner_resolution resolution \
+                    WHERE resolution.publication_ref = kept.publication_ref \
+                    ORDER BY resolution.decided_at DESC, resolution.resolution_ref DESC LIMIT 1 \
+                ) END AS historical_owner_state, \
                 kept.view_count, kept.views_as_of, \
                 ((now() AT TIME ZONE 'Asia/Shanghai')::date - coalesce(kept.published_business_date,kept.native_published_on)) >= 7 AS aged, \
                 kept.adopted_like_count AS like_count, \
@@ -536,6 +542,7 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
             .zip(ledger_state)
             .map(|(name, ledger_state)| OpsAccountRef { name, ledger_state }),
         publisher: row.try_get("publisher_name")?,
+        historical_owner_state: row.try_get("historical_owner_state")?,
         views,
         likes: row.try_get("like_count")?,
         collects: row.try_get("collect_count")?,
