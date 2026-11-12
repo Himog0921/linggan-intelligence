@@ -10,6 +10,15 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-11-12 · 机会卡（Opportunity Card）
+
+- [实施手册](opportunity/playbook.md)：T0.1b 至 T3 的任务卡、规格与验收。
+- [裁定记录](opportunity/DECISIONS.md)：D-001 至 D-020，与实施手册同等约束。
+- [术语表](opportunity/GLOSSARY.md)：机会卡术语、代码标识与数据库命名。
+- [勘察报告](opportunity/RECON.md)：T0.1 与 T0.1b 的代码库事实、差异与补充勘察。
+- [进度](opportunity/PROGRESS.md)：任务状态、验证结果与遗留问题。
+- [待裁定问题](opportunity/QUESTIONS.md)：Q-11、Q-12 等待负责人裁定。
+
 ## 2026-11-10 · 统一内容理解 L1 开发
 
 - [当前执行表](plans/active/unified-content-understanding-v1.2-execution.md)：先跑通一篇保存、读取和底稿展示，再做二十篇验收；独立开发已授权，未上线。
