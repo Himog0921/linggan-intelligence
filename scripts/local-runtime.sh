@@ -514,7 +514,11 @@ migrate() {
   apply_migration_once "0200_topic_research_automation" "$project_root/database/migrations/0200_topic_research_automation.sql"
   apply_migration_once "0201_topic_angle_handoff" "$project_root/database/migrations/0201_topic_angle_handoff.sql"
   apply_migration_once "0202_topic_core_merge_prompts" "$project_root/database/migrations/0202_topic_core_merge_prompts.sql"
-  apply_migration_once "0203_topic_single_pass" "$project_root/database/migrations/0203_topic_single_pass.sql"
+  apply_migration_once "0203_opportunity_metric_definition" "$project_root/database/migrations/0203_opportunity_metric_definition.sql"
+  apply_migration_once "0204_opportunity_comment_eligibility" "$project_root/database/migrations/0204_opportunity_comment_eligibility.sql"
+  apply_migration_once "0205_opportunity_problem_taxonomy" "$project_root/database/migrations/0205_opportunity_problem_taxonomy.sql"
+  apply_migration_once "0206_comment_platform_time" "$project_root/database/migrations/0206_comment_platform_time.sql"
+  apply_migration_once "0207_topic_single_pass" "$project_root/database/migrations/0207_topic_single_pass.sql"
 }
 
 case "$command_name" in

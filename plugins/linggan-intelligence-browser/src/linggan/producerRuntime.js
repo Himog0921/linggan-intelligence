@@ -20,6 +20,9 @@ export const PRODUCER_CAPABILITY = Object.freeze({
 });
 
 const PACKAGE_VERSION = 'linggan.producer.capture-package.v1';
+const COMMENT_COLLECTION_PROTOCOL_VERSION = 1;
+const COMMENT_COLLECTION_SORT_MODE = 'platform_default';
+const COMMENT_TRIGGER_SOURCES = new Set(['manual', 'scheduled', 'incremental', 'unknown']);
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
@@ -32,6 +35,26 @@ function isoNow(now = () => new Date()) {
 function numeric(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : null;
+}
+
+function commentTriggerSource(taskSpec, explicit) {
+  const requested = String(explicit || '').trim();
+  if (COMMENT_TRIGGER_SOURCES.has(requested)) return requested;
+  if (taskSpec?.incrementalCommentBudget) return 'incremental';
+  if (taskSpec?.source === 'scheduled') return 'scheduled';
+  if (taskSpec?.source === 'manual') return 'manual';
+  return 'unknown';
+}
+
+function commentCollectionProtocol(collection, taskSpec, triggerSource) {
+  const requestedLimit = numeric(collection?.requestedLimit);
+  const configuredLimit = numeric(taskSpec?.commentLimit);
+  return {
+    version: COMMENT_COLLECTION_PROTOCOL_VERSION,
+    sortMode: COMMENT_COLLECTION_SORT_MODE,
+    singleRunLimit: requestedLimit ?? configuredLimit,
+    triggerSource: commentTriggerSource(taskSpec, triggerSource),
+  };
 }
 
 function boundedCoverageLayer(capability, input = {}) {
@@ -69,6 +92,7 @@ export function createCapturePackage({
   coverage = {},
   records = [],
   checkpoint,
+  collectionProtocol,
 } = {}) {
   if (!Object.values(PRODUCER_CAPABILITY).includes(packageKind)) {
     throw new Error('unsupported_linggan_producer_capability');
@@ -90,6 +114,7 @@ export function createCapturePackage({
     },
     records: asArray(records),
     ...(checkpoint === undefined ? {} : { checkpoint }),
+    ...(collectionProtocol === undefined ? {} : { collectionProtocol }),
   };
 }
 
@@ -160,7 +185,7 @@ export function packageContentDetail({ platform, note, observedAt, capturedAt } 
 }
 
 export function packageComments({
-  platform, result, noteId, observedAt, capturedAt,
+  platform, result, noteId, observedAt, capturedAt, taskSpec, triggerSource,
 } = {}) {
   const collection = normalizedCommentCollectionReceipt(result, noteId);
   const comments = collection?.analysisUsability === 'not_usable'
@@ -171,6 +196,7 @@ export function packageComments({
     platform,
     observedAt,
     capturedAt,
+    collectionProtocol: commentCollectionProtocol(collection, taskSpec, triggerSource),
     target: {
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),
@@ -197,7 +223,7 @@ export function packageComments({
 // in the same array as top-level comments.  This keeps a parent/reply relationship from being
 // silently flattened into a generic comment count or a second Content observation.
 export function packageReplies({
-  platform, result, noteId, observedAt, capturedAt,
+  platform, result, noteId, observedAt, capturedAt, taskSpec, triggerSource,
 } = {}) {
   const collection = normalizedCommentCollectionReceipt(result, noteId);
   const replies = collection?.analysisUsability === 'not_usable'
@@ -208,6 +234,7 @@ export function packageReplies({
     platform,
     observedAt,
     capturedAt,
+    collectionProtocol: commentCollectionProtocol(collection, taskSpec, triggerSource),
     target: {
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),

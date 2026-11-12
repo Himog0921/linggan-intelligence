@@ -25,24 +25,32 @@ pub struct LocalFileModelSecrets {
     root: Option<PathBuf>,
 }
 
+pub fn support_dir() -> Option<PathBuf> {
+    resolve_support_dir(env::var_os("LINGGAN_SUPPORT_DIR"), env::var_os("HOME"))
+}
+
+fn resolve_support_dir(
+    configured: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> Option<PathBuf> {
+    configured
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            home.filter(|value| !value.is_empty()).map(|home| {
+                PathBuf::from(home).join("Library/Application Support/Linggan Intelligence")
+            })
+        })
+}
+
 impl LocalFileModelSecrets {
     pub fn new(root: PathBuf) -> Self {
         Self { root: Some(root) }
     }
 
     fn from_runtime() -> Self {
-        let support = env::var_os("LINGGAN_SUPPORT_DIR")
-            .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| {
-                env::var_os("HOME")
-                    .filter(|value| !value.is_empty())
-                    .map(|home| {
-                        PathBuf::from(home).join("Library/Application Support/Linggan Intelligence")
-                    })
-            });
         Self {
-            root: support.map(|path| path.join("model-secrets")),
+            root: support_dir().map(|path| path.join("model-secrets")),
         }
     }
 
@@ -114,7 +122,7 @@ fn ensure_private_dir(path: &Path) -> Result<(), ModelError> {
     }
 }
 
-fn private_dir(path: &Path) -> Result<(), ModelError> {
+pub fn private_dir(path: &Path) -> Result<(), ModelError> {
     let metadata = fs::symlink_metadata(path).map_err(|_| ModelError::SecretUnavailable)?;
     if !metadata.is_dir() || metadata.permissions().mode() & 0o077 != 0 {
         return Err(ModelError::SecretUnavailable);
@@ -122,7 +130,7 @@ fn private_dir(path: &Path) -> Result<(), ModelError> {
     Ok(())
 }
 
-fn private_file(path: &Path) -> Result<(), ModelError> {
+pub fn private_file(path: &Path) -> Result<(), ModelError> {
     let metadata = fs::symlink_metadata(path).map_err(|_| ModelError::SecretUnavailable)?;
     if !metadata.is_file()
         || metadata.permissions().mode() & 0o077 != 0
@@ -159,5 +167,31 @@ pub fn model_secret_store() -> Arc<dyn ModelSecretStore> {
         Arc::new(SyntheticModelSecrets)
     } else {
         Arc::new(LocalFileModelSecrets::from_runtime())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn support_dir_resolution_matches_the_previous_inline_logic() {
+        assert_eq!(
+            resolve_support_dir(Some("/tmp/support".into()), Some("/home/test".into())),
+            Some(PathBuf::from("/tmp/support"))
+        );
+        assert_eq!(
+            resolve_support_dir(None, Some("/home/test".into())),
+            Some(PathBuf::from(
+                "/home/test/Library/Application Support/Linggan Intelligence"
+            ))
+        );
+        assert_eq!(
+            resolve_support_dir(Some("".into()), Some("/home/test".into())),
+            Some(PathBuf::from(
+                "/home/test/Library/Application Support/Linggan Intelligence"
+            ))
+        );
+        assert_eq!(resolve_support_dir(None, None), None);
     }
 }

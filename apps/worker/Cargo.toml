@@ -60,3 +60,7 @@ path = "src/bin/comment_catalog.rs"
 [[bin]]
 name = "linggan-creation-recovery"
 path = "src/bin/creation_recovery.rs"
+
+[[bin]]
+name = "linggan-opportunity"
+path = "src/bin/opportunity.rs"

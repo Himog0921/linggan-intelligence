@@ -393,6 +393,68 @@ test('a retained collector can return one comment tree without flattening replie
   assert.equal(replies.coverage.target.commentCollection, undefined);
 });
 
+test('comment packages carry the versioned collection protocol that marks C2 records', () => {
+  const source = {
+    noteId: 'note-protocol',
+    comments: [{ commentId: 'root-1', text: 'top level', publishedAt: 1710000000000 }],
+    collectionReceipt: {
+      version: 1,
+      noteId: 'note-protocol',
+      scope: 'detail_window',
+      requestedLimit: 30,
+      pageCommentCount: 80,
+      expectedCount: 30,
+      uniqueCollectedCount: 1,
+      state: 'partial',
+      analysisUsability: 'usable',
+      targetIdentity: 'matched',
+      stopReason: 'comment_area_end',
+    },
+  };
+  const scheduled = packageComments({
+    platform: 'xhs', result: source, noteId: source.noteId,
+    taskSpec: { source: 'scheduled', commentLimit: 30 },
+  });
+  assert.deepEqual(scheduled.collectionProtocol, {
+    version: 1,
+    sortMode: 'platform_default',
+    singleRunLimit: 30,
+    triggerSource: 'scheduled',
+  });
+
+  const incremental = packageReplies({
+    platform: 'xhs', result: source, noteId: source.noteId,
+    taskSpec: {
+      source: 'scheduled', commentLimit: 30,
+      incrementalCommentBudget: { newUniqueLimit: 30 },
+    },
+  });
+  assert.equal(incremental.collectionProtocol.triggerSource, 'incremental');
+  assert.equal(incremental.collectionProtocol.singleRunLimit, 30);
+
+  const manual = packageComments({
+    platform: 'xhs', result: source, noteId: source.noteId, triggerSource: 'manual',
+  });
+  assert.equal(manual.collectionProtocol.triggerSource, 'manual');
+
+  const noCap = packageComments({
+    platform: 'xhs',
+    result: {
+      noteId: 'note-protocol',
+      comments: [],
+      collectionReceipt: {
+        version: 1, noteId: 'note-protocol', scope: 'all_public_comments',
+        pageCommentCount: null, expectedCount: null, uniqueCollectedCount: 0,
+        state: 'partial', analysisUsability: 'empty',
+        targetIdentity: 'matched', stopReason: 'comment_area_end',
+      },
+    },
+    noteId: 'note-protocol',
+  });
+  assert.equal(noCap.collectionProtocol.singleRunLimit, null);
+  assert.equal(noCap.collectionProtocol.triggerSource, 'unknown');
+});
+
 test('real xhs fallback comment identities stay in the right lane and bind to their manual task', () => {
   const source = {
     noteId: 'note-real-shape',

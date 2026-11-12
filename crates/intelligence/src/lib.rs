@@ -53,3 +53,5 @@ pub mod ocr_recognition_schema;
 
 pub mod content_understanding;
 pub mod note_analysis;
+
+pub mod opportunity;

@@ -172,6 +172,7 @@ test('buildXhsCommentsFromSnapshot maps main comments and replies into normalize
   assert.equal(main.rootCommentId, 'root_1');
   assert.equal(main.authorEntityId, 'xhs_user_1');
   assert.equal(main.avatarUrl, 'https://sns-avatar-1.jpg');
+  assert.equal(main.publishedAt, 1710000000000);
   assert.equal(main.rawSource, 'xhs.comments.api');
   assert.equal(main.dataQuality, 'full');
   assert.equal(main.qualityReason, '');
@@ -192,6 +193,30 @@ test('buildXhsCommentsFromSnapshot maps main comments and replies into normalize
   assert.equal(pagedReply.collectionRunId, 'run_1');
   assert.equal(pagedReply.dataQuality, 'full');
   assert.equal(pagedReply.sourceTier, 'api');
+});
+
+test('comment platform time is a millisecond epoch or null, never collection time or display text', () => {
+  const records = buildXhsCommentsFromSnapshot({
+    pages: [{
+      noteId: 'note_1',
+      cursor: '',
+      comments: [
+        { id: 'seconds', create_time: 1710000000, user_info: { nickname: '甲', user_id: 'u1' } },
+        { id: 'milliseconds', create_time: 1710000000123, user_info: { nickname: '乙', user_id: 'u2' } },
+        { id: 'missing', user_info: { nickname: '丙', user_id: 'u3' } },
+        { id: 'display_text', time: '3 天前', user_info: { nickname: '丁', user_id: 'u4' } },
+      ],
+    }],
+    subPages: [],
+  }, { noteId: 'note_1', contentId: 'xhs_note_1' }, {});
+
+  const byId = Object.fromEntries(records.map((record) => [record.commentId, record]));
+  assert.equal(byId.seconds.publishedAt, 1710000000000);
+  assert.equal(byId.milliseconds.publishedAt, 1710000000123);
+  assert.equal(byId.missing.publishedAt, null);
+  assert.notEqual(byId.missing.publishedAt, byId.missing.collectedAt);
+  assert.equal(byId.display_text.publishedAt, null);
+  assert.equal(byId.display_text.publishedAtText, '3 天前');
 });
 
 test('buildXhsCommentsFromSnapshot respects per-root reply cap when maxSubComments is set', () => {

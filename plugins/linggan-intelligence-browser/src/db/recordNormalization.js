@@ -159,7 +159,8 @@ export function normalizeCommentRecord(record = {}) {
   const parentCommentId = normalizeString(record.parentCommentId);
   const level = normalizeNumber(record.level, parentCommentId ? 2 : 1);
   const rootCommentId = normalizeString(record.rootCommentId || parentCommentId || commentId);
-  const publishedAt = normalizeNumber(record.publishedAt || record.createdAt, 0);
+  const publishedAtValue = normalizeNumber(record.publishedAt, null);
+  const publishedAt = publishedAtValue > 0 ? publishedAtValue : null;
   const collectedAt = normalizeNumber(record.collectedAt || record.createdAt, Date.now());
   const noteId = rawNoteId || (platform === 'douyin' ? contentId : inferPlatformContentId({ contentId }, platform));
   const searchKeyword = normalizeString(record.searchKeyword);

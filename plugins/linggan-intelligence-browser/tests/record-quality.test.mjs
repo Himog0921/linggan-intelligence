@@ -49,6 +49,35 @@ test('record normalization preserves explicit quality fields', () => {
   assert.equal(author.sourceTier, 'mixed');
 });
 
+test('comment normalization never turns createdAt into publishedAt', () => {
+  const withoutPlatformTime = normalizeCommentRecord({
+    platform: 'xhs',
+    noteId: 'note_1',
+    commentId: 'comment_1',
+    createdAt: 1710000000000,
+  });
+  assert.equal(withoutPlatformTime.publishedAt, null);
+  assert.equal(withoutPlatformTime.createdAt, 1710000000000);
+
+  const zeroIsUnknown = normalizeCommentRecord({
+    platform: 'xhs',
+    noteId: 'note_1',
+    commentId: 'comment_2',
+    publishedAt: 0,
+    createdAt: 1710000000000,
+  });
+  assert.equal(zeroIsUnknown.publishedAt, null);
+
+  const withPlatformTime = normalizeCommentRecord({
+    platform: 'xhs',
+    noteId: 'note_1',
+    commentId: 'comment_3',
+    publishedAt: 1710000000123,
+    createdAt: 1710000009999,
+  });
+  assert.equal(withPlatformTime.publishedAt, 1710000000123);
+});
+
 test('record normalization infers source tier from raw source when explicit tier is missing', () => {
   assert.equal(normalizeNoteRecord({ rawSource: 'detail_api' }).sourceTier, 'api');
   assert.equal(normalizeNoteRecord({ rawSource: 'render_data' }).sourceTier, 'mixed');

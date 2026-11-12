@@ -143,9 +143,9 @@ export function packageDetailPageSessionLane(entry = {}, taskSpec = {}) {
     return packageMediaSlots({ ...common, note: entry.note });
   }
   if (capability === 'comments') {
-    return packageComments({ ...common, result: entry.commentResult, noteId: contentExternalId });
+    return packageComments({ ...common, result: entry.commentResult, noteId: contentExternalId, taskSpec });
   }
-  return packageReplies({ ...common, result: entry.commentResult, noteId: contentExternalId });
+  return packageReplies({ ...common, result: entry.commentResult, noteId: contentExternalId, taskSpec });
 }
 
 /**
