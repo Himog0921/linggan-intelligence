@@ -58,11 +58,11 @@ function show(path = '/ops/publications?domain=d1') {
     <MemoryRouter initialEntries={[path]}><Routes><Route path="/ops/:page" element={<OpsPage/>}/></Routes><Location/></MemoryRouter>
   </QueryClientProvider>);
 }
-it('uses two secondary destinations and data tabs in Z02, preserving selected business', async () => {
+it('shows team management for admins and preserves business on data tabs', async () => {
   show();
   await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
   const side = screen.getByLabelText('运营导航');
-  expect(within(side).getAllByRole('link').map(link => link.textContent)).toEqual(['数据', '创作']);
+  expect(within(side).getAllByRole('link').map(link => link.textContent)).toEqual(['数据', '创作', '团队与权限']);
   expect(within(side).getByRole('link', { name: '创作' })).toHaveAttribute('href', '/ops/creation?domain=d1');
   const nav = screen.getByRole('navigation', { name: '数据页面' });
   expect(nav.closest('.v7-context-main')).not.toBeNull();

@@ -44,9 +44,14 @@ export function OffboardingPanel({ actor, member, members, resume, onDone }: {
   resume: PendingStop | null;
   onDone: () => void;
 }) {
-  const [planned, setPlanned] = useState(resume?.body.assignments !== undefined);
-  const [reason, setReason] = useState('');
-  const [recipients, setRecipients] = useState<Record<string, string>>({});
+  const [mode, setMode] = useState<'planned' | 'immediate' | null>(
+    resume ? (resume.body.assignments === undefined ? 'immediate' : 'planned') : null,
+  );
+  const planned = mode === 'planned';
+  const [reason, setReason] = useState(resume?.body.reason ?? '');
+  const [recipients, setRecipients] = useState<Record<string, string>>(() =>
+    Object.fromEntries(resume?.body.assignments?.map(item => [item.accountRef, item.nextMemberRef]) ?? []),
+  );
   const [pending, setPending] = useState(resume);
   const [receipt, setReceipt] = useState<api.DeactivationReceipt | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,7 +69,11 @@ export function OffboardingPanel({ actor, member, members, resume, onDone }: {
     const controller = new AbortController();
     void api.fetchDeactivation(resume.body.requestId, controller.signal).then(found => {
       savePendingStop(actor, null);
-      setReceipt(found);
+      if (found.outcome === 'stale' || found.outcome === 'rejected') {
+        setNotice('原请求未执行。请核对最新的成员和账号清单后再提交。');
+      } else {
+        setReceipt(found);
+      }
       setPending(null);
     }, () => {
       if (!controller.signal.aborted) setNotice('结果未确认。可以重试同一停用请求。');
@@ -87,7 +96,7 @@ export function OffboardingPanel({ actor, member, members, resume, onDone }: {
     if (busy) return;
     let next = pending;
     if (!next) {
-      if (!member || !reason.trim() || (planned && !planReady)) return;
+      if (!member || !mode || !reason.trim() || (planned && !planReady)) return;
       next = {
         memberRef: member.memberRef,
         body: {
@@ -133,8 +142,12 @@ export function OffboardingPanel({ actor, member, members, resume, onDone }: {
     {!pending ? <>
       <fieldset disabled={busy}>
         <legend>处理方式</legend>
-        <label><input type="radio" name="offboarding-mode" checked={!planned} onChange={() => setPlanned(false)} />立即停用，之后接管</label>
-        <label><input type="radio" name="offboarding-mode" checked={planned} onChange={() => setPlanned(true)} />先选接任人，一次完成交接和停用</label>
+        <label className={styles.mode}><input data-initial-focus type="radio" name="offboarding-mode" checked={planned} onChange={() => setMode('planned')} />
+          <span><strong>计划交接</strong><small>选好接任人后，一次完成账号交接和停权。</small></span>
+        </label>
+        <label className={styles.mode}><input type="radio" name="offboarding-mode" checked={mode === 'immediate'} onChange={() => setMode('immediate')} />
+          <span><strong>紧急停权</strong><small>立即撤销登录权限，账号留待管理员接管。</small></span>
+        </label>
       </fieldset>
       {planned ? <>
         {preview.isPending ? <p role="status">正在读取账号清单…</p> : null}
@@ -152,12 +165,13 @@ export function OffboardingPanel({ actor, member, members, resume, onDone }: {
             </option>)}
           </select>
         </label>)}
-      </> : <p>仍由该成员负责的在营账号会进入待接管。</p>}
-      <label>停用原因<textarea required maxLength={330} value={reason} onChange={event => setReason(event.target.value)} /></label>
+      </> : mode === 'immediate' ? <p>当前负责 {member?.currentAccountCount ?? 0} 个账号。在营账号将在停权后进入待接管。</p> : null}
+      {mode ? <label>停用原因<textarea required maxLength={330} value={reason} onChange={event => setReason(event.target.value)} /></label> : null}
     </> : null}
     {notice ? <p role="status" className={styles.error}>{notice}</p> : null}
-    <ActionButton type="submit" variant="danger" busy={busy} disabled={!pending && planned && !planReady}>
+    {mode || pending ? <footer className={styles.formActions}><ActionButton type="submit" variant="danger" busy={busy}
+      disabled={!pending && (!reason.trim() || (planned && !planReady))}>
       {pending ? '重试同一停用请求' : planned ? '确认交接并停用' : '立即停用'}
-    </ActionButton>
+    </ActionButton></footer> : null}
   </form>;
 }
