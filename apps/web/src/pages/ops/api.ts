@@ -91,6 +91,7 @@ function publication(r: R) {
       ]),
     })),
     publisher: sn(r, "publisher"),
+    historicalOwnerState: d.optStr(r, "historicalOwnerState"),
     views: { state, value, overdue: b(views, "overdue"), hit: b(views, "hit") },
     likes: nn(r, "likes"),
     collects: nn(r, "collects"),

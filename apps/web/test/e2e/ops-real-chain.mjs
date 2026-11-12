@@ -626,15 +626,15 @@ try {
       await memberPage.getByRole("button", { name: "启用团队账号" }).click();
       await memberPage.waitForURL("**/ops/**");
       await page.reload();
-      const memberRow = page.getByRole("listitem").filter({ hasText: "合成接任运营" });
+      const memberRow = page.getByRole("row").filter({ hasText: "合成接任运营" });
       await memberRow.getByRole("link", { name: "分配账号" }).click();
       const accountRow = page.getByRole("row").filter({ hasText: "SYNTHETIC 账号甲" });
-      await accountRow.getByRole("button", { name: "交接", exact: true }).click();
-      const transfer = page.getByRole("dialog", { name: "交接账号当前负责人" });
+      await accountRow.getByRole("button", { name: "分配账号", exact: true }).click();
+      const transfer = page.getByRole("dialog", { name: "分配账号", exact: true });
       const option = transfer.getByLabel("接任成员").locator("option:checked");
       assert.match(await option.innerText(), /合成接任运营/);
-      await transfer.getByLabel("交接原因").fill("合成浏览器验证");
-      await transfer.getByRole("button", { name: "确认交接" }).click();
+      await transfer.getByLabel("变更原因").fill("合成浏览器验证");
+      await transfer.getByRole("button", { name: "确认分配账号" }).click();
       await transfer.waitFor({ state: "hidden" });
 
       await memberPage.goto(`${origin}/ops/accounts`);
@@ -649,8 +649,10 @@ try {
       await oldPublication.waitFor({ state: "hidden" });
 
       await page.goto(`${origin}/settings/team`);
-      await page.getByRole("listitem").filter({ hasText: "合成接任运营" })
-        .getByRole("button", { name: "停用", exact: true }).click();
+      await page.getByRole("row").filter({ hasText: "合成接任运营" })
+        .getByRole("button", { name: "办理离职", exact: true }).click();
+      assert.equal(await page.getByRole("button", { name: "立即停用", exact: true }).count(), 0);
+      await page.getByRole("radio", { name: /紧急停权/ }).check();
       await page.getByLabel("停用原因").fill("合成紧急停用");
       await page.route("**/api/local/auth/members/*/deactivate", async route => {
         const accepted = await route.fetch();
@@ -661,7 +663,7 @@ try {
       await page.getByRole("button", { name: "重试同一停用请求" }).waitFor();
       await page.reload();
       await page.getByRole("heading", { name: "合成接任运营已停用" }).waitFor();
-      await page.getByRole("link", { name: "去接管", exact: true }).first().click();
+      await page.getByRole("dialog").getByRole("link", { name: "去接管", exact: true }).click();
       await page.getByRole("row").filter({ hasText: "SYNTHETIC 账号甲" })
         .getByText("原负责人已停用 · 待接管").waitFor();
       assert.equal((await recipient.request.get(`${origin}/api/local/auth/session`)).status(), 401);

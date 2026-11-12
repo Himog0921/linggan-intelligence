@@ -70,6 +70,7 @@
 | `platform`、`title`、`body`、`url` | 原值；`url` 是发布链接 |
 | `account` | `{ "name", "ledgerState" }`；没有账号为 `null` |
 | `publisher` | 发布人名或 `null` |
+| `historicalOwnerState` | 迁入记录的最新归属核实状态。取值为 `matched`、`unresolved`、`conflict_pending`。未产生核实记录或原生发布为 `null`。 |
 | `views` | `{ "state", "value", "asOf", "overdue", "hit" }`。`state` 取值：`value` 已填；`pending` 小红书未填；`optional` 抖音未填。`overdue` 表示小红书未填且发布已满 7 天，`hit` 表示小红书且 `value` ≥ 5000 |
 | `likes`、`collects`、`comments`、`coverClickRate` | 迁入旧值或 `null` |
 | `systemCheck` | 固定 `not_checked`，D5 前不给其他值 |

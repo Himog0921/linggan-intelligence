@@ -2,12 +2,13 @@ import type { ReactNode } from 'react';
 import { AppShell } from '../../app/AppShell';
 import { ContextBreadcrumb } from '../../shared/ContextBar';
 import { ContextTabs } from '../../shared/ContextTabs';
+import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { NavIcon, Sidebar } from '../../shared/Sidebar';
 
-/** Ops owns two secondary destinations; page sections and scope belong to Z02. */
-export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, restricted = false, page, children }: {
+/** Ops keeps its secondary destinations in the sidebar and page tabs in the context bar. */
+export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, restricted = false, manageTeam = false, page, children }: {
   section: 'data' | 'creation'; domain: string; scope: ReactNode; tabs?: ReactNode;
-  meta?: ReactNode; foot?: ReactNode; immersive?: boolean; restricted?: boolean; page?: string; children: ReactNode;
+  meta?: ReactNode; foot?: ReactNode; immersive?: boolean; restricted?: boolean; manageTeam?: boolean; page?: string; children: ReactNode;
 }) {
   const selectedDomain = domain && domain !== 'all' ? `?domain=${encodeURIComponent(domain)}` : '';
   const creationTrail = page ? [scope, '运营', '创作', page] : [scope, '运营', '创作'];
@@ -26,6 +27,9 @@ export function OpsFrame({ section, domain, scope, tabs, meta, foot, immersive, 
         </a>
         {!restricted ? <a className="v7-side-nav" aria-label="创作" title="创作" href={`/ops/creation${selectedDomain}`} aria-current={section === 'creation' ? 'page' : undefined}>
           <NavIcon name="creation"/><span>创作</span>
+        </a> : null}
+        {manageTeam ? <a className="v7-side-nav" aria-label="团队与权限" title="团队与权限" href="/settings/team">
+          <IntelligenceIcon name="security" className="v7-side-icon"/><span>团队与权限</span>
         </a> : null}
         {foot ? <div className="v7-side-foot">{foot}</div> : null}
       </Sidebar>

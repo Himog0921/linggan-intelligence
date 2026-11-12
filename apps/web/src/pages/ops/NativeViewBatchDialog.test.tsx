@@ -9,7 +9,7 @@ vi.mock("./api", async () => ({ ...(await vi.importActual<typeof import("./api")
 
 const publication = (ref: string, title: string) => ({
   ref, source: "native" as const, businessDate: "2026-10-23", dateState: "as_recorded" as const, platform: "xhs" as const, title, url: `https://example.test/${ref}`,
-  publisher: null, account: null, views: { state: "pending" as const, value: null, hit: false, overdue: false }, likes: null, collects: null, comments: null,
+  publisher: null, historicalOwnerState: null, account: null, views: { state: "pending" as const, value: null, hit: false, overdue: false }, likes: null, collects: null, comments: null,
   coverClickRate: null, body: null, systemCheck: "not_checked" as const, cover: { available: false }, duplicates: [], sync: { state: "not_requested" as const, requestRef: null, decision: null },
   media: { state: "not_requested" as const, observed: 0, available: 0, failed: 0, unavailable: 0 },
   fieldAdoption: { title: "not_provided" as const, body: "not_provided" as const, likes: "not_provided" as const, collects: "not_provided" as const, comments: "not_provided" as const, publishedAt: "not_provided" as const },
