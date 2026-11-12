@@ -560,12 +560,12 @@ CREATE TABLE collection_snapshot (
 
 该评论所属周期 = `linggan_opportunity_period_start(锚点时间, period_tz)`（D-020）。锚点时间按 `period_basis` 取作品发布时间或评论平台发布时间，**同一次计算只用一种**。
 
-切换前，`comment_published` 口径以影子模式同步计算并保存，不在页面展示（D-028）。资格函数因此增加参数 `period_basis`：`linggan_opportunity_eligible_comments(domain_ref, as_of, tz, period_basis)`，排除函数同理。
+切换前，`comment_published` 口径以影子模式同步计算并保存，不在页面展示（D-028）。两个函数的签名在全文统一为四参数，**以此处为准**：
 
-以上逻辑只允许在一处实现：
+- `linggan_opportunity_eligible_comments(domain_ref, as_of, tz, period_basis)`：返回 `content_ref`、`comment_external_id`、`commenter_external_id`（可空）、`work_author_external_id`、`period_anchor_at`、`period_start`、`first_observed_at`。`period_anchor_at` 是本次计算实际使用的锚点时间：按作品发布周时是作品发布时间，按评论发布周时是评论平台发布时间。
+- `linggan_opportunity_eligibility_exclusions(domain_ref, as_of, tz, period_basis)`：返回 `(reason, comments)`。
 
-- `linggan_opportunity_eligible_comments(domain_ref, as_of, tz)`：返回 `content_ref`、`comment_external_id`、`commenter_external_id`（可空）、`work_author_external_id`、`work_published_at`、`period_start`、`first_observed_at`。
-- `linggan_opportunity_eligibility_exclusions(domain_ref, as_of, tz)`：返回 `(reason, comments)`。
+以上逻辑只允许在一处实现。`tz` 与 `period_basis` 只能从 `metric_definition.params` 读取，不得写死。C3 完成之前，若传入 `period_basis = comment_published`，函数必须明确报错 `comment_published_basis_not_ready`，**不得**悄悄退回按作品发布周计算；该行为要有测试覆盖。
 
 两个函数必须共用同一段 SQL（例如同一个内部函数或视图），保证“有效评论数 + 各原因排除数 = 全部候选评论数”。这条等式本身要有测试。
 
@@ -582,10 +582,10 @@ CREATE TABLE collection_snapshot (
 #### 6.2.3 计算 SQL
 
 ```sql
--- 参数：:domain_ref, :problem_id, :tv, :period_start, :as_of, :tz, :digest_version
+-- 参数：:domain_ref, :problem_id, :tv, :period_start, :as_of, :tz, :period_basis, :digest_version
 WITH e AS (
   SELECT content_ref, comment_external_id
-  FROM linggan_opportunity_eligible_comments(:domain_ref, :as_of, :tz)
+  FROM linggan_opportunity_eligible_comments(:domain_ref, :as_of, :tz, :period_basis)
   WHERE period_start = :period_start
 ),
 fm AS (
@@ -603,7 +603,7 @@ SELECT (SELECT count(*) FROM fm) AS k,
        (SELECT count(*) FROM e)  AS n;
 ```
 
-`:tz` 只能取自 `metric_definition.params.period_tz`，`:digest_version` 只能取自当前配置。不得写死。
+`:tz` 只能取自 `metric_definition.params.period_tz`，`:period_basis` 只能取自 `metric_definition.params.period_basis`，`:digest_version` 只能取自当前配置。不得写死。
 
 #### 6.2.4 其余指标
 
@@ -1065,7 +1065,7 @@ interface CreatorDensity {
 - **前置**：T0.1b、T0.3
 - **目标**：按 §6.2.1 和 D-007、D-012 建立：
   - 视图 `linggan_opportunity_comment_fact`：每个稳定评论身份一行，包含 `content_ref`、`comment_external_id`、`commenter_external_id`、`first_observed_at`、`first_observed_backfilled`、解析是否成功；
-  - 函数 `linggan_opportunity_eligible_comments(domain_ref, as_of, tz)` 和 `linggan_opportunity_eligibility_exclusions(domain_ref, as_of, tz)`，两者共用同一段实现。
+  - 函数 `linggan_opportunity_eligible_comments(domain_ref, as_of, tz, period_basis)` 和 `linggan_opportunity_eligibility_exclusions(domain_ref, as_of, tz, period_basis)`，两者共用同一段实现。T0.2 只需实现 `period_basis = work_published_cohort`；传入 `comment_published` 时报错 `comment_published_basis_not_ready`，不得回退。
 - **要求**：
   - 不 `ALTER` 任何现有表（D-005）。
   - 所有 `observed_at::timestamptz` 转换只在这里做（D-018）。

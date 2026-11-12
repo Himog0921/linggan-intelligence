@@ -129,7 +129,7 @@
 
 ### D-012 排除必须计数
 
-- 新建函数 `linggan_opportunity_eligibility_exclusions(domain_ref, as_of)`，按原因返回被排除的评论数，原因闭集为：`period_anchor_missing`、`work_author_unknown`、`creator_self`、`restricted`、`observed_at_unparseable`、`not_in_domain_primary`。
+- 新建函数 `linggan_opportunity_eligibility_exclusions(domain_ref, as_of, tz, period_basis)`，按原因返回被排除的评论数，原因闭集为：`period_anchor_missing`、`comment_time_unknown`、`work_author_unknown`、`creator_self`、`restricted`、`observed_at_unparseable`、`not_in_domain_primary`。
 - 每次指标计算都记录这组计数（写入运行记录或日志），卡片 flags 按 D-008、D-010 的阈值生成。
 - 这条落实手册 §3.4“静默跳过数据行”的禁令。
 

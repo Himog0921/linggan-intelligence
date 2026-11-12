@@ -38,4 +38,4 @@
 - 内容：按负责人提供的更新版替换 `DECISIONS.md`（D-001 至 D-031）、`playbook.md`（v1.3）与 `GLOSSARY.md`（追加 D-028 至 D-030 术语）；同步更新 `QUESTIONS.md`（Q-11/Q-12 已答复）、`RECON.md` §7.10 与本文件。
 - 影响：新增阶段 C（C1–C4）采集侧任务、`period_basis = comment_published` 目标口径、`linggan_material_comment_platform_time` 只追加表、生产参数恢复为测试参数值、`collection_below_target`/`collection_protocol_changed` 等 flags。
 - 未开始：C1 及之后、T0.2 与其他实现任务；等待负责人明确授权。
-- 待负责人确认（文档内部不一致）：手册 §6.2.1 说资格函数增加 `period_basis` 参数（`linggan_opportunity_eligible_comments(domain_ref, as_of, tz, period_basis)`），但同节下方及 §8 任务卡仍写三参数版本。实现前需确认最终签名；本次未擅自改动负责人文本。
+- 已确认（四参数签名）：资格函数与排除函数统一为 `(domain_ref, as_of, tz, period_basis)`，返回字段 `work_published_at` 改为 `period_anchor_at`；§6.2.1 为唯一签名，§6.2.3 示例、T0.2 任务卡与 D-012 已同步。另约定 `tz`/`period_basis` 只从 `metric_definition.params` 读取，C3 之前传 `comment_published` 必须报 `comment_published_basis_not_ready`，不得回退，需测试覆盖。
