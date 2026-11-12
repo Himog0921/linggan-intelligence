@@ -17,7 +17,7 @@
 - [术语表](opportunity/GLOSSARY.md)：机会卡术语、代码标识与数据库命名。
 - [勘察报告](opportunity/RECON.md)：T0.1、T0.1b 与 C1 的代码库事实、差异与补充勘察。
 - [进度](opportunity/PROGRESS.md)：任务状态、验证结果与遗留问题。
-- [问题记录](opportunity/QUESTIONS.md)：Q-01 至 Q-14 已答复。
+- [问题记录](opportunity/QUESTIONS.md)：Q-01 至 Q-14 已答复；Q-15 待裁定（评论平台时间采集）。
 
 ## 2026-11-10 · 统一内容理解 L1 开发
 

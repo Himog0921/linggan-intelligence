@@ -228,3 +228,29 @@
 - 未完成项：
   - C3 目标中的“影子模式下同步计算并保存这一口径的指标”尚未实现。当前迁移集没有 `linggan_opportunity_problem_metric_period`（T0.7 不变量输出已确认 I1–I3 不可用），该表由 T1.2 创建；在表存在前无法保存影子指标，不能只在内存计算后声称完成。待 T1.2 建表后接入 `comment_published` 的影子计算与保存。
 - 遗留：独立审查与合并授权；影子指标依赖 T1.2；采集恢复后按 C4 补齐历史，并每周报告各领域覆盖率；切换口径需负责人批准并新增版本，不得直接改当前指针。
+
+## 2026-11-12 C4 真实重采集（第 1 轮）
+
+- 状态：真实采集与覆盖率报告完成；评论平台时间仍然拿不到，已登记 Q-15。未修改代码、未新增迁移。
+- 授权与前置：负责人授权真实重采集；插件扩展已重新加载到当前工作树构建（`releases/linggan-intelligence-browser-v0.8.65`，manifest 0.8.66）。系统代理故障（CN 域名全部 503）由负责人修复后复测：直连 `baidu 200`、`xiaohongshu 302`。
+- 执行方式：`POST /api/local/collection/material-deepening` 提交 3 个 `deep_archive` 批次，每个 4 个作品，`commentLimit = 30`、`replyExpandLimit = 2`、媒体/OCR/ASR 关闭；三批依次准入并全部执行完毕。
+- 批次结果（数据库实测）：
+  - ADHD `264f61a5-44f0-40e4-aa1a-49c0362c33c2`：4/4 作品；`content_detail` 4 包（4 条记录，全部有作品级 `publishedAt`）、`comments` 4 包 40 条记录、`replies` 4 包 39 条记录；12/12 任务完成，派发失败 0。该批在扩展重载前执行，包内无 `collectionProtocol`，`publishedAt` 写 `0`，不进入 C3 投影。
+  - 考研自习 `50f53929-e41c-4698-a978-c0dcaec17476`：3/4 作品；`content_detail` 3 包（3 条，全部有作品级 `publishedAt`）、`comments` 3 包 30 条、`replies` 3 包 26 条；9/9 任务完成，派发失败 0。
+  - 自闭症干预 `8439bab9-1557-4a16-b9f2-d174c640b8dc`：3/4 作品；`content_detail` 3 包（3 条，全部有作品级 `publishedAt`）、`comments` 3 包 30 条、`replies` 3 包 30 条；12 个任务中 9 个完成、3 个 `input_blocked`，派发失败 1（`execution_input_missing`）。
+  - 两批各放弃 1 个作品：考研 `230037d0-cea7-4fe2-b0b2-6ca50dc5e79e`、自闭症 `4ce71ef6-07b4-4d89-9826-19db7db132b8`。两者在 `collection_execution_input_eligibility` 中均为 `input_blocked / execution_input_missing`（无可用签名定位器，分别冻结于 14:21:45 与 15:36:12），admission 按既有输入闸跳过，不是采集失败。
+  - 风险冷却与暂停：本轮 `collection_installation_risk_cooldown` 0 行、活跃 `collection_risk_pause` 0 行、今日 `collection_installation_risk_signal` 0 条。
+- 评论平台时间（关键事实）：
+  - 重载后两批的评论包已带 `collectionProtocol.version = 1`、`sortMode = platform_default`（C2 协议生效），但 60 条评论记录和 56 条回复记录**全部**为 `sourceTier = dom`、`qualityReason = api_unobserved_dom_fallback`、`publishedAt = null`。
+  - 全库历史（`comments` 2247 包、`replies` 2238 包，共 31928 条记录）：只有 2026-08-31 的 4 个包（用户前台手动批量采集，scope 为 `all_public_comments` / `maximum_quota`）存在 API 记录与毫秒平台时间；其余所有日期，包括全部派发详情会话，API 记录数为 0。
+  - 原因定位（代码 + 实测）：插件 API 优先路径在页面中直接 `fetch('/api/sns/web/v2/comment/page', { credentials: 'include' })`，不带小红书签名头（`src/injected/xhsApiCapture.js:368`；`src/platforms/xhs/commentApi.js:803-824`）；未签名请求被平台网关拒绝（实测 HTTP 500 `create invoker failed, service: jarvis-gateway-default`）。派发会话又用 `chrome.windows.create({ focused: false })` 在非聚焦窗口打开详情页（`src/linggan/background.js:1466`），能拿到签名的只剩页面自身分页流量，而现有记录显示该流量没有被捕获到评论快照。
+  - 结论：当前插件版本在派发会话中无法取得评论平台时间；C4 的“新获得平台时间评论数”为 0，`comment_published` 口径仍不可用。已登记 Q-15，等待负责人裁定（修插件 / 暂缓口径 / 先做前台诊断）。
+- 覆盖率与不变量（本地运行库，`as_of = 2026-11-12`，`tz = Asia/Shanghai`，`periods = 12`，作品发布周口径）：
+  - `project-platform-times`：`inserted = 0`、`conflicts = 0`（没有带协议且 `publishedAt` 有效的记录可投影）。
+  - ADHD：12 周内有效评论 7118，有平台时间 0，`ratio = 0.0`；8 周有数据（2026-08-24 至 2026-10-12）。
+  - 考研自习：159 / 0，`ratio = 0.0`；6 周有数据。
+  - 自闭症干预：282 / 0，`ratio = 0.0`；8 周有数据。
+  - 三个领域 `agreement.compared = 0`、`timingViolations = 0`。
+  - `check-invariants`：`totalViolations = 0`、`incomplete = true`（I1–I10 依赖的 T1 表尚未建立）；I11 `available = true`、`violations = 0`。
+- 操作记录：本地库凭据以容器当前环境为准（工作树 `.env` 的 `POSTGRES_PASSWORD` 与容器内角色口令不一致，直接使用 `.env` 连接会报鉴权失败；本轮连接串从容器环境读取，未写入任何文件）。
+- 遗留：Q-15 裁定前，C4 无法产出评论平台时间，`comment_published` 的影子指标仍不可启用；第 2 轮重采集应在插件问题修复后执行，并优先覆盖两个 `input_blocked` 作品（需先获得新的可用签名定位器）。
