@@ -3,6 +3,7 @@
 - [OCR 封面标题与异常内容旧计划](plans/active/ocr-title-quality-454.md)：#454/#464 交付记录；现行阅读与修正以[唯一底稿合同](data-contracts/research-dossier.md)为准，最新版本地能力见[Paddle 运行手册](runbooks/paddle-ocr-runtime.md)。
 - [OCR 手动图片文字识别：实施与验收](plans/active/ocr-manual-recognition-454.md)：#454 当前候选；保留 local-v4/local-vl-v1/DeepSeek，统一当前读本、按需编辑与历次结果清理，未合并、未部署。
 采集完整交付入口：[COLLECTION-JTBD-001 单次采集](plans/active/collection-single-run-398.md)（Issue #398 / Draft PR #406；替代 #400 的限制，含 UI 与验收矩阵）。[运行与数据合同](data-contracts/collection-single-run-001.md)、[正式 UI 核对](design/changes/collection-single-run-398.md)、[单独 UI 审美审查](design/changes/collection-single-run-398-visual-audit.md)。旧[两页导航](plans/active/collection-jtbd-001.md)保留历史范围。
+- [PR #576 单次主题研究收口实施手册](plans/active/pr-576-single-pass-closeout.md)：`topic-map.single-pass.v1` 的 G0–G5 执行合同、修复证据与交付边界；未合并、未部署。
 
 > 状态: 权威当前
 > 最后核对: 2026-10-26（研究底稿与 OCR 入口同步；其余事实按各文档）

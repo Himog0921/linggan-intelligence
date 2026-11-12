@@ -223,6 +223,61 @@ fn restored_comment_roles_and_parent_links_still_require_real_main_evidence() {
 }
 
 #[test]
+fn a_citation_index_selects_that_exact_zero_based_fragment() {
+    let fragments = vec![
+        fragment("synthetic.body", "body", 100, "第一段没有目标"),
+        fragment(
+            "synthetic.comment",
+            "unresearched_comment",
+            500,
+            "已决定执行，但第一步无法开始。",
+        ),
+    ];
+    let valid = packet(&semantic(&fragments), &fragments);
+    let mut second = valid.clone();
+    second["d"][0]["e"] = json!([{"f":1,"q":"第一步无法开始"}]);
+    let restored = decode_compact_output(&second.to_string(), &fragments).unwrap();
+    let citation = &restored.discussions[0].evidence[0];
+    assert_eq!(citation.fragment_id, "synthetic.comment");
+    assert_eq!((citation.start, citation.end), (507, 514));
+    for (index, quote) in [(1, "第一段没有目标"), (0, "第一步无法开始")] {
+        // Each quote exists in the other fragment only; the decoder must not search past `f`.
+        let mut mismatched = valid.clone();
+        mismatched["d"][0]["e"] = json!([{"f":index,"q":quote}]);
+        let error = decode_compact_output(&mismatched.to_string(), &fragments).unwrap_err();
+        assert_eq!(
+            (error.code, error.path.as_str(), error.rule),
+            (
+                "citation_quote_not_found",
+                "discussions[0].evidence[0].quote",
+                "verbatim_quote"
+            )
+        );
+    }
+    let mut out_of_range = valid;
+    out_of_range["d"][0]["e"] = json!([{"f":2,"q":"第一步无法开始"}]);
+    let error = decode_compact_output(&out_of_range.to_string(), &fragments).unwrap_err();
+    assert_eq!(
+        (error.code, error.path.as_str(), error.rule),
+        (
+            "invalid_citation_fragment_index",
+            "discussions[0].evidence[0].fragmentId",
+            "fragment_index"
+        )
+    );
+    let schema = compact_output_schema();
+    let citation = &schema["properties"]["d"]["items"]["properties"]["e"]["items"]["properties"];
+    let description = citation["f"]["description"].as_str().unwrap();
+    assert!(description.contains("Zero-based") && description.contains("do not add or subtract 1"));
+    assert!(
+        citation["q"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("verbatim")
+    );
+}
+
+#[test]
 fn compact_schema_has_no_collisions_and_preserves_complete_required_objects() {
     fn check(schema: &Value) {
         if let Some(fields) = schema["properties"].as_object() {

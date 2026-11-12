@@ -41,7 +41,7 @@ uncertain 用于材料无法支持明确归属；out_of_scope 用于不属于当
 新建主题只在 newTopics 中定义一次，并用本地 newTopicId（如 "n1"）标识；多个讨论归入同一新主题时，在 decisions 中复用同一个 newTopicId，不重复写定义。
 newTopics 的 parent.kind：root 表示顶层；existing 必须给 topicRef 和 definitionRef；newTopic 用父主题的 newTopicId。程序会根据已声明的父级补充包含关系，不需要在每个 decision 重复。
 status 为 matched 时 newTopicId 为 null 并给出 matches；status 为 new 时必须给出 newTopicId；uncertain 和 out_of_scope 的 matches 与 newTopicId 都为空。
-projection 的引文用 f 指向本次 fragmentIndex，q 精确摘录对应片段中的必要文字；程序负责恢复坐标，不计算哈希或生成内部身份。
+projection 的引文用 f 指向输入 fragments 的 fragmentIndex，该值从 0 开始：照抄片段自带的 fragmentIndex，不要改用 1 起始，也不要加或减 1。q 必须是对应片段中逐字存在的短引文，不要改写、规范字符或跨片段拼接；程序负责恢复坐标，不计算哈希或生成内部身份。
 comment 模式 newTopics 必须为空数组，newTopicId 必须为 null，relations 必须为空。$system$,
  '按 packet.contract=topic-map.single-pass.v1 与 outputSchema 输出；newTopics 一次定义新主题，decisions 用 discussionIndex 与 newTopicId 引用本次结果。');
  INSERT INTO linggan_ai_task_config(task_config_ref,task_key,model_config_ref,skill_version_ref,

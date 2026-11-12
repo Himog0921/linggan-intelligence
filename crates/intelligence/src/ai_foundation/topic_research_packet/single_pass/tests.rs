@@ -501,3 +501,82 @@ fn reassignment_reuses_the_saved_projection_without_regenerating_it() {
     assert_eq!(decisions[1]["unitId"], json!(units[1].0));
     assert_eq!(decisions[1]["status"], "matched");
 }
+
+fn chain_topic(id: &str, label: &str, definition: &str, inclusion: &str, exclusion: &str, parent: Value) -> Value {
+    json!({"newTopicId":id,"label":label,"definition":definition,
+        "inclusionCriteria":[inclusion],"exclusionCriteria":[exclusion],
+        "domainFit":"in_scope","domainReason":"材料属于当前领域","abstractionReason":"可跨作品复用的执行问题",
+        "parent":parent})
+}
+
+fn new_topic_parent(id: &str) -> Value {
+    json!({"kind":"newTopic","topicRef":Value::Null,"definitionRef":Value::Null,
+        "newTopicId":id,"reason":"上层执行范围"})
+}
+
+#[test]
+fn a_three_layer_local_chain_is_accepted_with_every_parent_edge() {
+    let fragments = vec![fragment("f1", "知道要做却开始不了")];
+    let discussions = vec![discussion("启动", "知道要做却开始不了", &["f1"], &fragments)];
+    let payload = wire(
+        compact(&fragments, &discussions),
+        vec![
+            new_topic("n1", new_topic_parent("n2")),
+            chain_topic(
+                "n2",
+                "任务执行支持",
+                "帮助开始并维持已选定任务的支持过程",
+                "任务开始或执行中的具体障碍与支持",
+                "仅讨论选择哪些任务",
+                new_topic_parent("n3"),
+            ),
+            chain_topic(
+                "n3",
+                "执行支持范围",
+                "覆盖多类执行困难的更广支持范围",
+                "执行中的障碍",
+                "选择任务",
+                root_parent(),
+            ),
+        ],
+        vec![json!({"discussionIndex":0,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"启动问题"})],
+    );
+    let parsed = validate(&payload.to_string(), &input(fragments), &author_context()).unwrap();
+    let parent = &parsed["resolution"]["decisions"][0]["proposedTopic"]["parent"];
+    assert_eq!(parent["proposal"]["label"], "任务执行支持");
+    assert_eq!(parent["ancestor"]["proposal"]["label"], "执行支持范围");
+    assert_eq!(parent["ancestor"]["ancestor"], Value::Null);
+}
+
+#[test]
+fn an_unreferenced_grandparent_repeating_criteria_is_rejected() {
+    let fragments = vec![fragment("f1", "知道要做却开始不了")];
+    let discussions = vec![discussion("启动", "知道要做却开始不了", &["f1"], &fragments)];
+    let payload = wire(
+        compact(&fragments, &discussions),
+        vec![
+            new_topic("n1", new_topic_parent("n2")),
+            chain_topic(
+                "n2",
+                "任务执行支持",
+                "帮助开始并维持已选定任务的支持过程",
+                "任务开始或执行中的具体障碍与支持",
+                "仅讨论选择哪些任务",
+                new_topic_parent("n3"),
+            ),
+            chain_topic(
+                "n3",
+                "执行支持范围",
+                "覆盖多类执行困难的更广支持范围",
+                "任务开始或执行中的具体障碍与支持",
+                "仅讨论选择哪些任务",
+                root_parent(),
+            ),
+        ],
+        vec![json!({"discussionIndex":0,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"启动问题"})],
+    );
+    assert_eq!(
+        validate(&payload.to_string(), &input(fragments), &author_context()).unwrap_err(),
+        "topic_parent_criteria_repeated"
+    );
+}

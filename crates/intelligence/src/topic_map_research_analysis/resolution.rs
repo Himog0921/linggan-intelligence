@@ -165,10 +165,7 @@ pub fn validate_resolution(
         }
         let matches = validate_matches(decision, &candidates)?;
         let relations = validate_relations(decision, &candidates, &matches)?;
-        validate_status(decision, units, &candidates, &matches, &relations)?;
-        if let Some(child) = &decision.proposed_topic {
-            validate_parent_candidate_reuse(child, topics)?;
-        }
+        validate_status(decision, units, &candidates, &matches, &relations, topics)?;
     }
     Ok(())
 }
@@ -235,6 +232,7 @@ fn validate_status(
     candidates: &HashMap<Uuid, Uuid>,
     matches: &HashSet<Uuid>,
     relations: &HashMap<Uuid, &str>,
+    topics: &Value,
 ) -> Result<(), &'static str> {
     if relations.iter().any(|(topic, relation)| {
         *relation == "equivalent" && (decision.status != "matched" || !matches.contains(topic))
@@ -280,7 +278,7 @@ fn validate_status(
             if proposed.definition.trim() == statement.trim() {
                 return Err("new_topic_definition_copies_statement");
             }
-            validate_parent(proposed, candidates, relations)?;
+            validate_parent_chain(proposed, candidates, relations, topics)?;
         }
         "uncertain" | "out_of_scope" => {
             if !matches.is_empty() {
@@ -398,23 +396,30 @@ fn validate_criteria(
     Ok(())
 }
 
-/// Identity reuse must not skip the existing-parent version and containment decision.
-fn validate_parent_candidate_reuse(
-    child: &ProposedTopic,
+/// Normalized comparison is deterministic; it does not claim semantic containment.
+fn normalized_criteria(items: &[String]) -> Vec<String> {
+    let mut normalized: Vec<_> = items
+        .iter()
+        .map(|item| {
+            item.split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_lowercase()
+        })
+        .collect();
+    normalized.sort();
+    normalized
+}
+
+/// A proposed parent must not recreate a boundary the catalog already holds.
+fn validate_candidate_identity_reuse(
+    proposal: &ConceptDefinition,
     topics: &Value,
 ) -> Result<(), &'static str> {
-    if child.parent.kind != "proposed" {
-        return Ok(());
-    }
-    let parent = child
-        .parent
-        .proposal
-        .as_ref()
-        .ok_or("topic_parent_proposal_missing")?;
     let proposed_identity = crate::topic_map_core::concept_identity(
-        &parent.definition,
-        &parent.inclusion_criteria,
-        &parent.exclusion_criteria,
+        &proposal.definition,
+        &proposal.inclusion_criteria,
+        &proposal.exclusion_criteria,
     );
     for candidate in topics.as_array().into_iter().flatten() {
         let Some(definition) = candidate["definition"].as_str() else {
@@ -441,76 +446,118 @@ fn validate_parent_candidate_reuse(
     Ok(())
 }
 
-fn validate_parent(
+/// Walks the whole declared parent chain: an ancestor referenced only through `ancestor`
+/// must satisfy the same shape, identity, criteria, and candidate-version rules as a
+/// directly assigned parent. The direct parent alone also needs the containment relation;
+/// a deeper existing ancestor has no decision-level relation to require.
+fn validate_parent_chain(
     child: &ProposedTopic,
     candidates: &HashMap<Uuid, Uuid>,
     relations: &HashMap<Uuid, &str>,
+    topics: &Value,
 ) -> Result<(), &'static str> {
-    let parent = &child.parent;
-    if !text(&parent.reason, 500) {
-        return Err("topic_parent_reason_invalid");
+    let mut descendant_label = child.label.trim();
+    let mut descendant_identity = crate::topic_map_core::concept_identity(
+        &child.definition,
+        &child.inclusion_criteria,
+        &child.exclusion_criteria,
+    );
+    let mut descendant_inclusion = normalized_criteria(&child.inclusion_criteria);
+    let mut descendant_exclusion = normalized_criteria(&child.exclusion_criteria);
+    let mut seen_labels = HashSet::from([descendant_label]);
+    let mut seen_identities = HashSet::from([descendant_identity.clone()]);
+    let mut node = &child.parent;
+    let mut direct = true;
+    loop {
+        if !text(&node.reason, 500) {
+            return Err("topic_parent_reason_invalid");
+        }
+        match node.kind.as_str() {
+            "root" => {
+                if node.topic_ref.is_some()
+                    || node.definition_ref.is_some()
+                    || node.proposal.is_some()
+                {
+                    return Err("topic_parent_root_has_reference");
+                }
+                if node.ancestor.is_some() {
+                    return Err("topic_parent_ancestor_unexpected");
+                }
+                return Ok(());
+            }
+            "existing" => {
+                let (topic, definition) = node
+                    .topic_ref
+                    .zip(node.definition_ref)
+                    .ok_or("topic_parent_existing_reference_missing")?;
+                if node.proposal.is_some() {
+                    return Err("topic_parent_existing_has_proposal");
+                }
+                if node.ancestor.is_some() {
+                    return Err("topic_parent_ancestor_unexpected");
+                }
+                if !candidates.contains_key(&topic) {
+                    return Err("topic_parent_not_candidate");
+                }
+                if candidates.get(&topic) != Some(&definition) {
+                    return Err("topic_parent_version_mismatch");
+                }
+                if direct && relations.get(&topic) != Some(&"narrower") {
+                    return Err("topic_parent_containment_missing");
+                }
+                return Ok(());
+            }
+            "proposed" => {
+                if node.topic_ref.is_some() || node.definition_ref.is_some() {
+                    return Err("topic_parent_proposed_has_reference");
+                }
+                let proposal = node
+                    .proposal
+                    .as_ref()
+                    .ok_or("topic_parent_proposal_missing")?;
+                validate_concept(
+                    &proposal.label,
+                    &proposal.definition,
+                    &proposal.inclusion_criteria,
+                    &proposal.exclusion_criteria,
+                    &proposal.domain_fit,
+                    &proposal.domain_reason,
+                    &proposal.abstraction_reason,
+                    true,
+                )?;
+                if proposal.label.trim() == descendant_label {
+                    return Err("topic_parent_same_label");
+                }
+                let identity = crate::topic_map_core::concept_identity(
+                    &proposal.definition,
+                    &proposal.inclusion_criteria,
+                    &proposal.exclusion_criteria,
+                );
+                if identity == descendant_identity {
+                    return Err("topic_parent_same_concept");
+                }
+                if !seen_labels.insert(proposal.label.trim())
+                    || !seen_identities.insert(identity.clone())
+                {
+                    return Err("topic_parent_cycle");
+                }
+                let inclusion = normalized_criteria(&proposal.inclusion_criteria);
+                let exclusion = normalized_criteria(&proposal.exclusion_criteria);
+                if inclusion == descendant_inclusion && exclusion == descendant_exclusion {
+                    return Err("topic_parent_criteria_repeated");
+                }
+                validate_candidate_identity_reuse(proposal, topics)?;
+                descendant_label = proposal.label.trim();
+                descendant_identity = identity;
+                descendant_inclusion = inclusion;
+                descendant_exclusion = exclusion;
+                let Some(ancestor) = node.ancestor.as_deref() else {
+                    return Ok(());
+                };
+                node = ancestor;
+                direct = false;
+            }
+            _ => return Err("topic_parent_kind_unknown"),
+        }
     }
-    match parent.kind.as_str() {
-        "root" => {
-            if parent.topic_ref.is_some()
-                || parent.definition_ref.is_some()
-                || parent.proposal.is_some()
-            {
-                return Err("topic_parent_root_has_reference");
-            }
-        }
-        "existing" => {
-            let (topic, definition) = parent
-                .topic_ref
-                .zip(parent.definition_ref)
-                .ok_or("topic_parent_existing_reference_missing")?;
-            if parent.proposal.is_some() {
-                return Err("topic_parent_existing_has_proposal");
-            }
-            if !candidates.contains_key(&topic) {
-                return Err("topic_parent_not_candidate");
-            }
-            if candidates.get(&topic) != Some(&definition) {
-                return Err("topic_parent_version_mismatch");
-            }
-            if relations.get(&topic) != Some(&"narrower") {
-                return Err("topic_parent_containment_missing");
-            }
-        }
-        "proposed" => {
-            if parent.topic_ref.is_some() || parent.definition_ref.is_some() {
-                return Err("topic_parent_proposed_has_reference");
-            }
-            let proposal = parent
-                .proposal
-                .as_ref()
-                .ok_or("topic_parent_proposal_missing")?;
-            validate_concept(
-                &proposal.label,
-                &proposal.definition,
-                &proposal.inclusion_criteria,
-                &proposal.exclusion_criteria,
-                &proposal.domain_fit,
-                &proposal.domain_reason,
-                &proposal.abstraction_reason,
-                true,
-            )?;
-            if proposal.label.trim() == child.label.trim() {
-                return Err("topic_parent_same_label");
-            }
-            if crate::topic_map_core::concept_identity(
-                &proposal.definition,
-                &proposal.inclusion_criteria,
-                &proposal.exclusion_criteria,
-            ) == crate::topic_map_core::concept_identity(
-                &child.definition,
-                &child.inclusion_criteria,
-                &child.exclusion_criteria,
-            ) {
-                return Err("topic_parent_same_concept");
-            }
-        }
-        _ => return Err("topic_parent_kind_unknown"),
-    }
-    Ok(())
 }

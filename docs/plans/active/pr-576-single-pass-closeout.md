@@ -1,8 +1,14 @@
 # Intelligence · PR #576 单次主题研究收口实施手册
 
-> 版本：V1.0  ·  编制日期：2026-11-13  ·  工作包：`PR576-SINGLE-PASS-CLOSEOUT`  
-> 执行对象：本地 Agent（协调/实施/审查）  ·  仓库：`Himog0921/linggan-intelligence`  ·  原 PR：https://github.com/Himog0921/linggan-intelligence/pull/576  
+> 版本：V1.0  ·  编制日期：2026-11-13  ·  工作包：`PR576-SINGLE-PASS-CLOSEOUT`
+> 执行对象：本地 Agent（协调/实施/审查）  ·  仓库：`Himog0921/linggan-intelligence`  ·  原 PR：https://github.com/Himog0921/linggan-intelligence/pull/576
 > 本文件是**执行指令和验收合同**，不是已完成代码、测试或部署的证明。执行时必须更新基线，不能把本文件中的历史快照视为最新状态。
+
+> 状态: 活跃计划
+> 最后核对: 2026-11-12
+> 适用范围: PR #576 `topic-map.single-pass.v1` 收口（G0–G5）及原分支交付
+> 事实来源: 本手册、`origin/main@b1df0056`、PR #576 审查评论与隔离验证输出
+> 冲突时以谁为准: Mog 当前确认、AGENTS.md、真实运行/数据库/代码与现行合同
 
 ## 0. 给执行 Agent 的开工指令
 

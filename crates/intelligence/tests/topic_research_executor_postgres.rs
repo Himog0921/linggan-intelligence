@@ -35,7 +35,13 @@ async fn topic_single_pass_invalid_response_writes_no_result_or_assignment() {
 async fn topic_single_pass_no_signal_publishes_analysis_without_assignment() {
     exercise("no_signal").await;
 }
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and synthetic loopback only"]
+async fn topic_single_pass_invalid_ancestor_writes_no_result_or_assignment() {
+    exercise("invalid_ancestor").await;
+}
 async fn exercise(variant: &'static str) {
+    let invalid = matches!(variant, "invalid_output" | "invalid_ancestor");
     let db = dossier::fixture::proof_database("topic_execution").await;
     let work = dossier::work(&db).await;
     dossier::current_image_reading_with_bytes(&db, Some(core_fixture::bytes())).await;
@@ -152,11 +158,21 @@ async fn exercise(variant: &'static str) {
     let run = wait_for(&db, receipt.run_ref, &running).await;
     assert_eq!(run["executionMode"], "single_pass");
     assert_eq!(run["windowCount"], 1);
-    assert_eq!(run["succeededStageCount"], if variant == "invalid_output" { 0 } else { 1 });
     assert_eq!(
-        run["failedStageCount"],
-        if variant == "invalid_output" { 1 } else { 0 }
+        run["succeededStageCount"],
+        if invalid { 0 } else { 1 }
     );
+    assert_eq!(run["failedStageCount"], if invalid { 1 } else { 0 });
+    if variant == "invalid_ancestor" {
+        let reason: Option<String> = sqlx::query_scalar(
+            "SELECT result->>'validationReason' FROM linggan_model_invocation WHERE task_key LIKE 'topic_research%' ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_optional(db.pool())
+        .await
+        .unwrap()
+        .flatten();
+        assert_eq!(reason.as_deref(), Some("topic_parent_criteria_repeated"));
+    }
     assert_eq!(
         run["stages"].as_array().unwrap().iter().map(|s| s["stageNumber"].as_i64().unwrap()).collect::<Vec<_>>(),
         vec![0]
@@ -171,7 +187,7 @@ async fn exercise(variant: &'static str) {
             .fetch_one(db.pool())
             .await
             .unwrap();
-    assert_eq!(results, if variant == "invalid_output" { 0 } else { 1 });
+    assert_eq!(results, if invalid { 0 } else { 1 });
     assert_eq!(assignments, if variant == "normal" { 1 } else { 0 });
     let query = serde_json::from_value(serde_json::json!({"domainRef":dossier::DOMAIN})).unwrap();
     let graph = linggan_intelligence::topic_map::read_topic_map(&db, &query)
