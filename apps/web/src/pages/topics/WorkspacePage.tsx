@@ -110,41 +110,24 @@ function WorkspaceContents({ query, canonicalKey }: { query: ReturnType<typeof u
       ? `已读取定义 v${data.topic.definition.version} 与冻结材料包；材料内容来自共享 Work Resource Read。`
       : "正在读取本机 Topic 工作区…";
   return (
-    <div
-      className="v7-shell"
+    <main
       data-topic-workspace
       data-topic-key={canonicalKey}
+      data-topic-workspace-main=""
+      className={c("topic-workspace")}
+      aria-labelledby="topic-title"
     >
-      <aside className={c("v7-side", "topic-rail")} aria-label="Topic 研究导航">
-        <div className="v7-nav-label" data-readout="TOPIC">
-          主题研究
+      <nav className={c("topic-section-nav")} aria-label="Topic 工作区分区">
+        <div className={c("topic-section-links")}>
+          <a href="#definition"><span>01</span>定义与版本</a>
+          <a href="#materials"><span>02</span>{machine || !topic ? "材料分类" : "材料裁定"}</a>
+          <a href="#boundary"><span>03</span>来源边界</a>
         </div>
-        <a className="v7-side-nav" href="#definition" aria-current="page">
-          <i>01</i>
-          <span>定义与版本</span>
-        </a>
-        <a className="v7-side-nav" href="#materials">
-          <i>02</i>
-          <span>{machine || !topic ? "材料分类" : "材料裁定"}</span>
-        </a>
-        <a className="v7-side-nav" href="#boundary">
-          <i>03</i>
-          <span>来源边界</span>
-        </a>
-        <div className="v7-side-foot">
-          <span className="v7-side-dot" />
-          {lifecycle.label}
-          <br />
-          <span className="v7-tech-key">{lifecycle.key}</span>
-          <br />
-          不构成正式 Topic、趋势或市场事实。
+        <div className={c("topic-section-status")}>
+          <span>{lifecycle.label}</span>
+          <small>{lifecycle.key}</small>
         </div>
-      </aside>
-      <main
-        data-topic-workspace-main=""
-        className={c("topic-workspace")}
-        aria-labelledby="topic-title"
-      >
+      </nav>
         <section className={c("topic-definition")} id="definition">
           <div>
             <p className={c("topic-eyebrow")}>领域探索 / TOPIC WORKSPACE</p>
@@ -317,8 +300,7 @@ function WorkspaceContents({ query, canonicalKey }: { query: ReturnType<typeof u
             </p>
           </div>
         </section>
-      </main>
-    </div>
+    </main>
   );
 }
 export function WorkspacePage() {

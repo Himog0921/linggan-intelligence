@@ -281,9 +281,12 @@ try {
     assert.deepEqual(await primary.locator('.v7-nav-zh').allTextContents(),['雷达','主题图谱','语料','洞察','采集','运营']);
     assert.equal(await primary.getByRole('link',{name:/运营/}).getAttribute('aria-current'),'page');
     const sidebar=page.getByRole('complementary',{name:'运营导航'});
-    assert.equal(await sidebar.getByRole('link',{name:'创作',exact:true}).getAttribute('aria-current'),'page');
+    const activeGroup=sidebar.locator('[data-active-parent="true"]');
+    assert.equal(await activeGroup.getByRole('link',{name:'创作',exact:true}).count(),1);
+    assert.equal(await activeGroup.getByRole('link',{name:'我的创作',exact:true}).getAttribute('aria-current'),'page');
     assert.equal(await sidebar.getByRole('link',{name:'数据',exact:true}).count(),1);
     assert.equal(await page.getByRole('navigation',{name:'创作页面'}).count(),0);
+    assert.equal(await page.getByRole('group',{name:'写稿内容'}).count(),0);
     assert.match(await page.getByRole('navigation',{name:'当前位置'}).innerText(),/创作/);
     assert.equal(await page.getByRole('button',{name:'资产库',exact:true}).count(),1);
     assert.equal(await page.getByRole('navigation',{name:'创作步骤'}).isVisible(),false);

@@ -14,7 +14,7 @@ describe('D3 review regression boundaries', () => {
  });
  it('a late work lookup cannot navigate back after leaving comments', async () => {
   let finish: (value: Response) => void = () => {}; installFetch(url => url.pathname.endsWith('/works') ? new Promise<Response>(resolve => { finish = resolve; }) : undefined);
-  const { router } = renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table'); await userEvent.click(screen.getByRole('combobox',{name:'搜索范围'})); await userEvent.click(screen.getByRole('option',{name:'作品标题'})); await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'延迟'); await userEvent.click(screen.getByRole('button',{name:'筛选'})); await userEvent.click(screen.getByRole('button',{name:'完成'})); await userEvent.click(screen.getByRole('button', { name: '研究记录' }));
+  const { router } = renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table'); await userEvent.click(screen.getByRole('combobox',{name:'搜索范围'})); await userEvent.click(screen.getByRole('option',{name:'作品标题'})); await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'延迟'); await userEvent.click(screen.getByRole('button',{name:'筛选'})); await userEvent.click(screen.getByRole('button',{name:'完成'})); await userEvent.click(screen.getByRole('link', { name: '研究记录' }));
   await act(async () => { finish(json({ items: [], page: { nextCursor: null } })); await Promise.resolve(); }); expect(new URLSearchParams(router.state.location.search).get('view')).toBe('runs');
  });
  it('an older work search cannot overtake a newer pending search within the same route',async()=>{

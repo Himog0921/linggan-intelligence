@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -29,6 +29,14 @@ function renderPage(entry = '/settings/models?section=models', client = new Quer
 }
 const posts = () => calls.filter(call => call.method === 'POST');
 describe('AI 设置四区', () => {
+  it('将 AI 设置四个视图放在设置父项下，面包屑显示当前视图', () => {
+    renderPage('/settings/models?view=models');
+    const side = screen.getByRole('complementary', { name: '设置导航' });
+    expect(within(side).getByRole('link', { name: 'AI 设置' })).toHaveAttribute('href', '/settings/models');
+    expect(within(side).getByRole('link', { name: '模型连接' })).toHaveAttribute('aria-current', 'page');
+    expect(within(side).getByRole('link', { name: '账户安全' })).toHaveAttribute('href', '/settings/account');
+    expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent('设置/AI 设置/模型连接');
+  });
   it.each(['ocr_recognition', 'note_interpretation'])('%s 提示词可编辑、保存、启用和回退，保存不运行模型', async taskKey => {
     const seed = settingsFixture();
     const config = { ...seed.configurations[0]!, taskKey, taskConfigRef: 'ocr-config' };
@@ -170,16 +178,16 @@ describe('AI 设置四区', () => {
     expect(posts()).toHaveLength(1);
     expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/skills/switch', body: { taskKey, versionRef: 'version-1' } });
   });
-  it('原入口呈现四区；导航、样本读取与刷新不产生写操作', async () => {
-    const user = userEvent.setup(); renderPage();
+  it.each([
+    ['models', '模型'],
+    ['automation', '自动化与额度'],
+    ['skills', '做法'],
+    ['health', '运行状况'],
+  ])('旧版深链接 %s 保留对应内容，且不产生写操作', async (section, heading) => {
+    renderPage('/settings/models?section=' + section);
     expect(document.querySelector('h1#ai-settings-page-title.v7-sr-only')).toBeInTheDocument();
-    expect(await screen.findByLabelText('连接名称')).toHaveValue('隔离合成连接');
-    expect(screen.getByRole('navigation', { name: '旧版 AI 设置分区' })).toBeInTheDocument();
-    expect(screen.getByText('当前密钥尚未测试')).toBeInTheDocument();
-    for (const name of ['自动化与额度', '做法', '运行状况', '模型']) {
-      await user.click(screen.getByRole('link', { name }));
-      expect(await screen.findByRole('heading', { name, level: 2 })).toBeInTheDocument();
-    }
+    expect(await screen.findByRole('heading', { name: heading, level: 2 })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: '旧版 AI 设置分区' })).not.toBeInTheDocument();
     expect(posts()).toHaveLength(0);
     expect(calls.every(call => call.path.startsWith('/api/local/ai-settings') || (call.path === '/ops/api/creation/ai-budget' && call.method === 'GET'))).toBe(true);
   });

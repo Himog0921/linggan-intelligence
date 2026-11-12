@@ -40,10 +40,13 @@ try {
         await goto('?view=' + view);
         await page.getByRole('heading', { name: heading, exact: true, level: 2 }).waitFor();
         assert.equal(await page.locator('.v7-global-header').count(), 1, 'reuse single shared AppShell');
-        const navigation = page.getByRole('complementary', { name: 'AI 设置视图' });
+        const navigation = page.getByRole('complementary', { name: '设置导航' });
         assert.equal(await navigation.count(), 1, 'left navigation must exist');
         assert.equal(await navigation.locator('xpath=self::aside').count(), 1, 'view navigation must use the shared left rail');
-        assert.equal(await navigation.locator(':scope > .v7-side-content > a.v7-side-nav').count(), 4, 'each view link must be a direct shared rail item');
+        const disclosure = navigation.getByRole('button', { name: '收起AI 设置子页面', exact: true, includeHidden: true });
+        assert.equal(await disclosure.getAttribute('aria-expanded'), 'true');
+        const group = navigation.locator('[id=' + JSON.stringify(await disclosure.getAttribute('aria-controls')) + ']');
+        assert.equal(await group.getByRole('link').count(), 4, 'AI Settings owns all four child links');
         assert.equal(await page.getByText('SYSTEM / AI OPERATIONS', { exact: true }).count(), 0, 'removed system hero must not remain');
         assert.equal(await page.getByRole('button', { name: '刷新设置', exact: true }).count(), 0, 'removed refresh action must not remain');
         const dimensions = await page.evaluate(() => {
@@ -58,7 +61,7 @@ try {
         if (width === 390) {
           const rail = await navigation.locator('.v7-side-content').evaluate(element => ({
             direction: getComputedStyle(element).flexDirection,
-            children: Array.from(element.children).filter(child => child.matches('a.v7-side-nav')).length,
+            children: element.querySelectorAll('.v7-nav-subnav:not([hidden]) > a').length,
           }));
           assert.deepEqual(rail, { direction: 'row', children: 4 }, 'narrow view must use the shared horizontal rail');
         }

@@ -284,22 +284,25 @@
       "decision": {
         "selected": "A",
         "evidence": "U15",
-        "quote": "Q06 就按 A来收口，但是左侧导航栏可以支持点击折叠，只露出图标"
+        "quote": "Q06 就按 A来收口，但是左侧导航栏可以支持点击折叠，只露出图标",
+        "navigationEvidence": "U24",
+        "navigationQuote": "左侧导航栏只放 2 级页面跟3级页面"
       },
       "domainHost": "Z02",
-      "tertiaryHost": "Z02",
+      "tertiaryHost": "Z03",
       "layout": {
         "name": "连续导航轨",
-        "description": "所有入口保持展开，窄屏用局部横向滚动。",
+        "description": "一级职责导航在顶部；二级与三级页面在左侧导航树；窄屏沿用局部横向导航轨。",
         "header": "一级导航独立横轨",
-        "context": "宽屏同带；窄屏在Z02内换行",
-        "secondary": "宽屏左侧手动折叠为图标；窄屏同一Z03横轨可切换图标模式",
+        "context": "面包屑只表达真实路径、领域范围和当前位置；领域选择器保留原位。",
+        "secondary": "宽屏224px左侧手动折叠为图标；二级父项可展开三级子页面；窄屏沿用横向导航轨。",
         "collapseBelow": 820,
-        "sideWidth": 160,
+        "sideWidth": 224,
         "tabsBelow": 820,
         "collapsedWidth": 64,
         "iconSize": 18,
-        "defaultCollapsed": false
+        "defaultCollapsed": false,
+        "tertiary": "三级页面缩进显示在所属二级页面下；当前组自动展开；对象内部视图不进入全局导航。"
       },
       "sidebar": {
         "manualToggle": true,
@@ -312,17 +315,28 @@
       },
       "clock": "optional_when_page_contract_requires; no_mandatory_empty_slot",
       "supersedes": [
-        "ADR-10 fixed brand326/system400/3+4slots/silent120/mandatory-clock in shared shell"
+        "ADR-10 fixed brand326/system400/3+4slots/silent120/mandatory-clock in shared shell",
+        "ALIGN-NAV-003"
       ],
       "fixed": [
         "LIDS-TYPE-001-B",
         "ALIGN-VOICE-004",
         "ALIGN-FOCUS-005",
         "ALIGN-MATERIAL-006",
-        "ALIGN-NAV-003"
+        "ALIGN-NAV-004"
       ],
       "runtimeMigrated": false,
-      "componentCertificationChanged": false
+      "componentCertificationChanged": false,
+      "navigation": {
+        "secondaryHost": "Z03",
+        "tertiaryHost": "Z03",
+        "scopeHost": "Z02",
+        "structure": "nested_navigation_tree",
+        "desktop": "secondary parent rows with indexed icons; tertiary pages indent under their parent",
+        "activeGroup": "expand the active secondary parent; only the active group is auto-expanded after route changes",
+        "collapse": "retain secondary icons and accessible labels; hide tertiary labels until expanded",
+        "narrow": "keep the existing horizontal rail; secondary and tertiary links remain in the same local rail"
+      }
     },
     "ledger-layout": {
       "id": "ALIGN-LEDGER-008",
@@ -885,7 +899,7 @@
         {
           "id": "C25",
           "route": "shared",
-          "boundary": "三级页面Tab由Z02承载；对象内部Tab按对象，不混进集合筛选。",
+          "boundary": "页面三级导航由Z03左侧导航树承载；对象内部Tab按对象，不混进集合筛选。",
           "certified": false
         },
         {
@@ -908,8 +922,8 @@
         },
         {
           "id": "C29",
-          "route": "gap",
-          "boundary": "目前只有结构样例或来源不齐；先补输入、交互和验收合同再推广。",
+          "route": "adapter",
+          "boundary": "Sidebar提供二级父项/三级子项的共享呈现、展开/折叠、活动项与键盘语义；页面适配器提供路由、领域参数、权限、当前项与子页面列表。尚未完成七项CMP认证。",
           "certified": false
         },
         {
@@ -1042,7 +1056,7 @@
       "businessRequests": false,
       "problemCardsChanged": false,
       "domainHost": "Z02",
-      "tertiaryHost": "Z02"
+      "tertiaryHost": "Z03"
     },
     "media-material": {
       "id": "ALIGN-MEDIA-013",
@@ -1540,7 +1554,7 @@
     },
     {
       "path": "docs/design/lids/shell-layout.json",
-      "sha256": "5fcab4ad570e18e4c5099df9b239d0097d4d4148313a08a5057f07f73f427dfc"
+      "sha256": "4dd0d942a0ca677d8ce5151027db554f8799774379ae5b9a18ebb01801310fe7"
     },
     {
       "path": "docs/design/lids/ledger-layout.json",
@@ -1556,7 +1570,7 @@
     },
     {
       "path": "docs/design/lids/component-reuse.json",
-      "sha256": "1af8299c2f779e48921a34bc8193d94cfca2ede72dd885ef9b5314d47c20ceba"
+      "sha256": "1cec37240e0b68a4834232ba47d2d46ede3692056bd77e5a4740b280eac6c40f"
     },
     {
       "path": "docs/design/lids/media-material.json",
@@ -1583,7 +1597,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "4d240820d48c5aeeaeaeb6ef8a1d644b1c8bf7151f3b5187f7395e1b2a55f190",
+  "fingerprint": "ecf74ee575d14eb7f682639a05593abae706d9ce5a1dde07be36e4e4311f2684",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",
@@ -1783,7 +1797,6 @@
         "apps/web/src/pages/corpus/evidence/InspectorToolIcon.tsx",
         "apps/web/src/pages/collection/CollectionFrame.tsx",
         "apps/web/src/pages/collection/tasks/RunDrawer.tsx",
-        "apps/web/src/pages/ops/OpsPage.tsx",
         "apps/web/src/pages/ops/LedgerPage.tsx",
         "apps/web/src/pages/corpus/evidence/Lightbox.tsx",
         "apps/web/src/pages/settings/AiSettingsExperience.tsx",

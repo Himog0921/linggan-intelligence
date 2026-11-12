@@ -1,4 +1,3 @@
-import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useLocation, useSearchParams } from "react-router";
@@ -83,8 +82,8 @@ function OpsDataPage() {
           }
           setParams(next);
         }} />}
-      tabs={(restricted ? entries.slice(1) : entries).map(([name, title]) => <a key={name} href={`/ops/${name}?domain=${encodeURIComponent(business)}`}
-        className={c("ops-icon-tab")} aria-current={current[0] === name ? 'page' : undefined}><IntelligenceIcon name={name} size={18}/>{title}</a>)}
+      dataPageKey={current[0]}
+      page={current[1]}
       meta={<><span>可录入台账</span><span>历史迁入数据只读</span></>}>
         <main className={c("ops-main")} aria-labelledby="ops-title">
           <h1 id="ops-title" className="v7-sr-only">

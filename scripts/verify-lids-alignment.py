@@ -208,7 +208,7 @@ def render(data):
 
     lines = [
         "# LIDS-ALIGN-001 · 审阅稿逐项对齐表", "",
-        "> 状态: 权威当前", "> 最后核对: 2026-10-20",
+        "> 状态: 权威当前", "> 最后核对: 2026-11-11",
         "> 适用范围: 设计采用追踪与候选导航；不是另一个设计规则源",
         "> 事实来源: review-alignment.json及其中记录的用户确认、审阅源SHA和代码基线",
         "> 冲突时以谁为准: 用户最新确认及引用的正式LIDS分册；候选要求不自动生效", "",
@@ -220,7 +220,7 @@ def render(data):
         "- 原则采用／细节待审：已确认部分见正式分册，JSON候选参数不作为默认。",
         "- 候选待审：只用于讨论与盘点，不代表批准、组件交付或业务能力。", "",
         "字体角色与完整B字号、字重、行高已确认，Q01/Q02已关闭，Q03原声已统一OPPO Sans；唯一参数源为[typography.json](typography.json)。Q04已按ALIGN-FOCUS-005采用C；Q05已按ALIGN-MATERIAL-006采用M2，唯一参数源[control-material.json](control-material.json)；Q06已按ALIGN-SHELL-007采用A及手动图标折叠；Q07已按ALIGN-LEDGER-008采用L1/44px/名称144px；Q08按ALIGN-COMPOSITION-009采用含搜索的列表B/其他功能C并保留用户问题卡片；Q09已采用S1，Q10四类/七门槛已采用，Q11已采用自动/F2/数值对齐；Q12按ALIGN-MEDIA-013采用E1与白场舞台。",
-        "业务代码、字体资产和运行时Token未改；分支文档入库不等于主线或常驻runtime同步。", "",
+        "Signal Console二三级导航已在功能分支实施；字体资产未改，分支实现不等于主线合并、部署或生产验证。", "",
         f"原审阅注册表 SHA256：`{data['source']['registrySha256']}`。",
         f"本次代码基线：`{data['baseline']}`。完整确认摘要见清单userEvidence。", "",
         "## 已确认的跨模块规则", "",
@@ -228,7 +228,7 @@ def render(data):
         "| 无边框V2，连续白场、黑结构、橙重音；v8仍为粗稿 | [system](system.md) | Q05控件材质已采用M2；E1/白场舞台已采用 |",
         "| OPPO / Albert / Alumni / Manrope及B字级整体采用 | [typography](typography.md) | 原声OPPO已确认／生产接入Q11 |",
         "| 领域保留面包屑位置，位置与范围分责 | [shell-zones](shell-zones.md) | A容量及图标折叠已采用；组件认证Q10 |",
-        "| 三级页面Tab统一归Z02面包屑模块，主区不重复 | [shell-zones](shell-zones.md) | A容量／收纳已采用；对象内部Tab与筛选各自就近 |",
+        "| 二级与三级页面统一归Z03左侧导航树；Z02保留领域选择与当前位置 | [shell-zones](shell-zones.md) | A容量／收纳已采用；对象内部Tab与筛选各自就近 |",
         "| 区域可定位、标题去重、列表紧凑计数 | [regions](regions.md) | Q08组合及动作位置已采用；组件认证Q10 |",
         "| A连续账本，一任务一行 | [regions](regions.md) | 44px/名称144px已采用；B外部组合已采用；组件认证Q10 |",
         "| FIND保留装饰结构，输入/FIND聚焦不加外圈 | [primitives](primitives.md) | C焦点、M2材质已确认；组件认证Q10 |",

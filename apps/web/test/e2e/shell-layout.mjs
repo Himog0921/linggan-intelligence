@@ -90,20 +90,27 @@ export async function verifyShellLayout(browser, origin, out, storageState) {
       const menu=await page.getByText('个人菜单',{exact:true}).boundingBox();
       assert.ok(menu&&menu.x>=0&&menu.x+menu.width<=width+.5,`${width}: personal menu outside viewport`);
       if(width===1440){
-        const current=page.locator('.v7-side-nav[aria-current="page"]').first();await current.waitFor();
+        const ops=page.getByRole('complementary',{name:'运营导航'});
+        const selectedChild=ops.getByRole('link',{name:'概览',exact:true});
+        await selectedChild.waitFor();
+        assert.equal(await selectedChild.getAttribute('aria-current'),'page');
+        const current=ops.locator('[data-active-parent="true"] .v7-side-nav-parent');await current.waitFor();
         const colors=()=>current.evaluate(node=>({background:getComputedStyle(node).backgroundColor,color:getComputedStyle(node).color}));
         const before=await colors();assert.notEqual(before.background,'rgba(0, 0, 0, 0)');assert.notEqual(before.background,'rgb(255, 255, 255)');
         await current.hover();assert.deepEqual(await colors(),before);
       }
       await page.goto(origin+'/corpus/comments?domain=all');
-      await page.locator('[data-comment-study-context]').waitFor();
+      const comments=page.getByRole('complementary',{name:'语料导航'});
+      const currentCommentView=comments.getByRole('link',{name:'概览',exact:true});
+      await currentCommentView.waitFor();
+      assert.equal(await currentCommentView.getAttribute('aria-current'),'page');
       await page.waitForFunction(() => {
         const app = document.querySelector('.v7-app');
         const header = document.querySelector('[data-v7-shell-header]');
         return Boolean(app && header && parseFloat(getComputedStyle(app).getPropertyValue('--v7-header-height')) >= header.getBoundingClientRect().bottom - 1);
       });
-      const withContext = await shellGeometry('with-context-nav');
-      assert.equal(await page.locator('[data-comment-study-context]').count(), 1, `${width}: tertiary navigation missing`);
+      const commentShell = await shellGeometry('comment-sidebar');
+      assert.equal(await page.locator('.v7-context-section-nav').count(), 0, `${width}: comment views must not be duplicated above the sidebar`);
 
       await page.goto(origin+'/collection/targets?drawer=shell-geometry');
       const drawer = page.locator('#c-drawer');
@@ -150,7 +157,7 @@ export async function verifyShellLayout(browser, origin, out, storageState) {
         await page.evaluate(()=>{document.querySelector('[data-shell-geometry-spacer]')?.remove();window.scrollTo(0,0);});
       }
       await page.screenshot({path:path.join(out,`shell-${width}.png`),fullPage:true});
-      report.views.push({width,entries,rail,menu,noContext,withContext,collection,drawer:drawerBox});
+      report.views.push({width,entries,rail,menu,noContext,commentShell,collection,drawer:drawerBox});
     } finally {await context.close();}
   }
   await writeFile(path.join(out,'report.json'),JSON.stringify(report,null,2));

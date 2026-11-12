@@ -3,7 +3,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'rea
 import { useLocation, useNavigate, useSearchParams } from 'react-router';
 import { ActionButton } from '../../shared/ActionButton';
 import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
-import { Sidebar, NavIcon } from '../../shared/Sidebar';
+import { Sidebar, type SidebarNavigationItem } from '../../shared/Sidebar';
 import { AppShell } from '../../app/AppShell';
 import { ContextBreadcrumb } from '../../shared/ContextBar';
 import { DomainScopePicker } from '../../shared/DomainScopePicker';
@@ -53,26 +53,61 @@ export function CollectionFrame({ section, toolbar, meta, children }: { section:
   }
   const scheduler = shell?.scheduler === 'running' ? '调度心跳正常' : shell?.scheduler === 'stale' ? '调度心跳已过期' : '调度状态读不到';
   useEffect(() => { document.title = `${titles[section]} · 采集 · Linggan Intelligence`; }, [section]);
-  const picker = (
+  const pickerSelected = section === 'targets'
+    ? selected
+    : domain && domain !== 'all'
+      ? shell?.domains?.find(d => d.domainRef === domain)
+      : undefined;
+  const pickerAction = section === 'tasks' ? '/collection/tasks' : '/collection/targets';
+  const picker = section === 'targets' || section === 'tasks' ? (
     <DomainScopePicker
       label="切换当前观察领域"
       summary={
         <>
-          <span>{shell ? selected?.name ?? '全部领域' : '读取领域…'}</span>
-          <small>{selected ? domainSummary(selected) : '全部领域'}</small>
+          <span>{shell ? pickerSelected?.name ?? '全部领域' : '读取领域…'}</span>
+          <small>{pickerSelected ? domainSummary(pickerSelected) : '全部领域'}</small>
           <i aria-hidden="true" />
         </>
       }
     >
       <nav aria-label="可选观察领域">
-        <a href="/collection/targets?domain=all" aria-current={shell && !selected ? 'page' : undefined} aria-label="全部领域，全部领域"><span>全部领域</span><small>全部领域</small></a>
-        {shell?.domains?.map(d => <a key={d.domainRef} href={`/collection/targets?domain=${encodeURIComponent(d.domainRef)}`} aria-current={d.domainRef === selected?.domainRef ? 'page' : undefined} aria-label={`${d.name}，${domainSummary(d)}`}><span>{d.name}</span><small>{domainSummary(d)}</small></a>)}
-        <a className="c-domain-management-link" href={`/collection/domains?return_to=${encodeURIComponent(source)}`} data-collection-management onClick={e => { e.preventDefault(); e.currentTarget.closest('details')?.removeAttribute('open'); setDomainManager(true); }}><span>管理领域</span><small>配置与目标用途</small></a>
+        <a href={pickerAction + '?domain=all'} aria-current={shell && !pickerSelected ? 'page' : undefined} aria-label="全部领域，全部领域"><span>全部领域</span><small>全部领域</small></a>
+        {shell?.domains?.map(d => <a key={d.domainRef} href={pickerAction + '?domain=' + encodeURIComponent(d.domainRef)} aria-current={d.domainRef === pickerSelected?.domainRef ? 'page' : undefined} aria-label={d.name + '，' + domainSummary(d)}><span>{d.name}</span><small>{domainSummary(d)}</small></a>)}
+        <a className="c-domain-management-link" href={'/collection/domains?return_to=' + encodeURIComponent(source)} data-collection-management onClick={e => { e.preventDefault(); e.currentTarget.closest('details')?.removeAttribute('open'); setDomainManager(true); }}><span>管理领域</span><small>配置与目标用途</small></a>
       </nav>
     </DomainScopePicker>
-  );
-  const crumb = <ContextBreadcrumb items={section === 'targets' ? ['采集', picker, titles[section]] : ['采集', titles[section]]} />;
+  ) : null;
+  const crumb = <ContextBreadcrumb items={section === 'domains' ? ['采集', '观察目标', titles[section]] : section === 'targets' || section === 'tasks' ? ['采集', picker, titles[section]] : ['采集', titles[section]]} />;
+  const sidebarItems: SidebarNavigationItem[] = [
+    {
+      id: 'targets',
+      label: '观察目标',
+      index: '01',
+      icon: 'targets',
+      href: '/collection/targets' + suffix,
+      children: [{
+        id: 'domains',
+        label: '领域管理',
+        code: 'DOM',
+        href: '/collection/domains?return_to=' + encodeURIComponent(source),
+      }],
+    },
+    {
+      id: 'tasks',
+      label: '采集任务',
+      index: '02',
+      icon: 'tasks',
+      href: '/collection/tasks' + suffix,
+    },
+  ];
+  const activeId = section === 'domains' ? 'domains' : section === 'tasks' ? 'tasks' : 'targets';
+  const activeParentId = section === 'targets' || section === 'domains' ? 'targets' : undefined;
+  const sidebarFoot = !shell || shell.totalTargets === null
+    ? <>采集状态未知<br /><span className="v7-mono">目标与调度状态当前读不到</span></>
+    : shell.totalTargets === 0
+      ? <>暂无观察目标<br /><span className="v7-mono">没有可巡检的对象 · {scheduler}</span></>
+      : <>观察目标 {shell.totalTargets}<br /><span className="v7-mono">巡检开着 {shell.monitoringTargets ?? '未知'} · {scheduler}</span></>;
   return <AppShell active="collection" boundaryLabel={shell ? '本机不访问平台' : '采集状态未知'} contextBar={{ breadcrumb: crumb, meta: <>{meta}{section !== 'runtime' ? <ActionButton variant="quiet" className="c-management-entry" data-collection-management aria-label="工位管理，全局执行资源" aria-haspopup="dialog" aria-expanded={runtimeOpen} onClick={()=>toggleRuntime(true)}><IntelligenceIcon name="diagnostics" size={16}/>工位管理</ActionButton> : null}</> }}>
-    <div className="v7-shell"><Sidebar aria-label="采集导航">{(['targets', 'tasks'] as const).map((entry) => <a key={entry} className="v7-side-nav" href={`/collection/${entry}${suffix}`} aria-label={titles[entry]} title={titles[entry]} aria-current={section === entry ? 'page' : undefined}><NavIcon name={entry} /><span>{titles[entry]}</span></a>)}<div className="v7-side-foot"><span className="v7-side-dot" />{!shell || shell.totalTargets === null ? <>采集状态未知<br /><span className="v7-mono">目标与调度状态当前读不到</span></> : shell.totalTargets === 0 ? <>暂无观察目标<br /><span className="v7-mono">没有可巡检的对象 · {scheduler}</span></> : <>观察目标 {shell.totalTargets}<br /><span className="v7-mono">巡检开着 {shell.monitoringTargets ?? '未知'} · {scheduler}</span></>}</div></Sidebar><main className={`${collectionSurface['c-page'] ?? 'c-page'} ${section === 'domains' ? '' : styles.frame}`} data-collection-page={section} aria-labelledby="page-title"><h1 className="v7-sr-only" id="page-title">{titles[section]}</h1>{toolbar}<div className={`c-body ${section === 'domains' ? '' : styles.body}`}>{children}</div>{domainManager && <Suspense fallback={<p role="status">正在读取领域管理…</p>}><DomainManagementDialog onClose={() => setDomainManager(false)} /></Suspense>}{runtimeOpen && <Suspense fallback={<p role="status">正在打开工位管理…</p>}><RuntimeManagementDialog onClose={()=>toggleRuntime(false)}/></Suspense>}</main></div>
+    <div className="v7-shell"><Sidebar aria-label="采集导航" eyebrow="COLLECTION / NAV" title="采集工作区" items={sidebarItems} activeId={activeId} activeParentId={activeParentId} foot={sidebarFoot}/><main className={`${collectionSurface['c-page'] ?? 'c-page'} ${section === 'domains' ? '' : styles.frame}`} data-collection-page={section} aria-labelledby="page-title"><h1 className="v7-sr-only" id="page-title">{titles[section]}</h1>{toolbar}<div className={`c-body ${section === 'domains' ? '' : styles.body}`}>{children}</div>{domainManager && <Suspense fallback={<p role="status">正在读取领域管理…</p>}><DomainManagementDialog onClose={() => setDomainManager(false)} /></Suspense>}{runtimeOpen && <Suspense fallback={<p role="status">正在打开工位管理…</p>}><RuntimeManagementDialog onClose={()=>toggleRuntime(false)}/></Suspense>}</main></div>
   </AppShell>;
 }

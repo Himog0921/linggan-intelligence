@@ -28,7 +28,7 @@ LIDS-UI-001 已由 Mog 授权真实代码实施；唯一色值源 [color.json](c
 | [tokens](tokens.md) | 语义值、目标阶梯与未改动的运行时镜像 |
 | [primitives](primitives.md) | 控件、按钮、输入/FIND的C焦点与基础反馈；参数[focus.json](focus.json) |
 | [materials](materials.md) | M2控件材质与既有家族；参数[control-material.json](control-material.json) |
-| [shell-zones](shell-zones.md) | 共享壳、领域原位、三级页面Tab统一归面包屑模块与A容量／图标折叠；参数[shell-layout.json](shell-layout.json) |
+| [shell-zones](shell-zones.md) | 共享壳、领域原位、二级/三级页面统一归左侧导航树；面包屑保留路径/领域/当前位置；A容量与图标折叠；参数[shell-layout.json](shell-layout.json) |
 | [regions](regions.md) / [patterns](patterns.md) | 18个职责坐标、已确认组合原则与现有Pattern |
 | [interaction-contracts](interaction-contracts.md) | 触发、反馈、取消、返回及真实回执 |
 | [data-boundaries](data-boundaries.md) / [language-policy](language-policy.md) | 数据四态、来源、中文与英文使用边界 |
@@ -37,7 +37,7 @@ LIDS-UI-001 已由 Mog 授权真实代码实施；唯一色值源 [color.json](c
 ## 决定、待审与证据
 
 - [逐项对齐表](review-alignment.md)及其[清单源](review-alignment.json)：覆盖审阅稿全部R/Z/PT/C/B/I/P/A/D条目；只查本任务命中ID。它是追踪目录，不复制另一套规范权威。
-- [待审项](review-items.md)：Q01/Q02已采用B、Q03原声已统一OPPO Sans；Q04焦点已采用C、Q05材质已采用M2；Q06壳层按ALIGN-SHELL-007采用A及图标折叠，Q07按ALIGN-LEDGER-008采用L1/44px/任务名称144px；Q08组合已按ALIGN-COMPOSITION-009采用含搜索的列表B/其余功能C，用户问题卡片保留；Q09浮层已按ALIGN-OVERLAY-010采用S1；Q10四类已按ALIGN-REUSE-011采用，七门槛保持；Q11字体交付已按ALIGN-FONT-012采用，Q12按ALIGN-MEDIA-013采用E1与白场舞台。
+- [待审项](review-items.md)：Q01/Q02已采用B、Q03原声已统一OPPO Sans；Q04焦点已采用C、Q05材质已采用M2；Q06壳层按ALIGN-SHELL-007采用A及图标折叠；导航位置另按ALIGN-NAV-004将二级/三级页面统一归Z03，Z02保留路径/领域/当前位置；Q07按ALIGN-LEDGER-008采用L1/44px/任务名称144px；Q08组合已按ALIGN-COMPOSITION-009采用含搜索的列表B/其余功能C，用户问题卡片保留；Q09浮层已按ALIGN-OVERLAY-010采用S1；Q10四类已按ALIGN-REUSE-011采用，七门槛保持；Q11字体交付已按ALIGN-FONT-012采用，Q12按ALIGN-MEDIA-013采用E1与白场舞台。
 - [决定台账](decisions.md)：明确已确认规则对旧条款的局部替代，规则状态与运行时状态分列。
 - [迁移记录](migration-log.md)：本次实际只改文档与治理检查；不宣称业务字体/组件/页面已迁移。
 - [UI执行合同](../../agents/ui-execution-contract.md)与[设计治理](../design-governance.md)：授权、产品语义和验收边界继续有效。

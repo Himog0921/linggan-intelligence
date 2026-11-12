@@ -23,8 +23,8 @@ describe('restored comment overview on the current research contract',()=>{
   await userEvent.click(screen.getByRole('button',{name:'近 7 天'}));
   await userEvent.click(screen.getByRole('button',{name:'表格'}));
   expect(within(screen.getByRole('table')).getAllByRole('row')).toHaveLength(8);
-  await userEvent.click(screen.getByRole('button',{name:'用户评论'}));await screen.findByRole('searchbox',{name:'字面搜索'});
-  await userEvent.click(screen.getByRole('button',{name:'概览'}));
+  await userEvent.click(screen.getByRole('link',{name:'用户评论'}));await screen.findByRole('searchbox',{name:'字面搜索'});
+  await userEvent.click(screen.getByRole('link',{name:'概览'}));
   await waitFor(()=>expect(screen.getByRole('button',{name:'近 7 天'})).toHaveAttribute('aria-pressed','true'));
   expect(screen.getByRole('button',{name:'表格'})).toHaveAttribute('aria-pressed','true');
  });
@@ -39,7 +39,7 @@ describe('restored comment overview on the current research contract',()=>{
   installFetch(url=>url.pathname.endsWith('/comment-research/overview')?json({...overview(),domainRef:'wrong-domain'}):undefined);renderPage(`domain=${DOMAIN}&view=overview`);
   await screen.findByRole('alert');await screen.findAllByText('作业拖拉',{exact:true});
   expect(screen.queryByLabelText('研究累计读数与昨日活动')).not.toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'用户评论'})).toBeEnabled();
+  expect(screen.getByRole('link',{name:'用户评论'})).toBeVisible();
  });
  it('hides previously displayed source text when qualification refresh fails',async()=>{
   const base=overview();const value={...base,knowledgeSummary:{...base.knowledgeSummary,solutionSignalCount:1,solutionWorkCount:1,solutionPreview:[{requestRef:'request-a',commentKey:{workRef:'work-a',commentExternalId:'comment-a'},quote:'撤回之前的合成原声',proposition:'合成概括',workTitle:'合成作品'}]}};

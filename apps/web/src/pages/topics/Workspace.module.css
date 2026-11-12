@@ -1,10 +1,5 @@
 /* TOPIC-WORKSPACE-REAL-001 · L2 precision research workbench.
  * All colour and motion resolve through LIDS runtime tokens. */
-.topic-app :global(.v7-nav-label)[data-readout="TOPIC"]::after {
-  content: "主题工作区";
-  font: 600 calc(var(--lgi-space-1) * 2.75) / 1 var(--lgi-font-sans);
-  letter-spacing: calc(var(--lgi-space-1) * 0.0275);
-}
 .topic-workspace {
   min-width: 0;
   min-height: 0;
@@ -403,3 +398,74 @@
 }
 
 .topic-inspector a[hidden] { display:none; }
+
+
+/* In-page section anchors stay inside the Topic work surface; they are not global page navigation. */
+.topic-section-nav {
+  position: sticky;
+  top: 0;
+  z-index: var(--lgi-z-sticky);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-4);
+  min-width: 0;
+  padding: var(--lgi-space-3) var(--lgi-space-6);
+  border-bottom: 1px solid var(--lgi-hairline);
+  background: var(--lgi-canvas-glass);
+  backdrop-filter: blur(12px);
+}
+.topic-section-links {
+  display: flex;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.topic-section-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--lgi-space-2);
+  flex: none;
+  min-height: var(--lgi-space-8);
+  padding: 0 var(--lgi-space-3);
+  border-bottom: 2px solid transparent;
+  color: var(--lgi-muted);
+  font: var(--lgi-type-control-weight) var(--lgi-type-control-size) / var(--lgi-type-control-leading) var(--lgi-font-ui);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.topic-section-links a:hover {
+  background: var(--lgi-canvas-low);
+  color: var(--lgi-ink);
+}
+.topic-section-links a:focus-visible {
+  outline: 2px solid var(--lgi-focus);
+  outline-offset: 2px;
+}
+.topic-section-links a span {
+  color: var(--lgi-signal);
+  font: var(--lgi-type-aux-weight) var(--lgi-type-aux-size) / 1 var(--lgi-font-mono);
+}
+.topic-section-status {
+  display: flex;
+  align-items: baseline;
+  gap: var(--lgi-space-2);
+  flex: none;
+  color: var(--lgi-ink);
+  font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui);
+  white-space: nowrap;
+}
+.topic-section-status small {
+  color: var(--lgi-ghost);
+  font: var(--lgi-type-aux-weight) var(--lgi-type-aux-size) / 1 var(--lgi-font-mono);
+}
+@media (max-width: 720px) {
+  .topic-section-nav {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: var(--lgi-space-3) var(--lgi-space-4);
+  }
+  .topic-section-links { width: 100%; }
+}

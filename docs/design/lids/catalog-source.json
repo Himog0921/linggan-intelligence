@@ -9813,8 +9813,24 @@
         "apps/web/src/app/ContextTexture.tsx",
         "apps/web/src/pages/settings/ModelSettingsPage.tsx",
         "apps/web/src/shared/ContextBar.tsx",
-        "apps/web/src/styles/shell.css"
-      ]
+        "apps/web/src/styles/shell.css",
+        "apps/web/src/pages/settings/AccountSecurityPage.tsx",
+        "apps/web/src/pages/settings/SettingsSideNav.tsx",
+        "apps/web/src/pages/settings/AccountSecurityPage.module.css"
+      ],
+      "navigationContract": {
+        "secondary": [
+          "AI 设置",
+          "账户安全"
+        ],
+        "tertiary": [
+          "AI 能力",
+          "模型连接",
+          "运行与用量",
+          "高级配置"
+        ],
+        "host": "Z03"
+      }
     },
     {
       "id": "P03",
@@ -9992,8 +10008,15 @@
         "apps/web/src/pages/corpus/evidence/EvidencePage.tsx",
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/DomainScopePicker.tsx",
-        "apps/web/src/styles/shell.css"
-      ]
+        "apps/web/src/styles/shell.css",
+        "apps/web/src/corpus/CorpusSideNav.tsx"
+      ],
+      "navigationContract": {
+        "secondary": [
+          "证据库"
+        ],
+        "host": "Z03"
+      }
     },
     {
       "id": "P04",
@@ -10563,8 +10586,22 @@
         "apps/web/src/pages/corpus/comments/CommentsPage.tsx",
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/ContextTabs.tsx",
-        "apps/web/src/styles/shell.css"
-      ]
+        "apps/web/src/styles/shell.css",
+        "apps/web/src/corpus/CorpusSideNav.tsx",
+        "apps/web/src/corpus/corpusPages.ts"
+      ],
+      "navigationContract": {
+        "secondary": [
+          "评论研究"
+        ],
+        "tertiary": [
+          "概览",
+          "用户评论",
+          "研究记录",
+          "用户问题"
+        ],
+        "host": "Z03"
+      }
     },
     {
       "id": "P05",
@@ -10763,8 +10800,15 @@
         "apps/web/src/pages/corpus/creators/CreatorsPage.tsx",
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/DomainScopePicker.tsx",
-        "apps/web/src/styles/shell.css"
-      ]
+        "apps/web/src/styles/shell.css",
+        "apps/web/src/corpus/CorpusSideNav.tsx"
+      ],
+      "navigationContract": {
+        "secondary": [
+          "创作者"
+        ],
+        "host": "Z03"
+      }
     },
     {
       "id": "P06",
@@ -11218,8 +11262,18 @@
         "apps/web/src/app/ContextTexture.tsx",
         "apps/web/src/pages/topics/WorkspacePage.tsx",
         "apps/web/src/shared/ContextBar.tsx",
-        "apps/web/src/styles/shell.css"
-      ]
+        "apps/web/src/styles/shell.css",
+        "apps/web/src/pages/topics/Workspace.module.css"
+      ],
+      "navigationContract": {
+        "localSections": [
+          "定义与版本",
+          "材料分类/材料裁定",
+          "来源边界"
+        ],
+        "host": "Z04 work surface",
+        "notGlobalPages": true
+      }
     },
     {
       "id": "P08",
@@ -11429,7 +11483,17 @@
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/DomainScopePicker.tsx",
         "apps/web/src/styles/shell.css"
-      ]
+      ],
+      "navigationContract": {
+        "secondary": [
+          "观察目标",
+          "采集任务"
+        ],
+        "tertiaryUnderTargets": [
+          "领域管理"
+        ],
+        "host": "Z03"
+      }
     },
     {
       "id": "P09",
@@ -11621,7 +11685,17 @@
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/DomainScopePicker.tsx",
         "apps/web/src/styles/shell.css"
-      ]
+      ],
+      "navigationContract": {
+        "secondary": [
+          "观察目标",
+          "采集任务"
+        ],
+        "tertiaryUnderTargets": [
+          "领域管理"
+        ],
+        "host": "Z03"
+      }
     },
     {
       "id": "P10",
@@ -11771,7 +11845,17 @@
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/DomainScopePicker.tsx",
         "apps/web/src/styles/shell.css"
-      ]
+      ],
+      "navigationContract": {
+        "secondary": [
+          "观察目标",
+          "采集任务"
+        ],
+        "tertiaryUnderTargets": [
+          "领域管理"
+        ],
+        "host": "Z03"
+      }
     },
     {
       "id": "P11",
@@ -11934,7 +12018,17 @@
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/DomainScopePicker.tsx",
         "apps/web/src/styles/shell.css"
-      ]
+      ],
+      "navigationContract": {
+        "secondary": [
+          "观察目标",
+          "采集任务"
+        ],
+        "tertiaryUnderTargets": [
+          "领域管理"
+        ],
+        "host": "Z03"
+      }
     },
     {
       "id": "P12",
@@ -12782,17 +12876,17 @@
           "数据",
           "创作"
         ],
-        "dataPages": [
+        "tertiaryData": [
           "概览",
           "发布记录",
           "账号管理",
           "每日数据"
         ],
-        "host": "Z02",
-        "creationPages": [
+        "tertiaryCreation": [
           "今日选题",
           "我的创作"
         ],
+        "host": "Z03",
         "objectSteps": "保留编辑对象内局部导航"
       },
       "implementationSources": [
@@ -12974,18 +13068,21 @@
           "数据",
           "创作"
         ],
-        "dataPages": [
+        "tertiaryData": [
           "概览",
           "发布记录",
           "账号管理",
           "每日数据"
         ],
-        "host": "Z02",
-        "creationPages": [
+        "tertiaryCreation": [
           "今日选题",
           "我的创作"
         ],
-        "objectSteps": "保留编辑对象内局部导航"
+        "host": "Z03",
+        "objectSteps": "保留编辑对象内局部导航",
+        "adminSecondary": [
+          "团队与权限"
+        ]
       },
       "implementationSources": [
         "apps/web/src/app/AppShell.tsx",
@@ -13167,18 +13264,21 @@
           "数据",
           "创作"
         ],
-        "dataPages": [
+        "tertiaryData": [
           "概览",
           "发布记录",
           "账号管理",
           "每日数据"
         ],
-        "host": "Z02",
-        "creationPages": [
+        "tertiaryCreation": [
           "今日选题",
           "我的创作"
         ],
-        "objectSteps": "保留编辑对象内局部导航"
+        "host": "Z03",
+        "objectSteps": "保留编辑对象内局部导航",
+        "adminSecondary": [
+          "团队与权限"
+        ]
       },
       "implementationSources": [
         "apps/web/src/app/AppShell.tsx",
@@ -13324,18 +13424,21 @@
           "数据",
           "创作"
         ],
-        "dataPages": [
+        "tertiaryData": [
           "概览",
           "发布记录",
           "账号管理",
           "每日数据"
         ],
-        "host": "Z02",
-        "creationPages": [
+        "tertiaryCreation": [
           "今日选题",
           "我的创作"
         ],
-        "objectSteps": "保留编辑对象内局部导航"
+        "host": "Z03",
+        "objectSteps": "保留编辑对象内局部导航",
+        "adminSecondary": [
+          "团队与权限"
+        ]
       },
       "implementationSources": [
         "apps/web/src/app/AppShell.tsx",
@@ -13354,7 +13457,11 @@
         "apps/web/src/shared/ContextBar.tsx",
         "apps/web/src/shared/ContextTabs.tsx",
         "apps/web/src/shared/DomainScopePicker.tsx",
-        "apps/web/src/styles/shell.css"
+        "apps/web/src/styles/shell.css",
+        "apps/web/src/pages/settings/TeamSettingsPage.tsx",
+        "apps/web/src/pages/settings/TeamSettingsPage.module.css",
+        "apps/web/src/pages/settings/OffboardingPanel.tsx",
+        "apps/web/src/pages/settings/teamSettingsApi.ts"
       ]
     },
     {
@@ -13483,18 +13590,21 @@
           "数据",
           "创作"
         ],
-        "dataPages": [
+        "tertiaryData": [
           "概览",
           "发布记录",
           "账号管理",
           "每日数据"
         ],
-        "host": "Z02",
-        "creationPages": [
+        "tertiaryCreation": [
           "今日选题",
           "我的创作"
         ],
-        "objectSteps": "保留编辑对象内局部导航"
+        "host": "Z03",
+        "objectSteps": "保留编辑对象内局部导航",
+        "adminSecondary": [
+          "团队与权限"
+        ]
       },
       "implementationSources": [
         "apps/web/src/app/AppShell.tsx",

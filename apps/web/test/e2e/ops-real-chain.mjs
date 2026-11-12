@@ -252,7 +252,7 @@ try {
       .count()
       .catch(() => {});
     await page
-      .getByRole("navigation", { name: "数据页面" })
+      .getByRole("complementary", { name: "运营导航" })
       .getByRole("link", { name: /每日数据/ })
       .click();
     await wait(
@@ -609,7 +609,10 @@ try {
   );
   await step("invite, assign, fill inherited views, stop and recover exact receipt", async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto(`${origin}/settings/team`);
+    await go("accounts");
+    await page.getByRole("complementary", { name: "运营导航" })
+      .getByRole("link", { name: "团队与权限", exact: true }).click();
+    await page.waitForURL("**/settings/team");
     await page.getByRole("button", { name: "邀请成员", exact: true }).click();
     await page.getByLabel("姓名", { exact: true }).fill("合成接任运营");
     await page.getByLabel("工作邮箱").fill("synthetic-handover@example.test");
@@ -638,6 +641,9 @@ try {
       await transfer.waitFor({ state: "hidden" });
 
       await memberPage.goto(`${origin}/ops/accounts`);
+      const memberSidebar = memberPage.getByRole("complementary", { name: "运营导航" });
+      await memberSidebar.getByRole("link", { name: "账号管理", exact: true }).waitFor();
+      assert.equal(await memberSidebar.getByRole("link", { name: "团队与权限", exact: true }).count(), 0);
       await memberPage.getByRole("row").filter({ hasText: "SYNTHETIC 账号甲" })
         .getByRole("link", { name: "待补阅读量" }).click();
       const oldPublication = memberPage.getByRole("row").filter({ hasText: "合成发布 00" });

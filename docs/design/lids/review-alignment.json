@@ -108,6 +108,11 @@
     {
       "id": "U23",
       "statement": "Q12按E1保留，媒体舞台白场；整体收口核查组件、代表页面、正式LIDS和项目Agent文件，冲突与遗漏单列审阅，业务代码不动。"
+    },
+    {
+      "id": "U24",
+      "statement": "左侧导航栏只放 2 级页面跟3级页面；方案 C 更合适，按真实项目收口导航布局。",
+      "scope": "二级与三级页面统一进入左侧导航树；Z02 保留面包屑、领域选择和当前位置；对象内部视图与页面筛选不提升为全局导航。"
     }
   ],
   "scope": {
@@ -174,11 +179,12 @@
         "basis": [
           "U05",
           "U08",
-          "U10"
+          "U10",
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": "面包屑保留真实导航层级，领域选择保留在同一面包屑位置；Z02-P与Z02-S分责而不强制分行。范围控制不是虚构的父页面。筛选与读取时间仍归工具、结果或对象。",
-        "adoptedScope": "页面三级Tab物理host统一为Z02面包屑模块，领域原位；Z04-N仅保留职责ID；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。"
+        "adoptedScope": "二级与三级页面导航统一由Z03左侧导航树承载；Z02-P保留真实路径与当前位置，Z02-S保留领域选择器；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。"
       },
       {
         "id": "R06",
@@ -476,7 +482,8 @@
           "U15",
           "U17",
           "U18",
-          "U21"
+          "U21",
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -489,7 +496,7 @@
           "position": "页头下方"
         },
         "note": "区域职责已采用；精确组件白名单、容量与逐页映射仍候选。",
-        "adoptedScope": "页面三级Tab物理host统一为Z02面包屑模块，领域原位；Z04-N仅保留职责ID；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。",
+        "adoptedScope": "二级与三级页面导航统一由Z03左侧导航树承载；Z02-P保留真实路径与当前位置，Z02-S保留领域选择器；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。",
         "shellAdoption": "ALIGN-SHELL-007; A with manual icon collapse; runtime not migrated",
         "visualAdoption": "ALIGN-COMPOSITION-009; visual composition accepted, remaining contract/certification follows reviewItems",
         "validationStatus": "not_adopted_by_reuse_classification",
@@ -508,7 +515,8 @@
           "U15",
           "U17",
           "U18",
-          "U21"
+          "U21",
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -522,7 +530,7 @@
           "position": "页头下方"
         },
         "note": "区域职责已采用；精确组件白名单、容量与逐页映射仍候选。",
-        "adoptedScope": "页面三级Tab物理host统一为Z02面包屑模块，领域原位；Z04-N仅保留职责ID；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。",
+        "adoptedScope": "二级与三级页面导航统一由Z03左侧导航树承载；Z02-P保留真实路径与当前位置，Z02-S保留领域选择器；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。",
         "shellAdoption": "ALIGN-SHELL-007; A with manual icon collapse; runtime not migrated",
         "visualAdoption": "ALIGN-COMPOSITION-009; visual composition accepted, remaining contract/certification follows reviewItems",
         "validationStatus": "not_adopted_by_reuse_classification",
@@ -633,7 +641,8 @@
           "U15",
           "U17",
           "U18",
-          "U21"
+          "U21",
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -647,7 +656,7 @@
           "physicalHost": "Z02"
         },
         "note": "区域职责已采用；精确组件白名单、容量与逐页映射仍候选。",
-        "adoptedScope": "页面三级Tab物理host统一为Z02面包屑模块，领域原位；Z04-N仅保留职责ID；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。",
+        "adoptedScope": "二级与三级页面导航统一由Z03左侧导航树承载；Z02-P保留真实路径与当前位置，Z02-S保留领域选择器；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。",
         "shellAdoption": "ALIGN-SHELL-007; A with manual icon collapse; runtime not migrated",
         "visualAdoption": "ALIGN-COMPOSITION-009; visual composition accepted, remaining contract/certification follows reviewItems",
         "validationStatus": "not_adopted_by_reuse_classification",
@@ -2827,7 +2836,8 @@
         "basis": [
           "U08",
           "U10",
-          "U21"
+          "U21",
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -2862,7 +2872,7 @@
           ]
         },
         "implementationStatus": "not_promoted_by_alignment",
-        "adoptedScope": "页面三级Tab物理host统一为Z02面包屑模块，领域原位；Z04-N仅保留职责ID；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。",
+        "adoptedScope": "二级与三级页面导航统一由Z03左侧导航树承载；Z02-P保留真实路径与当前位置，Z02-S保留领域选择器；筛选和对象Tab各自就近。其他容量、组件晋升及参数仍待对应Q项。",
         "validationStatus": "not_adopted_by_reuse_classification",
         "validationRequired": "对应PAGE/组件/数据合同的逐项验收；四类采用不批准本条完整候选合同",
         "reuseClass": "shared"
@@ -8066,7 +8076,8 @@
           "U10",
           "U17",
           "U18",
-          "U21"
+          "U21",
+          "U24"
         ],
         "reviewItems": [],
         "candidateRequirement": {
@@ -8314,7 +8325,7 @@
           ],
           "states": "未选领域、尚无主题、原文不可用、旧分析、定义版本冲突、观察不足、研究暂停"
         },
-        "adoptedScope": "仅三级分区位置采用ALIGN-NAV-003；主题概览／用户生命旅程在Z02承载，既有业务与其余页型合同仍待Q08。",
+        "adoptedScope": "页面二级/三级导航归Z03；主题概览／用户生命旅程仍作为主题图谱内视图切换留在Z02，按既有产品决定，不提升为全局页面导航；既有业务与其余页型合同仍待Q08。",
         "visualAdoption": "ALIGN-COMPOSITION-009; visual composition accepted, remaining contract/certification follows reviewItems",
         "validationStatus": "not_adopted_by_reuse_classification",
         "validationRequired": "对应PAGE/组件/数据合同的逐项验收；四类采用不批准本条完整候选合同"
@@ -11202,7 +11213,7 @@
       "ALIGN-FOCUS-005",
       "ALIGN-VOICE-004",
       "LIDS-TYPE-001-B",
-      "ALIGN-NAV-003"
+      "ALIGN-NAV-004"
     ],
     "businessRequests": false,
     "runtimeMigrated": false,
@@ -11247,7 +11258,7 @@
       "ALIGN-VOICE-004",
       "ALIGN-FOCUS-005",
       "ALIGN-MATERIAL-006",
-      "ALIGN-NAV-003"
+      "ALIGN-NAV-004"
     ],
     "businessRequests": false,
     "runtimeMigrated": false,
@@ -11255,7 +11266,7 @@
     "acceptedMaterialsChanged": false,
     "selected": "A",
     "normativeSource": "docs/design/lids/shell-layout.json",
-    "sha256": "5fcab4ad570e18e4c5099df9b239d0097d4d4148313a08a5057f07f73f427dfc",
+    "sha256": "4dd0d942a0ca677d8ce5151027db554f8799774379ae5b9a18ebb01801310fe7",
     "currentEntryMode": "A_only_with_manual_icon_collapse",
     "manualSidebarCollapse": true,
     "componentCertificationChanged": false,
@@ -11279,7 +11290,7 @@
       "ALIGN-VOICE-004",
       "ALIGN-FOCUS-005",
       "ALIGN-MATERIAL-006",
-      "ALIGN-NAV-003",
+      "ALIGN-NAV-004",
       "ALIGN-SHELL-007"
     ],
     "singleTaskSingleRow": true,
@@ -11327,7 +11338,7 @@
       "ALIGN-VOICE-004",
       "ALIGN-FOCUS-005",
       "ALIGN-MATERIAL-006",
-      "ALIGN-NAV-003",
+      "ALIGN-NAV-004",
       "ALIGN-SHELL-007",
       "ALIGN-LEDGER-008"
     ],
@@ -11391,7 +11402,7 @@
       "ALIGN-SHELL-007",
       "ALIGN-LEDGER-008",
       "ALIGN-COMPOSITION-009",
-      "ALIGN-NAV-003"
+      "ALIGN-NAV-004"
     ],
     "businessRequests": false,
     "runtimeMigrated": false,
@@ -11423,7 +11434,7 @@
     "tertiaryHost": "Z02",
     "domainHost": "Z02",
     "normativeSource": "docs/design/lids/component-reuse.json",
-    "sha256": "1af8299c2f779e48921a34bc8193d94cfca2ede72dd885ef9b5314d47c20ceba",
+    "sha256": "1cec37240e0b68a4834232ba47d2d46ede3692056bd77e5a4740b280eac6c40f",
     "gateCount": 7,
     "selectedClasses": [
       "shared",

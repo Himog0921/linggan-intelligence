@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, useLocation } from 'react-router';
 import { afterEach, expect, it, vi } from 'vitest';
 import { TasksPage } from './TasksPage';
@@ -11,6 +11,12 @@ it('搜索手动提交，组词期间不查询，清空恢复范围且不读取�
   const client=new QueryClient({defaultOptions:{queries:{retry:false}}});
   render(<MemoryRouter initialEntries={['/collection/tasks?domain=all']}><QueryClientProvider client={client}><TasksPage/><Location/></QueryClientProvider></MemoryRouter>);
   await screen.findByText('当前筛选没有采集记录。');
+  const side=screen.getByRole('complementary',{name:'采集导航'});
+  expect(within(side).getByRole('link',{name:'采集任务'})).toHaveAttribute('aria-current','page');
+  expect(within(side).getByRole('link',{name:'观察目标'})).toHaveAttribute('href','/collection/targets?domain=all');
+  fireEvent.click(within(side).getByRole('button',{name:'展开观察目标子页面'}));
+  expect(within(side).getByRole('link',{name:'领域管理'}).getAttribute('href')).toContain('/collection/domains?return_to=');
+  expect(screen.getByRole('navigation',{name:'当前位置'})).toHaveTextContent(/采集.*采集任务/);
   const input=screen.getByRole('searchbox',{name:'搜索采集任务'}),form=screen.getByRole('search');
   fireEvent.compositionStart(input);fireEvent.change(input,{target:{value:'测试搜索'}});fireEvent.submit(form);
   expect(new URLSearchParams(screen.getByTestId('route').textContent??'').get('q')).toBeNull();
