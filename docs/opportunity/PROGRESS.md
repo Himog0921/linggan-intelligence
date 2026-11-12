@@ -52,3 +52,179 @@
   - `0048` 的毫秒 epoch 判定可复用为 C3 投影语义，但当前写在视图里，不是独立函数。
   - 按作品补评论走 `deepen_comments`，一次最多新增 30 条；授权、风险暂停、安装冷却与并发控制共用现有采集链。
 - 遗留：`QUESTIONS.md` Q-13（评论排序协议）待负责人裁定；C2 在 Q-13 裁定前不开始。
+
+## 2026-11-12 Q-13 裁定
+
+- 状态：done（文档更新）
+- 结果：负责人选 A，固定平台默认顺序，`collection_protocol.sort_mode = "platform_default"`；见 D-032。`QUESTIONS.md` Q-13 已标记答复，`DECISIONS.md`、`docs/README.md` 同步。
+
+## 2026-11-12 C2 插件写入评论时间并去掉回退
+
+- 状态：实现与本地验证完成；未合并、未发布、未访问平台、未执行真实采集、未写数据库。
+- 代码：
+  - 小红书与抖音评论映射：只有数值型平台字段可作为时间来源，秒值乘 1000，写入毫秒 epoch；缺失、0、无效值或展示文本写入 `null`。删除展示文本 `Date.parse` 推导。
+  - `recordNormalization.js`：删除 `record.publishedAt || record.createdAt` 回退；`publishedAt` 只接受正数，否则 `null`，不再写 0 或采集时间。
+  - 评论包新增 `collectionProtocol: { version: 1, sortMode: "platform_default", singleRunLimit, triggerSource }`；顶层字段存在即标记 C2 之后的时间语义，旧包无该字段仍被接收。
+  - 调用方传入 TaskSpec：`scheduled` → `scheduled`，带 `incrementalCommentBudget` → `incremental`，本地手动 → `manual`；无法判断 → `unknown`。`singleRunLimit` 取 receipt 的 `requestedLimit`，全量遍历为 `null`。
+  - Rust `producer_runtime`：`collectionProtocol` 可选；存在时校验仅用于 comments/replies、版本为 1、排序为 `platform_default`、上限为 `null` 或 1–2048、触发来源为闭集，并要求非空 `publishedAt` 是毫秒 epoch（≥ 1e12）；旧包跳过这些校验。
+- 验证：
+  - 插件测试（`TZ=Asia/Shanghai npm run test:linggan`）：333 passed, 0 failed。未设 TZ 时 `xhs-note-collector` 的既有“昨天/小时前”测试因本机时区为 PST 失败，与 C2 无关。
+  - `npm run check:contracts`、`npm run build`：通过。
+  - `cargo test -p linggan-contracts`：通过，新增 `collection_protocol_marks_c2_packages_while_pre_c2_packages_stay_acceptable`。
+- 新增测试：
+  - 带 `create_time`（秒）与带毫秒值样例映射为毫秒 epoch；无时间样例为 `null`，不等于采集时间；仅有展示文本时为 `null` 且保留 `publishedAtText`。
+  - `createdAt` 存在时 `publishedAt` 仍为 `null`；0 视为未知；显式平台时间保留。
+  - 评论包携带协议字段；scheduled/incremental/manual/unknown 与全量无上限样例。
+- 遗留：独立审查与合并授权；C3 投影器需按 `collectionProtocol.version` 选择时间语义，旧包按 0/缺失处理。
+
+## 2026-11-12 T0.3 口径定义与周期工具
+
+- 状态：实现与隔离库验证完成；未合并，未在共享库或生产库执行 migration，未写真实数据。
+- 数据库（`database/migrations/0203_opportunity_metric_definition.sql`）：
+  - 按 D-004 使用 `public` schema 与表名前缀：`linggan_opportunity_metric_definition`、`linggan_opportunity_metric_definition_current`；`singleton` 约束保证只有一个当前版本。
+  - seed 写入生产参数 v1，数值与 §6.3 固定测试参数集一致（含 `period_basis = work_published_cohort`、`period_tz = Asia/Shanghai`），并指向当前版本。
+  - 按 D-020 新增 `linggan_opportunity_period_start(ts timestamptz, tz text) RETURNS date` 与 `linggan_opportunity_period_bounds(p date, tz text) RETURNS TABLE(start_utc timestamptz, end_utc timestamptz)`；时区只由参数传入，函数内不写死。
+  - 按仓库约定登记到 `apps/api/src/local_web/full_schema_fixture.rs`（`include_str!` 与 sha256 台账 `1ee95ccf…`）和 `scripts/local-runtime.sh` 的 `apply_migration_once`；未执行到任何共享库或本地运行库。
+- Rust（`crates/intelligence/src/opportunity.rs`、`opportunity/metric_definition.rs`）：
+  - `load_current_metric_definition` 从当前版本读取 `params`；缺失返回 `opportunity_metric_definition_missing`，读取失败返回 `opportunity_metric_database_unavailable`。
+  - 逐项校验：`z` 为正有限数；计数类参数大于 0；比例类参数在 0–1；`period` 只接受 `week`；`period_basis` 只接受 `work_published_cohort`/`comment_published`；`week_start` 只接受 `monday`；`gate_classes` 非空、不重复且只含 `answers`/`mentions`；不合法返回 `opportunity_metric_definition_invalid` 并拒绝加载。
+  - 业务模块不含时区字符串或周期常量；`Asia/Shanghai` 只出现在 seed 数据与测试参数集中。
+- 验证：
+  - `cargo test -p linggan-intelligence --lib --locked`：335 passed, 0 failed, 10 ignored。
+  - `cargo test -p linggan-intelligence opportunity:: --locked`：3 passed，覆盖固定测试参数集加载、逐项非法值、缺失字段与未知字段。
+  - `scripts/test-opportunity-postgres.sh`：隔离容器内 2 passed，覆盖 §6.4.3 四条周期边界（含 `period_bounds` 的 UTC 起止）与 seed 加载；修改 seed 的 `z = 0` 后加载被拒绝。容器、卷与数据库在退出时删除并校验。
+- 遗留：独立审查与合并授权；迁移应用到任何共享/生产数据库前需单独授权。下一步 T0.2（评论事实视图与资格函数）。
+
+## 2026-11-12 T0.2 评论事实视图与资格函数
+
+- 状态：实现与隔离库验证完成；Q-14 已答复，暂停期数据不触发 D-024 停止条件（D-033），任务完成。未合并，未在共享库或生产库执行 migration，未写真实数据。
+- 数据库（`database/migrations/0204_opportunity_comment_eligibility.sql`）：
+  - 新增 `linggan_opportunity_observed_at(text)`：解析失败返回 `NULL`；按 D-018，`observed_at` 的文本到 `timestamptz` 转换只出现在本迁移。
+  - 视图 `linggan_opportunity_comment_fact`：按 `(content_ref, comment_external_id)` 聚合成一行；`first_observed_at` 取首入档包 `accepted_at`，无首入档行时回退最早可解析 `observed_at` 并置 `first_observed_backfilled = true`；同时输出 `first_observed_parseable`、`commenter_external_id_conflict`（§6.2.1）、`is_reply`、观察次数与不可解析观察数。评论者取值优先首入档包，否则按最早观察时间与包/材料引用排序。
+  - 唯一内部实现 `linggan_opportunity_comment_eligibility(domain_ref, as_of, tz, period_basis)`：`comment_published` 直接报 `comment_published_basis_not_ready`（不回退）；未知口径报 `unknown_period_basis`；空时区报 `period_tz_required`。按 D-023 处理 `created_at <= as_of` 与 legacy 行；周期锚点取 `as_of` 前最新有 `published_at` 的详情观察；排除原因使用闭集并固定优先级：`not_in_domain_primary`、`work_author_unknown`、`period_anchor_missing`、`observed_at_unparseable`、`restricted`、`creator_self`。
+  - 对外两个包装函数 `linggan_opportunity_eligible_comments` 与 `linggan_opportunity_eligibility_exclusions` 均只调用上述内部实现，等式“有效 + 各原因排除 = 全部候选”由结构保证。
+  - 按仓库约定登记到 `apps/api/src/local_web/full_schema_fixture.rs`（sha256 `2ad6bda8…`）与 `scripts/local-runtime.sh`；未执行到任何共享库或本地运行库。
+- 证明（隔离 PostgreSQL 容器，`scripts/test-opportunity-postgres.sh`）：
+  - 4 passed, 0 failed；新增两条 T0.2 证明（§8.2 数据集、口径拒绝），T0.3 的周期边界与 seed 加载继续通过。
+  - §8.2：有效 5800；`not_in_domain_primary` 3、`work_author_unknown` 5、`period_anchor_missing` 4、`observed_at_unparseable` 0、`restricted` 2、`creator_self` 1；候选 5815 = 5800 + 15；回填有效 10；回复 50；评论者冲突 0；`as_of = 2026-11-11` 时有效 5803。追加一条不可解析 `observed_at` 后，`observed_at_unparseable` 变为 1，候选变为 5816。
+  - `comment_published` 对两个对外函数均报 `comment_published_basis_not_ready`。
+- 真实库只读统计（仅 `SELECT`，`default_transaction_read_only=on`；0203/0204 未应用，资格逻辑以只读 CTE 复刻）：
+  - `first_observed_at` 来源：稳定身份 29017；首入档包 29017（100%）；回退可解析 0；回退不可解析 0；观察 31771 条；不可解析观察 0。
+  - 评论者一致性（§6.2.1）：稳定身份中评论者冲突 0（无多值、无“有值/空值”混合）。
+  - 回复占比（D-025）：有效评论 22003 条，其中回复 4858 条，22.08%；可区分。
+  - D-024 第 4 款分布：按最近 12 个自然周计算为 0 个领域-周（最新周期锚点 2026-10-21，落在当前周回溯 12 周窗口之外）；改用数据中最近 12 个有数据周期（2026-07-27 至 2026-10-12）：
+    - 领域-周 33 个；周 n 的 P25 = 27、P50 = 57、P75 = 211；最小 4，最大 1390。
+    - 有数据领域 3 个：ADHD 周中位 530.5（12 周）、考研自习 29.5（10 周）、自闭症干预 39.0（11 周）；第 4 个领域无有效数据。
+    - 多数（3 个中的 2 个）领域周 n 中位数低于 100。负责人说明前端采集已手动暂停一个多月，数据库反映暂停状态，不是项目设计或采集能力的结论；暂停期数据不作为停止条件（Q-14 / D-033），保持周周期继续推进。
+  - 作者 90 天窗口：有有效评论的作者 417 个；作者有效评论数 P25 = 3、P50 = 11、P75 = 23，最小 1、最大 825；按 `creator_min_n = 50`，充足 15 个、样本不足 402 个。
+  - 各证据等级的问题数：无法产出。当前库只有 `linggan_comment_problem_*` 表，没有 evidence level 字段，且 `linggan_comment_problem_definition` 为 0 行；机会卡的问题与证据等级尚未实现（T1+）。
+- 遗留：独立审查与合并授权；迁移应用到任何共享/生产数据库前需单独授权；采集恢复后重跑 D-024 只读报告；C3 需要替换 `comment_published_basis_not_ready` 分支。
+
+## 2026-11-12 T0.4 统计函数模块
+
+- 状态：实现与单元测试完成；未合并。纯函数模块，不访问数据库、不读取配置。
+- 代码（`crates/intelligence/src/opportunity/stats.rs`，由 `opportunity.rs` 重导出）：
+  - `wilson_interval(k, n, z)`：按 §6.4.1 实现；`n = 0` 返回 `EmptySample`，`k > n` 返回 `CountExceedsTotal`，`z` 非有限或非正返回 `InvalidZ`；不把错误改成默认值。
+  - `rate_per_1k(k, n)`：`n = 0` 返回 `None`。
+  - `evidence_tier(input, params)`：按 `mentioners_total`、`min_total_for_significant`、`min_k_significant`、`min_n_period` 与 Wilson 下界相对基线的比较返回 `candidate` / `established` / `significant`。
+- 测试（`cargo test -p linggan-intelligence --lib opportunity::stats --locked`）：
+  - 7 passed, 0 failed。
+  - §6.4.2 全部 12 条 Wilson 标准答案（容差 `1e-6`）与三类错误情况通过。
+  - §6.4.4 全部 7 条证据等级标准答案通过。
+  - 三条性质测试使用固定种子各生成 10,000 组 `0 <= k <= n <= 100000`：区间包住点估计、固定 `n` 时 `k` 增大下界不减小、固定比例时 `n` 翻倍区间宽度不增大。RECON §4.8 未发现现成性质测试库，因此未新增依赖，使用测试内的固定种子 LCG。
+- 遗留：独立审查与合并授权。
+
+## 2026-11-12 T0.5 问题登记与谱系
+
+- 状态：实现与隔离库验证完成；未合并，未在共享/生产库执行 migration，未写真实数据。
+- 数据库（`database/migrations/0205_opportunity_problem_taxonomy.sql`）：
+  - 新建 `linggan_opportunity_taxonomy_version`、`linggan_opportunity_problem`、`linggan_opportunity_problem_lineage`；按 D-014，`source_ref = problem_ref`、`source_definition_ref = definition_ref`、`level = 1`、`parent_id = NULL`，类型跟随现有表使用 uuid。
+  - `linggan_opportunity_sync_problems()` 从 0177 的 `linggan_comment_problem_definition` 登记问题；同一 `source_ref` 的 `source_definition_ref` 变化时 `def_version` 加 1，未变化不写。迁移末尾执行一次同步。
+  - 谱系关系为闭集 `merge` / `rename` / `split`；跨领域关系被拒绝；同一 `operation_ref` 的一次合并或拆分只递增一次领域 `taxonomy_version`；`rename` 不递增。0177 没有合并、改名或拆分语义，因此真实同步只登记问题，不写谱系（D-014）。
+  - `linggan_opportunity_resolve_problem_id(id)` 沿 `merge` / `rename` 链返回当前问题与完整路径；遇 `split` 返回所有直接子问题及路径，交给调用方；成环报 `problem_lineage_cycle`，不进入死循环。
+  - 按仓库约定登记到 `apps/api/src/local_web/full_schema_fixture.rs`（sha256 `8e7a8ce8…`）与 `scripts/local-runtime.sh`；未执行到任何共享库或本地运行库。
+- 验证（隔离 PostgreSQL 容器，`scripts/test-opportunity-postgres.sh`）：
+  - 5 passed, 0 failed；新增 T0.5 证明覆盖直达、两跳合并、改名后合并、拆分、成环五种情况。
+  - 同步：首次登记 2 条，重复执行 0 条；`definition_ref` 变化后 `def_version` 从 1 变为 2。
+  - 版本：一次 2 行拆分只递增 1 次；两次合并、两次成环边、拆分与改名混合后，领域版本为 7。
+  - 真实库只读：`linggan_comment_problem_definition` 当前 0 行，因此现有问题登记数为 0，与评论研究一致；这不是同步失败。
+- 遗留：独立审查与合并授权；真实库问题数随 0177 数据增长后需重跑同步。
+
+## 2026-11-12 T0.6 评论者哈希
+
+- 状态：实现与单元测试完成；未合并。未写真实数据，未读取真实评论者标识。
+- 代码（`crates/intelligence/src/opportunity/commenter_hash.rs`，由 `opportunity.rs` 重导出）：
+  - `CommenterDigest::hash(Some(author_external_id))` 返回 `hmac_sha256_hex(secret, author_external_id)` 的小写十六进制（64 字符）；`digest_version()` 固定返回 `commenter-hmac-sha256-v1`。`author_external_id` 为 `None` 时返回 `None`，调用方据此写 `commenter_hash = NULL`、`excluded_reason = 'commenter_unknown'`。
+  - 密钥路径固定为 `<support_dir>/opportunity/commenter-digest.key`，要求 `<support_dir>` 与 `opportunity` 目录均为私有目录、密钥文件为私有文件；密钥少于 32 字节时拒绝。没有空密钥回退，也不生成密钥。
+- 密钥解析：
+  - 从 `crates/intelligence/src/model_secrets.rs` 提取 `pub fn support_dir()`，`model_secrets` 自身改用同一函数；优先级与默认值保持不变：非空 `LINGGAN_SUPPORT_DIR`，否则 `$HOME/Library/Application Support/Linggan Intelligence`，两者都为空时返回 `None` 并拒绝启动。未新增第二份路径解析。
+  - 失败原因区分 `SupportDirUnset`、`SupportDirUnavailable`、`KeyUnavailable`、`KeyTooShort`；错误文本包含解析后的路径与最小字节数，不含密钥内容。
+- 加密实现：
+  - 复用 `crates/evidence/src/collection_control.rs` 的 `hmac_sha256_hex`，仅将其与 `collection_control` 模块导出改为 `pub`，行为未变；`linggan-evidence` 的 RFC 4231 向量测试继续通过（1 passed）。未复制加密代码。
+- 测试（`cargo test -p linggan-intelligence --lib opportunity::commenter_hash --locked`）：
+  - 8 passed, 0 failed。
+  - 同一 ID 与同一密钥得到相同哈希；不同密钥得到不同哈希；`None` 仍为 `None`；31 字节密钥被拒绝且错误文本含最小 32 字节；缺失密钥报错含解析路径；私有目录中的密钥可加载并得到相同哈希。
+  - 原始 ID 不出现在哈希、`Display`、`Debug` 或版本字符串中；模块内没有任何 `println!` / `eprintln!` / `log::` / `tracing::` / `dbg!` 输出语句，该断言通过扫描模块源码在测试中执行。
+- 验证：
+  - `cargo test -p linggan-intelligence --lib --locked`：351 passed, 0 failed, 10 ignored。
+  - `bash scripts/ci-preflight.sh origin/main`：通过（51 项脚本测试全过）。
+- 遗留：独立审查与合并授权；机会卡写入与计算任务接入时必须调用 `CommenterDigest::load()` 并在失败时拒绝启动，不得自行读取密钥或退回空密钥。
+
+## 2026-11-12 T0.7 测试数据集与不变量检查
+
+- 状态：实现与隔离库验证完成；未合并，未在共享/生产库执行 migration，未写真实数据。
+- 数据集构建器（`crates/intelligence/tests/support/opportunity_dataset.rs`）：
+  - §8.2 的种子 SQL 从集成测试移入可复用模块，`DOMAIN`、`AS_OF`、`period_tz`、`period_basis` 与手册一致。
+  - 所有人工标识改为稳定摘要：包、任务、尝试、材料、详情、评论、领域用途的 UUID 由 `md5(<固定文本>)::uuid` 派生；固定时间的 `created_at` 显式写入。运行结果不再依赖 `gen_random_uuid()` 或当前时钟。
+  - 连续两次构建分别写入两个独立隔离 schema；对内容、详情、领域用途、评论、首入档、限制、任务、尝试、捕获包、处置记录与 `linggan_opportunity_comment_fact` 做逐行 `row_to_json` 排序后摘要，两次结果相同，且有效评论数与排除计数一致。
+- 不变量检查（`crates/intelligence/src/opportunity/invariants.rs`）：
+  - 按 §8.3 登记 I1–I10（含 I6b）。每条检查有稳定 id、名称、依赖表与只读计数 SQL；依赖表不存在时输出 `available = false`、`violations = 0` 与 `missingTables`，不伪装成通过。可用检查出现违规时报告 `failed`。
+  - 当前迁移集内只有 I8（谱系不成环）可执行；I1–I7、I6b、I9、I10 依赖的度量子表、判定表、提及表、创作者密度表、机会卡表与质量门尚未在 T0 建表，因此明确标为不可用。
+  - I8 使用递归 CTE，合并/改名边走满 100 层上限，成环返回违规行数而不是死循环。
+- 命令（`apps/worker/src/bin/opportunity.rs`，二进制 `linggan-opportunity`）：
+  - `linggan-opportunity check-invariants [--schema SCHEMA]` 读取 `LINGGAN_LOCAL_DATABASE_URL`；默认连接当前 schema，`--schema` 仅用于隔离证明库，schema 名经过仓库既有的安全校验。
+  - 输出 JSON：每条检查的 `id`、`name`、`available`、`violations`、`missingTables`，以及 `totalViolations`、`incomplete`。有违规时退出码失败；仅有不可用检查时退出成功，由 `incomplete` 明示。
+- 验证（`scripts/test-opportunity-postgres.sh`）：
+  - 7 passed, 0 failed；新增两条 T0.7 证明：两次构建摘要一致、不变量在 §8.2 数据集上全为 0。
+  - 人为写入两条互指的 `merge` 谱系后，I8 报告违规且 `failed = true`；删除谱系后恢复为 0。
+  - 脚本在测试后以 `check-invariants --schema opportunity_t07_invariants` 调用命令，JSON 中 11 条检查全部 `violations = 0`，退出成功。容器、卷与数据库在退出时删除并校验。
+  - `cargo test -p linggan-intelligence --lib --locked`：352 passed, 0 failed, 10 ignored。
+  - `bash scripts/ci-preflight.sh origin/main`：通过（51 项脚本测试全过）。
+- 遗留：独立审查与合并授权；后续阶段建表后，相应检查自动从 `available = false` 变为可执行，需在 CI 中重新确认全为 0；I10 的 `quality_gate` 表名按手册原文登记，实际建表时若命名不同需同步更新登记。
+
+## 2026-11-12 C3 平台时间投影与校验
+
+- 状态：投影、校验与只读报告实现完成；隔离库验证通过。未合并，未在共享/生产库执行 migration，未写真实数据。
+- 数据库（`database/migrations/0206_comment_platform_time.sql`，sha256 `031971ac…`）：
+  - 新建只追加表 `linggan_material_comment_platform_time(content_public_ref, comment_external_id, published_at, precision, source_package_ref, protocol_version, created_at)`，以评论身份为主键；`precision` 当前只允许 `millisecond`；更新与删除由既有 `linggan_plugin_runtime_forbid_mutation()` 拒绝。
+  - 表名按 D-028 原文固定，不使用 `linggan_opportunity_` 前缀；这是 D-005 对象命名规则的一处明确例外，已在迁移头注释中记录。未 `ALTER` 任何现有评论表。
+  - `linggan_opportunity_project_comment_platform_times()` 只扫描 `collectionProtocol.version = '1'` 且 `sortMode = 'platform_default'` 的评论包；按 `accepted_at, package_ref` 顺序调用逐包投影，因此同一身份以第一条有效值为准。`publishedAt` 必须是数字且落在 `[1000000000000, 253402300800000)` 的毫秒 epoch 区间（与 `0048` 的上界一致）；缺失、为 `null` 或超界时跳过，不写入 0、也不使用采集时间。返回 `(inserted, conflicts)`；`conflicts` 是同一身份在不同包中出现多个不同 `published_at` 的身份数。
+  - 包内记录与评论按 `record_ordinal = ordinality - 1` 对齐，跟随 C2 采集记录从 0 开始编号的既有约定。
+  - `linggan_opportunity_comment_eligibility()` 现已接受 `comment_published`：该口径的周期锚点取平台时间；无平台时间时写 `comment_time_unknown` 排除原因。排除顺序为 `not_in_domain_primary` → `work_author_unknown` → `comment_time_unknown` → `period_anchor_missing` → `observed_at_unparseable` → `restricted` → `creator_self`。未知口径仍明确报错，不会悄悄退回按作品发布周计算。
+  - `linggan_opportunity_platform_time_coverage(domain, as_of, tz, periods)` 按工作发布周口径统计每周有效评论数与其中有平台时间的数量，分母为 0 时 `ratio = NULL`。
+  - `linggan_opportunity_platform_time_display_comparison / agreement / mismatches` 只在核对时读取展示文本，比较本地月日与可选年份；展示文本不写入任何时间列。
+- 代码：
+  - `crates/intelligence/src/opportunity/platform_time.rs`：包装投影、覆盖率、展示文本一致率与不一致明细，以及 `timing_violations`（`published_at > first_observed_at` 的行数）；`current_as_of()` 从数据库时钟生成 UTC 文本。日期与时间仍以文本返回，不新增日期库依赖。
+  - `crates/intelligence/src/opportunity/invariants.rs`：新增 I11 `platform_time_not_after_first_observation`，把 C3 第一条验收固定为每次不变量检查都会执行的项目。I11 不在手册 §8.3 的 I1–I10 列表中，属于 C3 验收的补充检查；I1–I10 的 id、名称与 SQL 未改。
+- 命令（`linggan-opportunity`）：
+  - `project-platform-times [--schema SCHEMA]`：执行全量投影，输出 `inserted` 与 `conflicts`。
+  - `platform-time-report --domain UUID [--as-of RFC3339] [--tz TZ] [--periods N] [--schema SCHEMA]`：输出最近 N 周（默认 12）的每周覆盖率、展示文本一致率/不一致明细与时间违例数。`--tz` 未给时从当前 `metric_definition.params.period_tz` 读取，不在代码内写死；`--as-of` 未给时取数据库当前时间。存在时间违例时退出码失败。
+  - `check-invariants` 行为不变，现在会额外输出可用的 I11。
+- 验证（`scripts/test-opportunity-postgres.sh`，隔离 PostgreSQL 容器）：
+  - 11 passed, 0 failed。新增 C3 覆盖：口径不回退、投影幂等与冲突计数、第一条值优先、毫秒区间越界跳过、每周覆盖率、展示文本同日一致与逐条不一致、I11 检测。
+  - 口径不回退：投影前 `comment_published` 有效评论为 0，5807 条候选因 `comment_time_unknown` 排除；投影后有效 5803 条，仅 1 条缺时间被排除。工作发布周口径始终为 5800，未受新表影响。
+  - 幂等与冲突：首次投影 `conflicts = 0`，第二次 `inserted = 0`；追加一个给出不同时间的后到包后 `inserted = 0`、`conflicts = 1`，表中仍保留第一条时间 `2026-10-27T00:01:00Z`。
+  - 毫秒区间：把 `c-work-2-1` 的 `publishedAt` 改成上界 `253402300800000` 后，投影不报错且跳过该条；同一包内 `c-work-2-2` 正常写入。
+  - 覆盖率：12 周中 5 周有数据；有效评论合计 5800，有平台时间 5799；唯一不足周为 `2026-10-26`（1200 条中 1199 条）。
+  - 展示文本：5799 条参与核对，5798 条同日一致（99.9828%），不一致仅 `c-work-1-17`（展示文本 `01-01`，实际 10-27），逐条列出。
+  - I11：正常数据 0 违例；人为写入晚于 `first_observed_at` 的时间后 I11 = 1、报告 `failed = true`，命令报告 `timingViolations = 1`。
+  - 测试数据集新增 C3 覆盖层（`build_platform_times`），只为评论包补协议标记与毫秒记录，不改变 T0.7 的 `build()` 结果与指纹。
+  - 脚本在测试后以 `platform-time-report` 调用 `opportunity_c3_basis` schema，实际输出 12 周覆盖率、99.9828% 一致率与 0 时间违例。
+  - `cargo test -p linggan-intelligence --lib --locked`：352 passed, 0 failed, 10 ignored；`cargo test -p linggan-contracts --lib --locked`：25 passed, 0 failed。
+  - `bash scripts/ci-preflight.sh origin/main`：通过（51 项脚本测试全过）。
+- 独立审查（2026-11-12）：未发现阻断或重大问题；两条 minor 已修复。
+  - `publishedAt` 此前只有下界。包合同与 `0206` 投影 SQL 均已补上 `< 253402300800000` 上界（与 `0048` 一致），并新增越界跳过证明；越界值不再可能让整次投影因 `to_timestamp` 溢出而回滚。
+  - `DECISIONS.md`、`QUESTIONS.md` 与 `docs/README.md` 的索引范围从 D-032/Q-13 更新为 D-033/Q-14。
+- 未完成项：
+  - C3 目标中的“影子模式下同步计算并保存这一口径的指标”尚未实现。当前迁移集没有 `linggan_opportunity_problem_metric_period`（T0.7 不变量输出已确认 I1–I3 不可用），该表由 T1.2 创建；在表存在前无法保存影子指标，不能只在内存计算后声称完成。待 T1.2 建表后接入 `comment_published` 的影子计算与保存。
+- 遗留：独立审查与合并授权；影子指标依赖 T1.2；采集恢复后按 C4 补齐历史，并每周报告各领域覆盖率；切换口径需负责人批准并新增版本，不得直接改当前指针。

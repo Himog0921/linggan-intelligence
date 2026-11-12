@@ -1611,7 +1611,7 @@ export function parseCommentNode(el) {
     avatarUrl,
     authorId,
     time: timeText,
-    publishedAt: 0,
+    publishedAt: null,
     publishedAtText: timeText,
     likes,
     likeText: likesText,

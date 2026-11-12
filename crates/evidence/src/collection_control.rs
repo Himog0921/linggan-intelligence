@@ -1429,7 +1429,7 @@ fn sha256_hex(value: &[u8]) -> String {
     hex_bytes(&digest)
 }
 
-fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
+pub fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String {
     const BLOCK: usize = 64;
     let mut normalized = [0_u8; BLOCK];
     if key.len() > BLOCK {

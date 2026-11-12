@@ -68,8 +68,9 @@ function toAvatarUrl(user = {}) {
 }
 
 function parsePublishedAt(raw) {
-  const value = Number(raw || 0);
-  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (raw == null || raw === '') return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return null;
   return value < 1000000000000 ? value * 1000 : value;
 }
 

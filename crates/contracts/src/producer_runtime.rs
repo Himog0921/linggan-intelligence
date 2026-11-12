@@ -13,6 +13,11 @@ pub const PRODUCER_TASK_SPEC_VERSION: &str = "linggan.producer.task-spec.v2";
 pub const PRODUCER_ATTEMPT_VERSION: &str = "linggan.producer.attempt.v1";
 pub const CAPTURE_PACKAGE_VERSION: &str = "linggan.producer.capture-package.v1";
 
+const COMMENT_COLLECTION_PROTOCOL_VERSION: u64 = 1;
+const COMMENT_TRIGGER_SOURCES: &[&str] = &["manual", "scheduled", "incremental", "unknown"];
+const COMMENT_PUBLISHED_AT_MIN_MS: u64 = 1_000_000_000_000;
+const COMMENT_PUBLISHED_AT_MAX_MS: u64 = 253_402_300_800_000;
+
 const PLATFORM_VALUES: &[&str] = &["xhs", "douyin"];
 const SOURCE_VALUES: &[&str] = &["manual", "scheduled"];
 const PACKAGE_KINDS: &[&str] = &[
@@ -182,6 +187,18 @@ struct CapturePackageWire {
     coverage: CoverageWire,
     records: Vec<Value>,
     checkpoint: Option<Value>,
+    collection_protocol: Option<CollectionProtocolWire>,
+}
+
+/// Comment collection protocol.  Its presence (and version) is the marker that a package uses
+/// the C2 comment-record time contract; packages without it keep the pre-C2 interpretation.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CollectionProtocolWire {
+    version: u64,
+    sort_mode: String,
+    single_run_limit: Value,
+    trigger_source: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -449,6 +466,11 @@ fn parse_producer_capture_value(
         return Err(ProducerRuntimeContractError::UnsupportedValue);
     }
     validate_coverage(&wire.coverage, &wire.package_kind)?;
+    validate_collection_protocol(
+        wire.collection_protocol.as_ref(),
+        &wire.package_kind,
+        &wire.records,
+    )?;
     Ok(ProducerCapturePackage {
         package_ref: parse_uuid(&wire.package_ref)?,
         package_kind: wire.package_kind,
@@ -564,6 +586,47 @@ fn validate_comment_collection_receipt(
         || !complete_has_nonterminal_stop
     {
         return Err(ProducerRuntimeContractError::InvalidCoverage);
+    }
+    Ok(())
+}
+
+fn validate_collection_protocol(
+    protocol: Option<&CollectionProtocolWire>,
+    package_kind: &str,
+    records: &[Value],
+) -> Result<(), ProducerRuntimeContractError> {
+    let Some(protocol) = protocol else {
+        // Pre-C2 packages did not carry a protocol.  They stay acceptable so a server upgrade
+        // never invalidates frozen outbox entries produced by an older plugin.
+        return Ok(());
+    };
+    if !matches!(package_kind, "comments" | "replies")
+        || protocol.version != COMMENT_COLLECTION_PROTOCOL_VERSION
+        || protocol.sort_mode != "platform_default"
+        || !(protocol.single_run_limit.is_null()
+            || protocol
+                .single_run_limit
+                .as_u64()
+                .is_some_and(|limit| (1..=2048).contains(&limit)))
+        || !COMMENT_TRIGGER_SOURCES.contains(&protocol.trigger_source.as_str())
+    {
+        return Err(ProducerRuntimeContractError::InvalidCoverage);
+    }
+    for record in records {
+        let Some(published_at) = record
+            .get("payload")
+            .and_then(Value::as_object)
+            .and_then(|payload| payload.get("publishedAt"))
+        else {
+            continue;
+        };
+        let valid = published_at.is_null()
+            || published_at.as_u64().is_some_and(|value| {
+                (COMMENT_PUBLISHED_AT_MIN_MS..COMMENT_PUBLISHED_AT_MAX_MS).contains(&value)
+            });
+        if !valid {
+            return Err(ProducerRuntimeContractError::UnsupportedValue);
+        }
     }
     Ok(())
 }
@@ -995,6 +1058,117 @@ mod tests {
             .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":20");
         assert!(matches!(
             parse_producer_capture_package(&unknown_short_window),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+    }
+
+    fn c2_comment_package() -> Value {
+        serde_json::json!({
+            "contractVersion": CAPTURE_PACKAGE_VERSION,
+            "packageRef": "11111111-1111-4111-8111-111111111111",
+            "packageKind": "comments",
+            "platform": "xhs",
+            "observedAt": "2026-08-25T00:00:00Z",
+            "capturedAt": "2026-08-25T00:00:01Z",
+            "coverage": {
+                "target": {
+                    "basis": "known_set",
+                    "contentExternalId": "n",
+                    "commentCollection": {
+                        "version": 1,
+                        "noteId": "n",
+                        "scope": "detail_window",
+                        "requestedLimit": 30,
+                        "pageCommentCount": 80,
+                        "expectedCount": 30,
+                        "uniqueCollectedCount": 2,
+                        "state": "partial",
+                        "analysisUsability": "usable",
+                        "targetIdentity": "matched",
+                        "stopReason": "comment_area_end"
+                    }
+                },
+                "layers": [{
+                    "capability": "comments",
+                    "observed": 2,
+                    "attempted": 2,
+                    "acquired": 2,
+                    "verified": 0,
+                    "failed": 0,
+                    "notAttempted": 0,
+                    "unknown": 0,
+                    "stoppedReason": "comment_area_end"
+                }]
+            },
+            "records": [
+                {"kind": "comment", "sourceObject": {"platform": "xhs"}, "payload": {"commentId": "c1", "publishedAt": 1710000000000_u64}},
+                {"kind": "comment", "sourceObject": {"platform": "xhs"}, "payload": {"commentId": "c2", "publishedAt": null}}
+            ],
+            "collectionProtocol": {
+                "version": 1,
+                "sortMode": "platform_default",
+                "singleRunLimit": 30,
+                "triggerSource": "scheduled"
+            }
+        })
+    }
+
+    #[test]
+    fn collection_protocol_marks_c2_packages_while_pre_c2_packages_stay_acceptable() {
+        let mut pre_c2 = c2_comment_package();
+        pre_c2.as_object_mut().unwrap().remove("collectionProtocol");
+        pre_c2["records"][0]["payload"]["publishedAt"] = serde_json::json!(0);
+        assert!(parse_producer_capture_package(&pre_c2.to_string()).is_ok());
+
+        assert!(parse_producer_capture_package(&c2_comment_package().to_string()).is_ok());
+
+        let mut seconds = c2_comment_package();
+        seconds["records"][0]["payload"]["publishedAt"] = serde_json::json!(1710000000);
+        assert!(matches!(
+            parse_producer_capture_package(&seconds.to_string()),
+            Err(ProducerRuntimeContractError::UnsupportedValue)
+        ));
+
+        let mut far_future = c2_comment_package();
+        far_future["records"][0]["payload"]["publishedAt"] = serde_json::json!(253402300800000_u64);
+        assert!(matches!(
+            parse_producer_capture_package(&far_future.to_string()),
+            Err(ProducerRuntimeContractError::UnsupportedValue)
+        ));
+
+        let mut zero = c2_comment_package();
+        zero["records"][0]["payload"]["publishedAt"] = serde_json::json!(0);
+        assert!(matches!(
+            parse_producer_capture_package(&zero.to_string()),
+            Err(ProducerRuntimeContractError::UnsupportedValue)
+        ));
+
+        let mut text = c2_comment_package();
+        text["records"][0]["payload"]["publishedAt"] = serde_json::json!("2024-03-09");
+        assert!(matches!(
+            parse_producer_capture_package(&text.to_string()),
+            Err(ProducerRuntimeContractError::UnsupportedValue)
+        ));
+
+        let mut missing_limit = c2_comment_package();
+        missing_limit["collectionProtocol"]
+            .as_object_mut()
+            .unwrap()
+            .remove("singleRunLimit");
+        assert!(parse_producer_capture_package(&missing_limit.to_string()).is_err());
+
+        let mut unknown_sort = c2_comment_package();
+        unknown_sort["collectionProtocol"]["sortMode"] = serde_json::json!("time_descending");
+        assert!(matches!(
+            parse_producer_capture_package(&unknown_sort.to_string()),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+
+        let mut wrong_capability = c2_comment_package();
+        wrong_capability["packageKind"] = serde_json::json!("media_slots");
+        wrong_capability["coverage"]["layers"][0]["capability"] = serde_json::json!("media_slots");
+        assert!(matches!(
+            parse_producer_capture_package(&wrong_capability.to_string()),
             Err(ProducerRuntimeContractError::InvalidCoverage)
         ));
     }
