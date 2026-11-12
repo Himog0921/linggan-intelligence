@@ -6,7 +6,7 @@
 
 > 状态: 一次性报告
 > 最后核对: 2026-11-12
-> 适用范围: 机会卡 T0.1 与 T0.1b 的代码库勘察结论。
+> 适用范围: 机会卡 T0.1、T0.1b 与 C1 采集侧勘察的代码库结论。
 > 事实来源: 指定基线上的实际文件读取、`rg` 搜索与只读聚合查询。
 > 冲突时以谁为准: 当前代码、迁移、合同与实际命令输出。
 
@@ -512,3 +512,65 @@ multi_identities|28423  admitted_after_work_first_package|11643
 
 - `QUESTIONS.md` Q-11：评论平台时间精确覆盖率仅 0.14%，达不到 D-008 v2 的 90% 门槛。已由 D-021 答复（v1 保持 `work_published_cohort`，不解析展示文本，采集侧修复移交），并受 D-028 修订（`comment_published` 成为阶段 C 的目标口径）。
 - `QUESTIONS.md` Q-12：D-013 写的 `LINGGAN_SUPPORT_DIR` 缺省路径与代码实际缺省不一致。已由 D-022 答复（以代码实际缺省为准，提取共享 `pub` 解析函数）。
+
+## 8. 采集侧补充勘察（C1，2026-11-12）
+
+范围：只读代码与文档，未访问平台、未修改代码、未写数据库。目标是确认评论时间与采集协议的现状，为 C2–C4 提供事实。需要负责人裁定的排序协议见 `QUESTIONS.md` Q-13。
+
+### 8.1 评论请求的排序方式
+
+- **当前请求没有排序参数**。小红书顶层评论请求由 `buildXhsCommentPageRequestUrls` 构造，查询参数只有 `note_id`、`cursor`、`top_comment_id`、`image_formats` 和可选的 `xsec_token`（`plugins/linggan-intelligence-browser/src/platforms/xhs/commentApi.js:356-370`）。子评论请求同理，另有固定 `num: 10`（`:372-390`，`:376`）。
+- **代码把排序标成未知**：小红书评论记录的 `sortMode` 固定写 `'unknown'`（`plugins/linggan-intelligence-browser/src/platforms/xhs/commentCollector.js:708`、`:1014`、`:1055`；默认参数见 `commentApi.js:450`、`:519`）。对比抖音有 `hot`/`latest` 两档并写入请求（`plugins/linggan-intelligence-browser/src/platforms/douyin/commentApi.js:222-223`），小红书没有对应逻辑。
+- **能力登记只证明“默认顺序”**：`docs/platforms/xiaohongshu/capture-capability-registry.md:69` 记录当前默认顺序已 `VERIFIED`；同一文件 `:116` 明确列出“默认排序”尚未验证。仓库中没有平台支持按时间排序的证据。
+- **结论**：现状是平台默认顺序，不是显式的时间排序。平台是否支持 `latest`/时间排序：**未验证**，不得推断。机会卡统计应采用哪种排序协议见 `QUESTIONS.md` Q-13。
+
+### 8.2 单次评论条数上限 30 的来源
+
+- 标准详情窗口的硬上限是 `MAX_ATTACHED_COMMENTS = 30`（`plugins/linggan-intelligence-browser/src/linggan/localExecutionSupport.js:23`），实际取值是 `min(页面公开数, 请求值, 30)`（`:177-181`）。
+- 详情页会话计划也拒绝大于 30 的 `commentLimit`（`plugins/linggan-intelligence-browser/src/linggan/detailPageSessionStore.js:105-109`）。
+- 批量控制器默认 `settings.commentLimit ?? 30`（`plugins/linggan-intelligence-browser/src/platforms/xhs/batchController.js:427`），该值可配置；深采 `all_public` 是独立的采集范围，不受标准 30 条窗口限制（`docs/platforms/xiaohongshu/capture-capability-registry.md:68`、`:96`、`:122`、`:130`）。
+- 分页层面，主评论最多补 6 页、每个根评论最多补 6 页（`commentApi.js:605-606`），子评论每页固定 10 条（`:376`）；这是浏览器内补页上限，不是服务端配额。
+- **结论**：30 是标准详情窗口的固定上限，批量/深采可通过 `commentLimit` 配置；机会卡若依赖“最新 30 条”，协议必须写明取的是默认顺序下的 30 条。
+
+### 8.3 包与记录上的版本字段
+
+- 采集包 `contractVersion` 固定为 `linggan.producer.capture-package.v1`（`plugins/linggan-intelligence-browser/src/linggan/producerRuntime.js:22`、`:81`；Rust 侧常量 `crates/contracts/src/producer_runtime.rs:14`）。包内的 `records` 是不透明 JSON 数组（`producer_runtime.rs:183`、`:208-210`）。
+- 任务/尝试/提交的信封版本分别是 `linggan.producer.task-spec.v2`、`linggan.producer.attempt.v1`、`linggan.producer.capture-package.v1`（`plugins/linggan-intelligence-browser/src/linggan/adapter.js:2-4`；Rust 常量 `producer_runtime.rs:12-14`）。
+- 评论采集回执有一个独立的协议字段 `commentCollection.version`，当前固定为 `1`（`plugins/linggan-intelligence-browser/src/platforms/xhs/captureReceipt.js:113`；`producerRuntime.js:250`）；Rust 校验要求它**恰好等于 1**（`crates/contracts/src/producer_runtime.rs:539`）。
+- 插件版本来自 manifest（`plugins/linggan-intelligence-browser/manifest.json:4`、`package.json:3`，当前 `0.8.66`），只在工位报到时发送（`plugins/linggan-intelligence-browser/src/linggan/background.js:358`、`adapter.js:104-137`），**不写入采集包或记录**。
+- **能否区分改造前后的包**：现有 `contractVersion` 与 `commentCollection.version` 都能作为分界，但两者都是当前固定值，直接升级会同时影响所有评论包。更细的“采集协议版本”（排序方式、单次上限、触发来源）目前不存在；C2 需要新增字段或升 `commentCollection.version`，并由 Rust 校验与 fixture 同步。
+
+### 8.4 评论记录 `publishedAt` 的类型与校验
+
+- **包合同不校验单条评论字段**：`CapturePackageWire.records` 是 `Vec<Value>`，Rust 只校验包级字段、`coverage` 和 JSON 可存储性（`crates/contracts/src/producer_runtime.rs:183`、`:409-427`、`:443-452`）；注释明确 `records` 保持不透明（`:208-210`）。因此 `publishedAt` 是否允许 `null` **不是合同层限制**。
+- 插件规范化当前把缺失时间写成 `0`：`record.publishedAt || record.createdAt` 后 `normalizeNumber(..., 0)`（`plugins/linggan-intelligence-browser/src/db/recordNormalization.js:162`、`:184`）；解析函数对缺失/非法值也返回 `0`（`plugins/linggan-intelligence-browser/src/platforms/xhs/commentApi.js:93-102`）。
+- 现有 comments fixture 的 `records` 都是空数组（`crates/contracts/src/producer_runtime.rs:912`、`:965`；`crates/contracts/tests/producer_execution_validation.rs:69-73`），没有评论时间样本。
+- **改为允许 `null` 要改哪里**：
+  1. 插件规范化：`recordNormalization.js:162` 不再回退 `createdAt`，缺失时保留 `null`；同步评论相关测试。
+  2. 合同与 fixture：合同层无需改类型，但应新增一条带 `"publishedAt": null` 与非空毫秒 epoch 的 comments fixture，锁定两种取值（现有 fixture 为空，新增不会破坏旧断言）。
+  3. 下游读取：`0048` 的提取逻辑本身对 `null`/`0` 都返回 `NULL`（见 8.5），但任何把 `publishedAt` 当数字直接相加/排序的代码都要检查；本仓库现有读取点主要是 `0048` 与评论研究 API（后者恒写 `NULL`，`crates/intelligence/src/comment_study_catalog/comments.sql:183`）。
+
+### 8.5 `0048` 的时间提取能否复用
+
+- `linggan_ci_source` 的提取条件是：`payload.data->>'publishedAt'` 匹配 `^[0-9]{12,15}$` 且数值小于 `253402300800000`，才 `to_timestamp(ms/1000)`，否则 `NULL`（`database/migrations/0048_comment_intelligence.sql:40-41`）。`publishedAtText` 截断到 100 字符另存（`:42`）。
+- 该表达式可直接复用为 C3 投影器的提取语义：`null`、`0`、非数字、超范围值都落 `NULL`；接受 12–15 位毫秒 epoch。
+- 限制：它目前写在视图里，依赖 `linggan_comment_research_current`、`linggan_runtime_capture_package` 和 `linggan_ci_comment_identity` 的连接及限制过滤（`0048:46-52`），**不是独立函数**。C3 若要按稳定身份全量投影，需把这段判定提取为共享 SQL 函数或复用同一表达式；不要另写第二份不同的判定。
+
+### 8.6 重新采集的现有入口与控制
+
+- **入口一（按作品补评论）**：主题页 `deepen_comments`（`apps/web/src/pages/topics/engine.tsx:1644`）→ `POST /api/local/topic-map/collection/commands`（`apps/api/src/local_web/topic_map.rs:96`）→ `CollectionCommand::DeepenComments`（`crates/intelligence/src/topic_map_research_collection.rs:35-45`；合同说明见 `docs/data-contracts/topic-map-http.md:96`）。
+  - 每次只允许 1 个作品（`:151-166`），领域采集策略必须已启用（`:168-181`）。
+  - 同一 `scope_hash` 已有活动轮次，或未传 `newRound` 时复用轮次（`:185-190`）。
+  - 本轮冻结 `comment_limit = 30`、`reply_expand_limit = 2`，不取媒体、不做 OCR/ASR（`:197-201`）。
+  - 评论预算：`knownCommentIds` 快照最多 5000 条（`:229-232`），`new_unique_limit = 30`、`max_scroll_rounds = 20`、`max_duration_seconds = 180`（`:233`）。
+- **入口二（通用材料深采）**：`POST /api/local/collection/material-deepening`（`apps/api/src/local_web.rs:325`，处理函数 `:1185`），接受明确的公开材料身份集合；只排队，不分配工位或 Lease（`:1179-1184`）。
+- **授权与频率控制**（两条入口共用）：
+  - 采集授权表 `collection_acquisition_authorization`（`database/migrations/0006_collection_acquisition_chain.sql:16`）；准入时 `granted_by = 'person'`（`topic_map_research_collection.rs:203-212`）。
+  - 授权失败码包括 `authorization_missing`、`authorization_scope_mismatch`、`authorization_purpose_mismatch`、`authorization_target_limit_reached`、`authorization_work_unit_limit_reached`、`authorization_expired_or_revoked`（`crates/evidence/src/collection_control.rs:2346-2353`）。
+  - 风险暂停与插件冷却：`collection_risk_pause`、`collection_installation_risk_cooldown`（`collection_control.rs:1069-1091`）；账号冷却 `account_cooling`（`:1348`）；另有平台并发上限与 Lease 抢占。
+- **重新采集一篇作品的评论需要走**：启用该领域的采集策略 → 确认目标/授权覆盖 `material_deepening` → 提交 `deepen_comments`（或材料深采接口）→ 服务端冻结轮次与评论预算并创建 Work Order → 插件以现有工位/账号/Lease 领取执行 → 实际取得结果按稳定评论 ID 接纳；重复 ID 不占新额度，超过 30 条新评论需要下一轮。
+- **对 C3/C4 的直接含义**：现有入口一次最多新增 30 条，历史回填需要按周/按轮多次执行并保留协议版本；风险暂停、冷却、授权过期都会中断回填，必须记录停止原因，不能把“未采到”当成“没有评论”。
+
+### 8.7 需要负责人裁定
+
+- `QUESTIONS.md` Q-13：机会卡统计使用哪种评论排序协议（平台默认顺序 / 时间倒序 / 两者都支持并按协议版本分组），以及 C2 是否必须实现显式时间排序。C1 只能确认现状是平台默认顺序；平台是否支持时间排序**未验证**。

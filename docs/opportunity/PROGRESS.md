@@ -39,3 +39,16 @@
 - 影响：新增阶段 C（C1–C4）采集侧任务、`period_basis = comment_published` 目标口径、`linggan_material_comment_platform_time` 只追加表、生产参数恢复为测试参数值、`collection_below_target`/`collection_protocol_changed` 等 flags。
 - 未开始：C1 及之后、T0.2 与其他实现任务；等待负责人明确授权。
 - 已确认（四参数签名）：资格函数与排除函数统一为 `(domain_ref, as_of, tz, period_basis)`，返回字段 `work_published_at` 改为 `period_anchor_at`；§6.2.1 为唯一签名，§6.2.3 示例、T0.2 任务卡与 D-012 已同步。另约定 `tz`/`period_basis` 只从 `metric_definition.params` 读取，C3 之前传 `comment_published` 必须报 `comment_published_basis_not_ready`，不得回退，需测试覆盖。
+
+## 2026-11-12 C1 采集侧勘察
+
+- 状态：done（只读勘察；未修改代码、未访问平台、未写数据库）
+- 结果：`docs/opportunity/RECON.md` 新增 §8“采集侧补充勘察”，覆盖 C1 的六项：排序方式、30 条上限、版本字段、`publishedAt` 类型与校验、`0048` 时间提取复用、重新采集入口与控制。
+- 关键事实：
+  - 小红书评论请求不带排序参数，`sortMode` 固定 `unknown`；能力登记只证明默认顺序，平台是否支持时间排序未验证。
+  - 30 是标准详情窗口硬上限（`localExecutionSupport.js:23`、`:177-181`），批量/深采可通过 `commentLimit` 配置。
+  - 包 `contractVersion` 固定 `linggan.producer.capture-package.v1`；`commentCollection.version` 固定为 1 且 Rust 校验恰好等于 1；插件版本不写入包。
+  - 包合同不校验单条评论 `publishedAt`；插件缺失时写 `0`，改为 `null` 只影响插件规范化与新增 fixture。
+  - `0048` 的毫秒 epoch 判定可复用为 C3 投影语义，但当前写在视图里，不是独立函数。
+  - 按作品补评论走 `deepen_comments`，一次最多新增 30 条；授权、风险暂停、安装冷却与并发控制共用现有采集链。
+- 遗留：`QUESTIONS.md` Q-13（评论排序协议）待负责人裁定；C2 在 Q-13 裁定前不开始。

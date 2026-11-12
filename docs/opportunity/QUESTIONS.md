@@ -2,11 +2,11 @@
 
 > 状态: 草案
 > 最后核对: 2026-11-12
-> 适用范围: 机会卡实施中的阻塞问题记录；Q-01 至 Q-12 均已答复，保留事实与裁定链。
-> 事实来源: T0.1/T0.1b 勘察与负责人答复记录。
+> 适用范围: 机会卡实施中的阻塞问题记录；Q-01 至 Q-12 已答复，Q-13 由 C1 新提出、待裁定。
+> 事实来源: T0.1/T0.1b/C1 勘察与负责人答复记录。
 > 冲突时以谁为准: DECISIONS.md 的已裁定内容；未裁定问题不按假设实现。
 
-当前裁定状态：Q-01 至 Q-12 已全部答复（2026-11-12），裁定内容以 `DECISIONS.md` 为准。Q-11 由 D-021 答复并受 D-028 修订，Q-12 由 D-022 答复；本文件不再有等待裁定的阻塞。
+当前裁定状态：Q-01 至 Q-12 已答复（2026-11-12），裁定内容以 `DECISIONS.md` 为准；Q-13（评论排序协议）由 C1 提出，待负责人裁定。Q-13 未裁定前不开始 C2。
 
 记录规则：每项先写事实与证据，再写为什么阻塞、可选方案和需要负责人裁定的事项。未裁定前不按假设继续实现。
 
@@ -151,3 +151,17 @@
   - C. 要求机会卡显式设置 `LINGGAN_SUPPORT_DIR`，不提供缺省；最安全但增加启动配置负担。
 - **需要裁定**：选 A/B/C；确认密钥文件的最终路径，以及是否允许把 `hmac_sha256_hex` 改为 `pub`（D-013 已允许，但需在 PR 单独说明）。
 - **答复（负责人，2026-11-12）**：选 A，并收敛为一处解析：把 `model_secrets.rs:39-43` 的 support 目录解析与私有文件权限校验提取为 `pub` 函数，由 `model_secrets` 与机会卡共同调用；不得再写第二份缺省值。见 D-022。
+
+## Q-13 机会卡统计使用哪种评论排序协议
+
+- **事实**：
+  - 小红书顶层/子评论请求都没有排序参数（`plugins/linggan-intelligence-browser/src/platforms/xhs/commentApi.js:356-390`）；记录里的 `sortMode` 固定写 `'unknown'`（`plugins/linggan-intelligence-browser/src/platforms/xhs/commentCollector.js:708`、`:1014`、`:1055`）。
+  - 能力登记只证明“当前默认顺序”可见（`docs/platforms/xiaohongshu/capture-capability-registry.md:69`），并明确“默认排序”尚未验证（`:116`）；仓库内没有平台支持时间排序的证据。
+  - 标准详情窗口固定最多 30 条（`plugins/linggan-intelligence-browser/src/linggan/localExecutionSupport.js:23`、`:177-181`），因此默认顺序下的 30 条不保证是“最新 30 条”；重复采集一次最多新增 30 条（`crates/intelligence/src/topic_map_research_collection.rs:226-231`）。
+  - D-030 要求采集协议版本化，并建议按时间排序，但是否可行要等 C1 结论；C1 无法验证平台是否支持。
+- **为什么阻塞**：不先确定协议，C2 无法决定请求是否要带排序参数、`collection_protocol` 记录哪些字段，也无法判断重复采集能否稳定补到新评论；D-030 的“按协议版本分组指标”同样缺少取值。
+- **可选方案**：
+  - A. 固定使用平台默认顺序；`collection_protocol` 记录 `sort_mode = "platform_default"`，并以多次采集补新评论。推荐：不需要平台未验证的能力。
+  - B. 改用时间倒序（若平台支持）；需要在 C2 前先做一次只读/人工验证，确认请求参数与页面行为。
+  - C. 两种都支持，按 `collection_protocol.sort_mode` 分组指标；实现与验证成本最高。
+- **需要裁定**：选 A/B/C；若选 B 或 C，确认是否允许为验证排序协议访问平台（C1 本身禁止访问平台）。
