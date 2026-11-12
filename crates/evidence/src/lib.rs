@@ -5,6 +5,7 @@ mod acquisition_chain;
 mod archive_completeness;
 mod archive_ledger;
 mod collection_control;
+pub use collection_control::hmac_sha256_hex;
 pub mod collection_run;
 mod collection_run_dispatch;
 pub use collection_run_dispatch::probe as probe_collection_run_control;

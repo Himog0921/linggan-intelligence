@@ -110,8 +110,8 @@ export function createLingganContentRuntime({ platform } = {}) {
       if (settings.taskSpec) {
         const capability = settings.taskSpec.capabilitiesRequested?.[0];
         const packageValue = capability === 'replies'
-          ? packageReplies({ platform, result, noteId })
-          : packageComments({ platform, result, noteId });
+          ? packageReplies({ platform, result, noteId, taskSpec: settings.taskSpec })
+          : packageComments({ platform, result, noteId, taskSpec: settings.taskSpec });
         return submit(
           taskFor(platform, capability, instruction.target, {
             ...instruction,
@@ -120,12 +120,12 @@ export function createLingganContentRuntime({ platform } = {}) {
           packageValue,
         );
       }
-      const packageValue = packageComments({ platform, result, noteId });
+      const packageValue = packageComments({ platform, result, noteId, triggerSource: 'manual' });
       const comments = await submit(
         taskFor(platform, 'comments', instruction.target, instruction),
         packageValue,
       );
-      const repliesPackage = packageReplies({ platform, result, noteId });
+      const repliesPackage = packageReplies({ platform, result, noteId, triggerSource: 'manual' });
       if (repliesPackage.records.length === 0) {
         return { ...comments, replies: { delivery: 'not_applicable' } };
       }

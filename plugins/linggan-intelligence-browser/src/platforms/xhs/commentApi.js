@@ -90,21 +90,19 @@ function readHasMore(source = {}) {
   return false;
 }
 
+// Only a numeric platform field is a comment time source. Display text such as "3 天前" or
+// "11-02" must stay text: its precision and reference moment are not enough to derive an epoch.
 function parsePublishedAt(raw) {
-  if (raw == null || raw === '') return 0;
-  if (typeof raw === 'string' && /\D/.test(raw) && !/^\d+$/.test(raw)) {
-    const parsed = Date.parse(raw);
-    return Number.isFinite(parsed) ? parsed : 0;
-  }
+  if (raw == null || raw === '') return null;
   const value = Number(raw);
-  if (!Number.isFinite(value) || value <= 0) return 0;
+  if (!Number.isFinite(value) || value <= 0) return null;
   return value < 1000000000000 ? value * 1000 : value;
 }
 
 function formatPublishedAtText(raw, publishedAt) {
   const explicit = normalizeText(raw);
   if (explicit && /\D/.test(explicit) && !/^\d+$/.test(explicit)) return explicit;
-  if (publishedAt <= 0) return explicit;
+  if (!(publishedAt > 0)) return explicit;
   try {
     return new Date(publishedAt).toISOString();
   } catch {
