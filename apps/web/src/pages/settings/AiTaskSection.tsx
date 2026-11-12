@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { command } from './aiSettingsApi';
-import { budgetText, controlReason, controlStatus, count, TASK_STATE, THINKING, type AiSettings, type Control, type ModelLimits, type Task } from './aiSettingsModel';
+import { isHistoricalTopicTask, budgetText, controlReason, controlStatus, count, TASK_STATE, THINKING, type AiSettings, type Control, type ModelLimits, type Task } from './aiSettingsModel';
 import { Field, Impact, Reference, SaveBar } from './AiSettingsFields';
 import type { AiAction } from './useAiAction';
 import styles from './AiSettings.module.css';
@@ -99,7 +99,7 @@ export function AiTaskSection({ data, action, linkBase = '?section=automation&ta
   const task = data.tasks.find(t => t.taskKey === query.get('task')) ?? data.tasks[0];
   return <section className={styles.section} aria-labelledby="tasks-title"><h2 id="tasks-title">自动化与额度</h2><p>全局、执行器、工作三层开关分别记录。所有开关开启后，仍需通过当前配置、材料许可和额度检查。</p>
     <div className={styles.grid}>{data.controls.filter(c => c.taskKey === null).map(control => <ControlAction key={`${control.scope}:${control.revision}`} control={control} action={action} label={control.scope === 'global' ? '全局 AI' : '执行器'} />)}</div>
-    <nav className={styles.selector} aria-label="工作清单">{data.tasks.map(t => <Link key={t.taskKey} to={linkBase + encodeURIComponent(t.taskKey)} aria-current={task?.taskKey === t.taskKey ? 'page' : undefined}><span>{t.label}</span><small>{TASK_STATE[t.lifecycle] ?? '状态未知'}</small></Link>)}</nav>
+    <nav className={styles.selector} aria-label="工作清单">{[...data.tasks].sort((a, b) => Number(isHistoricalTopicTask(a.taskKey)) - Number(isHistoricalTopicTask(b.taskKey))).map(t => <Link key={t.taskKey} to={linkBase + encodeURIComponent(t.taskKey)} aria-current={task?.taskKey === t.taskKey ? 'page' : undefined}><span>{t.label}</span><small>{isHistoricalTopicTask(t.taskKey) ? '历史主题研究' : TASK_STATE[t.lifecycle] ?? '状态未知'}</small></Link>)}</nav>
     {task ? <>{['active', 'pending'].includes(task.lifecycle) ? <AiTaskForm key={`${task.taskKey}:${task.revision}`} task={task} data={data} action={action} /> : <section className={styles.group}><h3>{task.label} · 历史配置</h3><p>{TASK_STATE[task.lifecycle] ?? '接入状态未识别'}；保留历史版本，当前不提供配置或启用入口。</p><Reference value={task.configuration.taskConfigRef} /></section>}{data.controls.filter(c => c.taskKey === task.taskKey).map(control => <ControlAction key={`${control.scope}:${control.revision}`} control={control} action={action} label={task.label} />)}</> : <p>尚未取得工作注册表。</p>}
   </section>;
 }

@@ -665,7 +665,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     const counts = progress?.summary;
     const operation = progressLoading ? "研究进度读取中" : progressError ? "研究进度读取失败" : "主题研究";
     const summary = counts
-      ? `接纳 ${number(counts.succeededStageCount)} · 失败 ${number(counts.failedStageCount)} · 待完成 ${number(counts.pendingStageCount)}`
+      ? `完成 ${number(counts.succeededStageCount)} · 失败 ${number(counts.failedStageCount)} · 待完成 ${number(counts.pendingStageCount)}`
       : "当前方法统计尚未取得";
     return btn(
       <>

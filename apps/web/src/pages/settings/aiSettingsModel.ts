@@ -142,3 +142,10 @@ export function controlReason(control: Control): string {
   if (control.actor === 'system' && control.commandRef === null && control.revision === 0 && control.reason === 'not_enabled') return '尚无人启用';
   return control.actor === 'system' && control.reason.startsWith('automatic_brake:') ? BRAKE_REASON[control.reason.slice(16)] ?? control.reason : control.reason;
 }
+
+export function isHistoricalTopicTask(taskKey: string): boolean {
+  return ['topic_research_extract_review', 'topic_research_resolve', 'topic_research_resolve_review'].includes(taskKey);
+}
+export function taskPresentationStage(task: Task): string {
+  return isHistoricalTopicTask(task.taskKey) ? 'legacy' : task.lifecycle;
+}

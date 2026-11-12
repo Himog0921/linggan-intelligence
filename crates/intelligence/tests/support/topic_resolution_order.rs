@@ -9,14 +9,15 @@ async fn topic_resolution_domain_order_releases_terminal_work_and_never_blocks_r
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("isolated proof URL");
     let mut db = PgConnection::connect(&url).await.unwrap();
     sqlx::raw_sql("CREATE TEMP TABLE linggan_topic_research_run(run_ref uuid,domain_ref uuid);
-        CREATE TEMP TABLE linggan_topic_research_window(window_ref uuid,run_ref uuid);
+        CREATE TEMP TABLE linggan_topic_research_window(window_ref uuid,run_ref uuid,input_refs jsonb);
         CREATE TEMP TABLE linggan_topic_research_stage(item_ref uuid,window_ref uuid,stage_number integer);
         CREATE TEMP TABLE linggan_ai_batch_item_control(item_ref uuid,state text,failure_code text);")
         .execute(&mut db).await.unwrap();
     let domain = Uuid::new_v4();
-    let first = window(&mut db, domain).await;
-    let second = window(&mut db, domain).await;
-    let other_domain = window(&mut db, Uuid::new_v4()).await;
+    let first = window(&mut db, domain, None).await;
+    let second = window(&mut db, domain, None).await;
+    let single = window(&mut db, domain, Some("single_pass")).await;
+    let other_domain = window(&mut db, Uuid::new_v4(), None).await;
     let query = concat!(
         "SELECT EXISTS(SELECT 1 FROM (SELECT $1::uuid AS item_ref) item WHERE true ",
         include_str!("../../src/ai_foundation/executor/topic_resolution_order.sql"),
@@ -57,20 +58,36 @@ async fn topic_resolution_domain_order_releases_terminal_work_and_never_blocks_r
         assert!(eligible(&mut db, query, first[3]).await);
         state(&mut db, first[stage], "failed", Some("ai_provider_failed")).await;
     }
+    // A fused single-pass call and an old resolve/review pair share one domain slot in both directions.
+    for item in [first[2], first[3], second[2], second[3]] {
+        state(&mut db, item, "succeeded", None).await;
+    }
+    state(&mut db, single[0], "running", None).await;
+    assert!(!eligible(&mut db, query, second[2]).await);
+    state(&mut db, single[0], "succeeded", None).await;
+    state(&mut db, first[2], "running", None).await;
+    assert!(!eligible(&mut db, query, single[0]).await);
+    state(&mut db, first[2], "succeeded", None).await;
+    assert!(eligible(&mut db, query, single[0]).await);
+    assert!(eligible(&mut db, query, other_domain[2]).await);
 }
 
-async fn window(db: &mut PgConnection, domain: Uuid) -> [Uuid; 4] {
+async fn window(db: &mut PgConnection, domain: Uuid, execution_mode: Option<&str>) -> [Uuid; 4] {
     let run = Uuid::new_v4();
     let window = Uuid::new_v4();
+    let input_refs = execution_mode
+        .map(|mode| serde_json::json!({"executionMode":mode}))
+        .unwrap_or_else(|| serde_json::json!({}));
     sqlx::query("INSERT INTO linggan_topic_research_run VALUES($1,$2)")
         .bind(run)
         .bind(domain)
         .execute(&mut *db)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO linggan_topic_research_window VALUES($1,$2)")
+    sqlx::query("INSERT INTO linggan_topic_research_window VALUES($1,$2,$3)")
         .bind(window)
         .bind(run)
+        .bind(&input_refs)
         .execute(&mut *db)
         .await
         .unwrap();

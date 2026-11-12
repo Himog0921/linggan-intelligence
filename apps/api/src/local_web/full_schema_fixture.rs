@@ -324,6 +324,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0200_topic_research_automation.sql"),
     include_str!("../../../../database/migrations/0201_topic_angle_handoff.sql"),
     include_str!("../../../../database/migrations/0202_topic_core_merge_prompts.sql"),
+    include_str!("../../../../database/migrations/0203_topic_single_pass.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -466,4 +467,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0200_topic_research_automation','26f7b1809c87d33765ee189960631e702a5b19663c9fd0b031c17023f8db378c');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0201_topic_angle_handoff','4e58d739792709899b18826f3d96c94a25444931b933641243f168422afa2b8e');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0202_topic_core_merge_prompts','12567f03e26e252e80bdf111b103ac0a453393e637a3d63c2d2da091e8ba4731');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0203_topic_single_pass','93c08e8b1afec2dad28e6cfa410f4009acf0b055d5aae8dc091ce700fa6b15f7');\n",
 );

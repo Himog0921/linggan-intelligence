@@ -41,7 +41,7 @@ async fn roundtrip(image_only: bool) {
         ControlScope::Task(TASK),
     ]
     .into_iter()
-    .chain(super::super::topic_research::TASKS.map(ControlScope::Task))
+    .chain(super::super::topic_research::CURRENT_TASKS.map(ControlScope::Task))
     {
         let revision =
             sqlx::query_scalar("SELECT revision FROM linggan_ai_control WHERE scope_key=$1")
@@ -118,7 +118,7 @@ async fn roundtrip(image_only: bool) {
         .await
         .unwrap();
         assert_eq!(receipt.window_count, 1);
-        assert_eq!(receipt.stage_count, 4);
+        assert_eq!(receipt.stage_count, 1);
         automation::tests::assert_manual_not_requeued(&db, support::D).await;
         receipt.run_ref
     };

@@ -514,6 +514,7 @@ migrate() {
   apply_migration_once "0200_topic_research_automation" "$project_root/database/migrations/0200_topic_research_automation.sql"
   apply_migration_once "0201_topic_angle_handoff" "$project_root/database/migrations/0201_topic_angle_handoff.sql"
   apply_migration_once "0202_topic_core_merge_prompts" "$project_root/database/migrations/0202_topic_core_merge_prompts.sql"
+  apply_migration_once "0203_topic_single_pass" "$project_root/database/migrations/0203_topic_single_pass.sql"
 }
 
 case "$command_name" in

@@ -15,6 +15,7 @@ pub(super) fn new_proposal() -> ProposedTopic {
             topic_ref: None,
             definition_ref: None,
             proposal: None,
+            ancestor: None,
             reason: "没有足够依据说明现有启动主题包含持续注意".into(),
         },
     }
@@ -64,6 +65,7 @@ fn existing_parent_requires_exact_version_and_scope_containment() {
         topic_ref: Some(target.topic_ref),
         definition_ref: Some(target.definition_ref),
         proposal: None,
+        ancestor: None,
         reason: "子概念的任务维持边界包含于执行任务过程，非共现".into(),
     };
     output.decisions[0].proposed_topic = Some(child);
@@ -112,6 +114,7 @@ fn inferred_parent_keeps_boundaries_and_no_recursive_tree_or_count_gate() {
             abstraction_reason: "持续注意实例支持执行过程这一上位范围，未声明其他实例已有证据"
                 .into(),
         }),
+        ancestor: None,
         reason: "持续注意是任务执行支持的一个具体阶段".into(),
     };
     output.decisions[0].proposed_topic = Some(child);
@@ -209,6 +212,7 @@ fn a_normalized_self_parent_is_rejected_before_acceptance() {
             domain_reason: "合成范围相关".into(),
             abstraction_reason: "声称抽象但同一身份".into(),
         }),
+        ancestor: None,
         reason: "合成错误自环建议".into(),
     };
     output.decisions[0].proposed_topic = Some(child);
@@ -242,6 +246,7 @@ fn a_grade_specific_legacy_candidate_does_not_block_a_reusable_evidence_based_co
             topic_ref: None,
             definition_ref: None,
             proposal: None,
+            ancestor: None,
             reason: "没有足够证据确定一个包含读写练习支持的现有上位主题".into(),
         },
     });
@@ -493,6 +498,7 @@ fn proposed_parent_cannot_reuse_an_existing_candidate_without_explicit_containme
         topic_ref: None,
         definition_ref: None,
         proposal: Some(parent),
+        ancestor: None,
         reason: "子级属于执行过程".into(),
     };
     output.decisions[0].proposed_topic = Some(child);
@@ -525,6 +531,7 @@ fn proposed_parent_cannot_reuse_an_existing_candidate_without_explicit_containme
         topic_ref: Some(matched.topic_ref),
         definition_ref: Some(matched.definition_ref),
         proposal: None,
+        ancestor: None,
         reason: "子级属于现有执行过程范围".into(),
     };
     assert_eq!(

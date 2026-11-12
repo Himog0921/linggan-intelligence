@@ -328,6 +328,7 @@ fn a_child_that_can_fit_without_fitting_its_parent_cannot_be_accepted() {
             topic_ref: Some(matched.topic_ref),
             definition_ref: Some(matched.definition_ref),
             proposal: None,
+            ancestor: None,
             reason: "合成错误地以相关当包含".into(),
         },
     });

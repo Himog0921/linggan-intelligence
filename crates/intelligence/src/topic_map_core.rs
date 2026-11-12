@@ -26,34 +26,46 @@ pub const METHOD_VERSION: &str = "topic-map.core.v2";
 pub(crate) fn units(input: &ResearchInput, output: &ResearchOutput) -> Vec<(String, Discussion)> {
     units_for_discussions(input, &output.discussions)
 }
+/// Stable identity for one discussion; repeated calls return the same unit key.
+pub(crate) fn unit_identity(input: &ResearchInput, discussion: &Discussion) -> String {
+    let mut evidence: Vec<String> = discussion
+        .evidence
+        .iter()
+        .filter_map(|c| {
+            input.fragments.iter().find(|f| f.fragment_id == c.fragment_id).map(|f| {
+                let quote: String = f.text.chars().skip(c.start.saturating_sub(f.start)).take(c.end.saturating_sub(c.start)).collect();
+                json!({"source":crate::topic_map_research::semantic_source_identity(input,f),
+                    "start":c.start,"end":c.end,"textHash":hash(&quote)}).to_string()
+            })
+        })
+        .collect();
+    evidence.sort();
+    evidence.dedup();
+    hash(
+        &json!({"domain":input.domain["domainRef"],"work":input.work.work_ref,"evidence":evidence,
+            "statement":discussion.statement.split_whitespace().collect::<Vec<_>>().join(" "),
+            "speaker":discussion.speaker_role,"role":discussion.evidence_role,"method":METHOD_VERSION})
+            .to_string(),
+    )
+}
+/// One entry per supplied discussion, index-aligned even when identities repeat.
+pub(crate) fn indexed_units(
+    input: &ResearchInput,
+    discussions: &[Discussion],
+) -> Vec<(String, Discussion)> {
+    discussions
+        .iter()
+        .map(|d| (unit_identity(input, d), d.clone()))
+        .collect()
+}
 pub(crate) fn units_for_discussions(
     input: &ResearchInput,
     discussions: &[Discussion],
 ) -> Vec<(String, Discussion)> {
     let mut seen = std::collections::HashSet::new();
-    discussions.iter()
-        .filter_map(|d| {
-            let mut evidence: Vec<String> = d
-                .evidence
-                .iter()
-                .filter_map(|c| {
-                    input.fragments.iter().find(|f| f.fragment_id == c.fragment_id).map(|f| {
-                let quote: String = f.text.chars().skip(c.start.saturating_sub(f.start)).take(c.end.saturating_sub(c.start)).collect();
-                json!({"source":crate::topic_map_research::semantic_source_identity(input,f),
-                    "start":c.start,"end":c.end,"textHash":hash(&quote)}).to_string()
-            })
-                })
-                .collect();
-            evidence.sort();
-            evidence.dedup();
-            let key = hash(
-                &json!({"domain":input.domain["domainRef"],"work":input.work.work_ref,"evidence":evidence,
-            "statement":d.statement.split_whitespace().collect::<Vec<_>>().join(" "),
-            "speaker":d.speaker_role,"role":d.evidence_role,"method":METHOD_VERSION})
-                .to_string(),
-            );
-            seen.insert(key.clone()).then(|| (key, d.clone()))
-        })
+    indexed_units(input, discussions)
+        .into_iter()
+        .filter(|(key, _)| seen.insert(key.clone()))
         .collect()
 }
 

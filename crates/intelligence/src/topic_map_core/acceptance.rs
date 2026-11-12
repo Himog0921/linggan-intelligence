@@ -1,7 +1,7 @@
 //! Immutable acceptance of one verified discussion batch and exact definition versions.
 use super::*;
 use crate::model_settings::ModelError;
-use crate::topic_map_research_analysis::{ProposedTopic, ResolutionOutput, UnitDecision};
+use crate::topic_map_research_analysis::{ProposedParent, ResolutionOutput, UnitDecision};
 use sqlx::{Postgres, Transaction};
 
 type Assignment = (Uuid, Uuid, String, String, Option<(Uuid, Uuid)>);
@@ -21,9 +21,10 @@ pub(crate) async fn accept_in(
     tx: &mut Transaction<'_, Postgres>,
     batch: Acceptance<'_>,
 ) -> Result<Vec<Value>, ModelError> {
-    if batch.semantic_verification["contract"]
-        != crate::topic_map_research_analysis::verification::VERIFY_CONTRACT
-        || batch.semantic_verification["passed"] != true
+    if !crate::ai_foundation::topic_research::single_pass(batch.input)
+        && (batch.semantic_verification["contract"]
+            != crate::topic_map_research_analysis::verification::VERIFY_CONTRACT
+            || batch.semantic_verification["passed"] != true)
     {
         return Err(ModelError::InvalidOutput);
     }
@@ -152,25 +153,26 @@ async fn assignments_for(
             _ => ModelError::InvalidOutput,
         })?;
         let topic = accepted[0];
-        let created_here: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_definition d JOIN linggan_topic_map_concept_rule rule USING(definition_ref) JOIN LATERAL(SELECT version,parent_topic_ref FROM linggan_topic_map_binding WHERE topic_ref=d.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE d.topic_ref=$1 AND d.version=1 AND rule.invocation_ref=$2 AND b.version=1 AND b.parent_topic_ref IS NULL)")
-            .bind(topic).bind(batch.invocation).fetch_one(&mut **tx).await?;
-        let parent = if created_here {
-            accept_parent(tx, batch, domain, proposal, &citations, discussion).await?
+        let parent = if created_here(tx, topic, batch.invocation).await? {
+            let parent =
+                accept_parent(tx, batch, domain, &proposal.parent, &citations, discussion).await?;
+            if let Some((parent_topic, parent_definition)) = parent {
+                crate::topic_map::bind_new_candidate_parent_in(
+                    tx,
+                    domain,
+                    topic,
+                    parent_topic,
+                    parent_definition,
+                    batch.invocation,
+                )
+                .await
+                .map_err(topic_error)?;
+            }
+            parent
         } else {
-            None
+            // A reused candidate keeps its saved parent; only report it, never create another.
+            saved_parent(tx, topic).await?
         };
-        if let Some((parent_topic, parent_definition)) = parent {
-            crate::topic_map::bind_new_candidate_parent_in(
-                tx,
-                domain,
-                topic,
-                parent_topic,
-                parent_definition,
-                batch.invocation,
-            )
-            .await
-            .map_err(topic_error)?;
-        }
         let definition:Uuid=sqlx::query_scalar("SELECT definition_ref FROM linggan_topic_definition WHERE topic_ref=$1 ORDER BY version DESC LIMIT 1")
                 .bind(topic).fetch_one(&mut **tx).await?;
         assignments.push((
@@ -230,15 +232,34 @@ fn topic_error(error: crate::topic_map::TopicMapError) -> ModelError {
     }
 }
 
+async fn created_here(
+    tx: &mut Transaction<'_, Postgres>,
+    topic: Uuid,
+    invocation: Uuid,
+) -> Result<bool, ModelError> {
+    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_definition d JOIN linggan_topic_map_concept_rule rule USING(definition_ref) JOIN LATERAL(SELECT version,parent_topic_ref FROM linggan_topic_map_binding WHERE topic_ref=d.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE d.topic_ref=$1 AND d.version=1 AND rule.invocation_ref=$2 AND b.version=1 AND b.parent_topic_ref IS NULL)")
+        .bind(topic).bind(invocation).fetch_one(&mut **tx).await?)
+}
+
+async fn saved_parent(
+    tx: &mut Transaction<'_, Postgres>,
+    topic: Uuid,
+) -> Result<Option<(Uuid, Uuid)>, ModelError> {
+    // The latest binding is chosen before the parent lookup: an inner join first would
+    // discard a newest NULL parent and silently resurrect an older parent version.
+    let row: Option<(Uuid, Uuid)> = sqlx::query_as("SELECT latest.parent_topic_ref,definition.definition_ref FROM (SELECT parent_topic_ref FROM linggan_topic_map_binding WHERE topic_ref=$1 ORDER BY version DESC LIMIT 1)latest JOIN LATERAL(SELECT definition_ref FROM linggan_topic_definition WHERE topic_ref=latest.parent_topic_ref ORDER BY version DESC LIMIT 1)definition ON true")
+        .bind(topic).fetch_optional(&mut **tx).await?;
+    Ok(row)
+}
+
 async fn accept_parent(
     tx: &mut Transaction<'_, Postgres>,
     batch: &Acceptance<'_>,
     domain: Uuid,
-    proposal: &ProposedTopic,
+    parent: &ProposedParent,
     citations: &[crate::topic_map::TopicMapCitation],
     discussion: &Discussion,
 ) -> Result<Option<(Uuid, Uuid)>, ModelError> {
-    let parent = &proposal.parent;
     if parent.kind == "root" {
         return Ok(None);
     }
@@ -272,6 +293,27 @@ async fn accept_parent(
     let topic = topics[0];
     let definition = sqlx::query_scalar("SELECT definition_ref FROM linggan_topic_definition WHERE topic_ref=$1 ORDER BY version DESC LIMIT 1")
         .bind(topic).fetch_one(&mut **tx).await?;
+    // A parent created here carries its own declared parent; existing candidates keep their binding.
+    if created_here(tx, topic, batch.invocation).await?
+        && let Some(ancestor) = &parent.ancestor
+    {
+        if let Some((grand, grand_definition)) = Box::pin(accept_parent(
+            tx, batch, domain, ancestor, citations, discussion,
+        ))
+        .await?
+        {
+            crate::topic_map::bind_new_candidate_parent_in(
+                tx,
+                domain,
+                topic,
+                grand,
+                grand_definition,
+                batch.invocation,
+            )
+            .await
+            .map_err(topic_error)?;
+        }
+    }
     Ok(Some((topic, definition)))
 }
 
@@ -299,3 +341,7 @@ async fn accepted_hierarchy(
         json!({"parentTopicRef":parent,"parentDefinitionRef":parent_definition,"state":"attached","reason":reason}),
     )
 }
+
+#[cfg(test)]
+#[path = "acceptance/tests.rs"]
+mod tests;

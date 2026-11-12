@@ -1,4 +1,4 @@
-import { parseTopicProgress } from './topicResearchModel';
+import { parseTopicProgress, parseTopicRuns } from './topicResearchModel';
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../shared/api";
 import {
@@ -129,3 +129,10 @@ it.each(["title", "angle", "rationale"])(
     expect(() => decodeAlternative(body)).toThrow(ApiError);
   },
 );
+
+it('requires explicit topic execution mode rather than inferring it from a lone stage', () => {
+  const run = { runRef: 'r', pendingStageCount: 0, failedStageCount: 0, windowCount: 1, stages: [{ windowRef: 'w', stageNumber: 0, state: 'succeeded' }] };
+  expect(() => parseTopicRuns({ runs: [run] })).toThrow(ApiError);
+  expect(() => parseTopicRuns({ runs: [{ ...run, executionMode: 'unknown' }] })).toThrow(ApiError);
+  expect(parseTopicRuns({ runs: [{ ...run, executionMode: 'legacy_four_stage' }] })[0]?.executionMode).toBe('legacy_four_stage');
+});

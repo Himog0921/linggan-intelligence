@@ -323,3 +323,20 @@ it('当前图片识别可单独配置原图许可，选择或保存原因不会�
   expect(calls.find(call => call.method === 'POST')?.body).toMatchObject({ taskKey: 'ocr_recognition', materialClass: 'manual_ocr_image', allowed: true });
   expect(calls.some(call => /batches|ocr-recognition/.test(call.path))).toBe(false);
 });
+it('groups old topic tasks as history without changing their executable lifecycle', async () => {
+  const seed = businessSettingsFixture();
+  const keys = ['topic_research', 'topic_research_extract_review', 'topic_research_resolve', 'topic_research_resolve_review'];
+  const labels = ['主题归并', '旧讨论审核', '旧归属判断', '旧归属审核'];
+  const data = { ...seed, tasks: keys.map((taskKey, index) => ({ ...seed.tasks[0]!, taskKey, label: labels[index]!, lifecycle: 'active', configuration: { ...seed.tasks[0]!.configuration, taskKey } })) };
+  respond = () => ok(data);
+  mount();
+  await screen.findByRole('heading', { name: '工作能力' });
+  await userEvent.click(screen.getByRole('button', { name: '已接入' }));
+  expect(screen.getByRole('button', { name: /主题归并/ })).toBeVisible();
+  expect(screen.queryByRole('button', { name: /旧讨论审核/ })).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '历史' }));
+  for (const label of labels.slice(1)) expect(screen.getByRole('button', { name: new RegExp(label) })).toBeVisible();
+  expect(screen.queryByRole('button', { name: /主题归并/ })).not.toBeInTheDocument();
+  expect(data.tasks.every(task => task.lifecycle === 'active')).toBe(true);
+  expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+});

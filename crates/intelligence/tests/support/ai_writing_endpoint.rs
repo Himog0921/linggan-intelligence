@@ -77,8 +77,13 @@ impl Endpoint {
                             }
                             if !probe {
                                 let root:Value=serde_json::from_str(&prompt).unwrap();let packet=&root["packet"];
-                                if variant=="no_signal" && packet["contract"]=="topic-map.extract.quotes.v1" {output["o"]=json!("no_signal");output["d"]=json!([]);}
-                                if (variant=="reject_extraction" && packet["input"]["phase"]=="extraction") || (variant=="reject_resolution" && packet["input"]["phase"]=="resolution") {output["checks"][0]["verdict"]=json!("fail");}
+                                if variant=="no_signal" && packet["contract"]=="topic-map.single-pass.v1" {
+                                    output["projection"]["o"]=json!("no_signal");output["projection"]["d"]=json!([]);
+                                    output["newTopics"]=json!([]);output["decisions"]=json!([]);
+                                }
+                                if variant=="invalid_output" && packet["contract"]=="topic-map.single-pass.v1" {
+                                    output["decisions"][0]["newTopicId"]=json!("missing");
+                                }
                             }
                             respond(&mut socket,&output.to_string()).await;
                         });
@@ -186,6 +191,35 @@ fn topic_response(prompt: &str) -> Option<Value> {
         "comment-problem-review.v1" => Some(
             json!({"contract":"comment-problem-review.v1","checks":packet["proposal"]["decisions"].as_array()?.iter().map(|d|json!({"signalOrdinal":d["signalOrdinal"],"verdict":"pass","reason":"synthetic pairwise review"})).collect::<Vec<_>>()}),
         ),
+        "topic-map.single-pass.v1" => {
+            if packet["input"]["mode"] != "author" {
+                return None;
+            }
+            let fragments = packet["input"]["fragments"].as_array()?;
+            let index = fragments
+                .iter()
+                .position(|f| matches!(f["field"].as_str(), Some("body" | "core_text_evidence")))
+                .unwrap_or(0);
+            let projection = json!({"contract":"topic-map.extract.quotes.v1","o":"analyzed","d":[{"l":"保留正文末尾","t":null,"e":[{"f":index,"q":"结尾不能丢失🙂"}],"s":"结尾不能丢失。","d":"完整保留正文末尾。","i":["正文末尾保留"],"x":["新增来源材料"],"sp":"author","er":"support","r":"合成原句支持"}],"s":[],"j":{"m":"unclear","s":[],"o":[],"p":"unknown","r":"无阶段依据","e":[]},"rm":[],"a":[],"p":[],"l":["SYNTHETIC ONLY"]});
+            let existing = packet["input"]["definitions"]
+                .as_array()?
+                .iter()
+                .find(|d| d["definition"] == "保留正文中明确存在的末尾内容。");
+            let (new_topics, decisions) = if let Some(definition) = existing {
+                (
+                    json!([]),
+                    json!([{"discussionIndex":0,"status":"matched","matches":[{"topicRef":definition["topicRef"],"definitionRef":definition["definitionRef"],"reason":"SYNTHETIC exact fixture boundary"}],"newTopicId":null,"relations":[],"reason":"合成明确边界"}]),
+                )
+            } else {
+                (
+                    json!([{"newTopicId":"n1","label":"正文完整保留","definition":"保留正文中明确存在的末尾内容。","inclusionCriteria":["讨论正文末尾保留"],"exclusionCriteria":["新增来源材料"],"domainFit":"in_scope","domainReason":"合成领域材料","abstractionReason":"合成保留规则","parent":{"kind":"root","topicRef":null,"definitionRef":null,"newTopicId":null,"reason":"合成根主题"}}]),
+                    json!([{"discussionIndex":0,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"合成明确边界"}]),
+                )
+            };
+            Some(
+                json!({"contract":"topic-map.single-pass.v1","projection":projection,"newTopics":new_topics,"decisions":decisions}),
+            )
+        }
         "topic-map.extract.quotes.v1" => {
             let fragments = packet["input"]["fragments"].as_array()?;
             let index = fragments

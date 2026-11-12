@@ -47,6 +47,9 @@ pub struct ProposedParent {
     pub definition_ref: Option<Uuid>,
     #[serde(deserialize_with = "required_nullable_concept")]
     pub proposal: Option<ConceptDefinition>,
+    /// Single-pass only: the proposed parent's own parent, so a referenced chain is accepted whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ancestor: Option<Box<ProposedParent>>,
     pub reason: String,
 }
 
