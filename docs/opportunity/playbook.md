@@ -1,17 +1,17 @@
 # 机会卡（Opportunity Card）实施手册
 
-- 版本：v1.1（2026-11-12 修订，见 §0.5）
+- 版本：v1.3（2026-11-12 修订，见 §0.5）
 - 日期：2026-11-12
 - 读者：负责推进的执行 agent（下称“执行者”），以及分派任务、审查结果的项目负责人（下称“负责人”）
 - 性质：本手册是实施的**唯一规格来源**。执行者看不到产品讨论的上下文，所以必要的背景都写在这里。
 
+---
+
 > 状态: 活跃计划
 > 最后核对: 2026-11-12
-> 适用范围: 机会卡 v1 的 T0.1b 至 T3 任务卡、验收标准与实施顺序。
-> 事实来源: 负责人裁定的 DECISIONS.md D-001 至 D-020，以及 T0.1/T0.1b 勘察结果。
+> 适用范围: 机会卡 v1 的 T0.1b 至 T3 与采集侧 Stage C 的任务卡、验收标准与实施顺序。
+> 事实来源: 负责人 2026-11-12 的裁定（DECISIONS D-001 至 D-031），以及 T0.1/T0.1b 勘察结果与实际代码、迁移。
 > 冲突时以谁为准: DECISIONS.md 的最新裁定；两者仍有出入时在 QUESTIONS.md 提出。
-
----
 
 ## 0. 使用说明
 
@@ -61,6 +61,16 @@ T0.1 勘察后，负责人对 10 个阻塞问题作出裁定，记录在 `docs/o
 | §7 | 新增 T0.1b（基线同步与补充勘察）；改写 T0.2 | D-001 等 |
 | §8.2 | 测试数据集增加排除用例 | D-010、D-012、D-013 |
 | §6.1.3 | SQLite 对照作废 | RECON |
+| **v1.2** §6.3、§6.4.4、§6.5、§8.2、T0.3 | 测试参数集与生产参数分开；生产 v1 为 `min_n_period = 100`、`creator_min_n = 30` | D-024 |
+| **v1.2** §6.2.1 | 领域归属按 `created_at <= as_of`，迁移回填行自始有效 | D-023 |
+| **v1.2** T0.2 | 验收增加分布报告和回复占比 | D-024、D-025 |
+| **v1.2** T0.6 | 密钥路径由与 `model_secrets` 相同的解析函数得出 | D-022 |
+| **v1.2** §6.6.2、T2.1 | 判定输入优先使用整篇材料快照的四个字段 | D-026 |
+| ~~**v1.2** D-008~~ | ~~评论时间的 v2 计划暂停~~（已被 v1.3 取代） | D-021 |
+| **v1.3** §7 | 新增**阶段 C：评论时间与采集协议**（C1–C4），与阶段 0、1 并行 | D-028、D-030 |
+| **v1.3** §6.2.1 | 统计周期支持两种基准；评论发布时间为目标口径，作品发布周为过渡口径 | D-028 |
+| **v1.3** §6.3 | 生产参数恢复为与测试参数集相同；新增采集目标参数 | D-029 |
+| **v1.3** §6.7 | 新增 flags `collection_below_target`、`collection_protocol_changed`；新增排除原因 `comment_time_unknown` | D-028、D-029、D-030 |
 
 ---
 
@@ -539,16 +549,18 @@ CREATE TABLE collection_snapshot (
 
 | 顺序 | 条件 | 不满足时的排除原因 |
 | --- | --- | --- |
-| 1 | 所属作品在领域研究主集合中：`linggan_material_domain_usage` 中 `domain_ref` 匹配、`use_kind = 'domain_research'`、`role = 'primary'` | `not_in_domain_primary` |
+| 1 | 所属作品在领域研究主集合中：`linggan_material_domain_usage` 中 `domain_ref` 匹配、`use_kind = 'domain_research'`、`role = 'primary'`，且 `created_at <= as_of`（迁移回填行不受此限，D-023） | `not_in_domain_primary` |
 | 2 | 作品作者已知：`linggan_material_content_author_at(content_ref, as_of)` 返回非空的 `author_external_id` | `work_author_unknown` |
-| 3 | 作品有周期锚点：截至 `as_of` 的最近一次详情观察中，`linggan_material_content_detail.published_at` 非空 | `period_anchor_missing` |
+| 3 | 有周期锚点。`period_basis = work_published_cohort` 时：截至 `as_of` 的最近一次详情观察中，`linggan_material_content_detail.published_at` 非空。`period_basis = comment_published` 时：`linggan_material_comment_platform_time` 中有该评论的平台时间（D-028） | 前者为 `period_anchor_missing`，后者为 `comment_time_unknown` |
 | 4 | `first_observed_at` 可以解析 | `observed_at_unparseable` |
 | 5 | 未受限：不存在 `restricted_at <= as_of` 的 `linggan_material_comment_restriction` 记录 | `restricted` |
 | 6 | 评论者不是作品作者本人（评论的 `author_external_id` 不等于作品作者的 `author_external_id`；评论者 ID 为空时视为非作者） | `creator_self` |
 
 另外，`first_observed_at > as_of` 的评论在该时点还不存在，既不是有效评论，也不计入任何排除原因。
 
-该评论所属周期 = `linggan_opportunity_period_start(work_published_at, period_tz)`（D-020）。
+该评论所属周期 = `linggan_opportunity_period_start(锚点时间, period_tz)`（D-020）。锚点时间按 `period_basis` 取作品发布时间或评论平台发布时间，**同一次计算只用一种**。
+
+切换前，`comment_published` 口径以影子模式同步计算并保存，不在页面展示（D-028）。资格函数因此增加参数 `period_basis`：`linggan_opportunity_eligible_comments(domain_ref, as_of, tz, period_basis)`，排除函数同理。
 
 以上逻辑只允许在一处实现：
 
@@ -606,9 +618,14 @@ SELECT (SELECT count(*) FROM fm) AS k,
 | 排除计数 | 每次计算都调用 `linggan_opportunity_eligibility_exclusions`，结果写入运行记录；按 §6.7 生成 flags |
 | 代表原声 | 只从有效评论中选取；点赞按 D-019 处理 |
 
-### 6.3 `metric_definition` v1 初始参数
+### 6.3 参数集
 
-由 seed 迁移写入。**这是全部阈值的唯一来源**（R3）：
+参数分两套（D-024）：
+
+- **测试参数集**：即下面这段 JSON，永久固定。§6.4.4、§6.5、§8.2 的标准答案都在这套参数下计算。它只存在于测试代码中，不写入生产库。
+- **生产参数 v1**：与测试参数集数值相同（D-029 取代了 D-024 第 2 款）。由 seed 迁移写入 `metric_definition`。采集不足时页面显示“样本不足”，不降低门槛。
+
+`metric_definition` 是生产环境全部阈值的唯一来源（R3）。测试参数集：
 
 ```json
 {
@@ -636,13 +653,15 @@ SELECT (SELECT count(*) FROM fm) AS k,
   "collection_volume_shift_alert": 0.30,
   "max_unanchored_share": 0.20,
   "max_author_unknown_share": 0.20,
+  "collection_target_per_period": 700,
+  "comment_time_switch_coverage": 0.90,
   "card_rebuild_debounce_seconds": 300
 }
 ```
 
 修改任何参数都必须新增一个版本，再切换 `metric_definition_current`。**不得原地修改已有版本。**
 
-加载器的额外校验：v1 中 `period_basis` 只接受 `work_published_cohort`，`week_start` 只接受 `monday`（D-008、D-020）。
+加载器的额外校验：`period_basis` 只接受 `work_published_cohort` 或 `comment_published`；`week_start` 只接受 `monday`（D-008、D-020、D-028）。生产 v1 使用 `work_published_cohort`，切换到 `comment_published` 必须新增口径版本（D-028）。
 
 ### 6.4 统计函数与标准答案
 
@@ -778,7 +797,7 @@ pub fn evidence_tier(i: &TierInput, p: &TierParams) -> EvidenceTier {
 
 周期函数按 D-020 在 PostgreSQL 中实现（`linggan_opportunity_period_start`、`linggan_opportunity_period_bounds`），在隔离数据库中用以上四条用例验证。Rust 侧不做时区换算，也不新增日期库。
 
-#### 6.4.4 证据等级标准答案（使用 §6.3 参数）
+#### 6.4.4 证据等级标准答案（使用测试参数集）
 
 | 用例 | mentioners_total | k_cur | n_cur | k_base | n_base | 期望 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -796,7 +815,7 @@ pub fn evidence_tier(i: &TierInput, p: &TierParams) -> EvidenceTier {
 2. `ranked` 排序：`ci_low` 降序，再按 `n` 降序，再按 `creator_id` 升序。
 3. `insufficient` 排序：`n` 降序，再按 `creator_id` 升序。`insufficient` 不显示名次。
 
-标准答案（`creator_min_n = 50`）：
+标准答案（测试参数集，`creator_min_n = 50`）：
 
 | 作者 | k | n | 期望归属与顺序 |
 | --- | --- | --- | --- |
@@ -822,7 +841,7 @@ pub fn evidence_tier(i: &TierInput, p: &TierParams) -> EvidenceTier {
 **输入**：
 
 - 问题表述（`problem.statement`）及其 `def_version`；
-- 作品文本：截至 `as_of` 的 `linggan_material_content_detail.title` 与 `body_text`。图片识别文字和口播转写 v1 不使用，待 T0.1b 第 8 项勘察后再定（D-017）。
+- 作品文本：优先使用整篇材料快照 `linggan_note_material_fragment` 的 `title`、`body`、`ocr`、`transcript` 四个字段，各段之间用换行拼接；T2.1 确认快照满足 D-026 的三个条件后才采用，否则退回截至 `as_of` 的 `linggan_material_content_detail.title` 与 `body_text`（D-017、D-026）。
 - 辅助上下文（可选）：`scope = 'note'` 的整篇理解结果。引文校验只针对原始文本，不针对理解结果。
 
 **标签定义**（必须原样写入提示词）：
@@ -892,7 +911,9 @@ type QualityFlag =
   | "stale_read_model"
   | "period_anchor_missing"          // D-008
   | "author_unknown_share_high"      // D-010
-  | "engagement_reference_missing";  // D-019
+  | "engagement_reference_missing"   // D-019
+  | "collection_below_target"        // D-029
+  | "collection_protocol_changed";   // D-030
 
 interface Interval1k { low: number; high: number }  // 已换算为每千
 
@@ -962,7 +983,9 @@ interface CreatorDensity {
   - `stale_read_model`：读模型的 `as_of` 早于最新事实的 `first_observed_at` 超过 24 小时时出现；
   - `period_anchor_missing`：因 `period_anchor_missing` 被排除的评论占候选评论的比例超过 `max_unanchored_share` 时出现；
   - `author_unknown_share_high`：因 `work_author_unknown` 被排除的比例超过 `max_author_unknown_share` 时出现；
-  - `engagement_reference_missing`：领域点赞中位数没有可用的 `KNOWN` 值时出现（D-019）。
+  - `engagement_reference_missing`：领域点赞中位数没有可用的 `KNOWN` 值时出现（D-019）；
+  - `collection_below_target`：当周领域有效评论数低于 `collection_target_per_period` 时出现（D-029）；
+  - `collection_protocol_changed`：统计窗口内评论采集协议发生变化时出现，趋势图需标记变化点（D-030）。
 
 ### 6.8 质量门
 
@@ -999,13 +1022,13 @@ interface CreatorDensity {
 | 重要性 | 重要性未校准 |
 | 墓碑 | 来源已撤回：原文不再展示，保留引用记录 |
 | 固定说明（首页表格下方） | 提及人数反映讨论热度，不等于问题对用户的重要性；评论只代表愿意留言的人，且每篇作品只采集平台排序靠前的部分评论。 |
-| 依据与局限（机会卡，固定显示） | 提及率按作品发布周统计：表示该周发布的作品下的评论中，提及该问题的比例。近期作品积累评论的时间较短，当周数字偏少。每篇作品只采集平台排序靠前的部分评论。 |
+| 依据与局限（机会卡，固定显示） | 按当前口径显示其一。作品发布周口径：“提及率按作品发布周统计，表示该周发布的作品下的评论中，提及该问题的比例；近期作品积累评论的时间较短，当周数字偏少。”评论发布周口径：“提及率按评论发布周统计。”两种口径都要附上当前的采集协议说明（排序方式与单次上限）。 |
 
 ---
 
 ## 7. 阶段与任务卡
 
-**依赖关系**：阶段 0 → 阶段 1 → 阶段 2；阶段 3 依赖阶段 1；阶段 4 依赖阶段 0，可以与阶段 3 并行。每个阶段结束时有质量门（G0–G4），由负责人确认通过后才能进入下一阶段。
+**依赖关系**：阶段 0 → 阶段 1 → 阶段 2；阶段 3 依赖阶段 1；阶段 4 依赖阶段 0，可以与阶段 3 并行。**阶段 C 在 T0.1b 之后即可开始，与阶段 0、阶段 1 并行**；C3 需要 T0.2 的资格函数做切换准备。每个阶段结束时有质量门（G0–G4），由负责人确认通过后才能进入下一阶段。
 
 ### 阶段 0：口径地基
 
@@ -1050,13 +1073,14 @@ interface CreatorDensity {
 - **验收**：
   - 在 §8.2 数据集上，有效评论数和各排除原因的计数与 §8.2.3 一致；
   - “有效 + 各原因排除 = 全部候选”的等式有测试；
-  - 在真实库上用只读查询统计 `first_observed_at` 三种来源（first_admission、最早观察回填、无法解析）各有多少条，写入 PROGRESS.md。
+  - 在真实库上用只读查询统计 `first_observed_at` 三种来源（first_admission、最早观察回填、无法解析）各有多少条，写入 PROGRESS.md；
+  - 按 D-024 第 4 条出分布报告；按 D-025 报告回复所占比例（或记录“无法区分”）。
 - **禁止**：在视图和函数之外，另写一份时间解析或资格判断。
 
 #### T0.3 口径定义与周期工具
 
 - **前置**：T0.1b
-- **目标**：建 `metric_definition` 相关表，写入 §6.3 的 v1 参数；实现参数加载和周期切分。
+- **目标**：建 `metric_definition` 相关表，由 seed 迁移写入 §6.3 的**生产参数 v1**；测试参数集放在测试代码中；实现参数加载和周期切分。
 - **要求**：
   - 参数加载（Rust）时逐项校验类型和取值范围（例如 `z > 0`、`min_n_period > 0`、比例在 0–1 之间、`period_basis` 与 `week_start` 只接受 v1 允许的值），不合法就拒绝启动相关任务。
   - 周期函数按 D-020 写成 PostgreSQL 函数：给定 UTC 时间和时区，返回 `period_start`；给定 `period_start` 和时区，返回 UTC 起止区间。
@@ -1090,7 +1114,7 @@ interface CreatorDensity {
 - **前置**：T0.1b
 - **目标**：实现 `commenter_hash = HMAC-SHA256(secret, author_external_id)`，按 D-013。
 - **要求**：
-  - 密钥文件：`${LINGGAN_SUPPORT_DIR}/opportunity/commenter-digest.key`，至少 32 字节；读取方式参照 `model_secrets.rs`。不得写入代码和日志。
+  - 密钥文件：`<support_dir>/opportunity/commenter-digest.key`，至少 32 字节。`<support_dir>` 由从 `model_secrets.rs` 提取出的同一个 `pub` 解析函数得出（D-022），不得另写路径解析或缺省值。密钥不得写入代码和日志。
   - 密钥缺失或过短时，机会卡的写入和计算任务拒绝启动，不得退回空密钥。
   - 复用 `crates/evidence/src/collection_control.rs` 中现有的 HMAC-SHA256 实现；如需改为 `pub`，不得改变其行为，现有 RFC 4231 测试必须继续通过。不得复制一份加密代码。
   - 输出十六进制字符串，同时记录 `commenter_digest_version = "commenter-hmac-sha256-v1"`。
@@ -1111,6 +1135,67 @@ interface CreatorDensity {
 - 同一份数据、同一 `as_of` 连续计算两次，所有派生结果逐字节一致。
 - 不变量检查全部为 0。
 - RECON.md 经负责人确认。
+
+### 阶段 C：评论时间与采集协议（D-028、D-030）
+
+本阶段改动采集插件和采集侧数据，范围比机会卡模块更广。除 §2、§3 的全部规则外，还要遵守：现有采集控制（频率、风险冷却、授权）一律不得绕过；包合同的任何变更都要同步更新 `crates/contracts` 的校验和 fixture。
+
+#### C1 采集侧勘察
+
+- **前置**：T0.1b
+- **目标**：只读勘察，结果写入 RECON.md 新增的“§8 采集侧”。
+  1. 评论请求的排序方式：插件现在请求的是哪种排序；平台是否支持按时间排序；依据写到 `capture-capability-registry.md` 的哪一行，或者代码位置。**没有依据就写“未验证”，不得推断。**
+  2. 单次评论条数上限 30 的来源（代码位置），以及是否可以配置。
+  3. 包或记录上现有的版本字段（插件版本、合同版本、协议字段），能否用来区分改造前后的包。
+  4. 包合同中评论记录 `publishedAt` 的类型与校验规则：是否允许 `null`；改为允许 `null` 需要改哪些校验和 fixture。
+  5. `0048_comment_intelligence.sql:40-42` 中 `linggan_ci_source` 从 payload 取时间的逻辑，能否复用为投影器的提取逻辑。
+  6. 重新采集的现有入口和控制（频率、冷却、授权）在哪里，重新采集一篇作品的评论需要走哪些步骤。
+- **验收**：每项有出处；需要负责人决定的写入 QUESTIONS.md（至少包括：机会卡统计使用哪种排序协议）。
+- **禁止**：修改代码；为了测试去访问平台。
+
+#### C2 插件写入评论时间并去掉回退
+
+- **前置**：C1，以及负责人对排序协议的决定
+- **目标**：
+  - 插件把平台评论时间以毫秒 epoch 写入 `publishedAt`；取不到时写 `null`。
+  - 删除 `recordNormalization.js:162` 中对 `record.createdAt` 的回退。
+  - 包上带有能区分改造前后的版本标识（按 C1 结论），并记录采集协议（排序方式、单次上限、触发来源）。
+  - 同步更新包合同、Rust 侧校验和 fixture。
+- **验收**：
+  - 插件单元测试覆盖：带 `create_time` 的样例、不带时间的样例（写 `null`，不是 0，也不是采集时间）、时间单位为秒和毫秒的样例（按 C1 确认的平台实际单位处理）；
+  - 合同测试通过；旧版本的包仍能被正确接收（向后兼容）；
+  - 用 fixture 证明 `createdAt` 存在时也不会写入 `publishedAt`。
+- **禁止**：编造平台字段名，只用 C1 中有出处的字段；用展示文本推算 epoch。
+
+#### C3 平台时间投影与校验
+
+- **前置**：C2、T0.2
+- **目标**：
+  - 新建只追加的表 `linggan_material_comment_platform_time(content_public_ref, comment_external_id, published_at, precision, source_package_ref, protocol_version, created_at)`，以评论身份为主键；
+  - 投影器从包中提取，同一身份以第一条有效值为准，多个包给出的值不一致时计数；
+  - 资格函数支持 `period_basis = comment_published`；影子模式下同步计算并保存这一口径的指标。
+- **验收**：
+  - `published_at > first_observed_at` 的违例数为 0；
+  - 与绝对日期型展示文本的同日一致率 ≥ 99%，不一致的逐条列出（展示文本只用于核对，不入库为时间）；
+  - 每个领域最近 12 周有效评论中有平台时间的比例，每周报告一次。
+- **禁止**：`ALTER` 现有评论表；用展示文本补时间。
+
+#### C4 重新采集补齐历史
+
+- **前置**：C2
+- **目标**：对仍可访问的作品，在现有采集控制允许的范围内重新采集评论，补齐统计窗口内的平台时间。
+- **要求**：
+  - 先补最近 12 周内发布的作品，按领域轮流进行；
+  - 每一批都记录：作品数、新获得平台时间的评论数、失败与冷却次数；
+  - 重新采集使用 C2 之后的协议。
+- **验收**：每周报告各领域的覆盖率进展；达到 D-028 的切换条件时提交切换申请，由负责人批准后新增口径版本。
+- **禁止**：绕过频率限制、风险冷却或授权；为了加快进度提高并发。
+
+#### GC 阶段 C 质量门
+
+- C3 的三项验收全部达标；
+- 至少一个领域满足切换条件，影子口径与过渡口径的对比报告提交给负责人；
+- 负责人批准后，该领域切换到 `comment_published`。
 
 ### 阶段 1：机会卡只读版
 
@@ -1214,7 +1299,7 @@ interface CreatorDensity {
 - **前置**：G1
 - **目标**：建 `work_problem_judgment`、`judgment_reject`、`supply_search_run` 三张表；按 §6.6.2 编写并注册提示词。
 - **先决条件**：先提交新 AI 任务的注册方案（`linggan_ai_task`、batch 的 task/kind 约束、egress 的 material_class），**由负责人单独批准**后再实施（D-017）。
-- **输入**：引文校验只针对作品原始文本（截至 `as_of` 的 `title` 与 `body_text`）；整篇理解只用 `scope = 'note'` 的结果作辅助（D-017）。
+- **输入**：按 §6.6.2 与 D-026，先确认整篇材料快照是否满足三个条件，并把结论写入 DECISIONS；引文校验只针对作品原始文本；整篇理解只用 `scope = 'note'` 的结果作辅助。
 - **验收**：提示词在现有版本系统中可查，标签定义与 §6.6.2 逐字一致。
 
 #### T2.2 候选召回
@@ -1358,6 +1443,7 @@ interface CreatorDensity {
 
 #### 8.2.1 设定
 
+- 参数使用测试参数集（§6.3）。
 - 领域 `D1`，`period_tz = Asia/Shanghai`，`period_basis = work_published_cohort`。
 - 当前周期 W0 = 2026-11-02（周一）。前四个周期为 W-1 至 W-4。
 - `as_of = 2026-11-10T00:00:00Z`。
@@ -1619,7 +1705,7 @@ WHERE oc.payload->'supply'->>'judgmentStatus' = 'verified'
 <任务编号与名称>
 
 ## 改动摘要
-- 
+-
 
 ## 依赖的现有符号
 | 符号 | 位置（文件:行号） | 用途 |
@@ -1638,14 +1724,14 @@ WHERE oc.payload->'supply'->>'judgmentStatus' = 'verified'
 - 截图（如涉及页面）：
 
 ## §3.8 自检
-1. 
-2. 
-3. 
-4. 
-5. 
-6. 
-7. 
-8. 
+1.
+2.
+3.
+4.
+5.
+6.
+7.
+8.
 
 ## 决定与遗留
 - DECISIONS.md 新增：

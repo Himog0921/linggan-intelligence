@@ -16,7 +16,7 @@
 
 ## 2026-11-12 T0.1b 基线同步与补充勘察
 
-- 状态：done（勘察完成；两项新发现待裁定，不影响 T0.1b 验收）
+- 状态：done（勘察完成；Q-11、Q-12 已由 D-021、D-022 答复）
 - PR：无（T0.1b 只更新文档，未修改代码；工作树 `.worktrees/opportunity-card-20261112`，分支 `claude/opportunity-card-20261112`，基线 `origin/main@4d65e506`）
 - 同步：主工作树 `docs/README.md` 同时有他人未提交改动和上游改动，无法 `pull --ff-only`；按 D-001 停止并询问后，负责人选择独立 worktree。主工作树未改动。迁移文件 203 个（0001–0202），本地 ledger 头 `0202_topic_core_merge_prompts`。
 - 差异：`ad19a4d7..HEAD` 在勘察路径中变更 143 个文件（intelligence 97、local_web 16、evidence 14、migrations 7、data-contracts 7、web app 2；`env.example`/`Cargo.toml`/`package.json` 0）。新增 migration 0196–0202 只涉及内容理解、topic research、ops 交接与 AI 任务/外发约束；未改评论/作品/领域/问题表结构。
@@ -29,4 +29,13 @@
   - 0064 problem 表不再被生产代码写入；0177 无合并/取代/问题级撤销语义，且 `problem_ref UNIQUE` 使 `def_version` 不会变化。
   - OCR/转写存储已存在（`linggan_material_derived_text`、`linggan_material_reading`、`linggan_note_material_fragment`）。
   - HMAC 实现私有，可按 D-013 改 `pub`；`model_secrets` 无通用读取函数。
-- 遗留：Q-11（评论时间覆盖率达不到 D-008 v2 的 90% 门槛，影响 v2 与 `linggan_opportunity_comment_published`，不影响 v1 的 `work_published_cohort`）；Q-12（D-013 的 `LINGGAN_SUPPORT_DIR` 缺省与代码实际缺省不一致，影响 T0.6 密钥路径）。详见 `docs/opportunity/QUESTIONS.md` 与 `docs/opportunity/RECON.md` §7。
+- 遗留：Q-11 由 D-021 答复（v1 保持 `work_published_cohort`，不解析展示文本，采集侧修复移交），并由 D-028 进一步定为目标口径、纳入阶段 C；Q-12 由 D-022 答复（以代码实际缺省为准，提取共享 `pub` 解析函数）。详见 `docs/opportunity/DECISIONS.md`、`docs/opportunity/QUESTIONS.md` 与 `docs/opportunity/RECON.md` §7。
+- 遗留（运维）：支持目录解析在 `model_secrets`、`media_worker_support`、`paddle_ocr.py` 等处存在多处副本；按 D-022 不在本项目内合并。
+
+## 2026-11-12 文档同步：D-021 至 D-031、手册 v1.3 与阶段 C
+
+- 状态：done（仅文档更新；未修改代码、未执行 migration、未写数据库）
+- 内容：按负责人提供的更新版替换 `DECISIONS.md`（D-001 至 D-031）、`playbook.md`（v1.3）与 `GLOSSARY.md`（追加 D-028 至 D-030 术语）；同步更新 `QUESTIONS.md`（Q-11/Q-12 已答复）、`RECON.md` §7.10 与本文件。
+- 影响：新增阶段 C（C1–C4）采集侧任务、`period_basis = comment_published` 目标口径、`linggan_material_comment_platform_time` 只追加表、生产参数恢复为测试参数值、`collection_below_target`/`collection_protocol_changed` 等 flags。
+- 未开始：C1 及之后、T0.2 与其他实现任务；等待负责人明确授权。
+- 待负责人确认（文档内部不一致）：手册 §6.2.1 说资格函数增加 `period_basis` 参数（`linggan_opportunity_eligible_comments(domain_ref, as_of, tz, period_basis)`），但同节下方及 §8 任务卡仍写三参数版本。实现前需确认最终签名；本次未擅自改动负责人文本。

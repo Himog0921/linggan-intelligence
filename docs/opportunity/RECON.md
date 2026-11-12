@@ -160,7 +160,7 @@ $ npm run typecheck / lint / test / build
 - 入库规范化：`plugins/linggan-intelligence-browser/src/db/recordNormalization.js:162`：`publishedAt = normalizeNumber(record.publishedAt || record.createdAt, 0)`，即**缺少发布时间时回退到采集时间**（`createdAt`），无法与真实发布时间区分。`:185` 的 `publishedAtText` 只取 `record.publishedAtText || record.time`。
 - 实际数据（只读聚合，库 `linggan_intelligence_dev`）：comments + replies 包共 31809 条记录，`records[].payload.publishedAt` 为 13 位毫秒 epoch 的只有 **45 条（0.14%）**，其余 31764 条为 `0`；`publishedAtText` 31809 条全部有值，但 76.8% 是带 `-` 的展示日期、16.6% 是“N 天前”相对文本（逐项输出见 §7.3）。
 - API 侧：`crates/intelligence/src/comment_study_catalog/comments.sql:183` 直接写 `'publishedAt', NULL`，所以评论研究目录接口**恒为 null**，即使包里存了值。
-- 结论：D-008 v2 要求的“发布时间可用率 ≥90%”在当前链路上**远未达到**（原始精确 epoch 仅 0.14%）。这是一条新阻塞，已记入 `QUESTIONS.md` Q-11。
+- 结论：D-008 v2 要求的“发布时间可用率 ≥90%”在当前链路上**远未达到**（原始精确 epoch 仅 0.14%）。这是一条新阻塞，已记入 `QUESTIONS.md` Q-11，并由 D-021、D-028 答复。
 
 ### 3.3 commenter_col（平台评论者标识，是否稳定）
 
@@ -448,7 +448,7 @@ text_other|15
 - 精确平台时间覆盖 **45/31809 = 0.14%**；其余 31764 条 `publishedAt=0`。`publishedAtText` 100% 有值，但 76.8% 是带 `-` 的展示日期（最多日精度），16.6% 是“N 天前”相对文本，6.6% 带时间冒号；均不是 UTC 时间戳。
 - 观察表 31771 条与包记录 31809 条相差 38 条，T0.1b 未逐条核对差异原因。
 - API 侧恒为 null：`crates/intelligence/src/comment_study_catalog/comments.sql:183` 写死 `'publishedAt', NULL`。派生视图 `linggan_ci_source` 会从 payload 提取（`database/migrations/0048_comment_intelligence.sql:40-42`），但没有落到评论表或机会卡可用的列。
-- 结论：远未达到 D-008 v2 的“覆盖率 ≥90%”。新阻塞见 `QUESTIONS.md` Q-11。
+- 结论：远未达到 D-008 v2 的“覆盖率 ≥90%”。已记入 `QUESTIONS.md` Q-11，并由 D-021、D-028 答复。
 
 ### 7.4 `linggan_material_domain_usage` 的 as_of 时间列（D-009）
 
@@ -505,11 +505,10 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - HMAC：`fn hmac_sha256_hex(key: &[u8], message: &[u8]) -> String`（`crates/evidence/src/collection_control.rs:1432`）**不是 `pub`**；模块声明是 `mod collection_control;`（`crates/evidence/src/lib.rs:7`），也未公开。现有调用只在同文件 `:686`。RFC 4231 测试在 `:3235-3243`，继续有效。按 D-013，可把函数改为 `pub`（行为不变），不能复制实现。
 - digest version：现有账号 digest 写 `'hmac-sha256-v1'`（`collection_control.rs:690`）；D-013 的评论者版本另定为 `commenter-hmac-sha256-v1`。
 - `model_secrets` 复用性：`LocalFileModelSecrets::from_runtime()` 是私有函数（`crates/intelligence/src/model_secrets.rs:33`），且读取的是 `model-secrets/<workspace>/<reference>` 固定布局，**没有通用的“读取任意密钥文件”函数**。可复用的是路径解析与私有权限校验的写法，不是函数本身。
-- **默认路径不一致**：代码的缺省是 `$HOME/Library/Application Support/Linggan Intelligence`（`model_secrets.rs:39-43`；同样的缺省见 `apps/worker/src/bin/media_worker_support/mod.rs:104-110`、`paddle_ocr.py:19-23`、`docs/runbooks/paddle-ocr-runtime.md:15`），而 D-013 写的是 `$HOME/.linggan-support`。新阻塞见 `QUESTIONS.md` Q-12。
+- **默认路径不一致**：代码的缺省是 `$HOME/Library/Application Support/Linggan Intelligence`（`model_secrets.rs:39-43`；同样的缺省见 `apps/worker/src/bin/media_worker_support/mod.rs:104-110`、`paddle_ocr.py:19-23`、`docs/runbooks/paddle-ocr-runtime.md:15`），而 D-013 写的是 `$HOME/.linggan-support`。已记入 `QUESTIONS.md` Q-12，并由 D-022 答复。
 - 前端只读状态写法（可参照）：`apps/web/src/pages/topics/TopicAutomation.tsx:17-26` 用 `AbortController` + `requestJson` 读取，`useState` 保存，卸载时 abort；`:27-35` 提供重试；`:36-47` 写操作带 `commandRef` 与 `expectedRevision`，成功后用响应替换本地状态；`:48-50` 用 `disabled` / `aria-busy` / `role="status"` 表达未就绪与错误。`requestJson` 在 `apps/web/src/shared/api.ts:52`。机会卡只读页可按同一模式，不需要新的状态库。
 
-### 7.10 新阻塞
+### 7.10 新阻塞（均已答复）
 
-- `QUESTIONS.md` Q-11：评论平台时间精确覆盖率仅 0.14%，达不到 D-008 v2 的 90% 门槛。
-- `QUESTIONS.md` Q-12：D-013 写的 `LINGGAN_SUPPORT_DIR` 缺省路径与代码实际缺省不一致。
-
+- `QUESTIONS.md` Q-11：评论平台时间精确覆盖率仅 0.14%，达不到 D-008 v2 的 90% 门槛。已由 D-021 答复（v1 保持 `work_published_cohort`，不解析展示文本，采集侧修复移交），并受 D-028 修订（`comment_published` 成为阶段 C 的目标口径）。
+- `QUESTIONS.md` Q-12：D-013 写的 `LINGGAN_SUPPORT_DIR` 缺省路径与代码实际缺省不一致。已由 D-022 答复（以代码实际缺省为准，提取共享 `pub` 解析函数）。

@@ -2,12 +2,6 @@
 
 复制自实施手册 §5（2026-11-12 版本）。执行中只增不改；代码、接口、数据库、文档统一使用下列标识，不得自创同义词。
 
-> 状态: 权威当前
-> 最后核对: 2026-11-12
-> 适用范围: 机会卡实施中的术语、代码标识与数据库命名。
-> 事实来源: 实施手册 v1.1 §5（2026-11-12）与现有代码/迁移命名。
-> 冲突时以谁为准: 现有代码与数据库实际命名；本表只约束新实现，不追溯改名。
-
 | 中文 | 代码标识 | 取值或类型 |
 | --- | --- | --- |
 | 用户问题 | `problem` | 实体 |
@@ -39,6 +33,12 @@
 | 首次采集时间 | `observed_at` | UTC 时间戳 |
 | 发布时间 | `published_at` | UTC 时间戳 |
 
+> 状态: 权威当前
+> 最后核对: 2026-11-12
+> 适用范围: 机会卡实施中的术语、代码标识与数据库命名。
+> 事实来源: 实施手册 v1.3 §5（2026-11-12）、DECISIONS D-028 至 D-030，以及现有代码/迁移命名。
+> 冲突时以谁为准: 现有代码与数据库实际命名；本表只约束新实现，不追溯改名。
+
 ## 勘察备注（不修改术语表本身）
 
 - 现有数据库中的 `linggan_material_comment.observed_at` 是“该次观察时间”，不是手册定义的“首次采集时间”；已裁定：机会卡领域使用 `first_observed_at`，见 `DECISIONS.md` D-007。
@@ -62,3 +62,16 @@
 | 特性开关 | `LINGGAN_OPPORTUNITY_CARD` | 仅 `enabled` 为开启 | D-006 |
 | 物理表名前缀 | `linggan_opportunity_` | 例如 `linggan_opportunity_problem` | D-004 |
 | 问题来源引用 | `source_ref` / `source_definition_ref` | 0177 的 `problem_ref` / `definition_ref` | D-014 |
+
+## 2026-11-12 追加（依据 DECISIONS D-028 至 D-030）
+
+| 中文 | 代码标识 | 取值或类型 | 依据 |
+| --- | --- | --- | --- |
+| 统计周期基准（追加取值） | `period_basis` | 目标口径 `comment_published`；过渡口径 `work_published_cohort` | D-028 |
+| 评论平台发布时间 | `comment_published_at` | UTC 时间戳，来自 `linggan_material_comment_platform_time.published_at` | D-028 |
+| 评论平台时间表 | `linggan_material_comment_platform_time` | 只追加，以评论身份为键 | D-028 |
+| 资格排除原因（追加） | `comment_time_unknown` | `comment_published` 口径下没有平台时间 | D-028 |
+| 影子口径 | `shadow` | 同步计算并保存、不展示的口径 | D-028 |
+| 采集目标 | `collection_target_per_period` | 每领域每周 700 条有效评论 | D-029 |
+| 质量标记（追加） | `flags` | `collection_below_target`、`collection_protocol_changed` | D-029、D-030 |
+| 采集协议 | `collection_protocol` | 排序方式、单次上限、触发来源；须有版本 | D-030 |
