@@ -278,5 +278,62 @@ async fn wait_for(
     .unwrap()
 }
 
+#[test]
+#[ignore = "synthetic endpoint contract fixture only"]
+fn synthetic_topic_response_matches_comment_and_reassignment_units() {
+    let prompt = |mode: &str, definitions: serde_json::Value, units: serde_json::Value| {
+        serde_json::json!({"packet":{"contract":"topic-map.single-pass.v1","input":{
+            "mode":mode,"definitions":definitions,"units":units}}})
+        .to_string()
+    };
+    let candidate = serde_json::json!([{"topicRef":"topic-1","definitionRef":"definition-1"}]);
+    let units = serde_json::json!([
+        {"discussionIndex":3,"discussion":{"evidence":[{"fragmentId":"fragment-1"}]}},
+        {"discussionIndex":7,"discussion":{"evidence":[]}}
+    ]);
+    for mode in ["comment", "reassignment"] {
+        let output =
+            wire::topic_response(&prompt(mode, candidate.clone(), units.clone())).unwrap();
+        assert_eq!(output["contract"], "topic-map.single-pass.v1");
+        assert_eq!(output["projection"], serde_json::Value::Null);
+        assert_eq!(output["newTopics"], serde_json::json!([]));
+        let decisions = output["decisions"].as_array().unwrap();
+        assert_eq!(decisions.len(), 2, "{mode}");
+        assert_eq!(
+            (
+                decisions[0]["discussionIndex"].as_i64(),
+                decisions[0]["status"].as_str()
+            ),
+            (Some(3), Some("matched")),
+            "{mode}"
+        );
+        assert_eq!(decisions[0]["matches"][0]["topicRef"], "topic-1");
+        assert_eq!(
+            (
+                decisions[1]["discussionIndex"].as_i64(),
+                decisions[1]["status"].as_str()
+            ),
+            (Some(7), Some("uncertain")),
+            "{mode}"
+        );
+        assert!(decisions
+            .iter()
+            .all(|decision| decision["newTopicId"].is_null()
+                && decision["relations"] == serde_json::json!([])));
+    }
+    let unmatched =
+        wire::topic_response(&prompt("comment", serde_json::json!([]), units)).unwrap();
+    assert!(unmatched["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|decision| decision["status"] == "uncertain"
+            && decision["matches"] == serde_json::json!([])));
+    assert_eq!(
+        wire::topic_response(&prompt("author", candidate, serde_json::json!([]))),
+        None
+    );
+}
+
 #[path = "support/topic_resolution_order.rs"]
 mod resolution_order;

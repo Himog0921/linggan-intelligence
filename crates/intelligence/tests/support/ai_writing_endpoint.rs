@@ -191,7 +191,7 @@ pub(crate) async fn respond(socket: &mut TcpStream, text: &str) {
     socket.shutdown().await.unwrap();
 }
 
-fn topic_response(prompt: &str) -> Option<Value> {
+pub fn topic_response(prompt: &str) -> Option<Value> {
     let root: Value = serde_json::from_str(prompt).ok()?;
     let packet = &root["packet"];
     match packet["contract"].as_str()? {
