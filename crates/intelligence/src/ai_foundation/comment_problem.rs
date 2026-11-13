@@ -68,6 +68,24 @@ async fn definitions_in(
     }
     Ok(json!(result))
 }
+
+/// Reuse the current publication gate without treating its limited evidence list as a count.
+pub(crate) async fn qualified_problem_refs_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+) -> Result<Vec<Uuid>, FoundationError> {
+    let definitions = definitions_in(tx, domain).await?;
+    definitions
+        .as_array()
+        .ok_or(FoundationError::Invalid)?
+        .iter()
+        .map(|definition| {
+            serde_json::from_value(definition["problemRef"].clone())
+                .map_err(|_| FoundationError::Invalid)
+        })
+        .collect()
+}
+
 fn problem_identity(p: &Problem) -> String {
     let normalize = |s: &str| {
         s.split_whitespace()

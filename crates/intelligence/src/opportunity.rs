@@ -3,12 +3,17 @@
 
 mod commenter_hash;
 mod invariants;
+mod mentions;
 mod metric_definition;
 mod platform_time;
 mod stats;
 
 pub use commenter_hash::{COMMENTER_DIGEST_VERSION, CommenterDigest, CommenterDigestError};
 pub use invariants::{InvariantCheck, InvariantReport, check_invariants};
+pub use mentions::{
+    MentionEligibilityCount, MentionProblemReconciliation, MentionSyncError, MentionSyncReport,
+    sync_comment_mentions,
+};
 pub use metric_definition::{
     OpportunityMetricDefinition, OpportunityMetricError, OpportunityMetricParams, Period,
     PeriodBasis, WeekStart, load_current_metric_definition,

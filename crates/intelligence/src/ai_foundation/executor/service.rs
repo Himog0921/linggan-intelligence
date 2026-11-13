@@ -20,6 +20,7 @@ mod content_understanding_deep;
 mod creator_account_research;
 mod creator_research;
 mod note_analysis;
+mod opportunity_sync;
 mod research_call;
 mod topic_research;
 mod work_comparison;
@@ -44,9 +45,19 @@ pub async fn run(
     let mut session = ExecutorSession::acquire(&db, source_revision, concurrency).await?;
     let fence = session.fence();
     let (work_db, work_drain) = (db.clone(), drain.clone());
+    let opportunity_sync = opportunity_sync::OpportunitySync::from_environment();
     let mut work = JoinSet::new();
     work.spawn(async move {
-        work_loop(&work_db, fence, concurrency, secrets, adapter, work_drain).await
+        work_loop(
+            &work_db,
+            fence,
+            concurrency,
+            secrets,
+            adapter,
+            work_drain,
+            opportunity_sync,
+        )
+        .await
     });
     let mut stopping = drain.subscribe();
     let mut heartbeat = tokio::time::interval(Duration::from_secs(5));
@@ -87,8 +98,10 @@ async fn work_loop(
     secrets: Arc<dyn ModelSecretStore>,
     adapter: PiAdapter,
     drain: ModelWorkerDrain,
+    opportunity_sync: Option<Arc<opportunity_sync::OpportunitySync>>,
 ) -> Result<(), ExecutorError> {
     let mut tasks = JoinSet::new();
+    let mut opportunity_jobs = JoinSet::new();
     let mut failure = None;
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -100,6 +113,11 @@ async fn work_loop(
             return failure.map_or(Ok(()), Err);
         }
         tokio::select! {
+            result=opportunity_jobs.join_next(),if !opportunity_jobs.is_empty()=>{
+                if let Some(Err(error))=result {
+                    if let Some(sync)=&opportunity_sync { sync.defer(&error); }
+                }
+            },
             result=tasks.join_next(),if !tasks.is_empty()=>{
                 let result=result.expect("a nonempty JoinSet yields a task").map_err(|_|ExecutorError::TaskFailed).and_then(|r|r);
                 if let Err(error)=result{failure.get_or_insert(error);drain.request();}
@@ -107,13 +125,25 @@ async fn work_loop(
             _=poll.tick()=>{
                 if drain.is_requested(){continue;}
                 if Instant::now() >= automation_scan {
+                    if opportunity_jobs.is_empty() && let Some(sync) = &opportunity_sync {
+                        let sync = sync.clone();
+                        let db = db.clone();
+                        opportunity_jobs.spawn(async move {
+                            if tokio::time::timeout(
+                                Duration::from_secs(AI_LIMITS.drain_grace_seconds()),
+                                sync.run_if_pending(&db),
+                            ).await.is_err() {
+                                sync.defer(&"projection timed out");
+                            }
+                        });
+                    }
                     // Queue production is isolated from execution: one bad source is not a drain request.
                     if let Err(error) = crate::ai_foundation::topic_research_automation::tick(db, &mut automation_cursor).await {
                         eprintln!("topic automation scan deferred: {error}");
                     }
                     automation_scan = Instant::now() + Duration::from_secs(5);
                 }
-                if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery).await{
+                if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery,&opportunity_sync).await{
                     failure.get_or_insert(error);drain.request();
                 }
             }
@@ -129,6 +159,7 @@ async fn fill_slots(
     adapter: &PiAdapter,
     drain: &ModelWorkerDrain,
     recovery: &mut Instant,
+    opportunity_sync: &Option<Arc<opportunity_sync::OpportunitySync>>,
 ) -> Result<(), ExecutorError> {
     if Instant::now() >= *recovery {
         queue::recover_expired(db, fence).await?;
@@ -147,9 +178,14 @@ async fn fill_slots(
             item.defer(db, "executor_draining").await?;
             break;
         }
-        let (db, secrets, adapter) = (db.clone(), secrets.clone(), adapter.clone());
+        let (db, secrets, adapter, opportunity_sync) = (
+            db.clone(),
+            secrets.clone(),
+            adapter.clone(),
+            opportunity_sync.clone(),
+        );
         tasks.spawn(async move {
-            match item.task_key {
+            let result = match item.task_key {
                 TaskKey::ContentUnderstanding => {
                     content_understanding::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
@@ -188,7 +224,14 @@ async fn fill_slots(
                     topic_research::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 _ => Err(ExecutorError::Invalid),
+            };
+            if item.task_key == TaskKey::CommentProblemPairReview
+                && result.is_ok()
+                && let Some(sync) = opportunity_sync
+            {
+                sync.request();
             }
+            result
         });
     }
     Ok(())

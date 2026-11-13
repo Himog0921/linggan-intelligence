@@ -58,6 +58,7 @@ test('existing domain proof coverage is retained and unions across files', () =>
     ['crates/evidence/src/ocr_source.rs', ['material_reading', 'ocr_recognition']],
     ['apps/worker/tests/ocr_cleanup_postgres.rs', ['ai', 'material_reading']],
     ['scripts/test-research-dossier-postgres.sh', ['ai', 'web', 'web_real_chain']],
+    ['scripts/test-opportunity-postgres.sh', ['ai']],
     ['scripts/runtime/prepare-web.sh', ['ai', 'web', 'web_real_chain']],
     ['scripts/local-runtime.sh', ['ai', 'ocr_recognition']],
     ['docs/design/lids/tokens.md', ['web']],
@@ -65,6 +66,19 @@ test('existing domain proof coverage is retained and unions across files', () =>
   ];
   for (const [path, expected] of cases) assert.deepEqual(selected([path]), expected, path);
   assert.deepEqual(selected(['docs/README.md', 'apps/web/src/pages/topics/TopicsPage.tsx', 'crates/evidence/src/ocr_adoption.rs']), ['material_reading', 'web', 'web_real_chain', 'topic']);
+});
+
+test('opportunity changes retain the isolated PostgreSQL proof', () => {
+  for (const path of [
+    'crates/intelligence/src/opportunity/mentions.rs',
+    'crates/intelligence/tests/opportunity_mentions_postgres.rs',
+    'database/migrations/0211_opportunity_comment_mentions.sql',
+    'scripts/test-opportunity-postgres.sh',
+  ]) assert.ok(selected([path]).includes('ai'), path);
+  assert.match(
+    readFileSync(join(root, '.github/workflows/ai-gen1-foundation.yml'), 'utf8'),
+    /bash scripts\/test-opportunity-postgres\.sh/,
+  );
 });
 
 test('page-local UI changes avoid OCR and PostgreSQL proofs; shared and API changes retain them', () => {
