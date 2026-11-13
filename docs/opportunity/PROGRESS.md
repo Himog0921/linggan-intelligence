@@ -311,3 +311,27 @@
 - `check-invariants`：`totalViolations = 0`，I8 = 0、I11 = 0；其余检查仍因 T1 表未建立而不可用。
 - 观察：覆盖率的分母按有效评论口径计算，不完全等于“新增评论身份数”（回复、重复身份与周期归属会改变增量）；本轮只按报告实际返回值记录，不把 60 条新增直接换算为覆盖率增量。
 - 遗留：`00685f28` 需要单独判断页面是否已失效（可先看前台是否仍可访问），下一轮不再自动优先重试；`agreement` 仍缺少真实一致率样本；独立审查与合并授权；共享/生产库迁移仍需单独授权。
+
+## 2026-11-13 G0 确认与 T1 工作包
+
+- 负责人确认：G0 与 RECON 按现有证据范围放行。T0.7 的确定性证明和当时可执行的不变量结果有效；因后续表尚未建立而不可用的不变量不视为已经通过，后续任务建表后必须验证。
+- 工作包：T1.1 评论提及数据、T1.2 问题指标计算。执行者 Codex；基线 `843e75cc`；T1.1 分支 `codex/opportunity-t11-comment-mention`，worktree `.worktrees/opportunity-t11-comment-mention`。代码与共享装配文件由本工作包独占修改；其他工作树、共享主工作树、本地运行库和生产环境不在写入范围。
+- 负责人要求当前代码逻辑一致，不建立两套并行问题身份；采用已存在的 UUID 问题身份，分类版本历史须满足 R12，见 D-035。T1.2 依赖 T1.1；遇到新的规格与现实冲突按 §3.3 停止并询问。
+- 授权与边界：可在一次性隔离测试库中执行测试迁移；真实采集、模型外发、本地运行库及生产环境迁移、生产写入和不可逆处置仍需单独明确授权。不得提高采集并发或绕过现有控制。
+- Q-16 已答复：按 D-036 从 0177 归属独立计算源侧人数并对账，另列机会卡资格排除及发布门槛差异，不新增持久业务计数。
+- Q-17 已答复：按 D-037 以前向迁移修复评论平台时间的 `as_of` 选择；当前视图与资格函数共享选择逻辑。
+- Q-18 已答复：按 D-038 使用首次入档包的协议，协议缺失保持未知，指标和基线按协议分组。
+- Q-19 已答复：按 D-039 共用按时点事实选择逻辑，历史计算以同一密钥计算该时点身份哈希；首次入档表缺少建立时间的限制明确记录。
+- Q-20 已答复：按 D-040 前向修正共享作品作者函数及作品发布时间锚点，补充跨模块回归。
+- 当前状态：T1.1 已实现并在隔离库通过验证；T1.2 正实施 D-037、D-039、D-040 前置修复与指标计算。`0211_opportunity_comment_mentions.sql` 已登记在工作分支的迁移装配文件中；未在本地运行库或生产环境执行。
+
+## 2026-11-13 T1.1 评论提及数据（候选）
+
+- 内容：从 0177 现有归属投影稳定评论与 UUID 问题；记录分类、指标、模型和提示词版本及来源；对每个问题比较源侧与投影侧去重人数，并单列资格和发布门槛差异。已有归属不调用模型；新归属在现有评论研究发布后由同一投影逻辑同步。开关关闭或密钥缺失时不启动机会卡写入。
+- 补充保护：重复同步不新增重复行；身份信息更新时更新派生哈希；同版本密钥与既有哈希不匹配时拒绝写入。源与投影集合一致但观察身份冲突时，自动路径仍记录冲突计数。分类版本变更记录可追溯时点，不伪造此前历史。
+- 执行 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target bash scripts/test-opportunity-postgres.sh`：基础 12 passed，提及专项 4 passed；实际 0177 发布链路使用本机回环合成服务，开启、密钥恢复、关闭、持锁后追平、持表锁时排空五种配置各 1 passed；末尾输出 `Opportunity PostgreSQL proof passed`，并确认临时库、容器和卷已清除。I6、I6b、I8、I11 可用且均为 0；其余依赖尚未建立的表，不记为通过（`incomplete = true`）。
+- 执行 `bash scripts/test-local-runtime-schema.sh`：`Fresh and repeat runtime schema migration passed; retired tables absent.` 使用脚本自建的隔离库，并清理其资源。
+- 执行 `bash scripts/ci-preflight.sh origin/main`：52 passed，`Preflight passed`；`node --test scripts/ci-select.test.mjs`：21 passed。改动 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`：退出码 0、无输出。
+- 基线 `843e75cc` 与候选分别执行 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked`：均退出 101，58 项 `too_many_lines` 错误的位置和内容相同（首次均在既有 `linggan-evidence`）；候选加 `-- -A clippy::too_many_lines` 后完成，退出码 0。原始严格 Clippy 未通过，不能称为通过。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-worker --bin linggan-opportunity --locked`：1 passed，0 failed。
+- 独立审阅完成：此前提出的自动同步、幂等与身份变更、CI 覆盖、分类时间、主调度阻塞、密钥恢复和身份冲突日志问题均已处理；最终增量复核未发现新的阻断问题。审阅者核对代码和测试报告，未独立重跑数据库测试。远端 CI、合并和部署尚未执行。只使用合成数据与隔离测试数据库；未对本地运行库或生产环境执行迁移，也未进行真实采集或模型外发。

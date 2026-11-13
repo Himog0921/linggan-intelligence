@@ -11,6 +11,7 @@ proof_volume="linggan-intelligence-opportunity-proof-${proof_suffix}-data"
 proof_user="opportunity_proof_admin"
 proof_password="$(openssl rand -hex 24)"
 postgres_image="linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1"
+proof_support_dir=""
 
 if [[ ! "$proof_database" =~ ^linggan_intelligence_proof_[0-9]{14}_[0-9]+_[0-9a-f]{8}$ ]] \
   || [[ ! "$proof_container" =~ ^linggan-intelligence-opportunity-proof-[0-9]{14}_[0-9]+_[0-9a-f]{8}$ ]] \
@@ -53,6 +54,11 @@ cleanup() {
   if [[ "$volume_created" -eq 1 ]] && ! docker volume rm "$proof_volume" >/dev/null; then
     echo "proof volume cleanup failed" >&2
     cleanup_failed=1
+  fi
+
+  if [[ -n "$proof_support_dir" ]]; then
+    rm -f "$proof_support_dir/opportunity/commenter-digest.key" || cleanup_failed=1
+    rmdir "$proof_support_dir/opportunity" "$proof_support_dir" || cleanup_failed=1
   fi
 
   if [[ "$cleanup_failed" -ne 0 ]]; then
@@ -99,6 +105,35 @@ proof_database_created=1
 export OPPORTUNITY_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 
 cargo test -p linggan-intelligence --test opportunity_postgres --locked -- --ignored --test-threads=1
+cargo test -p linggan-intelligence --test opportunity_mentions_postgres --locked -- --ignored --test-threads=1
+
+# Exercise the real 0177 publication path with an owned loopback model stub. The synthetic digest
+# key exists only in this temporary private directory and is never printed or committed.
+[[ -d apps/pi-adapter/node_modules ]] || { echo "pi-adapter dependencies are required for the synthetic publication proof" >&2; exit 1; }
+proof_support_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-opportunity-support.XXXXXXXX")"
+chmod 700 "$proof_support_dir"
+mkdir -m 700 "$proof_support_dir/opportunity"
+openssl rand 32 > "$proof_support_dir/opportunity/commenter-digest.key"
+chmod 600 "$proof_support_dir/opportunity/commenter-digest.key"
+for proof_mode in enabled missing_key disabled locked_release locked_drain; do
+  proof_lock=""
+  case "$proof_mode" in
+    enabled) proof_flag=enabled; proof_missing=0 ;;
+    missing_key)
+      proof_flag=enabled; proof_missing=1
+      rm "$proof_support_dir/opportunity/commenter-digest.key"
+      ;;
+    disabled) proof_flag=disabled; proof_missing=0 ;;
+    locked_release) proof_flag=enabled; proof_missing=0; proof_lock=release ;;
+    locked_drain) proof_flag=enabled; proof_missing=0; proof_lock=drain ;;
+  esac
+  LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+    LINGGAN_SUPPORT_DIR="$proof_support_dir" LINGGAN_OPPORTUNITY_CARD="$proof_flag" \
+    OPPORTUNITY_TEST_MISSING_KEY="$proof_missing" OPPORTUNITY_TEST_LOCK_MODE="$proof_lock" \
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
+    cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
+      -- --ignored --exact comment_uses_target_dossier_and_both_permissions --test-threads=1
+done
 
 LINGGAN_LOCAL_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
   cargo run -q -p linggan-worker --bin linggan-opportunity --locked -- \

@@ -300,7 +300,7 @@ docs/opportunity/
 
 - 新表放在 `public` schema，物理表名加前缀 `linggan_opportunity_`（D-004）。下文 DDL 为了可读，省略了前缀。
 - id 类型跟随现有：`domain_ref`、`problem_ref`、`content_ref` 等使用现有的 uuid 或 text 类型（D-014）。下文中 `domain_id BIGINT` 一律读作 `domain_ref` 及其现有类型。
-- 机会卡内部生成的自增主键（如 `problem.id`）保留 `BIGSERIAL`。
+- 问题统一使用已存在的 `problem_ref UUID`，不建立第二套问题身份（D-035）；其他与问题无关的内部自增主键可使用 `BIGSERIAL`。
 - 事实表只增不改（R1）。派生表允许按主键覆盖写入（upsert），因为它们随时可以重算。
 - `collection_snapshot` 冻结后不可变，用数据库触发器禁止 `UPDATE` 和 `DELETE`。
 
@@ -323,62 +323,75 @@ CREATE TABLE metric_definition_current (
 
 -- ===== 问题登记 =====
 CREATE TABLE taxonomy_version (
-  domain_ref      <现有类型>   NOT NULL,
-  version         INT          NOT NULL,
-  created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  note            TEXT,
+  domain_ref      UUID         PRIMARY KEY,
+  version         BIGINT       NOT NULL,
+  updated_at      TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+-- 当前版本行与历史在同一事务更新；不可恢复的旧历史不伪造（D-035）。
+CREATE TABLE taxonomy_version_history (
+  domain_ref      UUID         NOT NULL,
+  version         BIGINT       NOT NULL,
+  created_at      TIMESTAMPTZ  NOT NULL,
   PRIMARY KEY (domain_ref, version)
 );
 CREATE TABLE problem (
-  id                    BIGSERIAL    PRIMARY KEY,
-  domain_ref            <现有类型>   NOT NULL,   -- 跟随 0177 的 domain_ref
-  level                 SMALLINT     NOT NULL CHECK (level IN (1,2,3)),  -- v1 导入一律为 1（D-014）
-  parent_id             BIGINT       REFERENCES problem(id),
-  statement             TEXT         NOT NULL,
+  problem_ref           UUID         PRIMARY KEY,
+  domain_ref            UUID         NOT NULL,
+  level                 INT          NOT NULL,   -- v1 导入一律为 1（D-014）
+  parent_id             UUID         REFERENCES problem(problem_ref),
+  label                 TEXT         NOT NULL,
   def_version           INT          NOT NULL DEFAULT 1,
-  status                TEXT         NOT NULL CHECK (status IN ('active','merged','split')),
-  source_ref            <现有类型>   NOT NULL,   -- 0177 的 problem_ref（D-014）
-  source_definition_ref <现有类型>   NOT NULL,   -- 0177 当前的 definition_ref
+  source_ref            UUID         NOT NULL,   -- 0177 的 problem_ref（D-014）
+  source_definition_ref UUID         NOT NULL,   -- 0177 当前的 definition_ref
   created_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  created_by            TEXT         NOT NULL,
+  updated_at            TIMESTAMPTZ  NOT NULL DEFAULT now(),
   UNIQUE (source_ref)
 );
 CREATE TABLE problem_lineage (
-  id              BIGSERIAL    PRIMARY KEY,
-  from_problem_id BIGINT       NOT NULL REFERENCES problem(id),
-  to_problem_id   BIGINT       NOT NULL REFERENCES problem(id),
-  op              TEXT         NOT NULL CHECK (op IN ('merge','split','rename','reparent')),
-  taxonomy_version INT         NOT NULL,
-  created_at      TIMESTAMPTZ  NOT NULL DEFAULT now(),
-  created_by      TEXT         NOT NULL,
-  CHECK (from_problem_id <> to_problem_id)
+  lineage_ref      UUID         PRIMARY KEY,
+  operation_ref    UUID         NOT NULL,
+  from_problem_ref UUID         NOT NULL REFERENCES problem(problem_ref),
+  to_problem_ref   UUID         NOT NULL REFERENCES problem(problem_ref),
+  relation         TEXT         NOT NULL CHECK (relation IN ('merge','split','rename')),
+  created_at       TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  UNIQUE (operation_ref, from_problem_ref, to_problem_ref, relation),
+  CHECK (from_problem_ref <> to_problem_ref)
 );
 
 -- ===== 派生：评论提及 =====
 CREATE TABLE comment_mention (
   content_ref              UUID        NOT NULL,   -- 评论身份第一部分（D-011）
   comment_external_id      TEXT        NOT NULL,   -- 评论身份第二部分
-  problem_id               BIGINT      NOT NULL REFERENCES problem(id),
-  taxonomy_version         INT         NOT NULL,
+  problem_ref              UUID        NOT NULL REFERENCES problem(problem_ref),
+  taxonomy_version         BIGINT      NOT NULL,
+  metric_def_version       INT         NOT NULL REFERENCES metric_definition(version),
   commenter_hash           TEXT,                   -- HMAC-SHA256 十六进制；评论者未知时为 NULL（D-013）
   commenter_digest_version TEXT        NOT NULL,   -- v1：'commenter-hmac-sha256-v1'
-  source_material_ref      UUID,                   -- 来源观察，只用于溯源
-  source_membership_ref    TEXT        NOT NULL,   -- 0177 membership 的引用，格式见 RECON
+  source_material_ref      UUID        NOT NULL,   -- 来源观察，只用于溯源
+  source_request_ref       UUID        NOT NULL,
+  source_signal_ordinal    INT         NOT NULL,
+  source_membership_ref    TEXT        GENERATED ALWAYS AS
+    (source_request_ref::text || ':' || source_signal_ordinal::text) STORED,
   assigned_by              TEXT        NOT NULL CHECK (assigned_by IN ('ai','human','migrated')),
+  prompt_version           TEXT        NOT NULL,
+  model                    TEXT        NOT NULL,
+  content_hash             TEXT        NOT NULL,
   excluded_reason          TEXT        CHECK (excluded_reason IN ('marketing','commenter_unknown')),
   created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (content_ref, comment_external_id, problem_id, taxonomy_version),
+  PRIMARY KEY (content_ref, comment_external_id, problem_ref, taxonomy_version),
+  FOREIGN KEY (source_request_ref, source_signal_ordinal)
+    REFERENCES linggan_comment_problem_membership(request_ref, signal_ordinal),
   CHECK ((commenter_hash IS NULL) = (excluded_reason IS NOT DISTINCT FROM 'commenter_unknown'))
 );
-CREATE INDEX ON comment_mention (problem_id, taxonomy_version);
+CREATE INDEX ON comment_mention (problem_ref, taxonomy_version);
 -- 作者、作品发布时间、首次采集时间不冗余存储：一律在计算时经 §6.2.1 的资格函数按 as_of 取得，
 -- 以保证 R12（as_of 一致）。creator_self 由资格函数判定，不在本表标记。
 
 -- ===== 派生：问题指标 =====
 CREATE TABLE problem_metric_period (
-  problem_id         BIGINT      NOT NULL REFERENCES problem(id),
+  problem_ref        UUID        NOT NULL REFERENCES problem(problem_ref),
   period_start       DATE        NOT NULL,   -- period_tz 下的周一日期
-  taxonomy_version   INT         NOT NULL,
+  taxonomy_version   BIGINT      NOT NULL,
   metric_def_version INT         NOT NULL,
   k                  INT         NOT NULL CHECK (k >= 0),
   n                  INT         NOT NULL CHECK (n >= 0),
@@ -390,7 +403,7 @@ CREATE TABLE problem_metric_period (
   evidence_tier      TEXT        NOT NULL CHECK (evidence_tier IN ('candidate','established','significant')),
   computed_as_of     TIMESTAMPTZ NOT NULL,
   computed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (problem_id, period_start, taxonomy_version, metric_def_version),
+  PRIMARY KEY (problem_ref, period_start, taxonomy_version, metric_def_version),
   CHECK (k <= n),
   CHECK ((n = 0 AND ci_low IS NULL AND ci_high IS NULL) OR (n > 0 AND ci_low IS NOT NULL AND ci_high IS NOT NULL)),
   CHECK (ci_low IS NULL OR (0 <= ci_low AND ci_low <= ci_high AND ci_high <= 1))
@@ -399,9 +412,9 @@ CREATE TABLE problem_metric_period (
 -- ===== 派生：作者问题集中度 =====
 CREATE TABLE creator_problem_density (
   creator_id         TEXT        NOT NULL,
-  problem_id         BIGINT      NOT NULL REFERENCES problem(id),
+  problem_ref        UUID        NOT NULL REFERENCES problem(problem_ref),
   window_days        INT         NOT NULL,
-  taxonomy_version   INT         NOT NULL,
+  taxonomy_version   BIGINT      NOT NULL,
   metric_def_version INT         NOT NULL,
   k                  INT         NOT NULL CHECK (k >= 0),
   n                  INT         NOT NULL CHECK (n >= 0),
@@ -409,14 +422,14 @@ CREATE TABLE creator_problem_density (
   ci_high            DOUBLE PRECISION,
   sufficient         BOOLEAN     NOT NULL,
   computed_as_of     TIMESTAMPTZ NOT NULL,
-  PRIMARY KEY (creator_id, problem_id, window_days, taxonomy_version, metric_def_version),
+  PRIMARY KEY (creator_id, problem_ref, window_days, taxonomy_version, metric_def_version),
   CHECK (k <= n)
 );
 
 -- ===== 派生：作品回答判定 =====
 CREATE TABLE work_problem_judgment (
   work_id          TEXT        NOT NULL,
-  problem_id       BIGINT      NOT NULL REFERENCES problem(id),
+  problem_ref      UUID        NOT NULL REFERENCES problem(problem_ref),
   problem_def_ver  INT         NOT NULL,
   source           TEXT        NOT NULL CHECK (source IN ('ai','human')),
   content_hash     BYTEA       NOT NULL,
@@ -427,14 +440,14 @@ CREATE TABLE work_problem_judgment (
   reason           TEXT,
   reviewer         TEXT,                   -- human 记录必填
   judged_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (work_id, problem_id, problem_def_ver, source, content_hash, prompt_version, model),
+  PRIMARY KEY (work_id, problem_ref, problem_def_ver, source, content_hash, prompt_version, model),
   CHECK (label = 'none' OR evidence_quote IS NOT NULL),
   CHECK (source = 'ai' OR reviewer IS NOT NULL)
 );
 CREATE TABLE judgment_reject (
   id               BIGSERIAL   PRIMARY KEY,
   work_id          TEXT        NOT NULL,
-  problem_id       BIGINT      NOT NULL,
+  problem_ref      UUID        NOT NULL,
   prompt_version   TEXT        NOT NULL,
   model            TEXT        NOT NULL,
   reason           TEXT        NOT NULL CHECK (reason IN ('invalid_json','invalid_label','missing_quote','quote_not_found','too_long')),
@@ -443,7 +456,7 @@ CREATE TABLE judgment_reject (
 );
 CREATE TABLE supply_search_run (
   id               BIGSERIAL   PRIMARY KEY,
-  problem_id       BIGINT      NOT NULL REFERENCES problem(id),
+  problem_ref      UUID        NOT NULL REFERENCES problem(problem_ref),
   query            TEXT        NOT NULL,
   found            INT         NOT NULL CHECK (found >= 0),
   collected        INT         NOT NULL CHECK (collected >= 0 AND collected <= found),
@@ -456,11 +469,11 @@ CREATE TABLE label_task (
   id               BIGSERIAL   PRIMARY KEY,
   task_type        TEXT        NOT NULL CHECK (task_type IN ('work_problem_judgment')),
   work_id          TEXT        NOT NULL,
-  problem_id       BIGINT      NOT NULL REFERENCES problem(id),
+  problem_ref      UUID        NOT NULL REFERENCES problem(problem_ref),
   stratum          TEXT        NOT NULL,   -- 抽样分层标识
   batch_id         TEXT        NOT NULL,
   created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (task_type, work_id, problem_id, batch_id)
+  UNIQUE (task_type, work_id, problem_ref, batch_id)
 );
 CREATE TABLE label (
   id               BIGSERIAL   PRIMARY KEY,
@@ -494,7 +507,7 @@ CREATE TABLE quality_gate (
 
 -- ===== 读模型 =====
 CREATE TABLE opportunity_card (
-  problem_id       BIGINT      PRIMARY KEY REFERENCES problem(id),
+  problem_ref      UUID        PRIMARY KEY REFERENCES problem(problem_ref),
   payload          JSONB       NOT NULL,   -- 结构见 §6.7
   as_of            TIMESTAMPTZ NOT NULL,
   built_at         TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -558,7 +571,7 @@ CREATE TABLE collection_snapshot (
 
 另外，`first_observed_at > as_of` 的评论在该时点还不存在，既不是有效评论，也不计入任何排除原因。
 
-该评论所属周期 = `linggan_opportunity_period_start(锚点时间, period_tz)`（D-020）。锚点时间按 `period_basis` 取作品发布时间或评论平台发布时间，**同一次计算只用一种**。
+该评论所属周期 = `linggan_opportunity_period_start(锚点时间, period_tz)`（D-020）。锚点时间按 `period_basis` 取作品发布时间或评论平台发布时间，**同一次计算只用一种**。评论平台时间按 D-037 在 `as_of` 时点选择；当前视图与时点查询共用选择逻辑。
 
 切换前，`comment_published` 口径以影子模式同步计算并保存，不在页面展示（D-028）。两个函数的签名在全文统一为四参数，**以此处为准**：
 
@@ -582,7 +595,7 @@ CREATE TABLE collection_snapshot (
 #### 6.2.3 计算 SQL
 
 ```sql
--- 参数：:domain_ref, :problem_id, :tv, :period_start, :as_of, :tz, :period_basis, :digest_version
+-- 参数：:domain_ref, :problem_ref, :tv, :period_start, :as_of, :tz, :period_basis, :digest_version
 WITH e AS (
   SELECT content_ref, comment_external_id
   FROM linggan_opportunity_eligible_comments(:domain_ref, :as_of, :tz, :period_basis)
@@ -593,8 +606,12 @@ fm AS (
   FROM linggan_opportunity_comment_mention m
   JOIN e ON e.content_ref = m.content_ref
         AND e.comment_external_id = m.comment_external_id
-  WHERE m.problem_id = :problem_id
+  JOIN linggan_comment_problem_membership source
+    ON source.request_ref = m.source_request_ref
+   AND source.signal_ordinal = m.source_signal_ordinal
+  WHERE m.problem_ref = :problem_ref
     AND m.taxonomy_version = :tv
+    AND source.created_at <= :as_of
     AND m.excluded_reason IS NULL
     AND m.commenter_hash IS NOT NULL
     AND m.commenter_digest_version = :digest_version
@@ -873,7 +890,7 @@ pub fn evidence_tier(i: &TierInput, p: &TierParams) -> EvidenceTier {
 #### 6.6.4 缓存键
 
 ```
-cache_key = sha256(content_hash || problem_id || problem_def_ver || prompt_version || model)
+cache_key = sha256(content_hash || problem_ref || problem_def_ver || prompt_version || model)
 ```
 
 判定表主键已包含这些字段。提交任务前先查是否已存在，存在就跳过，并用唯一约束兜底（R13）。
@@ -1210,7 +1227,7 @@ interface CreatorDensity {
   - `creator_self` 由资格函数判定，不在本表标记。本表只标记 `commenter_unknown`（D-013）；营销号 v1 不标，在 DECISIONS.md 记录。
   - 0177 判定为“已发布”的问题，其 `mentioners_total` 应当不小于 2。不满足的逐条列出，并分析原因（例如作品不在研究主集合、作者未知）。
 - **验收**：
-  - 迁移后每个问题的去重提及人数与评论研究中的人数一致；不一致的逐条列出原因；
+  - 按 D-036 从 0177 完整归属及稳定评论身份独立计算源侧去重人数，与迁移结果按相同集合逐问题对账；不一致的逐条列出原因；另报机会卡资格排除及发布门槛差异；
   - 增量流程重复运行不产生重复行。
 - **禁止**：在本任务中新建 AI 归属算法。
 
@@ -1524,15 +1541,15 @@ SELECT * FROM creator_problem_density d
 WHERE d.sufficient AND d.n < (SELECT (params->>'creator_min_n')::int FROM metric_definition WHERE version = d.metric_def_version);
 -- I8 谱系不成环（递归检查，深度上限 100）
 WITH RECURSIVE walk(start_id, cur_id, depth) AS (
-  SELECT from_problem_id, to_problem_id, 1 FROM problem_lineage WHERE op IN ('merge','rename')
+  SELECT from_problem_ref, to_problem_ref, 1 FROM problem_lineage WHERE relation IN ('merge','rename')
   UNION ALL
-  SELECT w.start_id, l.to_problem_id, w.depth + 1
-  FROM walk w JOIN problem_lineage l ON l.from_problem_id = w.cur_id AND l.op IN ('merge','rename')
+  SELECT w.start_id, l.to_problem_ref, w.depth + 1
+  FROM walk w JOIN problem_lineage l ON l.from_problem_ref = w.cur_id AND l.relation IN ('merge','rename')
   WHERE w.depth < 100
 )
 SELECT * FROM walk WHERE start_id = cur_id;
 -- I9 读模型中不含撤回内容（接口层还需集成测试）
-SELECT oc.problem_id FROM opportunity_card oc
+SELECT oc.problem_ref FROM opportunity_card oc
 WHERE EXISTS (
   SELECT 1 FROM jsonb_array_elements(oc.payload->'demand'->'sampleVoices') v
   WHERE (v->>'tombstone')::boolean = false
@@ -1543,7 +1560,7 @@ WHERE EXISTS (
     )
 );
 -- I10 未通过质量门的 AI 结果不得被标为 verified
-SELECT oc.problem_id FROM opportunity_card oc
+SELECT oc.problem_ref FROM opportunity_card oc
 WHERE oc.payload->'supply'->>'judgmentStatus' = 'verified'
   AND EXISTS (
     SELECT 1 FROM jsonb_array_elements(oc.payload->'supply'->'works') w

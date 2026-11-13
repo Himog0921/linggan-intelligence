@@ -16,7 +16,7 @@ const paths = {
     'crates/storage-postgres/**', 'apps/api/src/local_web/**',
     'apps/worker/**', 'apps/pi-adapter/**', 'database/migrations/**',
     'scripts/runtime/**', 'scripts/local-runtime.sh',
-    'scripts/test-research-dossier-postgres.sh',
+    'scripts/test-research-dossier-postgres.sh', 'scripts/test-opportunity-postgres.sh',
   ],
   material_reading: [
     'crates/evidence/src/ocr_adoption*', 'crates/evidence/src/ocr_adoption/**',

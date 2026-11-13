@@ -574,3 +574,15 @@ multi_identities|28423  admitted_after_work_first_package|11643
 ### 8.7 负责人裁定（已答复）
 
 - `QUESTIONS.md` Q-13：负责人选 A，固定平台默认顺序，`collection_protocol.sort_mode = "platform_default"`，不实现显式时间排序。见 D-032。C1 只能确认现状是平台默认顺序；平台是否支持时间排序**未验证**，C2 也不依赖该能力。
+
+## 9. T1 补充勘察（2026-11-13，`843e75cc`）
+
+- 问题登记：`database/migrations/0205_opportunity_problem_taxonomy.sql:10-20` 以 `problem_ref UUID` 为主键；`source_ref`、`source_definition_ref` 是已有问题和定义引用。同步入口为同文件的 `linggan_opportunity_sync_problems()`（`:78-111`），谱系解析入口为 `linggan_opportunity_resolve_problem_id(uuid)`（`:113`）。单一 UUID 身份的裁定见 D-035。
+- 分类版本：同文件 `:4-8` 中 `linggan_opportunity_taxonomy_version` 每领域只有一个当前版本和 `updated_at`；`:40-76` 的谱系触发器在 merge/split 时递增它。本表本身不能提供已被覆盖的版本时间。
+- 0177 的归属键为 `(request_ref, signal_ordinal)`（`database/migrations/0177_comment_problem_workflow.sql:51-55`），并非单列 membership ID。`crates/intelligence/src/ai_foundation/comment_problem/publish.rs:106-118` 负责写入；原始评论观察经 `linggan_comment_research_request.source_ref` 关联（`database/migrations/0174_comment_research_execution.sql:26-39`）。T1.1 的 `source_membership_ref` 使用 `<request_ref>:<signal_ordinal>` 可逆编码，关联事实仍由 0177 保存。
+- 评论归属发布发生在 `crates/intelligence/src/ai_foundation/executor/service/comment_problem.rs:156-174` 的已有事务中；该事务随后保存回执并提交（`:176-202`）。新功能不能让关闭开关时的评论研究行为发生变化。
+- `CommenterDigest` 提供 `load()`、`from_key()`、`hash()` 和 `digest_version()`（`crates/intelligence/src/opportunity/commenter_hash.rs`）；生产写入使用 `load()`，测试可用明确的合成密钥。当前配置读取入口为 `load_current_metric_definition()`（`crates/intelligence/src/opportunity/metric_definition.rs:82`）。
+- 基线 `843e75cc` 未发现 `LINGGAN_OPPORTUNITY_CARD` 的代码或环境模板引用（`rg -n 'LINGGAN_OPPORTUNITY_CARD' apps crates env.example database`，无输出）；T1 的写入入口须按 D-006 新增并遵守默认关闭。
+- 逐问题人数：`apps/api/src/local_web/comment_study_command_api.rs:141-149` 的问题接口调用 `comment_problem/read.rs:4-40`；后者每问题最多读取 100 条来源合格依据，不输出去重评论者人数。发布资格在 `comment_problem.rs:38-68` 中检查初始核验的独立作者，不等同于机会卡全部有效提及人数。手册 T1.1 对账口径的冲突见 Q-16。
+- 评论平台时间时点：`0208_comment_platform_time_day_precision.sql:31-47` 的当前视图先按精度选择，`:411-413` 的资格函数直接连接它，未限制时间行创建或其来源包接纳时刻不晚于 `as_of`。Q-17 已由 D-037 裁定，需前向修复并共享一套选择逻辑。
+- 提及投影依赖的现有版本字段：`linggan_opportunity_comment_fact` 的稳定身份和首入档评论者取值见 `database/migrations/0204_opportunity_comment_eligibility.sql:12-68`；评论研究请求的输入指纹见 `0174_comment_research_execution.sql:26-39`；复核调用及其模型引用见 `0040_model_pi.sql:30-36,66-86` 和 `0138_ai_gen1_invocation.sql:34-36`；冻结任务配置的提示词版本见 `0170_ai_prompt_versions.sql:11-24`。所有缺失来源信息必须报错，不以占位值冒充。

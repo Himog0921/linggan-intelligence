@@ -1,10 +1,9 @@
-//! Operator tool for the §8.3 opportunity invariants and the C3 platform-time projection.
-//! Every command is read-only except `project-platform-times`, which appends to the platform-time
-//! table without touching any existing comment table.
+//! Operator tool for opportunity diagnostics, platform-time projection and mention projection.
+//! Mention writes are gated and reuse the existing comment-study memberships.
 
 use linggan_intelligence::opportunity::{
-    check_invariants, current_as_of, load_current_metric_definition,
-    project_comment_platform_times, read_platform_time_report,
+    CommenterDigest, check_invariants, current_as_of, load_current_metric_definition,
+    project_comment_platform_times, read_platform_time_report, sync_comment_mentions,
 };
 use linggan_storage_postgres::Database;
 use std::process::ExitCode;
@@ -13,6 +12,8 @@ use uuid::Uuid;
 const USAGE: &str = "usage:
   linggan-opportunity check-invariants [--schema SCHEMA]
   linggan-opportunity project-platform-times [--schema SCHEMA]
+  linggan-opportunity migrate-comment-mentions [--schema SCHEMA]
+  linggan-opportunity sync-comment-mentions [--schema SCHEMA]
   linggan-opportunity platform-time-report --domain UUID [--as-of RFC3339] [--tz TZ]
                                             [--periods N] [--schema SCHEMA]";
 
@@ -89,6 +90,8 @@ async fn connect(options: &Options) -> Result<Database, Box<dyn std::error::Erro
 async fn run() -> Result<bool, Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let (command, options) = parse_options(&args)?;
+    let opportunity_enabled =
+        opportunity_card_enabled(std::env::var("LINGGAN_OPPORTUNITY_CARD").ok().as_deref());
     match command {
         "check-invariants" => {
             let database = connect(&options).await?;
@@ -101,6 +104,20 @@ async fn run() -> Result<bool, Box<dyn std::error::Error>> {
             let projection = project_comment_platform_times(&database).await?;
             print_json(&projection)?;
             Ok(true)
+        }
+        "migrate-comment-mentions" | "sync-comment-mentions" => {
+            if !opportunity_enabled {
+                return Err("opportunity_card_disabled".into());
+            }
+            let digest = CommenterDigest::load()?;
+            let database = connect(&options).await?;
+            let report = sync_comment_mentions(&database, &digest).await?;
+            let matches = report
+                .reconciliations
+                .iter()
+                .all(|item| item.reasons.is_empty());
+            print_json(&report)?;
+            Ok(matches)
         }
         "platform-time-report" => {
             let domain = options
@@ -141,4 +158,27 @@ async fn run() -> Result<bool, Box<dyn std::error::Error>> {
 fn print_json<T: serde::Serialize>(value: &T) -> Result<(), serde_json::Error> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
+}
+
+fn opportunity_card_enabled(value: Option<&str>) -> bool {
+    value == Some("enabled")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::opportunity_card_enabled;
+
+    #[test]
+    fn opportunity_switch_is_closed_unless_exactly_enabled() {
+        assert!(opportunity_card_enabled(Some("enabled")));
+        for value in [
+            None,
+            Some(""),
+            Some("true"),
+            Some("ENABLED"),
+            Some(" enabled"),
+        ] {
+            assert!(!opportunity_card_enabled(value));
+        }
+    }
 }

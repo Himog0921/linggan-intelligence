@@ -522,6 +522,7 @@ migrate() {
   apply_migration_once "0208_comment_platform_time_day_precision" "$project_root/database/migrations/0208_comment_platform_time_day_precision.sql"
   apply_migration_once "0209_comment_display_time_suffix" "$project_root/database/migrations/0209_comment_display_time_suffix.sql"
   apply_migration_once "0210_comment_display_agreement_skips_iso" "$project_root/database/migrations/0210_comment_display_agreement_skips_iso.sql"
+  apply_migration_once "0211_opportunity_comment_mentions" "$project_root/database/migrations/0211_opportunity_comment_mentions.sql"
 }
 
 case "$command_name" in

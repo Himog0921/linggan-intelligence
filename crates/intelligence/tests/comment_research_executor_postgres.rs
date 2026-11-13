@@ -27,6 +27,9 @@ use uuid::Uuid;
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and owned synthetic loopback provider"]
 async fn comment_uses_target_dossier_and_both_permissions() {
+    let opportunity_enabled = std::env::var("LINGGAN_OPPORTUNITY_CARD").as_deref() == Ok("enabled");
+    let missing_key = std::env::var("OPPORTUNITY_TEST_MISSING_KEY").as_deref() == Ok("1");
+    let lock_mode = std::env::var("OPPORTUNITY_TEST_LOCK_MODE").unwrap_or_default();
     let db = fixture::proof_database("comment_research_execution").await;
     let work = dossier::work(&db).await;
     dossier::current_image_reading(&db).await;
@@ -241,6 +244,25 @@ async fn comment_uses_target_dossier_and_both_permissions() {
     )
     .await
     .unwrap();
+    let mut sync_lock = if lock_mode.is_empty() {
+        None
+    } else {
+        let mut transaction = db.pool().begin().await.unwrap();
+        if lock_mode == "drain" {
+            sqlx::query("LOCK TABLE linggan_opportunity_comment_mention IN ACCESS EXCLUSIVE MODE")
+                .execute(&mut *transaction)
+                .await
+                .unwrap();
+        } else {
+            sqlx::query(
+                "SELECT pg_advisory_xact_lock(hashtextextended('opportunity-mention-sync', 0))",
+            )
+            .execute(&mut *transaction)
+            .await
+            .unwrap();
+        }
+        Some(transaction)
+    };
     let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
     let running = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
         db.clone(),
@@ -375,12 +397,22 @@ async fn comment_uses_target_dossier_and_both_permissions() {
     assert!(materials.iter().any(|material| material["kind"] == "body"
         && material["text"] == format!("{}结尾不能丢失🙂", "完整正文。".repeat(900))));
     for index in 0..4 {
-        let image = materials.iter().find(|material| material["text"]
-            == format!("第{index}行连续的图片正文，完整可用。")).unwrap();
+        let image = materials
+            .iter()
+            .find(|material| material["text"] == format!("第{index}行连续的图片正文，完整可用。"))
+            .unwrap();
         assert_eq!(image["kind"], "image_substantive_text");
         assert_eq!(image["speaker"], "unconfirmed");
-        assert!(image["source"].as_str().is_some_and(|value| !value.is_empty()));
-        assert!(image["unitRef"].as_str().is_some_and(|value| !value.is_empty()));
+        assert!(
+            image["source"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty())
+        );
+        assert!(
+            image["unitRef"]
+                .as_str()
+                .is_some_and(|value| !value.is_empty())
+        );
     }
     assert!(context["availability"].is_object());
     for material in materials {
@@ -417,6 +449,72 @@ async fn comment_uses_target_dossier_and_both_permissions() {
             .unwrap(),
         2
     );
+    if missing_key || lock_mode == "release" {
+        let mentions: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_comment_mention")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            mentions, 0,
+            "publication must continue while projection is unavailable"
+        );
+    }
+    if missing_key {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let key_path = std::path::PathBuf::from(std::env::var_os("LINGGAN_SUPPORT_DIR").unwrap())
+            .join("opportunity/commenter-digest.key");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(key_path)
+            .unwrap()
+            .write_all(&[b's'; 32])
+            .unwrap();
+    }
+    if lock_mode == "release" {
+        sync_lock.take().unwrap().rollback().await.unwrap();
+    }
+    if opportunity_enabled && lock_mode != "drain" {
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            loop {
+                let mentions: i64 =
+                    sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_comment_mention")
+                        .fetch_one(db.pool())
+                        .await
+                        .unwrap();
+                if mentions == 2 {
+                    break;
+                }
+                assert!(
+                    !running.is_finished(),
+                    "executor stopped before opportunity projection"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("published 0177 memberships must be consumed automatically");
+        let ai_rows: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_opportunity_comment_mention WHERE assigned_by='ai'",
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert_eq!(ai_rows, 2);
+    } else if lock_mode != "drain" {
+        let mentions: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_comment_mention")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            mentions, 0,
+            "disabled or unavailable opportunity sync must not affect publication"
+        );
+    }
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'child-a','synthetic restriction')").bind(work).execute(db.pool()).await.unwrap();
     let restricted = research::read(&db, receipt.request_ref).await.unwrap();
     assert_eq!(restricted["sourceAvailable"], false);
@@ -605,7 +703,33 @@ async fn comment_uses_target_dossier_and_both_permissions() {
         before,
         "withdrawn problem definition cannot be sent to independent reviewer"
     );
+    if lock_mode == "drain" {
+        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+            loop {
+                let waiting: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' \
+                     AND query LIKE '%linggan_opportunity_comment_mention%'",
+                )
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+                if waiting > 0 {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("projection must be waiting on the held table lock");
+    }
     drain.request();
-    running.await.unwrap().unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), running)
+        .await
+        .expect("drain must not wait for opportunity projection")
+        .unwrap()
+        .unwrap();
+    if let Some(transaction) = sync_lock {
+        transaction.rollback().await.unwrap();
+    }
     endpoint.finish().await;
 }

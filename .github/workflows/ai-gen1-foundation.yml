@@ -59,6 +59,9 @@ jobs:
       - name: Fresh and repeat runtime schema migration
         if: matrix.segment == 'contracts'
         run: bash scripts/test-local-runtime-schema.sh
+      - name: Opportunity PostgreSQL invariants and projections
+        if: matrix.segment == 'contracts'
+        run: bash scripts/test-opportunity-postgres.sh
       - name: Owned PostgreSQL foundation, transport and writing upgrade
         if: matrix.segment == 'foundation'
         run: bash scripts/test-research-dossier-postgres.sh --ai-foundation 2>&1 | tee artifacts/private/ai-gen1-pr1b/ci-foundation.log
