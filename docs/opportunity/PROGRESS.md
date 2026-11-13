@@ -335,7 +335,7 @@
 - 执行 `bash scripts/ci-preflight.sh origin/main`：52 passed，`Preflight passed`；`node --test scripts/ci-select.test.mjs`：21 passed。改动 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`：退出码 0、无输出。
 - 基线 `843e75cc` 与候选分别执行 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked`：均退出 101，58 项 `too_many_lines` 错误的位置和内容相同（首次均在既有 `linggan-evidence`）；候选加 `-- -A clippy::too_many_lines` 后完成，退出码 0。原始严格 Clippy 未通过，不能称为通过。
 - `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-worker --bin linggan-opportunity --locked`：1 passed，0 failed。
-- 独立审阅完成：此前提出的自动同步、幂等与身份变更、CI 覆盖、分类时间、主调度阻塞、密钥恢复和身份冲突日志问题均已处理；最终增量复核未发现新的阻断问题。审阅者核对代码和测试报告，未独立重跑数据库测试。远端 CI、合并和部署尚未执行。只使用合成数据与隔离测试数据库；未对本地运行库或生产环境执行迁移，也未进行真实采集或模型外发。
+- 独立审阅完成：此前提出的自动同步、幂等与身份变更、CI 覆盖、分类时间、主调度阻塞、密钥恢复和身份冲突日志问题均已处理；最终增量复核未发现新的阻断问题。审阅者核对代码和测试报告，未独立重跑数据库测试。记录此候选时远端 CI、合并和部署尚未执行；后续 CI 与合并回执见下方「T1.1 / T1.2 合并与 T1.3 待决」。只使用合成数据与隔离测试数据库；未对本地运行库或生产环境执行迁移，也未进行真实采集或模型外发。
 
 ## 2026-11-13 T1.2 问题指标计算
 
@@ -351,3 +351,13 @@
 - I1、I2、I3、I6、I6b、I8、I11 的合成场景结果均为 0；未建表或未实现时点检查的项目标为不可用，报告 `incomplete = true`。历史测试另证明未来才出现的 I11 违例不污染旧时点，已存在于查询时点的 I11 违例会拒绝计算并回滚。
 - 已知限制：首次入档表没有建立时间；早于可证明的分类/问题登记或口径定义历史时返回不可用。按领域切换覆盖率与全局 singleton 当前指针不一致，切换任务开始前须按 §3.3 另行裁定。当前为实现并经隔离测试，不代表已合并、部署或获得业务验收；远端 CI 以实际运行结果为准。
 - 本任务超出手册建议的单 PR 代码行数：时点选择、协议分组、版本演进、同一事务的不变量与自动刷新必须共同接入并一起验证；拆开会留下无法满足本任务口径的中间结果。
+
+## 2026-11-13 T1.1 / T1.2 合并与 T1.3 待决
+
+- 负责人指示继续推进上一轮建议的下一步。T1.1 [PR #580](https://github.com/Himog0921/linggan-intelligence/pull/580) 以最终 head `67ebfb57` 合并，main 合并提交 `4db4f0c263508187691e314cd437567408769514`；转为 Ready 后的 [Delivery 43467742630](https://github.com/Himog0921/linggan-intelligence/actions/runs/43467742630) 的所有所选任务和 gate 通过。
+- T1.2 [PR #581](https://github.com/Himog0921/linggan-intelligence/pull/581) 在 #580 合并后改为以 main 为目标，最终 head `fce43b75` 合并，main 合并提交 `263435f38332f92f49200627bde67c6d875292bb`；重设基线后的 [Delivery 43471357125](https://github.com/Himog0921/linggan-intelligence/actions/runs/43471357125) 的所有所选任务和 gate 通过。合并后的 main 与该 head 的文件差异为 0。
+- 执行 `git fetch origin main`，输出 `843e75cc..263435f3  main -> origin/main`；执行 `git worktree add -b codex/opportunity-t13-creator-density .worktrees/opportunity-t13-creator-density origin/main`，输出 `HEAD is now at 263435f3`。共享主工作树的原有未提交改动保持不动。
+- T1.3 工作包：执行者 Codex；分支 `codex/opportunity-t13-creator-density`；worktree `.worktrees/opportunity-t13-creator-density`；基线 `263435f38332f92f49200627bde67c6d875292bb`。只使用隔离测试数据库；本地运行库及生产环境迁移、真实采集和模型外发仍需另行授权。
+- 状态：**blocked**。D-030 的协议分组与作者集中度表和卡片排序之间缺少规则；事实、选项和建议记录在 Q-22，已向负责人询问。答复前不写作者集中度代码、不修改业务规格。
+- 本次文档核对执行 `bash scripts/ci-preflight.sh origin/main`：`tests 52`、`pass 52`、`fail 0`，输出 `Preflight passed; required module proofs and independent review remain separate.`；`git diff --check` 退出码 0。
+- 仅合并代码，未部署，也未对本地运行库或生产环境执行迁移；严格 Clippy 的既有基线失败仍按 T1.1 / T1.2 原记录保留。
