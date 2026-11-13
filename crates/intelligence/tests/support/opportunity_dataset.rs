@@ -16,6 +16,7 @@ pub async fn build(database: &Database) -> Result<(), sqlx::Error> {
 /// C3 overlay: give the already-seeded comment packages a protocol marker and milliseconds-epoch
 /// records. Kept out of `build` so the T0.7 dataset keeps representing the pre-C3 collection.
 pub async fn build_platform_times(database: &Database) -> Result<(), sqlx::Error> {
+    set_projection_clock(database).await?;
     sqlx::raw_sql(PLATFORM_TIME_SQL)
         .execute(database.pool())
         .await?;
@@ -26,9 +27,22 @@ pub async fn build_platform_times(database: &Database) -> Result<(), sqlx::Error
 /// labels. Relative labels must resolve against the record's collectedAt, which the seed sets to
 /// the note's first observation time.
 pub async fn build_legacy_day_times(database: &Database) -> Result<(), sqlx::Error> {
+    set_projection_clock(database).await?;
     sqlx::raw_sql(LEGACY_DAY_TIME_SQL)
         .execute(database.pool())
         .await?;
+    Ok(())
+}
+
+// This fixture represents platform projections that existed just before the fixed AS_OF.
+// Production projection timestamps are never rewritten.
+async fn set_projection_clock(database: &Database) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+         AS $$ SELECT timestamptz '2026-11-09T23:59:59Z' $$",
+    )
+    .execute(database.pool())
+    .await?;
     Ok(())
 }
 

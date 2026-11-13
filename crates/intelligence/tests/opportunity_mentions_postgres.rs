@@ -295,3 +295,129 @@ async fn taxonomy_history_preserves_the_version_at_each_known_time() {
     .unwrap();
     assert_eq!(backwards, 0);
 }
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn global_digest_verifier_blocks_cross_domain_key_mixing_and_bootstraps_safely() {
+    let db = database("opportunity_t12_global_digest").await;
+    seed_memberships(&db).await;
+    let first = CommenterDigest::from_key(vec![42; 32]).unwrap();
+    let wrong = CommenterDigest::from_key(vec![43; 32]).unwrap();
+    sync_comment_mentions(&db, &first).await.unwrap();
+    sqlx::raw_sql(r#"
+ALTER TABLE linggan_comment_research_request DISABLE TRIGGER ALL;
+INSERT INTO linggan_comment_research_request(request_ref,command_ref,domain_ref,work_ref,source_ref,
+ observation_role,knowledge_cutoff,input_hash,input_fingerprint,task_config_ref,batch_ref,method_version,created_at)
+SELECT md5('cross-domain-request')::uuid,md5('cross-domain-command')::uuid,
+ '00000000-0000-4000-8000-000000000002',work_ref,source_ref,observation_role,knowledge_cutoff,
+ input_hash,input_fingerprint,task_config_ref,md5('cross-domain-batch')::uuid,method_version,created_at
+FROM linggan_comment_research_request WHERE request_ref=md5('request-1')::uuid;
+ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
+ALTER TABLE linggan_comment_problem_definition DISABLE TRIGGER ALL;
+INSERT INTO linggan_comment_problem_definition(definition_ref,problem_ref,domain_ref,identity_hash,label,actor,goal,
+ barrier,source_request_ref,source_signal_ordinal,review_invocation_ref,created_at)
+SELECT md5('cross-domain-definition')::uuid,md5('cross-domain-problem')::uuid,
+ '00000000-0000-4000-8000-000000000002',repeat('e',64),'synthetic second domain',actor,goal,barrier,
+ md5('cross-domain-request')::uuid,0,review_invocation_ref,created_at
+FROM linggan_comment_problem_definition WHERE definition_ref='00000000-0000-4000-8000-000000002001';
+ALTER TABLE linggan_comment_problem_definition ENABLE TRIGGER ALL;
+INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
+VALUES(md5('cross-domain-request')::uuid,0,md5('cross-domain-definition')::uuid,
+ '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z');
+"#).execute(db.pool()).await.unwrap();
+    let second_domain = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    let result = linggan_intelligence::opportunity::sync_comment_mentions_for_domain(
+        &db,
+        &wrong,
+        second_domain,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(MentionSyncError::DigestKeyOrSourceMismatch { .. })
+    ));
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_opportunity_comment_mention \
+        WHERE problem_ref=md5('cross-domain-problem')::uuid",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows, 0);
+    sqlx::query("DELETE FROM linggan_opportunity_digest_verifier")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let result = linggan_intelligence::opportunity::sync_comment_mentions_for_domain(
+        &db,
+        &wrong,
+        second_domain,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(MentionSyncError::DigestKeyOrSourceMismatch { .. })
+    ));
+    let markers: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_digest_verifier")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        markers, 0,
+        "old hashes must be verified before initializing the marker"
+    );
+    linggan_intelligence::opportunity::sync_comment_mentions_for_domain(&db, &first, second_domain)
+        .await
+        .unwrap();
+    let rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_opportunity_comment_mention \
+        WHERE problem_ref=md5('cross-domain-problem')::uuid",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(rows, 1);
+    sqlx::query("UPDATE linggan_opportunity_comment_mention SET commenter_hash=repeat('f',64) \
+        WHERE problem_ref='00000000-0000-4000-8000-000000001001' AND comment_external_id='c-work-0-1'")
+        .execute(db.pool()).await.unwrap();
+    let first_domain = uuid::Uuid::parse_str(opportunity_dataset::DOMAIN).unwrap();
+    let corrupt = linggan_intelligence::opportunity::sync_comment_mentions_for_domain(
+        &db,
+        &first,
+        first_domain,
+    )
+    .await;
+    assert!(matches!(
+        corrupt,
+        Err(MentionSyncError::DigestKeyOrSourceMismatch { .. })
+    ));
+    linggan_intelligence::opportunity::sync_comment_mentions_for_domain(&db, &first, second_domain)
+        .await
+        .expect("a corrupt hash in another domain must not block this domain");
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn concurrent_first_digest_initialization_cannot_accept_two_keys() {
+    let db = database("opportunity_t12_digest_concurrency").await;
+    let first = CommenterDigest::from_key(vec![42; 32]).unwrap();
+    let second = CommenterDigest::from_key(vec![43; 32]).unwrap();
+    let (a, b) = tokio::join!(
+        sync_comment_mentions(&db, &first),
+        sync_comment_mentions(&db, &second)
+    );
+    assert_eq!(usize::from(a.is_ok()) + usize::from(b.is_ok()), 1);
+    let markers: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_digest_verifier")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(markers, 1);
+    let losing = if a.is_ok() { &second } else { &first };
+    let retry = sync_comment_mentions(&db, losing).await;
+    assert!(matches!(
+        retry,
+        Err(MentionSyncError::DigestKeyOrSourceMismatch { .. })
+    ));
+}

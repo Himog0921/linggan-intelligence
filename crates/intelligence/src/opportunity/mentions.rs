@@ -28,6 +28,8 @@ pub enum MentionSyncError {
     DigestVersionMismatch { rows: usize },
     #[error("opportunity_mention_digest_key_or_source_mismatch: {rows} rows")]
     DigestKeyOrSourceMismatch { rows: usize },
+    #[error("opportunity_mention_digest_verifier_uninitialized")]
+    DigestVerifierUninitialized,
     #[error("opportunity_mention_migration_ledger_missing")]
     MigrationLedgerMissing,
     #[error("opportunity_mention_sync_busy")]
@@ -107,6 +109,7 @@ struct SourceMention {
 
 async fn read_sources(
     tx: &mut Transaction<'_, Postgres>,
+    domain: Option<Uuid>,
 ) -> Result<Vec<SourceMention>, sqlx::Error> {
     let rows = sqlx::query(
         "SELECT comment.content_public_ref, comment.comment_external_id, problem.problem_ref,
@@ -135,9 +138,11 @@ async fn read_sources(
          LEFT JOIN linggan_model_entry model ON model.model_ref = invocation.model_ref
          CROSS JOIN linggan_local_schema_migration ledger
          WHERE ledger.migration_id = '0211_opportunity_comment_mentions'
+           AND ($1::uuid IS NULL OR problem.domain_ref = $1)
          ORDER BY comment.content_public_ref, comment.comment_external_id, problem.problem_ref,
                   membership.created_at, membership.request_ref, membership.signal_ordinal",
     )
+    .bind(domain)
     .fetch_all(&mut **tx)
     .await?;
     rows.into_iter()
@@ -175,7 +180,7 @@ struct ProblemCounts {
     eligibility: Vec<MentionEligibilityCount>,
 }
 
-type MentionKey = (Uuid, String, Uuid, i64);
+pub(super) type MentionKey = (Uuid, String, Uuid, i64);
 
 struct ExistingDigest {
     hash: Option<String>,
@@ -185,19 +190,23 @@ struct ExistingDigest {
 
 /// An existing digest must still match at least one immutable observation of that comment.
 /// This catches a changed key under the same version without storing another key fingerprint.
-async fn verify_existing_digest(
+pub(super) async fn verify_existing_digest(
     tx: &mut Transaction<'_, Postgres>,
     digest: &CommenterDigest,
+    domain: Option<Uuid>,
 ) -> Result<HashSet<MentionKey>, MentionSyncError> {
     let rows = sqlx::query(
         "SELECT mention.content_ref, mention.comment_external_id, mention.problem_ref,
                 mention.taxonomy_version, mention.commenter_hash, mention.commenter_digest_version,
                 observation.author_external_id
          FROM linggan_opportunity_comment_mention mention
+         JOIN linggan_opportunity_problem problem USING(problem_ref)
          LEFT JOIN linggan_material_comment observation
            ON observation.content_public_ref = mention.content_ref
-          AND observation.comment_external_id = mention.comment_external_id",
+          AND observation.comment_external_id = mention.comment_external_id
+         WHERE ($1::uuid IS NULL OR problem.domain_ref=$1)",
     )
+    .bind(domain)
     .fetch_all(&mut **tx)
     .await?;
     let mut existing = BTreeMap::<MentionKey, ExistingDigest>::new();
@@ -235,18 +244,54 @@ async fn verify_existing_digest(
     Ok(existing.into_keys().collect())
 }
 
+/// Initialize only after every existing hash is verified; later domains share the same marker.
+pub(super) async fn verify_digest_key(
+    tx: &mut Transaction<'_, Postgres>,
+    digest: &CommenterDigest,
+    initialize: bool,
+) -> Result<(), MentionSyncError> {
+    let locked: bool = sqlx::query_scalar(
+        "SELECT pg_try_advisory_xact_lock(hashtextextended('opportunity-digest-verifier',0))",
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if !locked {
+        return Err(MentionSyncError::SyncBusy);
+    }
+    let stored: Option<String> = sqlx::query_scalar(
+        "SELECT key_verifier FROM linggan_opportunity_digest_verifier WHERE digest_version=$1",
+    )
+    .bind(digest.digest_version())
+    .fetch_optional(&mut **tx)
+    .await?;
+    let expected = digest.key_verifier();
+    match stored {
+        Some(value) if value == expected => Ok(()),
+        Some(_) => Err(MentionSyncError::DigestKeyOrSourceMismatch { rows: 1 }),
+        None if !initialize => Err(MentionSyncError::DigestVerifierUninitialized),
+        None => {
+            verify_existing_digest(tx, digest, None).await?;
+            sqlx::query("INSERT INTO linggan_opportunity_digest_verifier(digest_version,key_verifier) VALUES($1,$2)")
+                .bind(digest.digest_version()).bind(expected).execute(&mut **tx).await?;
+            Ok(())
+        }
+    }
+}
+
 async fn collect_eligibility(
     tx: &mut Transaction<'_, Postgres>,
     params: &OpportunityMetricParams,
     counts: &mut BTreeMap<(Uuid, i64), ProblemCounts>,
+    domain: Option<Uuid>,
 ) -> Result<(), MentionSyncError> {
     let basis = match params.period_basis {
         PeriodBasis::WorkPublishedCohort => "work_published_cohort",
         PeriodBasis::CommentPublished => "comment_published",
     };
     let domains: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT DISTINCT domain_ref FROM linggan_opportunity_problem ORDER BY domain_ref",
+        "SELECT DISTINCT domain_ref FROM linggan_opportunity_problem WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref",
     )
+    .bind(domain)
     .fetch_all(&mut **tx)
     .await?;
     let mut published = HashSet::new();
@@ -262,6 +307,7 @@ async fn collect_eligibility(
             AND version.version = mention.taxonomy_version
            JOIN linggan_opportunity_comment_fact fact
              ON fact.content_ref = mention.content_ref AND fact.comment_external_id = mention.comment_external_id
+           WHERE ($3::uuid IS NULL OR problem.domain_ref=$3)
          ), eligible AS MATERIALIZED (
            SELECT domain.domain_ref, candidate.* FROM (SELECT DISTINCT domain_ref FROM source) domain
            CROSS JOIN LATERAL linggan_opportunity_comment_eligibility(
@@ -287,6 +333,7 @@ async fn collect_eligibility(
     )
     .bind(&params.period_tz)
     .bind(basis)
+    .bind(domain)
     .fetch_all(&mut **tx)
     .await?;
     for row in rows {
@@ -374,6 +421,7 @@ async fn reconcile_projected(
     tx: &mut Transaction<'_, Postgres>,
     digest: &CommenterDigest,
     counts: &mut BTreeMap<(Uuid, i64), ProblemCounts>,
+    domain: Option<Uuid>,
 ) -> Result<(), MentionSyncError> {
     let rows = sqlx::query(
         "SELECT mention.problem_ref, mention.taxonomy_version, mention.commenter_hash,
@@ -381,8 +429,10 @@ async fn reconcile_projected(
          FROM linggan_opportunity_comment_mention mention
          JOIN linggan_opportunity_problem problem USING (problem_ref)
          JOIN linggan_opportunity_taxonomy_version version ON version.domain_ref = problem.domain_ref
-          AND version.version = mention.taxonomy_version",
+          AND version.version = mention.taxonomy_version
+         WHERE ($1::uuid IS NULL OR problem.domain_ref=$1)",
     )
+    .bind(domain)
     .fetch_all(&mut **tx)
     .await?;
     let mut mismatched = 0;
@@ -546,6 +596,23 @@ pub async fn sync_comment_mentions(
     database: &Database,
     digest: &CommenterDigest,
 ) -> Result<MentionSyncReport, MentionSyncError> {
+    sync_comment_mentions_scoped(database, digest, None).await
+}
+
+/// Synchronize one domain while enforcing the globally shared digest key.
+pub async fn sync_comment_mentions_for_domain(
+    database: &Database,
+    digest: &CommenterDigest,
+    domain: Uuid,
+) -> Result<MentionSyncReport, MentionSyncError> {
+    sync_comment_mentions_scoped(database, digest, Some(domain)).await
+}
+
+async fn sync_comment_mentions_scoped(
+    database: &Database,
+    digest: &CommenterDigest,
+    domain: Option<Uuid>,
+) -> Result<MentionSyncReport, MentionSyncError> {
     let metric = load_current_metric_definition(database).await?;
     let mut tx = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
@@ -579,13 +646,14 @@ pub async fn sync_comment_mentions(
         sqlx::query_scalar("SELECT synced FROM linggan_opportunity_sync_problems()")
             .fetch_one(&mut *tx)
             .await?;
-    let sources = read_sources(&mut tx).await?;
+    let sources = read_sources(&mut tx, domain).await?;
     validate_sources(&sources)?;
-    let existing = verify_existing_digest(&mut tx, digest).await?;
+    verify_digest_key(&mut tx, digest, true).await?;
+    let existing = verify_existing_digest(&mut tx, digest, domain).await?;
     let mut projection =
         project_sources(&mut tx, &sources, digest, metric.version, &existing).await?;
-    reconcile_projected(&mut tx, digest, &mut projection.counts).await?;
-    collect_eligibility(&mut tx, &metric.params, &mut projection.counts).await?;
+    reconcile_projected(&mut tx, digest, &mut projection.counts, domain).await?;
+    collect_eligibility(&mut tx, &metric.params, &mut projection.counts, domain).await?;
     let report = MentionSyncReport {
         source_memberships: sources.len(),
         unique_comment_problem_pairs: projection.unique_pairs,

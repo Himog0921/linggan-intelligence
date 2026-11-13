@@ -323,7 +323,8 @@
 - Q-18 已答复：按 D-038 使用首次入档包的协议，协议缺失保持未知，指标和基线按协议分组。
 - Q-19 已答复：按 D-039 共用按时点事实选择逻辑，历史计算以同一密钥计算该时点身份哈希；首次入档表缺少建立时间的限制明确记录。
 - Q-20 已答复：按 D-040 前向修正共享作品作者函数及作品发布时间锚点，补充跨模块回归。
-- 当前状态：T1.1 已实现并在隔离库通过验证；T1.2 正实施 D-037、D-039、D-040 前置修复与指标计算。`0211_opportunity_comment_mentions.sql` 已登记在工作分支的迁移装配文件中；未在本地运行库或生产环境执行。
+- Q-21 已答复：按 D-041 先选最新合格详情，再检查发布时间；缺失时记 `period_anchor_missing`。
+- 当前状态：T1.1、T1.2 已实现并通过隔离验证；D-037、D-039、D-040、D-041 的前置修复随 T1.2 交付。0211–0213 已登记在工作分支的迁移装配文件中；未在本地运行库或生产环境执行。
 
 ## 2026-11-13 T1.1 评论提及数据（候选）
 
@@ -335,3 +336,18 @@
 - 基线 `843e75cc` 与候选分别执行 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked`：均退出 101，58 项 `too_many_lines` 错误的位置和内容相同（首次均在既有 `linggan-evidence`）；候选加 `-- -A clippy::too_many_lines` 后完成，退出码 0。原始严格 Clippy 未通过，不能称为通过。
 - `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-worker --bin linggan-opportunity --locked`：1 passed，0 failed。
 - 独立审阅完成：此前提出的自动同步、幂等与身份变更、CI 覆盖、分类时间、主调度阻塞、密钥恢复和身份冲突日志问题均已处理；最终增量复核未发现新的阻断问题。审阅者核对代码和测试报告，未独立重跑数据库测试。远端 CI、合并和部署尚未执行。只使用合成数据与隔离测试数据库；未对本地运行库或生产环境执行迁移，也未进行真实采集或模型外发。
+
+## 2026-11-13 T1.2 问题指标计算
+
+- 工作分支 `codex/opportunity-t12-problem-metrics`，基于 T1.1 提交 `67ebfb57`；工作树 `.worktrees/opportunity-t12-problem-metrics`。前向迁移 0212 修复 D-037、D-039、D-040、D-041 的时间选择；0213 建立协议维度指标、影子版本关联与全局密钥校验标记，已登记装配和 checksum。旧迁移字节不变。
+- 周期计算从口径定义读取窗口和阈值；同协议单独计算分子、分母、Wilson 区间、基线和累计人数。缺少评论者身份保留在分母，未知协议单独成组；空分母输出空区间和原因，基线不足不判显著。输入未变的问题跳过重算；CLI 支持 `--full` 和不写指标表的 `--preview`。未来时点和用旧时点覆盖新结果均明确拒绝。
+- 已启用的现有后台任务按领域串行先同步提及，再计算当前与影子指标；已有归属发布后触发，其他事实变化按现有 `card_rebuild_debounce_seconds` 检查。一个领域的源数据或时点不变量失败不阻止其他领域；每次报告排除、身份冲突和可用的不变量。关闭开关时不启动。首次建立密钥标记前先全库核对旧哈希；无法验证时拒绝，不认领未知密钥。
+- 独立审阅发现的影子版本编号占用、缺失影子、未来时点、历史分类不可用、身份冲突、排除零项、时点不变量、历史预览、跨领域故障及密钥一致性均已修正。最终复核未发现新的明确阻断缺陷；审阅者未独立运行数据库测试。
+- 运行 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target bash /private/tmp/opportunity-t12-logic-proof.sh`：提及 6 passed、时点 3 passed、指标 2 passed；输出 `Opportunity targeted proof passed`，并确认隔离库、容器和卷已清除。定向自动链路另执行 `/private/tmp/opportunity-t12-enabled-proof.sh`：1 passed，覆盖一个领域 I11 违例而健康领域仍更新、无新归属的身份与限制变化。
+- 完整隔离回归 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target bash scripts/test-opportunity-postgres.sh`：基础 12 passed、提及 6 passed、时点 3 passed、指标 2 passed、共享作者调用 1 passed、实际 0177 合成发布链路五种配置各 1 passed；输出 `Opportunity PostgreSQL proof passed` 与隔离资源清除确认。此后只提取发布测试辅助函数，再执行 `/private/tmp/opportunity-t12-enabled-proof.sh`，1 passed。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo check -p linggan-worker --bin linggan-opportunity --locked`：`Finished dev profile`，退出码 0；`cargo test -p linggan-intelligence --lib --locked`：371 passed、0 failed、12 ignored；`cargo test -p linggan-worker --bin linggan-opportunity --locked`：2 passed、0 failed。只对改动 Rust 文件运行 `rustfmt --edition 2024 --config skip_children=true --check`，退出码 0、无输出。
+- `bash scripts/test-local-runtime-schema.sh`：`Fresh and repeat runtime schema migration passed; retired tables absent.`；`bash scripts/ci-preflight.sh origin/main`：52 passed、`Preflight passed`。脚本自建隔离资源均已清除。
+- 严格 `cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked` 退出 101：基线与候选均是既有 `linggan-evidence` 的 58 项 `too_many_lines`，位置和内容相同；加 `-- -A clippy::too_many_lines` 后完成，退出码 0。使用 `-- --cap-lints warn` 复核并拆分本次新增长函数；既有大型评论研究集成测试及其他仓库警告仍在，不声称严格 Clippy 全通过。
+- I1、I2、I3、I6、I6b、I8、I11 的合成场景结果均为 0；未建表或未实现时点检查的项目标为不可用，报告 `incomplete = true`。历史测试另证明未来才出现的 I11 违例不污染旧时点，已存在于查询时点的 I11 违例会拒绝计算并回滚。
+- 已知限制：首次入档表没有建立时间；早于可证明的分类/问题登记或口径定义历史时返回不可用。按领域切换覆盖率与全局 singleton 当前指针不一致，切换任务开始前须按 §3.3 另行裁定。当前为实现并经隔离测试，不代表已合并、部署或获得业务验收；远端 CI 以实际运行结果为准。
+- 本任务超出手册建议的单 PR 代码行数：时点选择、协议分组、版本演进、同一事务的不变量与自动刷新必须共同接入并一起验证；拆开会留下无法满足本任务口径的中间结果。

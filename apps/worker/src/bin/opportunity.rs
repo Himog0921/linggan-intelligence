@@ -2,8 +2,9 @@
 //! Mention writes are gated and reuse the existing comment-study memberships.
 
 use linggan_intelligence::opportunity::{
-    CommenterDigest, check_invariants, current_as_of, load_current_metric_definition,
-    project_comment_platform_times, read_platform_time_report, sync_comment_mentions,
+    CommenterDigest, RebuildMode, check_invariants, current_as_of, load_current_metric_definition,
+    project_comment_platform_times, read_platform_time_report, rebuild_problem_metrics,
+    sync_comment_mentions,
 };
 use linggan_storage_postgres::Database;
 use std::process::ExitCode;
@@ -14,6 +15,7 @@ const USAGE: &str = "usage:
   linggan-opportunity project-platform-times [--schema SCHEMA]
   linggan-opportunity migrate-comment-mentions [--schema SCHEMA]
   linggan-opportunity sync-comment-mentions [--schema SCHEMA]
+  linggan-opportunity rebuild-problem-metrics --domain UUID [--as-of RFC3339] [--full | --preview] [--schema SCHEMA]
   linggan-opportunity platform-time-report --domain UUID [--as-of RFC3339] [--tz TZ]
                                             [--periods N] [--schema SCHEMA]";
 
@@ -45,6 +47,8 @@ struct Options {
     as_of: Option<String>,
     time_zone: Option<String>,
     periods: Option<i32>,
+    full: bool,
+    preview: bool,
 }
 
 fn parse_options(args: &[String]) -> Result<(&str, Options), String> {
@@ -55,6 +59,16 @@ fn parse_options(args: &[String]) -> Result<(&str, Options), String> {
     let mut index = 0;
     while index < flags.len() {
         let flag = flags[index].as_str();
+        if flag == "--full" {
+            options.full = true;
+            index += 1;
+            continue;
+        }
+        if flag == "--preview" {
+            options.preview = true;
+            index += 1;
+            continue;
+        }
         let value = flags
             .get(index + 1)
             .ok_or_else(|| format!("{flag} requires a value"))?;
@@ -119,6 +133,35 @@ async fn run() -> Result<bool, Box<dyn std::error::Error>> {
             print_json(&report)?;
             Ok(matches)
         }
+        "rebuild-problem-metrics" => {
+            if !opportunity_enabled {
+                return Err("opportunity_card_disabled".into());
+            }
+            let domain = options
+                .domain
+                .as_deref()
+                .ok_or("rebuild-problem-metrics requires --domain")?;
+            let domain = Uuid::parse_str(domain).map_err(|_| "--domain must be a UUID")?;
+            let digest = CommenterDigest::load()?;
+            let database = connect(&options).await?;
+            let as_of = match options.as_of {
+                Some(ref value) => value.clone(),
+                None => current_as_of(&database).await?,
+            };
+            if options.full && options.preview {
+                return Err("--full and --preview are mutually exclusive".into());
+            }
+            let mode = if options.preview {
+                RebuildMode::Preview
+            } else if options.full {
+                RebuildMode::Full
+            } else {
+                RebuildMode::Incremental
+            };
+            let report = rebuild_problem_metrics(&database, domain, &as_of, &digest, mode).await?;
+            print_json(&report)?;
+            Ok(true)
+        }
         "platform-time-report" => {
             let domain = options
                 .domain
@@ -166,7 +209,7 @@ fn opportunity_card_enabled(value: Option<&str>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::opportunity_card_enabled;
+    use super::{opportunity_card_enabled, parse_options};
 
     #[test]
     fn opportunity_switch_is_closed_unless_exactly_enabled() {
@@ -180,5 +223,30 @@ mod tests {
         ] {
             assert!(!opportunity_card_enabled(value));
         }
+    }
+
+    #[test]
+    fn rebuild_full_is_an_explicit_switch() {
+        let args = [
+            "rebuild-problem-metrics",
+            "--domain",
+            "example",
+            "--full",
+            "--schema",
+            "proof",
+        ]
+        .map(str::to_owned);
+        let (command, options) = parse_options(&args).unwrap();
+        assert_eq!(command, "rebuild-problem-metrics");
+        assert!(options.full);
+        assert_eq!(options.schema.as_deref(), Some("proof"));
+        let args = ["rebuild-problem-metrics".to_owned()];
+        let (command, options) = parse_options(&args).unwrap();
+        assert_eq!(command, "rebuild-problem-metrics");
+        assert!(!options.full);
+        assert!(!options.preview);
+        let args = ["rebuild-problem-metrics", "--preview"].map(str::to_owned);
+        let (_, options) = parse_options(&args).unwrap();
+        assert!(options.preview);
     }
 }

@@ -30,7 +30,7 @@ pub async fn project_comment_platform_times(
 pub async fn current_as_of(database: &Database) -> Result<String, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT to_char(statement_timestamp() AT TIME ZONE 'UTC',
-                         'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')",
+                         'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
     )
     .fetch_one(database.pool())
     .await
@@ -130,12 +130,13 @@ pub async fn read_platform_time_report(
     .collect();
 
     let timing_violations: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_material_comment_platform_time_current platform
-         JOIN linggan_opportunity_comment_fact fact
+        "SELECT count(*) FROM linggan_opportunity_platform_time_at($1::timestamptz) platform
+         JOIN linggan_opportunity_comment_fact_at($1::timestamptz) fact
            ON fact.content_ref = platform.content_public_ref
           AND fact.comment_external_id = platform.comment_external_id
          WHERE platform.published_at > fact.first_observed_at",
     )
+    .bind(as_of)
     .fetch_one(database.pool())
     .await?;
 

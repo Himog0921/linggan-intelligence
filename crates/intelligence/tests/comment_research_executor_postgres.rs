@@ -24,14 +24,131 @@ use linggan_intelligence::{
 };
 use uuid::Uuid;
 
+async fn seed_periodic_opportunity(db: &linggan_storage_postgres::Database) {
+    sqlx::raw_sql(r#"
+ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER;
+UPDATE linggan_material_content_detail SET published_at=statement_timestamp()-interval '1 day',
+ published_at_source_field='syntheticEpoch',published_at_source_kind='platform_epoch',
+ published_at_precision='second',published_at_parser_version='synthetic'
+WHERE content_public_ref=(SELECT public_ref FROM linggan_material_content WHERE content_external_id='dossier-note');
+ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;
+UPDATE linggan_opportunity_metric_definition SET params=jsonb_set(params,'{card_rebuild_debounce_seconds}','1'::jsonb);
+INSERT INTO observation_domain(domain_ref,name)
+VALUES ('00000000-0000-4000-8000-000000000000','synthetic failing domain');
+INSERT INTO linggan_opportunity_problem(problem_ref,source_ref,source_definition_ref,domain_ref,label)
+VALUES ('00000000-0000-4000-8000-000000000010','00000000-0000-4000-8000-000000000010',
+ '00000000-0000-4000-8000-000000000011','00000000-0000-4000-8000-000000000000','synthetic invalid platform time');
+INSERT INTO linggan_opportunity_taxonomy_version(domain_ref,version)
+VALUES ('00000000-0000-4000-8000-000000000000',1);
+"#).execute(db.pool()).await.unwrap();
+    let fault_package = fixture::submit_package(
+            db, "content_detail", serde_json::json!({"contentExternalId":"synthetic-fault-work"}),
+            serde_json::json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"synthetic-fault-work"},
+                "payload":{"title":"synthetic fault","authorId":"synthetic-fault-author"}}),
+        ).await;
+    let fault_work: Uuid = sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='synthetic-fault-work'")
+            .fetch_one(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) \
+                     VALUES($1,$2,'00000000-0000-4000-8000-000000000000','primary','legacy_domain_migration',$3)")
+            .bind(Uuid::new_v4()).bind(fault_work).bind(fault_package).execute(db.pool()).await.unwrap();
+    let fault_comment = fixture::submit_package(
+            db, "comments", serde_json::json!({"contentExternalId":"synthetic-fault-work"}),
+            serde_json::json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"synthetic-fault-work"},
+                "payload":{"commentId":"synthetic-fault-comment","noteId":"synthetic-fault-work","text":"synthetic","authorId":"synthetic-reader"}}),
+        ).await;
+    sqlx::query("INSERT INTO linggan_material_comment_platform_time(content_public_ref,comment_external_id,published_at,\
+                     precision,source_package_ref,protocol_version,source_kind) \
+                     VALUES($1,'synthetic-fault-comment',statement_timestamp()+interval '1 day','millisecond',$2,1,'epoch')")
+            .bind(fault_work).bind(fault_comment).execute(db.pool()).await.unwrap();
+}
+
+async fn exercise_periodic_identity(
+    db: &linggan_storage_postgres::Database,
+    problems: &serde_json::Value,
+) -> (Uuid, i64) {
+    let problem: Uuid =
+        serde_json::from_value(problems["problems"][0]["problemRef"].clone()).unwrap();
+    let n: i64 = sqlx::query_scalar(
+        "SELECT sum(n)::bigint FROM linggan_opportunity_problem_metric_period \
+            WHERE problem_ref=$1 AND metric_def_version=1",
+    )
+    .bind(problem)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql("ALTER TABLE linggan_material_comment_first_admission DISABLE TRIGGER USER; \
+            DELETE FROM linggan_material_comment_first_admission WHERE comment_external_id='child-a'; \
+            ALTER TABLE linggan_material_comment_first_admission ENABLE TRIGGER USER;")
+            .execute(db.pool()).await.unwrap();
+    comments::reply_with_author(
+        db,
+        "dossier-note",
+        "child-a",
+        "parent-a",
+        "synthetic revision",
+        Some("synthetic-revised-reader"),
+        "2026-10-13T00:00:00Z",
+    )
+    .await;
+    let digest = linggan_intelligence::opportunity::CommenterDigest::load().unwrap();
+    let expected = digest.hash(Some("synthetic-revised-reader")).unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(25), async {
+        loop {
+            let current: Option<String> = sqlx::query_scalar(
+                "SELECT commenter_hash FROM linggan_opportunity_comment_mention \
+                    WHERE comment_external_id='child-a'",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if current.as_deref() == Some(expected.as_str()) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("periodic refresh must synchronize a changed identity without a new membership");
+    (problem, n)
+}
+
+async fn wait_periodic_restriction(
+    db: &linggan_storage_postgres::Database,
+    problem: Uuid,
+    before: i64,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(25), async {
+        loop {
+            let after: i64 = sqlx::query_scalar(
+                "SELECT sum(n)::bigint FROM linggan_opportunity_problem_metric_period \
+                    WHERE problem_ref=$1 AND metric_def_version=1",
+            )
+            .bind(problem)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if after == before - 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("periodic refresh must remove a restricted comment from the denominator");
+}
+
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and owned synthetic loopback provider"]
 async fn comment_uses_target_dossier_and_both_permissions() {
     let opportunity_enabled = std::env::var("LINGGAN_OPPORTUNITY_CARD").as_deref() == Ok("enabled");
     let missing_key = std::env::var("OPPORTUNITY_TEST_MISSING_KEY").as_deref() == Ok("1");
     let lock_mode = std::env::var("OPPORTUNITY_TEST_LOCK_MODE").unwrap_or_default();
+    let periodic = std::env::var("OPPORTUNITY_TEST_PERIODIC").as_deref() == Ok("1");
     let db = fixture::proof_database("comment_research_execution").await;
     let work = dossier::work(&db).await;
+    if periodic {
+        seed_periodic_opportunity(&db).await;
+    }
     dossier::current_image_reading(&db).await;
     comments::comment_with_author(
         &db,
@@ -504,6 +621,40 @@ async fn comment_uses_target_dossier_and_both_permissions() {
         .await
         .unwrap();
         assert_eq!(ai_rows, 2);
+        tokio::time::timeout(std::time::Duration::from_secs(25), async {
+            loop {
+                let versions: i64 = sqlx::query_scalar("SELECT count(DISTINCT metric_def_version) \
+                    FROM linggan_opportunity_problem_metric_period metric \
+                    JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE problem.domain_ref=$1")
+                    .bind(dossier::DOMAIN).fetch_one(db.pool()).await.unwrap();
+                if versions == 2 { break; }
+                assert!(!running.is_finished(), "executor stopped before metric refresh");
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
+        }).await.expect("published memberships must refresh both metric bases");
+        if periodic {
+            let global = linggan_intelligence::opportunity::check_invariants(&db)
+                .await
+                .unwrap();
+            assert_eq!(
+                global
+                    .checks
+                    .iter()
+                    .find(|check| check.id == "I11")
+                    .unwrap()
+                    .violations,
+                1
+            );
+            let fault_rows: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM linggan_opportunity_problem_metric_period metric \
+                JOIN linggan_opportunity_problem problem USING(problem_ref) \
+                WHERE problem.domain_ref='00000000-0000-4000-8000-000000000000'",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert_eq!(fault_rows, 0, "the faulty domain must not commit metrics");
+        }
     } else if lock_mode != "drain" {
         let mentions: i64 =
             sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_comment_mention")
@@ -514,8 +665,22 @@ async fn comment_uses_target_dossier_and_both_permissions() {
             mentions, 0,
             "disabled or unavailable opportunity sync must not affect publication"
         );
+        let metrics: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_problem_metric_period")
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+        assert_eq!(metrics, 0);
     }
+    let previous_n = if periodic {
+        Some(exercise_periodic_identity(&db, &problems).await)
+    } else {
+        None
+    };
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'child-a','synthetic restriction')").bind(work).execute(db.pool()).await.unwrap();
+    if let Some((problem, before)) = previous_n {
+        wait_periodic_restriction(&db, problem, before).await;
+    }
     let restricted = research::read(&db, receipt.request_ref).await.unwrap();
     assert_eq!(restricted["sourceAvailable"], false);
     assert!(restricted["result"].is_null());

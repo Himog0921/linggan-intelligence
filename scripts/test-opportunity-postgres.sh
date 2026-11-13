@@ -106,6 +106,11 @@ export OPPORTUNITY_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_passwo
 
 cargo test -p linggan-intelligence --test opportunity_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_mentions_postgres --locked -- --ignored --test-threads=1
+cargo test -p linggan-intelligence --test opportunity_asof_postgres --locked -- --ignored --test-threads=1
+cargo test -p linggan-intelligence --test opportunity_metrics_postgres --locked -- --ignored --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-evidence --test creator_discovery_postgres --locked \
+    -- --ignored --exact profile_only_author_uses_the_shared_as_of_owner --test-threads=1
 
 # Exercise the real 0177 publication path with an owned loopback model stub. The synthetic digest
 # key exists only in this temporary private directory and is never printed or committed.
@@ -117,8 +122,9 @@ openssl rand 32 > "$proof_support_dir/opportunity/commenter-digest.key"
 chmod 600 "$proof_support_dir/opportunity/commenter-digest.key"
 for proof_mode in enabled missing_key disabled locked_release locked_drain; do
   proof_lock=""
+  proof_periodic=0
   case "$proof_mode" in
-    enabled) proof_flag=enabled; proof_missing=0 ;;
+    enabled) proof_flag=enabled; proof_missing=0; proof_periodic=1 ;;
     missing_key)
       proof_flag=enabled; proof_missing=1
       rm "$proof_support_dir/opportunity/commenter-digest.key"
@@ -130,6 +136,7 @@ for proof_mode in enabled missing_key disabled locked_release locked_drain; do
   LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
     LINGGAN_SUPPORT_DIR="$proof_support_dir" LINGGAN_OPPORTUNITY_CARD="$proof_flag" \
     OPPORTUNITY_TEST_MISSING_KEY="$proof_missing" OPPORTUNITY_TEST_LOCK_MODE="$proof_lock" \
+    OPPORTUNITY_TEST_PERIODIC="$proof_periodic" \
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
     cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
       -- --ignored --exact comment_uses_target_dossier_and_both_permissions --test-threads=1

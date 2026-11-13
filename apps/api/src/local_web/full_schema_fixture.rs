@@ -333,6 +333,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0209_comment_display_time_suffix.sql"),
     include_str!("../../../../database/migrations/0210_comment_display_agreement_skips_iso.sql"),
     include_str!("../../../../database/migrations/0211_opportunity_comment_mentions.sql"),
+    include_str!("../../../../database/migrations/0212_opportunity_platform_time_as_of.sql"),
+    include_str!("../../../../database/migrations/0213_opportunity_problem_metric_period.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -484,4 +486,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0209_comment_display_time_suffix','43bc61e4ee5fd8f394492cd920efdee7e7e9baa938297c8a4c38df16311310d4');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0210_comment_display_agreement_skips_iso','a159d37671a012f0db38063730c24ab3f7e04a76c38871c8ea75c4ac13913a01');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0211_opportunity_comment_mentions','a59bf98fe1110037507c6a9db31f4581d4b82847e44f2370320c01e2f64cd49a');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0212_opportunity_platform_time_as_of','f09b6c6ee065c5f95da1d2fbb4bd9c18ba552dbae2c428960af92469ced75aeb');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0213_opportunity_problem_metric_period','ab38158b2465f1a2adef299ec78372d1b810c37440c5243f079f85d5dc545c6d');\n",
 );
