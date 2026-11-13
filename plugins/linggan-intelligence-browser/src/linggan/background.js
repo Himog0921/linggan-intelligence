@@ -56,6 +56,10 @@ const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
 const CAPTURE_DELIVERY_REJECTED = 'capture_delivery_rejected';
 let flushingOutbox = null;
 let creatingMediaWorker = null;
+// Tabs opened or reused for an approved collection task. The content script asks about its
+// own tab once at document_end; only a member installs the passive API capture bridge that
+// early. This is tab ownership, not a persistent list of browsed pages.
+const dispatchedCollectionTabIds = new Set();
 
 async function producerInstanceId() {
   const stored = await chrome.storage.local.get(PRODUCER_INSTANCE_KEY);
@@ -1228,6 +1232,7 @@ async function runDispatchedTask() {
     const tab=prior?.tabId ? await chrome.tabs.get(prior.tabId).catch(()=>null) : null;
     const samePage=tab && new URL(tab.url || 'about:blank').pathname.split('/').includes(contentExternalId) && /^https:\/\/([^.]+\.)?xiaohongshu\.com\//i.test(tab.url || '');
     opened=samePage ? {windowId:prior.windowId,tabId:prior.tabId} : await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
+    markDispatchedCollectionTab(opened?.tabId);
     if (!samePage && prior) await detailPageNavigationGrantStore.closeRetained(prior.grantKey);
   } catch {
     if (navigationGrant?.sessionRef) {
@@ -1466,18 +1471,33 @@ async function openTaskWindow(capability, targetValue, executionSourceUrl = '') 
   const created = await chrome.windows.create({ url, focused: false, type: 'normal' });
   const tabId = Number(created?.tabs?.[0]?.id || 0) || null;
   if (tabId) {
+    dispatchedCollectionTabIds.add(tabId);
     await chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => {});
   }
   return { windowId: created?.id ?? null, tabId };
+}
+
+/// 页面在同一次任务里被续用（深采分段）时，它仍然属于采集窗口。
+function markDispatchedCollectionTab(tabId) {
+  const id = Number(tabId || 0);
+  if (id) dispatchedCollectionTabIds.add(id);
 }
 
 /// 采集窗口用完即关。失败也要关：留下的僵尸窗口会一直吃内存。
 async function closeCollectionWindow(windowId) {
   if (!windowId) return;
   try {
-    await chrome.windows.remove(windowId);
-  } catch {
-    // 窗口可能已被人手动关掉，那不是错误。
+    const tabs = await chrome.tabs.query({ windowId }).catch(() => []);
+    for (const tab of Array.isArray(tabs) ? tabs : []) {
+      const tabId = Number(tab?.id || 0);
+      if (tabId) dispatchedCollectionTabIds.delete(tabId);
+    }
+  } finally {
+    try {
+      await chrome.windows.remove(windowId);
+    } catch {
+      // 窗口可能已被人手动关掉，那不是错误。
+    }
   }
 }
 
@@ -1509,6 +1529,12 @@ chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
   const action = String(message.action || '').trim();
   Promise.resolve().then(async () => {
     if (action === LINGGAN_RUNTIME_ACTION.TOGGLE_DASHBOARD) return openDashboard();
+    if (action === LINGGAN_RUNTIME_ACTION.IS_DISPATCHED_COLLECTION_TAB) {
+      const tabId = Number(sender?.tab?.id || 0);
+      return {
+        dispatched: Boolean(tabId && dispatchedCollectionTabIds.has(tabId)),
+      };
+    }
     if (action === LINGGAN_RUNTIME_ACTION.GET_FLYWHEEL_CONFIG || action === LINGGAN_RUNTIME_ACTION.SAVE_FLYWHEEL_CONFIG) return getLingganStatus();
     if (action === LINGGAN_RUNTIME_ACTION.RUN_DISPATCHED_TASK) return runDispatchedTask();
     if (action === LINGGAN_RUNTIME_ACTION.GET_EXECUTION_STATION_STATUS) {

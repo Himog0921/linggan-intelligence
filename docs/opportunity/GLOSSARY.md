@@ -63,13 +63,16 @@
 | 物理表名前缀 | `linggan_opportunity_` | 例如 `linggan_opportunity_problem` | D-004 |
 | 问题来源引用 | `source_ref` / `source_definition_ref` | 0177 的 `problem_ref` / `definition_ref` | D-014 |
 
-## 2026-11-12 追加（依据 DECISIONS D-028 至 D-030）
+## 2026-11-12 追加（依据 DECISIONS D-028 至 D-030、D-034）
 
 | 中文 | 代码标识 | 取值或类型 | 依据 |
 | --- | --- | --- | --- |
 | 统计周期基准（追加取值） | `period_basis` | 目标口径 `comment_published`；过渡口径 `work_published_cohort` | D-028 |
 | 评论平台发布时间 | `comment_published_at` | UTC 时间戳，来自 `linggan_material_comment_platform_time.published_at` | D-028 |
-| 评论平台时间表 | `linggan_material_comment_platform_time` | 只追加，以评论身份为键 | D-028 |
+| 评论平台时间表 | `linggan_material_comment_platform_time` | 只追加，以评论身份 + 精度为键 | D-028、D-034 |
+| 时间精度 | `precision` | `millisecond`（epoch）；`day`（展示日期，存上海当地零点） | D-034 |
+| 时间来源 | `source_kind` | `epoch`、`display_full_date`、`display_month_day`、`display_relative` | D-034 |
+| 日精度采集时刻 | `collectedAt` | 记录自身 13 位毫秒；相对时间以此为推算基准 | D-034 |
 | 资格排除原因（追加） | `comment_time_unknown` | `comment_published` 口径下没有平台时间 | D-028 |
 | 影子口径 | `shadow` | 同步计算并保存、不展示的口径 | D-028 |
 | 采集目标 | `collection_target_per_period` | 每领域每周 700 条有效评论 | D-029 |

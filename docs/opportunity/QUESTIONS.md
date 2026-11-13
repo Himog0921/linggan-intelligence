@@ -2,11 +2,11 @@
 
 > 状态: 草案
 > 最后核对: 2026-11-12
-> 适用范围: 机会卡实施中的阻塞问题记录；Q-01 至 Q-14 已答复。
+> 适用范围: 机会卡实施中的阻塞问题记录；Q-01 至 Q-15 已答复。
 > 事实来源: T0.1/T0.1b/C1 勘察与负责人答复记录。
 > 冲突时以谁为准: DECISIONS.md 的已裁定内容；未裁定问题不按假设实现。
 
-当前裁定状态：Q-01 至 Q-14 已答复（2026-11-12），裁定内容以 `DECISIONS.md` 为准。
+当前裁定状态：Q-01 至 Q-15 已答复（2026-11-12），裁定内容以 `DECISIONS.md` 为准。
 
 记录规则：每项先写事实与证据，再写为什么阻塞、可选方案和需要负责人裁定的事项。未裁定前不按假设继续实现。
 
@@ -181,3 +181,19 @@
   - C. 暂停机会卡实现，先完成阶段 C 采集扩容，再重新出分布报告；最保守。
 - **需要裁定**：选 A/B/C；若选 A，确认新周期长度，以及是否仍以 `work_published_cohort` 为 v1 口径。
 - **答复（负责人，2026-11-12）**：不按当前库的周期分布裁定。前端采集已手动暂停一个多月，数据库反映的是暂停状态，不代表项目设计或采集能力。保持 `period = week` 与 `period_basis = work_published_cohort`；D-024 分布报告保留为基线观察，采集恢复后重新运行，届时再判断周期口径。实现继续按手册推进。见 D-033。
+
+## Q-15 派发会话拿不到评论平台时间，C4 与 `comment_published` 口径如何推进
+
+- **事实**（2026-11-12 C4 第 1 轮真实采集与只读查询）：
+  - 三个 `deep_archive` 批次共 10 个作品、100 条评论记录、95 条回复记录。考研与自闭症两批在扩展重载后执行，评论包已带 `collectionProtocol.version = 1`、`sortMode = platform_default`，但两批共 60 条评论记录与 56 条回复记录全部为 `publishedAt = null`、`sourceTier = dom`、`qualityReason = api_unobserved_dom_fallback`；ADHD 批在重载前执行，无协议字段且 `publishedAt` 写 `0`。
+  - 全库历史 31928 条评论/回复记录中，只有 2026-08-31 的 4 个包（用户前台手动批量采集）有 API 记录与毫秒平台时间；其余所有日期、包括全部派发详情会话，API 记录数为 0。
+  - 插件 API 优先路径在页面中直接 `fetch('/api/sns/web/v2/comment/page', { credentials: 'include' })`，不带签名头（`plugins/linggan-intelligence-browser/src/injected/xhsApiCapture.js:368`、`src/platforms/xhs/commentApi.js:803-824`）；实测未签名请求被平台网关拒绝（HTTP 500 `create invoker failed, service: jarvis-gateway-default`）。
+  - 派发会话用 `chrome.windows.create({ focused: false })` 打开详情页（`src/linggan/background.js:1466`）；能提供签名的页面自身分页流量在现有记录中没有被捕获为评论快照。
+  - 覆盖率报告：ADHD 7118 条、考研自习 159 条、自闭症干预 282 条有效评论，有平台时间均为 0；`project-platform-times` 写入 0 条。
+- **为什么阻塞**：D-028 把 `comment_published` 定为目标口径，C3 只投影 `collectionProtocol.version = 1` 包中的有效 `publishedAt`。现在派发会话无法产生任何平台时间，C4 无法补齐历史，影子指标即使接入也恒为 0；这不是频率、冷却或授权问题，不能靠重试解决。
+- **可选方案**：
+  - A. 先做一次前台诊断：人工在前台打开一篇笔记，确认页面自身的评论分页请求是否被注入脚本捕获，再决定修复方式。成本最低，不修改代码。推荐。
+  - B. 授权修复插件采集路径（在独立分支实现并评审），让评论 API 请求带签名，或确保页面自身分页流量被捕获；修完后重跑 C4。
+  - C. 暂缓 `comment_published` 口径，维持 `work_published_cohort`，C4 只保留作品级覆盖率报告，等插件修复后再启用目标口径。
+- **需要裁定**：选 A/B/C；若选 B，需明确允许在插件内新增签名请求实现，并确认不触碰频率限制、风险冷却与并发上限。修复前不得把 `comment_published` 影子指标标为可用。
+- **答复（负责人，2026-11-12）**：选 A 的前半段事实成立，但不再继续追 API 修复；约 10 轮探针后确认页面自身分页流量无法作为评论快照捕获。改为采用已经稳定拿到的**日精度展示时间**：`publishedAtText` 覆盖全部评论/回复，按 D-034 以 `precision = 'day'` 入库；相对时间按该条记录自己的采集时刻推算；epoch 仍优先。新采集与历史回填同时进行。C4 的真实采集不再以拿到毫秒 epoch 为前置条件。见 D-034。

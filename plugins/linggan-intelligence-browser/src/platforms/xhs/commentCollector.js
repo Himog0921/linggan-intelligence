@@ -10,11 +10,18 @@ import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
 import { buildXhsCommentCollectionReceipt } from './captureReceipt.js';
 import {
   buildXhsCommentsFromSnapshot,
+  commentPlatformTimesFromSnapshot,
+  fetchXhsJsonViaBridge,
+  hydrateXhsCommentSnapshot,
+  isXhsCommentApiBridgeRequested,
+  mergeXhsCommentSnapshots,
+  readPassiveXhsCommentSnapshot,
+  readXhsSsrCommentPlatformTimes,
+  requestXhsCommentCaptureProbe,
   requestXhsCommentSnapshot,
   startFreshXhsCommentSnapshot,
-  hydrateXhsCommentSnapshot,
-  mergeXhsCommentSnapshots,
-  fetchXhsJsonViaBridge,
+  xhsCommentApiBridgeRequestedAt,
+  xhsCommentApiResourceProbe,
 } from './commentApi.js';
 
 const DEFAULT_DOM_TOP_UP_MAX_NO_NEW = 3;
@@ -113,6 +120,12 @@ function getCommentSurfaceFingerprint(container) {
   return `${items.length}:${ids}:${signals.hasEndMarker ? 'end' : 'open'}`;
 }
 
+let lastScrollProbe = null;
+
+export function xhsCommentScrollProbe() {
+  return lastScrollProbe;
+}
+
 async function loadMoreCommentSurface(container, distance = DEFAULT_COMMENT_SCROLL_DISTANCE, {
   actionGate = createCommentActionGate(),
   shouldStop = () => false,
@@ -123,23 +136,54 @@ async function loadMoreCommentSurface(container, distance = DEFAULT_COMMENT_SCRO
   await waitIfPaused();
   if (shouldStop() || !await actionGate.before({ kind: 'dom_scroll' })) return false;
   const before = getCommentSurfaceFingerprint(container);
-  const beforeScrollTop = Number(scrollParent.scrollTop || 0);
+  const intoView = revealCommentSurface(container);
+  const readTop = () => scrollParent === document.documentElement || scrollParent === document.body
+    ? Number(window.scrollY || scrollParent.scrollTop || 0)
+    : Number(scrollParent.scrollTop || 0);
+  const beforeScrollTop = readTop();
   const beforeScrollHeight = Number(scrollParent.scrollHeight || 0);
-  scrollParent.scrollBy({ top: distance, behavior: 'auto' });
+  if (scrollParent === document.documentElement || scrollParent === document.body) {
+    window.scrollBy({ top: distance, behavior: 'auto' });
+  } else {
+    scrollParent.scrollBy({ top: distance, behavior: 'auto' });
+  }
   const changed = await waitForCondition(() => {
     if (hasXhsCollectionRiskSignal()) return true;
     const current = getActiveCommentsContext().container || container;
     const signals = readCommentSignalsSafe(current);
-    const positionAdvanced = Number(scrollParent.scrollTop || 0) > beforeScrollTop;
+    const positionAdvanced = readTop() > beforeScrollTop;
     const surfaceExpanded = Number(scrollParent.scrollHeight || 0) > beforeScrollHeight;
     return signals.hasEndMarker
       || getCommentSurfaceFingerprint(current) !== before
       || positionAdvanced
       || surfaceExpanded;
   }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 140);
+  lastScrollProbe = {
+    target: String(scrollParent.tagName || '').toLowerCase(),
+    intoView,
+    beforeTop: Math.round(beforeScrollTop),
+    afterTop: Math.round(readTop()),
+    beforeHeight: Math.round(beforeScrollHeight),
+    afterHeight: Math.round(Number(scrollParent.scrollHeight || 0)),
+    changed,
+  };
   await actionGate.after({ kind: 'dom_scroll', changed });
   await waitIfPaused();
   return changed;
+}
+
+// The comment API request is gated on the comment panel entering the viewport, and a
+// dispatched detail tab starts at the top of the note. Bring the panel in once so the
+// page's own signed request can fire; later calls scroll incrementally from there.
+function revealCommentSurface(container) {
+  try {
+    const rect = container.getBoundingClientRect();
+    if (rect.bottom > 0 && rect.top < window.innerHeight) return false;
+    container.scrollIntoView({ block: 'end', behavior: 'auto' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Aggregate diagnostics only: no URLs, credentials, IDs or comment text. These identify
@@ -292,6 +336,83 @@ export function apiReplyTraversalExhausted(snapshot = {}) {
 
 const reusableApiSessions=new Map();
 
+function commentDisplayTimeTextSamples(comments = [], limit = 8) {
+  const counts = new Map();
+  (Array.isArray(comments) ? comments : []).forEach((comment) => {
+    if (Number(comment?.publishedAt) > 0) return;
+    const text = String(comment?.publishedAtText || comment?.time || '').trim();
+    if (text) counts.set(text, (counts.get(text) || 0) + 1);
+  });
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([text, count]) => ({ text, count }));
+}
+
+// The DOM only shows a day-precision or relative time. When the page's own API response (or
+// its remaining SSR payload) carried a numeric time for the same comment id, attach that epoch
+// while keeping the display text untouched. The probe records which source actually answered.
+async function attachCommentTimeEvidence(result = {}, { noteId = '', apiProbe = {} } = {}) {
+  const comments = Array.isArray(result?.comments) ? result.comments : [];
+  const bridgeRequested = isXhsCommentApiBridgeRequested();
+  const capture = bridgeRequested
+    ? await requestXhsCommentCaptureProbe(noteId).catch(() => null)
+    : null;
+  const snapshot = bridgeRequested
+    ? await readPassiveXhsCommentSnapshot(noteId).catch(() => null)
+    : null;
+  const passiveTimes = commentPlatformTimesFromSnapshot(snapshot || {});
+  let ssr = { present: false, commentCount: 0, epochTimes: 0, times: new Map() };
+  try {
+    ssr = readXhsSsrCommentPlatformTimes(noteId);
+  } catch {
+    // SSR reading is optional evidence; absence is not a collection failure.
+  }
+
+  let fromPassiveApi = 0;
+  let fromInitialState = 0;
+  comments.forEach((comment) => {
+    if (!comment || Number(comment?.publishedAt) > 0) return;
+    const id = String(comment?.commentId || '').trim();
+    if (!id) return;
+    if (passiveTimes.has(id)) {
+      comment.publishedAt = passiveTimes.get(id);
+      comment.timeSource = 'passive_api';
+      fromPassiveApi += 1;
+      return;
+    }
+    if (ssr.times.has(id)) {
+      comment.publishedAt = ssr.times.get(id);
+      comment.timeSource = 'initial_state';
+      fromInitialState += 1;
+    }
+  });
+
+  const withEpoch = comments.filter((comment) => Number(comment?.publishedAt) > 0).length;
+  result.commentTimeProbe = {
+    bridgeRequestedAt: xhsCommentApiBridgeRequestedAt(),
+    api: apiProbe,
+    capture: capture || { unavailable: true },
+    snapshot: {
+      pages: Array.isArray(snapshot?.pages) ? snapshot.pages.length : 0,
+      subPages: Array.isArray(snapshot?.subPages) ? snapshot.subPages.length : 0,
+      epochTimes: passiveTimes.size,
+    },
+    ssr: { present: ssr.present, comments: ssr.commentCount, epochTimes: ssr.epochTimes, shape: ssr.shape || null },
+    comments: {
+      total: comments.length,
+      withEpoch,
+      fromPassiveApi,
+      fromInitialState,
+      displayOnly: comments.length - withEpoch,
+      timeTextSamples: commentDisplayTimeTextSamples(comments),
+    },
+    resource: xhsCommentApiResourceProbe(),
+    scroll: xhsCommentScrollProbe(),
+  };
+  return result;
+}
+
 export async function collectComments({
   noteId = '',
   noteUrl = '',
@@ -364,13 +485,16 @@ export async function collectComments({
     publicCommentCount,
   });
   if (apiResult.stopReason === 'risk_control' || (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0))) {
-    const result = withCommentCollectionReceipt({
+    const result = await attachCommentTimeEvidence(withCommentCollectionReceipt({
       total: apiResult.total,
       comments: apiResult.comments,
       stopReason: apiResult.stopReason,
       traversal: apiResult.traversal,
       commentMode,
-    }, { noteId, maxTotal, publicCommentCount, observedNoteId, incrementalBudget });
+    }, { noteId, maxTotal, publicCommentCount, observedNoteId, incrementalBudget }), {
+      noteId,
+      apiProbe: apiResult.probe,
+    });
     if (emitReceipt) {
       result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
     }
@@ -385,7 +509,7 @@ export async function collectComments({
     });
   }
 
-  const result = await collectCommentsFromDom({
+  const result = await attachCommentTimeEvidence(await collectCommentsFromDom({
     noteId,
     noteUrl,
     maxTotal,
@@ -404,6 +528,9 @@ export async function collectComments({
     initialIdentityReliable: apiResult.traversal?.identityReliable !== false,
     persist,
     actionGate,
+  }), {
+    noteId,
+    apiProbe: apiResult.probe,
   });
   const normalizedResult = withCommentCollectionReceipt(result, {
     noteId,
@@ -589,6 +716,9 @@ async function collectCommentsViaApi({
   let apiNeedsDomFallback = false;
   let freshAttemptStarted = false;
   let freshAttemptReady = false;
+  let passiveSnapshotUsed = false;
+  let freshFetchAttempted = false;
+  let freshFetchError = '';
   const savedSession=reusableApiSessions.get(noteId);
   if (incrementalBudget && resumeCommentSessionKey && savedSession?.key===resumeCommentSessionKey && savedSession.page===window && savedSession.expiresAt>Date.now()) {
     retainedSnapshot=savedSession.snapshot;
@@ -601,6 +731,14 @@ async function collectCommentsViaApi({
     && Number.isFinite(Number(publicCommentCount))
     ? Math.max(0, Math.floor(Number(publicCommentCount)))
     : null;
+  const apiProbePayload = () => ({
+    passiveSnapshotUsed,
+    freshFetchAttempted,
+    freshFetchError,
+    snapshotPages: Array.isArray(retainedSnapshot?.pages) ? retainedSnapshot.pages.length : 0,
+    snapshotSubPages: Array.isArray(retainedSnapshot?.subPages) ? retainedSnapshot.subPages.length : 0,
+    snapshotEpochTimes: commentPlatformTimesFromSnapshot(retainedSnapshot || {}).size,
+  });
   const publishCountedProgress = (payload) => {
     const enriched = withPageCommentCount(payload, container);
     if (enriched.pageCommentCount != null && Number.isFinite(Number(enriched.pageCommentCount))) {
@@ -643,24 +781,37 @@ async function collectCommentsViaApi({
     let observedSnapshot = null;
     if (!freshAttemptStarted) {
       freshAttemptStarted = true;
-      hydrationActionAttempted = true;
-      observedSnapshot = await startFreshXhsCommentSnapshot(noteId, {
-        fetchJson: fetchXhsJsonViaBridge,
-        beforeExternalAction: async () => {
-          if (!await actionGate.before({ kind: 'api_page' })) throw new Error('comment_collection_stopped');
-        },
-        afterExternalAction: () => actionGate.after({ kind: 'api_page' }),
-      }).then((snapshot) => {
-        hydrationActionsPerformed = 1;
+      // A response the page itself requested carries its own signature headers; prefer that
+      // passively captured snapshot over a call this content script would have to synthesize.
+      observedSnapshot = isXhsCommentApiBridgeRequested()
+        ? await readPassiveXhsCommentSnapshot(noteId)
+        : null;
+      if (observedSnapshot) {
+        passiveSnapshotUsed = true;
         freshAttemptReady = true;
-        return snapshot;
-      }).catch(() => {
         hydrationActionsPerformed = 1;
-        freshAttemptReady = false;
-        hydrationDegradedEver = true;
-        consecutiveHydrationFailures += 1;
-        return null;
-      });
+      } else {
+        freshFetchAttempted = true;
+        hydrationActionAttempted = true;
+        observedSnapshot = await startFreshXhsCommentSnapshot(noteId, {
+          fetchJson: fetchXhsJsonViaBridge,
+          beforeExternalAction: async () => {
+            if (!await actionGate.before({ kind: 'api_page' })) throw new Error('comment_collection_stopped');
+          },
+          afterExternalAction: () => actionGate.after({ kind: 'api_page' }),
+        }).then((snapshot) => {
+          hydrationActionsPerformed = 1;
+          freshAttemptReady = true;
+          return snapshot;
+        }).catch((error) => {
+          hydrationActionsPerformed = 1;
+          freshAttemptReady = false;
+          hydrationDegradedEver = true;
+          consecutiveHydrationFailures += 1;
+          freshFetchError = String(error?.message || error || '').slice(0, 160);
+          return null;
+        });
+      }
     } else if (freshAttemptReady) {
       observedSnapshot = await requestXhsCommentSnapshot(noteId).catch(() => null);
     }
@@ -835,7 +986,7 @@ async function collectCommentsViaApi({
       });
       if (noNewCount >= maxNoNew) {
         if (!apiObserved && allComments.length === 0) {
-          return { total: 0, comments: [], apiObserved: false, stopReason: 'api_unobserved' };
+          return { total: 0, comments: [], apiObserved: false, stopReason: 'api_unobserved', probe: apiProbePayload() };
         }
         break;
       }
@@ -883,6 +1034,7 @@ async function collectCommentsViaApi({
     total: allComments.length,
     comments: allComments,
     apiObserved,
+    probe: apiProbePayload(),
     traversal: {
       mainExhausted: retainedSnapshot?.pages?.at(-1)?.hasMore === false && !(maxTotal > 0 && allComments.length >= maxTotal),
       repliesExhausted: retainedSnapshot?.hydrationMeta?.pending === false && apiReplyTraversalExhausted(retainedSnapshot) && !finalSignals.hasExpandableReplies,

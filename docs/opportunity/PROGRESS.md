@@ -1,7 +1,7 @@
 # PROGRESS
 
 > 状态: 活跃计划
-> 最后核对: 2026-11-12
+> 最后核对: 2026-11-13
 > 适用范围: 机会卡任务的执行状态、验证结果与遗留问题。
 > 事实来源: 实际执行的命令、测试输出与勘察结果。
 > 冲突时以谁为准: RECON.md、DECISIONS.md 与实际命令输出。
@@ -228,3 +228,86 @@
 - 未完成项：
   - C3 目标中的“影子模式下同步计算并保存这一口径的指标”尚未实现。当前迁移集没有 `linggan_opportunity_problem_metric_period`（T0.7 不变量输出已确认 I1–I3 不可用），该表由 T1.2 创建；在表存在前无法保存影子指标，不能只在内存计算后声称完成。待 T1.2 建表后接入 `comment_published` 的影子计算与保存。
 - 遗留：独立审查与合并授权；影子指标依赖 T1.2；采集恢复后按 C4 补齐历史，并每周报告各领域覆盖率；切换口径需负责人批准并新增版本，不得直接改当前指针。
+
+## 2026-11-12 C4 真实重采集（第 1 轮）
+
+- 状态：真实采集与覆盖率报告完成；评论平台时间仍然拿不到，已登记 Q-15。未修改代码、未新增迁移。
+- 授权与前置：负责人授权真实重采集；插件扩展已重新加载到当前工作树构建（`releases/linggan-intelligence-browser-v0.8.65`，manifest 0.8.66）。系统代理故障（CN 域名全部 503）由负责人修复后复测：直连 `baidu 200`、`xiaohongshu 302`。
+- 执行方式：`POST /api/local/collection/material-deepening` 提交 3 个 `deep_archive` 批次，每个 4 个作品，`commentLimit = 30`、`replyExpandLimit = 2`、媒体/OCR/ASR 关闭；三批依次准入并全部执行完毕。
+- 批次结果（数据库实测）：
+  - ADHD `264f61a5-44f0-40e4-aa1a-49c0362c33c2`：4/4 作品；`content_detail` 4 包（4 条记录，全部有作品级 `publishedAt`）、`comments` 4 包 40 条记录、`replies` 4 包 39 条记录；12/12 任务完成，派发失败 0。该批在扩展重载前执行，包内无 `collectionProtocol`，`publishedAt` 写 `0`，不进入 C3 投影。
+  - 考研自习 `50f53929-e41c-4698-a978-c0dcaec17476`：3/4 作品；`content_detail` 3 包（3 条，全部有作品级 `publishedAt`）、`comments` 3 包 30 条、`replies` 3 包 26 条；9/9 任务完成，派发失败 0。
+  - 自闭症干预 `8439bab9-1557-4a16-b9f2-d174c640b8dc`：3/4 作品；`content_detail` 3 包（3 条，全部有作品级 `publishedAt`）、`comments` 3 包 30 条、`replies` 3 包 30 条；12 个任务中 9 个完成、3 个 `input_blocked`，派发失败 1（`execution_input_missing`）。
+  - 两批各放弃 1 个作品：考研 `230037d0-cea7-4fe2-b0b2-6ca50dc5e79e`、自闭症 `4ce71ef6-07b4-4d89-9826-19db7db132b8`。两者在 `collection_execution_input_eligibility` 中均为 `input_blocked / execution_input_missing`（无可用签名定位器，分别冻结于 14:21:45 与 15:36:12），admission 按既有输入闸跳过，不是采集失败。
+  - 风险冷却与暂停：本轮 `collection_installation_risk_cooldown` 0 行、活跃 `collection_risk_pause` 0 行、今日 `collection_installation_risk_signal` 0 条。
+- 评论平台时间（关键事实）：
+  - 重载后两批的评论包已带 `collectionProtocol.version = 1`、`sortMode = platform_default`（C2 协议生效），但 60 条评论记录和 56 条回复记录**全部**为 `sourceTier = dom`、`qualityReason = api_unobserved_dom_fallback`、`publishedAt = null`。
+  - 全库历史（`comments` 2247 包、`replies` 2238 包，共 31928 条记录）：只有 2026-08-31 的 4 个包（用户前台手动批量采集，scope 为 `all_public_comments` / `maximum_quota`）存在 API 记录与毫秒平台时间；其余所有日期，包括全部派发详情会话，API 记录数为 0。
+  - 原因定位（代码 + 实测）：插件 API 优先路径在页面中直接 `fetch('/api/sns/web/v2/comment/page', { credentials: 'include' })`，不带小红书签名头（`src/injected/xhsApiCapture.js:368`；`src/platforms/xhs/commentApi.js:803-824`）；未签名请求被平台网关拒绝（实测 HTTP 500 `create invoker failed, service: jarvis-gateway-default`）。派发会话又用 `chrome.windows.create({ focused: false })` 在非聚焦窗口打开详情页（`src/linggan/background.js:1466`），能拿到签名的只剩页面自身分页流量，而现有记录显示该流量没有被捕获到评论快照。
+  - 结论：当前插件版本在派发会话中无法取得评论平台时间；C4 的“新获得平台时间评论数”为 0，`comment_published` 口径仍不可用。已登记 Q-15，等待负责人裁定（修插件 / 暂缓口径 / 先做前台诊断）。
+- 覆盖率与不变量（本地运行库，`as_of = 2026-11-12`，`tz = Asia/Shanghai`，`periods = 12`，作品发布周口径）：
+  - `project-platform-times`：`inserted = 0`、`conflicts = 0`（没有带协议且 `publishedAt` 有效的记录可投影）。
+  - ADHD：12 周内有效评论 7118，有平台时间 0，`ratio = 0.0`；8 周有数据（2026-08-24 至 2026-10-12）。
+  - 考研自习：159 / 0，`ratio = 0.0`；6 周有数据。
+  - 自闭症干预：282 / 0，`ratio = 0.0`；8 周有数据。
+  - 三个领域 `agreement.compared = 0`、`timingViolations = 0`。
+  - `check-invariants`：`totalViolations = 0`、`incomplete = true`（I1–I10 依赖的 T1 表尚未建立）；I11 `available = true`、`violations = 0`。
+- 操作记录：本地库凭据以容器当前环境为准（工作树 `.env` 的 `POSTGRES_PASSWORD` 与容器内角色口令不一致，直接使用 `.env` 连接会报鉴权失败；本轮连接串从容器环境读取，未写入任何文件）。
+- 遗留：Q-15 裁定前，C4 无法产出评论平台时间，`comment_published` 的影子指标仍不可启用；第 2 轮重采集应在插件问题修复后执行，并优先覆盖两个 `input_blocked` 作品（需先获得新的可用签名定位器）。
+
+## 2026-11-12 C3b 日精度平台时间（答复 Q-15）
+
+- 状态：迁移、投影、读取视图与测试实现完成；隔离库验证通过；经负责人授权，已在本地运行库执行迁移与历史回填。未在共享/生产库执行，未发起真实采集。
+- 背景：C4 与探针确认派发会话拿不到毫秒 epoch；但只读核查显示 32,219 条评论/回复全部有 `publishedAtText`，日精度可解析率接近 100%。负责人裁定采用日精度（D-034），范围为新采集 + 历史回填。
+- 数据库（`database/migrations/0208_comment_platform_time_day_precision.sql`）：
+  - 表新增 `source_kind`（`epoch`、`display_full_date`、`display_month_day`、`display_relative`）；`precision` 允许 `day`；`protocol_version` 允许 0（历史包无协议）。
+  - 主键改为 `(content_public_ref, comment_external_id, precision)`，历史回填的日精度行不会阻止以后写入精确 epoch。只追加与禁改触发器不变。
+  - 新增视图 `linggan_material_comment_platform_time_current`，同一评论毫秒行优先；覆盖率、资格、不变量与时间违例全部改读该视图。
+  - `linggan_opportunity_parse_comment_display_date(text, collected_at)` 解析 `YYYY-MM-DD`、`MM-DD`、`昨天`、`刚刚`、`N天前`、`N小时前`、`N分钟前`。`MM-DD` 的年份取采集时刻所在上海年份，候选日期晚于采集日时归入上一年；`N小时前`/`N分钟前` 按实际时长回退；日精度统一存上海当地零点。无法解析的文本返回 `NULL`，不猜测。
+  - `linggan_opportunity_comment_collected_at(record, package.accepted_at)` 优先读记录自身 13 位毫秒 `collectedAt`，缺失时退回包裹 `accepted_at`。相对时间按**该条记录的采集时刻**推算，不使用当前时间。
+  - epoch 的可信范围保持 C2 规则：协议 v1 包，或无协议但记录 `sourceTier = 'api'` 的历史包。历史 `dom` 回退的 `createdAt` 顶替值不采信，改用展示文本。
+  - 投影器分两遍执行：先全部毫秒包，再全部日精度包；冲突只由 epoch 观测计算，日精度不参与。旧的一参重载函数已删除。
+  - 展示文本交叉核对只比较毫秒行，避免用日精度值验证自身来源。
+- 后续修正（均以独立迁移，0208 保持已应用字节不变）：
+  - `0209_comment_display_time_suffix.sql`：真实数据中相对标签会带时分（`昨天 00:04`、`昨天 14:35`），共 2,080 条。解析前剥离末尾 ` H:MM` / ` HH:MM`；标签本身决定日期，时分不改变日精度值。
+  - `0210_comment_display_agreement_skips_iso.sql`：API 来源记录的 `publishedAtText` 是自身 epoch 的 ISO 序列化（`2026-08-30T16:06:01.000Z`），不是平台展示标签。此前拿它的 UTC 月日与上海当地日期比较，制造了 14 条假不一致；现在展示核对跳过 ISO 文本。
+  - 编号说明：这三条迁移最初写作 0207–0209；合入 `origin/main` 时主干已占用 `0207_topic_single_pass`，故依序后移为 0208–0210，内容字节不变。
+- 代码：`platform_time.rs` 与 `invariants.rs` 改读当前视图；测试数据集新增 `build_legacy_day_times()` 覆盖层。
+- 验证（`scripts/test-opportunity-postgres.sh`，隔离 PostgreSQL 容器）：
+  - 12 passed, 0 failed（原 11 条 + 新增日精度 1 条）。
+  - 新增证明：日精度投影写入 10 条（含 `昨天 14:35` 与 `3天前 08:00`），日期分别为 `2026-10-27`、`2026-10-27`、`2026-10-24`、`2026-10-26`、`2026-10-27`、`2026-10-27`、`2025-12-31`、`2026-01-01`、`2026-10-27`、`2026-10-24`；`12-31` 由跨年规则归入 2025；来源分别为全日期、月日、相对时间；`protocol_version = 0`。
+  - 日精度值按上海零点存储（`2026-10-27` → `2026-10-26T16:00:00Z`）；只有日精度行时展示核对 `compared = 0`、时间违例 0。
+  - 之后补入精确 epoch：日精度行保留，当前视图返回 `precision = millisecond` 的 `2026-10-27T00:01:00Z`。
+  - 把一条记录的展示文本改成 ISO 序列化后，展示核对不再把它计入 `compared`，避免 UTC/本地日期差被误报。
+  - 改动文件 `rustfmt --check` 通过。
+- 本地运行库执行（`linggan_intelligence_dev`，2026-11-12）：
+  - 迁移 `0208`、`0209`、`0210` 以事务方式应用，并写入 `linggan_local_schema_migration`；`scripts/local-runtime.sh` 已登记三条迁移。
+  - `project-platform-times` 首次 `inserted = 27,730`（日精度 27,689 + 毫秒 41），`conflicts = 0`；应用 `0209` 后再次执行补入 1,373 条，`conflicts = 0`。
+  - 最终分布：`display_full_date` 6,173、`display_month_day` 16,784、`display_relative` 6,105、`epoch` 41，合计 29,103 条。
+  - 覆盖率：29,104 条评论事实中 29,103 条有平台时间（99.997%）。唯一缺失记录的 `publishedAtText = '2/5'` 实为评论文本被误取为时间（DOM 中真实时间是 `昨天 14:35`），解析器拒绝该值是正确的。
+  - 三领域（`as_of = 2026-11-12`，12 周）：ADHD 7,118 / 7,117；考研自习 159 / 159；自闭症干预 283 / 283。`timingViolations = 0`。
+  - 展示核对 `compared = 0`：现存 epoch 行的展示文本都是 ISO 序列化，日精度行又不能自证，因此本库无法产生一致率样本；该指标仍由隔离库合成数据覆盖。
+  - `check-invariants`：`totalViolations = 0`，I8 = 0、I11 = 0；其余检查因 T1 表未建立而不可用。
+- 遗留：独立审查与合并授权；共享/生产库仍需单独授权后才能执行迁移；真实重采集需再次授权，并继续遵守 D-028 的频率、风险冷却与并发上限。C4 第 2 轮可不再以拿到毫秒 epoch 为前置条件。
+
+## 2026-11-13 C4 真实重采集（第 2 轮，日精度）
+
+- 状态：真实采集完成；三个领域各 1 批，日精度平台时间首次在真实回采中按预期落库。未修改代码、未新增迁移。
+- 授权与前置：负责人授权真实重采集（沿用 C4 第 1 轮授权范围）。批次按领域轮流、串行执行：前一批租约释放后才提交下一批，未提高并发，未绕过频率、风险冷却或授权。插件 `0.8.66` 在批次开始时心跳正常；三批结束时 `collection_installation_risk_signal` 0 条、`collection_installation_risk_cooldown` 0 行、活跃 `collection_risk_pause` 0 行。
+- 作品选择：最近 12 周内发布、领域 `primary` 用途、近 7 天未采过评论、未退役，按 `comment_count` 从高到低；排除第 1 轮两个 `input_blocked` 作品（`230037d0-cea7-4fe2-b0b2-6ca50dc5e79e`、`4ce71ef6-07b4-4d89-9826-19db7db132b8`）。每批 4 个作品，`commentLimit = 30`、`replyExpandLimit = 2`、媒体/OCR/ASR 关闭。
+- 批次结果（数据库实测；请求与工单均为实测引用）：
+  - ADHD（`request 2d51b359-c632-4db6-9728-373447f15099`，`work_order 2ebfb17f-07f0-4f91-8168-8f663a53462f`）：4 个作品，3 个采集成功。`content_detail` 3 包、`comments` 3 包 30 条记录、`replies` 3 包 28 条记录；12 个任务 9 完成、3 `blocked`；租约以 `partial` 释放。失败 1 个作品 `00685f28-07d8-40fb-b8b2-f8a46f6f83e6`：`detail_page_url_invalid`（`blocked`，预尝试重试预算耗尽），不是输入闸拒绝，也不是限流或冷却。
+  - 考研自习（`request 7f9e6e40-971c-4290-8477-48212b6f8001`，`work_order 613e15fc-954e-416b-94d7-66fec1f09b5c`）：4/4 作品；`content_detail` 4 包、`comments` 4 包 33 条、`replies` 4 包 18 条；12/12 任务完成；派发失败 0。
+  - 自闭症干预（`request e2d12724-4eda-45b2-8e87-ef26bd0103ca`，`work_order 91539666-18ae-4086-acb6-6f5993f8eeef`）：4/4 作品；`content_detail` 4 包、`comments` 4 包 40 条、`replies` 4 包 40 条；12/12 任务完成；派发失败 0。
+- 新获得平台时间的评论：
+  - 三批共 11 个 `comments` 包、103 条评论记录，全部带 `collectionProtocol.version = 1`、`sourceTier = dom`、`publishedAt = null`、非空展示文本；`replies` 包同样全部带协议 v1。C2 协议在真实回采中生效，毫秒 epoch 仍不可得（与第 1 轮结论一致），展示文本是唯一可用的时间来源。
+  - 每批采集后执行 `project-platform-times`：ADHD `inserted = 19`、考研自习 `inserted = 4`、自闭症干预 `inserted = 37`，合计 60 条，`conflicts = 0`。这 60 条是回采中新出现的评论身份，全部解析出日精度时间（60/60），其中 `display_month_day` 54 条、`display_relative` 6 条。
+  - 全部平台时间现为 29,163 条：`display_full_date` 6,173、`display_month_day` 16,838、`display_relative` 6,111、`epoch` 41（`precision = millisecond` 仍为 41）。
+- 覆盖率（CLI 默认 `as_of`，`--periods 12`，`--tz Asia/Shanghai`，作品发布周口径）：
+  - ADHD：7,137 条有效评论，7,136 条有平台时间（99.986%）；唯一缺失仍在 2026-10-05 周，即 `publishedAtText = '2/5'` 的误取记录。
+  - 考研自习：162 / 162（100%）。
+  - 自闭症干预：309 / 309（100%）。
+  - 三领域 `agreement.compared = 0`（现存 epoch 行的展示文本均为 ISO 序列化，不参与核对）、`timingViolations = 0`。
+- `check-invariants`：`totalViolations = 0`，I8 = 0、I11 = 0；其余检查仍因 T1 表未建立而不可用。
+- 观察：覆盖率的分母按有效评论口径计算，不完全等于“新增评论身份数”（回复、重复身份与周期归属会改变增量）；本轮只按报告实际返回值记录，不把 60 条新增直接换算为覆盖率增量。
+- 遗留：`00685f28` 需要单独判断页面是否已失效（可先看前台是否仍可访问），下一轮不再自动优先重试；`agreement` 仍缺少真实一致率样本；独立审查与合并授权；共享/生产库迁移仍需单独授权。

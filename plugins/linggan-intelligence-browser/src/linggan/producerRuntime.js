@@ -197,6 +197,7 @@ export function packageComments({
     observedAt,
     capturedAt,
     collectionProtocol: commentCollectionProtocol(collection, taskSpec, triggerSource),
+    checkpoint: result?.commentTimeProbe ? { commentTimeProbe: result.commentTimeProbe } : undefined,
     target: {
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),
@@ -235,6 +236,7 @@ export function packageReplies({
     observedAt,
     capturedAt,
     collectionProtocol: commentCollectionProtocol(collection, taskSpec, triggerSource),
+    checkpoint: result?.commentTimeProbe ? { commentTimeProbe: result.commentTimeProbe } : undefined,
     target: {
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),

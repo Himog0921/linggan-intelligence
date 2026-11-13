@@ -165,10 +165,10 @@ const DEFINITIONS: &[Definition] = &[
         id: "I11",
         name: "platform_time_not_after_first_observation",
         requires: &[
-            "linggan_material_comment_platform_time",
+            "linggan_material_comment_platform_time_current",
             "linggan_opportunity_comment_fact",
         ],
-        sql: "SELECT count(*) FROM linggan_material_comment_platform_time platform
+        sql: "SELECT count(*) FROM linggan_material_comment_platform_time_current platform
               JOIN linggan_opportunity_comment_fact fact
                 ON fact.content_ref = platform.content_public_ref
                AND fact.comment_external_id = platform.comment_external_id

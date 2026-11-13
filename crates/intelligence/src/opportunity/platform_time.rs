@@ -130,7 +130,7 @@ pub async fn read_platform_time_report(
     .collect();
 
     let timing_violations: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_material_comment_platform_time platform
+        "SELECT count(*) FROM linggan_material_comment_platform_time_current platform
          JOIN linggan_opportunity_comment_fact fact
            ON fact.content_ref = platform.content_public_ref
           AND fact.comment_external_id = platform.comment_external_id
