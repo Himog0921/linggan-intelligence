@@ -1,5 +1,6 @@
 import { parseCount } from '../../shared/utils.js';
 import { createCollectorEvidence, createCollectorQualityMeta, joinRawDomText } from '../../shared/collectorMetadata.js';
+import { readXhsSsrNoteDetailMap } from './ssrNoteMap.js';
 
 const PAGE_BRIDGE_SOURCE = 'lgboom-xhs-api-capture';
 const PAGE_FETCH_REQUEST_SOURCE = 'lgboom-xhs-content';
@@ -13,6 +14,8 @@ const SEARCH_NOTES_REQUEST_TYPE = '__lgboom_xhs_search_notes_request__';
 const SEARCH_NOTES_RESPONSE_TYPE = '__lgboom_xhs_search_notes_response__';
 const PAGE_FETCH_REQUEST_TYPE = '__lgboom_xhs_page_fetch_request__';
 const PAGE_FETCH_RESPONSE_TYPE = '__lgboom_xhs_page_fetch_response__';
+const CAPTURE_PROBE_REQUEST_TYPE = '__lgboom_xhs_capture_probe_request__';
+const CAPTURE_PROBE_RESPONSE_TYPE = '__lgboom_xhs_capture_probe_response__';
 
 function normalizeText(value) {
   return String(value || '').trim();
@@ -107,6 +110,147 @@ function formatPublishedAtText(raw, publishedAt) {
     return new Date(publishedAt).toISOString();
   } catch {
     return explicit;
+  }
+}
+
+function commentTimeField(comment = {}) {
+  return comment?.create_time ?? comment?.createTime ?? comment?.time;
+}
+
+// commentId -> epoch. Only numeric platform fields are eligible; display text is skipped here
+// because its precision cannot become an exact fact (D-028).
+export function commentPlatformTimesFromSnapshot(snapshot = {}) {
+  const times = new Map();
+  const addComment = (comment) => {
+    if (!comment || typeof comment !== 'object') return;
+    const id = normalizeText(comment?.id || comment?.comment_id || comment?.commentId);
+    if (!id || times.has(id)) return;
+    const epoch = parsePublishedAt(commentTimeField(comment));
+    if (epoch) times.set(id, epoch);
+  };
+  const addPage = (page) => {
+    (Array.isArray(page?.comments) ? page.comments : []).forEach((comment) => {
+      addComment(comment);
+      readInlineReplies(comment).forEach(addComment);
+    });
+  };
+  (Array.isArray(snapshot?.pages) ? snapshot.pages : []).forEach(addPage);
+  (Array.isArray(snapshot?.subPages) ? snapshot.subPages : []).forEach(addPage);
+  return times;
+}
+
+function readSsrCommentList(entry = {}) {
+  const root = unwrapSsrRef(entry);
+  const note = unwrapSsrRef(root?.note);
+  const comments = unwrapSsrRef(root?.comments);
+  const commentList = unwrapSsrRef(root?.commentList);
+  const noteComments = unwrapSsrRef(note?.comments);
+  const noteCommentList = unwrapSsrRef(note?.commentList);
+  const asArray = (value) => {
+    const unwrapped = unwrapSsrRef(value);
+    return Array.isArray(unwrapped) ? unwrapped : null;
+  };
+  const candidates = [
+    asArray(comments?.list),
+    asArray(comments),
+    asArray(commentList?.list),
+    asArray(commentList),
+    asArray(noteComments?.list),
+    asArray(noteComments),
+    asArray(noteCommentList?.list),
+    asArray(noteCommentList),
+  ];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) return candidate;
+  }
+  return [];
+}
+
+// SSR state keeps Vue refs in some builds. Unwrapping is structural only; no page script runs.
+function unwrapSsrRef(value) {
+  let current = value;
+  for (let depth = 0; depth < 4 && current && typeof current === 'object'; depth += 1) {
+    if (current.__v_isRef === true) {
+      current = current._rawValue ?? current._value ?? current.value;
+      continue;
+    }
+    if ('_rawValue' in current && Object.keys(current).length <= 2) {
+      current = current._rawValue;
+      continue;
+    }
+    if ('value' in current && Object.keys(current).length <= 2) {
+      current = current.value;
+      continue;
+    }
+    break;
+  }
+  return current;
+}
+
+// Property names only, for the bounded probe. It answers "where would the comment array live"
+// without storing any comment text from the page's own state.
+function ssrCommentShape(entry) {
+  const root = unwrapSsrRef(entry);
+  if (!root || typeof root !== 'object') return null;
+  const keys = (value) => (value && typeof value === 'object' ? Object.keys(value).slice(0, 12) : []);
+  const comments = unwrapSsrRef(root?.comments);
+  const list = unwrapSsrRef(comments?.list);
+  return {
+    entryKeys: keys(root),
+    noteKeys: keys(unwrapSsrRef(root?.note)),
+    commentsKeys: keys(comments),
+    commentsListKind: Array.isArray(list) ? 'array' : list == null ? 'none' : typeof list,
+    commentsListLength: Array.isArray(list) ? list.length : null,
+    commentKeys: Array.isArray(list) && list[0] ? keys(unwrapSsrRef(list[0])) : [],
+  };
+}
+
+// Some builds leave the first comment page in the SSR payload after hydration. Read it only
+// if present; the list is often empty. Serialized script text only; never evaluate page script.
+export function readXhsSsrCommentPlatformTimes(noteId = '') {
+  const normalizedNoteId = normalizeText(noteId);
+  let entry = null;
+  try {
+    const noteMap = readXhsSsrNoteDetailMap(globalThis.document);
+    entry = normalizedNoteId ? noteMap?.[normalizedNoteId] : null;
+  } catch {
+    entry = null;
+  }
+  const comments = entry ? readSsrCommentList(entry) : [];
+  const times = new Map();
+  const visit = (comment) => {
+    const id = normalizeText(comment?.id || comment?.comment_id || comment?.commentId);
+    const epoch = parsePublishedAt(commentTimeField(comment));
+    if (id && epoch && !times.has(id)) times.set(id, epoch);
+  };
+  comments.forEach(visit);
+  return {
+    present: Boolean(entry),
+    commentCount: comments.length,
+    epochTimes: times.size,
+    times,
+    shape: ssrCommentShape(entry),
+  };
+}
+
+// Resource Timing sees requests that may have started before the MAIN-world hook existed.
+// Paths only; no query strings or response bodies.
+export function xhsCommentApiResourceProbe() {
+  try {
+    const entries = performance.getEntriesByType('resource')
+      .filter((entry) => /\/api\/sns\/web\/v\d+\/comment\//.test(String(entry?.name || '')));
+    if (entries.length === 0) return { entries: 0 };
+    const origin = Number(performance.timeOrigin) || 0;
+    const starts = entries.map((entry) => origin + Number(entry.startTime || 0)).filter((value) => value > 0);
+    return {
+      entries: entries.length,
+      firstAt: starts.length ? Math.round(Math.min(...starts)) : null,
+      lastAt: starts.length ? Math.round(Math.max(...starts)) : null,
+      transferBytes: entries.reduce((sum, entry) => sum + (Number(entry.transferSize) || 0), 0),
+      fromCache: entries.filter((entry) => Number(entry.transferSize) === 0).length,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -789,6 +933,20 @@ export async function requestXhsCommentSnapshot(noteId = '') {
   };
 }
 
+// What the page itself already requested is better evidence than a request we synthesize:
+// it carries the page's own signature headers. Read it before considering any unsigned call.
+export async function readPassiveXhsCommentSnapshot(noteId = '') {
+  const normalizedNoteId = normalizeText(noteId);
+  if (!normalizedNoteId) return null;
+  const snapshot = await requestXhsCommentSnapshot(normalizedNoteId).catch(() => null);
+  if (!snapshot) return null;
+  const nonEmpty = (page) => Array.isArray(page?.comments) && page.comments.length > 0;
+  const pages = snapshot.pages.filter(nonEmpty);
+  const subPages = snapshot.subPages.filter(nonEmpty);
+  if (pages.length === 0 && subPages.length === 0) return null;
+  return { noteId: normalizedNoteId, pages, subPages };
+}
+
 export async function resetXhsCommentSnapshot(noteId = '') {
   const normalizedNoteId = normalizeText(noteId);
   if (!normalizedNoteId) return false;
@@ -859,12 +1017,33 @@ export async function fetchXhsJsonViaBridge(urls = []) {
   return payload?.json || null;
 }
 
+export async function requestXhsCommentCaptureProbe(noteId = '') {
+  const payload = await postBridgeRequest(
+    CAPTURE_PROBE_REQUEST_TYPE,
+    { noteId: normalizeText(noteId) },
+    CAPTURE_PROBE_RESPONSE_TYPE,
+    2000,
+  );
+  return payload?.probe || null;
+}
+
+let bridgeRequestedAt = null;
+
 export function ensureXhsCommentApiBridge() {
   if (typeof document === 'undefined' || typeof chrome === 'undefined' || typeof chrome.runtime?.getURL !== 'function') return;
+  if (bridgeRequestedAt == null) bridgeRequestedAt = Date.now();
   if (document.getElementById('__lgboom_xhs_api_capture')) return;
   const script = document.createElement('script');
   script.id = '__lgboom_xhs_api_capture';
   script.src = chrome.runtime.getURL('injected/xhsApiCapture.js');
   script.onload = () => script.remove();
   (document.head || document.documentElement).appendChild(script);
+}
+
+export function xhsCommentApiBridgeRequestedAt() {
+  return bridgeRequestedAt;
+}
+
+export function isXhsCommentApiBridgeRequested() {
+  return bridgeRequestedAt != null;
 }

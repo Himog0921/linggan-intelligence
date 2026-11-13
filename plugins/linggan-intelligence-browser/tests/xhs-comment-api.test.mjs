@@ -2,12 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  commentPlatformTimesFromSnapshot,
   parseXhsCommentPagePayload,
   buildXhsCommentsFromSnapshot,
   hydrateXhsCommentSnapshot,
+  readXhsSsrCommentPlatformTimes,
   resolveXhsCommentImageUrls,
   startFreshXhsCommentSnapshot,
 } from '../src/platforms/xhs/commentApi.js';
+import { packageComments } from '../src/linggan/producerRuntime.js';
 
 test('comment image extraction keeps public media candidates and excludes unrelated avatar fields', () => {
   assert.deepEqual(resolveXhsCommentImageUrls({
@@ -533,4 +536,85 @@ test('a final reply page overrides a stale root has-more flag on later acquisiti
 
   assert.equal(fetchCount, 0);
   assert.equal(hydrated.hydrationMeta.pending, false);
+});
+
+test('snapshot platform times join ids from main pages, inline replies and sub pages', () => {
+  const times = commentPlatformTimesFromSnapshot({
+    pages: [{
+      comments: [
+        { id: 'root_1', create_time: 1710000000 },
+        { id: 'root_text', time: '3 天前' },
+        { id: 'root_inline', create_time: 1710000100, sub_comments: [{ id: 'reply_inline', create_time: 1710000200 }] },
+      ],
+    }],
+    subPages: [{ rootCommentId: 'root_1', comments: [{ id: 'reply_page', create_time: 1710000300123 }] }],
+  });
+
+  assert.equal(times.get('root_1'), 1710000000000);
+  assert.equal(times.get('reply_inline'), 1710000200000);
+  assert.equal(times.get('reply_page'), 1710000300123);
+  assert.equal(times.has('root_text'), false);
+});
+
+test('SSR note detail map contributes platform times only from serialized script text', async (t) => {
+  const savedDocument = globalThis.document;
+  globalThis.document = {
+    scripts: [{
+      textContent: 'window.__INITIAL_STATE__={"note":{"noteDetailMap":{"note_1":{"comments":{"list":['
+        + '{"id":"root_1","create_time":1710000000},'
+        + '{"id":"root_text","time":"昨天"},'
+        + '{"id":"root_missing"}]}}}}};',
+    }],
+  };
+  t.after(() => { globalThis.document = savedDocument; });
+
+  const ssr = readXhsSsrCommentPlatformTimes('note_1');
+  assert.equal(ssr.present, true);
+  assert.equal(ssr.commentCount, 3);
+  assert.equal(ssr.epochTimes, 1);
+  assert.equal(ssr.times.get('root_1'), 1710000000000);
+  assert.equal(ssr.times.has('root_text'), false);
+
+  const absent = readXhsSsrCommentPlatformTimes('note_2');
+  assert.equal(absent.present, false);
+  assert.equal(absent.commentCount, 0);
+});
+
+test('comment packages carry the bounded time probe as an opaque checkpoint', () => {
+  const probe = {
+    bridgeRequestedAt: 1710000000000,
+    comments: { total: 2, withEpoch: 1, fromPassiveApi: 1, fromInitialState: 0, displayOnly: 1 },
+  };
+  const result = {
+    noteId: 'note_1',
+    comments: [{ commentId: 'root_1', level: 1, publishedAt: 1710000000000 }],
+    commentTimeProbe: probe,
+  };
+  const packaged = packageComments({ platform: 'xhs', result, noteId: 'note_1' });
+  assert.deepEqual(packaged.checkpoint, { commentTimeProbe: probe });
+
+  const withoutProbe = packageComments({ platform: 'xhs', result: { noteId: 'note_1', comments: [] }, noteId: 'note_1' });
+  assert.equal('checkpoint' in withoutProbe, false);
+});
+
+test('SSR comment reader unwraps Vue refs and reports only structural keys', async (t) => {
+  const savedDocument = globalThis.document;
+  globalThis.document = {
+    scripts: [{
+      textContent: 'window.__INITIAL_STATE__={"note":{"noteDetailMap":{"note_1":{"note":{"_rawValue":{"title":"合成标题"}},'
+        + '"comments":{"_rawValue":{"list":{"__v_isRef":true,"_rawValue":[{"id":"root_1","create_time":1710000000}]},"cursor":""}}}}}}};',
+    }],
+  };
+  t.after(() => { globalThis.document = savedDocument; });
+
+  const ssr = readXhsSsrCommentPlatformTimes('note_1');
+  assert.equal(ssr.present, true);
+  assert.equal(ssr.commentCount, 1);
+  assert.equal(ssr.times.get('root_1'), 1710000000000);
+  assert.deepEqual(ssr.shape.entryKeys.sort(), ['comments', 'note']);
+  assert.deepEqual([...ssr.shape.commentsKeys].sort(), ['cursor', 'list']);
+  assert.equal(ssr.shape.commentsListKind, 'array');
+  assert.equal(ssr.shape.commentsListLength, 1);
+  assert.deepEqual([...ssr.shape.commentKeys].sort(), ['create_time', 'id']);
+  assert.equal(JSON.stringify(ssr.shape).includes('合成标题'), false);
 });

@@ -60,6 +60,20 @@ installSelectorHealthReporter((snapshot) => sendToBackground(
   { timeoutMs: 4000 },
 ));
 
+// A dispatched detail tab begins loading while the page itself runs its signed comment request.
+// The isolated world cannot see that response, so this tab asks the background once whether it
+// belongs to a collection window and, only then, installs the passive MAIN-world capture before
+// any page action. Ordinary browsing installs nothing.
+function activatePassiveCommentCaptureForDispatchedTab() {
+  if (platform() !== 'xhs') return;
+  void sendToBackground(LINGGAN_RUNTIME_ACTION.IS_DISPATCHED_COLLECTION_TAB, {}, { timeoutMs: 4000 })
+    .then((response) => {
+      if (response?.dispatched === true) ensureXhsCommentApiBridge();
+    })
+    .catch(() => {});
+}
+activatePassiveCommentCaptureForDispatchedTab();
+
 async function collectCurrentXhsDetailPackage(...args) {
   // A direct detail request carries its attached comments in the same logical package.
   // The bridge remains task-triggered rather than becoming an always-on page observer.

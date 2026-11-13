@@ -7,6 +7,15 @@
   window.__lgboom_xhs_user_posted_pages = window.__lgboom_xhs_user_posted_pages || [];
   window.__lgboom_xhs_search_note_pages = window.__lgboom_xhs_search_note_pages || [];
 
+  // Bounded, content-free diagnostics. It answers one question: did this hook see the page's
+  // own comment API traffic, and did that payload carry numeric times? No comment text,
+  // author data or signed URLs are kept here.
+  const diag = {
+    installedAt: Date.now(),
+    requests: [],
+  };
+  window.__lgboom_xhs_capture_diag = diag;
+
   const BRIDGE_SOURCE = 'lgboom-xhs-api-capture';
   const REQUEST_SOURCE = 'lgboom-xhs-content';
   const SNAPSHOT_REQUEST_TYPE = '__lgboom_xhs_comment_api_request__';
@@ -19,9 +28,13 @@
   const SEARCH_NOTES_RESPONSE_TYPE = '__lgboom_xhs_search_notes_response__';
   const PAGE_FETCH_REQUEST_TYPE = '__lgboom_xhs_page_fetch_request__';
   const PAGE_FETCH_RESPONSE_TYPE = '__lgboom_xhs_page_fetch_response__';
+  const CAPTURE_PROBE_REQUEST_TYPE = '__lgboom_xhs_capture_probe_request__';
+  const CAPTURE_PROBE_RESPONSE_TYPE = '__lgboom_xhs_capture_probe_response__';
+  const PROBE_REQUEST_LOG_LIMIT = 24;
+  const PROBE_TIME_TEXT_SAMPLES = 8;
   const API_PATTERNS = [
-    '/api/sns/web/v2/comment/page',
-    '/api/sns/web/v2/comment/sub/page',
+    '/api/sns/web/v1/comment',
+    '/api/sns/web/v2/comment',
     '/api/sns/web/v1/user_posted',
     '/api/sns/web/v2/search/notes',
   ];
@@ -58,6 +71,97 @@
 
   function normalizeText(value) {
     return String(value || '').trim();
+  }
+
+  // Only the endpoint path is recorded: query strings carry note ids, cursors and tokens.
+  function readApiPath(url = '') {
+    try {
+      return new URL(String(url || ''), window.location.origin).pathname;
+    } catch {
+      return '';
+    }
+  }
+
+  function recordRequest(url, { status = null, ok = false, transport = '' } = {}) {
+    try {
+      const path = readApiPath(url);
+      if (!path) return;
+      diag.requests.push({ path, status, ok: Boolean(ok), transport, at: Date.now() });
+      if (diag.requests.length > PROBE_REQUEST_LOG_LIMIT) {
+        diag.requests = diag.requests.slice(-PROBE_REQUEST_LOG_LIMIT);
+      }
+    } catch {
+      // diagnostics must never disturb the page
+    }
+  }
+
+  function readEpoch(value) {
+    if (value == null || value === '' || typeof value === 'object') return null;
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    const epoch = numeric < 1000000000000 ? numeric * 1000 : numeric;
+    return epoch >= 1000000000000 && epoch < 253402300800000 ? epoch : null;
+  }
+
+  function readCommentTimeField(comment = {}) {
+    return comment?.create_time ?? comment?.createTime ?? comment?.time ?? null;
+  }
+
+  function pageCommentTimeStats(pages = []) {
+    const stats = { comments: 0, epochTimes: 0, textTimes: new Map() };
+    const visit = (comment) => {
+      if (!comment || typeof comment !== 'object') return;
+      stats.comments += 1;
+      const raw = readCommentTimeField(comment);
+      if (readEpoch(raw) !== null) {
+        stats.epochTimes += 1;
+      } else {
+        const text = normalizeText(raw);
+        if (text) stats.textTimes.set(text, (stats.textTimes.get(text) || 0) + 1);
+      }
+      const inline = comment?.sub_comments || comment?.subComments || comment?.reply_comments || comment?.replies;
+      if (Array.isArray(inline)) inline.forEach(visit);
+    };
+    (Array.isArray(pages) ? pages : []).forEach((page) => {
+      (Array.isArray(page?.comments) ? page.comments : []).forEach(visit);
+    });
+    return stats;
+  }
+
+  function mergeTimeStats(target, source) {
+    target.comments += source.comments;
+    target.epochTimes += source.epochTimes;
+    source.textTimes.forEach((count, text) => {
+      target.textTimes.set(text, (target.textTimes.get(text) || 0) + count);
+    });
+    return target;
+  }
+
+  function timeTextSamples(map) {
+    return [...map.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, PROBE_TIME_TEXT_SAMPLES)
+      .map(([text, count]) => ({ text, count }));
+  }
+
+  function buildCaptureProbe(noteId) {
+    const mainPages = Array.isArray(window.__lgboom_xhs_comment_pages?.[noteId])
+      ? window.__lgboom_xhs_comment_pages[noteId]
+      : [];
+    const subPages = Object.entries(window.__lgboom_xhs_sub_comment_pages || {})
+      .filter(([key]) => key.startsWith(`${noteId}::`))
+      .flatMap(([, value]) => Array.isArray(value) ? value : []);
+    const stats = mergeTimeStats(pageCommentTimeStats(mainPages), pageCommentTimeStats(subPages));
+    return {
+      installedAt: diag.installedAt,
+      now: Date.now(),
+      requests: diag.requests.slice(),
+      mainPages: mainPages.length,
+      subPages: subPages.length,
+      comments: stats.comments,
+      epochTimes: stats.epochTimes,
+      timeTextSamples: timeTextSamples(stats.textTimes),
+    };
   }
 
   function readPayload(json) {
@@ -309,10 +413,17 @@
       const response = await originalFetch(...args);
       try {
         const requestUrl = String(args?.[0]?.url || args?.[0] || response?.url || '');
-        if (response?.ok && isRelevantApi(requestUrl)) {
-          response.clone().json().then((json) => {
-            handleJson(requestUrl, json);
-          }).catch(() => {});
+        if (isRelevantApi(requestUrl)) {
+          recordRequest(requestUrl, {
+            status: Number(response?.status) || null,
+            ok: Boolean(response?.ok),
+            transport: 'fetch',
+          });
+          if (response?.ok) {
+            response.clone().json().then((json) => {
+              handleJson(requestUrl, json);
+            }).catch(() => {});
+          }
         }
       } catch {
         // ignore capture failures
@@ -335,10 +446,23 @@
       this.addEventListener('load', function () {
         try {
           const requestUrl = String(this.__lgboom_xhs_request_url || this.responseURL || '');
-          if (this.status >= 200 && this.status < 300 && isRelevantApi(requestUrl)) {
-            const json = JSON.parse(String(this.responseText || '{}'));
-            handleJson(requestUrl, json);
+          if (isRelevantApi(requestUrl)) {
+            const status = Number(this.status) || null;
+            const ok = this.status >= 200 && this.status < 300;
+            recordRequest(requestUrl, { status, ok, transport: 'xhr' });
+            if (ok) {
+              const json = JSON.parse(String(this.responseText || '{}'));
+              handleJson(requestUrl, json);
+            }
           }
+        } catch {
+          // ignore capture failures
+        }
+      });
+      this.addEventListener('error', function () {
+        try {
+          const requestUrl = String(this.__lgboom_xhs_request_url || this.responseURL || '');
+          if (isRelevantApi(requestUrl)) recordRequest(requestUrl, { status: 0, ok: false, transport: 'xhr' });
         } catch {
           // ignore capture failures
         }
@@ -453,6 +577,17 @@
           ok: true,
           keyword,
           pages,
+        });
+        return;
+      }
+
+      if (data.type === CAPTURE_PROBE_REQUEST_TYPE) {
+        const requestId = normalizeText(data.payload?.requestId);
+        const noteId = normalizeText(data.payload?.noteId);
+        respond(CAPTURE_PROBE_RESPONSE_TYPE, {
+          requestId,
+          ok: true,
+          probe: buildCaptureProbe(noteId),
         });
         return;
       }
