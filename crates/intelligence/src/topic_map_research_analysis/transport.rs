@@ -62,8 +62,8 @@ fn citation_schema(schema: &Value) -> bool {
 fn compact_schema(schema: &Value) -> Value {
     if citation_schema(schema) {
         return json!({"type":"object","properties":{
-            "f":{"type":"integer","minimum":0},
-            "q":{"type":"string","minLength":1,"maxLength":1000}},
+            "f":{"type":"integer","minimum":0,"description":"Zero-based index into the input fragments array: copy the fragment's own position in `fragments` unchanged. Do not use 1-based indexes and do not add or subtract 1."},
+            "q":{"type":"string","minLength":1,"maxLength":1000,"description":"Exact verbatim substring of the fragment selected by `f`. Do not paraphrase, normalize characters, or join text across fragments."}},
             "required":["f","q"],"additionalProperties":false});
     }
     let mut projected = schema.clone();

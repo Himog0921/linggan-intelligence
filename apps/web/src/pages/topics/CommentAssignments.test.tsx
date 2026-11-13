@@ -2,7 +2,7 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, expect, it, vi } from 'vitest';
 import { CommentAssignments } from './CommentAssignments';
-import { parseCommentAssignments } from './commentAssignmentsApi';
+import { parseCommentAssignments, retryCommentAssignment } from './commentAssignmentsApi';
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const signal = (assignmentState: string, status: string | null = null) => ({ signalOrdinal: 0, kind: 'need', proposition: '需要提醒', evidence: { sourceRef: 's', start: 0, end: 4, text: '原评论证据' }, assignmentState,
   assignment: status ? { status, matches: status === 'matched' ? [{ topicRef: 'topic', definitionRef: 'definition', label: '已有提醒主题', reason: '来源相符' }] : [], reason: '合成判断' } : null });
@@ -99,7 +99,7 @@ it('retries only an explicitly eligible window once and reads the new pending re
   const posted = fetch.mock.calls.find(([, init]) => init?.method === 'POST')!;
   expect(JSON.parse(String(posted[1]?.body))).toMatchObject({ domainRef: 'domain', windowRef: 'window' });
   state = 'pending';
-  release(response({ runRef: 'retry-run', windowCount: 1, stageCount: 2 }));
+  release(response({ runRef: 'retry-run', windowCount: 1, stageCount: 1 }));
   await waitFor(() => expect(screen.queryByRole('button', { name: '重试挂靠' })).not.toBeInTheDocument());
   expect(screen.getAllByText('挂靠中')).toHaveLength(2);
 });
@@ -124,4 +124,11 @@ it('retains the same command after an unknown receipt and does not offer dispatc
   await userEvent.click(screen.getByRole('button', { name: '刷新挂靠' }));
   expect(await screen.findByText('来源不可读')).toBeVisible();
   expect(screen.queryByRole('button', { name: '重试挂靠' })).not.toBeInTheDocument();
+});
+
+it('accepts a stored two-stage retry receipt replay without sending another request', async () => {
+  const fetch = vi.fn(async () => response({ runRef: 'historical-retry-run', windowCount: 1, stageCount: 2 }));
+  vi.stubGlobal('fetch', fetch);
+  await expect(retryCommentAssignment({ commandRef: 'same-command', domainRef: 'domain', windowRef: 'old-window' })).resolves.toBe('historical-retry-run');
+  expect(fetch).toHaveBeenCalledTimes(1);
 });

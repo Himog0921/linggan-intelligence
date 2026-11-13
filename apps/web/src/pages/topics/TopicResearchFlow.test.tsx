@@ -3,7 +3,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { TopicResearchFlow, type ResearchSubmission } from './TopicResearchFlow';
 vi.mock('./TopicAutomation', () => ({ TopicAutomation: ({ onEnabledChange }: { onEnabledChange: (enabled: boolean) => void }) => <button onClick={() => onEnabledChange(true)}>启用自动归并测试</button> }));
-const response = (pending: number, ref = 'run') => ({ runs: [{ runRef: ref, pendingStageCount: pending, failedStageCount: 0, windowCount: 1, stages: [] }] });
+const response = (pending: number, ref = 'run') => ({ runs: [{ runRef: ref, executionMode: 'single_pass', pendingStageCount: pending, failedStageCount: 0, windowCount: 1, stages: [] }] });
 const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 const works = [{ workRef: 'work', title: '作品' }];
 beforeEach(() => { vi.useFakeTimers(); });
@@ -18,7 +18,7 @@ it('polls running work, refreshes the map once at completion, then stops polling
   expect(screen.getByText(/研究进行中/)).toBeInTheDocument();
   await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
   expect(done).toHaveBeenCalledTimes(1);
-  expect(screen.getByText(/阶段处理完成/)).toBeInTheDocument();
+  expect(screen.getByText(/研究完成/)).toBeInTheDocument();
   await act(async () => { await vi.advanceTimersByTimeAsync(9000); });
   expect(fetch).toHaveBeenCalledTimes(2);
 });
@@ -36,7 +36,7 @@ it('reads progress immediately after submitting and cancelling', async () => {
   await settle();
   expect(fetch).toHaveBeenCalledTimes(3);
   expect(screen.getByText(/研究进行中/)).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: '取消余下阶段' }));
+  fireEvent.click(screen.getByRole('button', { name: '取消研究' }));
   await settle();
   expect(fetch).toHaveBeenCalledTimes(5);
 });
@@ -190,4 +190,15 @@ it('refreshes for a new automatic run completed between two reads only once', as
   expect(done).toHaveBeenCalledTimes(1);
   await act(async () => { await vi.advanceTimersByTimeAsync(10000); });
   expect(done).toHaveBeenCalledTimes(1);
+});
+
+it('uses the explicit execution mode while preserving legacy phase labels', async () => {
+  const single = { ...response(0).runs[0]!, stages: [{ windowRef: 'w1', stageNumber: 0, state: 'succeeded' }] };
+  const legacy = { ...response(0, 'legacy').runs[0]!, executionMode: 'legacy_four_stage', stages: [{ windowRef: 'w2', stageNumber: 0, state: 'succeeded' }, { windowRef: 'w2', stageNumber: 3, state: 'succeeded' }] };
+  vi.stubGlobal('fetch', vi.fn(async () => json({ runs: [single, legacy] })));
+  render(<MemoryRouter><TopicResearchFlow domain="one" works={works} /></MemoryRouter>);
+  await settle();
+  expect(screen.getByText(/主题归并：已完成/)).toBeVisible();
+  expect(screen.getByText(/讨论提炼：已通过/)).toBeVisible();
+  expect(screen.getByText(/归属核验：已通过/)).toBeVisible();
 });

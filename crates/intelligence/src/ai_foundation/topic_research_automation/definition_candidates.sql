@@ -10,7 +10,7 @@ WITH latest AS (
  JOIN observation_domain d ON d.domain_ref=r.domain_ref AND d.status='active'
  WHERE w.input_refs->>'inputContract'='topic-map.core-source.v1'
   AND w.input_refs->>'methodVersion'=$1
-  AND NOT EXISTS(SELECT 1 FROM linggan_ai_control c WHERE c.scope_key IN('global','executor','task:topic_research_resolve','task:topic_research_resolve_review') AND NOT c.enabled)
+  AND NOT EXISTS(SELECT 1 FROM linggan_ai_control c WHERE c.scope_key IN('global','executor','task:topic_research') AND NOT c.enabled)
   AND w.input_refs#>>'{coverage,coreRef}'=(SELECT request_ref::text FROM linggan_content_understanding_result WHERE work_ref=w.work_ref AND result IS NOT NULL ORDER BY created_at DESC,request_ref DESC LIMIT 1)
  ORDER BY r.domain_ref,w.work_ref,w.input_hash,result.created_at DESC,result.result_ref DESC
 ), changed AS (

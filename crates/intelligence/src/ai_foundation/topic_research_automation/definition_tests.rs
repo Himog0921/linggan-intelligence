@@ -31,7 +31,7 @@ async fn approve_extraction(db: &Database, window: Uuid, model: Uuid) {
         &review["checks"],
     )
     .unwrap();
-    for stage in [0, 1] {
+    for stage in [0] {
         let inv = invocation(db, model).await;
         sqlx::query("INSERT INTO linggan_topic_research_stage_result(item_ref,invocation_ref,output) SELECT item_ref,$3,$4 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=$2")
    .bind(window).bind(stage).bind(inv).bind(if stage==0{output.clone()}else{verified.clone()}).execute(db.pool()).await.unwrap();
@@ -100,12 +100,11 @@ pub(crate) async fn assert_definition_repair(
         sqlx::query("INSERT INTO linggan_topic_classification_run(classification_run_ref,definition_ref,run_kind,run_state,adjudication_note) VALUES($1,$2,'human_adjudicated','completed','SYNTHETIC manual authority')").bind(manual).bind(definition).execute(db.pool()).await.unwrap();
         sqlx::query("INSERT INTO linggan_topic_material_member(classification_run_ref,work_public_ref,role,rationale,ordinal) VALUES($1,$2,'support','SYNTHETIC manual membership',1)").bind(manual).bind(work).execute(db.pool()).await.unwrap();
         if round == 0 {
-            use crate::ai_foundation::{control_store::ControlScope, topic_research::TASKS};
+            use crate::ai_foundation::{control_store::ControlScope, topic_research::CURRENT_TASKS};
             for scope in [
                 ControlScope::Global,
                 ControlScope::Executor,
-                ControlScope::Task(TASKS[2]),
-                ControlScope::Task(TASKS[3]),
+                ControlScope::Task(CURRENT_TASKS[0]),
             ] {
                 switch(db, scope.clone(), false).await;
                 assert_eq!(poll(db).await, 0);
@@ -144,7 +143,7 @@ pub(crate) async fn assert_definition_repair(
         assert_eq!(poll(db).await, 0);
         let repaired:Uuid=sqlx::query_scalar("SELECT window_ref FROM linggan_topic_research_window WHERE input_refs#>>'{definitionReassessment,sourceWindow}'=$1 ORDER BY created_at DESC LIMIT 1").bind(previous.to_string()).fetch_one(db.pool()).await.unwrap();
         let stages:Vec<i32>=sqlx::query_scalar("SELECT stage_number FROM linggan_topic_research_stage WHERE window_ref=$1 ORDER BY stage_number").bind(repaired).fetch_all(db.pool()).await.unwrap();
-        assert_eq!(stages, vec![2, 3]);
+        assert_eq!(stages, vec![0]);
         let original = owner::frozen(db, window).await.unwrap();
         let frozen = owner::frozen(db, repaired).await.unwrap();
         assert_eq!(frozen.hash, original.hash);
@@ -164,17 +163,19 @@ pub(crate) async fn assert_definition_repair(
         let typed = serde_json::from_value(output.clone()).unwrap();
         crate::topic_map_research_analysis::validate_resolution(&typed, &units, &candidates)
             .unwrap();
+        let parsed = json!({"contract":"topic-map.single-pass.v1","projection":serde_json::to_value(&draft).unwrap(),"resolution":output});
         let inv = invocation(db, model).await;
         let accepted = invocation(db, model).await;
         let mut tx = db.pool().begin().await.unwrap();
-        sqlx::query("INSERT INTO linggan_topic_research_stage_result(item_ref,invocation_ref,output) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=2").bind(repaired).bind(inv).bind(output).execute(&mut *tx).await.unwrap();
+        sqlx::query("INSERT INTO linggan_topic_research_stage_result(item_ref,invocation_ref,output) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=0").bind(repaired).bind(inv).bind(&parsed).execute(&mut *tx).await.unwrap();
         packet::publish_in(
             &mut tx,
             repaired,
-            3,
+            0,
             accepted,
             &frozen,
             &json!({"candidates":candidates,"recall":{"method":"synthetic-proof"}}),
+            &parsed,
         )
         .await
         .unwrap();
@@ -187,8 +188,8 @@ pub(crate) async fn assert_definition_repair(
         assert_eq!(retained, "SYNTHETIC manual membership");
         previous = repaired;
     }
-    let outputs:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_topic_research_stage s JOIN linggan_topic_research_stage_result r USING(item_ref) WHERE stage_number<2").fetch_one(db.pool()).await.unwrap();
-    assert_eq!(outputs, 2);
+    let outputs:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_topic_research_stage s JOIN linggan_topic_research_stage_result r USING(item_ref) WHERE s.window_ref=$1 AND stage_number=0").bind(window).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(outputs, 1);
     if withdraw_image {
         change_definition(db, topic).await;
         let material:Uuid=sqlx::query_scalar("SELECT m.materialization_ref FROM linggan_material_media_origin o JOIN linggan_media_download_attempt a ON a.media_observation_ref=o.observation_ref JOIN linggan_media_materialization m USING(download_attempt_ref) WHERE o.content_public_ref=(SELECT work_ref FROM linggan_topic_research_window WHERE window_ref=$1) ORDER BY m.verified_at DESC LIMIT 1").bind(window).fetch_one(db.pool()).await.unwrap();

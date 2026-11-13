@@ -18,12 +18,12 @@ SELECT semantic.*,w.window_ref,result.core_json,dispatch.context,
  ELSE 'failed' END AS assignment_state
 FROM latest semantic
 LEFT JOIN LATERAL (
- SELECT w.window_ref FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref)
+ SELECT w.window_ref,w.input_refs->>'executionMode' AS execution_mode FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref)
  WHERE r.domain_ref=$1 AND w.input_refs->>'inputContract'='topic-map.comment-semantic-source.v1'
  AND w.input_refs->>'semanticRequestRef'=semantic.request_ref::text
  ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 1
 ) w ON true
 LEFT JOIN linggan_topic_research_result result USING(window_ref)
-LEFT JOIN linggan_topic_research_stage stage ON stage.window_ref=w.window_ref AND stage.stage_number=2
+LEFT JOIN linggan_topic_research_stage stage ON stage.window_ref=w.window_ref AND stage.stage_number=CASE WHEN w.execution_mode='single_pass' THEN 0 ELSE 2 END
 LEFT JOIN linggan_topic_research_dispatch dispatch USING(item_ref)
 ORDER BY semantic.created_at DESC,semantic.request_ref DESC

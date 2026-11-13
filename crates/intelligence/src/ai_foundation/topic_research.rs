@@ -13,6 +13,7 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 pub const CONTRACT: &str = "topic-research-stage.v1";
+pub const CURRENT_TASKS: [TaskKey; 1] = [TaskKey::TopicResearch];
 pub const TASKS: [TaskKey; 4] = [
     TaskKey::TopicResearch,
     TaskKey::TopicResearchExtractReview,
@@ -86,7 +87,7 @@ pub(crate) async fn start_with_kind(
         }
     }
     let mut configurations = Vec::new();
-    for task in TASKS {
+    for task in CURRENT_TASKS {
         let revision: i64 =
             sqlx::query_scalar("SELECT revision FROM linggan_ai_task_setting WHERE task_key=$1")
                 .bind(task.as_str())
@@ -161,8 +162,8 @@ pub(crate) async fn start_with_kind(
     for window in &windows {
         let reference = Uuid::new_v4();
         sqlx::query("INSERT INTO linggan_topic_research_window(window_ref,run_ref,work_ref,input_hash,input_refs) VALUES($1,$2,$3,$4,$5)")
-            .bind(reference).bind(run).bind(window.work.work_ref).bind(&window.hash).bind(source::reference_manifest(window)).execute(&mut *command.tx).await?;
-        for (index, task) in TASKS.into_iter().enumerate() {
+            .bind(reference).bind(run).bind(window.work.work_ref).bind(&window.hash).bind(single_manifest(window)).execute(&mut *command.tx).await?;
+        for (index, task) in CURRENT_TASKS.into_iter().enumerate() {
             let inputs = vec![BatchInput {
                 item_key: format!("{reference}:{index}"),
                 input: InputRef::TopicResearch {
@@ -189,7 +190,7 @@ pub(crate) async fn start_with_kind(
         .finish(Receipt {
             run_ref: run,
             window_count: windows.len(),
-            stage_count: windows.len() * 4,
+            stage_count: windows.len(),
         })
         .await
 }
@@ -210,6 +211,8 @@ pub(crate) async fn frozen(db: &Database, window: Uuid) -> Result<ResearchInput,
                 "ai_source_unavailable".into(),
             ]));
         }
+        let mut input = input;
+        input.coverage["executionMode"] = manifest["executionMode"].clone();
         return Ok(input);
     }
     let work: Uuid = row.get("work_ref");
@@ -223,8 +226,19 @@ pub(crate) async fn frozen(db: &Database, window: Uuid) -> Result<ResearchInput,
     )
     .await
     .map_err(source_error)?;
-    source::restore_scoped_window(&loaded, work, &manifest)
-        .ok_or_else(|| FoundationError::AdmissionDenied(vec!["ai_source_unavailable".into()]))
+    let mut input = source::restore_scoped_window(&loaded, work, &manifest)
+        .ok_or_else(|| FoundationError::AdmissionDenied(vec!["ai_source_unavailable".into()]))?;
+    input.coverage["executionMode"] = manifest["executionMode"].clone();
+    input.coverage["reusedExtractionWindow"] = manifest["reusedExtractionWindow"].clone();
+    Ok(input)
+}
+fn single_manifest(input: &ResearchInput) -> Value {
+    let mut manifest = source::reference_manifest(input);
+    manifest["executionMode"] = json!("single_pass");
+    manifest
+}
+pub(crate) fn single_pass(input: &ResearchInput) -> bool {
+    input.coverage["executionMode"] == "single_pass"
 }
 pub(crate) async fn previous_in(
     tx: &mut Transaction<'_, Postgres>,
@@ -260,11 +274,11 @@ pub(crate) async fn previous_in(
     }
 }
 pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
-    let rows=sqlx::query("SELECT r.run_ref,r.work_refs,r.created_at::text AS created_at,count(DISTINCT w.window_ref) AS windows,count(*) FILTER(WHERE c.state='succeeded') AS succeeded,count(*) FILTER(WHERE c.state='failed' OR (c.state='skipped' AND c.failure_code IS DISTINCT FROM 'topic_assignment_not_required')) AS failed,count(*) FILTER(WHERE c.state IN('pending','running')) AS pending,jsonb_agg(jsonb_build_object('windowRef',w.window_ref,'workRef',w.work_ref,'stageNumber',s.stage_number,'taskKey',b.task_key,'state',c.state,'failureCode',c.failure_code,'waitReason',c.wait_reason,'batchRef',b.batch_ref) ORDER BY w.window_ref,s.stage_number) AS stages FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item item USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1 GROUP BY r.run_ref ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 30")
+    let rows=sqlx::query("SELECT r.run_ref,r.work_refs,r.created_at::text AS created_at,count(DISTINCT w.window_ref) AS windows,bool_and(w.input_refs->>'executionMode'='single_pass') AS single_pass,count(*) FILTER(WHERE c.state='succeeded') AS succeeded,count(*) FILTER(WHERE c.state='failed' OR (c.state='skipped' AND c.failure_code IS DISTINCT FROM 'topic_assignment_not_required')) AS failed,count(*) FILTER(WHERE c.state IN('pending','running')) AS pending,jsonb_agg(jsonb_build_object('windowRef',w.window_ref,'workRef',w.work_ref,'stageNumber',s.stage_number,'taskKey',b.task_key,'state',c.state,'failureCode',c.failure_code,'waitReason',c.wait_reason,'batchRef',b.batch_ref) ORDER BY w.window_ref,s.stage_number) AS stages FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item item USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1 GROUP BY r.run_ref ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 30")
         .bind(domain).fetch_all(db.pool()).await?;
     let summary:Value=sqlx::query_scalar("SELECT jsonb_build_object('pendingStageCount',count(*) FILTER(WHERE c.state IN('pending','running')),'succeededStageCount',count(*) FILTER(WHERE c.state='succeeded'),'failedStageCount',count(*) FILTER(WHERE c.state='failed' OR (c.state='skipped' AND c.failure_code IS DISTINCT FROM 'topic_assignment_not_required'))) FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1").bind(domain).fetch_one(db.pool()).await?;
     Ok(
-        json!({"summary":summary,"domainRef":domain,"methodVersion":CONTRACT,"runs":rows.iter().map(|r|json!({"runRef":r.get::<Uuid,_>("run_ref"),"workRefs":r.get::<Vec<Uuid>,_>("work_refs"),"createdAt":r.get::<String,_>("created_at"),"windowCount":r.get::<i64,_>("windows"),"succeededStageCount":r.get::<i64,_>("succeeded"),"failedStageCount":r.get::<i64,_>("failed"),"pendingStageCount":r.get::<i64,_>("pending"),"stages":r.get::<Value,_>("stages")})).collect::<Vec<_>>()}),
+        json!({"summary":summary,"domainRef":domain,"methodVersion":CONTRACT,"runs":rows.iter().map(|r|json!({"runRef":r.get::<Uuid,_>("run_ref"),"executionMode":if r.get::<Option<bool>,_>("single_pass")==Some(true){"single_pass"}else{"legacy_four_stage"},"workRefs":r.get::<Vec<Uuid>,_>("work_refs"),"createdAt":r.get::<String,_>("created_at"),"windowCount":r.get::<i64,_>("windows"),"succeededStageCount":r.get::<i64,_>("succeeded"),"failedStageCount":r.get::<i64,_>("failed"),"pendingStageCount":r.get::<i64,_>("pending"),"stages":r.get::<Value,_>("stages")})).collect::<Vec<_>>()}),
     )
 }
 

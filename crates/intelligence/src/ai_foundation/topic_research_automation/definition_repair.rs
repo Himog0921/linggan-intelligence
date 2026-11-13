@@ -4,7 +4,7 @@ use crate::ai_foundation::{
     batch_store::{self, BatchInput, BatchKind, InputRef},
     store::Command,
     task_config::lock_setting,
-    topic_research::{self as owner, Receipt, TASKS},
+    topic_research::{self as owner, Receipt, CURRENT_TASKS},
 };
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
@@ -75,7 +75,7 @@ async fn enqueue(
     }
     // Same setting lock order as ordinary starts also serializes queue admission/cap checks.
     let mut active = Vec::new();
-    for task in TASKS {
+    for task in CURRENT_TASKS {
         let revision: i64 =
             sqlx::query_scalar("SELECT revision FROM linggan_ai_task_setting WHERE task_key=$1")
                 .bind(task.as_str())
@@ -83,9 +83,9 @@ async fn enqueue(
                 .await?;
         active.push(lock_setting(&mut command.tx, task, revision).await?);
     }
-    let controls=sqlx::query("SELECT enabled FROM linggan_ai_control WHERE scope_key IN('global','executor','task:topic_research_resolve','task:topic_research_resolve_review') ORDER BY scope_key FOR SHARE")
+    let controls=sqlx::query("SELECT enabled FROM linggan_ai_control WHERE scope_key IN('global','executor','task:topic_research') ORDER BY scope_key FOR SHARE")
         .fetch_all(&mut *command.tx).await?;
-    if controls.len() != 4 || controls.iter().any(|row| !row.get::<bool, _>("enabled")) {
+    if controls.len() != 3 || controls.iter().any(|row| !row.get::<bool, _>("enabled")) {
         return Err(FoundationError::AdmissionDenied(vec![
             "executor_off".into(),
         ]));
@@ -110,23 +110,15 @@ async fn enqueue(
         .and_then(Value::as_str)
         .and_then(|id| id.parse::<Uuid>().ok())
         .unwrap_or(source);
-    // Both outputs must have actually succeeded; no synthetic skipped/succeeded extraction stages.
-    for stage in [0, 1] {
-        let succeeded:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_research_stage s JOIN linggan_ai_batch_item_control c USING(item_ref) JOIN linggan_topic_research_stage_result output USING(item_ref) WHERE s.window_ref=$1 AND s.stage_number=$2 AND c.state='succeeded' AND output.output IS NOT NULL AND output.failure_code IS NULL)").bind(root).bind(stage).fetch_one(&mut *command.tx).await?;
-        if !succeeded {
-            return Err(FoundationError::AdmissionDenied(vec![
-                "topic_dependency_failed".into(),
-            ]));
-        }
-    }
-    let draft =
-        crate::ai_foundation::topic_research_packet::draft_in(&mut command.tx, root).await?;
+    // Reuse a genuinely published projection, regardless of the old execution topology.
+    let draft = crate::ai_foundation::topic_research_packet::draft_in(&mut command.tx, root).await?;
+    let published: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_research_result WHERE window_ref=$1)")
+        .bind(source).fetch_one(&mut *command.tx).await?;
+    if !published { return Err(FoundationError::AdmissionDenied(vec!["topic_dependency_failed".into()])); }
     crate::topic_map_research_analysis::validate_output(&draft, &frozen.fragments, &[])
         .map_err(|_| FoundationError::AdmissionDenied(vec!["ai_source_unavailable".into()]))?;
-    let mut configs: Vec<Uuid> =
-        serde_json::from_value(row.get("configurations")).map_err(|_| FoundationError::Invalid)?;
-    configs[2] = active[2];
-    configs[3] = active[3];
+    let configs = active;
+    manifest["executionMode"] = json!("single_pass");
     manifest["reusedExtractionWindow"] = json!(root);
     manifest["definitionReassessment"] = json!({"sourceWindow":source,"versions":versions});
     let run = Uuid::new_v4();
@@ -134,8 +126,8 @@ async fn enqueue(
     let work: Uuid = row.get("work_ref");
     sqlx::query("INSERT INTO linggan_topic_research_run(run_ref,command_ref,domain_ref,work_refs,knowledge_cutoff,configurations) VALUES($1,$2,$3,$4,$5::timestamptz,$6)").bind(run).bind(command_ref).bind(domain).bind(vec![work]).bind(row.get::<String,_>("cutoff")).bind(json!(configs)).execute(&mut *command.tx).await?;
     sqlx::query("INSERT INTO linggan_topic_research_window(window_ref,run_ref,work_ref,input_hash,input_refs) VALUES($1,$2,$3,$4,$5)").bind(window).bind(run).bind(work).bind(row.get::<String,_>("input_hash")).bind(manifest).execute(&mut *command.tx).await?;
-    for index in [2, 3] {
-        let task = TASKS[index];
+    for index in [0] {
+        let task = CURRENT_TASKS[index];
         let inputs = vec![BatchInput {
             item_key: format!("{window}:{index}"),
             input: InputRef::TopicResearch {
@@ -160,7 +152,7 @@ async fn enqueue(
         .finish(Receipt {
             run_ref: run,
             window_count: 1,
-            stage_count: 2,
+            stage_count: 1,
         })
         .await
 }

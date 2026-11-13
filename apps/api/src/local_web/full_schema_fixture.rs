@@ -328,6 +328,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0204_opportunity_comment_eligibility.sql"),
     include_str!("../../../../database/migrations/0205_opportunity_problem_taxonomy.sql"),
     include_str!("../../../../database/migrations/0206_comment_platform_time.sql"),
+    include_str!("../../../../database/migrations/0207_topic_single_pass.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -474,4 +475,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0204_opportunity_comment_eligibility','2ad6bda83580a4c3093f1c0ad6cc56e4fad1a4d1e641bc5b9fba3e15ee64feb2');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0205_opportunity_problem_taxonomy','8e7a8ce8026c21b48f8a146dc941e115c834e8f07f5faebd29f44a29fdbe3294');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0206_comment_platform_time','031971ac03e20ce747079860986de332807a1b52ff9ff811d8fb1cab1959df7e');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0207_topic_single_pass','8826b56d67ec365d3109be066d222f6267cfffaa22932c7c3c2b09cd810a1da7');\n",
 );

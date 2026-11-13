@@ -32,7 +32,7 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Setting, FoundationErro
         .bind(domain).fetch_optional(db.pool()).await?.ok_or(FoundationError::NotFound)?;
     let mut tx = db.pool().begin().await?;
     let mut ready = true;
-    for task in super::topic_research::TASKS {
+    for task in super::topic_research::CURRENT_TASKS {
         let config: Uuid = sqlx::query_scalar(
             "SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key=$1",
         )

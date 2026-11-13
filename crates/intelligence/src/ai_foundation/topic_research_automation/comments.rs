@@ -4,7 +4,7 @@ use crate::ai_foundation::{
     batch_store::{self, BatchInput, BatchKind, InputRef},
     store::Command,
     task_config::lock_setting,
-    topic_research::{Receipt, TASKS},
+    topic_research::{Receipt, CURRENT_TASKS},
 };
 use linggan_storage_postgres::Database;
 use serde_json::json;
@@ -74,7 +74,7 @@ async fn enqueue_with_retry(
             _ => FoundationError::Invalid,
         })?;
     let versions = super::super::topic_comment_source::catalog_versions(&catalog);
-    let previous=sqlx::query("SELECT w.input_refs,result.core_json,dispatch.context FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) LEFT JOIN linggan_topic_research_result result USING(window_ref) LEFT JOIN linggan_topic_research_stage s ON s.window_ref=w.window_ref AND s.stage_number=2 LEFT JOIN linggan_topic_research_dispatch dispatch USING(item_ref) WHERE r.domain_ref=$1 AND w.input_refs->>'semanticRequestRef'=$2 ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 1").bind(domain).bind(source.to_string()).fetch_optional(db.pool()).await?;
+    let previous=sqlx::query("SELECT w.input_refs,result.core_json,dispatch.context FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) LEFT JOIN linggan_topic_research_result result USING(window_ref) LEFT JOIN linggan_topic_research_stage s ON s.window_ref=w.window_ref AND s.stage_number=CASE WHEN w.input_refs->>'executionMode'='single_pass' THEN 0 ELSE 2 END LEFT JOIN linggan_topic_research_dispatch dispatch USING(item_ref) WHERE r.domain_ref=$1 AND w.input_refs->>'semanticRequestRef'=$2 ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 1").bind(domain).bind(source.to_string()).fetch_optional(db.pool()).await?;
     if let Some(previous) = previous.filter(|_| retry.is_none()) {
         let core: Option<serde_json::Value> = previous.get("core_json");
         let context: Option<serde_json::Value> = previous.get("context");
@@ -124,7 +124,7 @@ async fn enqueue_with_retry(
     }
     // Same setting lock order as ordinary starts also serializes queue admission/cap checks.
     let mut active = Vec::new();
-    for task in TASKS {
+    for task in CURRENT_TASKS {
         let revision: i64 =
             sqlx::query_scalar("SELECT revision FROM linggan_ai_task_setting WHERE task_key=$1")
                 .bind(task.as_str())
@@ -145,9 +145,9 @@ async fn enqueue_with_retry(
             ]));
         }
     }
-    let controls=sqlx::query("SELECT enabled FROM linggan_ai_control WHERE scope_key IN('global','executor','task:topic_research_resolve','task:topic_research_resolve_review') ORDER BY scope_key FOR SHARE")
+    let controls=sqlx::query("SELECT enabled FROM linggan_ai_control WHERE scope_key IN('global','executor','task:topic_research') ORDER BY scope_key FOR SHARE")
         .fetch_all(&mut *command.tx).await?;
-    if controls.len() != 4 || controls.iter().any(|row| !row.get::<bool, _>("enabled")) {
+    if controls.len() != 3 || controls.iter().any(|row| !row.get::<bool, _>("enabled")) {
         return Err(FoundationError::AdmissionDenied(vec![
             "executor_off".into(),
         ]));
@@ -169,7 +169,7 @@ async fn enqueue_with_retry(
         ]));
     }
     let configs = active;
-    let manifest = json!({"inputContract":super::super::topic_comment_source::CONTRACT,"semanticRequestRef":source,"inputHash":input.hash,"catalogVersions":versions,"methodVersion":crate::topic_map_research_analysis::METHOD_VERSION});
+    let manifest = json!({"executionMode":"single_pass","inputContract":super::super::topic_comment_source::CONTRACT,"semanticRequestRef":source,"inputHash":input.hash,"catalogVersions":versions,"methodVersion":crate::topic_map_research_analysis::METHOD_VERSION});
     let run = Uuid::new_v4();
     let window = Uuid::new_v4();
     let work = input.work.work_ref;
@@ -178,8 +178,8 @@ async fn enqueue_with_retry(
         .ok_or(FoundationError::Invalid)?;
     sqlx::query("INSERT INTO linggan_topic_research_run(run_ref,command_ref,domain_ref,work_refs,knowledge_cutoff,configurations) VALUES($1,$2,$3,$4,$5::timestamptz,$6)").bind(run).bind(command_ref).bind(domain).bind(vec![work]).bind(cutoff).bind(json!(configs)).execute(&mut *command.tx).await?;
     sqlx::query("INSERT INTO linggan_topic_research_window(window_ref,run_ref,work_ref,input_hash,input_refs) VALUES($1,$2,$3,$4,$5)").bind(window).bind(run).bind(work).bind(&input.hash).bind(manifest).execute(&mut *command.tx).await?;
-    for index in [2, 3] {
-        let task = TASKS[index];
+    for index in [0] {
+        let task = CURRENT_TASKS[index];
         let inputs = vec![BatchInput {
             item_key: format!("{window}:{index}"),
             input: InputRef::TopicResearch {
@@ -208,7 +208,7 @@ async fn enqueue_with_retry(
         .finish(Receipt {
             run_ref: run,
             window_count: 1,
-            stage_count: 2,
+            stage_count: 1,
         })
         .await
         .map(Some)

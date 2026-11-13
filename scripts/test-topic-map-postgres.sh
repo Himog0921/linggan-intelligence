@@ -52,6 +52,8 @@ export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password
 proof_exit=0
 AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test topic_map_postgres --test topic_research_executor_postgres --test topic_map_search_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?
 cargo_proof -p linggan-intelligence --lib topic_map_research::saved_source_postgres:: --locked -- --ignored --test-threads=1 || proof_exit=$?
+cargo_proof -p linggan-intelligence --lib topic_map_research::parent_chain_postgres:: --locked -- --ignored --test-threads=1 || proof_exit=$?
+cargo_proof -p linggan-intelligence --lib topic_map_core::acceptance::tests:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo_proof -p linggan-intelligence --lib topic_map::operations::tests:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo_proof -p linggan-intelligence --lib ai_foundation::topic_comment_source::tests:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo test -p linggan-evidence --test topic_map_comment_budget_postgres --test material_projection_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?

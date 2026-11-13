@@ -39,7 +39,7 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
         ControlScope::Task(crate::ai_foundation::TaskKey::CommentStudy),
     ]
     .into_iter()
-    .chain(super::super::topic_research::TASKS.map(ControlScope::Task))
+    .chain(super::super::topic_research::CURRENT_TASKS.map(ControlScope::Task))
     {
         let revision =
             sqlx::query_scalar("SELECT revision FROM linggan_ai_control WHERE scope_key=$1")
@@ -106,7 +106,7 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     .fetch_all(db.pool())
     .await
     .unwrap();
-    assert_eq!(stages, vec![2, 3]);
+    assert_eq!(stages, vec![0]);
     let retry = automation::RetryCommentAssignment {
         command_ref: Uuid::new_v4(),
         domain_ref: support::D,
@@ -144,7 +144,7 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     let retried = automation::retry_comment_assignment(&db, &retry)
         .await
         .unwrap();
-    assert_eq!(retried.stage_count, 2);
+    assert_eq!(retried.stage_count, 1);
     assert_eq!(
         automation::retry_comment_assignment(&db, &retry)
             .await
@@ -189,39 +189,34 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     .unwrap();
     let (topic, definition) = seed_topic(&db).await;
     let mut tx = db.pool().begin().await.unwrap();
-    let proposed = packet::prepare(&db, &mut tx, window, 2, &frozen)
+    let proposed = packet::prepare(&db, &mut tx, window, 0, &frozen)
         .await
         .unwrap();
     assert_eq!(
         proposed.schema["properties"]["decisions"]["items"]["properties"]["status"]["enum"],
         json!(["matched", "uncertain", "out_of_scope"])
     );
-    let units = crate::topic_map_core::units_for_discussions(&frozen, &discussions(&frozen));
-    let output = json!({"contract":crate::topic_map_research_analysis::RESOLVE_CONTRACT,"decisions":[
-        {"unitId":units[0].0,"status":"matched","matches":[{"topicRef":topic,"definitionRef":definition,"reason":"SYNTHETIC 同为启动任务"}],"proposedTopic":null,"relations":[],"reason":"SYNTHETIC 启动任务"},
-        {"unitId":units[1].0,"status":"uncertain","matches":[],"proposedTopic":null,"relations":[],"reason":"SYNTHETIC 现有主题不含笔盒偏好"}]});
-    packet::validate(&output.to_string(), 2, &frozen, &proposed.context, None).unwrap();
+    let output = json!({"contract":"topic-map.single-pass.v1","projection":json!(null),"newTopics":[],"decisions":[
+        {"discussionIndex":0,"status":"matched","matches":[{"topicRef":topic,"definitionRef":definition,"reason":"SYNTHETIC 同为启动任务"}],"newTopicId":null,"relations":[],"reason":"SYNTHETIC 启动任务"},
+        {"discussionIndex":1,"status":"uncertain","matches":[],"newTopicId":null,"relations":[],"reason":"SYNTHETIC 现有主题不含笔盒偏好"}]});
+    let parsed = packet::validate(&output.to_string(), 0, &frozen, &proposed.context, None).unwrap();
     let mut forbidden = output.clone();
     forbidden["decisions"][1]["status"] = json!("new");
     assert_eq!(
-        packet::validate(&forbidden.to_string(), 2, &frozen, &proposed.context, None).unwrap_err(),
+        packet::validate(&forbidden.to_string(), 0, &frozen, &proposed.context, None).unwrap_err(),
         "comment_topic_creation_forbidden"
     );
     let inv = invocation(&db, model_config).await;
-    sqlx::query("INSERT INTO linggan_topic_research_dispatch(item_ref,invocation_ref,context) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=2").bind(window).bind(inv).bind(&proposed.context).execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT INTO linggan_topic_research_stage_result(item_ref,invocation_ref,output) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=2").bind(window).bind(inv).bind(output).execute(&mut *tx).await.unwrap();
-    let review = packet::prepare(&db, &mut tx, window, 3, &frozen)
-        .await
-        .unwrap();
-    let verification = json!({"contract":"topic-map.verify.v1","checks":review.context["checks"].as_array().unwrap().iter().map(|c|json!({"checkId":c["checkId"],"verdict":"pass","reason":"SYNTHETIC exact existing topic"})).collect::<Vec<_>>()});
-    packet::validate(&verification.to_string(), 3, &frozen, &review.context, None).unwrap();
+    sqlx::query("INSERT INTO linggan_topic_research_dispatch(item_ref,invocation_ref,context) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=0").bind(window).bind(inv).bind(&proposed.context).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_topic_research_stage_result(item_ref,invocation_ref,output) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=0").bind(window).bind(inv).bind(&parsed).execute(&mut *tx).await.unwrap();
     packet::publish_in(
         &mut tx,
         window,
-        3,
+        0,
         invocation(&db, model_config).await,
         &frozen,
-        &review.context,
+        &proposed.context,
+        &parsed,
     )
     .await
     .unwrap();
@@ -286,14 +281,24 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     for _ in 0..3 {
         assert_eq!(automation::tick(&db, &mut cursor).await.unwrap(), 0);
     }
-    let count: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_topic_research_stage WHERE stage_number<2",
+    // The reassignment reuses the saved comment research in one fused stage.
+    let latest:Uuid=sqlx::query_scalar("SELECT w.window_ref FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 1").fetch_one(db.pool()).await.unwrap();
+    let stages: Vec<i32> = sqlx::query_scalar(
+        "SELECT stage_number FROM linggan_topic_research_stage WHERE window_ref=$1 ORDER BY stage_number",
     )
-    .fetch_one(db.pool())
+    .bind(latest)
+    .fetch_all(db.pool())
     .await
     .unwrap();
-    assert_eq!(count, 0);
-    let latest:Uuid=sqlx::query_scalar("SELECT w.window_ref FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) ORDER BY r.created_at DESC,r.run_ref DESC LIMIT 1").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(stages, vec![0]);
+    let manifest: serde_json::Value =
+        sqlx::query_scalar("SELECT input_refs FROM linggan_topic_research_window WHERE window_ref=$1")
+            .bind(latest)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(manifest["inputContract"], json!(CONTRACT));
+    assert_eq!(manifest["executionMode"], json!("single_pass"));
     let items: Vec<Uuid> =
         sqlx::query_scalar("SELECT item_ref FROM linggan_topic_research_stage WHERE window_ref=$1")
             .bind(latest)
