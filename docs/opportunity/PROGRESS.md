@@ -254,3 +254,25 @@
   - `check-invariants`：`totalViolations = 0`、`incomplete = true`（I1–I10 依赖的 T1 表尚未建立）；I11 `available = true`、`violations = 0`。
 - 操作记录：本地库凭据以容器当前环境为准（工作树 `.env` 的 `POSTGRES_PASSWORD` 与容器内角色口令不一致，直接使用 `.env` 连接会报鉴权失败；本轮连接串从容器环境读取，未写入任何文件）。
 - 遗留：Q-15 裁定前，C4 无法产出评论平台时间，`comment_published` 的影子指标仍不可启用；第 2 轮重采集应在插件问题修复后执行，并优先覆盖两个 `input_blocked` 作品（需先获得新的可用签名定位器）。
+
+## 2026-11-12 C3b 日精度平台时间（答复 Q-15）
+
+- 状态：迁移、投影、读取视图与测试实现完成；隔离库验证通过。未合并，未在共享/生产库执行 migration，未写真实数据，未发起真实采集。
+- 背景：C4 与探针确认派发会话拿不到毫秒 epoch；但只读核查显示 32,219 条评论/回复全部有 `publishedAtText`，日精度可解析率接近 100%。负责人裁定采用日精度（D-034），范围为新采集 + 历史回填。
+- 数据库（`database/migrations/0207_comment_platform_time_day_precision.sql`）：
+  - 表新增 `source_kind`（`epoch`、`display_full_date`、`display_month_day`、`display_relative`）；`precision` 允许 `day`；`protocol_version` 允许 0（历史包无协议）。
+  - 主键改为 `(content_public_ref, comment_external_id, precision)`，历史回填的日精度行不会阻止以后写入精确 epoch。只追加与禁改触发器不变。
+  - 新增视图 `linggan_material_comment_platform_time_current`，同一评论毫秒行优先；覆盖率、资格、不变量与时间违例全部改读该视图。
+  - `linggan_opportunity_parse_comment_display_date(text, collected_at)` 解析 `YYYY-MM-DD`、`MM-DD`、`昨天`、`刚刚`、`N天前`、`N小时前`、`N分钟前`。`MM-DD` 的年份取采集时刻所在上海年份，候选日期晚于采集日时归入上一年；`N小时前`/`N分钟前` 按实际时长回退；日精度统一存上海当地零点。无法解析的文本返回 `NULL`，不猜测。
+  - `linggan_opportunity_comment_collected_at(record, package.accepted_at)` 优先读记录自身 13 位毫秒 `collectedAt`，缺失时退回包裹 `accepted_at`。相对时间按**该条记录的采集时刻**推算，不使用当前时间。
+  - epoch 的可信范围保持 C2 规则：协议 v1 包，或无协议但记录 `sourceTier = 'api'` 的历史包。历史 `dom` 回退的 `createdAt` 顶替值不采信，改用展示文本。
+  - 投影器分两遍执行：先全部毫秒包，再全部日精度包；冲突只由 epoch 观测计算，日精度不参与。旧的一参重载函数已删除。
+  - 展示文本交叉核对只比较毫秒行，避免用日精度值验证自身来源。
+- 代码：`platform_time.rs` 与 `invariants.rs` 改读当前视图；测试数据集新增 `build_legacy_day_times()` 覆盖层。
+- 验证（`scripts/test-opportunity-postgres.sh`，隔离 PostgreSQL 容器）：
+  - 12 passed, 0 failed（原 11 条 + 新增日精度 1 条）。
+  - 新增证明：日精度投影写入 9 条，日期分别为 `2026-10-27`、`2026-10-27`、`2026-10-24`、`2026-10-26`、`2026-10-27`、`2026-10-27`、`2025-12-31`、`2026-01-01`、`2026-10-27`；`12-31` 由跨年规则归入 2025；来源分别为全日期、月日、相对时间；`protocol_version = 0`。
+  - 日精度值按上海零点存储（`2026-10-27` → `2026-10-26T16:00:00Z`）；只有日精度行时展示核对 `compared = 0`、时间违例 0。
+  - 之后补入精确 epoch：日精度行保留，当前视图返回 `precision = millisecond` 的 `2026-10-27T00:01:00Z`。
+  - `cargo fmt --check` 通过。
+- 遗留：独立审查与合并授权；真实库的历史回填需在 migration 获批执行后运行 `project-platform-times`；重新采集仍受 D-028 的频率、风险冷却与授权约束。C4 第 2 轮可不再以拿到毫秒 epoch 为前置条件。

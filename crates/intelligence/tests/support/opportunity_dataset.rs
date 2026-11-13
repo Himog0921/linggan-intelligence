@@ -22,6 +22,16 @@ pub async fn build_platform_times(database: &Database) -> Result<(), sqlx::Error
     Ok(())
 }
 
+/// C3b overlay: a legacy notes package without a collection protocol, carrying only display
+/// labels. Relative labels must resolve against the record's collectedAt, which the seed sets to
+/// the note's first observation time.
+pub async fn build_legacy_day_times(database: &Database) -> Result<(), sqlx::Error> {
+    sqlx::raw_sql(LEGACY_DAY_TIME_SQL)
+        .execute(database.pool())
+        .await?;
+    Ok(())
+}
+
 pub const SEED_SQL: &str = r#"
 CREATE TABLE opportunity_seed_work (
  work_key text PRIMARY KEY,
@@ -263,5 +273,39 @@ SET payload = jsonb_build_object(
 FROM opportunity_seed_package package_seed
 WHERE package_seed.package_ref = package.package_ref
   AND package_seed.kind IN ('comments', 'late');
+ALTER TABLE linggan_runtime_capture_package ENABLE TRIGGER USER;
+"#;
+
+pub const LEGACY_DAY_TIME_SQL: &str = r#"
+ALTER TABLE linggan_runtime_capture_package DISABLE TRIGGER USER;
+UPDATE linggan_runtime_capture_package package
+SET payload = jsonb_build_object(
+ 'records', jsonb_build_array(jsonb_build_object('kind', 'control', 'payload', '{}'::jsonb))
+  || COALESCE((
+  SELECT jsonb_agg(jsonb_build_object('kind', 'comment', 'payload', jsonb_build_object(
+   'publishedAt', NULL,
+   'publishedAtText', CASE
+    WHEN comment.record_ordinal = 1 THEN '2026-10-27'
+    WHEN comment.record_ordinal = 2 THEN '10-27'
+    WHEN comment.record_ordinal = 3 THEN '3天前'
+    WHEN comment.record_ordinal = 4 THEN '昨天'
+    WHEN comment.record_ordinal = 5 THEN '2小时前'
+    WHEN comment.record_ordinal = 6 THEN '刚刚'
+    WHEN comment.record_ordinal = 7 THEN '12-31'
+    WHEN comment.record_ordinal = 8 THEN '01-01'
+    WHEN comment.record_ordinal = 9 THEN '30分钟前'
+    ELSE NULL END,
+   'sourceTier', 'dom',
+   'collectedAt', (extract(epoch FROM seed_work.first_observed_at) * 1000)::bigint
+  )) ORDER BY comment.record_ordinal)
+  FROM linggan_material_comment comment
+  JOIN opportunity_seed_work seed_work ON seed_work.work_ref = comment.content_public_ref
+  WHERE comment.package_ref = package.package_ref
+ ), '[]'::jsonb)
+)
+FROM opportunity_seed_package package_seed
+WHERE package_seed.package_ref = package.package_ref
+  AND package_seed.kind = 'comments'
+  AND package_seed.work_key = 'work-1';
 ALTER TABLE linggan_runtime_capture_package ENABLE TRIGGER USER;
 "#;
