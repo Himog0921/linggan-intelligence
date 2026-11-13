@@ -105,6 +105,10 @@ impl CommenterDigest {
     pub fn digest_version(&self) -> &'static str {
         COMMENTER_DIGEST_VERSION
     }
+
+    pub(super) fn key_verifier(&self) -> String {
+        hmac_sha256_hex(&self.key, b"opportunity-commenter-key-verifier-v1")
+    }
 }
 
 #[cfg(test)]

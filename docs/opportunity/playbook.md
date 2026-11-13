@@ -320,6 +320,11 @@ CREATE TABLE metric_definition_current (
   version         INT          NOT NULL REFERENCES metric_definition(version),
   switched_at     TIMESTAMPTZ  NOT NULL
 );
+CREATE TABLE metric_shadow (
+  current_version INT PRIMARY KEY REFERENCES metric_definition(version),
+  shadow_version  INT NOT NULL UNIQUE REFERENCES metric_definition(version),
+  CHECK (current_version <> shadow_version)
+);  -- 仅保存定义关联；不移动当前指针
 
 -- ===== 问题登记 =====
 CREATE TABLE taxonomy_version (
@@ -378,6 +383,8 @@ CREATE TABLE comment_mention (
   content_hash             TEXT        NOT NULL,
   excluded_reason          TEXT        CHECK (excluded_reason IN ('marketing','commenter_unknown')),
   created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
+  hash_changed_at          TIMESTAMPTZ,
   PRIMARY KEY (content_ref, comment_external_id, problem_ref, taxonomy_version),
   FOREIGN KEY (source_request_ref, source_signal_ordinal)
     REFERENCES linggan_comment_problem_membership(request_ref, signal_ordinal),
@@ -393,17 +400,21 @@ CREATE TABLE problem_metric_period (
   period_start       DATE        NOT NULL,   -- period_tz 下的周一日期
   taxonomy_version   BIGINT      NOT NULL,
   metric_def_version INT         NOT NULL,
+  protocol_version   INT,                   -- NULL 为未知，与所有已知协议分组分开（D-038）
   k                  INT         NOT NULL CHECK (k >= 0),
   n                  INT         NOT NULL CHECK (n >= 0),
   ci_low             DOUBLE PRECISION,       -- n=0 时为 NULL
   ci_high            DOUBLE PRECISION,
+  empty_reason       TEXT,                  -- n=0 时为 no_eligible_comments
   baseline_k         INT         NOT NULL,
   baseline_n         INT         NOT NULL,
+  no_baseline        BOOLEAN     NOT NULL,
   mentioners_total   INT         NOT NULL,   -- 截至 as_of 的累计去重提及人数
   evidence_tier      TEXT        NOT NULL CHECK (evidence_tier IN ('candidate','established','significant')),
   computed_as_of     TIMESTAMPTZ NOT NULL,
   computed_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY (problem_ref, period_start, taxonomy_version, metric_def_version),
+  input_fingerprint  TEXT        NOT NULL,
+  UNIQUE NULLS NOT DISTINCT (problem_ref, period_start, taxonomy_version, metric_def_version, protocol_version),
   CHECK (k <= n),
   CHECK ((n = 0 AND ci_low IS NULL AND ci_high IS NULL) OR (n > 0 AND ci_low IS NOT NULL AND ci_high IS NOT NULL)),
   CHECK (ci_low IS NULL OR (0 <= ci_low AND ci_low <= ci_high AND ci_high <= 1))
@@ -563,8 +574,8 @@ CREATE TABLE collection_snapshot (
 | 顺序 | 条件 | 不满足时的排除原因 |
 | --- | --- | --- |
 | 1 | 所属作品在领域研究主集合中：`linggan_material_domain_usage` 中 `domain_ref` 匹配、`use_kind = 'domain_research'`、`role = 'primary'`，且 `created_at <= as_of`（迁移回填行不受此限，D-023） | `not_in_domain_primary` |
-| 2 | 作品作者已知：`linggan_material_content_author_at(content_ref, as_of)` 返回非空的 `author_external_id` | `work_author_unknown` |
-| 3 | 有周期锚点。`period_basis = work_published_cohort` 时：截至 `as_of` 的最近一次详情观察中，`linggan_material_content_detail.published_at` 非空。`period_basis = comment_published` 时：`linggan_material_comment_platform_time` 中有该评论的平台时间（D-028） | 前者为 `period_anchor_missing`，后者为 `comment_time_unknown` |
+| 2 | 作品作者已知：`linggan_material_content_author_at(content_ref, as_of)` 返回非空的 `author_external_id`；共享函数只使用截至该时点已接纳、已创建的观察（D-040） | `work_author_unknown` |
+| 3 | 有周期锚点。`period_basis = work_published_cohort` 时：截至 `as_of` 已接纳、已创建的最近一次详情观察中，`linggan_material_content_detail.published_at` 非空（D-040）。`period_basis = comment_published` 时：`linggan_material_comment_platform_time` 中有该评论的平台时间（D-028） | 前者为 `period_anchor_missing`，后者为 `comment_time_unknown` |
 | 4 | `first_observed_at` 可以解析 | `observed_at_unparseable` |
 | 5 | 未受限：不存在 `restricted_at <= as_of` 的 `linggan_material_comment_restriction` 记录 | `restricted` |
 | 6 | 评论者不是作品作者本人（评论的 `author_external_id` 不等于作品作者的 `author_external_id`；评论者 ID 为空时视为非作者） | `creator_self` |
@@ -582,7 +593,7 @@ CREATE TABLE collection_snapshot (
 
 两个函数必须共用同一段 SQL（例如同一个内部函数或视图），保证“有效评论数 + 各原因排除数 = 全部候选评论数”。这条等式本身要有测试。
 
-`commenter_external_id` 的取值规则：取该评论 first_admission 对应那次观察的值；没有 first_admission 时，取最早一次观察的值。同一评论多次观察中该值不一致时，计数并在运行记录中报告，不得静默取任意一次。
+`commenter_external_id` 的取值规则：先筛选截至 `as_of` 已接纳的包和已创建的观察，再取该评论 first_admission 对应合格观察的值；没有合格的 first_admission 观察时，取合格观察中最早一次的值（D-039）。同一评论多次观察中该值不一致时，计数并在运行记录中报告，不得静默取任意一次。首次入档表缺少行建立时间，历史计算无法证明该行当时是否已建立。
 
 营销号排除只作用于分子（`comment_mention.excluded_reason = 'marketing'`）。v1 没有现成的营销号规则，暂不标记（T1.1 记入 DECISIONS.md）。
 
@@ -595,32 +606,37 @@ CREATE TABLE collection_snapshot (
 #### 6.2.3 计算 SQL
 
 ```sql
--- 参数：:domain_ref, :problem_ref, :tv, :period_start, :as_of, :tz, :period_basis, :digest_version
+-- 参数：:domain_ref, :problem_ref, :tv, :period_start, :as_of, :tz, :period_basis, :protocol
+-- :eligible_hashes 是本次应用计算中对 as_of 资格函数返回的评论者身份使用 D-013 密钥求得的内存集合；
+-- 它只解释连接语义，不新增持久表。当前和历史都使用同一哈希实现（D-039）。
 WITH e AS (
   SELECT content_ref, comment_external_id
   FROM linggan_opportunity_eligible_comments(:domain_ref, :as_of, :tz, :period_basis)
   WHERE period_start = :period_start
 ),
 fm AS (
-  SELECT DISTINCT m.commenter_hash
+  SELECT DISTINCT h.commenter_hash
   FROM linggan_opportunity_comment_mention m
   JOIN e ON e.content_ref = m.content_ref
         AND e.comment_external_id = m.comment_external_id
+  JOIN :eligible_hashes h ON h.content_ref = e.content_ref
+        AND h.comment_external_id = e.comment_external_id
+        AND h.protocol_version IS NOT DISTINCT FROM :protocol
   JOIN linggan_comment_problem_membership source
     ON source.request_ref = m.source_request_ref
    AND source.signal_ordinal = m.source_signal_ordinal
   WHERE m.problem_ref = :problem_ref
     AND m.taxonomy_version = :tv
     AND source.created_at <= :as_of
-    AND m.excluded_reason IS NULL
-    AND m.commenter_hash IS NOT NULL
-    AND m.commenter_digest_version = :digest_version
+    AND m.excluded_reason IS DISTINCT FROM 'marketing'
+    AND h.commenter_hash IS NOT NULL
 )
 SELECT (SELECT count(*) FROM fm) AS k,
-       (SELECT count(*) FROM e)  AS n;
+       (SELECT count(*) FROM e JOIN :eligible_hashes h USING (content_ref, comment_external_id)
+        WHERE h.protocol_version IS NOT DISTINCT FROM :protocol) AS n;
 ```
 
-`:tz` 只能取自 `metric_definition.params.period_tz`，`:period_basis` 只能取自 `metric_definition.params.period_basis`，`:digest_version` 只能取自当前配置。不得写死。
+`:tz` 只能取自 `metric_definition.params.period_tz`，`:period_basis` 只能取自 `metric_definition.params.period_basis`。协议按首次入档包归属，未知单独成组（D-038）；哈希密钥与版本只能取自当前配置，不得写死。上述 SQL 是集合关系说明，具体连接可在应用内完成。
 
 #### 6.2.4 其余指标
 
@@ -628,7 +644,7 @@ SELECT (SELECT count(*) FROM fm) AS k,
 | --- | --- |
 | `rate_per_1k` | `k * 1000 / n`；`n = 0` 时为 `null` |
 | `ci_low`、`ci_high` | `wilson_interval(k, n, z)`，存为 0–1 比例；`n = 0` 时为 `null` |
-| `baseline_k`、`baseline_n` | 当前周期之前连续 `baseline_periods` 个周期的 `k`、`n` 分别求和（同一 `as_of`） |
+| `baseline_k`、`baseline_n` | 当前周期之前连续 `baseline_periods` 个周期的同协议 `k`、`n` 分别求和（同一 `as_of`）；任一周期该协议无样本或合计分母不足时标记 `no_baseline`，不判显著（D-030、D-038） |
 | `mentioners_total` | 截至 `as_of`，该问题在所有周期有效评论上的未排除提及的去重 `commenter_hash` 数 |
 | 作者 `k`、`n` | 窗口：`work_published_at` 落在 `[as_of − creator_window_days, as_of)`。`n` = 该作者作品上的有效评论数；`k` = 其中提及该问题的去重评论者数 |
 | 作者 `sufficient` | `n >= creator_min_n` |

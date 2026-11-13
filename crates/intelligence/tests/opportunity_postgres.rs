@@ -286,10 +286,11 @@ FROM opportunity_seed_package WHERE work_key = 'work-0' AND kind = 'comments';
 INSERT INTO linggan_material_comment(
  material_ref, content_public_ref, package_ref, record_ordinal, comment_external_id,
  root_comment_external_id, parent_comment_external_id, parent_identity_source_field,
- is_reply, body_text, body_state, author_external_id, observed_at
+ is_reply, body_text, body_state, author_external_id, observed_at, created_at
 )
 SELECT gen_random_uuid(), work.work_ref, package.package_ref, 2000, 'c-work-0-bad-time',
-       'c-work-0-bad-time', NULL, NULL, false, NULL, 'UNKNOWN', 'commenter-bad-time', 'not-a-time'
+       'c-work-0-bad-time', NULL, NULL, false, NULL, 'UNKNOWN', 'commenter-bad-time', 'not-a-time',
+       '2026-11-09T23:59:59Z'
 FROM opportunity_seed_work work
 JOIN opportunity_seed_package package ON package.work_key = work.work_key AND package.kind = 'comments'
 WHERE work.work_key = 'work-0';

@@ -3,6 +3,8 @@
 
 use linggan_storage_postgres::Database;
 use serde::Serialize;
+use sqlx::{PgConnection, Postgres, Transaction};
+use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -177,21 +179,75 @@ const DEFINITIONS: &[Definition] = &[
 ];
 
 pub async fn check_invariants(database: &Database) -> Result<InvariantReport, sqlx::Error> {
+    let mut connection = database.pool().acquire().await?;
+    check_on_connection(&mut connection, None).await
+}
+
+pub(super) async fn check_invariants_in(
+    tx: &mut Transaction<'_, Postgres>,
+    as_of: &str,
+    domain: Uuid,
+) -> Result<InvariantReport, sqlx::Error> {
+    check_on_connection(tx, Some((as_of, domain))).await
+}
+
+fn as_of_sql(id: &str) -> Option<&'static str> {
+    match id {
+        "I1" => Some(
+            "SELECT count(*) FROM linggan_opportunity_problem_metric_period metric JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE metric.k > metric.n AND metric.computed_as_of <= $1::timestamptz AND problem.domain_ref=$2",
+        ),
+        "I2" => Some(
+            "SELECT count(*) FROM linggan_opportunity_problem_metric_period metric JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE metric.ci_low IS NOT NULL AND NOT (0 <= metric.ci_low AND metric.ci_low <= metric.ci_high AND metric.ci_high <= 1) AND metric.computed_as_of <= $1::timestamptz AND problem.domain_ref=$2",
+        ),
+        "I3" => Some(
+            "SELECT count(*) FROM linggan_opportunity_problem_metric_period metric JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE ((metric.n = 0 AND (metric.ci_low IS NOT NULL OR metric.ci_high IS NOT NULL)) OR (metric.n > 0 AND (metric.ci_low IS NULL OR metric.ci_high IS NULL))) AND metric.computed_as_of <= $1::timestamptz AND problem.domain_ref=$2",
+        ),
+        "I6" => Some(
+            "SELECT count(*) FROM linggan_opportunity_comment_mention mention JOIN linggan_opportunity_problem problem USING(problem_ref) JOIN linggan_comment_problem_membership source ON source.request_ref=mention.source_request_ref AND source.signal_ordinal=mention.source_signal_ordinal LEFT JOIN linggan_opportunity_comment_fact_at($1::timestamptz) fact ON fact.content_ref=mention.content_ref AND fact.comment_external_id=mention.comment_external_id WHERE source.created_at <= $1::timestamptz AND problem.domain_ref=$2 AND fact.content_ref IS NULL",
+        ),
+        "I6b" => Some(
+            "SELECT count(*) FROM linggan_opportunity_comment_mention mention JOIN linggan_opportunity_problem problem USING(problem_ref) JOIN linggan_comment_problem_membership source ON source.request_ref=mention.source_request_ref AND source.signal_ordinal=mention.source_signal_ordinal WHERE source.created_at <= $1::timestamptz AND problem.domain_ref=$2 AND (mention.commenter_hash IS NULL) <> (mention.excluded_reason IS NOT DISTINCT FROM 'commenter_unknown')",
+        ),
+        "I8" => Some(
+            "WITH RECURSIVE walk(start_id,cur_id,depth) AS (SELECT lineage.from_problem_ref,lineage.to_problem_ref,1 FROM linggan_opportunity_problem_lineage lineage JOIN linggan_opportunity_problem problem ON problem.problem_ref=lineage.from_problem_ref WHERE problem.domain_ref=$2 AND lineage.relation IN ('merge','rename') AND lineage.created_at <= $1::timestamptz UNION ALL SELECT walk.start_id,lineage.to_problem_ref,walk.depth+1 FROM walk JOIN linggan_opportunity_problem_lineage lineage ON lineage.from_problem_ref=walk.cur_id AND lineage.created_at <= $1::timestamptz AND lineage.relation IN ('merge','rename') WHERE walk.depth < 100) SELECT count(*) FROM walk WHERE start_id=cur_id",
+        ),
+        "I11" => Some(
+            "SELECT count(*) FROM linggan_opportunity_platform_time_at($1::timestamptz) platform JOIN linggan_opportunity_comment_fact_at($1::timestamptz) fact ON fact.content_ref=platform.content_public_ref AND fact.comment_external_id=platform.comment_external_id WHERE platform.published_at > fact.first_observed_at AND EXISTS (SELECT 1 FROM linggan_material_domain_usage usage WHERE usage.content_public_ref=platform.content_public_ref AND usage.domain_ref=$2 AND (usage.basis_kind='legacy_domain_migration' OR usage.created_at <= $1::timestamptz))",
+        ),
+        _ => None,
+    }
+}
+
+async fn check_on_connection(
+    connection: &mut PgConnection,
+    as_of: Option<(&str, Uuid)>,
+) -> Result<InvariantReport, sqlx::Error> {
     let mut checks = Vec::with_capacity(DEFINITIONS.len());
     for definition in DEFINITIONS {
         let mut missing_tables = Vec::new();
         for table in definition.requires {
             let present: bool = sqlx::query_scalar("SELECT to_regclass($1) IS NOT NULL")
                 .bind(*table)
-                .fetch_one(database.pool())
+                .fetch_one(&mut *connection)
                 .await?;
             if !present {
                 missing_tables.push(*table);
             }
         }
-        let violations = if missing_tables.is_empty() {
+        if as_of.is_some() && as_of_sql(definition.id).is_none() {
+            missing_tables.push("as_of_check_not_implemented");
+        }
+        let violations = if missing_tables.is_empty()
+            && let (Some((as_of, domain)), Some(sql)) = (as_of, as_of_sql(definition.id))
+        {
+            sqlx::query_scalar::<_, i64>(sql)
+                .bind(as_of)
+                .bind(domain)
+                .fetch_one(&mut *connection)
+                .await?
+        } else if missing_tables.is_empty() {
             sqlx::query_scalar::<_, i64>(definition.sql)
-                .fetch_one(database.pool())
+                .fetch_one(&mut *connection)
                 .await?
         } else {
             0

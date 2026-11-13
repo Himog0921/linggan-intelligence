@@ -98,7 +98,9 @@ pub async fn load_current_metric_definition(
     })
 }
 
-fn parse_params(value: Value) -> Result<OpportunityMetricParams, OpportunityMetricError> {
+pub(super) fn parse_params(
+    value: Value,
+) -> Result<OpportunityMetricParams, OpportunityMetricError> {
     let params: OpportunityMetricParams = serde_json::from_value(value)
         .map_err(|error| OpportunityMetricError::Invalid(format!("params: {error}")))?;
     params.validate()?;
