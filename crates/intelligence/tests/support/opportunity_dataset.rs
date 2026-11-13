@@ -288,12 +288,13 @@ SET payload = jsonb_build_object(
     WHEN comment.record_ordinal = 1 THEN '2026-10-27'
     WHEN comment.record_ordinal = 2 THEN '10-27'
     WHEN comment.record_ordinal = 3 THEN '3天前'
-    WHEN comment.record_ordinal = 4 THEN '昨天'
+    WHEN comment.record_ordinal = 4 THEN '昨天 14:35'
     WHEN comment.record_ordinal = 5 THEN '2小时前'
     WHEN comment.record_ordinal = 6 THEN '刚刚'
     WHEN comment.record_ordinal = 7 THEN '12-31'
     WHEN comment.record_ordinal = 8 THEN '01-01'
     WHEN comment.record_ordinal = 9 THEN '30分钟前'
+    WHEN comment.record_ordinal = 10 THEN '3天前 08:00'
     ELSE NULL END,
    'sourceTier', 'dom',
    'collectedAt', (extract(epoch FROM seed_work.first_observed_at) * 1000)::bigint

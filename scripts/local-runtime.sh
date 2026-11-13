@@ -518,6 +518,9 @@ migrate() {
   apply_migration_once "0204_opportunity_comment_eligibility" "$project_root/database/migrations/0204_opportunity_comment_eligibility.sql"
   apply_migration_once "0205_opportunity_problem_taxonomy" "$project_root/database/migrations/0205_opportunity_problem_taxonomy.sql"
   apply_migration_once "0206_comment_platform_time" "$project_root/database/migrations/0206_comment_platform_time.sql"
+  apply_migration_once "0207_comment_platform_time_day_precision" "$project_root/database/migrations/0207_comment_platform_time_day_precision.sql"
+  apply_migration_once "0208_comment_display_time_suffix" "$project_root/database/migrations/0208_comment_display_time_suffix.sql"
+  apply_migration_once "0209_comment_display_agreement_skips_iso" "$project_root/database/migrations/0209_comment_display_agreement_skips_iso.sql"
 }
 
 case "$command_name" in

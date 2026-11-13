@@ -521,7 +521,7 @@ async fn display_labels_project_as_day_precision_from_the_collection_moment() {
         .unwrap();
 
     let first = project_comment_platform_times(&database).await.unwrap();
-    assert_eq!(first.inserted, 9);
+    assert_eq!(first.inserted, 10);
     assert_eq!(first.conflicts, 0);
 
     let rows = sqlx::query(
@@ -531,7 +531,7 @@ async fn display_labels_project_as_day_precision_from_the_collection_moment() {
                 precision, source_kind, protocol_version
          FROM linggan_material_comment_platform_time
          WHERE content_public_ref = '00000000-0000-4000-8000-000000000101'
-         ORDER BY comment_external_id",
+         ORDER BY substring(comment_external_id from '[0-9]+$')::integer",
     )
     .fetch_all(database.pool())
     .await
@@ -549,7 +549,7 @@ async fn display_labels_project_as_day_precision_from_the_collection_moment() {
             )
         })
         .collect();
-    assert_eq!(observed.len(), 9);
+    assert_eq!(observed.len(), 10);
     assert_eq!(
         observed[0],
         (
@@ -574,10 +574,13 @@ async fn display_labels_project_as_day_precision_from_the_collection_moment() {
             "2025-12-31",
             "2026-01-01",
             "2026-10-27",
+            "2026-10-24",
         ]
     );
     assert_eq!(observed[1].4, "display_month_day");
     assert_eq!(observed[2].4, "display_relative");
+    assert_eq!(observed[3].4, "display_relative");
+    assert_eq!(observed[9].4, "display_relative");
     assert!(observed.iter().all(|row| row.3 == "day"));
 
     // The display cross-check only compares millisecond rows, so a day-only projection reports
@@ -593,7 +596,7 @@ async fn display_labels_project_as_day_precision_from_the_collection_moment() {
         .iter()
         .map(|row| row.with_platform_time)
         .sum();
-    assert_eq!(with_time, 9);
+    assert_eq!(with_time, 10);
 
     // A later exact epoch is added alongside the historical day row, and readers prefer it.
     opportunity_dataset::build_platform_times(&database)
@@ -623,6 +626,39 @@ async fn display_labels_project_as_day_precision_from_the_collection_moment() {
     .unwrap();
     assert_eq!(current.get::<String, _>("precision"), "millisecond");
     assert_eq!(current.get::<String, _>("utc"), "2026-10-27T00:01:00Z");
+
+    // An ISO serialization of an epoch is not a display label: its UTC month-day must not be
+    // compared against the Shanghai local date, or every near-midnight record looks wrong.
+    sqlx::raw_sql(
+        r#"
+ALTER TABLE linggan_runtime_capture_package DISABLE TRIGGER USER;
+UPDATE linggan_runtime_capture_package package
+SET payload = jsonb_set(
+ package.payload, '{records,1,payload,publishedAtText}',
+ '"2026-10-26T20:00:00.000Z"'::jsonb
+)
+FROM opportunity_seed_package seed
+WHERE seed.package_ref = package.package_ref
+  AND seed.work_key = 'work-1'
+  AND seed.kind = 'comments';
+ALTER TABLE linggan_runtime_capture_package ENABLE TRIGGER USER;
+"#,
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let report =
+        read_platform_time_report(&database, Uuid::parse_str(DOMAIN).unwrap(), AS_OF, TZ, 12)
+            .await
+            .unwrap();
+    assert_eq!(report.agreement.compared, 5798);
+    assert!(
+        report
+            .agreement
+            .mismatches
+            .iter()
+            .all(|mismatch| mismatch.comment_external_id != "c-work-1-1")
+    );
 }
 
 #[tokio::test]
