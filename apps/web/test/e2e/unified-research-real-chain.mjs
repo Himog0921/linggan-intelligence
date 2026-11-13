@@ -75,16 +75,18 @@ try {
   await single.getByRole('button',{name:'刷新研究状态',exact:true}).click();
   await single.getByText('单篇研究已完成，判断和依据已更新。',{exact:true}).waitFor();
  });
- await step('topic four-stage research publishes only after both independent reviews',async()=>{
+ await step('topic single-pass research publishes the accepted assignment',async()=>{
   await page.goto(`${origin}/topics?tm=1&domainRef=${domain}`);
   await page.locator('[data-action="research"]').first().click();
   const flow=page.getByRole('region',{name:'主题研究流程',exact:true});
   await flow.getByRole('checkbox',{name:'合成底稿验收',exact:true}).check();
   const receipt=await post(flow.getByRole('button',{name:'开始研究',exact:true}),'/api/local/topic-research');
   const data=await until(`/api/local/topic-research/runs?domainRef=${domain}`,r=>r.runs.find(run=>run.runRef===receipt.runRef)?.pendingStageCount===0);
-  const run=data.runs.find(run=>run.runRef===receipt.runRef);assert.equal(run.failedStageCount,0);assert.ok(run.succeededStageCount>=4);
+  const run=data.runs.find(run=>run.runRef===receipt.runRef);assert.equal(run.failedStageCount,0);assert.equal(run.succeededStageCount,run.windowCount);
   await flow.getByRole('button',{name:'刷新进度',exact:true}).click();
-  await flow.getByText(/阶段处理完成/).waitFor();
+  await flow.getByText(/研究完成/).waitFor();
+  const topicRuns=await get(`/api/local/topic-research/runs?domainRef=${domain}`);
+  assert.ok(topicRuns.runs.every(run=>run.executionMode==='single_pass'&&run.stages.length===run.windowCount&&run.stages.every(stage=>stage.stageNumber===0)));
   const graph=await get(`/api/local/topic-map?domainRef=${domain}`);assert.ok(graph.topics.length>0);
   assert.ok(graph.works.find(item=>item.workRef===work)?.topicRefs.length>0);
   assert.equal(graph.scope.unclassifiedWorkCount,0);

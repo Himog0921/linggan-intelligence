@@ -40,6 +40,10 @@ mod input_tests;
 #[path = "topic_map_research/tests/saved_source_postgres.rs"]
 mod saved_source_postgres;
 
+#[cfg(test)]
+#[path = "topic_map_research/tests/parent_chain_postgres.rs"]
+mod parent_chain_postgres;
+
 #[derive(Debug, thiserror::Error)]
 pub enum ResearchError {
     #[error(transparent)]

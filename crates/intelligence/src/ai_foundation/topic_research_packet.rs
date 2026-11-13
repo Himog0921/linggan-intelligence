@@ -1,4 +1,6 @@
 //! Stage-specific topic packets and validators; transport does not decide topic semantics.
+mod single_pass;
+
 use super::{store::FoundationError, topic_comment_source as comments, topic_research as owner};
 use crate::{
     topic_map_research::ResearchInput,
@@ -23,7 +25,9 @@ pub(crate) async fn draft_in(
     tx: &mut Transaction<'_, Postgres>,
     window: Uuid,
 ) -> Result<ResearchOutput, FoundationError> {
-    serde_json::from_value(owner::previous_in(tx, window, 0).await?).map_err(|_| invalid())
+    let output = owner::previous_in(tx, window, 0).await?;
+    let projection = if output["contract"] == single_pass::CONTRACT { output["projection"].clone() } else { output };
+    serde_json::from_value(projection).map_err(|_| invalid())
 }
 async fn assignment_units(
     tx: &mut Transaction<'_, Postgres>,
@@ -93,6 +97,7 @@ pub(crate) async fn prepare(
     stage: u8,
     input: &ResearchInput,
 ) -> Result<Packet, FoundationError> {
+    if owner::single_pass(input) { return single_pass::prepare(db, tx, window, input).await; }
     let fragments = || {
         input.fragments.iter().enumerate().map(|(index,f)|json!({"fragmentIndex":index,"fragmentId":f.fragment_id,"field":f.field,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"speaker":f.speaker,"content":f.model_content(),"issues":f.issues})).collect::<Vec<_>>()
     };
@@ -174,6 +179,7 @@ pub(crate) fn validate(
     context: &Value,
     draft: Option<&ResearchOutput>,
 ) -> Result<Value, &'static str> {
+    if owner::single_pass(input) { return single_pass::validate(text, input, context); }
     match stage {
         0 => {
             let value =
@@ -210,7 +216,9 @@ pub(crate) async fn publish_in(
     invocation: Uuid,
     input: &ResearchInput,
     context: &Value,
+    parsed: &Value,
 ) -> Result<(), crate::model_settings::ModelError> {
+    if owner::single_pass(input) { return single_pass::publish_in(tx, window, invocation, input, context, parsed).await; }
     let draft = if comments::is_comment(input) {
         None
     } else {

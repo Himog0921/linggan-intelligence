@@ -26,6 +26,7 @@ struct Prepared {
     stage: u8,
     context: Value,
     comment_mode: bool,
+    single_pass: bool,
 }
 async fn prepare(
     db: &Database,
@@ -95,6 +96,7 @@ async fn prepare(
         stage: stage_number,
         context: packet.context,
         comment_mode: crate::ai_foundation::topic_comment_source::is_comment(&data),
+        single_pass: owner::single_pass(&data),
     })
 }
 pub(super) async fn execute(
@@ -174,7 +176,7 @@ async fn settle(
         .and_then(|value| value.as_ref().err())
         .copied();
     let mut parsed = validation.and_then(Result::ok);
-    let candidate_sources_ok = if prepared.stage >= 2 {
+    let candidate_sources_ok = if prepared.stage >= 2 || prepared.single_pass {
         match sources.as_ref() {
             Ok(input) => {
                 match packet::candidate_sources_current(db, input, &prepared.context).await {
@@ -204,7 +206,7 @@ async fn settle(
         )
         .await
         .is_ok();
-    if allowed && parsed.is_some() && (prepared.stage == 1 || prepared.stage == 3) {
+    if allowed && parsed.is_some() && (prepared.single_pass || prepared.stage == 1 || prepared.stage == 3) {
         sqlx::query("SAVEPOINT topic_acceptance")
             .execute(&mut *tx)
             .await?;
@@ -215,6 +217,7 @@ async fn settle(
             prepared.invocation,
             sources.as_ref().map_err(|_| ExecutorError::Invalid)?,
             &prepared.context,
+            parsed.as_ref().unwrap(),
         )
         .await
         {

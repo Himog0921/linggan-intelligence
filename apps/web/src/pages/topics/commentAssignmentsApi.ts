@@ -39,7 +39,7 @@ export async function readCommentAssignments(scope: CommentAssignmentScope, sign
 
 export async function retryCommentAssignment(body: { commandRef: string; domainRef: string; windowRef: string }) {
   return d.decode(await requestJson('/api/local/topic-map/comment-assignments/retry', { method: 'POST', body }), row => {
-    if (d.num(row, 'windowCount') !== 1 || d.num(row, 'stageCount') !== 2) throw new d.ShapeError('retryReceipt');
+    if (d.num(row, 'windowCount') !== 1 || ![1, 2].includes(d.num(row, 'stageCount'))) throw new d.ShapeError('retryReceipt');
     return d.str(row, 'runRef');
   });
 }

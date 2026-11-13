@@ -259,7 +259,7 @@
 
 - 状态：迁移、投影、读取视图与测试实现完成；隔离库验证通过；经负责人授权，已在本地运行库执行迁移与历史回填。未在共享/生产库执行，未发起真实采集。
 - 背景：C4 与探针确认派发会话拿不到毫秒 epoch；但只读核查显示 32,219 条评论/回复全部有 `publishedAtText`，日精度可解析率接近 100%。负责人裁定采用日精度（D-034），范围为新采集 + 历史回填。
-- 数据库（`database/migrations/0207_comment_platform_time_day_precision.sql`）：
+- 数据库（`database/migrations/0208_comment_platform_time_day_precision.sql`）：
   - 表新增 `source_kind`（`epoch`、`display_full_date`、`display_month_day`、`display_relative`）；`precision` 允许 `day`；`protocol_version` 允许 0（历史包无协议）。
   - 主键改为 `(content_public_ref, comment_external_id, precision)`，历史回填的日精度行不会阻止以后写入精确 epoch。只追加与禁改触发器不变。
   - 新增视图 `linggan_material_comment_platform_time_current`，同一评论毫秒行优先；覆盖率、资格、不变量与时间违例全部改读该视图。
@@ -268,9 +268,10 @@
   - epoch 的可信范围保持 C2 规则：协议 v1 包，或无协议但记录 `sourceTier = 'api'` 的历史包。历史 `dom` 回退的 `createdAt` 顶替值不采信，改用展示文本。
   - 投影器分两遍执行：先全部毫秒包，再全部日精度包；冲突只由 epoch 观测计算，日精度不参与。旧的一参重载函数已删除。
   - 展示文本交叉核对只比较毫秒行，避免用日精度值验证自身来源。
-- 后续修正（均以独立迁移，0207 保持已应用字节不变）：
-  - `0208_comment_display_time_suffix.sql`：真实数据中相对标签会带时分（`昨天 00:04`、`昨天 14:35`），共 2,080 条。解析前剥离末尾 ` H:MM` / ` HH:MM`；标签本身决定日期，时分不改变日精度值。
-  - `0209_comment_display_agreement_skips_iso.sql`：API 来源记录的 `publishedAtText` 是自身 epoch 的 ISO 序列化（`2026-08-30T16:06:01.000Z`），不是平台展示标签。此前拿它的 UTC 月日与上海当地日期比较，制造了 14 条假不一致；现在展示核对跳过 ISO 文本。
+- 后续修正（均以独立迁移，0208 保持已应用字节不变）：
+  - `0209_comment_display_time_suffix.sql`：真实数据中相对标签会带时分（`昨天 00:04`、`昨天 14:35`），共 2,080 条。解析前剥离末尾 ` H:MM` / ` HH:MM`；标签本身决定日期，时分不改变日精度值。
+  - `0210_comment_display_agreement_skips_iso.sql`：API 来源记录的 `publishedAtText` 是自身 epoch 的 ISO 序列化（`2026-08-30T16:06:01.000Z`），不是平台展示标签。此前拿它的 UTC 月日与上海当地日期比较，制造了 14 条假不一致；现在展示核对跳过 ISO 文本。
+  - 编号说明：这三条迁移最初写作 0207–0209；合入 `origin/main` 时主干已占用 `0207_topic_single_pass`，故依序后移为 0208–0210，内容字节不变。
 - 代码：`platform_time.rs` 与 `invariants.rs` 改读当前视图；测试数据集新增 `build_legacy_day_times()` 覆盖层。
 - 验证（`scripts/test-opportunity-postgres.sh`，隔离 PostgreSQL 容器）：
   - 12 passed, 0 failed（原 11 条 + 新增日精度 1 条）。
@@ -280,8 +281,8 @@
   - 把一条记录的展示文本改成 ISO 序列化后，展示核对不再把它计入 `compared`，避免 UTC/本地日期差被误报。
   - 改动文件 `rustfmt --check` 通过。
 - 本地运行库执行（`linggan_intelligence_dev`，2026-11-12）：
-  - 迁移 `0207`、`0208`、`0209` 以事务方式应用，并写入 `linggan_local_schema_migration`；`scripts/local-runtime.sh` 已登记三条迁移。
-  - `project-platform-times` 首次 `inserted = 27,730`（日精度 27,689 + 毫秒 41），`conflicts = 0`；应用 `0208` 后再次执行补入 1,373 条，`conflicts = 0`。
+  - 迁移 `0208`、`0209`、`0210` 以事务方式应用，并写入 `linggan_local_schema_migration`；`scripts/local-runtime.sh` 已登记三条迁移。
+  - `project-platform-times` 首次 `inserted = 27,730`（日精度 27,689 + 毫秒 41），`conflicts = 0`；应用 `0209` 后再次执行补入 1,373 条，`conflicts = 0`。
   - 最终分布：`display_full_date` 6,173、`display_month_day` 16,784、`display_relative` 6,105、`epoch` 41，合计 29,103 条。
   - 覆盖率：29,104 条评论事实中 29,103 条有平台时间（99.997%）。唯一缺失记录的 `publishedAtText = '2/5'` 实为评论文本被误取为时间（DOM 中真实时间是 `昨天 14:35`），解析器拒绝该值是正确的。
   - 三领域（`as_of = 2026-11-12`，12 周）：ADHD 7,118 / 7,117；考研自习 159 / 159；自闭症干预 283 / 283。`timingViolations = 0`。

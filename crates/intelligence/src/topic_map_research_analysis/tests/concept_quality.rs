@@ -15,6 +15,7 @@ pub(super) fn new_proposal() -> ProposedTopic {
             topic_ref: None,
             definition_ref: None,
             proposal: None,
+            ancestor: None,
             reason: "没有足够依据说明现有启动主题包含持续注意".into(),
         },
     }
@@ -64,6 +65,7 @@ fn existing_parent_requires_exact_version_and_scope_containment() {
         topic_ref: Some(target.topic_ref),
         definition_ref: Some(target.definition_ref),
         proposal: None,
+        ancestor: None,
         reason: "子概念的任务维持边界包含于执行任务过程，非共现".into(),
     };
     output.decisions[0].proposed_topic = Some(child);
@@ -112,6 +114,7 @@ fn inferred_parent_keeps_boundaries_and_no_recursive_tree_or_count_gate() {
             abstraction_reason: "持续注意实例支持执行过程这一上位范围，未声明其他实例已有证据"
                 .into(),
         }),
+        ancestor: None,
         reason: "持续注意是任务执行支持的一个具体阶段".into(),
     };
     output.decisions[0].proposed_topic = Some(child);
@@ -209,6 +212,7 @@ fn a_normalized_self_parent_is_rejected_before_acceptance() {
             domain_reason: "合成范围相关".into(),
             abstraction_reason: "声称抽象但同一身份".into(),
         }),
+        ancestor: None,
         reason: "合成错误自环建议".into(),
     };
     output.decisions[0].proposed_topic = Some(child);
@@ -242,6 +246,7 @@ fn a_grade_specific_legacy_candidate_does_not_block_a_reusable_evidence_based_co
             topic_ref: None,
             definition_ref: None,
             proposal: None,
+            ancestor: None,
             reason: "没有足够证据确定一个包含读写练习支持的现有上位主题".into(),
         },
     });
@@ -493,6 +498,7 @@ fn proposed_parent_cannot_reuse_an_existing_candidate_without_explicit_containme
         topic_ref: None,
         definition_ref: None,
         proposal: Some(parent),
+        ancestor: None,
         reason: "子级属于执行过程".into(),
     };
     output.decisions[0].proposed_topic = Some(child);
@@ -525,6 +531,7 @@ fn proposed_parent_cannot_reuse_an_existing_candidate_without_explicit_containme
         topic_ref: Some(matched.topic_ref),
         definition_ref: Some(matched.definition_ref),
         proposal: None,
+        ancestor: None,
         reason: "子级属于现有执行过程范围".into(),
     };
     assert_eq!(
@@ -561,4 +568,269 @@ fn discussion_rejection_names_the_actual_rule() {
         }
         assert_eq!(validate_output(&output, &fragments, &[]), Err(rule));
     }
+}
+
+const EXEC_INCLUDE: &str = "任务开始或执行中的具体障碍与支持";
+const EXEC_EXCLUDE: &str = "仅讨论选择哪些任务";
+
+fn chain_concept(
+    label: &str,
+    definition: &str,
+    inclusion: &[&str],
+    exclusion: &[&str],
+) -> ConceptDefinition {
+    ConceptDefinition {
+        label: label.into(),
+        definition: definition.into(),
+        inclusion_criteria: inclusion.iter().map(|s| (*s).into()).collect(),
+        exclusion_criteria: exclusion.iter().map(|s| (*s).into()).collect(),
+        domain_fit: "in_scope".into(),
+        domain_reason: "合成领域内概念".into(),
+        abstraction_reason: "合成可复用的上位边界".into(),
+    }
+}
+
+fn chain_root(reason: &str) -> ProposedParent {
+    ProposedParent {
+        kind: "root".into(),
+        topic_ref: None,
+        definition_ref: None,
+        proposal: None,
+        ancestor: None,
+        reason: reason.into(),
+    }
+}
+
+fn chain_parent(
+    concept: ConceptDefinition,
+    ancestor: Option<ProposedParent>,
+    reason: &str,
+) -> ProposedParent {
+    ProposedParent {
+        kind: "proposed".into(),
+        topic_ref: None,
+        definition_ref: None,
+        proposal: Some(concept),
+        ancestor: ancestor.map(Box::new),
+        reason: reason.into(),
+    }
+}
+
+fn chain_topic(parent: ProposedParent) -> ProposedTopic {
+    ProposedTopic {
+        label: new_proposal().label,
+        definition: new_proposal().definition,
+        inclusion_criteria: new_proposal().inclusion_criteria,
+        exclusion_criteria: new_proposal().exclusion_criteria,
+        domain_fit: "in_scope".into(),
+        domain_reason: new_proposal().domain_reason,
+        abstraction_reason: new_proposal().abstraction_reason,
+        parent,
+    }
+}
+
+fn new_decision_with(topic: ProposedTopic) -> (Vec<(String, Discussion)>, ResolutionOutput) {
+    let (units, _, mut output) = resolution_case();
+    output.decisions[0].matches.clear();
+    output.decisions[0].status = "new".into();
+    output.decisions[0].proposed_topic = Some(topic);
+    (units, output)
+}
+
+#[test]
+fn a_grandparent_repeating_its_childs_criteria_is_rejected() {
+    let n3 = chain_concept(
+        "执行支持范围",
+        "覆盖多类执行困难的更广支持范围",
+        &[EXEC_INCLUDE],
+        &[EXEC_EXCLUDE],
+    );
+    let n2 = chain_concept(
+        "任务执行支持",
+        "帮助开始并维持已选定任务的支持过程",
+        &[EXEC_INCLUDE],
+        &[EXEC_EXCLUDE],
+    );
+    let parent = chain_parent(
+        n2,
+        Some(chain_parent(n3, Some(chain_root("顶层范围")), "执行范围包含任务执行")),
+        "执行支持包含任务维持",
+    );
+    let (units, output) = new_decision_with(chain_topic(parent));
+    assert_eq!(
+        validate_resolution(&output, &units, &json!([])),
+        Err("topic_parent_criteria_repeated")
+    );
+}
+
+#[test]
+fn a_grandparent_with_the_same_concept_identity_as_its_child_is_rejected() {
+    let n3 = chain_concept(
+        "换名范围",
+        "帮助开始并维持已选定任务的支持过程",
+        &[EXEC_INCLUDE],
+        &[EXEC_EXCLUDE],
+    );
+    let n2 = chain_concept(
+        "任务执行支持",
+        "帮助开始并维持已选定任务的支持过程",
+        &[EXEC_INCLUDE],
+        &[EXEC_EXCLUDE],
+    );
+    let parent = chain_parent(
+        n2,
+        Some(chain_parent(n3, Some(chain_root("顶层范围")), "同一范围")),
+        "执行支持包含任务维持",
+    );
+    let (units, output) = new_decision_with(chain_topic(parent));
+    assert_eq!(
+        validate_resolution(&output, &units, &json!([])),
+        Err("topic_parent_same_concept")
+    );
+}
+
+#[test]
+fn a_grandparent_reusing_a_catalog_identity_is_rejected() {
+    let (units, mut candidates, mut output) = resolution_case();
+    let n3 = chain_concept(
+        "执行支持范围",
+        "跨场景的执行支持边界",
+        &["执行中的障碍"],
+        &["选择任务"],
+    );
+    candidates[0]["definition"] = json!(n3.definition);
+    candidates[0]["inclusionCriteria"] = json!(n3.inclusion_criteria);
+    candidates[0]["exclusionCriteria"] = json!(n3.exclusion_criteria);
+    let n2 = chain_concept(
+        "任务执行支持",
+        "帮助开始并维持已选定任务的支持过程",
+        &[EXEC_INCLUDE],
+        &[EXEC_EXCLUDE],
+    );
+    let parent = chain_parent(
+        n2,
+        Some(chain_parent(n3, Some(chain_root("顶层范围")), "执行范围包含任务执行")),
+        "执行支持包含任务维持",
+    );
+    output.decisions[0].matches.clear();
+    output.decisions[0].status = "new".into();
+    output.decisions[0].proposed_topic = Some(chain_topic(parent));
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("topic_parent_proposal_matches_candidate")
+    );
+}
+
+#[test]
+fn a_grandparent_existing_reference_must_match_the_current_candidate_version() {
+    let target = TopicMatch {
+        topic_ref: Uuid::new_v4(),
+        definition_ref: Uuid::new_v4(),
+        reason: "合成的现有范围".into(),
+    };
+    let candidates = json!([{"topicRef":target.topic_ref,"definitionRef":target.definition_ref}]);
+    let n2 = chain_concept(
+        "任务执行支持",
+        "帮助开始并维持已选定任务的支持过程",
+        &[EXEC_INCLUDE],
+        &[EXEC_EXCLUDE],
+    );
+    let stale = ProposedParent {
+        kind: "existing".into(),
+        topic_ref: Some(target.topic_ref),
+        definition_ref: Some(Uuid::new_v4()),
+        proposal: None,
+        ancestor: None,
+        reason: "属于现有执行范围".into(),
+    };
+    let (units, output) = new_decision_with(chain_topic(chain_parent(
+        n2.clone(),
+        Some(stale),
+        "执行支持包含任务维持",
+    )));
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("topic_parent_version_mismatch")
+    );
+
+    let missing = ProposedParent {
+        kind: "existing".into(),
+        topic_ref: Some(Uuid::new_v4()),
+        definition_ref: Some(target.definition_ref),
+        proposal: None,
+        ancestor: None,
+        reason: "属于目录外范围".into(),
+    };
+    let (units, output) = new_decision_with(chain_topic(chain_parent(
+        n2.clone(),
+        Some(missing),
+        "执行支持包含任务维持",
+    )));
+    assert_eq!(
+        validate_resolution(&output, &units, &candidates),
+        Err("topic_parent_not_candidate")
+    );
+}
+
+#[test]
+fn a_three_layer_proposed_chain_keeps_each_parent_boundary() {
+    let n3 = chain_concept(
+        "执行支持范围",
+        "覆盖多类执行困难的支持范围",
+        &["执行中的障碍"],
+        &["选择任务"],
+    );
+    let n2 = chain_concept(
+        "任务执行支持",
+        "帮助开始并维持已选定任务的支持过程",
+        &[EXEC_INCLUDE],
+        &[EXEC_EXCLUDE],
+    );
+    let parent = chain_parent(
+        n2,
+        Some(chain_parent(n3, Some(chain_root("顶层范围")), "执行范围包含任务执行")),
+        "执行支持包含任务维持",
+    );
+    let (units, output) = new_decision_with(chain_topic(parent));
+    assert!(validate_resolution(&output, &units, &json!([])).is_ok());
+    let ancestor = output.decisions[0]
+        .proposed_topic
+        .as_ref()
+        .unwrap()
+        .parent
+        .ancestor
+        .as_ref()
+        .unwrap();
+    assert_eq!(ancestor.kind, "proposed");
+    assert_eq!(ancestor.proposal.as_ref().unwrap().label, "执行支持范围");
+}
+
+#[test]
+fn a_proposed_parent_may_end_at_an_existing_candidate() {
+    let target = TopicMatch {
+        topic_ref: Uuid::new_v4(),
+        definition_ref: Uuid::new_v4(),
+        reason: "合成的现有范围".into(),
+    };
+    let candidates = json!([{"topicRef":target.topic_ref,"definitionRef":target.definition_ref}]);
+    let n2 = chain_concept(
+        "任务执行支持",
+        "帮助开始并维持已选定任务的支持过程",
+        &[EXEC_INCLUDE],
+        &[EXEC_EXCLUDE],
+    );
+    let parent = chain_parent(
+        n2,
+        Some(ProposedParent {
+            kind: "existing".into(),
+            topic_ref: Some(target.topic_ref),
+            definition_ref: Some(target.definition_ref),
+            proposal: None,
+            ancestor: None,
+            reason: "属于现有执行范围".into(),
+        }),
+        "执行支持包含任务维持",
+    );
+    let (units, output) = new_decision_with(chain_topic(parent));
+    assert!(validate_resolution(&output, &units, &candidates).is_ok());
 }

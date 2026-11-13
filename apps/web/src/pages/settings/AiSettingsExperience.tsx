@@ -12,7 +12,7 @@ import { NoticeLine } from './AiSettingsFields';
 import { ConnectionForm, EgressForm, ProbeForm } from './AiModelSection';
 import { AiTaskSection, AiTaskForm, ControlAction } from './AiTaskSection';
 import { AiSkillSection } from './AiSkillSection';
-import { BATCH_STATE, MATERIAL, TASK_STATE, budgetText, count, type AiSettings, type Task } from './aiSettingsModel';
+import { BATCH_STATE, MATERIAL, TASK_STATE, taskPresentationStage, budgetText, count, type AiSettings, type Task } from './aiSettingsModel';
 import type { AiAction } from './useAiAction';
 import styles from './AiSettingsExperience.module.css';
 
@@ -25,10 +25,10 @@ const COPY: Record<string, { group: string; description: string }> = {
   work_comparison: { group: '作品研究', description: '显式比较同一作者所选作品的已取得材料，保留双侧来源与覆盖限制。' },
   creator_account_research: { group: '创作者研究', description: '综合明确选定的作品底稿与公开简介，研究账号内容倾向并保留样本限制。' },
   creator_research: { group: '创作者研究', description: '研究选定作品的研究底稿，并保留引用与覆盖限制。' },
-  topic_research: { group: '主题研究', description: '从限定的完整底稿及评论窗口提炼带引用的讨论。' },
-  topic_research_extract_review: { group: '主题研究', description: '独立核对讨论与精确引用，未通过时阻止归属。' },
-  topic_research_resolve: { group: '主题研究', description: '比较当前主题的定义及纳入排除条件，形成候选归属。' },
-  topic_research_resolve_review: { group: '主题研究', description: '独立核验主题归属与层级，再接纳到图谱。' },
+  topic_research: { group: '主题研究', description: '基于内容理解与评论语义，完成主题归并和定义更新。' },
+  topic_research_extract_review: { group: '历史主题研究', description: '独立核对讨论与精确引用，未通过时阻止归属。' },
+  topic_research_resolve: { group: '历史主题研究', description: '比较当前主题的定义及纳入排除条件，形成候选归属。' },
+  topic_research_resolve_review: { group: '历史主题研究', description: '独立核验主题归属与层级，再接纳到图谱。' },
   author_org_identity: { group: '创作者研究', description: '辅助判断公开作者简介与账号定位，结论需要保留来源证据。' },
   direction_list_draft: { group: '主题研究', description: '从已有证据中整理候选研究方向，供人工审查。' },
   direction_proposal: { group: '市场洞察', description: '辅助提出值得验证的新切入点，而非自动立项。' },
@@ -115,7 +115,7 @@ function CapabilityDrawer({ data, task, action, onClose }: { data: AiSettings; t
   const checks = checksFor(data, task);
   const failed = checks.filter(c => c.okay !== true).length;
   return <Drawer title={task.label} onClose={onClose}>
-    <div className={styles.drawerIntro}><Status stage={task.lifecycle}/><p>{COPY[task.taskKey]?.description ?? '当前业务工作，具体能力以实际接入合同为准。'}</p></div>
+    <div className={styles.drawerIntro}><Status stage={taskPresentationStage(task)}/><p>{COPY[task.taskKey]?.description ?? '当前业务工作，具体能力以实际接入合同为准。'}</p></div>
     <div className={styles.drawerSummary}><b>{task.lifecycle !== 'active' ? '目前不能执行新工作' : failed ? '尚未满足全部已知运行条件' : '已知配置通过，执行仍需服务端复核'}</b><small>{failed} 项尚未确认或通过 · 前端诊断不代替最终运行准入</small></div>
     {task.taskKey === 'ocr_recognition' ? <AiTaskForm key={task.revision} data={data} task={task} action={action}/> : null}
     <h3 className={styles.blockTitle}>运行条件</h3><div className={styles.checkList}>{checks.map(check => <div className={styles.checkRow} key={check.title}><span className={styles.checkMark} data-ok={String(check.okay)}>{check.okay === true ? '✓' : check.okay === false ? '!' : '?'}</span><div><b>{check.title}</b><small>{check.detail}</small></div></div>)}</div>
@@ -130,7 +130,7 @@ export function AiCapabilities({ data, action }: { data: AiSettings; action: AiA
   const [detail, setDetail] = useState<string | null>(null);
   const [diagnostics, setDiagnostics] = useState(false);
   const tasks = groupTasks(data);
-  const visible = tasks.filter(task => (filter === 'all' || (filter === 'history' ? ['retired', 'legacy'].includes(task.lifecycle) : task.lifecycle === filter))
+  const visible = tasks.filter(task => (filter === 'all' || (filter === 'history' ? ['retired', 'legacy'].includes(taskPresentationStage(task)) : taskPresentationStage(task) === filter))
     && (task.label + ' ' + (COPY[task.taskKey]?.description ?? '') + ' ' + (COPY[task.taskKey]?.group ?? '')).toLowerCase().includes(search.toLowerCase().trim()));
   const service = data.execution.service;
   const observed = service.observedState;
@@ -141,17 +141,17 @@ export function AiCapabilities({ data, action }: { data: AiSettings; action: AiA
   return <div className={styles.experience}>
     <div className={styles.signalBar}><div className={styles.signalLead}><div className={styles.signalIcon}><IntelligenceIcon name="diagnostics" size={16}/></div><div><b>{online ? '执行器已报告运行状态' : observed === 'not_started' ? '执行器尚未启动' : '执行器状态需核对'}</b><small>{online ? '执行器心跳可见，但具体工作仍需满足完整准入条件。' : '当前读取未证明执行器正在运行。已接入工作不等于现在可执行。'}</small></div></div><div className={styles.signalMeta}><span>GLOBAL SWITCH <b>{control ? control.enabled ? '已启用' : '已关闭' : '未知'}</b></span><span>RUNNER <b>{runner ? runner.enabled ? '开关已启用' : '未启用' : '未知'}</b></span><button type="button" onClick={() => setDiagnostics(true)}>查看受阻原因 <IntelligenceIcon name="forward" size={16}/></button></div></div>
     <div className={styles.statStrip}>{[
-      ['已接入工作', tasks.filter(t => t.lifecycle === 'active').length, '仍需核对运行资格'],
-      ['尚待接入', tasks.filter(t => t.lifecycle === 'pending').length, '技术执行尚未连接'],
-      ['已冻结', tasks.filter(t => t.lifecycle === 'frozen').length, '暂不允许新任务'],
-      ['历史工作', tasks.filter(t => ['retired', 'legacy'].includes(t.lifecycle)).length, '只提供历史查询'],
+      ['已接入工作', tasks.filter(t => taskPresentationStage(t) === 'active').length, '仍需核对运行资格'],
+      ['尚待接入', tasks.filter(t => taskPresentationStage(t) === 'pending').length, '技术执行尚未连接'],
+      ['已冻结', tasks.filter(t => taskPresentationStage(t) === 'frozen').length, '暂不允许新任务'],
+      ['历史工作', tasks.filter(t => ['retired', 'legacy'].includes(taskPresentationStage(t))).length, '保留历史配置与记录'],
     ].map(([label, value, subtitle], i) => <div className={styles.stat} key={String(label)}><strong className={i === 0 ? styles.accent : undefined}>{String(value).padStart(2, '0')}</strong><div><b>{label}</b><small>{subtitle}</small></div></div>)}</div>
     <div className={styles.sectionHeading}><div><h2>工作能力</h2><small>{visible.length} 项匹配 · 选择工作可查看配置与受阻原因</small></div><div className={styles.toolbar}>
       <label className={styles.search}><IntelligenceIcon name="search" size={16}/><input type="search" value={search} onChange={event => setSearch(event.target.value)} placeholder="搜索 AI 工作" aria-label="搜索 AI 工作"/></label>
       <div className={styles.segments} aria-label="筛选工作">{([['all','全部'],['active','已接入'],['pending','待接入'],['frozen','冻结'],['history','历史']] as const).map(([key, title]) => <button key={key} type="button" data-active={filter === key} onClick={() => setFilter(key)}>{title}</button>)}</div>
       <div className={styles.viewPick}><button type="button" aria-label="卡片视图" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')}><IntelligenceIcon name="grid" size={16}/></button><button type="button" aria-label="列表视图" aria-pressed={layout === 'list'} onClick={() => setLayout('list')}><IntelligenceIcon name="list" size={16}/></button></div>
     </div></div>
-    <div className={styles.capGrid} data-layout={layout}>{visible.map((task, index) => <button type="button" key={task.taskKey} className={styles.capCard} data-stage={task.lifecycle} onClick={() => setDetail(task.taskKey)}><span className={styles.capTop}><small>CAPABILITY / {String(index + 1).padStart(2, '0')}</small><Status stage={task.lifecycle}/></span><span className={styles.capMiddle}><b>{task.label}</b><small>{COPY[task.taskKey]?.description ?? '查看当前业务能力与运行配置。'}</small></span><span className={styles.capBottom}><small>{COPY[task.taskKey]?.group ?? '其他工作'} · {STATES[task.lifecycle]?.note ?? '当前状态待核对'}</small><b>查看详情 <IntelligenceIcon name="forward" size={16}/></b></span></button>)}
+    <div className={styles.capGrid} data-layout={layout}>{visible.map((task, index) => <button type="button" key={task.taskKey} className={styles.capCard} data-stage={taskPresentationStage(task)} onClick={() => setDetail(task.taskKey)}><span className={styles.capTop}><small>CAPABILITY / {String(index + 1).padStart(2, '0')}</small><Status stage={taskPresentationStage(task)}/></span><span className={styles.capMiddle}><b>{task.label}</b><small>{COPY[task.taskKey]?.description ?? '查看当前业务能力与运行配置。'}</small></span><span className={styles.capBottom}><small>{COPY[task.taskKey]?.group ?? '其他工作'} · {STATES[taskPresentationStage(task)]?.note ?? '当前状态待核对'}</small><b>查看详情 <IntelligenceIcon name="forward" size={16}/></b></span></button>)}
       {!visible.length ? <div className={styles.empty}>没有符合条件的工作，试着调整搜索或筛选。</div> : null}</div>
     <p className={styles.footnote}>业务工作与基础模型测试分开管理，连接状态和运行状态均来自当前数据库回执。</p>
     {selected ? <CapabilityDrawer task={selected} data={data} action={action} onClose={() => setDetail(null)}/> : null}

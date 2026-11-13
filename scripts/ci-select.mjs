@@ -96,6 +96,7 @@ const paths = {
     'database/migrations/0200_topic_research_automation.sql',
     'database/migrations/0201_topic_angle_handoff.sql',
     'database/migrations/0202_topic_core_merge_prompts.sql',
+    'database/migrations/0207_topic_single_pass.sql',
     'crates/intelligence/src/topic_map*', 'crates/intelligence/src/topic_map*/**',
     'crates/intelligence/src/ai_foundation/topic_research*', 'crates/intelligence/src/ai_foundation/topic_research*/**',
     'crates/intelligence/src/ai_foundation/executor/topic_resolution_order.sql',

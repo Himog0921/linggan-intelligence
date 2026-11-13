@@ -22,25 +22,26 @@ mod method;
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and synthetic loopback only"]
-async fn topic_four_stages_publish_only_after_both_reviews() {
+async fn topic_single_pass_publishes_one_analysis_and_assignment_per_window() {
     exercise("normal").await;
 }
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and synthetic loopback only"]
-async fn topic_failed_extraction_review_cannot_resolve_or_publish() {
-    exercise("reject_extraction").await;
+async fn topic_single_pass_invalid_response_writes_no_result_or_assignment() {
+    exercise("invalid_output").await;
 }
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and synthetic loopback only"]
-async fn topic_failed_resolution_review_cannot_write_any_graph_decision() {
-    exercise("reject_resolution").await;
-}
-#[tokio::test]
-#[ignore = "isolated PostgreSQL and synthetic loopback only"]
-async fn topic_no_signal_completes_without_dispatching_assignment_stages() {
+async fn topic_single_pass_no_signal_publishes_analysis_without_assignment() {
     exercise("no_signal").await;
 }
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and synthetic loopback only"]
+async fn topic_single_pass_invalid_ancestor_writes_no_result_or_assignment() {
+    exercise("invalid_ancestor").await;
+}
 async fn exercise(variant: &'static str) {
+    let invalid = matches!(variant, "invalid_output" | "invalid_ancestor");
     let db = dossier::fixture::proof_database("topic_execution").await;
     let work = dossier::work(&db).await;
     dossier::current_image_reading_with_bytes(&db, Some(core_fixture::bytes())).await;
@@ -65,8 +66,9 @@ async fn exercise(variant: &'static str) {
         setup::enable(&db, control).await;
     }
     core_fixture::prepare(&db, work, &owner).await;
+    // The second work proves that an accepted topic is matched, not duplicated.
     let second = if variant == "normal" {
-        let package=dossier::fixture::submit_package(&db,"content_detail",serde_json::json!({"contentExternalId":"second-topic-note"}),serde_json::json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"second-topic-note"},"payload":{"title":"另一合格作品","bodyText":"另一作者的正文。结尾不能丢失🙂","authorId":"another-author"}})).await;
+        let package = dossier::fixture::submit_package(&db,"content_detail",serde_json::json!({"contentExternalId":"second-topic-note"}),serde_json::json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"second-topic-note"},"payload":{"title":"另一合格作品","bodyText":"另一作者的正文。结尾不能丢失🙂","authorId":"another-author"}})).await;
         let second:Uuid=sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='second-topic-note'").fetch_one(db.pool()).await.unwrap();
         sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(second).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
         core_fixture::image(&db, "second-topic-note").await;
@@ -78,7 +80,7 @@ async fn exercise(variant: &'static str) {
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();
     drop(owner);
-    for task in research::TASKS {
+    for task in research::CURRENT_TASKS {
         let revision: i64 =
             sqlx::query_scalar("SELECT revision FROM linggan_ai_task_setting WHERE task_key=$1")
                 .bind(task.as_str())
@@ -120,7 +122,7 @@ async fn exercise(variant: &'static str) {
         setup::enable(&db, control).await;
     }
     let mut versions = Vec::new();
-    for task in research::TASKS {
+    for task in research::CURRENT_TASKS {
         versions.push(method::assign(&db, &adapter, task, "V1", None).await);
     }
     let request = research::Start {
@@ -129,7 +131,7 @@ async fn exercise(variant: &'static str) {
         work_refs: vec![work],
     };
     let receipt = research::start(&db, &request).await.unwrap();
-    assert_eq!(receipt.stage_count, 4);
+    assert_eq!(receipt.stage_count, 1);
     assert_eq!(
         research::start(&db, &request).await.unwrap().run_ref,
         receipt.run_ref
@@ -141,7 +143,7 @@ async fn exercise(variant: &'static str) {
             .unwrap(),
         0
     );
-    for (i, task) in research::TASKS.into_iter().enumerate() {
+    for (i, task) in research::CURRENT_TASKS.into_iter().enumerate() {
         method::assign(&db, &adapter, task, "V2", Some(versions[i])).await;
     }
     let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
@@ -153,72 +155,46 @@ async fn exercise(variant: &'static str) {
         adapter,
         drain.clone(),
     ));
-    tokio::time::timeout(std::time::Duration::from_secs(25), async {
-        loop {
-            let progress = research::read(&db, dossier::DOMAIN).await.unwrap();
-            let run = &progress["runs"][0];
-            if run["pendingStageCount"] == 0 {
-                if variant == "normal" {
-                    assert_eq!(run["succeededStageCount"], 4);
-                    assert_eq!(run["failedStageCount"], 0);
-                } else if variant == "no_signal" {
-                    assert_eq!(run["succeededStageCount"], 2);
-                    assert_eq!(run["failedStageCount"], 0);
-                } else {
-                    assert!(run["failedStageCount"].as_i64().unwrap() > 0);
-                }
-
-                break;
-            }
-            assert!(!running.is_finished(), "executor stopped");
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .unwrap();
-    let requests = endpoint.requests.lock().unwrap().clone();
+    let run = wait_for(&db, receipt.run_ref, &running).await;
+    assert_eq!(run["executionMode"], "single_pass");
+    assert_eq!(run["windowCount"], 1);
     assert_eq!(
-        requests.len(),
-        if variant == "no_signal" || variant == "reject_extraction" {
-            3
-        } else {
-            5
-        }
+        run["succeededStageCount"],
+        if invalid { 0 } else { 1 }
     );
-    for request in requests.iter().skip(1) {
-        let system = wire::text(request, "system");
-        assert!(
-            system.contains("METHOD V1") && system.contains("SKILL V1"),
-            "{system}"
-        );
-        assert!(!system.contains("METHOD V2") && !system.contains("SKILL V2"));
+    assert_eq!(run["failedStageCount"], if invalid { 1 } else { 0 });
+    if variant == "invalid_ancestor" {
+        let reason: Option<String> = sqlx::query_scalar(
+            "SELECT result->>'validationReason' FROM linggan_model_invocation WHERE task_key LIKE 'topic_research%' ORDER BY created_at DESC LIMIT 1",
+        )
+        .fetch_optional(db.pool())
+        .await
+        .unwrap()
+        .flatten();
+        assert_eq!(reason.as_deref(), Some("topic_parent_criteria_repeated"));
     }
     assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_research_result")
+        run["stages"].as_array().unwrap().iter().map(|s| s["stageNumber"].as_i64().unwrap()).collect::<Vec<_>>(),
+        vec![0]
+    );
+    let results: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_topic_research_result")
             .fetch_one(db.pool())
             .await
-            .unwrap(),
-        if variant == "normal" || variant == "no_signal" {
-            1
-        } else {
-            0
-        }
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_unit_assignment")
+            .unwrap();
+    let assignments: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_topic_map_unit_assignment")
             .fetch_one(db.pool())
             .await
-            .unwrap(),
-        if variant == "normal" { 1 } else { 0 }
-    );
+            .unwrap();
+    assert_eq!(results, if invalid { 0 } else { 1 });
+    assert_eq!(assignments, if variant == "normal" { 1 } else { 0 });
     let query = serde_json::from_value(serde_json::json!({"domainRef":dossier::DOMAIN})).unwrap();
     let graph = linggan_intelligence::topic_map::read_topic_map(&db, &query)
         .await
         .unwrap();
     assert_eq!(!graph.topics.is_empty(), variant == "normal");
-    if variant == "normal" {
-        // Freeze a valid candidate, then withdraw its source between resolution and review.
-        let second = second.unwrap();
+    if let Some(second) = second {
         let second_run = research::start(
             &db,
             &research::Start {
@@ -229,100 +205,134 @@ async fn exercise(variant: &'static str) {
         )
         .await
         .unwrap();
-        use linggan_intelligence::ai_foundation::control_store::{
-            Actor, ChangeControl, change_control,
-        };
-        let task = research::TASKS[3];
-        let scope = ControlScope::Task(task);
-        let revision: i64 =
-            sqlx::query_scalar("SELECT revision FROM linggan_ai_control WHERE scope_key=$1")
-                .bind(scope.key())
-                .fetch_one(db.pool())
-                .await
-                .unwrap();
-        change_control(
-            &db,
-            &ChangeControl {
-                command_ref: Uuid::new_v4(),
-                scope: scope.clone(),
-                expected_revision: revision,
-                enabled: false,
-                reason: "synthetic pause before final review".into(),
-            },
-            Actor::Human,
+        let run = wait_for(&db, second_run.run_ref, &running).await;
+        assert_eq!(run["succeededStageCount"], 1);
+        assert_eq!(run["failedStageCount"], 0);
+        let topics: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_topic_workspace w JOIN LATERAL(SELECT domain_ref FROM linggan_topic_map_binding WHERE topic_ref=w.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE b.domain_ref=$1",
         )
+        .bind(dossier::DOMAIN)
+        .fetch_one(db.pool())
         .await
         .unwrap();
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                let progress = research::read(&db, dossier::DOMAIN).await.unwrap();
-                let run = progress["runs"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|r| r["runRef"] == second_run.run_ref.to_string())
-                    .unwrap();
-                if run["stages"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|s| s["stageNumber"] == 2 && s["state"] == "succeeded")
-                {
-                    break;
-                }
-                assert_eq!(run["failedStageCount"], 0, "{run}");
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            }
-        })
-        .await
-        .unwrap();
-        let before = endpoint.requests.lock().unwrap().len();
-        assert_eq!(before, 8);
-        linggan_evidence::record_slot_disposition(
-            &db,
-            "xhs:dossier-note:image:1",
-            linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
-            "synthetic-proof",
-            "withdraw candidate source before review",
-        )
-        .await
-        .unwrap();
-        setup::enable(&db, scope).await;
-        tokio::time::timeout(std::time::Duration::from_secs(15), async {
-            loop {
-                let progress = research::read(&db, dossier::DOMAIN).await.unwrap();
-                let run = progress["runs"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .find(|r| r["runRef"] == second_run.run_ref.to_string())
-                    .unwrap();
-                if run["pendingStageCount"] == 0 {
-                    assert!(run["failedStageCount"].as_i64().unwrap() > 0);
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-            }
-        })
-        .await
-        .unwrap();
+        assert_eq!(topics, 1, "a second work must match the accepted topic");
         assert_eq!(
-            endpoint.requests.lock().unwrap().len(),
-            before,
-            "withdrawn candidate cannot reach final reviewer"
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM linggan_topic_map_unit_assignment"
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+            2
         );
-        assert_eq!(
-            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_map_unit_assignment")
-                .fetch_one(db.pool())
-                .await
-                .unwrap(),
-            1,
-            "no second assignment may be accepted"
+    }
+    let requests = endpoint.requests.lock().unwrap().clone();
+    assert_eq!(requests.len(), if variant == "normal" { 3 } else { 2 });
+    // The first run is pinned to V1 even after the setting advances; the later run starts on V2.
+    for request in &requests[1..2] {
+        let system = wire::text(request, "system");
+        assert!(
+            system.contains("METHOD V1") && system.contains("SKILL V1"),
+            "{system}"
         );
+        assert!(!system.contains("METHOD V2") && !system.contains("SKILL V2"));
+    }
+    if variant == "normal" {
+        let system = wire::text(&requests[2], "system");
+        assert!(
+            system.contains("METHOD V2") && system.contains("SKILL V2"),
+            "{system}"
+        );
+        assert!(!system.contains("METHOD V1") && !system.contains("SKILL V1"));
     }
     drain.request();
     running.await.unwrap().unwrap();
     endpoint.finish().await;
+}
+
+async fn wait_for(
+    db: &linggan_storage_postgres::Database,
+    run_ref: Uuid,
+    running: &tokio::task::JoinHandle<
+        Result<linggan_intelligence::ai_foundation::executor::service::DrainReceipt, linggan_intelligence::ai_foundation::executor::ExecutorError>,
+    >,
+) -> serde_json::Value {
+    tokio::time::timeout(std::time::Duration::from_secs(25), async {
+        loop {
+            let progress = research::read(db, dossier::DOMAIN).await.unwrap();
+            let run = progress["runs"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|run| run["runRef"] == run_ref.to_string())
+                .unwrap()
+                .clone();
+            if run["pendingStageCount"] == 0 {
+                return run;
+            }
+            assert!(!running.is_finished(), "executor stopped");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap()
+}
+
+#[test]
+#[ignore = "synthetic endpoint contract fixture only"]
+fn synthetic_topic_response_matches_comment_and_reassignment_units() {
+    let prompt = |mode: &str, definitions: serde_json::Value, units: serde_json::Value| {
+        serde_json::json!({"packet":{"contract":"topic-map.single-pass.v1","input":{
+            "mode":mode,"definitions":definitions,"units":units}}})
+        .to_string()
+    };
+    let candidate = serde_json::json!([{"topicRef":"topic-1","definitionRef":"definition-1"}]);
+    let units = serde_json::json!([
+        {"discussionIndex":3,"discussion":{"evidence":[{"fragmentId":"fragment-1"}]}},
+        {"discussionIndex":7,"discussion":{"evidence":[]}}
+    ]);
+    for mode in ["comment", "reassignment"] {
+        let output =
+            wire::topic_response(&prompt(mode, candidate.clone(), units.clone())).unwrap();
+        assert_eq!(output["contract"], "topic-map.single-pass.v1");
+        assert_eq!(output["projection"], serde_json::Value::Null);
+        assert_eq!(output["newTopics"], serde_json::json!([]));
+        let decisions = output["decisions"].as_array().unwrap();
+        assert_eq!(decisions.len(), 2, "{mode}");
+        assert_eq!(
+            (
+                decisions[0]["discussionIndex"].as_i64(),
+                decisions[0]["status"].as_str()
+            ),
+            (Some(3), Some("matched")),
+            "{mode}"
+        );
+        assert_eq!(decisions[0]["matches"][0]["topicRef"], "topic-1");
+        assert_eq!(
+            (
+                decisions[1]["discussionIndex"].as_i64(),
+                decisions[1]["status"].as_str()
+            ),
+            (Some(7), Some("uncertain")),
+            "{mode}"
+        );
+        assert!(decisions
+            .iter()
+            .all(|decision| decision["newTopicId"].is_null()
+                && decision["relations"] == serde_json::json!([])));
+    }
+    let unmatched =
+        wire::topic_response(&prompt("comment", serde_json::json!([]), units)).unwrap();
+    assert!(unmatched["decisions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|decision| decision["status"] == "uncertain"
+            && decision["matches"] == serde_json::json!([])));
+    assert_eq!(
+        wire::topic_response(&prompt("author", candidate, serde_json::json!([]))),
+        None
+    );
 }
 
 #[path = "support/topic_resolution_order.rs"]
