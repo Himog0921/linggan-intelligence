@@ -105,3 +105,11 @@
 - 前端是否已有可复用的区间条或格子组件。只确认了 `Charts.tsx` 存在，没有读它的内容。
 - `linggan_ai_task` 等配置表是否对 `task_key` 有额外的取值约束。按 0199 的样板写入即可，但首次迁移务必在隔离库的真实有序链上跑通。
 - 成员角色除“管理员”与“受限”之外的细分。
+
+## 6. 后端连接补充（2026-11-14）
+
+- 运营列表的 `FILTERED` 读取已有发布规则与采纳字段：`crates/intelligence/src/ops_ledger/read/publications.rs:182`。看板复用业务取值规则，仅选择标题标注或分析各自所需列。
+- `LATEST_VIEWS_CTE`（`crates/intelligence/src/ops_ledger/read.rs:34`）取当前最新回执，没有历史时点过滤；v1 历史读取采用已保存快照。
+- AI batch/item 表见 `database/migrations/0135_ai_gen1_batch.sql`；`InputRef` 见 `crates/intelligence/src/ai_foundation/batch_store.rs:44`。看板运行冻结标题与分片，队列条目保存分片引用。
+- `linggan_creation_publication_link`（`database/migrations/0186_creation_publication_links.sql:6`）连接 `work_ref`、`revision_ref`、`publication_ref`，撤销关联另有 unlink 表；看板保留有效关联。
+- 主仓库私有目录的 `analyze.py` 包含 `ln(views + 1)`、账号残差、Wilson、覆盖统计与原始 eta²；未实现置换检验或 kappa，独立数值答案由 L0 补齐。原始材料继续保留在私有目录。
