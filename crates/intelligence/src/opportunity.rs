@@ -24,8 +24,9 @@ pub use platform_time::{
     PlatformTimeReport, current_as_of, project_comment_platform_times, read_platform_time_report,
 };
 pub use problem_metrics::{
-    MetricCalculationError, MetricExclusion, MetricIdentityConflicts, MetricPeriod,
-    MetricRebuildReport, RebuildMode, rebuild_problem_metrics,
+    CreatorDensity, CreatorDensityGroup, CreatorWindowExclusions, MetricCalculationError,
+    MetricExclusion, MetricIdentityConflicts, MetricPeriod, MetricRebuildReport, RebuildMode,
+    rebuild_problem_metrics, sort_creator_density_group,
 };
 pub use stats::{
     EvidenceTier, Interval, StatsError, TierInput, TierParams, evidence_tier, rate_per_1k,

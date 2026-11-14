@@ -133,6 +133,8 @@ struct KnowledgeUnit {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 enum LabelDimension {
+    // This draft-only category belongs to knowledge units and is never published as a label.
+    AuthorPosition,
     Discussion,
     Audience,
     Situation,
@@ -273,6 +275,123 @@ fn validate_generation(generation: &Generation) -> Result<(), &'static str> {
     Ok(())
 }
 
+fn read_draft(mut value: Value) -> Result<Draft, &'static str> {
+    // Only ignore observed metadata with no content. The typed draft still rejects
+    // every other extra field, including model-supplied source identity and offsets.
+    if let Some(object) = value.as_object_mut()
+        && object.get("type").and_then(Value::as_str) == Some("json_object")
+    {
+        object.remove("type");
+    }
+    if let Some(core) = value.get_mut("core").and_then(Value::as_object_mut) {
+        for key in ["knowledgeUnitsNote", "knowledgeUnits_note"] {
+            if core.get(key).is_some_and(Value::is_null) {
+                core.remove(key);
+            }
+        }
+    }
+    if let Some(images) = value
+        .pointer_mut("/evidenceCandidates/vision")
+        .and_then(Value::as_array_mut)
+    {
+        for image in images {
+            if let Some(role) = image.get_mut("speakerRole")
+                && role.as_str() == Some("unconfirmed")
+            {
+                *role = json!("unknown");
+            }
+        }
+    }
+    serde_json::from_value(value).map_err(|_| "invalid_draft")
+}
+
+fn transcript_line_break(text: &str) -> Option<&str> {
+    text.strip_prefix("\r\n")
+        .or_else(|| text.strip_prefix('\n'))
+}
+
+fn is_han(ch: char) -> bool {
+    matches!(ch, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}')
+}
+
+// For a Chinese ASR line break already present on both sides, an extra comma
+// before the break can be a model formatting artifact. No other punctuation
+// or characters are removed and the caller stores the original source slice.
+fn transcript_layout_match<'a>(mut source: &'a str, quote: &str) -> Option<&'a str> {
+    let mut previous = None;
+    let mut chars = quote.chars().peekable();
+    while let Some(expected) = chars.next() {
+        if let Some(rest) = source.strip_prefix(expected) {
+            source = rest;
+            if matches!(expected, ',' | '，')
+                && previous.is_some_and(is_han)
+                && chars.peek().copied().is_some_and(is_han)
+                && let Some(rest) = transcript_line_break(source)
+            {
+                source = rest;
+            }
+        } else if matches!(expected, ',' | '，')
+            && previous.is_some_and(is_han)
+            && let Some(rest) = transcript_line_break(source)
+        {
+            let next = chars.next()?;
+            if next == '\r' && chars.next() != Some('\n') || !matches!(next, '\r' | '\n') {
+                return None;
+            }
+            if !chars.peek().copied().is_some_and(is_han) {
+                return None;
+            }
+            source = rest;
+        } else {
+            return None;
+        }
+        previous = Some(expected);
+    }
+    Some(source)
+}
+
+fn quote_in_source<'a>(
+    source: &'a str,
+    quote: &str,
+    allow_transcript_wrap: bool,
+) -> Result<(usize, &'a str), &'static str> {
+    // A transcript can wrap a fragment immediately after a comma. The
+    // stored quotation still comes from one unchanged, contiguous slice.
+    let check_wrap =
+        allow_transcript_wrap && !quote.contains(['\r', '\n']) && source.contains('\n');
+    // Scan overlaps, and count both exact and wrap-equivalent matches.
+    let first = quote.chars().next().ok_or("invalid_text_quote")?;
+    let check_layout = allow_transcript_wrap && quote.contains('\n') && source.contains('\n');
+    let mut candidates = source.match_indices(first).flat_map(|(byte, _)| {
+        let tail = &source[byte..];
+        let strict = (|| {
+            let mut remaining = tail;
+            let mut after_comma = false;
+            for expected in quote.chars() {
+                if check_wrap && after_comma {
+                    remaining = transcript_line_break(remaining).unwrap_or(remaining);
+                }
+                remaining = remaining.strip_prefix(expected)?;
+                after_comma = matches!(expected, ',' | '，');
+            }
+            Some(remaining)
+        })();
+        let layout = check_layout
+            .then(|| transcript_layout_match(tail, quote))
+            .flatten()
+            .filter(|rest| strict.is_none_or(|other| other.len() != rest.len()));
+        [strict, layout]
+            .into_iter()
+            .flatten()
+            .map(move |rest| (byte, &source[byte..source.len() - rest.len()]))
+    });
+    let hit = candidates.next().ok_or("invalid_text_quote")?;
+    if candidates.next().is_some() {
+        return Err("invalid_text_quote");
+    }
+    Ok(hit)
+}
+
 /// Accept the new draft protocol only. The caller retains the untouched raw response.
 /// Structure/source admission is not semantic certification or permission to use the sources.
 pub fn accept(
@@ -280,7 +399,7 @@ pub fn accept(
     snapshot: &Snapshot,
     generation: &Generation,
 ) -> Result<Value, &'static str> {
-    let draft: Draft = serde_json::from_value(draft).map_err(|_| "invalid_draft")?;
+    let draft = read_draft(draft)?;
     validate_snapshot(snapshot)?;
     validate_generation(generation)?;
     let core = &draft.core;
@@ -325,6 +444,11 @@ pub fn accept(
             return Err("invalid_reference");
         }
     }
+    let candidate_labels: Vec<_> = core
+        .candidate_labels
+        .iter()
+        .filter(|label| !matches!(label.dimension, LabelDimension::AuthorPosition))
+        .collect();
     let project = |kind: UnitType, max: usize| -> Result<Vec<&str>, &'static str> {
         let ids: Vec<_> = core
             .knowledge_units
@@ -372,14 +496,9 @@ pub fn accept(
             .iter()
             .find(|s| s.citation_id == candidate.input_citation_id)
             .ok_or("invalid_evidence_source")?;
-        // char_indices checks overlapping occurrences too; match_indices alone would miss them.
-        let mut matches = source.text.char_indices().filter_map(|(byte, _)| {
-            source.text[byte..]
-                .starts_with(&candidate.quote)
-                .then_some(byte)
-        });
-        let byte = matches.next().ok_or("invalid_text_quote")?;
-        if matches.next().is_some() {
+        let (byte, quote) =
+            quote_in_source(&source.text, &candidate.quote, source.kind == "transcript")?;
+        if !sized(quote, 1, 500) {
             return Err("invalid_text_quote");
         }
         let start = source
@@ -387,14 +506,14 @@ pub fn accept(
             .checked_add(source.text[..byte].chars().count())
             .ok_or("invalid_text_quote")?;
         let end = start
-            .checked_add(candidate.quote.chars().count())
+            .checked_add(quote.chars().count())
             .ok_or("invalid_text_quote")?;
         evidence.push((
             candidate.id.as_str(),
             json!({
                 "id": candidate.id, "inputCitationId": source.citation_id,
                 "sourceRef": source.source_ref, "sourceVersion": source.source_version,
-                "sourceKind": "material", "start": start, "end": end, "quote": candidate.quote
+                "sourceKind": "material", "start": start, "end": end, "quote": quote
             }),
         ));
     }
@@ -483,7 +602,7 @@ pub fn accept(
             "mainTopicUnitId": core.main_topic_unit_id,
             "audienceUnitIds": audience, "authorPositionUnitIds": author_position,
             "provisionUnitIds": provision, "readerValueUnitIds": reader_value,
-            "knowledgeUnits": core.knowledge_units, "candidateLabels": core.candidate_labels
+            "knowledgeUnits": core.knowledge_units, "candidateLabels": candidate_labels
         },
         "deep": null, "evidence": evidence,
         "generation": {

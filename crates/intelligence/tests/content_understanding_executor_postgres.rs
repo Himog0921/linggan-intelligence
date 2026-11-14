@@ -588,7 +588,136 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     assert_eq!(packet["imageInventory"][0]["blobSha256"], image_sha);
     assert_eq!(packet["material"], frozen["snapshot"]);
     assert_eq!(packet["imageInventory"], frozen["inventory"]);
+    let recovery = seed_recoverable_failure(&db, work).await;
+    let before = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
+    assert_eq!(before["analysis"]["state"], "failed");
+    let count_sql = "SELECT count(*) FROM linggan_model_invocation";
+    let calls: i64 = sqlx::query_scalar(count_sql)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let revision = "b".repeat(40);
+    let ids = [recovery];
+    assert!(
+        owner::recover_saved_replies(&db, &ids, &revision, false)
+            .await
+            .is_ok()
+    );
+    assert_eq!(
+        owner::latest(&db, dossier::DOMAIN, work, None)
+            .await
+            .unwrap(),
+        before
+    );
+    assert!(
+        owner::recover_saved_replies(&db, &[recovery, Uuid::nil()], &revision, true)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        owner::latest(&db, dossier::DOMAIN, work, None)
+            .await
+            .unwrap(),
+        before
+    );
+    let repaired = owner::recover_saved_replies(&db, &ids, &revision, true)
+        .await
+        .unwrap();
+    assert!(!repaired[0].already_saved);
+    let after = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
+    assert_eq!(after["analysis"]["state"], "succeeded");
+    assert_eq!(after["analysis"]["recoveredFromSavedReply"], true);
+    assert_eq!(
+        after["analysis"]["result"]["card"]["analysisRef"],
+        json!(recovery)
+    );
+    assert_eq!(
+        after["analysis"]["result"]["card"]["evidence"][0]["quote"],
+        "先核对顺序，再摆出材料"
+    );
+    assert!(
+        owner::recover_saved_replies(&db, &ids, &revision, true)
+            .await
+            .unwrap()[0]
+            .already_saved
+    );
+    let reply_time: String = sqlx::query_scalar(
+        "SELECT to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')
+         FROM linggan_content_understanding_result WHERE request_ref=$1",
+    )
+    .bind(recovery)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        after["analysis"]["result"]["card"]["generation"]["createdAt"],
+        reply_time
+    );
+    let original: (String, String, String) = sqlx::query_as(
+        "SELECT b.state, i.state, o.failure_code FROM linggan_content_understanding_result o
+         JOIN linggan_content_understanding_request r USING(request_ref)
+         JOIN linggan_ai_batch_item_control b USING(item_ref)
+         JOIN linggan_model_invocation i ON i.invocation_ref=o.invocation_ref WHERE r.request_ref=$1",
+    ).bind(recovery).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(
+        original,
+        ("failed".into(), "failed".into(), "ai_output_invalid".into())
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(count_sql)
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        calls
+    );
     endpoint.finish().await;
+}
+
+async fn seed_recoverable_failure(db: &linggan_storage_postgres::Database, work: Uuid) -> Uuid {
+    let executor = linggan_intelligence::ai_foundation::executor::ExecutorSession::acquire(
+        db,
+        "content-l1-recovery-owned-proof",
+        4,
+    )
+    .await
+    .unwrap();
+    let preview = owner::preview(db, dossier::DOMAIN, work).await.unwrap();
+    let receipt = owner::start(db, &start_from(&preview, work)).await.unwrap();
+    let mut tx = executor.fence().begin(db, true).await.unwrap();
+    let manifest: Value = sqlx::query_scalar(
+        "SELECT input_manifest FROM linggan_content_understanding_request WHERE request_ref=$1",
+    )
+    .bind(receipt.request_ref)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    let mut draft = wire::draft(&json!({"material":manifest["snapshot"]}));
+    draft["type"] = json!("json_object");
+    draft["evidenceCandidates"]["text"][0]["quote"] = json!("先核对顺序，再摆出材料");
+    let invocation = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at,task_key,task_config_ref,batch_ref,dispatch_state,input_tokens,output_tokens,failure_code)
+        SELECT $1,m.connection_version_ref,m.model_ref,c.config_ref,'analyze',repeat('a',64),'failed',1000,20,
+        jsonb_build_object('ok',true,'promptVersion',t.prompt_version_ref,'diagnostic',jsonb_build_object('providerReturnedModel','synthetic-writing','terminalReceived',true,'finishReason','stop')),
+        scope_001_now(),t.task_key,t.task_config_ref,r.batch_ref,'started',10,10,'ai_output_invalid'
+        FROM linggan_content_understanding_request r JOIN linggan_ai_task_config t USING(task_config_ref)
+        JOIN linggan_model_config c ON c.config_ref=t.model_config_ref JOIN linggan_model_entry m USING(model_ref)
+        WHERE r.request_ref=$2")
+        .bind(invocation).bind(receipt.request_ref).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE linggan_ai_batch_item_control SET state='running',lease_generation=1,lease_token=$2,lease_instance_ref=$3,lease_instance_generation=$4,lease_expires_at=clock_timestamp()+interval '1 minute' WHERE item_ref=$1")
+        .bind(receipt.item_ref).bind(Uuid::new_v4()).bind(executor.fence().instance_ref()).bind(executor.fence().generation()).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE linggan_ai_batch_item_control ctl SET invocation_ref=$2,attempt_count=1,executed_config_ref=cfg.task_config_ref,executed_skill_version_ref=cfg.skill_version_ref,execution_contract=cfg.execution_contract FROM linggan_ai_task_config cfg JOIN linggan_content_understanding_request r USING(task_config_ref) WHERE ctl.item_ref=$1 AND r.request_ref=$3")
+        .bind(receipt.item_ref).bind(invocation).bind(receipt.request_ref).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,raw_output,failure_code)
+        SELECT request_ref,work_ref,material_snapshot_identity,method_version,$2,$3,'ai_output_invalid' FROM linggan_content_understanding_request WHERE request_ref=$1")
+        .bind(receipt.request_ref).bind(invocation).bind(draft.to_string()).execute(&mut *tx).await.unwrap();
+    sqlx::query("UPDATE linggan_ai_batch_item_control SET state='failed',usable=false,failure_code='ai_output_invalid',finished_at=scope_001_now(),lease_token=NULL,lease_expires_at=NULL,lease_instance_ref=NULL,lease_instance_generation=NULL WHERE item_ref=$1")
+        .bind(receipt.item_ref).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    receipt.request_ref
 }
 
 fn start_from(preview: &Value, work: Uuid) -> owner::Start {

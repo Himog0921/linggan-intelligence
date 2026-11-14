@@ -11,7 +11,7 @@ pub(crate) async fn scope_coverage(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let rows = sqlx::query("SELECT work_ref,material_snapshot_identity FROM linggan_content_understanding_result WHERE work_ref=ANY($1) AND method_version=$2 AND result IS NOT NULL AND created_at<=$3::timestamptz")
+    let rows = sqlx::query("SELECT work_ref,material_snapshot_identity FROM linggan_content_understanding_saved_core WHERE work_ref=ANY($1) AND method_version=$2 AND result IS NOT NULL AND created_at<=$3::timestamptz")
         .bind(works).bind(METHOD).bind(cutoff).fetch_all(&mut *tx).await?;
     let mut identities = BTreeMap::<Uuid, Vec<String>>::new();
     for row in rows {

@@ -335,7 +335,7 @@
 - 执行 `bash scripts/ci-preflight.sh origin/main`：52 passed，`Preflight passed`；`node --test scripts/ci-select.test.mjs`：21 passed。改动 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`：退出码 0、无输出。
 - 基线 `843e75cc` 与候选分别执行 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked`：均退出 101，58 项 `too_many_lines` 错误的位置和内容相同（首次均在既有 `linggan-evidence`）；候选加 `-- -A clippy::too_many_lines` 后完成，退出码 0。原始严格 Clippy 未通过，不能称为通过。
 - `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-worker --bin linggan-opportunity --locked`：1 passed，0 failed。
-- 独立审阅完成：此前提出的自动同步、幂等与身份变更、CI 覆盖、分类时间、主调度阻塞、密钥恢复和身份冲突日志问题均已处理；最终增量复核未发现新的阻断问题。审阅者核对代码和测试报告，未独立重跑数据库测试。远端 CI、合并和部署尚未执行。只使用合成数据与隔离测试数据库；未对本地运行库或生产环境执行迁移，也未进行真实采集或模型外发。
+- 独立审阅完成：此前提出的自动同步、幂等与身份变更、CI 覆盖、分类时间、主调度阻塞、密钥恢复和身份冲突日志问题均已处理；最终增量复核未发现新的阻断问题。审阅者核对代码和测试报告，未独立重跑数据库测试。记录此候选时远端 CI、合并和部署尚未执行；后续 CI 与合并回执见下方「T1.1 / T1.2 合并与 T1.3 待决」。只使用合成数据与隔离测试数据库；未对本地运行库或生产环境执行迁移，也未进行真实采集或模型外发。
 
 ## 2026-11-13 T1.2 问题指标计算
 
@@ -351,3 +351,33 @@
 - I1、I2、I3、I6、I6b、I8、I11 的合成场景结果均为 0；未建表或未实现时点检查的项目标为不可用，报告 `incomplete = true`。历史测试另证明未来才出现的 I11 违例不污染旧时点，已存在于查询时点的 I11 违例会拒绝计算并回滚。
 - 已知限制：首次入档表没有建立时间；早于可证明的分类/问题登记或口径定义历史时返回不可用。按领域切换覆盖率与全局 singleton 当前指针不一致，切换任务开始前须按 §3.3 另行裁定。当前为实现并经隔离测试，不代表已合并、部署或获得业务验收；远端 CI 以实际运行结果为准。
 - 本任务超出手册建议的单 PR 代码行数：时点选择、协议分组、版本演进、同一事务的不变量与自动刷新必须共同接入并一起验证；拆开会留下无法满足本任务口径的中间结果。
+
+## 2026-11-13 T1.1 / T1.2 合并与 T1.3 待决
+
+- 负责人指示继续推进上一轮建议的下一步。T1.1 [PR #580](https://github.com/Himog0921/linggan-intelligence/pull/580) 以最终 head `67ebfb57` 合并，main 合并提交 `4db4f0c263508187691e314cd437567408769514`；转为 Ready 后的 [Delivery 43467742630](https://github.com/Himog0921/linggan-intelligence/actions/runs/43467742630) 的所有所选任务和 gate 通过。
+- T1.2 [PR #581](https://github.com/Himog0921/linggan-intelligence/pull/581) 在 #580 合并后改为以 main 为目标，最终 head `fce43b75` 合并，main 合并提交 `263435f38332f92f49200627bde67c6d875292bb`；重设基线后的 [Delivery 43471357125](https://github.com/Himog0921/linggan-intelligence/actions/runs/43471357125) 的所有所选任务和 gate 通过。合并后的 main 与该 head 的文件差异为 0。
+- 执行 `git fetch origin main`，输出 `843e75cc..263435f3  main -> origin/main`；执行 `git worktree add -b codex/opportunity-t13-creator-density .worktrees/opportunity-t13-creator-density origin/main`，输出 `HEAD is now at 263435f3`。共享主工作树的原有未提交改动保持不动。
+- T1.3 工作包：执行者 Codex；分支 `codex/opportunity-t13-creator-density`；worktree `.worktrees/opportunity-t13-creator-density`；基线 `263435f38332f92f49200627bde67c6d875292bb`。只使用隔离测试数据库；本地运行库及生产环境迁移、真实采集和模型外发仍需另行授权。
+- 状态：**blocked**。D-030 的协议分组与作者集中度表和卡片排序之间缺少规则；事实、选项和建议记录在 Q-22，已向负责人询问。答复前不写作者集中度代码、不修改业务规格。
+- 本次文档核对执行 `bash scripts/ci-preflight.sh origin/main`：`tests 52`、`pass 52`、`fail 0`，输出 `Preflight passed; required module proofs and independent review remain separate.`；`git diff --check` 退出码 0。
+- 仅合并代码，未部署，也未对本地运行库或生产环境执行迁移；严格 Clippy 的既有基线失败仍按 T1.1 / T1.2 原记录保留。
+
+## 2026-11-13 T1.3 作者集中度工作包
+
+- 负责人答复 Q-22，采用 D-042：按首次入档协议分别计算、存储和组内排序；未知协议单列，后续卡片标明协议且不跨组比较。T1.3 恢复实施。
+- 代码范围：作者集中度的前向迁移、共享输入与计算、现有调度接入、隔离 PostgreSQL 与排序验证；继续复用机会卡现有评论资格、按时点身份、问题归属与 Wilson 函数。新迁移同步登记运行脚本及完整 schema fixture。
+- 本地运行库和生产环境迁移、真实采集、模型外发仍需另行授权。首次入档记录无创建时间、旧时点不可证明的限制继续保留。
+
+## 2026-11-13 T1.3 作者集中度（候选）
+
+- 前向迁移 `0215_opportunity_creator_problem_density.sql` 建立带协议维度的作者指标表；未知协议为 NULL，唯一约束将未知协议视为同一组。候选原编号为 0214；main 在并行开发中以 `c5899874` 合入内容理解的 0214，故本任务顺延为 0215，内容字节未改。迁移 SHA-256 为 `b8a6a54f6de2edff554d7f4cb633150fdb249c331a160ba2783f794fcc332396`，已同步运行脚本与完整 schema fixture；未执行运行环境迁移。
+- 作者指标与问题周期指标共用按时点资格、协议、评论者哈希、问题归属及同一重算事务；作者窗口始终取截至 `as_of` 的作品发布时间。每协议分别累计有效评论和去重提及人数；未知协议单列，组内先区分样本充足与不足，再按手册排序。现有后台刷新、`--full`、增量跳过与不写表的 `--preview` 同步覆盖作者指标；缺少作品发布时间与窗口外样本单独计数。
+- 共享 Wilson 函数将零命中下界和全命中上界固定为数学上的 0 和 1，防止浮点残差影响作者并列排序；手册全部原标准答案未更改。I7 已实现按领域和时点检查。
+- 标准样本直接重分配既有 W0 评论，在同一隔离库同时验证有效评论 5800、P1/P2/P3 标准答案以及 C1 `k=4 n=60 ci=[0.026229,0.159254] sufficient=true`、C2 `k=3 n=40 ci=[0.025836,0.198642] sufficient=false`。协议已知/未知、跨作品同人去重、未知评论者、撤回、窗口上下边界、历史预览以及增量与全量一致另有独立场景。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target bash scripts/test-opportunity-postgres.sh`：基础 12、提及 6、时点 3、问题与作者指标 4、共享作者 1 项通过；实际 0177 合成发布链路的 enabled、missing_key、disabled、locked_release、locked_drain 五种状态各 1 项通过。末尾输出 `Opportunity PostgreSQL proof passed` 与 `Opportunity PostgreSQL proof cleanup verified; isolated proof database, container, and volume were removed`。enabled 证明作者指标跟随资格和撤回刷新；disabled 使用有资格素材，后台跨扫描周期后仍无作者指标写入。
+- 集成 `origin/main@c5899874` 并顺延迁移后重新执行：`cargo test -p linggan-intelligence --lib --locked` 为 377 passed、0 failed、12 ignored；`cargo test -p linggan-worker --bin linggan-opportunity --locked` 为 2 passed、0 failed。`bash scripts/test-local-runtime-schema.sh` 输出 `Fresh and repeat runtime schema migration passed; retired tables absent.`；全量机会卡 PostgreSQL 证明在 0214 与 0215 装配后再次通过，隔离资源均清除。
+- `check-invariants`：I1、I2、I3、I6、I6b、I7、I8、I11 可用且各为 0；I4、I5、I9、I10 尚不可用，报告 `incomplete = true`。I7 的人工制造违规在时点预览中被拒绝并回滚。
+- 严格 `cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked` 退出 101；与基线逐项比较均为既有 `linggan-evidence` 的 58 项 `too_many_lines`，位置及内容相同。加 `-- -A clippy::too_many_lines` 后退出 0；`-- --cap-lints warn` 用于复核新增长函数，既有长测试仍有告警，不声称严格 Clippy 通过。
+- 工作区独立审阅提出标准集和关闭开关负例不足，均已修复并经隔离回归；审阅者只读核对代码与日志，未独立运行数据库测试。最终提交和远端 CI 以 PR 回执为准。
+- 本任务单 PR 的代码改动超过手册建议的约 400 行：需要把作者指标与现有输入、双口径重算及事务不变量一起接入，并拆分原有长函数；隔离数据与负例测试另占较大部分。拆成并行实现会使中间版本缺少一致的自动刷新和校验。
+- 结果为实现与合成测试候选；未部署、未做真实数据或业务验收。本地运行库及生产环境迁移仍需另行授权；首次入档表没有建立时间的历史限制仍在。
