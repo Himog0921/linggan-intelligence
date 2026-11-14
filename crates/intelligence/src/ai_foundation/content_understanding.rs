@@ -3,6 +3,7 @@ pub(crate) use coverage::scope_coverage;
 mod deep;
 mod deep_grounding;
 pub(crate) mod generate_deep;
+mod offline_recovery;
 mod source;
 use super::{
     TaskKey, admission,
@@ -14,6 +15,7 @@ use crate::content_understanding::{self as contract, METHOD};
 pub use deep::{DeepReceipt, PublishDeep, publish_deep};
 pub use generate_deep::{GenerateDeep, generate_deep};
 use linggan_storage_postgres::Database;
+pub use offline_recovery::{RecoveryReceipt, recover_saved_replies};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 pub(crate) use source::{Packet, frozen_in, images_in};
@@ -126,6 +128,18 @@ pub async fn preview(db: &Database, domain: Uuid, work: Uuid) -> Result<Value, F
     tx.commit().await?;
     Ok(result)
 }
+async fn lock_work_snapshot(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    material_identity: &str,
+) -> Result<(), FoundationError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,196))")
+        .bind(format!("{work}:{material_identity}:{METHOD}"))
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
+}
+
 pub async fn start(db: &Database, r: &Start) -> Result<Receipt, FoundationError> {
     if r.domain_ref.is_nil() || r.work_ref.is_nil() || r.command_ref.is_nil() || r.task_revision < 0
     {
@@ -155,14 +169,13 @@ pub async fn start(db: &Database, r: &Start) -> Result<Receipt, FoundationError>
             "materials_not_ready".into(),
         ]));
     }
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,196))")
-        .bind(format!(
-            "{}:{}:{}",
-            r.work_ref, p.snapshot.material_snapshot_identity, METHOD
-        ))
-        .execute(&mut *c.tx)
-        .await?;
-    let existing = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref) LEFT JOIN linggan_content_understanding_result result USING(request_ref) WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3 AND (c.state IN ('pending','running') OR result.result IS NOT NULL) ORDER BY r.created_at DESC,r.request_ref DESC LIMIT 1")
+    lock_work_snapshot(
+        &mut c.tx,
+        r.work_ref,
+        &p.snapshot.material_snapshot_identity,
+    )
+    .await?;
+    let existing = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref) LEFT JOIN linggan_content_understanding_saved_core result USING(request_ref) WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3 AND (c.state IN ('pending','running') OR result.result IS NOT NULL) ORDER BY r.created_at DESC,r.request_ref DESC LIMIT 1")
         .bind(r.work_ref).bind(&p.snapshot.material_snapshot_identity).bind(METHOD).fetch_optional(&mut *c.tx).await?;
     if let Some(existing) = existing {
         return c
@@ -223,10 +236,14 @@ pub async fn latest(
         .await?;
     let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut tx, as_of).await?;
     let p = source::load(&mut tx, domain, work, &cutoff).await?;
-    let row = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,c.state,c.failure_code,result.result,
+    let row = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,
+        CASE WHEN result.offline_recovery THEN 'succeeded' ELSE c.state END AS state,
+        CASE WHEN result.offline_recovery THEN NULL ELSE c.failure_code END AS failure_code,
+        result.result,COALESCE(result.offline_recovery,false) AS offline_recovery,
         d.analysis_ref AS deep_ref,d.method_version AS deep_method,d.findings,d.question
         FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
-        LEFT JOIN linggan_content_understanding_result result USING(request_ref)
+        LEFT JOIN linggan_content_understanding_saved_core result ON result.request_ref=r.request_ref
+          AND (NOT result.offline_recovery OR result.created_at<=$5::timestamptz)
         LEFT JOIN LATERAL (
           SELECT analysis_ref,method_version,findings,question FROM linggan_content_understanding_deep
           WHERE core_ref=result.request_ref AND domain_ref=$4 AND created_at<=$5::timestamptz
@@ -244,6 +261,9 @@ pub async fn latest(
                 "itemRef":r.get::<Uuid,_>("item_ref"),"state":r.get::<String,_>("state"),
                 "failureCode":r.get::<Option<String>,_>("failure_code"),"result":result
             });
+            if r.get::<bool, _>("offline_recovery") {
+                analysis["recoveredFromSavedReply"] = json!(true);
+            }
             if let Some(deep_ref) = r.get::<Option<Uuid>, _>("deep_ref") {
                 analysis["result"]["card"]["deep"] = json!({
                     "analysisRef":deep_ref,"methodVersion":r.get::<String,_>("deep_method"),
@@ -284,7 +304,7 @@ pub(crate) async fn core_cards_in(
     work: Uuid,
     cutoff: &str,
 ) -> Result<Vec<Value>, FoundationError> {
-    let rows = sqlx::query("SELECT result->'card' AS card,material_snapshot_identity FROM linggan_content_understanding_result WHERE work_ref=$1 AND method_version=$2 AND result IS NOT NULL AND created_at<=$3::timestamptz ORDER BY created_at DESC,request_ref DESC")
+    let rows = sqlx::query("SELECT result->'card' AS card,material_snapshot_identity FROM linggan_content_understanding_saved_core WHERE work_ref=$1 AND method_version=$2 AND result IS NOT NULL AND created_at<=$3::timestamptz ORDER BY created_at DESC,request_ref DESC")
         .bind(work).bind(METHOD).bind(cutoff).fetch_all(&mut **tx).await?;
     if rows.is_empty() {
         return Ok(vec![]);

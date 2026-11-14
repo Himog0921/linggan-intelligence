@@ -876,3 +876,100 @@ fn response_schema_explains_closed_json_literal_quotes_and_image_local_evidence(
         assert!(evidence.contains(rule));
     }
 }
+
+#[test]
+fn missing_transcript_line_break_restores_the_exact_source_slice_and_anchor() {
+    let (mut draft, mut snapshot, generation) = text_only();
+    let source = &mut snapshot.texts[0];
+    source.kind = "transcript".into();
+    source.text = "前🙂，合成材料，\n继续复核。".into();
+    source.structure = json!({"time":{"startMs":12000,"endMs":18000}});
+    snapshot.included_kinds = vec!["transcript".into()];
+    draft["evidenceCandidates"]["text"][0]["quote"] = json!("合成材料，继续复核");
+
+    let result = accept(draft, &snapshot, &generation).unwrap();
+    let evidence = &result["card"]["evidence"][0];
+    let anchored = snapshot
+        .texts
+        .iter()
+        .find(|text| text.citation_id == evidence["inputCitationId"].as_str().unwrap())
+        .unwrap();
+    assert_eq!(evidence["sourceRef"], anchored.source_ref.to_string());
+    assert_eq!(evidence["sourceVersion"], anchored.source_version);
+    assert_eq!(evidence["start"], 10);
+    assert_eq!(evidence["end"], 20);
+    assert_eq!(evidence["quote"], "合成材料，\n继续复核");
+    assert_eq!(anchored.structure["time"]["startMs"], 12000);
+}
+
+#[test]
+fn transcript_wrap_repair_cannot_change_punctuation_or_guess_a_segment() {
+    let quote = "合成材料，继续复核";
+    for (kind, cited_text) in [
+        ("transcript", "合成材料,\n继续复核"),
+        ("transcript", "合成材料， 继续复核"),
+        ("transcript", "合成材料，\n继续复核，合成材料，\n继续复核"),
+        ("transcript", "合成材料，\n继续复核。另：合成材料，继续复核"),
+        ("transcript", "合成材料，\n\n继续复核"),
+        ("transcript", "其他片段"),
+        ("frame_text", "合成材料，\n继续复核"),
+    ] {
+        let (mut draft, mut snapshot, generation) = text_only();
+        snapshot.texts[0].kind = kind.into();
+        snapshot.texts[0].text = cited_text.into();
+        snapshot.texts[0].structure = json!({"time":{"startMs":1000,"endMs":2000}});
+        let mut other = snapshot.texts[0].clone();
+        other.citation_id = "text-2".into();
+        other.source_ref = Uuid::from_u128(9);
+        other.text = quote.into();
+        other.structure = json!({"time":{"startMs":9000,"endMs":10000}});
+        snapshot.texts.push(other);
+        snapshot.included_kinds = vec![kind.into()];
+        draft["evidenceCandidates"]["text"][0]["quote"] = json!(quote);
+        assert_eq!(
+            accept(draft, &snapshot, &generation).unwrap_err(),
+            "invalid_text_quote",
+            "{kind}: {cited_text}",
+        );
+    }
+}
+
+#[test]
+fn draft_metadata_and_unsupported_optional_label_recover_without_changing_core() {
+    let (draft, snapshot, generation) = fixture();
+    let expected = accept(draft.clone(), &snapshot, &generation).unwrap();
+    let mut draft = draft;
+    draft["type"] = json!("json_object");
+    draft["core"]["knowledgeUnitsNote"] = Value::Null;
+    draft["core"]["knowledgeUnits_note"] = Value::Null;
+    draft["evidenceCandidates"]["vision"][0]["speakerRole"] = json!("unconfirmed");
+    let mut extra_label = draft["core"]["candidateLabels"][0].clone();
+    extra_label["dimension"] = json!("author_position");
+    let labels = draft["core"]["candidateLabels"].as_array_mut().unwrap();
+    labels.push(extra_label);
+    assert_eq!(accept(draft, &snapshot, &generation).unwrap(), expected);
+}
+
+#[test]
+fn draft_recovery_requires_empty_metadata_and_valid_label_references() {
+    let (mut draft, snapshot, generation) = fixture();
+    draft["core"]["candidateLabels"][0]["dimension"] = json!("author_position");
+    draft["core"]["candidateLabels"][0]["unitIds"] = json!(["missing"]);
+    assert_eq!(
+        accept(draft, &snapshot, &generation).unwrap_err(),
+        "invalid_reference"
+    );
+
+    let (mut draft, snapshot, generation) = fixture();
+    draft["core"]["knowledgeUnits_note"] = json!("额外主张");
+    assert_eq!(
+        accept(draft, &snapshot, &generation).unwrap_err(),
+        "invalid_draft"
+    );
+    let (mut draft, snapshot, generation) = fixture();
+    draft["type"] = json!("unsupported");
+    assert_eq!(
+        accept(draft, &snapshot, &generation).unwrap_err(),
+        "invalid_draft"
+    );
+}
