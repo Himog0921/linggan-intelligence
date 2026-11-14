@@ -964,20 +964,24 @@ interface OpportunityCard {
   as_of: string;                       // ISO-8601 UTC
   versions: { taxonomy: number; metric_def: number; judgment_prompt: string | null; model: string | null };
   demand: {
-    mentioners_total: number;
-    evidence_tier: "candidate" | "established" | "significant";
-    current: { period_start: string; k: number; n: number; rate_per_1k: number | null; ci_per_1k: Interval1k | null };
-    baseline: { k: number; n: number; rate_per_1k: number | null };
-    series: Array<{ period_start: string; k: number; n: number; rate_per_1k: number | null }>; // 长度 = series_periods
+    groups: Array<{
+      protocol_version: number | null; // NULL 为未知协议，不跨组比较（D-043）
+      mentioners_total: number;
+      evidence_tier: "candidate" | "established" | "significant";
+      current: { period_start: string; k: number; n: number; rate_per_1k: number | null; ci_per_1k: Interval1k | null };
+      baseline: { k: number; n: number; rate_per_1k: number | null };
+      series: Array<{ period_start: string; k: number; n: number; rate_per_1k: number | null }>; // 长度 = series_periods
+      flags: Array<"insufficient_sample" | "no_baseline">;
+    }>;
     sample_voices: Array<VoiceRef>;   // 最多 3 条，按点赞降序，排除墓碑后补位
-    user_methods: Array<{ label: string; mentioners: number }>;  // 来自现有“办法与经历”，没有就为空数组
+    user_methods: { status: "unavailable"; reason: "problem_method_association_unavailable" } | { status: "available"; items: Array<{ label: string; mentioners: number }> }; // D-044
     importance: { status: "not_calibrated" } | { status: "calibrated"; survey_id: string; importance: number; satisfaction: number; opportunity_score: number };
   };
   supply: {
     state: "not_evaluated" | "awaiting_understanding" | "insufficient_coverage" | "covered" | "suspected_gap";
     judgment_status: "verified" | "ai_suggested" | null;
     coverage: { found: number; collected: number; ratio: number } | null;
-    counts: { answers: number; mentions: number; none: number; unjudged: number };
+    counts: { answers: number; mentions: number; none: number; unjudged: number } | null; // 未评估为 null（D-045）
     works: Array<{ work_id: string; title: string | null; creator_id: string; likes: number | null; label: "answers" | "mentions" | "none"; source: "human" | "ai"; tombstone: boolean }>;
   };
   channel: {
@@ -1004,7 +1008,7 @@ interface VoiceRef {
 
 interface CreatorDensity {
   creator_id: string;
-  name: string;
+  name: string | null;             // 未知为 null，界面显示“姓名未知”（D-046）
   followers: number | null;
   k: number;
   n: number;
@@ -1016,9 +1020,10 @@ interface CreatorDensity {
 
 - 响应中不得出现评论者 ID、昵称或哈希（R9）。
 - 渠道栏按 `channel.groups` 标明采集协议；`protocol_version = null` 明确显示为未知协议，各组各自排序，不跨组比较（D-042）。
+- 需求栏按 `demand.groups` 分协议展示，每组使用自己的样本与基线标记；未知协议单独成组，不跨组比较（D-043）。问题级办法在归属不可证明时明确返回 `unavailable` 和原因，不推断共现关系（D-044）。
 - `flags` 规则：
   - `not_calibrated`：没有导入问卷时**必须**出现；
-  - `no_baseline`：`baseline_n < min_n_period` 时出现；
+  - `no_baseline`：对应协议组的基线不足时出现在该组的 `flags`；不得用其他协议补足（D-043）；
   - `collection_volume_shift`：本周期与上周期的领域有效评论数变化超过 `collection_volume_shift_alert` 时出现；
   - `stale_read_model`：读模型的 `as_of` 早于最新事实的 `first_observed_at` 超过 24 小时时出现；
   - `period_anchor_missing`：因 `period_anchor_missing` 被排除的评论占候选评论的比例超过 `max_unanchored_share` 时出现；
