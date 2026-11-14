@@ -104,6 +104,12 @@ docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 export OPPORTUNITY_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-intelligence --test comment_study_catalog_read_postgres --locked \
+    -- --ignored --exact catalog_likes_only_use_projections_available_at_the_requested_time --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-intelligence --test comment_study_catalog_read_postgres --locked \
+    -- --ignored --exact catalog_and_study_sources_share_the_author_known_at_the_requested_time --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_mentions_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_asof_postgres --locked -- --ignored --test-threads=1

@@ -1,4 +1,6 @@
 //! T1.2 standard dataset, protocol separation, and incremental/full equivalence.
+#[path = "opportunity_metrics_postgres/card.rs"]
+mod card;
 #[path = "opportunity_metrics_postgres/creator_density.rs"]
 mod creator_density;
 #[path = "../../../apps/api/src/local_web/full_schema_fixture.rs"]
@@ -504,7 +506,12 @@ async fn shadow_versions_avoid_existing_numbers_and_follow_current_changes() {
     let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
     let migration =
         include_str!("../../../database/migrations/0213_opportunity_problem_metric_period.sql");
-    let before = full_schema_fixture::FULL_MIGRATIONS.replace(migration, "");
+    let before = full_schema_fixture::FULL_MIGRATIONS
+        .replace(migration, "")
+        .replace(
+            include_str!("../../../database/migrations/0216_opportunity_card_read_model.sql"),
+            "",
+        );
     let db = isolated_proof_schema(&url, "opportunity_t12_shadow_versions", &before)
         .await
         .unwrap();

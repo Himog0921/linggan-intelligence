@@ -105,7 +105,7 @@ WITH latest AS MATERIALIZED (
     JOIN linggan_material_comment raw ON raw.material_ref = latest.material_ref
     LEFT JOIN linggan_comment_clean_cache cache
       ON cache.source_ref = latest.material_ref AND cache.cleaner_version = $3
-    LEFT JOIN linggan_material_content_author author ON author.content_public_ref = latest.content_public_ref
+    LEFT JOIN LATERAL linggan_material_content_author_at(latest.content_public_ref, $2::timestamptz) author ON true
     LEFT JOIN last_attempt ON last_attempt.content_public_ref = latest.content_public_ref
       AND last_attempt.comment_external_id = latest.comment_external_id
     LEFT JOIN success ON success.content_public_ref = latest.content_public_ref

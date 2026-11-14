@@ -1491,7 +1491,7 @@ interface CreatorDensity {
 
 - 参数使用测试参数集（§6.3）。
 - 领域 `D1`，`period_tz = Asia/Shanghai`，`period_basis = work_published_cohort`。
-- 当前周期 W0 = 2026-11-02（周一）。前四个周期为 W-1 至 W-4。
+- 样本周期 W0 = 2026-11-02（周一），前四个样本周期为 W-1 至 W-4。按下述 `as_of` 的上海日历周，当前周从 2026-11-09 开始，W0 是上周（D-048）。
 - `as_of = 2026-11-10T00:00:00Z`。
 - 测试数据写入隔离数据库中的现有表（作品、详情、作者归属、领域用途、评论、first_admission、package、restriction）和 0177 的问题表，通过 `scripts/test-opportunity-postgres.sh` 构建。
 - 除特别说明外：

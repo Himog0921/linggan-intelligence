@@ -2,8 +2,9 @@
 //! A failed projection is retried by the existing automation tick and cannot roll back publication.
 
 use crate::opportunity::{
-    CommenterDigest, RebuildMode, current_as_of, load_current_metric_definition,
-    rebuild_problem_metrics, sync_comment_mentions_for_domain,
+    CardRebuildMode, CommenterDigest, RebuildMode, current_as_of, enqueue_source_events,
+    load_current_metric_definition, rebuild_opportunity_cards, rebuild_problem_metrics,
+    sync_comment_mentions_for_domain,
 };
 use linggan_storage_postgres::Database;
 use std::sync::{
@@ -46,7 +47,18 @@ impl OpportunitySync {
     pub(super) async fn run_if_pending(&self, database: &Database) {
         let requested = self.pending.swap(false, Ordering::AcqRel);
         let due = Instant::now() >= *self.next_metrics.lock().await;
-        if !requested && !due {
+        if let Err(error) = enqueue_source_events(database).await {
+            self.defer(&error);
+            return;
+        }
+        let card_domains = match self.due_card_domains(database).await {
+            Ok(domains) => domains,
+            Err(error) => {
+                self.defer(&error);
+                return;
+            }
+        };
+        if !requested && !due && card_domains.is_empty() {
             return;
         }
         let digest = match CommenterDigest::load() {
@@ -56,10 +68,51 @@ impl OpportunitySync {
                 return;
             }
         };
-        match self.refresh_metrics(database, &digest).await {
+        let result = async {
+            let mut failures = Vec::new();
+            if requested || due {
+                if let Err(error) = self.refresh_metrics(database, &digest).await {
+                    failures.push(error);
+                }
+            }
+            for domain in card_domains {
+                match rebuild_opportunity_cards(database, domain, &digest, CardRebuildMode::Due)
+                    .await
+                {
+                    Ok(report) => eprintln!(
+                        "opportunity card refresh: domain={domain} {}",
+                        serde_json::to_string(&report).map_err(|error| error.to_string())?
+                    ),
+                    Err(error) => {
+                        failures.push(format!("domain={domain} {error}"));
+                        if !self.failure_reported.load(Ordering::Acquire) {
+                            eprintln!("opportunity card refresh deferred: domain={domain} {error}");
+                        }
+                    }
+                }
+            }
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("; "))
+            }
+        }
+        .await;
+        match result {
             Ok(()) => self.failure_reported.store(false, Ordering::Release),
             Err(error) => self.defer(&error),
         }
+    }
+
+    async fn due_card_domains(&self, database: &Database) -> Result<Vec<Uuid>, String> {
+        sqlx::query_scalar("SELECT DISTINCT problem.domain_ref FROM linggan_opportunity_card_change change \
+            JOIN linggan_opportunity_problem problem USING(problem_ref) \
+            CROSS JOIN linggan_opportunity_metric_definition_current current \
+            JOIN linggan_opportunity_metric_definition definition ON definition.version=current.version \
+            WHERE current.singleton AND change.changed_at+make_interval(secs=>\
+              (definition.params->>'card_rebuild_debounce_seconds')::double precision)<=clock_timestamp() \
+            ORDER BY problem.domain_ref")
+            .fetch_all(database.pool()).await.map_err(|error| error.to_string())
     }
 
     async fn sync_mentions(

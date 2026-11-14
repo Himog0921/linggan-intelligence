@@ -1,0 +1,280 @@
+{
+  "asOf": "2026-11-10T00:00:00.000000Z",
+  "channel": {
+    "groups": [
+      {
+        "insufficient": [
+          {
+            "ciPer1k": {
+              "high": 198.64233524310546,
+              "low": 25.836025774588197
+            },
+            "creatorId": "creator-C2",
+            "followers": null,
+            "k": 3,
+            "n": 40,
+            "name": null,
+            "observed": false,
+            "ratePer1k": 75.0
+          }
+        ],
+        "protocolVersion": null,
+        "ranked": [
+          {
+            "ciPer1k": {
+              "high": 159.25357313197168,
+              "low": 26.228698724506206
+            },
+            "creatorId": "creator-C1",
+            "followers": null,
+            "k": 4,
+            "n": 60,
+            "name": null,
+            "observed": false,
+            "ratePer1k": 66.66666666666667
+          },
+          {
+            "ciPer1k": {
+              "high": 9.754211345121297,
+              "low": 1.1342677400658034
+            },
+            "creatorId": "author-work-0",
+            "followers": null,
+            "k": 3,
+            "n": 900,
+            "name": null,
+            "observed": false,
+            "ratePer1k": 3.3333333333333335
+          },
+          {
+            "ciPer1k": {
+              "high": 4.705229990133217,
+              "low": 0.14711894493048142
+            },
+            "creatorId": "author-work-1",
+            "followers": null,
+            "k": 1,
+            "n": 1200,
+            "name": null,
+            "observed": false,
+            "ratePer1k": 0.8333333333333334
+          },
+          {
+            "ciPer1k": {
+              "high": 4.705229990133217,
+              "low": 0.14711894493048142
+            },
+            "creatorId": "author-work-2",
+            "followers": null,
+            "k": 1,
+            "n": 1200,
+            "name": null,
+            "observed": false,
+            "ratePer1k": 0.8333333333333334
+          },
+          {
+            "ciPer1k": {
+              "high": 4.705229990133217,
+              "low": 0.14711894493048142
+            },
+            "creatorId": "author-work-3",
+            "followers": null,
+            "k": 1,
+            "n": 1200,
+            "name": null,
+            "observed": false,
+            "ratePer1k": 0.8333333333333334
+          },
+          {
+            "ciPer1k": {
+              "high": 4.705229990133217,
+              "low": 0.14711894493048142
+            },
+            "creatorId": "author-work-4",
+            "followers": null,
+            "k": 1,
+            "n": 1200,
+            "name": null,
+            "observed": false,
+            "ratePer1k": 0.8333333333333334
+          }
+        ]
+      }
+    ],
+    "minN": 50,
+    "windowDays": 90
+  },
+  "demand": {
+    "groups": [
+      {
+        "baseline": {
+          "k": 13,
+          "n": 4600,
+          "ratePer1k": 2.8260869565217392
+        },
+        "current": {
+          "ciPer1k": null,
+          "k": 0,
+          "n": 0,
+          "periodStart": "2026-11-09",
+          "ratePer1k": null
+        },
+        "evidenceTier": "established",
+        "flags": [
+          "insufficient_sample"
+        ],
+        "mentionersTotal": 14,
+        "protocolVersion": null,
+        "series": [
+          {
+            "k": 0,
+            "n": 0,
+            "periodStart": "2026-09-21",
+            "ratePer1k": null
+          },
+          {
+            "k": 0,
+            "n": 0,
+            "periodStart": "2026-09-28",
+            "ratePer1k": null
+          },
+          {
+            "k": 1,
+            "n": 1200,
+            "periodStart": "2026-10-05",
+            "ratePer1k": 0.8333333333333334
+          },
+          {
+            "k": 1,
+            "n": 1200,
+            "periodStart": "2026-10-12",
+            "ratePer1k": 0.8333333333333334
+          },
+          {
+            "k": 1,
+            "n": 1200,
+            "periodStart": "2026-10-19",
+            "ratePer1k": 0.8333333333333334
+          },
+          {
+            "k": 1,
+            "n": 1200,
+            "periodStart": "2026-10-26",
+            "ratePer1k": 0.8333333333333334
+          },
+          {
+            "k": 10,
+            "n": 1000,
+            "periodStart": "2026-11-02",
+            "ratePer1k": 10.0
+          },
+          {
+            "k": 0,
+            "n": 0,
+            "periodStart": "2026-11-09",
+            "ratePer1k": null
+          }
+        ]
+      }
+    ],
+    "importance": {
+      "status": "not_calibrated"
+    },
+    "sampleVoices": [
+      {
+        "commentRef": {
+          "commentExternalId": "c-work-0-1",
+          "contentRef": "4b03a195-865e-3515-efce-21b04fa8dc5e"
+        },
+        "likes": 40,
+        "text": "SYNTHETIC 原声 c-work-0-1",
+        "tombstone": false,
+        "workId": "4b03a195-865e-3515-efce-21b04fa8dc5e"
+      },
+      {
+        "commentRef": {
+          "commentExternalId": "c-work-0-2",
+          "contentRef": "4b03a195-865e-3515-efce-21b04fa8dc5e"
+        },
+        "likes": 30,
+        "text": "SYNTHETIC 原声 c-work-0-2",
+        "tombstone": false,
+        "workId": "4b03a195-865e-3515-efce-21b04fa8dc5e"
+      },
+      {
+        "commentRef": {
+          "commentExternalId": "c-work-0-3",
+          "contentRef": "4b03a195-865e-3515-efce-21b04fa8dc5e"
+        },
+        "likes": 20,
+        "text": "SYNTHETIC 原声 c-work-0-3",
+        "tombstone": false,
+        "workId": "4b03a195-865e-3515-efce-21b04fa8dc5e"
+      }
+    ],
+    "userMethods": {
+      "reason": "problem_method_association_unavailable",
+      "status": "unavailable"
+    }
+  },
+  "exclusions": [
+    {
+      "comments": 0,
+      "reason": "comment_time_unknown"
+    },
+    {
+      "comments": 1,
+      "reason": "creator_self"
+    },
+    {
+      "comments": 3,
+      "reason": "not_in_domain_primary"
+    },
+    {
+      "comments": 0,
+      "reason": "observed_at_unparseable"
+    },
+    {
+      "comments": 4,
+      "reason": "period_anchor_missing"
+    },
+    {
+      "comments": 2,
+      "reason": "restricted"
+    },
+    {
+      "comments": 5,
+      "reason": "work_author_unknown"
+    }
+  ],
+  "flags": [
+    "not_calibrated",
+    "collection_below_target",
+    "collection_volume_shift",
+    "engagement_reference_missing"
+  ],
+  "limitations": [
+    "提及率按作品发布周统计，表示该周发布的作品下的评论中，提及该问题的比例；近期作品积累评论的时间较短，当周数字偏少。",
+    "未知协议：排序和单次上限未记录。"
+  ],
+  "problem": {
+    "id": "f0312a02-48ed-7114-02aa-1822e831200f",
+    "level": 1,
+    "parentId": null,
+    "redirectedFrom": null,
+    "statement": "synthetic P1"
+  },
+  "supply": {
+    "counts": null,
+    "coverage": null,
+    "judgmentStatus": null,
+    "state": "not_evaluated",
+    "works": []
+  },
+  "versions": {
+    "judgmentPrompt": null,
+    "metricDef": 1,
+    "model": null,
+    "taxonomy": 1
+  }
+}

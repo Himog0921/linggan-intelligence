@@ -126,6 +126,181 @@ async fn catalog_paginates_more_than_100_comments_without_a_run_and_searches_lit
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn catalog_likes_only_use_projections_available_at_the_requested_time() {
+    let db = database("catalog_like_projection_time").await;
+    detail_with_author(&db, "catalog-likes", "SYNTHETIC 点赞", Some("creator")).await;
+    let first = add_comment(
+        &db,
+        "catalog-likes",
+        "same",
+        "SYNTHETIC 评论内容",
+        Some("reader"),
+    )
+    .await;
+    let second = comment_with_author(
+        &db,
+        "catalog-likes",
+        "same",
+        "SYNTHETIC 评论内容",
+        Some("reader"),
+        "2026-09-22T08:00:00Z",
+    )
+    .await;
+    cache(&db).await;
+
+    sqlx::query("ALTER TABLE linggan_material_comment_engagement DISABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    for (source, likes) in [(first, 11_i64), (second, 42_i64)] {
+        sqlx::query("INSERT INTO linggan_material_comment_engagement(material_ref,like_count,like_count_state,parser_version,created_at) VALUES($1,$2,'KNOWN','comment-like.v1',clock_timestamp()+interval '1 day') ON CONFLICT(material_ref) DO UPDATE SET like_count=$2,like_count_state='KNOWN',created_at=clock_timestamp()+interval '1 day'")
+            .bind(source).bind(likes).execute(db.pool()).await.unwrap();
+    }
+    sqlx::query("ALTER TABLE linggan_material_comment_engagement ENABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let unknown = read_comment_catalog(&db, &query()).await.unwrap();
+    assert!(
+        unknown["items"][0]["likeCount"].is_null(),
+        "later projections must not be visible"
+    );
+
+    sqlx::query("ALTER TABLE linggan_material_comment_engagement DISABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE linggan_material_comment_engagement SET created_at=clock_timestamp()-interval '1 day' WHERE material_ref=$1")
+        .bind(first).execute(db.pool()).await.unwrap();
+    sqlx::query("ALTER TABLE linggan_material_comment_engagement ENABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let older_known = read_comment_catalog(&db, &query()).await.unwrap();
+    assert_eq!(older_known["items"][0]["likeCount"], 11);
+
+    sqlx::query("ALTER TABLE linggan_material_comment_engagement DISABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE linggan_material_comment_engagement SET created_at=clock_timestamp()-interval '1 day' WHERE material_ref=$1")
+        .bind(second).execute(db.pool()).await.unwrap();
+    sqlx::query("ALTER TABLE linggan_material_comment_engagement ENABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let newest_known = read_comment_catalog(&db, &query()).await.unwrap();
+    assert_eq!(newest_known["items"][0]["likeCount"], 42);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn catalog_and_study_sources_share_the_author_known_at_the_requested_time() {
+    let db = database("catalog_author_projection_time").await;
+    detail_with_author(&db, "catalog-author", "SYNTHETIC 作者时点", Some("creator")).await;
+    let source_ref = add_comment(
+        &db,
+        "catalog-author",
+        "same",
+        "SYNTHETIC 可研究评论",
+        Some("reader"),
+    )
+    .await;
+    cache(&db).await;
+    detail_with_author(
+        &db,
+        "catalog-author",
+        "SYNTHETIC 新作者观察",
+        Some("reader"),
+    )
+    .await;
+    sqlx::raw_sql("ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; \
+        UPDATE linggan_material_content_detail SET created_at=clock_timestamp()+interval '1 day', \
+          observed_at=to_char((clock_timestamp()+interval '1 hour') AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') \
+        WHERE author_external_id='reader'; \
+        ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER")
+        .execute(db.pool()).await.unwrap();
+    let work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+        WHERE platform='xhs' AND content_external_id='catalog-author'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let now: String = sqlx::query_scalar(
+        "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', \
+        'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let later: String = sqlx::query_scalar(
+        "SELECT to_char((clock_timestamp()+interval '2 days') AT TIME ZONE 'UTC', \
+        'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+
+    let catalog = read_comment_catalog(&db, &query()).await.unwrap();
+    assert_eq!(catalog["items"][0]["voiceRole"], "reader");
+    let candidates = eligible_sources(&db, query().domain, &now, 100)
+        .await
+        .unwrap();
+    assert_eq!(candidates.len(), 1);
+    let mut tx = db.pool().begin().await.unwrap();
+    let role = linggan_intelligence::comment_study_source::StudySourceRole::Primary;
+    let before = linggan_intelligence::comment_study_source::selected_source_in(
+        &mut tx,
+        query().domain,
+        work,
+        source_ref,
+        role,
+        &now,
+    )
+    .await
+    .unwrap();
+    assert!(before.is_some());
+    let after = linggan_intelligence::comment_study_source::selected_source_in(
+        &mut tx,
+        query().domain,
+        work,
+        source_ref,
+        role,
+        &later,
+    )
+    .await
+    .unwrap();
+    assert!(
+        after.is_none(),
+        "the same source becomes a creator self-comment after the later observation"
+    );
+    tx.rollback().await.unwrap();
+    assert!(
+        eligible_sources(&db, query().domain, &later, 100)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    sqlx::raw_sql(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+        AS $$ SELECT clock_timestamp()+interval '2 days' $$",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let mut creator = query();
+    creator.voice_role = CatalogVoiceRole::Creator;
+    let catalog_after = read_comment_catalog(&db, &creator).await.unwrap();
+    assert_eq!(catalog_after["items"][0]["voiceRole"], "creator");
+    assert_eq!(
+        catalog_after["items"][0]["studyEligibility"]["eligible"],
+        false
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn catalog_distinguishes_visibility_eligibility_and_pending_index() {
     let db = database("catalog_read_voices").await;
     detail_with_author(&db, "catalog-voices", "SYNTHETIC 声音角色", Some("creator")).await;

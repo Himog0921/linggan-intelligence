@@ -44,6 +44,11 @@ pub(super) fn facts_sql() -> String {
     )
 }
 
+// Parameter positions match the catalog's domain/as-of/optional-work/optional-comment inputs.
+pub(crate) fn like_heads_sql() -> &'static str {
+    include_str!("comment_study_catalog/like_heads.sql")
+}
+
 const MAX_REFRESH_LIMIT: i64 = 200;
 const MAX_QUERY_CHARS: usize = 200;
 

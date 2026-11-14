@@ -401,3 +401,11 @@
 - Q-27 的共享点赞读取已增加点赞投影 `created_at <= as_of`，隔离评论目录测试 `catalog_likes_only_use_projections_available_at_the_requested_time` 输出 `1 passed; 0 failed`；既有机会卡 PostgreSQL 证明的 12、6、3、4、1 与五种后台状态各 1 项在本轮早期回归中通过，隔离资源清理已确认。
 - 新增卡片隔离测试暴露 Q-28：固定 `as_of` 11 月 10 日对应上海日历周 11 月 9 日，手册却称 11 月 2 日为当前周。测试本周实际 `k=0,n=0` 与样本当前周期望 `k=10,n=1000` 冲突；同一轮已有 11 月 2 日标准数值检查保持通过。按 §3.3、§3.6 停止 T1.4 并请求裁定；未改原标准答案。
 - 并行主线已前进至 `954bcaa9`（PR #584，仅 `content_understanding` 两个文件），没有新增 0216 编号；尚未集成到本工作树。卡片代码和 0216 仍为未提交、未通过完整测试的中间改动，未应用到本地运行库或生产环境。
+- 负责人答复 Q-28 采用 A（D-048）：真实上海日历周为准，11 月 2 日的 W0 标准值作为上周保留，继续 T1.4。
+- 已将 `954bcaa9` 合入 T1.4 工作分支；合入文件与工作树内改动无重叠，迁移编号 0216 未冲突。
+- 隔离回归发现派生表被独占锁定时，同步触发器会使原评论写入等待；已终止本次自有测试进程并确认临时数据库、容器和卷清理。改为源事务仅追加变更事件，由既有后台线程另行归并；修复后的锁等待回归仍待执行。
+- 修复后的锁等待专项：`bash /private/tmp/opportunity-t14-lock-proof.sh` 输出 `test result: ok. 1 passed; 0 failed`、`Locked downstream source-write proof passed`，并确认临时资源清理。另一个领域故障时健康领域仍出卡的专项输出 `1 passed; 0 failed`。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash scripts/test-opportunity-postgres.sh` 在协议窗口边界修正之前完成完整隔离回归，各组 1、1、12、6、3、6、1 项及五种执行器状态各 1 项通过，输出 `Opportunity PostgreSQL proof passed` 与隔离资源清理确认。
+- 后续协议窗口边界和共享点赞参考已用隔离合成测试复验：`bash /private/tmp/opportunity-t14-targeted-proof.sh` 输出评论研究 `1 passed`、卡片 `2 passed`，含协议分组、窗口外旧协议、未来点赞投影、两种并发撤回顺序和 P1 JSON 快照。最终候选仍需完整链路复验与独立审阅。
+- 阶段 1 未实现供给判定、HTTP 只读接口或页面；`stale_read_model` 的读取时动态判断属于后续 T1.5，不能把当前生成时刻的快照当作后续读取时仍新鲜。
+- 源变更进入持久事件队列；开关关闭时后台不消费，重新启用后再归并。真实运行规模、长期关闭期间的队列容量尚未验证；本地运行库和生产库迁移仍未获授权。

@@ -46,5 +46,5 @@ SELECT page.*, raw.body_text AS body_text,
        ) AS source_restricted
 FROM page
 JOIN linggan_material_comment raw ON raw.material_ref = page.material_ref
-LEFT JOIN linggan_material_content_author author ON author.content_public_ref = page.content_public_ref
+LEFT JOIN LATERAL linggan_material_content_author_at(page.content_public_ref, $2::timestamptz) author ON true
 ORDER BY page.rank, page.content_public_ref;

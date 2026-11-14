@@ -713,6 +713,25 @@ async fn comment_uses_target_dossier_and_both_permissions() {
             .await
             .unwrap();
             assert_eq!(fault_rows, 0, "the faulty domain must not commit metrics");
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    let healthy_cards: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_opportunity_card card \
+                        JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE problem.domain_ref=$1")
+                        .bind(dossier::DOMAIN).fetch_one(db.pool()).await.unwrap();
+                    if healthy_cards > 0 { break; }
+                    assert!(!running.is_finished(), "executor stopped before the healthy card refresh");
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }).await.expect("a failing domain must not block another domain's card refresh");
+            let fault_cards: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM linggan_opportunity_opportunity_card card \
+                JOIN linggan_opportunity_problem problem USING(problem_ref) \
+                WHERE problem.domain_ref='00000000-0000-4000-8000-000000000000'",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert_eq!(fault_cards, 0, "the faulty domain must not publish a card");
         }
     } else if lock_mode != "drain" {
         let mentions: i64 =
