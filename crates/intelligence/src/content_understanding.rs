@@ -305,6 +305,51 @@ fn read_draft(mut value: Value) -> Result<Draft, &'static str> {
     serde_json::from_value(value).map_err(|_| "invalid_draft")
 }
 
+fn transcript_line_break(text: &str) -> Option<&str> {
+    text.strip_prefix("\r\n")
+        .or_else(|| text.strip_prefix('\n'))
+}
+
+fn is_han(ch: char) -> bool {
+    matches!(ch, '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}')
+}
+
+// For a Chinese ASR line break already present on both sides, an extra comma
+// before the break can be a model formatting artifact. No other punctuation
+// or characters are removed and the caller stores the original source slice.
+fn transcript_layout_match<'a>(mut source: &'a str, quote: &str) -> Option<&'a str> {
+    let mut previous = None;
+    let mut chars = quote.chars().peekable();
+    while let Some(expected) = chars.next() {
+        if let Some(rest) = source.strip_prefix(expected) {
+            source = rest;
+            if matches!(expected, ',' | '，')
+                && previous.is_some_and(is_han)
+                && chars.peek().copied().is_some_and(is_han)
+                && let Some(rest) = transcript_line_break(source)
+            {
+                source = rest;
+            }
+        } else if matches!(expected, ',' | '，')
+            && previous.is_some_and(is_han)
+            && let Some(rest) = transcript_line_break(source)
+        {
+            let next = chars.next()?;
+            if next == '\r' && chars.next() != Some('\n') || !matches!(next, '\r' | '\n') {
+                return None;
+            }
+            if !chars.peek().copied().is_some_and(is_han) {
+                return None;
+            }
+            source = rest;
+        } else {
+            return None;
+        }
+        previous = Some(expected);
+    }
+    Some(source)
+}
+
 fn quote_in_source<'a>(
     source: &'a str,
     quote: &str,
@@ -316,20 +361,29 @@ fn quote_in_source<'a>(
         allow_transcript_wrap && !quote.contains(['\r', '\n']) && source.contains('\n');
     // Scan overlaps, and count both exact and wrap-equivalent matches.
     let first = quote.chars().next().ok_or("invalid_text_quote")?;
-    let mut candidates = source.match_indices(first).filter_map(|(byte, _)| {
-        let mut remaining = &source[byte..];
-        let mut after_comma = false;
-        for expected in quote.chars() {
-            if check_wrap && after_comma {
-                remaining = remaining
-                    .strip_prefix("\r\n")
-                    .or_else(|| remaining.strip_prefix('\n'))
-                    .unwrap_or(remaining);
+    let check_layout = allow_transcript_wrap && quote.contains('\n') && source.contains('\n');
+    let mut candidates = source.match_indices(first).flat_map(|(byte, _)| {
+        let tail = &source[byte..];
+        let strict = (|| {
+            let mut remaining = tail;
+            let mut after_comma = false;
+            for expected in quote.chars() {
+                if check_wrap && after_comma {
+                    remaining = transcript_line_break(remaining).unwrap_or(remaining);
+                }
+                remaining = remaining.strip_prefix(expected)?;
+                after_comma = matches!(expected, ',' | '，');
             }
-            remaining = remaining.strip_prefix(expected)?;
-            after_comma = matches!(expected, ',' | '，');
-        }
-        Some((byte, &source[byte..source.len() - remaining.len()]))
+            Some(remaining)
+        })();
+        let layout = check_layout
+            .then(|| transcript_layout_match(tail, quote))
+            .flatten()
+            .filter(|rest| strict.is_none_or(|other| other.len() != rest.len()));
+        [strict, layout]
+            .into_iter()
+            .flatten()
+            .map(move |rest| (byte, &source[byte..source.len() - rest.len()]))
     });
     let hit = candidates.next().ok_or("invalid_text_quote")?;
     if candidates.next().is_some() {
