@@ -60,9 +60,9 @@ async fn core_endpoint() -> (String, tokio::task::JoinHandle<()>) {
                 let image = &packet["material"]["images"][0];
                 json!({
                     "core":{"summary":{"text":"合成正文末尾保留","unitIds":["u1"]},"contentType":"practical_guide","mainTopicUnitId":"u1",
-                        "knowledgeUnits":[{"id":"u1","unitType":"discussion","statement":"正文末尾不能丢失。","assertionKind":"author_claim","speakerRole":"author","evidenceRefs":["e1"]}],"candidateLabels":[]},
-                    "imageContributions":[{"inputCitationId":image["citationId"],"status":"no_new_information","summary":"合成单像素图片没有新增信息。","unitIds":[],"evidenceRefs":["v1"]}],
-                    "evidenceCandidates":{"text":[{"id":"e1","inputCitationId":source["citationId"],"quote":"结尾不能丢失🙂"}],"vision":[{"id":"v1","inputCitationId":image["citationId"],"modelQuote":null,"observation":"合成单像素图片。","speakerRole":"unknown"}]}
+                        "knowledgeUnits":[{"id":"u1","unitType":"discussion","statement":"正文末尾不能丢失。","assertionKind":"author_claim","speakerRole":"author","evidenceRefs":["ev1"]}],"candidateLabels":[]},
+                    "imageContributions":[{"inputCitationId":image["citationId"],"status":"no_new_information","summary":"合成单像素图片没有新增信息。","unitIds":[],"evidenceRefs":["ev2"]}],
+                    "evidenceCandidates":{"text":[{"id":"ev1","inputCitationId":source["citationId"],"quote":"结尾不能丢失🙂"}],"vision":[{"id":"ev2","inputCitationId":image["citationId"],"modelQuote":null,"observation":"合成单像素图片。","speakerRole":"unknown"}]}
                 })
             };
             endpoint::respond(&mut socket, &output.to_string()).await;

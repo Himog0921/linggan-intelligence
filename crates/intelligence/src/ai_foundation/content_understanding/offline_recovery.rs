@@ -52,7 +52,7 @@ async fn recover_in(
 ) -> Result<RecoveryReceipt, FoundationError> {
     let row = sqlx::query("SELECT r.work_ref,r.domain_ref,r.material_snapshot_identity,o.invocation_ref,o.raw_output,
         COALESCE(t.skill_version_ref::text,'none') AS skill,
-        i.result->>'promptVersion' AS prompt,t.model_config_ref::text AS model,
+        i.result->>'promptVersion' AS prompt,i.result->>'draftProtocol' AS draft_protocol,t.model_config_ref::text AS model,
         i.result#>>'{diagnostic,providerReturnedModel}' AS provider,
         to_char(o.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS generation_at
         FROM linggan_content_understanding_request r
@@ -105,8 +105,15 @@ async fn recover_in(
     };
     let raw: String = row.get("raw_output");
     let draft = serde_json::from_str(&raw).map_err(|_| FoundationError::Invalid)?;
-    let result = contract::accept(draft, &packet.snapshot, &generation)
-        .map_err(|code| FoundationError::AdmissionDenied(vec![code.to_owned()]))?;
+    let protocol: Option<String> = row.get("draft_protocol");
+    let result = match protocol.as_deref() {
+        None => contract::accept(draft, &packet.snapshot, &generation),
+        Some(contract::model_draft::PROTOCOL) => {
+            contract::model_draft::accept_model_draft(draft, &packet.snapshot, &generation)
+        }
+        Some(_) => return Err(FoundationError::Invalid),
+    }
+    .map_err(|code| FoundationError::AdmissionDenied(vec![code.to_owned()]))?;
     sqlx::query(
         "INSERT INTO linggan_content_understanding_offline_recovery
         (request_ref,work_ref,material_snapshot_identity,method_version,result,validator_revision)
