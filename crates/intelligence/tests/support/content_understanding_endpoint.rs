@@ -126,29 +126,29 @@ pub fn draft(packet: &Value) -> Value {
     assert!(!quote.is_empty() && quote.chars().count() <= 500);
     let images = packet["material"]["images"].as_array().unwrap();
     let vision: Vec<_> = images.iter().enumerate().map(|(i, image)| json!({
-        "id": format!("v{}", i + 1), "inputCitationId": image["citationId"],
+        "id": format!("ev_image{}", i + 1), "inputCitationId": image["citationId"],
         "modelQuote": null, "observation": "合成单像素图片，无额外可读内容。", "speakerRole": "unknown"
     })).collect();
     let contributions: Vec<_> = images.iter().enumerate().map(|(i, image)| json!({
         "inputCitationId": image["citationId"], "status": "no_new_information",
-        "summary": "合成空白图片没有新增信息。", "unitIds": [], "evidenceRefs": [format!("v{}", i + 1)]
+        "summary": "合成空白图片没有新增信息。", "unitIds": [], "evidenceRefs": [format!("ev_image{}", i + 1)]
     })).collect();
     json!({
         "core": {
             "summary": {"text":"合成材料说明步骤，仅验证数据链路。","unitIds":["u2","u3"]},
             "contentType":"practical_guide", "mainTopicUnitId":"u2",
             "knowledgeUnits":[
-                {"id":"u1","unitType":"discussion","statement":"合成流程的背景。","assertionKind":"observation","speakerRole":"author","evidenceRefs":["t1"]},
-                {"id":"u2","unitType":"discussion","statement":"合成材料的主要步骤。","assertionKind":"interpretation","speakerRole":"unknown","evidenceRefs":["t1"]},
-                {"id":"u3","unitType":"provision","statement":"先摆出材料，再按步骤核对。","assertionKind":"author_claim","speakerRole":"author","evidenceRefs":["t1"]}
+                {"id":"u1","unitType":"discussion","statement":"合成流程的背景。","assertionKind":"observation","speakerRole":"author","evidenceRefs":["ev1"]},
+                {"id":"u2","unitType":"discussion","statement":"合成材料的主要步骤。","assertionKind":"interpretation","speakerRole":"unknown","evidenceRefs":["ev1"]},
+                {"id":"u3","unitType":"provision","statement":"先摆出材料，再按步骤核对。","assertionKind":"author_claim","speakerRole":"author","evidenceRefs":["ev1"]}
             ],
             "candidateLabels":[{"dimension":"offered_value","label":"合成流程","retrievalUse":"只检索合成流程测试。","unitIds":["u3"]}]
         },
         "imageContributions":contributions,
         "evidenceCandidates":{
             "text":[
-                {"id":"t1","inputCitationId":source["citationId"],"quote":quote},
-                {"id":"unusedText","inputCitationId":source["citationId"],"quote":format!("{quote}”")}
+                {"id":"ev1","inputCitationId":source["citationId"],"quote":quote},
+                {"id":"ev_unused","inputCitationId":source["citationId"],"quote":format!("{quote}”")}
             ],
             "vision":vision
         }

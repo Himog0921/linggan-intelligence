@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
+pub mod model_draft;
 mod schema;
 pub use schema::response_schema;
 #[cfg(test)]
@@ -399,6 +400,15 @@ pub fn accept(
     snapshot: &Snapshot,
     generation: &Generation,
 ) -> Result<Value, &'static str> {
+    accept_draft(draft, snapshot, generation, false)
+}
+
+fn accept_draft(
+    draft: Value,
+    snapshot: &Snapshot,
+    generation: &Generation,
+    short_source_ids: bool,
+) -> Result<Value, &'static str> {
     let draft = read_draft(draft)?;
     validate_snapshot(snapshot)?;
     validate_generation(generation)?;
@@ -478,6 +488,17 @@ pub fn accept(
         )
         .map(String::as_str)
         .collect();
+    if short_source_ids
+        && draft
+            .evidence_candidates
+            .text
+            .iter()
+            .map(|e| &e.id)
+            .chain(draft.evidence_candidates.vision.iter().map(|e| &e.id))
+            .any(|id| !id.starts_with("ev") || !local_id(id))
+    {
+        return Err("invalid_evidence_id");
+    }
     let mut evidence = Vec::new();
     let mut evidence_sources: BTreeMap<&str, Option<&str>> = BTreeMap::new();
     for candidate in &draft.evidence_candidates.text {
@@ -491,11 +512,20 @@ pub fn accept(
         if !used.contains(candidate.id.as_str()) {
             continue;
         }
-        let source = snapshot
-            .texts
-            .iter()
-            .find(|s| s.citation_id == candidate.input_citation_id)
-            .ok_or("invalid_evidence_source")?;
+        let source = if short_source_ids {
+            candidate
+                .input_citation_id
+                .strip_prefix('s')
+                .and_then(|id| id.parse::<usize>().ok().filter(|n| n.to_string() == id))
+                .and_then(|n| n.checked_sub(1))
+                .and_then(|index| snapshot.texts.get(index))
+        } else {
+            snapshot
+                .texts
+                .iter()
+                .find(|s| s.citation_id == candidate.input_citation_id)
+        }
+        .ok_or("invalid_evidence_source")?;
         let (byte, quote) =
             quote_in_source(&source.text, &candidate.quote, source.kind == "transcript")?;
         if !sized(quote, 1, 500) {

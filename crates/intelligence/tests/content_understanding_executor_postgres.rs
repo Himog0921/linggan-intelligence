@@ -545,6 +545,18 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         "one real probe, one legacy call, one L1 call"
     );
     let (request, packet) = &l1_calls[0];
+    assert_eq!(
+        packet["draftProtocol"],
+        linggan_intelligence::content_understanding::model_draft::PROTOCOL
+    );
+    for (i, source) in packet["material"]["texts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        assert_eq!(source["citationId"], format!("s{}", i + 1));
+    }
     assert_eq!(request["reasoning_effort"], "high");
     assert_eq!(request["response_format"]["type"], "json_object");
     assert_eq!(
@@ -566,7 +578,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
             .as_array()
             .unwrap()
             .iter()
-            .all(|evidence| evidence["id"] != "unusedText")
+            .all(|evidence| evidence["id"] != "ev_unused")
     );
     let images: Vec<_> = request["messages"]
         .as_array()
@@ -586,7 +598,20 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         json!(image_source)
     );
     assert_eq!(packet["imageInventory"][0]["blobSha256"], image_sha);
-    assert_eq!(packet["material"], frozen["snapshot"]);
+    let mut restored_material = packet["material"].clone();
+    for (index, source) in restored_material["texts"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .enumerate()
+    {
+        source["citationId"] = frozen["snapshot"]["texts"][index]["citationId"].clone();
+        assert!(source["structure"].get("ref").is_none());
+        if let Some(reference) = frozen["snapshot"]["texts"][index]["structure"].get("ref") {
+            source["structure"]["ref"] = reference.clone();
+        }
+    }
+    assert_eq!(restored_material, frozen["snapshot"]);
     assert_eq!(packet["imageInventory"], frozen["inventory"]);
     let recovery = seed_recoverable_failure(&db, work).await;
     let before = owner::latest(&db, dossier::DOMAIN, work, None)

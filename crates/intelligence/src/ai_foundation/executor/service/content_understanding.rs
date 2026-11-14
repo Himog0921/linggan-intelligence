@@ -131,15 +131,19 @@ async fn settle(
         .and_then(|r| r.text.as_deref())
         .and_then(|s| serde_json::from_str::<Value>(s).ok())
         .and_then(|draft| {
-            sources.as_ref().ok().and_then(|packet| {
-                match contract::accept(draft, &packet.snapshot, &generation) {
+            sources.as_ref().ok().and_then(
+                |packet| match contract::model_draft::accept_model_draft(
+                    draft,
+                    &packet.snapshot,
+                    &generation,
+                ) {
                     Ok(result) => Some(result),
                     Err(code) => {
                         validation = Some(code);
                         None
                     }
-                }
-            })
+                },
+            )
         });
     let allowed = !cancelled
         && sources.is_ok()
@@ -170,6 +174,7 @@ async fn settle(
     metadata["executorReceipt"] = json!(item.lease_token);
     metadata["requestRef"] = json!(prepared.request_ref);
     metadata["promptVersion"] = json!(prepared.prompt_version_ref);
+    metadata["draftProtocol"] = json!(contract::model_draft::PROTOCOL);
     sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,result,raw_output,failure_code) SELECT request_ref,work_ref,material_snapshot_identity,method_version,$2,$3,$4,$5 FROM linggan_content_understanding_request WHERE request_ref=$1")
         .bind(prepared.request_ref).bind(prepared.invocation).bind(if success { parsed.as_ref() } else { None })
         .bind(if allowed { response.and_then(|r| r.text.as_deref()) } else { None }).bind(failure).execute(&mut *tx).await?;

@@ -720,6 +720,26 @@ fn metadata_and_snapshot_format_validation_rejects_invalid_program_inputs() {
 #[test]
 fn response_schema_uses_explicit_new_draft_without_identity_or_legacy_status() {
     let schema = response_schema();
+    let fields = &schema["properties"];
+    let sources = &fields["evidenceCandidates"]["properties"];
+    let image = &fields["imageContributions"]["items"]["properties"];
+    assert_eq!(
+        sources["text"]["items"]["properties"]["inputCitationId"]["pattern"],
+        "^s[1-9][0-9]*$"
+    );
+    assert_eq!(
+        image["inputCitationId"],
+        sources["vision"]["items"]["properties"]["inputCitationId"]
+    );
+    assert_ne!(image["inputCitationId"]["pattern"], "^s[1-9][0-9]*$");
+    assert_eq!(
+        image["evidenceRefs"]["items"]["pattern"],
+        "^ev[A-Za-z0-9_-]*$"
+    );
+    assert_ne!(
+        image["unitIds"]["items"]["pattern"],
+        image["evidenceRefs"]["items"]["pattern"]
+    );
     assert_eq!(schema["additionalProperties"], false);
     let core = &schema["properties"]["core"];
     assert!(
@@ -1021,4 +1041,121 @@ fn transcript_layout_recovery_rejects_ambiguity_and_content_changes() {
             "{source:?} {quote:?}"
         );
     }
+}
+
+#[test]
+fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
+    let (mut draft, mut snapshot, generation) = text_only();
+    snapshot.texts[0].text = "课程使用两本教辅。\n步骤要先对版本。".into();
+    let mut frame = snapshot.texts[0].clone();
+    frame.citation_id = "canonical-frame".into();
+    frame.kind = "frame_text".into();
+    frame.start = 11;
+    frame.text = "🙂教材全练 题例".into();
+    frame.speaker = "unknown".into();
+    frame.structure = json!({"ref":"canonical-frame","time":{"startMs":120000,"endMs":120000}});
+    snapshot.texts.push(frame);
+    snapshot.included_kinds.push("frame_text".into());
+    draft["evidenceCandidates"]["text"] = json!([
+        {"id":"ev1","inputCitationId":"s1","quote":"课程使用两本教辅"},
+        {"id":"ev2","inputCitationId":"s2","quote":"教材全练"}
+    ]);
+    for unit in draft["core"]["knowledgeUnits"].as_array_mut().unwrap() {
+        unit["evidenceRefs"] = json!(["ev1"]);
+    }
+    draft["core"]["knowledgeUnits"][2]["statement"] = json!("作者使用《教材全练》。");
+    draft["core"]["summary"]["text"] = json!("作者介绍《教材全练》。");
+    let verify = |draft: Value| model_draft::accept_model_draft(draft, &snapshot, &generation);
+    assert_eq!(verify(draft.clone()), Err("unsupported_literal"));
+    draft["core"]["knowledgeUnits"][2]["evidenceRefs"] = json!(["ev1", "ev2"]);
+
+    let material = model_draft::material(&snapshot);
+    assert_eq!(material["texts"][0]["citationId"], "s1");
+    assert_eq!(material["texts"][1]["citationId"], "s2");
+    assert_eq!(snapshot.texts[1].citation_id, "canonical-frame");
+    assert!(material["texts"][1]["structure"].get("ref").is_none());
+    assert_eq!(
+        material["texts"][1]["structure"]["time"],
+        snapshot.texts[1].structure["time"]
+    );
+
+    let result = verify(draft.clone()).unwrap();
+    let bound = &result["card"]["evidence"][1];
+    assert_eq!(bound["inputCitationId"], "canonical-frame");
+    assert_eq!(bound["start"], 12);
+    assert_eq!(bound["end"], 16);
+    assert_eq!(bound["quote"], "教材全练");
+
+    let mut wrong_channel = draft.clone();
+    wrong_channel["core"]["knowledgeUnits"][2]["statement"] = json!("口播原话「教材全练」。");
+    assert_eq!(verify(wrong_channel), Err("unsupported_literal"));
+    let mut literal_from_frame = draft.clone();
+    literal_from_frame["core"]["knowledgeUnits"][2]["statement"] = json!("画面原文「教材全练」。");
+    assert!(verify(literal_from_frame).is_ok());
+
+    let mut original_id = draft.clone();
+    original_id["evidenceCandidates"]["text"][1]["inputCitationId"] = json!("canonical-frame");
+    assert_eq!(verify(original_id), Err("invalid_evidence_source"));
+    let mut wrong_source = draft.clone();
+    wrong_source["evidenceCandidates"]["text"][1]["inputCitationId"] = json!("s1");
+    assert_eq!(verify(wrong_source), Err("invalid_text_quote"));
+    let mut mixed_id = draft;
+    mixed_id["core"]["knowledgeUnits"][2]["evidenceRefs"] = json!(["s2"]);
+    assert_eq!(verify(mixed_id), Err("invalid_reference"));
+}
+
+#[test]
+fn model_draft_keeps_image_reads_distinct_from_literal_transcriptions() {
+    let (mut draft, mut snapshot, generation) = fixture();
+    draft["evidenceCandidates"]["text"] = json!([
+        {"id":"ev1","inputCitationId":"s1","quote":"合成材料"}
+    ]);
+    draft["evidenceCandidates"]["vision"] = json!([
+        {"id":"ev2","inputCitationId":"image-1","modelQuote":null,"observation":"图片上写有合成步骤","speakerRole":"unknown"}
+    ]);
+    let units = draft["core"]["knowledgeUnits"].as_array_mut().unwrap();
+    units[0]["evidenceRefs"] = json!(["ev1"]);
+    units[1]["evidenceRefs"] = json!(["ev1"]);
+    units[2]["evidenceRefs"] = json!(["ev2"]);
+    units[2]["statement"] = json!("图片原文「合成步骤」。");
+    draft["imageContributions"][0]["evidenceRefs"] = json!(["ev2"]);
+    let verify =
+        |draft: Value, snap: &Snapshot| model_draft::accept_model_draft(draft, snap, &generation);
+    assert_eq!(verify(draft.clone(), &snapshot), Err("unsupported_literal"));
+    draft["evidenceCandidates"]["vision"][0]["modelQuote"] = json!("合成步骤");
+    let result = verify(draft.clone(), &snapshot).unwrap();
+    assert_eq!(result["card"]["evidence"][1]["verification"], "model_read");
+
+    for unsupported in [
+        "画面原文：「合成步骤」。",
+        "口播原话: “合成步骤”。",
+        "图片原文「合成步骤",
+        "图片原文「 」",
+        "图片原文「 合成步骤 」",
+        "图片原文「说明「合成步骤」。",
+    ] {
+        let mut variant = draft.clone();
+        variant["core"]["knowledgeUnits"][2]["statement"] = json!(unsupported);
+        assert_eq!(
+            verify(variant, &snapshot),
+            Err("unsupported_literal"),
+            "{unsupported}"
+        );
+    }
+
+    let mut frame = snapshot.texts[0].clone();
+    frame.kind = "frame_text".into();
+    frame.citation_id = "frozen-frame".into();
+    frame.text = "合成步骤".into();
+    snapshot.texts.push(frame);
+    snapshot.included_kinds.push("frame_text".into());
+    assert!(verify(draft.clone(), &snapshot).is_ok());
+    let mut wrong_source = draft.clone();
+    wrong_source["core"]["knowledgeUnits"][2]["statement"] = json!("图片 原文：「合成材料」。");
+    wrong_source["core"]["knowledgeUnits"][2]["evidenceRefs"] = json!(["ev1"]);
+    assert_eq!(verify(wrong_source, &snapshot), Err("unsupported_literal"));
+
+    let mut unqualified = draft;
+    unqualified["core"]["knowledgeUnits"][2]["statement"] = json!("原文「合成步骤」。");
+    assert_eq!(verify(unqualified, &snapshot), Err("unsupported_literal"));
 }

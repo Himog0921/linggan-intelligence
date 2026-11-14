@@ -46,7 +46,7 @@ async fn configuration(tx: &mut Transaction<'_, Postgres>) -> Result<(Uuid, i64)
     Ok(sqlx::query_as("SELECT current_config_ref,revision FROM linggan_ai_task_setting WHERE task_key='content_understanding'").fetch_one(&mut **tx).await?)
 }
 pub(crate) fn payload(p: &Packet) -> Value {
-    json!({"material":p.snapshot,"imageInventory":p.inventory,"resultSchema":contract::response_schema()})
+    json!({"draftProtocol":contract::model_draft::PROTOCOL,"material":contract::model_draft::material(&p.snapshot),"imageInventory":p.inventory,"resultSchema":contract::response_schema()})
 }
 async fn reasons(
     tx: &mut Transaction<'_, Postgres>,
