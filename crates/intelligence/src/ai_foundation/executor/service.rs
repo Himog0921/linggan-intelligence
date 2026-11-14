@@ -46,6 +46,10 @@ pub async fn run(
     let fence = session.fence();
     let (work_db, work_drain) = (db.clone(), drain.clone());
     let opportunity_sync = opportunity_sync::OpportunitySync::from_environment();
+    if let Some(sync) = &opportunity_sync {
+        try_activate_opportunity(&mut session, sync).await;
+    }
+    let work_opportunity_sync = opportunity_sync.clone();
     let mut work = JoinSet::new();
     work.spawn(async move {
         work_loop(
@@ -55,7 +59,7 @@ pub async fn run(
             secrets,
             adapter,
             work_drain,
-            opportunity_sync,
+            work_opportunity_sync,
         )
         .await
     });
@@ -74,7 +78,12 @@ pub async fn run(
             biased;
             _=stopping.changed(),if deadline.is_none()=>{},
             _=tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now)),if deadline.is_some()=>{return Err(ExecutorError::DrainTimedOut);},
-            _=heartbeat.tick()=>{tokio::time::timeout(Duration::from_secs(5),session.heartbeat()).await.map_err(|_|ExecutorError::HeartbeatTimedOut)??;},
+            _=heartbeat.tick()=>{
+                tokio::time::timeout(Duration::from_secs(5),session.heartbeat()).await.map_err(|_|ExecutorError::HeartbeatTimedOut)??;
+                if let Some(sync) = &opportunity_sync {
+                    try_activate_opportunity(&mut session, sync).await;
+                }
+            },
             result=work.join_next()=>{result.ok_or(ExecutorError::TaskFailed)?.map_err(|_|ExecutorError::TaskFailed)??;break;}
         }
     }
@@ -90,6 +99,25 @@ pub async fn run(
         process_id: std::process::id(),
         source_revision: source_revision.into(),
     })
+}
+
+async fn try_activate_opportunity(
+    session: &mut ExecutorSession,
+    sync: &opportunity_sync::OpportunitySync,
+) {
+    if sync.gate_active() {
+        return;
+    }
+    if let Err(error) = crate::opportunity::CommenterDigest::load() {
+        sync.defer(&error);
+        return;
+    }
+    match tokio::time::timeout(Duration::from_secs(5), session.try_opportunity_event_gate()).await {
+        Ok(Ok(true)) => sync.activate_gate(),
+        Ok(Ok(false)) => {} // Existing source transactions finish without waiting for this feature.
+        Ok(Err(error)) => sync.defer(&error),
+        Err(error) => sync.defer(&error),
+    }
 }
 async fn work_loop(
     db: &Database,

@@ -95,6 +95,7 @@ pub(super) async fn demand(
                     let n: i32 = row.try_get("n")?;
                     Ok::<_, sqlx::Error>(present || n > 0)
                 })?;
+        let previous_n = rows.get(1).ok_or(CardError::MissingMetrics)?.try_get("n")?;
         result.push(model::DemandGroup {
             protocol_version,
             mentioners_total: first.try_get("mentioners_total")?,
@@ -114,6 +115,7 @@ pub(super) async fn demand(
             series,
             flags,
             window_has_samples,
+            previous_n,
         });
     }
     Ok(result)

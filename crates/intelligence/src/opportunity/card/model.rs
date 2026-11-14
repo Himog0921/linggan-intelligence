@@ -56,6 +56,8 @@ pub(super) struct DemandGroup {
     pub flags: Vec<&'static str>,
     #[serde(skip)]
     pub window_has_samples: bool,
+    #[serde(skip)]
+    pub previous_n: i32,
 }
 
 #[derive(Serialize)]

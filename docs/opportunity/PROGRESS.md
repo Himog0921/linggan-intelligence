@@ -408,7 +408,24 @@
 - `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash scripts/test-opportunity-postgres.sh` 在协议窗口边界修正之前完成完整隔离回归，各组 1、1、12、6、3、6、1 项及五种执行器状态各 1 项通过，输出 `Opportunity PostgreSQL proof passed` 与隔离资源清理确认。
 - 后续协议窗口边界和共享点赞参考已用隔离合成测试复验：`bash /private/tmp/opportunity-t14-targeted-proof.sh` 输出评论研究 `1 passed`、卡片 `2 passed`，含协议分组、窗口外旧协议、未来点赞投影、两种并发撤回顺序和 P1 JSON 快照。最终候选仍需完整链路复验与独立审阅。
 - 阶段 1 未实现供给判定、HTTP 只读接口或页面；`stale_read_model` 的读取时动态判断属于后续 T1.5，不能把当前生成时刻的快照当作后续读取时仍新鲜。
-- 源变更进入持久事件队列；开关关闭时后台不消费，重新启用后再归并。真实运行规模、长期关闭期间的队列容量尚未验证；本地运行库和生产库迁移仍未获授权。
+- 早期候选 `05dc13e6` 的源变更进入持久事件队列；开关关闭时后台不消费。独立审查认为长期关闭会无界积压，下文记录修复状态。本地运行库和生产库迁移仍未获授权。
 - 候选 `05dc13e6` 的最终窗口修正后整轮隔离回归输出 `Opportunity PostgreSQL proof passed` 及容器、数据库、卷已清理；这只能证明现有测试，不能替代独立审查。
 - 独立审查发现：领域采集量告警误用组内变化；关闭期间源事件可无界积压；撤回表级锁影响无关领域且同步扫描全部卡片；清洗缓存完成未触发原声补位；全量命令未先同步最新 0177 归属；原声跳过只记录总数而没有原因。均待修复和针对性回归，当前候选不具备交付资格。
 - 独立审查另发现 §6.7 的协议变化标记无法从“未知 + 已知”推断真实变化。Q-29 已提出，依 §3.3、§3.6 将 T1.4 标为 **blocked**，等待负责人裁定；不自行修改该规则。
+- 负责人于 2026-11-14 答复 Q-29 采用 A，见 D-049；T1.4 恢复实施并修复独立审查发现。本地运行库和生产环境迁移仍需另行授权。
+- 候选修复：领域总量告警改按各协议组总和比较；全量命令先同步 0177；清洗缓存写入触发原声补位；原声报告区分跳过原因。关闭或后台离线时不积累源事件，后台重新取得门控后为现有问题登记追平；源事件按批归并。撤回改按受影响领域加锁并用来源反向索引定位卡片。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-review-fixes-proof.sh`：专项输出 `8 passed; 0 failed`、`Targeted card, CLI and source proofs passed`、`Opportunity PostgreSQL proof cleanup verified; isolated proof database, container, and volume were removed`。包含临时 schema 下锁键一致、停用门控、分批事件、离线归属的全量命令、清洗补位、两种撤回顺序和 1000 张无关卡片的索引定位。此专项不代替完整回归、真实后台重启追平验证和独立复审。
+- T1.5 的接口必须在后台离线或启动追平未完成时拒绝把旧卡片显示为新鲜结果；读取时动态判断 `stale_read_model`，不能仅依赖生成时快照。本任务尚未实现该接口或状态读取。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash scripts/test-opportunity-postgres.sh`：前一版修复的整轮隔离回归各组 `1、1、12、6、3、12、1` 及后台 enabled、missing_key、disabled、locked_release、locked_drain 各 `1 passed; 0 failed`，末尾为 `Opportunity PostgreSQL proof passed` 和容器、数据库、卷清理确认。临时依赖链接在命令退出时校验目标后移除。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-restart-proof.sh`：真实后台停止、合成离线评论写入、重新启动后，卡片分母增加 1；输出 `1 passed; 0 failed`、`Isolated restart catch-up proof passed` 和隔离资源清理确认。离线阶段源事件为 0。
+- 后续自查发现 `series_periods=1` 时，采集量告警漏看上周。已改为从现有上周指标读取，趋势序列长度仍由参数决定；`CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-review-fixes-proof.sh` 对该修正及全部卡片专项复测，输出 `9 passed; 0 failed`、`Targeted card, CLI and source proofs passed` 和隔离资源清理确认。
+- `bash scripts/test-local-runtime-schema.sh`：输出 `Fresh and repeat runtime schema migration passed; retired tables absent.`、`Owned runtime schema proof resources removed`。迁移只用于脚本创建的隔离数据库，未应用于本地运行库或生产库。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-comment-study-proof.sh`：评论目录 `10 passed; 0 failed`、来源启动 `1 passed; 0 failed`；输出 `Comment Study catalog and source regression passed` 与隔离资源清理确认。
+- 将卡片排队和组装拆成内部函数后，再执行 `/private/tmp/opportunity-t14-review-fixes-proof.sh`：`9 passed; 0 failed`；再执行 `/private/tmp/opportunity-t14-restart-proof.sh`：`1 passed; 0 failed`、`Isolated restart catch-up proof passed`。两次均确认隔离数据库、容器和卷已清理；临时依赖链接已移除。
+- `cargo test -p linggan-intelligence --lib --locked`：`380 passed; 0 failed; 12 ignored`；`cargo test -p linggan-worker --bin linggan-opportunity --locked`：`2 passed; 0 failed`。`cargo doc -p linggan-intelligence --no-deps --locked` 退出 0。
+- `cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked -- -D warnings` 退出 101，停在未修改的 `crates/evidence`，报告 118 项错误；`git diff --quiet origin/main -- crates/evidence` 退出 0。按既有仓库例外使用 `-- -A clippy::too_many_lines` 的限定 Clippy 退出 0，但保留仓库其他既有警告，不声称严格 Clippy 通过。
+- 代码及测试之外的改动超过手册 §3.7 建议大小：卡片的协议分组、同事务重算、同步撤回和默认关闭追平需一同成立；实现按组装、指标、原声和事件模块拆分，未拆成可留下不安全中间状态的并行业务路径。最终候选仍须独立审阅和远端 CI。
+- 当前候选迁移 `0216_opportunity_card_read_model.sql` 的 SHA-256 是 `48c1d814b9a1c5016572eb728b5cdbd85e350227efaefba7367c0b7163a0a1e0`；已登记 `scripts/local-runtime.sh` 并同步 `apps/api/src/local_web/full_schema_fixture.rs`。该登记不是运行环境迁移授权或执行回执。
+- 最后将当前定义读取提取为内部函数后，再执行 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-review-fixes-proof.sh`：`9 passed; 0 failed`、`Targeted card, CLI and source proofs passed`，隔离资源清理确认。独立审阅和远端检查仍待完成。
+- 整轮隔离回归的 `check-invariants` 输出 `totalViolations: 0`；I1、I2、I3、I6、I6b、I7、I8、I9、I11 可用且为 0，I4、I5、I10 尚不可用，故 `incomplete: true`。不得把不可用检查表述为通过。
+- 改动 Rust 文件的 `rustfmt --edition 2024 --config skip_children=true --check` 与 `git diff --check origin/main` 均退出 0；`bash scripts/ci-preflight.sh origin/main` 输出 `pass 52`、`fail 0` 和 `Preflight passed`。未运行全仓 `cargo fmt`。

@@ -5,6 +5,7 @@ use linggan_intelligence::opportunity::{
     CardRebuildMode, CommenterDigest, RebuildMode, check_invariants, current_as_of,
     load_current_metric_definition, project_comment_platform_times, read_platform_time_report,
     rebuild_opportunity_cards, rebuild_problem_metrics, sync_comment_mentions,
+    sync_comment_mentions_for_domain,
 };
 use linggan_storage_postgres::Database;
 use std::process::ExitCode;
@@ -179,6 +180,8 @@ async fn run() -> Result<bool, Box<dyn std::error::Error>> {
             let domain = Uuid::parse_str(domain).map_err(|_| "--domain must be a UUID")?;
             let digest = CommenterDigest::load()?;
             let database = connect(&options).await?;
+            // A full card rebuild starts from the same 0177 membership projection as the worker.
+            sync_comment_mentions_for_domain(&database, &digest, domain).await?;
             let report =
                 rebuild_opportunity_cards(&database, domain, &digest, CardRebuildMode::Full)
                     .await?;

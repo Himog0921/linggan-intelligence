@@ -12,6 +12,13 @@ pub(super) fn basis(params: &OpportunityMetricParams) -> &'static str {
     }
 }
 
+fn volume_shift(counts: impl IntoIterator<Item = (i64, i64)>, threshold: f64) -> bool {
+    let (current, previous) = counts
+        .into_iter()
+        .fold((0_i64, 0_i64), |(cur, prev), (c, p)| (cur + c, prev + p));
+    previous > 0 && ((current - previous).abs() as f64 / previous as f64) > threshold
+}
+
 pub(super) async fn exclusions_and_flags(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
@@ -61,20 +68,16 @@ pub(super) async fn exclusions_and_flags(
     }
     if groups
         .iter()
-        .filter(|group| group.window_has_samples)
+        .filter(|group| group.window_has_samples && group.protocol_version.is_some())
         .count()
         > 1
     {
         flags.push("collection_protocol_changed");
     }
-    if groups.iter().any(|group| {
-        let Some(previous) = group.series.iter().rev().nth(1) else {
-            return false;
-        };
-        previous.n > 0
-            && (f64::from(group.current.n - previous.n).abs() / f64::from(previous.n))
-                > params.collection_volume_shift_alert
-    }) {
+    let counts = groups
+        .iter()
+        .map(|group| (i64::from(group.current.n), i64::from(group.previous_n)));
+    if volume_shift(counts, params.collection_volume_shift_alert) {
         flags.push("collection_volume_shift");
     }
     if !has_engagement_reference(tx, domain, as_of, params).await? {
@@ -185,4 +188,16 @@ pub(super) async fn limitations(
         ));
     }
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::volume_shift;
+
+    #[test]
+    fn volume_shift_uses_domain_totals_even_when_protocol_mix_changes() {
+        assert!(!volume_shift([(200, 100), (0, 100)], 0.5));
+        assert!(volume_shift([(100, 100), (100, 0)], 0.5));
+        assert!(!volume_shift([(100, 0)], 0.5));
+    }
 }

@@ -6,6 +6,7 @@ use crate::{
     comment_study_source::{StudySourceRole, selected_source_in},
 };
 use sqlx::{Postgres, Row, Transaction};
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 // This is the fixed maximum in the card response contract, not a metric threshold.
@@ -19,7 +20,7 @@ pub(super) async fn select(
     as_of: &str,
     tz: &str,
     basis: &str,
-) -> Result<(Vec<model::Voice>, usize), CardError> {
+) -> Result<(Vec<model::Voice>, BTreeMap<String, usize>), CardError> {
     let sql = format!(
         "{}, {}, eligible AS MATERIALIZED (\
          SELECT * FROM linggan_opportunity_eligible_comments($1,$2::timestamptz,$6,$7)) \
@@ -54,17 +55,17 @@ pub(super) async fn select(
         .fetch_all(&mut **tx)
         .await?;
     let mut voices = Vec::new();
-    let mut excluded = 0;
+    let mut excluded = BTreeMap::new();
     for row in rows {
         if voices.len() == MAX_SAMPLE_VOICES {
             break;
         }
-        if row
-            .try_get::<Option<String>, _>("exclusion_reason")?
-            .is_some()
-            || !row.try_get::<bool, _>("same_body")?
-        {
-            excluded += 1;
+        if let Some(reason) = row.try_get::<Option<String>, _>("exclusion_reason")? {
+            *excluded.entry(reason).or_default() += 1;
+            continue;
+        }
+        if !row.try_get::<bool, _>("same_body")? {
+            *excluded.entry("sourceBodyChanged".to_owned()).or_default() += 1;
             continue;
         }
         let content_ref: Uuid = row.try_get("content_public_ref")?;
@@ -79,7 +80,7 @@ pub(super) async fn select(
         )
         .await?
         else {
-            excluded += 1;
+            *excluded.entry("sourceUnavailable".to_owned()).or_default() += 1;
             continue;
         };
         voices.push(model::Voice {

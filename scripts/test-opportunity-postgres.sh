@@ -113,6 +113,10 @@ LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
 cargo test -p linggan-intelligence --test opportunity_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_mentions_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_asof_postgres --locked -- --ignored --test-threads=1
+cargo build -p linggan-worker --bin linggan-opportunity --locked
+proof_target_dir="${CARGO_TARGET_DIR:-$project_root/target}"
+[[ "$proof_target_dir" = /* ]] || proof_target_dir="$project_root/$proof_target_dir"
+export OPPORTUNITY_TEST_WORKER_BIN="$proof_target_dir/debug/linggan-opportunity"
 cargo test -p linggan-intelligence --test opportunity_metrics_postgres --locked -- --ignored --test-threads=1
 LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
   cargo test -p linggan-evidence --test creator_discovery_postgres --locked \

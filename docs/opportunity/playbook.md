@@ -1031,7 +1031,7 @@ interface CreatorDensity {
   - `author_unknown_share_high`：因 `work_author_unknown` 被排除的比例超过 `max_author_unknown_share` 时出现；
   - `engagement_reference_missing`：领域点赞中位数没有可用的 `KNOWN` 值时出现（D-019）；
   - `collection_below_target`：当周领域有效评论数低于 `collection_target_per_period` 时出现（D-029）；
-  - `collection_protocol_changed`：统计窗口内评论采集协议发生变化时出现，趋势图需标记变化点（D-030）。
+  - `collection_protocol_changed`：统计窗口内出现两个或更多不同的已知评论采集协议版本时出现，趋势图需标记变化点；未知协议单独展示，不能单独证明变化（D-030、D-049）。
 
 ### 6.8 质量门
 

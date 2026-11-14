@@ -611,4 +611,7 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - 作品互动统一来源为 `linggan_material_engagement_observation`（`database/migrations/0023_material_engagement_and_media_components.sql:29-50`），覆盖详情与发现两条来源；证据库只从 `KNOWN` 观察中选最新值（`crates/evidence/src/material_query_sql.rs:77-83`）。T1.4 的互动参考可用性复用该视图，限制观察创建和来源包接纳时间；作品发布时间锚点仍按 D-041 选截至时点的最新详情。
 - 作者资料为 `linggan_material_author_profile`（`database/migrations/0016_material_social_lanes.sql:63-87`），姓名和粉丝数分别有 `KNOWN/UNKNOWN` 状态；目标与领域绑定见本文件 §3.4。T1.4 作者组排序复用 `sort_creator_density_group`（`crates/intelligence/src/opportunity/problem_metrics/creator_density.rs:135`），不另造排序口径。
 - 评论目录与机会卡共同使用 `comment_study_catalog::like_heads_sql`；时点作者共用 `linggan_material_content_author_at`。共享入口回归覆盖点赞、作者和研究资格，不依赖真实采集。
-- 采集协议缺失只表示版本未知（D-038），无法证明它与已知版本不同。候选 `05dc13e6` 将统计窗口内“未知 + 已知”作为确定的协议变化；§6.7 应如何提示见待裁定 Q-29，尚未更改实现或标准。
+- 采集协议缺失只表示版本未知（D-038），无法证明它与已知版本不同。Q-29 已由 D-049 裁定：未知单独展示；窗口内至少两个不同的已知版本才标记协议变化。候选 `05dc13e6` 的旧实现须修正。
+- 清洗缓存由 `crates/intelligence/src/comment_study_catalog/insert_clean_cache.sql` 以 `INSERT ... ON CONFLICT DO NOTHING` 写入；缓存完成可能晚于归属，因此卡片原声补位须观察缓存插入并继续使用现有目录资格。
+- 执行器的 `ExecutorSession` 持有脱离连接池的专属 PostgreSQL 连接并维持所有权（`crates/intelligence/src/ai_foundation/executor.rs`）；候选通过该既有连接持有事件门控，不增加工作线程或连接池并发。未启用或执行器离线时跳过源事件，下一次启用后按现有问题追平。
+- 撤回原子性需要在卡片快照建立之前协调同一领域的撤回写入；候选使用事务级和会话级咨询锁，并为卡片来源引用增加反向索引。引用仅保存作品和评论稳定身份，不保存评论者身份或正文。

@@ -3,7 +3,7 @@
 WITH claimed AS MATERIALIZED (
     SELECT event_id,event_kind,event_key,changed_at
     FROM linggan_opportunity_card_source_event
-    ORDER BY event_id FOR UPDATE SKIP LOCKED
+    ORDER BY event_id LIMIT $1 FOR UPDATE SKIP LOCKED
 ), keys AS MATERIALIZED (
     SELECT event_kind,event_key,max(changed_at) AS changed_at
     FROM claimed GROUP BY event_kind,event_key

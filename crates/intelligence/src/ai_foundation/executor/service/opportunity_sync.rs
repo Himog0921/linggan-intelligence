@@ -18,6 +18,8 @@ use uuid::Uuid;
 pub(super) struct OpportunitySync {
     pending: AtomicBool,
     failure_reported: AtomicBool,
+    gate_active: AtomicBool,
+    needs_catchup: AtomicBool,
     next_metrics: Mutex<Instant>,
 }
 
@@ -29,12 +31,23 @@ impl OpportunitySync {
         Some(Arc::new(Self {
             pending: AtomicBool::new(true),
             failure_reported: AtomicBool::new(false),
+            gate_active: AtomicBool::new(false),
+            needs_catchup: AtomicBool::new(true),
             next_metrics: Mutex::new(Instant::now()),
         }))
     }
 
     pub(super) fn request(&self) {
         self.pending.store(true, Ordering::Release);
+    }
+
+    pub(super) fn gate_active(&self) -> bool {
+        self.gate_active.load(Ordering::Acquire)
+    }
+
+    pub(super) fn activate_gate(&self) {
+        self.gate_active.store(true, Ordering::Release);
+        self.request();
     }
 
     pub(super) fn defer(&self, reason: &dyn std::fmt::Display) {
@@ -45,11 +58,33 @@ impl OpportunitySync {
     }
 
     pub(super) async fn run_if_pending(&self, database: &Database) {
+        if !self.gate_active() {
+            return;
+        }
+        if self.needs_catchup.load(Ordering::Acquire) {
+            let result = sqlx::query("INSERT INTO linggan_opportunity_card_change(problem_ref,changed_at) \
+                SELECT problem_ref,clock_timestamp() FROM linggan_opportunity_problem WHERE true ORDER BY problem_ref \
+                ON CONFLICT(problem_ref) DO UPDATE SET changed_at=EXCLUDED.changed_at, \
+                  revision=linggan_opportunity_card_change.revision+1")
+                .execute(database.pool()).await;
+            if let Err(error) = result {
+                self.defer(&error);
+                return;
+            }
+            self.needs_catchup.store(false, Ordering::Release);
+        }
         let requested = self.pending.swap(false, Ordering::AcqRel);
         let due = Instant::now() >= *self.next_metrics.lock().await;
-        if let Err(error) = enqueue_source_events(database).await {
-            self.defer(&error);
-            return;
+        match enqueue_source_events(database).await {
+            Ok(true) => {}
+            Ok(false) => {
+                self.request();
+                return;
+            }
+            Err(error) => {
+                self.defer(&error);
+                return;
+            }
         }
         let card_domains = match self.due_card_domains(database).await {
             Ok(domains) => domains,
@@ -70,10 +105,10 @@ impl OpportunitySync {
         };
         let result = async {
             let mut failures = Vec::new();
-            if requested || due {
-                if let Err(error) = self.refresh_metrics(database, &digest).await {
-                    failures.push(error);
-                }
+            if (requested || due)
+                && let Err(error) = self.refresh_metrics(database, &digest).await
+            {
+                failures.push(error);
             }
             for domain in card_domains {
                 match rebuild_opportunity_cards(database, domain, &digest, CardRebuildMode::Due)
