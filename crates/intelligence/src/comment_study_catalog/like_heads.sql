@@ -16,6 +16,7 @@ like_heads AS MATERIALIZED (
       AND ($5::text IS NULL OR comment.comment_external_id = $5)
       AND package.accepted_at <= $2::timestamptz AND comment.created_at <= $2::timestamptz
       AND engagement.created_at <= $2::timestamptz
+      AND linggan_opportunity_observed_at(comment.observed_at) IS NOT NULL
     ORDER BY comment.content_public_ref, comment.comment_external_id,
-             comment.observed_at::timestamptz DESC, comment.created_at DESC, comment.material_ref DESC
+             linggan_opportunity_observed_at(comment.observed_at) DESC, comment.created_at DESC, comment.material_ref DESC
 )

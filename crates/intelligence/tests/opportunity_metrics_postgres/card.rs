@@ -55,6 +55,133 @@ async fn p1(db: &linggan_storage_postgres::Database) -> Value {
         .fetch_one(db.pool()).await.unwrap()
 }
 
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn malformed_observations_do_not_block_card_or_override_valid_sources() {
+    let (db, domain, digest) = prepare().await;
+    let baseline = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let baseline_unavailable = baseline
+        .voice_exclusion_reasons
+        .get("bodyUnavailable")
+        .copied()
+        .unwrap_or(0);
+    sqlx::raw_sql(r#"
+      ALTER TABLE linggan_material_comment DISABLE TRIGGER USER;
+      UPDATE linggan_material_comment SET observed_at='not-a-time' WHERE comment_external_id='c-work-0-2';
+      ALTER TABLE linggan_material_comment ENABLE TRIGGER USER;
+      INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason,created_at)
+      SELECT package_ref,ordinal,'accepted_for_library_content','synthetic bad observation','2026-11-09T00:00:00Z'
+      FROM opportunity_seed_package CROSS JOIN (VALUES (2001),(3001),(3002),(3003),(3004)) ord(ordinal)
+      WHERE work_key='work-0' AND kind='comments';
+      INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason,created_at)
+      SELECT package_ref,2001,'accepted_for_library_content','synthetic bad revision','2026-11-09T00:00:00Z'
+      FROM opportunity_seed_package WHERE work_key='work-1' AND kind='comments';
+      INSERT INTO linggan_material_comment(material_ref,content_public_ref,package_ref,record_ordinal,
+        comment_external_id,root_comment_external_id,is_reply,body_text,body_state,author_external_id,observed_at,created_at)
+      SELECT md5('card-bad-only')::uuid,work.work_ref,package.package_ref,2001,
+        'card-bad-only','card-bad-only',false,'SYNTHETIC bad only','KNOWN','reader-bad','not-a-time','2026-11-09T00:00:00Z'
+      FROM opportunity_seed_work work JOIN opportunity_seed_package package USING(work_key)
+      WHERE work.work_key='work-0' AND package.kind='comments';
+      ALTER TABLE linggan_material_comment_first_admission DISABLE TRIGGER USER;
+      DELETE FROM linggan_material_comment_first_admission WHERE comment_external_id='card-bad-only';
+      ALTER TABLE linggan_material_comment_first_admission ENABLE TRIGGER USER;
+      INSERT INTO linggan_material_comment(material_ref,content_public_ref,package_ref,record_ordinal,
+        comment_external_id,root_comment_external_id,is_reply,body_text,body_state,author_external_id,observed_at,created_at)
+      SELECT md5('card-bad-revision')::uuid,original.content_public_ref,package.package_ref,2001,
+        original.comment_external_id,original.root_comment_external_id,false,'SYNTHETIC invalid revision','KNOWN',
+        original.author_external_id,'not-a-time','2026-11-09T00:00:00Z'
+      FROM linggan_material_comment original CROSS JOIN opportunity_seed_package package
+      WHERE original.comment_external_id='c-work-0-1' AND package.work_key='work-1' AND package.kind='comments';
+      INSERT INTO linggan_material_comment_engagement(material_ref,like_count,like_count_state,parser_version,created_at)
+      VALUES(md5('card-bad-revision')::uuid,9999,'KNOWN','comment-like.v1','2026-11-09T00:00:00Z');
+      INSERT INTO linggan_material_author_profile(material_ref,platform,author_external_id,package_ref,record_ordinal,
+        observed_at,display_name,display_name_state,biography,biography_state,follower_count,follower_count_state,created_at)
+      SELECT md5('card-profile:'||profile.ordinal)::uuid,'xhs',profile.creator,package.package_ref,profile.ordinal,
+        profile.observed,profile.name,'KNOWN',NULL,'UNKNOWN',profile.followers,'KNOWN','2026-11-09T00:00:00Z'
+      FROM opportunity_seed_package package CROSS JOIN (VALUES
+        (3001,'creator-C1','2026-11-06T00:00:00Z','SYNTHETIC valid creator',123::bigint),
+        (3002,'creator-C1','not-a-time','SYNTHETIC invalid creator',999::bigint),
+        (3003,'creator-C2','not-a-time','SYNTHETIC invalid only',888::bigint)
+      ) profile(ordinal,creator,observed,name,followers)
+      WHERE package.work_key='work-0' AND package.kind='comments';
+      INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,
+        observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,
+        published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,
+        published_at,published_at_source_field,published_at_source_kind,published_at_precision,
+        published_at_parser_version,created_at)
+      SELECT md5('card-bad-detail')::uuid,detail.content_public_ref,package.package_ref,3004,
+        'not-a-time','SYNTHETIC invalid detail','KNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN',
+        'seed','synthetic-invalid-author',detail.published_at,detail.published_at_source_field,
+        detail.published_at_source_kind,detail.published_at_precision,detail.published_at_parser_version,'2026-11-09T00:00:00Z'
+      FROM linggan_material_content_detail detail CROSS JOIN opportunity_seed_package package
+      WHERE detail.content_public_ref='00000000-0000-4000-8000-000000000100' AND detail.record_ordinal=0
+        AND package.work_key='work-0' AND package.kind='comments';
+    "#).execute(db.pool()).await.unwrap();
+    let report = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .expect("one malformed observation must not abort the entire card build");
+    assert!(report.cards_built > 0);
+    let invalid = report.unparseable_observations.as_ref().unwrap();
+    assert_eq!(invalid.comments, 3);
+    assert_eq!(invalid.creator_profiles, 2);
+    assert_eq!(invalid.work_details, 1);
+    assert_eq!(invalid.work_discoveries, 0);
+    assert_eq!(invalid.work_lanes, 0);
+    assert_eq!(
+        report.voice_exclusion_reasons.get("bodyUnavailable"),
+        Some(&(baseline_unavailable + 1))
+    );
+    let card = p1(&db).await;
+    let excluded = card["exclusions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["reason"] == "observed_at_unparseable")
+        .unwrap();
+    assert_eq!(excluded["comments"], 1);
+    let voices = card["demand"]["sampleVoices"].as_array().unwrap();
+    assert_eq!(voices[0]["commentRef"]["commentExternalId"], "c-work-0-1");
+    assert_eq!(voices[0]["likes"], 40);
+    assert_eq!(voices[0]["text"], "SYNTHETIC 原声 c-work-0-1");
+    assert!(
+        voices
+            .iter()
+            .all(|voice| voice["commentRef"]["commentExternalId"] != "c-work-0-2")
+    );
+    let admitted_is_eligible: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM \
+        linggan_opportunity_eligible_comments($1,'2026-11-10T00:00:00Z','Asia/Shanghai','work_published_cohort') \
+        WHERE comment_external_id='c-work-0-2')")
+        .bind(domain).fetch_one(db.pool()).await.unwrap();
+    assert!(
+        admitted_is_eligible,
+        "a known first admission remains a valid first time"
+    );
+    let groups = card["channel"]["groups"].as_array().unwrap();
+    let creators: Vec<_> = groups
+        .iter()
+        .flat_map(|group| {
+            group["ranked"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .chain(group["insufficient"].as_array().unwrap())
+        })
+        .collect();
+    let c1 = creators
+        .iter()
+        .find(|creator| creator["creatorId"] == "creator-C1")
+        .unwrap();
+    assert_eq!(c1["name"], "SYNTHETIC valid creator");
+    assert_eq!(c1["followers"], 123);
+    let c2 = creators
+        .iter()
+        .find(|creator| creator["creatorId"] == "creator-C2")
+        .unwrap();
+    assert!(c2["name"].is_null() && c2["followers"].is_null());
+}
+
 async fn payload_contains_comment(db: &linggan_storage_postgres::Database, content: Uuid) -> bool {
     sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_opportunity_opportunity_card card \
          CROSS JOIN LATERAL jsonb_array_elements(card.payload#>'{demand,sampleVoices}') voice \

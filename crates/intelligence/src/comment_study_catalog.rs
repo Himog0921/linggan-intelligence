@@ -87,6 +87,8 @@ pub struct CleanCacheRefresh {
     pub inserted_count: usize,
     pub already_present_count: usize,
     pub skipped_count: usize,
+    /// Observation rows in the domain, separate from stable-comment exclusion counts.
+    pub unparseable_observation_count: usize,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -152,12 +154,20 @@ pub async fn refresh_clean_cache(
         .bind(domain_ref)
         .fetch_all(&mut *transaction)
         .await?;
+    let invalid: i64 = rows
+        .first()
+        .ok_or(StudyCatalogError::ProjectionInvalid)?
+        .try_get("unparseable_observations")?;
     let mut report = CleanCacheRefresh {
-        examined_count: rows.len(),
+        unparseable_observation_count: usize::try_from(invalid)
+            .map_err(|_| StudyCatalogError::ProjectionInvalid)?,
         ..CleanCacheRefresh::default()
     };
     for row in rows {
-        let source_ref: Uuid = row.try_get("material_ref")?;
+        let Some(source_ref) = row.try_get::<Option<Uuid>, _>("material_ref")? else {
+            continue;
+        };
+        report.examined_count += 1;
         let raw_prefix: String = row.try_get("raw_prefix")?;
         let item = projection(&raw_prefix, row.try_get("raw_sha256")?)?;
         let written = sqlx::query(include_str!("comment_study_catalog/insert_clean_cache.sql"))
@@ -224,6 +234,8 @@ pub async fn maintain_comment_catalog(
         total.inserted_count += report.inserted_count;
         total.already_present_count += report.already_present_count;
         total.skipped_count += report.skipped_count;
+        // A work shared by domains contributes once per domain in this maintenance total.
+        total.unparseable_observation_count += report.unparseable_observation_count;
     }
     Ok(Some(total))
 }

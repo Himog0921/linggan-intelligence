@@ -143,8 +143,8 @@ pub(super) async fn creators(
            CASE WHEN p.follower_count_state='KNOWN' THEN p.follower_count END AS follower_count \
            FROM linggan_material_author_profile p JOIN linggan_runtime_capture_package package USING(package_ref) \
            WHERE p.platform='xhs' AND p.author_external_id=density.creator_id AND p.created_at<=$5::timestamptz \
-             AND package.accepted_at<=$5::timestamptz \
-           ORDER BY p.observed_at::timestamptz DESC,p.created_at DESC,p.material_ref DESC LIMIT 1) profile ON true \
+             AND package.accepted_at<=$5::timestamptz AND linggan_opportunity_observed_at(p.observed_at) IS NOT NULL \
+           ORDER BY linggan_opportunity_observed_at(p.observed_at) DESC,p.created_at DESC,p.material_ref DESC LIMIT 1) profile ON true \
          WHERE density.problem_ref=$2 AND density.taxonomy_version=$3 AND density.metric_def_version=$4 \
            AND density.computed_as_of=$5::timestamptz AND density.window_days=$6 \
          ORDER BY density.protocol_version NULLS LAST,density.creator_id",

@@ -8,9 +8,9 @@ use fixture::{proof_database, submit_package_at};
 use linggan_intelligence::ai_foundation::comment_research_overview;
 use linggan_intelligence::comment_study_catalog::{
     CatalogStudyState, CatalogSummaryQuery, CatalogVoiceRole, CommentCatalogQuery,
-    CommentDetailQuery, StudyCatalogError, WordCloudQuery, read_catalog_summary,
-    read_comment_catalog, read_comment_detail, read_word_cloud, read_work_catalog,
-    refresh_clean_cache,
+    CommentDetailQuery, CommentHistoryQuery, StudyCatalogError, WordCloudQuery,
+    read_catalog_summary, read_comment_catalog, read_comment_detail, read_comment_history,
+    read_comment_versions, read_word_cloud, read_work_catalog, refresh_clean_cache,
 };
 use linggan_intelligence::comment_study_source::{
     ADHD_DOMAIN_REF, eligible_sources, eligible_sources_for_works,
@@ -191,6 +191,297 @@ async fn catalog_likes_only_use_projections_available_at_the_requested_time() {
         .unwrap();
     let newest_known = read_comment_catalog(&db, &query()).await.unwrap();
     assert_eq!(newest_known["items"][0]["likeCount"], 42);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn malformed_observations_are_not_selected_by_catalog_or_study() {
+    let db = database("catalog_bad_observation_time").await;
+    detail_with_author(&db, "catalog-bad-time", "SYNTHETIC 时间", Some("creator")).await;
+    let valid = add_comment(
+        &db,
+        "catalog-bad-time",
+        "same",
+        "SYNTHETIC valid voice",
+        Some("reader"),
+    )
+    .await;
+    cache(&db).await;
+    let invalid = comment_with_author(
+        &db,
+        "catalog-bad-time",
+        "same",
+        "SYNTHETIC invalid revision",
+        Some("reader"),
+        "2026-09-22T08:00:00Z",
+    )
+    .await;
+    let invalid_only = add_comment(
+        &db,
+        "catalog-bad-time",
+        "invalid-only",
+        "SYNTHETIC invalid only",
+        Some("reader"),
+    )
+    .await;
+    sqlx::raw_sql("ALTER TABLE linggan_material_comment DISABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE linggan_material_comment SET observed_at='not-a-time' WHERE material_ref=ANY($1)",
+    )
+    .bind(vec![invalid, invalid_only])
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql(
+        "ALTER TABLE linggan_material_comment ENABLE TRIGGER USER; \
+        ALTER TABLE linggan_material_comment_engagement DISABLE TRIGGER USER",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    for (source, likes) in [(valid, 11_i64), (invalid, 999_i64)] {
+        sqlx::query("INSERT INTO linggan_material_comment_engagement(material_ref,like_count,like_count_state,parser_version,created_at) \
+            VALUES($1,$2,'KNOWN','comment-like.v1',clock_timestamp()) ON CONFLICT(material_ref) DO UPDATE \
+            SET like_count=$2,like_count_state='KNOWN',created_at=clock_timestamp()")
+            .bind(source).bind(likes).execute(db.pool()).await.unwrap();
+    }
+    sqlx::raw_sql("ALTER TABLE linggan_material_comment_engagement ENABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+
+    let refresh = refresh_clean_cache(&db, query().domain, 200).await.unwrap();
+    assert_eq!(
+        refresh.examined_count, 0,
+        "bad observations are not cleaning candidates"
+    );
+    assert_eq!(refresh.unparseable_observation_count, 2);
+    let catalog = read_comment_catalog(&db, &query()).await.unwrap();
+    let items = catalog["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["sourceRef"], valid.to_string());
+    assert_eq!(items[0]["commentText"], "SYNTHETIC valid voice");
+    assert_eq!(items[0]["likeCount"], 11);
+    let work: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(valid)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let dossier_comments = linggan_evidence::read_dossier_comments(&db, work, None)
+        .await
+        .expect("shared current comments must tolerate invalid observation times");
+    assert!(
+        dossier_comments["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["sourceRef"] == valid.to_string())
+    );
+    assert!(
+        !dossier_comments
+            .to_string()
+            .contains("SYNTHETIC invalid revision")
+    );
+    let detail_query = CommentDetailQuery {
+        domain: query().domain,
+        work_ref: work,
+        comment_external_id: "same".to_owned(),
+    };
+    let detail = read_comment_detail(&db, &detail_query).await.unwrap();
+    assert_eq!(
+        detail["materialVersions"]["totalCount"], 2,
+        "history retains observation metadata"
+    );
+    let versions = detail["materialVersions"]["items"].as_array().unwrap();
+    let malformed = versions
+        .iter()
+        .find(|v| v["sourceRef"] == invalid.to_string())
+        .unwrap();
+    assert!(malformed["observedAt"].is_null());
+    assert_eq!(malformed["isCurrent"], false);
+    let as_of: String = sqlx::query_scalar(
+        "SELECT to_char(clock_timestamp() AT TIME ZONE 'UTC', \
+        'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let invalid_detail = read_comment_detail(
+        &db,
+        &CommentDetailQuery {
+            domain: query().domain,
+            work_ref: work,
+            comment_external_id: "invalid-only".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(invalid_detail["source"]["sourceState"], "unknown");
+    assert!(invalid_detail["source"]["sourceRef"].is_null());
+    assert!(invalid_detail["comment"].is_null());
+    assert_eq!(invalid_detail["materialVersions"]["totalCount"], 1);
+    assert!(
+        !invalid_detail
+            .to_string()
+            .contains("SYNTHETIC invalid only")
+    );
+    let history_query = CommentHistoryQuery {
+        domain: query().domain,
+        work_ref: work,
+        comment_external_id: "invalid-only".to_owned(),
+        cursor: None,
+        limit: Some(5),
+    };
+    let versions = read_comment_versions(&db, &history_query).await.unwrap();
+    assert_eq!(versions["totalCount"], 1);
+    assert!(versions["items"][0]["observedAt"].is_null());
+    assert_eq!(
+        read_comment_history(&db, &history_query).await.unwrap()["totalCount"],
+        0
+    );
+    let foreign_query = CommentDetailQuery {
+        domain: Uuid::from_u128(0x0000_0000_0000_4000_8000_0000_0000_0002),
+        work_ref: work,
+        comment_external_id: "invalid-only".to_owned(),
+    };
+    assert!(matches!(
+        read_comment_detail(&db, &foreign_query).await,
+        Err(StudyCatalogError::ResourceNotFound)
+    ));
+    let preview =
+        linggan_intelligence::comment_study_source::preview_sources(&db, query().domain, &as_of)
+            .await
+            .unwrap();
+    assert_eq!(
+        (preview.total_comment_count, preview.eligible_comment_count),
+        (2, 1)
+    );
+    assert_eq!(preview.excluded_counts.body_unavailable, 1);
+    assert_eq!(preview.unparseable_observation_count, 2);
+    let sources = eligible_sources(&db, query().domain, &as_of, 100)
+        .await
+        .unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].source_ref, valid);
+    let mut tx = db.pool().begin().await.unwrap();
+    let role = linggan_intelligence::comment_study_source::StudySourceRole::Primary;
+    let selected = linggan_intelligence::comment_study_source::selected_source_in(
+        &mut tx,
+        query().domain,
+        work,
+        valid,
+        role,
+        &as_of,
+    )
+    .await
+    .unwrap();
+    assert!(selected.is_some());
+    let rejected = linggan_intelligence::comment_study_source::selected_source_in(
+        &mut tx,
+        query().domain,
+        work,
+        invalid,
+        role,
+        &as_of,
+    )
+    .await
+    .unwrap();
+    assert!(rejected.is_none());
+    assert!(
+        linggan_evidence::read_creation_comment_in(&mut tx, invalid)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    tx.rollback().await.unwrap();
+
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'invalid-only','synthetic restriction')")
+        .bind(work).execute(db.pool()).await.unwrap();
+    let restricted_detail = read_comment_detail(
+        &db,
+        &CommentDetailQuery {
+            domain: query().domain,
+            work_ref: work,
+            comment_external_id: "invalid-only".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(restricted_detail["source"]["sourceState"], "restricted");
+    assert!(restricted_detail["source"]["sourceRef"].is_null());
+    assert!(restricted_detail["comment"].is_null());
+
+    let reply = research_fixture::reply_with_author(
+        &db,
+        "catalog-bad-time",
+        "reply",
+        "same",
+        "SYNTHETIC valid reply",
+        Some("reader-two"),
+        "2026-09-23T08:00:00Z",
+    )
+    .await;
+    cache(&db).await;
+    let reply_detail = read_comment_detail(
+        &db,
+        &CommentDetailQuery {
+            domain: query().domain,
+            work_ref: work,
+            comment_external_id: "reply".to_owned(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reply_detail["parentContext"]["sourceRef"],
+        valid.to_string()
+    );
+    assert_eq!(
+        reply_detail["parentContext"]["commentText"],
+        "SYNTHETIC valid voice"
+    );
+    let mut tx = db.pool().begin().await.unwrap();
+    let creation_reply = linggan_evidence::read_creation_comment_in(&mut tx, reply)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        creation_reply["parentComment"]["sourceRef"],
+        valid.to_string()
+    );
+    tx.rollback().await.unwrap();
+    let sources = eligible_sources(&db, query().domain, &as_of, 100)
+        .await
+        .unwrap();
+    assert!(
+        sources.iter().all(|source| source.source_ref != reply),
+        "a source created after as_of remains invisible"
+    );
+
+    detail_with_author(
+        &db,
+        "catalog-bad-time",
+        "SYNTHETIC bad detail",
+        Some("bad-author"),
+    )
+    .await;
+    sqlx::raw_sql("ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; \
+        UPDATE linggan_material_content_detail SET observed_at='not-a-time' WHERE author_external_id='bad-author'; \
+        ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER")
+        .execute(db.pool()).await.unwrap();
+    let catalog = read_comment_catalog(&db, &query()).await.unwrap();
+    assert!(
+        catalog["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["sourceRef"] == valid.to_string())
+    );
 }
 
 #[tokio::test]

@@ -105,11 +105,8 @@ proof_database_created=1
 export OPPORTUNITY_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 
 LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
-  cargo test -p linggan-intelligence --test comment_study_catalog_read_postgres --locked \
-    -- --ignored --exact catalog_likes_only_use_projections_available_at_the_requested_time --test-threads=1
-LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
-  cargo test -p linggan-intelligence --test comment_study_catalog_read_postgres --locked \
-    -- --ignored --exact catalog_and_study_sources_share_the_author_known_at_the_requested_time --test-threads=1
+  cargo test -p linggan-intelligence --test comment_study_catalog_read_postgres \
+    --test comment_study_start_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_mentions_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_asof_postgres --locked -- --ignored --test-threads=1
@@ -121,6 +118,33 @@ cargo test -p linggan-intelligence --test opportunity_metrics_postgres --locked 
 LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
   cargo test -p linggan-evidence --test creator_discovery_postgres --locked \
     -- --ignored --exact profile_only_author_uses_the_shared_as_of_owner --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-evidence --test creator_discovery_postgres --locked \
+    -- --ignored --exact author_name_projection_keeps_sourced_names_and_unknowns --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-evidence --test material_projection_postgres --locked \
+    -- --ignored --test-threads=1
+# These existing dispatch tests use synthetic identities and the governance-stage fixture, as in
+# the repository's collection proof runners; no producer or platform connection is started.
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" LINGGAN_COLLECTION_UPGRADE_PHASE=governance \
+  cargo test -p linggan-evidence --test content_reobservation_postgres --locked \
+    -- --ignored --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-evidence --test corpus_performance_postgres --locked \
+    -- --ignored --exact keyset_snapshot_search_and_scan_budget_remain_bounded --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-intelligence --test comment_study_inspection_postgres --locked \
+    -- --ignored --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-intelligence --test target_inspection_postgres --locked \
+    -- --ignored --exact keyword_round_membership_and_exact_observation_changes_preserve_cutoff --test-threads=1
+mkdir -p "$project_root/artifacts/private/opportunity-api-fixtures"
+proof_media_dir="$(mktemp -d "$project_root/artifacts/private/opportunity-api-fixtures/${proof_suffix}.XXXXXXXX")"
+chmod 700 "$proof_media_dir"
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" LINGGAN_LOCAL_MEDIA_ROOT="$proof_media_dir" \
+  cargo test -p linggan-api --locked malformed_discovery_cannot_break_detail_or_supply_reobservation_authority \
+    -- --ignored --test-threads=1
+echo "Synthetic API media fixtures retained: $proof_media_dir"
 
 # Exercise the real 0177 publication path with an owned loopback model stub. The synthetic digest
 # key exists only in this temporary private directory and is never printed or committed.

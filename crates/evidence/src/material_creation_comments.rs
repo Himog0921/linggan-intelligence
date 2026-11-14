@@ -32,8 +32,10 @@ pub async fn read_creation_comments_at_in(
          LEFT JOIN LATERAL (SELECT p.* FROM linggan_material_comment p JOIN linggan_runtime_capture_package pp USING(package_ref) \
            WHERE c.is_reply AND p.content_public_ref=c.content_public_ref AND p.comment_external_id=c.parent_comment_external_id \
              AND p.created_at<=$2::timestamptz AND pp.accepted_at<=$2::timestamptz \
-           ORDER BY p.observed_at::timestamptz DESC,p.created_at DESC,p.material_ref DESC LIMIT 1) parent ON true \
-         WHERE c.material_ref=ANY($1) AND c.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz"
+             AND linggan_opportunity_observed_at(p.observed_at) IS NOT NULL \
+           ORDER BY linggan_opportunity_observed_at(p.observed_at) DESC,p.created_at DESC,p.material_ref DESC LIMIT 1) parent ON true \
+         WHERE c.material_ref=ANY($1) AND c.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz \
+           AND linggan_opportunity_observed_at(c.observed_at) IS NOT NULL"
     ).bind(sources).bind(as_of).fetch_all(&mut **tx).await?;
     let works: Vec<Uuid> = rows
         .iter()

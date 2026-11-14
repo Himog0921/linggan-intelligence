@@ -34,7 +34,7 @@ pub(super) async fn select(
          JOIN linggan_comment_problem_membership membership ON membership.request_ref=mention.source_request_ref \
            AND membership.signal_ordinal=mention.source_signal_ordinal AND membership.created_at<=$2::timestamptz \
          JOIN linggan_material_comment original ON original.material_ref=mention.source_material_ref \
-         JOIN linggan_material_comment current ON current.material_ref=q.material_ref \
+         LEFT JOIN linggan_material_comment current ON current.material_ref=q.material_ref \
          LEFT JOIN like_heads likes ON likes.content_public_ref=q.content_public_ref \
            AND likes.comment_external_id=q.comment_external_id \
          ORDER BY likes.like_count DESC NULLS LAST,eligible.first_observed_at,\
@@ -57,11 +57,11 @@ pub(super) async fn select(
     let mut voices = Vec::new();
     let mut excluded = BTreeMap::new();
     for row in rows {
-        if voices.len() == MAX_SAMPLE_VOICES {
-            break;
-        }
         if let Some(reason) = row.try_get::<Option<String>, _>("exclusion_reason")? {
             *excluded.entry(reason).or_default() += 1;
+            continue;
+        }
+        if voices.len() == MAX_SAMPLE_VOICES {
             continue;
         }
         if !row.try_get::<bool, _>("same_body")? {

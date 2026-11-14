@@ -292,3 +292,73 @@ async fn shared_author_and_work_anchor_do_not_read_future_observations() {
     .unwrap();
     assert_eq!(missing.as_deref(), Some("period_anchor_missing"));
 }
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn shared_author_skips_bad_time_and_preserves_valid_source_priority() {
+    let db = database("opportunity_author_bad_observation_time").await;
+    sqlx::raw_sql(SHARED_AUTHOR_SQL)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::raw_sql(r#"
+      ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER;
+      UPDATE linggan_material_content_detail SET observed_at='not-a-time'
+      WHERE material_ref=md5('asof-future-detail')::uuid;
+      ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;
+      INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason)
+      SELECT package_ref,1,'accepted_for_library_content','synthetic bad author detail'
+      FROM opportunity_seed_package WHERE work_key='work-unknown' AND kind='detail';
+      INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,
+        observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,
+        published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,
+        published_at,published_at_source_field,published_at_source_kind,published_at_precision,
+        published_at_parser_version,created_at)
+      SELECT md5('asof-bad-higher-priority')::uuid,content_public_ref,package_ref,1,
+        'not-a-time',title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,
+        published_at_source_text,published_at_source_text_state,searchable_text,'synthetic-bad-author',
+        published_at,published_at_source_field,published_at_source_kind,published_at_precision,
+        published_at_parser_version,'2026-11-10T02:00:00Z'
+      FROM linggan_material_content_detail
+      WHERE content_public_ref='00000000-0000-4000-8000-000000000201' AND record_ordinal=0;
+    "#).execute(db.pool()).await.unwrap();
+    let author: String = sqlx::query_scalar(
+        "SELECT author_external_id FROM linggan_material_content_author_at( \
+        '00000000-0000-4000-8000-000000000100','2026-11-10T03:00:00Z')",
+    )
+    .fetch_one(db.pool())
+    .await
+    .expect("a bad later observation must not break shared author selection");
+    assert_eq!(author, "author-work-0");
+    let fallback: String = sqlx::query_scalar(
+        "SELECT author_external_id FROM linggan_material_content_author_at( \
+        '00000000-0000-4000-8000-000000000201','2026-11-10T03:00:00Z')",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        fallback, "synthetic-profile-author",
+        "a bad detail must not hide a valid discovery author"
+    );
+    sqlx::raw_sql(
+        "ALTER TABLE linggan_material_discovery_finding DISABLE TRIGGER USER; \
+        UPDATE linggan_material_discovery_finding SET observed_at='not-a-time' \
+        WHERE content_public_ref='00000000-0000-4000-8000-000000000201'; \
+        ALTER TABLE linggan_material_discovery_finding ENABLE TRIGGER USER",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let no_author: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_content_author_at( \
+        '00000000-0000-4000-8000-000000000201','2026-11-10T03:00:00Z')",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        no_author, 0,
+        "no parseable observation means unknown author"
+    );
+}

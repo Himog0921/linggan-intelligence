@@ -1,7 +1,8 @@
 -- Material observations are not distinct comments. Metadata only, never old-body fallback.
 -- $1 domain; $2 work; $3 comment id; $4 asOf; $5 created-before; $6 ref-before; $7 limit+1.
 WITH scoped AS MATERIALIZED (
-    SELECT source.material_ref, source.package_ref, source.observed_at, source.created_at,
+    SELECT source.material_ref, source.package_ref,
+           linggan_opportunity_observed_at(source.observed_at) AS parsed_observed_at, source.created_at,
            source.body_state, source.body_text IS NOT NULL AS has_body
     FROM linggan_material_comment source
     JOIN linggan_material_content work ON work.public_ref = source.content_public_ref
@@ -30,12 +31,13 @@ SELECT jsonb_build_object(
         ),
         'item', jsonb_build_object(
             'sourceRef', page.material_ref, 'packageRef', page.package_ref,
-            'observedAt', to_char(page.observed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+            'observedAt', to_char(page.parsed_observed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
             'receivedAt', to_char(page.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
             'sourceState', CASE WHEN permission.restricted THEN 'restricted'
                 WHEN page.body_state = 'KNOWN' AND page.has_body THEN 'known' ELSE 'unknown' END,
-            'isCurrent', page.material_ref = (SELECT material_ref FROM scoped
-                ORDER BY observed_at::timestamptz DESC, created_at DESC, material_ref DESC LIMIT 1)
+            'isCurrent', COALESCE(page.material_ref = (SELECT material_ref FROM scoped
+                WHERE parsed_observed_at IS NOT NULL
+                ORDER BY parsed_observed_at DESC, created_at DESC, material_ref DESC LIMIT 1), false)
         )
     ) ORDER BY page.created_at DESC, page.material_ref DESC)
     FROM page CROSS JOIN permission), '[]'::jsonb)

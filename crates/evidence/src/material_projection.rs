@@ -138,7 +138,7 @@ async fn read_latest_material_page(
         if Some(scope.domain) != query.domain_ref() || scope.validate().is_err() {
             return Err(MaterialReadError::InvalidCursor);
         }
-        let data = crate::creator_discovery::load_in(&mut tx, scope)
+        let data = crate::creator_discovery::load_in(&mut tx, scope, Some(&as_of))
             .await
             .map_err(|error| match error {
                 crate::creator_discovery::DiscoveryError::Database(e) => {
@@ -209,7 +209,7 @@ async fn read_latest_material_page(
                 .await?;
         }
         for (row, item) in rows.iter().zip(batch.drain(..)) {
-            scan_observed_at = Some(row.observed_at.clone());
+            scan_observed_at = Some(row.sort_observed_at.clone());
             scan_platform = Some(row.platform.clone());
             scan_content_external_id = Some(row.content_external_id.clone());
             scanned_count += 1;
@@ -239,7 +239,7 @@ async fn read_latest_material_page(
                 material_cursor::for_last_item(
                     query,
                     as_of.clone(),
-                    item.summary.last_observed_at.clone(),
+                    item.sort_observed_at.clone(),
                     item.identity.platform.clone(),
                     item.identity.content_external_id.clone(),
                 ),
@@ -335,7 +335,8 @@ async fn enrich_discovery_batch(
          JOIN linggan_runtime_task task ON task.task_id=package.task_id \
          LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
          WHERE finding.content_public_ref=ANY($1) AND package.accepted_at <= $2::timestamptz \
-         ORDER BY finding.content_public_ref,finding.observed_at::timestamptz DESC,finding.created_at DESC), \
+           AND finding.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(finding.observed_at) IS NOT NULL \
+         ORDER BY finding.content_public_ref,linggan_opportunity_observed_at(finding.observed_at) DESC,finding.created_at DESC), \
          retained AS (SELECT package_ref,count(*) AS retained_count FROM linggan_material_discovery_finding \
              WHERE package_ref IN(SELECT package_ref FROM latest) GROUP BY package_ref) \
          SELECT latest.*,retained.retained_count FROM latest JOIN retained USING(package_ref)"
@@ -901,7 +902,8 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
                 AND to_regclass('linggan_material_discovery_finding') IS NOT NULL \
                 AND to_regclass('linggan_material_comment_current') IS NOT NULL \
                 AND to_regclass('linggan_creator_discovery_threshold') IS NOT NULL \
-                AND to_regproc('linggan_material_content_author_at') IS NOT NULL",
+                AND to_regproc('linggan_material_content_author_at') IS NOT NULL \
+                AND to_regprocedure('linggan_opportunity_observed_at(text)') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await?;
@@ -921,6 +923,12 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
                             WHERE migration_id = '0032_author_profile_avatar_media') \
                 AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
                             WHERE migration_id = '0115_creator_discovery') \
+                AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
+                            WHERE migration_id = '0204_opportunity_comment_eligibility') \
+                AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
+                            WHERE migration_id = '0217_opportunity_author_observation_time') \
+                AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
+                            WHERE migration_id = '0218_comment_current_safe_observation') \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() \
                               AND table_name='linggan_material_content_detail' \
@@ -1038,7 +1046,10 @@ pub(crate) fn material_item(
             "transcript":{"state":"NOT_OBSERVED","relationship":"content.transcript","resources":[]},
             "commentImages":{"state":"NOT_OBSERVED","relationship":"comment.image","items":[]}
         }),
-        lane_summaries: default_lane_summaries(&observed_at, current.detail_material_ref.is_some()),
+        lane_summaries: default_lane_summaries(
+            observed_at.as_deref(),
+            current.detail_material_ref.is_some(),
+        ),
         summary: MaterialSummary {
             last_observed_at: observed_at.clone(),
             primary_limitation: "OTHER_LANES_NOT_EVALUATED",
@@ -1066,6 +1077,7 @@ pub(crate) fn material_item(
         matched_fields,
         evidence_fragment: None,
         material_readiness: None,
+        sort_observed_at: current.sort_observed_at.clone(),
         author_external_id: current.author_external_id.clone(),
         body_text: body,
     }
@@ -1132,9 +1144,8 @@ async fn read_resource_batch(
         }
     }
     items.sort_by(|a, b| {
-        b.summary
-            .last_observed_at
-            .cmp(&a.summary.last_observed_at)
+        b.sort_observed_at
+            .cmp(&a.sort_observed_at)
             .then_with(|| a.identity.platform.cmp(&b.identity.platform))
             .then_with(|| {
                 a.identity

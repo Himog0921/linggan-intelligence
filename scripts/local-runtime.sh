@@ -528,6 +528,8 @@ migrate() {
   apply_migration_once "0214_content_understanding_offline_recovery" "$project_root/database/migrations/0214_content_understanding_offline_recovery.sql"
   apply_migration_once "0215_opportunity_creator_problem_density" "$project_root/database/migrations/0215_opportunity_creator_problem_density.sql"
   apply_migration_once "0216_opportunity_card_read_model" "$project_root/database/migrations/0216_opportunity_card_read_model.sql"
+  apply_migration_once "0217_opportunity_author_observation_time" "$project_root/database/migrations/0217_opportunity_author_observation_time.sql"
+  apply_migration_once "0218_comment_current_safe_observation" "$project_root/database/migrations/0218_comment_current_safe_observation.sql"
 }
 
 case "$command_name" in

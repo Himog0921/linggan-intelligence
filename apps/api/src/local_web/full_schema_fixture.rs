@@ -338,6 +338,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0214_content_understanding_offline_recovery.sql"),
     include_str!("../../../../database/migrations/0215_opportunity_creator_problem_density.sql"),
     include_str!("../../../../database/migrations/0216_opportunity_card_read_model.sql"),
+    include_str!("../../../../database/migrations/0217_opportunity_author_observation_time.sql"),
+    include_str!("../../../../database/migrations/0218_comment_current_safe_observation.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -494,4 +496,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0214_content_understanding_offline_recovery','80e6c91db5fa3eae34d23d1d8ac09d991855592f9ca93f5aa36a4bae5c675eb6');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0215_opportunity_creator_problem_density','b8a6a54f6de2edff554d7f4cb633150fdb249c331a160ba2783f794fcc332396');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0216_opportunity_card_read_model','a2ab38f0da68e73226d9b791a1efbc6c40cdbcb24b0c82c860b32ec4806b34e9');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0217_opportunity_author_observation_time','fb01a9d861b72d9da193a0f27ce70bb2fbf11250fbce20223dcbef64afb02403');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0218_comment_current_safe_observation','7bd129b708dcf89348b4e1786c3cec5fa2415e4c8c0bca0fab4e88a5b0d516e7');\n",
 );

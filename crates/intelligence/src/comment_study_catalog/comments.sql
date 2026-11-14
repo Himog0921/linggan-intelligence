@@ -153,14 +153,14 @@ SELECT jsonb_build_object(
                 ELSE 'recorded'
             END,
             'signalKinds', to_jsonb(page.signal_kinds),
-            'observedAt', to_char(page.observed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+            'observedAt', to_char(linggan_opportunity_observed_at(page.observed_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
             'receivedAt', to_char(page.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
             'authorDisplayName', page.author_display_name, 'authorExternalId', page.author_external_id,
             'parentCommentKey', CASE WHEN page.parent_comment_external_id IS NULL THEN NULL
                 ELSE jsonb_build_object('workRef', page.content_public_ref, 'commentExternalId', page.parent_comment_external_id) END,
             'likeCount', page.like_count,
             'likeCountAsOf', CASE WHEN page.like_count IS NULL THEN NULL
-                ELSE to_char(page.like_observed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') END,
+                ELSE to_char(linggan_opportunity_observed_at(page.like_observed_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') END,
             'publishedAt', NULL,
             'postUsage', jsonb_build_object(
                 'state', CASE WHEN page.usage_action = 'marked' THEN 'used' ELSE 'unused' END,

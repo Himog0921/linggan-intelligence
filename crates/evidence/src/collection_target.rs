@@ -1195,12 +1195,12 @@ pub async fn register_discovered_creator(
     let mut scope: linggan_contracts::creator_discovery::CreatorScope =
         serde_json::from_value(serde_json::json!({"domain":domain}))
             .map_err(|_| DiscoveryError::Invalid("invalid_domain"))?;
-    let mut data = load_in(&mut tx, &scope).await?;
+    let mut data = load_in(&mut tx, &scope, None).await?;
     if !data.observation_lookup_available {
         return Err(DiscoveryError::Invalid("observation_lookup_unavailable"));
     }
     scope.usage_role = "reference".into();
-    let reference_data = load_in(&mut tx, &scope).await?;
+    let reference_data = load_in(&mut tx, &scope, None).await?;
     if !reference_data.observation_lookup_available {
         return Err(DiscoveryError::Invalid("observation_lookup_unavailable"));
     }

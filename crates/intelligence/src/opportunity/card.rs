@@ -56,6 +56,19 @@ pub struct CardRebuildReport {
     pub changes_deferred: usize,
     pub voices_excluded: usize,
     pub voice_exclusion_reasons: BTreeMap<String, usize>,
+    /// Counts observation rows in this domain snapshot, not distinct comments or creators.
+    /// None means the rebuild had no due cards and did not evaluate these diagnostics.
+    pub unparseable_observations: Option<UnparseableObservations>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnparseableObservations {
+    pub comments: i64,
+    pub creator_profiles: i64,
+    pub work_details: i64,
+    pub work_discoveries: i64,
+    pub work_lanes: i64,
 }
 
 /// Recalculate and publish cards for one domain using a consistent current snapshot.
@@ -91,6 +104,7 @@ pub async fn rebuild_opportunity_cards(
         changes_deferred,
         voices_excluded: 0,
         voice_exclusion_reasons: BTreeMap::new(),
+        unparseable_observations: None,
     };
     if pending.is_empty() {
         tx.commit().await?;
@@ -104,6 +118,8 @@ pub async fn rebuild_opportunity_cards(
         RebuildMode::Incremental,
     )
     .await?;
+    report.unparseable_observations =
+        Some(unparseable_observations(&mut tx, domain, &as_of, version).await?);
     let taxonomy: i64 =
         sqlx::query_scalar("SELECT linggan_opportunity_taxonomy_version_at($1,$2::timestamptz)")
             .bind(domain)
@@ -156,6 +172,62 @@ pub async fn rebuild_opportunity_cards(
     }
     tx.commit().await?;
     Ok(report)
+}
+
+async fn unparseable_observations(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    as_of: &str,
+    version: i32,
+) -> Result<UnparseableObservations, sqlx::Error> {
+    let (comments, creator_profiles, work_details, work_discoveries, work_lanes): (
+        i64,
+        i64,
+        i64,
+        i64,
+        i64,
+    ) = sqlx::query_as(
+        "WITH domain_works AS MATERIALIZED (SELECT DISTINCT usage.content_public_ref \
+           FROM linggan_material_domain_usage usage WHERE usage.domain_ref=$1 \
+             AND (usage.basis_kind='legacy_domain_migration' OR usage.created_at<=$2::timestamptz)) \
+         SELECT \
+           (SELECT COALESCE(sum(fact.unparseable_observations),0)::bigint \
+            FROM linggan_opportunity_comment_fact_at($2::timestamptz) fact \
+            JOIN domain_works work ON work.content_public_ref=fact.content_ref), \
+           (SELECT count(*) FROM linggan_material_author_profile profile \
+            JOIN linggan_runtime_capture_package package USING(package_ref) \
+            WHERE profile.platform='xhs' AND profile.created_at<=$2::timestamptz \
+              AND package.accepted_at<=$2::timestamptz \
+              AND linggan_opportunity_observed_at(profile.observed_at) IS NULL \
+              AND EXISTS (SELECT 1 FROM linggan_opportunity_creator_problem_density density \
+                JOIN linggan_opportunity_problem problem USING(problem_ref) \
+                WHERE problem.domain_ref=$1 AND density.creator_id=profile.author_external_id \
+                  AND density.metric_def_version=$3 AND density.computed_as_of=$2::timestamptz)), \
+           (SELECT count(*) FROM linggan_material_content_detail detail \
+            JOIN domain_works work USING(content_public_ref) JOIN linggan_runtime_capture_package package USING(package_ref) \
+            WHERE detail.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz \
+              AND linggan_opportunity_observed_at(detail.observed_at) IS NULL), \
+           (SELECT count(*) FROM linggan_material_discovery_finding finding \
+            JOIN domain_works work USING(content_public_ref) JOIN linggan_runtime_capture_package package USING(package_ref) \
+            WHERE finding.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz \
+              AND linggan_opportunity_observed_at(finding.observed_at) IS NULL), \
+           (SELECT count(*) FROM linggan_material_lane_observation lane \
+            JOIN domain_works work USING(content_public_ref) JOIN linggan_runtime_capture_package package USING(package_ref) \
+            WHERE lane.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz \
+              AND linggan_opportunity_observed_at(lane.observed_at) IS NULL)",
+    )
+    .bind(domain)
+    .bind(as_of)
+    .bind(version)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(UnparseableObservations {
+        comments,
+        creator_profiles,
+        work_details,
+        work_discoveries,
+        work_lanes,
+    })
 }
 
 async fn touch_sources(

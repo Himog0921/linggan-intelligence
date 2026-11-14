@@ -11,7 +11,10 @@ mod problem_metrics;
 mod stats;
 
 pub(crate) use card::enqueue_source_events;
-pub use card::{CardError, CardRebuildMode, CardRebuildReport, rebuild_opportunity_cards};
+pub use card::{
+    CardError, CardRebuildMode, CardRebuildReport, UnparseableObservations,
+    rebuild_opportunity_cards,
+};
 pub use commenter_hash::{COMMENTER_DIGEST_VERSION, CommenterDigest, CommenterDigestError};
 pub use invariants::{InvariantCheck, InvariantReport, check_invariants};
 pub use mentions::{

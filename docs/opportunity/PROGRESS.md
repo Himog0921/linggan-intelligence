@@ -464,3 +464,21 @@
 
 - Q-30 修复期间，`CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-bad-time-study-proof.sh` 的新增跨模块场景输出 `FAILED. 0 passed; 1 failed`：合成作品详情时间为 `not-a-time` 时，评论目录返回 `InvalidCursor`。`read.rs` 将 PostgreSQL `22007` 映射为该错误。隔离数据库、容器和卷清理已确认。
 - 作品作者共享函数的独立坏时间专项在旧函数上输出 PostgreSQL `22007`、`0 passed; 1 failed`；候选前向迁移 `0217` 上输出 `1 passed; 0 failed`。这些测试使用隔离数据库，尚未执行运行环境迁移。其后确认共享作品读取仍会失败；已登记 D-051 / Q-31，T1.4 暂停并等待负责人裁定。
+
+## 2026-11-14 T1.4 恢复：Q-31 已答复
+
+- 负责人选择方案 A，按 D-051 修复共享作品读取；保留合格来源优先级和 D-041 周期锚点，补跨模块回归。运行环境迁移仍需另行授权。
+- Q-30 的隔离红测在坏时间观察下得到 PostgreSQL `22007`，卡片重建失败；共享评论和作者资料读取已复用既有 `linggan_opportunity_observed_at`。不可解析的观察数单独报告，不冒充评论资格排除人数；无合格观察时保留稳定评论身份并显示未知来源。
+- Q-31 追加前向迁移 `0217_opportunity_author_observation_time.sql` 与 `0218_comment_current_safe_observation.sql`，分别更新既有共享作者函数和当前评论视图；SHA-256 分别为 `fb01a9d861b72d9da193a0f27ce70bb2fbf11250fbce20223dcbef64afb02403` 和 `7bd129b708dcf89348b4e1786c3cec5fa2415e4c8c0bca0fab4e88a5b0d516e7`，已登记运行时清单及完整 schema fixture。旧迁移未改写。`bash scripts/test-local-runtime-schema.sh` 输出 `Fresh and repeat runtime schema migration passed; retired tables absent.`，只在隔离库执行并清理自有证明资源。
+- 证据库共享作品读取只从可解析的详情、发现、互动和渠道观察选择字段；无合格来源时返回未知。未知时间作品用内部排序键跨页，公开时间仍为空。共享作者筛选与评论目录维持请求的 `as_of`，机会卡发布时间锚点仍遵循 D-041。
+- 真实 Axum 路由的隔离红测：`CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-q31-api-proof.sh` 在旧资格查询下返回 503、`0 passed; 1 failed`，原因是坏时间发现来源的 `22007`。修复后通过同一共享解析过滤不可用发现；独立有效作品关联、领域、授权渠道、有效期与撤销检查不变。
+- 扩展整轮 `r2` 在评论目录 `11 passed`、来源启动 `1 passed`、机会卡 `12 / 6 / 4 / 22 passed`、证据库作品读取 `21 passed` 后，复采旧测试因测试进程缺少既有 `LINGGAN_COLLECTION_UPGRADE_PHASE=governance` 前置条件而 `1 passed; 3 failed`，并确认隔离资源清理。该失败没有被计作通过；真实环境的阶段、风险控制和授权均未更改。
+- 修正隔离夹具前置条件后，`CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-q31-tail-proof.sh` 输出复采 `4 passed; 0 failed`、旧版分页游标与扫描预算 `1 passed; 0 failed`、Axum 详情及授权边界 `1 passed; 0 failed`，末尾 `Tail proofs passed` 与隔离资源清理确认。复采测试使用合成身份，不启动生产者或访问平台；同作品双领域、过期、撤销和错误通道均验证拒绝及无新增请求/工单。
+- `npm --prefix apps/web run test -- src/pages/corpus/evidence/observationRecords.test.ts src/pages/corpus/evidence/evidenceDecode.test.ts src/pages/corpus/evidence/RecordsTab.test.tsx` 输出 `Test Files 3 passed (3)`、`Tests 51 passed (51)`。该测试复用锁文件一致的本机依赖，临时链接已移除；它不代表真实页面或业务验收。
+- 接口合成夹具写出的媒体文件已原样保存在 `artifacts/private/opportunity-api-fixtures/`，后续证明将媒体根目录显式隔离；这些文件不加入 Git。
+- 修正夹具前置条件后，`CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash scripts/test-opportunity-postgres.sh` 的完整 `r3` 回归输出评论目录 `11 passed`、研究启动 `1 passed`、机会卡基础/归属/时点/指标 `12 / 6 / 4 / 22 passed`、证据库作品读取 `21 passed`、复采 `4 passed`、旧游标 `1 passed`、评论检查 `4 passed`、目标轨迹 `1 passed`、Axum 详情 `1 passed`、其他作者专项及七组后台门控均通过；总计 97 项通过、0 项失败。末尾输出 `Opportunity PostgreSQL proof passed` 和隔离数据库、容器、卷清理确认；临时依赖链接已移除。
+- `r3` 不变量输出 `totalViolations: 0`、`incomplete: true`；I1、I2、I3、I6、I6b、I7、I8、I9、I11 可用且均为 0，I4、I5、I10 不可用，不计为通过。最终提交独立审阅和远端 CI 仍待完成。
+- 同一隔离编译目录、`CARGO_BUILD_JOBS=2` 下，`cargo test -p linggan-intelligence --lib --locked -- --test-threads=1` 输出 `380 passed; 0 failed; 12 ignored`；`cargo test -p linggan-evidence --lib --locked -- --test-threads=1` 输出 `193 passed; 0 failed; 1 ignored`；`cargo test -p linggan-worker --bin linggan-opportunity --locked -- --test-threads=1` 输出 `2 passed; 0 failed`。`cargo doc -p linggan-intelligence --no-deps --locked` 退出 0。
+- `cargo clippy -p linggan-evidence --lib --locked -- -D warnings` 退出 101，报告 118 项错误；首批位于与 `origin/main` 完全一致的 `crates/evidence/src/acquisition_chain.rs`。按 diff 行范围核对，严格 Clippy 诊断中 18 项指向本次改动过的文件，0 项指向本次新增或修改的行；不据此声称严格 Clippy 通过。`cargo clippy -p linggan-intelligence -p linggan-evidence -p linggan-worker --all-targets --locked -- -A clippy::too_many_lines` 退出 0，保留其他警告。
+- 仅对相对 `origin/main` 变更的 37 个 Rust 文件运行 `rustfmt --edition 2024 --config skip_children=true --check`，退出 0；未运行全仓 `cargo fmt`。`git diff --check origin/main` 退出 0；`bash scripts/ci-preflight.sh origin/main` 输出 `pass 52`、`fail 0`、`Preflight passed`。
+- 已知范围：证据库领域关系的分页读取仍未限制关系创建时间，翻页间新增归属可能影响后页；本次未验证其历史回填合同。另外主题地图、整篇理解和封面补建的既有独立读取仍有时间文本直接转换，坏时间下的实际影响未在本任务隔离复现，不能宣称全程序的旧读取都已覆盖。
