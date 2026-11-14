@@ -5,15 +5,15 @@ mod model;
 mod voices;
 
 use super::{
-    CommenterDigest, MetricCalculationError, MetricExclusion, OpportunityMetricError,
-    OpportunityMetricParams, RebuildMode,
+    CommenterDigest, MentionSyncError, MetricCalculationError, MetricExclusion,
+    OpportunityMetricDefinition, OpportunityMetricError, OpportunityMetricParams, RebuildMode,
 };
 use crate::comment_study_source::StudySourceError;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::{Connection, Postgres, Row, Transaction};
-use std::collections::BTreeMap;
+use sqlx::{Postgres, Row, Transaction};
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -24,6 +24,8 @@ pub enum CardError {
     Metrics(#[from] MetricCalculationError),
     #[error("{0}")]
     Definition(#[from] OpportunityMetricError),
+    #[error("{0}")]
+    MentionSync(#[from] MentionSyncError),
     #[error("{0}")]
     Source(#[from] StudySourceError),
     #[error("opportunity_card_serialization_failed")]
@@ -36,8 +38,6 @@ pub enum CardError {
     InvalidEngagementReference,
     #[error("opportunity_card_newer_result_exists")]
     NewerResultExists,
-    #[error("opportunity_card_source_events_pending")]
-    SourceEventsPending,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,20 +66,10 @@ pub async fn rebuild_opportunity_cards(
     digest: &CommenterDigest,
     mode: CardRebuildMode,
 ) -> Result<CardRebuildReport, CardError> {
-    if mode == CardRebuildMode::Due && !enqueue_source_events(database).await? {
-        return Err(CardError::SourceEventsPending);
+    if mode == CardRebuildMode::Due {
+        enqueue_source_events(database).await?;
     }
-    // A session lock must precede the repeatable-read snapshot. Closing this checked-out
-    // connection on every exit prevents lock leakage without exceeding the pool limit.
-    let mut connection = database.pool().acquire().await?;
-    connection.close_on_drop();
-    sqlx::query(
-        "SELECT pg_advisory_lock_shared(linggan_opportunity_card_restriction_lock_key($1))",
-    )
-    .bind(domain)
-    .execute(&mut *connection)
-    .await?;
-    let mut tx = connection.begin().await?;
+    let mut tx = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *tx)
         .await?;
@@ -89,9 +79,12 @@ pub async fn rebuild_opportunity_cards(
     .fetch_one(&mut *tx)
     .await?;
     let (version, params) = current_definition(&mut tx, &as_of).await?;
-
+    let definition = OpportunityMetricDefinition { version, params };
+    // The membership projection and card calculation must observe the same snapshot.
+    super::mentions::sync_comment_mentions_in(&mut tx, digest, Some(domain), &definition).await?;
+    let params = &definition.params;
     let (pending, changes_deferred) =
-        pending_changes(&mut tx, domain, &as_of, mode, &params).await?;
+        pending_changes(&mut tx, domain, &as_of, mode, params).await?;
     let mut report = CardRebuildReport {
         as_of: as_of.clone(),
         cards_built: 0,
@@ -101,7 +94,6 @@ pub async fn rebuild_opportunity_cards(
     };
     if pending.is_empty() {
         tx.commit().await?;
-        connection.close().await?;
         return Ok(report);
     }
     let metric_report = super::problem_metrics::rebuild_problem_metrics_in(
@@ -123,7 +115,7 @@ pub async fn rebuild_opportunity_cards(
         taxonomy,
         version,
         as_of: &as_of,
-        params: &params,
+        params,
         metric_exclusions: &metric_report.exclusions,
     };
     for pending_row in pending {
@@ -135,6 +127,7 @@ pub async fn rebuild_opportunity_cards(
         .fetch_one(&mut *tx)
         .await?;
         let (card, excluded) = assemble_card(&mut tx, problem, &inputs).await?;
+        touch_sources(&mut tx, problem, &card).await?;
         save(&mut tx, problem, taxonomy, version, &as_of, &card).await?;
         sqlx::query(
             "DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1 AND revision=$2",
@@ -162,8 +155,36 @@ pub async fn rebuild_opportunity_cards(
         .into());
     }
     tx.commit().await?;
-    connection.close().await?;
     Ok(report)
+}
+
+async fn touch_sources(
+    tx: &mut Transaction<'_, Postgres>,
+    problem: Uuid,
+    card: &model::Card,
+) -> Result<(), sqlx::Error> {
+    // Lock both old and replacement voices before changing a card or its reverse index.
+    let old: Vec<(Uuid, String)> = sqlx::query_as(
+        "SELECT content_ref,comment_external_id FROM linggan_opportunity_card_voice_ref WHERE problem_ref=$1",
+    )
+    .bind(problem)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut sources: BTreeSet<_> = old.into_iter().collect();
+    sources.extend(card.demand.sample_voices.iter().map(|voice| {
+        (
+            voice.comment_ref.content_ref,
+            voice.comment_ref.comment_external_id.clone(),
+        )
+    }));
+    for (content, comment) in sources {
+        sqlx::query("SELECT linggan_opportunity_card_touch_source($1,$2)")
+            .bind(content)
+            .bind(&comment)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
 }
 
 async fn current_definition(

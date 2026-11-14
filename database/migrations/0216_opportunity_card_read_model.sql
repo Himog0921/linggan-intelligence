@@ -19,6 +19,23 @@ CREATE TABLE linggan_opportunity_card_voice_ref (
 CREATE INDEX linggan_opportunity_card_voice_ref_source
  ON linggan_opportunity_card_voice_ref(content_ref,comment_external_id,problem_ref);
 
+-- A written version makes a stale repeatable-read snapshot fail instead of publishing
+-- a voice concurrently with a withdrawal. No text or commenter identity is stored here.
+CREATE TABLE linggan_opportunity_card_source_guard (
+ content_ref uuid NOT NULL REFERENCES linggan_material_content(public_ref),
+ comment_external_id text NOT NULL,
+ revision bigint NOT NULL DEFAULT 1 CHECK (revision > 0),
+ PRIMARY KEY(content_ref,comment_external_id)
+);
+
+CREATE FUNCTION linggan_opportunity_card_touch_source(p_content_ref uuid, p_comment_external_id text)
+RETURNS void LANGUAGE sql AS $$
+ INSERT INTO linggan_opportunity_card_source_guard(content_ref,comment_external_id)
+ VALUES(p_content_ref,p_comment_external_id)
+ ON CONFLICT(content_ref,comment_external_id) DO UPDATE
+ SET revision=linggan_opportunity_card_source_guard.revision+1
+$$;
+
 CREATE FUNCTION linggan_opportunity_card_index_voices()
 RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -72,11 +89,30 @@ RETURNS bigint LANGUAGE sql STABLE AS $$
  SELECT hashtextextended('linggan:opportunity-card:source-events:'||linggan_opportunity_card_namespace(),0)
 $$;
 
+-- The intent is a session lock, so source transactions can observe a starting worker
+-- without holding a long-lived shared lock that could starve gate acquisition.
+CREATE FUNCTION linggan_opportunity_card_event_gate_intent_key()
+RETURNS bigint LANGUAGE sql STABLE AS $$
+ SELECT hashtextextended('linggan:opportunity-card:source-event-intent:'||linggan_opportunity_card_namespace(),0)
+$$;
+
+CREATE FUNCTION linggan_opportunity_card_event_gate_starting()
+RETURNS boolean LANGUAGE sql STABLE AS $$
+ SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_locks lock_state
+  WHERE lock_state.locktype='advisory' AND lock_state.granted
+    AND lock_state.mode='ExclusiveLock' AND lock_state.objsubid=1
+    AND lock_state.database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+    AND ((lock_state.classid::bigint << 32) | lock_state.objid::bigint)
+      =linggan_opportunity_card_event_gate_intent_key())
+$$;
+
 CREATE FUNCTION linggan_opportunity_card_source_changed(p_kind text, p_key text)
 RETURNS void LANGUAGE plpgsql AS $$
 BEGIN
- IF pg_try_advisory_xact_lock_shared(linggan_opportunity_card_event_gate_key()) THEN
-  RETURN;
+ IF NOT linggan_opportunity_card_event_gate_starting() THEN
+  IF pg_try_advisory_xact_lock_shared(linggan_opportunity_card_event_gate_key()) THEN
+   RETURN;
+  END IF;
  END IF;
  INSERT INTO linggan_opportunity_card_source_event(event_kind,event_key) VALUES (p_kind,p_key);
 END $$;
@@ -270,36 +306,27 @@ AFTER UPDATE OF identity_key, target_kind, purpose_kind, lifecycle_state, first_
 ON collection_observation_target
 FOR EACH ROW EXECUTE FUNCTION linggan_opportunity_card_target_changed();
 
--- Serialize only affected domains. The rebuilding session takes the shared lock before
--- its first transaction snapshot; a withdrawal takes the exclusive transaction lock.
--- This preserves withdrawal safety without locking unrelated domains' source writes.
-CREATE INDEX linggan_opportunity_card_usage_content
- ON linggan_material_domain_usage(content_public_ref,domain_ref);
-
-CREATE FUNCTION linggan_opportunity_card_restriction_lock_key(p_domain_ref uuid)
-RETURNS bigint LANGUAGE sql STABLE STRICT AS $$
- SELECT hashtextextended('linggan:opportunity-card:restriction:'||linggan_opportunity_card_namespace()||':'||p_domain_ref::text,0)
-$$;
-
+-- A withdrawal and every card containing that voice write the same source guard first.
+-- PostgreSQL rejects a stale repeatable-read writer; a caller can retry from a fresh snapshot.
 CREATE FUNCTION linggan_opportunity_card_restriction_gate()
 RETURNS trigger LANGUAGE plpgsql AS $$
-DECLARE affected_contents uuid[];
-DECLARE affected_domain uuid;
+DECLARE affected_content uuid;
+DECLARE affected_comment text;
 BEGIN
- IF TG_OP='INSERT' THEN affected_contents:=ARRAY[NEW.content_public_ref];
- ELSIF TG_OP='DELETE' THEN affected_contents:=ARRAY[OLD.content_public_ref];
- ELSE affected_contents:=ARRAY[OLD.content_public_ref,NEW.content_public_ref]; END IF;
- FOR affected_domain IN
-  SELECT usage.domain_ref FROM linggan_material_domain_usage usage
-   WHERE usage.content_public_ref=ANY(affected_contents)
-  UNION
-  SELECT problem.domain_ref FROM linggan_opportunity_card_voice_ref voice
-   JOIN linggan_opportunity_problem problem USING(problem_ref)
-   WHERE voice.content_ref=ANY(affected_contents)
-  ORDER BY 1
- LOOP
-  PERFORM pg_advisory_xact_lock(linggan_opportunity_card_restriction_lock_key(affected_domain));
- END LOOP;
+ IF TG_OP='INSERT' THEN
+  PERFORM linggan_opportunity_card_touch_source(NEW.content_public_ref,NEW.comment_external_id);
+ ELSIF TG_OP='DELETE' THEN
+  PERFORM linggan_opportunity_card_touch_source(OLD.content_public_ref,OLD.comment_external_id);
+ ELSE
+  FOR affected_content,affected_comment IN
+   SELECT DISTINCT source.content_ref,source.comment_external_id FROM (VALUES
+    (OLD.content_public_ref,OLD.comment_external_id),
+    (NEW.content_public_ref,NEW.comment_external_id)
+   ) source(content_ref,comment_external_id) ORDER BY 1,2
+  LOOP
+   PERFORM linggan_opportunity_card_touch_source(affected_content,affected_comment);
+  END LOOP;
+ END IF;
  IF TG_OP='DELETE' THEN RETURN OLD; END IF;
  RETURN NEW;
 END $$;
@@ -323,18 +350,10 @@ BEGIN
   affected_comment := NEW.comment_external_id;
  END IF;
  IF TG_OP <> 'DELETE' THEN
-  WITH removed AS (
-   DELETE FROM linggan_opportunity_opportunity_card card
-   USING linggan_opportunity_card_voice_ref voice
-   WHERE voice.problem_ref=card.problem_ref AND voice.content_ref=affected_content
-     AND voice.comment_external_id=affected_comment
-   RETURNING card.problem_ref
-  )
-  INSERT INTO linggan_opportunity_card_change(problem_ref, changed_at)
-  SELECT problem_ref, clock_timestamp() FROM removed WHERE true ORDER BY problem_ref
-  ON CONFLICT (problem_ref) DO UPDATE
-  SET changed_at = EXCLUDED.changed_at,
-      revision = linggan_opportunity_card_change.revision + 1;
+  DELETE FROM linggan_opportunity_opportunity_card card
+  USING linggan_opportunity_card_voice_ref voice
+  WHERE voice.problem_ref=card.problem_ref AND voice.content_ref=affected_content
+    AND voice.comment_external_id=affected_comment;
  END IF;
  PERFORM linggan_opportunity_card_source_changed('content',affected_content::text);
  IF TG_OP='UPDATE' AND OLD.content_public_ref IS DISTINCT FROM NEW.content_public_ref THEN

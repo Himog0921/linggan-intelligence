@@ -131,7 +131,6 @@ impl ExecutorFence {
 pub struct ExecutorSession {
     connection: PgConnection,
     fence: ExecutorFence,
-    opportunity_event_gate_held: bool,
 }
 impl ExecutorSession {
     pub async fn acquire(
@@ -188,21 +187,7 @@ impl ExecutorSession {
                 instance_ref,
                 generation,
             },
-            opportunity_event_gate_held: false,
         })
-    }
-
-    /// A live enabled executor owns the event gate on the same detached connection as its fence.
-    /// Failure to acquire is nonblocking; existing source transactions can finish uninterrupted.
-    async fn try_opportunity_event_gate(&mut self) -> Result<bool, ExecutorError> {
-        if !self.opportunity_event_gate_held {
-            self.opportunity_event_gate_held = sqlx::query_scalar(
-                "SELECT pg_try_advisory_lock(linggan_opportunity_card_event_gate_key())",
-            )
-            .fetch_one(&mut self.connection)
-            .await?;
-        }
-        Ok(self.opportunity_event_gate_held)
     }
     pub fn fence(&self) -> ExecutorFence {
         self.fence

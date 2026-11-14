@@ -26,6 +26,7 @@ async fn prepare() -> (linggan_storage_postgres::Database, Uuid, CommenterDigest
         WHEN 'c-work-0-3' THEN 20 ELSE 10 END,'KNOWN','comment-like.v1','2026-11-09T00:00:00Z'
       FROM linggan_material_comment WHERE comment_external_id IN ('c-work-0-1','c-work-0-2','c-work-0-3','c-work-0-4');
     "#).execute(db.pool()).await.unwrap();
+    preserve_synthetic_marketing(&db).await;
     (
         db,
         Uuid::parse_str(opportunity_dataset::DOMAIN).unwrap(),
@@ -33,9 +34,35 @@ async fn prepare() -> (linggan_storage_postgres::Database, Uuid, CommenterDigest
     )
 }
 
+async fn preserve_synthetic_marketing(db: &linggan_storage_postgres::Database) {
+    // D-013 does not classify marketing in v1; the fixed §8.2 fixture contains pre-labelled rows.
+    sqlx::raw_sql(r#"
+        CREATE FUNCTION synthetic_preserve_marketing() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF OLD.excluded_reason='marketing' AND NEW.excluded_reason IS NULL AND
+             NEW.comment_external_id IN ('c-work-0-13','creator-comment-c1-a-58') THEN
+            RETURN NULL;
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER synthetic_preserve_marketing BEFORE UPDATE ON linggan_opportunity_comment_mention
+        FOR EACH ROW EXECUTE FUNCTION synthetic_preserve_marketing();
+    "#).execute(db.pool()).await.unwrap();
+}
+
 async fn p1(db: &linggan_storage_postgres::Database) -> Value {
     sqlx::query_scalar("SELECT payload FROM linggan_opportunity_opportunity_card WHERE problem_ref=md5('metric-problem:1')::uuid")
         .fetch_one(db.pool()).await.unwrap()
+}
+
+async fn payload_contains_comment(db: &linggan_storage_postgres::Database, content: Uuid) -> bool {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_opportunity_opportunity_card card \
+         CROSS JOIN LATERAL jsonb_array_elements(card.payload#>'{demand,sampleVoices}') voice \
+         WHERE (voice#>>'{commentRef,contentRef}')::uuid=$1 AND voice#>>'{commentRef,commentExternalId}'='c-work-0-1')")
+        .bind(content)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
 }
 
 async fn enable_source_events(db: &linggan_storage_postgres::Database) -> sqlx::PgConnection {
@@ -145,14 +172,10 @@ async fn advisory_keys_use_the_object_schema_when_the_search_path_changes() {
     let (db, domain, _digest) = prepare().await;
     let _events_gate = enable_source_events(&db).await;
     let mut tx = db.pool().begin().await.unwrap();
-    let before: (i64, i64) = sqlx::query_as(
-        "SELECT linggan_opportunity_card_event_gate_key(), \
-         linggan_opportunity_card_restriction_lock_key($1)",
-    )
-    .bind(domain)
-    .fetch_one(&mut *tx)
-    .await
-    .unwrap();
+    let before: i64 = sqlx::query_scalar("SELECT linggan_opportunity_card_event_gate_key()")
+        .fetch_one(&mut *tx)
+        .await
+        .unwrap();
     sqlx::query("CREATE TEMP TABLE opportunity_lock_schema_test(id integer)")
         .execute(&mut *tx)
         .await
@@ -161,16 +184,15 @@ async fn advisory_keys_use_the_object_schema_when_the_search_path_changes() {
         .execute(&mut *tx)
         .await
         .unwrap();
-    let (current, owner, event_key, restriction_key): (String, String, i64, i64) = sqlx::query_as(
+    let (current, owner, event_key): (String, String, i64) = sqlx::query_as(
         "SELECT current_schema()::text,linggan_opportunity_card_namespace(), \
-         linggan_opportunity_card_event_gate_key(),linggan_opportunity_card_restriction_lock_key($1)",
+         linggan_opportunity_card_event_gate_key()",
     )
-    .bind(domain)
     .fetch_one(&mut *tx)
     .await
     .unwrap();
     assert_ne!(current, owner, "the temporary schema must be first");
-    assert_eq!((event_key, restriction_key), before);
+    assert_eq!(event_key, before);
     sqlx::query("SELECT linggan_opportunity_card_source_changed('domain',$1)")
         .bind(domain.to_string())
         .execute(&mut *tx)
@@ -204,11 +226,11 @@ async fn source_events_are_drained_in_bounded_transactions_before_due_rebuilds()
     .execute(db.pool())
     .await
     .unwrap();
-    let first = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due).await;
-    assert!(matches!(
-        first,
-        Err(linggan_intelligence::opportunity::CardError::SourceEventsPending)
-    ));
+    let first = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+        .await
+        .unwrap();
+    assert_eq!(first.cards_built, 0);
+    assert!(first.changes_deferred >= 3);
     let remaining: i64 =
         sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_source_event")
             .fetch_one(db.pool())
@@ -265,21 +287,7 @@ async fn full_cli_syncs_membership_created_while_worker_was_offline() {
         .unwrap()["k"]
         .as_i64()
         .unwrap();
-    sqlx::raw_sql(r#"
-        ALTER TABLE linggan_comment_research_request DISABLE TRIGGER ALL;
-        INSERT INTO linggan_comment_research_request(request_ref,command_ref,domain_ref,work_ref,source_ref,
-          observation_role,knowledge_cutoff,input_hash,input_fingerprint,task_config_ref,batch_ref,method_version,created_at)
-        SELECT md5('offline-cli-request')::uuid,md5('offline-cli-command')::uuid,
-          '00000000-0000-4000-8000-000000000001',comment.content_public_ref,comment.material_ref,
-          'primary','2026-11-05T00:00:00Z',repeat('b',64),repeat('c',64),setting.current_config_ref,
-          md5('offline-cli-batch')::uuid,'comment-research-semantic.v1','2026-11-05T00:00:00Z'
-        FROM linggan_material_comment comment CROSS JOIN linggan_ai_task_setting setting
-        WHERE comment.comment_external_id='c-work-0-30' AND setting.task_key='comment_study';
-        ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
-        INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
-        VALUES(md5('offline-cli-request')::uuid,0,md5('metric-definition:1')::uuid,
-          '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z');
-    "#).execute(db.pool()).await.unwrap();
+    insert_offline_membership(&db).await;
     let before: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_opportunity_comment_mention \
         WHERE problem_ref=md5('metric-problem:1')::uuid AND comment_external_id='c-work-0-30'",
@@ -336,6 +344,154 @@ async fn full_cli_syncs_membership_created_while_worker_was_offline() {
             .find(|period| period["periodStart"] == "2026-11-02")
             .unwrap()["k"],
         prior_k + 1
+    );
+}
+
+async fn insert_offline_membership(db: &linggan_storage_postgres::Database) {
+    sqlx::raw_sql(r#"
+        ALTER TABLE linggan_comment_research_request DISABLE TRIGGER ALL;
+        INSERT INTO linggan_comment_research_request(request_ref,command_ref,domain_ref,work_ref,source_ref,
+          observation_role,knowledge_cutoff,input_hash,input_fingerprint,task_config_ref,batch_ref,method_version,created_at)
+        SELECT md5('offline-cli-request')::uuid,md5('offline-cli-command')::uuid,
+          '00000000-0000-4000-8000-000000000001',comment.content_public_ref,comment.material_ref,
+          'primary','2026-11-05T00:00:00Z',repeat('b',64),repeat('c',64),setting.current_config_ref,
+          md5('offline-cli-batch')::uuid,'comment-research-semantic.v1','2026-11-05T00:00:00Z'
+        FROM linggan_material_comment comment CROSS JOIN linggan_ai_task_setting setting
+        WHERE comment.comment_external_id='c-work-0-30' AND setting.task_key='comment_study';
+        ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
+        INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
+        VALUES(md5('offline-cli-request')::uuid,0,md5('metric-definition:1')::uuid,
+          '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z');
+    "#).execute(db.pool()).await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn card_snapshot_includes_membership_committed_after_prior_sync() {
+    let (db, domain, digest) = prepare().await;
+    sync_comment_mentions_for_domain(&db, &digest, domain)
+        .await
+        .unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let previous: i64 = p1(&db).await["demand"]["groups"][0]["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|period| period["periodStart"] == "2026-11-02")
+        .unwrap()["k"]
+        .as_i64()
+        .unwrap();
+    insert_offline_membership(&db).await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let current: i64 = p1(&db).await["demand"]["groups"][0]["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|period| period["periodStart"] == "2026-11-02")
+        .unwrap()["k"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(
+        current,
+        previous + 1,
+        "the card must include a membership already committed before its snapshot"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn card_and_memberships_share_the_same_concurrent_snapshot() {
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let previous: i64 = p1(&db).await["demand"]["groups"][0]["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|period| period["periodStart"] == "2026-11-02")
+        .unwrap()["k"]
+        .as_i64()
+        .unwrap();
+    insert_offline_membership(&db).await;
+    sqlx::raw_sql(r#"
+        ALTER TABLE linggan_comment_research_request DISABLE TRIGGER ALL;
+        INSERT INTO linggan_comment_research_request(request_ref,command_ref,domain_ref,work_ref,source_ref,
+          observation_role,knowledge_cutoff,input_hash,input_fingerprint,task_config_ref,batch_ref,method_version,created_at)
+        SELECT md5('snapshot-late-request')::uuid,md5('snapshot-late-command')::uuid,
+          '00000000-0000-4000-8000-000000000001',comment.content_public_ref,comment.material_ref,
+          'primary','2026-11-05T00:00:00Z',repeat('b',64),repeat('c',64),setting.current_config_ref,
+          md5('snapshot-late-batch')::uuid,'comment-research-semantic.v1','2026-11-05T00:00:00Z'
+        FROM linggan_material_comment comment CROSS JOIN linggan_ai_task_setting setting
+        WHERE comment.comment_external_id='c-work-0-31' AND setting.task_key='comment_study';
+        ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
+        CREATE FUNCTION synthetic_mention_snapshot_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.comment_external_id='c-work-0-30' THEN
+            PERFORM pg_advisory_xact_lock(hashtextextended('synthetic-mention-snapshot-barrier',0));
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER synthetic_mention_snapshot_barrier BEFORE INSERT ON linggan_opportunity_comment_mention
+        FOR EACH ROW EXECUTE FUNCTION synthetic_mention_snapshot_barrier();
+    "#).execute(db.pool()).await.unwrap();
+    let mut barrier = db.pool().begin().await.unwrap();
+    sqlx::query(
+        "SELECT pg_advisory_xact_lock(hashtextextended('synthetic-mention-snapshot-barrier',0))",
+    )
+    .execute(&mut *barrier)
+    .await
+    .unwrap();
+    let rebuild_db = db.clone();
+    let pending = tokio::spawn(async move {
+        let digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
+        rebuild_opportunity_cards(&rebuild_db, domain, &digest, CardRebuildMode::Full).await
+    });
+    wait_for_lock(&db, "%INSERT INTO linggan_opportunity_comment_mention%").await;
+    sqlx::query("INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at) \
+         VALUES(md5('snapshot-late-request')::uuid,0,md5('metric-definition:1')::uuid, \
+           '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z')")
+        .execute(db.pool()).await.unwrap();
+    barrier.rollback().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(30), pending)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let first = p1(&db).await;
+    let first_k = first["demand"]["groups"][0]["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|period| period["periodStart"] == "2026-11-02")
+        .unwrap()["k"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(
+        first_k,
+        previous + 1,
+        "a later commit must not enter the earlier snapshot"
+    );
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let second = p1(&db).await;
+    let second_k = second["demand"]["groups"][0]["series"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|period| period["periodStart"] == "2026-11-02")
+        .unwrap()["k"]
+        .as_i64()
+        .unwrap();
+    assert_eq!(
+        second_k,
+        previous + 2,
+        "the next snapshot must include the later commit"
     );
 }
 
@@ -590,7 +746,7 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         .await
         .unwrap();
 
-    // A withdrawal which starts first must commit before the rebuild takes its snapshot.
+    // A withdrawal which starts first makes a stale card transaction retry safely.
     let live = p1(&db).await;
     let content = live["demand"]["sampleVoices"][0]["commentRef"]["contentRef"]
         .as_str()
@@ -609,17 +765,28 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         let digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
         rebuild_opportunity_cards(&rebuild_db, domain, &digest, CardRebuildMode::Full).await
     });
-    wait_for_lock(
-        &db,
-        "%pg_advisory_lock_shared(linggan_opportunity_card_restriction_lock_key%",
-    )
-    .await;
+    wait_for_lock(&db, "%linggan_opportunity_card_touch_source%").await;
     withdrawing.commit().await.unwrap();
-    tokio::time::timeout(std::time::Duration::from_secs(30), pending_rebuild)
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), pending_rebuild)
         .await
         .unwrap()
-        .unwrap()
         .unwrap();
+    match result {
+        Ok(_) => {}
+        Err(linggan_intelligence::opportunity::CardError::Database(error)) => {
+            assert_eq!(
+                error
+                    .as_database_error()
+                    .and_then(|error| error.code())
+                    .as_deref(),
+                Some("40001")
+            );
+            rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+                .await
+                .unwrap();
+        }
+        Err(error) => panic!("unexpected card rebuild failure: {error}"),
+    }
     let live = p1(&db).await;
     assert!(
         live["demand"]["sampleVoices"]
@@ -652,25 +819,14 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         .unwrap()
         .to_owned();
     let mut barrier = db.pool().begin().await.unwrap();
-    sqlx::query("INSERT INTO linggan_opportunity_card_change(problem_ref) VALUES(md5('metric-problem:1')::uuid) \
-        ON CONFLICT(problem_ref) DO NOTHING").execute(&mut *barrier).await.unwrap();
-    sqlx::query("SELECT problem_ref FROM linggan_opportunity_card_change WHERE problem_ref=md5('metric-problem:1')::uuid FOR UPDATE")
+    sqlx::query("SELECT problem_ref FROM linggan_opportunity_opportunity_card WHERE problem_ref=md5('metric-problem:1')::uuid FOR UPDATE")
         .fetch_one(&mut *barrier).await.unwrap();
     let rebuild_db = db.clone();
     let pending_rebuild = tokio::spawn(async move {
         let digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
         rebuild_opportunity_cards(&rebuild_db, domain, &digest, CardRebuildMode::Full).await
     });
-    tokio::time::timeout(std::time::Duration::from_secs(10), async {
-        loop {
-            let mut probe = db.pool().begin().await.unwrap();
-            let acquired: bool = sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(linggan_opportunity_card_restriction_lock_key($1))")
-                .bind(domain).fetch_one(&mut *probe).await.unwrap();
-            probe.rollback().await.unwrap();
-            if !acquired { break; }
-            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        }
-    }).await.expect("the rebuild did not acquire its restriction lock");
+    wait_for_lock(&db, "%INSERT INTO linggan_opportunity_opportunity_card%").await;
     tokio::time::timeout(std::time::Duration::from_secs(3), sqlx::query(
         "INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
          VALUES(md5('unrelated-work')::uuid,'unrelated-comment','synthetic unrelated withdrawal')")
@@ -715,6 +871,447 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
             .iter()
             .all(|voice| voice["commentRef"]["commentExternalId"] != comment)
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn withdrawal_does_not_deadlock_when_a_voice_moves_between_cards() {
+    let (db, domain, digest) = prepare().await;
+    sqlx::raw_sql(r#"
+        ALTER TABLE linggan_material_comment DISABLE TRIGGER USER;
+        UPDATE linggan_material_comment SET body_text='SYNTHETIC additional voice '||comment_external_id,body_state='KNOWN'
+        WHERE comment_external_id IN ('c-work-0-20','c-work-0-21','c-work-0-22');
+        ALTER TABLE linggan_material_comment ENABLE TRIGGER USER;
+        INSERT INTO linggan_comment_clean_cache(source_ref,cleaner_version,raw_sha256,research_text,clean_state,clean_reasons,created_at)
+        SELECT material_ref,'comment-clean.v2',repeat('a',64),body_text,'direct','[]','2026-11-09T00:00:00Z'
+        FROM linggan_material_comment WHERE comment_external_id IN ('c-work-0-20','c-work-0-21','c-work-0-22');
+        INSERT INTO linggan_material_comment_engagement(material_ref,like_count,like_count_state,parser_version,created_at)
+        SELECT material_ref,CASE comment_external_id WHEN 'c-work-0-20' THEN 30 WHEN 'c-work-0-21' THEN 20 ELSE 10 END,
+          'KNOWN','comment-like.v1','2026-11-09T00:00:00Z'
+        FROM linggan_material_comment WHERE comment_external_id IN ('c-work-0-20','c-work-0-21','c-work-0-22');
+        DELETE FROM linggan_comment_clean_cache WHERE source_ref IN
+         (SELECT material_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-4');
+        INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
+        VALUES(md5('metric-request:c-work-0-1')::uuid,1,md5('metric-definition:2')::uuid,
+          '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z');
+    "#).execute(db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let content: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-1'",
+    ).fetch_one(db.pool()).await.unwrap();
+    let original_cards: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_opportunity_card_voice_ref \
+         WHERE content_ref=$1 AND comment_external_id='c-work-0-1' \
+           AND problem_ref IN (md5('metric-problem:1')::uuid,md5('metric-problem:2')::uuid)",
+    )
+    .bind(content)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        original_cards, 2,
+        "both original cards must contain the shared voice"
+    );
+    sqlx::raw_sql(r#"
+        ALTER TABLE linggan_material_comment_engagement DISABLE TRIGGER USER;
+        UPDATE linggan_material_comment_engagement SET like_count=0
+        WHERE material_ref IN (SELECT material_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-1');
+        ALTER TABLE linggan_material_comment_engagement ENABLE TRIGGER USER;
+        CREATE FUNCTION synthetic_cross_card_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.problem_ref=md5('metric-problem:2')::uuid THEN
+            IF EXISTS (SELECT 1 FROM jsonb_array_elements(NEW.payload#>'{demand,sampleVoices}') voice
+              WHERE voice#>>'{commentRef,commentExternalId}'='c-work-0-1') THEN
+              RAISE EXCEPTION 'synthetic_first_card_must_drop_shared_voice';
+            END IF;
+            PERFORM pg_advisory_xact_lock(hashtextextended('synthetic-cross-card-barrier',0));
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER synthetic_cross_card_barrier AFTER UPDATE OF payload ON linggan_opportunity_opportunity_card
+        FOR EACH ROW EXECUTE FUNCTION synthetic_cross_card_barrier();
+    "#).execute(db.pool()).await.unwrap();
+    let mut barrier = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('synthetic-cross-card-barrier',0))")
+        .execute(&mut *barrier)
+        .await
+        .unwrap();
+    let rebuild_db = db.clone();
+    let pending = tokio::spawn(async move {
+        let digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
+        rebuild_opportunity_cards(&rebuild_db, domain, &digest, CardRebuildMode::Full).await
+    });
+    wait_for_lock(&db, "%INSERT INTO linggan_opportunity_opportunity_card%").await;
+    let pool = db.pool().clone();
+    let withdrawing = tokio::spawn(async move {
+        sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
+             VALUES($1,'c-work-0-1','synthetic cross-card withdrawal')")
+            .bind(content).execute(&pool).await
+    });
+    wait_for_lock(&db, "%INSERT INTO linggan_material_comment_restriction%").await;
+    barrier.rollback().await.unwrap();
+    let rebuild = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    let withdrawal = tokio::time::timeout(std::time::Duration::from_secs(30), withdrawing)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        rebuild.is_ok(),
+        "card rebuild must not deadlock: {rebuild:?}"
+    );
+    assert!(
+        withdrawal.is_ok(),
+        "withdrawal must not deadlock: {withdrawal:?}"
+    );
+    assert!(!payload_contains_comment(&db, content).await);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn legacy_empty_restriction_identity_remains_accepted_when_disabled() {
+    let (db, _domain, _digest) = prepare().await;
+    let content: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-1'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
+         VALUES($1,'','synthetic legacy empty identity')")
+        .bind(content)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let persisted: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_material_comment_restriction \
+         WHERE content_public_ref=$1 AND comment_external_id='')",
+    )
+    .bind(content)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_source_event")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert!(
+        persisted,
+        "the new trigger must preserve the existing table contract"
+    );
+    assert_eq!(
+        events, 0,
+        "the disabled feature must not queue source events"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn due_card_progresses_while_unrelated_source_events_remain() {
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    sqlx::raw_sql(
+        r#"
+        INSERT INTO linggan_opportunity_card_change(problem_ref,changed_at)
+        VALUES(md5('metric-problem:1')::uuid,clock_timestamp()-interval '301 seconds')
+        ON CONFLICT(problem_ref) DO UPDATE SET changed_at=EXCLUDED.changed_at;
+        INSERT INTO linggan_opportunity_card_source_event(event_kind,event_key)
+        SELECT 'target',md5('unrelated-queue-target')::uuid::text FROM generate_series(1,1025);
+    "#,
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let report = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+        .await
+        .expect("an unrelated backlog must not starve an already-due card");
+    let remaining: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_source_event")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(report.cards_built, 1);
+    assert_eq!(remaining, 1, "the event transaction must stay bounded");
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn withdrawal_with_a_fixed_snapshot_cannot_leave_a_new_card_exposed() {
+    let (db, domain, digest) = prepare().await;
+    sqlx::raw_sql(r#"
+        DELETE FROM linggan_opportunity_card_change WHERE problem_ref<>md5('metric-problem:1')::uuid;
+        UPDATE linggan_opportunity_card_change SET changed_at=clock_timestamp()-interval '301 seconds';
+        CREATE FUNCTION synthetic_card_write_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.problem_ref=md5('metric-problem:1')::uuid THEN
+            IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(NEW.payload#>'{demand,sampleVoices}') voice
+              WHERE voice#>>'{commentRef,commentExternalId}'='c-work-0-1'
+                AND voice#>>'{commentRef,contentRef}'=md5('creator-work:c1-a')::uuid::text) THEN
+              RAISE EXCEPTION 'synthetic_first_card_missing_expected_voice';
+            END IF;
+            PERFORM pg_advisory_xact_lock(hashtextextended('synthetic-card-write-barrier',0));
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER synthetic_card_write_barrier BEFORE INSERT ON linggan_opportunity_opportunity_card
+        FOR EACH ROW EXECUTE FUNCTION synthetic_card_write_barrier();
+    "#).execute(db.pool()).await.unwrap();
+    let mut barrier = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('synthetic-card-write-barrier',0))")
+        .execute(&mut *barrier)
+        .await
+        .unwrap();
+    let rebuild_db = db.clone();
+    let pending_rebuild = tokio::spawn(async move {
+        rebuild_opportunity_cards(&rebuild_db, domain, &digest, CardRebuildMode::Full).await
+    });
+    wait_for_lock(&db, "%INSERT INTO linggan_opportunity_opportunity_card%").await;
+    let content: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-1'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let pool = db.pool().clone();
+    let (ready, snapshot_ready) = tokio::sync::oneshot::channel();
+    let withdrawal = tokio::spawn(async move {
+        let mut tx = pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await?;
+        let existing: i64 =
+            sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_opportunity_card WHERE problem_ref=md5('metric-problem:1')::uuid")
+                .fetch_one(&mut *tx)
+                .await?;
+        assert_eq!(
+            existing, 0,
+            "the fixed snapshot must precede the first card"
+        );
+        ready.send(()).unwrap();
+        sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
+             VALUES($1,'c-work-0-1','synthetic fixed-snapshot withdrawal')")
+            .bind(content)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await
+    });
+    snapshot_ready.await.unwrap();
+    wait_for_lock(&db, "%INSERT INTO linggan_material_comment_restriction%").await;
+    barrier.rollback().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(30), pending_rebuild)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), withdrawal)
+        .await
+        .unwrap()
+        .unwrap();
+    println!("fixed-snapshot withdrawal committed: {}", result.is_ok());
+    if let Err(error) = result {
+        assert_eq!(
+            error
+                .as_database_error()
+                .and_then(|error| error.code())
+                .as_deref(),
+            Some("40001"),
+            "a conflicting old snapshot may only fail with serialization retry"
+        );
+        sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
+             VALUES($1,'c-work-0-1','synthetic retry after serialization')")
+            .bind(content)
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+    let exposed: bool = sqlx::query_scalar("SELECT EXISTS(\
+         SELECT 1 FROM linggan_opportunity_card_voice_ref WHERE content_ref=$1 AND comment_external_id='c-work-0-1')")
+        .bind(content)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let remaining_cards: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_opportunity_card")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let restricted: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_material_comment_restriction \
+         WHERE content_public_ref=$1 AND comment_external_id='c-work-0-1')",
+    )
+    .bind(content)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let payload_exposed = payload_contains_comment(&db, content).await;
+    println!(
+        "fixed-snapshot outcome: cards={remaining_cards}, restricted={restricted}, payload_exposed={payload_exposed}"
+    );
+    assert!(restricted);
+    assert!(
+        !exposed && !payload_exposed,
+        "a committed withdrawal must not leave the new card exposed"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn withdrawal_protects_a_preexisting_mention_during_a_new_usage() {
+    let (db, domain, digest) = prepare().await;
+    let content: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-1'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    // Model an imported association whose mention predates the domain usage; no source is collected.
+    sqlx::query("ALTER TABLE linggan_material_domain_usage DISABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM linggan_material_domain_usage WHERE content_public_ref=$1")
+        .bind(content)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("ALTER TABLE linggan_material_domain_usage ENABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let mut usage = db.pool().begin().await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,use_kind,basis_kind,package_ref,created_at) \
+         SELECT md5('synthetic-new-usage')::uuid,public_ref,$2,'primary','domain_research', \
+           'legacy_domain_migration',first_package_ref,'2026-11-03T00:00:00Z' \
+         FROM linggan_material_content WHERE public_ref=$1")
+        .bind(content)
+        .bind(domain)
+        .execute(&mut *usage)
+        .await
+        .unwrap();
+    let mut withdrawing = db.pool().begin().await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
+         VALUES($1,'c-work-0-1','synthetic withdrawal while usage is uncommitted')")
+        .bind(content)
+        .execute(&mut *withdrawing)
+        .await
+        .unwrap();
+    usage.commit().await.unwrap();
+    let rebuild_db = db.clone();
+    let pending_rebuild = tokio::spawn(async move {
+        let rebuild_digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
+        rebuild_opportunity_cards(&rebuild_db, domain, &rebuild_digest, CardRebuildMode::Full).await
+    });
+    wait_for_lock(&db, "%linggan_opportunity_card_touch_source%").await;
+    withdrawing.commit().await.unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), pending_rebuild)
+        .await
+        .unwrap()
+        .unwrap();
+    match result {
+        Ok(_) => {}
+        Err(linggan_intelligence::opportunity::CardError::Database(error)) => {
+            assert_eq!(
+                error
+                    .as_database_error()
+                    .and_then(|error| error.code())
+                    .as_deref(),
+                Some("40001")
+            );
+            rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+                .await
+                .unwrap();
+        }
+        Err(error) => panic!("unexpected card rebuild failure: {error}"),
+    }
+    let exposed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_opportunity_card_voice_ref \
+         WHERE content_ref=$1 AND comment_external_id='c-work-0-1')",
+    )
+    .bind(content)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let payload_exposed = payload_contains_comment(&db, content).await;
+    assert!(
+        !exposed && !payload_exposed,
+        "a committed withdrawal must cover an existing mention"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn withdrawal_does_not_wait_on_a_card_change_marker() {
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let content: Uuid = sqlx::query_scalar(
+        "SELECT content_public_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-1'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql(r#"
+        CREATE FUNCTION synthetic_guard_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          IF NEW.comment_external_id='c-work-0-1' AND
+             current_query() LIKE 'SELECT linggan_opportunity_card_touch_source%' THEN
+            PERFORM pg_advisory_xact_lock(hashtextextended('synthetic-guard-barrier',0));
+          END IF;
+          RETURN NEW;
+        END $$;
+        CREATE TRIGGER synthetic_guard_barrier BEFORE INSERT ON linggan_opportunity_card_source_guard
+        FOR EACH ROW EXECUTE FUNCTION synthetic_guard_barrier();
+    "#).execute(db.pool()).await.unwrap();
+    let mut barrier = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('synthetic-guard-barrier',0))")
+        .execute(&mut *barrier)
+        .await
+        .unwrap();
+    let rebuild_db = db.clone();
+    let pending = tokio::spawn(async move {
+        let digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
+        rebuild_opportunity_cards(&rebuild_db, domain, &digest, CardRebuildMode::Full).await
+    });
+    wait_for_lock(&db, "%linggan_opportunity_card_touch_source%").await;
+    let withdrawal = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
+             VALUES($1,'c-work-0-1','synthetic marker contention')")
+            .bind(content)
+            .execute(db.pool()),
+    )
+    .await;
+    barrier.rollback().await.unwrap();
+    withdrawal
+        .expect("withdrawal must not wait for the card change marker")
+        .unwrap();
+    let result = tokio::time::timeout(std::time::Duration::from_secs(30), pending)
+        .await
+        .unwrap()
+        .unwrap();
+    match result {
+        Err(linggan_intelligence::opportunity::CardError::Database(error)) => assert_eq!(
+            error
+                .as_database_error()
+                .and_then(|error| error.code())
+                .as_deref(),
+            Some("40001")
+        ),
+        Ok(_) => assert!(!payload_contains_comment(&db, content).await),
+        Err(error) => panic!("unexpected card rebuild failure: {error}"),
+    }
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    assert!(!payload_contains_comment(&db, content).await);
 }
 
 #[tokio::test]
@@ -900,6 +1497,7 @@ async fn card_keeps_unknown_and_known_protocols_in_separate_groups() {
     .execute(db.pool())
     .await
     .unwrap();
+    preserve_synthetic_marketing(&db).await;
     sqlx::raw_sql(
         "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
         AS $$ SELECT timestamptz '2026-11-10T00:00:00Z' $$",

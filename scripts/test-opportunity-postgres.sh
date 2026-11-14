@@ -150,6 +150,15 @@ for proof_mode in enabled missing_key disabled locked_release locked_drain; do
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
     cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
       -- --ignored --exact comment_uses_target_dossier_and_both_permissions --test-threads=1
+  if [[ "$proof_mode" == enabled ]]; then
+    for gate_case in event_gate_activates_with_overlapping_source_writes event_gate_wait_does_not_block_executor_drain; do
+      LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+        LINGGAN_SUPPORT_DIR="$proof_support_dir" LINGGAN_OPPORTUNITY_CARD=enabled \
+        AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
+        cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
+          -- --ignored --exact "$gate_case" --test-threads=1
+    done
+  fi
 done
 
 LINGGAN_LOCAL_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \

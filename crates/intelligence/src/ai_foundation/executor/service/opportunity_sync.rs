@@ -7,6 +7,7 @@ use crate::opportunity::{
     sync_comment_mentions_for_domain,
 };
 use linggan_storage_postgres::Database;
+use sqlx::{Postgres, pool::PoolConnection};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -19,6 +20,7 @@ pub(super) struct OpportunitySync {
     pending: AtomicBool,
     failure_reported: AtomicBool,
     gate_active: AtomicBool,
+    gate_connection: Mutex<Option<PoolConnection<Postgres>>>,
     needs_catchup: AtomicBool,
     next_metrics: Mutex<Instant>,
 }
@@ -32,6 +34,7 @@ impl OpportunitySync {
             pending: AtomicBool::new(true),
             failure_reported: AtomicBool::new(false),
             gate_active: AtomicBool::new(false),
+            gate_connection: Mutex::new(None),
             needs_catchup: AtomicBool::new(true),
             next_metrics: Mutex::new(Instant::now()),
         }))
@@ -45,7 +48,7 @@ impl OpportunitySync {
         self.gate_active.load(Ordering::Acquire)
     }
 
-    pub(super) fn activate_gate(&self) {
+    fn activate_gate(&self) {
         self.gate_active.store(true, Ordering::Release);
         self.request();
     }
@@ -55,6 +58,69 @@ impl OpportunitySync {
         if !self.failure_reported.swap(true, Ordering::AcqRel) {
             eprintln!("opportunity projection deferred: {reason}");
         }
+    }
+
+    /// Queue behind existing offline writes without making later source writers wait.
+    /// The checked-out connection is closed on drop and never increases the pool limit.
+    pub(super) async fn ensure_gate(
+        &self,
+        database: &Database,
+        drain: &crate::model_worker_drain::ModelWorkerDrain,
+    ) -> bool {
+        let mut held = self.gate_connection.lock().await;
+        if let Some(connection) = held.as_mut() {
+            let health = tokio::time::timeout(
+                Duration::from_secs(5),
+                sqlx::query("SELECT 1").execute(&mut **connection),
+            )
+            .await;
+            match health {
+                Ok(Ok(_)) => return true,
+                Ok(Err(error)) => self.defer(&error),
+                Err(error) => self.defer(&error),
+            }
+            self.gate_active.store(false, Ordering::Release);
+            self.needs_catchup.store(true, Ordering::Release);
+            *held = None;
+        }
+        if let Err(error) = CommenterDigest::load() {
+            self.defer(&error);
+            return false;
+        }
+        let mut connection = match database.pool().acquire().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                self.defer(&error);
+                return false;
+            }
+        };
+        connection.close_on_drop();
+        if let Err(error) = sqlx::query("SET statement_timeout='2s'")
+            .execute(&mut *connection)
+            .await
+        {
+            self.defer(&error);
+            return false;
+        }
+        for query in [
+            "SELECT pg_advisory_lock(linggan_opportunity_card_event_gate_intent_key())",
+            "SELECT pg_advisory_lock(linggan_opportunity_card_event_gate_key())",
+        ] {
+            if let Err(error) = wait_for_gate_lock(&mut connection, query, drain).await {
+                self.defer(&error);
+                return false;
+            }
+        }
+        if let Err(error) = sqlx::query("RESET statement_timeout")
+            .execute(&mut *connection)
+            .await
+        {
+            self.defer(&error);
+            return false;
+        }
+        *held = Some(connection);
+        self.activate_gate();
+        true
     }
 
     pub(super) async fn run_if_pending(&self, database: &Database) {
@@ -79,7 +145,6 @@ impl OpportunitySync {
             Ok(true) => {}
             Ok(false) => {
                 self.request();
-                return;
             }
             Err(error) => {
                 self.defer(&error);
@@ -232,5 +297,25 @@ impl OpportunitySync {
         *self.next_metrics.lock().await = Instant::now()
             + Duration::from_secs(definition.params.card_rebuild_debounce_seconds.into());
         Ok(())
+    }
+}
+
+async fn wait_for_gate_lock(
+    connection: &mut PoolConnection<Postgres>,
+    query: &'static str,
+    drain: &crate::model_worker_drain::ModelWorkerDrain,
+) -> Result<(), sqlx::Error> {
+    loop {
+        match sqlx::query(query).execute(&mut **connection).await {
+            Ok(_) => return Ok(()),
+            Err(error)
+                if error
+                    .as_database_error()
+                    .and_then(|error| error.code())
+                    .as_deref()
+                    == Some("57014")
+                    && !drain.is_requested() => {}
+            Err(error) => return Err(error),
+        }
     }
 }

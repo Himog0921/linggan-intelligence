@@ -413,7 +413,7 @@
 - 独立审查发现：领域采集量告警误用组内变化；关闭期间源事件可无界积压；撤回表级锁影响无关领域且同步扫描全部卡片；清洗缓存完成未触发原声补位；全量命令未先同步最新 0177 归属；原声跳过只记录总数而没有原因。均待修复和针对性回归，当前候选不具备交付资格。
 - 独立审查另发现 §6.7 的协议变化标记无法从“未知 + 已知”推断真实变化。Q-29 已提出，依 §3.3、§3.6 将 T1.4 标为 **blocked**，等待负责人裁定；不自行修改该规则。
 - 负责人于 2026-11-14 答复 Q-29 采用 A，见 D-049；T1.4 恢复实施并修复独立审查发现。本地运行库和生产环境迁移仍需另行授权。
-- 候选修复：领域总量告警改按各协议组总和比较；全量命令先同步 0177；清洗缓存写入触发原声补位；原声报告区分跳过原因。关闭或后台离线时不积累源事件，后台重新取得门控后为现有问题登记追平；源事件按批归并。撤回改按受影响领域加锁并用来源反向索引定位卡片。
+- 候选 `6a1333dc` 的修复：领域总量告警改按各协议组总和比较；全量命令先同步 0177；清洗缓存写入触发原声补位；原声报告区分跳过原因。关闭或后台离线时不积累源事件，后台重新取得门控后为现有问题登记追平；源事件按批归并。该候选的领域锁、门控及归属同步仍有下文所述并发缺陷。
 - `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-review-fixes-proof.sh`：专项输出 `8 passed; 0 failed`、`Targeted card, CLI and source proofs passed`、`Opportunity PostgreSQL proof cleanup verified; isolated proof database, container, and volume were removed`。包含临时 schema 下锁键一致、停用门控、分批事件、离线归属的全量命令、清洗补位、两种撤回顺序和 1000 张无关卡片的索引定位。此专项不代替完整回归、真实后台重启追平验证和独立复审。
 - T1.5 的接口必须在后台离线或启动追平未完成时拒绝把旧卡片显示为新鲜结果；读取时动态判断 `stale_read_model`，不能仅依赖生成时快照。本任务尚未实现该接口或状态读取。
 - `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash scripts/test-opportunity-postgres.sh`：前一版修复的整轮隔离回归各组 `1、1、12、6、3、12、1` 及后台 enabled、missing_key、disabled、locked_release、locked_drain 各 `1 passed; 0 failed`，末尾为 `Opportunity PostgreSQL proof passed` 和容器、数据库、卷清理确认。临时依赖链接在命令退出时校验目标后移除。
@@ -425,7 +425,28 @@
 - `cargo test -p linggan-intelligence --lib --locked`：`380 passed; 0 failed; 12 ignored`；`cargo test -p linggan-worker --bin linggan-opportunity --locked`：`2 passed; 0 failed`。`cargo doc -p linggan-intelligence --no-deps --locked` 退出 0。
 - `cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked -- -D warnings` 退出 101，停在未修改的 `crates/evidence`，报告 118 项错误；`git diff --quiet origin/main -- crates/evidence` 退出 0。按既有仓库例外使用 `-- -A clippy::too_many_lines` 的限定 Clippy 退出 0，但保留仓库其他既有警告，不声称严格 Clippy 通过。
 - 代码及测试之外的改动超过手册 §3.7 建议大小：卡片的协议分组、同事务重算、同步撤回和默认关闭追平需一同成立；实现按组装、指标、原声和事件模块拆分，未拆成可留下不安全中间状态的并行业务路径。最终候选仍须独立审阅和远端 CI。
-- 当前候选迁移 `0216_opportunity_card_read_model.sql` 的 SHA-256 是 `48c1d814b9a1c5016572eb728b5cdbd85e350227efaefba7367c0b7163a0a1e0`；已登记 `scripts/local-runtime.sh` 并同步 `apps/api/src/local_web/full_schema_fixture.rs`。该登记不是运行环境迁移授权或执行回执。
+- 审阅候选 `6a1333dc` 的迁移 `0216_opportunity_card_read_model.sql` SHA-256 为 `48c1d814b9a1c5016572eb728b5cdbd85e350227efaefba7367c0b7163a0a1e0`；已登记 `scripts/local-runtime.sh` 并同步完整 schema fixture。审阅后事务安全修复会改变该校验值；登记不是运行环境迁移授权或执行回执。
 - 最后将当前定义读取提取为内部函数后，再执行 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-review-fixes-proof.sh`：`9 passed; 0 failed`、`Targeted card, CLI and source proofs passed`，隔离资源清理确认。独立审阅和远端检查仍待完成。
 - 整轮隔离回归的 `check-invariants` 输出 `totalViolations: 0`；I1、I2、I3、I6、I6b、I7、I8、I9、I11 可用且为 0，I4、I5、I10 尚不可用，故 `incomplete: true`。不得把不可用检查表述为通过。
 - 改动 Rust 文件的 `rustfmt --edition 2024 --config skip_children=true --check` 与 `git diff --check origin/main` 均退出 0；`bash scripts/ci-preflight.sh origin/main` 输出 `pass 52`、`fail 0` 和 `Preflight passed`。未运行全仓 `cargo fmt`。
+
+## 2026-11-14 T1.4 独立复审后的并发修复（进行中）
+
+- 对 `6a1333dc` 的第二轮独立审阅提出固定快照撤回、持续事件饥饿、门控启用饥饿及 0177 同步与卡片截点间隙；按照 §9.4 已向负责人升级，候选不可合并。
+- 使用合成数据确认：旧候选在持续积压时返回 `SourceEventsPending`；旧快照撤回事务成功后仍有卡片正文；已有归属在独立同步后、卡片快照前提交时未计入。初次撤回测试误用了合成作品身份，已修正并记录实际失败，不将误测作为通过证据。
+- 新实现候选按评论稳定引用写入同步标记并检测旧快照冲突；事件仍分批转移但不阻塞已到期卡片；归属同步与卡片重建共用同一事务快照。后台门控由既有任务排队获取，启用期间占用现有四连接池中的一个连接，不提高采集或模型并发；旧来源写入完成前的新写入继续入队。同步标记只保存作品、评论稳定引用及版本，不保存正文或评论者身份。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-gate-proof.sh` 输出 `1 passed; 0 failed`。相同环境运行 `bash /private/tmp/opportunity-t14-race-reproduction.sh` 输出六个 `CASE PASSED`：积压推进、固定快照撤回、历史归属交错、同步后新归属、快照期间提交及撤回锁顺序；两组均确认隔离资源清理。最新完整回归和新的独立审阅仍待完成。
+- 完整回归 `r4` 使用的迁移 SHA-256 为 `162c3e21e58c889c24e67b434b9557c5330a27bc3db970e741864abf83bde4d5`。后续为保持既有撤回表允许空评论标识的合同，移除了内部同步表的额外非空字符串约束，并补门控启动标记；当前 SHA-256 为 `a2ab38f0da68e73226d9b791a1efbc6c40cdbcb24b0c82c860b32ec4806b34e9`，已同步完整 schema fixture。同步标记在撤回或卡片引用原声时各多一次数据库写入；持久行数随涉及的稳定评论身份增长。
+- `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash scripts/test-opportunity-postgres.sh` 在 `r4` 迁移上输出 `1、1、12、6、3、19、1` 项及后台六项均 `passed; 0 failed`，末尾输出 `Opportunity PostgreSQL proof passed` 和隔离资源清理确认。空标识兼容修正和门控等待时停止专项尚需在最新迁移上重验。
+- 在最新迁移上，使用相同 `CARGO_TARGET_DIR` 和 `CARGO_BUILD_JOBS=2` 运行 `bash /private/tmp/opportunity-t14-gate-all-proof.sh`：`2 passed; 0 failed`，覆盖连续写入、等待实际门控和等待启动标记时停止；运行 `bash /private/tmp/opportunity-t14-race-reproduction.sh`：七个 `CASE PASSED`，包括旧空标识兼容；均输出隔离资源清理确认。等待门控设置数据库端 2 秒超时，是停止清理用的技术时限，不是业务阈值。
+- `as_of` 取值与数据库 MVCC 快照在同一条查询中取得，但数据库时钟读取可能晚于快照；代码没有保证该间隔的上限，手册未规定其提交完整性或容差。当前验证证明同一重建的归属、指标和卡片共享一个可见快照，不证明能够按历史提交时刻完整回放。
+- 机会归属同步沿用既有全局串行锁，卡片事务现在会持锁至提交；其他领域的机会派生可能延后，手动重建遇 `SyncBusy` 需重试，后台会重试。普通采集和 0177 发布不直接取得此锁；启用时占用连接池内一条连接，也可能影响繁忙时的排队时间。
+- 在迁移 `a2ab38f0` 上的 `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash scripts/test-opportunity-postgres.sh` 输出基础及指标各组 `1、1、12、6、3、20、1 passed; 0 failed`，后台及门控七组各 `1 passed; 0 failed`，并确认隔离资源清理。该回归早于下述跨卡锁顺序修正。
+- 独立预审提出跨卡撤回锁顺序问题后，`bash /private/tmp/opportunity-t14-cross-card-proof.sh` 在修复前输出 SQLSTATE `40P01`（死锁）；在卡片写入前按稳定身份保护该卡的新旧原声引用后，同一命令输出 `1 passed; 0 failed`、`CASE PASSED` 和隔离资源清理确认。最终整轮及精确提交复审仍待完成。
+- 在上述跨卡修复及迁移 SHA-256 `a2ab38f0da68e73226d9b791a1efbc6c40cdbcb24b0c82c860b32ec4806b34e9` 上，`CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash scripts/test-opportunity-postgres.sh` 输出基础及指标各组 `1、1、12、6、3、21、1 passed; 0 failed`、后台及门控七组各 `1 passed; 0 failed`，最后为 `Opportunity PostgreSQL proof passed` 和 `Opportunity PostgreSQL proof cleanup verified; isolated proof database, container, and volume were removed`。临时依赖链接已移除；其中的模型端点是本地合成桩。
+- 同一版本执行 `bash scripts/test-local-runtime-schema.sh`，输出 `Fresh and repeat runtime schema migration passed; retired tables absent.` 和 `Owned runtime schema proof resources removed`；同一 `CARGO_TARGET_DIR` / `CARGO_BUILD_JOBS` 下执行 `bash /private/tmp/opportunity-t14-comment-study-proof.sh`，输出 `10 passed; 0 failed`、`1 passed; 0 failed` 和 `Comment Study catalog and source regression passed`，并确认隔离资源清理。
+- 整轮隔离回归的 I1、I2、I3、I6、I6b、I7、I8、I9、I11 可用且均为 0；I4、I5 缺少尚未实现的判断表，I10 缺少供给质量门，输出 `totalViolations: 0`、`incomplete: true`。这三项不是通过。
+- 单条撤回与跨卡重建的锁序已复现并修复。独立复核指出：多条撤回在同一事务中以不同顺序持有来源时，理论上仍可能与重建形成死锁；尚未复现，也未在正式运行代码中找到批量撤回写入路径。PostgreSQL 会回滚死锁受害事务，调用方需要重试。
+- 限制写入即使在特性关闭时也会维护无正文的来源同步标记，以保护撤回；启用时来源写入还会检查门控状态。每个涉及的来源会留下持久标记，实际吞吐、容量及生产环境运行角色的附加表权限尚未验证。未运行本地运行库或生产迁移。
+- 最新候选执行 `cargo test -p linggan-intelligence --lib --locked` 输出 `380 passed; 0 failed; 12 ignored`；`cargo test -p linggan-worker --bin linggan-opportunity --locked` 输出 `2 passed; 0 failed`；`cargo doc -p linggan-intelligence --no-deps --locked` 退出 0。以上均使用前述独立 `CARGO_TARGET_DIR` 与 `CARGO_BUILD_JOBS=2`。
+- `cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked -- -A clippy::too_many_lines` 退出 0，保留既有警告。先前严格的 `-D warnings` 退出 101，停在未改动的 `crates/evidence` 的既有错误，不作为严格通过。

@@ -606,12 +606,13 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - 作者资料的 `display_name_state` 允许 `UNKNOWN`（`database/migrations/0016_material_social_lanes.sql:63-82`）；作者归属只保证作者身份，不保证资料记录或姓名。§6.7 的 `CreatorDensity.name` 必填，见 Q-26。
 - 代表原声可能因来源受限而撤回；来源限制记录位于 `database/migrations/0094_corpus_evidence_read_recovery.sql:7-13`，既有 I9 位于 `crates/intelligence/src/opportunity/invariants.rs:131-147`。后续实现必须同时验证防抖窗口内的撤回安全和重建后补位，不能只证明重建前的旧副本仍可读。
 - 点赞投影 `linggan_material_comment_engagement.created_at` 可晚于评论和包的时间（`database/migrations/0122_comment_like_library.sql:4-29`）；原评论研究 `like_heads` 只按评论和包筛选时点。Q-27 已由 D-047 答复，当前工作树把选择逻辑抽至 `crates/intelligence/src/comment_study_catalog/like_heads.sql` 并增加投影创建时间限制；隔离评论目录回归已通过，T1.4 整体尚未验收。
-- 已确认的 D-040 需要共同的按时点作者选择；原评论研究的 `selected_source_in`、目录 `facts.sql` 及候选 SQL 连接当前作者视图。当前工作树已将它们收敛至 `linggan_material_content_author_at`（`crates/intelligence/src/comment_study_source.rs:73`、`crates/intelligence/src/comment_study_catalog/facts.sql:108`、`crates/intelligence/src/comment_study_source/candidates.sql:49`）；专项跨模块回归仍待完成。
+- 已确认的 D-040 需要共同的按时点作者选择；原评论研究的 `selected_source_in`、目录 `facts.sql` 及候选 SQL 连接当前作者视图。当前工作树已将它们收敛至 `linggan_material_content_author_at`（`crates/intelligence/src/comment_study_source.rs:73`、`crates/intelligence/src/comment_study_catalog/facts.sql:108`、`crates/intelligence/src/comment_study_source/candidates.sql:49`）；隔离数据库中的跨模块回归已通过。
 - §8.2 原称 11 月 2 日为当前周，但 `as_of=2026-11-10T00:00:00Z` 的上海日历周从 11 月 9 日开始。Q-28 已由 D-048 裁定按真实日历周，原 W0 的 11 月 2 日单周标准值保持不变；卡片 `current` 应表示 11 月 9 日开始的周。
 - 作品互动统一来源为 `linggan_material_engagement_observation`（`database/migrations/0023_material_engagement_and_media_components.sql:29-50`），覆盖详情与发现两条来源；证据库只从 `KNOWN` 观察中选最新值（`crates/evidence/src/material_query_sql.rs:77-83`）。T1.4 的互动参考可用性复用该视图，限制观察创建和来源包接纳时间；作品发布时间锚点仍按 D-041 选截至时点的最新详情。
 - 作者资料为 `linggan_material_author_profile`（`database/migrations/0016_material_social_lanes.sql:63-87`），姓名和粉丝数分别有 `KNOWN/UNKNOWN` 状态；目标与领域绑定见本文件 §3.4。T1.4 作者组排序复用 `sort_creator_density_group`（`crates/intelligence/src/opportunity/problem_metrics/creator_density.rs:135`），不另造排序口径。
 - 评论目录与机会卡共同使用 `comment_study_catalog::like_heads_sql`；时点作者共用 `linggan_material_content_author_at`。共享入口回归覆盖点赞、作者和研究资格，不依赖真实采集。
-- 采集协议缺失只表示版本未知（D-038），无法证明它与已知版本不同。Q-29 已由 D-049 裁定：未知单独展示；窗口内至少两个不同的已知版本才标记协议变化。候选 `05dc13e6` 的旧实现须修正。
+- 采集协议缺失只表示版本未知（D-038），无法证明它与已知版本不同。Q-29 已由 D-049 裁定：未知单独展示；窗口内至少两个不同的已知版本才标记协议变化。当前候选已按此实现并用隔离数据库验证。
 - 清洗缓存由 `crates/intelligence/src/comment_study_catalog/insert_clean_cache.sql` 以 `INSERT ... ON CONFLICT DO NOTHING` 写入；缓存完成可能晚于归属，因此卡片原声补位须观察缓存插入并继续使用现有目录资格。
-- 执行器的 `ExecutorSession` 持有脱离连接池的专属 PostgreSQL 连接并维持所有权（`crates/intelligence/src/ai_foundation/executor.rs`）；候选通过该既有连接持有事件门控，不增加工作线程或连接池并发。未启用或执行器离线时跳过源事件，下一次启用后按现有问题追平。
-- 撤回原子性需要在卡片快照建立之前协调同一领域的撤回写入；候选使用事务级和会话级咨询锁，并为卡片来源引用增加反向索引。引用仅保存作品和评论稳定身份，不保存评论者身份或正文。
+- 执行器的 `ExecutorSession` 持有脱离连接池的专属 PostgreSQL 连接并维持所有权（`crates/intelligence/src/ai_foundation/executor.rs`）；数据库连接池上限为 4（`crates/storage-postgres/src/pool.rs`）。候选复用现有机会卡后台任务排队取得事件门控，在启用期间占用池内一个连接；不增加池上限、采集或模型并发。来源写入读取启动锁状态，后台等待使用数据库端短超时，以便停止时取消等待；离线跳过源事件，下一次启用后按现有问题追平。
+- 撤回原子性需要协调卡片正文与限制记录；领域锁不能防止已固定的旧快照漏删新卡。候选以作品、评论稳定身份及版本建立同步标记，并用反向索引定位受影响卡片；旧快照发生冲突时必须失败重试。标记和索引不保存评论者身份或正文。
+- 现有归属同步 `sync_comment_mentions`（`crates/intelligence/src/opportunity/mentions.rs:612`）使用全局事务锁。卡片重建经 `sync_comment_mentions_in`（`:628`）在同一事务先同步归属再计算卡片，保证两者使用同一数据库快照；锁会持续到卡片事务提交，其他领域的机会重建遇忙时需要重试。
