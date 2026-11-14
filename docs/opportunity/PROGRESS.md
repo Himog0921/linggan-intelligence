@@ -450,3 +450,8 @@
 - 限制写入即使在特性关闭时也会维护无正文的来源同步标记，以保护撤回；启用时来源写入还会检查门控状态。每个涉及的来源会留下持久标记，实际吞吐、容量及生产环境运行角色的附加表权限尚未验证。未运行本地运行库或生产迁移。
 - 最新候选执行 `cargo test -p linggan-intelligence --lib --locked` 输出 `380 passed; 0 failed; 12 ignored`；`cargo test -p linggan-worker --bin linggan-opportunity --locked` 输出 `2 passed; 0 failed`；`cargo doc -p linggan-intelligence --no-deps --locked` 退出 0。以上均使用前述独立 `CARGO_TARGET_DIR` 与 `CARGO_BUILD_JOBS=2`。
 - `cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked -- -A clippy::too_many_lines` 退出 0，保留既有警告。先前严格的 `-D warnings` 退出 101，停在未改动的 `crates/evidence` 的既有错误，不作为严格通过。
+
+## 2026-11-14 T1.4 阻塞：共享时间解析冲突
+
+- 最终独立审阅针对代码 `1e376fe7fe357ac77eda041eadb210b21101fbef`，并核对其后 `72665bad2b93a83cc8690fb9ef0dea260162e744` 只有 RECON 文档变化。发现目录、点赞和作者资料读取直接转换 `observed_at`，与 D-018 的集中安全解析要求冲突；不可解析时间导致卡片整体失败的场景仍是静态推演，尚未隔离实测。
+- 已登记 D-050 / Q-30，请负责人选择共享解析处理方式。T1.4 标记为 blocked；PR #585 已转 Draft。上述通过的测试未覆盖该坏时间和卡片重建的组合，不能代替此项验收。未对本地运行库或生产环境执行迁移。
