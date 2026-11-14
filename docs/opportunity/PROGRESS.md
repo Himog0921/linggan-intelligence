@@ -455,3 +455,12 @@
 
 - 最终独立审阅针对代码 `1e376fe7fe357ac77eda041eadb210b21101fbef`，并核对其后 `72665bad2b93a83cc8690fb9ef0dea260162e744` 只有 RECON 文档变化。发现目录、点赞和作者资料读取直接转换 `observed_at`，与 D-018 的集中安全解析要求冲突；不可解析时间导致卡片整体失败的场景仍是静态推演，尚未隔离实测。
 - 已登记 D-050 / Q-30，请负责人选择共享解析处理方式。T1.4 标记为 blocked；PR #585 已转 Draft。上述通过的测试未覆盖该坏时间和卡片重建的组合，不能代替此项验收。未对本地运行库或生产环境执行迁移。
+
+## 2026-11-14 T1.4 恢复：Q-30 已答复
+
+- 负责人选择方案 A；详见 D-050 和 Q-30。复用安全解析及首次入档资格，补坏时间与跨模块测试后再申请独立复核；运行环境迁移仍需另行授权。
+
+## 2026-11-14 T1.4 阻塞：共享作品读取的时间冲突
+
+- Q-30 修复期间，`CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target CARGO_BUILD_JOBS=2 bash /private/tmp/opportunity-t14-bad-time-study-proof.sh` 的新增跨模块场景输出 `FAILED. 0 passed; 1 failed`：合成作品详情时间为 `not-a-time` 时，评论目录返回 `InvalidCursor`。`read.rs` 将 PostgreSQL `22007` 映射为该错误。隔离数据库、容器和卷清理已确认。
+- 作品作者共享函数的独立坏时间专项在旧函数上输出 PostgreSQL `22007`、`0 passed; 1 failed`；候选前向迁移 `0217` 上输出 `1 passed; 0 failed`。这些测试使用隔离数据库，尚未执行运行环境迁移。其后确认共享作品读取仍会失败；已登记 D-051 / Q-31，T1.4 暂停并等待负责人裁定。
