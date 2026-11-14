@@ -605,3 +605,5 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - 阶段 1 不执行供给搜索与判定，但 §6.7 的 `supply.counts` 不允许空值；R5 要求未知不冒充 0，见 Q-25。
 - 作者资料的 `display_name_state` 允许 `UNKNOWN`（`database/migrations/0016_material_social_lanes.sql:63-82`）；作者归属只保证作者身份，不保证资料记录或姓名。§6.7 的 `CreatorDensity.name` 必填，见 Q-26。
 - 代表原声可能因来源受限而撤回；来源限制记录位于 `database/migrations/0094_corpus_evidence_read_recovery.sql:7-13`，既有 I9 位于 `crates/intelligence/src/opportunity/invariants.rs:131-147`。后续实现必须同时验证防抖窗口内的撤回安全和重建后补位，不能只证明重建前的旧副本仍可读。
+- 点赞投影 `linggan_material_comment_engagement.created_at` 可晚于评论和包的时间（`database/migrations/0122_comment_like_library.sql:4-29`）；评论研究的 `like_heads` 只按评论和包筛选时点，没有限制点赞投影创建时间（`crates/intelligence/src/comment_study_catalog/comments.sql:16-36`）。T1.4 代表原声需按点赞排序，冲突和统一修正方案见 Q-27。
+- 已确认的 D-040 需要共同的按时点作者选择；评论研究的 `selected_source_in` 和目录 `facts.sql` 仍连接当前作者视图（`crates/intelligence/src/comment_study_source.rs:73`，`crates/intelligence/src/comment_study_catalog/facts.sql:108`）。后续复用这些来源资格时应收敛到已授权的 `linggan_material_content_author_at`，并做跨模块回归，不另建作者选择逻辑。
