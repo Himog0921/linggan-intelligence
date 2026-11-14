@@ -110,7 +110,7 @@
 
 【事实】Wilson 区间在 `crates/intelligence/src/opportunity/stats.rs`。
 
-【判断】看板是它的第二个使用者。这时把它移到共享位置是合适的（例如 `crates/intelligence/src/stats.rs`），并把置换检验加在同一处。机会卡和看板用同一份实现，口径才不会分叉。
+【判断】看板是它的第二个使用者，长期应当提取到共享位置（例如 `crates/intelligence/src/stats.rs`）。但机会卡阶段 1 正在开发，现在搬动会让两个工作包同时改同一个文件。所以看板先直接调用现有函数，置换检验与 kappa 写在自己的模块里；等机会卡阶段 1 结束，再用一个单独的小改动把三者提取出来。
 
 ### 4.3 SQL
 
