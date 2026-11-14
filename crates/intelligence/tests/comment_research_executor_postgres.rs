@@ -24,7 +24,7 @@ use linggan_intelligence::{
 };
 use uuid::Uuid;
 
-async fn seed_periodic_opportunity(db: &linggan_storage_postgres::Database) {
+async fn seed_eligible_work_publication(db: &linggan_storage_postgres::Database) {
     sqlx::raw_sql(r#"
 ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER;
 UPDATE linggan_material_content_detail SET published_at=statement_timestamp()-interval '1 day',
@@ -32,6 +32,12 @@ UPDATE linggan_material_content_detail SET published_at=statement_timestamp()-in
  published_at_precision='second',published_at_parser_version='synthetic'
 WHERE content_public_ref=(SELECT public_ref FROM linggan_material_content WHERE content_external_id='dossier-note');
 ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;
+"#).execute(db.pool()).await.unwrap();
+}
+
+async fn seed_periodic_opportunity(db: &linggan_storage_postgres::Database) {
+    seed_eligible_work_publication(db).await;
+    sqlx::raw_sql(r#"
 UPDATE linggan_opportunity_metric_definition SET params=jsonb_set(params,'{card_rebuild_debounce_seconds}','1'::jsonb);
 INSERT INTO observation_domain(domain_ref,name)
 VALUES ('00000000-0000-4000-8000-000000000000','synthetic failing domain');
@@ -76,6 +82,19 @@ async fn exercise_periodic_identity(
     .fetch_one(db.pool())
     .await
     .unwrap();
+    let creator_n: Option<i64> = sqlx::query_scalar(
+        "SELECT sum(n)::bigint FROM linggan_opportunity_creator_problem_density \
+         WHERE problem_ref=$1 AND metric_def_version=1",
+    )
+    .bind(problem)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        creator_n,
+        Some(n),
+        "creator density must use the same eligible comments"
+    );
     sqlx::raw_sql("ALTER TABLE linggan_material_comment_first_admission DISABLE TRIGGER USER; \
             DELETE FROM linggan_material_comment_first_admission WHERE comment_external_id='child-a'; \
             ALTER TABLE linggan_material_comment_first_admission ENABLE TRIGGER USER;")
@@ -135,6 +154,44 @@ async fn wait_periodic_restriction(
     })
     .await
     .expect("periodic refresh must remove a restricted comment from the denominator");
+    let creator_after: Option<i64> = sqlx::query_scalar(
+        "SELECT sum(n)::bigint FROM linggan_opportunity_creator_problem_density \
+         WHERE problem_ref=$1 AND metric_def_version=1",
+    )
+    .bind(problem)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(creator_after, (before > 1).then_some(before - 1));
+}
+
+async fn assert_disabled_creator_projection(db: &linggan_storage_postgres::Database, work: Uuid) {
+    let eligible: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_opportunity_eligible_comments( \
+         $1,statement_timestamp(),'Asia/Shanghai','work_published_cohort') eligible
+         WHERE eligible.content_ref=$2 AND eligible.period_anchor_at >= statement_timestamp()
+           - make_interval(days => (SELECT (params->>'creator_window_days')::integer
+                                   FROM linggan_opportunity_metric_definition WHERE version=1))
+           AND eligible.period_anchor_at < statement_timestamp()",
+    )
+    .bind(dossier::DOMAIN)
+    .bind(work)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(
+        eligible > 0,
+        "disabled control needs eligible author-window comments"
+    );
+    let creator_rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_creator_problem_density")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        creator_rows, 0,
+        "disabled sync must not write creator metrics"
+    );
 }
 
 #[tokio::test]
@@ -148,6 +205,8 @@ async fn comment_uses_target_dossier_and_both_permissions() {
     let work = dossier::work(&db).await;
     if periodic {
         seed_periodic_opportunity(&db).await;
+    } else if !opportunity_enabled {
+        seed_eligible_work_publication(&db).await;
     }
     dossier::current_image_reading(&db).await;
     comments::comment_with_author(
@@ -671,6 +730,15 @@ async fn comment_uses_target_dossier_and_both_permissions() {
                 .await
                 .unwrap();
         assert_eq!(metrics, 0);
+        if !opportunity_enabled {
+            // The worker's automation scan runs every five seconds; keep it alive across a scan.
+            tokio::time::sleep(std::time::Duration::from_secs(6)).await;
+            assert!(
+                !running.is_finished(),
+                "disabled worker must remain alive across a scan"
+            );
+            assert_disabled_creator_projection(&db, work).await;
+        }
     }
     let previous_n = if periodic {
         Some(exercise_periodic_identity(&db, &problems).await)

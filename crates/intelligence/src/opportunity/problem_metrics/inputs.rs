@@ -13,6 +13,9 @@ pub(super) struct EligibleComment {
     pub(super) period: String,
     pub(super) protocol: ProtocolVersion,
     pub(super) hash: Option<String>,
+    pub(super) creator_id: String,
+    // None means the work's publication time is unavailable at this as-of instant.
+    pub(super) creator_in_window: Option<bool>,
 }
 
 #[derive(Default)]
@@ -48,10 +51,23 @@ pub(super) async fn read_inputs(
         PeriodBasis::CommentPublished => "comment_published",
     };
     let rows = sqlx::query(
-        "SELECT eligible.content_ref, eligible.comment_external_id, eligible.commenter_external_id,
+        "WITH work_anchor AS MATERIALIZED (
+           SELECT DISTINCT work.content_ref, work.period_anchor_at
+           FROM linggan_opportunity_eligible_comments($1, $2::timestamptz, $3, 'work_published_cohort') work
+           WHERE $4 = 'comment_published'
+         )
+         SELECT eligible.content_ref, eligible.comment_external_id, eligible.commenter_external_id,
+                eligible.work_author_external_id,
                 eligible.period_start::text AS period_start,
-                package.payload->'collectionProtocol'->'version' AS protocol_version
+                package.payload->'collectionProtocol'->'version' AS protocol_version,
+                (anchor.published_at >= $2::timestamptz - make_interval(days => $5)
+                 AND anchor.published_at < $2::timestamptz) AS creator_in_window
          FROM linggan_opportunity_eligible_comments($1, $2::timestamptz, $3, $4) eligible
+         LEFT JOIN work_anchor ON work_anchor.content_ref=eligible.content_ref
+         CROSS JOIN LATERAL (
+           SELECT CASE WHEN $4 = 'work_published_cohort' THEN eligible.period_anchor_at
+                       ELSE work_anchor.period_anchor_at END AS published_at
+         ) anchor
          LEFT JOIN linggan_material_comment_first_admission admission
            ON admission.content_public_ref=eligible.content_ref
           AND admission.comment_external_id=eligible.comment_external_id
@@ -69,6 +85,7 @@ pub(super) async fn read_inputs(
     .bind(as_of)
     .bind(&definition.params.period_tz)
     .bind(basis)
+    .bind(i32::try_from(definition.params.creator_window_days).map_err(|_| MetricCalculationError::CountOverflow)?)
     .fetch_all(&mut **tx)
     .await?;
     let mut inputs = MetricInputs::default();
@@ -84,6 +101,8 @@ pub(super) async fn read_inputs(
             period: period.clone(),
             protocol,
             hash: digest.hash(author.as_deref()),
+            creator_id: row.try_get("work_author_external_id")?,
+            creator_in_window: row.try_get("creator_in_window")?,
         };
         if inputs.eligible.insert(key, comment).is_some() {
             return Err(MetricCalculationError::InvalidCounts);
