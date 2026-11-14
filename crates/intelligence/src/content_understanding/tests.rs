@@ -973,3 +973,52 @@ fn draft_recovery_requires_empty_metadata_and_valid_label_references() {
         "invalid_draft"
     );
 }
+
+#[test]
+fn transcript_layout_recovery_keeps_the_source_line_break_and_unique_position() {
+    let source = "前🙂，合成材料\n接着核对，\n最后确认。";
+    let quote = "合成材料,\n接着核对，最后确认。";
+    let (mut draft, mut snapshot, generation) = text_only();
+    snapshot.texts[0].kind = "transcript".into();
+    snapshot.texts[0].text = source.into();
+    snapshot.texts[0].structure = json!({"time":{"startMs":12000,"endMs":18000}});
+    snapshot.included_kinds = vec!["transcript".into()];
+    draft["evidenceCandidates"]["text"][0]["quote"] = json!(quote);
+
+    let result = accept(draft, &snapshot, &generation).unwrap();
+    let evidence = &result["card"]["evidence"][0];
+    assert_eq!(evidence["inputCitationId"], snapshot.texts[0].citation_id);
+    assert_eq!(
+        evidence["sourceRef"],
+        snapshot.texts[0].source_ref.to_string()
+    );
+    assert_eq!(evidence["sourceVersion"], snapshot.texts[0].source_version);
+    assert_eq!(evidence["quote"], "合成材料\n接着核对，\n最后确认。");
+    assert_eq!(evidence["start"], snapshot.texts[0].start + 3);
+    assert_eq!(
+        evidence["end"],
+        snapshot.texts[0].start + source.chars().count()
+    );
+    assert_eq!(snapshot.texts[0].structure["time"]["startMs"], 12000);
+}
+
+#[test]
+fn transcript_layout_recovery_rejects_ambiguity_and_content_changes() {
+    for (source, quote, wrap) in [
+        ("材料\n核对。另：材料,\n核对", "材料,\n核对", true),
+        ("材料\n核对。另：材料\n核对", "材料,\n核对", true),
+        ("材料\n核对", "材料,\n核对", false),
+        ("材料\n核对", "材料,核对", true),
+        ("材料\n核对", "材料。\n核对", true),
+        ("金额1\n开始", "金额1,\n开始", true),
+        ("材料\n不核对", "材料,\n核对", true),
+        ("材料\n核对", "材料,\n核对。", true),
+        ("材料\n\n核对", "材料,\n核对", true),
+    ] {
+        assert_eq!(
+            quote_in_source(source, quote, wrap),
+            Err("invalid_text_quote"),
+            "{source:?} {quote:?}"
+        );
+    }
+}
