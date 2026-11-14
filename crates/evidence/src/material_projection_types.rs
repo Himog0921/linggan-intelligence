@@ -36,6 +36,9 @@ pub struct MaterialLibraryItem {
     /// must render that as an explicit state rather than substituting a title or a summary.
     pub evidence_fragment: Option<MaterialEvidenceFragment>,
     pub material_readiness: Option<crate::research_dossier::MaterialReadiness>,
+    /// Internal keyset position, never presented as an observation time.
+    #[serde(skip)]
+    pub(crate) sort_observed_at: String,
     #[serde(skip)]
     pub(crate) author_external_id: Option<String>,
     /// Raw detail body, kept out of the response by `skip`. It stays on the item only so the
@@ -161,13 +164,13 @@ pub struct MaterialLaneSummary {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialSummary {
-    pub last_observed_at: String,
+    pub last_observed_at: Option<String>,
     pub primary_limitation: &'static str,
     pub restriction_state: &'static str,
 }
 
 pub(crate) fn default_lane_summaries(
-    observed_at: &str,
+    observed_at: Option<&str>,
     has_detail: bool,
 ) -> Vec<MaterialLaneSummary> {
     [
@@ -211,7 +214,9 @@ pub(crate) fn default_lane_summaries(
         } else {
             vec!["LANE_NOT_EVALUATED"]
         },
-        latest_observed_at: (lane == "detail" && has_detail).then(|| observed_at.to_owned()),
+        latest_observed_at: (lane == "detail" && has_detail)
+            .then(|| observed_at.map(str::to_owned))
+            .flatten(),
     })
     .collect()
 }

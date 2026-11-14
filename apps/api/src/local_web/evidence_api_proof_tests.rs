@@ -192,6 +192,230 @@ async fn reobservation_counts(db: &Database) -> [i64; 4] {
     ]
 }
 
+/// Broken discovery times must not turn the work detail into a 503 or supply authority.
+/// All requests and authorization changes in this proof stay inside the synthetic database.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+#[ignore = "isolated PostgreSQL proof; no platform access"]
+async fn malformed_discovery_cannot_break_detail_or_supply_reobservation_authority() {
+    let db = isolated("ev_bad_disc").await;
+    let data = seed_dataset(&db).await;
+    let (order, authorization, station): (Uuid, Uuid, Uuid) = sqlx::query_as(
+        "SELECT work_order.work_order_ref,decision.authorization_ref,work_order.station_ref \
+         FROM collection_work_order_material_target scope \
+         JOIN collection_work_order work_order USING(work_order_ref) \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         WHERE scope.content_public_ref=$1",
+    )
+    .bind(data.reobserve)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let bad_package: Uuid = sqlx::query_scalar(
+        "SELECT package_ref FROM linggan_material_discovery_finding WHERE content_public_ref=$1",
+    )
+    .bind(data.reobserve)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let target = json!({"authorExternalId":"creator-reobserve"});
+    let good_package = super::evidence_fixture::fixture::submit_custom_package(
+        &db,
+        "xhs",
+        &["profile_discovery"],
+        target.clone(),
+        "profile_discovery",
+        "xhs",
+        json!({"target":target,"layers":[super::evidence_fixture::fixture::coverage_layer("profile_discovery", 1)]}),
+        vec![json!({"kind":"profile_discovery_card","resultPosition":1,
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"ev-reobserve"},
+            "payload":{"title":"有效发现"}})],
+    )
+    .await;
+    let lease = Uuid::new_v4();
+    sqlx::query("INSERT INTO collection_work_order_lease(lease_ref,work_order_ref,station_ref,capture_identity,expires_at) VALUES($1,$2,$3,'{}'::jsonb,scope_001_now()+interval '1 day')")
+        .bind(lease).bind(order).bind(station).execute(db.pool()).await.unwrap();
+    for (sequence, package) in [(1_i32, bad_package), (2_i32, good_package)] {
+        sqlx::query("INSERT INTO collection_work_order_lease_task(lease_ref,task_id,sequence_no) SELECT $1,task_id,$2 FROM linggan_runtime_capture_package WHERE package_ref=$3")
+            .bind(lease).bind(sequence).bind(package).execute(db.pool()).await.unwrap();
+    }
+    set_discovery_time_for_proof(&db, bad_package, "not-a-time").await;
+    set_discovery_time_for_proof(&db, good_package, "also-not-a-time").await;
+
+    let app = app_with_database(db.clone());
+    let detail_uri = format!(
+        "/api/local/work-resources/{}?domain={}",
+        data.reobserve, data.domain_one
+    );
+    let command_uri = format!(
+        "/api/local/work-resources/{}/reobserve?domain={}",
+        data.reobserve, data.domain_one
+    );
+    let before = reobservation_counts(&db).await;
+    let detail = get(&app, &detail_uri).await;
+    assert_eq!(detail.status, StatusCode::OK, "{}", detail.text);
+    assert_eq!(
+        detail.json["channels"]["reobservation"]["eligible"], true,
+        "an exact material scope remains independently valid"
+    );
+    assert_eq!(reobservation_counts(&db).await, before, "GET is read-only");
+
+    sqlx::query("DELETE FROM collection_work_order_material_target WHERE work_order_ref=$1 AND content_public_ref=$2")
+        .bind(order).bind(data.reobserve).execute(db.pool()).await.unwrap();
+    let detail = get(&app, &detail_uri).await;
+    assert_eq!(detail.status, StatusCode::OK, "{}", detail.text);
+    assert_eq!(
+        detail.json["channels"]["reobservation"]["eligible"], false,
+        "bad-time discoveries alone must never become authority"
+    );
+    let rejected = post(&app, &command_uri, None).await;
+    assert_eq!(rejected.status, StatusCode::CONFLICT, "{}", rejected.text);
+    assert_eq!(
+        rejected.json["code"],
+        "reobservation_authorization_not_linked"
+    );
+    assert_eq!(
+        reobservation_counts(&db).await,
+        before,
+        "denied commands leave no request or work order"
+    );
+
+    set_discovery_time_for_proof(&db, good_package, "2026-10-10T08:00:00Z").await;
+    let detail = get(&app, &detail_uri).await;
+    assert_eq!(detail.status, StatusCode::OK, "{}", detail.text);
+    assert_eq!(
+        detail.json["channels"]["reobservation"]["eligible"], true,
+        "a valid linked discovery remains eligible beside a bad observation"
+    );
+    let other_domain = get(
+        &app,
+        &format!(
+            "/api/local/work-resources/{}?domain={}",
+            data.reobserve, data.domain_two
+        ),
+    )
+    .await;
+    assert_eq!(other_domain.status, StatusCode::NOT_FOUND);
+    // A work may belong to both domains while its work order is authorized in only one.
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) SELECT gen_random_uuid(),public_ref,$2,'primary','legacy_domain_migration',first_package_ref FROM linggan_material_content WHERE public_ref=$1")
+        .bind(data.reobserve).bind(data.domain_two).execute(db.pool()).await.unwrap();
+    let other_domain_detail = format!(
+        "/api/local/work-resources/{}?domain={}",
+        data.reobserve, data.domain_two
+    );
+    let other_domain = get(&app, &other_domain_detail).await;
+    assert_eq!(other_domain.status, StatusCode::OK, "{}", other_domain.text);
+    assert_eq!(
+        other_domain.json["channels"]["reobservation"]["eligible"],
+        false
+    );
+    let other_domain_command = format!(
+        "/api/local/work-resources/{}/reobserve?domain={}",
+        data.reobserve, data.domain_two
+    );
+    let rejected = post(&app, &other_domain_command, None).await;
+    assert_eq!(rejected.status, StatusCode::CONFLICT, "{}", rejected.text);
+    assert_eq!(
+        reobservation_counts(&db).await,
+        before,
+        "another domain cannot borrow this authorization"
+    );
+    let other_work = get(
+        &app,
+        &format!(
+            "/api/local/work-resources/{}?domain={}",
+            data.rich, data.domain_one
+        ),
+    )
+    .await;
+    assert_eq!(other_work.status, StatusCode::OK, "{}", other_work.text);
+    assert_eq!(
+        other_work.json["channels"]["reobservation"]["eligible"],
+        false
+    );
+
+    sqlx::query("UPDATE collection_acquisition_authorization SET revoked_at=scope_001_now(),revoke_reason='synthetic proof' WHERE authorization_ref=$1")
+        .bind(authorization).execute(db.pool()).await.unwrap();
+    let detail = get(&app, &detail_uri).await;
+    assert_eq!(detail.json["channels"]["reobservation"]["eligible"], false);
+    let rejected = post(&app, &command_uri, None).await;
+    assert_eq!(rejected.status, StatusCode::CONFLICT, "{}", rejected.text);
+    assert_eq!(
+        reobservation_counts(&db).await,
+        before,
+        "revocation is rechecked before any write"
+    );
+
+    sqlx::query("UPDATE collection_acquisition_authorization SET revoked_at=NULL,revoke_reason=NULL,granted_at=scope_001_now()-interval '2 days',expires_at=scope_001_now()-interval '1 day' WHERE authorization_ref=$1")
+        .bind(authorization).execute(db.pool()).await.unwrap();
+    let detail = get(&app, &detail_uri).await;
+    assert_eq!(
+        detail.json["channels"]["reobservation"]["eligible"], false,
+        "expired grant"
+    );
+    let rejected = post(&app, &command_uri, None).await;
+    assert_eq!(rejected.status, StatusCode::CONFLICT, "{}", rejected.text);
+    assert_eq!(
+        reobservation_counts(&db).await,
+        before,
+        "expired grant creates no request"
+    );
+    sqlx::query("UPDATE collection_acquisition_authorization SET expires_at=scope_001_now()+interval '1 day',lane='patrol' WHERE authorization_ref=$1")
+        .bind(authorization).execute(db.pool()).await.unwrap();
+    let detail = get(&app, &detail_uri).await;
+    assert_eq!(
+        detail.json["channels"]["reobservation"]["eligible"], false,
+        "another lane"
+    );
+    let rejected = post(&app, &command_uri, None).await;
+    assert_eq!(rejected.status, StatusCode::CONFLICT, "{}", rejected.text);
+    assert_eq!(
+        reobservation_counts(&db).await,
+        before,
+        "wrong lane creates no request"
+    );
+    sqlx::query("UPDATE collection_acquisition_authorization SET lane='deep_archive' WHERE authorization_ref=$1")
+        .bind(authorization).execute(db.pool()).await.unwrap();
+    let accepted = post(&app, &command_uri, None).await;
+    assert_eq!(accepted.status, StatusCode::OK, "{}", accepted.text);
+    let decision =
+        Uuid::parse_str(accepted.json["operation"]["decisionRef"].as_str().unwrap()).unwrap();
+    let selected: Uuid = sqlx::query_scalar(
+        "SELECT authorization_ref FROM collection_admission_decision WHERE decision_ref=$1",
+    )
+    .bind(decision)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        selected, authorization,
+        "only the existing valid linked grant is used"
+    );
+    assert_eq!(
+        reobservation_counts(&db).await[3],
+        before[3],
+        "the synthetic command does not dispatch a lease"
+    );
+}
+
+async fn set_discovery_time_for_proof(db: &Database, package: Uuid, value: &str) {
+    sqlx::raw_sql("ALTER TABLE linggan_material_discovery_finding DISABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE linggan_material_discovery_finding SET observed_at=$1 WHERE package_ref=$2",
+    )
+    .bind(value)
+    .bind(package)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql("ALTER TABLE linggan_material_discovery_finding ENABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+}
+
 /// 立即复观测：每次点击留下一条请求与准入决定；同一范围只有一张尚未被认领的工单（第二次合并到它）；
 /// 请求时从不形成租约，状态地址也恒为空。
 async fn reobservation_merges_and_never_leases(db: &Database, app: &Router, data: &Dataset) {

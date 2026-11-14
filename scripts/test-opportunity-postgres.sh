@@ -104,13 +104,47 @@ docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 export OPPORTUNITY_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-intelligence --test comment_study_catalog_read_postgres \
+    --test comment_study_start_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_mentions_postgres --locked -- --ignored --test-threads=1
 cargo test -p linggan-intelligence --test opportunity_asof_postgres --locked -- --ignored --test-threads=1
+cargo build -p linggan-worker --bin linggan-opportunity --locked
+proof_target_dir="${CARGO_TARGET_DIR:-$project_root/target}"
+[[ "$proof_target_dir" = /* ]] || proof_target_dir="$project_root/$proof_target_dir"
+export OPPORTUNITY_TEST_WORKER_BIN="$proof_target_dir/debug/linggan-opportunity"
 cargo test -p linggan-intelligence --test opportunity_metrics_postgres --locked -- --ignored --test-threads=1
 LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
   cargo test -p linggan-evidence --test creator_discovery_postgres --locked \
     -- --ignored --exact profile_only_author_uses_the_shared_as_of_owner --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-evidence --test creator_discovery_postgres --locked \
+    -- --ignored --exact author_name_projection_keeps_sourced_names_and_unknowns --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-evidence --test material_projection_postgres --locked \
+    -- --ignored --test-threads=1
+# These existing dispatch tests use synthetic identities and the governance-stage fixture, as in
+# the repository's collection proof runners; no producer or platform connection is started.
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" LINGGAN_COLLECTION_UPGRADE_PHASE=governance \
+  cargo test -p linggan-evidence --test content_reobservation_postgres --locked \
+    -- --ignored --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-evidence --test corpus_performance_postgres --locked \
+    -- --ignored --exact keyset_snapshot_search_and_scan_budget_remain_bounded --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-intelligence --test comment_study_inspection_postgres --locked \
+    -- --ignored --test-threads=1
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  cargo test -p linggan-intelligence --test target_inspection_postgres --locked \
+    -- --ignored --exact keyword_round_membership_and_exact_observation_changes_preserve_cutoff --test-threads=1
+mkdir -p "$project_root/artifacts/private/opportunity-api-fixtures"
+proof_media_dir="$(mktemp -d "$project_root/artifacts/private/opportunity-api-fixtures/${proof_suffix}.XXXXXXXX")"
+chmod 700 "$proof_media_dir"
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" LINGGAN_LOCAL_MEDIA_ROOT="$proof_media_dir" \
+  cargo test -p linggan-api --locked malformed_discovery_cannot_break_detail_or_supply_reobservation_authority \
+    -- --ignored --test-threads=1
+echo "Synthetic API media fixtures retained: $proof_media_dir"
 
 # Exercise the real 0177 publication path with an owned loopback model stub. The synthetic digest
 # key exists only in this temporary private directory and is never printed or committed.
@@ -140,6 +174,15 @@ for proof_mode in enabled missing_key disabled locked_release locked_drain; do
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
     cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
       -- --ignored --exact comment_uses_target_dossier_and_both_permissions --test-threads=1
+  if [[ "$proof_mode" == enabled ]]; then
+    for gate_case in event_gate_activates_with_overlapping_source_writes event_gate_wait_does_not_block_executor_drain; do
+      LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+        LINGGAN_SUPPORT_DIR="$proof_support_dir" LINGGAN_OPPORTUNITY_CARD=enabled \
+        AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
+        cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
+          -- --ignored --exact "$gate_case" --test-threads=1
+    done
+  fi
 done
 
 LINGGAN_LOCAL_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \

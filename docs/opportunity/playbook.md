@@ -964,20 +964,24 @@ interface OpportunityCard {
   as_of: string;                       // ISO-8601 UTC
   versions: { taxonomy: number; metric_def: number; judgment_prompt: string | null; model: string | null };
   demand: {
-    mentioners_total: number;
-    evidence_tier: "candidate" | "established" | "significant";
-    current: { period_start: string; k: number; n: number; rate_per_1k: number | null; ci_per_1k: Interval1k | null };
-    baseline: { k: number; n: number; rate_per_1k: number | null };
-    series: Array<{ period_start: string; k: number; n: number; rate_per_1k: number | null }>; // 长度 = series_periods
+    groups: Array<{
+      protocol_version: number | null; // NULL 为未知协议，不跨组比较（D-043）
+      mentioners_total: number;
+      evidence_tier: "candidate" | "established" | "significant";
+      current: { period_start: string; k: number; n: number; rate_per_1k: number | null; ci_per_1k: Interval1k | null };
+      baseline: { k: number; n: number; rate_per_1k: number | null };
+      series: Array<{ period_start: string; k: number; n: number; rate_per_1k: number | null }>; // 长度 = series_periods
+      flags: Array<"insufficient_sample" | "no_baseline">;
+    }>;
     sample_voices: Array<VoiceRef>;   // 最多 3 条，按点赞降序，排除墓碑后补位
-    user_methods: Array<{ label: string; mentioners: number }>;  // 来自现有“办法与经历”，没有就为空数组
+    user_methods: { status: "unavailable"; reason: "problem_method_association_unavailable" } | { status: "available"; items: Array<{ label: string; mentioners: number }> }; // D-044
     importance: { status: "not_calibrated" } | { status: "calibrated"; survey_id: string; importance: number; satisfaction: number; opportunity_score: number };
   };
   supply: {
     state: "not_evaluated" | "awaiting_understanding" | "insufficient_coverage" | "covered" | "suspected_gap";
     judgment_status: "verified" | "ai_suggested" | null;
     coverage: { found: number; collected: number; ratio: number } | null;
-    counts: { answers: number; mentions: number; none: number; unjudged: number };
+    counts: { answers: number; mentions: number; none: number; unjudged: number } | null; // 未评估为 null（D-045）
     works: Array<{ work_id: string; title: string | null; creator_id: string; likes: number | null; label: "answers" | "mentions" | "none"; source: "human" | "ai"; tombstone: boolean }>;
   };
   channel: {
@@ -1004,7 +1008,7 @@ interface VoiceRef {
 
 interface CreatorDensity {
   creator_id: string;
-  name: string;
+  name: string | null;             // 未知为 null，界面显示“姓名未知”（D-046）
   followers: number | null;
   k: number;
   n: number;
@@ -1016,16 +1020,18 @@ interface CreatorDensity {
 
 - 响应中不得出现评论者 ID、昵称或哈希（R9）。
 - 渠道栏按 `channel.groups` 标明采集协议；`protocol_version = null` 明确显示为未知协议，各组各自排序，不跨组比较（D-042）。
+- 需求栏按 `demand.groups` 分协议展示，每组使用自己的样本与基线标记；未知协议单独成组，不跨组比较（D-043）。问题级办法在归属不可证明时明确返回 `unavailable` 和原因，不推断共现关系（D-044）。
+- 代表原声的点赞使用评论研究与机会卡共用的时点选择：来源包、评论观察和点赞投影均已在 `as_of` 前入库时，取最新已知点赞，否则为未知（D-047）。
 - `flags` 规则：
   - `not_calibrated`：没有导入问卷时**必须**出现；
-  - `no_baseline`：`baseline_n < min_n_period` 时出现；
+  - `no_baseline`：对应协议组的基线不足时出现在该组的 `flags`；不得用其他协议补足（D-043）；
   - `collection_volume_shift`：本周期与上周期的领域有效评论数变化超过 `collection_volume_shift_alert` 时出现；
   - `stale_read_model`：读模型的 `as_of` 早于最新事实的 `first_observed_at` 超过 24 小时时出现；
   - `period_anchor_missing`：因 `period_anchor_missing` 被排除的评论占候选评论的比例超过 `max_unanchored_share` 时出现；
   - `author_unknown_share_high`：因 `work_author_unknown` 被排除的比例超过 `max_author_unknown_share` 时出现；
   - `engagement_reference_missing`：领域点赞中位数没有可用的 `KNOWN` 值时出现（D-019）；
   - `collection_below_target`：当周领域有效评论数低于 `collection_target_per_period` 时出现（D-029）；
-  - `collection_protocol_changed`：统计窗口内评论采集协议发生变化时出现，趋势图需标记变化点（D-030）。
+  - `collection_protocol_changed`：统计窗口内出现两个或更多不同的已知评论采集协议版本时出现，趋势图需标记变化点；未知协议单独展示，不能单独证明变化（D-030、D-049）。
 
 ### 6.8 质量门
 
@@ -1485,7 +1491,7 @@ interface CreatorDensity {
 
 - 参数使用测试参数集（§6.3）。
 - 领域 `D1`，`period_tz = Asia/Shanghai`，`period_basis = work_published_cohort`。
-- 当前周期 W0 = 2026-11-02（周一）。前四个周期为 W-1 至 W-4。
+- 样本周期 W0 = 2026-11-02（周一），前四个样本周期为 W-1 至 W-4。按下述 `as_of` 的上海日历周，当前周从 2026-11-09 开始，W0 是上周（D-048）。
 - `as_of = 2026-11-10T00:00:00Z`。
 - 测试数据写入隔离数据库中的现有表（作品、详情、作者归属、领域用途、评论、first_admission、package、restriction）和 0177 的问题表，通过 `scripts/test-opportunity-postgres.sh` 构建。
 - 除特别说明外：

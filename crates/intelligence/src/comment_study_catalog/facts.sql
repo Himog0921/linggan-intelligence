@@ -1,11 +1,11 @@
 -- Shared catalog source/history relation; no title, pagination or page-specific eligibility.
 -- $1 domain; $2 asOf; $3 cleaner; $4 optional work; $5 optional exact stable comment id.
-WITH latest AS MATERIALIZED (
-    SELECT DISTINCT ON (comment.content_public_ref, comment.comment_external_id)
-           comment.material_ref, comment.content_public_ref, comment.comment_external_id,
+WITH observations AS MATERIALIZED (
+    SELECT comment.material_ref, comment.content_public_ref, comment.comment_external_id,
            comment.parent_comment_external_id, comment.body_state,
            comment.author_external_id, comment.author_display_name,
-           comment.observed_at, comment.created_at
+           comment.observed_at, comment.created_at,
+           linggan_opportunity_observed_at(comment.observed_at) AS parsed_observed_at
     FROM linggan_material_comment comment
     JOIN linggan_material_content content ON content.public_ref = comment.content_public_ref
     JOIN linggan_runtime_capture_package package ON package.package_ref = comment.package_ref
@@ -18,8 +18,23 @@ WITH latest AS MATERIALIZED (
       AND ($4::uuid IS NULL OR comment.content_public_ref = $4)
       AND ($5::text IS NULL OR comment.comment_external_id = $5)
       AND package.accepted_at <= $2::timestamptz AND comment.created_at <= $2::timestamptz
-    ORDER BY comment.content_public_ref, comment.comment_external_id,
-             comment.observed_at::timestamptz DESC, comment.created_at DESC, comment.material_ref DESC
+), latest AS MATERIALIZED (
+    -- Preserve the stable key even when no observation has a usable time. In that case
+    -- no material is selected: the directory/detail exposes an unknown source only.
+    SELECT DISTINCT ON (content_public_ref, comment_external_id)
+           CASE WHEN parsed_observed_at IS NOT NULL THEN material_ref END AS material_ref,
+           content_public_ref, comment_external_id,
+           CASE WHEN parsed_observed_at IS NOT NULL THEN parent_comment_external_id END AS parent_comment_external_id,
+           CASE WHEN parsed_observed_at IS NOT NULL THEN body_state ELSE 'UNKNOWN' END AS body_state,
+           CASE WHEN parsed_observed_at IS NOT NULL THEN author_external_id END AS author_external_id,
+           CASE WHEN parsed_observed_at IS NOT NULL THEN author_display_name END AS author_display_name,
+           CASE WHEN parsed_observed_at IS NOT NULL THEN observed_at END AS observed_at,
+           created_at,
+           count(*) FILTER (WHERE parsed_observed_at IS NULL)
+             OVER (PARTITION BY content_public_ref, comment_external_id) AS unparseable_observations
+    FROM observations
+    ORDER BY content_public_ref, comment_external_id, parsed_observed_at DESC NULLS LAST,
+             observations.created_at DESC, observations.material_ref DESC
 ), history AS MATERIALIZED (
     SELECT request.request_ref, request.source_ref,
            CASE WHEN bool_or(control.state IN ('pending','running')) THEN 'running'
@@ -102,10 +117,10 @@ WITH latest AS MATERIALIZED (
                 THEN 'known' ELSE 'unknown' END AS effective_source_state,
            active.content_public_ref IS NOT NULL AS in_progress
     FROM latest
-    JOIN linggan_material_comment raw ON raw.material_ref = latest.material_ref
+    LEFT JOIN linggan_material_comment raw ON raw.material_ref = latest.material_ref
     LEFT JOIN linggan_comment_clean_cache cache
       ON cache.source_ref = latest.material_ref AND cache.cleaner_version = $3
-    LEFT JOIN linggan_material_content_author author ON author.content_public_ref = latest.content_public_ref
+    LEFT JOIN LATERAL linggan_material_content_author_at(latest.content_public_ref, $2::timestamptz) author ON true
     LEFT JOIN last_attempt ON last_attempt.content_public_ref = latest.content_public_ref
       AND last_attempt.comment_external_id = latest.comment_external_id
     LEFT JOIN success ON success.content_public_ref = latest.content_public_ref

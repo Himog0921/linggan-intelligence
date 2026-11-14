@@ -795,6 +795,42 @@ async fn keyword_round_membership_and_exact_observation_changes_preserve_cutoff(
         before,
         "inspection reads cannot schedule, collect or invoke"
     );
+    sqlx::raw_sql("ALTER TABLE linggan_material_discovery_finding DISABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE linggan_material_discovery_finding SET observed_at='not-a-time' WHERE material_ref=$1")
+        .bind(b).execute(db.pool()).await.unwrap();
+    sqlx::raw_sql("ALTER TABLE linggan_material_discovery_finding ENABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let after_bad_time = inspection::read_trace(&db, &scope, common.work_ref, 0)
+        .await
+        .unwrap();
+    assert_eq!(after_bad_time.observations.len(), 1);
+    assert_eq!(
+        after_bad_time.observations[0].observation_ref,
+        a.to_string()
+    );
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let rows = sqlx::query(include_str!(
+        "../../evidence/src/target_inspection/age_metrics.sql"
+    ))
+    .bind(common.work_ref)
+    .bind(&cutoff)
+    .bind(0_i64)
+    .bind(scope.domain_ref)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert!(
+        rows.is_empty(),
+        "a bad-time observation cannot supply a 24-hour comparison"
+    );
 }
 
 /// 作者巡检里的「相似旧作」读的是这位作者在领域里的研究材料：只在作者主页上出现过的作品不算。

@@ -2,10 +2,12 @@
 //! A failed projection is retried by the existing automation tick and cannot roll back publication.
 
 use crate::opportunity::{
-    CommenterDigest, RebuildMode, current_as_of, load_current_metric_definition,
-    rebuild_problem_metrics, sync_comment_mentions_for_domain,
+    CardRebuildMode, CommenterDigest, RebuildMode, current_as_of, enqueue_source_events,
+    load_current_metric_definition, rebuild_opportunity_cards, rebuild_problem_metrics,
+    sync_comment_mentions_for_domain,
 };
 use linggan_storage_postgres::Database;
+use sqlx::{Postgres, pool::PoolConnection};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -17,6 +19,9 @@ use uuid::Uuid;
 pub(super) struct OpportunitySync {
     pending: AtomicBool,
     failure_reported: AtomicBool,
+    gate_active: AtomicBool,
+    gate_connection: Mutex<Option<PoolConnection<Postgres>>>,
+    needs_catchup: AtomicBool,
     next_metrics: Mutex<Instant>,
 }
 
@@ -28,12 +33,24 @@ impl OpportunitySync {
         Some(Arc::new(Self {
             pending: AtomicBool::new(true),
             failure_reported: AtomicBool::new(false),
+            gate_active: AtomicBool::new(false),
+            gate_connection: Mutex::new(None),
+            needs_catchup: AtomicBool::new(true),
             next_metrics: Mutex::new(Instant::now()),
         }))
     }
 
     pub(super) fn request(&self) {
         self.pending.store(true, Ordering::Release);
+    }
+
+    pub(super) fn gate_active(&self) -> bool {
+        self.gate_active.load(Ordering::Acquire)
+    }
+
+    fn activate_gate(&self) {
+        self.gate_active.store(true, Ordering::Release);
+        self.request();
     }
 
     pub(super) fn defer(&self, reason: &dyn std::fmt::Display) {
@@ -43,10 +60,105 @@ impl OpportunitySync {
         }
     }
 
+    /// Queue behind existing offline writes without making later source writers wait.
+    /// The checked-out connection is closed on drop and never increases the pool limit.
+    pub(super) async fn ensure_gate(
+        &self,
+        database: &Database,
+        drain: &crate::model_worker_drain::ModelWorkerDrain,
+    ) -> bool {
+        let mut held = self.gate_connection.lock().await;
+        if let Some(connection) = held.as_mut() {
+            let health = tokio::time::timeout(
+                Duration::from_secs(5),
+                sqlx::query("SELECT 1").execute(&mut **connection),
+            )
+            .await;
+            match health {
+                Ok(Ok(_)) => return true,
+                Ok(Err(error)) => self.defer(&error),
+                Err(error) => self.defer(&error),
+            }
+            self.gate_active.store(false, Ordering::Release);
+            self.needs_catchup.store(true, Ordering::Release);
+            *held = None;
+        }
+        if let Err(error) = CommenterDigest::load() {
+            self.defer(&error);
+            return false;
+        }
+        let mut connection = match database.pool().acquire().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                self.defer(&error);
+                return false;
+            }
+        };
+        connection.close_on_drop();
+        if let Err(error) = sqlx::query("SET statement_timeout='2s'")
+            .execute(&mut *connection)
+            .await
+        {
+            self.defer(&error);
+            return false;
+        }
+        for query in [
+            "SELECT pg_advisory_lock(linggan_opportunity_card_event_gate_intent_key())",
+            "SELECT pg_advisory_lock(linggan_opportunity_card_event_gate_key())",
+        ] {
+            if let Err(error) = wait_for_gate_lock(&mut connection, query, drain).await {
+                self.defer(&error);
+                return false;
+            }
+        }
+        if let Err(error) = sqlx::query("RESET statement_timeout")
+            .execute(&mut *connection)
+            .await
+        {
+            self.defer(&error);
+            return false;
+        }
+        *held = Some(connection);
+        self.activate_gate();
+        true
+    }
+
     pub(super) async fn run_if_pending(&self, database: &Database) {
+        if !self.gate_active() {
+            return;
+        }
+        if self.needs_catchup.load(Ordering::Acquire) {
+            let result = sqlx::query("INSERT INTO linggan_opportunity_card_change(problem_ref,changed_at) \
+                SELECT problem_ref,clock_timestamp() FROM linggan_opportunity_problem WHERE true ORDER BY problem_ref \
+                ON CONFLICT(problem_ref) DO UPDATE SET changed_at=EXCLUDED.changed_at, \
+                  revision=linggan_opportunity_card_change.revision+1")
+                .execute(database.pool()).await;
+            if let Err(error) = result {
+                self.defer(&error);
+                return;
+            }
+            self.needs_catchup.store(false, Ordering::Release);
+        }
         let requested = self.pending.swap(false, Ordering::AcqRel);
         let due = Instant::now() >= *self.next_metrics.lock().await;
-        if !requested && !due {
+        match enqueue_source_events(database).await {
+            Ok(true) => {}
+            Ok(false) => {
+                self.request();
+            }
+            Err(error) => {
+                self.defer(&error);
+                return;
+            }
+        }
+        let card_domains = match self.due_card_domains(database).await {
+            Ok(domains) => domains,
+            Err(error) => {
+                self.defer(&error);
+                return;
+            }
+        };
+        if !requested && !due && card_domains.is_empty() {
             return;
         }
         let digest = match CommenterDigest::load() {
@@ -56,10 +168,51 @@ impl OpportunitySync {
                 return;
             }
         };
-        match self.refresh_metrics(database, &digest).await {
+        let result = async {
+            let mut failures = Vec::new();
+            if (requested || due)
+                && let Err(error) = self.refresh_metrics(database, &digest).await
+            {
+                failures.push(error);
+            }
+            for domain in card_domains {
+                match rebuild_opportunity_cards(database, domain, &digest, CardRebuildMode::Due)
+                    .await
+                {
+                    Ok(report) => eprintln!(
+                        "opportunity card refresh: domain={domain} {}",
+                        serde_json::to_string(&report).map_err(|error| error.to_string())?
+                    ),
+                    Err(error) => {
+                        failures.push(format!("domain={domain} {error}"));
+                        if !self.failure_reported.load(Ordering::Acquire) {
+                            eprintln!("opportunity card refresh deferred: domain={domain} {error}");
+                        }
+                    }
+                }
+            }
+            if failures.is_empty() {
+                Ok(())
+            } else {
+                Err(failures.join("; "))
+            }
+        }
+        .await;
+        match result {
             Ok(()) => self.failure_reported.store(false, Ordering::Release),
             Err(error) => self.defer(&error),
         }
+    }
+
+    async fn due_card_domains(&self, database: &Database) -> Result<Vec<Uuid>, String> {
+        sqlx::query_scalar("SELECT DISTINCT problem.domain_ref FROM linggan_opportunity_card_change change \
+            JOIN linggan_opportunity_problem problem USING(problem_ref) \
+            CROSS JOIN linggan_opportunity_metric_definition_current current \
+            JOIN linggan_opportunity_metric_definition definition ON definition.version=current.version \
+            WHERE current.singleton AND change.changed_at+make_interval(secs=>\
+              (definition.params->>'card_rebuild_debounce_seconds')::double precision)<=clock_timestamp() \
+            ORDER BY problem.domain_ref")
+            .fetch_all(database.pool()).await.map_err(|error| error.to_string())
     }
 
     async fn sync_mentions(
@@ -144,5 +297,25 @@ impl OpportunitySync {
         *self.next_metrics.lock().await = Instant::now()
             + Duration::from_secs(definition.params.card_rebuild_debounce_seconds.into());
         Ok(())
+    }
+}
+
+async fn wait_for_gate_lock(
+    connection: &mut PoolConnection<Postgres>,
+    query: &'static str,
+    drain: &crate::model_worker_drain::ModelWorkerDrain,
+) -> Result<(), sqlx::Error> {
+    loop {
+        match sqlx::query(query).execute(&mut **connection).await {
+            Ok(_) => return Ok(()),
+            Err(error)
+                if error
+                    .as_database_error()
+                    .and_then(|error| error.code())
+                    .as_deref()
+                    == Some("57014")
+                    && !drain.is_requested() => {}
+            Err(error) => return Err(error),
+        }
     }
 }

@@ -344,10 +344,23 @@ pub async fn rebuild_problem_metrics(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *tx)
         .await?;
-    validate_request(&mut tx, domain, as_of, mode).await?;
-    let definitions = definitions(&mut tx, as_of).await?;
-    super::mentions::verify_digest_key(&mut tx, digest, mode != RebuildMode::Preview).await?;
-    super::mentions::verify_existing_digest(&mut tx, digest, Some(domain)).await?;
+    let report = rebuild_problem_metrics_in(&mut tx, domain, as_of, digest, mode).await?;
+    tx.commit().await?;
+    Ok(report)
+}
+
+// Card construction uses this same calculation inside its own consistent transaction.
+pub(super) async fn rebuild_problem_metrics_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    as_of: &str,
+    digest: &CommenterDigest,
+    mode: RebuildMode,
+) -> Result<MetricRebuildReport, MetricCalculationError> {
+    validate_request(tx, domain, as_of, mode).await?;
+    let definitions = definitions(tx, as_of).await?;
+    super::mentions::verify_digest_key(tx, digest, mode != RebuildMode::Preview).await?;
+    super::mentions::verify_existing_digest(tx, digest, Some(domain)).await?;
     let mut report = MetricRebuildReport {
         definitions: definitions.len(),
         problems_rebuilt: 0,
@@ -362,7 +375,7 @@ pub async fn rebuild_problem_metrics(
         identity_conflicts: Vec::new(),
         invariants: None,
     };
-    let Some((problems, taxonomy_version)) = problem_scope(&mut tx, domain, as_of).await? else {
+    let Some((problems, taxonomy_version)) = problem_scope(tx, domain, as_of).await? else {
         return finish(tx, report, as_of, domain).await;
     };
     let request = RebuildRequest {
@@ -373,7 +386,7 @@ pub async fn rebuild_problem_metrics(
     };
     for definition in &definitions {
         rebuild_definition(
-            &mut tx,
+            tx,
             &request,
             definition,
             &problems,
@@ -555,12 +568,12 @@ async fn rebuild_one_problem(
 }
 
 async fn finish(
-    mut tx: Transaction<'_, Postgres>,
+    tx: &mut Transaction<'_, Postgres>,
     mut report: MetricRebuildReport,
     as_of: &str,
     domain: Uuid,
 ) -> Result<MetricRebuildReport, MetricCalculationError> {
-    let invariants = super::invariants::check_invariants_in(&mut tx, as_of, domain).await?;
+    let invariants = super::invariants::check_invariants_in(tx, as_of, domain).await?;
     if invariants.failed() {
         let checks = invariants
             .checks
@@ -571,6 +584,5 @@ async fn finish(
         return Err(MetricCalculationError::InvariantViolations { checks });
     }
     report.invariants = Some(invariants);
-    tx.commit().await?;
     Ok(report)
 }

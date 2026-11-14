@@ -10,6 +10,7 @@ use super::{CLEANER_VERSION, StudyCatalogError, cursor, literal_substring_patter
 
 fn page_sql() -> String {
     format!("{}{}", super::facts_sql(), include_str!("comments.sql"))
+        .replace("/*COMMENT_LIKE_HEADS*/", super::like_heads_sql())
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]

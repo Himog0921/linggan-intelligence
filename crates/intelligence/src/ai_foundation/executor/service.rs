@@ -91,6 +91,7 @@ pub async fn run(
         source_revision: source_revision.into(),
     })
 }
+
 async fn work_loop(
     db: &Database,
     fence: super::ExecutorFence,
@@ -128,7 +129,11 @@ async fn work_loop(
                     if opportunity_jobs.is_empty() && let Some(sync) = &opportunity_sync {
                         let sync = sync.clone();
                         let db = db.clone();
+                        let opportunity_drain = drain.clone();
                         opportunity_jobs.spawn(async move {
+                            if !sync.ensure_gate(&db, &opportunity_drain).await {
+                                return;
+                            }
                             if tokio::time::timeout(
                                 Duration::from_secs(AI_LIMITS.drain_grace_seconds()),
                                 sync.run_if_pending(&db),

@@ -11,38 +11,40 @@ current_detail AS MATERIALIZED (
   JOIN requested_work scope ON scope.public_ref=detail.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz
+    AND linggan_opportunity_observed_at(detail.observed_at) IS NOT NULL
 ), current_observation AS MATERIALIZED (
   SELECT observation.* FROM linggan_material_engagement_observation observation
   JOIN requested_work scope ON scope.public_ref=observation.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz
+    AND linggan_opportunity_observed_at(observation.observed_at) IS NOT NULL
 ), latest_detail AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.material_ref,detail.package_ref,detail.record_ordinal,
     detail.observed_at,detail.created_at
   FROM current_detail detail
-  ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
+  ORDER BY detail.content_public_ref,linggan_opportunity_observed_at(detail.observed_at) DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_title AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.title,detail.title_state,detail.material_ref,
     detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM current_detail detail WHERE detail.title_state='KNOWN'
-  ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
+  ORDER BY detail.content_public_ref,linggan_opportunity_observed_at(detail.observed_at) DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_body AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.body_text,detail.body_state,detail.material_ref,
     detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM current_detail detail WHERE detail.body_state='KNOWN'
-  ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
+  ORDER BY detail.content_public_ref,linggan_opportunity_observed_at(detail.observed_at) DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_creator AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.creator_display_name,detail.creator_display_name_state,
     detail.material_ref,detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM current_detail detail WHERE detail.creator_display_name_state='KNOWN'
-  ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
+  ORDER BY detail.content_public_ref,linggan_opportunity_observed_at(detail.observed_at) DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_published_at AS (
   SELECT DISTINCT ON (detail.content_public_ref)
@@ -53,7 +55,7 @@ current_detail AS MATERIALIZED (
     detail.published_at_precision,detail.published_at_reference_observed_at,
     detail.published_at_parser_version
   FROM current_detail detail WHERE detail.published_at IS NOT NULL
-  ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
+  ORDER BY detail.content_public_ref,linggan_opportunity_observed_at(detail.observed_at) DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_published_text AS (
   SELECT DISTINCT ON (detail.content_public_ref)
@@ -63,7 +65,7 @@ current_detail AS MATERIALIZED (
     detail.published_at_source_kind,detail.published_at_precision,
     detail.published_at_reference_observed_at,detail.published_at_parser_version
   FROM current_detail detail WHERE detail.published_at_source_text_state='KNOWN'
-  ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,
+  ORDER BY detail.content_public_ref,linggan_opportunity_observed_at(detail.observed_at) DESC,
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_discovery AS (
   SELECT DISTINCT ON (finding.content_public_ref) finding.*
@@ -71,43 +73,45 @@ current_detail AS MATERIALIZED (
   JOIN requested_work scope ON scope.public_ref=finding.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND finding.created_at <= $2::timestamptz
-  ORDER BY finding.content_public_ref,finding.observed_at::timestamptz DESC,
+    AND linggan_opportunity_observed_at(finding.observed_at) IS NOT NULL
+  ORDER BY finding.content_public_ref,linggan_opportunity_observed_at(finding.observed_at) DESC,
            finding.created_at DESC,finding.package_ref DESC,finding.material_ref DESC
 ), latest_like AS (
   SELECT DISTINCT ON (observation.content_public_ref)
     observation.content_public_ref,observation.like_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
   FROM current_observation observation WHERE observation.like_count_state='KNOWN'
-  ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
+  ORDER BY observation.content_public_ref,linggan_opportunity_observed_at(observation.observed_at) DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_comment_count AS (
   SELECT DISTINCT ON (observation.content_public_ref)
     observation.content_public_ref,observation.comment_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
   FROM current_observation observation WHERE observation.comment_count_state='KNOWN'
-  ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
+  ORDER BY observation.content_public_ref,linggan_opportunity_observed_at(observation.observed_at) DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_collect AS (
   SELECT DISTINCT ON (observation.content_public_ref)
     observation.content_public_ref,observation.collect_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
   FROM current_observation observation WHERE observation.collect_count_state='KNOWN'
-  ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
+  ORDER BY observation.content_public_ref,linggan_opportunity_observed_at(observation.observed_at) DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_share AS (
   SELECT DISTINCT ON (observation.content_public_ref)
     observation.content_public_ref,observation.share_count,observation.package_ref,
     observation.source_lane,observation.observed_at,observation.created_at
   FROM current_observation observation WHERE observation.share_count_state='KNOWN'
-  ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
+  ORDER BY observation.content_public_ref,linggan_opportunity_observed_at(observation.observed_at) DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_lane AS (
-  SELECT lane.content_public_ref,linggan_human_moment(max(lane.observed_at::timestamptz)) AS observed_at
+  SELECT lane.content_public_ref,linggan_human_moment(max(linggan_opportunity_observed_at(lane.observed_at))) AS observed_at
   FROM linggan_material_lane_observation lane
   JOIN requested_work scope ON scope.public_ref=lane.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE lane.content_public_ref IS NOT NULL AND package.accepted_at <= $2::timestamptz
     AND lane.created_at <= $2::timestamptz
+    AND linggan_opportunity_observed_at(lane.observed_at) IS NOT NULL
   GROUP BY lane.content_public_ref
 ), work_resource_current AS (
   SELECT content.platform,content.content_external_id,content.public_ref,
@@ -220,7 +224,9 @@ current_detail AS MATERIALIZED (
 const FILTERED_PAGE_SCOPE: &str = r#"
 requested_work AS MATERIALIZED (
  SELECT content.* FROM linggan_material_content content
- WHERE ($8::uuid IS NULL OR content.public_ref=$8)
+ JOIN linggan_runtime_capture_package first_package ON first_package.package_ref=content.first_package_ref
+ WHERE content.created_at <= $2::timestamptz AND first_package.accepted_at <= $2::timestamptz
+ AND ($8::uuid IS NULL OR content.public_ref=$8)
  AND ($9::uuid IS NULL OR EXISTS (SELECT 1 FROM linggan_material_domain_usage usage
       WHERE usage.content_public_ref=content.public_ref AND usage.domain_ref=$9
         AND ($8::uuid IS NOT NULL OR $10::uuid[] IS NOT NULL OR usage.use_kind='domain_research')))
@@ -233,23 +239,25 @@ requested_work AS MATERIALIZED (
 const IDENTITY_PAGE_SCOPE: &str = r#"
 scoped_work AS MATERIALIZED (
  SELECT content.* FROM linggan_material_content content
- WHERE ($8::uuid IS NULL OR content.public_ref=$8)
+ JOIN linggan_runtime_capture_package first_package ON first_package.package_ref=content.first_package_ref
+ WHERE content.created_at <= $2::timestamptz AND first_package.accepted_at <= $2::timestamptz
+ AND ($8::uuid IS NULL OR content.public_ref=$8)
  AND ($9::uuid IS NULL OR EXISTS (SELECT 1 FROM linggan_material_domain_usage usage
       WHERE usage.content_public_ref=content.public_ref AND usage.domain_ref=$9
         AND ($8::uuid IS NOT NULL OR $10::uuid[] IS NOT NULL OR usage.use_kind='domain_research')))
  AND ($10::uuid[] IS NULL OR content.public_ref=ANY($10))
 ), recent_detail_time AS (
- SELECT detail.content_public_ref,max(detail.observed_at::timestamptz) AS observed_at
+ SELECT detail.content_public_ref,max(linggan_opportunity_observed_at(detail.observed_at)) AS observed_at
  FROM linggan_material_content_detail detail JOIN scoped_work scope ON scope.public_ref=detail.content_public_ref
  JOIN linggan_runtime_capture_package package USING(package_ref)
  WHERE package.accepted_at <= $2::timestamptz AND detail.created_at <= $2::timestamptz GROUP BY detail.content_public_ref
 ), recent_discovery_time AS (
- SELECT finding.content_public_ref,max(finding.observed_at::timestamptz) AS observed_at
+ SELECT finding.content_public_ref,max(linggan_opportunity_observed_at(finding.observed_at)) AS observed_at
  FROM linggan_material_discovery_finding finding JOIN scoped_work scope ON scope.public_ref=finding.content_public_ref
  JOIN linggan_runtime_capture_package package USING(package_ref)
  WHERE package.accepted_at <= $2::timestamptz AND finding.created_at <= $2::timestamptz GROUP BY finding.content_public_ref
 ), recent_lane_time AS (
- SELECT lane.content_public_ref,max(lane.observed_at::timestamptz) AS observed_at
+ SELECT lane.content_public_ref,max(linggan_opportunity_observed_at(lane.observed_at)) AS observed_at
  FROM linggan_material_lane_observation lane JOIN scoped_work scope ON scope.public_ref=lane.content_public_ref
  JOIN linggan_runtime_capture_package package USING(package_ref)
  WHERE package.accepted_at <= $2::timestamptz AND lane.created_at <= $2::timestamptz GROUP BY lane.content_public_ref
@@ -258,9 +266,8 @@ scoped_work AS MATERIALIZED (
  LEFT JOIN recent_detail_time detail ON detail.content_public_ref=content.public_ref
  LEFT JOIN recent_discovery_time discovery ON discovery.content_public_ref=content.public_ref
  LEFT JOIN recent_lane_time lane ON lane.content_public_ref=content.public_ref
- CROSS JOIN LATERAL (SELECT linggan_human_moment(COALESCE(detail.observed_at,discovery.observed_at,lane.observed_at))::timestamptz AS observed_at) moment
- WHERE moment.observed_at IS NOT NULL
- AND ($3::text IS NULL OR moment.observed_at < $3::timestamptz
+ CROSS JOIN LATERAL (SELECT COALESCE(linggan_opportunity_observed_at(linggan_human_moment(COALESCE(detail.observed_at,discovery.observed_at,lane.observed_at))),'-infinity'::timestamptz) AS observed_at) moment
+ WHERE ($3::text IS NULL OR moment.observed_at < $3::timestamptz
    OR (moment.observed_at=$3::timestamptz
      AND (content.platform>$4 OR (content.platform=$4 AND content.content_external_id>$5))))
  ORDER BY moment.observed_at DESC,content.platform,content.content_external_id LIMIT 51
@@ -280,10 +287,11 @@ pub(crate) fn material_page_sql(identity_page: bool) -> String {
   JOIN requested_work scope ON scope.public_ref=comment.content_public_ref
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND comment.created_at <= $2::timestamptz
+    AND linggan_opportunity_observed_at(comment.observed_at) IS NOT NULL
   ORDER BY comment.content_public_ref,comment.comment_external_id,
-           comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC
+           linggan_opportunity_observed_at(comment.observed_at) DESC,comment.created_at DESC,comment.material_ref DESC
 )
-SELECT current.* FROM work_resource_current current
+SELECT current.*,COALESCE(linggan_opportunity_observed_at(current.observed_at),'-infinity'::timestamptz)::text AS sort_observed_at FROM work_resource_current current
 WHERE ($1::text IS NULL
   OR lower(COALESCE(current.title,'')) LIKE '%' || lower($1) || '%'
   OR lower(COALESCE(current.creator_display_name,'')) LIKE '%' || lower($1) || '%'
@@ -309,7 +317,7 @@ WHERE ($1::text IS NULL
           AND NOT EXISTS(SELECT 1 FROM linggan_media_derivative d JOIN linggan_media_ocr_retirement retired ON retired.retired_job_ref=d.job_ref WHERE d.derivative_ref=reading.derivative_ref)
       )))
   )
-  OR EXISTS (SELECT 1 FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package author_package USING(package_ref) WHERE author.platform=current.platform AND author.author_external_id=current.author_external_id AND author_package.accepted_at <= $2::timestamptz AND author.created_at <= $2::timestamptz AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%')))
+  OR EXISTS (SELECT 1 FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package author_package USING(package_ref) WHERE author.platform=current.platform AND author.author_external_id=current.author_external_id AND author_package.accepted_at <= $2::timestamptz AND author.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(author.observed_at) IS NOT NULL AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%')))
 AND ($8::uuid IS NULL OR current.public_ref=$8)
 AND ($9::uuid IS NULL OR EXISTS (
   SELECT 1 FROM linggan_material_domain_usage domain_usage
@@ -317,30 +325,29 @@ AND ($9::uuid IS NULL OR EXISTS (
     AND domain_usage.domain_ref=$9
     AND ($8::uuid IS NOT NULL OR $10::uuid[] IS NOT NULL OR domain_usage.use_kind='domain_research')))
 AND ($10::uuid[] IS NULL OR current.public_ref=ANY($10))
-AND current.observed_at IS NOT NULL
 AND ($6::text IS NULL
   OR ($6='detail' AND current.detail_material_ref IS NOT NULL)
   OR ($6='discovery' AND current.material_ref IS NOT NULL)
-  OR ($6 IN ('comments','replies') AND EXISTS (SELECT 1 FROM linggan_material_lane_observation filtered_lane JOIN linggan_runtime_capture_package filtered_package USING(package_ref) WHERE filtered_lane.content_public_ref=current.public_ref AND filtered_lane.lane=$6 AND filtered_package.accepted_at <= $2::timestamptz AND filtered_lane.created_at <= $2::timestamptz))
-  OR ($6='author' AND EXISTS (SELECT 1 FROM linggan_material_author_profile filtered_author JOIN linggan_runtime_capture_package filtered_author_package USING(package_ref) WHERE filtered_author.platform=current.platform AND filtered_author.author_external_id=current.author_external_id AND filtered_author_package.accepted_at <= $2::timestamptz AND filtered_author.created_at <= $2::timestamptz))
+  OR ($6 IN ('comments','replies') AND EXISTS (SELECT 1 FROM linggan_material_lane_observation filtered_lane JOIN linggan_runtime_capture_package filtered_package USING(package_ref) WHERE filtered_lane.content_public_ref=current.public_ref AND filtered_lane.lane=$6 AND filtered_package.accepted_at <= $2::timestamptz AND filtered_lane.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(filtered_lane.observed_at) IS NOT NULL))
+  OR ($6='author' AND EXISTS (SELECT 1 FROM linggan_material_author_profile filtered_author JOIN linggan_runtime_capture_package filtered_author_package USING(package_ref) WHERE filtered_author.platform=current.platform AND filtered_author.author_external_id=current.author_external_id AND filtered_author_package.accepted_at <= $2::timestamptz AND filtered_author.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(filtered_author.observed_at) IS NOT NULL))
   OR ($6='media_slots' AND EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_origin JOIN linggan_runtime_capture_package filtered_origin_package USING(package_ref) WHERE filtered_origin.content_public_ref=current.public_ref AND filtered_origin_package.accepted_at <= $2::timestamptz AND filtered_origin.created_at <= $2::timestamptz))
   OR ($6='media_bytes' AND EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_origin JOIN linggan_runtime_capture_package filtered_origin_package USING(package_ref) JOIN linggan_media_download_attempt filtered_attempt ON filtered_attempt.media_observation_ref=filtered_origin.observation_ref JOIN linggan_media_materialization filtered_materialization USING(download_attempt_ref) WHERE filtered_origin.content_public_ref=current.public_ref AND filtered_origin_package.accepted_at <= $2::timestamptz AND filtered_origin.created_at <= $2::timestamptz AND filtered_materialization.verified_at <= $2::timestamptz))
   OR ($6='ocr' AND EXISTS (SELECT 1 FROM linggan_media_processing_job filtered_job JOIN linggan_media_slot filtered_slot USING(slot_key) WHERE filtered_slot.platform=current.platform AND filtered_slot.content_external_id=current.content_external_id AND filtered_job.processor_kind IN ('image_ocr','video_frame_ocr') AND filtered_job.created_at <= $2::timestamptz))
   OR ($6='asr' AND EXISTS (SELECT 1 FROM linggan_media_processing_job filtered_job JOIN linggan_media_slot filtered_slot USING(slot_key) WHERE filtered_slot.platform=current.platform AND filtered_slot.content_external_id=current.content_external_id AND filtered_job.processor_kind='asr' AND filtered_job.created_at <= $2::timestamptz)))
 AND ($7::text IS NULL OR EXISTS (SELECT 1 FROM linggan_material_media_origin filtered_kind JOIN linggan_runtime_capture_package filtered_kind_package USING(package_ref) WHERE filtered_kind.content_public_ref=current.public_ref AND filtered_kind.purpose=$7 AND filtered_kind_package.accepted_at <= $2::timestamptz AND filtered_kind.created_at <= $2::timestamptz))
-AND ($3::text IS NULL OR current.observed_at::timestamptz < $3::timestamptz
-  OR (current.observed_at::timestamptz=$3::timestamptz
+AND ($3::text IS NULL OR COALESCE(linggan_opportunity_observed_at(current.observed_at),'-infinity'::timestamptz) < $3::timestamptz
+  OR (COALESCE(linggan_opportunity_observed_at(current.observed_at),'-infinity'::timestamptz)=$3::timestamptz
     AND (current.platform > $4 OR (current.platform=$4 AND current.content_external_id > $5))))
-ORDER BY current.observed_at::timestamptz DESC,current.platform,current.content_external_id
+ORDER BY COALESCE(linggan_opportunity_observed_at(current.observed_at),'-infinity'::timestamptz) DESC,current.platform,current.content_external_id
 LIMIT 51"#,
     )
 }
 
 pub(crate) fn work_resource_currents_sql() -> String {
     format!(
-        "WITH requested_work AS MATERIALIZED (SELECT * FROM linggan_material_content WHERE public_ref=ANY($1::uuid[])), \
+        "WITH requested_work AS MATERIALIZED (SELECT content.* FROM linggan_material_content content JOIN linggan_runtime_capture_package first_package ON first_package.package_ref=content.first_package_ref WHERE content.public_ref=ANY($1::uuid[]) AND content.created_at<=$2::timestamptz AND first_package.accepted_at<=$2::timestamptz), \
          {WORK_RESOURCE_CURRENT_CTES} \
-         SELECT current.* FROM work_resource_current current WHERE current.observed_at IS NOT NULL"
+         SELECT current.*,COALESCE(linggan_opportunity_observed_at(current.observed_at),'-infinity'::timestamptz)::text AS sort_observed_at FROM work_resource_current current"
     )
 }
 

@@ -17,6 +17,175 @@ use uuid::Uuid;
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn work_reads_skip_bad_observation_times_and_page_unknowns() {
+    use serde_json::json;
+    use std::collections::BTreeSet;
+
+    let db = proof_database("material_bad_observation_time").await;
+    let valid = submit_package_at(&db,"content_detail",json!({"contentExternalId":"mixed-time"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"mixed-time"},
+        "payload":{"title":"SYNTHETIC valid title","bodyText":"SYNTHETIC valid body","authorId":"valid-author","likedCount":12}}),
+        "2026-09-20T08:00:00Z").await;
+    let invalid = submit_package_at(&db,"content_detail",json!({"contentExternalId":"mixed-time"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"mixed-time"},
+        "payload":{"title":"SYNTHETIC invalid title","bodyText":"SYNTHETIC invalid body","authorId":"invalid-author","likedCount":999}}),
+        "2026-09-21T08:00:00Z").await;
+    let invalid_discovery = submit_package_at(&db,"discovery_search",json!({"query":"synthetic"}),
+        json!({"kind":"discovery_card","resultPosition":1,"sourceObject":{"platform":"xhs","type":"content","externalId":"mixed-time"},
+        "payload":{"title":"SYNTHETIC invalid discovery","likeCount":777}}),
+        "2026-09-22T08:00:00Z").await;
+    let invalid_only = submit_package_at(&db,"content_detail",json!({"contentExternalId":"unknown-time"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"unknown-time"},
+        "payload":{"title":"SYNTHETIC invalid only","bodyText":"SYNTHETIC invalid only body","likedCount":333}}),
+        "2026-09-23T08:00:00Z").await;
+    let invalid_packages = vec![invalid, invalid_discovery, invalid_only];
+    sqlx::raw_sql(
+        "ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; \
+        ALTER TABLE linggan_material_discovery_finding DISABLE TRIGGER USER; \
+        ALTER TABLE linggan_material_lane_observation DISABLE TRIGGER USER",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    for query in [
+        "UPDATE linggan_material_content_detail SET observed_at='not-a-time' WHERE package_ref=ANY($1)",
+        "UPDATE linggan_material_discovery_finding SET observed_at='not-a-time' WHERE package_ref=ANY($1)",
+        "UPDATE linggan_material_lane_observation SET observed_at='not-a-time' WHERE package_ref=ANY($1)",
+    ] {
+        sqlx::query(query)
+            .bind(&invalid_packages)
+            .execute(db.pool())
+            .await
+            .unwrap();
+    }
+    sqlx::raw_sql(
+        "ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER; \
+        ALTER TABLE linggan_material_discovery_finding ENABLE TRIGGER USER; \
+        ALTER TABLE linggan_material_lane_observation ENABLE TRIGGER USER",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let mixed: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='mixed-time'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let unknown: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='unknown-time'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let mixed_item = read_work_resource(&db, mixed).await.unwrap().unwrap();
+    assert_eq!(
+        mixed_item.display.title.as_deref(),
+        Some("SYNTHETIC valid title")
+    );
+    assert_eq!(mixed_item.display.engagement.like_count, Some(12));
+    assert_eq!(
+        mixed_item.inspector["detailCurrent"]["title"]["source"]["packageRef"],
+        json!(valid)
+    );
+    let timeline = mixed_item.inspector["engagementTimeline"]
+        .as_array()
+        .unwrap();
+    assert_eq!(
+        timeline.len(),
+        1,
+        "bad-time readings cannot become a delta baseline"
+    );
+    assert_eq!(timeline[0]["likeCount"], 12);
+    assert_eq!(
+        mixed_item.inspector["engagementCurrent"]["metrics"]["likeCount"]["deltaState"],
+        "UNKNOWN"
+    );
+    let unknown_item = read_work_resource(&db, unknown).await.unwrap().unwrap();
+    assert!(unknown_item.display.title.is_none());
+    assert_eq!(unknown_item.display.title_state, "UNKNOWN");
+    assert!(unknown_item.display.engagement.like_count.is_none());
+    assert!(unknown_item.summary.last_observed_at.is_none());
+    assert!(
+        !serde_json::to_string(&unknown_item)
+            .unwrap()
+            .contains("SYNTHETIC invalid only")
+    );
+    let before_first_package: String = sqlx::query_scalar(
+        "SELECT (accepted_at - interval '1 second')::text FROM linggan_runtime_capture_package WHERE package_ref=$1",
+    )
+    .bind(invalid_only)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(
+        linggan_evidence::research_dossier::read_at(&db, unknown, Some(&before_first_package))
+            .await
+            .unwrap()
+            .is_none(),
+        "an unknown time must not reveal a work before its first accepted package"
+    );
+
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason) \
+        SELECT $1,100+n,'accepted_for_library_content','synthetic unknown time pagination' FROM generate_series(1,52) n")
+        .bind(invalid_only).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_content(platform,content_external_id,public_ref,first_package_ref) \
+        SELECT 'xhs','unknown-extra-'||n,md5('unknown-extra:'||n)::uuid,$1 FROM generate_series(1,52) n")
+        .bind(invalid_only).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,\
+        observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,\
+        published_at_source_text,published_at_source_text_state,searchable_text) \
+        SELECT md5('unknown-detail:'||n)::uuid,md5('unknown-extra:'||n)::uuid,$1,100+n,\
+        'not-a-time',NULL,'UNKNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN','' FROM generate_series(1,52) n")
+        .bind(invalid_only).execute(db.pool()).await.unwrap();
+    let mut seen = BTreeSet::new();
+    let mut cursor: Option<String> = None;
+    for page_number in 0..4 {
+        let query: EvidenceQuery = serde_json::from_value(json!({"scope":"all_accepted_material",
+            "window":"latest_accepted_discovery","sort":"latest_discovery","cursor":cursor}))
+        .unwrap();
+        let page = read_work_resources(&db, &query).await.unwrap();
+        for item in &page.items {
+            assert!(
+                seen.insert(item.identity.public_ref),
+                "pagination must not repeat a work"
+            );
+            if item.identity.public_ref != mixed {
+                assert!(item.summary.last_observed_at.is_none());
+            }
+            if item.identity.public_ref == unknown && page_number > 0 {
+                assert_eq!(
+                    item.inspector["commentsReceipt"]["total"], 0,
+                    "a projection created after the cursor cutoff cannot change the old count"
+                );
+            }
+        }
+        if page_number == 0 {
+            assert_eq!(page.items.first().unwrap().identity.public_ref, mixed);
+            sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason) \
+                VALUES($1,500,'accepted_for_library_content','synthetic later comment projection')")
+                .bind(invalid_only).execute(db.pool()).await.unwrap();
+            sqlx::query("INSERT INTO linggan_material_comment(material_ref,content_public_ref,package_ref,record_ordinal,\
+                comment_external_id,root_comment_external_id,is_reply,body_text,body_state,observed_at,created_at) \
+                VALUES(gen_random_uuid(),$1,$2,500,'late-comment','late-comment',false,'SYNTHETIC late comment',\
+                'KNOWN','2026-09-23T08:00:00Z',clock_timestamp())")
+                .bind(unknown).bind(invalid_only).execute(db.pool()).await.unwrap();
+        }
+        cursor = page.cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+    assert_eq!(
+        seen.len(),
+        54,
+        "every known and unknown time work must be returned once"
+    );
+    assert!(cursor.is_none(), "pagination must terminate");
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn source_navigation_uses_latest_accepted_exact_note_link_without_reviving_old_signatures() {
     let database = proof_database("material_source_note_navigation").await;
     let id = "0123456789abcdef01234567";

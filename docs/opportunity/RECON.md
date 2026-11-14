@@ -597,3 +597,28 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - 现有问题指标的输入、协议归属和来源提及由 `crates/intelligence/src/opportunity/problem_metrics/inputs.rs` 读取，计算事务与增量指纹由 `problem_metrics.rs` 的 `rebuild_problem_metrics` 协调；线上后台入口复用该函数（`crates/intelligence/src/ai_foundation/executor/service/opportunity_sync.rs`），手工重建入口为 `apps/worker/src/bin/opportunity.rs`。
 - Wilson 区间由 `crates/intelligence/src/opportunity/stats.rs:17` 的共享 `wilson_interval` 计算；I7 现有定义在 `crates/intelligence/src/opportunity/invariants.rs` 的 `sufficient_creator_meets_minimum`，T1.3 建表后须补按领域及 `as_of` 的检查。
 - Q-22 已答复：作者集中度沿用首次入档协议，未知单独成组并按组排序；后续卡片标明组别，见 D-042。协议是同一派生指标的维度，不引入平行评论事实。
+
+## 11. T1.4 前置勘察（2026-11-13，`b9a8f324`）
+
+- 问题周期指标表以 `protocol_version` 为同一指标的分组维度，未知为 NULL（`database/migrations/0213_opportunity_problem_metric_period.sql:9-28`）；作者指标和组内排序见 `crates/intelligence/src/opportunity/problem_metrics/creator_density.rs`。手册 §6.7 的需求栏未提供对应协议组，见 Q-23。
+- `linggan_comment_problem_membership` 的归属对象来自当前评论研究结果；问题归属阶段只选择合格的 `problem` / `need`（`crates/intelligence/src/ai_foundation/comment_problem.rs:22-31`）。现有 `solution` / `experience` 信号没有问题框架（`crates/intelligence/src/comment_study_semantic.rs:51-62`），不能据此证明办法与指定问题的关系，见 Q-24。
+- 阶段 1 不执行供给搜索与判定，但 §6.7 的 `supply.counts` 不允许空值；R5 要求未知不冒充 0，见 Q-25。
+- 作者资料的 `display_name_state` 允许 `UNKNOWN`（`database/migrations/0016_material_social_lanes.sql:63-82`）；作者归属只保证作者身份，不保证资料记录或姓名。§6.7 的 `CreatorDensity.name` 必填，见 Q-26。
+- 代表原声可能因来源受限而撤回；来源限制记录位于 `database/migrations/0094_corpus_evidence_read_recovery.sql:7-13`，既有 I9 位于 `crates/intelligence/src/opportunity/invariants.rs:131-147`。后续实现必须同时验证防抖窗口内的撤回安全和重建后补位，不能只证明重建前的旧副本仍可读。
+- 点赞投影 `linggan_material_comment_engagement.created_at` 可晚于评论和包的时间（`database/migrations/0122_comment_like_library.sql:4-29`）；原评论研究 `like_heads` 只按评论和包筛选时点。Q-27 已由 D-047 答复，当前工作树把选择逻辑抽至 `crates/intelligence/src/comment_study_catalog/like_heads.sql` 并增加投影创建时间限制；隔离评论目录回归已通过，T1.4 整体尚未验收。
+- 已确认的 D-040 需要共同的按时点作者选择；原评论研究的 `selected_source_in`、目录 `facts.sql` 及候选 SQL 连接当前作者视图。当前工作树已将它们收敛至 `linggan_material_content_author_at`（`crates/intelligence/src/comment_study_source.rs:73`、`crates/intelligence/src/comment_study_catalog/facts.sql:108`、`crates/intelligence/src/comment_study_source/candidates.sql:49`）；隔离数据库中的跨模块回归已通过。
+- §8.2 原称 11 月 2 日为当前周，但 `as_of=2026-11-10T00:00:00Z` 的上海日历周从 11 月 9 日开始。Q-28 已由 D-048 裁定按真实日历周，原 W0 的 11 月 2 日单周标准值保持不变；卡片 `current` 应表示 11 月 9 日开始的周。
+- 作品互动统一来源为 `linggan_material_engagement_observation`（`database/migrations/0023_material_engagement_and_media_components.sql:29-50`），覆盖详情与发现两条来源；证据库只从 `KNOWN` 观察中选最新值（`crates/evidence/src/material_query_sql.rs:77-83`）。T1.4 的互动参考可用性复用该视图，限制观察创建和来源包接纳时间；作品发布时间锚点仍按 D-041 选截至时点的最新详情。
+- 作者资料为 `linggan_material_author_profile`（`database/migrations/0016_material_social_lanes.sql:63-87`），姓名和粉丝数分别有 `KNOWN/UNKNOWN` 状态；目标与领域绑定见本文件 §3.4。T1.4 作者组排序复用 `sort_creator_density_group`（`crates/intelligence/src/opportunity/problem_metrics/creator_density.rs:135`），不另造排序口径。
+- 评论目录与机会卡共同使用 `comment_study_catalog::like_heads_sql`；时点作者共用 `linggan_material_content_author_at`。共享入口回归覆盖点赞、作者和研究资格，不依赖真实采集。
+- 采集协议缺失只表示版本未知（D-038），无法证明它与已知版本不同。Q-29 已由 D-049 裁定：未知单独展示；窗口内至少两个不同的已知版本才标记协议变化。当前候选已按此实现并用隔离数据库验证。
+- 清洗缓存由 `crates/intelligence/src/comment_study_catalog/insert_clean_cache.sql` 以 `INSERT ... ON CONFLICT DO NOTHING` 写入；缓存完成可能晚于归属，因此卡片原声补位须观察缓存插入并继续使用现有目录资格。
+- 执行器的 `ExecutorSession` 持有脱离连接池的专属 PostgreSQL 连接并维持所有权（`crates/intelligence/src/ai_foundation/executor.rs`）；数据库连接池上限为 4（`crates/storage-postgres/src/pool.rs`）。候选复用现有机会卡后台任务排队取得事件门控，在启用期间占用池内一个连接；不增加池上限、采集或模型并发。来源写入读取启动锁状态，后台等待使用数据库端短超时，以便停止时取消等待；离线跳过源事件，下一次启用后按现有问题追平。
+- 撤回原子性需要协调卡片正文与限制记录；领域锁不能防止已固定的旧快照漏删新卡。候选以作品、评论稳定身份及版本建立同步标记，并用反向索引定位受影响卡片；旧快照发生冲突时必须失败重试。标记和索引不保存评论者身份或正文。
+- 现有归属同步 `sync_comment_mentions`（`crates/intelligence/src/opportunity/mentions.rs:596`）使用全局事务锁。卡片重建经 `sync_comment_mentions_in`（`:628`）在同一事务先同步归属再计算卡片，保证两者使用同一数据库快照；锁会持续到卡片事务提交，其他领域的机会重建遇忙时需要重试。
+- 本任务另引用的既有表：`linggan_comment_clean_cache`（`database/migrations/0179_retire_research_relations.sql:14`）、`linggan_material_discovery_finding`（`database/migrations/0018_material_discovery_lane.sql:4`）、`linggan_opportunity_comment_mention`（`database/migrations/0211_opportunity_comment_mentions.sql:67`）、`linggan_opportunity_creator_problem_density`（`database/migrations/0215_opportunity_creator_problem_density.sql:3`）、`linggan_opportunity_problem_metric_period`（`database/migrations/0213_opportunity_problem_metric_period.sql:9`）。分别用于原声清洗、发现来源、问题归属、作者密度和问题周期指标。
+- 既有定义与时点符号：`linggan_opportunity_metric_definition`（`database/migrations/0203_opportunity_metric_definition.sql:1`）、`linggan_opportunity_metric_definition_current`（`:9`）、`linggan_opportunity_period_start`（`:51`）、`linggan_opportunity_problem`（`database/migrations/0205_opportunity_problem_taxonomy.sql:10`）、`linggan_opportunity_observed_at`（`database/migrations/0204_opportunity_comment_eligibility.sql:4`）、`linggan_opportunity_taxonomy_version_at`（`database/migrations/0211_opportunity_comment_mentions.sql:50`）。它们提供当前定义、周期边界、问题分类与按时点选择；没有新增平行定义。
+- Q-30 / D-050：评论目录和研究来源读取复用既有 `linggan_opportunity_observed_at(text)`；不可解析的单次观察不参与正文、点赞和作者资料选择。无可用观察时保留稳定评论身份与未知来源；评论首次时间仍按首次入档优先。观察异常数与按评论身份计数的资格排除原因分开，不能相加为评论人数。
+- Q-31 / D-051：证据库、评论研究与机会卡共用的作品读取过滤无法解析的详情、发现、互动和渠道观察；无有效来源的字段保持未知。`0217_opportunity_author_observation_time.sql` 前向更新共享作者函数，`0218_comment_current_safe_observation.sql` 前向更新共享当前评论视图；旧迁移不改。作品分页仅用内部排序键承载未知时间，不对外伪造观察时间。周期锚点仍按 D-041 读取最新合格详情。
+- 证据库作品详情还调用 `crates/evidence/src/content_reobservation.rs` 的关联授权查询；工作分支已在发现分支复用安全解析并剔除坏时间来源，未更改独立作品范围关联或授权、领域、到期与撤销条件。Axum 隔离回归覆盖同作品跨领域、无有效来源、撤销、过期和错误渠道。
+- 既有证据库分页的领域关系读取尚未限制关系创建时间；若翻页间新增领域归属，后页范围可能发生变化。该点与 Q-31 时间文本处理不同，历史回填和领域关系合同尚需核对，不能把本轮坏时间回归当作该行为已验证。
