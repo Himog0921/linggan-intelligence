@@ -385,6 +385,8 @@
 ## 2026-11-13 T1.3 合并与 T1.4 前置勘察
 
 - 负责人授权将 [PR #583](https://github.com/Himog0921/linggan-intelligence/pull/583) 的最终 head `e87a82628f40485423369529dbb685e5baa15ada` 标记为 Ready 并合并。Ready 后 [Delivery #557](https://github.com/Himog0921/linggan-intelligence/actions/runs/43549890373) 的全部所选任务及 Delivery gate 成功，未选任务为 skipped；合并提交 `b9a8f324266cb3798e196b63f210625aa0a7ab84`。
-- `git fetch --no-tags origin main` 输出 `c5899874..b9a8f324 main -> origin/main`；T1.4 独立分支 `codex/opportunity-t14-card-read-model` 和 worktree `.worktrees/opportunity-t14-card-read-model` 基于 `b9a8f324`。主工作区和其他 worktree 未改动。
+- 合并后主线 [Delivery 43551217936](https://github.com/Himog0921/linggan-intelligence/actions/runs/43551217936) 对 `b9a8f324` 完成，结论 `success`；全部任务及 Delivery gate 均成功。
+- `git fetch --no-tags origin main` 输出 `c5899874..b9a8f324 main -> origin/main`；T1.4 独立分支 `codex/opportunity-t14-card-read-model` 和 worktree `.worktrees/opportunity-t14-card-read-model` 基于 `b9a8f324`。主工作区代码与 checkout 未改动，未触及他人的 worktree；下条所述测试证据保存在仓库根目录的私有 artifacts 中。
+- T1.3 工作树已清理：确认分支已合入、工作树干净、`lsof +D` 无占用且最近 60 分钟无文件写入；先将两份隔离 schema 测试证据复制到 `artifacts/private/opportunity-t13-b9a8f324-proof/`，两次 `diff -qr` 均退出 0，再执行不带 `--force` 的 `git worktree remove`，退出 0。T1.3 分支保留。
 - 按手册 §3.3、§3.6 核对 T1.4 时发现需求协议分组、问题级办法归属、未评估供给计数及未知作者姓名四处规格/现实冲突，分别记录 Q-23 至 Q-26；已向负责人提出选项，T1.4 实现暂标 blocked。未修改手册规格或按假设填充数据。
 - 本地运行库、生产环境迁移和部署仍需另行授权；本次未执行真实采集或模型外发。
