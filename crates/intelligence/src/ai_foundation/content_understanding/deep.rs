@@ -135,7 +135,7 @@ pub(super) async fn current_card_in(
 ) -> Result<Option<Value>, FoundationError> {
     let cutoff = linggan_evidence::research_dossier::cutoff_in(tx, None).await?;
     let material = source::load(tx, domain, work, &cutoff).await?;
-    Ok(sqlx::query_scalar("SELECT result->'card' FROM linggan_content_understanding_result
+    Ok(sqlx::query_scalar("SELECT result->'card' FROM linggan_content_understanding_saved_core
         WHERE request_ref=$1 AND work_ref=$2 AND material_snapshot_identity=$3 AND method_version=$4 AND result IS NOT NULL")
         .bind(core).bind(work).bind(material.snapshot.material_snapshot_identity).bind(METHOD)
         .fetch_optional(&mut **tx).await?)
