@@ -3,7 +3,7 @@
 > 状态: 代码事实优先
 > 最后核对: 2026-11-14
 > 适用范围: [内容回溯看板实施手册](06-content-lens-playbook.md)里全部 `<<RECON:…>>` 占位符的真实值，以及开工前必须知道的代码事实；对应任务卡 T0.1
-> 事实来源: 2026-11-14 在 `origin/main@263435f3` 上的只读走查；本机运行库的只读结构查询
+> 事实来源: 2026-11-14 的只读走查，行号已在合入 `origin/main@954bcaa9` 之后重新核对；本机运行库的只读结构查询
 > 冲突时以谁为准: 实施当时的真实代码与迁移。行号会漂移，使用前按符号名重新定位；找不到时停下并记入 `QUESTIONS.md`
 
 本文件只记录事实。没有在这里出现的现有符号，一律视为不存在；需要用时先补勘察。
@@ -14,7 +14,7 @@
 |---|---|---|
 | `ops_publication_table` | `linggan_ops_publication`；标题列 `title`（可空），平台列 `platform`，小红书取值 `'xhs'`；主键 `publication_ref`；账号 `account_ref`；发布日期 `published_business_date`（按北京时间生成） | `database/migrations/0123_ops_ledger.sql:104` |
 | `ops_view_report_table` | `linggan_ops_view_report`；只追加（有禁止修改的触发器）；`report_kind` 为 `value` 或 `cleared`，`cleared` 时 `view_count` 为空 | `database/migrations/0123_ops_ledger.sql:183` |
-| `latest_views` | 现成的公共表达式 `LATEST_VIEWS_CTE`：每个 `publication_ref` 取 `report_sequence` 最大的一条 | `crates/intelligence/src/ops_ledger/read.rs:31` |
+| `latest_views` | 现成的公共表达式 `LATEST_VIEWS_CTE`：每个 `publication_ref` 取 `report_sequence` 最大的一条 | `crates/intelligence/src/ops_ledger/read.rs:34` |
 | `ops_daily_table` | `linggan_ops_daily_report`；每人每天一行；`links_opened_count`、`followers_gained`（加微） | `database/migrations/0123_ops_ledger.sql:207` |
 | `ops_read_module` | `crates/intelligence/src/ops_ledger/read/`；概览读模型在 `read/overview.rs`（`read_ops_overview`，153 行处） | 同左 |
 | `task_key_enum` | `TaskKey`，以及它的 `as_str` | `crates/intelligence/src/ai_foundation.rs:55`、`:83` |
@@ -34,11 +34,11 @@
 | `web_ops_overview` | 概览页与区块 | `apps/web/src/pages/ops/OverviewPage.tsx`、`OverviewBlocks.tsx`（各 442 行） |
 | `web_ops_charts` | 现有图表实现 | `apps/web/src/pages/ops/Charts.tsx` |
 | `web_ops_api_client` | 运营页的接口封装 | `apps/web/src/pages/ops/api.ts` |
-| `wilson_interval` | `wilson_interval(k, n, z) -> Result<Interval, StatsError>`；同文件另有 `rate_per_1k` | `crates/intelligence/src/opportunity/stats.rs:17`、`:38` |
+| `wilson_interval` | `wilson_interval(k, n, z) -> Result<Interval, StatsError>`；同文件另有 `rate_per_1k` | `crates/intelligence/src/opportunity/stats.rs:17`、`:48` |
 | `feature_flag_pattern` | 机会卡的开关：环境变量取值严格等于 `enabled` 才开启。目前实现在命令行与执行器两处；接口层还没有机会卡路由，所以没有“启动时读取并存入状态”的现成实现 | `apps/worker/src/bin/opportunity.rs:206`；`crates/intelligence/src/ai_foundation/executor/service/opportunity_sync.rs:25`；`env.example:24` |
-| `cli_pattern` | 机会卡的命令行二进制 `linggan-opportunity`，子命令形式 | `apps/worker/Cargo.toml:65`；`apps/worker/src/bin/opportunity.rs` |
-| `migration_assembly` | 新迁移要登记两处：本机运行脚本的 `apply_migration_once` 列表；接口测试用的全量结构夹具（`include_str!` 与校验和各一行） | `scripts/local-runtime.sh:527` 附近；`apps/api/src/local_web/full_schema_fixture.rs:337`、`:490` 附近 |
-| `next_migration` | 勘察时主线最新为 `0213_opportunity_problem_metric_period`。编号在合入时取主线下一个，不提前占用 | `database/migrations/` |
+| `cli_pattern` | 机会卡的命令行二进制 `linggan-opportunity`，子命令形式 | `apps/worker/Cargo.toml:66`；`apps/worker/src/bin/opportunity.rs` |
+| `migration_assembly` | 新迁移要登记两处：本机运行脚本的 `apply_migration_once` 列表；接口测试用的全量结构夹具（`include_str!` 与校验和各一行） | `scripts/local-runtime.sh:529` 附近；`apps/api/src/local_web/full_schema_fixture.rs:339`、`:494` 附近 |
+| `next_migration` | 勘察时主线最新为 `0215_opportunity_creator_problem_density`；一天之内主线新增了 0214、0215 两个迁移。编号在合入时取主线下一个，不提前占用 | `database/migrations/` |
 | `proof_scripts` | 隔离库证明脚本的样板 | `scripts/test-ops-ledger-postgres.sh`、`scripts/test-opportunity-postgres.sh`、`scripts/test-local-runtime-schema.sh`；空选择保护在 `scripts/cargo-proof.sh` |
 | `preflight` | 提交前预检 | `bash scripts/ci-preflight.sh origin/main` |
 | `ci_selector` | 按改动路径选择证明；新增共享依赖要同步它的路由测试 | `scripts/ci-select.mjs`、`scripts/ci-select.test.mjs` |
@@ -74,6 +74,10 @@
 ### 2.5 运营左栏的现有标签是“概览”
 
 手册早先写作“总览”，以代码里的“概览”为准。新页面排在“概览”之后。受限成员默认落在“发布记录”，看板在圈 A 只对管理员可见（DR-09），所以不需要改这段默认逻辑。
+
+### 2.6 L1 的失败恢复已在主线推进
+
+2026-11-13 至 14 日主线合入了两组改动（PR #582、#584）：在不改变来源锚点的前提下恢复无歧义的 L1 草稿；从已保存的完整回复离线恢复 Core（新增迁移 0214 与一个恢复用的命令行）；恢复带多余换行逗号的无歧义转写引句。因此“29 次失败”是 2026-11-13 的时点数字，其中结构不合格与引句不逐字两类已有一部分被处理。工作包 U1 应当先核对这些改动之后剩余的失败，再做分析。
 
 ## 3. 数据现状（2026-11-13 本机库）
 
