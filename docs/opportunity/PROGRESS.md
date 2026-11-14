@@ -381,3 +381,10 @@
 - 工作区独立审阅提出标准集和关闭开关负例不足，均已修复并经隔离回归；审阅者只读核对代码与日志，未独立运行数据库测试。最终提交和远端 CI 以 PR 回执为准。
 - 本任务单 PR 的代码改动超过手册建议的约 400 行：需要把作者指标与现有输入、双口径重算及事务不变量一起接入，并拆分原有长函数；隔离数据与负例测试另占较大部分。拆成并行实现会使中间版本缺少一致的自动刷新和校验。
 - 结果为实现与合成测试候选；未部署、未做真实数据或业务验收。本地运行库及生产环境迁移仍需另行授权；首次入档表没有建立时间的历史限制仍在。
+
+## 2026-11-13 T1.3 合并与 T1.4 前置勘察
+
+- 负责人授权将 [PR #583](https://github.com/Himog0921/linggan-intelligence/pull/583) 的最终 head `e87a82628f40485423369529dbb685e5baa15ada` 标记为 Ready 并合并。Ready 后 [Delivery #557](https://github.com/Himog0921/linggan-intelligence/actions/runs/43549890373) 的全部所选任务及 Delivery gate 成功，未选任务为 skipped；合并提交 `b9a8f324266cb3798e196b63f210625aa0a7ab84`。
+- `git fetch --no-tags origin main` 输出 `c5899874..b9a8f324 main -> origin/main`；T1.4 独立分支 `codex/opportunity-t14-card-read-model` 和 worktree `.worktrees/opportunity-t14-card-read-model` 基于 `b9a8f324`。主工作区和其他 worktree 未改动。
+- 按手册 §3.3、§3.6 核对 T1.4 时发现需求协议分组、问题级办法归属、未评估供给计数及未知作者姓名四处规格/现实冲突，分别记录 Q-23 至 Q-26；已向负责人提出选项，T1.4 实现暂标 blocked。未修改手册规格或按假设填充数据。
+- 本地运行库、生产环境迁移和部署仍需另行授权；本次未执行真实采集或模型外发。

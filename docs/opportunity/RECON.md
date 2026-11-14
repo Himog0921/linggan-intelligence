@@ -597,3 +597,11 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - 现有问题指标的输入、协议归属和来源提及由 `crates/intelligence/src/opportunity/problem_metrics/inputs.rs` 读取，计算事务与增量指纹由 `problem_metrics.rs` 的 `rebuild_problem_metrics` 协调；线上后台入口复用该函数（`crates/intelligence/src/ai_foundation/executor/service/opportunity_sync.rs`），手工重建入口为 `apps/worker/src/bin/opportunity.rs`。
 - Wilson 区间由 `crates/intelligence/src/opportunity/stats.rs:17` 的共享 `wilson_interval` 计算；I7 现有定义在 `crates/intelligence/src/opportunity/invariants.rs` 的 `sufficient_creator_meets_minimum`，T1.3 建表后须补按领域及 `as_of` 的检查。
 - Q-22 已答复：作者集中度沿用首次入档协议，未知单独成组并按组排序；后续卡片标明组别，见 D-042。协议是同一派生指标的维度，不引入平行评论事实。
+
+## 11. T1.4 前置勘察（2026-11-13，`b9a8f324`）
+
+- 问题周期指标表以 `protocol_version` 为同一指标的分组维度，未知为 NULL（`database/migrations/0213_opportunity_problem_metric_period.sql:9-28`）；作者指标和组内排序见 `crates/intelligence/src/opportunity/problem_metrics/creator_density.rs`。手册 §6.7 的需求栏未提供对应协议组，见 Q-23。
+- `linggan_comment_problem_membership` 的归属对象来自当前评论研究结果；问题归属阶段只选择合格的 `problem` / `need`（`crates/intelligence/src/ai_foundation/comment_problem.rs:22-31`）。现有 `solution` / `experience` 信号没有问题框架（`crates/intelligence/src/comment_study_semantic.rs:51-62`），不能据此证明办法与指定问题的关系，见 Q-24。
+- 阶段 1 不执行供给搜索与判定，但 §6.7 的 `supply.counts` 不允许空值；R5 要求未知不冒充 0，见 Q-25。
+- 作者资料的 `display_name_state` 允许 `UNKNOWN`（`database/migrations/0016_material_social_lanes.sql:63-82`）；作者归属只保证作者身份，不保证资料记录或姓名。§6.7 的 `CreatorDensity.name` 必填，见 Q-26。
+- 代表原声可能因来源受限而撤回；来源限制记录位于 `database/migrations/0094_corpus_evidence_read_recovery.sql:7-13`，既有 I9 位于 `crates/intelligence/src/opportunity/invariants.rs:131-147`。后续实现必须同时验证防抖窗口内的撤回安全和重建后补位，不能只证明重建前的旧副本仍可读。
