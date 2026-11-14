@@ -11,6 +11,22 @@
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
 
+## 2026-11-13 · Intelligence 上线手册集（2026-11-14 已裁定，看板阶段 0–2 立项）
+
+- [入口与读法](launch/README.md)：一页结论、文件清单、事实/判断/假设三种标记。
+- [内核手册](launch/01-kernel.md)：核心价值、内核回路、七项内核能力、设计原则与新思路。
+- [产品功能手册](launch/02-product.md)：三圈上线、各模块的保留与调整、选题的落点、链路断层。
+- [架构与 AI 手册](launch/03-architecture.md)：理解引擎、AI 任务的统一形状、工程结构、上线前必须解决的事。
+- [数据架构手册](launch/04-data.md)：四层、标注派生的通用模型、结果数据、时间、统计口径。
+- [界面设计手册](launch/05-ui.md)：情报界面的表达原则、看板骨架、文案约定与验收清单。
+- [内容回溯看板实施手册](launch/06-content-lens-playbook.md)：运营板块看板 v1 的硬规则、方法、数据模型、任务卡与验收。
+- [上线路线与质量门](launch/07-launch-gates.md)：高质量上线的五条标准与三圈的退出条件。
+- [待裁定事项](launch/DECISIONS-REQUIRED.md)：DR-01 至 DR-12 及 2026-11-14 的裁定。
+- [任务编排](launch/ORCHESTRATION.md)：工作包、依赖、波次、共享文件规则、质量门与外部 agent 开工说明。
+- [勘察记录](launch/RECON.md)：实施手册占位符的真实取值与开工前的代码事实。
+- [进度](launch/PROGRESS.md) · [问题记录](launch/QUESTIONS.md)：工作包进展与待 Mog 回答的问题。
+- [我方笔记回溯归类：方法与结果](audits/own-notes-retro-labeling-2026-11-13.md)：2026-11-13 的盲标、复标、关联与限制；只含聚合数字。
+
 ## 2026-11-12 · 机会卡（Opportunity Card）
 
 - [实施手册](opportunity/playbook.md)：v1.3，T0.1b 至 T3 与采集侧 Stage C 的任务卡、规格与验收。
