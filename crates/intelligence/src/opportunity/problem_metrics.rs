@@ -1,8 +1,12 @@
 //! Compute versioned, protocol-separated problem periods from one as-of fact set.
 mod calculate;
+mod creator_density;
 mod inputs;
 mod store;
 pub use calculate::MetricPeriod;
+pub use creator_density::{
+    CreatorDensity, CreatorDensityGroup, CreatorWindowExclusions, sort_creator_density_group,
+};
 
 use super::{
     CommenterDigest, InvariantReport, MentionSyncError, OpportunityMetricError,
@@ -66,9 +70,12 @@ pub struct MetricRebuildReport {
     pub problems_rebuilt: usize,
     pub problems_unchanged: usize,
     pub period_rows_written: usize,
+    pub creator_rows_written: usize,
     pub problems_previewed: usize,
     pub preview: Vec<MetricPeriod>,
+    pub creator_preview: Vec<CreatorDensityGroup>,
     pub exclusions: Vec<MetricExclusion>,
+    pub creator_window_exclusions: Vec<CreatorWindowExclusions>,
     pub identity_conflicts: Vec<MetricIdentityConflicts>,
     pub invariants: Option<InvariantReport>,
 }
@@ -264,7 +271,10 @@ async fn validate_request(
     let newer_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_opportunity_problem_metric_period metric
          JOIN linggan_opportunity_problem problem USING(problem_ref)
-         WHERE problem.domain_ref=$1 AND metric.computed_as_of > $2::timestamptz)",
+         WHERE problem.domain_ref=$1 AND metric.computed_as_of > $2::timestamptz)
+         OR EXISTS(SELECT 1 FROM linggan_opportunity_creator_problem_density density
+         JOIN linggan_opportunity_problem problem USING(problem_ref)
+         WHERE problem.domain_ref=$1 AND density.computed_as_of > $2::timestamptz)",
     )
     .bind(domain)
     .bind(as_of)
@@ -343,81 +353,205 @@ pub async fn rebuild_problem_metrics(
         problems_rebuilt: 0,
         problems_unchanged: 0,
         period_rows_written: 0,
+        creator_rows_written: 0,
         problems_previewed: 0,
         preview: Vec::new(),
+        creator_preview: Vec::new(),
         exclusions: Vec::new(),
+        creator_window_exclusions: Vec::new(),
         identity_conflicts: Vec::new(),
         invariants: None,
     };
     let Some((problems, taxonomy_version)) = problem_scope(&mut tx, domain, as_of).await? else {
         return finish(tx, report, as_of, domain).await;
     };
+    let request = RebuildRequest {
+        domain,
+        as_of,
+        digest,
+        mode,
+    };
     for definition in &definitions {
-        report
-            .exclusions
-            .extend(exclusions(&mut tx, domain, as_of, definition).await?);
-        report
-            .identity_conflicts
-            .push(identity_conflicts(&mut tx, domain, as_of, definition).await?);
-        let periods = periods(&mut tx, as_of, definition).await?;
-        let inputs =
-            inputs::read_inputs(&mut tx, domain, as_of, definition, taxonomy_version, digest)
-                .await?;
-        let output_periods = definition
-            .params
-            .series_periods
-            .checked_add(definition.params.baseline_periods)
-            .and_then(|n| usize::try_from(n).ok())
-            .ok_or(MetricCalculationError::CountOverflow)?;
-        let expected_rows = inputs
-            .denominators
-            .len()
-            .checked_mul(output_periods)
-            .ok_or(MetricCalculationError::CountOverflow)?;
-        for problem in &problems {
-            let fingerprint =
-                calculate::fingerprint(*problem, taxonomy_version, definition, &periods, &inputs)?;
-            if mode == RebuildMode::Incremental
-                && store::unchanged(
-                    &mut tx,
-                    *problem,
-                    taxonomy_version,
-                    definition.version,
-                    as_of,
-                    &fingerprint,
-                    expected_rows,
-                )
-                .await?
-            {
-                report.problems_unchanged += 1;
-                continue;
-            }
-            let calculated = calculate::calculate(
-                *problem,
-                taxonomy_version,
-                fingerprint,
-                definition,
-                &periods,
-                &inputs,
-            )?;
-            if mode == RebuildMode::Preview {
-                report.problems_previewed += 1;
-                report.preview.extend(calculated.rows);
-                continue;
-            }
+        rebuild_definition(
+            &mut tx,
+            &request,
+            definition,
+            &problems,
+            taxonomy_version,
+            &mut report,
+        )
+        .await?;
+    }
+    finish(tx, report, as_of, domain).await
+}
+
+struct RebuildRequest<'a> {
+    domain: Uuid,
+    as_of: &'a str,
+    digest: &'a CommenterDigest,
+    mode: RebuildMode,
+}
+
+struct ProblemInputs<'a> {
+    definition: &'a MetricDefinition,
+    periods: &'a [String],
+    inputs: &'a inputs::MetricInputs,
+    cohorts: &'a creator_density::Cohorts<'a>,
+    taxonomy_version: i64,
+    expected_rows: usize,
+    as_of: &'a str,
+    mode: RebuildMode,
+}
+
+async fn rebuild_definition(
+    tx: &mut Transaction<'_, Postgres>,
+    request: &RebuildRequest<'_>,
+    definition: &MetricDefinition,
+    problems: &[Uuid],
+    taxonomy_version: i64,
+    report: &mut MetricRebuildReport,
+) -> Result<(), MetricCalculationError> {
+    report
+        .exclusions
+        .extend(exclusions(tx, request.domain, request.as_of, definition).await?);
+    report
+        .identity_conflicts
+        .push(identity_conflicts(tx, request.domain, request.as_of, definition).await?);
+    let periods = periods(tx, request.as_of, definition).await?;
+    let inputs = inputs::read_inputs(
+        tx,
+        request.domain,
+        request.as_of,
+        definition,
+        taxonomy_version,
+        request.digest,
+    )
+    .await?;
+    report
+        .creator_window_exclusions
+        .push(creator_density::window_exclusions(
+            &inputs,
+            definition.version,
+        ));
+    let cohorts = creator_density::cohorts(&inputs);
+    let output_periods = definition
+        .params
+        .series_periods
+        .checked_add(definition.params.baseline_periods)
+        .and_then(|n| usize::try_from(n).ok())
+        .ok_or(MetricCalculationError::CountOverflow)?;
+    let expected_rows = inputs
+        .denominators
+        .len()
+        .checked_mul(output_periods)
+        .ok_or(MetricCalculationError::CountOverflow)?;
+    let context = ProblemInputs {
+        definition,
+        periods: &periods,
+        inputs: &inputs,
+        cohorts: &cohorts,
+        taxonomy_version,
+        expected_rows,
+        as_of: request.as_of,
+        mode: request.mode,
+    };
+    for &problem in problems {
+        rebuild_one_problem(tx, problem, &context, report).await?;
+    }
+    Ok(())
+}
+
+async fn rebuild_one_problem(
+    tx: &mut Transaction<'_, Postgres>,
+    problem: Uuid,
+    context: &ProblemInputs<'_>,
+    report: &mut MetricRebuildReport,
+) -> Result<(), MetricCalculationError> {
+    let ProblemInputs {
+        definition,
+        periods,
+        inputs,
+        cohorts,
+        taxonomy_version,
+        expected_rows,
+        as_of,
+        mode,
+    } = context;
+    let fingerprint =
+        calculate::fingerprint(problem, *taxonomy_version, definition, periods, inputs)?;
+    let period_unchanged = *mode == RebuildMode::Incremental
+        && store::unchanged(
+            tx,
+            problem,
+            *taxonomy_version,
+            definition.version,
+            as_of,
+            &fingerprint,
+            *expected_rows,
+        )
+        .await?;
+    let creators_unchanged = *mode == RebuildMode::Incremental
+        && creator_density::unchanged(
+            tx,
+            problem,
+            *taxonomy_version,
+            definition.version,
+            as_of,
+            &fingerprint,
+            cohorts.len(),
+        )
+        .await?;
+    if period_unchanged && creators_unchanged {
+        report.problems_unchanged += 1;
+        return Ok(());
+    }
+    if !period_unchanged {
+        let calculated = calculate::calculate(
+            problem,
+            *taxonomy_version,
+            fingerprint.clone(),
+            definition,
+            periods,
+            inputs,
+        )?;
+        if *mode == RebuildMode::Preview {
+            report.preview.extend(calculated.rows);
+        } else {
             store::save(
-                &mut tx,
+                tx,
                 &calculated,
-                taxonomy_version,
+                *taxonomy_version,
                 definition.version,
                 as_of,
             )
             .await?;
-            report.problems_rebuilt += 1;
             report.period_rows_written += calculated.rows.len();
         }
     }
-    finish(tx, report, as_of, domain).await
+    if !creators_unchanged {
+        let groups =
+            creator_density::calculate(problem, *taxonomy_version, definition, inputs, cohorts)?;
+        if *mode == RebuildMode::Preview {
+            report.creator_preview.extend(groups);
+        } else {
+            report.creator_rows_written += creator_density::save(
+                tx,
+                problem,
+                *taxonomy_version,
+                definition.version,
+                as_of,
+                &fingerprint,
+                &groups,
+            )
+            .await?;
+        }
+    }
+    if *mode == RebuildMode::Preview {
+        report.problems_previewed += 1;
+    } else {
+        report.problems_rebuilt += 1;
+    }
+    Ok(())
 }
 
 async fn finish(

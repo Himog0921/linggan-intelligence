@@ -30,8 +30,18 @@ pub fn wilson_interval(k: u64, n: u64, z: f64) -> Result<Interval, StatsError> {
     let denom = 1.0 + z2 / n_f;
     let center = p + z2 / (2.0 * n_f);
     let margin = z * (p * (1.0 - p) / n_f + z2 / (4.0 * n_f * n_f)).sqrt();
-    let low = ((center - margin) / denom).clamp(0.0, 1.0);
-    let high = ((center + margin) / denom).clamp(0.0, 1.0);
+    // The exact endpoint is known in these cases. Floating cancellation can otherwise
+    // give two zero-count samples different tiny positive lower bounds when ranking.
+    let low = if k == 0 {
+        0.0
+    } else {
+        ((center - margin) / denom).clamp(0.0, 1.0)
+    };
+    let high = if k == n {
+        1.0
+    } else {
+        ((center + margin) / denom).clamp(0.0, 1.0)
+    };
     Ok(Interval { low, high })
 }
 
@@ -135,6 +145,14 @@ mod tests {
         );
         assert_eq!(wilson_interval(1, 2, 0.0), Err(StatsError::InvalidZ));
         assert_eq!(wilson_interval(1, 2, f64::NAN), Err(StatsError::InvalidZ));
+    }
+
+    #[test]
+    fn wilson_zero_and_full_counts_have_exact_endpoints() {
+        for n in [1, 40, 100, 120, 1850] {
+            assert_eq!(wilson_interval(0, n, STANDARD_Z).unwrap().low, 0.0);
+            assert_eq!(wilson_interval(n, n, STANDARD_Z).unwrap().high, 1.0);
+        }
     }
 
     #[test]

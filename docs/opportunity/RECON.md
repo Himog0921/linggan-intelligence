@@ -589,3 +589,11 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - T1.2 时点依赖：`linggan_material_comment_first_admission` 的键和首次包在 `0125_collection_single_run.sql:136-153`，该表没有创建时间；评论观察的 `created_at` 在 `0016_material_social_lanes.sql:26-45`，来源包的 `accepted_at` 来自运行包。共享作者函数及其详情、主页发现来源在 `0115_creator_discovery.sql:4-31`，其他调用方包括 `crates/evidence/src/material_query_sql.rs:208`、`crates/evidence/src/collection_run.rs:221` 与 `crates/intelligence/src/ai_foundation/note_analysis/source.rs:53`。时点修复按 D-037、D-039、D-040 前向实施。
 - T1.2 当前候选：统一时点选择与共享作者修复位于 `database/migrations/0212_opportunity_platform_time_as_of.sql`；协议分组的指标表和影子定义位于 `0213_opportunity_problem_metric_period.sql`。计算入口 `crates/intelligence/src/opportunity/problem_metrics.rs`，命令入口 `apps/worker/src/bin/opportunity.rs`。以上是工作分支的候选，尚未表示运行环境已迁移。
 - 后续切换冲突：`0203_opportunity_metric_definition.sql` 的当前指针是全局 singleton，而 D-028 的覆盖率门是逐领域的。T1.2 只同时计算当前口径及影子口径，不移动指针；在实施按领域切换前须依 §3.3 将全局指针与逐领域切换的冲突提交负责人裁定，不能直接切换全部领域。
+
+## 10. T1.3 补充勘察（2026-11-13，`263435f3`）
+
+- `linggan_opportunity_eligible_comments(domain, as_of, tz, basis)` 返回稳定评论身份、评论者、`work_author_external_id` 与 `period_anchor_at`，并统一筛除无资格评论（`database/migrations/0204_opportunity_comment_eligibility.sql:170-195`）。`0212_opportunity_platform_time_as_of.sql:135-205` 采用截至时点的最新合格作品详情与共享作者函数；作品发布周口径的锚点就是作品发布时间，评论发布时间口径的锚点是评论时间。
+- 作者窗口固定按作品发布时间，无论周期指标的口径是什么（手册 §6.2.4）。T1.3 对评论发布时间口径复用同一作品发布周资格函数获取作品发布时间，不另写最新详情或作者的选择规则；仍没有合格作品时间时单独计数，不从旧详情回退（D-041）。
+- 现有问题指标的输入、协议归属和来源提及由 `crates/intelligence/src/opportunity/problem_metrics/inputs.rs` 读取，计算事务与增量指纹由 `problem_metrics.rs` 的 `rebuild_problem_metrics` 协调；线上后台入口复用该函数（`crates/intelligence/src/ai_foundation/executor/service/opportunity_sync.rs`），手工重建入口为 `apps/worker/src/bin/opportunity.rs`。
+- Wilson 区间由 `crates/intelligence/src/opportunity/stats.rs:17` 的共享 `wilson_interval` 计算；I7 现有定义在 `crates/intelligence/src/opportunity/invariants.rs` 的 `sufficient_creator_meets_minimum`，T1.3 建表后须补按领域及 `as_of` 的检查。
+- Q-22 已答复：作者集中度沿用首次入档协议，未知单独成组并按组排序；后续卡片标明组别，见 D-042。协议是同一派生指标的维度，不引入平行评论事实。

@@ -427,13 +427,14 @@ CREATE TABLE creator_problem_density (
   window_days        INT         NOT NULL,
   taxonomy_version   BIGINT      NOT NULL,
   metric_def_version INT         NOT NULL,
+  protocol_version   INT,                   -- 首次入档包协议；NULL = 未知（D-042）
   k                  INT         NOT NULL CHECK (k >= 0),
   n                  INT         NOT NULL CHECK (n >= 0),
   ci_low             DOUBLE PRECISION,
   ci_high            DOUBLE PRECISION,
   sufficient         BOOLEAN     NOT NULL,
   computed_as_of     TIMESTAMPTZ NOT NULL,
-  PRIMARY KEY (creator_id, problem_ref, window_days, taxonomy_version, metric_def_version),
+  UNIQUE NULLS NOT DISTINCT (creator_id, problem_ref, window_days, taxonomy_version, metric_def_version, protocol_version),
   CHECK (k <= n)
 );
 
@@ -646,7 +647,7 @@ SELECT (SELECT count(*) FROM fm) AS k,
 | `ci_low`、`ci_high` | `wilson_interval(k, n, z)`，存为 0–1 比例；`n = 0` 时为 `null` |
 | `baseline_k`、`baseline_n` | 当前周期之前连续 `baseline_periods` 个周期的同协议 `k`、`n` 分别求和（同一 `as_of`）；任一周期该协议无样本或合计分母不足时标记 `no_baseline`，不判显著（D-030、D-038） |
 | `mentioners_total` | 截至 `as_of`，该问题在所有周期有效评论上的未排除提及的去重 `commenter_hash` 数 |
-| 作者 `k`、`n` | 窗口：`work_published_at` 落在 `[as_of − creator_window_days, as_of)`。`n` = 该作者作品上的有效评论数；`k` = 其中提及该问题的去重评论者数 |
+| 作者 `k`、`n` | 窗口：`work_published_at` 落在 `[as_of − creator_window_days, as_of)`。每个首次入档协议分组分别计算：`n` = 该作者作品上的有效评论数；`k` = 其中提及该问题的去重评论者数。未知协议单独成组（D-042） |
 | 作者 `sufficient` | `n >= creator_min_n` |
 | 排除计数 | 每次计算都调用 `linggan_opportunity_eligibility_exclusions`，结果写入运行记录；按 §6.7 生成 flags |
 | 代表原声 | 只从有效评论中选取；点赞按 D-019 处理 |
@@ -844,6 +845,8 @@ pub fn evidence_tier(i: &TierInput, p: &TierParams) -> EvidenceTier {
 
 ### 6.5 作者排序
 
+以下规则对每个协议组分别应用；未知协议单独成组，不跨组比较（D-042）。
+
 1. 过滤：`sufficient = true` 的进入 `ranked`，其余进入 `insufficient`。
 2. `ranked` 排序：`ci_low` 降序，再按 `n` 降序，再按 `creator_id` 升序。
 3. `insufficient` 排序：`n` 降序，再按 `creator_id` 升序。`insufficient` 不显示名次。
@@ -980,8 +983,11 @@ interface OpportunityCard {
   channel: {
     window_days: number;
     min_n: number;
-    ranked: CreatorDensity[];
-    insufficient: CreatorDensity[];
+    groups: Array<{
+      protocol_version: number | null;  // null = 未知；不跨协议比较（D-042）
+      ranked: CreatorDensity[];
+      insufficient: CreatorDensity[];
+    }>;
   };
   flags: QualityFlag[];
   exclusions: Array<{ reason: string; comments: number }>;   // D-012，来自资格排除函数
@@ -1009,6 +1015,7 @@ interface CreatorDensity {
 ```
 
 - 响应中不得出现评论者 ID、昵称或哈希（R9）。
+- 渠道栏按 `channel.groups` 标明采集协议；`protocol_version = null` 明确显示为未知协议，各组各自排序，不跨组比较（D-042）。
 - `flags` 规则：
   - `not_calibrated`：没有导入问卷时**必须**出现；
   - `no_baseline`：`baseline_n < min_n_period` 时出现；

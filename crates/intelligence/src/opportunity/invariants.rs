@@ -208,6 +208,9 @@ fn as_of_sql(id: &str) -> Option<&'static str> {
         "I6b" => Some(
             "SELECT count(*) FROM linggan_opportunity_comment_mention mention JOIN linggan_opportunity_problem problem USING(problem_ref) JOIN linggan_comment_problem_membership source ON source.request_ref=mention.source_request_ref AND source.signal_ordinal=mention.source_signal_ordinal WHERE source.created_at <= $1::timestamptz AND problem.domain_ref=$2 AND (mention.commenter_hash IS NULL) <> (mention.excluded_reason IS NOT DISTINCT FROM 'commenter_unknown')",
         ),
+        "I7" => Some(
+            "SELECT count(*) FROM linggan_opportunity_creator_problem_density density JOIN linggan_opportunity_problem problem USING(problem_ref) JOIN linggan_opportunity_metric_definition definition ON definition.version=density.metric_def_version WHERE problem.domain_ref=$2 AND density.computed_as_of <= $1::timestamptz AND density.sufficient AND density.n < (definition.params->>'creator_min_n')::int",
+        ),
         "I8" => Some(
             "WITH RECURSIVE walk(start_id,cur_id,depth) AS (SELECT lineage.from_problem_ref,lineage.to_problem_ref,1 FROM linggan_opportunity_problem_lineage lineage JOIN linggan_opportunity_problem problem ON problem.problem_ref=lineage.from_problem_ref WHERE problem.domain_ref=$2 AND lineage.relation IN ('merge','rename') AND lineage.created_at <= $1::timestamptz UNION ALL SELECT walk.start_id,lineage.to_problem_ref,walk.depth+1 FROM walk JOIN linggan_opportunity_problem_lineage lineage ON lineage.from_problem_ref=walk.cur_id AND lineage.created_at <= $1::timestamptz AND lineage.relation IN ('merge','rename') WHERE walk.depth < 100) SELECT count(*) FROM walk WHERE start_id=cur_id",
         ),

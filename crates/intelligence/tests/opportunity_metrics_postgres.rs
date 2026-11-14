@@ -1,6 +1,10 @@
 //! T1.2 standard dataset, protocol separation, and incremental/full equivalence.
+#[path = "opportunity_metrics_postgres/creator_density.rs"]
+mod creator_density;
 #[path = "../../../apps/api/src/local_web/full_schema_fixture.rs"]
 mod full_schema_fixture;
+#[path = "support/opportunity_creator_dataset.rs"]
+mod opportunity_creator_dataset;
 #[path = "support/opportunity_dataset.rs"]
 mod opportunity_dataset;
 
@@ -13,6 +17,10 @@ use sqlx::Row;
 use uuid::Uuid;
 
 async fn database() -> Database {
+    database_with_standard_creators(false).await
+}
+
+async fn database_with_standard_creators(standard_creators: bool) -> Database {
     let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
     let db = isolated_proof_schema(
         &url,
@@ -22,6 +30,11 @@ async fn database() -> Database {
     .await
     .expect("isolated schema");
     opportunity_dataset::build(&db).await.unwrap();
+    if standard_creators {
+        opportunity_creator_dataset::build_standard(&db)
+            .await
+            .unwrap();
+    }
     sqlx::raw_sql(SEED).execute(db.pool()).await.unwrap();
     let digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
     sync_comment_mentions(&db, &digest).await.unwrap();
@@ -463,7 +476,7 @@ async fn verify_protocol_and_shadow(
         "shadow basis persists eligible comments"
     );
     let invariants = check_invariants(db).await.unwrap();
-    for id in ["I1", "I2", "I3", "I6", "I6b", "I8", "I11"] {
+    for id in ["I1", "I2", "I3", "I6", "I6b", "I7", "I8", "I11"] {
         let check = invariants.checks.iter().find(|c| c.id == id).unwrap();
         assert!(check.available, "{id}");
         assert_eq!(check.violations, 0, "{id}");
