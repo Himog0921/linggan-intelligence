@@ -525,7 +525,8 @@ migrate() {
   apply_migration_once "0211_opportunity_comment_mentions" "$project_root/database/migrations/0211_opportunity_comment_mentions.sql"
   apply_migration_once "0212_opportunity_platform_time_as_of" "$project_root/database/migrations/0212_opportunity_platform_time_as_of.sql"
   apply_migration_once "0213_opportunity_problem_metric_period" "$project_root/database/migrations/0213_opportunity_problem_metric_period.sql"
-  apply_migration_once "0214_opportunity_creator_problem_density" "$project_root/database/migrations/0214_opportunity_creator_problem_density.sql"
+  apply_migration_once "0214_content_understanding_offline_recovery" "$project_root/database/migrations/0214_content_understanding_offline_recovery.sql"
+  apply_migration_once "0215_opportunity_creator_problem_density" "$project_root/database/migrations/0215_opportunity_creator_problem_density.sql"
 }
 
 case "$command_name" in

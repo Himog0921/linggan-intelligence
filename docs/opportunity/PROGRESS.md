@@ -370,12 +370,12 @@
 
 ## 2026-11-13 T1.3 作者集中度（候选）
 
-- 前向迁移 `0214_opportunity_creator_problem_density.sql` 建立带协议维度的作者指标表；未知协议为 NULL，唯一约束将未知协议视为同一组。迁移 SHA-256 为 `b8a6a54f6de2edff554d7f4cb633150fdb249c331a160ba2783f794fcc332396`，已同步运行脚本与完整 schema fixture；未执行运行环境迁移。
+- 前向迁移 `0215_opportunity_creator_problem_density.sql` 建立带协议维度的作者指标表；未知协议为 NULL，唯一约束将未知协议视为同一组。候选原编号为 0214；main 在并行开发中以 `c5899874` 合入内容理解的 0214，故本任务顺延为 0215，内容字节未改。迁移 SHA-256 为 `b8a6a54f6de2edff554d7f4cb633150fdb249c331a160ba2783f794fcc332396`，已同步运行脚本与完整 schema fixture；未执行运行环境迁移。
 - 作者指标与问题周期指标共用按时点资格、协议、评论者哈希、问题归属及同一重算事务；作者窗口始终取截至 `as_of` 的作品发布时间。每协议分别累计有效评论和去重提及人数；未知协议单列，组内先区分样本充足与不足，再按手册排序。现有后台刷新、`--full`、增量跳过与不写表的 `--preview` 同步覆盖作者指标；缺少作品发布时间与窗口外样本单独计数。
 - 共享 Wilson 函数将零命中下界和全命中上界固定为数学上的 0 和 1，防止浮点残差影响作者并列排序；手册全部原标准答案未更改。I7 已实现按领域和时点检查。
 - 标准样本直接重分配既有 W0 评论，在同一隔离库同时验证有效评论 5800、P1/P2/P3 标准答案以及 C1 `k=4 n=60 ci=[0.026229,0.159254] sufficient=true`、C2 `k=3 n=40 ci=[0.025836,0.198642] sufficient=false`。协议已知/未知、跨作品同人去重、未知评论者、撤回、窗口上下边界、历史预览以及增量与全量一致另有独立场景。
 - `CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target bash scripts/test-opportunity-postgres.sh`：基础 12、提及 6、时点 3、问题与作者指标 4、共享作者 1 项通过；实际 0177 合成发布链路的 enabled、missing_key、disabled、locked_release、locked_drain 五种状态各 1 项通过。末尾输出 `Opportunity PostgreSQL proof passed` 与 `Opportunity PostgreSQL proof cleanup verified; isolated proof database, container, and volume were removed`。enabled 证明作者指标跟随资格和撤回刷新；disabled 使用有资格素材，后台跨扫描周期后仍无作者指标写入。
-- `cargo test -p linggan-intelligence --lib --locked`：373 passed、0 failed、12 ignored；`cargo test -p linggan-worker --bin linggan-opportunity --locked`：2 passed、0 failed。`bash scripts/test-local-runtime-schema.sh`：`Fresh and repeat runtime schema migration passed; retired tables absent.`；隔离资源均清除。
+- 集成 `origin/main@c5899874` 并顺延迁移后重新执行：`cargo test -p linggan-intelligence --lib --locked` 为 377 passed、0 failed、12 ignored；`cargo test -p linggan-worker --bin linggan-opportunity --locked` 为 2 passed、0 failed。`bash scripts/test-local-runtime-schema.sh` 输出 `Fresh and repeat runtime schema migration passed; retired tables absent.`；全量机会卡 PostgreSQL 证明在 0214 与 0215 装配后再次通过，隔离资源均清除。
 - `check-invariants`：I1、I2、I3、I6、I6b、I7、I8、I11 可用且各为 0；I4、I5、I9、I10 尚不可用，报告 `incomplete = true`。I7 的人工制造违规在时点预览中被拒绝并回滚。
 - 严格 `cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked` 退出 101；与基线逐项比较均为既有 `linggan-evidence` 的 58 项 `too_many_lines`，位置及内容相同。加 `-- -A clippy::too_many_lines` 后退出 0；`-- --cap-lints warn` 用于复核新增长函数，既有长测试仍有告警，不声称严格 Clippy 通过。
 - 工作区独立审阅提出标准集和关闭开关负例不足，均已修复并经隔离回归；审阅者只读核对代码与日志，未独立运行数据库测试。最终提交和远端 CI 以 PR 回执为准。
