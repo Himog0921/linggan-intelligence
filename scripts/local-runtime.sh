@@ -528,6 +528,11 @@ migrate() {
   apply_migration_once "0214_content_understanding_offline_recovery" "$project_root/database/migrations/0214_content_understanding_offline_recovery.sql"
   apply_migration_once "0215_opportunity_creator_problem_density" "$project_root/database/migrations/0215_opportunity_creator_problem_density.sql"
   apply_migration_once "0216_content_understanding_core_revision" "$project_root/database/migrations/0216_content_understanding_core_revision.sql"
+  apply_migration_once "0217_opportunity_card_read_model" "$project_root/database/migrations/0217_opportunity_card_read_model.sql"
+  apply_migration_once "0218_opportunity_author_observation_time" "$project_root/database/migrations/0218_opportunity_author_observation_time.sql"
+  apply_migration_once "0219_comment_current_safe_observation" "$project_root/database/migrations/0219_comment_current_safe_observation.sql"
+  apply_migration_once "0220_opportunity_valid_work_anchor" "$project_root/database/migrations/0220_opportunity_valid_work_anchor.sql"
+  apply_migration_once "0221_opportunity_restriction_trigger_owner" "$project_root/database/migrations/0221_opportunity_restriction_trigger_owner.sql"
 }
 
 case "$command_name" in

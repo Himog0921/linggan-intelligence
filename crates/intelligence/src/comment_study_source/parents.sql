@@ -12,7 +12,8 @@ LEFT JOIN LATERAL (
     JOIN linggan_runtime_capture_package p USING(package_ref)
     WHERE c.content_public_ref=k.work_ref AND c.comment_external_id=k.external_id
       AND p.accepted_at<=$3::timestamptz AND c.created_at<=$3::timestamptz
-    ORDER BY c.observed_at::timestamptz DESC,c.created_at DESC,c.material_ref DESC LIMIT 1
+      AND linggan_opportunity_observed_at(c.observed_at) IS NOT NULL
+    ORDER BY linggan_opportunity_observed_at(c.observed_at) DESC,c.created_at DESC,c.material_ref DESC LIMIT 1
 ) latest ON true
 LEFT JOIN linggan_material_comment_restriction r
   ON r.content_public_ref=k.work_ref AND r.comment_external_id=k.external_id;

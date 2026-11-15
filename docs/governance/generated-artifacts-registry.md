@@ -33,6 +33,7 @@
 
 | 类别 | 固定位置 | 来源/生成方式 | Git 策略 | 手工修改 | 保留与清理 |
 |---|---|---|---|---|---|
+| 机会卡 P1 合成快照 | `crates/intelligence/tests/opportunity_metrics_postgres/p1-card.snapshot.json` | root 维护；唯一来源是 §8.2 确定性合成数据与 T1.4 读模型；`OPPORTUNITY_PRINT_SYNTHETIC_SNAPSHOT=1 RUST_TEST_NOCAPTURE=1 bash scripts/test-opportunity-postgres.sh` 输出 `SYNTHETIC_P1_SNAPSHOT`，逐项审查后更新 | 按手册 §8.2.4 提交；不得包含真实材料或凭据 | 不独立修改标准答案；变更须在 PR 逐项说明 | 集成测试将完整 JSON 与快照比较，随合同长期保留 |
 | WEB-REACT-001 D3 私有证据 | 当前 D3 工作树 `artifacts/private/web-react-001-d3/`：只读实际基线、GET 回执、候选截图／逐像素差异、盘点辅助及验证日志 | root 的 GET/HEAD 限制浏览器采集、同输入重放、隔离库脚本；无共享库写入、无外发 | 忽略，不提交；真实评论／材料不进入代理或 CI | 不得伪造回执或修改原始像素；分析摘要可更新 | 保留至本包审阅；交付后移交主 checkout 同名私有目录再清理本工作树 |
 | Pi Node 固定依赖 | `apps/pi-adapter/node_modules/`（含 `.linggan-lock-sha256`）、`package-lock.json` | 精确 package.json、npm ci、`prepare-pi-adapter.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖，不处理其它项目 |
 | 网页前端固定依赖（WEB-REACT-001） | `apps/web/node_modules/`（含 `.linggan-lock-sha256`）、`apps/web/package-lock.json` | 精确版本的 `apps/web/package.json`、`npm ci --ignore-scripts`、`scripts/runtime/prepare-web.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖；可随时 `npm ci` 重建 |

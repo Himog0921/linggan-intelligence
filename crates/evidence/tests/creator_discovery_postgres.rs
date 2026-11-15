@@ -74,6 +74,24 @@ async fn author_name_projection_keeps_sourced_names_and_unknowns() {
     let newer_profile = fixture::submit_package_at(&db, "author_profile", json!({"authorExternalId":"profile-only"}),
         json!({"kind":"author_profile","sourceObject":{"platform":"xhs","type":"author","externalId":"profile-only"},"payload":{"userId":"profile-only","fans":12}}),
         "2026-10-02T00:00:00Z").await;
+    let bad_profile = fixture::submit_package_at(&db, "author_profile", json!({"authorExternalId":"profile-only"}),
+        json!({"kind":"author_profile","sourceObject":{"platform":"xhs","type":"author","externalId":"profile-only"},"payload":{"userId":"profile-only","nickname":"SYNTHETIC invalid name","fans":999}}),
+        "2026-10-03T00:00:00Z").await;
+    sqlx::raw_sql("ALTER TABLE linggan_material_author_profile DISABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE linggan_material_author_profile SET observed_at='not-a-time' WHERE package_ref=$1",
+    )
+    .bind(bad_profile)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql("ALTER TABLE linggan_material_author_profile ENABLE TRIGGER USER")
+        .execute(db.pool())
+        .await
+        .unwrap();
     let profile_target = Uuid::new_v4();
     let request = Uuid::new_v4();
     let decision = Uuid::new_v4();
@@ -97,7 +115,7 @@ async fn author_name_projection_keeps_sourced_names_and_unknowns() {
         .bind(order).bind(request).bind(D).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_work_order_lease(lease_ref,work_order_ref,station_ref,capture_identity,expires_at) VALUES($1,$2,$3,'{}'::jsonb,scope_001_now()+interval '1 day')")
         .bind(lease).bind(order).bind(station).execute(db.pool()).await.unwrap();
-    for (sequence, package) in [(1, older_profile), (2, newer_profile)] {
+    for (sequence, package) in [(1, older_profile), (2, newer_profile), (3, bad_profile)] {
         let task: Uuid = sqlx::query_scalar(
             "SELECT task_id FROM linggan_runtime_capture_package WHERE package_ref=$1",
         )
@@ -111,6 +129,15 @@ async fn author_name_projection_keeps_sourced_names_and_unknowns() {
 
     let mut q: CreatorScope = serde_json::from_value(json!({"domain":D})).unwrap();
     let data = load(&db, &q).await.unwrap();
+    let scoped: EvidenceQuery = serde_json::from_value(json!({"domainRef":D,"creatorScope":q.clone(),
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"})).unwrap();
+    let linked = read_work_resources(&db, &scoped).await.unwrap();
+    assert!(
+        linked
+            .items
+            .iter()
+            .any(|item| item.identity.public_ref == refs[5])
+    );
     assert_eq!(
         data.works
             .iter()
@@ -162,6 +189,7 @@ async fn author_name_projection_keeps_sourced_names_and_unknowns() {
     assert!(row("unknown")["displayName"].is_null());
     assert!(row("unknown")["displayNameSource"].is_null());
     assert_eq!(row("profile-only")["displayName"], "档案旧名");
+    assert_ne!(row("profile-only")["displayName"], "SYNTHETIC invalid name");
     assert_eq!(
         row("profile-only")["displayNameSource"]["kind"],
         "accepted_author_profile"
@@ -210,6 +238,57 @@ async fn author_name_projection_keeps_sourced_names_and_unknowns() {
     assert_eq!(
         aggregate(&data, &q)["items"][0]["displayName"],
         "目标档案名"
+    );
+
+    // A creator-scoped work cursor must keep the profile selection at its original as_of.
+    let source_package: Uuid = sqlx::query_scalar(
+        "SELECT first_package_ref FROM linggan_material_content WHERE public_ref=$1",
+    )
+    .bind(refs[5])
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason) \
+        SELECT $1,1000+n,'accepted_for_library_content','synthetic creator cursor' FROM generate_series(1,51) n")
+        .bind(source_package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_content(platform,content_external_id,public_ref,first_package_ref) \
+        SELECT 'xhs','creator-cursor-'||n,md5('creator-cursor:'||n)::uuid,$1 FROM generate_series(1,51) n")
+        .bind(source_package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,\
+        observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,\
+        published_at_source_text,published_at_source_text_state,searchable_text,author_external_id) \
+        SELECT md5('creator-cursor-detail:'||n)::uuid,md5('creator-cursor:'||n)::uuid,$1,1000+n,\
+        '2026-10-04T00:00:00Z','SYNTHETIC creator work','KNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN',\
+        'synthetic','profile-only' FROM generate_series(1,51) n")
+        .bind(source_package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) \
+        SELECT md5('creator-cursor-usage:'||n)::uuid,md5('creator-cursor:'||n)::uuid,$1,'primary',\
+        'legacy_domain_migration',$2 FROM generate_series(1,51) n")
+        .bind(D).bind(source_package).execute(db.pool()).await.unwrap();
+    let page_scope: CreatorScope =
+        serde_json::from_value(json!({"domain":D,"query":"档案旧名"})).unwrap();
+    let first_query: EvidenceQuery = serde_json::from_value(json!({"domainRef":D,"creatorScope":page_scope.clone(),
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"})).unwrap();
+    let first_page = read_work_resources(&db, &first_query).await.unwrap();
+    assert_eq!(first_page.items.len(), 50);
+    let cursor = first_page
+        .cursor
+        .expect("51 synthetic works require another page");
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason) \
+        VALUES($1,1,'accepted_for_library_content','synthetic later profile projection')")
+        .bind(older_profile).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_author_profile(material_ref,platform,author_external_id,package_ref,record_ordinal,\
+        observed_at,display_name,display_name_state,biography,biography_state,follower_count,follower_count_state) \
+        VALUES(gen_random_uuid(),'xhs','profile-only',$1,1,'2026-10-05T00:00:00Z',\
+        'SYNTHETIC later name','KNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN')")
+        .bind(older_profile).execute(db.pool()).await.unwrap();
+    let second_query: EvidenceQuery = serde_json::from_value(json!({"domainRef":D,"creatorScope":page_scope,
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery","cursor":cursor})).unwrap();
+    let second_page = read_work_resources(&db, &second_query).await.unwrap();
+    assert_eq!(
+        second_page.items.len(),
+        2,
+        "a later profile must not change the frozen creator scope"
     );
 }
 

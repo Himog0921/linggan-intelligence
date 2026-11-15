@@ -192,6 +192,326 @@ async fn assert_disabled_creator_projection(db: &linggan_storage_postgres::Datab
         creator_rows, 0,
         "disabled sync must not write creator metrics"
     );
+    let source_events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_source_event")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        source_events, 0,
+        "a disabled executor must not accumulate source events"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and enabled opportunity executor"]
+async fn event_gate_activates_with_overlapping_source_writes() {
+    let db = fixture::proof_database("opportunity_gate_fairness").await;
+    let mut offline_writer = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT linggan_opportunity_card_source_changed('domain',$1)")
+        .bind(dossier::DOMAIN.to_string())
+        .execute(&mut *offline_writer)
+        .await
+        .unwrap();
+    let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
+        std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap().into(),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/pi-adapter/src/adapter.mjs"),
+    );
+    let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
+    let running = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
+        db.clone(),
+        "synthetic-opportunity-gate-fairness",
+        4,
+        std::sync::Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
+        adapter,
+        drain.clone(),
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(12), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity \
+                 WHERE wait_event_type='Lock' AND query LIKE \
+                 '%pg_advisory_lock(linggan_opportunity_card_event_gate_key()%')",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if waiting {
+                break;
+            }
+            assert!(!running.is_finished(), "executor must remain running");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("enabled executor must queue for the gate while old writers finish");
+    // Keep the old transaction open beyond one server-side wait timeout.
+    tokio::time::sleep(std::time::Duration::from_millis(2300)).await;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        sqlx::query("SELECT linggan_opportunity_card_source_changed('domain',$1)")
+            .bind(dossier::DOMAIN.to_string())
+            .execute(db.pool()),
+    )
+    .await
+    .expect("new source writes must not wait behind the queued gate")
+    .unwrap();
+    let queued: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_source_event")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        queued, 1,
+        "overlapping new writes must be queued for catch-up"
+    );
+    offline_writer.commit().await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        loop {
+            let mut probe = db.pool().begin().await.unwrap();
+            let free: bool = sqlx::query_scalar(
+                "SELECT pg_try_advisory_xact_lock_shared(linggan_opportunity_card_event_gate_key())",
+            )
+            .fetch_one(&mut *probe)
+            .await
+            .unwrap();
+            probe.rollback().await.unwrap();
+            if !free {
+                break;
+            }
+            assert!(!running.is_finished(), "executor must remain running");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the queued executor must acquire its gate");
+    drain.request();
+    tokio::time::timeout(std::time::Duration::from_secs(5), running)
+        .await
+        .expect("the gate holder must not prevent drain")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and enabled opportunity executor"]
+async fn event_gate_wait_does_not_block_executor_drain() {
+    assert_gate_wait_drains(false).await;
+    assert_gate_wait_drains(true).await;
+}
+
+async fn assert_gate_wait_drains(waiting_for_intent: bool) {
+    let schema = if waiting_for_intent {
+        "opportunity_gate_intent_drain"
+    } else {
+        "opportunity_gate_drain"
+    };
+    let db = fixture::proof_database(schema).await;
+    let mut offline_writer = db.pool().begin().await.unwrap();
+    let pattern = if waiting_for_intent {
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(linggan_opportunity_card_event_gate_intent_key())",
+        )
+        .execute(&mut *offline_writer)
+        .await
+        .unwrap();
+        "%pg_advisory_lock(linggan_opportunity_card_event_gate_intent_key()%"
+    } else {
+        sqlx::query("SELECT linggan_opportunity_card_source_changed('domain',$1)")
+            .bind(dossier::DOMAIN.to_string())
+            .execute(&mut *offline_writer)
+            .await
+            .unwrap();
+        "%pg_advisory_lock(linggan_opportunity_card_event_gate_key()%"
+    };
+    let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
+        std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap().into(),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/pi-adapter/src/adapter.mjs"),
+    );
+    let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
+    let running = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
+        db.clone(),
+        "synthetic-opportunity-gate-drain",
+        4,
+        std::sync::Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
+        adapter,
+        drain.clone(),
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(12), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity \
+                 WHERE wait_event_type='Lock' AND query LIKE $1)",
+            )
+            .bind(pattern)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if waiting {
+                break;
+            }
+            assert!(!running.is_finished(), "executor must remain running");
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the enabled executor must be waiting on the gate");
+    drain.request();
+    tokio::time::timeout(std::time::Duration::from_secs(5), running)
+        .await
+        .expect("drain must not wait for an offline source transaction")
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let waiting: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM pg_stat_activity \
+                 WHERE wait_event_type='Lock' AND query LIKE $1)",
+            )
+            .bind(pattern)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if !waiting {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("drain must close the queued gate connection");
+    offline_writer.commit().await.unwrap();
+}
+
+async fn assert_offline_restart_catchup(
+    db: &linggan_storage_postgres::Database,
+    work: Uuid,
+    problem: Uuid,
+) {
+    use linggan_intelligence::opportunity::{
+        CardRebuildMode, CommenterDigest, rebuild_opportunity_cards,
+        sync_comment_mentions_for_domain,
+    };
+
+    // A disconnected owner may take a moment for PostgreSQL to observe the closed socket.
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let mut tx = db.pool().begin().await.unwrap();
+            let released: bool = sqlx::query_scalar(
+                "SELECT pg_try_advisory_xact_lock_shared(linggan_opportunity_card_event_gate_key())",
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+            tx.rollback().await.unwrap();
+            if released {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the stopped executor must release its source gate");
+
+    let digest = CommenterDigest::load().unwrap();
+    sync_comment_mentions_for_domain(db, &digest, dossier::DOMAIN)
+        .await
+        .unwrap();
+    rebuild_opportunity_cards(db, dossier::DOMAIN, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let prior_n: i64 = sqlx::query_scalar(
+        "SELECT (payload#>>'{demand,groups,0,current,n}')::bigint \
+         FROM linggan_opportunity_opportunity_card WHERE problem_ref=$1",
+    )
+    .bind(problem)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    // Isolate this scenario from unrelated events generated by the earlier test stages.
+    sqlx::query("DELETE FROM linggan_opportunity_card_source_event")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "DELETE FROM linggan_opportunity_card_change WHERE problem_ref IN \
+         (SELECT problem_ref FROM linggan_opportunity_problem WHERE domain_ref=$1)",
+    )
+    .bind(dossier::DOMAIN)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    comments::comment_with_author(
+        db,
+        "dossier-note",
+        "offline-restart-reader",
+        "synthetic offline comment",
+        Some("synthetic-offline-reader"),
+        "2026-10-14T00:10:00Z",
+    )
+    .await;
+    let eligible: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_opportunity_eligible_comments(\
+         $1,statement_timestamp(),'Asia/Shanghai','work_published_cohort') \
+         WHERE content_ref=$2 AND comment_external_id='offline-restart-reader'",
+    )
+    .bind(dossier::DOMAIN)
+    .bind(work)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(eligible, 1, "the offline comment must qualify");
+    let offline_events: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_source_event")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(offline_events, 0, "offline ingestion must not queue events");
+
+    let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
+        std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap().into(),
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../apps/pi-adapter/src/adapter.mjs"),
+    );
+    let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
+    let running = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
+        db.clone(),
+        "synthetic-comment-restart",
+        4,
+        std::sync::Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
+        adapter,
+        drain.clone(),
+    ));
+    tokio::time::timeout(std::time::Duration::from_secs(45), async {
+        loop {
+            let current: Option<i64> = sqlx::query_scalar(
+                "SELECT (payload#>>'{demand,groups,0,current,n}')::bigint \
+                 FROM linggan_opportunity_opportunity_card WHERE problem_ref=$1",
+            )
+            .bind(problem)
+            .fetch_optional(db.pool())
+            .await
+            .unwrap();
+            if current == Some(prior_n + 1) {
+                break;
+            }
+            assert!(
+                !running.is_finished(),
+                "the restarted executor must remain online"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+    })
+    .await
+    .expect("restart must catch up the offline comment without a source event");
+    drain.request();
+    tokio::time::timeout(std::time::Duration::from_secs(5), running)
+        .await
+        .expect("the restarted executor must drain")
+        .unwrap()
+        .unwrap();
 }
 
 #[tokio::test]
@@ -713,6 +1033,25 @@ async fn comment_uses_target_dossier_and_both_permissions() {
             .await
             .unwrap();
             assert_eq!(fault_rows, 0, "the faulty domain must not commit metrics");
+            tokio::time::timeout(std::time::Duration::from_secs(30), async {
+                loop {
+                    let healthy_cards: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_opportunity_card card \
+                        JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE problem.domain_ref=$1")
+                        .bind(dossier::DOMAIN).fetch_one(db.pool()).await.unwrap();
+                    if healthy_cards > 0 { break; }
+                    assert!(!running.is_finished(), "executor stopped before the healthy card refresh");
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            }).await.expect("a failing domain must not block another domain's card refresh");
+            let fault_cards: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM linggan_opportunity_opportunity_card card \
+                JOIN linggan_opportunity_problem problem USING(problem_ref) \
+                WHERE problem.domain_ref='00000000-0000-4000-8000-000000000000'",
+            )
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            assert_eq!(fault_cards, 0, "the faulty domain must not publish a card");
         }
     } else if lock_mode != "drain" {
         let mentions: i64 =
@@ -963,6 +1302,10 @@ async fn comment_uses_target_dossier_and_both_permissions() {
         .unwrap();
     if let Some(transaction) = sync_lock {
         transaction.rollback().await.unwrap();
+    }
+    if periodic {
+        let problem = serde_json::from_value(renewed["problems"][0]["problemRef"].clone()).unwrap();
+        assert_offline_restart_catchup(&db, work, problem).await;
     }
     endpoint.finish().await;
 }

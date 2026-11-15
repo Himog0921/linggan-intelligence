@@ -2,9 +2,9 @@
 //! Mention writes are gated and reuse the existing comment-study memberships.
 
 use linggan_intelligence::opportunity::{
-    CommenterDigest, RebuildMode, check_invariants, current_as_of, load_current_metric_definition,
-    project_comment_platform_times, read_platform_time_report, rebuild_problem_metrics,
-    sync_comment_mentions,
+    CardRebuildMode, CommenterDigest, RebuildMode, check_invariants, current_as_of,
+    load_current_metric_definition, project_comment_platform_times, read_platform_time_report,
+    rebuild_opportunity_cards, rebuild_problem_metrics, sync_comment_mentions,
 };
 use linggan_storage_postgres::Database;
 use std::process::ExitCode;
@@ -16,6 +16,7 @@ const USAGE: &str = "usage:
   linggan-opportunity migrate-comment-mentions [--schema SCHEMA]
   linggan-opportunity sync-comment-mentions [--schema SCHEMA]
   linggan-opportunity rebuild-problem-metrics --domain UUID [--as-of RFC3339] [--full | --preview] [--schema SCHEMA]
+  linggan-opportunity rebuild-cards --domain UUID --full [--schema SCHEMA]
   linggan-opportunity platform-time-report --domain UUID [--as-of RFC3339] [--tz TZ]
                                             [--periods N] [--schema SCHEMA]";
 
@@ -159,6 +160,28 @@ async fn run() -> Result<bool, Box<dyn std::error::Error>> {
                 RebuildMode::Incremental
             };
             let report = rebuild_problem_metrics(&database, domain, &as_of, &digest, mode).await?;
+            print_json(&report)?;
+            Ok(true)
+        }
+        "rebuild-cards" => {
+            if !opportunity_enabled {
+                return Err("opportunity_card_disabled".into());
+            }
+            if !options.full || options.preview || options.as_of.is_some() {
+                return Err(
+                    "rebuild-cards requires --full and supports only the current snapshot".into(),
+                );
+            }
+            let domain = options
+                .domain
+                .as_deref()
+                .ok_or("rebuild-cards requires --domain")?;
+            let domain = Uuid::parse_str(domain).map_err(|_| "--domain must be a UUID")?;
+            let digest = CommenterDigest::load()?;
+            let database = connect(&options).await?;
+            let report =
+                rebuild_opportunity_cards(&database, domain, &digest, CardRebuildMode::Full)
+                    .await?;
             print_json(&report)?;
             Ok(true)
         }

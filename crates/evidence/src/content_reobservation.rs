@@ -375,7 +375,7 @@ async fn linked_authorization_in_transaction(
              WHERE scope.content_public_ref=$1 \
                AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM collection_work_order_domain_usage usage WHERE usage.work_order_ref=work_order.work_order_ref AND usage.domain_ref=$2)) \
              UNION ALL \
-             SELECT work_order.target_ref,decision.authorization_ref,finding.observed_at::timestamptz AS linked_at \
+             SELECT work_order.target_ref,decision.authorization_ref,linggan_opportunity_observed_at(finding.observed_at) AS linked_at \
              FROM linggan_material_discovery_finding finding \
              JOIN linggan_runtime_capture_package package USING(package_ref) \
              JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
@@ -383,6 +383,7 @@ async fn linked_authorization_in_transaction(
              JOIN collection_work_order work_order ON work_order.work_order_ref=lease.work_order_ref \
              JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
              WHERE finding.content_public_ref=$1 \
+               AND linggan_opportunity_observed_at(finding.observed_at) IS NOT NULL \
                AND ($2::uuid IS NULL OR EXISTS (SELECT 1 FROM collection_work_order_domain_usage usage WHERE usage.work_order_ref=work_order.work_order_ref AND usage.domain_ref=$2)) \
          ) \
          SELECT linked_authority.target_ref,acquisition_auth.authorization_ref,acquisition_auth.purpose \

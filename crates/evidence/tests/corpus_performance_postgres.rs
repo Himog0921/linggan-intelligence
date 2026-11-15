@@ -7,6 +7,7 @@ use linggan_contracts::EvidenceQuery;
 use linggan_evidence::{read_work_resource, read_work_resources};
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use uuid::Uuid;
 
@@ -134,6 +135,54 @@ async fn keyset_snapshot_search_and_scan_budget_remain_bounded() {
     submit_package(&database,"content_detail",json!({"contentExternalId":"perf-000-new"}),json!({
         "kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"perf-000-new"},"payload":{"title":"newer snapshot"}
     })).await;
+    // Before unknown-time works were included, v1 cursors stored the displayed human moment.
+    // A still-open old page must continue at the same position as the new internal sort key.
+    let current_cursor = first.cursor.as_ref().unwrap();
+    let encoded = current_cursor.split('.').nth(1).unwrap();
+    let payload = (0..encoded.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&encoded[index..index + 2], 16).unwrap())
+        .collect::<Vec<_>>();
+    let mut old_payload: Value = serde_json::from_slice(&payload).unwrap();
+    old_payload["lastObservedAt"] = json!(
+        first
+            .items
+            .last()
+            .unwrap()
+            .summary
+            .last_observed_at
+            .as_ref()
+            .unwrap()
+    );
+    let old_encoded = serde_json::to_vec(&old_payload)
+        .unwrap()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let old_checksum = Sha256::digest(format!("material-keyset-v1:{old_encoded}").as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let old_cursor = format!("m1.{old_encoded}.{old_checksum}");
+    let current_page = read_work_resources(&database, &query(json!({"cursor":current_cursor})))
+        .await
+        .unwrap();
+    let old_page = read_work_resources(&database, &query(json!({"cursor":old_cursor})))
+        .await
+        .unwrap();
+    assert_eq!(old_page.as_of, as_of);
+    assert_eq!(
+        old_page
+            .items
+            .iter()
+            .map(|item| item.identity.public_ref)
+            .collect::<Vec<_>>(),
+        current_page
+            .items
+            .iter()
+            .map(|item| item.identity.public_ref)
+            .collect::<Vec<_>>()
+    );
     let mut cursor = first.cursor;
     while let Some(next) = cursor {
         let page = read_work_resources(&database, &query(json!({"cursor":next})))
