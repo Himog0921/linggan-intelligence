@@ -1,3 +1,5 @@
+mod core_revision;
+pub use core_revision::{CoreRevisionReceipt, ReviewedCore, publish_reviewed_core};
 mod coverage;
 pub(crate) use coverage::scope_coverage;
 mod deep;
@@ -239,14 +241,21 @@ pub async fn latest(
     let row = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,
         CASE WHEN result.offline_recovery THEN 'succeeded' ELSE c.state END AS state,
         CASE WHEN result.offline_recovery THEN NULL ELSE c.failure_code END AS failure_code,
-        result.result,COALESCE(result.offline_recovery,false) AS offline_recovery,
+        COALESCE(review.result,result.result) AS result, review.revision_ref,
+        COALESCE(result.offline_recovery,false) AS offline_recovery,
         d.analysis_ref AS deep_ref,d.method_version AS deep_method,d.findings,d.question
         FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
         LEFT JOIN linggan_content_understanding_saved_core result ON result.request_ref=r.request_ref
           AND (NOT result.offline_recovery OR result.created_at<=$5::timestamptz)
         LEFT JOIN LATERAL (
+          SELECT revision_ref,result FROM linggan_content_understanding_core_revision
+          WHERE base_request_ref=result.request_ref AND created_at<=$5::timestamptz
+          ORDER BY created_at DESC,revision_ref DESC LIMIT 1
+        ) review ON true
+        LEFT JOIN LATERAL (
           SELECT analysis_ref,method_version,findings,question FROM linggan_content_understanding_deep
-          WHERE core_ref=result.request_ref AND domain_ref=$4 AND created_at<=$5::timestamptz
+          WHERE core_ref=result.request_ref AND review.revision_ref IS NULL
+            AND domain_ref=$4 AND created_at<=$5::timestamptz
           ORDER BY revision DESC LIMIT 1
         ) d ON true
         WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3
@@ -263,6 +272,9 @@ pub async fn latest(
             });
             if r.get::<bool, _>("offline_recovery") {
                 analysis["recoveredFromSavedReply"] = json!(true);
+            }
+            if let Some(revision_ref) = r.get::<Option<Uuid>, _>("revision_ref") {
+                analysis["coreRevisionRef"] = json!(revision_ref);
             }
             if let Some(deep_ref) = r.get::<Option<Uuid>, _>("deep_ref") {
                 analysis["result"]["card"]["deep"] = json!({
