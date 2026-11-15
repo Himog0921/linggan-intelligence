@@ -22,11 +22,13 @@ Core 九字段、其类型与长度约束、文字证据字段、Deep、generati
 
 ## 2. 保持不变的共同结果
 
-同一作品、同一材料快照及同一核心理解方法版本只形成一份 Core：逻辑身份仍为 `(workRef, materialSnapshotIdentity, coreMethodVersion)`。跨领域复用同一 Core，不因领域复制卡片；底稿引用同一结果，L2 只追加 Deep，不覆盖 Core。`coreMethodVersion` 是该逻辑键中基础方法版本的含义，不新增同名外壳字段。
+同一作品、同一材料快照及同一核心理解方法版本形成一份逻辑 Core，身份仍为 `(workRef, materialSnapshotIdentity, coreMethodVersion)`。跨领域复用同一 Core，不因领域复制卡片；底稿引用同一结果，L2 只追加 Deep，不覆盖 Core。`coreMethodVersion` 是该逻辑键中基础方法版本的含义，不新增同名外壳字段。
+
+原 Core 已存在时，可以追加经人工核对的修订版。修订版使用独立的 `analysisRef`，与原 Core 关联并保存实际回包、失败回执和通过校验的草稿。研究底稿和 Content Card 通过同一个读取接口取得查询时点已发布的最新修订。接口的 `requestRef` 仍标识原请求，`coreRevisionRef` 标识当前修订。早于修订发布时间的查询读取原 Core。已有 L2 发现仍关联原 Core，后续 L2 的修订版接入单独处理。
 
 外壳仍包含 `schemaVersion/workRef/analysisRef/sourceSnapshot/core/deep/evidence/generation`。身份、快照、来源与执行元数据由程序绑定，不接受模型编造 UUID、版本、位置或哈希。
 
-`generation` 的版本引用沿用非空字符串约束：未绑定 Skill 时 `skillVersionRef` 为 `none`，不伪造版本身份；其余引用取本次冻结配置。`providerReturnedModel` 取实际供应商响应，不用请求的模型名替代。
+`generation` 的版本引用沿用非空字符串约束：未绑定 Skill 时 `skillVersionRef` 为 `none`，不伪造版本身份；其余引用取本次冻结配置。`providerReturnedModel` 取实际供应商响应，不用请求的模型名替代。人工修订时，`createdAt` 记录修订时间，`skillVersionRef` 为 `none`，`promptVersionRef` 和 `modelConfigRef` 使用保留值 `offline-reviewed`，表示本次修订未绑定生成提示词和模型配置。原回包的实际供应商模型随失败回执保留。
 
 | Core 字段 | 含义（不变） |
 | --- | --- |
