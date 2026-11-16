@@ -31,6 +31,7 @@ use linggan_intelligence::{
     pi_adapter::PiAdapter,
 };
 use linggan_storage_postgres::Database;
+use sha2::{Digest, Sha256};
 use serde_json::{Value, json};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use uuid::Uuid;
@@ -38,6 +39,33 @@ use uuid::Uuid;
 const BODY: &str = "合成说明🙂：先摆出材料，再按步骤核对；只用于流程测试。";
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
+/// The new migration must stay identical across the file, the runtime applier and
+/// the API full-schema fixture ledger; a hand-copied digest drifts silently.
+#[test]
+fn full_schema_fixtures_record_the_actual_deep_v2_migration_digest() {
+    const MIGRATION: &str =
+        include_str!("../../../database/migrations/0224_content_understanding_deep_v2.sql");
+    let digest: String = Sha256::digest(MIGRATION.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let ledger_entry = format!("('0224_content_understanding_deep_v2','{digest}')");
+    let fixture = include_str!("../../../apps/api/src/local_web/full_schema_fixture.rs");
+    assert!(
+        fixture.contains(&ledger_entry),
+        "api fixture migration ledger differs from the actual 0224 SQL"
+    );
+    assert!(
+        fixture.contains("database/migrations/0224_content_understanding_deep_v2.sql"),
+        "api fixture does not load the 0224 migration"
+    );
+    assert!(
+        include_str!("../../../scripts/local-runtime.sh")
+            .contains("apply_migration_once \"0224_content_understanding_deep_v2\""),
+        "local runtime does not apply the 0224 migration"
+    );
+}
 
 #[tokio::test]
 #[ignore = "owned PostgreSQL + AI_FOUNDATION_PROOF_NODE + owned LINGGAN_LOCAL_MEDIA_ROOT; no real models"]
