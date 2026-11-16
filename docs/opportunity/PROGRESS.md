@@ -487,3 +487,14 @@
 - `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/opportunity/OpportunityPage.test.tsx` → `10 passed; 0 failed`。`cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1794 passed (1794)`。
 - `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-final-head CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 和三类依据读取通过，隔离容器和卷已清理；私有截图已更新。
 - 对代码提交 `ccc73a1f` 的独立定点复核确认前述四项问题均已处理；复核未自行运行测试。依据重读成功后父级原声恢复的条件已静态核对，尚无该细节的单独断言。远端 CI 以 PR #597 最终提交的实际结果为准；合并、部署及真实业务验收不由本次测试推断。
+
+## 2026-11-16 PR #597 合并与本机部署预检
+
+- Mog 确认合并 PR #597 的 `d43bdc7e964a01b0be324fb6444844bb4a578e9e`，并要求本机部署与实际页面验证；本机运行库和生产环境迁移、真实采集、模型外发仍需另行授权。
+- `gh pr merge 597 --merge --match-head-commit d43bdc7e964a01b0be324fb6444844bb4a578e9e` → exit 0；`gh pr view 597 --json state,mergedAt,mergeCommit,headRefOid` → `MERGED`，head `d43bdc7e`，merge commit `69adcef7799199e1ce61340f3c47230228c39670`。远端 main 已核验为该 merge commit；此前同一 head 的 Delivery #614 已通过。转 Ready 自动触发的 Delivery #621 以 GitHub 实际结果为准。
+- 本机 PostgreSQL 只读账本对照目标迁移文件：账本 223 条、候选文件 223 个、缺少 `0223_opportunity_card_period_index` 1 个、已匹配迁移 checksum 不一致 0 个。0223 新建卡片周期索引，并将既有卡片加入重建队列；当前卡片和待处理变更均为 0。未执行迁移，也未运行会先停服务再因缺迁移拒绝启动的安装脚本。
+- 当前 3001 的 API 与 AI 执行器运行于 `.worktrees/l1-media-image-cutover-3001`，源码 `bafb7d27554d539bf5febe3006e0b088c4f1884e`；该版本含未合入 main 的 `a49b37fb`、`bafb7d27` 图集改动。`git rev-list --left-right --count 69adcef7799199e1ce61340f3c47230228c39670...bafb7d27554d539bf5febe3006e0b088c4f1884e` → `24 2`。只读合并预览发现 `crates/evidence/src/material_reading/read.rs` 和 `scripts/local-runtime.sh` 冲突；本机库另有该运行版本的 0222 历史图集迁移。直接部署 main 会使当前图集功能暂时失效，故未覆盖运行版本。巡检和媒体 worker 保持 disabled；AI 执行器保持 enabled，只读查询时在途 model invocation 为 0。
+- 只读统计：本机评论 32400 条，评论研究问题定义、归属、机会卡提及、指标、作者密度和卡片均为 0。即使部署成功，现有真实材料也只能先验证空状态；未通过真实采集、模型外发或写入合成业务数据制造卡片。
+- 为评估重启副作用，只读查询 AI 控制：`global=true`、`executor=true`，有 2 个 task 控制开启；查询时无 pending 条目、无 running invocation。这是既有运行状态，不代表新外发获准；后续若切换服务，必须避免因恢复执行器触发未授权外发。
+- 本记录工作树执行 `git diff --check` → exit 0；`bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`。
+- 状态：PR 已合并；本机部署和实际页面／业务链路验收未完成。等待 Mog 决定是否先集成现有图集改动，并单独授权本机 0223 迁移；生产环境迁移、真实采集和模型外发均未执行。
