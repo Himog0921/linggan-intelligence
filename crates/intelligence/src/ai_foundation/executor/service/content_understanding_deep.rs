@@ -10,7 +10,11 @@ use crate::{
     ai_foundation::{
         admission,
         batch_store::InputRef,
-        content_understanding::generate_deep::{self, FrozenDeep, METHOD},
+        content_understanding::{
+            build_manifest,
+            generate_deep::{self, FrozenDeep, METHOD},
+            images_for_manifest_in,
+        },
         store::FoundationError,
         transport::ResponseSchema,
     },
@@ -45,12 +49,25 @@ async fn prepare(
         item.item_ref,
     )
     .await?;
-    let card = frozen
-        .card_in(&mut tx)
-        .await?
-        .ok_or_else(|| FoundationError::AdmissionDenied(vec!["ai_source_unavailable".into()]))?;
+    let Some((packet, card, basis)) = frozen.packet_card_basis_in(&mut tx).await? else {
+        return Err(FoundationError::AdmissionDenied(vec!["ai_source_unavailable".into()]).into());
+    };
+    let (_, fingerprint) = build_manifest(
+        &packet,
+        &card,
+        &frozen.research_mode,
+        frozen.base_mode.as_deref(),
+        &frozen.sub_questions,
+        METHOD,
+        &basis,
+    )
+    .map_err(|_| FoundationError::AdmissionDenied(vec!["ai_source_unavailable".into()]))?;
+    if fingerprint != frozen.input_fingerprint || basis != frozen.core_basis {
+        return Err(FoundationError::AdmissionDenied(vec!["ai_source_unavailable".into()]).into());
+    }
     let payload = frozen.payload(&card);
-    let call = research_call::prepare_in(
+    let images = images_for_manifest_in(&mut tx, &frozen.input_manifest).await?;
+    let call = research_call::prepare_with_images_in(
         &mut tx,
         item,
         secrets,
@@ -65,6 +82,7 @@ async fn prepare(
             },
             material_class: "note_material",
         },
+        images,
     )
     .await?;
     tx.commit().await?;
@@ -126,12 +144,27 @@ async fn settle(
     let mut accepted = None;
     if allowed {
         frozen.lock_in(&mut tx).await?;
-        let card = frozen.card_in(&mut tx).await?;
-        allowed = card.is_some();
-        accepted = response
-            .filter(|r| r.ok)
-            .and_then(|r| r.text.as_deref())
-            .and_then(|text| Some(frozen.accept(text, card.as_ref()?)));
+        if let Some((packet, card, basis)) = frozen.packet_card_basis_in(&mut tx).await? {
+            let rebuilt = build_manifest(
+                &packet,
+                &card,
+                &frozen.research_mode,
+                frozen.base_mode.as_deref(),
+                &frozen.sub_questions,
+                METHOD,
+                &basis,
+            );
+            allowed = basis == frozen.core_basis
+                && rebuilt.is_ok_and(|(_, fingerprint)| fingerprint == frozen.input_fingerprint);
+            if allowed {
+                accepted = response
+                    .filter(|r| r.ok)
+                    .and_then(|r| r.text.as_deref())
+                    .and_then(|text| Some(frozen.accept(text, &card)));
+            }
+        } else {
+            allowed = false;
+        }
     }
     let success = accepted.as_ref().is_some_and(Result::is_ok);
     let failure = accepted
@@ -145,9 +178,16 @@ async fn settle(
                 "content_understanding_publication_withheld",
             )
         });
-    if let Some(Ok(findings)) = accepted {
+    if let Some(Ok((findings, rejected, statuses))) = accepted {
         frozen
-            .publish_in(&mut tx, request, call.invocation, findings)
+            .publish_in(
+                &mut tx,
+                request,
+                call.invocation,
+                findings,
+                rejected,
+                statuses,
+            )
             .await?;
     }
     let mut metadata = response

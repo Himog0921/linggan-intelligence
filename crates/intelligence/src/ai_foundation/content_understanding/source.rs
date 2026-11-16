@@ -185,6 +185,36 @@ pub(crate) async fn frozen_in(
     }
     Ok(saved)
 }
+/// Images referenced by a frozen v2 manifest, in manifest order.
+pub(crate) async fn images_for_manifest_in(
+    tx: &mut Transaction<'_, Postgres>,
+    manifest: &Value,
+) -> Result<Vec<crate::pi_adapter::PiImage>, super::super::executor::ExecutorError> {
+    let mut images = Vec::new();
+    for material in manifest.as_array().into_iter().flatten() {
+        if !matches!(material["materialKind"].as_str(), Some("cover" | "image")) {
+            continue;
+        }
+        let source_ref: Uuid = serde_json::from_value(material["sourceRef"].clone())
+            .map_err(|_| super::super::executor::ExecutorError::Invalid)?;
+        let hash = material["mediaSha256"]
+            .as_str()
+            .ok_or(super::super::executor::ExecutorError::Invalid)?;
+        let r = sqlx::query("SELECT b.storage_key,b.mime_type,b.byte_size FROM linggan_media_materialization m JOIN linggan_media_blob b ON b.sha256=m.blob_sha256 WHERE m.materialization_ref=$1 AND b.sha256=$2")
+            .bind(source_ref).bind(hash).fetch_one(&mut **tx).await?;
+        images.push(
+            super::super::executor::ocr_recognition::image(
+                &r.get::<String, _>("storage_key"),
+                &r.get::<String, _>("mime_type"),
+                r.get("byte_size"),
+                hash,
+            )?
+            .0,
+        );
+    }
+    Ok(images)
+}
+
 pub(crate) async fn images_in(
     tx: &mut Transaction<'_, Postgres>,
     packet: &Packet,

@@ -169,7 +169,7 @@ async fn configure_deep(
                     output_tokens: 1024,
                     timeout_seconds: 30,
                     attempts: 1,
-                    thinking_level: "off".into(),
+                    thinking_level: "high".into(),
                 },
             }),
             skill_version_ref: None,

@@ -61,6 +61,9 @@ pub async fn publish_reviewed_core(
         .await?;
     let source = &reviewed.source_snapshot;
     lock_work_snapshot(&mut tx, source.work_ref, &source.material_snapshot_identity).await?;
+    // Deep publication takes the same Core lock; without it a revision can land
+    // between the "still current" check and the Deep insert.
+    super::deep::lock_core(&mut tx, reviewed.base_request_ref).await?;
     let base = sqlx::query(
         "SELECT core.work_ref, core.material_snapshot_identity, r.domain_ref
         FROM linggan_content_understanding_saved_core core

@@ -283,7 +283,7 @@ try {
     assert.equal(bad.status, 202, JSON.stringify(bad.body));
     const badItem = await waitForDeep(bad.body.batchRef);
     assert.equal(badItem.state, 'failed');
-    assert.equal(badItem.failureCode, 'ai_output_invalid');
+    assert.equal(badItem.failureCode, 'content_understanding_deep_rejected_excess');
     assert.deepEqual((await call(latest)).body.analysis.result.card.deep, refreshed.result.card.deep);
 
     const queued = await call(generatePath, 'POST', generate);

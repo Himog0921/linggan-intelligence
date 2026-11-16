@@ -72,8 +72,11 @@ pub(super) async fn prepare_with_images_in(
         .as_object_mut()
         .ok_or(ExecutorError::Invalid)?
         .insert("instruction".into(), json!(instruction));
-    if item.task_key == crate::ai_foundation::TaskKey::ContentUnderstanding
-        && model.limits.thinking_level != "high"
+    if matches!(
+        item.task_key,
+        crate::ai_foundation::TaskKey::ContentUnderstanding
+            | crate::ai_foundation::TaskKey::ContentUnderstandingDeep
+    ) && model.limits.thinking_level != "high"
     {
         return Err(FoundationError::AdmissionDenied(vec![
             "content_understanding_requires_high".into(),

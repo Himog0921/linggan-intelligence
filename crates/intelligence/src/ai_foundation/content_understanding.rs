@@ -5,6 +5,7 @@ pub(crate) use coverage::scope_coverage;
 mod deep;
 mod deep_grounding;
 mod deep_manifest;
+mod deep_v2;
 pub(crate) mod generate_deep;
 mod offline_recovery;
 mod source;
@@ -21,7 +22,8 @@ use linggan_storage_postgres::Database;
 pub use offline_recovery::{RecoveryReceipt, recover_saved_replies};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-pub(crate) use source::{Packet, frozen_in, images_in};
+pub(crate) use deep_manifest::build as build_manifest;
+pub(crate) use source::{Packet, frozen_in, images_for_manifest_in, images_in};
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
