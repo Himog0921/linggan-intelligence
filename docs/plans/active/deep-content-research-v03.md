@@ -1,7 +1,7 @@
 # Intelligence · Deep Content Research V0.3
 
 > 状态: 活跃计划
-> 最后核对: 2026-11-15
+> 最后核对: 2026-11-16
 > 适用范围: L2 单篇深入研究（Deep Content Research）的 G1 研究方法与 G2 输入输出合同；含 L2 Skill 正文草案。不授权生产实现、迁移、开启 L2、切换配置或真实模型调用
 > 事实来源: Mog 提供的 V0.2 规范与 2026-11-15 对第 1.2 节 M1–M6 的确认；`main@7437781b` 的代码、迁移与只读本地库查询
 > 冲突时以谁为准: Mog 最新确认；代码事实以当前 `main` 为准，冲突时先记录位置与影响，不静默修改合同
@@ -39,7 +39,7 @@ V0.3 不改变这些诊断，也不改变第 1.1 节的产品决策。改动集�
 | C02 | §3、§5 | 研究问题改为 `subQuestions[]`；发现用 `answers` 指向子问题；新增子问题状态 | `deep_grounding.rs:109` 只要求 `questionFocus` 是问题的子串 |
 | C03 | §5、§6.4 | 逐条判定发现；被拒比例超过 1/3 时整次扣下；被拒原因入库 | `deep_grounding.rs:158` 任一条不合格即整次 `ai_output_invalid` |
 | C04 | §5.3 | `supportType` 由程序根据材料类型判定，模型不填；`「」` 只引用材料原文 | `deep_grounding.rs:119` 允许从 L1 的 `observation`、`modelQuote` 中“逐字”摘录 |
-| C05 | §4、§6.3 | 完整正文作为一个带位置的材料块进入；顺序声明支持 N 项；标题、封面固定在位置 0 | `deep_grounding.rs:85` 顺序只能在同一条 L1 证据块内证明；`:186` 最多两项 |
+| C05 | §4、§5.4 | 完整正文作为一个材料块进入；**不做先后顺序的程序证明**，删除 `order` 字段、材料的 `displayOrder`/`orderState` 与相关拒绝码（2026-11-16 Mog：图片顺序无价值） | `deep_grounding.rs:85` 现有顺序证明只在同一条 L1 证据块内成立；本地 21 张正文图片的展示顺序全部未知 |
 | C06 | §3.2-C、§5.1 | 方法发现必须用 `basisFindingIds` 指向同次输出内的观察；`application` 补 `originalUse` | V0.2 §3.2 表格要求“原作品用法”，§5.1 结构里没有这个字段 |
 | C07 | §3.4 | 断言性质改为判定树；`hypothesis` 必须填写 `mechanism` 与 `observableSignal` | 让单篇假设可以导出到假设台账，跨作品检验 |
 | C08 | §4.3-D | 删除 `performance_context` | 结果偏差；与内容回溯看板的盲标规则一致 |
@@ -51,6 +51,8 @@ V0.3 不改变这些诊断，也不改变第 1.1 节的产品决策。改动集�
 | C14 | §7 | Deep 绑定实际使用的 Core 版本（原始或人工修订） | PR #588 之后，Core 有修订时读取接口隐藏 Deep（`content_understanding.rs:229` 起的查询中 `review.revision_ref IS NULL`），L2 仍读原始 Core（`deep.rs` 的 `current_card_in`） |
 | C15 | §9 | 评测增加参照发现（召回）、两人一致率、重复运行稳定度、被拒原因分布；首轮只校准两个模式 | V0.2 的评分只衡量精度；3–5 篇分给三个模式不足以校准 |
 | C16 | §11 | 补充迁移约束：`content_understanding_deep_invocation` 只允许 `model.v1`，v2 必须改约束 | `0199_content_understanding_model_deep.sql` |
+
+**2026-11-16 修订：** 按 Mog 授权删除无价值的门槛。先后顺序不再做程序证明（C05）；材料清单只发送文字、类型和口播时间，不发送 bbox、识读问题列表等元数据。L1 的教训同样适用于 L2：整篇拒收的门槛大多拦下的是格式问题而不是编造，L1 已改为逐项接纳（见 [Content Card 合同](../../data-contracts/content-card.md)第 6 节）。L2 沿用第 5.6 节的逐条判定，不新增整篇拒收条件。
 
 ## 0.2 本轮仍不做
 
@@ -222,7 +224,7 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 
 说明：
 
-- 小红书正文通常较短，完整正文默认全量发送。这样顺序和结构才能校验，成本主要在图片。
+- 小红书正文通常较短，完整正文默认全量发送。这样结构判断有完整上下文，成本主要在图片。
 - 默认图片只有封面，加上 L1 证据中引用过的图片；其余由运营补充。上限 9 张，与现有图片物化能力对齐，以实测为准。
 - 视频只使用已保存的口播转写与画面文字（带时间位置）。本轮不声称支持动作、镜头节奏或音画关系。研究问题需要这些能力时，界面不提供该选项。
 
@@ -237,8 +239,6 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
   "sourceRef": "source-ref",
   "sourceVersion": "source-version",
   "inputCitationId": "body-01",
-  "displayOrder": 2,
-  "orderState": "known",
   "text": "完整正文……",
   "timeStartMs": null,
   "timeEndMs": null,
@@ -251,11 +251,10 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 规则：
 
 1. `id` 在一次 Deep 内唯一，由程序编号。
-2. 标题固定 `displayOrder = 0`，封面也为 0，正文从 1 开始；图片按作品内展示顺序编号；不知道顺序时 `orderState = "unknown"`，不编造。
-3. 文本类材料保存完整文本。来源以后变化，历史 Deep 仍可按当时的材料展示。
-4. 图片类材料保存来源、版本和字节 SHA256，不保存图片本身。历史 Deep 能否重新显示原图，取决于图片物化是否仍在。
-5. `core_unit` 与 `core_evidence` 来自本次使用的 Core 版本（原始或人工修订，见第 7.1 节）。L1 的 `model_read` 证据以 `core_evidence` 进入，并标明 `evidenceKind: "model_read"`。
-6. 发给模型的是清单的投影：材料 `id`、`materialKind`、`displayOrder`、`orderState`、`text`。图片按清单顺序随请求发送，并以材料 `id` 对应。
+2. 文本类材料保存完整文本。来源以后变化，历史 Deep 仍可按当时的材料展示。
+3. 图片类材料保存来源、版本和字节 SHA256，不保存图片本身。历史 Deep 能否重新显示原图，取决于图片物化是否仍在。
+4. `core_unit` 与 `core_evidence` 来自本次使用的 Core 版本（原始或人工修订，见第 7.1 节）。L1 的 `model_read` 证据以 `core_evidence` 进入，并标明 `evidenceKind: "model_read"`。
+5. 发给模型的是清单的投影：材料 `id`、`materialKind`、`text`，口播与画面文字附带时间。图片随请求发送，并以材料 `id` 对应。不发送 bbox、识读问题列表、来源 UUID 等元数据。
 
 ## 4.4 输入冻结与指纹
 
@@ -297,8 +296,7 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
         {"materialRef": "M03", "excerpt": "先把书包放到桌上"},
         {"materialRef": "M03", "excerpt": "再定一个十分钟"},
         {"materialRef": "M03", "excerpt": "最后只写第一题"}
-      ],
-      "order": ["S1", "S2", "S3"]
+      ]
     },
     {
       "id": "F02",
@@ -324,8 +322,6 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 
 示例为合成内容，不来自真实作品。
 
-`order` 中的 `S1…` 指本条 `support` 的序号（从 1 开始），不是材料编号。同一材料块内可能有多段摘录，按序号引用才没有歧义。
-
 ## 5.2 字段
 
 | 字段 | 必要性 | 说明 |
@@ -338,7 +334,6 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 | `basisUnitIds` | 可空 | Core 知识单元 id |
 | `basisFindingIds` | 可空；方法类必须非空 | 同次输出中先出现的发现 id，不能自指，不能成环 |
 | `support` | 必须，1–6 条 | 见第 5.3 节 |
-| `order` | 可空 | 声明先后时填写，至少 2 项，见第 5.4 节 |
 | `application` | 仅 `transferable_method`，且必须 | 六个字段都非空；`originalUse` 必须与本条至少一条 support 对应 |
 | `hypothesis` | 仅 `assertionKind = hypothesis`，且必须 | `{mechanism, observableSignal}` |
 
@@ -356,15 +351,9 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 
 `observation` 类发现必须至少有一条 `verbatim_text` 或 `visual_observation`；只靠 `model_read` 不够。
 
-## 5.4 顺序
+## 5.4 先后关系
 
-声明“先……再……”时：
-
-1. `order` 列出本条 support 的序号，至少 2 项。
-2. 同一文本材料内：每段摘录在材料 `text` 中的位置必须严格递增。程序取每段摘录的首次出现位置；摘录在材料中出现不止一次时，该条不能用于顺序证明。
-3. 跨材料：两份材料的 `orderState` 都必须是 `known`，且 `displayOrder` 递增。
-4. 口播与画面文字：按 `timeStartMs` 递增。
-5. 不满足时拒绝该条。
+不做程序证明。完整正文与逐字摘录都随结果保存，评审可以直接看到先后。Skill 要求只写材料中确实按此先后出现的内容，并列内容写成并列。摘录在材料中出现多次时取第一次出现，不因此拒绝。
 
 ## 5.5 持久化的 Finding
 
@@ -385,7 +374,7 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 | 没有发现，且全部子问题为 `insufficient` | `content_understanding_deep_insufficient_evidence`（不变，不计为失败） |
 | 有子问题标为 `answered`，却没有任何合格发现指向它 | 该子问题在保存时改记为 `unsupported`，不影响发布 |
 
-被拒原因代码（初始）：`unknown_material`、`excerpt_not_found`、`excerpt_too_short`、`quote_mark_misuse`、`order_unsupported`、`order_ambiguous`、`answers_unknown`、`assertion_rule`、`causal_language`、`banned_pattern`、`method_without_basis`、`application_incomplete`、`hypothesis_incomplete`、`basis_cycle`。
+被拒原因代码（初始）：`unknown_material`、`excerpt_not_found`、`excerpt_too_short`、`quote_mark_misuse`、`answers_unknown`、`assertion_rule`、`causal_language`、`banned_pattern`、`method_without_basis`、`application_incomplete`、`hypothesis_incomplete`、`basis_cycle`。
 
 ------------------------------------------------------------------------
 
@@ -546,7 +535,7 @@ LLM 评审只做辅助检查：重复发现、引用是否对应、可能的错�
 | 1 | 迁移：第 7.2 节全部；只新增版本，不切换配置 | 新迁移（编号合入时取） |
 | 2 | 请求 v2：模式、子问题、材料补充、Core 版本、manifest、指纹、去重 | `generate_deep.rs` |
 | 3 | 材料清单生成：从 `source::Packet` 与 Core 生成，图片走现有物化 | 新文件，`content_understanding/deep_manifest.rs` |
-| 4 | payload v2 与 accept v2：逐条判定、派生 supportType、顺序、断言规则、清单、标记、整次判定 | `deep_grounding.rs`（v1 保留） |
+| 4 | payload v2 与 accept v2：逐条判定、派生 supportType、断言规则、清单、标记、整次判定 | `deep_grounding.rs`（v1 保留） |
 | 5 | 执行器：按 manifest 传图（`prepare_with_images_in`）；L2 强制 High；发布前比对指纹 | `executor/service/content_understanding_deep.rs`、`research_call.rs:75` |
 | 6 | 读取：`deepAnalyses[]`、Core 版本、modes 接口 | `content_understanding.rs:229`、`content_understanding_api.rs` |
 | 7 | 前端类型与只读展示（发起入口属 G3） | `DossierUnderstanding.tsx` |
@@ -560,7 +549,7 @@ LLM 评审只做辅助检查：重复发现、引用是否对应、可能的错�
 - Core 出现新修订 → 不发布；基于修订的 Deep 正常显示。
 - 校验器逐条覆盖第 5.6 节的每个被拒原因代码，各至少一个合成用例。
 - 整次判定：恰好 1/3 被拒发布；超过 1/3 扣下；全部材料不足走 insufficient。
-- 顺序：同块递增、摘录重复出现、跨材料已知与未知顺序、口播时间。
+- 摘录重复出现时取第一次出现，不拒绝。
 - `supportType` 不接受模型自填。
 - 方法：没有 basis 拒绝；basis 指向后出现的发现，或形成环，拒绝。
 - L2 在非 High 配置下准入被拒。
@@ -689,7 +678,7 @@ description: 单篇作品深入研究（L2）。按给定研究模式与子问�
 - 文本：excerpt 从对应材料的 text 中逐字复制，连续，至少 4 个字。它要覆盖 statement 中的引语、数字和关键判断。
 - 图片：不写 excerpt，写 observation，只描述画面中可见的内容。
 - statement 中的「」只用来引用材料原文。不要给 model_read 的描述或你自己的话加「」。
-- 声称先后顺序时填写 order，按出现顺序列出本条 support 的序号（S1、S2…）。只有满足以下任一条件，才能声称先后：同一段文本中的位置；材料的 displayOrder 已知；口播的时间。两件事同时存在不等于先后，并列的内容写成并列。
+- 写先后关系时，只写材料中确实按此先后出现的内容。两件事同时存在不等于先后，并列的内容写成并列。
 - 数字、条件、范围原样保留，不换算，不取整。
 - core_unit 只能放在 basisUnitIds 中，不能放进 support。
 
@@ -723,7 +712,7 @@ description: 单篇作品深入研究（L2）。按给定研究模式与子问�
 按材料实际情况选择，不要求全部覆盖。
 
 - 标题与开头：标题提出了什么问题、承诺或冲突；正文第一段怎样接住它。
-- 信息顺序：正文按什么顺序展开，例如“场景 → 原因 → 动作”或“结论 → 理由 → 例子”。必须有 order 支持。
+- 信息顺序：正文按什么顺序展开，例如“场景 → 原因 → 动作”或“结论 → 理由 → 例子”。按正文实际出现的先后写。
 - 段落与清单：有没有编号、分组、对照；每一组承担什么作用。
 - 叙事：人物、场景、经历、转折出现在哪里，承担什么作用。
 - 表达手法：对比、数字、具体动作、比喻、对话、反问。指到具体的句子。
