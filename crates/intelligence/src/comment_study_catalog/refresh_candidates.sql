@@ -1,9 +1,10 @@
 -- Latest first, eligibility second: an UNKNOWN newer version must not revive an older body.
 -- Cache even creator/unknown-author text; cleaning is not study eligibility.
-WITH latest AS MATERIALIZED (
-    SELECT DISTINCT ON (comment.content_public_ref, comment.comment_external_id)
+WITH observations AS MATERIALIZED (
+    SELECT
         comment.material_ref, comment.content_public_ref, comment.comment_external_id,
-        comment.body_state, (comment.body_text IS NOT NULL) AS has_body, comment.created_at
+        comment.body_state, (comment.body_text IS NOT NULL) AS has_body, comment.created_at,
+        linggan_opportunity_observed_at(comment.observed_at) AS parsed_observed_at
     FROM linggan_material_comment comment
     JOIN linggan_material_content content ON content.public_ref = comment.content_public_ref
     JOIN linggan_runtime_capture_package package ON package.package_ref = comment.package_ref
@@ -12,8 +13,14 @@ WITH latest AS MATERIALIZED (
         WHERE usage.content_public_ref = content.public_ref AND usage.domain_ref = $3
     ) AND package.accepted_at <= scope_001_now()
       AND comment.created_at <= scope_001_now()
-    ORDER BY comment.content_public_ref, comment.comment_external_id,
-             comment.observed_at::timestamptz DESC, comment.created_at DESC, comment.material_ref DESC
+), latest AS MATERIALIZED (
+    SELECT DISTINCT ON (content_public_ref, comment_external_id) * FROM observations
+    WHERE parsed_observed_at IS NOT NULL
+    ORDER BY content_public_ref, comment_external_id,
+             parsed_observed_at DESC, created_at DESC, material_ref DESC
+), diagnostics AS (
+    SELECT count(*) FILTER (WHERE parsed_observed_at IS NULL) AS unparseable_observations
+    FROM observations
 ), pending AS MATERIALIZED (
     SELECT source.*
     FROM latest source
@@ -30,8 +37,9 @@ WITH latest AS MATERIALIZED (
     ORDER BY source.created_at, source.material_ref
     LIMIT $2
 )
-SELECT pending.material_ref, raw.body_text AS raw_prefix,
+SELECT pending.material_ref, raw.body_text AS raw_prefix, diagnostics.unparseable_observations,
        encode(sha256(convert_to(raw.body_text, 'UTF8')), 'hex') AS raw_sha256
-FROM pending
-JOIN linggan_material_comment raw ON raw.material_ref = pending.material_ref
-ORDER BY pending.created_at, pending.material_ref;
+FROM diagnostics
+LEFT JOIN pending ON true
+LEFT JOIN linggan_material_comment raw ON raw.material_ref = pending.material_ref
+ORDER BY pending.created_at NULLS LAST, pending.material_ref;

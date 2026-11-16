@@ -31,19 +31,21 @@ pub(crate) async fn enrich_batch(
         "SELECT DISTINCT ON (lane.content_public_ref,lane.lane) lane.content_public_ref,lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.package_ref,package.coverage \
          FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref) \
          WHERE lane.content_public_ref=ANY($1) AND package.accepted_at <= $2::timestamptz \
-         ORDER BY lane.content_public_ref,lane.lane,lane.observed_at::timestamptz DESC,lane.created_at DESC"
+           AND lane.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(lane.observed_at) IS NOT NULL \
+         ORDER BY lane.content_public_ref,lane.lane,linggan_opportunity_observed_at(lane.observed_at) DESC,lane.created_at DESC"
     ).bind(&refs).bind(as_of).fetch_all(&mut **tx).await?;
     let histories = sqlx::query(
         "SELECT lane.content_public_ref,lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.created_at::text AS recorded_at,lane.package_ref,package.coverage,package.task_id,package.attempt_id,receipt.receipt_ref \
          FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref) \
          LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
          WHERE lane.content_public_ref=ANY($1) AND lane.lane IN ('comments','replies') AND package.accepted_at <= $2::timestamptz \
-         ORDER BY lane.content_public_ref,lane.lane,lane.observed_at::timestamptz DESC,lane.created_at DESC"
+           AND lane.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(lane.observed_at) IS NOT NULL \
+         ORDER BY lane.content_public_ref,lane.lane,linggan_opportunity_observed_at(lane.observed_at) DESC,lane.created_at DESC"
     ).bind(&refs).bind(as_of).fetch_all(&mut **tx).await?;
     let counts: HashMap<Uuid,i64> = sqlx::query_as(
         "SELECT comment.content_public_ref,count(DISTINCT comment.comment_external_id) FROM linggan_material_comment comment \
          JOIN linggan_runtime_capture_package package USING(package_ref) WHERE comment.content_public_ref=ANY($1) \
-         AND package.accepted_at <= $2::timestamptz GROUP BY comment.content_public_ref"
+         AND package.accepted_at <= $2::timestamptz AND comment.created_at <= $2::timestamptz GROUP BY comment.content_public_ref"
     ).bind(&refs).bind(as_of).fetch_all(&mut **tx).await?.into_iter().collect();
     let platforms: Vec<&str> = items
         .iter()
@@ -58,13 +60,14 @@ pub(crate) async fn enrich_batch(
          SELECT DISTINCT ON (requested.content_public_ref) requested.content_public_ref,author.material_ref,author.package_ref,author.observed_at,author.display_name,author.display_name_state,author.biography_state,author.follower_count,author.follower_count_state \
          FROM requested JOIN linggan_material_author_profile author ON author.platform=requested.platform AND author.author_external_id=requested.author_id \
          JOIN linggan_runtime_capture_package package USING(package_ref) WHERE package.accepted_at <= $4::timestamptz \
-         ORDER BY requested.content_public_ref,author.observed_at::timestamptz DESC,author.created_at DESC"
+           AND author.created_at <= $4::timestamptz AND linggan_opportunity_observed_at(author.observed_at) IS NOT NULL \
+         ORDER BY requested.content_public_ref,linggan_opportunity_observed_at(author.observed_at) DESC,author.created_at DESC"
     ).bind(&refs).bind(&platforms).bind(&authors).bind(as_of).fetch_all(&mut **tx).await?;
     let provenance_rows = sqlx::query(
         "WITH requested AS (SELECT * FROM unnest($1::uuid[],$2::text[],$3::text[]) AS scope(content_public_ref,platform,author_id)), \
-         refs AS (SELECT lane.content_public_ref,lane.package_ref FROM linggan_material_lane_observation lane WHERE lane.content_public_ref=ANY($1) \
-             UNION SELECT finding.content_public_ref,finding.package_ref FROM linggan_material_discovery_finding finding WHERE finding.content_public_ref=ANY($1) \
-             UNION SELECT requested.content_public_ref,author.package_ref FROM requested JOIN linggan_material_author_profile author ON author.platform=requested.platform AND author.author_external_id=requested.author_id), \
+         refs AS (SELECT lane.content_public_ref,lane.package_ref FROM linggan_material_lane_observation lane WHERE lane.content_public_ref=ANY($1) AND lane.created_at<=$4::timestamptz \
+             UNION SELECT finding.content_public_ref,finding.package_ref FROM linggan_material_discovery_finding finding WHERE finding.content_public_ref=ANY($1) AND finding.created_at<=$4::timestamptz \
+             UNION SELECT requested.content_public_ref,author.package_ref FROM requested JOIN linggan_material_author_profile author ON author.platform=requested.platform AND author.author_external_id=requested.author_id WHERE author.created_at<=$4::timestamptz), \
          ranked AS (SELECT refs.content_public_ref,refs.package_ref,package.task_id,package.attempt_id,package.producer_instance_id,receipt.receipt_ref, \
              count(*) OVER(PARTITION BY refs.content_public_ref) AS total_count, \
              row_number() OVER(PARTITION BY refs.content_public_ref ORDER BY package.accepted_at,refs.package_ref) AS row_ordinal \
@@ -78,7 +81,8 @@ pub(crate) async fn enrich_batch(
             "WITH current_comment AS (SELECT DISTINCT ON(comment.content_public_ref,comment.comment_external_id) comment.content_public_ref,comment.body_text \
              FROM linggan_material_comment comment JOIN linggan_runtime_capture_package package USING(package_ref) \
              WHERE comment.content_public_ref=ANY($1) AND package.accepted_at <= $2::timestamptz \
-             ORDER BY comment.content_public_ref,comment.comment_external_id,comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC) \
+               AND comment.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(comment.observed_at) IS NOT NULL \
+             ORDER BY comment.content_public_ref,comment.comment_external_id,linggan_opportunity_observed_at(comment.observed_at) DESC,comment.created_at DESC,comment.material_ref DESC) \
              SELECT DISTINCT content_public_ref FROM current_comment WHERE lower(COALESCE(body_text,'')) LIKE '%' || lower($3) || '%'"
         ).bind(&refs).bind(as_of).bind(text).fetch_all(&mut **tx).await?;
         for content_ref in comment_matches {

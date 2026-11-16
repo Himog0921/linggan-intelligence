@@ -315,7 +315,7 @@ pub async fn load(database: &Database, q: &CreatorScope) -> Result<DiscoveryData
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let data = load_in(&mut tx, q).await?;
+    let data = load_in(&mut tx, q, None).await?;
     tx.commit().await?;
     Ok(data)
 }
@@ -473,8 +473,9 @@ pub async fn load_creator_material_for_work(
 pub(crate) async fn load_in(
     tx: &mut Transaction<'_, Postgres>,
     q: &CreatorScope,
+    as_of: Option<&str>,
 ) -> Result<DiscoveryData, DiscoveryError> {
-    load_materials_in(tx, q, None, None).await
+    load_materials_in(tx, q, None, as_of).await
 }
 
 async fn load_materials_in(
@@ -576,7 +577,12 @@ async fn load_materials_scoped_in(
     let latest_added = rows
         .iter()
         .max_by_key(|r| r.get::<i64, _>("first_added_ms"))
-        .map(|r| (r.get::<i64, _>("first_added_ms"), r.get::<String, _>("first_added_display")));
+        .map(|r| {
+            (
+                r.get::<i64, _>("first_added_ms"),
+                r.get::<String, _>("first_added_display"),
+            )
+        });
     timing.scope += scope_started.elapsed();
     let current_started = Instant::now();
     // All of these works already stay in memory for exact statistics. Reading
@@ -608,13 +614,13 @@ async fn load_materials_scoped_in(
         .into_iter()
         .map(|r| (r.get("work_ref"), r))
         .collect();
-    let profiles=sqlx::query("SELECT DISTINCT ON(author.author_external_id) author.author_external_id,jsonb_build_object('displayName',author.display_name,'biography',author.biography,'followerCount',author.follower_count,'sourceRef',author.material_ref,'observedAt',author.observed_at) AS profile FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package package USING(package_ref) WHERE author.platform=$1 AND package.accepted_at<=$2::timestamptz AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3) ORDER BY author.author_external_id,author.observed_at::timestamptz DESC,author.created_at DESC,author.material_ref DESC").bind(&q.platform).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
+    let profiles=sqlx::query("SELECT DISTINCT ON(author.author_external_id) author.author_external_id,jsonb_build_object('displayName',author.display_name,'biography',author.biography,'followerCount',author.follower_count,'sourceRef',author.material_ref,'observedAt',author.observed_at) AS profile FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package package USING(package_ref) WHERE author.platform=$1 AND package.accepted_at<=$2::timestamptz AND author.created_at<=$2::timestamptz AND linggan_opportunity_observed_at(author.observed_at) IS NOT NULL AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3) ORDER BY author.author_external_id,linggan_opportunity_observed_at(author.observed_at) DESC,author.created_at DESC,author.material_ref DESC").bind(&q.platform).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
     let profiles: HashMap<String, Value> = profiles
         .into_iter()
         .map(|r| (r.get("author_external_id"), r.get("profile")))
         .collect();
     let mut profile_name_candidates = HashMap::new();
-    let profile_names=sqlx::query("SELECT DISTINCT ON(author.author_external_id) author.author_external_id,author.display_name,author.material_ref FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package package USING(package_ref) WHERE author.platform=$1 AND package.accepted_at<=$2::timestamptz AND NULLIF(btrim(author.display_name),'') IS NOT NULL AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3) ORDER BY author.author_external_id,author.observed_at::timestamptz DESC,author.created_at DESC,author.material_ref DESC").bind(&q.platform).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
+    let profile_names=sqlx::query("SELECT DISTINCT ON(author.author_external_id) author.author_external_id,author.display_name,author.material_ref FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package package USING(package_ref) WHERE author.platform=$1 AND package.accepted_at<=$2::timestamptz AND author.created_at<=$2::timestamptz AND linggan_opportunity_observed_at(author.observed_at) IS NOT NULL AND NULLIF(btrim(author.display_name),'') IS NOT NULL AND EXISTS(SELECT 1 FROM collection_work_order_lease_task lt JOIN collection_work_order_lease lease USING(lease_ref) JOIN collection_work_order_domain_usage usage USING(work_order_ref) WHERE lt.task_id=package.task_id AND usage.domain_ref=$3) ORDER BY author.author_external_id,linggan_opportunity_observed_at(author.observed_at) DESC,author.created_at DESC,author.material_ref DESC").bind(&q.platform).bind(&as_of).bind(q.domain).fetch_all(&mut **tx).await?;
     for row in profile_names {
         let author: String = row.get("author_external_id");
         profile_name_candidates.insert(
@@ -983,7 +989,8 @@ async fn load_materials_scoped_in(
     let mut creator_discovery: HashMap<String, CreatorDiscovery> = HashMap::new();
     let mut creator_keyword_times: HashMap<String, HashMap<String, i64>> = HashMap::new();
     for work in &works {
-        let (Some(key), Some(discovered)) = (&work.creator_key, work_discovery.get(&work.work_ref)) else {
+        let (Some(key), Some(discovered)) = (&work.creator_key, work_discovery.get(&work.work_ref))
+        else {
             continue;
         };
         let entry = creator_discovery
@@ -1263,7 +1270,8 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
         let outside =
             data.observation_lookup_available && latest.observation["inCurrentDomain"] == false;
         let discovery = data.creator_discovery.get(key);
-        let recent = discovery.is_some_and(|d| d.first_seen_date.as_str() >= data.recent_from.as_str());
+        let recent =
+            discovery.is_some_and(|d| d.first_seen_date.as_str() >= data.recent_from.as_str());
         // 与「高赞线索」视图同一口径：该作者至少有 N 篇作品点赞不少于 M，不再附加相关性条件。
         let leads = ws
             .iter()
@@ -1395,24 +1403,25 @@ pub fn aggregate(data: &DiscoveryData, q: &CreatorScope) -> Value {
         }
         hints.truncate(2);
         let (display_name, display_name_source) = author_display(data, latest, &ws);
-        let (first_seen_ms, first_seen_date, first_seen_display, first_seen_precision) = match discovery {
-            Some(d) => {
-                let precision = if d.first_seen_date == data.earliest_record_date {
-                    "earliest_record"
-                } else if d.first_seen_date.as_str() >= data.recent_from.as_str() {
-                    "recent"
-                } else {
-                    "domain_first"
-                };
-                (
-                    Some(d.first_seen_ms),
-                    Some(d.first_seen_date.clone()),
-                    Some(d.first_seen_display.clone()),
-                    Some(precision),
-                )
-            }
-            None => (None, None, None, None),
-        };
+        let (first_seen_ms, first_seen_date, first_seen_display, first_seen_precision) =
+            match discovery {
+                Some(d) => {
+                    let precision = if d.first_seen_date == data.earliest_record_date {
+                        "earliest_record"
+                    } else if d.first_seen_date.as_str() >= data.recent_from.as_str() {
+                        "recent"
+                    } else {
+                        "domain_first"
+                    };
+                    (
+                        Some(d.first_seen_ms),
+                        Some(d.first_seen_date.clone()),
+                        Some(d.first_seen_display.clone()),
+                        Some(precision),
+                    )
+                }
+                None => (None, None, None, None),
+            };
         let keywords = discovery.map(|d| d.keywords.clone()).unwrap_or_default();
         let first_seen_work = discovery.and_then(|d| d.first_work);
         items.push(json!({"creatorKey":key,"displayName":display_name,"displayNameSource":display_name_source,"authorExternalId":latest.author_external_id,"platform":latest.platform,"profile":latest.profile,"focus":latest.focus,"authorAnalysis":latest.author_analysis,"traits":traits,"topicHints":hints,"discoveryKeywords":keywords,"firstSeenWorkRef":first_seen_work,"firstSeenMs":first_seen_ms,"firstSeenDate":first_seen_date,"firstSeenDisplay":first_seen_display,"firstSeenPrecision":first_seen_precision,"observation":latest.observation,"collectedWorkCount":ws.len(),"relatedWorkCount":related.len(),"matchedRelatedWorkCount":matched_related,"matchedViralWorkCount":threshold.map(|_|matched_viral),"unrelatedWorkCount":ws.iter().filter(|w|w.relevance=="unrelated").count(),"unknownRelevanceWorkCount":ws.iter().filter(|w|w.relevance=="unknown").count(),"knownLikeWorkCount":related.iter().filter(|w|w.likes.is_some()).count(),"viralWorkCount":threshold.map(|_|viral),"maxRelatedLikeCount":max_related,"candidateHighLikeCount":high,"matchedWorkRefs":refs,"representatives":candidates.iter().take(3).collect::<Vec<_>>(),"firstAdded":latest.first_added,"firstAddedDisplay":latest.first_added_display}));
@@ -1524,10 +1533,7 @@ mod discovery_list_tests {
         }
     }
 
-    fn data(
-        works: Vec<DiscoveryWork>,
-        creators: &[(&str, i64, &str, &[&str])],
-    ) -> DiscoveryData {
+    fn data(works: Vec<DiscoveryWork>, creators: &[(&str, i64, &str, &[&str])]) -> DiscoveryData {
         let work_discovery = works
             .iter()
             .map(|w| {

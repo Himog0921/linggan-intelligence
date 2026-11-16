@@ -25,7 +25,9 @@ pub(crate) struct WorkResourceCurrent {
     pub detail_material_ref: Option<Uuid>,
     pub package_ref: Option<Uuid>,
     pub record_ordinal: Option<i32>,
-    pub observed_at: String,
+    pub observed_at: Option<String>,
+    /// Internal keyset position; unknown observation times sort after all known times.
+    pub sort_observed_at: String,
     pub title: Option<String>,
     pub title_state: String,
     pub title_qualification: String,
@@ -142,6 +144,7 @@ fn map_current(row: PgRow) -> WorkResourceCurrent {
         package_ref: row.get("package_ref"),
         record_ordinal: row.get("record_ordinal"),
         observed_at: row.get("observed_at"),
+        sort_observed_at: row.get("sort_observed_at"),
         title: row.get("title"),
         title_state: row.get("title_state"),
         title_qualification: row.get("title_qualification"),

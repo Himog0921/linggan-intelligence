@@ -16,20 +16,32 @@ WITH requested_roles AS MATERIALIZED (
      AND usage.domain_ref = $1
      AND usage.role = requested.observation_role
     GROUP BY requested.work_ref, requested.observation_role
-), latest AS MATERIALIZED (
-    SELECT DISTINCT ON (c.content_public_ref, c.comment_external_id)
+), observations AS MATERIALIZED (
+    SELECT
            c.material_ref, c.content_public_ref, c.comment_external_id,
            c.parent_comment_external_id, c.body_state, c.author_external_id,
-           c.created_at, eligible_work_roles.observation_role
+           c.created_at, eligible_work_roles.observation_role,
+           linggan_opportunity_observed_at(c.observed_at) AS parsed_observed_at
     FROM linggan_material_comment c
     JOIN eligible_work_roles ON eligible_work_roles.work_ref = c.content_public_ref
     JOIN linggan_runtime_capture_package p ON p.package_ref = c.package_ref
     WHERE p.accepted_at <= $2::timestamptz AND c.created_at <= $2::timestamptz
-    ORDER BY c.content_public_ref, c.comment_external_id,
-             c.observed_at::timestamptz DESC, c.created_at DESC, c.material_ref DESC
+), latest AS MATERIALIZED (
+    SELECT DISTINCT ON (content_public_ref, comment_external_id)
+           CASE WHEN parsed_observed_at IS NOT NULL THEN material_ref END AS material_ref,
+           content_public_ref, comment_external_id,
+           CASE WHEN parsed_observed_at IS NOT NULL THEN parent_comment_external_id END AS parent_comment_external_id,
+           CASE WHEN parsed_observed_at IS NOT NULL THEN body_state ELSE 'UNKNOWN' END AS body_state,
+           CASE WHEN parsed_observed_at IS NOT NULL THEN author_external_id END AS author_external_id,
+           created_at, observations.material_ref AS ordering_ref, observation_role,
+           count(*) FILTER (WHERE parsed_observed_at IS NULL)
+             OVER (PARTITION BY content_public_ref, comment_external_id) AS unparseable_observations
+    FROM observations
+    ORDER BY content_public_ref, comment_external_id, parsed_observed_at DESC NULLS LAST,
+             observations.created_at DESC, observations.material_ref DESC
 ), ranked AS (
     SELECT latest.*,
-           row_number() OVER (PARTITION BY content_public_ref ORDER BY created_at DESC, material_ref DESC) AS rank
+           row_number() OVER (PARTITION BY content_public_ref ORDER BY created_at DESC, ordering_ref DESC) AS rank
     FROM latest
 ), page AS MATERIALIZED (
     SELECT * FROM ranked
@@ -45,6 +57,6 @@ SELECT page.*, raw.body_text AS body_text,
              AND restriction.comment_external_id = page.comment_external_id
        ) AS source_restricted
 FROM page
-JOIN linggan_material_comment raw ON raw.material_ref = page.material_ref
-LEFT JOIN linggan_material_content_author author ON author.content_public_ref = page.content_public_ref
+LEFT JOIN linggan_material_comment raw ON raw.material_ref = page.material_ref
+LEFT JOIN LATERAL linggan_material_content_author_at(page.content_public_ref, $2::timestamptz) author ON true
 ORDER BY page.rank, page.content_public_ref;

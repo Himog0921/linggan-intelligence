@@ -2,8 +2,9 @@
 //! No model is invoked and no commenter identifier is returned in a report or error.
 
 use super::{
-    CommenterDigest, EvidenceTier, OpportunityMetricError, OpportunityMetricParams, PeriodBasis,
-    TierInput, TierParams, evidence_tier, load_current_metric_definition,
+    CommenterDigest, EvidenceTier, OpportunityMetricDefinition, OpportunityMetricError,
+    OpportunityMetricParams, PeriodBasis, TierInput, TierParams, evidence_tier,
+    load_current_metric_definition,
 };
 use crate::ai_foundation::{comment_problem, store::FoundationError};
 use linggan_storage_postgres::Database;
@@ -618,10 +619,22 @@ async fn sync_comment_mentions_scoped(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *tx)
         .await?;
+    let report = sync_comment_mentions_in(&mut tx, digest, domain, &metric).await?;
+    tx.commit().await?;
+    Ok(report)
+}
+
+/// Project memberships in the caller's existing repeatable-read snapshot.
+pub(super) async fn sync_comment_mentions_in(
+    tx: &mut Transaction<'_, Postgres>,
+    digest: &CommenterDigest,
+    domain: Option<Uuid>,
+    metric: &OpportunityMetricDefinition,
+) -> Result<MentionSyncReport, MentionSyncError> {
     let locked: bool = sqlx::query_scalar(
         "SELECT pg_try_advisory_xact_lock(hashtextextended('opportunity-mention-sync', 0))",
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     if !locked {
         return Err(MentionSyncError::SyncBusy);
@@ -629,7 +642,7 @@ async fn sync_comment_mentions_scoped(
     let actual_version: Option<i32> = sqlx::query_scalar(
         "SELECT version FROM linggan_opportunity_metric_definition_current WHERE singleton",
     )
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     if actual_version != Some(metric.version) {
         return Err(MentionSyncError::MetricChanged);
@@ -637,23 +650,22 @@ async fn sync_comment_mentions_scoped(
     let ledger_present: bool = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM linggan_local_schema_migration WHERE migration_id = '0211_opportunity_comment_mentions')",
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     if !ledger_present {
         return Err(MentionSyncError::MigrationLedgerMissing);
     }
     let problems_synced: i64 =
         sqlx::query_scalar("SELECT synced FROM linggan_opportunity_sync_problems()")
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await?;
-    let sources = read_sources(&mut tx, domain).await?;
+    let sources = read_sources(tx, domain).await?;
     validate_sources(&sources)?;
-    verify_digest_key(&mut tx, digest, true).await?;
-    let existing = verify_existing_digest(&mut tx, digest, domain).await?;
-    let mut projection =
-        project_sources(&mut tx, &sources, digest, metric.version, &existing).await?;
-    reconcile_projected(&mut tx, digest, &mut projection.counts, domain).await?;
-    collect_eligibility(&mut tx, &metric.params, &mut projection.counts, domain).await?;
+    verify_digest_key(tx, digest, true).await?;
+    let existing = verify_existing_digest(tx, digest, domain).await?;
+    let mut projection = project_sources(tx, &sources, digest, metric.version, &existing).await?;
+    reconcile_projected(tx, digest, &mut projection.counts, domain).await?;
+    collect_eligibility(tx, &metric.params, &mut projection.counts, domain).await?;
     let report = MentionSyncReport {
         source_memberships: sources.len(),
         unique_comment_problem_pairs: projection.unique_pairs,
@@ -666,6 +678,5 @@ async fn sync_comment_mentions_scoped(
         problems_synced,
         reconciliations: reconciliations(projection.counts, &metric.params),
     };
-    tx.commit().await?;
     Ok(report)
 }

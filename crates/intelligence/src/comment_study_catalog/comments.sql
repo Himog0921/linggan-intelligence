@@ -14,26 +14,7 @@
         WHERE restriction.content_public_ref=original.content_public_ref
           AND restriction.comment_external_id IN (original.comment_external_id,original.parent_comment_external_id))
     GROUP BY original.content_public_ref,original.comment_external_id
-), like_heads AS MATERIALIZED (
-    -- The comment's own latest KNOWN count before asOf; an UNKNOWN newer observation does not hide
-    -- an older known one, and nothing is ever inferred from the work's likes.
-    SELECT DISTINCT ON (comment.content_public_ref, comment.comment_external_id)
-           comment.content_public_ref, comment.comment_external_id,
-           engagement.like_count, comment.observed_at AS like_observed_at
-    FROM linggan_material_comment comment
-    JOIN linggan_material_comment_engagement engagement
-      ON engagement.material_ref = comment.material_ref AND engagement.like_count_state = 'KNOWN'
-    JOIN linggan_runtime_capture_package package ON package.package_ref = comment.package_ref
-    WHERE EXISTS (
-        SELECT 1 FROM linggan_material_domain_usage usage
-        WHERE usage.content_public_ref = comment.content_public_ref AND usage.domain_ref = $1
-    )
-      AND ($4::uuid IS NULL OR comment.content_public_ref = $4)
-      AND ($5::text IS NULL OR comment.comment_external_id = $5)
-      AND package.accepted_at <= $2::timestamptz AND comment.created_at <= $2::timestamptz
-    ORDER BY comment.content_public_ref, comment.comment_external_id,
-             comment.observed_at::timestamptz DESC, comment.created_at DESC, comment.material_ref DESC
-), usage_heads AS MATERIALIZED (
+), /*COMMENT_LIKE_HEADS*/, usage_heads AS MATERIALIZED (
     SELECT DISTINCT ON (event.content_public_ref, event.comment_external_id)
            event.content_public_ref, event.comment_external_id,
            event.action AS usage_action, event.recorded_at AS usage_recorded_at
@@ -172,14 +153,14 @@ SELECT jsonb_build_object(
                 ELSE 'recorded'
             END,
             'signalKinds', to_jsonb(page.signal_kinds),
-            'observedAt', to_char(page.observed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+            'observedAt', to_char(linggan_opportunity_observed_at(page.observed_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
             'receivedAt', to_char(page.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
             'authorDisplayName', page.author_display_name, 'authorExternalId', page.author_external_id,
             'parentCommentKey', CASE WHEN page.parent_comment_external_id IS NULL THEN NULL
                 ELSE jsonb_build_object('workRef', page.content_public_ref, 'commentExternalId', page.parent_comment_external_id) END,
             'likeCount', page.like_count,
             'likeCountAsOf', CASE WHEN page.like_count IS NULL THEN NULL
-                ELSE to_char(page.like_observed_at::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') END,
+                ELSE to_char(linggan_opportunity_observed_at(page.like_observed_at) AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') END,
             'publishedAt', NULL,
             'postUsage', jsonb_build_object(
                 'state', CASE WHEN page.usage_action = 'marked' THEN 'used' ELSE 'unused' END,

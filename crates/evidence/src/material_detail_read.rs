@@ -49,7 +49,8 @@ pub async fn read_material_detail(
          FROM linggan_material_engagement_observation observation \
          JOIN linggan_runtime_capture_package package USING(package_ref) \
          WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
-         ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC LIMIT 100",
+           AND observation.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(observation.observed_at) IS NOT NULL \
+         ORDER BY linggan_opportunity_observed_at(observation.observed_at) DESC,observation.created_at DESC LIMIT 100",
     )
     .bind(public_ref)
     .bind(&as_of)
@@ -95,7 +96,7 @@ async fn read_source_note(
          JOIN linggan_runtime_capture_package package USING(package_ref) \
          CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') WITH ORDINALITY record(value,ordinality) \
          WHERE finding.content_public_ref=$1 AND package.accepted_at<=$2::timestamptz \
-           AND finding.created_at<=$2::timestamptz AND record.ordinality=finding.record_ordinal+1 \
+           AND finding.created_at<=$2::timestamptz AND linggan_opportunity_observed_at(finding.observed_at) IS NOT NULL AND record.ordinality=finding.record_ordinal+1 \
            AND record.value->'sourceObject'->>'platform'=$3 \
            AND record.value->'sourceObject'->>'externalId'=$4 \
          ORDER BY package.accepted_at DESC,finding.created_at DESC,finding.material_ref DESC LIMIT 1",
@@ -200,16 +201,16 @@ async fn read_metric_history(
     };
     let query = match metric {
         EngagementMetric::Like => {
-            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.like_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.like_count_state='KNOWN' AND observation.like_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
+            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.like_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(observation.observed_at) IS NOT NULL AND observation.like_count_state='KNOWN' AND observation.like_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY linggan_opportunity_observed_at(observation.observed_at) DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
         }
         EngagementMetric::Comment => {
-            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.comment_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.comment_count_state='KNOWN' AND observation.comment_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
+            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.comment_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(observation.observed_at) IS NOT NULL AND observation.comment_count_state='KNOWN' AND observation.comment_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY linggan_opportunity_observed_at(observation.observed_at) DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
         }
         EngagementMetric::Collect => {
-            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.collect_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.collect_count_state='KNOWN' AND observation.collect_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
+            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.collect_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(observation.observed_at) IS NOT NULL AND observation.collect_count_state='KNOWN' AND observation.collect_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY linggan_opportunity_observed_at(observation.observed_at) DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
         }
         EngagementMetric::Share => {
-            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.share_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.share_count_state='KNOWN' AND observation.share_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
+            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.share_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.created_at <= $2::timestamptz AND linggan_opportunity_observed_at(observation.observed_at) IS NOT NULL AND observation.share_count_state='KNOWN' AND observation.share_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY linggan_opportunity_observed_at(observation.observed_at) DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
         }
     };
     let (Some(current_package_ref), Some(current_source_lane)) = (
