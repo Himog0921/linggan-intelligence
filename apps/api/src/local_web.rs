@@ -82,6 +82,7 @@ mod ocr_recognition_browser_tests;
 mod offline_preview;
 #[cfg(test)]
 mod offline_preview_tests;
+mod opportunity_api;
 mod ops;
 mod ops_api;
 mod ops_auth;
@@ -412,6 +413,9 @@ fn router_with_public_access(
         .merge(topic_workspace::routes())
         .merge(topic_map::routes(state.database.database().cloned()))
         .merge(comment_study::routes())
+        .merge(opportunity_api::routes(
+            std::env::var("LINGGAN_OPPORTUNITY_CARD").as_deref() == Ok("enabled"),
+        ))
         .merge(model_settings::routes())
         .merge(ai_settings::routes())
         .merge(note_analysis_api::routes())

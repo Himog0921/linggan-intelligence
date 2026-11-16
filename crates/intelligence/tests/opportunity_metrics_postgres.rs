@@ -517,6 +517,10 @@ async fn shadow_versions_avoid_existing_numbers_and_follow_current_changes() {
                 "../../../database/migrations/0221_opportunity_restriction_trigger_owner.sql"
             ),
             "",
+        )
+        .replace(
+            include_str!("../../../database/migrations/0223_opportunity_card_period_index.sql"),
+            "",
         );
     let db = isolated_proof_schema(&url, "opportunity_t12_shadow_versions", &before)
         .await
