@@ -6,7 +6,6 @@ export function materialLabel(unit: DossierMaterial, imageNumber?: number): stri
   if (unit.kind === 'body') return '正文';
   if (unit.kind === 'tags') return '独立标签';
   if (unit.kind === 'audio') return '音轨转写';
-  if (unit.kind === 'video_frame') return '视频画面文字';
   return `图片${imageNumber === undefined ? '' : ` ${imageNumber}`}`;
 }
 /** The canonical issue identifies an eligible saved result; execution completion alone does not. */
@@ -28,7 +27,7 @@ export function processingLabel(unit: DossierMaterial): string | null {
       if (processing.reason === 'no_audio_stream_observed' && ['present', 'not_applicable'].includes(unit.sourceState)) return '未发现音轨。';
       if (processing.reason === 'no_speech_observed' && ['present', 'known_empty'].includes(unit.sourceState)) return '处理完成，未检出语音。';
     }
-    if ((unit.kind === 'image' && processing.reason === 'no_text_observed' || unit.kind === 'video_frame' && processing.reason === 'no_frame_text_observed')
+    if (unit.kind === 'image' && processing.reason === 'no_text_observed'
       && ['present', 'known_empty'].includes(unit.sourceState)) return '处理完成，未检出文字。';
   }
   if (unit.sourceState !== 'present') return null;

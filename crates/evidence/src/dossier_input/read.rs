@@ -99,12 +99,7 @@ pub(super) async fn read_in(
             fragments,
             layer_version: crate::research_dossier::content::RULE_VERSION.into(),
             processing_scope: super::ProcessingScope {
-                included: vec![
-                    "platform".into(),
-                    "image_ocr".into(),
-                    "asr".into(),
-                    "video_frame_ocr".into(),
-                ],
+                included: vec!["platform".into(), "image_ocr".into(), "asr".into()],
                 context_only: vec!["comment_image".into(), "author_avatar".into()],
                 not_connected: vec![],
             },
@@ -152,7 +147,6 @@ fn canonical_columns(note: &serde_json::Value, materials: &[serde_json::Value]) 
         ("tags", "tags"),
         ("ocr", "image"),
         ("transcript", "audio"),
-        ("frame_text", "video_frame"),
     ] {
         let units: Vec<_> = materials
             .iter()
@@ -212,7 +206,7 @@ mod tests {
             |columns: Vec<Column>| columns.into_iter().map(|c| c.field).collect::<Vec<_>>();
         assert_eq!(
             fields(canonical_columns(&note, &materials)),
-            ["title", "body", "tags", "ocr", "transcript", "frame_text"]
+            ["title", "body", "tags", "ocr", "transcript"]
         );
         assert_eq!(
             canonical_columns(&note, &materials)[3].state,

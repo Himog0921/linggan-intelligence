@@ -210,9 +210,6 @@ pub async fn admit_media_blob(
     .fetch_optional(&mut *tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
-    let allow_ocr = processing_policy
-        .as_ref()
-        .is_none_or(|row| row.get::<bool, _>("allow_ocr"));
     let allow_asr = processing_policy
         .as_ref()
         .is_none_or(|row| row.get::<bool, _>("allow_asr"));
@@ -223,7 +220,6 @@ pub async fn admit_media_blob(
         processors_for_mime(mime_type)
     };
     for processor_kind in processors.iter().copied().filter(|kind| match *kind {
-        "video_frame_ocr" => allow_ocr,
         "asr" => allow_asr,
         _ => true,
     }) {
@@ -1304,7 +1300,7 @@ fn processors_for_mime(mime_type: &str) -> &'static [&'static str] {
     if mime_type.starts_with("image/") {
         &["thumbnail"]
     } else if mime_type.starts_with("video/") {
-        &["thumbnail", "audio_extract", "asr", "video_frame_ocr"]
+        &["thumbnail", "audio_extract", "asr"]
     } else {
         &[]
     }

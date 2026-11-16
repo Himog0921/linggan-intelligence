@@ -79,7 +79,7 @@ L1 仍只覆盖通过 L0 领域和材料质量筛选的作品，热度不是默�
 
 两项内容均为 `null`、空串或空白占位时拒绝；即使另一项有内容，也不能用空白字符串代替 `null`。图片分支禁止 `start/end/quote/bbox/exact/verified`。合法人物枚举只证明格式合法，不证明归属正确。
 
-`sourceSnapshot.includedKinds` 允许 `title/body/tags/ocr/transcript/frame_text/image`。`image` 表示实际使用图片；它不是新的识读方法种类。保留枚举中的 `ocr` 不授权恢复本地图片 OCR，亦不依赖已删除的历史图片 OCR；已有视频 ASR 与视频抽帧 OCR 仍保留。
+`sourceSnapshot.includedKinds` 允许 `title/body/tags/ocr/transcript/frame_text/image`。`frame_text` 自 2026-11-16 起不再产生（[DEC-0013](../decisions/0013-retire-video-frame-text.md)），只为读取旧卡片保留。`image` 表示实际使用图片；它不是新的识读方法种类。保留枚举中的 `ocr` 不授权恢复本地图片 OCR，亦不依赖已删除的历史图片 OCR；已有视频 ASR 与视频抽帧 OCR 仍保留。
 
 图片关键事实、方法、数字、条件可以进入同一 Core，并关联图片证据；仅在图片说明中记录、Core 中遗漏，不满足底稿与卡片共同复用目标。原文和已有完整读本保留，不以摘要替换。不新增“机器读图”“未经人工核对”等前台泛化标签，不增加内容旁的原件入口；实质缺失、错误或不清仍须如实处理，后台真实来源与核验状态不因此省略或改写。
 

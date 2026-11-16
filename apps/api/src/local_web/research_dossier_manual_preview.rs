@@ -57,7 +57,7 @@ async fn dossier_reading_manual_preview() {
         );
     }
     // Replay represents saved completed results; it does not run the queued jobs.
-    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) SELECT gen_random_uuid(),j.job_ref,'succeeded','offline_saved_result_replay' FROM linggan_media_processing_job j JOIN linggan_material_unit u ON u.slot_key=j.slot_key AND u.current_reading_ref IS NOT NULL AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' WHEN 'video_frame_ocr' THEN 'video_frame' ELSE '' END").execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) SELECT gen_random_uuid(),j.job_ref,'succeeded','offline_saved_result_replay' FROM linggan_media_processing_job j JOIN linggan_material_unit u ON u.slot_key=j.slot_key AND u.current_reading_ref IS NOT NULL AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' ELSE '' END").execute(db.pool()).await.unwrap();
     let before = counts(&db).await;
     let port = std::env::var("DOSSIER_PREVIEW_PORT")
         .ok()

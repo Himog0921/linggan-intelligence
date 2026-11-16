@@ -79,7 +79,6 @@ export const FRAGMENT_SOURCE_LABELS: Readonly<Record<string, string>> = {
   comment_body: '评论',
   ocr_text: '图片文字',
   image_substantive_text: '图片实质文字',
-  frame_ocr_text: '视频画面文字',
   asr_text: '视频转录',
 };
 

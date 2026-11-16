@@ -215,9 +215,6 @@ fn coverage_limitations(
         {
             reasons.insert("material_reading_uncertain".into());
         }
-        if kind == "video_frame" && state != "not_applicable" {
-            reasons.insert("video_sampling_incomplete".into());
-        }
     }
     reasons.into_iter().collect()
 }
@@ -389,7 +386,7 @@ mod tests {
         let reasons = coverage_limitations(
             &c,
             &[
-                json!({"kind":"video_frame","sourceState":"present","currentRevisionRef":"reading","blocks":[{"kind":"gap"}],"issues":[]}),
+                json!({"kind":"audio","sourceState":"present","currentRevisionRef":"reading","blocks":[{"kind":"gap"}],"issues":[]}),
             ],
         );
         for reason in [
@@ -397,7 +394,6 @@ mod tests {
             "image_order_unknown",
             "some_media_not_readable",
             "material_reading_uncertain",
-            "video_sampling_incomplete",
         ] {
             assert!(reasons.contains(&reason.into()), "{reason}");
         }

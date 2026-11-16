@@ -9,7 +9,7 @@ pub fn context_sources(dossier: &ResearchDossier) -> Vec<Value> {
             "readingRef":f.reading_ref,"unitRef":f.unit_ref,"asOf":dossier.as_of,
             "verification":material.map(|m|m["reading"]["verification"].clone()),
             "contentType":f.structure.get("contentType"),"regionRef":f.structure.get("regionRef"),"regionLabel":f.structure.get("regionLabel"),
-            "kind":if f.structure["contentType"]=="visual_description" {"image_visual_description"} else {match f.field.as_str(){"title"=>"native_title","ocr"=>"image_substantive_text","transcript"=>"asr_text","frame_text"=>"frame_ocr_text",other=>other}},
+            "kind":if f.structure["contentType"]=="visual_description" {"image_visual_description"} else {match f.field.as_str(){"title"=>"native_title","ocr"=>"image_substantive_text","transcript"=>"asr_text",other=>other}},
             "text":f.text,"characterCount":f.text.chars().count(),"speaker":f.speaker,"structure":f.structure,"issues":f.issues,
             "slotOrdinal":material.map(|m|m["page"].clone()),"sourceLocation":material.map(|m|json!({"unitRef":m["ref"],"readingRef":m["currentRevisionRef"],"slotKey":m["slotKey"],"page":m["page"],"bbox":f.structure.get("bbox"),"time":f.structure.get("time")})),
             "contentHash":hash(&f.text)})
@@ -83,7 +83,6 @@ fn field_label(field: &str) -> &str {
         "ocr" => "图片文字",
         "cover_headline" => "图片标题",
         "transcript" => "音频转写",
-        "frame_text" => "视频帧文字",
         other => other,
     }
 }
@@ -342,7 +341,6 @@ mod tests {
             json!({"ref":"image2","kind":"image","page":2,"blocks":[paragraph("image2", "unconfirmed")]}),
             json!({"ref":"audio1","kind":"audio","blocks":audio}),
             json!({"ref":"audio2","kind":"audio","blocks":[paragraph("other-audio1", "unconfirmed"),paragraph("other-audio2", "unconfirmed")]}),
-            json!({"ref":"frames","kind":"video_frame","blocks":[paragraph("frame", "unconfirmed")]}),
         ];
         super::super::reading::rebuild(&mut d);
         let before = serde_json::to_value(&d).unwrap();

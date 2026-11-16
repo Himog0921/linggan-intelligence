@@ -66,7 +66,7 @@ fn dossier_excerpt(
 ) -> Option<MaterialEvidenceFragment> {
     // Prefer the author's body, then speech, then image text. All candidates come
     // from the same current reading references, never a stale derived-text row.
-    for kind in ["body", "audio", "image", "video_frame"] {
+    for kind in ["body", "audio", "image"] {
         for unit in dossier
             .materials
             .iter()
@@ -86,7 +86,6 @@ fn dossier_excerpt(
                     match kind {
                         "body" => "detail_body",
                         "audio" => "asr_text",
-                        "video_frame" => "frame_ocr_text",
                         _ => "image_substantive_text",
                     },
                     if query.is_some() {

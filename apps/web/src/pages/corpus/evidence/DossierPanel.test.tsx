@@ -17,7 +17,7 @@ beforeEach(() => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function mount(active = true) { return renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active={active} />); }
 const source = (state: string, units = 0, readings = 0) => ({ state, units, readings });
-const completeCoverage = { imageInventory: { basis: 'platform_image_list', expectedPages: 0, acquiredPages: 0, processedPages: 0, missingPages: [], unknownOrder: false }, sources: { body: source('known_empty'), images: source('not_applicable'), audio: source('available', 1, 1), videoFrames: source('not_applicable') }, issues: [] };
+const completeCoverage = { imageInventory: { basis: 'platform_image_list', expectedPages: 0, acquiredPages: 0, processedPages: 0, missingPages: [], unknownOrder: false }, sources: { body: source('known_empty'), images: source('not_applicable'), audio: source('available', 1, 1) }, issues: [] };
 
 it.each([401,403,404,410])('刷新得到 %i 后撤下旧内容与导出入口', async status => {
   kit.route('GET', path, ok(dossierJson(1, { bodyText: '已有缓存但随后失去权限的正文' })), fail(status, 'source_restricted'));
@@ -77,7 +77,7 @@ it('已确认缺页保留在数据，正文连续展示已有文字且不插入�
   expect(screen.getByText('缺页之后')).toBeVisible();
 });
 it('仅待处理样本保留真实缺失状态，不造口播、目录或原图入口', async () => {
-  kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null })], coverage: { ...completeCoverage, imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 1, processedPages: 0, missingPages: [], unknownOrder: true }, sources: { body: source('known_empty'), images: source('not_processed', 1), audio: source('not_applicable'), videoFrames: source('not_applicable') } } })));
+  kit.route('GET', path, ok(dossierJson(1, { materials: [dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null })], coverage: { ...completeCoverage, imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 1, processedPages: 0, missingPages: [], unknownOrder: true }, sources: { body: source('known_empty'), images: source('not_processed', 1), audio: source('not_applicable') } } })));
   const view = mount();
   await screen.findByText('待识读');
   expect(screen.queryByText(/图片原始顺序未确认|原作总页数未知/)).not.toBeInTheDocument();

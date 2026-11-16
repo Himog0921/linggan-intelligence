@@ -70,8 +70,7 @@ fn check(materials: &[Value], slots: &[Value], expected: Option<u64>) -> Materia
         state: MaterialState::Ready,
         kind,
         gaps: vec![],
-        scope_note: (kind == NoteKind::Video)
-            .then(|| "本次依据口播与已提取的画面文字，未覆盖整段视频的全部画面。".into()),
+        scope_note: (kind == NoteKind::Video).then(|| "本次依据口播，不包含视频画面内容。".into()),
     };
     if !materials.iter().any(|m| {
         m["kind"] == "body"
@@ -120,7 +119,7 @@ fn check(materials: &[Value], slots: &[Value], expected: Option<u64>) -> Materia
         }
         let mut prepared = true;
         let mut readable = false;
-        for (kind, name) in [("audio", "口播"), ("video_frame", "画面文字")] {
+        for (kind, name) in [("audio", "口播")] {
             let material = materials
                 .iter()
                 .find(|m| m["kind"] == kind && m["slotKey"] == video["slotKey"]);
@@ -163,7 +162,7 @@ fn check(materials: &[Value], slots: &[Value], expected: Option<u64>) -> Materia
             );
         }
         if prepared && !readable {
-            result.gap("video_content_unavailable", MaterialState::Blocked, "视频材料已处理，但当前没有可用的口播或画面文字；现有能力不能据此理解无字幕的动作画面。", video["slotKey"].as_str());
+            result.gap("video_content_unavailable", MaterialState::Blocked, "视频材料已处理，但当前没有可用的口播；画面文字已下线，现有能力不能理解无口播的视频。", video["slotKey"].as_str());
         }
     }
     result
@@ -312,59 +311,52 @@ mod tests {
         assert!(check(&[body()], &[still, motion], Some(1)).can_start());
     }
     #[test]
-    fn video_requires_both_applicable_readings_and_reports_pending_or_failure() {
-        let audio = reading("audio");
-        let mut frames = reading("video_frame");
-        frames["currentRevisionRef"] = Value::Null;
-        frames["processing"] = json!({"state":"running"});
+    fn video_requires_its_speech_reading_and_reports_pending_or_failure() {
+        let mut audio = reading("audio");
+        audio["currentRevisionRef"] = Value::Null;
+        audio["processing"] = json!({"state":"running"});
         assert_eq!(
-            check(&[body(), audio.clone(), frames.clone()], &[video()], None).state,
+            check(&[body(), audio.clone()], &[video()], None).state,
             MaterialState::Preparing
         );
-        frames["processing"] = json!({"state":"failed"});
+        audio["processing"] = json!({"state":"failed"});
         assert_eq!(
-            check(&[body(), audio, frames], &[video()], None).state,
+            check(&[body(), audio], &[video()], None).state,
             MaterialState::Blocked
         );
     }
     #[test]
-    fn no_audio_no_speech_and_no_frame_text_are_valid_outcomes_not_failures() {
+    fn video_with_speech_starts_and_states_its_scope() {
+        let result = check(&[body(), reading("audio")], &[video()], None);
+        assert!(result.can_start());
+        assert!(result.scope_note.unwrap().contains("不包含视频画面"));
+    }
+    #[test]
+    fn no_audio_or_no_speech_is_settled_but_leaves_the_video_unreadable() {
         for state in ["not_applicable", "known_empty"] {
             let mut audio = reading("audio");
             audio["sourceState"] = json!(state);
             audio["blocks"] = json!([]);
-            let result = check(&[body(), audio, reading("video_frame")], &[video()], None);
-            assert!(result.can_start());
-            assert!(result.scope_note.unwrap().contains("未覆盖"));
+            let result = check(&[body(), audio], &[video()], None);
+            assert_eq!(result.gaps[0].code, "video_content_unavailable");
+            assert_eq!(result.gaps.len(), 1, "processing itself did not fail");
         }
-        let mut frames = reading("video_frame");
-        frames["blocks"] = json!([{"kind":"gap","text":"未检出文字"}]);
-        assert!(check(&[body(), reading("audio"), frames], &[video()], None).can_start());
     }
     #[test]
     fn empty_video_processing_does_not_grant_visual_understanding_from_its_caption() {
         let mut audio = reading("audio");
         audio["sourceState"] = json!("known_empty");
         audio["blocks"] = json!([]);
-        let mut frames = reading("video_frame");
-        frames["blocks"] = json!([{"kind":"gap","text":"未检出文字"}]);
-        let result = check(&[body(), audio, frames], &[video()], None);
+        let result = check(&[body(), audio], &[video()], None);
         assert_eq!(result.gaps[0].code, "video_content_unavailable");
     }
     #[test]
     fn failed_retry_keeps_valid_current_readings_and_no_cover_is_required_for_video() {
         let mut audio = reading("audio");
         audio["processing"] = json!({"state":"failed"});
-        assert!(check(&[body(), audio, reading("video_frame")], &[video()], None).can_start());
+        assert!(check(&[body(), audio], &[video()], None).can_start());
         let mut restricted = video();
         restricted["sourceState"] = json!("restricted");
-        assert!(
-            !check(
-                &[body(), reading("audio"), reading("video_frame")],
-                &[restricted],
-                None
-            )
-            .can_start()
-        );
+        assert!(!check(&[body(), reading("audio")], &[restricted], None).can_start());
     }
 }

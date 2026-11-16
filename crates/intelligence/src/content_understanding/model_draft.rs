@@ -82,11 +82,10 @@ fn verify_literal_support(
                         _ => continue,
                     };
                     let context = statement[..offset].trim_end();
-                    let required_kind = if context.ends_with("画面") {
-                        Some("frame_text")
-                    } else if context.ends_with("口播") {
+                    // Video frame text is no longer material, so on-screen quotes are image reads.
+                    let required_kind = if context.ends_with("口播") {
                         Some("transcript")
-                    } else if context.ends_with("图片") {
+                    } else if context.ends_with("图片") || context.ends_with("画面") {
                         Some("image")
                     } else {
                         None
@@ -115,11 +114,7 @@ fn verify_literal_support(
                     entry["modelQuote"]
                         .as_str()
                         .is_some_and(|quote| quote.contains(literal))
-                }) && (required_kind == Some("image")
-                    || required_kind.is_none()
-                        && !snapshot.texts.iter().any(|source| {
-                            source.kind == "frame_text" && source.text.contains(literal)
-                        }));
+                }) && required_kind.is_none_or(|kind| kind == "image");
                 if !image_read {
                     return Err("unsupported_literal");
                 }

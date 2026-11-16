@@ -55,11 +55,11 @@ it('同一个 blocks 组内及对话之后也重置表达归属', () => {
   expect(screen.getByText('对话后的作者正文')).toBeVisible();
 });
 it.each([['running', '处理中'], ['failed', '处理失败'], ['cancelled', '已取消'], ['invalidated', '已失效']] as const)('无读本的 %s 保留真实执行状态', (state, expected) => {
-  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', blocks: [], reading: null, currentRevisionRef: null, processing: { state, reason: null } })], coverage: { sources: { body: { state: 'known_empty', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'not_processed', units: 1, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })).dossier;
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', blocks: [], reading: null, currentRevisionRef: null, processing: { state, reason: null } })], coverage: { sources: { body: { state: 'known_empty', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'not_processed', units: 1, readings: 0 } } } })).dossier;
   expect(readingGaps(dossier).find(row => row.key === 'audio')?.state).toBe(expected);
 });
 it('known_empty 的有效空读本在再次处理失败时继续有效，不误说无读本', () => {
-  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', sourceState: 'known_empty', blocks: [], processing: { state: 'failed', reason: 'retry_failed' } })], coverage: { sources: { body: { state: 'known_empty', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'known_empty', units: 1, readings: 1 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })).dossier;
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', sourceState: 'known_empty', blocks: [], processing: { state: 'failed', reason: 'retry_failed' } })], coverage: { sources: { body: { state: 'known_empty', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'known_empty', units: 1, readings: 1 } } } })).dossier;
   expect(readingGaps(dossier).some(row => row.key.includes('audio'))).toBe(false);
   expect(dossier.materials[0]?.processing?.state).toBe('failed');
 });
@@ -76,7 +76,7 @@ it('后续空识别状态不否定保留的可用口播', () => {
 it('人工确认无口播的空读本不成为待补项', () => {
   const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'audio', sourceState: 'present', blocks: [],
     reading: { generatedBy: 'human_edit', adoption: 'human_edited', verification: 'verified', ruleVersion: 'human.v1', review: null },
-    processing: { state: 'completed', reason: null } })], coverage: { sources: { body: { state: 'not_applicable', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'available', units: 1, readings: 1 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })).dossier;
+    processing: { state: 'completed', reason: null } })], coverage: { sources: { body: { state: 'not_applicable', units: 0, readings: 0 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'available', units: 1, readings: 1 } } } })).dossier;
   expect(readingGaps(dossier).some(row => row.key === 'audio')).toBe(false);
 });
 

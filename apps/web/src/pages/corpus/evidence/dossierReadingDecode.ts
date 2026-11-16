@@ -3,10 +3,10 @@ import { choice, strings } from './dossierBlockDecode';
 import { normalizedTagLabel, pureTagLabels } from './dossierTagText';
 import type { DossierMaterial, ReadingGroup, ReadingSection, ReadingSectionKind } from './dossierTypes';
 
-const SECTION_KINDS = ['publication', 'images', 'audio', 'frames'] as const;
+const SECTION_KINDS = ['publication', 'images', 'audio'] as const;
 const MODES = ['blocks', 'heading', 'paragraph', 'transcript_paragraph', 'list', 'table', 'tags'] as const;
 const KIND_SECTION: Record<DossierMaterial['kind'], ReadingSectionKind> = {
-  body: 'publication', tags: 'publication', image: 'images', audio: 'audio', video_frame: 'frames',
+  body: 'publication', tags: 'publication', image: 'images', audio: 'audio',
 };
 /** No client-side fallback or regrouping: the server's complete ordered reference plan is required. */
 export function parseReadingSections(reading: Json, materials: readonly DossierMaterial[], mainRefs: readonly string[], supplementRefs: readonly string[]): ReadingSection[] {

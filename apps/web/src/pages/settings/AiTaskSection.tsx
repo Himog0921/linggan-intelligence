@@ -59,7 +59,7 @@ export function LimitsFields({ limits, max, levels, singleAttempt = false }: { l
     <p><small>输入与输出之和必须在已声明的上下文容量内；保存时由服务端核对。</small></p>
   </>;
 }
-const COLUMNS: Record<string, string> = { title: '标题', body: '正文', tags: '标签', ocr: '图片文字', transcript: '音频转录', frame_text: '视频画面文字' };
+const COLUMNS: Record<string, string> = { title: '标题', body: '正文', tags: '标签', ocr: '图片文字', transcript: '音频转录' };
 export function AiTaskForm({ data, task, action }: { data: AiSettings; task: Task; action: AiAction }) {
   const current = task.configuration;
   const [identity, setIdentity] = useState(current.model?.identityRef ?? '');

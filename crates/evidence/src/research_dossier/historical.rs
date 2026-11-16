@@ -89,7 +89,7 @@ LEFT JOIN LATERAL (
  AND j.created_at<=$2::timestamptz AND w.reading_source_version IS NULL AND e.state='succeeded'
  AND NOT EXISTS(SELECT 1 FROM linggan_media_ocr_retirement r WHERE r.retired_job_ref=j.job_ref)
  AND NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition x WHERE x.state='WITHDRAWN_OR_RESTRICTED' AND x.derivative_ref=d.derivative_ref)
- AND (t.derivative_ref IS NOT NULL OR e.reason IN ('no_audio_stream_observed','no_speech_observed','no_frame_text_observed'))
+ AND (t.derivative_ref IS NOT NULL OR e.reason IN ('no_audio_stream_observed','no_speech_observed'))
  ORDER BY j.created_at DESC,j.job_ref DESC,d.created_at DESC,d.derivative_ref DESC LIMIT 1
 ) result ON true
 WHERE k.kind='audio' OR m.mime_type LIKE 'video/%'

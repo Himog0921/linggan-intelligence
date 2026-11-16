@@ -20,7 +20,7 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
     let video_text = dossier
         .materials
         .iter()
-        .any(|m| matches!(m["kind"].as_str(), Some("audio" | "video_frame")) && readable(m));
+        .any(|m| m["kind"] == "audio" && readable(m));
     let mut main = vec![];
     let mut supplement = vec![];
     for material in &dossier.materials {
@@ -30,11 +30,6 @@ pub(super) fn rebuild(dossier: &mut ResearchDossier) {
             match material["kind"].as_str() {
                 Some("image") => material["purpose"] != "cover" || !video_text,
                 Some("audio") => true,
-                Some("video_frame") => !dossier.materials.iter().any(|other| {
-                    other["kind"] == "audio"
-                        && other["slotKey"] == material["slotKey"]
-                        && readable(other)
-                }),
                 _ => false,
             }
         };
@@ -275,8 +270,7 @@ mod tests {
         );
         if video {
             materials.extend([
-            json!({"ref":"audio","kind":"audio","slotKey":"video","blocks":[{"ref":"a","kind":"paragraph","text":"口播","time":{"startMs":0,"endMs":2000}}]}),
-            json!({"ref":"frame","kind":"video_frame","slotKey":"video","blocks":[{"ref":"v","kind":"paragraph","text":"画面","time":{"startMs":1000,"endMs":1000}}]})]);
+            json!({"ref":"audio","kind":"audio","slotKey":"video","blocks":[{"ref":"a","kind":"paragraph","text":"口播","time":{"startMs":0,"endMs":2000}}]})]);
         }
         ResearchDossier {
             contract: VERSION,
@@ -390,14 +384,12 @@ mod tests {
         d.materials[1]["processing"] = json!({"state":"terminal","reason":"asr_failed"});
         rebuild(&mut d);
         assert!(d.note["displayTitle"].is_null());
-        assert_eq!(d.reading_view["mainBlockRefs"], json!(["h1", "p1", "v"]));
+        assert_eq!(d.reading_view["mainBlockRefs"], json!(["h1", "p1"]));
         d.materials[0]["purpose"] = json!("cover");
         d.materials[0]["blocks"][0]["kind"] = json!("paragraph");
         rebuild(&mut d);
         assert_eq!(d.note["displayTitleBasis"], "missing");
-        assert_eq!(d.reading_view["mainBlockRefs"], json!(["v"]));
-        d.materials[2]["blocks"] = json!([]);
-        rebuild(&mut d);
+        // Without readable speech the cover is the only text, so it stays primary.
         assert_eq!(d.reading_view["mainBlockRefs"], json!(["h1", "p1"]));
     }
 

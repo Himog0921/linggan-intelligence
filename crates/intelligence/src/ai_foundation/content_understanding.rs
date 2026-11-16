@@ -82,7 +82,7 @@ async fn reasons(
             .snapshot
             .texts
             .iter()
-            .any(|t| ["body", "transcript", "frame_text"].contains(&t.kind.as_str()))
+            .any(|t| ["body", "transcript"].contains(&t.kind.as_str()))
     {
         reasons.push("no_readable_material".into());
     }

@@ -23,7 +23,6 @@ pub async fn seed(db: &Database) -> Uuid {
                 data["images"][usize::try_from(page - 1).unwrap()].clone()
             }
             "audio" => data["audio"].clone(),
-            "video_frame" => data["frames"].clone(),
             _ => continue,
         };
         let slot = unit["slotKey"].as_str().unwrap();
@@ -42,7 +41,6 @@ pub async fn seed(db: &Database) -> Uuid {
                 producer_ref: Some(Uuid::new_v4()),
                 generated_by: match kind {
                     "audio" => "asr",
-                    "video_frame" => "frame_ocr",
                     _ => "cloud_vision",
                 }
                 .into(),

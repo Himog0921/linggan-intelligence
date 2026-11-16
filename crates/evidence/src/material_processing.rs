@@ -318,7 +318,7 @@ async fn claim_media_processing_work_scoped(
         "UPDATE linggan_media_processing_work SET state='leased', \
            attempt_count=attempt_count+1,claim_generation=claim_generation+1, \
            worker_instance_ref=$2,lease_expires_at=scope_001_now()+$3::interval,reading_source_version=$4, \
-           reading_base_ref=(SELECT u.current_reading_ref FROM linggan_material_unit u JOIN linggan_media_processing_job j ON j.slot_key=u.slot_key WHERE j.job_ref=$5 AND u.content_public_ref=$6 AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' WHEN 'video_frame_ocr' THEN 'video_frame' ELSE '' END), \
+           reading_base_ref=(SELECT u.current_reading_ref FROM linggan_material_unit u JOIN linggan_media_processing_job j ON j.slot_key=u.slot_key WHERE j.job_ref=$5 AND u.content_public_ref=$6 AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' ELSE '' END), \
            updated_at=scope_001_now() WHERE work_ref=$1 \
          RETURNING claim_generation,lease_expires_at::text AS lease_expires_at",
     )
@@ -571,10 +571,7 @@ pub async fn complete_media_processing_without_output(
     .execute(&mut *tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
-    if matches!(
-        claim.processor_kind.as_str(),
-        "image_ocr" | "asr" | "video_frame_ocr"
-    ) {
+    if matches!(claim.processor_kind.as_str(), "image_ocr" | "asr") {
         let no_audio = reason == "no_audio_stream_observed" && claim.processor_kind == "asr";
         // Empty recognition is status, never invented source text. ASR silence is
         // distinct from no audio; failures use the existing failed-work path.
@@ -750,8 +747,7 @@ pub async fn record_media_derivative_completion(
 ///
 /// 单独列出来是给两个调用方校验名字用的：摄取路径不该生出一个没有版本的处理器，
 /// 重排工具的命令行也不该把名字打错读成「这一类没有旧作业」。
-pub const REGISTERED_PROCESSOR_KINDS: [&str; 4] =
-    ["thumbnail", "audio_extract", "asr", "video_frame_ocr"];
+pub const REGISTERED_PROCESSOR_KINDS: [&str; 3] = ["thumbnail", "audio_extract", "asr"];
 
 /// 这个处理器当前的版本号。**改了处理器的行为，就必须同时抬它的版本号。**
 ///
@@ -769,8 +765,8 @@ pub const REGISTERED_PROCESSOR_KINDS: [&str; 4] =
 pub fn processor_version_for_kind(processor_kind: &str) -> Option<&'static str> {
     match processor_kind {
         // PP-OCRv4 固定使用 2 倍输入和 0.5 检测阈值；v5 是处理器配方版本，
-        // 不是换用 PP-OCRv5。图片与视频帧共用同一入口，旧结果仍保留原版本。
-        "image_ocr" | "video_frame_ocr" => Some("local-v5"),
+        // 不是换用 PP-OCRv5。视频画面文字已于 2026-11-16 下线，历史作业保留原版本。
+        "image_ocr" => Some("local-v5"),
         // 2026-09-17：whisper 换 medium 并加简体提示、修掉交给 whisper 子进程的 PATH（缺 ffmpeg）。
         "asr" => Some("local-v3"),
         // 行为没变的两类留在 `local-v1`：它们没有需要重做的存量，存量重排也不该碰它们。
@@ -875,104 +871,4 @@ pub async fn requeue_outdated_processor_jobs(
         });
     }
     Ok(summaries)
-}
-
-pub async fn enqueue_missing_video_frame_jobs(
-    database: &Database,
-    work_refs: &[Uuid],
-    dry_run: bool,
-) -> Result<ProcessorRequeueSummary, sqlx::Error> {
-    if work_refs.is_empty() {
-        return Err(sqlx::Error::Protocol("work_scope_required".into()));
-    }
-    let mut works = work_refs.to_vec();
-    works.sort_unstable();
-    works.dedup();
-    let mut tx = database.pool().begin().await?;
-    for work in &works {
-        sqlx::query("SELECT pg_advisory_xact_lock(420,hashtext($1::uuid::text))")
-            .bind(work)
-            .execute(&mut *tx)
-            .await?;
-    }
-    let cutoff = crate::research_dossier::cutoff_in(&mut tx, None).await?;
-    let dossiers = crate::research_dossier::read_in(&mut tx, &works, &cutoff).await?;
-    if dossiers.len() != works.len() {
-        return Err(sqlx::Error::RowNotFound);
-    }
-    let version = processor_version_for_kind("video_frame_ocr")
-        .expect("video_frame_ocr is a registered processor");
-    let mut enqueued_jobs = 0;
-    for dossier in dossiers.values() {
-        for slot in &dossier.media_inventory {
-            if slot["purpose"] != "video"
-                || slot["component"] != "motion"
-                || slot["sourceState"] != "present"
-                || slot["localReadable"] != true
-            {
-                continue;
-            }
-            if dossier.materials.iter().any(|m| {
-                m["kind"] == "video_frame"
-                    && m["slotKey"] == slot["slotKey"]
-                    && m["currentRevisionRef"].is_string()
-                    && matches!(
-                        m["sourceState"].as_str(),
-                        Some("present" | "known_empty" | "not_applicable")
-                    )
-            }) {
-                continue;
-            }
-            let field = |name| {
-                slot[name]
-                    .as_str()
-                    .ok_or_else(|| sqlx::Error::Protocol("video_source_invalid".into()))
-            };
-            let slot_key = field("slotKey")?;
-            let sha = field("blobSha256")?;
-            let observation: Uuid = field("observationRef")?
-                .parse()
-                .map_err(|_| sqlx::Error::Protocol("video_source_invalid".into()))?;
-            let source: Uuid = field("sourceRef")?
-                .parse()
-                .map_err(|_| sqlx::Error::Protocol("video_source_invalid".into()))?;
-            let allowed: bool = sqlx::query_scalar(
-                "SELECT COALESCE((SELECT target.allow_ocr \
-                 FROM linggan_material_media_origin origin \
-                 JOIN linggan_runtime_capture_package package USING(package_ref) \
-                 JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
-                 JOIN collection_work_order_lease lease USING(lease_ref) \
-                 JOIN collection_work_order_material_target target ON target.work_order_ref=lease.work_order_ref \
-                   AND target.content_public_ref=origin.content_public_ref \
-                 WHERE origin.observation_ref=$1 ORDER BY target.created_at DESC LIMIT 1),true) \
-                 AND NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition disposition \
-                 WHERE disposition.slot_key=$2 OR disposition.blob_sha256=$3 OR disposition.materialization_ref=$4)",
-            ).bind(observation).bind(slot_key).bind(sha).bind(source).fetch_one(&mut *tx).await?;
-            if !allowed {
-                continue;
-            }
-            enqueued_jobs += sqlx::query(
-                "WITH enqueued AS (INSERT INTO linggan_media_processing_job \
-                 (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) \
-                 SELECT gen_random_uuid(),$1,$2,'video_frame_ocr',$3,'full_blob' \
-                 WHERE NOT EXISTS(SELECT 1 FROM linggan_media_processing_job job \
-                   WHERE job.blob_sha256=$1 AND job.slot_key=$2 \
-                     AND job.processor_kind='video_frame_ocr' AND job.input_scope='full_blob') \
-                 ON CONFLICT(blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING \
-                 RETURNING job_ref) \
-                 INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) \
-                 SELECT gen_random_uuid(),job_ref,'pending','queued_for_missing_video_frames' FROM enqueued",
-            ).bind(sha).bind(slot_key).bind(version).execute(&mut *tx).await?.rows_affected() as i64;
-        }
-    }
-    if dry_run {
-        tx.rollback().await?;
-    } else {
-        tx.commit().await?;
-    }
-    Ok(ProcessorRequeueSummary {
-        processor_kind: "video_frame_ocr".into(),
-        target_version: version.into(),
-        enqueued_jobs,
-    })
 }

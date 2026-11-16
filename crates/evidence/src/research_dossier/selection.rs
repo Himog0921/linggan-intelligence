@@ -18,10 +18,7 @@ pub struct Selection {
 
 pub fn select(dossier: &mut ResearchDossier, selection: &Selection) -> Result<(), String> {
     for kind in &selection.kinds {
-        if !matches!(
-            kind.as_str(),
-            "body" | "tags" | "image" | "audio" | "video_frame"
-        ) {
+        if !matches!(kind.as_str(), "body" | "tags" | "image" | "audio") {
             return Err("invalid_material_kind".into());
         }
     }

@@ -10,7 +10,6 @@ use linggan_evidence::{
     ensure_media_processing_work, fail_media_processing_work, next_readiness_retry,
     read_claim_gate_readiness,
 };
-use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -21,8 +20,8 @@ mod media_worker_support;
 
 use media_worker_support::{
     apply_ffmpeg_path, command_available, emit_startup_event, ensure_local_input, ffmpeg_command,
-    first_json_file, local_media_root, paddle_ocr_python, paddle_ocr_script, prepare_output,
-    require_success, run_command, sha256_hex, whisper_command, whisper_model,
+    first_json_file, local_media_root, prepare_output, require_success, run_command, sha256_hex,
+    whisper_command, whisper_model,
 };
 
 const TICK_INTERVAL: Duration = Duration::from_secs(5);
@@ -55,29 +54,6 @@ const ASR_PROCESS_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 ///
 /// 提示本身不进入结果，只是解码的起点。
 const ASR_INITIAL_PROMPT: &str = "以下是普通话的句子。";
-
-/// Wire contract of the local Python bridge.  `bbox_norm` means the worker never has to infer
-/// image resolution from a line or recover coordinates from unstructured OCR text.
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PaddleOcrOutput {
-    schema_version: u8,
-    ok: bool,
-    engine: Option<String>,
-    engine_version: Option<String>,
-    image_width: Option<i32>,
-    image_height: Option<i32>,
-    lines: Option<Vec<PaddleOcrLine>>,
-    error: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PaddleOcrLine {
-    text: String,
-    confidence: f64,
-    bbox_norm: [f64; 4],
-}
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -301,7 +277,6 @@ async fn connect_when_reachable(url: &str) -> linggan_storage_postgres::Database
 
 fn enabled_processors() -> Vec<String> {
     let mut processors = Vec::new();
-    let paddle_ocr = command_available(&paddle_ocr_python()) && paddle_ocr_script().is_file();
     let ffmpeg = command_available(&ffmpeg_command());
     let whisper = command_available(&whisper_command());
     if ffmpeg {
@@ -310,9 +285,6 @@ fn enabled_processors() -> Vec<String> {
     }
     if ffmpeg && whisper {
         processors.push("asr".to_owned());
-    }
-    if ffmpeg && paddle_ocr {
-        processors.push("video_frame_ocr".to_owned());
     }
     processors
 }
@@ -326,94 +298,8 @@ async fn execute_claim(
         "thumbnail" => execute_thumbnail(database, worker_instance_ref, claim).await,
         "audio_extract" => execute_audio_extract(database, worker_instance_ref, claim).await,
         "asr" => execute_asr(database, worker_instance_ref, claim).await,
-        "video_frame_ocr" => execute_video_frame_ocr(database, worker_instance_ref, claim).await,
         other => Err(format!("processor_not_enabled:{other}")),
     }
-}
-
-/// PaddleOCR uses the filename suffix to decide whether an input is an image.  Linggan stores
-/// blobs under their content hash, deliberately without a filename extension, so pass Paddle a
-/// short-lived local link/copy whose suffix is derived from the admitted MIME fact.  The original
-/// Blob remains the authority and is never renamed or rewritten.
-async fn run_paddle_ocr(input: &Path, mime_type: &str) -> Result<PaddleOcrOutput, String> {
-    let extension = paddle_image_extension(mime_type)
-        .ok_or_else(|| format!("paddle_ocr_unsupported_mime:{mime_type}"))?;
-    let staged_input = stage_paddle_input(input, extension)?;
-    let result = run_paddle_ocr_staged(&staged_input).await;
-    // A staging file is an execution scratch artifact, not a media materialization.  It must not
-    // survive the attempt (whether Paddle accepts, rejects, or times out on the input).
-    let _ = std::fs::remove_file(&staged_input);
-    result
-}
-
-fn stage_paddle_input(input: &Path, extension: &str) -> Result<std::path::PathBuf, String> {
-    let staged_input =
-        std::env::temp_dir().join(format!("linggan-paddle-{}.{}", Uuid::new_v4(), extension));
-    stage_paddle_input_at(input, &staged_input)?;
-    Ok(staged_input)
-}
-
-fn stage_paddle_input_at(input: &Path, staged_input: &Path) -> Result<(), String> {
-    if let Err(link_error) = std::fs::hard_link(input, &staged_input) {
-        if let Err(copy_error) = std::fs::copy(input, &staged_input) {
-            // A failed copy may have created a partial file.  Delete it before returning so a
-            // retry never leaves raw media in the system temporary directory.
-            let _ = std::fs::remove_file(staged_input);
-            return Err(format!(
-                "paddle_ocr_input_stage_failed:{link_error};{copy_error}"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn paddle_image_extension(mime_type: &str) -> Option<&'static str> {
-    match mime_type {
-        "image/bmp" | "image/x-ms-bmp" => Some("bmp"),
-        "image/jpeg" | "image/jpg" => Some("jpg"),
-        "image/png" => Some("png"),
-        "image/webp" => Some("webp"),
-        "image/tiff" => Some("tiff"),
-        "image/x-portable-bitmap" => Some("pbm"),
-        "image/x-portable-graymap" => Some("pgm"),
-        "image/x-portable-pixmap" => Some("ppm"),
-        "image/x-portable-anymap" => Some("pnm"),
-        _ => None,
-    }
-}
-
-async fn run_paddle_ocr_staged(input: &Path) -> Result<PaddleOcrOutput, String> {
-    let script = paddle_ocr_script();
-    if !script.is_file() {
-        return Err("paddle_ocr_script_missing".to_owned());
-    }
-    let mut command = Command::new(paddle_ocr_python());
-    command
-        .arg(script)
-        .arg(input)
-        .args(["--image-scale", "2", "--text-det-box-thresh", "0.5"]);
-    let output = run_command(&mut command, PROCESS_TIMEOUT).await?;
-    if !output.status.success() {
-        let detail = String::from_utf8_lossy(&output.stderr)
-            .chars()
-            .take(500)
-            .collect::<String>();
-        return Err(format!("paddle_ocr_failed:{}", detail.trim()));
-    }
-    if output.stdout.len() > 2_000_000 {
-        return Err("paddle_ocr_result_too_large".to_owned());
-    }
-    let parsed: PaddleOcrOutput = serde_json::from_slice(&output.stdout)
-        .map_err(|_| "paddle_ocr_result_invalid_json".to_owned())?;
-    if parsed.schema_version != 1 || !parsed.ok || parsed.engine.as_deref() != Some("paddleocr") {
-        return Err(format!(
-            "paddle_ocr_result_rejected:{}",
-            parsed
-                .error
-                .unwrap_or_else(|| "schema_or_engine".to_owned())
-        ));
-    }
-    Ok(parsed)
 }
 
 async fn execute_thumbnail(
@@ -554,78 +440,6 @@ async fn execute_asr(
     .await
 }
 
-async fn execute_video_frame_ocr(
-    database: &linggan_storage_postgres::Database,
-    worker_instance_ref: Uuid,
-    claim: &MediaProcessingClaim,
-) -> Result<(), String> {
-    if !claim.mime_type.starts_with("video/") {
-        return Err("video_frame_ocr_mime_mismatch".to_owned());
-    }
-    let input = local_media_root().join(&claim.storage_key);
-    ensure_local_input(&input)?;
-    let frame_dir =
-        local_media_root().join(format!("derivatives/frame-ocr/{}/frames", claim.job_ref));
-    if frame_dir.exists() {
-        std::fs::remove_dir_all(&frame_dir).map_err(|e| format!("frame_cleanup_failed:{e}"))?;
-    }
-    std::fs::create_dir_all(&frame_dir).map_err(|e| format!("frame_directory_failed:{e}"))?;
-    let pattern = frame_dir.join("frame-%09d.jpg");
-    let mut ffmpeg = Command::new(ffmpeg_command());
-    ffmpeg.args(["-y","-i"]).arg(&input)
-        .args(["-vf","select='isnan(prev_selected_t)+gte(t-prev_selected_t,10)',showinfo,scale='min(1280,iw)':-2","-vsync","vfr"])
-        .arg(&pattern);
-    let extracted = run_command(&mut ffmpeg, PROCESS_TIMEOUT).await?;
-    let timestamps = media_worker_support::timed_text::sampled_pts(&extracted.stderr)?;
-    require_success(extracted, "video_frame_extract")?;
-    let mut frames = std::fs::read_dir(&frame_dir)
-        .map_err(|e| format!("frame_read_failed:{e}"))?
-        .filter_map(Result::ok)
-        .map(|f| f.path())
-        .filter(|f| f.extension().is_some_and(|e| e == "jpg"))
-        .collect::<Vec<_>>();
-    frames.sort();
-    if frames.len() != timestamps.len() {
-        return Err("frame_timestamp_count_mismatch".into());
-    }
-    let mut blocks = vec![];
-    for (frame_index, (frame, pts)) in frames.iter().zip(&timestamps).enumerate() {
-        let output = run_paddle_ocr(frame, "image/jpeg").await?;
-        let lines:Vec<_>=output.lines.unwrap_or_default().iter().map(|l|serde_json::json!({"text":l.text,"confidence":l.confidence,
-            "bbox":[l.bbox_norm[0],l.bbox_norm[1],l.bbox_norm[2]-l.bbox_norm[0],l.bbox_norm[3]-l.bbox_norm[1]]})).collect();
-        let mut frame_blocks = linggan_evidence::research_dossier::content::ocr_blocks(&lines);
-        if frame_blocks.is_empty() {
-            frame_blocks.push(serde_json::json!({"kind":"gap","speaker":"unconfirmed","text":"〔此抽样帧未返回文字〕","issues":[{"key":"recognition_empty","code":"recognition_empty","message":"未返回文字不证明此帧没有文字","resolution":"reading_edit"}]}));
-        }
-        for block in &mut frame_blocks {
-            block["time"] = serde_json::json!({"startMs":pts,"endMs":pts});
-            if let Some(issues) = block
-                .get_mut("issues")
-                .and_then(serde_json::Value::as_array_mut)
-            {
-                for issue in issues {
-                    issue["key"] = serde_json::json!(format!(
-                        "frame_{frame_index}:{}",
-                        issue["key"].as_str().expect("OCR issue key")
-                    ));
-                }
-            }
-        }
-        blocks.extend(frame_blocks);
-    }
-    if blocks.is_empty() {
-        return Err("video_frames_not_acquired".into());
-    }
-    let text = blocks
-        .iter()
-        .map(linggan_evidence::research_dossier::content::block_text)
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    complete_text_derivative(database,worker_instance_ref,claim,"frame_ocr_text","frame-ocr",&text,Some("zh-Hans"),
-        linggan_evidence::material_reading::producers::ReadingContent {blocks,issues:vec![serde_json::json!({"key":"sampled_frames","code":"sampling_incomplete","message":"仅覆盖实际抽样帧，未逐帧检查完整视频","resolution":"source_refresh"})],source_state:"present".into(),
-            source_location:serde_json::json!({"sampledPtsMs":timestamps,"frameCount":frames.len(),"sampling":"at_least_10_seconds_between_selected_source_frames"})}).await
-}
-
 async fn has_audio_stream(input: &Path) -> Result<bool, String> {
     let command = std::env::var("LINGGAN_FFPROBE_COMMAND").unwrap_or_else(|_| {
         std::path::PathBuf::from(ffmpeg_command())
@@ -723,38 +537,4 @@ async fn complete_text_derivative(
     .await
     .map_err(|error| error.to_string())?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{paddle_image_extension, stage_paddle_input_at};
-    use uuid::Uuid;
-
-    #[test]
-    fn paddle_input_suffix_is_derived_only_from_supported_admitted_image_mime() {
-        assert_eq!(paddle_image_extension("image/webp"), Some("webp"));
-        assert_eq!(paddle_image_extension("image/jpeg"), Some("jpg"));
-        assert_eq!(paddle_image_extension("image/png"), Some("png"));
-        assert_eq!(paddle_image_extension("image/gif"), None);
-        assert_eq!(paddle_image_extension("video/mp4"), None);
-    }
-
-    #[test]
-    fn failed_paddle_input_copy_removes_a_partial_staging_file() {
-        let root = std::env::temp_dir().join(format!("linggan-paddle-test-{}", Uuid::new_v4()));
-        std::fs::create_dir_all(&root).expect("test root");
-        let source_directory = root.join("source-directory");
-        std::fs::create_dir(&source_directory).expect("source directory");
-        let staged_input = root.join("partial.webp");
-        std::fs::write(&staged_input, b"partial").expect("partial staging file");
-
-        let result = stage_paddle_input_at(&source_directory, &staged_input);
-
-        assert!(result.is_err());
-        assert!(
-            !staged_input.exists(),
-            "failed staging must not leave a partial temporary file"
-        );
-        std::fs::remove_dir_all(&root).expect("test cleanup");
-    }
 }

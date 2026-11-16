@@ -4,8 +4,8 @@ import { choice, count, parseBlocks, parseIssue, strings } from './dossierBlockD
 import { parseReadingSections } from './dossierReadingDecode';
 import type { Dossier, DossierCommentPage, DossierCoverage, DossierMaterial, DossierPayload, DossierSelection, ReadingReviewReceipt, ReadingReviewSummary } from './dossierTypes';
 
-const KINDS = ['body', 'tags', 'image', 'audio', 'video_frame'] as const;
-const PRODUCERS = ['platform', 'ordinary_ocr', 'local_vision', 'cloud_vision', 'asr', 'frame_ocr', 'human_edit'] as const;
+const KINDS = ['body', 'tags', 'image', 'audio'] as const;
+const PRODUCERS = ['platform', 'ordinary_ocr', 'local_vision', 'cloud_vision', 'asr', 'human_edit'] as const;
 const ADOPTIONS = ['automatic', 'human_adopted', 'human_edited'] as const;
 const VERIFICATIONS = ['unchecked', 'verified'] as const;
 const REVIEW_ACTIONS = ['edit'] as const;
@@ -50,7 +50,7 @@ function parseCoverage(row: Json): DossierCoverage {
     return { state: choice(value.state, COVERAGE, 'state'), units, readings };
   };
   return { imageInventory: { basis: choice(images.basis, ['platform_image_list', 'observed_set'], 'basis'), expectedPages, acquiredPages, processedPages, missingPages, unknownOrder: bool(images, 'unknownOrder') },
-    sources: { body: readSource('body'), images: readSource('images'), audio: readSource('audio'), videoFrames: readSource('videoFrames') }, issues: list(row, 'issues', parseIssue) };
+    sources: { body: readSource('body'), images: readSource('images'), audio: readSource('audio') }, issues: list(row, 'issues', parseIssue) };
 }
 function parseSelection(row: Json): DossierSelection {
   const kinds = strings(row.kinds, 'kinds').map(value => choice(value, KINDS, 'kinds'));
