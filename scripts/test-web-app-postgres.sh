@@ -156,6 +156,10 @@ if [[ "${WEB_APP_PROOF_SCOPE:-all}" == topics ]]; then
   run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_browser_tests -- --ignored --nocapture --test-threads=1
   exit 0
 fi
+if [[ "${WEB_APP_PROOF_SCOPE:-all}" == opportunity ]]; then
+  run_proof "$proof_dir" env LINGGAN_OPPORTUNITY_CARD=enabled cargo test -p linggan-api --bins --locked local_web::opportunity_browser_tests -- --ignored --nocapture --test-threads=1
+  exit 0
+fi
 if [[ "${WEB_APP_PROOF_SCOPE:-all}" == comments-contracts || "${WEB_APP_PROOF_SCOPE:-all}" == comments || "${WEB_APP_PROOF_SCOPE:-all}" == research ]]; then
   mkdir -p "$proof_dir/research"
   run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked \
@@ -222,3 +226,7 @@ printf '%s\n' 'WEB-REACT-001 F Topics and Workspace real-chain proof passed (iso
 
 mkdir -p "$proof_dir/research"
 run_proof "$proof_dir/research" env LINGGAN_PI_NODE="$node_bin" cargo test -p linggan-api --bins --locked local_web::research_browser_tests -- --ignored --nocapture --test-threads=1
+
+# Opportunity v1: actual card reads and P1/P2/P3 screenshots, no collection or model calls.
+mkdir -p "$proof_dir/opportunity"
+run_proof "$proof_dir/opportunity" env LINGGAN_OPPORTUNITY_CARD=enabled cargo test -p linggan-api --bins --locked local_web::opportunity_browser_tests -- --ignored --nocapture --test-threads=1

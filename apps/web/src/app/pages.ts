@@ -11,6 +11,7 @@ export const WORKBENCH_PATH = '/ops/creation';
 export const CREATORS_PATH = '/corpus/creators';
 export const EVIDENCE_PATH = '/corpus/evidence';
 export const COMMENTS_PATH = '/corpus/comments';
+export const OPPORTUNITY_PATH = '/opportunity';
 
 export const COLLECTION_PATHS = ['/collection/targets', '/collection/tasks', '/collection/domains', '/collection/runtime'] as const;
 
@@ -20,4 +21,4 @@ export const TOPIC_WORKSPACE_PATH = '/topics/{canonical_key}';
 
 export const OPS_PATHS = ['/ops/overview', '/ops/publications', '/ops/accounts', '/ops/daily', '/ops/io'] as const;
 
-export const REACT_PAGE_PATHS: readonly string[] = [LOGIN_PATH, INVITATION_ACCEPT_PATH, MODEL_SETTINGS_PATH, ACCOUNT_SETTINGS_PATH, TEAM_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, ...COLLECTION_PATHS, ...OPS_PATHS, TOPICS_PATH, OFFLINE_REVIEW_PATH, TOPIC_WORKSPACE_PATH];
+export const REACT_PAGE_PATHS: readonly string[] = [LOGIN_PATH, INVITATION_ACCEPT_PATH, MODEL_SETTINGS_PATH, ACCOUNT_SETTINGS_PATH, TEAM_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, OPPORTUNITY_PATH, ...COLLECTION_PATHS, ...OPS_PATHS, TOPICS_PATH, OFFLINE_REVIEW_PATH, TOPIC_WORKSPACE_PATH];

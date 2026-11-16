@@ -4,6 +4,7 @@ import { ContextBar, type ContextBarContent } from '../shared/ContextBar';
 
 import { SidebarState } from '../shared/sidebarState';
 import { PERSONAL_MENU_LINKS, PRIMARY_ENTRIES, type PrimaryEntry, type PrimarySurface } from './navigation';
+import { useOpportunityStatus } from './opportunityStatusContext';
 import styles from './AppShell.module.css';
 
 interface AppShellProps {
@@ -42,6 +43,9 @@ function PrimaryEntryLink({ entry, active }: { entry: PrimaryEntry; active: Prim
  * 全站唯一 React 页头；样式由 apps/web/src/styles/shell.css 提供。
  */
 export function AppShell({ className, active, boundaryLabel, contextBar, children, workbenchMode, restrictedOps = false }: AppShellProps) {
+  const opportunity = useOpportunityStatus();
+  const entries = PRIMARY_ENTRIES.map(entry => entry.zh === '洞察' && opportunity.state === 'enabled'
+    ? { ...entry, href: '/opportunity', surface: 'opportunity' as const } : entry);
   const [collapsed, setCollapsed] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState('');
@@ -112,7 +116,7 @@ export function AppShell({ className, active, boundaryLabel, contextBar, childre
           }}>
             <summary>intelligence <span aria-hidden="true">⌄</span></summary>
             <nav aria-label="一级导航">
-              {PRIMARY_ENTRIES.filter(entry => !restrictedOps || entry.surface === 'ops').map(entry => entry.href ? <a key={entry.zh} href={entry.href} aria-current={entry.surface === active ? 'page' : undefined}>{entry.zh}</a> : <span key={entry.zh} aria-disabled="true">{entry.zh} · 未开放</span>)}
+              {entries.filter(entry => !restrictedOps || entry.surface === 'ops').map(entry => entry.href ? <a key={entry.zh} href={entry.href} aria-current={entry.surface === active ? 'page' : undefined}>{entry.zh}</a> : <span key={entry.zh} aria-disabled="true">{entry.zh} · 未开放</span>)}
               {PERSONAL_MENU_LINKS.filter(link => !restrictedOps || link.href === '/settings/account').map(link => <a key={link.href} href={link.href}>{link.label}</a>)}
               <FontNotice/>
             </nav>
@@ -138,7 +142,7 @@ export function AppShell({ className, active, boundaryLabel, contextBar, childre
             </div>
           </div>
           <nav className="v7-primary-nav" aria-label="一级导航">
-            {PRIMARY_ENTRIES.filter(entry => !restrictedOps || entry.surface === 'ops').map(entry => (
+            {entries.filter(entry => !restrictedOps || entry.surface === 'ops').map(entry => (
               <PrimaryEntryLink key={entry.zh} entry={entry} active={active} />
             ))}
           </nav>

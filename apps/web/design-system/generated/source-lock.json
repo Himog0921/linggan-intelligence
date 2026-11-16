@@ -1,5 +1,5 @@
 {
-  "fingerprint": "7e8812cddafa5dd055b6ea09fb930951fce7ce688c6c582d71099241ef12394f",
+  "fingerprint": "99a7d79b670cd998e4b381243cd04f0922937b2c8457018416713bec24c359ff",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -223,7 +223,7 @@
     },
     {
       "path": "apps/web/src/app/AppShell.tsx",
-      "sha256": "45d747a672a0345707649f37b94cec3e9498197d77520729c0f37256d3d8bfe2"
+      "sha256": "d2c6778078e5ef135a0ff146dc5564f396492b57d3d15a998e8039ac49f4b26a"
     },
     {
       "path": "apps/web/src/app/ContextTexture.module.css",

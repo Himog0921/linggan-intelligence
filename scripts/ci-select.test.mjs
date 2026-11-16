@@ -98,6 +98,8 @@ test('page-local UI changes avoid OCR and PostgreSQL proofs; shared and API chan
     ['apps/web/src/shared/api.ts', ['ocr_recognition', 'web', 'web_real_chain']],
     ['apps/web/src/pages/corpus/evidence/DossierSections.tsx', ['web', 'web_real_chain']],
     ['apps/web/src/pages/corpus/evidence/DossierUnderstanding.tsx', ['web', 'web_real_chain']],
+    ['apps/web/src/pages/opportunity/OpportunityDetail.tsx', ['web', 'web_real_chain']],
+    ['apps/web/test/e2e/opportunity-real-chain.mjs', ['web', 'web_real_chain']],
     ['apps/web/test/e2e/content-understanding-real-chain.mjs', ['web', 'web_real_chain']],
     ['apps/web/test/e2e/workbench-real-chain.mjs', ['web', 'web_real_chain']],
     ['apps/web/test/e2e/settings-real-chain.mjs', ['web', 'web_real_chain']],
@@ -149,6 +151,7 @@ test('every current browser script has an explicit proof or manual-only classifi
     'settings-trials-real-chain.mjs', 'topics-real-chain.mjs', 'workbench-real-chain.mjs',
     'login-lifecycle.mjs', 'shell-layout.mjs', 'topic-workspace-real-chain.mjs',
     'unified-research-real-chain.mjs', 'content-understanding-real-chain.mjs',
+    'opportunity-real-chain.mjs',
   ];
   const ocrAudit = ['ocr-recognition-real-chain.mjs'];
   const manualOnly = [

@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 pub use read::{
     EvidenceKind, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
-    read_evidence, read_opportunities,
+    read_card_in_domain, read_evidence, read_evidence_in_domain, read_opportunities,
 };
 
 #[derive(Debug, thiserror::Error)]

@@ -9,8 +9,8 @@ use axum::{
     routing::{any, get},
 };
 use linggan_intelligence::opportunity::{
-    CardError, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card, read_evidence,
-    read_opportunities,
+    CardError, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
+    read_card_in_domain, read_evidence, read_evidence_in_domain, read_opportunities,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -75,6 +75,14 @@ pub(super) fn routes(enabled: bool) -> Router<LocalWebState> {
         .route(
             "/api/local/opportunity/problems/{problem_ref}/evidence",
             get(evidence),
+        )
+        .route(
+            "/api/local/opportunity/domains/{domain_ref}/problems/{problem_ref}/card",
+            get(scoped_card),
+        )
+        .route(
+            "/api/local/opportunity/domains/{domain_ref}/problems/{problem_ref}/evidence",
+            get(scoped_evidence),
         )
         .route("/api/local/opportunity/{*rest}", any(not_found))
         .layer(middleware::from_fn_with_state(
@@ -243,6 +251,55 @@ async fn evidence(
     reply(&access, read_evidence(database, problem, &query).await)
 }
 
+async fn scoped_card(
+    State(state): State<LocalWebState>,
+    Extension(access): Extension<Arc<OpportunityAccess>>,
+    Path((domain, problem)): Path<(String, String)>,
+    query: Result<Query<CardQuery>, QueryRejection>,
+) -> Response {
+    let (Ok(domain), Ok(problem), Ok(Query(query))) =
+        (parse_id(&domain), parse_id(&problem), query)
+    else {
+        return failure(OpportunityReadError::InvalidQuery);
+    };
+    if query.as_of.is_some() {
+        return local_read_json_error(
+            StatusCode::NOT_IMPLEMENTED,
+            "opportunity_as_of_not_supported",
+        );
+    }
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
+    };
+    reply(
+        &access,
+        read_card_in_domain(database, domain, problem).await,
+    )
+}
+
+async fn scoped_evidence(
+    State(state): State<LocalWebState>,
+    Extension(access): Extension<Arc<OpportunityAccess>>,
+    Path((domain, problem)): Path<(String, String)>,
+    query: Result<Query<EvidenceQuery>, QueryRejection>,
+) -> Response {
+    let (Ok(domain), Ok(problem), Ok(Query(mut query))) =
+        (parse_id(&domain), parse_id(&problem), query)
+    else {
+        return failure(OpportunityReadError::InvalidQuery);
+    };
+    if let Err(error) = decode_cursor(&access, &mut query.cursor) {
+        return failure(error);
+    }
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(StatusCode::SERVICE_UNAVAILABLE, "read_model_not_connected");
+    };
+    reply(
+        &access,
+        read_evidence_in_domain(database, domain, problem, &query).await,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,6 +347,8 @@ mod tests {
             "/api/local/opportunity/domains/not-a-uuid/opportunities?limit=broken",
             "/api/local/opportunity/problems/not-a-uuid/card?asOf=anything",
             "/api/local/opportunity/problems/not-a-uuid/evidence?kind=broken",
+            "/api/local/opportunity/domains/not-a-uuid/problems/not-a-uuid/card",
+            "/api/local/opportunity/domains/not-a-uuid/problems/not-a-uuid/evidence?kind=comments",
             "/api/local/opportunity/not-a-route",
         ] {
             let (status, body) = call(app.clone(), "GET", uri).await;
@@ -373,6 +432,36 @@ mod tests {
         assert_eq!(
             card, payload,
             "the HTTP card matches the approved P1 snapshot"
+        );
+        let scoped = format!("/api/local/opportunity/domains/{domain}/problems/{first}");
+        assert_eq!(
+            call(app.clone(), "GET", &format!("{scoped}/card")).await.0,
+            StatusCode::OK
+        );
+        let other_domain = "00000000-0000-4000-8000-000000000002";
+        let other = format!("/api/local/opportunity/domains/{other_domain}/problems/{first}");
+        assert_eq!(
+            call(app.clone(), "GET", &format!("{other}/card")).await.0,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            call(
+                app.clone(),
+                "GET",
+                &format!("{other}/evidence?kind=creators")
+            )
+            .await
+            .0,
+            StatusCode::NOT_FOUND
+        );
+        let comparisons = format!(
+            "/api/local/opportunity/domains/{domain}/opportunities?includeWeeklyComparison=true&limit=1"
+        );
+        let (status, observed) = call(app.clone(), "GET", &comparisons).await;
+        assert_eq!(status, StatusCode::OK, "{observed}");
+        assert_eq!(
+            observed["weeklyComparisons"][0]["groups"][0]["status"],
+            "incomparable"
         );
         let creators =
             format!("/api/local/opportunity/problems/{first}/evidence?kind=creators&limit=1");

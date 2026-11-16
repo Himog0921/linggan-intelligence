@@ -708,3 +708,9 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - 现有评论目录事实与资格由 `crates/intelligence/src/comment_study_catalog/facts.sql:1`、`crates/intelligence/src/comment_study_source/gate.rs:1` 和 `crates/intelligence/src/comment_study_source.rs:248` 共用；可研究来源在 `comment_study_source.rs:65,334` 选择并附加上下文。机会卡原声通过 `crates/intelligence/src/opportunity/card/voices.rs:49` 组合这些来源，不另有一套正文资格定义。
 - 列表与单卡当前共用的锁表集合及依据读取位于 `crates/intelligence/src/opportunity/card/read.rs:13,293,413`；历史等级是同一 `linggan_opportunity_problem_metric_period` 中的协议、周期维度，不是跨协议汇总。
 - 本工作包新增的 `0223_opportunity_card_period_index.sql` 创建机会卡周期索引表，不改现有表；`card.rs` 保存时直接复制同一事务、同一版本和 `as_of` 的指标等级，并将索引与 payload 一起计算指纹。升级前的旧卡保持索引未知并排队重建；新版执行器也会重新识别旧程序写入后缺失或不匹配的索引。索引不创建另一套指标计算。
+
+## 17. T1.6 / T1.7 页面接线勘察（`a343ba8f`）
+
+- 机会列表、卡片和依据的现有读取位于 `crates/intelligence/src/opportunity/card/read.rs:493,345,657`，路由和状态开关位于 `apps/api/src/local_web/opportunity_api.rs:64`。列表目前按问题 ID 分页，不返回同协议周对比；需求周期由 `crates/intelligence/src/opportunity/card/groups.rs:17` 按时间正序组装。
+- 页面和服务器入口分别登记在 `apps/web/src/app/pages.ts` 与 `apps/api/src/local_web/web_app.rs:22`；全局壳为 `apps/web/src/app/AppShell.tsx:44`，现有领域上下文与选择器为 `apps/web/src/corpus/useCorpusShell.ts:8` 和 `apps/web/src/corpus/DomainPicker.tsx:20`。
+- `apps/web/src/app/navigation.ts:11` 的“洞察”目前禁用；用户问题、证据库和创作者的现有路径为 `/corpus/comments?view=problems`、`/corpus/evidence`、`/corpus/creators`。开关关闭时原导航必须保持原状。

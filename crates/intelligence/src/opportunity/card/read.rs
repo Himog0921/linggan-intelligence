@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 // Each reader signs only the relations it actually reads (D-061).
@@ -61,6 +61,8 @@ pub struct OpportunityListQuery {
     pub supply_state: Option<String>,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
+    #[serde(default)]
+    pub include_weekly_comparison: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -346,10 +348,30 @@ pub async fn read_card(
     database: &Database,
     requested: Uuid,
 ) -> Result<Value, OpportunityReadError> {
+    read_card_scoped(database, requested, None).await
+}
+
+/// Read a card only when its current problem belongs to the requested domain.
+pub async fn read_card_in_domain(
+    database: &Database,
+    domain: Uuid,
+    requested: Uuid,
+) -> Result<Value, OpportunityReadError> {
+    read_card_scoped(database, requested, Some(domain)).await
+}
+
+async fn read_card_scoped(
+    database: &Database,
+    requested: Uuid,
+    domain: Option<Uuid>,
+) -> Result<Value, OpportunityReadError> {
     let mut tx = begin(database).await?;
     card_snapshot(&mut tx).await?;
     let problem = resolve(&mut tx, requested).await?;
     let mut stored = load_card(&mut tx, problem).await?;
+    if domain.is_some_and(|domain| domain != stored.domain) {
+        return Err(OpportunityReadError::NotFound);
+    }
     stored.card.problem.redirected_from = (requested != problem).then_some(requested);
     snapshot::verify_for(&mut tx, CARD_READ_TABLES).await?;
     tx.commit().await?;
@@ -459,6 +481,109 @@ fn matching_period_groups(
 
 type ListEntry = (Uuid, Option<Vec<PeriodMatchGroup>>);
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WeeklyGroupComparison {
+    protocol_version: Option<i32>,
+    current_period_start: String,
+    previous_period_start: String,
+    current_rate_per_1k: Option<f64>,
+    previous_rate_per_1k: Option<f64>,
+    status: &'static str,
+    reason: Option<&'static str>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WeeklyComparison {
+    problem_id: Uuid,
+    groups: Vec<WeeklyGroupComparison>,
+}
+
+fn compare_weekly_group(
+    group: &read_model::DemandGroup,
+    current: &str,
+    previous: &str,
+) -> WeeklyGroupComparison {
+    let previous_rate = group
+        .series
+        .iter()
+        .find(|point| point.period_start == previous)
+        .and_then(|point| point.rate_per_1k);
+    // A previous card's current point must not be labelled as this week's value.
+    let current_rate = if group.current.period_start == current {
+        group.current.rate_per_1k
+    } else {
+        None
+    };
+    let reason = if group.protocol_version.is_none() {
+        Some("protocol_unknown")
+    } else if group.current.period_start != current {
+        Some("card_not_current_week")
+    } else if current_rate.is_none() {
+        Some("current_unavailable")
+    } else if previous_rate.is_none() {
+        Some("previous_unavailable")
+    } else {
+        None
+    };
+    let status = match (reason, current_rate, previous_rate) {
+        (None, Some(now), Some(before)) if now > before => "rising",
+        (None, Some(_), Some(_)) => "not_rising",
+        _ => "incomparable",
+    };
+    WeeklyGroupComparison {
+        protocol_version: group.protocol_version,
+        current_period_start: current.to_owned(),
+        previous_period_start: previous.to_owned(),
+        current_rate_per_1k: current_rate,
+        previous_rate_per_1k: previous_rate,
+        status,
+        reason,
+    }
+}
+
+async fn weekly_comparisons(
+    tx: &mut Transaction<'_, Postgres>,
+    as_of: &str,
+    cards: &[read_model::Card],
+) -> Result<Vec<WeeklyComparison>, OpportunityReadError> {
+    let versions: Vec<i32> = cards.iter().map(|card| card.versions.metric_def).collect();
+    let rows = sqlx::query(
+        "SELECT definition.version, periods.current::text AS current, \
+         (periods.current - 7)::text AS previous FROM linggan_opportunity_metric_definition definition \
+         CROSS JOIN LATERAL (SELECT linggan_opportunity_period_start($1::timestamptz, \
+           definition.params->>'period_tz') AS current) periods WHERE definition.version=ANY($2)",
+    ).bind(as_of).bind(versions).fetch_all(&mut **tx).await?;
+    let mut periods = BTreeMap::new();
+    for row in rows {
+        periods.insert(
+            row.try_get::<i32, _>("version")?,
+            (
+                row.try_get::<String, _>("current")?,
+                row.try_get::<String, _>("previous")?,
+            ),
+        );
+    }
+    cards
+        .iter()
+        .map(|card| {
+            let (current, previous) = periods
+                .get(&card.versions.metric_def)
+                .ok_or(OpportunityReadError::InvalidModel)?;
+            Ok(WeeklyComparison {
+                problem_id: card.problem.id,
+                groups: card
+                    .demand
+                    .groups
+                    .iter()
+                    .map(|group| compare_weekly_group(group, current, previous))
+                    .collect(),
+            })
+        })
+        .collect()
+}
+
 fn list_entries(
     rows: Vec<sqlx::postgres::PgRow>,
     query: &OpportunityListQuery,
@@ -497,13 +622,19 @@ pub async fn read_opportunities(
 ) -> Result<Value, OpportunityReadError> {
     let limit = page_limit(query.limit)?;
     validate_list_query(domain, query)?;
-    let scope = scope(
-        json!({"domain":domain,"period":query.period,"tier":query.tier,"supplyState":query.supply_state}),
-    )?;
+    let mut scope_value = json!({"domain":domain,"period":query.period,"tier":query.tier,"supplyState":query.supply_state});
+    if query.include_weekly_comparison {
+        scope_value["includeWeeklyComparison"] = json!(true);
+    }
+    let scope = scope(scope_value)?;
     let prior = previous("opportunity-list", query.cursor.as_deref(), &scope)?;
     let mut tx = begin(database).await?;
-    let tables = LIST_READ_TABLES;
-    let (captured, _) = snapshot::capture_for(&mut tx, tables).await?;
+    let mut tables = LIST_READ_TABLES.to_vec();
+    if query.include_weekly_comparison {
+        tables.push("linggan_opportunity_metric_definition");
+        tables.sort_unstable();
+    }
+    let (captured, _) = snapshot::capture_for(&mut tx, &tables).await?;
     snapshot::require_visible_restrictions(&mut tx).await?;
     let as_of = accepted_as_of(prior.as_ref(), captured)?;
     let domain_exists: bool =
@@ -554,11 +685,19 @@ pub async fn read_opportunities(
     } else {
         None
     };
-    snapshot::verify_for(&mut tx, tables).await?;
+    let comparisons = if query.include_weekly_comparison {
+        Some(weekly_comparisons(&mut tx, &as_of, &items).await?)
+    } else {
+        None
+    };
+    snapshot::verify_for(&mut tx, &tables).await?;
     tx.commit().await?;
     let mut result = json!({"domainRef":domain,"items":items,"page":{"limit":limit,"hasMore":next.is_some(),"nextCursor":next,"asOf":as_of}});
     if query.period.is_some() {
         result["periodMatches"] = json!(matches);
+    }
+    if let Some(comparisons) = comparisons {
+        result["weeklyComparisons"] = json!(comparisons);
     }
     Ok(result)
 }
@@ -659,8 +798,31 @@ pub async fn read_evidence(
     requested: Uuid,
     query: &EvidenceQuery,
 ) -> Result<Value, OpportunityReadError> {
+    read_evidence_scoped(database, requested, query, None).await
+}
+
+/// Read evidence only within the card's domain.
+pub async fn read_evidence_in_domain(
+    database: &Database,
+    domain: Uuid,
+    requested: Uuid,
+    query: &EvidenceQuery,
+) -> Result<Value, OpportunityReadError> {
+    read_evidence_scoped(database, requested, query, Some(domain)).await
+}
+
+async fn read_evidence_scoped(
+    database: &Database,
+    requested: Uuid,
+    query: &EvidenceQuery,
+    domain: Option<Uuid>,
+) -> Result<Value, OpportunityReadError> {
     let limit = page_limit(query.limit)?;
-    let scope = scope(json!({"problem":requested,"kind":query.kind}))?;
+    let mut scope_value = json!({"problem":requested,"kind":query.kind});
+    if let Some(domain) = domain {
+        scope_value["domain"] = json!(domain);
+    }
+    let scope = scope(scope_value)?;
     let prior = previous("opportunity-evidence", query.cursor.as_deref(), &scope)?;
     let mut tx = begin(database).await?;
     let evidence_tables = snapshot::evidence_read_tables();
@@ -674,6 +836,9 @@ pub async fn read_evidence(
     let as_of = accepted_as_of(prior.as_ref(), captured)?;
     let problem = resolve(&mut tx, requested).await?;
     let stored = load_card(&mut tx, problem).await?;
+    if domain.is_some_and(|domain| domain != stored.domain) {
+        return Err(OpportunityReadError::NotFound);
+    }
     let start = prior.as_ref().map_or(Ok(0), |prior| {
         usize::try_from(prior.last.offset).map_err(|_| OpportunityReadError::InvalidCursor)
     })?;
@@ -712,4 +877,49 @@ pub async fn read_evidence(
     snapshot::verify_for(&mut tx, tables).await?;
     tx.commit().await?;
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compare_weekly_group, read_model};
+
+    #[test]
+    fn weekly_comparison_requires_same_known_protocol_and_current_week() {
+        let mut card: read_model::Card = serde_json::from_str(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/opportunity_metrics_postgres/p1-card.snapshot.json"
+        )))
+        .unwrap();
+        let group = &mut card.demand.groups[0];
+        group.protocol_version = Some(1);
+        group.current.rate_per_1k = Some(12.0);
+        let rising = compare_weekly_group(group, "2026-11-09", "2026-11-02");
+        assert_eq!(rising.status, "rising");
+        assert_eq!(rising.previous_rate_per_1k, Some(10.0));
+        group.current.rate_per_1k = Some(9.0);
+        assert_eq!(
+            compare_weekly_group(group, "2026-11-09", "2026-11-02").status,
+            "not_rising"
+        );
+        group.protocol_version = None;
+        assert_eq!(
+            compare_weekly_group(group, "2026-11-09", "2026-11-02").reason,
+            Some("protocol_unknown")
+        );
+        group.protocol_version = Some(1);
+        let stale = compare_weekly_group(group, "2026-11-16", "2026-11-09");
+        assert_eq!(stale.reason, Some("card_not_current_week"));
+        assert_eq!(stale.current_period_start, "2026-11-16");
+        assert_eq!(stale.current_rate_per_1k, None);
+        group.current.rate_per_1k = None;
+        assert_eq!(
+            compare_weekly_group(group, "2026-11-09", "2026-11-02").reason,
+            Some("current_unavailable")
+        );
+        group.current.rate_per_1k = Some(12.0);
+        assert_eq!(
+            compare_weekly_group(group, "2026-11-09", "2026-09-01").reason,
+            Some("previous_unavailable")
+        );
+    }
 }

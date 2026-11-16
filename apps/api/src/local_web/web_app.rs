@@ -29,6 +29,7 @@ const REACT_PAGES: &[&str] = &[
     "/corpus/creators",
     "/corpus/evidence",
     "/corpus/comments",
+    "/opportunity",
     "/collection/targets",
     "/collection/tasks",
     "/collection/domains",
@@ -98,6 +99,7 @@ pub(super) struct WebAppConfig {
     dist: Arc<PathBuf>,
     /// 本进程所属部署的版本（`sync.sh` 写进身份文件）。不是本机运行链启动时为 `unknown`。
     runtime_revision: Arc<str>,
+    pub(super) opportunity_enabled: bool,
 }
 
 impl WebAppConfig {
@@ -106,13 +108,17 @@ impl WebAppConfig {
             Some(path) if !path.is_empty() => PathBuf::from(path),
             _ => PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../web/dist")),
         };
-        Self::new(dist, linggan_evidence::runtime_revision())
+        let mut config = Self::new(dist, linggan_evidence::runtime_revision());
+        config.opportunity_enabled =
+            std::env::var("LINGGAN_OPPORTUNITY_CARD").as_deref() == Ok("enabled");
+        config
     }
 
     pub(super) fn new(dist: PathBuf, runtime_revision: &str) -> Self {
         Self {
             dist: Arc::new(dist),
             runtime_revision: Arc::from(runtime_revision),
+            opportunity_enabled: false,
         }
     }
 }
@@ -138,6 +144,7 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
     for page in REACT_PAGES {
         if *page == "/login"
             || *page == "/invite/accept"
+            || (*page == "/opportunity" && !config.opportunity_enabled)
             || AUTHENTICATED_REACT_PAGES.contains(page)
         {
             continue;
@@ -340,24 +347,29 @@ pub(super) fn health() -> Value {
 }
 
 fn health_for(config: &WebAppConfig) -> Value {
+    let pages: Vec<_> = REACT_PAGES
+        .iter()
+        .copied()
+        .filter(|page| *page != "/opportunity" || config.opportunity_enabled)
+        .collect();
     match read_state(config) {
         WebAppState::Ready { revision, .. } => json!({
             "state": "ready",
             "revision": revision,
             "runtimeRevision": config.runtime_revision.as_ref(),
-            "pages": REACT_PAGES,
+            "pages": pages,
         }),
         WebAppState::Missing => json!({
             "state": "missing",
             "revision": null,
             "runtimeRevision": config.runtime_revision.as_ref(),
-            "pages": REACT_PAGES,
+            "pages": pages,
         }),
         WebAppState::RevisionMismatch { web, runtime } => json!({
             "state": "revision_mismatch",
             "revision": web,
             "runtimeRevision": runtime,
-            "pages": REACT_PAGES,
+            "pages": pages,
         }),
     }
 }

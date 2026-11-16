@@ -12,8 +12,9 @@ mod stats;
 
 pub use card::{
     CardError, CardRebuildMode, CardRebuildReport, EvidenceKind, EvidenceQuery,
-    OpportunityListQuery, OpportunityReadError, UnparseableObservations, read_card, read_evidence,
-    read_opportunities, rebuild_opportunity_cards,
+    OpportunityListQuery, OpportunityReadError, UnparseableObservations, read_card,
+    read_card_in_domain, read_evidence, read_evidence_in_domain, read_opportunities,
+    rebuild_opportunity_cards,
 };
 pub(crate) use card::{enqueue_period_index_repairs, enqueue_source_events};
 pub use commenter_hash::{COMMENTER_DIGEST_VERSION, CommenterDigest, CommenterDigestError};

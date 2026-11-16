@@ -461,3 +461,15 @@
 - 远端 Delivery `43813837722` 的机会卡 PostgreSQL 用例 `shadow_versions_avoid_existing_numbers_and_follow_current_changes` 失败：该历史升级测试主动移除 0217 卡片表，但新迁移 0223 依赖该表。测试装配已同步排除 0223，业务迁移与指标规则不变；`bash /private/tmp/opportunity-t15-shadow-compat-proof.sh` 隔离重跑 `1 passed; 0 failed`，专用容器和卷已清理。最终 CI 以最终 head 为准。
 - `cargo clippy -p linggan-intelligence --lib --locked --no-deps` → exit 101，48 项既有 `too_many_lines` 错误，位置均不在本次修改的函数；本次新增长函数已拆分。追加 `-- -A clippy::too_many_lines` 后 exit 0、42 条警告；不将此结果称为严格 Clippy 通过，既有问题未修改。
 - 新迁移只在隔离测试中执行；未迁移或部署本机运行库与生产环境，未进行真实采集或模型外发。独立 review 和远端 CI 须针对 PR #592 的最终 head 核实，不沿用旧 head 的通过记录。
+
+## 2026-11-16 T1.6 / T1.7 页面工作包
+
+- 负责人授权一次实现机会首页、机会卡页面及现有只读接口接线，完成后统一 review 和测试；执行者 Codex，基线 `a343ba8f57ad0bc4194b63371a691be9592c1d5e`，分支 `codex/opportunity-t16-t17-page`，工作树 `.worktrees/opportunity-t16-t17-page`。
+- 负责人答复 Q-43/Q-44：周对比由服务端按同一已知协议计算并标明不可比较；三个入口连接现有用户问题、证据库与创作者并保留领域。R4、R5、R10、D-042/043/045/062 仍生效。
+- 本机运行服务与生产环境迁移、部署、真实采集和模型外发不在本次授权内；使用隔离合成数据验证，真实前端和业务验收不由合成证明代替。
+- 实现：特性开关启用时显示机会首页和卡片详情；领域选择、三个现有任务入口、按协议分组、需求／供给／渠道、依据分页和原声来源均接入现有接口。周对比在服务端使用既有指标和上海自然周计算；缺少协议、数据或当前周卡片时显示不可比较。领域内卡片与依据读取复用既有事务和来源限制；领域不匹配返回 404。
+- `cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1788 passed (1788)`。首次全量测试发现新页面的三个尺寸未使用 LIDS 令牌，修正后完成上述全量重跑。`npm run typecheck && npm run lint && npm run lids:check` → exit 0，`LIDS sync: PASS`。
+- `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-final CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`；P1/P2/P3 均由手册合成数据生成并截图，三类依据经过真实 Axum 和隔离 PostgreSQL 读取；输出 `all synthetic reads passed; no writes or external requests`，容器和卷清理已验证。首页、P1/P2/P3 及其依据截图和合成报告保存于 `artifacts/private/opportunity-t16-t17-proof-20261116/`，不进入 Git。
+- `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-intelligence --lib --locked weekly_comparison_requires_same_known_protocol_and_current_week -- --test-threads=1` → `1 passed; 0 failed`。`cargo test -p linggan-api --locked opportunity_api::tests -- --test-threads=1` → `3 passed; 0 failed; 1 ignored`；忽略的隔离 PostgreSQL HTTP 测试单独运行通过。`cargo test -p linggan-api --locked opportunity_entry_is_available_only_when_enabled -- --test-threads=1` → `1 passed; 0 failed`。
+- `bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`。`node --test scripts/ci-select.test.mjs` → `21 pass; 0 fail`；新浏览器证明纳入现有真实链路及 CI 选择。改动 Rust 文件逐一执行 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0；`git diff --check`、`bash -n scripts/test-web-app-postgres.sh` → exit 0。
+- 页面墓碑文案由 React 测试覆盖；当前标准合成数据未生成真实墓碑原声，截图只证明 P1/P2/P3 标准数据展示。状态：实现与隔离验证完成，独立 review、最终提交的远端 CI、合并、运行环境部署和真实业务验收仍待进行。
