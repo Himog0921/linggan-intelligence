@@ -49,7 +49,18 @@ async fn pre_writing_bridge_database(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
     // This historical subset extends through 0150 but deliberately
     // omits creation 0127/0128 and writing cutovers 0140/0141/0148, applied below.
-    isolated_proof_schema(&url, schema, fixture::dossier::fixture::MIGRATIONS)
+    // The shared modern fixture also includes 0222; keep that forward migration
+    // for the upgrade under test instead of applying it to the historical base.
+    let historical = fixture::dossier::fixture::MIGRATIONS
+        .replace(
+            include_str!("../../../database/migrations/0222_historical_image_inventory.sql"),
+            "",
+        )
+        .lines()
+        .filter(|line| !line.contains("'0222_historical_image_inventory'"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    isolated_proof_schema(&url, schema, &historical)
         .await
         .expect("pre-writing-bridge proof schema is created")
 }

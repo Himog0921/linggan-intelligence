@@ -29,12 +29,7 @@ pub(super) async fn current(
     if kind == "image" {
         let selected =
             crate::research_dossier::displayed_image_source_in(conn, work, slot, as_of).await?;
-        let Some((selected_version, sha)) = selected else {
-            return Ok(false);
-        };
-        let matches =
-            selected_version == version || has_image_blob(conn, version, &sha, as_of).await?;
-        return Ok(matches && media_unrestricted(conn, Some(slot), derivative, version).await?);
+        return image_current(conn, slot, version, derivative, as_of, selected.as_ref()).await;
     }
     let Ok(materialization) = Uuid::parse_str(version) else {
         return Ok(false);
@@ -47,6 +42,21 @@ pub(super) async fn current(
          AND NOT EXISTS(SELECT 1 FROM linggan_media_derivative d JOIN linggan_media_ocr_retirement r ON r.retired_job_ref=d.job_ref WHERE d.derivative_ref=$4))")
         .bind(work).bind(slot).bind(materialization).bind(derivative).bind(as_of).bind(kind)
         .fetch_one(conn).await
+}
+
+pub(super) async fn image_current(
+    conn: &mut PgConnection,
+    slot: &str,
+    version: &str,
+    derivative: Option<Uuid>,
+    as_of: &str,
+    selected: Option<&(String, String)>,
+) -> Result<bool, sqlx::Error> {
+    let Some((selected_version, sha)) = selected else {
+        return Ok(false);
+    };
+    let matches = selected_version == version || has_image_blob(conn, version, sha, as_of).await?;
+    Ok(matches && media_unrestricted(conn, Some(slot), derivative, version).await?)
 }
 
 // A new receipt for identical bytes can retain the selected reading of the same slot.

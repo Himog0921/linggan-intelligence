@@ -75,7 +75,7 @@ async fn paged_unjudged_creators_expand_only_visible_dossiers_without_losing_cou
         inventory_batches, 1,
         "75 visible representatives, not all 124 works, may expand media inventories"
     );
-    let current_reads: i64 = sqlx::query_scalar("SELECT coalesce(sum(calls),0)::bigint FROM public.pg_stat_statements WHERE query LIKE 'WITH requested_work AS MATERIALIZED (SELECT * FROM linggan_material_content WHERE public_ref=ANY%'")
+    let current_reads: i64 = sqlx::query_scalar("SELECT coalesce(sum(calls),0)::bigint FROM public.pg_stat_statements WHERE query LIKE 'WITH requested_work AS MATERIALIZED (SELECT content.* FROM linggan_material_content content JOIN linggan_runtime_capture_package first_package%'")
         .fetch_one(db.pool()).await.unwrap();
     assert_eq!(
         current_reads, 1,

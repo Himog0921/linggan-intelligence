@@ -167,14 +167,11 @@ pub(crate) async fn pending_image_source_in(
     let currents =
         crate::work_resource_current::read_work_resource_currents_in(conn, &[work], as_of).await?;
     let inventories = inventory::read_in(conn, &currents.iter().collect::<Vec<_>>(), as_of).await?;
-    let Some(package) = inventories
-        .get(&work)
-        .and_then(|inventory| inventory.pending_image_package)
-    else {
+    let Some(inventory) = inventories.get(&work).filter(|i| i.pending_image_update) else {
         return Ok(false);
     };
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_media_materialization m JOIN linggan_media_download_attempt a USING(download_attempt_ref) JOIN linggan_material_media_origin o ON o.observation_ref=a.media_observation_ref JOIN linggan_runtime_record_disposition d ON d.package_ref=o.package_ref AND d.record_ordinal=o.record_ordinal WHERE m.materialization_ref=$1 AND m.verified_at<=$5::text::timestamptz AND o.content_public_ref=$2 AND o.slot_key=$3 AND o.package_ref=$4 AND o.created_at<=$5::text::timestamptz AND d.disposition='accepted_for_media_identity')")
-        .bind(materialization).bind(work).bind(slot).bind(package).bind(as_of).fetch_one(conn).await
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_media_materialization m JOIN linggan_media_download_attempt a USING(download_attempt_ref) JOIN linggan_material_media_origin o ON o.observation_ref=a.media_observation_ref JOIN linggan_runtime_record_disposition d ON d.package_ref=o.package_ref AND d.record_ordinal=o.record_ordinal WHERE m.materialization_ref=$1 AND m.verified_at<=$5::text::timestamptz AND o.content_public_ref=$2 AND o.slot_key=$3 AND o.package_ref=ANY($4::uuid[]) AND o.created_at<=$5::text::timestamptz AND d.disposition='accepted_for_media_identity')")
+        .bind(materialization).bind(work).bind(slot).bind(&inventory.pending_image_packages).bind(as_of).fetch_one(conn).await
 }
 
 pub async fn read(

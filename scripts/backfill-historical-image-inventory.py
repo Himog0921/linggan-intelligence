@@ -281,8 +281,28 @@ def verify_proofs(psql, encoded_plan, rows):
         raise ValueError(f"platform list proof validated {len(verified)} of {len(rows)} works")
 
 
+def local_psql_target(environment):
+    # libpq accepts connection strings in PGDATABASE and PGHOSTADDR can override
+    # PGHOST. Require one literal loopback endpoint and an ordinary database name.
+    if any(environment.get(key) for key in ("PGSERVICE", "PGSERVICEFILE", "PGHOSTADDR", "PGOPTIONS")):
+        raise ValueError("PGSERVICE, PGSERVICEFILE, PGHOSTADDR and PGOPTIONS must be unset")
+    host = environment.get("PGHOST", "")
+    port = environment.get("PGPORT", "")
+    database = environment.get("PGDATABASE", "")
+    if host not in ("127.0.0.1", "::1"):
+        raise ValueError("PGHOST must be an explicit loopback IP address")
+    if not re.fullmatch(r"[0-9]{1,5}", port) or not 1 <= int(port) <= 65535:
+        raise ValueError("PGPORT must explicitly select a valid local port")
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$-]{0,62}", database):
+        raise ValueError("PGDATABASE must be a plain database name")
+    return ["-h", host, "-p", port, "-d", database]
+
+
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Loopback alone does not prove locality through a tunnel; verify the target before any authorized --apply.",
+    )
     parser.add_argument("plan", type=Path)
     scope = parser.add_mutually_exclusive_group(required=True)
     scope.add_argument("--cohort", action="store_true")
@@ -291,8 +311,10 @@ def main():
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--psql", default="psql")
     args = parser.parse_args()
-    if not os.environ.get("PGDATABASE"):
-        parser.error("PGDATABASE must select the intended local database")
+    try:
+        target = local_psql_target(os.environ)
+    except ValueError as error:
+        parser.error(str(error))
     candidates = json.loads(args.plan.read_text())["candidates"]
     rows = [
         proof_row(candidate)
@@ -307,7 +329,7 @@ def main():
         parser.error("one or more requested works have no verified plan")
     encoded = json.dumps(rows, separators=(",", ":")).encode().hex()
     plan_sql = f"convert_from(decode('{encoded}','hex'),'UTF8')::jsonb"
-    psql = [args.psql, "-XqAt", "-v", "ON_ERROR_STOP=1"]
+    psql = [args.psql, "-XqAt", "-v", "ON_ERROR_STOP=1", *target]
     verify_proofs(psql, plan_sql, rows)
     sql = (
         "BEGIN ISOLATION LEVEL REPEATABLE READ;\n"

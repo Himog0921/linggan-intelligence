@@ -2,6 +2,44 @@ use super::*;
 
 const DEFERRED_IMAGE: &str = "deferredImageSelection";
 
+struct ImageContext<'a> {
+    as_of: &'a str,
+    sources: &'a crate::research_dossier::DisplayedImageSources,
+}
+
+async fn source_current(
+    conn: &mut PgConnection,
+    unit: &Unit,
+    version: &str,
+    derivative: Option<Uuid>,
+    as_of: &str,
+    images: Option<&ImageContext<'_>>,
+) -> Result<bool, sqlx::Error> {
+    if unit.kind == "image" {
+        if let (Some(images), Some(slot)) = (images, unit.slot.as_deref()) {
+            return source::image_current(
+                conn,
+                slot,
+                version,
+                derivative,
+                as_of,
+                images.sources.get(&(unit.work, slot.to_owned())),
+            )
+            .await;
+        }
+    }
+    source::current(
+        conn,
+        unit.work,
+        &unit.kind,
+        unit.slot.as_deref(),
+        version,
+        derivative,
+        as_of,
+    )
+    .await
+}
+
 /// Complete previously recorded selections when their image set becomes displayable.
 pub(crate) async fn activate_deferred_images_in(
     conn: &mut PgConnection,
@@ -10,6 +48,21 @@ pub(crate) async fn activate_deferred_images_in(
 ) -> Result<(), sqlx::Error> {
     let rows = sqlx::query("SELECT u.slot_key,u.source_version AS unit_source,u.current_reading_ref AS unit_current,r.reading_ref,r.source_version,r.source_state,r.page_ordinal,r.derivative_ref,r.producer_ref,r.producer_kind,r.rule_version,r.blocks,r.issues,r.source_location FROM linggan_material_unit u JOIN linggan_material_reading r USING(unit_ref) WHERE u.content_public_ref=$1 AND u.kind='image' AND r.created_at<=$2::text::timestamptz AND r.source_location ? 'deferredImageSelection' AND NOT EXISTS(SELECT 1 FROM linggan_material_reading_selection s WHERE s.reading_ref=r.reading_ref) ORDER BY r.created_at DESC,r.reading_ref DESC")
         .bind(work).bind(as_of).fetch_all(&mut *conn).await?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let currents =
+        crate::work_resource_current::read_work_resource_currents_in(conn, &[work], as_of).await?;
+    let sources = crate::research_dossier::displayed_image_sources_in(
+        conn,
+        &currents.iter().collect::<Vec<_>>(),
+        as_of,
+    )
+    .await?;
+    let image_context = ImageContext {
+        as_of,
+        sources: &sources,
+    };
     let mut attempted = std::collections::BTreeSet::new();
     for row in rows {
         let Some(slot) = row.get::<Option<String>, _>("slot_key") else {
@@ -19,14 +72,14 @@ pub(crate) async fn activate_deferred_images_in(
             continue;
         }
         let version: String = row.get("source_version");
-        if !source::current(
+        let selected = sources.get(&(work, slot.clone()));
+        if !source::image_current(
             conn,
-            work,
-            "image",
-            Some(&slot),
+            &slot,
             &version,
             row.get("derivative_ref"),
             as_of,
+            selected,
         )
         .await?
         {
@@ -44,10 +97,8 @@ pub(crate) async fn activate_deferred_images_in(
         };
         let current_source: String = row.get("unit_source");
         if marker["baseSource"] == current_source && current_source != version {
-            if let Some((_, sha)) =
-                crate::research_dossier::displayed_image_source_in(conn, work, &slot, as_of).await?
-            {
-                if !source::has_image_blob(conn, &current_source, &sha, as_of).await? {
+            if let Some((_, sha)) = selected {
+                if !source::has_image_blob(conn, &current_source, sha, as_of).await? {
                     // An edit to different old bytes is preserved in history and does not invalidate the new image.
                     expected = row.get("unit_current");
                 }
@@ -86,6 +137,7 @@ pub(crate) async fn activate_deferred_images_in(
                 },
             },
             Some(row.get("reading_ref")),
+            Some(&image_context),
         )
         .await?;
     }
@@ -96,38 +148,60 @@ pub async fn publish_in(
     conn: &mut PgConnection,
     input: NewReading,
 ) -> Result<PublishedReading, sqlx::Error> {
-    publish(conn, input, None).await
+    publish(conn, input, None, None).await
 }
 
 async fn publish(
     conn: &mut PgConnection,
     mut input: NewReading,
     saved_reading: Option<Uuid>,
+    images: Option<&ImageContext<'_>>,
 ) -> Result<PublishedReading, sqlx::Error> {
     validate_input(&input)?;
     lock_work(conn, input.content_public_ref).await?;
     let mut unit = ensure_unit(conn, &input).await?;
-    let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut *conn)
-        .await?;
-    let current_source = source::current(
+    let now: String = if let Some(images) = images {
+        images.as_of.to_owned()
+    } else {
+        sqlx::query_scalar("SELECT scope_001_now()::text")
+            .fetch_one(&mut *conn)
+            .await?
+    };
+    let current_source = source_current(
         conn,
-        unit.work,
-        &unit.kind,
-        unit.slot.as_deref(),
+        &unit,
         &input.source_version,
         input.derivative_ref,
         &now,
+        images,
     )
     .await?;
     let original_current = unit.current;
-    let expected_matches = match input.publication {
+    let expected_current = match input.publication {
         Publication::Automatic { expected_current }
-        | Publication::Requested { expected_current } => expected_current == original_current,
+        | Publication::Requested { expected_current } => expected_current,
     };
+    let mut expected_matches = expected_current == original_current;
+    if !expected_matches
+        && current_source
+        && unit.kind == "image"
+        && unit.source != input.source_version
+    {
+        if let Some(slot) = unit.slot.as_deref() {
+            let selected = if let Some(images) = images {
+                images.sources.get(&(unit.work, slot.to_owned())).cloned()
+            } else {
+                crate::research_dossier::displayed_image_source_in(conn, unit.work, slot, &now)
+                    .await?
+            };
+            if let Some((_, sha)) = selected {
+                // A change to old, different bytes must not suppress the new source.
+                expected_matches = !source::has_image_blob(conn, &unit.source, &sha, &now).await?;
+            }
+        }
+    }
     let requested = matches!(input.publication, Publication::Requested { .. }) && expected_matches;
     if !current_source
-        && expected_matches
         && unit.kind == "image"
         && input.source_location.get(DEFERRED_IMAGE).is_none()
     {
@@ -141,7 +215,7 @@ async fn publish(
             )
             .await?
             {
-                input.source_location[DEFERRED_IMAGE] = json!({"expectedCurrent":original_current,"baseSource":unit.source,"requested":matches!(input.publication, Publication::Requested { .. })});
+                input.source_location[DEFERRED_IMAGE] = json!({"expectedCurrent":expected_current,"baseSource":unit.source,"requested":matches!(input.publication, Publication::Requested { .. })});
             }
         }
     }
@@ -158,16 +232,7 @@ async fn publish(
         .fetch_one(&mut *conn)
         .await?;
         source::unrestricted(conn, &unit, derivative, &unit.source).await?
-            && source::current(
-                conn,
-                unit.work,
-                &unit.kind,
-                unit.slot.as_deref(),
-                &unit.source,
-                derivative,
-                &now,
-            )
-            .await?
+            && source_current(conn, &unit, &unit.source, derivative, &now, images).await?
     } else {
         false
     };

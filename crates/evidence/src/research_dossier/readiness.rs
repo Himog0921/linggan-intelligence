@@ -56,7 +56,7 @@ pub fn material_readiness(dossier: &ResearchDossier) -> MaterialReadiness {
         result.gap(
             "image_update_pending",
             MaterialState::Blocked,
-            "新图集尚未全部取得，当前展示旧版本。",
+            "新图集尚未全部取得。",
             None,
         );
     }

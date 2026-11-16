@@ -257,6 +257,8 @@ if [[ "${1:-}" == "--dossier-input" ]]; then
   cargo_proof -p linggan-evidence --test media_processor_requeue_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test research_dossier_postgres --locked -- --ignored --nocapture
   cargo_proof -p linggan-evidence --test material_reading_postgres --locked -- --ignored --nocapture
+  cargo_proof -p linggan-evidence --test creator_discovery_postgres --locked list_read::paged_unjudged_creators_expand_only_visible_dossiers_without_losing_counts -- --ignored --exact --nocapture
+  cargo_proof -p linggan-intelligence --lib --locked ai_foundation::content_understanding::topic_tests::pending_image_update_excludes_the_same_partial_core_from_topic_inputs -- --ignored --exact --nocapture
   cargo_proof -p linggan-api --bin linggan-api dossier_http_ --locked -- --ignored --nocapture
   echo "RESEARCH-DOSSIER-V2 canonical inputs, immutable readings and HTTP proof passed"
   exit 0

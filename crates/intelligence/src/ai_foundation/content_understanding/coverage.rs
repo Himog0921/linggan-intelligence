@@ -44,11 +44,18 @@ pub(crate) async fn scope_coverage(
 }
 
 fn classify(saved: &[String], current: &str, ready: bool) -> &'static str {
-    if ready && saved.iter().any(|identity| identity == current) {
+    if saved
+        .iter()
+        .any(|identity| qualified(identity, current, ready))
+    {
         "available"
     } else {
         "stale"
     }
+}
+
+pub(super) fn qualified(saved: &str, current: &str, ready: bool) -> bool {
+    ready && saved == current
 }
 
 #[cfg(test)]

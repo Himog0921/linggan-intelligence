@@ -11,7 +11,7 @@ pub(super) struct Inventory {
     pub slots: Vec<Value>,
     pub manifest: Option<Value>,
     pub pending_image_update: bool,
-    pub pending_image_package: Option<Uuid>,
+    pub pending_image_packages: Vec<Uuid>,
     pub tags: BTreeMap<Uuid, Value>,
 }
 
@@ -31,7 +31,7 @@ pub(super) async fn read_in(
         result
             .entry(version.work_ref)
             .or_default()
-            .pending_image_package = version.pending_package;
+            .pending_image_packages = version.pending_packages.clone();
         if let Some(manifest) = &version.manifest {
             result.entry(version.work_ref).or_default().manifest = Some(manifest.clone());
         }
@@ -156,7 +156,7 @@ struct ImageVersion {
     #[serde(skip)]
     pending_update: bool,
     #[serde(skip)]
-    pending_package: Option<Uuid>,
+    pending_packages: Vec<Uuid>,
 }
 
 async fn read_image_versions(
@@ -209,8 +209,7 @@ WITH manifests AS MATERIALIZED (
         COALESCE(ready.package_ref,CASE WHEN NOT legacy.exists THEN first.package_ref END) AS package_ref,
         CASE WHEN ready.package_ref IS NULL AND legacy.exists THEN first.accepted_at::text END AS legacy_cutoff,
         COALESCE(ready.inventory,CASE WHEN NOT legacy.exists THEN first.inventory END) AS inventory,
-        latest.package_ref IS DISTINCT FROM ready.package_ref AS pending_update,
-        CASE WHEN latest.package_ref IS DISTINCT FROM ready.package_ref THEN latest.package_ref END AS pending_package
+        latest.package_ref IS DISTINCT FROM ready.package_ref AS pending_update
  FROM first_manifest first LEFT JOIN ready USING(work_ref) JOIN latest_manifest latest USING(work_ref)
  CROSS JOIN LATERAL (
    SELECT EXISTS (
@@ -225,8 +224,14 @@ WITH manifests AS MATERIALIZED (
    ) AS exists
  ) legacy
 )
-SELECT work_ref,package_ref,legacy_cutoff,pending_update,pending_package,
-       inventory || jsonb_build_object('packageRef',package_ref) AS manifest
+SELECT selected.work_ref,selected.package_ref,selected.legacy_cutoff,selected.pending_update,
+       selected.inventory || jsonb_build_object('packageRef',selected.package_ref) AS manifest,
+       ARRAY(SELECT DISTINCT candidate.package_ref FROM manifests candidate
+             WHERE candidate.work_ref=selected.work_ref AND (selected.package_ref IS NULL OR
+               (candidate.accepted_at,candidate.created_at,candidate.package_ref) >
+               (SELECT shown.accepted_at,shown.created_at,shown.package_ref FROM manifests shown
+                WHERE shown.work_ref=selected.work_ref AND shown.package_ref=selected.package_ref
+                ORDER BY shown.created_at DESC LIMIT 1))) AS pending_packages
 FROM selected
 "#,
     )
@@ -239,7 +244,7 @@ FROM selected
             legacy_cutoff: row.try_get("legacy_cutoff")?,
             manifest: row.try_get("manifest")?,
             pending_update: row.try_get("pending_update")?,
-            pending_package: row.try_get("pending_package")?,
+            pending_packages: row.try_get("pending_packages")?,
         })
     })
     .fetch_all(&mut *conn)

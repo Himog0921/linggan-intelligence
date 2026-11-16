@@ -491,6 +491,409 @@ async fn staged_image_reading_is_selected_after_the_complete_set_arrives() {
     );
 }
 
+async fn edit_displayed_image(db: &Database, work: Uuid, source: Uuid, current: Uuid) -> Uuid {
+    let before = dossier::read(db, work).await.unwrap().unwrap();
+    let unit: Uuid = material(&before, "image")["ref"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    material_reading::review_reading(
+        db,
+        unit,
+        &material_reading::ReviewReadingRequest {
+            command_ref: Uuid::new_v4(),
+            expected_current_revision_ref: Some(current),
+            unit_ref: unit.to_string(),
+            source_version: source.to_string(),
+            action: "edit".into(),
+            actor: "synthetic-editor".into(),
+            reason: "Correct the displayed image".into(),
+            edited_blocks: Some(vec![
+                json!({"kind":"paragraph","text":"旧图人工校对","speaker":"unconfirmed"}),
+            ]),
+            verified: true,
+            resolved_issue_keys: vec![],
+        },
+    )
+    .await
+    .unwrap();
+    let edited = dossier::read(db, work).await.unwrap().unwrap();
+    material(&edited, "image")["currentRevisionRef"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn old_image_edit_during_recognition_does_not_hide_new_bytes() {
+    for completes_first in [true, false] {
+        let db = fixture::proof_database(if completes_first {
+            "image_edit_early_ocr"
+        } else {
+            "image_edit_late_ocr"
+        })
+        .await;
+        let id = if completes_first {
+            "early-ocr"
+        } else {
+            "late-ocr"
+        };
+        let work = detail(&db, id, json!({"bodyText":""})).await;
+        let old = images(&db, id, 1, &[("image", 1, 'a')]).await;
+        let slot = format!("xhs:{id}:image:1");
+        let original = publish_image(
+            &db,
+            work,
+            &slot,
+            old[0],
+            "旧图",
+            material_reading::Publication::Automatic {
+                expected_current: None,
+            },
+        )
+        .await;
+        let next = observe_images(&db, id, 2, &[("image", 1, 'b'), ("image", 2, 'c')]).await;
+        let first = store_image(&db, next[0], 'b').await;
+        let edited = edit_displayed_image(&db, work, old[0], original.reading_ref).await;
+        if !completes_first {
+            store_image(&db, next[1], 'c').await;
+        }
+        let reading = publish_image(
+            &db,
+            work,
+            &slot,
+            first,
+            "新图识读",
+            material_reading::Publication::Automatic {
+                expected_current: Some(original.reading_ref),
+            },
+        )
+        .await;
+        if completes_first {
+            assert!(
+                !reading.current,
+                "the old image stays selected while the set is incomplete"
+            );
+            store_image(&db, next[1], 'c').await;
+        }
+        let after = dossier::read(&db, work).await.unwrap().unwrap();
+        assert_eq!(
+            material(&after, "image")["currentRevisionRef"],
+            json!(reading.reading_ref)
+        );
+        assert_eq!(material(&after, "image")["blocks"][0]["text"], "新图识读");
+        let preserved: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM linggan_material_reading WHERE reading_ref=$1)",
+        )
+        .bind(edited)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert!(
+            preserved,
+            "the edit to old bytes remains in immutable history"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn same_image_bytes_keep_human_edit_after_stale_ocr_finishes() {
+    let db = fixture::proof_database("image_same_bytes_stale_ocr").await;
+    let id = "same-bytes-stale";
+    let work = detail(&db, id, json!({"bodyText":""})).await;
+    let old = images(&db, id, 1, &[("image", 1, 'a')]).await;
+    let slot = format!("xhs:{id}:image:1");
+    let original = publish_image(
+        &db,
+        work,
+        &slot,
+        old[0],
+        "旧识读",
+        material_reading::Publication::Automatic {
+            expected_current: None,
+        },
+    )
+    .await;
+    let next = observe_images(&db, id, 2, &[("image", 1, 'a'), ("image", 2, 'b')]).await;
+    let first = store_image(&db, next[0], 'a').await;
+    let edited = edit_displayed_image(&db, work, old[0], original.reading_ref).await;
+    let reading = publish_image(
+        &db,
+        work,
+        &slot,
+        first,
+        "过期识读",
+        material_reading::Publication::Automatic {
+            expected_current: Some(original.reading_ref),
+        },
+    )
+    .await;
+    assert!(!reading.current);
+    store_image(&db, next[1], 'b').await;
+    let after = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(
+        material(&after, "image")["currentRevisionRef"],
+        json!(edited)
+    );
+    assert_eq!(
+        material(&after, "image")["blocks"][0]["text"],
+        "旧图人工校对"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn intermediate_image_set_keeps_its_reading_when_newer_set_is_pending() {
+    let db = fixture::proof_database("image_interleaved_manifests").await;
+    let id = "interleaved-images";
+    let work = detail(&db, id, json!({"bodyText":""})).await;
+    let old = images(&db, id, 1, &[("image", 1, 'a')]).await;
+    let slot = format!("xhs:{id}:image:1");
+    let original = publish_image(
+        &db,
+        work,
+        &slot,
+        old[0],
+        "旧图",
+        material_reading::Publication::Automatic {
+            expected_current: None,
+        },
+    )
+    .await;
+    let middle = observe_images(&db, id, 2, &[("image", 1, 'b'), ("image", 2, 'c')]).await;
+    let first = store_image(&db, middle[0], 'b').await;
+    let _newest = observe_images(&db, id, 2, &[("image", 1, 'd'), ("image", 2, 'e')]).await;
+    let reading = publish_image(
+        &db,
+        work,
+        &slot,
+        first,
+        "中间版本识读",
+        material_reading::Publication::Automatic {
+            expected_current: Some(original.reading_ref),
+        },
+    )
+    .await;
+    assert!(!reading.current);
+    store_image(&db, middle[1], 'c').await;
+    let after = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(
+        material(&after, "image")["currentRevisionRef"],
+        json!(reading.reading_ref)
+    );
+    assert_eq!(
+        material(&after, "image")["blocks"][0]["text"],
+        "中间版本识读"
+    );
+    assert!(
+        after.coverage["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "image_update_pending")
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn first_pending_image_set_does_not_claim_an_older_version() {
+    let db = fixture::proof_database("first_pending_image_message").await;
+    let work = detail(&db, "first-pending", json!({"bodyText":""})).await;
+    observe_images(
+        &db,
+        "first-pending",
+        2,
+        &[("image", 1, 'a'), ("image", 2, 'b')],
+    )
+    .await;
+    let dossier = dossier::read(&db, work).await.unwrap().unwrap();
+    let readiness = dossier::material_readiness(&dossier);
+    let gap = readiness
+        .gaps
+        .iter()
+        .find(|gap| gap.code == "image_update_pending")
+        .unwrap();
+    assert_eq!(gap.message, "新图集尚未全部取得。");
+    assert!(!gap.message.contains("旧版本"));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL lock proof"]
+async fn image_admission_and_recognition_serialize_without_losing_the_reading() {
+    use std::time::{Duration, Instant};
+    let db = fixture::proof_database("image_admission_reading_lock").await;
+    let id = "image-lock";
+    let work = detail(&db, id, json!({"bodyText":""})).await;
+    let old = images(&db, id, 1, &[("image", 1, 'a')]).await;
+    let slot = format!("xhs:{id}:image:1");
+    let original = publish_image(
+        &db,
+        work,
+        &slot,
+        old[0],
+        "旧图",
+        material_reading::Publication::Automatic {
+            expected_current: None,
+        },
+    )
+    .await;
+    let next = observe_images(&db, id, 2, &[("image", 1, 'b'), ("image", 2, 'c')]).await;
+    let first = store_image(&db, next[0], 'b').await;
+    let mut barrier = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(420,hashtext($1::text))")
+        .bind(work.to_string())
+        .execute(&mut *barrier)
+        .await
+        .unwrap();
+
+    let read_db = db.clone();
+    let read_slot = slot.clone();
+    let recognition = tokio::spawn(async move {
+        publish_image(
+            &read_db,
+            work,
+            &read_slot,
+            first,
+            "并发新图识读",
+            material_reading::Publication::Automatic {
+                expected_current: Some(original.reading_ref),
+            },
+        )
+        .await
+    });
+    let write_db = db.clone();
+    let last = next[1];
+    let admission = tokio::spawn(async move { store_image(&write_db, last, 'c').await });
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let waiting: i64 = sqlx::query_scalar("SELECT count(*) FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory' AND query LIKE 'SELECT pg_advisory_xact_lock(420,%'")
+                .fetch_one(db.pool()).await.unwrap();
+            if waiting >= 2 { break; }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("both actual operations must wait on the same work lock");
+    let start = Instant::now();
+    barrier.rollback().await.unwrap();
+    let reading = tokio::time::timeout(Duration::from_secs(20), recognition)
+        .await
+        .unwrap()
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(20), admission)
+        .await
+        .unwrap()
+        .unwrap();
+    eprintln!(
+        "synthetic image admission and reading completed after lock release in {} ms",
+        start.elapsed().as_millis()
+    );
+    let after = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(
+        material(&after, "image")["currentRevisionRef"],
+        json!(reading.reading_ref)
+    );
+    assert_eq!(
+        material(&after, "image")["blocks"][0]["text"],
+        "并发新图识读"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL performance proof"]
+async fn image_cutover_reuses_one_inventory_for_many_pending_readings() {
+    use std::time::Instant;
+    let db = fixture::proof_database("image_cutover_many_pending").await;
+    let id = "many-pending-images";
+    let work = detail(&db, id, json!({"bodyText":""})).await;
+    let old = images(&db, id, 1, &[("image", 1, 'f')]).await;
+    let first_slot = format!("xhs:{id}:image:1");
+    let original = publish_image(
+        &db,
+        work,
+        &first_slot,
+        old[0],
+        "旧图",
+        material_reading::Publication::Automatic {
+            expected_current: None,
+        },
+    )
+    .await;
+    let slots: Vec<_> = (1..=20).map(|page| ("image", page, 'a')).collect();
+    let next = observe_images(&db, id, 20, &slots).await;
+    let mut readings = Vec::new();
+    for (index, observation) in next.iter().take(19).enumerate() {
+        let hash = format!("{:064x}", index + 1);
+        let source = admit_media_blob(
+            &db,
+            *observation,
+            &hash,
+            "image/jpeg",
+            12,
+            &format!("blobs/{hash}.jpg"),
+        )
+        .await
+        .unwrap()
+        .materialization_ref;
+        let slot = format!("xhs:{id}:image:{}", index + 1);
+        let expected = (index == 0).then_some(original.reading_ref);
+        readings.push(
+            publish_image(
+                &db,
+                work,
+                &slot,
+                source,
+                "合成识读",
+                material_reading::Publication::Automatic {
+                    expected_current: expected,
+                },
+            )
+            .await
+            .reading_ref,
+        );
+    }
+    sqlx::query("SELECT public.pg_stat_statements_reset()")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let hash = format!("{:064x}", 20);
+    let start = Instant::now();
+    admit_media_blob(
+        &db,
+        next[19],
+        &hash,
+        "image/jpeg",
+        12,
+        &format!("blobs/{hash}.jpg"),
+    )
+    .await
+    .unwrap();
+    let elapsed = start.elapsed();
+    let inventory_reads: i64 = sqlx::query_scalar("SELECT coalesce(sum(calls),0)::bigint FROM public.pg_stat_statements WHERE query LIKE '%WITH manifests AS MATERIALIZED (%'")
+        .fetch_one(db.pool()).await.unwrap();
+    eprintln!(
+        "synthetic 20-page cutover: {} pending readings, {} inventory reads, {} ms",
+        readings.len(),
+        inventory_reads,
+        elapsed.as_millis()
+    );
+    assert!(
+        (1..=2).contains(&inventory_reads),
+        "cutover must share one canonical inventory, got {inventory_reads}"
+    );
+    let after = dossier::read(&db, work).await.unwrap().unwrap();
+    let selected = after
+        .materials
+        .iter()
+        .filter(|material| {
+            material["kind"] == "image" && material["currentRevisionRef"].is_string()
+        })
+        .count();
+    assert_eq!(selected, readings.len());
+}
+
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
 async fn partial_media_observations_do_not_erase_the_latest_complete_inventory() {
@@ -722,6 +1125,13 @@ async fn publish_image(
     text: &str,
     publication: material_reading::Publication,
 ) -> material_reading::PublishedReading {
+    let hash: String = sqlx::query_scalar(
+        "SELECT blob_sha256 FROM linggan_media_materialization WHERE materialization_ref=$1",
+    )
+    .bind(source)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
     let mut tx = db.pool().begin().await.unwrap();
     let result = material_reading::publish_in(
         &mut tx,
@@ -741,7 +1151,7 @@ async fn publish_image(
                 json!({"ref":"source-line","kind":"paragraph","text":text,"speaker":"unconfirmed"}),
             ],
             issues: vec![],
-            source_location: json!({}),
+            source_location: json!({"blobSha256":hash}),
             publication,
         },
     )

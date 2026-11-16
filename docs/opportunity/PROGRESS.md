@@ -533,3 +533,14 @@
 - 独立增量复核 `95dd473e..dfc10cd8` 后，第一项只能证明已覆盖的顺序场景，仍有两处静态发现：① 新图 OCR 先领取、旧图随后编辑、OCR 再完成时可能不记录待接续标记，切换后读本仍不显示（P1）；② 两个新版图集交错时，较早新版的识读可能不记录待接续标记，先齐全后仍不显示（P2）。现有测试没有覆盖这两种顺序。
 - 第二项仍有静态发现：旧材料在待更新前后均为 `partial` 时，材料身份可能不变，话题研究可能继续使用旧 Core，而覆盖统计将其标为 stale（P2）；首次图集未齐且没有旧图时，提示仍可能写“当前展示旧版本”（P3）。独立复核未运行上述场景，也未连接运行库或调用模型；按 Mog 要求只报告，不继续修复。
 - 新增图片入库锁与机会卡短锁未发现直接锁循环，但待选读本较多时重复读取图集可能增加事务和锁持有时间，尚未测量。上述 `6 passed` 的媒体并发测试使用视频素材，未覆盖新增图片锁与 OCR 并发或机会卡签发竞争。`dfc10cd8` 的 [Delivery 43888272111](https://github.com/Himog0921/linggan-intelligence/actions/runs/43888272111) 已启动；最终结果须以该次及最终 head 的实际结果为准。
+
+### 2026-11-16 PR #603 已知问题集中修复
+
+- Mog 授权修复已报告的图集时序、内容资格、CI、回填目标和相关已知问题，并验证图片入库锁竞争；新发现只报告。对未完整图集的识读接续使用同一展示清单中的所有较新版本：旧图在识读开始后被编辑、两个新版交错以及相同图片字节保留人工内容，均有独立合成用例。批量接续复用同一时点的图集读取。
+- 内容理解的 Core 读取与覆盖统计共用材料身份及就绪资格；首次未完整图集的提示不再断言有旧版。回填脚本要求显式 loopback IP、端口和普通数据库名，拒绝 service、hostaddr、连接串及 PGOPTIONS；目标参数由脚本显式传给 psql。loopback 本身不能证明端口没有转发到远端，实际应用仍需要单独核验目标及获得授权；本轮未运行回填。
+- 修正历史写作升级测试的隔离基线，让 0222 在正向升级中只执行一次；没有更改迁移文件。修复已报告的创作者分页查询统计断言，并把该回归、内容资格回归和回填目标负例接入 CI 相关路径。
+- 以 `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_TARGET_DIR=/private/tmp/opportunity-image-integration-01a1d4e2-target` 运行 `bash /private/tmp/opportunity-pr603-repair-proof.sh --integration-proof`（第二次）→ 底稿 `20 passed`、素材读本 `7 passed`、媒体并发 `6 passed`、创作者分页 `1 passed`、完整性单元 `1 passed`；随后内容资格测试因合成任务配置不足中止。补齐该测试夹具后，`bash /private/tmp/opportunity-pr603-remaining-proof.sh --integration-proof` → 内容资格 `1 passed`、快照锁 `4 passed`、历史写作升级 `1 passed`、目标检查 `4 passed`。两次测试均使用一次性合成 PostgreSQL，无真实模型外发，容器及卷清理已验证。
+- `bash /private/tmp/opportunity-pr603-snapshot-proof.sh --integration-proof` → `4 passed; 0 failed`；实际图片入库先持锁时快照返回 `SourcesBusy`，快照来源表先持锁时图片入库等待并在释放后完成。底稿测试另验证入库与识读共同等待作品锁；20 页、19 条待接续识读的单次合成切换为 `1 inventory reads, 58 ms`，不是生产负载基准。
+- 另运行 `saved_core_drives_topic_queue_and_persisted_membership` → `0 passed; 1 failed`：既有 `topic_research_automation/tests.rs` 仍断言 4 个阶段，而当前 `CURRENT_TASKS` 和实际结果为 1。该断言不在此前报告的修复范围，按要求只记录。首次底稿测试使用缺少图片摘要的合成读本导致同图用例失败，修正夹具后底稿 20 项通过。
+- `bash scripts/ci-preflight.sh origin/main` → Node `52 pass; 0 fail`，回填目标检查 `3 tests OK`；改动 Rust 文件的 `rustfmt --edition 2024 --config skip_children=true --check`、`git diff --check` 和相关 shell 语法检查通过。最终提交的独立审阅与远端 CI 状态以 PR 实际回执为准。
+- 本机 0223 已获单独授权但本轮未执行；0224、生产迁移、真实采集和模型外发未获授权。本轮未部署或启动本机运行库。
