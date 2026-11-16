@@ -43,11 +43,24 @@ impl MaterialReadiness {
 }
 
 pub fn material_readiness(dossier: &ResearchDossier) -> MaterialReadiness {
-    check(
+    let mut result = check(
         &dossier.materials,
         &dossier.media_inventory,
         dossier.coverage["imageInventory"]["expectedPages"].as_u64(),
-    )
+    );
+    if dossier.coverage["issues"].as_array().is_some_and(|issues| {
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "image_update_pending")
+    }) {
+        result.gap(
+            "image_update_pending",
+            MaterialState::Blocked,
+            "新图集尚未全部取得，当前展示旧版本。",
+            None,
+        );
+    }
+    result
 }
 
 fn check(materials: &[Value], slots: &[Value], expected: Option<u64>) -> MaterialReadiness {

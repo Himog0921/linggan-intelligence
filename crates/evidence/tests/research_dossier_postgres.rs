@@ -309,6 +309,12 @@ async fn replacement_image_manifest_waits_for_every_page_receipt() {
             .iter()
             .any(|issue| issue["code"] == "image_update_pending")
     );
+    assert!(
+        dossier::material_readiness(&staged)
+            .gaps
+            .iter()
+            .any(|gap| gap.code == "image_update_pending")
+    );
     let old = staged
         .materials
         .iter()
@@ -362,6 +368,127 @@ async fn replacement_image_manifest_waits_for_every_page_receipt() {
         .unwrap()
         .unwrap();
     assert_eq!(sources(&before_final_receipt), previous);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn staged_image_reading_is_selected_after_the_complete_set_arrives() {
+    let db = fixture::proof_database("dossier_image_deferred_selection").await;
+    let id = "deferred-image";
+    let work = detail(&db, id, json!({"bodyText":""})).await;
+    let old = images(&db, id, 1, &[("image", 1, 'a')]).await;
+    let slot = format!("xhs:{id}:image:1");
+    let original = publish_image(
+        &db,
+        work,
+        &slot,
+        old[0],
+        "旧版",
+        material_reading::Publication::Automatic {
+            expected_current: None,
+        },
+    )
+    .await;
+    let next = observe_images(&db, id, 2, &[("image", 1, 'b'), ("image", 2, 'c')]).await;
+    let first = store_image(&db, next[0], 'b').await;
+    let staged = publish_image(
+        &db,
+        work,
+        &slot,
+        first,
+        "已完成的新图识读",
+        material_reading::Publication::Automatic {
+            expected_current: Some(original.reading_ref),
+        },
+    )
+    .await;
+    assert!(!staged.current);
+    let before = dossier::read(&db, work).await.unwrap().unwrap();
+    assert!(
+        before.coverage["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "image_update_pending")
+    );
+    assert_eq!(
+        material(&before, "image")["currentRevisionRef"],
+        json!(original.reading_ref)
+    );
+
+    let old_unit: Uuid = material(&before, "image")["ref"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    material_reading::review_reading(
+        &db,
+        old_unit,
+        &material_reading::ReviewReadingRequest {
+            command_ref: Uuid::new_v4(),
+            expected_current_revision_ref: Some(original.reading_ref),
+            unit_ref: old_unit.to_string(),
+            source_version: old[0].to_string(),
+            action: "edit".into(),
+            actor: "synthetic-editor".into(),
+            reason: "Correct the still displayed image".into(),
+            edited_blocks: Some(vec![
+                json!({"kind":"paragraph","text":"旧图人工校对","speaker":"unconfirmed"}),
+            ]),
+            verified: true,
+            resolved_issue_keys: vec![],
+        },
+    )
+    .await
+    .unwrap();
+    let edited = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(
+        material(&edited, "image")["blocks"][0]["text"],
+        "旧图人工校对"
+    );
+    let edited_reading: Uuid = material(&edited, "image")["currentRevisionRef"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+
+    store_image(&db, next[1], 'c').await;
+    let after = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(
+        material(&after, "image")["currentRevisionRef"],
+        json!(staged.reading_ref)
+    );
+    assert_eq!(
+        material(&after, "image")["blocks"][0]["text"],
+        "已完成的新图识读"
+    );
+    let old_edit_preserved: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_material_reading WHERE reading_ref=$1)",
+    )
+    .bind(edited_reading)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(old_edit_preserved, "the old image edit remains in history");
+    assert!(
+        !after.coverage["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "image_update_pending")
+    );
+    store_image(&db, next[1], 'c').await;
+    let selection_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_reading_selection WHERE reading_ref=$1",
+    )
+    .bind(staged.reading_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        selection_count, 1,
+        "replayed material admission cannot duplicate selection"
+    );
 }
 
 #[tokio::test]

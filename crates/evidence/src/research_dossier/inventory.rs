@@ -11,6 +11,7 @@ pub(super) struct Inventory {
     pub slots: Vec<Value>,
     pub manifest: Option<Value>,
     pub pending_image_update: bool,
+    pub pending_image_package: Option<Uuid>,
     pub tags: BTreeMap<Uuid, Value>,
 }
 
@@ -27,6 +28,10 @@ pub(super) async fn read_in(
             .entry(version.work_ref)
             .or_default()
             .pending_image_update = version.pending_update;
+        result
+            .entry(version.work_ref)
+            .or_default()
+            .pending_image_package = version.pending_package;
         if let Some(manifest) = &version.manifest {
             result.entry(version.work_ref).or_default().manifest = Some(manifest.clone());
         }
@@ -150,6 +155,8 @@ struct ImageVersion {
     manifest: Option<Value>,
     #[serde(skip)]
     pending_update: bool,
+    #[serde(skip)]
+    pending_package: Option<Uuid>,
 }
 
 async fn read_image_versions(
@@ -202,7 +209,8 @@ WITH manifests AS MATERIALIZED (
         COALESCE(ready.package_ref,CASE WHEN NOT legacy.exists THEN first.package_ref END) AS package_ref,
         CASE WHEN ready.package_ref IS NULL AND legacy.exists THEN first.accepted_at::text END AS legacy_cutoff,
         COALESCE(ready.inventory,CASE WHEN NOT legacy.exists THEN first.inventory END) AS inventory,
-        latest.package_ref IS DISTINCT FROM ready.package_ref AS pending_update
+        latest.package_ref IS DISTINCT FROM ready.package_ref AS pending_update,
+        CASE WHEN latest.package_ref IS DISTINCT FROM ready.package_ref THEN latest.package_ref END AS pending_package
  FROM first_manifest first LEFT JOIN ready USING(work_ref) JOIN latest_manifest latest USING(work_ref)
  CROSS JOIN LATERAL (
    SELECT EXISTS (
@@ -217,7 +225,7 @@ WITH manifests AS MATERIALIZED (
    ) AS exists
  ) legacy
 )
-SELECT work_ref,package_ref,legacy_cutoff,pending_update,
+SELECT work_ref,package_ref,legacy_cutoff,pending_update,pending_package,
        inventory || jsonb_build_object('packageRef',package_ref) AS manifest
 FROM selected
 "#,
@@ -231,6 +239,7 @@ FROM selected
             legacy_cutoff: row.try_get("legacy_cutoff")?,
             manifest: row.try_get("manifest")?,
             pending_update: row.try_get("pending_update")?,
+            pending_package: row.try_get("pending_package")?,
         })
     })
     .fetch_all(&mut *conn)

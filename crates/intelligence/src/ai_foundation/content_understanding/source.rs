@@ -119,6 +119,10 @@ pub(super) fn from_dossier(
         .count() as u64;
     let readiness = linggan_evidence::research_dossier::material_readiness(&d);
     let complete = readiness.kind != linggan_evidence::research_dossier::NoteKind::Video
+        && !readiness
+            .gaps
+            .iter()
+            .any(|gap| gap.code == "image_update_pending")
         && d.coverage["imageInventory"]["expectedPages"].as_u64() == Some(image_slots)
         && inventory
             .iter()
@@ -234,4 +238,52 @@ pub(crate) async fn images_in(
         );
     }
     Ok(images)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use linggan_evidence::research_dossier::ResearchDossier;
+
+    #[test]
+    fn pending_image_update_cannot_be_reported_as_complete() {
+        let source = Uuid::new_v4();
+        let mut dossier = ResearchDossier {
+            contract: "research-dossier.v2",
+            work_ref: Uuid::new_v4(),
+            revision: "r".into(),
+            material_revision: "m".into(),
+            as_of: "2026-11-16T00:00:00Z".into(),
+            note: json!({}),
+            materials: vec![
+                json!({"kind":"body","sourceRef":"native","sourceState":"known_empty","blocks":[]}),
+            ],
+            reading_view: json!({}),
+            coverage: json!({"imageInventory":{"expectedPages":1},"issues":[]}),
+            attachments: json!({}),
+            selection: json!({}),
+            fragments: vec![],
+            media: vec![],
+            media_inventory: vec![
+                json!({"slotKey":"image:1","purpose":"body_image","component":"image","page":1,
+                "displayOrderState":"KNOWN","sourceRef":source,"sourceVersion":source.to_string(),"blobSha256":"a".repeat(64),
+                "sourceState":"present","originalUrl":"/local/image","localReadable":true}),
+            ],
+            candidate_statuses: vec![],
+            metadata: json!({}),
+        };
+        let complete = from_dossier(dossier.clone(), "2026-11-16T00:00:00Z").unwrap();
+        assert_eq!(complete.snapshot.coverage_mode, "complete");
+        dossier.coverage["issues"] = json!([{"code":"image_update_pending"}]);
+        let pending = from_dossier(dossier, "2026-11-16T00:00:00Z").unwrap();
+        assert_eq!(pending.snapshot.coverage_mode, "partial");
+        assert_eq!(pending.coverage["materialReadiness"]["state"], "blocked");
+        assert!(
+            pending.coverage["materialReadiness"]["gaps"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|gap| gap["code"] == "image_update_pending")
+        );
+    }
 }
