@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, render, screen, within } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -24,7 +24,7 @@ function fixture() {
   return card;
 }
 
-function setup(search: string, custom?: (url: URL) => Response | undefined) {
+function setup(search: string, custom?: (url: URL) => Response | Promise<Response> | undefined) {
   const card = fixture();
   const calls: URL[] = [];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -45,6 +45,10 @@ function setup(search: string, custom?: (url: URL) => Response | undefined) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('机会卡页面', () => {
+  it('开关关闭时直接访问说明未启用', () => {
+    render(<OpportunityStatusContext.Provider value={{ state: 'disabled', retry: () => {} }}><OpportunityPage /></OpportunityStatusContext.Provider>);
+    expect(screen.getByRole('heading', { name: '机会卡未启用' })).toBeVisible();
+  });
   it('按服务端周对比展示列表，三个真实入口保留领域', async () => {
     const { calls } = setup(`domain=${DOMAIN}`);
     const table = await screen.findByRole('table', { name: '本周观察到上升的问题' });
@@ -64,6 +68,8 @@ describe('机会卡页面', () => {
     expect(screen.getAllByText('姓名未知').length).toBeGreaterThan(0);
     expect(screen.getAllByText('观察状态未知').length).toBeGreaterThan(0);
     expect(screen.getAllByText('样本不足，暂不排序').length).toBeGreaterThan(0);
+    expect(screen.getByText('周期 2026-11-09 提及人数')).toBeVisible();
+    expect(document.body).toHaveTextContent('提及 4 人 · 有效评论 60 条');
     expect(screen.getAllByRole('img', { name: /提及率每千/ }).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
     expect(await screen.findByText(/依据读取于/)).toBeVisible();
@@ -76,12 +82,69 @@ describe('机会卡页面', () => {
     failed = true;
     await act(async () => { await client.invalidateQueries({ queryKey: ['opportunity', 'card', DOMAIN, PROBLEM] }); });
     expect(await screen.findByRole('alert')).toHaveTextContent('部分来源已不可用');
+    await waitFor(() => expect(screen.queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument());
+  });
+  it('卡片重读尚未完成时不继续显示旧原声', async () => {
+    let slow = false; let finish: (value: Response) => void = () => {};
+    const pending = new Promise<Response>(resolve => { finish = resolve; });
+    const { client } = setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => url.pathname.endsWith('/card') && slow ? pending : undefined);
+    await screen.findByText('SYNTHETIC 原声 c-work-0-2');
+    slow = true; let refresh: Promise<void> | undefined;
+    await act(async () => { refresh = client.invalidateQueries({ queryKey: ['opportunity', 'card', DOMAIN, PROBLEM] }); });
+    await waitFor(() => expect(screen.queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument());
+    expect(screen.getByRole('status')).toHaveTextContent('正在读取机会卡');
+    await act(async () => { finish(reply(fixture())); await refresh; });
+    expect(await screen.findByText('SYNTHETIC 原声 c-work-0-2')).toBeVisible();
+  });
+  it('评论依据重读尚未完成时不继续显示旧原声', async () => {
+    let slow = false; let finish: (value: Response) => void = () => {};
+    const pending = new Promise<Response>(resolve => { finish = resolve; });
+    const { client } = setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => url.pathname.endsWith('/evidence') && slow ? pending : undefined);
+    await screen.findByRole('heading', { name: '合成的用户问题' });
+    await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
+    const panel = screen.getByRole('heading', { name: '判断与依据' }).closest('section');
+    if (!panel) throw new Error('evidence panel missing');
+    expect(await within(panel).findByText('SYNTHETIC 原声 c-work-0-2')).toBeVisible();
+    slow = true; let refresh: Promise<void> | undefined;
+    await act(async () => { refresh = client.invalidateQueries({ queryKey: ['opportunity', 'evidence', DOMAIN, PROBLEM] }); });
+    await waitFor(() => expect(within(panel).queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument());
+    expect(within(panel).getByRole('status')).toHaveTextContent('正在读取依据');
+    const card = fixture();
+    await act(async () => { finish(reply({ kind: 'comments', cardAsOf: card.asOf, items: card.demand.sampleVoices, excluded: {}, page: { nextCursor: null, hasMore: false, asOf: card.asOf } })); await refresh; });
+    expect(await within(panel).findByText('SYNTHETIC 原声 c-work-0-2')).toBeVisible();
+  });
+  it('依据读取失败时也隐藏卡片原声，成功重读卡片后恢复', async () => {
+    let failure = true;
+    setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => url.pathname.endsWith('/evidence') && failure ? reply({ code: 'opportunity_card_source_unavailable' }, 503) : undefined);
+    await screen.findByText('SYNTHETIC 原声 c-work-0-2');
+    await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('依据未能确认，已隐藏原声');
     expect(screen.queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument();
+    failure = false;
+    await userEvent.click(screen.getByRole('button', { name: '重新读取卡片' }));
+    expect(await screen.findByText('SYNTHETIC 原声 c-work-0-2')).toBeVisible();
   });
   it('卡片版本发生变化时不混合展示不同版本的依据', async () => {
     setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => url.pathname.endsWith('/evidence') ? reply({ kind: 'comments', cardAsOf: '2026-11-11T00:00:00Z', items: [], excluded: {}, page: { nextCursor: null, hasMore: false, asOf: '2026-11-11T00:00:00Z' } }) : undefined);
     await screen.findByRole('heading', { name: '合成的用户问题' });
     await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('卡片已更新');
+  });
+  it('卡片和依据版本交错时可重新读取并恢复', async () => {
+    let reads = 0; const card = fixture();
+    setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => {
+      if (!url.pathname.endsWith('/evidence')) return undefined;
+      reads += 1;
+      const asOf = reads === 1 ? '2026-11-11T00:00:00Z' : card.asOf;
+      return reply({ kind: 'comments', cardAsOf: asOf, items: [], excluded: {}, page: { nextCursor: null, hasMore: false, asOf } });
+    });
+    await screen.findByRole('heading', { name: '合成的用户问题' });
+    await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('卡片已更新');
+    await userEvent.click(screen.getByRole('button', { name: '重新读取卡片' }));
+    await screen.findByRole('heading', { name: '合成的用户问题' });
+    await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
+    expect(await screen.findByText(/依据读取于/)).toBeVisible();
+    expect(reads).toBe(2);
   });
 });

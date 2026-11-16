@@ -473,3 +473,12 @@
 - `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-intelligence --lib --locked weekly_comparison_requires_same_known_protocol_and_current_week -- --test-threads=1` → `1 passed; 0 failed`。`cargo test -p linggan-api --locked opportunity_api::tests -- --test-threads=1` → `3 passed; 0 failed; 1 ignored`；忽略的隔离 PostgreSQL HTTP 测试单独运行通过。`cargo test -p linggan-api --locked opportunity_entry_is_available_only_when_enabled -- --test-threads=1` → `1 passed; 0 failed`。
 - `bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`。`node --test scripts/ci-select.test.mjs` → `21 pass; 0 fail`；新浏览器证明纳入现有真实链路及 CI 选择。改动 Rust 文件逐一执行 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0；`git diff --check`、`bash -n scripts/test-web-app-postgres.sh` → exit 0。
 - 页面墓碑文案由 React 测试覆盖；当前标准合成数据未生成真实墓碑原声，截图只证明 P1/P2/P3 标准数据展示。状态：实现与隔离验证完成，独立 review、最终提交的远端 CI、合并、运行环境部署和真实业务验收仍待进行。
+
+### T1.6 / T1.7 独立审阅后的修正
+
+- 独立审阅基线 `a343ba8f`、候选 `39a90f4f`，发现四项本工作包问题：重读或依据读取失败后旧原声仍可能可见；`k` 去重人数被标成评论条数；开关关闭时直接访问未显示“未启用”；卡片与依据版本交错后可能无法恢复。
+- 已集中处理：卡片和依据重读期间隐藏旧正文，依据读取失败时隐藏卡片原声并要求重新读取；将 `k` 和 `n` 分别标明人数与评论数；关闭开关仍提供页面并显示“机会卡未启用”；依据缓存绑定卡片时点并在版本冲突后重置。未引入实时推送，页面保持开启且没有触发重读时，不会主动获知其他窗口发生的来源变化。
+- `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/opportunity/OpportunityPage.test.tsx` → `9 passed; 0 failed`；包括延迟重读、依据失败、版本交错与开关关闭。`cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1793 passed (1793)`。
+- `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-api --locked opportunity_entry_remains_available_when_disabled -- --test-threads=1` → `1 passed; 0 failed`。审阅增量 Rust 文件 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0。
+- `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-reviewed CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`；P1/P2/P3、三类依据及隔离清理再次通过；私有截图已更新为审阅后页面。
+- 后续状态：需对本次修正做独立增量复核，并核实最终提交的远端 CI；尚未合并、部署或进行真实业务验收。

@@ -144,7 +144,6 @@ pub(super) fn routes_for<S: Clone + Send + Sync + 'static>(config: WebAppConfig)
     for page in REACT_PAGES {
         if *page == "/login"
             || *page == "/invite/accept"
-            || (*page == "/opportunity" && !config.opportunity_enabled)
             || AUTHENTICATED_REACT_PAGES.contains(page)
         {
             continue;

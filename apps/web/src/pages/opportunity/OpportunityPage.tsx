@@ -1,7 +1,6 @@
 import { Link, useSearchParams } from 'react-router';
 import { AppShell } from '../../app/AppShell';
 import { useOpportunityStatus } from '../../app/opportunityStatusContext';
-import { NotFoundPage } from '../../app/NotFoundPage';
 import { useCorpusShell } from '../../corpus/useCorpusShell';
 import { DomainPicker } from '../../corpus/DomainPicker';
 import { ContextBreadcrumb } from '../../shared/ContextBar';
@@ -12,7 +11,7 @@ import styles from './Opportunity.module.css';
 
 export function OpportunityPage() {
   const status = useOpportunityStatus();
-  if (status.state === 'disabled') return <NotFoundPage />;
+  if (status.state === 'disabled') return <main className={styles.standalone}><h1>机会卡未启用</h1><p>此功能当前未启用。</p></main>;
   if (status.state === 'loading') return <p role="status">正在确认机会卡状态…</p>;
   if (status.state === 'unavailable') return <main className={styles.standalone}><p role="alert">无法确认机会卡功能状态。</p><button type="button" onClick={status.retry}>重试</button></main>;
   return <Workspace />;
