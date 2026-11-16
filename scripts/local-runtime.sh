@@ -534,6 +534,7 @@ migrate() {
   apply_migration_once "0220_opportunity_valid_work_anchor" "$project_root/database/migrations/0220_opportunity_valid_work_anchor.sql"
   apply_migration_once "0221_opportunity_restriction_trigger_owner" "$project_root/database/migrations/0221_opportunity_restriction_trigger_owner.sql"
   apply_migration_once "0223_opportunity_card_period_index" "$project_root/database/migrations/0223_opportunity_card_period_index.sql"
+  apply_migration_once "0224_content_understanding_deep_v2" "$project_root/database/migrations/0224_content_understanding_deep_v2.sql"
 }
 
 case "$command_name" in

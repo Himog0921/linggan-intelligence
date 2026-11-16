@@ -61,6 +61,7 @@ const paths = {
     'database/migrations/0196_content_understanding.sql',
     'database/migrations/0198_content_understanding_deep.sql',
     'database/migrations/0199_content_understanding_model_deep.sql',
+    'database/migrations/0224_content_understanding_deep_v2.sql',
     'crates/intelligence/src/content_understanding*', 'crates/intelligence/src/content_understanding/**',
     'crates/intelligence/src/ai_foundation/content_understanding*',
     'crates/intelligence/src/ai_foundation/content_understanding/**',
