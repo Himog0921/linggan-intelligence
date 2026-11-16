@@ -92,6 +92,13 @@ async fn author_name_projection_keeps_sourced_names_and_unknowns() {
         .execute(db.pool())
         .await
         .unwrap();
+    let directory_discovery = fixture::submit_package(
+        &db,
+        "profile_discovery",
+        json!({"authorExternalId":"profile-only"}),
+        json!({"kind":"profile_discovery_card","resultPosition":1,"sourceObject":{"platform":"xhs","type":"content","externalId":"creator-name-6"},"payload":{"title":"SYNTHETIC discovery"}}),
+    )
+    .await;
     let profile_target = Uuid::new_v4();
     let request = Uuid::new_v4();
     let decision = Uuid::new_v4();
@@ -115,7 +122,12 @@ async fn author_name_projection_keeps_sourced_names_and_unknowns() {
         .bind(order).bind(request).bind(D).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_work_order_lease(lease_ref,work_order_ref,station_ref,capture_identity,expires_at) VALUES($1,$2,$3,'{}'::jsonb,scope_001_now()+interval '1 day')")
         .bind(lease).bind(order).bind(station).execute(db.pool()).await.unwrap();
-    for (sequence, package) in [(1, older_profile), (2, newer_profile), (3, bad_profile)] {
+    for (sequence, package) in [
+        (1, older_profile),
+        (2, newer_profile),
+        (3, bad_profile),
+        (4, directory_discovery),
+    ] {
         let task: Uuid = sqlx::query_scalar(
             "SELECT task_id FROM linggan_runtime_capture_package WHERE package_ref=$1",
         )
@@ -126,6 +138,52 @@ async fn author_name_projection_keeps_sourced_names_and_unknowns() {
         sqlx::query("INSERT INTO collection_work_order_lease_task(lease_ref,task_id,sequence_no) VALUES($1,$2,$3)")
             .bind(lease).bind(task).bind(sequence).execute(db.pool()).await.unwrap();
     }
+
+    for package in [directory_discovery, older_profile] {
+        sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason) VALUES($1,999,'accepted_for_library_content','synthetic comment')")
+            .bind(package).execute(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_material_comment(material_ref,content_public_ref,package_ref,record_ordinal,comment_external_id,root_comment_external_id,is_reply,body_text,body_state,observed_at) VALUES($1,$2,$3,999,'synthetic-invalid-time','synthetic-invalid-time',false,'SYNTHETIC unavailable','KNOWN','not-a-time')")
+            .bind(Uuid::new_v4()).bind(refs[5]).bind(package).execute(db.pool()).await.unwrap();
+    }
+    let (admitted, selectable, observations): (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM linggan_material_comment_first_admission WHERE content_public_ref=$1), \
+                (SELECT count(*) FROM linggan_material_comment_current WHERE content_public_ref=$1), \
+                (SELECT count(*) FROM linggan_material_comment WHERE content_public_ref=$1)",
+    )
+    .bind(refs[5])
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!((admitted, selectable, observations), (1, 0, 2));
+    let directory = linggan_evidence::read_creator_directory(&db, profile_target, Some(D))
+        .await
+        .unwrap()
+        .unwrap();
+    let work = directory
+        .works
+        .iter()
+        .find(|work| work.public_ref == refs[5])
+        .unwrap();
+    assert_eq!(
+        work.comment_count,
+        Some(1),
+        "an admitted identity remains collected even when its source time is unusable"
+    );
+    let other_directory =
+        linggan_evidence::read_creator_directory(&db, profile_target, Some(OTHER))
+            .await
+            .unwrap()
+            .unwrap();
+    assert!(
+        other_directory
+            .works
+            .iter()
+            .all(|work| work.public_ref != refs[5])
+    );
+    let comments = linggan_evidence::read_dossier_comments(&db, refs[5], None)
+        .await
+        .unwrap();
+    assert_eq!(comments["total"], 0, "unusable originals are not readable");
 
     let mut q: CreatorScope = serde_json::from_value(json!({"domain":D})).unwrap();
     let data = load(&db, &q).await.unwrap();

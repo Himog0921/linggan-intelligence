@@ -683,3 +683,14 @@ multi_identities|28423  admitted_after_work_first_package|11643
 - `linggan_runtime_record_disposition`：`database/migrations/0004_plugin_runtime_all_capabilities.sql:62`。
 - `linggan_runtime_task`：`database/migrations/0004_plugin_runtime_all_capabilities.sql:8`。
 - `observation_domain_target`：`database/migrations/0103_domain_membership_and_usage.sql:15`。
+
+## 13. 目标作品目录的已采评论数
+
+- `crates/evidence/src/target_catalog.rs` 为创作者目录和关键词目录共用作品列表；其 `comment_count` 在 `apps/web/src/pages/collection/targets/TargetWorks.tsx` 标为“已采评论”。
+- `linggan_material_comment_first_admission` 的主键是作品与稳定评论身份，`database/migrations/0125_collection_single_run.sql:136` 建表并回填，评论首次插入时的 trigger 写入。该身份不包含正文，也不依赖单次观察时间可解析。
+- `0219_comment_current_safe_observation` 排除无法解析时间的正文来源；目录的已采数量从首次入档身份计数，证据库可阅读评论页仍只显示可选择的正文来源。两者分别回答采集身份数和可阅读正文数。
+
+## 14. OCR 历史迁移测试与当前共享读取
+
+- `apps/worker/tests/ocr_cleanup_postgres.rs` 的 `baseline` 必须停在 0168 之前，以验证当时的 OCR 清理；该测试仍使用当前 producer/材料读取代码生成合成数据。
+- 当前材料读取调用 0204 的 `linggan_opportunity_observed_at(text)`。历史测试仅从 `database/migrations/0204_opportunity_comment_eligibility.sql` 的原文提取该函数，以便当前读取代码运行；不执行 0204 的其他业务迁移，也不修改历史迁移。

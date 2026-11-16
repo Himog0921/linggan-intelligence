@@ -18,6 +18,7 @@ proof_volume="${proof_container}-data"
 proof_user="comment_study_proof_admin"
 proof_password="$(openssl rand -hex 24)"
 postgres_image="linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1"
+proof_support_dir=""
 [[ "$proof_database" =~ ^linggan_comment_study_proof_[a-zA-Z0-9_]+$ ]] || exit 1
 [[ "$proof_container" =~ ^linggan-comment-study-productization-[a-zA-Z0-9_-]+$ ]] || exit 1
 [[ "$proof_volume" =~ ^linggan-comment-study-productization-[a-zA-Z0-9_-]+-data$ ]] || exit 1
@@ -36,8 +37,12 @@ cleanup() {
     remaining="$(docker volume ls --filter "name=$proof_volume" --format '{{.Name}}')" || cleanup_failed=1
     [[ -z "$remaining" ]] || cleanup_failed=1
   fi
+  if [[ -n "$proof_support_dir" ]]; then
+    rm -f "$proof_support_dir/opportunity/commenter-digest.key" || cleanup_failed=1
+    rmdir "$proof_support_dir/opportunity" "$proof_support_dir" || cleanup_failed=1
+  fi
   [[ "$cleanup_failed" -eq 0 ]] || { echo "Comment Study owned proof cleanup failed" >&2; exit 1; }
-  echo "Comment Study owned proof container and volume cleanup verified"
+  echo "Comment Study owned proof container, volume, and support directory cleanup verified"
   exit "$task_exit"
 }
 trap cleanup EXIT
@@ -65,8 +70,24 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
   --test comment_study_p1_closure_postgres \
   --test comment_study_start_postgres --locked \
   -- --ignored --nocapture --test-threads=1
-# Current three-stage workflow is exercised through the shared executor and an owned loopback provider.
-AI_FOUNDATION_PROOF_NODE="$(command -v node)" RUST_TEST_THREADS=1 cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked -- --ignored --nocapture --test-threads=1
+# Current three-stage workflow is exercised with opportunity disabled and an owned loopback provider.
+proof_support_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-comment-study-support.XXXXXXXX")"
+chmod 700 "$proof_support_dir"
+mkdir -m 700 "$proof_support_dir/opportunity"
+AI_FOUNDATION_PROOF_NODE="$(command -v node)" LINGGAN_OPPORTUNITY_CARD=disabled \
+  LINGGAN_SUPPORT_DIR="$proof_support_dir" OPPORTUNITY_TEST_PERIODIC=0 \
+  OPPORTUNITY_TEST_MISSING_KEY=0 OPPORTUNITY_TEST_LOCK_MODE='' RUST_TEST_THREADS=1 \
+  cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
+    -- --ignored --exact comment_uses_target_dossier_and_both_permissions --nocapture --test-threads=1
+# Gate tests need the feature enabled and an owned key; do not read a developer's support directory.
+openssl rand 32 > "$proof_support_dir/opportunity/commenter-digest.key"
+chmod 600 "$proof_support_dir/opportunity/commenter-digest.key"
+for gate_case in event_gate_activates_with_overlapping_source_writes event_gate_wait_does_not_block_executor_drain; do
+  AI_FOUNDATION_PROOF_NODE="$(command -v node)" LINGGAN_OPPORTUNITY_CARD=enabled \
+    LINGGAN_SUPPORT_DIR="$proof_support_dir" RUST_TEST_THREADS=1 \
+    cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
+      -- --ignored --exact "$gate_case" --nocapture --test-threads=1
+done
 # Patrol now owns only local maintenance. The AI owner/signal/usage proofs run in
 # test-research-dossier-postgres.sh --ai-service with its explicit pinned Node/SDK setup.
 RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \

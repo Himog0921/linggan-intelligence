@@ -8,6 +8,8 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 const PURGE: &str = include_str!("../../../database/migrations/0168_dossier_ocr_cleanup.sql");
+const COMMENT_ELIGIBILITY: &str =
+    include_str!("../../../database/migrations/0204_opportunity_comment_eligibility.sql");
 async fn baseline(name: &str) -> Database {
     // This migration test must start immediately before 0168. Applying later
     // retirement migrations would remove the very historical owners being tested.
@@ -15,9 +17,16 @@ async fn baseline(name: &str) -> Database {
         .split_once(PURGE)
         .expect("0168 fixture boundary");
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
-    isolated_proof_schema(&url, &format!("{name}_{}", Uuid::new_v4().simple()), source)
+    let db = isolated_proof_schema(&url, &format!("{name}_{}", Uuid::new_v4().simple()), source)
         .await
-        .unwrap()
+        .unwrap();
+    // Current material readers need this shared parser while the OCR purge is
+    // tested against its original pre-0168 tables. Reuse its migration source.
+    let (parser, _) = COMMENT_ELIGIBILITY
+        .split_once("\nCREATE VIEW linggan_opportunity_comment_fact")
+        .expect("0204 shared parser boundary");
+    sqlx::raw_sql(parser).execute(db.pool()).await.unwrap();
+    db
 }
 async fn native_human(db: &Database, work: Uuid) -> Uuid {
     let row=sqlx::query("SELECT u.unit_ref,u.source_version,u.revision,r.reading_ref FROM linggan_material_unit u JOIN linggan_material_reading r ON r.reading_ref=u.current_reading_ref WHERE u.content_public_ref=$1 AND u.kind='body'").bind(work).fetch_one(db.pool()).await.unwrap();
@@ -268,8 +277,12 @@ async fn image_reset_removes_all_image_versions_and_keeps_video_ocr() {
         .bind(video).execute(db.pool()).await.unwrap();
     let before = counts(&db).await;
     let mut tx = db.pool().begin().await.unwrap();
-    sqlx::raw_sql(include_str!("../../../database/migrations/0192_reset_image_recognition.sql"))
-        .execute(&mut *tx).await.unwrap();
+    sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0192_reset_image_recognition.sql"
+    ))
+    .execute(&mut *tx)
+    .await
+    .unwrap();
     tx.commit().await.unwrap();
     assert_eq!(counts(&db).await, before);
     let retained: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_media_processing_job WHERE job_ref=$1) AND EXISTS(SELECT 1 FROM linggan_material_derived_text WHERE derivative_ref=$2) AND EXISTS(SELECT 1 FROM linggan_material_unit WHERE kind='body') AND NOT EXISTS(SELECT 1 FROM linggan_material_unit WHERE kind='image') AND NOT EXISTS(SELECT 1 FROM linggan_media_processing_job WHERE processor_kind='image_ocr')")
