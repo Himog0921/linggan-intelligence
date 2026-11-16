@@ -307,9 +307,19 @@ try {
     const generated = (await call(latest)).body.analysis;
     assert.equal(generated.deepQuestion, generatedQuestion);
     assert.equal(generated.result.card.deep.analysisRef, queued.body.requestRef);
-    assert.equal(generated.result.card.deep.methodVersion, 'content-understanding.l2.model.v1');
-    assert.deepEqual(generated.result.card.deep.findings, [{ id: 'f1', findingType: 'structure',
-      statement: generatedStatement, basisUnitIds: ['u3'], evidenceRefs: [evidence.id] }]);
+    assert.equal(generated.result.card.deep.methodVersion, 'content-understanding.l2.model.v2');
+    const [generatedFinding] = generated.result.card.deep.findings;
+    assert.equal(generatedFinding.id, 'F1');
+    assert.equal(generatedFinding.answers, 'Q1');
+    assert.equal(generatedFinding.findingType, 'structure');
+    assert.equal(generatedFinding.assertionKind, 'observation');
+    assert.equal(generatedFinding.statement, generatedStatement);
+    assert.deepEqual(generatedFinding.basisUnitIds, ['u3']);
+    assert.equal(generatedFinding.support.length, 1);
+    assert.equal(generatedFinding.support[0].supportType, 'verbatim_text');
+    assert.equal(generatedFinding.support[0].excerpt, evidence.quote);
+    assert.equal(generatedFinding.application, null);
+    assert.equal(generatedFinding.hypothesis, null);
     assert.deepEqual(generated.result.card.core, card.core);
     assert.deepEqual(generated.result.card.evidence, card.evidence);
     report.generated = generated.result.card.deep;
