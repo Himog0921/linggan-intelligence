@@ -8,6 +8,7 @@ use crate::ai_foundation::{
     task_config::lock_setting,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::{Postgres, Row, Transaction};
 
 pub(crate) const METHOD: &str = "content-understanding.l2.model.v1";

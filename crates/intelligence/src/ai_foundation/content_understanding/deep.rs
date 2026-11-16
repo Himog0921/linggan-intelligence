@@ -2,6 +2,7 @@ use super::{Command, Database, FoundationError, METHOD, Uuid, Value, source};
 use crate::ai_foundation::store::valid_reason;
 use crate::content_understanding::local_id;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::{Postgres, Row, Transaction};
 use std::collections::BTreeSet;
 
