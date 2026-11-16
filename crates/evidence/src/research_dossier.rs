@@ -82,10 +82,9 @@ pub(crate) async fn read_from_currents_in(
 ) -> Result<BTreeMap<Uuid, ResearchDossier>, sqlx::Error> {
     let mut output = BTreeMap::new();
     for batch in currents.chunks(100) {
-        let references: Vec<_> = batch.iter().map(|work| work.public_ref).collect();
         let mut readings =
             crate::material_reading::read_current_from_currents_in(&mut **tx, batch, as_of).await?;
-        let mut inventories = inventory::read_in(tx, &references, as_of).await?;
+        let mut inventories = inventory::read_in(tx, batch, as_of).await?;
         for work in batch {
             let reference = work.public_ref;
             let mut dossier = projection::assemble(

@@ -343,6 +343,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0219_comment_current_safe_observation.sql"),
     include_str!("../../../../database/migrations/0220_opportunity_valid_work_anchor.sql"),
     include_str!("../../../../database/migrations/0221_opportunity_restriction_trigger_owner.sql"),
+    include_str!("../../../../database/migrations/0222_historical_image_inventory.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -504,4 +505,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0219_comment_current_safe_observation','7bd129b708dcf89348b4e1786c3cec5fa2415e4c8c0bca0fab4e88a5b0d516e7');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0220_opportunity_valid_work_anchor','956536086dd9b73f857628de6bbfc0eaf309bcbada11d94633d797fb10605beb');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0221_opportunity_restriction_trigger_owner','2e51fb89ea2a1df6e8a871b8c41ae56942d129525ca2b8bb55b7b6ebac4252fb');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0222_historical_image_inventory','fe708de1a048635688031fbdde4918b54985c2e01485e0b2ed384c8ca550acd2');\n",
 );

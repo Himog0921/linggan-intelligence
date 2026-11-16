@@ -1,4 +1,5 @@
 //! One source inventory shared by full reading, coverage and explicit local rebuilding.
+use crate::work_resource_current::WorkResourceCurrent;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction};
 use std::collections::BTreeMap;
@@ -13,9 +14,10 @@ pub(super) struct Inventory {
 
 pub(super) async fn read_in(
     tx: &mut Transaction<'_, Postgres>,
-    works: &[Uuid],
+    currents: &[&WorkResourceCurrent],
     as_of: &str,
 ) -> Result<BTreeMap<Uuid, Inventory>, sqlx::Error> {
+    let works: Vec<_> = currents.iter().map(|work| work.public_ref).collect();
     let mut result = BTreeMap::<Uuid, Inventory>::new();
     let rows = sqlx::query(r#"
 WITH origins AS (
@@ -54,7 +56,7 @@ FROM origins o CROSS JOIN LATERAL (
  ORDER BY m.verified_at DESC,m.materialization_ref DESC LIMIT 1
 ) m ON true WHERE linggan_dossier_slot_active(o.content_public_ref,o.slot_key,$2::timestamptz)
 ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NULLS LAST,o.slot_key,component.kind
-"#).bind(works).bind(as_of).fetch_all(&mut **tx).await?;
+"#).bind(&works).bind(as_of).fetch_all(&mut **tx).await?;
     for row in rows {
         let work: Uuid = row.get("content_public_ref");
         let source: Option<Uuid> = row.get("materialization_ref");
@@ -86,8 +88,9 @@ ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NU
             "sourceState":if restricted {"restricted"} else if source.is_some() {"present"} else {"not_acquired"}
         }));
     }
-    read_manifests(tx, works, as_of, &mut result).await?;
-    read_tags(tx, works, as_of, &mut result).await?;
+    read_manifests(tx, &works, as_of, &mut result).await?;
+    read_historical_manifests(tx, currents, as_of, &mut result).await?;
+    read_tags(tx, &works, as_of, &mut result).await?;
     Ok(result)
 }
 
@@ -146,6 +149,103 @@ ORDER BY lane.content_public_ref,package.accepted_at DESC,lane.created_at DESC,p
         }
     }
     Ok(())
+}
+
+async fn read_historical_manifests(
+    tx: &mut Transaction<'_, Postgres>,
+    currents: &[&WorkResourceCurrent],
+    as_of: &str,
+    inventories: &mut BTreeMap<Uuid, Inventory>,
+) -> Result<(), sqlx::Error> {
+    let missing: Vec<_> = currents
+        .iter()
+        .filter(|work| {
+            inventories
+                .get(&work.public_ref)
+                .is_some_and(|i| i.manifest.is_none())
+        })
+        .filter_map(|work| work.detail_material_ref)
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let rows = sqlx::query(
+        r#"
+SELECT d.content_public_ref, d.package_ref, d.material_ref,
+       h.observation_refs, h.materialization_refs
+FROM linggan_historical_image_inventory h
+JOIN linggan_material_content_detail d ON d.material_ref=h.detail_ref
+JOIN linggan_runtime_capture_package p USING(package_ref)
+JOIN linggan_runtime_record_disposition disposition USING(package_ref,record_ordinal)
+WHERE h.detail_ref=ANY($1) AND p.platform='xhs'
+  AND disposition.disposition='accepted_for_library_content'
+  AND h.source_excerpt_sha256=encode(sha256(convert_to(
+    p.payload->'records'->d.record_ordinal->'payload'->>'rawPayload','UTF8'
+  )),'hex')
+  AND h.recorded_at<=$2::timestamptz AND d.created_at<=$2::timestamptz
+  AND p.accepted_at<=$2::timestamptz
+"#,
+    )
+    .bind(missing)
+    .bind(as_of)
+    .fetch_all(&mut **tx)
+    .await?;
+    for row in rows {
+        let work: Uuid = row.get("content_public_ref");
+        let inventory = inventories.entry(work).or_default();
+        let observed: Vec<Uuid> = row.get("observation_refs");
+        let materialized: Vec<Uuid> = row.get("materialization_refs");
+        if apply_historical_pages(&mut inventory.slots, &observed, &materialized) {
+            inventory
+                .slots
+                .sort_by_key(|slot| slot["page"].as_u64().unwrap_or(u64::MAX));
+            inventory.manifest = Some(json!({
+                "state":"complete",
+                "source":"platform_image_list",
+                "expectedPages":observed.len(),
+                "packageRef":row.get::<Uuid,_>("package_ref"),
+                "historicalDetailRef":row.get::<Uuid,_>("material_ref")
+            }));
+        }
+    }
+    Ok(())
+}
+
+fn apply_historical_pages(slots: &mut [Value], observed: &[Uuid], materialized: &[Uuid]) -> bool {
+    if observed.is_empty()
+        || observed.len() != materialized.len()
+        || slots
+            .iter()
+            .any(|s| matches!(s["purpose"].as_str(), Some("video" | "live_photo")))
+    {
+        return false;
+    }
+    let mut body: Vec<_> = slots
+        .iter_mut()
+        .filter(|s| s["purpose"] == "body_image" && s["component"] == "image")
+        .collect();
+    body.sort_by_key(|s| s["producerOrdinal"].as_u64());
+    let matches = body.len() == observed.len()
+        && body
+            .iter()
+            .zip(observed.iter().zip(materialized))
+            .enumerate()
+            .all(|(index, (slot, (origin, file)))| {
+                let page = json!(index + 1);
+                slot["producerOrdinal"] == page
+                    && (slot["page"].is_null() || slot["page"] == page)
+                    && slot["observationRef"] == json!(origin)
+                    && slot["sourceRef"] == json!(file)
+                    && slot["sourceState"] == "present"
+                    && slot["localReadable"] == true
+            });
+    if matches {
+        for (index, slot) in body.into_iter().enumerate() {
+            slot["page"] = json!(index + 1);
+            slot["displayOrderState"] = json!("KNOWN");
+        }
+    }
+    matches
 }
 
 async fn read_tags(
