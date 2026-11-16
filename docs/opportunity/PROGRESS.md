@@ -485,4 +485,5 @@
 
 - 对 `39a90f4f..19d918cf` 的独立增量复核确认人数标签、关闭开关直达和版本恢复已解决；同时指出首次读取依据挂起时，父级代表原声仍可能可见。现将依据状态提升为整张卡片共用：首次读取、重读、依据与卡片时点不一致时均隐藏代表原声；依据失败仍要求重新读取卡片。
 - `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/opportunity/OpportunityPage.test.tsx` → `10 passed; 0 failed`。`cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1794 passed (1794)`。
-- `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-final-head CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 和三类依据读取通过，隔离容器和卷已清理；私有截图已更新。最终增量复核及远端 CI 待确认。
+- `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-final-head CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 和三类依据读取通过，隔离容器和卷已清理；私有截图已更新。
+- 对代码提交 `ccc73a1f` 的独立定点复核确认前述四项问题均已处理；复核未自行运行测试。依据重读成功后父级原声恢复的条件已静态核对，尚无该细节的单独断言。远端 CI 以 PR #597 最终提交的实际结果为准；合并、部署及真实业务验收不由本次测试推断。
